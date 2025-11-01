@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: guren-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: guren
+      POSTGRES_USER: guren
+      POSTGRES_PASSWORD: guren
+    ports:
+      - "54322:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U guren -d guren"]
+      interval: 5s
+      retries: 10
+      start_period: 5s
+      timeout: 3s
+
+volumes:
+  postgres_data:

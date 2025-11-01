@@ -1,0 +1,38 @@
+{
+  "name": "create-guren-app",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gurenjs/guren",
+    "directory": "packages/create-app"
+  },
+  "homepage": "https://github.com/gurenjs/guren#readme",
+  "bugs": {
+    "url": "https://github.com/gurenjs/guren/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "templates"
+  ],
+  "bin": {
+    "create-guren-app": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "citty": "^0.1.6",
+    "consola": "^3.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "tsup": "^7.2.0",
+    "typescript": "^5.4.0"
+  }
+}

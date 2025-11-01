@@ -1,0 +1,47 @@
+{
+  "name": "@guren/testing",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gurenjs/guren",
+    "directory": "packages/testing"
+  },
+  "homepage": "https://github.com/gurenjs/guren#readme",
+  "bugs": {
+    "url": "https://github.com/gurenjs/guren/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist"
+  ],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "@inertiajs/react": "^1.0.0",
+    "@testing-library/react": "^14.0.0 || ^15.0.0 || ^16.0.0",
+    "react": "^18.0.0 || ^19.0.0",
+    "vitest": "^1.5.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "vitest": "^1.5.0",
+    "tsup": "^7.2.0",
+    "typescript": "^5.4.0"
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "name": "@guren/example-blog",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "routes:types": "bunx --bun guren routes:types --force",
+    "dev": "concurrently \"bun run dev:server\" \"bunx vite dev --host\"",
+    "dev:server": "VITE_DEV_SERVER_URL=http://localhost:5173 bun run --watch --hot bin/serve.ts",
+    "smoke": "bun run ./smoke.ts",
+    "test": "vitest run",
+    "build": "bunx vite build",
+    "preview": "bunx vite preview",
+    "db:make": "bunx guren make:migration",
+    "db:migrate": "bunx guren db:migrate",
+    "db:seed": "bunx guren db:seed"
+  },
+  "dependencies": {
+    "@guren/cli": "workspace:*",
+    "@guren/inertia-client": "workspace:*",
+    "@guren/testing": "workspace:*",
+    "@guren/orm": "workspace:*",
+    "@guren/server": "workspace:*",
+    "@inertiajs/react": "^1.0.0",
+    "drizzle-orm": "0.44.7",
+    "postgres": "^3.4.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "concurrently": "^9.2.1",
+    "drizzle-kit": "0.27.0",
+    "jsdom": "^25.0.0",
+    "tailwindcss": "^4.0.0",
+    "vite": "^7.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "vitest": "^2.1.2"
+  }
+}

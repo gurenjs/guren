@@ -1,0 +1,77 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noImplicitAny": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "allowJs": false,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "types": [
+      "bun-types"
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@guren/core": [
+        "packages/core/src/index.ts"
+      ],
+      "@guren/core/*": [
+        "packages/core/src/*"
+      ],
+      "@guren/server": [
+        "packages/server/src/index.ts"
+      ],
+      "@guren/server/*": [
+        "packages/server/src/*"
+      ],
+      "@guren/orm": [
+        "packages/orm/src/index.ts"
+      ],
+      "@guren/orm/*": [
+        "packages/orm/src/*"
+      ],
+      "@guren/cli": [
+        "packages/cli/src/index.ts"
+      ],
+      "@guren/cli/*": [
+        "packages/cli/src/*"
+      ],
+      "@guren/cli/vite": [
+        "packages/cli/src/vite/index.ts"
+      ],
+      "@guren/inertia-client": [
+        "packages/inertia-client/src/index.ts"
+      ],
+      "@guren/inertia-client/*": [
+        "packages/inertia-client/src/*"
+      ],
+      "@guren/testing": [
+        "packages/testing/src/index.ts"
+      ],
+      "@guren/testing/*": [
+        "packages/testing/src/*"
+      ],
+      "vite": [
+        "node_modules/vite"
+      ],
+      "vite/*": [
+        "node_modules/vite/*"
+      ]
+    }
+  },
+  "include": [
+    "packages/**/*",
+    "examples/**/*",
+    "types/**/*"
+  ],
+  "exclude": [
+    "packages/create-app/templates",
+    "examples/**/resources/js/**/*"
+  ]
+}

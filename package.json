@@ -1,0 +1,47 @@
+{
+  "name": "guren-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.1.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gurenjs/guren.git"
+  },
+  "homepage": "https://github.com/gurenjs/guren#readme",
+  "bugs": {
+    "url": "https://github.com/gurenjs/guren/issues"
+  },
+  "scripts": {
+    "build": "bun run build:routes && bun run build:testing && bun run build:orm && bun run build:server && bun run build:cli && bun run build:core && bun run build:inertia",
+    "build:routes": "bun run --cwd examples/blog routes:types",
+    "build:testing": "bun run --cwd packages/testing build",
+    "build:core": "bun run --cwd packages/core build",
+    "build:server": "bun run --cwd packages/server build",
+    "build:orm": "bun run --cwd packages/orm build",
+    "build:cli": "bun run --cwd packages/cli build",
+    "build:inertia": "bun run --cwd packages/inertia-client build",
+    "changeset": "changeset",
+    "version-packages": "changeset version && bun install",
+    "release": "bun run build && changeset publish",
+    "test:bun": "bun test packages/server packages/orm",
+    "test:examples": "bun run --cwd examples/blog test",
+    "test": "bun run test:bun && bun run test:examples",
+    "dev": "bun run --cwd examples/blog dev",
+    "db:migrate": "bun run --cwd examples/blog db:migrate",
+    "db:seed": "bun run --cwd examples/blog db:seed",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "db:logs": "docker compose logs -f postgres"
+  },
+  "workspaces": [
+    "packages/*",
+    "examples/*"
+  ],
+  "devDependencies": {
+    "@changesets/cli": "^2.29.7",
+    "bun-types": "^1.3.1",
+    "zod": "^3.24.0"
+  }
+}

@@ -1,0 +1,4 @@
+# Ignore compiled assets
+public/assets/
+.env
+node_modules/

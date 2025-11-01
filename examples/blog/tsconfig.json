@@ -1,0 +1,51 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "types": [
+      "bun-types",
+      "vitest/globals",
+      "@testing-library/jest-dom"
+    ],
+    "paths": {
+      "@/*": [
+        "./app/*"
+      ],
+      "@guren/core": [
+        "../../packages/core/src/index.ts"
+      ],
+      "@guren/core/*": [
+        "../../packages/core/src/*"
+      ],
+      "@guren/server": [
+        "../../packages/server/src/index.ts"
+      ],
+      "@guren/server/*": [
+        "../../packages/server/src/*"
+      ],
+      "@guren/orm": [
+        "../../packages/orm/src/index.ts"
+      ],
+      "@guren/orm/*": [
+        "../../packages/orm/src/*"
+      ],
+      "@guren/inertia-client": [
+        "../../packages/inertia-client/src/index.ts"
+      ],
+      "@guren/inertia-client/*": [
+        "../../packages/inertia-client/src/*"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*",
+    "app/**/*",
+    "routes/**/*",
+    "resources/js/**/*",
+    "types/**/*",
+    "tests/**/*"
+  ],
+  "exclude": []
+}
