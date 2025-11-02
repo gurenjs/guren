@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "routes:types": "bunx --bun guren routes:types --force",
+    "routes:types": "bun ../../packages/cli/src/bin.ts routes:types --force",
     "dev": "concurrently \"bun run dev:server\" \"bunx vite dev --host\"",
     "dev:server": "VITE_DEV_SERVER_URL=http://localhost:5173 bun run --watch --hot bin/serve.ts",
     "smoke": "bun run ./smoke.ts",
