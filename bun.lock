@@ -14,6 +14,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@guren/cli": "workspace:*",
+        "@guren/core": "workspace:*",
         "@guren/inertia-client": "workspace:*",
         "@guren/orm": "workspace:*",
         "@guren/server": "workspace:*",

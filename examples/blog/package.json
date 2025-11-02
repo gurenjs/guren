@@ -18,6 +18,7 @@
   "dependencies": {
     "@guren/cli": "workspace:*",
     "@guren/inertia-client": "workspace:*",
+    "@guren/core": "workspace:*",
     "@guren/testing": "workspace:*",
     "@guren/orm": "workspace:*",
     "@guren/server": "workspace:*",
