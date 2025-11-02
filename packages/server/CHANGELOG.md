@@ -1,5 +1,13 @@
 # @guren/server
 
+## 0.1.1-alpha.1
+
+### Patch Changes
+
+- Pinned dependencies to specific versions for consistency across packages
+- Updated dependencies
+  - @guren/inertia-client@0.1.1-alpha.1
+
 ## 0.1.1-alpha.0
 
 ### Patch Changes
