@@ -1,5 +1,14 @@
 # @guren/cli
 
+## 0.1.1-alpha.3
+
+### Patch Changes
+
+- The release build runs build:create-app so the CLI binary is bundled.
+- Updated dependencies
+  - @guren/orm@0.1.1-alpha.3
+  - @guren/server@0.1.1-alpha.3
+
 ## 0.1.1-alpha.2
 
 ### Patch Changes

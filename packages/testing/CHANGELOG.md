@@ -1,5 +1,11 @@
 # @guren/testing
 
+## 0.1.1-alpha.3
+
+### Patch Changes
+
+- The release build runs build:create-app so the CLI binary is bundled.
+
 ## 0.1.1-alpha.2
 
 ### Patch Changes
