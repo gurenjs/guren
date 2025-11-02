@@ -11,10 +11,10 @@
     "db:seed": "bunx guren db:seed"
   },
   "dependencies": {
-    "@guren/cli": "^0.1.1-alpha.4",
-    "@guren/inertia-client": "^0.1.1-alpha.4",
-    "@guren/orm": "^0.1.1-alpha.4",
-    "@guren/server": "^0.1.1-alpha.4",
+    "@guren/cli": "^0.1.1-alpha.5",
+    "@guren/inertia-client": "^0.1.1-alpha.5",
+    "@guren/orm": "^0.1.1-alpha.5",
+    "@guren/server": "^0.1.1-alpha.5",
     "@inertiajs/react": "^2.2.15",
     "drizzle-orm": "0.44.7",
     "postgres": "^3.4.3",

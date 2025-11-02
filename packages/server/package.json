@@ -1,6 +1,6 @@
 {
   "name": "@guren/server",
-  "version": "0.1.1-alpha.4",
+  "version": "0.1.1-alpha.5",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -37,7 +37,7 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@guren/inertia-client": "^0.1.1-alpha.4",
+    "@guren/inertia-client": "^0.1.1-alpha.5",
     "hono": "^4.4.0"
   },
   "devDependencies": {

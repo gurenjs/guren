@@ -1,5 +1,13 @@
 # @guren/server
 
+## 0.1.1-alpha.5
+
+### Patch Changes
+
+- Ensure dev asset server resolves and serves Inertia client chunks so the scaffold works in dev.
+- Updated dependencies
+  - @guren/inertia-client@0.1.1-alpha.5
+
 ## 0.1.1-alpha.4
 
 ### Patch Changes
