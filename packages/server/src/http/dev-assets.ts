@@ -2,6 +2,7 @@ import type { Context } from 'hono'
 import { serveStatic } from 'hono/bun'
 import { dirname, extname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
 import type { Application } from './Application'
 
 declare const Bun: any
@@ -38,7 +39,8 @@ export interface DevAssetsOptions {
 }
 
 // get the path to the inertia client bundled with Guren
-const gurenInertiaClient = fileURLToPath(new URL('../../../inertia-client/src/app.tsx', import.meta.url))
+const require = createRequire(import.meta.url)
+const gurenInertiaClient = require.resolve('@guren/inertia-client/app')
 
 /**
  * Registers development asset serving middleware.
