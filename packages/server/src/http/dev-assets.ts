@@ -84,7 +84,26 @@ export function registerDevAssets(app: Application, options: DevAssetsOptions): 
   app.hono.get(`${prefix}/*`, (ctx) => handleTranspileRequest(ctx, resourcesJsDir, prefix, reactImportPattern, tsxTranspiler, tsTranspiler, jsxRuntimeUrl))
 
   if (options.inertiaClient !== false) {
-    app.hono.get(inertiaClientPath, () => transpileFile(inertiaClientSource, reactImportPattern, tsxTranspiler, tsTranspiler, jsxRuntimeUrl))
+    const inertiaClientDir = dirname(inertiaClientSource)
+    const inertiaClientBase = inertiaClientPath.replace(/[^/]*$/u, '') || '/'
+    const inertiaClientPattern = `${inertiaClientBase.endsWith('/') ? inertiaClientBase : `${inertiaClientBase}/`}*`
+    const inertiaClientRequestPath = inertiaClientPath.slice(inertiaClientBase.length)
+
+    app.hono.get(inertiaClientPattern, (ctx) => {
+      const relativeRequest = ctx.req.path.slice(inertiaClientBase.length) || inertiaClientRequestPath
+
+      if (relativeRequest === inertiaClientRequestPath) {
+        return transpileFile(inertiaClientSource, reactImportPattern, tsxTranspiler, tsTranspiler, jsxRuntimeUrl)
+      }
+
+      const candidatePath = resolve(inertiaClientDir, relativeRequest)
+
+      if (!candidatePath.startsWith(inertiaClientDir)) {
+        return ctx.notFound()
+      }
+
+      return transpileFile(candidatePath, reactImportPattern, tsxTranspiler, tsTranspiler, jsxRuntimeUrl)
+    })
   }
 
   const publicPathOption = options.publicPath === undefined ? '../public' : options.publicPath
