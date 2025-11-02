@@ -105,6 +105,7 @@
         "@types/react": "^19.0.0",
         "@types/react-dom": "^19.0.0",
         "tsup": "^8.0.0",
+        "typescript": "^5.4.0",
       },
     },
     "packages/orm": {
