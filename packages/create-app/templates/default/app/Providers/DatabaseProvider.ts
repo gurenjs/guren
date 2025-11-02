@@ -1,5 +1,5 @@
 import type { ApplicationContext, Provider } from '@guren/server'
-import { bootModels } from '../../config/app'
+import { bootModels } from '../../config/app.js'
 
 export default class DatabaseProvider implements Provider {
   private initialized = false

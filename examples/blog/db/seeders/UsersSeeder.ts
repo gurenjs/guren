@@ -1,6 +1,6 @@
 import { defineSeeder } from '@guren/orm'
 import { ScryptHasher } from '@guren/core'
-import { users } from '../schema'
+import { users } from '../schema.js'
 
 export default defineSeeder(async ({ db }) => {
   const hasher = new ScryptHasher()

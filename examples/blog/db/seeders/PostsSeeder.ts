@@ -1,5 +1,5 @@
 import type { SeederContext } from '@guren/orm'
-import { posts, schema } from '../../db/schema'
+import { posts, schema } from '../../db/schema.js'
 
 export default async function seed({ db }: SeederContext<typeof schema>): Promise<void> {
   await db

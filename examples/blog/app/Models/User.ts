@@ -1,5 +1,5 @@
 import { Model } from '@guren/core'
-import { users } from '../../db/schema'
+import { users } from '../../db/schema.js'
 
 export type UserRecord = typeof users.$inferSelect
 export type NewUserRecord = typeof users.$inferInsert

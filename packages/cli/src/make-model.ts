@@ -7,7 +7,7 @@ function modelTemplate(className: string): string {
   const schemaIdentifier = camelCase(className)
 
   return `import { Model } from '@guren/orm'
-import { ${schemaIdentifier} } from '../../db/schema' // TODO: adjust to the actual table export
+import { ${schemaIdentifier} } from '../../db/schema.js' // TODO: adjust to the actual table export
 
 export type ${className}Record = typeof ${schemaIdentifier}.$inferSelect
 

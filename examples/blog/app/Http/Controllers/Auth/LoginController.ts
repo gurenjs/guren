@@ -1,7 +1,7 @@
 import type { Context } from '@guren/core'
 import { parseRequestPayload, formatValidationErrors } from '@guren/core'
-import Controller from '../Controller'
-import { LoginSchema } from '../../Validators/LoginValidator'
+import Controller from '../Controller.js'
+import { LoginSchema } from '../../Validators/LoginValidator.js'
 
 export default class LoginController extends Controller {
   async show(ctx: Context): Promise<Response> {

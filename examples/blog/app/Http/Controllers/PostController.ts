@@ -1,8 +1,8 @@
 import { Context, parseRequestPayload, formatValidationErrors } from '@guren/server'
-import Controller from './Controller'
+import Controller from './Controller.js'
 import type { InferInertiaProps } from '@guren/server'
-import { Post } from '../../Models/Post'
-import { PostPayloadSchema, PostFormSchema } from '../Validators/PostValidator'
+import { Post } from '../../Models/Post.js'
+import { PostPayloadSchema, PostFormSchema } from '../Validators/PostValidator.js'
 
 export default class PostController extends Controller {
   async index(ctx: Context) {

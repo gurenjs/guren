@@ -1,6 +1,6 @@
 import { useForm, usePage } from '@inertiajs/react'
-import Layout from '../../components/Layout'
-import PostForm, { type PostFormValues } from '../../components/PostForm'
+import Layout from '../../components/Layout.js'
+import PostForm, { type PostFormValues } from '../../components/PostForm.js'
 
 type EditPageProps = {
   post: PostFormValues | null

@@ -1,5 +1,5 @@
 import { Model } from '@guren/orm'
-import { posts } from '../../db/schema'
+import { posts } from '../../db/schema.js'
 
 export type PostRecord = typeof posts.$inferSelect
 

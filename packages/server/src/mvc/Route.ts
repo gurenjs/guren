@@ -6,8 +6,10 @@ export type ControllerConstructor<T extends Controller = Controller> = new () =>
 type ControllerMethod<T extends Controller> = {
   [K in keyof T]: T[K] extends (...args: any[]) => any ? K : never
 }[keyof T] & string
-export type ControllerAction<T extends Controller = Controller> = [ControllerConstructor<T>, ControllerMethod<T>]
-type AnyControllerAction = ControllerAction<Controller>
+type ControllerMethodFor<C extends ControllerConstructor> = ControllerMethod<InstanceType<C>>
+export type ControllerAction<C extends ControllerConstructor = ControllerConstructor> = [C, ControllerMethodFor<C>]
+type AnyControllerConstructor = ControllerConstructor<Controller>
+type AnyControllerAction = ControllerAction<AnyControllerConstructor>
 type RouteResult =
   | Response
   | string
@@ -17,7 +19,9 @@ type RouteResult =
   | Array<unknown>
   | null
   | void
-export type RouteHandler<T extends Controller = Controller> = ((c: Context) => RouteResult | Promise<RouteResult>) | ControllerAction<T>
+export type RouteHandler<C extends ControllerConstructor = ControllerConstructor> =
+  | ((c: Context) => RouteResult | Promise<RouteResult>)
+  | ControllerAction<C>
 type AnyRouteHandler = ((c: Context) => RouteResult | Promise<RouteResult>) | AnyControllerAction
 
 interface RegisteredRoute {
@@ -42,33 +46,38 @@ export class Route {
   private static readonly registry: RegisteredRoute[] = []
   private static readonly prefixStack: string[] = []
 
-  private static add<T extends Controller>(method: string, path: string, handler: RouteHandler<T>, middlewares: MiddlewareHandler[] = []): typeof Route {
+  private static add<C extends ControllerConstructor>(
+    method: string,
+    path: string,
+    handler: RouteHandler<C>,
+    middlewares: MiddlewareHandler[] = [],
+  ): typeof Route {
     const fullPath = joinPaths(this.prefixStack, path)
     this.registry.push({ method, path: fullPath, handler: handler as AnyRouteHandler, middlewares })
     return this
   }
 
-  static on<T extends Controller>(method: string, path: string, handler: RouteHandler<T>, ...middlewares: MiddlewareHandler[]): typeof Route {
+  static on<C extends ControllerConstructor>(method: string, path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): typeof Route {
     return this.add(method.toUpperCase(), path, handler, middlewares)
   }
 
-  static get<T extends Controller>(path: string, handler: RouteHandler<T>, ...middlewares: MiddlewareHandler[]): typeof Route {
+  static get<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): typeof Route {
     return this.add('GET', path, handler, middlewares)
   }
 
-  static post<T extends Controller>(path: string, handler: RouteHandler<T>, ...middlewares: MiddlewareHandler[]): typeof Route {
+  static post<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): typeof Route {
     return this.add('POST', path, handler, middlewares)
   }
 
-  static put<T extends Controller>(path: string, handler: RouteHandler<T>, ...middlewares: MiddlewareHandler[]): typeof Route {
+  static put<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): typeof Route {
     return this.add('PUT', path, handler, middlewares)
   }
 
-  static patch<T extends Controller>(path: string, handler: RouteHandler<T>, ...middlewares: MiddlewareHandler[]): typeof Route {
+  static patch<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): typeof Route {
     return this.add('PATCH', path, handler, middlewares)
   }
 
-  static delete<T extends Controller>(path: string, handler: RouteHandler<T>, ...middlewares: MiddlewareHandler[]): typeof Route {
+  static delete<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): typeof Route {
     return this.add('DELETE', path, handler, middlewares)
   }
 

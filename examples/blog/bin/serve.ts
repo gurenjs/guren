@@ -1,4 +1,4 @@
-import app, { ready } from '../src/main'
+import app, { ready } from '../src/main.js'
 
 try {
   await ready

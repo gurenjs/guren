@@ -2,8 +2,8 @@ import { configureInertiaAssets } from '@guren/server'
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import app from './app'
-import '../routes/web'
+import app from './app.js'
+import '../routes/web.js'
 
 configureViteAssets()
 configureInertiaAssets(app, {

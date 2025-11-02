@@ -1,4 +1,4 @@
-import { configureOrm, seedDatabase } from './database'
+import { configureOrm, seedDatabase } from './database.js'
 
 let bootstrapped = false
 

@@ -1,6 +1,6 @@
 import { Link } from '@inertiajs/react'
 import type { PostsIndexPageProps } from '@/Http/Controllers/PostController'
-import Layout from '../../components/Layout'
+import Layout from '../../components/Layout.js'
 
 export default function Index({ posts }: PostsIndexPageProps) {
   return (

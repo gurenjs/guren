@@ -4,12 +4,13 @@ import {
   createGurenControllerModule,
   readInertiaResponse,
 } from '@guren/testing'
+import type { Context } from '@guren/core'
 
 vi.mock('guren', () => createGurenControllerModule())
 vi.mock('@guren/core', () => createGurenControllerModule())
 vi.mock('@guren/server', () => createGurenControllerModule())
 
-import LoginController from '../../app/Http/Controllers/Auth/LoginController'
+import LoginController from '../../app/Http/Controllers/Auth/LoginController.js'
 
 function createAuthStub(user: unknown = null) {
   const session = {
@@ -34,7 +35,7 @@ describe('LoginController', () => {
         'X-Inertia': 'true',
         Accept: 'application/json',
       },
-    })
+    }) as unknown as Context
     controller.setContext(ctx)
 
     const response = await controller.show(ctx)
@@ -50,7 +51,7 @@ describe('LoginController', () => {
   it('embeds Inertia page data in HTML for full visits', async () => {
     const controller = new LoginController()
     ;(controller as unknown as { auth: ReturnType<typeof createAuthStub> }).auth = createAuthStub()
-    const ctx = createControllerContext('http://blog.test/login')
+    const ctx = createControllerContext('http://blog.test/login') as unknown as Context
     controller.setContext(ctx)
 
     const response = await controller.show(ctx)

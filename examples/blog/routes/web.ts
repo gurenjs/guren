@@ -1,7 +1,7 @@
 import { Route, requireAuthenticated, requireGuest } from '@guren/server'
-import PostController from '../app/Http/Controllers/PostController'
-import LoginController from '../app/Http/Controllers/Auth/LoginController'
-import DashboardController from '../app/Http/Controllers/DashboardController'
+import PostController from '../app/Http/Controllers/PostController.js'
+import LoginController from '../app/Http/Controllers/Auth/LoginController.js'
+import DashboardController from '../app/Http/Controllers/DashboardController.js'
 
 Route.get('/', [PostController, 'index'])
 

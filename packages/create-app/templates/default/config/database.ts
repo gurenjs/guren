@@ -1,5 +1,5 @@
 import { createPostgresDatabase } from '@guren/orm'
-import * as schema from '../db/schema'
+import * as schema from '../db/schema.js'
 
 const database = createPostgresDatabase({
   schema,

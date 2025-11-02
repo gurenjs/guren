@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import Login from '../../resources/js/pages/auth/Login'
+import Login from '../../resources/js/pages/auth/Login.js'
 import { setInertiaPage } from '@guren/testing'
 
 describe('Login Inertia page', () => {

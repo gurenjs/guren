@@ -1,5 +1,5 @@
 import type { Context } from '@guren/core'
-import Controller from './Controller'
+import Controller from './Controller.js'
 
 export default class DashboardController extends Controller {
   async index(ctx: Context): Promise<Response> {

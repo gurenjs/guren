@@ -1,7 +1,7 @@
 import { Application, createSessionMiddleware, attachAuthContext } from '@guren/server'
-import DatabaseProvider from '../app/Providers/DatabaseProvider'
-import AuthProvider from '../app/Providers/AuthProvider'
-import requestLogger from '../app/Http/middleware/requestLogger'
+import DatabaseProvider from '../app/Providers/DatabaseProvider.js'
+import AuthProvider from '../app/Providers/AuthProvider.js'
+import requestLogger from '../app/Http/middleware/requestLogger.js'
 
 const app = new Application({
   providers: [DatabaseProvider, AuthProvider],

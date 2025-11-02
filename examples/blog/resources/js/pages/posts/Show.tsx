@@ -1,5 +1,5 @@
 import { Link } from '@inertiajs/react'
-import Layout from '../../components/Layout'
+import Layout from '../../components/Layout.js'
 
 type Post = {
   id: number

@@ -1,6 +1,6 @@
 import { configureInertiaAssets } from '@guren/server'
-import app from './app'
-import '../routes/web'
+import app from './app.js'
+import '../routes/web.js'
 
 configureInertiaAssets(app, {
   importMeta: import.meta,

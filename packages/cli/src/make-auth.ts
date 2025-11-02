@@ -66,7 +66,7 @@ export default class DashboardController extends Controller {
 `
 
 const userModelTemplate = `import { Model } from '@guren/core'
-import { users } from '../../db/schema'
+import { users } from '../../db/schema.js'
 
 export type UserRecord = typeof users.$inferSelect
 
@@ -78,7 +78,7 @@ export class User extends Model<UserRecord> {
 
 const authProviderTemplate = `import type { ApplicationContext, Provider } from '@guren/core'
 import { ModelUserProvider, ScryptHasher } from '@guren/core'
-import { User } from '../Models/User'
+import { User } from '../Models/User.js'
 
 export default class AuthProvider implements Provider {
   register(context: ApplicationContext): void {
@@ -170,7 +170,7 @@ export default function Layout({ children }: PropsWithChildren) {
 
 const loginViewTemplate = `import { Head, Link, usePage } from '@inertiajs/react'
 import { useId, useState } from 'react'
-import Layout from '../../components/Layout'
+import Layout from '../../components/Layout.js'
 
 interface LoginErrors {
   email?: string
@@ -264,7 +264,7 @@ export default function Login() {
 }
 `
 
-const dashboardViewTemplate = `import Layout from '../../components/Layout'
+const dashboardViewTemplate = `import Layout from '../../components/Layout.js'
 
 interface DashboardProps {
   user?: {
@@ -300,8 +300,8 @@ export default function Dashboard({ user }: DashboardProps) {
 `
 
 const routesTemplate = `import { Route, requireAuthenticated, requireGuest } from '@guren/core'
-import LoginController from '../app/Http/Controllers/Auth/LoginController'
-import DashboardController from '../app/Http/Controllers/DashboardController'
+import LoginController from '../app/Http/Controllers/Auth/LoginController.js'
+import DashboardController from '../app/Http/Controllers/DashboardController.js'
 
 Route.get('/login', [LoginController, 'show'], requireGuest({ redirectTo: '/dashboard' }))
 Route.post('/login', [LoginController, 'store'], requireGuest({ redirectTo: '/dashboard' }))
@@ -312,7 +312,7 @@ Route.get('/dashboard', [DashboardController, 'index'], requireAuthenticated({ r
 
 const seederTemplate = `import { defineSeeder } from '@guren/orm'
 import { ScryptHasher } from '@guren/core'
-import { users } from '../schema'
+import { users } from '../schema.js'
 
 export default defineSeeder(async ({ db }) => {
   const hasher = new ScryptHasher()
@@ -398,7 +398,7 @@ export async function makeAuth(options: WriterOptions = {}): Promise<string[]> {
 
   consola.info('Next steps:')
   consola.info('  • Register AuthProvider and session middleware in src/app.ts')
-  consola.info('  • Import \'./routes/auth\' from src/main.ts or routes/web.ts')
+  consola.info('  • Import \'./routes/auth.js\' from src/main.ts or routes/web.ts')
   consola.info('  • Run `bun run db:migrate` and `bun run db:seed`')
   consola.info('  • Install zod if not already installed: `bun add zod`')
 

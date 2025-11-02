@@ -1,5 +1,5 @@
 import { useForm } from '@inertiajs/react'
-import PostForm, { type PostFormValues } from '../../components/PostForm'
+import PostForm, { type PostFormValues } from '../../components/PostForm.js'
 
 type NewProps = Record<string, never>
 

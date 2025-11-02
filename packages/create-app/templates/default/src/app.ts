@@ -1,5 +1,5 @@
 import { Application } from '@guren/server'
-import DatabaseProvider from '../app/Providers/DatabaseProvider'
+import DatabaseProvider from '../app/Providers/DatabaseProvider.js'
 
 const app = new Application({
   providers: [DatabaseProvider],

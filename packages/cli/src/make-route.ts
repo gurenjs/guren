@@ -5,7 +5,7 @@ const ROUTES_DIR = 'routes'
 
 function routeTemplate(prefix: string, controller: string): string {
   return `import { Route } from '@guren/server'
-import ${controller} from '../app/Http/Controllers/${controller}'
+import ${controller} from '../app/Http/Controllers/${controller}.js'
 
 export default Route.group('${prefix}', () => {
   Route.get('/', [${controller}, 'index'])

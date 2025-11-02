@@ -1,6 +1,6 @@
 import React from 'react'
 import { usePage, type InertiaFormProps } from '@inertiajs/react'
-import Layout from './Layout'
+import Layout from './Layout.js'
 
 export type PostFormValues = {
   title: string
