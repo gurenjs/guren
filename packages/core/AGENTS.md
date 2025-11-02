@@ -11,7 +11,7 @@
 
 ## Conventions
 - `src/index.ts` should stay a thin barrel file—avoid re-implementing logic here.
-- `package.json` must depend on the workspace packages via `workspace:*` ranges.
+- `package.json` should pin sibling `@guren/*` packages using caret ranges that match the current release (e.g. `^0.1.1-alpha.0`) so published artifacts resolve correctly outside the monorepo.
 
 ## Build
 - Build with `bun run --cwd packages/core build`.
