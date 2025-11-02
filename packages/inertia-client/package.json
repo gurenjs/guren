@@ -35,6 +35,7 @@
     "build": "tsup"
   },
   "dependencies": {
+    "@inertiajs/core": "^1.0.0",
     "@inertiajs/react": "^1.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
