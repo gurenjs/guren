@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { resolve } from 'node:path'
-import type { Logger, Plugin } from 'vite'
+import type { HmrContext, Logger, Plugin, ResolvedConfig } from 'vite'
 
 export interface RouteTypesPluginOptions {
   /**
@@ -96,12 +96,12 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
 
   return {
     name: 'guren-route-types',
-    async configResolved(config) {
+    async configResolved(config: ResolvedConfig) {
       appRoot = resolve(config.root, options.appRoot ?? '.')
       logger = config.logger
       await enqueueGeneration(appRoot)
     },
-    async handleHotUpdate(ctx) {
+    async handleHotUpdate(ctx: HmrContext) {
       const root = appRoot ?? ctx.server.config.root
       const watchFile = resolve(root, options.watchFile ?? DEFAULT_WATCH_FILE)
       const changedFile = resolve(ctx.file)
