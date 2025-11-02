@@ -1,5 +1,14 @@
 # @guren/cli
 
+## 0.1.1-alpha.2
+
+### Patch Changes
+
+- Updated the scaffolded app template so new projects pull in the freshly published prerelease.
+- Updated dependencies
+  - @guren/orm@0.1.1-alpha.2
+  - @guren/server@0.1.1-alpha.2
+
 ## 0.1.1-alpha.1
 
 ### Patch Changes
