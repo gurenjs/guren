@@ -14,13 +14,14 @@
     "url": "https://github.com/gurenjs/guren/issues"
   },
   "scripts": {
-    "build": "bun run build:testing && bun run build:orm && bun run build:server && bun run build:cli && bun run build:core && bun run build:inertia",
+    "build": "bun run build:testing && bun run build:orm && bun run build:server && bun run build:cli && bun run build:core && bun run build:create-app && bun run build:inertia",
     "build:routes": "bun run --cwd examples/blog routes:types",
     "build:testing": "bun run --cwd packages/testing build",
     "build:core": "bun run --cwd packages/core build",
     "build:server": "bun run --cwd packages/server build",
     "build:orm": "bun run --cwd packages/orm build",
     "build:cli": "bun run --cwd packages/cli build",
+    "build:create-app": "bun run --cwd packages/create-app build",
     "build:inertia": "bun run --cwd packages/inertia-client build",
     "changeset": "changeset",
     "version-packages": "changeset version && bun install",
