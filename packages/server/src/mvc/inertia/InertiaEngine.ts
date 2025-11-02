@@ -23,7 +23,7 @@ const DEFAULT_IMPORT_MAP: Record<string, string> = {
   'react/jsx-runtime': 'https://esm.sh/react@19.0.0/jsx-runtime?dev',
   'react/jsx-dev-runtime': 'https://esm.sh/react@19.0.0/jsx-dev-runtime?dev',
   'react-dom/client': 'https://esm.sh/react-dom@19.0.0/client?dev',
-  '@inertiajs/react': 'https://esm.sh/@inertiajs/react@1.0.0?dev&external=react,react-dom/client',
+  '@inertiajs/react': 'https://esm.sh/@inertiajs/react@2.2.15?dev&external=react,react-dom/client',
   '@guren/inertia-client': '/vendor/inertia-client.tsx',
 }
 

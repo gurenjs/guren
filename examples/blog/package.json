@@ -22,7 +22,7 @@
     "@guren/testing": "workspace:*",
     "@guren/orm": "workspace:*",
     "@guren/server": "workspace:*",
-    "@inertiajs/react": "^1.0.0",
+    "@inertiajs/react": "^2.2.15",
     "drizzle-orm": "0.44.7",
     "postgres": "^3.4.3",
     "react": "^19.0.0",
