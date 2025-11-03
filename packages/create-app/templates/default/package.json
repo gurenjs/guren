@@ -4,8 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun run bin/serve.ts",
-    "build": "bunx tsup --config tsup.config.ts",
+    "routes:types": "bunx guren routes:types --routes routes/web.ts --out types/generated/routes.d.ts --force",
+    "dev": "concurrently \"bun run dev:server\" \"bunx vite dev --host\"",
+    "dev:server": "VITE_DEV_SERVER_URL=http://localhost:5173 bun run --watch --hot bin/serve.ts",
+    "build": "bunx vite build",
+    "preview": "bunx vite preview",
     "db:make": "bunx guren make:migration",
     "db:migrate": "bunx guren db:migrate",
     "db:seed": "bunx guren db:seed"
@@ -24,8 +27,12 @@
   "devDependencies": {
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "concurrently": "^9.2.1",
     "drizzle-kit": "0.27.0",
-    "tsup": "^8.5.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "vite": "^7.0.0",
+    "@tailwindcss/vite": "^4.0.0",
+    "tailwindcss": "^4.0.0"
   }
 }

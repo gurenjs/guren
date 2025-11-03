@@ -5,5 +5,5 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
-  plugins: [routeTypesPlugin(), guren(), react(), tailwindcss()],
+  plugins: [routeTypesPlugin(), guren(), react(), ...tailwindcss()],
 })
