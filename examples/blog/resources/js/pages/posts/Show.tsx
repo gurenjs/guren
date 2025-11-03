@@ -1,18 +1,8 @@
 import { Link } from '@inertiajs/react'
 import Layout from '../../components/Layout.js'
+import type { PostShowPageProps } from '@/Http/Controllers/PostController'
 
-type Post = {
-  id: number
-  title: string
-  excerpt: string
-  body?: string | null
-}
-
-type ShowProps = {
-  post: Post
-}
-
-export default function Show({ post }: ShowProps) {
+export default function Show({ post }: PostShowPageProps) {
   const paragraphs = post.body?.split(/\n+/).filter(Boolean) ?? []
 
   return (
@@ -59,10 +49,10 @@ export default function Show({ post }: ShowProps) {
         <article className="relative rounded-3xl border border-[#F4B0B0] bg-white p-10 shadow-xl">
           <div className="flex items-center gap-4">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-linear-to-br from-[#FFC1C1] to-[#B71C1C] text-xl font-semibold text-white">
-              {post.title.charAt(0).toUpperCase()}
+              {(post.author?.name ?? post.title).charAt(0).toUpperCase()}
             </div>
             <div className="flex-1">
-              <p className="text-sm font-medium text-[#8F1111]">Author</p>
+              <p className="text-sm font-medium text-[#8F1111]">{post.author?.name ?? 'Unknown author'}</p>
               <p className="text-xs text-[#A65555]">
                 Published {new Date().toLocaleDateString('ja-JP', { month: 'long', day: 'numeric', year: 'numeric' })}
               </p>

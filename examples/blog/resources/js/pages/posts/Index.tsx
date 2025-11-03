@@ -93,17 +93,17 @@ export default function Index({ posts }: PostsIndexPageProps) {
 
                     {/* Card Footer */}
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-3">
-                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-linear-to-br from-[#FFC1C1] to-[#B71C1C] text-white">
-                          <span className="text-sm font-semibold">
-                            {post.title.charAt(0).toUpperCase()}
-                          </span>
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium text-[#8F1111]">Author</p>
-                          <p className="text-xs text-[#A65555]">5 min read</p>
-                        </div>
+                    <div className="flex items-center space-x-3">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-linear-to-br from-[#FFC1C1] to-[#B71C1C] text-white">
+                        <span className="text-sm font-semibold">
+                          {(post.author?.name ?? post.title).charAt(0).toUpperCase()}
+                        </span>
                       </div>
+                      <div>
+                        <p className="text-sm font-medium text-[#8F1111]">{post.author?.name ?? 'Unknown author'}</p>
+                        <p className="text-xs text-[#A65555]">{post.author ? `@${post.author.name.toLowerCase().replace(/\s+/g, '')}` : 'Guest post'}</p>
+                      </div>
+                    </div>
 
                       <Link
                         href={`/posts/${post.id}`}
