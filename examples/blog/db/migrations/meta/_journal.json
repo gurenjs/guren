@@ -5,15 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1761917403617,
-      "tag": "0000_initial_setup",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1762151221300,
-      "tag": "0001_add_author_to_posts",
+      "when": 1762178762600,
+      "tag": "0000_worried_oracle",
       "breakpoints": true
     }
   ]

@@ -2,17 +2,46 @@ import { Context, parseRequestPayload, formatValidationErrors } from '@guren/ser
 import Controller from './Controller.js'
 import type { ControllerInertiaProps } from '@guren/server'
 import { Post, type PostWithAuthor } from '../../Models/Post.js'
-import { PostPayloadSchema, PostFormSchema } from '../Validators/PostValidator.js'
+import { PostPayloadSchema, PostFormSchema, PageQuerySchema, PostIdParamSchema } from '../Validators/PostValidator.js'
+import type { PaginationMeta } from '@guren/orm'
+import { z } from 'zod'
+
 
 export default class PostController extends Controller {
   async index(ctx: Context) {
-    const posts = await Post.with('author')
+    const postsPerPage = 6
+    const pageResult = PageQuerySchema.safeParse({ page: ctx.req.query('page') })
 
-    return this.inertiaWithAuth('posts/Index', { posts }, { url: ctx.req.path, title: 'Posts | Guren Blog' })
+    if (!pageResult.success) {
+      return this.json({ message: 'Invalid page parameter.' }, { status: 422 })
+    }
+
+    const { data: posts, meta } = await Post.withPaginate('author', {
+      page: pageResult.data.page,
+      perPage: postsPerPage,
+      orderBy: [['id', 'desc']],
+    })
+
+    const pagination: PostsPagination = {
+      ...meta,
+      basePath: ctx.req.path ?? '/',
+    }
+
+    return this.inertiaWithAuth(
+      'posts/Index',
+      { posts, pagination },
+      { url: ctx.req.url ?? ctx.req.path, title: 'Posts | Guren Blog' },
+    )
   }
 
   async show(ctx: Context): Promise<Response> {
-    const id = Number(ctx.req.param('id'))
+    const paramsResult = PostIdParamSchema.safeParse({ id: ctx.req.param('id') })
+
+    if (!paramsResult.success) {
+      return this.json({ message: 'Invalid post id.' }, { status: 400 })
+    }
+
+    const { id } = paramsResult.data
     const [post] = await Post.with('author', { id })
 
     if (!post) {
@@ -52,7 +81,13 @@ export default class PostController extends Controller {
   }
 
   async edit(ctx: Context): Promise<Response> {
-    const id = Number(ctx.req.param('id'))
+    const paramsResult = PostIdParamSchema.safeParse({ id: ctx.req.param('id') })
+
+    if (!paramsResult.success) {
+      return this.inertiaWithAuth('posts/Edit', { errors: { message: 'Invalid post id.' }, post: null, postId: 0 }, { status: 400 })
+    }
+
+    const { id } = paramsResult.data
     const post = await Post.find(id)
 
     if (!post) {
@@ -72,7 +107,13 @@ export default class PostController extends Controller {
   }
 
   async update(ctx: Context): Promise<Response> {
-    const id = Number(ctx.req.param('id'))
+    const paramsResult = PostIdParamSchema.safeParse({ id: ctx.req.param('id') })
+
+    if (!paramsResult.success) {
+      return this.json({ message: 'Invalid post id.' }, { status: 400 })
+    }
+
+    const { id } = paramsResult.data
     const post = await Post.find(id)
 
     if (!post) {
@@ -115,5 +156,7 @@ type InertiaPropsFor<Action extends keyof PostController> = ControllerInertiaPro
 
 type AuthProps = InertiaPropsFor<'index'> extends { auth: infer T } ? T : { user: unknown }
 
-export type PostsIndexPageProps = { posts: PostWithAuthor[]; auth: AuthProps }
+export type PostsPagination = PaginationMeta & { basePath: string }
+
+export type PostsIndexPageProps = { posts: PostWithAuthor[]; pagination: PostsPagination; auth: AuthProps }
 export type PostShowPageProps = { post: PostWithAuthor; auth: AuthProps }

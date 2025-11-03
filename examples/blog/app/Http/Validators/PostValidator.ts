@@ -26,3 +26,11 @@ export const PostFormSchema = z.object({
 })
 
 export type PostFormData = z.infer<typeof PostFormSchema>
+
+export const PageQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+})
+
+export const PostIdParamSchema = z.object({
+  id: z.coerce.number().int().positive(),
+})
