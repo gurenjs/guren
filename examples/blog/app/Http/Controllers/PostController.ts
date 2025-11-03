@@ -1,21 +1,12 @@
 import { Context, parseRequestPayload, formatValidationErrors } from '@guren/server'
 import Controller from './Controller.js'
-import type { InferInertiaProps } from '@guren/server'
-import { Post, type PostRecord } from '../../Models/Post.js'
-import type { UserRecord } from '../../Models/User.js'
+import type { ControllerInertiaProps } from '@guren/server'
+import { Post, type PostWithAuthor } from '../../Models/Post.js'
 import { PostPayloadSchema, PostFormSchema } from '../Validators/PostValidator.js'
-import { z } from 'zod'
-
-type AuthorSummary = Pick<UserRecord, 'id' | 'name'>
-type PostWithAuthor = PostRecord & { author: AuthorSummary | null }
 
 export default class PostController extends Controller {
   async index(ctx: Context) {
-    const rawPosts = await Post.with('author')
-    const posts: PostWithAuthor[] = rawPosts.map((post) => ({
-      ...post,
-      author: toAuthorSummary(post.author),
-    }))
+    const posts = await Post.with('author')
 
     return this.inertiaWithAuth('posts/Index', { posts }, { url: ctx.req.path, title: 'Posts | Guren Blog' })
   }
@@ -28,12 +19,7 @@ export default class PostController extends Controller {
       return this.json({ message: 'Post not found' }, { status: 404 })
     }
 
-    const formattedPost: PostWithAuthor = {
-      ...post,
-      author: toAuthorSummary(post.author),
-    }
-
-    return this.inertiaWithAuth('posts/Show', { post: formattedPost }, { url: ctx.req.path, title: `${formattedPost.title} | Guren Blog` })
+    return this.inertiaWithAuth('posts/Show', { post }, { url: ctx.req.path, title: `${post.title} | Guren Blog` })
   }
 
   async create(ctx: Context): Promise<Response> {
@@ -49,13 +35,14 @@ export default class PostController extends Controller {
       return this.inertiaWithAuth('posts/New', { errors }, { status: 422 })
     }
 
-    const userResult = CurrentUserSchema.safeParse(await this.auth.user())
-    if (!userResult.success) {
+    const authUser = (await this.auth.user()) as { id?: number } | null
+
+    if (!authUser?.id) {
       return this.inertiaWithAuth('posts/New', { errors: { message: 'You must be signed in to create posts.' } }, { status: 401 })
     }
 
     try {
-      const post = await Post.create({ ...result.data, authorId: userResult.data.id })
+      const post = await Post.create({ ...result.data, authorId: authUser.id })
       const redirectTo = post?.id ? `/posts/${post.id}` : '/posts'
       return this.redirect(redirectTo)
     } catch (error) {
@@ -105,7 +92,12 @@ export default class PostController extends Controller {
         return this.inertiaWithAuth('posts/Edit', { errors: { message: 'Failed to load post.' }, post: null, postId: id }, { status: 500 })
       }
 
-      return this.inertiaWithAuth('posts/Edit', { post: formPostResult.data, postId: id, errors }, { status: 422 })
+      const formPost = formPostResult.data
+      return this.inertiaWithAuth(
+        'posts/Edit',
+        { post: formPost, postId: id, errors },
+        { status: 422, url: ctx.req.path, title: `Edit ${formPost.title} | Guren Blog` },
+      )
     }
 
     try {
@@ -113,34 +105,15 @@ export default class PostController extends Controller {
       return this.redirect(`/posts/${id}`)
     } catch (error) {
       console.error('Failed to update post:', error)
-      const formPostResult = PostFormSchema.safeParse(post)
 
-      if (formPostResult.success) {
-        return this.inertiaWithAuth('posts/Edit', { post: formPostResult.data, postId: id, errors: { message: 'Failed to update post.' } }, { status: 500 })
-      }
-
-      return this.inertiaWithAuth('posts/Edit', { errors: { message: 'Failed to update post.' }, post: null, postId: id }, { status: 500 })
+      return this.inertiaWithAuth('posts/Edit', { errors: { message: 'Failed to update post.' }, post: result.data, postId: id }, { status: 500 })
     }
   }
 }
 
-type PostControllerInstance = InstanceType<typeof PostController>
+type InertiaPropsFor<Action extends keyof PostController> = ControllerInertiaProps<PostController, Action>
 
-export type PostsIndexPageProps = InferInertiaProps<Awaited<ReturnType<PostControllerInstance['index']>>>
-export type PostShowPageProps = InferInertiaProps<Awaited<ReturnType<PostControllerInstance['show']>>>
+type AuthProps = InertiaPropsFor<'index'> extends { auth: infer T } ? T : { user: unknown }
 
-const AuthorSummarySchema = z.object({
-  id: z.number(),
-  name: z.string(),
-})
-
-const CurrentUserSchema = z.object({ id: z.number() })
-
-function toAuthorSummary(author: unknown): AuthorSummary | null {
-  if (author == null) {
-    return null
-  }
-
-  const result = AuthorSummarySchema.safeParse(author)
-  return result.success ? result.data : null
-}
+export type PostsIndexPageProps = { posts: PostWithAuthor[]; auth: AuthProps }
+export type PostShowPageProps = { post: PostWithAuthor; auth: AuthProps }

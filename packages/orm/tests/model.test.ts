@@ -65,7 +65,8 @@ function createAdapter(records: UserRecord[] = []): { adapter: ORMAdapter; snaps
       let results = store.filter(matches(where as WhereClause<UserRecord> | undefined))
 
       if (orderBy && orderBy.length > 0) {
-        results = [...results].sort(compare(orderBy as OrderByClause<UserRecord>))
+        const typedOrder = orderBy as unknown as OrderByClause<UserRecord>
+        results = [...results].sort(compare(typedOrder))
       }
 
       return results.map((record) => ({ ...record })) as unknown as TRecord[]

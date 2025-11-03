@@ -6,6 +6,7 @@
       "devDependencies": {
         "@changesets/cli": "^2.29.7",
         "bun-types": "^1.3.1",
+        "typescript": "^5.5.4",
         "zod": "^3.24.0",
       },
     },
@@ -21,6 +22,7 @@
         "@guren/testing": "workspace:*",
         "@inertiajs/react": "^2.2.15",
         "drizzle-orm": "0.44.7",
+        "lucide-react": "^0.552.0",
         "postgres": "^3.4.3",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
@@ -43,14 +45,14 @@
     },
     "packages/cli": {
       "name": "@guren/cli",
-      "version": "0.1.0",
+      "version": "0.1.1-alpha.5",
       "bin": {
-        "guren": "./dist/bin.js",
+        "guren": "./dist/bin.js"
       },
       "dependencies": {
         "@babel/parser": "^7.24.7",
-        "@guren/orm": "workspace:*",
-        "@guren/server": "workspace:*",
+        "@guren/orm": "^0.1.1-alpha.5",
+        "@guren/server": "^0.1.1-alpha.5",
         "citty": "^0.1.6",
         "consola": "^3.4.2",
       },
@@ -63,14 +65,14 @@
     },
     "packages/core": {
       "name": "@guren/core",
-      "version": "0.1.0",
+      "version": "0.1.1-alpha.5",
       "bin": {
-        "guren": "./dist/bin.js",
+        "guren": "./dist/bin.js"
       },
       "dependencies": {
-        "@guren/cli": "workspace:*",
-        "@guren/orm": "workspace:*",
-        "@guren/server": "workspace:*",
+        "@guren/cli": "^0.1.1-alpha.5",
+        "@guren/orm": "^0.1.1-alpha.5",
+        "@guren/server": "^0.1.1-alpha.5",
       },
       "devDependencies": {
         "@types/node": "^20.14.10",
@@ -80,9 +82,9 @@
     },
     "packages/create-app": {
       "name": "create-guren-app",
-      "version": "0.1.0",
+      "version": "0.1.1-alpha.5",
       "bin": {
-        "create-guren-app": "./dist/cli.js",
+        "create-guren-app": "./dist/cli.js"
       },
       "dependencies": {
         "citty": "^0.1.6",
@@ -96,7 +98,7 @@
     },
     "packages/inertia-client": {
       "name": "@guren/inertia-client",
-      "version": "0.1.0",
+      "version": "0.1.1-alpha.5",
       "dependencies": {
         "@inertiajs/core": "^2.2.15",
         "@inertiajs/react": "^2.2.15",
@@ -112,7 +114,7 @@
     },
     "packages/orm": {
       "name": "@guren/orm",
-      "version": "0.1.0",
+      "version": "0.1.1-alpha.5",
       "devDependencies": {
         "@types/node": "^20.14.10",
         "drizzle-orm": "^0.44.7",
@@ -131,9 +133,9 @@
     },
     "packages/server": {
       "name": "@guren/server",
-      "version": "0.1.0",
+      "version": "0.1.1-alpha.5",
       "dependencies": {
-        "@guren/inertia-client": "workspace:*",
+        "@guren/inertia-client": "^0.1.1-alpha.5",
         "hono": "^4.4.0",
       },
       "devDependencies": {
@@ -145,7 +147,7 @@
     },
     "packages/testing": {
       "name": "@guren/testing",
-      "version": "0.1.0",
+      "version": "0.1.1-alpha.5",
       "devDependencies": {
         "@types/react": "^19.0.0",
         "tsup": "^8.5.0",
@@ -788,6 +790,8 @@
     "loupe": ["loupe@3.2.1", "", {}, "sha512-CdzqowRJCeLU72bHvWqwRBBlLcMEtIvGrlvef74kMnV2AolS9Y8xUv1I0U/MNAWMhBlKIoyuEgoJ0t/bbwHbLQ=="],
 
     "lru-cache": ["lru-cache@5.1.1", "", { "dependencies": { "yallist": "^3.0.2" } }, "sha512-KpNARQA3Iwv+jTA0utUVVbrh+Jlrr1Fv0e56GGzAFOXN7dk/FviaDW8LHmK52DlcH4WP2n6gI8vN1aesBFgo9w=="],
+
+    "lucide-react": ["lucide-react@0.552.0", "", { "peerDependencies": { "react": "^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0" } }, "sha512-g9WCjmfwqbexSnZE+2cl21PCfXOcqnGeWeMTNAOGEfpPbm/ZF4YIq77Z8qWrxbu660EKuLB4nSLggoKnCb+isw=="],
 
     "lz-string": ["lz-string@1.5.0", "", { "bin": { "lz-string": "bin/bin.js" } }, "sha512-h5bgJWpxJNswbU7qCrV0tIKQCaS3blPDrqKWx+QxzuzL1zGUzij9XCWLrSLsJPu5t+eWA/ycetzYAO5IOMcWAQ=="],
 

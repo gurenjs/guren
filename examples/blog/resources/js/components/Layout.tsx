@@ -1,5 +1,6 @@
 import { Link, usePage } from '@inertiajs/react'
 import type { PropsWithChildren } from 'react'
+import { FileText, LayoutDashboard, LogIn, LogOut, UserRound } from 'lucide-react'
 
 type SharedPageProps = {
   auth?: {
@@ -36,26 +37,36 @@ export default function Layout({ children, mainClassName, wrapperClassName }: La
             Guren Blog
           </Link>
           <nav className="flex items-center gap-4 text-sm font-medium">
-            <Link href="/posts" className="transition hover:text-[#FFE3E3]">
+            <Link href="/posts" className="flex items-center gap-1.5 transition hover:text-[#FFE3E3]">
+              <FileText className="h-4 w-4" aria-hidden />
               Posts
             </Link>
-            <Link href="/dashboard" className="transition hover:text-[#FFE3E3]">
+            <Link href="/dashboard" className="flex items-center gap-1.5 transition hover:text-[#FFE3E3]">
+              <LayoutDashboard className="h-4 w-4" aria-hidden />
               Dashboard
             </Link>
+            {isAuthenticated ? (
+              <Link href="/profile" className="flex items-center gap-1.5 transition hover:text-[#FFE3E3]">
+                <UserRound className="h-4 w-4" aria-hidden />
+                Profile
+              </Link>
+            ) : null}
             {isAuthenticated ? (
               <Link
                 href="/logout"
                 method="post"
                 as="button"
-                className="rounded-full border border-white/70 px-4 py-1 text-white transition hover:bg-white hover:text-[#8F1111]"
+                className="inline-flex items-center gap-1.5 rounded-full border border-white/70 px-4 py-1 text-white transition hover:bg-white hover:text-[#8F1111]"
               >
+                <LogOut className="h-4 w-4" aria-hidden />
                 Log out
               </Link>
             ) : (
               <Link
                 href="/login"
-                className="rounded-full border border-white/70 px-4 py-1 text-white transition hover:bg-white hover:text-[#8F1111]"
+                className="inline-flex items-center gap-1.5 rounded-full border border-white/70 px-4 py-1 text-white transition hover:bg-white hover:text-[#8F1111]"
               >
+                <LogIn className="h-4 w-4" aria-hidden />
                 Sign in
               </Link>
             )}

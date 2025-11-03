@@ -27,5 +27,8 @@ jobs:
       - name: Generate route types
         run: bun run build:routes
 
+      - name: Type check
+        run: bun run typecheck
+
       - name: Run tests
         run: bun run test

@@ -2,6 +2,8 @@ import { DrizzleAdapter } from './adapters/drizzle-adapter'
 
 export type PlainObject = Record<string, unknown>
 
+type RelationShape = Record<string, unknown>
+
 export type WhereValue<Value> = Value | readonly Value[] | null
 
 export type WhereClause<TRecord extends PlainObject = PlainObject> = Partial<{
@@ -55,6 +57,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   protected static table: unknown
   static readonly recordType: unknown = undefined as unknown
   protected static relationDefinitions?: Map<string, RelationDefinition>
+  static relationTypes: RelationShape = {}
 
   static useAdapter(adapter: ORMAdapter): void {
     this.ormAdapter = adapter
@@ -105,7 +108,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     Related extends typeof Model,
     ForeignKey extends keyof TRecordFor<Related> & string,
     LocalKey extends keyof TRecordFor<This> & string,
-    Name extends string,
+    Name extends RelationKeyOrString<This>,
   >(
     this: This,
     name: Name,
@@ -128,7 +131,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     Related extends typeof Model,
     ForeignKey extends keyof TRecordFor<This> & string,
     OwnerKey extends keyof TRecordFor<Related> & string,
-    Name extends string,
+    Name extends RelationKeyOrString<This>,
   >(
     this: This,
     name: Name,
@@ -187,19 +190,25 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     return adapter.delete(table, where)
   }
 
-  static async with<T extends typeof Model>(
+  static async with<T extends typeof Model, K extends RelationKey<T>>(
     this: T,
-    relations: RelationNames,
+    relations: K | readonly K[],
     where?: WhereClauseFor<T>,
-  ): Promise<Array<LoadedRelationRecord<TRecordFor<T>>>> {
+  ): Promise<Array<TRecordFor<T> & RelationTypePick<T, K | readonly K[]>>>
+
+  static async with<T extends typeof Model, Names extends RelationNames>(
+    this: T,
+    relations: Names,
+    where?: WhereClauseFor<T>,
+  ): Promise<Array<TRecordFor<T> & RelationTypePick<T, Names>>> {
     const records = where ? await this.where(where) : await this.all()
     if (!records.length) {
-      return records as Array<LoadedRelationRecord<TRecordFor<T>>>
+      return records as Array<TRecordFor<T> & RelationTypePick<T, Names>>
     }
 
     const relationList = normalizeRelations(relations)
     if (relationList.length === 0) {
-      return records as Array<LoadedRelationRecord<TRecordFor<T>>>
+      return records as Array<TRecordFor<T> & RelationTypePick<T, Names>>
     }
 
     const copies = records.map((record) => ({ ...record }))
@@ -207,7 +216,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       await this.loadRelationInto(copies, relationName)
     }
 
-    return copies as Array<LoadedRelationRecord<TRecordFor<T>>>
+    return copies as Array<TRecordFor<T> & RelationTypePick<T, Names>>
   }
 
   protected static async loadRelationInto<T extends typeof Model>(
@@ -304,7 +313,23 @@ type WhereClauseFor<T extends typeof Model> = WhereClause<TRecordFor<T>>
 
 type RelationNames = string | readonly string[]
 
-type LoadedRelationRecord<TRecord extends PlainObject> = TRecord & Record<string, unknown>
+type RelationTypesFor<T extends typeof Model> = T extends { relationTypes: infer R }
+  ? R extends RelationShape
+    ? R
+    : {}
+  : {}
+
+type RelationKey<T extends typeof Model> = keyof RelationTypesFor<T> & string
+
+type RelationKeyOrString<T extends typeof Model> = RelationKey<T> extends never ? string : RelationKey<T>
+
+type RelationNameUnion<Names> = Names extends readonly (infer Items)[] ? Items : Names
+
+type RelationTypePick<T extends typeof Model, Names> = RelationNameUnion<Names> extends infer Keys
+  ? Keys extends string
+    ? { [K in Keys & keyof RelationTypesFor<T>]: RelationTypesFor<T>[K] }
+    : {}
+  : {}
 
 interface BaseRelationDefinition {
   type: 'hasMany' | 'belongsTo'
@@ -325,6 +350,14 @@ interface BelongsToRelationDefinition extends BaseRelationDefinition {
 }
 
 type RelationDefinition = HasManyRelationDefinition | BelongsToRelationDefinition
+
+export type HasManyRelationResult<T extends typeof Model> = Array<TRecordFor<T>>
+
+export type BelongsToRelationResult<T extends typeof Model> = TRecordFor<T> | null
+
+export type HasManyRecord<TRecord extends PlainObject> = TRecord[]
+
+export type BelongsToRecord<TRecord extends PlainObject> = TRecord | null
 
 function normalizeOrderBy<TRecord extends PlainObject>(order: OrderByInput<TRecord>): OrderByClause<TRecord> {
   if (Array.isArray(order) && !isOrderTuple(order)) {
@@ -364,5 +397,9 @@ function normalizeRelations(relations: RelationNames): string[] {
     return relations.map((relation) => relation.toString()).filter(Boolean)
   }
 
-  return relations ? [relations] : []
+  if (typeof relations === 'string' && relations) {
+    return [relations]
+  }
+
+  return []
 }

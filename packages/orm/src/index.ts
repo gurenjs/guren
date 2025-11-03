@@ -8,6 +8,10 @@ export type {
   OrderByClause,
   FindManyOptions,
   ORMAdapter,
+  HasManyRelationResult,
+  BelongsToRelationResult,
+  HasManyRecord,
+  BelongsToRecord,
 } from './Model'
 export { DrizzleAdapter } from './adapters/drizzle-adapter'
 export { createPostgresDatabase } from './postgres'

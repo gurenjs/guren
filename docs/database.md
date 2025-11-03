@@ -153,25 +153,34 @@ The ORM ships with a lightweight relationship layer for common Eloquent-style pa
 
 ```ts
 // app/Models/User.ts
-import { Model } from '@guren/orm'
+import { Model, type HasManyRecord } from '@guren/orm'
 import { users } from '@/db/schema'
+import type { PostRecord } from '@/app/Models/Post'
 
 export type UserRecord = typeof users.$inferSelect
 
 export class User extends Model<UserRecord> {
   static override table = users
   static override readonly recordType = {} as UserRecord
+  static override relationTypes: { posts: HasManyRecord<PostRecord> } = {
+    posts: [],
+  }
 }
 
 // app/Models/Post.ts
-import { Model } from '@guren/orm'
+import { Model, type BelongsToRecord } from '@guren/orm'
 import { posts } from '@/db/schema'
+import type { UserRecord } from '@/app/Models/User'
 
 export type PostRecord = typeof posts.$inferSelect
+export type PostAuthorSummary = Pick<UserRecord, 'id' | 'name'>
 
 export class Post extends Model<PostRecord> {
   static override table = posts
   static override readonly recordType = {} as PostRecord
+  static override relationTypes: { author: BelongsToRecord<PostAuthorSummary> } = {
+    author: null,
+  }
 }
 
 // app/Models/relations.ts
@@ -192,6 +201,7 @@ import './app/Models/relations'
 
 - `hasMany(name, RelatedModel, foreignKey, localKey)` expects the related model’s foreign key and the local key on the parent (often `id`).
 - `belongsTo(name, RelatedModel, foreignKey, ownerKey)` ties the current model’s foreign key to the owner key on the related model.
+- Define `static relationTypes` to describe the shape of eager-loaded relations. Helpers such as `Model.with('author')` merge these types, so controllers and views receive fully typed relation data (e.g. `{ author: PostAuthorSummary | null }`, `{ posts: PostRecord[] }`).
 
 ### Eager Loading with `with`
 
