@@ -1,12 +1,17 @@
-import { and, eq, inArray, isNull } from 'drizzle-orm'
+import { and, asc, count, desc, eq, inArray, isNull } from 'drizzle-orm'
 import type { AnyColumn } from 'drizzle-orm'
-import type { ORMAdapter, PlainObject, WhereClause } from '../Model'
+import type { FindManyOptions, OrderByClause, ORMAdapter, PlainObject, WhereClause } from '../Model'
 
 type DrizzleLikeSelect = {
   where?: (clause: unknown) => DrizzleLikeSelect
+  orderBy?: (...clauses: unknown[]) => DrizzleLikeSelect
+  limit?: (value: number) => DrizzleLikeSelect
+  offset?: (value: number) => DrizzleLikeSelect
   all?: () => Promise<unknown[]>
   get?: () => Promise<unknown>
 }
+
+type DrizzleSelectBuilder = DrizzleLikeSelect & { from(table: unknown): DrizzleLikeSelect }
 
 type DrizzleLikeInsert = {
   values: (record: PlainObject) => DrizzleLikeInsertResult
@@ -30,7 +35,7 @@ type DrizzleLikeDelete = {
 }
 
 type DrizzleDatabase = {
-  select(): { from(table: unknown): DrizzleLikeSelect }
+  select(selection?: Record<string, unknown>): DrizzleSelectBuilder
   insert(table: unknown): DrizzleLikeInsert
   update?(table: unknown): DrizzleLikeUpdate
   delete?(table: unknown): DrizzleLikeDelete
@@ -103,6 +108,23 @@ function resolveWhere(table: unknown, where?: WhereClause): unknown {
   return and(...clauses)
 }
 
+function resolveOrder(table: unknown, orderBy?: OrderByClause): unknown[] | undefined {
+  if (!orderBy || orderBy.length === 0) {
+    return undefined
+  }
+
+  const tableRecord = table as DrizzleTableLike
+  return orderBy.map(({ column, direction }) => {
+    const columnRef = tableRecord[column] as AnyColumn | undefined
+
+    if (!columnRef) {
+      throw new Error(`DrizzleAdapter: unknown column "${column}" on provided table.`)
+    }
+
+    return direction === 'desc' ? desc(columnRef) : asc(columnRef)
+  })
+}
+
 async function resolveSingle(result: DrizzleLikeSelect): Promise<unknown | null> {
   if (isPromiseLike(result)) {
     const list = (await (result as unknown as Promise<unknown[]>)) ?? []
@@ -148,9 +170,46 @@ export const DrizzleAdapter: ORMAdapter & { configure(db: DrizzleDatabase): void
     database = db
   },
 
-  async findMany<TRecord = PlainObject>(table: unknown, where?: WhereClause): Promise<TRecord[]> {
+  async findMany<TRecord extends PlainObject = PlainObject>(
+    table: unknown,
+    options?: FindManyOptions<TRecord>,
+  ): Promise<TRecord[]> {
     const db = ensureDatabase()
     let query = db.select().from(table)
+    const { where, orderBy, limit, offset } = options ?? {}
+
+    if (typeof query.where === 'function') {
+      const clause = resolveWhere(table, where)
+      if (clause) {
+        query = query.where(clause) as DrizzleLikeSelect
+      }
+    }
+
+    if (typeof query.orderBy === 'function') {
+      const clauses = resolveOrder(table, orderBy as OrderByClause)
+      if (clauses && clauses.length > 0) {
+        query = query.orderBy(...clauses) as DrizzleLikeSelect
+      }
+    }
+
+    if (typeof query.limit === 'function' && typeof limit === 'number') {
+      query = query.limit(limit) as DrizzleLikeSelect
+    }
+
+    if (typeof query.offset === 'function' && typeof offset === 'number') {
+      query = query.offset(offset) as DrizzleLikeSelect
+    }
+
+    const rows = await resolveList(query)
+    return rows as TRecord[]
+  },
+
+  async count<TRecord extends PlainObject = PlainObject>(
+    table: unknown,
+    where?: WhereClause<TRecord>,
+  ): Promise<number> {
+    const db = ensureDatabase()
+    let query = db.select({ value: count() }).from(table)
 
     if (typeof query.where === 'function') {
       const clause = resolveWhere(table, where)
@@ -160,10 +219,13 @@ export const DrizzleAdapter: ORMAdapter & { configure(db: DrizzleDatabase): void
     }
 
     const rows = await resolveList(query)
-    return rows as TRecord[]
+    const first = rows[0] as { value?: unknown } | undefined
+    const raw = first?.value ?? 0
+    const total = typeof raw === 'bigint' ? Number(raw) : Number(raw)
+    return Number.isNaN(total) ? 0 : total
   },
 
-  async findUnique<TRecord = PlainObject>(table: unknown, where: WhereClause): Promise<TRecord | null> {
+  async findUnique<TRecord extends PlainObject = PlainObject>(table: unknown, where: WhereClause<TRecord>): Promise<TRecord | null> {
     const db = ensureDatabase()
     let query = db.select().from(table)
 
@@ -188,7 +250,7 @@ export const DrizzleAdapter: ORMAdapter & { configure(db: DrizzleDatabase): void
     return result as TRecord
   },
 
-  async update<TRecord = PlainObject>(table: unknown, where: WhereClause, data: PlainObject): Promise<TRecord> {
+  async update<TRecord extends PlainObject = PlainObject>(table: unknown, where: WhereClause<TRecord>, data: PlainObject): Promise<TRecord> {
     const db = ensureDatabase()
     if (!db.update) {
       throw new Error('DrizzleAdapter: configured database does not support updates.')
@@ -200,7 +262,7 @@ export const DrizzleAdapter: ORMAdapter & { configure(db: DrizzleDatabase): void
     return result as TRecord
   },
 
-  async delete<TRecord = PlainObject>(table: unknown, where: WhereClause): Promise<number | PlainObject | void> {
+  async delete<TRecord extends PlainObject = PlainObject>(table: unknown, where: WhereClause<TRecord>): Promise<number | PlainObject | void> {
     const db = ensureDatabase()
     if (!db.delete) {
       throw new Error('DrizzleAdapter: configured database does not support deletes.')

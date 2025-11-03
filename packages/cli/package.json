@@ -48,6 +48,9 @@
     "citty": "^0.1.6",
     "consola": "^3.4.2"
   },
+  "peerDependencies": {
+    "vite": ">=7.0.0"
+  },
   "devDependencies": {
     "@types/node": "^20.14.10",
     "vite": "^7.0.0",

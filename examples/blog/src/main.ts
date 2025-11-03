@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import app from './app.js'
 import '../routes/web.js'
+import '../app/Models/relations.js'
 
 configureViteAssets()
 configureInertiaAssets(app, {

@@ -42,7 +42,7 @@ Create a service provider that registers a user provider and (optionally) custom
 
 ```ts
 import type { ApplicationContext, Provider } from '@guren/core'
-import { ModelUserProvider, ScryptHasher } from '@guren/core'
+import { ModelUserProvider } from '@guren/core'
 import { User } from '@/app/Models/User'
 
 export default class AuthProvider implements Provider {
@@ -52,13 +52,31 @@ export default class AuthProvider implements Provider {
       passwordColumn: 'passwordHash',
       rememberTokenColumn: 'rememberToken',
       credentialsPasswordField: 'password',
-      hasher: new ScryptHasher(),
     }))
   }
 }
 ```
 
-`ScryptHasher` is a thin wrapper around Bun's built-in `password.hash` API (Argon2id by default), so you get secure defaults without pulling in extra crypto dependencies.
+Pair this with the `AuthenticatableModel` base class (see below) to get automatic password hashing and validation helpers. Under the hood, Guren uses Bun's Argon2id implementation by default, so you get modern password hashing without additional dependencies.
+
+### Authenticatable Models
+
+Models that extend `AuthenticatableModel` receive first-class password handling. Providing a plain `password` property when calling `create` or `update` automatically hashes and stores it in the `passwordHash` column (configurable via static properties). The framework never persists the plain text password, and authentication continues to rely on the same hashing algorithm as the providers.
+
+```ts
+import { AuthenticatableModel } from '@guren/core'
+import { users } from '@/db/schema.js'
+
+export type UserRecord = typeof users.$inferSelect
+
+export class User extends AuthenticatableModel<UserRecord> {
+  static override table = users
+  static override readonly recordType = {} as UserRecord
+  // Optional:
+  // static override passwordField = 'plainPassword'
+  // static override passwordHashField = 'password_digest'
+}
+```
 
 The default `AuthServiceProvider` automatically registers a `web` guard that uses the `users` provider. If you need additional guards (e.g. token-based APIs), call `context.auth.registerGuard('api', factory)` inside the provider and set it as default via `context.auth.setDefaultGuard('api')` when appropriate.
 

@@ -4,7 +4,7 @@ export { registerDevAssets } from './http/dev-assets'
 export { configureInertiaAssets } from './http/inertia-assets'
 export { parseRequestPayload, formatValidationErrors } from './http/request'
 export { Controller } from './mvc/Controller'
-export type { InertiaResponse, InferInertiaProps } from './mvc/Controller'
+export type { InertiaResponse, InferInertiaProps, ControllerInertiaProps } from './mvc/Controller'
 export { Route } from './mvc/Route'
 export type { RouteDefinition } from './mvc/Route'
 export { ViewEngine } from './mvc/ViewEngine'
@@ -19,6 +19,7 @@ export {
   SessionGuard,
   ModelUserProvider,
   BaseUserProvider,
+  AuthenticatableModel,
   ScryptHasher,
 }
   from './auth'
