@@ -36,14 +36,16 @@ export abstract class AuthenticatableModel<TRecord extends PlainObject = PlainOb
 
     const payload = { ...basePayload }
     const plainPassword = payload[passwordField]
+    const hashField = this.resolvePasswordHashField()
 
     if (typeof plainPassword === 'string' && plainPassword.length > 0) {
       const hasher = this.resolvePasswordHasher()
-      const hashField = this.resolvePasswordHashField()
       payload[hashField] = await hasher.hash(plainPassword)
     }
 
-    delete payload[passwordField]
+    if (passwordField !== hashField) {
+      delete payload[passwordField]
+    }
     return payload
   }
 }
