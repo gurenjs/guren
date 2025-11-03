@@ -1,5 +1,4 @@
 import { Context, parseRequestPayload, formatValidationErrors } from '@guren/server'
-import { ScryptHasher } from '@guren/core'
 import Controller from './Controller.js'
 import { ProfileUpdateSchema } from '../Validators/ProfileValidator.js'
 import { User, type UserRecord } from '../../Models/User.js'
@@ -63,27 +62,20 @@ export default class ProfileController extends Controller {
       }, { status: 422 })
     }
 
-    const updates = {
+    const updates: Record<string, unknown> = {
       name,
       email,
-      passwordHash: undefined as string | undefined,
     }
 
     if (password) {
-      const hasher = new ScryptHasher()
-      updates.passwordHash = await hasher.hash(password)
+      updates.password = password
     }
 
     await User.update({ id: authed.id }, updates)
 
-    const refreshedUser: UserRecord = {
-      ...authed,
-      name,
-      email,
-    }
-
-    if (updates.passwordHash !== undefined) {
-      refreshedUser.passwordHash = updates.passwordHash
+    const refreshedUser = await User.find(authed.id)
+    if (!refreshedUser) {
+      throw new Error('Failed to reload user after profile update.')
     }
 
     await this.auth.login(refreshedUser)

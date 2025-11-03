@@ -67,6 +67,10 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     return this.ormAdapter
   }
 
+  protected static async preparePersistencePayload(data: PlainObject): Promise<PlainObject> {
+    return { ...data }
+  }
+
   protected static getRelationDefinitions(): Map<string, RelationDefinition> {
     if (!Object.prototype.hasOwnProperty.call(this, 'relationDefinitions') || !this.relationDefinitions) {
       this.relationDefinitions = new Map()
@@ -167,7 +171,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
 
   static async create<T extends typeof Model>(this: T, data: PlainObject): Promise<TRecordFor<T>> {
     const table = this.resolveTable()
-    return this.getAdapter().create(table, data) as Promise<TRecordFor<T>>
+    const payload = await this.preparePersistencePayload(data)
+    return this.getAdapter().create(table, payload) as Promise<TRecordFor<T>>
   }
 
   static async update<T extends typeof Model>(this: T, where: WhereClauseFor<T>, data: PlainObject): Promise<TRecordFor<T>> {
@@ -177,7 +182,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       throw new Error('Configured adapter does not support update operations.')
     }
 
-    return adapter.update(table, where, data) as Promise<TRecordFor<T>>
+    const payload = await this.preparePersistencePayload(data)
+    return adapter.update(table, where, payload) as Promise<TRecordFor<T>>
   }
 
   static async delete<T extends typeof Model>(this: T, where: WhereClauseFor<T>): Promise<number | PlainObject | void> {

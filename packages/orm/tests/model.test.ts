@@ -243,6 +243,31 @@ describe('Model', () => {
     await expect(Untethered.all()).rejects.toThrow('Untethered.table must be defined before using the model.')
   })
 
+  it('allows subclasses to mutate persistence payloads before create and update', async () => {
+    class User extends Model<UserRecord> {
+      static table = 'users'
+
+      protected static override async preparePersistencePayload(data: PlainObject): Promise<PlainObject> {
+        const payload = await super.preparePersistencePayload(data)
+
+        if (typeof payload.name === 'string') {
+          payload.name = payload.name.toUpperCase()
+        }
+
+        return payload
+      }
+    }
+
+    const { adapter } = createAdapter([])
+    User.useAdapter(adapter)
+
+    const created = await User.create({ name: 'asuka' })
+    expect(created.name).toBe('ASUKA')
+
+    const updated = await User.update({ id: created.id }, { name: 'rei' })
+    expect(updated.name).toBe('REI')
+  })
+
   it('loads hasMany and belongsTo relations', async () => {
     class User extends Model<UserRecord> {
       static table = 'users'

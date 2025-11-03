@@ -19,6 +19,7 @@ export {
   SessionGuard,
   ModelUserProvider,
   BaseUserProvider,
+  AuthenticatableModel,
   ScryptHasher,
 }
   from './auth'
