@@ -50,7 +50,7 @@ Logs are available through `bun run db:logs`.
 ```bash
 NODE_ENV=production bun run --cwd examples/blog build
 ```
-The `build` script runs both `bunx vite build` and `bunx vite build --ssr`, producing hashed client assets in `public/assets/` and an SSR bundle in `bootstrap/ssr/`. During application bootstrap, `src/main.ts` reads the manifests to populate `GUREN_INERTIA_ENTRY`, `GUREN_INERTIA_STYLES`, and `GUREN_INERTIA_SSR_ENTRY`, enabling server-side rendering automatically.
+The `build` script runs both `bunx vite build` and `bunx vite build --ssr`, generating the client manifest at `public/assets/.vite/manifest.json` and the SSR manifest at `public/assets/.vite/ssr-manifest.json`. At runtime `src/main.ts` calls `autoConfigureInertiaAssets`, which reads those files and automatically sets the `GUREN_INERTIA_*` environment variables so server-side rendering is enabled without extra configuration.
 
 ## Database Tasks
 

@@ -182,8 +182,8 @@ export default function Index({ posts, pagination }: PostsIndexPageProps) {
                   type="button"
                   onClick={() => visitPage(pageNumber)}
                   className={`inline-flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold transition-all duration-200 ${pageNumber === pagination.currentPage
-                      ? 'bg-linear-to-br from-[#B71C1C] to-[#8F1111] text-white shadow-lg shadow-[#B71C1C]/30'
-                      : 'bg-white text-[#B71C1C] shadow border border-[#F4B0B0] hover:bg-[#FFE3E3]'
+                    ? 'bg-linear-to-br from-[#B71C1C] to-[#8F1111] text-white shadow-lg shadow-[#B71C1C]/30'
+                    : 'bg-white text-[#B71C1C] shadow border border-[#F4B0B0] hover:bg-[#FFE3E3]'
                     }`}
                   aria-current={pageNumber === pagination.currentPage ? 'page' : undefined}
                 >

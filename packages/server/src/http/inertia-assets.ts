@@ -1,6 +1,7 @@
 import { serveStatic } from 'hono/bun'
-import { dirname, resolve } from 'node:path'
+import { dirname, resolve, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { readFileSync } from 'node:fs'
 import type { Application } from './Application'
 import { createStaticRewrite, registerDevAssets, type DevAssetsOptions } from './dev-assets'
 
@@ -15,8 +16,18 @@ export interface InertiaAssetsOptions extends DevAssetsOptions {
   ssrManifest?: string
 }
 
+export interface AutoConfigureInertiaOptions extends InertiaAssetsOptions {
+  /** Dev server URL used when NODE_ENV !== 'production'. */
+  devServerUrl?: string
+  /** Output directory for Vite SSR bundles (relative to project root). */
+  ssrOutDir?: string
+  /** Enables SSR auto-wiring (defaults to true). */
+  enableSsr?: boolean
+}
+
 const DEFAULT_STYLES_ENTRY = '/public/assets/app.css'
 const DEFAULT_SCRIPT_ENTRY = '/assets/app.js'
+const DEFAULT_VENDOR_CLIENT_PATH = '/vendor/inertia-client.tsx'
 
 export function configureInertiaAssets(app: Application, options: InertiaAssetsOptions): void {
   const stylesEntry = options.stylesEntry ?? DEFAULT_STYLES_ENTRY
@@ -74,6 +85,168 @@ export function configureInertiaAssets(app: Application, options: InertiaAssetsO
   if (options.favicon !== false) {
     app.hono.get('/favicon.ico', () => new Response(null, { status: 204 }))
   }
+
+  if (isProduction && options.inertiaClient !== false) {
+    try {
+      let inertiaClientEntry: string | undefined
+
+      if (typeof (import.meta as any).resolve === 'function') {
+        try {
+          const resolved = (import.meta as any).resolve('@guren/inertia-client/app', import.meta.url)
+          inertiaClientEntry = fileURLToPath(new URL(resolved))
+        } catch {
+          inertiaClientEntry = undefined
+        }
+      }
+
+      if (!inertiaClientEntry) {
+        throw new Error('Unable to resolve @guren/inertia-client entry')
+      }
+
+      const inertiaClientDir = dirname(inertiaClientEntry)
+      const inertiaClientPath = options.inertiaClientPath ?? DEFAULT_VENDOR_CLIENT_PATH
+      const inertiaClientBase = inertiaClientPath.replace(/[^/]*$/u, '') || '/'
+      const inertiaClientPattern = `${inertiaClientBase.endsWith('/') ? inertiaClientBase : `${inertiaClientBase}/`}*`
+      const inertiaClientRequestPath = inertiaClientPath.slice(inertiaClientBase.length)
+
+      app.hono.get(inertiaClientPattern, async (ctx) => {
+        const relativeRequest = ctx.req.path.slice(inertiaClientBase.length) || inertiaClientRequestPath
+
+        let targetPath: string
+
+        if (relativeRequest === inertiaClientRequestPath) {
+          targetPath = join(inertiaClientDir, 'app.js')
+        } else {
+          targetPath = resolve(inertiaClientDir, relativeRequest)
+
+          if (!targetPath.startsWith(inertiaClientDir)) {
+            return ctx.notFound()
+          }
+        }
+
+        const file = Bun.file(targetPath)
+
+        if (!(await file.exists())) {
+          return ctx.notFound()
+        }
+
+        const contentType = file.type || 'application/javascript; charset=utf-8'
+
+        return new Response(file, {
+          headers: {
+            'Content-Type': contentType,
+            'Cache-Control': 'public, max-age=31536000',
+          },
+        })
+      })
+    } catch (error) {
+      console.warn('Unable to resolve @guren/inertia-client/app for production serving.', error)
+    }
+  }
+}
+
+export function autoConfigureInertiaAssets(app: Application, options: AutoConfigureInertiaOptions): void {
+  configureInertiaAssets(app, options)
+
+  const moduleDir = options.importMeta ? dirname(fileURLToPath(options.importMeta.url)) : undefined
+  const resourcesDir = resolveResourcesDir(options, moduleDir)
+  const ssrOutDir = options.ssrOutDir ?? '.guren/ssr'
+  const importMapEntries = parseImportMap(process.env.GUREN_INERTIA_IMPORT_MAP)
+  const ssrEnabled = options.enableSsr ?? true
+
+  if (!moduleDir) {
+    return
+  }
+
+  const isProduction =
+    (process.env.NODE_ENV ?? 'development') === 'production' && typeof process.env.VITE_DEV_SERVER_URL !== 'string'
+
+  if (!isProduction) {
+    const devServerUrl = options.devServerUrl ?? process.env.VITE_DEV_SERVER_URL ?? 'http://localhost:5173'
+    process.env.GUREN_INERTIA_ENTRY = `${devServerUrl}/resources/js/dev-entry.ts`
+    process.env.GUREN_INERTIA_STYLES = ''
+    importMapEntries['@guren/inertia-client'] = DEFAULT_VENDOR_CLIENT_PATH
+
+    if (ssrEnabled) {
+      const ssrEntryPath = options.ssrEntry ?? (resourcesDir ? resolve(resourcesDir, 'js/ssr.tsx') : undefined)
+
+      if (ssrEntryPath) {
+        process.env.GUREN_INERTIA_SSR_ENTRY = ssrEntryPath
+      }
+
+      process.env.GUREN_INERTIA_SSR_MANIFEST = ''
+    } else {
+      process.env.GUREN_INERTIA_SSR_ENTRY = ''
+      process.env.GUREN_INERTIA_SSR_MANIFEST = ''
+    }
+
+    process.env.GUREN_INERTIA_IMPORT_MAP = JSON.stringify(importMapEntries)
+    return
+  }
+
+  const clientManifest = loadViteManifest(
+    [
+      resolve(moduleDir, '../public/assets/manifest.json'),
+      resolve(moduleDir, '../public/assets/.vite/manifest.json'),
+    ],
+    'client',
+  )
+
+  const clientEntry = clientManifest?.['resources/js/app.tsx']
+  const clientEntryFile = getManifestFile(clientEntry)
+  const clientCssFiles = getManifestCss(clientEntry)
+
+  if (clientEntryFile) {
+    process.env.GUREN_INERTIA_ENTRY = `/public/assets/${clientEntryFile.replace(/^\//u, '')}`
+  }
+
+  if (clientCssFiles?.length) {
+    process.env.GUREN_INERTIA_STYLES = clientCssFiles.map((href) => `/public/assets/${href.replace(/^\//u, '')}`).join(',')
+  }
+
+  importMapEntries['@guren/inertia-client'] = DEFAULT_VENDOR_CLIENT_PATH
+
+  if (!ssrEnabled) {
+    if (Object.keys(importMapEntries).length > 0) {
+      process.env.GUREN_INERTIA_IMPORT_MAP = JSON.stringify(importMapEntries)
+    }
+
+    process.env.GUREN_INERTIA_SSR_ENTRY = ''
+    process.env.GUREN_INERTIA_SSR_MANIFEST = ''
+    return
+  }
+
+  const ssrManifestPaths = [
+    options.ssrManifest,
+    resolve(moduleDir, `../${ssrOutDir}/manifest.json`),
+    resolve(moduleDir, `../${ssrOutDir}/.vite/manifest.json`),
+    resolve(moduleDir, `../${ssrOutDir}/ssr-manifest.json`),
+    resolve(moduleDir, '../build/ssr/manifest.json'),
+    resolve(moduleDir, '../build/ssr/.vite/manifest.json'),
+    resolve(moduleDir, '../build/ssr/ssr-manifest.json'),
+    resolve(moduleDir, '../public/assets/.ssr/manifest.json'),
+    resolve(moduleDir, '../public/assets/.ssr/.vite/manifest.json'),
+    resolve(moduleDir, '../public/assets/.ssr/ssr-manifest.json'),
+    resolve(moduleDir, '../public/assets/.vite/ssr-manifest.json'),
+  ].filter((value): value is string => Boolean(value))
+
+  const ssrManifest = loadViteManifest(ssrManifestPaths, 'SSR')
+
+  const ssrEntry = ssrManifest?.['resources/js/ssr.tsx']
+  const ssrEntryFile = getManifestFile(ssrEntry)
+  const ssrEntryRoot = deriveAssetRoot(ssrManifest, resolve(moduleDir, `../${ssrOutDir}`))
+
+  if (ssrEntryFile && ssrEntryRoot) {
+    process.env.GUREN_INERTIA_SSR_ENTRY = resolve(ssrEntryRoot, ssrEntryFile.replace(/^\//u, ''))
+  }
+
+  if (Object.keys(importMapEntries).length > 0) {
+    process.env.GUREN_INERTIA_IMPORT_MAP = JSON.stringify(importMapEntries)
+  }
+
+  if (ssrManifest?.__path__) {
+    process.env.GUREN_INERTIA_SSR_MANIFEST = ssrManifest.__path__
+  }
 }
 
 function resolveDevSsrEntry(options: InertiaAssetsOptions): string | undefined {
@@ -95,4 +268,122 @@ function resolveDevSsrEntry(options: InertiaAssetsOptions): string | undefined {
   const resourcesDir = resolve(moduleDir, resourcesPath)
 
   return resolve(resourcesDir, 'js/ssr.tsx')
+}
+
+type ViteManifestEntryObject = {
+  file: string
+  css?: string[]
+  assets?: string[]
+  imports?: string[]
+  dynamicImports?: string[]
+}
+
+type ViteManifestValue = ViteManifestEntryObject | string[]
+
+type ViteManifest = Record<string, ViteManifestValue> & { __path__?: string }
+
+function loadViteManifest(candidatePaths: string[], label: 'client' | 'SSR'): ViteManifest | undefined {
+  const command = label === 'SSR' ? 'bunx vite build --ssr' : 'bunx vite build'
+
+  for (const manifestPath of candidatePaths) {
+    try {
+      const raw = readFileSync(manifestPath, 'utf8')
+      const manifest = JSON.parse(raw) as ViteManifest
+      Object.defineProperty(manifest, '__path__', {
+        value: manifestPath,
+        enumerable: false,
+      })
+      return manifest
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        console.warn(`Unable to load ${label} Vite manifest at ${manifestPath}.`, error)
+        return undefined
+      }
+    }
+  }
+
+  if (candidatePaths.length) {
+    console.warn(
+      `Unable to load ${label} Vite manifest. Checked paths:\n${candidatePaths
+        .map((p) => `  - ${p}`)
+        .join('\n')}\nRun \`${command}\` before starting in production.`,
+    )
+  }
+
+  return undefined
+}
+
+function deriveAssetRoot(manifest: ViteManifest | undefined, fallback: string): string | undefined {
+  if (!manifest?.__path__) {
+    return fallback
+  }
+
+  return resolve(dirname(manifest.__path__), '..')
+}
+
+function getManifestFile(
+  entry: ViteManifestValue | string | undefined,
+): string | undefined {
+  if (!entry) {
+    return undefined
+  }
+
+  if (Array.isArray(entry)) {
+    return entry[0]
+  }
+
+  if (typeof entry === 'string') {
+    return entry
+  }
+
+  if ('file' in entry && typeof entry.file === 'string') {
+    return entry.file
+  }
+
+  return undefined
+}
+
+function getManifestCss(
+  entry: ViteManifestValue | string | undefined,
+): string[] | undefined {
+  if (!entry || Array.isArray(entry) || typeof entry === 'string') {
+    return undefined
+  }
+
+  return entry.css
+}
+
+function resolveResourcesDir(options: InertiaAssetsOptions, moduleDir?: string): string | undefined {
+  if (options.resourcesDir) {
+    return options.resourcesDir
+  }
+
+  if (!moduleDir) {
+    return undefined
+  }
+
+  const resourcesPath = options.resourcesPath ?? '../resources'
+  return resolve(moduleDir, resourcesPath)
+}
+
+function parseImportMap(value: string | undefined): Record<string, string> {
+  if (!value) {
+    return {}
+  }
+
+  try {
+    const parsed = JSON.parse(value) as Record<string, string | null | undefined>
+    const result: Record<string, string> = {}
+
+    for (const [key, entry] of Object.entries(parsed)) {
+      if (typeof entry === 'string' && entry.length > 0) {
+        result[key] = entry
+      }
+    }
+
+    return result
+  } catch (error) {
+    console.warn('Failed to parse GUREN_INERTIA_IMPORT_MAP from environment. Expected JSON object.', error)
+    return {}
+  }
 }

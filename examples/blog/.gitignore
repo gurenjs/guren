@@ -2,3 +2,4 @@
 public/assets/
 .env
 node_modules/
+.guren

@@ -93,18 +93,19 @@ Handle validation errors by returning them from the controller and reading `form
 The scaffold ships with Tailwind CSS preconfigured. Edit `resources/css/app.css` or add custom CSS frameworks as needed. If you introduce additional assets (images, fonts), place them under `public/`.
 
 ## Server-Side Rendering
-Each application ships with a default `resources/js/ssr.tsx` entry that calls `renderInertiaServer()` from `@guren/inertia-client`. During development Bun directly imports this file, while production builds rely on the Vite-generated SSR bundle and manifest. The server automatically attempts SSR when the following environment variables are set:
+Each application ships with a default `resources/js/ssr.tsx` entry that calls `renderInertiaServer()` from `@guren/inertia-client`. When you bootstrap the app with `autoConfigureInertiaAssets(app, { importMeta })`, Guren will:
 
-- `GUREN_INERTIA_SSR_ENTRY`: Absolute path (or module specifier) to the compiled SSR entry.
-- `GUREN_INERTIA_SSR_MANIFEST`: Optional path to the SSR manifest emitted by Vite.
+- Point HTML responses at the Vite dev server during development (using `VITE_DEV_SERVER_URL` when available).
+- Detect the built client manifest (`public/assets/.vite/manifest.json`) and automatically seed `GUREN_INERTIA_ENTRY`/`GUREN_INERTIA_STYLES` in production.
+- Locate the SSR manifest (`public/assets/.vite/ssr-manifest.json`) and set `GUREN_INERTIA_SSR_ENTRY` / `GUREN_INERTIA_SSR_MANIFEST` so Inertia can render on the server.
 
-The blog example configures these variables in `src/main.ts` for both dev and production. To produce the required assets run both client and SSR builds:
+To produce the required assets run both client and SSR builds:
 
 ```bash
 bunx vite build && bunx vite build --ssr
 ```
 
-You can override the default resolver—useful for custom component lookups—by editing `resources/js/ssr.tsx` and passing a different `resolve` function to `renderInertiaServer()`.
+You can override the default resolver—useful for custom component lookups—by editing `resources/js/ssr.tsx` and passing a different `resolve` function to `renderInertiaServer()`. If you opt out of the helper, you can still set the environment variables manually before calling `configureInertiaAssets`.
 
 ## Type Safety
 - Share types between backend and frontend by re-exporting the Drizzle-inferred types from models (e.g. `export type PostRecord = typeof posts.$inferSelect`).

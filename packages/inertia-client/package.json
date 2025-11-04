@@ -20,15 +20,24 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
     "./app": {
       "types": "./dist/app.d.ts",
+      "import": "./dist/app.js",
       "default": "./dist/app.js"
     },
     "./server": {
       "types": "./dist/server.d.ts",
+      "import": "./dist/server.js",
       "default": "./dist/server.js"
+    },
+    "./dist/*": {
+      "default": "./dist/*"
+    },
+    "./package.json": {
+      "default": "./package.json"
     }
   },
   "files": [

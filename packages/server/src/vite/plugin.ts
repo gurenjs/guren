@@ -15,7 +15,7 @@ export interface GurenVitePluginOptions {
   ssrEntry?: string
   /** Output directory for compiled assets (defaults to `public/assets`). */
   outDir?: string
-  /** Output directory for SSR bundles (defaults to `bootstrap/ssr`). */
+  /** Output directory for SSR bundles (defaults to `.guren/ssr`). */
   ssrOutDir?: string
   /** Default dev server port (defaults to 5173). */
   devPort?: number
@@ -37,7 +37,7 @@ const defaultOptions: Required<GurenVitePluginOptions> = {
   entry: 'resources/js/app.tsx',
   ssrEntry: 'resources/js/ssr.tsx',
   outDir: 'public/assets',
-  ssrOutDir: 'bootstrap/ssr',
+  ssrOutDir: '.guren/ssr',
   devPort: 5173,
   previewPort: 4173,
   entryFileNames: '[name]-[hash].js',
@@ -109,7 +109,8 @@ function ensureBuild(
   env: Record<string, any>,
 ) {
   config.build ??= {}
-  const isSsrBuild = Boolean(env?.ssrBuild)
+  const isSsrBuild = Boolean(env?.ssrBuild ?? env?.isSsrBuild)
+  const isServeCommand = env?.command === 'serve'
 
   if (config.build.emptyOutDir === undefined) {
     config.build.emptyOutDir = true
@@ -127,6 +128,9 @@ function ensureBuild(
     if (config.build.ssr === undefined) {
       config.build.ssr = path.resolve(root, options.ssrEntry)
     }
+
+    config.build.rollupOptions ??= {}
+    config.build.rollupOptions.input = path.resolve(root, options.ssrEntry)
   } else {
     if (config.build.outDir === undefined) {
       config.build.outDir = options.outDir
@@ -138,6 +142,14 @@ function ensureBuild(
 
     if (config.build.ssrManifest === undefined) {
       config.build.ssrManifest = true
+    }
+
+    if (!isServeCommand && config.base === undefined) {
+      const derivedBase = deriveHttpBaseFromOutDir(options.outDir)
+
+      if (derivedBase) {
+        config.base = derivedBase
+      }
     }
   }
 
@@ -162,6 +174,22 @@ function ensureBuild(
   }
 
   config.build.rollupOptions.output = output
+}
+
+function deriveHttpBaseFromOutDir(outDir: string): string | undefined {
+  const normalized = outDir.replace(/\\/gu, '/').replace(/^\.\//u, '')
+
+  if (normalized === 'public') {
+    return '/public/'
+  }
+
+  if (normalized.startsWith('public/')) {
+    const remainder = normalized.slice('public/'.length)
+    const suffix = remainder.length > 0 ? `${remainder.replace(/\/$/u, '')}/` : ''
+    return `/public/${suffix}`
+  }
+
+  return undefined
 }
 
 function resolveRoot(root: string | undefined): string {

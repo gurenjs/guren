@@ -47,8 +47,8 @@ const DEFAULT_IMPORT_MAP: Record<string, string> = {
   'react/jsx-runtime': 'https://esm.sh/react@19.0.0/jsx-runtime?dev',
   'react/jsx-dev-runtime': 'https://esm.sh/react@19.0.0/jsx-dev-runtime?dev',
   'react-dom/client': 'https://esm.sh/react-dom@19.0.0/client?dev',
-  '@inertiajs/react': 'https://esm.sh/@inertiajs/react@2.2.15?dev&external=react,react-dom/client',
   '@guren/inertia-client': '/vendor/inertia-client.tsx',
+  '@inertiajs/react': 'https://esm.sh/@inertiajs/react@2.2.15?dev&external=react,react-dom/client',
 }
 
 export async function inertia(
@@ -99,10 +99,12 @@ async function renderDocument(page: InertiaPagePayload, options: InertiaOptions)
   const entry = options.entry ?? defaultEntry
   const title = escapeHtml(options.title ?? DEFAULT_TITLE)
   const styles = options.styles ?? parseStylesEnv(process.env.GUREN_INERTIA_STYLES)
+  const envImportMap = parseImportMap(process.env.GUREN_INERTIA_IMPORT_MAP)
   const importMap = JSON.stringify(
     {
       imports: {
         ...DEFAULT_IMPORT_MAP,
+        ...envImportMap,
         ...(options.importMap ?? {}),
       },
     },
@@ -112,7 +114,7 @@ async function renderDocument(page: InertiaPagePayload, options: InertiaOptions)
   const serializedPage = serializePage(page)
   const stylesheetLinks = renderStyles(styles)
   const ssrResult = await tryRenderSsr(page, options)
-  const headElements = ssrResult?.head ?? []
+  const headElements = (ssrResult?.head ?? []).map(normalizeHeadElement)
   const hasCustomTitle = headElements.some((element) => /<title\b[^>]*>/iu.test(element))
   const headSegments = [
     '<meta charset="utf-8" />',
@@ -246,6 +248,35 @@ function renderStyles(styles: string[]): string {
   return styles
     .map((href) => `<link rel="stylesheet" href="${escapeAttribute(href)}" />`)
     .join('\n    ')
+}
+
+function parseImportMap(value: string | undefined): Record<string, string> {
+  if (!value) {
+    return {}
+  }
+
+  try {
+    const parsed = JSON.parse(value) as Record<string, string | null | undefined>
+    const result: Record<string, string> = {}
+
+    for (const [key, entry] of Object.entries(parsed)) {
+      if (typeof entry === 'string' && entry.length > 0) {
+        result[key] = entry
+      }
+    }
+
+    return result
+  } catch (error) {
+    console.warn('Failed to parse GUREN_INERTIA_IMPORT_MAP. Expected JSON object.', error)
+    return {}
+  }
+}
+
+function normalizeHeadElement(element: unknown): string {
+  const markup = typeof element === 'string' ? element : String(element ?? '')
+  const pattern = new RegExp('href="/(?!public/)([^"?]+\.(?:js|css))(\?[^"\']*)?"', 'g')
+
+  return markup.replace(pattern, (_match, file, query = '') => `href="/public/assets/${file}${query}"`)
 }
 
 function serializePage(page: InertiaPagePayload): string {
