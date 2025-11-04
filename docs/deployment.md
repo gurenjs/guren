@@ -36,7 +36,7 @@ This installs only the dependencies required at runtime. If your environment bui
 NODE_ENV=production bun run build
 ```
 
-The scaffolded build script bundles `resources/js/app.tsx` into `public/assets/`, ready to serve to browsers.
+The scaffolded build script runs both `bunx vite build` and `bunx vite build --ssr`, producing the client manifest at `public/assets/.vite/manifest.json` and the SSR manifest at `public/assets/.vite/ssr-manifest.json`. At runtime `src/main.ts` calls `autoConfigureInertiaAssets`, which reads those files and wires the `GUREN_INERTIA_*` environment variables automatically.
 
 ## 4. Run Database Migrations (and Seeders)
 
@@ -97,6 +97,8 @@ Build and run:
 docker build -t my-app .
 docker run --env-file .env.prod -p 3333:3333 my-app
 ```
+
+The container image bakes in both the client and SSR bundles so the server can stream pre-rendered HTML immediately.
 
 Mount your configuration or secrets as needed for your hosting environment.
 

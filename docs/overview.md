@@ -9,7 +9,7 @@ Guren is a Bun-native TypeScript MVC framework that unites Laravel-like ergonomi
 - **All-in-one scaffold**: `create-guren-app` generates backend, frontend, and database wiring so you can start coding immediately.
 
 ## Quick Start
-1. Scaffold a project: `bunx create-guren-app my-app`
+1. Scaffold a project (choose SSR or SPA when prompted, or force with `--mode ssr|spa`): `bunx create-guren-app my-app`
 2. Change into the directory: `cd my-app`
 3. Install dependencies: `bun install`
 4. Start the dev server: `bun run dev` and visit `http://localhost:3333`

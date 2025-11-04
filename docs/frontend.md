@@ -105,7 +105,7 @@ To produce the required assets run both client and SSR builds:
 bunx vite build && bunx vite build --ssr
 ```
 
-You can override the default resolver—useful for custom component lookups—by editing `resources/js/ssr.tsx` and passing a different `resolve` function to `renderInertiaServer()`. If you opt out of the helper, you can still set the environment variables manually before calling `configureInertiaAssets`.
+You can override the default resolver—useful for custom component lookups—by editing `resources/js/ssr.tsx` and passing a different `resolve` function to `renderInertiaServer()`. If you opt out of `autoConfigureInertiaAssets`, make sure you populate the required environment variables before calling `configureInertiaAssets` yourself.
 
 ## Type Safety
 - Share types between backend and frontend by re-exporting the Drizzle-inferred types from models (e.g. `export type PostRecord = typeof posts.$inferSelect`).
