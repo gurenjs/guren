@@ -17,6 +17,7 @@ declare namespace Guren {
     | `/posts/${string}`
     | `/posts/${string}/edit`
     | '/posts/new'
+    | '/profile'
 
   export type RouteUrl = RoutePath | `${RoutePath}?${string}`
 

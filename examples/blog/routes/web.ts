@@ -2,6 +2,7 @@ import { Route, requireAuthenticated, requireGuest } from '@guren/server'
 import PostController from '../app/Http/Controllers/PostController.js'
 import LoginController from '../app/Http/Controllers/Auth/LoginController.js'
 import DashboardController from '../app/Http/Controllers/DashboardController.js'
+import ProfileController from '../app/Http/Controllers/ProfileController.js'
 
 Route.get('/', [PostController, 'index'])
 
@@ -20,3 +21,6 @@ Route.group('/posts', () => {
 })
 
 Route.get('/dashboard', [DashboardController, 'index'], requireAuthenticated({ redirectTo: '/login' }))
+Route.get('/profile', [ProfileController, 'edit'], requireAuthenticated({ redirectTo: '/login' }))
+Route.put('/profile', [ProfileController, 'update'], requireAuthenticated({ redirectTo: '/login' }))
+Route.patch('/profile', [ProfileController, 'update'], requireAuthenticated({ redirectTo: '/login' }))

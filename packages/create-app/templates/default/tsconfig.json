@@ -14,12 +14,17 @@
         "./app/*"
       ]
     },
+    "types": [
+      "bun-types",
+      "vite/client"
+    ],
     "jsx": "react-jsx"
   },
   "include": [
     "src",
     "app",
     "routes",
-    "resources/js"
+    "resources/js",
+    "types"
   ]
 }

@@ -1,3 +1,4 @@
+import { Link } from '@inertiajs/react'
 import Layout from '../../components/Layout.js'
 
 interface DashboardProps {
@@ -21,6 +22,14 @@ export default function Dashboard({ user }: DashboardProps) {
           <div className="rounded-lg border border-[#F4B0B0] bg-white/80 p-6 shadow-lg shadow-[#B71C1C]/20 backdrop-blur">
             <h2 className="text-xl font-medium text-[#8F1111]">Signed in as {user.name}</h2>
             <p className="mt-2 text-sm text-[#A65555]">Email: {user.email}</p>
+            <div className="mt-6">
+              <Link
+                href="/profile"
+                className="inline-flex items-center rounded-lg bg-[#B71C1C] px-4 py-2 text-sm font-semibold text-white shadow shadow-[#B71C1C]/30 transition hover:bg-[#8F1111]"
+              >
+                Edit profile
+              </Link>
+            </div>
           </div>
         ) : (
           <div className="rounded border border-[#B71C1C]/40 bg-[#B71C1C]/10 px-4 py-3 text-sm text-[#7A0F0F]">

@@ -1,8 +1,43 @@
-import { Link } from '@inertiajs/react'
+import { Link, router, usePage } from '@inertiajs/react'
 import type { PostsIndexPageProps } from '@/Http/Controllers/PostController'
 import Layout from '../../components/Layout.js'
+import { FolderPlus, MoveRight, Newspaper, Plus } from 'lucide-react'
 
-export default function Index({ posts }: PostsIndexPageProps) {
+export default function Index({ posts, pagination }: PostsIndexPageProps) {
+  const { url } = usePage()
+  const currentPath = pagination.basePath || (url.split('?')[0] || '/')
+  const pages = Array.from({ length: pagination.totalPages }, (_, index) => index + 1)
+  const canGoPrevious = pagination.currentPage > 1
+  const canGoNext = pagination.currentPage < pagination.totalPages
+
+  const visitPage = (pageNumber: number) => {
+    const safePage = Math.max(1, Math.min(pageNumber, pagination.totalPages))
+
+    if (safePage === pagination.currentPage) {
+      return
+    }
+
+    const query = safePage > 1 ? `?page=${safePage}` : ''
+    router.visit(`${currentPath}${query}`, {
+      preserveScroll: true,
+      preserveState: true,
+    })
+  }
+
+  const goToPrevious = () => {
+    if (canGoPrevious) {
+      visitPage(pagination.currentPage - 1)
+    }
+  }
+
+  const goToNext = () => {
+    if (canGoNext) {
+      visitPage(pagination.currentPage + 1)
+    }
+  }
+
+  const showPagination = pagination.totalPages > 1
+
   return (
     <Layout
       wrapperClassName="relative bg-linear-to-br from-[#FFF0F0] via-[#FFE3E3] to-[#F5C5C5] text-[#3C0A0A]"
@@ -12,7 +47,8 @@ export default function Index({ posts }: PostsIndexPageProps) {
         {/* Header Section */}
         <section className="mx-auto flex w-full max-w-5xl flex-col gap-8 md:flex-row md:items-center md:justify-between">
           <div className="flex-1 space-y-4 text-center md:text-left">
-            <h1 className="text-4xl font-bold text-[#8F1111] md:text-5xl">
+            <h1 className="flex items-center justify-center gap-3 text-4xl font-bold text-[#8F1111] md:justify-start md:text-5xl">
+              <Newspaper className="h-10 w-10 text-[#B71C1C]" aria-hidden />
               Latest Posts
             </h1>
           </div>
@@ -20,11 +56,9 @@ export default function Index({ posts }: PostsIndexPageProps) {
           <div className="flex w-full flex-col items-center gap-4 md:w-auto md:items-end">
             <Link
               href="/posts/new"
-              className="inline-flex items-center rounded-full bg-linear-to-br from-[#B71C1C] to-[#8F1111] px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-[#B71C1C]/30 transition-all duration-200 hover:from-[#C92A2A] hover:to-[#7A0F0F] hover:shadow-xl"
+              className="inline-flex items-center gap-2 rounded-full bg-linear-to-br from-[#B71C1C] to-[#8F1111] px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-[#B71C1C]/30 transition-all duration-200 hover:from-[#C92A2A] hover:to-[#7A0F0F] hover:shadow-xl"
             >
-              <svg className="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
+              <Plus className="h-4 w-4" aria-hidden />
               Create new post
             </Link>
           </div>
@@ -35,20 +69,16 @@ export default function Index({ posts }: PostsIndexPageProps) {
           {posts.length === 0 ? (
             <div className="py-16 text-center">
               <div className="mx-auto mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-[#FDE1E1]">
-                <svg className="h-12 w-12 text-[#E35151]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
+                <FolderPlus className="h-12 w-12 text-[#E35151]" aria-hidden />
               </div>
               <h3 className="mb-2 text-xl font-semibold text-[#8F1111]">No posts yet</h3>
               <p className="text-[#6B1B1B]">Check back later for new content!</p>
               <div className="mt-8 flex justify-center">
                 <Link
                   href="/posts/new"
-                  className="inline-flex items-center rounded-xl bg-linear-to-br from-[#B71C1C] to-[#8F1111] px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-[#B71C1C]/30 transition-all duration-200 hover:from-[#C92A2A] hover:to-[#7A0F0F] hover:shadow-xl"
+                  className="inline-flex items-center gap-2 rounded-xl bg-linear-to-br from-[#B71C1C] to-[#8F1111] px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-[#B71C1C]/30 transition-all duration-200 hover:from-[#C92A2A] hover:to-[#7A0F0F] hover:shadow-xl"
                 >
-                  <svg className="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
+                  <Plus className="h-4 w-4" aria-hidden />
                   Create your first post
                 </Link>
               </div>
@@ -96,23 +126,21 @@ export default function Index({ posts }: PostsIndexPageProps) {
                       <div className="flex items-center space-x-3">
                         <div className="flex h-8 w-8 items-center justify-center rounded-full bg-linear-to-br from-[#FFC1C1] to-[#B71C1C] text-white">
                           <span className="text-sm font-semibold">
-                            {post.title.charAt(0).toUpperCase()}
+                            {(post.author?.name ?? post.title).charAt(0).toUpperCase()}
                           </span>
                         </div>
                         <div>
-                          <p className="text-sm font-medium text-[#8F1111]">Author</p>
-                          <p className="text-xs text-[#A65555]">5 min read</p>
+                          <p className="text-sm font-medium text-[#8F1111]">{post.author?.name ?? 'Unknown author'}</p>
+                          <p className="text-xs text-[#A65555]">{post.author ? `@${post.author.name.toLowerCase().replace(/\s+/g, '')}` : 'Guest post'}</p>
                         </div>
                       </div>
 
                       <Link
                         href={`/posts/${post.id}`}
-                        className="inline-flex items-center rounded-lg bg-[#FFE3E3] px-3 py-1.5 text-sm font-medium text-[#B71C1C] transition-colors duration-200 hover:bg-[#F5C5C5] group-hover:scale-105 group-hover:transform"
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-[#FFE3E3] px-3 py-1.5 text-sm font-medium text-[#B71C1C] transition-colors duration-200 hover:bg-[#F5C5C5] group-hover:scale-105 group-hover:transform"
                       >
                         Read more
-                        <svg className="ml-1 h-4 w-4 transition-transform duration-200 group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                        </svg>
+                        <MoveRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-1" aria-hidden />
                       </Link>
                     </div>
                   </div>
@@ -125,15 +153,44 @@ export default function Index({ posts }: PostsIndexPageProps) {
           )}
         </section>
 
-        {/* Load More Section */}
-        {posts.length > 0 && (
-          <div className="text-center">
-            <button className="inline-flex items-center rounded-xl bg-linear-to-br from-[#B71C1C] to-[#8F1111] px-6 py-3 text-base font-medium text-white shadow-lg shadow-[#B71C1C]/30 transition-all duration-200 hover:from-[#C92A2A] hover:to-[#7A0F0F] hover:scale-105 hover:shadow-xl">
-              Load More Posts
-              <svg className="ml-2 h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-              </svg>
-            </button>
+        {/* Pagination */}
+        {showPagination && (
+          <div className="flex flex-col items-center gap-4 text-center">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={goToPrevious}
+                disabled={!canGoPrevious}
+                className="inline-flex items-center rounded-lg bg-[#FFE3E3] px-3 py-2 text-sm font-medium text-[#8F1111] transition-colors duration-200 enabled:hover:bg-[#F5C5C5] disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Previous
+              </button>
+              <div className="hidden text-sm text-[#6B1B1B] sm:block">Page {pagination.currentPage} of {pagination.totalPages}</div>
+              <button
+                type="button"
+                onClick={goToNext}
+                disabled={!canGoNext}
+                className="inline-flex items-center rounded-lg bg-[#FFE3E3] px-3 py-2 text-sm font-medium text-[#8F1111] transition-colors duration-200 enabled:hover:bg-[#F5C5C5] disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Next
+              </button>
+            </div>
+            <div className="flex flex-wrap justify-center gap-2">
+              {pages.map((pageNumber) => (
+                <button
+                  key={pageNumber}
+                  type="button"
+                  onClick={() => visitPage(pageNumber)}
+                  className={`inline-flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold transition-all duration-200 ${pageNumber === pagination.currentPage
+                      ? 'bg-linear-to-br from-[#B71C1C] to-[#8F1111] text-white shadow-lg shadow-[#B71C1C]/30'
+                      : 'bg-white text-[#B71C1C] shadow border border-[#F4B0B0] hover:bg-[#FFE3E3]'
+                    }`}
+                  aria-current={pageNumber === pagination.currentPage ? 'page' : undefined}
+                >
+                  {pageNumber}
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>

@@ -1,18 +1,48 @@
 import { Context, parseRequestPayload, formatValidationErrors } from '@guren/server'
 import Controller from './Controller.js'
-import type { InferInertiaProps } from '@guren/server'
-import { Post } from '../../Models/Post.js'
-import { PostPayloadSchema, PostFormSchema } from '../Validators/PostValidator.js'
+import type { ControllerInertiaProps } from '@guren/server'
+import { Post, type PostWithAuthor } from '../../Models/Post.js'
+import { PostPayloadSchema, PostFormSchema, PageQuerySchema, PostIdParamSchema } from '../Validators/PostValidator.js'
+import type { PaginationMeta } from '@guren/orm'
+import { z } from 'zod'
+
 
 export default class PostController extends Controller {
   async index(ctx: Context) {
-    const posts = await Post.all()
-    return this.inertiaWithAuth('posts/Index', { posts }, { url: ctx.req.path, title: 'Posts | Guren Blog' })
+    const postsPerPage = 6
+    const pageResult = PageQuerySchema.safeParse({ page: ctx.req.query('page') })
+
+    if (!pageResult.success) {
+      return this.json({ message: 'Invalid page parameter.' }, { status: 422 })
+    }
+
+    const { data: posts, meta } = await Post.withPaginate('author', {
+      page: pageResult.data.page,
+      perPage: postsPerPage,
+      orderBy: [['id', 'desc']],
+    })
+
+    const pagination: PostsPagination = {
+      ...meta,
+      basePath: ctx.req.path ?? '/',
+    }
+
+    return this.inertiaWithAuth(
+      'posts/Index',
+      { posts, pagination },
+      { url: ctx.req.url ?? ctx.req.path, title: 'Posts | Guren Blog' },
+    )
   }
 
   async show(ctx: Context): Promise<Response> {
-    const id = Number(ctx.req.param('id'))
-    const post = await Post.find(id)
+    const paramsResult = PostIdParamSchema.safeParse({ id: ctx.req.param('id') })
+
+    if (!paramsResult.success) {
+      return this.json({ message: 'Invalid post id.' }, { status: 400 })
+    }
+
+    const { id } = paramsResult.data
+    const [post] = await Post.with('author', { id })
 
     if (!post) {
       return this.json({ message: 'Post not found' }, { status: 404 })
@@ -34,8 +64,14 @@ export default class PostController extends Controller {
       return this.inertiaWithAuth('posts/New', { errors }, { status: 422 })
     }
 
+    const authUser = (await this.auth.user()) as { id?: number } | null
+
+    if (!authUser?.id) {
+      return this.inertiaWithAuth('posts/New', { errors: { message: 'You must be signed in to create posts.' } }, { status: 401 })
+    }
+
     try {
-      const post = await Post.create(result.data)
+      const post = await Post.create({ ...result.data, authorId: authUser.id })
       const redirectTo = post?.id ? `/posts/${post.id}` : '/posts'
       return this.redirect(redirectTo)
     } catch (error) {
@@ -45,7 +81,13 @@ export default class PostController extends Controller {
   }
 
   async edit(ctx: Context): Promise<Response> {
-    const id = Number(ctx.req.param('id'))
+    const paramsResult = PostIdParamSchema.safeParse({ id: ctx.req.param('id') })
+
+    if (!paramsResult.success) {
+      return this.inertiaWithAuth('posts/Edit', { errors: { message: 'Invalid post id.' }, post: null, postId: 0 }, { status: 400 })
+    }
+
+    const { id } = paramsResult.data
     const post = await Post.find(id)
 
     if (!post) {
@@ -61,11 +103,17 @@ export default class PostController extends Controller {
 
     const formPost = formPostResult.data
 
-      return this.inertiaWithAuth('posts/Edit', { post: formPost, postId: id }, { url: ctx.req.path, title: `Edit ${formPost.title} | Guren Blog` })
+    return this.inertiaWithAuth('posts/Edit', { post: formPost, postId: id }, { url: ctx.req.path, title: `Edit ${formPost.title} | Guren Blog` })
   }
 
   async update(ctx: Context): Promise<Response> {
-    const id = Number(ctx.req.param('id'))
+    const paramsResult = PostIdParamSchema.safeParse({ id: ctx.req.param('id') })
+
+    if (!paramsResult.success) {
+      return this.json({ message: 'Invalid post id.' }, { status: 400 })
+    }
+
+    const { id } = paramsResult.data
     const post = await Post.find(id)
 
     if (!post) {
@@ -85,25 +133,30 @@ export default class PostController extends Controller {
         return this.inertiaWithAuth('posts/Edit', { errors: { message: 'Failed to load post.' }, post: null, postId: id }, { status: 500 })
       }
 
-      return this.inertiaWithAuth('posts/Edit', { post: formPostResult.data, postId: id, errors }, { status: 422 })
+      const formPost = formPostResult.data
+      return this.inertiaWithAuth(
+        'posts/Edit',
+        { post: formPost, postId: id, errors },
+        { status: 422, url: ctx.req.path, title: `Edit ${formPost.title} | Guren Blog` },
+      )
     }
 
     try {
-      await Post.update({ id }, result.data)
+      await Post.update({ id }, { ...result.data, authorId: post.authorId })
       return this.redirect(`/posts/${id}`)
     } catch (error) {
       console.error('Failed to update post:', error)
-      const formPostResult = PostFormSchema.safeParse(post)
 
-      if (formPostResult.success) {
-        return this.inertiaWithAuth('posts/Edit', { post: formPostResult.data, postId: id, errors: { message: 'Failed to update post.' } }, { status: 500 })
-      }
-
-      return this.inertiaWithAuth('posts/Edit', { errors: { message: 'Failed to update post.' }, post: null, postId: id }, { status: 500 })
+      return this.inertiaWithAuth('posts/Edit', { errors: { message: 'Failed to update post.' }, post: result.data, postId: id }, { status: 500 })
     }
   }
 }
 
-type PostControllerInstance = InstanceType<typeof PostController>
+type InertiaPropsFor<Action extends keyof PostController> = ControllerInertiaProps<PostController, Action>
 
-export type PostsIndexPageProps = InferInertiaProps<Awaited<ReturnType<PostControllerInstance['index']>>>
+type AuthProps = InertiaPropsFor<'index'> extends { auth: infer T } ? T : { user: unknown }
+
+export type PostsPagination = PaginationMeta & { basePath: string }
+
+export type PostsIndexPageProps = { posts: PostWithAuthor[]; pagination: PostsPagination; auth: AuthProps }
+export type PostShowPageProps = { post: PostWithAuthor; auth: AuthProps }

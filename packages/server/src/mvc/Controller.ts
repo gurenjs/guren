@@ -21,6 +21,12 @@ export type InferInertiaProps<T> = [T] extends [InertiaResponse<string, infer Pr
     ? InferInertiaProps<Awaited>
     : DefaultInertiaProps
 
+export type ControllerInertiaProps<TController extends Controller, TAction extends keyof TController> = TController[TAction] extends (
+  ...args: any[]
+) => infer TResult
+  ? InferInertiaProps<Awaited<TResult>>
+  : DefaultInertiaProps
+
 export interface RedirectOptions {
   status?: number
   headers?: HeadersInit
@@ -100,7 +106,9 @@ export class Controller {
   }
 
   protected redirect(url: string, options: RedirectOptions = {}): Response {
-    const { status = 302, headers } = options
+    const requestMethod = this.request.method?.toUpperCase?.()
+    const defaultStatus = requestMethod && requestMethod !== 'GET' ? 303 : 302
+    const { status = defaultStatus, headers } = options
     return new Response(null, {
       status,
       headers: {

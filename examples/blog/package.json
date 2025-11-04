@@ -10,6 +10,7 @@
     "smoke": "bun run ./smoke.ts",
     "test": "vitest run",
     "build": "bunx vite build && bunx vite build --ssr",
+    "typecheck": "tsc --noEmit",
     "preview": "bunx vite preview",
     "db:make": "bunx guren make:migration",
     "db:migrate": "bunx guren db:migrate",
@@ -23,6 +24,7 @@
     "@guren/orm": "workspace:*",
     "@guren/server": "workspace:*",
     "@inertiajs/react": "^2.2.15",
+    "lucide-react": "^0.552.0",
     "drizzle-orm": "0.44.7",
     "postgres": "^3.4.3",
     "react": "^19.0.0",
@@ -30,7 +32,7 @@
     "zod": "^3.24.0"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.0.0",
+    "@tailwindcss/vite": "^4.1.16",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
     "@types/react": "^19.0.0",
@@ -38,7 +40,7 @@
     "concurrently": "^9.2.1",
     "drizzle-kit": "0.27.0",
     "jsdom": "^25.0.0",
-    "tailwindcss": "^4.0.0",
+    "tailwindcss": "^4.1.16",
     "vite": "^7.0.0",
     "@vitejs/plugin-react": "^5.0.0",
     "vitest": "^2.1.2"

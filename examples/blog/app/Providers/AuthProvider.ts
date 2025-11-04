@@ -1,5 +1,5 @@
 import type { ApplicationContext, Provider } from '@guren/core'
-import { ModelUserProvider, ScryptHasher } from '@guren/core'
+import { ModelUserProvider } from '@guren/core'
 import { User } from '../Models/User.js'
 
 export default class AuthProvider implements Provider {
@@ -9,7 +9,6 @@ export default class AuthProvider implements Provider {
       passwordColumn: 'passwordHash',
       rememberTokenColumn: 'rememberToken',
       credentialsPasswordField: 'password',
-      hasher: new ScryptHasher(),
     }))
   }
 

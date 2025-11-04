@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
+import { Hono } from 'hono'
 import { Controller, Route } from '../../src'
 
 class InlineController extends Controller {
@@ -43,15 +44,15 @@ describe('Route registry', () => {
     Route.get('/controller', [InlineController, 'index'])
 
     const registrations: Array<{ method: string; path: string; handler: (ctx: any) => Promise<Response> }> = []
+    const app = new Hono()
 
-    const fakeApp = {
-      on(method: string, path: string, ...handlers: Array<(ctx: any) => Promise<Response>>) {
-        const handler = handlers[handlers.length - 1]
-        registrations.push({ method, path, handler })
-      },
-    }
+    app.on = ((method: string, path: string, ...handlers: Array<(ctx: any) => Promise<Response>>) => {
+      const handler = handlers[handlers.length - 1]
+      registrations.push({ method, path, handler })
+      return app
+    }) as typeof app.on
 
-    Route.mount(fakeApp as unknown as { on: typeof fakeApp.on })
+    Route.mount(app)
 
     expect(registrations).toHaveLength(1)
     const { method, path, handler } = registrations[0]
@@ -69,14 +70,14 @@ describe('Route registry', () => {
     Route.get('/empty', () => null)
 
     const handlers: Record<string, (ctx: any) => Promise<Response>> = {}
+    const app = new Hono()
 
-    const fakeApp = {
-      on(method: string, path: string, ...rest: Array<(ctx: any) => Promise<Response>>) {
-        handlers[path] = rest[rest.length - 1]
-      },
-    }
+    app.on = ((method: string, path: string, ...rest: Array<(ctx: any) => Promise<Response>>) => {
+      handlers[path] = rest[rest.length - 1]
+      return app
+    }) as typeof app.on
 
-    Route.mount(fakeApp as unknown as { on: typeof fakeApp.on })
+    Route.mount(app)
 
     const jsonHandler = handlers['/object']
     const emptyHandler = handlers['/empty']
@@ -98,16 +99,16 @@ describe('Route registry', () => {
     Route.get('/missing', [InlineController, 'show' as never])
 
     let captured: ((ctx: any) => Promise<Response>) | undefined
+    const app = new Hono()
 
-    const fakeApp = {
-      on(method: string, path: string, ...rest: Array<(ctx: any) => Promise<Response>>) {
-        if (path === '/missing') {
-          captured = rest[rest.length - 1]
-        }
-      },
-    }
+    app.on = ((method: string, path: string, ...rest: Array<(ctx: any) => Promise<Response>>) => {
+      if (path === '/missing') {
+        captured = rest[rest.length - 1]
+      }
+      return app
+    }) as typeof app.on
 
-    Route.mount(fakeApp as unknown as { on: typeof fakeApp.on })
+    Route.mount(app)
 
     if (!captured) {
       throw new Error('Missing route handler was not captured')
