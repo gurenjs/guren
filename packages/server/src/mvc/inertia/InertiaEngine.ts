@@ -1,3 +1,6 @@
+import { isAbsolute, resolve as resolvePath } from 'node:path'
+import { pathToFileURL } from 'node:url'
+
 export interface InertiaOptions {
   readonly url?: string
   readonly version?: string
@@ -8,6 +11,7 @@ export interface InertiaOptions {
   readonly entry?: string
   readonly importMap?: Record<string, string>
   readonly styles?: string[]
+  readonly ssr?: InertiaSsrOptions
 }
 
 export interface InertiaPagePayload {
@@ -15,6 +19,26 @@ export interface InertiaPagePayload {
   props: Record<string, unknown>
   url: string
   version?: string
+}
+
+export interface InertiaSsrContext {
+  page: InertiaPagePayload
+  request?: Request
+  manifest?: string
+}
+
+export interface InertiaSsrResult {
+  head: string[]
+  body: string
+}
+
+export type InertiaSsrRenderer = (context: InertiaSsrContext) => Promise<InertiaSsrResult> | InertiaSsrResult
+
+export interface InertiaSsrOptions {
+  enabled?: boolean
+  entry?: string
+  manifest?: string
+  render?: InertiaSsrRenderer
 }
 
 const DEFAULT_TITLE = 'Guren'
@@ -27,7 +51,11 @@ const DEFAULT_IMPORT_MAP: Record<string, string> = {
   '@guren/inertia-client': '/vendor/inertia-client.tsx',
 }
 
-export function inertia(component: string, props: Record<string, unknown>, options: InertiaOptions = {}): Response {
+export async function inertia(
+  component: string,
+  props: Record<string, unknown>,
+  options: InertiaOptions = {},
+): Promise<Response> {
   const page: InertiaPagePayload = {
     component,
     props,
@@ -52,7 +80,7 @@ export function inertia(component: string, props: Record<string, unknown>, optio
     })
   }
 
-  const html = renderDocument(page, options)
+  const html = await renderDocument(page, options)
 
   return new Response(html, {
     status: options.status ?? 200,
@@ -66,7 +94,7 @@ export function inertia(component: string, props: Record<string, unknown>, optio
   })
 }
 
-function renderDocument(page: InertiaPagePayload, options: InertiaOptions): string {
+async function renderDocument(page: InertiaPagePayload, options: InertiaOptions): Promise<string> {
   const defaultEntry = process.env.GUREN_INERTIA_ENTRY ?? '/resources/js/app.tsx'
   const entry = options.entry ?? defaultEntry
   const title = escapeHtml(options.title ?? DEFAULT_TITLE)
@@ -83,22 +111,131 @@ function renderDocument(page: InertiaPagePayload, options: InertiaOptions): stri
   )
   const serializedPage = serializePage(page)
   const stylesheetLinks = renderStyles(styles)
+  const ssrResult = await tryRenderSsr(page, options)
+  const headElements = ssrResult?.head ?? []
+  const hasCustomTitle = headElements.some((element) => /<title\b[^>]*>/iu.test(element))
+  const headSegments = [
+    '<meta charset="utf-8" />',
+    '<meta name="viewport" content="width=device-width, initial-scale=1" />',
+    hasCustomTitle ? '' : `<title>${title}</title>`,
+    stylesheetLinks,
+    ...headElements,
+    `<script type="importmap">${importMap}</script>`,
+    `<script>window.__INERTIA_PAGE__ = ${serializedPage};</script>`,
+  ].filter((segment) => segment && segment.length > 0)
+  const appMarkup = ssrResult?.body ?? `<div id="app" data-page="${escapeAttribute(serializedPage)}"></div>`
 
   return `<!DOCTYPE html>
 <html lang="en">
   <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${title}</title>
-    ${stylesheetLinks}
-    <script type="importmap">${importMap}</script>
-    <script>window.__INERTIA_PAGE__ = ${serializedPage};</script>
+    ${headSegments.join('\n    ')}
   </head>
   <body>
-    <div id="app" data-page="${escapeAttribute(serializedPage)}"></div>
+    ${appMarkup}
     <script type="module" src="${entry}"></script>
   </body>
 </html>`
+}
+
+async function tryRenderSsr(page: InertiaPagePayload, options: InertiaOptions): Promise<InertiaSsrResult | undefined> {
+  const ssrOptions = options.ssr
+
+  if (ssrOptions?.enabled === false) {
+    return undefined
+  }
+
+  const manifest = (ssrOptions?.manifest ?? process.env.GUREN_INERTIA_SSR_MANIFEST)?.trim() || undefined
+
+  const renderer = ssrOptions?.render ?? (await loadSsrRenderer(ssrOptions?.entry ?? process.env.GUREN_INERTIA_SSR_ENTRY))
+
+  if (!renderer) {
+    return undefined
+  }
+
+  try {
+    const result = await renderer({
+      page,
+      request: options.request,
+      manifest,
+    })
+
+    if (!result || typeof result.body !== 'string') {
+      return undefined
+    }
+
+    return {
+      body: result.body,
+      head: Array.isArray(result.head) ? result.head : [],
+    }
+  } catch (error) {
+    console.error('Inertia SSR renderer failed; falling back to client rendering.', error)
+    return undefined
+  }
+}
+
+async function loadSsrRenderer(entry: string | undefined): Promise<InertiaSsrRenderer | undefined> {
+  const specifier = entry?.trim()
+
+  if (!specifier) {
+    return undefined
+  }
+
+  const normalized = normalizeSsrSpecifier(specifier)
+
+  try {
+    const module = await import(normalized)
+    const renderCandidate = extractSsrRenderer(module)
+
+    if (!renderCandidate) {
+      console.warn(`Inertia SSR entry "${specifier}" does not export a renderer. Expected a default export or a named "render" function.`)
+      return undefined
+    }
+
+    return renderCandidate
+  } catch (error) {
+    console.error(`Failed to import Inertia SSR entry "${specifier}".`, error)
+    return undefined
+  }
+}
+
+function extractSsrRenderer(module: unknown): InertiaSsrRenderer | undefined {
+  if (!module || typeof module !== 'object') {
+    return undefined
+  }
+
+  const candidate =
+    typeof (module as Record<string, unknown>).render === 'function'
+      ? (module as Record<string, InertiaSsrRenderer>).render
+      : typeof (module as Record<string, unknown>).default === 'function'
+        ? (module as Record<string, InertiaSsrRenderer>).default
+        : undefined
+
+  if (!candidate) {
+    return undefined
+  }
+
+  return (context) => Promise.resolve(candidate(context))
+}
+
+function normalizeSsrSpecifier(specifier: string): string {
+  if (specifier.startsWith('file://') || isUrlLike(specifier)) {
+    return specifier
+  }
+
+  if (specifier.startsWith('./') || specifier.startsWith('../')) {
+    const absolute = resolvePath(process.cwd(), specifier)
+    return pathToFileURL(absolute).href
+  }
+
+  if (isAbsolute(specifier)) {
+    return pathToFileURL(specifier).href
+  }
+
+  return specifier
+}
+
+function isUrlLike(specifier: string): boolean {
+  return /^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(specifier)
 }
 
 function renderStyles(styles: string[]): string {

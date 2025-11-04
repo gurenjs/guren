@@ -61,20 +61,22 @@ export class Controller {
     return auth
   }
 
-  protected inertia<Component extends string, Props extends DefaultInertiaProps>(
+  protected async inertia<Component extends string, Props extends DefaultInertiaProps>(
     component: Component,
     props: Props,
     options: InertiaResponseOptions = {},
-  ): InertiaResponse<Component, Props> {
+  ): Promise<InertiaResponse<Component, Props>> {
     const ctx = this.ctx
     const { url: overrideUrl, ...rest } = options
     const url = overrideUrl ?? ctx.req.path ?? ctx.req.url ?? ''
 
-    return inertia(component, props as Record<string, unknown>, {
+    const response = await inertia(component, props as Record<string, unknown>, {
       ...rest,
       url,
       request: ctx.req.raw,
-    }) as InertiaResponse<Component, Props>
+    })
+
+    return response as InertiaResponse<Component, Props>
   }
 
   protected json<T>(data: T, init: ResponseInit = {}): Response {

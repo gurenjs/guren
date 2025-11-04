@@ -9,7 +9,14 @@ export { Route } from './mvc/Route'
 export type { RouteDefinition } from './mvc/Route'
 export { ViewEngine } from './mvc/ViewEngine'
 export { inertia } from './mvc/inertia/InertiaEngine'
-export type { InertiaOptions, InertiaPagePayload } from './mvc/inertia/InertiaEngine'
+export type {
+  InertiaOptions,
+  InertiaPagePayload,
+  InertiaSsrContext,
+  InertiaSsrOptions,
+  InertiaSsrRenderer,
+  InertiaSsrResult,
+} from './mvc/inertia/InertiaEngine'
 export type { Provider, ProviderConstructor } from './plugins/Provider'
 export { ApplicationContext } from './plugins/ApplicationContext'
 export { InertiaViewProvider } from './plugins/providers/InertiaViewProvider'

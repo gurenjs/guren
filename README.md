@@ -54,6 +54,17 @@ To stop the database container, run `bun run db:down`. Logs are available via `b
 - `bun run dev` – start the demo application in development mode
 - `bun run db:migrate` / `bun run db:seed` – execute migrations or seeders for the demo application
 
+### Production Builds
+
+When preparing the blog example (or any Guren app) for production, build both the client and SSR bundles so the server can stream pre-rendered HTML:
+
+```bash
+cd examples/blog
+bunx vite build && bunx vite build --ssr
+```
+
+`src/main.ts` reads the generated manifest files to populate `GUREN_INERTIA_ENTRY`, `GUREN_INERTIA_STYLES`, and `GUREN_INERTIA_SSR_ENTRY`, enabling Inertia's server-side rendering path by default.
+
 ## Project Structure
 
 - `packages/core/` – framework runtime, routing, controllers, middleware

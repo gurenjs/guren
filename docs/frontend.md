@@ -4,6 +4,7 @@ Guren delivers a single-page application experience by combining Inertia.js with
 
 ## Project Structure
 - `resources/js/app.tsx`: Bootstraps the Inertia app and registers global providers.
+- `resources/js/ssr.tsx`: Exports the server-side renderer consumed by the backend when SSR is enabled.
 - `resources/js/pages/`: React components that map to controller responses.
 - `resources/js/components/`: Shared UI components (optional but recommended).
 - `resources/css/app.css`: Tailwind (or your chosen CSS) entry point.
@@ -90,6 +91,20 @@ Handle validation errors by returning them from the controller and reading `form
 
 ## Assets and Styling
 The scaffold ships with Tailwind CSS preconfigured. Edit `resources/css/app.css` or add custom CSS frameworks as needed. If you introduce additional assets (images, fonts), place them under `public/`.
+
+## Server-Side Rendering
+Each application ships with a default `resources/js/ssr.tsx` entry that calls `renderInertiaServer()` from `@guren/inertia-client`. During development Bun directly imports this file, while production builds rely on the Vite-generated SSR bundle and manifest. The server automatically attempts SSR when the following environment variables are set:
+
+- `GUREN_INERTIA_SSR_ENTRY`: Absolute path (or module specifier) to the compiled SSR entry.
+- `GUREN_INERTIA_SSR_MANIFEST`: Optional path to the SSR manifest emitted by Vite.
+
+The blog example configures these variables in `src/main.ts` for both dev and production. To produce the required assets run both client and SSR builds:
+
+```bash
+bunx vite build && bunx vite build --ssr
+```
+
+You can override the default resolver—useful for custom component lookups—by editing `resources/js/ssr.tsx` and passing a different `resolve` function to `renderInertiaServer()`.
 
 ## Type Safety
 - Share types between backend and frontend by re-exporting the Drizzle-inferred types from models (e.g. `export type PostRecord = typeof posts.$inferSelect`).

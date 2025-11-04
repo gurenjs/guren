@@ -65,7 +65,7 @@ The `[Controller, 'method']` tuple tells Guren which class to instantiate and wh
 
 | Helper | Purpose |
 |--------|---------|
-| `this.inertia(component, props, options?)` | Render an Inertia page using `resources/js/pages/<component>.tsx`. |
+| `this.inertia(component, props, options?)` | Render an Inertia page using `resources/js/pages/<component>.tsx`. Returns a `Promise<Response>` so controller actions should be `async` and `return` the call directly. |
 | `this.json(data, init?)` | Return JSON. |
 | `this.redirect(url, status?)` | Redirect to another location (default status 302). |
 
@@ -90,3 +90,17 @@ Handle validation failures by returning `this.inertia()` with errors or `this.js
 - For end-to-end coverage, interact with the running application via `fetch` or your favourite HTTP client and assert on the responses.
 
 Controllers stay thin when they delegate business logic to models or services. Treat them as orchestration layers that glue together the rest of your application.
+
+### SSR Options
+
+When the SSR bundle is available, Guren renders pages on the server automatically. You can disable or customize this per-response by passing the `ssr` option:
+
+```ts
+return this.inertia('posts/Index', props, {
+  ssr: {
+    enabled: false, // force client-side rendering for this response
+  },
+})
+```
+
+Advanced use cases can provide a custom renderer via `ssr.render`, which receives the page payload and may delegate to utilities like `renderInertiaServer()`.

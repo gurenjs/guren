@@ -35,7 +35,7 @@ This example demonstrates how to build a simple blog using the Guren framework, 
    ```bash
    bun run --cwd examples/blog smoke
    ```
-   This waits for the application bootstrap and verifies the `/` and `/posts` routes. If the database isn't reachable, the script exits gracefully.
+   This waits for the application bootstrap, asserts that the home page returns SSR-rendered markup, and verifies the `/posts` JSON endpoint. If the database isn't reachable, the script exits gracefully.
 
 ## Shutting Down
 
@@ -50,7 +50,7 @@ Logs are available through `bun run db:logs`.
 ```bash
 NODE_ENV=production bun run --cwd examples/blog build
 ```
-This produces hashed assets in `public/assets/` and updates the Vite manifest that the Bun server consumes at runtime.
+The `build` script runs both `bunx vite build` and `bunx vite build --ssr`, producing hashed client assets in `public/assets/` and an SSR bundle in `bootstrap/ssr/`. During application bootstrap, `src/main.ts` reads the manifests to populate `GUREN_INERTIA_ENTRY`, `GUREN_INERTIA_STYLES`, and `GUREN_INERTIA_SSR_ENTRY`, enabling server-side rendering automatically.
 
 ## Database Tasks
 

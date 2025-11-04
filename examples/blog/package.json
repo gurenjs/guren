@@ -9,7 +9,7 @@
     "dev:server": "VITE_DEV_SERVER_URL=http://localhost:5173 bun run --watch --hot bin/serve.ts",
     "smoke": "bun run ./smoke.ts",
     "test": "vitest run",
-    "build": "bunx vite build",
+    "build": "bunx vite build && bunx vite build --ssr",
     "preview": "bunx vite preview",
     "db:make": "bunx guren make:migration",
     "db:migrate": "bunx guren db:migrate",

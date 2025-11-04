@@ -20,37 +20,60 @@ export const ready = bootstrap()
 export default app
 
 function configureViteAssets() {
+  const moduleDir = dirname(fileURLToPath(import.meta.url))
   const isProduction = process.env.NODE_ENV === 'production'
 
   if (!isProduction) {
     const devServerUrl = process.env.VITE_DEV_SERVER_URL ?? 'http://localhost:5173'
     process.env.GUREN_INERTIA_ENTRY = process.env.GUREN_INERTIA_ENTRY ?? `${devServerUrl}/resources/js/dev-entry.ts`
     process.env.GUREN_INERTIA_STYLES = process.env.GUREN_INERTIA_STYLES ?? ''
+    process.env.GUREN_INERTIA_SSR_ENTRY = process.env.GUREN_INERTIA_SSR_ENTRY ?? resolve(moduleDir, '../resources/js/ssr.tsx')
+    process.env.GUREN_INERTIA_SSR_MANIFEST = process.env.GUREN_INERTIA_SSR_MANIFEST ?? ''
     return
   }
 
-  const manifest = loadViteManifest()
-  const entry = manifest?.['resources/js/app.tsx']
+  const clientManifestPath = resolve(moduleDir, '../public/assets/manifest.json')
+  const clientManifest = loadViteManifest(clientManifestPath, 'client')
+  const clientEntry = clientManifest?.['resources/js/app.tsx']
 
-  if (entry?.file && !process.env.GUREN_INERTIA_ENTRY) {
-    process.env.GUREN_INERTIA_ENTRY = `/public/assets/${entry.file}`
+  if (clientEntry?.file && !process.env.GUREN_INERTIA_ENTRY) {
+    process.env.GUREN_INERTIA_ENTRY = `/public/assets/${clientEntry.file}`
   }
 
-  if (entry?.css?.length && !process.env.GUREN_INERTIA_STYLES) {
-    process.env.GUREN_INERTIA_STYLES = entry.css.map((href) => `/public/assets/${href}`).join(',')
+  if (clientEntry?.css?.length && !process.env.GUREN_INERTIA_STYLES) {
+    process.env.GUREN_INERTIA_STYLES = clientEntry.css.map((href) => `/public/assets/${href}`).join(',')
+  }
+
+  const ssrManifestPath = resolve(moduleDir, '../bootstrap/ssr/manifest.json')
+  const ssrManifest = loadViteManifest(ssrManifestPath, 'SSR')
+  const ssrEntry = ssrManifest?.['resources/js/ssr.tsx']
+
+  if (ssrEntry?.file && !process.env.GUREN_INERTIA_SSR_ENTRY) {
+    process.env.GUREN_INERTIA_SSR_ENTRY = resolve(moduleDir, '../bootstrap/ssr', ssrEntry.file)
+  }
+
+  if (ssrManifest && !process.env.GUREN_INERTIA_SSR_MANIFEST) {
+    process.env.GUREN_INERTIA_SSR_MANIFEST = ssrManifestPath
   }
 }
 
-type ViteManifest = Record<string, { file: string; css?: string[] }>
+type ViteManifestEntry = {
+  file: string
+  css?: string[]
+  assets?: string[]
+  imports?: string[]
+  dynamicImports?: string[]
+}
 
-function loadViteManifest(): ViteManifest | undefined {
+type ViteManifest = Record<string, ViteManifestEntry>
+
+function loadViteManifest(manifestPath: string, label: 'client' | 'SSR'): ViteManifest | undefined {
   try {
-    const moduleDir = dirname(fileURLToPath(import.meta.url))
-    const manifestPath = resolve(moduleDir, '../public/assets/manifest.json')
     const raw = readFileSync(manifestPath, 'utf8')
     return JSON.parse(raw) as ViteManifest
   } catch (error) {
-    console.warn('Unable to load Vite manifest. Run `bunx vite build` before starting in production.', error)
+    const command = label === 'SSR' ? 'bunx vite build --ssr' : 'bunx vite build'
+    console.warn(`Unable to load ${label} Vite manifest at ${manifestPath}. Run \`${command}\` before starting in production.`, error)
     return undefined
   }
 }

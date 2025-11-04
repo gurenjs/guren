@@ -11,8 +11,12 @@ export interface GurenVitePluginOptions {
   resourcesDir?: string
   /** Path to the primary frontend entry file (defaults to `resources/js/app.tsx`). */
   entry?: string
+  /** Path to the SSR entry file (defaults to `resources/js/ssr.tsx`). */
+  ssrEntry?: string
   /** Output directory for compiled assets (defaults to `public/assets`). */
   outDir?: string
+  /** Output directory for SSR bundles (defaults to `bootstrap/ssr`). */
+  ssrOutDir?: string
   /** Default dev server port (defaults to 5173). */
   devPort?: number
   /** Default preview server port (defaults to 4173). */
@@ -31,7 +35,9 @@ const defaultOptions: Required<GurenVitePluginOptions> = {
   resourcesAlias: '@resources',
   resourcesDir: 'resources/js',
   entry: 'resources/js/app.tsx',
+  ssrEntry: 'resources/js/ssr.tsx',
   outDir: 'public/assets',
+  ssrOutDir: 'bootstrap/ssr',
   devPort: 5173,
   previewPort: 4173,
   entryFileNames: '[name]-[hash].js',
@@ -45,21 +51,21 @@ export function gurenVitePlugin(options: GurenVitePluginOptions = {}) {
   return {
     name: 'guren:vite-config',
     enforce: 'pre' as const,
-    config(config: Record<string, any>, _env: Record<string, any>) {
-      ensureDefaults(config, resolved)
+    config(config: Record<string, any>, env: Record<string, any>) {
+      ensureDefaults(config, resolved, env)
     },
   }
 }
 
 export default gurenVitePlugin
 
-function ensureDefaults(config: Record<string, any>, options: Required<GurenVitePluginOptions>) {
+function ensureDefaults(config: Record<string, any>, options: Required<GurenVitePluginOptions>, env: Record<string, any>) {
   const root = resolveRoot(config.root)
 
   ensureAliases(config, options, root)
   ensureServer(config, options)
   ensurePreview(config, options)
-  ensureBuild(config, options, root)
+  ensureBuild(config, options, root, env)
 }
 
 function ensureAliases(config: Record<string, any>, options: Required<GurenVitePluginOptions>, root: string) {
@@ -96,24 +102,48 @@ function ensurePreview(config: Record<string, any>, options: Required<GurenViteP
   }
 }
 
-function ensureBuild(config: Record<string, any>, options: Required<GurenVitePluginOptions>, root: string) {
+function ensureBuild(
+  config: Record<string, any>,
+  options: Required<GurenVitePluginOptions>,
+  root: string,
+  env: Record<string, any>,
+) {
   config.build ??= {}
-
-  if (config.build.outDir === undefined) {
-    config.build.outDir = options.outDir
-  }
+  const isSsrBuild = Boolean(env?.ssrBuild)
 
   if (config.build.emptyOutDir === undefined) {
     config.build.emptyOutDir = true
   }
 
-  if (config.build.manifest === undefined) {
-    config.build.manifest = true
+  if (isSsrBuild) {
+    if (config.build.outDir === undefined) {
+      config.build.outDir = options.ssrOutDir
+    }
+
+    if (config.build.manifest === undefined) {
+      config.build.manifest = true
+    }
+
+    if (config.build.ssr === undefined) {
+      config.build.ssr = path.resolve(root, options.ssrEntry)
+    }
+  } else {
+    if (config.build.outDir === undefined) {
+      config.build.outDir = options.outDir
+    }
+
+    if (config.build.manifest === undefined) {
+      config.build.manifest = true
+    }
+
+    if (config.build.ssrManifest === undefined) {
+      config.build.ssrManifest = true
+    }
   }
 
   config.build.rollupOptions ??= {}
 
-  if (config.build.rollupOptions.input === undefined) {
+  if (!isSsrBuild && config.build.rollupOptions.input === undefined) {
     config.build.rollupOptions.input = path.resolve(root, options.entry)
   }
 

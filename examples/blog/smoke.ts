@@ -13,6 +13,11 @@ async function main() {
     throw new Error(`Unexpected status for /: ${root.status}`)
   }
 
+  const rootHtml = await root.text()
+  if (!rootHtml.includes('Latest Posts')) {
+    throw new Error('SSR markup missing expected content for posts index')
+  }
+
   const posts = await app.fetch(
     new Request('http://example.local/posts', {
       headers: {
@@ -30,7 +35,7 @@ async function main() {
     throw new Error('Inertia component mismatch for posts index')
   }
 
-  console.log('Smoke test passed: root & posts routes responded successfully')
+  console.log('Smoke test passed: SSR HTML and JSON endpoints responded successfully')
 }
 
 await main()

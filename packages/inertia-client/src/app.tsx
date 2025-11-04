@@ -2,11 +2,7 @@ import { createInertiaApp } from '@inertiajs/react'
 import type { Page } from '@inertiajs/core'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
-
-type PageModule = { default: React.ComponentType<any> }
-type PageLoader = () => Promise<PageModule>
-
-type ResolveComponent = (name: string) => Promise<PageModule>
+import { createPagesResolver as createPagesResolverFactory, type ResolveComponent } from './resolve'
 
 type SetupArgs = {
   el: HTMLElement
@@ -45,7 +41,12 @@ const defaultSetup = ({ el, App, props }: SetupArgs) => {
  * @returns A promise that resolves when the Inertia app is created.
  */
 export function startInertiaClient(options: StartInertiaClientOptions): Promise<unknown> {
-  const resolve = options.resolve ?? createPagesResolver(options)
+  const resolve =
+    options.resolve ??
+    createPagesResolverFactory({
+      pages: options.pages,
+      resolveComponentPath: options.resolveComponentPath,
+    })
 
   return createInertiaApp({
     resolve,
@@ -57,29 +58,6 @@ export function startInertiaClient(options: StartInertiaClientOptions): Promise<
   })
 }
 
-function createPagesResolver(options: StartInertiaClientOptions): ResolveComponent {
-  if (!options.pages) {
-    throw new Error('startInertiaClient requires either a `resolve` function or a `pages` map created via import.meta.glob().')
-  }
-
-  const pages = options.pages as Record<string, PageLoader>
-  const resolveComponentPath = options.resolveComponentPath ?? defaultResolveComponentPath
-
-  return (name) => {
-    const path = resolveComponentPath(name)
-    const loader = pages[path]
-
-    if (!loader) {
-      throw new Error(`Unable to locate Inertia page module for "${name}" at "${path}". Register the module via import.meta.glob() or provide a custom resolve function.`)
-    }
-
-    return loader()
-  }
-}
-
-function defaultResolveComponentPath(name: string): string {
-  return `./pages/${name}.tsx`
-}
 
 /**
  * Get the initial Inertia page from the global variable or the DOM.
