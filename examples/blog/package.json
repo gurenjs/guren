@@ -23,6 +23,7 @@
     "@guren/testing": "workspace:*",
     "@guren/orm": "workspace:*",
     "@guren/server": "workspace:*",
+    "@inertiajs/core": "^2.2.15",
     "@inertiajs/react": "^2.2.15",
     "lucide-react": "^0.552.0",
     "drizzle-orm": "0.44.7",
