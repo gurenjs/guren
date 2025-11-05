@@ -29,13 +29,13 @@ This example demonstrates how to build a simple blog using the Guren framework, 
    ```bash
    bun run --cwd examples/blog dev
    ```
-   The API server listens on http://localhost:3333 by default (override with `PORT`) and proxies asset requests to Vite, which serves the React frontend with HMR on http://localhost:5173.
+   The API server listens on http://localhost:3333 by default (override with `PORT`) and automatically launches the Vite dev server for the React frontend (typically http://localhost:5173). Set `GUREN_DEV_VITE=0` if you prefer to manage Vite yourself.
 
 5. **Smoke test**
    ```bash
    bun run --cwd examples/blog smoke
    ```
-   This waits for the application bootstrap and verifies the `/` and `/posts` routes. If the database isn't reachable, the script exits gracefully.
+   This waits for the application bootstrap, asserts that the home page returns SSR-rendered markup, and verifies the `/posts` JSON endpoint. If the database isn't reachable, the script exits gracefully.
 
 ## Shutting Down
 
@@ -50,7 +50,7 @@ Logs are available through `bun run db:logs`.
 ```bash
 NODE_ENV=production bun run --cwd examples/blog build
 ```
-This produces hashed assets in `public/assets/` and updates the Vite manifest that the Bun server consumes at runtime.
+The `build` script runs both `bunx vite build` and `bunx vite build --ssr`, generating the client manifest at `public/assets/.vite/manifest.json` and the SSR manifest at `public/assets/.vite/ssr-manifest.json`. At runtime `src/main.ts` calls `autoConfigureInertiaAssets`, which reads those files and automatically sets the `GUREN_INERTIA_*` environment variables so server-side rendering is enabled without extra configuration.
 
 ## Database Tasks
 

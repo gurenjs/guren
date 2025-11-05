@@ -11,8 +11,12 @@ export interface GurenVitePluginOptions {
   resourcesDir?: string
   /** Path to the primary frontend entry file (defaults to `resources/js/app.tsx`). */
   entry?: string
+  /** Path to the SSR entry file (defaults to `resources/js/ssr.tsx`). */
+  ssrEntry?: string
   /** Output directory for compiled assets (defaults to `public/assets`). */
   outDir?: string
+  /** Output directory for SSR bundles (defaults to `.guren/ssr`). */
+  ssrOutDir?: string
   /** Default dev server port (defaults to 5173). */
   devPort?: number
   /** Default preview server port (defaults to 4173). */
@@ -31,7 +35,9 @@ const defaultOptions: Required<GurenVitePluginOptions> = {
   resourcesAlias: '@resources',
   resourcesDir: 'resources/js',
   entry: 'resources/js/app.tsx',
+  ssrEntry: 'resources/js/ssr.tsx',
   outDir: 'public/assets',
+  ssrOutDir: '.guren/ssr',
   devPort: 5173,
   previewPort: 4173,
   entryFileNames: '[name]-[hash].js',
@@ -45,21 +51,21 @@ export function gurenVitePlugin(options: GurenVitePluginOptions = {}) {
   return {
     name: 'guren:vite-config',
     enforce: 'pre' as const,
-    config(config: Record<string, any>, _env: Record<string, any>) {
-      ensureDefaults(config, resolved)
+    config(config: Record<string, any>, env: Record<string, any>) {
+      ensureDefaults(config, resolved, env)
     },
   }
 }
 
 export default gurenVitePlugin
 
-function ensureDefaults(config: Record<string, any>, options: Required<GurenVitePluginOptions>) {
+function ensureDefaults(config: Record<string, any>, options: Required<GurenVitePluginOptions>, env: Record<string, any>) {
   const root = resolveRoot(config.root)
 
   ensureAliases(config, options, root)
   ensureServer(config, options)
   ensurePreview(config, options)
-  ensureBuild(config, options, root)
+  ensureBuild(config, options, root, env)
 }
 
 function ensureAliases(config: Record<string, any>, options: Required<GurenVitePluginOptions>, root: string) {
@@ -96,24 +102,60 @@ function ensurePreview(config: Record<string, any>, options: Required<GurenViteP
   }
 }
 
-function ensureBuild(config: Record<string, any>, options: Required<GurenVitePluginOptions>, root: string) {
+function ensureBuild(
+  config: Record<string, any>,
+  options: Required<GurenVitePluginOptions>,
+  root: string,
+  env: Record<string, any>,
+) {
   config.build ??= {}
-
-  if (config.build.outDir === undefined) {
-    config.build.outDir = options.outDir
-  }
+  const isSsrBuild = Boolean(env?.ssrBuild ?? env?.isSsrBuild)
+  const isServeCommand = env?.command === 'serve'
 
   if (config.build.emptyOutDir === undefined) {
     config.build.emptyOutDir = true
   }
 
-  if (config.build.manifest === undefined) {
-    config.build.manifest = true
+  if (isSsrBuild) {
+    if (config.build.outDir === undefined) {
+      config.build.outDir = options.ssrOutDir
+    }
+
+    if (config.build.manifest === undefined) {
+      config.build.manifest = true
+    }
+
+    if (config.build.ssr === undefined) {
+      config.build.ssr = path.resolve(root, options.ssrEntry)
+    }
+
+    config.build.rollupOptions ??= {}
+    config.build.rollupOptions.input = path.resolve(root, options.ssrEntry)
+  } else {
+    if (config.build.outDir === undefined) {
+      config.build.outDir = options.outDir
+    }
+
+    if (config.build.manifest === undefined) {
+      config.build.manifest = true
+    }
+
+    if (config.build.ssrManifest === undefined) {
+      config.build.ssrManifest = true
+    }
+
+    if (!isServeCommand && config.base === undefined) {
+      const derivedBase = deriveHttpBaseFromOutDir(options.outDir)
+
+      if (derivedBase) {
+        config.base = derivedBase
+      }
+    }
   }
 
   config.build.rollupOptions ??= {}
 
-  if (config.build.rollupOptions.input === undefined) {
+  if (!isSsrBuild && config.build.rollupOptions.input === undefined) {
     config.build.rollupOptions.input = path.resolve(root, options.entry)
   }
 
@@ -132,6 +174,22 @@ function ensureBuild(config: Record<string, any>, options: Required<GurenVitePlu
   }
 
   config.build.rollupOptions.output = output
+}
+
+function deriveHttpBaseFromOutDir(outDir: string): string | undefined {
+  const normalized = outDir.replace(/\\/gu, '/').replace(/^\.\//u, '')
+
+  if (normalized === 'public') {
+    return '/public/'
+  }
+
+  if (normalized.startsWith('public/')) {
+    const remainder = normalized.slice('public/'.length)
+    const suffix = remainder.length > 0 ? `${remainder.replace(/\/$/u, '')}/` : ''
+    return `/public/${suffix}`
+  }
+
+  return undefined
 }
 
 function resolveRoot(root: string | undefined): string {

@@ -12,7 +12,7 @@ describe('ViewEngine', () => {
 
     expect(ViewEngine.has('test-engine')).toBe(true)
 
-    const response = ViewEngine.render('test-engine', 'Dashboard', { users: 2 })
+    const response = await ViewEngine.render('test-engine', 'Dashboard', { users: 2 })
 
     expect(calls).toEqual([{ template: 'Dashboard', props: { users: 2 } }])
     expect(await response.text()).toBe('Dashboard:{"users":2}')

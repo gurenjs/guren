@@ -1,6 +1,9 @@
 # CLI Reference
 
-Guren ships with an official CLI that you can invoke via `bunx guren`. It helps you scaffold controllers, models, views, and eventually entire applications.
+Guren ships with two companion CLIs:
+
+- `bunx guren` for generating controllers, models, views, and running framework utilities inside an existing project.
+- `bunx create-guren-app` for scaffolding a brand-new application.
 
 ## Basic Usage
 
@@ -19,7 +22,6 @@ Commands follow a subcommand pattern such as `bunx guren make:controller UserCon
 | `make:model <Name>` | Generates a model class and type definition in `app/Models` | `bunx guren make:model Post` |
 | `make:view <path>` | Generates a React component in `resources/js/pages` | `bunx guren make:view posts/Index` |
 | `make:auth` | Scaffolds login/logout controllers, provider, views, migration, seeder, and routes | `bunx guren make:auth` |
-| `create <dir>` | Scaffolds a new application (coming soon) | `bunx guren create my-app` |
 
 > **Note:** `make:*` commands avoid overwriting existing files. Use `--force` if you need to replace them.
 
@@ -40,6 +42,16 @@ Generated files match the Laravel-inspired ergonomics of the framework:
 - Views are React + TypeScript + Tailwind CSS functional components.
 
 After generation remember to wire up routes and connect `static table` to the proper Drizzle schema.
+
+## Scaffolding New Apps
+
+Use the dedicated bootstrapper when starting from scratch:
+
+```bash
+bunx create-guren-app my-app
+```
+
+The CLI copies the default template, updates metadata, and prompts for a rendering mode. Choose **SSR** (default) to keep server-side rendering enabled via `autoConfigureInertiaAssets`, or pick **SPA** to disable SSR. Skip the prompt with `--mode ssr` or `--mode spa`, and overwrite a non-empty directory with `--force`.
 
 ## Troubleshooting
 - `command not found: bunx`: Your Bun version may be outdated. Upgrade to 1.1 or later.

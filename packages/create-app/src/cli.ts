@@ -6,6 +6,10 @@ import { consola } from 'consola'
 import { defineCommand, runMain } from 'citty'
 import { directoryExists, isDirectoryEmpty, toPackageName, toTitleCase } from './utils'
 
+const RENDERING_MODES = ['spa', 'ssr'] as const
+type RenderingMode = (typeof RENDERING_MODES)[number]
+const RENDERING_MODE_SET = new Set<RenderingMode>(RENDERING_MODES)
+
 async function ensureTargetDirectory(path: string, force: boolean): Promise<void> {
   try {
     await mkdir(path, { recursive: true })
@@ -45,6 +49,46 @@ async function replaceTokens(destination: string, files: string[], tokens: Map<s
   }
 }
 
+async function applySsrOverrides(destination: string): Promise<void> {
+  const ssrTemplateDir = fileURLToPath(new URL('../templates/default-ssr', import.meta.url))
+  await copyTemplate(ssrTemplateDir, destination)
+}
+
+async function updateSsrPackageJson(destination: string): Promise<void> {
+  const packageJsonPath = join(destination, 'package.json')
+  const raw = await readFile(packageJsonPath, 'utf8')
+  const pkg = JSON.parse(raw) as { scripts?: Record<string, string> }
+
+  pkg.scripts ??= {}
+  pkg.scripts.build = 'bunx vite build && bunx vite build --ssr'
+
+  await writeFile(packageJsonPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8')
+}
+
+async function resolveRenderingMode(flagValue: unknown): Promise<RenderingMode> {
+  if (typeof flagValue === 'string') {
+    const normalized = flagValue.toLowerCase()
+    if (!RENDERING_MODE_SET.has(normalized as RenderingMode)) {
+      throw new Error('Invalid rendering mode. Supported values are "spa" or "ssr".')
+    }
+    return normalized as RenderingMode
+  }
+
+  const result = await consola.prompt('Choose the rendering mode for this project', {
+    type: 'select',
+    options: [
+      { value: 'ssr', label: 'SSR (server-side rendering)' },
+      { value: 'spa', label: 'SPA (client-side rendering only)' },
+    ],
+    initial: 'ssr',
+    default: 'ssr',
+  })
+
+  const value = typeof result === 'string' ? result : 'ssr'
+
+  return (value as RenderingMode) ?? 'ssr'
+}
+
 const command = defineCommand({
   meta: {
     name: 'create-guren-app',
@@ -60,6 +104,10 @@ const command = defineCommand({
       type: 'boolean',
       alias: 'f',
       description: 'Overwrite existing files in the target directory',
+    },
+    mode: {
+      type: 'string',
+      description: 'Rendering mode to scaffold (spa or ssr)',
     },
   },
   async run({ args }) {
@@ -87,6 +135,12 @@ const command = defineCommand({
 
     await copyTemplate(templateDir, targetDir)
 
+    const renderingMode = await resolveRenderingMode(args.mode)
+
+    if (renderingMode === 'ssr') {
+      await applySsrOverrides(targetDir)
+    }
+
     const tokenMap = new Map<string, string>([
       ['guren-app-placeholder', packageName],
       ['__APP_TITLE__', appTitle],
@@ -104,15 +158,22 @@ const command = defineCommand({
 
     await replaceTokens(targetDir, filesToTransform, tokenMap)
 
+    if (renderingMode === 'ssr') {
+      await updateSsrPackageJson(targetDir)
+    }
+
     const relativeTarget = relative(process.cwd(), targetDir) || '.'
 
-    consola.success(`Scaffolded a new Guren app in ${relativeTarget}`)
+    consola.success(`Scaffolded a new Guren app (${renderingMode.toUpperCase()}) in ${relativeTarget}`)
     consola.info('Next steps:')
     if (relativeTarget !== '.') {
       consola.log(`  cd ${relativeTarget}`)
     }
     consola.log('  bun install')
     consola.log('  bun run dev')
+    if (renderingMode === 'ssr') {
+      consola.log('  bun run build  # builds both client and SSR bundles')
+    }
   },
 })
 

@@ -4,6 +4,7 @@ Guren delivers a single-page application experience by combining Inertia.js with
 
 ## Project Structure
 - `resources/js/app.tsx`: Bootstraps the Inertia app and registers global providers.
+- `resources/js/ssr.tsx`: Exports the server-side renderer consumed by the backend when SSR is enabled.
 - `resources/js/pages/`: React components that map to controller responses.
 - `resources/js/components/`: Shared UI components (optional but recommended).
 - `resources/css/app.css`: Tailwind (or your chosen CSS) entry point.
@@ -91,11 +92,26 @@ Handle validation errors by returning them from the controller and reading `form
 ## Assets and Styling
 The scaffold ships with Tailwind CSS preconfigured. Edit `resources/css/app.css` or add custom CSS frameworks as needed. If you introduce additional assets (images, fonts), place them under `public/`.
 
+## Server-Side Rendering
+Each application ships with a default `resources/js/ssr.tsx` entry that calls `renderInertiaServer()` from `@guren/inertia-client`. When you bootstrap the app with `autoConfigureInertiaAssets(app, { importMeta })`, Guren will:
+
+- Point HTML responses at the Vite dev server during development (using `VITE_DEV_SERVER_URL` when available).
+- Detect the built client manifest (`public/assets/.vite/manifest.json`) and automatically seed `GUREN_INERTIA_ENTRY`/`GUREN_INERTIA_STYLES` in production.
+- Locate the SSR manifest (`public/assets/.vite/ssr-manifest.json`) and set `GUREN_INERTIA_SSR_ENTRY` / `GUREN_INERTIA_SSR_MANIFEST` so Inertia can render on the server.
+
+To produce the required assets run both client and SSR builds:
+
+```bash
+bunx vite build && bunx vite build --ssr
+```
+
+You can override the default resolver—useful for custom component lookups—by editing `resources/js/ssr.tsx` and passing a different `resolve` function to `renderInertiaServer()`. If you opt out of `autoConfigureInertiaAssets`, make sure you populate the required environment variables before calling `configureInertiaAssets` yourself.
+
 ## Type Safety
 - Share types between backend and frontend by re-exporting the Drizzle-inferred types from models (e.g. `export type PostRecord = typeof posts.$inferSelect`).
 - Use module path aliases (configured in `tsconfig.json`) to avoid long relative imports.
 
 ## Hot Reloading
-Running `bun run dev` keeps the frontend and backend in sync. Changes to TSX files trigger instant reloads thanks to Bun’s dev server.
+Running `bun run dev` keeps the frontend and backend in sync—the Bun process automatically launches the Vite dev server, so changes to TSX files trigger instant reloads without extra commands. If you need to customize that workflow, import `startViteDevServer()` from `@guren/server` and manage the Vite instance yourself.
 
 By structuring your pages and components with these patterns, you get a smooth SPA experience with minimal boilerplate, powered entirely by React and Inertia.

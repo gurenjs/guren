@@ -21,7 +21,9 @@ bunx create-guren-app my-app
 cd my-app
 ```
 
-The generator copies a template and personalises project metadata such as the package name and title. Use `--force` if you need to scaffold into a non-empty directory.
+The generator copies a template, personalises metadata, and prompts you to choose **SSR** (default) or **SPA** rendering. Pass `--mode spa` to skip the prompt or `--mode ssr` to force server-side rendering. Use `--force` if you need to scaffold into a non-empty directory.
+
+Choosing SSR gives you `autoConfigureInertiaAssets` out of the box so Bun can discover Vite manifests automatically; the SPA preset disables SSR with the same helper.
 
 ## 2. Install Dependencies
 
@@ -69,7 +71,9 @@ bun run dev
 
 - Visit `http://localhost:3333` to see the default home page.
 - Hot reloading is handled via Bun + Hono, so backend changes apply immediately.
-- Frontend assets are transformed on demand by the dev server—no separate build step is necessary.
+- Frontend assets are transformed on demand by the dev server—`autoConfigureInertiaAssets` points the HTML response at Vite during development, so no separate build step is necessary.
+- The Bun process also spawns the Vite dev server automatically. Set `GUREN_DEV_VITE=0` if you prefer to run Vite yourself (for example inside an IDE task).
+- When the server boots you’ll see a crimson ASCII banner with the current Guren version and helpful URLs. Set `GUREN_DEV_BANNER=0` if you ever want to suppress it (for example in automated scripts).
 
 ## 6. Next Steps
 
@@ -88,7 +92,7 @@ When you are ready to ship:
 NODE_ENV=production bun run build
 ```
 
-This produces an optimised bundle under `dist/` ready for deployment on Bun.
+This runs both the client and SSR builds, emitting hashed assets under `public/assets/` plus manifests that `autoConfigureInertiaAssets` reads at runtime. Deploy the project as-is and the Bun server will stream SSR HTML on first request.
 
 ## Additional Resources
 - Learn about framework internals in [Architecture](./architecture.md)

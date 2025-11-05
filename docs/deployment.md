@@ -36,7 +36,7 @@ This installs only the dependencies required at runtime. If your environment bui
 NODE_ENV=production bun run build
 ```
 
-The scaffolded build script bundles `resources/js/app.tsx` into `public/assets/`, ready to serve to browsers.
+The scaffolded build script runs both `bunx vite build` and `bunx vite build --ssr`, producing the client manifest at `public/assets/.vite/manifest.json` and the SSR manifest at `public/assets/.vite/ssr-manifest.json`. At runtime `src/main.ts` calls `autoConfigureInertiaAssets`, which reads those files and wires the `GUREN_INERTIA_*` environment variables automatically.
 
 ## 4. Run Database Migrations (and Seeders)
 
@@ -56,6 +56,9 @@ NODE_ENV=production bun run bin/serve.ts
 ```
 
 For reliability, wrap this command with a process manager (e.g. `systemd`, `pm2`, `supervisord`, or your hosting provider’s run command). Example `systemd` unit:
+
+- The startup banner only renders in non-production environments by default. If you want to show it (or disable it explicitly) set `GUREN_DEV_BANNER=1` or `GUREN_DEV_BANNER=0`.
+- The framework skips launching the Vite dev server when `NODE_ENV=production`. If you’re running a custom dev workflow in production-like environments, toggle it with `GUREN_DEV_VITE=1` (on) or `GUREN_DEV_VITE=0` (off).
 
 ```ini
 [Unit]
@@ -97,6 +100,8 @@ Build and run:
 docker build -t my-app .
 docker run --env-file .env.prod -p 3333:3333 my-app
 ```
+
+The container image bakes in both the client and SSR bundles so the server can stream pre-rendered HTML immediately.
 
 Mount your configuration or secrets as needed for your hosting environment.
 

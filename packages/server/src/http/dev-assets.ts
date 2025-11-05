@@ -20,6 +20,10 @@ export interface DevAssetsOptions {
   resourcesPath?: string
   /** Path prefix to mount transpiled JS assets. Defaults to `/resources/js`. */
   prefix?: string
+  /** Route pattern used to serve raw CSS assets. Defaults to `/resources/css/*`. */
+  cssRoute?: string
+  /** Absolute path to the CSS directory. Defaults to `<resourcesDir>/../css`. */
+  cssDir?: string
   /** Enables serving the bundled inertia client. Defaults to true. */
   inertiaClient?: boolean
   /** Path to the inertia client source. Defaults to the version bundled with Guren. */
@@ -61,6 +65,8 @@ export function registerDevAssets(app: Application, options: DevAssetsOptions): 
   }
 
   const prefix = options.prefix ?? DEFAULT_PREFIX
+  const cssDir = options.cssDir ?? resolve(resourcesDir, 'css')
+  const cssRoute = options.cssRoute ?? deriveCssRoute(prefix)
   const inertiaClientPath = options.inertiaClientPath ?? DEFAULT_VENDOR_PATH
   const inertiaClientSource = options.inertiaClientSource ?? gurenInertiaClient
   const jsxRuntimeUrl = options.jsxRuntimeUrl ?? DEFAULT_JSX_RUNTIME
@@ -82,6 +88,17 @@ export function registerDevAssets(app: Application, options: DevAssetsOptions): 
   const tsTranspiler = new Bun.Transpiler({ loader: 'ts', ...transpilerOptions })
 
   app.hono.get(`${prefix}/*`, (ctx) => handleTranspileRequest(ctx, resourcesJsDir, prefix, reactImportPattern, tsxTranspiler, tsTranspiler, jsxRuntimeUrl))
+
+  if (cssDir) {
+    const cssRewrite = createStaticRewrite(cssRoute)
+    app.use(
+      cssRoute,
+      serveStatic({
+        root: cssDir,
+        rewriteRequestPath: cssRewrite,
+      }),
+    )
+  }
 
   if (options.inertiaClient !== false) {
     const inertiaClientDir = dirname(inertiaClientSource)
@@ -291,4 +308,11 @@ function createJsxRuntimeShim(helpers: Set<string>, runtimeUrl: string): string 
 
 function isDev(): boolean {
   return (process.env.NODE_ENV ?? 'development') !== 'production'
+}
+
+function deriveCssRoute(prefix: string): string {
+  const base = prefix.endsWith('/js') ? prefix.slice(0, -3) : prefix
+  const normalizedBase = base.endsWith('/') ? base.slice(0, -1) : base
+  const resolvedBase = normalizedBase.startsWith('/') ? normalizedBase : `/${normalizedBase}`
+  return `${resolvedBase}/css/*`
 }

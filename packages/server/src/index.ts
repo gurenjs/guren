@@ -1,7 +1,13 @@
 export { Application } from './http/Application'
-export type { Context } from './http/Application'
+export type { Context, ApplicationListenOptions } from './http/Application'
 export { registerDevAssets } from './http/dev-assets'
-export { configureInertiaAssets } from './http/inertia-assets'
+export { logDevServerBanner } from './http/dev-banner'
+export type { DevBannerOptions } from './http/dev-banner'
+export { GUREN_ASCII_ART } from './http/dev-banner'
+export { startViteDevServer } from './http/vite-dev-server'
+export type { StartViteDevServerOptions, StartedViteDevServer } from './http/vite-dev-server'
+export { configureInertiaAssets, autoConfigureInertiaAssets } from './http/inertia-assets'
+export type { AutoConfigureInertiaOptions } from './http/inertia-assets'
 export { parseRequestPayload, formatValidationErrors } from './http/request'
 export { Controller } from './mvc/Controller'
 export type { InertiaResponse, InferInertiaProps, ControllerInertiaProps } from './mvc/Controller'
@@ -9,7 +15,14 @@ export { Route } from './mvc/Route'
 export type { RouteDefinition } from './mvc/Route'
 export { ViewEngine } from './mvc/ViewEngine'
 export { inertia } from './mvc/inertia/InertiaEngine'
-export type { InertiaOptions, InertiaPagePayload } from './mvc/inertia/InertiaEngine'
+export type {
+  InertiaOptions,
+  InertiaPagePayload,
+  InertiaSsrContext,
+  InertiaSsrOptions,
+  InertiaSsrRenderer,
+  InertiaSsrResult,
+} from './mvc/inertia/InertiaEngine'
 export type { Provider, ProviderConstructor } from './plugins/Provider'
 export { ApplicationContext } from './plugins/ApplicationContext'
 export { InertiaViewProvider } from './plugins/providers/InertiaViewProvider'

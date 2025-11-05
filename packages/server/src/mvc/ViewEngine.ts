@@ -1,6 +1,6 @@
 import { inertia } from './inertia/InertiaEngine'
 
-export type ViewRenderer = (template: string, props: Record<string, unknown>) => Response
+export type ViewRenderer = (template: string, props: Record<string, unknown>) => Response | Promise<Response>
 
 /**
  * Registry for view renderers. Engines are typically registered via service
@@ -17,11 +17,11 @@ export class ViewEngine {
     return this.engines.has(name)
   }
 
-  static render(name: string, template: string, props: Record<string, unknown>): Response {
+  static render(name: string, template: string, props: Record<string, unknown>): Response | Promise<Response> {
     const engine = this.engines.get(name)
 
     if (!engine) {
-      throw new Error(`View engine \"${name}\" has not been registered.`)
+      throw new Error(`View engine "${name}" has not been registered.`)
     }
 
     return engine(template, props)

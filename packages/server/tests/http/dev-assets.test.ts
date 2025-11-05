@@ -21,6 +21,7 @@ describe('registerDevAssets inertia client chunk handling', () => {
 
     // minimal resources directory so the helper can mount the transpiler route
     await createFile('resources/js/app.tsx', "export const noop = () => 'noop'\n")
+    await createFile('resources/css/app.css', 'body { background: red; }\n')
 
     const inertiaEntry = await createFile(
       'inertia/inertia-client.tsx',
@@ -68,5 +69,12 @@ describe('registerDevAssets inertia client chunk handling', () => {
     const response = await app.fetch(new Request('http://example.com/vendor/../inertia-client.tsx'))
 
     expect(response.status).toBe(404)
+  })
+
+  it('serves css assets from the resources directory', async () => {
+    const response = await app.fetch(new Request('http://example.com/resources/css/app.css'))
+
+    expect(response.status).toBe(200)
+    expect(await response.text()).toContain('background: red')
   })
 })

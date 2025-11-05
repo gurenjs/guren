@@ -84,7 +84,7 @@ bunx guren dev
 ### Inertia.js Integration
 - Use `this.inertia(component, props, options)` in controllers
 - Component names map to `resources/js/pages/` file structure
-- Example apps use Vite for dev/production assets—`configureInertiaAssets` wires `GUREN_INERTIA_ENTRY`/`GUREN_INERTIA_STYLES` with the manifest output.
+- Example apps use Vite for dev/production assets—`autoConfigureInertiaAssets` wires `GUREN_INERTIA_*` env vars off manifests (it calls `configureInertiaAssets` under the hood).
 - Initial page data embedded in HTML via `data-page` attribute
 
 ### Static Route Registry
