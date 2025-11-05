@@ -7,6 +7,8 @@ import type { Provider, ProviderConstructor } from '../plugins/Provider'
 import { InertiaViewProvider } from '../plugins/providers/InertiaViewProvider'
 import { AuthServiceProvider } from '../plugins/providers/AuthServiceProvider'
 import { AuthManager } from '../auth'
+import { logDevServerBanner, type DevBannerOptions } from './dev-banner'
+import { startViteDevServer, type StartViteDevServerOptions } from './vite-dev-server'
 
 // Bun is only available at runtime. The declaration keeps TypeScript happy while
 // still allowing consumers to stub or polyfill it when running elsewhere.
@@ -27,6 +29,13 @@ export interface ApplicationOptions {
   readonly providers?: Array<Provider | ProviderConstructor>
 }
 
+export interface ApplicationListenOptions {
+  port?: number
+  hostname?: string
+  assetsUrl?: string
+  vite?: StartViteDevServerOptions | false
+}
+
 /**
  * Application wires the Route registry into a running Hono instance.
  * It offers a small convenience layer so users can bootstrap a Bun server
@@ -37,6 +46,8 @@ export class Application {
   private readonly plugins: PluginManager
   private context?: ApplicationContext
   private readonly authManager: AuthManager
+  private viteDevServer?: Awaited<ReturnType<typeof startViteDevServer>>['server']
+  private viteTeardownRegistered = false
 
   constructor(private readonly options: ApplicationOptions = {}) {
     this.hono = new Hono()
@@ -88,18 +99,63 @@ export class Application {
   /**
    * Convenience helper to start a Bun server when available.
    */
-  listen(options: { port?: number; hostname?: string } = {}): void {
+  async listen(options: ApplicationListenOptions = {}): Promise<void> {
     if (!Bun) {
       throw new Error('Bun runtime is required to call Application.listen')
     }
 
-    const { port = 3000, hostname = '0.0.0.0' } = options
+    const { port = 3000, hostname = '0.0.0.0', assetsUrl, vite } = options
+    const envAssetsUrl =
+      typeof process !== 'undefined' ? process.env?.VITE_DEV_SERVER_URL : undefined
+    let resolvedAssetsUrl = assetsUrl ?? envAssetsUrl
+
+    const shouldStartVite =
+      vite !== false &&
+      typeof process !== 'undefined' &&
+      process.env?.NODE_ENV !== 'production' &&
+      !resolvedAssetsUrl &&
+      process.env?.GUREN_DEV_VITE !== '0'
+
+    if (shouldStartVite) {
+      const viteOptions: StartViteDevServerOptions | undefined =
+        typeof vite === 'object' ? vite : undefined
+
+      try {
+        const { server, localUrl } = await startViteDevServer({
+          root: viteOptions?.root ?? process.cwd(),
+          config: viteOptions?.config,
+          host: viteOptions?.host ?? true,
+          port: viteOptions?.port,
+        })
+        this.viteDevServer = server
+        resolvedAssetsUrl = localUrl
+        if (typeof process !== 'undefined') {
+          process.env.VITE_DEV_SERVER_URL = resolvedAssetsUrl
+        }
+        this.registerViteTeardown()
+      } catch (error) {
+        console.error('Failed to start Vite dev server:', error)
+        process.exit(1)
+      }
+    }
 
     Bun.serve({
       port,
       hostname,
       fetch: (request: Request) => this.fetch(request),
     })
+
+    const shouldLogBanner =
+      typeof process === 'undefined' ||
+      (process.env?.NODE_ENV !== 'production' && process.env?.GUREN_DEV_BANNER !== '0')
+
+    if (shouldLogBanner) {
+      this.logDevServerBanner({
+        hostname,
+        port,
+        assetsUrl: resolvedAssetsUrl ?? 'http://localhost:5173',
+      })
+    }
   }
 
   register(provider: Provider | ProviderConstructor): this {
@@ -110,6 +166,13 @@ export class Application {
   registerMany(providers: Array<Provider | ProviderConstructor>): this {
     this.plugins.addMany(providers)
     return this
+  }
+
+  /**
+   * Logs the rich development server banner to the console.
+   */
+  logDevServerBanner(options: DevBannerOptions): void {
+    logDevServerBanner(options)
   }
 
   private resolveContext(): ApplicationContext {
@@ -123,6 +186,43 @@ export class Application {
   private registerDefaultProviders(): void {
     this.plugins.add(InertiaViewProvider)
     this.plugins.add(AuthServiceProvider)
+  }
+
+  private async closeViteDevServer(): Promise<void> {
+    if (!this.viteDevServer) {
+      return
+    }
+
+    try {
+      await this.viteDevServer.close()
+    } catch (error) {
+      console.error('Error while shutting down Vite dev server:', error)
+    } finally {
+      this.viteDevServer = undefined
+      this.viteTeardownRegistered = false
+    }
+  }
+
+  private registerViteTeardown(): void {
+    if (this.viteTeardownRegistered || !this.viteDevServer || typeof process === 'undefined') {
+      return
+    }
+
+    this.viteTeardownRegistered = true
+
+    const exitHandler = () => {
+      this.closeViteDevServer()
+        .then(() => process.exit(0))
+        .catch(() => process.exit(1))
+    }
+
+    process.once('SIGINT', exitHandler)
+    process.once('SIGTERM', exitHandler)
+    process.on('exit', () => {
+      if (this.viteDevServer) {
+        void this.viteDevServer.close()
+      }
+    })
   }
 }
 

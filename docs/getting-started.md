@@ -72,6 +72,8 @@ bun run dev
 - Visit `http://localhost:3333` to see the default home page.
 - Hot reloading is handled via Bun + Hono, so backend changes apply immediately.
 - Frontend assets are transformed on demand by the dev server—`autoConfigureInertiaAssets` points the HTML response at Vite during development, so no separate build step is necessary.
+- The Bun process also spawns the Vite dev server automatically. Set `GUREN_DEV_VITE=0` if you prefer to run Vite yourself (for example inside an IDE task).
+- When the server boots you’ll see a crimson ASCII banner with the current Guren version and helpful URLs. Set `GUREN_DEV_BANNER=0` if you ever want to suppress it (for example in automated scripts).
 
 ## 6. Next Steps
 

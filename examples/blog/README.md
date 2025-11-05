@@ -29,7 +29,7 @@ This example demonstrates how to build a simple blog using the Guren framework, 
    ```bash
    bun run --cwd examples/blog dev
    ```
-   The API server listens on http://localhost:3333 by default (override with `PORT`) and proxies asset requests to Vite, which serves the React frontend with HMR on http://localhost:5173.
+   The API server listens on http://localhost:3333 by default (override with `PORT`) and automatically launches the Vite dev server for the React frontend (typically http://localhost:5173). Set `GUREN_DEV_VITE=0` if you prefer to manage Vite yourself.
 
 5. **Smoke test**
    ```bash

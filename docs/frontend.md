@@ -112,6 +112,6 @@ You can override the default resolver—useful for custom component lookups—by
 - Use module path aliases (configured in `tsconfig.json`) to avoid long relative imports.
 
 ## Hot Reloading
-Running `bun run dev` keeps the frontend and backend in sync. Changes to TSX files trigger instant reloads thanks to Bun’s dev server.
+Running `bun run dev` keeps the frontend and backend in sync—the Bun process automatically launches the Vite dev server, so changes to TSX files trigger instant reloads without extra commands. If you need to customize that workflow, import `startViteDevServer()` from `@guren/server` and manage the Vite instance yourself.
 
 By structuring your pages and components with these patterns, you get a smooth SPA experience with minimal boilerplate, powered entirely by React and Inertia.

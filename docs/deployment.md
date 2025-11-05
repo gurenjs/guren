@@ -57,6 +57,9 @@ NODE_ENV=production bun run bin/serve.ts
 
 For reliability, wrap this command with a process manager (e.g. `systemd`, `pm2`, `supervisord`, or your hosting provider’s run command). Example `systemd` unit:
 
+- The startup banner only renders in non-production environments by default. If you want to show it (or disable it explicitly) set `GUREN_DEV_BANNER=1` or `GUREN_DEV_BANNER=0`.
+- The framework skips launching the Vite dev server when `NODE_ENV=production`. If you’re running a custom dev workflow in production-like environments, toggle it with `GUREN_DEV_VITE=1` (on) or `GUREN_DEV_VITE=0` (off).
+
 ```ini
 [Unit]
 Description=Guren Application

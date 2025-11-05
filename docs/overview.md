@@ -12,7 +12,7 @@ Guren is a Bun-native TypeScript MVC framework that unites Laravel-like ergonomi
 1. Scaffold a project (choose SSR or SPA when prompted, or force with `--mode ssr|spa`): `bunx create-guren-app my-app`
 2. Change into the directory: `cd my-app`
 3. Install dependencies: `bun install`
-4. Start the dev server: `bun run dev` and visit `http://localhost:3333`
+4. Start the dev server (Bun + Vite auto-launch together): `bun run dev` and visit `http://localhost:3333`
 
 Need more detail? Head to [Getting Started](./getting-started.md) for database setup and environment configuration.
 
