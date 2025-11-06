@@ -1,0 +1,39 @@
+{
+  "name": "web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "routes:types": "bunx guren routes:types --routes routes/web.ts --out types/generated/routes.d.ts --force",
+    "dev": "bun run dev:server",
+    "dev:server": "bun run --watch --hot bin/serve.ts",
+    "build": "bunx vite build && bunx vite build --ssr",
+    "preview": "bunx vite preview",
+    "db:make": "bunx guren make:migration",
+    "db:migrate": "bunx guren db:migrate",
+    "db:seed": "bunx guren db:seed"
+  },
+  "dependencies": {
+    "@guren/cli": "workspace:*",
+    "@guren/inertia-client": "workspace:*",
+    "@guren/core": "workspace:*",
+    "@guren/testing": "workspace:*",
+    "@guren/orm": "workspace:*",
+    "@guren/server": "workspace:*",
+    "@inertiajs/react": "^2.2.15",
+    "drizzle-orm": "0.44.7",
+    "postgres": "^3.4.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "drizzle-kit": "0.27.0",
+    "typescript": "^5.4.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "vite": "^7.0.0",
+    "@tailwindcss/vite": "^4.1.16",
+    "tailwindcss": "^4.1.16"
+  }
+}

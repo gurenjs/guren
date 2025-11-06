@@ -40,7 +40,8 @@
   },
   "workspaces": [
     "packages/*",
-    "examples/*"
+    "examples/*",
+    "web"
   ],
   "devDependencies": {
     "@changesets/cli": "^2.29.7",
