@@ -21,6 +21,9 @@ NODE_ENV=production
 
 Avoid committing this file—use your platform’s secret manager instead.
 
+> [!WARNING]
+> Treat every value in `.env` as sensitive. Prefer secret managers or environment variables provided by your platform so credentials never appear in git history, build logs, or container images.
+
 ## 2. Install Dependencies
 On the deployment host:
 
@@ -47,6 +50,9 @@ bun run db:seed
 ```
 
 Run these commands on every deployment to keep the schema in sync. Seeders are optional and typically used for demo or staging data.
+
+> [!IMPORTANT]
+> Run migrations before the new code begins serving traffic. Rolling back partially applied migrations is messy—if a deploy fails after running them, redeploy the previous commit **without** re-running migrations.
 
 ## 5. Start the Server
 You can start the Bun server directly:

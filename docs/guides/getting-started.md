@@ -43,6 +43,9 @@ Copy the bundled template and adjust values as needed:
 cp .env.example .env
 ```
 
+> [!CAUTION]
+> Keep `.env` out of version control. If credentials leak in a commit, rotate the database user and regenerate any API keys referenced in the file.
+
 Key settings:
 - `APP_URL`: Base URL reported to Inertia.
 - `DATABASE_URL`: Postgres connection string (defaults to `postgres://guren:guren@localhost:54322/guren`).
@@ -62,6 +65,9 @@ docker run --name guren-postgres \
 ```
 
 Stop the container with `docker stop guren-postgres` when you are done. If you already have a database, just update `DATABASE_URL` instead.
+
+> [!TIP]
+> Already running PostgreSQL locally or in the cloud? Skip the container entirely and point `DATABASE_URL` at that instance—the rest of the guide works unchanged.
 
 ## 5. Run the Development Server
 
@@ -95,6 +101,15 @@ NODE_ENV=production bun run build
 This runs both the client and SSR builds, emitting hashed assets under `public/assets/` plus manifests that `autoConfigureInertiaAssets` reads at runtime. Deploy the project as-is and the Bun server will stream SSR HTML on first request.
 
 ## Additional Resources
-- Learn about framework internals in [Architecture](./architecture.md)
-- Explore the command-line tooling via the [CLI Reference](./cli.md)
-- Found an issue or have ideas? Please open an issue or PR—we welcome contributions.
+Continue through the rest of the guides in this order:
+
+1. [Architecture](./architecture.md)
+2. [Routing Guide](./routing.md)
+3. [Controller Guide](./controllers.md)
+4. [Database Guide](./database.md)
+5. [Frontend Guide](./frontend.md)
+6. [Authentication Guide](./authentication.md)
+7. [Testing Guide](./testing.md)
+8. [Deployment Guide](./deployment.md)
+
+Need tooling details along the way? Keep the [CLI Reference](./cli.md) handy, and if you spot issues or have ideas, please open an issue or PR—we welcome contributions.

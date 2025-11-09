@@ -4,7 +4,7 @@ import { startInertiaClient } from '@guren/inertia-client'
 let pages: Record<string, () => Promise<unknown>> | undefined
 
 try {
-  pages = import.meta.glob!('./pages/**/*.tsx')
+  pages = import.meta.glob('./pages/**/*.tsx')
 } catch {
   pages = undefined
 }

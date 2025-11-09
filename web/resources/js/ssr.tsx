@@ -1,4 +1,4 @@
-import type { Page } from '@inertiajs/core'
+import type { Page } from "@inertiajs/core";
 import { renderInertiaServer } from '@guren/inertia-client'
 import type { InertiaSsrContext, InertiaSsrResult } from '@guren/server'
 

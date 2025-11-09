@@ -1,1 +1,15 @@
 @import 'tailwindcss';
+
+@theme {
+  --font-family-display: 'Inter', 'Inter var', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --color-crimson-50: #fff5f5;
+  --color-crimson-200: #f4b0b0;
+  --color-crimson-500: #b71c1c;
+  --color-crimson-950: #0f0a0a;
+}
+
+body {
+  font-family: var(--font-family-display);
+  background-color: var(--color-crimson-950);
+  color: var(--color-crimson-50);
+}

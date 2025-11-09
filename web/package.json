@@ -15,16 +15,20 @@
   },
   "dependencies": {
     "@guren/cli": "workspace:*",
-    "@guren/inertia-client": "workspace:*",
     "@guren/core": "workspace:*",
-    "@guren/testing": "workspace:*",
+    "@guren/inertia-client": "workspace:*",
     "@guren/orm": "workspace:*",
     "@guren/server": "workspace:*",
+    "@guren/testing": "workspace:*",
+    "@inertiajs/core": "^2.2.15",
     "@inertiajs/react": "^2.2.15",
     "drizzle-orm": "0.44.7",
+    "marked": "^15.0.11",
+    "marked-highlight": "^2.2.3",
     "postgres": "^3.4.3",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "shiki": "^3.15.0"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",

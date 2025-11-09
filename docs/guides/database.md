@@ -75,6 +75,9 @@ bun run db:migrate
 
 The script included in the scaffold executes pending migrations in order. Re-running the command is safe because completed migrations are tracked.
 
+> [!NOTE]
+> Once a migration has shipped to any environment, treat it as immutable. To correct mistakes, create a follow-up migration instead of editing the existing SQL file—this keeps the history consistent across all deployments.
+
 ## Seeding Data
 Place seed scripts in `db/seeders/`. A typical seeder exports an async `run()` function:
 
@@ -94,6 +97,9 @@ bun run db:seed
 ```
 
 Use seeders to load fixtures for development, testing, or demos.
+
+> [!CAUTION]
+> Seed scripts can mutate or purge data. Never point them at your production database unless the seeder was explicitly designed for that environment.
 
 ## Working with the ORM
 After the `DatabaseProvider` (or your own provider that calls `bootModels()`) runs during application startup, every model gains access to the configured database adapter. Common helpers include:
