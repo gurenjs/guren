@@ -1,5 +1,8 @@
 import { isAbsolute, resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
+import { ensureErrorStackTracePolyfill } from "../../support/error-polyfill";
+
+ensureErrorStackTracePolyfill();
 
 export interface InertiaOptions {
   readonly url?: string;
@@ -237,8 +240,8 @@ function extractSsrRenderer(module: unknown): InertiaSsrRenderer | undefined {
     typeof (module as Record<string, unknown>).render === "function"
       ? (module as Record<string, InertiaSsrRenderer>).render
       : typeof (module as Record<string, unknown>).default === "function"
-      ? (module as Record<string, InertiaSsrRenderer>).default
-      : undefined;
+        ? (module as Record<string, InertiaSsrRenderer>).default
+        : undefined;
 
   if (!candidate) {
     return undefined;

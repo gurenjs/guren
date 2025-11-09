@@ -1,3 +1,7 @@
+import { ensureErrorStackTracePolyfill } from './support/error-polyfill'
+
+ensureErrorStackTracePolyfill()
+
 export { Application } from './http/Application'
 export type { Context, ApplicationListenOptions } from './http/Application'
 export { registerDevAssets } from './http/dev-assets'

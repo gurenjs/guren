@@ -163,7 +163,8 @@ export function autoConfigureInertiaAssets(app: Application, options: AutoConfig
 
   if (!isProduction) {
     const devServerUrl = options.devServerUrl ?? process.env.VITE_DEV_SERVER_URL ?? 'http://localhost:5173'
-    process.env.GUREN_INERTIA_ENTRY = `${devServerUrl}/resources/js/dev-entry.ts`
+    const normalizedDevServerUrl = normalizeDevServerUrl(devServerUrl)
+    process.env.GUREN_INERTIA_ENTRY = `${normalizedDevServerUrl}/resources/js/dev-entry.ts`
     process.env.GUREN_INERTIA_STYLES = ''
     importMapEntries['@guren/inertia-client'] = DEFAULT_VENDOR_CLIENT_PATH
 
@@ -268,6 +269,20 @@ function resolveDevSsrEntry(options: InertiaAssetsOptions): string | undefined {
   const resourcesDir = resolve(moduleDir, resourcesPath)
 
   return resolve(resourcesDir, 'js/ssr.tsx')
+}
+
+function normalizeDevServerUrl(value: string): string {
+  if (!value) {
+    return value
+  }
+
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return trimmed
+  }
+
+  const stripped = trimmed.replace(/\/+$/u, '')
+  return stripped.length > 0 ? stripped : '/'
 }
 
 type ViteManifestEntryObject = {
