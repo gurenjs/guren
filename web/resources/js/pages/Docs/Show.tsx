@@ -30,6 +30,86 @@ interface DocsShowProps {
 }
 
 const docsContentStyles = `
+  .docs-layout {
+    font-family: ${docsTheme.fontFamily};
+    margin: 0 auto;
+    max-width: 1100px;
+    padding: 3rem 1.5rem 4rem;
+    display: grid;
+    gap: 2.5rem;
+    grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+    background-color: ${docsTheme.surfaces.page};
+    color: ${docsTheme.text.primary};
+  }
+  .docs-sidebar {
+    position: sticky;
+    top: 2rem;
+    align-self: start;
+    max-height: calc(100vh - 4rem);
+    overflow-y: auto;
+    padding-right: 0.5rem;
+  }
+  .docs-article {
+    min-width: 0;
+    background-color: ${docsTheme.surfaces.panel};
+    border-radius: 1rem;
+    border: 1px solid ${docsTheme.border.soft};
+    padding: 2.5rem 3rem;
+    box-shadow: ${docsTheme.shadow.card};
+  }
+  @media (max-width: 1024px) {
+    .docs-layout {
+      grid-template-columns: 1fr;
+      padding: 2.5rem 1.25rem 3rem;
+    }
+    .docs-sidebar {
+      position: static;
+      max-height: none;
+      padding-right: 0;
+    }
+    .docs-article {
+      padding: 2rem 1.75rem;
+    }
+  }
+  .docs-content {
+    min-width: 0;
+    width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  .docs-content > * {
+    max-width: 100%;
+  }
+  .docs-content pre,
+  .docs-content .shiki {
+    max-width: 100%;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .docs-content pre {
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .docs-content pre code {
+    white-space: inherit;
+  }
+  .docs-content a {
+    color: ${docsTheme.accent.strong};
+    text-decoration-color: rgba(183, 28, 28, 0.45);
+    text-underline-offset: 0.2em;
+    font-weight: 600;
+  }
+  .docs-content a:hover,
+  .docs-content a:focus-visible {
+    color: ${docsTheme.accent.base};
+    text-decoration-color: rgba(183, 28, 28, 0.8);
+  }
+  .docs-content a:focus-visible {
+    outline: 2px solid ${docsTheme.accent.strong};
+    outline-offset: 2px;
+    border-radius: 0.2rem;
+  }
   .shiki {
     border-radius: 1rem;
     border: 1px solid ${docsTheme.border.soft};
@@ -116,6 +196,27 @@ const docsContentStyles = `
   .docs-alert--caution .docs-alert__label {
     color: #5b0e0e;
   }
+  .docs-content img,
+  .docs-content video {
+    max-width: 100%;
+    height: auto;
+    border-radius: 0.75rem;
+  }
+  .docs-content table {
+    width: 100%;
+    display: block;
+    overflow-x: auto;
+    border-collapse: collapse;
+  }
+  .docs-content table thead tr {
+    background-color: rgba(183, 28, 28, 0.04);
+  }
+  .docs-content table th,
+  .docs-content table td {
+    padding: 0.65rem 0.85rem;
+    text-align: left;
+    border-bottom: 1px solid ${docsTheme.border.soft};
+  }
 `
 
 export default function DocsShow({ categories, doc, active }: DocsShowProps) {
@@ -128,29 +229,8 @@ export default function DocsShow({ categories, doc, active }: DocsShowProps) {
     <>
       <Head title={pageTitle} />
       <style dangerouslySetInnerHTML={{ __html: docsContentStyles }} />
-      <main
-        style={{
-          fontFamily: docsTheme.fontFamily,
-          margin: '0 auto',
-          maxWidth: '1100px',
-          padding: '3rem 1.5rem 4rem',
-          display: 'grid',
-          gap: '2.5rem',
-          gridTemplateColumns: 'minmax(220px, 260px) minmax(0, 1fr)',
-          backgroundColor: docsTheme.surfaces.page,
-          color: docsTheme.text.primary,
-        }}
-      >
-        <aside
-          style={{
-            position: 'sticky',
-            top: '2rem',
-            alignSelf: 'start',
-            maxHeight: 'calc(100vh - 4rem)',
-            overflowY: 'auto',
-            paddingRight: '0.5rem',
-          }}
-        >
+      <main className="docs-layout">
+        <aside className="docs-sidebar">
           {categories.map((group) => (
             <section key={group.category} style={{ marginBottom: '1.5rem' }}>
               <h2
@@ -193,16 +273,7 @@ export default function DocsShow({ categories, doc, active }: DocsShowProps) {
             </section>
           ))}
         </aside>
-        <article
-          style={{
-            minWidth: 0,
-            backgroundColor: docsTheme.surfaces.panel,
-            borderRadius: '1rem',
-            border: `1px solid ${docsTheme.border.soft}`,
-            padding: '2.5rem 3rem',
-            boxShadow: docsTheme.shadow.card,
-          }}
-        >
+        <article className="docs-article">
           {doc ? (
             <>
               <header style={{ marginBottom: '2rem' }}>

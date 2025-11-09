@@ -32,10 +32,7 @@ export default function Home({ message }: HomeProps) {
                 alt="Guren logo"
                 className="size-12 rounded-2xl p-1"
               />
-              <div className="leading-tight">
-                <p className="text-lg font-semibold">Guren</p>
-                <p className="text-sm text-white/70">Bun-native MVC</p>
-              </div>
+              <p className="text-lg font-semibold">Guren</p>
             </div>
             <nav className="flex flex-wrap items-center gap-4 text-sm font-medium opacity-90">
               <Link href="/docs" className="transition hover:text-crimson-200">
@@ -60,7 +57,7 @@ export default function Home({ message }: HomeProps) {
               aria-hidden
               className="pointer-events-none absolute -right-16 -bottom-16 h-72 w-72 rounded-full bg-[radial-gradient(circle,rgba(183,28,28,.35),transparent_65%)]"
             />
-            <p className="text-sm font-semibold uppercase tracking-[0.35em] text-crimson-200">Powered by Guren</p>
+            <p className="text-sm font-semibold uppercase tracking-[0.35em] text-crimson-200">Bun-native MVC</p>
             <h1 className="mt-4 text-4xl font-semibold leading-tight text-white md:text-5xl">{message}</h1>
             <p className="mt-4 max-w-2xl text-base leading-relaxed text-white/80 md:text-lg">
               Bring Laravel-inspired productivity to Bun. Wire up routes, controllers, React-powered Inertia pages, and Drizzle ORM in

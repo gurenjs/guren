@@ -18,9 +18,41 @@ declare const Bun:
       port?: number
       hostname?: string
       fetch: (request: Request) => Response | Promise<Response>
-    }): unknown
+    }): { stop?: (closeConnections?: boolean) => void | Promise<void> } | undefined
   }
   | undefined
+
+type BunServer = { stop?: (closeConnections?: boolean) => void | Promise<void> }
+
+type GurenGlobal = typeof globalThis & {
+  __gurenActiveServer?: BunServer
+}
+
+function getGlobalState(): GurenGlobal {
+  return globalThis as GurenGlobal
+}
+
+async function stopActiveBunServer(): Promise<void> {
+  const state = getGlobalState()
+  const previous = state.__gurenActiveServer
+
+  if (!previous?.stop) {
+    state.__gurenActiveServer = undefined
+    return
+  }
+
+  try {
+    await Promise.resolve(previous.stop())
+  } catch (error) {
+    console.warn('Failed to stop previous Bun server:', error)
+  } finally {
+    state.__gurenActiveServer = undefined
+  }
+}
+
+function setActiveBunServer(server?: BunServer): void {
+  getGlobalState().__gurenActiveServer = server
+}
 
 export type BootCallback = (app: Hono) => void | Promise<void>
 
@@ -47,6 +79,7 @@ export class Application {
   private context?: ApplicationContext
   private readonly authManager: AuthManager
   private viteDevServer?: Awaited<ReturnType<typeof startViteDevServer>>['server']
+  private bunServer?: BunServer
   private viteTeardownRegistered = false
 
   constructor(private readonly options: ApplicationOptions = {}) {
@@ -104,6 +137,8 @@ export class Application {
       throw new Error('Bun runtime is required to call Application.listen')
     }
 
+    await stopActiveBunServer()
+
     const { port = 3000, hostname = '0.0.0.0', assetsUrl, vite } = options
     const envAssetsUrl =
       typeof process !== 'undefined' ? process.env?.VITE_DEV_SERVER_URL : undefined
@@ -139,11 +174,13 @@ export class Application {
       }
     }
 
-    Bun.serve({
+    const server = Bun.serve({
       port,
       hostname,
       fetch: (request: Request) => this.fetch(request),
     })
+    this.bunServer = server
+    setActiveBunServer(server)
 
     const shouldLogBanner =
       typeof process === 'undefined' ||
