@@ -1,14 +1,2 @@
 [workspace]
 members = ["packages/*", "examples/*", "web"]
-
-[alias]
-"@guren/server" = "./packages/server/src/index.ts"
-"@guren/server/vite" = "./packages/server/src/vite/index.ts"
-"@guren/cli" = "./packages/cli/src/index.ts"
-"@guren/cli/vite" = "./packages/cli/src/vite/index.ts"
-"@guren/core" = "./packages/core/src/index.ts"
-"@guren/orm" = "./packages/orm/src/index.ts"
-"@guren/orm/drizzle" = "./packages/orm/src/drizzle.ts"
-"@guren/testing" = "./packages/testing/src/index.ts"
-"@guren/inertia-client" = "./packages/inertia-client/src/index.ts"
-"@guren/inertia-client/app" = "./packages/inertia-client/src/app.tsx"
