@@ -1,2 +1,2 @@
 [workspace]
-members = ["packages/*", "examples/*"]
+members = ["packages/*", "examples/*", "web"]

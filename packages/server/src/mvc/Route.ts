@@ -38,13 +38,26 @@ export interface RouteDefinition {
   name?: string
 }
 
+const ROUTE_REGISTRY_KEY = '__guren_route_registry__'
+const ROUTE_PREFIX_STACK_KEY = '__guren_route_prefix_stack__'
+
+type RouteGlobalState = {
+  [ROUTE_REGISTRY_KEY]?: RegisteredRoute[]
+  [ROUTE_PREFIX_STACK_KEY]?: string[]
+}
+
+const routeGlobal = globalThis as RouteGlobalState
+
+routeGlobal[ROUTE_REGISTRY_KEY] ??= []
+routeGlobal[ROUTE_PREFIX_STACK_KEY] ??= []
+
 /**
  * Route registry stores Laravel-style route declarations and eagerly mounts
  * them onto a Hono instance when requested.
  */
 export class Route {
-  private static readonly registry: RegisteredRoute[] = []
-  private static readonly prefixStack: string[] = []
+  private static readonly registry: RegisteredRoute[] = routeGlobal[ROUTE_REGISTRY_KEY]!
+  private static readonly prefixStack: string[] = routeGlobal[ROUTE_PREFIX_STACK_KEY]!
 
   private static add<C extends ControllerConstructor>(
     method: string,

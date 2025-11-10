@@ -1,0 +1,72 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-family-display: 'Inter', 'Inter var', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --color-crimson-50: #fff5f5;
+  --color-crimson-200: #f4b0b0;
+  --color-crimson-500: #b71c1c;
+  --color-crimson-950: #0f0a0a;
+}
+
+:root {
+  --color-crimson-50: #fff5f5;
+  --color-crimson-200: #f4b0b0;
+  --color-crimson-500: #b71c1c;
+  --color-crimson-950: #0f0a0a;
+  --docs-surface-page: #fff8f5;
+  --docs-surface-panel: #ffffff;
+  --docs-surface-raised: #fff1f1;
+  --docs-border-soft: #f4b0b0;
+  --docs-border-strong: #d86a6a;
+  --docs-text-primary: #2f0d0d;
+  --docs-text-secondary: #5f2a2a;
+  --docs-text-muted: #7a4f4f;
+  --docs-heading: #8f1111;
+  --docs-accent: #9d1c1c;
+  --docs-accent-strong: #b71c1c;
+  --docs-accent-tint: rgba(183, 28, 28, 0.12);
+  --docs-shadow-card: 0 12px 30px rgba(73, 7, 7, 0.08);
+}
+
+body {
+  font-family: var(--font-family-display);
+  background-color: var(--color-crimson-950);
+  color: var(--color-crimson-50);
+}
+
+body.docs-theme {
+  background-color: var(--docs-surface-page);
+  color: var(--docs-text-primary);
+}
+
+.docs-nav-link {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  transition: background-color 150ms ease, color 150ms ease, outline-color 150ms ease;
+}
+
+.docs-nav-link:hover,
+.docs-nav-link:focus-visible {
+  color: var(--docs-accent-strong) !important;
+  background-color: var(--docs-accent-tint) !important;
+}
+
+.docs-nav-link:focus-visible {
+  outline-color: var(--docs-accent-strong);
+}
+
+.docs-nav-link--active {
+  font-weight: 700 !important;
+  color: var(--docs-accent-strong) !important;
+  background-color: var(--docs-accent-tint) !important;
+}
+
+.docs-primary-link {
+  outline: 2px solid transparent;
+  outline-offset: 3px;
+  transition: background-color 150ms ease, outline-color 150ms ease;
+}
+
+.docs-primary-link:focus-visible {
+  outline-color: var(--docs-accent-strong);
+}
