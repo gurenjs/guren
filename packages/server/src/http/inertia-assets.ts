@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
 import type { Application } from './Application'
 import { createStaticRewrite, registerDevAssets, type DevAssetsOptions } from './dev-assets'
+import { registerRootPublicAssets } from './public-assets'
 
 export interface InertiaAssetsOptions extends DevAssetsOptions {
   /** Default stylesheet entry embedded into Inertia responses. */
@@ -85,6 +86,8 @@ export function configureInertiaAssets(app: Application, options: InertiaAssetsO
   if (options.favicon !== false) {
     app.hono.get('/favicon.ico', () => new Response(null, { status: 204 }))
   }
+
+  registerRootPublicAssets(app, publicDir, options.rootPublicAssets)
 
   if (isProduction && options.inertiaClient !== false) {
     try {

@@ -28,7 +28,7 @@ export default function Home({ message }: HomeProps) {
           <header className="flex flex-col gap-4 rounded-full border border-white/10 bg-black/30 px-8 py-5 text-white shadow-2xl shadow-black/50 backdrop-blur-xl md:flex-row md:items-center md:justify-between">
             <div className="flex items-center gap-4">
               <img
-                src="/public/logo.svg"
+                src="/logo.svg"
                 alt="Guren logo"
                 className="size-12 rounded-2xl p-1"
               />

@@ -4,6 +4,7 @@ import { dirname, extname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import type { Application } from './Application'
+import { registerRootPublicAssets, type RootPublicAssetsConfig } from './public-assets'
 
 declare const Bun: any
 
@@ -40,6 +41,8 @@ export interface DevAssetsOptions {
   publicRoute?: string
   /** Whether to register a no-op favicon route. Defaults to true when static assets are served. */
   favicon?: boolean
+  /** Serve selected files from the public directory without the `/public` prefix. */
+  rootPublicAssets?: RootPublicAssetsConfig
 }
 
 // get the path to the inertia client bundled with Guren
@@ -141,6 +144,8 @@ export function registerDevAssets(app: Application, options: DevAssetsOptions): 
     if (options.favicon !== false) {
       app.hono.get('/favicon.ico', () => new Response(null, { status: 204 }))
     }
+
+    registerRootPublicAssets(app, publicDir, options.rootPublicAssets)
   }
 }
 

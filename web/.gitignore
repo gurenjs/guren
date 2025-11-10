@@ -1,5 +1,10 @@
 node_modules
-.env
-.env.local
 bun.lockb
 dist
+
+### Wrangler ###
+.wrangler/
+.env*
+!.env.example
+.dev.vars*
+!.dev.vars.example
