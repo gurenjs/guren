@@ -1,5 +1,18 @@
 # @guren/core
 
+## 0.2.0-alpha.6
+
+### Minor Changes
+
+- Added SSR support, ORM relationships, pagination, and authentication enhancements.
+
+### Patch Changes
+
+- Updated dependencies
+  - @guren/cli@0.2.0-alpha.6
+  - @guren/orm@0.2.0-alpha.6
+  - @guren/server@0.2.0-alpha.6
+
 ## 0.1.1-alpha.5
 
 ### Patch Changes
