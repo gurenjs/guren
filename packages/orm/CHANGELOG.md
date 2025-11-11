@@ -1,5 +1,11 @@
 # @guren/orm
 
+## 0.2.0-alpha.7
+
+### Patch Changes
+
+- Fix the project created with the `create-guren-app` command so it can start successfully.
+
 ## 0.2.0-alpha.6
 
 ### Minor Changes

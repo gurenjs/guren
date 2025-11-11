@@ -1,5 +1,13 @@
 # @guren/server
 
+## 0.2.0-alpha.7
+
+### Patch Changes
+
+- Fix the project created with the `create-guren-app` command so it can start successfully.
+- Updated dependencies
+  - @guren/inertia-client@0.2.0-alpha.7
+
 ## 0.2.0-alpha.6
 
 ### Minor Changes
