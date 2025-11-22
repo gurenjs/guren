@@ -14,11 +14,12 @@ export { configureInertiaAssets, autoConfigureInertiaAssets } from './http/inert
 export type { AutoConfigureInertiaOptions } from './http/inertia-assets'
 export { parseRequestPayload, formatValidationErrors } from './http/request'
 export { Controller } from './mvc/Controller'
-export type { InertiaResponse, InferInertiaProps, ControllerInertiaProps } from './mvc/Controller'
+export type { InertiaResponse, InferInertiaProps, ControllerInertiaProps, AuthPayload } from './mvc/Controller'
 export { Route } from './mvc/Route'
 export type { RouteDefinition } from './mvc/Route'
 export { ViewEngine } from './mvc/ViewEngine'
 export { inertia } from './mvc/inertia/InertiaEngine'
+export { setInertiaSharedProps } from './mvc/inertia/shared'
 export type {
   InertiaOptions,
   InertiaPagePayload,
@@ -27,6 +28,11 @@ export type {
   InertiaSsrRenderer,
   InertiaSsrResult,
 } from './mvc/inertia/InertiaEngine'
+export type {
+  SharedInertiaPropsResolver,
+  InertiaSharedProps,
+  ResolvedSharedInertiaProps,
+} from './mvc/inertia/shared'
 export type { Provider, ProviderConstructor } from './plugins/Provider'
 export { ApplicationContext } from './plugins/ApplicationContext'
 export { InertiaViewProvider } from './plugins/providers/InertiaViewProvider'
@@ -61,6 +67,7 @@ export {
   attachAuthContext,
 }
   from './http/middleware'
+export { AUTH_CONTEXT_KEY } from './http/middleware/auth'
 export type {
   Middleware,
   Session,

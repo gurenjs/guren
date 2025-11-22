@@ -1,15 +1,14 @@
-import type { Context } from '@guren/core'
-import { parseRequestPayload, formatValidationErrors } from '@guren/core'
-import Controller from '../Controller.js'
+import { Controller, parseRequestPayload, formatValidationErrors } from '@guren/server'
 import { LoginSchema } from '../../Validators/LoginValidator.js'
 
 export default class LoginController extends Controller {
-  async show(ctx: Context): Promise<Response> {
-    return this.inertiaWithAuth('auth/Login', { email: ctx.req.query('email') ?? '' }, { url: ctx.req.path, title: 'Login | Guren Blog' })
+  async show(): Promise<Response> {
+    const email = this.request.query('email') ?? ''
+    return this.inertia('auth/Login', { email }, { url: this.request.path, title: 'Login | Guren Blog' })
   }
 
-  async store(ctx: Context): Promise<Response> {
-    const rawPayload = await parseRequestPayload(ctx)
+  async store(): Promise<Response> {
+    const rawPayload = await parseRequestPayload(this.ctx)
     const result = LoginSchema.safeParse(rawPayload)
 
     if (!result.success) {

@@ -43,6 +43,7 @@ The `@guren/testing` package provides helpers tailored for controller testing, i
 
 - `createControllerContext(url, init?)` – builds a controller-ready Hono context.
 - `createGurenControllerModule()` – mocks the `guren` package when running in Vitest so you can test controllers in isolation.
+- `createControllerModuleMock()` – drop-in mock for `@guren/server` with `Controller`, `json`, and `redirect` wired for Vitest.
 - `readInertiaResponse(response)` – normalizes Inertia responses into `{ format, payload, body }` for easy assertions.
 
 Import these utilities in Vitest suites (for example under `examples/blog/tests`) to keep React/Inertia controller tests expressive while avoiding Bun-specific APIs.

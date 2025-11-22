@@ -1,9 +1,8 @@
-import type { Context } from '@guren/core'
-import Controller from './Controller.js'
+import { Controller } from '@guren/server'
 
 export default class DashboardController extends Controller {
-  async index(ctx: Context): Promise<Response> {
+  async index() {
     const user = await this.auth.user()
-    return this.inertiaWithAuth('dashboard/Index', { user }, { url: ctx.req.path, title: 'Dashboard | Guren Blog' })
+    return this.inertia('dashboard/Index', { user }, { url: this.request.path, title: 'Dashboard | Guren Blog' })
   }
 }

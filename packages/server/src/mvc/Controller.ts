@@ -1,25 +1,32 @@
 import type { Context } from 'hono'
 import { inertia, type InertiaOptions } from './inertia/InertiaEngine'
+import { resolveSharedInertiaProps, type ResolvedSharedInertiaProps } from './inertia/shared'
 import { AUTH_CONTEXT_KEY } from '../http/middleware/auth'
 import type { AuthContext } from '../auth'
 
 type DefaultInertiaProps = Record<string, unknown>
 
+export type AuthPayload = Record<string, unknown> & { user: unknown }
+
 type InertiaResponseMarker<Component extends string, Props extends DefaultInertiaProps> = {
-  readonly __gurenInertia?: {
-    readonly component: Component
-    readonly props: Props
+  __gurenInertia: {
+    component: Component
+    props: Props
   }
 }
 
 export type InertiaResponse<Component extends string, Props extends DefaultInertiaProps> = Response &
   InertiaResponseMarker<Component, Props>
 
-export type InferInertiaProps<T> = [T] extends [InertiaResponse<string, infer Props>]
-  ? Props
-  : [T] extends [Promise<infer Awaited>]
-    ? InferInertiaProps<Awaited>
-    : DefaultInertiaProps
+type InertiaWithProps = { __gurenInertia: { props: DefaultInertiaProps } }
+
+type ExtractInertiaProps<T> = Awaited<T> extends infer R
+  ? R extends InertiaWithProps
+    ? R['__gurenInertia']['props']
+    : never
+  : never
+
+export type InferInertiaProps<T> = [ExtractInertiaProps<T>] extends [never] ? DefaultInertiaProps : ExtractInertiaProps<T>
 
 export type ControllerInertiaProps<TController extends Controller, TAction extends keyof TController> = TController[TAction] extends (
   ...args: any[]
@@ -71,18 +78,26 @@ export class Controller {
     component: Component,
     props: Props,
     options: InertiaResponseOptions = {},
-  ): Promise<InertiaResponse<Component, Props>> {
+  ): Promise<InertiaResponse<Component, Props & ResolvedSharedInertiaProps>> {
     const ctx = this.ctx
     const { url: overrideUrl, ...rest } = options
     const url = overrideUrl ?? ctx.req.path ?? ctx.req.url ?? ''
 
-    const response = await inertia(component, props as Record<string, unknown>, {
+    const sharedProps = await resolveSharedInertiaProps(ctx)
+    const propsWithShared = { ...sharedProps, ...props } as Props & ResolvedSharedInertiaProps
+
+    const response = await inertia(component, propsWithShared as Record<string, unknown>, {
       ...rest,
       url,
       request: ctx.req.raw,
     })
 
-    return response as InertiaResponse<Component, Props>
+    ;(response as InertiaResponse<Component, typeof propsWithShared>).__gurenInertia = {
+      component,
+      props: propsWithShared,
+    }
+
+    return response as InertiaResponse<Component, typeof propsWithShared>
   }
 
   protected json<T>(data: T, init: ResponseInit = {}): Response {

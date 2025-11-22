@@ -1,11 +1,11 @@
-import { Controller, Context } from '@guren/server'
+import { Controller } from '@guren/server'
 
 export default class HomeController extends Controller {
-  async index(ctx: Context): Promise<Response> {
+  async index(): Promise<Response> {
     const props = {
       message: 'Build full-stack web apps blazingly fast.',
     }
 
-    return this.inertia('Home', props, { url: ctx.req.path, title: 'Guren' })
+    return this.inertia('Home', props, { url: this.request.path, title: 'Guren' })
   }
 }

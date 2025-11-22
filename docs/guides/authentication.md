@@ -86,14 +86,28 @@ Controllers now expose an `auth` helper:
 
 ```ts
 export default class DashboardController extends Controller {
-  async index(ctx: Context) {
+  async index() {
     const user = await this.auth.user()
-    return this.inertia('dashboard/Index', { user }, { url: ctx.req.path })
+    return this.inertia('dashboard/Index', { user }, { url: this.request.path })
   }
 }
 ```
 
 Use `parseRequestPayload()` and `formatValidationErrors()` from `guren` to keep controller-level request handling consistent when integrating Zod or other schema validators.
+
+To surface the logged-in user on every Inertia page without repeating controller code, register shared props during app boot:
+
+```ts
+// config/inertia.ts
+import { setInertiaSharedProps, AUTH_CONTEXT_KEY, type AuthContext } from '@guren/server'
+
+setInertiaSharedProps(async (ctx) => {
+  const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
+  return { auth: { user: await auth?.user() } }
+})
+```
+
+Augment `InertiaSharedProps` (see the Controllers guide) to type this `auth` payload for React pages.
 
 Route middleware makes protecting endpoints straightforward:
 

@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs'
 import type { Application } from './Application'
 import { createStaticRewrite, registerDevAssets, type DevAssetsOptions } from './dev-assets'
 import { registerRootPublicAssets } from './public-assets'
+import { parseImportMap } from '../support/import-map'
 
 export interface InertiaAssetsOptions extends DevAssetsOptions {
   /** Default stylesheet entry embedded into Inertia responses. */
@@ -149,13 +150,23 @@ export function configureInertiaAssets(app: Application, options: InertiaAssetsO
 }
 
 export function autoConfigureInertiaAssets(app: Application, options: AutoConfigureInertiaOptions): void {
+  const providedEnv = captureInertiaEnvFlags()
   configureInertiaAssets(app, options)
 
   const moduleDir = options.importMeta ? dirname(fileURLToPath(options.importMeta.url)) : undefined
   const resourcesDir = resolveResourcesDir(options, moduleDir)
   const ssrOutDir = options.ssrOutDir ?? '.guren/ssr'
-  const importMapEntries = parseImportMap(process.env.GUREN_INERTIA_IMPORT_MAP)
+  const importMapEntries = parseImportMap(process.env.GUREN_INERTIA_IMPORT_MAP, {
+    context: 'GUREN_INERTIA_IMPORT_MAP from environment',
+  })
   const ssrEnabled = options.enableSsr ?? true
+  const setEnvIfUserDidNotProvide = (key: InertiaEnvKey, value: string) => {
+    if (providedEnv[key]) {
+      return
+    }
+
+    process.env[key] = value
+  }
 
   if (!moduleDir) {
     return
@@ -167,21 +178,21 @@ export function autoConfigureInertiaAssets(app: Application, options: AutoConfig
   if (!isProduction) {
     const devServerUrl = options.devServerUrl ?? process.env.VITE_DEV_SERVER_URL ?? 'http://localhost:5173'
     const normalizedDevServerUrl = normalizeDevServerUrl(devServerUrl)
-    process.env.GUREN_INERTIA_ENTRY = `${normalizedDevServerUrl}/resources/js/dev-entry.ts`
-    process.env.GUREN_INERTIA_STYLES = ''
+    setEnvIfUserDidNotProvide('GUREN_INERTIA_ENTRY', `${normalizedDevServerUrl}/resources/js/dev-entry.ts`)
+    setEnvIfUserDidNotProvide('GUREN_INERTIA_STYLES', '')
     importMapEntries['@guren/inertia-client'] = DEFAULT_VENDOR_CLIENT_PATH
 
     if (ssrEnabled) {
       const ssrEntryPath = options.ssrEntry ?? (resourcesDir ? resolve(resourcesDir, 'js/ssr.tsx') : undefined)
 
       if (ssrEntryPath) {
-        process.env.GUREN_INERTIA_SSR_ENTRY = ssrEntryPath
+        setEnvIfUserDidNotProvide('GUREN_INERTIA_SSR_ENTRY', ssrEntryPath)
       }
 
-      process.env.GUREN_INERTIA_SSR_MANIFEST = ''
+      setEnvIfUserDidNotProvide('GUREN_INERTIA_SSR_MANIFEST', '')
     } else {
-      process.env.GUREN_INERTIA_SSR_ENTRY = ''
-      process.env.GUREN_INERTIA_SSR_MANIFEST = ''
+      setEnvIfUserDidNotProvide('GUREN_INERTIA_SSR_ENTRY', '')
+      setEnvIfUserDidNotProvide('GUREN_INERTIA_SSR_MANIFEST', '')
     }
 
     process.env.GUREN_INERTIA_IMPORT_MAP = JSON.stringify(importMapEntries)
@@ -201,11 +212,14 @@ export function autoConfigureInertiaAssets(app: Application, options: AutoConfig
   const clientCssFiles = getManifestCss(clientEntry)
 
   if (clientEntryFile) {
-    process.env.GUREN_INERTIA_ENTRY = `/public/assets/${clientEntryFile.replace(/^\//u, '')}`
+    setEnvIfUserDidNotProvide('GUREN_INERTIA_ENTRY', `/public/assets/${clientEntryFile.replace(/^\//u, '')}`)
   }
 
   if (clientCssFiles?.length) {
-    process.env.GUREN_INERTIA_STYLES = clientCssFiles.map((href) => `/public/assets/${href.replace(/^\//u, '')}`).join(',')
+    setEnvIfUserDidNotProvide(
+      'GUREN_INERTIA_STYLES',
+      clientCssFiles.map((href) => `/public/assets/${href.replace(/^\//u, '')}`).join(','),
+    )
   }
 
   importMapEntries['@guren/inertia-client'] = DEFAULT_VENDOR_CLIENT_PATH
@@ -215,8 +229,8 @@ export function autoConfigureInertiaAssets(app: Application, options: AutoConfig
       process.env.GUREN_INERTIA_IMPORT_MAP = JSON.stringify(importMapEntries)
     }
 
-    process.env.GUREN_INERTIA_SSR_ENTRY = ''
-    process.env.GUREN_INERTIA_SSR_MANIFEST = ''
+    setEnvIfUserDidNotProvide('GUREN_INERTIA_SSR_ENTRY', '')
+    setEnvIfUserDidNotProvide('GUREN_INERTIA_SSR_MANIFEST', '')
     return
   }
 
@@ -241,7 +255,10 @@ export function autoConfigureInertiaAssets(app: Application, options: AutoConfig
   const ssrEntryRoot = deriveAssetRoot(ssrManifest, resolve(moduleDir, `../${ssrOutDir}`))
 
   if (ssrEntryFile && ssrEntryRoot) {
-    process.env.GUREN_INERTIA_SSR_ENTRY = resolve(ssrEntryRoot, ssrEntryFile.replace(/^\//u, ''))
+    setEnvIfUserDidNotProvide(
+      'GUREN_INERTIA_SSR_ENTRY',
+      resolve(ssrEntryRoot, ssrEntryFile.replace(/^\//u, '')),
+    )
   }
 
   if (Object.keys(importMapEntries).length > 0) {
@@ -249,7 +266,22 @@ export function autoConfigureInertiaAssets(app: Application, options: AutoConfig
   }
 
   if (ssrManifest?.__path__) {
-    process.env.GUREN_INERTIA_SSR_MANIFEST = ssrManifest.__path__
+    setEnvIfUserDidNotProvide('GUREN_INERTIA_SSR_MANIFEST', ssrManifest.__path__)
+  }
+}
+
+type InertiaEnvKey =
+  | 'GUREN_INERTIA_ENTRY'
+  | 'GUREN_INERTIA_STYLES'
+  | 'GUREN_INERTIA_SSR_ENTRY'
+  | 'GUREN_INERTIA_SSR_MANIFEST'
+
+function captureInertiaEnvFlags(): Record<InertiaEnvKey, boolean> {
+  return {
+    GUREN_INERTIA_ENTRY: process.env.GUREN_INERTIA_ENTRY !== undefined,
+    GUREN_INERTIA_STYLES: process.env.GUREN_INERTIA_STYLES !== undefined,
+    GUREN_INERTIA_SSR_ENTRY: process.env.GUREN_INERTIA_SSR_ENTRY !== undefined,
+    GUREN_INERTIA_SSR_MANIFEST: process.env.GUREN_INERTIA_SSR_MANIFEST !== undefined,
   }
 }
 
@@ -382,26 +414,4 @@ function resolveResourcesDir(options: InertiaAssetsOptions, moduleDir?: string):
 
   const resourcesPath = options.resourcesPath ?? '../resources'
   return resolve(moduleDir, resourcesPath)
-}
-
-function parseImportMap(value: string | undefined): Record<string, string> {
-  if (!value) {
-    return {}
-  }
-
-  try {
-    const parsed = JSON.parse(value) as Record<string, string | null | undefined>
-    const result: Record<string, string> = {}
-
-    for (const [key, entry] of Object.entries(parsed)) {
-      if (typeof entry === 'string' && entry.length > 0) {
-        result[key] = entry
-      }
-    }
-
-    return result
-  } catch (error) {
-    console.warn('Failed to parse GUREN_INERTIA_IMPORT_MAP from environment. Expected JSON object.', error)
-    return {}
-  }
 }
