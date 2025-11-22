@@ -1,5 +1,4 @@
-import { Context, parseRequestPayload, formatValidationErrors } from '@guren/server'
-import Controller from './Controller.js'
+import { Controller, parseRequestPayload, formatValidationErrors } from '@guren/server'
 import { ProfileUpdateSchema } from '../Validators/ProfileValidator.js'
 import { User, type UserRecord } from '../../Models/User.js'
 
@@ -15,30 +14,30 @@ type ProfilePageProps = {
 }
 
 export default class ProfileController extends Controller {
-  async edit(ctx: Context): Promise<Response> {
+  async edit(): Promise<Response> {
     const authed = await this.auth.user<UserRecord | null>()
     if (!authed) {
       return this.redirect('/login')
     }
 
-    return this.inertiaWithAuth<
+    return this.inertia<
       'profile/Edit',
       ProfilePageProps
-    >('profile/Edit', { profile: { name: authed.name, email: authed.email } }, { url: ctx.req.path, title: 'Edit Profile | Guren Blog' })
+    >('profile/Edit', { profile: { name: authed.name, email: authed.email } }, { url: this.request.path, title: 'Edit Profile | Guren Blog' })
   }
 
-  async update(ctx: Context): Promise<Response> {
+  async update(): Promise<Response> {
     const authed = await this.auth.user<UserRecord | null>()
     if (!authed) {
       return this.redirect('/login')
     }
 
-    const rawPayload = await parseRequestPayload(ctx)
+    const rawPayload = await parseRequestPayload(this.ctx)
     const parsed = ProfileUpdateSchema.safeParse(rawPayload)
 
     if (!parsed.success) {
       const errors = formatValidationErrors(parsed.error)
-      return this.inertiaWithAuth('profile/Edit', {
+      return this.inertia('profile/Edit', {
         profile: { name: authed.name, email: authed.email },
         errors,
       }, { status: 422 })
@@ -56,7 +55,7 @@ export default class ProfileController extends Controller {
     }
 
     if (Object.keys(errors).length > 0) {
-      return this.inertiaWithAuth('profile/Edit', {
+      return this.inertia('profile/Edit', {
         profile: { name, email },
         errors,
       }, { status: 422 })
@@ -80,9 +79,9 @@ export default class ProfileController extends Controller {
 
     await this.auth.login(refreshedUser)
 
-    return this.inertiaWithAuth('profile/Edit', {
+    return this.inertia('profile/Edit', {
       profile: { name, email },
       status: 'Profile updated successfully.',
-    }, { url: ctx.req.path, title: 'Edit Profile | Guren Blog' })
+    }, { url: this.request.path, title: 'Edit Profile | Guren Blog' })
   }
 }

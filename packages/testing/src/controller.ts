@@ -137,6 +137,40 @@ export function createGurenControllerModule() {
   }
 }
 
+export function createControllerModuleMock() {
+  const module = createGurenControllerModule()
+
+  class TestController extends module.Controller {
+    public get request(): ControllerContext['req'] {
+      return this.ctx.req
+    }
+
+    public json(data: unknown, init: ResponseInit = {}): Response {
+      return new Response(JSON.stringify(data), {
+        ...init,
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          ...(init.headers ?? {}),
+        },
+      })
+    }
+
+    public redirect(url: string, status = 302): Response {
+      return new Response(null, {
+        status,
+        headers: {
+          Location: url,
+        },
+      })
+    }
+  }
+
+  return {
+    ...module,
+    Controller: TestController,
+  }
+}
+
 export async function readInertiaResponse(response: Response): Promise<{
   format: 'json' | 'html'
   payload: InertiaPayload

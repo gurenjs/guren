@@ -2,6 +2,7 @@ import { Application, createSessionMiddleware, attachAuthContext } from '@guren/
 import DatabaseProvider from '../app/Providers/DatabaseProvider.js'
 import AuthProvider from '../app/Providers/AuthProvider.js'
 import requestLogger from '../app/Http/middleware/requestLogger.js'
+import '../config/inertia.js'
 
 const app = new Application({
   providers: [DatabaseProvider, AuthProvider],

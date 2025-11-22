@@ -1,6 +1,7 @@
 import { isAbsolute, resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
 import { ensureErrorStackTracePolyfill } from "../../support/error-polyfill";
+import { parseImportMap } from "../../support/import-map";
 
 ensureErrorStackTracePolyfill();
 
@@ -110,7 +111,9 @@ async function renderDocument(
   const title = escapeHtml(options.title ?? DEFAULT_TITLE);
   const styles =
     options.styles ?? parseStylesEnv(process.env.GUREN_INERTIA_STYLES);
-  const envImportMap = parseImportMap(process.env.GUREN_INERTIA_IMPORT_MAP);
+  const envImportMap = parseImportMap(process.env.GUREN_INERTIA_IMPORT_MAP, {
+    context: "GUREN_INERTIA_IMPORT_MAP",
+  });
   const importMap = JSON.stringify(
     {
       imports: {
@@ -280,35 +283,6 @@ function renderStyles(styles: string[]): string {
     .map((href) => `<link rel="stylesheet" href="${escapeAttribute(href)}" />`)
     .join("\n    ");
 }
-
-function parseImportMap(value: string | undefined): Record<string, string> {
-  if (!value) {
-    return {};
-  }
-
-  try {
-    const parsed = JSON.parse(value) as Record<
-      string,
-      string | null | undefined
-    >;
-    const result: Record<string, string> = {};
-
-    for (const [key, entry] of Object.entries(parsed)) {
-      if (typeof entry === "string" && entry.length > 0) {
-        result[key] = entry;
-      }
-    }
-
-    return result;
-  } catch (error) {
-    console.warn(
-      "Failed to parse GUREN_INERTIA_IMPORT_MAP. Expected JSON object.",
-      error
-    );
-    return {};
-  }
-}
-
 function normalizeHeadElement(element: unknown): string {
   const markup = typeof element === "string" ? element : String(element ?? "");
   const pattern = /href="\/(?!public\/)([^"?]+\.(?:js|css))(\?[^"']*)?"/g;

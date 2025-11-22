@@ -16,17 +16,17 @@ function timestamp(): string {
   ].join('')
 }
 
-const loginControllerTemplate = `import type { Context } from '@guren/core'
-import { Controller, parseRequestPayload, formatValidationErrors } from '@guren/core'
+const loginControllerTemplate = `import { Controller, parseRequestPayload, formatValidationErrors } from '@guren/core'
 import { LoginSchema } from '@/Http/Validators/LoginValidator'
 
 export default class LoginController extends Controller {
-  async show(ctx: Context): Promise<Response> {
-    return this.inertia('auth/Login', { email: ctx.req.query('email') ?? '' }, { url: ctx.req.path, title: 'Login' })
+  async show(): Promise<Response> {
+    const email = this.request.query('email') ?? ''
+    return this.inertia('auth/Login', { email }, { url: this.request.path, title: 'Login' })
   }
 
-  async store(ctx: Context): Promise<Response> {
-    const payload = await parseRequestPayload(ctx)
+  async store(): Promise<Response> {
+    const payload = await parseRequestPayload(this.ctx)
     const result = LoginSchema.safeParse(payload)
 
     if (!result.success) {
@@ -54,13 +54,12 @@ export default class LoginController extends Controller {
 }
 `
 
-const dashboardControllerTemplate = `import type { Context } from '@guren/core'
-import { Controller } from '@guren/core'
+const dashboardControllerTemplate = `import { Controller } from '@guren/core'
 
 export default class DashboardController extends Controller {
-  async index(ctx: Context): Promise<Response> {
+  async index(): Promise<Response> {
     const user = await this.auth.user()
-    return this.inertia('dashboard/Index', { user }, { url: ctx.req.path, title: 'Dashboard' })
+    return this.inertia('dashboard/Index', { user }, { url: this.request.path, title: 'Dashboard' })
   }
 }
 `

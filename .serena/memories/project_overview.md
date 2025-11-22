@@ -1,0 +1,8 @@
+- **Purpose:** Guren is a Laravel-inspired fullstack framework for TypeScript that targets the Bun runtime and ships as a monorepo containing reusable packages plus example applications and scaffolding tooling.
+- **Tech stack:** Bun runtime, Hono HTTP server, Inertia.js + React for views, Vite for bundling, Drizzle ORM (pluggable adapters), TypeScript across packages, Dockerized PostgreSQL for local DB, managed with bun workspaces.
+- **Structure highlights:**
+  - `packages/core` runtime (routing, controllers, middleware)
+  - `packages/server`, `packages/orm`, `packages/cli`, `packages/testing`, `packages/inertia-client`, `packages/create-app`
+  - `examples/blog` demo app (routes, migrations, Vite client/SSR)
+  - Top-level `app`, `config`, `resources` provide default skeleton shared by generators.
+- **Entry points:** Development primarily runs the `examples/blog` app via Bun; CLI (`bunx guren`) provides scaffolding and routing helpers; Docker compose brings up PostgreSQL (service `postgres`).

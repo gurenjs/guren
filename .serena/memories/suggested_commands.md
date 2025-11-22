@@ -1,0 +1,9 @@
+- Install deps: `bun install`
+- Start Postgres via Docker: `bun run db:up` (stop with `bun run db:down`, logs `bun run db:logs`)
+- Run dev server (examples/blog): `bun run dev`
+- Run migrations / seed demo DB: `bun run db:migrate` / `bun run db:seed`
+- Build all packages: `bun run build`
+- Run tests: framework `bun run test:bun`, example app `bun run test:examples`, full suite `bun run test`
+- Type checking: `bun run typecheck`
+- Example blog build for production: `cd examples/blog && bunx vite build && bunx vite build --ssr`
+- CLI scaffolding: `bunx guren <command>` (e.g., `bunx guren make:controller`, `bunx guren routes:types`).

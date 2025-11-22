@@ -29,7 +29,10 @@ function createAuthStub(user: unknown = null) {
 describe('LoginController', () => {
   it('returns JSON payload for Inertia visits', async () => {
     const controller = new LoginController()
-    ;(controller as unknown as { auth: ReturnType<typeof createAuthStub> }).auth = createAuthStub()
+    Object.defineProperty(controller, 'auth', {
+      value: createAuthStub(),
+      configurable: true,
+    })
     const ctx = createControllerContext('http://blog.test/login?email=jane@example.com', {
       headers: {
         'X-Inertia': 'true',
@@ -38,7 +41,7 @@ describe('LoginController', () => {
     }) as unknown as Context
     controller.setContext(ctx)
 
-    const response = await controller.show(ctx)
+    const response = await controller.show()
     const { format, payload } = await readInertiaResponse(response)
 
     expect(response.status).toBe(200)
@@ -50,11 +53,14 @@ describe('LoginController', () => {
 
   it('embeds Inertia page data in HTML for full visits', async () => {
     const controller = new LoginController()
-    ;(controller as unknown as { auth: ReturnType<typeof createAuthStub> }).auth = createAuthStub()
+    Object.defineProperty(controller, 'auth', {
+      value: createAuthStub(),
+      configurable: true,
+    })
     const ctx = createControllerContext('http://blog.test/login') as unknown as Context
     controller.setContext(ctx)
 
-    const response = await controller.show(ctx)
+    const response = await controller.show()
     const { format, payload, body } = await readInertiaResponse(response)
 
     expect(response.status).toBe(200)

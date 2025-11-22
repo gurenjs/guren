@@ -74,6 +74,34 @@ Return one of these helpers from each controller method. If you need custom head
 ## Sharing Data Across Methods
 Controllers are instantiated per request, so you can set instance fields in one method and reuse them in helpers. For global data (e.g. user information), consider Inertia shared props or middleware.
 
+## Shared Inertia Props
+Use `setInertiaSharedProps()` to inject app-wide data (such as the authenticated user) into every Inertia response:
+
+```ts
+// config/inertia.ts
+import { setInertiaSharedProps, AUTH_CONTEXT_KEY, type AuthContext } from '@guren/server'
+
+setInertiaSharedProps(async (ctx) => {
+  const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
+  return { auth: { user: await auth?.user() } }
+})
+```
+
+Augment the exported `InertiaSharedProps` interface to keep props typed across controllers and React pages:
+
+```ts
+// types/inertia.d.ts
+import type { UserRecord } from '@/app/Models/User'
+
+declare module '@guren/server' {
+  interface InertiaSharedProps {
+    auth: { user: UserRecord | null }
+  }
+}
+```
+
+When you need a component’s prop type, `InferInertiaProps<ReturnType<Controller['action']>>` includes both the action props and shared props.
+
 ## Validation Tips
 Guren does not prescribe a validation library. Use your preferred solution (e.g. Zod) within controller methods:
 

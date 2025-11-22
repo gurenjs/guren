@@ -1,0 +1,5 @@
+- Follow prevailing TypeScript style already used in each package; repository expects Bun (type: module) projects with ES module syntax.
+- Controllers/models follow Laravel-like conventions (Route DSL, base Controller helpers, Model<TRecord> with ORMAdapter, Drizzle schema definitions under `db/`).
+- Commit messages follow Conventional Commits (types feat/fix/docs/... with optional scope and concise summary).
+- Tests should accompany behaviour changes; run unit tests plus example app tests before PRs; ensure `bun run build` passes.
+- Respect Code of Conduct and contributing workflow (fork from main, describe problem/solution in PR template).

@@ -4,10 +4,10 @@ import { kebabCase, resourceName, writeFileSafe } from './utils'
 const CONTROLLERS_DIR = 'app/Http/Controllers'
 
 function controllerTemplate(className: string, resourcePath: string): string {
-  return `import { Controller, Context } from '@guren/server'
+  return `import { Controller } from '@guren/server'
 
 export default class ${className} extends Controller {
-  async index(ctx: Context) {
+  async index() {
     // TODO: Replace with real implementation
     return this.inertia('${resourcePath}/Index', { message: '${className} index' })
   }

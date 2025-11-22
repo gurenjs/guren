@@ -1,4 +1,4 @@
-import { Controller, Context } from '@guren/server'
+import { Controller } from '@guren/server'
 import {
   docsService,
   normalizeDocCategory,
@@ -6,19 +6,19 @@ import {
 } from '../../Services/DocsService.js'
 
 export default class DocsController extends Controller {
-  async index(ctx: Context): Promise<Response> {
+  async index(): Promise<Response> {
     const categories = await docsService.listDocs()
 
     return this.inertia(
       'Docs/Index',
       { categories },
-      { url: ctx.req.path, title: 'Documentation' },
+      { url: this.request.path, title: 'Documentation' },
     )
   }
 
-  async show(ctx: Context): Promise<Response> {
-    const categoryParam = ctx.req.param('category') || undefined
-    const slugParam = ctx.req.param('slug') || undefined
+  async show(): Promise<Response> {
+    const categoryParam = this.request.param('category') || undefined
+    const slugParam = this.request.param('slug') || undefined
     const normalizedCategory = normalizeDocCategory(categoryParam)
     const normalizedSlug = normalizeDocSlug(slugParam)
     const [categories, doc] = await Promise.all([
@@ -37,7 +37,7 @@ export default class DocsController extends Controller {
       'Docs/Show',
       { categories, doc, active },
       {
-        url: ctx.req.path,
+        url: this.request.path,
         title: pageTitle,
         status: doc ? 200 : 404,
       },

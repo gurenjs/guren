@@ -48,13 +48,21 @@ export function startInertiaClient(options: StartInertiaClientOptions): Promise<
       resolveComponentPath: options.resolveComponentPath,
     })
 
+  const initialPage = options.page ?? getInitialPage()
+
+  if (!initialPage) {
+    throw new Error(
+      'Unable to locate the initial Inertia page payload. Pass `page` to startInertiaClient() or ensure SSR embeds window.__INERTIA_PAGE__.',
+    )
+  }
+
   return createInertiaApp({
     resolve,
     setup({ el, App, props }) {
       ; (options.setup ?? defaultSetup)({ el, App: App as any, props: props as any })
     },
     progress: options.progress,
-    page: options.page ?? getInitialPage(),
+    page: initialPage,
   })
 }
 
