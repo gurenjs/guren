@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   createControllerContext,
-  createGurenControllerModule,
+  createControllerModuleMock,
   readInertiaResponse,
 } from '@guren/testing'
-import type { Context } from '@guren/core'
+import type { Context } from '@guren/server'
 
-vi.mock('guren', () => createGurenControllerModule())
-vi.mock('@guren/core', () => createGurenControllerModule())
-vi.mock('@guren/server', () => createGurenControllerModule())
+vi.mock('guren', () => createControllerModuleMock())
+vi.mock('@guren/core', () => createControllerModuleMock())
+vi.mock('@guren/server', () => createControllerModuleMock())
 
 import LoginController from '../../app/Http/Controllers/Auth/LoginController.js'
 
