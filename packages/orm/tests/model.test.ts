@@ -61,12 +61,20 @@ function createAdapter(records: UserRecord[] = []): { adapter: ORMAdapter; snaps
       options?: FindManyOptions<TRecord>,
     ): Promise<TRecord[]> {
       expect(table).toBe('users')
-      const { where, orderBy } = options ?? {}
+      const { where, orderBy, limit, offset } = options ?? {}
       let results = store.filter(matches(where as WhereClause<UserRecord> | undefined))
 
       if (orderBy && orderBy.length > 0) {
         const typedOrder = orderBy as unknown as OrderByClause<UserRecord>
         results = [...results].sort(compare(typedOrder))
+      }
+
+      if (typeof offset === 'number' && Number.isFinite(offset)) {
+        results = results.slice(offset)
+      }
+
+      if (typeof limit === 'number' && Number.isFinite(limit)) {
+        results = results.slice(0, limit)
       }
 
       return results.map((record) => ({ ...record })) as unknown as TRecord[]
@@ -311,5 +319,50 @@ describe('Model', () => {
     const postsWithAuthor = (await Post.with('author', { id: 11 })) as Array<PostRecord & { author: UserRecord | null }>
     expect(postsWithAuthor).toHaveLength(1)
     expect(postsWithAuthor[0].author?.name).toBe('Shinji')
+  })
+
+  it('supports first() and findOrFail()', async () => {
+    class User extends Model<UserRecord> {
+      static table = 'users'
+    }
+
+    const { adapter } = createAdapter([
+      { id: 1, name: 'Misato' },
+      { id: 2, name: 'Shinji' },
+    ])
+
+    User.useAdapter(adapter)
+
+    const first = await User.first()
+    expect(first?.id).toBe(1)
+
+    const shinji = await User.first({ id: 2 })
+    expect(shinji?.name).toBe('Shinji')
+
+    await expect(User.findOrFail(999)).rejects.toThrow('User not found for id=999')
+  })
+
+  it('builds a query starting from the model when provided a database', async () => {
+    class User extends Model<UserRecord> {
+      static table = 'users'
+    }
+
+    const queryableDb = {
+      select: () => ({
+        from(table: unknown) {
+          expect(table).toBe('users')
+          return {
+            where(clause: unknown) {
+              return { table, clause }
+            },
+          }
+        },
+      }),
+    }
+
+    const builder = User.query(queryableDb) as { where: (clause: unknown) => unknown }
+    const result = builder.where({ id: 1 })
+
+    expect(result).toEqual({ table: 'users', clause: { id: 1 } })
   })
 })

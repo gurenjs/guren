@@ -9,6 +9,9 @@ import {
 import { Post, type PostWithAuthor } from '../../Models/Post.js'
 import { PostPayloadSchema, PostFormSchema, PageQuerySchema, PostIdParamSchema } from '../Validators/PostValidator.js'
 import type { PaginationMeta } from '@guren/orm'
+import { desc, eq, count } from 'drizzle-orm'
+import { getDatabase } from '../../../config/database.ts'
+import { posts as postsTable, users } from '../../../db/schema.ts'
 
 type PostsIndexInertiaProps = ResolvedSharedInertiaProps & { posts: PostWithAuthor[]; pagination: PostsPagination }
 type PostShowInertiaProps = ResolvedSharedInertiaProps & { post: PostWithAuthor }
@@ -23,11 +26,55 @@ export default class PostController extends Controller {
       return this.json({ message: 'Invalid page parameter.' }, { status: 422 })
     }
 
-    const { data: posts, meta } = await Post.withPaginate('author', {
-      page: pageResult.data.page,
+    const db = await getDatabase()
+    const requestedPage = pageResult.data.page ?? 1
+    const currentPage = Number.isFinite(requestedPage) && requestedPage > 0 ? Math.floor(requestedPage) : 1
+
+    const [{ value: totalRaw } = { value: 0 }] = await db
+      .select({ value: count(postsTable.id) })
+      .from(postsTable)
+
+    const total = typeof totalRaw === 'bigint' ? Number(totalRaw) : Number(totalRaw ?? 0)
+    const totalPages = total === 0 ? 1 : Math.max(1, Math.ceil(total / postsPerPage))
+    const page = Math.min(currentPage, totalPages)
+    const offset = (page - 1) * postsPerPage
+
+    const rows = await db
+      .select({
+        id: postsTable.id,
+        title: postsTable.title,
+        excerpt: postsTable.excerpt,
+        body: postsTable.body,
+        authorId: postsTable.authorId,
+        author: {
+          id: users.id,
+          name: users.name,
+        },
+      })
+      .from(postsTable)
+      .leftJoin(users, eq(users.id, postsTable.authorId))
+      .orderBy(desc(postsTable.id))
+      .offset(offset)
+      .limit(postsPerPage)
+
+    const postList: PostWithAuthor[] = rows.map((row): PostWithAuthor => ({
+      id: row.id,
+      title: row.title,
+      excerpt: row.excerpt,
+      body: row.body,
+      authorId: row.authorId,
+      author: row.author?.id ? { id: row.author.id, name: row.author.name } : null,
+    }))
+
+    const meta: PaginationMeta = {
+      total,
       perPage: postsPerPage,
-      orderBy: [['id', 'desc']],
-    })
+      currentPage: page,
+      totalPages,
+      hasMore: page < totalPages,
+      from: total === 0 ? 0 : offset + 1,
+      to: total === 0 ? 0 : Math.min(total, offset + postList.length),
+    }
 
     const pagination: PostsPagination = {
       ...meta,
@@ -35,7 +82,7 @@ export default class PostController extends Controller {
     }
 
     const url = this.request.url ?? this.request.path
-    return this.inertia('posts/Index', { posts, pagination }, { url, title: 'Posts | Guren Blog' })
+    return this.inertia('posts/Index', { posts: postList, pagination }, { url, title: 'Posts | Guren Blog' })
   }
 
   async show(): Promise<InertiaResponse<'posts/Show', PostShowInertiaProps> | Response> {
@@ -152,8 +199,8 @@ export default class PostController extends Controller {
       console.error('Failed to update post:', error)
 
       return this.inertia('posts/Edit', { errors: { message: 'Failed to update post.' }, post: result.data, postId: id }, { status: 500 })
+    }
   }
-}
 }
 
 export type PostsIndexPageProps = InferInertiaProps<ReturnType<PostController['index']>>

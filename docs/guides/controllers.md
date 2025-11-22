@@ -119,6 +119,49 @@ Handle validation failures by returning `this.inertia()` with errors or `this.js
 
 Controllers stay thin when they delegate business logic to models or services. Treat them as orchestration layers that glue together the rest of your application.
 
+## Model helpers vs Drizzle RQB (side-by-side)
+
+Both access patterns are supported. Use model helpers for quick CRUD; drop to Drizzle’s relational query builder when you need joins, aggregates, or driver-specific features.
+
+```ts
+// Model-first: concise and consistent
+import { Controller } from '@guren/server'
+import { Post } from '@/app/Models/Post'
+
+export default class PostsController extends Controller {
+  async index() {
+    const posts = await Post.orderBy(['publishedAt', 'desc'], { published: true })
+    return this.inertia('posts/Index', { posts })
+  }
+}
+```
+
+```ts
+// Drizzle RQB: full control, still type-safe
+import { Controller } from '@guren/server'
+import { getDatabase } from '@/config/database'
+import { posts, users } from '@/db/schema'
+import { eq, desc } from 'drizzle-orm'
+
+export default class PostsController extends Controller {
+  async index() {
+    const db = await getDatabase()
+    const postsWithAuthor = await db
+      .select({
+        id: posts.id,
+        title: posts.title,
+        author: users.name,
+      })
+      .from(posts)
+      .leftJoin(users, eq(posts.authorId, users.id))
+      .where(eq(posts.published, true))
+      .orderBy(desc(posts.publishedAt))
+
+    return this.inertia('posts/Index', { posts: postsWithAuthor })
+  }
+}
+```
+
 ### SSR Options
 
 When the SSR bundle is available, Guren renders pages on the server automatically. You can disable or customize this per-response by passing the `ssr` option:
