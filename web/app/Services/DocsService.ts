@@ -20,7 +20,15 @@ export interface DocPage extends DocSummary {
   html: string
 }
 
-const DEFAULT_DOCS_DIR = resolve(process.cwd(), '../docs')
+// Resolve docs relative to the repository root so it works regardless of where the server is launched.
+const DEFAULT_DOCS_DIR = resolve(import.meta.dirname, '../../..', 'docs')
+const DEFAULT_DOC_LOCALE: DocLocale = 'en'
+
+const DOC_LOCALE_CONFIG = {
+  en: { label: 'English', dir: 'en' },
+  ja: { label: '日本語', dir: 'ja' },
+} as const
+
 const FEATURED_DOC_ORDER = [
   'getting-started',
   'architecture',
@@ -48,7 +56,9 @@ const DOC_CATEGORY_CONFIG = {
 } as const
 
 export type DocCategory = keyof typeof DOC_CATEGORY_CONFIG
+export type DocLocale = keyof typeof DOC_LOCALE_CONFIG
 const DOC_CATEGORY_KEYS = Object.keys(DOC_CATEGORY_CONFIG) as DocCategory[]
+const DOC_LOCALE_KEYS = Object.keys(DOC_LOCALE_CONFIG) as DocLocale[]
 const DOC_ORDER_INDEX: Record<DocCategory, Map<string, number>> = DOC_CATEGORY_KEYS.reduce(
   (acc, category) => {
     acc[category] = new Map(
@@ -79,6 +89,19 @@ export function normalizeDocCategory(value: string | undefined): DocCategory | n
     : null
 }
 
+export function normalizeDocLocale(value: string | undefined): DocLocale | null {
+  if (!value) {
+    return null
+  }
+
+  const trimmed = value.trim().replace(/\//gu, '').toLowerCase()
+  if (!trimmed) {
+    return null
+  }
+
+  return DOC_LOCALE_KEYS.includes(trimmed as DocLocale) ? (trimmed as DocLocale) : null
+}
+
 export function normalizeDocSlug(value: string | undefined): string | null {
   if (!value) {
     return null
@@ -100,16 +123,16 @@ export class DocsService {
     this.#docsDir = docsDir
   }
 
-  async listDocs(): Promise<DocCategoryGroup[]> {
+  async listDocs(locale: DocLocale = DEFAULT_DOC_LOCALE): Promise<DocCategoryGroup[]> {
     const groups = await Promise.all(
       DOC_CATEGORY_KEYS.map(async (category) => {
-        const entries = await this.#readDirectory(category)
+        const entries = await this.#readDirectory(category, locale)
         const docs = await Promise.all(
           entries
             .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
             .map(async (entry) => {
               const slug = this.#slugFromFilename(entry.name)
-              const markdown = await this.#readMarkdownBySlug(category, slug)
+              const markdown = await this.#readMarkdownBySlug(category, slug, locale)
               const title = this.#extractTitle(markdown, slug)
               const description = this.#extractDescription(markdown)
 
@@ -134,7 +157,11 @@ export class DocsService {
     return groups
   }
 
-  async getDoc(category: string | undefined, slug: string | undefined): Promise<DocPage | null> {
+  async getDoc(
+    category: string | undefined,
+    slug: string | undefined,
+    locale: DocLocale = DEFAULT_DOC_LOCALE,
+  ): Promise<DocPage | null> {
     const normalizedCategory = normalizeDocCategory(category)
     const normalizedSlug = normalizeDocSlug(slug)
 
@@ -142,7 +169,7 @@ export class DocsService {
       return null
     }
 
-    const markdown = await this.#readMarkdownBySlug(normalizedCategory, normalizedSlug).catch(() => null)
+    const markdown = await this.#readMarkdownBySlug(normalizedCategory, normalizedSlug, locale).catch(() => null)
     if (!markdown) {
       return null
     }
@@ -160,17 +187,17 @@ export class DocsService {
     }
   }
 
-  async #readDirectory(category: DocCategory): Promise<Dirent[]> {
-    const dirPath = resolve(this.#docsDir, DOC_CATEGORY_CONFIG[category].dir)
+  async #readDirectory(category: DocCategory, locale: DocLocale): Promise<Dirent[]> {
+    const dirPath = resolve(this.#rootForLocale(locale), DOC_CATEGORY_CONFIG[category].dir)
     return readdir(dirPath, { withFileTypes: true }).catch(() => [])
   }
 
-  #docsPathForSlug(category: DocCategory, slug: string): string {
-    return resolve(this.#docsDir, DOC_CATEGORY_CONFIG[category].dir, `${slug}.md`)
+  #docsPathForSlug(category: DocCategory, slug: string, locale: DocLocale): string {
+    return resolve(this.#rootForLocale(locale), DOC_CATEGORY_CONFIG[category].dir, `${slug}.md`)
   }
 
-  async #readMarkdownBySlug(category: DocCategory, slug: string): Promise<string> {
-    return readFile(this.#docsPathForSlug(category, slug), 'utf8')
+  async #readMarkdownBySlug(category: DocCategory, slug: string, locale: DocLocale): Promise<string> {
+    return readFile(this.#docsPathForSlug(category, slug, locale), 'utf8')
   }
 
   #slugFromFilename(filename: string): string {
@@ -231,6 +258,17 @@ export class DocsService {
 
     return a.title.localeCompare(b.title)
   }
+
+  #rootForLocale(locale: DocLocale): string {
+    const localeDir = DOC_LOCALE_CONFIG[locale].dir
+    return localeDir ? resolve(this.#docsDir, localeDir) : this.#docsDir
+  }
 }
 
 export const docsService = new DocsService()
+
+export const DOC_LOCALE_OPTIONS = DOC_LOCALE_KEYS.map((code) => ({
+  code,
+  label: DOC_LOCALE_CONFIG[code].label,
+}))
+export { DEFAULT_DOC_LOCALE }

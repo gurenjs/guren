@@ -6,5 +6,7 @@ Route.get('/', [HomeController, 'index'])
 
 Route.group('/docs', () => {
   Route.get('/', [DocsController, 'index'])
+  Route.get('/ja', [DocsController, 'indexJa'])
+  Route.get('/ja/:category/:slug', [DocsController, 'showJa'])
   Route.get('/:category/:slug', [DocsController, 'show'])
 })

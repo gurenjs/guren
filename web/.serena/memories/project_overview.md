@@ -1,0 +1,6 @@
+# Project Overview
+- Purpose: Example Guren fullstack app (Bun + Hono + Inertia + React + Drizzle) following Laravel-like MVC patterns; serves as reference/demo for the framework.
+- Runtime: Bun (TypeScript, ES2022 modules) with Vite for client/SSR builds.
+- Structure highlights: routes in routes/web.ts; controllers under app/Http/Controllers; models under app/Models; React pages under resources/js/pages; entry bootstrap at src/main.ts; database schema/migrations under db/ and config/database.ts.
+- Key framework conventions: static Route registry (Laravel-style), controllers return this.inertia/json/redirect, models extend Model with static table referencing Drizzle schema; assets auto-configured via autoConfigureInertiaAssets; uses Bun workspaces for @guren/* packages.
+- Repo instructions: follow AGENTS.md guidance for CLI tooling (citty + consola), route/controller patterns, ORM adapter usage, Inertia integration, and Dockerized Postgres defaults (localhost:54322, user/pass/db guren).

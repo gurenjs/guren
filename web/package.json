@@ -7,6 +7,8 @@
     "routes:types": "bunx guren routes:types --routes routes/web.ts --out types/generated/routes.d.ts --force",
     "dev": "bun run dev:server",
     "dev:server": "bun run --watch --hot bin/serve.ts",
+    "typecheck": "bunx tsc --noEmit",
+    "test": "bunx vitest run",
     "build": "bunx vite build && bunx vite build --ssr",
     "preview": "bunx vite preview",
     "db:make": "bunx guren make:migration",
@@ -38,6 +40,7 @@
     "@vitejs/plugin-react": "^5.0.0",
     "vite": "^7.0.0",
     "@tailwindcss/vite": "^4.1.16",
-    "tailwindcss": "^4.1.16"
+    "tailwindcss": "^4.1.16",
+    "vitest": "^2.1.3"
   }
 }

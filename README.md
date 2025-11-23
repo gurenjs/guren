@@ -99,6 +99,8 @@ bunx vite build && bunx vite build --ssr
 
 ## Roadmap
 
+Status details live in `ROADMAP.md`.
+
 - [ ] Routing parity with resource routes, named routes, scoped groups, and implicit model binding
 - [ ] Framework-level validation pipeline and reusable middleware library
 - [ ] Expanded ORM features: relationships, eager loading, scopes, soft deletes, and observers
@@ -108,6 +110,11 @@ bunx vite build && bunx vite build --ssr
 - [ ] Database adapters: first-party MySQL and SQLite support alongside Postgres
 - [ ] Developer experience improvements: finalized CLI scaffolding, artisan-style utilities, and richer testing helpers
 - [ ] Database lifecycle commands: first-party `guren db:reset` / `guren db:rollback` with safe Postgres helpers and guardrails
+- [ ] Release and compatibility policy: SemVer guarantees, Bun/Node compatibility matrix, and migration guides per minor release
+- [ ] Documentation and learning: opinionated quickstart, end-to-end tutorial, deployment recipes (Docker/Edge/Serverless), and troubleshooting docs
+- [ ] Quality and reliability: CI with Bun runners, integration/E2E coverage (routes, Inertia SSR, ORM), perf/footprint benchmarks, and nightly canary builds
+- [ ] Community process: contribution templates, RFC workflow for breaking changes, and regular changelog/release notes
+- [ ] First-party plugins: auth scaffolding refinements, mail/queue/cache drivers, job scheduler, and adapter examples beyond Postgres/Drizzle
 
 ## Contributing
 

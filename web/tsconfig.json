@@ -25,6 +25,7 @@
     "app",
     "routes",
     "resources/js",
-    "types"
+    "types",
+    "tests"
   ]
 }
