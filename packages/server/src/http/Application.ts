@@ -23,9 +23,11 @@ declare const Bun:
   | undefined
 
 type BunServer = { stop?: (closeConnections?: boolean) => void | Promise<void> }
+type ViteServer = Awaited<ReturnType<typeof startViteDevServer>>['server']
 
 type GurenGlobal = typeof globalThis & {
   __gurenActiveServer?: BunServer
+  __gurenActiveViteDevServer?: ViteServer
 }
 
 function getGlobalState(): GurenGlobal {
@@ -54,6 +56,28 @@ function setActiveBunServer(server?: BunServer): void {
   getGlobalState().__gurenActiveServer = server
 }
 
+async function stopActiveViteDevServer(): Promise<void> {
+  const state = getGlobalState()
+  const previous = state.__gurenActiveViteDevServer
+
+  if (!previous) {
+    state.__gurenActiveViteDevServer = undefined
+    return
+  }
+
+  try {
+    await previous.close()
+  } catch (error) {
+    console.warn('Failed to stop previous Vite dev server:', error)
+  } finally {
+    state.__gurenActiveViteDevServer = undefined
+  }
+}
+
+function setActiveViteDevServer(server?: ViteServer): void {
+  getGlobalState().__gurenActiveViteDevServer = server
+}
+
 export type BootCallback = (app: Hono) => void | Promise<void>
 
 export interface ApplicationOptions {
@@ -78,7 +102,7 @@ export class Application {
   private readonly plugins: PluginManager
   private context?: ApplicationContext
   private readonly authManager: AuthManager
-  private viteDevServer?: Awaited<ReturnType<typeof startViteDevServer>>['server']
+  private viteDevServer?: ViteServer
   private bunServer?: BunServer
   private viteTeardownRegistered = false
   private bunTeardownRegistered = false
@@ -139,6 +163,7 @@ export class Application {
     }
 
     await stopActiveBunServer()
+    await stopActiveViteDevServer()
 
     const { port = 3000, hostname = '0.0.0.0', assetsUrl, vite } = options
     const envAssetsUrl =
@@ -157,6 +182,7 @@ export class Application {
         typeof vite === 'object' ? vite : undefined
 
       try {
+        await this.closeViteDevServer()
         const { server, localUrl } = await startViteDevServer({
           root: viteOptions?.root ?? process.cwd(),
           config: viteOptions?.config,
@@ -164,6 +190,7 @@ export class Application {
           port: viteOptions?.port,
         })
         this.viteDevServer = server
+        setActiveViteDevServer(server)
         resolvedAssetsUrl = localUrl
         if (typeof process !== 'undefined') {
           process.env.VITE_DEV_SERVER_URL = resolvedAssetsUrl
@@ -237,6 +264,9 @@ export class Application {
     } catch (error) {
       console.error('Error while shutting down Vite dev server:', error)
     } finally {
+      if (getGlobalState().__gurenActiveViteDevServer === this.viteDevServer) {
+        setActiveViteDevServer()
+      }
       this.viteDevServer = undefined
       this.viteTeardownRegistered = false
     }
