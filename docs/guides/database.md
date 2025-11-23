@@ -101,6 +101,34 @@ Use seeders to load fixtures for development, testing, or demos.
 > [!CAUTION]
 > Seed scripts can mutate or purge data. Never point them at your production database unless the seeder was explicitly designed for that environment.
 
+### Quick templates: model-first vs RQB
+
+Pick whichever fits the feature. Both stay type-safe.
+
+```ts
+// Model-first (concise CRUD, eager load)
+import { Post } from '@/app/Models/Post'
+const posts = await Post.withPaginate('author', { page: 1, perPage: 10, orderBy: [['id', 'desc']] })
+```
+
+```ts
+// Drizzle RQB (joins/aggregates)
+import { getDatabase } from '@/config/database'
+import { posts, users } from '@/db/schema'
+import { eq, desc } from 'drizzle-orm'
+
+const db = await getDatabase()
+const rows = await db
+  .select({
+    id: posts.id,
+    title: posts.title,
+    author: users.name,
+  })
+  .from(posts)
+  .leftJoin(users, eq(posts.authorId, users.id))
+  .orderBy(desc(posts.id))
+```
+
 ## Working with the ORM
 After the `DatabaseProvider` (or your own provider that calls `bootModels()`) runs during application startup, every model gains access to the configured database adapter. Common helpers include:
 
@@ -110,6 +138,32 @@ await Post.find(id)         // Look up by primary key (returns null if missing)
 await Post.create(payload)  // Insert a new row
 await Post.where({ title }) // Filter with simple where clauses
 ```
+
+### Using Drizzle directly (RQB) and `Model.query()`
+
+Guren stays Drizzle-first. You can always reach for the relational query builder directly, or start from the model as a convenience entrypoint:
+
+```ts
+// Direct Drizzle access (type-safe)
+import { getDatabase } from '@/config/database'
+import { schema } from '@/db/schema'
+import { desc } from 'drizzle-orm'
+import { Post } from '@/app/Models/Post'
+
+const db = await getDatabase()
+const recent = await db
+  .select()
+  .from(schema.posts)
+  .orderBy(desc(schema.posts.createdAt))
+  .limit(5)
+
+// Start from the model while keeping RQB control
+const recentViaModel = await Post.query(db)
+  .orderBy(desc(schema.posts.createdAt))
+  .limit(5)
+```
+
+Use the model helpers for quick CRUD. Switch to RQB (with `db.select().from(...)` or `Model.query(db)`) when you need complex predicates, joins, or driver-specific APIs.
 
 ### Typed Filtering with `where`
 
@@ -127,6 +181,31 @@ await Post.where({ published: true, authorId: user?.id ?? undefined })
 ```
 
 TypeScript will flag unknown keys (`Post.where({ foo: 'bar' })`) or mismatched types (`Post.where({ id: 'oops' })`) before the query runs.
+
+### Conditional filters without scopes
+
+Drizzle-firstでスコープを持たない場合は、プレーン関数でフィルタを組み立てるのがシンプルです。
+
+```ts
+import { and, ilike, eq } from 'drizzle-orm'
+import { getDatabase } from '@/config/database'
+import { posts } from '@/db/schema'
+import { Post } from '@/app/Models/Post'
+
+type PostFilters = { search?: string; authorId?: number }
+
+function buildPostFilters(filters: PostFilters) {
+  const clauses = []
+  if (filters.search) clauses.push(ilike(posts.title, `%${filters.search}%`))
+  if (filters.authorId) clauses.push(eq(posts.authorId, filters.authorId))
+  return clauses.length ? and(...clauses) : undefined
+}
+
+// Model helper + RQB hybrid
+const db = await getDatabase()
+const where = buildPostFilters({ search: 'guren', authorId: 1 })
+const rows = await Post.query(db).where(where).limit(10).execute()
+```
 
 ### Sorting Results with `orderBy`
 

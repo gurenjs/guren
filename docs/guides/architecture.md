@@ -56,7 +56,7 @@ export default class PostController extends Controller {
 - `this.inertia(component, props, options)`: Creates an Inertia response.
 
 ## Models and ORM
-Models extend `Model<TRecord>` and connect to Drizzle via `static table`.
+Models extend `Model<TRecord>` and connect to Drizzle via `static table`. The layer is intentionally thin—use the helpers for fast CRUD, or drop to Drizzle RQB directly when queries get complex.
 
 ```ts
 export type PostRecord = typeof posts.$inferSelect
@@ -67,10 +67,9 @@ export class Post extends Model<PostRecord> {
 }
 ```
 
-- Provides Laravel-style helpers like `Model.all()`, `Model.find(id)`, and `Model.create(data)`.
+- Provides Laravel-style helpers like `Model.all()`, `Model.find(id)`, `Model.findOrFail()`, `Model.first()`, and `Model.create(data)`.
 - `recordType` keeps static helpers strongly typed (e.g. `Post.find()` returns `PostRecord | null`).
-- Use a provider such as `DatabaseProvider` (which calls `bootModels()`) to invoke `DrizzleAdapter.configure(db)`, making the adapter available to every model.
-- Custom adapters (e.g. for PlanetScale) can be swapped in by implementing the `ORMAdapter` interface.
+- Use a provider such as `DatabaseProvider` (which calls `bootModels()`) to invoke `DrizzleAdapter.configure(db)`, making the adapter available to every model. When you need full control, use `Model.query(db)` or the Drizzle database instance directly.
 
 ## Inertia.js and Views
 - Place React pages under `resources/js/pages/` and reference them by component name.

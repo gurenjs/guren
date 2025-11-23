@@ -75,6 +75,12 @@ export interface ORMAdapter {
   count?<TRecord extends PlainObject = PlainObject>(table: unknown, where?: WhereClause<TRecord>): Promise<number>
 }
 
+type SelectFrom<TDatabase> = TDatabase extends { select: (...args: any[]) => infer TSelect } // eslint-disable-line @typescript-eslint/no-explicit-any
+  ? TSelect extends { from: (...args: any[]) => infer TResult } // eslint-disable-line @typescript-eslint/no-explicit-any
+    ? TResult
+    : never
+  : never
+
 /**
  * Minimal ActiveRecord-like wrapper around the configured ORM adapter. The API
  * mirrors a subset of Laravel's Eloquent helpers and can be expanded over time.
@@ -127,6 +133,20 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     const table = this.resolveTable()
     const where = { [key]: id } as WhereClauseFor<T>
     return this.getAdapter().findUnique(table, where) as Promise<TRecordFor<T> | null>
+  }
+
+  static async findOrFail<T extends typeof Model>(this: T, id: unknown, key = 'id'): Promise<TRecordFor<T>> {
+    const record = await this.find(id, key)
+    if (record == null) {
+      throw new Error(`${this.name} not found for ${key}=${String(id)}`)
+    }
+    return record
+  }
+
+  static async first<T extends typeof Model>(this: T, where?: WhereClauseFor<T>): Promise<TRecordFor<T> | null> {
+    const table = this.resolveTable()
+    const results = await this.getAdapter().findMany(table, { where, limit: 1 })
+    return (results[0] ?? null) as TRecordFor<T> | null
   }
 
   static async where<T extends typeof Model>(this: T, where: WhereClauseFor<T>): Promise<TRecordFor<T>[]> {
@@ -304,6 +324,29 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     }
 
     return adapter.delete(table, where)
+  }
+
+  static query<TDatabase extends { select: (...args: any[]) => any } = { select: (...args: any[]) => any }>( // eslint-disable-line @typescript-eslint/no-explicit-any
+    this: typeof Model,
+    db?: TDatabase,
+  ): SelectFrom<TDatabase> {
+    const table = this.resolveTable()
+    if (db) {
+      const selectBuilder = db.select()
+      if (!selectBuilder || typeof selectBuilder.from !== 'function') {
+        throw new Error('Configured ORM adapter does not expose select().from; pass a Drizzle database to Model.query(db).')
+      }
+      return selectBuilder.from(table) as SelectFrom<TDatabase>
+    }
+
+    const resolvedDb = resolveQueryableDatabase(this.getAdapter())
+    const fallbackBuilder = resolvedDb.select()
+
+    if (!fallbackBuilder || typeof fallbackBuilder.from !== 'function') {
+      throw new Error('Configured ORM adapter does not expose select().from; pass a Drizzle database to Model.query(db).')
+    }
+
+    return fallbackBuilder.from(table) as SelectFrom<TDatabase>
   }
 
   static async with<T extends typeof Model, K extends RelationKey<T>>(
@@ -518,4 +561,16 @@ function normalizeRelations(relations: RelationNames): string[] {
   }
 
   return []
+}
+
+function hasDatabaseAccessor(adapter: ORMAdapter): adapter is ORMAdapter & { getDatabase: () => { select: (...args: any[]) => any } } { // eslint-disable-line @typescript-eslint/no-explicit-any
+  return typeof (adapter as { getDatabase?: unknown }).getDatabase === 'function'
+}
+
+function resolveQueryableDatabase(adapter: ORMAdapter): { select: (...args: any[]) => any } { // eslint-disable-line @typescript-eslint/no-explicit-any
+  if (hasDatabaseAccessor(adapter)) {
+    return adapter.getDatabase()
+  }
+
+  throw new Error('No queryable database found. Configure the ORM adapter or pass a Drizzle database to Model.query(db).')
 }

@@ -165,9 +165,16 @@ function isPromiseLike<T>(value: unknown): value is Promise<T> {
   return typeof value === 'object' && value !== null && 'then' in value && typeof (value as { then: unknown }).then === 'function'
 }
 
-export const DrizzleAdapter: ORMAdapter & { configure(db: DrizzleDatabase): void } = {
+export const DrizzleAdapter: ORMAdapter & {
+  configure(db: DrizzleDatabase): void
+  getDatabase<TDatabase extends DrizzleDatabase = DrizzleDatabase>(): TDatabase
+} = {
   configure(db: DrizzleDatabase) {
     database = db
+  },
+
+  getDatabase<TDatabase extends DrizzleDatabase = DrizzleDatabase>(): TDatabase {
+    return ensureDatabase() as unknown as TDatabase
   },
 
   async findMany<TRecord extends PlainObject = PlainObject>(

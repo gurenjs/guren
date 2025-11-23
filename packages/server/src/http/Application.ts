@@ -81,6 +81,7 @@ export class Application {
   private viteDevServer?: Awaited<ReturnType<typeof startViteDevServer>>['server']
   private bunServer?: BunServer
   private viteTeardownRegistered = false
+  private bunTeardownRegistered = false
 
   constructor(private readonly options: ApplicationOptions = {}) {
     this.hono = new Hono()
@@ -181,6 +182,7 @@ export class Application {
     })
     this.bunServer = server
     setActiveBunServer(server)
+    this.registerBunTeardown()
 
     const shouldLogBanner =
       typeof process === 'undefined' ||
@@ -259,6 +261,26 @@ export class Application {
       if (this.viteDevServer) {
         void this.viteDevServer.close()
       }
+    })
+  }
+
+  private registerBunTeardown(): void {
+    if (this.bunTeardownRegistered || typeof process === 'undefined') {
+      return
+    }
+
+    this.bunTeardownRegistered = true
+
+    const exitHandler = () => {
+      stopActiveBunServer()
+        .then(() => process.exit(0))
+        .catch(() => process.exit(1))
+    }
+
+    process.once('SIGINT', exitHandler)
+    process.once('SIGTERM', exitHandler)
+    process.on('exit', () => {
+      void stopActiveBunServer()
     })
   }
 }

@@ -19,7 +19,7 @@ Commands follow a subcommand pattern such as `bunx guren make:controller UserCon
 | Command | Description | Example |
 |---------|-------------|---------|
 | `make:controller <Name>` | Generates a controller in `app/Http/Controllers` | `bunx guren make:controller PostController` |
-| `make:model <Name>` | Generates a model class and type definition in `app/Models` | `bunx guren make:model Post` |
+| `make:model <Name>` | Generates a minimal model class and type definition in `app/Models` (imports `camelCase(Name)s` from `db/schema`) | `bunx guren make:model Post` |
 | `make:view <path>` | Generates a React component in `resources/js/pages` | `bunx guren make:view posts/Index` |
 | `make:auth` | Scaffolds login/logout controllers, provider, views, migration, seeder, and routes | `bunx guren make:auth` |
 
@@ -38,10 +38,10 @@ Common options are centralised under `packages/core/src/cli` so behaviour stays 
 Generated files match the Laravel-inspired ergonomics of the framework:
 
 - Controllers extend `Controller` and use helpers like `this.inertia()`.
-- Models extend `Model<TRecord>` and prefill `static table`.
+- Models extend `Model<TRecord>` and prefill `static table`. Use the helpers for quick CRUD, or call Drizzle’s RQB directly. `Model.query(db)` lets you start from the model while still writing Drizzle-flavoured queries.
 - Views are React + TypeScript + Tailwind CSS functional components.
 
-After generation remember to wire up routes and connect `static table` to the proper Drizzle schema.
+After generation remember to wire up routes and connect `static table` to the proper Drizzle schema. Complex queries can skip the model entirely—use your Drizzle database (`getDatabase()`) or `Model.query()` to stay type-safe.
 
 ## Scaffolding New Apps
 
