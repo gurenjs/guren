@@ -32,14 +32,14 @@ export default function Edit() {
   if (!post) {
     return (
       <Layout>
-        <div className="mx-auto mt-12 max-w-xl rounded-2xl border border-[#F4B0B0] bg-white p-8 text-center shadow-lg shadow-[#B71C1C]/10">
-          <h2 className="text-2xl font-semibold text-[#B71C1C] mb-3">投稿が見つかりません</h2>
-          <p className="text-[#6B1B1B]">{errors.message ?? '指定された投稿を表示できません。'}</p>
+        <div className="mx-auto mt-12 max-w-xl rounded-2xl bg-white p-8 text-center shadow-sm ring-1 ring-zinc-200">
+          <h2 className="text-2xl font-semibold text-zinc-900 mb-3">Post Not Found</h2>
+          <p className="text-zinc-500">{errors.message ?? 'The requested post could not be found.'}</p>
           <button
             onClick={() => window.history.back()}
-            className="mt-6 inline-flex items-center rounded-xl bg-linear-to-r from-[#B71C1C] to-[#8F1111] px-5 py-2.5 text-white shadow-lg shadow-[#B71C1C]/30 transition-all duration-200 hover:from-[#C92A2A] hover:to-[#7A0F0F]"
+            className="mt-6 inline-flex items-center justify-center rounded-full bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800"
           >
-            戻る
+            Go Back
           </button>
         </div>
       </Layout>

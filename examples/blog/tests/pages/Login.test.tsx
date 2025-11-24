@@ -12,7 +12,7 @@ describe('Login Inertia page', () => {
     })
     render(<Login />)
 
-    expect(screen.getByLabelText('Email')).toHaveValue('demo@guren.dev')
+    expect(screen.getByLabelText('Email address')).toHaveValue('demo@guren.dev')
   })
 
   it('renders validation messaging from the server', () => {
