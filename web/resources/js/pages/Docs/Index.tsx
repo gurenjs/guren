@@ -55,20 +55,16 @@ export default function DocsIndex({ categories, locales = [], basePath }: DocsIn
           }}
         >
           <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', textDecoration: 'none', color: 'inherit' }}>
-            <div style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: '8px',
-              background: 'linear-gradient(135deg, #db1b1b, #991b1b)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'white',
-              fontWeight: 'bold',
-              fontSize: '18px'
-            }}>
-              G
-            </div>
+              <img
+                src="/logo.svg"
+                alt="Guren Docs"
+                style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '8px',
+                  padding: '2px',
+                }}
+              />
             <span style={{ fontSize: '1.1rem', fontWeight: 700, color: docsTheme.text.heading, letterSpacing: '-0.02em' }}>Guren Docs</span>
           </Link>
           <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
