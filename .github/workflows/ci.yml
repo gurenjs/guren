@@ -35,9 +35,6 @@ jobs:
 
   web-app:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
 
     steps:
       - name: Checkout repository
@@ -49,19 +46,18 @@ jobs:
           bun-version: "1.3.1"
 
       - name: Install workspace dependencies
-        working-directory: ..
         run: bun install --frozen-lockfile
 
       - name: Generate route types
         run: |
-          bun run routes:types
-          git diff --exit-code
+          bun run --cwd web routes:types
+          git diff --exit-code -- web/types/generated/routes.d.ts
 
       - name: Type check
-        run: bun run typecheck
+        run: bun run --cwd web typecheck
 
       - name: Run tests
-        run: bun run test
+        run: bun run --cwd web test
 
       - name: Build client and SSR
-        run: bun run build
+        run: bun run --cwd web build
