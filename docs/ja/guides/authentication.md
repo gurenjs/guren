@@ -11,23 +11,62 @@ Guren には Laravel 由来の認証スタックが同梱され、セッショ�
 
 ## CLI でクイックスタート
 
-新規アプリではスキャフォルダーを実行します:
+新規アプリでは自動インストール機能付きのスキャフォルダーを実行します（セッションミドルウェアはデフォルトで自動付与されます）:
+
+```bash
+bunx guren make:auth --install
+```
+
+このコマンドはコントローラ、Inertia ページ、レイアウト、`AuthProvider`、ユーザーモデル、SQL マイグレーション、デモシーダーを生成します。`--install` フラグにより自動的に:
+
+1. `Application` の providers 配列に `AuthProvider` を登録
+2. 開発環境用の設定で `createSessionMiddleware` を追加（本番では `cookieSecure: true`）
+3. `routes/web.ts` に認証ルートをインポート
+4. `db/schema.ts` にパスワードや remember トークンのカラムを追加
+
+スキャフォルド後は以下を実行するだけです:
+
+```bash
+bun run db:migrate
+bun run db:seed
+bun run dev
+```
+
+`http://localhost:3000/login` にアクセスし、`demo@example.com` / `secret` でログインできます。
+
+### 手動セットアップ
+
+手動で設定したい場合や、部分的に設定済みの環境では `--install` フラグを省略します:
 
 ```bash
 bunx guren make:auth
 ```
 
-このコマンドはコントローラ、Inertia ページ、レイアウト、`AuthProvider`、ユーザーモデル、SQL マイグレーション、デモシーダーを生成します。実行後は:
+その後、手動で:
+1. `src/app.ts` に `AuthProvider` を登録
+2. ミドルウェアスタックに `createSessionMiddleware` を追加（`AuthServiceProvider` がデフォルトで自動追加。不要ならオプトアウト）
+3. `routes/web.ts` から `./routes/auth` をインポート
 
-1. `AuthProvider`、`createSessionMiddleware`、`attachAuthContext` を `src/app.ts` に登録。
-2. `src/main.ts`（または既存のルートブート箇所）で `./routes/auth` をインポート。
-3. `bun run db:migrate` の後に `bun run db:seed` を実行。
-
-スキャフォルダーは必要に応じて `db/schema.ts` にパスワードや remember トークンのカラムを追加します。
+`--install` フラグは安全かつ冪等です – 既存の設定を重複させません。
 
 ## セッションの有効化
 
-ガードはセッションに依存します。アプリ起動の早い段階で `createSessionMiddleware` を登録してください:
+ガードはセッションに依存します。デフォルトでは `AuthServiceProvider` が `createSessionMiddleware` を自動で付与します。無効化やカスタマイズは `Application` にオプションを渡します。
+
+```ts
+import { Application } from '@guren/server'
+
+const app = new Application({
+  auth: {
+    autoSession: true, // 無効化したい場合は false
+    sessionOptions: {
+      cookieSecure: process.env.NODE_ENV === 'production',
+    },
+  },
+})
+```
+
+細かく制御したい場合は、ブート処理の早い段階で明示的に登録してください:
 
 ```ts
 import { Application, createSessionMiddleware } from '@guren/core'
@@ -36,28 +75,78 @@ const app = new Application()
 app.use('*', createSessionMiddleware())
 ```
 
+`cookieSecure` はセッション Cookie に `Secure` 属性を付けるかどうかを制御します。HTTPS のみで送信させる属性で、本番では `true` を推奨します。ローカル開発では `http://localhost` で動かすためデフォルトで `false` になっています。
+
+**Application の auth オプション**
+- `autoSession`（デフォルト `true`）: `createSessionMiddleware` を自動で付与します。
+- `sessionOptions`（`createSessionMiddleware` にそのまま渡されます）:
+  - `cookieName`（デフォルト `guren.session`）
+  - `cookieSecure`（本番は `true`、開発は `false` がデフォルト）
+  - `cookieSameSite`（デフォルト `Lax`）
+  - `cookieHttpOnly`（デフォルト `true`）
+  - `cookieMaxAgeSeconds`（任意。指定がなければ `ttlSeconds` を使用）
+  - `ttlSeconds`（デフォルト 2 時間）
+  - `store`（デフォルトはメモリストア。複数インスタンス構成では独自実装に差し替えてください）
+
 ## プロバイダーとガードの設定
 
-ユーザープロバイダーと（必要なら）カスタムガードを登録するサービスプロバイダーを用意します。以下は `User` モデル向けに `ModelUserProvider` を配線し、既定の `web` セッションガードを維持する例です。
+### `auth.useModel()` ショートハンドの使用（推奨）
+
+認証を設定する最もシンプルな方法は `auth.useModel()` ヘルパーを使用することで、`ModelUserProvider` と `SessionGuard` を一度に登録できます:
 
 ```ts
 import type { ApplicationContext, Provider } from '@guren/core'
-import { ModelUserProvider } from '@guren/core'
 import { User } from '@/app/Models/User'
 
 export default class AuthProvider implements Provider {
   register(context: ApplicationContext): void {
+    context.auth.useModel(User, {
+      usernameColumn: 'email',
+      passwordColumn: 'passwordHash',
+      rememberTokenColumn: 'rememberToken',
+      credentialsPasswordField: 'password',
+    })
+  }
+}
+```
+
+このメソッド呼び出しで:
+- 指定されたカラムで `ModelUserProvider` を登録
+- 適切なセッション処理を備えた `SessionGuard` を作成
+- デフォルトガードを 'web' に設定
+- `ScryptHasher`（Bun ネイティブの scrypt ベース）をデフォルトで使用
+
+### 手動設定（上級者向け）
+
+カスタムプロバイダーやガードが必要な高度なケースでは、手動で設定できます:
+
+```ts
+import type { ApplicationContext, Provider } from '@guren/core'
+import { ModelUserProvider, SessionGuard } from '@guren/core'
+import { User } from '@/app/Models/User'
+
+export default class AuthProvider implements Provider {
+  register(context: ApplicationContext): void {
+    // プロバイダーを登録
     context.auth.registerProvider('users', () => new ModelUserProvider(User, {
       usernameColumn: 'email',
       passwordColumn: 'passwordHash',
       rememberTokenColumn: 'rememberToken',
       credentialsPasswordField: 'password',
     }))
+
+    // カスタムガードを登録
+    context.auth.registerGuard('web', ({ session, manager }) => {
+      const provider = manager.getProvider('users')
+      return new SessionGuard({ provider, session })
+    })
+
+    context.auth.setDefaultGuard('web')
   }
 }
 ```
 
-後述の `AuthenticatableModel` を併用するとパスワードのハッシュ化と検証ヘルパーが自動で付きます。内部では Bun の Argon2id を既定で使用するため、追加依存なしで最新のハッシュ化が得られます。
+後述の `AuthenticatableModel` を併用するとパスワードのハッシュ化と検証ヘルパーが自動で付きます。
 
 ### 認証可能モデル
 

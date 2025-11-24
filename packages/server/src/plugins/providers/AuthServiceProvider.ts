@@ -1,6 +1,7 @@
 import type { Provider, ProviderConstructor } from '../Provider'
 import type { ApplicationContext } from '../ApplicationContext'
 import { attachAuthContext } from '../../http/middleware/auth'
+import { createSessionMiddleware, type CreateSessionMiddlewareOptions } from '../../http/middleware/session'
 import { SessionGuard } from '../../auth/SessionGuard'
 import type { GuardFactory } from '../../auth/types'
 
@@ -19,6 +20,19 @@ export class AuthServiceProvider implements Provider {
 
   boot(context: ApplicationContext): void {
     const { app, auth } = context
+
+    const authOptions = app.authOptions ?? {}
+    const shouldAttachSession = authOptions.autoSession !== false && !app.hasAutoSessionAttached()
+
+    if (shouldAttachSession) {
+      const sessionOptions: CreateSessionMiddlewareOptions = {
+        cookieSecure: typeof process !== 'undefined' ? process.env.NODE_ENV === 'production' : true,
+        ...authOptions.sessionOptions,
+      }
+
+      app.use('*', createSessionMiddleware(sessionOptions))
+      app.markAutoSessionAttached()
+    }
 
     app.use('*', attachAuthContext((ctx) => auth.createAuthContext(ctx)))
   }

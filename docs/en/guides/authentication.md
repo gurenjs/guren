@@ -11,23 +11,62 @@ Guren ships with a Laravel-inspired authentication stack that sits on top of the
 
 ## Quickstart via CLI
 
-For new applications, run the bundled scaffolder:
+For new applications, run the bundled scaffolder with automatic installation (the session middleware will be auto-attached by default):
+
+```bash
+bunx guren make:auth --install
+```
+
+This command generates controllers, Inertia pages, a layout, `AuthProvider`, user model, SQL migration, and a demo seeder. The `--install` flag automatically:
+
+1. Registers `AuthProvider` in your `Application` providers array
+2. Adds `createSessionMiddleware` with development-friendly defaults (uses `cookieSecure: true` in production)
+3. Imports auth routes into `routes/web.ts`
+4. Updates `db/schema.ts` to include password and remember-token columns
+
+After scaffolding, simply run:
+
+```bash
+bun run db:migrate
+bun run db:seed
+bun run dev
+```
+
+Visit `http://localhost:3000/login` and sign in with `demo@example.com` / `secret`.
+
+### Manual Setup
+
+If you prefer to configure manually or already have partial setup, omit the `--install` flag:
 
 ```bash
 bunx guren make:auth
 ```
 
-This command generates controllers, Inertia pages, a layout, `AuthProvider`, user model, SQL migration, and a demo seeder. After running it:
+Then manually:
+1. Register `AuthProvider` in `src/app.ts`
+2. Add `createSessionMiddleware` to your middleware stack (auto-added by `AuthServiceProvider` unless you opt out)
+3. Import `./routes/auth` from `routes/web.ts`
 
-1. Register `AuthProvider`, `createSessionMiddleware`, and `attachAuthContext` inside `src/app.ts`.
-2. Import `./routes/auth` from `src/main.ts` (or your existing route bootstraps).
-3. Execute `bun run db:migrate` followed by `bun run db:seed`.
-
-The scaffolder updates `db/schema.ts` to include password and remember-token columns when needed.
+The `--install` flag is safe and idempotent – it won't duplicate existing configuration.
 
 ## Enabling Sessions
 
-Guards need access to the session. Register `createSessionMiddleware` early in your application bootstrap:
+Guards need access to the session. By default, `AuthServiceProvider` will attach `createSessionMiddleware` for you. To customize or disable it, pass auth options to `Application`:
+
+```ts
+import { Application } from '@guren/server'
+
+const app = new Application({
+  auth: {
+    autoSession: true, // set false to opt out
+    sessionOptions: {
+      cookieSecure: process.env.NODE_ENV === 'production',
+    },
+  },
+})
+```
+
+If you need manual control, register the middleware explicitly early in your bootstrap:
 
 ```ts
 import { Application, createSessionMiddleware } from '@guren/core'
@@ -36,28 +75,78 @@ const app = new Application()
 app.use('*', createSessionMiddleware())
 ```
 
+`cookieSecure` controls whether the session cookie is marked `Secure` (only sent over HTTPS). In production you should keep it `true`; in local development it is set to `false` by default so cookies work over http://localhost.
+
+**Application auth options**
+- `autoSession` (default `true`): automatically attaches `createSessionMiddleware`.
+- `sessionOptions` (forwarded to `createSessionMiddleware`):
+  - `cookieName` (default `guren.session`)
+  - `cookieSecure` (default `true` in production, `false` in dev/local)
+  - `cookieSameSite` (default `Lax`)
+  - `cookieHttpOnly` (default `true`)
+  - `cookieMaxAgeSeconds` (optional; falls back to `ttlSeconds`)
+  - `ttlSeconds` (default 2 hours)
+  - `store` (default in-memory; swap for your own implementation for multi-instance deployments)
+
 ## Configuring Providers & Guards
 
-Create a service provider that registers a user provider and (optionally) custom guards. The example below wires a `ModelUserProvider` for the `User` model and keeps the default `web` session guard.
+### Using the `auth.useModel()` Shorthand (Recommended)
+
+The simplest way to configure authentication is using the `auth.useModel()` helper, which registers both a `ModelUserProvider` and `SessionGuard` in one call:
 
 ```ts
 import type { ApplicationContext, Provider } from '@guren/core'
-import { ModelUserProvider } from '@guren/core'
 import { User } from '@/app/Models/User'
 
 export default class AuthProvider implements Provider {
   register(context: ApplicationContext): void {
+    context.auth.useModel(User, {
+      usernameColumn: 'email',
+      passwordColumn: 'passwordHash',
+      rememberTokenColumn: 'rememberToken',
+      credentialsPasswordField: 'password',
+    })
+  }
+}
+```
+
+This single method call:
+- Registers a `ModelUserProvider` with the specified columns
+- Creates a `SessionGuard` with proper session handling
+- Sets up the default guard as 'web'
+- Uses `ScryptHasher` (based on Bun's native scrypt) by default
+
+### Manual Configuration (Advanced)
+
+For advanced use cases requiring custom providers or guards, you can still configure them manually:
+
+```ts
+import type { ApplicationContext, Provider } from '@guren/core'
+import { ModelUserProvider, SessionGuard } from '@guren/core'
+import { User } from '@/app/Models/User'
+
+export default class AuthProvider implements Provider {
+  register(context: ApplicationContext): void {
+    // Register the provider
     context.auth.registerProvider('users', () => new ModelUserProvider(User, {
       usernameColumn: 'email',
       passwordColumn: 'passwordHash',
       rememberTokenColumn: 'rememberToken',
       credentialsPasswordField: 'password',
     }))
+
+    // Register a custom guard
+    context.auth.registerGuard('web', ({ session, manager }) => {
+      const provider = manager.getProvider('users')
+      return new SessionGuard({ provider, session })
+    })
+
+    context.auth.setDefaultGuard('web')
   }
 }
 ```
 
-Pair this with the `AuthenticatableModel` base class (see below) to get automatic password hashing and validation helpers. Under the hood, Guren uses Bun's Argon2id implementation by default, so you get modern password hashing without additional dependencies.
+Pair this with the `AuthenticatableModel` base class (see below) to get automatic password hashing and validation helpers.
 
 ### Authenticatable Models
 

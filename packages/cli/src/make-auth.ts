@@ -1,7 +1,8 @@
 import { readFile, writeFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { dirname, relative, resolve, sep as pathSep } from 'node:path'
 import { consola } from 'consola'
 import { writeFileSafe, type WriterOptions } from './utils'
+import { addImport, addMiddleware, addProvider } from './patch-helpers'
 
 function timestamp(): string {
   const now = new Date()
@@ -76,18 +77,16 @@ export class User extends AuthenticatableModel<UserRecord> {
 `
 
 const authProviderTemplate = `import type { ApplicationContext, Provider } from '@guren/core'
-import { ModelUserProvider, ScryptHasher } from '@guren/core'
 import { User } from '../Models/User.js'
 
 export default class AuthProvider implements Provider {
   register(context: ApplicationContext): void {
-    context.auth.registerProvider('users', () => new ModelUserProvider(User, {
+    context.auth.useModel(User, {
       usernameColumn: 'email',
       passwordColumn: 'passwordHash',
       rememberTokenColumn: 'rememberToken',
       credentialsPasswordField: 'password',
-      hasher: new ScryptHasher(),
-    }))
+    })
   }
 }
 `
@@ -378,7 +377,11 @@ export const users = pgTable('users', {
   consola.info('Updated db/schema.ts with authentication columns.')
 }
 
-export async function makeAuth(options: WriterOptions = {}): Promise<string[]> {
+export interface MakeAuthOptions extends WriterOptions {
+  install?: boolean
+}
+
+export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]> {
   const created: string[] = []
 
   created.push(await writeFileSafe('app/Http/Controllers/Auth/LoginController.ts', loginControllerTemplate, options))
@@ -395,11 +398,109 @@ export async function makeAuth(options: WriterOptions = {}): Promise<string[]> {
 
   await updateSchema()
 
-  consola.info('Next steps:')
-  consola.info('  • Register AuthProvider and session middleware in src/app.ts')
-  consola.info('  • Import \'./routes/auth.js\' from src/main.ts or routes/web.ts')
-  consola.info('  • Run `bun run db:migrate` and `bun run db:seed`')
-  consola.info('  • Install zod if not already installed: `bun add zod`')
+  if (options.install) {
+    await installAuth()
+  } else {
+    consola.info('Next steps:')
+    consola.info('  • Register AuthProvider and session middleware in src/app.ts')
+    consola.info('  • Import \'./routes/auth.js\' from src/main.ts or routes/web.ts')
+    consola.info('  • Run `bun run db:migrate` and `bun run db:seed`')
+    consola.info('  • Install zod if not already installed: `bun add zod`')
+  }
 
   return created
+}
+
+async function installAuth(): Promise<void> {
+  consola.info('Installing authentication configuration...')
+
+  // Determine app file location (try src/app.ts first, then app.ts)
+  const appPaths = ['src/app.ts', 'app.ts']
+  let appPath: string | undefined
+
+  for (const path of appPaths) {
+    try {
+      await readFile(resolve(process.cwd(), path), 'utf8')
+      appPath = path
+      break
+    } catch {
+      // File doesn't exist, try next
+    }
+  }
+
+  if (!appPath) {
+    consola.warn('Could not find src/app.ts or app.ts - skipping auto-configuration')
+    consola.info('Please manually:')
+    consola.info('  • Register AuthProvider in your Application providers')
+    consola.info('  • Add createSessionMiddleware to your middleware stack')
+    return
+  }
+
+  // Add imports
+  const sessionImport = "import { createSessionMiddleware } from '@guren/server'"
+  const authProviderImportPath = (() => {
+    const base = dirname(appPath)
+    const rel = relative(base, 'app/Providers/AuthProvider.js') || 'app/Providers/AuthProvider.js'
+    const normalized = rel.split(pathSep).join('/').replace(/^\.$/, 'app/Providers/AuthProvider.js')
+    return normalized.startsWith('.') ? normalized : `./${normalized}`
+  })()
+  const authProviderImport = `import AuthProvider from '${authProviderImportPath}'`
+
+  const sessionImportResult = await addImport(appPath, sessionImport)
+  if (sessionImportResult.modified) {
+    consola.success(`Added session middleware import to ${appPath}`)
+  } else if (sessionImportResult.reason === 'Import already exists') {
+    consola.info(`Session middleware import already exists in ${appPath}`)
+  }
+
+  const authImportResult = await addImport(appPath, authProviderImport)
+  if (authImportResult.modified) {
+    consola.success(`Added AuthProvider import to ${appPath}`)
+  } else if (authImportResult.reason === 'Import already exists') {
+    consola.info(`AuthProvider import already exists in ${appPath}`)
+  }
+
+  // Add AuthProvider to providers array
+  const providerResult = await addProvider(appPath, 'AuthProvider')
+  if (providerResult.modified) {
+    consola.success(`Added AuthProvider to providers array in ${appPath}`)
+  } else if (providerResult.reason === 'Provider already registered') {
+    consola.info(`AuthProvider already registered in ${appPath}`)
+  } else {
+    consola.warn(`Could not add AuthProvider: ${providerResult.reason}`)
+  }
+
+  // Add session middleware
+  const middlewareCall = "app.use('*', createSessionMiddleware({ cookieSecure: false }))"
+  const middlewareResult = await addMiddleware(appPath, middlewareCall)
+  if (middlewareResult.modified) {
+    consola.success(`Added session middleware to ${appPath}`)
+  } else if (middlewareResult.reason === 'Middleware already registered') {
+    consola.info(`Session middleware already registered in ${appPath}`)
+  } else {
+    consola.warn(`Could not add session middleware: ${middlewareResult.reason}`)
+  }
+
+  // Add auth routes import to routes/web.ts
+  const webRoutesPath = 'routes/web.ts'
+  try {
+    await readFile(resolve(process.cwd(), webRoutesPath), 'utf8')
+    const routesImport = "import './auth.js'"
+    const routesImportResult = await addImport(webRoutesPath, routesImport)
+
+    if (routesImportResult.modified) {
+      consola.success(`Added auth routes import to ${webRoutesPath}`)
+    } else if (routesImportResult.reason === 'Import already exists') {
+      consola.info(`Auth routes import already exists in ${webRoutesPath}`)
+    }
+  } catch {
+    consola.warn(`Could not find ${webRoutesPath} - you may need to manually import './routes/auth.js'`)
+  }
+
+  consola.success('Authentication configuration installed!')
+  consola.info('Next steps:')
+  consola.info('  • Run `bun run db:migrate` to create the users table')
+  consola.info('  • Run `bun run db:seed` to create demo user')
+  consola.info('  • Install zod if not already installed: `bun add zod`')
+  consola.info('  • Start the dev server and visit /login')
 }

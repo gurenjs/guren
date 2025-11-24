@@ -2,13 +2,19 @@
 
 Secure your app by scaffolding the built-in authentication stack.
 
-1. **Generate scaffolding** — run `bunx guren make:auth --force` to create controllers, views, migrations, and the `AuthProvider`.
-2. **Wire providers** — register `AuthProvider`, `createSessionMiddleware`, and `attachAuthContext` inside `src/app.ts` before booting the application:
+1. **Generate scaffolding** — run `bunx guren make:auth --install` to create controllers, views, migrations, the `AuthProvider`, and auto-wire session + routes. Use `--force` if you want to overwrite existing files.
+2. **(Usually done for you)** `--install` auto-registers `AuthProvider`, attaches session middleware, and imports auth routes. If you want to tweak session behavior (e.g., force secure cookies), pass auth options to `Application`:
    ```ts
-   app.register(DatabaseProvider)
-   app.register(AuthProvider)
-   app.use('*', createSessionMiddleware())
-   app.use('*', attachAuthContext())
+   import { Application } from '@guren/server'
+
+   const app = new Application({
+     auth: {
+       autoSession: true, // set false to skip auto session wiring
+       sessionOptions: {
+         cookieSecure: process.env.NODE_ENV === 'production',
+       },
+     },
+   })
    ```
 3. **Run migrations & seeders** — execute `bun run db:migrate` followed by `bun run db:seed` to create the `users` table and demo user.
 4. **Protect routes** — apply `requireAuthenticated` middleware to dashboards or post-management endpoints:

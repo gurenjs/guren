@@ -145,9 +145,17 @@ const makeAuthCommand = defineCommand({
       description: 'Overwrite existing files',
       alias: 'f',
     },
+    install: {
+      type: 'boolean',
+      description: 'Automatically wire up auth configuration in app.ts and routes',
+      alias: 'i',
+    },
   },
   async run({ args }) {
-    const files = await makeAuth(toWriterOptions(args))
+    const files = await makeAuth({
+      ...toWriterOptions(args),
+      install: Boolean(args.install),
+    })
     for (const file of files) {
       consola.success(`Created ${file}`)
     }

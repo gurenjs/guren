@@ -18,8 +18,8 @@ This document tracks the current status of the roadmap items listed in `README.m
   - Current: Drizzle adapter, `Model` with `find/where/orderBy/paginate`, `hasMany/belongsTo`, simple eager loading via `with/withPaginate`.
   - Missing: scopes, soft deletes, observers/events, richer relationship types and constraints.
 - Auth/authorization suite — **In progress**
-  - Current: AuthManager + SessionGuard, middleware (`requireAuthenticated`/`requireGuest`), `make:auth` scaffolding.
-  - Missing: OAuth/social, password reset flows, API tokens, policies/gates, remember-me tokens, guard drivers beyond session.
+  - Current: AuthManager + SessionGuard, middleware (`requireAuthenticated`/`requireGuest`), `make:auth` scaffolding with `--install` flag for auto-wiring, `auth.useModel()` shorthand API, session management with remember-me support.
+  - Missing: OAuth/social providers, password reset flows, email verification, API tokens, policies/gates, guard drivers beyond session (e.g., JWT, API token), **CSRF protection middleware + form helpers**.
 - Asynchronous tooling — **Planned**
   - Missing: queues, events, broadcasting, scheduler, cache abstractions.
 - Storage integrations — **Planned**
@@ -45,5 +45,5 @@ This document tracks the current status of the roadmap items listed in `README.m
   - Current: Code of Conduct, Contributing guide.
   - Missing: Issue/PR templates, RFC workflow, release notes cadence.
 - First-party plugins — **In progress**
-  - Current: auth scaffolding, session middleware.
-  - Missing: mail/queue/cache drivers, job scheduler, alternative ORM/DB adapter examples.
+  - Current: auth scaffolding with auto-installation, session middleware with configurable options, `auth.useModel()` helper for simplified provider registration.
+  - Missing: mail/queue/cache drivers, job scheduler, alternative ORM/DB adapter examples, event broadcasting.

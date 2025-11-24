@@ -7,6 +7,7 @@ import type { Provider, ProviderConstructor } from '../plugins/Provider'
 import { InertiaViewProvider } from '../plugins/providers/InertiaViewProvider'
 import { AuthServiceProvider } from '../plugins/providers/AuthServiceProvider'
 import { AuthManager } from '../auth'
+import type { CreateSessionMiddlewareOptions } from './middleware/session'
 import { logDevServerBanner, type DevBannerOptions } from './dev-banner'
 import { startViteDevServer, type StartViteDevServerOptions } from './vite-dev-server'
 
@@ -83,6 +84,12 @@ export type BootCallback = (app: Hono) => void | Promise<void>
 export interface ApplicationOptions {
   readonly boot?: BootCallback
   readonly providers?: Array<Provider | ProviderConstructor>
+  readonly auth?: AuthPluginOptions
+}
+
+export interface AuthPluginOptions {
+  autoSession?: boolean
+  sessionOptions?: CreateSessionMiddlewareOptions
 }
 
 export interface ApplicationListenOptions {
@@ -106,6 +113,7 @@ export class Application {
   private bunServer?: BunServer
   private viteTeardownRegistered = false
   private bunTeardownRegistered = false
+  private autoSessionAttached = false
 
   constructor(private readonly options: ApplicationOptions = {}) {
     this.hono = new Hono()
@@ -121,6 +129,18 @@ export class Application {
 
   get auth(): AuthManager {
     return this.authManager
+  }
+
+  get authOptions(): AuthPluginOptions | undefined {
+    return this.options.auth
+  }
+
+  markAutoSessionAttached(): void {
+    this.autoSessionAttached = true
+  }
+
+  hasAutoSessionAttached(): boolean {
+    return this.autoSessionAttached
   }
 
   /**
