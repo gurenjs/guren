@@ -1,64 +1,70 @@
 import { Link } from '@inertiajs/react'
-import Layout from '../../components/Layout.js'
 import type { PostShowPageProps } from '@/Http/Controllers/PostController'
-import { ArrowLeft, PencilLine } from 'lucide-react'
+import Layout from '../../components/Layout.js'
+import { ArrowLeft, Calendar, User } from 'lucide-react'
 
 export default function Show({ post }: PostShowPageProps) {
-  const paragraphs: string[] = post.body?.split(/\n+/).filter(Boolean) ?? []
-
   return (
     <Layout
-      wrapperClassName="relative bg-linear-to-br from-[#FFF0F0] via-[#FFE3E3] to-[#F5C5C5] text-[#3C0A0A]"
-      mainClassName="relative mx-auto w-full max-w-5xl px-4 sm:px-6 lg:px-8 py-12"
+      wrapperClassName="bg-zinc-50"
+      mainClassName="max-w-3xl mx-auto px-6 py-12"
     >
-      <div className="relative z-10 space-y-10">
-        <section className="rounded-3xl border border-[#F4B0B0] bg-white/90 p-8 shadow-lg shadow-[#B71C1C]/10 backdrop-blur">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <Link
-              href="/posts"
-              className="inline-flex items-center gap-2 text-sm font-medium text-[#B71C1C] transition-colors duration-200 hover:text-[#7A0F0F]"
-            >
-              <ArrowLeft className="h-4 w-4" aria-hidden />
-              Back to posts
-            </Link>
-            <Link
-              href={`/posts/${post.id}/edit`}
-              className="inline-flex items-center gap-2 rounded-xl bg-linear-to-r from-[#B71C1C] to-[#8F1111] px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-[#B71C1C]/30 transition-all duration-200 hover:from-[#C92A2A] hover:to-[#7A0F0F] hover:shadow-xl"
-            >
-              <PencilLine className="h-4 w-4" aria-hidden />
-              Edit post
-            </Link>
+      <article className="bg-white p-8 shadow-sm ring-1 ring-zinc-200 sm:rounded-2xl sm:p-12">
+        <Link
+          href="/posts"
+          className="group mb-8 inline-flex items-center text-sm font-medium text-zinc-500 transition hover:text-zinc-900"
+        >
+          <ArrowLeft className="mr-2 h-4 w-4 transition-transform group-hover:-translate-x-1" />
+          Back to posts
+        </Link>
+
+        <header className="mb-10">
+          <div className="mb-6 flex items-center gap-4 text-sm text-zinc-500">
+            <span className="flex items-center gap-1.5">
+              <Calendar className="h-4 w-4" />
+              {new Date().toLocaleDateString('en-US', {
+                month: 'long',
+                day: 'numeric',
+                year: 'numeric'
+              })}
+            </span>
+            <span className="h-1 w-1 rounded-full bg-zinc-300" />
+            <span className="flex items-center gap-1.5">
+              <User className="h-4 w-4" />
+              {post.author?.name ?? 'Unknown author'}
+            </span>
           </div>
 
-          <header className="mt-6 space-y-4">
-            <h1 className="text-4xl md:text-5xl font-bold text-[#8F1111] leading-tight">
-              {post.title}
-            </h1>
-            <p className="max-w-3xl text-lg text-[#6B1B1B]">
-              {post.excerpt}
-            </p>
-          </header>
-        </section>
+          <h1 className="text-3xl font-bold tracking-tight text-zinc-900 sm:text-4xl lg:text-5xl">
+            {post.title}
+          </h1>
+        </header>
 
-        <article className="relative rounded-3xl border border-[#F4B0B0] bg-white p-10 shadow-xl">
+        <div className="prose prose-zinc prose-lg max-w-none">
+          <p className="lead text-xl text-zinc-600">{post.excerpt}</p>
+          <div className="mt-8 space-y-6 text-zinc-700">
+            {(post.body || '').split('\n').map((paragraph, index) => (
+              <p key={index}>{paragraph}</p>
+            ))}
+          </div>
+        </div>
+
+        <hr className="my-12 border-zinc-100" />
+
+        <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-linear-to-br from-[#FFC1C1] to-[#B71C1C] text-xl font-semibold text-white">
-              {(post.author?.name ?? post.title).charAt(0).toUpperCase()}
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-guren-50 text-guren-600 ring-1 ring-guren-100">
+              <span className="text-lg font-bold">
+                {(post.author?.name ?? post.title).charAt(0).toUpperCase()}
+              </span>
             </div>
-            <div className="flex-1">
-              <p className="text-sm font-medium text-[#8F1111]">{post.author?.name ?? 'Unknown author'}</p>
-              <p className="text-xs text-[#A65555]">
-                Published {new Date().toLocaleDateString('ja-JP', { month: 'long', day: 'numeric', year: 'numeric' })}
-              </p>
+            <div>
+              <p className="font-medium text-zinc-900">{post.author?.name ?? 'Unknown author'}</p>
+              <p className="text-sm text-zinc-500">Author</p>
             </div>
           </div>
-        </article>
-      </div>
-
-      <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
-        <div className="absolute -top-16 -right-32 h-64 w-64 rounded-full bg-[#F5C5C5] opacity-20 blur-3xl mix-blend-multiply" />
-        <div className="absolute -bottom-20 -left-32 h-64 w-64 rounded-full bg-[#E35151] opacity-15 blur-3xl mix-blend-multiply" />
-      </div>
+        </div>
+      </article>
     </Layout>
   )
 }
