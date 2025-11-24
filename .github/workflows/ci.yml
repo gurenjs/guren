@@ -32,3 +32,35 @@ jobs:
 
       - name: Run tests
         run: bun run test
+
+  web-app:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.1"
+
+      - name: Install workspace dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build packages
+        run: bun run build
+
+      - name: Generate route types
+        run: |
+          bun run --cwd web routes:types
+          git diff --exit-code -- web/types/generated/routes.d.ts
+
+      - name: Type check
+        run: bun run --cwd web typecheck
+
+      - name: Run tests
+        run: bun run --cwd web test
+
+      - name: Build client and SSR
+        run: bun run --cwd web build

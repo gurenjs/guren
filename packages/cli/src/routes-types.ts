@@ -1,12 +1,12 @@
 import { relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Route } from '@guren/server'
+import { writeFileSafe, type WriterOptions } from './utils'
 type RouteDefinition = {
   method: string
   path: string
   name?: string
 }
-import { writeFileSafe, type WriterOptions } from './utils'
 
 export interface GenerateRouteTypesOptions extends WriterOptions {
   routesFile?: string

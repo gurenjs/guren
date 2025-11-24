@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createControllerContext, readInertiaResponse, type ControllerContext } from '@guren/testing'
 import type { Context } from '@guren/server'
 import type { DocCategoryGroup, DocPage } from '../../app/Services/DocsService.js'
+import { DEFAULT_DOC_LOCALE } from '../../app/Services/DocsService.js'
 import { createControllerModuleMock } from '../../../packages/testing/dist/index.js'
 
 vi.mock('@guren/server', () => createControllerModuleMock())
@@ -86,8 +87,14 @@ describe('DocsController', () => {
     const response = await controller.show()
     const { payload } = await readInertiaResponse(response)
 
-    expect(docsService.getDoc).toHaveBeenCalledWith('guides', 'routing')
-    expect(response.status).toBe(200)
+    expect(docsService.getDoc).toHaveBeenCalledWith('guides', 'routing', DEFAULT_DOC_LOCALE)
+    expect(payload.props.locale).toBe(DEFAULT_DOC_LOCALE)
+    expect(payload.props.locales).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'en', href: '/docs/guides/routing', active: true }),
+        expect.objectContaining({ code: 'ja', href: '/docs/ja/guides/routing', active: false }),
+      ]),
+    )
     expect(payload.props.doc).toEqual(docPage)
     expect(payload.props.active).toEqual({ category: 'guides', slug: 'routing' })
     expect(payload.props.categories).toEqual(categories)
@@ -104,7 +111,14 @@ describe('DocsController', () => {
     const response = await controller.show()
     const { payload } = await readInertiaResponse(response)
 
-    expect(response.status).toBe(404)
+    expect(docsService.getDoc).toHaveBeenCalledWith('guides', 'missing', DEFAULT_DOC_LOCALE)
+    expect(payload.props.locale).toBe(DEFAULT_DOC_LOCALE)
+    expect(payload.props.locales).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'en', href: '/docs/guides/missing', active: true }),
+        expect.objectContaining({ code: 'ja', href: '/docs/ja/guides/missing', active: false }),
+      ]),
+    )
     expect(payload.props.doc).toBeNull()
     expect(payload.props.active).toEqual({ category: 'guides', slug: 'missing' })
   })
