@@ -1,1 +1,23 @@
 @import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+
+  --color-guren-50: #fff0f3;
+  --color-guren-100: #ffe3e8;
+  --color-guren-200: #ffc9d2;
+  --color-guren-300: #ff9fb0;
+  --color-guren-400: #ff6b85;
+  --color-guren-500: #ff385c;
+  --color-guren-600: #E60033;
+  --color-guren-700: #c2002b;
+  --color-guren-800: #a00026;
+  --color-guren-900: #850522;
+  --color-guren-950: #4a000f;
+}
+
+@layer base {
+  body {
+    @apply antialiased text-zinc-900 bg-zinc-50;
+  }
+}
