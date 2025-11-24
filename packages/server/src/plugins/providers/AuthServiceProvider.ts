@@ -11,15 +11,12 @@ const DEFAULT_PROVIDER = 'users'
 export class AuthServiceProvider implements Provider {
   register(context: ApplicationContext): void {
     const auth = context.auth
+    const { app } = context
 
     if (!auth.guardNames().length) {
       auth.registerGuard(DEFAULT_GUARD, createDefaultGuardFactory(DEFAULT_PROVIDER))
       auth.setDefaultGuard(DEFAULT_GUARD)
     }
-  }
-
-  boot(context: ApplicationContext): void {
-    const { app, auth } = context
 
     const authOptions = app.authOptions ?? {}
     const shouldAttachSession = authOptions.autoSession !== false && !app.hasAutoSessionAttached()
