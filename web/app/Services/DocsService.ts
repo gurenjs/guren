@@ -1,6 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises'
-import { Dirent } from 'node:fs'
-import { resolve } from 'node:path'
+import { Dirent, existsSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 import { renderMarkdownToHtml } from './MarkdownRenderer.js'
 
 export interface DocSummary {
@@ -20,8 +20,57 @@ export interface DocPage extends DocSummary {
   html: string
 }
 
-// Resolve docs relative to the repository root so it works regardless of where the server is launched.
-const DEFAULT_DOCS_DIR = resolve(import.meta.dirname, '../../..', 'docs')
+type ResolveDocsDirOptions = {
+  importMetaDir?: string
+  cwd?: string
+  envDocsDir?: string | null
+}
+
+function findNearestDocsDir(startDir: string, maxDepth = 6): string | null {
+  let currentDir = startDir
+
+  for (let depth = 0; depth < maxDepth; depth += 1) {
+    const candidate = resolve(currentDir, 'docs')
+    if (existsSync(candidate)) {
+      return candidate
+    }
+
+    const parent = dirname(currentDir)
+    if (parent === currentDir) {
+      break
+    }
+    currentDir = parent
+  }
+
+  return null
+}
+
+// Resolve docs relative to the repository root so it works regardless of where the server is launched or bundled.
+export function resolveDefaultDocsDir(options: ResolveDocsDirOptions = {}): string {
+  const envDir = options.envDocsDir ?? process.env.GUREN_DOCS_DIR ?? process.env.DOCS_DIR
+  if (envDir) {
+    const resolvedEnvDir = resolve(envDir)
+    if (existsSync(resolvedEnvDir)) {
+      return resolvedEnvDir
+    }
+  }
+
+  const cwdMatch = findNearestDocsDir(options.cwd ?? process.cwd())
+  if (cwdMatch) {
+    return cwdMatch
+  }
+
+  const importMetaDir = options.importMetaDir ?? import.meta.dirname
+  const importMetaMatch = findNearestDocsDir(importMetaDir)
+  if (importMetaMatch) {
+    return importMetaMatch
+  }
+
+  // Fallback to the original heuristic; this keeps behavior stable even if no docs directory is found.
+  return resolve(importMetaDir, '../../..', 'docs')
+}
+
+const DEFAULT_DOCS_DIR = resolveDefaultDocsDir()
 const DEFAULT_DOC_LOCALE: DocLocale = 'en'
 
 const DOC_LOCALE_CONFIG = {
