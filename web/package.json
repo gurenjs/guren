@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "routes:types": "bun ../packages/cli/src/bin.ts routes:types --routes routes/web.ts --out types/generated/routes.d.ts --force",
+    "routes:types": "cd .. && bun packages/cli/src/bin.ts routes:types --routes web/routes/web.ts --out web/types/generated/routes.d.ts --force",
     "dev": "bun run dev:server",
     "dev:server": "bun run --watch --hot bin/serve.ts",
     "typecheck": "bunx tsc --noEmit",
