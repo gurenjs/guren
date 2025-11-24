@@ -24,6 +24,7 @@ export const docsTheme = {
   },
   shadow: {
     card: 'var(--docs-shadow-card)',
+    floating: 'var(--docs-shadow-floating)',
   },
 } as const
 

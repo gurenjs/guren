@@ -35,54 +35,65 @@ export default function DocsIndex({ categories, locales = [], basePath }: DocsIn
       <Head title="Documentation" />
       <header
         style={{
-          background: 'linear-gradient(135deg, rgba(183,28,28,0.14), rgba(15,10,10,0.9))',
+          backgroundColor: docsTheme.surfaces.page,
           borderBottom: `1px solid ${docsTheme.border.soft}`,
-          padding: '1.15rem 1.5rem',
+          padding: '1rem 1.5rem',
+          position: 'sticky',
+          top: 0,
+          zIndex: 50,
         }}
       >
         <div
           style={{
-            maxWidth: '1100px',
+            maxWidth: '1200px',
             margin: '0 auto',
             display: 'flex',
             alignItems: 'center',
             gap: '1rem',
             justifyContent: 'space-between',
-            color: docsTheme.text.heading,
             flexWrap: 'wrap',
           }}
         >
           <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', textDecoration: 'none', color: 'inherit' }}>
-            <img src="/logo.svg" alt="Guren logo" style={{ width: '36px', height: '36px', borderRadius: '12px', background: 'rgba(255,255,255,0.08)', padding: '6px' }} />
-            <span style={{ fontSize: '1.05rem', fontWeight: 700 }}>Guren Docs</span>
+              <img
+                src="/logo.svg"
+                alt="Guren Docs"
+                style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '8px',
+                  padding: '2px',
+                }}
+              />
+            <span style={{ fontSize: '1.1rem', fontWeight: 700, color: docsTheme.text.heading, letterSpacing: '-0.02em' }}>Guren Docs</span>
           </Link>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-            <nav style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
-              <Link href={basePath} style={{ color: docsTheme.text.heading, textDecoration: 'none', fontWeight: 600 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
+            <nav style={{ display: 'flex', gap: '1.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <Link href={basePath} style={{ color: docsTheme.text.primary, textDecoration: 'none', fontWeight: 500, fontSize: '0.95rem' }}>
                 Guides
               </Link>
-              <Link href={`${basePath}/tutorials/overview`} style={{ color: docsTheme.text.heading, textDecoration: 'none', fontWeight: 600 }}>
+              <Link href={`${basePath}/tutorials/overview`} style={{ color: docsTheme.text.primary, textDecoration: 'none', fontWeight: 500, fontSize: '0.95rem' }}>
                 Tutorials
               </Link>
-              <Link href="https://github.com/gurenjs/guren" style={{ color: docsTheme.text.heading, textDecoration: 'none', fontWeight: 600 }}>
-                GitHub ↗
+              <Link href="https://github.com/gurenjs/guren" style={{ color: docsTheme.text.muted, textDecoration: 'none', fontWeight: 500, fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                GitHub <span style={{ fontSize: '0.8em' }}>↗</span>
               </Link>
             </nav>
             {locales.length > 1 ? (
-              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center', flexWrap: 'wrap', paddingLeft: '1rem', borderLeft: `1px solid ${docsTheme.border.soft}` }}>
                 {locales.map((locale) => (
                   <Link
                     key={locale.code}
                     href={locale.href}
                     style={{
-                      padding: '0.35rem 0.75rem',
-                      borderRadius: '999px',
+                      padding: '0.25rem 0.6rem',
+                      borderRadius: '6px',
                       textDecoration: 'none',
-                      color: locale.active ? docsTheme.surfaces.panel : docsTheme.text.primary,
-                      backgroundColor: locale.active ? docsTheme.accent.strong : docsTheme.surfaces.panel,
-                      border: `1px solid ${locale.active ? docsTheme.accent.strong : docsTheme.border.soft}`,
+                      color: locale.active ? docsTheme.accent.strong : docsTheme.text.muted,
+                      backgroundColor: locale.active ? docsTheme.accent.tint : 'transparent',
                       fontWeight: 600,
-                      fontSize: '0.9rem',
+                      fontSize: '0.85rem',
+                      transition: 'all 0.2s ease',
                     }}
                   >
                     {locale.label}
@@ -96,103 +107,122 @@ export default function DocsIndex({ categories, locales = [], basePath }: DocsIn
       <main
         style={{
           fontFamily: docsTheme.fontFamily,
-          margin: '3rem auto',
-          maxWidth: '960px',
-          padding: '0 1.5rem',
           backgroundColor: docsTheme.surfaces.page,
           color: docsTheme.text.primary,
+          minHeight: 'calc(100vh - 70px)',
         }}
       >
-        <header style={{ marginBottom: '2.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <p
-            style={{
-              color: docsTheme.text.muted,
-              fontSize: '0.875rem',
-              textTransform: 'uppercase',
-              letterSpacing: '0.08em',
-            }}
-          >
-            Resources
-          </p>
-          <h1
-            style={{
-              fontSize: '2.5rem',
-              margin: '0.5rem 0 1rem',
-              fontWeight: 700,
-              color: docsTheme.text.heading,
-            }}
-          >
-            Guren Documentation
-          </h1>
-          <p
-            style={{
-              fontSize: '1.125rem',
-              lineHeight: 1.7,
-              color: docsTheme.text.secondary,
-              maxWidth: '720px',
-            }}
-          >
-            Browse the official guides and hands-on tutorials. Start with foundational topics, then follow the step-by-step builds
-            to apply what you learned.
-          </p>
-        </header>
-        {categories.map((group) => (
-          <section key={group.category} style={{ marginBottom: '2.5rem' }}>
-            <div style={{ marginBottom: '1.25rem' }}>
-              <p
-                style={{
-                  color: docsTheme.text.muted,
-                  fontSize: '0.75rem',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.12em',
-                }}
-              >
-                {group.title}
-              </p>
-              <h2 style={{ fontSize: '1.75rem', margin: 0, color: docsTheme.text.heading }}>
-                {group.title === 'Guides' ? 'Deep dives & references' : 'Applied builds'}
-              </h2>
-            </div>
-            {group.docs.length ? (
-              <div style={{ display: 'grid', gap: '1.5rem', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
-                {group.docs.map((doc) => (
-                  <article
-                key={`${group.category}-${doc.slug}`}
-                style={{
-                  border: `1px solid ${docsTheme.border.soft}`,
-                  borderRadius: '0.75rem',
-                  padding: '1.5rem',
-                      backgroundColor: docsTheme.surfaces.panel,
-                      boxShadow: docsTheme.shadow.card,
-                    }}
-                  >
-                  <h3 style={{ fontSize: '1.25rem', marginBottom: '0.75rem', fontWeight: 600 }}>
-                    <Link
-                      href={`${basePath}/${group.category}/${doc.slug}`}
-                      style={{ color: docsTheme.accent.strong, textDecoration: 'none' }}
-                    >
-                      {doc.title}
-                    </Link>
-                  </h3>
-                    {doc.description ? (
-                      <p style={{ fontSize: '0.95rem', color: docsTheme.text.secondary, lineHeight: 1.6 }}>{doc.description}</p>
-                    ) : null}
-                    <div style={{ marginTop: '1.25rem' }}>
+        <div style={{
+          maxWidth: '1200px',
+          margin: '0 auto',
+          padding: '4rem 1.5rem 6rem',
+        }}>
+          <header style={{ marginBottom: '5rem', maxWidth: '800px' }}>
+            <p
+              style={{
+                color: docsTheme.accent.strong,
+                fontSize: '0.9rem',
+                fontWeight: 600,
+                marginBottom: '1rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+              }}
+            >
+              <span style={{ width: '20px', height: '1px', backgroundColor: docsTheme.accent.strong }}></span>
+              DOCUMENTATION
+            </p>
+            <h1
+              style={{
+                fontSize: '3.5rem',
+                margin: '0 0 1.5rem',
+                fontWeight: 800,
+                color: docsTheme.text.heading,
+                letterSpacing: '-0.03em',
+                lineHeight: 1.1,
+              }}
+            >
+              Build faster with <br />
+              <span style={{
+                background: 'linear-gradient(135deg, #db1b1b 0%, #7f1d1d 100%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent'
+              }}>Guren Framework</span>
+            </h1>
+            <p
+              style={{
+                fontSize: '1.25rem',
+                lineHeight: 1.6,
+                color: docsTheme.text.secondary,
+                maxWidth: '640px',
+              }}
+            >
+              Everything you need to build robust, scalable applications.
+              Explore our comprehensive guides and hands-on tutorials to get started.
+            </p>
+          </header>
+
+          <div style={{ display: 'grid', gap: '4rem' }}>
+            {categories.map((group) => (
+              <section key={group.category}>
+                <div style={{ marginBottom: '2rem', display: 'flex', alignItems: 'baseline', gap: '1rem' }}>
+                  <h2 style={{ fontSize: '1.5rem', margin: 0, fontWeight: 700, color: docsTheme.text.heading, letterSpacing: '-0.02em' }}>
+                    {group.title === 'Guides' ? 'Core Concepts & Guides' : 'Tutorials & Examples'}
+                  </h2>
+                  <div style={{ flex: 1, height: '1px', backgroundColor: docsTheme.border.soft, opacity: 0.6 }}></div>
+                </div>
+
+                {group.docs.length ? (
+                  <div style={{ display: 'grid', gap: '1.5rem', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
+                    {group.docs.map((doc) => (
                       <Link
+                        key={`${group.category}-${doc.slug}`}
                         href={`${basePath}/${group.category}/${doc.slug}`}
-                        style={{ fontSize: '0.95rem', color: docsTheme.accent.base, fontWeight: 600, textDecoration: 'none' }}
+                        style={{ textDecoration: 'none', color: 'inherit' }}
                       >
-                        Read {group.title.toLowerCase().slice(0, -1)} →
+                        <article
+                          style={{
+                            height: '100%',
+                            border: `1px solid ${docsTheme.border.soft}`,
+                            borderRadius: '12px',
+                            padding: '1.75rem',
+                            backgroundColor: docsTheme.surfaces.panel,
+                            transition: 'all 0.2s ease',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            cursor: 'pointer',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.transform = 'translateY(-4px)'
+                            e.currentTarget.style.boxShadow = docsTheme.shadow.floating
+                            e.currentTarget.style.borderColor = docsTheme.accent.strong
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.transform = 'translateY(0)'
+                            e.currentTarget.style.boxShadow = 'none'
+                            e.currentTarget.style.borderColor = docsTheme.border.soft
+                          }}
+                        >
+                          <h3 style={{ fontSize: '1.15rem', marginBottom: '0.75rem', fontWeight: 600, color: docsTheme.text.heading }}>
+                            {doc.title}
+                          </h3>
+                          {doc.description ? (
+                            <p style={{ fontSize: '0.95rem', color: docsTheme.text.secondary, lineHeight: 1.6, flex: 1 }}>{doc.description}</p>
+                          ) : null}
+                          <div style={{ marginTop: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem', fontWeight: 600, color: docsTheme.accent.strong }}>
+                            Read more <span>→</span>
+                          </div>
+                        </article>
                       </Link>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            ) : (
-              <p style={{ color: docsTheme.text.muted }}>No entries yet.</p>
-            )}
-          </section>
-        ))}
+                    ))}
+                  </div>
+                ) : (
+                  <p style={{ color: docsTheme.text.muted, fontStyle: 'italic' }}>No documentation available in this section yet.</p>
+                )}
+              </section>
+            ))}
+          </div>
+        </div>
       </main>
     </>
   )

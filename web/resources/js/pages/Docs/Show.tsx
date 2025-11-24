@@ -88,42 +88,50 @@ const docsContentStyles = `
   .docs-layout {
     font-family: ${docsTheme.fontFamily};
     margin: 0 auto;
-    max-width: 1100px;
-    padding: 3rem 1.5rem 4rem;
+    max-width: 1280px;
+    padding: 2rem 1.5rem 4rem;
     display: grid;
-    gap: 2.5rem;
-    grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+    gap: 3rem;
+    grid-template-columns: 260px minmax(0, 1fr);
     background-color: ${docsTheme.surfaces.page};
     color: ${docsTheme.text.primary};
   }
   .docs-sidebar {
     position: sticky;
-    top: 2rem;
+    top: 5.5rem;
     align-self: start;
-    max-height: calc(100vh - 4rem);
+    max-height: calc(100vh - 6rem);
     overflow-y: auto;
-    padding-right: 0.5rem;
+    padding-right: 1rem;
+  }
+  .docs-sidebar::-webkit-scrollbar {
+    width: 4px;
+  }
+  .docs-sidebar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .docs-sidebar::-webkit-scrollbar-thumb {
+    background: ${docsTheme.border.soft};
+    border-radius: 4px;
   }
   .docs-article {
     min-width: 0;
-    background-color: ${docsTheme.surfaces.panel};
-    border-radius: 1rem;
-    border: 1px solid ${docsTheme.border.soft};
-    padding: 2.5rem 3rem;
-    box-shadow: ${docsTheme.shadow.card};
+    max-width: 860px;
+    padding-bottom: 4rem;
   }
   @media (max-width: 1024px) {
     .docs-layout {
       grid-template-columns: 1fr;
-      padding: 2.5rem 1.25rem 3rem;
+      padding: 2rem 1.25rem 3rem;
+      gap: 2rem;
     }
     .docs-sidebar {
       position: static;
       max-height: none;
       padding-right: 0;
-    }
-    .docs-article {
-      padding: 2rem 1.75rem;
+      border-bottom: 1px solid ${docsTheme.border.soft};
+      padding-bottom: 2rem;
+      margin-bottom: 1rem;
     }
   }
   .docs-content {
@@ -131,16 +139,19 @@ const docsContentStyles = `
     width: 100%;
     overflow-wrap: anywhere;
     word-break: break-word;
+    font-size: 1.05rem;
+    line-height: 1.75;
   }
   .docs-content ul,
   .docs-content ol {
-    padding-left: 1.4em;
-    margin: 0.5rem 0 1rem;
+    padding-left: 1.25em;
+    margin: 1rem 0 1.5rem;
     display: grid;
-    gap: 0.35rem;
+    gap: 0.5rem;
   }
   .docs-content li {
     line-height: 1.7;
+    padding-left: 0.25rem;
   }
   .docs-content ul {
     list-style: disc;
@@ -148,11 +159,8 @@ const docsContentStyles = `
   .docs-content ol {
     list-style: decimal;
   }
-  .docs-content ul ul,
-  .docs-content ol ul,
-  .docs-content ul ol,
-  .docs-content ol ol {
-    margin: 0.25rem 0 0.5rem;
+  .docs-content ul li::marker {
+    color: ${docsTheme.accent.strong};
   }
   .docs-content > * {
     max-width: 100%;
@@ -163,176 +171,162 @@ const docsContentStyles = `
   .docs-content h4 {
     color: ${docsTheme.text.heading};
     font-weight: 700;
-    line-height: 1.25;
-    margin: 1.4rem 0 0.8rem;
+    line-height: 1.3;
+    margin: 2.5rem 0 1rem;
+    letter-spacing: -0.01em;
   }
-  .docs-content h1 { font-size: 2rem; }
-  .docs-content h2 { font-size: 1.6rem; border-bottom: 1px solid ${docsTheme.border.soft}; padding-bottom: 0.35rem; }
-  .docs-content h3 { font-size: 1.35rem; }
+  .docs-content h1 { font-size: 2.25rem; letter-spacing: -0.02em; }
+  .docs-content h2 { 
+    font-size: 1.75rem; 
+    border-bottom: 1px solid ${docsTheme.border.soft}; 
+    padding-bottom: 0.5rem; 
+    margin-top: 3rem;
+  }
+  .docs-content h3 { font-size: 1.4rem; margin-top: 2rem; }
   .docs-content h4 { font-size: 1.15rem; }
   /* Hide the first document title; the page header already renders the title. */
   .docs-content > h1:first-of-type { display: none; }
+  /* Hide the first paragraph as it is used as the description in the page header */
+  .docs-content > h1:first-of-type + p { display: none; }
   .docs-content pre,
   .docs-content .shiki {
     max-width: 100%;
     width: 100%;
     box-sizing: border-box;
+    margin: 1rem 0;
   }
   .docs-content pre {
     overflow-x: auto;
     white-space: pre-wrap;
     word-break: break-word;
     position: relative;
-    padding-top: 2.25rem;
+    padding-top: 0.75rem;
   }
   .docs-content pre code {
     white-space: inherit;
   }
   .docs-content a {
     color: ${docsTheme.accent.strong};
-    text-decoration-color: rgba(183, 28, 28, 0.45);
-    text-underline-offset: 0.2em;
+    text-decoration: none;
     font-weight: 600;
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.2s;
   }
-  .docs-content a:hover,
-  .docs-content a:focus-visible {
-    color: ${docsTheme.accent.base};
-    text-decoration-color: rgba(183, 28, 28, 0.8);
-  }
-  .docs-content a:focus-visible {
-    outline: 2px solid ${docsTheme.accent.strong};
-    outline-offset: 2px;
-    border-radius: 0.2rem;
+  .docs-content a:hover {
+    border-bottom-color: ${docsTheme.accent.strong};
   }
   .shiki {
-    border-radius: 1rem;
+    border-radius: 0.75rem;
     border: 1px solid ${docsTheme.border.soft};
-    margin: 0;
-    padding: 1.15rem 1.4rem;
+    padding: 1rem 1.25rem;
     overflow-x: auto;
     background: ${docsTheme.surfaces.raised};
+    font-size: 0.9rem;
+    line-height: 1.5;
   }
   .shiki code {
     font-family: "JetBrains Mono", "SFMono-Regular", ui-monospace, "SFMono", monospace;
-    font-size: 0.95rem;
-  }
-  .shiki span {
-    font-family: inherit;
   }
   .docs-content :not(pre) > code {
     background: ${docsTheme.accent.tint};
-    border-radius: 0.4rem;
-    padding: 0.1rem 0.35rem;
+    border-radius: 0.375rem;
+    padding: 0.125rem 0.375rem;
     font-family: "JetBrains Mono", "SFMono-Regular", ui-monospace, "SFMono", monospace;
-    font-size: 0.95rem;
-    color: ${docsTheme.text.heading};
-    border: 1px solid ${docsTheme.border.soft};
+    font-size: 0.875em;
+    color: ${docsTheme.accent.strong};
+    font-weight: 500;
   }
   .docs-alert {
-    border-radius: 1rem;
-    padding: 1.15rem 1.4rem;
-    border: 1px solid rgba(60, 10, 10, 0.12);
-    background: ${docsTheme.surfaces.panel};
-    display: flex;
-    flex-direction: column;
-    gap: 0.65rem;
+    border-radius: 0.75rem;
+    padding: 1rem 1.25rem;
+    border-left: 4px solid;
+    background: ${docsTheme.surfaces.raised};
+    margin: 1.25rem 0;
   }
   .docs-alert__label {
-    margin: 0;
+    margin: 0 0 0.5rem;
     font-size: 0.85rem;
     font-weight: 700;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.05em;
     text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
   }
-  .docs-alert__body > :first-child {
-    margin-top: 0;
+  .docs-alert__body {
+    font-size: 0.95rem;
   }
-  .docs-alert__body > :last-child {
-    margin-bottom: 0;
-  }
-  .docs-alert--note {
-    border-color: #a0c4ff;
-    background: #f0f6ff;
-    color: #0f3057;
-  }
-  .docs-alert--note .docs-alert__label {
-    color: #0f3057;
-  }
-  .docs-alert--tip {
-    border-color: #9be7b4;
-    background: #f1fff6;
-    color: #0c3b24;
-  }
-  .docs-alert--tip .docs-alert__label {
-    color: #0c3b24;
-  }
-  .docs-alert--important {
-    border-color: #f7c873;
-    background: #fff8ef;
-    color: #5c3600;
-  }
-  .docs-alert--important .docs-alert__label {
-    color: #5c3600;
-  }
-  .docs-alert--warning {
-    border-color: #f8aa8b;
-    background: #fff5f0;
-    color: #5c1b00;
-  }
-  .docs-alert--warning .docs-alert__label {
-    color: #5c1b00;
-  }
-  .docs-alert--caution {
-    border-color: ${docsTheme.border.soft};
-    background: #fff2f2;
-    color: #5b0e0e;
-  }
-  .docs-alert--caution .docs-alert__label {
-    color: #5b0e0e;
-  }
+  .docs-alert__body > :first-child { margin-top: 0; }
+  .docs-alert__body > :last-child { margin-bottom: 0; }
+  
+  .docs-alert--note { border-color: #3b82f6; background: #eff6ff; }
+  .docs-alert--note .docs-alert__label { color: #1d4ed8; }
+  
+  .docs-alert--tip { border-color: #10b981; background: #ecfdf5; }
+  .docs-alert--tip .docs-alert__label { color: #047857; }
+  
+  .docs-alert--important { border-color: #f59e0b; background: #fffbeb; }
+  .docs-alert--important .docs-alert__label { color: #b45309; }
+  
+  .docs-alert--warning { border-color: #f97316; background: #fff7ed; }
+  .docs-alert--warning .docs-alert__label { color: #c2410c; }
+  
+  .docs-alert--caution { border-color: #ef4444; background: #fef2f2; }
+  .docs-alert--caution .docs-alert__label { color: #b91c1c; }
+
   .docs-copy-btn {
     position: absolute;
-    top: 0.6rem;
-    right: 0.7rem;
+    top: 0.35rem;
+    right: 0.35rem;
     border: 1px solid ${docsTheme.border.soft};
-    background: ${docsTheme.surfaces.panel};
-    color: ${docsTheme.text.primary};
-    border-radius: 0.5rem;
-    padding: 0.35rem 0.65rem;
-    font-size: 0.85rem;
+    background: ${docsTheme.surfaces.page};
+    color: ${docsTheme.text.secondary};
+    border-radius: 0.375rem;
+    padding: 0.2rem 0.4rem;
+    font-size: 0.7rem;
     font-weight: 600;
     cursor: pointer;
-    transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.1s ease;
+    transition: all 0.2s;
+    opacity: 0;
+    z-index: 10;
   }
-  .docs-copy-btn:hover,
-  .docs-copy-btn:focus-visible {
-    background: ${docsTheme.accent.tint};
-    border-color: ${docsTheme.accent.strong};
-    outline: none;
+  pre:hover .docs-copy-btn {
+    opacity: 1;
   }
-  .docs-copy-btn:active {
-    transform: translateY(1px);
+  .docs-copy-btn:hover {
+    background: ${docsTheme.surfaces.raised};
+    color: ${docsTheme.text.primary};
+    border-color: ${docsTheme.border.strong};
   }
   .docs-content img,
   .docs-content video {
     max-width: 100%;
     height: auto;
     border-radius: 0.75rem;
+    border: 1px solid ${docsTheme.border.soft};
+    box-shadow: ${docsTheme.shadow.card};
   }
   .docs-content table {
     width: 100%;
     display: block;
     overflow-x: auto;
     border-collapse: collapse;
+    margin: 1.5rem 0;
+    font-size: 0.95rem;
   }
   .docs-content table thead tr {
-    background-color: rgba(183, 28, 28, 0.04);
+    border-bottom: 2px solid ${docsTheme.border.soft};
   }
-  .docs-content table th,
-  .docs-content table td {
-    padding: 0.65rem 0.85rem;
+  .docs-content table th {
+    font-weight: 600;
     text-align: left;
+    padding: 0.75rem 1rem;
+    color: ${docsTheme.text.heading};
+  }
+  .docs-content table td {
+    padding: 0.75rem 1rem;
     border-bottom: 1px solid ${docsTheme.border.soft};
+    color: ${docsTheme.text.primary};
   }
 `
 
@@ -371,21 +365,19 @@ export default function DocsShow({ categories, doc, active, locales = [], basePa
         try {
           await navigator.clipboard.writeText(getText())
           button.textContent = 'Copied!'
-          button.setAttribute('aria-live', 'polite')
           setTimeout(() => {
             button.textContent = 'Copy'
-            button.removeAttribute('aria-live')
-          }, 1200)
+          }, 1500)
         } catch (err) {
           console.error('Failed to copy code block', err)
           button.textContent = 'Error'
           setTimeout(() => {
             button.textContent = 'Copy'
-          }, 1200)
+          }, 1500)
         }
       }
 
-      button.addEventListener('click', handleClick, { once: false })
+      button.addEventListener('click', handleClick)
       pre.prepend(button)
       cleanups.push(() => {
         button.removeEventListener('click', handleClick)
@@ -404,54 +396,65 @@ export default function DocsShow({ categories, doc, active, locales = [], basePa
       <style dangerouslySetInnerHTML={{ __html: docsContentStyles }} />
       <header
         style={{
-          background: 'linear-gradient(135deg, rgba(183,28,28,0.14), rgba(15,10,10,0.9))',
+          backgroundColor: docsTheme.surfaces.page,
           borderBottom: `1px solid ${docsTheme.border.soft}`,
-          padding: '1.15rem 1.5rem',
+          padding: '1rem 1.5rem',
+          position: 'sticky',
+          top: 0,
+          zIndex: 50,
         }}
       >
         <div
           style={{
-            maxWidth: '1100px',
+            maxWidth: '1280px',
             margin: '0 auto',
             display: 'flex',
             alignItems: 'center',
             gap: '1rem',
             justifyContent: 'space-between',
-            color: docsTheme.text.heading,
             flexWrap: 'wrap',
           }}
         >
           <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', textDecoration: 'none', color: 'inherit' }}>
-            <img src="/logo.svg" alt="Guren logo" style={{ width: '36px', height: '36px', borderRadius: '12px', background: 'rgba(255,255,255,0.08)', padding: '6px' }} />
-            <span style={{ fontSize: '1.05rem', fontWeight: 700 }}>Guren Docs</span>
+            <img
+              src="/logo.svg"
+              alt="Guren Docs"
+              style={{
+                width: '32px',
+                height: '32px',
+                borderRadius: '8px',
+                padding: '2px',
+              }}
+            />
+            <span style={{ fontSize: '1.1rem', fontWeight: 700, color: docsTheme.text.heading, letterSpacing: '-0.02em' }}>Guren Docs</span>
           </Link>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-            <nav style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
-              <Link href={basePath} style={{ color: docsTheme.text.heading, textDecoration: 'none', fontWeight: 600 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
+            <nav style={{ display: 'flex', gap: '1.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <Link href={basePath} style={{ color: docsTheme.text.primary, textDecoration: 'none', fontWeight: 500, fontSize: '0.95rem' }}>
                 Guides
               </Link>
-              <Link href={`${basePath}/tutorials/overview`} style={{ color: docsTheme.text.heading, textDecoration: 'none', fontWeight: 600 }}>
+              <Link href={`${basePath}/tutorials/overview`} style={{ color: docsTheme.text.primary, textDecoration: 'none', fontWeight: 500, fontSize: '0.95rem' }}>
                 Tutorials
               </Link>
-              <Link href="https://github.com/gurenjs/guren" style={{ color: docsTheme.text.heading, textDecoration: 'none', fontWeight: 600 }}>
-                GitHub ↗
+              <Link href="https://github.com/gurenjs/guren" style={{ color: docsTheme.text.muted, textDecoration: 'none', fontWeight: 500, fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                GitHub <span style={{ fontSize: '0.8em' }}>↗</span>
               </Link>
             </nav>
             {locales.length > 1 ? (
-              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center', flexWrap: 'wrap', paddingLeft: '1rem', borderLeft: `1px solid ${docsTheme.border.soft}` }}>
                 {locales.map((locale) => (
                   <Link
                     key={locale.code}
                     href={locale.href}
                     style={{
-                      padding: '0.35rem 0.75rem',
-                      borderRadius: '999px',
+                      padding: '0.25rem 0.6rem',
+                      borderRadius: '6px',
                       textDecoration: 'none',
-                      color: locale.active ? docsTheme.surfaces.panel : docsTheme.text.primary,
-                      backgroundColor: locale.active ? docsTheme.accent.strong : docsTheme.surfaces.panel,
-                      border: `1px solid ${locale.active ? docsTheme.accent.strong : docsTheme.border.soft}`,
+                      color: locale.active ? docsTheme.accent.strong : docsTheme.text.muted,
+                      backgroundColor: locale.active ? docsTheme.accent.tint : 'transparent',
                       fontWeight: 600,
-                      fontSize: '0.9rem',
+                      fontSize: '0.85rem',
+                      transition: 'all 0.2s ease',
                     }}
                   >
                     {locale.label}
@@ -465,20 +468,21 @@ export default function DocsShow({ categories, doc, active, locales = [], basePa
       <main className="docs-layout">
         <aside className="docs-sidebar">
           {categories.map((group) => (
-            <section key={group.category} style={{ marginBottom: '1.5rem' }}>
+            <section key={group.category} style={{ marginBottom: '2rem' }}>
               <h2
                 style={{
-                  fontSize: '0.9rem',
-                  fontWeight: 600,
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
                   textTransform: 'uppercase',
-                  letterSpacing: '0.08em',
-                  color: docsTheme.accent.strong,
-                  marginBottom: '0.5rem',
+                  letterSpacing: '0.05em',
+                  color: docsTheme.text.heading,
+                  marginBottom: '0.75rem',
+                  paddingLeft: '0.5rem',
                 }}
               >
                 {group.title}
               </h2>
-              <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+              <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
                 {group.docs.map((entry) => {
                   const isActive = active?.category === group.category && active?.slug === entry.slug
                   const className = isActive ? 'docs-nav-link docs-nav-link--active' : 'docs-nav-link'
@@ -488,14 +492,14 @@ export default function DocsShow({ categories, doc, active, locales = [], basePa
                       href={`${basePath}/${group.category}/${entry.slug}`}
                       className={className}
                       style={{
-                        padding: '0.45rem 0.65rem',
-                        borderRadius: '0.5rem',
+                        padding: '0.4rem 0.6rem',
+                        borderRadius: '6px',
                         textDecoration: 'none',
-                        color: isActive ? docsTheme.accent.strong : docsTheme.text.primary,
+                        color: isActive ? docsTheme.accent.strong : docsTheme.text.secondary,
                         backgroundColor: isActive ? docsTheme.accent.tint : 'transparent',
-                        fontWeight: isActive ? 700 : 500,
-                        fontSize: '0.95rem',
-                        border: `1px solid ${isActive ? docsTheme.border.soft : 'transparent'}`,
+                        fontWeight: isActive ? 600 : 400,
+                        fontSize: '0.925rem',
+                        borderLeft: isActive ? `2px solid ${docsTheme.accent.strong}` : '2px solid transparent',
                       }}
                     >
                       {entry.title}
@@ -509,88 +513,114 @@ export default function DocsShow({ categories, doc, active, locales = [], basePa
         <article className="docs-article">
           {doc ? (
             <>
-              <header style={{ marginBottom: '2rem' }}>
-                <p
-                  style={{
-                    color: docsTheme.accent.strong,
-                    fontSize: '0.875rem',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.08em',
-                    fontWeight: 600,
-                  }}
-                >
-                  {docLabel}
-                </p>
+              <header style={{ marginBottom: '3rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+                  <span
+                    style={{
+                      color: docsTheme.accent.strong,
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.05em',
+                      backgroundColor: docsTheme.accent.tint,
+                      padding: '0.25rem 0.5rem',
+                      borderRadius: '4px',
+                    }}
+                  >
+                    {docLabel}
+                  </span>
+                  <span style={{ color: docsTheme.text.muted, fontSize: '0.875rem' }}>/</span>
+                  <span style={{ color: docsTheme.text.muted, fontSize: '0.875rem', fontWeight: 500 }}>{doc.category}</span>
+                </div>
                 <h1
                   style={{
-                    fontSize: '2.25rem',
-                    fontWeight: 700,
-                    margin: '0.4rem 0 0.75rem',
+                    fontSize: '2.75rem',
+                    fontWeight: 800,
+                    margin: '0 0 1rem',
                     color: docsTheme.text.heading,
-                    lineHeight: 1.2,
+                    lineHeight: 1.1,
+                    letterSpacing: '-0.02em',
                   }}
                 >
                   {doc.title}
                 </h1>
+                {doc.description && (
+                  <p style={{ fontSize: '1.25rem', color: docsTheme.text.secondary, lineHeight: 1.6, maxWidth: '720px' }}>
+                    {doc.description}
+                  </p>
+                )}
               </header>
               <div
                 className="docs-content"
-                style={{
-                  fontSize: '1rem',
-                  lineHeight: 1.7,
-                  color: docsTheme.text.primary,
-                  display: 'grid',
-                  gap: '1.5rem',
-                }}
                 dangerouslySetInnerHTML={{ __html: doc.html }}
               />
               {(nav.prev || nav.next) && (
                 <nav
                   aria-label="Document pagination"
                   style={{
-                    marginTop: '2.25rem',
+                    marginTop: '4rem',
+                    paddingTop: '2rem',
+                    borderTop: `1px solid ${docsTheme.border.soft}`,
                     display: 'grid',
                     gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-                    gap: '0.75rem',
+                    gap: '1.5rem',
                   }}
                 >
-                  {nav.prev && (
+                  {nav.prev ? (
                     <Link
                       href={nav.prev.href}
                       style={{
-                        padding: '1rem 1.1rem',
-                        borderRadius: '0.85rem',
+                        padding: '1.25rem',
+                        borderRadius: '0.75rem',
                         border: `1px solid ${docsTheme.border.soft}`,
-                        background: docsTheme.surfaces.panel,
+                        background: docsTheme.surfaces.page,
                         textDecoration: 'none',
                         display: 'flex',
                         flexDirection: 'column',
-                        gap: '0.2rem',
-                        color: docsTheme.text.primary,
+                        gap: '0.35rem',
+                        transition: 'all 0.2s',
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                      }}
+                      onMouseEnter={(e: React.MouseEvent<HTMLAnchorElement>) => {
+                        e.currentTarget.style.borderColor = docsTheme.accent.strong
+                        e.currentTarget.style.transform = 'translateY(-2px)'
+                      }}
+                      onMouseLeave={(e: React.MouseEvent<HTMLAnchorElement>) => {
+                        e.currentTarget.style.borderColor = docsTheme.border.soft
+                        e.currentTarget.style.transform = 'translateY(0)'
                       }}
                     >
-                      <span style={{ fontSize: '0.85rem', color: docsTheme.text.muted, fontWeight: 700 }}>Previous</span>
-                      <span style={{ fontWeight: 600, color: docsTheme.text.heading }}>{nav.prev.title}</span>
+                      <span style={{ fontSize: '0.85rem', color: docsTheme.text.muted, fontWeight: 600 }}>← Previous</span>
+                      <span style={{ fontSize: '1.1rem', fontWeight: 600, color: docsTheme.text.heading }}>{nav.prev.title}</span>
                     </Link>
-                  )}
+                  ) : <div />}
                   {nav.next && (
                     <Link
                       href={nav.next.href}
                       style={{
-                        padding: '1rem 1.1rem',
-                        borderRadius: '0.85rem',
+                        padding: '1.25rem',
+                        borderRadius: '0.75rem',
                         border: `1px solid ${docsTheme.border.soft}`,
-                        background: docsTheme.surfaces.panel,
+                        background: docsTheme.surfaces.page,
                         textDecoration: 'none',
                         display: 'flex',
                         flexDirection: 'column',
-                        gap: '0.2rem',
-                        color: docsTheme.text.primary,
+                        gap: '0.35rem',
                         textAlign: 'right',
+                        transition: 'all 0.2s',
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                      }}
+                      onMouseEnter={(e: React.MouseEvent<HTMLAnchorElement>) => {
+                        e.currentTarget.style.borderColor = docsTheme.accent.strong
+                        e.currentTarget.style.transform = 'translateY(-2px)'
+                      }}
+                      onMouseLeave={(e: React.MouseEvent<HTMLAnchorElement>) => {
+                        e.currentTarget.style.borderColor = docsTheme.border.soft
+                        e.currentTarget.style.transform = 'translateY(0)'
                       }}
                     >
-                      <span style={{ fontSize: '0.85rem', color: docsTheme.text.muted, fontWeight: 700 }}>Next</span>
-                      <span style={{ fontWeight: 600, color: docsTheme.text.heading }}>{nav.next.title}</span>
+                      <span style={{ fontSize: '0.85rem', color: docsTheme.text.muted, fontWeight: 600 }}>Next →</span>
+                      <span style={{ fontSize: '1.1rem', fontWeight: 600, color: docsTheme.text.heading }}>{nav.next.title}</span>
                     </Link>
                   )}
                 </nav>
@@ -599,34 +629,35 @@ export default function DocsShow({ categories, doc, active, locales = [], basePa
           ) : (
             <section
               style={{
-                padding: '4rem 3rem',
-                border: `1px solid ${docsTheme.border.soft}`,
-                borderRadius: '1rem',
-                background: docsTheme.surfaces.panel,
+                padding: '6rem 2rem',
                 textAlign: 'center',
+                maxWidth: '600px',
+                margin: '0 auto',
               }}
             >
-              <h1 style={{ fontSize: '2rem', fontWeight: 700, marginBottom: '1rem', color: docsTheme.text.heading }}>Document not found</h1>
-              <p style={{ fontSize: '1.05rem', color: docsTheme.text.secondary, marginBottom: '2rem' }}>
-                We couldn&apos;t find the guide you were looking for. Try choosing another topic from the navigation or head back
-                to the docs overview.
+              <div style={{ fontSize: '4rem', marginBottom: '1rem' }}>😕</div>
+              <h1 style={{ fontSize: '2.25rem', fontWeight: 800, marginBottom: '1rem', color: docsTheme.text.heading }}>Page not found</h1>
+              <p style={{ fontSize: '1.15rem', color: docsTheme.text.secondary, marginBottom: '2.5rem', lineHeight: 1.6 }}>
+                The page you are looking for doesn't exist or has been moved.
               </p>
               <Link
                 href={basePath}
-                className="docs-primary-link"
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: '0.35rem',
-                  padding: '0.65rem 1.25rem',
+                  gap: '0.5rem',
+                  padding: '0.75rem 1.5rem',
                   borderRadius: '999px',
                   backgroundColor: docsTheme.accent.strong,
-                  color: 'var(--color-crimson-50)',
+                  color: 'white',
                   textDecoration: 'none',
                   fontWeight: 600,
+                  transition: 'transform 0.2s',
                 }}
+                onMouseEnter={(e: React.MouseEvent<HTMLAnchorElement>) => e.currentTarget.style.transform = 'scale(1.05)'}
+                onMouseLeave={(e: React.MouseEvent<HTMLAnchorElement>) => e.currentTarget.style.transform = 'scale(1)'}
               >
-                Back to docs
+                Back to Documentation
               </Link>
             </section>
           )}
