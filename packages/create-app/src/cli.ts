@@ -109,6 +109,10 @@ const command = defineCommand({
       type: 'string',
       description: 'Rendering mode to scaffold (spa or ssr)',
     },
+    auth: {
+      type: 'boolean',
+      description: 'Include authentication scaffolding with auto-configured providers and middleware',
+    },
   },
   async run({ args }) {
     const target = args.target as string
@@ -162,6 +166,22 @@ const command = defineCommand({
       await updateSsrPackageJson(targetDir)
     }
 
+    const includeAuth = Boolean(args.auth)
+
+    if (includeAuth) {
+      const originalCwd = process.cwd()
+      try {
+        process.chdir(targetDir)
+        const { makeAuth } = await import('@guren/cli')
+        await makeAuth({ install: true, force: true })
+      } catch (error) {
+        consola.warn('Failed to scaffold authentication automatically. You can run it manually after install with `bunx guren make:auth --install`.')
+        consola.debug(error)
+      } finally {
+        process.chdir(originalCwd)
+      }
+    }
+
     const relativeTarget = relative(process.cwd(), targetDir) || '.'
 
     consola.success(`Scaffolded a new Guren app (${renderingMode.toUpperCase()}) in ${relativeTarget}`)
@@ -170,6 +190,13 @@ const command = defineCommand({
       consola.log(`  cd ${relativeTarget}`)
     }
     consola.log('  bun install')
+
+    if (includeAuth) {
+      consola.log('  bunx guren make:auth --install  # scaffold authentication (already attempted)')
+      consola.log('  bun run db:migrate              # create database tables')
+      consola.log('  bun run db:seed                 # seed demo user')
+    }
+
     consola.log('  bun run dev')
     if (renderingMode === 'ssr') {
       consola.log('  bun run build  # builds both client and SSR bundles')

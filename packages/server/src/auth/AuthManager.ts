@@ -1,6 +1,11 @@
 import type { Context } from 'hono'
+import type { Model } from '@guren/orm'
+import type { PlainObject } from '@guren/orm/Model'
 import { getSessionFromContext } from '../http/middleware/session'
 import { RequestAuthContext } from './RequestAuthContext'
+import { ModelUserProvider, type ModelUserProviderOptions } from './providers/ModelUserProvider'
+import { SessionGuard } from './SessionGuard'
+import { ScryptHasher } from './password/ScryptHasher'
 import type {
   AttachContextOptions,
   AuthContext,
@@ -103,6 +108,40 @@ export class AuthManager implements AuthManagerContract {
   async attempt(name: string, ctx: Context, credentials: AuthCredentials, remember?: boolean): Promise<boolean> {
     const guard = this.createAuthContext(ctx, { guard: name }).guard(name)
     return guard.attempt(credentials, remember)
+  }
+
+  /**
+   * Shorthand method to register a model-based authentication provider and session guard.
+   * This simplifies the common case of authenticating users via a database model.
+   *
+   * @param model - The model class to use for user authentication
+   * @param options - Options for the ModelUserProvider (partial, with defaults)
+   * @param providerName - Name for the provider (defaults to 'users')
+   * @param guardName - Name for the guard (defaults to 'web')
+   */
+  useModel(
+    model: typeof Model<PlainObject>,
+    options: Partial<ModelUserProviderOptions> = {},
+    providerName = 'users',
+    guardName = 'web',
+  ): void {
+    const defaultOptions: ModelUserProviderOptions = {
+      usernameColumn: 'email',
+      passwordColumn: 'passwordHash',
+      rememberTokenColumn: 'rememberToken',
+      credentialsPasswordField: 'password',
+      hasher: new ScryptHasher(),
+      ...options,
+    }
+
+    this.registerProvider(providerName, () => new ModelUserProvider(model, defaultOptions))
+
+    this.registerGuard(guardName, ({ session, manager }) => {
+      const provider = manager.getProvider(providerName)
+      return new SessionGuard({ provider, session })
+    })
+
+    this.setDefaultGuard(guardName)
   }
 }
 

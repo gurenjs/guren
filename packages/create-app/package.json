@@ -27,6 +27,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@guren/cli": "^0.2.0-alpha.7",
     "citty": "^0.1.6",
     "consola": "^3.4.2"
   },
