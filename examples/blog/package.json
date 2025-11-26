@@ -6,7 +6,7 @@
   "scripts": {
     "routes:types": "bun ../../packages/cli/src/bin.ts routes:types --force",
     "dev": "bun run dev:server",
-    "dev:server": "bun run --watch --hot bin/serve.ts",
+    "dev:server": "bun run --watch bin/serve.ts",
     "smoke": "bun run ./smoke.ts",
     "test": "vitest run",
     "build": "bunx vite build && bunx vite build --ssr",

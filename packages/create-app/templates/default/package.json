@@ -6,7 +6,7 @@
   "scripts": {
     "routes:types": "bunx guren routes:types --routes routes/web.ts --out types/generated/routes.d.ts --force",
     "dev": "bun run dev:server",
-    "dev:server": "bun run --watch --hot bin/serve.ts",
+    "dev:server": "bun run --watch bin/serve.ts",
     "build": "bunx vite build",
     "preview": "bunx vite preview",
     "db:make": "bunx guren make:migration",

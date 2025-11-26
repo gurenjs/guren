@@ -6,7 +6,7 @@
   "scripts": {
     "routes:types": "cd .. && bun packages/cli/src/bin.ts routes:types --routes web/routes/web.ts --out web/types/generated/routes.d.ts --force",
     "dev": "bun run dev:server",
-    "dev:server": "bun run --watch --hot bin/serve.ts",
+    "dev:server": "bun run --watch bin/serve.ts",
     "typecheck": "bunx tsc --noEmit",
     "test": "bunx vitest run",
     "build": "bunx vite build && bunx vite build --ssr",
