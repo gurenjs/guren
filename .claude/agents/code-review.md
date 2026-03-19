@@ -44,16 +44,53 @@ Review code changes and provide constructive, actionable feedback.
 - [ ] Routes follow DSL conventions
 - [ ] Middleware uses `defineMiddleware`
 
+### Events & Jobs
+- [ ] Events registered in `EventServiceProvider`
+- [ ] Job classes implement `handle()` method
+- [ ] Listeners are properly bound to events
+- [ ] Events extend base `Event` class
+
+### Authorization
+- [ ] Gate/Policy used for resource authorization (not inline checks)
+- [ ] Authorization middleware applied to protected routes
+- [ ] Policy methods match controller actions
+
+### Validation
+- [ ] Input validated via `validateBody/validateQuery/validateParams`, `FormRequest`, or `Validator`
+- [ ] Prefer `validateBody/Query/Params` with Zod schemas over manual `safeParse` + error handling
+- [ ] `findOrFail` used instead of `find` + null check where appropriate
+- [ ] `userOrFail()` used instead of `user()` + null check where appropriate
+- [ ] Validation rules are appropriate for data types
+- [ ] Custom error messages provided where needed
+
+### Cache
+- [ ] Cache keys follow a consistent naming convention (e.g., `entity:id:field`)
+- [ ] Cache TTL is appropriate for the data type
+- [ ] Cache invalidation on data mutation
+
+### Mail
+- [ ] Mailable classes extend `Mail` base class
+- [ ] Mail content is properly structured
+- [ ] Queue used for sending (not blocking request)
+
+### Container & Providers
+- [ ] `register()` only binds services (no boot logic)
+- [ ] `boot()` for setup that depends on other services
+- [ ] Providers registered in app configuration
+
 ### Security
 - [ ] Input validation present
 - [ ] No SQL injection risks
 - [ ] No hardcoded secrets
 - [ ] Authentication checks where needed
+- [ ] CSRF protection on state-changing routes
+- [ ] Rate limiting on public endpoints
 
 ### Testing
 - [ ] Tests added for new functionality
 - [ ] Edge cases covered
 - [ ] Test names are descriptive
+- [ ] Event/job/mail fakes used where appropriate
 
 ## Output Format
 
@@ -63,20 +100,20 @@ Review code changes and provide constructive, actionable feedback.
 **Files:** 3 changed (+45/-12 lines)
 **Risk Level:** Low/Medium/High
 
-### ✓ Strengths
+### Strengths
 - Point 1
 - Point 2
 
-### ⚠ Suggestions
+### Suggestions
 - file.ts:23 - Consider adding validation
 - helper.ts:45 - Could extract to utility
 
-### ✗ Issues (Must Fix)
+### Issues (Must Fix)
 - query.ts:12 - Potential SQL injection
 - auth.ts:8 - Missing authentication check
 
-### Security: ✓ No critical issues
-### Tests: ✓ Adequate coverage
+### Security: No critical issues
+### Tests: Adequate coverage
 ```
 
 ## Be Constructive

@@ -91,6 +91,16 @@ import { helper } from './utils'
 ### Controllers
 ```typescript
 import { Controller } from '@guren/server'
+import { z } from 'zod'
+
+const CreatePostSchema = z.object({
+  title: z.string().min(1),
+  body: z.string().min(1),
+})
+
+const PostIdParamSchema = z.object({
+  id: z.coerce.number().int().positive(),
+})
 
 export class PostController extends Controller {
   async index() {
@@ -98,13 +108,25 @@ export class PostController extends Controller {
     return this.inertia('Posts/Index', { posts })
   }
 
+  async show() {
+    const { id } = this.validateParams(PostIdParamSchema)
+    const post = await Post.findOrFail(id)  // throws 404 automatically
+    return this.inertia('Posts/Show', { post })
+  }
+
   async store() {
-    const data = await this.request.json()
-    const post = await Post.create(data)
+    const data = await this.validateBody(CreatePostSchema)  // throws 422 on failure
+    const user = await this.auth.userOrFail()  // throws 401 if unauthenticated
+    const post = await Post.create({ ...data, authorId: user.id })
     return this.redirect('/posts')
   }
 }
 ```
+
+**Controller validation helpers** (accepts any Zod-like schema with `safeParse`):
+- `this.validateBody(schema)` — parse request body, throw `ValidationException` (422) on failure
+- `this.validateQuery(schema)` — parse query parameters
+- `this.validateParams(schema)` — parse route parameters
 
 ### Models
 ```typescript
@@ -118,7 +140,8 @@ export class Post extends Model<typeof posts> {
 }
 
 // Usage
-const post = await Post.find(1)
+const post = await Post.find(1)          // returns null if not found
+const post = await Post.findOrFail(1)    // throws ModelNotFoundException (404)
 const all = await Post.where('published', true).get()
 ```
 
@@ -201,9 +224,11 @@ docs: update authentication guide
 | Path | Purpose |
 |------|---------|
 | `packages/server/src/http/Application.ts` | Main server class |
-| `packages/server/src/mvc/Controller.ts` | Base controller |
+| `packages/server/src/mvc/Controller.ts` | Base controller (validateBody/Query/Params) |
 | `packages/server/src/mvc/Route.ts` | Route registry |
-| `packages/orm/src/Model.ts` | Base model class |
+| `packages/server/src/errors/ExceptionHandler.ts` | Exception handler (duck-type statusCode) |
+| `packages/orm/src/Model.ts` | Base model class (findOrFail) |
+| `packages/orm/src/ModelNotFoundException.ts` | 404 exception for models |
 | `packages/cli/src/bin.ts` | CLI entry point |
 | `examples/blog/` | Reference implementation |
 
@@ -229,31 +254,8 @@ Available AI-powered skills that Claude can use automatically:
 
 | Skill | Trigger Words | Purpose |
 |-------|---------------|---------|
-| `scaffold` | "create", "generate", "make" | Generate components (controllers, models, views, middleware, jobs, etc.) using `bunx guren make:*` |
-| `feature` | "full feature", "CRUD", "resource" | Generate complete CRUD feature with Model, Controller, Views, Routes, Tests, Factory, Seeder |
-| `smart-test` | "run tests", "test my changes" | Run only tests affected by recent code changes |
-| `db-manage` | "database", "migration", "rollback" | Database operations with safety checks |
-| `guren-api` | "how to", "example of" | API documentation and code patterns |
-
-## Claude Code Slash Commands
-
-Quick shortcuts for common tasks:
-
-### Development Workflow
-| Command | Purpose |
-|---------|---------|
-| `/test` | Run full test suite |
-| `/build` | Build all packages |
-| `/typecheck` | Run TypeScript type checking |
-| `/pr-check` | Pre-PR validation (build + typecheck + test) |
-| `/db-reset` | Reset database (down + up + migrate + seed) |
-| `/dev` | Start development server |
-
-### Configuration Maintenance
-| Command | Purpose |
-|---------|---------|
-| `/claude-status` | Show Claude Code configuration status |
-| `/claude-skills` | List all available skills |
-| `/claude-add-skill` | Create a new skill interactively |
-| `/claude-update` | Update CLAUDE.md |
-| `/claude-sync` | Check documentation consistency |
+| `dev-workflow` | "build", "test", "typecheck", "pr check", "dev server" | Build, test (smart/full), type check, pre-PR validation, dev server |
+| `scaffold` | "create a controller", "make a job", "new event" | Generate individual components using `bunx guren make:*` |
+| `feature` | "full feature", "CRUD", "everything for" | Generate complete CRUD feature with all components at once |
+| `db-manage` | "database", "migration", "reset", "rollback" | Database operations (migrate, rollback, seed, reset) with safety checks |
+| `guren-api` | "how to", "example of", "what is" | API documentation for all subsystems (auth, cache, queue, mail, events, etc.) |
