@@ -13,6 +13,7 @@ const MAIN_ENTRY_CANDIDATES = [
 
 export type MaybeApplication = {
   listen?: (options?: { port?: number; hostname?: string }) => unknown
+  boot?: () => Promise<void> | void
 }
 
 export async function resolveMainEntry(): Promise<string> {

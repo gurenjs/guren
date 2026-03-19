@@ -1,0 +1,266 @@
+import { createCipheriv, createDecipheriv, randomBytes, createHmac } from 'crypto'
+import type { EncrypterConfig, EncryptOptions, DecryptOptions, EncryptedPayload } from './types'
+
+/**
+ * Encrypter for secure data encryption using AES.
+ *
+ * @example
+ * ```typescript
+ * const encrypter = new Encrypter({ key: 'base64-encoded-32-byte-key' })
+ *
+ * // Encrypt
+ * const encrypted = encrypter.encrypt({ userId: 123, role: 'admin' })
+ *
+ * // Decrypt
+ * const data = encrypter.decrypt(encrypted)
+ * ```
+ */
+export class Encrypter {
+  /**
+   * Encryption key.
+   */
+  protected key: Buffer
+
+  /**
+   * Cipher algorithm.
+   */
+  protected cipher: 'aes-256-gcm' | 'aes-256-cbc'
+
+  constructor(config: EncrypterConfig) {
+    this.key = Buffer.from(config.key, 'base64')
+    this.cipher = config.cipher ?? 'aes-256-gcm'
+
+    if (this.key.length !== 32) {
+      throw new Error('Encryption key must be 32 bytes (256 bits).')
+    }
+  }
+
+  /**
+   * Encrypt a value.
+   */
+  encrypt(value: unknown, options: EncryptOptions = {}): string {
+    const serialize = options.serialize !== false
+    const data = serialize ? JSON.stringify(value) : String(value)
+
+    if (this.cipher === 'aes-256-gcm') {
+      return this.encryptGcm(data)
+    }
+
+    return this.encryptCbc(data)
+  }
+
+  /**
+   * Decrypt a value.
+   */
+  decrypt<T = unknown>(payload: string, options: DecryptOptions = {}): T {
+    const deserialize = options.deserialize !== false
+
+    let parsed: EncryptedPayload
+    try {
+      parsed = JSON.parse(Buffer.from(payload, 'base64').toString('utf8'))
+    } catch {
+      throw new Error('Invalid encrypted payload.')
+    }
+
+    let decrypted: string
+    if (parsed.tag) {
+      decrypted = this.decryptGcm(parsed)
+    } else if (parsed.mac) {
+      decrypted = this.decryptCbc(parsed)
+    } else {
+      throw new Error('Invalid encrypted payload format.')
+    }
+
+    if (deserialize) {
+      try {
+        return JSON.parse(decrypted) as T
+      } catch {
+        return decrypted as T
+      }
+    }
+
+    return decrypted as T
+  }
+
+  /**
+   * Encrypt a string (no serialization).
+   */
+  encryptString(value: string): string {
+    return this.encrypt(value, { serialize: false })
+  }
+
+  /**
+   * Decrypt a string (no deserialization).
+   */
+  decryptString(payload: string): string {
+    return this.decrypt(payload, { deserialize: false })
+  }
+
+  /**
+   * Encrypt using AES-256-GCM.
+   */
+  protected encryptGcm(data: string): string {
+    const iv = randomBytes(12) // 96 bits for GCM
+    const cipher = createCipheriv('aes-256-gcm', this.key, iv)
+
+    const encrypted = Buffer.concat([
+      cipher.update(data, 'utf8'),
+      cipher.final(),
+    ])
+
+    const tag = cipher.getAuthTag()
+
+    const payload: EncryptedPayload = {
+      iv: iv.toString('base64'),
+      value: encrypted.toString('base64'),
+      tag: tag.toString('base64'),
+    }
+
+    return Buffer.from(JSON.stringify(payload)).toString('base64')
+  }
+
+  /**
+   * Decrypt using AES-256-GCM.
+   */
+  protected decryptGcm(payload: EncryptedPayload): string {
+    const iv = Buffer.from(payload.iv, 'base64')
+    const encrypted = Buffer.from(payload.value, 'base64')
+    const tag = Buffer.from(payload.tag!, 'base64')
+
+    const decipher = createDecipheriv('aes-256-gcm', this.key, iv)
+    decipher.setAuthTag(tag)
+
+    const decrypted = Buffer.concat([
+      decipher.update(encrypted),
+      decipher.final(),
+    ])
+
+    return decrypted.toString('utf8')
+  }
+
+  /**
+   * Encrypt using AES-256-CBC with HMAC.
+   */
+  protected encryptCbc(data: string): string {
+    const iv = randomBytes(16) // 128 bits for CBC
+    const cipher = createCipheriv('aes-256-cbc', this.key, iv)
+
+    const encrypted = Buffer.concat([
+      cipher.update(data, 'utf8'),
+      cipher.final(),
+    ])
+
+    const mac = this.createMac(iv, encrypted)
+
+    const payload: EncryptedPayload = {
+      iv: iv.toString('base64'),
+      value: encrypted.toString('base64'),
+      mac,
+    }
+
+    return Buffer.from(JSON.stringify(payload)).toString('base64')
+  }
+
+  /**
+   * Decrypt using AES-256-CBC with HMAC verification.
+   */
+  protected decryptCbc(payload: EncryptedPayload): string {
+    const iv = Buffer.from(payload.iv, 'base64')
+    const encrypted = Buffer.from(payload.value, 'base64')
+
+    // Verify MAC
+    const expectedMac = this.createMac(iv, encrypted)
+    if (!this.secureCompare(payload.mac!, expectedMac)) {
+      throw new Error('MAC verification failed.')
+    }
+
+    const decipher = createDecipheriv('aes-256-cbc', this.key, iv)
+    const decrypted = Buffer.concat([
+      decipher.update(encrypted),
+      decipher.final(),
+    ])
+
+    return decrypted.toString('utf8')
+  }
+
+  /**
+   * Create HMAC for CBC mode.
+   */
+  protected createMac(iv: Buffer, encrypted: Buffer): string {
+    const hmac = createHmac('sha256', this.key)
+    hmac.update(iv)
+    hmac.update(encrypted)
+    return hmac.digest('hex')
+  }
+
+  /**
+   * Constant-time string comparison.
+   */
+  protected secureCompare(a: string, b: string): boolean {
+    if (a.length !== b.length) {
+      return false
+    }
+
+    let result = 0
+    for (let i = 0; i < a.length; i++) {
+      result |= a.charCodeAt(i) ^ b.charCodeAt(i)
+    }
+
+    return result === 0
+  }
+
+  /**
+   * Get the encryption key (base64).
+   */
+  getKey(): string {
+    return this.key.toString('base64')
+  }
+}
+
+/**
+ * Generate a random encryption key.
+ */
+export function generateKey(): string {
+  return randomBytes(32).toString('base64')
+}
+
+// Global encrypter instance
+let globalEncrypter: Encrypter | null = null
+
+/**
+ * Create an encrypter instance.
+ */
+export function createEncrypter(config: EncrypterConfig): Encrypter {
+  return new Encrypter(config)
+}
+
+/**
+ * Set the global encrypter.
+ */
+export function setEncrypter(encrypter: Encrypter): void {
+  globalEncrypter = encrypter
+}
+
+/**
+ * Get the global encrypter.
+ */
+export function getEncrypter(): Encrypter {
+  if (!globalEncrypter) {
+    throw new Error('Encrypter not initialized. Call setEncrypter() first.')
+  }
+  return globalEncrypter
+}
+
+/**
+ * Encrypt a value using the global encrypter.
+ */
+export function encrypt(value: unknown, options?: EncryptOptions): string {
+  return getEncrypter().encrypt(value, options)
+}
+
+/**
+ * Decrypt a value using the global encrypter.
+ */
+export function decrypt<T = unknown>(payload: string, options?: DecryptOptions): T {
+  return getEncrypter().decrypt<T>(payload, options)
+}

@@ -1,5 +1,5 @@
 import type { WriterOptions } from './utils'
-import { kebabCase, resourceName, writeFileSafe } from './utils'
+import { kebabCase, scaffoldFile } from './utils'
 
 const CONTROLLERS_DIR = 'app/Http/Controllers'
 
@@ -16,10 +16,12 @@ export default class ${className} extends Controller {
 }
 
 export async function makeController(name: string, options: WriterOptions = {}): Promise<string> {
-  const { className } = resourceName(name)
-  const normalizedName = className.endsWith('Controller') ? className : `${className}Controller`
-  const resourcePath = kebabCase(normalizedName.replace(/Controller$/u, ''))
-  const filePath = `${CONTROLLERS_DIR}/${normalizedName}.ts`
-  const contents = controllerTemplate(normalizedName, resourcePath)
-  return writeFileSafe(filePath, contents, options)
+  return scaffoldFile(name, {
+    dir: CONTROLLERS_DIR,
+    suffix: 'Controller',
+    template: ({ normalizedName }) => {
+      const resourcePath = kebabCase(normalizedName.replace(/Controller$/u, ''))
+      return controllerTemplate(normalizedName, resourcePath)
+    },
+  }, options)
 }

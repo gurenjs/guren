@@ -52,6 +52,9 @@ export interface SessionOptions {
 
 const DEFAULT_COOKIE_NAME = 'guren.session'
 const DEFAULT_TTL_SECONDS = 60 * 60 * 2 // 2 hours
+const DEFAULT_COOKIE_SECURE = typeof process !== 'undefined'
+  ? process.env.NODE_ENV === 'production'
+  : true
 
 const SESSION_CONTEXT_KEY = 'guren:session'
 
@@ -160,7 +163,7 @@ export function createSessionMiddleware(options: CreateSessionMiddlewareOptions 
     cookieName = DEFAULT_COOKIE_NAME,
     cookiePath = '/',
     cookieDomain,
-    cookieSecure = true,
+    cookieSecure = DEFAULT_COOKIE_SECURE,
     cookieSameSite = 'Lax',
     cookieHttpOnly = true,
     cookieMaxAgeSeconds,

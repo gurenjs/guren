@@ -1,11 +1,8 @@
 import { Hono } from 'hono'
 import type { MiddlewareHandler, ExecutionContext } from 'hono'
 import { Route } from '../mvc/Route'
-import { ApplicationContext } from '../plugins/ApplicationContext'
-import { PluginManager } from '../plugins/PluginManager'
-import type { Provider, ProviderConstructor } from '../plugins/Provider'
-import { InertiaViewProvider } from '../plugins/providers/InertiaViewProvider'
-import { AuthServiceProvider } from '../plugins/providers/AuthServiceProvider'
+import { Container, setContainer, type ServiceProvider } from '../container'
+import { ProviderManager } from '../container/ServiceProvider'
 import { AuthManager } from '../auth'
 import type { CreateSessionMiddlewareOptions } from './middleware/session'
 import { logDevServerBanner, type DevBannerOptions } from './dev-banner'
@@ -81,10 +78,16 @@ function setActiveViteDevServer(server?: ViteServer): void {
 
 export type BootCallback = (app: Hono) => void | Promise<void>
 
+/**
+ * Service provider class constructor type.
+ */
+export type ServiceProviderConstructor = new (container: Container) => ServiceProvider
+
 export interface ApplicationOptions {
   readonly boot?: BootCallback
-  readonly providers?: Array<Provider | ProviderConstructor>
+  readonly providers?: Array<ServiceProviderConstructor>
   readonly auth?: AuthPluginOptions
+  readonly discover?: boolean
 }
 
 export interface AuthPluginOptions {
@@ -101,13 +104,14 @@ export interface ApplicationListenOptions {
 
 /**
  * Application wires the Route registry into a running Hono instance.
- * It offers a small convenience layer so users can bootstrap a Bun server
- * without touching the underlying Hono object directly.
+ *
+ * It embeds a DI Container as the backbone of the framework, binding core
+ * services and managing providers through the container's ProviderManager.
  */
 export class Application {
   readonly hono: Hono
-  private readonly plugins: PluginManager
-  private context?: ApplicationContext
+  readonly container: Container
+  private readonly providerManager: ProviderManager
   private readonly authManager: AuthManager
   private viteDevServer?: ViteServer
   private bunServer?: BunServer
@@ -117,13 +121,21 @@ export class Application {
 
   constructor(private readonly options: ApplicationOptions = {}) {
     this.hono = new Hono()
+    this.container = new Container()
     this.authManager = new AuthManager()
-    this.plugins = new PluginManager(() => this.resolveContext())
+    this.providerManager = new ProviderManager(this.container)
 
-    this.registerDefaultProviders()
+    // Set global container
+    setContainer(this.container)
 
+    // Bind core instances
+    this.container.instance('app', this as Application)
+    this.container.instance('hono', this.hono)
+    this.container.instance('auth', this.authManager)
+
+    // Register user providers
     if (Array.isArray(this.options.providers)) {
-      this.plugins.addMany(this.options.providers)
+      this.providerManager.registerMany(this.options.providers)
     }
   }
 
@@ -158,13 +170,13 @@ export class Application {
   }
 
   /**
-   * Executes the optional boot callback and mounts the registered routes.
+   * Executes provider registration, boot callback, mounts routes, and boots providers.
    */
   async boot(): Promise<void> {
-    await this.plugins.registerAll()
+    await this.providerManager.registerAll()
     await this.options.boot?.(this.hono)
     this.mountRoutes()
-    await this.plugins.bootAll()
+    await this.providerManager.bootAll()
   }
 
   /**
@@ -244,13 +256,19 @@ export class Application {
     }
   }
 
-  register(provider: Provider | ProviderConstructor): this {
-    this.plugins.add(provider)
+  /**
+   * Register a service provider.
+   */
+  register(provider: ServiceProviderConstructor): this {
+    this.providerManager.register(provider)
     return this
   }
 
-  registerMany(providers: Array<Provider | ProviderConstructor>): this {
-    this.plugins.addMany(providers)
+  /**
+   * Register multiple service providers.
+   */
+  registerMany(providers: Array<ServiceProviderConstructor>): this {
+    this.providerManager.registerMany(providers)
     return this
   }
 
@@ -259,19 +277,6 @@ export class Application {
    */
   logDevServerBanner(options: DevBannerOptions): void {
     logDevServerBanner(options)
-  }
-
-  private resolveContext(): ApplicationContext {
-    if (!this.context) {
-      this.context = new ApplicationContext(this, this.authManager)
-    }
-
-    return this.context
-  }
-
-  private registerDefaultProviders(): void {
-    this.plugins.add(InertiaViewProvider)
-    this.plugins.add(AuthServiceProvider)
   }
 
   private async closeViteDevServer(): Promise<void> {

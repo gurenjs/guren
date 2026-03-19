@@ -39,6 +39,7 @@
   "scripts": {
     "build": "tsup",
     "dev": "bun --watch src/index.ts",
+    "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

@@ -41,15 +41,63 @@ export default defineConfig({
         replacement: reactDomClientEntry,
       },
       {
-        find: '@guren/testing',
+        find: /^@guren\/testing$/,
         replacement: resolve(rootDir, '../../packages/testing/src/index.ts'),
       },
       {
-        find: 'guren',
+        find: /^@guren\/testing\//,
+        replacement: resolve(rootDir, '../../packages/testing/src/'),
+      },
+      {
+        find: /^@guren\/server$/,
+        replacement: resolve(rootDir, '../../packages/server/src/index.ts'),
+      },
+      {
+        find: /^@guren\/server\//,
+        replacement: resolve(rootDir, '../../packages/server/src/'),
+      },
+      {
+        find: /^@guren\/core$/,
         replacement: resolve(rootDir, '../../packages/core/src/index.ts'),
       },
       {
-        find: 'guren/',
+        find: /^@guren\/core\//,
+        replacement: resolve(rootDir, '../../packages/core/src/'),
+      },
+      {
+        find: /^@guren\/orm$/,
+        replacement: resolve(rootDir, '../../packages/orm/src/index.ts'),
+      },
+      {
+        find: /^@guren\/orm\/drizzle$/,
+        replacement: resolve(rootDir, '../../packages/orm/src/drizzle.ts'),
+      },
+      {
+        find: /^@guren\/orm\//,
+        replacement: resolve(rootDir, '../../packages/orm/src/'),
+      },
+      {
+        find: /^@guren\/inertia-client$/,
+        replacement: resolve(rootDir, '../../packages/inertia-client/src/index.ts'),
+      },
+      {
+        find: /^@guren\/inertia-client\//,
+        replacement: resolve(rootDir, '../../packages/inertia-client/src/'),
+      },
+      {
+        find: /^@guren\/cli$/,
+        replacement: resolve(rootDir, '../../packages/cli/src/index.ts'),
+      },
+      {
+        find: /^@guren\/cli\//,
+        replacement: resolve(rootDir, '../../packages/cli/src/'),
+      },
+      {
+        find: /^guren$/,
+        replacement: resolve(rootDir, '../../packages/core/src/index.ts'),
+      },
+      {
+        find: /^guren\//,
         replacement: resolve(rootDir, '../../packages/core/src/'),
       },
     ],

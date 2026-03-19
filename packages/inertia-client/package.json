@@ -45,7 +45,8 @@
     "src"
   ],
   "scripts": {
-    "build": "tsup"
+    "build": "tsup",
+    "test": "bun test"
   },
   "dependencies": {
     "@inertiajs/core": "^2.2.15",

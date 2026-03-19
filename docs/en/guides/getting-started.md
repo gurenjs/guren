@@ -2,6 +2,9 @@
 
 This guide shows how to scaffold and run a brand-new Guren application using the `create-guren-app` CLI. The instructions target macOS and Linux, and they also work on Windows with WSL2.
 
+> [!NOTE]
+> If any term is unfamiliar, see the [Glossary](./glossary.md).
+
 ## Prerequisites
 - **Bun 1.1 or later**  
   Install example: `curl -fsSL https://bun.sh/install | bash`

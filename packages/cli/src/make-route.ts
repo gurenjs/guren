@@ -1,5 +1,5 @@
 import type { WriterOptions } from './utils'
-import { kebabCase, resourceName, writeFileSafe } from './utils'
+import { kebabCase, scaffoldFile } from './utils'
 
 const ROUTES_DIR = 'routes'
 
@@ -14,9 +14,16 @@ export default Route.group('${prefix}', () => {
 }
 
 export async function makeRoute(name: string, options: WriterOptions = {}): Promise<string> {
-  const { className, fileName } = resourceName(name)
-  const controller = className.endsWith('Controller') ? className : `${className}Controller`
-  const prefix = `/${kebabCase(name)}`
-  const filePath = `${ROUTES_DIR}/${fileName}.ts`
-  return writeFileSafe(filePath, routeTemplate(prefix, controller), options)
+  return scaffoldFile(name, {
+    dir: ROUTES_DIR,
+    fileName: ({ fileName }) => fileName,
+    template: ({ className, rawName }) => {
+      const baseName = className.endsWith('s') && !className.endsWith('ss')
+        ? className.slice(0, -1)
+        : className
+      const controller = baseName.endsWith('Controller') ? baseName : `${baseName}Controller`
+      const prefix = `/${kebabCase(rawName)}`
+      return routeTemplate(prefix, controller)
+    },
+  }, options)
 }

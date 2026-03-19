@@ -1,6 +1,8 @@
 import { and, asc, count, desc, eq, inArray, isNull } from 'drizzle-orm'
 import type { AnyColumn } from 'drizzle-orm'
 import type { FindManyOptions, OrderByClause, ORMAdapter, PlainObject, WhereClause } from '../Model'
+import type { ORMAdapterAdvanced, WhereCondition } from '../QueryBuilder'
+import { buildDrizzleConditions } from './drizzle-conditions'
 
 type DrizzleLikeSelect = {
   where?: (clause: unknown) => DrizzleLikeSelect
@@ -165,7 +167,7 @@ function isPromiseLike<T>(value: unknown): value is Promise<T> {
   return typeof value === 'object' && value !== null && 'then' in value && typeof (value as { then: unknown }).then === 'function'
 }
 
-export const DrizzleAdapter: ORMAdapter & {
+export const DrizzleAdapter: ORMAdapterAdvanced & {
   configure(db: DrizzleDatabase): void
   getDatabase<TDatabase extends DrizzleDatabase = DrizzleDatabase>(): TDatabase
 } = {
@@ -276,6 +278,117 @@ export const DrizzleAdapter: ORMAdapter & {
     }
 
     const clause = resolveWhere(table, where)
+    const query = db.delete(table)
+    const result = await resolveMutation(clause ? query.where(clause) : query)
+    return result as number | PlainObject | void
+  },
+
+  async findManyAdvanced<TRecord extends PlainObject = PlainObject>(
+    table: unknown,
+    conditions: WhereCondition[],
+    options: {
+      orderBy?: OrderByClause
+      limit?: number
+      offset?: number
+      select?: string[]
+    },
+  ): Promise<TRecord[]> {
+    const db = ensureDatabase()
+    const tableRecord = table as DrizzleTableLike
+
+    // Build select - if specific fields requested, build a selection object
+    let query: DrizzleLikeSelect
+    if (options.select && options.select.length > 0) {
+      const selection: Record<string, unknown> = {}
+      for (const field of options.select) {
+        const column = tableRecord[field]
+        if (!column) {
+          throw new Error(`DrizzleAdapter: unknown column "${field}" on provided table.`)
+        }
+        selection[field] = column
+      }
+      query = db.select(selection).from(table)
+    } else {
+      query = db.select().from(table)
+    }
+
+    // Apply advanced conditions
+    if (typeof query.where === 'function') {
+      const clause = buildDrizzleConditions(table, conditions)
+      if (clause) {
+        query = query.where(clause) as DrizzleLikeSelect
+      }
+    }
+
+    // Apply ordering
+    if (typeof query.orderBy === 'function') {
+      const clauses = resolveOrder(table, options.orderBy)
+      if (clauses && clauses.length > 0) {
+        query = query.orderBy(...clauses) as DrizzleLikeSelect
+      }
+    }
+
+    // Apply limit
+    if (typeof query.limit === 'function' && typeof options.limit === 'number') {
+      query = query.limit(options.limit) as DrizzleLikeSelect
+    }
+
+    // Apply offset
+    if (typeof query.offset === 'function' && typeof options.offset === 'number') {
+      query = query.offset(options.offset) as DrizzleLikeSelect
+    }
+
+    const rows = await resolveList(query)
+    return rows as TRecord[]
+  },
+
+  async countAdvanced<TRecord extends PlainObject = PlainObject>(
+    table: unknown,
+    conditions: WhereCondition[],
+  ): Promise<number> {
+    const db = ensureDatabase()
+    let query = db.select({ value: count() }).from(table)
+
+    if (typeof query.where === 'function') {
+      const clause = buildDrizzleConditions(table, conditions)
+      if (clause) {
+        query = query.where(clause) as DrizzleLikeSelect
+      }
+    }
+
+    const rows = await resolveList(query)
+    const first = rows[0] as { value?: unknown } | undefined
+    const raw = first?.value ?? 0
+    const total = typeof raw === 'bigint' ? Number(raw) : Number(raw)
+    return Number.isNaN(total) ? 0 : total
+  },
+
+  async updateAdvanced<TRecord extends PlainObject = PlainObject>(
+    table: unknown,
+    conditions: WhereCondition[],
+    data: PlainObject,
+  ): Promise<TRecord> {
+    const db = ensureDatabase()
+    if (!db.update) {
+      throw new Error('DrizzleAdapter: configured database does not support updates.')
+    }
+
+    const clause = buildDrizzleConditions(table, conditions)
+    const query = db.update(table).set(data)
+    const result = await resolveMutation(clause ? query.where(clause) : query)
+    return result as TRecord
+  },
+
+  async deleteAdvanced<TRecord extends PlainObject = PlainObject>(
+    table: unknown,
+    conditions: WhereCondition[],
+  ): Promise<number | PlainObject | void> {
+    const db = ensureDatabase()
+    if (!db.delete) {
+      throw new Error('DrizzleAdapter: configured database does not support deletes.')
+    }
+
+    const clause = buildDrizzleConditions(table, conditions)
     const query = db.delete(table)
     const result = await resolveMutation(clause ? query.where(clause) : query)
     return result as number | PlainObject | void

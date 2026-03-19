@@ -1,8 +1,8 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, relative, resolve, sep as pathSep } from 'node:path'
 import { consola } from 'consola'
-import { writeFileSafe, type WriterOptions } from './utils'
-import { addImport, addMiddleware, addProvider } from './patch-helpers'
+import { writeFilesSafe, type WriterOptions } from './utils'
+import { addImport, addProvider } from './patch-helpers'
 
 function timestamp(): string {
   const now = new Date()
@@ -382,19 +382,20 @@ export interface MakeAuthOptions extends WriterOptions {
 }
 
 export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]> {
-  const created: string[] = []
-
-  created.push(await writeFileSafe('app/Http/Controllers/Auth/LoginController.ts', loginControllerTemplate, options))
-  created.push(await writeFileSafe('app/Http/Controllers/DashboardController.ts', dashboardControllerTemplate, options))
-  created.push(await writeFileSafe('app/Models/User.ts', userModelTemplate, options))
-  created.push(await writeFileSafe('app/Providers/AuthProvider.ts', authProviderTemplate, options))
-  created.push(await writeFileSafe('app/Http/Validators/LoginValidator.ts', loginValidatorTemplate, options))
-  created.push(await writeFileSafe('resources/js/components/Layout.tsx', layoutTemplate, options))
-  created.push(await writeFileSafe('resources/js/pages/auth/Login.tsx', loginViewTemplate, options))
-  created.push(await writeFileSafe('resources/js/pages/dashboard/Index.tsx', dashboardViewTemplate, options))
-  created.push(await writeFileSafe('routes/auth.ts', routesTemplate, options))
-  created.push(await writeFileSafe(`db/migrations/${timestamp()}_create_users_table.sql`, migrationTemplate, options))
-  created.push(await writeFileSafe('db/seeders/UsersSeeder.ts', seederTemplate, options))
+  const migrationPath = `db/migrations/${timestamp()}_create_users_table.sql`
+  const created = await writeFilesSafe([
+    { path: 'app/Http/Controllers/Auth/LoginController.ts', contents: loginControllerTemplate },
+    { path: 'app/Http/Controllers/DashboardController.ts', contents: dashboardControllerTemplate },
+    { path: 'app/Models/User.ts', contents: userModelTemplate },
+    { path: 'app/Providers/AuthProvider.ts', contents: authProviderTemplate },
+    { path: 'app/Http/Validators/LoginValidator.ts', contents: loginValidatorTemplate },
+    { path: 'resources/js/components/Layout.tsx', contents: layoutTemplate },
+    { path: 'resources/js/pages/auth/Login.tsx', contents: loginViewTemplate },
+    { path: 'resources/js/pages/dashboard/Index.tsx', contents: dashboardViewTemplate },
+    { path: 'routes/auth.ts', contents: routesTemplate },
+    { path: migrationPath, contents: migrationTemplate },
+    { path: 'db/seeders/UsersSeeder.ts', contents: seederTemplate },
+  ], options)
 
   await updateSchema()
 
@@ -402,10 +403,12 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
     await installAuth()
   } else {
     consola.info('Next steps:')
-    consola.info('  • Register AuthProvider and session middleware in src/app.ts')
-    consola.info('  • Import \'./routes/auth.js\' from src/main.ts or routes/web.ts')
+    consola.info('  • Register AuthProvider in src/app.ts providers array')
+    consola.info('  • Import \'./routes/auth.js\' from routes/web.ts')
     consola.info('  • Run `bun run db:migrate` and `bun run db:seed`')
     consola.info('  • Install zod if not already installed: `bun add zod`')
+    consola.info('')
+    consola.info('Session middleware is auto-configured when AuthProvider is registered.')
   }
 
   return created
@@ -430,14 +433,11 @@ async function installAuth(): Promise<void> {
 
   if (!appPath) {
     consola.warn('Could not find src/app.ts or app.ts - skipping auto-configuration')
-    consola.info('Please manually:')
-    consola.info('  • Register AuthProvider in your Application providers')
-    consola.info('  • Add createSessionMiddleware to your middleware stack')
+    consola.info('Please manually register AuthProvider in your Application providers')
     return
   }
 
-  // Add imports
-  const sessionImport = "import { createSessionMiddleware } from '@guren/server'"
+  // Add AuthProvider import
   const authProviderImportPath = (() => {
     const base = dirname(appPath)
     const rel = relative(base, 'app/Providers/AuthProvider.js') || 'app/Providers/AuthProvider.js'
@@ -445,13 +445,6 @@ async function installAuth(): Promise<void> {
     return normalized.startsWith('.') ? normalized : `./${normalized}`
   })()
   const authProviderImport = `import AuthProvider from '${authProviderImportPath}'`
-
-  const sessionImportResult = await addImport(appPath, sessionImport)
-  if (sessionImportResult.modified) {
-    consola.success(`Added session middleware import to ${appPath}`)
-  } else if (sessionImportResult.reason === 'Import already exists') {
-    consola.info(`Session middleware import already exists in ${appPath}`)
-  }
 
   const authImportResult = await addImport(appPath, authProviderImport)
   if (authImportResult.modified) {
@@ -468,17 +461,6 @@ async function installAuth(): Promise<void> {
     consola.info(`AuthProvider already registered in ${appPath}`)
   } else {
     consola.warn(`Could not add AuthProvider: ${providerResult.reason}`)
-  }
-
-  // Add session middleware
-  const middlewareCall = "app.use('*', createSessionMiddleware({ cookieSecure: false }))"
-  const middlewareResult = await addMiddleware(appPath, middlewareCall)
-  if (middlewareResult.modified) {
-    consola.success(`Added session middleware to ${appPath}`)
-  } else if (middlewareResult.reason === 'Middleware already registered') {
-    consola.info(`Session middleware already registered in ${appPath}`)
-  } else {
-    consola.warn(`Could not add session middleware: ${middlewareResult.reason}`)
   }
 
   // Add auth routes import to routes/web.ts
@@ -498,6 +480,7 @@ async function installAuth(): Promise<void> {
   }
 
   consola.success('Authentication configuration installed!')
+  consola.info('Session middleware is auto-configured via AuthServiceProvider (autoSession: true)')
   consola.info('Next steps:')
   consola.info('  • Run `bun run db:migrate` to create the users table')
   consola.info('  • Run `bun run db:seed` to create demo user')

@@ -1,5 +1,6 @@
 import type { Context, MiddlewareHandler } from 'hono'
 import type { AuthContext } from '../../auth'
+import { jsonResponse } from './index'
 export type { AuthContext } from '../../auth'
 
 export interface RequireAuthOptions {
@@ -40,10 +41,7 @@ export function requireAuthenticated(options: RequireAuthOptions = {}): Middlewa
         return responseFactory()
       }
 
-      return new Response(JSON.stringify({ message: 'Unauthorized' }), {
-        status,
-        headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      })
+      return jsonResponse({ message: 'Unauthorized' }, status)
     }
 
     await next()
@@ -69,10 +67,7 @@ export function requireGuest(options: RequireAuthOptions = {}): MiddlewareHandle
         return responseFactory()
       }
 
-      return new Response(JSON.stringify({ message: 'Already authenticated' }), {
-        status,
-        headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      })
+      return jsonResponse({ message: 'Already authenticated' }, status)
     }
 
     await next()

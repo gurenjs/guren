@@ -22,8 +22,149 @@ Commands follow a subcommand pattern such as `bunx guren make:controller UserCon
 | `make:model <Name>` | Generates a minimal model class and type definition in `app/Models` (imports `camelCase(Name)s` from `db/schema`) | `bunx guren make:model Post` |
 | `make:view <path>` | Generates a React component in `resources/js/pages` | `bunx guren make:view posts/Index` |
 | `make:auth` | Scaffolds login/logout controllers, provider, views, migration, seeder, and routes | `bunx guren make:auth` |
+| `make:middleware <Name>` | Generates a middleware file in `app/Http/Middleware` | `bunx guren make:middleware Auth` |
+| `make:seeder <Name>` | Generates a database seeder file | `bunx guren make:seeder UserSeeder` |
+| `make:job <Name>` | Generates a queueable job class | `bunx guren make:job SendEmail` |
+| `make:event <Name>` | Generates an event class | `bunx guren make:event UserRegistered` |
+| `make:listener <Name>` | Generates an event listener class | `bunx guren make:listener SendWelcomeEmail` |
+| `make:notification <Name>` | Generates a notification class | `bunx guren make:notification InvoicePaid` |
+| `make:mail <Name>` | Generates a mailable class | `bunx guren make:mail WelcomeEmail` |
 
 > **Note:** `make:*` commands avoid overwriting existing files. Use `--force` if you need to replace them.
+
+## Route Commands
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `route:list` | List all registered routes | `bunx guren route:list` |
+
+### route:list Options
+
+Display all application routes with filtering and sorting capabilities:
+
+```bash
+# List all routes
+bunx guren route:list
+
+# Filter by HTTP method
+bunx guren route:list --method GET
+
+# Filter by path pattern
+bunx guren route:list --path users
+
+# Filter by route name
+bunx guren route:list --name admin
+
+# Sort routes
+bunx guren route:list --sort path
+bunx guren route:list --sort method
+bunx guren route:list --sort name
+
+# Reverse sort order
+bunx guren route:list --sort path --reverse
+
+# Output formats
+bunx guren route:list --format table   # Default table format
+bunx guren route:list --format json    # JSON output
+bunx guren route:list --format compact # Compact single-line format
+```
+
+## Config Commands
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `config:cache` | Cache all configuration files | `bunx guren config:cache` |
+| `config:clear` | Clear the configuration cache | `bunx guren config:clear` |
+| `config:show` | Display configuration cache info | `bunx guren config:show` |
+
+### Configuration Caching
+
+Cache your configuration files for improved performance in production:
+
+```bash
+# Cache all configuration
+bunx guren config:cache
+
+# Clear the cache
+bunx guren config:clear
+
+# View cache info
+bunx guren config:show
+```
+
+The cache is stored in `bootstrap/cache/config.json`. Configuration files are loaded from the `config/` directory (including nested subdirectories).
+
+**Note:** After modifying configuration files, run `config:cache` again to update the cache.
+
+## Database Commands
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `db:migrate` | Run pending database migrations | `bunx guren db:migrate` |
+| `db:rollback` | Rollback the last migration batch | `bunx guren db:rollback` |
+| `db:reset` | Drop all tables and re-run migrations | `bunx guren db:reset` |
+| `db:seed` | Run database seeders | `bunx guren db:seed` |
+
+### db:migrate Options
+
+```bash
+# Run migrations
+bunx guren db:migrate
+
+# Force migrations in production
+bunx guren db:migrate --force
+
+# Specify migration path
+bunx guren db:migrate --path db/migrations
+```
+
+### db:rollback Options
+
+```bash
+# Rollback last batch
+bunx guren db:rollback
+
+# Rollback specific number of steps
+bunx guren db:rollback --step 3
+
+# Rollback all migrations
+bunx guren db:rollback --all
+```
+
+### db:seed Options
+
+```bash
+# Run all seeders
+bunx guren db:seed
+
+# Run specific seeder
+bunx guren db:seed --class UserSeeder
+
+# Force seeding in production
+bunx guren db:seed --force
+```
+
+## Queue Commands
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `queue:work` | Start processing queued jobs | `bunx guren queue:work` |
+
+### queue:work Options
+
+```bash
+# Process jobs from default queue
+bunx guren queue:work
+
+# Process specific queue
+bunx guren queue:work --queue emails
+
+# Limit number of jobs
+bunx guren queue:work --max-jobs 100
+
+# Stop when queue is empty
+bunx guren queue:work --stop-when-empty
+```
 
 ## Shared Options
 

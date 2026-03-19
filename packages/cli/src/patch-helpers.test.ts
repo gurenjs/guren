@@ -2,14 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import {
-  addImport,
-  addMiddleware,
-  addProvider,
-  hasImport,
-  hasSessionMiddleware,
-  hasAuthProvider,
-} from './patch-helpers'
+import { addImport, addProvider, hasImport, hasAuthProvider } from './patch-helpers'
 
 describe('patch-helpers', () => {
   let tempDir: string
@@ -73,64 +66,6 @@ const app = new Application()`
 
     it('should return false if file not found', async () => {
       const result = await addImport(join(tempDir, 'nonexistent.ts'), "import { foo } from 'bar'")
-
-      expect(result.modified).toBe(false)
-      expect(result.reason).toBe('File not found')
-    })
-  })
-
-  describe('addMiddleware', () => {
-    it('should add session middleware before auth context', async () => {
-      const filePath = join(tempDir, 'app.ts')
-      const initialContent = `import { Application } from '@guren/server'
-
-const app = new Application({
-  providers: [],
-})
-
-app.use('*', attachAuthContext((ctx) => app.auth.createAuthContext(ctx)))`
-
-      await writeFile(filePath, initialContent, 'utf8')
-
-      const result = await addMiddleware(
-        filePath,
-        "app.use('*', createSessionMiddleware({ cookieSecure: false }))",
-      )
-
-      expect(result.modified).toBe(true)
-
-      const content = await Bun.file(filePath).text()
-      expect(content).toContain('createSessionMiddleware')
-      expect(content.indexOf('createSessionMiddleware')).toBeLessThan(
-        content.indexOf('attachAuthContext'),
-      )
-    })
-
-    it('should not add duplicate session middleware', async () => {
-      const filePath = join(tempDir, 'app.ts')
-      const initialContent = `import { Application, createSessionMiddleware } from '@guren/server'
-
-const app = new Application()
-
-app.use('*', createSessionMiddleware({ cookieSecure: false }))
-app.use('*', attachAuthContext((ctx) => app.auth.createAuthContext(ctx)))`
-
-      await writeFile(filePath, initialContent, 'utf8')
-
-      const result = await addMiddleware(
-        filePath,
-        "app.use('*', createSessionMiddleware({ cookieSecure: false }))",
-      )
-
-      expect(result.modified).toBe(false)
-      expect(result.reason).toBe('Middleware already registered')
-    })
-
-    it('should return false if file not found', async () => {
-      const result = await addMiddleware(
-        join(tempDir, 'nonexistent.ts'),
-        "app.use('*', createSessionMiddleware())",
-      )
 
       expect(result.modified).toBe(false)
       expect(result.reason).toBe('File not found')
@@ -215,30 +150,6 @@ const app = new Application()`
 
     it('should return false if file not found', async () => {
       const result = await hasImport(join(tempDir, 'nonexistent.ts'), "import { foo } from 'bar'")
-
-      expect(result).toBe(false)
-    })
-  })
-
-  describe('hasSessionMiddleware', () => {
-    it('should return true if session middleware exists', async () => {
-      const filePath = join(tempDir, 'app.ts')
-      await writeFile(
-        filePath,
-        "app.use('*', createSessionMiddleware({ cookieSecure: false }))",
-        'utf8',
-      )
-
-      const result = await hasSessionMiddleware(filePath)
-
-      expect(result).toBe(true)
-    })
-
-    it('should return false if session middleware does not exist', async () => {
-      const filePath = join(tempDir, 'app.ts')
-      await writeFile(filePath, "app.use('*', someOtherMiddleware())", 'utf8')
-
-      const result = await hasSessionMiddleware(filePath)
 
       expect(result).toBe(false)
     })

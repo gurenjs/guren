@@ -2,6 +2,9 @@
 
 `create-guren-app` で新規プロジェクトを作成した後のフルセットアップ手順です。英語版と同等の内容をまとめています。
 
+> [!NOTE]
+> 用語が分からない場合は先に [用語集](./glossary.md) を参照してください。
+
 ## 前提ツール
 - **Bun 1.1 以降**  
   例: `curl -fsSL https://bun.sh/install | bash`

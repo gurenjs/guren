@@ -1,0 +1,474 @@
+import type { StorageDriver, S3DriverOptions, PutOptions, FileMetadata } from '../types'
+
+/**
+ * S3 Client interface (@aws-sdk/client-s3 compatible).
+ */
+interface S3Client {
+  send(command: unknown): Promise<unknown>
+}
+
+/**
+ * AWS S3 storage driver.
+ *
+ * @example
+ * ```ts
+ * import { S3Client } from '@aws-sdk/client-s3'
+ *
+ * const client = new S3Client({ region: 'ap-northeast-1' })
+ * const driver = new S3Driver({
+ *   client,
+ *   bucket: 'my-bucket',
+ * })
+ *
+ * await driver.put('avatars/user-1.jpg', imageBuffer)
+ * const url = driver.url('avatars/user-1.jpg')
+ * ```
+ */
+export class S3Driver implements StorageDriver {
+  private client: S3Client | null = null
+  private readonly bucket: string
+  private readonly region: string
+  private readonly endpoint?: string
+  private readonly accessKeyId?: string
+  private readonly secretAccessKey?: string
+  private readonly prefix: string
+  private readonly baseUrl: string
+  private readonly defaultVisibility: 'public' | 'private'
+
+  constructor(private readonly options: S3DriverOptions) {
+    this.client = options.client as S3Client | null
+    this.bucket = options.bucket
+    this.region = options.region ?? 'us-east-1'
+    this.endpoint = options.endpoint
+    this.accessKeyId = options.accessKeyId
+    this.secretAccessKey = options.secretAccessKey
+    this.prefix = options.prefix ?? ''
+    this.baseUrl = options.url ?? `https://${this.bucket}.s3.${this.region}.amazonaws.com`
+    this.defaultVisibility = options.visibility ?? 'private'
+  }
+
+  /**
+   * Get or create the S3 client.
+   */
+  private async getClient(): Promise<S3Client> {
+    if (this.client) {
+      return this.client
+    }
+
+    // Dynamically import @aws-sdk/client-s3
+    const { S3Client } = await importAwsModule('@aws-sdk/client-s3') as {
+      S3Client: new (config: unknown) => S3Client
+    }
+
+    const config: Record<string, unknown> = {
+      region: this.region,
+    }
+
+    if (this.endpoint) {
+      config.endpoint = this.endpoint
+      config.forcePathStyle = true
+    }
+
+    if (this.accessKeyId && this.secretAccessKey) {
+      config.credentials = {
+        accessKeyId: this.accessKeyId,
+        secretAccessKey: this.secretAccessKey,
+      }
+    }
+
+    this.client = new S3Client(config)
+    return this.client
+  }
+
+  /**
+   * Get the prefixed key.
+   */
+  private prefixKey(path: string): string {
+    return this.prefix ? `${this.prefix}/${path}` : path
+  }
+
+  /**
+   * Get ACL from visibility.
+   */
+  private getAcl(visibility: 'public' | 'private'): string {
+    return visibility === 'public' ? 'public-read' : 'private'
+  }
+
+  async put(path: string, content: Buffer | string, options?: PutOptions): Promise<string> {
+    const client = await this.getClient()
+    const { PutObjectCommand } = await importAwsModule('@aws-sdk/client-s3') as {
+      PutObjectCommand: new (input: unknown) => unknown
+    }
+
+    const body = typeof content === 'string' ? Buffer.from(content) : content
+    const visibility = options?.visibility ?? this.defaultVisibility
+
+    const command = new PutObjectCommand({
+      Bucket: this.bucket,
+      Key: this.prefixKey(path),
+      Body: body,
+      ContentType: options?.contentType,
+      ACL: this.getAcl(visibility),
+      Metadata: options?.metadata,
+    })
+
+    await client.send(command)
+    return path
+  }
+
+  async putFile(path: string, localPath: string, options?: PutOptions): Promise<string> {
+    const { readFile } = await import('node:fs/promises')
+    const content = await readFile(localPath)
+    return this.put(path, content, options)
+  }
+
+  async get(path: string): Promise<Buffer | null> {
+    const client = await this.getClient()
+    const { GetObjectCommand } = await importAwsModule('@aws-sdk/client-s3') as {
+      GetObjectCommand: new (input: unknown) => unknown
+    }
+
+    try {
+      const command = new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: this.prefixKey(path),
+      })
+
+      const response = await client.send(command) as { Body?: { transformToByteArray(): Promise<Uint8Array> } }
+
+      if (!response.Body) {
+        return null
+      }
+
+      const bytes = await response.Body.transformToByteArray()
+      return Buffer.from(bytes)
+    } catch (error: unknown) {
+      if (error && typeof error === 'object' && 'name' in error && error.name === 'NoSuchKey') {
+        return null
+      }
+      throw error
+    }
+  }
+
+  async getAsString(path: string): Promise<string | null> {
+    const content = await this.get(path)
+    return content ? content.toString('utf-8') : null
+  }
+
+  async exists(path: string): Promise<boolean> {
+    const client = await this.getClient()
+    const { HeadObjectCommand } = await importAwsModule('@aws-sdk/client-s3') as {
+      HeadObjectCommand: new (input: unknown) => unknown
+    }
+
+    try {
+      const command = new HeadObjectCommand({
+        Bucket: this.bucket,
+        Key: this.prefixKey(path),
+      })
+
+      await client.send(command)
+      return true
+    } catch (error: unknown) {
+      if (error && typeof error === 'object' && 'name' in error && error.name === 'NotFound') {
+        return false
+      }
+      throw error
+    }
+  }
+
+  async delete(path: string): Promise<boolean> {
+    const client = await this.getClient()
+    const { DeleteObjectCommand } = await importAwsModule('@aws-sdk/client-s3') as {
+      DeleteObjectCommand: new (input: unknown) => unknown
+    }
+
+    try {
+      const command = new DeleteObjectCommand({
+        Bucket: this.bucket,
+        Key: this.prefixKey(path),
+      })
+
+      await client.send(command)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  async deleteMany(paths: string[]): Promise<number> {
+    if (paths.length === 0) {
+      return 0
+    }
+
+    const client = await this.getClient()
+    const { DeleteObjectsCommand } = await importAwsModule('@aws-sdk/client-s3') as {
+      DeleteObjectsCommand: new (input: unknown) => unknown
+    }
+
+    const command = new DeleteObjectsCommand({
+      Bucket: this.bucket,
+      Delete: {
+        Objects: paths.map((path) => ({ Key: this.prefixKey(path) })),
+      },
+    })
+
+    const response = await client.send(command) as { Deleted?: unknown[] }
+    return response.Deleted?.length ?? 0
+  }
+
+  async copy(from: string, to: string): Promise<string> {
+    const client = await this.getClient()
+    const { CopyObjectCommand } = await importAwsModule('@aws-sdk/client-s3') as {
+      CopyObjectCommand: new (input: unknown) => unknown
+    }
+
+    const command = new CopyObjectCommand({
+      Bucket: this.bucket,
+      CopySource: `${this.bucket}/${this.prefixKey(from)}`,
+      Key: this.prefixKey(to),
+    })
+
+    await client.send(command)
+    return to
+  }
+
+  async move(from: string, to: string): Promise<string> {
+    await this.copy(from, to)
+    await this.delete(from)
+    return to
+  }
+
+  url(path: string): string {
+    return `${this.baseUrl}/${this.prefixKey(path)}`
+  }
+
+  async temporaryUrl(path: string, expiration: Date): Promise<string> {
+    const client = await this.getClient()
+    const { GetObjectCommand } = await importAwsModule('@aws-sdk/client-s3') as {
+      GetObjectCommand: new (input: unknown) => unknown
+    }
+    const { getSignedUrl } = await importAwsModule('@aws-sdk/s3-request-presigner') as {
+      getSignedUrl: (client: unknown, command: unknown, options: { expiresIn: number }) => Promise<string>
+    }
+
+    const command = new GetObjectCommand({
+      Bucket: this.bucket,
+      Key: this.prefixKey(path),
+    })
+
+    const expiresIn = Math.max(1, Math.floor((expiration.getTime() - Date.now()) / 1000))
+    return getSignedUrl(client, command, { expiresIn })
+  }
+
+  async size(path: string): Promise<number> {
+    const metadata = await this.metadata(path)
+
+    if (!metadata) {
+      throw new Error(`File not found: ${path}`)
+    }
+
+    return metadata.size
+  }
+
+  async lastModified(path: string): Promise<Date> {
+    const metadata = await this.metadata(path)
+
+    if (!metadata) {
+      throw new Error(`File not found: ${path}`)
+    }
+
+    return metadata.lastModified
+  }
+
+  async metadata(path: string): Promise<FileMetadata | null> {
+    const client = await this.getClient()
+    const { HeadObjectCommand } = await importAwsModule('@aws-sdk/client-s3') as {
+      HeadObjectCommand: new (input: unknown) => unknown
+    }
+
+    try {
+      const command = new HeadObjectCommand({
+        Bucket: this.bucket,
+        Key: this.prefixKey(path),
+      })
+
+      const response = await client.send(command) as {
+        ContentLength?: number
+        LastModified?: Date
+        ContentType?: string
+        Metadata?: Record<string, string>
+      }
+
+      return {
+        path,
+        size: response.ContentLength ?? 0,
+        lastModified: response.LastModified ?? new Date(),
+        contentType: response.ContentType,
+        metadata: response.Metadata,
+      }
+    } catch (error: unknown) {
+      if (error && typeof error === 'object' && 'name' in error && error.name === 'NotFound') {
+        return null
+      }
+      throw error
+    }
+  }
+
+  async files(directory: string): Promise<string[]> {
+    const client = await this.getClient()
+    const { ListObjectsV2Command } = await importAwsModule('@aws-sdk/client-s3') as {
+      ListObjectsV2Command: new (input: unknown) => unknown
+    }
+
+    const prefix = this.prefixKey(directory)
+    const command = new ListObjectsV2Command({
+      Bucket: this.bucket,
+      Prefix: prefix ? `${prefix}/` : '',
+      Delimiter: '/',
+    })
+
+    const response = await client.send(command) as {
+      Contents?: Array<{ Key?: string }>
+    }
+
+    return (response.Contents ?? [])
+      .map((item) => item.Key?.replace(this.prefix ? `${this.prefix}/` : '', '') ?? '')
+      .filter((key) => key && !key.endsWith('/'))
+  }
+
+  async directories(directory: string): Promise<string[]> {
+    const client = await this.getClient()
+    const { ListObjectsV2Command } = await importAwsModule('@aws-sdk/client-s3') as {
+      ListObjectsV2Command: new (input: unknown) => unknown
+    }
+
+    const prefix = this.prefixKey(directory)
+    const command = new ListObjectsV2Command({
+      Bucket: this.bucket,
+      Prefix: prefix ? `${prefix}/` : '',
+      Delimiter: '/',
+    })
+
+    const response = await client.send(command) as {
+      CommonPrefixes?: Array<{ Prefix?: string }>
+    }
+
+    return (response.CommonPrefixes ?? [])
+      .map((item) =>
+        item.Prefix?.replace(this.prefix ? `${this.prefix}/` : '', '').replace(/\/$/, '') ?? ''
+      )
+      .filter(Boolean)
+  }
+
+  async allFiles(directory: string): Promise<string[]> {
+    const client = await this.getClient()
+    const { ListObjectsV2Command } = await importAwsModule('@aws-sdk/client-s3') as {
+      ListObjectsV2Command: new (input: unknown) => unknown
+    }
+
+    const prefix = this.prefixKey(directory)
+    const command = new ListObjectsV2Command({
+      Bucket: this.bucket,
+      Prefix: prefix ? `${prefix}/` : '',
+    })
+
+    const response = await client.send(command) as {
+      Contents?: Array<{ Key?: string }>
+    }
+
+    return (response.Contents ?? [])
+      .map((item) => item.Key?.replace(this.prefix ? `${this.prefix}/` : '', '') ?? '')
+      .filter((key) => key && !key.endsWith('/'))
+  }
+
+  async makeDirectory(path: string): Promise<void> {
+    // S3 doesn't have directories, but we can create a marker object
+    await this.put(`${path}/.keep`, '')
+  }
+
+  async deleteDirectory(path: string): Promise<void> {
+    const files = await this.allFiles(path)
+    if (files.length > 0) {
+      await this.deleteMany(files)
+    }
+  }
+
+  async setVisibility(path: string, visibility: 'public' | 'private'): Promise<void> {
+    const client = await this.getClient()
+    const { PutObjectAclCommand } = await importAwsModule('@aws-sdk/client-s3') as {
+      PutObjectAclCommand: new (input: unknown) => unknown
+    }
+
+    const command = new PutObjectAclCommand({
+      Bucket: this.bucket,
+      Key: this.prefixKey(path),
+      ACL: this.getAcl(visibility),
+    })
+
+    await client.send(command)
+  }
+
+  async getVisibility(path: string): Promise<'public' | 'private'> {
+    const client = await this.getClient()
+    const { GetObjectAclCommand } = await importAwsModule('@aws-sdk/client-s3') as {
+      GetObjectAclCommand: new (input: unknown) => unknown
+    }
+
+    const command = new GetObjectAclCommand({
+      Bucket: this.bucket,
+      Key: this.prefixKey(path),
+    })
+
+    const response = await client.send(command) as {
+      Grants?: Array<{ Grantee?: { URI?: string }; Permission?: string }>
+    }
+
+    // Check if there's a public-read grant
+    const isPublic = response.Grants?.some(
+      (grant) =>
+        grant.Grantee?.URI === 'http://acs.amazonaws.com/groups/global/AllUsers' &&
+        grant.Permission === 'READ'
+    )
+
+    return isPublic ? 'public' : 'private'
+  }
+
+  /**
+   * Get the bucket name.
+   */
+  getBucket(): string {
+    return this.bucket
+  }
+
+  /**
+   * Get the prefix.
+   */
+  getPrefix(): string {
+    return this.prefix
+  }
+}
+
+function isMissingAwsModule(error: unknown, moduleName: string): boolean {
+  if (!error || typeof error !== 'object') return false
+  const code = (error as { code?: string }).code
+  if (code === 'ERR_MODULE_NOT_FOUND') return true
+  const message = String((error as { message?: string }).message ?? '')
+  return (
+    message.includes(`Cannot find package '${moduleName}'`) ||
+    message.includes(`Cannot find module '${moduleName}'`)
+  )
+}
+
+async function importAwsModule<T>(moduleName: string): Promise<T> {
+  try {
+    return await import(moduleName) as T
+  } catch (error) {
+    if (isMissingAwsModule(error, moduleName)) {
+      throw new Error(
+        `Missing optional dependency "${moduleName}". Install @aws-sdk/client-s3 and @aws-sdk/s3-request-presigner to use the S3 driver.`
+      )
+    }
+    throw error
+  }
+}

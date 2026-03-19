@@ -8,6 +8,36 @@ class InlineController extends Controller {
   }
 }
 
+class UserController extends Controller {
+  index() {
+    return 'user list'
+  }
+
+  create() {
+    return 'create form'
+  }
+
+  store() {
+    return 'created'
+  }
+
+  show() {
+    return 'user detail'
+  }
+
+  edit() {
+    return 'edit form'
+  }
+
+  update() {
+    return 'updated'
+  }
+
+  destroy() {
+    return 'deleted'
+  }
+}
+
 function createContext(): any {
   return {
     req: {
@@ -115,5 +145,148 @@ describe('Route registry', () => {
     }
 
     await expect(captured(createContext())).rejects.toThrow('Controller method show is not defined on InlineController.')
+  })
+})
+
+describe('Named routes', () => {
+  beforeEach(() => {
+    Route.clear()
+  })
+
+  it('assigns name to route via chained .name() method', () => {
+    Route.get('/users', () => 'users').name('users.index')
+
+    expect(Route.definitions()).toEqual([
+      { method: 'GET', path: '/users', name: 'users.index' },
+    ])
+  })
+
+  it('generates URL from named route', () => {
+    Route.get('/users', () => 'users').name('users.index')
+
+    const url = Route.route('users.index')
+    expect(url).toBe('/users')
+  })
+
+  it('generates URL with parameter substitution', () => {
+    Route.get('/users/:id', () => 'user').name('users.show')
+
+    const url = Route.route('users.show', { id: 42 })
+    expect(url).toBe('/users/42')
+  })
+
+  it('generates URL with multiple parameters', () => {
+    Route.get('/users/:userId/posts/:postId', () => 'post').name('posts.show')
+
+    const url = Route.route('posts.show', { userId: 1, postId: 99 })
+    expect(url).toBe('/users/1/posts/99')
+  })
+
+  it('encodes route parameters in generated URLs', () => {
+    Route.get('/files/:path', () => 'file').name('files.show')
+
+    const url = Route.route('files.show', { path: 'a b/c' })
+    expect(url).toBe('/files/a%20b%2Fc')
+  })
+
+  it('throws error for undefined route name', () => {
+    expect(() => Route.route('undefined.route')).toThrow('Route [undefined.route] not defined.')
+  })
+
+  it('checks if named route exists via hasRoute', () => {
+    Route.get('/users', () => 'users').name('users.index')
+
+    expect(Route.hasRoute('users.index')).toBe(true)
+    expect(Route.hasRoute('undefined.route')).toBe(false)
+  })
+
+  it('clears named routes when Route.clear() is called', () => {
+    Route.get('/users', () => 'users').name('users.index')
+    expect(Route.hasRoute('users.index')).toBe(true)
+
+    Route.clear()
+    expect(Route.hasRoute('users.index')).toBe(false)
+  })
+
+  it('allows chaining after .name()', () => {
+    Route.get('/a', () => 'a').name('a')
+    Route.get('/b', () => 'b').name('b')
+
+    expect(Route.definitions()).toHaveLength(2)
+    expect(Route.hasRoute('a')).toBe(true)
+    expect(Route.hasRoute('b')).toBe(true)
+  })
+})
+
+describe('Resource routes', () => {
+  beforeEach(() => {
+    Route.clear()
+  })
+
+  it('registers all CRUD routes for a controller', () => {
+    Route.resource('/users', UserController)
+
+    const definitions = Route.definitions()
+
+    expect(definitions).toContainEqual({ method: 'GET', path: '/users', name: 'users.index' })
+    expect(definitions).toContainEqual({ method: 'GET', path: '/users/create', name: 'users.create' })
+    expect(definitions).toContainEqual({ method: 'POST', path: '/users', name: 'users.store' })
+    expect(definitions).toContainEqual({ method: 'GET', path: '/users/:id', name: 'users.show' })
+    expect(definitions).toContainEqual({ method: 'GET', path: '/users/:id/edit', name: 'users.edit' })
+    expect(definitions).toContainEqual({ method: 'PUT', path: '/users/:id', name: 'users.update' })
+    expect(definitions).toContainEqual({ method: 'DELETE', path: '/users/:id', name: 'users.destroy' })
+  })
+
+  it('generates named routes for URL generation', () => {
+    Route.resource('/users', UserController)
+
+    expect(Route.route('users.index')).toBe('/users')
+    expect(Route.route('users.create')).toBe('/users/create')
+    expect(Route.route('users.show', { id: 5 })).toBe('/users/5')
+    expect(Route.route('users.edit', { id: 5 })).toBe('/users/5/edit')
+  })
+
+  it('uses custom parameter name', () => {
+    Route.resource('/posts', UserController, { param: 'post' })
+
+    const definitions = Route.definitions()
+    expect(definitions).toContainEqual({ method: 'GET', path: '/posts/:post', name: 'posts.show' })
+    expect(definitions).toContainEqual({ method: 'PUT', path: '/posts/:post', name: 'posts.update' })
+  })
+
+  it('uses custom route name prefix', () => {
+    Route.resource('/admin/users', UserController, { name: 'admin.users' })
+
+    expect(Route.hasRoute('admin.users.index')).toBe(true)
+    expect(Route.hasRoute('admin.users.show')).toBe(true)
+    expect(Route.route('admin.users.show', { id: 1 })).toBe('/admin/users/1')
+  })
+
+  it('registers only specified actions', () => {
+    Route.resource('/posts', UserController, { only: ['index', 'show'] })
+
+    const definitions = Route.definitions()
+    expect(definitions).toHaveLength(2)
+    expect(definitions).toContainEqual({ method: 'GET', path: '/posts', name: 'posts.index' })
+    expect(definitions).toContainEqual({ method: 'GET', path: '/posts/:id', name: 'posts.show' })
+  })
+
+  it('excludes specified actions', () => {
+    Route.resource('/posts', UserController, { except: ['create', 'edit', 'destroy'] })
+
+    const definitions = Route.definitions()
+    expect(definitions).toHaveLength(4)
+    expect(definitions).not.toContainEqual(expect.objectContaining({ name: 'posts.create' }))
+    expect(definitions).not.toContainEqual(expect.objectContaining({ name: 'posts.edit' }))
+    expect(definitions).not.toContainEqual(expect.objectContaining({ name: 'posts.destroy' }))
+  })
+
+  it('works with group prefix', () => {
+    Route.group('/api', () => {
+      Route.resource('/users', UserController)
+    })
+
+    expect(Route.route('users.index')).toBe('/api/users')
+    expect(Route.route('users.show', { id: 1 })).toBe('/api/users/1')
   })
 })

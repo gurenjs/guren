@@ -1,5 +1,8 @@
 import { Controller, parseRequestPayload, formatValidationErrors } from '@guren/server'
 import { LoginSchema } from '../../Validators/LoginValidator.js'
+import { getEventManager } from '../../../Providers/EventServiceProvider.js'
+import { UserLoggedIn } from '../../../Events/UserLoggedIn.js'
+import type { UserRecord } from '../../../Models/User.js'
 
 export default class LoginController extends Controller {
   async show(): Promise<Response> {
@@ -24,6 +27,14 @@ export default class LoginController extends Controller {
 
     if (!authenticated) {
       return this.json({ errors: { message: 'Invalid credentials.' } }, { status: 422 })
+    }
+
+    // Emit UserLoggedIn event
+    const user = await this.auth.user() as UserRecord | null
+    if (user) {
+      const ipAddress = this.request.header('x-forwarded-for') ?? this.request.header('x-real-ip') ?? null
+      const events = getEventManager()
+      await events.emit(new UserLoggedIn(user, ipAddress))
     }
 
     return this.redirect('/dashboard')

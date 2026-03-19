@@ -22,8 +22,149 @@ bunx guren --help
 | `make:model <Name>` | 最小のモデルクラスと型定義を `app/Models` に生成（`db/schema` から `camelCase(Name)s` を import） | `bunx guren make:model Post` |
 | `make:view <path>` | `resources/js/pages` に React コンポーネントを生成 | `bunx guren make:view posts/Index` |
 | `make:auth` | ログイン/ログアウトのコントローラ、プロバイダー、ビュー、マイグレーション、シーダー、ルートをスキャフォールド | `bunx guren make:auth` |
+| `make:middleware <Name>` | `app/Http/Middleware` にミドルウェアを生成 | `bunx guren make:middleware Auth` |
+| `make:seeder <Name>` | データベースシーダーファイルを生成 | `bunx guren make:seeder UserSeeder` |
+| `make:job <Name>` | キュー可能なジョブクラスを生成 | `bunx guren make:job SendEmail` |
+| `make:event <Name>` | イベントクラスを生成 | `bunx guren make:event UserRegistered` |
+| `make:listener <Name>` | イベントリスナークラスを生成 | `bunx guren make:listener SendWelcomeEmail` |
+| `make:notification <Name>` | 通知クラスを生成 | `bunx guren make:notification InvoicePaid` |
+| `make:mail <Name>` | メールクラスを生成 | `bunx guren make:mail WelcomeEmail` |
 
 > **Note:** `make:*` は既存ファイルを上書きしません。必要なら `--force` を付けてください。
+
+## ルートコマンド
+
+| コマンド | 説明 | 例 |
+|----------|------|----|
+| `route:list` | 登録済み全ルートを一覧表示 | `bunx guren route:list` |
+
+### route:list オプション
+
+フィルタリングとソート機能付きで全アプリケーションルートを表示します：
+
+```bash
+# 全ルートを一覧表示
+bunx guren route:list
+
+# HTTPメソッドでフィルタリング
+bunx guren route:list --method GET
+
+# パスパターンでフィルタリング
+bunx guren route:list --path users
+
+# ルート名でフィルタリング
+bunx guren route:list --name admin
+
+# ルートをソート
+bunx guren route:list --sort path
+bunx guren route:list --sort method
+bunx guren route:list --sort name
+
+# ソート順を逆にする
+bunx guren route:list --sort path --reverse
+
+# 出力フォーマット
+bunx guren route:list --format table   # デフォルトのテーブル形式
+bunx guren route:list --format json    # JSON出力
+bunx guren route:list --format compact # コンパクトな1行形式
+```
+
+## 設定コマンド
+
+| コマンド | 説明 | 例 |
+|----------|------|----|
+| `config:cache` | 全設定ファイルをキャッシュ | `bunx guren config:cache` |
+| `config:clear` | 設定キャッシュをクリア | `bunx guren config:clear` |
+| `config:show` | 設定キャッシュ情報を表示 | `bunx guren config:show` |
+
+### 設定キャッシュ
+
+本番環境でのパフォーマンス向上のために設定ファイルをキャッシュします：
+
+```bash
+# 全設定をキャッシュ
+bunx guren config:cache
+
+# キャッシュをクリア
+bunx guren config:clear
+
+# キャッシュ情報を表示
+bunx guren config:show
+```
+
+キャッシュは `bootstrap/cache/config.json` に保存されます。設定ファイルは `config/` ディレクトリ（サブディレクトリ含む）から読み込まれます。
+
+**Note:** 設定ファイルを変更した後は、`config:cache` を再実行してキャッシュを更新してください。
+
+## データベースコマンド
+
+| コマンド | 説明 | 例 |
+|----------|------|----|
+| `db:migrate` | 保留中のマイグレーションを実行 | `bunx guren db:migrate` |
+| `db:rollback` | 最後のマイグレーションバッチをロールバック | `bunx guren db:rollback` |
+| `db:reset` | 全テーブルを削除してマイグレーションを再実行 | `bunx guren db:reset` |
+| `db:seed` | データベースシーダーを実行 | `bunx guren db:seed` |
+
+### db:migrate オプション
+
+```bash
+# マイグレーションを実行
+bunx guren db:migrate
+
+# 本番環境でマイグレーションを強制実行
+bunx guren db:migrate --force
+
+# マイグレーションパスを指定
+bunx guren db:migrate --path db/migrations
+```
+
+### db:rollback オプション
+
+```bash
+# 最後のバッチをロールバック
+bunx guren db:rollback
+
+# 指定ステップ数ロールバック
+bunx guren db:rollback --step 3
+
+# 全マイグレーションをロールバック
+bunx guren db:rollback --all
+```
+
+### db:seed オプション
+
+```bash
+# 全シーダーを実行
+bunx guren db:seed
+
+# 特定のシーダーを実行
+bunx guren db:seed --class UserSeeder
+
+# 本番環境でシーディングを強制実行
+bunx guren db:seed --force
+```
+
+## キューコマンド
+
+| コマンド | 説明 | 例 |
+|----------|------|----|
+| `queue:work` | キューに入ったジョブの処理を開始 | `bunx guren queue:work` |
+
+### queue:work オプション
+
+```bash
+# デフォルトキューからジョブを処理
+bunx guren queue:work
+
+# 特定のキューを処理
+bunx guren queue:work --queue emails
+
+# ジョブ数を制限
+bunx guren queue:work --max-jobs 100
+
+# キューが空になったら停止
+bunx guren queue:work --stop-when-empty
+```
 
 ## 共通オプション
 

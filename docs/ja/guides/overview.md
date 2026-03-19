@@ -16,7 +16,9 @@ Guren は Bun を前提にした TypeScript の MVC フルスタックフレー�
 
 PostgreSQL を使う場合は `.env` の `DATABASE_URL` を手元のインスタンスに合わせてください。コンテナでも既存のデータベースでも動作します。
 
-## 次のステップ（英語）
+## 次のステップ
+- 初学者向けの最短ルート: [はじめの一歩](../guides/first-steps.md)
+- 用語に迷ったら: [用語集](../guides/glossary.md)
 - より詳しいセットアップ: [Getting Started](../guides/getting-started.md)
 - 全体像の把握: [Architecture](../guides/architecture.md)
 - 基本機能の学習: [Routing](../guides/routing.md) / [Controllers](../guides/controllers.md) / [Database](../guides/database.md)

@@ -1,10 +1,10 @@
-import type { ApplicationContext, Provider } from '@guren/server'
+import { ServiceProvider } from '@guren/server'
 import { bootModels } from '../../config/app.js'
 
-export default class DatabaseProvider implements Provider {
+export default class DatabaseProvider extends ServiceProvider {
   private initialized = false
 
-  async boot(_context: ApplicationContext): Promise<void> {
+  async boot(): Promise<void> {
     if (this.initialized) {
       return
     }
@@ -12,4 +12,6 @@ export default class DatabaseProvider implements Provider {
     await bootModels()
     this.initialized = true
   }
+
+  register(): void {}
 }

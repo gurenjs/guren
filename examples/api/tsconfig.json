@@ -1,0 +1,24 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "./dist",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./app/*"],
+      "@guren/cli": ["../../packages/cli/src"],
+      "@guren/core": ["../../packages/core/src"],
+      "@guren/orm": ["../../packages/orm/src"],
+      "@guren/orm/*": ["../../packages/orm/src/*"],
+      "@guren/server": ["../../packages/server/src"],
+      "@guren/testing": ["../../packages/testing/src"]
+    }
+  },
+  "include": [
+    "**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}

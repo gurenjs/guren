@@ -1,5 +1,5 @@
 import type { WriterOptions } from './utils'
-import { camelCase, resourceName, writeFileSafe } from './utils'
+import { camelCase, scaffoldFile } from './utils'
 
 function pluralizeIdentifier(name: string): string {
   if (name.endsWith('s')) {
@@ -27,7 +27,8 @@ export class ${className} extends Model<${className}Record> {
 }
 
 export async function makeModel(name: string, options: WriterOptions = {}): Promise<string> {
-  const { className } = resourceName(name)
-  const filePath = `${MODELS_DIR}/${className}.ts`
-  return writeFileSafe(filePath, modelTemplate(className), options)
+  return scaffoldFile(name, {
+    dir: MODELS_DIR,
+    template: ({ className }) => modelTemplate(className),
+  }, options)
 }

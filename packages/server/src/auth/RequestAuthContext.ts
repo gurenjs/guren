@@ -1,6 +1,7 @@
 import type { Context } from 'hono'
 import type { Session } from '../http/middleware'
 import type { AuthContext, AuthCredentials, Guard } from './types'
+import { AuthenticationException } from '../errors/exceptions/AuthenticationException'
 
 export type GuardResolver = (name?: string) => Guard<unknown>
 
@@ -38,6 +39,12 @@ export class RequestAuthContext implements AuthContext {
 
   async user<T = unknown>(): Promise<T | null> {
     return this.guard<T>().user()
+  }
+
+  async userOrFail<T = unknown>(): Promise<T> {
+    const u = await this.user<T>()
+    if (!u) throw new AuthenticationException()
+    return u
   }
 
   async id(): Promise<unknown> {

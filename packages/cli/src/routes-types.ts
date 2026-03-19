@@ -2,7 +2,7 @@ import { relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Route } from '@guren/server'
 import { writeFileSafe, type WriterOptions } from './utils'
-type RouteDefinition = {
+export type RouteDefinition = {
   method: string
   path: string
   name?: string
@@ -45,7 +45,7 @@ export async function generateRouteTypes(options: GenerateRouteTypesOptions = {}
   }
 }
 
-function buildDeclarationContent(definitions: RouteDefinition[], context: { source: string }): string {
+export function buildDeclarationContent(definitions: RouteDefinition[], context: { source: string }): string {
   const uniquePaths = Array.from(new Set(definitions.map((route) => route.path))).sort()
   const templateLiterals = uniquePaths.map((path) => toTypeLiteral(path))
 
@@ -62,7 +62,7 @@ function buildDeclarationContent(definitions: RouteDefinition[], context: { sour
   return `${header}declare namespace Guren {\n  export type RouteMethod = ${methodUnion}\n\n  export type RoutePath =\n${routeLines}\n\n  export type RouteUrl = RoutePath | \`${'${'}RoutePath${'}'}?${'${'}string${'}'}\`\n\n  export interface RouteMeta {\n    method: RouteMethod\n    path: RoutePath\n    name?: string\n  }\n}\n\ndeclare module '@inertiajs/react' {\n  interface BaseInertiaLinkProps {\n    href: Guren.RouteUrl\n  }\n}\n\ndeclare module '@inertiajs/core' {\n  interface Router {\n    visit(href: Guren.RouteUrl, options?: VisitOptions): void\n    get(url: Guren.RouteUrl, data?: RequestPayload, options?: Omit<VisitOptions, 'method' | 'data'>): void\n    post(url: Guren.RouteUrl, data?: RequestPayload, options?: Omit<VisitOptions, 'method' | 'data'>): void\n    put(url: Guren.RouteUrl, data?: RequestPayload, options?: Omit<VisitOptions, 'method' | 'data'>): void\n    patch(url: Guren.RouteUrl, data?: RequestPayload, options?: Omit<VisitOptions, 'method' | 'data'>): void\n    delete(url: Guren.RouteUrl, options?: Omit<VisitOptions, 'method'>): void\n    replace(url: Guren.RouteUrl, options?: Omit<VisitOptions, 'replace'>): void\n  }\n}\n`
 }
 
-function toTypeLiteral(path: string): string {
+export function toTypeLiteral(path: string): string {
   if (!path.includes(':')) {
     return `'${escapeSingleQuotes(path)}'`
   }

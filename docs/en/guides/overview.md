@@ -14,24 +14,26 @@ Guren is a Bun-native TypeScript MVC framework that unites Laravel-like ergonomi
 3. Install dependencies: `bun install`
 4. Start the dev server (Bun + Vite auto-launch together): `bun run dev` and visit `http://localhost:3333`
 
-Need more detail? Head to [Getting Started](./getting-started.md) for database setup and environment configuration.
+Need more detail? Head to [Getting Started](./getting-started.md) for database setup and environment configuration. If any term is unfamiliar, see the [Glossary](./glossary.md).
 
 ## Guided Path
 Follow this order if you’re new to Guren—the topics build on each other from scaffolding through production:
 
-1. **[Getting Started](./getting-started.md)** — Prerequisites, environment setup, development workflow.
-2. **[Architecture](./architecture.md)** — How the MVC layers, providers, and runtime fit together.
-3. **[Routing Guide](./routing.md)** — Defining HTTP routes, groups, and middleware.
-4. **[Controller Guide](./controllers.md)** — Handling requests and returning responses/Inertia pages.
-5. **[Database Guide](./database.md)** — Drizzle schemas, migrations, seeders, and the ORM facade.
-6. **[Frontend Guide](./frontend.md)** — Inertia-powered React pages, assets, and SSR coordination.
-7. **[Authentication Guide](./authentication.md)** — Guards, user providers, and securing routes.
-8. **[Testing Guide](./testing.md)** — Bun test harnesses, Vitest examples, and CLI helpers.
-9. **[Deployment Guide](./deployment.md)** — Building, migrating, and running in production.
+1. **[First Steps](./first-steps.md)** — Minimal route, controller, and page to see a working screen.
+2. **[Getting Started](./getting-started.md)** — Prerequisites, environment setup, development workflow.
+3. **[Architecture](./architecture.md)** — How the MVC layers, providers, and runtime fit together.
+4. **[Routing Guide](./routing.md)** — Defining HTTP routes, groups, and middleware.
+5. **[Controller Guide](./controllers.md)** — Handling requests and returning responses/Inertia pages.
+6. **[Database Guide](./database.md)** — Drizzle schemas, migrations, seeders, and the ORM facade.
+7. **[Frontend Guide](./frontend.md)** — Inertia-powered React pages, assets, and SSR coordination.
+8. **[Authentication Guide](./authentication.md)** — Guards, user providers, and securing routes.
+9. **[Testing Guide](./testing.md)** — Bun test harnesses, Vitest examples, and CLI helpers.
+10. **[Deployment Guide](./deployment.md)** — Building, migrating, and running in production.
 
 ## Reference
 - [CLI Reference](./cli.md): `guren` commands for generators, migrations, and runtime tooling.
 - [Middleware Guide](./middleware.md): Writing reusable HTTP middleware and binding it to routes.
+- [Glossary](./glossary.md): Short definitions for common terms in the docs.
 - [Overview for Agents](./AGENTS.md): Internal guidelines for contributors updating documentation.
 - [Tutorials Overview](../tutorials/overview.md): Step-by-step builds covering blog posts, authentication, and ORM relationships.
 

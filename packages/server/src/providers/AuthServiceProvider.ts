@@ -1,0 +1,50 @@
+import { ServiceProvider } from '../container/ServiceProvider'
+import { attachAuthContext } from '../http/middleware/auth'
+import { createSessionMiddleware, type CreateSessionMiddlewareOptions } from '../http/middleware/session'
+import { SessionGuard } from '../auth/SessionGuard'
+import type { GuardFactory } from '../auth/types'
+import type { Application, AuthPluginOptions } from '../http/Application'
+import type { AuthManager } from '../auth'
+
+const DEFAULT_GUARD = 'web'
+const DEFAULT_PROVIDER = 'users'
+
+/**
+ * Sets up authentication guards, session middleware, and auth context.
+ */
+export class AuthServiceProvider extends ServiceProvider {
+  register(): void {
+    const app = this.container.make<Application>('app')
+    const auth = this.container.make<AuthManager>('auth')
+
+    if (!auth.guardNames().length) {
+      auth.registerGuard(DEFAULT_GUARD, createDefaultGuardFactory(DEFAULT_PROVIDER))
+      auth.setDefaultGuard(DEFAULT_GUARD)
+    }
+
+    const authOptions: AuthPluginOptions = app.authOptions ?? {}
+    const shouldAttachSession = authOptions.autoSession !== false && !app.hasAutoSessionAttached()
+
+    if (shouldAttachSession) {
+      const sessionOptions: CreateSessionMiddlewareOptions = {
+        cookieSecure: typeof process !== 'undefined' ? process.env.NODE_ENV === 'production' : true,
+        ...authOptions.sessionOptions,
+      }
+
+      app.use('*', createSessionMiddleware(sessionOptions))
+      app.markAutoSessionAttached()
+    }
+
+    app.use('*', attachAuthContext((ctx) => auth.createAuthContext(ctx)))
+  }
+}
+
+function createDefaultGuardFactory(providerName: string): GuardFactory {
+  return ({ ctx, session, manager }) => {
+    const provider = manager.getProvider(providerName)
+    return new SessionGuard({
+      provider,
+      session,
+    })
+  }
+}

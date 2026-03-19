@@ -37,6 +37,12 @@
       ],
       "@guren/inertia-client/*": [
         "../../packages/inertia-client/src/*"
+      ],
+      "@guren/testing": [
+        "../../packages/testing/src/index.ts"
+      ],
+      "@guren/testing/*": [
+        "../../packages/testing/src/*"
       ]
     }
   },
