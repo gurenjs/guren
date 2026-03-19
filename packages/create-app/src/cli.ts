@@ -152,6 +152,7 @@ const command = defineCommand({
     ])
 
     const filesToTransform = [
+      'CLAUDE.md',
       'README.md',
       'package.json',
       'public/index.html',
