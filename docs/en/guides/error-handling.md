@@ -1,6 +1,42 @@
 # Error Handling
 
-Guren provides multiple layers of error handling, from global error handlers to controller-level exception catching. Built on Hono's robust error handling primitives, you can customize how errors are displayed to users.
+Guren provides multiple layers of error handling, from a centralized `ExceptionHandler` to controller-level exception catching. Built on Hono's robust error handling primitives, you can customize how errors are displayed to users in both development and production.
+
+## ExceptionHandler
+
+The `ExceptionHandler` class provides a centralized place to handle all exceptions thrown by your application. Register it as a service provider or configure it during application boot:
+
+```ts
+import { ExceptionHandler } from '@guren/server'
+
+class AppExceptionHandler extends ExceptionHandler {
+  // Exceptions that should not be reported to your logging system
+  dontReport = [
+    'ValidationException',
+    'AuthenticationException',
+  ]
+
+  // Register custom exception reporting
+  register(): void {
+    this.reportable('DatabaseException', (error) => {
+      // Send to external error tracking service
+      errorTracker.captureException(error)
+    })
+  }
+
+  // Customize the response for specific exceptions
+  render(error: Error, ctx: Context): Response {
+    if (error instanceof ValidationException) {
+      return ctx.json({
+        message: 'Validation failed',
+        errors: error.errors,
+      }, 422)
+    }
+
+    return super.render(error, ctx)
+  }
+}
+```
 
 ## Global Error Handler
 
@@ -34,6 +70,47 @@ app.hono.onError((error, ctx) => {
   }, 500)
 })
 ```
+
+## Built-in Exception Classes
+
+Guren provides typed exception classes for common HTTP error scenarios:
+
+```ts
+import {
+  HttpException,
+  NotFoundHttpException,
+  AuthenticationException,
+  AuthorizationException,
+  ValidationException,
+  MethodNotAllowedException,
+} from '@guren/server'
+import { ModelNotFoundException } from '@guren/orm'
+
+// 404 Not Found
+throw new NotFoundHttpException('Post not found')
+
+// 404 Not Found (thrown automatically by Model.findOrFail())
+throw new ModelNotFoundException('Post', 42)
+
+// 401 Unauthorized (thrown automatically by auth.userOrFail())
+throw new AuthenticationException('Authentication required')
+
+// 403 Forbidden
+throw new AuthorizationException('You do not have permission to edit this post')
+
+// 422 Unprocessable Entity (thrown automatically by validateBody/Query/Params)
+throw new ValidationException({ title: ['Title is required'] })
+
+// 405 Method Not Allowed
+throw new MethodNotAllowedException('GET method is not allowed for this endpoint')
+
+// Generic HTTP exception with custom status
+throw new HttpException(429, 'Rate limit exceeded')
+```
+
+### Duck-typed `statusCode`
+
+The `ExceptionHandler` supports any error with a numeric `statusCode` property, not just `HttpException` subclasses. This means `ModelNotFoundException` (from `@guren/orm`, which has `statusCode: 404`) is automatically rendered as a 404 response without any extra configuration. For errors with `statusCode >= 500`, the message is hidden in production (replaced with "Internal Server Error").
 
 ## HTTP Exceptions
 
@@ -94,40 +171,55 @@ app.hono.notFound((ctx) => {
 })
 ```
 
-## Controller Error Handling
+## Debug Error Page
 
-Handle errors within controllers using try-catch:
+In development, Guren renders a detailed error page when an unhandled exception occurs. The debug page includes:
+
+- The exception message and class name
+- A full stack trace with source file links
+- The request details (method, URL, headers)
+- Environment and route information
+
+The debug page is enabled automatically when `NODE_ENV` is not set to `production`. To customize its behavior:
 
 ```ts
-import { Controller, formatValidationErrors } from '@guren/server'
+import { Application } from '@guren/server'
+
+const app = new Application({
+  debug: process.env.NODE_ENV !== 'production',
+})
+```
+
+In production, the debug page is replaced with a generic error response that does not expose sensitive information. You can customize the production error page by overriding the `render()` method in your `ExceptionHandler`.
+
+## Controller Error Handling
+
+With `validateBody`/`validateQuery`/`validateParams`, `findOrFail`, and `userOrFail`, most error handling is automatic — no try-catch needed:
+
+```ts
+import { Controller } from '@guren/server'
+import { z } from 'zod'
+
+const StorePostSchema = z.object({ title: z.string().min(1), content: z.string().min(10) })
+const PostIdSchema = z.object({ id: z.coerce.number().int().positive() })
 
 export default class PostController extends Controller {
   async store(): Promise<Response> {
-    try {
-      const payload = await parseRequestPayload(this.ctx)
-      const result = PostSchema.safeParse(payload)
+    const data = await this.validateBody(StorePostSchema)  // 422 on failure
+    const user = await this.auth.userOrFail()              // 401 if not logged in
+    const post = await Post.create({ ...data, authorId: user.id })
+    return this.redirect(`/posts/${post.id}`)
+  }
 
-      if (!result.success) {
-        return this.json({
-          error: 'Validation failed',
-          errors: formatValidationErrors(result.error),
-        }, { status: 422 })
-      }
-
-      const post = await Post.create(result.data)
-      return this.redirect(`/posts/${post.id}`)
-
-    } catch (error) {
-      console.error('Failed to create post:', error)
-
-      // Return error page for Inertia requests
-      return this.inertia('posts/New', {
-        errors: { message: 'An unexpected error occurred.' },
-      }, { status: 500 })
-    }
+  async show(): Promise<Response> {
+    const { id } = this.validateParams(PostIdSchema)       // 422 on invalid params
+    const post = await Post.findOrFail(id)                  // 404 if missing
+    return this.inertia('posts/Show', { post })
   }
 }
 ```
+
+The `ExceptionHandler` catches and renders all thrown exceptions automatically. Use try-catch only when you need custom error recovery logic within a specific controller method.
 
 ## Validation Errors
 
@@ -239,24 +331,22 @@ export default function Error({ status, message }: { status: number; message: st
 
 ## Database Errors
 
-Handle database-specific errors:
+Use `Model.findOrFail()` instead of manual null-checking. It throws `ModelNotFoundException` (404) automatically:
 
 ```ts
-import { HTTPException } from 'hono/http-exception'
-
-async function findPostOrFail(id: number) {
-  const post = await Post.find(id)
-
+// Before — manual null check
+async show(): Promise<Response> {
+  const post = await Post.find(Number(this.request.param('id')))
   if (!post) {
     throw new HTTPException(404, { message: 'Post not found' })
   }
-
-  return post
+  return this.inertia('posts/Show', { post })
 }
 
-// Usage in controller
+// After — automatic 404
 async show(): Promise<Response> {
-  const post = await findPostOrFail(Number(this.request.param('id')))
+  const { id } = this.validateParams(PostIdSchema)
+  const post = await Post.findOrFail(id)  // throws ModelNotFoundException (404)
   return this.inertia('posts/Show', { post })
 }
 ```
@@ -296,7 +386,7 @@ app.hono.onError((error, ctx) => {
   const isDev = process.env.NODE_ENV !== 'production'
 
   if (isDev) {
-    // Show full error in development
+    // Show full error in development (or use the built-in debug page)
     return ctx.json({
       error: error.message,
       stack: error.stack,
@@ -314,9 +404,11 @@ app.hono.onError((error, ctx) => {
 
 ## Best Practices
 
-1. **Always catch async errors** - Unhandled promise rejections can crash your server
-2. **Log errors with context** - Include request ID, user ID, and relevant data
-3. **Use appropriate status codes** - 4xx for client errors, 5xx for server errors
-4. **Don't expose sensitive data** - Hide stack traces and internal details in production
-5. **Provide user-friendly messages** - Technical errors should be translated to helpful messages
-6. **Monitor errors** - Use error tracking services in production
+1. **Use the ExceptionHandler** - Centralize error handling logic instead of scattering try-catch blocks.
+2. **Always catch async errors** - Unhandled promise rejections can crash your server.
+3. **Log errors with context** - Include request ID, user ID, and relevant data.
+4. **Use appropriate status codes** - 4xx for client errors, 5xx for server errors.
+5. **Don't expose sensitive data** - Hide stack traces and internal details in production.
+6. **Provide user-friendly messages** - Technical errors should be translated to helpful messages.
+7. **Monitor errors** - Use error tracking services in production.
+8. **Use built-in exceptions** - Prefer `NotFoundHttpException`, `AuthorizationException`, etc. over generic `HTTPException`.

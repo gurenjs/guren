@@ -96,38 +96,32 @@ app.hono.notFound((ctx) => {
 
 ## コントローラーでのエラーハンドリング
 
-try-catch を使用してコントローラー内でエラーを処理：
+`validateBody`/`validateQuery`/`validateParams`、`findOrFail`、`userOrFail` を使えば、ほとんどのエラーハンドリングは自動です — try-catch は不要です：
 
 ```ts
-import { Controller, formatValidationErrors } from '@guren/server'
+import { Controller } from '@guren/server'
+import { z } from 'zod'
+
+const StorePostSchema = z.object({ title: z.string().min(1), content: z.string().min(10) })
+const PostIdSchema = z.object({ id: z.coerce.number().int().positive() })
 
 export default class PostController extends Controller {
   async store(): Promise<Response> {
-    try {
-      const payload = await parseRequestPayload(this.ctx)
-      const result = PostSchema.safeParse(payload)
+    const data = await this.validateBody(StorePostSchema)  // 失敗時 422
+    const user = await this.auth.userOrFail()              // 未認証時 401
+    const post = await Post.create({ ...data, authorId: user.id })
+    return this.redirect(`/posts/${post.id}`)
+  }
 
-      if (!result.success) {
-        return this.json({
-          error: 'バリデーションに失敗しました',
-          errors: formatValidationErrors(result.error),
-        }, { status: 422 })
-      }
-
-      const post = await Post.create(result.data)
-      return this.redirect(`/posts/${post.id}`)
-
-    } catch (error) {
-      console.error('投稿の作成に失敗しました:', error)
-
-      // Inertia リクエストにはエラーページを返す
-      return this.inertia('posts/New', {
-        errors: { message: '予期しないエラーが発生しました。' },
-      }, { status: 500 })
-    }
+  async show(): Promise<Response> {
+    const { id } = this.validateParams(PostIdSchema)       // 不正パラメータ時 422
+    const post = await Post.findOrFail(id)                  // 見つからない場合 404
+    return this.inertia('posts/Show', { post })
   }
 }
 ```
+
+`ExceptionHandler` がスローされた例外をすべてキャッチし自動でレンダリングします。try-catch は特定のコントローラーメソッド内でカスタムエラーリカバリが必要な場合のみ使用してください。
 
 ## バリデーションエラー
 
@@ -239,27 +233,60 @@ export default function Error({ status, message }: { status: number; message: st
 
 ## データベースエラー
 
-データベース固有のエラーを処理：
+`Model.findOrFail()` を使えば、手動の null チェックは不要です。見つからない場合は `ModelNotFoundException`（404）が自動的にスローされます：
 
 ```ts
-import { HTTPException } from 'hono/http-exception'
-
-async function findPostOrFail(id: number) {
-  const post = await Post.find(id)
-
+// Before — 手動 null チェック
+async show(): Promise<Response> {
+  const post = await Post.find(Number(this.request.param('id')))
   if (!post) {
     throw new HTTPException(404, { message: '投稿が見つかりません' })
   }
-
-  return post
+  return this.inertia('posts/Show', { post })
 }
 
-// コントローラーでの使用
+// After — 自動 404
 async show(): Promise<Response> {
-  const post = await findPostOrFail(Number(this.request.param('id')))
+  const { id } = this.validateParams(PostIdSchema)
+  const post = await Post.findOrFail(id)  // ModelNotFoundException（404）をスロー
   return this.inertia('posts/Show', { post })
 }
 ```
+
+## 組み込み例外クラス
+
+Guren は一般的な HTTP エラーシナリオ用の型付き例外クラスを提供しています：
+
+```ts
+import {
+  HttpException,
+  NotFoundHttpException,
+  AuthenticationException,
+  AuthorizationException,
+  ValidationException,
+  MethodNotAllowedException,
+} from '@guren/server'
+import { ModelNotFoundException } from '@guren/orm'
+
+// 404 Not Found
+throw new NotFoundHttpException('投稿が見つかりません')
+
+// 404 Not Found（Model.findOrFail() が自動的にスロー）
+throw new ModelNotFoundException('Post', 42)
+
+// 401 Unauthorized（auth.userOrFail() が自動的にスロー）
+throw new AuthenticationException('認証が必要です')
+
+// 422 Unprocessable Entity（validateBody/Query/Params が自動的にスロー）
+throw new ValidationException({ title: ['タイトルは必須です'] })
+
+// 403 Forbidden
+throw new AuthorizationException('この投稿を編集する権限がありません')
+```
+
+### Duck-typed `statusCode`
+
+`ExceptionHandler` は `HttpException` のサブクラスだけでなく、数値の `statusCode` プロパティを持つ任意のエラーに対応します。これにより `ModelNotFoundException`（`@guren/orm` から、`statusCode: 404` を持つ）は追加設定なしで自動的に 404 レスポンスとしてレンダリングされます。`statusCode >= 500` のエラーは本番環境でメッセージが隠されます（"Internal Server Error" に置換）。
 
 ## 非同期エラーバウンダリ
 
@@ -311,6 +338,26 @@ app.hono.onError((error, ctx) => {
   }, 500)
 })
 ```
+
+### デバッグページ
+
+開発環境では、Guren はスタックトレースやリクエスト情報を含む詳細なデバッグページを自動的に表示します。`Application` の `debug` オプションで制御できます:
+
+```ts
+import { Application } from '@guren/server'
+
+const app = new Application({
+  debug: process.env.NODE_ENV !== 'production',
+})
+```
+
+デバッグページには以下の情報が含まれます:
+- エラーメッセージとスタックトレース
+- リクエスト情報（メソッド、パス、ヘッダー）
+- 登録済みのミドルウェアとルート
+- 環境変数（機密情報は自動でマスク）
+
+本番環境では `debug: false`（デフォルト）を設定し、内部情報の漏洩を防いでください。
 
 ## ベストプラクティス
 

@@ -1,223 +1,121 @@
-# Testing Guide
+# Testing
 
-Guren ships with two different styles of automated tests:
+A single well-written test catches bugs before your users do. Guren makes testing so convenient that writing tests feels faster than manually checking things in a browser.
 
-- **Framework unit/integration tests** live inside the packages (for example `packages/server/tests`). These run with Bun’s native `bun test` runner.
-- **Example application tests** (such as the blog demo under `examples/blog`) use Vitest and jsdom so that React components render the same way they would in the browser.
+## TestApp
 
-Because the runners have different expectations, run them the way they were designed:
+`TestApp` is the centerpiece of Guren's testing story. It boots a lightweight instance of your application with the full middleware and routing stack, then lets you make requests and assert on responses with a fluent API:
 
-```bash
-# Framework packages – Bun’s test runner
-bun test packages/server/tests
-bun test packages/orm/tests
-bun test packages/core/tests
-bun test packages/cli/tests
-bun test packages/create-app/tests
-bun test packages/inertia-client/tests
+```ts
+import { describe, test, beforeAll } from 'bun:test'
+import { TestApp } from '@guren/testing'
 
-# Testing utilities – Vitest
-bun run --cwd packages/testing test
+describe('Posts', () => {
+  let app: TestApp
 
-# Example apps – Vitest + jsdom
-bun run --cwd examples/blog test
-bun run --cwd examples/api test
-bun run --cwd web test
-```
-
-### Writing Bun tests for framework packages
-
-Framework tests rely on Bun’s built-in assertions from `bun:test`. They help validate lower-level utilities such as the routing registry or HTTP helpers without needing a full application boot.
-
-Common patterns:
-
-- Instantiate controllers and call `setContext(ctx)` with a stubbed Hono context before invoking actions.
-- Use lightweight fakes (for example an in-memory ORM adapter) to cover success and failure paths.
-- Prefer focused unit tests inside the package that owns the code; use higher-level application tests sparingly to keep the inner loop fast.
-
-Need a starting point? Run the generator:
-
-```bash
-# Bun-style test file under tests/
-bunx guren make:test server/http/request --runner bun
-
-# Vitest-style test file for SPA code
-bunx guren make:test blog/pages/Login
-```
-
-The command writes scaffold files beneath `tests/` (creating directories as needed) and defaults to Vitest unless you override `--runner bun`.
-
-### Testing controllers with `@guren/testing`
-
-The `@guren/testing` package provides helpers tailored for controller testing, including:
-
-- `createControllerContext(url, init?)` – builds a controller-ready Hono context.
-- `createGurenControllerModule()` – mocks the `guren` package when running in Vitest so you can test controllers in isolation.
-- `createControllerModuleMock()` – drop-in mock for `@guren/server` with `Controller`, `json`, and `redirect` wired for Vitest.
-- `readInertiaResponse(response)` – normalizes Inertia responses into `{ format, payload, body }` for easy assertions.
-
-Import these utilities in Vitest suites (for example under `examples/blog/tests`) to keep React/Inertia controller tests expressive while avoiding Bun-specific APIs.
-
-### Troubleshooting
-
-- Seeing `vi.mock is not a function`? That test is running under Bun; switch to the Vitest command shown above.
-- Hitting `ReferenceError: document is not defined` indicates a DOM-dependent test is running outside jsdom. Use the Vitest runner or set up jsdom explicitly.
-
-Keeping the runners separate ensures you get fast feedback from Bun for framework code and realistic DOM behavior for SPA tests.
-
-## Testing Fakes
-
-The `@guren/testing` package provides fake implementations of services for testing. These let you test code that sends emails, dispatches events, or queues jobs without actually performing those actions.
-
-### FakeMail
-
-Test email sending without actually sending emails:
-
-```typescript
-import { describe, it, expect, beforeEach } from 'bun:test'
-import { FakeMail } from '@guren/testing'
-
-describe('User Registration', () => {
-  let fakeMail: FakeMail
-
-  beforeEach(() => {
-    fakeMail = new FakeMail()
+  beforeAll(async () => {
+    app = await TestApp.create()
   })
 
-  it('sends welcome email', async () => {
-    await userService.register({ email: 'user@example.com' })
-
-    fakeMail.assertSent(WelcomeEmail)
-    fakeMail.assertSentTo('user@example.com')
+  test('lists all posts', async () => {
+    await app.get('/posts').assertOk()
   })
 
-  it('sends email with correct subject', async () => {
-    await userService.register({ email: 'user@example.com' })
+  test('creates a post', async () => {
+    await app
+      .post('/posts', { title: 'Hello', content: 'World' })
+      .assertStatus(201)
+      .assertJsonPath('post.title', 'Hello')
+  })
 
-    fakeMail.assertSentWith(WelcomeEmail, {
-      subject: 'Welcome to our app!',
-    })
+  test('returns 404 for missing post', async () => {
+    await app.get('/posts/999').assertNotFound()
   })
 })
 ```
 
-#### FakeMail Methods
+All standard HTTP methods are available:
 
-| Method | Description |
-|--------|-------------|
-| `assertSent(mailable)` | Assert a mailable was sent |
-| `assertSentTimes(mailable, count)` | Assert mailable sent exact number of times |
-| `assertNotSent(mailable)` | Assert a mailable was not sent |
-| `assertNothingSent()` | Assert no emails were sent |
-| `assertSentTo(email)` | Assert email was sent to address |
-| `assertSentWith(mailable, data)` | Assert mailable was sent with specific data |
-| `assertQueuedCount(count)` | Assert number of queued emails |
-| `sent(mailable)` | Get all sent instances of a mailable |
+```ts
+await app.get('/posts')
+await app.post('/posts', body)
+await app.put('/posts/1', body)
+await app.patch('/posts/1', body)
+await app.delete('/posts/1')
+```
 
-### FakeQueue
+### Fluent Assertions
 
-Test job dispatching without processing jobs:
+Chain assertions directly on the response:
 
-```typescript
-import { describe, it, expect, beforeEach } from 'bun:test'
-import { FakeQueue } from '@guren/testing'
+```ts
+// Status
+await app.get('/posts').assertOk()                         // 200
+await app.get('/posts').assertStatus(200)
+await app.post('/posts', data).assertStatus(201)
+await app.delete('/posts/1').assertNoContent()              // 204
+await app.get('/secret').assertUnauthorized()                // 401
+await app.get('/secret').assertForbidden()                   // 403
+await app.get('/missing').assertNotFound()                   // 404
 
-describe('Order Processing', () => {
-  let fakeQueue: FakeQueue
+// JSON
+await app.get('/posts').assertJson({ data: [] })
+await app.get('/posts').assertJsonCount(5, 'data')
+await app.get('/posts/1').assertJsonPath('post.title', 'Hello')
+await app.get('/posts').assertJsonStructure(['data', 'meta'])
 
-  beforeEach(() => {
-    fakeQueue = new FakeQueue()
-  })
+// Headers and redirects
+await app.get('/posts').assertHeader('content-type', 'application/json')
+await app.get('/old-page').assertRedirect('/new-page')
+```
 
-  it('dispatches order processing job', async () => {
-    await orderService.create(orderData)
+## Authentication in Tests
 
-    fakeQueue.assertPushed(ProcessOrderJob)
-    fakeQueue.assertPushedWith(ProcessOrderJob, {
-      orderId: expect.any(Number),
-    })
-  })
+Use `actingAs()` to simulate an authenticated user without touching session or token logic:
 
-  it('does not dispatch job for invalid orders', async () => {
-    await orderService.create(invalidData)
+```ts
+import { User } from '@/app/Models/User'
 
-    fakeQueue.assertNotPushed(ProcessOrderJob)
-  })
+const user = await User.create({
+  email: 'test@example.com',
+  name: 'Test User',
+})
+
+// Authenticated requests
+await app.actingAs(user).get('/dashboard').assertOk()
+await app.actingAs(user).post('/posts', data).assertStatus(201)
+
+// Without auth, protected routes reject
+await app.get('/dashboard').assertUnauthorized()
+```
+
+## Testing JSON APIs
+
+For API endpoints, use `.json()` to set the appropriate headers and get JSON-focused assertions:
+
+```ts
+test('API returns paginated posts', async () => {
+  await app.json().get('/api/posts')
+    .assertOk()
+    .assertJsonStructure(['data', 'meta'])
+    .assertJsonCount(10, 'data')
+    .assertJsonPath('meta.currentPage', 1)
+})
+
+test('API validates input', async () => {
+  await app.json().post('/api/posts', { title: '' })
+    .assertStatus(422)
+    .assertJsonPath('errors.title.0', 'The title field is required.')
 })
 ```
 
-#### FakeQueue Methods
+## Database in Tests
 
-| Method | Description |
-|--------|-------------|
-| `assertPushed(job)` | Assert a job was pushed |
-| `assertPushedTimes(job, count)` | Assert job pushed exact number of times |
-| `assertPushedOn(queue, job)` | Assert job pushed to specific queue |
-| `assertPushedWith(job, data)` | Assert job pushed with specific data |
-| `assertNotPushed(job)` | Assert a job was not pushed |
-| `assertNothingPushed()` | Assert no jobs were pushed |
-| `pushed(job)` | Get all pushed instances of a job |
+Keep tests isolated by resetting the database between runs:
 
-### FakeEvent
-
-Test event dispatching without triggering listeners:
-
-```typescript
-import { describe, it, expect, beforeEach } from 'bun:test'
-import { FakeEvent } from '@guren/testing'
-
-describe('User Actions', () => {
-  let fakeEvent: FakeEvent
-
-  beforeEach(() => {
-    fakeEvent = new FakeEvent()
-  })
-
-  it('dispatches user registered event', async () => {
-    await userService.register(userData)
-
-    fakeEvent.assertDispatched(UserRegistered)
-  })
-
-  it('dispatches events in correct order', async () => {
-    await userService.register(userData)
-
-    fakeEvent.assertDispatchedInOrder([
-      UserCreated,
-      UserRegistered,
-      WelcomeEmailSent,
-    ])
-  })
-
-  it('dispatches event with correct data', async () => {
-    await userService.register({ email: 'test@example.com' })
-
-    fakeEvent.assertDispatchedWith(UserRegistered, {
-      email: 'test@example.com',
-    })
-  })
-})
-```
-
-#### FakeEvent Methods
-
-| Method | Description |
-|--------|-------------|
-| `assertDispatched(event, callback?)` | Assert an event was dispatched |
-| `assertDispatchedTimes(event, count)` | Assert event dispatched exact number of times |
-| `assertNotDispatched(event)` | Assert an event was not dispatched |
-| `assertNothingDispatched()` | Assert no events were dispatched |
-| `assertDispatchedInOrder(events)` | Assert events dispatched in specific order |
-| `assertDispatchedWith(event, data)` | Assert event dispatched with specific data |
-| `dispatched(event)` | Get all dispatched instances of an event |
-
-### Database Testing
-
-Use database fakes for testing without affecting your real database:
-
-```typescript
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
-import { DatabaseFake, RefreshDatabase } from '@guren/testing'
+```ts
+import { describe, test, beforeEach, afterEach } from 'bun:test'
+import { RefreshDatabase } from '@guren/testing'
 
 describe('User Model', () => {
   beforeEach(async () => {
@@ -228,7 +126,7 @@ describe('User Model', () => {
     await RefreshDatabase.cleanup()
   })
 
-  it('creates a user', async () => {
+  test('creates a user', async () => {
     const user = await User.create({
       email: 'test@example.com',
       name: 'Test User',
@@ -240,44 +138,100 @@ describe('User Model', () => {
 })
 ```
 
-### HTTP Testing
+> [!TIP]
+> `RefreshDatabase.refresh()` resets the database to a clean state. Use it in `beforeEach` so every test starts fresh.
 
-Test HTTP endpoints with the controller testing helpers:
+## Faking Services
 
-```typescript
-import { describe, it, expect } from 'bun:test'
-import { createControllerContext } from '@guren/testing'
-import UserController from '../app/Http/Controllers/UserController'
+Real tests should not send actual emails, dispatch real events, or push jobs to a queue. Replace services with fakes using the container:
 
-describe('UserController', () => {
-  it('returns user list', async () => {
-    const ctx = createControllerContext('/users')
-    const controller = new UserController()
-    controller.setContext(ctx)
+```ts
+import { TestApp, FakeEvent, FakeMail, FakeQueue } from '@guren/testing'
 
-    const response = await controller.index()
+const app = await TestApp.create()
 
-    expect(response.status).toBe(200)
-  })
+// Swap real services for fakes
+const fakeEvents = new FakeEvent()
+const fakeMail = new FakeMail()
+const fakeQueue = new FakeQueue()
+app.container.fake('events', fakeEvents)
+app.container.fake('mail', fakeMail)
+app.container.fake('queue', fakeQueue)
+```
 
-  it('creates a new user', async () => {
-    const ctx = createControllerContext('/users', {
-      method: 'POST',
-      body: { email: 'new@example.com', name: 'New User' },
-    })
-    const controller = new UserController()
-    controller.setContext(ctx)
+Then assert on what happened:
 
-    const response = await controller.store()
+```ts
+test('registration sends welcome email and dispatches event', async () => {
+  await app.post('/register', {
+    email: 'new@example.com',
+    name: 'New User',
+    password: 'secret123',
+  }).assertStatus(201)
 
-    expect(response.status).toBe(201)
-  })
+  fakeEvents.assertDispatched(UserRegistered)
+  fakeMail.assertSentTo('new@example.com')
+  fakeQueue.assertPushed(SendWelcomeEmailJob)
+})
+
+test('does not send email for invalid registration', async () => {
+  await app.post('/register', { email: '' }).assertStatus(422)
+
+  fakeMail.assertNothingSent()
+  fakeEvents.assertNotDispatched(UserRegistered)
 })
 ```
 
-### Best Practices
+### Available Fake Assertions
 
-1. **Reset fakes in beforeEach** - Always start with a clean state.
-2. **Use specific assertions** - Prefer `assertSentWith` over `assertSent` when possible.
-3. **Test failure cases** - Verify events/emails are NOT sent in error scenarios.
-4. **Keep tests isolated** - Each test should be independent.
+**FakeMail:**
+
+| Method | Description |
+|--------|-------------|
+| `assertSent(mailable)` | A mailable was sent |
+| `assertSentTo(email)` | Email was sent to address |
+| `assertSentWith(mailable, data)` | Mailable sent with specific data |
+| `assertNotSent(mailable)` | A mailable was not sent |
+| `assertNothingSent()` | No emails sent at all |
+
+**FakeEvent:**
+
+| Method | Description |
+|--------|-------------|
+| `assertDispatched(event)` | An event was dispatched |
+| `assertDispatchedWith(event, data)` | Event dispatched with specific data |
+| `assertDispatchedInOrder(events)` | Events dispatched in order |
+| `assertNotDispatched(event)` | An event was not dispatched |
+| `assertNothingDispatched()` | No events dispatched |
+
+**FakeQueue:**
+
+| Method | Description |
+|--------|-------------|
+| `assertPushed(job)` | A job was pushed |
+| `assertPushedWith(job, data)` | Job pushed with specific data |
+| `assertPushedOn(queue, job)` | Job pushed to specific queue |
+| `assertNotPushed(job)` | A job was not pushed |
+| `assertNothingPushed()` | No jobs pushed |
+
+## Running Tests
+
+```bash
+# Full test suite
+bun run test
+
+# Framework packages (Bun test runner)
+bun run test:bun
+
+# Example apps (Vitest)
+bun run test:examples
+
+# Single file
+bun test path/to/file.test.ts
+
+# Generate a test file
+bunx guren make:test posts/PostController --runner bun
+```
+
+> [!NOTE]
+> Framework packages use Bun's native test runner (`bun:test`). Example apps and React components use Vitest with jsdom. Keep the runners separate to get fast feedback from Bun for framework code and realistic DOM behavior for SPA tests.

@@ -68,7 +68,7 @@ export function SoftDeletes<TBase extends typeof Model>(Base: TBase): TBase & So
     if (!adapter.update) {
       throw new Error('Configured adapter does not support update operations (needed for soft delete).')
     }
-    const table = (this as unknown as { resolveTable(): unknown }).resolveTable()
+    const table = this.resolveTable()
     const column = (this as unknown as SoftDeletesStatic).deletedAtColumn
     return adapter.update(table, where, { [column]: new Date() }) as Promise<PlainObject>
   } as typeof Model.delete
@@ -91,7 +91,7 @@ export function SoftDeletes<TBase extends typeof Model>(Base: TBase): TBase & So
     if (!adapter.update) {
       throw new Error('Configured adapter does not support update operations (needed for restore).')
     }
-    const table = (this as unknown as { resolveTable(): unknown }).resolveTable()
+    const table = this.resolveTable()
     const column = (this as unknown as SoftDeletesStatic).deletedAtColumn
     return adapter.update(table, where, { [column]: null }) as Promise<PlainObject>
   }
@@ -104,7 +104,7 @@ export function SoftDeletes<TBase extends typeof Model>(Base: TBase): TBase & So
     if (!adapter.delete) {
       throw new Error('Configured adapter does not support delete operations.')
     }
-    const table = (this as unknown as { resolveTable(): unknown }).resolveTable()
+    const table = this.resolveTable()
     return adapter.delete(table, where)
   }
 

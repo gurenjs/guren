@@ -11,7 +11,21 @@ Guren provides a flexible logging system with multiple channels, log levels foll
 
 ## Basic Usage
 
-### Quick Start
+### Quick Start (Facade)
+
+The simplest way to log is through the `LogFacade`, which resolves the `LogManager` from the container lazily:
+
+```ts
+import { LogFacade as Log } from '@guren/server'
+
+Log.info('Application started')
+Log.error('Something went wrong', { error: 'Connection failed' })
+Log.channel('daily').warning('Disk space low')
+```
+
+### Direct Instantiation
+
+You can also create a `LogManager` directly:
 
 ```ts
 import { LogManager } from '@guren/core'
@@ -208,9 +222,23 @@ const log = new LogManager({
 })
 ```
 
+## Container Integration
+
+The logging subsystem is registered as a singleton via a `ServiceProvider`. You can resolve it from the container:
+
+```ts
+import { container } from '@guren/server'
+
+const log = container.make('log') // LogManager
+log.info('Using container-resolved logger')
+```
+
 ## Global Logger
 
 ### Setting Up Global Logger
+
+> [!NOTE]
+> In most applications you should prefer the `LogFacade` or `container.make('log')` instead of the global setter. The global functions below are kept for backward compatibility.
 
 ```ts
 import { setLogManager, getLogManager, LogManager } from '@guren/core'
@@ -318,6 +346,29 @@ export const requestLogging = defineMiddleware(async (c, next) => {
 ```
 
 ## Testing
+
+### Using `container.fake()`
+
+Swap the log manager in tests to capture log output:
+
+```ts
+import { container } from '@guren/server'
+import { LogManager } from '@guren/core'
+
+test('logs error on failure', async () => {
+  const fakeLog = new LogManager({
+    default: 'memory',
+    channels: { memory: { driver: 'memory' } },
+  })
+
+  using _ = container.fake('log', fakeLog)
+
+  // Run code under test — all logging via the facade or container
+  // is captured by fakeLog
+})
+```
+
+### Custom Memory Channel
 
 ```ts
 import { describe, test, expect, beforeEach, mock } from 'bun:test'

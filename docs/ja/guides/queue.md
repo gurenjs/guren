@@ -65,6 +65,21 @@ export class SendWelcomeEmailJob extends Job<SendWelcomeEmailPayload> {
 
 ## ジョブのディスパッチ
 
+### ファサードを使用（推奨）
+
+`QueueFacade` を使うと、コンテナからキュードライバを遅延解決してシンプルにジョブをディスパッチできます:
+
+```ts
+import { QueueFacade as Queue } from '@guren/server'
+
+await Queue.push(new SendWelcomeEmailJob({
+  userId: '123',
+  email: 'user@example.com',
+}))
+```
+
+### 直接セットアップ
+
 ジョブをディスパッチする前に、キュードライバを設定します：
 
 ```ts

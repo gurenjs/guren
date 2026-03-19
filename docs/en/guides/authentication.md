@@ -4,10 +4,10 @@ Guren ships with a Laravel-inspired authentication stack that sits on top of the
 
 ## Core Concepts
 
-- **AuthManager** – central registry for guards and user providers. Available from the application instance (`app.auth`) or inside service providers via `context.auth`.
+- **AuthManager** – central registry for guards and user providers. Resolved from the service container via `this.container.make<AuthManager>('auth')`.
 - **Guards** – runtime objects responsible for authenticating a request. The default `SessionGuard` persists the logged-in user's identifier inside the session and supports optional "remember me" tokens.
 - **User Providers** – data access adapters used by guards to load and validate users. `ModelUserProvider` integrates with Guren's `Model` abstraction so you can back authentication with Drizzle ORM tables.
-- **Auth Context** – per-request façade that surfaces guard helpers (`auth.check()`, `auth.user()`, `auth.login()`, etc.). The context is attached automatically by `AuthServiceProvider`; it is available in controllers via the new `this.auth` helper and in middleware through `attachAuthContext`.
+- **Auth Context** – per-request facade that surfaces guard helpers (`auth.check()`, `auth.user()`, `auth.login()`, etc.). The context is attached automatically by `AuthServiceProvider`; it is available in controllers via the `this.auth` helper and in middleware through `attachAuthContext`.
 
 ## Quickstart via CLI
 
@@ -69,7 +69,7 @@ const app = new Application({
 If you need manual control, register the middleware explicitly early in your bootstrap:
 
 ```ts
-import { Application, createSessionMiddleware } from '@guren/core'
+import { Application, createSessionMiddleware } from '@guren/server'
 
 const app = new Application()
 app.use('*', createSessionMiddleware())
@@ -95,12 +95,14 @@ app.use('*', createSessionMiddleware())
 The simplest way to configure authentication is using the `auth.useModel()` helper, which registers both a `ModelUserProvider` and `SessionGuard` in one call:
 
 ```ts
-import type { ApplicationContext, Provider } from '@guren/core'
+import { ServiceProvider } from '@guren/server'
+import type { AuthManager } from '@guren/server'
 import { User } from '@/app/Models/User'
 
-export default class AuthProvider implements Provider {
-  register(context: ApplicationContext): void {
-    context.auth.useModel(User, {
+export default class AuthProvider extends ServiceProvider {
+  register(): void {
+    const auth = this.container.make<AuthManager>('auth')
+    auth.useModel(User, {
       usernameColumn: 'email',
       passwordColumn: 'passwordHash',
       rememberTokenColumn: 'rememberToken',
@@ -121,14 +123,17 @@ This single method call:
 For advanced use cases requiring custom providers or guards, you can still configure them manually:
 
 ```ts
-import type { ApplicationContext, Provider } from '@guren/core'
-import { ModelUserProvider, SessionGuard } from '@guren/core'
+import { ServiceProvider } from '@guren/server'
+import { ModelUserProvider, SessionGuard } from '@guren/server'
+import type { AuthManager } from '@guren/server'
 import { User } from '@/app/Models/User'
 
-export default class AuthProvider implements Provider {
-  register(context: ApplicationContext): void {
+export default class AuthProvider extends ServiceProvider {
+  register(): void {
+    const auth = this.container.make<AuthManager>('auth')
+
     // Register the provider
-    context.auth.registerProvider('users', () => new ModelUserProvider(User, {
+    auth.registerProvider('users', () => new ModelUserProvider(User, {
       usernameColumn: 'email',
       passwordColumn: 'passwordHash',
       rememberTokenColumn: 'rememberToken',
@@ -136,12 +141,12 @@ export default class AuthProvider implements Provider {
     }))
 
     // Register a custom guard
-    context.auth.registerGuard('web', ({ session, manager }) => {
+    auth.registerGuard('web', ({ session, manager }) => {
       const provider = manager.getProvider('users')
       return new SessionGuard({ provider, session })
     })
 
-    context.auth.setDefaultGuard('web')
+    auth.setDefaultGuard('web')
   }
 }
 ```
@@ -153,7 +158,7 @@ Pair this with the `AuthenticatableModel` base class (see below) to get automati
 Models that extend `AuthenticatableModel` receive first-class password handling. Providing a plain `password` property when calling `create` or `update` automatically hashes and stores it in the `passwordHash` column (configurable via static properties). The framework never persists the plain text password, and authentication continues to rely on the same hashing algorithm as the providers.
 
 ```ts
-import { AuthenticatableModel } from '@guren/core'
+import { AuthenticatableModel } from '@guren/server'
 import { users } from '@/db/schema.js'
 
 export type UserRecord = typeof users.$inferSelect
@@ -167,7 +172,7 @@ export class User extends AuthenticatableModel<UserRecord> {
 }
 ```
 
-The default `AuthServiceProvider` automatically registers a `web` guard that uses the `users` provider. If you need additional guards (e.g. token-based APIs), call `context.auth.registerGuard('api', factory)` inside the provider and set it as default via `context.auth.setDefaultGuard('api')` when appropriate.
+The default `AuthServiceProvider` automatically registers a `web` guard that uses the `users` provider. If you need additional guards (e.g. token-based APIs), call `auth.registerGuard('api', factory)` inside the provider and set it as default via `auth.setDefaultGuard('api')` when appropriate.
 
 ## Controllers & Routes
 
@@ -176,13 +181,20 @@ Controllers now expose an `auth` helper:
 ```ts
 export default class DashboardController extends Controller {
   async index() {
-    const user = await this.auth.user()
+    const user = await this.auth.user()       // returns user or null
     return this.inertia('dashboard/Index', { user }, { url: this.request.path })
+  }
+
+  async store() {
+    const user = await this.auth.userOrFail()  // throws 401 if not authenticated
+    // user is guaranteed non-null here
+    await Post.create({ authorId: user.id, ...data })
+    return this.redirect('/posts')
   }
 }
 ```
 
-Use `parseRequestPayload()` and `formatValidationErrors()` from `guren` to keep controller-level request handling consistent when integrating Zod or other schema validators.
+Use `this.validate()` with a FormRequest class, or `this.validateBody()` / `this.validateQuery()` / `this.validateParams()` with Zod schemas for typed validation.
 
 To surface the logged-in user on every Inertia page without repeating controller code, register shared props during app boot:
 
@@ -201,18 +213,29 @@ Augment `InertiaSharedProps` (see the Controllers guide) to type this `auth` pay
 Route middleware makes protecting endpoints straightforward:
 
 ```ts
-import { Route, requireAuthenticated, requireGuest } from '@guren/core'
+import { Route, requireAuthenticated, requireGuest } from '@guren/server'
 import LoginController from '@/app/Http/Controllers/Auth/LoginController'
 
-Route.get('/login', [LoginController, 'show'], requireGuest({ redirectTo: '/dashboard' }))
-Route.post('/login', [LoginController, 'store'], requireGuest({ redirectTo: '/dashboard' }))
-Route.post('/logout', [LoginController, 'destroy'], requireAuthenticated({ redirectTo: '/login' }))
+// Using middleware aliases (recommended)
+Route.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
+Route.aliasMiddleware('guest', requireGuest({ redirectTo: '/dashboard' }))
+
+Route.middleware('guest').group(() => {
+  Route.get('/login', [LoginController, 'show'])
+  Route.post('/login', [LoginController, 'store'])
+})
+
+Route.middleware('auth').group(() => {
+  Route.post('/logout', [LoginController, 'destroy'])
+  Route.get('/dashboard', [DashboardController, 'index'])
+})
 ```
 
 ## Session Guard Helpers
 
 - `auth.check()` – resolves to `true` when a user is authenticated.
 - `auth.user()` – returns the current user record (or `null`).
+- `auth.userOrFail()` – returns the current user or throws `AuthenticationException` (401). Useful when you know the route is protected and want to avoid null checks.
 - `auth.login(user, remember?)` – logs in the given user and optionally issues a remember token.
 - `auth.attempt(credentials, remember?)` – validates credentials using the active guard and logs in on success.
 - `auth.logout()` – clears the session and remember token.

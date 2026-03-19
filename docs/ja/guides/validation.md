@@ -263,6 +263,122 @@ function CreateUser({ errors }: { errors?: Record<string, string> }) {
 }
 ```
 
+## コントローラーバリデーションヘルパー
+
+コントローラーで最もシンプルにバリデーションを行う方法は `validateBody`、`validateQuery`、`validateParams` です。`safeParse()` を持つ任意の Zod ライクなスキーマを受け取り、失敗時に `ValidationException`（422）をスローします：
+
+```ts
+import { Controller } from '@guren/server'
+import { z } from 'zod'
+
+const StorePostSchema = z.object({
+  title: z.string().min(1).max(200),
+  content: z.string().min(10),
+})
+
+const PostIdParamSchema = z.object({
+  id: z.coerce.number().int().positive(),
+})
+
+const PageQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+})
+
+export default class PostsController extends Controller {
+  async index() {
+    const { page } = this.validateQuery(PageQuerySchema)
+    const posts = await Post.paginate({ page })
+    return this.json(posts)
+  }
+
+  async show() {
+    const { id } = this.validateParams(PostIdParamSchema)
+    const post = await Post.findOrFail(id)
+    return this.json(post)
+  }
+
+  async store() {
+    const data = await this.validateBody(StorePostSchema)
+    const post = await Post.create(data)
+    return this.created({ post })
+  }
+}
+```
+
+| ヘルパー | 入力元 | 非同期 | 説明 |
+|--------|--------|--------|------|
+| `this.validateBody(schema)` | リクエストボディ | Yes | JSON またはフォームボディをパース |
+| `this.validateQuery(schema)` | クエリ文字列 | No | `?page=1&sort=desc` をパース |
+| `this.validateParams(schema)` | ルートパラメータ | No | `:id`、`:slug` などをパース |
+
+> [!TIP]
+> これらのヘルパーは `safeParse()` を実装する任意のスキーマライブラリ（Zod、Valibot、カスタムバリデーター）で動作します。
+
+## FormRequest
+
+`FormRequest` を使うと、コントローラ内で型安全なバリデーションをクラスベースで行えます。認可ロジックが必要な場合に使用します。リクエストごとにバリデーションルールと認可ロジックをカプセル化できます:
+
+```ts
+import { FormRequest } from '@guren/server'
+import { z } from 'zod'
+
+const CreatePostSchema = z.object({
+  title: z.string().min(1).max(200),
+  content: z.string().min(10),
+  published: z.boolean().optional().default(false),
+})
+
+export class CreatePostRequest extends FormRequest<z.infer<typeof CreatePostSchema>> {
+  schema = CreatePostSchema
+
+  // オプション: リクエストの認可チェック
+  async authorize(): Promise<boolean> {
+    return this.auth.check()
+  }
+}
+```
+
+コントローラでの使用:
+
+```ts
+export default class PostController extends Controller {
+  async store() {
+    const data = await this.validate(CreatePostRequest)
+    // data は完全に型付けされている
+    const post = await Post.create(data)
+    return this.redirect(`/posts/${post.id}`)
+  }
+}
+```
+
+### コントローラヘルパー
+
+コントローラには以下の便利なヘルパーメソッドが用意されています:
+
+```ts
+export default class PostController extends Controller {
+  async store() {
+    const data = this.input()          // リクエストボディ全体を取得
+    const page = this.query('page')    // クエリパラメータを取得
+    const validated = await this.validate(CreatePostRequest) // FormRequest でバリデーション
+
+    const post = await Post.create(validated)
+    return this.created({ post })      // 201 レスポンス
+  }
+
+  async update() {
+    const post = await Post.find(this.ctx.req.param('id'))
+    await post.update(this.input())
+    return this.noContent()            // 204 レスポンス
+  }
+
+  async process() {
+    await processTask()
+    return this.accepted()             // 202 レスポンス
+  }
+}
+```
+
 ## 型安全なリクエストパース
 
 完全な型安全性のため、リクエストパースと組み合わせ：

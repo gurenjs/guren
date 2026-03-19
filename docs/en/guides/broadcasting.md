@@ -35,6 +35,17 @@ await broadcast.broadcast('notifications', 'NewMessage', {
 })
 ```
 
+### Container Integration
+
+The broadcasting subsystem is registered as a singleton via a `ServiceProvider`. You can resolve it from the container:
+
+```ts
+import { container } from '@guren/server'
+
+const broadcast = container.make('broadcast') // BroadcastManager
+await broadcast.broadcast('notifications', 'NewMessage', { content: 'Hello!' })
+```
+
 ### Using Channel Helpers
 
 ```ts
@@ -303,6 +314,28 @@ await channel.broadcast('MemberLeft', {
 ```
 
 ## Testing
+
+### Using `container.fake()`
+
+Swap the broadcast manager in tests:
+
+```ts
+import { container } from '@guren/server'
+import { BroadcastManager, MemoryDriver } from '@guren/core'
+
+test('broadcasts order update', async () => {
+  const fakeBroadcast = new BroadcastManager({
+    default: 'memory',
+    drivers: { memory: () => new MemoryDriver() },
+  })
+
+  using _ = container.fake('broadcast', fakeBroadcast)
+
+  // Code under test that broadcasts events will use fakeBroadcast
+})
+```
+
+### Manual Testing
 
 ```ts
 import { describe, test, expect, beforeEach, mock } from 'bun:test'

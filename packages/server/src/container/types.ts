@@ -58,7 +58,7 @@ export interface ServiceProviderOptions {
 }
 
 /**
- * Provider interface (compatible with existing Provider).
+ * Provider interface for container-based service providers.
  */
 export interface Provider {
   register?(context: unknown): void | Promise<void>

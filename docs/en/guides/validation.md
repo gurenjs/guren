@@ -1,6 +1,6 @@
 # Validation
 
-Guren provides a flexible validation system that integrates with Zod and other schema validation libraries. Validate request data at the middleware level or within controllers.
+Guren provides a flexible validation system with two approaches: middleware-based validation with schema libraries (Zod, Valibot) and Laravel-style FormRequest classes for typed, reusable validation with authorization.
 
 ## Quick Start
 
@@ -21,6 +21,215 @@ Route.post('/posts', async (ctx) => {
   // data is fully typed and validated
   return ctx.json({ post: await Post.create(data) })
 }, validateRequest(createPostSchema))
+```
+
+## Controller Validation Helpers
+
+The simplest way to validate in controllers is with `validateBody`, `validateQuery`, and `validateParams`. They accept any Zod-like schema (anything with `safeParse()`) and throw `ValidationException` (422) on failure:
+
+```ts
+import { Controller } from '@guren/server'
+import { z } from 'zod'
+
+const StorePostSchema = z.object({
+  title: z.string().min(1).max(200),
+  content: z.string().min(10),
+})
+
+const PostIdParamSchema = z.object({
+  id: z.coerce.number().int().positive(),
+})
+
+const PageQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+})
+
+export default class PostsController extends Controller {
+  async index() {
+    const { page } = this.validateQuery(PageQuerySchema)
+    const posts = await Post.paginate({ page })
+    return this.json(posts)
+  }
+
+  async show() {
+    const { id } = this.validateParams(PostIdParamSchema)
+    const post = await Post.findOrFail(id)
+    return this.json(post)
+  }
+
+  async store() {
+    const data = await this.validateBody(StorePostSchema)
+    const post = await Post.create(data)
+    return this.created({ post })
+  }
+}
+```
+
+| Helper | Input Source | Async | Description |
+|--------|-------------|-------|-------------|
+| `this.validateBody(schema)` | Request body | Yes | Parses JSON or form body |
+| `this.validateQuery(schema)` | Query string | No | Parses `?page=1&sort=desc` |
+| `this.validateParams(schema)` | Route params | No | Parses `:id`, `:slug`, etc. |
+
+> [!TIP]
+> These helpers work with any schema library that implements `safeParse()` — Zod, Valibot, or custom validators.
+
+## FormRequest Classes
+
+FormRequest classes combine validation rules, authorization logic, and type safety in a single reusable class. Use this when you need authorization logic or Laravel-style rule definitions.
+
+### Defining a FormRequest
+
+```ts
+// app/Http/Requests/StorePostRequest.ts
+import { FormRequest, required, stringRule, min, max } from '@guren/server'
+
+interface StorePostData {
+  title: string
+  content: string
+  status: string
+}
+
+export class StorePostRequest extends FormRequest<StorePostData> {
+  rules() {
+    return {
+      title: [required(), stringRule(), min(3), max(200)],
+      content: [required(), stringRule(), min(10)],
+      status: [required(), stringRule()],
+    }
+  }
+
+  authorize(): boolean {
+    // Return true to allow the request, false to reject with 403
+    return this.user() !== null
+  }
+}
+```
+
+### Using FormRequest in Controllers
+
+Pass the FormRequest class to `this.validate()` in your controller:
+
+```ts
+import { Controller } from '@guren/server'
+import { StorePostRequest } from '@/app/Http/Requests/StorePostRequest'
+import { UpdatePostRequest } from '@/app/Http/Requests/UpdatePostRequest'
+import { Post } from '@/app/Models/Post'
+
+export default class PostsController extends Controller {
+  async store() {
+    // Validates and returns typed data, or returns 422 automatically
+    const data = await this.validate(StorePostRequest)
+
+    const post = await Post.create(data)
+    return this.created({ post })
+  }
+
+  async update() {
+    const data = await this.validate(UpdatePostRequest)
+    const id = this.ctx.req.param('id')
+
+    await Post.update(Number(id), data)
+    return this.redirect(`/posts/${id}`)
+  }
+}
+```
+
+If validation fails, a 422 response is returned automatically with structured error details. If `authorize()` returns `false`, a 403 Forbidden response is returned.
+
+### Available Validation Rules
+
+```ts
+import {
+  required,
+  stringRule,
+  numberRule,
+  booleanRule,
+  min,
+  max,
+  email,
+  url,
+  regex,
+  confirmed,
+  unique,
+  exists,
+  inArray,
+  date,
+  before,
+  after,
+  nullable,
+  arrayRule,
+  minLength,
+  maxLength,
+} from '@guren/server'
+```
+
+#### Rule Examples
+
+```ts
+class CreateUserRequest extends FormRequest<CreateUserData> {
+  rules() {
+    return {
+      name: [required(), stringRule(), min(2), max(100)],
+      email: [required(), email(), unique('users', 'email')],
+      password: [required(), stringRule(), min(8), confirmed()],
+      age: [nullable(), numberRule(), min(13)],
+      role: [required(), inArray(['user', 'admin', 'moderator'])],
+      website: [nullable(), url()],
+      bio: [nullable(), stringRule(), maxLength(500)],
+      tags: [nullable(), arrayRule(), minLength(1), maxLength(10)],
+      birthDate: [nullable(), date(), before(new Date())],
+    }
+  }
+}
+```
+
+### Custom Validation Messages
+
+Override `messages()` to provide custom error messages:
+
+```ts
+class StorePostRequest extends FormRequest<StorePostData> {
+  rules() {
+    return {
+      title: [required(), stringRule(), min(3)],
+      content: [required(), stringRule()],
+    }
+  }
+
+  messages() {
+    return {
+      'title.required': 'Every post needs a title.',
+      'title.min': 'The title must be at least 3 characters.',
+      'content.required': 'Please write some content for your post.',
+    }
+  }
+}
+```
+
+### Accessing Request Data in FormRequest
+
+FormRequest classes have access to the current request context:
+
+```ts
+class UpdatePostRequest extends FormRequest<UpdatePostData> {
+  rules() {
+    return {
+      title: [required(), stringRule(), min(3)],
+      // Use current route parameter in validation
+      slug: [required(), stringRule(), unique('posts', 'slug', {
+        ignore: this.param('id'),
+      })],
+    }
+  }
+
+  authorize(): boolean {
+    // Check if the user owns this post
+    const user = this.user()
+    const postId = this.param('id')
+    return user?.id === Number(postId)
+  }
+}
 ```
 
 ## Middleware Validation
@@ -228,10 +437,20 @@ When validation fails, the default response format is:
 
 ### Displaying in Inertia
 
-Pass validation errors to your frontend:
+With FormRequest, validation errors are automatically shared with the Inertia page. For manual validation, pass errors to your frontend:
 
 ```ts
-// Controller
+// Controller with FormRequest (recommended)
+async store() {
+  const data = await this.validate(StorePostRequest)
+  // Validation errors are handled automatically - 422 response with errors
+  await Post.create(data)
+  return this.redirect('/posts')
+}
+```
+
+```ts
+// Controller with manual validation
 async store() {
   try {
     const data = validate(schema, await this.ctx.req.json())

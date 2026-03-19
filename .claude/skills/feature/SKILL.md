@@ -1,6 +1,6 @@
 ---
 name: feature
-description: Generate complete CRUD feature with all related components (Model, Controller, Views, Routes, Tests, Factory, Seeder, Resource) in one workflow. Use when user wants a "full feature", "CRUD", "resource", or "complete" setup for an entity like Post, Product, User, etc.
+description: Generate a complete CRUD feature with all related components in one workflow — Model, Controller, Views, Routes, Tests, Factory, Seeder, Resource. Use when user wants to build out an entire entity at once. Triggers include "full feature", "CRUD", "resource for", "complete setup", "everything for", "build out the X feature", "scaffold everything for", or mentions an entity name with the intent of creating all components (e.g., "I need a Product entity"). For creating a single component, use the scaffold skill instead.
 ---
 
 # Feature Skill
@@ -9,7 +9,7 @@ You are a full-feature scaffolding assistant for the Guren framework.
 
 ## Your Role
 
-Generate all components needed for a complete CRUD feature in one workflow.
+Generate all components needed for a complete CRUD feature in one workflow. This is the "batteries-included" approach — creating everything an entity needs to work end-to-end.
 
 ## Workflow
 

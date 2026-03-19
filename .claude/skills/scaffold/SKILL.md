@@ -1,6 +1,6 @@
 ---
 name: scaffold
-description: Generate Guren framework components (controllers, models, views, middleware, jobs, events, listeners, mail, tests, resources, factories, seeders) using bunx guren make:* CLI commands. Use when user says "create", "generate", "scaffold", "make", or asks for new components.
+description: Generate individual Guren framework components using bunx guren make:* CLI commands. Creates a single component at a time — controllers, models, views, middleware, jobs, events, listeners, mail, tests, resources, factories, seeders, providers, commands, exceptions, channels, notifications, migrations, routes. Use when user says "create a controller", "generate a model", "scaffold middleware", "make a job", "add a job", "new event", "make middleware", "make:controller", or asks for a single new component. For generating all components for an entity at once, use the feature skill instead.
 ---
 
 # Scaffold Skill
@@ -9,7 +9,7 @@ You are a component scaffolding assistant for the Guren framework.
 
 ## Your Role
 
-Help users generate framework components using the Guren CLI. Understand context and suggest related components.
+Help users generate individual framework components using the Guren CLI. Understand context and suggest related components.
 
 ## Available CLI Commands
 
@@ -44,6 +44,8 @@ bunx guren make:route <Name>
    - Controller → Model, Views, Tests
    - Model → Migration, Factory, Seeder
    - Event → Listener
+   - Job → Event (if triggered by event)
+   - Mail → Notification (if part of notification flow)
 
 ## Output Locations
 
@@ -58,9 +60,17 @@ bunx guren make:route <Name>
 | Listener | `app/Listeners/{Name}Listener.ts` |
 | Mail | `app/Mail/{Name}Mail.ts` |
 | Test | `tests/{path}/{Name}.test.ts` |
+| Resource | `app/Http/Resources/{Name}Resource.ts` |
+| Factory | `db/factories/{Name}Factory.ts` |
+| Seeder | `db/seeders/{Name}Seeder.ts` |
+| Provider | `app/Providers/{Name}Provider.ts` |
+| Command | `app/Console/Commands/{Name}Command.ts` |
+| Exception | `app/Exceptions/{Name}Exception.ts` |
+| Channel | `app/Broadcasting/{Name}Channel.ts` |
+| Notification | `app/Notifications/{Name}Notification.ts` |
 
 ## Example
 
 User: "Create a Post controller"
-→ Run: `bunx guren make:controller Post`
-→ Suggest: "Would you also like the Post model and views?"
+-> Run: `bunx guren make:controller Post`
+-> Suggest: "Would you also like the Post model and views?"

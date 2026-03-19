@@ -11,24 +11,37 @@ Gurenは複数のストレージバックエンドをサポートする統一さ
 
 ## 基本的な使い方
 
-### クイックスタート
+### クイックスタート（ファサード）
+
+最もシンプルにキャッシュを使う方法は `CacheFacade` です。コンテナから `CacheManager` を遅延解決します:
+
+```ts
+import { CacheFacade as Cache } from '@guren/server'
+
+// 値を保存（TTLは秒単位）
+await Cache.store().set('user:1', { name: 'John' }, 3600)
+
+// 値を取得
+const user = await Cache.store().get<{ name: string }>('user:1')
+
+// キーが存在するか確認
+const exists = await Cache.store().has('user:1')
+
+// 値を削除
+await Cache.store().delete('user:1')
+```
+
+### 直接インスタンス化
+
+`CacheManager` を直接作成することもできます:
 
 ```ts
 import { CacheManager } from '@guren/core'
 
 const cache = new CacheManager()
 
-// 値を保存（TTLは秒単位）
 await cache.store().set('user:1', { name: 'John' }, 3600)
-
-// 値を取得
 const user = await cache.store().get<{ name: string }>('user:1')
-
-// キーが存在するか確認
-const exists = await cache.store().has('user:1')
-
-// 値を削除
-await cache.store().delete('user:1')
 ```
 
 ### キャッシュ操作

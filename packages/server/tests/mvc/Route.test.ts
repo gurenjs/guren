@@ -38,6 +38,18 @@ class UserController extends Controller {
   }
 }
 
+class InjectedController extends Controller {
+  static inject = ['cache'] as const
+
+  constructor(private readonly cache?: { get: (key: string) => string }) {
+    super()
+  }
+
+  index() {
+    return this.cache?.get('message') ?? 'ok'
+  }
+}
+
 function createContext(): any {
   return {
     req: {
@@ -146,6 +158,30 @@ describe('Route registry', () => {
 
     await expect(captured(createContext())).rejects.toThrow('Controller method show is not defined on InlineController.')
   })
+
+  it('allows injected controllers to run without an initialized container', async () => {
+    Route.get('/injected', [InjectedController, 'index'])
+
+    let captured: ((ctx: any) => Promise<Response>) | undefined
+    const app = new Hono()
+
+    app.on = ((method: string, path: string, ...rest: Array<(ctx: any) => Promise<Response>>) => {
+      if (path === '/injected') {
+        captured = rest[rest.length - 1]
+      }
+      return app
+    }) as typeof app.on
+
+    Route.mount(app)
+
+    if (!captured) {
+      throw new Error('Injected route handler was not captured')
+    }
+
+    const response = await captured(createContext())
+    expect(response.status).toBe(200)
+    expect(await response.text()).toBe('ok')
+  })
 })
 
 describe('Named routes', () => {
@@ -215,6 +251,26 @@ describe('Named routes', () => {
     expect(Route.definitions()).toHaveLength(2)
     expect(Route.hasRoute('a')).toBe(true)
     expect(Route.hasRoute('b')).toBe(true)
+  })
+})
+
+describe('Middleware groups', () => {
+  beforeEach(() => {
+    Route.clear()
+  })
+
+  it('reuses nested middleware groups across siblings without treating them as circular', () => {
+    const auth = async (_ctx: any, next: () => Promise<void>) => {
+      await next()
+    }
+
+    Route.aliasMiddleware('auth', auth)
+    Route.groupMiddleware('web', ['auth'])
+    Route.groupMiddleware('admin', ['auth'])
+
+    expect(() => {
+      Route.middleware('web', 'admin').get('/dashboard', () => 'ok')
+    }).not.toThrow()
   })
 })
 

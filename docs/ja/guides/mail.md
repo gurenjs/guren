@@ -10,6 +10,19 @@ Gurenはメール送信のための流暢なAPIを提供し、複数のトラン
 
 ## 基本的な使い方
 
+### ファサードを使用（推奨）
+
+`MailFacade` を使うと、コンテナから `MailManager` を遅延解決してシンプルにメールを送信できます:
+
+```ts
+import { MailFacade as Mail } from '@guren/server'
+
+await Mail.to('user@example.com')
+  .subject('Hello!')
+  .text('Hello World!')
+  .send()
+```
+
 ### クイックスタート
 
 ```ts

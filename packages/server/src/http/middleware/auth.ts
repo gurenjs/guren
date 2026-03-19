@@ -1,5 +1,5 @@
 import type { Context, MiddlewareHandler } from 'hono'
-import type { AuthContext } from '../../auth'
+import type { Authenticatable, AuthContext } from '../../auth'
 import { jsonResponse } from './index'
 export type { AuthContext } from '../../auth'
 
@@ -10,10 +10,42 @@ export interface RequireAuthOptions {
 }
 
 const AUTH_CONTEXT_KEY = 'guren:auth'
+const TESTING_USER_HEADER = 'x-testing-user'
+
+function resolveTestingUser(ctx: Context): Authenticatable | null {
+  const rawUser = ctx.req.header(TESTING_USER_HEADER)
+  if (!rawUser) {
+    return null
+  }
+
+  try {
+    return JSON.parse(rawUser) as Authenticatable
+  } catch {
+    return null
+  }
+}
+
+function withTestingUser(auth: AuthContext, testingUser: Authenticatable | null): AuthContext {
+  if (!testingUser) {
+    return auth
+  }
+
+  return {
+    ...auth,
+    check: async () => true,
+    guest: async () => false,
+    user: async <T = Authenticatable>() => testingUser as T,
+    id: async () => testingUser.getAuthIdentifier(),
+    login: async () => {},
+    attempt: async () => true,
+    logout: async () => {},
+  }
+}
 
 export function attachAuthContext(contextFactory: (ctx: Context) => AuthContext): MiddlewareHandler {
   return async (ctx, next) => {
-    ctx.set(AUTH_CONTEXT_KEY, contextFactory(ctx))
+    const auth = contextFactory(ctx)
+    ctx.set(AUTH_CONTEXT_KEY, withTestingUser(auth, resolveTestingUser(ctx)))
     await next()
   }
 }

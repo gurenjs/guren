@@ -1,44 +1,107 @@
-# Guren Documentation Overview
+# Guren at a Glance
 
-Guren is a Bun-native TypeScript MVC framework that unites Laravel-like ergonomics with Hono, Inertia.js, React, and Drizzle ORM, aiming to deliver a fast, elegant full-stack workflow that keeps frontend and backend work in sync. The name “Guren” (紅蓮), meaning “crimson lotus,” reflects the framework’s blend of intensity and refinement.
+The fullstack TypeScript framework that feels like Laravel — powered by Bun.
 
-## Why Guren?
-- **Fast inner loop**: Bun’s native tooling and Hono’s lightweight server deliver quick feedback during development.
-- **Laravel-like ergonomics**: The `Route` DSL, `Controller`/`Model` base classes, and Inertia-powered views feel familiar and productive.
-- **Type-safe data access**: Drizzle ORM offers an Eloquent-style API with rich TypeScript types.
-- **All-in-one scaffold**: `create-guren-app` generates backend, frontend, and database wiring so you can start coding immediately.
+## See for Yourself
 
-## Quick Start
-1. Scaffold a project (choose SSR or SPA when prompted, or force with `--mode ssr|spa`): `bunx create-guren-app my-app`
-2. Change into the directory: `cd my-app`
-3. Install dependencies: `bun install`
-4. Start the dev server (Bun + Vite auto-launch together): `bun run dev` and visit `http://localhost:3333`
+A route, a controller, a typed response — in a few lines:
 
-Need more detail? Head to [Getting Started](./getting-started.md) for database setup and environment configuration. If any term is unfamiliar, see the [Glossary](./glossary.md).
+```ts
+// routes/web.ts
+import TaskController from '@/app/Http/Controllers/TaskController'
 
-## Guided Path
-Follow this order if you’re new to Guren—the topics build on each other from scaffolding through production:
+Route.get('/tasks', [TaskController, 'index'])
+Route.post('/tasks', [TaskController, 'store'])
 
-1. **[First Steps](./first-steps.md)** — Minimal route, controller, and page to see a working screen.
-2. **[Getting Started](./getting-started.md)** — Prerequisites, environment setup, development workflow.
-3. **[Architecture](./architecture.md)** — How the MVC layers, providers, and runtime fit together.
-4. **[Routing Guide](./routing.md)** — Defining HTTP routes, groups, and middleware.
-5. **[Controller Guide](./controllers.md)** — Handling requests and returning responses/Inertia pages.
-6. **[Database Guide](./database.md)** — Drizzle schemas, migrations, seeders, and the ORM facade.
-7. **[Frontend Guide](./frontend.md)** — Inertia-powered React pages, assets, and SSR coordination.
-8. **[Authentication Guide](./authentication.md)** — Guards, user providers, and securing routes.
-9. **[Testing Guide](./testing.md)** — Bun test harnesses, Vitest examples, and CLI helpers.
-10. **[Deployment Guide](./deployment.md)** — Building, migrating, and running in production.
+Route.middleware('auth').group(() => {
+  Route.get('/dashboard', [DashboardController, 'index'])
+})
+```
 
-## Reference
-- [CLI Reference](./cli.md): `guren` commands for generators, migrations, and runtime tooling.
-- [Middleware Guide](./middleware.md): Writing reusable HTTP middleware and binding it to routes.
-- [Glossary](./glossary.md): Short definitions for common terms in the docs.
-- [Overview for Agents](./AGENTS.md): Internal guidelines for contributors updating documentation.
-- [Tutorials Overview](../tutorials/overview.md): Step-by-step builds covering blog posts, authentication, and ORM relationships.
+```ts
+// app/Http/Controllers/TaskController.ts
+import { Controller } from '@guren/server'
+import { Task } from '@/app/Models/Task'
 
-## Terminology
-- **Application (`my-app` etc.)**: A project scaffolded with `create-guren-app`; this is your main workspace.
-- **Bootstrap**: The initialization flow in `src/main.ts` that registers routes, configures the ORM, and boots the `Application` instance.
+export default class TaskController extends Controller {
+  async index() {
+    const tasks = await Task.where('completed', false)
+      .orderBy('createdAt', 'desc')
+      .limit(20)
+      .get()
 
-Have suggestions or discover issues? Open an issue or submit a PR—we appreciate the feedback!
+    return this.inertia('Tasks/Index', { tasks })
+  }
+
+  async store() {
+    const data = await this.only('title', 'description')
+    const task = await Task.create(data)
+    return this.redirect('/tasks')
+  }
+}
+```
+
+Your React page receives typed props directly from the controller — no manual API layer:
+
+```tsx
+// resources/js/pages/Tasks/Index.tsx
+import type { ControllerInertiaProps } from '@guren/server'
+import type TaskController from '@/app/Http/Controllers/TaskController'
+
+type Props = ControllerInertiaProps<TaskController, 'index'>
+
+export default function TasksIndex({ tasks }: Props) {
+  return (
+    <ul>
+      {tasks.map((task) => (
+        <li key={task.id}>{task.title}</li>
+      ))}
+    </ul>
+  )
+}
+```
+
+Testing reads like plain English:
+
+```ts
+const app = await TestApp.create({ boot })
+
+await app.get('/tasks').assertOk().assertJsonCount(3, 'tasks')
+await app.post('/tasks', { title: 'Ship it' }).assertRedirect('/tasks')
+await app.actingAs(user).get('/dashboard').assertOk()
+```
+
+## What Makes Guren Different
+
+**Bun-native from day one.** Guren runs on Bun's runtime with Hono as the HTTP layer. There is no Node.js compatibility shim — you get Bun's fast startup, native TypeScript execution, and built-in test runner out of the box.
+
+**Laravel's developer experience, in TypeScript.** If you have used Laravel, the patterns are instantly familiar: `Route.resource`, `Controller` base class with `this.inertia()`, `Model.where().orderBy().get()`. If you have not, you will find them intuitive anyway — the API reads like what it does.
+
+**End-to-end type safety.** Your Drizzle schema types flow into your Model, through your Controller, and into your React page props. Change a column name and TypeScript catches every place that needs updating — from database to browser.
+
+**Batteries included, not forced.** Authentication, validation, caching, queues, mail, events, broadcasting, scheduling — they are all there when you need them. Each subsystem is opt-in through ServiceProviders, so you only load what you use.
+
+**Convention over configuration.** Generate a controller with `bunx guren make:controller`, a model with `make:model`, routes with `make:route`. The CLI scaffolds files in the right place with the right structure so you spend time building features, not debating folder layout.
+
+## Get Started
+
+```bash
+bunx create-guren-app my-app
+cd my-app
+bun install
+bun run dev        # visit http://localhost:3333
+```
+
+## Learn More
+
+New to Guren? Follow this path:
+
+1. **[First Steps](./first-steps.md)** — Build a working feature in 10 minutes.
+2. **[Getting Started](./getting-started.md)** — Environment setup and database configuration.
+3. **[Routing Guide](./routing.md)** — Route groups, middleware, and resource routes.
+4. **[Controller Guide](./controllers.md)** — Request handling, input helpers, and validation.
+5. **[Database Guide](./database.md)** — Drizzle schemas, migrations, QueryBuilder, and relationships.
+6. **[Frontend Guide](./frontend.md)** — Inertia-powered React pages and SSR.
+7. **[Testing Guide](./testing.md)** — TestApp, fluent assertions, and test utilities.
+
+For a full reference of CLI commands, see the [CLI Reference](./cli.md). If any term is unfamiliar, check the [Glossary](./glossary.md).

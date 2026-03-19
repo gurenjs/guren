@@ -1,6 +1,6 @@
 ---
 name: db-manage
-description: Database management for Guren with safety checks. Handles migrations, rollbacks, seeding, and container management. Use when user mentions "database", "migration", "migrate", "rollback", "seed", "db:up", "db:down", or database-related tasks.
+description: Database management for Guren with safety checks. Handles migrations, rollbacks, seeding, resets, and container management. Use when user mentions "database", "migration", "migrate", "rollback", "seed", "reset", "db:up", "db:down", "db:reset", "fresh database", or database-related tasks.
 ---
 
 # Database Management Skill
@@ -31,7 +31,7 @@ bunx guren db:rollback
 bunx guren db:rollback --step=3
 bunx guren db:rollback --batch
 ```
-- ⚠️ ALWAYS confirm before running
+- ALWAYS confirm before running
 - Warn about data loss
 
 ### Fresh (destructive)
@@ -39,7 +39,7 @@ bunx guren db:rollback --batch
 bunx guren db:fresh
 bunx guren db:fresh --seed
 ```
-- ⚠️ DROPS ALL TABLES
+- DROPS ALL TABLES
 - Require explicit confirmation
 - Block in production
 
@@ -47,6 +47,22 @@ bunx guren db:fresh --seed
 ```bash
 bun run db:seed
 ```
+
+### Reset
+
+Full reset: stop container, start fresh, migrate, and seed.
+
+```bash
+bun run db:down && bun run db:up && sleep 3 && bun run db:migrate && bun run db:seed
+```
+
+- This destroys all existing data in the development database
+- The `sleep 3` ensures PostgreSQL is ready before migrations
+- ALWAYS confirm with user before running
+- If reset fails:
+  1. Check if Docker is running
+  2. Check if port 54322 is available
+  3. Review migration errors if migrations fail
 
 ### Create Migration
 ```bash

@@ -1,9 +1,9 @@
 # ルーティングガイド
 
-Guren は Hono の HTTP サーバー上に Laravel 風のルーティング DSL を提供します。`routes/web.ts` をインポートすると起動時にルートが登録され、パス・HTTP メソッド・コントローラ・任意のミドルウェアを宣言的にまとめられます。
+Guren は Hono の HTTP サーバー上に Laravel 風のルーティング DSL を提供します。`routes/web.ts` をインポートすることで起動時にルートが登録され、パス・HTTP メソッド・コントローラーアクション・任意のミドルウェアを宣言的に定義できます。
 
 ## 基本の使い方
-`routes/web.ts` で `Route` とコントローラをインポートして定義します:
+`routes/web.ts` を作成または編集し、`Route` ヘルパーと使用するコントローラーをインポートします。
 
 ```ts
 import { Route } from '@guren/server'
@@ -13,14 +13,14 @@ Route.get('/', [PostsController, 'index'])
 Route.post('/posts', [PostsController, 'store'])
 ```
 
-各ルートはパスと以下のいずれかを受け取ります:
-- コントローラタプル `[ControllerClass, 'method']`
-- インラインハンドラ `(ctx) => new Response('...')`
+各ルートはパスと以下のいずれかを受け取ります。
+- コントローラータプル `[ControllerClass, 'method']`
+- インラインハンドラー `(ctx) => new Response('...')`
 
-利用できるメソッドは `Route.get`, `Route.post`, `Route.put`, `Route.patch`, `Route.delete`, 汎用の `Route.on(method, path, handler)` です。
+利用できるメソッドは `Route.get`、`Route.post`、`Route.put`、`Route.patch`、`Route.delete`、そして汎用の `Route.on(method, path, handler)` です。
 
 ## ルートグループ
-共通プレフィックスやミドルウェアをまとめるには `Route.group(prefix, callback)` を使います:
+`Route.group(prefix, callback)` を使って、共通のパスプレフィックスとミドルウェアを適用できます。
 
 ```ts
 Route.group('/posts', () => {
@@ -29,30 +29,121 @@ Route.group('/posts', () => {
 })
 ```
 
-グループはネスト可能です。`/posts` + `/new` は自動で `/posts/new` に連結されます。
+グループはネスト可能です。プレフィックスは自動的にトリミングされるため、`/posts` + `/new` は `/posts/new` になります。
 
 ## ミドルウェア
-ハンドラの後ろに Hono のミドルウェアを渡します:
+
+### ルート単位のミドルウェア
+
+ハンドラーの後にミドルウェアを追加するか、`.middleware()` メソッドでチェーンできます。
 
 ```ts
 import { auth } from '@/app/Http/middleware/auth'
 
+// インラインでミドルウェアを渡す
 Route.post('/posts', [PostsController, 'store'], auth)
+
+// 流暢なルート単位のミドルウェア
+Route.get('/admin', [AdminController, 'index']).middleware('auth', 'admin')
 ```
 
-ミドルウェアは指定した順に実行されます。同じグループ内でもルートごとに別のミドルウェアを付けられます。グローバル登録やビルトインのヒントは [Middleware Guide](./middleware.md) を参照してください。
+### ミドルウェアエイリアス
+
+ミドルウェア関数に短い名前を登録しておけば、ルート全体で文字列で参照できます。
+
+```ts
+import { Route, requireAuthenticated } from '@guren/server'
+import { requireAdmin } from '@/app/Http/middleware/admin'
+
+Route.aliasMiddleware('auth', requireAuthenticated())
+Route.aliasMiddleware('admin', requireAdmin())
+```
+
+エイリアスを登録すれば、ミドルウェアが受け入れられる場所ならどこでも文字列名で使えます。
+
+```ts
+Route.get('/dashboard', [DashboardController, 'index']).middleware('auth')
+Route.get('/admin', [AdminController, 'index']).middleware('auth', 'admin')
+```
+
+### ミドルウェアグループ
+
+よく使うミドルウェアの組み合わせを一つの名前にまとめられます。
+
+```ts
+Route.groupMiddleware('web', ['session', 'csrf'])
+Route.groupMiddleware('api', ['throttle:60'])
+```
+
+ミドルウェアグループをルートグループに適用します。
+
+```ts
+Route.middleware('web').group(() => {
+  Route.get('/', [HomeController, 'index'])
+  Route.get('/about', [PagesController, 'about'])
+})
+
+Route.middleware('auth').group(() => {
+  Route.get('/dashboard', [DashboardController, 'index'])
+  Route.get('/settings', [SettingsController, 'index'])
+})
+```
+
+ミドルウェアグループと個別のエイリアスは自由に組み合わせられます。
+
+```ts
+Route.middleware('web', 'auth').group(() => {
+  Route.get('/profile', [ProfileController, 'show'])
+})
+```
+
+グローバル登録パターン、ビルトインヘルパー、セッションサポートの詳細は、専用の[ミドルウェアガイド](./middleware.md)をご覧ください。
 
 ## ルートパラメータ
-動的セグメントは Hono の構文に従います:
+動的パラメータは Hono の構文に従います。
 
 ```ts
 Route.get('/posts/:id', [PostsController, 'show'])
 ```
 
-コントローラでは `this.ctx.req.param('id')` で参照します。任意パラメータは `Route.get('/posts/:id?', handler)` のように `?`、ワイルドカードは `*`（例: `/:slug*`）を使います。
+コントローラー内では `this.ctx.req.param('id')` でパラメータを読み取ります。
 
-## ブート手順
-`src/main.ts` でルートファイルをインポートし、アプリ起動前に登録します:
+オプショナルセグメントには Hono のパターンサポート（`Route.get('/posts/:id?', handler)`）を使い、ワイルドカードには `*`（例: `/:slug*`）を使います。
+
+## ルートモデルバインディング
+
+ルートモデルバインディングを使うと、ルートパラメータから Eloquent モデルのインスタンスを自動的に解決できます。パラメータ名とモデルクラスのバインディングを登録します。
+
+```ts
+import { Route } from '@guren/server'
+import { Post } from '@/app/Models/Post'
+import { User } from '@/app/Models/User'
+
+Route.bind('post', Post)
+Route.bind('user', User)
+```
+
+バインドされた名前と一致するパラメータを含むルートでは、Guren がプライマリキーで対応するモデルインスタンスを解決し、コントローラーに渡します。
+
+```ts
+// ルート定義
+Route.get('/posts/:post', [PostsController, 'show'])
+Route.get('/users/:user/posts/:post', [PostsController, 'showForUser'])
+
+// コントローラーで解決済みのモデルインスタンスを受け取る
+export default class PostsController extends Controller {
+  async show() {
+    // this.ctx.req.param('post') は解決済みの Post インスタンス
+    const post = this.ctx.get('post') as PostRecord
+    return this.inertia('posts/Show', { post })
+  }
+}
+```
+
+モデルが見つからない場合は、自動的に 404 レスポンスが返されます。
+
+## ブートストラップ
+`src/main.ts` でルートファイルをインポートし、アプリケーションの起動前にルートが登録されるようにします。
 
 ```ts
 // src/main.ts
@@ -63,10 +154,10 @@ await app.boot()
 await app.listen()
 ```
 
-`routes/web.ts` は副作用だけを持ち、エクスポートは不要です。
+インポートは副作用のみです。`routes/web.ts` から明示的なエクスポートは必要ありません。
 
-## カスタムハンドラ
-インラインハンドラを使えばコントローラを経由せず Hono `Context` を直接扱えます:
+## カスタムハンドラー
+インラインハンドラーを使えば、コントローラーなしで Hono の `Context` を直接扱えます。
 
 ```ts
 Route.get('/health', (ctx) => ctx.json({ ok: true }))
@@ -75,8 +166,10 @@ Route.get('/health', (ctx) => ctx.json({ ok: true }))
 ヘルスチェックや Webhook のような軽量エンドポイントに便利です。
 
 ## Tips
-- `routes/web.ts` は HTTP 定義に集中させ、ビジネスロジックはコントローラやサービスへ移してください。
-- 大規模になったら `routes/admin.ts` などに分割し、`src/main.ts` からまとめてインポートします。
-- 可能な限り表現力のあるメソッド名（`index`, `show`, `store`, `update`, `destroy`）を使うと、フレームワーク全体のスタイルと揃います。
+- `routes/web.ts` は HTTP 定義に集中させましょう。ビジネスロジックはコントローラーやサービスに移してください。
+- 大規模なアプリでは、ルートを追加ファイル（例: `routes/admin.ts`）に分割し、`src/main.ts` からまとめてインポートします。
+- 分かりやすいコントローラーメソッド名（`index`、`show`、`store`、`update`、`destroy`）を使うと、フレームワーク全体の規約と揃います。
+- ミドルウェアエイリアスを活用すると、ルートファイルがすっきりし、あちこちでミドルウェア関数をインポートする必要がなくなります。
+- ルートモデルバインディングはルートファイルの先頭で登録しておくと、以降のすべてのルートに適用されます。
 
-この DSL を使えば、エントリーポイントを宣言的で読みやすく保ったまま複雑な HTTP 構造を表現できます。
+ルーティング DSL を使えば、複雑な HTTP 構造を表現しながら、エントリーポイントをクリーンで宣言的に保てます。

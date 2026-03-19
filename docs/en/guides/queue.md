@@ -65,7 +65,20 @@ export class SendWelcomeEmailJob extends Job<SendWelcomeEmailPayload> {
 
 ## Dispatching Jobs
 
-Before dispatching jobs, configure a queue driver:
+### Using the Facade
+
+The simplest way to interact with the queue is through the `QueueFacade`:
+
+```ts
+import { QueueFacade as Queue } from '@guren/server'
+
+// Access the default driver
+const driver = Queue.driver()
+```
+
+### Manual Setup
+
+You can also configure a queue driver directly:
 
 ```ts
 import { setQueueDriver, MemoryDriver } from '@guren/core'
@@ -257,6 +270,38 @@ Or programmatically:
 
 ```ts
 await driver.deleteFailedJob(jobId)
+```
+
+## Container Integration
+
+The queue subsystem is registered as a singleton via a `ServiceProvider`. You can resolve it from the container:
+
+```ts
+import { container } from '@guren/server'
+
+const queue = container.make('queue') // QueueManager
+const driver = queue.driver()
+```
+
+### Testing with `container.fake()`
+
+Swap the queue manager in tests to prevent real job dispatching:
+
+```ts
+import { container } from '@guren/server'
+import { QueueManager, MemoryDriver } from '@guren/core'
+
+test('jobs are dispatched', async () => {
+  const fakeQueue = new QueueManager({
+    default: 'memory',
+    drivers: { memory: () => new MemoryDriver() },
+  })
+
+  using _ = container.fake('queue', fakeQueue)
+
+  // All code resolving 'queue' from the container (including the facade)
+  // now uses fakeQueue
+})
 ```
 
 ## Testing

@@ -126,6 +126,3 @@ export async function resetDatabase(options: ResetDatabaseOptions = {}): Promise
     }
   }
 }
-
-/** @deprecated Use resetDatabase instead */
-export const freshDatabase = resetDatabase

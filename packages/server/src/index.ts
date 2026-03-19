@@ -33,12 +33,7 @@ export type {
   InertiaSharedProps,
   ResolvedSharedInertiaProps,
 } from './mvc/inertia/shared'
-// Legacy plugin system (deprecated - use container ServiceProvider instead)
-export type { Provider, ProviderConstructor } from './plugins/Provider'
-export { ApplicationContext } from './plugins/ApplicationContext'
-export { InertiaViewProvider as LegacyInertiaViewProvider } from './plugins/providers/InertiaViewProvider'
-export { AuthServiceProvider as LegacyAuthServiceProvider } from './plugins/providers/AuthServiceProvider'
-// New container-based providers
+// Service Providers
 export {
   InertiaServiceProvider,
   AuthServiceProvider,

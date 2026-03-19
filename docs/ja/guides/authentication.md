@@ -95,12 +95,13 @@ app.use('*', createSessionMiddleware())
 認証を設定する最もシンプルな方法は `auth.useModel()` ヘルパーを使用することで、`ModelUserProvider` と `SessionGuard` を一度に登録できます:
 
 ```ts
-import type { ApplicationContext, Provider } from '@guren/core'
+import { ServiceProvider } from '@guren/server'
 import { User } from '@/app/Models/User'
 
-export default class AuthProvider implements Provider {
-  register(context: ApplicationContext): void {
-    context.auth.useModel(User, {
+export default class AuthProvider extends ServiceProvider {
+  register(): void {
+    const auth = this.container.make<AuthManager>('auth')
+    auth.useModel(User, {
       usernameColumn: 'email',
       passwordColumn: 'passwordHash',
       rememberTokenColumn: 'rememberToken',
@@ -121,14 +122,16 @@ export default class AuthProvider implements Provider {
 カスタムプロバイダーやガードが必要な高度なケースでは、手動で設定できます:
 
 ```ts
-import type { ApplicationContext, Provider } from '@guren/core'
+import { ServiceProvider } from '@guren/server'
 import { ModelUserProvider, SessionGuard } from '@guren/core'
 import { User } from '@/app/Models/User'
 
-export default class AuthProvider implements Provider {
-  register(context: ApplicationContext): void {
+export default class AuthProvider extends ServiceProvider {
+  register(): void {
+    const auth = this.container.make<AuthManager>('auth')
+
     // プロバイダーを登録
-    context.auth.registerProvider('users', () => new ModelUserProvider(User, {
+    auth.registerProvider('users', () => new ModelUserProvider(User, {
       usernameColumn: 'email',
       passwordColumn: 'passwordHash',
       rememberTokenColumn: 'rememberToken',
@@ -136,12 +139,12 @@ export default class AuthProvider implements Provider {
     }))
 
     // カスタムガードを登録
-    context.auth.registerGuard('web', ({ session, manager }) => {
+    auth.registerGuard('web', ({ session, manager }) => {
       const provider = manager.getProvider('users')
       return new SessionGuard({ provider, session })
     })
 
-    context.auth.setDefaultGuard('web')
+    auth.setDefaultGuard('web')
   }
 }
 ```
@@ -176,13 +179,20 @@ export class User extends AuthenticatableModel<UserRecord> {
 ```ts
 export default class DashboardController extends Controller {
   async index() {
-    const user = await this.auth.user()
+    const user = await this.auth.user()       // ユーザーまたは null を返す
     return this.inertia('dashboard/Index', { user }, { url: this.request.path })
+  }
+
+  async store() {
+    const user = await this.auth.userOrFail()  // 未認証なら 401 をスロー
+    // user は non-null が保証される
+    await Post.create({ authorId: user.id, ...data })
+    return this.redirect('/posts')
   }
 }
 ```
 
-Zod などのバリデーションを組み込むときは `parseRequestPayload()` と `formatValidationErrors()` を使うとハンドリングを一貫できます。
+バリデーションには `this.validateBody()` / `this.validateQuery()` / `this.validateParams()` を Zod スキーマと共に使うか、`this.validate()` を FormRequest クラスと使います。
 
 Inertia の全ページでログインユーザーを共有したい場合は、アプリ起動時に共有 props を登録します:
 
@@ -213,6 +223,7 @@ Route.post('/logout', [LoginController, 'destroy'], requireAuthenticated({ redir
 
 - `auth.check()` — 認証済みなら `true`。
 - `auth.user()` — 現在のユーザーレコード（または `null`）。
+- `auth.userOrFail()` — 現在のユーザーを返すか、未認証なら `AuthenticationException`（401）をスロー。ルートが保護されていると分かっている場合に、null チェックを省略できます。
 - `auth.login(user, remember?)` — 指定ユーザーでログインし、任意で remember トークンを発行。
 - `auth.attempt(credentials, remember?)` — 資格情報を検証し、成功時にログイン。
 - `auth.logout()` — セッションと remember トークンをクリア。

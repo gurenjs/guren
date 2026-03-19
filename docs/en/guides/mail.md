@@ -10,7 +10,23 @@ Guren provides a fluent API for sending emails with support for multiple transpo
 
 ## Basic Usage
 
-### Quick Start
+### Quick Start (Facade)
+
+The simplest way to send mail is through the `MailFacade`, which resolves the `MailManager` from the container lazily:
+
+```ts
+import { MailFacade as Mail } from '@guren/server'
+
+// Send a simple email — no need to pass a manager instance
+await Mail.to('user@example.com')
+  .subject('Hello!')
+  .text('Hello World!')
+  .send()
+```
+
+### Direct Instantiation
+
+You can also create a `MailManager` directly:
 
 ```ts
 import { MailManager, mail } from '@guren/core'
@@ -331,6 +347,44 @@ const welcomeMail = new WelcomeMail(mailManager, {
 await welcomeMail.send()
 // or
 await welcomeMail.queue('emails')
+```
+
+## Container Integration
+
+The mail subsystem is registered as a singleton via a `ServiceProvider`. You can resolve it from the container:
+
+```ts
+import { container } from '@guren/server'
+
+const mailManager = container.make('mail') // MailManager
+```
+
+### Testing with `container.fake()`
+
+Swap the mail manager in tests to capture sent messages without sending real emails:
+
+```ts
+import { container } from '@guren/server'
+import { MailManager, MemoryTransport } from '@guren/core'
+
+test('sends welcome email on registration', async () => {
+  const memoryTransport = new MemoryTransport()
+  const fakeMail = new MailManager({
+    default: 'memory',
+    from: { email: 'test@example.com' },
+  })
+  fakeMail.registerTransport('memory', () => memoryTransport)
+
+  using _ = container.fake('mail', fakeMail)
+
+  // Run the code under test — all mail sent via the facade or container
+  // is captured by memoryTransport
+  await registerUser({ email: 'new@example.com' })
+
+  const sent = memoryTransport.getSentMessages()
+  expect(sent).toHaveLength(1)
+  expect(sent[0].to[0].email).toBe('new@example.com')
+})
 ```
 
 ## Testing

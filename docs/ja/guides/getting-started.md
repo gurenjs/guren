@@ -54,6 +54,10 @@ bun run dev
 - `http://localhost:3333` を開いて確認します。
 - Bun プロセスが Hono サーバーと Vite を同時に立ち上げます。`GUREN_DEV_VITE=0` で Vite の起動を抑制できます。
 - Inertia のアセット解決は開発時に自動で Vite へ向きます（本番はビルド済み資産を参照）。
+- サービスプロバイダの自動ディスカバリが有効な場合、`app/Providers/` 配下のプロバイダが自動的に登録されます:
+  ```ts
+  const app = new Application({ discover: true })
+  ```
 
 ### 6. 次のステップ
 - コード生成:  

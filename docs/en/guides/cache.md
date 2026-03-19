@@ -11,24 +11,37 @@ Guren provides a unified caching API with support for multiple storage backends.
 
 ## Basic Usage
 
-### Quick Start
+### Quick Start (Facade)
+
+The simplest way to use the cache is through the `CacheFacade`, which resolves the `CacheManager` from the container lazily:
+
+```ts
+import { CacheFacade as Cache } from '@guren/server'
+
+// Store a value (TTL in seconds)
+await Cache.store().set('user:1', { name: 'John' }, 3600)
+
+// Retrieve a value
+const user = await Cache.store().get<{ name: string }>('user:1')
+
+// Check if key exists
+const exists = await Cache.store().has('user:1')
+
+// Delete a value
+await Cache.store().delete('user:1')
+```
+
+### Direct Instantiation
+
+You can also create a `CacheManager` directly:
 
 ```ts
 import { CacheManager } from '@guren/core'
 
 const cache = new CacheManager()
 
-// Store a value (TTL in seconds)
 await cache.store().set('user:1', { name: 'John' }, 3600)
-
-// Retrieve a value
 const user = await cache.store().get<{ name: string }>('user:1')
-
-// Check if key exists
-const exists = await cache.store().has('user:1')
-
-// Delete a value
-await cache.store().delete('user:1')
 ```
 
 ### Cache Operations
@@ -265,9 +278,67 @@ export async function getUserPreferences(
 }
 ```
 
+## Container Integration
+
+The cache subsystem is registered as a singleton via a `ServiceProvider`. You can resolve it from the container:
+
+```ts
+import { container } from '@guren/server'
+
+// Type-safe resolution
+const cache = container.make('cache') // CacheManager
+await cache.store().get('key')
+```
+
+### Custom Configuration via ServiceProvider
+
+Override the default cache configuration by creating your own provider:
+
+```ts
+import { ServiceProvider, createCacheManager } from '@guren/server'
+
+class AppCacheProvider extends ServiceProvider {
+  register(): void {
+    this.container.singleton('cache', () => createCacheManager({
+      default: 'redis',
+      stores: {
+        redis: { driver: 'redis', host: 'localhost' },
+        memory: { driver: 'memory', maxSize: 500 },
+      },
+    }))
+  }
+}
+```
+
 ## Testing
 
-Use the Memory store for testing:
+### Using `container.fake()`
+
+In tests, you can swap the cache manager with a fake using `container.fake()` and the `using` declaration for automatic cleanup:
+
+```ts
+import { describe, test, expect } from 'bun:test'
+import { container } from '@guren/server'
+import { CacheManager } from '@guren/core'
+
+describe('Cache in application code', () => {
+  test('uses fake cache manager', async () => {
+    const fakeCache = new CacheManager() // in-memory by default
+
+    using _ = container.fake('cache', fakeCache)
+
+    // All code that resolves 'cache' from the container (including facades)
+    // now receives fakeCache
+    const cache = container.make('cache')
+    await cache.store().set('key', 'value', 3600)
+    expect(await cache.store().get('key')).toBe('value')
+  })
+})
+```
+
+### Using the Memory Store Directly
+
+Use the Memory store for unit testing cache logic:
 
 ```ts
 import { describe, test, expect, beforeEach } from 'bun:test'

@@ -1,3 +1,4 @@
+import { DEFAULT_PAGINATION_SIZE } from './Model'
 import type { FindManyOptions, Model, ORMAdapter, OrderByClause, OrderDirection, PaginatedResult, PaginationMeta, PlainObject } from './Model'
 
 /** Comparison operators supported by the QueryBuilder. */
@@ -28,8 +29,6 @@ export interface QueryBuilderOptions {
   offsetValue?: number
   selectFields?: string[]
 }
-
-const DEFAULT_PAGINATION_SIZE = 15
 
 /**
  * Fluent query builder for the Guren ORM.
@@ -63,7 +62,7 @@ export class QueryBuilder<TRecord extends PlainObject = PlainObject> {
 
   constructor(modelClass: typeof Model) {
     this.modelClass = modelClass
-    this.table = (modelClass as unknown as { resolveTable(): unknown }).resolveTable()
+    this.table = modelClass.resolveTable()
     this.adapter = modelClass.getAdapter()
   }
 

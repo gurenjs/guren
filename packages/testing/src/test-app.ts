@@ -328,16 +328,10 @@ export class TestApp {
    * @guren/server installed), a lightweight Hono-based fallback is used.
    */
   static async create(options: TestAppOptions = {}): Promise<TestApp> {
-    try {
-      const { Application } = await import('@guren/server')
-      const application = new Application({
-        boot: options.boot as ((app: Hono) => void | Promise<void>) | undefined,
-        providers: options.providers as Array<new (...args: unknown[]) => unknown> | undefined,
-      })
-      await application.boot()
+    let Application: typeof import('@guren/server').Application | undefined
 
-      const fetchFn = (request: Request) => application.fetch(request)
-      return new TestApp(fetchFn)
+    try {
+      ;({ Application } = await import('@guren/server'))
     } catch {
       // Fallback: use a plain Hono app when @guren/server is not available.
       const { Hono } = await import('hono')
@@ -349,6 +343,15 @@ export class TestApp {
       const fetchFn = (request: Request) => hono.fetch(request)
       return new TestApp(fetchFn)
     }
+
+    const application = new Application({
+      boot: options.boot as ((app: Hono) => void | Promise<void>) | undefined,
+      providers: options.providers as Array<new (...args: unknown[]) => unknown> | undefined,
+    })
+    await application.boot()
+
+    const fetchFn = (request: Request) => application.fetch(request)
+    return new TestApp(fetchFn)
   }
 
   /**

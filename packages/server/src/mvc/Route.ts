@@ -369,14 +369,20 @@ export class Route {
   /**
    * Resolve middleware names (including groups) to actual handlers.
    */
-  private static resolveMiddlewareNames(names: string[]): MiddlewareHandler[] {
+  private static resolveMiddlewareNames(names: string[], seen?: Set<string>): MiddlewareHandler[] {
     const handlers: MiddlewareHandler[] = []
+    const visited = seen ?? new Set<string>()
 
     for (const name of names) {
       // Check if it's a group
       const groupNames = this.middlewareGroups.get(name)
       if (groupNames) {
-        handlers.push(...this.resolveMiddlewareNames(groupNames))
+        if (visited.has(name)) {
+          throw new Error(`Circular middleware group detected: "${name}"`)
+        }
+        const nextVisited = new Set(visited)
+        nextVisited.add(name)
+        handlers.push(...this.resolveMiddlewareNames(groupNames, nextVisited))
         continue
       }
 
@@ -483,7 +489,6 @@ function resolveHandler(
           const deps = inject.map((key) => container.make(key))
           controller = new ControllerClass(...deps)
         } catch {
-          // Fallback to no-arg construction if container not available
           controller = new ControllerClass()
         }
       } else {
@@ -497,10 +502,12 @@ function resolveHandler(
         throw new Error(`Controller method ${String(methodName)} is not defined on ${ControllerClass.name}.`)
       }
 
-      // Resolve model bindings from route params
-      const resolvedBindings = await resolveModelBindings(c, modelBindings)
+      // Resolve model bindings from route params (skip if none registered)
+      const resolvedBindings = modelBindings.size > 0
+        ? await resolveModelBindings(c, modelBindings)
+        : []
 
-      const args: unknown[] = [c, ...resolvedBindings]
+      const args: unknown[] = resolvedBindings.length > 0 ? [c, ...resolvedBindings] : [c]
       const result = await (method as (...a: unknown[]) => unknown).apply(controller, args)
       return ensureResponse(result)
     }

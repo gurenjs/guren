@@ -72,7 +72,26 @@ class OrderPlaced extends Event {
 
 ## Registering Listeners
 
-### Basic Usage
+### Using the Facade
+
+The simplest way to work with events is through the `EventsFacade`, which resolves the `EventManager` from the container lazily:
+
+```ts
+import { EventsFacade as Events } from '@guren/server'
+import { UserRegistered } from '@/app/Events/UserRegistered'
+
+// Register a listener
+Events.on(UserRegistered, async (event) => {
+  console.log(`User ${event.email} registered at ${event.timestamp}`)
+})
+
+// Emit the event
+Events.emit(new UserRegistered('123', 'user@example.com'))
+```
+
+### Direct Instantiation
+
+You can also create an `EventManager` directly:
 
 ```ts
 import { EventManager } from '@guren/core'
@@ -323,6 +342,34 @@ const listeners = events.getListeners(UserRegistered)
 
 // Remove all listeners
 events.removeAllListeners()
+```
+
+## Container Integration
+
+The event system is registered as a singleton via a `ServiceProvider`. You can resolve it from the container:
+
+```ts
+import { container } from '@guren/server'
+
+const events = container.make('events') // EventManager
+events.emit(new UserRegistered('123', 'user@example.com'))
+```
+
+### Testing with `container.fake()`
+
+Swap the event manager with a fake in tests:
+
+```ts
+import { container } from '@guren/server'
+import { EventManager } from '@guren/core'
+
+test('application emits events', async () => {
+  const fakeEvents = new EventManager()
+  using _ = container.fake('events', fakeEvents)
+
+  // All code resolving 'events' from the container (including the facade)
+  // now uses fakeEvents — no real listeners are triggered
+})
 ```
 
 ## Testing

@@ -72,7 +72,24 @@ class OrderPlaced extends Event {
 
 ## リスナーの登録
 
-### 基本的な使い方
+### ファサードを使用（推奨）
+
+`EventsFacade` を使うと、コンテナから `EventManager` を遅延解決して簡潔に利用できます:
+
+```ts
+import { EventsFacade as Events } from '@guren/server'
+import { UserRegistered } from '@/app/Events/UserRegistered'
+
+// リスナーを登録
+Events.on(UserRegistered, async (event) => {
+  console.log(`ユーザー ${event.email} が ${event.timestamp} に登録しました`)
+})
+
+// イベントを発行
+await Events.emit(new UserRegistered('123', 'user@example.com'))
+```
+
+### 直接インスタンス化
 
 ```ts
 import { EventManager } from '@guren/core'

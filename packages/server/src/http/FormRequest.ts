@@ -3,6 +3,7 @@ import type { ValidationRule } from './validation/types'
 import { Validator } from './validation/Validator'
 import { AuthorizationException } from '../errors/exceptions/AuthorizationException'
 import { AUTH_CONTEXT_KEY } from './middleware/auth'
+import { parseRequestPayload } from './request'
 import type { AuthContext } from '../auth'
 
 /**
@@ -109,26 +110,6 @@ export abstract class FormRequest<T = Record<string, unknown>> {
   }
 
   private async parseBody(): Promise<Record<string, unknown>> {
-    const contentType = this.ctx.req.header('content-type') ?? ''
-
-    if (contentType.includes('application/json')) {
-      return this.ctx.req.json() as Promise<Record<string, unknown>>
-    }
-
-    if (contentType.includes('application/x-www-form-urlencoded')) {
-      const text = await this.ctx.req.text()
-      return Object.fromEntries(new URLSearchParams(text))
-    }
-
-    if (contentType.includes('multipart/form-data')) {
-      const formData = await this.ctx.req.formData()
-      const result: Record<string, unknown> = {}
-      formData.forEach((value, key) => {
-        result[key] = value
-      })
-      return result
-    }
-
-    return {}
+    return parseRequestPayload(this.ctx)
   }
 }

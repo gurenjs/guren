@@ -78,6 +78,17 @@ notifications
   .registerChannel('database', new DatabaseChannel())
 ```
 
+### Container Integration
+
+The notification subsystem is registered as a singleton via a `ServiceProvider`. You can resolve it from the container:
+
+```ts
+import { container } from '@guren/server'
+
+const notifications = container.make('notifications') // NotificationManager
+await notifications.send(user, new OrderShipped(order, 'ABC123'))
+```
+
 ### Sending to a User
 
 ```ts
@@ -377,6 +388,30 @@ class OrderConfirmation extends Notification {
 ```
 
 ## Testing
+
+### Using `container.fake()`
+
+Swap the notification manager in tests:
+
+```ts
+import { container } from '@guren/server'
+import { NotificationManager, MemoryChannel } from '@guren/core'
+
+test('sends order notification', async () => {
+  const memoryChannel = new MemoryChannel()
+  const fakeNotifications = new NotificationManager({
+    channels: { memory: memoryChannel },
+  })
+
+  using _ = container.fake('notifications', fakeNotifications)
+
+  // Run code under test
+  const sent = memoryChannel.getSentNotifications()
+  expect(sent).toHaveLength(1)
+})
+```
+
+### Manual Testing
 
 ```ts
 import { describe, test, expect, beforeEach } from 'bun:test'

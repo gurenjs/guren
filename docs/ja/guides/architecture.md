@@ -76,6 +76,39 @@ export class Post extends Model<PostRecord> {
 - サーバーは `data-page` 属性を通して Inertia ペイロードを HTML に埋め込みます。
 - クライアントは CDN ESM から React/Inertia を読み込み、初期ページをハイドレートします。
 
+## サービスプロバイダ
+
+Guren v0.3 では全プロバイダが `ServiceProvider` を継承する統一パターンに移行しました。`this.container` 経由でサービスコンテナにアクセスできます:
+
+```ts
+import { ServiceProvider } from '@guren/server'
+
+export default class AppServiceProvider extends ServiceProvider {
+  register(): void {
+    // サービスの登録
+    this.container.singleton('myService', () => new MyService())
+  }
+
+  boot(): void {
+    // 初期化処理
+    const service = this.container.make<MyService>('myService')
+    service.init()
+  }
+}
+```
+
+### ファサード
+
+頻繁に使うサービスにはファサードが用意されています。コンテナから遅延解決されるため、import するだけで利用可能です:
+
+```ts
+import { CacheFacade as Cache } from '@guren/server'
+import { EventsFacade as Events } from '@guren/server'
+import { LogFacade as Log } from '@guren/server'
+import { MailFacade as Mail } from '@guren/server'
+import { QueueFacade as Queue } from '@guren/server'
+```
+
 ## アプリケーションのブート
 生成済みプロジェクトの `src/main.ts` は以下の手順を示します:
 
@@ -83,6 +116,12 @@ export class Post extends Model<PostRecord> {
 2. `const app = new Application({ providers: [DatabaseProvider, ...] })` のように生成し、サービスを早期登録。
 3. `await app.boot()` でルートをマウントし、プロバイダーのブートフックを実行し、ミドルウェアを準備。
 4. `await app.listen()`（または Bun では `app.listen()`）で HTTP サーバーを開始。
+
+自動ディスカバリを有効にすると、`app/Providers/` 配下のプロバイダが自動的に登録されます:
+
+```ts
+const app = new Application({ discover: true })
+```
 
 この流れは Bun のネイティブモジュールで動作し、`bun run dev` で起動されます。
 
