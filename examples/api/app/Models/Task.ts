@@ -5,7 +5,6 @@ import type { UserRecord } from './User.js'
 export type TaskRecord = typeof tasks.$inferSelect
 export type NewTaskRecord = typeof tasks.$inferInsert
 export type TaskOwnerSummary = Pick<UserRecord, 'id' | 'name'>
-export type TaskWithOwner = TaskRecord & { owner: BelongsToRecord<TaskOwnerSummary> }
 
 export class Task extends Model<TaskRecord> {
   static override table = tasks

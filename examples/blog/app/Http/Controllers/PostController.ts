@@ -4,14 +4,15 @@ import {
   type InferInertiaProps,
   Controller,
 } from '@guren/server'
-import { Post, type PostWithAuthor } from '../../Models/Post.js'
+import { Post } from '../../Models/Post.js'
 import type { UserRecord } from '../../Models/User.js'
 import { PostPayloadSchema, PostFormSchema, PageQuerySchema, PostIdParamSchema } from '../Validators/PostValidator.js'
-import type { PaginationMeta } from '@guren/orm'
+import type { PaginationMeta, WithRelations } from '@guren/orm'
 import { getEventManager } from '../../Providers/EventServiceProvider.js'
 import { PostCreated } from '../../Events/PostCreated.js'
 import { getPostCacheService } from '../../Services/PostCacheService.js'
 
+type PostWithAuthor = WithRelations<typeof Post, 'author'>
 type PostsIndexInertiaProps = ResolvedSharedInertiaProps & { posts: PostWithAuthor[]; pagination: PostsPagination }
 type PostShowInertiaProps = ResolvedSharedInertiaProps & { post: PostWithAuthor }
 export type PostsPagination = PaginationMeta & { basePath: string }
@@ -30,12 +31,7 @@ export default class PostController extends Controller {
 
   async show(): Promise<InertiaResponse<'posts/Show', PostShowInertiaProps> | Response> {
     const { id } = this.validateParams(PostIdParamSchema)
-    const cacheService = getPostCacheService()
-    const post = await cacheService.getPost(id)
-
-    if (!post) {
-      return this.json({ message: 'Post not found' }, { status: 404 })
-    }
+    const post = await Post.findWithOrFail(id, 'author')
 
     return this.inertia('posts/Show', { post }, { url: this.request.path, title: `${post.title} | Guren Blog` })
   }

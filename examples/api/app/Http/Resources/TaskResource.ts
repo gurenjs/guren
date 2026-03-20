@@ -1,6 +1,9 @@
 import { Resource } from '@guren/server'
+import { Task } from '../../Models/Task.js'
 import type { TaskRecord } from '../../Models/Task.js'
-import type { TaskWithOwner } from '../../Models/Task.js'
+import type { WithRelations } from '@guren/orm'
+
+type TaskWithOwner = WithRelations<typeof Task, 'owner'>
 
 export class TaskResource extends Resource<TaskRecord | TaskWithOwner> {
   toArray() {

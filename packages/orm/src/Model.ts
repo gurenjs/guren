@@ -495,6 +495,86 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   /**
+   * Find a record by primary key with eager-loaded relations.
+   *
+   * @param id - The primary key value
+   * @param relations - Relation name(s) to eager load
+   * @param key - The primary key column name (default: 'id')
+   * @returns The record with loaded relations, or null if not found
+   *
+   * @example
+   * const post = await Post.findWith(1, 'author')
+   * const post = await Post.findWith(1, ['author', 'tags'])
+   */
+  static async findWith<T extends typeof Model, K extends RelationKey<T>>(
+    this: T,
+    id: unknown,
+    relations: K | readonly K[],
+    key?: string,
+  ): Promise<(TRecordFor<T> & RelationTypePick<T, K | readonly K[]>) | null>
+
+  static async findWith<T extends typeof Model, Names extends RelationNames>(
+    this: T,
+    id: unknown,
+    relations: Names,
+    key?: string,
+  ): Promise<(TRecordFor<T> & RelationTypePick<T, Names>) | null> {
+    const record = await this.find(id, key)
+    if (record == null) return null
+
+    const relationList = normalizeRelations(relations)
+    if (relationList.length === 0) {
+      return record as TRecordFor<T> & RelationTypePick<T, Names>
+    }
+
+    const copy = { ...record }
+    for (const rel of relationList) {
+      await this.loadRelationInto([copy], rel)
+    }
+    return copy as TRecordFor<T> & RelationTypePick<T, Names>
+  }
+
+  /**
+   * Find a record by primary key with eager-loaded relations, or throw.
+   *
+   * @param id - The primary key value
+   * @param relations - Relation name(s) to eager load
+   * @param key - The primary key column name (default: 'id')
+   * @returns The record with loaded relations
+   * @throws ModelNotFoundException if record not found
+   *
+   * @example
+   * const post = await Post.findWithOrFail(1, 'author')
+   * const post = await Post.findWithOrFail(1, ['author', 'tags'])
+   */
+  static async findWithOrFail<T extends typeof Model, K extends RelationKey<T>>(
+    this: T,
+    id: unknown,
+    relations: K | readonly K[],
+    key?: string,
+  ): Promise<TRecordFor<T> & RelationTypePick<T, K | readonly K[]>>
+
+  static async findWithOrFail<T extends typeof Model, Names extends RelationNames>(
+    this: T,
+    id: unknown,
+    relations: Names,
+    key?: string,
+  ): Promise<TRecordFor<T> & RelationTypePick<T, Names>> {
+    const record = await this.findOrFail(id, key)
+
+    const relationList = normalizeRelations(relations)
+    if (relationList.length === 0) {
+      return record as TRecordFor<T> & RelationTypePick<T, Names>
+    }
+
+    const copy = { ...record }
+    for (const rel of relationList) {
+      await this.loadRelationInto([copy], rel)
+    }
+    return copy as TRecordFor<T> & RelationTypePick<T, Names>
+  }
+
+  /**
    * Get the first record matching the conditions.
    *
    * @param where - Optional filter conditions
@@ -1554,6 +1634,12 @@ export type BelongsToManyRecord<TRecord extends PlainObject> = TRecord[]
 
 /** Utility type for hasManyThrough relation data shape. */
 export type HasManyThroughRecord<TRecord extends PlainObject> = TRecord[]
+
+/** Utility type: model record with specified relations merged. */
+export type WithRelations<
+  T extends typeof Model,
+  K extends RelationKey<T> | readonly RelationKey<T>[],
+> = TRecordFor<T> & RelationTypePick<T, K>
 
 function normalizeOrderBy<TRecord extends PlainObject>(order: OrderByInput<TRecord>): OrderByClause<TRecord> {
   if (Array.isArray(order) && !isOrderTuple(order)) {

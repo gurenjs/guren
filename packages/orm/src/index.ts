@@ -23,6 +23,7 @@ export type {
   BelongsToRecord,
   BelongsToManyRecord,
   HasManyThroughRecord,
+  WithRelations,
 } from './Model'
 export { QueryBuilder } from './QueryBuilder'
 export type {

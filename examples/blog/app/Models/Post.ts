@@ -4,7 +4,6 @@ import type { UserRecord } from './User.js'
 
 export type PostRecord = typeof posts.$inferSelect
 export type PostAuthorSummary = Pick<UserRecord, 'id' | 'name'>
-export type PostWithAuthor = PostRecord & { author: BelongsToRecord<PostAuthorSummary> }
 
 export class Post extends Model<PostRecord> {
   static override table = posts

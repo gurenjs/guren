@@ -1,6 +1,8 @@
 import { createCacheManager, type CacheManager } from '@guren/server'
-import { Post, type PostWithAuthor } from '../Models/Post.js'
-import type { PaginationMeta } from '@guren/orm'
+import { Post } from '../Models/Post.js'
+import type { PaginationMeta, WithRelations } from '@guren/orm'
+
+type PostWithAuthor = WithRelations<typeof Post, 'author'>
 
 /**
  * Cache service for posts.
