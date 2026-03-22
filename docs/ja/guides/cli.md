@@ -14,10 +14,37 @@ bunx guren --help
 
 コマンドは `bunx guren make:controller UserController` のようなサブコマンド形式です。
 
+## 高レベルスキャフォールド
+
+低レベルな `make:*` ではなく、標準構成をまとめて導入したい場合は `bunx guren add ...` を使います。
+
+```bash
+bunx guren add auth
+bunx guren add admin
+bunx guren add resource posts
+bunx guren add queue
+bunx guren add mail
+bunx guren add events
+bunx guren add cache
+bunx guren add notifications
+bunx guren add storage
+bunx guren add broadcasting
+bunx guren add schedule
+```
+
+これらのコマンドは `src/app.ts` を更新し、対応する provider/runtime ファイルを生成します。
+
+`bunx guren add admin` は次を生成します:
+
+- `app/Http/Controllers/Admin/AdminDashboardController.ts`
+- `resources/js/pages/admin/Dashboard.tsx`
+- `routes/admin.ts`（`routes/web.ts` がある場合は自動配線）
+
 ## 主要コマンド
 
 | コマンド | 説明 | 例 |
 |----------|------|----|
+| `deploy` | Docker/Fly.io/Railway/Vercel 向けデプロイ設定ファイルを生成 | `bunx guren deploy --target all --app my-app --port 3333` |
 | `make:controller <Name>` | `app/Http/Controllers` にコントローラを生成 | `bunx guren make:controller PostController` |
 | `make:model <Name>` | 最小のモデルクラスと型定義を `app/Models` に生成（`db/schema` から `camelCase(Name)s` を import） | `bunx guren make:model Post` |
 | `make:view <path>` | `resources/js/pages` に React コンポーネントを生成 | `bunx guren make:view posts/Index` |
@@ -31,6 +58,46 @@ bunx guren --help
 | `make:mail <Name>` | メールクラスを生成 | `bunx guren make:mail WelcomeEmail` |
 
 > **Note:** `make:*` は既存ファイルを上書きしません。必要なら `--force` を付けてください。
+
+## デプロイレシピ生成
+
+CLI からデプロイ設定ファイルを直接生成できます:
+
+```bash
+# Dockerfile のみ
+bunx guren deploy
+
+# Fly.io（Dockerfile + fly.toml）
+bunx guren deploy --target fly --app my-app
+
+# Railway（Dockerfile + railway.json）
+bunx guren deploy --target railway
+
+# Vercel（vercel.json）
+bunx guren deploy --target vercel
+
+# すべてのレシピを一括生成（カスタムポート）
+bunx guren deploy --target all --app my-app --port 4000
+```
+
+`--target` は `docker` / `fly` / `railway` / `vercel` / `all` をサポートします。
+
+Vercel と Bun
+Vercel は Bun を用いたデプロイをサポートしています。Bun プロジェクトでは主に次の二択が現実的です：
+
+- `vercel.json` に Bun 用の install/build コマンドを記載してデプロイする（シンプルなアプリ向け推奨）:
+
+  ```json
+  {
+    "installCommand": "bun install",
+    "buildCommand": "NODE_ENV=production bun run build",
+    "devCommand": "bun run dev"
+  }
+  ```
+
+- Docker イメージを使ってデプロイし、実行環境や Bun のバージョンを固定する（ネイティブ依存や長時間実行がある場合に推奨）。
+
+推奨: Bun の特定バージョンに依存する、あるいは長時間実行プロセスが必要な場合は Docker デプロイを選ぶと再現性が高くなります。生成される `vercel.json` は出発点です。プロジェクト構成に合わせてコマンドやルーティングを調整してください。
 
 ## ルートコマンド
 

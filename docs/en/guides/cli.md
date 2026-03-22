@@ -20,6 +20,7 @@ Use `bunx guren add ...` when you want the standard vNext path instead of low-le
 
 ```bash
 bunx guren add auth
+bunx guren add admin
 bunx guren add resource posts
 bunx guren add queue
 bunx guren add mail
@@ -33,10 +34,17 @@ bunx guren add schedule
 
 These commands patch `src/app.ts`, create the matching provider/runtime files, and keep the generated app aligned with the reference starter.
 
+`bunx guren add admin` scaffolds:
+
+- `app/Http/Controllers/Admin/AdminDashboardController.ts`
+- `resources/js/pages/admin/Dashboard.tsx`
+- `routes/admin.ts` (and auto-wires `routes/web.ts` when present)
+
 ## Core Commands
 
 | Command | Description | Example |
 |---------|-------------|---------|
+| `deploy` | Generate deployment recipe files for Docker/Fly.io/Railway/Vercel | `bunx guren deploy --target all --app my-app --port 3333` |
 | `make:controller <Name>` | Generates a controller in `app/Http/Controllers` | `bunx guren make:controller PostController` |
 | `make:model <Name>` | Generates a minimal model class and type definition in `app/Models` (imports `camelCase(Name)s` from `db/schema`) | `bunx guren make:model Post` |
 | `make:view <path>` | Generates a React component in `resources/js/pages` | `bunx guren make:view posts/Index` |
@@ -50,6 +58,46 @@ These commands patch `src/app.ts`, create the matching provider/runtime files, a
 | `make:mail <Name>` | Generates a mailable class | `bunx guren make:mail WelcomeEmail` |
 
 > **Note:** `make:*` commands avoid overwriting existing files. Use `--force` if you need to replace them.
+
+## Deployment Recipes
+
+Generate deployment config files directly from the CLI:
+
+```bash
+# Dockerfile only
+bunx guren deploy
+
+# Fly.io (Dockerfile + fly.toml)
+bunx guren deploy --target fly --app my-app
+
+# Railway (Dockerfile + railway.json)
+bunx guren deploy --target railway
+
+# Vercel (vercel.json)
+bunx guren deploy --target vercel
+
+# Generate all recipes at once with a custom port
+bunx guren deploy --target all --app my-app --port 4000
+```
+
+Supported targets are `docker`, `fly`, `railway`, `vercel`, and `all`.
+
+Vercel and Bun
+Vercel supports deploying Bun applications. For Bun projects consider either:
+
+- Using `vercel.json` with Bun commands (recommended for simple apps):
+
+  ```json
+  {
+    "installCommand": "bun install",
+    "buildCommand": "NODE_ENV=production bun run build",
+    "devCommand": "bun run dev"
+  }
+  ```
+
+- Deploying a Docker image (recommended when you need exact Bun version, native dependencies, or long-running processes).
+
+Recommendation: If your app relies on a specific Bun version or needs long-lived processes, prefer Docker deployment for reproducibility. The generated `vercel.json` is a starting point; adjust commands, routes, and runtime strategy to your project.
 
 ## Route Commands
 
