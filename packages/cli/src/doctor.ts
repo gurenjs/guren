@@ -1,6 +1,8 @@
 import { access, readFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { resolve, relative } from 'node:path'
 import { consola } from 'consola'
+import { discoverControllerFiles, discoverModelFiles, fileExists as discoveryFileExists, classNameFromPath } from './discovery'
+import { parseModelFile } from './model-parser'
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail'
 
@@ -12,16 +14,26 @@ export interface DoctorCheck {
   fix?: string
 }
 
+export interface NextStep {
+  priority: number
+  title: string
+  description: string
+  filePath?: string
+  command?: string
+}
+
 export interface DoctorReport {
   cwd: string
   checks: DoctorCheck[]
   hasWarnings: boolean
   hasFailures: boolean
+  nextSteps?: NextStep[]
 }
 
 export interface RunDoctorOptions {
   cwd?: string
   json?: boolean
+  next?: boolean
 }
 
 const APP_ENTRY_CANDIDATES = ['src/main.ts', 'src/main.mts', 'src/main.js', 'src/main.mjs']
@@ -231,11 +243,143 @@ export async function runDoctor(options: RunDoctorOptions = {}): Promise<DoctorR
     hasFailures: checks.some((check) => check.status === 'fail'),
   }
 
+  if (options.next) {
+    report.nextSteps = await suggestNextSteps({ cwd })
+  }
+
   if (!options.json) {
     renderDoctorReport(report)
   }
 
   return report
+}
+
+export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<NextStep[]> {
+  const cwd = resolve(options.cwd ?? process.cwd())
+  const steps: NextStep[] = []
+  let priority = 1
+
+  // 1. Check for empty controller methods
+  try {
+    const controllerFiles = await discoverControllerFiles(cwd)
+    for (const filePath of controllerFiles) {
+      const source = await readFile(filePath, 'utf-8')
+      const { parse } = await import('@babel/parser')
+      let ast
+      try {
+        ast = parse(source, { sourceType: 'module', plugins: ['typescript'] })
+      } catch {
+        continue
+      }
+
+      for (const node of ast.program.body) {
+        let classDecl = null
+        if (node.type === 'ExportNamedDeclaration' && node.declaration?.type === 'ClassDeclaration') {
+          classDecl = node.declaration
+        } else if (node.type === 'ExportDefaultDeclaration' && node.declaration?.type === 'ClassDeclaration') {
+          classDecl = node.declaration
+        }
+        if (!classDecl) continue
+        const className = classDecl.id?.name ?? classNameFromPath(filePath)
+
+        for (const member of classDecl.body.body) {
+          if (
+            member.type === 'ClassMethod' &&
+            member.key.type === 'Identifier' &&
+            member.key.name !== 'constructor' &&
+            member.body.body.length === 0
+          ) {
+            steps.push({
+              priority: priority++,
+              title: `Implement ${className}.${member.key.name}()`,
+              description: `Method has an empty body.`,
+              filePath: relative(cwd, filePath),
+            })
+          }
+        }
+      }
+    }
+  } catch {
+    // Ignore discovery failures
+  }
+
+  // 2. Check for missing test files
+  try {
+    const controllerFiles = await discoverControllerFiles(cwd)
+    for (const filePath of controllerFiles) {
+      const name = classNameFromPath(filePath)
+      const testCandidates = [
+        `tests/controllers/${name}.test.ts`,
+        `tests/${name}.test.ts`,
+      ]
+      let hasTest = false
+      for (const candidate of testCandidates) {
+        if (await discoveryFileExists(cwd, candidate)) {
+          hasTest = true
+          break
+        }
+      }
+      if (!hasTest) {
+        steps.push({
+          priority: priority++,
+          title: `Add tests for ${name}`,
+          description: `No test file found.`,
+          command: `bunx guren make:test ${name.replace('Controller', '')} --controller`,
+        })
+      }
+    }
+  } catch {
+    // Ignore
+  }
+
+  // 3. Check for models without factories
+  try {
+    const modelFiles = await discoverModelFiles(cwd)
+    for (const filePath of modelFiles) {
+      const name = classNameFromPath(filePath)
+      const factoryCandidates = [
+        `database/factories/${name}Factory.ts`,
+        `db/factories/${name}Factory.ts`,
+      ]
+      let hasFactory = false
+      for (const candidate of factoryCandidates) {
+        if (await discoveryFileExists(cwd, candidate)) {
+          hasFactory = true
+          break
+        }
+      }
+      if (!hasFactory) {
+        steps.push({
+          priority: priority++,
+          title: `Add factory for ${name}`,
+          description: `No factory file found for testing and seeding.`,
+          command: `bunx guren make:factory ${name}`,
+        })
+      }
+    }
+  } catch {
+    // Ignore
+  }
+
+  // 4. Check for missing codegen
+  const manifests = ['.guren/routes.gen.ts', '.guren/pages.gen.ts', '.guren/data.gen.ts']
+  let missingManifests = false
+  for (const manifest of manifests) {
+    if (!(await discoveryFileExists(cwd, manifest))) {
+      missingManifests = true
+      break
+    }
+  }
+  if (missingManifests) {
+    steps.push({
+      priority: priority++,
+      title: 'Run codegen',
+      description: 'Generated type manifests are missing or outdated.',
+      command: 'bunx guren codegen',
+    })
+  }
+
+  return steps
 }
 
 export function renderDoctorReport(report: DoctorReport): void {
@@ -247,6 +391,17 @@ export function renderDoctorReport(report: DoctorReport): void {
     log(`${prefix} ${check.title}: ${check.message}`)
     if (check.fix) {
       consola.info(`       Fix: ${check.fix}`)
+    }
+  }
+
+  if (report.nextSteps && report.nextSteps.length > 0) {
+    console.log('')
+    consola.box('Next steps')
+    for (const step of report.nextSteps) {
+      consola.info(`${step.priority}. ${step.title}`)
+      consola.info(`   ${step.description}`)
+      if (step.filePath) consola.info(`   File: ${step.filePath}`)
+      if (step.command) consola.info(`   Run: ${step.command}`)
     }
   }
 }

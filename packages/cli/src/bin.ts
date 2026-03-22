@@ -45,6 +45,11 @@ import { publishLanguageFiles, makeLanguage, listLocales } from './lang'
 import { upgradeCanary } from './upgrade'
 import { scaffoldDeploy, type DeployTarget } from './deploy'
 import { installPlugin } from './plugin'
+import { displayModels } from './model-list'
+import { displayContext } from './context'
+import { runCheck, renderCheckReport } from './check'
+import { generateGuidelines } from './guidelines'
+import { makeFeature, parseFieldsString } from './make-feature'
 
 type ForceableArgs = { force?: boolean }
 
@@ -1228,10 +1233,15 @@ const doctorCommand = defineCommand({
       type: 'boolean',
       description: 'Exit with code 1 when warnings or failures are reported.',
     },
+    next: {
+      type: 'boolean',
+      description: 'Show actionable next steps for the project.',
+    },
   },
   async run({ args }) {
     const report = await runDoctor({
       json: Boolean(args.json),
+      next: Boolean(args.next),
     })
 
     if (args.json) {
@@ -1241,6 +1251,157 @@ const doctorCommand = defineCommand({
     if (args.strict && (report.hasWarnings || report.hasFailures)) {
       process.exit(1)
     }
+  },
+})
+
+// --- AI Agent Commands ---
+
+const modelListCommand = defineCommand({
+  meta: {
+    name: 'model:list',
+    description: 'List all models with relationships and metadata.',
+  },
+  args: {
+    format: {
+      type: 'string',
+      description: 'Output format: table, json, or compact.',
+      default: 'table',
+    },
+    app: {
+      type: 'string',
+      description: 'Application root directory.',
+    },
+  },
+  async run({ args }) {
+    await displayModels({
+      appRoot: args.app,
+      format: args.format as 'table' | 'json' | 'compact',
+    })
+  },
+})
+
+const contextCommand = defineCommand({
+  meta: {
+    name: 'context',
+    description: 'Generate a project context map for AI agents.',
+  },
+  args: {
+    json: {
+      type: 'boolean',
+      description: 'Output as JSON.',
+    },
+    routes: {
+      type: 'string',
+      description: 'Path to routes entry file.',
+    },
+    app: {
+      type: 'string',
+      description: 'Application root directory.',
+    },
+  },
+  async run({ args }) {
+    await displayContext({
+      cwd: args.app,
+      json: Boolean(args.json),
+      routesFile: args.routes,
+    })
+  },
+})
+
+const checkCommand = defineCommand({
+  meta: {
+    name: 'check',
+    description: 'Validate integrity across routes, controllers, pages, and models.',
+  },
+  args: {
+    json: {
+      type: 'boolean',
+      description: 'Output as JSON.',
+    },
+    routes: {
+      type: 'string',
+      description: 'Path to routes entry file.',
+    },
+    app: {
+      type: 'string',
+      description: 'Application root directory.',
+    },
+  },
+  async run({ args }) {
+    const report = await runCheck({
+      cwd: args.app,
+      json: Boolean(args.json),
+      routesFile: args.routes,
+    })
+
+    if (args.json) {
+      console.log(JSON.stringify(report, null, 2))
+    } else {
+      renderCheckReport(report)
+    }
+  },
+})
+
+const guidelinesCommand = defineCommand({
+  meta: {
+    name: 'guidelines',
+    description: 'Auto-generate project-specific coding guidelines.',
+  },
+  args: {
+    output: {
+      type: 'string',
+      alias: 'o',
+      description: 'Write guidelines to file path (e.g., .claude/rules/project-guidelines.md).',
+    },
+    app: {
+      type: 'string',
+      description: 'Application root directory.',
+    },
+  },
+  async run({ args }) {
+    const output = await generateGuidelines({
+      cwd: args.app,
+      output: args.output,
+    })
+
+    if (!args.output) {
+      console.log(output)
+    }
+  },
+})
+
+const makeFeatureCommand = defineCommand({
+  meta: {
+    name: 'make:feature',
+    description: 'Scaffold a complete CRUD feature with all components.',
+  },
+  args: {
+    name: {
+      type: 'positional',
+      required: true,
+      description: 'Feature name (singular, e.g., Product).',
+    },
+    fields: {
+      type: 'string',
+      alias: 'F',
+      description: 'Field definitions (name:type,...). e.g., title:string,body:text,published:boolean',
+    },
+    force: {
+      type: 'boolean',
+      alias: 'f',
+      description: 'Overwrite existing files.',
+    },
+    test: {
+      type: 'boolean',
+      description: 'Also generate a test file.',
+    },
+  },
+  async run({ args }) {
+    await makeFeature(args.name as string, {
+      fields: args.fields,
+      force: Boolean(args.force),
+      withTest: Boolean(args.test),
+    })
   },
 })
 
@@ -1610,6 +1771,12 @@ const main = defineCommand({
     deploy: deployCommand,
     console: consoleCommand,
     dev: devCommand,
+    // AI Agent commands
+    'model:list': modelListCommand,
+    context: contextCommand,
+    check: checkCommand,
+    guidelines: guidelinesCommand,
+    'make:feature': makeFeatureCommand,
   },
   async run(ctx) {
     if (ctx.args.help || ctx.rawArgs.length === 0) {

@@ -2,7 +2,6 @@
 // Run `guren codegen` to regenerate.
 
 import type { PageContract, PagePropsRecord } from '@guren/inertia-client'
-import type { HomePageProps } from '../resources/js/pages/contracts.js'
 
 
 export const pageManifest = {
@@ -24,7 +23,7 @@ export function isPageId(value: string): value is PageId {
  * Auto-extracted Props types from page components.
  */
 export interface PagePropsMap {
-  'Home': HomePageProps
+  'Home': Record<string, unknown>
 }
 
 export type InferPageProps<TId extends PageId> =
@@ -46,5 +45,5 @@ function defineGeneratedPage<TId extends string, TProps extends PagePropsRecord 
 
 export const pages = {
   contracts: defineGeneratedPage('contracts', pageManifest['contracts']),
-  Home: defineGeneratedPage<'Home', PagePropsMap['Home']>('Home', pageManifest['Home'])
+  Home: defineGeneratedPage('Home', pageManifest['Home'])
 } as const
