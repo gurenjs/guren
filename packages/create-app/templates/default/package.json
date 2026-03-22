@@ -19,7 +19,7 @@
     "@guren/core": "^0.2.0-alpha.7",
     "@guren/inertia-client": "^0.2.0-alpha.7",
     "@guren/orm": "^0.2.0-alpha.7",
-    "@inertiajs/react": "^2.2.15",
+    "@inertiajs/react": "^2.3.18",
     "drizzle-orm": "0.44.7",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

@@ -59,8 +59,8 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@inertiajs/core": "^2.2.15",
-    "@inertiajs/react": "^2.2.15",
+    "@inertiajs/core": "^2.3.18",
+    "@inertiajs/react": "^2.3.18",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
