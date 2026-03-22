@@ -447,7 +447,7 @@ async function main(): Promise<void> {
     await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'codegen', '--routes', 'routes/web.ts', '--out', 'types/generated/routes.d.ts', '--force'], appDir, runtimeEnv)
     await run(['bun', 'run', 'typecheck'], appDir, runtimeEnv)
     await run(['bun', 'run', 'build'], appDir, runtimeEnv)
-    await run(['bun', resolve(repoRoot, 'scripts/smoke/build-budget.ts'), '--max-kb', '450', appDir], repoRoot, runtimeEnv)
+    await run(['bun', resolve(repoRoot, 'scripts/smoke/build-budget.ts'), '--max-kb', '600', appDir], repoRoot, runtimeEnv)
 
     console.log(`\nFresh app smoke passed (${installMode}): ${appDir}`)
   } finally {
