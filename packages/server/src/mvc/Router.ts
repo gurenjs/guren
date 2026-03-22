@@ -1,7 +1,19 @@
-import type { Context, MiddlewareHandler } from 'hono'
-import type { Hono } from 'hono'
+import type { Context, MiddlewareHandler, Hono } from 'hono'
 import { Controller } from './Controller'
 import type { Container } from '../container/Container'
+
+/**
+ * Hono's app.on() expects a string literal type for the method parameter.
+ * This type-safe helper mounts a route without requiring `as any` casts.
+ */
+function mountRoute(
+  app: Hono,
+  method: string,
+  path: string,
+  ...handlers: MiddlewareHandler[]
+): void {
+  app.on(method as 'GET', path, ...handlers)
+}
 import { formatValidationErrors, parseRequestPayload, type ValidationErrorLike } from '../http/request'
 import type { ValidationSchema } from '../http/middleware/validation'
 
@@ -419,8 +431,7 @@ export class Router {
     for (const route of this.registry) {
       const resolvedMiddlewares = this.resolveMiddlewareNames(route.routeMiddlewareNames)
       const handler = resolveHandler(route.handler, this.modelBindings, options.container, route.bindings)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ;(app.on as any)(route.method, route.path, ...resolvedMiddlewares, ...route.middlewares, handler)
+      mountRoute(app, route.method, route.path, ...resolvedMiddlewares, ...route.middlewares, handler)
     }
   }
 
@@ -751,10 +762,10 @@ function resolveHandler(
         controller = new ControllerClass()
       }
 
-      if (container) {
-        c.set('container' as never, container as never)
-      }
       controller.setContext(c)
+      if (container) {
+        controller.setContainer(container)
+      }
 
       // Resolve per-route model bindings (from RouteContractOptions.bind)
       if (routeBindings && routeBindings.size > 0) {

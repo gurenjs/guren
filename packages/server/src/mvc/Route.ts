@@ -1,7 +1,19 @@
-import type { Context, MiddlewareHandler } from 'hono'
-import type { Hono } from 'hono'
+import type { Context, MiddlewareHandler, Hono } from 'hono'
 import { Controller } from './Controller'
 import { getContainer } from '../container/Container'
+
+/**
+ * Hono's app.on() expects a string literal type for the method parameter.
+ * This type-safe helper mounts a route without requiring `as any` casts.
+ */
+function mountRoute(
+  app: Hono,
+  method: string,
+  path: string,
+  ...handlers: MiddlewareHandler[]
+): void {
+  app.on(method as 'GET', path, ...handlers)
+}
 
 /**
  * Constructor type for Controller classes.
@@ -336,8 +348,7 @@ export class Route {
     for (const route of this.registry) {
       const resolvedMiddlewares = this.resolveMiddlewareNames(route.routeMiddlewareNames)
       const handler = resolveHandler(route.handler, this.modelBindings)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ;(app.on as any)(route.method, route.path, ...resolvedMiddlewares, ...route.middlewares, handler)
+      mountRoute(app, route.method, route.path, ...resolvedMiddlewares, ...route.middlewares, handler)
     }
   }
 

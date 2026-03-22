@@ -105,9 +105,15 @@ export class Controller {
   private context?: Context
   private parsedBody?: Record<string, unknown>
   private resolvedModels?: Map<unknown, unknown>
+  private _container?: { make(key: string): unknown }
 
   setContext(context: Context): void {
     this.context = context
+  }
+
+  /** @internal Called by the router to inject the DI container. */
+  setContainer(container: { make(key: string): unknown }): void {
+    this._container = container
   }
 
   /**
@@ -171,7 +177,10 @@ export class Controller {
   protected make<K extends keyof ServiceBindings>(key: K): ServiceBindings[K]
   protected make<T>(key: string): T
   protected make(key: string): unknown {
-    return this.ctx.var.container.make(key)
+    if (!this._container) {
+      throw new Error('Controller.make() requires a DI container. Ensure the app is booted with a Container.')
+    }
+    return this._container.make(key)
   }
 
   // ─── API Token Helpers ─────────────────────────────────────────
