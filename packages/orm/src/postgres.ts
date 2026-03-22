@@ -1,6 +1,6 @@
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { migrate } from 'drizzle-orm/postgres-js/migrator'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import postgres from 'postgres'
@@ -54,7 +54,7 @@ export function createPostgresDatabase<TSchema extends Record<string, unknown>>(
     }
 
     const promise = (async (): Promise<void> => {
-      if (!hasDrizzleMigrationJournal(resolvedMigrationsFolder)) {
+      if (!hasDrizzleMigrations(resolvedMigrationsFolder)) {
         return
       }
 
@@ -65,7 +65,7 @@ export function createPostgresDatabase<TSchema extends Record<string, unknown>>(
       })
 
       try {
-        const db = drizzle(migrationClient, { schema })
+        const db = drizzle({ client: migrationClient, schema })
         await migrate(db, { migrationsFolder: resolvedMigrationsFolder })
       } finally {
         await migrationClient.end({ timeout: 0 })
@@ -94,7 +94,7 @@ export function createPostgresDatabase<TSchema extends Record<string, unknown>>(
         ...clientOptions,
       })
 
-      return drizzle(client, { schema })
+      return drizzle({ client, schema })
     })()
 
     databasePromise = promise.catch((error) => {
@@ -138,6 +138,19 @@ export function createPostgresDatabase<TSchema extends Record<string, unknown>>(
   }
 }
 
-function hasDrizzleMigrationJournal(migrationsFolder: string): boolean {
+function hasDrizzleMigrations(migrationsFolder: string): boolean {
+  if (!existsSync(migrationsFolder)) {
+    return false
+  }
+
+  // v1: folder-based migrations (YYYYMMDD_name/migration.sql)
+  const entries = readdirSync(migrationsFolder, { withFileTypes: true })
+  for (const entry of entries) {
+    if (entry.isDirectory() && existsSync(resolve(migrationsFolder, entry.name, 'migration.sql'))) {
+      return true
+    }
+  }
+
+  // v0: journal-based migrations (meta/_journal.json)
   return existsSync(resolve(migrationsFolder, 'meta/_journal.json'))
 }

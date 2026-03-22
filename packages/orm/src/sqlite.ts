@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
@@ -63,7 +63,7 @@ export function createSqliteDatabase<TSchema extends Record<string, unknown>>(
     sqlite.exec('PRAGMA journal_mode = WAL;')
 
     const { drizzle } = await import('drizzle-orm/bun-sqlite')
-    db = drizzle(sqlite, { schema })
+    db = drizzle({ client: sqlite, schema })
     return db
   }
 
@@ -71,7 +71,7 @@ export function createSqliteDatabase<TSchema extends Record<string, unknown>>(
     if (migrationsPromise) return migrationsPromise
 
     migrationsPromise = (async () => {
-      if (!hasDrizzleMigrationJournal(resolvedMigrationsFolder)) {
+      if (!hasDrizzleMigrations(resolvedMigrationsFolder)) {
         return
       }
 
@@ -122,6 +122,19 @@ export function createSqliteDatabase<TSchema extends Record<string, unknown>>(
   }
 }
 
-function hasDrizzleMigrationJournal(migrationsFolder: string): boolean {
+function hasDrizzleMigrations(migrationsFolder: string): boolean {
+  if (!existsSync(migrationsFolder)) {
+    return false
+  }
+
+  // v1: folder-based migrations (YYYYMMDD_name/migration.sql)
+  const entries = readdirSync(migrationsFolder, { withFileTypes: true })
+  for (const entry of entries) {
+    if (entry.isDirectory() && existsSync(resolve(migrationsFolder, entry.name, 'migration.sql'))) {
+      return true
+    }
+  }
+
+  // v0: journal-based migrations (meta/_journal.json)
   return existsSync(resolve(migrationsFolder, 'meta/_journal.json'))
 }

@@ -25,12 +25,13 @@ await mock.module('drizzle-orm/mysql2/migrator', () => ({
 
 const { createMySqlDatabase } = await import('../src/mysql')
 
-function createMigrationsFolder(withJournal: boolean): string {
+function createMigrationsFolder(withMigrations: boolean): string {
   const migrationsFolder = mkdtempSync(join(tmpdir(), 'guren-orm-mysql-migrations-'))
 
-  if (withJournal) {
-    mkdirSync(join(migrationsFolder, 'meta'), { recursive: true })
-    writeFileSync(join(migrationsFolder, 'meta/_journal.json'), '[]')
+  if (withMigrations) {
+    const migrationDir = join(migrationsFolder, '20240101000000_init')
+    mkdirSync(migrationDir, { recursive: true })
+    writeFileSync(join(migrationDir, 'migration.sql'), '')
   }
 
   return migrationsFolder

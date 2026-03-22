@@ -4,9 +4,8 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { DrizzleAdapter } from '../src/adapters/drizzle-adapter'
 
-const drizzleMock = mock((client: unknown, options: Record<string, unknown>) => ({
-  client,
-  options,
+const drizzleMock = mock((config: Record<string, unknown>) => ({
+  config,
 }))
 const migrateMock = mock(async () => {})
 const postgresMock = mock((_url: string, _options: Record<string, unknown>) => ({
@@ -27,12 +26,13 @@ await mock.module('postgres', () => ({
 
 const { createPostgresDatabase } = await import('../src/postgres')
 
-function createMigrationsFolder(withJournal: boolean): string {
+function createMigrationsFolder(withMigrations: boolean): string {
   const migrationsFolder = mkdtempSync(join(tmpdir(), 'guren-orm-migrations-'))
 
-  if (withJournal) {
-    mkdirSync(join(migrationsFolder, 'meta'), { recursive: true })
-    writeFileSync(join(migrationsFolder, 'meta/_journal.json'), '[]')
+  if (withMigrations) {
+    const migrationDir = join(migrationsFolder, '20240101000000_init')
+    mkdirSync(migrationDir, { recursive: true })
+    writeFileSync(join(migrationDir, 'migration.sql'), '')
   }
 
   return migrationsFolder
@@ -51,7 +51,7 @@ describe('createPostgresDatabase', () => {
     expect(migrateMock).toHaveBeenCalled()
 
     const db = await database.getDatabase()
-    expect(db).toMatchObject({ options: { schema } })
+    expect(db).toMatchObject({ config: { schema } })
   })
 
   it('configures the Drizzle adapter', async () => {
