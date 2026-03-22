@@ -205,7 +205,7 @@ const off = feed.on('NewPost', (payload) => {
 
 ```ts
 import type { ChannelEvents } from '../.guren/channels.gen'
-import { createTypedBroadcaster } from '@guren/server'
+import { createTypedBroadcaster } from '@guren/core'
 
 const typed = createTypedBroadcaster<ChannelEvents>(broadcast)
 

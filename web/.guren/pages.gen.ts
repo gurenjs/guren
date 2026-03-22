@@ -51,9 +51,9 @@ function defineGeneratedPage<TId extends string, TProps extends PagePropsRecord 
 export const pages = {
   contracts: defineGeneratedPage('contracts', pageManifest['contracts']),
   Docs: {
-    Index: defineGeneratedPage<'Docs/Index', PagePropsMap['Docs/Index']>('Docs/Index', pageManifest['Docs/Index']),
-    Show: defineGeneratedPage<'Docs/Show', PagePropsMap['Docs/Show']>('Docs/Show', pageManifest['Docs/Show']),
+    Index: defineGeneratedPage('Docs/Index', pageManifest['Docs/Index']),
+    Show: defineGeneratedPage('Docs/Show', pageManifest['Docs/Show']),
     theme: defineGeneratedPage('Docs/theme', pageManifest['Docs/theme'])
   },
-  Home: defineGeneratedPage<'Home', PagePropsMap['Home']>('Home', pageManifest['Home'])
+  Home: defineGeneratedPage('Home', pageManifest['Home'])
 } as const
