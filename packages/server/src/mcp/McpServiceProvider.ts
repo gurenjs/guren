@@ -30,7 +30,7 @@ export class McpServiceProvider extends ServiceProvider {
     // @guren/cli is resolved at runtime (not a direct dependency of @guren/server).
     const [{ WebStandardStreamableHTTPServerTransport }, cli] = await Promise.all([
       import('@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'),
-      // @ts-expect-error — @guren/cli is available at runtime via the app's dependencies
+      // @ts-ignore — @guren/cli is available at runtime via the app's dependencies
       (import('@guren/cli') as Promise<GurenCliApi>),
     ])
 
