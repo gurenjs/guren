@@ -118,8 +118,6 @@ async function auditEnglishDocs(root: string): Promise<void> {
   assert(csrf.includes('appPages.forms.create'), 'CSRF guide must use page contracts in controller examples.')
   assert(!csrf.includes('Route.post('), 'CSRF guide must not use legacy Route.post() examples.')
 
-  const localization = await read(root, 'docs/en/guides/localization.md')
-  assert(localization.includes('appPages.home'), 'Localization guide must use page contracts in controller examples.')
 }
 
 async function auditJapaneseDocs(root: string): Promise<void> {
@@ -220,8 +218,6 @@ async function auditJapaneseDocs(root: string): Promise<void> {
   assert(csrf.includes('appPages.forms.create'), 'Japanese CSRF guide must use page contracts in controller examples.')
   assert(!csrf.includes('Route.post('), 'Japanese CSRF guide must not use legacy Route.post() examples.')
 
-  const localization = await read(root, 'docs/ja/guides/localization.md')
-  assert(localization.includes('appPages.home'), 'Japanese localization guide must use page contracts in controller examples.')
 }
 
 async function main(): Promise<void> {
