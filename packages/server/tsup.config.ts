@@ -21,7 +21,7 @@ export default defineConfig({
     'src/events/index.ts',
     'src/health/index.ts',
     'src/i18n/index.ts',
-    'src/legacy-validation/index.ts',
+
     'src/logging/index.ts',
     'src/mail/index.ts',
     'src/notifications/index.ts',

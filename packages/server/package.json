@@ -57,10 +57,7 @@
       "types": "./dist/i18n/index.d.ts",
       "default": "./dist/i18n/index.js"
     },
-    "./legacy-validation": {
-      "types": "./dist/legacy-validation/index.d.ts",
-      "default": "./dist/legacy-validation/index.js"
-    },
+
     "./logging": {
       "types": "./dist/logging/index.d.ts",
       "default": "./dist/logging/index.js"

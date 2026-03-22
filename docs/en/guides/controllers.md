@@ -178,52 +178,6 @@ export default class PostsController extends Controller {
 
 All three throw `ValidationException` (HTTP 422) on failure, which the `ExceptionHandler` renders automatically.
 
-### FormRequest Compatibility
-
-Schema-first validation is the recommended path. If you are migrating older code or need class-based authorization rules, Guren still supports `FormRequest` through the legacy validation layer:
-
-```ts
-// app/Http/Requests/StorePostRequest.ts
-import { FormRequest } from '@guren/core/legacy-validation'
-import { required, stringRule, min, max, inValues } from '@guren/core/legacy-validation'
-
-interface StorePostData {
-  title: string
-  content: string
-  status: 'draft' | 'published'
-}
-
-export class StorePostRequest extends FormRequest<StorePostData> {
-  rules() {
-    return {
-      title: [required(), stringRule(), min(3), max(255)],
-      content: [required(), stringRule()],
-      status: [required(), inValues(['draft', 'published'])],
-    }
-  }
-
-  authorize() {
-    return this.user() !== null
-  }
-}
-```
-
-Use it in the controller with one line:
-
-```ts
-async store() {
-  const data = await this.validate(StorePostRequest)
-  // `data` is typed as StorePostData — no manual parsing needed
-  const post = await Post.create(data)
-  return this.redirect('/posts')
-}
-```
-
-If validation fails, a 422 response is returned automatically. If `authorize()` returns `false`, a 403 is returned. Prefer Zod or route contracts for new code.
-
-> [!NOTE]
-> See the [Validation Guide](./validation.md) for the full list of built-in rules.
-
 ## Dependency Injection
 
 When your controller needs services (caching, events, mail), declare them with `static inject` and Guren resolves them from the container:
