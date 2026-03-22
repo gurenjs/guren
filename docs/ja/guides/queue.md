@@ -1,8 +1,8 @@
 # キューガイド
 
-Gurenは、時間のかかるタスクをバックグラウンドで処理するための堅牢なキューシステムを提供します。これは、メール送信、アップロード処理、外部API呼び出しなどの操作を行いながら、高速なレスポンスタイムを維持するために不可欠です。
+Guren は、時間のかかるタスクをバックグラウンドで処理するための堅牢なキューシステムを提供します。これは、メール送信、アップロード処理、外部API呼び出しなどの操作を行いながら、高速なレスポンスタイムを維持するために不可欠です。
 
-vNext の標準導線は、`@guren/core` から queue API を import し、provider で queue manager を構成し、controller では job の dispatch に集中する形です。
+推奨パターン: `@guren/core` から queue API をインポートし、provider で queue manager を構成します。コントローラーではジョブのディスパッチに集中します。
 
 ## コアコンセプト
 
@@ -151,9 +151,9 @@ bunx guren queue:work --sleep=500 --timeout=120000 --max-jobs=100
 | `--timeout` | `60000` | ジョブのタイムアウト（ミリ秒） |
 | `--max-jobs` | `0` | 停止前の最大ジョブ数（0 = 無制限） |
 
-### プログラムによるワーカー
+### コードによるワーカー
 
-より細かい制御のために、プログラムでワーカーを作成できます：
+より細かい制御のために、コードからワーカーを作成できます：
 
 ```ts
 import { Worker, MemoryDriver, createQueueManager, registerJob } from '@guren/core'
@@ -255,7 +255,7 @@ const driver = queue.driver()
 bunx guren queue:failed
 ```
 
-またはプログラムで：
+またはコードから：
 
 ```ts
 const failedJobs = await driver.getFailedJobs()
@@ -273,7 +273,7 @@ bunx guren queue:retry <job-id>
 bunx guren queue:retry --all
 ```
 
-またはプログラムで：
+またはコードから：
 
 ```ts
 await driver.retryFailedJob(jobId)
@@ -285,7 +285,7 @@ await driver.retryFailedJob(jobId)
 bunx guren queue:flush
 ```
 
-またはプログラムで：
+またはコードから：
 
 ```ts
 await driver.deleteFailedJob(jobId)

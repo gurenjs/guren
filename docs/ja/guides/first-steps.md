@@ -1,6 +1,6 @@
 # 10分で最初の機能を作る
 
-このガイドは、現在の Guren の標準導線で進めます。`@guren/core`、`bunx guren add ...`、page contract、resource 出力、route/page manifest を前提にしています。
+このガイドでは、Guren の推奨パターンに沿って進めます。`@guren/core`、`bunx guren add ...`、page contract、resource 出力、route/page manifest を前提にしています。
 
 ## 作るもの
 
@@ -39,7 +39,7 @@ bunx guren add schedule
 - `AuthProvider`、login/profile controller、validator、routes、page contracts
 - `PostController`、`PostResource`、`PostValidator`、CRUD pages、named routes
 - `QueueProvider`、`MailProvider`、`EventProvider`、`CacheProvider`、`NotificationProvider`、`StorageProvider`、`BroadcastProvider`、`app/Console/Kernel.ts` など、標準の非同期/運用系機能
-- Inertia page props の単一契約点としての `resources/js/pages/contracts.ts`
+- Inertia page props の一元管理ファイルとしての `resources/js/pages/contracts.ts`
 
 ## 3. 型付き manifest を生成する
 
@@ -73,9 +73,9 @@ bun run dev
 - `/login` で生成された認証フロー
 - `/posts` で生成された resource フロー
 
-## 6. contract graph を理解する
+## 6. データフローを理解する
 
-標準の resource scaffold は、次の contract graph で動きます。
+標準の resource scaffold は、次のデータフローで動きます。
 
 1. `db/schema.ts` が Drizzle table を定義する
 2. `app/Models/Post.ts` が typed model を公開する
@@ -83,7 +83,7 @@ bun run dev
 4. `resources/js/pages/contracts.ts` が page props を宣言する
 5. `app/Http/Controllers/PostController.ts` が input を検証し、resource 出力を返す
 
-一覧ページの標準 shape はこうです。
+一覧ページの標準的なデータ構造はこうです。
 
 ```ts
 type Props = PaginatedPageProps<PostResourceData>
@@ -121,4 +121,4 @@ bun run codegen
 - page contract は props 定義
 - controller は response composition
 
-これが、Guren が目指している Rails/Laravel 的な DX に最短で近づくやり方です。
+これが、Guren が目指している Rails/Laravel 的な DX を実現するための基本パターンです。

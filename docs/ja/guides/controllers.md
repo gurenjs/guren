@@ -286,7 +286,7 @@ declare module '@guren/core' {
 コンポーネントのプロパティ型が必要な場合は、`InferInertiaProps<ReturnType<Controller['action']>>` でアクションプロパティと共有プロパティの両方を含む型を取得できます。
 
 ## コントローラーのテスト
-- `TestApp` を使うと、流暢なアサーションで表現力豊かな HTTP レベルのテストが書けます。
+- `TestApp` を使うと、Fluent アサーションで表現力豊かな HTTP レベルのテストが書けます。
 
 ```ts
 import { TestApp } from '@guren/testing'

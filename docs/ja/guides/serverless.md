@@ -1,6 +1,6 @@
 # サーバーレスデプロイ（AWS Lambda）
 
-`@guren/server/lambda` アダプターで Guren を AWS Lambda 上で動かせます。このガイドでは HTTP、キュー、スケジュールタスク、CLI コマンド、インフラ構成のすべてをカバーします。
+`@guren/core/lambda` アダプターで Guren を AWS Lambda 上で動かせます。このガイドでは HTTP、キュー、スケジュールタスク、CLI コマンド、インフラ構成のすべてをカバーします。
 
 ## 完全な Lambda エントリポイント
 
@@ -13,7 +13,7 @@ import {
   createSqsHandler,
   createScheduleHandler,
   createConsoleHandler,
-} from '@guren/server/lambda'
+} from '@guren/core/lambda'
 import { scheduler } from './src/scheduler'
 import { kernel } from './src/console'
 
@@ -48,7 +48,7 @@ SQS メッセージを Guren のジョブとして処理します。**部分バ�
 
 ```typescript
 import { SQSClient } from '@aws-sdk/client-sqs'
-import { createSqsAdapter, SqsDriver, setQueueDriver } from '@guren/server/queue'
+import { createSqsAdapter, SqsDriver, setQueueDriver } from '@guren/core/queue'
 
 const adapter = createSqsAdapter(new SQSClient({ region: 'ap-northeast-1' }))
 setQueueDriver(new SqsDriver(adapter, {
@@ -82,7 +82,7 @@ aws lambda invoke --function-name my-app-console \
 ランタイムに応じた設定の切り替え:
 
 ```typescript
-import { isLambda, getLambdaContext } from '@guren/server/lambda'
+import { isLambda, getLambdaContext } from '@guren/core/lambda'
 
 if (isLambda()) {
   const ctx = getLambdaContext()!
@@ -99,7 +99,7 @@ if (isLambda()) {
 デフォルトの `ScryptHasher` は `Bun.password` を使うため Lambda では動作しません。`NodeHasher` を使います:
 
 ```typescript
-import { NodeHasher } from '@guren/server/auth'
+import { NodeHasher } from '@guren/core/auth'
 
 // AuthProvider 内で:
 container.instance('hash', new NodeHasher())
@@ -113,7 +113,7 @@ container.instance('hash', new NodeHasher())
 Lambda は `stderr` を自動で CloudWatch に送信します。JSON 形式のコンソールロギングを使います:
 
 ```typescript
-import { LogManager } from '@guren/server/logging'
+import { LogManager } from '@guren/core/logging'
 
 const log = new LogManager({
   default: 'console',
@@ -135,7 +135,7 @@ Lambda での静的ファイル配信は適していません。CloudFront + S3 
 
 ### サービスプロバイダー
 
-オートディスカバリー（`Bun.Glob`）は Lambda では利用不可。プロバイダーを明示的にリスト:
+オートディスカバリー（`Bun.Glob`）は Lambda では利用不可。プロバイダーを明示的に列挙してください:
 
 ```typescript
 const app = createApp({

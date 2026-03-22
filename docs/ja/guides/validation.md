@@ -4,7 +4,7 @@ Guren のバリデーションは schema-first が基本です。Zod 互換ス�
 
 ## クイックスタート
 
-推奨の mainline は controller の validation helper を使う形です：
+推奨パターンはコントローラーの validation helper を使う方法です：
 
 ```ts
 import { Controller, paginate } from '@guren/core'
@@ -260,7 +260,7 @@ const schema = z.object({
 
 ### Inertia での表示
 
-page contract に `ValidationErrors<T>` を載せて、コントローラとコンポーネントで同じ shape を共有します：
+page contract に `ValidationErrors<T>` を載せて、コントローラーとコンポーネントで同じ shape を共有します：
 
 ```ts
 import { type ValidationErrors } from '@guren/core'
@@ -378,7 +378,7 @@ export class CreatePostRequest extends FormRequest<z.infer<typeof CreatePostSche
 }
 ```
 
-コントローラでの使用:
+コントローラーでの使用:
 
 ```ts
 export default class PostController extends Controller {
@@ -391,9 +391,9 @@ export default class PostController extends Controller {
 }
 ```
 
-### コントローラヘルパー
+### コントローラーヘルパー
 
-コントローラには以下の便利なヘルパーメソッドが用意されています:
+コントローラーには以下の便利なヘルパーメソッドが用意されています:
 
 ```ts
 export default class PostController extends Controller {

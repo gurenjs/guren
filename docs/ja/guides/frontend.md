@@ -1,11 +1,11 @@
 # フロントエンドガイド
 
-Guren は Inertia.js と React を組み合わせ、単一ページアプリの体験を提供します。コントローラは Inertia レスポンスを返し、フロントエンドは `resources/js/pages/` 配下の React コンポーネントを描画します。
+Guren は Inertia.js と React を組み合わせ、単一ページアプリの体験を提供します。コントローラーは Inertia レスポンスを返し、フロントエンドは `resources/js/pages/` 配下の React コンポーネントを描画します。
 
 ## プロジェクト構成
 - `resources/js/app.tsx`: Inertia アプリのブートストラップとグローバルプロバイダー登録。
 - `resources/js/ssr.tsx`: SSR 有効時にバックエンドが利用するサーバーレンダラーをエクスポート。
-- `resources/js/pages/`: コントローラ応答に対応する React コンポーネント。
+- `resources/js/pages/`: コントローラー応答に対応する React コンポーネント。
 - `resources/js/components/`: 共有 UI コンポーネント（推奨）。
 - `resources/css/app.css`: Tailwind など CSS のエントリーポイント。
 
@@ -90,7 +90,7 @@ Inertia のヘルパーでクライアントナビゲーションとフォーム
 - `const form = useForm({ title: '', body: '' })` でフォーム状態を管理。
 - `form.post('/posts')` で送信。
 
-バリデーションエラーはコントローラから返し、クライアント側で `form.errors` を参照します。
+バリデーションエラーはコントローラーから返し、クライアント側で `form.errors` を参照します。
 
 ## アセットとスタイル
 スキャフォールドには Tailwind CSS が設定済みです。`resources/css/app.css` を編集するか、好みの CSS フレームワークを追加してください。画像やフォントなどの追加アセットは `public/` 配下に置きます。

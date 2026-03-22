@@ -4,13 +4,13 @@ Guren は Laravel の設計思想を TypeScript 上で再構成し、Bun・Hono�
 
 ## ハイレベルな流れ
 1. **ルーティング**: `routes/web.ts` に registrar を export し、app-local な `Router` にルートを定義。
-2. **コントローラ**: `Controller` を継承し、Hono の `Context` を利用。
+2. **コントローラー**: `Controller` を継承し、Hono の `Context` を利用。
 3. **モデル**: `defineModel(table)` で Drizzle スキーマからモデルを導出。
 4. **ビュー**: `resources/js/pages/` の React コンポーネントを Inertia 経由で描画。
 5. **アプリ起動**: `createApp({ routes, providers })` がルートとサービスを束ね、Bun/Hono サーバーを開始。
 
 ## プロジェクト構成
-- `app/Http/Controllers/`: コントローラを配置。
+- `app/Http/Controllers/`: コントローラーを配置。
 - `app/Models/`: Drizzle バックエンドのモデル (`Model<T>`) を配置。
 - `config/`: アプリやデータベースの設定ファイル。
 - `db/`: スキーマ定義、マイグレーション、シーダー。
@@ -19,7 +19,7 @@ Guren は Laravel の設計思想を TypeScript 上で再構成し、Bun・Hono�
 - `src/`: アプリのブートストラップ（`src/main.ts`, `src/app.ts`）。
 
 ## 命名規約
-- 単一のクラスや型をエクスポートするファイル（コントローラ、モデル、HTTP アプリなど）は `PascalCase.ts` で、ファイル名をエクスポートに揃えます。
+- 単一のクラスや型をエクスポートするファイル（コントローラー、モデル、HTTP アプリなど）は `PascalCase.ts` で、ファイル名をエクスポートに揃えます。
 - 関数やユーティリティを集めるモジュールは `kebab-case.ts`（例: `dev-assets.ts`, `inertia-assets.ts`）で、クラス中心のモジュールと区別します。
 - ディレクトリ内ではどちらかに統一します。例: `packages/core/src/http/` は新規クラスなら PascalCase、アセットミドルウェアや CLI ユーティリティのようにヘルパー中心のディレクトリは kebab-case を維持します。
 
@@ -40,10 +40,10 @@ export function registerWebRoutes(router: Router): void {
 ```
 
 - 各 `Application` は独立した `Router` を持ち、`app.boot()` 時に Hono にマウントされます。
-- コントローラは `[Class, 'method']` タプルで参照します。`router.resource()` も利用できます。
+- コントローラーは `[Class, 'method']` タプルで参照します。`router.resource()` も利用できます。
 
-## コントローラ
-コントローラは `Controller` を継承し、`setContext()` 経由で Hono の `Context` を受け取ります。`this.inertia()` や `this.json()` などのヘルパーでレスポンスを返します。
+## コントローラー
+コントローラーは `Controller` を継承し、`setContext()` 経由で Hono の `Context` を受け取ります。`this.inertia()` や `this.json()` などのヘルパーでレスポンスを返します。
 
 ```ts
 import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
@@ -136,7 +136,7 @@ const { Cache, Events, Log, Mail, Queue } = createFacades(app.container)
 ## リクエストライフサイクル
 1. Hono が HTTP リクエストを受信。
 2. `Router` がマッチするハンドラを解決。
-3. コントローラが実行され、モデル経由で DB にアクセス。
+3. コントローラーが実行され、モデル経由で DB にアクセス。
 4. `this.inertia()` がビューへデータを渡し、Inertia レスポンスを組み立て。
 5. クライアントは初回に React をハイドレートし、以降の遷移は Inertia の SPA トランジションで行われます。
 

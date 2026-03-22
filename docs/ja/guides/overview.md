@@ -78,7 +78,7 @@ export default function TasksIndex({ data, pagination }: Props) {
 }
 ```
 
-テストは英語を読むように書けます：
+テストは自然な文章のように読めます：
 
 ```ts
 const app = await TestApp.create({ boot })
@@ -90,13 +90,13 @@ await app.actingAs(user).get('/dashboard').assertOk()
 
 ## Guren の特徴
 
-**Bun ネイティブ。** Guren は Bun ランタイム上で Hono を HTTP レイヤーとして動作します。Node.js の互換レイヤーはありません。Bun の高速起動、ネイティブ TypeScript 実行、組み込みテストランナーをそのまま活用できます。
+**Bun ネイティブ。** Guren は Bun ランタイム上で Hono を HTTP レイヤーとして動作します。Node.js の互換レイヤーを経由せず、Bun 上で直接動作します。Bun の高速起動、ネイティブ TypeScript 実行、組み込みテストランナーをそのまま活用できます。
 
 **TypeScript で Laravel の開発体験。** Laravel を使ったことがあれば、リソースルーティング、`Controller` と `this.inertia()`、`Model.where().orderBy().get()` といったパターンにはすぐ馴染めます。使ったことがなくても大丈夫です — API は「やりたいこと」がそのまま読めるように設計されています。
 
 **エンドツーエンドの型安全。** Drizzle のスキーマ型が Model に流れ、Controller を通って、React ページの props まで到達します。カラム名を変えると TypeScript がデータベースからブラウザまで、更新が必要な箇所をすべてキャッチします。
 
-**バッテリー同梱、でも強制しない。** 認証、バリデーション、キャッシュ、キュー、メール、イベント、ブロードキャスト、スケジューリング — 必要なときにすべて揃っています。各サブシステムは ServiceProvider によるオプトイン方式なので、使うものだけをロードします。
+**必要な機能を標準搭載。ただし使用は任意。** 認証、バリデーション、キャッシュ、キュー、メール、イベント、ブロードキャスト、スケジューリング — 必要なときにすべて揃っています。各サブシステムは ServiceProvider によるオプトイン方式なので、使うものだけをロードします。
 
 **設定より規約。** `bunx guren add auth` や `bunx guren add resource posts` で feature 単位に生成できます。CLI が正しい場所に正しい構造でファイルを作るので、フォルダ構成の議論ではなく機能開発に時間を使えます。
 
@@ -112,7 +112,7 @@ bun run codegen
 bun run dev        # http://localhost:3333 にアクセス
 ```
 
-## もっと学ぶ
+## さらに詳しく
 
 Guren が初めての方は、この順番で進めてください：
 

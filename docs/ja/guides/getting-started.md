@@ -1,6 +1,6 @@
 # Getting Started
 
-`create-guren-app` で新規プロジェクトを作成した後のフルセットアップ手順です。英語版と同等の内容をまとめています。
+`create-guren-app` で新規プロジェクトを作成した後のセットアップ手順です。
 
 > [!NOTE]
 > 用語が分からない場合は先に [用語集](./glossary.md) を参照してください。
@@ -59,8 +59,8 @@ bun run dev
 ```
 - `http://localhost:3333` を開いて確認します。
 - Bun プロセスが Hono サーバーと Vite を同時に立ち上げます。`GUREN_DEV_VITE=0` で Vite の起動を抑制できます。
-- Inertia のアセット解決は開発時に自動で Vite へ向きます（本番はビルド済み資産を参照）。
-- 生成されたアプリは `createApp({ routes, providers })` を使って bootstrap され、`src/app.ts` から route registrar を受け取ります。
+- Inertia のアセット解決は開発時に自動で Vite を参照します（本番はビルド済みアセットを参照）。
+- 生成されたアプリは `createApp({ routes, providers })` で初期化され、`src/app.ts` から route registrar を受け取ります。
 
 ### 6. 次のステップ
 - コード生成:  
@@ -70,23 +70,23 @@ bun run dev
 - マイグレーション/シード:  
   `bun run db:migrate`  
   `bun run db:seed`
-- さらに学ぶ: [アーキテクチャ](./architecture.md) → [ルーティング](./routing.md) → [コントローラ](./controllers.md) の順で読むとスムーズです。
+- さらに学ぶ: [アーキテクチャ](./architecture.md) → [ルーティング](./routing.md) → [コントローラー](./controllers.md) の順で読むとスムーズです。
 
 ## 本番ビルド
-出荷準備ができたらビルドします:
+本番環境にデプロイする準備ができたらビルドします:
 ```bash
 NODE_ENV=production bun run build
 ```
 クライアント/SSR ビルドが生成され、ハッシュ付きアセットとマニフェストが `public/assets/` に出力されます。実行中の Bun サーバーはこれを参照して SSR を返します。
 
 ## 追加リソース
-1. [Architecture](./architecture.md)
-2. [Routing](./routing.md)
-3. [Controller](./controllers.md)
-4. [Database](./database.md)
-5. [Frontend](./frontend.md)
-6. [Authentication](./authentication.md)
-7. [Testing](./testing.md)
-8. [Deployment](./deployment.md)
+1. [アーキテクチャ](./architecture.md)
+2. [ルーティング](./routing.md)
+3. [コントローラー](./controllers.md)
+4. [データベース](./database.md)
+5. [フロントエンド](./frontend.md)
+6. [認証](./authentication.md)
+7. [テスティング](./testing.md)
+8. [デプロイ](./deployment.md)
 
 ツールの詳細は [CLI リファレンス](./cli.md) を参照してください。

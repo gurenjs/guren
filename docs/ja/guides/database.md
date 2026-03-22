@@ -192,9 +192,9 @@ await Post.transaction(async (_trx, txPost) => {
 })
 ```
 
-## 流暢なクエリビルダー
+## Fluent クエリビルダー
 
-モデルは流暢な `QueryBuilder` を公開しており、条件・ソート・制限をチェーンしてから実行できます。
+モデルは Fluent な `QueryBuilder` を公開しており、条件・ソート・制限をチェーンしてから実行できます。
 
 ```ts
 // シンプルな where 句

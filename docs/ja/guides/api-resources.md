@@ -159,7 +159,7 @@ const data = collect(users, UserResource)
 
 ## ページネーション
 
-Gurenは2つのページネーション戦略を提供します。
+Guren は2つのページネーション戦略を提供します。
 
 ### オフセットベースページネーション
 

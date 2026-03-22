@@ -1,31 +1,31 @@
-# メール認証ガイド
+# メール確認ガイド
 
-Gurenはトークン生成、検証、有効期限を備えたセキュアなメール認証システムを提供します。トークンはセキュリティのため、保存前にハッシュ化されます。
+Guren はトークン生成、検証、有効期限を備えたセキュアなメール確認システムを提供します。トークンはセキュリティのため、保存前にハッシュ化されます。
 
 ## コアコンセプト
 
-- **EmailVerificationTokenStore** – 認証トークンを保存するためのインターフェース。
+- **EmailVerificationTokenStore** – メール確認トークンを保存するためのインターフェース。
 - **トークンハッシュ化** – トークンは保存前にSHA-256でハッシュ化される。
 - **平文は保存しない** – トークンはハッシュのみ保存。
-- **一度きりの使用** – トークンは認証成功後に削除される。
+- **一度きりの使用** – トークンは確認成功後に削除される。
 - **有効期限** – トークンは設定可能な時間後に期限切れになる（デフォルト: 24時間）。
 
 ## 基本的な使い方
 
-### 認証トークンの作成
+### 確認トークンの作成
 
 ```ts
 import { createEmailVerificationToken, MemoryEmailVerificationStore } from '@guren/core'
 
 const store = new MemoryEmailVerificationStore() // 本番環境ではデータベースを使用
 
-// 認証トークンを作成
+// 確認トークンを作成
 const { token, expiresAt } = await createEmailVerificationToken(
   'user@example.com',
   store
 )
 
-// 認証メールを送信
+// 確認メールを送信
 await sendVerificationEmail(email, token)
 ```
 
@@ -45,7 +45,7 @@ if (!email) {
 return ctx.json({ email, valid: true })
 ```
 
-### 認証の完了
+### 確認の完了
 
 ```ts
 import { completeEmailVerification } from '@guren/core'
@@ -54,7 +54,7 @@ const user = await completeEmailVerification(
   token,
   store,
   async (email) => {
-    // ユーザーを認証済みとしてマーク
+    // ユーザーのメールを確認済みとしてマーク
     await User.update(
       { email },
       { emailVerifiedAt: new Date() }
@@ -120,7 +120,7 @@ export class VerificationController extends Controller {
     const user = await this.auth.user()
 
     if (isEmailVerified(user)) {
-      return this.json({ message: 'すでに認証済みです' })
+      return this.json({ message: 'すでにメール確認済みです' })
     }
 
     const { token } = await createEmailVerificationToken(
@@ -136,7 +136,7 @@ export class VerificationController extends Controller {
 
     await this.sendVerificationEmail(user, verifyUrl)
 
-    return this.json({ message: '認証メールを送信しました' })
+    return this.json({ message: '確認メールを送信しました' })
   }
 
   async verify() {
@@ -155,7 +155,7 @@ export class VerificationController extends Controller {
 
     if (!user) {
       return this.inertia(appPages.auth.verifyEmail, {
-        error: '無効または期限切れの認証リンク',
+        error: '無効または期限切れの確認リンク',
       })
     }
 
@@ -167,7 +167,7 @@ export class VerificationController extends Controller {
       to: user.email,
       subject: 'メールアドレスを確認してください',
       html: `
-        <h1>メール認証</h1>
+        <h1>メール確認</h1>
         <p>以下のボタンをクリックしてメールアドレスを確認してください：</p>
         <a href="${verifyUrl}" style="...">メールを確認</a>
         <p>このリンクは24時間で期限切れになります。</p>
@@ -180,14 +180,14 @@ export class VerificationController extends Controller {
 
 ## ヘルパー関数
 
-### 認証状態の確認
+### メール確認状態のチェック
 
 ```ts
 import { isEmailVerified } from '@guren/core'
 
-// ユーザーが認証済みか確認
+// ユーザーのメールが確認済みかチェック
 if (isEmailVerified(user)) {
-  // ユーザーのメールは認証済み
+  // ユーザーのメールは確認済み
 }
 
 // nullableなユーザーでも動作
@@ -196,14 +196,14 @@ if (!isEmailVerified(null)) {
 }
 ```
 
-### メール認証必須ミドルウェア
+### メール確認必須ミドルウェア
 
 ```ts
 import { Router, requireVerifiedEmail } from '@guren/core'
 
 const router = new Router()
 
-// 未認証ユーザーをリダイレクト
+// メール未確認ユーザーをリダイレクト
 router.get('/dashboard', [DashboardController, 'index']).middleware(
   requireVerifiedEmail({ redirectTo: '/email/verify' })
 )
@@ -221,7 +221,7 @@ router.get('/profile', [ProfileController, 'show']).middleware(
 
 ## URLヘルパー
 
-### 認証URLの構築
+### 確認URLの構築
 
 ```ts
 import { buildVerificationUrl } from '@guren/core'
@@ -239,7 +239,7 @@ const urlWithEmail = buildVerificationUrl(
 // 結果: https://example.com/verify?token=abc123...&email=user%40example.com
 ```
 
-### 認証URLの解析
+### 確認URLの解析
 
 ```ts
 import { parseVerificationUrl } from '@guren/core'
@@ -352,7 +352,7 @@ import {
   MemoryEmailVerificationStore,
 } from '@guren/core'
 
-describe('メール認証', () => {
+describe('メール確認', () => {
   let store: MemoryEmailVerificationStore
 
   beforeEach(() => {
@@ -385,7 +385,7 @@ describe('メール認証', () => {
     expect(email).toBeNull()
   })
 
-  test('認証を完了しトークンを消費する', async () => {
+  test('確認を完了しトークンを消費する', async () => {
     const { token } = await createEmailVerificationToken('user@example.com', store)
 
     const result = await completeEmailVerification(
@@ -428,10 +428,10 @@ async register() {
     emailVerifiedAt: null,
   })
 
-  // 認証トークンを作成
+  // 確認トークンを作成
   const { token } = await createEmailVerificationToken(email, this.store)
 
-  // 認証メールを送信
+  // 確認メールを送信
   const verifyUrl = buildVerificationUrl(
     `${process.env.APP_URL}/email/verify`,
     token
@@ -441,25 +441,25 @@ async register() {
   // ユーザーをログイン
   await this.auth.login(user)
 
-  // 認証通知ページへリダイレクト
+  // メール確認通知ページへリダイレクト
   return this.redirect('/email/verify')
 }
 ```
 
 ## ベストプラクティス
 
-1. **長めの有効期限を使用**: メール認証トークンは24〜72時間で安全に期限切れにできる。
+1. **長めの有効期限を使用**: メール確認トークンは24〜72時間で安全に期限切れにできる。
 
 2. **メールを正規化**: 大文字小文字の問題を防ぐため、メールは小文字で保存。
 
-3. **再送信を許可**: ユーザーが必要に応じて新しい認証メールをリクエストできるようにする。
+3. **再送信を許可**: ユーザーが必要に応じて新しい確認メールをリクエストできるようにする。
 
 4. **古いトークンをクリア**: 新しいトークン作成時に同じメールの古いトークンが自動的に削除される。
 
-5. **ルートを保護**: 認証済みユーザーが必要なルートには`requireVerifiedEmail`ミドルウェアを使用。
+5. **ルートを保護**: メール確認済みユーザーが必要なルートには`requireVerifiedEmail`ミドルウェアを使用。
 
-6. **認証済みを処理**: 新しいトークンを送信する前に`isEmailVerified()`をチェック。
+6. **確認済みユーザーの処理**: 新しいトークンを送信する前に`isEmailVerified()`をチェック。
 
 7. **データベースストレージを使用**: `MemoryEmailVerificationStore`はテスト用のみ。
 
-8. **登録時に送信**: ユーザー登録時に自動的に認証メールを送信。
+8. **登録時に送信**: ユーザー登録時に自動的に確認メールを送信。

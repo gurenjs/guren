@@ -29,7 +29,7 @@
      }
    }
    ```
-3. **リレーションを読み込む** — コントローラで eager load:
+3. **リレーションを読み込む** — コントローラーで eager load:
    ```ts
    import { PostResource } from '@/app/Http/Resources/PostResource'
    import { appPages } from '@/resources/js/pages/contracts'

@@ -2,7 +2,7 @@
 
 Guren には 2 つの CLI が付属します:
 
-- 既存プロジェクト内でコントローラ/モデル/ビュー生成やユーティリティを実行する `bunx guren`
+- 既存プロジェクト内でコントローラー/モデル/ビュー生成やユーティリティを実行する `bunx guren`
 - 新規アプリをスキャフォールドする `bunx create-guren-app`
 
 ## 基本的な使い方
@@ -51,10 +51,10 @@ bunx guren add plugin @acme/guren-plugin-audit
 | コマンド | 説明 | 例 |
 |----------|------|----|
 | `deploy` | Docker/Fly.io/Railway/Vercel 向けデプロイ設定ファイルを生成 | `bunx guren deploy --target all --app my-app --port 3333` |
-| `make:controller <Name>` | `app/Http/Controllers` にコントローラを生成 | `bunx guren make:controller PostController` |
+| `make:controller <Name>` | `app/Http/Controllers` にコントローラーを生成 | `bunx guren make:controller PostController` |
 | `make:model <Name>` | 最小のモデルクラスと型定義を `app/Models` に生成（`db/schema` から `camelCase(Name)s` を import） | `bunx guren make:model Post` |
 | `make:view <path>` | `resources/js/pages` に React コンポーネントを生成 | `bunx guren make:view posts/Index` |
-| `make:auth` | ログイン/ログアウトのコントローラ、プロバイダー、ビュー、マイグレーション、シーダー、ルートをスキャフォールド | `bunx guren make:auth` |
+| `make:auth` | ログイン/ログアウトのコントローラー、プロバイダー、ビュー、マイグレーション、シーダー、ルートをスキャフォールド | `bunx guren make:auth` |
 | `make:middleware <Name>` | `app/Http/Middleware` にミドルウェアを生成 | `bunx guren make:middleware Auth` |
 | `make:seeder <Name>` | データベースシーダーファイルを生成 | `bunx guren make:seeder UserSeeder` |
 | `make:job <Name>` | キュー可能なジョブクラスを生成 | `bunx guren make:job SendEmail` |
@@ -249,9 +249,9 @@ bunx guren queue:work --stop-when-empty
 
 ## テンプレートの特徴
 
-生成物はフレームワークの Laravel 風エルゴノミクスに沿っています:
+生成物はフレームワークの Laravel 風の設計方針に沿っています:
 
-- コントローラは `Controller` を継承し、`this.inertia()` などのヘルパーを使用。
+- コントローラーは `Controller` を継承し、`this.inertia()` などのヘルパーを使用。
 - モデルは `Model<TRecord>` を継承し、`static table` を事前に設定。手早い CRUD にはヘルパーを、複雑なクエリは Drizzle RQB へ直接。`Model.query(db)` でモデル起点の RQB も書けます。
 - ビューは React + TypeScript + Tailwind CSS の関数コンポーネント。
 
@@ -267,7 +267,7 @@ bunx create-guren-app my-app
 
 CLI はデフォルトテンプレートをコピーし、メタデータを更新、レンダリングモードを選択するプロンプトを出します。既定の **SSR** は `autoConfigureInertiaAssets` 経由で SSR を有効にし、**SPA** を選ぶと無効化します。プロンプトをスキップする場合は `--mode ssr` または `--mode spa`、空でないディレクトリに生成する場合は `--force` を付けます。
 
-## トラブルシュート
+## トラブルシューティング
 - `command not found: bunx`: Bun が古い可能性があります。1.1 以降にアップグレードしてください。
 - `Error: Port already in use`: 開発サーバー（既定 3333）が埋まっています。`.env` の `PORT` を変更して再起動してください。
 - `Database connection failed`: Postgres に到達できるか、`.env` が `postgres://guren:guren@localhost:54322/guren` を指しているか確認してください。

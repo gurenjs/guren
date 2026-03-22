@@ -113,12 +113,12 @@ Mount your configuration or secrets as needed for your hosting environment.
 
 ## AWS Lambda (Serverless)
 
-Guren runs on AWS Lambda via the `@guren/server/lambda` adapter — ideal for variable traffic or minimal infrastructure management.
+Guren runs on AWS Lambda via the `@guren/core/lambda` adapter — ideal for variable traffic or minimal infrastructure management.
 
 ```typescript
 // lambda.ts
 import app from './src/app'
-import { createLambdaHandler } from '@guren/server/lambda'
+import { createLambdaHandler } from '@guren/core/lambda'
 
 await app.boot()
 export const handler = createLambdaHandler(app)

@@ -4,8 +4,8 @@
 
 ## 本番チェックリスト
 - 環境変数を設定（`DATABASE_URL`, `APP_URL`, `PORT` など）。
-- Bun で依存を本番モードでインストール。
-- フロントエンド資産をビルド。
+- Bun で依存パッケージを本番モードでインストール。
+- フロントエンドアセットをビルド。
 - マイグレーションを実行（必要ならシードも）。
 - Bun サーバーをプロセスマネージャーやコンテナで起動。
 
@@ -33,7 +33,7 @@ bun install --production
 
 デプロイ中にアセットをビルドする環境では dev 依存も必要な場合があるため、必要に応じて `--production` を外してください。
 
-## 3. フロントエンド資産をビルド
+## 3. フロントエンドアセットをビルド
 
 ```bash
 NODE_ENV=production bun run build
@@ -111,12 +111,12 @@ docker run --env-file .env.prod -p 3333:3333 my-app
 
 ## AWS Lambda（サーバーレス）
 
-`@guren/server/lambda` アダプターで Guren を AWS Lambda 上で動かせます。トラフィックが変動するアプリやインフラ管理を最小化したい場合に最適です。
+`@guren/core/lambda` アダプターで Guren を AWS Lambda 上で動かせます。トラフィックが変動するアプリやインフラ管理を最小化したい場合に最適です。
 
 ```typescript
 // lambda.ts
 import app from './src/app'
-import { createLambdaHandler } from '@guren/server/lambda'
+import { createLambdaHandler } from '@guren/core/lambda'
 
 await app.boot()
 export const handler = createLambdaHandler(app)

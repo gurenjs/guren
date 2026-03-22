@@ -1,20 +1,20 @@
 # メールガイド
 
-Gurenはメール送信のための流暢なAPIを提供し、複数のトランスポートバックエンドをサポートしています。メールシステムはキューシステムと統合して非同期送信を実現し、HTMLテンプレート、添付ファイルなどをサポートします。
+Guren はメール送信のための Fluent API を提供し、複数のトランスポートバックエンドをサポートしています。メールシステムはキューシステムと統合して非同期送信を実現し、HTMLテンプレート、添付ファイルなどをサポートします。
 
-vNext の標準導線は、`@guren/core` から mail API を import し、provider で mail manager を構成し、controller では mail の組み立てと dispatch に集中する形です。
+推奨パターン: `@guren/core` から mail API をインポートし、provider で mail manager を構成します。コントローラーではメールの組み立てと送信に集中します。
 
 ## コアコンセプト
 
 - **MailManager** – メールトランスポートを設定・アクセスするための中央レジストリ。
-- **Mail** – メールを作成・送信するための流暢なビルダー。
+- **Mail** – メールを作成・送信するための Fluent ビルダー。
 - **Transport** – メール配信バックエンド。GurenにはSMTP、Resend、Memory（テスト用）トランスポートが付属。
 
 ## 基本的な使い方
 
-### コンテナ束縛ファサードを使用
+### コンテナバインディングファサードを使用
 
-アプリケーションコンテナからファサードを作ると、`MailManager` を明示的に受け回さずにメールを送信できます:
+アプリケーションコンテナからファサードを作ると、`MailManager` を明示的に引き回さずにメールを送信できます:
 
 ```ts
 import { createFacades } from '@guren/core'
@@ -53,7 +53,7 @@ await mail(mailManager)
   .send()
 ```
 
-### 流暢なAPI
+### Fluent API
 
 ```ts
 const builder = mail(mailManager)
@@ -165,7 +165,7 @@ await mail(mailManager)
 
 ### React Emailの使用
 
-Gurenは型安全なメールテンプレートのために[React Email](https://react.email/)と統合できます：
+Guren は型安全なメールテンプレートのために[React Email](https://react.email/)と統合できます：
 
 ```bash
 bun add @react-email/render react

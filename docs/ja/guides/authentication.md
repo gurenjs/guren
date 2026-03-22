@@ -7,7 +7,7 @@ Guren には Laravel 由来の認証スタックが同梱され、セッショ�
 - **AuthManager**: ガードとユーザープロバイダーのレジストリ。アプリケーションインスタンスの `app.auth` またはサービスプロバイダー内の `context.auth` から利用。
 - **ガード**: リクエストを認証するランタイムオブジェクト。既定の `SessionGuard` はセッションにユーザー ID を保持し、任意で「ログイン情報を保持する」トークンも扱います。
 - **ユーザープロバイダー**: ガードがユーザーを読み込み・検証するためのデータアクセス層。`ModelUserProvider` は Guren の `Model` 抽象に対応し、Drizzle のテーブルを認証に使えます。
-- **Auth コンテキスト**: リクエスト単位のファサードで、`auth.check()`, `auth.user()`, `auth.login()` などのヘルパーを提供。`AuthServiceProvider` が自動でアタッチし、コントローラでは `this.auth`、ミドルウェアでは `attachAuthContext` 経由で利用できます。
+- **Auth コンテキスト**: リクエスト単位のファサードで、`auth.check()`, `auth.user()`, `auth.login()` などのヘルパーを提供。`AuthServiceProvider` が自動でアタッチし、コントローラーでは `this.auth`、ミドルウェアでは `attachAuthContext` 経由で利用できます。
 - **OAuthManager**: ソーシャルログイン向けヘルパー。OAuth state 管理、コード交換、プロファイル取得を扱います。
 
 ## CLI でクイックスタート
@@ -18,7 +18,7 @@ Guren には Laravel 由来の認証スタックが同梱され、セッショ�
 bunx guren make:auth --install
 ```
 
-このコマンドはコントローラ、Inertia ページ、レイアウト、`AuthProvider`、ユーザーモデル、SQL マイグレーション、デモシーダーを生成します。`--install` フラグにより自動的に:
+このコマンドはコントローラー、Inertia ページ、レイアウト、`AuthProvider`、ユーザーモデル、SQL マイグレーション、デモシーダーを生成します。`--install` フラグにより自動的に:
 
 1. `Application` の providers 配列に `AuthProvider` を登録
 2. 開発環境用の設定で `createSessionMiddleware` を追加（本番では `cookieSecure: true`）
@@ -211,9 +211,9 @@ export class User extends AuthenticatableModel<UserRecord> {
 
 既定の `AuthServiceProvider` は `users` プロバイダーを使う `web` ガードを自動登録します。追加のガード（例: トークンベース API）が必要なら、`context.auth.registerGuard('api', factory)` を呼び、必要に応じて `context.auth.setDefaultGuard('api')` で既定を差し替えます。
 
-## コントローラとルート
+## コントローラーとルート
 
-コントローラは `auth` ヘルパーを持ちます:
+コントローラーは `auth` ヘルパーを持ちます:
 
 ```ts
 import { appPages } from '@/resources/js/pages/contracts'
@@ -247,7 +247,7 @@ setInertiaSharedProps(async (ctx) => {
 })
 ```
 
-`InertiaSharedProps` を拡張し、React 側でも型付けしてください（詳細はコントローラガイドを参照）。
+`InertiaSharedProps` を拡張し、React 側でも型付けしてください（詳細はコントローラーガイドを参照）。
 
 ルートミドルウェアを使うと保護が簡単です:
 

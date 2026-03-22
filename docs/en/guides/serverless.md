@@ -1,6 +1,6 @@
 # Serverless Deployment (AWS Lambda)
 
-Guren runs on AWS Lambda via the `@guren/server/lambda` adapter. This guide covers the full serverless stack — HTTP, queues, scheduled tasks, CLI commands, and infrastructure.
+Guren runs on AWS Lambda via the `@guren/core/lambda` adapter. This guide covers the full serverless stack — HTTP, queues, scheduled tasks, CLI commands, and infrastructure.
 
 ## Complete Lambda Entry Point
 
@@ -13,7 +13,7 @@ import {
   createSqsHandler,
   createScheduleHandler,
   createConsoleHandler,
-} from '@guren/server/lambda'
+} from '@guren/core/lambda'
 import { scheduler } from './src/scheduler'
 import { kernel } from './src/console'
 
@@ -48,7 +48,7 @@ Configure the SQS driver in your queue provider:
 
 ```typescript
 import { SQSClient } from '@aws-sdk/client-sqs'
-import { createSqsAdapter, SqsDriver, setQueueDriver } from '@guren/server/queue'
+import { createSqsAdapter, SqsDriver, setQueueDriver } from '@guren/core/queue'
 
 const adapter = createSqsAdapter(new SQSClient({ region: 'ap-northeast-1' }))
 setQueueDriver(new SqsDriver(adapter, {
@@ -82,7 +82,7 @@ Returns `{ exitCode: 0 }` on success, `{ exitCode: 1 }` on failure.
 Conditionally configure services based on the runtime:
 
 ```typescript
-import { isLambda, getLambdaContext } from '@guren/server/lambda'
+import { isLambda, getLambdaContext } from '@guren/core/lambda'
 
 if (isLambda()) {
   const ctx = getLambdaContext()!
@@ -99,7 +99,7 @@ if (isLambda()) {
 The default `ScryptHasher` uses `Bun.password` — unavailable on Lambda's Node.js runtime. Use `NodeHasher` instead:
 
 ```typescript
-import { NodeHasher } from '@guren/server/auth'
+import { NodeHasher } from '@guren/core/auth'
 
 // In your AuthProvider:
 container.instance('hash', new NodeHasher())
@@ -113,7 +113,7 @@ container.instance('hash', new NodeHasher())
 Lambda captures `stderr` to CloudWatch automatically. Use JSON-formatted console logging:
 
 ```typescript
-import { LogManager } from '@guren/server/logging'
+import { LogManager } from '@guren/core/logging'
 
 const log = new LogManager({
   default: 'console',

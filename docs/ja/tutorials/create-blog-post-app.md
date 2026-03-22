@@ -22,7 +22,7 @@ Guren の MVC スタックで基本的なブログを作る手順です。
 
    export default class Post extends defineModel(posts) {}
    ```
-3. **コントローラを実装** — `app/Http/Controllers/PostController.ts`:
+3. **コントローラーを実装** — `app/Http/Controllers/PostController.ts`:
    ```ts
    import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
    import Post from '@/app/Models/Post'

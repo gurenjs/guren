@@ -1,6 +1,6 @@
 # 認可
 
-認可は、認証されたユーザーが何を行うことができるかを決定します。GurenはLaravelにインスパイアされた強力なポリシーベースの認可システムを提供しています。
+認可は、認証済みユーザーが実行できる操作を制御する仕組みです。Guren は Laravel に着想を得たポリシーベースの認可システムを提供しています。
 
 ## ゲート
 
@@ -46,9 +46,9 @@ const cannotView = await Gate.denies('view-dashboard', user)
 // リソース付き
 const canUpdate = await Gate.allows('update-post', user, post)
 
-// 認可または例外をスロー
+// 認可を確認し、拒否された場合は例外をスロー
 await Gate.authorize('update-post', user, post)
-// 拒否された場合AuthorizationExceptionをスロー
+// 拒否された場合 AuthorizationException をスロー
 ```
 
 ### Beforeコールバック
@@ -61,7 +61,7 @@ Gate.before((user, ability) => {
   if (user.isSuperAdmin) {
     return true
   }
-  // undefinedを返すとゲートに続行
+  // undefined を返すと通常のゲート判定に進みます
 })
 ```
 
@@ -193,7 +193,7 @@ export class PostPolicy extends Policy<User, Post> {
     if (user.isAdmin) {
       return true
     }
-    // undefinedを返すと特定のメソッドに続行
+    // undefined を返すと個別のポリシーメソッドで判定します
   }
 }
 ```
