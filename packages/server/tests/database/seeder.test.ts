@@ -276,7 +276,7 @@ describe('Factory', () => {
 
   describe('create', () => {
     it('calls persist method', async () => {
-      const persistFn = vi.fn().mockImplementation((attrs) => ({
+      const persistFn = vi.fn().mockImplementation((attrs: Partial<User>) => ({
         ...attrs,
         savedAt: new Date(),
       }))
@@ -299,7 +299,7 @@ describe('Factory', () => {
     })
 
     it('createMany creates multiple instances', async () => {
-      const persistFn = vi.fn().mockImplementation((attrs) => attrs)
+      const persistFn = vi.fn().mockImplementation((attrs: Partial<User>) => attrs)
 
       class PersistingFactory extends BaseFactory<User> {
         definition(): Partial<User> {
@@ -395,7 +395,7 @@ describe('Factory', () => {
     })
 
     it('supports custom persist function', async () => {
-      const persist = vi.fn().mockImplementation((attrs) => ({ ...attrs, saved: true }))
+      const persist = vi.fn().mockImplementation((attrs: Partial<User>) => ({ ...attrs, saved: true }))
 
       const factory = defineFactory<User>(
         (seq) => ({ id: seq, name: `User ${seq}` }),

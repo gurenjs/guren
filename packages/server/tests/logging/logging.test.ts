@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import {
@@ -27,10 +27,10 @@ describe('LOG_LEVEL_PRIORITY', () => {
 })
 
 describe('ConsoleChannel', () => {
-  let consoleSpy: ReturnType<typeof vi.spyOn>
-  let errorSpy: ReturnType<typeof vi.spyOn>
-  let warnSpy: ReturnType<typeof vi.spyOn>
-  let infoSpy: ReturnType<typeof vi.spyOn>
+  let consoleSpy: MockInstance
+  let errorSpy: MockInstance
+  let warnSpy: MockInstance
+  let infoSpy: MockInstance
 
   beforeEach(() => {
     consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
