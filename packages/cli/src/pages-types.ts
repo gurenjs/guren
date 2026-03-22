@@ -122,10 +122,18 @@ export const pages = ${pageObject} as const
 `
 }
 
+function hasContractsImport(extracted: ExtractedPageProps): boolean {
+  return extracted.imports.some((s) => /from\s+['"][^'"]*contracts[^'"]*['"]/.test(s))
+}
+
 function buildPagePropsBlock(propsMap: Map<string, ExtractedPageProps>): string {
   const entries = Array.from(propsMap.entries())
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([pageId, extracted]) => `  '${esc(pageId)}': ${extracted.rawType}`)
+    .map(([pageId, extracted]) => {
+      // Use Record<string, unknown> for types from contracts files to avoid circular deps
+      const type = hasContractsImport(extracted) ? 'Record<string, unknown>' : extracted.rawType
+      return `  '${esc(pageId)}': ${type}`
+    })
     .join('\n')
 
   return `
@@ -147,6 +155,9 @@ function buildTypeImportsBlock(propsMap: Map<string, ExtractedPageProps>): strin
     .map((statement) => statement.trim())
     .filter((statement) => statement.length > 0)
     .filter((statement) => !statement.includes("from 'react'") && !statement.includes('from "react"'))
+    // Exclude imports from contracts files to prevent circular dependencies:
+    // contracts.ts imports from pages.gen.ts, so importing back creates a cycle
+    .filter((statement) => !/from\s+['"][^'"]*contracts[^'"]*['"]/.test(statement))
   const unique = Array.from(new Set(imports)).sort((left, right) => left.localeCompare(right))
 
   if (unique.length === 0) {
@@ -242,7 +253,8 @@ function renderPageNode(segment: string, node: PageTreeNode, depth: number, prop
 
   if (node.page && node.children.size === 0) {
     const id = node.page.id
-    const hasTypedProps = propsMap?.has(id)
+    const extracted = propsMap?.get(id)
+    const hasTypedProps = extracted && !hasContractsImport(extracted)
     const typeArgs = hasTypedProps
       ? `<'${esc(id)}', PagePropsMap['${esc(id)}']>`
       : ''
