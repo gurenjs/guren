@@ -751,7 +751,7 @@ function resolveHandler(
       }
 
       if (container) {
-        c.set('container', container)
+        c.set('container' as never, container as never)
       }
       controller.setContext(c)
 
