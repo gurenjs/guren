@@ -58,7 +58,9 @@ jobs:
         run: bun run audit:docs
 
       - name: Build example apps
-        run: bun run --cwd examples/blog build
+        run: |
+          bun run --cwd examples/blog build
+          bun run --cwd web build
 
       - name: Bundle budget audit
         run: bun run audit:bundle-budgets
