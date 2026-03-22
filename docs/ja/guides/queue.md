@@ -13,13 +13,13 @@ Guren は、時間のかかるタスクをバックグラウンドで処理す�
 
 ## ジョブの作成
 
-CLIを使用して新しいジョブを生成します：
+CLIを使用して新しいジョブを生成します。
 
 ```bash
 bunx guren make:job SendWelcomeEmail
 ```
 
-これにより`app/Jobs/SendWelcomeEmailJob.ts`が作成されます：
+これにより`app/Jobs/SendWelcomeEmailJob.ts`が作成されます。
 
 ```ts
 import { Job } from '@guren/core'
@@ -69,7 +69,7 @@ export class SendWelcomeEmailJob extends Job<SendWelcomeEmailPayload> {
 
 ### ファサードを使用（推奨）
 
-`QueueFacade` を使うと、コンテナからキュードライバを遅延解決してシンプルにジョブをディスパッチできます:
+`QueueFacade` を使うと、コンテナからキュードライバを遅延解決してシンプルにジョブをディスパッチできます。
 
 ```ts
 import { QueueFacade as Queue } from '@guren/core'
@@ -82,7 +82,7 @@ await Queue.push(new SendWelcomeEmailJob({
 
 ### 直接セットアップ
 
-ジョブをディスパッチする前に、キューマネージャーを設定します：
+ジョブをディスパッチする前に、キューマネージャーを設定します。
 
 ```ts
 import { createQueueManager, MemoryDriver } from '@guren/core'
@@ -97,7 +97,7 @@ const queue = createQueueManager({
 queue.driver()
 ```
 
-その後、アプリケーションのどこからでもジョブをディスパッチできます：
+その後、アプリケーションのどこからでもジョブをディスパッチできます。
 
 ```ts
 import { SendWelcomeEmailJob } from '@/app/Jobs/SendWelcomeEmailJob'
@@ -129,7 +129,7 @@ await SendWelcomeEmailJob.dispatch(
 
 ### CLIを使用
 
-ジョブを処理するワーカーを起動します：
+ジョブを処理するワーカーを起動します。
 
 ```bash
 # デフォルトキューを処理
@@ -153,7 +153,7 @@ bunx guren queue:work --sleep=500 --timeout=120000 --max-jobs=100
 
 ### コードによるワーカー
 
-より細かい制御のために、コードからワーカーを作成できます：
+より細かい制御のために、コードからワーカーを作成できます。
 
 ```ts
 import { Worker, MemoryDriver, createQueueManager, registerJob } from '@guren/core'
@@ -199,7 +199,7 @@ await worker.stop()
 
 ### QueueManagerを使用
 
-複数のキューバックエンドを持つアプリケーションには、`createQueueManager()` を使用します：
+複数のキューバックエンドを持つアプリケーションには、`createQueueManager()` を使用します。
 
 ```ts
 import { createQueueManager, MemoryDriver, RedisDriver, createRedisClient } from '@guren/core'
@@ -223,7 +223,7 @@ const memoryDriver = queueManager.driver('memory')
 
 ### Redisドライバ
 
-本番環境では、永続性とマルチサーバーサポートのためにRedisドライバを使用します：
+本番環境では、永続性とマルチサーバーサポートのためにRedisドライバを使用します。
 
 ```ts
 import { createQueueManager, RedisDriver, createRedisClient } from '@guren/core'
@@ -255,7 +255,7 @@ const driver = queue.driver()
 bunx guren queue:failed
 ```
 
-またはコードから：
+またはコードから取得できます。
 
 ```ts
 const failedJobs = await driver.getFailedJobs()
@@ -273,7 +273,7 @@ bunx guren queue:retry <job-id>
 bunx guren queue:retry --all
 ```
 
-またはコードから：
+またはコードからリトライできます。
 
 ```ts
 await driver.retryFailedJob(jobId)
@@ -285,7 +285,7 @@ await driver.retryFailedJob(jobId)
 bunx guren queue:flush
 ```
 
-またはコードから：
+またはコードから削除できます。
 
 ```ts
 await driver.deleteFailedJob(jobId)
@@ -293,7 +293,7 @@ await driver.deleteFailedJob(jobId)
 
 ## テスト
 
-テストには、Memoryドライバを使用してジョブを同期的に処理します：
+テストには、Memoryドライバを使用してジョブを同期的に処理します。
 
 ```ts
 import { describe, test, expect, beforeEach } from 'bun:test'

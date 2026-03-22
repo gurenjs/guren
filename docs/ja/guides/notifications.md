@@ -138,7 +138,7 @@ toMail(notifiable: Notifiable): NotificationMailMessage {
 
 ### データベースチャンネル
 
-通知をデータベースに保存：
+通知をデータベースに保存できます。
 
 ```ts
 import { DatabaseChannel } from '@guren/core'
@@ -219,7 +219,7 @@ const sent = memoryChannel.getSentNotifications()
 
 ## Notifiableインターフェース
 
-通知を受け取るエンティティは`Notifiable`を実装する必要があります：
+通知を受け取るエンティティは`Notifiable`を実装する必要があります。
 
 ```ts
 import type { Notifiable } from '@guren/core'
@@ -339,7 +339,7 @@ class OrderStatusNotification extends Notification {
 
 ## カスタムチャンネル
 
-カスタム通知チャンネルを作成：
+カスタム通知チャンネルを作成できます。
 
 ```ts
 import type { NotificationChannel, Notifiable } from '@guren/core'

@@ -42,7 +42,7 @@ cp .env.example .env
 > `.env` はリポジトリにコミットしないでください。もし漏洩させた場合はデータベースユーザーのローテーションや API キーの再発行を行ってください。
 
 ### 4. PostgreSQL を用意
-PostgreSQL 15+ が必要です。手元でコンテナを立てる例:
+PostgreSQL 15+ が必要です。手元でコンテナを立てる例を示します。
 ```bash
 docker run --name guren-postgres \
   -e POSTGRES_USER=guren \
@@ -73,7 +73,7 @@ bun run dev
 - さらに学ぶ: [アーキテクチャ](./architecture.md) → [ルーティング](./routing.md) → [コントローラー](./controllers.md) の順で読むとスムーズです。
 
 ## 本番ビルド
-本番環境にデプロイする準備ができたらビルドします:
+本番環境にデプロイする準備ができたらビルドします。
 ```bash
 NODE_ENV=production bun run build
 ```

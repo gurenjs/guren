@@ -32,7 +32,7 @@ return ctx.json({ token: plainTextToken })
 
 ### トークンフォーマット
 
-トークンは`{id}|{token}`形式で返されます：
+トークンは`{id}|{token}`形式で返されます。
 
 ```
 abc123def456...|xyz789ghi012...
@@ -80,7 +80,7 @@ tokenCanAny(token, ['users:read', 'users:write'])   // false
 
 ### ワイルドカードAbility
 
-`*`を使用してすべてのabilitiesを付与：
+`*`を使用してすべてのabilitiesを付与できます。
 
 ```ts
 const { plainTextToken } = await createApiToken(store, {

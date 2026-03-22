@@ -78,7 +78,7 @@ broadcast.channel('public.*', () => true) // ワイルドカードパターン
 
 ### Privateチャンネル
 
-Privateチャンネルには認証が必要です：
+Privateチャンネルには認証が必要です。
 
 ```ts
 broadcast.privateChannel('orders.{orderId}', async (channel, user) => {
@@ -99,7 +99,7 @@ broadcast.privateChannel('user.{userId}', (channel, user) => {
 
 ### Presenceチャンネル
 
-Presenceチャンネルは認可時にメンバー情報を返します：
+Presenceチャンネルは認可時にメンバー情報を返します。
 
 ```ts
 broadcast.presenceChannel('chat.{roomId}', async (channel, user) => {
@@ -267,7 +267,7 @@ async function subscribeToChannel(channel: string) {
 
 ### Redisドライバー
 
-本番環境とマルチサーバーサポート向け：
+本番環境とマルチサーバーサポートにはRedisドライバーを使用します。
 
 ```ts
 import { BroadcastManager, RedisDriver } from '@guren/core'
@@ -302,7 +302,7 @@ await driver.publish('test-channel', 'TestEvent', data)
 
 ## イベントからのブロードキャスト
 
-イベントシステムとブロードキャスティングを統合：
+イベントシステムとブロードキャスティングを統合できます。
 
 ```ts
 import { Event } from '@guren/core'
@@ -346,7 +346,7 @@ for (const channel of event.broadcastOn()) {
 
 ## Presenceチャンネルメンバー
 
-Presenceチャンネルの参加者を追跡：
+Presenceチャンネルの参加者を追跡できます。
 
 ```ts
 import { PresenceChannel } from '@guren/core'

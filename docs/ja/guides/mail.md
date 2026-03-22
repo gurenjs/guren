@@ -14,7 +14,7 @@ Guren はメール送信のための Fluent API を提供し、複数のトラ�
 
 ### コンテナバインディングファサードを使用
 
-アプリケーションコンテナからファサードを作ると、`MailManager` を明示的に引き回さずにメールを送信できます:
+アプリケーションコンテナからファサードを作ると、`MailManager` を明示的に引き回さずにメールを送信できます。
 
 ```ts
 import { createFacades } from '@guren/core'
@@ -96,7 +96,7 @@ await builder.send()
 
 ### 複数のトランスポート
 
-異なるユースケースに対応するため、複数のメールバックエンドを設定：
+異なるユースケースに対応するため、複数のメールバックエンドを設定できます。
 
 ```ts
 import { MailManager, mail } from '@guren/core'
@@ -165,7 +165,7 @@ await mail(mailManager)
 
 ### React Emailの使用
 
-Guren は型安全なメールテンプレートのために[React Email](https://react.email/)と統合できます：
+Guren は型安全なメールテンプレートのために[React Email](https://react.email/)と統合できます。
 
 ```bash
 bun add @react-email/render react
@@ -263,7 +263,7 @@ await mail(mailManager)
 
 ## キューによるメール送信
 
-キューシステムを使用してメールを非同期で送信します。実アプリでは mail manager を provider で構成し、container から利用します。`setMailManager()` は queued mail job から同じ manager を参照するための bridge です：
+キューシステムを使用してメールを非同期で送信します。実アプリでは mail manager を provider で構成し、container から利用します。`setMailManager()` は queued mail job から同じ manager を参照するための bridge です。
 
 ```ts
 import { mail, setMailManager, createQueueManager, MemoryDriver } from '@guren/core'
@@ -294,7 +294,7 @@ await mail(mailManager)
 
 ## Mailableクラス
 
-再利用可能なメールテンプレート用のMailableクラスを生成：
+再利用可能なメールテンプレート用のMailableクラスを生成できます。
 
 ```bash
 bunx guren make:mail WelcomeMail
@@ -359,7 +359,7 @@ await welcomeMail.queue('emails')
 
 ## テスト
 
-テストにはMemoryトランスポートを使用：
+テストにはMemoryトランスポートを使用します。
 
 ```ts
 import { describe, test, expect, beforeEach } from 'bun:test'

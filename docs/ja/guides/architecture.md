@@ -24,7 +24,7 @@ Guren は Laravel の設計思想を TypeScript 上で再構成し、Bun・Hono�
 - ディレクトリ内ではどちらかに統一します。例: `packages/core/src/http/` は新規クラスなら PascalCase、アセットミドルウェアや CLI ユーティリティのようにヘルパー中心のディレクトリは kebab-case を維持します。
 
 ## ルーティング
-`routes/web.ts` は registrar を export します:
+`routes/web.ts` は registrar を export します。
 
 ```ts
 import { Router } from '@guren/core'
@@ -89,7 +89,7 @@ export class Post extends defineModel(posts) {}
 
 ## サービスプロバイダ
 
-Guren v0.3 では全プロバイダが `ServiceProvider` を継承する統一パターンに移行しました。`this.container` 経由でサービスコンテナにアクセスできます:
+Guren v0.3 では全プロバイダが `ServiceProvider` を継承する統一パターンに移行しました。`this.container` 経由でサービスコンテナにアクセスできます。
 
 ```ts
 import { ServiceProvider } from '@guren/core'
@@ -110,7 +110,7 @@ export default class AppServiceProvider extends ServiceProvider {
 
 ### ファサード
 
-頻繁に使うサービスにはファサードが用意されています。コンテナから遅延解決されるため、import するだけで利用可能です:
+頻繁に使うサービスにはファサードが用意されています。コンテナから遅延解決されるため、import するだけで利用可能です。
 
 ```ts
 import { createFacades } from '@guren/core'
@@ -119,7 +119,7 @@ const { Cache, Events, Log, Mail, Queue } = createFacades(app.container)
 ```
 
 ## アプリケーションのブート
-生成済みプロジェクトの `src/main.ts` は以下の手順を示します:
+生成済みプロジェクトの `src/main.ts` は以下の手順を示します。
 
 1. `routes/web.ts` から registrar を export する。
 2. `const app = createApp({ routes: registerWebRoutes, providers: [DatabaseProvider, ...] })` のように生成し、サービスを早期登録。

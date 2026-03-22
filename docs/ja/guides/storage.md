@@ -139,7 +139,7 @@ const visibility = await disk.getVisibility('file.txt')
 
 ### 複数のディスク
 
-アプリケーションで複数のストレージバックエンドを設定：
+アプリケーションで複数のストレージバックエンドを設定できます。
 
 ```ts
 import { StorageManager } from '@guren/core'
@@ -228,7 +228,7 @@ const storage = new StorageManager({
 
 ### S3互換サービス
 
-MinIO、DigitalOcean Spaces、Cloudflare R2などのサービス向け：
+MinIO、DigitalOcean Spaces、Cloudflare R2などのサービスにも対応しています。
 
 ```ts
 // MinIO
@@ -280,7 +280,7 @@ const storage = new StorageManager({
 
 ### 署名付きURL
 
-プライベートファイル用の一時URLを生成：
+プライベートファイル用の一時URLを生成します。
 
 ```ts
 const disk = storage.disk('s3')
@@ -334,7 +334,7 @@ export class UploadController extends Controller {
 
 ### 大きなファイルのストリーミング
 
-大きなファイルの場合はストリーミングを検討：
+大きなファイルの場合はストリーミングを検討してください。
 
 ```ts
 import { Controller } from '@guren/core'
@@ -363,7 +363,7 @@ export class DownloadController extends Controller {
 
 ## テスト
 
-テストにはMemoryドライバを使用：
+テストにはMemoryドライバを使用します。
 
 ```ts
 import { describe, test, expect, beforeEach } from 'bun:test'

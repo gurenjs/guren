@@ -15,7 +15,7 @@ Guren は複数のストレージバックエンドをサポートする統一�
 
 ### クイックスタート（コンテナバインディングファサード）
 
-最もシンプルにキャッシュを使う方法は、アプリケーションコンテナからファサードを作ることです:
+最もシンプルにキャッシュを使う方法は、アプリケーションコンテナからファサードを作ることです。
 
 ```ts
 import { createFacades } from '@guren/core'
@@ -37,7 +37,7 @@ await Cache.store().delete('user:1')
 
 ### 直接インスタンス化
 
-`CacheManager` を直接作成することもできます:
+`CacheManager` を直接作成することもできます。
 
 ```ts
 import { CacheManager } from '@guren/core'
@@ -100,7 +100,7 @@ const settings = await cache.store().rememberForever('app:settings', async () =>
 
 ### 複数のストア
 
-アプリケーションで複数のキャッシュバックエンドを設定：
+アプリケーションで複数のキャッシュバックエンドを設定できます。
 
 ```ts
 import { CacheManager } from '@guren/core'
@@ -159,7 +159,7 @@ await cache.store('file').set('persistent', 'data')
 
 ## タグ付きキャッシュ
 
-タグを使用すると、関連するキャッシュアイテムをグループ化して簡単に無効化できます：
+タグを使用すると、関連するキャッシュアイテムをグループ化して簡単に無効化できます。
 
 ```ts
 const cache = new CacheManager()
@@ -284,7 +284,7 @@ export async function getUserPreferences(
 
 ## テスト
 
-テストにはMemoryストアを使用：
+テストにはMemoryストアを使用します。
 
 ```ts
 import { describe, test, expect, beforeEach } from 'bun:test'

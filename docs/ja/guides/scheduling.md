@@ -32,7 +32,7 @@ scheduler.start()
 
 ### スケジューラーの実行
 
-アプリケーションのブートストラップでスケジューラーを起動：
+アプリケーションのブートストラップでスケジューラーを起動します。
 
 ```ts
 // app.ts
@@ -73,7 +73,7 @@ scheduler.schedule((schedule) => {
 
 ### ジョブ
 
-キュージョブをスケジュールでディスパッチ：
+キュージョブをスケジュールでディスパッチします。
 
 ```ts
 import { SendWeeklyDigestJob } from '@/app/Jobs/SendWeeklyDigestJob'
@@ -198,7 +198,7 @@ schedule.call(task)
 
 ### 重複実行の防止
 
-前のインスタンスがまだ実行中の場合、タスクの実行をスキップ：
+前のインスタンスがまだ実行中の場合、タスクの実行をスキップします。
 
 ```ts
 schedule.call(longRunningTask)
@@ -213,7 +213,7 @@ schedule.call(task)
 
 ### 単一サーバーでの実行
 
-マルチサーバー環境で、1台のサーバーでのみタスクを実行：
+マルチサーバー環境で、1台のサーバーでのみタスクを実行します。
 
 ```ts
 schedule.call(task)
@@ -283,7 +283,7 @@ await scheduler.runDueTasks()           // 実行予定の全タスクを今す�
 
 ## CLI統合
 
-コマンドラインからスケジューラーを実行：
+コマンドラインからスケジューラーを実行します。
 
 ```bash
 # スケジューラーを開始

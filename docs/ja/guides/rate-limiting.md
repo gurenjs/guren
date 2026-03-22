@@ -151,7 +151,7 @@ X-RateLimit-Reset: 1705312800
 
 ### メモリストア
 
-シングルプロセスアプリケーションに適しています：
+シングルプロセスアプリケーションに適しています。
 
 ```ts
 import { MemoryRateLimitStore } from '@guren/core'
@@ -171,7 +171,7 @@ process.on('SIGTERM', () => {
 
 ### スライディングウィンドウストア
 
-トラフィックを滑らかにするより正確なレート制限：
+トラフィックを滑らかにするより正確なレート制限を提供します。
 
 ```ts
 import { SlidingWindowRateLimitStore } from '@guren/core'
@@ -191,7 +191,7 @@ const rateLimiter = createRateLimitMiddleware({
 
 ### Redisストア（カスタム実装）
 
-分散アプリケーション用のRedisバックエンドストアを実装：
+分散アプリケーション用のRedisバックエンドストアを実装できます。
 
 ```ts
 import type { RateLimitStore, RateLimitEntry } from '@guren/core'
@@ -234,7 +234,7 @@ export class RedisRateLimitStore implements RateLimitStore {
 
 ### レート制限情報の取得
 
-インクリメントせずにレート制限状態を確認：
+インクリメントせずにレート制限状態を確認できます。
 
 ```ts
 import { getRateLimitInfo, MemoryRateLimitStore } from '@guren/core'
@@ -251,7 +251,7 @@ console.log(`制限中: ${info.isLimited}`)
 
 ### レート制限のリセット
 
-特定のキーのレート制限をクリア：
+特定のキーのレート制限をクリアできます。
 
 ```ts
 import { resetRateLimit, MemoryRateLimitStore } from '@guren/core'

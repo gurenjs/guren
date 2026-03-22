@@ -3,7 +3,7 @@
 組み込みの認証スタックをスキャフォールドしてアプリを保護します。
 
 1. **スキャフォールドを生成** — `bunx guren make:auth --install` を実行するとコントローラー、ビュー、マイグレーション、`AuthProvider` を作成し、セッションやルートも自動配線します。既存ファイルを上書きしたい場合は `--force` を併用。
-2. **配線（通常は自動）** — `--install` で `AuthProvider` 登録とセッションミドルウェア、ルート接続まで自動化されます。セッション設定を調整したい場合は `createApp()` に auth オプションを渡してください:
+2. **配線（通常は自動）** — `--install` で `AuthProvider` 登録とセッションミドルウェア、ルート接続まで自動化されます。セッション設定を調整したい場合は `createApp()` に auth オプションを渡してください。
    ```ts
    import { createApp } from '@guren/core'
 
@@ -17,7 +17,7 @@
    })
    ```
 3. **マイグレーションとシードを実行** — `bun run db:migrate` の後に `bun run db:seed` を実行し、`users` テーブルとデモユーザーを作成。
-4. **ルートを保護** — ダッシュボードや投稿管理に `requireAuthenticated` を適用:
+4. **ルートを保護** — ダッシュボードや投稿管理に `requireAuthenticated` を適用します。
    ```ts
    import { Router, requireAuthenticated } from '@guren/core'
 

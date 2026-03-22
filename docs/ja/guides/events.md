@@ -14,7 +14,7 @@ Guren はアプリケーション内のコンポーネントを疎結合にす�
 
 ### 基本的なイベント
 
-`Event`基底クラスを拡張してカスタムイベントを作成：
+`Event`基底クラスを拡張してカスタムイベントを作成します。
 
 ```ts
 import { Event } from '@guren/core'
@@ -31,13 +31,13 @@ export class UserRegistered extends Event {
 
 ### CLIを使用
 
-CLIを使用してイベントクラスを生成：
+CLIを使用してイベントクラスを生成できます。
 
 ```bash
 bunx guren make:event UserRegistered
 ```
 
-これにより`app/Events/UserRegistered.ts`が作成されます：
+これにより`app/Events/UserRegistered.ts`が作成されます。
 
 ```ts
 import { Event } from '@guren/core'
@@ -76,7 +76,7 @@ class OrderPlaced extends Event {
 
 ### コンテナバインディングファサードを使用
 
-アプリケーションコンテナからファサードを作ると、`EventManager` を明示的に引き回さずに簡潔に利用できます:
+アプリケーションコンテナからファサードを作ると、`EventManager` を明示的に引き回さずに簡潔に利用できます。
 
 ```ts
 import { createFacades } from '@guren/core'
@@ -121,7 +121,7 @@ events.once(ApplicationStarted, (event) => {
 
 ### リスナーの優先度
 
-優先度の高いリスナーが先に実行されます：
+優先度の高いリスナーが先に実行されます。
 
 ```ts
 // 2番目に実行（デフォルト優先度: 0）
@@ -150,7 +150,7 @@ events.off(UserRegistered)
 
 ## リスナークラス
 
-複雑なリスナーには、クラスベースのリスナーを使用：
+複雑なリスナーには、クラスベースのリスナーを使用します。
 
 ```bash
 bunx guren make:listener SendWelcomeEmail
@@ -225,7 +225,7 @@ events.on(
 
 ### 逐次実行
 
-リスナーは優先度順に1つずつ実行されます：
+リスナーは優先度順に1つずつ実行されます。
 
 ```ts
 // リスナーは順番に実行される
@@ -234,7 +234,7 @@ await events.emit(new UserRegistered('123', 'user@example.com'))
 
 ### 並列実行
 
-順序が重要でない場合の高速実行：
+順序が重要でない場合は高速に実行できます。
 
 ```ts
 // リスナーは並行して実行される
@@ -305,7 +305,7 @@ events.on(ApplicationShutdown, (event) => {
 
 ## キュー対応リスナー
 
-リスナーを非同期処理のためにキューにディスパッチ：
+リスナーを非同期処理のためにキューにディスパッチできます。
 
 ```ts
 // キュー統合を設定

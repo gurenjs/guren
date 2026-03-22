@@ -10,7 +10,7 @@ Guren は Inertia.js と React を組み合わせ、単一ページアプリの�
 - `resources/css/app.css`: Tailwind など CSS のエントリーポイント。
 
 ## ページコンポーネント
-ファイル名は `resources/js/pages/contracts.ts` の page contract と対応します:
+ファイル名は `resources/js/pages/contracts.ts` の page contract と対応します。
 
 ```ts
 // Controller
@@ -52,7 +52,7 @@ export default function Index({ data, pagination }: Props) {
 TypeScript で props を型付けするとコンパイル時の安全性が高まります。
 
 ## レイアウトと共有 UI
-ナビゲーションや共通 UI を保つため、ページをレイアウトコンポーネントでラップします:
+ナビゲーションや共通 UI を保つため、ページをレイアウトコンポーネントでラップします。
 
 ```tsx
 // resources/js/components/Layout.tsx
@@ -84,7 +84,7 @@ export default function Index({ posts }: Props) {
 ```
 
 ## フォームとナビゲーション
-Inertia のヘルパーでクライアントナビゲーションとフォーム送信を行います:
+Inertia のヘルパーでクライアントナビゲーションとフォーム送信を行います。
 
 - `<Link href="/posts/new">Create Post</Link>` でページ遷移してもフルリロードされません。
 - `const form = useForm({ title: '', body: '' })` でフォーム状態を管理。
@@ -96,13 +96,13 @@ Inertia のヘルパーでクライアントナビゲーションとフォーム
 スキャフォールドには Tailwind CSS が設定済みです。`resources/css/app.css` を編集するか、好みの CSS フレームワークを追加してください。画像やフォントなどの追加アセットは `public/` 配下に置きます。
 
 ## サーバーサイドレンダリング
-各アプリには既定で `resources/js/ssr.tsx` が入り、`@guren/inertia-client` の `renderInertiaServer()` を呼び出します。`autoConfigureInertiaAssets(app, { importMeta })` でブートすると、Guren は次を自動で処理します:
+各アプリには既定で `resources/js/ssr.tsx` が入り、`@guren/inertia-client` の `renderInertiaServer()` を呼び出します。`autoConfigureInertiaAssets(app, { importMeta })` でブートすると、Guren は次を自動で処理します。
 
 - 開発時は Vite dev サーバーへ HTML を向けます（`VITE_DEV_SERVER_URL` があれば使用）。
 - 本番ではビルド済みクライアントマニフェスト (`public/assets/.vite/manifest.json`) を検出し、`GUREN_INERTIA_ENTRY`/`GUREN_INERTIA_STYLES` を設定。
 - SSR マニフェスト (`public/assets/.vite/ssr-manifest.json`) を検出し、`GUREN_INERTIA_SSR_ENTRY` / `GUREN_INERTIA_SSR_MANIFEST` を設定してサーバーレンダリングを可能にします。
 
-必要なアセットを生成するには `codegen` を含む標準 build を実行します:
+必要なアセットを生成するには `codegen` を含む標準 build を実行します。
 
 ```bash
 bun run build

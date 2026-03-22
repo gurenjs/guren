@@ -4,7 +4,7 @@ Guren のバリデーションは schema-first が基本です。Zod 互換ス�
 
 ## クイックスタート
 
-推奨パターンはコントローラーの validation helper を使う方法です：
+推奨パターンはコントローラーの validation helper を使う方法です。
 
 ```ts
 import { Controller, paginate } from '@guren/core'
@@ -49,7 +49,7 @@ export default class PostsController extends Controller {
 
 ### `validateRequest(schema)` 互換ミドルウェア
 
-バリデーションミドルウェアを作成するファクトリ：
+バリデーションミドルウェアを作成するファクトリです。
 
 ```ts
 import { Router, validateRequest } from '@guren/core'
@@ -69,7 +69,7 @@ router.post('/login', [AuthController, 'login'], validateRequest(schema))
 
 ### `validateRequestWith(schemaFactory)`
 
-リクエストコンテキストに基づく動的スキーマ用：
+リクエストコンテキストに基づく動的スキーマ用です。
 
 ```ts
 import { Router, validateRequestWith } from '@guren/core'
@@ -90,7 +90,7 @@ router.put('/users/:id', [UserController, 'update'], validateRequestWith((ctx) =
 
 ## 検証済みデータの取得
 
-バリデーションミドルウェア実行後、`getValidatedData()` で型付きデータを取得：
+バリデーションミドルウェア実行後、`getValidatedData()` で型付きデータを取得できます。
 
 ```ts
 import { getValidatedData } from '@guren/core'
@@ -113,7 +113,7 @@ router.post('/posts', async (ctx) => {
 
 ## 手動バリデーション
 
-ミドルウェア外でのバリデーションには `validate()` または `validateSafe()` を使用：
+ミドルウェア外でのバリデーションには `validate()` または `validateSafe()` を使用します。
 
 ```ts
 import { validate, validateSafe } from '@guren/core'
@@ -132,7 +132,7 @@ if (result.success) {
 
 ## カスタムエラーハンドリング
 
-デフォルトのエラーレスポンスをオーバーライド：
+デフォルトのエラーレスポンスをオーバーライドできます。
 
 ```ts
 validateRequest(schema, {
@@ -151,7 +151,7 @@ validateRequest(schema, {
 
 ## スキーマインターフェース
 
-Guren のバリデーションはスキーマライブラリに依存しません。`ValidationSchema` を実装する任意のオブジェクトが使用可能：
+Guren のバリデーションはスキーマライブラリに依存しません。`ValidationSchema` を実装する任意のオブジェクトが使用可能です。
 
 ```ts
 interface ValidationSchema<T> {
@@ -160,7 +160,7 @@ interface ValidationSchema<T> {
 }
 ```
 
-これにより Zod、Valibot、カスタムバリデーターが使用可能：
+これにより Zod、Valibot、カスタムバリデーターが使用できます。
 
 ```ts
 // Valibot を使用
@@ -240,7 +240,7 @@ const schema = z.object({
 
 ## フォームバリデーションエラー
 
-バリデーション失敗時のデフォルトレスポンス形式：
+バリデーション失敗時のデフォルトレスポンス形式です。
 
 ```json
 {
@@ -260,7 +260,7 @@ const schema = z.object({
 
 ### Inertia での表示
 
-page contract に `ValidationErrors<T>` を載せて、コントローラーとコンポーネントで同じ shape を共有します：
+page contract に `ValidationErrors<T>` を載せて、コントローラーとコンポーネントで同じ shape を共有します。
 
 ```ts
 import { type ValidationErrors } from '@guren/core'
@@ -305,7 +305,7 @@ function CreateUser({ errors }: Props) {
 
 ## コントローラーバリデーションヘルパー
 
-コントローラーで最もシンプルにバリデーションを行う方法は `validateBody`、`validateQuery`、`validateParams` です。`safeParse()` を持つ任意の Zod ライクなスキーマを受け取り、失敗時に `ValidationException`（422）をスローします：
+コントローラーで最もシンプルにバリデーションを行う方法は `validateBody`、`validateQuery`、`validateParams` です。`safeParse()` を持つ任意の Zod ライクなスキーマを受け取り、失敗時に `ValidationException`（422）をスローします。
 
 ```ts
 import { Controller } from '@guren/core'
@@ -378,7 +378,7 @@ export class CreatePostRequest extends FormRequest<z.infer<typeof CreatePostSche
 }
 ```
 
-コントローラーでの使用:
+コントローラーでの使用例です。
 
 ```ts
 export default class PostController extends Controller {
@@ -393,7 +393,7 @@ export default class PostController extends Controller {
 
 ### コントローラーヘルパー
 
-コントローラーには以下の便利なヘルパーメソッドが用意されています:
+コントローラーには以下の便利なヘルパーメソッドが用意されています。
 
 ```ts
 export default class PostController extends Controller {
@@ -421,7 +421,7 @@ export default class PostController extends Controller {
 
 ## 型安全なリクエストパース
 
-完全な型安全性のため、リクエストパースと組み合わせ：
+完全な型安全性のため、リクエストパースと組み合わせます。
 
 ```ts
 import { Router, parseRequestPayload, validateRequest, getValidatedData } from '@guren/core'

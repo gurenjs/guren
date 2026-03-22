@@ -5,7 +5,6 @@ import { CodeBlock } from '../components/CodeBlock.js'
 import { FeatureCard } from '../components/FeatureCard.js'
 import { Footer } from '../components/Footer.js'
 import { Header } from '../components/Header.js'
-import { HighlightedCode } from '../components/HighlightedCode.js'
 import {
   ArrowRightIcon,
   BoltIcon,
@@ -50,46 +49,10 @@ const features = [
   },
 ]
 
-const codeExamples = {
-  Routes: `import { Router } from '@guren/core'
+const TAB_KEYS = ['Routes', 'Controller', 'Model'] as const
+type TabKey = (typeof TAB_KEYS)[number]
 
-export function routes(router: Router) {
-  router.get('/posts', [PostController, 'index'])
-  router.post('/posts', [PostController, 'store'])
-
-  router.middleware('auth').group((g) => {
-    g.get('/dashboard', [DashCtrl, 'index'])
-  })
-}`,
-  Controller: `export class PostController extends Controller {
-  async index() {
-    const result = await Post.paginate({ page: 1, perPage: 15 })
-    const paginator = paginate(result, { path: this.request.path ?? '/posts' })
-    return this.inertia(appPages.posts.index, {
-      data: result.data.map((post) => new PostResource(post).toJSON()),
-      pagination: paginator,
-    })
-  }
-
-  async store() {
-    const data = await this.validateBody(Schema)
-    await Post.create(data)
-    return this.redirect('/posts')
-  }
-}`,
-  Model: `export class Post extends Model {
-  static table = posts
-}
-
-const post = await Post.findOrFail(1)
-const all = await Post
-  .where('published', true)
-  .get()`,
-} as const
-
-type TabKey = keyof typeof codeExamples
-
-export default function Home({ message }: HomePageProps) {
+export default function Home({ message, codeExamples }: HomePageProps) {
   const [activeTab, setActiveTab] = useState<TabKey>('Routes')
 
   return (
@@ -168,7 +131,7 @@ export default function Home({ message }: HomePageProps) {
             </div>
             <div className="rounded-xl border border-white/10 bg-[#1a1212]">
               <div className="flex border-b border-white/10">
-                {(Object.keys(codeExamples) as TabKey[]).map((tab) => (
+                {TAB_KEYS.map((tab) => (
                   <button
                     key={tab}
                     type="button"
@@ -183,8 +146,8 @@ export default function Home({ message }: HomePageProps) {
                   </button>
                 ))}
               </div>
-              <div className="overflow-x-auto p-5">
-                <HighlightedCode code={codeExamples[activeTab]} lang="typescript" />
+              <div className="overflow-x-auto p-5 [&_.shiki]:!border-0 [&_.shiki]:!bg-transparent [&_.shiki]:!p-0 [&_.shiki]:!m-0">
+                <div dangerouslySetInnerHTML={{ __html: codeExamples[activeTab] ?? '' }} />
               </div>
             </div>
           </div>

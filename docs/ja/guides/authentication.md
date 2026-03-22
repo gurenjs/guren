@@ -12,7 +12,7 @@ Guren には Laravel 由来の認証スタックが同梱され、セッショ�
 
 ## CLI でクイックスタート
 
-新規アプリでは自動インストール機能付きのスキャフォルダーを実行します（セッションミドルウェアはデフォルトで自動付与されます）:
+新規アプリでは自動インストール機能付きのスキャフォルダーを実行します（セッションミドルウェアはデフォルトで自動付与されます）。
 
 ```bash
 bunx guren make:auth --install
@@ -25,7 +25,7 @@ bunx guren make:auth --install
 3. `routes/web.ts` で `registerAuthRoutes(router)` を接続
 4. `db/schema.ts` にパスワードや remember トークンのカラムを追加
 
-スキャフォルド後は以下を実行するだけです:
+スキャフォルド後は以下を実行するだけです。
 
 ```bash
 bun run db:migrate
@@ -75,7 +75,7 @@ router.get('/auth/:provider/callback', [OAuthController, 'callback'])
 
 ### 手動セットアップ
 
-手動で設定したい場合や、部分的に設定済みの環境では `--install` フラグを省略します:
+手動で設定したい場合や、部分的に設定済みの環境では `--install` フラグを省略します。
 
 ```bash
 bunx guren make:auth
@@ -105,7 +105,7 @@ const app = createApp({
 })
 ```
 
-細かく制御したい場合は、`src/app.ts` で明示的に登録してください:
+細かく制御したい場合は、`src/app.ts` で明示的に登録してください。
 
 ```ts
 import { createApp, createSessionMiddleware } from '@guren/core'
@@ -131,7 +131,7 @@ app.use('*', createSessionMiddleware())
 
 ### `auth.useModel()` ショートハンドの使用（推奨）
 
-認証を設定する最もシンプルな方法は `auth.useModel()` ヘルパーを使用することで、`ModelUserProvider` と `SessionGuard` を一度に登録できます:
+認証を設定する最もシンプルな方法は `auth.useModel()` ヘルパーを使用することで、`ModelUserProvider` と `SessionGuard` を一度に登録できます。
 
 ```ts
 import { ServiceProvider } from '@guren/core'
@@ -158,7 +158,7 @@ export default class AuthProvider extends ServiceProvider {
 
 ### 手動設定（上級者向け）
 
-カスタムプロバイダーやガードが必要な高度なケースでは、手動で設定できます:
+カスタムプロバイダーやガードが必要な高度なケースでは、手動で設定できます。
 
 ```ts
 import { ServiceProvider } from '@guren/core'
@@ -213,7 +213,7 @@ export class User extends AuthenticatableModel<UserRecord> {
 
 ## コントローラーとルート
 
-コントローラーは `auth` ヘルパーを持ちます:
+コントローラーは `auth` ヘルパーを持っています。
 
 ```ts
 import { appPages } from '@/resources/js/pages/contracts'
@@ -235,7 +235,7 @@ export default class DashboardController extends Controller {
 
 バリデーションには `this.validateBody()` / `this.validateQuery()` / `this.validateParams()` を Zod スキーマと共に使います。`FormRequest` は互換用途に限定してください。
 
-Inertia の全ページでログインユーザーを共有したい場合は、アプリ起動時に共有 props を登録します:
+Inertia の全ページでログインユーザーを共有したい場合は、アプリ起動時に共有 props を登録します。
 
 ```ts
 // config/inertia.ts
@@ -249,7 +249,7 @@ setInertiaSharedProps(async (ctx) => {
 
 `InertiaSharedProps` を拡張し、React 側でも型付けしてください（詳細はコントローラーガイドを参照）。
 
-ルートミドルウェアを使うと保護が簡単です:
+ルートミドルウェアを使うと保護が簡単です。
 
 ```ts
 import { Router, requireAuthenticated, requireGuest } from '@guren/core'
@@ -286,7 +286,7 @@ export function registerWebRoutes(router: Router): void {
 - `resources/js/pages/auth/Login.tsx` と `resources/js/pages/dashboard/Index.tsx` の Inertia ページ
 - `users` 用のスキーマ、マイグレーション、シーダー
 
-デモ実行:
+デモを実行します。
 
 ```bash
 bun run dev

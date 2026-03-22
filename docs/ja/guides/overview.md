@@ -4,7 +4,7 @@ Laravel のような書き心地の、フルスタック TypeScript フレーム
 
 ## まずはコードを見てください
 
-ルート、コントローラー、型付きレスポンス — たった数行で：
+ルート、コントローラー、型付きレスポンス — たった数行で書けます。
 
 ```ts
 // routes/web.ts
@@ -55,7 +55,7 @@ export default class TaskController extends Controller {
 }
 ```
 
-React ページにはコントローラーから型付き props がそのまま渡ります — API レイヤーの手書きは不要：
+React ページにはコントローラーから型付き props がそのまま渡ります — API レイヤーの手書きは不要です。
 
 ```tsx
 // resources/js/pages/tasks/Index.tsx
@@ -78,7 +78,7 @@ export default function TasksIndex({ data, pagination }: Props) {
 }
 ```
 
-テストは自然な文章のように読めます：
+テストは自然な文章のように読めます。
 
 ```ts
 const app = await TestApp.create({ boot })
@@ -114,7 +114,7 @@ bun run dev        # http://localhost:3333 にアクセス
 
 ## さらに詳しく
 
-Guren が初めての方は、この順番で進めてください：
+Guren が初めての方は、この順番で進めてください。
 
 1. **[はじめの一歩](./first-steps.md)** — 10分で動く機能を作ります。
 2. **[環境構築](./getting-started.md)** — 環境設定とデータベースの準備。

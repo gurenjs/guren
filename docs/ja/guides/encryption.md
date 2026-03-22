@@ -8,7 +8,7 @@ Guren はデータの暗号化とパスワードの安全なハッシュ化の�
 
 ### セットアップ
 
-32バイトのキーでEncrypterを作成します：
+32バイトのキーでEncrypterを作成します。
 
 ```typescript
 import { Encrypter, generateKey } from '@guren/core'
@@ -56,7 +56,7 @@ const key = generateKey()
 const currentKey = encrypter.getKey()
 ```
 
-暗号化キーは環境変数に安全に保存してください：
+暗号化キーは環境変数に安全に保存してください。
 
 ```bash
 # .env

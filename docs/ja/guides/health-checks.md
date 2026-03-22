@@ -4,7 +4,7 @@ Guren はアプリケーションの依存関係やサービスを監視する�
 
 ## 設定
 
-ヘルスマネージャーを作成し、チェックを登録します：
+ヘルスマネージャーを作成し、チェックを登録します。
 
 ```typescript
 import { createHealthManager, DatabaseCheck, RedisCheck, MemoryCheck } from '@guren/core'
@@ -25,7 +25,7 @@ console.log(report.status) // 'healthy', 'degraded', または 'unhealthy'
 
 ### データベースチェック
 
-シンプルなクエリを実行してデータベース接続を検証します：
+シンプルなクエリを実行してデータベース接続を検証します。
 
 ```typescript
 import { DatabaseCheck } from '@guren/core'
@@ -42,7 +42,7 @@ health.register(new DatabaseCheck(db, {
 
 ### Redisチェック
 
-Redis接続を検証します：
+Redis接続を検証します。
 
 ```typescript
 import { RedisCheck } from '@guren/core'
@@ -58,7 +58,7 @@ health.register(new RedisCheck(redis, {
 
 ### メモリチェック
 
-設定可能なしきい値でプロセスメモリ使用量を監視します：
+設定可能なしきい値でプロセスメモリ使用量を監視します。
 
 ```typescript
 import { MemoryCheck } from '@guren/core'
@@ -70,14 +70,14 @@ health.register(new MemoryCheck({
 }))
 ```
 
-メモリチェックはヒープ使用量に基づいてステータスを返します：
+メモリチェックはヒープ使用量に基づいてステータスを返します。
 - **healthy**: しきい値未満
 - **degraded**: しきい値以上、危険値未満
 - **unhealthy**: 危険しきい値以上
 
 ### キャッシュチェック
 
-キャッシュストア接続を検証します：
+キャッシュストア接続を検証します。
 
 ```typescript
 import { CacheCheck } from '@guren/core'
@@ -89,7 +89,7 @@ health.register(new CacheCheck(cache, {
 
 ### ストレージチェック
 
-ストレージドライバー接続を検証します：
+ストレージドライバー接続を検証します。
 
 ```typescript
 import { StorageCheck } from '@guren/core'
@@ -105,7 +105,7 @@ health.register(new StorageCheck(storage, {
 
 ### CustomCheckの使用
 
-コールバック関数でチェックを作成します：
+コールバック関数でチェックを作成します。
 
 ```typescript
 import { customCheck } from '@guren/core'
@@ -137,7 +137,7 @@ health.register(customCheck('queue-depth', async () => {
 
 ### HealthCheckクラスの拡張
 
-再利用可能なチェックのために、基底クラスを拡張します：
+再利用可能なチェックのために、基底クラスを拡張します。
 
 ```typescript
 import { HealthCheck, CheckResult } from '@guren/core'
@@ -185,7 +185,7 @@ health.register(new ExternalServiceCheck(
 
 ## チェックオプション
 
-チェックを登録する際にオプションを設定できます：
+チェックを登録する際にオプションを設定できます。
 
 ```typescript
 health.register(check, {
@@ -209,7 +209,7 @@ health.register(new RedisCheck(redis), { critical: false })
 
 ## ヘルスレポート
 
-ヘルスチェックはレポートオブジェクトを返します：
+ヘルスチェックはレポートオブジェクトを返します。
 
 ```typescript
 const report = await health.check()
@@ -243,7 +243,7 @@ const dbResult = await health.getCheck('database')
 
 ## HTTPミドルウェア
 
-組み込みのミドルウェアを使用してヘルスエンドポイントを公開します：
+組み込みのミドルウェアを使用してヘルスエンドポイントを公開します。
 
 ```typescript
 import { createHealthManager } from '@guren/core'
@@ -308,7 +308,7 @@ router.get('/health/simple', health.middleware({ detailed: false }))
 
 ### ヘルスチェック実行
 
-コマンドラインからヘルスチェックを実行します：
+コマンドラインからヘルスチェックを実行します。
 
 ```bash
 # すべてのヘルスチェックを実行

@@ -1,6 +1,6 @@
 # CLI リファレンス
 
-Guren には 2 つの CLI が付属します:
+Guren には 2 つの CLI が付属します。
 
 - 既存プロジェクト内でコントローラー/モデル/ビュー生成やユーティリティを実行する `bunx guren`
 - 新規アプリをスキャフォールドする `bunx create-guren-app`
@@ -67,7 +67,7 @@ bunx guren add plugin @acme/guren-plugin-audit
 
 ## デプロイレシピ生成
 
-CLI からデプロイ設定ファイルを直接生成できます:
+CLI からデプロイ設定ファイルを直接生成できます。
 
 ```bash
 # Dockerfile のみ
@@ -89,9 +89,9 @@ bunx guren deploy --target all --app my-app --port 4000
 `--target` は `docker` / `fly` / `railway` / `vercel` / `all` をサポートします。
 
 Vercel と Bun
-Vercel は Bun を用いたデプロイをサポートしています。Bun プロジェクトでは主に次の二択が現実的です：
+Vercel は Bun を用いたデプロイをサポートしています。Bun プロジェクトでは主に次の二択が現実的です。
 
-- `vercel.json` に Bun 用の install/build コマンドを記載してデプロイする（シンプルなアプリ向け推奨）:
+- `vercel.json` に Bun 用の install/build コマンドを記載してデプロイする（シンプルなアプリ向け推奨）。
 
   ```json
   {
@@ -113,7 +113,7 @@ Vercel は Bun を用いたデプロイをサポートしています。Bun プ�
 
 ### route:list オプション
 
-フィルタリングとソート機能付きで全アプリケーションルートを表示します：
+フィルタリングとソート機能付きで全アプリケーションルートを表示します。
 
 ```bash
 # 全ルートを一覧表示
@@ -152,7 +152,7 @@ bunx guren route:list --format compact # コンパクトな1行形式
 
 ### 設定キャッシュ
 
-本番環境でのパフォーマンス向上のために設定ファイルをキャッシュします：
+本番環境でのパフォーマンス向上のために設定ファイルをキャッシュします。
 
 ```bash
 # 全設定をキャッシュ
@@ -241,7 +241,7 @@ bunx guren queue:work --stop-when-empty
 
 ## 共通オプション
 
-オプションは `packages/core/src/cli` で一元化され、挙動が統一されています:
+オプションは `packages/core/src/cli` で一元化され、挙動が統一されています。
 
 - `--force` / `-f`: 既存ファイルを上書き
 - `--dry-run`: 生成内容を表示するだけで書き込まない（予定）
@@ -249,7 +249,7 @@ bunx guren queue:work --stop-when-empty
 
 ## テンプレートの特徴
 
-生成物はフレームワークの Laravel 風の設計方針に沿っています:
+生成物はフレームワークの Laravel 風の設計方針に沿っています。
 
 - コントローラーは `Controller` を継承し、`this.inertia()` などのヘルパーを使用。
 - モデルは `Model<TRecord>` を継承し、`static table` を事前に設定。手早い CRUD にはヘルパーを、複雑なクエリは Drizzle RQB へ直接。`Model.query(db)` でモデル起点の RQB も書けます。
@@ -259,7 +259,7 @@ bunx guren queue:work --stop-when-empty
 
 ## 新規アプリのスキャフォールド
 
-ゼロから始めるときは専用ブートストラッパーを使います:
+ゼロから始めるときは専用ブートストラッパーを使います。
 
 ```bash
 bunx create-guren-app my-app
@@ -274,7 +274,7 @@ CLI はデフォルトテンプレートをコピーし、メタデータを更�
 
 ## 対話 REPL
 
-フレームワーク対応のコンソールを起動:
+フレームワーク対応のコンソールを起動します。
 
 ```bash
 bunx guren console

@@ -13,7 +13,7 @@ Guren はRFC 5424に準拠したログレベル、複数のチャンネル、コ
 
 ### ファサードを使用（推奨）
 
-`LogFacade` を使うと、コンテナから `LogManager` を遅延解決してシンプルにログ出力できます:
+`LogFacade` を使うと、コンテナから `LogManager` を遅延解決してシンプルにログ出力できます。
 
 ```ts
 import { LogFacade as Log } from '@guren/core'
@@ -25,7 +25,7 @@ Log.channel('file').warning('ファイルにのみ記録')
 
 ### クイックスタート
 
-`LogManager` を直接インスタンス化して使うこともできます:
+`LogManager` を直接インスタンス化して使うこともできます。
 
 ```ts
 import { LogManager } from '@guren/core'
@@ -43,7 +43,7 @@ log.error('問題が発生しました', { error: '接続に失敗しました' 
 
 ### ログレベル
 
-Guren はRFC 5424の重大度レベルをサポート（最も重大なものから）：
+Guren はRFC 5424の重大度レベルをサポートしています（最も重大なものから）。
 
 ```ts
 log.emergency('システムが使用不能')
@@ -76,7 +76,7 @@ userLog.info('ユーザーアクション')  // requestIdとuserIdを含む
 
 ### コンソールチャンネル
 
-色とフォーマット付きでコンソールに出力：
+色とフォーマット付きでコンソールに出力します。
 
 ```ts
 const log = new LogManager({
@@ -95,7 +95,7 @@ const log = new LogManager({
 
 ### ファイルチャンネル
 
-単一ファイルにログを書き込み：
+単一ファイルにログを書き込みます。
 
 ```ts
 const log = new LogManager({
@@ -113,7 +113,7 @@ const log = new LogManager({
 
 ### デイリーファイルチャンネル
 
-自動クリーンアップ付きで毎日ログファイルをローテーション：
+自動クリーンアップ付きで毎日ログファイルをローテーションします。
 
 ```ts
 const log = new LogManager({
@@ -134,7 +134,7 @@ const log = new LogManager({
 
 ### スタックチャンネル
 
-複数のチャンネルを組み合わせ：
+複数のチャンネルを組み合わせることができます。
 
 ```ts
 const log = new LogManager({

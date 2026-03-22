@@ -28,6 +28,7 @@ type LocaleLink = {
 export const webPages = {
   home: generatedPages.Home.props<{
     message: string
+    codeExamples: Record<string, string>
   }>(),
   docs: {
     index: generatedPages.Docs.Index.props<{

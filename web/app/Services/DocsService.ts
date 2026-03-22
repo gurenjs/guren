@@ -79,8 +79,13 @@ const DOC_LOCALE_CONFIG = {
 } as const
 
 const FEATURED_DOC_ORDER = [
+  // Getting Started
+  'overview',
   'getting-started',
+  'first-steps',
   'architecture',
+
+  // The Basics
   'routing',
   'controllers',
   'middleware',
@@ -89,9 +94,41 @@ const FEATURED_DOC_ORDER = [
   'error-handling',
   'database',
   'frontend',
+
+  // Security
   'authentication',
+  'authorization',
+  'api-tokens',
+  'password-reset',
+  'email-verification',
+  'encryption',
+
+  // Digging Deeper
+  'events',
+  'queue',
+  'cache',
+  'mail',
+  'notifications',
+  'broadcasting',
+  'storage',
+  'scheduling',
+  'rate-limiting',
+  'logging',
+  'health-checks',
+  'i18n',
+  'api-resources',
+
+  // Testing & Deployment
   'testing',
   'deployment',
+  'serverless',
+  'operations',
+
+  // Reference
+  'cli',
+  'upgrading',
+  'release-policy',
+  'glossary',
 ]
 const TUTORIAL_DOC_ORDER = ['overview', 'create-blog-post-app', 'authentication', 'relationships']
 

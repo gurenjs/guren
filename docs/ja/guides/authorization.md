@@ -8,7 +8,7 @@
 
 ### ゲートの定義
 
-`Gate`クラスを使用してゲートを定義します：
+`Gate`クラスを使用してゲートを定義します。
 
 ```typescript
 import { Gate } from '@guren/core'
@@ -32,7 +32,7 @@ Gate.define('delete-comment', async (user, comment) => {
 
 ### ゲートの使用
 
-ゲートメソッドを使用して認可をチェックします：
+ゲートメソッドを使用して認可をチェックします。
 
 ```typescript
 import { Gate } from '@guren/core'
@@ -53,7 +53,7 @@ await Gate.authorize('update-post', user, post)
 
 ### Beforeコールバック
 
-すべてのゲートチェックの前に実行されるコールバックを登録します：
+すべてのゲートチェックの前に実行されるコールバックを登録します。
 
 ```typescript
 Gate.before((user, ability) => {
@@ -67,7 +67,7 @@ Gate.before((user, ability) => {
 
 ### Afterコールバック
 
-すべてのゲートチェックの後に実行されるコールバックを登録します：
+すべてのゲートチェックの後に実行されるコールバックを登録します。
 
 ```typescript
 Gate.after((user, ability, result) => {
@@ -141,7 +141,7 @@ export class PostPolicy extends Policy<User, Post> {
 
 ### ポリシーの登録
 
-Gateクラスにポリシーを登録します：
+Gateクラスにポリシーを登録します。
 
 ```typescript
 import { Gate } from '@guren/core'
@@ -170,7 +170,7 @@ await Gate.forUser(user).authorize('update', post)
 
 ### ポリシーメソッド
 
-ポリシーは以下の標準メソッドをサポートしています：
+ポリシーは以下の標準メソッドをサポートしています。
 
 | メソッド | 説明 |
 |--------|-------------|
@@ -184,7 +184,7 @@ await Gate.forUser(user).authorize('update', post)
 
 ### Beforeメソッド
 
-すべてのポリシーチェックをインターセプトする`before`メソッドを追加します：
+すべてのポリシーチェックをインターセプトする`before`メソッドを追加します。
 
 ```typescript
 export class PostPolicy extends Policy<User, Post> {
@@ -200,7 +200,7 @@ export class PostPolicy extends Policy<User, Post> {
 
 ## コントローラー統合
 
-コントローラーで認可を使用します：
+コントローラーで認可を使用します。
 
 ```typescript
 import { Controller, Gate } from '@guren/core'
@@ -232,7 +232,7 @@ export default class PostController extends Controller {
 
 ## ミドルウェア
 
-ルートレベルのチェック用認可ミドルウェアを作成します：
+ルートレベルのチェック用認可ミドルウェアを作成します。
 
 ```typescript
 import { Router, Gate, AuthorizationException } from '@guren/core'

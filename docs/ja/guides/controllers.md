@@ -189,7 +189,7 @@ export default class PostsController extends Controller {
 
 ### Zod スキーマヘルパー（推奨）
 
-コントローラー内で `validateBody`、`validateQuery`、`validateParams` を使うのが最もシンプルです。`safeParse()` メソッドを持つ任意のスキーマ（Zod、Valibot など）を受け取り、失敗時に `ValidationException`（422）をスローします：
+コントローラー内で `validateBody`、`validateQuery`、`validateParams` を使うのが最もシンプルです。`safeParse()` メソッドを持つ任意のスキーマ（Zod、Valibot など）を受け取り、失敗時に `ValidationException`（422）をスローします。
 
 ```ts
 import { Controller } from '@guren/core'
@@ -239,7 +239,7 @@ export default class PostsController extends Controller {
 
 ### FormRequest 互換レイヤー
 
-新規コードでは schema-first を推奨します。既存コードの移行やクラスベースの認可が必要な場合のみ `FormRequest` を使います：
+新規コードでは schema-first を推奨します。既存コードの移行やクラスベースの認可が必要な場合のみ `FormRequest` を使います。
 
 ```ts
 async store() {

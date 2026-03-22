@@ -345,19 +345,19 @@ User.addGlobalScope('active', (q) => q.where('active', true))
 
 ### グローバルスコープの一時除外
 
-特定のスコープを1回のクエリだけ除外:
+特定のスコープを1回のクエリだけ除外できます。
 
 ```ts
 const allUsers = await User.withoutGlobalScope('active').get()
 ```
 
-すべてのグローバルスコープを除外:
+すべてのグローバルスコープを除外する場合は以下のようにします。
 
 ```ts
 const everyone = await User.withoutGlobalScopes().get()
 ```
 
-スコープを完全に削除:
+スコープを完全に削除することもできます。
 
 ```ts
 User.removeGlobalScope('active')
@@ -435,7 +435,7 @@ export class PostObserver implements ModelObserver {
 }
 ```
 
-モデルにオブザーバーを登録:
+モデルにオブザーバーを登録します。
 
 ```ts
 import { PostObserver } from '@/app/Observers/PostObserver'
@@ -521,7 +521,7 @@ export class Post extends Model<PostRecord> {
 
 ### アクセサ
 
-レコード取得時に自動的に適用される計算プロパティを定義:
+レコード取得時に自動的に適用される計算プロパティを定義します。
 
 ```ts
 export class User extends defineModel(users) {
@@ -541,7 +541,7 @@ console.log(user.fullName)  // "John Doe"
 
 ### ミューテータ
 
-データベースに保存する前に入力データを変換:
+データベースに保存する前に入力データを変換します。
 
 ```ts
 export class User extends defineModel(users) {
@@ -565,7 +565,7 @@ API レスポンスや Inertia プロップスでモデルレコードの表示�
 
 ### フィールドの非表示
 
-機密フィールドをシリアライズ出力から除外:
+機密フィールドをシリアライズ出力から除外します。
 
 ```ts
 export class User extends defineModel(users) {
@@ -582,7 +582,7 @@ const json = User.serialize(user)
 
 ### 表示フィールドのホワイトリスト
 
-ブラックリストの代わりにホワイトリストを使用:
+ブラックリストの代わりにホワイトリストを使用することもできます。
 
 ```ts
 export class User extends defineModel(users) {
@@ -594,7 +594,7 @@ export class User extends defineModel(users) {
 
 ### 仮想属性の追加
 
-アクセサで計算された値をシリアライズ出力に含める:
+アクセサで計算された値をシリアライズ出力に含めます。
 
 ```ts
 export class User extends defineModel(users) {
@@ -724,7 +724,7 @@ Country.hasManyThrough('posts', Post, User, 'countryId', 'authorId')
 
 ポリモーフィックリレーションを使うと、1つのリレーションで複数の親モデルに属することができます。例えば、投稿と動画の両方にコメントを付けられます。
 
-関連テーブルに type/id カラムを定義:
+関連テーブルに type/id カラムを定義します。
 
 ```ts
 export const comments = sqliteTable('comments', {
@@ -735,7 +735,7 @@ export const comments = sqliteTable('comments', {
 })
 ```
 
-リレーションを登録:
+リレーションを登録します。
 
 ```ts
 Post.morphMany('comments', Comment, 'commentable', 'id')
@@ -745,7 +745,7 @@ Comment.morphTo('commentable', 'commentable')
 Model.morphMap = { Post, Video }
 ```
 
-通常のリレーションと同じようにクエリ:
+通常のリレーションと同じようにクエリできます。
 
 ```ts
 const postWithComments = await Post.with('comments')
@@ -766,7 +766,7 @@ const posts = await Post.with('author', { authorId: [1, 2] })
 // posts[0].author は関連する UserRecord か null（belongsTo の場合）
 ```
 
-QueryBuilder 上でも eager loading が使えるので、フィルタやソートと組み合わせられます:
+QueryBuilder 上でも eager loading が使えるので、フィルタやソートと組み合わせられます。
 
 ```ts
 const activeUsers = await User.where('active', true)
@@ -777,7 +777,7 @@ const activeUsers = await User.where('active', true)
 const user = await User.newQuery().with('posts').first()
 ```
 
-ネストリレーションはドット記法で指定:
+ネストリレーションはドット記法で指定します。
 
 ```ts
 const users = await User.with('posts.comments')

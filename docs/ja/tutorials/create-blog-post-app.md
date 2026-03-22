@@ -2,7 +2,7 @@
 
 Guren の MVC スタックで基本的なブログを作る手順です。
 
-1. **テーブルを用意** — `db/schema.ts` に Drizzle ヘルパーを追加します:
+1. **テーブルを用意** — `db/schema.ts` に Drizzle ヘルパーを追加します。
    ```ts
    export const posts = pgTable('posts', {
      id: serial('id').primaryKey(),
@@ -13,7 +13,7 @@ Guren の MVC スタックで基本的なブログを作る手順です。
    })
    ```
    `bun run db:migrate` でスキーマを反映します。
-2. **モデルを作成** — `app/Models/Post.ts` に記述:
+2. **モデルを作成** — `app/Models/Post.ts` に記述します。
    ```ts
    import { defineModel } from '@guren/orm'
    import { posts } from '@/db/schema'
@@ -22,7 +22,7 @@ Guren の MVC スタックで基本的なブログを作る手順です。
 
    export default class Post extends defineModel(posts) {}
    ```
-3. **コントローラーを実装** — `app/Http/Controllers/PostController.ts`:
+3. **コントローラーを実装** — `app/Http/Controllers/PostController.ts` を作成します。
    ```ts
    import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
    import Post from '@/app/Models/Post'
@@ -54,7 +54,7 @@ Guren の MVC スタックで基本的なブログを作る手順です。
      }
    }
    ```
-4. **ルートを登録** — `routes/web.ts` を更新:
+4. **ルートを登録** — `routes/web.ts` を更新します。
    ```ts
    import { Router } from '@guren/core'
    import PostController from '@/app/Http/Controllers/PostController'

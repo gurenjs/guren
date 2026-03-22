@@ -4,7 +4,7 @@
 
 ## 完全な Lambda エントリポイント
 
-1つの `lambda.ts` ファイルで全 Lambda 関数のハンドラーを export できます:
+1つの `lambda.ts` ファイルで全 Lambda 関数のハンドラーを export できます。
 
 ```typescript
 import app from './src/app'
@@ -44,7 +44,7 @@ Hono の fetch ハンドラーを API Gateway v1/v2、ALB 向けにラップし�
 
 SQS メッセージを Guren のジョブとして処理します。**部分バッチ失敗**に対応しており、失敗したメッセージのみが SQS に戻されてリトライされます。
 
-キュープロバイダーで SQS ドライバーを設定:
+キュープロバイダーで SQS ドライバーを設定します。
 
 ```typescript
 import { SQSClient } from '@aws-sdk/client-sqs'
@@ -68,7 +68,7 @@ EventBridge から呼び出されたときにタスクを実行します。Event
 
 ### コンソール — `createConsoleHandler(kernel)`
 
-Lambda 上で CLI コマンドを実行します。AWS CLI で呼び出し:
+Lambda 上で CLI コマンドを実行します。AWS CLI で呼び出します。
 
 ```bash
 aws lambda invoke --function-name my-app-console \
@@ -79,7 +79,7 @@ aws lambda invoke --function-name my-app-console \
 
 ## ランタイム検出
 
-ランタイムに応じた設定の切り替え:
+ランタイムに応じた設定の切り替えができます。
 
 ```typescript
 import { isLambda, getLambdaContext } from '@guren/core/lambda'
@@ -96,7 +96,7 @@ if (isLambda()) {
 
 ## パスワードハッシュ
 
-デフォルトの `ScryptHasher` は `Bun.password` を使うため Lambda では動作しません。`NodeHasher` を使います:
+デフォルトの `ScryptHasher` は `Bun.password` を使うため Lambda では動作しません。`NodeHasher` を使います。
 
 ```typescript
 import { NodeHasher } from '@guren/core/auth'
@@ -110,7 +110,7 @@ container.instance('hash', new NodeHasher())
 
 ## ロギング
 
-Lambda は `stderr` を自動で CloudWatch に送信します。JSON 形式のコンソールロギングを使います:
+Lambda は `stderr` を自動で CloudWatch に送信します。JSON 形式のコンソールロギングを使います。
 
 ```typescript
 import { LogManager } from '@guren/core/logging'
@@ -125,7 +125,7 @@ const log = new LogManager({
 
 ## 静的アセット
 
-Lambda での静的ファイル配信は適していません。CloudFront + S3 を使います:
+Lambda での静的ファイル配信は適していません。CloudFront + S3 を使います。
 
 1. Vite ビルド出力（`public/assets/`）を S3 バケットにアップロード。
 2. そのバケットを参照する CloudFront ディストリビューションを作成。
@@ -135,7 +135,7 @@ Lambda での静的ファイル配信は適していません。CloudFront + S3 
 
 ### サービスプロバイダー
 
-オートディスカバリー（`Bun.Glob`）は Lambda では利用不可。プロバイダーを明示的に列挙してください:
+オートディスカバリー（`Bun.Glob`）は Lambda では利用不可です。プロバイダーを明示的に列挙してください。
 
 ```typescript
 const app = createApp({
@@ -173,7 +173,7 @@ Lambda のファイルシステムは `/tmp`（512 MB、揮発性）以外は読
 
 ## AWS CDK の例
 
-4つの Lambda 関数を含む完全な CDK スタック:
+4つの Lambda 関数を含む完全な CDK スタックの例です。
 
 ```typescript
 import { Duration, Stack } from 'aws-cdk-lib'

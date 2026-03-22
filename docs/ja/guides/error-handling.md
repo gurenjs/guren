@@ -4,7 +4,7 @@ Guren はグローバルエラーハンドラーからコントローラーレ�
 
 ## グローバルエラーハンドラー
 
-Hono の `onError` メソッドを使用してグローバルエラーハンドラーを登録：
+Hono の `onError` メソッドを使用してグローバルエラーハンドラーを登録します。
 
 > 登録は `src/app.ts` で `createApp(...)` の直後、または `boot(hono)` コールバック内で行います。`app.boot()` の前に設定してください。
 
@@ -37,7 +37,7 @@ app.hono.onError((error, ctx) => {
 
 ## HTTP 例外
 
-`HTTPException` をスローして特定の HTTP ステータスコードを返す：
+`HTTPException` をスローして特定の HTTP ステータスコードを返せます。
 
 ```ts
 import { HTTPException } from 'hono/http-exception'
@@ -56,7 +56,7 @@ router.get('/posts/:id', async (ctx) => {
 })
 ```
 
-よく使う HTTP 例外：
+よく使う HTTP 例外の例です。
 
 ```ts
 // 400 Bad Request
@@ -83,7 +83,7 @@ throw new HTTPException(500, { message: 'サーバーエラー' })
 
 ## Not Found ハンドラー
 
-404 レスポンスをカスタマイズ：
+404 レスポンスをカスタマイズできます。
 
 ```ts
 app.hono.notFound((ctx) => {
@@ -99,7 +99,7 @@ app.hono.notFound((ctx) => {
 
 ## コントローラーでのエラーハンドリング
 
-`validateBody`/`validateQuery`/`validateParams`、`findOrFail`、`userOrFail` を使えば、ほとんどのエラーハンドリングは自動です — try-catch は不要です：
+`validateBody`/`validateQuery`/`validateParams`、`findOrFail`、`userOrFail` を使えば、ほとんどのエラーハンドリングは自動です — try-catch は不要です。
 
 ```ts
 import { Controller } from '@guren/core'
@@ -130,7 +130,7 @@ export default class PostController extends Controller {
 
 ## バリデーションエラー
 
-`formatValidationErrors` を使用して Zod エラーをフラットなオブジェクトに変換：
+`formatValidationErrors` を使用して Zod エラーをフラットなオブジェクトに変換できます。
 
 ```ts
 import { formatValidationErrors } from '@guren/core'
@@ -149,7 +149,7 @@ if (!result.success) {
 }
 ```
 
-フォールバックメッセージ付き：
+フォールバックメッセージ付きの例です。
 
 ```ts
 const errors = formatValidationErrors(result.error, '入力内容を確認してください')
@@ -157,7 +157,7 @@ const errors = formatValidationErrors(result.error, '入力内容を確認して
 
 ## エラーミドルウェア
 
-再利用可能なエラーハンドリングミドルウェアを作成：
+再利用可能なエラーハンドリングミドルウェアを作成できます。
 
 ```ts
 import { defineMiddleware } from '@guren/core'
@@ -187,7 +187,7 @@ app.use('*', errorHandler)
 
 ## Inertia エラーページ
 
-Inertia アプリケーションではエラーコンポーネントをレンダリング：
+Inertia アプリケーションではエラーコンポーネントをレンダリングします。
 
 ```ts
 // Inertia 用グローバルエラーハンドラー
@@ -213,7 +213,7 @@ app.hono.onError(async (error, ctx) => {
 })
 ```
 
-React エラーコンポーネント：
+React エラーコンポーネントの例です。
 
 ```tsx
 // resources/pages/Error.tsx
@@ -238,7 +238,7 @@ export default function Error({ status, message }: { status: number; message: st
 
 ## データベースエラー
 
-`Model.findOrFail()` を使えば、手動の null チェックは不要です。見つからない場合は `ModelNotFoundException`（404）が自動的にスローされます：
+`Model.findOrFail()` を使えば、手動の null チェックは不要です。見つからない場合は `ModelNotFoundException`（404）が自動的にスローされます。
 
 ```ts
 import { PostResource } from '@/app/Http/Resources/PostResource'
@@ -263,7 +263,7 @@ async show(): Promise<Response> {
 
 ## 組み込み例外クラス
 
-Guren は一般的な HTTP エラーシナリオ用の型付き例外クラスを提供しています：
+Guren は一般的な HTTP エラーシナリオ用の型付き例外クラスを提供しています。
 
 ```ts
 import {
@@ -298,7 +298,7 @@ throw new AuthorizationException('この投稿を編集する権限がありま�
 
 ## 非同期エラーバウンダリ
 
-非同期操作をエラーバウンダリでラップ：
+非同期操作をエラーバウンダリでラップできます。
 
 ```ts
 async function withErrorBoundary<T>(
@@ -324,7 +324,7 @@ const posts = await withErrorBoundary(
 
 ## 開発環境 vs 本番環境
 
-環境に応じてエラー出力をカスタマイズ：
+環境に応じてエラー出力をカスタマイズします。
 
 ```ts
 app.hono.onError((error, ctx) => {
@@ -349,7 +349,7 @@ app.hono.onError((error, ctx) => {
 
 ### デバッグページ
 
-開発環境では、Guren はスタックトレースやリクエスト情報を含む詳細なデバッグページを自動的に表示します。`createApp()` の `debug` オプションで制御できます:
+開発環境では、Guren はスタックトレースやリクエスト情報を含む詳細なデバッグページを自動的に表示します。`createApp()` の `debug` オプションで制御できます。
 
 ```ts
 import { createApp } from '@guren/core'
@@ -359,7 +359,7 @@ const app = createApp({
 })
 ```
 
-デバッグページには以下の情報が含まれます:
+デバッグページには以下の情報が含まれます。
 - エラーメッセージとスタックトレース
 - リクエスト情報（メソッド、パス、ヘッダー）
 - 登録済みのミドルウェアとルート

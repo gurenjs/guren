@@ -53,7 +53,7 @@ export default class UserController extends Controller {
 
 ### when()
 
-条件がtrueの場合のみフィールドを含める：
+条件がtrueの場合のみフィールドを含めます。
 
 ```typescript
 export class UserResource extends Resource<User> {
@@ -72,7 +72,7 @@ export class UserResource extends Resource<User> {
 
 ### whenLoaded()
 
-リレーションがロードされている場合のみフィールドを含める：
+リレーションがロードされている場合のみフィールドを含めます。
 
 ```typescript
 export class PostResource extends Resource<Post> {
@@ -96,7 +96,7 @@ export class PostResource extends Resource<Post> {
 
 ### whenNotNull()
 
-nullでない場合のみフィールドを含める：
+nullでない場合のみフィールドを含めます。
 
 ```typescript
 export class ProfileResource extends Resource<Profile> {
@@ -112,7 +112,7 @@ export class ProfileResource extends Resource<Profile> {
 
 ### whenOr()
 
-デフォルト値付きでフィールドを含める：
+デフォルト値付きでフィールドを含めます。
 
 ```typescript
 export class SettingsResource extends Resource<Settings> {
@@ -130,7 +130,7 @@ export class SettingsResource extends Resource<Settings> {
 
 ## 追加データ
 
-リソースレスポンスに追加データを加える：
+リソースレスポンスに追加データを加えます。
 
 ```typescript
 const resource = new UserResource(user)
@@ -145,7 +145,7 @@ return this.json({ data: resource.toJSON() })
 
 ## リソースコレクション
 
-モデルの配列をリソースに変換する：
+モデルの配列をリソースに変換します。
 
 ```typescript
 // 静的メソッド
@@ -163,7 +163,7 @@ Guren は2つのページネーション戦略を提供します。
 
 ### オフセットベースページネーション
 
-ページ番号を使用した従来のページネーション：
+ページ番号を使用した従来のページネーションです。
 
 ```typescript
 import { paginate, Paginator } from '@guren/core'
@@ -216,7 +216,7 @@ export default class UserController extends Controller {
 
 ### カーソルベースページネーション
 
-無限スクロールやリアルタイムデータに最適：
+無限スクロールやリアルタイムデータに最適です。
 
 ```typescript
 import { cursorPaginate, CursorPaginator } from '@guren/core'
@@ -297,7 +297,7 @@ export default class PostController extends Controller {
 
 ## JsonResource
 
-カスタムクラスなしの簡単な変換：
+カスタムクラスなしで簡単に変換できます。
 
 ```typescript
 import { JsonResource } from '@guren/core'
@@ -309,7 +309,7 @@ const resource = new JsonResource(user)
 
 ## リソースの生成
 
-CLIを使用して新しいリソースを生成：
+CLIを使用して新しいリソースを生成します。
 
 ```bash
 bunx guren make:resource User

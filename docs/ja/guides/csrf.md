@@ -4,7 +4,7 @@ CSRF（Cross-Site Request Forgery）保護は、悪意のあるウェブサイ�
 
 ## セットアップ
 
-アプリケーションにミドルウェアを追加して CSRF 保護を有効にします：
+アプリケーションにミドルウェアを追加して CSRF 保護を有効にします。
 
 ```ts
 // src/app.ts
@@ -17,14 +17,14 @@ app.use('*', createSessionMiddleware())
 app.use('*', createCsrfMiddleware())
 ```
 
-ミドルウェアは自動的に：
+ミドルウェアは自動的に以下を行います。
 - セッションごとに一意のトークンを生成
 - 状態を変更するリクエスト（POST、PUT、PATCH、DELETE）でトークンを検証
 - 安全なメソッド（GET、HEAD、OPTIONS）は検証なしで許可
 
 ## フォームにトークンを含める
 
-`csrfField()` ヘルパーを使用して hidden input フィールドを生成します：
+`csrfField()` ヘルパーを使用して hidden input フィールドを生成します。
 
 ```ts
 // コントローラー内
@@ -40,7 +40,7 @@ export default class FormController extends Controller {
 }
 ```
 
-フロントエンドのフォーム（React の例）：
+フロントエンドのフォーム（React の例）です。
 
 ```tsx
 function CreateForm({ csrfToken }: { csrfToken: string }) {
@@ -54,7 +54,7 @@ function CreateForm({ csrfToken }: { csrfToken: string }) {
 }
 ```
 
-または hidden フィールドを直接生成：
+または hidden フィールドを直接生成することもできます。
 
 ```ts
 const hiddenField = csrfField(ctx)
@@ -63,7 +63,7 @@ const hiddenField = csrfField(ctx)
 
 ## AJAX リクエスト
 
-JavaScript/AJAX リクエストの場合、ヘッダーにトークンを含めます：
+JavaScript/AJAX リクエストの場合、ヘッダーにトークンを含めます。
 
 ```ts
 // meta タグまたは cookie からトークンを取得
@@ -103,7 +103,7 @@ createCsrfMiddleware({
 
 ## ルートの除外
 
-一部のルート（Webhook エンドポイントなど）は CSRF 検証をスキップする必要があります：
+一部のルート（Webhook エンドポイントなど）は CSRF 検証をスキップする必要があります。
 
 ```ts
 createCsrfMiddleware({
@@ -117,7 +117,7 @@ createCsrfMiddleware({
 
 ## 手動トークン検証
 
-カスタム検証ロジックには `verifyCsrfToken()` を使用：
+カスタム検証ロジックには `verifyCsrfToken()` を使用します。
 
 ```ts
 import { verifyCsrfToken, getCsrfToken } from '@guren/core'
@@ -138,7 +138,7 @@ export function registerWebRoutes(router: Router): void {
 
 ## トークンの再生成
 
-トークンはセッションに紐づいており、以下の場合に再生成されます：
+トークンはセッションに紐づいており、以下の場合に再生成されます。
 - 新しいセッションが作成されたとき
 - `session.regenerate()` が呼び出されたとき（ログイン後に推奨）
 
@@ -158,7 +158,7 @@ await session.regenerate()
 
 ## Inertia.js との統合
 
-Inertia.js を使用する場合、CSRF は Cookie を通じて自動的に処理されます。Axios/fetch の設定に credentials を含めてください：
+Inertia.js を使用する場合、CSRF は Cookie を通じて自動的に処理されます。Axios/fetch の設定に credentials を含めてください。
 
 ```ts
 // resources/js/app.tsx
