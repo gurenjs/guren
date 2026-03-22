@@ -3,6 +3,7 @@ export { SessionGuard } from './SessionGuard'
 export { BaseUserProvider } from './providers/UserProvider'
 export { ModelUserProvider } from './providers/ModelUserProvider'
 export { ScryptHasher } from './password/ScryptHasher'
+export { NodeHasher } from './password/NodeHasher'
 export { AuthenticatableModel } from './AuthenticatableModel'
 export {
   createPasswordResetToken,

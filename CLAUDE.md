@@ -12,7 +12,7 @@ packages/
 ├── core/           # Framework entry point, aggregates other packages
 ├── server/         # HTTP server (Hono), routing, controllers, middleware, auth
 ├── orm/            # ORM abstraction with Drizzle adapter, Model API
-├── cli/            # CLI commands (make:*, db:*, routes:types)
+├── cli/            # CLI commands (make:*, db:*, routes:types, AI agent commands)
 ├── testing/        # Testing utilities for controllers and HTTP
 ├── create-app/     # Project scaffolding tool
 └── inertia-client/ # Frontend React + Inertia.js integration
@@ -54,6 +54,29 @@ bun run build:server  # Build @guren/server
 bun run build:orm     # Build @guren/orm
 bun run build:cli     # Build @guren/cli
 # etc.
+```
+
+## AI Agent Commands
+
+Commands designed for AI coding agents to understand, validate, and generate code:
+
+```bash
+# Project introspection
+bunx guren context              # Project context map (markdown)
+bunx guren context --json       # Project context map (JSON)
+bunx guren model:list           # List models with relationships
+bunx guren model:list --format json  # Models as JSON
+
+# Integrity checking
+bunx guren check                # Validate route↔controller↔page consistency
+bunx guren check --json         # Check results as JSON
+bunx guren doctor --next        # Doctor report + actionable next steps
+
+# Code generation
+bunx guren guidelines           # Auto-generate project-specific coding guidelines
+bunx guren guidelines -o .claude/rules/project-guidelines.md  # Write to file
+bunx guren make:feature Post --fields "title:string,body:text,published:boolean"  # CRUD scaffold
+bunx guren make:feature Post --fields "title:string,body:text" --test  # With test file
 ```
 
 ## Coding Conventions
@@ -219,6 +242,26 @@ fix(orm): handle null values in where clause
 docs: update authentication guide
 ```
 
+## Serverless (AWS Lambda)
+
+Guren supports AWS Lambda deployment via `@guren/server/lambda`:
+
+```typescript
+// lambda.ts
+import app from './src/app'
+import { createLambdaHandler } from '@guren/server/lambda'
+
+await app.boot()
+export const handler = createLambdaHandler(app)
+```
+
+**Key points:**
+- `app.boot()` runs once at cold start; the handler reuses the booted app
+- Use `NodeHasher` instead of `ScryptHasher` for password hashing on Node.js runtimes
+- Static assets should be served via CloudFront/S3, not Lambda
+- Use Redis-backed session/cache/queue stores (not in-memory)
+- List providers explicitly in `createApp()` (auto-discovery requires Bun)
+
 ## Key Files
 
 | Path | Purpose |
@@ -229,7 +272,16 @@ docs: update authentication guide
 | `packages/server/src/errors/ExceptionHandler.ts` | Exception handler (duck-type statusCode) |
 | `packages/orm/src/Model.ts` | Base model class (findOrFail) |
 | `packages/orm/src/ModelNotFoundException.ts` | 404 exception for models |
+| `packages/server/src/lambda/index.ts` | AWS Lambda adapter |
+| `packages/server/src/auth/password/NodeHasher.ts` | Node.js-compatible password hasher |
 | `packages/cli/src/bin.ts` | CLI entry point |
+| `packages/cli/src/context.ts` | AI agent: project context map generation |
+| `packages/cli/src/check.ts` | AI agent: integrity checking |
+| `packages/cli/src/guidelines.ts` | AI agent: dynamic guidelines generation |
+| `packages/cli/src/model-list.ts` | AI agent: model introspection |
+| `packages/cli/src/model-parser.ts` | AI agent: Babel AST model parsing |
+| `packages/cli/src/make-feature.ts` | AI agent: CRUD feature scaffolding |
+| `packages/cli/src/discovery.ts` | AI agent: shared file discovery utilities |
 | `examples/blog/` | Reference implementation |
 
 ## Before Opening PRs

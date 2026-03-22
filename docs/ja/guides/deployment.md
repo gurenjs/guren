@@ -109,6 +109,21 @@ docker run --env-file .env.prod -p 3333:3333 my-app
 
 このイメージにはクライアント/SSR バンドルが同梱されるため、サーバーは初回から SSR HTML をストリームできます。環境に応じて設定ファイルやシークレットをマウントしてください。
 
+## AWS Lambda（サーバーレス）
+
+`@guren/server/lambda` アダプターで Guren を AWS Lambda 上で動かせます。トラフィックが変動するアプリやインフラ管理を最小化したい場合に最適です。
+
+```typescript
+// lambda.ts
+import app from './src/app'
+import { createLambdaHandler } from '@guren/server/lambda'
+
+await app.boot()
+export const handler = createLambdaHandler(app)
+```
+
+HTTP、SQS キュー、EventBridge スケジューリング、CLI コマンドの専用ハンドラーを提供しています。詳細は **[サーバーレスデプロイガイド](./serverless.md)** を参照してください。
+
 ## デプロイ後の作業
 - HTTPS を設定（Nginx/Caddy などのリバースプロキシやクラウド機能）。
 - ログ・モニタリングを構成（Bun は stdout/stderr に出力するので、集約先へ転送）。

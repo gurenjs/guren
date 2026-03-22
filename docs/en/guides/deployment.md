@@ -111,6 +111,21 @@ The container image bakes in both the client and SSR bundles so the server can s
 
 Mount your configuration or secrets as needed for your hosting environment.
 
+## AWS Lambda (Serverless)
+
+Guren runs on AWS Lambda via the `@guren/server/lambda` adapter — ideal for variable traffic or minimal infrastructure management.
+
+```typescript
+// lambda.ts
+import app from './src/app'
+import { createLambdaHandler } from '@guren/server/lambda'
+
+await app.boot()
+export const handler = createLambdaHandler(app)
+```
+
+The framework provides dedicated handlers for HTTP, SQS queues, EventBridge scheduling, and CLI commands. See the **[Serverless Deployment Guide](./serverless.md)** for the full setup including SQS, EventBridge, CDK examples, and infrastructure recommendations.
+
 ## Post-Deployment Tasks
 - Follow the [Production Operations Runbook](./operations.md) for SLO, incident response, and backup/restore drill policy.
 - Set up HTTPS (e.g. via a reverse proxy such as Nginx, Caddy, or your cloud platform).

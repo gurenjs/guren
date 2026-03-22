@@ -36,6 +36,10 @@
     "./legacy-validation": {
       "types": "./dist/legacy-validation.d.ts",
       "default": "./dist/legacy-validation.js"
+    },
+    "./lambda": {
+      "types": "./dist/lambda.d.ts",
+      "default": "./dist/lambda.js"
     }
   },
   "bin": {
