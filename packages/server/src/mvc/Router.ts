@@ -419,7 +419,8 @@ export class Router {
     for (const route of this.registry) {
       const resolvedMiddlewares = this.resolveMiddlewareNames(route.routeMiddlewareNames)
       const handler = resolveHandler(route.handler, this.modelBindings, options.container, route.bindings)
-      app.on(route.method, route.path, ...resolvedMiddlewares, ...route.middlewares, handler)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(app.on as any)(route.method, route.path, ...resolvedMiddlewares, ...route.middlewares, handler)
     }
   }
 
