@@ -34,6 +34,7 @@ describe('renderInertiaServer', () => {
       clearHistory: false,
       encryptHistory: false,
       rememberedState: {},
+      flash: {},
     }
     const pages = {
       './pages/Dashboard.tsx': async () => ({ default: () => null }),
@@ -59,6 +60,7 @@ describe('renderInertiaServer', () => {
       clearHistory: false,
       encryptHistory: false,
       rememberedState: {},
+      flash: {},
     }
     const pages = {
       './custom/Overview.tsx': async () => ({ default: () => null }),

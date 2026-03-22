@@ -57,6 +57,7 @@ describe('startInertiaClient', () => {
       clearHistory: false,
       encryptHistory: false,
       rememberedState: {},
+      flash: {},
     }
 
     globalRef.window = { __INERTIA_PAGE__: page }
@@ -79,6 +80,7 @@ describe('startInertiaClient', () => {
       clearHistory: false,
       encryptHistory: false,
       rememberedState: {},
+      flash: {},
     }
 
     globalRef.window = {}
