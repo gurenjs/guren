@@ -26,7 +26,7 @@
     "audit:core-first": "bun run ./scripts/smoke/core-first-audit.ts",
     "audit:contracts": "bun run ./scripts/smoke/contract-audit.ts",
     "audit:feature-runtime": "bun run ./scripts/smoke/feature-runtime-audit.ts",
-    "audit:bundle-budgets": "bun run ./scripts/smoke/build-budget.ts",
+    "audit:bundle-budgets": "bun run ./scripts/smoke/build-budget.ts --max-kb 600",
     "audit:starter-template": "bun run ./scripts/smoke/starter-template-audit.ts",
     "audit:docs": "bun run ./scripts/smoke/docs-audit.ts",
     "smoke:starter": "bun run ./scripts/smoke/fresh-app.ts",
