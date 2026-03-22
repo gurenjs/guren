@@ -4,7 +4,8 @@ import { scaffoldFile } from './utils'
 const MAIL_DIR = 'app/Mail'
 
 function mailTemplate(className: string): string {
-  return `import { Mail } from '@guren/server'
+  const subject = className.replace(/Mail$/, '')
+  return `import { Mail, type MailManager } from '@guren/core'
 
 /**
  * ${className}
@@ -14,10 +15,11 @@ export default class ${className} extends Mail {
    * Create a new mailable instance.
    */
   constructor(
+    manager: MailManager,
     // Define your mail data here
     public readonly data: Record<string, unknown> = {},
   ) {
-    super()
+    super(manager)
   }
 
   /**
@@ -25,8 +27,8 @@ export default class ${className} extends Mail {
    */
   build(): this {
     return this
-      .subject('${className.replace(/Mail$/, '')}')
-      .view('emails/${className.replace(/Mail$/, '').toLowerCase()}', this.data)
+      .subject('${subject}')
+      .text('Replace this body with your real email content.')
   }
 }
 `

@@ -26,6 +26,12 @@ bun install
 ```
 Guren 本体、Inertia クライアント、React、TypeScript などが一括で入ります。
 
+### 2.5. ルートとページのマニフェストを生成
+```bash
+bun run codegen
+```
+初回の typecheck や build の前に、型付きルートヘルパーとページマニフェストを生成します。
+
 ### 3. 環境変数を設定
 ```bash
 cp .env.example .env
@@ -54,10 +60,7 @@ bun run dev
 - `http://localhost:3333` を開いて確認します。
 - Bun プロセスが Hono サーバーと Vite を同時に立ち上げます。`GUREN_DEV_VITE=0` で Vite の起動を抑制できます。
 - Inertia のアセット解決は開発時に自動で Vite へ向きます（本番はビルド済み資産を参照）。
-- サービスプロバイダの自動ディスカバリが有効な場合、`app/Providers/` 配下のプロバイダが自動的に登録されます:
-  ```ts
-  const app = new Application({ discover: true })
-  ```
+- 生成されたアプリは `createApp({ routes, providers })` を使って bootstrap され、`src/app.ts` から route registrar を受け取ります。
 
 ### 6. 次のステップ
 - コード生成:  

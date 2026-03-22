@@ -1,7 +1,10 @@
 #!/usr/bin/env bun
+import { spawn } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
 import { defineCommand, runMain, showUsage } from 'citty'
+import { listBlueprints, runBlueprint } from './blueprints'
+import { runDoctor } from './doctor'
 import { makeAuth } from './make-auth'
 import { makeChannel } from './make-channel'
 import { makeCommand } from './make-command'
@@ -26,6 +29,9 @@ import { runDatabaseMigrations, runDatabaseSeeders, resetDatabase } from './db-m
 import { runDatabaseRollback, showMigrationStatus } from './db-rollback'
 import type { WriterOptions } from './utils'
 import { generateRouteTypes } from './routes-types'
+import { generatePageTypes } from './pages-types'
+import { generateDataTypes } from './data-types'
+import { generateApiClientTypes } from './api-client-types'
 import { consoleCommand } from './console'
 import { bootstrapApplication, resolveMainEntry, type MaybeApplication } from './runtime'
 import { runQueueWorker, listFailedJobs, retryFailedJob, retryAllFailedJobs, flushFailedJobs } from './queue'
@@ -35,6 +41,7 @@ import { createStorageLink, removeStorageLink } from './storage-link'
 import { listScheduledTasks, runScheduledTasks } from './schedule'
 import { runHealthCheck } from './health-check'
 import { publishLanguageFiles, makeLanguage, listLocales } from './lang'
+import { upgradeCanary } from './upgrade'
 
 type ForceableArgs = { force?: boolean }
 
@@ -101,6 +108,27 @@ function ensureDestructiveCommandAllowed(force?: boolean): boolean {
   }
 
   return true
+}
+
+async function runBunCommand(args: string[]): Promise<void> {
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    const child = spawn(process.execPath || 'bun', args, {
+      stdio: 'inherit',
+      env: process.env,
+    })
+
+    child.on('error', (error) => {
+      rejectPromise(error)
+    })
+
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolvePromise()
+      } else {
+        rejectPromise(new Error(`bun ${args.join(' ')} exited with code ${code}`))
+      }
+    })
+  })
 }
 
 const makeTestCommand = defineCommand({
@@ -517,6 +545,16 @@ const routeTypesCommand = defineCommand({
       description: 'Application root directory to resolve paths from',
       valueHint: '.',
     },
+    pages: {
+      type: 'string',
+      description: 'Frontend pages directory to scan for page contracts',
+      valueHint: 'resources/js/pages',
+    },
+    pagesOut: {
+      type: 'string',
+      description: 'Runtime page manifest module to write',
+      valueHint: '.guren/pages.gen.ts',
+    },
     force: {
       type: 'boolean',
       description: 'Overwrite existing declaration file',
@@ -525,13 +563,60 @@ const routeTypesCommand = defineCommand({
   },
   async run({ args }) {
     const writerOptions = toWriterOptions(args)
-    const { outputPath } = await generateRouteTypes({
+    const { outputPath: pagesOutputPath } = await generatePageTypes({
+      appRoot: args.app,
+      pagesDir: args.pages,
+      outputFile: args.pagesOut,
+      ...writerOptions,
+    })
+    const { outputPath, runtimeOutputPath } = await generateRouteTypes({
       routesFile: args.routes,
       outputFile: args.out,
       appRoot: args.app,
       ...writerOptions,
     })
+    consola.success(`Page helpers generated at ${pagesOutputPath}`)
     consola.success(`Route types generated at ${outputPath}`)
+    consola.success(`Route helpers generated at ${runtimeOutputPath}`)
+    process.exit(0)
+  },
+})
+
+const codegenCommand = defineCommand({
+  meta: {
+    name: 'codegen',
+    description: 'Generate framework artifacts such as route declarations and runtime route helpers.',
+  },
+  args: routeTypesCommand.args,
+  async run({ args }) {
+    const writerOptions = toWriterOptions(args)
+    const { outputPath: pagesOutputPath } = await generatePageTypes({
+      appRoot: args.app,
+      pagesDir: args.pages,
+      outputFile: args.pagesOut,
+      extractProps: true,
+      ...writerOptions,
+    })
+    const { outputPath, runtimeOutputPath, definitions } = await generateRouteTypes({
+      routesFile: args.routes,
+      outputFile: args.out,
+      appRoot: args.app,
+      ...writerOptions,
+    })
+    const { outputPath: dataOutputPath } = await generateDataTypes({
+      appRoot: args.app,
+      ...writerOptions,
+    })
+    const { outputPath: apiClientOutputPath } = await generateApiClientTypes(
+      definitions,
+      { appRoot: args.app, ...writerOptions },
+    )
+    if (pagesOutputPath) consola.success(`Page helpers generated at ${pagesOutputPath}`)
+    consola.success(`Route types generated at ${outputPath}`)
+    consola.success(`Route helpers generated at ${runtimeOutputPath}`)
+    consola.success(`Data types generated at ${dataOutputPath}`)
+    consola.success(`API client generated at ${apiClientOutputPath}`)
+    process.exit(0)
   },
 })
 
@@ -1121,6 +1206,261 @@ const devCommand = defineCommand({
   },
 })
 
+const doctorCommand = defineCommand({
+  meta: {
+    name: 'doctor',
+    description: 'Inspect the current workspace for vNext runtime, codegen, and bootstrap issues.',
+  },
+  args: {
+    json: {
+      type: 'boolean',
+      description: 'Output the doctor report as JSON.',
+    },
+    strict: {
+      type: 'boolean',
+      description: 'Exit with code 1 when warnings or failures are reported.',
+    },
+  },
+  async run({ args }) {
+    const report = await runDoctor({
+      json: Boolean(args.json),
+    })
+
+    if (args.json) {
+      consola.log(JSON.stringify(report, null, 2))
+    }
+
+    if (args.strict && (report.hasWarnings || report.hasFailures)) {
+      process.exit(1)
+    }
+  },
+})
+
+const newCommand = defineCommand({
+  meta: {
+    name: 'new',
+    description: 'Scaffold a new Guren application via create-guren-app.',
+  },
+  args: {
+    target: {
+      type: 'positional',
+      description: 'Directory to create the application in',
+      default: '.',
+    },
+    force: {
+      type: 'boolean',
+      alias: 'f',
+      description: 'Overwrite existing files in the target directory',
+    },
+    mode: {
+      type: 'string',
+      description: 'Rendering mode to scaffold (spa or ssr)',
+    },
+    auth: {
+      type: 'boolean',
+      description: 'Include authentication scaffolding',
+    },
+    blueprint: {
+      type: 'string',
+      description: 'Application blueprint to scaffold (default or blog).',
+    },
+  },
+  async run({ args }) {
+    const commandArgs = ['x', 'create-guren-app']
+
+    if (args.target) {
+      commandArgs.push(String(args.target))
+    }
+
+    if (args.force) {
+      commandArgs.push('--force')
+    }
+
+    if (args.mode) {
+      commandArgs.push('--mode', String(args.mode))
+    }
+
+    if (args.auth) {
+      commandArgs.push('--auth')
+    }
+
+    if (args.blueprint) {
+      commandArgs.push('--blueprint', String(args.blueprint))
+    }
+
+    await runBunCommand(commandArgs)
+  },
+})
+
+const addAuthCommand = defineCommand({
+  meta: {
+    name: 'auth',
+    description: 'Add authentication scaffolding to the current application.',
+  },
+  args: {
+    force: {
+      type: 'boolean',
+      description: 'Overwrite existing files',
+      alias: 'f',
+    },
+  },
+  async run({ args }) {
+    const files = await runBlueprint('auth', {
+      force: Boolean(args.force),
+    })
+
+    for (const file of files) {
+      consola.success(`Created ${file}`)
+    }
+  },
+})
+
+const addResourceCommand = defineCommand({
+  meta: {
+    name: 'resource',
+    description: 'Scaffold a model, controller, view, and route group for a resource.',
+  },
+  args: {
+    name: {
+      type: 'positional',
+      required: true,
+      description: 'Resource name (singular)',
+    },
+    force: {
+      type: 'boolean',
+      description: 'Overwrite existing files',
+      alias: 'f',
+    },
+  },
+  async run({ args }) {
+    const createdFiles = await runBlueprint('resource', {
+      name: String(args.name),
+      force: Boolean(args.force),
+    })
+
+    for (const file of createdFiles) {
+      consola.success(`Created ${file}`)
+    }
+  },
+})
+
+function createAddBlueprintCommand(
+  blueprint: string,
+  description: string,
+  needsName = false,
+) {
+  return defineCommand({
+    meta: {
+      name: blueprint,
+      description,
+    },
+    args: {
+      ...(needsName
+        ? {
+            name: {
+              type: 'positional' as const,
+              required: true,
+              description: 'Blueprint argument',
+            },
+          }
+        : {}),
+      force: {
+        type: 'boolean' as const,
+        description: 'Overwrite existing files',
+        alias: 'f',
+      },
+    },
+    async run({ args }) {
+      const createdFiles = await runBlueprint(blueprint, {
+        name: typeof args.name === 'string' ? args.name : undefined,
+        force: Boolean(args.force),
+      })
+
+      for (const file of createdFiles) {
+        consola.success(`Created ${file}`)
+      }
+    },
+  })
+}
+
+const addCommand = defineCommand({
+  meta: {
+    name: 'add',
+    description: 'Apply higher-level framework scaffolds to the current application.',
+  },
+  args: {
+    help: {
+      type: 'boolean',
+      alias: 'h',
+      description: 'Show available blueprints.',
+    },
+  },
+  subCommands: {
+    auth: addAuthCommand,
+    broadcasting: createAddBlueprintCommand('broadcasting', 'Install broadcasting scaffolding with sample public and private channels.'),
+    cache: createAddBlueprintCommand('cache', 'Install cache scaffolding and an example cache service.'),
+    events: createAddBlueprintCommand('events', 'Install event scaffolding with a sample event and listener.'),
+    mail: createAddBlueprintCommand('mail', 'Install mail scaffolding with a sample mailable.'),
+    notifications: createAddBlueprintCommand('notifications', 'Install notification scaffolding with sample channels and a sample notification.'),
+    queue: createAddBlueprintCommand('queue', 'Install queue scaffolding with a sample job.'),
+    resource: addResourceCommand,
+    schedule: createAddBlueprintCommand('schedule', 'Install a schedule kernel with a sample recurring task.'),
+    storage: createAddBlueprintCommand('storage', 'Install storage scaffolding with local/public disks and a sample storage service.'),
+  },
+  async run(ctx) {
+    if (ctx.args.help || ctx.rawArgs.length === 0) {
+      consola.info(`Available blueprints: ${listBlueprints().join(', ')}`)
+      await showUsage(ctx.cmd)
+    }
+  },
+})
+
+const upgradeCommand = defineCommand({
+  meta: {
+    name: 'upgrade',
+    description: 'Upgrade Guren dependencies in the current application.',
+  },
+  args: {
+    canary: {
+      type: 'boolean',
+      description: 'Pin @guren/* dependencies to the canary release tag.',
+    },
+    install: {
+      type: 'boolean',
+      description: 'Run bun install after package.json is updated.',
+    },
+    dryRun: {
+      type: 'boolean',
+      description: 'Print the dependency changes without modifying package.json.',
+    },
+  },
+  async run({ args }) {
+    if (!args.canary) {
+      throw new Error('Only `guren upgrade --canary` is currently supported.')
+    }
+
+    const result = await upgradeCanary({
+      install: Boolean(args.install),
+      dryRun: Boolean(args.dryRun),
+    })
+
+    if (result.updated.length === 0) {
+      consola.info('No Guren dependencies needed updating.')
+      return
+    }
+
+    for (const dependency of result.updated) {
+      consola.success(`${dependency.field}: ${dependency.name} ${dependency.previousVersion} -> ${dependency.nextVersion}`)
+    }
+
+    if (args.dryRun) {
+      consola.info('Dry run complete. package.json was not modified.')
+    } else {
+      consola.info(`Updated ${result.packageJsonPath}`)
+    }
+  },
+})
+
 const main = defineCommand({
   meta: {
     name: 'guren',
@@ -1155,6 +1495,7 @@ const main = defineCommand({
     'queue:retry': queueRetryCommand,
     'queue:flush': queueFlushCommand,
     'routes:types': routeTypesCommand,
+    codegen: codegenCommand,
     'route:list': routeListCommand,
     'config:cache': configCacheCommand,
     'config:clear': configClearCommand,
@@ -1166,6 +1507,10 @@ const main = defineCommand({
     'lang:publish': langPublishCommand,
     'lang:list': langListCommand,
     'make:lang': makeLangCommand,
+    add: addCommand,
+    doctor: doctorCommand,
+    new: newCommand,
+    upgrade: upgradeCommand,
     console: consoleCommand,
     dev: devCommand,
   },

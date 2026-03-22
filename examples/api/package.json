@@ -15,7 +15,6 @@
     "@guren/cli": "workspace:*",
     "@guren/core": "workspace:*",
     "@guren/orm": "workspace:*",
-    "@guren/server": "workspace:*",
     "@guren/testing": "workspace:*",
     "drizzle-orm": "0.44.7",
     "postgres": "^3.4.3",

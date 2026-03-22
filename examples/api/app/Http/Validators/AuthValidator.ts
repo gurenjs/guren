@@ -17,6 +17,10 @@ export const CreateTokenSchema = z.object({
   expiresInDays: z.number().int().positive().optional(),
 })
 
+export const TokenIdParamSchema = z.object({
+  id: z.string().min(1),
+})
+
 export type RegisterInput = z.infer<typeof RegisterSchema>
 export type LoginInput = z.infer<typeof LoginSchema>
 export type CreateTokenInput = z.infer<typeof CreateTokenSchema>

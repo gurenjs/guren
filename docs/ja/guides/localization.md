@@ -7,7 +7,7 @@ Gurenは多言語アプリケーションを構築するための包括的な国
 設定でi18nマネージャーを作成します：
 
 ```typescript
-import { createI18n } from '@guren/server'
+import { createI18n } from '@guren/core'
 
 const i18n = createI18n({
   locale: 'ja',                    // デフォルトロケール
@@ -223,7 +223,7 @@ await i18n.loadNamespace('ja', 'validation')
 カスタム翻訳読み込みを実装します：
 
 ```typescript
-import { TranslationLoader, TranslationMessages } from '@guren/server'
+import { TranslationLoader, TranslationMessages } from '@guren/core'
 
 class DatabaseLoader implements TranslationLoader {
   async load(locale: string): Promise<TranslationMessages> {
@@ -248,7 +248,7 @@ i18n.setLoader(new DatabaseLoader())
 ### グローバルインスタンスの設定
 
 ```typescript
-import { createI18n, setI18n, t, tc } from '@guren/server'
+import { createI18n, setI18n, t, tc } from '@guren/core'
 
 const i18n = createI18n({ /* config */ })
 setI18n(i18n)
@@ -261,7 +261,7 @@ tc('items.count', 5)
 ### コントローラーで使用
 
 ```typescript
-import { Controller, t, tc } from '@guren/server'
+import { Controller, t, tc } from '@guren/core'
 
 export default class ProductController extends Controller {
   async index() {
@@ -316,7 +316,7 @@ bunx guren make:lang ja --from en
 ### ロケール検出ミドルウェア
 
 ```typescript
-import { defineMiddleware } from '@guren/server'
+import { defineMiddleware } from '@guren/core'
 
 export const localeMiddleware = defineMiddleware(async (ctx, next) => {
   // クエリパラメータをチェック
@@ -345,7 +345,8 @@ export const localeMiddleware = defineMiddleware(async (ctx, next) => {
 ## コントローラー統合
 
 ```typescript
-import { Controller } from '@guren/server'
+import { Controller } from '@guren/core'
+import { appPages } from '@/resources/js/pages/contracts'
 
 export default class HomeController extends Controller {
   async index() {
@@ -355,7 +356,7 @@ export default class HomeController extends Controller {
     // ロケール固有のトランスレーターを作成
     const t = this.app.i18n.forLocale(locale)
 
-    return this.inertia('Home', {
+    return this.inertia(appPages.home, {
       title: t.t('pages.home.title'),
       description: t.t('pages.home.description'),
     })

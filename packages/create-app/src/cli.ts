@@ -1,13 +1,12 @@
-import { cp, mkdir, readFile, writeFile } from 'node:fs/promises'
-import { basename, join, relative, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { relative, resolve } from 'node:path'
 import process from 'node:process'
 import { consola } from 'consola'
 import { defineCommand, runMain } from 'citty'
-import { directoryExists, isDirectoryEmpty, toPackageName, toTitleCase } from './utils'
+import { getAppBlueprint, listAppBlueprints, scaffoldAppBlueprint, type RenderingMode } from './blueprints'
+import { directoryExists, isDirectoryEmpty } from './utils'
 
 const RENDERING_MODES = ['spa', 'ssr'] as const
-type RenderingMode = (typeof RENDERING_MODES)[number]
 const RENDERING_MODE_SET = new Set<RenderingMode>(RENDERING_MODES)
 
 async function ensureTargetDirectory(path: string, force: boolean): Promise<void> {
@@ -29,40 +28,20 @@ async function ensureTargetDirectory(path: string, force: boolean): Promise<void
   }
 }
 
-async function copyTemplate(template: string, destination: string): Promise<void> {
-  await cp(template, destination, { recursive: true, force: true })
-}
-
-async function replaceTokens(destination: string, files: string[], tokens: Map<string, string>): Promise<void> {
-  for (const file of files) {
-    const path = join(destination, file)
-    const content = await readFile(path, 'utf8')
-    let updated = content
-
-    for (const [token, replacement] of tokens) {
-      updated = updated.split(token).join(replacement)
-    }
-
-    if (updated !== content) {
-      await writeFile(path, updated, 'utf8')
-    }
-  }
-}
-
-async function applySsrOverrides(destination: string): Promise<void> {
-  const ssrTemplateDir = fileURLToPath(new URL('../templates/default-ssr', import.meta.url))
-  await copyTemplate(ssrTemplateDir, destination)
-}
-
 async function updateSsrPackageJson(destination: string): Promise<void> {
-  const packageJsonPath = join(destination, 'package.json')
+  const packageJsonPath = resolve(destination, 'package.json')
   const raw = await readFile(packageJsonPath, 'utf8')
   const pkg = JSON.parse(raw) as { scripts?: Record<string, string> }
 
   pkg.scripts ??= {}
-  pkg.scripts.build = 'bunx vite build && bunx vite build --ssr'
+  pkg.scripts.build = 'bun run codegen && bunx vite build && bunx vite build --ssr'
 
   await writeFile(packageJsonPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8')
+}
+
+async function installAuthBlueprint(): Promise<void> {
+  const { runBlueprint } = await import('@guren/cli')
+  await runBlueprint('auth', { force: true })
 }
 
 async function resolveRenderingMode(flagValue: unknown): Promise<RenderingMode> {
@@ -113,13 +92,14 @@ const command = defineCommand({
       type: 'boolean',
       description: 'Include authentication scaffolding with auto-configured providers and middleware',
     },
+    blueprint: {
+      type: 'string',
+      description: `Starter blueprint to scaffold (${listAppBlueprints().join(', ')})`,
+    },
   },
   async run({ args }) {
     const target = args.target as string
     const force = Boolean(args.force)
-    const templateName = 'default'
-
-    const templateDir = fileURLToPath(new URL(`../templates/${templateName}`, import.meta.url))
     const targetDir = resolve(process.cwd(), target)
 
     if (await directoryExists(targetDir)) {
@@ -133,35 +113,14 @@ const command = defineCommand({
       await ensureTargetDirectory(targetDir, true)
     }
 
-    const appName = basename(targetDir)
-    const packageName = toPackageName(appName)
-    const appTitle = toTitleCase(appName)
-
-    await copyTemplate(templateDir, targetDir)
-
     const renderingMode = await resolveRenderingMode(args.mode)
+    const blueprint = getAppBlueprint(typeof args.blueprint === 'string' ? args.blueprint : undefined)
 
-    if (renderingMode === 'ssr') {
-      await applySsrOverrides(targetDir)
-    }
-
-    const tokenMap = new Map<string, string>([
-      ['guren-app-placeholder', packageName],
-      ['__APP_TITLE__', appTitle],
-      ['__APP_NAME__', appName],
-    ])
-
-    const filesToTransform = [
-      'CLAUDE.md',
-      'README.md',
-      'package.json',
-      'public/index.html',
-      'bin/serve.ts',
-      'app/Http/Controllers/HomeController.ts',
-      'resources/js/pages/Home.tsx',
-    ]
-
-    await replaceTokens(targetDir, filesToTransform, tokenMap)
+    await scaffoldAppBlueprint({
+      blueprint: blueprint.name,
+      destination: targetDir,
+      renderingMode,
+    })
 
     if (renderingMode === 'ssr') {
       await updateSsrPackageJson(targetDir)
@@ -173,10 +132,9 @@ const command = defineCommand({
       const originalCwd = process.cwd()
       try {
         process.chdir(targetDir)
-        const { makeAuth } = await import('@guren/cli')
-        await makeAuth({ install: true, force: true })
+        await installAuthBlueprint()
       } catch (error) {
-        consola.warn('Failed to scaffold authentication automatically. You can run it manually after install with `bunx guren make:auth --install`.')
+        consola.warn('Failed to scaffold authentication automatically. You can run it manually after install with `bunx guren add auth`.')
         consola.debug(error)
       } finally {
         process.chdir(originalCwd)
@@ -185,22 +143,27 @@ const command = defineCommand({
 
     const relativeTarget = relative(process.cwd(), targetDir) || '.'
 
-    consola.success(`Scaffolded a new Guren app (${renderingMode.toUpperCase()}) in ${relativeTarget}`)
+    consola.success(`Scaffolded a new Guren app (${blueprint.name}/${renderingMode.toUpperCase()}) in ${relativeTarget}`)
     consola.info('Next steps:')
     if (relativeTarget !== '.') {
       consola.log(`  cd ${relativeTarget}`)
     }
     consola.log('  bun install')
+    consola.log('  bun run dev')
+    consola.log('')
+    consola.info('No Docker or database setup needed — SQLite is ready out of the box.')
 
     if (includeAuth) {
-      consola.log('  bunx guren make:auth --install  # scaffold authentication (already attempted)')
-      consola.log('  bun run db:migrate              # create database tables')
-      consola.log('  bun run db:seed                 # seed demo user')
+      consola.log('')
+      consola.info('Auth scaffolding included. Run migrations and seed after install:')
+      consola.log('  bun run db:migrate')
+      consola.log('  bun run db:seed')
     }
 
-    consola.log('  bun run dev')
     if (renderingMode === 'ssr') {
-      consola.log('  bun run build  # builds both client and SSR bundles')
+      consola.log('')
+      consola.info('Production build:')
+      consola.log('  bun run build')
     }
   },
 })

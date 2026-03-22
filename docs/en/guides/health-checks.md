@@ -7,7 +7,7 @@ Guren provides a comprehensive health checking system to monitor your applicatio
 Create a health manager and register checks:
 
 ```typescript
-import { createHealthManager, DatabaseCheck, RedisCheck, MemoryCheck } from '@guren/server'
+import { createHealthManager, DatabaseCheck, RedisCheck, MemoryCheck } from '@guren/core'
 
 const health = createHealthManager()
 
@@ -28,7 +28,7 @@ console.log(report.status) // 'healthy', 'degraded', or 'unhealthy'
 Verifies database connectivity by executing a simple query:
 
 ```typescript
-import { DatabaseCheck } from '@guren/server'
+import { DatabaseCheck } from '@guren/core'
 
 // Basic usage
 health.register(new DatabaseCheck(db))
@@ -45,7 +45,7 @@ health.register(new DatabaseCheck(db, {
 Verifies Redis connectivity:
 
 ```typescript
-import { RedisCheck } from '@guren/server'
+import { RedisCheck } from '@guren/core'
 
 // Basic usage
 health.register(new RedisCheck(redis))
@@ -61,7 +61,7 @@ health.register(new RedisCheck(redis, {
 Monitors process memory usage with configurable thresholds:
 
 ```typescript
-import { MemoryCheck } from '@guren/server'
+import { MemoryCheck } from '@guren/core'
 
 health.register(new MemoryCheck({
   name: 'memory',              // Check name (default: 'memory')
@@ -80,7 +80,7 @@ Memory check returns status based on heap usage:
 Verifies cache store connectivity:
 
 ```typescript
-import { CacheCheck } from '@guren/server'
+import { CacheCheck } from '@guren/core'
 
 health.register(new CacheCheck(cache, {
   name: 'cache',   // Custom name (default: 'cache')
@@ -92,7 +92,7 @@ health.register(new CacheCheck(cache, {
 Verifies storage driver connectivity:
 
 ```typescript
-import { StorageCheck } from '@guren/server'
+import { StorageCheck } from '@guren/core'
 
 health.register(new StorageCheck(storage, {
   name: 'storage',        // Custom name (default: 'storage')
@@ -108,7 +108,7 @@ health.register(new StorageCheck(storage, {
 Create checks with a callback function:
 
 ```typescript
-import { customCheck } from '@guren/server'
+import { customCheck } from '@guren/core'
 
 // Simple custom check
 health.register(customCheck('external-api', async () => {
@@ -140,7 +140,7 @@ health.register(customCheck('queue-depth', async () => {
 For reusable checks, extend the base class:
 
 ```typescript
-import { HealthCheck, CheckResult } from '@guren/server'
+import { HealthCheck, CheckResult } from '@guren/core'
 
 export class ExternalServiceCheck extends HealthCheck {
   readonly name: string
@@ -246,7 +246,7 @@ const dbResult = await health.getCheck('database')
 Use the built-in middleware to expose a health endpoint:
 
 ```typescript
-import { createHealthManager } from '@guren/server'
+import { createHealthManager } from '@guren/core'
 
 const health = createHealthManager()
 // ... register checks
@@ -354,7 +354,7 @@ import {
   RedisCheck,
   MemoryCheck,
   customCheck,
-} from '@guren/server'
+} from '@guren/core'
 import { db } from './database'
 import { redis } from './redis'
 

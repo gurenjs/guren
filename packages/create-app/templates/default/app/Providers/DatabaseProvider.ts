@@ -1,4 +1,4 @@
-import { ServiceProvider } from '@guren/server'
+import { ServiceProvider } from '@guren/core'
 import { bootModels } from '../../config/app.js'
 
 export default class DatabaseProvider extends ServiceProvider {

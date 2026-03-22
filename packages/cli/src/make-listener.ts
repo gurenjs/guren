@@ -10,28 +10,27 @@ function listenerTemplate(className: string, eventName?: string): string {
 
   const eventType = eventName || 'Event'
   const eventParam = eventName ? `event: ${eventName}` : 'event: Event'
+  const listenerGeneric = eventName ? `<${eventName}>` : ''
+  const staticEvent = eventName ? `\n  static override event = ${eventName}\n` : ''
 
-  return `import { Listener, Event } from '@guren/server'
+  return `import { Listener, Event } from '@guren/core'
 ${eventImport}
 
 /**
  * ${className}
  */
-export default class ${className} extends Listener {
+export default class ${className} extends Listener${listenerGeneric} {${staticEvent}
   /**
    * Handle the event.
    */
   async handle(${eventParam}): Promise<void> {
-    // TODO: Implement listener logic
-    console.log('${className} handling event:', event)
+    void event
   }
 
   /**
-   * Determine if the listener should be queued.
+   * Queue this listener in the background when needed.
    */
-  shouldQueue(): boolean {
-    return false
-  }
+  static override shouldQueue = false
 
   /**
    * Handle listener failure.

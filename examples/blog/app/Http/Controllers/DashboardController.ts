@@ -1,8 +1,9 @@
-import { Controller } from '@guren/server'
+import { Controller } from '@guren/core'
+import { pages } from '../../../.guren/pages.gen.js'
 
 export default class DashboardController extends Controller {
   async index() {
-    const user = await this.auth.user()
-    return this.inertia('dashboard/Index', { user }, { url: this.request.path, title: 'Dashboard | Guren Blog' })
+    const user = await this.auth.user<{ id: number; name: string; email: string }>()
+    return this.inertia(pages.dashboard.Index, { user }, { url: this.request.path, title: 'Dashboard | Guren Blog' })
   }
 }

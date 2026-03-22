@@ -73,18 +73,21 @@ return ctx.json({ message: 'Password updated successfully' })
 ### Routes
 
 ```ts
-import { Route } from '@guren/server'
+import { Router } from '@guren/core'
 import { PasswordResetController } from '@/app/Controllers/PasswordResetController'
 
-Route.post('/forgot-password', [PasswordResetController, 'sendResetLink'])
-Route.get('/reset-password', [PasswordResetController, 'showResetForm'])
-Route.post('/reset-password', [PasswordResetController, 'resetPassword'])
+export function registerWebRoutes(router: Router): void {
+  router.post('/forgot-password', [PasswordResetController, 'sendResetLink'])
+  router.get('/reset-password', [PasswordResetController, 'showResetForm'])
+  router.post('/reset-password', [PasswordResetController, 'resetPassword'])
+}
 ```
 
 ### Controller
 
 ```ts
-import { Controller } from '@guren/server'
+ import { Controller } from '@guren/core'
+ import { z } from 'zod'
 import {
   createPasswordResetToken,
   verifyPasswordResetToken,
@@ -92,13 +95,23 @@ import {
   buildPasswordResetUrl,
 } from '@guren/core'
 import { User } from '@/app/Models/User'
+import { appPages } from '@/resources/js/pages/contracts'
+
+const ForgotPasswordSchema = z.object({
+  email: z.string().email(),
+})
+
+const ResetPasswordSchema = z.object({
+  token: z.string().min(1),
+  password: z.string().min(8),
+})
 
 export class PasswordResetController extends Controller {
   private store = new DatabasePasswordResetStore()
   private userProvider = new EloquentUserProvider(User)
 
   async sendResetLink() {
-    const { email } = await this.request.json()
+    const { email } = await this.validateBody(ForgotPasswordSchema)
 
     // Always return success to prevent email enumeration
     const user = await User.where('email', email).first()
@@ -127,16 +140,16 @@ export class PasswordResetController extends Controller {
     const email = await verifyPasswordResetToken(token, this.store)
 
     if (!email) {
-      return this.inertia('Auth/ResetPassword', {
+      return this.inertia(appPages.auth.resetPassword, {
         error: 'Invalid or expired reset link',
       })
     }
 
-    return this.inertia('Auth/ResetPassword', { token, email })
+    return this.inertia(appPages.auth.resetPassword, { token, email })
   }
 
   async resetPassword() {
-    const { token, password } = await this.request.json()
+    const { token, password } = await this.validateBody(ResetPasswordSchema)
 
     const user = await completePasswordReset(
       token,

@@ -1,12 +1,28 @@
 import type { Hono } from 'hono'
+import type { Router } from '@guren/server'
 import { TestResponse } from './http'
+
+type BootCallback = (app: Hono) => void | Promise<void>
+type ProviderLike = { register?(): unknown; boot?(): unknown }
+type ProviderConstructor = new (...args: unknown[]) => ProviderLike
+type RouteRegistration = (router: Router) => void | Promise<void>
+type ApplicationLike = {
+  boot(): Promise<void>
+  fetch(request: Request): Response | Promise<Response>
+}
+type ApplicationConstructor = new (options: {
+  boot?: BootCallback
+  providers?: ProviderConstructor[]
+  routes?: RouteRegistration
+}) => ApplicationLike
 
 /**
  * Options for creating a TestApp instance.
  */
 export interface TestAppOptions {
-  readonly boot?: (app: Hono) => void | Promise<void>
-  readonly providers?: Array<unknown>
+  readonly boot?: BootCallback
+  readonly providers?: ProviderConstructor[]
+  readonly routes?: RouteRegistration
 }
 
 /**
@@ -326,12 +342,12 @@ export class TestApp {
    * The Application is imported dynamically to avoid hard coupling at the
    * module level. If the import fails (e.g., in a test environment without
    * @guren/server installed), a lightweight Hono-based fallback is used.
-   */
+  */
   static async create(options: TestAppOptions = {}): Promise<TestApp> {
-    let Application: typeof import('@guren/server').Application | undefined
+    let Application: ApplicationConstructor | undefined
 
     try {
-      ;({ Application } = await import('@guren/server'))
+      ;({ Application } = await import('@guren/server') as { Application: ApplicationConstructor })
     } catch {
       // Fallback: use a plain Hono app when @guren/server is not available.
       const { Hono } = await import('hono')
@@ -340,17 +356,18 @@ export class TestApp {
         await options.boot(hono)
       }
 
-      const fetchFn = (request: Request) => hono.fetch(request)
+      const fetchFn = (request: Request) => Promise.resolve(hono.fetch(request))
       return new TestApp(fetchFn)
     }
 
     const application = new Application({
-      boot: options.boot as ((app: Hono) => void | Promise<void>) | undefined,
-      providers: options.providers as Array<new (...args: unknown[]) => unknown> | undefined,
+      boot: options.boot,
+      providers: options.providers,
+      routes: options.routes,
     })
     await application.boot()
 
-    const fetchFn = (request: Request) => application.fetch(request)
+    const fetchFn = (request: Request) => Promise.resolve(application.fetch(request))
     return new TestApp(fetchFn)
   }
 

@@ -44,8 +44,8 @@
   },
   "dependencies": {
     "@babel/parser": "^7.24.7",
+    "@guren/core": "^0.2.0-alpha.7",
     "@guren/orm": "^0.2.0-alpha.7",
-    "@guren/server": "^0.2.0-alpha.7",
     "citty": "^0.1.6",
     "consola": "^3.4.2"
   },

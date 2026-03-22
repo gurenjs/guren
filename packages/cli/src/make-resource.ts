@@ -4,7 +4,7 @@ import { scaffoldFile } from './utils'
 const RESOURCES_DIR = 'app/Http/Resources'
 
 function resourceTemplate(className: string, modelName: string): string {
-  return `import { Resource } from '@guren/server'
+  return `import { Resource } from '@guren/core'
 
 export default class ${className} extends Resource<${modelName}> {
   toArray() {

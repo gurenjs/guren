@@ -12,11 +12,19 @@ export interface RouteTypesPluginOptions {
    */
   watchFile?: string
   /**
+   * Relative path (from the app root) to the frontend pages directory. Defaults to `resources/js/pages`.
+   */
+  pagesDir?: string
+  /**
+   * Relative path (from the app root) to the Resources directory. Defaults to `app/Http/Resources`.
+   */
+  resourcesDir?: string
+  /**
    * Override the executable launched to regenerate route types. Defaults to `bun`.
    */
   executable?: string
   /**
-   * Arguments passed to the executable. Defaults to `['x', '--bun', 'guren', 'routes:types', '--force']`.
+   * Arguments passed to the executable. Defaults to `['x', '--bun', 'guren', 'codegen', '--force']`.
    */
   args?: string[]
   /**
@@ -26,8 +34,10 @@ export interface RouteTypesPluginOptions {
 }
 
 const DEFAULT_EXECUTABLE = 'bun'
-const DEFAULT_ARGS = ['x', '--bun', 'guren', 'routes:types', '--force']
+const DEFAULT_ARGS = ['x', '--bun', 'guren', 'codegen', '--force']
 const DEFAULT_WATCH_FILE = 'routes/web.ts'
+const DEFAULT_PAGES_DIR = 'resources/js/pages'
+const DEFAULT_RESOURCES_DIR = 'app/Http/Resources'
 
 export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin {
   let appRoot = options.appRoot
@@ -104,9 +114,15 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
     async handleHotUpdate(ctx: HmrContext) {
       const root = appRoot ?? ctx.server.config.root
       const watchFile = resolve(root, options.watchFile ?? DEFAULT_WATCH_FILE)
+      const pagesDir = resolve(root, options.pagesDir ?? DEFAULT_PAGES_DIR)
+      const resourcesDir = resolve(root, options.resourcesDir ?? DEFAULT_RESOURCES_DIR)
       const changedFile = resolve(ctx.file)
 
-      if (changedFile === watchFile) {
+      if (
+        changedFile === watchFile ||
+        changedFile.startsWith(`${pagesDir}/`) || changedFile === pagesDir ||
+        changedFile.startsWith(`${resourcesDir}/`) || changedFile === resourcesDir
+      ) {
         await enqueueGeneration(root)
       }
 

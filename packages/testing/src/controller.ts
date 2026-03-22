@@ -13,12 +13,19 @@ const HTML_DECODE_ENTITIES: Record<string, string> = {
 }
 
 export interface ControllerContext {
+  var?: {
+    container?: {
+      make: <T = unknown>(key: string) => T
+    }
+  }
   req: {
     raw: Request
     path: string
     url: string
     method: string
     query: (key?: string) => string | undefined | Record<string, string>
+    queries?: () => Record<string, string[]>
+    param?: (key?: string) => string | Record<string, string> | undefined
     header: (name: string) => string | undefined
   }
   get: (key: string) => unknown
@@ -37,10 +44,12 @@ export interface InertiaPayload {
 export function createControllerContext(
   url: string,
   init: RequestInit = {},
+  contextValues: Record<string, unknown> = {},
 ): ControllerContext {
   const request = new Request(url, init)
   const parsedUrl = new URL(request.url)
   const searchParams = parsedUrl.searchParams
+  const store = new Map<string, unknown>(Object.entries(contextValues))
 
   const req = {
     raw: request,
@@ -54,13 +63,28 @@ export function createControllerContext(
 
       return searchParams.get(key) ?? undefined
     },
+    queries: () => {
+      const values = new Map<string, string[]>()
+      for (const [key, value] of searchParams.entries()) {
+        const existing = values.get(key) ?? []
+        existing.push(value)
+        values.set(key, existing)
+      }
+      return Object.fromEntries(values)
+    },
+    param: () => undefined,
     header: (name: string) => request.headers.get(name) ?? undefined,
   }
 
   return {
+    var: {
+      container: {
+        make: <T = unknown>(key: string) => store.get(key) as T,
+      },
+    },
     req,
-    get: () => undefined,
-    set: () => {},
+    get: (key: string) => store.get(key),
+    set: (key: string, value: unknown) => { store.set(key, value) },
     header: () => {},
     status: () => {},
   }
@@ -82,13 +106,21 @@ export function createGurenControllerModule() {
       return this.context
     }
 
+    make<T = unknown>(key: string): T {
+      return this.ctx.var?.container?.make<T>(key) as T
+    }
+
     inertia(
-      component: string,
+      componentOrPage: string | { id: string; component?: string },
       props: Record<string, unknown>,
       options: Record<string, unknown> = {},
     ): Response {
       const ctx = this.ctx
       const request = ctx.req.raw
+      const component =
+        typeof componentOrPage === 'string'
+          ? componentOrPage
+          : componentOrPage.component ?? componentOrPage.id
       const url =
         (options.url as string | undefined) ??
         ctx.req.path ??
@@ -173,10 +205,196 @@ export function createGurenControllerModule() {
 
 export function createControllerModuleMock() {
   const module = createGurenControllerModule()
+  const buildValidationErrors = (issues: Array<{ path: (string | number)[]; message: string }> = []) => {
+    const errors: Record<string, string[]> = {}
+
+    for (const issue of issues) {
+      const key = issue.path.join('.') || 'message'
+      if (!errors[key]) {
+        errors[key] = []
+      }
+      errors[key].push(issue.message)
+    }
+
+    if (Object.keys(errors).length === 0) {
+      errors.message = ['The given data was invalid.']
+    }
+
+    return errors
+  }
 
   class TestController extends module.Controller {
+    public parsedBody?: Record<string, unknown>
+
+    public runValidation<T>(
+      schema: {
+        safeParse: (data: unknown) =>
+          | { success: true; data: T }
+          | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
+      },
+      data: unknown,
+      statusCode: number,
+    ): T {
+      const result = schema.safeParse(data)
+      if (result.success) {
+        return result.data
+      }
+
+      const error = new ValidationException(buildValidationErrors(result.error.issues))
+      error.statusCode = statusCode
+      throw error
+    }
+
+    public runValidationSafe<T>(schema: {
+      safeParse: (data: unknown) =>
+        | { success: true; data: T }
+        | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
+    }, data: unknown): { success: true; data: T } | { success: false; errors: Record<string, string> } {
+      const result = schema.safeParse(data)
+      if (result.success) {
+        return { success: true, data: result.data }
+      }
+
+      const errors: Record<string, string> = {}
+      for (const issue of result.error.issues ?? []) {
+        const key = issue.path.join('.') || issue.message
+        if (!errors[key]) {
+          errors[key] = issue.message
+        }
+      }
+
+      if (Object.keys(errors).length === 0) {
+        errors.message = 'The given data was invalid.'
+      }
+
+      return { success: false, errors }
+    }
+
     public get request(): ControllerContext['req'] {
       return this.ctx.req
+    }
+
+    public async getBody(): Promise<Record<string, unknown>> {
+      if (this.parsedBody) {
+        return this.parsedBody
+      }
+
+      this.parsedBody = ((await module.parseRequestPayload(this.ctx)) ?? {}) as Record<string, unknown>
+      return this.parsedBody
+    }
+
+    public async input<T = unknown>(key: string, defaultValue?: T): Promise<T | undefined> {
+      const body = await this.getBody()
+      if (key in body) {
+        return body[key] as T
+      }
+
+      const queryValue = this.ctx.req.query(key)
+      return (queryValue as T | undefined) ?? defaultValue
+    }
+
+    public async validateBody<T>(schema: {
+      safeParse: (data: unknown) =>
+        | { success: true; data: T }
+        | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
+    }): Promise<T> {
+      const body = await this.getBody()
+      return this.runValidation(schema, body, 422)
+    }
+
+    public async validateBodySafe<T>(schema: {
+      safeParse: (data: unknown) =>
+        | { success: true; data: T }
+        | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
+    }): Promise<{ success: true; data: T } | { success: false; errors: Record<string, string> }> {
+      const body = await this.getBody()
+      return this.runValidationSafe(schema, body)
+    }
+
+    public validateQuery<T>(schema: {
+      safeParse: (data: unknown) =>
+        | { success: true; data: T }
+        | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
+    }): T {
+      return this.runValidation(schema, this.ctx.req.query(), 422)
+    }
+
+    public validateQuerySafe<T>(schema: {
+      safeParse: (data: unknown) =>
+        | { success: true; data: T }
+        | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
+    }): { success: true; data: T } | { success: false; errors: Record<string, string> } {
+      return this.runValidationSafe(schema, this.ctx.req.query())
+    }
+
+    public validateParams<T>(schema: {
+      safeParse: (data: unknown) =>
+        | { success: true; data: T }
+        | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
+    }): T {
+      const paramResolver = (this.ctx.req as { param?: (key?: string) => unknown }).param
+      const rawParams = typeof paramResolver === 'function' ? paramResolver() : {}
+      const params =
+        typeof rawParams === 'string'
+          ? { id: rawParams }
+          : rawParams && typeof rawParams === 'object'
+            ? rawParams
+            : {}
+
+      return this.runValidation(schema, params, 400)
+    }
+
+    public validateParamsSafe<T>(schema: {
+      safeParse: (data: unknown) =>
+        | { success: true; data: T }
+        | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
+    }): { success: true; data: T } | { success: false; errors: Record<string, string> } {
+      const paramResolver = (this.ctx.req as { param?: (key?: string) => unknown }).param
+      const rawParams = typeof paramResolver === 'function' ? paramResolver() : {}
+      const params =
+        typeof rawParams === 'string'
+          ? { id: rawParams }
+          : rawParams && typeof rawParams === 'object'
+            ? rawParams
+            : {}
+
+      return this.runValidationSafe(schema, params)
+    }
+
+    public apiToken(): { token: unknown; userId: string | number; abilities: string[] } {
+      const result = this.ctx.get('guren:api-token') as {
+        token: unknown
+        userId: string | number
+        abilities: string[]
+      } | undefined
+      if (!result) {
+        const error = new Error('Unauthenticated.') as Error & { statusCode: number }
+        error.statusCode = 401
+        throw error
+      }
+      return result
+    }
+
+    public apiTokenUserId(): string | number {
+      return this.apiToken().userId
+    }
+
+    public created(data?: unknown, init: ResponseInit = {}): Response {
+      if (data === undefined) {
+        return new Response(null, { status: 201, ...init })
+      }
+      return new Response(JSON.stringify(data), {
+        status: 201,
+        ...init,
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          ...(init.headers ?? {}),
+        },
+      })
+    }
+
+    public noContent(): Response {
+      return new Response(null, { status: 204 })
     }
 
     public json(data: unknown, init: ResponseInit = {}): Response {
@@ -289,6 +507,62 @@ export function createControllerModuleMock() {
   ): Record<string, unknown>[] => {
     return resources.map((resource) => new resourceClass(resource).toJSON())
   }
+  class ValidationException extends Error {
+    statusCode = 422
+    errors: Record<string, string[]>
+
+    constructor(errors: Record<string, string[]>, message = 'The given data was invalid.') {
+      super(message)
+      this.name = 'ValidationException'
+      this.errors = errors
+    }
+
+    static withMessages(messages: Record<string, string | string[]>): ValidationException {
+      const errors: Record<string, string[]> = {}
+      for (const [key, value] of Object.entries(messages)) {
+        errors[key] = Array.isArray(value) ? value : [value]
+      }
+      return new ValidationException(errors)
+    }
+
+    static fromZodError(zodError: { issues?: Array<{ path: (string | number)[]; message: string }> }): ValidationException {
+      const errors: Record<string, string[]> = {}
+      if (zodError?.issues) {
+        for (const issue of zodError.issues) {
+          const key = issue.path.join('.') || 'message'
+          if (!errors[key]) {
+            errors[key] = []
+          }
+          errors[key].push(issue.message)
+        }
+      }
+      return new ValidationException(errors)
+    }
+  }
+
+  class AuthenticationException extends Error {
+    statusCode = 401
+
+    constructor(message = 'Unauthenticated.') {
+      super(message)
+      this.name = 'AuthenticationException'
+    }
+  }
+
+  const getApiTokenOrFail = (
+    ctx: ControllerContext,
+  ): { token: unknown; userId: string | number; abilities: string[] } => {
+    const result = ctx.get('guren:api-token') as {
+      token: unknown
+      userId: string | number
+      abilities: string[]
+    } | undefined
+    if (!result) {
+      throw new AuthenticationException('Unauthenticated.')
+    }
+    return result
+  }
+
   class MemoryApiTokenStore {
     clear(): void {}
   }
@@ -370,11 +644,14 @@ export function createControllerModuleMock() {
     Resource,
     JsonResource,
     collect,
+    ValidationException,
+    AuthenticationException,
     MemoryApiTokenStore,
     createApiToken,
     revokeApiToken,
     getUserApiTokens,
     getApiToken,
+    getApiTokenOrFail,
     createEventManager,
     createMailManager,
     setMailManager,

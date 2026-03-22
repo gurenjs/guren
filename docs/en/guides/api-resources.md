@@ -7,7 +7,7 @@ API Resources provide a transformation layer between your models and API respons
 Create a resource by extending the `Resource` class:
 
 ```typescript
-import { Resource } from '@guren/server'
+import { Resource } from '@guren/core'
 import type { User } from '../Models/User'
 
 export class UserResource extends Resource<User> {
@@ -25,7 +25,7 @@ export class UserResource extends Resource<User> {
 ### Using Resources in Controllers
 
 ```typescript
-import { Controller } from '@guren/server'
+import { Controller } from '@guren/core'
 import { UserResource } from '../Resources/UserResource'
 
 export default class UserController extends Controller {
@@ -153,7 +153,7 @@ const users = await User.all()
 const data = UserResource.collection(users)
 
 // Or use the collect helper
-import { collect } from '@guren/server'
+import { collect } from '@guren/core'
 const data = collect(users, UserResource)
 ```
 
@@ -166,18 +166,19 @@ Guren provides two pagination strategies.
 Traditional pagination with page numbers:
 
 ```typescript
-import { paginate, Paginator } from '@guren/server'
+import { paginate, Paginator } from '@guren/core'
 
 export default class UserController extends Controller {
   async index() {
     const page = Number(this.request.query('page') ?? 1)
     const perPage = Number(this.request.query('per_page') ?? 15)
 
-    const { data: users, meta } = await User.paginate({ page, perPage })
+    const result = await User.paginate({ page, perPage })
 
-    const paginator = paginate(users, meta.total, perPage, page)
-      .withPath('/api/users')
-      .withQuery({ per_page: String(perPage) })
+    const paginator = paginate(result, {
+      path: '/api/users',
+      query: { per_page: String(result.meta.perPage) },
+    })
 
     return this.json(paginator.toResource(UserResource))
   }
@@ -204,7 +205,11 @@ export default class UserController extends Controller {
     "first": "/api/users?page=1&per_page=15",
     "last": "/api/users?page=5&per_page=15",
     "prev": null,
-    "next": "/api/users?page=2&per_page=15"
+    "next": "/api/users?page=2&per_page=15",
+    "pages": [
+      { "page": 1, "url": "/api/users?page=1&per_page=15", "active": true },
+      { "page": 2, "url": "/api/users?page=2&per_page=15", "active": false }
+    ]
   }
 }
 ```
@@ -214,7 +219,7 @@ export default class UserController extends Controller {
 Ideal for infinite scroll and real-time data:
 
 ```typescript
-import { cursorPaginate, CursorPaginator } from '@guren/server'
+import { cursorPaginate, CursorPaginator } from '@guren/core'
 
 export default class PostController extends Controller {
   async index() {
@@ -295,7 +300,7 @@ export default class PostController extends Controller {
 For simple transformations without a custom class:
 
 ```typescript
-import { JsonResource } from '@guren/server'
+import { JsonResource } from '@guren/core'
 
 const user = { id: 1, name: 'John', password: 'secret' }
 const resource = new JsonResource(user)

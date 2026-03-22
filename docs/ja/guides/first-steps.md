@@ -1,252 +1,124 @@
 # 10分で最初の機能を作る
 
-タスクトラッカーを作ります：タスクの作成、一覧表示、完了マーク。このチュートリアルが終わる頃には、Guren の MVC ループがデータベースからブラウザまでどう動くかを理解できます。
+このガイドは、現在の Guren の標準導線で進めます。`@guren/core`、`bunx guren add ...`、page contract、resource 出力、route/page manifest を前提にしています。
 
 ## 作るもの
 
-タスクを入力して Enter を押すとリストに表示されるシンプルなページです。各タスクにはチェックボックスがあり、完了マークを付けられます。シンプルですが、フレームワークのすべてのレイヤーに触れます：スキーマ、モデル、コントローラー、ルート、React ページ。
+次の要素を持つ小さな posts 機能です。
 
-## 1. プロジェクトを生成する
+- 認証 scaffolding
+- posts 用の resource stack
+- 型付き route/page manifest
+- Guren 標準フローで動く SSR アプリ
+
+## 1. アプリを作る
 
 ```bash
-bunx create-guren-app tasks-app
-cd tasks-app
+bunx create-guren-app posts-app --mode ssr
+cd posts-app
 bun install
 ```
 
-プロンプトが出たら **SSR** モードを選択してください。生成されたプロジェクトには、Bun サーバー、Vite によるフロントエンドビルド、PostgreSQL 対応の Drizzle セットアップが含まれています。
-
-> [!NOTE]
-> PostgreSQL がローカルで動いている必要があります。`bun run db:up` で Docker コンテナを起動するか、`.env` の `DATABASE_URL` を自分のインスタンスに設定してください。
-
-## 2. スキーマを定義する
-
-`db/schema.ts` を開いて `tasks` テーブルを追加します：
-
-```ts
-import { pgTable, serial, text, boolean, timestamp } from 'drizzle-orm/pg-core'
-
-export const tasks = pgTable('tasks', {
-  id: serial('id').primaryKey(),
-  title: text('title').notNull(),
-  completed: boolean('completed').default(false).notNull(),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-})
-```
-
-マイグレーションを生成して実行します：
+## 2. 標準の機能スタックを追加する
 
 ```bash
-bunx guren db:migrate
+bunx guren add auth
+bunx guren add resource posts
+bunx guren add queue
+bunx guren add mail
+bunx guren add events
+bunx guren add cache
+bunx guren add notifications
+bunx guren add storage
+bunx guren add broadcasting
+bunx guren add schedule
 ```
 
-## 3. モデルを作成する
+これで次が生成されます。
+
+- `AuthProvider`、login/profile controller、validator、routes、page contracts
+- `PostController`、`PostResource`、`PostValidator`、CRUD pages、named routes
+- `QueueProvider`、`MailProvider`、`EventProvider`、`CacheProvider`、`NotificationProvider`、`StorageProvider`、`BroadcastProvider`、`app/Console/Kernel.ts` など、標準の非同期/運用系機能
+- Inertia page props の単一契約点としての `resources/js/pages/contracts.ts`
+
+## 3. 型付き manifest を生成する
 
 ```bash
-bunx guren make:model Task
+bun run codegen
 ```
 
-生成された `app/Models/Task.ts` を開いてスキーマとリンクします：
+`codegen` は次を生成します。
 
-```ts
-import { Model } from '@guren/orm'
-import { tasks } from '@/db/schema'
+- named route helper 用の `.guren/routes.gen.ts`
+- 型付き page contract 用の `.guren/pages.gen.ts`
+- editor 補助用の `types/generated/routes.d.ts`
 
-export type TaskRecord = typeof tasks.$inferSelect
+## 4. データベースを準備する
 
-export class Task extends Model<TaskRecord> {
-  static override table = tasks
-  static override readonly recordType = {} as TaskRecord
-}
-```
-
-これだけでデータ層は完成です。`Task` には `find()`、`create()`、`where()`、`update()`、`delete()`、`paginate()`、そして流暢な QueryBuilder が備わっています — すべて Drizzle スキーマから型安全に。
-
-## 4. コントローラーを作成する
+PostgreSQL を使える状態にしてから、次を実行します。
 
 ```bash
-bunx guren make:controller TaskController
+bun run db:migrate
+bun run db:seed
 ```
 
-`app/Http/Controllers/TaskController.ts` を開いて内容を置き換えます：
-
-```ts
-import { Controller } from '@guren/server'
-import { Task } from '@/app/Models/Task'
-
-export default class TaskController extends Controller {
-  async index() {
-    const tasks = await Task.where('completed', false)
-      .orderBy('createdAt', 'desc')
-      .get()
-
-    const completed = await Task.where('completed', true)
-      .orderBy('createdAt', 'desc')
-      .get()
-
-    return this.inertia('Tasks/Index', { tasks, completed })
-  }
-
-  async store() {
-    const title = await this.input<string>('title')
-
-    if (!title || title.trim().length === 0) {
-      return this.redirect('/tasks')
-    }
-
-    await Task.create({ title: title.trim() })
-    return this.redirect('/tasks')
-  }
-
-  async update() {
-    const id = Number(this.request.param('id'))
-    const completed = await this.input<boolean>('completed')
-
-    await Task.update({ id }, { completed: completed ?? true })
-    return this.redirect('/tasks')
-  }
-}
-```
-
-3つのメソッド、それぞれ数行。`this.input()` でリクエストボディを読み、`this.inertia()` で React ページを型付き props と共にレンダリングし、`this.redirect()` でユーザーを戻します。
-
-## 5. ルートを定義する
-
-`routes/web.ts` に追加します：
-
-```ts
-import TaskController from '@/app/Http/Controllers/TaskController'
-
-Route.get('/tasks', [TaskController, 'index']).name('tasks.index')
-Route.post('/tasks', [TaskController, 'store']).name('tasks.store')
-Route.put('/tasks/:id', [TaskController, 'update']).name('tasks.update')
-```
-
-3つのルート、3つのコントローラーメソッド。`[Controller, 'method']` のタプル構文でメソッド名の自動補完が効きます。
-
-## 6. ページを作成する
-
-`resources/js/pages/Tasks/Index.tsx` を作成します：
-
-```tsx
-import { useForm } from '@inertiajs/react'
-
-type Task = {
-  id: number
-  title: string
-  completed: boolean
-  createdAt: string
-}
-
-type Props = {
-  tasks: Task[]
-  completed: Task[]
-}
-
-export default function TasksIndex({ tasks, completed }: Props) {
-  const form = useForm({ title: '' })
-
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    form.post('/tasks', { onSuccess: () => form.reset() })
-  }
-
-  function toggleTask(task: Task) {
-    form.put(`/tasks/${task.id}`, {
-      data: { completed: !task.completed },
-    })
-  }
-
-  return (
-    <main className="mx-auto max-w-lg px-6 py-12">
-      <h1 className="text-2xl font-bold">Tasks</h1>
-
-      <form onSubmit={handleSubmit} className="mt-4 flex gap-2">
-        <input
-          type="text"
-          value={form.data.title}
-          onChange={(e) => form.setData('title', e.target.value)}
-          placeholder="何をする？"
-          className="flex-1 rounded border px-3 py-2"
-        />
-        <button
-          type="submit"
-          disabled={form.processing}
-          className="rounded bg-blue-600 px-4 py-2 text-white"
-        >
-          追加
-        </button>
-      </form>
-
-      <ul className="mt-6 space-y-2">
-        {tasks.map((task) => (
-          <li key={task.id} className="flex items-center gap-3">
-            <input
-              type="checkbox"
-              onChange={() => toggleTask(task)}
-              className="h-4 w-4"
-            />
-            <span>{task.title}</span>
-          </li>
-        ))}
-      </ul>
-
-      {completed.length > 0 && (
-        <>
-          <h2 className="mt-8 text-lg font-semibold text-gray-500">
-            完了済み ({completed.length})
-          </h2>
-          <ul className="mt-2 space-y-2">
-            {completed.map((task) => (
-              <li key={task.id} className="flex items-center gap-3 text-gray-400">
-                <input
-                  type="checkbox"
-                  checked
-                  onChange={() => toggleTask(task)}
-                  className="h-4 w-4"
-                />
-                <span className="line-through">{task.title}</span>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-    </main>
-  )
-}
-```
-
-Inertia がサーバーとクライアントの通信を処理します。fetch も API ルートもローディング状態も不要です。フォームを送信すると、サーバーの最新データでページが更新されます。
-
-## 7. 実行する
+## 5. アプリを起動する
 
 ```bash
 bun run dev
 ```
 
-`http://localhost:3333/tasks` を開いてください。タスクを入力して **追加** をクリックすると表示されます。チェックボックスを押すと完了セクションに移動します。
+次を開いて確認します。
 
-## 何が起きたのか？
+- `/login` で生成された認証フロー
+- `/posts` で生成された resource フロー
 
-いま作ったフローはこうなっています：
+## 6. contract graph を理解する
 
-1. **ブラウザ** が `GET /tasks` をリクエスト
-2. **ルート** が URL を `TaskController.index` にマッピング
-3. **コントローラー** が **モデル** を通してタスクを取得し、`this.inertia()` を呼び出す
-4. **Inertia** がデータを props として React ページをレンダリング
-5. ユーザーがフォームを送信 — Inertia がフルページリロードなしで `POST /tasks` を送信
-6. **コントローラー** がタスクを作成しリダイレクト
-7. Inertia がリダイレクトをたどり、最新の props を取得してページを更新
+標準の resource scaffold は、次の contract graph で動きます。
 
-これが Guren で何を作るときでも基本となるコアループです。このタスクリストと同じパターンが、認証、バリデーション、ファイルアップロード、バックグラウンドジョブを備えた本格的なアプリケーションにもスケールします。
+1. `db/schema.ts` が Drizzle table を定義する
+2. `app/Models/Post.ts` が typed model を公開する
+3. `app/Http/Resources/PostResource.ts` が response shape を定義する
+4. `resources/js/pages/contracts.ts` が page props を宣言する
+5. `app/Http/Controllers/PostController.ts` が input を検証し、resource 出力を返す
 
-## 次のステップ
+一覧ページの標準 shape はこうです。
 
-動く機能ができました。ここからさらに深く学びましょう：
+```ts
+type Props = PaginatedPageProps<PostResourceData>
+```
 
-- **[ルーティングガイド](./routing.md)** — ミドルウェアグループ、リソースルート、ルートモデルバインディング。
-- **[コントローラーガイド](./controllers.md)** — FormRequest によるバリデーション、レスポンスヘルパー、依存性注入。
-- **[データベースガイド](./database.md)** — リレーション、スコープ、ページネーション、フック、シーダー。
-- **[フロントエンドガイド](./frontend.md)** — レイアウト、共有 props、SSR、アセット管理。
-- **[認証ガイド](./authentication.md)** — ログイン追加とルートの保護。
-- **[テスティングガイド](./testing.md)** — いま作ったものすべてにテストを書く。
+つまりページは次を受け取ります。
+
+- `data`
+- `pagination.meta`
+- `pagination.links`
+
+controller や UI 側で pagination state を組み直す必要はありません。
+
+## 7. 次に触る場所
+
+- post の項目を増やすなら `db/schema.ts`
+- create/update ルールを変えるなら `app/Http/Validators/PostValidator.ts`
+- page/API の出力を変えるなら `app/Http/Resources/PostResource.ts`
+- UI を変えるなら `resources/js/pages/posts/*.tsx`
+
+## 8. 推奨する考え方
+
+新しい機能を追加するときは、まずこの流れを使います。
+
+```bash
+bunx guren add resource comments
+bun run codegen
+```
+
+その上で各レイヤーの責務を固定します。
+
+- model は data access
+- validator は input parsing
+- resource は output shaping
+- page contract は props 定義
+- controller は response composition
+
+これが、Guren が目指している Rails/Laravel 的な DX に最短で近づくやり方です。

@@ -7,7 +7,7 @@ Gurenは複数のストレージバックエンドで動作する強力なファ
 アプリケーションでストレージディスクを設定します：
 
 ```typescript
-import { createStorageManager } from '@guren/server'
+import { createStorageManager } from '@guren/core'
 
 const storage = createStorageManager({
   default: 'local',
@@ -225,7 +225,7 @@ await storage.disk('public').put('images/logo.png', imageBuffer)
 カスタムストレージドライバーを登録：
 
 ```typescript
-import { StorageDriver } from '@guren/server'
+import { StorageDriver } from '@guren/core'
 
 class CloudinaryDriver implements StorageDriver {
   async put(path: string, content: Buffer | string, options?: PutOptions): Promise<string> {
@@ -250,7 +250,7 @@ storage.registerDriver('cloudinary', (options) => new CloudinaryDriver(options))
 コントローラーでストレージを使用：
 
 ```typescript
-import { Controller } from '@guren/server'
+import { Controller } from '@guren/core'
 
 export default class UploadController extends Controller {
   async store() {

@@ -4,12 +4,13 @@ import { kebabCase, scaffoldFile } from './utils'
 const CONTROLLERS_DIR = 'app/Http/Controllers'
 
 function controllerTemplate(className: string, resourcePath: string): string {
-  return `import { Controller } from '@guren/server'
+  return `import { Controller } from '@guren/core'
 
 export default class ${className} extends Controller {
-  async index() {
-    // TODO: Replace with real implementation
-    return this.inertia('${resourcePath}/Index', { message: '${className} index' })
+  async index(): Promise<Response> {
+    return this.inertia('${resourcePath}/Index', {
+      title: '${className.replace(/Controller$/u, '')}',
+    })
   }
 }
 `

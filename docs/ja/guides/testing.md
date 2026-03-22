@@ -2,14 +2,14 @@
 
 Guren には 2 つのスタイルの自動テストがあります。
 
-- **フレームワークのユニット/統合テスト**: パッケージ内（例: `packages/server/tests`）に配置されており、Bun のネイティブな `bun test` ランナーで実行します。
+- **フレームワークのユニット/統合テスト**: パッケージ内（例: `packages/core/tests`）に配置されており、Bun のネイティブな `bun test` ランナーで実行します。
 - **サンプルアプリケーションのテスト**: ブログデモ（`examples/blog`）などは、Vitest と jsdom を使用して、ブラウザと同等の方法で React コンポーネントをレンダリングします。
 
 ランナーの想定が異なるため、それぞれに合った方法で実行してください。
 
 ```bash
 # フレームワークパッケージ - Bun のテストランナー
-bun test packages/server/tests
+bun test packages/core/tests
 bun test packages/orm/tests
 bun test packages/core/tests
 bun test packages/cli/tests
@@ -170,7 +170,7 @@ fakeMail.assertSentTo('new@test.com')
 
 - `createControllerContext(url, init?)` — コントローラー用の Hono コンテキストを構築します。
 - `createGurenControllerModule()` — Vitest 実行時に `guren` パッケージをモックし、コントローラーを分離してテストできるようにします。
-- `createControllerModuleMock()` — `@guren/server` の `Controller`、`json`、`redirect` を Vitest 向けに配線したドロップインモックです。
+- `createControllerModuleMock()` — `@guren/core` の `Controller`、`json`、`redirect` を Vitest 向けに配線したドロップインモックです。
 - `readInertiaResponse(response)` — Inertia レスポンスを `{ format, payload, body }` に正規化し、アサーションを簡単にします。
 
 これらのユーティリティを Vitest スイート（例: `examples/blog/tests`）にインポートすれば、Bun 固有の API を避けつつ、React/Inertia コントローラーテストを表現力豊かに書けます。

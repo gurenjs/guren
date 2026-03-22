@@ -77,13 +77,14 @@ describe('makeController', () => {
 
     const content = await readFile(result, 'utf8')
     expect(content).toContain("inertia('admin-settings/Index'")
+    expect(content).not.toContain('TODO')
   })
 
   it('includes correct imports in template', async () => {
     const result = await makeController('Test')
 
     const content = await readFile(result, 'utf8')
-    expect(content).toContain("import { Controller } from '@guren/server'")
+    expect(content).toContain("import { Controller } from '@guren/core'")
   })
 
   it('throws error if file already exists without force flag', async () => {

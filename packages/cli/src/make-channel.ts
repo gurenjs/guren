@@ -7,7 +7,7 @@ function channelTemplate(className: string, channelName: string, isPrivate: bool
   const baseClass = isPresence ? 'PresenceChannel' : isPrivate ? 'PrivateChannel' : 'Channel'
 
   if (isPresence) {
-    return `import { PresenceChannel, type BroadcastManager, type Context } from '@guren/server'
+    return `import { PresenceChannel, type BroadcastManager, type Context } from '@guren/core'
 
 export default class ${className} extends PresenceChannel {
   constructor(manager: BroadcastManager) {
@@ -32,7 +32,7 @@ export default class ${className} extends PresenceChannel {
   }
 
   if (isPrivate) {
-    return `import { PrivateChannel, type BroadcastManager, type Context } from '@guren/server'
+    return `import { PrivateChannel, type BroadcastManager, type Context } from '@guren/core'
 
 export default class ${className} extends PrivateChannel {
   constructor(manager: BroadcastManager) {
@@ -51,7 +51,7 @@ export default class ${className} extends PrivateChannel {
 `
   }
 
-  return `import { Channel, type BroadcastManager } from '@guren/server'
+  return `import { Channel, type BroadcastManager } from '@guren/core'
 
 export default class ${className} extends Channel {
   constructor(manager: BroadcastManager) {

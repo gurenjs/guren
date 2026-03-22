@@ -45,11 +45,12 @@ describe('CLI make:* commands', () => {
     it('generates correct job template', async () => {
       const result = await makeJob('SendEmail')
       const content = fs.readFileSync(result, 'utf-8')
+      expect(content).toContain("import { Job } from '@guren/core'")
       expect(content).toContain('class SendEmailJob extends Job')
       expect(content).toContain('interface SendEmailJobPayload')
-      expect(content).toContain('async handle()')
-      expect(content).toContain('async failed(error: Error)')
-      expect(content).toContain("static queue = 'default'")
+      expect(content).toContain('async handle(payload: SendEmailJobPayload)')
+      expect(content).toContain('async failed(payload: SendEmailJobPayload, error: Error)')
+      expect(content).toContain("static override queue = 'default'")
     })
 
     it('preserves Job suffix if already present', async () => {
@@ -80,8 +81,9 @@ describe('CLI make:* commands', () => {
     it('generates correct event template', async () => {
       const result = await makeEvent('UserRegistered')
       const content = fs.readFileSync(result, 'utf-8')
+      expect(content).toContain("import { Event } from '@guren/core'")
       expect(content).toContain('class UserRegistered extends Event')
-      expect(content).toContain("static eventName = 'UserRegistered'")
+      expect(content).toContain("static override eventName = 'UserRegistered'")
     })
   })
 
@@ -95,9 +97,10 @@ describe('CLI make:* commands', () => {
     it('generates correct listener template', async () => {
       const result = await makeListener('SendWelcomeEmail')
       const content = fs.readFileSync(result, 'utf-8')
+      expect(content).toContain("import { Listener, Event } from '@guren/core'")
       expect(content).toContain('class SendWelcomeEmailListener extends Listener')
       expect(content).toContain('async handle(')
-      expect(content).toContain('shouldQueue()')
+      expect(content).toContain('static override shouldQueue = false')
     })
 
     it('includes event import when specified', async () => {
@@ -105,6 +108,7 @@ describe('CLI make:* commands', () => {
       const content = fs.readFileSync(result, 'utf-8')
       expect(content).toContain("import UserRegistered from '../Events/UserRegistered'")
       expect(content).toContain('event: UserRegistered')
+      expect(content).toContain('static override event = UserRegistered')
     })
 
     it('preserves Listener suffix if already present', async () => {
@@ -124,10 +128,13 @@ describe('CLI make:* commands', () => {
     it('generates correct mail template', async () => {
       const result = await makeMail('WelcomeEmail')
       const content = fs.readFileSync(result, 'utf-8')
+      expect(content).toContain("import { Mail, type MailManager } from '@guren/core'")
       expect(content).toContain('class WelcomeEmailMail extends Mail')
+      expect(content).toContain('manager: MailManager')
+      expect(content).not.toContain('getMailManager()')
       expect(content).toContain('build(): this')
       expect(content).toContain('.subject(')
-      expect(content).toContain('.view(')
+      expect(content).toContain('.text(')
     })
   })
 
@@ -158,9 +165,9 @@ describe('CLI make:* commands', () => {
     it('generates correct seeder template', async () => {
       const result = await makeSeeder('User')
       const content = fs.readFileSync(result, 'utf-8')
-      expect(content).toContain('class UserSeeder')
-      expect(content).toContain('async run()')
-      expect(content).toContain('db:seed')
+      expect(content).toContain("import { defineSeeder } from '@guren/orm'")
+      expect(content).toContain('export default defineSeeder(async () => {')
+      expect(content).toContain("console.info('Ran UserSeeder.')")
     })
   })
 

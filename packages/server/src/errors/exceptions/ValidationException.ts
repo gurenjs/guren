@@ -67,6 +67,26 @@ export class ValidationException extends HttpException {
     if (!this.errors) return []
     return Object.values(this.errors).flat()
   }
+
+  /**
+   * Create a ValidationException from a plain messages object.
+   *
+   * Useful for business-logic validation (e.g. duplicate email checks)
+   * where Zod is not involved.
+   *
+   * @example
+   * ```typescript
+   * throw ValidationException.withMessages({ email: 'Email already registered' })
+   * throw ValidationException.withMessages({ email: ['Must be unique', 'Must be corporate'] })
+   * ```
+   */
+  static withMessages(messages: Record<string, string | string[]>): ValidationException {
+    const errors: Record<string, string[]> = {}
+    for (const [key, value] of Object.entries(messages)) {
+      errors[key] = Array.isArray(value) ? value : [value]
+    }
+    return new ValidationException(errors)
+  }
 }
 
 /**
@@ -74,7 +94,7 @@ export class ValidationException extends HttpException {
  */
 interface ZodLikeError {
   issues: Array<{
-    path: (string | number)[]
+    path: PropertyKey[]
     message: string
   }>
 }

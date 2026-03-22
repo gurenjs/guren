@@ -4,73 +4,111 @@ import {
   createControllerModuleMock,
   readInertiaResponse,
 } from '@guren/testing'
-import type { Context } from '@guren/server'
+import type { Context } from '@guren/core'
 
 const {
-  mockWithPaginate,
-  mockWith,
-  mockFind,
+  mockFindOrFail,
+  mockFindWithOrFail,
   mockCreate,
   mockUpdate,
   mockGetPaginatedPosts,
-  mockGetPost,
   mockInvalidatePost,
   mockEmit,
+  MockPostCacheService,
 } = vi.hoisted(() => ({
-  mockWithPaginate: vi.fn(),
-  mockWith: vi.fn(),
-  mockFind: vi.fn(),
+  mockFindOrFail: vi.fn(),
+  mockFindWithOrFail: vi.fn(),
   mockCreate: vi.fn(),
   mockUpdate: vi.fn(),
   mockGetPaginatedPosts: vi.fn(),
-  mockGetPost: vi.fn(),
   mockInvalidatePost: vi.fn(),
   mockEmit: vi.fn(),
+  MockPostCacheService: vi.fn().mockImplementation(() => ({
+    getPaginatedPosts: mockGetPaginatedPosts,
+    invalidatePost: mockInvalidatePost,
+  })),
 }))
 
 vi.mock('../../app/Models/Post.js', () => ({
   Post: {
-    withPaginate: mockWithPaginate,
-    with: mockWith,
-    find: mockFind,
+    findOrFail: mockFindOrFail,
+    findWithOrFail: mockFindWithOrFail,
     create: mockCreate,
     update: mockUpdate,
   },
 }))
 
 vi.mock('../../app/Services/PostCacheService.js', () => ({
-  getPostCacheService: vi.fn(() => ({
-    getPaginatedPosts: mockGetPaginatedPosts,
-    getPost: mockGetPost,
-    invalidatePost: mockInvalidatePost,
-  })),
-}))
-
-vi.mock('../../app/Providers/EventServiceProvider.js', () => ({
-  getEventManager: vi.fn(() => ({
-    emit: mockEmit,
-  })),
+  POSTS_PAGE_SIZE: 6,
+  PostCacheService: MockPostCacheService,
 }))
 
 vi.mock('guren', () => createControllerModuleMock())
-vi.mock('@guren/core', () => createControllerModuleMock())
-vi.mock('@guren/server', () => createControllerModuleMock())
+vi.mock('@guren/core', async () => {
+  const actual = await vi.importActual<typeof import('@guren/core')>('@guren/core')
+  return {
+    ...actual,
+    ...createControllerModuleMock(),
+    ServiceProvider: actual.ServiceProvider,
+    collect: vi.fn((resources: unknown[]) => resources),
+    paginate: vi.fn((result: { meta: { total: number; perPage: number; currentPage: number } }, options?: { path?: string }) => {
+      const lastPage = Math.max(1, Math.ceil(result.meta.total / result.meta.perPage))
+      const path = options?.path ?? ''
+      const buildPageUrl = (page: number) => `${path}?page=${page}`
+
+      return {
+        meta: () => ({
+          currentPage: result.meta.currentPage,
+          lastPage,
+          perPage: result.meta.perPage,
+          total: result.meta.total,
+          from: result.meta.total === 0 ? null : (result.meta.currentPage - 1) * result.meta.perPage + 1,
+          to: result.meta.total === 0 ? null : Math.min(result.meta.total, result.meta.currentPage * result.meta.perPage),
+        }),
+        links: () => ({
+          first: buildPageUrl(1),
+          last: buildPageUrl(lastPage),
+          prev: result.meta.currentPage > 1 ? buildPageUrl(result.meta.currentPage - 1) : null,
+          next: result.meta.currentPage < lastPage ? buildPageUrl(result.meta.currentPage + 1) : null,
+          pages: Array.from({ length: lastPage }, (_, index) => {
+            const page = index + 1
+            return {
+              page,
+              url: buildPageUrl(page),
+              active: page === result.meta.currentPage,
+            }
+          }),
+        }),
+      }
+    }),
+  }
+})
 
 import PostController from '../../app/Http/Controllers/PostController.js'
 
 type MockAuth = {
   user: ReturnType<typeof vi.fn>
+  userOrFail: ReturnType<typeof vi.fn>
   session: ReturnType<typeof vi.fn>
 }
 
 function createAuthStub(user: unknown = null): MockAuth {
   return {
     user: vi.fn().mockResolvedValue(user),
+    userOrFail: user
+      ? vi.fn().mockResolvedValue(user)
+      : vi.fn().mockRejectedValue(Object.assign(new Error('Unauthenticated.'), { statusCode: 401 })),
     session: vi.fn().mockReturnValue({
       regenerate: vi.fn(),
       invalidate: vi.fn(),
     }),
   }
+}
+
+function setRouteParams(ctx: Context, params: Record<string, string>): void {
+  ;(ctx.req as { param: (key?: string) => string | Record<string, string> | undefined }).param = vi.fn((key?: string) =>
+    key ? params[key] : params,
+  )
 }
 
 function createControllerWithAuth<T extends { setContext: (ctx: Context) => void }>(
@@ -117,10 +155,13 @@ describe('PostController', () => {
 
   describe('index()', () => {
     it('returns paginated posts with Inertia response', async () => {
-      mockGetPaginatedPosts.mockResolvedValue({ posts: [samplePost], meta: paginatedPostsResponse.meta })
+      mockGetPaginatedPosts.mockResolvedValue(paginatedPostsResponse)
       const auth = createAuthStub()
       const ctx = createControllerContext('http://blog.test/posts', {
         headers: { 'X-Inertia': 'true' },
+      }, {
+        cache: { store: vi.fn() },
+        events: { emit: mockEmit },
       }) as unknown as Context
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
@@ -129,17 +170,41 @@ describe('PostController', () => {
 
       expect(format).toBe('json')
       expect(payload.component).toBe('posts/Index')
-      expect(payload.props.posts).toEqual([samplePost])
-      const pagination = (payload.props as { pagination?: { total: number } }).pagination
+      expect(payload.props.data).toEqual([{
+        id: samplePost.id,
+        title: samplePost.title,
+        excerpt: samplePost.excerpt,
+        body: samplePost.body,
+        notificationArtifactPath: `notifications/posts/${samplePost.id}.json`,
+        broadcastChannels: {
+          public: 'announcements',
+          private: `posts.${samplePost.id}`,
+        },
+        author: samplePost.author,
+      }])
+      const pagination = (payload.props as {
+        pagination?: {
+          meta: { total: number; currentPage: number }
+          links: { prev: string | null; next: string | null; pages: Array<{ page: number; url: string | null; active: boolean }> }
+        }
+      }).pagination
       expect(pagination).toBeDefined()
-      expect(pagination?.total).toBe(1)
+      expect(pagination?.meta.total).toBe(1)
+      expect(pagination?.links.pages[0]).toEqual({
+        page: 1,
+        url: '/posts?page=1',
+        active: true,
+      })
     })
 
     it('returns page 1 when no page param provided', async () => {
-      mockGetPaginatedPosts.mockResolvedValue({ posts: [samplePost], meta: paginatedPostsResponse.meta })
+      mockGetPaginatedPosts.mockResolvedValue(paginatedPostsResponse)
       const auth = createAuthStub()
       const ctx = createControllerContext('http://blog.test/posts', {
         headers: { 'X-Inertia': 'true' },
+      }, {
+        cache: { store: vi.fn() },
+        events: { emit: mockEmit },
       }) as unknown as Context
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
@@ -149,10 +214,13 @@ describe('PostController', () => {
     })
 
     it('passes page parameter to cache service', async () => {
-      mockGetPaginatedPosts.mockResolvedValue({ posts: [samplePost], meta: paginatedPostsResponse.meta })
+      mockGetPaginatedPosts.mockResolvedValue(paginatedPostsResponse)
       const auth = createAuthStub()
       const ctx = createControllerContext('http://blog.test/posts?page=2', {
         headers: { 'X-Inertia': 'true' },
+      }, {
+        cache: { store: vi.fn() },
+        events: { emit: mockEmit },
       }) as unknown as Context
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
@@ -162,9 +230,12 @@ describe('PostController', () => {
     })
 
     it('returns HTML for full page visits', async () => {
-      mockGetPaginatedPosts.mockResolvedValue({ posts: [samplePost], meta: paginatedPostsResponse.meta })
+      mockGetPaginatedPosts.mockResolvedValue(paginatedPostsResponse)
       const auth = createAuthStub()
-      const ctx = createControllerContext('http://blog.test/posts') as unknown as Context
+      const ctx = createControllerContext('http://blog.test/posts', {}, {
+        cache: { store: vi.fn() },
+        events: { emit: mockEmit },
+      }) as unknown as Context
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
       const response = await controller.index()
@@ -177,51 +248,64 @@ describe('PostController', () => {
 
   describe('show()', () => {
     it('returns post with author relation', async () => {
-      mockGetPost.mockResolvedValue(samplePost)
+      mockFindWithOrFail.mockResolvedValue(samplePost)
       const auth = createAuthStub()
       const ctx = createControllerContext('http://blog.test/posts/1', {
         headers: { 'X-Inertia': 'true' },
+      }, {
+        cache: { store: vi.fn() },
+        events: { emit: mockEmit },
       }) as unknown as Context
-      // Mock param function
-      ;(ctx.req as { param: (key: string) => string }).param = vi.fn().mockReturnValue('1')
+      setRouteParams(ctx, { id: '1' })
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
       const response = await controller.show()
       const { payload } = await readInertiaResponse(response)
 
       expect(payload.component).toBe('posts/Show')
-      expect(payload.props.post).toEqual(samplePost)
+      expect((payload.props as { post: { notificationArtifactPath: string; broadcastChannels: { public: string } } }).post.notificationArtifactPath).toBe('notifications/posts/1.json')
+      expect((payload.props as { post: { notificationArtifactPath: string; broadcastChannels: { public: string } } }).post.broadcastChannels.public).toBe('announcements')
+      expect(payload.props.post).toEqual({
+        id: samplePost.id,
+        title: samplePost.title,
+        excerpt: samplePost.excerpt,
+        body: samplePost.body,
+        author: samplePost.author,
+        notificationArtifactPath: 'notifications/posts/1.json',
+        broadcastChannels: {
+          public: 'announcements',
+          private: 'posts.1',
+        },
+      })
     })
 
     it('returns 404 for non-existent post', async () => {
-      mockGetPost.mockResolvedValue(null)
+      mockFindWithOrFail.mockRejectedValue(Object.assign(new Error('Post not found'), { statusCode: 404 }))
       const auth = createAuthStub()
       const ctx = createControllerContext('http://blog.test/posts/999', {
         headers: { 'X-Inertia': 'true' },
+      }, {
+        cache: { store: vi.fn() },
+        events: { emit: mockEmit },
       }) as unknown as Context
-      ;(ctx.req as { param: (key: string) => string }).param = vi.fn().mockReturnValue('999')
+      setRouteParams(ctx, { id: '999' })
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
-      const response = await controller.show()
-
-      expect(response.status).toBe(404)
-      const json = await response.json()
-      expect(json.message).toBe('Post not found')
+      await expect(controller.show()).rejects.toMatchObject({ statusCode: 404, message: 'Post not found' })
     })
 
     it('returns 400 for invalid post id', async () => {
       const auth = createAuthStub()
       const ctx = createControllerContext('http://blog.test/posts/abc', {
         headers: { 'X-Inertia': 'true' },
+      }, {
+        cache: { store: vi.fn() },
+        events: { emit: mockEmit },
       }) as unknown as Context
-      ;(ctx.req as { param: (key: string) => string }).param = vi.fn().mockReturnValue('abc')
+      setRouteParams(ctx, { id: 'abc' })
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
-      const response = await controller.show()
-
-      expect(response.status).toBe(400)
-      const json = await response.json()
-      expect(json.message).toBe('Invalid post id.')
+      await expect(controller.show()).rejects.toMatchObject({ statusCode: 400 })
     })
   })
 
@@ -230,6 +314,9 @@ describe('PostController', () => {
       const auth = createAuthStub()
       const ctx = createControllerContext('http://blog.test/posts/new', {
         headers: { 'X-Inertia': 'true' },
+      }, {
+        cache: { store: vi.fn() },
+        events: { emit: mockEmit },
       }) as unknown as Context
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
@@ -251,6 +338,9 @@ describe('PostController', () => {
         method: 'POST',
         body: JSON.stringify({ title: 'New Post', excerpt: 'Excerpt', body: 'Body content' }),
         headers: { 'Content-Type': 'application/json' },
+      }, {
+        cache: { store: vi.fn() },
+        events: { emit: mockEmit },
       }) as unknown as Context
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
@@ -272,16 +362,13 @@ describe('PostController', () => {
         method: 'POST',
         body: JSON.stringify({ title: 'New Post', excerpt: 'Excerpt', body: 'Body content' }),
         headers: { 'Content-Type': 'application/json', 'X-Inertia': 'true' },
+      }, {
+        cache: { store: vi.fn() },
+        events: { emit: mockEmit },
       }) as unknown as Context
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
-      const response = await controller.store()
-      const { payload } = await readInertiaResponse(response)
-
-      expect(response.status).toBe(401)
-      const errors = (payload.props as { errors?: { message?: string } }).errors
-      expect(errors).toBeDefined()
-      expect(errors?.message).toBe('You must be signed in to create posts.')
+      await expect(controller.store()).rejects.toMatchObject({ statusCode: 401, message: 'Unauthenticated.' })
     })
 
     it('returns validation errors for invalid data', async () => {
@@ -291,27 +378,34 @@ describe('PostController', () => {
         method: 'POST',
         body: JSON.stringify({ title: '', excerpt: '', body: '' }),
         headers: { 'Content-Type': 'application/json', 'X-Inertia': 'true' },
+      }, {
+        cache: { store: vi.fn() },
+        events: { emit: mockEmit },
       }) as unknown as Context
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
-      const response = await controller.store()
-      const { payload } = await readInertiaResponse(response)
-
-      expect(response.status).toBe(422)
-      expect(payload.component).toBe('posts/New')
-      const errors = (payload.props as { errors?: Record<string, unknown> }).errors
-      expect(errors).toBeDefined()
+      await expect(controller.store()).rejects.toMatchObject({
+        statusCode: 422,
+        errors: expect.objectContaining({
+          title: expect.any(Array),
+          excerpt: expect.any(Array),
+          body: expect.any(Array),
+        }),
+      })
     })
   })
 
   describe('edit()', () => {
     it('returns edit form with post data', async () => {
-      mockFind.mockResolvedValue(samplePost)
+      mockFindOrFail.mockResolvedValue(samplePost)
       const auth = createAuthStub()
       const ctx = createControllerContext('http://blog.test/posts/1/edit', {
         headers: { 'X-Inertia': 'true' },
+      }, {
+        cache: { store: vi.fn() },
+        events: { emit: mockEmit },
       }) as unknown as Context
-      ;(ctx.req as { param: (key: string) => string }).param = vi.fn().mockReturnValue('1')
+      setRouteParams(ctx, { id: '1' })
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
       const response = await controller.edit()
@@ -324,34 +418,35 @@ describe('PostController', () => {
     })
 
     it('returns 404 for non-existent post', async () => {
-      mockFind.mockResolvedValue(null)
+      mockFindOrFail.mockRejectedValue(Object.assign(new Error('Post not found'), { statusCode: 404 }))
       const auth = createAuthStub()
       const ctx = createControllerContext('http://blog.test/posts/999/edit', {
         headers: { 'X-Inertia': 'true' },
+      }, {
+        cache: { store: vi.fn() },
+        events: { emit: mockEmit },
       }) as unknown as Context
-      ;(ctx.req as { param: (key: string) => string }).param = vi.fn().mockReturnValue('999')
+      setRouteParams(ctx, { id: '999' })
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
-      const response = await controller.edit()
-      const { payload } = await readInertiaResponse(response)
-
-      expect(response.status).toBe(404)
-      const errors = (payload.props as { errors?: { message?: string } }).errors
-      expect(errors?.message).toBe('Post not found.')
+      await expect(controller.edit()).rejects.toMatchObject({ statusCode: 404, message: 'Post not found' })
     })
   })
 
   describe('update()', () => {
     it('updates post and redirects', async () => {
-      mockFind.mockResolvedValue(samplePost)
+      mockFindOrFail.mockResolvedValue(samplePost)
       mockUpdate.mockResolvedValue(samplePost)
       const auth = createAuthStub()
       const ctx = createControllerContext('http://blog.test/posts/1', {
         method: 'PUT',
         body: JSON.stringify({ title: 'Updated Title', excerpt: 'Updated excerpt', body: 'Updated body' }),
         headers: { 'Content-Type': 'application/json' },
+      }, {
+        cache: { store: vi.fn() },
+        events: { emit: mockEmit },
       }) as unknown as Context
-      ;(ctx.req as { param: (key: string) => string }).param = vi.fn().mockReturnValue('1')
+      setRouteParams(ctx, { id: '1' })
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
       const response = await controller.update()
@@ -361,39 +456,44 @@ describe('PostController', () => {
     })
 
     it('returns 404 for non-existent post', async () => {
-      mockFind.mockResolvedValue(null)
+      mockFindOrFail.mockRejectedValue(Object.assign(new Error('Post not found'), { statusCode: 404 }))
       const auth = createAuthStub()
       const ctx = createControllerContext('http://blog.test/posts/999', {
         method: 'PUT',
         body: JSON.stringify({ title: 'Updated', excerpt: 'Excerpt', body: 'Body' }),
         headers: { 'Content-Type': 'application/json' },
+      }, {
+        cache: { store: vi.fn() },
+        events: { emit: mockEmit },
       }) as unknown as Context
-      ;(ctx.req as { param: (key: string) => string }).param = vi.fn().mockReturnValue('999')
+      setRouteParams(ctx, { id: '999' })
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
-      const response = await controller.update()
-
-      expect(response.status).toBe(404)
+      await expect(controller.update()).rejects.toMatchObject({ statusCode: 404, message: 'Post not found' })
     })
 
     it('returns validation errors for invalid data', async () => {
-      mockFind.mockResolvedValue(samplePost)
+      mockFindOrFail.mockResolvedValue(samplePost)
       const auth = createAuthStub()
       const ctx = createControllerContext('http://blog.test/posts/1', {
         method: 'PUT',
         body: JSON.stringify({ title: '', excerpt: '', body: '' }),
         headers: { 'Content-Type': 'application/json', 'X-Inertia': 'true' },
+      }, {
+        cache: { store: vi.fn() },
+        events: { emit: mockEmit },
       }) as unknown as Context
-      ;(ctx.req as { param: (key: string) => string }).param = vi.fn().mockReturnValue('1')
+      setRouteParams(ctx, { id: '1' })
 
       const controller = createControllerWithAuth(PostController, auth, ctx)
-      const response = await controller.update()
-      const { payload } = await readInertiaResponse(response)
-
-      expect(response.status).toBe(422)
-      expect(payload.component).toBe('posts/Edit')
-      const errors = (payload.props as { errors?: Record<string, unknown> }).errors
-      expect(errors).toBeDefined()
+      await expect(controller.update()).rejects.toMatchObject({
+        statusCode: 422,
+        errors: expect.objectContaining({
+          title: expect.any(Array),
+          excerpt: expect.any(Array),
+          body: expect.any(Array),
+        }),
+      })
     })
   })
 })

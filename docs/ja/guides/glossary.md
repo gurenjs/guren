@@ -34,7 +34,7 @@ Guren のドキュメントで頻出する言葉を、初学者向けに短く�
 - **SSR**: サーバー側で HTML を生成して返す方式。初回表示が速くなります。
 - **Props（プロップス）**: コンポーネントに渡すデータ。Inertia ではサーバーが props を返します。
 - **HMR**: ホットリロード。変更を保存すると画面が即時更新されます。
-- **Inertia ページ**: `resources/js/pages/` に置く React コンポーネント。`this.inertia('posts/Index', ...)` のように参照します。
+- **Inertia ページ**: `resources/js/pages/` に置く React コンポーネント。通常は `appPages.posts.index` のような page contract を通して `this.inertia()` で参照します。
 
 ## CLI
 - **create-guren-app**: 新規アプリのひな形を作る CLI。

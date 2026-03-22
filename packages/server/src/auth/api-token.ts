@@ -1,5 +1,6 @@
 import type { MiddlewareHandler, Context } from 'hono'
 import { hashToken, generateToken, generateId, secureCompare } from './utils'
+import { AuthenticationException } from '../errors/exceptions/AuthenticationException'
 
 /**
  * API token data stored in the backing store.
@@ -514,4 +515,27 @@ export function getApiToken(
     userId: string | number
     abilities: string[]
   } | null
+}
+
+/**
+ * Get the authenticated API token from the request context, or throw.
+ *
+ * @throws {AuthenticationException} When no token is present in the context.
+ *
+ * @example
+ * ```ts
+ * Route.get('/api/me', async (ctx) => {
+ *   const { token, userId, abilities } = getApiTokenOrFail(ctx)
+ *   return ctx.json({ userId, tokenName: token.name, abilities })
+ * })
+ * ```
+ */
+export function getApiTokenOrFail(
+  ctx: Context
+): { token: ApiToken; userId: string | number; abilities: string[] } {
+  const result = getApiToken(ctx)
+  if (!result) {
+    throw new AuthenticationException('Unauthenticated.')
+  }
+  return result
 }

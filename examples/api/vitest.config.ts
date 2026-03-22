@@ -9,6 +9,10 @@ export default defineConfig({
   resolve: {
     alias: [
       {
+        find: /^@guren\/testing\/controller$/,
+        replacement: resolveFromRoot('../../packages/testing/src/controller.ts'),
+      },
+      {
         find: /^@guren\/testing$/,
         replacement: resolveFromRoot('../../packages/testing/src/index.ts'),
       },
@@ -17,12 +21,12 @@ export default defineConfig({
         replacement: resolveFromRoot('../../packages/testing/src/'),
       },
       {
-        find: /^@guren\/server$/,
-        replacement: resolveFromRoot('../../packages/server/src/index.ts'),
+        find: /^@guren\/core$/,
+        replacement: resolveFromRoot('../../packages/core/src/index.ts'),
       },
       {
-        find: /^@guren\/server\//,
-        replacement: resolveFromRoot('../../packages/server/src/'),
+        find: /^@guren\/core\//,
+        replacement: resolveFromRoot('../../packages/core/src/'),
       },
       {
         find: /^@guren\/core$/,
@@ -61,6 +65,10 @@ export default defineConfig({
         replacement: resolveFromRoot('../../packages/cli/src/'),
       },
       {
+        find: /^bun:sqlite$/,
+        replacement: resolveFromRoot('./tests/support/bun-sqlite.ts'),
+      },
+      {
         find: /^guren$/,
         replacement: resolveFromRoot('../../packages/core/src/index.ts'),
       },
@@ -77,7 +85,7 @@ export default defineConfig({
     setupFiles: ['./tests/setup.ts'],
     server: {
       deps: {
-        inline: ['@guren/server', '@guren/orm', '@guren/core', '@guren/testing'],
+        inline: ['@guren/core', '@guren/orm', '@guren/core', '@guren/testing'],
       },
     },
   },

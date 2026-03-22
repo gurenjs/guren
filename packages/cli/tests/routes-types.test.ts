@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
   buildDeclarationContent,
+  buildRouteModuleContent,
   toTypeLiteral,
   type RouteDefinition,
 } from '../src/routes-types'
@@ -156,5 +157,23 @@ describe('buildDeclarationContent', () => {
 
     expect(content).toContain('export type RouteMethod = never')
     expect(content).toContain('export type RoutePath =\n    never')
+  })
+})
+
+describe('buildRouteModuleContent', () => {
+  it('generates a runtime manifest and route helpers for named routes', () => {
+    const definitions: RouteDefinition[] = [
+      { method: 'GET', path: '/', name: 'home' },
+      { method: 'GET', path: '/posts/:id', name: 'posts.show' },
+    ]
+
+    const content = buildRouteModuleContent(definitions, { source: 'routes/web.ts' })
+
+    expect(content).toContain("export const routeManifest = {")
+    expect(content).toContain("'home': { method: 'GET', path: '/' }")
+    expect(content).toContain("'posts.show': { method: 'GET', path: '/posts/:id' }")
+    expect(content).toContain("export function route<TName extends RouteName>")
+    expect(content).toContain("home: (query?: RouteQuery) => route('home', query)")
+    expect(content).toContain("show: (params: RouteParams<'posts.show'>, query?: RouteQuery) => route('posts.show', params, query)")
   })
 })

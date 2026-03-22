@@ -399,19 +399,16 @@ export function createContainer(): Container {
   return new Container()
 }
 
-// Global container instance
+// ---------------------------------------------------------------------------
+// Global container singleton
+// ---------------------------------------------------------------------------
+
 let globalContainer: Container | null = null
 
-/**
- * Set the global container instance.
- */
 export function setContainer(container: Container): void {
   globalContainer = container
 }
 
-/**
- * Get the global container instance.
- */
 export function getContainer(): Container {
   if (!globalContainer) {
     throw new Error('Container not initialized. Call setContainer() first.')
@@ -419,12 +416,6 @@ export function getContainer(): Container {
   return globalContainer
 }
 
-/**
- * Resolve a service from the global container.
- * Type-safe for known service keys.
- */
-export function resolve<K extends keyof ServiceBindings>(key: K): ServiceBindings[K]
-export function resolve<T>(key: string): T
-export function resolve(key: string): unknown {
-  return getContainer().make(key)
+export function resolve<T = unknown>(key: string): T {
+  return getContainer().make<T>(key)
 }

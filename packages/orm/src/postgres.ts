@@ -1,5 +1,6 @@
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { migrate } from 'drizzle-orm/postgres-js/migrator'
+import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import postgres from 'postgres'
@@ -53,6 +54,10 @@ export function createPostgresDatabase<TSchema extends Record<string, unknown>>(
     }
 
     const promise = (async (): Promise<void> => {
+      if (!hasDrizzleMigrationJournal(resolvedMigrationsFolder)) {
+        return
+      }
+
       const url = resolveConnectionString()
       const migrationClient = postgres(url, {
         max: 1,
@@ -131,4 +136,8 @@ export function createPostgresDatabase<TSchema extends Record<string, unknown>>(
     configureOrm,
     seedDatabase,
   }
+}
+
+function hasDrizzleMigrationJournal(migrationsFolder: string): boolean {
+  return existsSync(resolve(migrationsFolder, 'meta/_journal.json'))
 }

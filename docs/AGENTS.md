@@ -25,6 +25,6 @@ This guide captures the decisions established in recent documentation updates so
 - After editing, run `rg` on `docs/` for disallowed terms (`packages/core`, `citty`, `consola`, `bun run db:up`, etc.) to catch regressions.
 - Ensure Quick Start and Getting Started remain aligned whenever the scaffold workflow changes.
 - Update examples promptly if the `create-guren-app` template adds or removes scripts, environment variables, or file structure.
-- Keep `testing.md` synchronized with `@guren/testing` helpers and the latest CLI commands referenced in scaffolds (e.g. `make:test`, `routes:types`).
+- Keep `testing.md` synchronized with `@guren/testing` helpers and the latest CLI commands referenced in scaffolds (e.g. `make:test`, `codegen`).
 
 Following these guidelines keeps the documentation laser-focused on the user experience of building apps with Guren.

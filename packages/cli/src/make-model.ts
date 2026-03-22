@@ -13,15 +13,14 @@ const MODELS_DIR = 'app/Models'
 function modelTemplate(className: string): string {
   const schemaIdentifier = pluralizeIdentifier(camelCase(className))
 
-  return `import { Model } from '@guren/orm'
-import { ${schemaIdentifier} } from '../../db/schema.js' // TODO: adjust to the actual table export
+  return `import { defineModel } from '@guren/orm'
+import { ${schemaIdentifier} } from '../../db/schema.js'
 
 export type ${className}Record = typeof ${schemaIdentifier}.$inferSelect
+export type New${className}Record = typeof ${schemaIdentifier}.$inferInsert
 
-export class ${className} extends Model<${className}Record> {
-  static override table = ${schemaIdentifier}
-  static override readonly recordType = {} as ${className}Record
-  // For complex queries, start from Drizzle: ${className}.query().where(...), or use ${schemaIdentifier} directly with db.query.${schemaIdentifier}
+export class ${className} extends defineModel(${schemaIdentifier}) {
+  // For advanced queries, start from ${className}.query() or the underlying Drizzle table.
 }
 `
 }

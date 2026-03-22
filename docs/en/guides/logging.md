@@ -16,7 +16,7 @@ Guren provides a flexible logging system with multiple channels, log levels foll
 The simplest way to log is through the `LogFacade`, which resolves the `LogManager` from the container lazily:
 
 ```ts
-import { LogFacade as Log } from '@guren/server'
+import { LogFacade as Log } from '@guren/core'
 
 Log.info('Application started')
 Log.error('Something went wrong', { error: 'Connection failed' })
@@ -227,7 +227,7 @@ const log = new LogManager({
 The logging subsystem is registered as a singleton via a `ServiceProvider`. You can resolve it from the container:
 
 ```ts
-import { container } from '@guren/server'
+import { container } from '@guren/core'
 
 const log = container.make('log') // LogManager
 log.info('Using container-resolved logger')
@@ -310,7 +310,7 @@ log.registerDriver('slack', (config) => {
 ### Middleware Example
 
 ```ts
-import { defineMiddleware } from '@guren/server'
+import { defineMiddleware } from '@guren/core'
 import { getLogManager } from '@guren/core'
 
 export const requestLogging = defineMiddleware(async (c, next) => {
@@ -352,7 +352,7 @@ export const requestLogging = defineMiddleware(async (c, next) => {
 Swap the log manager in tests to capture log output:
 
 ```ts
-import { container } from '@guren/server'
+import { container } from '@guren/core'
 import { LogManager } from '@guren/core'
 
 test('logs error on failure', async () => {

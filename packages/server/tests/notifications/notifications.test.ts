@@ -784,7 +784,7 @@ describe('MailChannel', () => {
 
       expect(sendMock).toHaveBeenCalledTimes(1)
       expect(sendMock).toHaveBeenCalledWith({
-        to: 'test@example.com',
+        to: [{ email: 'test@example.com' }],
         from: undefined,
         replyTo: undefined,
         cc: undefined,
@@ -851,7 +851,7 @@ describe('MailChannel', () => {
       expect(transportMock).toHaveBeenCalledWith('custom')
       expect(sendMock).toHaveBeenCalledWith(
         expect.objectContaining({
-          from: 'noreply@example.com',
+          from: { email: 'noreply@example.com' },
         })
       )
     })

@@ -1,4 +1,4 @@
-import { Job } from '@guren/server'
+import { Job } from '@guren/core'
 import { User } from '../Models/User.js'
 import { sendRegistrationMail } from '../Mail/RegistrationMail.js'
 
@@ -22,7 +22,7 @@ export class SendRegistrationEmailJob extends Job<SendRegistrationEmailPayload> 
       return
     }
 
-    await sendRegistrationMail({ email: user.email, name: user.name })
+    await sendRegistrationMail(this.make('mail'), { email: user.email, name: user.name })
     console.log(`[Job] Registration email sent to ${user.email}`)
   }
 

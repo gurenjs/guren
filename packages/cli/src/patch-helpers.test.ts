@@ -28,7 +28,7 @@ describe('patch-helpers', () => {
 
     it('should add import after existing imports', async () => {
       const filePath = join(tempDir, 'test.ts')
-      const initialContent = `import { Application } from '@guren/server'
+      const initialContent = `import { Application } from '@guren/core'
 import { something } from 'else'
 
 const app = new Application()`
@@ -48,8 +48,8 @@ const app = new Application()`
 
     it('should not add duplicate import', async () => {
       const filePath = join(tempDir, 'test.ts')
-      const initialContent = `import { Application } from '@guren/server'
-import { createSessionMiddleware } from '@guren/server'
+      const initialContent = `import { Application } from '@guren/core'
+import { createSessionMiddleware } from '@guren/core'
 
 const app = new Application()`
 
@@ -57,7 +57,7 @@ const app = new Application()`
 
       const result = await addImport(
         filePath,
-        "import { createSessionMiddleware } from '@guren/server'",
+        "import { createSessionMiddleware } from '@guren/core'",
       )
 
       expect(result.modified).toBe(false)
@@ -75,7 +75,7 @@ const app = new Application()`
   describe('addProvider', () => {
     it('should add provider to providers array', async () => {
       const filePath = join(tempDir, 'app.ts')
-      const initialContent = `import { Application } from '@guren/server'
+      const initialContent = `import { Application } from '@guren/core'
 import DatabaseProvider from './Providers/DatabaseProvider.js'
 
 const app = new Application({
@@ -95,7 +95,7 @@ const app = new Application({
 
     it('should not add duplicate provider', async () => {
       const filePath = join(tempDir, 'app.ts')
-      const initialContent = `import { Application } from '@guren/server'
+      const initialContent = `import { Application } from '@guren/core'
 import AuthProvider from './Providers/AuthProvider.js'
 
 const app = new Application({
@@ -112,7 +112,7 @@ const app = new Application({
 
     it('should return false if providers array not found', async () => {
       const filePath = join(tempDir, 'app.ts')
-      const initialContent = `import { Application } from '@guren/server'
+      const initialContent = `import { Application } from '@guren/core'
 
 const app = new Application()`
 
@@ -130,18 +130,18 @@ const app = new Application()`
       const filePath = join(tempDir, 'test.ts')
       await writeFile(
         filePath,
-        "import { Application } from '@guren/server'\n\nconst app = new Application()",
+        "import { Application } from '@guren/core'\n\nconst app = new Application()",
         'utf8',
       )
 
-      const result = await hasImport(filePath, "import { Application } from '@guren/server'")
+      const result = await hasImport(filePath, "import { Application } from '@guren/core'")
 
       expect(result).toBe(true)
     })
 
     it('should return false if import does not exist', async () => {
       const filePath = join(tempDir, 'test.ts')
-      await writeFile(filePath, "import { Application } from '@guren/server'", 'utf8')
+      await writeFile(filePath, "import { Application } from '@guren/core'", 'utf8')
 
       const result = await hasImport(filePath, "import { foo } from 'bar'")
 

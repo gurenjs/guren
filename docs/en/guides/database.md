@@ -1,6 +1,6 @@
 # Database
 
-Guren uses Drizzle ORM with PostgreSQL. You define your schema in TypeScript, wrap it in a Model class, and get a fluent query API that feels like Laravel Eloquent while staying fully type-safe.
+Guren uses Drizzle ORM with PostgreSQL. You define your schema in TypeScript, derive models from those tables, and get a fluent query API that feels like Laravel Eloquent while staying fully type-safe.
 
 ## Connecting to the Database
 
@@ -30,19 +30,17 @@ DrizzleAdapter.configure({ connectionString: process.env.DATABASE_URL })
 
 ## Defining Models
 
-A Model wraps a Drizzle table and gives it an expressive query API:
+Use `defineModel()` to derive a typed model directly from a Drizzle table:
 
 ```ts
 // app/Models/Post.ts
-import { Model } from '@guren/orm'
+import { defineModel } from '@guren/orm'
 import { posts } from '@/db/schema'
 
 export type PostRecord = typeof posts.$inferSelect
+export type NewPostRecord = typeof posts.$inferInsert
 
-export class Post extends Model<PostRecord> {
-  static override table = posts
-  static override readonly recordType = {} as PostRecord
-}
+export class Post extends defineModel(posts) {}
 ```
 
 That is all you need. `Post` now has `find`, `create`, `where`, `paginate`, and dozens more methods.
@@ -155,28 +153,32 @@ Or use `guarded` to block specific fields:
 
 ## Relationships
 
-Declare relationships once, then eager-load them everywhere.
+Declare relationships next to the model that owns them, then eager-load them everywhere.
 
 ### hasMany / belongsTo
 
 ```ts
 // app/Models/User.ts
-export class User extends Model<UserRecord> {
-  static override table = users
-  static override readonly recordType = {} as UserRecord
-  static override relationTypes: { posts: HasManyRecord<PostRecord> } = { posts: [] }
+export class User extends defineModel(users) {
+  static override relationTypes: { posts: HasManyRecord<PostRecord> } = {
+    posts: [],
+  }
+}
+
+if (typeof User.hasMany === 'function') {
+  User.hasMany('posts', async () => (await import('./Post.js')).Post, 'authorId', 'id')
 }
 
 // app/Models/Post.ts
-export class Post extends Model<PostRecord> {
-  static override table = posts
-  static override readonly recordType = {} as PostRecord
-  static override relationTypes: { author: BelongsToRecord<UserRecord> } = { author: null }
+export class Post extends defineModel(posts) {
+  static override relationTypes: { author: BelongsToRecord<UserRecord> } = {
+    author: null,
+  }
 }
 
-// app/Models/relations.ts — import once in src/main.ts
-User.hasMany('posts', Post, 'authorId', 'id')
-Post.belongsTo('author', User, 'authorId', 'id')
+if (typeof Post.belongsTo === 'function') {
+  Post.belongsTo('author', async () => (await import('./User.js')).User, 'authorId', 'id')
+}
 ```
 
 ### Other relationship types
@@ -187,12 +189,70 @@ User.belongsToMany('roles', Role, 'user_roles', 'userId', 'roleId')
 Country.hasManyThrough('posts', Post, User, 'countryId', 'authorId')
 ```
 
+### Polymorphic Relationships
+
+Polymorphic relationships let a model belong to more than one type of parent using a single relation. For example, both posts and videos can have comments.
+
+Define the type/id columns on the related table:
+
+```ts
+// db/schema.ts
+export const comments = pgTable('comments', {
+  id: serial('id').primaryKey(),
+  body: text('body').notNull(),
+  commentableType: text('commentable_type').notNull(),
+  commentableId: integer('commentable_id').notNull(),
+})
+```
+
+Register the relationships:
+
+```ts
+// Parent models
+Post.morphMany('comments', Comment, 'commentable', 'id')
+Video.morphMany('comments', Comment, 'commentable', 'id')
+
+// Child model (inverse)
+Comment.morphTo('commentable', 'commentable')
+
+// Map type strings to model classes
+Model.morphMap = {
+  'Post': Post,
+  'Video': Video,
+}
+```
+
+Query them like any other relation:
+
+```ts
+const postWithComments = await Post.with('comments')
+const comment = await Comment.findWith(1, 'commentable')
+console.log(comment.commentable) // Post or Video record
+```
+
 ### Eager Loading
 
 ```ts
 const users = await User.with('posts')             // users[0].posts is PostRecord[]
 const posts = await Post.with('author')             // posts[0].author is UserRecord | null
 const filtered = await Post.with('author', { authorId: [1, 2] })
+```
+
+Eager loading also works on the QueryBuilder, so you can combine it with filters and ordering:
+
+```ts
+const activeUsers = await User.where('active', true)
+  .with('posts')
+  .orderBy('name')
+  .get()
+
+const user = await User.newQuery().with('posts').first()
+```
+
+Nested relations use dot notation:
+
+```ts
+const users = await User.with('posts.comments')
 ```
 
 ## Query Scopes
@@ -219,6 +279,43 @@ const myPopular = await Post.scope('published')
   .where('authorId', currentUser.id)
   .get()
 ```
+
+## Global Scopes
+
+Global scopes apply automatically to every query on a model. Use them for multi-tenancy, soft deletes, or any filter that should always be active.
+
+```ts
+// Always filter by the current tenant
+User.addGlobalScope('tenant', (q) => q.where('tenantId', currentTenantId()))
+
+// Always exclude inactive users
+User.addGlobalScope('active', (q) => q.where('active', true))
+```
+
+Every query through `all()`, `find()`, `where()`, and `newQuery()` now applies both scopes automatically.
+
+### Bypassing Global Scopes
+
+Remove a specific scope for one query:
+
+```ts
+const allUsers = await User.withoutGlobalScope('active').get()
+```
+
+Remove all global scopes:
+
+```ts
+const everyone = await User.withoutGlobalScopes().get()
+```
+
+Remove a scope permanently:
+
+```ts
+User.removeGlobalScope('active')
+```
+
+> [!TIP]
+> The `SoftDeletes` mixin registers a global scope named `'softDelete'`. You can bypass it with `withoutGlobalScope('softDelete')` instead of `withTrashed()` if you prefer.
 
 ## Model Hooks
 
@@ -249,6 +346,42 @@ export class Post extends Model<PostRecord> {
 | `creating` / `created` | Before / after insert |
 | `updating` / `updated` | Before / after update |
 | `deleting` / `deleted` | Before / after delete |
+
+## Model Observers
+
+When hook logic grows complex, extract it into a dedicated observer class. Observers respond to the same lifecycle events as hooks but live in their own file.
+
+```ts
+// app/Observers/PostObserver.ts
+import type { ModelObserver } from '@guren/orm'
+import type { PlainObject } from '@guren/orm'
+
+export class PostObserver implements ModelObserver {
+  creating(data: PlainObject) {
+    data.slug = slugify(data.title as string)
+  }
+
+  created(data: PlainObject) {
+    await notifySubscribers(data)
+  }
+
+  deleting(data: PlainObject) {
+    await clearPostCache(data.id)
+  }
+}
+```
+
+Register the observer on the model:
+
+```ts
+import { PostObserver } from '@/app/Observers/PostObserver'
+
+Post.observe(PostObserver)
+```
+
+Returning `false` from a before-event (`creating`, `updating`, `deleting`, `saving`) aborts the operation, just like inline hooks.
+
+Observers and inline hooks coexist — hooks fire first, then observers.
 
 ## Soft Deletes
 
@@ -293,6 +426,113 @@ export class Post extends Model<PostRecord> {
 }
 ```
 
+## Accessors & Mutators
+
+Accessors compute virtual attributes when reading records. Mutators transform values before writing to the database.
+
+### Accessors
+
+Define computed properties that are automatically applied when records are fetched:
+
+```ts
+export class User extends defineModel(users) {
+  static accessors = {
+    fullName: (record) => `${record.firstName} ${record.lastName}`,
+    isAdmin: (record) => record.role === 'admin',
+  }
+}
+```
+
+```ts
+const user = await User.find(1)
+console.log(user.fullName)  // "John Doe"
+console.log(user.isAdmin)   // true
+```
+
+Accessors run on every read path: `all()`, `find()`, `where()`, `first()`, and `paginate()`.
+
+### Mutators
+
+Transform input data before it hits the database:
+
+```ts
+export class User extends defineModel(users) {
+  static mutators = {
+    email: (value) => String(value).toLowerCase().trim(),
+    name: (value) => String(value).trim(),
+  }
+}
+```
+
+```ts
+await User.create({ email: '  JOHN@EXAMPLE.COM  ', name: '  John  ' })
+// Stored as: email = "john@example.com", name = "John"
+```
+
+Mutators run on both `create()` and `update()`, before hooks and before cast serialization.
+
+## Serialization
+
+Control how model records appear in API responses and Inertia props.
+
+### Hiding Fields
+
+Exclude sensitive fields from serialized output:
+
+```ts
+export class User extends defineModel(users) {
+  static hidden = ['passwordHash', 'rememberToken']
+}
+```
+
+```ts
+const user = await User.find(1)
+const json = User.serialize(user)
+// { id: 1, name: "John", email: "john@example.com" }
+// passwordHash and rememberToken are excluded
+```
+
+### Visible Fields
+
+Use a whitelist instead of a blacklist:
+
+```ts
+export class User extends defineModel(users) {
+  static visible = ['id', 'name', 'email']
+}
+```
+
+When `visible` is set, only those fields appear. `visible` takes precedence over `hidden`.
+
+### Appending Virtual Attributes
+
+Include accessor-computed values in serialized output:
+
+```ts
+export class User extends defineModel(users) {
+  static accessors = {
+    fullName: (record) => `${record.firstName} ${record.lastName}`,
+  }
+  static appends = ['fullName']
+  static hidden = ['firstName', 'lastName']
+}
+```
+
+```ts
+const json = User.serialize(user)
+// { id: 1, fullName: "John Doe", email: "john@example.com" }
+```
+
+### Serializing Collections
+
+```ts
+const users = await User.all()
+const json = User.serializeMany(users)
+```
+
+> [!TIP]
+> `serialize()` and `serializeMany()` are ideal for building Inertia page props or API responses. Pair them with `JsonResource` for more complex transformations.
+
 ## Pagination
 
 Paginate query results and get metadata for building page controls:
@@ -306,12 +546,47 @@ const result = await Post.paginate({ page: 1, perPage: 10 })
 Pass pagination data directly to an Inertia page:
 
 ```ts
+import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
+import { PostResource, type PostResourceData } from '@/app/Http/Resources/PostResource'
+import { appPages } from '@/resources/js/pages/contracts'
+
+type PostsIndexProps = PaginatedPageProps<PostResourceData>
+
 async index() {
   const page = Number(this.query('page', '1'))
-  const posts = await Post.scope('published').paginate({ page, perPage: 15 })
-  return this.inertia('posts/Index', { posts })
+  const result = await Post.scope('published').paginate({ page, perPage: 15 })
+  const paginator = paginate(result, { path: this.request.path ?? '/posts' })
+
+  return this.inertia<PostsIndexProps>(appPages.posts.index, {
+    data: result.data.map((post) => new PostResource(post).toJSON()),
+    pagination: paginator,
+  })
 }
 ```
+
+## SQLite Support
+
+Guren supports SQLite out of the box via Bun's built-in SQLite driver. New projects use SQLite by default — no Docker or external database needed.
+
+```ts
+// config/database.ts
+import { createSqliteDatabase } from '@guren/orm'
+import * as schema from '../db/schema.js'
+
+const database = createSqliteDatabase({
+  schema,
+  migrationsFolder: new URL('../db/migrations', import.meta.url),
+  seedersFolder: new URL('../db/seeders', import.meta.url),
+  filename: () => process.env.DATABASE_URL ?? './data/guren.db',
+})
+
+export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+```
+
+The SQLite adapter has the same API as `createPostgresDatabase`, so switching between them only requires changing the import and connection config.
+
+> [!TIP]
+> Use SQLite for development and testing, then switch to PostgreSQL for production. The ORM adapter abstraction means your models and queries work unchanged.
 
 ## Migrations
 

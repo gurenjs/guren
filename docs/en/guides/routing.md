@@ -1,37 +1,40 @@
 # Routing
 
-Routes map URLs to your application logic. They define what happens when a user visits `/posts`, submits a form, or hits an API endpoint. Guren's routing DSL is declarative, expressive, and keeps your route files readable even as your app grows.
+Routes map URLs to your application logic. They define what happens when a user visits `/posts`, submits a form, or hits an API endpoint. In vNext-style apps, each application owns a `Router` instance and route files export a registrar function instead of mutating a global registry.
 
 ## Defining Routes
 
-Create `routes/web.ts` and import `Route` along with your controllers:
+Create `routes/web.ts` and export a registrar that receives the application router:
 
 ```ts
 // routes/web.ts
-import { Route } from '@guren/server'
+import { Router } from '@guren/core'
 import PostsController from '@/app/Http/Controllers/PostsController'
 
-// Controller tuple — the most common pattern
-Route.get('/posts', [PostsController, 'index'])
-Route.post('/posts', [PostsController, 'store'])
-Route.put('/posts/:id', [PostsController, 'update'])
-Route.delete('/posts/:id', [PostsController, 'destroy'])
+export function registerWebRoutes(router: Router): void {
+  // Controller tuple — the most common pattern
+  router.get('/posts', [PostsController, 'index'])
+  router.post('/posts', [PostsController, 'store'])
+  router.put('/posts/:id', [PostsController, 'update'])
+  router.delete('/posts/:id', [PostsController, 'destroy'])
 
-// Inline handler — great for lightweight endpoints
-Route.get('/health', (ctx) => ctx.json({ ok: true }))
+  // Inline handler — great for lightweight endpoints
+  router.get('/health', (ctx) => ctx.json({ ok: true }))
+}
 ```
 
-Available methods: `Route.get`, `Route.post`, `Route.put`, `Route.patch`, `Route.delete`, and the generic `Route.on(method, path, handler)`.
+Available methods: `router.get`, `router.post`, `router.put`, `router.patch`, `router.delete`, and the generic `router.on(method, path, handler)`.
 
-Import your route file in `src/main.ts` so it runs at boot:
+Pass the registrar to `createApp()` in `src/app.ts`:
 
 ```ts
-// src/main.ts
-import '@/routes/web'
+// src/app.ts
+import { createApp } from '@guren/core'
+import registerWebRoutes from '@/routes/web'
 
-const app = new Application()
-await app.boot()
-await app.listen()
+const app = createApp({
+  routes: registerWebRoutes,
+})
 ```
 
 ## Route Groups
@@ -39,19 +42,21 @@ await app.listen()
 Group routes under a shared prefix to avoid repetition:
 
 ```ts
-Route.group('/posts', () => {
-  Route.get('/', [PostsController, 'index'])       // GET /posts
-  Route.get('/:id', [PostsController, 'show'])     // GET /posts/:id
-  Route.post('/', [PostsController, 'store'])       // POST /posts
-})
+export function registerWebRoutes(router: Router): void {
+  router.group('/posts', (posts) => {
+    posts.get('/', [PostsController, 'index'])      // GET /posts
+    posts.get('/:id', [PostsController, 'show'])    // GET /posts/:id
+    posts.post('/', [PostsController, 'store'])     // POST /posts
+  })
+}
 ```
 
 Groups nest naturally. Prefixes combine automatically:
 
 ```ts
-Route.group('/admin', () => {
-  Route.group('/users', () => {
-    Route.get('/', [AdminUsersController, 'index'])  // GET /admin/users
+router.group('/admin', (admin) => {
+  admin.group('/users', (users) => {
+    users.get('/', [AdminUsersController, 'index']) // GET /admin/users
   })
 })
 ```
@@ -61,14 +66,14 @@ Route.group('/admin', () => {
 Give routes a name, then generate URLs by name instead of hardcoding paths:
 
 ```ts
-Route.get('/posts/:id', [PostsController, 'show']).name('posts.show')
+router.get('/posts/:id', [PostsController, 'show']).name('posts.show')
 
 // Later, generate the URL
-const url = Route.route('posts.show', { id: 42 })
+const url = router.route('posts.show', { id: 42 })
 // => '/posts/42'
 ```
 
-This keeps your code resilient to path changes. If you rename `/posts` to `/articles`, only the route definition changes — every `Route.route()` call still works.
+This keeps your code resilient to path changes. If you rename `/posts` to `/articles`, only the route definition changes.
 
 ## Middleware
 
@@ -79,11 +84,13 @@ Middleware runs before (or after) your route handler. Guren supports three level
 Give middleware functions short names so you can reference them as strings:
 
 ```ts
-import { Route, requireAuthenticated } from '@guren/server'
+import { Router, requireAuthenticated } from '@guren/core'
 import { requireAdmin } from '@/app/Http/middleware/admin'
 
-Route.aliasMiddleware('auth', requireAuthenticated())
-Route.aliasMiddleware('admin', requireAdmin())
+export function registerWebRoutes(router: Router): void {
+  router.aliasMiddleware('auth', requireAuthenticated())
+  router.aliasMiddleware('admin', requireAdmin())
+}
 ```
 
 ### Middleware Groups
@@ -91,31 +98,31 @@ Route.aliasMiddleware('admin', requireAdmin())
 Bundle related middleware under a single name:
 
 ```ts
-Route.groupMiddleware('web', ['session', 'csrf'])
-Route.groupMiddleware('api', ['throttle'])
+router.groupMiddleware('web', ['session', 'csrf'])
+router.groupMiddleware('api', ['throttle'])
 ```
 
 ### Applying Middleware
 
-Use `Route.middleware().group()` for a set of routes, or `.middleware()` on a single route:
+Use `router.middleware().group()` for a set of routes, or `.middleware()` on a single route:
 
 ```ts
 // Group-level — all routes inside share the middleware
-Route.middleware('web').group(() => {
-  Route.get('/', [HomeController, 'index'])
-  Route.get('/about', [PagesController, 'about'])
+router.middleware('web').group((web) => {
+  web.get('/', [HomeController, 'index'])
+  web.get('/about', [PagesController, 'about'])
 })
 
 // Nested — combine middleware layers
-Route.middleware('web').group(() => {
-  Route.middleware('auth').group(() => {
-    Route.get('/dashboard', [DashboardController, 'index'])
-    Route.get('/settings', [SettingsController, 'index'])
+router.middleware('web').group((web) => {
+  web.middleware('auth').group((auth) => {
+    auth.get('/dashboard', [DashboardController, 'index'])
+    auth.get('/settings', [SettingsController, 'index'])
   })
 })
 
 // Per-route — for one-off protection
-Route.get('/admin', [AdminController, 'index']).middleware('auth', 'admin')
+router.get('/admin', [AdminController, 'index']).middleware('auth', 'admin')
 ```
 
 > [!TIP]
@@ -129,7 +136,7 @@ Without model binding, every controller method starts with the same boilerplate:
 // Before: manual lookup in every method
 async show() {
   const post = await Post.findOrFail(this.ctx.req.param('id'))
-  return this.inertia('posts/Show', { post })
+  return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
 }
 ```
 
@@ -137,15 +144,15 @@ With model binding, Guren resolves the model automatically:
 
 ```ts
 // Register bindings (top of routes file)
-Route.bind('post', Post)
+router.bind('post', Post)
 
 // Route uses :post instead of :id
-Route.get('/posts/:post', [PostsController, 'show'])
+router.get('/posts/:post', [PostsController, 'show'])
 
 // Controller receives the resolved model — no lookup needed
 async show() {
   const post = this.ctx.get('post') as PostRecord
-  return this.inertia('posts/Show', { post })
+  return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
 }
 ```
 
@@ -154,15 +161,15 @@ If the record is not found, a 404 is returned automatically.
 You can also bind with a custom resolver for slug-based lookups:
 
 ```ts
-Route.bind('post', async (value) => Post.where('slug', value).firstOrFail())
+router.bind('post', async (value) => Post.where('slug', value).firstOrFail())
 ```
 
 ## Resource Routes
 
-`Route.resource()` generates a full set of RESTful routes from a single line:
+`router.resource()` generates a full set of RESTful routes from a single line:
 
 ```ts
-Route.resource('/posts', PostsController)
+router.resource('/posts', PostsController)
 ```
 
 This registers:
@@ -181,12 +188,12 @@ Only methods that exist on the controller are registered. Scope the routes with 
 
 ```ts
 // API-only — skip create/edit (those are for HTML forms)
-Route.resource('/posts', PostsController, {
+router.resource('/posts', PostsController, {
   only: ['index', 'show', 'store', 'update', 'destroy'],
 })
 
 // Custom parameter name
-Route.resource('/posts', PostsController, { param: 'post' })
+router.resource('/posts', PostsController, { param: 'post' })
 ```
 
 ## Route Parameters
@@ -194,8 +201,8 @@ Route.resource('/posts', PostsController, { param: 'post' })
 Dynamic segments use `:param` syntax:
 
 ```ts
-Route.get('/posts/:id', [PostsController, 'show'])
-Route.get('/users/:userId/posts/:postId', [PostsController, 'showForUser'])
+router.get('/posts/:id', [PostsController, 'show'])
+router.get('/users/:userId/posts/:postId', [PostsController, 'showForUser'])
 ```
 
 Read them in the controller:
@@ -206,4 +213,4 @@ const userId = this.ctx.req.param('userId')
 ```
 
 > [!NOTE]
-> For large apps, split routes into multiple files (`routes/api.ts`, `routes/admin.ts`) and import each from `src/main.ts`.
+> For large apps, split routes into multiple registrars (`routes/api.ts`, `routes/admin.ts`) and compose them from `src/app.ts`.

@@ -1,42 +1,16 @@
-import { Link, router, usePage } from '@inertiajs/react'
-import type { PostsIndexPageProps } from '@/Http/Controllers/PostController'
+import { Link } from '@inertiajs/react'
 import Layout from '../../components/Layout.js'
 import { ArrowRight, Calendar, ChevronLeft, ChevronRight, Plus, User } from 'lucide-react'
+import type { PaginatedPageProps } from '@guren/core'
+import type { PostResourceData } from '../../../../app/Http/Resources/PostResource.js'
 
-export default function Index({ posts, pagination }: PostsIndexPageProps) {
-  const { url } = usePage()
-  const currentPath = pagination.basePath || (url.split('?')[0] || '/')
-  const pages = Array.from({ length: pagination.totalPages }, (_, index) => index + 1)
-  const canGoPrevious = pagination.currentPage > 1
-  const canGoNext = pagination.currentPage < pagination.totalPages
+interface Props extends PaginatedPageProps<PostResourceData> {}
 
-  const visitPage = (pageNumber: number) => {
-    const safePage = Math.max(1, Math.min(pageNumber, pagination.totalPages))
-
-    if (safePage === pagination.currentPage) {
-      return
-    }
-
-    const query = safePage > 1 ? `?page=${safePage}` : ''
-    router.visit(`${currentPath}${query}`, {
-      preserveScroll: true,
-      preserveState: true,
-    })
-  }
-
-  const goToPrevious = () => {
-    if (canGoPrevious) {
-      visitPage(pagination.currentPage - 1)
-    }
-  }
-
-  const goToNext = () => {
-    if (canGoNext) {
-      visitPage(pagination.currentPage + 1)
-    }
-  }
-
-  const showPagination = pagination.totalPages > 1
+export default function Index({ data: posts, pagination }: Props) {
+  const pages = pagination.links.pages
+  const canGoPrevious = Boolean(pagination.links.prev)
+  const canGoNext = Boolean(pagination.links.next)
+  const showPagination = pagination.meta.lastPage > 1
 
   return (
     <Layout
@@ -141,42 +115,67 @@ export default function Index({ posts, pagination }: PostsIndexPageProps) {
         {showPagination && (
           <div className="flex items-center justify-center border-t border-zinc-200 pt-8">
             <nav className="flex items-center gap-1" aria-label="Pagination">
-              <button
-                type="button"
-                onClick={goToPrevious}
-                disabled={!canGoPrevious}
-                className="inline-flex h-9 items-center justify-center rounded-md px-3 text-sm font-medium text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 disabled:pointer-events-none disabled:opacity-50"
-              >
-                <ChevronLeft className="mr-1 h-4 w-4" />
-                Previous
-              </button>
+              {pagination.links.prev ? (
+                <Link
+                  href={pagination.links.prev}
+                  preserveScroll
+                  preserveState
+                  className="inline-flex h-9 items-center justify-center rounded-md px-3 text-sm font-medium text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
+                >
+                  <ChevronLeft className="mr-1 h-4 w-4" />
+                  Previous
+                </Link>
+              ) : (
+                <span
+                  aria-disabled="true"
+                  className="inline-flex h-9 items-center justify-center rounded-md px-3 text-sm font-medium text-zinc-500 opacity-50"
+                >
+                  <ChevronLeft className="mr-1 h-4 w-4" />
+                  Previous
+                </span>
+              )}
 
               <div className="flex items-center gap-1 px-2">
-                {pages.map((pageNumber) => (
-                  <button
-                    key={pageNumber}
-                    type="button"
-                    onClick={() => visitPage(pageNumber)}
-                    className={`inline-flex h-9 w-9 items-center justify-center rounded-md text-sm font-medium transition ${pageNumber === pagination.currentPage
+                {pages.map((pageLink) => (
+                  <Link
+                    key={pageLink.page}
+                    href={pageLink.url ?? '#'}
+                    preserveScroll
+                    preserveState
+                    className={`inline-flex h-9 w-9 items-center justify-center rounded-md text-sm font-medium transition ${pageLink.active
                       ? 'bg-zinc-900 text-white shadow-sm'
                       : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900'
                       }`}
-                    aria-current={pageNumber === pagination.currentPage ? 'page' : undefined}
+                    aria-current={pageLink.active ? 'page' : undefined}
+                    aria-disabled={pageLink.url ? undefined : true}
+                    tabIndex={pageLink.url ? undefined : -1}
                   >
-                    {pageNumber}
-                  </button>
+                    {pageLink.page}
+                  </Link>
                 ))}
               </div>
 
-              <button
-                type="button"
-                onClick={goToNext}
-                disabled={!canGoNext}
-                className="inline-flex h-9 items-center justify-center rounded-md px-3 text-sm font-medium text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 disabled:pointer-events-none disabled:opacity-50"
-              >
-                Next
-                <ChevronRight className="ml-1 h-4 w-4" />
-              </button>
+              {pagination.links.next ? (
+                <Link
+                  href={pagination.links.next}
+                  preserveScroll
+                  preserveState
+                  className="inline-flex h-9 items-center justify-center rounded-md px-3 text-sm font-medium text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
+                >
+                  Next
+                  <ChevronRight className="ml-1 h-4 w-4" />
+                </Link>
+              ) : (
+                <span
+                  aria-disabled="true"
+                  className="inline-flex h-9 items-center justify-center rounded-md px-3 text-sm font-medium text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 disabled:pointer-events-none disabled:opacity-50"
+                >
+                  <>
+                    Next
+                    <ChevronRight className="ml-1 h-4 w-4" />
+                  </>
+                </span>
+              )}
             </nav>
           </div>
         )}

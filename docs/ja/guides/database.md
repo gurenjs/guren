@@ -30,22 +30,43 @@ export const posts = pgTable('posts', {
 })
 ```
 
-テーブルは `static table` に割り当ててモデルに公開します。
+テーブルは `defineModel()` でモデルに公開するのが推奨です。
 
 ```ts
 // app/Models/Post.ts
-import { Model } from '@guren/orm'
+import { defineModel } from '@guren/orm'
 import { posts } from '@/db/schema'
 
 export type PostRecord = typeof posts.$inferSelect
 
-export class Post extends Model<PostRecord> {
-  static override table = posts
-  static override readonly recordType = {} as PostRecord
-}
+export class Post extends defineModel(posts) {}
 
-// `recordType` により Post.find() などの静的ヘルパーが Drizzle から推論された正確な型を返します。
+// Drizzle の推論型がそのまま Post.find() などの静的ヘルパーに流れます。
 ```
+
+## SQLite サポート
+
+Guren は Bun 組み込みの SQLite ドライバを使って、SQLite をそのままサポートします。新規プロジェクトはデフォルトで SQLite を使用するため、Docker や外部データベースのセットアップは不要です。
+
+```ts
+// config/database.ts
+import { createSqliteDatabase } from '@guren/orm'
+import * as schema from '../db/schema.js'
+
+const database = createSqliteDatabase({
+  schema,
+  migrationsFolder: new URL('../db/migrations', import.meta.url),
+  seedersFolder: new URL('../db/seeders', import.meta.url),
+  filename: () => process.env.DATABASE_URL ?? './data/guren.db',
+})
+
+export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+```
+
+SQLite アダプタは `createPostgresDatabase` と同じ API を持つため、切り替えはインポートと接続設定の変更だけで済みます。
+
+> [!TIP]
+> 開発とテストには SQLite を使い、本番では PostgreSQL に切り替えるのがおすすめです。ORM アダプタの抽象化により、モデルやクエリはそのまま動作します。
 
 ## マイグレーションの生成
 Guren CLI は drizzle-kit をラップしており、Drizzle スキーマから SQL ファイルを直接生成できます。
@@ -255,6 +276,43 @@ const myPopularPosts = await Post.scope('published')
   .get()
 ```
 
+## グローバルスコープ
+
+グローバルスコープは、モデルのすべてのクエリに自動的に適用されるフィルタです。マルチテナンシーやソフトデリートなど、常に有効にしたい条件に使います。
+
+```ts
+// 現在のテナントで常にフィルタ
+User.addGlobalScope('tenant', (q) => q.where('tenantId', currentTenantId()))
+
+// 非アクティブユーザーを常に除外
+User.addGlobalScope('active', (q) => q.where('active', true))
+```
+
+`all()`、`find()`、`where()`、`newQuery()` のすべてのクエリに自動適用されます。
+
+### グローバルスコープの一時除外
+
+特定のスコープを1回のクエリだけ除外:
+
+```ts
+const allUsers = await User.withoutGlobalScope('active').get()
+```
+
+すべてのグローバルスコープを除外:
+
+```ts
+const everyone = await User.withoutGlobalScopes().get()
+```
+
+スコープを完全に削除:
+
+```ts
+User.removeGlobalScope('active')
+```
+
+> [!TIP]
+> `SoftDeletes` ミックスインは `'softDelete'` という名前のグローバルスコープを登録します。`withTrashed()` の代わりに `withoutGlobalScope('softDelete')` でも同じ結果が得られます。
+
 ## モデルフック
 
 フックを使うと、モデルのライフサイクルの特定のポイントでロジックを実行できます。静的な `hooks` オブジェクトとして定義します。
@@ -304,6 +362,37 @@ export class Post extends Model<typeof posts.$inferSelect> {
 | `updated` | 更新後 |
 | `deleting` | 削除前 |
 | `deleted` | 削除後 |
+
+## モデルオブザーバー
+
+フックのロジックが複雑になったら、専用のオブザーバークラスに切り出せます。オブザーバーはフックと同じライフサイクルイベントに応答しますが、独立したファイルに配置できます。
+
+```ts
+// app/Observers/PostObserver.ts
+import type { ModelObserver, PlainObject } from '@guren/orm'
+
+export class PostObserver implements ModelObserver {
+  creating(data: PlainObject) {
+    data.slug = slugify(data.title as string)
+  }
+
+  created(data: PlainObject) {
+    await notifySubscribers(data)
+  }
+}
+```
+
+モデルにオブザーバーを登録:
+
+```ts
+import { PostObserver } from '@/app/Observers/PostObserver'
+
+Post.observe(PostObserver)
+```
+
+before イベント（`creating`、`updating`、`deleting`、`saving`）で `false` を返すと操作が中止されます。インラインフックと同じ動作です。
+
+フックとオブザーバーは共存できます。フックが先に実行され、その後にオブザーバーが実行されます。
 
 ## ソフトデリート
 
@@ -373,6 +462,112 @@ export class Post extends Model<PostRecord> {
 | `'number'` | number に変換 |
 | `'string'` | string に変換 |
 
+## アクセサとミューテータ
+
+アクセサはレコード読み取り時に仮想属性を計算します。ミューテータはデータベースへの書き込み前に値を変換します。
+
+### アクセサ
+
+レコード取得時に自動的に適用される計算プロパティを定義:
+
+```ts
+export class User extends defineModel(users) {
+  static accessors = {
+    fullName: (record) => `${record.firstName} ${record.lastName}`,
+    isAdmin: (record) => record.role === 'admin',
+  }
+}
+```
+
+```ts
+const user = await User.find(1)
+console.log(user.fullName)  // "John Doe"
+```
+
+アクセサは `all()`、`find()`、`where()`、`first()`、`paginate()` のすべての読み取りパスで実行されます。
+
+### ミューテータ
+
+データベースに保存する前に入力データを変換:
+
+```ts
+export class User extends defineModel(users) {
+  static mutators = {
+    email: (value) => String(value).toLowerCase().trim(),
+    name: (value) => String(value).trim(),
+  }
+}
+```
+
+```ts
+await User.create({ email: '  JOHN@EXAMPLE.COM  ', name: '  John  ' })
+// 保存される値: email = "john@example.com", name = "John"
+```
+
+ミューテータは `create()` と `update()` の両方で、フックやキャストのシリアライズより前に実行されます。
+
+## シリアライゼーション
+
+API レスポンスや Inertia プロップスでモデルレコードの表示を制御します。
+
+### フィールドの非表示
+
+機密フィールドをシリアライズ出力から除外:
+
+```ts
+export class User extends defineModel(users) {
+  static hidden = ['passwordHash', 'rememberToken']
+}
+```
+
+```ts
+const user = await User.find(1)
+const json = User.serialize(user)
+// { id: 1, name: "John", email: "john@example.com" }
+// passwordHash と rememberToken は除外される
+```
+
+### 表示フィールドのホワイトリスト
+
+ブラックリストの代わりにホワイトリストを使用:
+
+```ts
+export class User extends defineModel(users) {
+  static visible = ['id', 'name', 'email']
+}
+```
+
+`visible` が設定されている場合、そのフィールドのみが表示されます。`visible` は `hidden` より優先されます。
+
+### 仮想属性の追加
+
+アクセサで計算された値をシリアライズ出力に含める:
+
+```ts
+export class User extends defineModel(users) {
+  static accessors = {
+    fullName: (record) => `${record.firstName} ${record.lastName}`,
+  }
+  static appends = ['fullName']
+  static hidden = ['firstName', 'lastName']
+}
+```
+
+```ts
+const json = User.serialize(user)
+// { id: 1, fullName: "John Doe", email: "john@example.com" }
+```
+
+### コレクションのシリアライズ
+
+```ts
+const users = await User.all()
+const json = User.serializeMany(users)
+```
+
+> [!TIP]
+> `serialize()` と `serializeMany()` は Inertia ページプロップスや API レスポンスの構築に最適です。より複雑な変換には `JsonResource` と組み合わせてください。
+
 ## マスアサインメント保護
 
 `fillable` または `guarded` で、`create()` や `update()` で設定可能なフィールドを制御できます。
@@ -424,27 +619,21 @@ export class User extends Model<UserRecord> {
 }
 
 // app/Models/Post.ts
-import { Model, type BelongsToRecord } from '@guren/orm'
+import { defineModel, type BelongsToRecord } from '@guren/orm'
 import { posts } from '@/db/schema'
 import type { UserRecord } from '@/app/Models/User'
 
 export type PostRecord = typeof posts.$inferSelect
 
-export class Post extends Model<PostRecord> {
-  static override table = posts
-  static override readonly recordType = {} as PostRecord
+export class Post extends defineModel(posts) {
   static override relationTypes: { author: BelongsToRecord<UserRecord> } = {
     author: null,
   }
 }
 
-// app/Models/relations.ts
-import { Post } from './Post'
-import { User } from './User'
-
-// モジュールの循環を避けるため、両方のモデルを定義した後にリレーションを記述します。
-User.hasMany('posts', Post, 'authorId', 'id')
-Post.belongsTo('author', User, 'authorId', 'id')
+if (typeof Post.belongsTo === 'function') {
+  Post.belongsTo('author', async () => (await import('./User.js')).User, 'authorId', 'id')
+}
 ```
 
 ### hasOne
@@ -469,19 +658,46 @@ Post.belongsToMany('tags', Tag, 'post_tags', 'postId', 'tagId')
 Country.hasManyThrough('posts', Post, User, 'countryId', 'authorId')
 ```
 
-副作用を確実に実行するため、アプリケーション起動時（例: `src/main.ts`）に `relations.ts` モジュールを一度インポートしてください。
-
-```ts
-// src/main.ts
-import './app/Models/relations'
-```
-
 - `hasMany(name, RelatedModel, foreignKey, localKey)`: 関連モデルの外部キーと親側のローカルキー（通常 `id`）を指定します。
 - `belongsTo(name, RelatedModel, foreignKey, ownerKey)`: 現在のモデルの外部キーと関連モデルの所有キーを結びつけます。
 - `hasOne(name, RelatedModel, foreignKey, localKey)`: `hasMany` と同じように動作しますが、単一のレコードまたは `null` を返します。
 - `belongsToMany(name, RelatedModel, pivotTable, foreignPivotKey, relatedPivotKey)`: ピボットテーブルを通じた多対多を処理します。
 - `hasManyThrough(name, RelatedModel, ThroughModel, firstKey, secondKey)`: 中間モデルを経由してリモートリレーションにアクセスします。
+- `morphMany(name, RelatedModel, morphName, localKey)`: 1対多のポリモーフィックリレーション。
+- `morphTo(name, morphName)`: ポリモーフィックリレーションの逆方向。
 - `static relationTypes` で eager load されるリレーションの型を記述します。`Model.with('author')` などのヘルパーがこれらの型をマージし、コントローラーやビューで完全に型付けされたリレーションデータを受け取れます。
+
+### ポリモーフィックリレーション
+
+ポリモーフィックリレーションを使うと、1つのリレーションで複数の親モデルに属することができます。例えば、投稿と動画の両方にコメントを付けられます。
+
+関連テーブルに type/id カラムを定義:
+
+```ts
+export const comments = sqliteTable('comments', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  body: text('body').notNull(),
+  commentableType: text('commentable_type').notNull(),
+  commentableId: integer('commentable_id').notNull(),
+})
+```
+
+リレーションを登録:
+
+```ts
+Post.morphMany('comments', Comment, 'commentable', 'id')
+Video.morphMany('comments', Comment, 'commentable', 'id')
+Comment.morphTo('commentable', 'commentable')
+
+Model.morphMap = { Post, Video }
+```
+
+通常のリレーションと同じようにクエリ:
+
+```ts
+const postWithComments = await Post.with('comments')
+const comment = await Comment.findWith(1, 'commentable')
+```
 
 ### `with` による eager loading
 
@@ -497,7 +713,49 @@ const posts = await Post.with('author', { authorId: [1, 2] })
 // posts[0].author は関連する UserRecord か null（belongsTo の場合）
 ```
 
-`hasMany` リレーションは配列として展開されます（マッチするものがない場合は `[]`）。`belongsTo` は単一の関連レコードまたは外部キーが存在しない場合は `null` を返します。複数のリレーションを配列で渡すこともできます: `await User.with(['posts'])`。既存の `where`/`orderBy` ヘルパーと組み合わせて追加のフィルタリングも可能です。
+QueryBuilder 上でも eager loading が使えるので、フィルタやソートと組み合わせられます:
+
+```ts
+const activeUsers = await User.where('active', true)
+  .with('posts')
+  .orderBy('name')
+  .get()
+
+const user = await User.newQuery().with('posts').first()
+```
+
+ネストリレーションはドット記法で指定:
+
+```ts
+const users = await User.with('posts.comments')
+```
+
+`hasMany` リレーションは配列として展開されます（マッチするものがない場合は `[]`）。`belongsTo` は単一の関連レコードまたは外部キーが存在しない場合は `null` を返します。複数のリレーションを配列で渡すこともできます: `await User.with(['posts'])`。
+
+## ページネーション
+
+一覧ページでは ORM の `PaginatedResult<T>` をそのまま `paginate()` に流し、resource output と page contract を揃えるのが標準です。
+
+```ts
+import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
+import { PostResource, type PostResourceData } from '@/app/Http/Resources/PostResource'
+import { appPages } from '@/resources/js/pages/contracts'
+
+type PostsIndexProps = PaginatedPageProps<PostResourceData>
+
+export default class PostController extends Controller {
+  async index() {
+    const page = Number(this.query('page', '1'))
+    const result = await Post.paginate({ page, perPage: 15 })
+    const paginator = paginate(result, { path: this.request.path ?? '/posts' })
+
+    return this.inertia<PostsIndexProps>(appPages.posts.index, {
+      data: result.data.map((post) => new PostResource(post).toJSON()),
+      pagination: paginator,
+    })
+  }
+}
+```
 
 ## トランザクション
 `config/database.ts` のデータベースインスタンスを使ってトランザクションを実行します。

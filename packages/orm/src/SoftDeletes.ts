@@ -24,10 +24,7 @@ export interface SoftDeletesStatic {
  *
  * When applied, `delete()` sets a `deletedAt` timestamp instead of removing the
  * record from the database. All default queries automatically exclude soft-deleted
- * records via a `defaultScope`.
- *
- * @param Base - The Model class to extend
- * @returns A new class with soft delete capabilities
+ * records via a global scope named 'softDelete'.
  *
  * @example
  * class Post extends SoftDeletes(Model)<PostRecord> {
@@ -57,7 +54,10 @@ export function SoftDeletes<TBase extends typeof Model>(Base: TBase): TBase & So
 
   SoftDeleteModel.deletedAtColumn = 'deletedAt'
 
-  SoftDeleteModel.defaultScope = (q: QueryBuilder<any>) => q.whereNull('deletedAt') // eslint-disable-line @typescript-eslint/no-explicit-any
+  // Register as both defaultScope (backward compat) and named global scope
+  const scopeFn = (q: QueryBuilder<any>) => q.whereNull('deletedAt') // eslint-disable-line @typescript-eslint/no-explicit-any
+  SoftDeleteModel.defaultScope = scopeFn
+  ;(SoftDeleteModel as unknown as typeof Model).addGlobalScope('softDelete', scopeFn)
 
   // Override delete to do a soft delete (set deletedAt)
   ;(SoftDeleteModel as unknown as typeof Model).delete = async function (
@@ -74,12 +74,12 @@ export function SoftDeletes<TBase extends typeof Model>(Base: TBase): TBase & So
   } as typeof Model.delete
 
   SoftDeleteModel.withTrashed = function (this: typeof Model): QueryBuilder<PlainObject> {
-    return (this as unknown as { newQueryWithoutScopes(): QueryBuilder<PlainObject> }).newQueryWithoutScopes()
+    return (this as unknown as { withoutGlobalScopes(): QueryBuilder<PlainObject> }).withoutGlobalScopes()
   }
 
   SoftDeleteModel.onlyTrashed = function (this: typeof Model): QueryBuilder<PlainObject> {
     const column = (this as unknown as SoftDeletesStatic).deletedAtColumn
-    return (this as unknown as { newQueryWithoutScopes(): QueryBuilder<PlainObject> }).newQueryWithoutScopes()
+    return (this as unknown as { withoutGlobalScopes(): QueryBuilder<PlainObject> }).withoutGlobalScopes()
       .whereNotNull(column)
   }
 

@@ -4,12 +4,16 @@ import { kebabCase, scaffoldFile } from './utils'
 const ROUTES_DIR = 'routes'
 
 function routeTemplate(prefix: string, controller: string): string {
-  return `import { Route } from '@guren/server'
+  return `import { Router } from '@guren/core'
 import ${controller} from '../app/Http/Controllers/${controller}.js'
 
-export default Route.group('${prefix}', () => {
-  Route.get('/', [${controller}, 'index'])
-})
+export function registerRoutes(router: Router): void {
+  router.group('${prefix}', (group) => {
+    group.get('/', [${controller}, 'index'])
+  })
+}
+
+export default registerRoutes
 `
 }
 

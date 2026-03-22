@@ -1,4 +1,4 @@
-import { Job, createEventManager } from '@guren/server'
+import { Job } from '@guren/core'
 import { Post } from '../Models/Post.js'
 import { User } from '../Models/User.js'
 import { PostCreated } from '../Events/PostCreated.js'
@@ -16,8 +16,6 @@ export class ProcessNewPostJob extends Job<ProcessNewPostPayload> {
   static override maxAttempts = 3
   static override backoff: 'exponential' = 'exponential'
 
-  private events = createEventManager()
-
   async handle(payload: ProcessNewPostPayload): Promise<void> {
     const post = await Post.find(payload.postId)
     if (!post) {
@@ -32,7 +30,7 @@ export class ProcessNewPostJob extends Job<ProcessNewPostPayload> {
     }
 
     // Emit PostCreated event
-    await this.events.emit(new PostCreated(post, author))
+    await this.make('events').emit(new PostCreated(post, author))
     console.log(`[Job] Post ${post.id} processed successfully`)
   }
 

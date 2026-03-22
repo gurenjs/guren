@@ -11,7 +11,7 @@
 `Gate`クラスを使用してゲートを定義します：
 
 ```typescript
-import { Gate } from '@guren/server'
+import { Gate } from '@guren/core'
 
 // シンプルなゲート
 Gate.define('view-dashboard', (user) => {
@@ -35,7 +35,7 @@ Gate.define('delete-comment', async (user, comment) => {
 ゲートメソッドを使用して認可をチェックします：
 
 ```typescript
-import { Gate } from '@guren/server'
+import { Gate } from '@guren/core'
 
 // 許可されているかチェック
 const canView = await Gate.allows('view-dashboard', user)
@@ -83,7 +83,7 @@ Gate.after((user, ability, result) => {
 ### ポリシーの作成
 
 ```typescript
-import { Policy } from '@guren/server'
+import { Policy } from '@guren/core'
 import type { User } from '../Models/User'
 import type { Post } from '../Models/Post'
 
@@ -144,7 +144,7 @@ export class PostPolicy extends Policy<User, Post> {
 Gateクラスにポリシーを登録します：
 
 ```typescript
-import { Gate } from '@guren/server'
+import { Gate } from '@guren/core'
 import { PostPolicy } from './Policies/PostPolicy'
 import { Post } from './Models/Post'
 
@@ -203,7 +203,9 @@ export class PostPolicy extends Policy<User, Post> {
 コントローラーで認可を使用します：
 
 ```typescript
-import { Controller, Gate } from '@guren/server'
+import { Controller, Gate } from '@guren/core'
+import { PostResource } from '@/app/Http/Resources/PostResource'
+import { appPages } from '@/resources/js/pages/contracts'
 
 export default class PostController extends Controller {
   async show(id: number) {
@@ -212,7 +214,7 @@ export default class PostController extends Controller {
     // Gateを使用して認可
     await Gate.authorize('view', this.user(), post)
 
-    return this.inertia('posts/Show', { post })
+    return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
   }
 
   async update(id: number) {
@@ -233,7 +235,7 @@ export default class PostController extends Controller {
 ルートレベルのチェック用認可ミドルウェアを作成します：
 
 ```typescript
-import { Gate, AuthorizationException } from '@guren/server'
+import { Router, Gate, AuthorizationException } from '@guren/core'
 
 export function authorize(ability: string) {
   return async (ctx, next) => {
@@ -248,7 +250,9 @@ export function authorize(ability: string) {
 }
 
 // ルートでの使用
-Route.get('/admin', AdminController, 'index').middleware(authorize('access-admin'))
+export function registerWebRoutes(router: Router): void {
+  router.get('/admin', [AdminController, 'index']).middleware(authorize('access-admin'))
+}
 ```
 
 ## ベストプラクティス
@@ -263,7 +267,7 @@ Route.get('/admin', AdminController, 'index').middleware(authorize('access-admin
 
 ```typescript
 import { describe, it, expect, beforeEach } from 'bun:test'
-import { Gate } from '@guren/server'
+import { Gate } from '@guren/core'
 
 describe('PostPolicy', () => {
   beforeEach(() => {

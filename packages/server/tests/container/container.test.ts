@@ -2,9 +2,6 @@ import { describe, expect, it, beforeEach } from 'bun:test'
 import {
   Container,
   createContainer,
-  setContainer,
-  getContainer,
-  resolve,
   ServiceProvider,
   ProviderManager,
 } from '../../src/container'
@@ -332,23 +329,6 @@ describe('Container', () => {
       expect(aliases.db).toBe('database')
       expect(aliases.log).toBe('logger')
     })
-  })
-})
-
-describe('Global container', () => {
-  it('should set and get global container', () => {
-    const container = createContainer()
-    setContainer(container)
-
-    expect(getContainer()).toBe(container)
-  })
-
-  it('should resolve from global container', () => {
-    const container = createContainer()
-    container.instance('value', 42)
-    setContainer(container)
-
-    expect(resolve<number>('value')).toBe(42)
   })
 })
 

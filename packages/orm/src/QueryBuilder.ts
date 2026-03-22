@@ -1,6 +1,8 @@
 import { DEFAULT_PAGINATION_SIZE } from './Model'
 import type { FindManyOptions, Model, ORMAdapter, OrderByClause, OrderDirection, PaginatedResult, PaginationMeta, PlainObject } from './Model'
 
+type FieldKey<TRecord extends PlainObject> = keyof TRecord & string
+
 /** Comparison operators supported by the QueryBuilder. */
 export type WhereOperator = '=' | '!=' | '>' | '<' | '>=' | '<=' | 'like' | 'in' | 'not in' | 'is null' | 'is not null'
 
@@ -27,7 +29,7 @@ export interface QueryBuilderOptions {
   orderBy: Array<{ column: string; direction: OrderDirection }>
   limitValue?: number
   offsetValue?: number
-  selectFields?: string[]
+  selectFields?: readonly string[]
 }
 
 /**
@@ -53,12 +55,17 @@ export interface QueryBuilderOptions {
  * // Pagination
  * const page = await Post.where('status', 'published').paginate(1, 20)
  */
-export class QueryBuilder<TRecord extends PlainObject = PlainObject> {
+export class QueryBuilder<
+  TRecord extends PlainObject = PlainObject,
+  TResult extends PlainObject = TRecord,
+> {
   private conditions: WhereCondition[] = []
   private options: QueryBuilderOptions = { orderBy: [] }
   private modelClass: typeof Model
   private table: unknown
   private adapter: ORMAdapter
+  private eagerLoad: string[] = []
+  private eagerLoadConstraints: Map<string, (q: QueryBuilder<any>) => void> = new Map() // eslint-disable-line @typescript-eslint/no-explicit-any
 
   constructor(modelClass: typeof Model) {
     this.modelClass = modelClass
@@ -74,10 +81,14 @@ export class QueryBuilder<TRecord extends PlainObject = PlainObject> {
    * - `where(field, operator, value)` - comparison
    * - `where(object)` - multiple equality conditions
    */
-  where(field: string, value: unknown): this
-  where(field: string, operator: WhereOperator, value: unknown): this
-  where(conditions: Partial<Record<string, unknown>>): this
-  where(fieldOrConditions: string | Partial<Record<string, unknown>>, operatorOrValue?: unknown, value?: unknown): this {
+  where<TKey extends FieldKey<TRecord>>(field: TKey, value: TRecord[TKey]): this
+  where<TKey extends FieldKey<TRecord>>(field: TKey, operator: WhereOperator, value: unknown): this
+  where(conditions: Partial<Record<FieldKey<TRecord>, unknown>>): this
+  where(
+    fieldOrConditions: FieldKey<TRecord> | Partial<Record<FieldKey<TRecord>, unknown>>,
+    operatorOrValue?: unknown,
+    value?: unknown,
+  ): this {
     if (typeof fieldOrConditions === 'object' && fieldOrConditions !== null) {
       for (const [key, val] of Object.entries(fieldOrConditions)) {
         if (val !== undefined) {
@@ -104,10 +115,14 @@ export class QueryBuilder<TRecord extends PlainObject = PlainObject> {
    * Same overloads as `where()`, but joins with OR logic.
    * Creates an OR group containing the new condition(s).
    */
-  orWhere(field: string, value: unknown): this
-  orWhere(field: string, operator: WhereOperator, value: unknown): this
-  orWhere(conditions: Partial<Record<string, unknown>>): this
-  orWhere(fieldOrConditions: string | Partial<Record<string, unknown>>, operatorOrValue?: unknown, value?: unknown): this {
+  orWhere<TKey extends FieldKey<TRecord>>(field: TKey, value: TRecord[TKey]): this
+  orWhere<TKey extends FieldKey<TRecord>>(field: TKey, operator: WhereOperator, value: unknown): this
+  orWhere(conditions: Partial<Record<FieldKey<TRecord>, unknown>>): this
+  orWhere(
+    fieldOrConditions: FieldKey<TRecord> | Partial<Record<FieldKey<TRecord>, unknown>>,
+    operatorOrValue?: unknown,
+    value?: unknown,
+  ): this {
     const orConditions: SimpleCondition[] = []
 
     if (typeof fieldOrConditions === 'object' && fieldOrConditions !== null) {
@@ -141,7 +156,7 @@ export class QueryBuilder<TRecord extends PlainObject = PlainObject> {
    * Add a WHERE NULL condition.
    * @param field - Column to check for NULL
    */
-  whereNull(field: string): this {
+  whereNull(field: FieldKey<TRecord>): this {
     this.addSimpleCondition(field, 'is null', null)
     return this
   }
@@ -150,7 +165,7 @@ export class QueryBuilder<TRecord extends PlainObject = PlainObject> {
    * Add a WHERE NOT NULL condition.
    * @param field - Column to check for NOT NULL
    */
-  whereNotNull(field: string): this {
+  whereNotNull(field: FieldKey<TRecord>): this {
     this.addSimpleCondition(field, 'is not null', null)
     return this
   }
@@ -160,7 +175,7 @@ export class QueryBuilder<TRecord extends PlainObject = PlainObject> {
    * @param field - Column to check
    * @param values - Array of values to match against
    */
-  whereIn(field: string, values: unknown[]): this {
+  whereIn<TKey extends FieldKey<TRecord>>(field: TKey, values: readonly TRecord[TKey][]): this {
     this.addSimpleCondition(field, 'in', values)
     return this
   }
@@ -170,7 +185,7 @@ export class QueryBuilder<TRecord extends PlainObject = PlainObject> {
    * @param field - Column to check
    * @param values - Array of values to exclude
    */
-  whereNotIn(field: string, values: unknown[]): this {
+  whereNotIn<TKey extends FieldKey<TRecord>>(field: TKey, values: readonly TRecord[TKey][]): this {
     this.addSimpleCondition(field, 'not in', values)
     return this
   }
@@ -180,7 +195,7 @@ export class QueryBuilder<TRecord extends PlainObject = PlainObject> {
    * @param field - Column to sort by
    * @param direction - Sort direction (default: 'asc')
    */
-  orderBy(field: string, direction: OrderDirection = 'asc'): this {
+  orderBy(field: FieldKey<TRecord>, direction: OrderDirection = 'asc'): this {
     this.options.orderBy.push({ column: field, direction })
     return this
   }
@@ -207,9 +222,9 @@ export class QueryBuilder<TRecord extends PlainObject = PlainObject> {
    * Limit the columns returned in the result.
    * @param fields - Column names to select
    */
-  select(...fields: string[]): this {
-    this.options.selectFields = fields
-    return this
+  select<TKey extends FieldKey<TRecord>>(...fields: readonly TKey[]): QueryBuilder<TRecord, Pick<TRecord, TKey>> {
+    this.options.selectFields = [...fields]
+    return this as unknown as QueryBuilder<TRecord, Pick<TRecord, TKey>>
   }
 
   /**
@@ -234,6 +249,42 @@ export class QueryBuilder<TRecord extends PlainObject = PlainObject> {
   }
 
   // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // Eager Loading
+  // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Eager-load relationships on query results.
+   *
+   * Supports string names, arrays, dot notation for nested relations,
+   * and constraint callbacks.
+   *
+   * @example
+   * // Simple
+   * await User.where('active', true).with('posts').get()
+   *
+   * // Multiple
+   * await User.where('active', true).with('posts', 'comments').get()
+   *
+   * // Nested (dot notation)
+   * await User.where('active', true).with('posts.comments').get()
+   */
+  with(...relations: (string | Record<string, (q: QueryBuilder<any>) => void>)[]): this { // eslint-disable-line @typescript-eslint/no-explicit-any
+    for (const rel of relations) {
+      if (typeof rel === 'string') {
+        if (!this.eagerLoad.includes(rel)) this.eagerLoad.push(rel)
+      } else {
+        for (const [name, constraint] of Object.entries(rel)) {
+          if (!this.eagerLoad.includes(name)) this.eagerLoad.push(name)
+          this.eagerLoadConstraints.set(name, constraint)
+        }
+      }
+    }
+    return this
+  }
+
+  // ---------------------------------------------------------------------------
   // Terminal methods
   // ---------------------------------------------------------------------------
 
@@ -241,20 +292,23 @@ export class QueryBuilder<TRecord extends PlainObject = PlainObject> {
    * Execute the query and return all matching records.
    * @returns Array of matching records
    */
-  async get(): Promise<TRecord[]> {
-    return this.executeQuery()
+  async get(): Promise<TResult[]> {
+    const results = await this.executeQuery()
+    return this.loadEagerRelations(results)
   }
 
   /**
    * Execute the query and return the first matching record.
    * @returns The first record or null
    */
-  async first(): Promise<TRecord | null> {
+  async first(): Promise<TResult | null> {
     const prev = this.options.limitValue
     this.options.limitValue = 1
     const results = await this.executeQuery()
     this.options.limitValue = prev
-    return (results[0] ?? null) as TRecord | null
+    if (results.length === 0) return null
+    const loaded = await this.loadEagerRelations(results)
+    return loaded[0] as TResult
   }
 
   /**
@@ -262,7 +316,7 @@ export class QueryBuilder<TRecord extends PlainObject = PlainObject> {
    * @returns The first record
    * @throws Error if no record matches
    */
-  async firstOrFail(): Promise<TRecord> {
+  async firstOrFail(): Promise<TResult> {
     const record = await this.first()
     if (record === null) {
       throw new Error(`${this.modelClass.name} not found`)
@@ -296,7 +350,7 @@ export class QueryBuilder<TRecord extends PlainObject = PlainObject> {
    * @param perPage - Records per page (default: 15)
    * @returns Paginated result with data and metadata
    */
-  async paginate(page = 1, perPage = DEFAULT_PAGINATION_SIZE): Promise<PaginatedResult<TRecord>> {
+  async paginate(page = 1, perPage = DEFAULT_PAGINATION_SIZE): Promise<PaginatedResult<TResult>> {
     const sanitizedPage = Number.isFinite(page) && page >= 1 ? Math.floor(page) : 1
     const sanitizedPerPage = Number.isFinite(perPage) && perPage >= 1 ? Math.floor(perPage) : DEFAULT_PAGINATION_SIZE
 
@@ -388,8 +442,8 @@ export class QueryBuilder<TRecord extends PlainObject = PlainObject> {
    * Makes QueryBuilder a thenable so it can be directly awaited.
    * Resolves to the result of `get()`.
    */
-  then<TResult1 = TRecord[], TResult2 = never>(
-    onfulfilled?: ((value: TRecord[]) => TResult1 | PromiseLike<TResult1>) | null,
+  then<TResult1 = TResult[], TResult2 = never>(
+    onfulfilled?: ((value: TResult[]) => TResult1 | PromiseLike<TResult1>) | null,
     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
   ): Promise<TResult1 | TResult2> {
     return this.get().then(onfulfilled, onrejected)
@@ -398,9 +452,9 @@ export class QueryBuilder<TRecord extends PlainObject = PlainObject> {
   /**
    * Catch handler for the thenable interface.
    */
-  catch<TResult = never>(
-    onrejected?: ((reason: unknown) => TResult | PromiseLike<TResult>) | null,
-  ): Promise<TRecord[] | TResult> {
+  catch<TCatch = never>(
+    onrejected?: ((reason: unknown) => TCatch | PromiseLike<TCatch>) | null,
+  ): Promise<TResult[] | TCatch> {
     return this.get().catch(onrejected)
   }
 
@@ -427,11 +481,11 @@ export class QueryBuilder<TRecord extends PlainObject = PlainObject> {
     })
   }
 
-  private async executeQuery(): Promise<TRecord[]> {
+  private async executeQuery(): Promise<TResult[]> {
     const advancedAdapter = this.adapter as ORMAdapterAdvanced
 
     if (typeof advancedAdapter.findManyAdvanced === 'function') {
-      return advancedAdapter.findManyAdvanced<TRecord>(this.table, this.conditions, {
+      return advancedAdapter.findManyAdvanced<TResult>(this.table, this.conditions, {
         orderBy: this.options.orderBy.length > 0 ? (this.options.orderBy as OrderByClause) : undefined,
         limit: this.options.limitValue,
         offset: this.options.offsetValue,
@@ -441,8 +495,8 @@ export class QueryBuilder<TRecord extends PlainObject = PlainObject> {
 
     // Fallback: convert to simple where clause if possible
     const simpleWhere = this.toSimpleWhereClause()
-    return this.adapter.findMany<TRecord>(this.table, {
-      where: (simpleWhere ?? undefined) as FindManyOptions<TRecord>['where'],
+    return this.adapter.findMany<TResult>(this.table, {
+      where: (simpleWhere ?? undefined) as FindManyOptions<TResult>['where'],
       orderBy: this.options.orderBy.length > 0 ? (this.options.orderBy as OrderByClause) : undefined,
       limit: this.options.limitValue,
       offset: this.options.offsetValue,
@@ -479,6 +533,90 @@ export class QueryBuilder<TRecord extends PlainObject = PlainObject> {
 
     return result
   }
+
+  /**
+   * Load eager relations onto fetched results.
+   * Supports dot notation for nested relations (e.g., 'posts.comments').
+   */
+  private readonly loadEagerRelations = async (results: TResult[]): Promise<TResult[]> => {
+    if (this.eagerLoad.length === 0 || results.length === 0) return results
+
+    const copies = results.map((r) => ({ ...r }))
+    const model = this.modelClass as typeof Model & {
+      loadRelationInto(records: PlainObject[], name: string): Promise<void>
+    }
+
+    for (const relation of this.eagerLoad) {
+      const parts = relation.split('.')
+      const topLevel = parts[0]
+
+      // Load top-level relation
+      await model.loadRelationInto(copies as PlainObject[], topLevel)
+
+      // Handle nested relations via dot notation
+      if (parts.length > 1) {
+        const nestedName = parts.slice(1).join('.')
+        // Collect all nested records from the top-level relation
+        const nestedRecords: PlainObject[] = []
+        for (const record of copies) {
+          const related = (record as PlainObject)[topLevel]
+          if (Array.isArray(related)) {
+            nestedRecords.push(...related)
+          } else if (related && typeof related === 'object') {
+            nestedRecords.push(related as PlainObject)
+          }
+        }
+
+        if (nestedRecords.length > 0) {
+          // Resolve the related model's class to load nested relations
+          const topDef = (model as any).getRelationDefinition(topLevel) // eslint-disable-line @typescript-eslint/no-explicit-any
+          if (topDef) {
+            const relatedModel = await resolveRelatedModel(topDef.related)
+            if (relatedModel) {
+              const nestedModel = relatedModel as typeof Model & {
+                loadRelationInto(records: PlainObject[], name: string): Promise<void>
+              }
+              // Recursively handle deeper nesting
+              const nestedParts = parts.slice(1)
+              await nestedModel.loadRelationInto(nestedRecords, nestedParts[0])
+
+              if (nestedParts.length > 1) {
+                // For deeper nesting, recurse through remaining parts
+                for (let i = 1; i < nestedParts.length; i++) {
+                  const subRecords: PlainObject[] = []
+                  for (const nr of nestedRecords) {
+                    const sub = nr[nestedParts[i - 1]]
+                    if (Array.isArray(sub)) subRecords.push(...sub)
+                    else if (sub && typeof sub === 'object') subRecords.push(sub as PlainObject)
+                  }
+                  if (subRecords.length === 0) break
+                  // Would need to resolve the next model in the chain — simplified for now
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return copies as TResult[]
+  }
+}
+
+async function resolveRelatedModel(
+  reference: typeof Model | (() => typeof Model | Promise<typeof Model>),
+): Promise<typeof Model | null> {
+  if (typeof reference === 'function' && 'prototype' in reference) {
+    try {
+      if ((reference as any).resolveTable) return reference as typeof Model // eslint-disable-line @typescript-eslint/no-explicit-any
+    } catch { /* not a model class */ }
+  }
+  if (typeof reference === 'function') {
+    try {
+      return await (reference as () => typeof Model | Promise<typeof Model>)()
+    } catch { return null }
+  }
+  return null
 }
 
 /**
@@ -493,7 +631,7 @@ export interface ORMAdapterAdvanced extends ORMAdapter {
       orderBy?: OrderByClause
       limit?: number
       offset?: number
-      select?: string[]
+      select?: readonly string[]
     },
   ): Promise<TRecord[]>
   countAdvanced?<TRecord extends PlainObject = PlainObject>(

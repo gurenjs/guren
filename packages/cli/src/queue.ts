@@ -194,7 +194,7 @@ async function getConfiguredDriver(): Promise<QueueDriver> {
 
   const driver = getQueueDriver()
   if (!driver) {
-    consola.error('Queue driver not configured. Make sure to call setQueueDriver() in your application.')
+    consola.error('Queue driver not configured. Make sure your application boots a queue manager and activates a driver.')
     process.exit(1)
   }
 

@@ -2,6 +2,8 @@
 
 Guren provides a robust queue system for deferring time-consuming tasks to be processed in the background. This is essential for maintaining fast response times while handling operations like sending emails, processing uploads, or making external API calls.
 
+The standard vNext path is: import queue APIs from `@guren/core`, configure the queue manager in a provider, and keep controllers focused on dispatching jobs.
+
 ## Core Concepts
 
 - **Job** – A class that encapsulates a unit of work to be processed asynchronously. Jobs define their own `handle()` method and can specify retry behavior.
@@ -70,7 +72,7 @@ export class SendWelcomeEmailJob extends Job<SendWelcomeEmailPayload> {
 The simplest way to interact with the queue is through the `QueueFacade`:
 
 ```ts
-import { QueueFacade as Queue } from '@guren/server'
+import { QueueFacade as Queue } from '@guren/core'
 
 // Access the default driver
 const driver = Queue.driver()
@@ -78,13 +80,19 @@ const driver = Queue.driver()
 
 ### Manual Setup
 
-You can also configure a queue driver directly:
+You can also configure a queue manager directly:
 
 ```ts
-import { setQueueDriver, MemoryDriver } from '@guren/core'
+import { createQueueManager, MemoryDriver } from '@guren/core'
 
-// Simple setup with memory driver
-setQueueDriver(new MemoryDriver())
+const queue = createQueueManager({
+  default: 'memory',
+  drivers: {
+    memory: () => new MemoryDriver(),
+  },
+})
+
+queue.driver()
 ```
 
 Then dispatch jobs from anywhere in your application:
@@ -146,12 +154,17 @@ bunx guren queue:work --sleep=500 --timeout=120000 --max-jobs=100
 For more control, create workers programmatically:
 
 ```ts
-import { Worker, MemoryDriver, setQueueDriver, registerJob } from '@guren/core'
+import { Worker, MemoryDriver, createQueueManager, registerJob } from '@guren/core'
 import { SendWelcomeEmailJob } from '@/app/Jobs/SendWelcomeEmailJob'
 
 // Setup
-const driver = new MemoryDriver()
-setQueueDriver(driver)
+const queue = createQueueManager({
+  default: 'memory',
+  drivers: {
+    memory: () => new MemoryDriver(),
+  },
+})
+const driver = queue.driver()
 
 // Register job classes (required for worker to find them)
 registerJob(SendWelcomeEmailJob)
@@ -184,15 +197,14 @@ await worker.stop()
 
 ### Using QueueManager
 
-For applications with multiple queue backends, use `QueueManager`:
+For applications with multiple queue backends, use `createQueueManager()`:
 
 ```ts
-import { QueueManager, MemoryDriver, RedisDriver, setQueueDriver } from '@guren/core'
-import { createRedisClient } from '@guren/core'
+import { createQueueManager, MemoryDriver, RedisDriver, createRedisClient } from '@guren/core'
 
 const redis = createRedisClient({ url: process.env.REDIS_URL })
 
-const queueManager = new QueueManager({
+const queueManager = createQueueManager({
   default: 'redis',
   drivers: {
     memory: () => new MemoryDriver(),
@@ -200,7 +212,7 @@ const queueManager = new QueueManager({
   },
 })
 
-// Get the default driver (also sets it as global)
+// Resolve the default driver and make it active for dispatching
 const driver = queueManager.driver()
 
 // Get a specific driver
@@ -212,18 +224,23 @@ const memoryDriver = queueManager.driver('memory')
 For production, use the Redis driver for persistence and multi-server support:
 
 ```ts
-import { RedisDriver } from '@guren/core'
-import { createRedisClient } from '@guren/core'
+import { createQueueManager, RedisDriver, createRedisClient } from '@guren/core'
 
 const redis = createRedisClient({
   url: process.env.REDIS_URL,
 })
 
-const driver = new RedisDriver(redis, {
-  prefix: 'myapp:queue:', // Key prefix (default: 'guren:queue:')
+const queue = createQueueManager({
+  default: 'redis',
+  drivers: {
+    redis: () =>
+      new RedisDriver(redis, {
+        prefix: 'myapp:queue:', // Key prefix (default: 'guren:queue:')
+      }),
+  },
 })
 
-setQueueDriver(driver)
+const driver = queue.driver()
 ```
 
 ## Failed Jobs
@@ -277,7 +294,7 @@ await driver.deleteFailedJob(jobId)
 The queue subsystem is registered as a singleton via a `ServiceProvider`. You can resolve it from the container:
 
 ```ts
-import { container } from '@guren/server'
+import { container } from '@guren/core'
 
 const queue = container.make('queue') // QueueManager
 const driver = queue.driver()
@@ -288,7 +305,7 @@ const driver = queue.driver()
 Swap the queue manager in tests to prevent real job dispatching:
 
 ```ts
-import { container } from '@guren/server'
+import { container } from '@guren/core'
 import { QueueManager, MemoryDriver } from '@guren/core'
 
 test('jobs are dispatched', async () => {
@@ -310,21 +327,20 @@ For testing, use the Memory driver and process jobs synchronously:
 
 ```ts
 import { describe, test, expect, beforeEach } from 'bun:test'
-import {
-  MemoryDriver,
-  setQueueDriver,
-  registerJob,
-  processJob,
-  clearJobRegistry,
-} from '@guren/core'
+import { MemoryDriver, createQueueManager, registerJob, processJob, clearJobRegistry } from '@guren/core'
 import { SendWelcomeEmailJob } from '@/app/Jobs/SendWelcomeEmailJob'
 
 describe('SendWelcomeEmailJob', () => {
   let driver: MemoryDriver
 
   beforeEach(() => {
-    driver = new MemoryDriver()
-    setQueueDriver(driver)
+    const queue = createQueueManager({
+      default: 'memory',
+      drivers: {
+        memory: () => new MemoryDriver(),
+      },
+    })
+    driver = queue.driver()
     clearJobRegistry()
     registerJob(SendWelcomeEmailJob)
   })

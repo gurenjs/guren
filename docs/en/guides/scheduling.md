@@ -2,6 +2,8 @@
 
 Guren provides a fluent API for defining scheduled tasks within your application. Instead of managing multiple cron entries, you can define your entire task schedule in code.
 
+The standard vNext path is: import scheduling APIs from `@guren/core`, register schedules centrally, and keep feature code focused on the jobs or commands being scheduled.
+
 ## Core Concepts
 
 - **Scheduler** – Manages and runs scheduled tasks at the appropriate times.

@@ -12,8 +12,8 @@
 - `bun install` installs workspace dependencies.
 - `bun run dev` boots the Bun API server (`bin/serve.ts`) and automatically launches the Vite dev server for HMR.
 - `bun run smoke` executes `smoke.ts` to verify critical routes after boot.
-- `bun run build` builds production assets via Vite; follow with `bun run preview` for a static preview.
-- `bun run routes:types` regenerates `types/generated/routes.d.ts`; rerun after editing `routes/web.ts` or adding route params.
+- `bun run build` builds production assets via Vite; follow with `bun run preview` to boot the production Bun server against the built manifests.
+- `bun run codegen` regenerates `types/generated/routes.d.ts`, `.guren/routes.gen.ts`, and `.guren/pages.gen.ts`; rerun after editing `routes/web.ts` or `resources/js/pages/**/*`.
 - Database helpers: `bun run db:make` (generate migration), `bun run db:migrate` (apply), `bun run db:seed` (seed fixtures).
 
 ## Coding Style & Naming Conventions

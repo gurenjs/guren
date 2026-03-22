@@ -6,13 +6,13 @@ Guren はグローバルエラーハンドラーからコントローラーレ�
 
 Hono の `onError` メソッドを使用してグローバルエラーハンドラーを登録：
 
-> 登録は `src/app.ts` で `new Application(...)` の直後、または `boot(hono)` コールバック内で行います。`app.boot()` の前に設定してください。
+> 登録は `src/app.ts` で `createApp(...)` の直後、または `boot(hono)` コールバック内で行います。`app.boot()` の前に設定してください。
 
 ```ts
-import { Application } from '@guren/server'
+import { createApp } from '@guren/core'
 import { HTTPException } from 'hono/http-exception'
 
-const app = new Application()
+const app = createApp()
 
 app.hono.onError((error, ctx) => {
   console.error('未処理のエラー:', error)
@@ -41,8 +41,11 @@ app.hono.onError((error, ctx) => {
 
 ```ts
 import { HTTPException } from 'hono/http-exception'
+import { Router } from '@guren/core'
 
-Route.get('/posts/:id', async (ctx) => {
+const router = new Router()
+
+router.get('/posts/:id', async (ctx) => {
   const post = await Post.find(ctx.req.param('id'))
 
   if (!post) {
@@ -99,8 +102,10 @@ app.hono.notFound((ctx) => {
 `validateBody`/`validateQuery`/`validateParams`、`findOrFail`、`userOrFail` を使えば、ほとんどのエラーハンドリングは自動です — try-catch は不要です：
 
 ```ts
-import { Controller } from '@guren/server'
+import { Controller } from '@guren/core'
 import { z } from 'zod'
+import { PostResource } from '@/app/Http/Resources/PostResource'
+import { appPages } from '@/resources/js/pages/contracts'
 
 const StorePostSchema = z.object({ title: z.string().min(1), content: z.string().min(10) })
 const PostIdSchema = z.object({ id: z.coerce.number().int().positive() })
@@ -116,7 +121,7 @@ export default class PostController extends Controller {
   async show(): Promise<Response> {
     const { id } = this.validateParams(PostIdSchema)       // 不正パラメータ時 422
     const post = await Post.findOrFail(id)                  // 見つからない場合 404
-    return this.inertia('posts/Show', { post })
+    return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
   }
 }
 ```
@@ -128,7 +133,7 @@ export default class PostController extends Controller {
 `formatValidationErrors` を使用して Zod エラーをフラットなオブジェクトに変換：
 
 ```ts
-import { formatValidationErrors } from '@guren/server'
+import { formatValidationErrors } from '@guren/core'
 import { z } from 'zod'
 
 const schema = z.object({
@@ -155,7 +160,7 @@ const errors = formatValidationErrors(result.error, '入力内容を確認して
 再利用可能なエラーハンドリングミドルウェアを作成：
 
 ```ts
-import { defineMiddleware } from '@guren/server'
+import { defineMiddleware } from '@guren/core'
 import { HTTPException } from 'hono/http-exception'
 
 export const errorHandler = defineMiddleware(async (ctx, next) => {
@@ -236,20 +241,23 @@ export default function Error({ status, message }: { status: number; message: st
 `Model.findOrFail()` を使えば、手動の null チェックは不要です。見つからない場合は `ModelNotFoundException`（404）が自動的にスローされます：
 
 ```ts
+import { PostResource } from '@/app/Http/Resources/PostResource'
+import { appPages } from '@/resources/js/pages/contracts'
+
 // Before — 手動 null チェック
 async show(): Promise<Response> {
   const post = await Post.find(Number(this.request.param('id')))
   if (!post) {
     throw new HTTPException(404, { message: '投稿が見つかりません' })
   }
-  return this.inertia('posts/Show', { post })
+  return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
 }
 
 // After — 自動 404
 async show(): Promise<Response> {
   const { id } = this.validateParams(PostIdSchema)
   const post = await Post.findOrFail(id)  // ModelNotFoundException（404）をスロー
-  return this.inertia('posts/Show', { post })
+  return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
 }
 ```
 
@@ -265,7 +273,7 @@ import {
   AuthorizationException,
   ValidationException,
   MethodNotAllowedException,
-} from '@guren/server'
+} from '@guren/core'
 import { ModelNotFoundException } from '@guren/orm'
 
 // 404 Not Found
@@ -341,12 +349,12 @@ app.hono.onError((error, ctx) => {
 
 ### デバッグページ
 
-開発環境では、Guren はスタックトレースやリクエスト情報を含む詳細なデバッグページを自動的に表示します。`Application` の `debug` オプションで制御できます:
+開発環境では、Guren はスタックトレースやリクエスト情報を含む詳細なデバッグページを自動的に表示します。`createApp()` の `debug` オプションで制御できます:
 
 ```ts
-import { Application } from '@guren/server'
+import { createApp } from '@guren/core'
 
-const app = new Application({
+const app = createApp({
   debug: process.env.NODE_ENV !== 'production',
 })
 ```

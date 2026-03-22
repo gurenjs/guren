@@ -1,4 +1,5 @@
 import type React from 'react'
+import { resolvePagePath, type PageManifest } from './contracts'
 
 export type PageModule = { default: React.ComponentType<any> }
 export type PageLoader = () => Promise<PageModule>
@@ -6,6 +7,7 @@ export type ResolveComponent = (name: string) => Promise<PageModule>
 
 export interface PagesResolverOptions {
   pages?: Record<string, () => Promise<unknown>>
+  pageManifest?: PageManifest
   resolveComponentPath?: (name: string) => string
 }
 
@@ -15,7 +17,18 @@ export function createPagesResolver(options: PagesResolverOptions): ResolveCompo
   }
 
   const pages = options.pages as Record<string, PageLoader>
-  const resolveComponentPath = options.resolveComponentPath ?? defaultResolveComponentPath
+  const resolveComponentPath =
+    options.resolveComponentPath ??
+    (options.pageManifest
+      ? (name: string) => {
+          const path = resolvePagePath(name, options.pageManifest!)
+          if (!path) {
+            throw new Error(`Unable to locate Inertia page "${name}" in the generated page manifest.`)
+          }
+
+          return path
+        }
+      : defaultResolveComponentPath)
 
   return (name) => {
     const path = resolveComponentPath(name)

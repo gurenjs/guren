@@ -4,12 +4,17 @@ import {
   createControllerModuleMock,
   readInertiaResponse,
 } from '@guren/testing'
-import type { Context } from '@guren/server'
+import type { Context } from '@guren/core'
 
 vi.mock('guren', () => createControllerModuleMock())
-vi.mock('@guren/core', () => createControllerModuleMock())
-vi.mock('@guren/server', () => createControllerModuleMock())
-
+vi.mock('@guren/core', async () => {
+  const actual = await vi.importActual<typeof import('@guren/core')>('@guren/core')
+  return {
+    ...actual,
+    ...createControllerModuleMock(),
+    ServiceProvider: actual.ServiceProvider,
+  }
+})
 import DashboardController from '../../app/Http/Controllers/DashboardController.js'
 
 function createAuthStub(user: unknown) {

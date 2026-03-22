@@ -276,9 +276,16 @@ export class WelcomeNotification extends Notification {
 ### キューのセットアップ
 
 ```ts
-import { setQueueDriver, MemoryDriver } from '@guren/core'
+import { createQueueManager, MemoryDriver } from '@guren/core'
 
-setQueueDriver(new MemoryDriver())
+const queue = createQueueManager({
+  default: 'memory',
+  drivers: {
+    memory: () => new MemoryDriver(),
+  },
+})
+
+queue.driver()
 
 // shouldQueue = trueの通知はキューに入る
 await notifications.send(user, new WelcomeNotification())

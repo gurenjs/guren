@@ -362,6 +362,11 @@ describe('Paginator', () => {
       expect(links.last).toBe('/api/items?page=10')
       expect(links.prev).toBe('/api/items?page=1')
       expect(links.next).toBe('/api/items?page=3')
+      expect(links.pages[1]).toEqual({
+        page: 2,
+        url: '/api/items?page=2',
+        active: true,
+      })
     })
 
     it('returns null links without path', () => {
@@ -370,6 +375,11 @@ describe('Paginator', () => {
 
       expect(links.first).toBeNull()
       expect(links.prev).toBeNull()
+      expect(links.pages[0]).toEqual({
+        page: 1,
+        url: null,
+        active: true,
+      })
     })
 
     it('prev is null on first page', () => {
@@ -582,6 +592,26 @@ describe('paginate helper', () => {
 
     expect(paginator).toBeInstanceOf(Paginator)
     expect(paginator.items()).toEqual([1, 2, 3])
+  })
+
+  it('creates paginator from a paginated result', () => {
+    const paginator = paginate({
+      data: [1, 2, 3],
+      meta: {
+        total: 23,
+        perPage: 10,
+        currentPage: 3,
+      },
+    }, {
+      path: '/api/items',
+      query: { per_page: '10' },
+    })
+
+    expect(paginator).toBeInstanceOf(Paginator)
+    expect(paginator.currentPage()).toBe(3)
+    expect(paginator.perPage()).toBe(10)
+    expect(paginator.links().prev).toBe('/api/items?per_page=10&page=2')
+    expect(paginator.links().next).toBeNull()
   })
 })
 

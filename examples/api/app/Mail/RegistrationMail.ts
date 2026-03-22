@@ -1,4 +1,4 @@
-import { mail, getMailManager } from '@guren/server'
+import { mail, type MailManager } from '@guren/core'
 
 interface RegistrationMailData {
   email: string
@@ -8,13 +8,7 @@ interface RegistrationMailData {
 /**
  * Send a registration confirmation email.
  */
-export async function sendRegistrationMail(data: RegistrationMailData): Promise<void> {
-  const manager = getMailManager()
-  if (!manager) {
-    console.log(`[Mail] Would send registration email to ${data.email}`)
-    return
-  }
-
+export async function sendRegistrationMail(manager: MailManager, data: RegistrationMailData): Promise<void> {
   await mail(manager)
     .to(data.email)
     .subject('Welcome to the API!')

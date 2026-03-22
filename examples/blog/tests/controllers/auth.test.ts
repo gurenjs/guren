@@ -4,11 +4,21 @@ import {
   createControllerModuleMock,
   readInertiaResponse,
 } from '@guren/testing'
-import type { Context } from '@guren/server'
+import type { Context } from '@guren/core'
+
+const { mockEmit } = vi.hoisted(() => ({
+  mockEmit: vi.fn(),
+}))
 
 vi.mock('guren', () => createControllerModuleMock())
-vi.mock('@guren/core', () => createControllerModuleMock())
-vi.mock('@guren/server', () => createControllerModuleMock())
+vi.mock('@guren/core', async () => {
+  const actual = await vi.importActual<typeof import('@guren/core')>('@guren/core')
+  return {
+    ...actual,
+    ...createControllerModuleMock(),
+    ServiceProvider: actual.ServiceProvider,
+  }
+})
 
 import LoginController from '../../app/Http/Controllers/Auth/LoginController.js'
 
@@ -162,7 +172,7 @@ describe('LoginController', () => {
       )
     })
 
-    it('returns error for invalid credentials', async () => {
+    it('throws ValidationException for invalid credentials', async () => {
       const auth = createAuthStub()
       auth.attempt.mockResolvedValue(false)
 
@@ -174,14 +184,10 @@ describe('LoginController', () => {
       }) as unknown as Context
       controller.setContext(ctx)
 
-      const response = await controller.store()
-      const body = await response.json()
-
-      expect(response.status).toBe(422)
-      expect(body.errors.message).toBe('Invalid credentials.')
+      await expect(controller.store()).rejects.toThrow('The given data was invalid.')
     })
 
-    it('validates required email field', async () => {
+    it('throws ValidationException for missing email', async () => {
       const auth = createAuthStub()
       const controller = createLoginController(auth)
       const ctx = createControllerContext('http://blog.test/login', {
@@ -191,13 +197,11 @@ describe('LoginController', () => {
       }) as unknown as Context
       controller.setContext(ctx)
 
-      const response = await controller.store()
-
-      expect(response.status).toBe(422)
+      await expect(controller.store()).rejects.toThrow()
       expect(auth.attempt).not.toHaveBeenCalled()
     })
 
-    it('validates required password field', async () => {
+    it('throws ValidationException for missing password', async () => {
       const auth = createAuthStub()
       const controller = createLoginController(auth)
       const ctx = createControllerContext('http://blog.test/login', {
@@ -207,13 +211,11 @@ describe('LoginController', () => {
       }) as unknown as Context
       controller.setContext(ctx)
 
-      const response = await controller.store()
-
-      expect(response.status).toBe(422)
+      await expect(controller.store()).rejects.toThrow()
       expect(auth.attempt).not.toHaveBeenCalled()
     })
 
-    it('validates email format', async () => {
+    it('throws ValidationException for invalid email format', async () => {
       const auth = createAuthStub()
       const controller = createLoginController(auth)
       const ctx = createControllerContext('http://blog.test/login', {
@@ -223,9 +225,7 @@ describe('LoginController', () => {
       }) as unknown as Context
       controller.setContext(ctx)
 
-      const response = await controller.store()
-
-      expect(response.status).toBe(422)
+      await expect(controller.store()).rejects.toThrow()
       expect(auth.attempt).not.toHaveBeenCalled()
     })
 

@@ -20,6 +20,9 @@ describe('gurenVitePlugin', () => {
     expect(config.build.outDir).toBe('public/assets')
     expect(config.build.manifest).toBe(true)
     expect(config.build.ssrManifest).toBe(true)
+    expect(config.build.copyPublicDir).toBe(false)
+    expect(config.publicDir).toBe(false)
+    expect(typeof config.build.rollupOptions.output.manualChunks).toBe('function')
     expect(config.base).toBe('/public/assets/')
   })
 

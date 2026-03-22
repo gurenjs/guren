@@ -9,6 +9,7 @@ describe('@guren/core', () => {
     expect(core.Controller).toBeDefined()
     expect(core.Model).toBeDefined()
     expect(core.DrizzleAdapter).toBeDefined()
+    expect(core.defineModel).toBeDefined()
   })
 
   it('bin entry proxies to @guren/cli', async () => {

@@ -4,8 +4,9 @@ import { resolveSharedInertiaProps, type ResolvedSharedInertiaProps } from './in
 import { AUTH_CONTEXT_KEY } from '../http/middleware/auth'
 import { parseRequestPayload } from '../http/request'
 import type { AuthContext } from '../auth'
-import type { FormRequest } from '../http/FormRequest'
+import type { ServiceBindings } from '../container/bindings'
 import { ValidationException } from '../errors/exceptions/ValidationException'
+import { getApiTokenOrFail } from '../auth/api-token'
 
 /**
  * Duck-type interface for Zod-like schemas.
@@ -14,12 +15,28 @@ import { ValidationException } from '../errors/exceptions/ValidationException'
 interface ZodLikeSchema<T> {
   safeParse(data: unknown):
     | { success: true; data: T }
-    | { success: false; error: { issues: Array<{ path: (string | number)[]; message: string }> } }
+    | { success: false; error: { issues: Array<{ path: PropertyKey[]; message: string }> } }
 }
+
+/**
+ * Result type for safe validation methods (discriminated union).
+ */
+export type SafeValidationResult<T> =
+  | { success: true; data: T }
+  | { success: false; errors: Record<string, string> }
 
 type DefaultInertiaProps = Record<string, unknown>
 
 export type AuthPayload = Record<string, unknown> & { user: unknown }
+
+export type InertiaPageContractLike<
+  Component extends string = string,
+  Props extends DefaultInertiaProps = DefaultInertiaProps,
+> = {
+  id: Component
+  component?: Component
+  __props?: Props
+}
 
 type InertiaResponseMarker<Component extends string, Props extends DefaultInertiaProps> = {
   __gurenInertia: {
@@ -54,6 +71,9 @@ export interface RedirectOptions {
 
 type InertiaResponseOptions = Omit<InertiaOptions, 'url' | 'request'> & { url?: string }
 
+type InertiaPageComponent<TPage extends InertiaPageContractLike> = TPage['id']
+type InertiaPageProps<TPage extends InertiaPageContractLike> = NonNullable<TPage['__props']>
+
 /**
  * Constructor type for controllers with optional DI.
  */
@@ -84,9 +104,47 @@ export class Controller {
 
   private context?: Context
   private parsedBody?: Record<string, unknown>
+  private resolvedModels?: Map<unknown, unknown>
 
   setContext(context: Context): void {
     this.context = context
+  }
+
+  /**
+   * Store a resolved model instance from route model binding.
+   * @internal Called by the router, not intended for direct use.
+   */
+  setResolvedModel(modelClass: unknown, instance: unknown): void {
+    if (!this.resolvedModels) this.resolvedModels = new Map()
+    this.resolvedModels.set(modelClass, instance)
+  }
+
+  /**
+   * Retrieve a model instance resolved via route model binding.
+   *
+   * @example
+   * ```typescript
+   * // routes/web.ts
+   * posts.get('/:id', { bind: { id: Post }, name: 'posts.show' }, [PostController, 'show'])
+   *
+   * // PostController.ts
+   * async show() {
+   *   const post = this.model(Post)  // typed as PostRecord
+   *   return this.inertia(pages.posts.Show, { post })
+   * }
+   * ```
+   */
+  protected model<T extends { findOrFail(...args: any[]): Promise<any> }>(
+    modelClass: T,
+  ): Awaited<ReturnType<T['findOrFail']>> {
+    const instance = this.resolvedModels?.get(modelClass)
+    if (instance === undefined) {
+      throw new Error(
+        `No model binding found for ${(modelClass as { name?: string }).name ?? 'unknown'}. ` +
+        'Ensure the route has a matching bind option in RouteContractOptions.',
+      )
+    }
+    return instance as Awaited<ReturnType<T['findOrFail']>>
   }
 
   protected get ctx(): Context {
@@ -110,16 +168,62 @@ export class Controller {
     return auth
   }
 
+  protected make<K extends keyof ServiceBindings>(key: K): ServiceBindings[K]
+  protected make<T>(key: string): T
+  protected make(key: string): unknown {
+    return this.ctx.var.container.make(key)
+  }
+
+  // ─── API Token Helpers ─────────────────────────────────────────
+
+  /**
+   * Get the authenticated API token or throw AuthenticationException.
+   *
+   * @example
+   * ```typescript
+   * const { userId, abilities } = this.apiToken()
+   * ```
+   */
+  protected apiToken() {
+    return getApiTokenOrFail(this.ctx)
+  }
+
+  /**
+   * Get the authenticated user ID from the API token.
+   *
+   * @example
+   * ```typescript
+   * const userId = this.apiTokenUserId()
+   * ```
+   */
+  protected apiTokenUserId(): string | number {
+    return this.apiToken().userId
+  }
+
   // ─── Response Helpers ───────────────────────────────────────────
 
+  protected async inertia<TPage extends InertiaPageContractLike>(
+    page: TPage,
+    props: InertiaPageProps<TPage>,
+    options?: InertiaResponseOptions,
+  ): Promise<InertiaResponse<InertiaPageComponent<TPage>, InertiaPageProps<TPage> & ResolvedSharedInertiaProps>>
   protected async inertia<Component extends string, Props extends DefaultInertiaProps>(
     component: Component,
+    props: Props,
+    options?: InertiaResponseOptions,
+  ): Promise<InertiaResponse<Component, Props & ResolvedSharedInertiaProps>>
+  protected async inertia<Component extends string, Props extends DefaultInertiaProps>(
+    componentOrPage: Component | InertiaPageContractLike<Component, Props>,
     props: Props,
     options: InertiaResponseOptions = {},
   ): Promise<InertiaResponse<Component, Props & ResolvedSharedInertiaProps>> {
     const ctx = this.ctx
     const { url: overrideUrl, ...rest } = options
     const url = overrideUrl ?? ctx.req.path ?? ctx.req.url ?? ''
+    const component =
+      typeof componentOrPage === 'string'
+        ? componentOrPage
+        : componentOrPage.component ?? componentOrPage.id
 
     const sharedProps = await resolveSharedInertiaProps(ctx)
     const propsWithShared = { ...sharedProps, ...props } as Props & ResolvedSharedInertiaProps
@@ -270,26 +374,6 @@ export class Controller {
 
   // ─── Validation ─────────────────────────────────────────────────
 
-  /**
-   * Validate the request using a FormRequest class.
-   * Returns typed, validated data. Throws ValidationException on failure.
-   *
-   * @example
-   * ```typescript
-   * async store() {
-   *   const data = await this.validate(StorePostRequest)
-   *   const post = await Post.create(data)
-   *   return this.redirect('/posts')
-   * }
-   * ```
-   */
-  protected async validate<T>(
-    requestClass: new () => FormRequest<T>,
-  ): Promise<T> {
-    const formRequest = new requestClass()
-    return formRequest.handle(this.ctx)
-  }
-
   // ─── Zod Validation Helpers ────────────────────────────────────
 
   /**
@@ -339,12 +423,69 @@ export class Controller {
     return this.runValidation(schema, params)
   }
 
+  // ─── Safe Validation (no-throw) ──────────────────────────────
+
+  /**
+   * Validate the request body against a Zod-like schema without throwing.
+   * Returns a discriminated union: `{ success: true, data }` or `{ success: false, errors }`.
+   *
+   * @example
+   * ```typescript
+   * const result = await this.validateBodySafe(CreatePostSchema)
+   * if (!result.success) {
+   *   return this.inertia('Posts/New', { errors: result.errors }, { status: 422 })
+   * }
+   * const { title, body } = result.data
+   * ```
+   */
+  protected async validateBodySafe<T>(schema: ZodLikeSchema<T>): Promise<SafeValidationResult<T>> {
+    const body = await this.getBody()
+    return this.runValidationSafe(schema, body)
+  }
+
+  /**
+   * Validate query parameters against a Zod-like schema without throwing.
+   * Returns a discriminated union: `{ success: true, data }` or `{ success: false, errors }`.
+   */
+  protected validateQuerySafe<T>(schema: ZodLikeSchema<T>): SafeValidationResult<T> {
+    const queries = this.ctx.req.queries()
+    const flat: Record<string, unknown> = {}
+    for (const [key, values] of Object.entries(queries)) {
+      flat[key] = values.length === 1 ? values[0] : values
+    }
+    return this.runValidationSafe(schema, flat)
+  }
+
+  /**
+   * Validate route parameters against a Zod-like schema without throwing.
+   * Returns a discriminated union: `{ success: true, data }` or `{ success: false, errors }`.
+   */
+  protected validateParamsSafe<T>(schema: ZodLikeSchema<T>): SafeValidationResult<T> {
+    const params = this.ctx.req.param() as Record<string, string>
+    return this.runValidationSafe(schema, params)
+  }
+
   private runValidation<T>(schema: ZodLikeSchema<T>, data: unknown): T {
     const result = schema.safeParse(data)
     if (result.success) {
       return result.data
     }
     throw ValidationException.fromZodError(result.error)
+  }
+
+  private runValidationSafe<T>(schema: ZodLikeSchema<T>, data: unknown): SafeValidationResult<T> {
+    const result = schema.safeParse(data)
+    if (result.success) {
+      return { success: true, data: result.data }
+    }
+    const errors: Record<string, string> = {}
+    for (const issue of result.error.issues) {
+      const field = issue.path.join('.') || issue.message
+      if (!errors[field]) {
+        errors[field] = issue.message
+      }
+    }
+    return { success: false, errors }
   }
 
   // ─── Private Helpers ────────────────────────────────────────────

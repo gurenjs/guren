@@ -1,8 +1,12 @@
 export * from '@guren/server'
 export {
   Model,
+  defineModel,
+  type InferModelRecord,
+  type InferModelInsert,
   DrizzleAdapter,
   createPostgresDatabase,
+  createSqliteDatabase,
   runSeeders,
   defineSeeder,
   loadSeeders,
@@ -19,12 +23,15 @@ export type {
   PaginatedResult,
   PaginationMeta as OrmPaginationMeta,
   ORMAdapter,
+  WithRelations,
   HasManyRelationResult,
   BelongsToRelationResult,
   HasManyRecord,
   BelongsToRecord,
   PostgresDatabase,
   PostgresDatabaseOptions,
+  SqliteDatabase,
+  SqliteDatabaseOptions,
   SeederContext,
   SeederHandler,
 } from '@guren/orm'

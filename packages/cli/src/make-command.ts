@@ -4,7 +4,7 @@ import { kebabCase, scaffoldFile } from './utils'
 const COMMANDS_DIR = 'app/Console/Commands'
 
 function commandTemplate(className: string, commandName: string): string {
-  return `import { Command } from '@guren/server'
+  return `import { Command } from '@guren/core'
 
 export default class ${className} extends Command {
   static signature = '${commandName}'

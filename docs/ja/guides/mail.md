@@ -2,6 +2,8 @@
 
 Gurenはメール送信のための流暢なAPIを提供し、複数のトランスポートバックエンドをサポートしています。メールシステムはキューシステムと統合して非同期送信を実現し、HTMLテンプレート、添付ファイルなどをサポートします。
 
+vNext の標準導線は、`@guren/core` から mail API を import し、provider で mail manager を構成し、controller では mail の組み立てと dispatch に集中する形です。
+
 ## コアコンセプト
 
 - **MailManager** – メールトランスポートを設定・アクセスするための中央レジストリ。
@@ -10,12 +12,14 @@ Gurenはメール送信のための流暢なAPIを提供し、複数のトラン
 
 ## 基本的な使い方
 
-### ファサードを使用（推奨）
+### コンテナ束縛ファサードを使用
 
-`MailFacade` を使うと、コンテナから `MailManager` を遅延解決してシンプルにメールを送信できます:
+アプリケーションコンテナからファサードを作ると、`MailManager` を明示的に受け回さずにメールを送信できます:
 
 ```ts
-import { MailFacade as Mail } from '@guren/server'
+import { createFacades } from '@guren/core'
+
+const { Mail } = createFacades(app.container)
 
 await Mail.to('user@example.com')
   .subject('Hello!')
@@ -259,15 +263,22 @@ await mail(mailManager)
 
 ## キューによるメール送信
 
-キューシステムを使用してメールを非同期で送信：
+キューシステムを使用してメールを非同期で送信します。実アプリでは mail manager を provider で構成し、container から利用します。`setMailManager()` は queued mail job から同じ manager を参照するための bridge です：
 
 ```ts
-import { mail, setMailManager, setQueueDriver, MemoryDriver } from '@guren/core'
+import { mail, setMailManager, createQueueManager, MemoryDriver } from '@guren/core'
 
-// キュードライバを設定
-setQueueDriver(new MemoryDriver())
+// キューマネージャーを設定
+const queue = createQueueManager({
+  default: 'memory',
+  drivers: {
+    memory: () => new MemoryDriver(),
+  },
+})
 
-// キュージョブ用にグローバルメールマネージャーを設定
+queue.driver()
+
+// provider で構成した mail manager を queued job へ bridge する
 setMailManager(mailManager)
 
 // 即座に送信せずキューに入れる

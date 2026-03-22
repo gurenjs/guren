@@ -10,37 +10,40 @@ Guren は Inertia.js と React を組み合わせ、単一ページアプリの�
 - `resources/css/app.css`: Tailwind など CSS のエントリーポイント。
 
 ## ページコンポーネント
-ファイル名は `this.inertia()` に渡すコンポーネント名と対応します:
+ファイル名は `resources/js/pages/contracts.ts` の page contract と対応します:
 
 ```ts
 // Controller
-return this.inertia('posts/Index', { posts })
+return this.inertia(appPages.posts.index, {
+  data,
+  pagination,
+})
 ```
 
 ```tsx
 // resources/js/pages/posts/Index.tsx
-import type { PostRecord } from '@/app/Models/Post'
+import type { PageProps } from '@guren/inertia-client/contracts'
 import { Head, Link } from '@inertiajs/react'
+import { appPages } from '../contracts'
 
-type Props = {
-  posts: PostRecord[]
-}
+type Props = PageProps<typeof appPages.posts.index>
 
-export default function Index({ posts }: Props) {
+export default function Index({ data, pagination }: Props) {
   return (
     <>
       <Head title="Posts" />
       <div className="space-y-4">
-        {posts.map((post) => (
+        {data.map((post) => (
           <article key={post.id} className="rounded border border-slate-200 p-4">
             <h2 className="text-lg font-semibold">{post.title}</h2>
-            <p className="text-slate-600">{post.body}</p>
+            <p className="text-slate-600">{post.excerpt}</p>
             <Link className="text-blue-600 underline" href={`/posts/${post.id}`}>
               Read more
             </Link>
           </article>
         ))}
       </div>
+      <p className="mt-4 text-sm text-slate-500">{pagination.meta.total} posts</p>
     </>
   )
 }
@@ -99,10 +102,10 @@ Inertia のヘルパーでクライアントナビゲーションとフォーム
 - 本番ではビルド済みクライアントマニフェスト (`public/assets/.vite/manifest.json`) を検出し、`GUREN_INERTIA_ENTRY`/`GUREN_INERTIA_STYLES` を設定。
 - SSR マニフェスト (`public/assets/.vite/ssr-manifest.json`) を検出し、`GUREN_INERTIA_SSR_ENTRY` / `GUREN_INERTIA_SSR_MANIFEST` を設定してサーバーレンダリングを可能にします。
 
-必要なアセットを生成するにはクライアントと SSR の両方をビルドします:
+必要なアセットを生成するには `codegen` を含む標準 build を実行します:
 
 ```bash
-bunx vite build && bunx vite build --ssr
+bun run build
 ```
 
 コンポーネント解決をカスタムしたい場合は `resources/js/ssr.tsx` を編集し、`renderInertiaServer()` に別の `resolve` を渡します。`autoConfigureInertiaAssets` を使わない場合は、`configureInertiaAssets` を呼ぶ前に必要な環境変数を自前でセットしてください。
@@ -112,6 +115,6 @@ bunx vite build && bunx vite build --ssr
 - `tsconfig.json` で設定したパスエイリアスを使い、長い相対パスを避けます。
 
 ## ホットリロード
-`bun run dev` を実行するとフロントエンドとバックエンドが同期して動き、Bun が自動で Vite dev サーバーを起動するため TSX 変更は即時リロードされます。ワークフローを調整したい場合は `@guren/server` の `startViteDevServer()` を使って自前で Vite を制御できます。
+`bun run dev` を実行するとフロントエンドとバックエンドが同期して動き、Bun が自動で Vite dev サーバーを起動するため TSX 変更は即時リロードされます。ワークフローを調整したい場合は `@guren/core/runtime` の `startViteDevServer()` を使って自前で Vite を制御できます。
 
 これらのパターンでページとコンポーネントを構成すれば、React と Inertia だけでミニマムなボイラープレートの SPA 体験を得られます。

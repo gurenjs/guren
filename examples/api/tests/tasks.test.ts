@@ -2,31 +2,29 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import {
   createControllerContext,
   createControllerModuleMock,
-} from '@guren/testing'
-import type { Context } from '@guren/server'
+} from '@guren/testing/controller'
+import type { Context } from '@guren/core'
+import { paginate } from '@guren/core'
 
 const {
-  mockGetApiToken,
   mockTaskCreate,
   mockTaskFirst,
   mockTaskFind,
-  mockTaskPaginate,
   mockTaskUpdate,
   mockTaskDelete,
+  mockGetUserTasks,
+  mockEmit,
+  mockPaginate,
+  MockTaskCacheService,
 } = vi.hoisted(() => ({
-  mockGetApiToken: vi.fn(),
   mockTaskCreate: vi.fn(),
   mockTaskFirst: vi.fn(),
   mockTaskFind: vi.fn(),
-  mockTaskPaginate: vi.fn(),
   mockTaskUpdate: vi.fn(),
   mockTaskDelete: vi.fn(),
-}))
-
-vi.mock('@guren/server', () => ({
-  ...createControllerModuleMock(),
-  getApiToken: mockGetApiToken,
-  paginate: vi.fn().mockReturnValue({
+  mockGetUserTasks: vi.fn(),
+  mockEmit: vi.fn(),
+  mockPaginate: vi.fn().mockReturnValue({
     withPath: vi.fn().mockReturnThis(),
     withQuery: vi.fn().mockReturnThis(),
     toResource: vi.fn().mockReturnValue({
@@ -35,17 +33,35 @@ vi.mock('@guren/server', () => ({
       links: {},
     }),
   }),
+  MockTaskCacheService: vi.fn().mockImplementation(() => ({
+    getUserTasks: mockGetUserTasks,
+    invalidateTask: vi.fn(),
+    invalidateUserTasks: vi.fn(),
+  })),
 }))
+
+vi.mock('@guren/core', async () => {
+  const actual = await vi.importActual<typeof import('@guren/core')>('@guren/core')
+  return {
+    ...actual,
+    ...createControllerModuleMock(),
+    ServiceProvider: actual.ServiceProvider,
+    paginate: mockPaginate,
+  }
+})
 
 vi.mock('../app/Models/Task.js', () => ({
   Task: {
     create: mockTaskCreate,
     first: mockTaskFirst,
     find: mockTaskFind,
-    paginate: mockTaskPaginate,
     update: mockTaskUpdate,
     delete: mockTaskDelete,
   },
+}))
+
+vi.mock('../app/Services/TaskCacheService.js', () => ({
+  TaskCacheService: MockTaskCacheService,
 }))
 
 import TaskController from '../app/Http/Controllers/TaskController.js'
@@ -56,54 +72,70 @@ function createController(ctx: Context): TaskController {
   return controller
 }
 
+function authenticatedContext(url: string, init: RequestInit = {}): Context {
+  return createControllerContext(url, init, {
+    'guren:api-token': { userId: 1, abilities: ['*'], token: {} },
+    cache: { store: vi.fn() },
+    events: { emit: mockEmit },
+  }) as unknown as Context
+}
+
 describe('TaskController', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
   describe('index()', () => {
-    it('returns 401 without authentication', async () => {
-      mockGetApiToken.mockReturnValue(null)
-
+    it('throws when unauthenticated', async () => {
       const ctx = createControllerContext('http://api.test/api/tasks', {
         method: 'GET',
       }) as unknown as Context
 
       const controller = createController(ctx)
-      const response = await controller.index()
 
-      expect(response.status).toBe(401)
+      await expect(controller.index()).rejects.toMatchObject({
+        statusCode: 401,
+      })
     })
 
     it('returns paginated tasks when authenticated', async () => {
-      mockGetApiToken.mockReturnValue({ userId: 1, abilities: ['*'], token: {} as never })
-      mockTaskPaginate.mockResolvedValue({
+      mockGetUserTasks.mockResolvedValue({
         data: [{ id: 1, title: 'Task 1', completed: false, createdAt: new Date(), updatedAt: new Date() }],
-        meta: { total: 1, perPage: 15, currentPage: 1, totalPages: 1, hasMore: false, from: 1, to: 1 },
+        meta: { total: 21, perPage: 15, currentPage: 2, totalPages: 2, hasMore: false, from: 16, to: 21 },
       })
 
-      const ctx = createControllerContext('http://api.test/api/tasks', {
+      const ctx = authenticatedContext('http://api.test/api/tasks?page=999&per_page=15&completed=true', {
         method: 'GET',
-      }) as unknown as Context
+      })
 
       const controller = createController(ctx)
       const response = await controller.index()
 
       expect(response.status).toBe(200)
+      expect(mockGetUserTasks).toHaveBeenCalledWith(1, 999, 15, { completed: true })
+      expect(paginate).toHaveBeenCalledWith(
+        {
+          data: [{ id: 1, title: 'Task 1', completed: false, createdAt: expect.any(Date), updatedAt: expect.any(Date) }],
+          meta: { total: 21, perPage: 15, currentPage: 2, totalPages: 2, hasMore: false, from: 16, to: 21 },
+        },
+        {
+          path: '/api/tasks',
+          query: { per_page: '15', completed: 'true' },
+        },
+      )
     })
   })
 
   describe('store()', () => {
     it('creates a task when authenticated', async () => {
-      mockGetApiToken.mockReturnValue({ userId: 1, abilities: ['*'], token: {} as never })
       const newTask = { id: 1, title: 'New Task', description: null, completed: false, userId: 1, createdAt: new Date(), updatedAt: new Date() }
       mockTaskCreate.mockResolvedValue(newTask)
 
-      const ctx = createControllerContext('http://api.test/api/tasks', {
+      const ctx = authenticatedContext('http://api.test/api/tasks', {
         method: 'POST',
         body: JSON.stringify({ title: 'New Task' }),
         headers: { 'Content-Type': 'application/json' },
-      }) as unknown as Context
+      })
 
       const controller = createController(ctx)
       const response = await controller.store()
@@ -113,34 +145,33 @@ describe('TaskController', () => {
       expect(json.data.title).toBe('New Task')
     })
 
-    it('returns validation errors for missing title', async () => {
-      mockGetApiToken.mockReturnValue({ userId: 1, abilities: ['*'], token: {} as never })
-
-      const ctx = createControllerContext('http://api.test/api/tasks', {
+    it('throws validation errors for missing title', async () => {
+      const ctx = authenticatedContext('http://api.test/api/tasks', {
         method: 'POST',
         body: JSON.stringify({ description: 'No title' }),
         headers: { 'Content-Type': 'application/json' },
-      }) as unknown as Context
+      })
 
       const controller = createController(ctx)
-      const response = await controller.store()
 
-      expect(response.status).toBe(422)
-      const json = await response.json()
-      expect(json.errors).toBeDefined()
+      await expect(controller.store()).rejects.toMatchObject({
+        statusCode: 422,
+      })
     })
   })
 
   describe('show()', () => {
     it('returns task when found', async () => {
-      mockGetApiToken.mockReturnValue({ userId: 1, abilities: ['*'], token: {} as never })
       const task = { id: 1, title: 'Task', description: 'Desc', completed: false, userId: 1, createdAt: new Date(), updatedAt: new Date() }
       mockTaskFirst.mockResolvedValue(task)
 
-      const ctx = createControllerContext('http://api.test/api/tasks/1', {
+      const ctx = authenticatedContext('http://api.test/api/tasks/1', {
         method: 'GET',
-      }) as unknown as Context
-      ;(ctx.req as { param: (key: string) => string }).param = vi.fn().mockReturnValue('1')
+      })
+      ;(ctx.req as { param: (key?: string) => unknown }).param = vi.fn((key?: string) => {
+        if (!key) return { id: '1' }
+        return key === 'id' ? '1' : undefined
+      })
 
       const controller = createController(ctx)
       const response = await controller.show()
@@ -148,16 +179,20 @@ describe('TaskController', () => {
       expect(response.status).toBe(200)
       const json = await response.json()
       expect(json.data.title).toBe('Task')
+      expect(json.data.notificationArtifactPath).toBe('notifications/tasks/1.json')
+      expect(json.data.broadcastChannels.public).toBe('tasks')
     })
 
     it('returns 404 when task not found', async () => {
-      mockGetApiToken.mockReturnValue({ userId: 1, abilities: ['*'], token: {} as never })
       mockTaskFirst.mockResolvedValue(null)
 
-      const ctx = createControllerContext('http://api.test/api/tasks/999', {
+      const ctx = authenticatedContext('http://api.test/api/tasks/999', {
         method: 'GET',
-      }) as unknown as Context
-      ;(ctx.req as { param: (key: string) => string }).param = vi.fn().mockReturnValue('999')
+      })
+      ;(ctx.req as { param: (key?: string) => unknown }).param = vi.fn((key?: string) => {
+        if (!key) return { id: '999' }
+        return key === 'id' ? '999' : undefined
+      })
 
       const controller = createController(ctx)
       const response = await controller.show()
@@ -168,18 +203,20 @@ describe('TaskController', () => {
 
   describe('update()', () => {
     it('updates task when found', async () => {
-      mockGetApiToken.mockReturnValue({ userId: 1, abilities: ['*'], token: {} as never })
       const task = { id: 1, title: 'Task', description: 'Desc', completed: false, userId: 1, createdAt: new Date(), updatedAt: new Date() }
       mockTaskFirst.mockResolvedValue(task)
       mockTaskUpdate.mockResolvedValue(task)
       mockTaskFind.mockResolvedValue({ ...task, title: 'Updated', completed: true })
 
-      const ctx = createControllerContext('http://api.test/api/tasks/1', {
+      const ctx = authenticatedContext('http://api.test/api/tasks/1', {
         method: 'PUT',
         body: JSON.stringify({ title: 'Updated', completed: true }),
         headers: { 'Content-Type': 'application/json' },
-      }) as unknown as Context
-      ;(ctx.req as { param: (key: string) => string }).param = vi.fn().mockReturnValue('1')
+      })
+      ;(ctx.req as { param: (key?: string) => unknown }).param = vi.fn((key?: string) => {
+        if (!key) return { id: '1' }
+        return key === 'id' ? '1' : undefined
+      })
 
       const controller = createController(ctx)
       const response = await controller.update()
@@ -193,15 +230,17 @@ describe('TaskController', () => {
 
   describe('destroy()', () => {
     it('deletes task when found', async () => {
-      mockGetApiToken.mockReturnValue({ userId: 1, abilities: ['*'], token: {} as never })
       const task = { id: 1, title: 'Task', userId: 1 }
       mockTaskFirst.mockResolvedValue(task)
       mockTaskDelete.mockResolvedValue(undefined)
 
-      const ctx = createControllerContext('http://api.test/api/tasks/1', {
+      const ctx = authenticatedContext('http://api.test/api/tasks/1', {
         method: 'DELETE',
-      }) as unknown as Context
-      ;(ctx.req as { param: (key: string) => string }).param = vi.fn().mockReturnValue('1')
+      })
+      ;(ctx.req as { param: (key?: string) => unknown }).param = vi.fn((key?: string) => {
+        if (!key) return { id: '1' }
+        return key === 'id' ? '1' : undefined
+      })
 
       const controller = createController(ctx)
       const response = await controller.destroy()
@@ -212,13 +251,15 @@ describe('TaskController', () => {
     })
 
     it('returns 404 when task not found', async () => {
-      mockGetApiToken.mockReturnValue({ userId: 1, abilities: ['*'], token: {} as never })
       mockTaskFirst.mockResolvedValue(null)
 
-      const ctx = createControllerContext('http://api.test/api/tasks/999', {
+      const ctx = authenticatedContext('http://api.test/api/tasks/999', {
         method: 'DELETE',
-      }) as unknown as Context
-      ;(ctx.req as { param: (key: string) => string }).param = vi.fn().mockReturnValue('999')
+      })
+      ;(ctx.req as { param: (key?: string) => unknown }).param = vi.fn((key?: string) => {
+        if (!key) return { id: '999' }
+        return key === 'id' ? '999' : undefined
+      })
 
       const controller = createController(ctx)
       const response = await controller.destroy()

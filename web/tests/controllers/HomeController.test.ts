@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createControllerContext, readInertiaResponse } from '@guren/testing'
-import type { Context } from '@guren/server'
-import { createControllerModuleMock } from '../../../packages/testing/dist/index.js'
+import {
+  createControllerContext,
+  createControllerModuleMock,
+  readInertiaResponse,
+} from '../../../packages/testing/src/controller.js'
+import type { Context } from '@guren/core'
 
-vi.mock('@guren/server', () => createControllerModuleMock())
+vi.mock('@guren/core', () => createControllerModuleMock())
 
 import HomeController from '../../app/Http/Controllers/HomeController.js'
 

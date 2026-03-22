@@ -4,12 +4,21 @@ import {
   createControllerModuleMock,
   readInertiaResponse,
 } from '@guren/testing'
-import type { Context } from '@guren/server'
+import type { Context } from '@guren/core'
+
+const { mockEmit } = vi.hoisted(() => ({
+  mockEmit: vi.fn(),
+}))
 
 vi.mock('guren', () => createControllerModuleMock())
-vi.mock('@guren/core', () => createControllerModuleMock())
-vi.mock('@guren/server', () => createControllerModuleMock())
-
+vi.mock('@guren/core', async () => {
+  const actual = await vi.importActual<typeof import('@guren/core')>('@guren/core')
+  return {
+    ...actual,
+    ...createControllerModuleMock(),
+    ServiceProvider: actual.ServiceProvider,
+  }
+})
 import LoginController from '../../app/Http/Controllers/Auth/LoginController.js'
 
 function createAuthStub(user: unknown = null) {
@@ -38,6 +47,8 @@ describe('LoginController', () => {
         'X-Inertia': 'true',
         Accept: 'application/json',
       },
+    }, {
+      events: { emit: mockEmit },
     }) as unknown as Context
     controller.setContext(ctx)
 
@@ -57,7 +68,9 @@ describe('LoginController', () => {
       value: createAuthStub(),
       configurable: true,
     })
-    const ctx = createControllerContext('http://blog.test/login') as unknown as Context
+    const ctx = createControllerContext('http://blog.test/login', {}, {
+      events: { emit: mockEmit },
+    }) as unknown as Context
     controller.setContext(ctx)
 
     const response = await controller.show()

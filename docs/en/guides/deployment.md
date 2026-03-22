@@ -115,6 +115,6 @@ Mount your configuration or secrets as needed for your hosting environment.
 - Set up HTTPS (e.g. via a reverse proxy such as Nginx, Caddy, or your cloud platform).
 - Configure logging and monitoring—Bun prints to stdout/stderr, so ship logs to your chosen aggregator.
 - Schedule automated backups for the PostgreSQL database.
-- Implement health checks (e.g. expose `/health` route via `Route.get('/health', (ctx) => ctx.json({ ok: true }))`) and wire them into your load balancer.
+- Implement health checks (e.g. expose `/health` from a `registerHealthRoutes(router)` registrar via `router.get('/health', (ctx) => ctx.json({ ok: true }))`) and wire them into your load balancer.
 
 Following this checklist ensures each release is reproducible, migrates the database safely, and keeps your application responsive in production.

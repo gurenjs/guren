@@ -69,6 +69,15 @@ export interface Session {
   all(): SessionData
   regenerate(): void
   invalidate(): void
+  flash(key: string, value: unknown): void
+  getFlash<T = unknown>(key: string): T | undefined
+  reflash(): void
+  keep(...keys: string[]): void
+}
+
+interface FlashBag {
+  new: Record<string, unknown>
+  old: Record<string, unknown>
 }
 
 class SessionImpl implements Session {
@@ -78,11 +87,21 @@ class SessionImpl implements Session {
   private dirty = false
   private destroyed = false
   private regenerated = false
+  private _flash: FlashBag = { new: {}, old: {} }
 
   constructor(id: string, initialData: SessionData, readonly isNew: boolean) {
     this.currentId = id
     this.originalId = id
-    this.data = { ...initialData }
+    // Separate flash bag from regular session data
+    const { _flash, ...rest } = initialData
+    this.data = { ...rest }
+    if (_flash && typeof _flash === 'object') {
+      const bag = _flash as Partial<FlashBag>
+      this._flash = {
+        new: bag.new && typeof bag.new === 'object' ? { ...bag.new } : {},
+        old: bag.old && typeof bag.old === 'object' ? { ...bag.old } : {},
+      }
+    }
   }
 
   get id(): string {
@@ -131,6 +150,42 @@ class SessionImpl implements Session {
     this.destroyed = true
   }
 
+  flash(key: string, value: unknown): void {
+    this._flash.new[key] = value
+    this.dirty = true
+  }
+
+  getFlash<T = unknown>(key: string): T | undefined {
+    return this._flash.old[key] as T | undefined
+  }
+
+  reflash(): void {
+    // Move all old flash data back to new so it survives another request
+    for (const [key, value] of Object.entries(this._flash.old)) {
+      this._flash.new[key] = value
+    }
+    this.dirty = true
+  }
+
+  keep(...keys: string[]): void {
+    for (const key of keys) {
+      if (key in this._flash.old) {
+        this._flash.new[key] = this._flash.old[key]
+      }
+    }
+    this.dirty = true
+  }
+
+  /**
+   * Age flash data: move `new` → `old`, clear previous `old`.
+   * Called at the start of each request by the session middleware.
+   */
+  ageFlashData(): void {
+    this._flash.old = { ...this._flash.new }
+    this._flash.new = {}
+    this.dirty = true
+  }
+
   markTouched(): void {
     this.dirty = true
   }
@@ -148,7 +203,13 @@ class SessionImpl implements Session {
   }
 
   snapshot(): SessionData {
-    return { ...this.data }
+    const hasFlash =
+      Object.keys(this._flash.new).length > 0 ||
+      Object.keys(this._flash.old).length > 0
+    return {
+      ...this.data,
+      ...(hasFlash ? { _flash: { new: { ...this._flash.new }, old: { ...this._flash.old } } } : {}),
+    }
   }
 
   originalSessionId(): string {
@@ -177,6 +238,7 @@ export function createSessionMiddleware(options: CreateSessionMiddlewareOptions 
     const isNew = !existingId
     const initialData = existingId ? (await store.read(existingId)) ?? {} : {}
     const session = new SessionImpl(sessionId, initialData, isNew)
+    session.ageFlashData()
 
     ctx.set(SESSION_CONTEXT_KEY, session)
 

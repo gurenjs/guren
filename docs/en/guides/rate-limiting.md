@@ -14,22 +14,25 @@ Guren provides a flexible rate limiting system to protect your application from 
 ### Quick Start
 
 ```ts
-import { createRateLimitMiddleware } from '@guren/server'
-import { Route } from '@guren/server'
+import { Router, createRateLimitMiddleware } from '@guren/core'
 
 // Apply to all routes - 100 requests per minute per IP
-Route.middleware([createRateLimitMiddleware()]).group(() => {
-  Route.get('/api/*', [ApiController, 'handle'])
+const router = new Router()
+
+router.middleware(createRateLimitMiddleware()).group((group) => {
+  group.get('/api/*', [ApiController, 'handle'])
 })
 ```
 
 ### Route-Specific Limits
 
 ```ts
-import { createRateLimitMiddleware } from '@guren/server'
+import { Router, createRateLimitMiddleware } from '@guren/core'
+
+const router = new Router()
 
 // Stricter limit for login endpoint - 5 attempts per 15 minutes
-Route.post('/login', [AuthController, 'login']).middleware(
+router.post('/login', [AuthController, 'login']).middleware(
   createRateLimitMiddleware({
     limit: 5,
     windowMs: 15 * 60 * 1000, // 15 minutes
@@ -37,8 +40,8 @@ Route.post('/login', [AuthController, 'login']).middleware(
 )
 
 // Higher limit for authenticated API routes
-Route.middleware(['auth']).group(() => {
-  Route.get('/api/*', [ApiController, 'handle']).middleware(
+router.middleware('auth').group((group) => {
+  group.get('/api/*', [ApiController, 'handle']).middleware(
     createRateLimitMiddleware({
       limit: 1000,
       windowMs: 60 * 60 * 1000, // 1 hour
@@ -86,7 +89,7 @@ interface RateLimitOptions {
 ### Full Configuration Example
 
 ```ts
-import { createRateLimitMiddleware, MemoryRateLimitStore } from '@guren/server'
+import { createRateLimitMiddleware, MemoryRateLimitStore } from '@guren/core'
 
 const store = new MemoryRateLimitStore()
 
@@ -151,7 +154,7 @@ X-RateLimit-Reset: 1705312800
 Suitable for single-process applications:
 
 ```ts
-import { MemoryRateLimitStore } from '@guren/server'
+import { MemoryRateLimitStore } from '@guren/core'
 
 const store = new MemoryRateLimitStore(60000) // Cleanup every 60 seconds
 
@@ -171,7 +174,7 @@ process.on('SIGTERM', () => {
 More accurate rate limiting that smooths out traffic:
 
 ```ts
-import { SlidingWindowRateLimitStore } from '@guren/server'
+import { SlidingWindowRateLimitStore } from '@guren/core'
 
 const store = new SlidingWindowRateLimitStore()
 
@@ -191,7 +194,7 @@ const rateLimiter = createRateLimitMiddleware({
 For distributed applications, implement a Redis-backed store:
 
 ```ts
-import type { RateLimitStore, RateLimitEntry } from '@guren/server'
+import type { RateLimitStore, RateLimitEntry } from '@guren/core'
 
 export class RedisRateLimitStore implements RateLimitStore {
   constructor(private redis: Redis) {}
@@ -234,7 +237,7 @@ export class RedisRateLimitStore implements RateLimitStore {
 Check rate limit status without incrementing:
 
 ```ts
-import { getRateLimitInfo, MemoryRateLimitStore } from '@guren/server'
+import { getRateLimitInfo, MemoryRateLimitStore } from '@guren/core'
 
 const store = new MemoryRateLimitStore()
 
@@ -251,7 +254,7 @@ console.log(`Is limited: ${info.isLimited}`)
 Clear rate limit for a specific key:
 
 ```ts
-import { resetRateLimit, MemoryRateLimitStore } from '@guren/server'
+import { resetRateLimit, MemoryRateLimitStore } from '@guren/core'
 
 const store = new MemoryRateLimitStore()
 
@@ -267,6 +270,8 @@ await resetRateLimit('192.168.1.1', store, { keyPrefix: 'login:' })
 ### Different Limits by Endpoint
 
 ```ts
+import { Router } from '@guren/core'
+
 // Strict limit for authentication
 const authLimiter = createRateLimitMiddleware({
   limit: 5,
@@ -289,10 +294,12 @@ const searchLimiter = createRateLimitMiddleware({
 })
 
 // Apply to routes
-Route.post('/login', [AuthController, 'login']).middleware(authLimiter)
-Route.post('/register', [AuthController, 'register']).middleware(authLimiter)
-Route.get('/api/*', [ApiController, 'handle']).middleware(apiLimiter)
-Route.get('/search', [SearchController, 'search']).middleware(searchLimiter)
+const router = new Router()
+
+router.post('/login', [AuthController, 'login']).middleware(authLimiter)
+router.post('/register', [AuthController, 'register']).middleware(authLimiter)
+router.get('/api/*', [ApiController, 'handle']).middleware(apiLimiter)
+router.get('/search', [SearchController, 'search']).middleware(searchLimiter)
 ```
 
 ### User-Based Rate Limiting
@@ -364,7 +371,7 @@ import {
   MemoryRateLimitStore,
   getRateLimitInfo,
   resetRateLimit,
-} from '@guren/server'
+} from '@guren/core'
 
 describe('Rate Limiting', () => {
   let store: MemoryRateLimitStore

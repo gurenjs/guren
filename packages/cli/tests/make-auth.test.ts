@@ -14,10 +14,12 @@ describe('makeAuth', () => {
 
       await writeFile(
         join(workspace.dir, 'src/app.ts'),
-        `import { Application } from '@guren/server'
+        `import { createApp } from '@guren/core'
 import DatabaseProvider from '../app/Providers/DatabaseProvider.js'
+import registerWebRoutes from '../routes/web.js'
 
-const app = new Application({
+const app = createApp({
+  routes: registerWebRoutes,
   providers: [DatabaseProvider],
 })
 
@@ -28,9 +30,26 @@ export default app
 
       await writeFile(
         join(workspace.dir, 'routes/web.ts'),
-        `import { Route } from '@guren/server'
+        `import { Router } from '@guren/core'
 
-Route.get('/', () => 'home')
+export function registerWebRoutes(router: Router): void {
+  router.get('/', () => 'home')
+}
+`,
+        'utf8',
+      )
+
+      await mkdir(join(workspace.dir, 'resources/js/pages'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'resources/js/pages/contracts.ts'),
+        `import type { PageProps } from '@guren/inertia-client/contracts'
+import { pages as generatedPages } from '../../../.guren/pages.gen.ts'
+
+export const appPages = {
+  home: generatedPages.Home.props<{ message: string }>(),
+} as const
+
+export type HomePageProps = PageProps<typeof appPages.home>
 `,
         'utf8',
       )
@@ -44,10 +63,12 @@ Route.get('/', () => 'home')
 
       const created = await makeAuth({ install: true, force: true })
 
-      expect(created).toHaveLength(11)
+      expect(created).toHaveLength(14)
       expect(created).toEqual(expect.arrayContaining([
         expect.stringContaining('LoginController.ts'),
         expect.stringContaining('routes/auth.ts'),
+        expect.stringContaining('ProfileController.ts'),
+        expect.stringContaining('ProfileValidator.ts'),
       ]))
 
       const migrations = await readdir(join(workspace.dir, 'db/migrations'))
@@ -61,7 +82,16 @@ Route.get('/', () => 'home')
       expect(appContent).toContain('providers: [DatabaseProvider, AuthProvider]')
 
       const routesContent = await readFile(join(workspace.dir, 'routes/web.ts'), 'utf8')
-      expect(routesContent).toContain("import './auth.js'")
+      expect(routesContent).toContain("import registerAuthRoutes from './auth.js'")
+      expect(routesContent).toContain('registerAuthRoutes(router)')
+
+      const contracts = await readFile(join(workspace.dir, 'resources/js/pages/contracts.ts'), 'utf8')
+      expect(contracts).toContain('appPages.auth.login')
+      expect(contracts).toContain('appPages.profile.edit')
+
+      const loginController = await readFile(join(workspace.dir, 'app/Http/Controllers/Auth/LoginController.ts'), 'utf8')
+      expect(loginController).toContain('validateBody(LoginSchema)')
+      expect(loginController).not.toContain('safeParse')
     } finally {
       await workspace.cleanup()
     }

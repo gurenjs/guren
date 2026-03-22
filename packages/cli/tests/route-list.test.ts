@@ -28,8 +28,11 @@ describe('route-list', () => {
       await writeFile(
         join(tempDir, 'routes/web.ts'),
         `
-import { Route } from '@guren/server'
-// No routes registered
+import { Router } from '@guren/core'
+
+export function registerWebRoutes(_router: Router): void {
+  // No routes registered
+}
 `
       )
 
@@ -48,7 +51,9 @@ import { Route } from '@guren/server'
       await writeFile(
         join(tempDir, 'custom/routes.ts'),
         `
-import { Route } from '@guren/server'
+import { Router } from '@guren/core'
+
+export function registerRoutes(_router: Router): void {}
 `
       )
 
@@ -159,7 +164,9 @@ import { Route } from '@guren/server'
       await writeFile(
         join(tempDir, 'routes/web.ts'),
         `
-import { Route } from '@guren/server'
+import { Router } from '@guren/core'
+
+export function registerWebRoutes(_router: Router): void {}
 `
       )
 

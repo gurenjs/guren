@@ -2,39 +2,45 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import {
   createControllerContext,
   createControllerModuleMock,
-} from '@guren/testing'
-import type { Context } from '@guren/server'
+} from '@guren/testing/controller'
+import type { Context } from '@guren/core'
 
 // Mock dependencies
-vi.mock('@guren/core', () => ({
-  ...createControllerModuleMock(),
-  ScryptHasher: class {
-    async hash(password: string) {
-      return `hashed_${password}`
-    }
-    async verify(password: string, hash: string) {
-      return hash === `hashed_${password}`
-    }
-  },
-}))
+vi.mock('@guren/core', async () => {
+  const actual = await vi.importActual<typeof import('@guren/core')>('@guren/core')
+  return {
+    ...actual,
+    ...createControllerModuleMock(),
+    ServiceProvider: actual.ServiceProvider,
+    ScryptHasher: class {
+      async hash(password: string) {
+        return `hashed_${password}`
+      }
+      async verify(password: string, hash: string) {
+        return hash === `hashed_${password}`
+      }
+    },
+  }
+})
 
-vi.mock('@guren/server', () => createControllerModuleMock())
-
-const { mockUserCreate, mockUserFirst, mockUserFind } = vi.hoisted(() => ({
+const { mockUserCreate, mockUserFirst, mockUserFindOrFail } = vi.hoisted(() => ({
   mockUserCreate: vi.fn(),
   mockUserFirst: vi.fn(),
-  mockUserFind: vi.fn(),
+  mockUserFindOrFail: vi.fn(),
+}))
+const { mockEmit } = vi.hoisted(() => ({
+  mockEmit: vi.fn(),
 }))
 
 vi.mock('../app/Models/User.js', () => ({
   User: {
     create: mockUserCreate,
     first: mockUserFirst,
-    find: mockUserFind,
+    findOrFail: mockUserFindOrFail,
   },
 }))
 
-import AuthController, { tokenStore } from '../app/Http/Controllers/AuthController.js'
+import AuthController from '../app/Http/Controllers/AuthController.js'
 
 function createController(ctx: Context): AuthController {
   const controller = new AuthController()
@@ -45,7 +51,6 @@ function createController(ctx: Context): AuthController {
 describe('AuthController', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    tokenStore.clear()
   })
 
   describe('register()', () => {
@@ -62,6 +67,8 @@ describe('AuthController', () => {
           password: 'password123',
         }),
         headers: { 'Content-Type': 'application/json' },
+      }, {
+        events: { emit: mockEmit },
       }) as unknown as Context
 
       const controller = createController(ctx)
@@ -74,7 +81,7 @@ describe('AuthController', () => {
       expect(json.tokenId).toBeDefined()
     })
 
-    it('returns 422 for duplicate email', async () => {
+    it('throws ValidationException for duplicate email', async () => {
       mockUserFirst.mockResolvedValue({ id: 1, email: 'existing@example.com' })
 
       const ctx = createControllerContext('http://api.test/api/auth/register', {
@@ -85,17 +92,19 @@ describe('AuthController', () => {
           password: 'password123',
         }),
         headers: { 'Content-Type': 'application/json' },
+      }, {
+        events: { emit: mockEmit },
       }) as unknown as Context
 
       const controller = createController(ctx)
-      const response = await controller.register()
 
-      expect(response.status).toBe(422)
-      const json = await response.json()
-      expect(json.errors.email).toBe('Email already registered')
+      await expect(controller.register()).rejects.toMatchObject({
+        statusCode: 422,
+        errors: { email: ['Email already registered'] },
+      })
     })
 
-    it('returns validation errors for invalid data', async () => {
+    it('throws validation errors for invalid data', async () => {
       const ctx = createControllerContext('http://api.test/api/auth/register', {
         method: 'POST',
         body: JSON.stringify({
@@ -104,14 +113,15 @@ describe('AuthController', () => {
           password: 'short',
         }),
         headers: { 'Content-Type': 'application/json' },
+      }, {
+        events: { emit: mockEmit },
       }) as unknown as Context
 
       const controller = createController(ctx)
-      const response = await controller.register()
 
-      expect(response.status).toBe(422)
-      const json = await response.json()
-      expect(json.errors).toBeDefined()
+      await expect(controller.register()).rejects.toMatchObject({
+        statusCode: 422,
+      })
     })
   })
 
@@ -127,6 +137,8 @@ describe('AuthController', () => {
           password: 'password123',
         }),
         headers: { 'Content-Type': 'application/json' },
+      }, {
+        events: { emit: mockEmit },
       }) as unknown as Context
 
       const controller = createController(ctx)
@@ -148,6 +160,8 @@ describe('AuthController', () => {
           password: 'wrongpassword',
         }),
         headers: { 'Content-Type': 'application/json' },
+      }, {
+        events: { emit: mockEmit },
       }) as unknown as Context
 
       const controller = createController(ctx)
@@ -169,6 +183,8 @@ describe('AuthController', () => {
           password: 'wrongpassword',
         }),
         headers: { 'Content-Type': 'application/json' },
+      }, {
+        events: { emit: mockEmit },
       }) as unknown as Context
 
       const controller = createController(ctx)
@@ -179,15 +195,36 @@ describe('AuthController', () => {
   })
 
   describe('user()', () => {
-    it('returns 401 without token', async () => {
+    it('throws when unauthenticated', async () => {
       const ctx = createControllerContext('http://api.test/api/auth/user', {
         method: 'GET',
       }) as unknown as Context
 
       const controller = createController(ctx)
+
+      await expect(controller.user()).rejects.toMatchObject({
+        statusCode: 401,
+      })
+    })
+
+    it('returns user when authenticated', async () => {
+      const user = { id: 1, name: 'Test', email: 'test@example.com', createdAt: new Date() }
+      mockUserFindOrFail.mockResolvedValue(user)
+
+      const ctx = createControllerContext('http://api.test/api/auth/user', {
+        method: 'GET',
+      }, {
+        'guren:api-token': { userId: 1, abilities: ['*'], token: {} },
+        events: { emit: mockEmit },
+      }) as unknown as Context
+
+      const controller = createController(ctx)
       const response = await controller.user()
 
-      expect(response.status).toBe(401)
+      expect(response.status).toBe(200)
+      const json = await response.json()
+      expect(json.user.email).toBe('test@example.com')
+      expect(json.tokenAbilities).toEqual(['*'])
     })
   })
 })

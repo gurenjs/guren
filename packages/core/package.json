@@ -24,6 +24,18 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime.d.ts",
+      "default": "./dist/runtime.js"
+    },
+    "./vite": {
+      "types": "./dist/vite.d.ts",
+      "default": "./dist/vite.js"
+    },
+    "./legacy-validation": {
+      "types": "./dist/legacy-validation.d.ts",
+      "default": "./dist/legacy-validation.js"
     }
   },
   "bin": {

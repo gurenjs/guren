@@ -7,7 +7,7 @@ Guren provides multiple layers of error handling, from a centralized `ExceptionH
 The `ExceptionHandler` class provides a centralized place to handle all exceptions thrown by your application. Register it as a service provider or configure it during application boot:
 
 ```ts
-import { ExceptionHandler } from '@guren/server'
+import { ExceptionHandler } from '@guren/core'
 
 class AppExceptionHandler extends ExceptionHandler {
   // Exceptions that should not be reported to your logging system
@@ -42,13 +42,13 @@ class AppExceptionHandler extends ExceptionHandler {
 
 Register a global error handler using Hono's `onError` method on the underlying app:
 
-> Register handlers in `src/app.ts` right after `new Application(...)`, or inside the `boot(hono)` callback. Make sure it is set before `app.boot()`.
+> Register handlers in `src/app.ts` right after `createApp(...)`, or inside the `boot(hono)` callback. Make sure it is set before `app.boot()`.
 
 ```ts
-import { Application } from '@guren/server'
+import { createApp } from '@guren/core'
 import { HTTPException } from 'hono/http-exception'
 
-const app = new Application()
+const app = createApp()
 
 app.hono.onError((error, ctx) => {
   console.error('Unhandled error:', error)
@@ -83,7 +83,7 @@ import {
   AuthorizationException,
   ValidationException,
   MethodNotAllowedException,
-} from '@guren/server'
+} from '@guren/core'
 import { ModelNotFoundException } from '@guren/orm'
 
 // 404 Not Found
@@ -118,8 +118,11 @@ Throw `HTTPException` to return specific HTTP status codes:
 
 ```ts
 import { HTTPException } from 'hono/http-exception'
+import { Router } from '@guren/core'
 
-Route.get('/posts/:id', async (ctx) => {
+const router = new Router()
+
+router.get('/posts/:id', async (ctx) => {
   const post = await Post.find(ctx.req.param('id'))
 
   if (!post) {
@@ -183,9 +186,9 @@ In development, Guren renders a detailed error page when an unhandled exception 
 The debug page is enabled automatically when `NODE_ENV` is not set to `production`. To customize its behavior:
 
 ```ts
-import { Application } from '@guren/server'
+import { createApp } from '@guren/core'
 
-const app = new Application({
+const app = createApp({
   debug: process.env.NODE_ENV !== 'production',
 })
 ```
@@ -197,8 +200,10 @@ In production, the debug page is replaced with a generic error response that doe
 With `validateBody`/`validateQuery`/`validateParams`, `findOrFail`, and `userOrFail`, most error handling is automatic — no try-catch needed:
 
 ```ts
-import { Controller } from '@guren/server'
+import { Controller } from '@guren/core'
 import { z } from 'zod'
+import { PostResource } from '@/app/Http/Resources/PostResource'
+import { appPages } from '@/resources/js/pages/contracts'
 
 const StorePostSchema = z.object({ title: z.string().min(1), content: z.string().min(10) })
 const PostIdSchema = z.object({ id: z.coerce.number().int().positive() })
@@ -214,7 +219,7 @@ export default class PostController extends Controller {
   async show(): Promise<Response> {
     const { id } = this.validateParams(PostIdSchema)       // 422 on invalid params
     const post = await Post.findOrFail(id)                  // 404 if missing
-    return this.inertia('posts/Show', { post })
+    return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
   }
 }
 ```
@@ -226,7 +231,7 @@ The `ExceptionHandler` catches and renders all thrown exceptions automatically. 
 Use `formatValidationErrors` to convert Zod errors to a flat object:
 
 ```ts
-import { formatValidationErrors } from '@guren/server'
+import { formatValidationErrors } from '@guren/core'
 import { z } from 'zod'
 
 const schema = z.object({
@@ -253,7 +258,7 @@ const errors = formatValidationErrors(result.error, 'Please check your input')
 Create reusable error handling middleware:
 
 ```ts
-import { defineMiddleware } from '@guren/server'
+import { defineMiddleware } from '@guren/core'
 import { HTTPException } from 'hono/http-exception'
 
 export const errorHandler = defineMiddleware(async (ctx, next) => {
@@ -340,14 +345,14 @@ async show(): Promise<Response> {
   if (!post) {
     throw new HTTPException(404, { message: 'Post not found' })
   }
-  return this.inertia('posts/Show', { post })
+  return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
 }
 
 // After — automatic 404
 async show(): Promise<Response> {
   const { id } = this.validateParams(PostIdSchema)
   const post = await Post.findOrFail(id)  // throws ModelNotFoundException (404)
-  return this.inertia('posts/Show', { post })
+  return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
 }
 ```
 

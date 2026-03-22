@@ -11,7 +11,7 @@ Gurenはデータの暗号化とパスワードの安全なハッシュ化のた
 32バイトのキーでEncrypterを作成します：
 
 ```typescript
-import { Encrypter, generateKey } from '@guren/server'
+import { Encrypter, generateKey } from '@guren/core'
 
 // 新しいキーを生成
 const key = generateKey()
@@ -47,7 +47,7 @@ const decryptedData = encrypter.decrypt(encryptedData, true)
 ### キー管理
 
 ```typescript
-import { generateKey, Encrypter } from '@guren/server'
+import { generateKey, Encrypter } from '@guren/core'
 
 // 暗号学的に安全なキーを生成
 const key = generateKey()
@@ -66,7 +66,7 @@ APP_KEY=base64:your-32-byte-key-here
 ### エラーハンドリング
 
 ```typescript
-import { Encrypter, DecryptException } from '@guren/server'
+import { Encrypter, DecryptException } from '@guren/core'
 
 try {
   const decrypted = encrypter.decrypt(invalidPayload)
@@ -84,7 +84,7 @@ try {
 ### ハッシャーの作成
 
 ```typescript
-import { Hash } from '@guren/server'
+import { Hash } from '@guren/core'
 
 // デフォルトのbcryptハッシャー
 const hash = new Hash()
@@ -176,7 +176,7 @@ const hash = new Hash({
 ## コントローラーでの使用
 
 ```typescript
-import { Controller, Hash } from '@guren/server'
+import { Controller, Hash } from '@guren/core'
 
 export default class AuthController extends Controller {
   private hash = new Hash()
@@ -224,7 +224,7 @@ export default class AuthController extends Controller {
 
 ```typescript
 import { describe, it, expect } from 'bun:test'
-import { Encrypter, Hash, generateKey } from '@guren/server'
+import { Encrypter, Hash, generateKey } from '@guren/core'
 
 describe('暗号化', () => {
   it('データを暗号化して復号化する', () => {

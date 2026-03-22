@@ -328,6 +328,18 @@ describe('TestClient', () => {
 })
 
 describe('TestApp', () => {
+  it('passes route registrars through to the application bootstrap', async () => {
+    const app = await TestApp.create({
+      routes: (router) => {
+        router.get('/health', () => new Response(JSON.stringify({ ok: true }), {
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      },
+    })
+
+    await app.get('/health').assertOk().assertJson({ ok: true })
+  })
+
   it('actingAs authenticates requests through auth middleware', async () => {
     const app = new Hono()
     app.use('*', attachAuthContext(() => ({

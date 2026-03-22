@@ -16,7 +16,7 @@ GurenはRFC 5424に準拠したログレベル、複数のチャンネル、コ�
 `LogFacade` を使うと、コンテナから `LogManager` を遅延解決してシンプルにログ出力できます:
 
 ```ts
-import { LogFacade as Log } from '@guren/server'
+import { LogFacade as Log } from '@guren/core'
 
 Log.info('アプリケーションが起動しました')
 Log.error('問題が発生しました', { error: '接続に失敗しました' })
@@ -296,7 +296,7 @@ log.registerDriver('slack', (config) => {
 ### ミドルウェアの例
 
 ```ts
-import { defineMiddleware } from '@guren/server'
+import { defineMiddleware } from '@guren/core'
 import { getLogManager } from '@guren/core'
 
 export const requestLogging = defineMiddleware(async (c, next) => {

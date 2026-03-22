@@ -1,9 +1,13 @@
 import { Link } from '@inertiajs/react'
-import type { PostShowPageProps } from '@/Http/Controllers/PostController'
 import Layout from '../../components/Layout.js'
 import { ArrowLeft, Calendar, User } from 'lucide-react'
+import type { PostResourceData } from '../../../../app/Http/Resources/PostResource.js'
 
-export default function Show({ post }: PostShowPageProps) {
+interface Props {
+  post: PostResourceData
+}
+
+export default function Show({ post }: Props) {
   return (
     <Layout
       wrapperClassName="bg-zinc-50"
@@ -62,6 +66,10 @@ export default function Show({ post }: PostShowPageProps) {
               <p className="font-medium text-zinc-900">{post.author?.name ?? 'Unknown author'}</p>
               <p className="text-sm text-zinc-500">Author</p>
             </div>
+          </div>
+          <div className="text-right text-xs text-zinc-500">
+            <p>Notification artifact: {post.notificationArtifactPath}</p>
+            <p>Broadcast: {post.broadcastChannels.public}</p>
           </div>
         </div>
       </article>

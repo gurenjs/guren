@@ -21,7 +21,7 @@ bunx guren make:auth --install
 
 1. `Application` の providers 配列に `AuthProvider` を登録
 2. 開発環境用の設定で `createSessionMiddleware` を追加（本番では `cookieSecure: true`）
-3. `routes/web.ts` に認証ルートをインポート
+3. `routes/web.ts` で `registerAuthRoutes(router)` を接続
 4. `db/schema.ts` にパスワードや remember トークンのカラムを追加
 
 スキャフォルド後は以下を実行するだけです:
@@ -45,18 +45,18 @@ bunx guren make:auth
 その後、手動で:
 1. `src/app.ts` に `AuthProvider` を登録
 2. ミドルウェアスタックに `createSessionMiddleware` を追加（`AuthServiceProvider` がデフォルトで自動追加。不要ならオプトアウト）
-3. `routes/web.ts` から `./routes/auth` をインポート
+3. `routes/web.ts` から `registerAuthRoutes(router)` を呼ぶ
 
 `--install` フラグは安全かつ冪等です – 既存の設定を重複させません。
 
 ## セッションの有効化
 
-ガードはセッションに依存します。デフォルトでは `AuthServiceProvider` が `createSessionMiddleware` を自動で付与します。無効化やカスタマイズは `Application` にオプションを渡します。
+ガードはセッションに依存します。デフォルトでは `AuthServiceProvider` が `createSessionMiddleware` を自動で付与します。無効化やカスタマイズは `createApp()` にオプションを渡します。
 
 ```ts
-import { Application } from '@guren/server'
+import { createApp } from '@guren/core'
 
-const app = new Application({
+const app = createApp({
   auth: {
     autoSession: true, // 無効化したい場合は false
     sessionOptions: {
@@ -66,12 +66,12 @@ const app = new Application({
 })
 ```
 
-細かく制御したい場合は、ブート処理の早い段階で明示的に登録してください:
+細かく制御したい場合は、`src/app.ts` で明示的に登録してください:
 
 ```ts
-import { Application, createSessionMiddleware } from '@guren/core'
+import { createApp, createSessionMiddleware } from '@guren/core'
 
-const app = new Application()
+const app = createApp()
 app.use('*', createSessionMiddleware())
 ```
 
@@ -95,7 +95,7 @@ app.use('*', createSessionMiddleware())
 認証を設定する最もシンプルな方法は `auth.useModel()` ヘルパーを使用することで、`ModelUserProvider` と `SessionGuard` を一度に登録できます:
 
 ```ts
-import { ServiceProvider } from '@guren/server'
+import { ServiceProvider } from '@guren/core'
 import { User } from '@/app/Models/User'
 
 export default class AuthProvider extends ServiceProvider {
@@ -122,7 +122,7 @@ export default class AuthProvider extends ServiceProvider {
 カスタムプロバイダーやガードが必要な高度なケースでは、手動で設定できます:
 
 ```ts
-import { ServiceProvider } from '@guren/server'
+import { ServiceProvider } from '@guren/core'
 import { ModelUserProvider, SessionGuard } from '@guren/core'
 import { User } from '@/app/Models/User'
 
@@ -177,10 +177,12 @@ export class User extends AuthenticatableModel<UserRecord> {
 コントローラは `auth` ヘルパーを持ちます:
 
 ```ts
+import { appPages } from '@/resources/js/pages/contracts'
+
 export default class DashboardController extends Controller {
   async index() {
     const user = await this.auth.user()       // ユーザーまたは null を返す
-    return this.inertia('dashboard/Index', { user }, { url: this.request.path })
+    return this.inertia(appPages.dashboard.index, { user }, { url: this.request.path })
   }
 
   async store() {
@@ -192,13 +194,13 @@ export default class DashboardController extends Controller {
 }
 ```
 
-バリデーションには `this.validateBody()` / `this.validateQuery()` / `this.validateParams()` を Zod スキーマと共に使うか、`this.validate()` を FormRequest クラスと使います。
+バリデーションには `this.validateBody()` / `this.validateQuery()` / `this.validateParams()` を Zod スキーマと共に使います。`FormRequest` は互換用途に限定してください。
 
 Inertia の全ページでログインユーザーを共有したい場合は、アプリ起動時に共有 props を登録します:
 
 ```ts
 // config/inertia.ts
-import { setInertiaSharedProps, AUTH_CONTEXT_KEY, type AuthContext } from '@guren/server'
+import { setInertiaSharedProps, AUTH_CONTEXT_KEY, type AuthContext } from '@guren/core'
 
 setInertiaSharedProps(async (ctx) => {
   const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
@@ -211,12 +213,16 @@ setInertiaSharedProps(async (ctx) => {
 ルートミドルウェアを使うと保護が簡単です:
 
 ```ts
-import { Route, requireAuthenticated, requireGuest } from '@guren/core'
+import { Router, requireAuthenticated, requireGuest } from '@guren/core'
 import LoginController from '@/app/Http/Controllers/Auth/LoginController'
+import DashboardController from '@/app/Http/Controllers/DashboardController'
 
-Route.get('/login', [LoginController, 'show'], requireGuest({ redirectTo: '/dashboard' }))
-Route.post('/login', [LoginController, 'store'], requireGuest({ redirectTo: '/dashboard' }))
-Route.post('/logout', [LoginController, 'destroy'], requireAuthenticated({ redirectTo: '/login' }))
+export function registerWebRoutes(router: Router): void {
+  router.get('/login', [LoginController, 'show'], requireGuest({ redirectTo: '/dashboard' }))
+  router.post('/login', [LoginController, 'store'], requireGuest({ redirectTo: '/dashboard' }))
+  router.post('/logout', [LoginController, 'destroy'], requireAuthenticated({ redirectTo: '/login' }))
+  router.get('/dashboard', [DashboardController, 'index'], requireAuthenticated({ redirectTo: '/login' }))
+}
 ```
 
 ## セッションガードのヘルパー

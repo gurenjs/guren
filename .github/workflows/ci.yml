@@ -42,6 +42,30 @@ jobs:
       - name: Type check
         run: bun run typecheck
 
+      - name: Core-first audit
+        run: bun run audit:core-first
+
+      - name: Contract audit
+        run: bun run audit:contracts
+
+      - name: Feature runtime audit
+        run: bun run audit:feature-runtime
+
+      - name: Starter template audit
+        run: bun run audit:starter-template
+
+      - name: Docs audit
+        run: bun run audit:docs
+
+      - name: Bundle budget audit
+        run: bun run audit:bundle-budgets
+
+      - name: Fresh app smoke
+        run: bun run smoke:starter
+
+      - name: Packed artifact audit
+        run: bun run smoke:starter:packed
+
       - name: Run tests
         run: bun run test
 
@@ -76,3 +100,6 @@ jobs:
 
       - name: Build client and SSR
         run: bun run --cwd web build
+
+      - name: Bundle budget audit
+        run: bun run ./scripts/smoke/build-budget.ts web

@@ -4,7 +4,7 @@ import { scaffoldFile } from './utils'
 const EXCEPTIONS_DIR = 'app/Exceptions'
 
 function exceptionTemplate(className: string, statusCode: number, defaultMessage: string): string {
-  return `import { HttpException } from '@guren/server'
+  return `import { HttpException } from '@guren/core'
 
 export class ${className} extends HttpException {
   constructor(message = '${defaultMessage}') {

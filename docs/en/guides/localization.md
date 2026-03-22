@@ -7,7 +7,7 @@ Guren provides a comprehensive internationalization (i18n) system for building m
 Create an i18n manager with your configuration:
 
 ```typescript
-import { createI18n } from '@guren/server'
+import { createI18n } from '@guren/core'
 
 const i18n = createI18n({
   locale: 'en',                    // Default locale
@@ -220,7 +220,7 @@ await i18n.loadNamespace('ja', 'validation')
 Implement custom translation loading:
 
 ```typescript
-import { TranslationLoader, TranslationMessages } from '@guren/server'
+import { TranslationLoader, TranslationMessages } from '@guren/core'
 
 class DatabaseLoader implements TranslationLoader {
   async load(locale: string): Promise<TranslationMessages> {
@@ -245,7 +245,7 @@ i18n.setLoader(new DatabaseLoader())
 ### Setting Global Instance
 
 ```typescript
-import { createI18n, setI18n, t, tc } from '@guren/server'
+import { createI18n, setI18n, t, tc } from '@guren/core'
 
 const i18n = createI18n({ /* config */ })
 setI18n(i18n)
@@ -258,7 +258,7 @@ tc('items.count', 5)
 ### In Controllers
 
 ```typescript
-import { Controller, t, tc } from '@guren/server'
+import { Controller, t, tc } from '@guren/core'
 
 export default class ProductController extends Controller {
   async index() {
@@ -313,7 +313,7 @@ bunx guren make:lang ja --from en
 ### Locale Detection Middleware
 
 ```typescript
-import { defineMiddleware } from '@guren/server'
+import { defineMiddleware } from '@guren/core'
 
 export const localeMiddleware = defineMiddleware(async (ctx, next) => {
   // Check query parameter
@@ -342,7 +342,8 @@ export const localeMiddleware = defineMiddleware(async (ctx, next) => {
 ## Controller Integration
 
 ```typescript
-import { Controller } from '@guren/server'
+import { Controller } from '@guren/core'
+import { appPages } from '@/resources/js/pages/contracts'
 
 export default class HomeController extends Controller {
   async index() {
@@ -352,7 +353,7 @@ export default class HomeController extends Controller {
     // Create locale-specific translator
     const t = this.app.i18n.forLocale(locale)
 
-    return this.inertia('Home', {
+    return this.inertia(appPages.home, {
       title: t.t('pages.home.title'),
       description: t.t('pages.home.description'),
     })

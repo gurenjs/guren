@@ -4,7 +4,7 @@ import {
   createControllerModuleMock,
   readInertiaResponse,
 } from '@guren/testing'
-import type { Context } from '@guren/server'
+import type { Context } from '@guren/core'
 
 const { mockUserWhere, mockUserUpdate, mockUserFind } = vi.hoisted(() => ({
   mockUserWhere: vi.fn(),
@@ -21,9 +21,14 @@ vi.mock('../../app/Models/User.js', () => ({
 }))
 
 vi.mock('guren', () => createControllerModuleMock())
-vi.mock('@guren/core', () => createControllerModuleMock())
-vi.mock('@guren/server', () => createControllerModuleMock())
-
+vi.mock('@guren/core', async () => {
+  const actual = await vi.importActual<typeof import('@guren/core')>('@guren/core')
+  return {
+    ...actual,
+    ...createControllerModuleMock(),
+    ServiceProvider: actual.ServiceProvider,
+  }
+})
 import ProfileController from '../../app/Http/Controllers/ProfileController.js'
 
 function createAuthStub(user: unknown) {

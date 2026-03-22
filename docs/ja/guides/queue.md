@@ -2,6 +2,8 @@
 
 Gurenは、時間のかかるタスクをバックグラウンドで処理するための堅牢なキューシステムを提供します。これは、メール送信、アップロード処理、外部API呼び出しなどの操作を行いながら、高速なレスポンスタイムを維持するために不可欠です。
 
+vNext の標準導線は、`@guren/core` から queue API を import し、provider で queue manager を構成し、controller では job の dispatch に集中する形です。
+
 ## コアコンセプト
 
 - **Job** – 非同期で処理される作業単位をカプセル化したクラス。`handle()`メソッドを定義し、リトライ動作を指定できます。
@@ -70,7 +72,7 @@ export class SendWelcomeEmailJob extends Job<SendWelcomeEmailPayload> {
 `QueueFacade` を使うと、コンテナからキュードライバを遅延解決してシンプルにジョブをディスパッチできます:
 
 ```ts
-import { QueueFacade as Queue } from '@guren/server'
+import { QueueFacade as Queue } from '@guren/core'
 
 await Queue.push(new SendWelcomeEmailJob({
   userId: '123',
@@ -80,13 +82,19 @@ await Queue.push(new SendWelcomeEmailJob({
 
 ### 直接セットアップ
 
-ジョブをディスパッチする前に、キュードライバを設定します：
+ジョブをディスパッチする前に、キューマネージャーを設定します：
 
 ```ts
-import { setQueueDriver, MemoryDriver } from '@guren/core'
+import { createQueueManager, MemoryDriver } from '@guren/core'
 
-// メモリドライバでシンプルなセットアップ
-setQueueDriver(new MemoryDriver())
+const queue = createQueueManager({
+  default: 'memory',
+  drivers: {
+    memory: () => new MemoryDriver(),
+  },
+})
+
+queue.driver()
 ```
 
 その後、アプリケーションのどこからでもジョブをディスパッチできます：
@@ -148,12 +156,17 @@ bunx guren queue:work --sleep=500 --timeout=120000 --max-jobs=100
 より細かい制御のために、プログラムでワーカーを作成できます：
 
 ```ts
-import { Worker, MemoryDriver, setQueueDriver, registerJob } from '@guren/core'
+import { Worker, MemoryDriver, createQueueManager, registerJob } from '@guren/core'
 import { SendWelcomeEmailJob } from '@/app/Jobs/SendWelcomeEmailJob'
 
 // セットアップ
-const driver = new MemoryDriver()
-setQueueDriver(driver)
+const queue = createQueueManager({
+  default: 'memory',
+  drivers: {
+    memory: () => new MemoryDriver(),
+  },
+})
+const driver = queue.driver()
 
 // ジョブクラスを登録（ワーカーがジョブを見つけるために必要）
 registerJob(SendWelcomeEmailJob)
@@ -186,15 +199,14 @@ await worker.stop()
 
 ### QueueManagerを使用
 
-複数のキューバックエンドを持つアプリケーションには、`QueueManager`を使用します：
+複数のキューバックエンドを持つアプリケーションには、`createQueueManager()` を使用します：
 
 ```ts
-import { QueueManager, MemoryDriver, RedisDriver, setQueueDriver } from '@guren/core'
-import { createRedisClient } from '@guren/core'
+import { createQueueManager, MemoryDriver, RedisDriver, createRedisClient } from '@guren/core'
 
 const redis = createRedisClient({ url: process.env.REDIS_URL })
 
-const queueManager = new QueueManager({
+const queueManager = createQueueManager({
   default: 'redis',
   drivers: {
     memory: () => new MemoryDriver(),
@@ -202,7 +214,7 @@ const queueManager = new QueueManager({
   },
 })
 
-// デフォルトドライバを取得（グローバルにも設定される）
+// デフォルトドライバを解決し、dispatch の既定ドライバとして有効化
 const driver = queueManager.driver()
 
 // 特定のドライバを取得
@@ -214,18 +226,23 @@ const memoryDriver = queueManager.driver('memory')
 本番環境では、永続性とマルチサーバーサポートのためにRedisドライバを使用します：
 
 ```ts
-import { RedisDriver } from '@guren/core'
-import { createRedisClient } from '@guren/core'
+import { createQueueManager, RedisDriver, createRedisClient } from '@guren/core'
 
 const redis = createRedisClient({
   url: process.env.REDIS_URL,
 })
 
-const driver = new RedisDriver(redis, {
-  prefix: 'myapp:queue:', // キープレフィックス（デフォルト: 'guren:queue:'）
+const queue = createQueueManager({
+  default: 'redis',
+  drivers: {
+    redis: () =>
+      new RedisDriver(redis, {
+        prefix: 'myapp:queue:', // キープレフィックス（デフォルト: 'guren:queue:'）
+      }),
+  },
 })
 
-setQueueDriver(driver)
+const driver = queue.driver()
 ```
 
 ## 失敗したジョブ
@@ -280,21 +297,20 @@ await driver.deleteFailedJob(jobId)
 
 ```ts
 import { describe, test, expect, beforeEach } from 'bun:test'
-import {
-  MemoryDriver,
-  setQueueDriver,
-  registerJob,
-  processJob,
-  clearJobRegistry,
-} from '@guren/core'
+import { MemoryDriver, createQueueManager, registerJob, processJob, clearJobRegistry } from '@guren/core'
 import { SendWelcomeEmailJob } from '@/app/Jobs/SendWelcomeEmailJob'
 
 describe('SendWelcomeEmailJob', () => {
   let driver: MemoryDriver
 
   beforeEach(() => {
-    driver = new MemoryDriver()
-    setQueueDriver(driver)
+    const queue = createQueueManager({
+      default: 'memory',
+      drivers: {
+        memory: () => new MemoryDriver(),
+      },
+    })
+    driver = queue.driver()
     clearJobRegistry()
     registerJob(SendWelcomeEmailJob)
   })

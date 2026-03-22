@@ -12,18 +12,33 @@ bunx guren make:controller PostsController
 
 ```ts
 // app/Http/Controllers/PostsController.ts
-import { Controller } from '@guren/server'
+import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
 import { Post } from '@/app/Models/Post'
+import { PostResource, type PostResourceData } from '@/app/Http/Resources/PostResource'
+import { ListPostsQuerySchema, PostIdParamSchema } from '@/app/Http/Validators/PostValidator'
+import { appPages } from '@/resources/js/pages/contracts'
+
+type PostsIndexProps = PaginatedPageProps<PostResourceData>
 
 export default class PostsController extends Controller {
   async index() {
-    const posts = await Post.all()
-    return this.inertia('posts/Index', { posts })
+    const { page } = this.validateQuery(ListPostsQuerySchema)
+    const result = await Post.paginate({ page, perPage: 10, orderBy: ['id', 'desc'] })
+    const paginator = paginate(result, { path: this.request.path ?? '/posts' })
+
+    return this.inertia(appPages.posts.index, {
+      data: result.data.map((post) => new PostResource(post).toJSON()),
+      pagination: {
+        meta: paginator.meta(),
+        links: paginator.links(),
+      },
+    } satisfies PostsIndexProps)
   }
 
   async show() {
-    const post = await Post.findOrFail(this.ctx.req.param('id'))
-    return this.inertia('posts/Show', { post })
+    const { id } = this.validateParams(PostIdParamSchema)
+    const post = await Post.findOrFail(id)
+    return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
   }
 }
 ```
@@ -31,10 +46,13 @@ export default class PostsController extends Controller {
 Wire it up in `routes/web.ts`:
 
 ```ts
+import { Router } from '@guren/core'
 import PostsController from '@/app/Http/Controllers/PostsController'
 
-Route.get('/posts', [PostsController, 'index'])
-Route.get('/posts/:id', [PostsController, 'show'])
+export function registerWebRoutes(router: Router): void {
+  router.get('/posts', [PostsController, 'index'])
+  router.get('/posts/:id', [PostsController, 'show'])
+}
 ```
 
 That is all it takes. The `[Controller, 'method']` tuple tells Guren which class to instantiate and which method to call for each request.
@@ -47,17 +65,19 @@ Controllers provide helpers for every common response type:
 export default class PostsController extends Controller {
   async index() {
     const posts = await Post.all()
-    return this.json(posts)              // 200 JSON
+    return this.json(posts) // 200 JSON
   }
 
   async show() {
-    const post = await Post.findOrFail(this.ctx.req.param('id'))
-    return this.inertia('posts/Show', { post })  // Inertia page
+    const { id } = this.validateParams(PostIdParamSchema)
+    const post = await Post.findOrFail(id)
+    return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() }) // Inertia page
   }
 
   async store() {
-    const post = await Post.create({ title: 'New' })
-    return this.created({ post })        // 201 JSON
+    const data = await this.validateBody(StorePostSchema)
+    const post = await Post.create(data)
+    return this.created({ post: new PostResource(post).toJSON() }) // 201 JSON
   }
 
   async update() {
@@ -93,11 +113,8 @@ async store() {
   // Query parameters (synchronous)
   const page = this.query('page', '1')
 
-  // Pick specific fields from the body
-  const data = await this.only('title', 'content', 'status')
-
-  // Everything except certain fields
-  const safe = await this.except('_token', '_method')
+  // Canonical schema-first body parsing
+  const data = await this.validateBody(StorePostSchema)
 
   // Check if a field exists
   if (await this.has('email')) {
@@ -107,7 +124,7 @@ async store() {
 ```
 
 > [!TIP]
-> Body-reading methods (`input`, `only`, `except`, `has`) are `async` because they parse the request body. The `query` method reads URL parameters and is synchronous.
+> Body-reading methods (`input`, `has`, `validateBody`) are `async` because they parse the request body. The `query` method reads URL parameters and is synchronous.
 
 ## Validation
 
@@ -116,7 +133,7 @@ async store() {
 The simplest approach is to use `validateBody`, `validateQuery`, and `validateParams` with Zod schemas directly in your controller. They accept any object with a `safeParse()` method (Zod, Valibot, etc.) and throw a `ValidationException` (422) on failure:
 
 ```ts
-import { Controller } from '@guren/server'
+import { Controller } from '@guren/core'
 import { z } from 'zod'
 import { Post } from '@/app/Models/Post'
 
@@ -126,20 +143,27 @@ const PageQuerySchema = z.object({ page: z.coerce.number().int().min(1).default(
 
 export default class PostsController extends Controller {
   async index() {
-    const { page } = this.validateQuery(PageQuerySchema)   // throws 422
-    const posts = await Post.paginate({ page })
-    return this.inertia('posts/Index', { posts })
+    const { page } = this.validateQuery(PageQuerySchema) // throws 422
+    const result = await Post.paginate({ page, perPage: 10 })
+    const paginator = paginate(result, { path: this.request.path ?? '/posts' })
+    return this.inertia(appPages.posts.index, {
+      data: result.data.map((post) => new PostResource(post).toJSON()),
+      pagination: {
+        meta: paginator.meta(),
+        links: paginator.links(),
+      },
+    })
   }
 
   async show() {
-    const { id } = this.validateParams(PostIdParamSchema)   // throws 422
-    const post = await Post.findOrFail(id)                   // throws 404
-    return this.inertia('posts/Show', { post })
+    const { id } = this.validateParams(PostIdParamSchema) // throws 422
+    const post = await Post.findOrFail(id) // throws 404
+    return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
   }
 
   async store() {
-    const data = await this.validateBody(StorePostSchema)    // throws 422
-    const user = await this.auth.userOrFail()                // throws 401
+    const data = await this.validateBody(StorePostSchema) // throws 422
+    const user = await this.auth.userOrFail() // throws 401
     const post = await Post.create({ ...data, authorId: user.id })
     return this.redirect('/posts')
   }
@@ -154,14 +178,14 @@ export default class PostsController extends Controller {
 
 All three throw `ValidationException` (HTTP 422) on failure, which the `ExceptionHandler` renders automatically.
 
-### FormRequest Classes
+### FormRequest Compatibility
 
-For more complex scenarios requiring authorization logic, use FormRequest classes:
+Schema-first validation is the recommended path. If you are migrating older code or need class-based authorization rules, Guren still supports `FormRequest` through the legacy validation layer:
 
 ```ts
 // app/Http/Requests/StorePostRequest.ts
-import { FormRequest } from '@guren/server'
-import { required, stringRule, min, max, inValues } from '@guren/server'
+import { FormRequest } from '@guren/core/legacy-validation'
+import { required, stringRule, min, max, inValues } from '@guren/core/legacy-validation'
 
 interface StorePostData {
   title: string
@@ -195,7 +219,7 @@ async store() {
 }
 ```
 
-If validation fails, a 422 response is returned automatically. If `authorize()` returns `false`, a 403 is returned.
+If validation fails, a 422 response is returned automatically. If `authorize()` returns `false`, a 403 is returned. Prefer Zod or route contracts for new code.
 
 > [!NOTE]
 > See the [Validation Guide](./validation.md) for the full list of built-in rules.
@@ -205,8 +229,8 @@ If validation fails, a 422 response is returned automatically. If `authorize()` 
 When your controller needs services (caching, events, mail), declare them with `static inject` and Guren resolves them from the container:
 
 ```ts
-import { Controller } from '@guren/server'
-import type { CacheManager, EventManager } from '@guren/server'
+import { Controller } from '@guren/core'
+import type { CacheManager, EventManager } from '@guren/core'
 import { Post } from '@/app/Models/Post'
 
 export default class PostsController extends Controller {
@@ -234,10 +258,10 @@ The `as const` assertion on `inject` ensures type safety. Each string maps to a 
 
 ## Resource Controllers
 
-Instead of defining seven routes by hand, use `Route.resource()`:
+Instead of defining seven routes by hand, use `router.resource()`:
 
 ```ts
-Route.resource('/posts', PostsController)
+router.resource('/posts', PostsController)
 ```
 
 This generates:
@@ -255,7 +279,7 @@ This generates:
 Only methods that exist on your controller are registered. Limit the routes with `only` or `except`:
 
 ```ts
-Route.resource('/posts', PostsController, { only: ['index', 'show'] })
+router.resource('/posts', PostsController, { only: ['index', 'show'] })
 ```
 
 ## Testing Controllers

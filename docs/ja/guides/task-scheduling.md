@@ -7,7 +7,7 @@ Gurenは、流暢で表現力豊かな構文でスケジュールタスクを定
 スケジューラーを作成し、スケジュールタスクを定義します：
 
 ```typescript
-import { createScheduler, Schedule } from '@guren/server'
+import { createScheduler, Schedule } from '@guren/core'
 
 const scheduler = createScheduler({
   timezone: 'Asia/Tokyo',
@@ -238,7 +238,7 @@ schedule.call(task)
 ### 作成と管理
 
 ```typescript
-import { createScheduler } from '@guren/server'
+import { createScheduler } from '@guren/core'
 
 const scheduler = createScheduler({
   timezone: 'UTC',          // デフォルトタイムゾーン
@@ -325,7 +325,7 @@ bunx guren schedule:run --force
 
 ```typescript
 // app/Console/Kernel.ts
-import { Schedule, createScheduler } from '@guren/server'
+import { Schedule, createScheduler } from '@guren/core'
 import { SendDailyReportJob } from '../Jobs/SendDailyReportJob'
 import { CleanupTempFilesJob } from '../Jobs/CleanupTempFilesJob'
 

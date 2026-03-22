@@ -140,8 +140,18 @@ export class ExceptionHandler {
    */
   protected shouldNotReport(error: Error): boolean {
     return this.dontReportClasses.some(
-      (errorClass) => error instanceof errorClass
+      (errorClass) => this.matchesErrorClass(error, errorClass)
     )
+  }
+
+  protected matchesErrorClass(error: Error, errorClass: ExceptionClass): boolean {
+    const errorClassName = (errorClass as { name?: string }).name
+    const errorName = error.name
+    const constructorName = (error.constructor as { name?: string } | undefined)?.name
+
+    return error instanceof errorClass
+      || errorName === errorClassName
+      || constructorName === errorClassName
   }
 
   /**
@@ -150,7 +160,7 @@ export class ExceptionHandler {
   protected async renderException(error: Error, ctx: Context): Promise<Response> {
     // Check for custom renderer
     for (const { errorClass, renderer } of this.renderers) {
-      if (error instanceof errorClass) {
+      if (this.matchesErrorClass(error, errorClass)) {
         return renderer(error, ctx)
       }
     }
@@ -194,15 +204,15 @@ export class ExceptionHandler {
   middleware(): Middleware {
     return async (ctx, next) => {
       try {
-        await next()
+        return await next()
       } catch (error) {
-        if (error instanceof Error) {
-          return this.handle(error, ctx)
-        }
+        const response = error instanceof Error
+          ? await this.handle(error, ctx)
+          : await this.handle(new Error(String(error)), ctx)
 
-        // Handle non-Error throws
-        const wrappedError = new Error(String(error))
-        return this.handle(wrappedError, ctx)
+        ctx.res = response
+
+        return response
       }
     }
   }

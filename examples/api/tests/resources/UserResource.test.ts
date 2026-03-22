@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createControllerModuleMock } from '@guren/testing'
+import { createControllerModuleMock } from '@guren/testing/controller'
 
-vi.mock('@guren/server', () => createControllerModuleMock())
+vi.mock('@guren/core', () => createControllerModuleMock())
 import { UserResource } from '../../app/Http/Resources/UserResource.js'
 
 describe('UserResource', () => {

@@ -10,37 +10,40 @@ Guren delivers a single-page application experience by combining Inertia.js with
 - `resources/css/app.css`: Tailwind (or your chosen CSS) entry point.
 
 ## Page Components
-Page filenames mirror the component names passed to `this.inertia()`:
+Page filenames map to the page contracts declared in `resources/js/pages/contracts.ts`:
 
 ```ts
 // Controller
-return this.inertia('posts/Index', { posts })
+return this.inertia(appPages.posts.index, {
+  data,
+  pagination,
+})
 ```
 
 ```tsx
 // resources/js/pages/posts/Index.tsx
-import type { PostRecord } from '@/app/Models/Post'
+import type { PageProps } from '@guren/inertia-client/contracts'
 import { Head, Link } from '@inertiajs/react'
+import { appPages } from '../contracts'
 
-type Props = {
-  posts: PostRecord[]
-}
+type Props = PageProps<typeof appPages.posts.index>
 
-export default function Index({ posts }: Props) {
+export default function Index({ data, pagination }: Props) {
   return (
     <>
       <Head title="Posts" />
       <div className="space-y-4">
-        {posts.map((post) => (
+        {data.map((post) => (
           <article key={post.id} className="rounded border border-slate-200 p-4">
             <h2 className="text-lg font-semibold">{post.title}</h2>
-            <p className="text-slate-600">{post.body}</p>
+            <p className="text-slate-600">{post.excerpt}</p>
             <Link className="text-blue-600 underline" href={`/posts/${post.id}`}>
               Read more
             </Link>
           </article>
         ))}
       </div>
+      <p className="mt-4 text-sm text-slate-500">{pagination.meta.total} posts</p>
     </>
   )
 }
@@ -99,10 +102,10 @@ Each application ships with a default `resources/js/ssr.tsx` entry that calls `r
 - Detect the built client manifest (`public/assets/.vite/manifest.json`) and automatically seed `GUREN_INERTIA_ENTRY`/`GUREN_INERTIA_STYLES` in production.
 - Locate the SSR manifest (`public/assets/.vite/ssr-manifest.json`) and set `GUREN_INERTIA_SSR_ENTRY` / `GUREN_INERTIA_SSR_MANIFEST` so Inertia can render on the server.
 
-To produce the required assets run both client and SSR builds:
+To produce the required assets run the app build, which runs codegen before the Vite client and SSR builds:
 
 ```bash
-bunx vite build && bunx vite build --ssr
+bun run build
 ```
 
 You can override the default resolver—useful for custom component lookups—by editing `resources/js/ssr.tsx` and passing a different `resolve` function to `renderInertiaServer()`. If you opt out of `autoConfigureInertiaAssets`, make sure you populate the required environment variables before calling `configureInertiaAssets` yourself.
@@ -112,6 +115,6 @@ You can override the default resolver—useful for custom component lookups—by
 - Use module path aliases (configured in `tsconfig.json`) to avoid long relative imports.
 
 ## Hot Reloading
-Running `bun run dev` keeps the frontend and backend in sync—the Bun process automatically launches the Vite dev server, so changes to TSX files trigger instant reloads without extra commands. If you need to customize that workflow, import `startViteDevServer()` from `@guren/server` and manage the Vite instance yourself.
+Running `bun run dev` keeps the frontend and backend in sync—the Bun process automatically launches the Vite dev server, so changes to TSX files trigger instant reloads without extra commands. If you need to customize that workflow, import `startViteDevServer()` from `@guren/core/runtime` and manage the Vite instance yourself.
 
 By structuring your pages and components with these patterns, you get a smooth SPA experience with minimal boilerplate, powered entirely by React and Inertia.

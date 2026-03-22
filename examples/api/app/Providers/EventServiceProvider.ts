@@ -1,12 +1,18 @@
 import {
+  ServiceProvider,
   createEventManager,
   createMailManager,
+  createQueueManager,
   setMailManager,
-  setQueueDriver,
   MemoryDriver,
   registerJob,
   type EventManager,
-} from '@guren/server'
+  type MailManager,
+  type QueueManager,
+  type NotificationManager,
+  type BroadcastManager,
+  type StorageManager,
+} from '@guren/core'
 import { LogUserRegistration } from '../Listeners/LogUserRegistration.js'
 import { NotifyTaskCompleted } from '../Listeners/NotifyTaskCompleted.js'
 import { UserRegistered } from '../Events/UserRegistered.js'
@@ -14,23 +20,22 @@ import { TaskCompleted } from '../Events/TaskCompleted.js'
 import { SendRegistrationEmailJob } from '../Jobs/SendRegistrationEmailJob.js'
 
 let eventManager: EventManager | null = null
+let mailManager: MailManager | null = null
+let queueManager: QueueManager | null = null
+let containerRef: { make<T>(key: string): T } | null = null
+let initialized = false
 
 /**
  * Initialize events, mail, and queue systems.
  */
 export function initializeEventSystem(): EventManager {
-  if (eventManager) {
+  if (eventManager && initialized) {
     return eventManager
   }
 
-  // Create and configure event manager
-  eventManager = createEventManager()
+  eventManager = eventManager ?? createEventManager()
 
-  // Register event listeners
-  registerListeners(eventManager)
-
-  // Configure mail (using memory transport for development)
-  const mailManager = createMailManager({
+  mailManager = mailManager ?? createMailManager({
     default: 'memory',
     from: { email: 'noreply@api.example.com', name: 'Guren API' },
     transports: {
@@ -39,14 +44,18 @@ export function initializeEventSystem(): EventManager {
   })
   setMailManager(mailManager)
 
-  // Configure queue (using memory driver for development)
-  const queueDriver = new MemoryDriver()
-  setQueueDriver(queueDriver)
+  queueManager = queueManager ?? createQueueManager({
+    default: 'memory',
+    drivers: {
+      memory: () => new MemoryDriver(),
+    },
+  })
+  queueManager.driver()
 
-  // Register jobs
   registerJob(SendRegistrationEmailJob)
+  registerListeners(eventManager)
 
-  console.log('[Events] Event system initialized')
+  initialized = true
   return eventManager
 }
 
@@ -61,7 +70,13 @@ function registerListeners(events: EventManager): void {
   })
 
   // TaskCompleted listeners
-  const notifyTaskCompleted = new NotifyTaskCompleted()
+  if (!containerRef) {
+    throw new Error('EventServiceProvider container has not been registered.')
+  }
+  const notifications = containerRef.make<NotificationManager>('notifications')
+  const broadcast = containerRef.make<BroadcastManager>('broadcast')
+  const storage = containerRef.make<StorageManager>('storage')
+  const notifyTaskCompleted = new NotifyTaskCompleted(notifications, broadcast, storage)
   events.on(
     TaskCompleted,
     async (event) => {
@@ -75,18 +90,21 @@ function registerListeners(events: EventManager): void {
   console.log('[Events] Registered listeners: LogUserRegistration, NotifyTaskCompleted')
 }
 
-/**
- * Get the event manager instance.
- */
-export function getEventManager(): EventManager {
-  if (!eventManager) {
-    return initializeEventSystem()
+export default class EventServiceProvider extends ServiceProvider {
+  register(): void {
+    containerRef = this.container
+    this.container.singleton('events', () => initializeEventSystem())
+    this.container.singleton('mail', () => {
+      initializeEventSystem()
+      return mailManager as MailManager
+    })
+    this.container.singleton('queue', () => {
+      initializeEventSystem()
+      return queueManager as QueueManager
+    })
   }
-  return eventManager
-}
 
-export default {
   boot(): void {
     initializeEventSystem()
-  },
+  }
 }

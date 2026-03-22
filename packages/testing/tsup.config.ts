@@ -6,5 +6,13 @@ export default defineConfig({
   dts: true,
   sourcemap: true,
   clean: true,
-  external: ['vitest'],
+  external: [
+    'vitest',
+    'lightningcss',
+    'hono',
+    /^@guren\//,
+    'bun:sqlite',
+    'drizzle-orm/bun-sqlite',
+    'drizzle-orm/bun-sqlite/migrator',
+  ],
 })

@@ -11,18 +11,22 @@
 ## Key Framework Patterns
 
 ### MVC Structure
-- **Routes**: Laravel-style DSL in `routes/web.ts` using `Route.get()`, `Route.group()`, etc.
+- **Routes**: Export a registrar from `routes/web.ts` and register against `Router` using `router.get()`, `router.group()`, etc.
 - **Controllers**: Extend `Controller` base class, use `this.inertia()` for page responses
-- **Models**: Extend `Model<TRecord>` with static `table` property pointing to Drizzle schema
+- **Models**: Prefer `defineModel(table)` or `defineModel(table, { base })` for Drizzle-backed models
 - **Views**: React components in `resources/js/pages/` rendered via Inertia
 
 ### Route & Controller Pattern
 ```typescript
 // routes/web.ts
-Route.group('/posts', () => {
-  Route.get('/', [PostController, 'index'])
-  Route.get('/:id', [PostController, 'show'])
-})
+import { Router } from '@guren/server'
+
+export function registerWebRoutes(router: Router): void {
+  router.group('/posts', (posts) => {
+    posts.get('/', [PostController, 'index'])
+    posts.get('/:id', [PostController, 'show'])
+  })
+}
 
 // Controllers use array syntax: [ControllerClass, 'methodName']
 // Controllers access context via this.ctx, return this.inertia() for pages
@@ -69,14 +73,14 @@ bunx guren make:model User
 bunx guren make:view users/Index
 bunx guren make:test auth/Login --runner vitest
 bunx guren make:auth --force
-bunx guren routes:types --routes routes/web.ts --out types/generated/routes.d.ts
+bunx guren codegen --routes routes/web.ts --out types/generated/routes.d.ts
 bunx guren console
 bunx guren dev
 ```
 
 ### Application Bootstrap Pattern
-1. Import routes in `src/main.ts` (side-effect based registration)
-2. Create an `Application` instance, registering any providers (e.g. `DatabaseProvider`) that prepare services
+1. Export a route registrar from `routes/web.ts`
+2. Create the app with `createApp({ routes, providers })`
 3. Call `app.boot()` then `app.listen()`
 
 ## Framework-Specific Conventions
@@ -87,10 +91,10 @@ bunx guren dev
 - Example apps use Vite for dev/production assets—`autoConfigureInertiaAssets` wires `GUREN_INERTIA_*` env vars off manifests (it calls `configureInertiaAssets` under the hood).
 - Initial page data embedded in HTML via `data-page` attribute
 
-### Static Route Registry
-- Routes are registered statically in `Route` class registry
-- Import route files as side effects (no explicit calls needed)
-- All routes mounted when `app.boot()` is called via `Route.mount(hono)`
+### Router Registration
+- Routes are registered against an app-local `Router` instance
+- Pass the registrar to `createApp({ routes })` rather than importing route files for side effects
+- The application mounts its router during `app.boot()`
 
 ### ORM Adapter Pattern
 - Models use adapter pattern with `ORMAdapter` interface
@@ -131,3 +135,14 @@ bunx guren dev
 - Controllers import as default exports: `import PostController from '@/path'`
 - Models export both type and class: `export type PostRecord = typeof posts.$inferSelect; export class Post`
 - Routes use controller array syntax: `[PostController, 'index']`
+
+### End-to-End Type Safety
+- `bunx guren codegen` generates four artifacts in `.guren/`: `pages.gen.ts`, `routes.gen.ts`, `data.gen.ts`, `api-client.gen.ts`
+- **Route Schema Binding**: Attach Zod schemas to routes via `RouteContractOptions` (`body`, `params`, `query`); codegen extracts schema types at runtime and generates typed `body` fields in `ApiRoutes`
+- **Route Model Binding**: `bind: { id: Post }` in route options + `this.model(Post)` in controllers for typed, auto-resolved model instances
+- **Page Props**: Define `interface Props` in page components; codegen extracts them via Babel AST into `PagePropsMap` for compile-time validation in `this.inertia()`. No manual `contracts.ts` needed
+- **Data Types**: `JsonResource` subclasses with typed `toArray()` are exported as `Data.Post`, `Data.User`, etc.
+- **API Client**: `createApiClient<ApiRoutes>()` provides typed `request()` with route name autocomplete, param checking, and body types
+- **Bidirectional Forms**: `RouteBody<ApiRoutes, 'posts.store'>` and `RouteErrors<PostForm>` from `@guren/inertia-client/typed-forms`
+- **Typed Components**: `createTypedLink(routeManifest)` and `createTypedForm(routeManifest)` provide `<Link route="posts.show" params={{ id: 1 }}>` with compile-time route name and param checking
+- **Vite HMR**: The Vite plugin watches `routes/web.ts`, `resources/js/pages/`, and `app/Http/Resources/` — changes trigger automatic codegen

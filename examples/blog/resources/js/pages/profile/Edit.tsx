@@ -1,8 +1,15 @@
-import { useForm, usePage } from '@inertiajs/react'
+import { useForm } from '@inertiajs/react'
 import type { FormEvent } from 'react'
 import { useEffect } from 'react'
 import Layout from '../../components/Layout.js'
 import { User, Mail, Lock, Save, RotateCcw, AlertCircle } from 'lucide-react'
+import type { ValidationErrors } from '@guren/core'
+
+interface Props {
+  profile: { name: string; email: string }
+  errors?: ValidationErrors<'name' | 'email' | 'password'>
+  status?: string
+}
 
 type ProfileFormValues = {
   name: string
@@ -11,16 +18,7 @@ type ProfileFormValues = {
   passwordConfirmation: string
 }
 
-type ProfilePageProps = {
-  profile: {
-    name: string
-    email: string
-  }
-  status?: string
-}
-
-export default function EditProfile() {
-  const { profile, status } = usePage<ProfilePageProps>().props
+export default function EditProfile({ profile, status }: Props) {
 
   const form = useForm<ProfileFormValues>({
     name: profile?.name ?? '',

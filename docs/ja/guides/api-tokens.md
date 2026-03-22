@@ -106,15 +106,17 @@ app.use('/api/*', createBearerTokenMiddleware({ store }))
 ### Ability要件付き
 
 ```ts
-import { Route } from '@guren/server'
+import { Router } from '@guren/core'
 
 // ルートに特定のabilitiesを要求
-Route.delete('/api/posts/:id', [PostController, 'destroy']).middleware(
-  createBearerTokenMiddleware({
-    store,
-    abilities: ['posts:delete'],
-  })
-)
+export function registerApiRoutes(router: Router): void {
+  router.delete('/api/posts/:id', [PostController, 'destroy']).middleware(
+    createBearerTokenMiddleware({
+      store,
+      abilities: ['posts:delete'],
+    }),
+  )
+}
 ```
 
 ### ユーザー読み込み付き
@@ -128,7 +130,7 @@ app.use('/api/*', createBearerTokenMiddleware({
 }))
 
 // コンテキストでユーザーが利用可能に
-Route.get('/api/me', (ctx) => {
+router.get('/api/me', (ctx) => {
   const user = ctx.get('guren:user')
   return ctx.json(user)
 })
@@ -156,7 +158,7 @@ app.use('/api/*', createBearerTokenMiddleware({
 ```ts
 import { getApiToken } from '@guren/core'
 
-Route.get('/api/token-info', (ctx) => {
+router.get('/api/token-info', (ctx) => {
   const tokenInfo = getApiToken(ctx)
 
   if (!tokenInfo) {
@@ -179,7 +181,7 @@ Route.get('/api/token-info', (ctx) => {
 ```ts
 import { getUserApiTokens } from '@guren/core'
 
-Route.get('/api/tokens', async (ctx) => {
+router.get('/api/tokens', async (ctx) => {
   const user = ctx.get('guren:user')
   const tokens = await getUserApiTokens(user.id, store)
 
@@ -202,14 +204,14 @@ Route.get('/api/tokens', async (ctx) => {
 import { revokeApiToken, revokeAllApiTokens } from '@guren/core'
 
 // 特定のトークンを無効化
-Route.delete('/api/tokens/:id', async (ctx) => {
+router.delete('/api/tokens/:id', async (ctx) => {
   const tokenId = ctx.req.param('id')
   await revokeApiToken(tokenId, store)
   return ctx.json({ message: 'トークンが無効化されました' })
 })
 
 // すべてのトークンを無効化（パスワード変更時など）
-Route.post('/api/tokens/revoke-all', async (ctx) => {
+router.post('/api/tokens/revoke-all', async (ctx) => {
   const user = ctx.get('guren:user')
   await revokeAllApiTokens(user.id, store)
   return ctx.json({ message: 'すべてのトークンが無効化されました' })

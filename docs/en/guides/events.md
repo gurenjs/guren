@@ -2,6 +2,8 @@
 
 Guren provides a simple yet powerful event system for decoupling components in your application. Events allow you to broadcast occurrences in your application that other parts can listen and react to.
 
+The standard vNext path is: import event APIs from `@guren/core`, register listeners/providers centrally, and keep controllers focused on emitting domain events.
+
 ## Core Concepts
 
 - **Event** – A class representing something that happened in your application. Events carry data about the occurrence.
@@ -72,13 +74,15 @@ class OrderPlaced extends Event {
 
 ## Registering Listeners
 
-### Using the Facade
+### Using Container-bound Facades
 
-The simplest way to work with events is through the `EventsFacade`, which resolves the `EventManager` from the container lazily:
+The simplest way to work with events without passing the manager around is to create facades from an application container:
 
 ```ts
-import { EventsFacade as Events } from '@guren/server'
+import { createFacades } from '@guren/core'
 import { UserRegistered } from '@/app/Events/UserRegistered'
+
+const { Events } = createFacades(app.container)
 
 // Register a listener
 Events.on(UserRegistered, async (event) => {
@@ -307,8 +311,16 @@ Dispatch listeners to a queue for async processing:
 
 ```ts
 // Configure queue integration
-import { setQueueDriver, MemoryDriver } from '@guren/core'
-setQueueDriver(new MemoryDriver())
+import { createQueueManager, MemoryDriver } from '@guren/core'
+
+const queue = createQueueManager({
+  default: 'memory',
+  drivers: {
+    memory: () => new MemoryDriver(),
+  },
+})
+
+queue.driver()
 
 // Register a queued listener
 events.on(
@@ -349,7 +361,7 @@ events.removeAllListeners()
 The event system is registered as a singleton via a `ServiceProvider`. You can resolve it from the container:
 
 ```ts
-import { container } from '@guren/server'
+import { container } from '@guren/core'
 
 const events = container.make('events') // EventManager
 events.emit(new UserRegistered('123', 'user@example.com'))
@@ -360,7 +372,7 @@ events.emit(new UserRegistered('123', 'user@example.com'))
 Swap the event manager with a fake in tests:
 
 ```ts
-import { container } from '@guren/server'
+import { container } from '@guren/core'
 import { EventManager } from '@guren/core'
 
 test('application emits events', async () => {

@@ -40,7 +40,7 @@ await broadcast.broadcast('notifications', 'NewMessage', {
 The broadcasting subsystem is registered as a singleton via a `ServiceProvider`. You can resolve it from the container:
 
 ```ts
-import { container } from '@guren/server'
+import { container } from '@guren/core'
 
 const broadcast = container.make('broadcast') // BroadcastManager
 await broadcast.broadcast('notifications', 'NewMessage', { content: 'Hello!' })
@@ -144,18 +144,18 @@ broadcast.channel('admin.**', isAdmin)             // admin.users, admin.setting
 ### SSE Endpoint
 
 ```ts
-import { Route } from '@guren/server'
+import { Router } from '@guren/core'
 
-// SSE connection endpoint
-Route.get('/broadcasting/events', broadcast.sseMiddleware({
-  pingInterval: 30000, // Send ping every 30s
-  retry: 3000,         // Client retry delay
-}))
+export function registerBroadcastRoutes(router: Router): void {
+  router.get('/broadcasting/events', broadcast.sseMiddleware({
+    pingInterval: 30000,
+    retry: 3000,
+  }))
 
-// Channel auth endpoint
-Route.post('/broadcasting/auth', broadcast.authMiddleware({
-  getUser: (ctx) => ctx.get('user'),
-}))
+  router.post('/broadcasting/auth', broadcast.authMiddleware({
+    getUser: (ctx) => ctx.get('user'),
+  }))
+}
 ```
 
 ### Client-Side Integration
@@ -320,7 +320,7 @@ await channel.broadcast('MemberLeft', {
 Swap the broadcast manager in tests:
 
 ```ts
-import { container } from '@guren/server'
+import { container } from '@guren/core'
 import { BroadcastManager, MemoryDriver } from '@guren/core'
 
 test('broadcasts order update', async () => {

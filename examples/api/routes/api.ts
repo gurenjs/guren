@@ -1,11 +1,13 @@
 import {
-  Route,
+  Router,
   createRateLimitMiddleware,
   createBearerTokenMiddleware,
   MemoryRateLimitStore,
-} from '@guren/server'
-import AuthController, { tokenStore } from '../app/Http/Controllers/AuthController.js'
+} from '@guren/core'
+import AuthController from '../app/Http/Controllers/AuthController.js'
+import TokenController from '../app/Http/Controllers/TokenController.js'
 import TaskController from '../app/Http/Controllers/TaskController.js'
+import { getTokenStore } from '../app/Providers/ApiTokenProvider.js'
 
 // Rate limit stores (shared for consistent limiting)
 const rateLimitStore = new MemoryRateLimitStore()
@@ -31,26 +33,27 @@ const userRateLimit = createRateLimitMiddleware({
 
 // Bearer token auth middleware
 const requireAuth = createBearerTokenMiddleware({
-  store: tokenStore,
+  store: getTokenStore(),
 })
 
-// Public auth routes (with strict rate limiting)
-Route.post('/api/auth/register', [AuthController, 'register'], strictRateLimit).name('auth.register')
-Route.post('/api/auth/login', [AuthController, 'login'], strictRateLimit).name('auth.login')
+export function registerApiRoutes(router: Router): void {
+  router.post('/api/auth/register', [AuthController, 'register'], strictRateLimit).name('auth.register')
+  router.post('/api/auth/login', [AuthController, 'login'], strictRateLimit).name('auth.login')
 
-// Authenticated auth routes
-Route.group('/api/auth', () => {
-  Route.get('/user', [AuthController, 'user'], requireAuth, userRateLimit).name('auth.user')
-  Route.get('/tokens', [AuthController, 'listTokens'], requireAuth, userRateLimit).name('auth.tokens.index')
-  Route.post('/tokens', [AuthController, 'createToken'], requireAuth, userRateLimit).name('auth.tokens.store')
-  Route.delete('/tokens/:id', [AuthController, 'revokeToken'], requireAuth, userRateLimit).name('auth.tokens.destroy')
-})
+  router.group('/api/auth', (auth) => {
+    auth.get('/user', [AuthController, 'user'], requireAuth, userRateLimit).name('auth.user')
+    auth.get('/tokens', [TokenController, 'index'], requireAuth, userRateLimit).name('auth.tokens.index')
+    auth.post('/tokens', [TokenController, 'store'], requireAuth, userRateLimit).name('auth.tokens.store')
+    auth.delete('/tokens/:id', [TokenController, 'destroy'], requireAuth, userRateLimit).name('auth.tokens.destroy')
+  })
 
-// Task routes (all authenticated with user-based rate limiting)
-Route.group('/api/tasks', () => {
-  Route.get('/', [TaskController, 'index'], requireAuth, userRateLimit).name('tasks.index')
-  Route.post('/', [TaskController, 'store'], requireAuth, userRateLimit).name('tasks.store')
-  Route.get('/:id', [TaskController, 'show'], requireAuth, userRateLimit).name('tasks.show')
-  Route.put('/:id', [TaskController, 'update'], requireAuth, userRateLimit).name('tasks.update')
-  Route.delete('/:id', [TaskController, 'destroy'], requireAuth, userRateLimit).name('tasks.destroy')
-})
+  router.group('/api/tasks', (tasks) => {
+    tasks.get('/', [TaskController, 'index'], requireAuth, userRateLimit).name('tasks.index')
+    tasks.post('/', [TaskController, 'store'], requireAuth, userRateLimit).name('tasks.store')
+    tasks.get('/:id', [TaskController, 'show'], requireAuth, userRateLimit).name('tasks.show')
+    tasks.put('/:id', [TaskController, 'update'], requireAuth, userRateLimit).name('tasks.update')
+    tasks.delete('/:id', [TaskController, 'destroy'], requireAuth, userRateLimit).name('tasks.destroy')
+  })
+}
+
+export default registerApiRoutes

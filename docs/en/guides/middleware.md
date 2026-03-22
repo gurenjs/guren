@@ -6,7 +6,7 @@ Guren routes and applications share Hono's middleware model but expose Laravel-s
 
 ```ts
 // src/app.ts
-import { Application, defineMiddleware } from '@guren/server'
+import { createApp, defineMiddleware } from '@guren/core'
 
 const requestTimer = defineMiddleware(async (ctx, next) => {
   const started = performance.now()
@@ -15,7 +15,7 @@ const requestTimer = defineMiddleware(async (ctx, next) => {
   console.log(`${ctx.req.method} ${ctx.req.path} -> ${ctx.res.status} (${duration}ms)`)
 })
 
-const app = new Application()
+const app = createApp()
 app.use('*', requestTimer)
 ```
 
@@ -24,11 +24,15 @@ Global middlewares run before any routes are mounted. Providers can register mid
 ## Route Middleware
 
 ```ts
-import { Route } from '@guren/server'
+import { Router } from '@guren/core'
 import DashboardController from '@/app/Http/Controllers/DashboardController'
 import { requireAuthenticated } from '@/app/Http/middleware/auth'
 
-Route.get('/dashboard', [DashboardController, 'index'], requireAuthenticated({ redirectTo: '/login' }))
+export function registerWebRoutes(router: Router): void {
+  router.get('/dashboard', [DashboardController, 'index']).middleware(
+    requireAuthenticated({ redirectTo: '/login' }),
+  )
+}
 ```
 
 Route middleware only applies to the specific endpoint (or every endpoint nested in a group).
@@ -38,20 +42,22 @@ Route middleware only applies to the specific endpoint (or every endpoint nested
 Register short string names for middleware functions so you can reference them throughout your route files without importing the actual function each time:
 
 ```ts
-import { Route, requireAuthenticated } from '@guren/server'
+import { Router, requireAuthenticated } from '@guren/core'
 import { requireAdmin } from '@/app/Http/middleware/admin'
 import { csrfProtection } from '@/app/Http/middleware/csrf'
 
-Route.aliasMiddleware('auth', requireAuthenticated())
-Route.aliasMiddleware('admin', requireAdmin())
-Route.aliasMiddleware('csrf', csrfProtection())
+export function registerWebRoutes(router: Router): void {
+  router.aliasMiddleware('auth', requireAuthenticated())
+  router.aliasMiddleware('admin', requireAdmin())
+  router.aliasMiddleware('csrf', csrfProtection())
+}
 ```
 
 Once registered, use the alias string anywhere middleware is accepted:
 
 ```ts
-Route.get('/dashboard', [DashboardController, 'index']).middleware('auth')
-Route.post('/settings', [SettingsController, 'update']).middleware('auth', 'csrf')
+router.get('/dashboard', [DashboardController, 'index']).middleware('auth')
+router.post('/settings', [SettingsController, 'update']).middleware('auth', 'csrf')
 ```
 
 ## Middleware Groups
@@ -59,31 +65,31 @@ Route.post('/settings', [SettingsController, 'update']).middleware('auth', 'csrf
 Bundle multiple middleware aliases under a single group name. This is useful for stacks that commonly run together:
 
 ```ts
-Route.groupMiddleware('web', ['session', 'csrf'])
-Route.groupMiddleware('api', ['throttle:60'])
+router.groupMiddleware('web', ['session', 'csrf'])
+router.groupMiddleware('api', ['throttle:60'])
 ```
 
-Apply a group to a route group using `Route.middleware()`:
+Apply a group to a route group using `router.middleware()`:
 
 ```ts
-Route.middleware('web').group(() => {
-  Route.get('/', [HomeController, 'index'])
-  Route.get('/about', [PagesController, 'about'])
-  Route.get('/contact', [PagesController, 'contact'])
+router.middleware('web').group((web) => {
+  web.get('/', [HomeController, 'index'])
+  web.get('/about', [PagesController, 'about'])
+  web.get('/contact', [PagesController, 'contact'])
 })
 
-Route.middleware('api').group(() => {
-  Route.get('/api/posts', [ApiPostController, 'index'])
-  Route.post('/api/posts', [ApiPostController, 'store'])
+router.middleware('api').group((api) => {
+  api.get('/api/posts', [ApiPostController, 'index'])
+  api.post('/api/posts', [ApiPostController, 'store'])
 })
 ```
 
 You can combine groups and individual aliases:
 
 ```ts
-Route.middleware('web', 'auth').group(() => {
-  Route.get('/profile', [ProfileController, 'show'])
-  Route.put('/profile', [ProfileController, 'update'])
+router.middleware('web', 'auth').group((group) => {
+  group.get('/profile', [ProfileController, 'show'])
+  group.put('/profile', [ProfileController, 'update'])
 })
 ```
 
@@ -96,7 +102,7 @@ Utility wrapper for annotating Hono middleware with Guren's type expectations.
 Factory that attaches a session object to the request context. Sessions are stored in memory by default (`MemorySessionStore`) and persisted using signed cookies.
 
 ```ts
-import { createSessionMiddleware } from '@guren/server'
+import { createSessionMiddleware } from '@guren/core'
 
 app.use('*', createSessionMiddleware())
 ```
@@ -108,17 +114,17 @@ Each request exposes the session through `ctx.get('guren:session')` or the helpe
 `requireAuthenticated` and `requireGuest` are thin wrappers that expect an auth context to be attached earlier in the pipeline. Pair them with `attachAuthContext`, which stores your guard implementation on the request.
 
 ```ts
-import { attachAuthContext, requireAuthenticated } from '@guren/server'
+import { attachAuthContext, requireAuthenticated } from '@guren/core'
 
 app.use('*', attachAuthContext(() => authManager.createGuard('web')))
 
 // Using middleware alias (recommended)
-Route.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
-Route.aliasMiddleware('guest', requireGuest({ redirectTo: '/dashboard' }))
+router.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
+router.aliasMiddleware('guest', requireGuest({ redirectTo: '/dashboard' }))
 
-Route.middleware('auth').group(() => {
-  Route.get('/settings', [SettingsController, 'index'])
-  Route.get('/dashboard', [DashboardController, 'index'])
+router.middleware('auth').group((auth) => {
+  auth.get('/settings', [SettingsController, 'index'])
+  auth.get('/dashboard', [DashboardController, 'index'])
 })
 ```
 
@@ -127,10 +133,10 @@ Route.middleware('auth').group(() => {
 The CSRF middleware validates tokens on state-changing requests (POST, PUT, PATCH, DELETE):
 
 ```ts
-Route.aliasMiddleware('csrf', csrfProtection())
+router.aliasMiddleware('csrf', csrfProtection())
 
-Route.middleware('csrf').group(() => {
-  Route.post('/posts', [PostsController, 'store'])
+router.middleware('csrf').group((csrf) => {
+  csrf.post('/posts', [PostsController, 'store'])
 })
 ```
 
@@ -139,12 +145,12 @@ Route.middleware('csrf').group(() => {
 Apply rate limiting to routes or groups:
 
 ```ts
-import { rateLimit } from '@guren/server'
+import { rateLimit } from '@guren/core'
 
-Route.aliasMiddleware('throttle', rateLimit({ max: 60, windowMs: 60_000 }))
+router.aliasMiddleware('throttle', rateLimit({ max: 60, windowMs: 60_000 }))
 
-Route.middleware('throttle').group(() => {
-  Route.post('/api/login', [AuthController, 'login'])
+router.middleware('throttle').group((throttle) => {
+  throttle.post('/api/login', [AuthController, 'login'])
 })
 ```
 
@@ -153,7 +159,7 @@ Route.middleware('throttle').group(() => {
 Create middleware with `defineMiddleware` for full type support:
 
 ```ts
-import { defineMiddleware } from '@guren/server'
+import { defineMiddleware } from '@guren/core'
 
 export const requireSubscription = defineMiddleware(async (ctx, next) => {
   const user = await ctx.get('auth')?.user()
@@ -169,9 +175,9 @@ export const requireSubscription = defineMiddleware(async (ctx, next) => {
 Register it as an alias for convenient use:
 
 ```ts
-Route.aliasMiddleware('subscribed', requireSubscription)
+router.aliasMiddleware('subscribed', requireSubscription)
 
-Route.middleware('auth', 'subscribed').group(() => {
-  Route.get('/premium', [PremiumController, 'index'])
+router.middleware('auth', 'subscribed').group((group) => {
+  group.get('/premium', [PremiumController, 'index'])
 })
 ```

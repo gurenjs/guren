@@ -1,36 +1,58 @@
 # バリデーション
 
-Guren は Zod やその他のスキーマバリデーションライブラリと統合する柔軟なバリデーションシステムを提供しています。ミドルウェアレベルまたはコントローラー内でリクエストデータを検証できます。
+Guren のバリデーションは schema-first が基本です。Zod 互換スキーマをコントローラー、ルートコントラクト、ミドルウェアで使い回し、必要な場合だけ legacy な `FormRequest` 互換レイヤーを使います。
 
 ## クイックスタート
 
-Zod スキーマと `validateRequest()` ミドルウェアを使用：
+推奨の mainline は controller の validation helper を使う形です：
 
 ```ts
-import { Route, validateRequest, getValidatedData } from '@guren/server'
+import { Controller, paginate } from '@guren/core'
 import { z } from 'zod'
+import { Post } from '@/app/Models/Post'
+import { PostResource } from '@/app/Http/Resources/PostResource'
+import { appPages } from '@/resources/js/pages/contracts'
 
-const createPostSchema = z.object({
+const StorePostSchema = z.object({
   title: z.string().min(1).max(200),
   content: z.string().min(10),
-  published: z.boolean().optional().default(false),
 })
 
-Route.post('/posts', async (ctx) => {
-  const data = getValidatedData<z.infer<typeof createPostSchema>>(ctx)
-  // data は完全に型付けされ、検証済み
-  return ctx.json({ post: await Post.create(data) })
-}, validateRequest(createPostSchema))
+const PageQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+})
+
+export default class PostsController extends Controller {
+  async index() {
+    const { page } = this.validateQuery(PageQuerySchema)
+    const result = await Post.paginate({ page, perPage: 10 })
+    const paginator = paginate(result, { path: this.request.path ?? '/posts' })
+
+    return this.inertia(appPages.posts.index, {
+      data: result.data.map((post) => new PostResource(post).toJSON()),
+      pagination: {
+        meta: paginator.meta(),
+        links: paginator.links(),
+      },
+    })
+  }
+
+  async store() {
+    const data = await this.validateBody(StorePostSchema)
+    const post = await Post.create(data)
+    return this.created({ post: new PostResource(post).toJSON() })
+  }
+}
 ```
 
 ## ミドルウェアバリデーション
 
-### `validateRequest(schema)`
+### `validateRequest(schema)` 互換ミドルウェア
 
 バリデーションミドルウェアを作成するファクトリ：
 
 ```ts
-import { validateRequest } from '@guren/server'
+import { Router, validateRequest } from '@guren/core'
 import { z } from 'zod'
 
 const schema = z.object({
@@ -38,7 +60,9 @@ const schema = z.object({
   password: z.string().min(8),
 })
 
-Route.post('/login', [AuthController, 'login'], validateRequest(schema))
+const router = new Router()
+
+router.post('/login', [AuthController, 'login'], validateRequest(schema))
 ```
 
 デフォルトでは、バリデーションエラーはエラー詳細を含む 422 レスポンスを返します。
@@ -48,9 +72,11 @@ Route.post('/login', [AuthController, 'login'], validateRequest(schema))
 リクエストコンテキストに基づく動的スキーマ用：
 
 ```ts
-import { validateRequestWith } from '@guren/server'
+import { Router, validateRequestWith } from '@guren/core'
 
-Route.put('/users/:id', [UserController, 'update'], validateRequestWith((ctx) => {
+const router = new Router()
+
+router.put('/users/:id', [UserController, 'update'], validateRequestWith((ctx) => {
   const isAdmin = ctx.get('user')?.role === 'admin'
 
   return z.object({
@@ -67,10 +93,13 @@ Route.put('/users/:id', [UserController, 'update'], validateRequestWith((ctx) =>
 バリデーションミドルウェア実行後、`getValidatedData()` で型付きデータを取得：
 
 ```ts
-import { getValidatedData } from '@guren/server'
+import { getValidatedData } from '@guren/core'
 import type { z } from 'zod'
+import { Router } from '@guren/core'
 
-Route.post('/posts', async (ctx) => {
+const router = new Router()
+
+router.post('/posts', async (ctx) => {
   const data = getValidatedData<z.infer<typeof createPostSchema>>(ctx)
 
   // TypeScript は正確な型を認識
@@ -87,7 +116,7 @@ Route.post('/posts', async (ctx) => {
 ミドルウェア外でのバリデーションには `validate()` または `validateSafe()` を使用：
 
 ```ts
-import { validate, validateSafe } from '@guren/server'
+import { validate, validateSafe } from '@guren/core'
 
 // バリデーション失敗時に例外をスロー
 const data = validate(schema, requestData)
@@ -136,13 +165,16 @@ interface ValidationSchema<T> {
 ```ts
 // Valibot を使用
 import * as v from 'valibot'
+import { Router } from '@guren/core'
 
 const schema = v.object({
   name: v.string([v.minLength(1)]),
   email: v.string([v.email()]),
 })
 
-Route.post('/users', handler, validateRequest(schema))
+const router = new Router()
+
+router.post('/users', handler, validateRequest(schema))
 ```
 
 ## 一般的なパターン
@@ -228,29 +260,37 @@ const schema = z.object({
 
 ### Inertia での表示
 
-バリデーションエラーをフロントエンドに渡す：
+page contract に `ValidationErrors<T>` を載せて、コントローラとコンポーネントで同じ shape を共有します：
 
 ```ts
-// Controller
+import { type ValidationErrors } from '@guren/core'
+import { appPages } from '@/resources/js/pages/contracts'
+
+type CreateUserFields = 'email' | 'password'
+type CreateUserProps = {
+  errors?: ValidationErrors<CreateUserFields>
+}
+
 async store() {
-  try {
-    const data = validate(schema, await this.ctx.req.json())
-    await User.create(data)
-    return this.redirect('/users')
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return this.inertia('Users/Create', {
-        errors: formatValidationErrors(error),
-      })
-    }
-    throw error
+  const result = await this.validateBodySafe(schema)
+  if (!result.success) {
+    return this.inertia<CreateUserProps>(appPages.users.create, {
+      errors: result.errors,
+    })
   }
+
+  await User.create(result.data)
+  return this.redirect('/users')
 }
 ```
 
 ```tsx
-// React コンポーネント
-function CreateUser({ errors }: { errors?: Record<string, string> }) {
+import type { PageProps } from '@guren/inertia-client'
+import { appPages } from '@/resources/js/pages/contracts'
+
+type Props = PageProps<typeof appPages.users.create>
+
+function CreateUser({ errors }: Props) {
   return (
     <form>
       <input name="email" />
@@ -268,7 +308,7 @@ function CreateUser({ errors }: { errors?: Record<string, string> }) {
 コントローラーで最もシンプルにバリデーションを行う方法は `validateBody`、`validateQuery`、`validateParams` です。`safeParse()` を持つ任意の Zod ライクなスキーマを受け取り、失敗時に `ValidationException`（422）をスローします：
 
 ```ts
-import { Controller } from '@guren/server'
+import { Controller } from '@guren/core'
 import { z } from 'zod'
 
 const StorePostSchema = z.object({
@@ -314,12 +354,12 @@ export default class PostsController extends Controller {
 > [!TIP]
 > これらのヘルパーは `safeParse()` を実装する任意のスキーマライブラリ（Zod、Valibot、カスタムバリデーター）で動作します。
 
-## FormRequest
+## FormRequest 互換レイヤー
 
-`FormRequest` を使うと、コントローラ内で型安全なバリデーションをクラスベースで行えます。認可ロジックが必要な場合に使用します。リクエストごとにバリデーションルールと認可ロジックをカプセル化できます:
+`FormRequest` は既存コードの移行やクラスベースの認可が必要な場合に使えます。新規コードでは schema-first の `validateBody()` / `validateQuery()` / `validateParams()` を優先してください。
 
 ```ts
-import { FormRequest } from '@guren/server'
+import { FormRequest } from '@guren/core/legacy-validation'
 import { z } from 'zod'
 
 const CreatePostSchema = z.object({
@@ -360,7 +400,7 @@ export default class PostController extends Controller {
   async store() {
     const data = this.input()          // リクエストボディ全体を取得
     const page = this.query('page')    // クエリパラメータを取得
-    const validated = await this.validate(CreatePostRequest) // FormRequest でバリデーション
+    const validated = await this.validate(CreatePostRequest) // 互換レイヤーの FormRequest
 
     const post = await Post.create(validated)
     return this.created({ post })      // 201 レスポンス
@@ -384,14 +424,16 @@ export default class PostController extends Controller {
 完全な型安全性のため、リクエストパースと組み合わせ：
 
 ```ts
-import { parseRequestPayload, validateRequest, getValidatedData } from '@guren/server'
+import { Router, parseRequestPayload, validateRequest, getValidatedData } from '@guren/core'
 
 const schema = z.object({
   title: z.string(),
   content: z.string(),
 })
 
-Route.post('/posts', async (ctx) => {
+const router = new Router()
+
+router.post('/posts', async (ctx) => {
   const data = getValidatedData<z.infer<typeof schema>>(ctx)!
   // 完全に型付けされ、検証済みのデータ
   return ctx.json({ post: await Post.create(data) })

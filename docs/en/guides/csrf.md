@@ -8,9 +8,9 @@ Enable CSRF protection by adding the middleware to your application:
 
 ```ts
 // src/app.ts
-import { Application, createSessionMiddleware, createCsrfMiddleware } from '@guren/server'
+import { createApp, createSessionMiddleware, createCsrfMiddleware } from '@guren/core'
 
-const app = new Application()
+const app = createApp()
 
 // Session middleware is required for CSRF
 app.use('*', createSessionMiddleware())
@@ -28,13 +28,14 @@ Use the `csrfField()` helper to generate a hidden input field:
 
 ```ts
 // In your controller
-import { Controller, getCsrfToken, csrfField } from '@guren/server'
+import { Controller, getCsrfToken, csrfField } from '@guren/core'
+import { appPages } from '@/resources/js/pages/contracts'
 
 export default class FormController extends Controller {
   create() {
     const token = getCsrfToken(this.ctx)
     // Pass to your template/view
-    return this.inertia('Form/Create', { csrfToken: token })
+    return this.inertia(appPages.forms.create, { csrfToken: token })
   }
 }
 ```
@@ -119,17 +120,20 @@ createCsrfMiddleware({
 For custom validation logic, use `verifyCsrfToken()`:
 
 ```ts
-import { verifyCsrfToken, getCsrfToken } from '@guren/server'
+import { verifyCsrfToken, getCsrfToken } from '@guren/core'
+import { Router } from '@guren/core'
 
-Route.post('/custom', async (ctx) => {
-  const token = ctx.req.header('X-Custom-Token')
+export function registerWebRoutes(router: Router): void {
+  router.post('/custom', async (ctx) => {
+    const token = ctx.req.header('X-Custom-Token')
 
-  if (!verifyCsrfToken(ctx, token)) {
-    return ctx.json({ error: 'Invalid token' }, 403)
-  }
+    if (!verifyCsrfToken(ctx, token)) {
+      return ctx.json({ error: 'Invalid token' }, 403)
+    }
 
-  // Process request...
-})
+    return ctx.json({ ok: true })
+  })
+}
 ```
 
 ## Token Regeneration

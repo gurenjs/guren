@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import type { MiddlewareHandler, ExecutionContext } from 'hono'
-import { Route } from '../mvc/Route'
-import { Container, setContainer, type ServiceProvider } from '../container'
+import { Router } from '../mvc/Router'
+import { Container, type ServiceProvider } from '../container'
 import { ProviderManager } from '../container/ServiceProvider'
 import { AuthManager } from '../auth'
 import type { CreateSessionMiddlewareOptions } from './middleware/session'
@@ -22,6 +22,37 @@ declare const Bun:
 
 type BunServer = { stop?: (closeConnections?: boolean) => void | Promise<void> }
 type ViteServer = Awaited<ReturnType<typeof startViteDevServer>>['server']
+const MANAGED_VITE_ENV_FLAG = 'GUREN_MANAGED_VITE_DEV_SERVER'
+const DEFAULT_DEV_ENTRY_PATH = '/resources/js/dev-entry.ts'
+
+function clearManagedViteEnv(): void {
+  if (typeof process === 'undefined') {
+    return
+  }
+
+  if (process.env[MANAGED_VITE_ENV_FLAG] === '1') {
+    delete process.env.VITE_DEV_SERVER_URL
+  }
+
+  delete process.env[MANAGED_VITE_ENV_FLAG]
+}
+
+function normalizeDevEntryUrl(baseUrl: string): string {
+  return `${baseUrl.replace(/\/$/u, '')}${DEFAULT_DEV_ENTRY_PATH}`
+}
+
+function syncManagedInertiaDevEntry(devServerUrl: string): void {
+  if (typeof process === 'undefined') {
+    return
+  }
+
+  const nextEntry = normalizeDevEntryUrl(devServerUrl)
+  const currentEntry = process.env.GUREN_INERTIA_ENTRY
+
+  if (!currentEntry || currentEntry.endsWith(DEFAULT_DEV_ENTRY_PATH)) {
+    process.env.GUREN_INERTIA_ENTRY = nextEntry
+  }
+}
 
 type GurenGlobal = typeof globalThis & {
   __gurenActiveServer?: BunServer
@@ -60,6 +91,7 @@ async function stopActiveViteDevServer(): Promise<void> {
 
   if (!previous) {
     state.__gurenActiveViteDevServer = undefined
+    clearManagedViteEnv()
     return
   }
 
@@ -69,6 +101,7 @@ async function stopActiveViteDevServer(): Promise<void> {
     console.warn('Failed to stop previous Vite dev server:', error)
   } finally {
     state.__gurenActiveViteDevServer = undefined
+    clearManagedViteEnv()
   }
 }
 
@@ -82,12 +115,16 @@ export type BootCallback = (app: Hono) => void | Promise<void>
  * Service provider class constructor type.
  */
 export type ServiceProviderConstructor = new (container: Container) => ServiceProvider
+export type RouteRegistration = (router: Router) => void | Promise<void>
+export type ApplicationFeatures = Record<string, unknown>
 
 export interface ApplicationOptions {
   readonly boot?: BootCallback
   readonly providers?: Array<ServiceProviderConstructor>
   readonly auth?: AuthPluginOptions
   readonly discover?: boolean
+  readonly routes?: RouteRegistration
+  readonly features?: ApplicationFeatures
 }
 
 export interface AuthPluginOptions {
@@ -103,7 +140,7 @@ export interface ApplicationListenOptions {
 }
 
 /**
- * Application wires the Route registry into a running Hono instance.
+ * Application wires an app-local router into a running Hono instance.
  *
  * It embeds a DI Container as the backbone of the framework, binding core
  * services and managing providers through the container's ProviderManager.
@@ -111,6 +148,7 @@ export interface ApplicationListenOptions {
 export class Application {
   readonly hono: Hono
   readonly container: Container
+  readonly router: Router
   private readonly providerManager: ProviderManager
   private readonly authManager: AuthManager
   private viteDevServer?: ViteServer
@@ -118,20 +156,20 @@ export class Application {
   private viteTeardownRegistered = false
   private bunTeardownRegistered = false
   private autoSessionAttached = false
+  private routesRegistered = false
 
   constructor(private readonly options: ApplicationOptions = {}) {
     this.hono = new Hono()
     this.container = new Container()
+    this.router = new Router()
     this.authManager = new AuthManager()
     this.providerManager = new ProviderManager(this.container)
-
-    // Set global container
-    setContainer(this.container)
 
     // Bind core instances
     this.container.instance('app', this as Application)
     this.container.instance('hono', this.hono)
     this.container.instance('auth', this.authManager)
+    this.container.instance('router', this.router)
 
     // Register user providers
     if (Array.isArray(this.options.providers)) {
@@ -156,10 +194,16 @@ export class Application {
   }
 
   /**
-   * Mounts all routes that were defined through the Route DSL.
+   * Mounts the application router onto the Hono instance.
    */
-  mountRoutes(): void {
-    Route.mount(this.hono)
+  async mountRoutes(): Promise<void> {
+    if (this.options.routes && !this.routesRegistered) {
+      this.router.clear()
+      await this.options.routes(this.router)
+      this.routesRegistered = true
+    }
+
+    this.router.mount(this.hono, { container: this.container })
   }
 
   /**
@@ -175,7 +219,7 @@ export class Application {
   async boot(): Promise<void> {
     await this.providerManager.registerAll()
     await this.options.boot?.(this.hono)
-    this.mountRoutes()
+    await this.mountRoutes()
     await this.providerManager.bootAll()
   }
 
@@ -198,9 +242,11 @@ export class Application {
     await stopActiveViteDevServer()
 
     const { port = 3000, hostname = '0.0.0.0', assetsUrl, vite } = options
-    const envAssetsUrl =
-      typeof process !== 'undefined' ? process.env?.VITE_DEV_SERVER_URL : undefined
-    let resolvedAssetsUrl = assetsUrl ?? envAssetsUrl
+    const externalAssetsUrl =
+      typeof process !== 'undefined' && process.env?.[MANAGED_VITE_ENV_FLAG] !== '1'
+        ? process.env?.VITE_DEV_SERVER_URL
+        : undefined
+    let resolvedAssetsUrl = assetsUrl ?? externalAssetsUrl
 
     const shouldStartVite =
       vite !== false &&
@@ -226,7 +272,9 @@ export class Application {
         resolvedAssetsUrl = localUrl
         if (typeof process !== 'undefined') {
           process.env.VITE_DEV_SERVER_URL = resolvedAssetsUrl
+          process.env[MANAGED_VITE_ENV_FLAG] = '1'
         }
+        syncManagedInertiaDevEntry(resolvedAssetsUrl)
         this.registerViteTeardown()
       } catch (error) {
         console.error('Failed to start Vite dev server:', error)
@@ -294,6 +342,7 @@ export class Application {
       }
       this.viteDevServer = undefined
       this.viteTeardownRegistered = false
+      clearManagedViteEnv()
     }
   }
 
@@ -338,6 +387,10 @@ export class Application {
       void stopActiveBunServer()
     })
   }
+}
+
+export function createApp(options: ApplicationOptions = {}): Application {
+  return new Application(options)
 }
 
 export type { Context } from 'hono'

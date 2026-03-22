@@ -4,7 +4,7 @@ import { scaffoldFile } from './utils'
 const EVENTS_DIR = 'app/Events'
 
 function eventTemplate(className: string): string {
-  return `import { Event } from '@guren/server'
+  return `import { Event } from '@guren/core'
 
 /**
  * ${className}
@@ -13,7 +13,7 @@ export default class ${className} extends Event {
   /**
    * The event name used for registration.
    */
-  static eventName = '${className}'
+  static override eventName = '${className}'
 
   /**
    * Create a new event instance.

@@ -1,26 +1,48 @@
 # Validation
 
-Guren provides a flexible validation system with two approaches: middleware-based validation with schema libraries (Zod, Valibot) and Laravel-style FormRequest classes for typed, reusable validation with authorization.
+Guren's primary validation path is schema-first. Use Zod-compatible schemas in controllers, route contracts, or middleware so request parsing and type inference stay in one place. A legacy `FormRequest` compatibility layer still exists for migrations.
 
 ## Quick Start
 
-Use `validateRequest()` middleware with a Zod schema:
+Use controller validation helpers for the mainline path:
 
 ```ts
-import { Route, validateRequest, getValidatedData } from '@guren/server'
+import { Controller, paginate } from '@guren/core'
 import { z } from 'zod'
+import { Post } from '@/app/Models/Post'
+import { PostResource } from '@/app/Http/Resources/PostResource'
+import { appPages } from '@/resources/js/pages/contracts'
 
-const createPostSchema = z.object({
+const StorePostSchema = z.object({
   title: z.string().min(1).max(200),
   content: z.string().min(10),
-  published: z.boolean().optional().default(false),
 })
 
-Route.post('/posts', async (ctx) => {
-  const data = getValidatedData<z.infer<typeof createPostSchema>>(ctx)
-  // data is fully typed and validated
-  return ctx.json({ post: await Post.create(data) })
-}, validateRequest(createPostSchema))
+const PageQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+})
+
+export default class PostsController extends Controller {
+  async index() {
+    const { page } = this.validateQuery(PageQuerySchema)
+    const result = await Post.paginate({ page, perPage: 10 })
+    const paginator = paginate(result, { path: this.request.path ?? '/posts' })
+
+    return this.inertia(appPages.posts.index, {
+      data: result.data.map((post) => new PostResource(post).toJSON()),
+      pagination: {
+        meta: paginator.meta(),
+        links: paginator.links(),
+      },
+    })
+  }
+
+  async store() {
+    const data = await this.validateBody(StorePostSchema)
+    const post = await Post.create(data)
+    return this.created({ post: new PostResource(post).toJSON() })
+  }
+}
 ```
 
 ## Controller Validation Helpers
@@ -28,7 +50,7 @@ Route.post('/posts', async (ctx) => {
 The simplest way to validate in controllers is with `validateBody`, `validateQuery`, and `validateParams`. They accept any Zod-like schema (anything with `safeParse()`) and throw `ValidationException` (422) on failure:
 
 ```ts
-import { Controller } from '@guren/server'
+import { Controller } from '@guren/core'
 import { z } from 'zod'
 
 const StorePostSchema = z.object({
@@ -74,15 +96,15 @@ export default class PostsController extends Controller {
 > [!TIP]
 > These helpers work with any schema library that implements `safeParse()` — Zod, Valibot, or custom validators.
 
-## FormRequest Classes
+## FormRequest Compatibility
 
-FormRequest classes combine validation rules, authorization logic, and type safety in a single reusable class. Use this when you need authorization logic or Laravel-style rule definitions.
+`FormRequest` remains available for legacy-style validation rules and authorization hooks, but new applications should prefer schema-first validation.
 
 ### Defining a FormRequest
 
 ```ts
 // app/Http/Requests/StorePostRequest.ts
-import { FormRequest, required, stringRule, min, max } from '@guren/server'
+import { FormRequest, required, stringRule, min, max } from '@guren/core/legacy-validation'
 
 interface StorePostData {
   title: string
@@ -111,7 +133,7 @@ export class StorePostRequest extends FormRequest<StorePostData> {
 Pass the FormRequest class to `this.validate()` in your controller:
 
 ```ts
-import { Controller } from '@guren/server'
+import { Controller } from '@guren/core'
 import { StorePostRequest } from '@/app/Http/Requests/StorePostRequest'
 import { UpdatePostRequest } from '@/app/Http/Requests/UpdatePostRequest'
 import { Post } from '@/app/Models/Post'
@@ -161,7 +183,7 @@ import {
   arrayRule,
   minLength,
   maxLength,
-} from '@guren/server'
+} from '@guren/core'
 ```
 
 #### Rule Examples
@@ -234,12 +256,12 @@ class UpdatePostRequest extends FormRequest<UpdatePostData> {
 
 ## Middleware Validation
 
-### `validateRequest(schema)`
+### `validateRequest(schema)` Compatibility Middleware
 
 Factory that creates validation middleware:
 
 ```ts
-import { validateRequest } from '@guren/server'
+import { Router, validateRequest } from '@guren/core'
 import { z } from 'zod'
 
 const schema = z.object({
@@ -247,7 +269,9 @@ const schema = z.object({
   password: z.string().min(8),
 })
 
-Route.post('/login', [AuthController, 'login'], validateRequest(schema))
+const router = new Router()
+
+router.post('/login', [AuthController, 'login'], validateRequest(schema))
 ```
 
 By default, validation errors return a 422 response with error details.
@@ -257,9 +281,11 @@ By default, validation errors return a 422 response with error details.
 For dynamic schemas based on request context:
 
 ```ts
-import { validateRequestWith } from '@guren/server'
+import { Router, validateRequestWith } from '@guren/core'
 
-Route.put('/users/:id', [UserController, 'update'], validateRequestWith((ctx) => {
+const router = new Router()
+
+router.put('/users/:id', [UserController, 'update'], validateRequestWith((ctx) => {
   const isAdmin = ctx.get('user')?.role === 'admin'
 
   return z.object({
@@ -276,10 +302,13 @@ Route.put('/users/:id', [UserController, 'update'], validateRequestWith((ctx) =>
 After validation middleware runs, retrieve typed data with `getValidatedData()`:
 
 ```ts
-import { getValidatedData } from '@guren/server'
+import { getValidatedData } from '@guren/core'
 import type { z } from 'zod'
+import { Router } from '@guren/core'
 
-Route.post('/posts', async (ctx) => {
+const router = new Router()
+
+router.post('/posts', async (ctx) => {
   const data = getValidatedData<z.infer<typeof createPostSchema>>(ctx)
 
   // TypeScript knows the exact shape
@@ -296,7 +325,7 @@ Route.post('/posts', async (ctx) => {
 For validation outside middleware, use `validate()` or `validateSafe()`:
 
 ```ts
-import { validate, validateSafe } from '@guren/server'
+import { validate, validateSafe } from '@guren/core'
 
 // Throws on validation failure
 const data = validate(schema, requestData)
@@ -345,13 +374,16 @@ This means you can use Zod, Valibot, or custom validators:
 ```ts
 // With Valibot
 import * as v from 'valibot'
+import { Router } from '@guren/core'
 
 const schema = v.object({
   name: v.string([v.minLength(1)]),
   email: v.string([v.email()]),
 })
 
-Route.post('/users', handler, validateRequest(schema))
+const router = new Router()
+
+router.post('/users', handler, validateRequest(schema))
 ```
 
 ## Common Patterns
@@ -437,39 +469,37 @@ When validation fails, the default response format is:
 
 ### Displaying in Inertia
 
-With FormRequest, validation errors are automatically shared with the Inertia page. For manual validation, pass errors to your frontend:
+Use page contracts with `ValidationErrors<T>` so controller and component share the same error shape.
 
 ```ts
-// Controller with FormRequest (recommended)
-async store() {
-  const data = await this.validate(StorePostRequest)
-  // Validation errors are handled automatically - 422 response with errors
-  await Post.create(data)
-  return this.redirect('/posts')
+import { type ValidationErrors } from '@guren/core'
+import { appPages } from '@/resources/js/pages/contracts'
+
+type CreateUserFields = 'email' | 'password'
+type CreateUserProps = {
+  errors?: ValidationErrors<CreateUserFields>
 }
-```
 
-```ts
-// Controller with manual validation
 async store() {
-  try {
-    const data = validate(schema, await this.ctx.req.json())
-    await User.create(data)
-    return this.redirect('/users')
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return this.inertia('Users/Create', {
-        errors: formatValidationErrors(error),
-      })
-    }
-    throw error
+  const result = await this.validateBodySafe(schema)
+  if (!result.success) {
+    return this.inertia<CreateUserProps>(appPages.users.create, {
+      errors: result.errors,
+    })
   }
+
+  await User.create(result.data)
+  return this.redirect('/users')
 }
 ```
 
 ```tsx
-// React component
-function CreateUser({ errors }: { errors?: Record<string, string> }) {
+import type { PageProps } from '@guren/inertia-client'
+import { appPages } from '@/resources/js/pages/contracts'
+
+type Props = PageProps<typeof appPages.users.create>
+
+function CreateUser({ errors }: Props) {
   return (
     <form>
       <input name="email" />
@@ -487,14 +517,16 @@ function CreateUser({ errors }: { errors?: Record<string, string> }) {
 For complete type safety, combine with request parsing:
 
 ```ts
-import { parseRequestPayload, validateRequest, getValidatedData } from '@guren/server'
+import { Router, parseRequestPayload, validateRequest, getValidatedData } from '@guren/core'
 
 const schema = z.object({
   title: z.string(),
   content: z.string(),
 })
 
-Route.post('/posts', async (ctx) => {
+const router = new Router()
+
+router.post('/posts', async (ctx) => {
   const data = getValidatedData<z.infer<typeof schema>>(ctx)!
   // Fully typed, validated data ready to use
   return ctx.json({ post: await Post.create(data) })

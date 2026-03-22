@@ -2,19 +2,12 @@ import { ensureErrorStackTracePolyfill } from './support/error-polyfill'
 
 ensureErrorStackTracePolyfill()
 
-export { Application } from './http/Application'
+export { Application, createApp } from './http/Application'
 export type { Context, ApplicationListenOptions, ServiceProviderConstructor } from './http/Application'
-export { registerDevAssets } from './http/dev-assets'
-export { logDevServerBanner } from './http/dev-banner'
-export type { DevBannerOptions } from './http/dev-banner'
-export { GUREN_ASCII_ART } from './http/dev-banner'
-export { startViteDevServer } from './http/vite-dev-server'
-export type { StartViteDevServerOptions, StartedViteDevServer } from './http/vite-dev-server'
-export { configureInertiaAssets, autoConfigureInertiaAssets } from './http/inertia-assets'
-export type { AutoConfigureInertiaOptions } from './http/inertia-assets'
 export { parseRequestPayload, formatValidationErrors } from './http/request'
 export { Controller } from './mvc/Controller'
 export type { InertiaResponse, InferInertiaProps, ControllerInertiaProps, AuthPayload } from './mvc/Controller'
+export { Router } from './mvc/Router'
 export { Route } from './mvc/Route'
 export type { RouteBuilder, RouteDefinition, ResourceAction as RouteResourceAction, ResourceRouteOptions } from './mvc/Route'
 export { ViewEngine } from './mvc/ViewEngine'
@@ -164,8 +157,6 @@ export type {
   RateLimitEntry,
   RateLimitInfo,
 } from './http/middleware'
-export { gurenVitePlugin } from './vite/plugin'
-export type { GurenVitePluginOptions } from './vite/plugin'
 // Validation (advanced)
 export {
   Validator,
@@ -446,15 +437,20 @@ export {
 } from './http/resources'
 export type {
   ResourceData,
+  ValidationErrors,
   PaginationMeta,
   PaginationLinks,
+  PaginationPageLink,
   PaginatedResponse,
+  PaginatedPageProps,
+  PaginatedResultLike,
   CursorPaginationMeta,
   CursorPaginatedResponse,
   PaginatorOptions,
   CursorPaginatorOptions,
   ResourceClass,
   BaseResource,
+  InferResourceData,
 } from './http/resources'
 // Health Checks
 export {
@@ -691,20 +687,8 @@ export type {
   PasswordHashOptions,
   RandomStringOptions,
 } from './encryption'
-// Facades (prefixed to avoid conflicts with class exports)
-export {
-  Cache as CacheFacade,
-  Events as EventsFacade,
-  Queue as QueueFacade,
-  Mail as MailFacade,
-  Log as LogFacade,
-  I18n as I18nFacade,
-  Notifications as NotificationsFacade,
-  Broadcast as BroadcastFacade,
-  Storage as StorageFacade,
-  Scheduler as SchedulerFacade,
-  createFacade,
-} from './facades'
+// Facades
+export { createFacade, createFacades } from './facades'
 // Auto-Discovery
 export { AutoDiscovery } from './discovery'
 export type { DiscoveryOptions, DiscoveryResult } from './discovery'

@@ -8,6 +8,15 @@ import type {
 } from './types'
 import type { Resource } from './Resource'
 
+export interface PaginatedResultLike<T> {
+  data: T[]
+  meta: {
+    total: number
+    perPage: number
+    currentPage: number
+  }
+}
+
 /**
  * Paginator for offset-based pagination.
  */
@@ -164,6 +173,14 @@ export class Paginator<T> {
    */
   links(): PaginationLinks {
     const path = this._options.path
+    const pages = Array.from({ length: this.lastPage() }, (_, index) => {
+      const page = index + 1
+      return {
+        page,
+        url: path ? this.url(page) : null,
+        active: page === this._currentPage,
+      }
+    })
 
     if (!path) {
       return {
@@ -171,6 +188,7 @@ export class Paginator<T> {
         last: null,
         prev: null,
         next: null,
+        pages,
       }
     }
 
@@ -179,6 +197,7 @@ export class Paginator<T> {
       last: this.url(this.lastPage()),
       prev: this._currentPage > 1 ? this.url(this._currentPage - 1) : null,
       next: this.hasMorePages() ? this.url(this._currentPage + 1) : null,
+      pages,
     }
   }
 
@@ -272,17 +291,48 @@ export class Paginator<T> {
 
     return new Paginator(pageItems, total, perPage, page, options)
   }
+
+  /**
+   * Create paginator from an ORM-style paginated result.
+   */
+  static fromPaginatedResult<T>(
+    result: PaginatedResultLike<T>,
+    options?: PaginatorOptions
+  ): Paginator<T> {
+    return new Paginator(
+      result.data,
+      result.meta.total,
+      result.meta.perPage,
+      result.meta.currentPage,
+      options
+    )
+  }
 }
 
 /**
  * Create a paginator.
  */
 export function paginate<T>(
+  result: PaginatedResultLike<T>,
+  options?: PaginatorOptions
+): Paginator<T>
+export function paginate<T>(
   items: T[],
   total: number,
   perPage: number,
   currentPage: number,
   options?: PaginatorOptions
+): Paginator<T>
+export function paginate<T>(
+  itemsOrResult: T[] | PaginatedResultLike<T>,
+  totalOrOptions?: number | PaginatorOptions,
+  perPage?: number,
+  currentPage?: number,
+  options?: PaginatorOptions
 ): Paginator<T> {
-  return new Paginator(items, total, perPage, currentPage, options)
+  if (!Array.isArray(itemsOrResult)) {
+    return Paginator.fromPaginatedResult(itemsOrResult, totalOrOptions as PaginatorOptions | undefined)
+  }
+
+  return new Paginator(itemsOrResult, totalOrOptions as number, perPage as number, currentPage as number, options)
 }

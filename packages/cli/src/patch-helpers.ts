@@ -40,7 +40,7 @@ export async function addImport(
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim()
-    if (line.startsWith('import ') || line.startsWith('export ')) {
+    if (line.startsWith('import ')) {
       lastImportIndex = i
     } else if (lastImportIndex >= 0 && line.length > 0 && !line.startsWith('//')) {
       break

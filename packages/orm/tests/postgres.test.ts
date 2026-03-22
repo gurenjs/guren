@@ -1,4 +1,7 @@
 import { describe, expect, it, mock } from 'bun:test'
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { DrizzleAdapter } from '../src/adapters/drizzle-adapter'
 
 const drizzleMock = mock((client: unknown, options: Record<string, unknown>) => ({
@@ -24,12 +27,23 @@ await mock.module('postgres', () => ({
 
 const { createPostgresDatabase } = await import('../src/postgres')
 
+function createMigrationsFolder(withJournal: boolean): string {
+  const migrationsFolder = mkdtempSync(join(tmpdir(), 'guren-orm-migrations-'))
+
+  if (withJournal) {
+    mkdirSync(join(migrationsFolder, 'meta'), { recursive: true })
+    writeFileSync(join(migrationsFolder, 'meta/_journal.json'), '[]')
+  }
+
+  return migrationsFolder
+}
+
 describe('createPostgresDatabase', () => {
   it('runs migrations and returns a configured database', async () => {
     const schema = { users: {} }
     const database = createPostgresDatabase({
       schema,
-      migrationsFolder: 'db/migrations',
+      migrationsFolder: createMigrationsFolder(true),
       connectionString: () => 'postgres://example',
     })
 
@@ -44,7 +58,7 @@ describe('createPostgresDatabase', () => {
     const schema = { users: {} }
     const database = createPostgresDatabase({
       schema,
-      migrationsFolder: 'db/migrations',
+      migrationsFolder: createMigrationsFolder(true),
       connectionString: () => 'postgres://example',
     })
 
@@ -58,10 +72,38 @@ describe('createPostgresDatabase', () => {
     DrizzleAdapter.configure = originalConfigure
   })
 
+  it('skips migrations when drizzle metadata is missing', async () => {
+    const migrationsFolder = createMigrationsFolder(false)
+    const database = createPostgresDatabase({
+      schema: {},
+      migrationsFolder,
+      connectionString: () => 'postgres://example',
+    })
+
+    migrateMock.mockClear()
+    await database.migrateDatabase()
+
+    expect(migrateMock).not.toHaveBeenCalled()
+  })
+
+  it('runs migrations when drizzle metadata exists', async () => {
+    const migrationsFolder = createMigrationsFolder(true)
+    const database = createPostgresDatabase({
+      schema: {},
+      migrationsFolder,
+      connectionString: () => 'postgres://example',
+    })
+
+    migrateMock.mockClear()
+    await database.migrateDatabase()
+
+    expect(migrateMock).toHaveBeenCalled()
+  })
+
   it('throws when seeders folder is missing', async () => {
     const database = createPostgresDatabase({
       schema: {},
-      migrationsFolder: 'db/migrations',
+      migrationsFolder: createMigrationsFolder(true),
       connectionString: () => 'postgres://example',
     })
 

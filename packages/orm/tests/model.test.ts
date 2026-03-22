@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import {
   Model,
+  defineModel,
   type FindManyOptions,
   type OrderByClause,
   type ORMAdapter,
@@ -201,6 +202,39 @@ function createRelationalAdapter(data: { users?: UserRecord[]; posts?: PostRecor
 }
 
 describe('Model', () => {
+  it('supports defineModel() for table-backed models', async () => {
+    const usersTable = {
+      $inferSelect: {} as UserRecord,
+      $inferInsert: {} as Omit<UserRecord, 'id'>,
+    }
+
+    class User extends defineModel(usersTable) {}
+
+    const adapter: ORMAdapter = {
+      async findMany<TRecord extends PlainObject = PlainObject>(table: unknown): Promise<TRecord[]> {
+        expect(table).toBe(usersTable)
+        return [{ id: 1, name: 'Daiki', team: 'core' }] as unknown as TRecord[]
+      },
+      async findUnique<TRecord extends PlainObject = PlainObject>(table: unknown): Promise<TRecord | null> {
+        expect(table).toBe(usersTable)
+        return { id: 1, name: 'Daiki', team: 'core' } as unknown as TRecord
+      },
+      async create<TRecord extends PlainObject = PlainObject>(table: unknown, data: PlainObject): Promise<TRecord> {
+        expect(table).toBe(usersTable)
+        return { id: 2, ...data } as unknown as TRecord
+      },
+    }
+
+    User.useAdapter(adapter)
+
+    expect(await User.find(1)).toEqual({ id: 1, name: 'Daiki', team: 'core' })
+    expect(await User.create({ name: 'Asuka', team: 'infra' })).toEqual({
+      id: 2,
+      name: 'Asuka',
+      team: 'infra',
+    })
+  })
+
   it('delegates CRUD helpers to the configured adapter', async () => {
     class User extends Model<UserRecord> {
       static table = 'users'
@@ -375,6 +409,70 @@ describe('Model', () => {
     await expect(User.findOrFail(999)).rejects.toThrow('User not found for id=999')
   })
 
+  it('supports findWith() with eager-loaded relations', async () => {
+    class User extends Model<UserRecord> {
+      static table = 'users'
+    }
+
+    class Post extends Model<PostRecord> {
+      static table = 'posts'
+    }
+
+    Post.belongsTo('author', User, 'authorId', 'id')
+
+    const adapter = createRelationalAdapter({
+      users: [
+        { id: 1, name: 'Misato', team: 'operations' },
+        { id: 2, name: 'Shinji', team: 'pilots' },
+      ],
+      posts: [
+        { id: 10, title: 'Logistics update', authorId: 1 },
+        { id: 11, title: 'Sync ratios', authorId: 2 },
+      ],
+    })
+
+    User.useAdapter(adapter)
+    Post.useAdapter(adapter)
+
+    const post = await Post.findWith(10, 'author')
+    expect(post).not.toBeNull()
+    expect(post!.id).toBe(10)
+    expect((post as any).author?.name).toBe('Misato')
+
+    const missing = await Post.findWith(999, 'author')
+    expect(missing).toBeNull()
+  })
+
+  it('supports findWithOrFail() with eager-loaded relations', async () => {
+    class User extends Model<UserRecord> {
+      static table = 'users'
+    }
+
+    class Post extends Model<PostRecord> {
+      static table = 'posts'
+    }
+
+    Post.belongsTo('author', User, 'authorId', 'id')
+
+    const adapter = createRelationalAdapter({
+      users: [
+        { id: 1, name: 'Misato', team: 'operations' },
+      ],
+      posts: [
+        { id: 10, title: 'Logistics update', authorId: 1 },
+      ],
+    })
+
+    User.useAdapter(adapter)
+    Post.useAdapter(adapter)
+
+    const post = await Post.findWithOrFail(10, 'author')
+    expect(post.id).toBe(10)
+    expect((post as any).author?.name).toBe('Misato')
+
+    await expect(Post.findWithOrFail(999, 'author')).rejects.toThrow('Post not found for id=999')
+  })
+
   it('builds a query starting from the model when provided a database', async () => {
     class User extends Model<UserRecord> {
       static table = 'users'
@@ -397,6 +495,30 @@ describe('Model', () => {
     const result = builder.where({ id: 1 })
 
     expect(result).toEqual({ table: 'users', clause: { id: 1 } })
+  })
+
+  it('tracks typed select fields on the query builder', async () => {
+    class User extends Model<UserRecord> {
+      static table = 'users'
+    }
+
+    const advancedAdapter: ORMAdapter = {
+      async findMany<TRecord extends PlainObject = PlainObject>(): Promise<TRecord[]> {
+        return [] as TRecord[]
+      },
+      async findUnique<TRecord extends PlainObject = PlainObject>(): Promise<TRecord | null> {
+        return null
+      },
+      async create<TRecord extends PlainObject = PlainObject>(): Promise<TRecord> {
+        return {} as TRecord
+      },
+    }
+
+    User.useAdapter(advancedAdapter)
+
+    const builder = User.select('id', 'name')
+
+    expect(builder.getOptions().selectFields).toEqual(['id', 'name'])
   })
 })
 

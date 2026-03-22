@@ -83,7 +83,7 @@ notifications
 The notification subsystem is registered as a singleton via a `ServiceProvider`. You can resolve it from the container:
 
 ```ts
-import { container } from '@guren/server'
+import { container } from '@guren/core'
 
 const notifications = container.make('notifications') // NotificationManager
 await notifications.send(user, new OrderShipped(order, 'ABC123'))
@@ -287,9 +287,16 @@ export class WelcomeNotification extends Notification {
 ### Queue Setup
 
 ```ts
-import { setQueueDriver, MemoryDriver } from '@guren/core'
+import { createQueueManager, MemoryDriver } from '@guren/core'
 
-setQueueDriver(new MemoryDriver())
+const queue = createQueueManager({
+  default: 'memory',
+  drivers: {
+    memory: () => new MemoryDriver(),
+  },
+})
+
+queue.driver()
 
 // Notifications with shouldQueue = true will be queued
 await notifications.send(user, new WelcomeNotification())
@@ -394,7 +401,7 @@ class OrderConfirmation extends Notification {
 Swap the notification manager in tests:
 
 ```ts
-import { container } from '@guren/server'
+import { container } from '@guren/core'
 import { NotificationManager, MemoryChannel } from '@guren/core'
 
 test('sends order notification', async () => {

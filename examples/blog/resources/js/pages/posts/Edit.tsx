@@ -1,16 +1,15 @@
-import { useForm, usePage } from '@inertiajs/react'
+import { useForm } from '@inertiajs/react'
 import Layout from '../../components/Layout.js'
 import PostForm, { type PostFormValues } from '../../components/PostForm.js'
+import type { ValidationErrors } from '@guren/core'
 
-type EditPageProps = {
+interface Props {
   post: PostFormValues | null
   postId: number
-  errors?: Record<string, string>
+  errors?: ValidationErrors<Extract<keyof PostFormValues, string>>
 }
 
-export default function Edit() {
-  const { post, postId, errors = {} } = usePage<EditPageProps>().props
-
+export default function Edit({ post, postId, errors = {} }: Props) {
   const form = useForm<PostFormValues>({
     title: post?.title ?? '',
     excerpt: post?.excerpt ?? '',

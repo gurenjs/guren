@@ -4,7 +4,7 @@ import { scaffoldFile } from './utils'
 const MIDDLEWARE_DIR = 'app/Http/Middleware'
 
 function middlewareTemplate(className: string): string {
-  return `import { defineMiddleware, type Context } from '@guren/server'
+  return `import { defineMiddleware, type Context } from '@guren/core'
 
 /**
  * ${className} middleware.

@@ -3,22 +3,25 @@
 コントローラーは、受信した HTTP リクエストを処理し、モデルを通じてデータを取得し、Inertia や JSON ペイロードでレスポンスを返す役割を担います。すべてのコントローラーは `app/Http/Controllers/` に配置し、フレームワークの `Controller` 基底クラスを継承します。このガイドでは、コントローラーと `routes/web.ts` で定義されるルートとの接続方法も説明します。
 
 ## ルーティングの基本
-ルートは `routes/web.ts` で Laravel ライクな DSL を使って登録します。コントローラーをインポートして、HTTP メソッドとパスにマッピングしましょう。
+ルートは `routes/web.ts` で registrar を export して登録します。コントローラーをインポートして、HTTP メソッドとパスにマッピングしましょう。
 
 ```ts
 // routes/web.ts
+import { Router } from '@guren/core'
 import PostsController from '@/app/Http/Controllers/PostsController'
 
-Route.get('/', [PostsController, 'index'])
-Route.get('/posts/:id', [PostsController, 'show'])
-Route.post('/posts', [PostsController, 'store'])
+export function registerWebRoutes(router: Router): void {
+  router.get('/', [PostsController, 'index'])
+  router.get('/posts/:id', [PostsController, 'show'])
+  router.post('/posts', [PostsController, 'store'])
+}
 ```
 
 - 各ルートはパスと `[コントローラークラス, 'メソッド名']` のタプルを受け取ります。
-- `Route.group('/posts', () => { ... })` でプレフィックスとミドルウェアを共有できます。
-- `src/main.ts` で `routes/web.ts` をインポートすることで、起動時にルートが一度だけ登録されます（副作用インポート）。
+- `router.group('/posts', (posts) => { ... })` でプレフィックスとミドルウェアを共有できます。
+- `src/app.ts` で `createApp({ routes: registerWebRoutes })` に渡すことで、起動時にルートが登録されます。
 
-より複雑な構成の場合は、追加のルートファイル（例: `routes/api.ts`）を作成し、同様に `src/main.ts` からインポートできます。
+より複雑な構成の場合は、追加のルートファイル（例: `routes/api.ts`）を作成し、同様に `src/app.ts` で合成できます。
 
 グループ、ミドルウェア、インラインハンドラーの詳細は[ルーティングガイド](./routing.md)をご覧ください。
 
@@ -33,13 +36,33 @@ bunx guren make:controller PostsController
 
 ```ts
 // app/Http/Controllers/PostsController.ts
-import { Controller } from '@guren/server'
+import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
 import { Post } from '@/app/Models/Post'
+import { PostResource, type PostResourceData } from '@/app/Http/Resources/PostResource'
+import { ListPostsQuerySchema, PostIdParamSchema } from '@/app/Http/Validators/PostValidator'
+import { appPages } from '@/resources/js/pages/contracts'
+
+type PostsIndexProps = PaginatedPageProps<PostResourceData>
 
 export default class PostsController extends Controller {
   async index() {
-    const posts = await Post.all()
-    return this.inertia('posts/Index', { posts })
+    const { page } = this.validateQuery(ListPostsQuerySchema)
+    const result = await Post.paginate({ page, perPage: 10, orderBy: ['id', 'desc'] })
+    const paginator = paginate(result, { path: this.request.path ?? '/posts' })
+
+    return this.inertia(appPages.posts.index, {
+      data: result.data.map((post) => new PostResource(post).toJSON()),
+      pagination: {
+        meta: paginator.meta(),
+        links: paginator.links(),
+      },
+    } satisfies PostsIndexProps)
+  }
+
+  async show() {
+    const { id } = this.validateParams(PostIdParamSchema)
+    const post = await Post.findOrFail(id)
+    return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
   }
 }
 ```
@@ -49,9 +72,9 @@ export default class PostsController extends Controller {
 コントローラーは `static inject` を使ったコンストラクタベースの依存性注入をサポートしています。コントローラーが必要とするコンテナキーを宣言すると、Guren がインスタンス化時に自動的に解決します。
 
 ```ts
-import { Controller } from '@guren/server'
-import type { CacheManager } from '@guren/server'
-import type { EventManager } from '@guren/server'
+import { Controller } from '@guren/core'
+import type { CacheManager } from '@guren/core'
+import type { EventManager } from '@guren/core'
 import { Post } from '@/app/Models/Post'
 
 export default class PostsController extends Controller {
@@ -65,16 +88,16 @@ export default class PostsController extends Controller {
   }
 
   async index() {
-    const cached = await this.cache.get('posts:all')
+    const cached = await this.cache.get('posts:index')
     if (cached) return this.json(cached)
 
     const posts = await Post.all()
-    await this.cache.put('posts:all', posts, 300)
-    return this.inertia('posts/Index', { posts })
+    await this.cache.put('posts:index', posts, 300)
+    return this.json(posts)
   }
 
   async store() {
-    const data = await this.validate(StorePostRequest)
+    const data = await this.validateBody(StorePostSchema)
     const post = await Post.create(data)
     this.events.dispatch(new PostCreated(post))
     return this.created({ post })
@@ -85,13 +108,16 @@ export default class PostsController extends Controller {
 `inject` の `as const` アサーションにより型安全性が確保されます。配列内の各文字列は、サービスコンテナに登録されたキーに対応します。
 
 ## ルート登録
-コントローラーは `routes/web.ts` で Laravel スタイルの DSL を使ってルートに接続します。
+コントローラーは `routes/web.ts` の registrar からルートに接続します。
 
 ```ts
+import { Router } from '@guren/core'
 import PostsController from '@/app/Http/Controllers/PostsController'
 
-Route.get('/posts', [PostsController, 'index'])
-Route.post('/posts', [PostsController, 'store'])
+export function registerWebRoutes(router: Router): void {
+  router.get('/posts', [PostsController, 'index'])
+  router.post('/posts', [PostsController, 'store'])
+}
 ```
 
 `[Controller, 'method']` タプルは、Guren にどのクラスをインスタンス化し、どのメソッドを呼び出すかを指示します。メソッドは非同期にできます。
@@ -111,11 +137,8 @@ const title = await this.input('title')
 // クエリパラメータを読み取る（デフォルト値を指定可能）
 const page = this.query('page', '1')
 
-// リクエストボディから特定のフィールドのみ取得する
-const data = await this.only('title', 'content', 'status')
-
-// 指定したフィールドを除いたすべてのフィールドを取得する
-const data = await this.except('_token', '_method')
+// schema-first の標準入力
+const data = await this.validateBody(StorePostSchema)
 
 // フィールドがリクエストに存在するか確認する
 if (await this.has('email')) {
@@ -169,7 +192,7 @@ export default class PostsController extends Controller {
 コントローラー内で `validateBody`、`validateQuery`、`validateParams` を使うのが最もシンプルです。`safeParse()` メソッドを持つ任意のスキーマ（Zod、Valibot など）を受け取り、失敗時に `ValidationException`（422）をスローします：
 
 ```ts
-import { Controller } from '@guren/server'
+import { Controller } from '@guren/core'
 import { z } from 'zod'
 import { Post } from '@/app/Models/Post'
 
@@ -179,15 +202,22 @@ const PageQuerySchema = z.object({ page: z.coerce.number().int().min(1).default(
 
 export default class PostsController extends Controller {
   async index() {
-    const { page } = this.validateQuery(PageQuerySchema)    // 422 をスロー
-    const posts = await Post.paginate({ page })
-    return this.inertia('posts/Index', { posts })
+    const { page } = this.validateQuery(PageQuerySchema) // 422 をスロー
+    const result = await Post.paginate({ page, perPage: 10 })
+    const paginator = paginate(result, { path: this.request.path ?? '/posts' })
+    return this.inertia(appPages.posts.index, {
+      data: result.data.map((post) => new PostResource(post).toJSON()),
+      pagination: {
+        meta: paginator.meta(),
+        links: paginator.links(),
+      },
+    })
   }
 
   async show() {
-    const { id } = this.validateParams(PostIdParamSchema)    // 422 をスロー
-    const post = await Post.findOrFail(id)                    // 404 をスロー
-    return this.inertia('posts/Show', { post })
+    const { id } = this.validateParams(PostIdParamSchema) // 422 をスロー
+    const post = await Post.findOrFail(id) // 404 をスロー
+    return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
   }
 
   async store() {
@@ -207,9 +237,9 @@ export default class PostsController extends Controller {
 
 いずれも失敗時に `ValidationException`（HTTP 422）をスローし、`ExceptionHandler` が自動でレンダリングします。
 
-### FormRequest クラス
+### FormRequest 互換レイヤー
 
-認可ロジックが必要なより複雑なシナリオでは、`FormRequest` クラスを使います：
+新規コードでは schema-first を推奨します。既存コードの移行やクラスベースの認可が必要な場合のみ `FormRequest` を使います：
 
 ```ts
 async store() {
@@ -222,7 +252,7 @@ async store() {
 
 バリデーションが失敗すると、エラー詳細を含む 422 レスポンスが自動的に返されます。`authorize()` メソッドが `false` を返した場合は、403 レスポンスが返されます。
 
-FormRequest クラスとバリデーションルールの定義については、[バリデーションガイド](./validation.md)をご覧ください。
+FormRequest クラスとバリデーションルールの定義については、[バリデーションガイド](./validation.md)をご覧ください。新規実装では `validateBody()` / `validateQuery()` / `validateParams()` を優先してください。
 
 ## メソッド間でのデータ共有
 コントローラーはリクエストごとにインスタンス化されるため、あるメソッドでインスタンスフィールドを設定して、ヘルパーメソッドで再利用できます。全ページ共通のデータ（例: ユーザー情報）については、Inertia の共有プロパティやミドルウェアの利用を検討してください。
@@ -232,7 +262,7 @@ FormRequest クラスとバリデーションルールの定義については�
 
 ```ts
 // config/inertia.ts
-import { setInertiaSharedProps, AUTH_CONTEXT_KEY, type AuthContext } from '@guren/server'
+import { setInertiaSharedProps, AUTH_CONTEXT_KEY, type AuthContext } from '@guren/core'
 
 setInertiaSharedProps(async (ctx) => {
   const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
@@ -246,7 +276,7 @@ setInertiaSharedProps(async (ctx) => {
 // types/inertia.d.ts
 import type { UserRecord } from '@/app/Models/User'
 
-declare module '@guren/server' {
+declare module '@guren/core' {
   interface InertiaSharedProps {
     auth: { user: UserRecord | null }
   }
@@ -278,26 +308,33 @@ await app.actingAs(user).get('/dashboard').assertStatus(200)
 
 ```ts
 // モデルファースト: 簡潔で一貫性がある
-import { Controller } from '@guren/server'
+import { Controller, paginate } from '@guren/core'
 import { Post } from '@/app/Models/Post'
+import { PostResource } from '@/app/Http/Resources/PostResource'
+import { appPages } from '@/resources/js/pages/contracts'
 
 export default class PostsController extends Controller {
   async index() {
-    const posts = await Post.where('status', 'published')
-      .orderBy('publishedAt', 'desc')
-      .limit(10)
-      .get()
-    return this.inertia('posts/Index', { posts })
+    const result = await Post.paginate({ page: 1, perPage: 10, orderBy: ['publishedAt', 'desc'] })
+    const paginator = paginate(result, { path: this.request.path ?? '/posts' })
+    return this.inertia(appPages.posts.index, {
+      data: result.data.map((post) => new PostResource(post).toJSON()),
+      pagination: {
+        meta: paginator.meta(),
+        links: paginator.links(),
+      },
+    })
   }
 }
 ```
 
 ```ts
 // Drizzle RQB: フルコントロール、型安全性も維持
-import { Controller } from '@guren/server'
+import { Controller } from '@guren/core'
 import { getDatabase } from '@/config/database'
 import { posts, users } from '@/db/schema'
 import { eq, desc } from 'drizzle-orm'
+import { appPages } from '@/resources/js/pages/contracts'
 
 export default class PostsController extends Controller {
   async index() {
@@ -313,7 +350,27 @@ export default class PostsController extends Controller {
       .where(eq(posts.published, true))
       .orderBy(desc(posts.publishedAt))
 
-    return this.inertia('posts/Index', { posts: postsWithAuthor })
+    return this.inertia(appPages.posts.index, {
+      data: postsWithAuthor,
+      pagination: {
+        meta: {
+          currentPage: 1,
+          perPage: postsWithAuthor.length,
+          total: postsWithAuthor.length,
+          lastPage: 1,
+          from: postsWithAuthor.length > 0 ? 1 : 0,
+          to: postsWithAuthor.length,
+          hasMorePages: false,
+        },
+        links: {
+          first: '/posts',
+          last: '/posts',
+          prev: null,
+          next: null,
+          pages: [{ label: '1', page: 1, url: '/posts', active: true }],
+        },
+      },
+    })
   }
 }
 ```
@@ -323,7 +380,7 @@ export default class PostsController extends Controller {
 SSR バンドルが利用可能な場合、Guren はサーバーサイドでページを自動的にレンダリングします。`ssr` オプションを渡すことで、レスポンスごとにこの動作を無効化またはカスタマイズできます。
 
 ```ts
-return this.inertia('posts/Index', props, {
+return this.inertia(appPages.posts.index, props, {
   ssr: {
     enabled: false, // このレスポンスではクライアントサイドレンダリングを強制
   },

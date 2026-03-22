@@ -25,7 +25,7 @@ describe('makeModel', () => {
     expect(result).toContain('User.ts')
 
     const content = await readFile(result, 'utf8')
-    expect(content).toContain('export class User extends Model')
+    expect(content).toContain('export class User extends defineModel')
   })
 
   it('converts kebab-case names to PascalCase', async () => {
@@ -34,7 +34,7 @@ describe('makeModel', () => {
     expect(result).toContain('BlogPost.ts')
 
     const content = await readFile(result, 'utf8')
-    expect(content).toContain('class BlogPost extends Model')
+    expect(content).toContain('class BlogPost extends defineModel')
   })
 
   it('converts snake_case names to PascalCase', async () => {
@@ -57,7 +57,7 @@ describe('makeModel', () => {
 
     const content = await readFile(result, 'utf8')
     expect(content).toContain('import { posts }')
-    expect(content).toContain('static override table = posts')
+    expect(content).toContain('extends defineModel(posts)')
   })
 
   it('handles already pluralized names', async () => {
@@ -73,15 +73,15 @@ describe('makeModel', () => {
 
     const content = await readFile(result, 'utf8')
     expect(content).toContain('export type ArticleRecord = typeof articles.$inferSelect')
-    expect(content).toContain('extends Model<ArticleRecord>')
-    expect(content).toContain('static override readonly recordType = {} as ArticleRecord')
+    expect(content).toContain('export type NewArticleRecord = typeof articles.$inferInsert')
+    expect(content).toContain('extends defineModel(articles)')
   })
 
   it('includes correct imports in template', async () => {
     const result = await makeModel('Test')
 
     const content = await readFile(result, 'utf8')
-    expect(content).toContain("import { Model } from '@guren/orm'")
+    expect(content).toContain("import { defineModel } from '@guren/orm'")
     expect(content).toContain("from '../../db/schema.js'")
   })
 

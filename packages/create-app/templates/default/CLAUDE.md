@@ -72,7 +72,7 @@ bun run test
 
 ### Controllers
 ```typescript
-import { Controller } from '@guren/server'
+import { Controller } from '@guren/core'
 import { z } from 'zod'
 
 const CreatePostSchema = z.object({
@@ -86,14 +86,18 @@ const PostIdParamSchema = z.object({
 
 export class PostController extends Controller {
   async index() {
-    const posts = await Post.all()
-    return this.inertia('Posts/Index', { posts })
+    const result = await Post.paginate({ page: 1, perPage: 15 })
+    const paginator = paginate(result, { path: this.request.path ?? '/posts' })
+    return this.inertia(appPages.posts.index, {
+      data: result.data.map((post) => new PostResource(post).toJSON()),
+      pagination: paginator,
+    })
   }
 
   async show() {
     const { id } = this.validateParams(PostIdParamSchema)
     const post = await Post.findOrFail(id)
-    return this.inertia('Posts/Show', { post })
+    return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
   }
 
   async store() {
@@ -127,20 +131,22 @@ const all = await Post.where('published', true).get()
 
 ### Routes
 ```typescript
-import { Route } from '@guren/server'
+import { Router } from '@guren/core'
 
-Route.get('/posts', PostController.index)
-Route.post('/posts', PostController.store)
-Route.resource('/posts', PostController)
+export function registerWebRoutes(router: Router): void {
+  router.get('/posts', PostController.index)
+  router.post('/posts', PostController.store)
+  router.resource('/posts', PostController)
 
-Route.middleware(['auth']).group(() => {
-  Route.get('/dashboard', DashboardController.index)
-})
+  router.middleware('auth').group((group) => {
+    group.get('/dashboard', DashboardController.index)
+  })
+}
 ```
 
 ### Middleware
 ```typescript
-import { defineMiddleware } from '@guren/server'
+import { defineMiddleware } from '@guren/core'
 
 export const requireAuth = defineMiddleware(async (c, next) => {
   if (!c.get('user')) {

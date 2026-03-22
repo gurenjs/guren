@@ -21,7 +21,7 @@ This command generates controllers, Inertia pages, a layout, `AuthProvider`, use
 
 1. Registers `AuthProvider` in your `Application` providers array
 2. Adds `createSessionMiddleware` with development-friendly defaults (uses `cookieSecure: true` in production)
-3. Imports auth routes into `routes/web.ts`
+3. Wires `registerAuthRoutes(router)` into `routes/web.ts`
 4. Updates `db/schema.ts` to include password and remember-token columns
 
 After scaffolding, simply run:
@@ -45,18 +45,18 @@ bunx guren make:auth
 Then manually:
 1. Register `AuthProvider` in `src/app.ts`
 2. Add `createSessionMiddleware` to your middleware stack (auto-added by `AuthServiceProvider` unless you opt out)
-3. Import `./routes/auth` from `routes/web.ts`
+3. Register `registerAuthRoutes(router)` from `routes/web.ts`
 
 The `--install` flag is safe and idempotent – it won't duplicate existing configuration.
 
 ## Enabling Sessions
 
-Guards need access to the session. By default, `AuthServiceProvider` will attach `createSessionMiddleware` for you. To customize or disable it, pass auth options to `Application`:
+Guards need access to the session. By default, `AuthServiceProvider` will attach `createSessionMiddleware` for you. To customize or disable it, pass auth options to `createApp()`:
 
 ```ts
-import { Application } from '@guren/server'
+import { createApp } from '@guren/core'
 
-const app = new Application({
+const app = createApp({
   auth: {
     autoSession: true, // set false to opt out
     sessionOptions: {
@@ -66,12 +66,12 @@ const app = new Application({
 })
 ```
 
-If you need manual control, register the middleware explicitly early in your bootstrap:
+If you need manual control, register the middleware explicitly in `src/app.ts`:
 
 ```ts
-import { Application, createSessionMiddleware } from '@guren/server'
+import { createApp, createSessionMiddleware } from '@guren/core'
 
-const app = new Application()
+const app = createApp()
 app.use('*', createSessionMiddleware())
 ```
 
@@ -95,8 +95,8 @@ app.use('*', createSessionMiddleware())
 The simplest way to configure authentication is using the `auth.useModel()` helper, which registers both a `ModelUserProvider` and `SessionGuard` in one call:
 
 ```ts
-import { ServiceProvider } from '@guren/server'
-import type { AuthManager } from '@guren/server'
+import { ServiceProvider } from '@guren/core'
+import type { AuthManager } from '@guren/core'
 import { User } from '@/app/Models/User'
 
 export default class AuthProvider extends ServiceProvider {
@@ -123,9 +123,9 @@ This single method call:
 For advanced use cases requiring custom providers or guards, you can still configure them manually:
 
 ```ts
-import { ServiceProvider } from '@guren/server'
-import { ModelUserProvider, SessionGuard } from '@guren/server'
-import type { AuthManager } from '@guren/server'
+import { ServiceProvider } from '@guren/core'
+import { ModelUserProvider, SessionGuard } from '@guren/core'
+import type { AuthManager } from '@guren/core'
 import { User } from '@/app/Models/User'
 
 export default class AuthProvider extends ServiceProvider {
@@ -158,7 +158,7 @@ Pair this with the `AuthenticatableModel` base class (see below) to get automati
 Models that extend `AuthenticatableModel` receive first-class password handling. Providing a plain `password` property when calling `create` or `update` automatically hashes and stores it in the `passwordHash` column (configurable via static properties). The framework never persists the plain text password, and authentication continues to rely on the same hashing algorithm as the providers.
 
 ```ts
-import { AuthenticatableModel } from '@guren/server'
+import { AuthenticatableModel } from '@guren/core'
 import { users } from '@/db/schema.js'
 
 export type UserRecord = typeof users.$inferSelect
@@ -179,10 +179,12 @@ The default `AuthServiceProvider` automatically registers a `web` guard that use
 Controllers now expose an `auth` helper:
 
 ```ts
+import { appPages } from '@/resources/js/pages/contracts'
+
 export default class DashboardController extends Controller {
   async index() {
     const user = await this.auth.user()       // returns user or null
-    return this.inertia('dashboard/Index', { user }, { url: this.request.path })
+    return this.inertia(appPages.dashboard.index, { user }, { url: this.request.path })
   }
 
   async store() {
@@ -194,13 +196,13 @@ export default class DashboardController extends Controller {
 }
 ```
 
-Use `this.validate()` with a FormRequest class, or `this.validateBody()` / `this.validateQuery()` / `this.validateParams()` with Zod schemas for typed validation.
+Use `this.validateBody()` / `this.validateQuery()` / `this.validateParams()` with Zod schemas for typed validation. Reserve `FormRequest` for compatibility code.
 
 To surface the logged-in user on every Inertia page without repeating controller code, register shared props during app boot:
 
 ```ts
 // config/inertia.ts
-import { setInertiaSharedProps, AUTH_CONTEXT_KEY, type AuthContext } from '@guren/server'
+import { setInertiaSharedProps, AUTH_CONTEXT_KEY, type AuthContext } from '@guren/core'
 
 setInertiaSharedProps(async (ctx) => {
   const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
@@ -213,22 +215,24 @@ Augment `InertiaSharedProps` (see the Controllers guide) to type this `auth` pay
 Route middleware makes protecting endpoints straightforward:
 
 ```ts
-import { Route, requireAuthenticated, requireGuest } from '@guren/server'
+import { Router, requireAuthenticated, requireGuest } from '@guren/core'
 import LoginController from '@/app/Http/Controllers/Auth/LoginController'
+import DashboardController from '@/app/Http/Controllers/DashboardController'
 
-// Using middleware aliases (recommended)
-Route.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
-Route.aliasMiddleware('guest', requireGuest({ redirectTo: '/dashboard' }))
+export function registerWebRoutes(router: Router): void {
+  router.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
+  router.aliasMiddleware('guest', requireGuest({ redirectTo: '/dashboard' }))
 
-Route.middleware('guest').group(() => {
-  Route.get('/login', [LoginController, 'show'])
-  Route.post('/login', [LoginController, 'store'])
-})
+  router.middleware('guest').group((guest) => {
+    guest.get('/login', [LoginController, 'show'])
+    guest.post('/login', [LoginController, 'store'])
+  })
 
-Route.middleware('auth').group(() => {
-  Route.post('/logout', [LoginController, 'destroy'])
-  Route.get('/dashboard', [DashboardController, 'index'])
-})
+  router.middleware('auth').group((auth) => {
+    auth.post('/logout', [LoginController, 'destroy'])
+    auth.get('/dashboard', [DashboardController, 'index'])
+  })
+}
 ```
 
 ## Session Guard Helpers

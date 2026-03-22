@@ -14,6 +14,25 @@ bunx guren --help
 
 Commands follow a subcommand pattern such as `bunx guren make:controller UserController`.
 
+## High-Level Scaffolds
+
+Use `bunx guren add ...` when you want the standard vNext path instead of low-level file generators:
+
+```bash
+bunx guren add auth
+bunx guren add resource posts
+bunx guren add queue
+bunx guren add mail
+bunx guren add events
+bunx guren add cache
+bunx guren add notifications
+bunx guren add storage
+bunx guren add broadcasting
+bunx guren add schedule
+```
+
+These commands patch `src/app.ts`, create the matching provider/runtime files, and keep the generated app aligned with the reference starter.
+
 ## Core Commands
 
 | Command | Description | Example |

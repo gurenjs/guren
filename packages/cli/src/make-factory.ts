@@ -4,7 +4,7 @@ import { scaffoldFile } from './utils'
 const FACTORIES_DIR = 'db/factories'
 
 function factoryTemplate(className: string, modelName: string): string {
-  return `import { Factory } from '@guren/server'
+  return `import { Factory } from '@guren/core'
 // import { ${modelName} } from 'db/schema'
 
 export default class ${className} extends Factory<typeof ${modelName}> {

@@ -1,16 +1,40 @@
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
+import { applyAccessors, applyMutators } from './attributes'
+import type { AccessorDefinitions, MutatorDefinitions } from './attributes'
+import { GlobalScopeRegistry } from './GlobalScopeRegistry'
+import type { ScopeFunction } from './GlobalScopeRegistry'
 import { executeHook } from './hooks'
 import type { ModelHooks } from './hooks'
+import { executeObservers } from './ModelObserver'
+import type { ModelObserver, ModelObserverConstructor } from './ModelObserver'
 import { ModelNotFoundException } from './ModelNotFoundException'
 import { QueryBuilder } from './QueryBuilder'
 import type { WhereOperator } from './QueryBuilder'
+import { serializeRecord, serializeRecords } from './serialization'
 
 /** Generic plain object type used throughout the ORM. */
 export type PlainObject = Record<string, unknown>
 
 type RelationShape = Record<string, unknown>
 
+type TableShape<TSelect extends PlainObject = PlainObject, TInsert extends PlainObject = PlainObject> = {
+  $inferSelect: TSelect
+  $inferInsert?: TInsert
+}
+
 export const DEFAULT_PAGINATION_SIZE = 15
+
+export type InferModelRecord<TTable> = TTable extends { $inferSelect: infer TRecord }
+  ? TRecord extends PlainObject
+    ? TRecord
+    : PlainObject
+  : PlainObject
+
+export type InferModelInsert<TTable> = TTable extends { $inferInsert: infer TInsert }
+  ? TInsert extends PlainObject
+    ? TInsert
+    : PlainObject
+  : PlainObject
 
 /** Supported cast types for attribute casting. */
 export type CastType = 'json' | 'date' | 'boolean' | 'number' | 'string'
@@ -185,6 +209,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   protected static table: unknown
   /** Type marker for TypeScript inference. Define as `{} as YourRecordType`. */
   static readonly recordType: unknown = undefined as unknown
+  /** Type marker for insert/update payload inference. Define as `{} as typeof table.$inferInsert`. */
+  static readonly createType: unknown = undefined as unknown
   protected static relationDefinitions?: Map<string, RelationDefinition>
   /** Type marker for relation types. Define relation types here for type inference. */
   static relationTypes: RelationShape = {}
@@ -266,6 +292,64 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   static guarded?: string[]
 
   /**
+   * Accessor functions for computed/virtual attributes.
+   * Applied after reading records from the database.
+   *
+   * @example
+   * class User extends Model<UserRecord> {
+   *   static accessors = {
+   *     fullName: (record) => `${record.firstName} ${record.lastName}`,
+   *   }
+   * }
+   */
+  static accessors?: AccessorDefinitions
+
+  /**
+   * Mutator functions for transforming attributes before persistence.
+   *
+   * @example
+   * class User extends Model<UserRecord> {
+   *   static mutators = {
+   *     email: (value) => String(value).toLowerCase(),
+   *   }
+   * }
+   */
+  static mutators?: MutatorDefinitions
+
+  /**
+   * Fields to exclude from serialization output.
+   *
+   * @example
+   * class User extends Model<UserRecord> {
+   *   static hidden = ['passwordHash', 'rememberToken']
+   * }
+   */
+  static hidden?: string[]
+
+  /**
+   * Whitelist of fields to include in serialization output.
+   * When set, only these fields appear. Takes precedence over `hidden`.
+   */
+  static visible?: string[]
+
+  /**
+   * Virtual accessor attributes to include in serialization output.
+   *
+   * @example
+   * class User extends Model<UserRecord> {
+   *   static appends = ['fullName']
+   *   static accessors = { fullName: (r) => `${r.firstName} ${r.lastName}` }
+   * }
+   */
+  static appends?: string[]
+
+  /** Registered model observers. */
+  protected static observers?: ModelObserver[]
+
+  /** Named global scopes registry. */
+  protected static globalScopeRegistry?: GlobalScopeRegistry
+
+  /**
    * Set a custom ORM adapter for this model.
    * @param adapter - The adapter to use
    */
@@ -279,6 +363,122 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    */
   static getAdapter(): ORMAdapter {
     return this.ormAdapter
+  }
+
+  // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // Observers
+  // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Register a model observer class.
+   *
+   * @example
+   * User.observe(UserObserver)
+   */
+  static observe(ObserverClass: ModelObserverConstructor): void {
+    if (!Object.prototype.hasOwnProperty.call(this, 'observers') || !this.observers) {
+      this.observers = []
+    }
+    this.observers.push(new ObserverClass())
+  }
+
+  /** Clear all registered observers. */
+  static clearObservers(): void {
+    this.observers = []
+  }
+
+  // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // Global Scopes
+  // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+
+  protected static getGlobalScopes(): GlobalScopeRegistry {
+    if (!Object.prototype.hasOwnProperty.call(this, 'globalScopeRegistry') || !this.globalScopeRegistry) {
+      this.globalScopeRegistry = new GlobalScopeRegistry()
+    }
+    return this.globalScopeRegistry
+  }
+
+  /**
+   * Register a named global scope.
+   *
+   * @example
+   * User.addGlobalScope('active', (q) => q.where('active', true))
+   */
+  static addGlobalScope(name: string, fn: ScopeFunction): void {
+    this.getGlobalScopes().add(name, fn)
+  }
+
+  /** Remove a named global scope. */
+  static removeGlobalScope(name: string): void {
+    this.getGlobalScopes().remove(name)
+  }
+
+  /**
+   * Start a query excluding specific global scope(s).
+   *
+   * @example
+   * const all = await User.withoutGlobalScope('active').get()
+   */
+  static withoutGlobalScope<T extends typeof Model>(this: T, ...names: string[]): QueryBuilder<TRecordFor<T>> {
+    const builder = new QueryBuilder<TRecordFor<T>>(this)
+    // Apply defaultScope if present
+    if (this.defaultScope) {
+      this.defaultScope(builder)
+    }
+    // Apply global scopes except the excluded ones
+    this.getGlobalScopes().apply(builder, names)
+    return builder
+  }
+
+  /**
+   * Start a query with no global scopes applied (also skips defaultScope).
+   *
+   * @example
+   * const all = await User.withoutGlobalScopes().get()
+   */
+  static withoutGlobalScopes<T extends typeof Model>(this: T): QueryBuilder<TRecordFor<T>> {
+    return new QueryBuilder<TRecordFor<T>>(this)
+  }
+
+  // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // Serialization
+  // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Serialize a record for API/JSON output.
+   * Applies hidden/visible filtering, accessors, and appends.
+   *
+   * @example
+   * const json = User.serialize(user)
+   */
+  static serialize<T extends typeof Model>(this: T, record: TRecordFor<T>): PlainObject {
+    return serializeRecord(record, {
+      hidden: this.hidden,
+      visible: this.visible,
+      appends: this.appends,
+      accessors: this.accessors,
+    })
+  }
+
+  /**
+   * Serialize an array of records.
+   *
+   * @example
+   * const json = User.serializeMany(users)
+   */
+  static serializeMany<T extends typeof Model>(this: T, records: TRecordFor<T>[]): PlainObject[] {
+    return serializeRecords(records, {
+      hidden: this.hidden,
+      visible: this.visible,
+      appends: this.appends,
+      accessors: this.accessors,
+    })
   }
 
   /**
@@ -339,6 +539,17 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   /**
+   * Apply all read-time transforms: casts then accessors.
+   * Used internally after fetching records from the database.
+   */
+  protected static applyReadTransforms<T extends PlainObject>(record: T): T {
+    let result = record
+    if (this.casts) result = this.applyCasts(result)
+    if (this.accessors) result = applyAccessors(result, this.accessors)
+    return result
+  }
+
+  /**
    * Filter input data based on mass assignment protection rules.
    *
    * If `fillable` is defined, only fields listed in `fillable` are kept.
@@ -372,7 +583,13 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   protected static async preparePersistencePayload(data: PlainObject): Promise<PlainObject> {
-    const result = { ...data }
+    let result = { ...data }
+
+    // Apply mutators before persistence
+    if (this.mutators) {
+      result = applyMutators(result, this.mutators)
+    }
+
     const castDefs = this.casts
     if (castDefs) {
       for (const [field, castType] of Object.entries(castDefs)) {
@@ -419,7 +636,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     return this.relationDefinitions
   }
 
-  protected static getRelationDefinition(name: string): RelationDefinition | undefined {
+  /** @internal */
+  static getRelationDefinition(name: string): RelationDefinition | undefined {
     return this.getRelationDefinitions().get(name)
   }
 
@@ -440,13 +658,14 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    * const users = await User.all()
    */
   static async all<T extends typeof Model>(this: T): Promise<Array<TRecordFor<T>>> {
-    if (this.defaultScope) {
+    const hasGlobalScopes = this.globalScopeRegistry && this.globalScopeRegistry.size > 0
+    if (this.defaultScope || hasGlobalScopes) {
       return this.newQuery().get()
     }
     const table = this.resolveTable()
     const records = await this.getAdapter().findMany(table) as Array<TRecordFor<T>>
-    if (this.casts) {
-      return records.map((r) => this.applyCasts(r))
+    if (this.casts || this.accessors) {
+      return records.map((r) => this.applyReadTransforms(r))
     }
     return records
   }
@@ -462,15 +681,19 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    * const user = await User.find(1)
    * const userByEmail = await User.find('john@example.com', 'email')
    */
-  static async find<T extends typeof Model>(this: T, id: unknown, key = 'id'): Promise<TRecordFor<T> | null> {
-    if (this.defaultScope) {
-      return this.newQuery().where(key, id).first()
+  static async find<T extends typeof Model>(
+    this: T,
+    id: TRecordFor<T>[keyof TRecordFor<T> & string],
+    key: keyof TRecordFor<T> & string = 'id' as keyof TRecordFor<T> & string,
+  ): Promise<TRecordFor<T> | null> {
+    if (this.defaultScope || (this.globalScopeRegistry && this.globalScopeRegistry.size > 0)) {
+      return this.newQuery().where(key, id as TRecordFor<T>[typeof key]).first()
     }
     const table = this.resolveTable()
     const where = { [key]: id } as WhereClauseFor<T>
     const record = await this.getAdapter().findUnique(table, where) as TRecordFor<T> | null
-    if (record && this.casts) {
-      return this.applyCasts(record)
+    if (record && (this.casts || this.accessors)) {
+      return this.applyReadTransforms(record)
     }
     return record
   }
@@ -486,7 +709,11 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    * @example
    * const user = await User.findOrFail(1) // Throws if not found
    */
-  static async findOrFail<T extends typeof Model>(this: T, id: unknown, key = 'id'): Promise<TRecordFor<T>> {
+  static async findOrFail<T extends typeof Model>(
+    this: T,
+    id: TRecordFor<T>[keyof TRecordFor<T> & string],
+    key: keyof TRecordFor<T> & string = 'id' as keyof TRecordFor<T> & string,
+  ): Promise<TRecordFor<T>> {
     const record = await this.find(id, key)
     if (record == null) {
       throw new ModelNotFoundException(this.name, id, key)
@@ -508,16 +735,16 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    */
   static async findWith<T extends typeof Model, K extends RelationKey<T>>(
     this: T,
-    id: unknown,
+    id: TRecordFor<T>[keyof TRecordFor<T> & string],
     relations: K | readonly K[],
-    key?: string,
+    key?: keyof TRecordFor<T> & string,
   ): Promise<(TRecordFor<T> & RelationTypePick<T, K | readonly K[]>) | null>
 
   static async findWith<T extends typeof Model, Names extends RelationNames>(
     this: T,
-    id: unknown,
+    id: TRecordFor<T>[keyof TRecordFor<T> & string],
     relations: Names,
-    key?: string,
+    key?: keyof TRecordFor<T> & string,
   ): Promise<(TRecordFor<T> & RelationTypePick<T, Names>) | null> {
     const record = await this.find(id, key)
     if (record == null) return null
@@ -549,16 +776,16 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    */
   static async findWithOrFail<T extends typeof Model, K extends RelationKey<T>>(
     this: T,
-    id: unknown,
+    id: TRecordFor<T>[keyof TRecordFor<T> & string],
     relations: K | readonly K[],
-    key?: string,
+    key?: keyof TRecordFor<T> & string,
   ): Promise<TRecordFor<T> & RelationTypePick<T, K | readonly K[]>>
 
   static async findWithOrFail<T extends typeof Model, Names extends RelationNames>(
     this: T,
-    id: unknown,
+    id: TRecordFor<T>[keyof TRecordFor<T> & string],
     relations: Names,
-    key?: string,
+    key?: keyof TRecordFor<T> & string,
   ): Promise<TRecordFor<T> & RelationTypePick<T, Names>> {
     const record = await this.findOrFail(id, key)
 
@@ -584,7 +811,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    * const admin = await User.first({ role: 'admin' })
    */
   static async first<T extends typeof Model>(this: T, where?: WhereClauseFor<T>): Promise<TRecordFor<T> | null> {
-    if (this.defaultScope) {
+    if (this.defaultScope || (this.globalScopeRegistry && this.globalScopeRegistry.size > 0)) {
       const builder = this.newQuery().limit(1)
       if (where) {
         builder.where(where as Partial<Record<string, unknown>>)
@@ -595,8 +822,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     const table = this.resolveTable()
     const results = await this.getAdapter().findMany(table, { where, limit: 1 })
     const record = (results[0] ?? null) as TRecordFor<T> | null
-    if (record && this.casts) {
-      return this.applyCasts(record)
+    if (record && (this.casts || this.accessors)) {
+      return this.applyReadTransforms(record)
     }
     return record
   }
@@ -624,32 +851,35 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    *   .get()
    */
   static where<T extends typeof Model>(this: T, conditions: WhereClauseFor<T>): QueryBuilder<TRecordFor<T>>
-  static where<T extends typeof Model>(this: T, field: string, value: unknown): QueryBuilder<TRecordFor<T>>
-  static where<T extends typeof Model>(this: T, field: string, operator: WhereOperator, value: unknown): QueryBuilder<TRecordFor<T>>
+  static where<T extends typeof Model>(this: T, field: keyof TRecordFor<T> & string, value: unknown): QueryBuilder<TRecordFor<T>>
+  static where<T extends typeof Model>(this: T, field: keyof TRecordFor<T> & string, operator: WhereOperator, value: unknown): QueryBuilder<TRecordFor<T>>
   static where<T extends typeof Model>(
     this: T,
-    fieldOrConditions: string | WhereClauseFor<T>,
+    fieldOrConditions: (keyof TRecordFor<T> & string) | WhereClauseFor<T>,
     operatorOrValue?: unknown,
     value?: unknown,
   ): QueryBuilder<TRecordFor<T>> {
     const builder = new QueryBuilder<TRecordFor<T>>(this)
 
     if (typeof fieldOrConditions === 'object' && fieldOrConditions !== null) {
-      return builder.where(fieldOrConditions as Partial<Record<string, unknown>>)
+      return builder.where(fieldOrConditions as Partial<Record<keyof TRecordFor<T> & string, unknown>>)
     }
 
     if (arguments.length === 3) {
-      return builder.where(fieldOrConditions as string, operatorOrValue as WhereOperator, value)
+      return builder.where(fieldOrConditions as keyof TRecordFor<T> & string, operatorOrValue as WhereOperator, value)
     }
 
-    return builder.where(fieldOrConditions as string, operatorOrValue)
+    return builder.where(
+      fieldOrConditions as keyof TRecordFor<T> & string,
+      operatorOrValue as TRecordFor<T>[keyof TRecordFor<T> & string],
+    )
   }
 
   /**
    * Start a fluent query with a WHERE NULL condition.
    * @param field - Column to check for NULL
    */
-  static whereNull<T extends typeof Model>(this: T, field: string): QueryBuilder<TRecordFor<T>> {
+  static whereNull<T extends typeof Model>(this: T, field: keyof TRecordFor<T> & string): QueryBuilder<TRecordFor<T>> {
     return new QueryBuilder<TRecordFor<T>>(this).whereNull(field)
   }
 
@@ -657,7 +887,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    * Start a fluent query with a WHERE NOT NULL condition.
    * @param field - Column to check for NOT NULL
    */
-  static whereNotNull<T extends typeof Model>(this: T, field: string): QueryBuilder<TRecordFor<T>> {
+  static whereNotNull<T extends typeof Model>(this: T, field: keyof TRecordFor<T> & string): QueryBuilder<TRecordFor<T>> {
     return new QueryBuilder<TRecordFor<T>>(this).whereNotNull(field)
   }
 
@@ -666,7 +896,11 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    * @param field - Column to check
    * @param values - Array of values to match against
    */
-  static whereIn<T extends typeof Model>(this: T, field: string, values: unknown[]): QueryBuilder<TRecordFor<T>> {
+  static whereIn<T extends typeof Model>(
+    this: T,
+    field: keyof TRecordFor<T> & string,
+    values: readonly TRecordFor<T>[keyof TRecordFor<T> & string][],
+  ): QueryBuilder<TRecordFor<T>> {
     return new QueryBuilder<TRecordFor<T>>(this).whereIn(field, values)
   }
 
@@ -675,8 +909,26 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    * @param field - Column to check
    * @param values - Array of values to exclude
    */
-  static whereNotIn<T extends typeof Model>(this: T, field: string, values: unknown[]): QueryBuilder<TRecordFor<T>> {
+  static whereNotIn<T extends typeof Model>(
+    this: T,
+    field: keyof TRecordFor<T> & string,
+    values: readonly TRecordFor<T>[keyof TRecordFor<T> & string][],
+  ): QueryBuilder<TRecordFor<T>> {
     return new QueryBuilder<TRecordFor<T>>(this).whereNotIn(field, values)
+  }
+
+  /**
+   * Start a fluent query with a typed field selection.
+   *
+   * @example
+   * const rows = await User.select('id', 'name')
+   * const first = await User.select('id').first()
+   */
+  static select<T extends typeof Model, Keys extends keyof TRecordFor<T> & string>(
+    this: T,
+    ...fields: readonly Keys[]
+  ): QueryBuilder<TRecordFor<T>, Pick<TRecordFor<T>, Keys>> {
+    return new QueryBuilder<TRecordFor<T>>(this).select(...fields)
   }
 
   /**
@@ -695,6 +947,11 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     const builder = new QueryBuilder<TRecordFor<T>>(this)
     if (this.defaultScope) {
       this.defaultScope(builder)
+    }
+    // Apply named global scopes
+    const registry = this.globalScopeRegistry
+    if (registry && registry.size > 0) {
+      registry.apply(builder)
     }
     return builder
   }
@@ -753,7 +1010,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   >(
     this: This,
     name: Name,
-    related: Related,
+    related: Related | (() => Related | Promise<Related>),
     foreignKey: ForeignKey,
     localKey: LocalKey,
   ): void {
@@ -792,7 +1049,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   >(
     this: This,
     name: Name,
-    related: Related,
+    related: Related | (() => Related | Promise<Related>),
     foreignKey: ForeignKey,
     ownerKey: OwnerKey,
   ): void {
@@ -831,7 +1088,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   >(
     this: This,
     name: Name,
-    related: Related,
+    related: Related | (() => Related | Promise<Related>),
     foreignKey: ForeignKey,
     localKey: LocalKey,
   ): void {
@@ -871,7 +1128,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   >(
     this: This,
     name: Name,
-    related: Related,
+    related: Related | (() => Related | Promise<Related>),
     pivotTable: unknown,
     foreignPivotKey: string,
     relatedPivotKey: string,
@@ -918,8 +1175,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   >(
     this: This,
     name: Name,
-    related: Related,
-    through: Through,
+    related: Related | (() => Related | Promise<Related>),
+    through: Through | (() => Through | Promise<Through>),
     firstKey: string,
     secondKey: string,
     localKey?: string,
@@ -935,6 +1192,70 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       secondKey,
       localKey: localKey ?? 'id',
       secondLocalKey: secondLocalKey ?? 'id',
+    })
+  }
+
+  /**
+   * Map of type strings to model classes for polymorphic relationships.
+   *
+   * @example
+   * Model.morphMap = { Post, Video }
+   */
+  static morphMap?: Record<string, typeof Model>
+
+  /**
+   * Define a one-to-many polymorphic relationship.
+   *
+   * @param name - Relation name
+   * @param related - The related model class
+   * @param morphName - Base name for the type/id columns (e.g. 'commentable' → commentableType + commentableId)
+   * @param localKey - Local key on this model (default: 'id')
+   *
+   * @example
+   * Post.morphMany('comments', Comment, 'commentable', 'id')
+   */
+  static morphMany<
+    This extends typeof Model,
+    Related extends typeof Model,
+    Name extends RelationKeyOrString<This>,
+  >(
+    this: This,
+    name: Name,
+    related: Related | (() => Related | Promise<Related>),
+    morphName: string,
+    localKey?: string,
+  ): void {
+    this.getRelationDefinitions().set(name, {
+      type: 'morphMany',
+      name,
+      related,
+      morphName,
+      localKey: localKey ?? 'id',
+    })
+  }
+
+  /**
+   * Define the inverse of a polymorphic relationship.
+   *
+   * @param name - Relation name
+   * @param morphName - Base name for the type/id columns
+   *
+   * @example
+   * Comment.morphTo('commentable', 'commentable')
+   */
+  static morphTo<
+    This extends typeof Model,
+    Name extends RelationKeyOrString<This>,
+  >(
+    this: This,
+    name: Name,
+    morphName: string,
+  ): void {
+    this.getRelationDefinitions().set(name, {
+      type: 'morphTo',
+      name,
+      related: undefined,
+      morphName,
     })
   }
 
@@ -1101,18 +1422,27 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    *   email: 'john@example.com'
    * })
    */
-  static async create<T extends typeof Model>(this: T, data: PlainObject): Promise<TRecordFor<T>> {
+  static async create<T extends typeof Model>(this: T, data: TCreateFor<T>): Promise<TRecordFor<T>> {
     const table = this.resolveTable()
     const filtered = this.filterFillable(data)
     const payload = await this.preparePersistencePayload(filtered)
 
     const hooks = this.hooks
+    const observers = this.observers
     if (hooks) {
       if (!(await executeHook(hooks, 'creating', payload))) {
         throw new Error(`${this.name}.create() aborted by 'creating' hook.`)
       }
       if (!(await executeHook(hooks, 'saving', payload))) {
         throw new Error(`${this.name}.create() aborted by 'saving' hook.`)
+      }
+    }
+    if (observers) {
+      if (!(await executeObservers(observers, 'creating', payload))) {
+        throw new Error(`${this.name}.create() aborted by observer 'creating'.`)
+      }
+      if (!(await executeObservers(observers, 'saving', payload))) {
+        throw new Error(`${this.name}.create() aborted by observer 'saving'.`)
       }
     }
 
@@ -1124,8 +1454,14 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       await executeHook(hooks, 'saved', resultData)
     }
 
-    if (this.casts) {
-      return this.applyCasts(result)
+    if (observers) {
+      const resultData = result as unknown as Record<string, unknown>
+      await executeObservers(observers, 'created', resultData)
+      await executeObservers(observers, 'saved', resultData)
+    }
+
+    if (this.casts || this.accessors) {
+      return this.applyReadTransforms(result)
     }
     return result
   }
@@ -1140,7 +1476,11 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    * @example
    * await User.update({ id: 1 }, { name: 'Jane Doe' })
    */
-  static async update<T extends typeof Model>(this: T, where: WhereClauseFor<T>, data: PlainObject): Promise<TRecordFor<T>> {
+  static async update<T extends typeof Model>(
+    this: T,
+    where: WhereClauseFor<T>,
+    data: Partial<TCreateFor<T>>,
+  ): Promise<TRecordFor<T>> {
     const table = this.resolveTable()
     const adapter = this.getAdapter()
     if (!adapter.update) {
@@ -1151,12 +1491,21 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     const payload = await this.preparePersistencePayload(filtered)
 
     const hooks = this.hooks
+    const observers = this.observers
     if (hooks) {
       if (!(await executeHook(hooks, 'updating', payload))) {
         throw new Error(`${this.name}.update() aborted by 'updating' hook.`)
       }
       if (!(await executeHook(hooks, 'saving', payload))) {
         throw new Error(`${this.name}.update() aborted by 'saving' hook.`)
+      }
+    }
+    if (observers) {
+      if (!(await executeObservers(observers, 'updating', payload))) {
+        throw new Error(`${this.name}.update() aborted by observer 'updating'.`)
+      }
+      if (!(await executeObservers(observers, 'saving', payload))) {
+        throw new Error(`${this.name}.update() aborted by observer 'saving'.`)
       }
     }
 
@@ -1168,8 +1517,14 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       await executeHook(hooks, 'saved', resultData)
     }
 
-    if (this.casts) {
-      return this.applyCasts(result)
+    if (observers) {
+      const resultData = result as unknown as Record<string, unknown>
+      await executeObservers(observers, 'updated', resultData)
+      await executeObservers(observers, 'saved', resultData)
+    }
+
+    if (this.casts || this.accessors) {
+      return this.applyReadTransforms(result)
     }
     return result
   }
@@ -1192,10 +1547,16 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     }
 
     const hooks = this.hooks
+    const observers = this.observers
     const whereData = where as unknown as Record<string, unknown>
     if (hooks) {
       if (!(await executeHook(hooks, 'deleting', whereData))) {
         throw new Error(`${this.name}.delete() aborted by 'deleting' hook.`)
+      }
+    }
+    if (observers) {
+      if (!(await executeObservers(observers, 'deleting', whereData))) {
+        throw new Error(`${this.name}.delete() aborted by observer 'deleting'.`)
       }
     }
 
@@ -1203,6 +1564,9 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
 
     if (hooks) {
       await executeHook(hooks, 'deleted', whereData)
+    }
+    if (observers) {
+      await executeObservers(observers, 'deleted', whereData)
     }
 
     return result
@@ -1293,7 +1657,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     return copies as Array<TRecordFor<T> & RelationTypePick<T, Names>>
   }
 
-  protected static async loadRelationInto<T extends typeof Model>(
+  /** @internal Used by QueryBuilder for eager loading. */
+  static async loadRelationInto<T extends typeof Model>(
     this: T,
     records: Array<PlainObject>,
     relationName: string,
@@ -1320,6 +1685,12 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       case 'hasManyThrough':
         await this.loadHasManyThrough(records, definition)
         return
+      case 'morphMany':
+        await this.loadMorphMany(records, definition)
+        return
+      case 'morphTo':
+        await this.loadMorphTo(records, definition)
+        return
     }
   }
 
@@ -1327,7 +1698,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     records: Array<PlainObject>,
     definition: HasManyRelationDefinition,
   ): Promise<void> {
-    const { related, foreignKey, localKey, name } = definition
+    const { foreignKey, localKey, name } = definition
+    const related = await resolveModelReference(definition.related)
     await loadRelationData(records, name, related, localKey, foreignKey, true)
   }
 
@@ -1335,7 +1707,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     records: Array<PlainObject>,
     definition: HasOneRelationDefinition,
   ): Promise<void> {
-    const { related, foreignKey, localKey, name } = definition
+    const { foreignKey, localKey, name } = definition
+    const related = await resolveModelReference(definition.related)
     await loadRelationData(records, name, related, localKey, foreignKey, false)
   }
 
@@ -1343,7 +1716,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     records: Array<PlainObject>,
     definition: BelongsToRelationDefinition,
   ): Promise<void> {
-    const { related, foreignKey, ownerKey, name } = definition
+    const { foreignKey, ownerKey, name } = definition
+    const related = await resolveModelReference(definition.related)
     await loadRelationData(records, name, related, foreignKey, ownerKey, false)
   }
 
@@ -1351,7 +1725,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     records: Array<PlainObject>,
     definition: BelongsToManyRelationDefinition,
   ): Promise<void> {
-    const { related, pivotTable, foreignPivotKey, relatedPivotKey, parentKey, relatedKey, name } = definition
+    const { pivotTable, foreignPivotKey, relatedPivotKey, parentKey, relatedKey, name } = definition
+    const related = await resolveModelReference(definition.related)
 
     // Collect parent key values
     const parentValues = Array.from(
@@ -1418,7 +1793,9 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     records: Array<PlainObject>,
     definition: HasManyThroughRelationDefinition,
   ): Promise<void> {
-    const { related, through, firstKey, secondKey, localKey, secondLocalKey, name } = definition
+    const { firstKey, secondKey, localKey, secondLocalKey, name } = definition
+    const related = await resolveModelReference(definition.related)
+    const through = await resolveModelReference(definition.through)
 
     // Collect local key values from parent records
     const localValues = Array.from(
@@ -1484,6 +1861,85 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       record[name] = items
     }
   }
+
+  protected static async loadMorphMany(
+    records: Array<PlainObject>,
+    definition: MorphManyRelationDefinition,
+  ): Promise<void> {
+    const { morphName, localKey, name } = definition
+    const related = await resolveModelReference(definition.related)
+    const typeColumn = `${morphName}Type`
+    const idColumn = `${morphName}Id`
+    const parentType = this.name
+
+    const localValues = Array.from(
+      new Set(records.map((r) => r[localKey]).filter((v): v is unknown => v != null)),
+    )
+
+    if (localValues.length === 0) {
+      for (const record of records) record[name] = []
+      return
+    }
+
+    const allRelated = await related.where({
+      [typeColumn]: parentType,
+      [idColumn]: localValues,
+    } as WhereClause) as PlainObject[]
+
+    const map = new Map<unknown, PlainObject[]>()
+    for (const item of allRelated) {
+      const key = item[idColumn]
+      if (!map.has(key)) map.set(key, [])
+      map.get(key)!.push({ ...item })
+    }
+
+    for (const record of records) {
+      const key = record[localKey]
+      record[name] = key != null ? (map.get(key) ?? []) : []
+    }
+  }
+
+  protected static async loadMorphTo(
+    records: Array<PlainObject>,
+    definition: MorphToRelationDefinition,
+  ): Promise<void> {
+    const { morphName, name } = definition
+    const typeColumn = `${morphName}Type`
+    const idColumn = `${morphName}Id`
+    const morphMap = Model.morphMap ?? {}
+
+    // Group records by type
+    const byType = new Map<string, unknown[]>()
+    for (const record of records) {
+      const type = record[typeColumn] as string
+      const id = record[idColumn]
+      if (!type || id == null) continue
+      if (!byType.has(type)) byType.set(type, [])
+      byType.get(type)!.push(id)
+    }
+
+    // Fetch each type's records
+    const resolved = new Map<string, Map<unknown, PlainObject>>()
+    for (const [type, ids] of byType) {
+      const modelClass = morphMap[type]
+      if (!modelClass) continue
+      const uniqueIds = Array.from(new Set(ids))
+      const results = await modelClass.where({ id: uniqueIds } as WhereClause) as PlainObject[]
+      const idMap = new Map<unknown, PlainObject>()
+      for (const r of results) idMap.set(r.id, { ...r })
+      resolved.set(type, idMap)
+    }
+
+    for (const record of records) {
+      const type = record[typeColumn] as string
+      const id = record[idColumn]
+      if (!type || id == null) {
+        record[name] = null
+        continue
+      }
+      record[name] = resolved.get(type)?.get(id) ?? null
+    }
+  }
 }
 
 async function loadRelationData(
@@ -1528,7 +1984,23 @@ async function loadRelationData(
   }
 }
 
+async function resolveModelReference(
+  reference: typeof Model | (() => typeof Model | Promise<typeof Model>),
+): Promise<typeof Model> {
+  if (typeof reference === 'function' && 'prototype' in reference && reference.prototype instanceof Model) {
+    return reference as typeof Model
+  }
+
+  return await (reference as () => typeof Model | Promise<typeof Model>)()
+}
+
 type TRecordFor<T extends typeof Model> = T extends { recordType: infer R }
+  ? R extends PlainObject
+    ? R
+    : PlainObject
+  : PlainObject
+
+type TCreateFor<T extends typeof Model> = T extends { createType: infer R }
   ? R extends PlainObject
     ? R
     : PlainObject
@@ -1557,9 +2029,9 @@ type RelationTypePick<T extends typeof Model, Names> = RelationNameUnion<Names> 
   : {}
 
 interface BaseRelationDefinition {
-  type: 'hasMany' | 'hasOne' | 'belongsTo' | 'belongsToMany' | 'hasManyThrough'
+  type: 'hasMany' | 'hasOne' | 'belongsTo' | 'belongsToMany' | 'hasManyThrough' | 'morphMany' | 'morphTo'
   name: string
-  related: typeof Model
+  related: typeof Model | (() => typeof Model | Promise<typeof Model>)
 }
 
 interface HasManyRelationDefinition extends BaseRelationDefinition {
@@ -1591,7 +2063,7 @@ interface BelongsToManyRelationDefinition extends BaseRelationDefinition {
 
 interface HasManyThroughRelationDefinition extends BaseRelationDefinition {
   type: 'hasManyThrough'
-  through: typeof Model
+  through: typeof Model | (() => typeof Model | Promise<typeof Model>)
   firstKey: string
   secondKey: string
   localKey: string
@@ -1604,6 +2076,21 @@ type RelationDefinition =
   | BelongsToRelationDefinition
   | BelongsToManyRelationDefinition
   | HasManyThroughRelationDefinition
+  | MorphManyRelationDefinition
+  | MorphToRelationDefinition
+
+interface MorphManyRelationDefinition extends BaseRelationDefinition {
+  type: 'morphMany'
+  morphName: string
+  localKey: string
+}
+
+interface MorphToRelationDefinition {
+  type: 'morphTo'
+  name: string
+  related: undefined
+  morphName: string
+}
 
 /** Type for hasMany relation results (array of related records). */
 export type HasManyRelationResult<T extends typeof Model> = Array<TRecordFor<T>>
@@ -1635,11 +2122,64 @@ export type BelongsToManyRecord<TRecord extends PlainObject> = TRecord[]
 /** Utility type for hasManyThrough relation data shape. */
 export type HasManyThroughRecord<TRecord extends PlainObject> = TRecord[]
 
+/** Type for morphMany relation results (array of related records). */
+export type MorphManyRelationResult<T extends typeof Model> = Array<TRecordFor<T>>
+
+/** Utility type for morphMany relation data shape. */
+export type MorphManyRecord<TRecord extends PlainObject> = TRecord[]
+
+/** Type for morphTo relation results (single record or null). */
+export type MorphToRelationResult = PlainObject | null
+
+/** Utility type for morphTo relation data shape. */
+export type MorphToRecord = PlainObject | null
+
 /** Utility type: model record with specified relations merged. */
 export type WithRelations<
   T extends typeof Model,
   K extends RelationKey<T> | readonly RelationKey<T>[],
 > = TRecordFor<T> & RelationTypePick<T, K>
+
+type ModelClassWithTable<
+  TTable extends TableShape,
+  TBase extends typeof Model = typeof Model,
+  TCreate extends PlainObject = InferModelInsert<TTable> & TCreateFor<TBase>,
+> = TBase & {
+  readonly table: TTable
+  readonly recordType: InferModelRecord<TTable>
+  readonly createType: TCreate
+}
+
+/**
+ * Create a table-backed model base class from a Drizzle table.
+ *
+ * @example
+ * export class Post extends defineModel(posts) {}
+ * export class User extends defineModel(users, { base: AuthenticatableModel }) {}
+ */
+export function defineModel<
+  TTable extends TableShape,
+  TBase extends typeof Model = typeof Model,
+  TCreate extends PlainObject = InferModelInsert<TTable> & TCreateFor<TBase>,
+>(
+  table: TTable,
+  options: {
+    base?: TBase
+    createType?: TCreate
+  } = {},
+): ModelClassWithTable<TTable, TBase, TCreate> {
+  const BaseClass = (options.base ?? Model) as typeof Model
+
+  abstract class DefinedModel extends BaseClass {}
+
+  ;(DefinedModel as typeof Model & { table: TTable }).table = table
+  ;(DefinedModel as typeof Model & { recordType: InferModelRecord<TTable> }).recordType =
+    {} as InferModelRecord<TTable>
+  ;(DefinedModel as typeof Model & { createType: TCreate }).createType =
+    (options.createType ?? ({} as InferModelInsert<TTable> & TCreateFor<TBase>)) as TCreate
+
+  return DefinedModel as ModelClassWithTable<TTable, TBase, TCreate>
+}
 
 function normalizeOrderBy<TRecord extends PlainObject>(order: OrderByInput<TRecord>): OrderByClause<TRecord> {
   if (Array.isArray(order) && !isOrderTuple(order)) {

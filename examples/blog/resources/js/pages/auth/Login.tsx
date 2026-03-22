@@ -1,21 +1,19 @@
-import { Head, Link, usePage } from '@inertiajs/react'
+import { Head, Link } from '@inertiajs/react'
 import { useId, useState } from 'react'
 import Layout from '../../components/Layout.js'
 import { Check, Loader2, LogIn } from 'lucide-react'
+import type { ValidationErrors } from '@guren/core'
 
-interface LoginErrors {
+interface Props {
   email?: string
-  password?: string
-  message?: string
+  errors?: ValidationErrors<'email' | 'password'>
 }
 
-export default function Login() {
-  const page = usePage<{ email?: string; errors?: LoginErrors }>()
-  const [email, setEmail] = useState(page.props.email ?? '')
+export default function Login({ email: initialEmail = '', errors = {} }: Props) {
+  const [email, setEmail] = useState(initialEmail)
   const [password, setPassword] = useState('')
   const [remember, setRemember] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
-  const errors = page.props.errors ?? {}
 
   const emailId = useId()
   const passwordId = useId()

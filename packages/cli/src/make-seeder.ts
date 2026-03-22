@@ -4,28 +4,11 @@ import { scaffoldFile } from './utils'
 const SEEDERS_DIR = 'db/seeders'
 
 function seederTemplate(className: string): string {
-  return `import { db } from '../db'
-// import { users } from '../schema'
+  return `import { defineSeeder } from '@guren/orm'
 
-/**
- * ${className}
- *
- * Run with: bun guren db:seed
- */
-export default class ${className} {
-  /**
-   * Run the database seeder.
-   */
-  async run(): Promise<void> {
-    // TODO: Implement seeder logic
-    // Example:
-    // await db.insert(users).values([
-    //   { name: 'John Doe', email: 'john@example.com' },
-    //   { name: 'Jane Doe', email: 'jane@example.com' },
-    // ])
-    console.log('Running ${className}...')
-  }
-}
+export default defineSeeder(async () => {
+  console.info('Ran ${className}.')
+})
 `
 }
 

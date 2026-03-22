@@ -2,7 +2,7 @@
 
 ## Purpose
 - Ships the Citty-based CLI (`guren` bin) with generators and database helpers.
-- Generates code targeting `@guren/server` and `@guren/orm` imports.
+- Generates code targeting `@guren/core` and `@guren/orm` imports.
 - Provides runtime utilities (`dev`, `console`) and typed route generation for client helpers.
 
 ## Key Commands

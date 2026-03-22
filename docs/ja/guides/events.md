@@ -2,6 +2,8 @@
 
 Gurenはアプリケーション内のコンポーネントを疎結合にするための、シンプルかつ強力なイベントシステムを提供します。イベントを使用することで、アプリケーション内で発生した出来事を他の部分がリッスンして反応できるようになります。
 
+vNext の標準導線は、`@guren/core` から event API を import し、listener/provider を中央で登録し、controller では domain event の発火に集中する形です。
+
 ## コアコンセプト
 
 - **Event** – アプリケーション内で発生した出来事を表すクラス。イベントはその出来事に関するデータを持つ。
@@ -72,13 +74,15 @@ class OrderPlaced extends Event {
 
 ## リスナーの登録
 
-### ファサードを使用（推奨）
+### コンテナ束縛ファサードを使用
 
-`EventsFacade` を使うと、コンテナから `EventManager` を遅延解決して簡潔に利用できます:
+アプリケーションコンテナからファサードを作ると、`EventManager` を明示的に受け回さずに簡潔に利用できます:
 
 ```ts
-import { EventsFacade as Events } from '@guren/server'
+import { createFacades } from '@guren/core'
 import { UserRegistered } from '@/app/Events/UserRegistered'
+
+const { Events } = createFacades(app.container)
 
 // リスナーを登録
 Events.on(UserRegistered, async (event) => {
@@ -305,8 +309,16 @@ events.on(ApplicationShutdown, (event) => {
 
 ```ts
 // キュー統合を設定
-import { setQueueDriver, MemoryDriver } from '@guren/core'
-setQueueDriver(new MemoryDriver())
+import { createQueueManager, MemoryDriver } from '@guren/core'
+
+const queue = createQueueManager({
+  default: 'memory',
+  drivers: {
+    memory: () => new MemoryDriver(),
+  },
+})
+
+queue.driver()
 
 // キュー対応リスナーを登録
 events.on(

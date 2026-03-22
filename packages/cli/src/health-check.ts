@@ -130,7 +130,7 @@ export async function runHealthCheck(options: HealthCheckOptions = {}): Promise<
     consola.info('  app/health.ts')
     consola.info('')
     consola.info('Example:')
-    consola.info('  import { createHealthManager, DatabaseCheck, MemoryCheck } from "@guren/server"')
+    consola.info('  import { createHealthManager, DatabaseCheck, MemoryCheck } from "@guren/core"')
     consola.info('')
     consola.info('  export const health = createHealthManager()')
     consola.info('  health.register(new DatabaseCheck(db))')

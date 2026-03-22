@@ -106,15 +106,17 @@ app.use('/api/*', createBearerTokenMiddleware({ store }))
 ### With Ability Requirements
 
 ```ts
-import { Route } from '@guren/server'
+import { Router } from '@guren/core'
 
 // Require specific abilities for routes
-Route.delete('/api/posts/:id', [PostController, 'destroy']).middleware(
-  createBearerTokenMiddleware({
-    store,
-    abilities: ['posts:delete'],
-  })
-)
+export function registerApiRoutes(router: Router): void {
+  router.delete('/api/posts/:id', [PostController, 'destroy']).middleware(
+    createBearerTokenMiddleware({
+      store,
+      abilities: ['posts:delete'],
+    }),
+  )
+}
 ```
 
 ### With User Loading
@@ -128,7 +130,7 @@ app.use('/api/*', createBearerTokenMiddleware({
 }))
 
 // User is now available in the context
-Route.get('/api/me', (ctx) => {
+router.get('/api/me', (ctx) => {
   const user = ctx.get('guren:user')
   return ctx.json(user)
 })
@@ -156,7 +158,7 @@ app.use('/api/*', createBearerTokenMiddleware({
 ```ts
 import { getApiToken } from '@guren/core'
 
-Route.get('/api/token-info', (ctx) => {
+router.get('/api/token-info', (ctx) => {
   const tokenInfo = getApiToken(ctx)
 
   if (!tokenInfo) {
@@ -179,7 +181,7 @@ Route.get('/api/token-info', (ctx) => {
 ```ts
 import { getUserApiTokens } from '@guren/core'
 
-Route.get('/api/tokens', async (ctx) => {
+router.get('/api/tokens', async (ctx) => {
   const user = ctx.get('guren:user')
   const tokens = await getUserApiTokens(user.id, store)
 
@@ -202,14 +204,14 @@ Route.get('/api/tokens', async (ctx) => {
 import { revokeApiToken, revokeAllApiTokens } from '@guren/core'
 
 // Revoke a specific token
-Route.delete('/api/tokens/:id', async (ctx) => {
+router.delete('/api/tokens/:id', async (ctx) => {
   const tokenId = ctx.req.param('id')
   await revokeApiToken(tokenId, store)
   return ctx.json({ message: 'Token revoked' })
 })
 
 // Revoke all tokens (e.g., on password change)
-Route.post('/api/tokens/revoke-all', async (ctx) => {
+router.post('/api/tokens/revoke-all', async (ctx) => {
   const user = ctx.get('guren:user')
   await revokeAllApiTokens(user.id, store)
   return ctx.json({ message: 'All tokens revoked' })

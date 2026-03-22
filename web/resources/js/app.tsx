@@ -1,5 +1,4 @@
 import '../css/app.css'
-import { startInertiaClient } from '@guren/inertia-client'
 
 let pages: Record<string, () => Promise<unknown>> | undefined
 
@@ -9,7 +8,9 @@ try {
   pages = undefined
 }
 
-startInertiaClient({
-  pages,
-  resolve: pages ? undefined : (name) => import(`./pages/${name}.tsx`),
-})
+void import('@guren/inertia-client').then(({ startInertiaClient }) =>
+  startInertiaClient({
+    pages,
+    resolve: pages ? undefined : (name) => import(`./pages/${name}.tsx`),
+  }),
+)

@@ -5,10 +5,13 @@ const { emitMock, postFindMock, userFindMock } = vi.hoisted(() => ({
   postFindMock: vi.fn(),
   userFindMock: vi.fn(),
 }))
-vi.mock('@guren/server', () => ({
+vi.mock('@guren/core', () => ({
   Event: class {},
-  Job: class {},
-  createEventManager: () => ({ emit: emitMock }),
+  Job: class {
+    make() {
+      return { emit: emitMock }
+    }
+  },
 }))
 
 vi.mock('../../app/Models/Post.js', () => ({

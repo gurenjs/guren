@@ -295,7 +295,7 @@ const url = await disk.temporaryUrl('private/document.pdf', expiration)
 ### フォームアップロードの処理
 
 ```ts
-import { Controller } from '@guren/server'
+import { Controller } from '@guren/core'
 
 export class UploadController extends Controller {
   async store() {
@@ -337,7 +337,7 @@ export class UploadController extends Controller {
 大きなファイルの場合はストリーミングを検討：
 
 ```ts
-import { Controller } from '@guren/server'
+import { Controller } from '@guren/core'
 
 export class DownloadController extends Controller {
   async show() {

@@ -49,20 +49,20 @@ export default defineConfig({
         replacement: resolve(rootDir, '../../packages/testing/src/'),
       },
       {
-        find: /^@guren\/server$/,
-        replacement: resolve(rootDir, '../../packages/server/src/index.ts'),
-      },
-      {
-        find: /^@guren\/server\//,
-        replacement: resolve(rootDir, '../../packages/server/src/'),
-      },
-      {
         find: /^@guren\/core$/,
         replacement: resolve(rootDir, '../../packages/core/src/index.ts'),
       },
       {
         find: /^@guren\/core\//,
         replacement: resolve(rootDir, '../../packages/core/src/'),
+      },
+      {
+        find: /^@guren\/server$/,
+        replacement: resolve(rootDir, '../../packages/server/src/index.ts'),
+      },
+      {
+        find: /^@guren\/server\//,
+        replacement: resolve(rootDir, '../../packages/server/src/'),
       },
       {
         find: /^@guren\/orm$/,
@@ -91,6 +91,10 @@ export default defineConfig({
       {
         find: /^@guren\/cli\//,
         replacement: resolve(rootDir, '../../packages/cli/src/'),
+      },
+      {
+        find: /^bun:sqlite$/,
+        replacement: resolve(rootDir, './tests/support/bun-sqlite.ts'),
       },
       {
         find: /^guren$/,

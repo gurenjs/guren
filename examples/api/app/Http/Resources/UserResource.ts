@@ -1,4 +1,4 @@
-import { Resource } from '@guren/server'
+import { Resource } from '@guren/core'
 import type { UserRecord } from '../../Models/User.js'
 
 export class UserResource extends Resource<UserRecord> {

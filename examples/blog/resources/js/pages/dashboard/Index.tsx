@@ -2,15 +2,11 @@ import { Link } from '@inertiajs/react'
 import { User, Mail, Settings } from 'lucide-react'
 import Layout from '../../components/Layout.js'
 
-interface DashboardProps {
-  user?: {
-    id: number
-    name: string
-    email: string
-  } | null
+interface Props {
+  user?: { id: number; name: string; email: string } | null
 }
 
-export default function Dashboard({ user }: DashboardProps) {
+export default function Dashboard({ user }: Props) {
   return (
     <Layout
       wrapperClassName="bg-zinc-50"

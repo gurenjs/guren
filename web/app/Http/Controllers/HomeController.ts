@@ -1,4 +1,5 @@
-import { Controller } from '@guren/server'
+import { Controller } from '@guren/core'
+import { webPages } from '../../../resources/js/pages/contracts.js'
 
 export default class HomeController extends Controller {
   async index(): Promise<Response> {
@@ -6,6 +7,6 @@ export default class HomeController extends Controller {
       message: 'Build full-stack web apps blazingly fast.',
     }
 
-    return this.inertia('Home', props, { url: this.request.path, title: 'Guren' })
+    return this.inertia(webPages.home, props, { url: this.request.path, title: 'Guren' })
   }
 }

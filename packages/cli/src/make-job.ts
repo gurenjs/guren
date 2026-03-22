@@ -4,13 +4,13 @@ import { scaffoldFile } from './utils'
 const JOBS_DIR = 'app/Jobs'
 
 function jobTemplate(className: string): string {
-  return `import { Job } from '@guren/server'
+  return `import { Job } from '@guren/core'
 
 /**
  * Payload for ${className}.
  */
 export interface ${className}Payload {
-  // Define your job payload here
+  [key: string]: unknown
 }
 
 /**
@@ -20,26 +20,25 @@ export default class ${className} extends Job<${className}Payload> {
   /**
    * The queue this job should be dispatched to.
    */
-  static queue = 'default'
+  static override queue = 'default'
 
   /**
    * The number of times the job may be attempted.
    */
-  static maxAttempts = 3
+  static override maxAttempts = 3
 
   /**
    * Process the job.
    */
-  async handle(): Promise<void> {
-    const payload = this.getPayload()
-    // TODO: Implement job logic
-    console.log('Processing ${className}:', payload)
+  async handle(payload: ${className}Payload): Promise<void> {
+    void payload
   }
 
   /**
    * Handle a job failure.
    */
-  async failed(error: Error): Promise<void> {
+  async failed(payload: ${className}Payload, error: Error): Promise<void> {
+    void payload
     console.error('${className} failed:', error.message)
   }
 }

@@ -17,31 +17,25 @@ function timestamp(): string {
   ].join('')
 }
 
-const loginControllerTemplate = `import { Controller, parseRequestPayload, formatValidationErrors } from '@guren/core'
+const loginControllerTemplate = `import { Controller, ValidationException } from '@guren/core'
 import { LoginSchema } from '@/Http/Validators/LoginValidator'
+import { appPages } from '../../../../resources/js/pages/contracts.js'
 
 export default class LoginController extends Controller {
   async show(): Promise<Response> {
     const email = this.request.query('email') ?? ''
-    return this.inertia('auth/Login', { email }, { url: this.request.path, title: 'Login' })
+    return this.inertia(appPages.auth.login, { email }, { url: this.request.path, title: 'Login' })
   }
 
   async store(): Promise<Response> {
-    const payload = await parseRequestPayload(this.ctx)
-    const result = LoginSchema.safeParse(payload)
-
-    if (!result.success) {
-      return this.json({ errors: formatValidationErrors(result.error) }, { status: 422 })
-    }
-
-    const { email, password, remember } = result.data
+    const { email, password, remember } = await this.validateBody(LoginSchema)
 
     this.auth.session()?.regenerate()
 
     const authenticated = await this.auth.attempt({ email, password }, remember)
 
     if (!authenticated) {
-      return this.json({ errors: { message: 'Invalid credentials.' } }, { status: 422 })
+      throw ValidationException.withMessages({ message: 'Invalid credentials.' })
     }
 
     return this.redirect('/dashboard')
@@ -56,11 +50,75 @@ export default class LoginController extends Controller {
 `
 
 const dashboardControllerTemplate = `import { Controller } from '@guren/core'
+import type { UserRecord } from '../../Models/User.js'
+import { appPages } from '../../../resources/js/pages/contracts.js'
 
 export default class DashboardController extends Controller {
   async index(): Promise<Response> {
-    const user = await this.auth.user()
-    return this.inertia('dashboard/Index', { user }, { url: this.request.path, title: 'Dashboard' })
+    const currentUser = await this.auth.user<UserRecord | null>()
+    const user = currentUser
+      ? {
+          id: currentUser.id,
+          name: currentUser.name,
+          email: currentUser.email,
+        }
+      : null
+    return this.inertia(appPages.dashboard.index, { user }, { url: this.request.path, title: 'Dashboard' })
+  }
+}
+`
+
+const profileControllerTemplate = `import { Controller, ValidationException } from '@guren/core'
+import { User, type UserRecord } from '../../Models/User.js'
+import { ProfileUpdateSchema } from '../Validators/ProfileValidator.js'
+import { appPages } from '../../../resources/js/pages/contracts.js'
+
+export default class ProfileController extends Controller {
+  async edit(): Promise<Response> {
+    const user = await this.auth.user<UserRecord | null>()
+    if (!user) {
+      return this.redirect('/login')
+    }
+
+    return this.inertia(appPages.profile.edit, {
+      profile: {
+        name: user.name,
+        email: user.email,
+      },
+    }, { url: this.request.path, title: 'Profile' })
+  }
+
+  async update(): Promise<Response> {
+    const user = await this.auth.user<UserRecord | null>()
+    if (!user) {
+      return this.redirect('/login')
+    }
+
+    const { name, email, password } = await this.validateBody(ProfileUpdateSchema)
+
+    if (email !== user.email) {
+      const existing = await User.where({ email })
+      const conflict = existing.find((candidate) => candidate.id !== user.id)
+      if (conflict) {
+        throw ValidationException.withMessages({ email: 'Email is already in use.' })
+      }
+    }
+
+    await User.update({ id: user.id }, {
+      name,
+      email,
+      ...(password ? { password } : {}),
+    })
+
+    const refreshed = await User.find(user.id)
+    if (refreshed) {
+      await this.auth.login(refreshed)
+    }
+
+    return this.inertia(appPages.profile.edit, {
+      profile: { name, email },
+      status: 'Profile updated successfully.',
+    }, { url: this.request.path, title: 'Profile' })
   }
 }
 `
@@ -76,8 +134,8 @@ export class User extends AuthenticatableModel<UserRecord> {
 }
 `
 
-const authProviderTemplate = `import { ServiceProvider } from '@guren/server'
-import type { AuthManager } from '@guren/server'
+const authProviderTemplate = `import { ServiceProvider } from '@guren/core'
+import type { AuthManager } from '@guren/core'
 import { User } from '../Models/User.js'
 
 export default class AuthProvider extends ServiceProvider {
@@ -97,12 +155,12 @@ const loginValidatorTemplate = `import { z } from 'zod'
 
 export const LoginSchema = z.object({
   email: z
-    .string({ required_error: 'Email is required.' })
+    .string()
     .trim()
     .min(1, 'Email is required.')
     .email('The email address is badly formatted.'),
   password: z
-    .string({ required_error: 'Password is required.' })
+    .string()
     .min(1, 'Password is required.'),
   remember: z
     .union([
@@ -119,12 +177,36 @@ export const LoginSchema = z.object({
 export type LoginInput = z.infer<typeof LoginSchema>
 `
 
+const profileValidatorTemplate = `import { z } from 'zod'
+
+export const ProfileUpdateSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, 'Name is required.')
+    .max(120, 'Name must be 120 characters or fewer.'),
+  email: z
+    .string()
+    .trim()
+    .min(1, 'Email is required.')
+    .email('Enter a valid email address.'),
+  password: z
+    .string()
+    .trim()
+    .optional()
+    .transform((value) => value ?? '')
+    .refine((value) => value === '' || value.length >= 8, 'Password must be at least 8 characters.'),
+})
+
+export type ProfileUpdateInput = z.infer<typeof ProfileUpdateSchema>
+`
+
 const layoutTemplate = `import { Link, usePage } from '@inertiajs/react'
 import type { PropsWithChildren } from 'react'
 
 export default function Layout({ children }: PropsWithChildren) {
-  const { props } = usePage()
-  const user = props.auth?.user as { name?: string } | undefined
+  const { props } = usePage<{ auth?: { user?: { name?: string } } }>()
+  const user = props.auth?.user
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
@@ -168,22 +250,23 @@ export default function Layout({ children }: PropsWithChildren) {
 }
 `
 
-const loginViewTemplate = `import { Head, Link, usePage } from '@inertiajs/react'
-import { useId, useState } from 'react'
+const loginViewTemplate = `import { Head, Link, useForm } from '@inertiajs/react'
+import { useId } from 'react'
 import Layout from '../../components/Layout.js'
+import type { LoginPageProps } from '../contracts.js'
 
-interface LoginErrors {
-  email?: string
-  password?: string
-  message?: string
+type LoginFormData = {
+  email: string
+  password: string
+  remember: boolean
 }
 
-export default function Login() {
-  const page = usePage<{ email?: string; errors?: LoginErrors }>()
-  const [email, setEmail] = useState(page.props.email ?? '')
-  const [password, setPassword] = useState('')
-  const [remember, setRemember] = useState(false)
-  const errors = page.props.errors ?? {}
+export default function Login({ email = '', errors = {} }: LoginPageProps) {
+  const form = useForm<LoginFormData>({
+    email,
+    password: '',
+    remember: false,
+  })
 
   const emailId = useId()
   const passwordId = useId()
@@ -203,7 +286,13 @@ export default function Login() {
           </p>
         )}
 
-        <form method="post" action="/login" className="mt-6 space-y-4">
+        <form
+          className="mt-6 space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault()
+            form.post('/login')
+          }}
+        >
           <div>
             <label htmlFor={emailId} className="block text-sm font-medium text-slate-200">
               Email
@@ -211,9 +300,8 @@ export default function Login() {
             <input
               id={emailId}
               type="email"
-              name="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
+              value={form.data.email}
+              onChange={(event) => form.setData('email', event.target.value)}
               required
               className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
             />
@@ -227,9 +315,8 @@ export default function Login() {
             <input
               id={passwordId}
               type="password"
-              name="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
+              value={form.data.password}
+              onChange={(event) => form.setData('password', event.target.value)}
               required
               className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
             />
@@ -239,19 +326,19 @@ export default function Login() {
           <label className="flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
-              name="remember"
-              checked={remember}
-              onChange={(event) => setRemember(event.target.checked)}
+              checked={form.data.remember}
+              onChange={(event) => form.setData('remember', event.target.checked)}
               className="h-4 w-4 rounded border-slate-700 bg-slate-950 text-emerald-400 focus:ring-emerald-400"
             />
             Remember me
           </label>
 
-          <button
-            type="submit"
-            className="w-full rounded bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400"
-          >
-            Sign in
+            <button
+              type="submit"
+              disabled={form.processing}
+              className="w-full rounded bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400"
+            >
+              Sign in
           </button>
         </form>
 
@@ -265,16 +352,9 @@ export default function Login() {
 `
 
 const dashboardViewTemplate = `import Layout from '../../components/Layout.js'
+import type { DashboardPageProps } from '../contracts.js'
 
-interface DashboardProps {
-  user?: {
-    id: number
-    name: string
-    email: string
-  } | null
-}
-
-export default function Dashboard({ user }: DashboardProps) {
+export default function Dashboard({ user }: DashboardPageProps) {
   return (
     <Layout>
       <section className="space-y-6">
@@ -299,15 +379,108 @@ export default function Dashboard({ user }: DashboardProps) {
 }
 `
 
-const routesTemplate = `import { Route, requireAuthenticated, requireGuest } from '@guren/core'
+const profileViewTemplate = `import { Head, useForm } from '@inertiajs/react'
+import type { FormEvent } from 'react'
+import Layout from '../../components/Layout.js'
+import type { ProfilePageProps } from '../contracts.js'
+
+type ProfileFormValues = {
+  name: string
+  email: string
+  password: string
+}
+
+export default function ProfileEdit({ profile, status }: ProfilePageProps) {
+  const form = useForm<ProfileFormValues>({
+    name: profile.name,
+    email: profile.email,
+    password: '',
+  })
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    form.put('/profile')
+  }
+
+  return (
+    <Layout>
+      <Head title="Profile" />
+      <section className="space-y-6 rounded-lg border border-slate-800 bg-slate-900/40 p-8 shadow-xl shadow-emerald-500/5">
+        <header>
+          <h1 className="text-2xl font-semibold text-emerald-300">Profile</h1>
+          <p className="mt-2 text-sm text-slate-400">Update your account details and password.</p>
+        </header>
+
+        {status ? (
+          <p className="rounded border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-200">
+            {status}
+          </p>
+        ) : null}
+
+        <form className="space-y-4" onSubmit={handleSubmit}>
+          <div>
+            <label className="block text-sm font-medium text-slate-200">Name</label>
+            <input
+              type="text"
+              value={form.data.name}
+              onChange={(event) => form.setData('name', event.target.value)}
+              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
+            />
+            {form.errors.name ? <p className="mt-1 text-sm text-rose-300">{form.errors.name}</p> : null}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-200">Email</label>
+            <input
+              type="email"
+              value={form.data.email}
+              onChange={(event) => form.setData('email', event.target.value)}
+              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
+            />
+            {form.errors.email ? <p className="mt-1 text-sm text-rose-300">{form.errors.email}</p> : null}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-200">New password</label>
+            <input
+              type="password"
+              value={form.data.password}
+              onChange={(event) => form.setData('password', event.target.value)}
+              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
+            />
+            {form.errors.password ? <p className="mt-1 text-sm text-rose-300">{form.errors.password}</p> : null}
+          </div>
+
+          <button
+            type="submit"
+            disabled={form.processing}
+            className="w-full rounded bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:opacity-50"
+          >
+            Save changes
+          </button>
+        </form>
+      </section>
+    </Layout>
+  )
+}
+`
+
+const routesTemplate = `import { Router, requireAuthenticated, requireGuest } from '@guren/core'
 import LoginController from '../app/Http/Controllers/Auth/LoginController.js'
 import DashboardController from '../app/Http/Controllers/DashboardController.js'
+import ProfileController from '../app/Http/Controllers/ProfileController.js'
 
-Route.get('/login', [LoginController, 'show'], requireGuest({ redirectTo: '/dashboard' }))
-Route.post('/login', [LoginController, 'store'], requireGuest({ redirectTo: '/dashboard' }))
-Route.post('/logout', [LoginController, 'destroy'], requireAuthenticated({ redirectTo: '/login' }))
+export function registerAuthRoutes(router: Router): void {
+  router.get('/login', [LoginController, 'show'], requireGuest({ redirectTo: '/dashboard' })).name('login')
+  router.post('/login', [LoginController, 'store'], requireGuest({ redirectTo: '/dashboard' })).name('login.store')
+  router.post('/logout', [LoginController, 'destroy'], requireAuthenticated({ redirectTo: '/login' })).name('logout')
 
-Route.get('/dashboard', [DashboardController, 'index'], requireAuthenticated({ redirectTo: '/login' }))
+  router.get('/dashboard', [DashboardController, 'index'], requireAuthenticated({ redirectTo: '/login' })).name('dashboard')
+  router.get('/profile', [ProfileController, 'edit'], requireAuthenticated({ redirectTo: '/login' })).name('profile.edit')
+  router.put('/profile', [ProfileController, 'update'], requireAuthenticated({ redirectTo: '/login' })).name('profile.update')
+}
+
+export default registerAuthRoutes
 `
 
 const seederTemplate = `import { defineSeeder } from '@guren/orm'
@@ -379,6 +552,47 @@ export const users = pgTable('users', {
   consola.info('Updated db/schema.ts with authentication columns.')
 }
 
+async function updatePageContracts(): Promise<void> {
+  const contractsPath = resolve(process.cwd(), 'resources/js/pages/contracts.ts')
+  let content: string
+  const coreTypeImport = "import type { ValidationErrors } from '@guren/core'\n"
+
+  try {
+    content = await readFile(contractsPath, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return
+    }
+    throw error
+  }
+
+  content = content.replace(/^import type \{[^}]*\} from '@guren\/core'\n+/gmu, '')
+  if (!content.includes(coreTypeImport.trim())) {
+    content = content.replace(
+      "import type { PageProps } from '@guren/inertia-client/contracts'\n",
+      `import type { PageProps } from '@guren/inertia-client/contracts'\n${coreTypeImport}`,
+    )
+  }
+
+  if (!content.includes("generatedPages.auth.Login")) {
+    content = content.replace(
+      "} as const\n",
+      `  auth: {\n    login: generatedPages.auth.Login.props<{\n      email?: string\n      errors?: ValidationErrors<'email' | 'password'>\n    }>(),\n  },\n  dashboard: {\n    index: generatedPages.dashboard.Index.props<{\n      user?: {\n        id: number\n        name: string\n        email: string\n      } | null\n    }>(),\n  },\n  profile: {\n    edit: generatedPages.profile.Edit.props<{\n      profile: {\n        name: string\n        email: string\n      }\n      errors?: ValidationErrors<'name' | 'email' | 'password'>\n      status?: string\n    }>(),\n  },\n} as const\n`,
+    )
+
+    content = content.replace(
+      /export type HomePageProps = PageProps<typeof appPages\.home>\n/u,
+      `export type HomePageProps = PageProps<typeof appPages.home>\nexport type LoginPageProps = PageProps<typeof appPages.auth.login>\nexport type DashboardPageProps = PageProps<typeof appPages.dashboard.index>\nexport type ProfilePageProps = PageProps<typeof appPages.profile.edit>\n`,
+    )
+
+    await writeFile(contractsPath, content, 'utf8')
+    consola.success('Updated resources/js/pages/contracts.ts with auth page contracts')
+    return
+  }
+
+  await writeFile(contractsPath, content, 'utf8')
+}
+
 export interface MakeAuthOptions extends WriterOptions {
   install?: boolean
 }
@@ -388,25 +602,29 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
   const created = await writeFilesSafe([
     { path: 'app/Http/Controllers/Auth/LoginController.ts', contents: loginControllerTemplate },
     { path: 'app/Http/Controllers/DashboardController.ts', contents: dashboardControllerTemplate },
+    { path: 'app/Http/Controllers/ProfileController.ts', contents: profileControllerTemplate },
     { path: 'app/Models/User.ts', contents: userModelTemplate },
     { path: 'app/Providers/AuthProvider.ts', contents: authProviderTemplate },
     { path: 'app/Http/Validators/LoginValidator.ts', contents: loginValidatorTemplate },
+    { path: 'app/Http/Validators/ProfileValidator.ts', contents: profileValidatorTemplate },
     { path: 'resources/js/components/Layout.tsx', contents: layoutTemplate },
     { path: 'resources/js/pages/auth/Login.tsx', contents: loginViewTemplate },
     { path: 'resources/js/pages/dashboard/Index.tsx', contents: dashboardViewTemplate },
+    { path: 'resources/js/pages/profile/Edit.tsx', contents: profileViewTemplate },
     { path: 'routes/auth.ts', contents: routesTemplate },
     { path: migrationPath, contents: migrationTemplate },
     { path: 'db/seeders/UsersSeeder.ts', contents: seederTemplate },
   ], options)
 
   await updateSchema()
+  await updatePageContracts()
 
   if (options.install) {
     await installAuth()
   } else {
     consola.info('Next steps:')
     consola.info('  • Register AuthProvider in src/app.ts providers array')
-    consola.info('  • Import \'./routes/auth.js\' from routes/web.ts')
+    consola.info('  • Import registerAuthRoutes from routes/auth.ts and call it from your routes/web.ts registrar')
     consola.info('  • Run `bun run db:migrate` and `bun run db:seed`')
     consola.info('  • Install zod if not already installed: `bun add zod`')
     consola.info('')
@@ -468,17 +686,31 @@ async function installAuth(): Promise<void> {
   // Add auth routes import to routes/web.ts
   const webRoutesPath = 'routes/web.ts'
   try {
-    await readFile(resolve(process.cwd(), webRoutesPath), 'utf8')
-    const routesImport = "import './auth.js'"
+    const absoluteWebRoutesPath = resolve(process.cwd(), webRoutesPath)
+    let routesContent = await readFile(absoluteWebRoutesPath, 'utf8')
+    const routesImport = "import registerAuthRoutes from './auth.js'"
     const routesImportResult = await addImport(webRoutesPath, routesImport)
 
     if (routesImportResult.modified) {
-      consola.success(`Added auth routes import to ${webRoutesPath}`)
+      consola.success(`Added auth route registrar import to ${webRoutesPath}`)
     } else if (routesImportResult.reason === 'Import already exists') {
-      consola.info(`Auth routes import already exists in ${webRoutesPath}`)
+      consola.info(`Auth route registrar import already exists in ${webRoutesPath}`)
+    }
+
+    routesContent = await readFile(absoluteWebRoutesPath, 'utf8')
+
+    if (!routesContent.includes('registerAuthRoutes(router)')) {
+      const registrarPattern = /(export function [^(]+\(\s*router\s*:\s*Router\s*\)\s*(?::\s*[^{]+)?\{\n)/u
+      if (registrarPattern.test(routesContent)) {
+        routesContent = routesContent.replace(registrarPattern, `$1  registerAuthRoutes(router)\n`)
+        await writeFile(absoluteWebRoutesPath, routesContent, 'utf8')
+        consola.success(`Registered auth routes inside ${webRoutesPath}`)
+      } else {
+        consola.warn(`Could not locate a route registrar in ${webRoutesPath} - add registerAuthRoutes(router) manually`)
+      }
     }
   } catch {
-    consola.warn(`Could not find ${webRoutesPath} - you may need to manually import './routes/auth.js'`)
+    consola.warn(`Could not find ${webRoutesPath} - you may need to manually import and call registerAuthRoutes(router)`)
   }
 
   consola.success('Authentication configuration installed!')
@@ -486,6 +718,5 @@ async function installAuth(): Promise<void> {
   consola.info('Next steps:')
   consola.info('  • Run `bun run db:migrate` to create the users table')
   consola.info('  • Run `bun run db:seed` to create demo user')
-  consola.info('  • Install zod if not already installed: `bun add zod`')
   consola.info('  • Start the dev server and visit /login')
 }

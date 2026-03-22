@@ -151,6 +151,19 @@ function ensureBuild(
         config.base = derivedBase
       }
     }
+
+    const buildOutDir = resolveBuildOutputDirectory(root, config.build.outDir)
+    const rootPublicDir = path.resolve(root, 'public')
+
+    if (buildOutDir.startsWith(rootPublicDir)) {
+      if (config.build.copyPublicDir === undefined) {
+        config.build.copyPublicDir = false
+      }
+
+      if (config.publicDir === undefined) {
+        config.publicDir = false
+      }
+    }
   }
 
   config.build.rollupOptions ??= {}
@@ -173,7 +186,60 @@ function ensureBuild(
     output.assetFileNames = options.assetFileNames
   }
 
+  if (!isSsrBuild && output.manualChunks === undefined) {
+    output.manualChunks = createDefaultManualChunks(root)
+  }
+
   config.build.rollupOptions.output = output
+}
+
+function createDefaultManualChunks(root: string) {
+  const normalizedRoot = root.replace(/\\/gu, '/')
+
+  return (id: string): string | undefined => {
+    const normalizedId = id.replace(/\\/gu, '/')
+
+    if (normalizedId.includes('/packages/inertia-client/')) {
+      return 'inertia-vendor'
+    }
+
+    if (normalizedId.includes('/packages/core/') || normalizedId.includes('/packages/server/') || normalizedId.includes('/packages/orm/')) {
+      return 'framework-vendor'
+    }
+
+    if (!normalizedId.includes('/node_modules/')) {
+      if (normalizedId.startsWith(normalizedRoot)) {
+        return undefined
+      }
+
+      if (normalizedId.includes('/packages/')) {
+        return 'framework-vendor'
+      }
+
+      return undefined
+    }
+
+    if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/u.test(normalizedId)) {
+      return 'react-vendor'
+    }
+
+    if (
+      /[\\/]node_modules[\\/]@inertiajs[\\/]/u.test(normalizedId) ||
+      /[\\/]node_modules[\\/](axios|qs|lodash-es|lodash)[\\/]/u.test(normalizedId)
+    ) {
+      return 'inertia-vendor'
+    }
+
+    if (/[\\/]node_modules[\\/](@guren|hono)[\\/]/u.test(normalizedId)) {
+      return 'framework-vendor'
+    }
+
+    return 'vendor'
+  }
+}
+
+function resolveBuildOutputDirectory(root: string, outDir: string): string {
+  return path.isAbsolute(outDir) ? outDir : path.resolve(root, outDir)
 }
 
 function deriveHttpBaseFromOutDir(outDir: string): string | undefined {

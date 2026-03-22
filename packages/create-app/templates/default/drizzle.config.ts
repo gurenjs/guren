@@ -3,8 +3,8 @@ import { defineConfig } from 'drizzle-kit'
 export default defineConfig({
   schema: './db/schema.ts',
   out: './db/migrations',
-  dialect: 'postgresql',
+  dialect: 'sqlite',
   dbCredentials: {
-    url: process.env.DATABASE_URL ?? 'postgres://guren:guren@localhost:54322/guren',
+    url: process.env.DATABASE_URL ?? './data/guren.db',
   },
 })

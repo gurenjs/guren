@@ -1,4 +1,4 @@
-import { Resource } from '@guren/server'
+import { Resource } from '@guren/core'
 import { Task } from '../../Models/Task.js'
 import type { TaskRecord } from '../../Models/Task.js'
 import type { WithRelations } from '@guren/orm'
@@ -13,6 +13,11 @@ export class TaskResource extends Resource<TaskRecord | TaskWithOwner> {
       title: task.title,
       description: task.description,
       completed: task.completed,
+      notificationArtifactPath: `notifications/tasks/${task.id}.json`,
+      broadcastChannels: {
+        public: 'tasks',
+        private: `users.${task.userId}.tasks`,
+      },
       createdAt: task.createdAt.toISOString(),
       updatedAt: task.updatedAt.toISOString(),
       // Conditionally include owner if loaded

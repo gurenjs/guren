@@ -2,7 +2,7 @@
 
 ## Purpose
 - Scaffolding CLI that copies templates from `templates/default` and replaces tokens.
-- Generates apps targeting `@guren/server`, `@guren/orm`, and `@guren/cli`.
+- Generates apps targeting `@guren/core`, `@guren/orm`, and `@guren/cli`.
 
 ## Key Files
 - `src/cli.ts`: Citty command definition.

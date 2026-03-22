@@ -7,7 +7,7 @@ Gurenはアプリケーションの依存関係やサービスを監視するた
 ヘルスマネージャーを作成し、チェックを登録します：
 
 ```typescript
-import { createHealthManager, DatabaseCheck, RedisCheck, MemoryCheck } from '@guren/server'
+import { createHealthManager, DatabaseCheck, RedisCheck, MemoryCheck } from '@guren/core'
 
 const health = createHealthManager()
 
@@ -28,7 +28,7 @@ console.log(report.status) // 'healthy', 'degraded', または 'unhealthy'
 シンプルなクエリを実行してデータベース接続を検証します：
 
 ```typescript
-import { DatabaseCheck } from '@guren/server'
+import { DatabaseCheck } from '@guren/core'
 
 // 基本的な使用方法
 health.register(new DatabaseCheck(db))
@@ -45,7 +45,7 @@ health.register(new DatabaseCheck(db, {
 Redis接続を検証します：
 
 ```typescript
-import { RedisCheck } from '@guren/server'
+import { RedisCheck } from '@guren/core'
 
 // 基本的な使用方法
 health.register(new RedisCheck(redis))
@@ -61,7 +61,7 @@ health.register(new RedisCheck(redis, {
 設定可能なしきい値でプロセスメモリ使用量を監視します：
 
 ```typescript
-import { MemoryCheck } from '@guren/server'
+import { MemoryCheck } from '@guren/core'
 
 health.register(new MemoryCheck({
   name: 'memory',              // チェック名（デフォルト: 'memory'）
@@ -80,7 +80,7 @@ health.register(new MemoryCheck({
 キャッシュストア接続を検証します：
 
 ```typescript
-import { CacheCheck } from '@guren/server'
+import { CacheCheck } from '@guren/core'
 
 health.register(new CacheCheck(cache, {
   name: 'cache',   // カスタム名（デフォルト: 'cache'）
@@ -92,7 +92,7 @@ health.register(new CacheCheck(cache, {
 ストレージドライバー接続を検証します：
 
 ```typescript
-import { StorageCheck } from '@guren/server'
+import { StorageCheck } from '@guren/core'
 
 health.register(new StorageCheck(storage, {
   name: 'storage',        // カスタム名（デフォルト: 'storage'）
@@ -108,7 +108,7 @@ health.register(new StorageCheck(storage, {
 コールバック関数でチェックを作成します：
 
 ```typescript
-import { customCheck } from '@guren/server'
+import { customCheck } from '@guren/core'
 
 // シンプルなカスタムチェック
 health.register(customCheck('external-api', async () => {
@@ -140,7 +140,7 @@ health.register(customCheck('queue-depth', async () => {
 再利用可能なチェックのために、基底クラスを拡張します：
 
 ```typescript
-import { HealthCheck, CheckResult } from '@guren/server'
+import { HealthCheck, CheckResult } from '@guren/core'
 
 export class ExternalServiceCheck extends HealthCheck {
   readonly name: string
@@ -246,7 +246,7 @@ const dbResult = await health.getCheck('database')
 組み込みのミドルウェアを使用してヘルスエンドポイントを公開します：
 
 ```typescript
-import { createHealthManager } from '@guren/server'
+import { createHealthManager } from '@guren/core'
 
 const health = createHealthManager()
 // ... チェックを登録
@@ -354,7 +354,7 @@ import {
   RedisCheck,
   MemoryCheck,
   customCheck,
-} from '@guren/server'
+} from '@guren/core'
 import { db } from './database'
 import { redis } from './redis'
 

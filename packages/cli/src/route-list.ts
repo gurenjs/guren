@@ -1,7 +1,6 @@
 import { resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
-import { Route } from '@guren/server'
 import { consola } from 'consola'
+import { loadRouteDefinitions } from './load-routes'
 
 export interface RouteListOptions {
   /**
@@ -60,20 +59,16 @@ export async function listRoutes(options: RouteListOptions = {}): Promise<RouteI
   const appRoot = options.appRoot ? resolve(options.appRoot) : process.cwd()
   const routesFile = resolve(appRoot, options.routesFile ?? DEFAULT_ROUTES_FILE)
 
-  // Clear existing routes
-  Route.clear()
-
-  // Import routes file to register routes
+  let definitions
   try {
-    await import(pathToFileURL(routesFile).href)
+    definitions = await loadRouteDefinitions(routesFile)
   } catch (error) {
     throw new Error(
       `Failed to import routes file (${routesFile}): ${error instanceof Error ? error.message : String(error)}`
     )
   }
 
-  // Get route definitions
-  let routes = Route.definitions().map((def) => ({
+  let routes = definitions.map((def) => ({
     method: def.method.toUpperCase(),
     path: def.path,
     name: def.name,

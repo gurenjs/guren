@@ -2,6 +2,8 @@
 
 Guren provides a fluent API for sending emails with support for multiple transport backends. The mail system integrates with the queue system for async sending and supports HTML templates, attachments, and more.
 
+The standard vNext path is: import mail APIs from `@guren/core`, configure the mail manager in a provider, and keep controllers focused on composing and dispatching mail work.
+
 ## Core Concepts
 
 - **MailManager** – Central registry for configuring and accessing mail transports.
@@ -10,12 +12,14 @@ Guren provides a fluent API for sending emails with support for multiple transpo
 
 ## Basic Usage
 
-### Quick Start (Facade)
+### Quick Start (Container-bound Facade)
 
-The simplest way to send mail is through the `MailFacade`, which resolves the `MailManager` from the container lazily:
+The simplest way to send mail without passing a manager around is to create facades from an application container:
 
 ```ts
-import { MailFacade as Mail } from '@guren/server'
+import { createFacades } from '@guren/core'
+
+const { Mail } = createFacades(app.container)
 
 // Send a simple email — no need to pass a manager instance
 await Mail.to('user@example.com')
@@ -262,15 +266,22 @@ await mail(mailManager)
 
 ## Queued Emails
 
-Send emails asynchronously using the queue system:
+Send emails asynchronously using the queue system. In a real app, configure the mail manager in a provider and expose it through the container. `setMailManager()` is only the queue-worker bridge that lets queued mail jobs resolve the same manager instance:
 
 ```ts
-import { mail, setMailManager, setQueueDriver, MemoryDriver } from '@guren/core'
+import { mail, setMailManager, createQueueManager, MemoryDriver } from '@guren/core'
 
-// Configure queue driver
-setQueueDriver(new MemoryDriver())
+// Configure queue manager
+const queue = createQueueManager({
+  default: 'memory',
+  drivers: {
+    memory: () => new MemoryDriver(),
+  },
+})
 
-// Set global mail manager for queue jobs
+queue.driver()
+
+// Bridge the provider-managed mail manager into queued jobs
 setMailManager(mailManager)
 
 // Queue the email instead of sending immediately
@@ -354,7 +365,7 @@ await welcomeMail.queue('emails')
 The mail subsystem is registered as a singleton via a `ServiceProvider`. You can resolve it from the container:
 
 ```ts
-import { container } from '@guren/server'
+import { container } from '@guren/core'
 
 const mailManager = container.make('mail') // MailManager
 ```
@@ -364,7 +375,7 @@ const mailManager = container.make('mail') // MailManager
 Swap the mail manager in tests to capture sent messages without sending real emails:
 
 ```ts
-import { container } from '@guren/server'
+import { container } from '@guren/core'
 import { MailManager, MemoryTransport } from '@guren/core'
 
 test('sends welcome email on registration', async () => {

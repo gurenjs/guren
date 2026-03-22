@@ -8,35 +8,49 @@ Laravel のような書き心地の、フルスタック TypeScript フレーム
 
 ```ts
 // routes/web.ts
+import { Router } from '@guren/core'
 import TaskController from '@/app/Http/Controllers/TaskController'
+import DashboardController from '@/app/Http/Controllers/DashboardController'
 
-Route.get('/tasks', [TaskController, 'index'])
-Route.post('/tasks', [TaskController, 'store'])
+export function registerWebRoutes(router: Router): void {
+  router.get('/tasks', [TaskController, 'index'])
+  router.post('/tasks', [TaskController, 'store'])
 
-Route.middleware('auth').group(() => {
-  Route.get('/dashboard', [DashboardController, 'index'])
-})
+  router.middleware('auth').group((auth) => {
+    auth.get('/dashboard', [DashboardController, 'index'])
+  })
+}
 ```
 
 ```ts
 // app/Http/Controllers/TaskController.ts
-import { Controller } from '@guren/server'
+import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
 import { Task } from '@/app/Models/Task'
+import { TaskResource, type TaskResourceData } from '@/app/Http/Resources/TaskResource'
+import { CreateTaskSchema, ListTasksQuerySchema } from '@/app/Http/Validators/TaskValidator'
+import { appPages } from '@/resources/js/pages/contracts'
+
+type TasksIndexProps = PaginatedPageProps<TaskResourceData>
 
 export default class TaskController extends Controller {
   async index() {
-    const tasks = await Task.where('completed', false)
-      .orderBy('createdAt', 'desc')
-      .limit(20)
-      .get()
+    const { page } = this.validateQuery(ListTasksQuerySchema)
+    const result = await Task.paginate({ page, perPage: 20, orderBy: ['createdAt', 'desc'] })
+    const paginator = paginate(result, { path: this.request.path ?? '/tasks' })
 
-    return this.inertia('Tasks/Index', { tasks })
+    return this.inertia(appPages.tasks.index, {
+      data: result.data.map((task) => new TaskResource(task).toJSON()),
+      pagination: {
+        meta: paginator.meta(),
+        links: paginator.links(),
+      },
+    } satisfies TasksIndexProps)
   }
 
   async store() {
-    const data = await this.only('title', 'description')
+    const data = await this.validateBody(CreateTaskSchema)
     const task = await Task.create(data)
-    return this.redirect('/tasks')
+    return this.redirect(`/tasks/${task?.id ?? ''}`)
   }
 }
 ```
@@ -44,19 +58,22 @@ export default class TaskController extends Controller {
 React ページにはコントローラーから型付き props がそのまま渡ります — API レイヤーの手書きは不要：
 
 ```tsx
-// resources/js/pages/Tasks/Index.tsx
-import type { ControllerInertiaProps } from '@guren/server'
-import type TaskController from '@/app/Http/Controllers/TaskController'
+// resources/js/pages/tasks/Index.tsx
+import type { PageProps } from '@guren/inertia-client/contracts'
+import { appPages } from '@/resources/js/pages/contracts'
 
-type Props = ControllerInertiaProps<TaskController, 'index'>
+type Props = PageProps<typeof appPages.tasks.index>
 
-export default function TasksIndex({ tasks }: Props) {
+export default function TasksIndex({ data, pagination }: Props) {
   return (
-    <ul>
-      {tasks.map((task) => (
-        <li key={task.id}>{task.title}</li>
-      ))}
-    </ul>
+    <section>
+      <ul>
+        {data.map((task) => (
+          <li key={task.id}>{task.title}</li>
+        ))}
+      </ul>
+      <p>{pagination.meta.total} tasks</p>
+    </section>
   )
 }
 ```
@@ -75,13 +92,15 @@ await app.actingAs(user).get('/dashboard').assertOk()
 
 **Bun ネイティブ。** Guren は Bun ランタイム上で Hono を HTTP レイヤーとして動作します。Node.js の互換レイヤーはありません。Bun の高速起動、ネイティブ TypeScript 実行、組み込みテストランナーをそのまま活用できます。
 
-**TypeScript で Laravel の開発体験。** Laravel を使ったことがあれば、パターンは一瞬で馴染みます：`Route.resource`、`Controller` と `this.inertia()`、`Model.where().orderBy().get()`。使ったことがなくても大丈夫です — API は「やりたいこと」がそのまま読めるように設計されています。
+**TypeScript で Laravel の開発体験。** Laravel を使ったことがあれば、リソースルーティング、`Controller` と `this.inertia()`、`Model.where().orderBy().get()` といったパターンにはすぐ馴染めます。使ったことがなくても大丈夫です — API は「やりたいこと」がそのまま読めるように設計されています。
 
 **エンドツーエンドの型安全。** Drizzle のスキーマ型が Model に流れ、Controller を通って、React ページの props まで到達します。カラム名を変えると TypeScript がデータベースからブラウザまで、更新が必要な箇所をすべてキャッチします。
 
 **バッテリー同梱、でも強制しない。** 認証、バリデーション、キャッシュ、キュー、メール、イベント、ブロードキャスト、スケジューリング — 必要なときにすべて揃っています。各サブシステムは ServiceProvider によるオプトイン方式なので、使うものだけをロードします。
 
-**設定より規約。** `bunx guren make:controller` でコントローラーを、`make:model` でモデルを、`make:route` でルートを生成。CLI が正しい場所に正しい構造でファイルを作るので、フォルダ構成の議論ではなく機能開発に時間を使えます。
+**設定より規約。** `bunx guren add auth` や `bunx guren add resource posts` で feature 単位に生成できます。CLI が正しい場所に正しい構造でファイルを作るので、フォルダ構成の議論ではなく機能開発に時間を使えます。
+
+**グローバル状態よりアプリ単位。** 生成されたアプリは route registrar を `createApp({ routes })` に渡すため、複数アプリやテスト間でルート状態が混線しません。
 
 ## はじめよう
 
@@ -89,6 +108,7 @@ await app.actingAs(user).get('/dashboard').assertOk()
 bunx create-guren-app my-app
 cd my-app
 bun install
+bun run codegen
 bun run dev        # http://localhost:3333 にアクセス
 ```
 

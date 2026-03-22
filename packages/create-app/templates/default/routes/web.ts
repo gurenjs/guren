@@ -1,4 +1,8 @@
-import { Route } from '@guren/server'
+import { Router } from '@guren/core'
 import HomeController from '../app/Http/Controllers/HomeController.js'
 
-Route.get('/', [HomeController, 'index'])
+export function registerWebRoutes(router: Router): void {
+  router.get('/', [HomeController, 'index'])
+}
+
+export default registerWebRoutes

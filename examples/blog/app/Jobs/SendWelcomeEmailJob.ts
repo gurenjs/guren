@@ -1,4 +1,4 @@
-import { Job } from '@guren/server'
+import { Job } from '@guren/core'
 import { User } from '../Models/User.js'
 import { sendWelcomeMail } from '../Mail/WelcomeMail.js'
 
@@ -22,7 +22,7 @@ export class SendWelcomeEmailJob extends Job<SendWelcomeEmailPayload> {
       return
     }
 
-    await sendWelcomeMail(user)
+    await sendWelcomeMail(this.make('mail'), user)
     console.log(`[Job] Welcome email sent to ${user.email}`)
   }
 

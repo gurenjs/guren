@@ -2,6 +2,8 @@
 
 Guren provides a unified caching API with support for multiple storage backends. Caching helps improve application performance by storing expensive computations or database queries for quick retrieval.
 
+The standard vNext path is: import cache APIs from `@guren/core`, configure the cache manager in a provider, and keep services responsible for cache keys and invalidation.
+
 ## Core Concepts
 
 - **CacheStore** – Interface for cache operations (get, set, delete, etc.). All drivers implement this interface.
@@ -11,12 +13,14 @@ Guren provides a unified caching API with support for multiple storage backends.
 
 ## Basic Usage
 
-### Quick Start (Facade)
+### Quick Start (Container-bound Facade)
 
-The simplest way to use the cache is through the `CacheFacade`, which resolves the `CacheManager` from the container lazily:
+The simplest way to use the cache without passing a manager around is to create facades from an application container:
 
 ```ts
-import { CacheFacade as Cache } from '@guren/server'
+import { createFacades } from '@guren/core'
+
+const { Cache } = createFacades(app.container)
 
 // Store a value (TTL in seconds)
 await Cache.store().set('user:1', { name: 'John' }, 3600)
@@ -283,7 +287,7 @@ export async function getUserPreferences(
 The cache subsystem is registered as a singleton via a `ServiceProvider`. You can resolve it from the container:
 
 ```ts
-import { container } from '@guren/server'
+import { container } from '@guren/core'
 
 // Type-safe resolution
 const cache = container.make('cache') // CacheManager
@@ -295,7 +299,7 @@ await cache.store().get('key')
 Override the default cache configuration by creating your own provider:
 
 ```ts
-import { ServiceProvider, createCacheManager } from '@guren/server'
+import { ServiceProvider, createCacheManager } from '@guren/core'
 
 class AppCacheProvider extends ServiceProvider {
   register(): void {
@@ -318,7 +322,7 @@ In tests, you can swap the cache manager with a fake using `container.fake()` an
 
 ```ts
 import { describe, test, expect } from 'bun:test'
-import { container } from '@guren/server'
+import { container } from '@guren/core'
 import { CacheManager } from '@guren/core'
 
 describe('Cache in application code', () => {

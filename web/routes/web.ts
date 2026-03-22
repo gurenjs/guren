@@ -1,12 +1,16 @@
-import { Route } from '@guren/server'
+import { Router } from '@guren/core'
 import DocsController from '../app/Http/Controllers/DocsController.js'
 import HomeController from '../app/Http/Controllers/HomeController.js'
 
-Route.get('/', [HomeController, 'index'])
+export function registerWebRoutes(router: Router): void {
+  router.get('/', [HomeController, 'index'])
 
-Route.group('/docs', () => {
-  Route.get('/', [DocsController, 'index'])
-  Route.get('/ja', [DocsController, 'indexJa'])
-  Route.get('/ja/:category/:slug', [DocsController, 'showJa'])
-  Route.get('/:category/:slug', [DocsController, 'show'])
-})
+  router.group('/docs', (docs) => {
+    docs.get('/', [DocsController, 'index'])
+    docs.get('/ja', [DocsController, 'indexJa'])
+    docs.get('/ja/:category/:slug', [DocsController, 'showJa'])
+    docs.get('/:category/:slug', [DocsController, 'show'])
+  })
+}
+
+export default registerWebRoutes

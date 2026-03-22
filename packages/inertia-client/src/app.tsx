@@ -3,6 +3,7 @@ import type { Page } from '@inertiajs/core'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { createPagesResolver as createPagesResolverFactory, type ResolveComponent } from './resolve'
+import type { PageManifest } from './contracts'
 
 type SetupArgs = {
   el: HTMLElement
@@ -19,6 +20,7 @@ type SetupArgs = {
 export interface StartInertiaClientOptions {
   resolve?: ResolveComponent
   pages?: Record<string, () => Promise<unknown>>
+  pageManifest?: PageManifest
   resolveComponentPath?: (name: string) => string
   setup?: (args: SetupArgs) => void
   progress?: {
@@ -45,6 +47,7 @@ export function startInertiaClient(options: StartInertiaClientOptions): Promise<
     options.resolve ??
     createPagesResolverFactory({
       pages: options.pages,
+      pageManifest: options.pageManifest,
       resolveComponentPath: options.resolveComponentPath,
     })
 

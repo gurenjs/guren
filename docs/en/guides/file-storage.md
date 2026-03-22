@@ -7,7 +7,7 @@ Guren provides a powerful filesystem abstraction that works across multiple stor
 Configure storage disks in your application:
 
 ```typescript
-import { createStorageManager } from '@guren/server'
+import { createStorageManager } from '@guren/core'
 
 const storage = createStorageManager({
   default: 'local',
@@ -225,7 +225,7 @@ await storage.disk('public').put('images/logo.png', imageBuffer)
 Register custom storage drivers:
 
 ```typescript
-import { StorageDriver } from '@guren/server'
+import { StorageDriver } from '@guren/core'
 
 class CloudinaryDriver implements StorageDriver {
   async put(path: string, content: Buffer | string, options?: PutOptions): Promise<string> {
@@ -250,7 +250,7 @@ storage.registerDriver('cloudinary', (options) => new CloudinaryDriver(options))
 Using storage in controllers:
 
 ```typescript
-import { Controller } from '@guren/server'
+import { Controller } from '@guren/core'
 
 export default class UploadController extends Controller {
   async store() {

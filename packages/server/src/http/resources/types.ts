@@ -3,6 +3,8 @@
  */
 export type ResourceData = Record<string, unknown>
 
+export type ValidationErrors<TField extends string = string> = Partial<Record<TField | 'message', string>>
+
 /**
  * Pagination meta information.
  */
@@ -18,11 +20,18 @@ export interface PaginationMeta {
 /**
  * Pagination links.
  */
+export interface PaginationPageLink {
+  page: number
+  url: string | null
+  active: boolean
+}
+
 export interface PaginationLinks {
   first: string | null
   last: string | null
   prev: string | null
   next: string | null
+  pages: PaginationPageLink[]
 }
 
 /**
@@ -32,6 +41,14 @@ export interface PaginatedResponse<T> {
   data: T[]
   meta: PaginationMeta
   links: PaginationLinks
+}
+
+export interface PaginatedPageProps<T> extends Record<string, unknown> {
+  data: T[]
+  pagination: {
+    meta: PaginationMeta
+    links: PaginationLinks
+  }
 }
 
 /**
@@ -83,3 +100,5 @@ export interface BaseResource<T> {
   toArray(): ResourceData
   toJSON(): ResourceData
 }
+
+export type InferResourceData<TResource extends BaseResource<unknown>> = ReturnType<TResource['toJSON']>

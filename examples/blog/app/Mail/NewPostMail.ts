@@ -1,4 +1,4 @@
-import { mail, getMailManager } from '@guren/server'
+import { mail, type MailManager } from '@guren/core'
 import type { PostRecord } from '../Models/Post.js'
 import type { UserRecord } from '../Models/User.js'
 
@@ -6,16 +6,11 @@ import type { UserRecord } from '../Models/User.js'
  * Send a notification email about a new post.
  */
 export async function sendNewPostMail(
+  manager: MailManager,
   subscriber: { email: string; name: string },
   post: PostRecord,
   author: UserRecord
 ): Promise<void> {
-  const manager = getMailManager()
-  if (!manager) {
-    console.log(`[Mail] Would send new post notification to ${subscriber.email}`)
-    return
-  }
-
   const body = post.body ?? ''
   await mail(manager)
     .to(subscriber.email)

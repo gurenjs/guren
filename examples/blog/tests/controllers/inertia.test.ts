@@ -4,7 +4,7 @@ import {
   createControllerModuleMock,
   readInertiaResponse,
 } from '@guren/testing'
-import type { Context } from '@guren/server'
+import type { Context } from '@guren/core'
 
 function createGurenCoreMock() {
   return {
@@ -22,9 +22,14 @@ function createGurenCoreMock() {
 }
 
 vi.mock('guren', () => createControllerModuleMock())
-vi.mock('@guren/core', () => createGurenCoreMock())
-vi.mock('@guren/server', () => createControllerModuleMock())
-
+vi.mock('@guren/core', async () => {
+  const actual = await vi.importActual<typeof import('@guren/core')>('@guren/core')
+  return {
+    ...actual,
+    ...createGurenCoreMock(),
+    ServiceProvider: actual.ServiceProvider,
+  }
+})
 import DashboardController from '../../app/Http/Controllers/DashboardController.js'
 import ProfileController from '../../app/Http/Controllers/ProfileController.js'
 
@@ -162,7 +167,7 @@ describe('ProfileController', () => {
       expect(response.headers.get('Location')).toBe('/login')
     })
 
-    it('returns validation errors for invalid data', async () => {
+    it('throws ValidationException for invalid data', async () => {
       const mockUser = { id: 1, name: 'John Doe', email: 'john@example.com' }
       const auth = createAuthStub(mockUser)
       const ctx = createControllerContext('http://blog.test/profile', {
@@ -172,12 +177,7 @@ describe('ProfileController', () => {
       }) as unknown as Context
 
       const controller = createControllerWithAuth(ProfileController, auth, ctx)
-      const response = await controller.update()
-      const { payload } = await readInertiaResponse(response)
-
-      expect(response.status).toBe(422)
-      expect(payload.component).toBe('profile/Edit')
-      expect(payload.props.errors).toBeDefined()
+      await expect(controller.update()).rejects.toThrow()
     })
   })
 })

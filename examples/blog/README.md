@@ -52,6 +52,14 @@ NODE_ENV=production bun run --cwd examples/blog build
 ```
 The `build` script runs both `bunx vite build` and `bunx vite build --ssr`, generating the client manifest at `public/assets/.vite/manifest.json` and the SSR manifest at `public/assets/.vite/ssr-manifest.json`. At runtime `src/main.ts` calls `autoConfigureInertiaAssets`, which reads those files and automatically sets the `GUREN_INERTIA_*` environment variables so server-side rendering is enabled without extra configuration.
 
+To preview that production build locally, run:
+
+```bash
+NODE_ENV=production bun run --cwd examples/blog preview
+```
+
+This boots the same Bun server in production mode, using the generated manifests, rather than Vite's static preview server.
+
 ## Database Tasks
 
 - `bun run --cwd examples/blog db:make` – generate a new SQL migration via drizzle-kit.

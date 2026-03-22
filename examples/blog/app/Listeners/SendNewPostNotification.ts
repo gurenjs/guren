@@ -1,5 +1,6 @@
-import { Listener } from '@guren/server'
+import { Listener, type BroadcastManager, type NotificationManager, type Notifiable, type StorageManager } from '@guren/core'
 import { PostCreated } from '../Events/PostCreated.js'
+import { NewPostPublishedNotification } from '../Notifications/NewPostPublishedNotification.js'
 
 /**
  * Listener that sends notifications when a new post is created.
@@ -11,9 +12,36 @@ export class SendNewPostNotification extends Listener<PostCreated> {
   static override queue = 'notifications'
   static override priority = 0
 
+  constructor(
+    private readonly notifications: NotificationManager,
+    private readonly broadcast: BroadcastManager,
+    private readonly storage: StorageManager,
+  ) {
+    super()
+  }
+
   async handle(event: PostCreated): Promise<void> {
     const { post, author } = event
-    // In a real app, this would send notifications to subscribers
+    const payload = {
+      postId: post.id,
+      title: post.title,
+      authorId: author.id,
+      authorName: author.name,
+    }
+
+    const recipient: Notifiable = {
+      notifications: [],
+      routeNotificationFor(channel: string): string | null {
+        if (channel === 'mail') return author.email
+        return null
+      },
+    }
+
+    await this.storage.disk('public').put(`notifications/posts/${post.id}.json`, JSON.stringify(payload))
+    await this.notifications.sendNow(recipient, new NewPostPublishedNotification(post))
+    await this.broadcast.broadcast('announcements', 'post.created', payload)
+    await this.broadcast.broadcast(`posts.${post.id}`, 'post.created', payload)
+
     console.log(
       `[Notification] New post "${post.title}" created by ${author.name}`
     )

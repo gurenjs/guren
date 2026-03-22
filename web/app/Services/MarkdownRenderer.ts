@@ -2,7 +2,10 @@ import { Marked, type Tokens } from 'marked'
 import { markedHighlight } from 'marked-highlight'
 import { codeToHtml } from 'shiki'
 
-const DOCS_THEME = 'rose-pine-dawn'
+const DOCS_THEMES = {
+  light: 'rose-pine-dawn',
+  dark: 'rose-pine-moon',
+} as const
 const DEFAULT_LANGUAGE = 'text'
 const ALERT_DIRECTIVE_PATTERN = /^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*/iu
 
@@ -34,10 +37,18 @@ markedInstance.use(
       const normalizedLang = lang?.trim() || DEFAULT_LANGUAGE
 
       try {
-        return await codeToHtml(code, { lang: normalizedLang, theme: DOCS_THEME })
+        return await codeToHtml(code, {
+          lang: normalizedLang,
+          themes: DOCS_THEMES,
+          defaultColor: 'light',
+        })
       }
       catch {
-        return await codeToHtml(code, { lang: DEFAULT_LANGUAGE, theme: DOCS_THEME })
+        return await codeToHtml(code, {
+          lang: DEFAULT_LANGUAGE,
+          themes: DOCS_THEMES,
+          defaultColor: 'light',
+        })
       }
     },
   }),

@@ -4,7 +4,7 @@ Guren reimagines Laravel's design principles in TypeScript, tying together Bun, 
 
 ## High-Level Flow
 1. **Container & Providers**: `ServiceProvider` classes register services into the IoC container during boot.
-2. **Routing**: Define routes in `routes/web.ts` using the `Route` DSL with middleware aliases and model binding.
+2. **Routing**: Define routes in `routes/web.ts` with a registrar that receives an app-local `Router`.
 3. **Controllers**: Extend the `Controller` base class with dependency injection via `static inject`.
 4. **Models**: Extend `Model<TRecord>` and link to a Drizzle schema via `static table`.
 5. **Views**: Render React components (`resources/js/pages/`) through Inertia.js.
@@ -12,7 +12,7 @@ Guren reimagines Laravel's design principles in TypeScript, tying together Bun, 
 
 ## Project Layout
 - `app/Http/Controllers/`: Home for your controllers.
-- `app/Http/Requests/`: FormRequest classes for typed validation.
+- `app/Http/Requests/`: Optional legacy `FormRequest` classes for compatibility-heavy apps.
 - `app/Models/`: Drizzle-backed models extending `Model<T>`.
 - `app/Providers/`: ServiceProvider classes for registering services.
 - `app/Events/`: Event classes.
@@ -27,7 +27,7 @@ Guren reimagines Laravel's design principles in TypeScript, tying together Bun, 
 ## Naming Conventions
 - Files that export a single class or type (e.g. controllers, models, HTTP application) use `PascalCase.ts` so the filename mirrors the exported identifier.
 - Utility modules that gather functions or helpers use `kebab-case.ts` (for example `dev-assets.ts`, `inertia-assets.ts`) to distinguish them from class-centric modules.
-- Each directory sticks to one convention; when you add a new file under `packages/server/src/http/`, prefer PascalCase for new classes, while helper-heavy folders such as the asset middleware or CLI utilities should stay in kebab-case.
+- Each directory sticks to one convention; when you add a new file under `packages/core/src/http/`, prefer PascalCase for new classes, while helper-heavy folders such as the asset middleware or CLI utilities should stay in kebab-case.
 
 ## Service Container
 
@@ -36,8 +36,8 @@ The IoC container is the heart of Guren's architecture. It manages service regis
 ### Binding Services
 
 ```ts
-import { ServiceProvider } from '@guren/server'
-import { CacheManager } from '@guren/server'
+import { ServiceProvider } from '@guren/core'
+import { CacheManager } from '@guren/core'
 
 export default class CacheProvider extends ServiceProvider {
   register(): void {
@@ -70,13 +70,15 @@ container.fake('events', mockEventManager)
 Facades provide a static proxy to services resolved from the container. They offer a convenient, expressive syntax without sacrificing testability:
 
 ```ts
-import { CacheFacade as Cache, EventFacade as Event } from '@guren/server'
+import { createFacades } from '@guren/core'
+
+const { Cache, Events } = createFacades(app.container)
 
 // Use anywhere without manually resolving from the container
 await Cache.get('user:1')
 await Cache.put('user:1', userData, 3600)
 
-Event.dispatch(new UserRegistered(user))
+Events.dispatch(new UserRegistered(user))
 ```
 
 ## Service Providers
@@ -84,7 +86,7 @@ Event.dispatch(new UserRegistered(user))
 All providers extend `ServiceProvider` and implement `register()` and optionally `boot()`:
 
 ```ts
-import { ServiceProvider } from '@guren/server'
+import { ServiceProvider } from '@guren/core'
 
 export default class AppServiceProvider extends ServiceProvider {
   register(): void {
@@ -103,32 +105,25 @@ export default class AppServiceProvider extends ServiceProvider {
 - **`register()`**: Bind services into the container. Do not resolve other services here—they may not be registered yet.
 - **`boot()`**: Called after every provider's `register()` has run. Safe to resolve and use other services.
 
-## Auto-Discovery
-
-When enabled, Guren automatically discovers and registers providers, listeners, and jobs from your `app/` directories:
-
-```ts
-const app = new Application({ discover: true })
-```
-
-This scans `app/Providers/`, `app/Listeners/`, and `app/Jobs/` and registers them without manual imports. For production, you can disable discovery and list providers explicitly for faster boot times.
-
 ## Routing
-`routes/web.ts` uses a Laravel-like DSL with middleware aliases and model binding:
+`routes/web.ts` exports a registrar and configures an app-local router:
 
 ```ts
+import { Router, requireAuthenticated } from '@guren/core'
 import PostController from '@/Http/Controllers/PostController'
 
-Route.aliasMiddleware('auth', requireAuthenticated())
-Route.bind('post', Post)
+export function registerWebRoutes(router: Router): void {
+  router.aliasMiddleware('auth', requireAuthenticated())
+  router.bind('post', Post)
 
-Route.get('/', [PostController, 'index'])
-Route.middleware('auth').group(() => {
-  Route.get('/posts/:post', [PostController, 'show'])
-})
+  router.get('/', [PostController, 'index'])
+  router.middleware('auth').group((auth) => {
+    auth.get('/posts/:post', [PostController, 'show'])
+  })
+}
 ```
 
-- Routes are stored in a static registry and mounted into the Hono app during `app.boot()`.
+- Each `Application` owns its own router instance, so tests and multiple apps do not share route state.
 - Controllers are referenced with the `[Class, 'method']` tuple.
 - Route model binding automatically resolves model instances from route parameters.
 
@@ -136,6 +131,12 @@ Route.middleware('auth').group(() => {
 Controllers extend `Controller` and support dependency injection via `static inject`. Methods return responses through helpers like `this.inertia()`, `this.json()`, `this.created()`, or `this.noContent()`.
 
 ```ts
+import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
+import { PostResource, type PostResourceData } from '@/app/Http/Resources/PostResource'
+import { appPages } from '@/resources/js/pages/contracts'
+
+type PostsIndexProps = PaginatedPageProps<PostResourceData>
+
 export default class PostController extends Controller {
   static inject = ['cache'] as const
 
@@ -144,12 +145,17 @@ export default class PostController extends Controller {
   }
 
   async index() {
-    const posts = await Post.where('status', 'published').get()
-    return this.inertia('posts/Index', { posts })
+    const result = await Post.where('status', 'published').paginate({ page: 1, perPage: 15 })
+    const paginator = paginate(result, { path: this.request.path ?? '/posts' })
+
+    return this.inertia<PostsIndexProps>(appPages.posts.index, {
+      data: result.data.map((post) => new PostResource(post).toJSON()),
+      pagination: paginator,
+    })
   }
 
   async store() {
-    const data = await this.validate(StorePostRequest)
+    const data = await this.validateBody(StorePostSchema)
     const post = await Post.create(data)
     return this.created({ post })
   }
@@ -159,19 +165,16 @@ export default class PostController extends Controller {
 - `this.ctx`: Full Hono context.
 - `this.request`: Convenience accessor for the underlying Request.
 - `this.inertia(component, props, options)`: Creates an Inertia response.
-- `this.validate(FormRequest)`: Validates and returns typed request data.
+- `this.validateBody(schema)`: Validates and returns typed request data.
 - `await this.input('key')`, `this.query('key')`: Input helpers.
 
 ## Models and ORM
-Models extend `Model<TRecord>` and connect to Drizzle via `static table`. The layer provides a fluent QueryBuilder, scopes, hooks, soft deletes, attribute casting, and mass assignment protection.
+Models typically use `defineModel(table)` and connect to Drizzle via the table definition itself. The layer provides a fluent QueryBuilder, scopes, hooks, soft deletes, attribute casting, and mass assignment protection.
 
 ```ts
 export type PostRecord = typeof posts.$inferSelect
 
-export class Post extends Model<PostRecord> {
-  static override table = posts
-  static override readonly recordType = {} as PostRecord
-
+export class Post extends defineModel(posts) {
   static fillable = ['title', 'content', 'status']
   static casts = { metadata: 'json', publishedAt: 'date' }
 
@@ -187,7 +190,7 @@ export class Post extends Model<PostRecord> {
 
 - Provides Laravel-style helpers like `Model.all()`, `Model.find(id)`, `Model.findOrFail()`, `Model.first()`, and `Model.create(data)`.
 - Fluent QueryBuilder: `Post.where('status', 'published').orderBy('createdAt', 'desc').limit(10).get()`.
-- `recordType` keeps static helpers strongly typed (e.g. `Post.find()` returns `PostRecord | null`).
+- Table inference keeps static helpers strongly typed (e.g. `Post.find()` returns `PostRecord | null`).
 - Use a provider such as `DatabaseProvider` (which calls `bootModels()`) to invoke `DrizzleAdapter.configure(db)`, making the adapter available to every model. When you need full control, use `Model.query(db)` or the Drizzle database instance directly.
 
 ## Inertia.js and Views
@@ -198,12 +201,12 @@ export class Post extends Model<PostRecord> {
 ## Bootstrapping the Application
 `src/main.ts` in a generated project illustrates the boot process:
 
-1. Import routes for their side effects, e.g. `import '@/routes/web'`.
-2. Instantiate the application with providers:
+1. Export a route registrar from `routes/web.ts`.
+2. Instantiate the application with providers and routes:
    ```ts
-   const app = new Application({
+   const app = createApp({
+     routes: registerWebRoutes,
      providers: [DatabaseProvider, AuthProvider, EventServiceProvider],
-     discover: true, // auto-register from app/ directories
    })
    ```
 3. `await app.boot()` to mount routes, run provider register/boot hooks, and prepare middleware.
@@ -219,7 +222,7 @@ This process runs under Bun as a native module and is triggered by `bun run dev`
 ## Request Lifecycle
 1. Hono receives an HTTP request.
 2. Global middleware runs (session, CSRF, rate limiting, etc.).
-3. The `Route` registry resolves the matching handler and runs route-level middleware.
+3. The application router resolves the matching handler and runs route-level middleware.
 4. Route model binding resolves any bound parameters.
 5. The controller is instantiated with injected dependencies.
 6. The controller method executes, using models to access the database.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import type { FindManyOptions, ORMAdapter, PlainObject, WhereClause } from '@guren/orm/Model'
+import type { FindManyOptions, ORMAdapter, PlainObject, WhereClause } from '@guren/orm'
 import { AuthenticatableModel } from '../../src/auth/AuthenticatableModel'
 
 function createAdapter(store: PlainObject[] = []): ORMAdapter {

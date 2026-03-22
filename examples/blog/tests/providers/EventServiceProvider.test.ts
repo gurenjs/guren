@@ -1,33 +1,42 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { Container } from '@guren/core'
 
-const { eventManager, createEventManager, createMailManager, setMailManager, setQueueDriver, registerJob } = vi.hoisted(
-  () => {
-    const eventManager = { on: vi.fn() }
-    return {
-      eventManager,
-      createEventManager: vi.fn(() => eventManager),
-      createMailManager: vi.fn(() => ({ id: 'mail' })),
-      setMailManager: vi.fn(),
-      setQueueDriver: vi.fn(),
-      registerJob: vi.fn(),
-    }
-  },
-)
-
-vi.mock('@guren/server', () => ({
+const {
+  eventManager,
+  queueManager,
   createEventManager,
   createMailManager,
+  createQueueManager,
   setMailManager,
-  setQueueDriver,
   registerJob,
-  MemoryDriver: class {},
-  Event: class {},
-  Listener: class {},
-  Job: class {},
-  AuthenticatableModel: class {},
-}))
+} = vi.hoisted(() => {
+  const eventManager = { on: vi.fn() }
+  const queueManager = { driver: vi.fn() }
+  return {
+    eventManager,
+    queueManager,
+    createEventManager: vi.fn(() => eventManager),
+    createMailManager: vi.fn(() => ({ id: 'mail' })),
+    createQueueManager: vi.fn(() => queueManager),
+    setMailManager: vi.fn(),
+    registerJob: vi.fn(),
+  }
+})
 
-import { getEventManager, initializeEventSystem } from '../../app/Providers/EventServiceProvider.js'
+vi.mock('@guren/core', async () => {
+  const actual = await vi.importActual<typeof import('@guren/core')>('@guren/core')
+  return {
+    ...actual,
+    createEventManager,
+    createMailManager,
+    createQueueManager,
+    setMailManager,
+    registerJob,
+    MemoryDriver: class {},
+  }
+})
+
+import EventServiceProvider from '../../app/Providers/EventServiceProvider.js'
 
 describe('EventServiceProvider', () => {
   beforeEach(() => {
@@ -35,13 +44,21 @@ describe('EventServiceProvider', () => {
   })
 
   it('initializes the event system once', () => {
-    const first = initializeEventSystem()
-    const second = getEventManager()
+    const container = new Container()
+    container.instance('notifications', { registerChannel: vi.fn() })
+    container.instance('broadcast', { broadcast: vi.fn() })
+    container.instance('storage', { disk: vi.fn(() => ({ put: vi.fn() })) })
+    const provider = new EventServiceProvider(container)
+
+    provider.register()
+    const first = container.make('events')
+    const second = container.make('events')
 
     expect(first).toBe(second)
     expect(createEventManager).toHaveBeenCalledTimes(1)
     expect(setMailManager).toHaveBeenCalled()
-    expect(setQueueDriver).toHaveBeenCalled()
+    expect(createQueueManager).toHaveBeenCalled()
+    expect(queueManager.driver).toHaveBeenCalled()
     expect(registerJob).toHaveBeenCalled()
     expect(eventManager.on).toHaveBeenCalled()
   })

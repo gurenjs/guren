@@ -133,18 +133,18 @@ broadcast.channel('admin.**', isAdmin)             // admin.users, admin.setting
 ### SSEエンドポイント
 
 ```ts
-import { Route } from '@guren/server'
+import { Router } from '@guren/core'
 
-// SSE接続エンドポイント
-Route.get('/broadcasting/events', broadcast.sseMiddleware({
-  pingInterval: 30000, // 30秒ごとにping送信
-  retry: 3000,         // クライアントリトライ遅延
-}))
+export function registerBroadcastRoutes(router: Router): void {
+  router.get('/broadcasting/events', broadcast.sseMiddleware({
+    pingInterval: 30000,
+    retry: 3000,
+  }))
 
-// チャンネル認証エンドポイント
-Route.post('/broadcasting/auth', broadcast.authMiddleware({
-  getUser: (ctx) => ctx.get('user'),
-}))
+  router.post('/broadcasting/auth', broadcast.authMiddleware({
+    getUser: (ctx) => ctx.get('user'),
+  }))
+}
 ```
 
 ### クライアント側の統合

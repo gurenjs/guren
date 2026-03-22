@@ -1,4 +1,4 @@
-import { Listener } from '@guren/server'
+import { Listener } from '@guren/core'
 import { UserRegistered } from '../Events/UserRegistered.js'
 
 /**

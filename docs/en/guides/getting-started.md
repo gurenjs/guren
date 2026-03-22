@@ -38,6 +38,16 @@ bun install
 
 This installs the framework (`guren`), Inertia client, React, and supporting dev tools (TypeScript, tsup, etc.).
 
+## 2.5 Generate Route and Page Manifests
+
+Before the first typecheck or production build, run:
+
+```bash
+bun run codegen
+```
+
+This generates typed route helpers and the page manifest used by the Inertia integration.
+
 ## 3. Configure Environment Variables
 
 Copy the bundled template and adjust values as needed:

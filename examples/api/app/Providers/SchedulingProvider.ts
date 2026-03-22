@@ -1,0 +1,25 @@
+import { ServiceProvider, createScheduler, type Scheduler } from '@guren/core'
+import { registerApiSchedules } from '../Console/Kernel.js'
+
+let scheduler: Scheduler | null = null
+
+export function getScheduler(): Scheduler {
+  if (!scheduler) {
+    scheduler = createScheduler({
+      timezone: 'UTC',
+    })
+    registerApiSchedules(scheduler)
+  }
+
+  return scheduler
+}
+
+export default class SchedulingProvider extends ServiceProvider {
+  register(): void {
+    this.container.singleton('scheduler', () => getScheduler())
+  }
+
+  boot(): void {
+    this.container.make<Scheduler>('scheduler')
+  }
+}

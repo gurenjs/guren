@@ -8,9 +8,9 @@ CSRF（Cross-Site Request Forgery）保護は、悪意のあるウェブサイ�
 
 ```ts
 // src/app.ts
-import { Application, createSessionMiddleware, createCsrfMiddleware } from '@guren/server'
+import { createApp, createSessionMiddleware, createCsrfMiddleware } from '@guren/core'
 
-const app = new Application()
+const app = createApp()
 
 // CSRF にはセッションミドルウェアが必要
 app.use('*', createSessionMiddleware())
@@ -28,13 +28,14 @@ app.use('*', createCsrfMiddleware())
 
 ```ts
 // コントローラー内
-import { Controller, getCsrfToken, csrfField } from '@guren/server'
+import { Controller, getCsrfToken, csrfField } from '@guren/core'
+import { appPages } from '@/resources/js/pages/contracts'
 
 export default class FormController extends Controller {
   create() {
     const token = getCsrfToken(this.ctx)
     // テンプレート/ビューに渡す
-    return this.inertia('Form/Create', { csrfToken: token })
+    return this.inertia(appPages.forms.create, { csrfToken: token })
   }
 }
 ```
@@ -119,17 +120,20 @@ createCsrfMiddleware({
 カスタム検証ロジックには `verifyCsrfToken()` を使用：
 
 ```ts
-import { verifyCsrfToken, getCsrfToken } from '@guren/server'
+import { verifyCsrfToken, getCsrfToken } from '@guren/core'
+import { Router } from '@guren/core'
 
-Route.post('/custom', async (ctx) => {
-  const token = ctx.req.header('X-Custom-Token')
+export function registerWebRoutes(router: Router): void {
+  router.post('/custom', async (ctx) => {
+    const token = ctx.req.header('X-Custom-Token')
 
-  if (!verifyCsrfToken(ctx, token)) {
-    return ctx.json({ error: '無効なトークン' }, 403)
-  }
+    if (!verifyCsrfToken(ctx, token)) {
+      return ctx.json({ error: '無効なトークン' }, 403)
+    }
 
-  // リクエスト処理...
-})
+    return ctx.json({ ok: true })
+  })
+}
 ```
 
 ## トークンの再生成

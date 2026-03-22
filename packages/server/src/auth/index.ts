@@ -46,6 +46,7 @@ export {
   getUserApiTokens,
   createBearerTokenMiddleware,
   getApiToken,
+  getApiTokenOrFail,
   MemoryApiTokenStore,
   API_TOKEN_KEY,
 } from './api-token'

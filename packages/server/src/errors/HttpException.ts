@@ -197,5 +197,13 @@ export class HttpException extends Error {
    */
   static isHttpException(error: unknown): error is HttpException {
     return error instanceof HttpException
+      || (
+        typeof error === 'object'
+        && error !== null
+        && 'statusCode' in error
+        && typeof (error as { statusCode?: unknown }).statusCode === 'number'
+        && 'toResponse' in error
+        && typeof (error as { toResponse?: unknown }).toResponse === 'function'
+      )
   }
 }

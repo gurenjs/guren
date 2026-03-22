@@ -75,21 +75,23 @@ return ctx.redirect('/dashboard')
 ### Routes
 
 ```ts
-import { Route } from '@guren/server'
+import { Router } from '@guren/core'
 import { VerificationController } from '@/app/Controllers/VerificationController'
 
-Route.middleware(['auth']).group(() => {
-  Route.get('/email/verify', [VerificationController, 'notice'])
-  Route.post('/email/resend', [VerificationController, 'resend'])
-})
+export function registerWebRoutes(router: Router): void {
+  router.middleware('auth').group((auth) => {
+    auth.get('/email/verify', [VerificationController, 'notice'])
+    auth.post('/email/resend', [VerificationController, 'resend'])
+  })
 
-Route.get('/email/verify/:token', [VerificationController, 'verify'])
+  router.get('/email/verify/:token', [VerificationController, 'verify'])
+}
 ```
 
 ### Controller
 
 ```ts
-import { Controller } from '@guren/server'
+import { Controller } from '@guren/core'
 import {
   createEmailVerificationToken,
   completeEmailVerification,
@@ -97,6 +99,7 @@ import {
   isEmailVerified,
 } from '@guren/core'
 import { User } from '@/app/Models/User'
+import { appPages } from '@/resources/js/pages/contracts'
 
 export class VerificationController extends Controller {
   private store = new DatabaseEmailVerificationStore()
@@ -108,7 +111,7 @@ export class VerificationController extends Controller {
       return this.redirect('/dashboard')
     }
 
-    return this.inertia('Auth/VerifyEmail', {
+    return this.inertia(appPages.auth.verifyEmail, {
       email: user.email,
     })
   }
@@ -151,7 +154,7 @@ export class VerificationController extends Controller {
     )
 
     if (!user) {
-      return this.inertia('Auth/VerifyEmail', {
+      return this.inertia(appPages.auth.verifyEmail, {
         error: 'Invalid or expired verification link',
       })
     }
@@ -196,16 +199,17 @@ if (!isEmailVerified(null)) {
 ### Require Verified Email Middleware
 
 ```ts
-import { requireVerifiedEmail } from '@guren/core'
-import { Route } from '@guren/server'
+import { Router, requireVerifiedEmail } from '@guren/core'
+
+const router = new Router()
 
 // Redirect unverified users
-Route.get('/dashboard', [DashboardController, 'index']).middleware(
+router.get('/dashboard', [DashboardController, 'index']).middleware(
   requireVerifiedEmail({ redirectTo: '/email/verify' })
 )
 
 // Custom user getter
-Route.get('/profile', [ProfileController, 'show']).middleware(
+router.get('/profile', [ProfileController, 'show']).middleware(
   requireVerifiedEmail({
     redirectTo: '/verify-email',
     getUser: async (ctx) => {

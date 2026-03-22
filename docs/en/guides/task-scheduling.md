@@ -7,7 +7,7 @@ Guren provides a powerful task scheduler that allows you to define scheduled tas
 Create a scheduler and define your scheduled tasks:
 
 ```typescript
-import { createScheduler, Schedule } from '@guren/server'
+import { createScheduler, Schedule } from '@guren/core'
 
 const scheduler = createScheduler({
   timezone: 'America/New_York',
@@ -238,7 +238,7 @@ schedule.call(task)
 ### Creating and Managing
 
 ```typescript
-import { createScheduler } from '@guren/server'
+import { createScheduler } from '@guren/core'
 
 const scheduler = createScheduler({
   timezone: 'UTC',          // Default timezone
@@ -325,7 +325,7 @@ bunx guren schedule:run --force
 
 ```typescript
 // app/Console/Kernel.ts
-import { Schedule, createScheduler } from '@guren/server'
+import { Schedule, createScheduler } from '@guren/core'
 import { SendDailyReportJob } from '../Jobs/SendDailyReportJob'
 import { CleanupTempFilesJob } from '../Jobs/CleanupTempFilesJob'
 

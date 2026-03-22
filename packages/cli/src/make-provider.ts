@@ -4,7 +4,7 @@ import { scaffoldFile } from './utils'
 const PROVIDERS_DIR = 'app/Providers'
 
 function providerTemplate(className: string): string {
-  return `import { ServiceProvider, type Container } from '@guren/server'
+  return `import { ServiceProvider, type Container } from '@guren/core'
 
 export default class ${className} extends ServiceProvider {
   /**

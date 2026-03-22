@@ -1,5 +1,4 @@
-import type { Model } from '@guren/orm'
-import type { PlainObject } from '@guren/orm/Model'
+import type { Model, PlainObject } from '@guren/orm'
 import type { PasswordHasher } from '../password/PasswordHasher'
 import { ScryptHasher } from '../password/ScryptHasher'
 import type { AuthCredentials, Authenticatable } from '../types'

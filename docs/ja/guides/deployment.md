@@ -113,6 +113,6 @@ docker run --env-file .env.prod -p 3333:3333 my-app
 - HTTPS を設定（Nginx/Caddy などのリバースプロキシやクラウド機能）。
 - ログ・モニタリングを構成（Bun は stdout/stderr に出力するので、集約先へ転送）。
 - PostgreSQL の自動バックアップをスケジュール。
-- ヘルスチェックを実装し（例: `Route.get('/health', (ctx) => ctx.json({ ok: true }))`）、ロードバランサーに組み込みます。
+- ヘルスチェックを実装し（例: `registerHealthRoutes(router)` で `router.get('/health', (ctx) => ctx.json({ ok: true }))` を公開）、ロードバランサーに組み込みます。
 
 このチェックリストを守れば、毎回再現性のあるリリースができ、DB を安全にマイグレーションしつつ本番レスポンスを維持できます。

@@ -1,5 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import type { QueueDriver, QueuedJob, JobOptions } from './types'
+import type { ServiceBindings } from '../container/bindings'
+import { getContainer } from '../container/Container'
 
 /**
  * Global queue driver instance.
@@ -75,6 +77,12 @@ export abstract class Job<T = unknown> {
    * @default 'exponential'
    */
   static backoff: 'exponential' | 'linear' | number = 'exponential'
+
+  protected make<K extends keyof ServiceBindings>(key: K): ServiceBindings[K]
+  protected make<TService>(key: string): TService
+  protected make(key: string): unknown {
+    return getContainer().make(key)
+  }
 
   /**
    * Handle the job.

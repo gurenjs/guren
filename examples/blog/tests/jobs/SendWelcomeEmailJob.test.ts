@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 
-vi.mock('@guren/server', () => ({
-  Job: class {},
+vi.mock('@guren/core', () => ({
+  Job: class {
+    protected make() {
+      return { id: 'mailer' }
+    }
+  },
 }))
 
 const { userFindMock, sendWelcomeMailMock } = vi.hoisted(() => ({
@@ -34,6 +38,6 @@ describe('SendWelcomeEmailJob', () => {
     const job = new SendWelcomeEmailJob()
     await job.handle({ userId: 1 })
 
-    expect(sendWelcomeMailMock).toHaveBeenCalled()
+    expect(sendWelcomeMailMock).toHaveBeenCalledWith({ id: 'mailer' }, { id: 1, email: 'ada@example.com' })
   })
 })

@@ -11,7 +11,7 @@ The `Encrypter` class provides AES-256-GCM encryption for sensitive data.
 Create an encrypter with a 32-byte key:
 
 ```typescript
-import { Encrypter, generateKey } from '@guren/server'
+import { Encrypter, generateKey } from '@guren/core'
 
 // Generate a new key
 const key = generateKey()
@@ -47,7 +47,7 @@ const decryptedData = encrypter.decrypt(encryptedData, true)
 ### Key Management
 
 ```typescript
-import { generateKey, Encrypter } from '@guren/server'
+import { generateKey, Encrypter } from '@guren/core'
 
 // Generate a cryptographically secure key
 const key = generateKey()
@@ -66,7 +66,7 @@ APP_KEY=base64:your-32-byte-key-here
 ### Error Handling
 
 ```typescript
-import { Encrypter, DecryptException } from '@guren/server'
+import { Encrypter, DecryptException } from '@guren/core'
 
 try {
   const decrypted = encrypter.decrypt(invalidPayload)
@@ -84,7 +84,7 @@ The `Hash` class provides secure password hashing using bcrypt, argon2, or scryp
 ### Creating a Hasher
 
 ```typescript
-import { Hash } from '@guren/server'
+import { Hash } from '@guren/core'
 
 // Default bcrypt hasher
 const hash = new Hash()
@@ -176,7 +176,7 @@ const hash = new Hash({
 ## Using in Controllers
 
 ```typescript
-import { Controller, Hash } from '@guren/server'
+import { Controller, Hash } from '@guren/core'
 
 export default class AuthController extends Controller {
   private hash = new Hash()
@@ -224,7 +224,7 @@ export default class AuthController extends Controller {
 
 ```typescript
 import { describe, it, expect } from 'bun:test'
-import { Encrypter, Hash, generateKey } from '@guren/server'
+import { Encrypter, Hash, generateKey } from '@guren/core'
 
 describe('Encryption', () => {
   it('encrypts and decrypts data', () => {

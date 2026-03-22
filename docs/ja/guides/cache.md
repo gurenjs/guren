@@ -2,6 +2,8 @@
 
 Gurenは複数のストレージバックエンドをサポートする統一されたキャッシュAPIを提供します。キャッシュは、コストの高い計算やデータベースクエリを保存して高速に取得することで、アプリケーションのパフォーマンス向上に役立ちます。
 
+vNext の標準導線は、`@guren/core` から cache API を import し、provider で cache manager を構成し、service が cache key と invalidation を担当する形です。
+
 ## コアコンセプト
 
 - **CacheStore** – キャッシュ操作（get、set、deleteなど）のインターフェース。すべてのドライバがこのインターフェースを実装。
@@ -11,12 +13,14 @@ Gurenは複数のストレージバックエンドをサポートする統一さ
 
 ## 基本的な使い方
 
-### クイックスタート（ファサード）
+### クイックスタート（コンテナ束縛ファサード）
 
-最もシンプルにキャッシュを使う方法は `CacheFacade` です。コンテナから `CacheManager` を遅延解決します:
+最もシンプルにキャッシュを使う方法は、アプリケーションコンテナからファサードを作ることです:
 
 ```ts
-import { CacheFacade as Cache } from '@guren/server'
+import { createFacades } from '@guren/core'
+
+const { Cache } = createFacades(app.container)
 
 // 値を保存（TTLは秒単位）
 await Cache.store().set('user:1', { name: 'John' }, 3600)

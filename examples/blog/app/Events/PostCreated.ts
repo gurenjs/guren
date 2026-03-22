@@ -1,4 +1,4 @@
-import { Event } from '@guren/server'
+import { Event } from '@guren/core'
 import type { PostRecord } from '../Models/Post.js'
 import type { UserRecord } from '../Models/User.js'
 

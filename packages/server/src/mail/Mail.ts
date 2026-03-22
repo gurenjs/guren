@@ -157,9 +157,13 @@ export class Mail {
     props: P
   ): Promise<this> {
     try {
+      const reactEmailModule = '@react-email/render'
+
       // Dynamic import to avoid requiring react-email in production
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const reactEmail = await import('@react-email/render' as any) as { render: (element: unknown) => Promise<string> }
+      const reactEmail = await import(/* @vite-ignore */ reactEmailModule as any) as {
+        render: (element: unknown) => Promise<string>
+      }
       const html = await reactEmail.render(component(props))
       this.message.html = html
     } catch (error) {

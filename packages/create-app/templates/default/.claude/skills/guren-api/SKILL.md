@@ -14,10 +14,10 @@ Help users understand and use Guren framework APIs by providing examples, patter
 ## Core Subsystems
 
 ### Controllers
-Source: `packages/server/src/mvc/Controller.ts`
+Source: `packages/core/src/mvc/Controller.ts`
 
 ```typescript
-import { Controller } from '@guren/server'
+import { Controller } from '@guren/core'
 import { z } from 'zod'
 
 const PostIdParamSchema = z.object({ id: z.coerce.number().int().positive() })
@@ -76,10 +76,10 @@ await Post.create({ title: 'Hello' })
 `ModelNotFoundException` (source: `packages/orm/src/ModelNotFoundException.ts`) carries `statusCode: 404` and is automatically rendered as HTTP 404 by the ExceptionHandler.
 
 ### Routes
-Source: `packages/server/src/mvc/Route.ts`
+Source: `packages/core/src/mvc/Route.ts`
 
 ```typescript
-import { Route } from '@guren/server'
+import { Route } from '@guren/core'
 
 Route.get('/posts', PostController.index)
 Route.post('/posts', PostController.store)
@@ -91,10 +91,10 @@ Route.middleware(['auth']).group(() => {
 ```
 
 ### Middleware
-Source: `packages/server/src/http/middleware/`
+Source: `packages/core/src/http/middleware/`
 
 ```typescript
-import { defineMiddleware } from '@guren/server'
+import { defineMiddleware } from '@guren/core'
 
 export const logRequest = defineMiddleware(async (ctx, next) => {
   console.log(ctx.req.method, ctx.req.url)
@@ -103,10 +103,10 @@ export const logRequest = defineMiddleware(async (ctx, next) => {
 ```
 
 ### Authentication
-Source: `packages/server/src/auth/`
+Source: `packages/core/src/auth/`
 
 ```typescript
-import { requireAuthenticated } from '@guren/server'
+import { requireAuthenticated } from '@guren/core'
 
 Route.middleware([requireAuthenticated]).group(() => {
   // Protected routes
@@ -119,21 +119,21 @@ const isLoggedIn = await this.auth.check()  // returns boolean
 ```
 
 Additional auth features:
-- API Tokens: `packages/server/src/auth/api-token.ts`
-- Email Verification: `packages/server/src/auth/email-verification.ts`
-- Password Reset: `packages/server/src/auth/password-reset.ts`
+- API Tokens: `packages/core/src/auth/api-token.ts`
+- Email Verification: `packages/core/src/auth/email-verification.ts`
+- Password Reset: `packages/core/src/auth/password-reset.ts`
 
 ## Extended Subsystems
 
 ### Authorization (Gate & Policy)
-Source: `packages/server/src/authorization/`
+Source: `packages/core/src/authorization/`
 
 - `Gate.ts` — Define abilities and policies
 - `Policy.ts` — Resource-based authorization
 - `middleware.ts` — Route-level authorization middleware
 
 ### Events & Listeners
-Source: `packages/server/src/events/`
+Source: `packages/core/src/events/`
 
 - `Event.ts` — Base event class
 - `EventManager.ts` — Event dispatcher
@@ -143,16 +143,16 @@ Source: `packages/server/src/events/`
 Register events in `app/Providers/EventServiceProvider.ts`.
 
 ### Jobs & Queue
-Source: `packages/server/src/queue/`
+Source: `packages/core/src/queue/`
 
 - `Job.ts` — Base job class with `handle()` method
 - `QueueManager.ts` — Queue manager (memory, Redis drivers)
 - `Worker.ts` — Queue worker process
 
-Drivers: `packages/server/src/queue/drivers/`
+Drivers: `packages/core/src/queue/drivers/`
 
 ### Mail
-Source: `packages/server/src/mail/`
+Source: `packages/core/src/mail/`
 
 - `Mail.ts` — Base mailable class
 - `MailManager.ts` — Mail manager
@@ -163,7 +163,7 @@ Transports:
 - `SmtpTransport.ts` — SMTP
 
 ### Cache
-Source: `packages/server/src/cache/`
+Source: `packages/core/src/cache/`
 
 - `CacheManager.ts` — Cache manager
 - `TaggedCache.ts` — Tag-based cache invalidation
@@ -174,14 +174,14 @@ Stores:
 - `RedisStore.ts` — Redis
 
 ### Validation
-Source: `packages/server/src/http/validation/`
+Source: `packages/core/src/http/validation/`
 
 - `Validator.ts` — Validation engine
 - `rules.ts` — Built-in validation rules
-- `FormRequest.ts` — Form request validation (`packages/server/src/http/FormRequest.ts`)
+- `FormRequest.ts` — Form request validation (`packages/core/src/http/FormRequest.ts`)
 
 ### Broadcasting
-Source: `packages/server/src/broadcasting/`
+Source: `packages/core/src/broadcasting/`
 
 - `BroadcastManager.ts` — Broadcast manager
 
@@ -189,7 +189,7 @@ Channels: `Channel.ts`, `PrivateChannel.ts`, `PresenceChannel.ts`
 Drivers: `MemoryDriver.ts`, `RedisDriver.ts`
 
 ### Notifications
-Source: `packages/server/src/notifications/`
+Source: `packages/core/src/notifications/`
 
 - `Notification.ts` — Base notification class
 - `NotificationManager.ts` — Notification dispatcher
@@ -197,14 +197,14 @@ Source: `packages/server/src/notifications/`
 Channels: `MailChannel.ts`, `SlackChannel.ts`, `DatabaseChannel.ts`, `MemoryChannel.ts`
 
 ### Storage
-Source: `packages/server/src/storage/`
+Source: `packages/core/src/storage/`
 
 - `StorageManager.ts` — Storage manager
 
 Drivers: `LocalDriver.ts`, `MemoryDriver.ts`, `S3Driver.ts`
 
 ### Scheduling
-Source: `packages/server/src/scheduling/`
+Source: `packages/core/src/scheduling/`
 
 - `Schedule.ts` — Schedule definition
 - `Scheduler.ts` — Scheduler runner
@@ -212,7 +212,7 @@ Source: `packages/server/src/scheduling/`
 - `CronParser.ts` — Cron expression parser
 
 ### I18n (Internationalization)
-Source: `packages/server/src/i18n/`
+Source: `packages/core/src/i18n/`
 
 - `I18nManager.ts` — I18n manager
 - `Translator.ts` — Translation engine
@@ -221,14 +221,14 @@ Source: `packages/server/src/i18n/`
 Loaders: `JsonLoader.ts`, `MemoryLoader.ts`
 
 ### Encryption
-Source: `packages/server/src/encryption/`
+Source: `packages/core/src/encryption/`
 
 - `Encrypter.ts` — Encrypt/decrypt values
 - `Hash.ts` — Hashing utilities
 - `Random.ts` — Secure random generation
 
 ### Health Checks
-Source: `packages/server/src/health/`
+Source: `packages/core/src/health/`
 
 - `HealthManager.ts` — Health check manager
 - `HealthCheck.ts` — Base health check
@@ -236,7 +236,7 @@ Source: `packages/server/src/health/`
 Checks: `DatabaseCheck.ts`, `RedisCheck.ts`, `CacheCheck.ts`, `MemoryCheck.ts`, `StorageCheck.ts`, `CustomCheck.ts`
 
 ### Error Handling
-Source: `packages/server/src/errors/`
+Source: `packages/core/src/errors/`
 
 - `ExceptionHandler.ts` — Global exception handler (supports duck-typed `statusCode` property)
 - `HttpException.ts` — Base HTTP exception
@@ -250,22 +250,22 @@ The ExceptionHandler automatically handles:
 - Other errors → 500 (message hidden unless debug mode)
 
 ### Container & Service Providers
-Source: `packages/server/src/container/`
+Source: `packages/core/src/container/`
 
 - `Container.ts` — IoC container
 - `ServiceProvider.ts` — Base service provider
 
-Built-in providers: `packages/server/src/providers/`
+Built-in providers: `packages/core/src/providers/`
 
 ### Console Commands
-Source: `packages/server/src/console/`
+Source: `packages/core/src/console/`
 
 - `Command.ts` — Base command class
 - `ConsoleKernel.ts` — Console kernel
 - `Input.ts` / `Output.ts` — IO handling
 
 ### API Resources
-Source: `packages/server/src/http/resources/`
+Source: `packages/core/src/http/resources/`
 
 - `Resource.ts` — API resource transformer
 - `ResourceCollection.ts` — Collection of resources
@@ -273,14 +273,14 @@ Source: `packages/server/src/http/resources/`
 - `CursorPaginator.ts` — Cursor-based pagination
 
 ### Database (Factory & Seeder)
-Source: `packages/server/src/database/`
+Source: `packages/core/src/database/`
 
 - `Factory.ts` — Model factory for testing
 - `Seeder.ts` — Database seeder
 - `SeederRunner.ts` — Seeder execution
 
 ### Logging
-Source: `packages/server/src/logging/`
+Source: `packages/core/src/logging/`
 
 - `LogManager.ts` — Log manager
 - `Logger.ts` — Logger instance
@@ -288,7 +288,7 @@ Source: `packages/server/src/logging/`
 Channels: `ConsoleChannel.ts`, `FileChannel.ts`, `DailyFileChannel.ts`
 
 ### Redis
-Source: `packages/server/src/redis/`
+Source: `packages/core/src/redis/`
 
 - `client.ts` — Redis client
 - Session, rate-limit, API token, email verification, password reset stores
@@ -297,30 +297,30 @@ Source: `packages/server/src/redis/`
 
 | Subsystem | Source Path |
 |-----------|------------|
-| Controllers | `packages/server/src/mvc/Controller.ts` |
+| Controllers | `packages/core/src/mvc/Controller.ts` |
 | Models | `packages/orm/src/Model.ts` |
-| Routes | `packages/server/src/mvc/Route.ts` |
-| Auth | `packages/server/src/auth/` |
-| Authorization | `packages/server/src/authorization/` |
-| Events | `packages/server/src/events/` |
-| Queue/Jobs | `packages/server/src/queue/` |
-| Mail | `packages/server/src/mail/` |
-| Cache | `packages/server/src/cache/` |
-| Validation | `packages/server/src/http/validation/` |
-| Broadcasting | `packages/server/src/broadcasting/` |
-| Notifications | `packages/server/src/notifications/` |
-| Storage | `packages/server/src/storage/` |
-| Scheduling | `packages/server/src/scheduling/` |
-| I18n | `packages/server/src/i18n/` |
-| Encryption | `packages/server/src/encryption/` |
-| Health Checks | `packages/server/src/health/` |
-| Error Handling | `packages/server/src/errors/` |
-| Container | `packages/server/src/container/` |
-| Console | `packages/server/src/console/` |
-| API Resources | `packages/server/src/http/resources/` |
-| Database/Seeder | `packages/server/src/database/` |
-| Logging | `packages/server/src/logging/` |
-| Redis | `packages/server/src/redis/` |
+| Routes | `packages/core/src/mvc/Route.ts` |
+| Auth | `packages/core/src/auth/` |
+| Authorization | `packages/core/src/authorization/` |
+| Events | `packages/core/src/events/` |
+| Queue/Jobs | `packages/core/src/queue/` |
+| Mail | `packages/core/src/mail/` |
+| Cache | `packages/core/src/cache/` |
+| Validation | `packages/core/src/http/validation/` |
+| Broadcasting | `packages/core/src/broadcasting/` |
+| Notifications | `packages/core/src/notifications/` |
+| Storage | `packages/core/src/storage/` |
+| Scheduling | `packages/core/src/scheduling/` |
+| I18n | `packages/core/src/i18n/` |
+| Encryption | `packages/core/src/encryption/` |
+| Health Checks | `packages/core/src/health/` |
+| Error Handling | `packages/core/src/errors/` |
+| Container | `packages/core/src/container/` |
+| Console | `packages/core/src/console/` |
+| API Resources | `packages/core/src/http/resources/` |
+| Database/Seeder | `packages/core/src/database/` |
+| Logging | `packages/core/src/logging/` |
+| Redis | `packages/core/src/redis/` |
 | Example App | `examples/blog/` |
 | API Example | `examples/api/` |
 | Docs | `web/` |

@@ -1,33 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import Login from '../../resources/js/pages/auth/Login.js'
-import { setInertiaPage } from '@guren/testing'
 
 describe('Login Inertia page', () => {
   it('pre-fills the email field from page props', () => {
-    setInertiaPage({
-      component: 'auth/Login',
-      props: { email: 'demo@guren.dev', errors: {} },
-      url: '/login',
-    })
-    render(<Login />)
+    render(<Login email="demo@guren.dev" errors={{}} />)
 
     expect(screen.getByLabelText('Email address')).toHaveValue('demo@guren.dev')
   })
 
   it('renders validation messaging from the server', () => {
-    setInertiaPage({
-      component: 'auth/Login',
-      props: {
-        email: 'demo@guren.dev',
-        errors: {
-          email: 'Email must be valid.',
-          message: 'Invalid credentials.',
-        },
-      },
-      url: '/login',
-    })
-    render(<Login />)
+    render(<Login
+      email="demo@guren.dev"
+      errors={{
+        email: 'Email must be valid.',
+        message: 'Invalid credentials.',
+      }}
+    />)
 
     expect(screen.getByText('Invalid credentials.')).toBeInTheDocument()
     expect(screen.getByText('Email must be valid.')).toBeInTheDocument()

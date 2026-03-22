@@ -1,0 +1,234 @@
+import { readFile } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
+
+function assert(condition: unknown, message: string): asserts condition {
+  if (!condition) {
+    throw new Error(message)
+  }
+}
+
+async function read(root: string, relativePath: string): Promise<string> {
+  return readFile(join(root, relativePath), 'utf8')
+}
+
+async function auditEnglishDocs(root: string): Promise<void> {
+  const readme = await read(root, 'README.md')
+  assert(readme.includes('bunx guren add auth'), 'README must document the standard auth scaffold path.')
+  assert(readme.includes('bunx guren add notifications'), 'README must document the standard notifications scaffold path.')
+  assert(readme.includes('bunx guren add storage'), 'README must document the standard storage scaffold path.')
+  assert(readme.includes('bunx guren add broadcasting'), 'README must document the standard broadcasting scaffold path.')
+  assert(readme.includes('bun run codegen'), 'README must document codegen in the standard flow.')
+  assert(readme.includes('bun run build'), 'README must document canonical production builds via bun run build.')
+
+  const firstSteps = await read(root, 'docs/en/guides/first-steps.md')
+  assert(firstSteps.includes('@guren/core'), 'First Steps must describe the @guren/core standard path.')
+  assert(firstSteps.includes('PaginatedPageProps<PostResourceData>'), 'First Steps must describe the paginated resource contract.')
+  assert(firstSteps.includes('bunx guren add notifications'), 'First Steps must document the notifications scaffold path.')
+  assert(firstSteps.includes('bunx guren add storage'), 'First Steps must document the storage scaffold path.')
+  assert(firstSteps.includes('bunx guren add broadcasting'), 'First Steps must document the broadcasting scaffold path.')
+
+  const cli = await read(root, 'docs/en/guides/cli.md')
+  assert(cli.includes('bunx guren add notifications'), 'CLI guide must document the notifications scaffold path.')
+  assert(cli.includes('bunx guren add storage'), 'CLI guide must document the storage scaffold path.')
+  assert(cli.includes('bunx guren add broadcasting'), 'CLI guide must document the broadcasting scaffold path.')
+
+  const overview = await read(root, 'docs/en/guides/overview.md')
+  assert(overview.includes("import { Controller, paginate, type PaginatedPageProps } from '@guren/core'"), 'Overview must show the canonical controller import path.')
+  assert(overview.includes('await this.validateBody(CreateTaskSchema)'), 'Overview must show validateBody() in the controller example.')
+  assert(overview.includes('appPages.tasks.index'), 'Overview must show page contracts instead of string page names.')
+  assert(!overview.includes("this.inertia('Tasks/Index'"), 'Overview must not use string-based page names in the controller example.')
+  assert(!overview.includes('await this.only('), 'Overview must not use legacy this.only() input handling.')
+
+  const routing = await read(root, 'docs/en/guides/routing.md')
+  assert(routing.includes("import { Router } from '@guren/core'"), 'Routing guide must use Router from @guren/core.')
+  assert(routing.includes('createApp({'), 'Routing guide must show createApp() bootstrap.')
+  assert(routing.includes('appPages.posts.show'), 'Routing guide must use page contracts in model binding examples.')
+
+  const controllers = await read(root, 'docs/en/guides/controllers.md')
+  assert(controllers.includes('PaginatedPageProps<PostResourceData>'), 'Controllers guide must show paginated page props in the canonical path.')
+  assert(controllers.includes('appPages.posts.index'), 'Controllers guide must use page contracts instead of string page names.')
+  assert(!controllers.includes('await this.only('), 'Controllers guide must not use legacy this.only() examples.')
+  assert(!controllers.includes("this.inertia('posts/Index'"), 'Controllers guide must not use string-based Inertia page names in canonical examples.')
+
+  const middleware = await read(root, 'docs/en/guides/middleware.md')
+  assert(middleware.includes("import { Router } from '@guren/core'"), 'Middleware guide must use Router from @guren/core.')
+  assert(middleware.includes('router.aliasMiddleware('), 'Middleware guide must use router.aliasMiddleware().')
+  assert(!middleware.includes('Route.aliasMiddleware('), 'Middleware guide must not use legacy Route.aliasMiddleware().')
+
+  const validation = await read(root, 'docs/en/guides/validation.md')
+  assert(validation.includes('this.validateBody(StorePostSchema)'), 'Validation guide must show validateBody() in the mainline example.')
+  assert(validation.includes('appPages.posts.index'), 'Validation guide must show page contracts in the mainline example.')
+  assert(validation.includes("const router = new Router()"), 'Validation guide must use Router for middleware-based validation examples.')
+
+  const database = await read(root, 'docs/en/guides/database.md')
+  assert(database.includes('PaginatedPageProps<PostResourceData>'), 'Database guide must show paginated resource contracts.')
+  assert(database.includes('appPages.posts.index'), 'Database guide must use page contracts in pagination examples.')
+
+  const architecture = await read(root, 'docs/en/guides/architecture.md')
+  assert(architecture.includes('PaginatedPageProps<PostResourceData>'), 'Architecture guide must show paginated page props in controller examples.')
+  assert(architecture.includes('appPages.posts.index'), 'Architecture guide must use page contracts in controller examples.')
+
+  const rateLimiting = await read(root, 'docs/en/guides/rate-limiting.md')
+  assert(rateLimiting.includes("import { Router, createRateLimitMiddleware } from '@guren/core'"), 'Rate limiting guide must use Router from @guren/core.')
+  assert(!rateLimiting.includes('Route.post('), 'Rate limiting guide must not use legacy Route.post() examples.')
+
+  const relationships = await read(root, 'docs/en/tutorials/relationships.md')
+  assert(relationships.includes('appPages.posts.show'), 'Relationships tutorial must use page contracts.')
+  assert(relationships.includes('new PostResource(post).toJSON()'), 'Relationships tutorial must serialize resources explicitly.')
+
+  const frontend = await read(root, 'docs/en/guides/frontend.md')
+  assert(frontend.includes('PageProps<typeof appPages.posts.index>'), 'Frontend guide must show page-contract-based props.')
+  assert(frontend.includes('bun run build'), 'Frontend guide must document the canonical build command.')
+  assert(!frontend.includes("this.inertia('posts/Index'"), 'Frontend guide must not use string-based page names in the mainline example.')
+
+  const blogTutorial = await read(root, 'docs/en/tutorials/create-blog-post-app.md')
+  assert(blogTutorial.includes('PaginatedPageProps<PostResourceData>'), 'Blog tutorial must show paginated resource contracts.')
+  assert(blogTutorial.includes('appPages.posts.index'), 'Blog tutorial must use page contracts in the controller example.')
+
+  const authentication = await read(root, 'docs/en/guides/authentication.md')
+  assert(authentication.includes('appPages.dashboard.index'), 'Authentication guide must use page contracts for dashboard pages.')
+
+  const authorization = await read(root, 'docs/en/guides/authorization.md')
+  assert(authorization.includes('appPages.posts.show'), 'Authorization guide must use resource output in Inertia examples.')
+  assert(!authorization.includes('Route.get('), 'Authorization guide must not use legacy Route.get() route examples.')
+
+  const emailVerification = await read(root, 'docs/en/guides/email-verification.md')
+  assert(emailVerification.includes("import { Router } from '@guren/core'"), 'Email verification guide must use Router from @guren/core.')
+  assert(emailVerification.includes('appPages.auth.verifyEmail'), 'Email verification guide must use page contracts.')
+
+  const passwordReset = await read(root, 'docs/en/guides/password-reset.md')
+  assert(passwordReset.includes('this.validateBody(ForgotPasswordSchema)'), 'Password reset guide must use validateBody() for request parsing.')
+  assert(passwordReset.includes('appPages.auth.resetPassword'), 'Password reset guide must use page contracts.')
+
+  const apiTokens = await read(root, 'docs/en/guides/api-tokens.md')
+  assert(apiTokens.includes("import { Router } from '@guren/core'"), 'API tokens guide must use Router from @guren/core.')
+  assert(!apiTokens.includes('Route.get('), 'API tokens guide must not use legacy Route.get() examples.')
+
+  const broadcasting = await read(root, 'docs/en/guides/broadcasting.md')
+  assert(broadcasting.includes("import { Router } from '@guren/core'"), 'Broadcasting guide must use Router from @guren/core.')
+  assert(!broadcasting.includes('Route.get('), 'Broadcasting guide must not use legacy Route.get() examples.')
+
+  const errorHandling = await read(root, 'docs/en/guides/error-handling.md')
+  assert(errorHandling.includes('appPages.posts.show'), 'Error handling guide must use page contracts in Inertia examples.')
+
+  const deployment = await read(root, 'docs/en/guides/deployment.md')
+  assert(deployment.includes("router.get('/health'"), 'Deployment guide must use router-based health checks.')
+
+  const csrf = await read(root, 'docs/en/guides/csrf.md')
+  assert(csrf.includes('appPages.forms.create'), 'CSRF guide must use page contracts in controller examples.')
+  assert(!csrf.includes('Route.post('), 'CSRF guide must not use legacy Route.post() examples.')
+
+  const localization = await read(root, 'docs/en/guides/localization.md')
+  assert(localization.includes('appPages.home'), 'Localization guide must use page contracts in controller examples.')
+}
+
+async function auditJapaneseDocs(root: string): Promise<void> {
+  const firstSteps = await read(root, 'docs/ja/guides/first-steps.md')
+  assert(firstSteps.includes('@guren/core'), 'Japanese First Steps must describe the @guren/core standard path.')
+  assert(firstSteps.includes('PaginatedPageProps<PostResourceData>'), 'Japanese First Steps must describe the paginated resource contract.')
+  assert(firstSteps.includes('bunx guren add notifications'), 'Japanese First Steps must document the notifications scaffold path.')
+  assert(firstSteps.includes('bunx guren add storage'), 'Japanese First Steps must document the storage scaffold path.')
+  assert(firstSteps.includes('bunx guren add broadcasting'), 'Japanese First Steps must document the broadcasting scaffold path.')
+
+  const overview = await read(root, 'docs/ja/guides/overview.md')
+  assert(overview.includes("import { Controller, paginate, type PaginatedPageProps } from '@guren/core'"), 'Japanese overview must show the canonical controller import path.')
+  assert(overview.includes('await this.validateBody(CreateTaskSchema)'), 'Japanese overview must show validateBody() in the controller example.')
+  assert(overview.includes('appPages.tasks.index'), 'Japanese overview must show page contracts instead of string page names.')
+  assert(!overview.includes("this.inertia('Tasks/Index'"), 'Japanese overview must not use string-based page names in the controller example.')
+  assert(!overview.includes('await this.only('), 'Japanese overview must not use legacy this.only() input handling.')
+
+  const routing = await read(root, 'docs/ja/guides/routing.md')
+  assert(routing.includes("import { Router } from '@guren/core'"), 'Japanese routing guide must use Router from @guren/core.')
+  assert(routing.includes('createApp({'), 'Japanese routing guide must show createApp() bootstrap.')
+  assert(!routing.includes('Route.aliasMiddleware('), 'Japanese routing guide must not use legacy Route.* middleware examples.')
+  assert(routing.includes('appPages.posts.show'), 'Japanese routing guide must use page contracts in model binding examples.')
+
+  const controllers = await read(root, 'docs/ja/guides/controllers.md')
+  assert(controllers.includes('PaginatedPageProps<PostResourceData>'), 'Japanese controllers guide must show paginated page props in the canonical path.')
+  assert(controllers.includes('appPages.posts.index'), 'Japanese controllers guide must use page contracts instead of string page names.')
+  assert(!controllers.includes('await this.only('), 'Japanese controllers guide must not use legacy this.only() examples.')
+  assert(!controllers.includes("this.inertia('posts/Index'"), 'Japanese controllers guide must not use string-based Inertia page names in canonical examples.')
+
+  const middleware = await read(root, 'docs/ja/guides/middleware.md')
+  assert(middleware.includes("import { Router } from '@guren/core'"), 'Japanese middleware guide must use Router from @guren/core.')
+  assert(middleware.includes('router.get('), 'Japanese middleware guide must use router-based route middleware examples.')
+  assert(!middleware.includes('Route.get('), 'Japanese middleware guide must not use legacy Route.get() examples.')
+
+  const validation = await read(root, 'docs/ja/guides/validation.md')
+  assert(validation.includes('this.validateBody(StorePostSchema)'), 'Japanese validation guide must show validateBody() in the mainline example.')
+  assert(validation.includes('appPages.posts.index'), 'Japanese validation guide must show page contracts in the mainline example.')
+  assert(validation.includes("const router = new Router()"), 'Japanese validation guide must use Router for middleware-based validation examples.')
+
+  const database = await read(root, 'docs/ja/guides/database.md')
+  assert(database.includes('PaginatedPageProps<PostResourceData>'), 'Japanese database guide must show paginated resource contracts.')
+  assert(database.includes('appPages.posts.index'), 'Japanese database guide must use page contracts in pagination examples.')
+
+  const architecture = await read(root, 'docs/ja/guides/architecture.md')
+  assert(architecture.includes('PaginatedPageProps<PostResourceData>'), 'Japanese architecture guide must show paginated page props in controller examples.')
+  assert(architecture.includes('appPages.posts.index'), 'Japanese architecture guide must use page contracts in controller examples.')
+
+  const glossary = await read(root, 'docs/ja/guides/glossary.md')
+  assert(glossary.includes('page contract'), 'Japanese glossary must describe page contracts for Inertia pages.')
+
+  const rateLimiting = await read(root, 'docs/ja/guides/rate-limiting.md')
+  assert(rateLimiting.includes("import { Router, createRateLimitMiddleware } from '@guren/core'"), 'Japanese rate limiting guide must use Router from @guren/core.')
+  assert(!rateLimiting.includes('Route.post('), 'Japanese rate limiting guide must not use legacy Route.post() examples.')
+
+  const relationships = await read(root, 'docs/ja/tutorials/relationships.md')
+  assert(relationships.includes('appPages.posts.show'), 'Japanese relationships tutorial must use page contracts.')
+  assert(relationships.includes('new PostResource(post).toJSON()'), 'Japanese relationships tutorial must serialize resources explicitly.')
+
+  const frontend = await read(root, 'docs/ja/guides/frontend.md')
+  assert(frontend.includes('PageProps<typeof appPages.posts.index>'), 'Japanese frontend guide must show page-contract-based props.')
+  assert(frontend.includes('bun run build'), 'Japanese frontend guide must document the canonical build command.')
+  assert(!frontend.includes("this.inertia('posts/Index'"), 'Japanese frontend guide must not use string-based page names in the mainline example.')
+
+  const blogTutorial = await read(root, 'docs/ja/tutorials/create-blog-post-app.md')
+  assert(blogTutorial.includes('PaginatedPageProps<PostResourceData>'), 'Japanese blog tutorial must show paginated resource contracts.')
+  assert(blogTutorial.includes('appPages.posts.index'), 'Japanese blog tutorial must use page contracts in the controller example.')
+
+  const authentication = await read(root, 'docs/ja/guides/authentication.md')
+  assert(authentication.includes('appPages.dashboard.index'), 'Japanese authentication guide must use page contracts for dashboard pages.')
+
+  const authorization = await read(root, 'docs/ja/guides/authorization.md')
+  assert(authorization.includes('appPages.posts.show'), 'Japanese authorization guide must use resource output in Inertia examples.')
+  assert(!authorization.includes('Route.get('), 'Japanese authorization guide must not use legacy Route.get() route examples.')
+
+  const emailVerification = await read(root, 'docs/ja/guides/email-verification.md')
+  assert(emailVerification.includes("import { Router } from '@guren/core'"), 'Japanese email verification guide must use Router from @guren/core.')
+  assert(emailVerification.includes('appPages.auth.verifyEmail'), 'Japanese email verification guide must use page contracts.')
+
+  const passwordReset = await read(root, 'docs/ja/guides/password-reset.md')
+  assert(passwordReset.includes('this.validateBody(ForgotPasswordSchema)'), 'Japanese password reset guide must use validateBody() for request parsing.')
+  assert(passwordReset.includes('appPages.auth.resetPassword'), 'Japanese password reset guide must use page contracts.')
+
+  const apiTokens = await read(root, 'docs/ja/guides/api-tokens.md')
+  assert(apiTokens.includes("import { Router } from '@guren/core'"), 'Japanese API tokens guide must use Router from @guren/core.')
+  assert(!apiTokens.includes('Route.get('), 'Japanese API tokens guide must not use legacy Route.get() examples.')
+
+  const broadcasting = await read(root, 'docs/ja/guides/broadcasting.md')
+  assert(broadcasting.includes("import { Router } from '@guren/core'"), 'Japanese broadcasting guide must use Router from @guren/core.')
+  assert(!broadcasting.includes('Route.get('), 'Japanese broadcasting guide must not use legacy Route.get() examples.')
+
+  const errorHandling = await read(root, 'docs/ja/guides/error-handling.md')
+  assert(errorHandling.includes('appPages.posts.show'), 'Japanese error handling guide must use page contracts in Inertia examples.')
+
+  const deployment = await read(root, 'docs/ja/guides/deployment.md')
+  assert(deployment.includes("router.get('/health'"), 'Japanese deployment guide must use router-based health checks.')
+
+  const csrf = await read(root, 'docs/ja/guides/csrf.md')
+  assert(csrf.includes('appPages.forms.create'), 'Japanese CSRF guide must use page contracts in controller examples.')
+  assert(!csrf.includes('Route.post('), 'Japanese CSRF guide must not use legacy Route.post() examples.')
+
+  const localization = await read(root, 'docs/ja/guides/localization.md')
+  assert(localization.includes('appPages.home'), 'Japanese localization guide must use page contracts in controller examples.')
+}
+
+async function main(): Promise<void> {
+  const root = resolve(process.argv[2] ?? '.')
+  await auditEnglishDocs(root)
+  await auditJapaneseDocs(root)
+  console.log(`Docs audit passed for ${root}`)
+}
+
+await main()

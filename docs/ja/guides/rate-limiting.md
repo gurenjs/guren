@@ -14,22 +14,25 @@ Gurenはアプリケーションを乱用から保護するための柔軟なレ
 ### クイックスタート
 
 ```ts
-import { createRateLimitMiddleware } from '@guren/server'
-import { Route } from '@guren/server'
+import { Router, createRateLimitMiddleware } from '@guren/core'
 
 // すべてのルートに適用 - IPごとに1分間100リクエスト
-Route.middleware([createRateLimitMiddleware()]).group(() => {
-  Route.get('/api/*', [ApiController, 'handle'])
+const router = new Router()
+
+router.middleware(createRateLimitMiddleware()).group((group) => {
+  group.get('/api/*', [ApiController, 'handle'])
 })
 ```
 
 ### ルート固有の制限
 
 ```ts
-import { createRateLimitMiddleware } from '@guren/server'
+import { Router, createRateLimitMiddleware } from '@guren/core'
+
+const router = new Router()
 
 // ログインエンドポイントにより厳しい制限 - 15分間に5回の試行
-Route.post('/login', [AuthController, 'login']).middleware(
+router.post('/login', [AuthController, 'login']).middleware(
   createRateLimitMiddleware({
     limit: 5,
     windowMs: 15 * 60 * 1000, // 15分
@@ -37,8 +40,8 @@ Route.post('/login', [AuthController, 'login']).middleware(
 )
 
 // 認証済みAPIルートにはより高い制限
-Route.middleware(['auth']).group(() => {
-  Route.get('/api/*', [ApiController, 'handle']).middleware(
+router.middleware('auth').group((group) => {
+  group.get('/api/*', [ApiController, 'handle']).middleware(
     createRateLimitMiddleware({
       limit: 1000,
       windowMs: 60 * 60 * 1000, // 1時間
@@ -86,7 +89,7 @@ interface RateLimitOptions {
 ### 完全な設定例
 
 ```ts
-import { createRateLimitMiddleware, MemoryRateLimitStore } from '@guren/server'
+import { createRateLimitMiddleware, MemoryRateLimitStore } from '@guren/core'
 
 const store = new MemoryRateLimitStore()
 
@@ -151,7 +154,7 @@ X-RateLimit-Reset: 1705312800
 シングルプロセスアプリケーションに適しています：
 
 ```ts
-import { MemoryRateLimitStore } from '@guren/server'
+import { MemoryRateLimitStore } from '@guren/core'
 
 const store = new MemoryRateLimitStore(60000) // 60秒ごとにクリーンアップ
 
@@ -171,7 +174,7 @@ process.on('SIGTERM', () => {
 トラフィックを滑らかにするより正確なレート制限：
 
 ```ts
-import { SlidingWindowRateLimitStore } from '@guren/server'
+import { SlidingWindowRateLimitStore } from '@guren/core'
 
 const store = new SlidingWindowRateLimitStore()
 
@@ -191,7 +194,7 @@ const rateLimiter = createRateLimitMiddleware({
 分散アプリケーション用のRedisバックエンドストアを実装：
 
 ```ts
-import type { RateLimitStore, RateLimitEntry } from '@guren/server'
+import type { RateLimitStore, RateLimitEntry } from '@guren/core'
 
 export class RedisRateLimitStore implements RateLimitStore {
   constructor(private redis: Redis) {}
@@ -234,7 +237,7 @@ export class RedisRateLimitStore implements RateLimitStore {
 インクリメントせずにレート制限状態を確認：
 
 ```ts
-import { getRateLimitInfo, MemoryRateLimitStore } from '@guren/server'
+import { getRateLimitInfo, MemoryRateLimitStore } from '@guren/core'
 
 const store = new MemoryRateLimitStore()
 
@@ -251,7 +254,7 @@ console.log(`制限中: ${info.isLimited}`)
 特定のキーのレート制限をクリア：
 
 ```ts
-import { resetRateLimit, MemoryRateLimitStore } from '@guren/server'
+import { resetRateLimit, MemoryRateLimitStore } from '@guren/core'
 
 const store = new MemoryRateLimitStore()
 
@@ -267,6 +270,8 @@ await resetRateLimit('192.168.1.1', store, { keyPrefix: 'login:' })
 ### エンドポイントごとに異なる制限
 
 ```ts
+import { Router } from '@guren/core'
+
 // 認証に厳しい制限
 const authLimiter = createRateLimitMiddleware({
   limit: 5,
@@ -289,10 +294,12 @@ const searchLimiter = createRateLimitMiddleware({
 })
 
 // ルートに適用
-Route.post('/login', [AuthController, 'login']).middleware(authLimiter)
-Route.post('/register', [AuthController, 'register']).middleware(authLimiter)
-Route.get('/api/*', [ApiController, 'handle']).middleware(apiLimiter)
-Route.get('/search', [SearchController, 'search']).middleware(searchLimiter)
+const router = new Router()
+
+router.post('/login', [AuthController, 'login']).middleware(authLimiter)
+router.post('/register', [AuthController, 'register']).middleware(authLimiter)
+router.get('/api/*', [ApiController, 'handle']).middleware(apiLimiter)
+router.get('/search', [SearchController, 'search']).middleware(searchLimiter)
 ```
 
 ### ユーザーベースのレート制限
@@ -364,7 +371,7 @@ import {
   MemoryRateLimitStore,
   getRateLimitInfo,
   resetRateLimit,
-} from '@guren/server'
+} from '@guren/core'
 
 describe('レート制限', () => {
   let store: MemoryRateLimitStore
