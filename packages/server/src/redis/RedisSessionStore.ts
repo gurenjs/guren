@@ -1,5 +1,6 @@
 import type { Redis } from 'ioredis'
 import type { SessionStore, SessionData } from '../http/middleware/session'
+import { scanKeys } from './scan-keys'
 
 /**
  * Options for RedisSessionStore.
@@ -75,16 +76,7 @@ export class RedisSessionStore implements SessionStore {
    * Note: This uses SCAN to avoid blocking Redis.
    */
   async keys(): Promise<string[]> {
-    const pattern = this.prefix + '*'
-    const keys: string[] = []
-    let cursor = '0'
-
-    do {
-      const [newCursor, foundKeys] = await this.redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100)
-      cursor = newCursor
-      keys.push(...foundKeys)
-    } while (cursor !== '0')
-
+    const keys = await scanKeys(this.redis, this.prefix + '*')
     return keys.map((key) => key.slice(this.prefix.length))
   }
 

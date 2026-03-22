@@ -45,6 +45,15 @@ export abstract class HealthCheck {
   }
 
   /**
+   * Create an unhealthy result from a caught error.
+   */
+  protected handleError(error: unknown, fallbackMessage: string): CheckResult {
+    return this.unhealthy(
+      error instanceof Error ? error.message : fallbackMessage
+    )
+  }
+
+  /**
    * Create a check result.
    */
   private result(

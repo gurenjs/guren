@@ -64,11 +64,7 @@ export class CacheCheck extends HealthCheck {
         `Cache read/write mismatch: expected "${testValue}", got "${retrieved}"`
       )
     } catch (error) {
-      return this.unhealthy(
-        error instanceof Error
-          ? error.message
-          : 'Cache operation failed'
-      )
+      return this.handleError(error, 'Cache operation failed')
     }
   }
 }

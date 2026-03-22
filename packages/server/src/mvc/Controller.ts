@@ -8,6 +8,11 @@ import type { ServiceBindings } from '../container/bindings'
 import { ValidationException } from '../errors/exceptions/ValidationException'
 import { getApiTokenOrFail } from '../auth/api-token'
 
+/** Structural type for DI containers, avoiding a hard dependency on Container. */
+interface ContainerLike {
+  make(key: string): unknown
+}
+
 /**
  * Duck-type interface for Zod-like schemas.
  * Allows validation without a direct Zod dependency.
@@ -105,14 +110,14 @@ export class Controller {
   private context?: Context
   private parsedBody?: Record<string, unknown>
   private resolvedModels?: Map<unknown, unknown>
-  private _container?: { make(key: string): unknown }
+  private _container?: ContainerLike
 
   setContext(context: Context): void {
     this.context = context
   }
 
   /** @internal Called by the router to inject the DI container. */
-  setContainer(container: { make(key: string): unknown }): void {
+  setContainer(container: ContainerLike): void {
     this._container = container
   }
 
@@ -381,9 +386,17 @@ export class Controller {
     return key in body
   }
 
-  // ─── Validation ─────────────────────────────────────────────────
+  /** Flatten query string arrays to scalar values for cleaner schema usage. */
+  private flattenQueries(): Record<string, unknown> {
+    const queries = this.ctx.req.queries()
+    const flat: Record<string, unknown> = {}
+    for (const [key, values] of Object.entries(queries)) {
+      flat[key] = values.length === 1 ? values[0] : values
+    }
+    return flat
+  }
 
-  // ─── Zod Validation Helpers ────────────────────────────────────
+  // ─── Validation ─────────────────────────────────────────────────
 
   /**
    * Validate the request body against a Zod-like schema.
@@ -409,13 +422,7 @@ export class Controller {
    * ```
    */
   protected validateQuery<T>(schema: ZodLikeSchema<T>): T {
-    const queries = this.ctx.req.queries()
-    // Flatten single-element arrays to scalar values for cleaner schema usage
-    const flat: Record<string, unknown> = {}
-    for (const [key, values] of Object.entries(queries)) {
-      flat[key] = values.length === 1 ? values[0] : values
-    }
-    return this.runValidation(schema, flat)
+    return this.runValidation(schema, this.flattenQueries())
   }
 
   /**
@@ -457,12 +464,7 @@ export class Controller {
    * Returns a discriminated union: `{ success: true, data }` or `{ success: false, errors }`.
    */
   protected validateQuerySafe<T>(schema: ZodLikeSchema<T>): SafeValidationResult<T> {
-    const queries = this.ctx.req.queries()
-    const flat: Record<string, unknown> = {}
-    for (const [key, values] of Object.entries(queries)) {
-      flat[key] = values.length === 1 ? values[0] : values
-    }
-    return this.runValidationSafe(schema, flat)
+    return this.runValidationSafe(schema, this.flattenQueries())
   }
 
   /**

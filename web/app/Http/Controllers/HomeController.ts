@@ -41,20 +41,18 @@ const all = await Post
 
 const SHIKI_THEME = 'rose-pine-moon'
 
-let highlightedCache: Record<string, string> | null = null
+let highlightedPromise: Promise<Record<string, string>> | null = null
 
-async function getHighlightedExamples(): Promise<Record<string, string>> {
-  if (highlightedCache) return highlightedCache
-
-  const entries = await Promise.all(
-    Object.entries(CODE_EXAMPLES).map(async ([key, code]) => {
-      const html = await codeToHtml(code, { lang: 'typescript', theme: SHIKI_THEME })
-      return [key, html] as const
-    }),
-  )
-
-  highlightedCache = Object.fromEntries(entries)
-  return highlightedCache
+function getHighlightedExamples(): Promise<Record<string, string>> {
+  if (!highlightedPromise) {
+    highlightedPromise = Promise.all(
+      Object.entries(CODE_EXAMPLES).map(async ([key, code]) => {
+        const html = await codeToHtml(code, { lang: 'typescript', theme: SHIKI_THEME })
+        return [key, html] as const
+      }),
+    ).then(Object.fromEntries)
+  }
+  return highlightedPromise
 }
 
 export default class HomeController extends Controller {

@@ -46,11 +46,7 @@ export class DatabaseCheck extends HealthCheck {
       await this.db.query(this.query)
       return this.healthy('Database connection is healthy')
     } catch (error) {
-      return this.unhealthy(
-        error instanceof Error
-          ? error.message
-          : 'Database connection failed'
-      )
+      return this.handleError(error, 'Database connection failed')
     }
   }
 }

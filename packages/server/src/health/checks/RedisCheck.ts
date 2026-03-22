@@ -41,11 +41,7 @@ export class RedisCheck extends HealthCheck {
       }
       return this.degraded(`Redis ping returned: ${response}`)
     } catch (error) {
-      return this.unhealthy(
-        error instanceof Error
-          ? error.message
-          : 'Redis connection failed'
-      )
+      return this.handleError(error, 'Redis connection failed')
     }
   }
 }

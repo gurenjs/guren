@@ -65,11 +65,7 @@ export class StorageCheck extends HealthCheck {
 
       return this.degraded('Storage read/write mismatch')
     } catch (error) {
-      return this.unhealthy(
-        error instanceof Error
-          ? error.message
-          : 'Storage operation failed'
-      )
+      return this.handleError(error, 'Storage operation failed')
     }
   }
 }

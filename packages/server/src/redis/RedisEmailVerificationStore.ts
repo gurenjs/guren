@@ -1,4 +1,5 @@
 import type { Redis } from 'ioredis'
+import { scanKeys } from './scan-keys'
 import type {
   EmailVerificationTokenStore,
   EmailVerificationToken,
@@ -136,16 +137,7 @@ export class RedisEmailVerificationStore implements EmailVerificationTokenStore 
    * Clear all tokens (for testing).
    */
   async clear(): Promise<void> {
-    const pattern = this.prefix + '*'
-    const keys: string[] = []
-    let cursor = '0'
-
-    do {
-      const [newCursor, foundKeys] = await this.redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100)
-      cursor = newCursor
-      keys.push(...foundKeys)
-    } while (cursor !== '0')
-
+    const keys = await scanKeys(this.redis, this.prefix + '*')
     if (keys.length > 0) {
       await this.redis.del(...keys)
     }
