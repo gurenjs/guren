@@ -26,10 +26,12 @@ export class McpServiceProvider extends ServiceProvider {
     const hono = app.hono
     const cwd = process.cwd()
 
-    // Dynamic imports to avoid circular dependencies and keep prod bundles clean
+    // Dynamic imports to avoid circular dependencies and keep prod bundles clean.
+    // @guren/cli is resolved at runtime (not a direct dependency of @guren/server).
     const [{ WebStandardStreamableHTTPServerTransport }, cli] = await Promise.all([
       import('@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'),
-      import('@guren/cli') as Promise<GurenCliApi>,
+      // @ts-expect-error — @guren/cli is available at runtime via the app's dependencies
+      (import('@guren/cli') as Promise<GurenCliApi>),
     ])
 
     // Stateless mode: each request gets a fresh McpServer + transport pair.
