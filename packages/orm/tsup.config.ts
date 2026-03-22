@@ -7,5 +7,5 @@ export default defineConfig({
   outDir: 'dist',
   clean: true,
   tsconfig: 'tsconfig.json',
-  external: ['bun:sqlite', 'drizzle-orm/bun-sqlite', 'drizzle-orm/bun-sqlite/migrator'],
+  external: ['bun:sqlite', 'drizzle-orm/bun-sqlite', 'drizzle-orm/bun-sqlite/migrator', 'drizzle-orm/mysql2', 'drizzle-orm/mysql2/migrator'],
 })

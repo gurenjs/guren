@@ -1,6 +1,6 @@
 import { and, asc, count, desc, eq, inArray, isNull } from 'drizzle-orm'
 import type { AnyColumn } from 'drizzle-orm'
-import type { FindManyOptions, OrderByClause, ORMAdapter, PlainObject, WhereClause } from '../Model'
+import type { AdapterQueryOptions, FindManyOptions, OrderByClause, ORMAdapter, PlainObject, WhereClause } from '../Model'
 import type { ORMAdapterAdvanced, WhereCondition } from '../QueryBuilder'
 import { buildDrizzleConditions } from './drizzle-conditions'
 
@@ -41,6 +41,7 @@ type DrizzleDatabase = {
   insert(table: unknown): DrizzleLikeInsert
   update?(table: unknown): DrizzleLikeUpdate
   delete?(table: unknown): DrizzleLikeDelete
+  transaction?<TResult>(callback: (trx: unknown) => Promise<TResult>): Promise<TResult>
 }
 
 let database: DrizzleDatabase | undefined
@@ -51,6 +52,14 @@ function ensureDatabase(): DrizzleDatabase {
   }
 
   return database
+}
+
+function resolveExecutor(options?: AdapterQueryOptions): DrizzleDatabase {
+  if (options?.trx && typeof options.trx === 'object') {
+    return options.trx as DrizzleDatabase
+  }
+
+  return ensureDatabase()
 }
 
 async function resolveList(result: DrizzleLikeSelect): Promise<unknown[]> {
@@ -182,8 +191,9 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
   async findMany<TRecord extends PlainObject = PlainObject>(
     table: unknown,
     options?: FindManyOptions<TRecord>,
+    queryOptions?: AdapterQueryOptions,
   ): Promise<TRecord[]> {
-    const db = ensureDatabase()
+    const db = resolveExecutor(queryOptions)
     let query = db.select().from(table)
     const { where, orderBy, limit, offset } = options ?? {}
 
@@ -216,8 +226,9 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
   async count<TRecord extends PlainObject = PlainObject>(
     table: unknown,
     where?: WhereClause<TRecord>,
+    queryOptions?: AdapterQueryOptions,
   ): Promise<number> {
-    const db = ensureDatabase()
+    const db = resolveExecutor(queryOptions)
     let query = db.select({ value: count() }).from(table)
 
     if (typeof query.where === 'function') {
@@ -234,8 +245,12 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     return Number.isNaN(total) ? 0 : total
   },
 
-  async findUnique<TRecord extends PlainObject = PlainObject>(table: unknown, where: WhereClause<TRecord>): Promise<TRecord | null> {
-    const db = ensureDatabase()
+  async findUnique<TRecord extends PlainObject = PlainObject>(
+    table: unknown,
+    where: WhereClause<TRecord>,
+    queryOptions?: AdapterQueryOptions,
+  ): Promise<TRecord | null> {
+    const db = resolveExecutor(queryOptions)
     let query = db.select().from(table)
 
     if (typeof query.where === 'function') {
@@ -253,14 +268,23 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     return row as TRecord
   },
 
-  async create<TRecord = PlainObject>(table: unknown, data: PlainObject): Promise<TRecord> {
-    const db = ensureDatabase()
+  async create<TRecord = PlainObject>(
+    table: unknown,
+    data: PlainObject,
+    writeOptions?: AdapterQueryOptions,
+  ): Promise<TRecord> {
+    const db = resolveExecutor(writeOptions)
     const result = await resolveMutation(db.insert(table).values(data))
     return result as TRecord
   },
 
-  async update<TRecord extends PlainObject = PlainObject>(table: unknown, where: WhereClause<TRecord>, data: PlainObject): Promise<TRecord> {
-    const db = ensureDatabase()
+  async update<TRecord extends PlainObject = PlainObject>(
+    table: unknown,
+    where: WhereClause<TRecord>,
+    data: PlainObject,
+    writeOptions?: AdapterQueryOptions,
+  ): Promise<TRecord> {
+    const db = resolveExecutor(writeOptions)
     if (!db.update) {
       throw new Error('DrizzleAdapter: configured database does not support updates.')
     }
@@ -271,8 +295,12 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     return result as TRecord
   },
 
-  async delete<TRecord extends PlainObject = PlainObject>(table: unknown, where: WhereClause<TRecord>): Promise<number | PlainObject | void> {
-    const db = ensureDatabase()
+  async delete<TRecord extends PlainObject = PlainObject>(
+    table: unknown,
+    where: WhereClause<TRecord>,
+    writeOptions?: AdapterQueryOptions,
+  ): Promise<number | PlainObject | void> {
+    const db = resolveExecutor(writeOptions)
     if (!db.delete) {
       throw new Error('DrizzleAdapter: configured database does not support deletes.')
     }
@@ -292,8 +320,9 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
       offset?: number
       select?: string[]
     },
+    queryOptions?: AdapterQueryOptions,
   ): Promise<TRecord[]> {
-    const db = ensureDatabase()
+    const db = resolveExecutor(queryOptions)
     const tableRecord = table as DrizzleTableLike
 
     // Build select - if specific fields requested, build a selection object
@@ -345,8 +374,9 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
   async countAdvanced<TRecord extends PlainObject = PlainObject>(
     table: unknown,
     conditions: WhereCondition[],
+    queryOptions?: AdapterQueryOptions,
   ): Promise<number> {
-    const db = ensureDatabase()
+    const db = resolveExecutor(queryOptions)
     let query = db.select({ value: count() }).from(table)
 
     if (typeof query.where === 'function') {
@@ -367,8 +397,9 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     table: unknown,
     conditions: WhereCondition[],
     data: PlainObject,
+    writeOptions?: AdapterQueryOptions,
   ): Promise<TRecord> {
-    const db = ensureDatabase()
+    const db = resolveExecutor(writeOptions)
     if (!db.update) {
       throw new Error('DrizzleAdapter: configured database does not support updates.')
     }
@@ -382,8 +413,9 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
   async deleteAdvanced<TRecord extends PlainObject = PlainObject>(
     table: unknown,
     conditions: WhereCondition[],
+    writeOptions?: AdapterQueryOptions,
   ): Promise<number | PlainObject | void> {
-    const db = ensureDatabase()
+    const db = resolveExecutor(writeOptions)
     if (!db.delete) {
       throw new Error('DrizzleAdapter: configured database does not support deletes.')
     }
@@ -392,5 +424,13 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     const query = db.delete(table)
     const result = await resolveMutation(clause ? query.where(clause) : query)
     return result as number | PlainObject | void
+  },
+
+  async transaction<TResult>(callback: (trx: unknown) => Promise<TResult>): Promise<TResult> {
+    const db = ensureDatabase()
+    if (typeof db.transaction !== 'function') {
+      throw new Error('DrizzleAdapter: configured database does not support transactions.')
+    }
+    return db.transaction(callback)
   },
 }

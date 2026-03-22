@@ -50,6 +50,21 @@ export {
   MemoryApiTokenStore,
   API_TOKEN_KEY,
 } from './api-token'
+export {
+  OAuthManager,
+  MemoryOAuthStateStore,
+  createOAuthManager,
+  createOAuthState,
+  verifyOAuthState,
+  buildOAuthAuthorizeUrl,
+  exchangeOAuthCode,
+  fetchOAuthUserProfile,
+  createGitHubOAuthProviderConfig,
+  createGoogleOAuthProviderConfig,
+  createDiscordOAuthProviderConfig,
+  buildOAuthRedirectUrl,
+  parseOAuthRedirectUrl,
+} from './oauth'
 export type {
   ApiToken,
   ApiTokenStore,
@@ -57,6 +72,18 @@ export type {
   CreateApiTokenResult,
   BearerTokenMiddlewareOptions,
 } from './api-token'
+export type {
+  OAuthProviderConfig,
+  OAuthTokenResult,
+  OAuthUserProfile,
+  OAuthStatePayload,
+  OAuthStateStore,
+  OAuthStateConfig,
+  OAuthAuthorizeOptions,
+  OAuthCallbackPayload,
+  OAuthManagerOptions,
+  OAuthProviderFactoryInput,
+} from './oauth'
 export type {
   AuthContext,
   AuthCredentials,

@@ -1,5 +1,6 @@
 export { InertiaServiceProvider } from './InertiaServiceProvider'
 export { AuthServiceProvider } from './AuthServiceProvider'
+export { OAuthServiceProvider } from './OAuthServiceProvider'
 export { EventServiceProvider } from './EventServiceProvider'
 export { CacheServiceProvider } from './CacheServiceProvider'
 export { QueueServiceProvider } from './QueueServiceProvider'

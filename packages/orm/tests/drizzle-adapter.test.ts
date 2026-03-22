@@ -16,8 +16,9 @@ function createMockDatabase(options: {
   supportsUpdate?: boolean
   supportsDelete?: boolean
   useGetMethod?: boolean
+  supportsTransaction?: boolean
 } = {}) {
-  const { records = [], supportsUpdate = true, supportsDelete = true, useGetMethod = false } = options
+  const { records = [], supportsUpdate = true, supportsDelete = true, useGetMethod = false, supportsTransaction = true } = options
   let store = [...records]
   let nextId = records.length + 1
 
@@ -114,6 +115,9 @@ function createMockDatabase(options: {
 
           return chain
         }
+      : undefined,
+    transaction: supportsTransaction
+      ? async <TResult>(callback: (trx: unknown) => Promise<TResult>): Promise<TResult> => callback(db)
       : undefined,
   }
 
@@ -484,6 +488,31 @@ describe('DrizzleAdapter', () => {
       const result = await DrizzleAdapter.create(table, { name: 'Alice' })
 
       expect(result).toEqual({ lastInsertRowid: 1 })
+    })
+  })
+
+  describe('transaction', () => {
+    it('delegates transaction callback to database transaction', async () => {
+      const { db } = createMockDatabase()
+      DrizzleAdapter.configure(db as never)
+
+      const runTransaction = DrizzleAdapter.transaction as NonNullable<typeof DrizzleAdapter.transaction>
+      const result = await runTransaction(async (trx) => {
+        expect(trx).toBe(db)
+        return 'ok'
+      })
+
+      expect(result).toBe('ok')
+    })
+
+    it('throws when database does not support transactions', async () => {
+      const { db } = createMockDatabase({ supportsTransaction: false })
+      DrizzleAdapter.configure(db as never)
+
+      const runTransaction = DrizzleAdapter.transaction as NonNullable<typeof DrizzleAdapter.transaction>
+      await expect(runTransaction(async () => 'ok')).rejects.toThrow(
+        'DrizzleAdapter: configured database does not support transactions.',
+      )
     })
   })
 })

@@ -8,6 +8,7 @@ Guren には Laravel 由来の認証スタックが同梱され、セッショ�
 - **ガード**: リクエストを認証するランタイムオブジェクト。既定の `SessionGuard` はセッションにユーザー ID を保持し、任意で「ログイン情報を保持する」トークンも扱います。
 - **ユーザープロバイダー**: ガードがユーザーを読み込み・検証するためのデータアクセス層。`ModelUserProvider` は Guren の `Model` 抽象に対応し、Drizzle のテーブルを認証に使えます。
 - **Auth コンテキスト**: リクエスト単位のファサードで、`auth.check()`, `auth.user()`, `auth.login()` などのヘルパーを提供。`AuthServiceProvider` が自動でアタッチし、コントローラでは `this.auth`、ミドルウェアでは `attachAuthContext` 経由で利用できます。
+- **OAuthManager**: ソーシャルログイン向けヘルパー。OAuth state 管理、コード交換、プロファイル取得を扱います。
 
 ## CLI でクイックスタート
 
@@ -33,6 +34,44 @@ bun run dev
 ```
 
 `http://localhost:3000/login` にアクセスし、`demo@example.com` / `secret` でログインできます。
+
+## OAuth / ソーシャルログイン
+
+Wave 4 で、GitHub / Google / Discord 向けの OAuth プリセットを追加しました。
+
+### OAuth スキャフォールド
+
+```bash
+bunx guren add oauth
+```
+
+以下が生成されます。
+
+- `app/Providers/OAuthProvider.ts`
+- `app/Http/Controllers/Auth/OAuthController.ts`
+- `routes/oauth.ts`
+
+さらに `src/app.ts` に `CoreOAuthServiceProvider` と `OAuthProvider` が自動登録されます。
+
+### プロバイダー資格情報の設定
+
+```bash
+OAUTH_GITHUB_CLIENT_ID=...
+OAUTH_GITHUB_CLIENT_SECRET=...
+OAUTH_GITHUB_REDIRECT_URI=https://your-app.test/auth/github/callback
+```
+
+`GOOGLE` / `DISCORD` も同様の環境変数名で設定できます。
+
+### ルートフロー
+
+```ts
+router.get('/auth/:provider', [OAuthController, 'redirect'])
+router.get('/auth/:provider/callback', [OAuthController, 'callback'])
+```
+
+`redirect` は state を生成してプロバイダー同意画面へリダイレクトします。  
+`callback` は state を検証し、authorization code を token に交換してプロフィールを取得します。
 
 ### 手動セットアップ
 

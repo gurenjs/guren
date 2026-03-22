@@ -30,6 +30,7 @@ export type {
 export {
   InertiaServiceProvider,
   AuthServiceProvider,
+  OAuthServiceProvider,
   EventServiceProvider,
   CacheServiceProvider,
   QueueServiceProvider,
@@ -83,6 +84,19 @@ export {
   getApiToken,
   MemoryApiTokenStore,
   API_TOKEN_KEY,
+  OAuthManager,
+  MemoryOAuthStateStore,
+  createOAuthManager,
+  createOAuthState,
+  verifyOAuthState,
+  buildOAuthAuthorizeUrl,
+  exchangeOAuthCode,
+  fetchOAuthUserProfile,
+  createGitHubOAuthProviderConfig,
+  createGoogleOAuthProviderConfig,
+  createDiscordOAuthProviderConfig,
+  buildOAuthRedirectUrl,
+  parseOAuthRedirectUrl,
 }
   from './auth'
 export type {
@@ -109,6 +123,16 @@ export type {
   CreateApiTokenOptions,
   CreateApiTokenResult,
   BearerTokenMiddlewareOptions,
+  OAuthProviderConfig,
+  OAuthTokenResult,
+  OAuthUserProfile,
+  OAuthStatePayload,
+  OAuthStateStore,
+  OAuthStateConfig,
+  OAuthAuthorizeOptions,
+  OAuthCallbackPayload,
+  OAuthManagerOptions,
+  OAuthProviderFactoryInput,
 } from './auth'
 export {
   defineMiddleware,
@@ -531,6 +555,7 @@ export type {
   PresenceChannelAuthorizer,
   PresenceMember,
   SSEClient,
+  WebSocketClient,
   BroadcastManagerOptions,
   BroadcastDriverFactory,
   ChannelRegistration,

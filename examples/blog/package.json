@@ -7,7 +7,7 @@
     "codegen": "bun ../../packages/cli/src/bin.ts codegen --force",
     "routes:types": "bun run codegen",
     "dev": "bun run codegen && bun run dev:server",
-    "dev:server": "bun run --watch bin/serve.ts",
+    "dev:server": "bun bin/serve.ts",
     "smoke": "bun run ./smoke.ts",
     "test": "vitest run",
     "build": "bun run codegen && bunx vite build && bunx vite build --ssr",

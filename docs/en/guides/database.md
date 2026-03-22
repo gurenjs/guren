@@ -1,6 +1,6 @@
 # Database
 
-Guren uses Drizzle ORM with PostgreSQL. You define your schema in TypeScript, derive models from those tables, and get a fluent query API that feels like Laravel Eloquent while staying fully type-safe.
+Guren uses Drizzle ORM and supports PostgreSQL, SQLite, and MySQL. You define your schema in TypeScript, derive models from those tables, and get a fluent query API that feels like Laravel Eloquent while staying fully type-safe.
 
 ## Connecting to the Database
 
@@ -27,6 +27,27 @@ import { DrizzleAdapter } from '@guren/orm'
 
 DrizzleAdapter.configure({ connectionString: process.env.DATABASE_URL })
 ```
+
+## MySQL Support
+
+Use `createMySqlDatabase` when your app runs on MySQL-compatible databases.
+
+```ts
+// config/database.ts
+import { createMySqlDatabase } from '@guren/orm'
+import * as schema from '../db/schema.js'
+
+const database = createMySqlDatabase({
+  schema,
+  migrationsFolder: new URL('../db/migrations', import.meta.url),
+  seedersFolder: new URL('../db/seeders', import.meta.url),
+  connectionString: () => process.env.DATABASE_URL,
+})
+
+export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+```
+
+Like the PostgreSQL and SQLite adapters, the MySQL adapter exposes the same runtime API (`getDatabase`, `migrateDatabase`, `configureOrm`, `seedDatabase`) so switching drivers is mostly an import/configuration change.
 
 ## Defining Models
 
@@ -125,6 +146,36 @@ await Post.update({ id: post.id }, { title: 'Updated Title' })
 
 // Delete
 await Post.delete({ id: post.id })
+```
+
+### Transactions
+
+Use `Model.transaction()` when multiple writes must succeed or fail together:
+
+```ts
+await Post.transaction(async (trx) => {
+  const post = await Post.create({
+    title: 'Atomic write',
+    body: 'Everything in one transaction',
+  }, { trx })
+
+  await Post.update({ id: post.id }, { status: 'published' }, { trx })
+})
+```
+
+If an error is thrown in the callback, Guren rolls back the transaction.
+
+You can also use the transaction-bound scope for cleaner type-safe writes:
+
+```ts
+await Post.transaction(async (_trx, txPost) => {
+  const post = await txPost.create({
+    title: 'Scoped write',
+    body: 'No manual { trx } forwarding',
+  })
+
+  await txPost.update({ id: post.id }, { status: 'published' })
+})
 ```
 
 ### Mass Assignment Protection

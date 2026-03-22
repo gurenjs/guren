@@ -12,9 +12,14 @@ import {
 type UserRecord = { id: number; name: string; team?: string }
 type PostRecord = { id: number; title: string; authorId: number }
 
-function createAdapter(records: UserRecord[] = []): { adapter: ORMAdapter; snapshot: () => UserRecord[] } {
+function createAdapter(records: UserRecord[] = []): {
+  adapter: ORMAdapter
+  snapshot: () => UserRecord[]
+  transactionCalls: () => number
+} {
   let nextId = records.length + 1
   const store = [...records]
+  let txCalls = 0
 
   function matches(where?: WhereClause<UserRecord>) {
     if (!where) {
@@ -116,11 +121,16 @@ function createAdapter(records: UserRecord[] = []): { adapter: ORMAdapter; snaps
       store.splice(index, 1)
       return 1
     },
+    async transaction<TResult>(callback: (trx: unknown) => Promise<TResult>): Promise<TResult> {
+      txCalls += 1
+      return callback(adapter)
+    },
   }
 
   return {
     adapter,
     snapshot: () => store.map((record) => ({ ...record })),
+    transactionCalls: () => txCalls,
   }
 }
 
@@ -519,6 +529,42 @@ describe('Model', () => {
     const builder = User.select('id', 'name')
 
     expect(builder.getOptions().selectFields).toEqual(['id', 'name'])
+  })
+
+  it('runs Model.transaction() via adapter and forwards trx to writes', async () => {
+    class User extends Model<UserRecord> {
+      static table = 'users'
+    }
+
+    const { adapter, transactionCalls } = createAdapter([])
+    User.useAdapter(adapter)
+
+    const created = await User.transaction(async (trx) => {
+      const first = await User.create({ name: 'Ayanami', team: 'pilots' }, { trx })
+      const second = await User.update({ id: first.id }, { team: 'command' }, { trx })
+      return second
+    })
+
+    expect(created.team).toBe('command')
+    expect(transactionCalls()).toBe(1)
+  })
+
+  it('provides transaction-bound scope helpers via Model.transaction callback', async () => {
+    class User extends Model<UserRecord> {
+      static table = 'users'
+    }
+
+    const { adapter, transactionCalls } = createAdapter([{ id: 1, name: 'Asuka', team: 'pilots' }])
+    User.useAdapter(adapter)
+
+    const updated = await User.transaction(async (_trx, txUser) => {
+      const created = await txUser.create({ name: 'Misato', team: 'ops' })
+      expect(created.id).toBeGreaterThan(1)
+      return txUser.update({ id: 1 }, { team: 'command' })
+    })
+
+    expect(updated.team).toBe('command')
+    expect(transactionCalls()).toBe(1)
   })
 })
 

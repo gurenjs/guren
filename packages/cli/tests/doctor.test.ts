@@ -50,6 +50,16 @@ describe('runDoctor', () => {
         'utf8',
       )
       await writeFile(
+        join(workspace.dir, '.guren/data.gen.ts'),
+        'export namespace Data {}\n',
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, '.guren/channels.gen.ts'),
+        'export type ChannelEvents = Record<string, Record<string, unknown>>\n',
+        'utf8',
+      )
+      await writeFile(
         join(workspace.dir, 'tsconfig.json'),
         JSON.stringify({
           include: ['src/**/*', '.guren/**/*'],

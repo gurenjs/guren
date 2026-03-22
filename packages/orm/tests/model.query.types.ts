@@ -1,6 +1,6 @@
 import { drizzle } from 'drizzle-orm/postgres-js'
 import { pgTable, serial, text } from 'drizzle-orm/pg-core'
-import { Model, defineModel } from '../src/Model'
+import { Model, defineModel, type TransactionHandle, type TransactionModelScope } from '../src/Model'
 
 const users = pgTable('users', {
   id: serial('id').primaryKey(),
@@ -45,3 +45,9 @@ const _selectedTeam = ({} as SelectedRow).team
 FactoryUser.where('name', 'Ada')
 FactoryUser.whereIn('id', [1, 2, 3])
 FactoryUser.whereNull('name')
+
+declare const trx: TransactionHandle
+const txUser = User.inTransaction(trx)
+const _txScope: TransactionModelScope<typeof User> = txUser
+txUser.create({ name: 'Kaworu' })
+txUser.update({ id: 1 }, { name: 'Nagisa' })

@@ -6,6 +6,7 @@ export type {
   PresenceChannelAuthorizer,
   PresenceMember,
   SSEClient,
+  WebSocketClient,
   BroadcastManagerOptions,
   BroadcastDriverFactory,
   ChannelRegistration,
@@ -20,6 +21,15 @@ export {
   getBroadcastManager,
   createBroadcastManager,
 } from './BroadcastManager'
+export {
+  createTypedBroadcaster,
+} from './typed'
+export type {
+  TypedBroadcaster,
+  TypedChannelHandle,
+  TypedPrivateChannelHandle,
+  TypedPresenceChannelHandle,
+} from './typed'
 
 export { Channel, PrivateChannel, PresenceChannel } from './channels'
 

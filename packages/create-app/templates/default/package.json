@@ -6,7 +6,7 @@
   "scripts": {
     "codegen": "bunx guren codegen --routes routes/web.ts --out types/generated/routes.d.ts --force",
     "dev": "bun run codegen && bun run dev:server",
-    "dev:server": "bun run --watch bin/serve.ts",
+    "dev:server": "bun bin/serve.ts",
     "typecheck": "tsc --noEmit",
     "build": "bun run codegen && bunx vite build",
     "preview": "NODE_ENV=production bun bin/serve.ts",

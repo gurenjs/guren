@@ -147,26 +147,54 @@ export interface PaginatedResult<TRecord extends PlainObject = PlainObject> {
  * The default adapter is DrizzleAdapter.
  */
 export interface ORMAdapter {
+  /** Run operations in a database transaction. */
+  transaction?<TResult>(callback: (trx: unknown) => Promise<TResult>): Promise<TResult>
   /** Find multiple records with optional filtering, ordering, and pagination. */
-  findMany<TRecord extends PlainObject = PlainObject>(table: unknown, options?: FindManyOptions<TRecord>): Promise<TRecord[]>
+  findMany<TRecord extends PlainObject = PlainObject>(
+    table: unknown,
+    options?: FindManyOptions<TRecord>,
+    queryOptions?: AdapterQueryOptions,
+  ): Promise<TRecord[]>
   /** Find a single record by unique criteria. */
-  findUnique<TRecord extends PlainObject = PlainObject>(table: unknown, where: WhereClause<TRecord>): Promise<TRecord | null>
+  findUnique<TRecord extends PlainObject = PlainObject>(
+    table: unknown,
+    where: WhereClause<TRecord>,
+    queryOptions?: AdapterQueryOptions,
+  ): Promise<TRecord | null>
   /** Create a new record. */
-  create<TRecord extends PlainObject = PlainObject>(table: unknown, data: PlainObject): Promise<TRecord>
+  create<TRecord extends PlainObject = PlainObject>(
+    table: unknown,
+    data: PlainObject,
+    writeOptions?: AdapterQueryOptions,
+  ): Promise<TRecord>
   /** Update records matching criteria. */
   update?<TRecord extends PlainObject = PlainObject>(
     table: unknown,
     where: WhereClause<TRecord>,
     data: PlainObject,
+    writeOptions?: AdapterQueryOptions,
   ): Promise<TRecord>
   /** Delete records matching criteria. */
   delete?<TRecord extends PlainObject = PlainObject>(
     table: unknown,
     where: WhereClause<TRecord>,
+    writeOptions?: AdapterQueryOptions,
   ): Promise<number | PlainObject | void>
   /** Count records matching criteria. */
-  count?<TRecord extends PlainObject = PlainObject>(table: unknown, where?: WhereClause<TRecord>): Promise<number>
+  count?<TRecord extends PlainObject = PlainObject>(
+    table: unknown,
+    where?: WhereClause<TRecord>,
+    queryOptions?: AdapterQueryOptions,
+  ): Promise<number>
 }
+
+export interface AdapterQueryOptions {
+  trx?: unknown
+}
+
+export type ModelWriteOptions = AdapterQueryOptions
+export type ModelQueryOptions = AdapterQueryOptions
+export type TransactionHandle = NonNullable<AdapterQueryOptions['trx']>
 
 type SelectFrom<TDatabase> = TDatabase extends { select: (...args: any[]) => infer TSelect } // eslint-disable-line @typescript-eslint/no-explicit-any
   ? TSelect extends { from: (...args: any[]) => infer TResult } // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -363,6 +391,71 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    */
   static getAdapter(): ORMAdapter {
     return this.ormAdapter
+  }
+
+  /**
+   * Run operations inside a database transaction.
+   *
+   * @example
+   * await User.transaction(async (trx) => {
+   *   const user = await User.create({ name: 'John' }, { trx })
+   *   await Profile.create({ userId: user.id }, { trx })
+   * })
+   */
+  static async transaction<T extends typeof Model, TResult>(
+    this: T,
+    callback: (trx: TransactionHandle, scope: TransactionModelScope<T>) => Promise<TResult>,
+  ): Promise<TResult> {
+    const adapter = this.getAdapter()
+    if (typeof adapter.transaction !== 'function') {
+      throw new Error('Configured adapter does not support transactions.')
+    }
+    return adapter.transaction((trx) => callback(trx as TransactionHandle, this.inTransaction(trx as TransactionHandle)))
+  }
+
+  /**
+   * Create a transaction-bound model scope that automatically forwards `trx`
+   * to query and write operations.
+   *
+   * @example
+   * await User.transaction(async (trx, txUser) => {
+   *   await txUser.create({ name: 'Shinji' })
+   *   await txUser.update({ id: 1 }, { name: 'Ikari' })
+   * })
+   */
+  static inTransaction<T extends typeof Model>(this: T, trx: TransactionHandle): TransactionModelScope<T> {
+    const where: TransactionModelScope<T>['where'] = (
+      fieldOrConditions: FieldFor<T> | WhereClauseFor<T>,
+      operatorOrValue?: unknown,
+      value?: unknown,
+    ) => {
+      if (typeof fieldOrConditions === 'object' && fieldOrConditions !== null) {
+        return this.newQuery({ trx }).where(fieldOrConditions as Partial<Record<keyof TRecordFor<T> & string, unknown>>)
+      }
+
+      if (value !== undefined) {
+        return this.newQuery({ trx }).where(fieldOrConditions as keyof TRecordFor<T> & string, operatorOrValue as WhereOperator, value)
+      }
+
+      return this.newQuery({ trx }).where(
+        fieldOrConditions as keyof TRecordFor<T> & string,
+        operatorOrValue as TRecordFor<T>[keyof TRecordFor<T> & string],
+      )
+    }
+
+    return {
+      trx,
+      all: () => this.all({ trx }),
+      find: (id) => this.find(id as TRecordFor<T>[keyof TRecordFor<T> & string], undefined, { trx }),
+      findOrFail: (id) => this.findOrFail(id as TRecordFor<T>[keyof TRecordFor<T> & string], undefined, { trx }),
+      first: (where) => this.first(where, { trx }),
+      where,
+      newQuery: () => this.newQuery({ trx }),
+      create: (data) => this.create(data, { trx }),
+      update: (where, data) => this.update(where, data, { trx }),
+      delete: (where) => this.delete(where, { trx }),
+      paginate: (options) => this.paginate(options, { trx }),
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -657,13 +750,13 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    * @example
    * const users = await User.all()
    */
-  static async all<T extends typeof Model>(this: T): Promise<Array<TRecordFor<T>>> {
+  static async all<T extends typeof Model>(this: T, queryOptions?: ModelQueryOptions): Promise<Array<TRecordFor<T>>> {
     const hasGlobalScopes = this.globalScopeRegistry && this.globalScopeRegistry.size > 0
     if (this.defaultScope || hasGlobalScopes) {
-      return this.newQuery().get()
+      return this.newQuery(queryOptions).get()
     }
     const table = this.resolveTable()
-    const records = await this.getAdapter().findMany(table) as Array<TRecordFor<T>>
+    const records = await this.getAdapter().findMany(table, undefined, queryOptions) as Array<TRecordFor<T>>
     if (this.casts || this.accessors) {
       return records.map((r) => this.applyReadTransforms(r))
     }
@@ -685,13 +778,14 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     this: T,
     id: TRecordFor<T>[keyof TRecordFor<T> & string],
     key: keyof TRecordFor<T> & string = 'id' as keyof TRecordFor<T> & string,
+    queryOptions?: ModelQueryOptions,
   ): Promise<TRecordFor<T> | null> {
     if (this.defaultScope || (this.globalScopeRegistry && this.globalScopeRegistry.size > 0)) {
-      return this.newQuery().where(key, id as TRecordFor<T>[typeof key]).first()
+      return this.newQuery(queryOptions).where(key, id as TRecordFor<T>[typeof key]).first()
     }
     const table = this.resolveTable()
     const where = { [key]: id } as WhereClauseFor<T>
-    const record = await this.getAdapter().findUnique(table, where) as TRecordFor<T> | null
+    const record = await this.getAdapter().findUnique(table, where, queryOptions) as TRecordFor<T> | null
     if (record && (this.casts || this.accessors)) {
       return this.applyReadTransforms(record)
     }
@@ -713,8 +807,9 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     this: T,
     id: TRecordFor<T>[keyof TRecordFor<T> & string],
     key: keyof TRecordFor<T> & string = 'id' as keyof TRecordFor<T> & string,
+    queryOptions?: ModelQueryOptions,
   ): Promise<TRecordFor<T>> {
-    const record = await this.find(id, key)
+    const record = await this.find(id, key, queryOptions)
     if (record == null) {
       throw new ModelNotFoundException(this.name, id, key)
     }
@@ -810,9 +905,13 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    * @example
    * const admin = await User.first({ role: 'admin' })
    */
-  static async first<T extends typeof Model>(this: T, where?: WhereClauseFor<T>): Promise<TRecordFor<T> | null> {
+  static async first<T extends typeof Model>(
+    this: T,
+    where?: WhereClauseFor<T>,
+    queryOptions?: ModelQueryOptions,
+  ): Promise<TRecordFor<T> | null> {
     if (this.defaultScope || (this.globalScopeRegistry && this.globalScopeRegistry.size > 0)) {
-      const builder = this.newQuery().limit(1)
+      const builder = this.newQuery(queryOptions).limit(1)
       if (where) {
         builder.where(where as Partial<Record<string, unknown>>)
       }
@@ -820,7 +919,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       return (results[0] ?? null) as TRecordFor<T> | null
     }
     const table = this.resolveTable()
-    const results = await this.getAdapter().findMany(table, { where, limit: 1 })
+    const results = await this.getAdapter().findMany(table, { where, limit: 1 }, queryOptions)
     const record = (results[0] ?? null) as TRecordFor<T> | null
     if (record && (this.casts || this.accessors)) {
       return this.applyReadTransforms(record)
@@ -879,7 +978,10 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    * Start a fluent query with a WHERE NULL condition.
    * @param field - Column to check for NULL
    */
-  static whereNull<T extends typeof Model>(this: T, field: keyof TRecordFor<T> & string): QueryBuilder<TRecordFor<T>> {
+  static whereNull<T extends typeof Model>(
+    this: T,
+    field: keyof TRecordFor<T> & string,
+  ): QueryBuilder<TRecordFor<T>> {
     return new QueryBuilder<TRecordFor<T>>(this).whereNull(field)
   }
 
@@ -887,7 +989,10 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    * Start a fluent query with a WHERE NOT NULL condition.
    * @param field - Column to check for NOT NULL
    */
-  static whereNotNull<T extends typeof Model>(this: T, field: keyof TRecordFor<T> & string): QueryBuilder<TRecordFor<T>> {
+  static whereNotNull<T extends typeof Model>(
+    this: T,
+    field: keyof TRecordFor<T> & string,
+  ): QueryBuilder<TRecordFor<T>> {
     return new QueryBuilder<TRecordFor<T>>(this).whereNotNull(field)
   }
 
@@ -943,8 +1048,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    *   .limit(10)
    *   .get()
    */
-  static newQuery<T extends typeof Model>(this: T): QueryBuilder<TRecordFor<T>> {
-    const builder = new QueryBuilder<TRecordFor<T>>(this)
+  static newQuery<T extends typeof Model>(this: T, queryOptions?: ModelQueryOptions): QueryBuilder<TRecordFor<T>> {
+    const builder = new QueryBuilder<TRecordFor<T>>(this, queryOptions)
     if (this.defaultScope) {
       this.defaultScope(builder)
     }
@@ -962,8 +1067,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    *
    * @returns A fresh QueryBuilder instance with no scopes applied
    */
-  static newQueryWithoutScopes<T extends typeof Model>(this: T): QueryBuilder<TRecordFor<T>> {
-    return new QueryBuilder<TRecordFor<T>>(this)
+  static newQueryWithoutScopes<T extends typeof Model>(this: T, queryOptions?: ModelQueryOptions): QueryBuilder<TRecordFor<T>> {
+    return new QueryBuilder<TRecordFor<T>>(this, queryOptions)
   }
 
   /**
@@ -1283,6 +1388,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     this: T,
     order: OrderByInput<TRecordFor<T>>,
     where?: WhereClauseFor<T>,
+    queryOptions?: ModelQueryOptions,
   ): Promise<TRecordFor<T>[]> {
     const table = this.resolveTable()
     const orderBy = normalizeOrderBy(order)
@@ -1292,7 +1398,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       options.where = where
     }
 
-    return this.getAdapter().findMany(table, options) as Promise<TRecordFor<T>[]>
+    return this.getAdapter().findMany(table, options, queryOptions) as Promise<TRecordFor<T>[]>
   }
 
   /**
@@ -1318,6 +1424,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   static async paginate<T extends typeof Model>(
     this: T,
     options: PaginateOptions<TRecordFor<T>> = {},
+    queryOptions?: ModelQueryOptions,
   ): Promise<PaginatedResult<TRecordFor<T>>> {
     const table = this.resolveTable()
     const adapter = this.getAdapter()
@@ -1330,11 +1437,11 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
 
     let total = 0
     if (typeof adapter.count === 'function') {
-      total = await adapter.count(table, options.where as WhereClauseFor<T>)
+      total = await adapter.count(table, options.where as WhereClauseFor<T>, queryOptions)
     } else {
       const records = options.where
-        ? await this.where(options.where as WhereClauseFor<T>)
-        : await this.all()
+        ? await this.newQuery(queryOptions).where(options.where as Partial<Record<string, unknown>>).get()
+        : await this.all(queryOptions)
       total = records.length
     }
 
@@ -1350,7 +1457,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       offset,
     }
 
-    const data = await adapter.findMany(table, findOptions) as Array<TRecordFor<T>>
+    const data = await adapter.findMany(table, findOptions, queryOptions) as Array<TRecordFor<T>>
 
     const from = total === 0 ? 0 : offset + 1
     const to = total === 0 ? 0 : offset + data.length
@@ -1422,7 +1529,11 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    *   email: 'john@example.com'
    * })
    */
-  static async create<T extends typeof Model>(this: T, data: TCreateFor<T>): Promise<TRecordFor<T>> {
+  static async create<T extends typeof Model>(
+    this: T,
+    data: TCreateFor<T>,
+    writeOptions?: ModelWriteOptions,
+  ): Promise<TRecordFor<T>> {
     const table = this.resolveTable()
     const filtered = this.filterFillable(data)
     const payload = await this.preparePersistencePayload(filtered)
@@ -1446,7 +1557,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       }
     }
 
-    const result = await this.getAdapter().create(table, payload) as TRecordFor<T>
+    const result = await this.getAdapter().create(table, payload, writeOptions) as TRecordFor<T>
 
     if (hooks) {
       const resultData = result as unknown as Record<string, unknown>
@@ -1480,6 +1591,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     this: T,
     where: WhereClauseFor<T>,
     data: Partial<TCreateFor<T>>,
+    writeOptions?: ModelWriteOptions,
   ): Promise<TRecordFor<T>> {
     const table = this.resolveTable()
     const adapter = this.getAdapter()
@@ -1509,7 +1621,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       }
     }
 
-    const result = await adapter.update(table, where, payload) as TRecordFor<T>
+    const result = await adapter.update(table, where, payload, writeOptions) as TRecordFor<T>
 
     if (hooks) {
       const resultData = result as unknown as Record<string, unknown>
@@ -1539,7 +1651,11 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    * await User.delete({ id: 1 })
    * await User.delete({ status: 'inactive' })
    */
-  static async delete<T extends typeof Model>(this: T, where: WhereClauseFor<T>): Promise<number | PlainObject | void> {
+  static async delete<T extends typeof Model>(
+    this: T,
+    where: WhereClauseFor<T>,
+    writeOptions?: ModelWriteOptions,
+  ): Promise<number | PlainObject | void> {
     const table = this.resolveTable()
     const adapter = this.getAdapter()
     if (!adapter.delete) {
@@ -1560,7 +1676,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       }
     }
 
-    const result = await adapter.delete(table, where)
+    const result = await adapter.delete(table, where, writeOptions)
 
     if (hooks) {
       await executeHook(hooks, 'deleted', whereData)
@@ -2007,6 +2123,7 @@ type TCreateFor<T extends typeof Model> = T extends { createType: infer R }
   : PlainObject
 
 type WhereClauseFor<T extends typeof Model> = WhereClause<TRecordFor<T>>
+type FieldFor<T extends typeof Model> = keyof TRecordFor<T> & string
 
 type RelationNames = string | readonly string[]
 
@@ -2027,6 +2144,22 @@ type RelationTypePick<T extends typeof Model, Names> = RelationNameUnion<Names> 
     ? { [K in Keys & keyof RelationTypesFor<T>]: RelationTypesFor<T>[K] }
     : {}
   : {}
+
+export interface TransactionModelScope<T extends typeof Model> {
+  readonly trx: TransactionHandle
+  all(): Promise<TRecordFor<T>[]>
+  find(id: unknown): Promise<TRecordFor<T> | null>
+  findOrFail(id: unknown): Promise<TRecordFor<T>>
+  first(where?: WhereClauseFor<T>): Promise<TRecordFor<T> | null>
+  where(conditions: WhereClauseFor<T>): QueryBuilder<TRecordFor<T>>
+  where(field: FieldFor<T>, value: unknown): QueryBuilder<TRecordFor<T>>
+  where(field: FieldFor<T>, operator: WhereOperator, value: unknown): QueryBuilder<TRecordFor<T>>
+  newQuery(): QueryBuilder<TRecordFor<T>>
+  create(data: TCreateFor<T>): Promise<TRecordFor<T>>
+  update(where: WhereClauseFor<T>, data: Partial<TCreateFor<T>>): Promise<TRecordFor<T>>
+  delete(where: WhereClauseFor<T>): Promise<number | PlainObject | void>
+  paginate(options?: PaginateOptions<TRecordFor<T>>): Promise<PaginatedResult<TRecordFor<T>>>
+}
 
 interface BaseRelationDefinition {
   type: 'hasMany' | 'hasOne' | 'belongsTo' | 'belongsToMany' | 'hasManyThrough' | 'morphMany' | 'morphTo'

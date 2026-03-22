@@ -8,6 +8,7 @@ Guren provides a broadcasting system for real-time event broadcasting to connect
 - **Channel** – A named conduit for broadcasting events. Channels can be public, private, or presence.
 - **BroadcastDriver** – Backend for event distribution (Memory or Redis).
 - **SSE (Server-Sent Events)** – Built-in support for pushing events to browser clients.
+- **WebSocket Clients** – Built-in lifecycle helpers for registering socket clients and subscribing them to channels.
 
 ## Channel Types
 
@@ -156,6 +157,70 @@ export function registerBroadcastRoutes(router: Router): void {
     getUser: (ctx) => ctx.get('user'),
   }))
 }
+```
+
+## WebSocket Foundation
+
+Guren now includes WebSocket client lifecycle helpers on `BroadcastManager`.  
+You can register a socket client, subscribe it to channels, and reuse the same broadcast events used by SSE.
+
+```ts
+const clientId = broadcast.registerWebSocketClient({
+  send: (event, data) => socket.send(JSON.stringify({ event, data })),
+  close: () => socket.close(),
+})
+
+broadcast.subscribeWebSocketClient(clientId, 'notifications')
+
+// Later
+broadcast.unsubscribeWebSocketClient(clientId, 'notifications')
+broadcast.removeWebSocketClient(clientId)
+```
+
+These APIs provide the server-side foundation so a Bun WebSocket upgrade route can plug into the existing channel/driver system.
+
+### Typed channel codegen (Wave 3)
+
+`guren codegen` now generates `.guren/channels.gen.ts` from your server-side broadcast usage.
+
+```ts
+// app/Providers/BroadcastProvider.ts
+broadcast.channel('announcements', () => true)
+broadcast.privateChannel('posts.{id}', () => true)
+broadcast.broadcast('announcements', 'NewPost', { id: 1 })
+```
+
+Generated artifacts include:
+
+- `ChannelName` – channel name union with pattern-aware template literal types.
+- `ChannelEvents` – channel-to-event map with inferred payload types for literal/object/array broadcast payloads.
+- `channelEventManifest` – runtime manifest for discovered channels/events.
+
+```ts
+import type { ChannelEvents } from '../.guren/channels.gen'
+import { createUseChannel } from '@guren/inertia-client'
+
+const useChannel = createUseChannel<ChannelEvents>()
+const feed = useChannel('announcements')
+const off = feed.on('NewPost', (payload) => {
+  console.log(payload)
+})
+```
+
+This gives you typed channel/event names and inferred payload shapes in the frontend.
+
+### End-to-end typed realtime flow (Wave 7)
+
+Use the generated `ChannelEvents` on the server too, so emit-side payloads are checked at compile time.
+
+```ts
+import type { ChannelEvents } from '../.guren/channels.gen'
+import { createTypedBroadcaster } from '@guren/server'
+
+const typed = createTypedBroadcaster<ChannelEvents>(broadcast)
+
+await typed.broadcast('announcements', 'NewPost', { id: 1 }) // typed payload
+await typed.toChannel('announcements').broadcast('NewPost', { id: 2 })
 ```
 
 ### Client-Side Integration

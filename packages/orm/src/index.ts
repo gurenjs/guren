@@ -14,6 +14,8 @@ export type {
   PaginatedResult,
   PaginationMeta,
   ORMAdapter,
+  TransactionHandle,
+  TransactionModelScope,
   CastType,
   HasManyRelationResult,
   HasOneRelationResult,
@@ -48,6 +50,8 @@ export { DrizzleAdapter } from './adapters/drizzle-adapter'
 export { buildDrizzleConditions } from './adapters/drizzle-conditions'
 export { createPostgresDatabase } from './postgres'
 export type { PostgresDatabase, PostgresDatabaseOptions } from './postgres'
+export { createMySqlDatabase } from './mysql'
+export type { MySqlDatabase, MySqlDatabaseOptions } from './mysql'
 export { createSqliteDatabase } from './sqlite'
 export type { SqliteDatabase, SqliteDatabaseOptions } from './sqlite'
 export { runSeeders, defineSeeder, loadSeeders } from './seeder'

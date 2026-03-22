@@ -8,6 +8,7 @@ Gurenは接続されたクライアントへのリアルタイムイベント配
 - **Channel** – イベントをブロードキャストするための名前付き経路。チャンネルはpublic、private、presenceのいずれか。
 - **BroadcastDriver** – イベント配信のバックエンド（MemoryまたはRedis）。
 - **SSE (Server-Sent Events)** – ブラウザクライアントへのイベントプッシュの組み込みサポート。
+- **WebSocket Clients** – ソケットクライアントの登録・購読・解除を扱う基盤API。
 
 ## チャンネルタイプ
 
@@ -145,6 +146,71 @@ export function registerBroadcastRoutes(router: Router): void {
     getUser: (ctx) => ctx.get('user'),
   }))
 }
+```
+
+## WebSocket 基盤
+
+`BroadcastManager` に WebSocket クライアントのライフサイクルAPIが追加されています。  
+クライアント登録、チャンネル購読、解除を SSE と同じブロードキャスト経路で扱えます。
+
+```ts
+const clientId = broadcast.registerWebSocketClient({
+  send: (event, data) => socket.send(JSON.stringify({ event, data })),
+  close: () => socket.close(),
+})
+
+broadcast.subscribeWebSocketClient(clientId, 'notifications')
+
+// 後で解除
+broadcast.unsubscribeWebSocketClient(clientId, 'notifications')
+broadcast.removeWebSocketClient(clientId)
+```
+
+このAPIを使うことで、Bun の WebSocket upgrade ルートを既存の channel/driver 構成に接続できます。
+
+### 型安全 channel codegen（Wave 3）
+
+`guren codegen` で `.guren/channels.gen.ts` が生成されるようになりました。  
+サーバー側の broadcast 利用箇所からチャンネルとイベント名を抽出します。
+
+```ts
+// app/Providers/BroadcastProvider.ts
+broadcast.channel('announcements', () => true)
+broadcast.privateChannel('posts.{id}', () => true)
+broadcast.broadcast('announcements', 'NewPost', { id: 1 })
+```
+
+生成物には以下が含まれます。
+
+- `ChannelName` – パターンを含むチャンネル名 union（template literal type）
+- `ChannelEvents` – チャンネルごとのイベント map（リテラル/object/array の payload 型を推論）
+- `channelEventManifest` – 検出済み channel/event の runtime manifest
+
+```ts
+import type { ChannelEvents } from '../.guren/channels.gen'
+import { createUseChannel } from '@guren/inertia-client'
+
+const useChannel = createUseChannel<ChannelEvents>()
+const feed = useChannel('announcements')
+const off = feed.on('NewPost', (payload) => {
+  console.log(payload)
+})
+```
+
+これにより、フロント側で channel/event 名だけでなく payload 形状も型安全に扱えます。
+
+### E2E 型安全リアルタイム（Wave 7）
+
+生成された `ChannelEvents` をサーバー側 emit にも適用すると、送信時 payload もコンパイル時に検証できます。
+
+```ts
+import type { ChannelEvents } from '../.guren/channels.gen'
+import { createTypedBroadcaster } from '@guren/server'
+
+const typed = createTypedBroadcaster<ChannelEvents>(broadcast)
+
+await typed.broadcast('announcements', 'NewPost', { id: 1 }) // payload も型チェック
+await typed.toChannel('announcements').broadcast('NewPost', { id: 2 })
 ```
 
 ### クライアント側の統合

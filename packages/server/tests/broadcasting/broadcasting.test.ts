@@ -4,6 +4,7 @@ import {
   createBroadcastManager,
   setBroadcastManager,
   getBroadcastManager,
+  createTypedBroadcaster,
   Channel,
   PrivateChannel,
   PresenceChannel,
@@ -616,6 +617,40 @@ describe('BroadcastManager', () => {
     })
   })
 
+  describe('typed broadcaster', () => {
+    it('broadcasts using typed helper wrappers', async () => {
+      type Events = {
+        announcements: {
+          NewPost: { id: number; title: string }
+        }
+        'private-orders.1': {
+          OrderUpdated: { status: string }
+        }
+        'presence-chat.1': {
+          UserTyping: { userId: number }
+        }
+      }
+
+      const manager = new BroadcastManager({
+        default: 'memory',
+        drivers: {
+          memory: () => new MemoryDriver(),
+        },
+      })
+
+      const typed = createTypedBroadcaster<Events>(manager)
+      await typed.broadcast('announcements', 'NewPost', { id: 1, title: 'hello' })
+      await typed.toPrivate('private-orders.1').broadcast('OrderUpdated', { status: 'paid' })
+      await typed.toPresence('presence-chat.1').broadcast('UserTyping', { userId: 42 })
+
+      const events = (manager.driver() as MemoryDriver).getPublishedEvents()
+      expect(events).toHaveLength(3)
+      expect(events[0].event).toBe('NewPost')
+      expect(events[1].event).toBe('OrderUpdated')
+      expect(events[2].event).toBe('UserTyping')
+    })
+  })
+
   describe('toChannel', () => {
     it('should return public channel', () => {
       const channel = manager.toChannel('notifications')
@@ -640,6 +675,62 @@ describe('BroadcastManager', () => {
 
       expect(channel).toBeInstanceOf(PresenceChannel)
       expect(channel.name).toBe('presence-chat.1')
+    })
+  })
+
+  describe('websocket clients', () => {
+    it('should register and remove websocket clients', () => {
+      const clientId = manager.registerWebSocketClient({
+        send: () => {},
+        close: () => {},
+      })
+
+      const client = manager.getWebSocketClient(clientId)
+      expect(client).toBeDefined()
+      expect(client?.id).toBe(clientId)
+      expect(client?.channels.size).toBe(0)
+
+      const removed = manager.removeWebSocketClient(clientId)
+      expect(removed).toBe(true)
+      expect(manager.getWebSocketClient(clientId)).toBeUndefined()
+    })
+
+    it('should subscribe websocket clients and fanout events', async () => {
+      const received: Array<{ event: string; data: unknown }> = []
+      const clientId = manager.registerWebSocketClient({
+        send: (event, data) => {
+          received.push({ event, data })
+        },
+        close: () => {},
+      })
+
+      const subscribed = manager.subscribeWebSocketClient(clientId, 'ws.notifications')
+      expect(subscribed).toBe(true)
+
+      await manager.broadcast('ws.notifications', 'NewMessage', { body: 'hello' })
+
+      expect(received).toHaveLength(1)
+      expect(received[0].event).toBe('NewMessage')
+      expect(received[0].data).toEqual({ body: 'hello' })
+    })
+
+    it('should unsubscribe websocket clients from channels', async () => {
+      const received: Array<{ event: string; data: unknown }> = []
+      const clientId = manager.registerWebSocketClient({
+        send: (event, data) => {
+          received.push({ event, data })
+        },
+        close: () => {},
+      })
+
+      manager.subscribeWebSocketClient(clientId, 'ws.notifications')
+      await manager.broadcast('ws.notifications', 'Before', { n: 1 })
+      const unsubscribed = manager.unsubscribeWebSocketClient(clientId, 'ws.notifications')
+      expect(unsubscribed).toBe(true)
+      await manager.broadcast('ws.notifications', 'After', { n: 2 })
+
+      expect(received).toHaveLength(1)
+      expect(received[0].event).toBe('Before')
     })
   })
 })

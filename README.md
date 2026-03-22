@@ -492,10 +492,10 @@ Status details live in `ROADMAP.md`.
 - [ ] Database adapters: MySQL support (Postgres and SQLite implemented)
 - [x] Route model binding (`bind: { id: Post }`) with typed `this.model(Post)` controller helper
 - [ ] OAuth/social authentication providers and JWT guard
-- [ ] Release and compatibility policy: Bun/Node compatibility matrix and migration guides per minor release
+- [x] Release and compatibility policy: Bun/Node compatibility matrix and migration guides per minor release
 - [ ] Documentation and learning: end-to-end tutorial, deployment recipes (Docker/Edge/Serverless), and troubleshooting docs
 - [ ] Quality and reliability: integration/E2E coverage, perf/footprint benchmarks, and nightly canary builds
-- [ ] Community process: contribution templates, RFC workflow for breaking changes, and regular changelog/release notes
+- [x] Community process: contribution templates, RFC workflow for breaking changes, and regular changelog/release notes
 
 ## Contributing
 

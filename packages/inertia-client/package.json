@@ -38,6 +38,11 @@
       "import": "./dist/contracts.js",
       "default": "./dist/contracts.js"
     },
+    "./channel": {
+      "types": "./dist/channel.d.ts",
+      "import": "./dist/channel.js",
+      "default": "./dist/channel.js"
+    },
     "./dist/*": {
       "default": "./dist/*"
     },

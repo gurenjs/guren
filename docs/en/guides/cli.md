@@ -31,6 +31,12 @@ bunx guren add storage
 bunx guren add broadcasting
 bunx guren add schedule
 ```
+```bash
+bunx guren add plugin @acme/guren-plugin-audit
+```
+
+`add plugin` wires the plugin provider into `src/app.ts` and prints a `bun add <package>` hint when the dependency is not installed yet.
+
 
 These commands patch `src/app.ts`, create the matching provider/runtime files, and keep the generated app aligned with the reference starter.
 

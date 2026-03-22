@@ -6,6 +6,7 @@ describe('@guren/orm', () => {
     expect(orm.Model).toBeDefined()
     expect(orm.DrizzleAdapter).toBeDefined()
     expect(orm.createPostgresDatabase).toBeDefined()
+    expect(orm.createMySqlDatabase).toBeDefined()
     expect(orm.runSeeders).toBeDefined()
   })
 })

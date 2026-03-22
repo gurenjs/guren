@@ -90,6 +90,17 @@ export interface SSEClient {
 }
 
 /**
+ * WebSocket client connection.
+ */
+export interface WebSocketClient {
+  id: string
+  userId?: string | number
+  channels: Set<string>
+  send(event: string, data: unknown): void | Promise<void>
+  close(): void
+}
+
+/**
  * Broadcast manager options.
  */
 export interface BroadcastManagerOptions {

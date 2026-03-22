@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun run --watch bin/serve.ts",
+    "dev": "bun bin/serve.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "db:make": "bunx guren make:migration",

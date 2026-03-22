@@ -8,6 +8,7 @@ Guren ships with a Laravel-inspired authentication stack that sits on top of the
 - **Guards** – runtime objects responsible for authenticating a request. The default `SessionGuard` persists the logged-in user's identifier inside the session and supports optional "remember me" tokens.
 - **User Providers** – data access adapters used by guards to load and validate users. `ModelUserProvider` integrates with Guren's `Model` abstraction so you can back authentication with Drizzle ORM tables.
 - **Auth Context** – per-request facade that surfaces guard helpers (`auth.check()`, `auth.user()`, `auth.login()`, etc.). The context is attached automatically by `AuthServiceProvider`; it is available in controllers via the `this.auth` helper and in middleware through `attachAuthContext`.
+- **OAuthManager** – social login helper that manages provider configs, CSRF-safe OAuth state, code exchange, and user profile fetch.
 
 ## Quickstart via CLI
 
@@ -33,6 +34,44 @@ bun run dev
 ```
 
 Visit `http://localhost:3000/login` and sign in with `demo@example.com` / `secret`.
+
+## OAuth / Social login
+
+Wave 4 adds first-party OAuth primitives plus provider presets for GitHub / Google / Discord.
+
+### Scaffold OAuth in an app
+
+```bash
+bunx guren add oauth
+```
+
+This creates:
+
+- `app/Providers/OAuthProvider.ts`
+- `app/Http/Controllers/Auth/OAuthController.ts`
+- `routes/oauth.ts`
+
+and wires `CoreOAuthServiceProvider` + `OAuthProvider` into `src/app.ts`.
+
+### Configure provider credentials
+
+```bash
+OAUTH_GITHUB_CLIENT_ID=...
+OAUTH_GITHUB_CLIENT_SECRET=...
+OAUTH_GITHUB_REDIRECT_URI=https://your-app.test/auth/github/callback
+```
+
+Equivalent env names exist for `GOOGLE` and `DISCORD`.
+
+### Route flow
+
+```ts
+router.get('/auth/:provider', [OAuthController, 'redirect'])
+router.get('/auth/:provider/callback', [OAuthController, 'callback'])
+```
+
+`redirect` creates a signed state and redirects to the provider consent screen.  
+`callback` validates state, exchanges code for token, then fetches the remote profile.
 
 ### Manual Setup
 

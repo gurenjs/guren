@@ -31,6 +31,12 @@ bunx guren add storage
 bunx guren add broadcasting
 bunx guren add schedule
 ```
+```bash
+bunx guren add plugin @acme/guren-plugin-audit
+```
+
+`add plugin` は `src/app.ts` にプラグイン Provider を自動登録し、依存が未インストールの場合は `bun add <package>` の案内を表示します。
+
 
 これらのコマンドは `src/app.ts` を更新し、対応する provider/runtime ファイルを生成します。
 

@@ -64,9 +64,239 @@ async function scaffoldFeatureFiles(
 }
 
 const blueprintRegistry: Record<string, BlueprintDefinition> = {
+  admin: {
+    description: 'Install a starter admin dashboard with dedicated routes and controller.',
+    run: async (options) => {
+      const writerOptions: WriterOptions = { force: Boolean(options.force) }
+      const created = await scaffoldFeatureFiles([
+        {
+          path: 'app/Http/Controllers/Admin/AdminDashboardController.ts',
+          contents: `import { Controller } from '@guren/core'
+
+export default class AdminDashboardController extends Controller {
+  async index(): Promise<Response> {
+    return this.inertia('admin/Dashboard', {
+      stats: {
+        users: 0,
+        posts: 0,
+        comments: 0,
+      },
+    }, {
+      title: 'Admin Dashboard',
+      url: '/admin',
+    })
+  }
+}
+`,
+        },
+        {
+          path: 'resources/js/pages/admin/Dashboard.tsx',
+          contents: `type Props = {
+  stats: {
+    users: number
+    posts: number
+    comments: number
+  }
+}
+
+export default function AdminDashboard({ stats }: Props) {
+  return (
+    <main className="mx-auto max-w-5xl space-y-8 px-6 py-12">
+      <header className="space-y-2">
+        <p className="text-xs uppercase tracking-wide text-zinc-500">Admin</p>
+        <h1 className="text-3xl font-semibold">Dashboard</h1>
+      </header>
+
+      <section className="grid gap-4 sm:grid-cols-3">
+        <article className="rounded border p-4">
+          <p className="text-sm text-zinc-500">Users</p>
+          <p className="mt-2 text-2xl font-semibold">{stats.users}</p>
+        </article>
+        <article className="rounded border p-4">
+          <p className="text-sm text-zinc-500">Posts</p>
+          <p className="mt-2 text-2xl font-semibold">{stats.posts}</p>
+        </article>
+        <article className="rounded border p-4">
+          <p className="text-sm text-zinc-500">Comments</p>
+          <p className="mt-2 text-2xl font-semibold">{stats.comments}</p>
+        </article>
+      </section>
+    </main>
+  )
+}
+`,
+        },
+        {
+          path: 'routes/admin.ts',
+          contents: `import { Router } from '@guren/core'
+import AdminDashboardController from '../app/Http/Controllers/Admin/AdminDashboardController.js'
+
+export function registerAdminRoutes(router: Router): void {
+  router.get('/admin', [AdminDashboardController, 'index']).name('admin.dashboard')
+}
+
+export default registerAdminRoutes
+`,
+        },
+      ], writerOptions)
+
+      try {
+        const webRoutesPath = 'routes/web.ts'
+        const absoluteWebRoutesPath = resolve(process.cwd(), webRoutesPath)
+        const adminImport = "import registerAdminRoutes from './admin.js'"
+        await addImport(webRoutesPath, adminImport)
+
+        let routesContent = await readFile(absoluteWebRoutesPath, 'utf8')
+        if (!routesContent.includes('registerAdminRoutes(router)')) {
+          const registrarPattern = /(export function [^(]+\(\s*router\s*:\s*Router\s*\)\s*(?::\s*[^{]+)?\{\n)/u
+          if (registrarPattern.test(routesContent)) {
+            routesContent = routesContent.replace(registrarPattern, `$1  registerAdminRoutes(router)\n`)
+            await writeFile(absoluteWebRoutesPath, routesContent, 'utf8')
+          }
+        }
+      } catch {
+        // skip route auto-wiring when routes/web.ts doesn't exist yet
+      }
+
+      return created
+    },
+  },
   auth: {
     description: 'Install the default authentication stack for the current app.',
     run: async (options) => makeAuth({ force: Boolean(options.force), install: true }),
+  },
+  oauth: {
+    description: 'Install OAuth scaffolding with GitHub, Google, and Discord provider presets.',
+    run: async (options) => {
+      const writerOptions: WriterOptions = { force: Boolean(options.force) }
+      const created = await scaffoldFeatureFiles([
+        {
+          path: 'app/Providers/OAuthProvider.ts',
+          contents: `import { ServiceProvider, type OAuthManager, createGitHubOAuthProviderConfig, createGoogleOAuthProviderConfig, createDiscordOAuthProviderConfig } from '@guren/core'
+
+export default class OAuthProvider extends ServiceProvider {
+  register(): void {
+    const oauth = this.container.make<OAuthManager>('oauth')
+
+    const githubClientId = process.env.OAUTH_GITHUB_CLIENT_ID
+    const githubClientSecret = process.env.OAUTH_GITHUB_CLIENT_SECRET
+    const githubRedirectUri = process.env.OAUTH_GITHUB_REDIRECT_URI
+    if (githubClientId && githubClientSecret && githubRedirectUri) {
+      oauth.registerProvider('github', createGitHubOAuthProviderConfig({
+        clientId: githubClientId,
+        clientSecret: githubClientSecret,
+        redirectUri: githubRedirectUri,
+      }))
+    }
+
+    const googleClientId = process.env.OAUTH_GOOGLE_CLIENT_ID
+    const googleClientSecret = process.env.OAUTH_GOOGLE_CLIENT_SECRET
+    const googleRedirectUri = process.env.OAUTH_GOOGLE_REDIRECT_URI
+    if (googleClientId && googleClientSecret && googleRedirectUri) {
+      oauth.registerProvider('google', createGoogleOAuthProviderConfig({
+        clientId: googleClientId,
+        clientSecret: googleClientSecret,
+        redirectUri: googleRedirectUri,
+      }))
+    }
+
+    const discordClientId = process.env.OAUTH_DISCORD_CLIENT_ID
+    const discordClientSecret = process.env.OAUTH_DISCORD_CLIENT_SECRET
+    const discordRedirectUri = process.env.OAUTH_DISCORD_REDIRECT_URI
+    if (discordClientId && discordClientSecret && discordRedirectUri) {
+      oauth.registerProvider('discord', createDiscordOAuthProviderConfig({
+        clientId: discordClientId,
+        clientSecret: discordClientSecret,
+        redirectUri: discordRedirectUri,
+      }))
+    }
+  }
+}
+`,
+        },
+        {
+          path: 'app/Http/Controllers/Auth/OAuthController.ts',
+          contents: `import { Controller, type OAuthManager } from '@guren/core'
+
+type SupportedProvider = 'github' | 'google' | 'discord'
+
+const SUPPORTED_PROVIDERS = new Set<SupportedProvider>(['github', 'google', 'discord'])
+
+export default class OAuthController extends Controller {
+  private oauth(): OAuthManager {
+    return this.make<OAuthManager>('oauth')
+  }
+
+  async redirect(): Promise<Response> {
+    const provider = this.validateProvider(this.request.param('provider'))
+    const { url } = await this.oauth().authorize(provider)
+    return this.redirect(url)
+  }
+
+  async callback(): Promise<Response> {
+    const provider = this.validateProvider(this.request.param('provider'))
+    const code = this.request.query('code')
+    const state = this.request.query('state')
+
+    if (!code || !state) {
+      return this.json({ error: 'Missing OAuth callback parameters.' }, { status: 400 })
+    }
+
+    const profile = await this.oauth().user(provider, { code, state })
+    return this.json({ provider, profile }, { status: 200 })
+  }
+
+  private validateProvider(value: string): SupportedProvider {
+    if (SUPPORTED_PROVIDERS.has(value as SupportedProvider)) {
+      return value as SupportedProvider
+    }
+    throw new Error(\`Unsupported OAuth provider: \${value}\`)
+  }
+}
+`,
+        },
+        {
+          path: 'routes/oauth.ts',
+          contents: `import { Router } from '@guren/core'
+import OAuthController from '../app/Http/Controllers/Auth/OAuthController.js'
+
+export function registerOAuthRoutes(router: Router): void {
+  router.get('/auth/:provider', [OAuthController, 'redirect']).name('oauth.redirect')
+  router.get('/auth/:provider/callback', [OAuthController, 'callback']).name('oauth.callback')
+}
+
+export default registerOAuthRoutes
+`,
+        },
+      ], writerOptions)
+
+      await installCoreProvider(
+        "import { OAuthServiceProvider as CoreOAuthServiceProvider } from '@guren/core'",
+        'CoreOAuthServiceProvider',
+      )
+      await addImport('src/app.ts', "import OAuthProvider from '../app/Providers/OAuthProvider.js'")
+      await addProvider('src/app.ts', 'OAuthProvider')
+
+      try {
+        const webRoutesPath = 'routes/web.ts'
+        const absoluteWebRoutesPath = resolve(process.cwd(), webRoutesPath)
+        const oauthImport = "import registerOAuthRoutes from './oauth.js'"
+        await addImport(webRoutesPath, oauthImport)
+
+        let routesContent = await readFile(absoluteWebRoutesPath, 'utf8')
+        if (!routesContent.includes('registerOAuthRoutes(router)')) {
+          const registrarPattern = /(export function [^(]+\(\s*router\s*:\s*Router\s*\)\s*(?::\s*[^{]+)?\{\n)/u
+          if (registrarPattern.test(routesContent)) {
+            routesContent = routesContent.replace(registrarPattern, `$1  registerOAuthRoutes(router)\n`)
+            await writeFile(absoluteWebRoutesPath, routesContent, 'utf8')
+          }
+        }
+      } catch {
+        // skip route auto-wiring when routes/web.ts doesn't exist yet
+      }
+
+      return created
+    },
   },
   cache: {
     description: 'Install the default cache provider and an example cache service.',

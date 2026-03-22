@@ -96,6 +96,7 @@ describe('inertia assets', () => {
     })
 
     expect(process.env.GUREN_INERTIA_ENTRY).toBe('http://localhost:5174/resources/js/dev-entry.ts')
+    expect(process.env.GUREN_INERTIA_STYLES).toBe('/resources/css/app.css')
     expect(process.env.GUREN_INERTIA_SSR_ENTRY).toBe('')
     expect(process.env.GUREN_INERTIA_IMPORT_MAP).toContain('@guren/inertia-client')
   })

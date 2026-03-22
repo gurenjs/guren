@@ -112,6 +112,7 @@ The container image bakes in both the client and SSR bundles so the server can s
 Mount your configuration or secrets as needed for your hosting environment.
 
 ## Post-Deployment Tasks
+- Follow the [Production Operations Runbook](./operations.md) for SLO, incident response, and backup/restore drill policy.
 - Set up HTTPS (e.g. via a reverse proxy such as Nginx, Caddy, or your cloud platform).
 - Configure logging and monitoring—Bun prints to stdout/stderr, so ship logs to your chosen aggregator.
 - Schedule automated backups for the PostgreSQL database.

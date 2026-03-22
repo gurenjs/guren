@@ -2,6 +2,8 @@
 
 Guren は Drizzle ORM と PostgreSQL を組み合わせて使います。このガイドでは、スキーマ定義、マイグレーション、シーダー、アプリケーションコードからの日常的な利用方法を説明します。
 
+現在は PostgreSQL / SQLite / MySQL をサポートしています。
+
 ## 設定の概要
 - `config/database.ts`: データベース接続を生成し、フレームワークに公開します。
 - `drizzle.config.ts`: drizzle-kit の共通設定（スキーマパス、マイグレーション出力先、DB 方言など）。
@@ -67,6 +69,27 @@ SQLite アダプタは `createPostgresDatabase` と同じ API を持つため、
 
 > [!TIP]
 > 開発とテストには SQLite を使い、本番では PostgreSQL に切り替えるのがおすすめです。ORM アダプタの抽象化により、モデルやクエリはそのまま動作します。
+
+## MySQL サポート
+
+MySQL（および互換データベース）を使う場合は `createMySqlDatabase` を使います。
+
+```ts
+// config/database.ts
+import { createMySqlDatabase } from '@guren/orm'
+import * as schema from '../db/schema.js'
+
+const database = createMySqlDatabase({
+  schema,
+  migrationsFolder: new URL('../db/migrations', import.meta.url),
+  seedersFolder: new URL('../db/seeders', import.meta.url),
+  connectionString: () => process.env.DATABASE_URL,
+})
+
+export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+```
+
+MySQL アダプタも PostgreSQL / SQLite と同じランタイム API（`getDatabase`, `migrateDatabase`, `configureOrm`, `seedDatabase`）を提供するため、切り替え時は主に import と接続設定の変更だけで済みます。
 
 ## マイグレーションの生成
 Guren CLI は drizzle-kit をラップしており、Drizzle スキーマから SQL ファイルを直接生成できます。
@@ -137,6 +160,36 @@ await Post.find(id)         // プライマリキーで検索（見つからな�
 await Post.findOrFail(id)   // 検索、見つからなければ ModelNotFoundException（404）をスロー
 await Post.create(payload)  // 新しいレコードを挿入
 await Post.first()          // 最初のマッチするレコードを返す
+```
+
+## トランザクション
+
+複数の書き込みを「全部成功 or 全部失敗」にしたい場合は `Model.transaction()` を使います。
+
+```ts
+await Post.transaction(async (trx) => {
+  const post = await Post.create({
+    title: 'Atomic write',
+    body: 'Everything in one transaction',
+  }, { trx })
+
+  await Post.update({ id: post.id }, { status: 'published' }, { trx })
+})
+```
+
+コールバック内で例外が投げられると、トランザクションはロールバックされます。
+
+より簡潔に書きたい場合は、トランザクション束縛スコープも使えます。
+
+```ts
+await Post.transaction(async (_trx, txPost) => {
+  const post = await txPost.create({
+    title: 'Scoped write',
+    body: '手動で { trx } を渡さない',
+  })
+
+  await txPost.update({ id: post.id }, { status: 'published' })
+})
 ```
 
 ## 流暢なクエリビルダー

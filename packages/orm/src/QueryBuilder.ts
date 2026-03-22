@@ -1,5 +1,15 @@
 import { DEFAULT_PAGINATION_SIZE } from './Model'
-import type { FindManyOptions, Model, ORMAdapter, OrderByClause, OrderDirection, PaginatedResult, PaginationMeta, PlainObject } from './Model'
+import type {
+  AdapterQueryOptions,
+  FindManyOptions,
+  Model,
+  ORMAdapter,
+  OrderByClause,
+  OrderDirection,
+  PaginatedResult,
+  PaginationMeta,
+  PlainObject,
+} from './Model'
 
 type FieldKey<TRecord extends PlainObject> = keyof TRecord & string
 
@@ -30,6 +40,7 @@ export interface QueryBuilderOptions {
   limitValue?: number
   offsetValue?: number
   selectFields?: readonly string[]
+  trx?: unknown
 }
 
 /**
@@ -67,10 +78,11 @@ export class QueryBuilder<
   private eagerLoad: string[] = []
   private eagerLoadConstraints: Map<string, (q: QueryBuilder<any>) => void> = new Map() // eslint-disable-line @typescript-eslint/no-explicit-any
 
-  constructor(modelClass: typeof Model) {
+  constructor(modelClass: typeof Model, options: { trx?: unknown } = {}) {
     this.modelClass = modelClass
     this.table = modelClass.resolveTable()
     this.adapter = modelClass.getAdapter()
+    this.options.trx = options.trx
   }
 
   /**
@@ -330,13 +342,13 @@ export class QueryBuilder<
    */
   async count(): Promise<number> {
     if (typeof this.adapter.count === 'function' && this.conditions.length === 0) {
-      return this.adapter.count(this.table)
+      return this.adapter.count(this.table, undefined, { trx: this.options.trx })
     }
 
     // For advanced conditions we need to use the advanced adapter method
     const advancedAdapter = this.adapter as ORMAdapterAdvanced
     if (typeof advancedAdapter.countAdvanced === 'function') {
-      return advancedAdapter.countAdvanced(this.table, this.conditions)
+      return advancedAdapter.countAdvanced(this.table, this.conditions, { trx: this.options.trx })
     }
 
     // Fallback: fetch all and count
@@ -399,13 +411,13 @@ export class QueryBuilder<
 
     const advancedAdapter = this.adapter as ORMAdapterAdvanced
     if (typeof advancedAdapter.updateAdvanced === 'function') {
-      return advancedAdapter.updateAdvanced(this.table, this.conditions, data) as Promise<TRecord>
+      return advancedAdapter.updateAdvanced(this.table, this.conditions, data, { trx: this.options.trx }) as Promise<TRecord>
     }
 
     // Fallback to simple where clause if possible
     const simpleWhere = this.toSimpleWhereClause()
     if (simpleWhere) {
-      return this.adapter.update(this.table, simpleWhere, data) as Promise<TRecord>
+      return this.adapter.update(this.table, simpleWhere, data, { trx: this.options.trx }) as Promise<TRecord>
     }
 
     throw new Error('Advanced conditions require an adapter that supports updateAdvanced.')
@@ -422,13 +434,13 @@ export class QueryBuilder<
 
     const advancedAdapter = this.adapter as ORMAdapterAdvanced
     if (typeof advancedAdapter.deleteAdvanced === 'function') {
-      return advancedAdapter.deleteAdvanced(this.table, this.conditions)
+      return advancedAdapter.deleteAdvanced(this.table, this.conditions, { trx: this.options.trx })
     }
 
     // Fallback to simple where clause if possible
     const simpleWhere = this.toSimpleWhereClause()
     if (simpleWhere) {
-      return this.adapter.delete(this.table, simpleWhere)
+      return this.adapter.delete(this.table, simpleWhere, { trx: this.options.trx })
     }
 
     throw new Error('Advanced conditions require an adapter that supports deleteAdvanced.')
@@ -490,7 +502,7 @@ export class QueryBuilder<
         limit: this.options.limitValue,
         offset: this.options.offsetValue,
         select: this.options.selectFields,
-      })
+      }, { trx: this.options.trx })
     }
 
     // Fallback: convert to simple where clause if possible
@@ -500,7 +512,7 @@ export class QueryBuilder<
       orderBy: this.options.orderBy.length > 0 ? (this.options.orderBy as OrderByClause) : undefined,
       limit: this.options.limitValue,
       offset: this.options.offsetValue,
-    })
+    }, { trx: this.options.trx })
   }
 
   /**
@@ -633,18 +645,22 @@ export interface ORMAdapterAdvanced extends ORMAdapter {
       offset?: number
       select?: readonly string[]
     },
+    queryOptions?: AdapterQueryOptions,
   ): Promise<TRecord[]>
   countAdvanced?<TRecord extends PlainObject = PlainObject>(
     table: unknown,
     conditions: WhereCondition[],
+    queryOptions?: AdapterQueryOptions,
   ): Promise<number>
   updateAdvanced?<TRecord extends PlainObject = PlainObject>(
     table: unknown,
     conditions: WhereCondition[],
     data: PlainObject,
+    writeOptions?: AdapterQueryOptions,
   ): Promise<TRecord>
   deleteAdvanced?<TRecord extends PlainObject = PlainObject>(
     table: unknown,
     conditions: WhereCondition[],
+    writeOptions?: AdapterQueryOptions,
   ): Promise<number | PlainObject | void>
 }

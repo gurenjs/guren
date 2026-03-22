@@ -32,7 +32,7 @@ const PAGE_CONTRACT_CANDIDATES = [
   'resources/js/pages/contracts.js',
   'resources/js/pages/contracts.jsx',
 ]
-const GENERATED_FILES = ['.guren/routes.gen.ts', '.guren/pages.gen.ts']
+const GENERATED_FILES = ['.guren/routes.gen.ts', '.guren/pages.gen.ts', '.guren/data.gen.ts', '.guren/channels.gen.ts']
 
 async function fileExists(cwd: string, relativePath: string): Promise<boolean> {
   try {

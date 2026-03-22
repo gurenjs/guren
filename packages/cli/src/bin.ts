@@ -32,6 +32,7 @@ import { generateRouteTypes } from './routes-types'
 import { generatePageTypes } from './pages-types'
 import { generateDataTypes } from './data-types'
 import { generateApiClientTypes } from './api-client-types'
+import { generateChannelTypes } from './channel-types'
 import { consoleCommand } from './console'
 import { bootstrapApplication, resolveMainEntry, type MaybeApplication } from './runtime'
 import { runQueueWorker, listFailedJobs, retryFailedJob, retryAllFailedJobs, flushFailedJobs } from './queue'
@@ -42,6 +43,8 @@ import { listScheduledTasks, runScheduledTasks } from './schedule'
 import { runHealthCheck } from './health-check'
 import { publishLanguageFiles, makeLanguage, listLocales } from './lang'
 import { upgradeCanary } from './upgrade'
+import { scaffoldDeploy, type DeployTarget } from './deploy'
+import { installPlugin } from './plugin'
 
 type ForceableArgs = { force?: boolean }
 
@@ -607,6 +610,10 @@ const codegenCommand = defineCommand({
       appRoot: args.app,
       ...writerOptions,
     })
+    const { outputPath: channelOutputPath } = await generateChannelTypes({
+      appRoot: args.app,
+      ...writerOptions,
+    })
     const { outputPath: apiClientOutputPath } = await generateApiClientTypes(
       definitions,
       { appRoot: args.app, ...writerOptions },
@@ -615,6 +622,7 @@ const codegenCommand = defineCommand({
     consola.success(`Route types generated at ${outputPath}`)
     consola.success(`Route helpers generated at ${runtimeOutputPath}`)
     consola.success(`Data types generated at ${dataOutputPath}`)
+    consola.success(`Channel types generated at ${channelOutputPath}`)
     consola.success(`API client generated at ${apiClientOutputPath}`)
     process.exit(0)
   },
@@ -1383,6 +1391,41 @@ function createAddBlueprintCommand(
   })
 }
 
+const addPluginCommand = defineCommand({
+  meta: {
+    name: 'plugin',
+    description: 'Register a third-party plugin provider in src/app.ts.',
+  },
+  args: {
+    package: {
+      type: 'positional',
+      required: true,
+      description: 'Plugin package name (for example: @acme/guren-plugin-foo)',
+    },
+    force: {
+      type: 'boolean',
+      description: 'Reserved for compatibility. Plugin registration is idempotent.',
+      alias: 'f',
+    },
+  },
+  async run({ args }) {
+    const result = await installPlugin({
+      packageName: String(args.package),
+      force: Boolean(args.force),
+    })
+
+    for (const item of result) {
+      if (item.startsWith('Run:')) {
+        consola.info(item)
+      } else if (item.includes('(already registered)')) {
+        consola.info(`Checked ${item}`)
+      } else {
+        consola.success(`Updated ${item}`)
+      }
+    }
+  },
+})
+
 const addCommand = defineCommand({
   meta: {
     name: 'add',
@@ -1396,7 +1439,9 @@ const addCommand = defineCommand({
     },
   },
   subCommands: {
+    admin: createAddBlueprintCommand('admin', 'Install a starter admin dashboard scaffold with routes and page.'),
     auth: addAuthCommand,
+    oauth: createAddBlueprintCommand('oauth', 'Install OAuth scaffolding with provider presets and callback routes.'),
     broadcasting: createAddBlueprintCommand('broadcasting', 'Install broadcasting scaffolding with sample public and private channels.'),
     cache: createAddBlueprintCommand('cache', 'Install cache scaffolding and an example cache service.'),
     events: createAddBlueprintCommand('events', 'Install event scaffolding with a sample event and listener.'),
@@ -1404,12 +1449,13 @@ const addCommand = defineCommand({
     notifications: createAddBlueprintCommand('notifications', 'Install notification scaffolding with sample channels and a sample notification.'),
     queue: createAddBlueprintCommand('queue', 'Install queue scaffolding with a sample job.'),
     resource: addResourceCommand,
+    plugin: addPluginCommand,
     schedule: createAddBlueprintCommand('schedule', 'Install a schedule kernel with a sample recurring task.'),
     storage: createAddBlueprintCommand('storage', 'Install storage scaffolding with local/public disks and a sample storage service.'),
   },
   async run(ctx) {
     if (ctx.args.help || ctx.rawArgs.length === 0) {
-      consola.info(`Available blueprints: ${listBlueprints().join(', ')}`)
+      consola.info(`Available blueprints: ${listBlueprints().join(', ')}, plugin`)
       await showUsage(ctx.cmd)
     }
   },
@@ -1457,6 +1503,56 @@ const upgradeCommand = defineCommand({
       consola.info('Dry run complete. package.json was not modified.')
     } else {
       consola.info(`Updated ${result.packageJsonPath}`)
+    }
+  },
+})
+
+const deployCommand = defineCommand({
+  meta: {
+    name: 'deploy',
+    description: 'Generate deployment recipes for Docker, Fly.io, Railway, or Vercel.',
+  },
+  args: {
+    target: {
+      type: 'string',
+      description: 'Deployment target (docker, fly, railway, vercel, all)',
+      default: 'docker',
+    },
+    app: {
+      type: 'string',
+      description: 'Application name used in generated config (e.g. fly.toml app name)',
+    },
+    port: {
+      type: 'string',
+      description: 'Application port for generated deployment files (default: 3333)',
+    },
+    force: {
+      type: 'boolean',
+      description: 'Overwrite existing deployment files',
+      alias: 'f',
+    },
+  },
+  async run({ args }) {
+    const rawTarget = String(args.target ?? 'docker')
+    const allowedTargets = new Set<DeployTarget>(['docker', 'fly', 'railway', 'vercel', 'all'])
+    if (!allowedTargets.has(rawTarget as DeployTarget)) {
+      throw new Error(`Invalid deploy target "${rawTarget}". Expected one of: docker, fly, railway, vercel, all.`)
+    }
+
+    const port = args.port === undefined ? undefined : Number(args.port)
+    if (args.port !== undefined && !Number.isInteger(port)) {
+      throw new Error('The --port option must be an integer.')
+    }
+
+    const createdFiles = await scaffoldDeploy({
+      target: rawTarget as DeployTarget,
+      appName: args.app ? String(args.app) : undefined,
+      port,
+      force: Boolean(args.force),
+    })
+
+    for (const file of createdFiles) {
+      consola.success(`Created ${file}`)
     }
   },
 })
@@ -1511,6 +1607,7 @@ const main = defineCommand({
     doctor: doctorCommand,
     new: newCommand,
     upgrade: upgradeCommand,
+    deploy: deployCommand,
     console: consoleCommand,
     dev: devCommand,
   },

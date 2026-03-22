@@ -11,6 +11,24 @@ describe('InertiaEngine SSR integration', () => {
     expect(body).not.toContain('<title>SSR Title</title>')
   })
 
+
+  it('adds docs body class for docs pages', async () => {
+    const response = await inertia('Docs/Show', { categories: [] }, { url: '/docs/guides/overview' })
+    const body = await response.text()
+
+    expect(body).toContain('<body class="docs-theme">')
+  })
+
+
+  it('injects docs prepaint critical style and script', async () => {
+    const response = await inertia('Docs/Show', { categories: [] }, { url: '/docs/guides/overview' })
+    const body = await response.text()
+
+    expect(body).toContain('id="guren-docs-critical"')
+    expect(body).toContain("localStorage.getItem('guren-color-mode')")
+    expect(body).toContain("prefers-color-scheme: dark")
+  })
+
   it('utilizes provided SSR renderer when available', async () => {
     const response = await inertia(
       'Dashboard',

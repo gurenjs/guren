@@ -34,18 +34,18 @@ This document tracks the current status of the roadmap items listed in `README.m
   - End-to-end type safety: `bunx guren codegen` generates `pages.gen.ts` (Babel AST Props extraction → `PagePropsMap`), `routes.gen.ts` (typed `route()` helper), `data.gen.ts` (`Data` namespace from `JsonResource.toArray()`), `api-client.gen.ts` (typed `ApiRoutes` with `body` fields from Zod schemas). Route-level schema binding (`body`/`params`/`query`), route model binding (`bind: { id: Post }` + `this.model(Post)`), typed `<Link>`/`<Form>` components, bidirectional form types (`RouteBody`/`RouteErrors`), Vite HMR auto-regeneration.
 - Database lifecycle commands — **Complete**
   - Current: `db:migrate`, `db:seed`, `db:reset`, `db:fresh`, `db:rollback` with safety checks, `db:status` for migration tracking.
-- Release & compatibility policy — **In progress**
+- Release & compatibility policy — **Complete**
   - Current: SemVer commitment stated in CHANGELOG.
-  - Missing: Bun/Node compatibility matrix, migration guides per minor.
+  - Missing: none.
 - Documentation & learning — **In progress**
   - Current: guides/tutorials (getting started, deployment, authentication, relationships, validation, CSRF, error handling).
   - Missing: end-to-end tutorial path, deployment recipes verified and versioned.
 - Quality & reliability — **In progress**
   - Current: CI on Bun (build, routes types, typecheck, tests), 99 test files with ~24,000 lines of test code covering server packages (auth, cache, queue, events, broadcasting, scheduling, storage, mail, notifications, i18n, logging, health, errors, container, console, http middleware, validation, resources, database), comprehensive testing utilities (`TestApp`, `TestClient`, `FakeMail`, `FakeEvent`, `FakeQueue`, mock auth helpers, database assertions, Inertia test helpers).
   - Missing: integration/E2E coverage, performance benchmarks.
-- Community process — **Planned**
+- Community process — **Complete**
   - Current: Code of Conduct, Contributing guide.
-  - Missing: Issue/PR templates, RFC workflow, release notes cadence.
+  - Missing: none.
 - First-party plugins — **Complete**
   - Current: Auth (scaffolding, auto-session, API tokens, password reset, email verification, policies/gates), Mail (SMTP, Resend transports), Queue (Memory/Redis), Cache (Memory/Redis/File, tagged cache), Notifications (Mail, Database, Slack, Memory channels), Broadcasting (Memory/Redis, SSE), Scheduler (cron, fluent API), Logging (Console, File, DailyFile channels), i18n (JSON loader, pluralization, namespaces), Health checks (Database, Redis, Cache, Storage, Memory, custom), Console commands (full Artisan-style kernel), Container/DI (bind/singleton/scoped/tag/alias/fake/contextual bindings), Error handling (HttpException, ExceptionHandler, debug page), Rate limiting middleware (fixed window, sliding window, Redis store), Encryption (AES-GCM/CBC, hashing, HMAC, random generation), Facades, Auto-discovery (providers, listeners, jobs), API Resources (JsonResource, ResourceCollection, Paginator, CursorPaginator).
   - Missing: additional mail transports, more notification channels (SMS, push).

@@ -8,6 +8,7 @@ import type {
   SSEMiddlewareOptions,
   AuthMiddlewareOptions,
   SSEClient,
+  WebSocketClient,
   BroadcastEvent,
 } from './types'
 import { Channel, PrivateChannel, PresenceChannel } from './channels'
@@ -74,6 +75,11 @@ export class BroadcastManager {
    * SSE clients.
    */
   protected sseClients: Map<string, SSEClient> = new Map()
+
+  /**
+   * WebSocket clients.
+   */
+  protected wsClients: Map<string, WebSocketClient> = new Map()
 
   constructor(options: BroadcastManagerOptions = {}) {
     if (options.default) {
@@ -402,6 +408,72 @@ export class BroadcastManager {
   }
 
   /**
+   * Register a WebSocket client and return its generated client ID.
+   */
+  registerWebSocketClient(client: Omit<WebSocketClient, 'id' | 'channels'> & { userId?: string | number }): string {
+    const clientId = this.generateClientId('ws')
+    this.wsClients.set(clientId, {
+      ...client,
+      id: clientId,
+      channels: new Set(),
+    })
+    return clientId
+  }
+
+  /**
+   * Remove a WebSocket client and close the underlying connection.
+   */
+  removeWebSocketClient(clientId: string): boolean {
+    const client = this.wsClients.get(clientId)
+    if (!client) return false
+    this.wsClients.delete(clientId)
+    client.close()
+    return true
+  }
+
+  /**
+   * Subscribe a WebSocket client to a channel.
+   */
+  subscribeWebSocketClient(clientId: string, channel: string): boolean {
+    const client = this.wsClients.get(clientId)
+    if (!client) return false
+
+    client.channels.add(channel)
+    this.driver().subscribe(channel, async (event: BroadcastEvent) => {
+      if (client.channels.has(channel)) {
+        await client.send(event.event, event.data)
+      }
+    })
+
+    return true
+  }
+
+  /**
+   * Unsubscribe a WebSocket client from a channel.
+   */
+  unsubscribeWebSocketClient(clientId: string, channel: string): boolean {
+    const client = this.wsClients.get(clientId)
+    if (!client) return false
+
+    client.channels.delete(channel)
+    return true
+  }
+
+  /**
+   * Get a WebSocket client by ID.
+   */
+  getWebSocketClient(clientId: string): WebSocketClient | undefined {
+    return this.wsClients.get(clientId)
+  }
+
+  /**
+   * Get all WebSocket clients.
+   */
+  getWebSocketClients(): WebSocketClient[] {
+    return Array.from(this.wsClients.values())
+  }
+
+  /**
    * Unsubscribe a client from a channel.
    */
   unsubscribeClient(clientId: string, channel: string): boolean {
@@ -436,10 +508,10 @@ export class BroadcastManager {
   /**
    * Generate a unique client ID.
    */
-  protected generateClientId(): string {
+  protected generateClientId(prefix: 'sse' | 'ws' = 'sse'): string {
     const timestamp = Date.now().toString(36)
     const random = Math.random().toString(36).substring(2, 10)
-    return `sse_${timestamp}${random}`
+    return `${prefix}_${timestamp}${random}`
   }
 }
 

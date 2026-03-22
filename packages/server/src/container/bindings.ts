@@ -10,6 +10,7 @@ import type { NotificationManager } from '../notifications'
 import type { BroadcastManager } from '../broadcasting'
 import type { Encrypter } from '../encryption'
 import type { AuthManager } from '../auth'
+import type { OAuthManager } from '../auth/oauth'
 import type { StorageManager } from '../storage'
 import type { HealthManager } from '../health'
 import type { Scheduler } from '../scheduling'
@@ -41,6 +42,7 @@ export interface ServiceBindings {
   broadcast: BroadcastManager
   encrypter: Encrypter
   auth: AuthManager
+  oauth: OAuthManager
   storage: StorageManager
   health: HealthManager
   scheduler: Scheduler

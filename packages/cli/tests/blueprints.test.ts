@@ -16,12 +16,14 @@ describe('blueprints', () => {
 
   it('lists the available scaffold blueprints', () => {
     expect(listBlueprints()).toEqual([
+      'admin',
       'auth',
       'broadcasting',
       'cache',
       'events',
       'mail',
       'notifications',
+      'oauth',
       'queue',
       'resource',
       'schedule',
@@ -91,6 +93,7 @@ export const users = pgTable('users', {
 
   it('runs the infrastructure blueprints', async () => {
     await mkdir('src', { recursive: true })
+    await mkdir('routes', { recursive: true })
     await writeFile('src/app.ts', `import { createApp } from '@guren/core'
 
 const app = createApp({
@@ -100,7 +103,16 @@ const app = createApp({
 
 export default app
 `)
+    await writeFile('routes/web.ts', `import { Router } from '@guren/core'
 
+export function registerWebRoutes(router: Router): void {
+  router.get('/', () => 'home')
+}
+
+export default registerWebRoutes
+`)
+
+    const adminFiles = await runBlueprint('admin')
     const queueFiles = await runBlueprint('queue')
     const mailFiles = await runBlueprint('mail')
     const eventFiles = await runBlueprint('events')
@@ -109,6 +121,7 @@ export default app
     const notificationFiles = await runBlueprint('notifications')
     const storageFiles = await runBlueprint('storage')
     const broadcastingFiles = await runBlueprint('broadcasting')
+    const oauthFiles = await runBlueprint('oauth')
 
     expect(queueFiles.some((file) => file.endsWith('app/Providers/QueueProvider.ts'))).toBe(true)
     expect(mailFiles.some((file) => file.endsWith('app/Providers/MailProvider.ts'))).toBe(true)
@@ -118,6 +131,8 @@ export default app
     expect(notificationFiles.some((file) => file.endsWith('app/Providers/NotificationProvider.ts'))).toBe(true)
     expect(storageFiles.some((file) => file.endsWith('app/Providers/StorageProvider.ts'))).toBe(true)
     expect(broadcastingFiles.some((file) => file.endsWith('app/Providers/BroadcastProvider.ts'))).toBe(true)
+    expect(oauthFiles.some((file) => file.endsWith('app/Providers/OAuthProvider.ts'))).toBe(true)
+    expect(oauthFiles.some((file) => file.endsWith('app/Http/Controllers/Auth/OAuthController.ts'))).toBe(true)
 
     const appSource = await readFile('src/app.ts', 'utf8')
     expect(appSource).toContain('CoreQueueServiceProvider')
@@ -128,6 +143,7 @@ export default app
     expect(appSource).toContain('CoreNotificationServiceProvider')
     expect(appSource).toContain('CoreStorageServiceProvider')
     expect(appSource).toContain('CoreBroadcastServiceProvider')
+    expect(appSource).toContain('CoreOAuthServiceProvider')
     expect(appSource).toContain('QueueProvider')
     expect(appSource).toContain('MailProvider')
     expect(appSource).toContain('EventProvider')
@@ -135,5 +151,13 @@ export default app
     expect(appSource).toContain('NotificationProvider')
     expect(appSource).toContain('StorageProvider')
     expect(appSource).toContain('BroadcastProvider')
+    expect(appSource).toContain('OAuthProvider')
+
+    const routesSource = await readFile('routes/web.ts', 'utf8')
+    expect(adminFiles.some((file) => file.endsWith('app/Http/Controllers/Admin/AdminDashboardController.ts'))).toBe(true)
+    expect(adminFiles.some((file) => file.endsWith('resources/js/pages/admin/Dashboard.tsx'))).toBe(true)
+    expect(adminFiles.some((file) => file.endsWith('routes/admin.ts'))).toBe(true)
+    expect(routesSource).toContain("import registerAdminRoutes from './admin.js'")
+    expect(routesSource).toContain('registerAdminRoutes(router)')
   })
 })

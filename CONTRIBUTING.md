@@ -75,3 +75,9 @@ If you find a bug or have an idea for an improvement, open an issue on GitHub. I
 ## Code of Conduct
 
 By participating in this project you agree to uphold our [Code of Conduct](./CODE_OF_CONDUCT.md). Please report unacceptable behaviour to the maintainers listed there.
+
+## Stability and Breaking Changes
+
+- For breaking changes, open an RFC under `.github/rfcs/` before implementation.
+- Update release notes and migration documentation in the same PR.
+- Keep runtime compatibility updates aligned with `docs/en/guides/release-policy.md` and `docs/ja/guides/release-policy.md`.
