@@ -3,8 +3,12 @@ import { Controller } from './Controller'
 import type { Container } from '../container/Container'
 
 /**
- * Hono's app.on() expects a string literal type for the method parameter.
- * This type-safe helper mounts a route without requiring `as any` casts.
+ * Mounts a route on a Hono app with a dynamic HTTP method string.
+ *
+ * Hono's app.on() uses complex overloads that expect literal types for the
+ * method parameter, making it incompatible with dynamic `string` values at
+ * the type level. This helper encapsulates the single narrowing cast needed,
+ * keeping the rest of the codebase cast-free.
  */
 function mountRoute(
   app: Hono,
@@ -12,7 +16,8 @@ function mountRoute(
   path: string,
   ...handlers: MiddlewareHandler[]
 ): void {
-  app.on(method as 'GET', path, ...handlers)
+  type OnFn = (method: string, path: string, ...handlers: MiddlewareHandler[]) => unknown
+  ;(app.on as OnFn)(method, path, ...handlers)
 }
 import { formatValidationErrors, parseRequestPayload, type ValidationErrorLike } from '../http/request'
 import type { ValidationSchema } from '../http/middleware/validation'
