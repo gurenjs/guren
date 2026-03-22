@@ -1,6 +1,6 @@
 ---
 name: dev-workflow
-description: Development workflow commands for a Guren application. Handles dev server, building, testing, type checking, database operations, and pre-deploy validation. Use when user says "build", "test", "typecheck", "type check", "run tests", "dev server", "start server", "deploy check".
+description: Development workflow commands for a Guren application. Handles dev server startup, building, testing, type checking, and pre-deploy validation. Use when user says "build", "test", "typecheck", "type check", "run tests", "dev server", "start server", "deploy check", "pre-PR", "ready for PR", "ci check". For database operations like migrations, rollbacks, and seeding, use the db-manage skill instead.
 ---
 
 # Development Workflow Skill
@@ -24,6 +24,10 @@ bun run dev
 **Prerequisites check before starting:**
 1. Database running? If not: `bun run db:up`
 2. Migrations applied? If not: `bun run db:migrate`
+
+**After startup:**
+- App: `http://localhost:3333`
+- MCP endpoint: `http://localhost:3333/_guren/mcp` (dev only, auto-enabled)
 
 ### Build
 
@@ -55,15 +59,6 @@ bunx tsc --noEmit
 ```
 
 **On failure:** List each error with file:line, show the message, suggest fixes.
-
-### Database Operations
-
-```bash
-bun run db:up       # Start PostgreSQL container
-bun run db:down     # Stop container
-bun run db:migrate  # Run pending migrations
-bun run db:seed     # Run seeders
-```
 
 ### Pre-Deploy Check
 

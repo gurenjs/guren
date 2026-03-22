@@ -15,6 +15,16 @@ Generate all components needed for a complete CRUD feature in one workflow. This
 
 When given a feature name (e.g., "Post", "Product"):
 
+**Preferred: one-shot command** (if fields are known):
+
+```bash
+bunx guren make:feature <Name> --fields "title:string,body:text,published:boolean" --test
+```
+
+This generates controller, model, views, validator, and resource in one command.
+
+**Alternative: step-by-step** (for more control):
+
 1. **Generate all components** by running these commands in order:
 
 ```bash
@@ -77,6 +87,11 @@ resources/js/pages/posts/
 routes/posts.ts
 tests/controllers/PostController.test.ts
 ```
+
+## MCP Alternative
+
+If the dev server is running, the `guren_make_feature` MCP tool provides the same functionality.
+The MCP tool is useful when the AI agent is connected via `.mcp.json` and wants to scaffold without shell access.
 
 ## Schema Example
 

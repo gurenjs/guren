@@ -321,6 +321,25 @@ Source: `packages/core/src/redis/`
 | Database/Seeder | `packages/core/src/database/` |
 | Logging | `packages/core/src/logging/` |
 | Redis | `packages/core/src/redis/` |
+| MCP Server | Built into dev server at `/_guren/mcp` |
 | Example App | `examples/blog/` |
 | API Example | `examples/api/` |
 | Docs | `web/` |
+
+## MCP Server (AI Agent Integration)
+
+The dev server exposes an MCP endpoint at `/_guren/mcp` (dev only).
+
+**Available MCP tools:**
+- `guren_get_context` — project structure map (models, routes, pages, controllers)
+- `guren_check` — route↔controller↔page integrity validation
+- `guren_list_models` — model list with relationships
+- `guren_generate_guidelines` — project-specific coding guidelines
+- `guren_doctor` — health check + next steps
+- `guren_make_feature` — CRUD scaffold
+- `guren_make_component` — individual component generation
+- `guren_codegen` — type manifest generation
+
+**Configuration:** `.mcp.json` in project root (included by default).
+
+**Disabled in production** (`NODE_ENV=production`).

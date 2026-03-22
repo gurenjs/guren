@@ -719,3 +719,6 @@ export { AutoDiscovery } from './discovery'
 export type { DiscoveryOptions, DiscoveryResult } from './discovery'
 // Debug Error Page
 export { renderDebugPage, debugErrorMiddleware } from './errors/debug-page'
+// MCP: available via '@guren/server/mcp' subpath import.
+// Not re-exported here to avoid pulling @modelcontextprotocol/sdk
+// types into the main DTS bundle (causes OOM in tsup).

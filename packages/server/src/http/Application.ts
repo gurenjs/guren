@@ -220,7 +220,31 @@ export class Application {
     await this.providerManager.registerAll()
     await this.options.boot?.(this.hono)
     await this.mountRoutes()
+    await this.mountMcpEndpoint()
     await this.providerManager.bootAll()
+  }
+
+  /**
+   * Mounts the MCP endpoint at /_guren/mcp in development mode.
+   * This allows AI coding agents to introspect the project.
+   */
+  private async mountMcpEndpoint(): Promise<void> {
+    if (
+      typeof process === 'undefined' ||
+      process.env?.NODE_ENV === 'production' ||
+      process.env?.GUREN_MCP === '0'
+    ) {
+      return
+    }
+
+    try {
+      const { McpServiceProvider } = await import('../mcp/McpServiceProvider')
+      const provider = new McpServiceProvider(this.container)
+      provider.register()
+      await provider.boot()
+    } catch {
+      // MCP SDK not installed or failed to load — skip silently
+    }
   }
 
   /**

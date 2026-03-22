@@ -69,6 +69,11 @@ bunx guren make:route <Name>
 | Channel | `app/Broadcasting/{Name}Channel.ts` |
 | Notification | `app/Notifications/{Name}Notification.ts` |
 
+## MCP Alternative
+
+If the dev server is running, the `guren_make_component` MCP tool can generate individual components without shell access.
+Supported types: controller, model, view, test, route. Other types fall back to CLI.
+
 ## Example
 
 User: "Create a Post controller"

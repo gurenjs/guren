@@ -68,6 +68,30 @@ bun run build
 bun run test
 ```
 
+## MCP Server (AI Agent Integration)
+
+`bun run dev` を実行すると、開発サーバーに MCP エンドポイントが自動的に起動します:
+
+```
+http://localhost:3333/_guren/mcp
+```
+
+`.mcp.json` が設定済みなので、Claude Code / Cursor は自動的に接続します。
+本番環境（`NODE_ENV=production`）では無効化されます。
+
+### 利用可能なツール
+
+| Tool | 説明 |
+|------|------|
+| `guren_get_context` | プロジェクト構造マップ（models, routes, pages, controllers等） |
+| `guren_check` | route↔controller↔page の整合性検証 |
+| `guren_list_models` | モデル一覧（リレーション、soft deletes、auth trait含む） |
+| `guren_generate_guidelines` | プロジェクト固有コーディング規約の自動生成 |
+| `guren_doctor` | プロジェクト健全性チェック + 次のアクション提案 |
+| `guren_make_feature` | CRUD 一括スキャフォールド |
+| `guren_make_component` | 個別コンポーネント生成 |
+| `guren_codegen` | 型マニフェスト生成（routes.gen.ts, pages.gen.ts等） |
+
 ## Architecture Patterns
 
 ### Controllers

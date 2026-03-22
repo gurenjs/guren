@@ -750,6 +750,9 @@ function resolveHandler(
         controller = new ControllerClass()
       }
 
+      if (container) {
+        c.set('container', container)
+      }
       controller.setContext(c)
 
       // Resolve per-route model bindings (from RouteContractOptions.bind)

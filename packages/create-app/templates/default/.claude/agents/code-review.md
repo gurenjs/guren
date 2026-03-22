@@ -26,7 +26,13 @@ Review code changes and provide constructive, actionable feedback.
    - Read `.claude/rules/coding-standards.md`
    - Check patterns in `CLAUDE.md`
 
-3. **Review systematically**
+3. **Run integrity check**
+   ```bash
+   bunx guren check --json
+   ```
+   This validates route↔controller↔page consistency, missing tests, and generated manifests.
+
+4. **Review systematically**
 
 ## Review Checklist
 
