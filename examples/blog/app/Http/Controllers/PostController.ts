@@ -1,7 +1,6 @@
 import {
   type InertiaResponse,
   type ResolvedSharedInertiaProps,
-  type InferInertiaProps,
   Controller,
   paginate,
   type PaginatedPageProps,
@@ -17,6 +16,7 @@ import { PostResource, type PostResourceData } from '../Resources/PostResource.j
 export type PostPageResource = PostResourceData
 type PostsIndexInertiaProps = ResolvedSharedInertiaProps & PaginatedPageProps<PostPageResource>
 type PostShowInertiaProps = ResolvedSharedInertiaProps & { post: PostPageResource }
+type PostEditInertiaProps = ResolvedSharedInertiaProps & { post: import('../Validators/PostValidator.js').PostFormData; postId: number }
 type BoundPost = Awaited<ReturnType<typeof Post.findOrFail>> & { id: number; authorId: number }
 
 export default class PostController extends Controller {
@@ -71,7 +71,7 @@ export default class PostController extends Controller {
     return this.redirect(post?.id ? `/posts/${post.id}` : '/posts')
   }
 
-  async edit(): Promise<Response> {
+  async edit(): Promise<InertiaResponse<'posts/Edit', PostEditInertiaProps> | Response> {
     const { id } = this.validateParams(PostIdParamSchema)
     const post = await Post.findOrFail(id) as BoundPost
     const formPost = PostFormSchema.parse(post)
@@ -93,5 +93,3 @@ export default class PostController extends Controller {
   }
 }
 
-export type PostsIndexPageProps = InferInertiaProps<ReturnType<PostController['index']>>
-export type PostShowPageProps = InferInertiaProps<ReturnType<PostController['show']>>

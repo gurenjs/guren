@@ -1,11 +1,36 @@
 import { Head, Link } from '@inertiajs/react'
-import type { DocsIndexPageProps } from '../contracts.js'
+
+type DocSummary = {
+  slug: string
+  title: string
+  description?: string
+}
+
+type DocCategoryGroup = {
+  category: string
+  title: string
+  docs: DocSummary[]
+}
+
+type LocaleLink = {
+  code: string
+  label: string
+  href: string
+  active?: boolean
+}
+
+interface Props {
+  categories: DocCategoryGroup[]
+  locale: string
+  locales?: LocaleLink[]
+  basePath: string
+}
 import { Footer } from '../../components/Footer.js'
 import { Header } from '../../components/Header.js'
 import { BookOpenIcon, TerminalIcon } from '../../components/icons.js'
 import { useDocsPageTheme } from './theme.js'
 
-export default function DocsIndex({ categories, locales = [], basePath }: DocsIndexPageProps) {
+export default function DocsIndex({ categories, locales = [], basePath }: Props) {
   useDocsPageTheme()
 
   return (

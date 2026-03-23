@@ -1,13 +1,43 @@
 import { Head, Link } from '@inertiajs/react'
 import { useEffect, useState } from 'react'
-import type { DocsShowPageProps } from '../contracts.js'
 import { Footer } from '../../components/Footer.js'
 import { Header } from '../../components/Header.js'
 import { docsTheme, useDocsPageTheme } from './theme.js'
-type DocsShowPage = DocsShowPageProps
-type DocCategoryGroup = DocsShowPage['categories'][number]
-type DocPage = NonNullable<DocsShowPage['doc']>
-type ActiveDoc = NonNullable<DocsShowPage['active']>
+
+type DocSummary = {
+  slug: string
+  title: string
+  description?: string
+}
+
+type DocCategoryGroup = {
+  category: string
+  title: string
+  docs: DocSummary[]
+}
+
+type DocPage = DocSummary & {
+  category: string
+  html: string
+}
+
+type LocaleLink = {
+  code: string
+  label: string
+  href: string
+  active?: boolean
+}
+
+interface Props {
+  categories: DocCategoryGroup[]
+  doc: DocPage | null
+  active?: { category: string; slug: string }
+  locale: string
+  locales?: LocaleLink[]
+  basePath: string
+}
+
+type ActiveDoc = NonNullable<Props['active']>
 
 interface NavLink {
   title: string
@@ -101,7 +131,7 @@ function useTableOfContents(doc: DocPage | null) {
   return { items, activeId }
 }
 
-export default function DocsShow({ categories, doc, active, locales = [], basePath }: DocsShowPageProps) {
+export default function DocsShow({ categories, doc, active, locales = [], basePath }: Props) {
   useDocsPageTheme()
 
   const pageTitle = doc ? `${doc.title} – Documentation` : 'Document Not Found'

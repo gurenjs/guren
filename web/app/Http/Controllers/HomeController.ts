@@ -1,6 +1,6 @@
 import { Controller } from '@guren/core'
 import { codeToHtml } from 'shiki'
-import { webPages } from '../../../resources/js/pages/contracts.js'
+import { pages } from '../../../.guren/pages.gen.js'
 
 const CODE_EXAMPLES = {
   Routes: `import { Router } from '@guren/core'
@@ -64,6 +64,6 @@ export default class HomeController extends Controller {
       codeExamples,
     }
 
-    return this.inertia(webPages.home, props, { url: this.request.path, title: 'Guren' })
+    return this.inertia(pages.Home, props, { url: this.request.path, title: 'Guren' })
   }
 }

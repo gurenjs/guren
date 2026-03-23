@@ -1,5 +1,7 @@
 import { Head } from '@inertiajs/react'
-import type { HomePageProps } from './contracts.js'
+interface Props {
+  message: string
+}
 
 const features = [
   { title: 'Routing & Controllers', desc: 'Laravel-style MVC with type-safe route helpers' },
@@ -10,7 +12,7 @@ const features = [
   { title: 'Zero-config SQLite', desc: 'No Docker needed — just bun install && bun run dev' },
 ]
 
-export default function Home({ message }: HomePageProps) {
+export default function Home({ message }: Props) {
   return (
     <>
       <Head title="__APP_TITLE__" />

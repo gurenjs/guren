@@ -218,14 +218,14 @@ describe('Router', () => {
   })
 
   it('reuses nested middleware groups across siblings without treating them as circular', () => {
-    const router = new Router()
     const auth = async (_ctx: any, next: () => Promise<void>) => {
       await next()
     }
 
-    router.aliasMiddleware('auth', auth)
-    router.groupMiddleware('web', ['auth'])
-    router.groupMiddleware('admin', ['auth'])
+    const router = new Router()
+      .aliasMiddleware('auth', auth)
+      .groupMiddleware('web', ['auth'])
+      .groupMiddleware('admin', ['auth'])
 
     expect(() => {
       router.middleware('web', 'admin').get('/dashboard', () => 'ok')

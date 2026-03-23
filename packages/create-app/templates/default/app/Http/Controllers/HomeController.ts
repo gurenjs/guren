@@ -1,5 +1,5 @@
 import { Controller } from '@guren/core'
-import { appPages } from '../../../resources/js/pages/contracts.js'
+import { pages } from '../../../../.guren/pages.gen.js'
 
 export default class HomeController extends Controller {
   async index(): Promise<Response> {
@@ -7,6 +7,6 @@ export default class HomeController extends Controller {
       message: 'Welcome to __APP_TITLE__!',
     }
 
-    return this.inertia(appPages.home, props, { url: this.request.path, title: '__APP_TITLE__' })
+    return this.inertia(pages.Home, props, { url: this.request.path, title: '__APP_TITLE__' })
   }
 }

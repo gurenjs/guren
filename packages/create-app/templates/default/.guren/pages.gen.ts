@@ -5,7 +5,6 @@ import type { PageContract, PagePropsRecord } from '@guren/inertia-client'
 
 
 export const pageManifest = {
-  'contracts': './pages/contracts.ts',
   'Home': './pages/Home.tsx',
 } as const
 
@@ -44,6 +43,5 @@ function defineGeneratedPage<TId extends string, TProps extends PagePropsRecord 
 }
 
 export const pages = {
-  contracts: defineGeneratedPage('contracts', pageManifest['contracts']),
   Home: defineGeneratedPage('Home', pageManifest['Home'])
 } as const

@@ -1,6 +1,9 @@
 import { Head, Link } from '@inertiajs/react'
 import { useState } from 'react'
-import type { HomePageProps } from './contracts.js'
+interface Props {
+  message: string
+  codeExamples: Record<string, string>
+}
 import { CodeBlock } from '../components/CodeBlock.js'
 import { FeatureCard } from '../components/FeatureCard.js'
 import { Footer } from '../components/Footer.js'
@@ -52,7 +55,7 @@ const features = [
 const TAB_KEYS = ['Routes', 'Controller', 'Model'] as const
 type TabKey = (typeof TAB_KEYS)[number]
 
-export default function Home({ message, codeExamples }: HomePageProps) {
+export default function Home({ message, codeExamples }: Props) {
   const [activeTab, setActiveTab] = useState<TabKey>('Routes')
 
   return (

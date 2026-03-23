@@ -3,30 +3,35 @@ import PostController from '../app/Http/Controllers/PostController.js'
 import LoginController from '../app/Http/Controllers/Auth/LoginController.js'
 import DashboardController from '../app/Http/Controllers/DashboardController.js'
 import ProfileController from '../app/Http/Controllers/ProfileController.js'
-import { PostPayloadSchema, PostIdParamSchema } from '../app/Http/Validators/PostValidator.js'
-import { LoginSchema } from '../app/Http/Validators/LoginValidator.js'
-import { ProfileUpdateSchema } from '../app/Http/Validators/ProfileValidator.js'
 import { Post } from '../app/Models/Post.js'
 
-export function registerWebRoutes(router: Router): void {
+export function registerWebRoutes(baseRouter: Router): void {
+  const router = baseRouter
+    .aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
+    .aliasMiddleware('guest', requireGuest({ redirectTo: '/dashboard' }))
+
   router.get('/', [PostController, 'index']).name('home')
 
-  router.get('/login', [LoginController, 'show'], requireGuest({ redirectTo: '/dashboard' })).name('login')
-  router.post('/login', { body: LoginSchema, name: 'login.store' }, [LoginController, 'store'])
-  router.post('/logout', [LoginController, 'destroy'], requireAuthenticated({ redirectTo: '/login' })).name('logout')
+  router.middleware('guest').get('/login', [LoginController, 'show']).name('login')
+  router.post('/login', { name: 'login.store' }, [LoginController, 'store'])
+  router.middleware('auth').post('/logout', [LoginController, 'destroy']).name('logout')
 
   router.group('/posts', (posts) => {
     posts.get('/', [PostController, 'index']).name('posts.index')
-    posts.get('/new', [PostController, 'create']).name('posts.create')
-    posts.get('/:id', { params: PostIdParamSchema, name: 'posts.show' }, [PostController, 'show'])
-    posts.get('/:id/edit', { params: PostIdParamSchema, bind: { id: Post }, name: 'posts.edit' }, [PostController, 'edit'])
-    posts.post('/', { body: PostPayloadSchema, name: 'posts.store' }, [PostController, 'store'])
-    posts.put('/:id', { body: PostPayloadSchema, params: PostIdParamSchema, bind: { id: Post }, name: 'posts.update' }, [PostController, 'update'])
-    posts.patch('/:id', { body: PostPayloadSchema, params: PostIdParamSchema, bind: { id: Post }, name: 'posts.patch' }, [PostController, 'update'])
+    posts.middleware('auth').get('/new', [PostController, 'create']).name('posts.create')
+    posts.get('/:id', [PostController, 'show']).name('posts.show')
+    posts.middleware('auth').group((authed) => {
+      authed.get('/:id/edit', { bind: { id: Post }, name: 'posts.edit' }, [PostController, 'edit'])
+      authed.post('/', [PostController, 'store']).name('posts.store')
+      authed.put('/:id', { bind: { id: Post }, name: 'posts.update' }, [PostController, 'update'])
+      authed.patch('/:id', { bind: { id: Post }, name: 'posts.patch' }, [PostController, 'update'])
+    })
   })
 
-  router.get('/dashboard', [DashboardController, 'index'], requireAuthenticated({ redirectTo: '/login' })).name('dashboard')
-  router.get('/profile', [ProfileController, 'edit'], requireAuthenticated({ redirectTo: '/login' })).name('profile.edit')
-  router.put('/profile', { body: ProfileUpdateSchema, name: 'profile.update' }, [ProfileController, 'update'])
-  router.patch('/profile', { body: ProfileUpdateSchema, name: 'profile.patch' }, [ProfileController, 'update'])
+  router.middleware('auth').group((authed) => {
+    authed.get('/dashboard', [DashboardController, 'index']).name('dashboard')
+    authed.get('/profile', [ProfileController, 'edit']).name('profile.edit')
+    authed.put('/profile', [ProfileController, 'update']).name('profile.update')
+    authed.patch('/profile', [ProfileController, 'update']).name('profile.patch')
+  })
 }

@@ -5,7 +5,6 @@ import type { PageContract, PagePropsRecord } from '@guren/inertia-client'
 
 
 export const pageManifest = {
-  'contracts': './pages/contracts.ts',
   'Docs/Index': './pages/Docs/Index.tsx',
   'Docs/Show': './pages/Docs/Show.tsx',
   'Docs/theme': './pages/Docs/theme.ts',
@@ -22,13 +21,51 @@ export function isPageId(value: string): value is PageId {
   return Object.prototype.hasOwnProperty.call(pageManifest, value)
 }
 
+type DocSummary = {
+  slug: string
+  title: string
+  description?: string
+}
+
+type DocCategoryGroup = {
+  category: string
+  title: string
+  docs: DocSummary[]
+}
+
+type LocaleLink = {
+  code: string
+  label: string
+  href: string
+  active?: boolean
+}
+
+type DocPage = DocSummary & {
+  category: string
+  html: string
+}
 /**
  * Auto-extracted Props types from page components.
  */
 export interface PagePropsMap {
-  'Docs/Index': Record<string, unknown>
-  'Docs/Show': Record<string, unknown>
-  'Home': Record<string, unknown>
+  'Docs/Index': {
+  categories: DocCategoryGroup[]
+  locale: string
+  locales?: LocaleLink[]
+  basePath: string
+}
+  'Docs/Show': {
+  categories: DocCategoryGroup[]
+  doc: DocPage | null
+  active?: { category: string; slug: string }
+  locale: string
+  locales?: LocaleLink[]
+  basePath: string
+}
+  'Home': {
+  message: string
+  codeExamples: Record<string, string>
+}
 }
 
 export type InferPageProps<TId extends PageId> =
@@ -49,11 +86,10 @@ function defineGeneratedPage<TId extends string, TProps extends PagePropsRecord 
 }
 
 export const pages = {
-  contracts: defineGeneratedPage('contracts', pageManifest['contracts']),
   Docs: {
-    Index: defineGeneratedPage('Docs/Index', pageManifest['Docs/Index']),
-    Show: defineGeneratedPage('Docs/Show', pageManifest['Docs/Show']),
+    Index: defineGeneratedPage<'Docs/Index', PagePropsMap['Docs/Index']>('Docs/Index', pageManifest['Docs/Index']),
+    Show: defineGeneratedPage<'Docs/Show', PagePropsMap['Docs/Show']>('Docs/Show', pageManifest['Docs/Show']),
     theme: defineGeneratedPage('Docs/theme', pageManifest['Docs/theme'])
   },
-  Home: defineGeneratedPage('Home', pageManifest['Home'])
+  Home: defineGeneratedPage<'Home', PagePropsMap['Home']>('Home', pageManifest['Home'])
 } as const

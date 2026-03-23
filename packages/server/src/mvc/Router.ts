@@ -137,12 +137,13 @@ export interface RouteDefinition {
 
 /**
  * Chainable builder for configuring a registered route.
+ * @template M - Union of registered middleware alias names
  */
-export interface RouteBuilder {
+export interface RouteBuilder<M extends string = never> {
   /** Set the route name for URL generation. */
-  name(routeName: string): RouteBuilder
+  name(routeName: string): RouteBuilder<M>
   /** Attach named middleware to this specific route. */
-  middleware(...names: string[]): RouteBuilder
+  middleware(...names: M[]): RouteBuilder<M>
 }
 
 export interface RouterMountOptions {
@@ -176,8 +177,9 @@ export interface ResourceRouteOptions {
 
 /**
  * Instance-based router for app-local route registration and mounting.
+ * @template M - Union of registered middleware alias names (e.g. `'auth' | 'guest'`)
  */
-export class Router {
+export class Router<M extends string = never> {
   private readonly registry: RegisteredRoute[] = []
   private readonly prefixStack: string[] = []
   private readonly namedRoutes: Map<string, RegisteredRoute> = new Map()
@@ -186,17 +188,17 @@ export class Router {
   private readonly middlewareGroups: Map<string, string[]> = new Map()
   private readonly modelBindings: Map<string, ModelBindingResolver> = new Map()
 
-  aliasMiddleware(name: string, handler: MiddlewareHandler): this {
+  aliasMiddleware<N extends string>(name: N, handler: MiddlewareHandler): Router<M | N> {
     this.middlewareAliases.set(name, handler)
-    return this
+    return this as Router<M | N>
   }
 
-  groupMiddleware(name: string, middlewareNames: string[]): this {
+  groupMiddleware<N extends string>(name: N, middlewareNames: M[]): Router<M | N> {
     this.middlewareGroups.set(name, middlewareNames)
-    return this
+    return this as Router<M | N>
   }
 
-  middleware(...names: string[]): RouterMiddlewareGroupBuilder {
+  middleware(...names: M[]): RouterMiddlewareGroupBuilder<M> {
     return new RouterMiddlewareGroupBuilder(this, names)
   }
 
@@ -213,7 +215,7 @@ export class Router {
     return this
   }
 
-  on<C extends ControllerConstructor>(method: string, path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder
+  on<C extends ControllerConstructor>(method: string, path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder<M>
   on<
     TParamsSchema extends SchemaLike<unknown>,
     TQuerySchema extends SchemaLike<unknown>,
@@ -224,7 +226,7 @@ export class Router {
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
     handler: TypedRouteHandler<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-  ): RouteBuilder
+  ): RouteBuilder<M>
   on<
     C extends ControllerConstructor,
     TParamsSchema extends SchemaLike<unknown>,
@@ -236,12 +238,12 @@ export class Router {
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
     handler: ControllerAction<C>,
-  ): RouteBuilder
-  on(method: string, path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder {
+  ): RouteBuilder<M>
+  on(method: string, path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.register(method.toUpperCase(), path, handlerOrOptions, rest)
   }
 
-  get<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder
+  get<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder<M>
   get<
     TParamsSchema extends SchemaLike<unknown>,
     TQuerySchema extends SchemaLike<unknown>,
@@ -251,7 +253,7 @@ export class Router {
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
     handler: TypedRouteHandler<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-  ): RouteBuilder
+  ): RouteBuilder<M>
   get<
     C extends ControllerConstructor,
     TParamsSchema extends SchemaLike<unknown>,
@@ -262,12 +264,12 @@ export class Router {
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
     handler: ControllerAction<C>,
-  ): RouteBuilder
-  get(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder {
+  ): RouteBuilder<M>
+  get(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.register('GET', path, handlerOrOptions, rest)
   }
 
-  post<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder
+  post<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder<M>
   post<
     TParamsSchema extends SchemaLike<unknown>,
     TQuerySchema extends SchemaLike<unknown>,
@@ -277,7 +279,7 @@ export class Router {
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
     handler: TypedRouteHandler<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-  ): RouteBuilder
+  ): RouteBuilder<M>
   post<
     C extends ControllerConstructor,
     TParamsSchema extends SchemaLike<unknown>,
@@ -288,12 +290,12 @@ export class Router {
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
     handler: ControllerAction<C>,
-  ): RouteBuilder
-  post(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder {
+  ): RouteBuilder<M>
+  post(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.register('POST', path, handlerOrOptions, rest)
   }
 
-  put<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder
+  put<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder<M>
   put<
     TParamsSchema extends SchemaLike<unknown>,
     TQuerySchema extends SchemaLike<unknown>,
@@ -303,7 +305,7 @@ export class Router {
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
     handler: TypedRouteHandler<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-  ): RouteBuilder
+  ): RouteBuilder<M>
   put<
     C extends ControllerConstructor,
     TParamsSchema extends SchemaLike<unknown>,
@@ -314,12 +316,12 @@ export class Router {
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
     handler: ControllerAction<C>,
-  ): RouteBuilder
-  put(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder {
+  ): RouteBuilder<M>
+  put(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.register('PUT', path, handlerOrOptions, rest)
   }
 
-  patch<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder
+  patch<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder<M>
   patch<
     TParamsSchema extends SchemaLike<unknown>,
     TQuerySchema extends SchemaLike<unknown>,
@@ -329,7 +331,7 @@ export class Router {
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
     handler: TypedRouteHandler<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-  ): RouteBuilder
+  ): RouteBuilder<M>
   patch<
     C extends ControllerConstructor,
     TParamsSchema extends SchemaLike<unknown>,
@@ -340,12 +342,12 @@ export class Router {
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
     handler: ControllerAction<C>,
-  ): RouteBuilder
-  patch(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder {
+  ): RouteBuilder<M>
+  patch(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.register('PATCH', path, handlerOrOptions, rest)
   }
 
-  delete<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder
+  delete<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder<M>
   delete<
     TParamsSchema extends SchemaLike<unknown>,
     TQuerySchema extends SchemaLike<unknown>,
@@ -355,7 +357,7 @@ export class Router {
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
     handler: TypedRouteHandler<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-  ): RouteBuilder
+  ): RouteBuilder<M>
   delete<
     C extends ControllerConstructor,
     TParamsSchema extends SchemaLike<unknown>,
@@ -366,12 +368,12 @@ export class Router {
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
     handler: ControllerAction<C>,
-  ): RouteBuilder
-  delete(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder {
+  ): RouteBuilder<M>
+  delete(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.register('DELETE', path, handlerOrOptions, rest)
   }
 
-  group(prefix: string, callback: (router: Router) => void): this {
+  group(prefix: string, callback: (router: Router<M>) => void): this {
     this.prefixStack.push(prefix)
     callback(this)
     this.prefixStack.pop()
@@ -454,7 +456,7 @@ export class Router {
     path: string,
     handlerOrOptions: unknown,
     rest: unknown[],
-  ): RouteBuilder {
+  ): RouteBuilder<M> {
     if (isRouteContractOptions(handlerOrOptions)) {
       const options = handlerOrOptions as RouteContractOptions
       const [handlerOrAction] = rest
@@ -496,7 +498,7 @@ export class Router {
     return this.add(method, path, handlerOrOptions as AnyRouteHandler, rest as MiddlewareHandler[])
   }
 
-  private add(method: string, path: string, handler: AnyRouteHandler, middlewares: MiddlewareHandler[] = []): RouteBuilder {
+  private add(method: string, path: string, handler: AnyRouteHandler, middlewares: MiddlewareHandler[] = []): RouteBuilder<M> {
     const fullPath = joinPaths(this.prefixStack, path)
     const stackMiddleware = this.middlewareStack.flat()
     const route: RegisteredRoute = {
@@ -541,20 +543,20 @@ export class Router {
   }
 }
 
-class RouterMiddlewareGroupBuilder {
+class RouterMiddlewareGroupBuilder<M extends string = never> {
   constructor(
-    private readonly router: Router,
+    private readonly router: Router<M>,
     private readonly names: string[],
   ) {}
 
-  group(callback: (router: Router) => void): Router {
+  group(callback: (router: Router<M>) => void): Router<M> {
     return this.router.applyMiddlewareScope(this.names, () => {
       callback(this.router)
       return this.router
     })
   }
 
-  get<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder
+  get<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder<M>
   get<
     TParamsSchema extends SchemaLike<unknown>,
     TQuerySchema extends SchemaLike<unknown>,
@@ -564,12 +566,12 @@ class RouterMiddlewareGroupBuilder {
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
     handler: TypedRouteHandler<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-  ): RouteBuilder
-  get(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder {
+  ): RouteBuilder<M>
+  get(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.router.applyMiddlewareScope(this.names, () => this.router.get(path, handlerOrOptions as never, ...(rest as never[])))
   }
 
-  post<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder
+  post<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder<M>
   post<
     TParamsSchema extends SchemaLike<unknown>,
     TQuerySchema extends SchemaLike<unknown>,
@@ -579,12 +581,12 @@ class RouterMiddlewareGroupBuilder {
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
     handler: TypedRouteHandler<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-  ): RouteBuilder
-  post(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder {
+  ): RouteBuilder<M>
+  post(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.router.applyMiddlewareScope(this.names, () => this.router.post(path, handlerOrOptions as never, ...(rest as never[])))
   }
 
-  put<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder
+  put<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder<M>
   put<
     TParamsSchema extends SchemaLike<unknown>,
     TQuerySchema extends SchemaLike<unknown>,
@@ -594,12 +596,12 @@ class RouterMiddlewareGroupBuilder {
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
     handler: TypedRouteHandler<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-  ): RouteBuilder
-  put(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder {
+  ): RouteBuilder<M>
+  put(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.router.applyMiddlewareScope(this.names, () => this.router.put(path, handlerOrOptions as never, ...(rest as never[])))
   }
 
-  patch<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder
+  patch<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder<M>
   patch<
     TParamsSchema extends SchemaLike<unknown>,
     TQuerySchema extends SchemaLike<unknown>,
@@ -609,12 +611,12 @@ class RouterMiddlewareGroupBuilder {
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
     handler: TypedRouteHandler<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-  ): RouteBuilder
-  patch(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder {
+  ): RouteBuilder<M>
+  patch(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.router.applyMiddlewareScope(this.names, () => this.router.patch(path, handlerOrOptions as never, ...(rest as never[])))
   }
 
-  delete<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder
+  delete<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder<M>
   delete<
     TParamsSchema extends SchemaLike<unknown>,
     TQuerySchema extends SchemaLike<unknown>,
@@ -624,20 +626,20 @@ class RouterMiddlewareGroupBuilder {
     path: string,
     options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
     handler: TypedRouteHandler<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
-  ): RouteBuilder
-  delete(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder {
+  ): RouteBuilder<M>
+  delete(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.router.applyMiddlewareScope(this.names, () => this.router.delete(path, handlerOrOptions as never, ...(rest as never[])))
   }
 }
 
-function createRouteBuilder(route: RegisteredRoute, namedRoutes: Map<string, RegisteredRoute>): RouteBuilder {
+function createRouteBuilder<M extends string = never>(route: RegisteredRoute, namedRoutes: Map<string, RegisteredRoute>): RouteBuilder<M> {
   return {
-    name(routeName: string): RouteBuilder {
+    name(routeName: string): RouteBuilder<M> {
       route.name = routeName
       namedRoutes.set(routeName, route)
       return this
     },
-    middleware(...names: string[]): RouteBuilder {
+    middleware(...names: M[]): RouteBuilder<M> {
       route.routeMiddlewareNames.push(...names)
       return this
     },

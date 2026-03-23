@@ -6,7 +6,7 @@ import {
   normalizeDocCategory,
   normalizeDocSlug,
 } from '../../Services/DocsService.js'
-import { webPages } from '../../../resources/js/pages/contracts.js'
+import { pages } from '../../../.guren/pages.gen.js'
 
 type DocLocale = (typeof DOC_LOCALE_OPTIONS)[number]['code']
 
@@ -39,7 +39,7 @@ export default class DocsController extends Controller {
     const basePath = this.#basePathForLocale(locale)
 
     return this.inertia(
-      webPages.docs.index,
+      pages.Docs.Index,
       { categories, locale, locales, basePath },
       {
         url: this.request.path,
@@ -74,7 +74,7 @@ export default class DocsController extends Controller {
     const basePath = this.#basePathForLocale(locale)
 
     return this.inertia(
-      webPages.docs.show,
+      pages.Docs.Show,
       { categories, doc, active, locale, locales, basePath },
       {
         url: this.request.path,
