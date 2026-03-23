@@ -85,12 +85,12 @@ export type HomePageProps = PageProps<typeof appPages.home>
       expect(routesContent).toContain("import registerAuthRoutes from './auth.js'")
       expect(routesContent).toContain('registerAuthRoutes(router)')
 
-      const contracts = await readFile(join(workspace.dir, 'resources/js/pages/contracts.ts'), 'utf8')
-      expect(contracts).toContain('appPages.auth.login')
-      expect(contracts).toContain('appPages.profile.edit')
+      const loginPage = await readFile(join(workspace.dir, 'resources/js/pages/auth/Login.tsx'), 'utf8')
+      expect(loginPage).toContain('interface Props')
 
       const loginController = await readFile(join(workspace.dir, 'app/Http/Controllers/Auth/LoginController.ts'), 'utf8')
       expect(loginController).toContain('validateBody(LoginSchema)')
+      expect(loginController).toContain('pages.auth.Login')
       expect(loginController).not.toContain('safeParse')
     } finally {
       await workspace.cleanup()

@@ -39,10 +39,7 @@ export interface RunDoctorOptions {
 const APP_ENTRY_CANDIDATES = ['src/main.ts', 'src/main.mts', 'src/main.js', 'src/main.mjs']
 const ROUTE_CANDIDATES = ['routes/web.ts', 'routes/web.js', 'routes/api.ts', 'routes/api.js']
 const PAGE_CONTRACT_CANDIDATES = [
-  'resources/js/pages/contracts.ts',
-  'resources/js/pages/contracts.tsx',
-  'resources/js/pages/contracts.js',
-  'resources/js/pages/contracts.jsx',
+  '.guren/pages.gen.ts',
 ]
 const GENERATED_FILES = ['.guren/routes.gen.ts', '.guren/pages.gen.ts', '.guren/data.gen.ts', '.guren/channels.gen.ts']
 
@@ -140,14 +137,14 @@ export async function runDoctor(options: RunDoctorOptions = {}): Promise<DoctorR
     checks.push(
       createCheck(
         'page-contracts',
-        'Page Contracts',
+        'Page Types',
         'warn',
-        'No resources/js/pages/contracts.* file was found.',
-        'Define pages with definePage() so controllers and components share the same contract.',
+        'No .guren/pages.gen.ts file was found.',
+        'Run `bunx guren routes:types` to generate page type definitions.',
       ),
     )
   } else {
-    checks.push(createCheck('page-contracts', 'Page Contracts', 'pass', `Found ${pageContracts}.`))
+    checks.push(createCheck('page-contracts', 'Page Types', 'pass', `Found ${pageContracts}.`))
   }
 
   for (const generatedFile of GENERATED_FILES) {

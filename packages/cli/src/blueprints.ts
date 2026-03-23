@@ -668,7 +668,7 @@ export class ${singular}Resource extends Resource<${singular}Record> {
 import { ${singular} } from '../../Models/${singular}.js'
 import { ${singular}Resource, type ${singular}ResourceData } from '../Resources/${singular}Resource.js'
 import { ${singular}IdParamSchema, ${singular}PayloadSchema, List${collection}QuerySchema } from '../Validators/${singular}Validator.js'
-import { appPages } from '../../../resources/js/pages/contracts.js'
+import { pages } from '../../../.guren/pages.gen.js'
 
 type ${collection}IndexProps = PaginatedPageProps<${singular}ResourceData>
 type ${singular}FormErrors = ValidationErrors<'title' | 'body'>
@@ -679,7 +679,7 @@ export default class ${singular}Controller extends Controller {
     const result = await ${singular}.paginate({ page, perPage: 10, orderBy: ['id', 'desc'] })
     const paginator = paginate(result, { path: this.request.path ?? '/${routeName}' })
 
-    return this.inertia(appPages.${routeName}.index, {
+    return this.inertia(pages.${routeVar}.Index, {
       data: result.data.map((${variableName}) => new ${singular}Resource(${variableName}).toJSON()),
       pagination: {
         meta: paginator.meta(),
@@ -692,13 +692,13 @@ export default class ${singular}Controller extends Controller {
     const { id } = this.validateParams(${singular}IdParamSchema)
     const ${variableName} = await ${singular}.findOrFail(id)
 
-    return this.inertia(appPages.${routeName}.show, {
+    return this.inertia(pages.${routeVar}.Show, {
       ${variableName}: new ${singular}Resource(${variableName}).toJSON(),
     }, { url: this.request.path, title: '${singular}' })
   }
 
   async create(): Promise<Response> {
-    return this.inertia(appPages.${routeName}.create, {}, { url: this.request.path, title: 'New ${singular}' })
+    return this.inertia(pages.${routeVar}.New, {}, { url: this.request.path, title: 'New ${singular}' })
   }
 
   async store(): Promise<Response> {
@@ -710,7 +710,7 @@ export default class ${singular}Controller extends Controller {
   async edit(): Promise<Response> {
     const { id } = this.validateParams(${singular}IdParamSchema)
     const ${variableName} = await ${singular}.findOrFail(id)
-    return this.inertia(appPages.${routeName}.edit, {
+    return this.inertia(pages.${routeVar}.Edit, {
       ${variableName}: new ${singular}Resource(${variableName}).toJSON(),
       errors: {} as ${singular}FormErrors,
     }, { url: this.request.path, title: 'Edit ${singular}' })
@@ -728,10 +728,10 @@ export default class ${singular}Controller extends Controller {
         {
           path: `resources/js/pages/${routeName}/Index.tsx`,
           contents: `import { Link } from '@inertiajs/react'
-import type { PageProps } from '@guren/inertia-client/contracts'
-import { appPages } from '../contracts.js'
+import type { PaginatedPageProps } from '@guren/core'
+import type { ${singular}ResourceData } from '../../../../app/Http/Resources/${singular}Resource.js'
 
-type Props = PageProps<typeof appPages.${routeName}.index>
+interface Props extends PaginatedPageProps<${singular}ResourceData> {}
 
 export default function ${collection}Index({ data, pagination }: Props) {
   return (
@@ -763,10 +763,11 @@ export default function ${collection}Index({ data, pagination }: Props) {
         {
           path: `resources/js/pages/${routeName}/Show.tsx`,
           contents: `import { Link } from '@inertiajs/react'
-import type { PageProps } from '@guren/inertia-client/contracts'
-import { appPages } from '../contracts.js'
+import type { ${singular}ResourceData } from '../../../../app/Http/Resources/${singular}Resource.js'
 
-type Props = PageProps<typeof appPages.${routeName}.show>
+interface Props {
+  ${variableName}: ${singular}ResourceData
+}
 
 export default function ${singular}Show({ ${variableName} }: Props) {
   return (
@@ -783,12 +784,8 @@ export default function ${singular}Show({ ${variableName} }: Props) {
         {
           path: `resources/js/pages/${routeName}/New.tsx`,
           contents: `import { useForm } from '@inertiajs/react'
-import type { PageProps } from '@guren/inertia-client/contracts'
-import { appPages } from '../contracts.js'
 
-type Props = PageProps<typeof appPages.${routeName}.create>
-
-export default function New${singular}(_: Props) {
+export default function New${singular}() {
   const form = useForm({ title: '', body: '' })
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
@@ -805,10 +802,13 @@ export default function New${singular}(_: Props) {
         {
           path: `resources/js/pages/${routeName}/Edit.tsx`,
           contents: `import { useForm } from '@inertiajs/react'
-import type { PageProps } from '@guren/inertia-client/contracts'
-import { appPages } from '../contracts.js'
+import type { ${singular}ResourceData } from '../../../../app/Http/Resources/${singular}Resource.js'
+import type { ValidationErrors } from '@guren/core'
 
-type Props = PageProps<typeof appPages.${routeName}.edit>
+interface Props {
+  ${variableName}: ${singular}ResourceData
+  errors?: ValidationErrors<'title' | 'body'>
+}
 
 export default function Edit${singular}({ ${variableName} }: Props) {
   const form = useForm({ title: ${variableName}.title, body: ${variableName}.body ?? '' })
@@ -888,49 +888,13 @@ async function updateResourceSchema(collection: string, routeName: string): Prom
 }
 
 async function updateResourceContracts(
-  singular: string,
-  collection: string,
-  routeName: string,
-  routeVar: string,
-  variableName: string,
+  _singular: string,
+  _collection: string,
+  _routeName: string,
+  _routeVar: string,
+  _variableName: string,
 ): Promise<void> {
-  const contractsPath = resolve(process.cwd(), 'resources/js/pages/contracts.ts')
-  let content = await readFile(contractsPath, 'utf8')
-  const routeKey = routeName.replace(/-([a-z])/g, (_, char: string) => char.toUpperCase())
-  const coreTypes = new Set(['PaginatedPageProps'])
-  const coreImportMatches = content.matchAll(/^import type \{([^}]*)\} from '@guren\/core'$/gmu)
-
-  for (const [, imported] of coreImportMatches) {
-    for (const item of imported.split(',').map(part => part.trim()).filter(Boolean)) {
-      coreTypes.add(item)
-    }
-  }
-
-  content = content.replace(/^import type \{[^}]*\} from '@guren\/core'\n+/gmu, '')
-
-  const requiredImports = [
-    `import type { ${Array.from(coreTypes).sort().join(', ')} } from '@guren/core'`,
-    `import type { ${singular}ResourceData } from '../../../app/Http/Resources/${singular}Resource.js'`,
-  ]
-
-  const missingImports = requiredImports.filter(importStatement => !content.includes(importStatement))
-  if (missingImports.length > 0) {
-    const importBlockMatch = content.match(/^(?:import[^\n]*\n)+/u)
-    if (importBlockMatch) {
-      const updatedImportBlock = `${importBlockMatch[0]}${missingImports.join('\n')}\n`
-      content = `${updatedImportBlock}${content.slice(importBlockMatch[0].length)}`
-    } else {
-      content = `${missingImports.join('\n')}\n\n${content}`
-    }
-  }
-
-  if (!content.includes(`${routeKey}: {`)) {
-    content = content.replace(
-      '} as const\n',
-      `  ${routeKey}: {\n    index: generatedPages['${routeVar}'].Index.props<PaginatedPageProps<${singular}ResourceData>>(),\n    show: generatedPages['${routeVar}'].Show.props<{ ${variableName}: ${singular}ResourceData }>(),\n    create: generatedPages['${routeVar}'].New.props<Record<string, never>>(),\n    edit: generatedPages['${routeVar}'].Edit.props<{ ${variableName}: ${singular}ResourceData; errors?: ValidationErrors<'title' | 'body'> }>(),\n  },\n} as const\n`,
-    )
-    await writeFile(contractsPath, content, 'utf8')
-  }
+  // contracts.ts has been removed; Props are now defined directly in page components
 }
 
 async function updateResourceRoutes(singular: string, routeName: string, routeVar: string): Promise<void> {

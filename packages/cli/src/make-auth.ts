@@ -19,12 +19,12 @@ function timestamp(): string {
 
 const loginControllerTemplate = `import { Controller, ValidationException } from '@guren/core'
 import { LoginSchema } from '@/Http/Validators/LoginValidator'
-import { appPages } from '../../../../resources/js/pages/contracts.js'
+import { pages } from '../../../../.guren/pages.gen.js'
 
 export default class LoginController extends Controller {
   async show(): Promise<Response> {
     const email = this.request.query('email') ?? ''
-    return this.inertia(appPages.auth.login, { email }, { url: this.request.path, title: 'Login' })
+    return this.inertia(pages.auth.Login, { email }, { url: this.request.path, title: 'Login' })
   }
 
   async store(): Promise<Response> {
@@ -51,7 +51,7 @@ export default class LoginController extends Controller {
 
 const dashboardControllerTemplate = `import { Controller } from '@guren/core'
 import type { UserRecord } from '../../Models/User.js'
-import { appPages } from '../../../resources/js/pages/contracts.js'
+import { pages } from '../../../.guren/pages.gen.js'
 
 export default class DashboardController extends Controller {
   async index(): Promise<Response> {
@@ -63,7 +63,7 @@ export default class DashboardController extends Controller {
           email: currentUser.email,
         }
       : null
-    return this.inertia(appPages.dashboard.index, { user }, { url: this.request.path, title: 'Dashboard' })
+    return this.inertia(pages.dashboard.Index, { user }, { url: this.request.path, title: 'Dashboard' })
   }
 }
 `
@@ -71,7 +71,7 @@ export default class DashboardController extends Controller {
 const profileControllerTemplate = `import { Controller, ValidationException } from '@guren/core'
 import { User, type UserRecord } from '../../Models/User.js'
 import { ProfileUpdateSchema } from '../Validators/ProfileValidator.js'
-import { appPages } from '../../../resources/js/pages/contracts.js'
+import { pages } from '../../../.guren/pages.gen.js'
 
 export default class ProfileController extends Controller {
   async edit(): Promise<Response> {
@@ -80,7 +80,7 @@ export default class ProfileController extends Controller {
       return this.redirect('/login')
     }
 
-    return this.inertia(appPages.profile.edit, {
+    return this.inertia(pages.profile.Edit, {
       profile: {
         name: user.name,
         email: user.email,
@@ -115,7 +115,7 @@ export default class ProfileController extends Controller {
       await this.auth.login(refreshed)
     }
 
-    return this.inertia(appPages.profile.edit, {
+    return this.inertia(pages.profile.Edit, {
       profile: { name, email },
       status: 'Profile updated successfully.',
     }, { url: this.request.path, title: 'Profile' })
@@ -253,7 +253,12 @@ export default function Layout({ children }: PropsWithChildren) {
 const loginViewTemplate = `import { Head, Link, useForm } from '@inertiajs/react'
 import { useId } from 'react'
 import Layout from '../../components/Layout.js'
-import type { LoginPageProps } from '../contracts.js'
+import type { ValidationErrors } from '@guren/core'
+
+interface Props {
+  email?: string
+  errors?: ValidationErrors<'email' | 'password'>
+}
 
 type LoginFormData = {
   email: string
@@ -261,7 +266,7 @@ type LoginFormData = {
   remember: boolean
 }
 
-export default function Login({ email = '', errors = {} }: LoginPageProps) {
+export default function Login({ email = '', errors = {} }: Props) {
   const form = useForm<LoginFormData>({
     email,
     password: '',
@@ -352,9 +357,12 @@ export default function Login({ email = '', errors = {} }: LoginPageProps) {
 `
 
 const dashboardViewTemplate = `import Layout from '../../components/Layout.js'
-import type { DashboardPageProps } from '../contracts.js'
 
-export default function Dashboard({ user }: DashboardPageProps) {
+interface Props {
+  user?: { id: number; name: string; email: string } | null
+}
+
+export default function Dashboard({ user }: Props) {
   return (
     <Layout>
       <section className="space-y-6">
@@ -382,7 +390,13 @@ export default function Dashboard({ user }: DashboardPageProps) {
 const profileViewTemplate = `import { Head, useForm } from '@inertiajs/react'
 import type { FormEvent } from 'react'
 import Layout from '../../components/Layout.js'
-import type { ProfilePageProps } from '../contracts.js'
+import type { ValidationErrors } from '@guren/core'
+
+interface Props {
+  profile: { name: string; email: string }
+  errors?: ValidationErrors<'name' | 'email' | 'password'>
+  status?: string
+}
 
 type ProfileFormValues = {
   name: string
@@ -390,7 +404,7 @@ type ProfileFormValues = {
   password: string
 }
 
-export default function ProfileEdit({ profile, status }: ProfilePageProps) {
+export default function ProfileEdit({ profile, status }: Props) {
   const form = useForm<ProfileFormValues>({
     name: profile.name,
     email: profile.email,
@@ -553,44 +567,7 @@ export const users = pgTable('users', {
 }
 
 async function updatePageContracts(): Promise<void> {
-  const contractsPath = resolve(process.cwd(), 'resources/js/pages/contracts.ts')
-  let content: string
-  const coreTypeImport = "import type { ValidationErrors } from '@guren/core'\n"
-
-  try {
-    content = await readFile(contractsPath, 'utf8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return
-    }
-    throw error
-  }
-
-  content = content.replace(/^import type \{[^}]*\} from '@guren\/core'\n+/gmu, '')
-  if (!content.includes(coreTypeImport.trim())) {
-    content = content.replace(
-      "import type { PageProps } from '@guren/inertia-client/contracts'\n",
-      `import type { PageProps } from '@guren/inertia-client/contracts'\n${coreTypeImport}`,
-    )
-  }
-
-  if (!content.includes("generatedPages.auth.Login")) {
-    content = content.replace(
-      "} as const\n",
-      `  auth: {\n    login: generatedPages.auth.Login.props<{\n      email?: string\n      errors?: ValidationErrors<'email' | 'password'>\n    }>(),\n  },\n  dashboard: {\n    index: generatedPages.dashboard.Index.props<{\n      user?: {\n        id: number\n        name: string\n        email: string\n      } | null\n    }>(),\n  },\n  profile: {\n    edit: generatedPages.profile.Edit.props<{\n      profile: {\n        name: string\n        email: string\n      }\n      errors?: ValidationErrors<'name' | 'email' | 'password'>\n      status?: string\n    }>(),\n  },\n} as const\n`,
-    )
-
-    content = content.replace(
-      /export type HomePageProps = PageProps<typeof appPages\.home>\n/u,
-      `export type HomePageProps = PageProps<typeof appPages.home>\nexport type LoginPageProps = PageProps<typeof appPages.auth.login>\nexport type DashboardPageProps = PageProps<typeof appPages.dashboard.index>\nexport type ProfilePageProps = PageProps<typeof appPages.profile.edit>\n`,
-    )
-
-    await writeFile(contractsPath, content, 'utf8')
-    consola.success('Updated resources/js/pages/contracts.ts with auth page contracts')
-    return
-  }
-
-  await writeFile(contractsPath, content, 'utf8')
+  // contracts.ts has been removed; Props are now defined directly in page components
 }
 
 export interface MakeAuthOptions extends WriterOptions {

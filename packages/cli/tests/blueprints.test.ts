@@ -72,12 +72,12 @@ export const users = pgTable('users', {
     expect(files.some((file) => file.endsWith('app/Http/Validators/PostValidator.ts'))).toBe(true)
 
     const controller = await readFile(files.find((file) => file.endsWith('PostController.ts'))!, 'utf8')
-    expect(controller).toContain('appPages.posts.index')
+    expect(controller).toContain('pages.posts.Index')
     expect(controller).toContain('paginate(result')
 
-    const contracts = await readFile('resources/js/pages/contracts.ts', 'utf8')
-    expect(contracts).toContain("generatedPages['posts'].Index")
-    expect(contracts).toContain('PaginatedPageProps<PostResourceData>')
+    const indexPage = await readFile(files.find((file) => file.endsWith('pages/posts/Index.tsx'))!, 'utf8')
+    expect(indexPage).toContain('interface Props')
+    expect(indexPage).toContain('PaginatedPageProps')
 
     const routes = await readFile('routes/web.ts', 'utf8')
     expect(routes).toContain("router.group('/posts'")

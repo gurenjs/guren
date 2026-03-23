@@ -122,15 +122,10 @@ export const pages = ${pageObject} as const
 `
 }
 
-function hasContractsImport(extracted: ExtractedPageProps): boolean {
-  return extracted.imports.some((s) => /from\s+['"][^'"]*contracts[^'"]*['"]/.test(s))
-}
-
 function buildPagePropsBlock(propsMap: Map<string, ExtractedPageProps>): string {
   // Collect and deduplicate local type definitions across all pages
   const allLocalTypes = new Map<string, string>()
   for (const extracted of propsMap.values()) {
-    if (hasContractsImport(extracted)) continue
     for (const typeDef of extracted.localTypes) {
       // Use the type name as key for deduplication
       const nameMatch = typeDef.match(/^(?:export\s+)?(?:type|interface)\s+([A-Za-z0-9_]+)/)
@@ -148,8 +143,7 @@ function buildPagePropsBlock(propsMap: Map<string, ExtractedPageProps>): string 
   const entries = Array.from(propsMap.entries())
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([pageId, extracted]) => {
-      // Use Record<string, unknown> for types from contracts files to avoid circular deps
-      const type = hasContractsImport(extracted) ? 'Record<string, unknown>' : extracted.rawType
+      const type = extracted.rawType
       return `  '${esc(pageId)}': ${type}`
     })
     .join('\n')
@@ -173,9 +167,6 @@ function buildTypeImportsBlock(propsMap: Map<string, ExtractedPageProps>): strin
     .map((statement) => statement.trim())
     .filter((statement) => statement.length > 0)
     .filter((statement) => !statement.includes("from 'react'") && !statement.includes('from "react"'))
-    // Exclude imports from contracts files to prevent circular dependencies:
-    // contracts.ts imports from pages.gen.ts, so importing back creates a cycle
-    .filter((statement) => !/from\s+['"][^'"]*contracts[^'"]*['"]/.test(statement))
 
   // Merge imports from the same module into a single statement
   const moduleImports = new Map<string, Set<string>>()
@@ -296,7 +287,7 @@ function renderPageNode(segment: string, node: PageTreeNode, depth: number, prop
   if (node.page && node.children.size === 0) {
     const id = node.page.id
     const extracted = propsMap?.get(id)
-    const hasTypedProps = extracted && !hasContractsImport(extracted)
+    const hasTypedProps = Boolean(extracted)
     const typeArgs = hasTypedProps
       ? `<'${esc(id)}', PagePropsMap['${esc(id)}']>`
       : ''

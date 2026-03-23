@@ -195,11 +195,11 @@ async function checkInertiaPages(
   const source = await readFile(filePath, 'utf-8')
 
   // Find this.inertia('PageName', ...) calls via regex (simpler than AST for this)
-  const inertiaCallRegex = /this\.inertia\(\s*(?:appPages\.[.\w]+|['"]([^'"]+)['"])/g
+  const inertiaCallRegex = /this\.inertia\(\s*(?:(?:appPages|pages)\.[.\w]+|['"]([^'"]+)['"])/g
   let match
   while ((match = inertiaCallRegex.exec(source)) !== null) {
     const pageName = match[1]
-    if (!pageName) continue // appPages.xxx pattern — already type-checked
+    if (!pageName) continue // pages.xxx pattern — already type-checked
 
     const pagePath = `resources/js/pages/${pageName}.tsx`
     const exists = await fileExists(cwd, pagePath)
