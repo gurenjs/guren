@@ -894,7 +894,6 @@ async function updateResourceContracts(
   _routeVar: string,
   _variableName: string,
 ): Promise<void> {
-  // contracts.ts has been removed; Props are now defined directly in page components
 }
 
 async function updateResourceRoutes(singular: string, routeName: string, routeVar: string): Promise<void> {

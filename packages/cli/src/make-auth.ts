@@ -567,7 +567,6 @@ export const users = pgTable('users', {
 }
 
 async function updatePageContracts(): Promise<void> {
-  // contracts.ts has been removed; Props are now defined directly in page components
 }
 
 export interface MakeAuthOptions extends WriterOptions {

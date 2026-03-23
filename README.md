@@ -374,7 +374,7 @@ async update() {
 
 ### Type-Safe Inertia Render
 
-Page components that define a `Props` interface get automatic type checking — no `contracts.ts` or manual type files needed:
+Page components that define a `Props` interface get automatic type checking:
 
 ```tsx
 // resources/js/pages/posts/Show.tsx

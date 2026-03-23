@@ -445,6 +445,7 @@ async function main(): Promise<void> {
     await assertCoreFirstStarter(appDir, { checkDependencies: false })
     await assertCanonicalScaffolds(appDir)
     await assertFeatureScaffolds(appDir)
+    await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'codegen', '--force'], appDir, runtimeEnv)
     await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'codegen', '--routes', 'routes/web.ts', '--out', 'types/generated/routes.d.ts', '--force'], appDir, runtimeEnv)
     await run(['bun', 'run', 'typecheck'], appDir, runtimeEnv)
     await run(['bun', 'run', 'build'], appDir, runtimeEnv)
