@@ -122,14 +122,14 @@ router.get('/posts/:id', [PostsController, 'show'])
 
 ```ts
 import { PostResource } from '@/app/Http/Resources/PostResource'
-import { appPages } from '@/resources/js/pages/contracts'
+import { pages } from '@/.guren/pages.gen'
 
 router.bind('post', Post)
 router.get('/posts/:post', [PostsController, 'show'])
 
 async show() {
   const post = this.ctx.get('post') as PostRecord
-  return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
+  return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() })
 }
 ```
 

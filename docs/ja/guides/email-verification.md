@@ -99,7 +99,7 @@ import {
   isEmailVerified,
 } from '@guren/core'
 import { User } from '@/app/Models/User'
-import { appPages } from '@/resources/js/pages/contracts'
+import { pages } from '@/.guren/pages.gen'
 
 export class VerificationController extends Controller {
   private store = new DatabaseEmailVerificationStore()
@@ -111,7 +111,7 @@ export class VerificationController extends Controller {
       return this.redirect('/dashboard')
     }
 
-    return this.inertia(appPages.auth.verifyEmail, {
+    return this.inertia(pages.auth.VerifyEmail, {
       email: user.email,
     })
   }
@@ -154,7 +154,7 @@ export class VerificationController extends Controller {
     )
 
     if (!user) {
-      return this.inertia(appPages.auth.verifyEmail, {
+      return this.inertia(pages.auth.VerifyEmail, {
         error: '無効または期限切れの確認リンク',
       })
     }

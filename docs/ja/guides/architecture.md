@@ -48,7 +48,7 @@ export function registerWebRoutes(router: Router): void {
 ```ts
 import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
 import { PostResource, type PostResourceData } from '@/app/Http/Resources/PostResource'
-import { appPages } from '@/resources/js/pages/contracts'
+import { pages } from '@/.guren/pages.gen'
 
 type PostsIndexProps = PaginatedPageProps<PostResourceData>
 
@@ -57,7 +57,7 @@ export default class PostController extends Controller {
     const result = await Post.paginate({ page: 1, perPage: 15 })
     const paginator = paginate(result, { path: this.request.path ?? '/posts' })
 
-    return this.inertia<PostsIndexProps>(appPages.posts.index, {
+    return this.inertia<PostsIndexProps>(pages.posts.Index, {
       data: result.data.map((post) => new PostResource(post).toJSON()),
       pagination: paginator,
     })

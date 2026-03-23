@@ -27,7 +27,7 @@ Hands-on steps for building a basic blog using Guren’s MVC stack.
    import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
    import Post from '@/app/Models/Post'
    import { PostResource, type PostResourceData } from '@/app/Http/Resources/PostResource'
-   import { appPages } from '@/resources/js/pages/contracts'
+   import { pages } from '@/.guren/pages.gen'
    import { PageQuerySchema, PostIdParamSchema } from '@/app/Http/Validators/PostValidator'
 
    type PostsIndexProps = PaginatedPageProps<PostResourceData>
@@ -38,7 +38,7 @@ Hands-on steps for building a basic blog using Guren’s MVC stack.
        const result = await Post.paginate({ page, perPage: 10, orderBy: ['publishedAt', 'desc'] })
        const paginator = paginate(result, { path: this.request.path ?? '/posts' })
 
-       return this.inertia(appPages.posts.index, {
+       return this.inertia(pages.posts.Index, {
          data: result.data.map((post) => new PostResource(post).toJSON()),
          pagination: {
            meta: paginator.meta(),
@@ -50,7 +50,7 @@ Hands-on steps for building a basic blog using Guren’s MVC stack.
      async show() {
        const { id } = this.validateParams(PostIdParamSchema)
        const post = await Post.findOrFail(id)
-       return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
+       return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() })
      }
    }
    ```
@@ -66,4 +66,4 @@ Hands-on steps for building a basic blog using Guren’s MVC stack.
      })
    }
    ```
-5. **Create Inertia pages** — add `resources/js/pages/contracts.ts`, then `resources/js/pages/posts/Index.tsx` and `Show.tsx` that read the typed `data` / `pagination` / `post` props and render React UI. Vite hot reload plus Inertia keep browser state synced as you edit.
+5. **Create Inertia pages** — add `resources/js/pages/posts/Index.tsx` and `Show.tsx` that define `interface Props` and render React UI with the typed `data` / `pagination` / `post` props. Run `bun run codegen` to generate `.guren/pages.gen.ts`. Vite hot reload plus Inertia keep browser state synced as you edit.

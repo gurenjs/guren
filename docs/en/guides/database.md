@@ -599,7 +599,7 @@ Pass pagination data directly to an Inertia page:
 ```ts
 import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
 import { PostResource, type PostResourceData } from '@/app/Http/Resources/PostResource'
-import { appPages } from '@/resources/js/pages/contracts'
+import { pages } from '@/.guren/pages.gen'
 
 type PostsIndexProps = PaginatedPageProps<PostResourceData>
 
@@ -608,7 +608,7 @@ async index() {
   const result = await Post.scope('published').paginate({ page, perPage: 15 })
   const paginator = paginate(result, { path: this.request.path ?? '/posts' })
 
-  return this.inertia<PostsIndexProps>(appPages.posts.index, {
+  return this.inertia<PostsIndexProps>(pages.posts.Index, {
     data: result.data.map((post) => new PostResource(post).toJSON()),
     pagination: paginator,
   })

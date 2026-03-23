@@ -1,6 +1,6 @@
 # 10分で最初の機能を作る
 
-このガイドでは、Guren の推奨パターンに沿って進めます。`@guren/core`、`bunx guren add ...`、page contract、resource 出力、route/page manifest を前提にしています。
+このガイドでは、Guren の推奨パターンに沿って進めます。`@guren/core`、`bunx guren add ...`、page definition、resource 出力、route/page manifest を前提にしています。
 
 ## 作るもの
 
@@ -36,10 +36,10 @@ bunx guren add schedule
 
 これで次が生成されます。
 
-- `AuthProvider`、login/profile controller、validator、routes、page contracts
+- `AuthProvider`、login/profile controller、validator、routes、page definitions
 - `PostController`、`PostResource`、`PostValidator`、CRUD pages、named routes
 - `QueueProvider`、`MailProvider`、`EventProvider`、`CacheProvider`、`NotificationProvider`、`StorageProvider`、`BroadcastProvider`、`app/Console/Kernel.ts` など、標準の非同期/運用系機能
-- Inertia page props の一元管理ファイルとしての `resources/js/pages/contracts.ts`
+- 各ページコンポーネントの `Props` から自動生成される `.guren/pages.gen.ts`（Inertia page props の型情報源）
 
 ## 3. 型付き manifest を生成する
 
@@ -50,7 +50,7 @@ bun run codegen
 `codegen` は次を生成します。
 
 - named route helper 用の `.guren/routes.gen.ts`
-- 型付き page contract 用の `.guren/pages.gen.ts`
+- 型付き page definitions 用の `.guren/pages.gen.ts`
 - editor 補助用の `types/generated/routes.d.ts`
 
 ## 4. データベースを準備する
@@ -80,7 +80,7 @@ bun run dev
 1. `db/schema.ts` が Drizzle table を定義する
 2. `app/Models/Post.ts` が typed model を公開する
 3. `app/Http/Resources/PostResource.ts` が response shape を定義する
-4. `resources/js/pages/contracts.ts` が page props を宣言する
+4. 各ページコンポーネントで Props を定義し、codegen が `.guren/pages.gen.ts` に自動抽出する
 5. `app/Http/Controllers/PostController.ts` が input を検証し、resource 出力を返す
 
 一覧ページの標準的なデータ構造はこうです。
@@ -118,7 +118,7 @@ bun run codegen
 - model は data access
 - validator は input parsing
 - resource は output shaping
-- page contract は props 定義
+- page component は props 定義
 - controller は response composition
 
 これが、Guren が目指している Rails/Laravel 的な DX を実現するための基本パターンです。

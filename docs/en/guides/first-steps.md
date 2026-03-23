@@ -1,6 +1,6 @@
 # Build Your First Feature in 10 Minutes
 
-This walkthrough uses the current Guren standard path: `@guren/core`, `bunx guren add ...`, page contracts, resource output, and generated route/page manifests.
+This walkthrough uses the current Guren standard path: `@guren/core`, `bunx guren add ...`, page definitions, resource output, and generated route/page manifests.
 
 ## What You Will Build
 
@@ -36,10 +36,10 @@ bunx guren add schedule
 
 This gives you:
 
-- `AuthProvider`, login/profile controllers, validators, routes, and page contracts
+- `AuthProvider`, login/profile controllers, validators, routes, and page definitions
 - `PostController`, `PostResource`, `PostValidator`, CRUD pages, and named routes
 - `QueueProvider`, `MailProvider`, `EventProvider`, `CacheProvider`, `NotificationProvider`, `StorageProvider`, `BroadcastProvider`, and `app/Console/Kernel.ts` for the standard async/runtime features
-- `resources/js/pages/contracts.ts` as the single source for Inertia page props
+- `.guren/pages.gen.ts` as the auto-generated source for Inertia page props (extracted from each page component's `Props`)
 
 ## 3. Generate Typed Manifests
 
@@ -50,7 +50,7 @@ bun run codegen
 `codegen` writes:
 
 - `.guren/routes.gen.ts` for runtime-aware named route helpers
-- `.guren/pages.gen.ts` for typed page contracts
+- `.guren/pages.gen.ts` for typed page definitions
 - `types/generated/routes.d.ts` for editor support
 
 ## 4. Prepare the Database
@@ -80,7 +80,7 @@ The default resource scaffold follows one contract graph:
 1. `db/schema.ts` defines the Drizzle table
 2. `app/Models/Post.ts` exposes the typed model
 3. `app/Http/Resources/PostResource.ts` defines the response shape
-4. `resources/js/pages/contracts.ts` declares page props
+4. Props are defined directly in each page component and auto-extracted to `.guren/pages.gen.ts` by codegen
 5. `app/Http/Controllers/PostController.ts` validates input and returns resource output
 
 For list pages, the standard shape is:
@@ -118,7 +118,7 @@ Then keep each layer focused:
 - models describe data access
 - validators parse inputs
 - resources shape outputs
-- page contracts define props
+- page components define props
 - controllers compose responses
 
 That is the shortest path to the Rails/Laravel-style DX Guren is aiming for.

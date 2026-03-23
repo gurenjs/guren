@@ -127,6 +127,24 @@ function hasContractsImport(extracted: ExtractedPageProps): boolean {
 }
 
 function buildPagePropsBlock(propsMap: Map<string, ExtractedPageProps>): string {
+  // Collect and deduplicate local type definitions across all pages
+  const allLocalTypes = new Map<string, string>()
+  for (const extracted of propsMap.values()) {
+    if (hasContractsImport(extracted)) continue
+    for (const typeDef of extracted.localTypes) {
+      // Use the type name as key for deduplication
+      const nameMatch = typeDef.match(/^(?:export\s+)?(?:type|interface)\s+([A-Za-z0-9_]+)/)
+      const key = nameMatch ? nameMatch[1] : typeDef
+      if (!allLocalTypes.has(key)) {
+        allLocalTypes.set(key, typeDef.replace(/^export\s+/, ''))
+      }
+    }
+  }
+
+  const localTypesBlock = allLocalTypes.size > 0
+    ? Array.from(allLocalTypes.values()).join('\n\n') + '\n'
+    : ''
+
   const entries = Array.from(propsMap.entries())
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([pageId, extracted]) => {
@@ -137,7 +155,7 @@ function buildPagePropsBlock(propsMap: Map<string, ExtractedPageProps>): string 
     .join('\n')
 
   return `
-/**
+${localTypesBlock}/**
  * Auto-extracted Props types from page components.
  */
 export interface PagePropsMap {
@@ -158,13 +176,37 @@ function buildTypeImportsBlock(propsMap: Map<string, ExtractedPageProps>): strin
     // Exclude imports from contracts files to prevent circular dependencies:
     // contracts.ts imports from pages.gen.ts, so importing back creates a cycle
     .filter((statement) => !/from\s+['"][^'"]*contracts[^'"]*['"]/.test(statement))
-  const unique = Array.from(new Set(imports)).sort((left, right) => left.localeCompare(right))
 
-  if (unique.length === 0) {
+  // Merge imports from the same module into a single statement
+  const moduleImports = new Map<string, Set<string>>()
+  for (const statement of imports) {
+    const moduleMatch = statement.match(/from\s+['"]([^'"]+)['"]/u)
+    if (!moduleMatch) continue
+    const modulePath = moduleMatch[1]
+    const specifierMatch = statement.match(/\{\s*([^}]+)\s*\}/)
+    if (!specifierMatch) continue
+    const specifiers = specifierMatch[1].split(',').map((s) => s.trim()).filter(Boolean)
+
+    if (!moduleImports.has(modulePath)) {
+      moduleImports.set(modulePath, new Set())
+    }
+    for (const specifier of specifiers) {
+      moduleImports.get(modulePath)!.add(specifier)
+    }
+  }
+
+  const merged = Array.from(moduleImports.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([modulePath, specifiers]) => {
+      const sorted = Array.from(specifiers).sort()
+      return `import type { ${sorted.join(', ')} } from '${modulePath}'`
+    })
+
+  if (merged.length === 0) {
     return ''
   }
 
-  return `${unique.join('\n')}\n`
+  return `${merged.join('\n')}\n`
 }
 
 function rewriteImportStatement(statement: string, sourceDirectory: string, outputDirectory: string): string {

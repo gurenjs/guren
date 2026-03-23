@@ -28,7 +28,7 @@ import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
 import { Task } from '@/app/Models/Task'
 import { TaskResource, type TaskResourceData } from '@/app/Http/Resources/TaskResource'
 import { CreateTaskSchema, ListTasksQuerySchema } from '@/app/Http/Validators/TaskValidator'
-import { appPages } from '@/resources/js/pages/contracts'
+import { pages } from '@/.guren/pages.gen'
 
 type TasksIndexProps = PaginatedPageProps<TaskResourceData>
 
@@ -38,7 +38,7 @@ export default class TaskController extends Controller {
     const result = await Task.paginate({ page, perPage: 20, orderBy: ['createdAt', 'desc'] })
     const paginator = paginate(result, { path: this.request.path ?? '/tasks' })
 
-    return this.inertia(appPages.tasks.index, {
+    return this.inertia(pages.tasks.Index, {
       data: result.data.map((task) => new TaskResource(task).toJSON()),
       pagination: {
         meta: paginator.meta(),
@@ -60,9 +60,9 @@ React ページにはコントローラーから型付き props がそのまま�
 ```tsx
 // resources/js/pages/tasks/Index.tsx
 import type { PageProps } from '@guren/inertia-client/contracts'
-import { appPages } from '@/resources/js/pages/contracts'
+import { pages } from '@/.guren/pages.gen'
 
-type Props = PageProps<typeof appPages.tasks.index>
+type Props = PageProps<typeof pages.tasks.Index>
 
 export default function TasksIndex({ data, pagination }: Props) {
   return (

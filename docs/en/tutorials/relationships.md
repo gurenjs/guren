@@ -32,10 +32,10 @@ Connect related models and eager-load their data.
 3. **Load relationships** — use eager-loading helpers in controllers:
    ```ts
    import { PostResource } from '@/app/Http/Resources/PostResource'
-   import { appPages } from '@/resources/js/pages/contracts'
+   import { pages } from '@/.guren/pages.gen'
 
    const post = await Post.with('comments').findOrFail(id)
-   return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
+   return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() })
    ```
    `with('comments')` tells the ORM adapter to retrieve all matching comments in one query when supported (Drizzle joins) or via batched lookups.
 4. **Create comments** — add a `store` method on `CommentController`:

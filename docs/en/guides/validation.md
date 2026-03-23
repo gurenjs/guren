@@ -1,6 +1,6 @@
 # Validation
 
-Guren's primary validation path is schema-first. Use Zod-compatible schemas in controllers, route contracts, or middleware so request parsing and type inference stay in one place. A legacy `FormRequest` compatibility layer still exists for migrations.
+Guren's primary validation path is schema-first. Use Zod-compatible schemas in controllers, route definitions, or middleware so request parsing and type inference stay in one place. A legacy `FormRequest` compatibility layer still exists for migrations.
 
 ## Quick Start
 
@@ -11,7 +11,7 @@ import { Controller, paginate } from '@guren/core'
 import { z } from 'zod'
 import { Post } from '@/app/Models/Post'
 import { PostResource } from '@/app/Http/Resources/PostResource'
-import { appPages } from '@/resources/js/pages/contracts'
+import { pages } from '@/.guren/pages.gen'
 
 const StorePostSchema = z.object({
   title: z.string().min(1).max(200),
@@ -28,7 +28,7 @@ export default class PostsController extends Controller {
     const result = await Post.paginate({ page, perPage: 10 })
     const paginator = paginate(result, { path: this.request.path ?? '/posts' })
 
-    return this.inertia(appPages.posts.index, {
+    return this.inertia(pages.posts.Index, {
       data: result.data.map((post) => new PostResource(post).toJSON()),
       pagination: {
         meta: paginator.meta(),
@@ -311,11 +311,11 @@ When validation fails, the default response format is:
 
 ### Displaying in Inertia
 
-Use page contracts with `ValidationErrors<T>` so controller and component share the same error shape.
+Use page definitions with `ValidationErrors<T>` so controller and component share the same error shape.
 
 ```ts
 import { type ValidationErrors } from '@guren/core'
-import { appPages } from '@/resources/js/pages/contracts'
+import { pages } from '@/.guren/pages.gen'
 
 type CreateUserFields = 'email' | 'password'
 type CreateUserProps = {
@@ -325,7 +325,7 @@ type CreateUserProps = {
 async store() {
   const result = await this.validateBodySafe(schema)
   if (!result.success) {
-    return this.inertia<CreateUserProps>(appPages.users.create, {
+    return this.inertia<CreateUserProps>(pages.users.Create, {
       errors: result.errors,
     })
   }
@@ -337,9 +337,9 @@ async store() {
 
 ```tsx
 import type { PageProps } from '@guren/inertia-client'
-import { appPages } from '@/resources/js/pages/contracts'
+import { pages } from '@/.guren/pages.gen'
 
-type Props = PageProps<typeof appPages.users.create>
+type Props = PageProps<typeof pages.users.Create>
 
 function CreateUser({ errors }: Props) {
   return (

@@ -218,12 +218,12 @@ The default `AuthServiceProvider` automatically registers a `web` guard that use
 Controllers now expose an `auth` helper:
 
 ```ts
-import { appPages } from '@/resources/js/pages/contracts'
+import { pages } from '@/.guren/pages.gen'
 
 export default class DashboardController extends Controller {
   async index() {
     const user = await this.auth.user()       // returns user or null
-    return this.inertia(appPages.dashboard.index, { user }, { url: this.request.path })
+    return this.inertia(pages.dashboard.Index, { user }, { url: this.request.path })
   }
 
   async store() {

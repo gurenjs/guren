@@ -29,13 +29,13 @@ app.use('*', createCsrfMiddleware())
 ```ts
 // コントローラー内
 import { Controller, getCsrfToken, csrfField } from '@guren/core'
-import { appPages } from '@/resources/js/pages/contracts'
+import { pages } from '@/.guren/pages.gen'
 
 export default class FormController extends Controller {
   create() {
     const token = getCsrfToken(this.ctx)
     // テンプレート/ビューに渡す
-    return this.inertia(appPages.forms.create, { csrfToken: token })
+    return this.inertia(pages.forms.Create, { csrfToken: token })
   }
 }
 ```

@@ -10,11 +10,11 @@ Guren は Inertia.js と React を組み合わせ、単一ページアプリの�
 - `resources/css/app.css`: Tailwind など CSS のエントリーポイント。
 
 ## ページコンポーネント
-ファイル名は `resources/js/pages/contracts.ts` の page contract と対応します。
+ファイル名は `.guren/pages.gen.ts` に自動生成される page definitions と対応します。Props は各ページコンポーネントで `interface Props` として定義し、codegen で抽出されます。
 
 ```ts
 // Controller
-return this.inertia(appPages.posts.index, {
+return this.inertia(pages.posts.Index, {
   data,
   pagination,
 })
@@ -24,9 +24,9 @@ return this.inertia(appPages.posts.index, {
 // resources/js/pages/posts/Index.tsx
 import type { PageProps } from '@guren/inertia-client/contracts'
 import { Head, Link } from '@inertiajs/react'
-import { appPages } from '../contracts'
+import { pages } from '../../../.guren/pages.gen'
 
-type Props = PageProps<typeof appPages.posts.index>
+type Props = PageProps<typeof pages.posts.Index>
 
 export default function Index({ data, pagination }: Props) {
   return (
@@ -111,8 +111,99 @@ bun run build
 コンポーネント解決をカスタムしたい場合は `resources/js/ssr.tsx` を編集し、`renderInertiaServer()` に別の `resolve` を渡します。`autoConfigureInertiaAssets` を使わない場合は、`configureInertiaAssets` を呼ぶ前に必要な環境変数を自前でセットしてください。
 
 ## 型安全
+
+Guren はコントローラーとページコンポーネント間のエンドツーエンド型安全を自動 codegen パイプラインで実現します。
+
+### 型の流れ
+
+```
+ページコンポーネント      codegen              コントローラー
+┌──────────────┐    ┌──────────────┐    ┌──────────────────┐
+│ interface Props    │ pages.gen.ts │    │ this.inertia(     │
+│ {             │ ──►│ PagePropsMap │───►│   pages.posts.Show│
+│   post: Post  │    │ PageContract │    │   { post }        │
+│ }             │    └──────────────┘    │ ) // 型チェック済み│
+└──────────────┘                        └──────────────────┘
+```
+
+1. **ページコンポーネントで Props を定義** — 各ページが受け取るデータを `interface Props` で宣言します:
+
+```tsx
+// resources/js/pages/posts/Show.tsx
+import type { PostResourceData } from '@/Http/Resources/PostResource'
+
+interface Props {
+  post: PostResourceData
+}
+
+export default function Show({ post }: Props) {
+  return <h1>{post.title}</h1>
+}
+```
+
+2. **codegen が Props を抽出** — `bun run codegen`（`bun run dev` 時にも自動実行）がすべてのページコンポーネントをスキャンし、`interface Props` を抽出して `.guren/pages.gen.ts` に書き出します:
+
+```ts
+// .guren/pages.gen.ts（自動生成）
+export interface PagePropsMap {
+  'posts/Show': { post: PostResourceData }
+}
+
+export const pages = {
+  posts: {
+    Show: defineGeneratedPage<'posts/Show', PagePropsMap['posts/Show']>(...)
+  }
+}
+```
+
+3. **コントローラーが型チェックされる** — コントローラーが `this.inertia(pages.posts.Show, { ... })` を呼ぶと、TypeScript が第二引数を `PageContract` の Props 型と照合します。プロパティの不足や型の不一致はコンパイルエラーになります:
+
+```ts
+// app/Http/Controllers/PostController.ts
+import { pages } from '@/.guren/pages.gen'
+
+export default class PostController extends Controller {
+  async show() {
+    const post = await Post.findOrFail(id)
+    // ✅ 型チェック済み: { post } は Show.tsx の Props と一致する必要がある
+    return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() })
+  }
+}
+```
+
+### Props でのローカル型の使用
+
+Props はローカルに定義した型を参照できます。codegen が自動的に収集します:
+
+```tsx
+type Author = { id: number; name: string }
+
+interface Props {
+  post: { title: string; author: Author }
+}
+```
+
+`Author` と `Props` の両方が `pages.gen.ts` に抽出されます。
+
+### Props でのインポート型の使用
+
+Resource ファイルなど外部モジュールからインポートした型も追跡されます:
+
+```tsx
+import type { PostResourceData } from '@/Http/Resources/PostResource'
+
+interface Props {
+  post: PostResourceData
+}
+```
+
+codegen がインポートパスを書き換え、`pages.gen.ts` から同じ型を参照できるようにします。
+
+### Tips
+
 - バックエンドとフロントエンドで型を共有するため、モデルから Drizzle 推論型を再エクスポートします（例: `export type PostRecord = typeof posts.$inferSelect`）。
 - `tsconfig.json` で設定したパスエイリアスを使い、長い相対パスを避けます。
+- Props を追加・変更した後は `bun run codegen` を実行して `pages.gen.ts` を更新してください。
 
 ## ホットリロード
 `bun run dev` を実行するとフロントエンドとバックエンドが同期して動き、Bun が自動で Vite dev サーバーを起動するため TSX 変更は即時リロードされます。ワークフローを調整したい場合は `@guren/core/runtime` の `startViteDevServer()` を使って自前で Vite を制御できます。

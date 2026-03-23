@@ -216,12 +216,12 @@ export class User extends AuthenticatableModel<UserRecord> {
 コントローラーは `auth` ヘルパーを持っています。
 
 ```ts
-import { appPages } from '@/resources/js/pages/contracts'
+import { pages } from '@/.guren/pages.gen'
 
 export default class DashboardController extends Controller {
   async index() {
     const user = await this.auth.user()       // ユーザーまたは null を返す
-    return this.inertia(appPages.dashboard.index, { user }, { url: this.request.path })
+    return this.inertia(pages.dashboard.Index, { user }, { url: this.request.path })
   }
 
   async store() {
@@ -257,10 +257,18 @@ import LoginController from '@/app/Http/Controllers/Auth/LoginController'
 import DashboardController from '@/app/Http/Controllers/DashboardController'
 
 export function registerWebRoutes(router: Router): void {
-  router.get('/login', [LoginController, 'show'], requireGuest({ redirectTo: '/dashboard' }))
-  router.post('/login', [LoginController, 'store'], requireGuest({ redirectTo: '/dashboard' }))
-  router.post('/logout', [LoginController, 'destroy'], requireAuthenticated({ redirectTo: '/login' }))
-  router.get('/dashboard', [DashboardController, 'index'], requireAuthenticated({ redirectTo: '/login' }))
+  router.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
+  router.aliasMiddleware('guest', requireGuest({ redirectTo: '/dashboard' }))
+
+  router.middleware('guest').group((guest) => {
+    guest.get('/login', [LoginController, 'show'])
+    guest.post('/login', [LoginController, 'store'])
+  })
+
+  router.middleware('auth').group((auth) => {
+    auth.post('/logout', [LoginController, 'destroy'])
+    auth.get('/dashboard', [DashboardController, 'index'])
+  })
 }
 ```
 

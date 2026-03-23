@@ -32,10 +32,10 @@
 3. **リレーションを読み込む** — コントローラーで eager load します。
    ```ts
    import { PostResource } from '@/app/Http/Resources/PostResource'
-   import { appPages } from '@/resources/js/pages/contracts'
+   import { pages } from '@/.guren/pages.gen'
 
    const post = await Post.with('comments').findOrFail(id)
-   return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
+   return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() })
    ```
    `with('comments')` で関連コメントを一括取得します（Drizzle なら JOIN、もしくはバッチルックアップ）。
 4. **コメントを作成** — `CommentController` に `store` を追加します。

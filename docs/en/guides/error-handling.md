@@ -203,7 +203,7 @@ With `validateBody`/`validateQuery`/`validateParams`, `findOrFail`, and `userOrF
 import { Controller } from '@guren/core'
 import { z } from 'zod'
 import { PostResource } from '@/app/Http/Resources/PostResource'
-import { appPages } from '@/resources/js/pages/contracts'
+import { pages } from '@/.guren/pages.gen'
 
 const StorePostSchema = z.object({ title: z.string().min(1), content: z.string().min(10) })
 const PostIdSchema = z.object({ id: z.coerce.number().int().positive() })
@@ -219,7 +219,7 @@ export default class PostController extends Controller {
   async show(): Promise<Response> {
     const { id } = this.validateParams(PostIdSchema)       // 422 on invalid params
     const post = await Post.findOrFail(id)                  // 404 if missing
-    return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
+    return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() })
   }
 }
 ```
@@ -345,14 +345,14 @@ async show(): Promise<Response> {
   if (!post) {
     throw new HTTPException(404, { message: 'Post not found' })
   }
-  return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
+  return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() })
 }
 
 // After — automatic 404
 async show(): Promise<Response> {
   const { id } = this.validateParams(PostIdSchema)
   const post = await Post.findOrFail(id)  // throws ModelNotFoundException (404)
-  return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
+  return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() })
 }
 ```
 

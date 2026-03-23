@@ -205,7 +205,7 @@ Use authorization in controllers:
 ```typescript
 import { Controller, Gate } from '@guren/core'
 import { PostResource } from '@/app/Http/Resources/PostResource'
-import { appPages } from '@/resources/js/pages/contracts'
+import { pages } from '@/.guren/pages.gen'
 
 export default class PostController extends Controller {
   async show(id: number) {
@@ -214,7 +214,7 @@ export default class PostController extends Controller {
     // Authorize using Gate
     await Gate.authorize('view', this.user(), post)
 
-    return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
+    return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() })
   }
 
   async update(id: number) {

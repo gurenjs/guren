@@ -40,7 +40,7 @@ import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
 import { Post } from '@/app/Models/Post'
 import { PostResource, type PostResourceData } from '@/app/Http/Resources/PostResource'
 import { ListPostsQuerySchema, PostIdParamSchema } from '@/app/Http/Validators/PostValidator'
-import { appPages } from '@/resources/js/pages/contracts'
+import { pages } from '@/.guren/pages.gen'
 
 type PostsIndexProps = PaginatedPageProps<PostResourceData>
 
@@ -50,7 +50,7 @@ export default class PostsController extends Controller {
     const result = await Post.paginate({ page, perPage: 10, orderBy: ['id', 'desc'] })
     const paginator = paginate(result, { path: this.request.path ?? '/posts' })
 
-    return this.inertia(appPages.posts.index, {
+    return this.inertia(pages.posts.Index, {
       data: result.data.map((post) => new PostResource(post).toJSON()),
       pagination: {
         meta: paginator.meta(),
@@ -62,7 +62,7 @@ export default class PostsController extends Controller {
   async show() {
     const { id } = this.validateParams(PostIdParamSchema)
     const post = await Post.findOrFail(id)
-    return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
+    return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() })
   }
 }
 ```
@@ -205,7 +205,7 @@ export default class PostsController extends Controller {
     const { page } = this.validateQuery(PageQuerySchema) // 422 をスロー
     const result = await Post.paginate({ page, perPage: 10 })
     const paginator = paginate(result, { path: this.request.path ?? '/posts' })
-    return this.inertia(appPages.posts.index, {
+    return this.inertia(pages.posts.Index, {
       data: result.data.map((post) => new PostResource(post).toJSON()),
       pagination: {
         meta: paginator.meta(),
@@ -217,7 +217,7 @@ export default class PostsController extends Controller {
   async show() {
     const { id } = this.validateParams(PostIdParamSchema) // 422 をスロー
     const post = await Post.findOrFail(id) // 404 をスロー
-    return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
+    return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() })
   }
 
   async store() {
@@ -311,13 +311,13 @@ await app.actingAs(user).get('/dashboard').assertStatus(200)
 import { Controller, paginate } from '@guren/core'
 import { Post } from '@/app/Models/Post'
 import { PostResource } from '@/app/Http/Resources/PostResource'
-import { appPages } from '@/resources/js/pages/contracts'
+import { pages } from '@/.guren/pages.gen'
 
 export default class PostsController extends Controller {
   async index() {
     const result = await Post.paginate({ page: 1, perPage: 10, orderBy: ['publishedAt', 'desc'] })
     const paginator = paginate(result, { path: this.request.path ?? '/posts' })
-    return this.inertia(appPages.posts.index, {
+    return this.inertia(pages.posts.Index, {
       data: result.data.map((post) => new PostResource(post).toJSON()),
       pagination: {
         meta: paginator.meta(),
@@ -334,7 +334,7 @@ import { Controller } from '@guren/core'
 import { getDatabase } from '@/config/database'
 import { posts, users } from '@/db/schema'
 import { eq, desc } from 'drizzle-orm'
-import { appPages } from '@/resources/js/pages/contracts'
+import { pages } from '@/.guren/pages.gen'
 
 export default class PostsController extends Controller {
   async index() {
@@ -350,7 +350,7 @@ export default class PostsController extends Controller {
       .where(eq(posts.published, true))
       .orderBy(desc(posts.publishedAt))
 
-    return this.inertia(appPages.posts.index, {
+    return this.inertia(pages.posts.Index, {
       data: postsWithAuthor,
       pagination: {
         meta: {
@@ -380,7 +380,7 @@ export default class PostsController extends Controller {
 SSR バンドルが利用可能な場合、Guren はサーバーサイドでページを自動的にレンダリングします。`ssr` オプションを渡すことで、レスポンスごとにこの動作を無効化またはカスタマイズできます。
 
 ```ts
-return this.inertia(appPages.posts.index, props, {
+return this.inertia(pages.posts.Index, props, {
   ssr: {
     enabled: false, // このレスポンスではクライアントサイドレンダリングを強制
   },

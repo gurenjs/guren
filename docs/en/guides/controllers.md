@@ -16,7 +16,7 @@ import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
 import { Post } from '@/app/Models/Post'
 import { PostResource, type PostResourceData } from '@/app/Http/Resources/PostResource'
 import { ListPostsQuerySchema, PostIdParamSchema } from '@/app/Http/Validators/PostValidator'
-import { appPages } from '@/resources/js/pages/contracts'
+import { pages } from '@/.guren/pages.gen'
 
 type PostsIndexProps = PaginatedPageProps<PostResourceData>
 
@@ -26,7 +26,7 @@ export default class PostsController extends Controller {
     const result = await Post.paginate({ page, perPage: 10, orderBy: ['id', 'desc'] })
     const paginator = paginate(result, { path: this.request.path ?? '/posts' })
 
-    return this.inertia(appPages.posts.index, {
+    return this.inertia(pages.posts.Index, {
       data: result.data.map((post) => new PostResource(post).toJSON()),
       pagination: {
         meta: paginator.meta(),
@@ -38,7 +38,7 @@ export default class PostsController extends Controller {
   async show() {
     const { id } = this.validateParams(PostIdParamSchema)
     const post = await Post.findOrFail(id)
-    return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
+    return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() })
   }
 }
 ```
@@ -71,7 +71,7 @@ export default class PostsController extends Controller {
   async show() {
     const { id } = this.validateParams(PostIdParamSchema)
     const post = await Post.findOrFail(id)
-    return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() }) // Inertia page
+    return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() }) // Inertia page
   }
 
   async store() {
@@ -146,7 +146,7 @@ export default class PostsController extends Controller {
     const { page } = this.validateQuery(PageQuerySchema) // throws 422
     const result = await Post.paginate({ page, perPage: 10 })
     const paginator = paginate(result, { path: this.request.path ?? '/posts' })
-    return this.inertia(appPages.posts.index, {
+    return this.inertia(pages.posts.Index, {
       data: result.data.map((post) => new PostResource(post).toJSON()),
       pagination: {
         meta: paginator.meta(),
@@ -158,7 +158,7 @@ export default class PostsController extends Controller {
   async show() {
     const { id } = this.validateParams(PostIdParamSchema) // throws 422
     const post = await Post.findOrFail(id) // throws 404
-    return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
+    return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() })
   }
 
   async store() {

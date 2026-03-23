@@ -136,7 +136,7 @@ Without model binding, every controller method starts with the same boilerplate:
 // Before: manual lookup in every method
 async show() {
   const post = await Post.findOrFail(this.ctx.req.param('id'))
-  return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
+  return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() })
 }
 ```
 
@@ -152,7 +152,7 @@ router.get('/posts/:post', [PostsController, 'show'])
 // Controller receives the resolved model — no lookup needed
 async show() {
   const post = this.ctx.get('post') as PostRecord
-  return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
+  return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() })
 }
 ```
 

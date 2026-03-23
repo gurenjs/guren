@@ -95,7 +95,7 @@ import {
   buildPasswordResetUrl,
 } from '@guren/core'
 import { User } from '@/app/Models/User'
-import { appPages } from '@/resources/js/pages/contracts'
+import { pages } from '@/.guren/pages.gen'
 
 const ForgotPasswordSchema = z.object({
   email: z.string().email(),
@@ -140,12 +140,12 @@ export class PasswordResetController extends Controller {
     const email = await verifyPasswordResetToken(token, this.store)
 
     if (!email) {
-      return this.inertia(appPages.auth.resetPassword, {
+      return this.inertia(pages.auth.ResetPassword, {
         error: 'Invalid or expired reset link',
       })
     }
 
-    return this.inertia(appPages.auth.resetPassword, { token, email })
+    return this.inertia(pages.auth.ResetPassword, { token, email })
   }
 
   async resetPassword() {

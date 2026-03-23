@@ -29,13 +29,13 @@ Use the `csrfField()` helper to generate a hidden input field:
 ```ts
 // In your controller
 import { Controller, getCsrfToken, csrfField } from '@guren/core'
-import { appPages } from '@/resources/js/pages/contracts'
+import { pages } from '@/.guren/pages.gen'
 
 export default class FormController extends Controller {
   create() {
     const token = getCsrfToken(this.ctx)
     // Pass to your template/view
-    return this.inertia(appPages.forms.create, { csrfToken: token })
+    return this.inertia(pages.forms.Create, { csrfToken: token })
   }
 }
 ```

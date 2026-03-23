@@ -27,7 +27,7 @@ Guren の MVC スタックで基本的なブログを作る手順です。
    import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
    import Post from '@/app/Models/Post'
    import { PostResource, type PostResourceData } from '@/app/Http/Resources/PostResource'
-   import { appPages } from '@/resources/js/pages/contracts'
+   import { pages } from '@/.guren/pages.gen'
    import { PageQuerySchema, PostIdParamSchema } from '@/app/Http/Validators/PostValidator'
 
    type PostsIndexProps = PaginatedPageProps<PostResourceData>
@@ -38,7 +38,7 @@ Guren の MVC スタックで基本的なブログを作る手順です。
        const result = await Post.paginate({ page, perPage: 10, orderBy: ['publishedAt', 'desc'] })
        const paginator = paginate(result, { path: this.request.path ?? '/posts' })
 
-       return this.inertia(appPages.posts.index, {
+       return this.inertia(pages.posts.Index, {
          data: result.data.map((post) => new PostResource(post).toJSON()),
          pagination: {
            meta: paginator.meta(),
@@ -50,7 +50,7 @@ Guren の MVC スタックで基本的なブログを作る手順です。
      async show() {
        const { id } = this.validateParams(PostIdParamSchema)
        const post = await Post.findOrFail(id)
-       return this.inertia(appPages.posts.show, { post: new PostResource(post).toJSON() })
+       return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() })
      }
    }
    ```
@@ -66,4 +66,4 @@ Guren の MVC スタックで基本的なブログを作る手順です。
      })
    }
    ```
-5. **Inertia ページを作成** — `resources/js/pages/contracts.ts` と `resources/js/pages/posts/Index.tsx` / `Show.tsx` を追加し、型付きの `data` / `pagination` / `post` props を読んで React UI を描画します。Vite のホットリロードと Inertia がブラウザ状態を同期してくれます。
+5. **Inertia ページを作成** — `resources/js/pages/posts/Index.tsx` / `Show.tsx` を追加し、`interface Props` を定義して型付きの `data` / `pagination` / `post` props で React UI を描画します。`bun run codegen` で `.guren/pages.gen.ts` を生成します。Vite のホットリロードと Inertia がブラウザ状態を同期してくれます。
