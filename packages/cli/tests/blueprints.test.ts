@@ -35,15 +35,6 @@ describe('blueprints', () => {
     await mkdir('resources/js/pages', { recursive: true })
     await mkdir('routes', { recursive: true })
     await mkdir('db', { recursive: true })
-    await writeFile('resources/js/pages/contracts.ts', `import type { PageProps } from '@guren/inertia-client/contracts'
-import { pages as generatedPages } from '../../../.guren/pages.gen.ts'
-
-export const appPages = {
-  home: generatedPages.Home.props<{ message: string }>(),
-} as const
-
-export type HomePageProps = PageProps<typeof appPages.home>
-`)
     await writeFile('routes/web.ts', `import { Router } from '@guren/core'
 
 export function registerWebRoutes(router: Router): void {

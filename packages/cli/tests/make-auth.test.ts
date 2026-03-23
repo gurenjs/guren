@@ -41,16 +41,8 @@ export function registerWebRoutes(router: Router): void {
 
       await mkdir(join(workspace.dir, 'resources/js/pages'), { recursive: true })
       await writeFile(
-        join(workspace.dir, 'resources/js/pages/contracts.ts'),
-        `import type { PageProps } from '@guren/inertia-client/contracts'
-import { pages as generatedPages } from '../../../.guren/pages.gen.ts'
-
-export const appPages = {
-  home: generatedPages.Home.props<{ message: string }>(),
-} as const
-
-export type HomePageProps = PageProps<typeof appPages.home>
-`,
+        join(workspace.dir, 'resources/js/pages/Home.tsx'),
+        `interface Props { message: string }\nexport default function Home({ message }: Props) { return <h1>{message}</h1> }\n`,
         'utf8',
       )
 

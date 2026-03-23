@@ -53,24 +53,6 @@ export class Post extends defineModel(posts) {}`,
     }
   })
 
-  it('excludes contracts from pages', async () => {
-    const workspace = await createTempWorkspace('guren-cli-context-contracts-')
-
-    try {
-      await mkdir(join(workspace.dir, 'resources/js/pages'), { recursive: true })
-      await writeFile(join(workspace.dir, 'resources/js/pages/contracts.ts'), 'export {}', 'utf8')
-      await writeFile(join(workspace.dir, 'resources/js/pages/Home.tsx'), 'export default function() {}', 'utf8')
-      await writeFile(join(workspace.dir, 'package.json'), '{}', 'utf8')
-
-      const ctx = await generateContext({ cwd: workspace.dir })
-
-      expect(ctx.pages).toContain('Home')
-      expect(ctx.pages).not.toContain('contracts')
-    } finally {
-      await workspace.cleanup()
-    }
-  })
-
   it('discovers controllers, resources, events, jobs', async () => {
     const workspace = await createTempWorkspace('guren-cli-context-components-')
 

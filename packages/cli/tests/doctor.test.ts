@@ -35,11 +35,6 @@ describe('runDoctor', () => {
       )
       await writeFile(join(workspace.dir, 'routes/web.ts'), 'export default []\n', 'utf8')
       await writeFile(
-        join(workspace.dir, 'resources/js/pages/contracts.ts'),
-        "import { definePage } from '@guren/inertia-client'\nexport const HomePage = definePage('Home')\n",
-        'utf8',
-      )
-      await writeFile(
         join(workspace.dir, '.guren/routes.gen.ts'),
         'export const routeManifest = {} as const\n',
         'utf8',
