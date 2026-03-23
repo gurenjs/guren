@@ -42,11 +42,6 @@ async function auditBlog(root: string): Promise<void> {
   assert(!postCacheService.includes('getCacheManager'), 'Blog post cache service must not pull cache via helper singletons.')
   assert(!postCacheService.includes('getPostCacheService'), 'Blog post cache service must not expose a singleton getter.')
 
-  const contracts = await read(root, 'resources/js/pages/contracts.ts')
-  assert(contracts.includes("ValidationErrors<'email' | 'password'>"), 'Blog login contract must expose ValidationErrors.')
-  assert(contracts.includes('PaginatedPageProps<PostPageResource>'), 'Blog posts contract must expose PaginatedPageProps.')
-  assert(contracts.includes("errors?: ValidationErrors<keyof PostFormValues>"), 'Blog edit contract must expose ValidationErrors.')
-
   const eventProvider = await read(root, 'app/Providers/EventServiceProvider.ts')
   assert(eventProvider.includes("from '@guren/core'"), 'Blog event provider must use @guren/core imports.')
   assert(eventProvider.includes('createEventManager'), 'Blog event provider must create an event manager.')
@@ -117,18 +112,13 @@ async function auditWeb(root: string): Promise<void> {
   assert(appBootstrap.includes('DatabaseProvider'), 'Web app must register DatabaseProvider.')
 
   const homeController = await read(root, 'app/Http/Controllers/HomeController.ts')
-  assert(homeController.includes('webPages.home'), 'Web home controller must use page contracts.')
+  assert(homeController.includes('pages.Home'), 'Web home controller must use typed page definitions.')
   assert(!homeController.includes("this.inertia('"), 'Web home controller must not use string page names.')
 
   const docsController = await read(root, 'app/Http/Controllers/DocsController.ts')
-  assert(docsController.includes('webPages.docs.index'), 'Web docs controller must use page contracts for index pages.')
-  assert(docsController.includes('webPages.docs.show'), 'Web docs controller must use page contracts for show pages.')
+  assert(docsController.includes('pages.Docs.Index'), 'Web docs controller must use typed page definitions for index pages.')
+  assert(docsController.includes('pages.Docs.Show'), 'Web docs controller must use typed page definitions for show pages.')
   assert(!docsController.includes("this.inertia('"), 'Web docs controller must not use string page names.')
-
-  const contracts = await read(root, 'resources/js/pages/contracts.ts')
-  assert(contracts.includes('generatedPages.Home.props'), 'Web contracts must be generated-page based.')
-  assert(contracts.includes('generatedPages.Docs.Index.props'), 'Web docs index contract must be generated-page based.')
-  assert(contracts.includes('generatedPages.Docs.Show.props'), 'Web docs show contract must be generated-page based.')
 }
 
 async function main(): Promise<void> {
