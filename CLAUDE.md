@@ -194,6 +194,34 @@ export const requireAuth = defineMiddleware(async (c, next) => {
 })
 ```
 
+### Application Bootstrap
+1. Export a route registrar from `routes/web.ts`
+2. Create the app with `createApp({ routes, providers })`
+3. Call `app.boot()` then `app.listen()`
+
+### Database Configuration
+- PostgreSQL via Docker Compose (service: `postgres`)
+- Port: `54322` (non-standard to avoid conflicts)
+- Credentials: `guren/guren/guren` (user/pass/db)
+- Connection string: `postgres://guren:guren@localhost:54322/guren`
+
+**Database workflow:**
+1. Schema defined in `db/schema.ts` using Drizzle
+2. `config/database.ts` calls `createPostgresDatabase` to expose `configureOrm`, migration, and seeding helpers
+3. ORM configured via `DatabaseProvider` (internally calls `bootModels()` to run `configureOrm`/`seedDatabase` once)
+4. Models reference schema tables via static `table` property
+
+### End-to-End Type Safety
+- `bunx guren codegen` generates four artifacts in `.guren/`: `pages.gen.ts`, `routes.gen.ts`, `data.gen.ts`, `api-client.gen.ts`
+- **Route Schema Binding**: Attach Zod schemas to routes via `RouteContractOptions` (`body`, `params`, `query`); codegen extracts schema types and generates typed `body` fields in `ApiRoutes`
+- **Route Model Binding**: `bind: { id: Post }` in route options + `this.model(Post)` in controllers for typed, auto-resolved model instances
+- **Page Props**: Define `interface Props` in page components; codegen extracts them via Babel AST into `PagePropsMap` for compile-time validation in `this.inertia()`
+- **Data Types**: `JsonResource` subclasses with typed `toArray()` are exported as `Data.Post`, `Data.User`, etc.
+- **API Client**: `createApiClient<ApiRoutes>()` provides typed `request()` with route name autocomplete, param checking, and body types
+- **Bidirectional Forms**: `RouteBody<ApiRoutes, 'posts.store'>` and `RouteErrors<PostForm>` from `@guren/inertia-client/typed-forms`
+- **Typed Components**: `createTypedLink(routeManifest)` and `createTypedForm(routeManifest)` provide `<Link route="posts.show" params={{ id: 1 }}>` with compile-time route name and param checking
+- **Vite HMR**: The Vite plugin watches `routes/web.ts`, `resources/js/pages/`, and `app/Http/Resources/` — changes trigger automatic codegen
+
 ## Testing
 
 ### Framework Tests

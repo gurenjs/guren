@@ -60,7 +60,7 @@ const BLOG_TRANSFORM_FILES = [
 const BLOG_OVERLAY_EXCLUDES = [
   '.env',
   '.guren',
-  'AGENTS.md',
+  'CLAUDE.md',
   'node_modules',
   'package.json',
   'public/assets',
