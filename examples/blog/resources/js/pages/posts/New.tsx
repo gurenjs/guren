@@ -1,9 +1,7 @@
 import { useForm } from '@inertiajs/react'
 import PostForm, { type PostFormValues } from '../../components/PostForm.js'
 
-interface Props {}
-
-export default function New({}: Props) {
+export default function New() {
   const form = useForm<PostFormValues>({
     title: '',
     excerpt: '',

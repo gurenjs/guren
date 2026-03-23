@@ -31,12 +31,12 @@ export default function Edit({ post, postId, errors = {} }: Props) {
   if (!post) {
     return (
       <Layout>
-        <div className="mx-auto mt-12 max-w-xl rounded-2xl bg-white p-8 text-center shadow-sm ring-1 ring-zinc-200">
-          <h2 className="text-2xl font-semibold text-zinc-900 mb-3">Post Not Found</h2>
-          <p className="text-zinc-500">{errors.message ?? 'The requested post could not be found.'}</p>
+        <div className="mx-auto mt-12 max-w-xl rounded-lg bg-white p-8 text-center shadow-sm">
+          <h2 className="text-2xl font-semibold text-stone-900 mb-3">Post Not Found</h2>
+          <p className="text-stone-400">{errors?.message ?? 'The requested post could not be found.'}</p>
           <button
             onClick={() => window.history.back()}
-            className="mt-6 inline-flex items-center justify-center rounded-full bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800"
+            className="mt-6 inline-flex items-center justify-center rounded-md bg-stone-900 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-800"
           >
             Go Back
           </button>

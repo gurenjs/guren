@@ -18,6 +18,10 @@
 
 @layer base {
   body {
-    @apply antialiased text-zinc-900 bg-zinc-50;
+    @apply antialiased text-stone-800 bg-stone-50;
+  }
+
+  h1, h2, h3 {
+    text-wrap: balance;
   }
 }

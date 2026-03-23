@@ -1,6 +1,6 @@
 import { Link } from '@inertiajs/react'
 import Layout from '../../components/Layout.js'
-import { ArrowLeft, Calendar, User } from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
 import type { PostResourceData } from '../../../../app/Http/Resources/PostResource.js'
 
 interface Props {
@@ -10,68 +10,53 @@ interface Props {
 export default function Show({ post }: Props) {
   return (
     <Layout
-      wrapperClassName="bg-zinc-50"
-      mainClassName="max-w-3xl mx-auto px-6 py-12"
+      mainClassName="max-w-3xl mx-auto px-6 pt-10 pb-16 sm:pt-12 sm:pb-24"
     >
-      <article className="bg-white p-8 shadow-sm ring-1 ring-zinc-200 sm:rounded-2xl sm:p-12">
+      <article>
         <Link
           href="/posts"
-          className="group mb-8 inline-flex items-center text-sm font-medium text-zinc-500 transition hover:text-zinc-900"
+          className="group inline-flex items-center text-sm text-stone-400 transition-colors hover:text-stone-600"
         >
-          <ArrowLeft className="mr-2 h-4 w-4 transition-transform group-hover:-translate-x-1" />
+          <ArrowLeft className="mr-1.5 h-3.5 w-3.5 transition-transform group-hover:-translate-x-0.5" />
           Back to posts
         </Link>
 
-        <header className="mb-10">
-          <div className="mb-6 flex items-center gap-4 text-sm text-zinc-500">
-            <span className="flex items-center gap-1.5">
-              <Calendar className="h-4 w-4" />
+        <header className="mt-10">
+          <div className="flex items-center gap-3 text-xs font-normal uppercase tracking-widest text-stone-400">
+            <time>
               {new Date().toLocaleDateString('en-US', {
                 month: 'long',
                 day: 'numeric',
                 year: 'numeric'
               })}
-            </span>
-            <span className="h-1 w-1 rounded-full bg-zinc-300" />
-            <span className="flex items-center gap-1.5">
-              <User className="h-4 w-4" />
-              {post.author?.name ?? 'Unknown author'}
-            </span>
+            </time>
+            <span className="text-stone-300">/</span>
+            <span>{post.author?.name ?? 'Unknown author'}</span>
           </div>
 
-          <h1 className="text-3xl font-bold tracking-tight text-zinc-900 sm:text-4xl lg:text-5xl">
+          <h1 className="mt-4 text-3xl font-semibold tracking-tight text-stone-900 sm:text-4xl lg:text-5xl">
             {post.title}
           </h1>
+
+          <div className="mt-6 h-0.5 w-12 bg-guren-600" />
         </header>
 
-        <div className="prose prose-zinc prose-lg max-w-none">
-          <p className="lead text-xl text-zinc-600">{post.excerpt}</p>
-          <div className="mt-8 space-y-6 text-zinc-700">
+        <div className="mt-10">
+          <p className="text-xl leading-relaxed text-stone-500">{post.excerpt}</p>
+
+          <div className="mt-10 space-y-6 text-base leading-[1.8] text-stone-700">
             {(post.body || '').split('\n').map((paragraph, index) => (
               <p key={index}>{paragraph}</p>
             ))}
           </div>
         </div>
 
-        <hr className="my-12 border-zinc-100" />
-
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-guren-50 text-guren-600 ring-1 ring-guren-100">
-              <span className="text-lg font-bold">
-                {(post.author?.name ?? post.title).charAt(0).toUpperCase()}
-              </span>
-            </div>
-            <div>
-              <p className="font-medium text-zinc-900">{post.author?.name ?? 'Unknown author'}</p>
-              <p className="text-sm text-zinc-500">Author</p>
-            </div>
+        <footer className="mt-16 border-t border-stone-100 pt-8">
+          <div>
+            <p className="font-medium text-stone-900">{post.author?.name ?? 'Unknown author'}</p>
+            <p className="mt-0.5 text-xs text-stone-400">Author</p>
           </div>
-          <div className="text-right text-xs text-zinc-500">
-            <p>Notification artifact: {post.notificationArtifactPath}</p>
-            <p>Broadcast: {post.broadcastChannels.public}</p>
-          </div>
-        </div>
+        </footer>
       </article>
     </Layout>
   )
