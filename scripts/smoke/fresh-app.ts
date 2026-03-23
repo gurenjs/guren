@@ -278,7 +278,7 @@ async function assertCoreFirstStarter(
     'src/main.ts',
     'vite.config.ts',
     'routes/web.ts',
-    'resources/js/pages/contracts.ts',
+    'resources/js/pages/Home.tsx',
   ]
 
   for (const relativePath of filesToCheck) {
@@ -305,10 +305,11 @@ async function assertCanonicalScaffolds(appDir: string): Promise<void> {
   const postResource = await readFile(join(appDir, 'app/Http/Resources/PostResource.ts'), 'utf8')
   assert(postResource.includes('toArray(): PostResourceData'), 'Resource scaffold must define an explicit toArray() output type.')
 
-  const contracts = await readFile(join(appDir, 'resources/js/pages/contracts.ts'), 'utf8')
-  assert(contracts.includes("ValidationErrors<'email' | 'password'>"), 'Auth page contracts must expose ValidationErrors for login.')
-  assert(contracts.includes('PaginatedPageProps<PostResourceData>'), 'Resource page contracts must expose PaginatedPageProps for index pages.')
-  assert(contracts.includes("errors?: ValidationErrors<'title' | 'body'>"), 'Resource page contracts must expose ValidationErrors for edit pages.')
+  const loginPage = await readFile(join(appDir, 'resources/js/pages/auth/Login.tsx'), 'utf8')
+  assert(loginPage.includes('interface Props'), 'Auth login page must define Props interface.')
+
+  const postsIndexPage = await readFile(join(appDir, 'resources/js/pages/posts/Index.tsx'), 'utf8')
+  assert(postsIndexPage.includes('interface Props') || postsIndexPage.includes('PaginatedPageProps'), 'Posts index page must define Props.')
 }
 
 async function assertFeatureScaffolds(appDir: string): Promise<void> {

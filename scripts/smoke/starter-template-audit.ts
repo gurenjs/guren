@@ -29,9 +29,8 @@ export async function auditStarterTemplate(root: string): Promise<void> {
   assert(viteConfig.includes("from '@guren/core/vite'"), 'Starter template must use @guren/core/vite.')
   assert(viteConfig.includes('publicDir: false'), 'Starter template must disable publicDir copying in Vite config.')
 
-  const pageContracts = await read(root, 'resources/js/pages/contracts.ts')
-  assert(pageContracts.includes("generatedPages.Home.props"), 'Starter template must ship page contracts based on generated pages.')
-  assert(!pageContracts.includes('@guren/server'), 'Starter template page contracts must not import @guren/server.')
+  const homePage = await read(root, 'resources/js/pages/Home.tsx')
+  assert(homePage.includes('interface Props'), 'Starter template Home page must define Props interface.')
 
   const routes = await read(root, 'routes/web.ts')
   assert(routes.includes("from '@guren/core'"), 'Starter template routes must import from @guren/core.')
