@@ -15,6 +15,6 @@ void import('@guren/inertia-client').then(({ startInertiaClient }) =>
     pageManifest,
     resolve: pages
       ? undefined
-      : (name) => import(pageManifest[name as keyof typeof pageManifest] ?? `./pages/${name}.tsx`),
+      : (name) => import(/* @vite-ignore */ pageManifest[name as keyof typeof pageManifest] ?? `./pages/${name}.tsx`),
   }),
 )
