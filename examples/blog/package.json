@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "codegen": "bun ../../packages/cli/src/bin.ts codegen --force",
+    "codegen": "bun ../../packages/cli/src/bin.ts codegen --routes routes/web.ts --force",
     "routes:types": "bun run codegen",
     "dev": "bun run codegen && bun run dev:server",
     "dev:server": "bun bin/serve.ts",
