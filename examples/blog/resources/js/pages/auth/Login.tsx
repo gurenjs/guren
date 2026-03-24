@@ -1,4 +1,4 @@
-import { Head, Link } from '@inertiajs/react'
+import { Head, Link, usePage } from '@inertiajs/react'
 import { useId, useState } from 'react'
 import Layout from '../../components/Layout.js'
 import { Loader2 } from 'lucide-react'
@@ -14,6 +14,7 @@ interface Props {
 }
 
 export default function Login({ email: initialEmail = '', errors = {} }: Props) {
+  const { props } = usePage<{ csrfToken?: string }>()
   const [email, setEmail] = useState(initialEmail)
   const [password, setPassword] = useState('')
   const [remember, setRemember] = useState(false)
@@ -68,6 +69,7 @@ export default function Login({ email: initialEmail = '', errors = {} }: Props) 
           )}
 
           <form method="post" action={route('login.store')} className="space-y-6" onSubmit={handleSubmit}>
+            {props.csrfToken && <input type="hidden" name="_token" value={props.csrfToken} />}
             <div>
               <label htmlFor={emailId} className="block text-sm font-medium text-stone-700">
                 Email address

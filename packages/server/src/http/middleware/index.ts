@@ -30,6 +30,8 @@ export {
   CSRF_TOKEN_KEY,
   CSRF_HEADER_NAME,
   CSRF_FORM_FIELD,
+  XSRF_HEADER_NAME,
+  XSRF_COOKIE_NAME,
   type CsrfOptions,
 } from './csrf'
 export {

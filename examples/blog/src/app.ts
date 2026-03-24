@@ -1,5 +1,6 @@
 import {
   createApp,
+  createCsrfMiddleware,
   ErrorServiceProvider,
   InertiaServiceProvider,
   AuthServiceProvider as CoreAuthServiceProvider,
@@ -46,5 +47,10 @@ const app = createApp({
 })
 
 app.use('*', requestLogger)
+app.use('*', createCsrfMiddleware({
+  cookieOptions: {
+    secure: process.env.NODE_ENV === 'production',
+  },
+}))
 
 export default app

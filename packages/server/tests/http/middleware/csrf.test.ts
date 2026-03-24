@@ -18,6 +18,12 @@ function createTestApp(csrfOptions?: Parameters<typeof createCsrfMiddleware>[0])
 }
 
 function extractCookie(res: Response): string {
+  // When multiple Set-Cookie headers exist (session + XSRF-TOKEN),
+  // collect all cookies and join them so the session is preserved.
+  const cookies = res.headers.getSetCookie?.() ?? []
+  if (cookies.length > 0) {
+    return cookies.map((c) => c.split(';')[0]).join('; ')
+  }
   return res.headers.get('set-cookie')?.split(';')[0] ?? ''
 }
 

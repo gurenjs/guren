@@ -4,6 +4,8 @@ import { getSessionFromContext } from './session'
 
 export const CSRF_TOKEN_KEY = '_csrf_token'
 export const CSRF_HEADER_NAME = 'X-CSRF-TOKEN'
+export const XSRF_HEADER_NAME = 'X-XSRF-TOKEN'
+export const XSRF_COOKIE_NAME = 'XSRF-TOKEN'
 export const CSRF_FORM_FIELD = '_token'
 
 export interface CsrfOptions {
@@ -24,6 +26,23 @@ export interface CsrfOptions {
    * Defaults to ['POST', 'PUT', 'PATCH', 'DELETE'].
    */
   methods?: string[]
+
+  /**
+   * Set the CSRF token as an `XSRF-TOKEN` cookie on every response.
+   * This enables Axios/Inertia.js to automatically read the cookie
+   * and send it back as the `X-XSRF-TOKEN` header.
+   * Defaults to true.
+   */
+  cookie?: boolean
+
+  /**
+   * Cookie options when `cookie` is enabled.
+   */
+  cookieOptions?: {
+    path?: string
+    secure?: boolean
+    sameSite?: 'Strict' | 'Lax' | 'None'
+  }
 }
 
 const DEFAULT_PROTECTED_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE']
@@ -105,10 +124,16 @@ export function verifyCsrfToken(ctx: Context, token: string | undefined): boolea
 }
 
 async function getTokenFromRequest(ctx: Context): Promise<string | undefined> {
-  // First, check header
+  // Check X-CSRF-TOKEN header
   const headerToken = ctx.req.header(CSRF_HEADER_NAME)
   if (headerToken) {
     return headerToken
+  }
+
+  // Check X-XSRF-TOKEN header (sent automatically by Axios from XSRF-TOKEN cookie)
+  const xsrfToken = ctx.req.header(XSRF_HEADER_NAME)
+  if (xsrfToken) {
+    return xsrfToken
   }
 
   // Then, check form body
@@ -170,6 +195,8 @@ export function createCsrfMiddleware(options: CsrfOptions = {}): MiddlewareHandl
     exclude = [],
     onError,
     methods = DEFAULT_PROTECTED_METHODS,
+    cookie: enableCookie = true,
+    cookieOptions = {},
   } = options
 
   const protectedMethods = new Set(methods.map((m) => m.toUpperCase()))
@@ -184,11 +211,13 @@ export function createCsrfMiddleware(options: CsrfOptions = {}): MiddlewareHandl
     const method = ctx.req.method.toUpperCase()
     const path = new URL(ctx.req.url).pathname
 
-    // For safe methods, just ensure token exists
+    // For safe methods, just ensure token exists and set cookie
     if (!protectedMethods.has(method)) {
-      // Ensure a token exists in the session for later use
-      getCsrfToken(ctx)
+      const token = getCsrfToken(ctx)
       await next()
+      if (enableCookie) {
+        setXsrfCookie(ctx, token, cookieOptions)
+      }
       return
     }
 
@@ -211,5 +240,23 @@ export function createCsrfMiddleware(options: CsrfOptions = {}): MiddlewareHandl
     }
 
     await next()
+
+    // Refresh the cookie after successful mutation
+    if (enableCookie) {
+      setXsrfCookie(ctx, getCsrfToken(ctx), cookieOptions)
+    }
   }
+}
+
+function setXsrfCookie(
+  ctx: Context,
+  token: string,
+  options: CsrfOptions['cookieOptions'] = {},
+): void {
+  const { path = '/', secure = false, sameSite = 'Lax' } = options
+  // httpOnly must be false so JavaScript (Axios) can read the cookie
+  ctx.header(
+    'Set-Cookie',
+    `${XSRF_COOKIE_NAME}=${encodeURIComponent(token)}; Path=${path}; SameSite=${sameSite}${secure ? '; Secure' : ''}`,
+  )
 }
