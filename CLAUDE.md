@@ -113,8 +113,9 @@ import { helper } from './utils'
 
 ### Controllers
 ```typescript
-import { Controller } from '@guren/server'
+import { Controller } from '@guren/core'
 import { z } from 'zod'
+import { pages } from '@/.guren/pages.gen'
 
 const CreatePostSchema = z.object({
   title: z.string().min(1),
@@ -128,13 +129,13 @@ const PostIdParamSchema = z.object({
 export class PostController extends Controller {
   async index() {
     const posts = await Post.all()
-    return this.inertia('Posts/Index', { posts })
+    return this.inertia(pages.posts.Index, { posts })
   }
 
   async show() {
     const { id } = this.validateParams(PostIdParamSchema)
     const post = await Post.findOrFail(id)  // throws 404 automatically
-    return this.inertia('Posts/Show', { post })
+    return this.inertia(pages.posts.Show, { post })
   }
 
   async store() {

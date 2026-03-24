@@ -10,7 +10,7 @@ This document tracks the current status of the roadmap items listed in `README.m
 ## Items
 
 - Routing parity — **Complete**
-  - Current: HTTP verbs, prefix groups, controller actions, route type generator, resource routes (`Route.resource`), named routes (`.name()`, `Route.route()`), scoped groups, route contracts with typed validation, route model binding (`bind: { id: Post }`).
+  - Current: HTTP verbs, prefix groups, controller actions, route type generator, resource routes (`router.resource`), named routes (`.name()`, `router.route()`), scoped groups, route contracts with typed validation, route model binding (`bind: { id: Post }`), type-safe middleware aliases (`router.aliasMiddleware`).
   - Missing: none.
 - Validation pipeline — **Complete**
   - Current: `validateRequest` middleware with Zod schema support, `getValidatedData` helper, customizable error handling, `parseRequestPayload` and `formatValidationErrors` utilities, `FormRequest` class, 49 built-in validation rules (`Validator` class with fluent field API, bail/nullable/sometimes/conditional rules), `quickValidate`/`quickValidateOrThrow` helpers.
