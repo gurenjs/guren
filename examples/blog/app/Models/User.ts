@@ -7,6 +7,8 @@ export type NewUserRecord = typeof users.$inferInsert
 
 export class User extends AuthenticatableModel<UserRecord> {
   static override table = users
+  static fillable = ['name', 'email', 'password']
+  static guarded = ['id', 'passwordHash', 'rememberToken']
   static override readonly recordType = {} as UserRecord
   static override readonly createType = {} as Omit<NewUserRecord, 'passwordHash'> & {
     password: string
