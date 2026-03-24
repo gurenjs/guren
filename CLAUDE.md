@@ -170,21 +170,23 @@ const all = await Post.where('published', true).get()
 
 ### Routes
 ```typescript
-import { Route } from '@guren/server'
+import { Router, requireAuthenticated } from '@guren/core'
 
-Route.get('/posts', PostController.index)
-Route.post('/posts', PostController.store)
-Route.resource('/users', UserController)
+export function registerWebRoutes(router: Router): void {
+  router.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
 
-// With middleware
-Route.middleware(['auth']).group(() => {
-  Route.get('/dashboard', DashboardController.index)
-})
+  router.get('/posts', [PostController, 'index'])
+  router.post('/posts', [PostController, 'store'])
+
+  router.middleware('auth').group((auth) => {
+    auth.get('/dashboard', [DashboardController, 'index'])
+  })
+}
 ```
 
 ### Middleware
 ```typescript
-import { defineMiddleware } from '@guren/server'
+import { defineMiddleware } from '@guren/core'
 
 export const requireAuth = defineMiddleware(async (c, next) => {
   if (!c.get('user')) {
@@ -296,7 +298,7 @@ export const handler = createLambdaHandler(app)
 |------|---------|
 | `packages/server/src/http/Application.ts` | Main server class |
 | `packages/server/src/mvc/Controller.ts` | Base controller (validateBody/Query/Params) |
-| `packages/server/src/mvc/Route.ts` | Route registry |
+| `packages/server/src/mvc/Router.ts` | Instance-based route registry |
 | `packages/server/src/errors/ExceptionHandler.ts` | Exception handler (duck-type statusCode) |
 | `packages/orm/src/Model.ts` | Base model class (findOrFail) |
 | `packages/orm/src/ModelNotFoundException.ts` | 404 exception for models |
