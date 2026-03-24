@@ -161,6 +161,21 @@ export {
   resetRateLimit,
   MemoryRateLimitStore,
   SlidingWindowRateLimitStore,
+  // Security headers
+  createSecurityHeaders,
+  // CSP
+  createCspMiddleware,
+  getCspNonce,
+  CSP_NONCE_KEY,
+  // Host authorization
+  createHostAuthorizationMiddleware,
+  // CORS
+  createCorsMiddleware,
+  // Redirect safety
+  createRedirectSafetyMiddleware,
+  isSafeRedirectUrl,
+  // Force HTTPS
+  createForceHttpsMiddleware,
 }
   from './http/middleware'
 export { AUTH_CONTEXT_KEY } from './http/middleware/auth'
@@ -179,6 +194,20 @@ export type {
   RateLimitStore,
   RateLimitEntry,
   RateLimitInfo,
+  // Security headers types
+  SecurityHeadersOptions,
+  HstsOptions,
+  // CSP types
+  CspOptions,
+  CspDirectives,
+  // Host authorization types
+  HostAuthorizationOptions,
+  // CORS types
+  CorsOptions,
+  // Redirect safety types
+  RedirectSafetyOptions,
+  // Force HTTPS types
+  ForceHttpsOptions,
 } from './http/middleware'
 // Validation (advanced)
 export {
@@ -380,6 +409,7 @@ export type {
 // Logging
 export {
   Logger,
+  filterSensitiveData,
   LogManager,
   ConsoleChannel,
   FileChannel,
@@ -402,6 +432,7 @@ export type {
   StackChannelConfig,
   LogConfig,
   LogFormatter,
+  LoggerOptions,
 } from './logging'
 // i18n
 export {

@@ -15,7 +15,8 @@ export type {
 
 export { LOG_LEVEL_PRIORITY } from './types'
 
-export { Logger } from './Logger'
+export { Logger, filterSensitiveData } from './Logger'
+export type { LoggerOptions } from './Logger'
 export {
   LogManager,
   createLogManager,

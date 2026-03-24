@@ -1,5 +1,5 @@
 import type { LogConfig, LogChannel, LogChannelConfig, LogChannelFactory } from './types'
-import { Logger } from './Logger'
+import { Logger, type LoggerOptions } from './Logger'
 import { ConsoleChannel } from './channels/ConsoleChannel'
 import { FileChannel } from './channels/FileChannel'
 import { DailyFileChannel } from './channels/DailyFileChannel'
@@ -30,9 +30,14 @@ export class LogManager {
   private readonly channelFactories: Map<string, LogChannelFactory> = new Map()
   private readonly channelInstances: Map<string, LogChannel> = new Map()
   private readonly loggers: Map<string, Logger> = new Map()
+  private readonly loggerOptions: LoggerOptions
 
   constructor(config: LogConfig) {
     this.config = config
+    this.loggerOptions = {
+      filterKeys: config.filterKeys,
+      replacement: config.filterReplacement,
+    }
     this.registerDefaultDrivers()
   }
 
@@ -88,7 +93,7 @@ export class LogManager {
 
     if (!this.loggers.has(channelName)) {
       const channel = this.resolveChannel(channelName)
-      this.loggers.set(channelName, new Logger([channel]))
+      this.loggers.set(channelName, new Logger([channel], {}, this.loggerOptions))
     }
 
     return this.loggers.get(channelName)!
@@ -102,7 +107,7 @@ export class LogManager {
 
     if (!this.loggers.has(key)) {
       const channels = channelNames.map((name) => this.resolveChannel(name))
-      this.loggers.set(key, new Logger(channels))
+      this.loggers.set(key, new Logger(channels, {}, this.loggerOptions))
     }
 
     return this.loggers.get(key)!

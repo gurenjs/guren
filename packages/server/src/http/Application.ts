@@ -5,6 +5,8 @@ import { Container, type ServiceProvider } from '../container'
 import { ProviderManager } from '../container/ServiceProvider'
 import { AuthManager } from '../auth'
 import type { CreateSessionMiddlewareOptions } from './middleware/session'
+import { createSecurityHeaders, type SecurityHeadersOptions } from './middleware/security-headers'
+import { createHostAuthorizationMiddleware, type HostAuthorizationOptions } from './middleware/host-authorization'
 import { logDevServerBanner, type DevBannerOptions } from './dev-banner'
 import { startViteDevServer, type StartViteDevServerOptions } from './vite-dev-server'
 
@@ -125,11 +127,32 @@ export interface ApplicationOptions {
   readonly discover?: boolean
   readonly routes?: RouteRegistration
   readonly features?: ApplicationFeatures
+  /**
+   * Configure or disable the default security headers middleware.
+   * Set to `false` to disable entirely, or pass `SecurityHeadersOptions` to customize.
+   * Enabled by default with safe Rails-matching defaults.
+   */
+  readonly securityHeaders?: SecurityHeadersOptions | false
+  /**
+   * Configure host authorization middleware for DNS rebinding protection.
+   * Pass `HostAuthorizationOptions` to enable, or `false` / omit to disable.
+   * The `create-app` template includes a default localhost configuration.
+   */
+  readonly hostAuthorization?: HostAuthorizationOptions | false
 }
 
 export interface AuthPluginOptions {
   autoSession?: boolean
   sessionOptions?: CreateSessionMiddlewareOptions
+  /**
+   * Automatically register CSRF middleware when session is enabled.
+   * Defaults to `true`. Set to `false` to disable (e.g., for pure API servers).
+   */
+  autoCsrf?: boolean
+  /**
+   * Options passed to the CSRF middleware when `autoCsrf` is enabled.
+   */
+  csrfOptions?: import('./middleware/csrf').CsrfOptions
 }
 
 export interface ApplicationListenOptions {
@@ -217,11 +240,34 @@ export class Application {
    * Executes provider registration, boot callback, mounts routes, and boots providers.
    */
   async boot(): Promise<void> {
+    this.mountSecurityDefaults()
     await this.providerManager.registerAll()
     await this.options.boot?.(this.hono)
     await this.mountRoutes()
     await this.mountMcpEndpoint()
     await this.providerManager.bootAll()
+  }
+
+  /**
+   * Registers default security middleware (headers + host authorization).
+   */
+  private mountSecurityDefaults(): void {
+    // Security headers (default: enabled)
+    const { securityHeaders } = this.options
+    if (securityHeaders !== false) {
+      this.hono.use('*', createSecurityHeaders(securityHeaders ?? {}))
+    }
+
+    // Host authorization (default: enabled in non-production)
+    this.mountHostAuthorization()
+  }
+
+  private mountHostAuthorization(): void {
+    const { hostAuthorization } = this.options
+
+    if (hostAuthorization === false || !hostAuthorization) return
+
+    this.hono.use('*', createHostAuthorizationMiddleware(hostAuthorization))
   }
 
   /**

@@ -1,6 +1,7 @@
 import { ServiceProvider } from '../container/ServiceProvider'
 import { attachAuthContext } from '../http/middleware/auth'
 import { createSessionMiddleware, type CreateSessionMiddlewareOptions } from '../http/middleware/session'
+import { createCsrfMiddleware } from '../http/middleware/csrf'
 import { SessionGuard } from '../auth/SessionGuard'
 import type { GuardFactory } from '../auth/types'
 import type { Application, AuthPluginOptions } from '../http/Application'
@@ -33,6 +34,17 @@ export class AuthServiceProvider extends ServiceProvider {
 
       app.use('*', createSessionMiddleware(sessionOptions))
       app.markAutoSessionAttached()
+
+      // Auto-register CSRF protection when session is enabled (secure by default)
+      if (authOptions.autoCsrf !== false) {
+        const csrfOptions = authOptions.csrfOptions ?? {}
+        app.use('*', createCsrfMiddleware({
+          cookieOptions: {
+            secure: typeof process !== 'undefined' ? process.env.NODE_ENV === 'production' : true,
+          },
+          ...csrfOptions,
+        }))
+      }
     }
 
     app.use('*', attachAuthContext((ctx) => auth.createAuthContext(ctx)))

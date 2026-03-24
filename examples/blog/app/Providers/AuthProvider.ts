@@ -1,5 +1,5 @@
-import { ServiceProvider, createCsrfMiddleware } from '@guren/core'
-import type { AuthManager, Application } from '@guren/core'
+import { ServiceProvider } from '@guren/core'
+import type { AuthManager } from '@guren/core'
 import { User } from '../Models/User.js'
 
 export default class AuthProvider extends ServiceProvider {
@@ -11,12 +11,7 @@ export default class AuthProvider extends ServiceProvider {
       rememberTokenColumn: 'rememberToken',
       credentialsPasswordField: 'password',
     })
-
-    const app = this.container.make<Application>('app')
-    app.use('*', createCsrfMiddleware({
-      cookieOptions: {
-        secure: process.env.NODE_ENV === 'production',
-      },
-    }))
+    // CSRF middleware is now auto-registered by AuthServiceProvider
+    // when autoSession is enabled (secure by default).
   }
 }

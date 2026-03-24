@@ -112,6 +112,10 @@ export interface StackChannelConfig extends LogChannelConfig {
 export interface LogConfig {
   default: string
   channels: Record<string, LogChannelConfig>
+  /** Keys whose values are replaced with '[FILTERED]' in log context. */
+  filterKeys?: string[]
+  /** Replacement string for filtered values. Default: '[FILTERED]' */
+  filterReplacement?: string
 }
 
 /**
