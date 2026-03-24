@@ -75,6 +75,28 @@ await Post.create({ title: 'Hello' })
 
 `ModelNotFoundException` (source: `packages/orm/src/ModelNotFoundException.ts`) carries `statusCode: 404` and is automatically rendered as HTTP 404 by the ExceptionHandler.
 
+**Mass assignment protection** — prevent injection of unintended fields via `create()` / `update()`:
+
+```typescript
+export class Post extends defineModel(posts) {
+  // Whitelist: only these fields are accepted (recommended)
+  static fillable = ['title', 'excerpt', 'body', 'authorId']
+}
+
+export class User extends AuthenticatableModel<UserRecord> {
+  static override table = users
+  // Whitelist for mass assignment
+  static fillable = ['name', 'email', 'password']
+  // Blacklist: these fields are always stripped (ignored when fillable is set)
+  static guarded = ['id', 'passwordHash', 'rememberToken']
+}
+```
+
+- `fillable` (whitelist) — only listed fields pass through to `create()` / `update()`
+- `guarded` (blacklist, default: `['id']`) — listed fields are stripped; ignored when `fillable` is set
+- Both are enforced by `Model.filterFillable()`, called automatically before persistence
+- Always define `fillable` on models that accept user input — this is the second defense layer after Zod validation
+
 ### Routes
 Source: `packages/server/src/mvc/Router.ts`
 

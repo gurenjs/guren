@@ -138,6 +138,25 @@ interface Props {
 }
 ```
 
+### Models — define fillable for mass assignment protection
+
+Always add `fillable` to generated models. This is the second defense layer after Zod validation — it prevents unintended fields from reaching the database even if the controller validation is bypassed or misconfigured:
+
+```typescript
+export class <Name> extends defineModel(<names>) {
+  static fillable = ['title', 'body', 'authorId']  // only these fields pass to create()/update()
+}
+```
+
+For User models, also define `guarded` to explicitly protect sensitive fields:
+
+```typescript
+export class User extends AuthenticatableModel<UserRecord> {
+  static fillable = ['name', 'email', 'password']
+  static guarded = ['id', 'passwordHash', 'rememberToken']
+}
+```
+
 ## Generated Structure
 
 For feature "Post":
