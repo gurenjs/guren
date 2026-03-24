@@ -1,5 +1,6 @@
 import type { Session } from '../http/middleware'
 import type { AuthCredentials, Authenticatable, Guard, UserProvider } from './types'
+import { secureStringCompare } from './utils'
 
 export interface SessionGuardOptions {
   provider: UserProvider
@@ -49,7 +50,7 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
     }
 
     const providerToken = await this.provider.getRememberToken?.(user)
-    if (!providerToken || providerToken !== rememberToken) {
+    if (!providerToken || !secureStringCompare(providerToken, rememberToken)) {
       this.currentSession.forget(this.rememberSessionKey())
       return null
     }
@@ -163,6 +164,10 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
   async validate(credentials: AuthCredentials): Promise<User | null> {
     const user = await this.provider.retrieveByCredentials(credentials)
     if (!user) {
+      // Perform a dummy validation to prevent timing-based user enumeration.
+      // Without this, requests for non-existent users return faster (no hash
+      // computation), letting attackers distinguish valid from invalid emails.
+      await this.provider.validateCredentials({} as User, credentials)
       return null
     }
 

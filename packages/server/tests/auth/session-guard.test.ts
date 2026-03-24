@@ -281,6 +281,21 @@ describe('SessionGuard', () => {
       await guard.validate({ email: 'user@test.com', password: 'hashed_password' })
       expect(await guard.check()).toBe(false)
     })
+
+    test('should call validateCredentials even when user not found (timing attack mitigation)', async () => {
+      let validateCalled = false
+      const trackingProvider = {
+        ...provider,
+        async validateCredentials(_user: MockUser, _credentials: AuthCredentials) {
+          validateCalled = true
+          return false
+        },
+      }
+      const guard = createGuard({ provider: trackingProvider })
+      const result = await guard.validate({ email: 'nobody@test.com', password: 'x' })
+      expect(result).toBeNull()
+      expect(validateCalled).toBe(true)
+    })
   })
 
   describe('remember token flow', () => {

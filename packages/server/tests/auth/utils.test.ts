@@ -4,6 +4,7 @@ import {
   generateToken,
   generateId,
   secureCompare,
+  secureStringCompare,
   buildTokenUrl,
   parseTokenUrl,
 } from '../../src/auth/utils'
@@ -83,6 +84,30 @@ describe('auth/utils', () => {
     test('should return true for matching empty strings (zero-length buffers)', () => {
       // timingSafeEqual with zero-length buffers returns true
       expect(secureCompare('', '')).toBe(true)
+    })
+  })
+
+  describe('secureStringCompare', () => {
+    test('should return true for identical strings', () => {
+      expect(secureStringCompare('hello-world', 'hello-world')).toBe(true)
+    })
+
+    test('should return false for different strings', () => {
+      expect(secureStringCompare('hello', 'world')).toBe(false)
+    })
+
+    test('should return false for different lengths', () => {
+      expect(secureStringCompare('short', 'longer-string')).toBe(false)
+    })
+
+    test('should work with UUIDs', () => {
+      const uuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+      expect(secureStringCompare(uuid, uuid)).toBe(true)
+      expect(secureStringCompare(uuid, 'a1b2c3d4-e5f6-7890-abcd-ef1234567891')).toBe(false)
+    })
+
+    test('should return true for empty strings', () => {
+      expect(secureStringCompare('', '')).toBe(true)
     })
   })
 

@@ -34,6 +34,17 @@ export function secureCompare(a: string, b: string): boolean {
 }
 
 /**
+ * Securely compare two arbitrary strings using timing-safe comparison.
+ * Unlike secureCompare, this works with any string encoding (UUIDs, tokens, etc.).
+ */
+export function secureStringCompare(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, 'utf8')
+  const bufB = Buffer.from(b, 'utf8')
+  if (bufA.length !== bufB.length) return false
+  return timingSafeEqual(bufA, bufB)
+}
+
+/**
  * Build a URL with token and optional email parameters.
  */
 export function buildTokenUrl(baseUrl: string, token: string, email?: string): string {

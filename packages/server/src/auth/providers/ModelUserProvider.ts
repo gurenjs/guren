@@ -72,6 +72,9 @@ export class ModelUserProvider<User extends Authenticatable = Authenticatable> e
 
     const hashed = (user as PlainObject)[this.passwordColumn]
     if (typeof hashed !== 'string') {
+      // Run a dummy hash to prevent timing-based user enumeration.
+      // This ensures requests take the same time whether or not the user exists.
+      await this.hasher.hash('dummy-timing-equalization')
       return false
     }
 

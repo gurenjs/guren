@@ -103,6 +103,7 @@ export {
   generateToken,
   generateId,
   secureCompare,
+  secureStringCompare,
   buildTokenUrl,
   parseTokenUrl,
 } from './utils'
