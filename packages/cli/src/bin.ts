@@ -605,6 +605,12 @@ const codegenCommand = defineCommand({
       extractProps: true,
       ...writerOptions,
     })
+    if (pagesOutputPath) consola.success(`Page helpers generated at ${pagesOutputPath}`)
+
+    if (!args.routes) {
+      process.exit(0)
+    }
+
     const { outputPath, runtimeOutputPath, definitions } = await generateRouteTypes({
       routesFile: args.routes,
       outputFile: args.out,
@@ -623,7 +629,6 @@ const codegenCommand = defineCommand({
       definitions,
       { appRoot: args.app, ...writerOptions },
     )
-    if (pagesOutputPath) consola.success(`Page helpers generated at ${pagesOutputPath}`)
     consola.success(`Route types generated at ${outputPath}`)
     consola.success(`Route helpers generated at ${runtimeOutputPath}`)
     consola.success(`Data types generated at ${dataOutputPath}`)
