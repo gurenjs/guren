@@ -102,7 +102,17 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   consola.info('')
   consola.info('Next steps:')
   consola.info(`  1. Add table definition to db/schema.ts`)
-  consola.info(`  2. Register routes in routes/web.ts`)
+  consola.info(`  2. Register routes in routes/web.ts with body schemas:`)
+  consola.info(`     import ${singular}Controller from '../app/Http/Controllers/${singular}Controller.js'`)
+  consola.info(`     import { ${singular}PayloadSchema } from '../app/Http/Validators/${singular}Validator.js'`)
+  consola.info(`     router.group('/${routeName}', (${routeVar}) => {`)
+  consola.info(`       ${routeVar}.get('/', [${singular}Controller, 'index']).name('${routeName}.index')`)
+  consola.info(`       ${routeVar}.get('/new', [${singular}Controller, 'create']).name('${routeName}.create')`)
+  consola.info(`       ${routeVar}.get('/:id', [${singular}Controller, 'show']).name('${routeName}.show')`)
+  consola.info(`       ${routeVar}.get('/:id/edit', [${singular}Controller, 'edit']).name('${routeName}.edit')`)
+  consola.info(`       ${routeVar}.post('/', { name: '${routeName}.store', body: ${singular}PayloadSchema }, [${singular}Controller, 'store'])`)
+  consola.info(`       ${routeVar}.put('/:id', { name: '${routeName}.update', body: ${singular}PayloadSchema }, [${singular}Controller, 'update'])`)
+  consola.info(`     })`)
   consola.info(`  3. Run: bunx guren db:migrate`)
   consola.info(`  4. Run: bunx guren codegen`)
 
@@ -217,15 +227,13 @@ function generateController(
   variableName: string,
   fields: FieldDefinition[],
 ): string {
-  const fieldNames = fields.map((f) => `'${f.name}'`).join(' | ')
-  return `import { Controller, paginate, type PaginatedPageProps, type ValidationErrors } from '@guren/core'
+  return `import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
 import { pages } from '../../../.guren/pages.gen.js'
 import { ${singular} } from '../../Models/${singular}.js'
 import { ${singular}Resource, type ${singular}ResourceData } from '../Resources/${singular}Resource.js'
 import { ${singular}IdParamSchema, ${singular}PayloadSchema, List${collection}QuerySchema } from '../Validators/${singular}Validator.js'
 
 type ${collection}IndexProps = PaginatedPageProps<${singular}ResourceData>
-type ${singular}FormErrors = ValidationErrors<${fieldNames}>
 
 export default class ${singular}Controller extends Controller {
   async index(): Promise<Response> {
@@ -266,7 +274,7 @@ export default class ${singular}Controller extends Controller {
     const ${variableName} = await ${singular}.findOrFail(id)
     return this.inertia(pages.${routeVar}.Edit, {
       ${variableName}: new ${singular}Resource(${variableName}).toJSON(),
-      errors: {} as ${singular}FormErrors,
+      errors: {},
     })
   }
 
@@ -291,25 +299,30 @@ function generateIndexPage(
   const summaryField = fields.length > 1 ? fields[1]?.name : null
 
   return `import { Link } from '@inertiajs/react'
+import type { PaginatedPageProps } from '@guren/core'
+import type { ${singular}ResourceData } from '../../../../app/Http/Resources/${singular}Resource.js'
+import { route } from '../../../../.guren/routes.gen'
 
-export default function ${collection}Index({ data, pagination }: any) {
+interface Props extends PaginatedPageProps<${singular}ResourceData> {}
+
+export default function ${collection}Index({ data, pagination }: Props) {
   return (
     <main className="mx-auto max-w-3xl space-y-6 px-6 py-12">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-semibold">${collection}</h1>
-        <Link href="/${routeName}/new" className="rounded bg-black px-4 py-2 text-white">New ${singular}</Link>
+        <Link href={route('${routeName}.create')} className="rounded bg-black px-4 py-2 text-white">New ${singular}</Link>
       </div>
       <div className="space-y-4">
-        {data.map((${variableName}: any) => (
+        {data.map((${variableName}) => (
           <article key={${variableName}.id} className="rounded border p-4">
-            <Link href={'/${routeName}/' + ${variableName}.id} className="text-xl font-medium">{${variableName}.${titleField}}</Link>
+            <Link href={route('${routeName}.show', { id: ${variableName}.id })} className="text-xl font-medium">{${variableName}.${titleField}}</Link>
 ${summaryField ? `            <p className="mt-2 text-sm text-zinc-600">{${variableName}.${summaryField} ?? ''}</p>` : ''}
           </article>
         ))}
       </div>
       {pagination?.links?.pages && (
         <nav className="flex gap-2">
-          {pagination.links.pages.map((page: any) => (
+          {pagination.links.pages.map((page) => (
             <Link key={page.page} href={page.url ?? '#'} className="rounded border px-3 py-1">
               {page.page}
             </Link>
@@ -336,13 +349,19 @@ function generateShowPage(
   }).join('\n')
 
   return `import { Link } from '@inertiajs/react'
+import type { ${singular}ResourceData } from '../../../../app/Http/Resources/${singular}Resource.js'
+import { route } from '../../../../.guren/routes.gen'
 
-export default function ${singular}Show({ ${variableName} }: any) {
+interface Props {
+  ${variableName}: ${singular}ResourceData
+}
+
+export default function ${singular}Show({ ${variableName} }: Props) {
   return (
     <main className="mx-auto max-w-3xl space-y-6 px-6 py-12">
-      <Link href="/${routeName}">Back</Link>
+      <Link href={route('${routeName}.index')}>Back</Link>
 ${fieldRenders}
-      <Link href={'/${routeName}/' + ${variableName}.id + '/edit'}>Edit</Link>
+      <Link href={route('${routeName}.edit', { id: ${variableName}.id })}>Edit</Link>
     </main>
   )
 }
@@ -362,12 +381,16 @@ function generateNewPage(
   const formFields = fields.map((f) => generateFormField(f, 'form')).join('\n')
 
   return `import { useForm } from '@inertiajs/react'
+import type { ApiRoutes } from '../../../../.guren/api-client.gen'
+import { route } from '../../../../.guren/routes.gen'
+
+type ${singular}FormData = ApiRoutes['${routeName}.store']['body']
 
 export default function New${singular}() {
-  const form = useForm({ ${defaults} })
+  const form = useForm<${singular}FormData>({ ${defaults} })
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
-      <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); form.post('/${routeName}') }}>
+      <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); form.post(route('${routeName}.store')) }}>
 ${formFields}
         <button type="submit" className="rounded bg-black px-4 py-2 text-white">Create</button>
       </form>
@@ -391,12 +414,22 @@ function generateEditPage(
   const formFields = fields.map((f) => generateFormField(f, 'form')).join('\n')
 
   return `import { useForm } from '@inertiajs/react'
+import type { ApiRoutes } from '../../../../.guren/api-client.gen'
+import type { RouteErrors } from '@guren/inertia-client/typed-forms'
+import { route } from '../../../../.guren/routes.gen'
 
-export default function Edit${singular}({ ${variableName} }: any) {
-  const form = useForm({ ${defaults} })
+type ${singular}FormData = ApiRoutes['${routeName}.store']['body']
+
+interface Props {
+  ${variableName}: ${singular}FormData & { id: number }
+  errors?: RouteErrors<${singular}FormData> & { message?: string }
+}
+
+export default function Edit${singular}({ ${variableName} }: Props) {
+  const form = useForm<${singular}FormData>({ ${defaults} })
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
-      <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); form.put('/${routeName}/' + ${variableName}.id) }}>
+      <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); form.put(route('${routeName}.update', { id: ${variableName}.id })) }}>
 ${formFields}
         <button type="submit" className="rounded bg-black px-4 py-2 text-white">Save</button>
       </form>

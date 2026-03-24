@@ -2,12 +2,9 @@ import React from 'react'
 import { usePage, type InertiaFormProps } from '@inertiajs/react'
 import Layout from './Layout.js'
 import { AlertCircle } from 'lucide-react'
+import type { ApiRoutes } from '../../../.guren/api-client.gen'
 
-export type PostFormValues = {
-  title: string
-  excerpt: string
-  body: string
-}
+export type PostFormValues = ApiRoutes['posts.store']['body']
 
 type PostFormProps = {
   form: InertiaFormProps<PostFormValues>

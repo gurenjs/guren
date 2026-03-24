@@ -2,11 +2,15 @@ import { Head, Link } from '@inertiajs/react'
 import { useId, useState } from 'react'
 import Layout from '../../components/Layout.js'
 import { Loader2 } from 'lucide-react'
-import type { ValidationErrors } from '@guren/core'
+import type { RouteErrors } from '@guren/inertia-client/typed-forms'
+import type { ApiRoutes } from '../../../../.guren/api-client.gen'
+import { route } from '../../../../.guren/routes.gen'
+
+type LoginBody = ApiRoutes['login.store']['body']
 
 interface Props {
   email?: string
-  errors?: ValidationErrors<'email' | 'password'>
+  errors?: RouteErrors<LoginBody> & { message?: string }
 }
 
 export default function Login({ email: initialEmail = '', errors = {} }: Props) {
@@ -63,7 +67,7 @@ export default function Login({ email: initialEmail = '', errors = {} }: Props) 
             </div>
           )}
 
-          <form method="post" action="/login" className="space-y-6" onSubmit={handleSubmit}>
+          <form method="post" action={route('login.store')} className="space-y-6" onSubmit={handleSubmit}>
             <div>
               <label htmlFor={emailId} className="block text-sm font-medium text-stone-700">
                 Email address

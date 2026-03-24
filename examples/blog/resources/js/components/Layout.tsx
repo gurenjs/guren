@@ -1,5 +1,6 @@
 import { Link, usePage } from '@inertiajs/react'
 import type { PropsWithChildren } from 'react'
+import { route } from '../../../.guren/routes.gen'
 
 type SharedPageProps = {
   auth?: {
@@ -45,20 +46,20 @@ export default function Layout({ children, mainClassName, wrapperClassName }: La
             <span className="text-lg font-medium tracking-tight text-stone-900">Guren</span>
           </Link>
           <nav className="flex items-center gap-8 text-sm">
-            <Link href="/posts" className="text-stone-500 transition-colors hover:text-stone-900">
+            <Link href={route('posts.index')} className="text-stone-500 transition-colors hover:text-stone-900">
               Posts
             </Link>
-            <Link href="/dashboard" className="text-stone-500 transition-colors hover:text-stone-900">
+            <Link href={route('dashboard')} className="text-stone-500 transition-colors hover:text-stone-900">
               Dashboard
             </Link>
             {isAuthenticated ? (
-              <Link href="/profile" className="text-stone-500 transition-colors hover:text-stone-900">
+              <Link href={route('profile.edit')} className="text-stone-500 transition-colors hover:text-stone-900">
                 Profile
               </Link>
             ) : null}
             {isAuthenticated ? (
               <Link
-                href="/logout"
+                href={route('logout')}
                 method="post"
                 as="button"
                 className="inline-flex items-center rounded-md bg-stone-100 px-4 py-1.5 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-200"
@@ -67,7 +68,7 @@ export default function Layout({ children, mainClassName, wrapperClassName }: La
               </Link>
             ) : (
               <Link
-                href="/login"
+                href={route('login')}
                 className="inline-flex items-center rounded-md bg-guren-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-guren-500"
               >
                 Sign in

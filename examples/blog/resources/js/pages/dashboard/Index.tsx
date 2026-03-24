@@ -1,6 +1,7 @@
 import { Link } from '@inertiajs/react'
 import { User, Mail } from 'lucide-react'
 import Layout from '../../components/Layout.js'
+import { route } from '../../../../.guren/routes.gen'
 
 interface Props {
   user?: { id: number; name: string; email: string } | null
@@ -54,7 +55,7 @@ export default function Dashboard({ user }: Props) {
 
                 <div className="mt-8 border-t border-stone-100 pt-6">
                   <Link
-                    href="/profile"
+                    href={route('profile.edit')}
                     className="text-sm font-medium text-stone-600 underline-offset-4 transition-colors hover:text-stone-900 hover:underline"
                   >
                     Edit Profile
@@ -67,7 +68,7 @@ export default function Dashboard({ user }: Props) {
               <p className="text-stone-500">You are not signed in.</p>
               <div className="mt-4">
                 <Link
-                  href="/login"
+                  href={route('login')}
                   className="inline-flex items-center justify-center rounded-md bg-guren-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-guren-500"
                 >
                   Sign in

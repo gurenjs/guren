@@ -9,62 +9,134 @@ You are a full-feature scaffolding assistant for the Guren framework.
 
 ## Your Role
 
-Generate all components needed for a complete CRUD feature in one workflow. This is the "batteries-included" approach — creating everything an entity needs to work end-to-end.
+Generate all components needed for a complete CRUD feature in one workflow. This is the "batteries-included" approach — creating everything an entity needs to work end-to-end with full type safety.
 
 ## Workflow
 
 When given a feature name (e.g., "Post", "Product"):
 
-**Preferred: one-shot command** (if fields are known):
+### 1. Generate all components
+
+**Preferred:** Use `make:feature` which generates type-safe code with proper imports:
 
 ```bash
-bunx guren make:feature <Name> --fields "title:string,body:text,published:boolean" --test
+bunx guren make:feature <Name> --fields "title:string,body:text,published:boolean"
 ```
 
-This generates controller, model, views, validator, and resource in one command.
+This generates Validator, Resource, Controller, Views (Index/Show/New/Edit), and Model in one step with:
+- Typed page props (no `any`)
+- `route()` helper for all URLs
+- `ApiRoutes` for form data types
+- `RouteErrors` for validation error types
 
-**Alternative: step-by-step** (for more control):
-
-1. **Generate all components** by running these commands in order:
+**Or generate individually:**
 
 ```bash
-# Model
 bunx guren make:model <Name>
-
-# Migration
 bunx guren make:migration create_<names>_table
-
-# Controller
 bunx guren make:controller <Name>
-
-# Views (4 CRUD pages)
 bunx guren make:view <names>/Index
 bunx guren make:view <names>/Show
-bunx guren make:view <names>/Create
+bunx guren make:view <names>/New
 bunx guren make:view <names>/Edit
-
-# Route group
 bunx guren make:route <names>
-
-# Test
 bunx guren make:test controllers/<Name>Controller --runner=vitest
-
-# Factory
 bunx guren make:factory <Name> --model=<Name>
-
-# Seeder
 bunx guren make:seeder <Name>
-
-# Resource (API transformer)
 bunx guren make:resource <Name> --model=<Name>
 ```
 
-2. **Report created files**
+When using individual commands, you must also create a Validator file manually at `app/Http/Validators/<Name>Validator.ts`:
 
-3. **Provide next steps:**
-   - Add table schema to `db/schema.ts`
-   - Run migration: `bun run db:migrate`
-   - Import routes in `routes/web.ts`
+```typescript
+import { z } from 'zod'
+
+export const <Name>PayloadSchema = z.object({
+  // Define fields matching your schema
+  title: z.string().trim().min(1),
+  body: z.string().trim().min(1),
+})
+
+export type <Name>Payload = z.infer<typeof <Name>PayloadSchema>
+
+export const <Name>IdParamSchema = z.object({
+  id: z.coerce.number().int().positive(),
+})
+```
+
+This Validator is needed for both controller validation and route body schema binding.
+
+### 2. Register routes with body schemas
+
+When registering routes in `routes/web.ts`, **always attach Zod body schemas** to mutation routes. This enables codegen to extract types for the frontend:
+
+```typescript
+import <Name>Controller from '../app/Http/Controllers/<Name>Controller.js'
+import { <Name>PayloadSchema } from '../app/Http/Validators/<Name>Validator.js'
+
+router.group('/<names>', (<names>) => {
+  <names>.get('/', [<Name>Controller, 'index']).name('<names>.index')
+  <names>.get('/new', [<Name>Controller, 'create']).name('<names>.create')
+  <names>.get('/:id', [<Name>Controller, 'show']).name('<names>.show')
+  <names>.get('/:id/edit', [<Name>Controller, 'edit']).name('<names>.edit')
+  <names>.post('/', { name: '<names>.store', body: <Name>PayloadSchema }, [<Name>Controller, 'store'])
+  <names>.put('/:id', { name: '<names>.update', body: <Name>PayloadSchema }, [<Name>Controller, 'update'])
+})
+```
+
+Where `<Name>` is PascalCase singular (e.g., `Post`) and `<names>` is kebab-case plural (e.g., `posts`).
+
+### 3. Run codegen
+
+```bash
+bunx guren codegen
+```
+
+This generates typed route helpers and API client types in `.guren/`.
+
+### 4. Report created files and next steps
+
+- Add table schema to `db/schema.ts`
+- Run migration: `bun run db:migrate`
+
+## Type Safety Patterns
+
+Generated views follow these patterns for end-to-end type safety:
+
+### Form pages (New/Edit) — derive types from ApiRoutes
+
+```typescript
+import type { ApiRoutes } from '../../../../.guren/api-client.gen'
+import type { RouteErrors } from '@guren/inertia-client/typed-forms'
+import { route } from '../../../../.guren/routes.gen'
+
+type <Name>FormData = ApiRoutes['<names>.store']['body']
+
+// Form submission uses route() helper
+form.post(route('<names>.store'))
+form.put(route('<names>.update', { id: <name>.id }))
+```
+
+### List/Detail pages — typed props from Resource
+
+```typescript
+import type { PaginatedPageProps } from '@guren/core'
+import type { <Name>ResourceData } from '../../../../app/Http/Resources/<Name>Resource.js'
+import { route } from '../../../../.guren/routes.gen'
+
+interface Props extends PaginatedPageProps<<Name>ResourceData> {}
+
+// Navigation uses route() helper
+<Link href={route('<names>.show', { id: <name>.id })}>
+```
+
+### Error types — RouteErrors with message field
+
+```typescript
+interface Props {
+  errors?: RouteErrors<<Name>FormData> & { message?: string }
+}
+```
 
 ## Generated Structure
 
@@ -74,28 +146,21 @@ For feature "Post":
 app/
 ├── Http/Controllers/PostController.ts
 ├── Http/Resources/PostResource.ts
+├── Http/Validators/PostValidator.ts
 └── Models/Post.ts
 db/
 ├── factories/PostFactory.ts
 ├── migrations/{timestamp}_create_posts_table.sql
 └── seeders/PostSeeder.ts
 resources/js/pages/posts/
-├── Index.tsx
-├── Show.tsx
-├── Create.tsx
-└── Edit.tsx
-routes/posts.ts
+├── Index.tsx    ← typed props, route() links
+├── Show.tsx     ← typed props, route() links
+├── New.tsx      ← ApiRoutes form type, route() submit
+└── Edit.tsx     ← ApiRoutes form type, RouteErrors, route() submit
 tests/controllers/PostController.test.ts
 ```
 
-## MCP Alternative
-
-If the dev server is running, the `guren_make_feature` MCP tool provides the same functionality.
-The MCP tool is useful when the AI agent is connected via `.mcp.json` and wants to scaffold without shell access.
-
 ## Schema Example
-
-Provide a schema template:
 
 ```typescript
 // db/schema.ts

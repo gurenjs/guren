@@ -3,6 +3,7 @@ import Layout from '../../components/Layout.js'
 import { Plus, ChevronLeft, ChevronRight } from 'lucide-react'
 import type { PaginatedPageProps } from '@guren/core'
 import type { PostResourceData } from '../../../../app/Http/Resources/PostResource.js'
+import { route } from '../../../../.guren/routes.gen'
 
 interface Props extends PaginatedPageProps<PostResourceData> {}
 
@@ -30,7 +31,7 @@ export default function Index({ data: posts, pagination }: Props) {
 
           {isAuthenticated && (
             <Link
-              href="/posts/new"
+              href={route('posts.create')}
               className="inline-flex items-center justify-center gap-2 rounded-md bg-stone-900 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-800 focus:outline-none focus:ring-2 focus:ring-stone-900 focus:ring-offset-2"
             >
               <Plus className="h-4 w-4" aria-hidden />
@@ -47,7 +48,7 @@ export default function Index({ data: posts, pagination }: Props) {
               <p className="mt-1 text-sm text-stone-400">Get started by creating your first post.</p>
               <div className="mt-6">
                 <Link
-                  href="/posts/new"
+                  href={route('posts.create')}
                   className="inline-flex items-center gap-2 rounded-md bg-stone-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-stone-800"
                 >
                   <Plus className="h-4 w-4" aria-hidden />
@@ -60,7 +61,7 @@ export default function Index({ data: posts, pagination }: Props) {
               {posts.map((post) => (
                 <article key={post.id} className="group">
                   <Link
-                    href={`/posts/${post.id}`}
+                    href={route('posts.show', { id: post.id })}
                     className="block py-8 sm:py-10 sm:flex sm:items-start sm:gap-10"
                   >
                     <time className="mb-2 block shrink-0 text-xs font-normal uppercase tracking-widest text-stone-400 sm:mb-0 sm:w-28 sm:pt-1.5">

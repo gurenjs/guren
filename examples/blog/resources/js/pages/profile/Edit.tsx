@@ -3,19 +3,16 @@ import type { FormEvent } from 'react'
 import { useEffect } from 'react'
 import Layout from '../../components/Layout.js'
 import { AlertCircle } from 'lucide-react'
-import type { ValidationErrors } from '@guren/core'
+import type { RouteErrors } from '@guren/inertia-client/typed-forms'
+import type { ApiRoutes } from '../../../../.guren/api-client.gen'
+import { route } from '../../../../.guren/routes.gen'
+
+type ProfileFormValues = ApiRoutes['profile.update']['body']
 
 interface Props {
   profile: { name: string; email: string }
-  errors?: ValidationErrors<'name' | 'email' | 'password'>
+  errors?: RouteErrors<ProfileFormValues>
   status?: string
-}
-
-type ProfileFormValues = {
-  name: string
-  email: string
-  password: string
-  passwordConfirmation: string
 }
 
 export default function EditProfile({ profile, status }: Props) {
@@ -35,7 +32,7 @@ export default function EditProfile({ profile, status }: Props) {
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    form.put('/profile')
+    form.put(route('profile.update'))
   }
 
   return (

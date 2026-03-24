@@ -2,6 +2,7 @@ import { Link } from '@inertiajs/react'
 import Layout from '../../components/Layout.js'
 import { ArrowLeft } from 'lucide-react'
 import type { PostResourceData } from '../../../../app/Http/Resources/PostResource.js'
+import { route } from '../../../../.guren/routes.gen'
 
 interface Props {
   post: PostResourceData
@@ -14,7 +15,7 @@ export default function Show({ post }: Props) {
     >
       <article>
         <Link
-          href="/posts"
+          href={route('posts.index')}
           className="group inline-flex items-center text-sm text-stone-400 transition-colors hover:text-stone-600"
         >
           <ArrowLeft className="mr-1.5 h-3.5 w-3.5 transition-transform group-hover:-translate-x-0.5" />

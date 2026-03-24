@@ -1,12 +1,13 @@
 import { useForm } from '@inertiajs/react'
 import Layout from '../../components/Layout.js'
 import PostForm, { type PostFormValues } from '../../components/PostForm.js'
-import type { ValidationErrors } from '@guren/core'
+import type { RouteErrors } from '@guren/inertia-client/typed-forms'
+import { route } from '../../../../.guren/routes.gen'
 
 interface Props {
   post: PostFormValues | null
   postId: number
-  errors?: ValidationErrors<Extract<keyof PostFormValues, string>>
+  errors?: RouteErrors<PostFormValues> & { message?: string }
 }
 
 export default function Edit({ post, postId, errors = {} }: Props) {
@@ -18,7 +19,7 @@ export default function Edit({ post, postId, errors = {} }: Props) {
 
   const handleSubmit = (data: PostFormValues) => {
     form.setData(data)
-    form.put(`/posts/${postId}`)
+    form.put(route('posts.update', { id: postId }))
   }
 
   const handleCancel = () => {

@@ -1,5 +1,6 @@
 import { useForm } from '@inertiajs/react'
 import PostForm, { type PostFormValues } from '../../components/PostForm.js'
+import { route } from '../../../../.guren/routes.gen'
 
 export default function New() {
   const form = useForm<PostFormValues>({
@@ -10,7 +11,7 @@ export default function New() {
 
   const handleSubmit = (data: PostFormValues) => {
     form.setData(data)
-    form.post('/posts', {
+    form.post(route('posts.store'), {
       onSuccess: () => form.reset()
     })
   }
