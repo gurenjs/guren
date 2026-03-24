@@ -297,7 +297,7 @@ export function isEmailVerified(user: { emailVerifiedAt?: Date | null } | null):
  *
  * @example
  * ```ts
- * Route.get('/dashboard', [DashboardController, 'index'],
+ * router.get('/dashboard', [DashboardController, 'index'],
  *   requireAuthenticated(),
  *   requireVerifiedEmail({ redirectTo: '/verify-email' })
  * )

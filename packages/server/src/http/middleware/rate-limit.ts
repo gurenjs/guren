@@ -229,7 +229,7 @@ function getDefaultStore(): MemoryRateLimitStore {
  * app.use('*', createRateLimitMiddleware())
  *
  * // Stricter limit for login endpoint
- * Route.post('/login', [AuthController, 'login'],
+ * router.post('/login', [AuthController, 'login'],
  *   createRateLimitMiddleware({
  *     limit: 5,
  *     windowMs: 15 * 60 * 1000, // 15 minutes

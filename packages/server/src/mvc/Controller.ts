@@ -449,7 +449,7 @@ export class Controller {
    * ```typescript
    * const result = await this.validateBodySafe(CreatePostSchema)
    * if (!result.success) {
-   *   return this.inertia('Posts/New', { errors: result.errors }, { status: 422 })
+   *   return this.inertia(pages.posts.New, { errors: result.errors }, { status: 422 })
    * }
    * const { title, body } = result.data
    * ```

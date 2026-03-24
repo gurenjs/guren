@@ -213,12 +213,13 @@ function generateController(
   singular: string,
   collection: string,
   routeName: string,
-  _routeVar: string,
+  routeVar: string,
   variableName: string,
   fields: FieldDefinition[],
 ): string {
   const fieldNames = fields.map((f) => `'${f.name}'`).join(' | ')
   return `import { Controller, paginate, type PaginatedPageProps, type ValidationErrors } from '@guren/core'
+import { pages } from '../../../.guren/pages.gen.js'
 import { ${singular} } from '../../Models/${singular}.js'
 import { ${singular}Resource, type ${singular}ResourceData } from '../Resources/${singular}Resource.js'
 import { ${singular}IdParamSchema, ${singular}PayloadSchema, List${collection}QuerySchema } from '../Validators/${singular}Validator.js'
@@ -232,7 +233,7 @@ export default class ${singular}Controller extends Controller {
     const result = await ${singular}.paginate({ page, perPage: 10, orderBy: ['id', 'desc'] })
     const paginator = paginate(result, { path: this.request.path ?? '/${routeName}' })
 
-    return this.inertia('${routeName}/Index', {
+    return this.inertia(pages.${routeVar}.Index, {
       data: result.data.map((${variableName}) => new ${singular}Resource(${variableName}).toJSON()),
       pagination: {
         meta: paginator.meta(),
@@ -245,13 +246,13 @@ export default class ${singular}Controller extends Controller {
     const { id } = this.validateParams(${singular}IdParamSchema)
     const ${variableName} = await ${singular}.findOrFail(id)
 
-    return this.inertia('${routeName}/Show', {
+    return this.inertia(pages.${routeVar}.Show, {
       ${variableName}: new ${singular}Resource(${variableName}).toJSON(),
     })
   }
 
   async create(): Promise<Response> {
-    return this.inertia('${routeName}/New', {})
+    return this.inertia(pages.${routeVar}.New, {})
   }
 
   async store(): Promise<Response> {
@@ -263,7 +264,7 @@ export default class ${singular}Controller extends Controller {
   async edit(): Promise<Response> {
     const { id } = this.validateParams(${singular}IdParamSchema)
     const ${variableName} = await ${singular}.findOrFail(id)
-    return this.inertia('${routeName}/Edit', {
+    return this.inertia(pages.${routeVar}.Edit, {
       ${variableName}: new ${singular}Resource(${variableName}).toJSON(),
       errors: {} as ${singular}FormErrors,
     })

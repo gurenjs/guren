@@ -72,10 +72,11 @@ const blueprintRegistry: Record<string, BlueprintDefinition> = {
         {
           path: 'app/Http/Controllers/Admin/AdminDashboardController.ts',
           contents: `import { Controller } from '@guren/core'
+import { pages } from '../../../../.guren/pages.gen.js'
 
 export default class AdminDashboardController extends Controller {
   async index(): Promise<Response> {
-    return this.inertia('admin/Dashboard', {
+    return this.inertia(pages.admin.Dashboard, {
       stats: {
         users: 0,
         posts: 0,

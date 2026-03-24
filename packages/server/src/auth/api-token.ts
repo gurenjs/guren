@@ -421,7 +421,7 @@ export interface BearerTokenMiddlewareOptions {
  * app.use('/api/*', createBearerTokenMiddleware({ store }))
  *
  * // With ability requirement
- * Route.delete('/api/posts/:id', [PostController, 'destroy'],
+ * router.delete('/api/posts/:id', [PostController, 'destroy'],
  *   createBearerTokenMiddleware({
  *     store,
  *     abilities: ['posts:delete'],
@@ -501,7 +501,7 @@ export function createBearerTokenMiddleware(
  *
  * @example
  * ```ts
- * Route.get('/api/me', async (ctx) => {
+ * router.get('/api/me', async (ctx) => {
  *   const { token, userId, abilities } = getApiToken(ctx)!
  *   return ctx.json({ userId, tokenName: token.name, abilities })
  * })
@@ -524,7 +524,7 @@ export function getApiToken(
  *
  * @example
  * ```ts
- * Route.get('/api/me', async (ctx) => {
+ * router.get('/api/me', async (ctx) => {
  *   const { token, userId, abilities } = getApiTokenOrFail(ctx)
  *   return ctx.json({ userId, tokenName: token.name, abilities })
  * })

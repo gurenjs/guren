@@ -76,7 +76,7 @@ describe('makeController', () => {
     const result = await makeController('AdminSettings')
 
     const content = await readFile(result, 'utf8')
-    expect(content).toContain("inertia('admin-settings/Index'")
+    expect(content).toContain("inertia(pages.adminSettings.Index")
     expect(content).not.toContain('TODO')
   })
 
