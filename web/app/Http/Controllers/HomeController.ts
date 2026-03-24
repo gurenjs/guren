@@ -17,7 +17,7 @@ export function routes(router: Router) {
   async index() {
     const result = await Post.paginate({ page: 1, perPage: 15 })
     const paginator = paginate(result, { path: this.request.path ?? '/posts' })
-    return this.inertia(appPages.posts.index, {
+    return this.inertia(pages.posts.Index, {
       data: result.data.map((post) => new PostResource(post).toJSON()),
       pagination: paginator,
     })

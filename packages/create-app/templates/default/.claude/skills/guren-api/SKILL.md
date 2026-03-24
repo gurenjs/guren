@@ -19,6 +19,7 @@ Source: `packages/core/src/mvc/Controller.ts`
 ```typescript
 import { Controller } from '@guren/core'
 import { z } from 'zod'
+import { pages } from '@/.guren/pages.gen'
 
 const PostIdParamSchema = z.object({ id: z.coerce.number().int().positive() })
 const CreatePostSchema = z.object({ title: z.string().min(1), body: z.string().min(1) })
@@ -26,13 +27,13 @@ const CreatePostSchema = z.object({ title: z.string().min(1), body: z.string().m
 export default class PostController extends Controller {
   async index() {
     const posts = await Post.all()
-    return this.inertia('Posts/Index', { posts })
+    return this.inertia(pages.posts.Index, { posts })
   }
 
   async show() {
     const { id } = this.validateParams(PostIdParamSchema)  // throws 422
     const post = await Post.findOrFail(id)                  // throws 404
-    return this.inertia('Posts/Show', { post })
+    return this.inertia(pages.posts.Show, { post })
   }
 
   async store() {
@@ -76,18 +77,21 @@ await Post.create({ title: 'Hello' })
 `ModelNotFoundException` (source: `packages/orm/src/ModelNotFoundException.ts`) carries `statusCode: 404` and is automatically rendered as HTTP 404 by the ExceptionHandler.
 
 ### Routes
-Source: `packages/core/src/mvc/Route.ts`
+Source: `packages/core/src/mvc/Router.ts`
 
 ```typescript
-import { Route } from '@guren/core'
+import { Router, requireAuthenticated } from '@guren/core'
 
-Route.get('/posts', PostController.index)
-Route.post('/posts', PostController.store)
-Route.resource('/posts', PostController)
+export function registerWebRoutes(router: Router): void {
+  router.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
 
-Route.middleware(['auth']).group(() => {
-  Route.get('/dashboard', DashboardController.index)
-})
+  router.get('/posts', [PostController, 'index'])
+  router.post('/posts', [PostController, 'store'])
+
+  router.middleware('auth').group((auth) => {
+    auth.get('/dashboard', [DashboardController, 'index'])
+  })
+}
 ```
 
 ### Middleware
@@ -106,9 +110,12 @@ export const logRequest = defineMiddleware(async (ctx, next) => {
 Source: `packages/core/src/auth/`
 
 ```typescript
-import { requireAuthenticated } from '@guren/core'
+import { Router, requireAuthenticated } from '@guren/core'
 
-Route.middleware([requireAuthenticated]).group(() => {
+const router = new Router()
+  .aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
+
+router.middleware('auth').group((auth) => {
   // Protected routes
 })
 
