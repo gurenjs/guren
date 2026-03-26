@@ -168,3 +168,140 @@ router.get('/health', (ctx) => ctx.json({ ok: true }))
 - ミドルウェアエイリアスを活用すると、ルートファイルがすっきりし、あちこちでミドルウェア関数をインポートする必要がなくなります。
 
 ルーティング DSL を使えば、複雑な HTTP 構造を表現しながら、エントリーポイントをクリーンで宣言的に保てます。
+
+## ルートコントラクト
+
+第 2 引数にオプションオブジェクトを渡すと、Zod スキーマとメタデータをルートに付与できます。フレームワークはこれらのスキーマをリクエストバリデーション、コード生成、OpenAPI ドキュメント生成に使用します。
+
+```ts
+import { z } from 'zod'
+
+const CreatePostSchema = z.object({
+  title: z.string().min(1),
+  body: z.string().min(1),
+})
+
+const PostIdParams = z.object({
+  id: z.coerce.number().int().positive(),
+})
+
+router.post('/posts', {
+  body: CreatePostSchema,
+  name: 'posts.store',
+}, [PostsController, 'store'])
+
+router.get('/posts/:id', {
+  params: PostIdParams,
+  name: 'posts.show',
+}, [PostsController, 'show'])
+```
+
+利用可能なコントラクトフィールド:
+
+| フィールド | 用途 |
+|-----------|------|
+| `name` | URL 生成・コード生成用のルート名 |
+| `params` | パスパラメータの Zod スキーマ |
+| `query` | クエリパラメータの Zod スキーマ |
+| `body` | リクエストボディの Zod スキーマ |
+| `output` | レスポンスボディの Zod スキーマ |
+| `bind` | ルートモデルバインディングマップ |
+| `middlewares` | ミドルウェアハンドラーの配列 |
+
+### OpenAPI メタデータ
+
+ルートコントラクトには軽量な OpenAPI アノテーションも指定できます。これらはルート定義に保存され、オプションの `@guren/openapi` プラグインで OpenAPI 3.1 ドキュメントを生成する際に使用されます。
+
+```ts
+router.post('/posts', {
+  body: CreatePostSchema,
+  output: PostResponseSchema,
+  name: 'posts.store',
+  summary: 'Create a post',
+  description: 'Creates a new blog post.',
+  tags: ['Posts'],
+}, [PostsController, 'store'])
+
+router.get('/posts/:id', {
+  params: PostIdParams,
+  name: 'posts.show',
+  summary: 'Get a post',
+  tags: ['Posts'],
+  deprecated: false,
+}, [PostsController, 'show'])
+```
+
+利用可能な OpenAPI フィールド:
+
+| フィールド | 型 | 用途 |
+|-----------|------|------|
+| `summary` | `string` | ドキュメント UI に表示される短い説明 |
+| `description` | `string` | エンドポイントの詳細な説明 |
+| `tags` | `string[]` | ドキュメント UI でエンドポイントをグループ化 |
+| `operationId` | `string` | 自動生成されるオペレーション ID を上書き |
+| `deprecated` | `boolean` | エンドポイントを非推奨としてマーク |
+
+スペックドキュメントの生成については CLI リファレンスの OpenAPI セクションを参照してください。
+
+## OpenAPI ドキュメント生成
+
+オプションの `@guren/openapi` パッケージをインストールして、ルート定義からスペックを生成します。
+
+```bash
+bun add @guren/openapi
+bunx guren openapi:generate
+```
+
+ルートファイルを読み取り、ルートコントラクトから Zod スキーマと OpenAPI メタデータを抽出し、OpenAPI 3.1 JSON ドキュメントを `.guren/openapi.gen.json` に書き出します。
+
+### CLI オプション
+
+```bash
+# タイトルとバージョンを指定
+bunx guren openapi:generate --title "Blog API" --version "1.0.0"
+
+# 出力パスを変更
+bunx guren openapi:generate --out docs/openapi.json
+
+# サーバー URL を含める
+bunx guren openapi:generate --server "https://api.example.com"
+
+# 既存ファイルを上書き
+bunx guren openapi:generate --force
+```
+
+### ランタイムでのドキュメントマウント
+
+OpenAPI スペックとインタラクティブなドキュメント UI をアプリケーションから直接配信することもできます。
+
+```ts
+import { createApp } from '@guren/core'
+import { mountOpenApiDocs } from '@guren/openapi'
+
+const app = createApp({ routes: registerWebRoutes })
+
+mountOpenApiDocs(app, {
+  title: 'Blog API',
+  version: '1.0.0',
+})
+```
+
+以下の 2 つのエンドポイントがマウントされます。
+
+| パス | 説明 |
+|-----|------|
+| `/openapi.json` | 生成された OpenAPI 3.1 JSON ドキュメント |
+| `/docs` | インタラクティブな API ドキュメント UI（Scalar） |
+
+パスは `jsonPath` と `docsPath` オプションでカスタマイズできます。
+
+```ts
+mountOpenApiDocs(app, {
+  title: 'Blog API',
+  version: '1.0.0',
+  jsonPath: '/api/openapi.json',
+  docsPath: '/api/docs',
+})
+```
+
+`Application` インスタンスにマウントする場合、ルート定義はルーターから自動的に読み取られます。素の Hono インスタンスの場合は `definitions` を明示的に渡してください。

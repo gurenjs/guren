@@ -105,6 +105,46 @@ Vercel は Bun を用いたデプロイをサポートしています。Bun プ�
 
 推奨: Bun の特定バージョンに依存する、あるいは長時間実行プロセスが必要な場合は Docker デプロイを選ぶと再現性が高くなります。生成される `vercel.json` は出発点です。プロジェクト構成に合わせてコマンドやルーティングを調整してください。
 
+## OpenAPI コマンド
+
+| コマンド | 説明 | 例 |
+|---------|------|-----|
+| `openapi:generate` | ルート定義から OpenAPI 3.1 ドキュメントを生成 | `bunx guren openapi:generate` |
+
+オプションの `@guren/openapi` パッケージが必要です（`bun add @guren/openapi`）。
+
+### openapi:generate オプション
+
+```bash
+# デフォルトで生成（routes/web.ts を読み取り、.guren/openapi.gen.json に書き出し）
+bunx guren openapi:generate
+
+# タイトル、バージョン、説明を指定
+bunx guren openapi:generate --title "Blog API" --version "1.0.0" --description "My blog"
+
+# ルートファイルと出力パスを変更
+bunx guren openapi:generate --routes routes/api.ts --out docs/openapi.json
+
+# サーバー URL を含める
+bunx guren openapi:generate --server "https://api.example.com"
+
+# 既存ファイルを上書き
+bunx guren openapi:generate --force
+```
+
+| フラグ | デフォルト | 説明 |
+|-------|----------|------|
+| `--routes` | `routes/web.ts` | ルート登録ファイルのパス |
+| `--out` | `.guren/openapi.gen.json` | 生成ドキュメントの出力パス |
+| `--title` | `package.json` の name または `"Guren API"` | OpenAPI ドキュメントタイトル |
+| `--version` | `package.json` の version または `"1.0.0"` | OpenAPI ドキュメントバージョン |
+| `--description` | `package.json` の description | OpenAPI ドキュメント説明 |
+| `--server` | — | 含めるサーバー URL |
+| `--app` | カレントディレクトリ | アプリケーションルートディレクトリ |
+| `--force` | `false` | 既存ファイルを上書き |
+
+コマンドはルートコントラクトから Zod スキーマと OpenAPI メタデータ（`summary`、`description`、`tags`、`operationId`、`deprecated`）を抽出し、OpenAPI 3.1 JSON ドキュメントを生成します。ルートへのアノテーション方法は[ルーティング — OpenAPI](./routing.md#openapi-ドキュメント生成)を参照してください。
+
 ## ルートコマンド
 
 | コマンド | 説明 | 例 |

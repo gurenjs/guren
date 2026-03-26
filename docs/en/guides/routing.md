@@ -214,3 +214,140 @@ const userId = this.ctx.req.param('userId')
 
 > [!NOTE]
 > For large apps, split routes into multiple registrars (`routes/api.ts`, `routes/admin.ts`) and compose them from `src/app.ts`.
+
+## Route Contracts
+
+Pass an options object as the second argument to attach Zod schemas and metadata to a route. The framework uses these schemas for request validation, codegen, and OpenAPI document generation.
+
+```ts
+import { z } from 'zod'
+
+const CreatePostSchema = z.object({
+  title: z.string().min(1),
+  body: z.string().min(1),
+})
+
+const PostIdParams = z.object({
+  id: z.coerce.number().int().positive(),
+})
+
+router.post('/posts', {
+  body: CreatePostSchema,
+  name: 'posts.store',
+}, [PostsController, 'store'])
+
+router.get('/posts/:id', {
+  params: PostIdParams,
+  name: 'posts.show',
+}, [PostsController, 'show'])
+```
+
+Available contract fields:
+
+| Field | Purpose |
+|-------|---------|
+| `name` | Route name for URL generation and codegen |
+| `params` | Zod schema for path parameters |
+| `query` | Zod schema for query string parameters |
+| `body` | Zod schema for the request body |
+| `output` | Zod schema for the response body |
+| `bind` | Route model binding map |
+| `middlewares` | Array of middleware handlers |
+
+### OpenAPI Metadata
+
+Route contracts also accept lightweight OpenAPI annotations. These are stored on the route definition and used by the optional `@guren/openapi` plugin to generate an OpenAPI 3.1 document.
+
+```ts
+router.post('/posts', {
+  body: CreatePostSchema,
+  output: PostResponseSchema,
+  name: 'posts.store',
+  summary: 'Create a post',
+  description: 'Creates a new blog post.',
+  tags: ['Posts'],
+}, [PostsController, 'store'])
+
+router.get('/posts/:id', {
+  params: PostIdParams,
+  name: 'posts.show',
+  summary: 'Get a post',
+  tags: ['Posts'],
+  deprecated: false,
+}, [PostsController, 'show'])
+```
+
+Available OpenAPI fields:
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `summary` | `string` | Short description shown in docs UI |
+| `description` | `string` | Detailed explanation of the endpoint |
+| `tags` | `string[]` | Group endpoints in the docs UI |
+| `operationId` | `string` | Override the auto-generated operation ID |
+| `deprecated` | `boolean` | Mark endpoint as deprecated |
+
+See the [OpenAPI guide](#openapi) section in the CLI reference for generating the spec document.
+
+## OpenAPI Document Generation
+
+Install the optional `@guren/openapi` package and generate a spec from your route definitions:
+
+```bash
+bun add @guren/openapi
+bunx guren openapi:generate
+```
+
+This reads your routes file, extracts Zod schemas and OpenAPI metadata from route contracts, and writes an OpenAPI 3.1 JSON document to `.guren/openapi.gen.json`.
+
+### CLI Options
+
+```bash
+# Custom title and version
+bunx guren openapi:generate --title "Blog API" --version "1.0.0"
+
+# Custom output path
+bunx guren openapi:generate --out docs/openapi.json
+
+# Include a server URL
+bunx guren openapi:generate --server "https://api.example.com"
+
+# Overwrite existing file
+bunx guren openapi:generate --force
+```
+
+### Mounting Docs at Runtime
+
+You can also serve the OpenAPI spec and an interactive docs UI directly from your application:
+
+```ts
+import { createApp } from '@guren/core'
+import { mountOpenApiDocs } from '@guren/openapi'
+
+const app = createApp({ routes: registerWebRoutes })
+
+mountOpenApiDocs(app, {
+  title: 'Blog API',
+  version: '1.0.0',
+})
+```
+
+This mounts two endpoints:
+
+| Path | Description |
+|------|-------------|
+| `/openapi.json` | The generated OpenAPI 3.1 JSON document |
+| `/docs` | Interactive API documentation UI (Scalar) |
+
+Customize the paths with `jsonPath` and `docsPath` options:
+
+```ts
+mountOpenApiDocs(app, {
+  title: 'Blog API',
+  version: '1.0.0',
+  jsonPath: '/api/openapi.json',
+  docsPath: '/api/docs',
+})
+```
+
+When mounted on an `Application` instance, route definitions are read from the router automatically. For a plain Hono instance, pass `definitions` explicitly.

@@ -105,6 +105,46 @@ Vercel supports deploying Bun applications. For Bun projects consider either:
 
 Recommendation: If your app relies on a specific Bun version or needs long-lived processes, prefer Docker deployment for reproducibility. The generated `vercel.json` is a starting point; adjust commands, routes, and runtime strategy to your project.
 
+## OpenAPI Commands
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `openapi:generate` | Generate an OpenAPI 3.1 document from route definitions | `bunx guren openapi:generate` |
+
+Requires the optional `@guren/openapi` package (`bun add @guren/openapi`).
+
+### openapi:generate Options
+
+```bash
+# Generate with defaults (reads routes/web.ts, writes .guren/openapi.gen.json)
+bunx guren openapi:generate
+
+# Custom title, version, and description
+bunx guren openapi:generate --title "Blog API" --version "1.0.0" --description "My blog"
+
+# Custom routes file and output path
+bunx guren openapi:generate --routes routes/api.ts --out docs/openapi.json
+
+# Include a server URL
+bunx guren openapi:generate --server "https://api.example.com"
+
+# Overwrite existing file
+bunx guren openapi:generate --force
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--routes` | `routes/web.ts` | Path to the route registration file |
+| `--out` | `.guren/openapi.gen.json` | Output path for the generated document |
+| `--title` | `package.json` name or `"Guren API"` | OpenAPI document title |
+| `--version` | `package.json` version or `"1.0.0"` | OpenAPI document version |
+| `--description` | `package.json` description | OpenAPI document description |
+| `--server` | — | Server URL to include |
+| `--app` | Current directory | Application root directory |
+| `--force` | `false` | Overwrite existing files |
+
+The command extracts Zod schemas and OpenAPI metadata (`summary`, `description`, `tags`, `operationId`, `deprecated`) from route contracts and produces an OpenAPI 3.1 JSON document. See [Routing — OpenAPI](./routing.md#openapi-document-generation) for details on annotating routes.
+
 ## Route Commands
 
 | Command | Description | Example |
