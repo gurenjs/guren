@@ -47,6 +47,21 @@ bun run db:migrate    # Run migrations
 bun run db:seed       # Run seeders
 ```
 
+## Build Order & Troubleshooting
+
+`bun run build` executes packages sequentially in dependency order:
+`testing → orm → server → openapi → cli → core → create-app → inertia`
+
+**Stale `.d.ts` issue:** If DTS build fails (e.g., `@guren/core` cannot find `@guren/server` types), old `dist/` artifacts are likely interfering. Run:
+```bash
+bun run build:clean   # rm -rf packages/*/dist && bun run build
+```
+
+**Rule:** Always use `bun run build:clean` instead of `bun run build` when:
+- Building after switching branches
+- Building after pulling large changes
+- DTS build fails with "could not find declaration file" errors
+
 ## Package-Specific Builds
 
 ```bash

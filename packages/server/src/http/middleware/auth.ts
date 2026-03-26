@@ -1,7 +1,7 @@
 import type { Context, MiddlewareHandler } from 'hono'
-import type { Authenticatable, AuthContext } from '../../auth'
+import type { Authenticatable, AuthContext } from '../../auth/types'
 import { jsonResponse } from './index'
-export type { AuthContext } from '../../auth'
+export type { AuthContext } from '../../auth/types'
 
 export interface RequireAuthOptions {
   redirectTo?: string

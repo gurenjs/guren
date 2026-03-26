@@ -15,6 +15,7 @@
   },
   "scripts": {
     "build": "bun run build:testing && bun run build:orm && bun run build:server && bun run build:openapi && bun run build:cli && bun run build:core && bun run build:create-app && bun run build:inertia",
+    "build:clean": "rm -rf packages/*/dist && bun run build",
     "build:routes": "bun run --cwd examples/blog routes:types",
     "build:testing": "bun run --cwd packages/testing build",
     "build:core": "bun run --cwd packages/core build",
