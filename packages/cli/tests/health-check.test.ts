@@ -7,6 +7,9 @@ await mock.module('consola', () => ({
   consola: {
     info: mock(() => {}),
     debug: mock(() => {}),
+    warn: mock(() => {}),
+    error: mock(() => {}),
+    log: mock(() => {}),
   },
 }))
 
