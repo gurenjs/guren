@@ -7,6 +7,7 @@
     "dev": "bun bin/serve.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
+    "openapi:generate": "bunx guren openapi:generate --routes routes/api.ts --title \"Guren Example API\" --version \"0.1.0\" --description \"Example API for authentication, tokens, and task management.\" --out .guren/openapi.gen.json",
     "db:make": "bunx guren make:migration",
     "db:migrate": "bunx guren db:migrate",
     "db:seed": "bunx guren db:seed"
@@ -14,6 +15,7 @@
   "dependencies": {
     "@guren/cli": "workspace:*",
     "@guren/core": "workspace:*",
+    "@guren/openapi": "workspace:*",
     "@guren/orm": "workspace:*",
     "@guren/testing": "workspace:*",
     "drizzle-orm": "1.0.0-beta.18-7eb39f0",

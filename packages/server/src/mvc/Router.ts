@@ -90,7 +90,7 @@ export interface RouteContractOptions<
   TQuerySchema extends SchemaLike<unknown> = undefined,
   TBodySchema extends SchemaLike<unknown> = undefined,
   TOutputSchema extends SchemaLike<unknown> = undefined,
-> {
+> extends RouteOpenApiMetadata {
   name?: string
   middlewares?: MiddlewareHandler[]
   params?: TParamsSchema
@@ -98,6 +98,14 @@ export interface RouteContractOptions<
   body?: TBodySchema
   output?: TOutputSchema
   bind?: Record<string, BindableModel>
+}
+
+export interface RouteOpenApiMetadata {
+  summary?: string
+  description?: string
+  tags?: string[]
+  operationId?: string
+  deprecated?: boolean
 }
 
 interface RegisteredRoute {
@@ -113,6 +121,7 @@ interface RegisteredRoute {
     body?: SchemaLike<unknown>
     output?: SchemaLike<unknown>
   }
+  openapi?: RouteOpenApiMetadata
   bindings?: Map<string, BindableModel>
 }
 
@@ -133,6 +142,11 @@ export interface RouteDefinition {
     body?: SchemaLike<unknown>
     output?: SchemaLike<unknown>
   }
+  summary?: string
+  description?: string
+  tags?: string[]
+  operationId?: string
+  deprecated?: boolean
 }
 
 /**
@@ -439,7 +453,13 @@ export class Router<M extends string = never> {
   }
 
   definitions(): RouteDefinition[] {
-    return this.registry.map(({ method, path, name, schemas }) => ({ method, path, name, schemas }))
+    return this.registry.map(({ method, path, name, schemas, openapi }) => ({
+      method,
+      path,
+      name,
+      schemas,
+      ...openapi,
+    }))
   }
 
   applyMiddlewareScope<T>(names: string[], callback: () => T): T {
@@ -465,12 +485,8 @@ export class Router<M extends string = never> {
       if (isControllerAction(handlerOrAction as AnyRouteHandler)) {
         const builder = this.add(method, path, handlerOrAction as AnyControllerAction, options.middlewares ?? [])
         if (options.name) builder.name(options.name)
-        // Store schemas for codegen extraction
         const route = this.registry[this.registry.length - 1]
-        route.schemas = { params: options.params, query: options.query, body: options.body, output: options.output }
-        if (options.bind) {
-          route.bindings = new Map(Object.entries(options.bind))
-        }
+        applyRouteContract(route, options)
         return builder
       }
 
@@ -488,10 +504,7 @@ export class Router<M extends string = never> {
       }
 
       const route = this.registry[this.registry.length - 1]
-      route.schemas = { params: options.params, query: options.query, body: options.body, output: options.output }
-      if (options.bind) {
-        route.bindings = new Map(Object.entries(options.bind))
-      }
+      applyRouteContract(route, options)
       return builder
     }
 
@@ -540,6 +553,20 @@ export class Router<M extends string = never> {
     }
 
     return handlers
+  }
+}
+
+function applyRouteContract(route: RegisteredRoute, options: RouteContractOptions): void {
+  route.schemas = { params: options.params, query: options.query, body: options.body, output: options.output }
+  route.openapi = {
+    summary: options.summary,
+    description: options.description,
+    tags: options.tags,
+    operationId: options.operationId,
+    deprecated: options.deprecated,
+  }
+  if (options.bind) {
+    route.bindings = new Map(Object.entries(options.bind))
   }
 }
 
@@ -845,7 +872,17 @@ function isRouteContractOptions(value: unknown): value is RouteContractOptions<S
     return false
   }
 
-  return 'params' in value || 'query' in value || 'body' in value || 'output' in value || 'name' in value || 'middlewares' in value
+  return 'params' in value
+    || 'query' in value
+    || 'body' in value
+    || 'output' in value
+    || 'name' in value
+    || 'middlewares' in value
+    || 'summary' in value
+    || 'description' in value
+    || 'tags' in value
+    || 'operationId' in value
+    || 'deprecated' in value
 }
 
 function joinPaths(prefixStack: string[], path: string): string {

@@ -32,6 +32,7 @@ import { generateRouteTypes } from './routes-types'
 import { generatePageTypes } from './pages-types'
 import { generateDataTypes } from './data-types'
 import { generateApiClientTypes } from './api-client-types'
+import { generateOpenApiSpec } from './openapi-generate'
 import { generateChannelTypes } from './channel-types'
 import { consoleCommand } from './console'
 import { bootstrapApplication, resolveMainEntry, type MaybeApplication } from './runtime'
@@ -634,6 +635,69 @@ const codegenCommand = defineCommand({
     consola.success(`Data types generated at ${dataOutputPath}`)
     consola.success(`Channel types generated at ${channelOutputPath}`)
     consola.success(`API client generated at ${apiClientOutputPath}`)
+    process.exit(0)
+  },
+})
+
+const openApiGenerateCommand = defineCommand({
+  meta: {
+    name: 'openapi:generate',
+    description: 'Generate an OpenAPI 3.1 document using the optional @guren/openapi plugin.',
+  },
+  args: {
+    routes: {
+      type: 'string',
+      description: 'Path to the route registration file',
+      default: 'routes/web.ts',
+    },
+    app: {
+      type: 'string',
+      description: 'Application root directory',
+      default: process.cwd(),
+    },
+    out: {
+      type: 'string',
+      description: 'Path to the generated OpenAPI document',
+      default: '.guren/openapi.gen.json',
+    },
+    title: {
+      type: 'string',
+      description: 'OpenAPI document title. Defaults to package.json name or "Guren API".',
+    },
+    version: {
+      type: 'string',
+      description: 'OpenAPI document version. Defaults to package.json version or 1.0.0.',
+    },
+    description: {
+      type: 'string',
+      description: 'OpenAPI document description. Defaults to package.json description.',
+    },
+    server: {
+      type: 'string',
+      description: 'Server URL to include in the generated OpenAPI document.',
+    },
+    force: {
+      type: 'boolean',
+      description: 'Overwrite existing files',
+      alias: 'f',
+    },
+  },
+  async run({ args }) {
+    const { outputPath, warnings } = await generateOpenApiSpec({
+      routesFile: args.routes,
+      appRoot: args.app,
+      outputFile: args.out,
+      title: args.title,
+      version: args.version,
+      description: args.description,
+      server: args.server,
+      force: Boolean(args.force),
+    })
+
+    consola.success(`OpenAPI document generated at ${outputPath}`)
+    for (const warning of warnings) {
+      consola.warn(warning)
+    }
     process.exit(0)
   },
 })
@@ -1802,6 +1866,7 @@ const main = defineCommand({
     'routes:types': routeTypesCommand,
     codegen: codegenCommand,
     'route:list': routeListCommand,
+    'openapi:generate': openApiGenerateCommand,
     'config:cache': configCacheCommand,
     'config:clear': configClearCommand,
     'config:show': configShowCommand,

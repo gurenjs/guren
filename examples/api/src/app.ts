@@ -4,6 +4,7 @@ import {
   StorageServiceProvider as CoreStorageServiceProvider,
   BroadcastServiceProvider as CoreBroadcastServiceProvider,
 } from '@guren/core'
+import { mountOpenApiDocs } from '@guren/openapi'
 import CacheProvider from '../app/Providers/CacheProvider.js'
 import DatabaseProvider from '../app/Providers/DatabaseProvider.js'
 import EventServiceProvider from '../app/Providers/EventServiceProvider.js'
@@ -27,6 +28,15 @@ const app = createApp({
     EventServiceProvider,
     SchedulingProvider,
   ],
+})
+
+mountOpenApiDocs(app, {
+  title: 'Guren Example API',
+  version: '0.1.0',
+  description: 'Example API for authentication, tokens, and task management.',
+  jsonPath: '/api/openapi.json',
+  docsPath: '/api/docs',
+  servers: ['http://localhost:3334'],
 })
 
 export default app

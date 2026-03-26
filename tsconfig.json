@@ -45,6 +45,12 @@
       "@guren/cli/vite": [
         "packages/cli/src/vite/index.ts"
       ],
+      "@guren/openapi": [
+        "packages/openapi/src/index.ts"
+      ],
+      "@guren/openapi/*": [
+        "packages/openapi/src/*"
+      ],
       "@guren/inertia-client": [
         "packages/inertia-client/src/index.ts"
       ],

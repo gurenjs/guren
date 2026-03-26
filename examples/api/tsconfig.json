@@ -23,6 +23,12 @@
       "@guren/core/*": [
         "../../packages/core/src/*"
       ],
+      "@guren/openapi": [
+        "../../packages/openapi/src/index.ts"
+      ],
+      "@guren/openapi/*": [
+        "../../packages/openapi/src/*"
+      ],
       "@guren/server": [
         "../../packages/server/src/index.ts"
       ],

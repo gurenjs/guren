@@ -19,6 +19,7 @@
       "dependencies": {
         "@guren/cli": "workspace:*",
         "@guren/core": "workspace:*",
+        "@guren/openapi": "workspace:*",
         "@guren/orm": "workspace:*",
         "@guren/testing": "workspace:*",
         "drizzle-orm": "1.0.0-beta.18-7eb39f0",
@@ -133,6 +134,18 @@
       "devDependencies": {
         "@types/react": "^19.0.0",
         "@types/react-dom": "^19.0.0",
+        "tsup": "^8.5.0",
+        "typescript": "^5.4.0",
+      },
+    },
+    "packages/openapi": {
+      "name": "@guren/openapi",
+      "version": "0.2.0-alpha.7",
+      "dependencies": {
+        "@guren/core": "^0.2.0-alpha.7",
+      },
+      "devDependencies": {
+        "@types/node": "^20.14.10",
         "tsup": "^8.5.0",
         "typescript": "^5.4.0",
       },
@@ -409,6 +422,8 @@
     "@guren/example-blog": ["@guren/example-blog@workspace:examples/blog"],
 
     "@guren/inertia-client": ["@guren/inertia-client@workspace:packages/inertia-client"],
+
+    "@guren/openapi": ["@guren/openapi@workspace:packages/openapi"],
 
     "@guren/orm": ["@guren/orm@workspace:packages/orm"],
 

@@ -13,3 +13,5 @@ const hostname = process.env.HOST ?? '0.0.0.0'
 await app.listen({ port, hostname, vite: false })
 
 console.log(`API server running at http://${hostname}:${port}`)
+console.log(`OpenAPI JSON available at http://${hostname}:${port}/api/openapi.json`)
+console.log(`API docs available at http://${hostname}:${port}/api/docs`)

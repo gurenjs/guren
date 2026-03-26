@@ -1,4 +1,4 @@
-import { configureOrm, seedDatabase } from './database.js'
+import { configureOrm, hasSeeders, seedDatabase } from './database.js'
 
 let bootstrapped = false
 
@@ -6,6 +6,8 @@ export async function bootModels(): Promise<void> {
   if (bootstrapped) return
 
   await configureOrm()
-  await seedDatabase()
+  if (hasSeeders) {
+    await seedDatabase()
+  }
   bootstrapped = true
 }

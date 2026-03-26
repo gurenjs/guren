@@ -8,7 +8,14 @@ export { parseRequestPayload, formatValidationErrors } from './http/request'
 export { Controller } from './mvc/Controller'
 export type { InertiaResponse, InferInertiaProps, ControllerInertiaProps, AuthPayload } from './mvc/Controller'
 export { Router } from './mvc/Router'
-export type { RouteBuilder, RouteDefinition, ResourceAction as RouteResourceAction, ResourceRouteOptions } from './mvc/Router'
+export type {
+  RouteBuilder,
+  RouteContractOptions,
+  RouteDefinition,
+  RouteOpenApiMetadata,
+  ResourceAction as RouteResourceAction,
+  ResourceRouteOptions,
+} from './mvc/Router'
 export { ViewEngine } from './mvc/ViewEngine'
 export { inertia } from './mvc/inertia/InertiaEngine'
 export { setInertiaSharedProps } from './mvc/inertia/shared'

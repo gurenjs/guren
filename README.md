@@ -329,6 +329,19 @@ posts.post('/', { body: PostPayloadSchema, name: 'posts.store' }, [PostControlle
 posts.put('/:id', { body: PostPayloadSchema, params: PostIdParamSchema, name: 'posts.update' }, [PostController, 'update'])
 ```
 
+Route contracts can also carry lightweight OpenAPI metadata. `guren` core stores that metadata on route definitions, while OpenAPI document generation itself lives in the optional `@guren/openapi` plugin:
+
+```typescript
+posts.post('/', {
+  body: PostPayloadSchema,
+  output: PostResponseSchema,
+  name: 'posts.store',
+  summary: 'Create a post',
+  description: 'Creates a new blog post.',
+  tags: ['Posts'],
+}, [PostController, 'store'])
+```
+
 The codegen extracts schema types at runtime and generates typed `body` fields in `ApiRoutes`:
 
 ```typescript
@@ -341,6 +354,29 @@ export interface ApiRoutes {
     body: { title: string; excerpt: string; body: string }
   }
 }
+```
+
+### Optional OpenAPI Plugin
+
+If you want an OpenAPI 3.1 document and hosted docs UI, install the optional plugin package and generate the spec separately from core codegen:
+
+```bash
+bun add @guren/openapi
+bunx guren openapi:generate --title "Blog API" --version "1.0.0"
+```
+
+You can also mount `/openapi.json` and `/docs` directly on an app:
+
+```typescript
+import { createApp } from '@guren/core'
+import { mountOpenApiDocs } from '@guren/openapi'
+
+const app = createApp({ routes: registerWebRoutes })
+
+mountOpenApiDocs(app, {
+  title: 'Blog API',
+  version: '1.0.0',
+})
 ```
 
 ### Route Model Binding
