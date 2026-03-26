@@ -31,6 +31,7 @@
     "audit:docs": "bun run ./scripts/smoke/docs-audit.ts",
     "smoke:starter": "bun run ./scripts/smoke/fresh-app.ts",
     "smoke:starter:packed": "GUREN_SMOKE_INSTALL_MODE=packed bun run ./scripts/smoke/fresh-app.ts",
+    "smoke:upgrade-existing-app": "bun run ./scripts/smoke/upgrade-existing-app.ts",
     "changeset": "changeset",
     "version-packages": "changeset version && bun install",
     "release": "bun run build && changeset publish",

@@ -1,8 +1,7 @@
-import { access, readFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { resolve, relative } from 'node:path'
 import { consola } from 'consola'
-import { discoverControllerFiles, discoverModelFiles, fileExists as discoveryFileExists, classNameFromPath } from './discovery'
-import { parseModelFile } from './model-parser'
+import { discoverControllerFiles, discoverModelFiles, fileExists, readIfExists, classNameFromPath } from './discovery'
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail'
 
@@ -12,6 +11,8 @@ export interface DoctorCheck {
   status: DoctorStatus
   message: string
   fix?: string
+  canAutofix?: boolean
+  manualFix?: string
 }
 
 export interface NextStep {
@@ -25,9 +26,12 @@ export interface NextStep {
 export interface DoctorReport {
   cwd: string
   checks: DoctorCheck[]
+  fixableChecks: DoctorCheck[]
+  manualChecks: DoctorCheck[]
   hasWarnings: boolean
   hasFailures: boolean
   nextSteps?: NextStep[]
+  recommendedCommands: string[]
 }
 
 export interface RunDoctorOptions {
@@ -36,41 +40,91 @@ export interface RunDoctorOptions {
   next?: boolean
 }
 
+export interface DoctorAutofix {
+  key: string
+  title: string
+  summary: string
+  apply: (cwd: string) => Promise<void>
+}
+
+export interface DoctorRuleEvaluation {
+  check: DoctorCheck
+  autofix?: DoctorAutofix | null
+}
+
+interface DoctorRuleContext {
+  cwd: string
+}
+
+interface DoctorRule {
+  key: string
+  title: string
+  detect: (context: DoctorRuleContext) => Promise<DoctorCheck>
+  autofix?: (context: DoctorRuleContext, check: DoctorCheck) => Promise<DoctorAutofix | null>
+}
+
+type JsonReadResult<T> =
+  | { exists: false; raw: null; value: null; parseError: null }
+  | { exists: true; raw: string; value: T; parseError: null }
+  | { exists: true; raw: string; value: null; parseError: Error }
+
 const APP_ENTRY_CANDIDATES = ['src/main.ts', 'src/main.mts', 'src/main.js', 'src/main.mjs']
 const ROUTE_CANDIDATES = ['routes/web.ts', 'routes/web.js', 'routes/api.ts', 'routes/api.js']
-const PAGE_CONTRACT_CANDIDATES = [
-  '.guren/pages.gen.ts',
-]
+const PAGE_CONTRACT_CANDIDATES = ['.guren/pages.gen.ts']
 const GENERATED_FILES = ['.guren/routes.gen.ts', '.guren/pages.gen.ts', '.guren/data.gen.ts', '.guren/channels.gen.ts']
 
-async function fileExists(cwd: string, relativePath: string): Promise<boolean> {
-  try {
-    await access(resolve(cwd, relativePath))
-    return true
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return false
-    }
-    throw error
-  }
+export const DOCTOR_RECOMMENDED_COMMANDS = [
+  'bunx guren codegen --force',
+  'bun run typecheck',
+  'bun run build',
+]
+
+export const CANONICAL_APP_SCRIPTS = {
+  dev: 'bun run codegen && bun run dev:server',
+  build: 'bun run codegen && bunx vite build',
+  typecheck: 'tsc --noEmit',
+  codegen: 'bunx guren codegen --routes routes/web.ts --out types/generated/routes.d.ts --force',
+} as const
+
+type PackageJsonShape = {
+  scripts?: Record<string, string>
+}
+
+type TsconfigShape = {
+  include?: string[]
 }
 
 async function findFirstExisting(cwd: string, candidates: readonly string[]): Promise<string | null> {
-  for (const candidate of candidates) {
-    if (await fileExists(cwd, candidate)) {
-      return candidate
-    }
-  }
-
-  return null
+  const results = await Promise.all(candidates.map((c) => fileExists(cwd, c)))
+  const index = results.indexOf(true)
+  return index === -1 ? null : candidates[index]
 }
 
-async function readIfExists(cwd: string, relativePath: string): Promise<string | null> {
-  if (!(await fileExists(cwd, relativePath))) {
-    return null
+async function readJsonIfExists<T>(cwd: string, relativePath: string): Promise<JsonReadResult<T>> {
+  const raw = await readIfExists(cwd, relativePath)
+  if (raw === null) {
+    return { exists: false, raw: null, value: null, parseError: null }
   }
 
-  return readFile(resolve(cwd, relativePath), 'utf8')
+  try {
+    return {
+      exists: true,
+      raw,
+      value: JSON.parse(raw) as T,
+      parseError: null,
+    }
+  } catch (error) {
+    return {
+      exists: true,
+      raw,
+      value: null,
+      parseError: error as Error,
+    }
+  }
+}
+
+async function writeJsonFile(cwd: string, relativePath: string, value: unknown): Promise<void> {
+  await writeFile(resolve(cwd, relativePath), `${JSON.stringify(value, null, 2)}\n`, 'utf8')
 }
 
 function createCheck(
@@ -78,166 +132,362 @@ function createCheck(
   title: string,
   status: DoctorStatus,
   message: string,
-  fix?: string,
+  options: {
+    fix?: string
+    canAutofix?: boolean
+    manualFix?: string
+  } = {},
 ): DoctorCheck {
-  return { key, title, status, message, fix }
+  return {
+    key,
+    title,
+    status,
+    message,
+    fix: options.fix,
+    canAutofix: options.canAutofix,
+    manualFix: options.manualFix,
+  }
+}
+
+async function detectPackageJson(context: DoctorRuleContext): Promise<DoctorCheck> {
+  const packageJson = await readJsonIfExists<Record<string, unknown>>(context.cwd, 'package.json')
+
+  if (!packageJson.exists) {
+    return createCheck(
+      'package-json',
+      'package.json',
+      'fail',
+      'No package.json was found in the current workspace.',
+      {
+        fix: 'Create a Guren app root or run `guren new` in an empty directory.',
+        manualFix: 'Create a package.json for the application root before running upgrade or doctor.',
+      },
+    )
+  }
+
+  if (packageJson.parseError) {
+    return createCheck(
+      'package-json',
+      'package.json',
+      'fail',
+      'package.json could not be parsed as strict JSON.',
+      {
+        fix: 'Fix package.json so it is valid JSON before running Guren maintenance commands.',
+        manualFix: 'Repair package.json formatting so the CLI can read dependencies and scripts.',
+      },
+    )
+  }
+
+  return createCheck('package-json', 'package.json', 'pass', 'Workspace package.json detected.')
+}
+
+async function detectAppEntry(context: DoctorRuleContext): Promise<DoctorCheck> {
+  const appEntry = await findFirstExisting(context.cwd, APP_ENTRY_CANDIDATES)
+  if (!appEntry) {
+    return createCheck(
+      'app-entry',
+      'Application Entry',
+      'fail',
+      'Could not find an application entry point in src/main.{ts,js,mts,mjs}.',
+      {
+        fix: 'Add src/main.ts and export a bootable application.',
+        manualFix: 'Add src/main.ts so createApp() can be booted from a standard entry point.',
+      },
+    )
+  }
+
+  return createCheck('app-entry', 'Application Entry', 'pass', `Found ${appEntry}.`)
+}
+
+async function detectRoutes(context: DoctorRuleContext): Promise<DoctorCheck> {
+  const routesFile = await findFirstExisting(context.cwd, ROUTE_CANDIDATES)
+  if (!routesFile) {
+    return createCheck(
+      'routes',
+      'Route Sources',
+      'fail',
+      'No routes/web.ts or routes/api.ts file was found.',
+      {
+        fix: 'Add a route registrar and pass it into createApp({ routes }).',
+        manualFix: 'Add a route registrar and point createApp({ routes }) at it.',
+      },
+    )
+  }
+
+  return createCheck('routes', 'Route Sources', 'pass', `Found ${routesFile}.`)
+}
+
+async function detectPageContracts(context: DoctorRuleContext): Promise<DoctorCheck> {
+  const pageContracts = await findFirstExisting(context.cwd, PAGE_CONTRACT_CANDIDATES)
+  if (!pageContracts) {
+    return createCheck(
+      'page-contracts',
+      'Page Types',
+      'warn',
+      'No .guren/pages.gen.ts file was found.',
+      {
+        fix: 'Run `bunx guren codegen --force` to generate page type definitions.',
+        manualFix: 'Run `bunx guren codegen --force` to regenerate .guren/pages.gen.ts.',
+      },
+    )
+  }
+
+  return createCheck('page-contracts', 'Page Types', 'pass', `Found ${pageContracts}.`)
+}
+
+function createGeneratedManifestRule(generatedFile: string): DoctorRule {
+  return {
+    key: `generated:${generatedFile}`,
+    title: generatedFile,
+    async detect(context) {
+      const present = await fileExists(context.cwd, generatedFile)
+      return createCheck(
+        `generated:${generatedFile}`,
+        generatedFile,
+        present ? 'pass' : 'warn',
+        present
+          ? `Generated manifest present at ${generatedFile}.`
+          : `Missing generated manifest ${generatedFile}.`,
+        {
+          fix: `Run \`guren codegen --force\` to regenerate ${generatedFile}.`,
+          manualFix: `Run \`guren codegen --force\` to regenerate ${generatedFile}.`,
+        },
+      )
+    },
+  }
+}
+
+async function detectTsconfig(context: DoctorRuleContext): Promise<DoctorCheck> {
+  const tsconfig = await readJsonIfExists<TsconfigShape>(context.cwd, 'tsconfig.json')
+
+  if (!tsconfig.exists) {
+    return createCheck(
+      'tsconfig',
+      'TypeScript Config',
+      'warn',
+      'No tsconfig.json was found.',
+      {
+        fix: 'Add tsconfig.json and include `.guren/**/*` so generated contracts are type-checked.',
+        manualFix: 'Add a tsconfig.json and include `.guren/**/*` in its include list.',
+      },
+    )
+  }
+
+  if (tsconfig.parseError) {
+    return createCheck(
+      'tsconfig',
+      'TypeScript Config',
+      'warn',
+      'tsconfig.json could not be parsed as strict JSON.',
+      {
+        fix: 'Fix tsconfig.json so Guren can verify generated artifacts are included.',
+        manualFix: 'Repair tsconfig.json formatting and add `.guren/**/*` to include.',
+      },
+    )
+  }
+
+  const includesGenerated = Array.isArray(tsconfig.value.include) && tsconfig.value.include.includes('.guren/**/*')
+  return createCheck(
+    'tsconfig',
+    'TypeScript Config',
+    includesGenerated ? 'pass' : 'warn',
+    includesGenerated
+      ? 'tsconfig.json includes generated .guren artifacts.'
+      : 'tsconfig.json does not appear to include generated .guren artifacts.',
+    {
+      fix: 'Add `.guren/**/*` to the tsconfig include list.',
+      canAutofix: !includesGenerated,
+      manualFix: 'Add `.guren/**/*` to tsconfig.json include.',
+    },
+  )
+}
+
+async function createTsconfigAutofix(_context: DoctorRuleContext, check: DoctorCheck): Promise<DoctorAutofix | null> {
+  if (check.status === 'pass' || !check.canAutofix) {
+    return null
+  }
+
+  return {
+    key: check.key,
+    title: check.title,
+    summary: 'Add `.guren/**/*` to tsconfig.json include.',
+    async apply(cwd: string) {
+      const current = await readJsonIfExists<TsconfigShape>(cwd, 'tsconfig.json')
+      if (!current.exists || current.parseError || !current.value) {
+        return
+      }
+
+      const nextConfig = { ...current.value }
+      const include = Array.isArray(nextConfig.include) ? [...nextConfig.include] : []
+      if (!include.includes('.guren/**/*')) {
+        include.push('.guren/**/*')
+      }
+      nextConfig.include = include
+      await writeJsonFile(cwd, 'tsconfig.json', nextConfig)
+    },
+  }
+}
+
+async function detectBootstrap(context: DoctorRuleContext): Promise<DoctorCheck> {
+  const appEntry = await findFirstExisting(context.cwd, APP_ENTRY_CANDIDATES)
+  if (!appEntry) {
+    return createCheck(
+      'bootstrap',
+      'Bootstrap Style',
+      'warn',
+      'Could not inspect application bootstrap because no app entry was found.',
+      {
+        fix: 'Prefer `createApp({ routes, providers, features })` over side-effect bootstrapping.',
+        manualFix: 'Adopt `createApp({ routes, providers, features })` in src/app.ts or src/main.ts.',
+      },
+    )
+  }
+
+  const appEntryRaw = await readIfExists(context.cwd, appEntry)
+  const appSourceCandidates = [appEntryRaw]
+  if (await fileExists(context.cwd, 'src/app.ts')) {
+    appSourceCandidates.push(await readIfExists(context.cwd, 'src/app.ts'))
+  }
+
+  const combinedSource = appSourceCandidates.filter((value): value is string => typeof value === 'string').join('\n')
+  const usesCreateApp = combinedSource.includes('createApp(')
+  const usesLegacyApplication = combinedSource.includes('new Application(')
+
+  return createCheck(
+    'bootstrap',
+    'Bootstrap Style',
+    usesCreateApp ? 'pass' : 'warn',
+    usesCreateApp
+      ? 'Application bootstrap uses createApp().'
+      : usesLegacyApplication
+        ? 'Application bootstrap still uses new Application().'
+        : 'Could not detect createApp() in the application bootstrap.',
+    {
+      fix: 'Prefer `createApp({ routes, providers, features })` over side-effect bootstrapping.',
+      manualFix: 'Migrate bootstrap to createApp({ routes, providers, features }).',
+    },
+  )
+}
+
+async function detectScripts(context: DoctorRuleContext): Promise<DoctorCheck> {
+  const packageJson = await readJsonIfExists<PackageJsonShape>(context.cwd, 'package.json')
+  if (!packageJson.exists) {
+    return createCheck(
+      'scripts',
+      'App Scripts',
+      'warn',
+      'package.json is missing, so recommended app scripts could not be verified.',
+      {
+        fix: 'Add `dev`, `build`, `typecheck`, and `codegen` scripts to package.json.',
+        manualFix: 'Create package.json and add the standard app scripts.',
+      },
+    )
+  }
+
+  if (packageJson.parseError || !packageJson.value) {
+    return createCheck(
+      'scripts',
+      'App Scripts',
+      'warn',
+      'package.json could not be parsed, so app scripts could not be verified.',
+      {
+        fix: 'Fix package.json so Guren can manage the standard app scripts.',
+        manualFix: 'Repair package.json formatting and add the standard app scripts.',
+      },
+    )
+  }
+
+  const scripts = packageJson.value.scripts ?? {}
+  const missingScripts = Object.keys(CANONICAL_APP_SCRIPTS).filter((script) => !(script in scripts))
+
+  return createCheck(
+    'scripts',
+    'App Scripts',
+    missingScripts.length === 0 ? 'pass' : 'warn',
+    missingScripts.length === 0
+      ? 'package.json exposes dev/build/typecheck/codegen scripts.'
+      : `package.json is missing recommended scripts: ${missingScripts.join(', ')}.`,
+    {
+      fix: 'Add `dev`, `build`, `typecheck`, and `codegen` scripts to package.json.',
+      canAutofix: missingScripts.length > 0,
+      manualFix: 'Add the standard dev/build/typecheck/codegen scripts to package.json.',
+    },
+  )
+}
+
+async function createScriptsAutofix(_context: DoctorRuleContext, check: DoctorCheck): Promise<DoctorAutofix | null> {
+  if (check.status === 'pass' || !check.canAutofix) {
+    return null
+  }
+
+  return {
+    key: check.key,
+    title: check.title,
+    summary: 'Add missing recommended scripts to package.json.',
+    async apply(cwd: string) {
+      const current = await readJsonIfExists<PackageJsonShape>(cwd, 'package.json')
+      if (!current.exists || current.parseError || !current.value) {
+        return
+      }
+
+      const nextManifest = { ...current.value }
+      const scripts = { ...(nextManifest.scripts ?? {}) }
+      for (const [name, command] of Object.entries(CANONICAL_APP_SCRIPTS)) {
+        if (!(name in scripts)) {
+          scripts[name] = command
+        }
+      }
+      nextManifest.scripts = scripts
+      await writeJsonFile(cwd, 'package.json', nextManifest)
+    },
+  }
+}
+
+const doctorRules: DoctorRule[] = [
+  { key: 'package-json', title: 'package.json', detect: detectPackageJson },
+  { key: 'app-entry', title: 'Application Entry', detect: detectAppEntry },
+  { key: 'routes', title: 'Route Sources', detect: detectRoutes },
+  { key: 'page-contracts', title: 'Page Types', detect: detectPageContracts },
+  ...GENERATED_FILES.map((generatedFile) => createGeneratedManifestRule(generatedFile)),
+  { key: 'tsconfig', title: 'TypeScript Config', detect: detectTsconfig, autofix: createTsconfigAutofix },
+  { key: 'bootstrap', title: 'Bootstrap Style', detect: detectBootstrap },
+  { key: 'scripts', title: 'App Scripts', detect: detectScripts, autofix: createScriptsAutofix },
+]
+
+export async function getDoctorRuleEvaluations(options: { cwd?: string } = {}): Promise<{
+  cwd: string
+  evaluations: DoctorRuleEvaluation[]
+}> {
+  const cwd = resolve(options.cwd ?? process.cwd())
+  const context: DoctorRuleContext = { cwd }
+
+  const evaluations = await Promise.all(
+    doctorRules.map(async (rule) => {
+      const check = await rule.detect(context)
+      const autofix = rule.autofix && check.status !== 'pass'
+        ? await rule.autofix(context, check)
+        : null
+      return { check, autofix } as DoctorRuleEvaluation
+    }),
+  )
+
+  return { cwd, evaluations }
 }
 
 export async function runDoctor(options: RunDoctorOptions = {}): Promise<DoctorReport> {
-  const cwd = resolve(options.cwd ?? process.cwd())
-  const checks: DoctorCheck[] = []
-
-  const packageJsonRaw = await readIfExists(cwd, 'package.json')
-  if (!packageJsonRaw) {
-    checks.push(
-      createCheck(
-        'package-json',
-        'package.json',
-        'fail',
-        'No package.json was found in the current workspace.',
-        'Create a Guren app root or run `guren new` in an empty directory.',
-      ),
-    )
-  } else {
-    checks.push(createCheck('package-json', 'package.json', 'pass', 'Workspace package.json detected.'))
-  }
-
-  const appEntry = await findFirstExisting(cwd, APP_ENTRY_CANDIDATES)
-  if (!appEntry) {
-    checks.push(
-      createCheck(
-        'app-entry',
-        'Application Entry',
-        'fail',
-        'Could not find an application entry point in src/main.{ts,js,mts,mjs}.',
-        'Add src/main.ts and export a bootable application.',
-      ),
-    )
-  } else {
-    checks.push(createCheck('app-entry', 'Application Entry', 'pass', `Found ${appEntry}.`))
-  }
-
-  const routesFile = await findFirstExisting(cwd, ROUTE_CANDIDATES)
-  if (!routesFile) {
-    checks.push(
-      createCheck(
-        'routes',
-        'Route Sources',
-        'fail',
-        'No routes/web.ts or routes/api.ts file was found.',
-        'Add a route registrar and pass it into createApp({ routes }).',
-      ),
-    )
-  } else {
-    checks.push(createCheck('routes', 'Route Sources', 'pass', `Found ${routesFile}.`))
-  }
-
-  const pageContracts = await findFirstExisting(cwd, PAGE_CONTRACT_CANDIDATES)
-  if (!pageContracts) {
-    checks.push(
-      createCheck(
-        'page-contracts',
-        'Page Types',
-        'warn',
-        'No .guren/pages.gen.ts file was found.',
-        'Run `bunx guren routes:types` to generate page type definitions.',
-      ),
-    )
-  } else {
-    checks.push(createCheck('page-contracts', 'Page Types', 'pass', `Found ${pageContracts}.`))
-  }
-
-  for (const generatedFile of GENERATED_FILES) {
-    checks.push(
-      createCheck(
-        `generated:${generatedFile}`,
-        generatedFile,
-        (await fileExists(cwd, generatedFile)) ? 'pass' : 'warn',
-        (await fileExists(cwd, generatedFile))
-          ? `Generated manifest present at ${generatedFile}.`
-          : `Missing generated manifest ${generatedFile}.`,
-        `Run \`guren codegen --force\` to regenerate ${generatedFile}.`,
-      ),
-    )
-  }
-
-  const tsconfigRaw = await readIfExists(cwd, 'tsconfig.json')
-  if (!tsconfigRaw) {
-    checks.push(
-      createCheck(
-        'tsconfig',
-        'TypeScript Config',
-        'warn',
-        'No tsconfig.json was found.',
-        'Add tsconfig.json and include `.guren/**/*` so generated contracts are type-checked.',
-      ),
-    )
-  } else {
-    const includesGenerated = tsconfigRaw.includes('.guren')
-    checks.push(
-      createCheck(
-        'tsconfig',
-        'TypeScript Config',
-        includesGenerated ? 'pass' : 'warn',
-        includesGenerated
-          ? 'tsconfig.json includes generated .guren artifacts.'
-          : 'tsconfig.json does not appear to include generated .guren artifacts.',
-        'Add `.guren/**/*` to the tsconfig include list.',
-      ),
-    )
-  }
-
-  if (appEntry) {
-    const appEntryRaw = await readIfExists(cwd, appEntry)
-    const appSourceCandidates = [appEntryRaw]
-
-    if (await fileExists(cwd, 'src/app.ts')) {
-      appSourceCandidates.push(await readIfExists(cwd, 'src/app.ts'))
-    }
-
-    const combinedSource = appSourceCandidates.filter((value): value is string => typeof value === 'string').join('\n')
-    const usesCreateApp = combinedSource.includes('createApp(')
-    const usesLegacyApplication = combinedSource.includes('new Application(')
-
-    checks.push(
-      createCheck(
-        'bootstrap',
-        'Bootstrap Style',
-        usesCreateApp ? 'pass' : usesLegacyApplication ? 'warn' : 'warn',
-        usesCreateApp
-          ? 'Application bootstrap uses createApp().'
-          : usesLegacyApplication
-            ? 'Application bootstrap still uses new Application().'
-            : 'Could not detect createApp() in the application bootstrap.',
-        'Prefer `createApp({ routes, providers, features })` over side-effect bootstrapping.',
-      ),
-    )
-  }
-
-  if (packageJsonRaw) {
-    const packageJson = JSON.parse(packageJsonRaw) as { scripts?: Record<string, string> }
-    const scripts = packageJson.scripts ?? {}
-    const expectedScripts = ['dev', 'build', 'typecheck', 'codegen']
-    const missingScripts = expectedScripts.filter((script) => !(script in scripts))
-
-    checks.push(
-      createCheck(
-        'scripts',
-        'App Scripts',
-        missingScripts.length === 0 ? 'pass' : 'warn',
-        missingScripts.length === 0
-          ? 'package.json exposes dev/build/typecheck/codegen scripts.'
-          : `package.json is missing recommended scripts: ${missingScripts.join(', ')}.`,
-        'Add `dev`, `build`, `typecheck`, and `codegen` scripts to package.json.',
-      ),
-    )
-  }
+  const { cwd, evaluations } = await getDoctorRuleEvaluations({ cwd: options.cwd })
+  const checks = evaluations.map((evaluation) => evaluation.check)
+  const fixableChecks = checks.filter((check) => check.status !== 'pass' && Boolean(check.canAutofix))
+  const manualChecks = checks.filter((check) => check.status !== 'pass' && !check.canAutofix)
 
   const report: DoctorReport = {
     cwd,
     checks,
+    fixableChecks,
+    manualChecks,
     hasWarnings: checks.some((check) => check.status === 'warn'),
     hasFailures: checks.some((check) => check.status === 'fail'),
+    recommendedCommands: [...DOCTOR_RECOMMENDED_COMMANDS],
   }
 
   if (options.next) {
@@ -256,9 +506,9 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
   const steps: NextStep[] = []
   let priority = 1
 
-  // 1. Check for empty controller methods
+  const controllerFiles = await discoverControllerFiles(cwd).catch(() => [] as string[])
+
   try {
-    const controllerFiles = await discoverControllerFiles(cwd)
     for (const filePath of controllerFiles) {
       const source = await readFile(filePath, 'utf-8')
       const { parse } = await import('@babel/parser')
@@ -289,7 +539,7 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
             steps.push({
               priority: priority++,
               title: `Implement ${className}.${member.key.name}()`,
-              description: `Method has an empty body.`,
+              description: 'Method has an empty body.',
               filePath: relative(cwd, filePath),
             })
           }
@@ -297,12 +547,10 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
       }
     }
   } catch {
-    // Ignore discovery failures
+    // Ignore parse failures
   }
 
-  // 2. Check for missing test files
   try {
-    const controllerFiles = await discoverControllerFiles(cwd)
     for (const filePath of controllerFiles) {
       const name = classNameFromPath(filePath)
       const testCandidates = [
@@ -311,7 +559,7 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
       ]
       let hasTest = false
       for (const candidate of testCandidates) {
-        if (await discoveryFileExists(cwd, candidate)) {
+        if (await fileExists(cwd, candidate)) {
           hasTest = true
           break
         }
@@ -320,7 +568,7 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
         steps.push({
           priority: priority++,
           title: `Add tests for ${name}`,
-          description: `No test file found.`,
+          description: 'No test file found.',
           command: `bunx guren make:test ${name.replace('Controller', '')} --controller`,
         })
       }
@@ -329,7 +577,6 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
     // Ignore
   }
 
-  // 3. Check for models without factories
   try {
     const modelFiles = await discoverModelFiles(cwd)
     for (const filePath of modelFiles) {
@@ -340,7 +587,7 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
       ]
       let hasFactory = false
       for (const candidate of factoryCandidates) {
-        if (await discoveryFileExists(cwd, candidate)) {
+        if (await fileExists(cwd, candidate)) {
           hasFactory = true
           break
         }
@@ -349,7 +596,7 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
         steps.push({
           priority: priority++,
           title: `Add factory for ${name}`,
-          description: `No factory file found for testing and seeding.`,
+          description: 'No factory file found for testing and seeding.',
           command: `bunx guren make:factory ${name}`,
         })
       }
@@ -358,11 +605,9 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
     // Ignore
   }
 
-  // 4. Check for missing codegen
-  const manifests = ['.guren/routes.gen.ts', '.guren/pages.gen.ts', '.guren/data.gen.ts']
   let missingManifests = false
-  for (const manifest of manifests) {
-    if (!(await discoveryFileExists(cwd, manifest))) {
+  for (const manifest of ['.guren/routes.gen.ts', '.guren/pages.gen.ts', '.guren/data.gen.ts']) {
+    if (!(await fileExists(cwd, manifest))) {
       missingManifests = true
       break
     }
@@ -388,6 +633,19 @@ export function renderDoctorReport(report: DoctorReport): void {
     log(`${prefix} ${check.title}: ${check.message}`)
     if (check.fix) {
       consola.info(`       Fix: ${check.fix}`)
+    }
+    if (check.canAutofix) {
+      consola.info('       Autofix: available')
+    } else if (check.manualFix) {
+      consola.info(`       Manual: ${check.manualFix}`)
+    }
+  }
+
+  if (report.recommendedCommands.length > 0) {
+    console.log('')
+    consola.box('Recommended commands')
+    for (const command of report.recommendedCommands) {
+      consola.info(command)
     }
   }
 

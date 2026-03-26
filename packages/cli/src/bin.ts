@@ -1645,6 +1645,14 @@ const upgradeCommand = defineCommand({
       type: 'boolean',
       description: 'Print the dependency changes without modifying package.json.',
     },
+    json: {
+      type: 'boolean',
+      description: 'Print the upgrade report as JSON.',
+    },
+    noAutofix: {
+      type: 'boolean',
+      description: 'Only report fixable issues without applying automatic fixes.',
+    },
   },
   async run({ args }) {
     if (!args.canary) {
@@ -1654,20 +1662,55 @@ const upgradeCommand = defineCommand({
     const result = await upgradeCanary({
       install: Boolean(args.install),
       dryRun: Boolean(args.dryRun),
+      noAutofix: Boolean(args.noAutofix),
     })
 
-    if (result.updated.length === 0) {
-      consola.info('No Guren dependencies needed updating.')
+    if (args.json) {
+      console.log(JSON.stringify(result, null, 2))
       return
     }
 
-    for (const dependency of result.updated) {
-      consola.success(`${dependency.field}: ${dependency.name} ${dependency.previousVersion} -> ${dependency.nextVersion}`)
+    if (result.updatedDependencies.length === 0) {
+      consola.info('No Guren dependencies needed updating.')
+    } else {
+      consola.box('Dependency changes')
+      for (const dependency of result.updatedDependencies) {
+        consola.success(`${dependency.field}: ${dependency.name} ${dependency.previousVersion} -> ${dependency.nextVersion}`)
+      }
+    }
+
+    if (result.autofixes.length > 0) {
+      consola.box(args.dryRun ? 'Autofix preview' : 'Autofixes applied')
+      for (const autofix of result.autofixes) {
+        const prefix = autofix.applied ? '[applied]' : '[preview]'
+        consola.info(`${prefix} ${autofix.title}: ${autofix.summary}`)
+      }
+    }
+
+    if (result.warnings.length > 0) {
+      consola.box('Warnings')
+      for (const warning of result.warnings) {
+        consola.warn(`${warning.title}: ${warning.message}`)
+      }
+    }
+
+    if (result.manualSteps.length > 0) {
+      consola.box('Manual steps')
+      for (const step of result.manualSteps) {
+        consola.info(step)
+      }
+    }
+
+    if (result.recommendedCommands.length > 0) {
+      consola.box('Next commands')
+      for (const command of result.recommendedCommands) {
+        consola.info(command)
+      }
     }
 
     if (args.dryRun) {
-      consola.info('Dry run complete. package.json was not modified.')
-    } else {
+      consola.info('Dry run complete. Files were not modified.')
+    } else if (result.updatedDependencies.length > 0 || result.autofixes.some((autofix) => autofix.applied)) {
       consola.info(`Updated ${result.packageJsonPath}`)
     }
   },

@@ -71,6 +71,9 @@ jobs:
       - name: Packed artifact audit
         run: bun run smoke:starter:packed
 
+      - name: Upgrade existing app smoke
+        run: bun run smoke:upgrade-existing-app
+
       - name: Run tests
         run: bun run test
 
