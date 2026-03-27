@@ -9,7 +9,7 @@ import { makeModel } from './make-model'
 import { makeNotification } from './make-notification'
 import { makeRoute } from './make-route'
 import { makeView } from './make-view'
-import { addImport, addProvider } from './patch-helpers'
+import { addImport, addProvider, ensureDrizzleImports } from './patch-helpers'
 import { camelCase, kebabCase, pascalCase, writeFilesSafe, type WriterOptions } from './utils'
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -881,6 +881,8 @@ async function updateResourceSchema(collection: string, routeName: string): Prom
   if (content.includes(`export const ${schemaIdentifier} = pgTable(`)) {
     return
   }
+
+  content = ensureDrizzleImports(content, ['pgTable', 'serial', 'text', 'timestamp'])
 
   const schemaBlock = `\nexport const ${schemaIdentifier} = pgTable('${tableName}', {\n  id: serial('id').primaryKey(),\n  title: text('title').notNull(),\n  body: text('body'),\n  createdAt: timestamp('created_at', { withTimezone: false }).defaultNow().notNull(),\n})\n`
 

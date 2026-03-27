@@ -11,17 +11,7 @@ export default class ${className} extends Command {
   static description = 'Command description'
 
   async handle(): Promise<void> {
-    this.info('Command executed!')
-
-    // Access arguments and options
-    // const name = this.argument('name')
-    // const verbose = this.hasOption('verbose')
-
-    // Interactive prompts
-    // const answer = await this.ask('What is your name?')
-    // const confirm = await this.confirm('Continue?')
-
-    this.success('Done!')
+    this.info('Done!')
   }
 }
 `

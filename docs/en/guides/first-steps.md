@@ -19,27 +19,20 @@ cd posts-app
 bun install
 ```
 
-## 2. Add the Standard Feature Stacks
+## 2. Add Auth and Your First Resource
 
 ```bash
 bunx guren add auth
-bunx guren add resource posts
-bunx guren add queue
-bunx guren add mail
-bunx guren add events
-bunx guren add cache
-bunx guren add notifications
-bunx guren add storage
-bunx guren add broadcasting
-bunx guren add schedule
+bunx guren add resource posts --fields "title:string,body:text,published:boolean"
 ```
 
 This gives you:
 
 - `AuthProvider`, login/profile controllers, validators, routes, and page definitions
-- `PostController`, `PostResource`, `PostValidator`, CRUD pages, and named routes
-- `QueueProvider`, `MailProvider`, `EventProvider`, `CacheProvider`, `NotificationProvider`, `StorageProvider`, `BroadcastProvider`, and `app/Console/Kernel.ts` for the standard async/runtime features
+- `PostController`, `PostResource`, `PostValidator`, CRUD pages, and named routes — with `title`, `body`, and `published` fields already wired through the entire stack
 - `.guren/pages.gen.ts` as the auto-generated source for Inertia page props (extracted from each page component's `Props`)
+
+> You can add more features later with `bunx guren add queue`, `bunx guren add mail`, `bunx guren add events`, etc.
 
 ## 3. Generate Typed Manifests
 
@@ -62,7 +55,16 @@ bun run db:migrate
 bun run db:seed
 ```
 
-## 5. Run the App
+## 5. Verify Everything Works
+
+```bash
+bun run typecheck
+bun run test
+```
+
+Make sure there are no type errors and all generated tests pass before moving on.
+
+## 6. Run the App
 
 ```bash
 bun run dev
@@ -73,7 +75,7 @@ Visit:
 - `/login` for the generated auth flow
 - `/posts` for the generated resource flow
 
-## 6. Understand the Contract Path
+## 7. Understand the Contract Path
 
 The default resource scaffold follows one contract graph:
 
@@ -97,19 +99,19 @@ That means the page receives:
 
 without rebuilding pagination state in the controller or UI.
 
-## 7. Where to Edit Next
+## 8. Where to Edit Next
 
 - Adjust `db/schema.ts` to add more post fields.
 - Update `app/Http/Validators/PostValidator.ts` to change create/update rules.
 - Update `app/Http/Resources/PostResource.ts` when the page/API output should change.
 - Update `resources/js/pages/posts/*.tsx` to customize the UI.
 
-## 8. The Recommended Mental Model
+## 9. The Recommended Mental Model
 
 When adding new features, prefer this flow:
 
 ```bash
-bunx guren add resource comments
+bunx guren add resource comments --fields "body:text,postId:integer"
 bun run codegen
 ```
 

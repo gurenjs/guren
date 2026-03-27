@@ -6,6 +6,7 @@ import { createTempWorkspace } from './helpers'
 await mock.module('consola', () => ({
   consola: {
     info: mock(() => {}),
+    success: mock(() => {}),
     debug: mock(() => {}),
     warn: mock(() => {}),
     error: mock(() => {}),

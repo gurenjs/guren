@@ -14,10 +14,6 @@ export default class ${className} extends PresenceChannel {
     super('${channelName}', manager.driver())
   }
 
-  /**
-   * Authorize the user to join this presence channel.
-   * Return user info object if authorized, or false/null to deny.
-   */
   async join(ctx: Context): Promise<{ id: string; name?: string } | false> {
     const user = ctx.get('user')
     if (!user) return false
@@ -39,12 +35,8 @@ export default class ${className} extends PrivateChannel {
     super('${channelName}', manager.driver())
   }
 
-  /**
-   * Authorize the user to join this private channel.
-   */
   async authorize(ctx: Context): Promise<boolean> {
     const user = ctx.get('user')
-    // Add your authorization logic here
     return !!user
   }
 }

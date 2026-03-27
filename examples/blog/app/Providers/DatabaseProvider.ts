@@ -4,6 +4,8 @@ import { bootModels } from '../../config/app.js'
 export default class DatabaseProvider extends ServiceProvider {
   private initialized = false
 
+  register(): void {}
+
   async boot(): Promise<void> {
     if (this.initialized) {
       return
@@ -12,6 +14,4 @@ export default class DatabaseProvider extends ServiceProvider {
     await bootModels()
     this.initialized = true
   }
-
-  register(): void {}
 }

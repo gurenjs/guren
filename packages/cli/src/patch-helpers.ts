@@ -135,3 +135,33 @@ export async function hasAuthProvider(filePath: string): Promise<boolean> {
     return false
   }
 }
+
+/**
+ * Ensures that a set of named Drizzle imports are present in file content.
+ * Merges into an existing `@guren/orm/drizzle` import or prepends a new one.
+ * Returns the (possibly updated) content string.
+ */
+export function ensureDrizzleImports(content: string, needed: string[]): string {
+  // Check only import lines for existing identifiers, not the entire file content
+  const importLines = content.split('\n').filter((line) => line.trimStart().startsWith('import '))
+  const importContent = importLines.join('\n')
+
+  const missing = needed.filter(
+    (name) => !new RegExp(`\\b${name}\\b`).test(importContent),
+  )
+
+  if (missing.length === 0) {
+    return content
+  }
+
+  const existingDrizzleImport = /import\s*\{([^}]+)\}\s*from\s*['"]@guren\/orm\/drizzle['"]/
+  const match = content.match(existingDrizzleImport)
+
+  if (match) {
+    const existingNames = match[1].split(',').map((s) => s.trim()).filter(Boolean)
+    const allNames = [...new Set([...existingNames, ...missing])].sort()
+    return content.replace(existingDrizzleImport, `import { ${allNames.join(', ')} } from '@guren/orm/drizzle'`)
+  }
+
+  return `import { ${missing.sort().join(', ')} } from '@guren/orm/drizzle'\n${content}`
+}

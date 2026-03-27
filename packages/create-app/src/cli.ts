@@ -149,15 +149,24 @@ const command = defineCommand({
       consola.log(`  cd ${relativeTarget}`)
     }
     consola.log('  bun install')
-    consola.log('  bun run dev')
     consola.log('')
-    consola.info('No Docker or database setup needed — SQLite is ready out of the box.')
+    consola.info('Add features:')
+    consola.log('  bunx guren add auth')
+    consola.log('  bunx guren add resource posts --fields "title:string,body:text"')
+    consola.log('')
+    consola.info('Generate types and set up database:')
+    consola.log('  bun run codegen')
+    consola.log('  bun run db:migrate')
+    consola.log('  bun run db:seed')
+    consola.log('')
+    consola.info('Verify and run:')
+    consola.log('  bun run typecheck')
+    consola.log('  bun run test')
+    consola.log('  bun run dev')
 
     if (includeAuth) {
       consola.log('')
-      consola.info('Auth scaffolding included. Run migrations and seed after install:')
-      consola.log('  bun run db:migrate')
-      consola.log('  bun run db:seed')
+      consola.info('Auth scaffolding was included automatically.')
     }
 
     if (renderingMode === 'ssr') {

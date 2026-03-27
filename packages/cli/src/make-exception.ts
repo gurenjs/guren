@@ -10,25 +10,6 @@ export class ${className} extends HttpException {
   constructor(message = '${defaultMessage}') {
     super(${statusCode}, message)
   }
-
-  /**
-   * Render the exception to a response.
-   * Override this method to customize the error response.
-   */
-  // render(ctx: Context): Response {
-  //   return ctx.json({
-  //     message: this.message,
-  //     code: '${className.replace(/Exception$/, '').toUpperCase()}',
-  //   }, this.statusCode)
-  // }
-
-  /**
-   * Report the exception.
-   * Override this method to log or send the exception to external services.
-   */
-  // report(): void {
-  //   console.error(this.message)
-  // }
 }
 `
 }

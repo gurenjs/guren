@@ -5,23 +5,11 @@ const FACTORIES_DIR = 'db/factories'
 
 function factoryTemplate(className: string, modelName: string): string {
   return `import { Factory } from '@guren/core'
-// import { ${modelName} } from 'db/schema'
 
 export default class ${className} extends Factory<typeof ${modelName}> {
   definition() {
-    return {
-      // Add your factory definition here
-      // name: this.faker.person.fullName(),
-      // email: this.faker.internet.email(),
-    }
+    return {}
   }
-
-  // Optional: Add states for variations
-  // admin() {
-  //   return this.state({
-  //     role: 'admin',
-  //   })
-  // }
 }
 `
 }

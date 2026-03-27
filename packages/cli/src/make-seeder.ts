@@ -4,7 +4,7 @@ import { scaffoldFile } from './utils'
 const SEEDERS_DIR = 'db/seeders'
 
 function seederTemplate(className: string): string {
-  return `import { defineSeeder } from '@guren/orm'
+  return `import { defineSeeder } from '@guren/core'
 
 export default defineSeeder(async () => {
   console.info('Ran ${className}.')

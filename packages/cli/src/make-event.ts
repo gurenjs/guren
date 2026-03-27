@@ -6,20 +6,10 @@ const EVENTS_DIR = 'app/Events'
 function eventTemplate(className: string): string {
   return `import { Event } from '@guren/core'
 
-/**
- * ${className}
- */
-export default class ${className} extends Event {
-  /**
-   * The event name used for registration.
-   */
+export class ${className} extends Event {
   static override eventName = '${className}'
 
-  /**
-   * Create a new event instance.
-   */
   constructor(
-    // Define your event data here
     public readonly data: Record<string, unknown> = {},
   ) {
     super()

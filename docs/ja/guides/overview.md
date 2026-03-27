@@ -105,10 +105,14 @@ await app.actingAs(user).get('/dashboard').assertOk()
 ## はじめよう
 
 ```bash
-bunx create-guren-app my-app
+bunx create-guren-app my-app --mode ssr
 cd my-app
 bun install
+bunx guren add auth
+bunx guren add resource posts --fields "title:string,body:text"
 bun run codegen
+bun run db:migrate && bun run db:seed
+bun run typecheck && bun run build
 bun run dev        # http://localhost:3333 にアクセス
 ```
 

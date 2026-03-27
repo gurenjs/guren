@@ -6,37 +6,18 @@ const JOBS_DIR = 'app/Jobs'
 function jobTemplate(className: string): string {
   return `import { Job } from '@guren/core'
 
-/**
- * Payload for ${className}.
- */
 export interface ${className}Payload {
   [key: string]: unknown
 }
 
-/**
- * ${className}
- */
-export default class ${className} extends Job<${className}Payload> {
-  /**
-   * The queue this job should be dispatched to.
-   */
+export class ${className} extends Job<${className}Payload> {
   static override queue = 'default'
-
-  /**
-   * The number of times the job may be attempted.
-   */
   static override maxAttempts = 3
 
-  /**
-   * Process the job.
-   */
   async handle(payload: ${className}Payload): Promise<void> {
     void payload
   }
 
-  /**
-   * Handle a job failure.
-   */
   async failed(payload: ${className}Payload, error: Error): Promise<void> {
     void payload
     console.error('${className} failed:', error.message)

@@ -81,7 +81,7 @@ describe('makeModel', () => {
     const result = await makeModel('Test')
 
     const content = await readFile(result, 'utf8')
-    expect(content).toContain("import { defineModel } from '@guren/orm'")
+    expect(content).toContain("import { defineModel } from '@guren/core'")
     expect(content).toContain("from '../../db/schema.js'")
   })
 

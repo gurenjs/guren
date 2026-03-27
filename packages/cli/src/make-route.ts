@@ -12,8 +12,6 @@ export function registerRoutes(router: Router): void {
     group.get('/', [${controller}, 'index'])
   })
 }
-
-export default registerRoutes
 `
 }
 

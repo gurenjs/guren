@@ -96,9 +96,22 @@ export async function runQueueWorker(options: QueueWorkOptions = {}): Promise<vo
 /**
  * List failed jobs.
  */
-export async function listFailedJobs(queue?: string): Promise<void> {
+export async function listFailedJobs(queue?: string, options: { json?: boolean } = {}): Promise<void> {
   const driver = await getConfiguredDriver()
   const failedJobs = await driver.getFailedJobs(queue)
+
+  if (options.json) {
+    console.log(JSON.stringify(failedJobs.map((job) => ({
+      id: job.id,
+      name: job.name,
+      queue: job.queue,
+      error: job.error,
+      failedAt: job.failedAt.toISOString(),
+      attempts: job.attempts,
+      maxAttempts: job.maxAttempts,
+    })), null, 2))
+    return
+  }
 
   if (failedJobs.length === 0) {
     consola.info('No failed jobs.')

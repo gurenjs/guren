@@ -74,7 +74,7 @@ export function registerWebRoutes(router: Router): void {
       expect(appContent).toContain('providers: [DatabaseProvider, AuthProvider]')
 
       const routesContent = await readFile(join(workspace.dir, 'routes/web.ts'), 'utf8')
-      expect(routesContent).toContain("import registerAuthRoutes from './auth.js'")
+      expect(routesContent).toContain("import { registerAuthRoutes } from './auth.js'")
       expect(routesContent).toContain('registerAuthRoutes(router)')
 
       const loginPage = await readFile(join(workspace.dir, 'resources/js/pages/auth/Login.tsx'), 'utf8')

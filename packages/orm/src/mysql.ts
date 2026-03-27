@@ -183,14 +183,8 @@ function hasDrizzleMigrations(migrationsFolder: string): boolean {
     return false
   }
 
-  // v1: folder-based migrations (YYYYMMDD_name/migration.sql)
   const entries = readdirSync(migrationsFolder, { withFileTypes: true })
-  for (const entry of entries) {
-    if (entry.isDirectory() && existsSync(resolve(migrationsFolder, entry.name, 'migration.sql'))) {
-      return true
-    }
-  }
-
-  // v0: journal-based migrations (meta/_journal.json)
-  return existsSync(resolve(migrationsFolder, 'meta/_journal.json'))
+  return entries.some(
+    (entry) => entry.isDirectory() && existsSync(resolve(migrationsFolder, entry.name, 'migration.sql')),
+  )
 }

@@ -2,7 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, relative, resolve, sep as pathSep } from 'node:path'
 import { consola } from 'consola'
 import { writeFilesSafe, type WriterOptions } from './utils'
-import { addImport, addProvider } from './patch-helpers'
+import { addImport, addProvider, ensureDrizzleImports } from './patch-helpers'
 
 function timestamp(): string {
   const now = new Date()
@@ -493,12 +493,9 @@ export function registerAuthRoutes(router: Router): void {
   router.get('/profile', [ProfileController, 'edit'], requireAuthenticated({ redirectTo: '/login' })).name('profile.edit')
   router.put('/profile', [ProfileController, 'update'], requireAuthenticated({ redirectTo: '/login' })).name('profile.update')
 }
-
-export default registerAuthRoutes
 `
 
-const seederTemplate = `import { defineSeeder } from '@guren/orm'
-import { ScryptHasher } from '@guren/core'
+const seederTemplate = `import { defineSeeder, ScryptHasher } from '@guren/core'
 import { users } from '../schema.js'
 
 export default defineSeeder(async ({ db }) => {
@@ -549,9 +546,20 @@ async function updateSchema(): Promise<void> {
     return
   }
 
-  const updated = `import { pgTable, serial, text, timestamp } from '@guren/orm/drizzle'
+  // Replace SQLite-specific imports with Postgres imports when switching adapters
+  content = content.replace(
+    /import\s*\{[^}]*\}\s*from\s*['"]drizzle-orm\/sqlite-core['"]\s*\n?/,
+    '',
+  )
 
-export const users = pgTable('users', {
+  // Ensure required Drizzle imports are present
+  content = ensureDrizzleImports(content, ['pgTable', 'serial', 'text', 'timestamp'])
+
+  // Replace an existing users table that lacks auth columns, or append if absent
+  // Match both pgTable and sqliteTable variants — use `})` on its own line as the end anchor
+  // to avoid premature matching inside nested function calls like `$defaultFn(() => ...)`
+  const usersTablePattern = /export const users = (?:pgTable|sqliteTable)\('users',\s*\{[\s\S]*?\n\}\)\s*\n?/
+  const usersTableBlock = `export const users = pgTable('users', {
   id: serial('id').primaryKey(),
   name: text('name').notNull(),
   email: text('email').notNull(),
@@ -562,7 +570,13 @@ export const users = pgTable('users', {
 })
 `
 
-  await writeFile(schemaPath, updated, 'utf8')
+  if (usersTablePattern.test(content)) {
+    content = content.replace(usersTablePattern, usersTableBlock)
+  } else {
+    content = `${content.trimEnd()}\n\n${usersTableBlock}`
+  }
+
+  await writeFile(schemaPath, content, 'utf8')
   consola.info('Updated db/schema.ts with authentication columns.')
 }
 
@@ -664,7 +678,7 @@ async function installAuth(): Promise<void> {
   try {
     const absoluteWebRoutesPath = resolve(process.cwd(), webRoutesPath)
     let routesContent = await readFile(absoluteWebRoutesPath, 'utf8')
-    const routesImport = "import registerAuthRoutes from './auth.js'"
+    const routesImport = "import { registerAuthRoutes } from './auth.js'"
     const routesImportResult = await addImport(webRoutesPath, routesImport)
 
     if (routesImportResult.modified) {

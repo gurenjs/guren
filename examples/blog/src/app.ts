@@ -43,6 +43,10 @@ const app = createApp({
       cookieSecure: process.env.NODE_ENV === 'production',
     },
   },
+  hostAuthorization: {
+    allowedHosts: ['localhost:*', '127.0.0.1:*'],
+    exclude: ['/healthcheck', '/up'],
+  },
 })
 
 app.use('*', requestLogger)

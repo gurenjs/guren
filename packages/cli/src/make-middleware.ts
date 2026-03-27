@@ -6,20 +6,9 @@ const MIDDLEWARE_DIR = 'app/Http/Middleware'
 function middlewareTemplate(className: string): string {
   return `import { defineMiddleware, type Context } from '@guren/core'
 
-/**
- * ${className} middleware.
- */
 export const ${className} = defineMiddleware(async (ctx: Context, next: () => Promise<void>) => {
-  // Before request handling
-  // console.log('Request:', ctx.req.method, ctx.req.url)
-
   await next()
-
-  // After request handling
-  // console.log('Response:', ctx.res.status)
 })
-
-export default ${className}
 `
 }
 

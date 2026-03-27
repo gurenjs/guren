@@ -21,7 +21,7 @@ Use `bunx guren add ...` when you want the standard vNext path instead of low-le
 ```bash
 bunx guren add auth
 bunx guren add admin
-bunx guren add resource posts
+bunx guren add resource posts --fields "title:string,body:text,published:boolean"
 bunx guren add queue
 bunx guren add mail
 bunx guren add events
@@ -31,6 +31,9 @@ bunx guren add storage
 bunx guren add broadcasting
 bunx guren add schedule
 ```
+
+> **Golden path:** Start with `bunx guren add auth` and `bunx guren add resource`, then add more features as your app grows.
+
 ```bash
 bunx guren add plugin @acme/guren-plugin-audit
 ```

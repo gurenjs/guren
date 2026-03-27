@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises'
+import { copyFile, readFile, writeFile } from 'node:fs/promises'
 import { resolve, relative } from 'node:path'
 import { consola } from 'consola'
 import { discoverControllerFiles, discoverModelFiles, fileExists, readIfExists, classNameFromPath } from './discovery'
@@ -52,6 +52,33 @@ export interface DoctorRuleEvaluation {
   autofix?: DoctorAutofix | null
 }
 
+export interface DoctorJsonOutput {
+  version: 1
+  cwd: string
+  timestamp: string
+  runtime: {
+    name: string
+    version: string | null
+  }
+  summary: {
+    total: number
+    pass: number
+    warn: number
+    fail: number
+  }
+  checks: Array<{
+    key: string
+    title: string
+    status: DoctorStatus
+    message: string
+    fix: string | null
+    canAutofix: boolean
+    manualFix: string | null
+  }>
+  nextSteps: NextStep[] | null
+  recommendedCommands: string[]
+}
+
 interface DoctorRuleContext {
   cwd: string
 }
@@ -71,7 +98,7 @@ type JsonReadResult<T> =
 const APP_ENTRY_CANDIDATES = ['src/main.ts', 'src/main.mts', 'src/main.js', 'src/main.mjs']
 const ROUTE_CANDIDATES = ['routes/web.ts', 'routes/web.js', 'routes/api.ts', 'routes/api.js']
 const PAGE_CONTRACT_CANDIDATES = ['.guren/pages.gen.ts']
-const GENERATED_FILES = ['.guren/routes.gen.ts', '.guren/pages.gen.ts', '.guren/data.gen.ts', '.guren/channels.gen.ts']
+const GENERATED_FILES = ['.guren/routes.gen.ts', '.guren/pages.gen.ts', '.guren/data.gen.ts', '.guren/api-client.gen.ts', '.guren/channels.gen.ts']
 
 export const DOCTOR_RECOMMENDED_COMMANDS = [
   'bunx guren codegen --force',
@@ -443,15 +470,313 @@ async function createScriptsAutofix(_context: DoctorRuleContext, check: DoctorCh
   }
 }
 
+const MIN_BUN_VERSION = '1.1.0'
+
+function compareVersions(a: string, b: string): number {
+  const pa = a.split('.').map(Number)
+  const pb = b.split('.').map(Number)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const na = pa[i] ?? 0
+    const nb = pb[i] ?? 0
+    if (na !== nb) return na - nb
+  }
+  return 0
+}
+
+async function detectBunVersion(context: DoctorRuleContext): Promise<DoctorCheck> {
+  const bunVersion = typeof process !== 'undefined' && process.versions?.bun
+    ? process.versions.bun
+    : null
+
+  if (!bunVersion) {
+    return createCheck(
+      'bun-version',
+      'Bun Version',
+      'fail',
+      'Could not detect Bun runtime version. Guren requires Bun >= 1.1.0.',
+      {
+        fix: 'Install or update Bun with `bun upgrade`.',
+        manualFix: 'Install Bun from https://bun.sh and ensure version >= 1.1.0.',
+      },
+    )
+  }
+
+  const cmp = compareVersions(bunVersion, MIN_BUN_VERSION)
+
+  if (cmp >= 0) {
+    return createCheck(
+      'bun-version',
+      'Bun Version',
+      'pass',
+      `Bun ${bunVersion} detected (minimum: ${MIN_BUN_VERSION}).`,
+    )
+  }
+
+  // Version is below minimum — check if critically old (< 1.0.0)
+  const critical = compareVersions(bunVersion, '1.0.0') < 0
+
+  return createCheck(
+    'bun-version',
+    'Bun Version',
+    critical ? 'fail' : 'warn',
+    `Bun ${bunVersion} detected, but Guren requires >= ${MIN_BUN_VERSION}.`,
+    {
+      fix: 'Update Bun with `bun upgrade`.',
+      manualFix: `Upgrade Bun to >= ${MIN_BUN_VERSION} by running \`bun upgrade\`.`,
+    },
+  )
+}
+
+async function detectRuntime(_context: DoctorRuleContext): Promise<DoctorCheck> {
+  const isBun = typeof process !== 'undefined' && !!process.versions?.bun
+  const isNode = typeof process !== 'undefined' && !!process.versions?.node && !isBun
+
+  if (isNode) {
+    return createCheck(
+      'runtime',
+      'Runtime Environment',
+      'warn',
+      `Running under Node.js ${process.versions.node}. Guren is designed for Bun and some features may not work correctly.`,
+      {
+        fix: 'Install Bun from https://bun.sh and run the project with `bun` instead of `node`.',
+        manualFix: 'Switch to Bun runtime for full framework compatibility.',
+      },
+    )
+  }
+
+  if (!isBun) {
+    return createCheck(
+      'runtime',
+      'Runtime Environment',
+      'fail',
+      'Could not detect Bun or Node.js runtime. Guren requires the Bun runtime.',
+      {
+        fix: 'Install Bun from https://bun.sh.',
+        manualFix: 'Install Bun from https://bun.sh and ensure it is in your PATH.',
+      },
+    )
+  }
+
+  return createCheck(
+    'runtime',
+    'Runtime Environment',
+    'pass',
+    'Running under Bun runtime.',
+  )
+}
+
+async function detectConfigDrift(context: DoctorRuleContext): Promise<DoctorCheck> {
+  const appEntry = await findFirstExisting(context.cwd, APP_ENTRY_CANDIDATES)
+  if (!appEntry) {
+    return createCheck(
+      'config-drift',
+      'App Wiring',
+      'warn',
+      'Could not inspect app wiring because no entry point was found.',
+      {
+        fix: 'Create src/main.ts with createApp() to establish the application entry.',
+        manualFix: 'Add src/main.ts as the application entry point.',
+      },
+    )
+  }
+
+  const appEntryRaw = await readIfExists(context.cwd, appEntry)
+  const appSourceCandidates = [appEntryRaw]
+  if (await fileExists(context.cwd, 'src/app.ts')) {
+    appSourceCandidates.push(await readIfExists(context.cwd, 'src/app.ts'))
+  }
+
+  const combinedSource = appSourceCandidates.filter((value): value is string => typeof value === 'string').join('\n')
+
+  if (!combinedSource.includes('createApp(')) {
+    return createCheck(
+      'config-drift',
+      'App Wiring',
+      'warn',
+      'createApp() not found in app sources; cannot verify wiring.',
+      {
+        fix: 'Use createApp({ routes, providers }) in src/app.ts.',
+        manualFix: 'Migrate to createApp() for proper app wiring.',
+      },
+    )
+  }
+
+  const issues: string[] = []
+
+  // Check routes wiring
+  const hasRoutesImport = combinedSource.includes('routes') && (
+    combinedSource.includes("from 'routes/") ||
+    combinedSource.includes("from '@/routes/") ||
+    combinedSource.includes("from '../routes/") ||
+    combinedSource.includes("from './routes/") ||
+    combinedSource.includes('routes:') ||
+    combinedSource.includes('routes,')
+  )
+  const routeFileExists = await findFirstExisting(context.cwd, ROUTE_CANDIDATES)
+
+  if (routeFileExists && !hasRoutesImport) {
+    issues.push('Route file exists but may not be wired into createApp()')
+  }
+
+  // Check providers wiring
+  const hasProviders = combinedSource.includes('providers')
+  const providerDir = await fileExists(context.cwd, 'app/Providers')
+  if (providerDir && !hasProviders) {
+    issues.push('Providers directory exists but may not be wired into createApp()')
+  }
+
+  // Check that DatabaseProvider is present when database config exists
+  const dbConfigFile = await findFirstExisting(context.cwd, DATABASE_CONFIG_CANDIDATES)
+  if (dbConfigFile) {
+    const hasDatabaseProvider = combinedSource.includes('DatabaseProvider') ||
+      combinedSource.includes('database') ||
+      combinedSource.includes('orm')
+    if (!hasDatabaseProvider) {
+      issues.push('Database config exists but DatabaseProvider may not be registered')
+    }
+  }
+
+  if (issues.length > 0) {
+    return createCheck(
+      'config-drift',
+      'App Wiring',
+      'warn',
+      `Possible config drift detected: ${issues.join('; ')}.`,
+      {
+        fix: 'Ensure routes, providers, and features are all passed to createApp().',
+        manualFix: `Review src/app.ts wiring: ${issues.join('; ')}.`,
+      },
+    )
+  }
+
+  return createCheck(
+    'config-drift',
+    'App Wiring',
+    'pass',
+    'App wiring appears consistent.',
+  )
+}
+
+async function detectEnvFile(context: DoctorRuleContext): Promise<DoctorCheck> {
+  const envExists = await fileExists(context.cwd, '.env')
+  const envExampleExists = await fileExists(context.cwd, '.env.example')
+
+  if (envExists) {
+    return createCheck(
+      'env-file',
+      'Environment File',
+      'pass',
+      '.env file detected.',
+    )
+  }
+
+  if (envExampleExists) {
+    return createCheck(
+      'env-file',
+      'Environment File',
+      'warn',
+      '.env file is missing, but .env.example exists.',
+      {
+        fix: 'Copy .env.example to .env: `cp .env.example .env`',
+        canAutofix: true,
+        manualFix: 'Copy .env.example to .env and configure environment variables.',
+      },
+    )
+  }
+
+  return createCheck(
+    'env-file',
+    'Environment File',
+    'fail',
+    'Neither .env nor .env.example was found.',
+    {
+      fix: 'Create a .env file with your environment configuration.',
+      manualFix: 'Create a .env file in the project root with the required environment variables.',
+    },
+  )
+}
+
+async function createEnvFileAutofix(_context: DoctorRuleContext, check: DoctorCheck): Promise<DoctorAutofix | null> {
+  if (check.status === 'pass' || !check.canAutofix) {
+    return null
+  }
+
+  return {
+    key: check.key,
+    title: check.title,
+    summary: 'Copy .env.example to .env.',
+    async apply(cwd: string) {
+      const exampleExists = await fileExists(cwd, '.env.example')
+      if (!exampleExists) {
+        return
+      }
+      await copyFile(resolve(cwd, '.env.example'), resolve(cwd, '.env'))
+    },
+  }
+}
+
+const DATABASE_CONFIG_CANDIDATES = ['config/database.ts', 'db/config.ts']
+
+async function detectDatabaseConfig(context: DoctorRuleContext): Promise<DoctorCheck> {
+  const configFile = await findFirstExisting(context.cwd, DATABASE_CONFIG_CANDIDATES)
+
+  if (!configFile) {
+    return createCheck(
+      'database-config',
+      'Database Configuration',
+      'warn',
+      'No database configuration file found (checked config/database.ts and db/config.ts).',
+      {
+        fix: 'Create a database configuration file at config/database.ts.',
+        manualFix: 'Add config/database.ts using createPostgresDatabase() from @guren/orm.',
+      },
+    )
+  }
+
+  // Check if .env exists and has DATABASE_URL
+  const envContent = await readIfExists(context.cwd, '.env')
+  if (envContent !== null) {
+    const hasDatabaseUrl = envContent.split('\n').some((line) => {
+      const trimmed = line.trim()
+      return !trimmed.startsWith('#') && trimmed.startsWith('DATABASE_URL')
+    })
+
+    if (!hasDatabaseUrl) {
+      return createCheck(
+        'database-config',
+        'Database Configuration',
+        'warn',
+        `Found ${configFile}, but DATABASE_URL may be missing from .env.`,
+        {
+          fix: 'Add DATABASE_URL to your .env file (e.g., DATABASE_URL=postgres://user:pass@localhost:5432/dbname).',
+          manualFix: 'Check that DATABASE_URL is defined in .env with a valid connection string.',
+        },
+      )
+    }
+  }
+
+  return createCheck(
+    'database-config',
+    'Database Configuration',
+    'pass',
+    `Found ${configFile}.`,
+  )
+}
+
 const doctorRules: DoctorRule[] = [
+  { key: 'runtime', title: 'Runtime Environment', detect: detectRuntime },
+  { key: 'bun-version', title: 'Bun Version', detect: detectBunVersion },
   { key: 'package-json', title: 'package.json', detect: detectPackageJson },
+  { key: 'env-file', title: 'Environment File', detect: detectEnvFile, autofix: createEnvFileAutofix },
   { key: 'app-entry', title: 'Application Entry', detect: detectAppEntry },
   { key: 'routes', title: 'Route Sources', detect: detectRoutes },
   { key: 'page-contracts', title: 'Page Types', detect: detectPageContracts },
   ...GENERATED_FILES.map((generatedFile) => createGeneratedManifestRule(generatedFile)),
   { key: 'tsconfig', title: 'TypeScript Config', detect: detectTsconfig, autofix: createTsconfigAutofix },
   { key: 'bootstrap', title: 'Bootstrap Style', detect: detectBootstrap },
+  { key: 'config-drift', title: 'App Wiring', detect: detectConfigDrift },
   { key: 'scripts', title: 'App Scripts', detect: detectScripts, autofix: createScriptsAutofix },
+  { key: 'database-config', title: 'Database Configuration', detect: detectDatabaseConfig },
 ]
 
 export async function getDoctorRuleEvaluations(options: { cwd?: string } = {}): Promise<{
@@ -494,11 +819,46 @@ export async function runDoctor(options: RunDoctorOptions = {}): Promise<DoctorR
     report.nextSteps = await suggestNextSteps({ cwd })
   }
 
-  if (!options.json) {
+  if (options.json) {
+    const jsonOutput = buildJsonOutput(report)
+    console.log(JSON.stringify(jsonOutput, null, 2))
+  } else {
     renderDoctorReport(report)
   }
 
   return report
+}
+
+export function buildJsonOutput(report: DoctorReport): DoctorJsonOutput {
+  const isBun = typeof process !== 'undefined' && !!process.versions?.bun
+  const runtimeVersion = isBun
+    ? process.versions.bun
+    : (process.versions?.node ?? null)
+
+  return {
+    version: 1,
+    cwd: report.cwd,
+    timestamp: new Date().toISOString(),
+    runtime: {
+      name: isBun ? 'bun' : 'node',
+      version: runtimeVersion,
+    },
+    summary: report.checks.reduce(
+      (acc, c) => { acc.total++; acc[c.status]++; return acc },
+      { total: 0, pass: 0, warn: 0, fail: 0 },
+    ),
+    checks: report.checks.map((c) => ({
+      key: c.key,
+      title: c.title,
+      status: c.status,
+      message: c.message,
+      fix: c.fix ?? null,
+      canAutofix: c.canAutofix ?? false,
+      manualFix: c.manualFix ?? null,
+    })),
+    nextSteps: report.nextSteps ?? null,
+    recommendedCommands: report.recommendedCommands,
+  }
 }
 
 export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<NextStep[]> {
@@ -606,7 +966,7 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
   }
 
   let missingManifests = false
-  for (const manifest of ['.guren/routes.gen.ts', '.guren/pages.gen.ts', '.guren/data.gen.ts']) {
+  for (const manifest of ['.guren/routes.gen.ts', '.guren/pages.gen.ts', '.guren/data.gen.ts', '.guren/api-client.gen.ts']) {
     if (!(await fileExists(cwd, manifest))) {
       missingManifests = true
       break

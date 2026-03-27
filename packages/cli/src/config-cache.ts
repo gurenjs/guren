@@ -18,22 +18,16 @@ export interface ConfigCacheOptions {
    * Cache output directory.
    */
   cacheDir?: string
+
+  /**
+   * Output as JSON.
+   */
+  json?: boolean
 }
 
 const DEFAULT_CONFIG_DIR = 'config'
 const DEFAULT_CACHE_DIR = 'bootstrap/cache'
 const CACHE_FILE = 'config.json'
-
-function logSuccess(message: string): void {
-  if (typeof consola.success === 'function') {
-    consola.success(message)
-    return
-  }
-
-  if (typeof consola.info === 'function') {
-    consola.info(message)
-  }
-}
 
 /**
  * Cache all configuration files into a single JSON file.
@@ -75,7 +69,7 @@ export async function cacheConfig(options: ConfigCacheOptions = {}): Promise<str
   const cacheContent = JSON.stringify(config, null, 2)
   writeFileSync(cacheFile, cacheContent, 'utf-8')
 
-  logSuccess(`Configuration cached to ${cacheFile}`)
+  consola.success(`Configuration cached to ${cacheFile}`)
   consola.info(`Cached ${Object.keys(config).length} configuration file(s).`)
 
   return cacheFile
@@ -91,7 +85,7 @@ export function clearConfigCache(options: ConfigCacheOptions = {}): boolean {
 
   if (existsSync(cacheFile)) {
     unlinkSync(cacheFile)
-    logSuccess('Configuration cache cleared.')
+    consola.success('Configuration cache cleared.')
     return true
   }
 
@@ -163,6 +157,10 @@ export function showConfigCacheInfo(options: ConfigCacheOptions = {}): void {
   const cacheFile = join(cacheDir, CACHE_FILE)
 
   if (!existsSync(cacheFile)) {
+    if (options.json) {
+      console.log(JSON.stringify({ cached: false, file: cacheFile }, null, 2))
+      return
+    }
     consola.info('Configuration is not cached.')
     consola.info(`Run \`guren config:cache\` to cache your configuration.`)
     return
@@ -171,6 +169,17 @@ export function showConfigCacheInfo(options: ConfigCacheOptions = {}): void {
   const stat = statSync(cacheFile)
   const config = loadCachedConfig(options)
   const keys = config ? Object.keys(config) : []
+
+  if (options.json) {
+    console.log(JSON.stringify({
+      cached: true,
+      file: cacheFile,
+      size: stat.size,
+      modified: stat.mtime.toISOString(),
+      configs: keys,
+    }, null, 2))
+    return
+  }
 
   consola.info('Configuration cache info:')
   console.log(`  File: ${cacheFile}`)

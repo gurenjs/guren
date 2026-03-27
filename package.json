@@ -34,6 +34,7 @@
     "smoke:starter": "bun run ./scripts/smoke/fresh-app.ts",
     "smoke:starter:packed": "GUREN_SMOKE_INSTALL_MODE=packed bun run ./scripts/smoke/fresh-app.ts",
     "smoke:upgrade-existing-app": "bun run ./scripts/smoke/upgrade-existing-app.ts",
+    "smoke:golden-path": "bash ./scripts/smoke-golden-path.sh",
     "changeset": "changeset",
     "version-packages": "changeset version && bun install",
     "release": "bun run build && changeset publish",

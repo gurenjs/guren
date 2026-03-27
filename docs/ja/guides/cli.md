@@ -21,7 +21,7 @@ bunx guren --help
 ```bash
 bunx guren add auth
 bunx guren add admin
-bunx guren add resource posts
+bunx guren add resource posts --fields "title:string,body:text"
 bunx guren add queue
 bunx guren add mail
 bunx guren add events
@@ -31,12 +31,13 @@ bunx guren add storage
 bunx guren add broadcasting
 bunx guren add schedule
 ```
+> **Golden path:** まず `bunx guren add auth` と `bunx guren add resource` から始め、アプリの成長に応じて他の機能を追加してください。
+
 ```bash
 bunx guren add plugin @acme/guren-plugin-audit
 ```
 
 `add plugin` は `src/app.ts` にプラグイン Provider を自動登録し、依存が未インストールの場合は `bun add <package>` の案内を表示します。
-
 
 これらのコマンドは `src/app.ts` を更新し、対応する provider/runtime ファイルを生成します。
 
@@ -302,15 +303,15 @@ bunx guren queue:work --stop-when-empty
 ゼロから始めるときは専用ブートストラッパーを使います。
 
 ```bash
-bunx create-guren-app my-app
+bunx create-guren-app my-app --mode ssr
 ```
 
-CLI はデフォルトテンプレートをコピーし、メタデータを更新、レンダリングモードを選択するプロンプトを出します。既定の **SSR** は `autoConfigureInertiaAssets` 経由で SSR を有効にし、**SPA** を選ぶと無効化します。プロンプトをスキップする場合は `--mode ssr` または `--mode spa`、空でないディレクトリに生成する場合は `--force` を付けます。
+CLI はデフォルトテンプレートをコピーし、メタデータを更新します。`--mode ssr`（既定）で SSR が有効に、`--mode spa` で無効になります。空でないディレクトリに生成する場合は `--force` を付けます。
 
 ## トラブルシューティング
 - `command not found: bunx`: Bun が古い可能性があります。1.1 以降にアップグレードしてください。
 - `Error: Port already in use`: 開発サーバー（既定 3333）が埋まっています。`.env` の `PORT` を変更して再起動してください。
-- `Database connection failed`: Postgres に到達できるか、`.env` が `postgres://guren:guren@localhost:54322/guren` を指しているか確認してください。
+- `Database connection failed`: デフォルトは SQLite（`./data/guren.db`）です。PostgreSQL を使う場合は `.env` の `DATABASE_URL` を確認してください。
 
 ## 対話 REPL
 

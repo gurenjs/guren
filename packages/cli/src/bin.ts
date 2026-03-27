@@ -119,6 +119,22 @@ function ensureDestructiveCommandAllowed(force?: boolean): boolean {
   return true
 }
 
+function reportDryRun(action: string, message: string, json: boolean, extra?: Record<string, unknown>): void {
+  if (json) {
+    console.log(JSON.stringify({ dryRun: true, action, message, ...extra }, null, 2))
+  } else {
+    consola.info(`[dry-run] ${message}`)
+  }
+}
+
+function reportSuccess(action: string, message: string, json: boolean, extra?: Record<string, unknown>): void {
+  if (json) {
+    console.log(JSON.stringify({ success: true, action, message, ...extra }, null, 2))
+  } else {
+    consola.success(message)
+  }
+}
+
 async function runBunCommand(args: string[]): Promise<void> {
   await new Promise<void>((resolvePromise, rejectPromise) => {
     const child = spawn(process.execPath || 'bun', args, {
@@ -450,9 +466,25 @@ const migrateCommand = defineCommand({
     name: 'db:migrate',
     description: 'Run all pending database migrations.',
   },
-  async run() {
+  args: {
+    dryRun: {
+      type: 'boolean',
+      alias: 'd',
+      description: 'Show what would happen without executing',
+    },
+    json: {
+      type: 'boolean',
+      description: 'Output result as JSON',
+    },
+  },
+  async run({ args }) {
+    if (args.dryRun) {
+      reportDryRun('db:migrate', 'Would run all pending database migrations.', Boolean(args.json))
+      return
+    }
+
     await runDatabaseMigrations()
-    consola.success('Database migrations completed.')
+    reportSuccess('db:migrate', 'Database migrations completed.', Boolean(args.json))
   },
 })
 
@@ -461,9 +493,34 @@ const seedCommand = defineCommand({
     name: 'db:seed',
     description: 'Execute database seeders.',
   },
-  async run() {
+  args: {
+    force: {
+      type: 'boolean',
+      description: 'Run in production without confirmation',
+      alias: 'f',
+    },
+    dryRun: {
+      type: 'boolean',
+      alias: 'd',
+      description: 'Show what would happen without executing',
+    },
+    json: {
+      type: 'boolean',
+      description: 'Output result as JSON',
+    },
+  },
+  async run({ args }) {
+    if (!ensureDestructiveCommandAllowed(args.force)) {
+      return
+    }
+
+    if (args.dryRun) {
+      reportDryRun('db:seed', 'Would execute database seeders.', Boolean(args.json))
+      return
+    }
+
     await runDatabaseSeeders()
-    consola.success('Database seeders executed.')
+    reportSuccess('db:seed', 'Database seeders executed.', Boolean(args.json))
   },
 })
 
@@ -480,8 +537,17 @@ const resetCommand = defineCommand({
     },
     force: {
       type: 'boolean',
-      description: 'Skip confirmation prompt (required in production)',
+      description: 'Run in production without confirmation',
       alias: 'f',
+    },
+    json: {
+      type: 'boolean',
+      description: 'Output result as JSON',
+    },
+    dryRun: {
+      type: 'boolean',
+      alias: 'd',
+      description: 'Show what would happen without executing',
     },
   },
   async run({ args }) {
@@ -489,14 +555,21 @@ const resetCommand = defineCommand({
       return
     }
 
+    if (args.dryRun) {
+      const message = args.seed
+        ? 'Would drop all tables, re-run all migrations, and run seeders.'
+        : 'Would drop all tables and re-run all migrations.'
+      reportDryRun('db:reset', message, Boolean(args.json), { seed: Boolean(args.seed) })
+      return
+    }
+
     consola.info('Dropping all tables...')
     await resetDatabase({ seed: Boolean(args.seed) })
 
-    if (args.seed) {
-      consola.success('Database reset and seeded successfully.')
-    } else {
-      consola.success('Database reset successfully.')
-    }
+    const message = args.seed
+      ? 'Database reset and seeded successfully.'
+      : 'Database reset successfully.'
+    reportSuccess('db:reset', message, Boolean(args.json), { seed: Boolean(args.seed) })
   },
 })
 
@@ -513,8 +586,17 @@ const freshCommand = defineCommand({
     },
     force: {
       type: 'boolean',
-      description: 'Skip confirmation prompt (required in production)',
+      description: 'Run in production without confirmation',
       alias: 'f',
+    },
+    json: {
+      type: 'boolean',
+      description: 'Output result as JSON',
+    },
+    dryRun: {
+      type: 'boolean',
+      alias: 'd',
+      description: 'Show what would happen without executing',
     },
   },
   async run({ args }) {
@@ -522,14 +604,21 @@ const freshCommand = defineCommand({
       return
     }
 
+    if (args.dryRun) {
+      const message = args.seed
+        ? 'Would drop all tables, re-run all migrations, and run seeders.'
+        : 'Would drop all tables and re-run all migrations.'
+      reportDryRun('db:fresh', message, Boolean(args.json), { seed: Boolean(args.seed) })
+      return
+    }
+
     consola.info('Dropping all tables...')
     await resetDatabase({ seed: Boolean(args.seed) })
 
-    if (args.seed) {
-      consola.success('Database refreshed and seeded successfully.')
-    } else {
-      consola.success('Database refreshed successfully.')
-    }
+    const message = args.seed
+      ? 'Database refreshed and seeded successfully.'
+      : 'Database refreshed successfully.'
+    reportSuccess('db:fresh', message, Boolean(args.json), { seed: Boolean(args.seed) })
   },
 })
 
@@ -566,7 +655,7 @@ const routeTypesCommand = defineCommand({
     },
     force: {
       type: 'boolean',
-      description: 'Overwrite existing declaration file',
+      description: 'Overwrite existing files',
       alias: 'f',
     },
   },
@@ -719,8 +808,17 @@ const rollbackCommand = defineCommand({
     },
     force: {
       type: 'boolean',
-      description: 'Skip confirmation prompt',
+      description: 'Run in production without confirmation',
       alias: 'f',
+    },
+    dryRun: {
+      type: 'boolean',
+      alias: 'd',
+      description: 'Show what would happen without executing',
+    },
+    json: {
+      type: 'boolean',
+      description: 'Output result as JSON',
     },
   },
   async run({ args }) {
@@ -728,11 +826,22 @@ const rollbackCommand = defineCommand({
       return
     }
 
+    const steps = parseInt(args.step ?? '1', 10)
+
+    if (args.dryRun) {
+      const message = args.batch
+        ? 'Would rollback the entire last migration batch.'
+        : `Would rollback ${steps} migration(s).`
+      reportDryRun('db:rollback', message, Boolean(args.json), { steps, batch: Boolean(args.batch) })
+      return
+    }
+
     await runDatabaseRollback({
-      steps: parseInt(args.step ?? '1', 10),
+      steps,
       batch: args.batch,
       force: args.force,
     })
+    reportSuccess('db:rollback', 'Database rollback completed.', Boolean(args.json), { steps, batch: Boolean(args.batch) })
   },
 })
 
@@ -741,8 +850,14 @@ const statusCommand = defineCommand({
     name: 'db:status',
     description: 'Show the status of all migrations.',
   },
-  async run() {
-    await showMigrationStatus()
+  args: {
+    json: {
+      type: 'boolean',
+      description: 'Output as JSON',
+    },
+  },
+  async run({ args }) {
+    await showMigrationStatus({ json: Boolean(args.json) })
   },
 })
 
@@ -798,9 +913,13 @@ const queueFailedCommand = defineCommand({
       type: 'string',
       description: 'Filter by queue name',
     },
+    json: {
+      type: 'boolean',
+      description: 'Output as JSON',
+    },
   },
   async run({ args }) {
-    await listFailedJobs(args.queue)
+    await listFailedJobs(args.queue, { json: Boolean(args.json) })
   },
 })
 
@@ -846,8 +965,19 @@ const queueFlushCommand = defineCommand({
       type: 'string',
       description: 'Filter by queue name',
     },
+    dryRun: {
+      type: 'boolean',
+      alias: 'd',
+      description: 'Show what would happen without executing',
+    },
   },
   async run({ args }) {
+    if (args.dryRun) {
+      const queueFilter = args.queue ? ` on queue "${args.queue}"` : ''
+      consola.info(`[dry-run] Would delete all failed jobs${queueFilter}.`)
+      return
+    }
+
     await flushFailedJobs(args.queue)
   },
 })
@@ -981,11 +1111,16 @@ const configShowCommand = defineCommand({
       type: 'string',
       description: 'Application root directory',
     },
+    json: {
+      type: 'boolean',
+      description: 'Output as JSON',
+    },
   },
   async run({ args }) {
     showConfigCacheInfo({
       cacheDir: args.cache,
       appRoot: args.app,
+      json: Boolean(args.json),
     })
   },
 })
@@ -998,7 +1133,7 @@ const storageLinkCommand = defineCommand({
   args: {
     force: {
       type: 'boolean',
-      description: 'Recreate the link if it already exists',
+      description: 'Overwrite existing link',
       alias: 'f',
     },
     relative: {
@@ -1044,11 +1179,16 @@ const scheduleListCommand = defineCommand({
       type: 'string',
       description: 'Application root directory',
     },
+    json: {
+      type: 'boolean',
+      description: 'Output as JSON',
+    },
   },
   async run({ args }) {
     await listScheduledTasks({
       kernel: args.kernel,
       appRoot: args.app,
+      json: Boolean(args.json),
     })
   },
 })
@@ -1075,7 +1215,7 @@ const scheduleRunCommand = defineCommand({
     },
     force: {
       type: 'boolean',
-      description: 'Force run (ignore schedule)',
+      description: 'Run tasks regardless of schedule',
       alias: 'f',
     },
   },
@@ -1216,12 +1356,21 @@ const langListCommand = defineCommand({
       type: 'string',
       description: 'Application root directory',
     },
+    json: {
+      type: 'boolean',
+      description: 'Output as JSON',
+    },
   },
   async run({ args }) {
     const locales = listLocales({
       path: args.path,
       appRoot: args.app,
     })
+
+    if (args.json) {
+      consola.log(JSON.stringify(locales, null, 2))
+      return
+    }
 
     if (locales.length === 0) {
       consola.info('No language locales found.')
@@ -1634,7 +1783,7 @@ const addPluginCommand = defineCommand({
     },
     force: {
       type: 'boolean',
-      description: 'Reserved for compatibility. Plugin registration is idempotent.',
+      description: 'Overwrite existing plugin registration',
       alias: 'f',
     },
   },

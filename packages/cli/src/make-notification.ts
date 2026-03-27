@@ -4,28 +4,15 @@ import { scaffoldFile } from './utils'
 const NOTIFICATIONS_DIR = 'app/Notifications'
 
 function notificationTemplate(className: string): string {
-  return `/**
- * ${className} notification.
- */
-export default class ${className} {
-  /**
-   * Create a new notification instance.
-   */
+  return `export class ${className} {
   constructor(
-    // Define your notification data here
     public readonly data: Record<string, unknown> = {},
   ) {}
 
-  /**
-   * Get the notification channels.
-   */
   via(): string[] {
     return ['mail', 'database']
   }
 
-  /**
-   * Get the mail representation of the notification.
-   */
   toMail() {
     return {
       subject: '${className.replace(/Notification$/, '')}',
@@ -33,9 +20,6 @@ export default class ${className} {
     }
   }
 
-  /**
-   * Get the database representation of the notification.
-   */
   toDatabase() {
     return {
       type: '${className}',
@@ -43,9 +27,6 @@ export default class ${className} {
     }
   }
 
-  /**
-   * Get the array representation of the notification.
-   */
   toArray() {
     return {
       ...this.data,

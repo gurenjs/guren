@@ -1,5 +1,9 @@
 # Guren Framework
 
+[![X (Twitter)](https://img.shields.io/badge/follow-%40gurenjs-black?logo=x)](https://x.com/gurenjs)
+[![GitHub Discussions](https://img.shields.io/github/discussions/gurenjs/guren)](https://github.com/gurenjs/guren/discussions)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Guren is a Laravel-inspired fullstack framework for TypeScript that runs on Bun. It pairs a familiar MVC developer experience with modern tooling such as the Hono HTTP server, Inertia.js + React for the frontend, and Drizzle ORM for database access. The framework ships as a monorepo with reusable packages and example applications.
 
 ## Features
@@ -28,29 +32,51 @@ Guren is currently considered **alpha** software. Expect rapid iteration and pot
 
 ### Quick Start
 
-Create a new Guren application with the vNext standard flow:
+Build a blog app from scratch following the golden path:
 
 ```bash
+# 1. Scaffold a new app
 bunx create-guren-app my-app --mode ssr
 cd my-app
 bun install
+
+# 2. Add authentication and a resource
 bunx guren add auth
-bunx guren add resource posts
-bunx guren add queue
-bunx guren add mail
-bunx guren add events
-bunx guren add cache
-bunx guren add notifications
-bunx guren add storage
-bunx guren add broadcasting
-bunx guren add schedule
+bunx guren add resource posts --fields "title:string,body:text"
+
+# 3. Generate typed route helpers, page props, and API client
 bun run codegen
+
+# 4. Set up the database
 bun run db:migrate
 bun run db:seed
+
+# 5. Verify everything compiles
+bun run typecheck
+bun run build
+
+# 6. Start developing
 bun run dev
 ```
 
-Visit `http://localhost:3000` to see your application running!
+Visit `http://localhost:3000` to see your blog running. Sign in at `/login` with `demo@example.com` / `secret`.
+
+### Add More Features
+
+Once your app is up and running, add optional subsystems as needed:
+
+```bash
+bunx guren add queue           # Background job processing (Memory/Redis)
+bunx guren add mail            # Email sending (SMTP/Resend)
+bunx guren add events          # Event dispatching and listeners
+bunx guren add cache           # Cache layer (Memory/Redis/File)
+bunx guren add notifications   # Multi-channel notifications (Mail/Database/Slack)
+bunx guren add storage         # File storage (Local/S3/Memory)
+bunx guren add broadcasting    # Real-time broadcasting (SSE)
+bunx guren add schedule        # Cron-based task scheduling
+```
+
+Run `bun run codegen` again after adding new features to regenerate types.
 
 ### Prerequisites
 

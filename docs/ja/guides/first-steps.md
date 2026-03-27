@@ -1,15 +1,15 @@
 # 10分で最初の機能を作る
 
-このガイドでは、Guren の推奨パターンに沿って進めます。`@guren/core`、`bunx guren add ...`、page definition、resource 出力、route/page manifest を前提にしています。
+このガイドでは、Guren の推奨フロー（golden path）に沿って認証付きブログアプリを構築します。
 
 ## 作るもの
 
-次の要素を持つ小さな posts 機能です。
+次の要素を持つ小さな posts アプリです。
 
-- 認証 scaffolding
-- posts 用の resource stack
+- 認証 scaffolding（ログイン、登録、プロフィール）
+- posts の CRUD（一覧、詳細、作成、編集、削除）
 - 型付き route/page manifest
-- Guren 標準フローで動く SSR アプリ
+- SSR で動くフルスタックアプリ
 
 ## 1. アプリを作る
 
@@ -19,27 +19,18 @@ cd posts-app
 bun install
 ```
 
-## 2. 標準の機能スタックを追加する
+## 2. 認証とリソースを追加する
 
 ```bash
 bunx guren add auth
-bunx guren add resource posts
-bunx guren add queue
-bunx guren add mail
-bunx guren add events
-bunx guren add cache
-bunx guren add notifications
-bunx guren add storage
-bunx guren add broadcasting
-bunx guren add schedule
+bunx guren add resource posts --fields "title:string,body:text"
 ```
 
 これで次が生成されます。
 
-- `AuthProvider`、login/profile controller、validator、routes、page definitions
-- `PostController`、`PostResource`、`PostValidator`、CRUD pages、named routes
-- `QueueProvider`、`MailProvider`、`EventProvider`、`CacheProvider`、`NotificationProvider`、`StorageProvider`、`BroadcastProvider`、`app/Console/Kernel.ts` など、標準の非同期/運用系機能
-- 各ページコンポーネントの `Props` から自動生成される `.guren/pages.gen.ts`（Inertia page props の型情報源）
+- `AuthProvider`、login/register/profile の Controller、Validator、routes、ページ
+- `PostController`、`PostResource`、`PostValidator`、CRUD ページ、named routes
+- `db/schema.ts` に posts テーブル定義が追加
 
 ## 3. 型付き manifest を生成する
 
@@ -49,20 +40,30 @@ bun run codegen
 
 `codegen` は次を生成します。
 
-- named route helper 用の `.guren/routes.gen.ts`
-- 型付き page definitions 用の `.guren/pages.gen.ts`
-- editor 補助用の `types/generated/routes.d.ts`
+- `.guren/routes.gen.ts` -- named route helper の型情報
+- `.guren/pages.gen.ts` -- 型付き page props の定義
+- `.guren/data.gen.ts` -- JsonResource の型情報
+- `.guren/api-client.gen.ts` -- 型付き API クライアント
 
 ## 4. データベースを準備する
-
-PostgreSQL を使える状態にしてから、次を実行します。
 
 ```bash
 bun run db:migrate
 bun run db:seed
 ```
 
-## 5. アプリを起動する
+デフォルトは SQLite のため、追加のセットアップは不要です。
+
+## 5. 型チェックとビルド
+
+```bash
+bun run typecheck
+bun run build
+```
+
+ここまででエラーがなければ、アプリの整合性が取れています。
+
+## 6. アプリを起動する
 
 ```bash
 bun run dev
@@ -70,10 +71,10 @@ bun run dev
 
 次を開いて確認します。
 
-- `/login` で生成された認証フロー
-- `/posts` で生成された resource フロー
+- `/login` -- 生成された認証フロー（`demo@example.com` / `secret` でサインイン）
+- `/posts` -- 生成された CRUD フロー
 
-## 6. データフローを理解する
+## 7. データフローを理解する
 
 標準の resource scaffold は、次のデータフローで動きます。
 
@@ -97,20 +98,21 @@ type Props = PaginatedPageProps<PostResourceData>
 
 controller や UI 側で pagination state を組み直す必要はありません。
 
-## 7. 次に触る場所
+## 8. 次に触る場所
 
 - post の項目を増やすなら `db/schema.ts`
 - create/update ルールを変えるなら `app/Http/Validators/PostValidator.ts`
 - page/API の出力を変えるなら `app/Http/Resources/PostResource.ts`
 - UI を変えるなら `resources/js/pages/posts/*.tsx`
 
-## 8. 推奨する考え方
+## 9. 推奨する考え方
 
 新しい機能を追加するときは、まずこの流れを使います。
 
 ```bash
-bunx guren add resource comments
+bunx guren add resource comments --fields "body:text,postId:number"
 bun run codegen
+bun run db:migrate
 ```
 
 その上で各レイヤーの責務を固定します。

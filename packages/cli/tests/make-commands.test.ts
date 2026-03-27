@@ -106,7 +106,7 @@ describe('CLI make:* commands', () => {
     it('includes event import when specified', async () => {
       const result = await makeListener('SendWelcomeEmail', { event: 'UserRegistered' })
       const content = fs.readFileSync(result, 'utf-8')
-      expect(content).toContain("import UserRegistered from '../Events/UserRegistered'")
+      expect(content).toContain("import { UserRegistered } from '../Events/UserRegistered'")
       expect(content).toContain('event: UserRegistered')
       expect(content).toContain('static override event = UserRegistered')
     })
@@ -165,7 +165,7 @@ describe('CLI make:* commands', () => {
     it('generates correct seeder template', async () => {
       const result = await makeSeeder('User')
       const content = fs.readFileSync(result, 'utf-8')
-      expect(content).toContain("import { defineSeeder } from '@guren/orm'")
+      expect(content).toContain("import { defineSeeder } from '@guren/core'")
       expect(content).toContain('export default defineSeeder(async () => {')
       expect(content).toContain("console.info('Ran UserSeeder.')")
     })

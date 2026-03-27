@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { addImport, addProvider, hasImport, hasAuthProvider } from './patch-helpers'
+import { addImport, addProvider, hasImport, hasAuthProvider, ensureDrizzleImports } from './patch-helpers'
 
 describe('patch-helpers', () => {
   let tempDir: string
@@ -180,6 +180,38 @@ const app = new Application()`
       const result = await hasAuthProvider(filePath)
 
       expect(result).toBe(false)
+    })
+  })
+
+  describe('ensureDrizzleImports', () => {
+    it('should add missing imports when no Drizzle import exists', () => {
+      const content = `const x = 1\n`
+      const result = ensureDrizzleImports(content, ['pgTable', 'serial', 'text'])
+
+      expect(result).toContain("import { pgTable, serial, text } from '@guren/orm/drizzle'")
+      expect(result).toContain('const x = 1')
+    })
+
+    it('should merge into existing Drizzle import', () => {
+      const content = `import { pgTable, serial } from '@guren/orm/drizzle'\n\nexport const posts = pgTable('posts', {})\n`
+      const result = ensureDrizzleImports(content, ['pgTable', 'serial', 'text', 'timestamp'])
+
+      expect(result).toContain("import { pgTable, serial, text, timestamp } from '@guren/orm/drizzle'")
+      expect(result).not.toContain("import { pgTable, serial }")
+    })
+
+    it('should not modify content when all imports already present', () => {
+      const content = `import { pgTable, serial, text, timestamp } from '@guren/orm/drizzle'\n\nexport const posts = pgTable('posts', {})\n`
+      const result = ensureDrizzleImports(content, ['pgTable', 'serial', 'text', 'timestamp'])
+
+      expect(result).toBe(content)
+    })
+
+    it('should return content unchanged when needed list is empty', () => {
+      const content = `const x = 1\n`
+      const result = ensureDrizzleImports(content, [])
+
+      expect(result).toBe(content)
     })
   })
 })

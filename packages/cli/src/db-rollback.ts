@@ -116,12 +116,17 @@ export async function runDatabaseRollback(options: RollbackOptions = {}): Promis
 /**
  * Show migration status.
  */
-export async function showMigrationStatus(): Promise<void> {
+export async function showMigrationStatus(options: { json?: boolean } = {}): Promise<void> {
   const { executor, close } = await getSqlExecutor()
 
   try {
     const migrationsDir = resolve(process.cwd(), 'db/migrations')
     const status = await getMigrationStatus(executor, migrationsDir)
+
+    if (options.json) {
+      console.log(JSON.stringify(status, null, 2))
+      return
+    }
 
     if (status.length === 0) {
       consola.info('No migrations found.')

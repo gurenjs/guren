@@ -11,16 +11,10 @@ function hasMigrations(): boolean {
     return false
   }
 
-  // v1: folder-based migrations
   const entries = readdirSync(MIGRATIONS_FOLDER, { withFileTypes: true })
-  for (const entry of entries) {
-    if (entry.isDirectory() && existsSync(resolve(MIGRATIONS_FOLDER, entry.name, 'migration.sql'))) {
-      return true
-    }
-  }
-
-  // v0: journal-based migrations
-  return existsSync(resolve(MIGRATIONS_FOLDER, 'meta/_journal.json'))
+  return entries.some(
+    (entry) => entry.isDirectory() && existsSync(resolve(MIGRATIONS_FOLDER, entry.name, 'migration.sql')),
+  )
 }
 
 export async function bootModels(): Promise<void> {

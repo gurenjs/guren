@@ -13,6 +13,11 @@ export interface ScheduleOptions {
    * Path to the schedule kernel file.
    */
   kernel?: string
+
+  /**
+   * Output as JSON.
+   */
+  json?: boolean
 }
 
 export interface ScheduleRunOptions extends ScheduleOptions {
@@ -172,6 +177,11 @@ export async function listScheduledTasks(options: ScheduleOptions = {}): Promise
   const kernel = await loadScheduleKernel(options)
 
   if (!kernel || kernel.tasks.length === 0) {
+    if (options.json) {
+      console.log(JSON.stringify([], null, 2))
+      return
+    }
+
     consola.info('No scheduled tasks found.')
     consola.info('')
     consola.info('To define scheduled tasks, create a kernel file at:')
@@ -183,6 +193,20 @@ export async function listScheduledTasks(options: ScheduleOptions = {}): Promise
     consola.info('    schedule.call(myTask).daily().name("my-task")')
     consola.info('    return schedule')
     consola.info('  }')
+    return
+  }
+
+  if (options.json) {
+    const data = kernel.tasks.map((task) => {
+      const nextRun = getNextRunTime(task.expression, task.timezone)
+      return {
+        name: task.name,
+        expression: task.expression,
+        nextRun: nextRun ? nextRun.toISOString() : null,
+        timezone: task.timezone || 'UTC',
+      }
+    })
+    console.log(JSON.stringify(data, null, 2))
     return
   }
 

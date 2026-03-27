@@ -1,14 +1,25 @@
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
+import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test'
 import { mkdtemp, rm, mkdir, writeFile, readFile, access } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import {
+
+await mock.module('consola', () => ({
+  consola: {
+    info: mock(() => {}),
+    success: mock(() => {}),
+    warn: mock(() => {}),
+    error: mock(() => {}),
+    log: mock(() => {}),
+  },
+}))
+
+const {
   cacheConfig,
   clearConfigCache,
   loadCachedConfig,
   hasConfigCache,
   showConfigCacheInfo,
-} from '../src/config-cache'
+} = await import('../src/config-cache')
 
 describe('config-cache', () => {
   let tempDir: string

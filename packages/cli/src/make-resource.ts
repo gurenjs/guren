@@ -6,11 +6,10 @@ const RESOURCES_DIR = 'app/Http/Resources'
 function resourceTemplate(className: string, modelName: string): string {
   return `import { Resource } from '@guren/core'
 
-export default class ${className} extends Resource<${modelName}> {
+export class ${className} extends Resource<${modelName}> {
   toArray() {
     return {
       id: this.resource.id,
-      // Add your resource fields here
       createdAt: this.resource.createdAt?.toISOString(),
       updatedAt: this.resource.updatedAt?.toISOString(),
     }
