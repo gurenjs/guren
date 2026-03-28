@@ -7,7 +7,6 @@ import type { PageContract, PagePropsRecord } from '@guren/inertia-client'
 export const pageManifest = {
   'Docs/Index': './pages/Docs/Index.tsx',
   'Docs/Show': './pages/Docs/Show.tsx',
-  'Docs/theme': './pages/Docs/theme.ts',
   'Home': './pages/Home.tsx',
 } as const
 
@@ -88,8 +87,7 @@ function defineGeneratedPage<TId extends string, TProps extends PagePropsRecord 
 export const pages = {
   Docs: {
     Index: defineGeneratedPage<'Docs/Index', PagePropsMap['Docs/Index']>('Docs/Index', pageManifest['Docs/Index']),
-    Show: defineGeneratedPage<'Docs/Show', PagePropsMap['Docs/Show']>('Docs/Show', pageManifest['Docs/Show']),
-    theme: defineGeneratedPage('Docs/theme', pageManifest['Docs/theme'])
+    Show: defineGeneratedPage<'Docs/Show', PagePropsMap['Docs/Show']>('Docs/Show', pageManifest['Docs/Show'])
   },
   Home: defineGeneratedPage<'Home', PagePropsMap['Home']>('Home', pageManifest['Home'])
 } as const

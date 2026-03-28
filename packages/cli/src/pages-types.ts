@@ -18,7 +18,6 @@ export interface GeneratePageTypesOptions extends WriterOptions {
 
 const DEFAULT_PAGES_DIR = 'resources/js/pages'
 const DEFAULT_OUTPUT_FILE = '.guren/pages.gen.ts'
-const PAGE_EXTENSIONS = new Set(['.tsx', '.jsx', '.ts', '.js'])
 const PAGE_COMPONENT_EXTENSIONS = new Set(['.tsx', '.jsx'])
 
 export async function generatePageTypes(
@@ -237,7 +236,7 @@ async function collectPageDefinitions(
     }
 
     const extension = extname(entry.name)
-    if (!PAGE_EXTENSIONS.has(extension)) continue
+    if (!PAGE_COMPONENT_EXTENSIONS.has(extension)) continue
 
     const normalized = entryRelativePath.replace(/\\/gu, '/')
     const id = normalized.slice(0, normalized.length - extension.length)

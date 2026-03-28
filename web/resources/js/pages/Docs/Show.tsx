@@ -81,12 +81,27 @@ function buildPrevNext(
   }
 }
 
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/[\s]+/g, '-')
+    .replace(/[^\p{L}\p{N}\-]/gu, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    || `heading-${Math.random().toString(36).slice(2, 8)}`
+}
+
 function useTableOfContents(doc: DocPage | null) {
   const [items, setItems] = useState<TocItem[]>([])
   const [activeId, setActiveId] = useState<string>('')
 
   useEffect(() => {
-    if (!doc) return
+    if (!doc) {
+      setItems([])
+      setActiveId('')
+      return
+    }
 
     const container = document.querySelector('.docs-content')
     if (!container) return
@@ -96,7 +111,7 @@ function useTableOfContents(doc: DocPage | null) {
 
     headings.forEach((heading) => {
       if (!heading.id) {
-        heading.id = heading.textContent?.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') ?? ''
+        heading.id = slugify(heading.textContent ?? '')
       }
       if (heading.id) {
         tocItems.push({
