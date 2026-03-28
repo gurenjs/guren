@@ -1,13 +1,4 @@
-import { test, expect, type Page } from '@playwright/test'
-
-async function login(page: Page) {
-  await page.goto('/login')
-  await page.waitForLoadState('networkidle')
-  await page.getByLabel('Email address').fill('demo@guren.dev')
-  await page.getByLabel('Password').fill('secret')
-  await page.getByRole('button', { name: 'Sign in' }).click()
-  await page.waitForURL('**/dashboard')
-}
+import { test, expect } from '@playwright/test'
 
 test.describe('Inertia SPA Navigation', () => {
   test('navigating between pages uses Inertia (no full reload)', async ({ page }) => {
@@ -56,14 +47,10 @@ test.describe('Pagination', () => {
 })
 
 test.describe('Multi-step User Journey', () => {
-  test('full user journey: login → dashboard → create post → view post', async ({ page }) => {
-    // Login
-    await page.goto('/login')
+  test('dashboard → create post → view post', async ({ page }) => {
+    // Already authenticated via storageState
+    await page.goto('/dashboard')
     await page.waitForLoadState('networkidle')
-    await page.getByLabel('Email address').fill('demo@guren.dev')
-    await page.getByLabel('Password').fill('secret')
-    await page.getByRole('button', { name: 'Sign in' }).click()
-    await page.waitForURL('**/dashboard')
 
     // Navigate to posts
     await page.getByRole('link', { name: 'Posts' }).click()
@@ -87,16 +74,4 @@ test.describe('Multi-step User Journey', () => {
   })
 })
 
-test.describe('Authenticated Route Protection', () => {
-  test('protected routes redirect unauthenticated users', async ({ page }) => {
-    // Try to access protected routes without auth
-    await page.goto('/posts/new')
-    await expect(page).toHaveURL(/\/login/)
-
-    await page.goto('/posts/1/edit')
-    await expect(page).toHaveURL(/\/login/)
-
-    await page.goto('/profile')
-    await expect(page).toHaveURL(/\/login/)
-  })
-})
+// Route protection tests are in auth.spec.ts (requires unauthenticated state)

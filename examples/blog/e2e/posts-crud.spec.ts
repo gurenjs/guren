@@ -1,13 +1,4 @@
-import { test, expect, type Page } from '@playwright/test'
-
-async function login(page: Page) {
-  await page.goto('/login')
-  await page.waitForLoadState('networkidle')
-  await page.getByLabel('Email address').fill('demo@guren.dev')
-  await page.getByLabel('Password').fill('secret')
-  await page.getByRole('button', { name: 'Sign in' }).click()
-  await page.waitForURL('**/dashboard')
-}
+import { test, expect } from '@playwright/test'
 
 test.describe('Posts — public', () => {
   test('posts index renders the list of posts', async ({ page }) => {
@@ -33,10 +24,6 @@ test.describe('Posts — authenticated CRUD', () => {
   test.describe.configure({ mode: 'serial' })
 
   const uniqueTitle = `E2E Test Post ${Date.now()}`
-
-  test.beforeEach(async ({ page }) => {
-    await login(page)
-  })
 
   test('create a new post', async ({ page }) => {
     await page.goto('/posts')

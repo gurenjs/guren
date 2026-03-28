@@ -65,4 +65,15 @@ test.describe('Authentication', () => {
     await expect(page).toHaveURL(/\/login/)
     await expect(page.getByText('Invalid credentials')).toBeVisible({ timeout: 10_000 })
   })
+
+  test('protected routes redirect unauthenticated users', async ({ page }) => {
+    await page.goto('/posts/new')
+    await expect(page).toHaveURL(/\/login/)
+
+    await page.goto('/posts/1/edit')
+    await expect(page).toHaveURL(/\/login/)
+
+    await page.goto('/profile')
+    await expect(page).toHaveURL(/\/login/)
+  })
 })

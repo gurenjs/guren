@@ -5,3 +5,4 @@ node_modules/
 .guren
 test-results/
 playwright-report/
+e2e/.auth/
