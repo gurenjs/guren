@@ -337,37 +337,37 @@ This backlog breaks the roadmap into issue-sized work items that can be mapped d
 
 ### 6-12 month backlog
 
-#### 1.0 readiness
+#### 1.0 readiness — ✅ Done
 
-- Define stable versus experimental API boundaries.
-- Formalize deprecation policy enforcement.
-- Add a breaking-change checklist to release process.
-- Publish maintainer-facing SemVer operations guidance.
+- [x] Define stable versus experimental API boundaries (`contributing/api-stability.md`).
+- [x] Formalize deprecation policy enforcement (`contributing/deprecation-policy.md`).
+- [x] Add a breaking-change checklist to release process (`contributing/breaking-change-checklist.md`).
+- [x] Publish maintainer-facing SemVer operations guidance (`contributing/semver-guidance.md`).
 
-#### Plugin ecosystem
+#### Plugin ecosystem — ✅ Done
 
-- Define a plugin contract.
-- Add a plugin compatibility test harness.
-- Publish an official plugin authoring guide.
-- Define plugin versioning policy.
+- [x] Define a plugin contract (`contributing/plugin-contract.md`).
+- [x] Add a plugin compatibility test harness (`packages/testing/src/plugin-test-utils.ts`).
+- [x] Publish an official plugin authoring guide (`docs/en/guides/plugins.md`, `docs/ja/guides/plugins.md`).
+- [x] Define plugin versioning policy (included in plugin-contract.md).
 
-#### Governance and maintenance
+#### Governance and maintenance — ✅ Done
 
-- Formalize the RFC process.
-- Publish a security policy.
-- Set a release cadence.
-- Define issue triage SLAs.
-- Require regression tests for all bug fixes.
+- [x] Formalize the RFC process (`contributing/rfc-process.md`).
+- [x] Publish a security policy (`SECURITY.md` — already existed).
+- [x] Set a release cadence (`contributing/release-cadence.md`).
+- [x] Define issue triage SLAs (`contributing/issue-triage.md`).
+- [x] Require regression tests for all bug fixes (documented in issue-triage.md).
 
-#### Verified deployment recipes
+#### Verified deployment recipes — ✅ Done
 
-- Keep Docker deployment recipes under continuous verification.
-- Keep Fly.io deployment recipes under continuous verification.
-- Publish and verify VPS deployment recipes.
-- Clarify valid and supported serverless deployment targets.
+- [x] Keep Docker deployment recipes under continuous verification (`examples/deploy/docker/`).
+- [x] Keep Fly.io deployment recipes under continuous verification (`examples/deploy/fly/`).
+- [x] Publish and verify VPS deployment recipes (`examples/deploy/vps/`).
+- [x] Clarify valid and supported serverless deployment targets (`examples/deploy/serverless/`).
 
-#### Dogfooding
+#### Dogfooding — ✅ Done
 
-- Maintain multiple real reference applications on current Guren versions.
-- Verify framework upgrades against reference applications.
-- Turn dogfooding feedback into a recurring product-quality input.
+- [x] Maintain multiple real reference applications on current Guren versions (`contributing/dogfooding.md`).
+- [x] Verify framework upgrades against reference applications (documented in dogfooding.md).
+- [x] Turn dogfooding feedback into a recurring product-quality input (documented in dogfooding.md).

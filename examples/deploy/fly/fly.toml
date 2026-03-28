@@ -1,0 +1,17 @@
+app = "my-guren-app"
+primary_region = "nrt"
+
+[build]
+  dockerfile = "../docker/Dockerfile"
+
+[http_service]
+  internal_port = 3333
+  force_https = true
+
+  [[http_service.checks]]
+    path = "/health"
+    interval = "30s"
+    timeout = "5s"
+
+[env]
+  APP_ENV = "production"
