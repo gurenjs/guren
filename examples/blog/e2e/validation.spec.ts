@@ -10,18 +10,24 @@ async function login(page: Page) {
 }
 
 test.describe('Validation errors', () => {
+  test.describe.configure({ mode: 'serial' })
+
   test.beforeEach(async ({ page }) => {
     await login(page)
   })
 
   test('submitting an empty post form shows validation errors', async ({ page }) => {
+    test.slow() // Inertia XHR round-trip can be slow in CI
     await page.goto('/posts/new')
     await page.waitForLoadState('networkidle')
     await expect(page.getByRole('heading', { name: 'New Post' })).toBeVisible()
 
     // Submit the form — Inertia sends XHR, server returns validation errors
     await page.getByRole('button', { name: 'Create Post' }).click()
+
+    // Wait for Inertia to process the 422 response and re-render with errors
     await page.waitForLoadState('networkidle')
+    await page.waitForTimeout(1000)
 
     await expect(page.getByText('Title is required.')).toBeVisible()
     await expect(page.getByText('Excerpt is required.')).toBeVisible()
@@ -29,13 +35,16 @@ test.describe('Validation errors', () => {
   })
 
   test('submitting a partially filled post form shows remaining errors', async ({ page }) => {
+    test.slow()
     await page.goto('/posts/new')
     await page.waitForLoadState('networkidle')
 
     // Fill only the title
     await page.getByLabel('Title').fill('Partial Post')
     await page.getByRole('button', { name: 'Create Post' }).click()
+
     await page.waitForLoadState('networkidle')
+    await page.waitForTimeout(1000)
 
     await expect(page.getByText('Excerpt is required.')).toBeVisible()
 
