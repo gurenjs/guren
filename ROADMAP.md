@@ -301,12 +301,12 @@ This backlog breaks the roadmap into issue-sized work items that can be mapped d
 - [x] Add nightly docs walkthrough verification (audit:docs in nightly).
 - [x] Define triage rules for canary failures (`contributing/canary-triage-rules.md`).
 
-#### Starter kits — In progress
+#### Starter kits — ✅ Done
 
 - [x] Ship an official API-only starter (`--blueprint api`).
-- [ ] Ship a SaaS-style starter.
 - [x] Ship a worker-heavy starter (`--blueprint worker` with queue/events/cache/schedule).
 - [x] Add smoke coverage for each official starter (`smoke:starter:api`, `smoke:starter:worker`).
+- SaaS-style starter deferred to post-1.0 (requires Stripe/multi-tenant support not yet in framework).
 
 ### 90-day backlog
 
