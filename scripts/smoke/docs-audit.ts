@@ -118,6 +118,25 @@ async function auditEnglishDocs(root: string): Promise<void> {
   assert(csrf.includes('pages.forms.Create'), 'CSRF guide must use typed page definitions in controller examples.')
   assert(!csrf.includes('Route.post('), 'CSRF guide must not use legacy Route.post() examples.')
 
+  // Task-completion guides
+  const buildAuthApp = await read(root, 'docs/en/guides/build-auth-app.md')
+  assert(buildAuthApp.includes('bunx create-guren-app'), 'Build auth app guide must include project scaffolding.')
+  assert(buildAuthApp.includes('bunx guren add auth'), 'Build auth app guide must include auth scaffold command.')
+  assert(buildAuthApp.includes('bun run codegen'), 'Build auth app guide must include codegen step.')
+
+  const shipApi = await read(root, 'docs/en/guides/ship-api.md')
+  assert(shipApi.includes('--blueprint api'), 'Ship API guide must reference the api blueprint.')
+  assert(shipApi.includes('bun run codegen'), 'Ship API guide must include codegen step.')
+
+  const deployProduction = await read(root, 'docs/en/guides/deploy-production.md')
+  assert(deployProduction.includes('bun run build'), 'Deploy guide must include the build command.')
+  assert(deployProduction.includes('bun run typecheck'), 'Deploy guide must include typecheck in pre-deploy.')
+  assert(deployProduction.includes('/health'), 'Deploy guide must reference health check endpoint.')
+
+  const troubleshoot = await read(root, 'docs/en/guides/troubleshoot.md')
+  assert(troubleshoot.includes('bunx guren doctor'), 'Troubleshoot guide must reference the doctor command.')
+  assert(troubleshoot.includes('bun run codegen'), 'Troubleshoot guide must include codegen as a fix.')
+
 }
 
 async function auditJapaneseDocs(root: string): Promise<void> {
@@ -217,6 +236,21 @@ async function auditJapaneseDocs(root: string): Promise<void> {
   const csrf = await read(root, 'docs/ja/guides/csrf.md')
   assert(csrf.includes('pages.forms.Create'), 'Japanese CSRF guide must use typed page definitions in controller examples.')
   assert(!csrf.includes('Route.post('), 'Japanese CSRF guide must not use legacy Route.post() examples.')
+
+  // Task-completion guides
+  const jaBuildAuthApp = await read(root, 'docs/ja/guides/build-auth-app.md')
+  assert(jaBuildAuthApp.includes('bunx create-guren-app'), 'Japanese build auth app guide must include project scaffolding.')
+  assert(jaBuildAuthApp.includes('bunx guren add auth'), 'Japanese build auth app guide must include auth scaffold command.')
+
+  const jaShipApi = await read(root, 'docs/ja/guides/ship-api.md')
+  assert(jaShipApi.includes('--blueprint api'), 'Japanese ship API guide must reference the api blueprint.')
+
+  const jaDeployProduction = await read(root, 'docs/ja/guides/deploy-production.md')
+  assert(jaDeployProduction.includes('bun run build'), 'Japanese deploy guide must include the build command.')
+  assert(jaDeployProduction.includes('/health'), 'Japanese deploy guide must reference health check endpoint.')
+
+  const jaTroubleshoot = await read(root, 'docs/ja/guides/troubleshoot.md')
+  assert(jaTroubleshoot.includes('bunx guren doctor'), 'Japanese troubleshoot guide must reference the doctor command.')
 
 }
 

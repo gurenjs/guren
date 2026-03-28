@@ -317,14 +317,14 @@ This backlog breaks the roadmap into issue-sized work items that can be mapped d
 - [x] Add a "Deploy to production" guide (en/ja).
 - [x] Add a "Troubleshoot a broken setup" guide (en/ja).
 - [x] Reorganize docs IA around task completion (DocsService order updated).
-- [ ] Add CI verification for documented walkthroughs.
+- [x] Add CI verification for documented walkthroughs (docs-audit.ts assertions).
 
 #### Production defaults — ✅ Done
 
 - [x] Enable request IDs by default (`requestIdMiddleware`).
 - [x] Standardize structured logging defaults (`requestLoggingMiddleware` with JSON output).
 - [x] Strengthen production health-check defaults (default `/health` in starter template).
-- [ ] Improve queue failure visibility defaults.
+- [x] Improve queue failure visibility defaults (FailedJobReporter, structured log output in Worker).
 - [x] Improve default error pages and exception rendering (HTML error pages for browsers, Error.tsx for Inertia, React ErrorBoundary).
 
 #### Benchmarks and regression tracking — ✅ Done

@@ -29,6 +29,13 @@ export { SqsDriver, createSqsAdapter, type SqsDriverOptions, type SqsAdapter } f
 // Worker
 export { Worker, processJob, type WorkerEvents } from './Worker'
 
+// Failed job reporter
+export {
+  FailedJobReporter,
+  type FailedJobInfo,
+  type FailedJobHandler,
+} from './FailedJobReporter'
+
 // Manager
 export {
   QueueManager,

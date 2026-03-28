@@ -143,13 +143,16 @@ jobs:
       - name: Build packages
         run: bun run build
 
+      - name: Generate route types
+        run: bun run build:routes
+
       - name: Install Playwright browsers
         run: cd examples/blog && bunx playwright install --with-deps chromium
 
       - name: Run migrations and seed
         run: |
-          bun run db:migrate
-          bun run db:seed --force
+          bun run --cwd examples/blog db:migrate
+          bun run --cwd examples/blog db:seed --force
 
       - name: Run E2E tests
         run: bun run --cwd examples/blog e2e

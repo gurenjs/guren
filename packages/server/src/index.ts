@@ -324,6 +324,7 @@ export {
   clearJobRegistry,
   createQueueManager,
   processJob,
+  FailedJobReporter,
 } from './queue'
 export type {
   QueuedJob,
@@ -338,6 +339,8 @@ export type {
   QueueConfig,
   QueueDriverFactory,
   RedisDriverOptions,
+  FailedJobInfo,
+  FailedJobHandler,
 } from './queue'
 // Mail
 export {

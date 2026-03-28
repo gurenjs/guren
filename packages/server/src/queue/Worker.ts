@@ -214,6 +214,18 @@ export class Worker {
       }
     }
 
+    // Structured log so failures are visible even without custom event listeners
+    console.error(JSON.stringify({
+      level: 'error',
+      msg: `Job failed: ${job.name}`,
+      job: job.name,
+      queue: job.queue ?? 'default',
+      attempt: job.attempts,
+      maxAttempts: job.maxAttempts,
+      willRetry,
+      error: error.message,
+    }))
+
     this.events.jobFailed?.(job, error, willRetry)
   }
 
