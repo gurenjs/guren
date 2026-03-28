@@ -180,7 +180,7 @@ export function autoConfigureInertiaAssets(app: Application, options: AutoConfig
     const devServerUrl = options.devServerUrl ?? process.env.VITE_DEV_SERVER_URL ?? 'http://localhost:5173'
     const normalizedDevServerUrl = normalizeDevServerUrl(devServerUrl)
     setEnvIfUserDidNotProvide('GUREN_INERTIA_ENTRY', `${normalizedDevServerUrl}/resources/js/dev-entry.ts`)
-    setEnvIfUserDidNotProvide('GUREN_INERTIA_STYLES', DEFAULT_DEV_STYLES_ENTRY)
+    setEnvIfUserDidNotProvide('GUREN_INERTIA_STYLES', options.stylesEntry ?? DEFAULT_DEV_STYLES_ENTRY)
     importMapEntries['@guren/inertia-client'] = DEFAULT_VENDOR_CLIENT_PATH
 
     if (ssrEnabled) {
