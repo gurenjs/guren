@@ -53,6 +53,11 @@ async function resolveRenderingMode(flagValue: unknown): Promise<RenderingMode> 
     return normalized as RenderingMode
   }
 
+  // In non-interactive environments (CI, piped stdin), default to SSR
+  if (!process.stdin.isTTY) {
+    return 'ssr'
+  }
+
   const result = await consola.prompt('Choose the rendering mode for this project', {
     type: 'select',
     options: [

@@ -47,8 +47,7 @@ export class AuthServiceProvider extends ServiceProvider {
       }
     }
 
-    // Auth context is now attached by Application constructor.
-    // No need to re-attach here.
+    app.use('*', attachAuthContext((ctx) => auth.createAuthContext(ctx)))
   }
 }
 

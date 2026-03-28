@@ -207,10 +207,9 @@ export class Application {
       this.authManager.setDefaultGuard('web')
     }
 
-    // Always attach auth context middleware.
-    this.hono.use('*', attachAuthContext((ctx) => this.authManager.createAuthContext(ctx)))
-
-    // AuthServiceProvider (session + CSRF) is only registered when options.auth is set.
+    // AuthServiceProvider (session + CSRF + auth context) is registered
+    // when options.auth is set. For apps that manually wire sessions,
+    // auth context is attached as a fallback in boot().
     if (this.options.auth) {
       this.providerManager.register(AuthServiceProvider)
     }
@@ -263,6 +262,13 @@ export class Application {
   async boot(): Promise<void> {
     this.mountSecurityDefaults()
     await this.providerManager.registerAll()
+
+    // If no AuthServiceProvider was registered (no options.auth), attach
+    // auth context as a fallback so manual session + requireAuthenticated works.
+    if (!this.options.auth) {
+      this.hono.use('*', attachAuthContext((ctx) => this.authManager.createAuthContext(ctx)))
+    }
+
     await this.options.boot?.(this.hono)
     await this.mountRoutes()
     await this.mountMcpEndpoint()
