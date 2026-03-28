@@ -3,12 +3,26 @@ import { Router, type RouteDefinition } from '@guren/core'
 
 type RouteRegistrar = (router: Router) => void | Promise<void>
 
-const REGISTRAR_EXPORTS = ['registerRoutes', 'registerWebRoutes', 'default'] as const
+const REGISTRAR_EXPORTS = [
+  'registerRoutes',
+  'registerWebRoutes',
+  'registerApiRoutes',
+  'registerAuthRoutes',
+  'default',
+] as const
+
+const REGISTRAR_PATTERN = /^register\w*Routes$/u
 
 function resolveRegistrar(moduleExports: Record<string, unknown>): RouteRegistrar | undefined {
   for (const name of REGISTRAR_EXPORTS) {
     const candidate = moduleExports[name]
     if (typeof candidate === 'function') {
+      return candidate as RouteRegistrar
+    }
+  }
+
+  for (const [name, candidate] of Object.entries(moduleExports)) {
+    if (REGISTRAR_PATTERN.test(name) && typeof candidate === 'function') {
       return candidate as RouteRegistrar
     }
   }
@@ -28,7 +42,7 @@ export async function loadRouteDefinitions(routesFile: string): Promise<RouteDef
 
   if (!registrar) {
     throw new Error(
-      `No route registrar export found in ${routesFile}. Export registerRoutes, registerWebRoutes, or default (router) => void.`,
+      `No route registrar export found in ${routesFile}. Export a register*Routes function (e.g. registerRoutes, registerWebRoutes, registerApiRoutes) or a default (router) => void.`,
     )
   }
 

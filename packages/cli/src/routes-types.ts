@@ -159,17 +159,40 @@ function renderHelperTree(node: HelperTreeNode, depth: number): string {
   return `{\n${entries.join(',\n')}\n${'  '.repeat(depth - 1)}}`
 }
 
+const VALID_JS_IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/u
+
+function quoteKey(segment: string): string {
+  return VALID_JS_IDENTIFIER.test(segment) ? segment : `'${escapeSingleQuotes(segment)}'`
+}
+
 function renderHelperNode(segment: string, node: HelperTreeNode, depth: number): string {
+  const key = quoteKey(segment)
+
   if (node.route && node.children.size === 0) {
     const params = extractParamNames(node.route.path)
     if (params.length === 0) {
-      return `${segment}: (query?: RouteQuery) => route('${node.route.name}', query)`
+      return `${key}: (query?: RouteQuery) => route('${node.route.name}', query)`
     }
 
-    return `${segment}: (params: RouteParams<'${node.route.name}'>, query?: RouteQuery) => route('${node.route.name}', params, query)`
+    return `${key}: (params: RouteParams<'${node.route.name}'>, query?: RouteQuery) => route('${node.route.name}', params, query)`
   }
 
-  return `${segment}: ${renderHelperTree(node, depth)}`
+  if (node.route && node.children.size > 0) {
+    const params = extractParamNames(node.route.path)
+    const selfFn = params.length === 0
+      ? `(query?: RouteQuery) => route('${node.route.name}', query)`
+      : `(params: RouteParams<'${node.route.name}'>, query?: RouteQuery) => route('${node.route.name}', params, query)`
+
+    const indentation = '  '.repeat(depth)
+    const childEntries = Array.from(node.children.entries()).map(([childSegment, child]) => {
+      const renderedChild = renderHelperNode(childSegment, child, depth + 1)
+      return `${indentation}${renderedChild}`
+    })
+
+    return `${key}: Object.assign(\n${indentation}${selfFn},\n${indentation}${`{\n${childEntries.join(',\n')}\n${'  '.repeat(depth - 1)}}`}\n${'  '.repeat(depth - 1)})`
+  }
+
+  return `${key}: ${renderHelperTree(node, depth)}`
 }
 
 function extractParamNames(path: string): string[] {
