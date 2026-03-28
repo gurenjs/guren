@@ -17,8 +17,8 @@ export interface RedisPasswordResetStoreOptions {
  * Redis-backed password reset token store.
  *
  * Uses the following key structure:
- * - `pwreset:{hashedToken}` - Token data (JSON with email and expiresAt)
- * - `pwreset:email:{email}` - Set of hashed tokens for an email
+ * - `pwreset:{tokenId}` - Token data (JSON with email and expiresAt)
+ * - `pwreset:email:{email}` - Set of token IDs for an email
  *
  * @example
  * ```ts
@@ -43,8 +43,8 @@ export class RedisPasswordResetStore implements PasswordResetTokenStore {
   /**
    * Store a password reset token.
    */
-  async store(tokenHash: string, email: string, expiresAt: Date): Promise<void> {
-    const tokenKey = `${this.prefix}${tokenHash}`
+  async store(tokenId: string, email: string, expiresAt: Date): Promise<void> {
+    const tokenKey = `${this.prefix}${tokenId}`
     const emailKey = `${this.prefix}email:${email.toLowerCase()}`
     const ttlMs = Math.max(0, expiresAt.getTime() - Date.now())
 
@@ -56,7 +56,7 @@ export class RedisPasswordResetStore implements PasswordResetTokenStore {
 
     const pipeline = this.redis.pipeline()
     pipeline.psetex(tokenKey, ttlMs, data)
-    pipeline.sadd(emailKey, tokenHash)
+    pipeline.sadd(emailKey, tokenId)
     pipeline.pexpire(emailKey, ttlMs + 60000) // Add buffer to email set expiration
     await pipeline.exec()
   }
@@ -64,8 +64,8 @@ export class RedisPasswordResetStore implements PasswordResetTokenStore {
   /**
    * Find a token by its hash.
    */
-  async find(tokenHash: string): Promise<{ email: string; expiresAt: Date } | null> {
-    const tokenKey = `${this.prefix}${tokenHash}`
+  async find(tokenId: string): Promise<{ email: string; expiresAt: Date } | null> {
+    const tokenKey = `${this.prefix}${tokenId}`
     const data = await this.redis.get(tokenKey)
 
     if (!data) {
@@ -86,15 +86,15 @@ export class RedisPasswordResetStore implements PasswordResetTokenStore {
   /**
    * Delete a token by its hash.
    */
-  async delete(tokenHash: string): Promise<void> {
-    const tokenKey = `${this.prefix}${tokenHash}`
+  async delete(tokenId: string): Promise<void> {
+    const tokenKey = `${this.prefix}${tokenId}`
     const data = await this.redis.get(tokenKey)
 
     if (data) {
       try {
         const parsed = JSON.parse(data) as { email: string }
         const emailKey = `${this.prefix}email:${parsed.email.toLowerCase()}`
-        await this.redis.srem(emailKey, tokenHash)
+        await this.redis.srem(emailKey, tokenId)
       } catch {
         // Ignore parse errors
       }
@@ -108,10 +108,10 @@ export class RedisPasswordResetStore implements PasswordResetTokenStore {
    */
   async deleteForEmail(email: string): Promise<void> {
     const emailKey = `${this.prefix}email:${email.toLowerCase()}`
-    const tokenHashes = await this.redis.smembers(emailKey)
+    const tokenIds = await this.redis.smembers(emailKey)
 
-    if (tokenHashes.length > 0) {
-      const tokenKeys = tokenHashes.map((hash) => `${this.prefix}${hash}`)
+    if (tokenIds.length > 0) {
+      const tokenKeys = tokenIds.map((tokenId) => `${this.prefix}${tokenId}`)
       await this.redis.del(...tokenKeys, emailKey)
     } else {
       await this.redis.del(emailKey)

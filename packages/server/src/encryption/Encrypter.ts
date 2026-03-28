@@ -1,5 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes, createHmac } from 'crypto'
 import type { EncrypterConfig, EncryptOptions, DecryptOptions, EncryptedPayload } from './types'
+import { generateAppKey, normalizeAppKey } from './app-key'
 
 /**
  * Encrypter for secure data encryption using AES.
@@ -20,6 +21,7 @@ export class Encrypter {
    * Encryption key.
    */
   protected key: Buffer
+  protected previousKeys: Buffer[]
 
   /**
    * Cipher algorithm.
@@ -27,12 +29,11 @@ export class Encrypter {
   protected cipher: 'aes-256-gcm' | 'aes-256-cbc'
 
   constructor(config: EncrypterConfig) {
-    this.key = Buffer.from(config.key, 'base64')
+    this.key = Buffer.from(normalizeAppKey(config.key).slice('base64:'.length), 'base64')
+    this.previousKeys = (config.previousKeys ?? []).map((key) =>
+      Buffer.from(normalizeAppKey(key).slice('base64:'.length), 'base64'),
+    )
     this.cipher = config.cipher ?? 'aes-256-gcm'
-
-    if (this.key.length !== 32) {
-      throw new Error('Encryption key must be 32 bytes (256 bits).')
-    }
   }
 
   /**
@@ -123,19 +124,21 @@ export class Encrypter {
    * Decrypt using AES-256-GCM.
    */
   protected decryptGcm(payload: EncryptedPayload): string {
-    const iv = Buffer.from(payload.iv, 'base64')
-    const encrypted = Buffer.from(payload.value, 'base64')
-    const tag = Buffer.from(payload.tag!, 'base64')
+    return this.tryDecryptWithKeys((key) => {
+      const iv = Buffer.from(payload.iv, 'base64')
+      const encrypted = Buffer.from(payload.value, 'base64')
+      const tag = Buffer.from(payload.tag!, 'base64')
 
-    const decipher = createDecipheriv('aes-256-gcm', this.key, iv)
-    decipher.setAuthTag(tag)
+      const decipher = createDecipheriv('aes-256-gcm', key, iv)
+      decipher.setAuthTag(tag)
 
-    const decrypted = Buffer.concat([
-      decipher.update(encrypted),
-      decipher.final(),
-    ])
+      const decrypted = Buffer.concat([
+        decipher.update(encrypted),
+        decipher.final(),
+      ])
 
-    return decrypted.toString('utf8')
+      return decrypted.toString('utf8')
+    })
   }
 
   /**
@@ -165,29 +168,30 @@ export class Encrypter {
    * Decrypt using AES-256-CBC with HMAC verification.
    */
   protected decryptCbc(payload: EncryptedPayload): string {
-    const iv = Buffer.from(payload.iv, 'base64')
-    const encrypted = Buffer.from(payload.value, 'base64')
+    return this.tryDecryptWithKeys((key) => {
+      const iv = Buffer.from(payload.iv, 'base64')
+      const encrypted = Buffer.from(payload.value, 'base64')
 
-    // Verify MAC
-    const expectedMac = this.createMac(iv, encrypted)
-    if (!this.secureCompare(payload.mac!, expectedMac)) {
-      throw new Error('MAC verification failed.')
-    }
+      const expectedMac = this.createMac(iv, encrypted, key)
+      if (!this.secureCompare(payload.mac!, expectedMac)) {
+        throw new Error('MAC verification failed.')
+      }
 
-    const decipher = createDecipheriv('aes-256-cbc', this.key, iv)
-    const decrypted = Buffer.concat([
-      decipher.update(encrypted),
-      decipher.final(),
-    ])
+      const decipher = createDecipheriv('aes-256-cbc', key, iv)
+      const decrypted = Buffer.concat([
+        decipher.update(encrypted),
+        decipher.final(),
+      ])
 
-    return decrypted.toString('utf8')
+      return decrypted.toString('utf8')
+    })
   }
 
   /**
    * Create HMAC for CBC mode.
    */
-  protected createMac(iv: Buffer, encrypted: Buffer): string {
-    const hmac = createHmac('sha256', this.key)
+  protected createMac(iv: Buffer, encrypted: Buffer, key: Buffer = this.key): string {
+    const hmac = createHmac('sha256', key)
     hmac.update(iv)
     hmac.update(encrypted)
     return hmac.digest('hex')
@@ -215,13 +219,28 @@ export class Encrypter {
   getKey(): string {
     return this.key.toString('base64')
   }
+
+  protected tryDecryptWithKeys(run: (key: Buffer) => string): string {
+    const keys = [this.key, ...this.previousKeys]
+    let lastError: Error | undefined
+
+    for (const key of keys) {
+      try {
+        return run(key)
+      } catch (error) {
+        lastError = error as Error
+      }
+    }
+
+    throw lastError ?? new Error('Failed to decrypt payload.')
+  }
 }
 
 /**
  * Generate a random encryption key.
  */
 export function generateKey(): string {
-  return randomBytes(32).toString('base64')
+  return generateAppKey()
 }
 
 // Global encrypter instance

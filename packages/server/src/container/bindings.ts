@@ -9,6 +9,7 @@ import type { I18nManager } from '../i18n'
 import type { NotificationManager } from '../notifications'
 import type { BroadcastManager } from '../broadcasting'
 import type { Encrypter } from '../encryption'
+import type { AppKeyring } from '../encryption/app-key'
 import type { AuthManager } from '../auth/AuthManager'
 import type { OAuthManager } from '../auth/oauth'
 import type { StorageManager } from '../storage'
@@ -41,6 +42,7 @@ export interface ServiceBindings {
   notifications: NotificationManager
   broadcast: BroadcastManager
   encrypter: Encrypter
+  'app.keyring': AppKeyring
   auth: AuthManager
   oauth: OAuthManager
   storage: StorageManager

@@ -6,6 +6,11 @@ import {
   MemorySessionStore,
 } from '../../../src/http/middleware/session'
 
+const APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+
+process.env.APP_KEY = APP_KEY
+delete process.env.APP_PREVIOUS_KEYS
+
 describe('MemorySessionStore', () => {
   it('reads and writes session data', async () => {
     const store = new MemorySessionStore()
@@ -122,6 +127,42 @@ describe('createSessionMiddleware', () => {
     const body = await res2.json()
     expect(body).toEqual({ visited: true })
     expect(isNew).toBe(false)
+  })
+
+  it('creates a new session when cookie signature is tampered', async () => {
+    const store = new MemorySessionStore()
+    const app = createTestApp({ store })
+
+    app.get('/set', (c) => {
+      const session = getSessionFromContext(c)
+      session?.set('visited', true)
+      return c.text('ok')
+    })
+
+    app.get('/check', (c) => c.json(getSessionFromContext(c)?.all() ?? {}))
+
+    const res1 = await app.request('/set')
+    const cookie = res1.headers.get('set-cookie')?.split(';')[0] ?? ''
+    const tampered = `${cookie}x`
+
+    const res2 = await app.request('/check', {
+      headers: { Cookie: tampered },
+    })
+
+    expect(await res2.json()).toEqual({})
+  })
+
+  it('creates a new session when receiving an unsigned legacy cookie', async () => {
+    const store = new MemorySessionStore()
+    const app = createTestApp({ store })
+
+    app.get('/check', (c) => c.json({ isNew: getSessionFromContext(c)?.isNew }))
+
+    const res = await app.request('/check', {
+      headers: { Cookie: 'guren.session=legacy-session-id' },
+    })
+
+    expect(await res.json()).toEqual({ isNew: true })
   })
 
   it('allows session.get and session.set', async () => {

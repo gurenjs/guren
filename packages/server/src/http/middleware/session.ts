@@ -1,11 +1,23 @@
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie'
+import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { MiddlewareHandler } from 'hono'
+import { deriveAppKeyring, getAppKeyringFromEnv } from '../../encryption/app-key'
 
 export type SessionData = Record<string, unknown>
 
 export interface SessionStore {
+  /**
+   * Read a session by its opaque identifier.
+   * Returns undefined when the session does not exist or has expired.
+   */
   read(id: string): Promise<SessionData | undefined>
+  /**
+   * Persist a session using upsert semantics for the given opaque identifier.
+   */
   write(id: string, data: SessionData, ttlSeconds: number): Promise<void>
+  /**
+   * Destroy a session. Implementations must treat repeated calls as safe.
+   */
   destroy(id: string): Promise<void>
 }
 
@@ -219,6 +231,69 @@ class SessionImpl implements Session {
 
 export interface CreateSessionMiddlewareOptions extends SessionOptions {}
 
+interface SessionCookieSigner {
+  sign(sessionId: string): string
+  verify(cookieValue: string | undefined): string | null
+}
+
+function encodeBase64Url(value: string): string {
+  return Buffer.from(value, 'utf8').toString('base64url')
+}
+
+function decodeBase64Url(value: string): string {
+  return Buffer.from(value, 'base64url').toString('utf8')
+}
+
+function createCookieSigner(cookieName: string, cookiePath: string): SessionCookieSigner {
+  const keyring = deriveAppKeyring(getAppKeyringFromEnv(), 'cookie-signing')
+  const keys = [keyring.current, ...keyring.previous]
+
+  const canonicalize = (encodedId: string): string => `${cookieName}|${cookiePath}|${encodedId}`
+
+  const sign = (sessionId: string): string => {
+    const encodedId = encodeBase64Url(sessionId)
+    const signature = createHmac('sha256', keyring.current)
+      .update(canonicalize(encodedId))
+      .digest('base64url')
+    return `${encodedId}.${signature}`
+  }
+
+  const verify = (cookieValue: string | undefined): string | null => {
+    if (!cookieValue) {
+      return null
+    }
+
+    const [encodedId, signature, extra] = cookieValue.split('.')
+    if (!encodedId || !signature || extra) {
+      return null
+    }
+
+    const canonical = canonicalize(encodedId)
+    const matches = keys.some((key) => {
+      const expected = createHmac('sha256', key).update(canonical).digest('base64url')
+      const actualBuffer = Buffer.from(signature, 'utf8')
+      const expectedBuffer = Buffer.from(expected, 'utf8')
+      if (actualBuffer.length !== expectedBuffer.length) {
+        return false
+      }
+
+      return timingSafeEqual(actualBuffer, expectedBuffer)
+    })
+
+    if (!matches) {
+      return null
+    }
+
+    try {
+      return decodeBase64Url(encodedId)
+    } catch {
+      return null
+    }
+  }
+
+  return { sign, verify }
+}
+
 export function createSessionMiddleware(options: CreateSessionMiddlewareOptions = {}): MiddlewareHandler {
   const {
     cookieName = DEFAULT_COOKIE_NAME,
@@ -231,9 +306,10 @@ export function createSessionMiddleware(options: CreateSessionMiddlewareOptions 
     ttlSeconds = DEFAULT_TTL_SECONDS,
     store = new MemorySessionStore(),
   } = options
+  const signer = createCookieSigner(cookieName, cookiePath)
 
   return async (ctx, next) => {
-    const existingId = getCookie(ctx, cookieName)
+    const existingId = signer.verify(getCookie(ctx, cookieName))
     const sessionId = existingId ?? globalThis.crypto.randomUUID()
     const isNew = !existingId
     const initialData = existingId ? (await store.read(existingId)) ?? {} : {}
@@ -261,7 +337,7 @@ export function createSessionMiddleware(options: CreateSessionMiddlewareOptions 
         if (existingId) {
           await store.write(existingId, session.snapshot(), ttlSeconds)
 
-          setCookie(ctx, cookieName, existingId, {
+          setCookie(ctx, cookieName, signer.sign(existingId), {
             path: cookiePath,
             domain: cookieDomain,
             secure: cookieSecure,
@@ -275,8 +351,11 @@ export function createSessionMiddleware(options: CreateSessionMiddlewareOptions 
 
       const nextId = session.id
       await store.write(nextId, session.snapshot(), ttlSeconds)
+      if (session.wasRegenerated() && session.originalSessionId() !== nextId) {
+        await store.destroy(session.originalSessionId())
+      }
 
-      setCookie(ctx, cookieName, nextId, {
+      setCookie(ctx, cookieName, signer.sign(nextId), {
         path: cookiePath,
         domain: cookieDomain,
         secure: cookieSecure,

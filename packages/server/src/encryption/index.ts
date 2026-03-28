@@ -18,6 +18,25 @@ export {
   encrypt,
   decrypt,
 } from './Encrypter'
+export {
+  generateAppKey,
+  normalizeAppKey,
+  parseAppKey,
+  parsePreviousAppKeys,
+  getAppKeyringFromEnv,
+  deriveAppKey,
+  deriveAppKeyring,
+  encodeDerivedKey,
+} from './app-key'
+export type { AppKeyring } from './app-key'
+export { MessageSigner } from './MessageSigner'
+export type {
+  SignedMessageClaims,
+  SignMessageOptions,
+  VerifySignedMessageOptions,
+} from './MessageSigner'
+export { signUrl, verifySignedUrl } from './signed-url'
+export type { SignedUrlOptions, VerifySignedUrlOptions } from './signed-url'
 
 export {
   hash,

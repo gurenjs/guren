@@ -28,6 +28,11 @@ export interface EncrypterConfig {
   key: string
 
   /**
+   * Previous encryption keys used for decryption fallback during key rotation.
+   */
+  previousKeys?: string[]
+
+  /**
    * Encryption cipher to use.
    */
   cipher?: 'aes-256-gcm' | 'aes-256-cbc'

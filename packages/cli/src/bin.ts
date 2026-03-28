@@ -51,6 +51,7 @@ import { displayContext } from './context'
 import { runCheck, renderCheckReport } from './check'
 import { generateGuidelines } from './guidelines'
 import { makeFeature, parseFieldsString } from './make-feature'
+import { generateKeyValue, writeKeyToEnv } from './key-generate'
 
 type ForceableArgs = { force?: boolean }
 
@@ -1490,6 +1491,30 @@ const doctorCommand = defineCommand({
   },
 })
 
+const keyGenerateCommand = defineCommand({
+  meta: {
+    name: 'key:generate',
+    description: 'Generate a canonical APP_KEY value.',
+  },
+  args: {
+    write: {
+      type: 'boolean',
+      description: 'Write the generated APP_KEY to .env in the current workspace.',
+    },
+  },
+  async run({ args }) {
+    const key = generateKeyValue()
+
+    if (args.write) {
+      await writeKeyToEnv(process.cwd(), key)
+      consola.success('APP_KEY written to .env')
+      return
+    }
+
+    consola.log(key)
+  },
+})
+
 // --- AI Agent Commands ---
 
 const modelListCommand = defineCommand({
@@ -2088,6 +2113,7 @@ const main = defineCommand({
     'make:lang': makeLangCommand,
     add: addCommand,
     doctor: doctorCommand,
+    'key:generate': keyGenerateCommand,
     new: newCommand,
     upgrade: upgradeCommand,
     deploy: deployCommand,

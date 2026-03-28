@@ -10,6 +10,9 @@ import {
   MemoryEmailVerificationStore,
 } from '../../src/auth/email-verification'
 
+process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+delete process.env.APP_PREVIOUS_KEYS
+
 describe('MemoryEmailVerificationStore', () => {
   let store: MemoryEmailVerificationStore
 
@@ -20,33 +23,33 @@ describe('MemoryEmailVerificationStore', () => {
   it('stores and retrieves tokens', async () => {
     const token = {
       email: 'test@example.com',
-      hashedToken: 'hashed-token',
+      tokenId: 'hashed-token',
       expiresAt: new Date(Date.now() + 3600000),
       createdAt: new Date(),
     }
 
     await store.store(token)
-    const found = await store.findByHashedToken('hashed-token')
+    const found = await store.findByTokenId('hashed-token')
 
     expect(found).toEqual(token)
   })
 
   it('returns null for non-existent tokens', async () => {
-    const found = await store.findByHashedToken('non-existent')
+    const found = await store.findByTokenId('non-existent')
     expect(found).toBeNull()
   })
 
   it('deletes tokens by hashed token', async () => {
     const token = {
       email: 'test@example.com',
-      hashedToken: 'hashed-token',
+      tokenId: 'hashed-token',
       expiresAt: new Date(Date.now() + 3600000),
       createdAt: new Date(),
     }
 
     await store.store(token)
     await store.delete('hashed-token')
-    const found = await store.findByHashedToken('hashed-token')
+    const found = await store.findByTokenId('hashed-token')
 
     expect(found).toBeNull()
   })
@@ -54,28 +57,28 @@ describe('MemoryEmailVerificationStore', () => {
   it('deletes all tokens for an email', async () => {
     await store.store({
       email: 'user@example.com',
-      hashedToken: 'hash1',
+      tokenId: 'hash1',
       expiresAt: new Date(Date.now() + 3600000),
       createdAt: new Date(),
     })
     await store.store({
       email: 'user@example.com',
-      hashedToken: 'hash2',
+      tokenId: 'hash2',
       expiresAt: new Date(Date.now() + 3600000),
       createdAt: new Date(),
     })
     await store.store({
       email: 'other@example.com',
-      hashedToken: 'hash3',
+      tokenId: 'hash3',
       expiresAt: new Date(Date.now() + 3600000),
       createdAt: new Date(),
     })
 
     await store.deleteForEmail('user@example.com')
 
-    expect(await store.findByHashedToken('hash1')).toBeNull()
-    expect(await store.findByHashedToken('hash2')).toBeNull()
-    expect(await store.findByHashedToken('hash3')).not.toBeNull()
+    expect(await store.findByTokenId('hash1')).toBeNull()
+    expect(await store.findByTokenId('hash2')).toBeNull()
+    expect(await store.findByTokenId('hash3')).not.toBeNull()
   })
 
   it('clears all tokens', () => {
@@ -88,7 +91,7 @@ describe('MemoryEmailVerificationStore', () => {
 
     await store.store({
       email: 'test@example.com',
-      hashedToken: 'hash',
+      tokenId: 'hash',
       expiresAt: new Date(),
       createdAt: new Date(),
     })
@@ -108,7 +111,7 @@ describe('createEmailVerificationToken', () => {
     const result = await createEmailVerificationToken('user@example.com', store)
 
     expect(result.token).toBeDefined()
-    expect(result.token.length).toBe(64) // 32 bytes hex encoded
+    expect(result.token.length).toBeGreaterThan(64)
     expect(result.expiresAt).toBeInstanceOf(Date)
     expect(result.expiresAt.getTime()).toBeGreaterThan(Date.now())
   })
@@ -151,7 +154,7 @@ describe('createEmailVerificationToken', () => {
       tokenLength: 16,
     })
 
-    expect(result.token.length).toBe(32) // 16 bytes hex encoded
+    expect(result.token.length).toBeGreaterThan(32)
   })
 })
 
@@ -172,6 +175,11 @@ describe('verifyEmailToken', () => {
   it('returns null for invalid token', async () => {
     const email = await verifyEmailToken('invalid-token', store)
     expect(email).toBeNull()
+  })
+
+  it('returns null for tampered token', async () => {
+    const { token } = await createEmailVerificationToken('user@example.com', store)
+    expect(await verifyEmailToken(`${token}x`, store)).toBeNull()
   })
 
   it('returns null for expired token', async () => {

@@ -233,6 +233,23 @@ async function applyTokenTransforms(destination: string, files: string[], tokens
   }
 }
 
+async function scaffoldEnvFiles(destination: string): Promise<void> {
+  const envExamplePath = join(destination, '.env.example')
+  const envPath = join(destination, '.env')
+
+  let envExample: string
+  try {
+    envExample = await readFile(envExamplePath, 'utf8')
+  } catch {
+    return
+  }
+
+  const { generateKeyValue } = await import('@guren/cli')
+  const appKey = generateKeyValue()
+  const envContent = envExample.replace(/^APP_KEY=.*$/mu, `APP_KEY=${appKey}`)
+  await writeFile(envPath, envContent.endsWith('\n') ? envContent : `${envContent}\n`, 'utf8')
+}
+
 export function listAppBlueprints(): AppBlueprintName[] {
   return [...APP_BLUEPRINTS]
 }
@@ -275,6 +292,7 @@ export async function scaffoldAppBlueprint(options: ScaffoldAppBlueprintOptions)
   }
 
   await applyTokenTransforms(options.destination, blueprint.transformFiles, tokenMap)
+  await scaffoldEnvFiles(options.destination)
   await blueprint.postScaffold?.(context)
   return blueprint
 }

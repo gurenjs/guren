@@ -714,11 +714,21 @@ export type {
 export {
   Encrypter,
   generateKey,
+  generateAppKey,
+  normalizeAppKey,
+  parseAppKey,
+  parsePreviousAppKeys,
+  getAppKeyringFromEnv,
+  deriveAppKey,
+  deriveAppKeyring,
   createEncrypter,
   setEncrypter,
   getEncrypter,
   encrypt,
   decrypt,
+  MessageSigner,
+  signUrl,
+  verifySignedUrl,
   hash,
   hmac,
   verifyHmac,
@@ -746,14 +756,20 @@ export {
   sample,
 } from './encryption'
 export type {
+  AppKeyring,
   EncryptOptions,
   DecryptOptions,
   EncrypterConfig,
   EncryptedPayload,
+  SignedMessageClaims,
+  SignMessageOptions,
+  VerifySignedMessageOptions,
   HashAlgorithm,
   HmacOptions,
   PasswordHashOptions,
   RandomStringOptions,
+  SignedUrlOptions,
+  VerifySignedUrlOptions,
 } from './encryption'
 // Facades
 export { createFacade, createFacades } from './facades'

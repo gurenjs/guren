@@ -696,6 +696,80 @@ async function detectEnvFile(context: DoctorRuleContext): Promise<DoctorCheck> {
   )
 }
 
+function readEnvVar(content: string, name: string): string | null {
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) {
+      continue
+    }
+
+    const separator = trimmed.indexOf('=')
+    if (separator === -1) {
+      continue
+    }
+
+    if (trimmed.slice(0, separator) === name) {
+      return trimmed.slice(separator + 1)
+    }
+  }
+
+  return null
+}
+
+function isValidAppKey(rawValue: string): boolean {
+  const trimmed = rawValue.trim()
+  if (!trimmed) {
+    return false
+  }
+
+  const encoded = trimmed.startsWith('base64:') ? trimmed.slice('base64:'.length) : trimmed
+  const decoded = Buffer.from(encoded, 'base64')
+  return decoded.length === 32 && decoded.toString('base64') === encoded
+}
+
+async function detectAppKey(context: DoctorRuleContext): Promise<DoctorCheck> {
+  const envContent = await readIfExists(context.cwd, '.env')
+  if (envContent !== null) {
+    const rawValue = readEnvVar(envContent, 'APP_KEY')
+    if (!rawValue) {
+      return createCheck('app-key', 'APP_KEY', 'fail', 'APP_KEY is missing from .env.', {
+        fix: 'Run `bunx guren key:generate --write` to populate APP_KEY in .env.',
+        manualFix: 'Add APP_KEY=base64:... to .env with a valid 32-byte key.',
+      })
+    }
+
+    if (!isValidAppKey(rawValue)) {
+      return createCheck('app-key', 'APP_KEY', 'fail', 'APP_KEY in .env is invalid.', {
+        fix: 'Run `bunx guren key:generate --write` to replace APP_KEY with a valid value.',
+        manualFix: 'Replace APP_KEY in .env with a valid base64: 32-byte key.',
+      })
+    }
+
+    return createCheck('app-key', 'APP_KEY', 'pass', 'Valid APP_KEY found in .env.')
+  }
+
+  const envExampleContent = await readIfExists(context.cwd, '.env.example')
+  if (envExampleContent !== null) {
+    const rawValue = readEnvVar(envExampleContent, 'APP_KEY')
+    if (rawValue === null) {
+      return createCheck('app-key', 'APP_KEY', 'warn', '.env.example does not define APP_KEY.', {
+        fix: 'Add APP_KEY= to .env.example so new environments know a key is required.',
+        manualFix: 'Document APP_KEY in .env.example.',
+      })
+    }
+
+    return createCheck('app-key', 'APP_KEY', 'warn', '.env.example documents APP_KEY, but .env is missing.', {
+      fix: 'Copy .env.example to .env and run `bunx guren key:generate --write`.',
+      manualFix: 'Create .env and assign a valid APP_KEY before running the app.',
+    })
+  }
+
+  return createCheck('app-key', 'APP_KEY', 'warn', 'No .env or .env.example found to validate APP_KEY.', {
+    fix: 'Create .env with APP_KEY=base64:... before running the application.',
+    manualFix: 'Add APP_KEY to .env or .env.example.',
+  })
+}
+
 async function createEnvFileAutofix(_context: DoctorRuleContext, check: DoctorCheck): Promise<DoctorAutofix | null> {
   if (check.status === 'pass' || !check.canAutofix) {
     return null
@@ -768,6 +842,7 @@ const doctorRules: DoctorRule[] = [
   { key: 'bun-version', title: 'Bun Version', detect: detectBunVersion },
   { key: 'package-json', title: 'package.json', detect: detectPackageJson },
   { key: 'env-file', title: 'Environment File', detect: detectEnvFile, autofix: createEnvFileAutofix },
+  { key: 'app-key', title: 'APP_KEY', detect: detectAppKey },
   { key: 'app-entry', title: 'Application Entry', detect: detectAppEntry },
   { key: 'routes', title: 'Route Sources', detect: detectRoutes },
   { key: 'page-contracts', title: 'Page Types', detect: detectPageContracts },

@@ -302,7 +302,7 @@ describeRedis('Redis Stores (requires REDIS_URL)', () => {
 
     it('stores and finds token', async () => {
       const token = {
-        hashedToken: 'hash-1',
+        tokenId: 'hash-1',
         email: 'user@example.com',
         expiresAt: new Date(Date.now() + 3600000),
         createdAt: new Date(),
@@ -310,20 +310,20 @@ describeRedis('Redis Stores (requires REDIS_URL)', () => {
 
       await store.store(token)
 
-      const found = await store.findByHashedToken('hash-1')
+      const found = await store.findByTokenId('hash-1')
       expect(found).not.toBeNull()
       expect(found!.email).toBe('user@example.com')
-      expect(found!.hashedToken).toBe('hash-1')
+      expect(found!.tokenId).toBe('hash-1')
     })
 
     it('returns null for non-existent token', async () => {
-      const found = await store.findByHashedToken('non-existent')
+      const found = await store.findByTokenId('non-existent')
       expect(found).toBeNull()
     })
 
     it('deletes token', async () => {
       const token = {
-        hashedToken: 'hash-1',
+        tokenId: 'hash-1',
         email: 'user@example.com',
         expiresAt: new Date(Date.now() + 3600000),
         createdAt: new Date(),
@@ -332,25 +332,25 @@ describeRedis('Redis Stores (requires REDIS_URL)', () => {
       await store.store(token)
       await store.delete('hash-1')
 
-      const found = await store.findByHashedToken('hash-1')
+      const found = await store.findByTokenId('hash-1')
       expect(found).toBeNull()
     })
 
     it('deletes all tokens for email', async () => {
       const token1 = {
-        hashedToken: 'hash-1',
+        tokenId: 'hash-1',
         email: 'user@example.com',
         expiresAt: new Date(Date.now() + 3600000),
         createdAt: new Date(),
       }
       const token2 = {
-        hashedToken: 'hash-2',
+        tokenId: 'hash-2',
         email: 'user@example.com',
         expiresAt: new Date(Date.now() + 3600000),
         createdAt: new Date(),
       }
       const token3 = {
-        hashedToken: 'hash-3',
+        tokenId: 'hash-3',
         email: 'other@example.com',
         expiresAt: new Date(Date.now() + 3600000),
         createdAt: new Date(),
@@ -362,14 +362,14 @@ describeRedis('Redis Stores (requires REDIS_URL)', () => {
 
       await store.deleteForEmail('user@example.com')
 
-      expect(await store.findByHashedToken('hash-1')).toBeNull()
-      expect(await store.findByHashedToken('hash-2')).toBeNull()
-      expect(await store.findByHashedToken('hash-3')).not.toBeNull()
+      expect(await store.findByTokenId('hash-1')).toBeNull()
+      expect(await store.findByTokenId('hash-2')).toBeNull()
+      expect(await store.findByTokenId('hash-3')).not.toBeNull()
     })
 
     it('expires token after TTL', async () => {
       const token = {
-        hashedToken: 'hash-1',
+        tokenId: 'hash-1',
         email: 'user@example.com',
         expiresAt: new Date(Date.now() + 100), // 100ms
         createdAt: new Date(),
@@ -379,7 +379,7 @@ describeRedis('Redis Stores (requires REDIS_URL)', () => {
 
       await new Promise((r) => setTimeout(r, 200))
 
-      const found = await store.findByHashedToken('hash-1')
+      const found = await store.findByTokenId('hash-1')
       expect(found).toBeNull()
     })
   })

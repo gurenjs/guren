@@ -1,4 +1,6 @@
-import { hashToken, generateToken, buildTokenUrl, parseTokenUrl } from './utils'
+import { generateId, buildTokenUrl, parseTokenUrl } from './utils'
+import { MessageSigner } from '../encryption/MessageSigner'
+import { deriveAppKeyring, getAppKeyringFromEnv } from '../encryption/app-key'
 
 /**
  * Email verification token data stored in the backing store.
@@ -6,7 +8,7 @@ import { hashToken, generateToken, buildTokenUrl, parseTokenUrl } from './utils'
  */
 export interface EmailVerificationToken {
   email: string
-  hashedToken: string
+  tokenId: string
   expiresAt: Date
   createdAt: Date
 }
@@ -22,14 +24,14 @@ export interface EmailVerificationTokenStore {
   store(token: EmailVerificationToken): Promise<void>
 
   /**
-   * Find a token by its hashed value.
+   * Find a token by its opaque token ID.
    */
-  findByHashedToken(hashedToken: string): Promise<EmailVerificationToken | null>
+  findByTokenId(tokenId: string): Promise<EmailVerificationToken | null>
 
   /**
-   * Delete a token by its hashed value.
+   * Delete a token by its opaque token ID.
    */
-  delete(hashedToken: string): Promise<void>
+  delete(tokenId: string): Promise<void>
 
   /**
    * Delete all tokens for a given email.
@@ -45,15 +47,15 @@ export class MemoryEmailVerificationStore implements EmailVerificationTokenStore
   private tokens: Map<string, EmailVerificationToken> = new Map()
 
   async store(token: EmailVerificationToken): Promise<void> {
-    this.tokens.set(token.hashedToken, token)
+    this.tokens.set(token.tokenId, token)
   }
 
-  async findByHashedToken(hashedToken: string): Promise<EmailVerificationToken | null> {
-    return this.tokens.get(hashedToken) ?? null
+  async findByTokenId(tokenId: string): Promise<EmailVerificationToken | null> {
+    return this.tokens.get(tokenId) ?? null
   }
 
-  async delete(hashedToken: string): Promise<void> {
-    this.tokens.delete(hashedToken)
+  async delete(tokenId: string): Promise<void> {
+    this.tokens.delete(tokenId)
   }
 
   async deleteForEmail(email: string): Promise<void> {
@@ -100,6 +102,11 @@ export interface EmailVerificationConfig {
 const DEFAULT_CONFIG: Required<EmailVerificationConfig> = {
   expiresIn: 24 * 60 * 60 * 1000, // 24 hours
   tokenLength: 32,
+}
+const EMAIL_VERIFICATION_PURPOSE = 'email-verification'
+
+function createEmailVerificationSigner(): MessageSigner {
+  return new MessageSigner(deriveAppKeyring(getAppKeyringFromEnv(), 'email-verification-signing'))
 }
 
 /**
@@ -152,14 +159,25 @@ export async function createEmailVerificationToken(
   await store.deleteForEmail(email)
 
   // Generate a secure random token
-  const token = generateToken(tokenLength)
-  const hashedToken = hashToken(token)
+  const tokenId = generateId()
   const now = new Date()
   const expiresAt = new Date(now.getTime() + expiresIn)
+  const signer = createEmailVerificationSigner()
+  const token = signer.sign(
+    {
+      id: tokenId,
+      email: email.toLowerCase(),
+      bytes: tokenLength,
+    },
+    {
+      purpose: EMAIL_VERIFICATION_PURPOSE,
+      expiresIn,
+    },
+  )
 
   await store.store({
     email: email.toLowerCase(),
-    hashedToken,
+    tokenId,
     expiresAt,
     createdAt: now,
   })
@@ -192,8 +210,21 @@ export async function verifyEmailToken(
   store: EmailVerificationTokenStore,
   _config: EmailVerificationConfig = {}
 ): Promise<string | null> {
-  const hashedToken = hashToken(token)
-  const storedToken = await store.findByHashedToken(hashedToken)
+  const signer = createEmailVerificationSigner()
+  const payload = signer.verify<{ id?: string; email?: string }>(token, {
+    purpose: EMAIL_VERIFICATION_PURPOSE,
+    allowExpired: true,
+  })
+  if (!payload?.id || !payload.email) {
+    return null
+  }
+
+  if (typeof payload.exp === 'number' && payload.exp < Math.floor(Date.now() / 1000)) {
+    await store.delete(payload.id)
+    return null
+  }
+
+  const storedToken = await store.findByTokenId(payload.id)
 
   if (!storedToken) {
     return null
@@ -201,11 +232,13 @@ export async function verifyEmailToken(
 
   // Check if expired
   if (new Date() > storedToken.expiresAt) {
-    await store.delete(hashedToken)
+    await store.delete(payload.id)
     return null
   }
 
-  return storedToken.email
+  return storedToken.email.toLowerCase() === payload.email.toLowerCase()
+    ? storedToken.email
+    : null
 }
 
 /**
@@ -239,8 +272,21 @@ export async function completeEmailVerification<T>(
   store: EmailVerificationTokenStore,
   markVerified: (email: string) => Promise<T>
 ): Promise<T | null> {
-  const hashedToken = hashToken(token)
-  const storedToken = await store.findByHashedToken(hashedToken)
+  const signer = createEmailVerificationSigner()
+  const payload = signer.verify<{ id?: string; email?: string }>(token, {
+    purpose: EMAIL_VERIFICATION_PURPOSE,
+    allowExpired: true,
+  })
+  if (!payload?.id || !payload.email) {
+    return null
+  }
+
+  if (typeof payload.exp === 'number' && payload.exp < Math.floor(Date.now() / 1000)) {
+    await store.delete(payload.id)
+    return null
+  }
+
+  const storedToken = await store.findByTokenId(payload.id)
 
   if (!storedToken) {
     return null
@@ -248,7 +294,12 @@ export async function completeEmailVerification<T>(
 
   // Check if expired
   if (new Date() > storedToken.expiresAt) {
-    await store.delete(hashedToken)
+    await store.delete(payload.id)
+    return null
+  }
+
+  // Verify email matches between JWT and store
+  if (storedToken.email.toLowerCase() !== payload.email.toLowerCase()) {
     return null
   }
 
@@ -256,7 +307,7 @@ export async function completeEmailVerification<T>(
   const result = await markVerified(storedToken.email)
 
   // Delete the used token
-  await store.delete(hashedToken)
+  await store.delete(payload.id)
 
   return result
 }

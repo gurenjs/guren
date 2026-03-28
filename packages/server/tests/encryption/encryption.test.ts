@@ -8,6 +8,12 @@ import {
   getEncrypter,
   encrypt,
   decrypt,
+  normalizeAppKey,
+  parseAppKey,
+  deriveAppKeyring,
+  MessageSigner,
+  signUrl,
+  verifySignedUrl,
   // Hash
   hash,
   hmac,
@@ -53,7 +59,8 @@ describe('Encrypter', () => {
   describe('generateKey', () => {
     test('generates 32-byte base64 key', () => {
       const newKey = generateKey()
-      const decoded = Buffer.from(newKey, 'base64')
+      expect(newKey.startsWith('base64:')).toBe(true)
+      const decoded = Buffer.from(newKey.slice('base64:'.length), 'base64')
       expect(decoded.length).toBe(32)
     })
 
@@ -61,13 +68,30 @@ describe('Encrypter', () => {
       const keys = new Set(Array.from({ length: 100 }, () => generateKey()))
       expect(keys.size).toBe(100)
     })
+
+    test('normalizes APP_KEY format', () => {
+      const raw = Buffer.alloc(32, 1).toString('base64')
+      expect(normalizeAppKey(raw)).toBe(`base64:${raw}`)
+      expect(parseAppKey(raw)).toBeInstanceOf(Buffer)
+    })
   })
 
   describe('constructor', () => {
     test('throws on invalid key length', () => {
       expect(() => {
         new Encrypter({ key: Buffer.from('short').toString('base64') })
-      }).toThrow('32 bytes')
+      }).toThrow('32-byte')
+    })
+
+    test('decrypts with previous keys during key rotation', () => {
+      const oldKey = generateKey()
+      const rotatedKey = generateKey()
+      const oldEncrypter = new Encrypter({ key: oldKey })
+      const rotatedEncrypter = new Encrypter({ key: rotatedKey, previousKeys: [oldKey] })
+
+      const encrypted = oldEncrypter.encryptString('rotated')
+
+      expect(rotatedEncrypter.decryptString(encrypted)).toBe('rotated')
     })
   })
 
@@ -145,6 +169,34 @@ describe('Encrypter', () => {
       const decrypted = decrypt(encrypted)
 
       expect(decrypted).toEqual(data)
+    })
+  })
+
+  describe('message signing', () => {
+    test('signs and verifies claims', () => {
+      const keyring = deriveAppKeyring({ current: parseAppKey(key), previous: [] }, 'message-signing')
+      const signer = new MessageSigner(keyring)
+      const signed = signer.sign({ userId: 1 }, { purpose: 'test', expiresIn: 60_000 })
+
+      expect(signer.verify<{ userId: number }>(signed, { purpose: 'test' })?.userId).toBe(1)
+      expect(signer.verify(signed, { purpose: 'other' })).toBeNull()
+    })
+
+    test('returns null for expired token', () => {
+      const keyring = deriveAppKeyring({ current: parseAppKey(key), previous: [] }, 'message-signing')
+      const signer = new MessageSigner(keyring)
+      const signed = signer.sign({ userId: 1 }, { purpose: 'test', expiresIn: -1000 })
+
+      expect(signer.verify(signed, { purpose: 'test' })).toBeNull()
+      expect(signer.verify(signed, { purpose: 'test', allowExpired: true })?.userId).toBe(1)
+    })
+
+    test('signs and verifies URLs', () => {
+      const keyring = deriveAppKeyring({ current: parseAppKey(key), previous: [] }, 'message-signing')
+      const signedUrl = signUrl('https://example.com/invite?b=2&a=1', keyring, { expiresIn: 60_000 })
+
+      expect(verifySignedUrl(signedUrl, keyring)).toBe(true)
+      expect(verifySignedUrl(`${signedUrl}x`, keyring)).toBe(false)
     })
   })
 })

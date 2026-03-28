@@ -10,6 +10,9 @@ import {
 import type { UserProvider } from '../../src/auth/types'
 import { createMockUser, createMockProvider, type MockUser } from '@guren/testing'
 
+process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+delete process.env.APP_PREVIOUS_KEYS
+
 describe('MemoryPasswordResetStore', () => {
   let store: MemoryPasswordResetStore
 
@@ -89,8 +92,8 @@ describe('createPasswordResetToken', () => {
 
     expect(result.token).toBeTruthy()
     expect(result.token.length).toBeGreaterThan(0)
-    expect(result.tokenHash).toBeTruthy()
-    expect(result.tokenHash).not.toBe(result.token)
+    expect(result.tokenId).toBeTruthy()
+    expect(result.tokenId).not.toBe(result.token)
     expect(result.expiresAt).toBeInstanceOf(Date)
     expect(result.expiresAt.getTime()).toBeGreaterThan(Date.now())
   })
@@ -100,8 +103,8 @@ describe('createPasswordResetToken', () => {
     const result2 = await createPasswordResetToken('user@example.com', store)
 
     // First token should be invalidated
-    const found1 = await store.find(result1.tokenHash)
-    const found2 = await store.find(result2.tokenHash)
+    const found1 = await store.find(result1.tokenId)
+    const found2 = await store.find(result2.tokenId)
 
     expect(found1).toBeNull()
     expect(found2).not.toBeNull()
@@ -136,6 +139,13 @@ describe('verifyPasswordResetToken', () => {
   it('returns null for invalid token', async () => {
     const email = await verifyPasswordResetToken('invalid-token', store)
     expect(email).toBeNull()
+  })
+
+  it('returns null for tampered token', async () => {
+    const { token } = await createPasswordResetToken('user@example.com', store)
+    const tampered = `${token}x`
+
+    expect(await verifyPasswordResetToken(tampered, store)).toBeNull()
   })
 
   it('returns null for expired token', async () => {

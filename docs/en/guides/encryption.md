@@ -2,6 +2,37 @@
 
 Guren provides utilities for encrypting data and hashing passwords securely.
 
+## APP_KEY
+
+Every Guren application needs an `APP_KEY` — a base64-encoded 32-byte secret used for encryption, cookie signing, and token signing. Guren uses HKDF to derive separate keys for each purpose, so a single `APP_KEY` secures all subsystems without sharing raw key material.
+
+### Generating a Key
+
+```bash
+# Generate and print a key
+bunx guren key:generate
+
+# Generate and write directly to .env
+bunx guren key:generate --write
+```
+
+`create-guren-app` generates an `APP_KEY` automatically when scaffolding a new project.
+
+### Key Rotation
+
+To rotate your `APP_KEY` without breaking existing encrypted data or active sessions:
+
+1. Move the current `APP_KEY` value to `APP_PREVIOUS_KEYS`
+2. Generate a new `APP_KEY`
+
+```bash
+# .env
+APP_KEY=base64:<new-key>
+APP_PREVIOUS_KEYS=base64:<old-key>
+```
+
+Multiple previous keys can be comma-separated. Guren will try the current key first, then fall back to previous keys when decrypting data or verifying signatures.
+
 ## Encryption
 
 The `Encrypter` class provides AES-256-GCM encryption for sensitive data.
@@ -15,33 +46,38 @@ import { Encrypter, generateKey } from '@guren/core'
 
 // Generate a new key
 const key = generateKey()
-console.log(key) // Base64-encoded 32-byte key
+console.log(key) // base64:... (32-byte key)
 
 // Create encrypter
-const encrypter = new Encrypter(key)
+const encrypter = new Encrypter({ key })
+
+// With key rotation support
+const rotatedEncrypter = new Encrypter({
+  key: newKey,
+  previousKeys: [oldKey],
+})
 ```
 
 ### Encrypting Data
 
 ```typescript
-// Encrypt a string
-const encrypted = encrypter.encrypt('secret message')
+// Encrypt any value (objects are JSON-serialized automatically)
+const encrypted = encrypter.encrypt({ userId: 1, token: 'abc123' })
 
-// Encrypt with JSON serialization (for objects)
-const data = { userId: 1, token: 'abc123' }
-const encryptedData = encrypter.encrypt(data, true)
+// Encrypt a raw string without serialization
+const encryptedString = encrypter.encryptString('secret message')
 ```
 
 ### Decrypting Data
 
 ```typescript
-// Decrypt a string
-const decrypted = encrypter.decrypt(encrypted)
-// Returns: 'secret message'
-
-// Decrypt with JSON deserialization
-const decryptedData = encrypter.decrypt(encryptedData, true)
+// Decrypt (automatically deserializes JSON)
+const data = encrypter.decrypt(encrypted)
 // Returns: { userId: 1, token: 'abc123' }
+
+// Decrypt a raw string
+const message = encrypter.decryptString(encryptedString)
+// Returns: 'secret message'
 ```
 
 ### Key Management
@@ -66,14 +102,12 @@ APP_KEY=base64:your-32-byte-key-here
 ### Error Handling
 
 ```typescript
-import { Encrypter, DecryptException } from '@guren/core'
+import { Encrypter } from '@guren/core'
 
 try {
   const decrypted = encrypter.decrypt(invalidPayload)
 } catch (error) {
-  if (error instanceof DecryptException) {
-    console.error('Decryption failed:', error.message)
-  }
+  console.error('Decryption failed:', (error as Error).message)
 }
 ```
 
@@ -214,11 +248,11 @@ export default class AuthController extends Controller {
 
 ## Security Best Practices
 
-1. **Never store plain passwords** - Always hash passwords before storing.
-2. **Use a strong APP_KEY** - Generate a random 32-byte key for encryption.
-3. **Don't roll your own crypto** - Use the provided utilities.
-4. **Rotate keys periodically** - Plan for key rotation in production.
-5. **Use Argon2 for new projects** - It's the current recommendation for password hashing.
+1. **Never store plain passwords** — Always hash passwords before storing.
+2. **Use a strong APP_KEY** — Run `bunx guren key:generate --write` to generate one. Never commit it to version control.
+3. **Don't roll your own crypto** — Use the provided utilities.
+4. **Rotate keys periodically** — Use `APP_PREVIOUS_KEYS` to rotate without downtime (see [Key Rotation](#key-rotation)).
+5. **Use Scrypt for new projects** — It's Guren's default and recommended password hashing algorithm.
 
 ## Testing
 
@@ -228,7 +262,7 @@ import { Encrypter, Hash, generateKey } from '@guren/core'
 
 describe('Encryption', () => {
   it('encrypts and decrypts data', () => {
-    const encrypter = new Encrypter(generateKey())
+    const encrypter = new Encrypter({ key: generateKey() })
 
     const encrypted = encrypter.encrypt('secret')
     const decrypted = encrypter.decrypt(encrypted)

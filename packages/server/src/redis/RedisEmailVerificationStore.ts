@@ -20,8 +20,8 @@ export interface RedisEmailVerificationStoreOptions {
  * Redis-backed email verification token store.
  *
  * Uses the following key structure:
- * - `emailverify:{hashedToken}` - Token data (JSON)
- * - `emailverify:email:{email}` - Set of hashed tokens for an email
+ * - `emailverify:{tokenId}` - Token data (JSON)
+ * - `emailverify:email:{email}` - Set of token IDs for an email
  *
  * @example
  * ```ts
@@ -47,7 +47,7 @@ export class RedisEmailVerificationStore implements EmailVerificationTokenStore 
    * Store an email verification token.
    */
   async store(token: EmailVerificationToken): Promise<void> {
-    const tokenKey = `${this.prefix}${token.hashedToken}`
+    const tokenKey = `${this.prefix}${token.tokenId}`
     const emailKey = `${this.prefix}email:${token.email.toLowerCase()}`
     const ttlMs = Math.max(0, token.expiresAt.getTime() - Date.now())
 
@@ -56,7 +56,7 @@ export class RedisEmailVerificationStore implements EmailVerificationTokenStore 
     }
 
     const data = JSON.stringify({
-      hashedToken: token.hashedToken,
+      tokenId: token.tokenId,
       email: token.email,
       expiresAt: token.expiresAt.toISOString(),
       createdAt: token.createdAt.toISOString(),
@@ -64,7 +64,7 @@ export class RedisEmailVerificationStore implements EmailVerificationTokenStore 
 
     const pipeline = this.redis.pipeline()
     pipeline.psetex(tokenKey, ttlMs, data)
-    pipeline.sadd(emailKey, token.hashedToken)
+    pipeline.sadd(emailKey, token.tokenId)
     pipeline.pexpire(emailKey, ttlMs + 60000) // Add buffer to email set expiration
     await pipeline.exec()
   }
@@ -72,8 +72,8 @@ export class RedisEmailVerificationStore implements EmailVerificationTokenStore 
   /**
    * Find a token by its hash.
    */
-  async findByHashedToken(hashedToken: string): Promise<EmailVerificationToken | null> {
-    const tokenKey = `${this.prefix}${hashedToken}`
+  async findByTokenId(tokenId: string): Promise<EmailVerificationToken | null> {
+    const tokenKey = `${this.prefix}${tokenId}`
     const data = await this.redis.get(tokenKey)
 
     if (!data) {
@@ -82,13 +82,13 @@ export class RedisEmailVerificationStore implements EmailVerificationTokenStore 
 
     try {
       const parsed = JSON.parse(data) as {
-        hashedToken: string
+        tokenId: string
         email: string
         expiresAt: string
         createdAt: string
       }
       return {
-        hashedToken: parsed.hashedToken,
+        tokenId: parsed.tokenId,
         email: parsed.email,
         expiresAt: new Date(parsed.expiresAt),
         createdAt: new Date(parsed.createdAt),
@@ -101,15 +101,15 @@ export class RedisEmailVerificationStore implements EmailVerificationTokenStore 
   /**
    * Delete a token by its hash.
    */
-  async delete(hashedToken: string): Promise<void> {
-    const tokenKey = `${this.prefix}${hashedToken}`
+  async delete(tokenId: string): Promise<void> {
+    const tokenKey = `${this.prefix}${tokenId}`
     const data = await this.redis.get(tokenKey)
 
     if (data) {
       try {
         const parsed = JSON.parse(data) as { email: string }
         const emailKey = `${this.prefix}email:${parsed.email.toLowerCase()}`
-        await this.redis.srem(emailKey, hashedToken)
+        await this.redis.srem(emailKey, tokenId)
       } catch {
         // Ignore parse errors
       }
@@ -123,10 +123,10 @@ export class RedisEmailVerificationStore implements EmailVerificationTokenStore 
    */
   async deleteForEmail(email: string): Promise<void> {
     const emailKey = `${this.prefix}email:${email.toLowerCase()}`
-    const tokenHashes = await this.redis.smembers(emailKey)
+    const tokenIds = await this.redis.smembers(emailKey)
 
-    if (tokenHashes.length > 0) {
-      const tokenKeys = tokenHashes.map((hash) => `${this.prefix}${hash}`)
+    if (tokenIds.length > 0) {
+      const tokenKeys = tokenIds.map((tokenId) => `${this.prefix}${tokenId}`)
       await this.redis.del(...tokenKeys, emailKey)
     } else {
       await this.redis.del(emailKey)

@@ -6,6 +6,7 @@ import type { DoctorJsonOutput } from '../src/doctor'
 import { createTempWorkspace } from './helpers'
 
 let consoleLogSpy: ReturnType<typeof spyOn>
+const VALID_APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 
 beforeEach(() => {
   // Suppress console.log output from --json mode during tests
@@ -81,7 +82,7 @@ describe('runDoctor', () => {
       )
       await writeFile(
         join(workspace.dir, '.env'),
-        'DATABASE_URL=postgres://guren:guren@localhost:54322/guren\n',
+        `DATABASE_URL=postgres://guren:guren@localhost:54322/guren\nAPP_KEY=${VALID_APP_KEY}\n`,
         'utf8',
       )
       await writeFile(
@@ -132,7 +133,7 @@ describe('runDoctor', () => {
         }, null, 2),
         'utf8',
       )
-      await writeFile(join(workspace.dir, '.env'), 'APP_KEY=test\n', 'utf8')
+      await writeFile(join(workspace.dir, '.env'), `APP_KEY=${VALID_APP_KEY}\n`, 'utf8')
 
       const report = await runDoctor({ cwd: workspace.dir, json: true })
 
@@ -351,7 +352,7 @@ describe('runDoctor', () => {
         JSON.stringify({ name: 'doctor-env-pass' }, null, 2),
         'utf8',
       )
-      await writeFile(join(workspace.dir, '.env'), 'APP_KEY=secret\n', 'utf8')
+      await writeFile(join(workspace.dir, '.env'), `APP_KEY=${VALID_APP_KEY}\n`, 'utf8')
 
       const report = await runDoctor({ cwd: workspace.dir, json: true })
       const envCheck = report.checks.find((check) => check.key === 'env-file')
@@ -399,7 +400,7 @@ describe('runDoctor', () => {
         "import { createPostgresDatabase } from '@guren/orm'\nexport default createPostgresDatabase()\n",
         'utf8',
       )
-      await writeFile(join(workspace.dir, '.env'), 'APP_KEY=secret\n', 'utf8')
+      await writeFile(join(workspace.dir, '.env'), `APP_KEY=${VALID_APP_KEY}\n`, 'utf8')
 
       const report = await runDoctor({ cwd: workspace.dir, json: true })
       const dbCheck = report.checks.find((check) => check.key === 'database-config')
@@ -429,7 +430,7 @@ describe('runDoctor', () => {
       )
       await writeFile(
         join(workspace.dir, '.env'),
-        'DATABASE_URL=postgres://guren:guren@localhost:54322/guren\n',
+        `DATABASE_URL=postgres://guren:guren@localhost:54322/guren\nAPP_KEY=${VALID_APP_KEY}\n`,
         'utf8',
       )
 

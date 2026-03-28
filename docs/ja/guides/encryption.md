@@ -2,6 +2,37 @@
 
 Guren はデータの暗号化とパスワードの安全なハッシュ化のためのユーティリティを提供しています。
 
+## APP_KEY
+
+すべてのGurenアプリケーションには `APP_KEY` が必要です。これはbase64エンコードされた32バイトのシークレットで、暗号化、Cookie署名、トークン署名に使用されます。GurenはHKDFを使って各目的ごとに個別のキーを導出するため、単一の `APP_KEY` で全サブシステムを安全に保護できます。
+
+### キーの生成
+
+```bash
+# キーを生成して表示
+bunx guren key:generate
+
+# キーを生成して .env に直接書き込み
+bunx guren key:generate --write
+```
+
+`create-guren-app` でプロジェクトをスキャフォールドすると、`APP_KEY` は自動的に生成されます。
+
+### キーローテーション
+
+既存の暗号化データやアクティブなセッションを壊さずに `APP_KEY` をローテーションするには:
+
+1. 現在の `APP_KEY` の値を `APP_PREVIOUS_KEYS` に移動
+2. 新しい `APP_KEY` を生成
+
+```bash
+# .env
+APP_KEY=base64:<新しいキー>
+APP_PREVIOUS_KEYS=base64:<古いキー>
+```
+
+複数の旧キーはカンマ区切りで指定できます。Gurenは現在のキーを最初に試し、復号や署名検証時に旧キーへフォールバックします。
+
 ## 暗号化
 
 `Encrypter`クラスは機密データのAES-256-GCM暗号化を提供します。
@@ -15,33 +46,38 @@ import { Encrypter, generateKey } from '@guren/core'
 
 // 新しいキーを生成
 const key = generateKey()
-console.log(key) // Base64エンコードされた32バイトのキー
+console.log(key) // base64:... (32バイトのキー)
 
 // Encrypterを作成
-const encrypter = new Encrypter(key)
+const encrypter = new Encrypter({ key })
+
+// キーローテーション対応
+const rotatedEncrypter = new Encrypter({
+  key: newKey,
+  previousKeys: [oldKey],
+})
 ```
 
 ### データの暗号化
 
 ```typescript
-// 文字列を暗号化
-const encrypted = encrypter.encrypt('secret message')
+// 任意の値を暗号化（オブジェクトは自動的にJSONシリアライズされます）
+const encrypted = encrypter.encrypt({ userId: 1, token: 'abc123' })
 
-// JSONシリアライズで暗号化（オブジェクト用）
-const data = { userId: 1, token: 'abc123' }
-const encryptedData = encrypter.encrypt(data, true)
+// シリアライズなしで文字列を暗号化
+const encryptedString = encrypter.encryptString('secret message')
 ```
 
 ### データの復号化
 
 ```typescript
-// 文字列を復号化
-const decrypted = encrypter.decrypt(encrypted)
-// 戻り値: 'secret message'
-
-// JSONデシリアライズで復号化
-const decryptedData = encrypter.decrypt(encryptedData, true)
+// 復号化（JSONは自動的にデシリアライズされます）
+const data = encrypter.decrypt(encrypted)
 // 戻り値: { userId: 1, token: 'abc123' }
+
+// 文字列を復号化
+const message = encrypter.decryptString(encryptedString)
+// 戻り値: 'secret message'
 ```
 
 ### キー管理
@@ -66,14 +102,12 @@ APP_KEY=base64:your-32-byte-key-here
 ### エラーハンドリング
 
 ```typescript
-import { Encrypter, DecryptException } from '@guren/core'
+import { Encrypter } from '@guren/core'
 
 try {
   const decrypted = encrypter.decrypt(invalidPayload)
 } catch (error) {
-  if (error instanceof DecryptException) {
-    console.error('復号化に失敗しました:', error.message)
-  }
+  console.error('復号化に失敗しました:', (error as Error).message)
 }
 ```
 
@@ -214,11 +248,11 @@ export default class AuthController extends Controller {
 
 ## セキュリティベストプラクティス
 
-1. **平文パスワードを保存しない** - パスワードは保存前に必ずハッシュ化します。
-2. **強力なAPP_KEYを使用** - 暗号化用にランダムな32バイトのキーを生成します。
-3. **独自の暗号化を作らない** - 提供されているユーティリティを使用します。
-4. **定期的にキーをローテーション** - 本番環境ではキーのローテーションを計画します。
-5. **新規プロジェクトにはArgon2を使用** - パスワードハッシュの現在の推奨事項です。
+1. **平文パスワードを保存しない** — パスワードは保存前に必ずハッシュ化します。
+2. **強力なAPP_KEYを使用** — `bunx guren key:generate --write` で生成します。バージョン管理にコミットしないでください。
+3. **独自の暗号化を作らない** — 提供されているユーティリティを使用します。
+4. **定期的にキーをローテーション** — ダウンタイムなしでローテーションするには `APP_PREVIOUS_KEYS` を使用します（[キーローテーション](#キーローテーション)を参照）。
+5. **新規プロジェクトにはScryptを使用** — Gurenのデフォルトかつ推奨のパスワードハッシュアルゴリズムです。
 
 ## テスト
 
@@ -228,7 +262,7 @@ import { Encrypter, Hash, generateKey } from '@guren/core'
 
 describe('暗号化', () => {
   it('データを暗号化して復号化する', () => {
-    const encrypter = new Encrypter(generateKey())
+    const encrypter = new Encrypter({ key: generateKey() })
 
     const encrypted = encrypter.encrypt('secret')
     const decrypted = encrypter.decrypt(encrypted)
