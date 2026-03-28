@@ -347,7 +347,7 @@ export class TestApp {
     let Application: ApplicationConstructor | undefined
 
     try {
-      ;({ Application } = await import('@guren/server') as { Application: ApplicationConstructor })
+      ;({ Application } = await import('@guren/core') as { Application: ApplicationConstructor })
     } catch {
       // Fallback: use a plain Hono app when @guren/server is not available.
       const { Hono } = await import('hono')
@@ -460,8 +460,14 @@ export class TestApp {
 
     if (this.authenticatedUser) {
       // Inject authenticated user as a JSON-encoded header that test-aware
-      // auth middleware can read.
-      headers['X-Testing-User'] = JSON.stringify(this.authenticatedUser)
+      // auth middleware can read. Preserve the auth identifier so the
+      // deserialized object can reconstruct getAuthIdentifier().
+      const user = this.authenticatedUser as Record<string, unknown>
+      const authId =
+        typeof (user as { getAuthIdentifier?: unknown }).getAuthIdentifier === 'function'
+          ? (user as { getAuthIdentifier(): unknown }).getAuthIdentifier()
+          : user.id ?? null
+      headers['X-Testing-User'] = JSON.stringify({ ...user, __authId: authId })
     }
 
     const init: RequestInit = {

@@ -19,7 +19,16 @@ function resolveTestingUser(ctx: Context): Authenticatable | null {
   }
 
   try {
-    return JSON.parse(rawUser) as Authenticatable
+    const parsed = JSON.parse(rawUser) as Record<string, unknown>
+    // Re-attach Authenticatable methods lost during JSON serialization.
+    // The serialized payload includes __authId (the pre-serialized identifier)
+    // so we can reconstruct a conforming object.
+    const authId = parsed.__authId ?? parsed.id ?? null
+    return {
+      ...parsed,
+      getAuthIdentifier: () => authId,
+      getAuthPassword: () => (parsed.password as string | null | undefined) ?? null,
+    } as unknown as Authenticatable
   } catch {
     return null
   }
@@ -35,10 +44,14 @@ function withTestingUser(auth: AuthContext, testingUser: Authenticatable | null)
     check: async () => true,
     guest: async () => false,
     user: async <T = Authenticatable>() => testingUser as T,
+    userOrFail: async <T = Authenticatable>() => testingUser as T,
     id: async () => testingUser.getAuthIdentifier(),
     login: async () => {},
     attempt: async () => true,
     logout: async () => {},
+    // Preserve prototype methods lost by the object spread
+    guard: auth.guard.bind(auth),
+    session: auth.session.bind(auth),
   }
 }
 
