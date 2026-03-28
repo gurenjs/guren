@@ -6,7 +6,7 @@ async function login(page: Page) {
   await page.getByLabel('Email address').fill('demo@guren.dev')
   await page.getByLabel('Password').fill('secret')
   await page.getByRole('button', { name: 'Sign in' }).click()
-  await page.waitForURL('**/dashboard', { timeout: 15_000 })
+  await page.waitForURL('**/dashboard')
 }
 
 test.describe('Validation errors', () => {
@@ -25,7 +25,7 @@ test.describe('Validation errors', () => {
       page.getByRole('button', { name: 'Create Post' }).click(),
     ])
 
-    await expect(page.getByText('Title is required.')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Title is required.')).toBeVisible()
     await expect(page.getByText('Excerpt is required.')).toBeVisible()
     await expect(page.getByText('Body is required.')).toBeVisible()
   })
@@ -42,7 +42,7 @@ test.describe('Validation errors', () => {
     ])
 
     // Wait for Inertia error response
-    await expect(page.getByText('Excerpt is required.')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Excerpt is required.')).toBeVisible()
 
     // Title error should not appear, but excerpt and body errors should
     await expect(page.getByText('Title is required.')).not.toBeVisible()

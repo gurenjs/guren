@@ -6,10 +6,13 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: 1,
+  timeout: process.env.CI ? 60_000 : 30_000,
+  expect: { timeout: process.env.CI ? 15_000 : 5_000 },
   reporter: process.env.CI ? 'github' : 'html',
   use: {
     baseURL: 'http://localhost:3333',
     trace: 'on-first-retry',
+    navigationTimeout: process.env.CI ? 30_000 : 15_000,
   },
   projects: [
     {
@@ -21,6 +24,6 @@ export default defineConfig({
     command: process.env.CI ? 'bun run dev:server' : 'bun run dev',
     url: 'http://localhost:3333',
     reuseExistingServer: !process.env.CI,
-    timeout: 30_000,
+    timeout: process.env.CI ? 60_000 : 30_000,
   },
 })

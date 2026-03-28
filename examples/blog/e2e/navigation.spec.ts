@@ -6,7 +6,7 @@ async function login(page: Page) {
   await page.getByLabel('Email address').fill('demo@guren.dev')
   await page.getByLabel('Password').fill('secret')
   await page.getByRole('button', { name: 'Sign in' }).click()
-  await page.waitForURL('**/dashboard', { timeout: 15_000 })
+  await page.waitForURL('**/dashboard')
 }
 
 test.describe('Inertia SPA Navigation', () => {
@@ -63,7 +63,7 @@ test.describe('Multi-step User Journey', () => {
     await page.getByLabel('Email address').fill('demo@guren.dev')
     await page.getByLabel('Password').fill('secret')
     await page.getByRole('button', { name: 'Sign in' }).click()
-    await page.waitForURL('**/dashboard', { timeout: 15_000 })
+    await page.waitForURL('**/dashboard')
 
     // Navigate to posts
     await page.getByRole('link', { name: 'Posts' }).click()
@@ -79,7 +79,7 @@ test.describe('Multi-step User Journey', () => {
     await page.getByLabel('Excerpt').fill('Journey test excerpt')
     await page.getByLabel('Body').fill('Journey test body')
     await page.getByRole('button', { name: 'Create Post' }).click()
-    await page.waitForURL(/\/posts/, { timeout: 15_000 })
+    await page.waitForURL(/\/posts/)
 
     // Verify the post is visible
     await expect(page.getByText(title)).toBeVisible({ timeout: 10_000 })

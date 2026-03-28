@@ -8,7 +8,7 @@ async function login(page: Page) {
 
   // Listen for navigation response to debug login issues
   await page.getByRole('button', { name: 'Sign in' }).click()
-  await page.waitForURL('**/dashboard', { timeout: 15_000 })
+  await page.waitForURL('**/dashboard')
 
 }
 

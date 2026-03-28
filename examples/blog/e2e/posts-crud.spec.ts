@@ -6,7 +6,7 @@ async function login(page: Page) {
   await page.getByLabel('Email address').fill('demo@guren.dev')
   await page.getByLabel('Password').fill('secret')
   await page.getByRole('button', { name: 'Sign in' }).click()
-  await page.waitForURL('**/dashboard', { timeout: 15_000 })
+  await page.waitForURL('**/dashboard')
 }
 
 test.describe('Posts — public', () => {
@@ -52,7 +52,7 @@ test.describe('Posts — authenticated CRUD', () => {
     await page.getByRole('button', { name: 'Create Post' }).click()
 
     // Controller redirects to /posts/:id or /posts after creation
-    await page.waitForURL(/\/posts/, { timeout: 15_000 })
+    await page.waitForURL(/\/posts/)
     await expect(page.getByText(uniqueTitle)).toBeVisible({ timeout: 10_000 })
   })
 
