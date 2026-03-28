@@ -116,8 +116,9 @@ jobs:
         run: bun run test:bun
 
   e2e:
+    if: github.event_name == 'push'  # E2E only on main push (flaky in PR due to Inertia XHR timing)
     runs-on: ubuntu-latest
-    continue-on-error: true  # E2E with Inertia XHR is flaky in CI; non-blocking
+    continue-on-error: true
     services:
       postgres:
         image: postgres:15-alpine
