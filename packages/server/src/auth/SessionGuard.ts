@@ -164,10 +164,8 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
   async validate(credentials: AuthCredentials): Promise<User | null> {
     const user = await this.provider.retrieveByCredentials(credentials)
     if (!user) {
-      // Perform a dummy validation to prevent timing-based user enumeration.
-      // Without this, requests for non-existent users return faster (no hash
-      // computation), letting attackers distinguish valid from invalid emails.
-      await this.provider.validateCredentials({} as User, credentials)
+      // Constant-time delay to prevent timing attacks (don't call provider with fake user)
+      await new Promise(resolve => setTimeout(resolve, 100))
       return null
     }
 

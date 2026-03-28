@@ -282,7 +282,7 @@ describe('SessionGuard', () => {
       expect(await guard.check()).toBe(false)
     })
 
-    test('should call validateCredentials even when user not found (timing attack mitigation)', async () => {
+    test('should use constant-time delay when user not found (timing attack mitigation)', async () => {
       let validateCalled = false
       const trackingProvider = {
         ...provider,
@@ -294,7 +294,8 @@ describe('SessionGuard', () => {
       const guard = createGuard({ provider: trackingProvider })
       const result = await guard.validate({ email: 'nobody@test.com', password: 'x' })
       expect(result).toBeNull()
-      expect(validateCalled).toBe(true)
+      // Should NOT call validateCredentials with a fake user (breaks custom providers)
+      expect(validateCalled).toBe(false)
     })
   })
 

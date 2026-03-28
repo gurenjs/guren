@@ -442,7 +442,7 @@ export class Router<M extends string = never> {
   mount(app: Hono, options: RouterMountOptions = {}): void {
     for (const route of this.registry) {
       const resolvedMiddlewares = this.resolveMiddlewareNames(route.routeMiddlewareNames)
-      const handler = resolveHandler(route.handler, this.modelBindings, options.container, route.bindings)
+      const handler = resolveHandler(route.handler, this.modelBindings, options.container, route.bindings, route.path)
       const contractMiddleware = createContractValidationMiddleware(route)
       const allMiddlewares = contractMiddleware
         ? [...resolvedMiddlewares, ...route.middlewares, contractMiddleware, handler]
@@ -847,6 +847,7 @@ function resolveHandler(
   modelBindings: Map<string, ModelBindingResolver>,
   container?: Container,
   routeBindings?: Map<string, BindableModel>,
+  path?: string,
 ): MiddlewareHandler {
   if (isControllerAction(action)) {
     const [ControllerClass, methodName] = action
@@ -855,12 +856,8 @@ function resolveHandler(
       let controller: Controller
 
       if (inject && inject.length > 0 && container) {
-        try {
-          const deps = inject.map((key) => container.make(key))
-          controller = new ControllerClass(...deps)
-        } catch {
-          controller = new ControllerClass()
-        }
+        const deps = inject.map((key) => container.make(key))
+        controller = new ControllerClass(...deps)
       } else {
         controller = new ControllerClass()
       }
@@ -888,7 +885,7 @@ function resolveHandler(
       }
 
       const resolvedBindings = modelBindings.size > 0
-        ? await resolveModelBindings(c, modelBindings)
+        ? await resolveModelBindings(c, modelBindings, path)
         : []
 
       const args: unknown[] = resolvedBindings.length > 0 ? [c, ...resolvedBindings] : [c]
@@ -906,6 +903,7 @@ function resolveHandler(
 async function resolveModelBindings(
   c: Context,
   modelBindings: Map<string, ModelBindingResolver>,
+  path?: string,
 ): Promise<unknown[]> {
   if (modelBindings.size === 0) {
     return []
@@ -914,8 +912,13 @@ async function resolveModelBindings(
   const resolved: unknown[] = []
   const params = c.req.param()
 
-  for (const [paramName, resolver] of modelBindings) {
-    const value = params[paramName]
+  // Get path params in order from the route pattern
+  const pathParams = path?.match(/:([a-zA-Z0-9_-]+)/g)?.map(p => p.slice(1)) ?? []
+
+  for (const param of pathParams) {
+    const resolver = modelBindings.get(param)
+    if (!resolver) continue
+    const value = params[param]
     if (value !== undefined) {
       const model = await resolver(value)
       resolved.push(model)
