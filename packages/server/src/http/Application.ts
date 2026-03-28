@@ -4,6 +4,7 @@ import { Router } from '../mvc/Router'
 import { Container, type ServiceProvider } from '../container'
 import { ProviderManager } from '../container/ServiceProvider'
 import { AuthManager } from '../auth/AuthManager'
+import { AuthServiceProvider } from '../providers/AuthServiceProvider'
 import type { CreateSessionMiddlewareOptions } from './middleware/session'
 import { createSecurityHeaders, type SecurityHeadersOptions } from './middleware/security-headers'
 import { createHostAuthorizationMiddleware, type HostAuthorizationOptions } from './middleware/host-authorization'
@@ -193,6 +194,11 @@ export class Application {
     this.container.instance('hono', this.hono)
     this.container.instance('auth', this.authManager)
     this.container.instance('router', this.router)
+
+    // Auto-register AuthServiceProvider when auth option is provided
+    if (this.options.auth) {
+      this.providerManager.register(AuthServiceProvider)
+    }
 
     // Register user providers
     if (Array.isArray(this.options.providers)) {

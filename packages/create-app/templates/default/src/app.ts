@@ -5,7 +5,7 @@ import { registerWebRoutes } from '../routes/web.js'
 const app = createApp({
   routes: registerWebRoutes,
   providers: [DatabaseProvider],
-  hostAuthorization: {
+  hostAuthorization: process.env.NODE_ENV === 'production' ? false : {
     allowedHosts: ['localhost:*', '127.0.0.1:*'],
     exclude: ['/healthcheck', '/up'],
   },

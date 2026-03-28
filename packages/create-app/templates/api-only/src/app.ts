@@ -5,7 +5,7 @@ import { registerApiRoutes } from '../routes/api.js'
 const app = createApp({
   routes: registerApiRoutes,
   providers: [DatabaseProvider],
-  hostAuthorization: {
+  hostAuthorization: process.env.NODE_ENV === 'production' ? false : {
     allowedHosts: ['localhost:*', '127.0.0.1:*'],
     exclude: ['/health'],
   },

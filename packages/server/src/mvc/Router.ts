@@ -876,6 +876,7 @@ function isRouteContractOptions(value: unknown): value is RouteContractOptions<S
     || 'query' in value
     || 'body' in value
     || 'output' in value
+    || 'bind' in value
     || 'name' in value
     || 'middlewares' in value
     || 'summary' in value
