@@ -11,6 +11,7 @@
     "db:make": "bunx guren make:migration",
     "db:migrate": "bunx guren db:migrate",
     "db:seed": "bunx guren db:seed",
+    "build": "tsc --noEmit",
     "test": "bun test"
   },
   "dependencies": {

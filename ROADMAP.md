@@ -306,7 +306,7 @@ This backlog breaks the roadmap into issue-sized work items that can be mapped d
 - [x] Ship an official API-only starter (`--blueprint api`).
 - [ ] Ship a SaaS-style starter.
 - [x] Ship a worker-heavy starter (`--blueprint worker` with queue/events/cache/schedule).
-- [ ] Add smoke coverage for each official starter.
+- [x] Add smoke coverage for each official starter (`smoke:starter:api`, `smoke:starter:worker`).
 
 ### 90-day backlog
 

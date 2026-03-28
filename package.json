@@ -32,6 +32,8 @@
     "audit:starter-template": "bun run ./scripts/smoke/starter-template-audit.ts",
     "audit:docs": "bun run ./scripts/smoke/docs-audit.ts",
     "smoke:starter": "bun run ./scripts/smoke/fresh-app.ts",
+    "smoke:starter:api": "GUREN_SMOKE_BLUEPRINT=api bun run ./scripts/smoke/fresh-app.ts",
+    "smoke:starter:worker": "GUREN_SMOKE_BLUEPRINT=worker bun run ./scripts/smoke/fresh-app.ts",
     "smoke:starter:packed": "GUREN_SMOKE_INSTALL_MODE=packed bun run ./scripts/smoke/fresh-app.ts",
     "smoke:upgrade-existing-app": "bun run ./scripts/smoke/upgrade-existing-app.ts",
     "smoke:golden-path": "bash ./scripts/smoke-golden-path.sh",

@@ -355,8 +355,8 @@ export class ApplicationCache {
         {
           path: 'app/Providers/EventProvider.ts',
           contents: `import { ServiceProvider, type EventManager } from '@guren/core'
-import OrderPlaced from '../Events/OrderPlaced.js'
-import SendOrderReceiptListener from '../Listeners/SendOrderReceiptListener.js'
+import { OrderPlaced } from '../Events/OrderPlaced.js'
+import { SendOrderReceiptListener } from '../Listeners/SendOrderReceiptListener.js'
 
 export default class EventProvider extends ServiceProvider {
   register(): void {}
@@ -435,7 +435,7 @@ export default class MailProvider extends ServiceProvider {
         {
           path: 'app/Providers/QueueProvider.ts',
           contents: `import { ServiceProvider, MemoryDriver, createQueueManager, registerJob, type QueueManager } from '@guren/core'
-import ProcessWelcomeSequenceJob from '../Jobs/ProcessWelcomeSequenceJob.js'
+import { ProcessWelcomeSequenceJob } from '../Jobs/ProcessWelcomeSequenceJob.js'
 
 export default class QueueProvider extends ServiceProvider {
   register(): void {

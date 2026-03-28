@@ -75,8 +75,14 @@ jobs:
       - name: Bundle budget audit
         run: bun run audit:bundle-budgets
 
-      - name: Fresh app smoke
+      - name: Fresh app smoke (default)
         run: bun run smoke:starter
+
+      - name: Fresh app smoke (api)
+        run: bun run smoke:starter:api
+
+      - name: Fresh app smoke (worker)
+        run: bun run smoke:starter:worker
 
       - name: Packed artifact audit
         run: bun run smoke:starter:packed
