@@ -942,8 +942,17 @@ const queueRetryCommand = defineCommand({
       type: 'string',
       description: 'Filter by queue name (with --all)',
     },
+    force: {
+      type: 'boolean',
+      description: 'Run in production without confirmation',
+      alias: 'f',
+    },
   },
   async run({ args }) {
+    if (!ensureDestructiveCommandAllowed(args.force)) {
+      return
+    }
+
     if (args.all) {
       await retryAllFailedJobs(args.queue)
     } else if (args.id) {
@@ -965,6 +974,11 @@ const queueFlushCommand = defineCommand({
       type: 'string',
       description: 'Filter by queue name',
     },
+    force: {
+      type: 'boolean',
+      description: 'Run in production without confirmation',
+      alias: 'f',
+    },
     dryRun: {
       type: 'boolean',
       alias: 'd',
@@ -972,6 +986,10 @@ const queueFlushCommand = defineCommand({
     },
   },
   async run({ args }) {
+    if (!ensureDestructiveCommandAllowed(args.force)) {
+      return
+    }
+
     if (args.dryRun) {
       const queueFilter = args.queue ? ` on queue "${args.queue}"` : ''
       consola.info(`[dry-run] Would delete all failed jobs${queueFilter}.`)

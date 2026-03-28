@@ -175,6 +175,60 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Add-on composition: verify multiple resources and infrastructure add-ons
+# compose cleanly together.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Step 9: Add a second resource scaffold (comments)
+# ---------------------------------------------------------------------------
+step 9 "Add resource scaffold (comments)"
+
+(cd "$APP_DIR" && bun "$CLI_BIN" add resource comments --fields "body:text,postId:number")
+
+# ---------------------------------------------------------------------------
+# Step 10: Add infrastructure add-on — queue
+# ---------------------------------------------------------------------------
+step 10 "Add infrastructure add-on (queue)"
+
+(cd "$APP_DIR" && bun "$CLI_BIN" add queue)
+
+# ---------------------------------------------------------------------------
+# Step 11: Add infrastructure add-on — mail
+# ---------------------------------------------------------------------------
+step 11 "Add infrastructure add-on (mail)"
+
+(cd "$APP_DIR" && bun "$CLI_BIN" add mail)
+
+# ---------------------------------------------------------------------------
+# Step 12: Add infrastructure add-on — events
+# ---------------------------------------------------------------------------
+step 12 "Add infrastructure add-on (events)"
+
+(cd "$APP_DIR" && bun "$CLI_BIN" add events)
+
+# ---------------------------------------------------------------------------
+# Step 13: Re-run codegen after all add-ons
+# ---------------------------------------------------------------------------
+step 13 "Re-run codegen (post add-on composition)"
+
+(cd "$APP_DIR" && bun "$CLI_BIN" codegen --force)
+
+# ---------------------------------------------------------------------------
+# Step 14: Re-run typecheck after all add-ons
+# ---------------------------------------------------------------------------
+step 14 "Re-run typecheck (post add-on composition)"
+
+(cd "$APP_DIR" && bun run typecheck)
+
+# ---------------------------------------------------------------------------
+# Step 15: Re-run build after all add-ons
+# ---------------------------------------------------------------------------
+step 15 "Re-run build (post add-on composition)"
+
+(cd "$APP_DIR" && bun run build)
+
+# ---------------------------------------------------------------------------
 # Done
 # ---------------------------------------------------------------------------
 echo ""
