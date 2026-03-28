@@ -131,7 +131,7 @@ jobs:
         run: bun run build
 
       - name: Install Playwright browsers
-        run: bunx --cwd examples/blog playwright install --with-deps chromium
+        run: cd examples/blog && bunx playwright install --with-deps chromium
 
       - name: Run migrations and seed
         run: |

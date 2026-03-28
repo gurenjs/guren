@@ -2,7 +2,7 @@
 
 ## Supported: AWS Lambda
 
-Guren provides first-class AWS Lambda support via `@guren/server/lambda`. The adapter handles API Gateway and ALB events, SQS queue processing, and EventBridge scheduled tasks.
+Guren provides first-class AWS Lambda support via the `createLambdaHandler` adapter. The adapter handles API Gateway and ALB events, SQS queue processing, and EventBridge scheduled tasks.
 
 See the full guide: [docs/en/guides/serverless.md](../../docs/en/guides/serverless.md)
 

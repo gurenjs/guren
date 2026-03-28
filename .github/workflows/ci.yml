@@ -100,6 +100,8 @@ jobs:
           bun-version: '1.3.11'
       - run: bun install --frozen-lockfile
       - run: bun run build
+      - name: Generate route types
+        run: bun run build:routes
       - run: bun run typecheck
       - name: Run tests (no Redis)
         run: bun run test:bun
@@ -136,7 +138,7 @@ jobs:
         run: bun run build
 
       - name: Install Playwright browsers
-        run: bunx --cwd examples/blog playwright install --with-deps chromium
+        run: cd examples/blog && bunx playwright install --with-deps chromium
 
       - name: Run migrations and seed
         run: |
