@@ -98,9 +98,7 @@ export class ProviderManager {
         ? providerOrClass
         : new providerOrClass(this.container)
 
-    // Handle deferred providers
-    // NOTE: Deferred provider resolution is not yet wired into Container.make().
-    // Currently deferred providers must be loaded explicitly via loadDeferredProvider().
+    // Deferred providers are loaded on-demand when Container.make() is called
     if (provider.isDeferred()) {
       for (const service of provider.provides()) {
         this.deferredProviders.set(service, provider)
@@ -147,6 +145,12 @@ export class ProviderManager {
       }
     }
     this.allBooted = true
+
+    // Wire deferred provider resolution into Container.make()
+    if (this.deferredProviders.size > 0) {
+      this.container.deferredProviderLoader = (service: string) =>
+        this.loadDeferredProvider(service)
+    }
   }
 
   /**

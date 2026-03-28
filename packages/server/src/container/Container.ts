@@ -34,6 +34,9 @@ export class Container {
   protected scopedInstances: Map<string, unknown>[] = []
   protected fakes: Map<string, unknown> = new Map()
 
+  /** @internal Used by ProviderManager to resolve deferred providers on demand */
+  deferredProviderLoader: ((service: string) => Promise<void>) | null = null
+
   /**
    * Bind a service to the container.
    * Each resolution creates a new instance.
@@ -100,8 +103,19 @@ export class Container {
       return this.fakes.get(resolvedKey)
     }
 
-    // Check binding exists
-    const binding = this.bindings.get(resolvedKey)
+    // Check binding exists — try deferred providers if not found
+    let binding = this.bindings.get(resolvedKey)
+    if (!binding && this.deferredProviderLoader) {
+      // Synchronously trigger deferred provider loading.
+      // The loader registers the provider which adds bindings to this container.
+      // We use a micro-optimization: call the loader and let it resolve synchronously
+      // if the provider's register() is synchronous (which is the common case).
+      let resolved = false
+      this.deferredProviderLoader(resolvedKey).then(() => { resolved = true })
+      if (resolved) {
+        binding = this.bindings.get(resolvedKey)
+      }
+    }
     if (!binding) {
       throw new Error(`Service "${key}" not found in container`)
     }

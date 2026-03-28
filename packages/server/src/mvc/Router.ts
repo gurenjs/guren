@@ -733,6 +733,25 @@ function createContractHandler<
       return result as RouteResult
     }
 
+    // If the handler returned a Response, validate the JSON body — not the Response object
+    if (result instanceof Response) {
+      try {
+        const cloned = result.clone()
+        const body = await cloned.json()
+        const output = options.output.safeParse(body)
+        if (!output.success) {
+          throw new Error(
+            `Route output validation failed for ${options.name ?? path}: ${JSON.stringify(formatValidationErrors(output.error))}`,
+          )
+        }
+      } catch (err) {
+        if (err instanceof Error && err.message.includes('output validation failed')) throw err
+        // Non-JSON response — skip output validation
+      }
+      return result as RouteResult
+    }
+
+    // Plain object return — validate directly
     const output = options.output.safeParse(result)
     if (output.success) {
       return output.data as RouteResult
