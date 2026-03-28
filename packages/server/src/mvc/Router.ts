@@ -217,9 +217,17 @@ export class Router<M extends string = never> {
   }
 
   bind(param: string, modelOrResolver: BindableModel | ModelBindingResolver): this {
-    if (typeof modelOrResolver === 'function') {
+    if (typeof modelOrResolver === 'function' && 'findOrFail' in modelOrResolver) {
+      // Model class with static findOrFail — wrap in resolver
+      const model = modelOrResolver as unknown as BindableModel
+      this.modelBindings.set(param, async (value: string) => {
+        return model.findOrFail(value)
+      })
+    } else if (typeof modelOrResolver === 'function') {
+      // Custom resolver function
       this.modelBindings.set(param, modelOrResolver as ModelBindingResolver)
     } else {
+      // Object with findOrFail (e.g., model instance or plain object)
       const model = modelOrResolver
       this.modelBindings.set(param, async (value: string) => {
         return model.findOrFail(value)
@@ -435,7 +443,11 @@ export class Router<M extends string = never> {
     for (const route of this.registry) {
       const resolvedMiddlewares = this.resolveMiddlewareNames(route.routeMiddlewareNames)
       const handler = resolveHandler(route.handler, this.modelBindings, options.container, route.bindings)
-      mountRoute(app, route.method, route.path, ...resolvedMiddlewares, ...route.middlewares, handler)
+      const contractMiddleware = createContractValidationMiddleware(route)
+      const allMiddlewares = contractMiddleware
+        ? [...resolvedMiddlewares, ...route.middlewares, contractMiddleware, handler]
+        : [...resolvedMiddlewares, ...route.middlewares, handler]
+      mountRoute(app, route.method, route.path, ...allMiddlewares)
     }
   }
 
@@ -754,6 +766,61 @@ function validationErrorResponse(error: ValidationErrorLike, status: number): Re
     status,
     headers: { 'Content-Type': 'application/json; charset=utf-8' },
   })
+}
+
+function createContractValidationMiddleware(route: RegisteredRoute): MiddlewareHandler | null {
+  // Only apply contract validation for controller actions with schemas
+  if (!isControllerAction(route.handler)) {
+    return null
+  }
+
+  const schemas = route.schemas
+  if (!schemas || (!schemas.params && !schemas.query && !schemas.body && !schemas.output)) {
+    return null
+  }
+
+  return async (c, next) => {
+    if (schemas.params) {
+      const result = parseRouteSegment(schemas.params, c.req.param(), 400)
+      if (result instanceof Response) {
+        return result
+      }
+    }
+
+    if (schemas.query) {
+      const result = parseRouteSegment(schemas.query, c.req.query(), 422)
+      if (result instanceof Response) {
+        return result
+      }
+    }
+
+    if (schemas.body) {
+      const payload = await parseRequestPayload(c)
+      const result = parseRouteSegment(schemas.body, payload, 422)
+      if (result instanceof Response) {
+        return result
+      }
+    }
+
+    await next()
+
+    // Validate output schema against the response body
+    if (schemas.output && c.res) {
+      try {
+        const cloned = c.res.clone()
+        const body = await cloned.json()
+        const parsed = schemas.output.safeParse(body)
+        if (!parsed.success) {
+          const errors = 'flatten' in parsed.error && typeof (parsed.error as any).flatten === 'function'
+            ? (parsed.error as any).flatten()
+            : parsed.error
+          c.res = c.json({ message: 'Response validation failed', errors }, 500)
+        }
+      } catch {
+        // Non-JSON response or parse error — skip output validation
+      }
+    }
+  }
 }
 
 function resolveHandler(
