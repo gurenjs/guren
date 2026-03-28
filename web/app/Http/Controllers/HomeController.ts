@@ -50,7 +50,11 @@ function getHighlightedExamples(): Promise<Record<string, string>> {
         const html = await codeToHtml(code, { lang: 'typescript', theme: SHIKI_THEME })
         return [key, html] as const
       }),
-    ).then(Object.fromEntries)
+    ).then(Object.fromEntries).catch((err) => {
+      // Clear cache on failure so the next request can retry
+      highlightedPromise = null
+      throw err
+    })
   }
   return highlightedPromise
 }

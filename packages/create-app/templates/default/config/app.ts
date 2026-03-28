@@ -20,12 +20,11 @@ function hasMigrations(): boolean {
 export async function bootModels(): Promise<void> {
   if (bootstrapped) return
 
-  if (!hasMigrations()) {
-    bootstrapped = true
-    return
-  }
-
+  // Always initialize ORM (even without migrations, models need a connection).
+  // Only run seeders when migrations exist.
   await configureOrm()
-  await seedDatabase()
+  if (hasMigrations()) {
+    await seedDatabase()
+  }
   bootstrapped = true
 }

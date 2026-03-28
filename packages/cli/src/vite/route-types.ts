@@ -109,6 +109,8 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
     async configResolved(config: ResolvedConfig) {
       appRoot = resolve(config.root, options.appRoot ?? '.')
       logger = config.logger
+      // Skip route type generation in CI (codegen runs as a separate build step)
+      if (process.env.CI) return
       await enqueueGeneration(appRoot)
     },
     async handleHotUpdate(ctx: HmrContext) {
