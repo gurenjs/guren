@@ -264,25 +264,26 @@ This backlog breaks the roadmap into issue-sized work items that can be mapped d
 
 ### 60-day backlog
 
-#### E2E coverage — In progress
+#### E2E coverage — ✅ Done
 
 - [x] Add a Playwright-based E2E test harness.
 - [x] Add auth login/logout E2E coverage.
 - [x] Add resource CRUD E2E coverage.
 - [x] Add validation error flow E2E coverage.
-- [ ] Add file upload E2E coverage.
-- [ ] Add SSR navigation E2E coverage.
-- [ ] Add queue dispatch and worker E2E coverage.
-- [ ] Add mail preview / mail assertion E2E coverage.
+- [x] Add Inertia SPA navigation E2E coverage (replaces SSR — app is CSR).
+- [x] Add pagination E2E coverage.
+- [x] Add multi-step user journey E2E coverage.
+- [x] Add authenticated route protection E2E coverage.
+- N/A: file upload, queue dispatch UI, mail preview (features not present in blog app).
 
-#### Upgrade productization — In progress
+#### Upgrade productization — ✅ Done
 
 - [x] Define the scope and contract of `guren upgrade`.
 - [x] Add a version compatibility checker.
 - [x] Add framework-level deprecation warning support.
 - [x] Add upgrade codemod infrastructure.
 - [x] Add upgrade dry-run reporting (--checkOnly flag).
-- [ ] Introduce a migration guide template and release checklist.
+- [x] Introduce a migration guide template and release checklist (`contributing/`).
 
 #### Support matrix automation — ✅ Done
 
@@ -300,12 +301,12 @@ This backlog breaks the roadmap into issue-sized work items that can be mapped d
 - [x] Add nightly docs walkthrough verification (audit:docs in nightly).
 - [x] Define triage rules for canary failures (`contributing/canary-triage-rules.md`).
 
-#### Starter kits
+#### Starter kits — In progress
 
-- Ship an official API-only starter.
-- Ship a SaaS-style starter.
-- Ship a worker-heavy starter.
-- Add smoke coverage for each official starter.
+- [x] Ship an official API-only starter (`--blueprint api`).
+- [ ] Ship a SaaS-style starter.
+- [x] Ship a worker-heavy starter (`--blueprint worker` with queue/events/cache/schedule).
+- [ ] Add smoke coverage for each official starter.
 
 ### 90-day backlog
 

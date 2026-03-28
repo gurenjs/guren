@@ -1,9 +1,10 @@
 import { cp, readFile, writeFile } from 'node:fs/promises'
 import { basename, join, relative } from 'node:path'
+import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { toPackageName, toTitleCase } from './utils'
 
-export const APP_BLUEPRINTS = ['default', 'blog'] as const
+export const APP_BLUEPRINTS = ['default', 'api', 'blog', 'worker'] as const
 export type AppBlueprintName = (typeof APP_BLUEPRINTS)[number]
 export type RenderingMode = 'spa' | 'ssr'
 
@@ -57,6 +58,12 @@ const BLOG_TRANSFORM_FILES = [
   'resources/js/components/Layout.tsx',
 ]
 
+const API_TRANSFORM_FILES = [
+  'README.md',
+  'package.json',
+  'bin/serve.ts',
+]
+
 const BLOG_OVERLAY_EXCLUDES = [
   '.env',
   '.guren',
@@ -72,6 +79,7 @@ const BLOG_OVERLAY_EXCLUDES = [
 
 const defaultTemplateDir = fileURLToPath(new URL('../templates/default', import.meta.url))
 const defaultSsrOverlayDir = fileURLToPath(new URL('../templates/default-ssr', import.meta.url))
+const apiTemplateDir = fileURLToPath(new URL('../templates/api-only', import.meta.url))
 const exampleBlogDir = fileURLToPath(new URL('../../../examples/blog', import.meta.url))
 
 const blueprintRegistry: Record<AppBlueprintName, AppBlueprint> = {
@@ -85,6 +93,15 @@ const blueprintRegistry: Record<AppBlueprintName, AppBlueprint> = {
       ssr: [{ dir: defaultSsrOverlayDir }],
     },
     transformFiles: DEFAULT_TRANSFORM_FILES,
+  },
+  api: {
+    name: 'api',
+    description: 'API-only starter — no Inertia, no React, no frontend assets.',
+    baseTemplate: {
+      dir: apiTemplateDir,
+    },
+    overlayTemplateDirs: {},
+    transformFiles: API_TRANSFORM_FILES,
   },
   blog: {
     name: 'blog',
@@ -139,6 +156,30 @@ const blueprintRegistry: Record<AppBlueprintName, AppBlueprint> = {
           )
           await writeFile(mainPath, updated, 'utf8')
         }
+      }
+    },
+  },
+  worker: {
+    name: 'worker',
+    description: 'Full-stack app pre-configured with queue, events, cache, and scheduling',
+    baseTemplate: {
+      dir: defaultTemplateDir,
+    },
+    overlayTemplateDirs: {
+      ssr: [{ dir: defaultSsrOverlayDir }],
+    },
+    transformFiles: DEFAULT_TRANSFORM_FILES,
+    postScaffold: async ({ destination }) => {
+      const { runBlueprint } = await import('@guren/cli')
+      const originalCwd = process.cwd()
+      try {
+        process.chdir(destination)
+        await runBlueprint('queue', { force: true })
+        await runBlueprint('events', { force: true })
+        await runBlueprint('cache', { force: true })
+        await runBlueprint('schedule', { force: true })
+      } finally {
+        process.chdir(originalCwd)
       }
     },
   },
