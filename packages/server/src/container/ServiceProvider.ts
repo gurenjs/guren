@@ -72,6 +72,7 @@ export class ProviderManager {
   protected registered: Set<ServiceProvider> = new Set()
   protected booted: Set<ServiceProvider> = new Set()
   protected deferredProviders: Map<string, ServiceProvider> = new Map()
+  private allBooted = false
 
   constructor(protected container: Container) {}
 
@@ -81,12 +82,25 @@ export class ProviderManager {
   register(
     providerOrClass: ServiceProvider | (new (container: Container) => ServiceProvider)
   ): this {
+    if (this.allBooted) {
+      const name =
+        providerOrClass instanceof ServiceProvider
+          ? providerOrClass.constructor.name
+          : providerOrClass.name
+      throw new Error(
+        `Cannot register provider "${name}" after bootAll() has been called. ` +
+        'Register all providers before booting the application.',
+      )
+    }
+
     const provider =
       providerOrClass instanceof ServiceProvider
         ? providerOrClass
         : new providerOrClass(this.container)
 
     // Handle deferred providers
+    // NOTE: Deferred provider resolution is not yet wired into Container.make().
+    // Currently deferred providers must be loaded explicitly via loadDeferredProvider().
     if (provider.isDeferred()) {
       for (const service of provider.provides()) {
         this.deferredProviders.set(service, provider)
@@ -132,6 +146,7 @@ export class ProviderManager {
         this.booted.add(provider)
       }
     }
+    this.allBooted = true
   }
 
   /**

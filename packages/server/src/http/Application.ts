@@ -263,14 +263,14 @@ export class Application {
     this.mountSecurityDefaults()
     await this.providerManager.registerAll()
 
-    await this.options.boot?.(this.hono)
-
     // If no AuthServiceProvider was registered (no options.auth), attach
     // auth context as a fallback so manual session + requireAuthenticated works.
-    // Runs after boot() so user-mounted session middleware is already in place.
+    // Runs before boot() callback so routes registered there have auth context.
     if (!this.options.auth) {
       this.hono.use('*', attachAuthContext((ctx) => this.authManager.createAuthContext(ctx)))
     }
+
+    await this.options.boot?.(this.hono)
 
     await this.mountRoutes()
     await this.mountMcpEndpoint()

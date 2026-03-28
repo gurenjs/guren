@@ -344,6 +344,11 @@ export class TestApp {
    * @guren/server installed), a lightweight Hono-based fallback is used.
   */
   static async create(options: TestAppOptions = {}): Promise<TestApp> {
+    // Enable test mode so that attachAuthContext() accepts the X-Testing-User header.
+    if (typeof process !== 'undefined') {
+      process.env.GUREN_TESTING = '1'
+    }
+
     let Application: ApplicationConstructor | undefined
 
     try {
@@ -379,6 +384,7 @@ export class TestApp {
     fetchFn: (request: Request) => Response | Promise<Response>,
     baseUrl = 'http://localhost',
   ): TestApp {
+    process.env.GUREN_TESTING = '1'
     return new TestApp(
       (req) => Promise.resolve(fetchFn(req)),
       baseUrl,
