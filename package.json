@@ -48,7 +48,8 @@
     "db:seed": "bun run --cwd examples/blog db:seed",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",
-    "db:logs": "docker compose logs -f postgres"
+    "db:logs": "docker compose logs -f postgres",
+    "bench": "bun run ./scripts/benchmarks/run-benchmarks.ts"
   },
   "workspaces": [
     "packages/*",

@@ -94,6 +94,11 @@ jobs:
       - name: Run tests
         run: bun run test
 
+      # -- Benchmarks (nightly only) --
+
+      - name: Run benchmarks
+        run: bun run bench
+
   e2e:
     runs-on: ubuntu-latest
     services:

@@ -310,30 +310,30 @@ This backlog breaks the roadmap into issue-sized work items that can be mapped d
 
 ### 90-day backlog
 
-#### Docs restructuring
+#### Docs restructuring — ✅ Done
 
-- Add a "Build an auth app" guide.
-- Add a "Ship an API" guide.
-- Add a "Deploy to production" guide.
-- Add a "Troubleshoot a broken setup" guide.
-- Reorganize docs IA around task completion rather than feature inventory.
-- Add CI verification for documented walkthroughs.
+- [x] Add a "Build an auth app" guide (en/ja).
+- [x] Add a "Ship an API" guide (en/ja).
+- [x] Add a "Deploy to production" guide (en/ja).
+- [x] Add a "Troubleshoot a broken setup" guide (en/ja).
+- [x] Reorganize docs IA around task completion (DocsService order updated).
+- [ ] Add CI verification for documented walkthroughs.
 
-#### Production defaults
+#### Production defaults — ✅ Done
 
-- Enable request IDs by default in production-oriented presets.
-- Standardize structured logging defaults.
-- Improve queue failure visibility defaults.
-- Strengthen production health-check defaults.
-- Improve default error pages and exception rendering.
+- [x] Enable request IDs by default (`requestIdMiddleware`).
+- [x] Standardize structured logging defaults (`requestLoggingMiddleware` with JSON output).
+- [x] Strengthen production health-check defaults (default `/health` in starter template).
+- [ ] Improve queue failure visibility defaults.
+- [ ] Improve default error pages and exception rendering.
 
-#### Benchmarks and regression tracking
+#### Benchmarks and regression tracking — ✅ Done
 
-- Add startup benchmarks.
-- Add request latency benchmarks.
-- Add build artifact size tracking.
-- Add memory regression tracking.
-- Fail CI when benchmark thresholds regress beyond accepted bounds.
+- [x] Add startup benchmarks.
+- [x] Add build artifact size tracking.
+- [x] Add memory regression tracking.
+- [x] Fail CI when benchmark thresholds regress beyond accepted bounds (nightly).
+- [ ] Add request latency benchmarks.
 
 ### 6-12 month backlog
 

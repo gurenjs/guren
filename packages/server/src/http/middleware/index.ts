@@ -84,3 +84,5 @@ export {
   createForceHttpsMiddleware,
   type ForceHttpsOptions,
 } from './force-https'
+export { requestIdMiddleware } from './request-id'
+export { requestLoggingMiddleware } from './request-logging'

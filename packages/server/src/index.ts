@@ -183,6 +183,9 @@ export {
   isSafeRedirectUrl,
   // Force HTTPS
   createForceHttpsMiddleware,
+  // Request ID & Logging
+  requestIdMiddleware,
+  requestLoggingMiddleware,
 }
   from './http/middleware'
 export { AUTH_CONTEXT_KEY } from './http/middleware/auth'
@@ -215,7 +218,7 @@ export type {
   RedirectSafetyOptions,
   // Force HTTPS types
   ForceHttpsOptions,
-} from './http/middleware'
+}  from './http/middleware'
 // Validation (advanced)
 export {
   Validator,

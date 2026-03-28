@@ -125,6 +125,10 @@ const FEATURED_DOC_ORDER = [
   'operations',
 
   // Reference
+  'build-auth-app',
+  'ship-api',
+  'deploy-production',
+  'troubleshoot',
   'cli',
   'support-matrix',
   'upgrading',
