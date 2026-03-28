@@ -143,9 +143,10 @@ jobs:
         run: cd examples/blog && bunx playwright install --with-deps chromium
 
       - name: Run migrations and seed
+        working-directory: examples/blog
         run: |
-          bun run --cwd examples/blog db:migrate
-          bun run --cwd examples/blog db:seed --force
+          bun ../../packages/cli/src/bin.ts db:migrate
+          bun ../../packages/cli/src/bin.ts db:seed --force
 
       - name: Run E2E tests
         run: bun run --cwd examples/blog e2e
