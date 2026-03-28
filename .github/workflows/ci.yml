@@ -31,6 +31,7 @@ jobs:
           --health-retries 5
     env:
       REDIS_URL: redis://localhost:6379
+      APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
 
     steps:
       - name: Checkout repository
@@ -99,6 +100,8 @@ jobs:
   sqlite-smoke:
     runs-on: ubuntu-latest
     # No redis service — verifies all tests gracefully skip when Redis is unavailable
+    env:
+      APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
     steps:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
@@ -130,6 +133,7 @@ jobs:
           --health-retries 5
     env:
       DATABASE_URL: postgres://guren:guren@localhost:54322/guren
+      APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
 
     steps:
       - uses: actions/checkout@v6
@@ -148,6 +152,11 @@ jobs:
 
       - name: Install Playwright browsers
         run: cd examples/blog && bunx playwright install --with-deps chromium
+
+      - name: Set up blog .env
+        run: |
+          cp examples/blog/.env.example examples/blog/.env
+          sed -i "s/^APP_KEY=$/APP_KEY=$APP_KEY/" examples/blog/.env
 
       - name: Run migrations and seed
         working-directory: examples/blog

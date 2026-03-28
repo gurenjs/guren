@@ -1,3 +1,5 @@
+process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+
 import { describe, expect, it } from 'bun:test'
 import { Hono } from 'hono'
 import {
