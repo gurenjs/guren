@@ -505,18 +505,19 @@ export class TestApp {
  * ```
  */
 export async function factory<T>(
-  factoryClass: { create(overrides?: Partial<T>): Promise<T> },
+  factoryClass: new () => { create(overrides?: Partial<T>): Promise<T> },
   count?: number,
 ): Promise<T | T[]> {
+  const instance = new factoryClass()
   if (count !== undefined && count > 0) {
     const results: T[] = []
     for (let i = 0; i < count; i++) {
-      results.push(await factoryClass.create())
+      results.push(await instance.create())
     }
     return results
   }
 
-  return factoryClass.create()
+  return instance.create()
 }
 
 // --- Internal helpers ---

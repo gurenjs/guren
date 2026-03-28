@@ -398,6 +398,13 @@ export class TestRequestBuilder {
       this._headers['Cookie'] = cookieStr
     }
 
+    if (this._user) {
+      this._headers['X-Testing-User'] = JSON.stringify(this._user)
+    }
+    if (Object.keys(this._session).length > 0) {
+      this._headers['X-Testing-Session'] = JSON.stringify(this._session)
+    }
+
     const request = new Request(this.url, {
       method: this.method,
       headers: this._headers,
