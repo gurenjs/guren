@@ -355,7 +355,7 @@ Available AI-powered skills that Claude can use automatically:
 
 | Skill | Trigger Words | Purpose |
 |-------|---------------|---------|
-| `dev-workflow` | "build", "test", "typecheck", "pr check", "dev server" | Build, test (smart/full), type check, pre-PR validation, dev server |
+| `dev-workflow` | "build", "test", "typecheck", "pr check", "e2e", "dev server" | Build, test (smart/full), type check, pre-PR validation, E2E tests, dev server |
 | `scaffold` | "create a controller", "make a job", "new event" | Generate individual components using `bunx guren make:*` |
 | `feature` | "full feature", "CRUD", "everything for" | Generate complete CRUD feature with all components at once |
 | `db-manage` | "database", "migration", "reset", "rollback" | Database operations (migrate, rollback, seed, reset) with safety checks |

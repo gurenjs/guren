@@ -1,6 +1,6 @@
 ---
 name: dev-workflow
-description: Development workflow commands for the Guren monorepo. Handles building packages, running tests (smart targeted or full suite), type checking, pre-PR validation, and dev server startup. Use when user says "build", "test", "typecheck", "type check", "run tests", "test my changes", "quick test", "pr check", "pre-PR", "ready for PR", "dev server", "start server".
+description: Development workflow commands for the Guren monorepo. Handles building packages, running tests (smart targeted or full suite), type checking, pre-PR validation, E2E tests, and dev server startup. Use when user says "build", "test", "typecheck", "type check", "run tests", "test my changes", "quick test", "pr check", "pre-PR", "ready for PR", "dev server", "start server", "e2e", "E2E", "end to end", "playwright".
 ---
 
 # Development Workflow Skill
@@ -94,6 +94,29 @@ On success, confirm:
 - All packages built successfully
 - No type errors found
 - All tests passing
+
+### E2E Tests (default for "e2e", "playwright", "end to end")
+
+Runs Playwright E2E tests against the blog example app.
+
+**Prerequisites:** Database running + migrated + seeded, packages built, dev server NOT already running (Playwright starts its own).
+
+```bash
+cd examples/blog && bun run e2e
+```
+
+Opens Playwright UI for debugging:
+```bash
+cd examples/blog && bun run e2e:ui
+```
+
+**Known flaky tests:**
+- Validation tests (Inertia XHR round-trip timing) are flaky in CI. They are skipped via `test.skip(!!process.env.CI)` but may occasionally fail locally too. If only validation tests fail, it is safe to proceed.
+
+**On failure:**
+1. Check if the failure is a known flaky test (validation spec)
+2. If not, check the error screenshot in `examples/blog/test-results/`
+3. Ensure the database is running and seeded: `bun run db:up && bun run db:migrate && bun run db:seed`
 
 ### Dev Server
 
