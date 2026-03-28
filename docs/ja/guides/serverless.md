@@ -48,7 +48,7 @@ SQS メッセージを Guren のジョブとして処理します。**部分バ�
 
 ```typescript
 import { SQSClient } from '@aws-sdk/client-sqs'
-import { createSqsAdapter, SqsDriver, setQueueDriver } from '@guren/core/queue'
+import { createSqsAdapter, SqsDriver, setQueueDriver } from '@guren/core'
 
 const adapter = createSqsAdapter(new SQSClient({ region: 'ap-northeast-1' }))
 setQueueDriver(new SqsDriver(adapter, {
@@ -99,7 +99,7 @@ if (isLambda()) {
 デフォルトの `ScryptHasher` は `Bun.password` を使うため Lambda では動作しません。`NodeHasher` を使います。
 
 ```typescript
-import { NodeHasher } from '@guren/core/auth'
+import { NodeHasher } from '@guren/core'
 
 // AuthProvider 内で:
 container.instance('hash', new NodeHasher())
@@ -113,7 +113,7 @@ container.instance('hash', new NodeHasher())
 Lambda は `stderr` を自動で CloudWatch に送信します。JSON 形式のコンソールロギングを使います。
 
 ```typescript
-import { LogManager } from '@guren/core/logging'
+import { LogManager } from '@guren/core'
 
 const log = new LogManager({
   default: 'console',

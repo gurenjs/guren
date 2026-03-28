@@ -48,7 +48,7 @@ Configure the SQS driver in your queue provider:
 
 ```typescript
 import { SQSClient } from '@aws-sdk/client-sqs'
-import { createSqsAdapter, SqsDriver, setQueueDriver } from '@guren/core/queue'
+import { createSqsAdapter, SqsDriver, setQueueDriver } from '@guren/core'
 
 const adapter = createSqsAdapter(new SQSClient({ region: 'ap-northeast-1' }))
 setQueueDriver(new SqsDriver(adapter, {
@@ -99,7 +99,7 @@ if (isLambda()) {
 The default `ScryptHasher` uses `Bun.password` — unavailable on Lambda's Node.js runtime. Use `NodeHasher` instead:
 
 ```typescript
-import { NodeHasher } from '@guren/core/auth'
+import { NodeHasher } from '@guren/core'
 
 // In your AuthProvider:
 container.instance('hash', new NodeHasher())
@@ -113,7 +113,7 @@ container.instance('hash', new NodeHasher())
 Lambda captures `stderr` to CloudWatch automatically. Use JSON-formatted console logging:
 
 ```typescript
-import { LogManager } from '@guren/core/logging'
+import { LogManager } from '@guren/core'
 
 const log = new LogManager({
   default: 'console',
