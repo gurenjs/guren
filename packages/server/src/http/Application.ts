@@ -201,7 +201,13 @@ export class Application {
     // even when apps manually wire sessions without the auth option.
     if (!this.authManager.guardNames().length) {
       this.authManager.registerGuard('web', ({ ctx, session, manager }) => {
-        const provider = manager.getProvider('users')
+        // Use 'users' provider if registered; otherwise create a no-op guard
+        // that always returns unauthenticated (apps must register a provider
+        // for actual auth to work).
+        let provider: any
+        try { provider = manager.getProvider('users') } catch {
+          provider = { retrieveById: async () => null, retrieveByCredentials: async () => null, validateCredentials: async () => false }
+        }
         return new SessionGuard({ provider, session })
       })
       this.authManager.setDefaultGuard('web')
