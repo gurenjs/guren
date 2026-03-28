@@ -1,11 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 
-const { codeToHtml } = vi.hoisted(() => ({
-  codeToHtml: vi.fn(async () => '<pre>code</pre>'),
-}))
-vi.mock('shiki', () => ({ codeToHtml }))
+const mockCodeToHtml = vi.fn(async () => '<pre>code</pre>')
+vi.mock('shiki', () => ({ codeToHtml: mockCodeToHtml }))
 
-import { renderMarkdownToHtml } from '../../app/Services/MarkdownRenderer.js'
+const { renderMarkdownToHtml } = await import('../../app/Services/MarkdownRenderer.js')
 
 describe('renderMarkdownToHtml', () => {
   it('renders alert blocks', async () => {
@@ -17,6 +15,6 @@ describe('renderMarkdownToHtml', () => {
   it('renders code blocks with shiki', async () => {
     const html = await renderMarkdownToHtml('```js\nconsole.log("hi")\n```')
     expect(html).toContain('<pre>code</pre>')
-    expect(codeToHtml).toHaveBeenCalled()
+    expect(mockCodeToHtml).toHaveBeenCalled()
   })
 })

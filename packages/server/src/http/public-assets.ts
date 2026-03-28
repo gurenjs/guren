@@ -80,7 +80,9 @@ export function registerRootPublicAssets(app: Application, publicDir: string, co
 
     const candidatePath = resolve(publicDir, relativePath)
 
-    if (!candidatePath.startsWith(publicDir)) {
+    // Use publicDir + separator to prevent sibling-directory traversal
+    // (e.g., /tmp/public vs /tmp/publicity)
+    if (!candidatePath.startsWith(publicDir + '/') && candidatePath !== publicDir) {
       return next()
     }
 
