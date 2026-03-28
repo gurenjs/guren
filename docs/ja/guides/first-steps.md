@@ -1,6 +1,6 @@
 # 10分で最初の機能を作る
 
-このガイドでは、Guren の推奨フロー（golden path）に沿って認証付きブログアプリを構築します。
+このガイドでは、Guren の推奨フロー（golden path）に沿って認証付きブログアプリを構築します。すべてのインポートは `@guren/core` を使います。
 
 ## 作るもの
 
@@ -31,6 +31,8 @@ bunx guren add resource posts --fields "title:string,body:text"
 - `AuthProvider`、login/register/profile の Controller、Validator、routes、ページ
 - `PostController`、`PostResource`、`PostValidator`、CRUD ページ、named routes
 - `db/schema.ts` に posts テーブル定義が追加
+
+> 後から `bunx guren add queue`、`bunx guren add mail`、`bunx guren add events`、`bunx guren add notifications`、`bunx guren add storage`、`bunx guren add broadcasting` などで機能を追加できます。
 
 ## 3. 型付き manifest を生成する
 

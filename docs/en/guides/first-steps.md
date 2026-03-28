@@ -32,7 +32,7 @@ This gives you:
 - `PostController`, `PostResource`, `PostValidator`, CRUD pages, and named routes — with `title`, `body`, and `published` fields already wired through the entire stack
 - `.guren/pages.gen.ts` as the auto-generated source for Inertia page props (extracted from each page component's `Props`)
 
-> You can add more features later with `bunx guren add queue`, `bunx guren add mail`, `bunx guren add events`, etc.
+> You can add more features later with `bunx guren add queue`, `bunx guren add mail`, `bunx guren add events`, `bunx guren add notifications`, `bunx guren add storage`, `bunx guren add broadcasting`, and more.
 
 ## 3. Generate Typed Manifests
 

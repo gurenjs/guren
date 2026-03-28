@@ -1884,9 +1884,13 @@ const upgradeCommand = defineCommand({
       type: 'boolean',
       description: 'Only report fixable issues without applying automatic fixes.',
     },
+    checkOnly: {
+      type: 'boolean',
+      description: 'Run compatibility and deprecation checks without modifying anything.',
+    },
   },
   async run({ args }) {
-    if (!args.canary) {
+    if (!args.canary && !args.checkOnly) {
       throw new Error('Only `guren upgrade --canary` is currently supported.')
     }
 
@@ -1894,10 +1898,48 @@ const upgradeCommand = defineCommand({
       install: Boolean(args.install),
       dryRun: Boolean(args.dryRun),
       noAutofix: Boolean(args.noAutofix),
+      checkOnly: Boolean(args.checkOnly),
     })
 
     if (args.json) {
       console.log(JSON.stringify(result, null, 2))
+      return
+    }
+
+    // Version compatibility
+    if (result.versionCompatibility) {
+      const vc = result.versionCompatibility
+      if (vc.warnings.length > 0) {
+        consola.box('Version compatibility')
+        for (const warning of vc.warnings) {
+          consola.warn(warning)
+        }
+      } else {
+        consola.success(`Version compatible (${vc.currentVersion} -> ${vc.targetVersion})`)
+      }
+    }
+
+    // Deprecation warnings
+    if (result.deprecationWarnings.length > 0) {
+      consola.box('Deprecation warnings')
+      for (const dep of result.deprecationWarnings) {
+        consola.warn(`${dep.what} (deprecated since ${dep.since}, removed in ${dep.removedIn})`)
+        consola.info(`  Replacement: ${dep.replacement}`)
+        consola.info(`  Affected files: ${dep.affectedFiles.join(', ')}`)
+      }
+    }
+
+    // Codemod results
+    if (result.codemodResults.length > 0) {
+      consola.box(args.dryRun ? 'Codemod preview' : 'Codemods')
+      for (const codemod of result.codemodResults) {
+        const prefix = codemod.status === 'applied' ? '[applied]' : codemod.status === 'pending' ? '[pending]' : '[skipped]'
+        consola.info(`${prefix} ${codemod.description} (${codemod.filesAffected} files)`)
+      }
+    }
+
+    if (args.checkOnly) {
+      consola.info('Check-only mode. No files were modified.')
       return
     }
 

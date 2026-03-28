@@ -126,6 +126,7 @@ const FEATURED_DOC_ORDER = [
 
   // Reference
   'cli',
+  'support-matrix',
   'upgrading',
   'release-policy',
   'glossary',

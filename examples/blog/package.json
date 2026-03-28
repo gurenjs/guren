@@ -11,6 +11,8 @@
     "smoke": "bun run ./smoke.ts",
     "test": "vitest run",
     "build": "bun run codegen && bunx vite build && bunx vite build --ssr",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui",
     "typecheck": "tsc --noEmit",
     "preview": "NODE_ENV=production bun bin/serve.ts",
     "db:make": "bunx guren make:migration",
@@ -33,16 +35,17 @@
     "zod": "^3.24.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@tailwindcss/vite": "^4.2.2",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^6.0.0",
     "drizzle-kit": "1.0.0-beta.18-7eb39f0",
     "jsdom": "^25.0.0",
     "tailwindcss": "^4.2.2",
     "vite": "^8.0.0",
-    "@vitejs/plugin-react": "^6.0.0",
     "vitest": "^2.1.2"
   }
 }

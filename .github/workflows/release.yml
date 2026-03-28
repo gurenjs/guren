@@ -29,6 +29,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      # Bun version is centralized here for easy updates.
+      # To test against multiple versions, convert the publish job
+      # into a validate + publish split with a matrix on validate.
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:

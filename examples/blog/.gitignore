@@ -3,3 +3,5 @@ public/assets/
 .env
 node_modules/
 .guren
+test-results/
+playwright-report/

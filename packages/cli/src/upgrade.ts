@@ -1,12 +1,14 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import {
   DOCTOR_RECOMMENDED_COMMANDS,
   getDoctorRuleEvaluations,
   type DoctorAutofix,
   type DoctorCheck,
 } from './doctor'
+import { checkDeprecations, type DeprecationWarning } from './deprecations'
+import { compareVersions, runCodemods, type CodemodResult } from './codemods'
 
 const PACKAGE_JSON = 'package.json'
 const GUREN_PACKAGE = /^(?:@guren\/|create-guren-app$)/u
@@ -19,6 +21,7 @@ export interface UpgradeCanaryOptions {
   install?: boolean
   dryRun?: boolean
   noAutofix?: boolean
+  checkOnly?: boolean
   installRunner?: (cwd: string) => Promise<void>
 }
 
@@ -43,6 +46,16 @@ export interface UpgradeCanaryResult {
   warnings: DoctorCheck[]
   manualSteps: string[]
   recommendedCommands: string[]
+  versionCompatibility?: VersionCompatibility
+  deprecationWarnings: DeprecationWarning[]
+  codemodResults: CodemodResult[]
+}
+
+export interface VersionCompatibility {
+  compatible: boolean
+  currentVersion: string
+  targetVersion: string
+  warnings: string[]
 }
 
 type PackageManifest = Partial<Record<ManifestField, Record<string, string>>> & {
@@ -112,6 +125,30 @@ async function updateManifestDependencies(cwd: string, dryRun = false): Promise<
   }
 }
 
+export async function checkVersionCompatibility(cwd: string, targetTag: string): Promise<VersionCompatibility> {
+  const manifestPath = join(cwd, 'package.json')
+  const raw = await readFile(manifestPath, 'utf-8').catch(() => null)
+  if (!raw) return { compatible: true, currentVersion: 'unknown', targetVersion: targetTag, warnings: [] }
+
+  const manifest = JSON.parse(raw)
+  const deps = { ...manifest.dependencies, ...manifest.devDependencies }
+
+  // Find current Guren version
+  const currentVersion = Object.entries(deps)
+    .filter(([k]) => k.startsWith('@guren/'))
+    .map(([, v]) => String(v).replace(/^[\^~]/, ''))[0] ?? 'unknown'
+
+  const warnings: string[] = []
+
+  // Check Bun version compatibility
+  const bunVersion = process.versions?.bun
+  if (bunVersion && compareVersions(bunVersion, '1.0.0') < 0) {
+    warnings.push(`Bun ${bunVersion} may not be compatible. Recommend Bun 1.3.x or later.`)
+  }
+
+  return { compatible: warnings.length === 0, currentVersion, targetVersion: targetTag, warnings }
+}
+
 function collectManualSteps(checks: DoctorCheck[]): string[] {
   return checks
     .map((check) => check.manualFix ?? check.fix)
@@ -120,6 +157,27 @@ function collectManualSteps(checks: DoctorCheck[]): string[] {
 
 export async function upgradeCanary(options: UpgradeCanaryOptions = {}): Promise<UpgradeCanaryResult> {
   const cwd = resolve(options.cwd ?? process.cwd())
+
+  // Run version compatibility and deprecation checks
+  const versionCompatibility = await checkVersionCompatibility(cwd, 'canary')
+  const deprecationWarnings = await checkDeprecations(cwd)
+
+  // If check-only mode, return early with just the checks
+  if (options.checkOnly) {
+    const packageJsonPath = resolve(cwd, PACKAGE_JSON)
+    return {
+      packageJsonPath,
+      updatedDependencies: [],
+      autofixes: [],
+      warnings: [],
+      manualSteps: [],
+      recommendedCommands: [],
+      versionCompatibility,
+      deprecationWarnings,
+      codemodResults: [],
+    }
+  }
+
   const { packageJsonPath, updatedDependencies } = await updateManifestDependencies(cwd, Boolean(options.dryRun))
   const { evaluations } = await getDoctorRuleEvaluations({ cwd })
 
@@ -156,6 +214,14 @@ export async function upgradeCanary(options: UpgradeCanaryOptions = {}): Promise
       return true
     })
 
+  // Run codemods for the version transition
+  const codemodResults = await runCodemods(
+    cwd,
+    versionCompatibility.currentVersion,
+    'canary',
+    { dryRun: options.dryRun },
+  )
+
   if (!options.dryRun && options.install && updatedDependencies.length > 0) {
     const installRunner = options.installRunner ?? runBunInstall
     await installRunner(cwd)
@@ -168,5 +234,8 @@ export async function upgradeCanary(options: UpgradeCanaryOptions = {}): Promise
     warnings: warningChecks,
     manualSteps: collectManualSteps(warningChecks),
     recommendedCommands: [...DOCTOR_RECOMMENDED_COMMANDS],
+    versionCompatibility,
+    deprecationWarnings,
+    codemodResults,
   }
 }

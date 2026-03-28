@@ -78,6 +78,8 @@
   ],
   "exclude": [
     "packages/create-app/templates",
-    "examples/**/resources/js/**/*"
+    "examples/**/resources/js/**/*",
+    "examples/**/e2e/**/*",
+    "examples/**/playwright.config.ts"
   ]
 }

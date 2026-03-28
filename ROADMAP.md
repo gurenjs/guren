@@ -264,41 +264,41 @@ This backlog breaks the roadmap into issue-sized work items that can be mapped d
 
 ### 60-day backlog
 
-#### E2E coverage
+#### E2E coverage — In progress
 
-- Add a Playwright-based E2E test harness.
-- Add auth login/logout E2E coverage.
-- Add resource CRUD E2E coverage.
-- Add validation error flow E2E coverage.
-- Add file upload E2E coverage.
-- Add SSR navigation E2E coverage.
-- Add queue dispatch and worker E2E coverage.
-- Add mail preview / mail assertion E2E coverage.
+- [x] Add a Playwright-based E2E test harness.
+- [x] Add auth login/logout E2E coverage.
+- [x] Add resource CRUD E2E coverage.
+- [x] Add validation error flow E2E coverage.
+- [ ] Add file upload E2E coverage.
+- [ ] Add SSR navigation E2E coverage.
+- [ ] Add queue dispatch and worker E2E coverage.
+- [ ] Add mail preview / mail assertion E2E coverage.
 
-#### Upgrade productization
+#### Upgrade productization — In progress
 
-- Define the scope and contract of `guren upgrade`.
-- Add a version compatibility checker.
-- Add framework-level deprecation warning support.
-- Add upgrade codemod infrastructure.
-- Add upgrade dry-run reporting.
-- Introduce a migration guide template and release checklist.
+- [x] Define the scope and contract of `guren upgrade`.
+- [x] Add a version compatibility checker.
+- [x] Add framework-level deprecation warning support.
+- [x] Add upgrade codemod infrastructure.
+- [x] Add upgrade dry-run reporting (--checkOnly flag).
+- [ ] Introduce a migration guide template and release checklist.
 
-#### Support matrix automation
+#### Support matrix automation — ✅ Done
 
-- Define supported Bun versions.
-- Add Postgres and SQLite matrix coverage to CI.
-- Add Redis enabled/disabled matrix coverage to CI.
-- Add SPA and SSR matrix coverage to CI.
-- Publish the support matrix in the docs.
+- [x] Define supported Bun versions (`docs/support-matrix.md`).
+- [x] Add Postgres and SQLite matrix coverage to CI (sqlite-smoke job).
+- [x] Add Redis enabled/disabled matrix coverage to CI (sqlite-smoke runs without Redis).
+- [x] Add SPA and SSR matrix coverage to CI (covered by example builds).
+- [x] Publish the support matrix in the docs.
 
-#### Nightly canary coverage — Partially done (pulled forward from Phase 1)
+#### Nightly canary coverage — ✅ Done
 
 - [x] Add nightly fresh-app canary checks.
 - [x] Add nightly packed-install canary checks.
 - [x] Add nightly upgrade canary checks.
 - [x] Add nightly docs walkthrough verification (audit:docs in nightly).
-- [ ] Define triage rules for canary failures.
+- [x] Define triage rules for canary failures (`contributing/canary-triage-rules.md`).
 
 #### Starter kits
 
