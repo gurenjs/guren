@@ -13,6 +13,12 @@ const AUTH_CONTEXT_KEY = 'guren:auth'
 const TESTING_USER_HEADER = 'x-testing-user'
 
 function resolveTestingUser(ctx: Context): Authenticatable | null {
+  // Only allow testing user override when GUREN_TESTING is explicitly set.
+  // This prevents external callers from bypassing auth in production/staging.
+  if (!process.env.GUREN_TESTING) {
+    return null
+  }
+
   const rawUser = ctx.req.header(TESTING_USER_HEADER)
   if (!rawUser) {
     return null

@@ -298,14 +298,15 @@ export class Application {
   }
 
   /**
-   * Mounts the MCP endpoint at /_guren/mcp in development mode.
+   * Mounts the MCP endpoint at /_guren/mcp when explicitly enabled.
+   * Requires GUREN_MCP=1 environment variable. Never active in production.
    * This allows AI coding agents to introspect the project.
    */
   private async mountMcpEndpoint(): Promise<void> {
     if (
       typeof process === 'undefined' ||
       process.env?.NODE_ENV === 'production' ||
-      process.env?.GUREN_MCP === '0'
+      process.env?.GUREN_MCP !== '1'
     ) {
       return
     }
