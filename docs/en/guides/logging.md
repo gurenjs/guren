@@ -16,7 +16,8 @@ Guren provides a flexible logging system with multiple channels, log levels foll
 The simplest way to log is through the `LogFacade`, which resolves the `LogManager` from the container lazily:
 
 ```ts
-import { LogFacade as Log } from '@guren/core'
+// Resolve the logger from the container
+const Log = app.container.make('log')
 
 Log.info('Application started')
 Log.error('Something went wrong', { error: 'Connection failed' })

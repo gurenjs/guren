@@ -72,7 +72,8 @@ export class SendWelcomeEmailJob extends Job<SendWelcomeEmailPayload> {
 The simplest way to interact with the queue is through the `QueueFacade`:
 
 ```ts
-import { QueueFacade as Queue } from '@guren/core'
+// Resolve the queue manager from the container
+const Queue = app.container.make('queue')
 
 // Access the default driver
 const driver = Queue.driver()

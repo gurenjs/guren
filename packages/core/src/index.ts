@@ -33,7 +33,7 @@ export type {
   FindManyOptions,
   PaginateOptions,
   PaginatedResult,
-  PaginationMeta as OrmPaginationMeta,
+  PaginationMeta,
   ORMAdapter,
   TransactionHandle,
   TransactionModelScope,

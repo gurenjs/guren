@@ -764,6 +764,16 @@ export type { DiscoveryOptions, DiscoveryResult } from './discovery'
 export { renderDebugPage, debugErrorMiddleware } from './errors/debug-page'
 // Production Error Page
 export { renderErrorPage } from './errors/error-page'
+// Auth: Node.js-compatible hasher (for Lambda / non-Bun runtimes)
+export { NodeHasher } from './auth/password/NodeHasher'
+// Hash: convenience alias for ScryptHasher (used as default in docs)
+export { ScryptHasher as Hash } from './auth/password/ScryptHasher'
+// Queue: SQS adapter
+export { SqsDriver, createSqsAdapter } from './queue/drivers/SqsDriver'
+// Broadcasting: typed broadcaster
+export { createTypedBroadcaster } from './broadcasting/typed'
+// Redis: client factory
+export { createRedisClient } from './redis/client'
 // MCP: available via '@guren/server/mcp' subpath import.
 // Not re-exported here to avoid pulling @modelcontextprotocol/sdk
 // types into the main DTS bundle (causes OOM in tsup).

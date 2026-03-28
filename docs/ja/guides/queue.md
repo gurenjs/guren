@@ -72,7 +72,8 @@ export class SendWelcomeEmailJob extends Job<SendWelcomeEmailPayload> {
 `QueueFacade` を使うと、コンテナからキュードライバを遅延解決してシンプルにジョブをディスパッチできます。
 
 ```ts
-import { QueueFacade as Queue } from '@guren/core'
+// Resolve the queue manager from the container
+const Queue = app.container.make('queue')
 
 await Queue.push(new SendWelcomeEmailJob({
   userId: '123',
