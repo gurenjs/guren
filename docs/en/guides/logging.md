@@ -13,7 +13,7 @@ Guren provides a flexible logging system with multiple channels, log levels foll
 
 ### Quick Start (Facade)
 
-The simplest way to log is through the `LogFacade`, which resolves the `LogManager` from the container lazily:
+The simplest way to log is through the `LogManager`, which resolves the `LogManager` from the container lazily:
 
 ```ts
 // Resolve the logger from the container
@@ -228,7 +228,7 @@ const log = new LogManager({
 The logging subsystem is registered as a singleton via a `ServiceProvider`. You can resolve it from the container:
 
 ```ts
-import { container } from '@guren/core'
+// Access via app.container or this.container in providers
 
 const log = container.make('log') // LogManager
 log.info('Using container-resolved logger')
@@ -239,7 +239,7 @@ log.info('Using container-resolved logger')
 ### Setting Up Global Logger
 
 > [!NOTE]
-> In most applications you should prefer the `LogFacade` or `container.make('log')` instead of the global setter. The global functions below are kept for backward compatibility.
+> In most applications you should prefer the `LogManager` or `container.make('log')` instead of the global setter. The global functions below are kept for backward compatibility.
 
 ```ts
 import { setLogManager, getLogManager, LogManager } from '@guren/core'
@@ -353,7 +353,7 @@ export const requestLogging = defineMiddleware(async (c, next) => {
 Swap the log manager in tests to capture log output:
 
 ```ts
-import { container } from '@guren/core'
+// Access via app.container or this.container in providers
 import { LogManager } from '@guren/core'
 
 test('logs error on failure', async () => {

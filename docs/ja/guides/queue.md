@@ -69,7 +69,7 @@ export class SendWelcomeEmailJob extends Job<SendWelcomeEmailPayload> {
 
 ### ファサードを使用（推奨）
 
-`QueueFacade` を使うと、コンテナからキュードライバを遅延解決してシンプルにジョブをディスパッチできます。
+`QueueManager` を使うと、コンテナからキュードライバを遅延解決してシンプルにジョブをディスパッチできます。
 
 ```ts
 // Resolve the queue manager from the container

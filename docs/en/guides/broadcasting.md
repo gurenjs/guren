@@ -41,7 +41,7 @@ await broadcast.broadcast('notifications', 'NewMessage', {
 The broadcasting subsystem is registered as a singleton via a `ServiceProvider`. You can resolve it from the container:
 
 ```ts
-import { container } from '@guren/core'
+// Access via app.container or this.container in providers
 
 const broadcast = container.make('broadcast') // BroadcastManager
 await broadcast.broadcast('notifications', 'NewMessage', { content: 'Hello!' })
@@ -385,7 +385,7 @@ await channel.broadcast('MemberLeft', {
 Swap the broadcast manager in tests:
 
 ```ts
-import { container } from '@guren/core'
+// Access via app.container or this.container in providers
 import { BroadcastManager, MemoryDriver } from '@guren/core'
 
 test('broadcasts order update', async () => {

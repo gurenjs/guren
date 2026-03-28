@@ -69,7 +69,7 @@ export class SendWelcomeEmailJob extends Job<SendWelcomeEmailPayload> {
 
 ### Using the Facade
 
-The simplest way to interact with the queue is through the `QueueFacade`:
+The simplest way to interact with the queue is through the `QueueManager`:
 
 ```ts
 // Resolve the queue manager from the container
@@ -295,7 +295,7 @@ await driver.deleteFailedJob(jobId)
 The queue subsystem is registered as a singleton via a `ServiceProvider`. You can resolve it from the container:
 
 ```ts
-import { container } from '@guren/core'
+// Access via app.container or this.container in providers
 
 const queue = container.make('queue') // QueueManager
 const driver = queue.driver()
@@ -306,7 +306,7 @@ const driver = queue.driver()
 Swap the queue manager in tests to prevent real job dispatching:
 
 ```ts
-import { container } from '@guren/core'
+// Access via app.container or this.container in providers
 import { QueueManager, MemoryDriver } from '@guren/core'
 
 test('jobs are dispatched', async () => {

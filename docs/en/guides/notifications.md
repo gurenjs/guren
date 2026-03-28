@@ -83,7 +83,7 @@ notifications
 The notification subsystem is registered as a singleton via a `ServiceProvider`. You can resolve it from the container:
 
 ```ts
-import { container } from '@guren/core'
+// Access via app.container or this.container in providers
 
 const notifications = container.make('notifications') // NotificationManager
 await notifications.send(user, new OrderShipped(order, 'ABC123'))
@@ -401,7 +401,7 @@ class OrderConfirmation extends Notification {
 Swap the notification manager in tests:
 
 ```ts
-import { container } from '@guren/core'
+// Access via app.container or this.container in providers
 import { NotificationManager, MemoryChannel } from '@guren/core'
 
 test('sends order notification', async () => {

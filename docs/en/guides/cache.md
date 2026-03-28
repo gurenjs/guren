@@ -287,7 +287,7 @@ export async function getUserPreferences(
 The cache subsystem is registered as a singleton via a `ServiceProvider`. You can resolve it from the container:
 
 ```ts
-import { container } from '@guren/core'
+// Access via app.container or this.container in providers
 
 // Type-safe resolution
 const cache = container.make('cache') // CacheManager
@@ -322,7 +322,7 @@ In tests, you can swap the cache manager with a fake using `container.fake()` an
 
 ```ts
 import { describe, test, expect } from 'bun:test'
-import { container } from '@guren/core'
+// Access via app.container or this.container in providers
 import { CacheManager } from '@guren/core'
 
 describe('Cache in application code', () => {

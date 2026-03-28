@@ -365,7 +365,7 @@ await welcomeMail.queue('emails')
 The mail subsystem is registered as a singleton via a `ServiceProvider`. You can resolve it from the container:
 
 ```ts
-import { container } from '@guren/core'
+// Access via app.container or this.container in providers
 
 const mailManager = container.make('mail') // MailManager
 ```
@@ -375,7 +375,7 @@ const mailManager = container.make('mail') // MailManager
 Swap the mail manager in tests to capture sent messages without sending real emails:
 
 ```ts
-import { container } from '@guren/core'
+// Access via app.container or this.container in providers
 import { MailManager, MemoryTransport } from '@guren/core'
 
 test('sends welcome email on registration', async () => {

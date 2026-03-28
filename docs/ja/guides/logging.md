@@ -13,7 +13,7 @@ Guren はRFC 5424に準拠したログレベル、複数のチャンネル、コ
 
 ### ファサードを使用（推奨）
 
-`LogFacade` を使うと、コンテナから `LogManager` を遅延解決してシンプルにログ出力できます。
+`LogManager` を使うと、コンテナから `LogManager` を遅延解決してシンプルにログ出力できます。
 
 ```ts
 // Resolve the logger from the container

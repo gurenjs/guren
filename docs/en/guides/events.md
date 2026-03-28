@@ -361,7 +361,7 @@ events.removeAllListeners()
 The event system is registered as a singleton via a `ServiceProvider`. You can resolve it from the container:
 
 ```ts
-import { container } from '@guren/core'
+// Access via app.container or this.container in providers
 
 const events = container.make('events') // EventManager
 events.emit(new UserRegistered('123', 'user@example.com'))
@@ -372,7 +372,7 @@ events.emit(new UserRegistered('123', 'user@example.com'))
 Swap the event manager with a fake in tests:
 
 ```ts
-import { container } from '@guren/core'
+// Access via app.container or this.container in providers
 import { EventManager } from '@guren/core'
 
 test('application emits events', async () => {
