@@ -77,6 +77,11 @@ markedInstance.use({
     }
   },
   renderer: {
+    heading({ tokens, depth }: Tokens.Heading) {
+      const text = this.parser.parseInline(tokens)
+      const id = slugifyHeading(text)
+      return `<h${depth} id="${id}">${text}</h${depth}>\n`
+    },
     blockquote(token) {
       const content = this.parser.parse(token.tokens ?? [])
       const alertType = (token as Tokens.Blockquote & { alertType?: AlertType }).alertType
@@ -101,6 +106,18 @@ ${content}
 export async function renderMarkdownToHtml(markdown: string): Promise<string> {
   const rendered = await markedInstance.parse(markdown, { async: true })
   return typeof rendered === 'string' ? rendered : ''
+}
+
+function slugifyHeading(text: string): string {
+  const stripped = text.replace(/<[^>]*>/g, '')
+  const slug = stripped
+    .toLowerCase()
+    .trim()
+    .replace(/[\s]+/g, '-')
+    .replace(/[^\p{L}\p{N}\-]/gu, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+  return slug || `heading-${Math.random().toString(36).slice(2, 8)}`
 }
 
 function extractAlertType(paragraph: Tokens.Paragraph): AlertType | null {
