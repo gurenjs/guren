@@ -22,7 +22,7 @@ describe('scaffoldDeploy', () => {
     expect(files.some((file) => file.endsWith('Dockerfile'))).toBe(true)
 
     const dockerfile = await readFile('Dockerfile', 'utf8')
-    expect(dockerfile).toContain('FROM oven/bun:1 AS base')
+    expect(dockerfile).toContain('FROM oven/bun:1 AS builder')
     expect(dockerfile).toContain('EXPOSE 3333')
   })
 

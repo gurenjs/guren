@@ -113,8 +113,10 @@ const command = defineCommand({
       await ensureTargetDirectory(targetDir, true)
     }
 
-    const renderingMode = await resolveRenderingMode(args.mode)
     const blueprint = getAppBlueprint(typeof args.blueprint === 'string' ? args.blueprint : undefined)
+    const renderingMode = blueprint.name === 'api'
+      ? 'spa' as const  // API blueprint has no frontend — force SPA (no SSR overlay)
+      : await resolveRenderingMode(args.mode)
 
     await scaffoldAppBlueprint({
       blueprint: blueprint.name,

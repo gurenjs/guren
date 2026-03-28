@@ -15,7 +15,11 @@ WORKDIR /app
 COPY --from=builder /app/package.json /app/bun.lock ./
 RUN bun install --frozen-lockfile --production
 
-COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/bin ./bin
+COPY --from=builder /app/src ./src
+COPY --from=builder /app/app ./app
+COPY --from=builder /app/config ./config
+COPY --from=builder /app/routes ./routes
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/db ./db
 COPY --from=builder /app/.guren ./.guren
@@ -27,4 +31,4 @@ EXPOSE 3333
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
   CMD curl -f http://localhost:3333/health || exit 1
 
-CMD ["bun", "run", "start"]
+CMD ["bun", "bin/serve.ts"]

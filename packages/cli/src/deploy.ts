@@ -42,18 +42,35 @@ async function inferAppName(): Promise<string> {
 }
 
 function dockerfileTemplate(port: number): string {
-  return `FROM oven/bun:1 AS base
+  return `# Build stage — includes devDependencies for Vite/TypeScript
+FROM oven/bun:1 AS builder
 WORKDIR /app
 
 COPY bun.lock package.json ./
-RUN bun install --production
+RUN bun install --frozen-lockfile
 
 COPY . .
-RUN NODE_ENV=production bun run build
+RUN bun run build
+
+# Production stage — runtime only
+FROM oven/bun:1-slim
+WORKDIR /app
+
+COPY --from=builder /app/package.json /app/bun.lock ./
+RUN bun install --frozen-lockfile --production
+
+COPY --from=builder /app/bin ./bin
+COPY --from=builder /app/src ./src
+COPY --from=builder /app/app ./app
+COPY --from=builder /app/config ./config
+COPY --from=builder /app/routes ./routes
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/db ./db
+COPY --from=builder /app/.guren ./.guren
 
 EXPOSE ${port}
 ENV NODE_ENV=production
-CMD ["bun", "run", "bin/serve.ts"]
+CMD ["bun", "bin/serve.ts"]
 `
 }
 
