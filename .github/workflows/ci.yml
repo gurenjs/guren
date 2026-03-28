@@ -116,9 +116,7 @@ jobs:
         run: bun run test:bun
 
   e2e:
-    if: github.event_name == 'push'  # E2E only on main push (flaky in PR due to Inertia XHR timing)
     runs-on: ubuntu-latest
-    continue-on-error: true
     services:
       postgres:
         image: postgres:15-alpine
@@ -152,6 +150,9 @@ jobs:
       - name: Generate route types
         run: bun run build:routes
 
+      - name: Build blog frontend
+        run: bun run --cwd examples/blog build
+
       - name: Install Playwright browsers
         run: cd examples/blog && bunx playwright install --with-deps chromium
 
@@ -167,6 +168,8 @@ jobs:
           bun ../../packages/cli/src/bin.ts db:seed --force
 
       - name: Run E2E tests
+        env:
+          NODE_ENV: production
         run: bun run --cwd examples/blog e2e
 
       - name: Upload test results

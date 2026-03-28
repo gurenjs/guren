@@ -40,7 +40,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: isCI ? 'bun run dev:server' : 'bun run dev',
+    command: isCI ? 'NODE_ENV=production bun bin/serve.ts' : 'bun run dev',
     url: 'http://localhost:3333',
     reuseExistingServer: !isCI,
     timeout: isCI ? 60_000 : 30_000,
