@@ -173,23 +173,47 @@ export interface RateLimitOptions {
   keyPrefix?: string
 }
 
+let defaultKeyGeneratorWarned = false
+
 /**
- * Default key generator using client IP.
+ * Default key generator using Bun's `server.requestIP()` for per-client limiting.
+ *
+ * **Important:** When `server.requestIP()` is unavailable (tests, non-Bun runtimes,
+ * Lambda), this falls back to a shared per-route bucket (`__shared__:METHOD:PATH`).
+ * In that mode, all clients hitting the same endpoint share a single rate-limit
+ * counter, which is overly restrictive but safe.
+ *
+ * **For production deployments, always supply a custom `keyGenerator`:**
+ *
+ * ```ts
+ * createRateLimitMiddleware({
+ *   keyGenerator: (c) => c.req.header('cf-connecting-ip') ?? c.req.header('x-real-ip') ?? 'unknown',
+ * })
+ * ```
+ *
+ * Does NOT trust proxy headers by default to prevent rate-limit bypass via
+ * header spoofing on direct deployments.
  */
 function defaultKeyGenerator(ctx: Context): string {
-  // Try various headers for the real IP
-  const forwarded = ctx.req.header('x-forwarded-for')
-  if (forwarded) {
-    return forwarded.split(',')[0].trim()
+  // Bun.serve passes { server } in env — use server.requestIP() for true client IP
+  const env = ctx.env as Record<string, unknown> | undefined
+  if (env?.server && typeof (env.server as any).requestIP === 'function') {
+    const info = (env.server as any).requestIP(ctx.req.raw)
+    if (info?.address) return info.address as string
   }
 
-  const realIp = ctx.req.header('x-real-ip')
-  if (realIp) {
-    return realIp
+  // Fallback: shared per-route bucket. The __shared__ prefix makes it explicit
+  // that this is an incomplete fallback, not per-client limiting.
+  if (!defaultKeyGeneratorWarned) {
+    defaultKeyGeneratorWarned = true
+    console.warn(
+      '[guren] Rate limiter: could not determine client IP via server.requestIP(). ' +
+      'Falling back to shared per-route bucket (__shared__:METHOD:PATH). ' +
+      'For per-client limiting, supply a custom keyGenerator option. ' +
+      'See: https://guren.dev/docs/guides/rate-limiting',
+    )
   }
-
-  // Fallback to connection info (may not be available in all environments)
-  return 'unknown'
+  return `__shared__:${ctx.req.method}:${ctx.req.path}`
 }
 
 /**

@@ -46,7 +46,14 @@ export class AuthServiceProvider extends ServiceProvider {
         }))
       }
     }
+  }
 
+  boot(): void {
+    const app = this.container.make<Application>('app')
+    const auth = this.container.make<AuthManager>('auth')
+
+    // Attach auth context in boot() so it runs after the user's boot callback
+    // has had a chance to mount session middleware (e.g. when autoSession: false).
     app.use('*', attachAuthContext((ctx) => auth.createAuthContext(ctx)))
   }
 }

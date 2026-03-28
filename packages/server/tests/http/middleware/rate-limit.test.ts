@@ -298,7 +298,7 @@ describe('createRateLimitMiddleware', () => {
     app.get('/', (c) => c.text('OK'))
 
     await app.request('/')
-    const info = await getRateLimitInfo('unknown', store, { limit: 1, keyPrefix: 'api:' })
+    const info = await getRateLimitInfo('__shared__:GET:/', store, { limit: 1, keyPrefix: 'api:' })
 
     expect(info.remaining).toBe(0)
   })

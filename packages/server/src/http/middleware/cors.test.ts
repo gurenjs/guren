@@ -3,9 +3,23 @@ import { Hono } from 'hono'
 import { createCorsMiddleware } from './cors'
 
 describe('createCorsMiddleware', () => {
-  test('should set CORS headers with default options', async () => {
+  test('should not set ACAO header with default options (same-origin policy)', async () => {
     const app = new Hono()
     app.use('*', createCorsMiddleware())
+    app.get('/', (c) => c.text('ok'))
+
+    const res = await app.request('/', {
+      headers: { Origin: 'http://example.com' },
+    })
+
+    // Default: no origin configured means no ACAO header, browser enforces same-origin
+    const acao = res.headers.get('Access-Control-Allow-Origin')
+    expect(!acao || acao === '').toBe(true)
+  })
+
+  test('should allow all origins when explicitly set to *', async () => {
+    const app = new Hono()
+    app.use('*', createCorsMiddleware({ origin: '*' }))
     app.get('/', (c) => c.text('ok'))
 
     const res = await app.request('/', {

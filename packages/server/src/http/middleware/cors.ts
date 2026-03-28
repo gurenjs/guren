@@ -3,8 +3,8 @@ import { cors } from 'hono/cors'
 
 export interface CorsOptions {
   /**
-   * Allowed origins. Default: request origin (same-origin).
-   * - A string: exact origin match
+   * Allowed origins. Default: none (same-origin policy applies).
+   * - A string: exact origin match (use '*' to allow all origins)
    * - An array of strings: multiple allowed origins
    * - A function: dynamic origin evaluation
    */
@@ -48,8 +48,14 @@ export function createCorsMiddleware(options: CorsOptions = {}): MiddlewareHandl
     )
   }
 
+  // When no origin is configured, reject all cross-origin requests by
+  // returning an empty string so no Access-Control-Allow-Origin header is
+  // set and the browser's same-origin policy applies.
+  // This is safer than defaulting to '*' which would allow any origin.
+  const origin = options.origin ?? (() => '')
+
   return cors({
-    origin: options.origin ?? '*',
+    origin,
     allowMethods: options.allowMethods,
     allowHeaders: options.allowHeaders,
     exposeHeaders: options.exposeHeaders,
