@@ -24,6 +24,7 @@ Review code changes and provide constructive, actionable feedback.
 
 2. **Analyze against project standards**
    - Read `.claude/rules/coding-standards.md`
+   - Read `.claude/rules/common-pitfalls.md` — check for known recurring issues
    - Check patterns in `CLAUDE.md`
 
 3. **Review systematically**
@@ -85,6 +86,11 @@ Review code changes and provide constructive, actionable feedback.
 - [ ] Authentication checks where needed
 - [ ] CSRF protection on state-changing routes
 - [ ] Rate limiting on public endpoints
+- [ ] No `require()` in ESM code (Node ESM compat)
+- [ ] No `@guren/server` in docs or templates (core-first)
+- [ ] No `bunx guren` in CI paths (use direct bin path)
+- [ ] Middleware ordering: session before auth context
+- [ ] New attack-surface features (MCP, debug endpoints) are opt-in, not opt-out
 
 ### Testing
 - [ ] Tests added for new functionality

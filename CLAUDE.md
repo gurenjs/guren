@@ -335,7 +335,10 @@ export const handler = createLambdaHandler(app)
 1. Run `bun run build` - ensure all packages compile
 2. Run `bun run typecheck` - no type errors
 3. Run `bun run test` - all tests pass
-4. Follow commit message convention
+4. Run `bun run audit:core-first` - no `@guren/server` references in docs/templates
+5. Run `bun run audit:docs` - docs reference valid commands and APIs
+6. Review `.claude/rules/common-pitfalls.md` - check for known gotchas
+7. Follow commit message convention
 
 ## Claude Code Agents
 
