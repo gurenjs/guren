@@ -3,6 +3,7 @@ import { Controller } from './Controller'
 import type { Container } from '../container/Container'
 import { mountRoute } from './mount-route'
 import { formatValidationErrors, parseRequestPayload, type ValidationErrorLike } from '../http/request'
+import { ValidationException } from '../errors/exceptions/ValidationException'
 import type { ValidationSchema } from '../http/middleware/validation'
 
 /**
@@ -794,30 +795,28 @@ function createContractValidationMiddleware(route: RegisteredRoute): MiddlewareH
   }
 
   const schemas = route.schemas
-  if (!schemas || (!schemas.params && !schemas.query && !schemas.body && !schemas.output)) {
+  if (!schemas || (!schemas.params && !schemas.query && !schemas.output)) {
     return null
   }
 
   return async (c, next) => {
+    // Validate params and query in middleware. Body validation is left to the
+    // controller's validateBody() to avoid consuming the request stream twice.
     if (schemas.params) {
       const result = parseRouteSegment(schemas.params, c.req.param(), 400)
       if (result instanceof Response) {
-        return result
+        throw ValidationException.withMessages(
+          formatValidationErrors((schemas.params.safeParse(c.req.param()) as any).error),
+        )
       }
     }
 
     if (schemas.query) {
       const result = parseRouteSegment(schemas.query, c.req.query(), 422)
       if (result instanceof Response) {
-        return result
-      }
-    }
-
-    if (schemas.body) {
-      const payload = await parseRequestPayload(c)
-      const result = parseRouteSegment(schemas.body, payload, 422)
-      if (result instanceof Response) {
-        return result
+        throw ValidationException.withMessages(
+          formatValidationErrors((schemas.query.safeParse(c.req.query()) as any).error),
+        )
       }
     }
 
