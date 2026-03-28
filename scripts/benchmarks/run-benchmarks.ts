@@ -5,20 +5,59 @@ import { execSync } from 'node:child_process'
 const ROOT = resolve(import.meta.dir, '../..')
 const RESULTS_FILE = resolve(ROOT, 'benchmarks.json')
 
+interface LatencyResults {
+  p50Ms: number
+  p95Ms: number
+  p99Ms: number
+}
+
 interface BenchmarkResults {
   timestamp: string
   commit: string
   startup: { durationMs: number }
+  latency: LatencyResults
   build: { blogSizeKb: number; webSizeKb: number }
   memory: { heapUsedMb: number }
 }
 
+let bootedApp: { hono: { request: (path: string) => Promise<Response> } } | null = null
+
 async function measureStartup(): Promise<number> {
   const start = performance.now()
-  // Import and boot the app without listening
   const { default: app } = await import('../../examples/blog/src/app.js')
   await app.boot()
+  bootedApp = app
   return Math.round(performance.now() - start)
+}
+
+function round(n: number): number {
+  return Math.round(n * 100) / 100
+}
+
+async function measureLatency(): Promise<LatencyResults> {
+  if (!bootedApp) throw new Error('App must be booted before measuring latency')
+  const hono = bootedApp.hono
+  const N = 200
+
+  // Warm up
+  for (let i = 0; i < 20; i++) {
+    await hono.request('/health')
+  }
+
+  // Measure
+  const durations: number[] = []
+  for (let i = 0; i < N; i++) {
+    const start = performance.now()
+    await hono.request('/health')
+    durations.push(performance.now() - start)
+  }
+
+  durations.sort((a, b) => a - b)
+  return {
+    p50Ms: round(durations[Math.floor(N * 0.5)]),
+    p95Ms: round(durations[Math.floor(N * 0.95)]),
+    p99Ms: round(durations[Math.floor(N * 0.99)]),
+  }
 }
 
 function measureBuildSize(): { blogSizeKb: number; webSizeKb: number } {
@@ -50,6 +89,9 @@ async function main() {
   const startupMs = await measureStartup()
   console.log(`  Startup: ${startupMs}ms`)
 
+  const latency = await measureLatency()
+  console.log(`  Latency: p50=${latency.p50Ms}ms, p95=${latency.p95Ms}ms, p99=${latency.p99Ms}ms`)
+
   const buildSize = measureBuildSize()
   console.log(`  Blog build: ${buildSize.blogSizeKb}KB, Web build: ${buildSize.webSizeKb}KB`)
 
@@ -60,6 +102,7 @@ async function main() {
     timestamp: new Date().toISOString(),
     commit,
     startup: { durationMs: startupMs },
+    latency,
     build: buildSize,
     memory,
   }
@@ -80,6 +123,7 @@ async function main() {
   // Check thresholds
   const THRESHOLDS = {
     startupMs: 3000,        // 3 seconds max startup
+    p95LatencyMs: 10,       // 10ms max p95 request latency
     blogBuildKb: 800,       // 800KB max blog build
     webBuildKb: 800,        // 800KB max web build
     heapUsedMb: 256,        // 256MB max heap
@@ -88,6 +132,10 @@ async function main() {
   let failed = false
   if (startupMs > THRESHOLDS.startupMs) {
     console.error(`FAIL: Startup ${startupMs}ms exceeds threshold ${THRESHOLDS.startupMs}ms`)
+    failed = true
+  }
+  if (latency.p95Ms > THRESHOLDS.p95LatencyMs) {
+    console.error(`FAIL: p95 latency ${latency.p95Ms}ms exceeds threshold ${THRESHOLDS.p95LatencyMs}ms`)
     failed = true
   }
   if (buildSize.blogSizeKb > THRESHOLDS.blogBuildKb) {

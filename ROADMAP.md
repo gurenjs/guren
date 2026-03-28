@@ -333,7 +333,7 @@ This backlog breaks the roadmap into issue-sized work items that can be mapped d
 - [x] Add build artifact size tracking.
 - [x] Add memory regression tracking.
 - [x] Fail CI when benchmark thresholds regress beyond accepted bounds (nightly).
-- [ ] Add request latency benchmarks.
+- [x] Add request latency benchmarks (p50/p95/p99, threshold p95 < 10ms).
 
 ### 6-12 month backlog
 
