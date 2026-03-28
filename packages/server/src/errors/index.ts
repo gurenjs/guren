@@ -26,3 +26,5 @@ export {
   NotFoundHttpException,
   MethodNotAllowedException,
 } from './exceptions'
+
+export { renderErrorPage } from './error-page'

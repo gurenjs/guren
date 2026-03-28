@@ -10,6 +10,7 @@ import type {
   ErrorResponse,
 } from './types'
 import { HttpException } from './HttpException'
+import { renderErrorPage } from './error-page'
 
 /**
  * Exception handler for centralized error handling.
@@ -177,6 +178,11 @@ export class ExceptionHandler {
 
     if (HttpException.isHttpException(error)) {
       const { status, body } = error.toResponse(debug)
+
+      if (this.wantsHtmlResponse(ctx) && !debug) {
+        return ctx.html(renderErrorPage(status, body.message), status as ContentfulStatusCode)
+      }
+
       return ctx.json(body, status as ContentfulStatusCode)
     }
 
@@ -195,7 +201,27 @@ export class ExceptionHandler {
       body.stack = error.stack
     }
 
+    if (this.wantsHtmlResponse(ctx) && !debug) {
+      return ctx.html(renderErrorPage(statusCode, body.message), statusCode as ContentfulStatusCode)
+    }
+
     return ctx.json(body, statusCode as ContentfulStatusCode)
+  }
+
+  /**
+   * Determine whether the request expects an HTML response.
+   * Returns false for Inertia, XHR, and JSON API requests so they
+   * continue to receive JSON error payloads.
+   */
+  protected wantsHtmlResponse(ctx: Context): boolean {
+    if (!ctx?.req?.header) return false
+    const accept = ctx.req.header('accept') ?? ''
+    const isJsonRequest =
+      accept.includes('application/json') ||
+      ctx.req.header('x-requested-with') === 'XMLHttpRequest' ||
+      ctx.req.header('x-inertia') === 'true'
+
+    return !isJsonRequest && accept.includes('text/html')
   }
 
   /**

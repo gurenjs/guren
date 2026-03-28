@@ -325,7 +325,7 @@ This backlog breaks the roadmap into issue-sized work items that can be mapped d
 - [x] Standardize structured logging defaults (`requestLoggingMiddleware` with JSON output).
 - [x] Strengthen production health-check defaults (default `/health` in starter template).
 - [ ] Improve queue failure visibility defaults.
-- [ ] Improve default error pages and exception rendering.
+- [x] Improve default error pages and exception rendering (HTML error pages for browsers, Error.tsx for Inertia, React ErrorBoundary).
 
 #### Benchmarks and regression tracking — ✅ Done
 

@@ -23,6 +23,7 @@ export {
   createTypedLink,
   createTypedForm,
 } from './components'
+export { ErrorBoundary } from './ErrorBoundary'
 export type {
   RouteManifestLike,
   TypedLinkProps,
