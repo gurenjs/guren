@@ -5,6 +5,8 @@ import { Container, type ServiceProvider } from '../container'
 import { ProviderManager } from '../container/ServiceProvider'
 import { AuthManager } from '../auth/AuthManager'
 import { AuthServiceProvider } from '../providers/AuthServiceProvider'
+import { attachAuthContext } from './middleware/auth'
+import { SessionGuard } from '../auth/SessionGuard'
 import type { CreateSessionMiddlewareOptions } from './middleware/session'
 import { createSecurityHeaders, type SecurityHeadersOptions } from './middleware/security-headers'
 import { createHostAuthorizationMiddleware, type HostAuthorizationOptions } from './middleware/host-authorization'
@@ -195,7 +197,20 @@ export class Application {
     this.container.instance('auth', this.authManager)
     this.container.instance('router', this.router)
 
-    // Auto-register AuthServiceProvider when auth option is provided
+    // Register a default auth guard so requireAuthenticated/requireGuest work
+    // even when apps manually wire sessions without the auth option.
+    if (!this.authManager.guardNames().length) {
+      this.authManager.registerGuard('web', ({ ctx, session, manager }) => {
+        const provider = manager.getProvider('users')
+        return new SessionGuard({ provider, session })
+      })
+      this.authManager.setDefaultGuard('web')
+    }
+
+    // Always attach auth context middleware.
+    this.hono.use('*', attachAuthContext((ctx) => this.authManager.createAuthContext(ctx)))
+
+    // AuthServiceProvider (session + CSRF) is only registered when options.auth is set.
     if (this.options.auth) {
       this.providerManager.register(AuthServiceProvider)
     }
@@ -227,7 +242,7 @@ export class Application {
    */
   async mountRoutes(): Promise<void> {
     if (this.options.routes && !this.routesRegistered) {
-      this.router.clear()
+      // Don't clear — preserve routes added directly to app.router before boot()
       await this.options.routes(this.router)
       this.routesRegistered = true
     }
