@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 
 export const docsTheme = {
   fontFamily: 'system-ui, sans-serif',
@@ -96,11 +96,24 @@ export function useColorMode(): { mode: ColorMode; isDark: boolean; setMode: (m:
     () => 'system' as ColorMode,
   )
 
-  const isDark = useSyncExternalStore(
-    subscribe,
-    () => getResolvedDark(getStoredMode()),
-    () => false,
-  )
+  // Start with `null` (unknown) to avoid hydration mismatch — the server
+  // snapshot always returns `false`, but the client may resolve to `true`
+  // from localStorage / matchMedia on the very first render.  Deferring the
+  // real value to a useEffect keeps the initial client render identical to
+  // the server render.
+  const [isDark, setIsDark] = useState<boolean>(false)
+
+  useEffect(() => {
+    setIsDark(getResolvedDark(getStoredMode()))
+  }, [mode])
+
+  // Keep isDark in sync when the external store emits changes (e.g. system
+  // preference toggle while mode === 'system').
+  useEffect(() => {
+    return subscribe(() => {
+      setIsDark(getResolvedDark(getStoredMode()))
+    })
+  }, [])
 
   const setMode = useCallback((m: ColorMode) => {
     localStorage.setItem(STORAGE_KEY, m)
