@@ -40,11 +40,7 @@ test.describe('Authentication', () => {
   test('authenticated user can log out', async ({ page }) => {
     await login(page)
 
-    await Promise.all([
-      page.waitForURL('**/'),
-      page.getByRole('button', { name: 'Log out' }).click(),
-    ])
-
+    await page.getByRole('button', { name: 'Log out' }).click()
     await expect(page).toHaveURL('/')
     await expect(page.getByRole('link', { name: 'Sign in' })).toBeVisible()
   })

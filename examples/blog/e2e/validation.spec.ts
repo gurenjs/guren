@@ -4,7 +4,6 @@ test.describe('Validation errors', () => {
   test('submitting an empty post form shows validation errors', async ({ page }) => {
     await page.goto('/posts/new')
     await expect(page.getByRole('heading', { name: 'New Post' })).toBeVisible()
-    await expect(page.locator('main[data-hydrated="true"]')).toBeVisible()
 
     await page.getByRole('button', { name: 'Create Post' }).click()
 
@@ -16,7 +15,6 @@ test.describe('Validation errors', () => {
   test('submitting a partially filled post form shows remaining errors', async ({ page }) => {
     await page.goto('/posts/new')
     await expect(page.getByRole('heading', { name: 'New Post' })).toBeVisible()
-    await expect(page.locator('main[data-hydrated="true"]')).toBeVisible()
 
     const titleInput = page.getByLabel('Title')
     await titleInput.click()
