@@ -85,8 +85,9 @@ jobs:
       - name: Packed artifact audit
         run: bun run smoke:starter:packed
 
-      - name: Upgrade existing app smoke
-        run: bun run smoke:upgrade-existing-app
+      # upgrade-existing-app smoke skipped in release workflow: it tries to
+      # resolve the new version from npm before publish, causing a chicken-and-egg
+      # failure. This smoke runs in CI on every PR instead.
 
       - name: Run tests
         run: bun run test
