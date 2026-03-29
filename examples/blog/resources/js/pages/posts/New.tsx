@@ -10,7 +10,7 @@ export default function New() {
   })
 
   const handleSubmit = (data: PostFormValues) => {
-    form.setData(data)
+    form.transform(() => data)
     form.post(route('posts.store'), {
       onSuccess: () => form.reset()
     })

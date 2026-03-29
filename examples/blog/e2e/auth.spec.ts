@@ -3,13 +3,18 @@ import { test, expect, type Page } from '@playwright/test'
 async function login(page: Page) {
   await page.goto('/login')
   await expect(page.getByRole('heading', { name: 'Sign in to your account' })).toBeVisible()
-  await page.getByLabel('Email address').fill('demo@guren.dev')
-  await page.getByLabel('Password').fill('secret')
+  const emailInput = page.getByLabel('Email address')
+  const passwordInput = page.getByLabel('Password')
+  await emailInput.click()
+  await emailInput.pressSequentially('demo@guren.dev')
+  await expect(emailInput).toHaveValue('demo@guren.dev')
+  await passwordInput.click()
+  await passwordInput.pressSequentially('secret')
+  await expect(passwordInput).toHaveValue('secret')
 
-  await Promise.all([
-    page.waitForURL('**/dashboard'),
-    page.getByRole('button', { name: 'Sign in' }).click(),
-  ])
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await expect(page).toHaveURL(/\/dashboard$/)
+  await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
 }
 
 test.describe('Authentication', () => {
@@ -41,7 +46,7 @@ test.describe('Authentication', () => {
     ])
 
     await expect(page).toHaveURL('/')
-    await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Sign in' })).toBeVisible()
   })
 
   test('visiting /dashboard without auth redirects to /login', async ({ page }) => {
@@ -54,8 +59,14 @@ test.describe('Authentication', () => {
     await page.goto('/login')
     await expect(page.getByRole('heading', { name: 'Sign in to your account' })).toBeVisible()
 
-    await page.getByLabel('Email address').fill('wrong@example.com')
-    await page.getByLabel('Password').fill('wrongpassword')
+    const emailInput = page.getByLabel('Email address')
+    const passwordInput = page.getByLabel('Password')
+    await emailInput.click()
+    await emailInput.pressSequentially('wrong@example.com')
+    await expect(emailInput).toHaveValue('wrong@example.com')
+    await passwordInput.click()
+    await passwordInput.pressSequentially('wrongpassword')
+    await expect(passwordInput).toHaveValue('wrongpassword')
     await page.getByRole('button', { name: 'Sign in' }).click()
 
     await expect(page).toHaveURL(/\/login/)

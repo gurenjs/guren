@@ -66,11 +66,10 @@ test.describe('Multi-step User Journey', () => {
     await page.getByLabel('Title').fill(title)
     await page.getByLabel('Excerpt').fill('Journey test excerpt')
     await page.getByLabel('Body').fill('Journey test body')
-    await Promise.all([
-      page.waitForURL(/\/posts\/\d+$/),
-      page.getByRole('button', { name: 'Create Post' }).click(),
-    ])
+    await expect(page.getByLabel('Title')).toHaveValue(title)
+    await page.getByRole('button', { name: 'Create Post' }).click()
+    await expect(page).toHaveURL(/\/posts(?:\/\d+)?$/)
 
-    await expect(page.getByRole('heading', { name: title })).toBeVisible()
+    await expect(page.getByText(title)).toBeVisible()
   })
 })

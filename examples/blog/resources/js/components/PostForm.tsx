@@ -56,11 +56,15 @@ export default function PostForm({ form, onSubmit, onCancel, mode }: PostFormPro
     e.preventDefault()
     clearErrors()
 
-    onSubmit({
-      title: data.title,
-      excerpt: data.excerpt,
-      body: data.body
-    })
+    const formData = new FormData(e.currentTarget as HTMLFormElement)
+    const payload: PostFormValues = {
+      title: String(formData.get('title') ?? ''),
+      excerpt: String(formData.get('excerpt') ?? ''),
+      body: String(formData.get('body') ?? ''),
+    }
+
+    setData(payload)
+    onSubmit(payload)
   }
 
   const handleChange = (field: keyof PostFormValues) => (
@@ -106,6 +110,7 @@ export default function PostForm({ form, onSubmit, onCancel, mode }: PostFormPro
               <input
                 type="text"
                 id="title"
+                name="title"
                 value={data.title}
                 onChange={handleChange('title')}
                 className={`block w-full rounded-md border-0 px-3 py-2.5 text-xl font-medium text-stone-900 shadow-sm ring-1 ring-inset placeholder:text-stone-300 focus:ring-2 focus:ring-inset sm:leading-8 ${formErrors.title
@@ -130,6 +135,7 @@ export default function PostForm({ form, onSubmit, onCancel, mode }: PostFormPro
               </label>
               <textarea
                 id="excerpt"
+                name="excerpt"
                 value={data.excerpt}
                 onChange={handleChange('excerpt')}
                 rows={3}
@@ -155,6 +161,7 @@ export default function PostForm({ form, onSubmit, onCancel, mode }: PostFormPro
               </label>
               <textarea
                 id="body"
+                name="body"
                 value={data.body}
                 onChange={handleChange('body')}
                 rows={16}

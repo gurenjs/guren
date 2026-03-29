@@ -7,7 +7,7 @@ export default defineConfig({
   fullyParallel: false,
   forbidOnly: isCI,
   retries: isCI ? 3 : 0,
-  workers: isCI ? 1 : undefined,
+  workers: 1,
   timeout: isCI ? 60_000 : 30_000,
   expect: { timeout: isCI ? 15_000 : 5_000 },
   reporter: isCI ? 'github' : 'html',

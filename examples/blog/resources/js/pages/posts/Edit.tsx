@@ -18,7 +18,7 @@ export default function Edit({ post, postId, errors = {} }: Props) {
   })
 
   const handleSubmit = (data: PostFormValues) => {
-    form.setData(data)
+    form.transform(() => data)
     form.put(route('posts.update', { id: postId }))
   }
 

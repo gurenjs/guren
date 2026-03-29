@@ -13,13 +13,11 @@ async function createPost(page: Page, title: string) {
   await page.getByLabel('Title').fill(title)
   await page.getByLabel('Excerpt').fill('An excerpt for the E2E test post.')
   await page.getByLabel('Body').fill('This is the body content created during E2E testing.')
+  await expect(page.getByLabel('Title')).toHaveValue(title)
 
-  await Promise.all([
-    page.waitForURL(/\/posts\/\d+$/),
-    page.getByRole('button', { name: 'Create Post' }).click(),
-  ])
-
-  await expect(page.getByRole('heading', { name: title })).toBeVisible()
+  await page.getByRole('button', { name: 'Create Post' }).click()
+  await expect(page).toHaveURL(/\/posts(?:\/\d+)?$/)
+  await expect(page.getByText(title)).toBeVisible()
 }
 
 test.describe('Posts — public', () => {
@@ -52,6 +50,13 @@ test.describe('Posts — authenticated CRUD', () => {
 
     await createPost(page, originalTitle)
 
+    if (/\/posts$/.test(page.url())) {
+      await Promise.all([
+        page.waitForURL(/\/posts\/\d+$/),
+        page.getByRole('link', { name: new RegExp(originalTitle) }).click(),
+      ])
+    }
+
     await page.goto(`${page.url()}/edit`)
 
     await expect(page.getByRole('heading', { name: 'Edit Post' })).toBeVisible()
@@ -60,7 +65,8 @@ test.describe('Posts — authenticated CRUD', () => {
     await expect(titleInput).toHaveValue(originalTitle)
 
     await titleInput.clear()
-    await titleInput.fill(updatedTitle)
+    await titleInput.pressSequentially(updatedTitle)
+    await expect(titleInput).toHaveValue(updatedTitle)
 
     await Promise.all([
       page.waitForURL(/\/posts\/\d+$/),

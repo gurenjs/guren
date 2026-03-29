@@ -16,7 +16,10 @@ test.describe('Validation errors', () => {
     await page.goto('/posts/new')
     await expect(page.getByRole('heading', { name: 'New Post' })).toBeVisible()
 
-    await page.getByLabel('Title').fill('Partial Post')
+    const titleInput = page.getByLabel('Title')
+    await titleInput.click()
+    await titleInput.pressSequentially('Partial Post')
+    await expect(titleInput).toHaveValue('Partial Post')
     await page.getByRole('button', { name: 'Create Post' }).click()
 
     await expect(page.getByText('Excerpt is required.')).toBeVisible()
