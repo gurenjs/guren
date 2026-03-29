@@ -1,6 +1,6 @@
 {
   "name": "create-guren-app",
-  "version": "0.2.0-alpha.7",
+  "version": "1.0.0-rc.9",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -28,7 +28,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@guren/cli": "^0.2.0-alpha.7",
+    "@guren/cli": "^1.0.0-rc.9",
     "citty": "^0.1.6",
     "consola": "^3.4.2"
   },

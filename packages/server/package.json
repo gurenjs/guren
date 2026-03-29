@@ -1,6 +1,6 @@
 {
   "name": "@guren/server",
-  "version": "0.2.0-alpha.7",
+  "version": "1.0.0-rc.9",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -57,7 +57,6 @@
       "types": "./dist/i18n/index.d.ts",
       "default": "./dist/i18n/index.js"
     },
-
     "./logging": {
       "types": "./dist/logging/index.d.ts",
       "default": "./dist/logging/index.js"
@@ -106,7 +105,7 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@guren/inertia-client": "^0.2.0-alpha.7",
+    "@guren/inertia-client": "^1.0.0-rc.9",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "chalk": "^5.3.0",
     "consola": "^3.4.2",

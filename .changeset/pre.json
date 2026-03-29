@@ -1,25 +1,31 @@
 {
   "mode": "pre",
-  "tag": "alpha",
+  "tag": "rc",
   "initialVersions": {
+    "@guren/example-api": "0.1.0",
     "@guren/example-blog": "0.1.0",
-    "@guren/cli": "0.1.0",
-    "@guren/core": "0.1.0",
-    "create-guren-app": "0.1.0",
-    "@guren/inertia-client": "0.1.0",
-    "@guren/orm": "0.1.0",
-    "@guren/server": "0.1.0",
-    "@guren/testing": "0.1.0"
+    "@guren/cli": "0.2.0-alpha.7",
+    "@guren/core": "0.2.0-alpha.7",
+    "create-guren-app": "0.2.0-alpha.7",
+    "@guren/inertia-client": "0.2.0-alpha.7",
+    "@guren/openapi": "0.2.0-alpha.7",
+    "@guren/orm": "0.2.0-alpha.7",
+    "@guren/server": "0.2.0-alpha.7",
+    "@guren/testing": "0.2.0-alpha.7",
+    "web": "0.1.0"
   },
   "changesets": [
+    "align-rc9",
     "busy-bobcats-smell",
     "dull-tips-go",
     "hot-parents-know",
     "ninety-dragons-wonder",
+    "openapi-major",
     "proud-snakes-brush",
     "ready-numbers-rescue",
     "release-prep",
     "strict-shoes-crash",
-    "thick-bottles-search"
+    "thick-bottles-search",
+    "v1-rc-release"
   ]
 }
