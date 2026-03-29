@@ -1,5 +1,5 @@
 import { Link, usePage } from '@inertiajs/react'
-import type { PropsWithChildren } from 'react'
+import { useEffect, useState, type PropsWithChildren } from 'react'
 import { route } from '../../../.guren/routes.gen'
 
 type SharedPageProps = {
@@ -16,6 +16,11 @@ type LayoutProps = PropsWithChildren<{
 export default function Layout({ children, mainClassName, wrapperClassName }: LayoutProps) {
   const { props } = usePage<SharedPageProps>()
   const isAuthenticated = Boolean(props.auth?.user)
+  const [isHydrated, setIsHydrated] = useState(false)
+
+  useEffect(() => {
+    setIsHydrated(true)
+  }, [])
 
   const wrapperClasses = ['min-h-screen bg-stone-50 text-stone-800 font-sans selection:bg-guren-100 selection:text-guren-900']
   if (wrapperClassName) {
@@ -77,7 +82,7 @@ export default function Layout({ children, mainClassName, wrapperClassName }: La
           </nav>
         </div>
       </header>
-      <main className={mainClasses.join(' ')}>
+      <main className={mainClasses.join(' ')} data-hydrated={isHydrated ? 'true' : 'false'}>
         {children}
       </main>
       <footer className="border-t border-stone-100 py-16">

@@ -4,6 +4,7 @@ test.describe('Inertia SPA Navigation', () => {
   test('navigating between pages uses Inertia (no full reload)', async ({ page }) => {
     await page.goto('/posts')
     await expect(page.getByRole('heading', { name: 'Posts' })).toBeVisible()
+    await expect(page.locator('main[data-hydrated="true"]')).toBeVisible()
 
     const firstPostLink = page.locator('article a').first()
     const firstPostTitle = await firstPostLink.locator('h2').textContent()
@@ -24,6 +25,7 @@ test.describe('Pagination', () => {
   test('pagination navigates between pages', async ({ page }) => {
     await page.goto('/posts')
     await expect(page.getByRole('heading', { name: 'Posts' })).toBeVisible()
+    await expect(page.locator('main[data-hydrated="true"]')).toBeVisible()
 
     const nextLink = page.getByRole('link', { name: 'Next' })
     if (await nextLink.isVisible()) {
@@ -49,18 +51,21 @@ test.describe('Multi-step User Journey', () => {
   test('dashboard → create post → view post', async ({ page }) => {
     await page.goto('/dashboard')
     await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
+    await expect(page.locator('main[data-hydrated="true"]')).toBeVisible()
 
     await Promise.all([
       page.waitForURL('**/posts'),
       page.getByRole('link', { name: 'Posts' }).click(),
     ])
     await expect(page.getByRole('heading', { name: 'Posts' })).toBeVisible()
+    await expect(page.locator('main[data-hydrated="true"]')).toBeVisible()
 
     await Promise.all([
       page.waitForURL('**/posts/new'),
       page.getByRole('link', { name: 'New post' }).click(),
     ])
     await expect(page.getByRole('heading', { name: 'New Post' })).toBeVisible()
+    await expect(page.locator('main[data-hydrated="true"]')).toBeVisible()
 
     const title = `Journey Post ${Date.now()}`
     await page.getByLabel('Title').fill(title)

@@ -3,12 +3,14 @@ import { test, expect, type Page } from '@playwright/test'
 async function createPost(page: Page, title: string) {
   await page.goto('/posts')
   await expect(page.getByRole('heading', { name: 'Posts' })).toBeVisible()
+  await expect(page.locator('main[data-hydrated="true"]')).toBeVisible()
 
   await Promise.all([
     page.waitForURL('**/posts/new'),
     page.getByRole('link', { name: 'New post' }).click(),
   ])
   await expect(page.getByRole('heading', { name: 'New Post' })).toBeVisible()
+  await expect(page.locator('main[data-hydrated="true"]')).toBeVisible()
 
   await page.getByLabel('Title').fill(title)
   await page.getByLabel('Excerpt').fill('An excerpt for the E2E test post.')
@@ -60,6 +62,7 @@ test.describe('Posts — authenticated CRUD', () => {
     await page.goto(`${page.url()}/edit`)
 
     await expect(page.getByRole('heading', { name: 'Edit Post' })).toBeVisible()
+    await expect(page.locator('main[data-hydrated="true"]')).toBeVisible()
 
     const titleInput = page.getByLabel('Title')
     await expect(titleInput).toHaveValue(originalTitle)
