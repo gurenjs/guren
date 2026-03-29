@@ -117,7 +117,8 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
-    continue-on-error: true  # E2E flaky in GitHub Actions due to Inertia XHR timing
+    # CI sets NODE_ENV=production (required for Vite asset serving) but runs
+    # over HTTP — the blog app disables Secure cookies when CI env is set.
     services:
       postgres:
         image: postgres:15-alpine

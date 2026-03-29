@@ -19,6 +19,8 @@ import BroadcastProvider from '../app/Providers/BroadcastProvider.js'
 import { registerWebRoutes } from '../routes/web.js'
 import '../config/inertia.js'
 
+const secureCookies = process.env.NODE_ENV === 'production' && !process.env.CI
+
 const app = createApp({
   routes: registerWebRoutes,
   providers: [
@@ -40,7 +42,12 @@ const app = createApp({
   auth: {
     autoSession: true,
     sessionOptions: {
-      cookieSecure: process.env.NODE_ENV === 'production',
+      cookieSecure: secureCookies,
+    },
+    csrfOptions: {
+      cookieOptions: {
+        secure: secureCookies,
+      },
     },
   },
   hostAuthorization: {

@@ -49,7 +49,7 @@ Lessons learned from code review cycles. Check these before submitting changes.
 
 ## E2E Tests
 
-- **Validation tests (Inertia XHR round-trip) are flaky in CI.** Skipped via `test.skip(!!process.env.CI)`.
+- **E2E needs `NODE_ENV=production` for Vite assets but runs over HTTP.** Cookie `Secure` flag must be disabled when `CI` is set (see `examples/blog/src/app.ts`), otherwise all Inertia XHR POSTs fail silently (CSRF/session cookies rejected by browser).
 - **Use `storageState` for authenticated tests** — login once in setup, share session across all tests.
 - **Avoid asserting specific post titles in lists** — pagination may push them off page 1.
 - **Use `page.waitForLoadState('networkidle')` after Inertia navigations** in CI.
