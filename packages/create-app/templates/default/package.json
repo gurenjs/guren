@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "codegen": "bunx guren codegen --routes routes/web.ts --out types/generated/routes.d.ts --force",
+    "codegen": "bunx guren codegen --force",
     "dev": "bun run codegen && bun run dev:server",
     "dev:server": "bun bin/serve.ts",
     "typecheck": "tsc --noEmit",

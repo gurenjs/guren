@@ -399,7 +399,10 @@ export class TestRequestBuilder {
     }
 
     if (this._user) {
-      this._headers['X-Testing-User'] = JSON.stringify(this._user)
+      const userData = typeof this._user.getAuthIdentifier === 'function'
+        ? { ...this._user, __authId: this._user.getAuthIdentifier() }
+        : this._user
+      this._headers['X-Testing-User'] = JSON.stringify(userData)
     }
     if (Object.keys(this._session).length > 0) {
       this._headers['X-Testing-Session'] = JSON.stringify(this._session)

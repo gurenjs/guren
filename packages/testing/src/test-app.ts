@@ -233,8 +233,7 @@ export class PendingTestResponse implements PromiseLike<TestResponse> {
   assertCookie(name: string, value?: string): PendingTestResponse {
     return new PendingTestResponse(
       this.promise.then((r) => {
-        const setCookie = r.headers.get('Set-Cookie') ?? ''
-        const cookies = setCookie.split(',').map((c) => c.trim())
+        const cookies = r.headers.getSetCookie()
         const found = cookies.some((c) => {
           const [pair] = c.split(';')
           const [cookieName, cookieValue] = pair.split('=')
@@ -262,8 +261,7 @@ export class PendingTestResponse implements PromiseLike<TestResponse> {
   assertCookieMissing(name: string): PendingTestResponse {
     return new PendingTestResponse(
       this.promise.then((r) => {
-        const setCookie = r.headers.get('Set-Cookie') ?? ''
-        const cookies = setCookie.split(',').map((c) => c.trim())
+        const cookies = r.headers.getSetCookie()
         const found = cookies.some((c) => {
           const [pair] = c.split(';')
           const [cookieName] = pair.split('=')

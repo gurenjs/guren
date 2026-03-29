@@ -3,7 +3,9 @@ import { configureInertiaVitest } from './vitest'
 import { setInertiaPage } from './inertia'
 
 describe('configureInertiaVitest', () => {
-  it('stubs Bun and wires Inertia mocks', async () => {
+  const isBun = typeof globalThis.Bun !== 'undefined'
+
+  it.skipIf(isBun)('stubs Bun and wires Inertia mocks', async () => {
     const globalRef = globalThis as { Bun?: unknown }
     const originalBun = globalRef.Bun
     delete globalRef.Bun

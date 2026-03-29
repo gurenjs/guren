@@ -88,6 +88,7 @@ export {
   getUserApiTokens,
   createBearerTokenMiddleware,
   getApiToken,
+  getApiTokenOrFail,
   MemoryApiTokenStore,
   API_TOKEN_KEY,
   OAuthManager,
