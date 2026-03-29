@@ -2,7 +2,7 @@
 
 Guren の MVC スタックで基本的なブログを作る手順です。
 
-1. **テーブルを用意** — `db/schema.ts` に Drizzle ヘルパーを追加します:
+1. **テーブルを用意** — `db/schema.ts` に Drizzle ヘルパーを追加します。
    ```ts
    export const posts = pgTable('posts', {
      id: serial('id').primaryKey(),
@@ -13,42 +13,57 @@ Guren の MVC スタックで基本的なブログを作る手順です。
    })
    ```
    `bun run db:migrate` でスキーマを反映します。
-2. **モデルを作成** — `app/Models/Post.ts` に記述:
+2. **モデルを作成** — `app/Models/Post.ts` に記述します。
    ```ts
-   import { Model } from '@guren/core'
+   import { defineModel } from '@guren/orm'
    import { posts } from '@/db/schema'
 
    export type PostRecord = typeof posts.$inferSelect
 
-   export default class Post extends Model<PostRecord> {
-     static override table = posts
-     static override readonly recordType = {} as PostRecord
-   }
+   export default class Post extends defineModel(posts) {}
    ```
-3. **コントローラを実装** — `app/Http/Controllers/PostController.ts`:
+3. **コントローラーを実装** — `app/Http/Controllers/PostController.ts` を作成します。
    ```ts
-   import { Controller } from '@guren/core'
+   import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
    import Post from '@/app/Models/Post'
+   import { PostResource, type PostResourceData } from '@/app/Http/Resources/PostResource'
+   import { pages } from '@/.guren/pages.gen'
+   import { PageQuerySchema, PostIdParamSchema } from '@/app/Http/Validators/PostValidator'
+
+   type PostsIndexProps = PaginatedPageProps<PostResourceData>
 
    export default class PostController extends Controller {
      async index() {
-       const posts = await Post.orderBy('publishedAt', 'desc').get()
-       return this.inertia('posts/Index', { posts })
+       const { page } = this.validateQuery(PageQuerySchema)
+       const result = await Post.paginate({ page, perPage: 10, orderBy: ['publishedAt', 'desc'] })
+       const paginator = paginate(result, { path: this.request.path ?? '/posts' })
+
+       return this.inertia(pages.posts.Index, {
+         data: result.data.map((post) => new PostResource(post).toJSON()),
+         pagination: {
+           meta: paginator.meta(),
+           links: paginator.links(),
+         },
+       } satisfies PostsIndexProps)
      }
 
-     async show(_, params: { id: string }) {
-       const post = await Post.findOrFail(Number(params.id))
-       return this.inertia('posts/Show', { post })
+     async show() {
+       const { id } = this.validateParams(PostIdParamSchema)
+       const post = await Post.findOrFail(id)
+       return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() })
      }
    }
    ```
-4. **ルートを登録** — `routes/web.ts` を更新:
+4. **ルートを登録** — `routes/web.ts` を更新します。
    ```ts
+   import { Router } from '@guren/core'
    import PostController from '@/app/Http/Controllers/PostController'
 
-   Route.group('/posts', () => {
-     Route.get('/', [PostController, 'index'])
-     Route.get('/:id', [PostController, 'show'])
-   })
+   export function registerWebRoutes(router: Router): void {
+     router.group('/posts', (posts) => {
+       posts.get('/', [PostController, 'index'])
+       posts.get('/:id', [PostController, 'show'])
+     })
+   }
    ```
-5. **Inertia ページを作成** — `resources/js/pages/posts/Index.tsx` と `Show.tsx` を追加し、`posts` / `post` props を読んで React UI を描画します。Vite のホットリロードと Inertia がブラウザ状態を同期してくれます。
+5. **Inertia ページを作成** — `resources/js/pages/posts/Index.tsx` / `Show.tsx` を追加し、`interface Props` を定義して型付きの `data` / `pagination` / `post` props で React UI を描画します。`bun run codegen` で `.guren/pages.gen.ts` を生成します。Vite のホットリロードと Inertia がブラウザ状態を同期してくれます。

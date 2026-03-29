@@ -6,7 +6,7 @@ Guren のルートとアプリケーションは Hono のミドルウェアモ�
 
 ```ts
 // src/app.ts
-import { Application, defineMiddleware } from '@guren/core'
+import { createApp, defineMiddleware } from '@guren/core'
 
 const requestTimer = defineMiddleware(async (ctx, next) => {
   const started = performance.now()
@@ -15,7 +15,7 @@ const requestTimer = defineMiddleware(async (ctx, next) => {
   console.log(`${ctx.req.method} ${ctx.req.path} -> ${ctx.res.status} (${duration}ms)`)
 })
 
-const app = new Application()
+const app = createApp()
 app.use('*', requestTimer)
 ```
 
@@ -24,11 +24,15 @@ app.use('*', requestTimer)
 ## ルートミドルウェア
 
 ```ts
-import { Route } from '@guren/core'
+import { Router } from '@guren/core'
 import DashboardController from '@/app/Http/Controllers/DashboardController'
 import { requireAuthenticated } from '@/app/Http/middleware/auth'
 
-Route.get('/dashboard', [DashboardController, 'index'], requireAuthenticated({ redirectTo: '/login' }))
+export function registerWebRoutes(router: Router): void {
+  router.get('/dashboard', [DashboardController, 'index']).middleware(
+    requireAuthenticated({ redirectTo: '/login' }),
+  )
+}
 ```
 
 ルートミドルウェアは対象のエンドポイント（またはグループ内の全エンドポイント）だけに適用されます。
@@ -57,7 +61,9 @@ app.use('*', createSessionMiddleware())
 import { attachAuthContext, requireAuthenticated } from '@guren/core'
 
 app.use('*', attachAuthContext(() => authManager.createGuard('web')))
-Route.get('/settings', [SettingsController, 'index'], requireAuthenticated({ redirectTo: '/login' }))
+router.get('/settings', [SettingsController, 'index']).middleware(
+  requireAuthenticated({ redirectTo: '/login' }),
+)
 ```
 
 認証モジュールは今後強化されますが、現状でもこの契約を使ってカスタムガードを配線できます。

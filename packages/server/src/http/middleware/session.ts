@@ -1,11 +1,23 @@
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie'
+import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { MiddlewareHandler } from 'hono'
+import { deriveAppKeyring, getAppKeyringFromEnv } from '../../encryption/app-key'
 
 export type SessionData = Record<string, unknown>
 
 export interface SessionStore {
+  /**
+   * Read a session by its opaque identifier.
+   * Returns undefined when the session does not exist or has expired.
+   */
   read(id: string): Promise<SessionData | undefined>
+  /**
+   * Persist a session using upsert semantics for the given opaque identifier.
+   */
   write(id: string, data: SessionData, ttlSeconds: number): Promise<void>
+  /**
+   * Destroy a session. Implementations must treat repeated calls as safe.
+   */
   destroy(id: string): Promise<void>
 }
 
@@ -52,6 +64,9 @@ export interface SessionOptions {
 
 const DEFAULT_COOKIE_NAME = 'guren.session'
 const DEFAULT_TTL_SECONDS = 60 * 60 * 2 // 2 hours
+const DEFAULT_COOKIE_SECURE = typeof process !== 'undefined'
+  ? process.env.NODE_ENV === 'production'
+  : true
 
 const SESSION_CONTEXT_KEY = 'guren:session'
 
@@ -66,6 +81,15 @@ export interface Session {
   all(): SessionData
   regenerate(): void
   invalidate(): void
+  flash(key: string, value: unknown): void
+  getFlash<T = unknown>(key: string): T | undefined
+  reflash(): void
+  keep(...keys: string[]): void
+}
+
+interface FlashBag {
+  new: Record<string, unknown>
+  old: Record<string, unknown>
 }
 
 class SessionImpl implements Session {
@@ -75,11 +99,21 @@ class SessionImpl implements Session {
   private dirty = false
   private destroyed = false
   private regenerated = false
+  private _flash: FlashBag = { new: {}, old: {} }
 
   constructor(id: string, initialData: SessionData, readonly isNew: boolean) {
     this.currentId = id
     this.originalId = id
-    this.data = { ...initialData }
+    // Separate flash bag from regular session data
+    const { _flash, ...rest } = initialData
+    this.data = { ...rest }
+    if (_flash && typeof _flash === 'object') {
+      const bag = _flash as Partial<FlashBag>
+      this._flash = {
+        new: bag.new && typeof bag.new === 'object' ? { ...bag.new } : {},
+        old: bag.old && typeof bag.old === 'object' ? { ...bag.old } : {},
+      }
+    }
   }
 
   get id(): string {
@@ -128,6 +162,42 @@ class SessionImpl implements Session {
     this.destroyed = true
   }
 
+  flash(key: string, value: unknown): void {
+    this._flash.new[key] = value
+    this.dirty = true
+  }
+
+  getFlash<T = unknown>(key: string): T | undefined {
+    return this._flash.old[key] as T | undefined
+  }
+
+  reflash(): void {
+    // Move all old flash data back to new so it survives another request
+    for (const [key, value] of Object.entries(this._flash.old)) {
+      this._flash.new[key] = value
+    }
+    this.dirty = true
+  }
+
+  keep(...keys: string[]): void {
+    for (const key of keys) {
+      if (key in this._flash.old) {
+        this._flash.new[key] = this._flash.old[key]
+      }
+    }
+    this.dirty = true
+  }
+
+  /**
+   * Age flash data: move `new` → `old`, clear previous `old`.
+   * Called at the start of each request by the session middleware.
+   */
+  ageFlashData(): void {
+    this._flash.old = { ...this._flash.new }
+    this._flash.new = {}
+    this.dirty = true
+  }
+
   markTouched(): void {
     this.dirty = true
   }
@@ -145,7 +215,13 @@ class SessionImpl implements Session {
   }
 
   snapshot(): SessionData {
-    return { ...this.data }
+    const hasFlash =
+      Object.keys(this._flash.new).length > 0 ||
+      Object.keys(this._flash.old).length > 0
+    return {
+      ...this.data,
+      ...(hasFlash ? { _flash: { new: { ...this._flash.new }, old: { ...this._flash.old } } } : {}),
+    }
   }
 
   originalSessionId(): string {
@@ -155,25 +231,90 @@ class SessionImpl implements Session {
 
 export interface CreateSessionMiddlewareOptions extends SessionOptions {}
 
+interface SessionCookieSigner {
+  sign(sessionId: string): string
+  verify(cookieValue: string | undefined): string | null
+}
+
+function encodeBase64Url(value: string): string {
+  return Buffer.from(value, 'utf8').toString('base64url')
+}
+
+function decodeBase64Url(value: string): string {
+  return Buffer.from(value, 'base64url').toString('utf8')
+}
+
+function createCookieSigner(cookieName: string, cookiePath: string): SessionCookieSigner {
+  const keyring = deriveAppKeyring(getAppKeyringFromEnv(), 'cookie-signing')
+  const keys = [keyring.current, ...keyring.previous]
+
+  const canonicalize = (encodedId: string): string => `${cookieName}|${cookiePath}|${encodedId}`
+
+  const sign = (sessionId: string): string => {
+    const encodedId = encodeBase64Url(sessionId)
+    const signature = createHmac('sha256', keyring.current)
+      .update(canonicalize(encodedId))
+      .digest('base64url')
+    return `${encodedId}.${signature}`
+  }
+
+  const verify = (cookieValue: string | undefined): string | null => {
+    if (!cookieValue) {
+      return null
+    }
+
+    const [encodedId, signature, extra] = cookieValue.split('.')
+    if (!encodedId || !signature || extra) {
+      return null
+    }
+
+    const canonical = canonicalize(encodedId)
+    const matches = keys.some((key) => {
+      const expected = createHmac('sha256', key).update(canonical).digest('base64url')
+      const actualBuffer = Buffer.from(signature, 'utf8')
+      const expectedBuffer = Buffer.from(expected, 'utf8')
+      if (actualBuffer.length !== expectedBuffer.length) {
+        return false
+      }
+
+      return timingSafeEqual(actualBuffer, expectedBuffer)
+    })
+
+    if (!matches) {
+      return null
+    }
+
+    try {
+      return decodeBase64Url(encodedId)
+    } catch {
+      return null
+    }
+  }
+
+  return { sign, verify }
+}
+
 export function createSessionMiddleware(options: CreateSessionMiddlewareOptions = {}): MiddlewareHandler {
   const {
     cookieName = DEFAULT_COOKIE_NAME,
     cookiePath = '/',
     cookieDomain,
-    cookieSecure = true,
+    cookieSecure = DEFAULT_COOKIE_SECURE,
     cookieSameSite = 'Lax',
     cookieHttpOnly = true,
     cookieMaxAgeSeconds,
     ttlSeconds = DEFAULT_TTL_SECONDS,
     store = new MemorySessionStore(),
   } = options
+  const signer = createCookieSigner(cookieName, cookiePath)
 
   return async (ctx, next) => {
-    const existingId = getCookie(ctx, cookieName)
+    const existingId = signer.verify(getCookie(ctx, cookieName))
     const sessionId = existingId ?? globalThis.crypto.randomUUID()
     const isNew = !existingId
     const initialData = existingId ? (await store.read(existingId)) ?? {} : {}
     const session = new SessionImpl(sessionId, initialData, isNew)
+    session.ageFlashData()
 
     ctx.set(SESSION_CONTEXT_KEY, session)
 
@@ -196,7 +337,7 @@ export function createSessionMiddleware(options: CreateSessionMiddlewareOptions 
         if (existingId) {
           await store.write(existingId, session.snapshot(), ttlSeconds)
 
-          setCookie(ctx, cookieName, existingId, {
+          setCookie(ctx, cookieName, signer.sign(existingId), {
             path: cookiePath,
             domain: cookieDomain,
             secure: cookieSecure,
@@ -210,8 +351,11 @@ export function createSessionMiddleware(options: CreateSessionMiddlewareOptions 
 
       const nextId = session.id
       await store.write(nextId, session.snapshot(), ttlSeconds)
+      if (session.wasRegenerated() && session.originalSessionId() !== nextId) {
+        await store.destroy(session.originalSessionId())
+      }
 
-      setCookie(ctx, cookieName, nextId, {
+      setCookie(ctx, cookieName, signer.sign(nextId), {
         path: cookiePath,
         domain: cookieDomain,
         secure: cookieSecure,

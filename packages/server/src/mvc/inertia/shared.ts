@@ -21,6 +21,10 @@ export function setInertiaSharedProps<Props extends Record<string, unknown> = Re
   resolver = resolverFn as SharedInertiaPropsResolver<ResolvedSharedInertiaProps> | null
 }
 
+export function getInertiaSharedPropsResolver(): SharedInertiaPropsResolver<ResolvedSharedInertiaProps> | null {
+  return resolver
+}
+
 export async function resolveSharedInertiaProps(ctx: Context): Promise<ResolvedSharedInertiaProps> {
   if (!resolver) return {} as ResolvedSharedInertiaProps
 

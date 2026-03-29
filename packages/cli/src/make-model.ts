@@ -1,5 +1,5 @@
 import type { WriterOptions } from './utils'
-import { camelCase, resourceName, writeFileSafe } from './utils'
+import { camelCase, scaffoldFile } from './utils'
 
 function pluralizeIdentifier(name: string): string {
   if (name.endsWith('s')) {
@@ -13,21 +13,20 @@ const MODELS_DIR = 'app/Models'
 function modelTemplate(className: string): string {
   const schemaIdentifier = pluralizeIdentifier(camelCase(className))
 
-  return `import { Model } from '@guren/orm'
-import { ${schemaIdentifier} } from '../../db/schema.js' // TODO: adjust to the actual table export
+  return `import { defineModel } from '@guren/core'
+import { ${schemaIdentifier} } from '../../db/schema.js'
 
 export type ${className}Record = typeof ${schemaIdentifier}.$inferSelect
+export type New${className}Record = typeof ${schemaIdentifier}.$inferInsert
 
-export class ${className} extends Model<${className}Record> {
-  static override table = ${schemaIdentifier}
-  static override readonly recordType = {} as ${className}Record
-  // For complex queries, start from Drizzle: ${className}.query().where(...), or use ${schemaIdentifier} directly with db.query.${schemaIdentifier}
+export class ${className} extends defineModel(${schemaIdentifier}) {
 }
 `
 }
 
 export async function makeModel(name: string, options: WriterOptions = {}): Promise<string> {
-  const { className } = resourceName(name)
-  const filePath = `${MODELS_DIR}/${className}.ts`
-  return writeFileSafe(filePath, modelTemplate(className), options)
+  return scaffoldFile(name, {
+    dir: MODELS_DIR,
+    template: ({ className }) => modelTemplate(className),
+  }, options)
 }

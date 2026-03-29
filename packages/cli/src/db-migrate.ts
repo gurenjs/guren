@@ -92,3 +92,37 @@ export async function runDatabaseSeeders(): Promise<void> {
     }
   }
 }
+
+export interface ResetDatabaseOptions {
+  /** Run seeders after migrations (default: false) */
+  seed?: boolean
+}
+
+export async function resetDatabase(options: ResetDatabaseOptions = {}): Promise<void> {
+  const module = await resolveDatabaseModule()
+  const reset = pickFunction(module, ['resetDatabase', 'dropAllTables'])
+  const migrate = pickFunction(module, ['migrateDatabase', 'runMigrations', 'getDatabase'])
+  const seed = pickFunction(module, ['seedDatabase', 'runSeeders'])
+  const close = pickFunction(module, ['closeDatabase'])
+
+  if (!reset) {
+    throw new Error('config/database.ts must export resetDatabase() or dropAllTables() to use db:reset.')
+  }
+
+  if (!migrate) {
+    throw new Error('config/database.ts must export migrateDatabase(), runMigrations(), or getDatabase().')
+  }
+
+  try {
+    await reset()
+    await migrate()
+
+    if (options.seed && seed) {
+      await seed()
+    }
+  } finally {
+    if (close) {
+      await close()
+    }
+  }
+}

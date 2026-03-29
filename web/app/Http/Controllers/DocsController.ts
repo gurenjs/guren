@@ -1,4 +1,4 @@
-import { Controller } from '@guren/server'
+import { Controller } from '@guren/core'
 import {
   DEFAULT_DOC_LOCALE,
   DOC_LOCALE_OPTIONS,
@@ -6,6 +6,7 @@ import {
   normalizeDocCategory,
   normalizeDocSlug,
 } from '../../Services/DocsService.js'
+import { pages } from '../../../.guren/pages.gen.js'
 
 type DocLocale = (typeof DOC_LOCALE_OPTIONS)[number]['code']
 
@@ -38,7 +39,7 @@ export default class DocsController extends Controller {
     const basePath = this.#basePathForLocale(locale)
 
     return this.inertia(
-      'Docs/Index',
+      pages.Docs.Index,
       { categories, locale, locales, basePath },
       {
         url: this.request.path,
@@ -73,7 +74,7 @@ export default class DocsController extends Controller {
     const basePath = this.#basePathForLocale(locale)
 
     return this.inertia(
-      'Docs/Show',
+      pages.Docs.Show,
       { categories, doc, active, locale, locales, basePath },
       {
         url: this.request.path,

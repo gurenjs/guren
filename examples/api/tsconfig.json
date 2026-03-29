@@ -1,0 +1,60 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "noEmit": true,
+    "types": [
+      "bun-types",
+      "vitest/globals"
+    ],
+    "paths": {
+      "@/*": [
+        "./app/*"
+      ],
+      "@guren/cli": [
+        "../../packages/cli/src/index.ts"
+      ],
+      "@guren/cli/*": [
+        "../../packages/cli/src/*"
+      ],
+      "@guren/core": [
+        "../../packages/core/src/index.ts"
+      ],
+      "@guren/core/*": [
+        "../../packages/core/src/*"
+      ],
+      "@guren/openapi": [
+        "../../packages/openapi/src/index.ts"
+      ],
+      "@guren/openapi/*": [
+        "../../packages/openapi/src/*"
+      ],
+      "@guren/server": [
+        "../../packages/server/src/index.ts"
+      ],
+      "@guren/server/*": [
+        "../../packages/server/src/*"
+      ],
+      "@guren/orm": [
+        "../../packages/orm/src/index.ts"
+      ],
+      "@guren/orm/*": [
+        "../../packages/orm/src/*"
+      ],
+      "@guren/testing": [
+        "../../packages/testing/src/index.ts"
+      ],
+      "@guren/testing/*": [
+        "../../packages/testing/src/*"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*",
+    "app/**/*",
+    "routes/**/*",
+    "config/**/*",
+    "tests/**/*"
+  ],
+  "exclude": []
+}

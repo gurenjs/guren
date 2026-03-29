@@ -1,0 +1,43 @@
+{
+  "name": "@guren/openapi",
+  "version": "0.2.0-alpha.7",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gurenjs/guren",
+    "directory": "packages/openapi"
+  },
+  "homepage": "https://github.com/gurenjs/guren#readme",
+  "bugs": {
+    "url": "https://github.com/gurenjs/guren/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist"
+  ],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "bun --watch src/index.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@guren/core": "^0.2.0-alpha.7"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "tsup": "^8.5.0",
+    "typescript": "^5.4.0"
+  }
+}

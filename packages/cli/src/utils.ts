@@ -5,6 +5,21 @@ export interface WriterOptions {
   force?: boolean
 }
 
+export type ScaffoldNames = {
+  rawName: string
+  className: string
+  fileName: string
+  normalizedName: string
+}
+
+export interface ScaffoldConfig {
+  dir: string
+  suffix?: string
+  extension?: string
+  fileName?: (names: ScaffoldNames) => string
+  template: (names: ScaffoldNames) => string
+}
+
 export async function writeFileSafe(relativePath: string, contents: string, options: WriterOptions = {}): Promise<string> {
   const fullPath = resolve(process.cwd(), relativePath)
 
@@ -22,6 +37,29 @@ export async function writeFileSafe(relativePath: string, contents: string, opti
   await mkdir(dirname(fullPath), { recursive: true })
   await writeFile(fullPath, contents, 'utf8')
   return fullPath
+}
+
+export async function writeFilesSafe(
+  entries: Array<{ path: string; contents: string }>,
+  options: WriterOptions = {},
+): Promise<string[]> {
+  const created: string[] = []
+
+  for (const entry of entries) {
+    created.push(await writeFileSafe(entry.path, entry.contents, options))
+  }
+
+  return created
+}
+
+export async function scaffoldFile(name: string, config: ScaffoldConfig, options: WriterOptions = {}): Promise<string> {
+  const { className, fileName } = resourceName(name)
+  const normalizedName = config.suffix ? ensureSuffix(className, config.suffix) : className
+  const baseName = config.fileName ? config.fileName({ rawName: name, className, fileName, normalizedName }) : normalizedName
+  const extension = config.extension ?? 'ts'
+  const filePath = extension ? `${config.dir}/${baseName}.${extension}` : `${config.dir}/${baseName}`
+  const contents = config.template({ rawName: name, className, fileName, normalizedName })
+  return writeFileSafe(filePath, contents, options)
 }
 
 export function pascalCase(value: string): string {
@@ -46,4 +84,8 @@ export function resourceName(value: string): { className: string; fileName: stri
   const className = pascalCase(value)
   const fileName = kebabCase(value)
   return { className, fileName }
+}
+
+export function ensureSuffix(name: string, suffix: string): string {
+  return name.endsWith(suffix) ? name : `${name}${suffix}`
 }

@@ -1,6 +1,9 @@
-export { Model } from './Model'
+export { Model, defineModel } from './Model'
+export { ModelNotFoundException } from './ModelNotFoundException'
 export type {
   PlainObject,
+  InferModelRecord,
+  InferModelInsert,
   WhereClause,
   OrderDirection,
   OrderDefinition,
@@ -11,13 +14,60 @@ export type {
   PaginatedResult,
   PaginationMeta,
   ORMAdapter,
+  TransactionHandle,
+  TransactionModelScope,
+  CastType,
   HasManyRelationResult,
+  HasOneRelationResult,
   BelongsToRelationResult,
+  BelongsToManyRelationResult,
+  HasManyThroughRelationResult,
   HasManyRecord,
+  HasOneRecord,
   BelongsToRecord,
+  BelongsToManyRecord,
+  HasManyThroughRecord,
+  MorphManyRelationResult,
+  MorphManyRecord,
+  MorphToRelationResult,
+  MorphToRecord,
+  WithRelations,
 } from './Model'
+export { QueryBuilder } from './QueryBuilder'
+export type {
+  WhereOperator,
+  WhereCondition,
+  SimpleCondition,
+  GroupCondition,
+  ORMAdapterAdvanced,
+  QueryBuilderOptions,
+} from './QueryBuilder'
+export { SoftDeletes } from './SoftDeletes'
+export type { SoftDeletesStatic } from './SoftDeletes'
+export { executeHook } from './hooks'
+export type { ModelHooks, HookName, HookCallback } from './hooks'
 export { DrizzleAdapter } from './adapters/drizzle-adapter'
+export { buildDrizzleConditions } from './adapters/drizzle-conditions'
 export { createPostgresDatabase } from './postgres'
 export type { PostgresDatabase, PostgresDatabaseOptions } from './postgres'
+export { createMySqlDatabase } from './mysql'
+export type { MySqlDatabase, MySqlDatabaseOptions } from './mysql'
+export { createSqliteDatabase } from './sqlite'
+export type { SqliteDatabase, SqliteDatabaseOptions } from './sqlite'
 export { runSeeders, defineSeeder, loadSeeders } from './seeder'
 export type { SeederContext, SeederHandler } from './seeder'
+
+// Accessors & Mutators
+export { applyAccessors, applyMutators } from './attributes'
+export type { AccessorFn, MutatorFn, AccessorDefinitions, MutatorDefinitions } from './attributes'
+
+// Serialization
+export { serializeRecord, serializeRecords } from './serialization'
+
+// Observers
+export { executeObservers } from './ModelObserver'
+export type { ModelObserver, ModelObserverConstructor } from './ModelObserver'
+
+// Global Scopes
+export { GlobalScopeRegistry } from './GlobalScopeRegistry'
+export type { ScopeFunction } from './GlobalScopeRegistry'

@@ -1,21 +1,20 @@
-import { Controller, parseRequestPayload, formatValidationErrors } from '@guren/server'
+import { Controller, ValidationException } from '@guren/core'
 import { LoginSchema } from '../../Validators/LoginValidator.js'
+import { UserLoggedIn } from '../../../Events/UserLoggedIn.js'
+import type { UserRecord } from '../../../Models/User.js'
+import { pages } from '../../../../.guren/pages.gen.js'
 
 export default class LoginController extends Controller {
   async show(): Promise<Response> {
     const email = this.request.query('email') ?? ''
-    return this.inertia('auth/Login', { email }, { url: this.request.path, title: 'Login | Guren Blog' })
+    return this.inertia(pages.auth.Login, { email }, { url: this.request.path, title: 'Login | Guren Blog' })
   }
 
   async store(): Promise<Response> {
-    const rawPayload = await parseRequestPayload(this.ctx)
-    const result = LoginSchema.safeParse(rawPayload)
-
-    if (!result.success) {
-      return this.json({ errors: formatValidationErrors(result.error) }, { status: 422 })
-    }
-
-    const { email, password, remember } = result.data
+    // validateBody throws ValidationException on failure →
+    // InertiaServiceProvider catches it, flashes errors to session, and redirects back (303).
+    // Inertia's useForm() preserves client-side input state across the redirect.
+    const { email, password, remember } = await this.validateBody(LoginSchema)
 
     const session = this.auth.session()
     session?.regenerate()
@@ -23,7 +22,15 @@ export default class LoginController extends Controller {
     const authenticated = await this.auth.attempt({ email, password }, remember)
 
     if (!authenticated) {
-      return this.json({ errors: { message: 'Invalid credentials.' } }, { status: 422 })
+      throw ValidationException.withMessages({ message: 'Invalid credentials.' })
+    }
+
+    // Emit UserLoggedIn event
+    const user = (await this.auth.user()) as UserRecord | null
+    if (user) {
+      const ipAddress = this.request.header('x-forwarded-for') ?? this.request.header('x-real-ip') ?? null
+      const events = this.make('events')
+      await events.emit(new UserLoggedIn(user, ipAddress))
     }
 
     return this.redirect('/dashboard')

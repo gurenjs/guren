@@ -2,7 +2,7 @@
 
 関連するモデルを接続し、関連データを eager load します。
 
-1. **テーブルを定義** — `db/schema.ts` に投稿を参照する comments テーブルを追加:
+1. **テーブルを定義** — `db/schema.ts` に投稿を参照する comments テーブルを追加します。
    ```ts
    export const comments = pgTable('comments', {
      id: serial('id').primaryKey(),
@@ -12,7 +12,7 @@
      createdAt: timestamp('created_at').defaultNow(),
    })
    ```
-2. **モデルを作成** — `Comment` を用意し、`Post` からヘルパーで参照:
+2. **モデルを作成** — `Comment` を用意し、`Post` からヘルパーで参照します。
    ```ts
    export type CommentRecord = typeof comments.$inferSelect
 
@@ -29,13 +29,16 @@
      }
    }
    ```
-3. **リレーションを読み込む** — コントローラで eager load:
+3. **リレーションを読み込む** — コントローラーで eager load します。
    ```ts
+   import { PostResource } from '@/app/Http/Resources/PostResource'
+   import { pages } from '@/.guren/pages.gen'
+
    const post = await Post.with('comments').findOrFail(id)
-   return this.inertia('posts/Show', { post })
+   return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() })
    ```
    `with('comments')` で関連コメントを一括取得します（Drizzle なら JOIN、もしくはバッチルックアップ）。
-4. **コメントを作成** — `CommentController` に `store` を追加:
+4. **コメントを作成** — `CommentController` に `store` を追加します。
    ```ts
    await Comment.create({ postId: Number(params.id), author, body })
    return this.redirect(`/posts/${params.id}`)

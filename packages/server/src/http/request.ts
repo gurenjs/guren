@@ -27,7 +27,7 @@ export async function parseRequestPayload(ctx: Context): Promise<Record<string, 
 }
 
 export interface ValidationIssueLike {
-  path: Array<string | number>
+  path: PropertyKey[]
   message: string
 }
 

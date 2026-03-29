@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+.bun/
+
+# Build outputs
+dist/
+*.tsbuildinfo
+
+# Package manager
+bun.lock
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Coverage
+coverage/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Generated files
+types/generated/
+
+# Large assets
+*.mp4
+*.mov
+*.zip
+*.tar.gz
+
+# Templates (avoid reading raw templates)
+packages/create-app/templates/

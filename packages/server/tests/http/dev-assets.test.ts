@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { Application, registerDevAssets } from '../../src'
+import { Application } from '../../src'
+import { registerDevAssets } from '../../src/runtime'
 
 describe('registerDevAssets inertia client chunk handling', () => {
   let tmpRoot: string

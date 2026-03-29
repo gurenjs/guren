@@ -55,6 +55,7 @@ export interface AuthContext<User = Authenticatable> {
   check(): Promise<boolean>
   guest(): Promise<boolean>
   user<T = User>(): Promise<T | null>
+  userOrFail<T = User>(): Promise<T>
   id(): Promise<unknown>
   login<T = User>(user: T, remember?: boolean): Promise<void>
   attempt(credentials: AuthCredentials, remember?: boolean): Promise<boolean>

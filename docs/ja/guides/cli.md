@@ -1,8 +1,8 @@
 # CLI リファレンス
 
-Guren には 2 つの CLI が付属します:
+Guren には 2 つの CLI が付属します。
 
-- 既存プロジェクト内でコントローラ/モデル/ビュー生成やユーティリティを実行する `bunx guren`
+- 既存プロジェクト内でコントローラー/モデル/ビュー生成やユーティリティを実行する `bunx guren`
 - 新規アプリをスキャフォールドする `bunx create-guren-app`
 
 ## 基本的な使い方
@@ -14,20 +14,276 @@ bunx guren --help
 
 コマンドは `bunx guren make:controller UserController` のようなサブコマンド形式です。
 
+## 高レベルスキャフォールド
+
+低レベルな `make:*` ではなく、標準構成をまとめて導入したい場合は `bunx guren add ...` を使います。
+
+```bash
+bunx guren add auth
+bunx guren add admin
+bunx guren add resource posts --fields "title:string,body:text"
+bunx guren add queue
+bunx guren add mail
+bunx guren add events
+bunx guren add cache
+bunx guren add notifications
+bunx guren add storage
+bunx guren add broadcasting
+bunx guren add schedule
+```
+> **Golden path:** まず `bunx guren add auth` と `bunx guren add resource` から始め、アプリの成長に応じて他の機能を追加してください。
+
+```bash
+bunx guren add plugin @acme/guren-plugin-audit
+```
+
+`add plugin` は `src/app.ts` にプラグイン Provider を自動登録し、依存が未インストールの場合は `bun add <package>` の案内を表示します。
+
+これらのコマンドは `src/app.ts` を更新し、対応する provider/runtime ファイルを生成します。
+
+`bunx guren add admin` は次を生成します:
+
+- `app/Http/Controllers/Admin/AdminDashboardController.ts`
+- `resources/js/pages/admin/Dashboard.tsx`
+- `routes/admin.ts`（`routes/web.ts` がある場合は自動配線）
+
 ## 主要コマンド
 
 | コマンド | 説明 | 例 |
 |----------|------|----|
-| `make:controller <Name>` | `app/Http/Controllers` にコントローラを生成 | `bunx guren make:controller PostController` |
+| `key:generate` | 新しい `APP_KEY` 値を生成。`--write` で `.env` に保存 | `bunx guren key:generate --write` |
+| `deploy` | Docker/Fly.io/Railway/Vercel 向けデプロイ設定ファイルを生成 | `bunx guren deploy --target all --app my-app --port 3333` |
+| `make:controller <Name>` | `app/Http/Controllers` にコントローラーを生成 | `bunx guren make:controller PostController` |
 | `make:model <Name>` | 最小のモデルクラスと型定義を `app/Models` に生成（`db/schema` から `camelCase(Name)s` を import） | `bunx guren make:model Post` |
 | `make:view <path>` | `resources/js/pages` に React コンポーネントを生成 | `bunx guren make:view posts/Index` |
-| `make:auth` | ログイン/ログアウトのコントローラ、プロバイダー、ビュー、マイグレーション、シーダー、ルートをスキャフォールド | `bunx guren make:auth` |
+| `make:auth` | ログイン/ログアウトのコントローラー、プロバイダー、ビュー、マイグレーション、シーダー、ルートをスキャフォールド | `bunx guren make:auth` |
+| `make:middleware <Name>` | `app/Http/Middleware` にミドルウェアを生成 | `bunx guren make:middleware Auth` |
+| `make:seeder <Name>` | データベースシーダーファイルを生成 | `bunx guren make:seeder UserSeeder` |
+| `make:job <Name>` | キュー可能なジョブクラスを生成 | `bunx guren make:job SendEmail` |
+| `make:event <Name>` | イベントクラスを生成 | `bunx guren make:event UserRegistered` |
+| `make:listener <Name>` | イベントリスナークラスを生成 | `bunx guren make:listener SendWelcomeEmail` |
+| `make:notification <Name>` | 通知クラスを生成 | `bunx guren make:notification InvoicePaid` |
+| `make:mail <Name>` | メールクラスを生成 | `bunx guren make:mail WelcomeEmail` |
 
 > **Note:** `make:*` は既存ファイルを上書きしません。必要なら `--force` を付けてください。
 
+## デプロイレシピ生成
+
+CLI からデプロイ設定ファイルを直接生成できます。
+
+```bash
+# Dockerfile のみ
+bunx guren deploy
+
+# Fly.io（Dockerfile + fly.toml）
+bunx guren deploy --target fly --app my-app
+
+# Railway（Dockerfile + railway.json）
+bunx guren deploy --target railway
+
+# Vercel（vercel.json）
+bunx guren deploy --target vercel
+
+# すべてのレシピを一括生成（カスタムポート）
+bunx guren deploy --target all --app my-app --port 4000
+```
+
+`--target` は `docker` / `fly` / `railway` / `vercel` / `all` をサポートします。
+
+Vercel と Bun
+Vercel は Bun を用いたデプロイをサポートしています。Bun プロジェクトでは主に次の二択が現実的です。
+
+- `vercel.json` に Bun 用の install/build コマンドを記載してデプロイする（シンプルなアプリ向け推奨）。
+
+  ```json
+  {
+    "installCommand": "bun install",
+    "buildCommand": "NODE_ENV=production bun run build",
+    "devCommand": "bun run dev"
+  }
+  ```
+
+- Docker イメージを使ってデプロイし、実行環境や Bun のバージョンを固定する（ネイティブ依存や長時間実行がある場合に推奨）。
+
+推奨: Bun の特定バージョンに依存する、あるいは長時間実行プロセスが必要な場合は Docker デプロイを選ぶと再現性が高くなります。生成される `vercel.json` は出発点です。プロジェクト構成に合わせてコマンドやルーティングを調整してください。
+
+## OpenAPI コマンド
+
+| コマンド | 説明 | 例 |
+|---------|------|-----|
+| `openapi:generate` | ルート定義から OpenAPI 3.1 ドキュメントを生成 | `bunx guren openapi:generate` |
+
+オプションの `@guren/openapi` パッケージが必要です（`bun add @guren/openapi`）。
+
+### openapi:generate オプション
+
+```bash
+# デフォルトで生成（routes/web.ts を読み取り、.guren/openapi.gen.json に書き出し）
+bunx guren openapi:generate
+
+# タイトル、バージョン、説明を指定
+bunx guren openapi:generate --title "Blog API" --version "1.0.0" --description "My blog"
+
+# ルートファイルと出力パスを変更
+bunx guren openapi:generate --routes routes/api.ts --out docs/openapi.json
+
+# サーバー URL を含める
+bunx guren openapi:generate --server "https://api.example.com"
+
+# 既存ファイルを上書き
+bunx guren openapi:generate --force
+```
+
+| フラグ | デフォルト | 説明 |
+|-------|----------|------|
+| `--routes` | `routes/web.ts` | ルート登録ファイルのパス |
+| `--out` | `.guren/openapi.gen.json` | 生成ドキュメントの出力パス |
+| `--title` | `package.json` の name または `"Guren API"` | OpenAPI ドキュメントタイトル |
+| `--version` | `package.json` の version または `"1.0.0"` | OpenAPI ドキュメントバージョン |
+| `--description` | `package.json` の description | OpenAPI ドキュメント説明 |
+| `--server` | — | 含めるサーバー URL |
+| `--app` | カレントディレクトリ | アプリケーションルートディレクトリ |
+| `--force` | `false` | 既存ファイルを上書き |
+
+コマンドはルートコントラクトから Zod スキーマと OpenAPI メタデータ（`summary`、`description`、`tags`、`operationId`、`deprecated`）を抽出し、OpenAPI 3.1 JSON ドキュメントを生成します。ルートへのアノテーション方法は[ルーティング — OpenAPI](./routing.md#openapi-ドキュメント生成)を参照してください。
+
+## ルートコマンド
+
+| コマンド | 説明 | 例 |
+|----------|------|----|
+| `route:list` | 登録済み全ルートを一覧表示 | `bunx guren route:list` |
+
+### route:list オプション
+
+フィルタリングとソート機能付きで全アプリケーションルートを表示します。
+
+```bash
+# 全ルートを一覧表示
+bunx guren route:list
+
+# HTTPメソッドでフィルタリング
+bunx guren route:list --method GET
+
+# パスパターンでフィルタリング
+bunx guren route:list --path users
+
+# ルート名でフィルタリング
+bunx guren route:list --name admin
+
+# ルートをソート
+bunx guren route:list --sort path
+bunx guren route:list --sort method
+bunx guren route:list --sort name
+
+# ソート順を逆にする
+bunx guren route:list --sort path --reverse
+
+# 出力フォーマット
+bunx guren route:list --format table   # デフォルトのテーブル形式
+bunx guren route:list --format json    # JSON出力
+bunx guren route:list --format compact # コンパクトな1行形式
+```
+
+## 設定コマンド
+
+| コマンド | 説明 | 例 |
+|----------|------|----|
+| `config:cache` | 全設定ファイルをキャッシュ | `bunx guren config:cache` |
+| `config:clear` | 設定キャッシュをクリア | `bunx guren config:clear` |
+| `config:show` | 設定キャッシュ情報を表示 | `bunx guren config:show` |
+
+### 設定キャッシュ
+
+本番環境でのパフォーマンス向上のために設定ファイルをキャッシュします。
+
+```bash
+# 全設定をキャッシュ
+bunx guren config:cache
+
+# キャッシュをクリア
+bunx guren config:clear
+
+# キャッシュ情報を表示
+bunx guren config:show
+```
+
+キャッシュは `bootstrap/cache/config.json` に保存されます。設定ファイルは `config/` ディレクトリ（サブディレクトリ含む）から読み込まれます。
+
+**Note:** 設定ファイルを変更した後は、`config:cache` を再実行してキャッシュを更新してください。
+
+## データベースコマンド
+
+| コマンド | 説明 | 例 |
+|----------|------|----|
+| `db:migrate` | 保留中のマイグレーションを実行 | `bunx guren db:migrate` |
+| `db:rollback` | 最後のマイグレーションバッチをロールバック | `bunx guren db:rollback` |
+| `db:reset` | 全テーブルを削除してマイグレーションを再実行 | `bunx guren db:reset` |
+| `db:seed` | データベースシーダーを実行 | `bunx guren db:seed` |
+
+### db:migrate オプション
+
+```bash
+# マイグレーションを実行
+bunx guren db:migrate
+
+# 本番環境でマイグレーションを強制実行
+bunx guren db:migrate --force
+
+# マイグレーションパスを指定
+bunx guren db:migrate --path db/migrations
+```
+
+### db:rollback オプション
+
+```bash
+# 最後のバッチをロールバック
+bunx guren db:rollback
+
+# 指定ステップ数ロールバック
+bunx guren db:rollback --step 3
+
+# 全マイグレーションをロールバック
+bunx guren db:rollback --all
+```
+
+### db:seed オプション
+
+```bash
+# 全シーダーを実行
+bunx guren db:seed
+
+# 特定のシーダーを実行
+bunx guren db:seed --class UserSeeder
+
+# 本番環境でシーディングを強制実行
+bunx guren db:seed --force
+```
+
+## キューコマンド
+
+| コマンド | 説明 | 例 |
+|----------|------|----|
+| `queue:work` | キューに入ったジョブの処理を開始 | `bunx guren queue:work` |
+
+### queue:work オプション
+
+```bash
+# デフォルトキューからジョブを処理
+bunx guren queue:work
+
+# 特定のキューを処理
+bunx guren queue:work --queue emails
+
+# ジョブ数を制限
+bunx guren queue:work --max-jobs 100
+
+# キューが空になったら停止
+bunx guren queue:work --stop-when-empty
+```
+
 ## 共通オプション
 
-オプションは `packages/core/src/cli` で一元化され、挙動が統一されています:
+オプションは `packages/core/src/cli` で一元化され、挙動が統一されています。
 
 - `--force` / `-f`: 既存ファイルを上書き
 - `--dry-run`: 生成内容を表示するだけで書き込まない（予定）
@@ -35,9 +291,9 @@ bunx guren --help
 
 ## テンプレートの特徴
 
-生成物はフレームワークの Laravel 風エルゴノミクスに沿っています:
+生成物はフレームワークの Laravel 風の設計方針に沿っています。
 
-- コントローラは `Controller` を継承し、`this.inertia()` などのヘルパーを使用。
+- コントローラーは `Controller` を継承し、`this.inertia()` などのヘルパーを使用。
 - モデルは `Model<TRecord>` を継承し、`static table` を事前に設定。手早い CRUD にはヘルパーを、複雑なクエリは Drizzle RQB へ直接。`Model.query(db)` でモデル起点の RQB も書けます。
 - ビューは React + TypeScript + Tailwind CSS の関数コンポーネント。
 
@@ -45,22 +301,22 @@ bunx guren --help
 
 ## 新規アプリのスキャフォールド
 
-ゼロから始めるときは専用ブートストラッパーを使います:
+ゼロから始めるときは専用ブートストラッパーを使います。
 
 ```bash
-bunx create-guren-app my-app
+bunx create-guren-app my-app --mode ssr
 ```
 
-CLI はデフォルトテンプレートをコピーし、メタデータを更新、レンダリングモードを選択するプロンプトを出します。既定の **SSR** は `autoConfigureInertiaAssets` 経由で SSR を有効にし、**SPA** を選ぶと無効化します。プロンプトをスキップする場合は `--mode ssr` または `--mode spa`、空でないディレクトリに生成する場合は `--force` を付けます。
+CLI はデフォルトテンプレートをコピーし、メタデータを更新します。`--mode ssr`（既定）で SSR が有効に、`--mode spa` で無効になります。空でないディレクトリに生成する場合は `--force` を付けます。
 
-## トラブルシュート
+## トラブルシューティング
 - `command not found: bunx`: Bun が古い可能性があります。1.1 以降にアップグレードしてください。
 - `Error: Port already in use`: 開発サーバー（既定 3333）が埋まっています。`.env` の `PORT` を変更して再起動してください。
-- `Database connection failed`: Postgres に到達できるか、`.env` が `postgres://guren:guren@localhost:54322/guren` を指しているか確認してください。
+- `Database connection failed`: デフォルトは SQLite（`./data/guren.db`）です。PostgreSQL を使う場合は `.env` の `DATABASE_URL` を確認してください。
 
 ## 対話 REPL
 
-フレームワーク対応のコンソールを起動:
+フレームワーク対応のコンソールを起動します。
 
 ```bash
 bunx guren console

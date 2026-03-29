@@ -1,6 +1,7 @@
 import type { Context, MiddlewareHandler } from 'hono'
-import type { AuthContext } from '../../auth'
-export type { AuthContext } from '../../auth'
+import type { Authenticatable, AuthContext } from '../../auth/types'
+import { jsonResponse } from './index'
+export type { AuthContext } from '../../auth/types'
 
 export interface RequireAuthOptions {
   redirectTo?: string
@@ -9,10 +10,61 @@ export interface RequireAuthOptions {
 }
 
 const AUTH_CONTEXT_KEY = 'guren:auth'
+const TESTING_USER_HEADER = 'x-testing-user'
+
+function resolveTestingUser(ctx: Context): Authenticatable | null {
+  // Only allow testing user override when GUREN_TESTING is explicitly set.
+  // This prevents external callers from bypassing auth in production/staging.
+  if (!process.env.GUREN_TESTING) {
+    return null
+  }
+
+  const rawUser = ctx.req.header(TESTING_USER_HEADER)
+  if (!rawUser) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(rawUser) as Record<string, unknown>
+    // Re-attach Authenticatable methods lost during JSON serialization.
+    // The serialized payload includes __authId (the pre-serialized identifier)
+    // so we can reconstruct a conforming object.
+    const authId = parsed.__authId ?? parsed.id ?? null
+    return {
+      ...parsed,
+      getAuthIdentifier: () => authId,
+      getAuthPassword: () => (parsed.password as string | null | undefined) ?? null,
+    } as unknown as Authenticatable
+  } catch {
+    return null
+  }
+}
+
+function withTestingUser(auth: AuthContext, testingUser: Authenticatable | null): AuthContext {
+  if (!testingUser) {
+    return auth
+  }
+
+  return {
+    ...auth,
+    check: async () => true,
+    guest: async () => false,
+    user: async <T = Authenticatable>() => testingUser as T,
+    userOrFail: async <T = Authenticatable>() => testingUser as T,
+    id: async () => testingUser.getAuthIdentifier(),
+    login: async () => {},
+    attempt: async () => true,
+    logout: async () => {},
+    // Preserve prototype methods lost by the object spread
+    guard: auth.guard.bind(auth),
+    session: auth.session.bind(auth),
+  }
+}
 
 export function attachAuthContext(contextFactory: (ctx: Context) => AuthContext): MiddlewareHandler {
   return async (ctx, next) => {
-    ctx.set(AUTH_CONTEXT_KEY, contextFactory(ctx))
+    const auth = contextFactory(ctx)
+    ctx.set(AUTH_CONTEXT_KEY, withTestingUser(auth, resolveTestingUser(ctx)))
     await next()
   }
 }
@@ -40,10 +92,7 @@ export function requireAuthenticated(options: RequireAuthOptions = {}): Middlewa
         return responseFactory()
       }
 
-      return new Response(JSON.stringify({ message: 'Unauthorized' }), {
-        status,
-        headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      })
+      return jsonResponse({ message: 'Unauthorized' }, status)
     }
 
     await next()
@@ -69,10 +118,7 @@ export function requireGuest(options: RequireAuthOptions = {}): MiddlewareHandle
         return responseFactory()
       }
 
-      return new Response(JSON.stringify({ message: 'Already authenticated' }), {
-        status,
-        headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      })
+      return jsonResponse({ message: 'Already authenticated' }, status)
     }
 
     await next()

@@ -9,15 +9,38 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        bun-version: ['1.3.11']
+        include:
+          - bun-version: '1.3.11'
+            redis: true
+          # When a new Bun version is supported, add it here:
+          # - bun-version: '1.4.x'
+          #   redis: true
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      REDIS_URL: redis://localhost:6379
+      APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.3.1"
+          bun-version: ${{ matrix.bun-version }}
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -30,20 +53,149 @@ jobs:
       - name: Type check
         run: bun run typecheck
 
+      - name: Core-first audit
+        run: bun run audit:core-first
+
+      - name: Contract audit
+        run: bun run audit:contracts
+
+      - name: Feature runtime audit
+        run: bun run audit:feature-runtime
+
+      - name: Starter template audit
+        run: bun run audit:starter-template
+
+      - name: Docs audit
+        run: bun run audit:docs
+
+      - name: Build example apps
+        run: |
+          bun run --cwd examples/blog build
+          bun run --cwd web build
+
+      - name: Bundle budget audit
+        run: bun run audit:bundle-budgets
+
+      - name: Fresh app smoke (default)
+        run: bun run smoke:starter
+
+      - name: Fresh app smoke (api)
+        run: bun run smoke:starter:api
+
+      - name: Fresh app smoke (worker)
+        run: bun run smoke:starter:worker
+
+      - name: Packed artifact audit
+        run: bun run smoke:starter:packed
+
+      - name: Upgrade existing app smoke
+        run: bun run smoke:upgrade-existing-app
+
+      - name: Golden path smoke test
+        run: bun run smoke:golden-path
+
       - name: Run tests
         run: bun run test
+
+  sqlite-smoke:
+    runs-on: ubuntu-latest
+    # No redis service — verifies all tests gracefully skip when Redis is unavailable
+    env:
+      APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.11'
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - name: Generate route types
+        run: bun run build:routes
+      - run: bun run typecheck
+      - name: Run tests (no Redis)
+        run: bun run test:bun
+
+  e2e:
+    runs-on: ubuntu-latest
+    # NODE_ENV=production is required for Vite asset serving.
+    # VITE_DEV_SERVER_URL must be removed from .env (see setup step) —
+    # otherwise autoConfigureInertiaAssets falls back to dev mode.
+    # The blog app also disables Secure cookies when CI is set (HTTP, not HTTPS).
+    services:
+      postgres:
+        image: postgres:15-alpine
+        ports:
+          - 54322:5432
+        env:
+          POSTGRES_USER: guren
+          POSTGRES_PASSWORD: guren
+          POSTGRES_DB: guren
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://guren:guren@localhost:54322/guren
+      APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.11'
+
+      - run: bun install --frozen-lockfile
+
+      - name: Build packages
+        run: bun run build
+
+      - name: Generate route types
+        run: bun run build:routes
+
+      - name: Build blog frontend
+        run: bun run --cwd examples/blog build
+
+      - name: Install Playwright browsers
+        run: cd examples/blog && bunx playwright install --with-deps chromium
+
+      - name: Set up blog .env
+        run: |
+          cp examples/blog/.env.example examples/blog/.env
+          sed -i "s/^APP_KEY=$/APP_KEY=$APP_KEY/" examples/blog/.env
+          sed -i "/^VITE_DEV_SERVER_URL=/d" examples/blog/.env
+
+      - name: Run migrations and seed
+        working-directory: examples/blog
+        run: |
+          bun ../../packages/cli/src/bin.ts db:migrate
+          bun ../../packages/cli/src/bin.ts db:seed --force
+
+      - name: Run E2E tests
+        env:
+          NODE_ENV: production
+        run: bun run --cwd examples/blog e2e
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: examples/blog/playwright-report/
+          retention-days: 7
 
   web-app:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.3.1"
+          bun-version: "1.3.11"
 
       - name: Install workspace dependencies
         run: bun install --frozen-lockfile
@@ -64,3 +216,6 @@ jobs:
 
       - name: Build client and SSR
         run: bun run --cwd web build
+
+      - name: Bundle budget audit
+        run: bun run ./scripts/smoke/build-budget.ts --max-kb 600 web

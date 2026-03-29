@@ -37,10 +37,17 @@
       ],
       "@guren/inertia-client/*": [
         "../../packages/inertia-client/src/*"
+      ],
+      "@guren/testing": [
+        "../../packages/testing/src/index.ts"
+      ],
+      "@guren/testing/*": [
+        "../../packages/testing/src/*"
       ]
     }
   },
   "include": [
+    ".guren/**/*",
     "src/**/*",
     "app/**/*",
     "routes/**/*",
@@ -48,5 +55,5 @@
     "types/**/*",
     "tests/**/*"
   ],
-  "exclude": []
+  "exclude": ["e2e/**/*", "playwright.config.ts"]
 }

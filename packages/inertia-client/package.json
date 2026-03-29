@@ -33,6 +33,16 @@
       "import": "./dist/server.js",
       "default": "./dist/server.js"
     },
+    "./contracts": {
+      "types": "./dist/contracts.d.ts",
+      "import": "./dist/contracts.js",
+      "default": "./dist/contracts.js"
+    },
+    "./channel": {
+      "types": "./dist/channel.d.ts",
+      "import": "./dist/channel.js",
+      "default": "./dist/channel.js"
+    },
     "./dist/*": {
       "default": "./dist/*"
     },
@@ -45,11 +55,12 @@
     "src"
   ],
   "scripts": {
-    "build": "tsup"
+    "build": "tsup",
+    "test": "bun test"
   },
   "dependencies": {
-    "@inertiajs/core": "^2.2.15",
-    "@inertiajs/react": "^2.2.15",
+    "@inertiajs/core": "^2.3.18",
+    "@inertiajs/react": "^2.3.18",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

@@ -1,13 +1,15 @@
 import { Hono } from 'hono'
 import type { MiddlewareHandler, ExecutionContext } from 'hono'
-import { Route } from '../mvc/Route'
-import { ApplicationContext } from '../plugins/ApplicationContext'
-import { PluginManager } from '../plugins/PluginManager'
-import type { Provider, ProviderConstructor } from '../plugins/Provider'
-import { InertiaViewProvider } from '../plugins/providers/InertiaViewProvider'
-import { AuthServiceProvider } from '../plugins/providers/AuthServiceProvider'
-import { AuthManager } from '../auth'
+import { Router } from '../mvc/Router'
+import { Container, type ServiceProvider } from '../container'
+import { ProviderManager } from '../container/ServiceProvider'
+import { AuthManager } from '../auth/AuthManager'
+import { AuthServiceProvider } from '../providers/AuthServiceProvider'
+import { attachAuthContext } from './middleware/auth'
+import { SessionGuard } from '../auth/SessionGuard'
 import type { CreateSessionMiddlewareOptions } from './middleware/session'
+import { createSecurityHeaders, type SecurityHeadersOptions } from './middleware/security-headers'
+import { createHostAuthorizationMiddleware, type HostAuthorizationOptions } from './middleware/host-authorization'
 import { logDevServerBanner, type DevBannerOptions } from './dev-banner'
 import { startViteDevServer, type StartViteDevServerOptions } from './vite-dev-server'
 
@@ -25,6 +27,37 @@ declare const Bun:
 
 type BunServer = { stop?: (closeConnections?: boolean) => void | Promise<void> }
 type ViteServer = Awaited<ReturnType<typeof startViteDevServer>>['server']
+const MANAGED_VITE_ENV_FLAG = 'GUREN_MANAGED_VITE_DEV_SERVER'
+const DEFAULT_DEV_ENTRY_PATH = '/resources/js/dev-entry.ts'
+
+function clearManagedViteEnv(): void {
+  if (typeof process === 'undefined') {
+    return
+  }
+
+  if (process.env[MANAGED_VITE_ENV_FLAG] === '1') {
+    delete process.env.VITE_DEV_SERVER_URL
+  }
+
+  delete process.env[MANAGED_VITE_ENV_FLAG]
+}
+
+function normalizeDevEntryUrl(baseUrl: string): string {
+  return `${baseUrl.replace(/\/$/u, '')}${DEFAULT_DEV_ENTRY_PATH}`
+}
+
+function syncManagedInertiaDevEntry(devServerUrl: string): void {
+  if (typeof process === 'undefined') {
+    return
+  }
+
+  const nextEntry = normalizeDevEntryUrl(devServerUrl)
+  const currentEntry = process.env.GUREN_INERTIA_ENTRY
+
+  if (!currentEntry || currentEntry.endsWith(DEFAULT_DEV_ENTRY_PATH)) {
+    process.env.GUREN_INERTIA_ENTRY = nextEntry
+  }
+}
 
 type GurenGlobal = typeof globalThis & {
   __gurenActiveServer?: BunServer
@@ -63,6 +96,7 @@ async function stopActiveViteDevServer(): Promise<void> {
 
   if (!previous) {
     state.__gurenActiveViteDevServer = undefined
+    clearManagedViteEnv()
     return
   }
 
@@ -72,6 +106,7 @@ async function stopActiveViteDevServer(): Promise<void> {
     console.warn('Failed to stop previous Vite dev server:', error)
   } finally {
     state.__gurenActiveViteDevServer = undefined
+    clearManagedViteEnv()
   }
 }
 
@@ -81,15 +116,46 @@ function setActiveViteDevServer(server?: ViteServer): void {
 
 export type BootCallback = (app: Hono) => void | Promise<void>
 
+/**
+ * Service provider class constructor type.
+ */
+export type ServiceProviderConstructor = new (container: Container) => ServiceProvider
+export type RouteRegistration = (router: Router) => void | Promise<void>
+export type ApplicationFeatures = Record<string, unknown>
+
 export interface ApplicationOptions {
   readonly boot?: BootCallback
-  readonly providers?: Array<Provider | ProviderConstructor>
+  readonly providers?: Array<ServiceProviderConstructor>
   readonly auth?: AuthPluginOptions
+  readonly discover?: boolean
+  readonly routes?: RouteRegistration
+  readonly features?: ApplicationFeatures
+  /**
+   * Configure or disable the default security headers middleware.
+   * Set to `false` to disable entirely, or pass `SecurityHeadersOptions` to customize.
+   * Enabled by default with safe Rails-matching defaults.
+   */
+  readonly securityHeaders?: SecurityHeadersOptions | false
+  /**
+   * Configure host authorization middleware for DNS rebinding protection.
+   * Pass `HostAuthorizationOptions` to enable, or `false` / omit to disable.
+   * The `create-app` template includes a default localhost configuration.
+   */
+  readonly hostAuthorization?: HostAuthorizationOptions | false
 }
 
 export interface AuthPluginOptions {
   autoSession?: boolean
   sessionOptions?: CreateSessionMiddlewareOptions
+  /**
+   * Automatically register CSRF middleware when session is enabled.
+   * Defaults to `true`. Set to `false` to disable (e.g., for pure API servers).
+   */
+  autoCsrf?: boolean
+  /**
+   * Options passed to the CSRF middleware when `autoCsrf` is enabled.
+   */
+  csrfOptions?: import('./middleware/csrf').CsrfOptions
 }
 
 export interface ApplicationListenOptions {
@@ -100,30 +166,63 @@ export interface ApplicationListenOptions {
 }
 
 /**
- * Application wires the Route registry into a running Hono instance.
- * It offers a small convenience layer so users can bootstrap a Bun server
- * without touching the underlying Hono object directly.
+ * Application wires an app-local router into a running Hono instance.
+ *
+ * It embeds a DI Container as the backbone of the framework, binding core
+ * services and managing providers through the container's ProviderManager.
  */
 export class Application {
   readonly hono: Hono
-  private readonly plugins: PluginManager
-  private context?: ApplicationContext
+  readonly container: Container
+  readonly router: Router
+  private readonly providerManager: ProviderManager
   private readonly authManager: AuthManager
   private viteDevServer?: ViteServer
   private bunServer?: BunServer
   private viteTeardownRegistered = false
   private bunTeardownRegistered = false
   private autoSessionAttached = false
+  private routesRegistered = false
 
   constructor(private readonly options: ApplicationOptions = {}) {
     this.hono = new Hono()
+    this.container = new Container()
+    this.router = new Router()
     this.authManager = new AuthManager()
-    this.plugins = new PluginManager(() => this.resolveContext())
+    this.providerManager = new ProviderManager(this.container)
 
-    this.registerDefaultProviders()
+    // Bind core instances
+    this.container.instance('app', this as Application)
+    this.container.instance('hono', this.hono)
+    this.container.instance('auth', this.authManager)
+    this.container.instance('router', this.router)
 
+    // Register a default auth guard so requireAuthenticated/requireGuest work
+    // even when apps manually wire sessions without the auth option.
+    if (!this.authManager.guardNames().length) {
+      this.authManager.registerGuard('web', ({ ctx, session, manager }) => {
+        // Use 'users' provider if registered; otherwise create a no-op guard
+        // that always returns unauthenticated (apps must register a provider
+        // for actual auth to work).
+        let provider: any
+        try { provider = manager.getProvider('users') } catch {
+          provider = { retrieveById: async () => null, retrieveByCredentials: async () => null, validateCredentials: async () => false }
+        }
+        return new SessionGuard({ provider, session })
+      })
+      this.authManager.setDefaultGuard('web')
+    }
+
+    // AuthServiceProvider (session + CSRF + auth context) is registered
+    // when options.auth is set. For apps that manually wire sessions,
+    // auth context is attached as a fallback in boot().
+    if (this.options.auth) {
+      this.providerManager.register(AuthServiceProvider)
+    }
+
+    // Register user providers
     if (Array.isArray(this.options.providers)) {
-      this.plugins.addMany(this.options.providers)
+      this.providerManager.registerMany(this.options.providers)
     }
   }
 
@@ -144,10 +243,16 @@ export class Application {
   }
 
   /**
-   * Mounts all routes that were defined through the Route DSL.
+   * Mounts the application router onto the Hono instance.
    */
-  mountRoutes(): void {
-    Route.mount(this.hono)
+  async mountRoutes(): Promise<void> {
+    if (this.options.routes && !this.routesRegistered) {
+      // Don't clear — preserve routes added directly to app.router before boot()
+      await this.options.routes(this.router)
+      this.routesRegistered = true
+    }
+
+    this.router.mount(this.hono, { container: this.container })
   }
 
   /**
@@ -158,13 +263,70 @@ export class Application {
   }
 
   /**
-   * Executes the optional boot callback and mounts the registered routes.
+   * Executes provider registration, boot callback, mounts routes, and boots providers.
    */
   async boot(): Promise<void> {
-    await this.plugins.registerAll()
+    this.mountSecurityDefaults()
+    await this.providerManager.registerAll()
+
+    // If no AuthServiceProvider was registered (no options.auth), attach
+    // auth context as a fallback so manual session + requireAuthenticated works.
+    // Runs before boot() callback so routes registered there have auth context.
+    if (!this.options.auth) {
+      this.hono.use('*', attachAuthContext((ctx) => this.authManager.createAuthContext(ctx)))
+    }
+
     await this.options.boot?.(this.hono)
-    this.mountRoutes()
-    await this.plugins.bootAll()
+
+    await this.mountRoutes()
+    await this.mountMcpEndpoint()
+    await this.providerManager.bootAll()
+  }
+
+  /**
+   * Registers default security middleware (headers + host authorization).
+   */
+  private mountSecurityDefaults(): void {
+    // Security headers (default: enabled)
+    const { securityHeaders } = this.options
+    if (securityHeaders !== false) {
+      this.hono.use('*', createSecurityHeaders(securityHeaders ?? {}))
+    }
+
+    // Host authorization (default: enabled in non-production)
+    this.mountHostAuthorization()
+  }
+
+  private mountHostAuthorization(): void {
+    const { hostAuthorization } = this.options
+
+    if (hostAuthorization === false || !hostAuthorization) return
+
+    this.hono.use('*', createHostAuthorizationMiddleware(hostAuthorization))
+  }
+
+  /**
+   * Mounts the MCP endpoint at /_guren/mcp when explicitly enabled.
+   * Requires GUREN_MCP=1 environment variable. Never active in production.
+   * This allows AI coding agents to introspect the project.
+   */
+  private async mountMcpEndpoint(): Promise<void> {
+    if (
+      typeof process === 'undefined' ||
+      process.env?.NODE_ENV === 'production' ||
+      process.env?.GUREN_MCP !== '1'
+    ) {
+      return
+    }
+
+    try {
+      const { McpServiceProvider } = await import('../mcp/McpServiceProvider')
+      const provider = new McpServiceProvider(this.container)
+      provider.register()
+      await provider.boot()
+    } catch {
+      // MCP SDK not installed or failed to load — skip silently
+    }
   }
 
   /**
@@ -186,9 +348,11 @@ export class Application {
     await stopActiveViteDevServer()
 
     const { port = 3000, hostname = '0.0.0.0', assetsUrl, vite } = options
-    const envAssetsUrl =
-      typeof process !== 'undefined' ? process.env?.VITE_DEV_SERVER_URL : undefined
-    let resolvedAssetsUrl = assetsUrl ?? envAssetsUrl
+    const externalAssetsUrl =
+      typeof process !== 'undefined' && process.env?.[MANAGED_VITE_ENV_FLAG] !== '1'
+        ? process.env?.VITE_DEV_SERVER_URL
+        : undefined
+    let resolvedAssetsUrl = assetsUrl ?? externalAssetsUrl
 
     const shouldStartVite =
       vite !== false &&
@@ -214,7 +378,9 @@ export class Application {
         resolvedAssetsUrl = localUrl
         if (typeof process !== 'undefined') {
           process.env.VITE_DEV_SERVER_URL = resolvedAssetsUrl
+          process.env[MANAGED_VITE_ENV_FLAG] = '1'
         }
+        syncManagedInertiaDevEntry(resolvedAssetsUrl)
         this.registerViteTeardown()
       } catch (error) {
         console.error('Failed to start Vite dev server:', error)
@@ -244,13 +410,19 @@ export class Application {
     }
   }
 
-  register(provider: Provider | ProviderConstructor): this {
-    this.plugins.add(provider)
+  /**
+   * Register a service provider.
+   */
+  register(provider: ServiceProviderConstructor): this {
+    this.providerManager.register(provider)
     return this
   }
 
-  registerMany(providers: Array<Provider | ProviderConstructor>): this {
-    this.plugins.addMany(providers)
+  /**
+   * Register multiple service providers.
+   */
+  registerMany(providers: Array<ServiceProviderConstructor>): this {
+    this.providerManager.registerMany(providers)
     return this
   }
 
@@ -259,19 +431,6 @@ export class Application {
    */
   logDevServerBanner(options: DevBannerOptions): void {
     logDevServerBanner(options)
-  }
-
-  private resolveContext(): ApplicationContext {
-    if (!this.context) {
-      this.context = new ApplicationContext(this, this.authManager)
-    }
-
-    return this.context
-  }
-
-  private registerDefaultProviders(): void {
-    this.plugins.add(InertiaViewProvider)
-    this.plugins.add(AuthServiceProvider)
   }
 
   private async closeViteDevServer(): Promise<void> {
@@ -289,6 +448,7 @@ export class Application {
       }
       this.viteDevServer = undefined
       this.viteTeardownRegistered = false
+      clearManagedViteEnv()
     }
   }
 
@@ -333,6 +493,10 @@ export class Application {
       void stopActiveBunServer()
     })
   }
+}
+
+export function createApp(options: ApplicationOptions = {}): Application {
+  return new Application(options)
 }
 
 export type { Context } from 'hono'

@@ -1,4 +1,4 @@
-import { extname, resolve } from 'node:path'
+import { extname, resolve, sep } from 'node:path'
 import type { Application } from './Application'
 
 declare const Bun: any
@@ -80,7 +80,9 @@ export function registerRootPublicAssets(app: Application, publicDir: string, co
 
     const candidatePath = resolve(publicDir, relativePath)
 
-    if (!candidatePath.startsWith(publicDir)) {
+    // Use publicDir + separator to prevent sibling-directory traversal
+    // (e.g., /tmp/public vs /tmp/publicity)
+    if (!candidatePath.startsWith(publicDir + sep) && candidatePath !== publicDir) {
       return next()
     }
 

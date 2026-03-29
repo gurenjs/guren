@@ -16,11 +16,6 @@ export interface BunPasswordHasherOptions {
   cost?: number
 }
 
-/**
- * @deprecated Use {@link BunPasswordHasherOptions} for configuration.
- */
-export type ScryptHasherOptions = BunPasswordHasherOptions
-
 export class ScryptHasher implements PasswordHasher {
   private readonly algorithm: SupportedAlgorithm
   private readonly memoryCost?: number

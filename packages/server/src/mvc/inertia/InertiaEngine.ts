@@ -127,6 +127,7 @@ async function renderDocument(
   );
   const serializedPage = serializePage(page);
   const stylesheetLinks = renderStyles(styles);
+  const docsHeadBootstrap = renderDocsHeadBootstrap(page.component);
   const ssrResult = await tryRenderSsr(page, options);
   const headElements = (ssrResult?.head ?? []).map(normalizeHeadElement);
   const hasCustomTitle = headElements.some((element) =>
@@ -136,6 +137,7 @@ async function renderDocument(
     '<meta charset="utf-8" />',
     '<meta name="viewport" content="width=device-width, initial-scale=1" />',
     hasCustomTitle ? "" : `<title>${title}</title>`,
+    docsHeadBootstrap,
     stylesheetLinks,
     ...headElements,
     `<script type="importmap">${importMap}</script>`,
@@ -144,13 +146,15 @@ async function renderDocument(
   const appMarkup =
     ssrResult?.body ??
     `<div id="app" data-page="${escapeAttribute(serializedPage)}"></div>`;
+  const bodyClass = resolveBodyClass(page.component);
+  const bodyAttributes = bodyClass ? ` class="${escapeAttribute(bodyClass)}"` : "";
 
   return `<!DOCTYPE html>
 <html lang="en">
   <head>
     ${headSegments.join("\n    ")}
   </head>
-  <body>
+  <body${bodyAttributes}>
     ${appMarkup}
     <script type="module" src="${entry}"></script>
   </body>
@@ -291,6 +295,42 @@ function normalizeHeadElement(element: unknown): string {
     pattern,
     (_match, file, query = "") => `href="/public/assets/${file}${query}"`
   );
+}
+
+function resolveBodyClass(componentName: string): string {
+  return componentName.startsWith("Docs/") ? "docs-theme" : "";
+}
+
+function renderDocsHeadBootstrap(componentName: string): string {
+  if (!componentName.startsWith("Docs/")) {
+    return "";
+  }
+
+  const criticalStyles = [
+    "html,body{background:#ffffff;color:#1f2937;}",
+    "body.docs-theme{background:#ffffff;color:#1f2937;}",
+    "html.dark,html.dark body,html.dark body.docs-theme{background:#1a1a2e;color:#e0def4;}",
+    ".size-4{width:1rem;height:1rem;}",
+    ".size-5{width:1.25rem;height:1.25rem;}",
+    ".size-6{width:1.5rem;height:1.5rem;}",
+    ".size-8{width:2rem;height:2rem;}",
+    ".size-9{width:2.25rem;height:2.25rem;}",
+  ].join("");
+
+  const prepaintScript = [
+    "(function(){",
+    "try{",
+    "var mode=localStorage.getItem('guren-color-mode')||'system';",
+    "var dark=mode==='dark'||(mode!=='light'&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);",
+    "var root=document.documentElement;",
+    "root.classList.toggle('dark',dark);",
+    "root.style.colorScheme=dark?'dark':'light';",
+    "}catch(_){",
+    "}",
+    "})();",
+  ].join("");
+
+  return `<style id="guren-docs-critical">${criticalStyles}</style><script>${prepaintScript}</script>`;
 }
 
 function serializePage(page: InertiaPagePayload): string {

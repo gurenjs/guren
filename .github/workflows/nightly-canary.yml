@@ -1,0 +1,190 @@
+name: Nightly Canary
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  canary-validate:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      REDIS_URL: redis://localhost:6379
+
+    steps:
+      # ----------------------------------------------------------------
+      # Nightly canary is a SUPERSET of CI.
+      # Every check that CI runs MUST also run here. Additional
+      # canary-specific checks (e.g. extended smoke tests, upgrade
+      # scenarios) are appended after the CI-equivalent steps.
+      # When adding a new step to ci.yml, mirror it here as well.
+      # ----------------------------------------------------------------
+
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.11'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build packages
+        run: bun run build
+
+      - name: Generate route types
+        run: bun run build:routes
+
+      - name: Type check
+        run: bun run typecheck
+
+      # -- Audit checks (matching CI) --
+
+      - name: Core-first audit
+        run: bun run audit:core-first
+
+      - name: Contract audit
+        run: bun run audit:contracts
+
+      - name: Feature runtime audit
+        run: bun run audit:feature-runtime
+
+      - name: Starter template audit
+        run: bun run audit:starter-template
+
+      - name: Docs audit
+        run: bun run audit:docs
+
+      # -- Example app builds (matching CI) --
+
+      - name: Build example apps
+        run: |
+          bun run --cwd examples/blog build
+          bun run --cwd web build
+
+      - name: Bundle budget audit
+        run: bun run audit:bundle-budgets
+
+      # -- Smoke tests (matching CI) --
+
+      - name: Fresh app smoke (default)
+        run: bun run smoke:starter
+
+      - name: Fresh app smoke (api)
+        run: bun run smoke:starter:api
+
+      - name: Fresh app smoke (worker)
+        run: bun run smoke:starter:worker
+
+      - name: Packed artifact audit
+        run: bun run smoke:starter:packed
+
+      - name: Upgrade existing app smoke
+        run: bun run smoke:upgrade-existing-app
+
+      - name: Golden path smoke test
+        run: bun run smoke:golden-path
+
+      # -- Tests --
+
+      - name: Run tests
+        run: bun run test
+
+      # -- Benchmarks (nightly only) --
+
+      - name: Run benchmarks
+        run: bun run bench
+
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        ports:
+          - 54322:5432
+        env:
+          POSTGRES_USER: guren
+          POSTGRES_PASSWORD: guren
+          POSTGRES_DB: guren
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://guren:guren@localhost:54322/guren
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.11'
+
+      - run: bun install --frozen-lockfile
+
+      - name: Build packages
+        run: bun run build
+
+      - name: Generate route types
+        run: bun run build:routes
+
+      - name: Install Playwright browsers
+        run: cd examples/blog && bunx playwright install --with-deps chromium
+
+      - name: Run migrations and seed
+        working-directory: examples/blog
+        run: |
+          bun ../../packages/cli/src/bin.ts db:migrate
+          bun ../../packages/cli/src/bin.ts db:seed --force
+
+      - name: Run E2E tests
+        run: bun run --cwd examples/blog e2e
+
+  web-app:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ----------------------------------------------------------------
+      # Mirrors the web-app job from CI to ensure the docs site builds
+      # and passes all checks on the nightly schedule as well.
+      # ----------------------------------------------------------------
+
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.11'
+
+      - name: Install workspace dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build packages
+        run: bun run build
+
+      - name: Generate route types
+        run: |
+          bun run --cwd web routes:types
+          git diff --exit-code -- web/types/generated/routes.d.ts
+
+      - name: Type check
+        run: bun run --cwd web typecheck
+
+      - name: Run tests
+        run: bun run --cwd web test
+
+      - name: Build client and SSR
+        run: bun run --cwd web build
+
+      - name: Bundle budget audit
+        run: bun run ./scripts/smoke/build-budget.ts --max-kb 600 web

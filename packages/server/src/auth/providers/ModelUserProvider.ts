@@ -1,5 +1,4 @@
-import type { Model } from '@guren/orm'
-import type { PlainObject } from '@guren/orm/Model'
+import type { Model, PlainObject } from '@guren/orm'
 import type { PasswordHasher } from '../password/PasswordHasher'
 import { ScryptHasher } from '../password/ScryptHasher'
 import type { AuthCredentials, Authenticatable } from '../types'
@@ -73,6 +72,9 @@ export class ModelUserProvider<User extends Authenticatable = Authenticatable> e
 
     const hashed = (user as PlainObject)[this.passwordColumn]
     if (typeof hashed !== 'string') {
+      // Run a dummy hash to prevent timing-based user enumeration.
+      // This ensures requests take the same time whether or not the user exists.
+      await this.hasher.hash('dummy-timing-equalization')
       return false
     }
 

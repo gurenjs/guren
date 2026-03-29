@@ -16,3 +16,15 @@ export type {
   PgTable,
   PgColumn,
 } from 'drizzle-orm/pg-core'
+
+export {
+  mysqlTable,
+  int,
+  varchar,
+  datetime,
+} from 'drizzle-orm/mysql-core'
+
+export type {
+  MySqlTable,
+  MySqlColumn,
+} from 'drizzle-orm/mysql-core'

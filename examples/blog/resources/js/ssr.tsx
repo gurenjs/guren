@@ -1,6 +1,7 @@
 import type { Page } from "@inertiajs/core";
 import { renderInertiaServer } from "@guren/inertia-client";
-import type { InertiaSsrContext, InertiaSsrResult } from "@guren/server";
+import type { InertiaSsrContext, InertiaSsrResult } from "@guren/core";
+import { pageManifest } from "../../.guren/pages.gen.ts";
 
 let pages: Record<string, () => Promise<unknown>> | undefined;
 
@@ -19,6 +20,11 @@ export default async function renderSsr(
   return renderInertiaServer({
     page: context.page as Page,
     pages,
-    resolve: pages ? undefined : (name) => import(`./pages/${name}.tsx`),
+    pageManifest,
+    resolve:
+      pages
+        ? undefined
+        : (name) =>
+            import(pageManifest[name as keyof typeof pageManifest] ?? `./pages/${name}.tsx`),
   });
 }

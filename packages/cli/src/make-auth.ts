@@ -1,8 +1,8 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, relative, resolve, sep as pathSep } from 'node:path'
 import { consola } from 'consola'
-import { writeFileSafe, type WriterOptions } from './utils'
-import { addImport, addMiddleware, addProvider } from './patch-helpers'
+import { writeFilesSafe, type WriterOptions } from './utils'
+import { addImport, addProvider, ensureDrizzleImports } from './patch-helpers'
 
 function timestamp(): string {
   const now = new Date()
@@ -17,31 +17,25 @@ function timestamp(): string {
   ].join('')
 }
 
-const loginControllerTemplate = `import { Controller, parseRequestPayload, formatValidationErrors } from '@guren/core'
+const loginControllerTemplate = `import { Controller, ValidationException } from '@guren/core'
 import { LoginSchema } from '@/Http/Validators/LoginValidator'
+import { pages } from '../../../../.guren/pages.gen.js'
 
 export default class LoginController extends Controller {
   async show(): Promise<Response> {
     const email = this.request.query('email') ?? ''
-    return this.inertia('auth/Login', { email }, { url: this.request.path, title: 'Login' })
+    return this.inertia(pages.auth.Login, { email }, { url: this.request.path, title: 'Login' })
   }
 
   async store(): Promise<Response> {
-    const payload = await parseRequestPayload(this.ctx)
-    const result = LoginSchema.safeParse(payload)
-
-    if (!result.success) {
-      return this.json({ errors: formatValidationErrors(result.error) }, { status: 422 })
-    }
-
-    const { email, password, remember } = result.data
+    const { email, password, remember } = await this.validateBody(LoginSchema)
 
     this.auth.session()?.regenerate()
 
     const authenticated = await this.auth.attempt({ email, password }, remember)
 
     if (!authenticated) {
-      return this.json({ errors: { message: 'Invalid credentials.' } }, { status: 422 })
+      throw ValidationException.withMessages({ message: 'Invalid credentials.' })
     }
 
     return this.redirect('/dashboard')
@@ -56,11 +50,75 @@ export default class LoginController extends Controller {
 `
 
 const dashboardControllerTemplate = `import { Controller } from '@guren/core'
+import type { UserRecord } from '../../Models/User.js'
+import { pages } from '../../../.guren/pages.gen.js'
 
 export default class DashboardController extends Controller {
   async index(): Promise<Response> {
-    const user = await this.auth.user()
-    return this.inertia('dashboard/Index', { user }, { url: this.request.path, title: 'Dashboard' })
+    const currentUser = await this.auth.user<UserRecord | null>()
+    const user = currentUser
+      ? {
+          id: currentUser.id,
+          name: currentUser.name,
+          email: currentUser.email,
+        }
+      : null
+    return this.inertia(pages.dashboard.Index, { user }, { url: this.request.path, title: 'Dashboard' })
+  }
+}
+`
+
+const profileControllerTemplate = `import { Controller, ValidationException } from '@guren/core'
+import { User, type UserRecord } from '../../Models/User.js'
+import { ProfileUpdateSchema } from '../Validators/ProfileValidator.js'
+import { pages } from '../../../.guren/pages.gen.js'
+
+export default class ProfileController extends Controller {
+  async edit(): Promise<Response> {
+    const user = await this.auth.user<UserRecord | null>()
+    if (!user) {
+      return this.redirect('/login')
+    }
+
+    return this.inertia(pages.profile.Edit, {
+      profile: {
+        name: user.name,
+        email: user.email,
+      },
+    }, { url: this.request.path, title: 'Profile' })
+  }
+
+  async update(): Promise<Response> {
+    const user = await this.auth.user<UserRecord | null>()
+    if (!user) {
+      return this.redirect('/login')
+    }
+
+    const { name, email, password } = await this.validateBody(ProfileUpdateSchema)
+
+    if (email !== user.email) {
+      const existing = await User.where({ email })
+      const conflict = existing.find((candidate) => candidate.id !== user.id)
+      if (conflict) {
+        throw ValidationException.withMessages({ email: 'Email is already in use.' })
+      }
+    }
+
+    await User.update({ id: user.id }, {
+      name,
+      email,
+      ...(password ? { password } : {}),
+    })
+
+    const refreshed = await User.find(user.id)
+    if (refreshed) {
+      await this.auth.login(refreshed)
+    }
+
+    return this.inertia(pages.profile.Edit, {
+      profile: { name, email },
+      status: 'Profile updated successfully.',
+    }, { url: this.request.path, title: 'Profile' })
   }
 }
 `
@@ -76,12 +134,14 @@ export class User extends AuthenticatableModel<UserRecord> {
 }
 `
 
-const authProviderTemplate = `import type { ApplicationContext, Provider } from '@guren/core'
+const authProviderTemplate = `import { ServiceProvider } from '@guren/core'
+import type { AuthManager } from '@guren/core'
 import { User } from '../Models/User.js'
 
-export default class AuthProvider implements Provider {
-  register(context: ApplicationContext): void {
-    context.auth.useModel(User, {
+export default class AuthProvider extends ServiceProvider {
+  register(): void {
+    const auth = this.container.make<AuthManager>('auth')
+    auth.useModel(User, {
       usernameColumn: 'email',
       passwordColumn: 'passwordHash',
       rememberTokenColumn: 'rememberToken',
@@ -95,12 +155,12 @@ const loginValidatorTemplate = `import { z } from 'zod'
 
 export const LoginSchema = z.object({
   email: z
-    .string({ required_error: 'Email is required.' })
+    .string()
     .trim()
     .min(1, 'Email is required.')
     .email('The email address is badly formatted.'),
   password: z
-    .string({ required_error: 'Password is required.' })
+    .string()
     .min(1, 'Password is required.'),
   remember: z
     .union([
@@ -117,12 +177,36 @@ export const LoginSchema = z.object({
 export type LoginInput = z.infer<typeof LoginSchema>
 `
 
+const profileValidatorTemplate = `import { z } from 'zod'
+
+export const ProfileUpdateSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, 'Name is required.')
+    .max(120, 'Name must be 120 characters or fewer.'),
+  email: z
+    .string()
+    .trim()
+    .min(1, 'Email is required.')
+    .email('Enter a valid email address.'),
+  password: z
+    .string()
+    .trim()
+    .optional()
+    .transform((value) => value ?? '')
+    .refine((value) => value === '' || value.length >= 8, 'Password must be at least 8 characters.'),
+})
+
+export type ProfileUpdateInput = z.infer<typeof ProfileUpdateSchema>
+`
+
 const layoutTemplate = `import { Link, usePage } from '@inertiajs/react'
 import type { PropsWithChildren } from 'react'
 
 export default function Layout({ children }: PropsWithChildren) {
-  const { props } = usePage()
-  const user = props.auth?.user as { name?: string } | undefined
+  const { props } = usePage<{ auth?: { user?: { name?: string } } }>()
+  const user = props.auth?.user
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
@@ -166,22 +250,28 @@ export default function Layout({ children }: PropsWithChildren) {
 }
 `
 
-const loginViewTemplate = `import { Head, Link, usePage } from '@inertiajs/react'
-import { useId, useState } from 'react'
+const loginViewTemplate = `import { Head, Link, useForm } from '@inertiajs/react'
+import { useId } from 'react'
 import Layout from '../../components/Layout.js'
+import type { ValidationErrors } from '@guren/core'
 
-interface LoginErrors {
+interface Props {
   email?: string
-  password?: string
-  message?: string
+  errors?: ValidationErrors<'email' | 'password'>
 }
 
-export default function Login() {
-  const page = usePage<{ email?: string; errors?: LoginErrors }>()
-  const [email, setEmail] = useState(page.props.email ?? '')
-  const [password, setPassword] = useState('')
-  const [remember, setRemember] = useState(false)
-  const errors = page.props.errors ?? {}
+type LoginFormData = {
+  email: string
+  password: string
+  remember: boolean
+}
+
+export default function Login({ email = '', errors = {} }: Props) {
+  const form = useForm<LoginFormData>({
+    email,
+    password: '',
+    remember: false,
+  })
 
   const emailId = useId()
   const passwordId = useId()
@@ -201,7 +291,13 @@ export default function Login() {
           </p>
         )}
 
-        <form method="post" action="/login" className="mt-6 space-y-4">
+        <form
+          className="mt-6 space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault()
+            form.post('/login')
+          }}
+        >
           <div>
             <label htmlFor={emailId} className="block text-sm font-medium text-slate-200">
               Email
@@ -209,9 +305,8 @@ export default function Login() {
             <input
               id={emailId}
               type="email"
-              name="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
+              value={form.data.email}
+              onChange={(event) => form.setData('email', event.target.value)}
               required
               className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
             />
@@ -225,9 +320,8 @@ export default function Login() {
             <input
               id={passwordId}
               type="password"
-              name="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
+              value={form.data.password}
+              onChange={(event) => form.setData('password', event.target.value)}
               required
               className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
             />
@@ -237,19 +331,19 @@ export default function Login() {
           <label className="flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
-              name="remember"
-              checked={remember}
-              onChange={(event) => setRemember(event.target.checked)}
+              checked={form.data.remember}
+              onChange={(event) => form.setData('remember', event.target.checked)}
               className="h-4 w-4 rounded border-slate-700 bg-slate-950 text-emerald-400 focus:ring-emerald-400"
             />
             Remember me
           </label>
 
-          <button
-            type="submit"
-            className="w-full rounded bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400"
-          >
-            Sign in
+            <button
+              type="submit"
+              disabled={form.processing}
+              className="w-full rounded bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400"
+            >
+              Sign in
           </button>
         </form>
 
@@ -264,15 +358,11 @@ export default function Login() {
 
 const dashboardViewTemplate = `import Layout from '../../components/Layout.js'
 
-interface DashboardProps {
-  user?: {
-    id: number
-    name: string
-    email: string
-  } | null
+interface Props {
+  user?: { id: number; name: string; email: string } | null
 }
 
-export default function Dashboard({ user }: DashboardProps) {
+export default function Dashboard({ user }: Props) {
   return (
     <Layout>
       <section className="space-y-6">
@@ -297,19 +387,115 @@ export default function Dashboard({ user }: DashboardProps) {
 }
 `
 
-const routesTemplate = `import { Route, requireAuthenticated, requireGuest } from '@guren/core'
-import LoginController from '../app/Http/Controllers/Auth/LoginController.js'
-import DashboardController from '../app/Http/Controllers/DashboardController.js'
+const profileViewTemplate = `import { Head, useForm } from '@inertiajs/react'
+import type { FormEvent } from 'react'
+import Layout from '../../components/Layout.js'
+import type { ValidationErrors } from '@guren/core'
 
-Route.get('/login', [LoginController, 'show'], requireGuest({ redirectTo: '/dashboard' }))
-Route.post('/login', [LoginController, 'store'], requireGuest({ redirectTo: '/dashboard' }))
-Route.post('/logout', [LoginController, 'destroy'], requireAuthenticated({ redirectTo: '/login' }))
+interface Props {
+  profile: { name: string; email: string }
+  errors?: ValidationErrors<'name' | 'email' | 'password'>
+  status?: string
+}
 
-Route.get('/dashboard', [DashboardController, 'index'], requireAuthenticated({ redirectTo: '/login' }))
+type ProfileFormValues = {
+  name: string
+  email: string
+  password: string
+}
+
+export default function ProfileEdit({ profile, status }: Props) {
+  const form = useForm<ProfileFormValues>({
+    name: profile.name,
+    email: profile.email,
+    password: '',
+  })
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    form.put('/profile')
+  }
+
+  return (
+    <Layout>
+      <Head title="Profile" />
+      <section className="space-y-6 rounded-lg border border-slate-800 bg-slate-900/40 p-8 shadow-xl shadow-emerald-500/5">
+        <header>
+          <h1 className="text-2xl font-semibold text-emerald-300">Profile</h1>
+          <p className="mt-2 text-sm text-slate-400">Update your account details and password.</p>
+        </header>
+
+        {status ? (
+          <p className="rounded border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-200">
+            {status}
+          </p>
+        ) : null}
+
+        <form className="space-y-4" onSubmit={handleSubmit}>
+          <div>
+            <label className="block text-sm font-medium text-slate-200">Name</label>
+            <input
+              type="text"
+              value={form.data.name}
+              onChange={(event) => form.setData('name', event.target.value)}
+              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
+            />
+            {form.errors.name ? <p className="mt-1 text-sm text-rose-300">{form.errors.name}</p> : null}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-200">Email</label>
+            <input
+              type="email"
+              value={form.data.email}
+              onChange={(event) => form.setData('email', event.target.value)}
+              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
+            />
+            {form.errors.email ? <p className="mt-1 text-sm text-rose-300">{form.errors.email}</p> : null}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-200">New password</label>
+            <input
+              type="password"
+              value={form.data.password}
+              onChange={(event) => form.setData('password', event.target.value)}
+              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
+            />
+            {form.errors.password ? <p className="mt-1 text-sm text-rose-300">{form.errors.password}</p> : null}
+          </div>
+
+          <button
+            type="submit"
+            disabled={form.processing}
+            className="w-full rounded bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:opacity-50"
+          >
+            Save changes
+          </button>
+        </form>
+      </section>
+    </Layout>
+  )
+}
 `
 
-const seederTemplate = `import { defineSeeder } from '@guren/orm'
-import { ScryptHasher } from '@guren/core'
+const routesTemplate = `import { Router, requireAuthenticated, requireGuest } from '@guren/core'
+import LoginController from '../app/Http/Controllers/Auth/LoginController.js'
+import DashboardController from '../app/Http/Controllers/DashboardController.js'
+import ProfileController from '../app/Http/Controllers/ProfileController.js'
+
+export function registerAuthRoutes(router: Router): void {
+  router.get('/login', [LoginController, 'show'], requireGuest({ redirectTo: '/dashboard' })).name('login')
+  router.post('/login', [LoginController, 'store'], requireGuest({ redirectTo: '/dashboard' })).name('login.store')
+  router.post('/logout', [LoginController, 'destroy'], requireAuthenticated({ redirectTo: '/login' })).name('logout')
+
+  router.get('/dashboard', [DashboardController, 'index'], requireAuthenticated({ redirectTo: '/login' })).name('dashboard')
+  router.get('/profile', [ProfileController, 'edit'], requireAuthenticated({ redirectTo: '/login' })).name('profile.edit')
+  router.put('/profile', [ProfileController, 'update'], requireAuthenticated({ redirectTo: '/login' })).name('profile.update')
+}
+`
+
+const seederTemplate = `import { defineSeeder, ScryptHasher } from '@guren/core'
 import { users } from '../schema.js'
 
 export default defineSeeder(async ({ db }) => {
@@ -360,9 +546,20 @@ async function updateSchema(): Promise<void> {
     return
   }
 
-  const updated = `import { pgTable, serial, text, timestamp } from '@guren/orm/drizzle'
+  // Replace SQLite-specific imports with Postgres imports when switching adapters
+  content = content.replace(
+    /import\s*\{[^}]*\}\s*from\s*['"]drizzle-orm\/sqlite-core['"]\s*\n?/,
+    '',
+  )
 
-export const users = pgTable('users', {
+  // Ensure required Drizzle imports are present
+  content = ensureDrizzleImports(content, ['pgTable', 'serial', 'text', 'timestamp'])
+
+  // Replace an existing users table that lacks auth columns, or append if absent
+  // Match both pgTable and sqliteTable variants — use `})` on its own line as the end anchor
+  // to avoid premature matching inside nested function calls like `$defaultFn(() => ...)`
+  const usersTablePattern = /export const users = (?:pgTable|sqliteTable)\('users',\s*\{[\s\S]*?\n\}\)\s*\n?/
+  const usersTableBlock = `export const users = pgTable('users', {
   id: serial('id').primaryKey(),
   name: text('name').notNull(),
   email: text('email').notNull(),
@@ -373,8 +570,17 @@ export const users = pgTable('users', {
 })
 `
 
-  await writeFile(schemaPath, updated, 'utf8')
+  if (usersTablePattern.test(content)) {
+    content = content.replace(usersTablePattern, usersTableBlock)
+  } else {
+    content = `${content.trimEnd()}\n\n${usersTableBlock}`
+  }
+
+  await writeFile(schemaPath, content, 'utf8')
   consola.info('Updated db/schema.ts with authentication columns.')
+}
+
+async function updatePageContracts(): Promise<void> {
 }
 
 export interface MakeAuthOptions extends WriterOptions {
@@ -382,30 +588,37 @@ export interface MakeAuthOptions extends WriterOptions {
 }
 
 export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]> {
-  const created: string[] = []
-
-  created.push(await writeFileSafe('app/Http/Controllers/Auth/LoginController.ts', loginControllerTemplate, options))
-  created.push(await writeFileSafe('app/Http/Controllers/DashboardController.ts', dashboardControllerTemplate, options))
-  created.push(await writeFileSafe('app/Models/User.ts', userModelTemplate, options))
-  created.push(await writeFileSafe('app/Providers/AuthProvider.ts', authProviderTemplate, options))
-  created.push(await writeFileSafe('app/Http/Validators/LoginValidator.ts', loginValidatorTemplate, options))
-  created.push(await writeFileSafe('resources/js/components/Layout.tsx', layoutTemplate, options))
-  created.push(await writeFileSafe('resources/js/pages/auth/Login.tsx', loginViewTemplate, options))
-  created.push(await writeFileSafe('resources/js/pages/dashboard/Index.tsx', dashboardViewTemplate, options))
-  created.push(await writeFileSafe('routes/auth.ts', routesTemplate, options))
-  created.push(await writeFileSafe(`db/migrations/${timestamp()}_create_users_table.sql`, migrationTemplate, options))
-  created.push(await writeFileSafe('db/seeders/UsersSeeder.ts', seederTemplate, options))
+  const migrationPath = `db/migrations/${timestamp()}_create_users_table.sql`
+  const created = await writeFilesSafe([
+    { path: 'app/Http/Controllers/Auth/LoginController.ts', contents: loginControllerTemplate },
+    { path: 'app/Http/Controllers/DashboardController.ts', contents: dashboardControllerTemplate },
+    { path: 'app/Http/Controllers/ProfileController.ts', contents: profileControllerTemplate },
+    { path: 'app/Models/User.ts', contents: userModelTemplate },
+    { path: 'app/Providers/AuthProvider.ts', contents: authProviderTemplate },
+    { path: 'app/Http/Validators/LoginValidator.ts', contents: loginValidatorTemplate },
+    { path: 'app/Http/Validators/ProfileValidator.ts', contents: profileValidatorTemplate },
+    { path: 'resources/js/components/Layout.tsx', contents: layoutTemplate },
+    { path: 'resources/js/pages/auth/Login.tsx', contents: loginViewTemplate },
+    { path: 'resources/js/pages/dashboard/Index.tsx', contents: dashboardViewTemplate },
+    { path: 'resources/js/pages/profile/Edit.tsx', contents: profileViewTemplate },
+    { path: 'routes/auth.ts', contents: routesTemplate },
+    { path: migrationPath, contents: migrationTemplate },
+    { path: 'db/seeders/UsersSeeder.ts', contents: seederTemplate },
+  ], options)
 
   await updateSchema()
+  await updatePageContracts()
 
   if (options.install) {
     await installAuth()
   } else {
     consola.info('Next steps:')
-    consola.info('  • Register AuthProvider and session middleware in src/app.ts')
-    consola.info('  • Import \'./routes/auth.js\' from src/main.ts or routes/web.ts')
+    consola.info('  • Register AuthProvider in src/app.ts providers array')
+    consola.info('  • Import registerAuthRoutes from routes/auth.ts and call it from your routes/web.ts registrar')
     consola.info('  • Run `bun run db:migrate` and `bun run db:seed`')
     consola.info('  • Install zod if not already installed: `bun add zod`')
+    consola.info('')
+    consola.info('Session middleware is auto-configured when AuthProvider is registered.')
   }
 
   return created
@@ -430,14 +643,11 @@ async function installAuth(): Promise<void> {
 
   if (!appPath) {
     consola.warn('Could not find src/app.ts or app.ts - skipping auto-configuration')
-    consola.info('Please manually:')
-    consola.info('  • Register AuthProvider in your Application providers')
-    consola.info('  • Add createSessionMiddleware to your middleware stack')
+    consola.info('Please manually register AuthProvider in your Application providers')
     return
   }
 
-  // Add imports
-  const sessionImport = "import { createSessionMiddleware } from '@guren/server'"
+  // Add AuthProvider import
   const authProviderImportPath = (() => {
     const base = dirname(appPath)
     const rel = relative(base, 'app/Providers/AuthProvider.js') || 'app/Providers/AuthProvider.js'
@@ -445,13 +655,6 @@ async function installAuth(): Promise<void> {
     return normalized.startsWith('.') ? normalized : `./${normalized}`
   })()
   const authProviderImport = `import AuthProvider from '${authProviderImportPath}'`
-
-  const sessionImportResult = await addImport(appPath, sessionImport)
-  if (sessionImportResult.modified) {
-    consola.success(`Added session middleware import to ${appPath}`)
-  } else if (sessionImportResult.reason === 'Import already exists') {
-    consola.info(`Session middleware import already exists in ${appPath}`)
-  }
 
   const authImportResult = await addImport(appPath, authProviderImport)
   if (authImportResult.modified) {
@@ -470,37 +673,40 @@ async function installAuth(): Promise<void> {
     consola.warn(`Could not add AuthProvider: ${providerResult.reason}`)
   }
 
-  // Add session middleware
-  const middlewareCall = "app.use('*', createSessionMiddleware({ cookieSecure: false }))"
-  const middlewareResult = await addMiddleware(appPath, middlewareCall)
-  if (middlewareResult.modified) {
-    consola.success(`Added session middleware to ${appPath}`)
-  } else if (middlewareResult.reason === 'Middleware already registered') {
-    consola.info(`Session middleware already registered in ${appPath}`)
-  } else {
-    consola.warn(`Could not add session middleware: ${middlewareResult.reason}`)
-  }
-
   // Add auth routes import to routes/web.ts
   const webRoutesPath = 'routes/web.ts'
   try {
-    await readFile(resolve(process.cwd(), webRoutesPath), 'utf8')
-    const routesImport = "import './auth.js'"
+    const absoluteWebRoutesPath = resolve(process.cwd(), webRoutesPath)
+    let routesContent = await readFile(absoluteWebRoutesPath, 'utf8')
+    const routesImport = "import { registerAuthRoutes } from './auth.js'"
     const routesImportResult = await addImport(webRoutesPath, routesImport)
 
     if (routesImportResult.modified) {
-      consola.success(`Added auth routes import to ${webRoutesPath}`)
+      consola.success(`Added auth route registrar import to ${webRoutesPath}`)
     } else if (routesImportResult.reason === 'Import already exists') {
-      consola.info(`Auth routes import already exists in ${webRoutesPath}`)
+      consola.info(`Auth route registrar import already exists in ${webRoutesPath}`)
+    }
+
+    routesContent = await readFile(absoluteWebRoutesPath, 'utf8')
+
+    if (!routesContent.includes('registerAuthRoutes(router)')) {
+      const registrarPattern = /(export function [^(]+\(\s*router\s*:\s*Router\s*\)\s*(?::\s*[^{]+)?\{\n)/u
+      if (registrarPattern.test(routesContent)) {
+        routesContent = routesContent.replace(registrarPattern, `$1  registerAuthRoutes(router)\n`)
+        await writeFile(absoluteWebRoutesPath, routesContent, 'utf8')
+        consola.success(`Registered auth routes inside ${webRoutesPath}`)
+      } else {
+        consola.warn(`Could not locate a route registrar in ${webRoutesPath} - add registerAuthRoutes(router) manually`)
+      }
     }
   } catch {
-    consola.warn(`Could not find ${webRoutesPath} - you may need to manually import './routes/auth.js'`)
+    consola.warn(`Could not find ${webRoutesPath} - you may need to manually import and call registerAuthRoutes(router)`)
   }
 
   consola.success('Authentication configuration installed!')
+  consola.info('Session middleware is auto-configured via AuthServiceProvider (autoSession: true)')
   consola.info('Next steps:')
   consola.info('  • Run `bun run db:migrate` to create the users table')
   consola.info('  • Run `bun run db:seed` to create demo user')
-  consola.info('  • Install zod if not already installed: `bun add zod`')
   consola.info('  • Start the dev server and visit /login')
 }

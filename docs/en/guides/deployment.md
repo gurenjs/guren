@@ -111,10 +111,26 @@ The container image bakes in both the client and SSR bundles so the server can s
 
 Mount your configuration or secrets as needed for your hosting environment.
 
+## AWS Lambda (Serverless)
+
+Guren runs on AWS Lambda via the `@guren/core/lambda` adapter — ideal for variable traffic or minimal infrastructure management.
+
+```typescript
+// lambda.ts
+import app from './src/app'
+import { createLambdaHandler } from '@guren/core/lambda'
+
+await app.boot()
+export const handler = createLambdaHandler(app)
+```
+
+The framework provides dedicated handlers for HTTP, SQS queues, EventBridge scheduling, and CLI commands. See the **[Serverless Deployment Guide](./serverless.md)** for the full setup including SQS, EventBridge, CDK examples, and infrastructure recommendations.
+
 ## Post-Deployment Tasks
+- Follow the [Production Operations Runbook](./operations.md) for SLO, incident response, and backup/restore drill policy.
 - Set up HTTPS (e.g. via a reverse proxy such as Nginx, Caddy, or your cloud platform).
 - Configure logging and monitoring—Bun prints to stdout/stderr, so ship logs to your chosen aggregator.
 - Schedule automated backups for the PostgreSQL database.
-- Implement health checks (e.g. expose `/health` route via `Route.get('/health', (ctx) => ctx.json({ ok: true }))`) and wire them into your load balancer.
+- Implement health checks (e.g. expose `/health` from a `registerHealthRoutes(router)` registrar via `router.get('/health', (ctx) => ctx.json({ ok: true }))`) and wire them into your load balancer.
 
 Following this checklist ensures each release is reproducible, migrates the database safely, and keeps your application responsive in production.

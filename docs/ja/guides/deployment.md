@@ -4,13 +4,13 @@
 
 ## 本番チェックリスト
 - 環境変数を設定（`DATABASE_URL`, `APP_URL`, `PORT` など）。
-- Bun で依存を本番モードでインストール。
-- フロントエンド資産をビルド。
+- Bun で依存パッケージを本番モードでインストール。
+- フロントエンドアセットをビルド。
 - マイグレーションを実行（必要ならシードも）。
 - Bun サーバーをプロセスマネージャーやコンテナで起動。
 
 ## 1. 環境変数を用意
-本番用 `.env` を作成するか、ホスティングの環境変数機能を使います。最低限:
+本番用 `.env` を作成するか、ホスティングの環境変数機能を使います。最低限、以下の変数が必要です。
 
 ```dotenv
 APP_URL=https://example.com
@@ -25,7 +25,7 @@ NODE_ENV=production
 > `.env` の値はすべて機密扱いにしてください。git 履歴やビルドログ、コンテナイメージに残らないよう、シークレットマネージャー経由で注入することを推奨します。
 
 ## 2. 依存をインストール
-デプロイ先で:
+デプロイ先で以下を実行します。
 
 ```bash
 bun install --production
@@ -33,7 +33,7 @@ bun install --production
 
 デプロイ中にアセットをビルドする環境では dev 依存も必要な場合があるため、必要に応じて `--production` を外してください。
 
-## 3. フロントエンド資産をビルド
+## 3. フロントエンドアセットをビルド
 
 ```bash
 NODE_ENV=production bun run build
@@ -55,13 +55,13 @@ bun run db:seed
 > 新コードがトラフィックを処理する前にマイグレーションを実行してください。途中まで適用された状態からのロールバックは厄介です。デプロイ失敗時はマイグレーションを再実行せず、前のコミットを再デプロイしてください。
 
 ## 5. サーバー起動
-直接 Bun で起動できます:
+直接 Bun で起動できます。
 
 ```bash
 NODE_ENV=production bun run bin/serve.ts
 ```
 
-信頼性のため、プロセスマネージャー（`systemd`, `pm2`, `supervisord` など）やホスティングの起動コマンドでラップしてください。例として `systemd` ユニット:
+信頼性のため、プロセスマネージャー（`systemd`, `pm2`, `supervisord` など）やホスティングの起動コマンドでラップしてください。以下は `systemd` ユニットの例です。
 
 - スタートアップバナーは本番では既定で非表示です。表示したい/明示的に消したい場合は `GUREN_DEV_BANNER=1` または `GUREN_DEV_BANNER=0` を設定。
 - `NODE_ENV=production` では Vite dev サーバーを起動しません。もし本番相当環境で起動したい/抑制したい場合は `GUREN_DEV_VITE=1`/`0` を切り替えてください。
@@ -100,7 +100,7 @@ ENV NODE_ENV=production
 CMD ["bun", "run", "bin/serve.ts"]
 ```
 
-ビルドと実行:
+ビルドと実行は以下のコマンドで行います。
 
 ```bash
 docker build -t my-app .
@@ -109,10 +109,25 @@ docker run --env-file .env.prod -p 3333:3333 my-app
 
 このイメージにはクライアント/SSR バンドルが同梱されるため、サーバーは初回から SSR HTML をストリームできます。環境に応じて設定ファイルやシークレットをマウントしてください。
 
+## AWS Lambda（サーバーレス）
+
+`@guren/core/lambda` アダプターで Guren を AWS Lambda 上で動かせます。トラフィックが変動するアプリやインフラ管理を最小化したい場合に最適です。
+
+```typescript
+// lambda.ts
+import app from './src/app'
+import { createLambdaHandler } from '@guren/core/lambda'
+
+await app.boot()
+export const handler = createLambdaHandler(app)
+```
+
+HTTP、SQS キュー、EventBridge スケジューリング、CLI コマンドの専用ハンドラーを提供しています。詳細は **[サーバーレスデプロイガイド](./serverless.md)** を参照してください。
+
 ## デプロイ後の作業
 - HTTPS を設定（Nginx/Caddy などのリバースプロキシやクラウド機能）。
 - ログ・モニタリングを構成（Bun は stdout/stderr に出力するので、集約先へ転送）。
 - PostgreSQL の自動バックアップをスケジュール。
-- ヘルスチェックを実装し（例: `Route.get('/health', (ctx) => ctx.json({ ok: true }))`）、ロードバランサーに組み込みます。
+- ヘルスチェックを実装し（例: `registerHealthRoutes(router)` で `router.get('/health', (ctx) => ctx.json({ ok: true }))` を公開）、ロードバランサーに組み込みます。
 
 このチェックリストを守れば、毎回再現性のあるリリースができ、DB を安全にマイグレーションしつつ本番レスポンスを維持できます。

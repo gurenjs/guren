@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "types": ["bun-types"],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./app/*"]
+    }
+  },
+  "include": ["src/**/*", "app/**/*", "routes/**/*", "config/**/*", "db/**/*", "bin/**/*"],
+  "exclude": ["node_modules"]
+}

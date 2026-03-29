@@ -25,31 +25,119 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./auth": {
+      "types": "./dist/auth/index.d.ts",
+      "default": "./dist/auth/index.js"
+    },
+    "./authorization": {
+      "types": "./dist/authorization/index.d.ts",
+      "default": "./dist/authorization/index.js"
+    },
+    "./broadcasting": {
+      "types": "./dist/broadcasting/index.d.ts",
+      "default": "./dist/broadcasting/index.js"
+    },
+    "./cache": {
+      "types": "./dist/cache/index.d.ts",
+      "default": "./dist/cache/index.js"
+    },
+    "./encryption": {
+      "types": "./dist/encryption/index.d.ts",
+      "default": "./dist/encryption/index.js"
+    },
+    "./events": {
+      "types": "./dist/events/index.d.ts",
+      "default": "./dist/events/index.js"
+    },
+    "./health": {
+      "types": "./dist/health/index.d.ts",
+      "default": "./dist/health/index.js"
+    },
+    "./i18n": {
+      "types": "./dist/i18n/index.d.ts",
+      "default": "./dist/i18n/index.js"
+    },
+
+    "./logging": {
+      "types": "./dist/logging/index.d.ts",
+      "default": "./dist/logging/index.js"
+    },
+    "./mail": {
+      "types": "./dist/mail/index.d.ts",
+      "default": "./dist/mail/index.js"
+    },
+    "./notifications": {
+      "types": "./dist/notifications/index.d.ts",
+      "default": "./dist/notifications/index.js"
+    },
+    "./queue": {
+      "types": "./dist/queue/index.d.ts",
+      "default": "./dist/queue/index.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime/index.d.ts",
+      "default": "./dist/runtime/index.js"
+    },
+    "./scheduling": {
+      "types": "./dist/scheduling/index.d.ts",
+      "default": "./dist/scheduling/index.js"
+    },
+    "./storage": {
+      "types": "./dist/storage/index.d.ts",
+      "default": "./dist/storage/index.js"
+    },
     "./vite": {
       "types": "./dist/vite/index.d.ts",
       "default": "./dist/vite/index.js"
+    },
+    "./mcp": {
+      "types": "./dist/mcp/index.d.ts",
+      "default": "./dist/mcp/index.js"
+    },
+    "./lambda": {
+      "types": "./dist/lambda/index.d.ts",
+      "default": "./dist/lambda/index.js"
     }
   },
   "scripts": {
-    "build": "tsup",
+    "build": "NODE_OPTIONS='--max-old-space-size=8192' tsup",
     "dev": "bun --watch src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test"
   },
   "dependencies": {
     "@guren/inertia-client": "^0.2.0-alpha.7",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "chalk": "^5.3.0",
     "consola": "^3.4.2",
     "figlet": "^1.7.0",
-    "hono": "^4.4.0"
+    "hono": "^4.12.8",
+    "ioredis": "^5.9.1",
+    "nodemailer": "^7.0.12"
   },
   "peerDependencies": {
+    "@aws-sdk/client-s3": "^3.0.0",
+    "@aws-sdk/client-sqs": "^3.0.0",
+    "@aws-sdk/s3-request-presigner": "^3.0.0",
     "vite": ">=7.0.0"
   },
+  "peerDependenciesMeta": {
+    "@aws-sdk/client-s3": {
+      "optional": true
+    },
+    "@aws-sdk/client-sqs": {
+      "optional": true
+    },
+    "@aws-sdk/s3-request-presigner": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@types/ioredis": "^5.0.0",
     "@types/node": "^20.14.10",
-    "vite": "^7.0.0",
+    "@types/nodemailer": "^7.0.5",
     "tsup": "^8.5.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vite": "^8.0.0"
   }
 }

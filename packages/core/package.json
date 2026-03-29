@@ -24,6 +24,19 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime.d.ts",
+      "default": "./dist/runtime.js"
+    },
+    "./vite": {
+      "types": "./dist/vite.d.ts",
+      "default": "./dist/vite.js"
+    },
+
+    "./lambda": {
+      "types": "./dist/lambda.d.ts",
+      "default": "./dist/lambda.js"
     }
   },
   "bin": {
@@ -32,6 +45,7 @@
   "scripts": {
     "build": "tsup",
     "dev": "bun --watch src/index.ts",
+    "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

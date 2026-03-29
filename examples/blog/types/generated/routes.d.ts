@@ -1,5 +1,5 @@
 // Generated from routes/web.ts — DO NOT EDIT
-// Run `guren routes:types` to regenerate.
+// Run `guren codegen` to regenerate.
 
 import type { RequestPayload, VisitOptions } from '@inertiajs/core'
 

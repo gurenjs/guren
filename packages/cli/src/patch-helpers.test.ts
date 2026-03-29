@@ -2,14 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import {
-  addImport,
-  addMiddleware,
-  addProvider,
-  hasImport,
-  hasSessionMiddleware,
-  hasAuthProvider,
-} from './patch-helpers'
+import { addImport, addProvider, hasImport, hasAuthProvider, ensureDrizzleImports } from './patch-helpers'
 
 describe('patch-helpers', () => {
   let tempDir: string
@@ -35,7 +28,7 @@ describe('patch-helpers', () => {
 
     it('should add import after existing imports', async () => {
       const filePath = join(tempDir, 'test.ts')
-      const initialContent = `import { Application } from '@guren/server'
+      const initialContent = `import { Application } from '@guren/core'
 import { something } from 'else'
 
 const app = new Application()`
@@ -55,8 +48,8 @@ const app = new Application()`
 
     it('should not add duplicate import', async () => {
       const filePath = join(tempDir, 'test.ts')
-      const initialContent = `import { Application } from '@guren/server'
-import { createSessionMiddleware } from '@guren/server'
+      const initialContent = `import { Application } from '@guren/core'
+import { createSessionMiddleware } from '@guren/core'
 
 const app = new Application()`
 
@@ -64,7 +57,7 @@ const app = new Application()`
 
       const result = await addImport(
         filePath,
-        "import { createSessionMiddleware } from '@guren/server'",
+        "import { createSessionMiddleware } from '@guren/core'",
       )
 
       expect(result.modified).toBe(false)
@@ -79,68 +72,10 @@ const app = new Application()`
     })
   })
 
-  describe('addMiddleware', () => {
-    it('should add session middleware before auth context', async () => {
-      const filePath = join(tempDir, 'app.ts')
-      const initialContent = `import { Application } from '@guren/server'
-
-const app = new Application({
-  providers: [],
-})
-
-app.use('*', attachAuthContext((ctx) => app.auth.createAuthContext(ctx)))`
-
-      await writeFile(filePath, initialContent, 'utf8')
-
-      const result = await addMiddleware(
-        filePath,
-        "app.use('*', createSessionMiddleware({ cookieSecure: false }))",
-      )
-
-      expect(result.modified).toBe(true)
-
-      const content = await Bun.file(filePath).text()
-      expect(content).toContain('createSessionMiddleware')
-      expect(content.indexOf('createSessionMiddleware')).toBeLessThan(
-        content.indexOf('attachAuthContext'),
-      )
-    })
-
-    it('should not add duplicate session middleware', async () => {
-      const filePath = join(tempDir, 'app.ts')
-      const initialContent = `import { Application, createSessionMiddleware } from '@guren/server'
-
-const app = new Application()
-
-app.use('*', createSessionMiddleware({ cookieSecure: false }))
-app.use('*', attachAuthContext((ctx) => app.auth.createAuthContext(ctx)))`
-
-      await writeFile(filePath, initialContent, 'utf8')
-
-      const result = await addMiddleware(
-        filePath,
-        "app.use('*', createSessionMiddleware({ cookieSecure: false }))",
-      )
-
-      expect(result.modified).toBe(false)
-      expect(result.reason).toBe('Middleware already registered')
-    })
-
-    it('should return false if file not found', async () => {
-      const result = await addMiddleware(
-        join(tempDir, 'nonexistent.ts'),
-        "app.use('*', createSessionMiddleware())",
-      )
-
-      expect(result.modified).toBe(false)
-      expect(result.reason).toBe('File not found')
-    })
-  })
-
   describe('addProvider', () => {
     it('should add provider to providers array', async () => {
       const filePath = join(tempDir, 'app.ts')
-      const initialContent = `import { Application } from '@guren/server'
+      const initialContent = `import { Application } from '@guren/core'
 import DatabaseProvider from './Providers/DatabaseProvider.js'
 
 const app = new Application({
@@ -160,7 +95,7 @@ const app = new Application({
 
     it('should not add duplicate provider', async () => {
       const filePath = join(tempDir, 'app.ts')
-      const initialContent = `import { Application } from '@guren/server'
+      const initialContent = `import { Application } from '@guren/core'
 import AuthProvider from './Providers/AuthProvider.js'
 
 const app = new Application({
@@ -177,7 +112,7 @@ const app = new Application({
 
     it('should return false if providers array not found', async () => {
       const filePath = join(tempDir, 'app.ts')
-      const initialContent = `import { Application } from '@guren/server'
+      const initialContent = `import { Application } from '@guren/core'
 
 const app = new Application()`
 
@@ -195,18 +130,18 @@ const app = new Application()`
       const filePath = join(tempDir, 'test.ts')
       await writeFile(
         filePath,
-        "import { Application } from '@guren/server'\n\nconst app = new Application()",
+        "import { Application } from '@guren/core'\n\nconst app = new Application()",
         'utf8',
       )
 
-      const result = await hasImport(filePath, "import { Application } from '@guren/server'")
+      const result = await hasImport(filePath, "import { Application } from '@guren/core'")
 
       expect(result).toBe(true)
     })
 
     it('should return false if import does not exist', async () => {
       const filePath = join(tempDir, 'test.ts')
-      await writeFile(filePath, "import { Application } from '@guren/server'", 'utf8')
+      await writeFile(filePath, "import { Application } from '@guren/core'", 'utf8')
 
       const result = await hasImport(filePath, "import { foo } from 'bar'")
 
@@ -215,30 +150,6 @@ const app = new Application()`
 
     it('should return false if file not found', async () => {
       const result = await hasImport(join(tempDir, 'nonexistent.ts'), "import { foo } from 'bar'")
-
-      expect(result).toBe(false)
-    })
-  })
-
-  describe('hasSessionMiddleware', () => {
-    it('should return true if session middleware exists', async () => {
-      const filePath = join(tempDir, 'app.ts')
-      await writeFile(
-        filePath,
-        "app.use('*', createSessionMiddleware({ cookieSecure: false }))",
-        'utf8',
-      )
-
-      const result = await hasSessionMiddleware(filePath)
-
-      expect(result).toBe(true)
-    })
-
-    it('should return false if session middleware does not exist', async () => {
-      const filePath = join(tempDir, 'app.ts')
-      await writeFile(filePath, "app.use('*', someOtherMiddleware())", 'utf8')
-
-      const result = await hasSessionMiddleware(filePath)
 
       expect(result).toBe(false)
     })
@@ -269,6 +180,38 @@ const app = new Application()`
       const result = await hasAuthProvider(filePath)
 
       expect(result).toBe(false)
+    })
+  })
+
+  describe('ensureDrizzleImports', () => {
+    it('should add missing imports when no Drizzle import exists', () => {
+      const content = `const x = 1\n`
+      const result = ensureDrizzleImports(content, ['pgTable', 'serial', 'text'])
+
+      expect(result).toContain("import { pgTable, serial, text } from '@guren/orm/drizzle'")
+      expect(result).toContain('const x = 1')
+    })
+
+    it('should merge into existing Drizzle import', () => {
+      const content = `import { pgTable, serial } from '@guren/orm/drizzle'\n\nexport const posts = pgTable('posts', {})\n`
+      const result = ensureDrizzleImports(content, ['pgTable', 'serial', 'text', 'timestamp'])
+
+      expect(result).toContain("import { pgTable, serial, text, timestamp } from '@guren/orm/drizzle'")
+      expect(result).not.toContain("import { pgTable, serial }")
+    })
+
+    it('should not modify content when all imports already present', () => {
+      const content = `import { pgTable, serial, text, timestamp } from '@guren/orm/drizzle'\n\nexport const posts = pgTable('posts', {})\n`
+      const result = ensureDrizzleImports(content, ['pgTable', 'serial', 'text', 'timestamp'])
+
+      expect(result).toBe(content)
+    })
+
+    it('should return content unchanged when needed list is empty', () => {
+      const content = `const x = 1\n`
+      const result = ensureDrizzleImports(content, [])
+
+      expect(result).toBe(content)
     })
   })
 })

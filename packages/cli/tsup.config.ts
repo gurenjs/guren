@@ -7,5 +7,5 @@ export default defineConfig({
   outDir: 'dist',
   clean: true,
   tsconfig: 'tsconfig.json',
-  external: ['@guren/server']
+  external: ['@guren/core', '@guren/openapi']
 })

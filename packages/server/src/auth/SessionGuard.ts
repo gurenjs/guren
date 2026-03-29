@@ -1,5 +1,6 @@
 import type { Session } from '../http/middleware'
 import type { AuthCredentials, Authenticatable, Guard, UserProvider } from './types'
+import { secureStringCompare } from './utils'
 
 export interface SessionGuardOptions {
   provider: UserProvider
@@ -49,7 +50,7 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
     }
 
     const providerToken = await this.provider.getRememberToken?.(user)
-    if (!providerToken || providerToken !== rememberToken) {
+    if (!providerToken || !secureStringCompare(providerToken, rememberToken)) {
       this.currentSession.forget(this.rememberSessionKey())
       return null
     }
@@ -163,6 +164,8 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
   async validate(credentials: AuthCredentials): Promise<User | null> {
     const user = await this.provider.retrieveByCredentials(credentials)
     if (!user) {
+      // Constant-time delay to prevent timing attacks (don't call provider with fake user)
+      await new Promise(resolve => setTimeout(resolve, 100))
       return null
     }
 

@@ -1,25 +1,61 @@
 # __APP_TITLE__
 
-Welcome to your new Guren application.
+A fullstack TypeScript application built with [Guren](https://guren.dev).
 
-## Getting Started
+## Quick Start
 
-1. Install dependencies with `bun install`.
-2. Copy `.env.example` to `.env` and update any required values.
-3. Start the development servers with `bun run dev` (runs Bun and Vite together).
+```bash
+bun install
+bun run dev
+```
 
-The default setup expects a PostgreSQL database. You can change the connection string in `config/database.ts` or set the `DATABASE_URL` environment variable before running the server.
+That's it. No Docker, no database setup — SQLite is ready out of the box.
 
-## Available Scripts
+Visit `http://localhost:3000` to see your app running.
 
-- `bun run dev` - start the Bun API server alongside the Vite dev server.
-- `bun run build` - build production frontend assets with Vite.
-- `bun run preview` - preview the production build locally.
-- `bun run routes:types` - regenerate client-side route helpers.
-- `bun run db:make` - scaffold a new SQL migration from your schema using drizzle-kit.
-- `bun run db:migrate` - apply database migrations.
-- `bun run db:seed` - execute seeders.
+## Adding Features
 
-Tailwind CSS is ready to use out of the box. Edit `resources/css/app.css` or add utilities to your components and the dev server will pick them up automatically.
+```bash
+bunx guren add auth          # authentication with login/dashboard
+bunx guren add resource posts # CRUD scaffolding for a resource
+bunx guren add queue          # background job processing
+bunx guren add mail           # email sending
+bunx guren add events         # event system
+bunx guren add cache          # caching layer
+bunx guren add notifications  # notification channels
+bunx guren add storage        # local/public disks
+bunx guren add broadcasting   # realtime channels
+bunx guren add schedule       # task scheduling
+```
 
-Happy hacking!
+## Project Structure
+
+- `routes/web.ts` — route definitions
+- `app/Http/Controllers/` — request handlers
+- `app/Models/` — ORM models
+- `resources/js/pages/` — React pages (rendered via Inertia.js)
+- `config/database.ts` — database configuration
+- `db/schema.ts` — Drizzle table definitions
+
+## Scripts
+
+| Command | Description |
+|---------|-------------|
+| `bun run dev` | Start dev server (Bun + Vite) |
+| `bun run build` | Build for production |
+| `bun run preview` | Start the built app with the Bun production server |
+| `bun run db:migrate` | Run database migrations |
+| `bun run db:seed` | Seed the database |
+| `bun run codegen` | Regenerate route/page types |
+
+Run `bun run build` before `bun run preview` so the production server can read the generated manifests from `public/assets`.
+
+## Switching to PostgreSQL
+
+Update `config/database.ts` to use `createPostgresDatabase` and set `DATABASE_URL`:
+
+```bash
+DATABASE_URL=postgres://user:pass@localhost:5432/myapp
+```
+
+See the [database guide](https://guren.dev/docs/guides/database) for details.

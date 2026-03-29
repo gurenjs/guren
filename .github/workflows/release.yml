@@ -9,21 +9,80 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      REDIS_URL: redis://localhost:6379
     permissions:
       contents: read
       packages: write
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
+      # Bun version is centralized here for easy updates.
+      # To test against multiple versions, convert the publish job
+      # into a validate + publish split with a matrix on validate.
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.3.1"
+          bun-version: "1.3.11"
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Build packages
+        run: bun run build
+
+      - name: Generate route types
+        run: bun run build:routes
+
+      - name: Type check
+        run: bun run typecheck
+
+      - name: Core-first audit
+        run: bun run audit:core-first
+
+      - name: Contract audit
+        run: bun run audit:contracts
+
+      - name: Feature runtime audit
+        run: bun run audit:feature-runtime
+
+      - name: Starter template audit
+        run: bun run audit:starter-template
+
+      - name: Docs audit
+        run: bun run audit:docs
+
+      - name: Build example apps
+        run: |
+          bun run --cwd examples/blog build
+          bun run --cwd web build
+
+      - name: Bundle budget audit
+        run: bun run audit:bundle-budgets
+
+      - name: Fresh app smoke
+        run: bun run smoke:starter
+
+      - name: Packed artifact audit
+        run: bun run smoke:starter:packed
+
+      - name: Upgrade existing app smoke
+        run: bun run smoke:upgrade-existing-app
+
+      - name: Run tests
+        run: bun run test
 
       - name: Configure npm auth
         env:

@@ -33,14 +33,19 @@
   "scripts": {
     "build": "tsup",
     "dev": "bun --watch src/index.ts",
+    "test": "bun test",
     "typecheck": "tsc -p tsconfig.typecheck.json"
   },
   "peerDependencies": {
-    "drizzle-orm": "^0.44.7",
+    "drizzle-orm": "1.0.0-beta.18-7eb39f0",
+    "mysql2": "^3.11.3",
     "postgres": "^3.4.3"
   },
   "peerDependenciesMeta": {
     "drizzle-orm": {
+      "optional": true
+    },
+    "mysql2": {
       "optional": true
     },
     "postgres": {
@@ -49,7 +54,8 @@
   },
   "devDependencies": {
     "@types/node": "^20.14.10",
-    "drizzle-orm": "^0.44.7",
+    "drizzle-orm": "1.0.0-beta.18-7eb39f0",
+    "mysql2": "^3.11.3",
     "postgres": "^3.4.3",
     "tsup": "^8.5.0",
     "typescript": "^5.4.0"

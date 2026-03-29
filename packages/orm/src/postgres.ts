@@ -1,5 +1,6 @@
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { migrate } from 'drizzle-orm/postgres-js/migrator'
+import { existsSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import postgres from 'postgres'
@@ -53,6 +54,10 @@ export function createPostgresDatabase<TSchema extends Record<string, unknown>>(
     }
 
     const promise = (async (): Promise<void> => {
+      if (!hasDrizzleMigrations(resolvedMigrationsFolder)) {
+        return
+      }
+
       const url = resolveConnectionString()
       const migrationClient = postgres(url, {
         max: 1,
@@ -60,7 +65,7 @@ export function createPostgresDatabase<TSchema extends Record<string, unknown>>(
       })
 
       try {
-        const db = drizzle(migrationClient, { schema })
+        const db = drizzle({ client: migrationClient, schema })
         await migrate(db, { migrationsFolder: resolvedMigrationsFolder })
       } finally {
         await migrationClient.end({ timeout: 0 })
@@ -89,7 +94,7 @@ export function createPostgresDatabase<TSchema extends Record<string, unknown>>(
         ...clientOptions,
       })
 
-      return drizzle(client, { schema })
+      return drizzle({ client, schema })
     })()
 
     databasePromise = promise.catch((error) => {
@@ -131,4 +136,15 @@ export function createPostgresDatabase<TSchema extends Record<string, unknown>>(
     configureOrm,
     seedDatabase,
   }
+}
+
+function hasDrizzleMigrations(migrationsFolder: string): boolean {
+  if (!existsSync(migrationsFolder)) {
+    return false
+  }
+
+  const entries = readdirSync(migrationsFolder, { withFileTypes: true })
+  return entries.some(
+    (entry) => entry.isDirectory() && existsSync(resolve(migrationsFolder, entry.name, 'migration.sql')),
+  )
 }

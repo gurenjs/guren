@@ -2,7 +2,10 @@ import { Marked, type Tokens } from 'marked'
 import { markedHighlight } from 'marked-highlight'
 import { codeToHtml } from 'shiki'
 
-const DOCS_THEME = 'rose-pine-dawn'
+const DOCS_THEMES = {
+  light: 'rose-pine-dawn',
+  dark: 'rose-pine-moon',
+} as const
 const DEFAULT_LANGUAGE = 'text'
 const ALERT_DIRECTIVE_PATTERN = /^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*/iu
 
@@ -34,10 +37,18 @@ markedInstance.use(
       const normalizedLang = lang?.trim() || DEFAULT_LANGUAGE
 
       try {
-        return await codeToHtml(code, { lang: normalizedLang, theme: DOCS_THEME })
+        return await codeToHtml(code, {
+          lang: normalizedLang,
+          themes: DOCS_THEMES,
+          defaultColor: 'light',
+        })
       }
       catch {
-        return await codeToHtml(code, { lang: DEFAULT_LANGUAGE, theme: DOCS_THEME })
+        return await codeToHtml(code, {
+          lang: DEFAULT_LANGUAGE,
+          themes: DOCS_THEMES,
+          defaultColor: 'light',
+        })
       }
     },
   }),
@@ -88,8 +99,82 @@ ${content}
 })
 
 export async function renderMarkdownToHtml(markdown: string): Promise<string> {
-  const rendered = await markedInstance.parse(markdown, { async: true })
+  // Per-render slug deduplication — safe for concurrent requests.
+  // Create a lightweight wrapper that only overrides the heading renderer
+  // with a closure-scoped slug map, inheriting everything else from the
+  // shared markedInstance (highlight, alert walkTokens, blockquote renderer).
+  const seenSlugs = new Map<string, number>()
+  const instance = new Marked()
+  instance.setOptions({ gfm: true, breaks: false, async: true })
+
+  // Re-use the shared plugins
+  instance.use(
+    markedHighlight({
+      async: true,
+      highlight: async (code: string, lang?: string) => {
+        const normalizedLang = lang?.trim() || DEFAULT_LANGUAGE
+        try {
+          return await codeToHtml(code, { lang: normalizedLang, themes: DOCS_THEMES, defaultColor: 'light' })
+        } catch {
+          return await codeToHtml(code, { lang: DEFAULT_LANGUAGE, themes: DOCS_THEMES, defaultColor: 'light' })
+        }
+      },
+    }),
+  )
+
+  // Alert walkTokens + blockquote renderer (same as shared instance)
+  instance.use({
+    walkTokens(token) {
+      if (token.type !== 'blockquote' || !token.tokens?.length) return
+      const first = token.tokens[0]
+      if (first.type !== 'paragraph') return
+      const alertType = extractAlertType(first as Tokens.Paragraph)
+      if (!alertType) return
+      ;(token as Tokens.Blockquote & { alertType?: AlertType }).alertType = alertType
+      if (!first.text.trim()) token.tokens.shift()
+    },
+    renderer: {
+      heading({ tokens, depth }: Tokens.Heading) {
+        const text = this.parser.parseInline(tokens)
+        const id = slugifyHeading(text, seenSlugs)
+        return `<h${depth} id="${id}">${text}</h${depth}>\n`
+      },
+      blockquote(token) {
+        const content = this.parser.parse(token.tokens ?? [])
+        const alertType = (token as Tokens.Blockquote & { alertType?: AlertType }).alertType
+        if (!alertType) return `<blockquote>\n${content}</blockquote>\n`
+        const meta = ALERT_METADATA[alertType]
+        return `<div class="docs-alert docs-alert--${meta.classSuffix}">
+  <p class="docs-alert__label">${meta.label}</p>
+  <div class="docs-alert__body">
+${content}
+  </div>
+</div>`
+      },
+    },
+  })
+
+  const rendered = await instance.parse(markdown, { async: true })
   return typeof rendered === 'string' ? rendered : ''
+}
+
+function slugifyHeading(text: string, seenSlugs: Map<string, number>): string {
+  const stripped = text.replace(/<[^>]*>/g, '')
+  let slug = stripped
+    .toLowerCase()
+    .trim()
+    .replace(/[\s]+/g, '-')
+    .replace(/[^\p{L}\p{N}\-]/gu, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+  slug = slug || `heading-${Math.random().toString(36).slice(2, 8)}`
+
+  const count = seenSlugs.get(slug) ?? 0
+  seenSlugs.set(slug, count + 1)
+  if (count > 0) {
+    slug = `${slug}-${count}`
+  }
+  return slug
 }
 
 function extractAlertType(paragraph: Tokens.Paragraph): AlertType | null {

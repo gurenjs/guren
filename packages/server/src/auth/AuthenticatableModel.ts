@@ -1,9 +1,15 @@
-import type { PlainObject } from '@guren/orm/Model'
-import { Model } from '@guren/orm/Model'
+import { Model, type PlainObject } from '@guren/orm'
 import type { PasswordHasher } from './password/PasswordHasher'
 import { ScryptHasher } from './password/ScryptHasher'
 
 export abstract class AuthenticatableModel<TRecord extends PlainObject = PlainObject> extends Model<TRecord> {
+  static override readonly createType: PlainObject & {
+    password?: string
+    plainPassword?: string
+  } = undefined as unknown as PlainObject & {
+    password?: string
+    plainPassword?: string
+  }
   protected static passwordField = 'password'
   protected static passwordHashField = 'passwordHash'
   protected static passwordHasher: PasswordHasher | null = null

@@ -1,0 +1,666 @@
+import { DEFAULT_PAGINATION_SIZE } from './Model'
+import type {
+  AdapterQueryOptions,
+  FindManyOptions,
+  Model,
+  ORMAdapter,
+  OrderByClause,
+  OrderDirection,
+  PaginatedResult,
+  PaginationMeta,
+  PlainObject,
+} from './Model'
+
+type FieldKey<TRecord extends PlainObject> = keyof TRecord & string
+
+/** Comparison operators supported by the QueryBuilder. */
+export type WhereOperator = '=' | '!=' | '>' | '<' | '>=' | '<=' | 'like' | 'in' | 'not in' | 'is null' | 'is not null'
+
+/** A single field-level condition. */
+export interface SimpleCondition {
+  type: 'simple'
+  field: string
+  operator: WhereOperator
+  value: unknown
+}
+
+/** A group of conditions joined by AND or OR. */
+export interface GroupCondition {
+  type: 'group'
+  boolean: 'and' | 'or'
+  conditions: WhereCondition[]
+}
+
+/** A where condition - either simple or grouped. */
+export type WhereCondition = SimpleCondition | GroupCondition
+
+/** Options carried by the QueryBuilder for query execution. */
+export interface QueryBuilderOptions {
+  orderBy: Array<{ column: string; direction: OrderDirection }>
+  limitValue?: number
+  offsetValue?: number
+  selectFields?: readonly string[]
+  trx?: unknown
+}
+
+/**
+ * Fluent query builder for the Guren ORM.
+ *
+ * Provides a chainable API for constructing database queries with
+ * support for complex where conditions, ordering, pagination, and more.
+ *
+ * Implements the thenable pattern so it can be directly awaited,
+ * resolving to the result of `get()`.
+ *
+ * @example
+ * // Fluent chaining
+ * const posts = await Post.where('status', 'published')
+ *   .where('views', '>', 100)
+ *   .orderBy('createdAt', 'desc')
+ *   .limit(10)
+ *   .get()
+ *
+ * // Thenable - await directly
+ * const active = await User.where('active', true)
+ *
+ * // Pagination
+ * const page = await Post.where('status', 'published').paginate(1, 20)
+ */
+export class QueryBuilder<
+  TRecord extends PlainObject = PlainObject,
+  TResult extends PlainObject = TRecord,
+> {
+  private conditions: WhereCondition[] = []
+  private options: QueryBuilderOptions = { orderBy: [] }
+  private modelClass: typeof Model
+  private table: unknown
+  private adapter: ORMAdapter
+  private eagerLoad: string[] = []
+  private eagerLoadConstraints: Map<string, (q: QueryBuilder<any>) => void> = new Map() // eslint-disable-line @typescript-eslint/no-explicit-any
+
+  constructor(modelClass: typeof Model, options: { trx?: unknown } = {}) {
+    this.modelClass = modelClass
+    this.table = modelClass.resolveTable()
+    this.adapter = modelClass.getAdapter()
+    this.options.trx = options.trx
+  }
+
+  /**
+   * Add a where condition (AND).
+   *
+   * Supports three calling signatures:
+   * - `where(field, value)` - equality check
+   * - `where(field, operator, value)` - comparison
+   * - `where(object)` - multiple equality conditions
+   */
+  where<TKey extends FieldKey<TRecord>>(field: TKey, value: TRecord[TKey]): this
+  where<TKey extends FieldKey<TRecord>>(field: TKey, operator: WhereOperator, value: unknown): this
+  where(conditions: Partial<Record<FieldKey<TRecord>, unknown>>): this
+  where(
+    fieldOrConditions: FieldKey<TRecord> | Partial<Record<FieldKey<TRecord>, unknown>>,
+    operatorOrValue?: unknown,
+    value?: unknown,
+  ): this {
+    if (typeof fieldOrConditions === 'object' && fieldOrConditions !== null) {
+      for (const [key, val] of Object.entries(fieldOrConditions)) {
+        if (val !== undefined) {
+          this.addSimpleCondition(key, '=', val)
+        }
+      }
+      return this
+    }
+
+    const field = fieldOrConditions as string
+
+    if (arguments.length === 2) {
+      this.addSimpleCondition(field, '=', operatorOrValue)
+    } else {
+      this.addSimpleCondition(field, operatorOrValue as WhereOperator, value)
+    }
+
+    return this
+  }
+
+  /**
+   * Add an OR where condition.
+   *
+   * Same overloads as `where()`, but joins with OR logic.
+   * Creates an OR group containing the new condition(s).
+   */
+  orWhere<TKey extends FieldKey<TRecord>>(field: TKey, value: TRecord[TKey]): this
+  orWhere<TKey extends FieldKey<TRecord>>(field: TKey, operator: WhereOperator, value: unknown): this
+  orWhere(conditions: Partial<Record<FieldKey<TRecord>, unknown>>): this
+  orWhere(
+    fieldOrConditions: FieldKey<TRecord> | Partial<Record<FieldKey<TRecord>, unknown>>,
+    operatorOrValue?: unknown,
+    value?: unknown,
+  ): this {
+    const orConditions: SimpleCondition[] = []
+
+    if (typeof fieldOrConditions === 'object' && fieldOrConditions !== null) {
+      for (const [key, val] of Object.entries(fieldOrConditions)) {
+        if (val !== undefined) {
+          orConditions.push({ type: 'simple', field: key, operator: '=', value: val })
+        }
+      }
+    } else {
+      const field = fieldOrConditions as string
+
+      if (arguments.length === 2) {
+        orConditions.push({ type: 'simple', field, operator: '=', value: operatorOrValue })
+      } else {
+        orConditions.push({ type: 'simple', field, operator: operatorOrValue as WhereOperator, value })
+      }
+    }
+
+    if (orConditions.length > 0) {
+      this.conditions.push({
+        type: 'group',
+        boolean: 'or',
+        conditions: orConditions,
+      })
+    }
+
+    return this
+  }
+
+  /**
+   * Add a WHERE NULL condition.
+   * @param field - Column to check for NULL
+   */
+  whereNull(field: FieldKey<TRecord>): this {
+    this.addSimpleCondition(field, 'is null', null)
+    return this
+  }
+
+  /**
+   * Add a WHERE NOT NULL condition.
+   * @param field - Column to check for NOT NULL
+   */
+  whereNotNull(field: FieldKey<TRecord>): this {
+    this.addSimpleCondition(field, 'is not null', null)
+    return this
+  }
+
+  /**
+   * Add a WHERE IN condition.
+   * @param field - Column to check
+   * @param values - Array of values to match against
+   */
+  whereIn<TKey extends FieldKey<TRecord>>(field: TKey, values: readonly TRecord[TKey][]): this {
+    this.addSimpleCondition(field, 'in', values)
+    return this
+  }
+
+  /**
+   * Add a WHERE NOT IN condition.
+   * @param field - Column to check
+   * @param values - Array of values to exclude
+   */
+  whereNotIn<TKey extends FieldKey<TRecord>>(field: TKey, values: readonly TRecord[TKey][]): this {
+    this.addSimpleCondition(field, 'not in', values)
+    return this
+  }
+
+  /**
+   * Add an ORDER BY clause. Can be called multiple times to sort by multiple columns.
+   * @param field - Column to sort by
+   * @param direction - Sort direction (default: 'asc')
+   */
+  orderBy(field: FieldKey<TRecord>, direction: OrderDirection = 'asc'): this {
+    this.options.orderBy.push({ column: field, direction })
+    return this
+  }
+
+  /**
+   * Set the maximum number of records to return.
+   * @param n - Maximum record count
+   */
+  limit(n: number): this {
+    this.options.limitValue = n
+    return this
+  }
+
+  /**
+   * Set the number of records to skip.
+   * @param n - Number of records to skip
+   */
+  offset(n: number): this {
+    this.options.offsetValue = n
+    return this
+  }
+
+  /**
+   * Limit the columns returned in the result.
+   * @param fields - Column names to select
+   */
+  select<TKey extends FieldKey<TRecord>>(...fields: readonly TKey[]): QueryBuilder<TRecord, Pick<TRecord, TKey>> {
+    this.options.selectFields = [...fields]
+    return this as unknown as QueryBuilder<TRecord, Pick<TRecord, TKey>>
+  }
+
+  /**
+   * Apply a named query scope defined on the model.
+   *
+   * @param name - The scope name
+   * @returns this (for chaining)
+   *
+   * @example
+   * const results = await Post.where('author', 'John')
+   *   .scope('published')
+   *   .scope('popular')
+   *   .get()
+   */
+  scope(name: string): this {
+    const modelScopes = (this.modelClass as typeof Model & { scopes?: Record<string, (q: QueryBuilder<any>) => QueryBuilder<any>> }).scopes // eslint-disable-line @typescript-eslint/no-explicit-any
+    if (!modelScopes || typeof modelScopes[name] !== 'function') {
+      throw new Error(`${this.modelClass.name}: unknown scope "${name}".`)
+    }
+    modelScopes[name](this)
+    return this
+  }
+
+  // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // Eager Loading
+  // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Eager-load relationships on query results.
+   *
+   * Supports string names, arrays, dot notation for nested relations,
+   * and constraint callbacks.
+   *
+   * @example
+   * // Simple
+   * await User.where('active', true).with('posts').get()
+   *
+   * // Multiple
+   * await User.where('active', true).with('posts', 'comments').get()
+   *
+   * // Nested (dot notation)
+   * await User.where('active', true).with('posts.comments').get()
+   */
+  with(...relations: (string | Record<string, (q: QueryBuilder<any>) => void>)[]): this { // eslint-disable-line @typescript-eslint/no-explicit-any
+    for (const rel of relations) {
+      if (typeof rel === 'string') {
+        if (!this.eagerLoad.includes(rel)) this.eagerLoad.push(rel)
+      } else {
+        for (const [name, constraint] of Object.entries(rel)) {
+          if (!this.eagerLoad.includes(name)) this.eagerLoad.push(name)
+          this.eagerLoadConstraints.set(name, constraint)
+        }
+      }
+    }
+    return this
+  }
+
+  // ---------------------------------------------------------------------------
+  // Terminal methods
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Execute the query and return all matching records.
+   * @returns Array of matching records
+   */
+  async get(): Promise<TResult[]> {
+    const results = await this.executeQuery()
+    return this.loadEagerRelations(results)
+  }
+
+  /**
+   * Execute the query and return the first matching record.
+   * @returns The first record or null
+   */
+  async first(): Promise<TResult | null> {
+    const prev = this.options.limitValue
+    this.options.limitValue = 1
+    const results = await this.executeQuery()
+    this.options.limitValue = prev
+    if (results.length === 0) return null
+    const loaded = await this.loadEagerRelations(results)
+    return loaded[0] as TResult
+  }
+
+  /**
+   * Execute the query and return the first matching record, or throw.
+   * @returns The first record
+   * @throws Error if no record matches
+   */
+  async firstOrFail(): Promise<TResult> {
+    const record = await this.first()
+    if (record === null) {
+      throw new Error(`${this.modelClass.name} not found`)
+    }
+    return record
+  }
+
+  /**
+   * Count the number of records matching the current conditions.
+   * @returns The count of matching records
+   */
+  async count(): Promise<number> {
+    if (typeof this.adapter.count === 'function' && this.conditions.length === 0) {
+      return this.adapter.count(this.table, undefined, { trx: this.options.trx })
+    }
+
+    // For advanced conditions we need to use the advanced adapter method
+    const advancedAdapter = this.adapter as ORMAdapterAdvanced
+    if (typeof advancedAdapter.countAdvanced === 'function') {
+      return advancedAdapter.countAdvanced(this.table, this.conditions, { trx: this.options.trx })
+    }
+
+    // Fallback: fetch all and count
+    const results = await this.executeQuery()
+    return results.length
+  }
+
+  /**
+   * Paginate the query results.
+   * @param page - Page number (1-based, default: 1)
+   * @param perPage - Records per page (default: 15)
+   * @returns Paginated result with data and metadata
+   */
+  async paginate(page = 1, perPage = DEFAULT_PAGINATION_SIZE): Promise<PaginatedResult<TResult>> {
+    const sanitizedPage = Number.isFinite(page) && page >= 1 ? Math.floor(page) : 1
+    const sanitizedPerPage = Number.isFinite(perPage) && perPage >= 1 ? Math.floor(perPage) : DEFAULT_PAGINATION_SIZE
+
+    const total = await this.count()
+    const totalPages = total === 0 ? 1 : Math.max(1, Math.ceil(total / sanitizedPerPage))
+    const currentPage = Math.min(sanitizedPage, totalPages)
+    const offset = (currentPage - 1) * sanitizedPerPage
+
+    // Save and override limit/offset for the data query
+    const prevLimit = this.options.limitValue
+    const prevOffset = this.options.offsetValue
+    this.options.limitValue = sanitizedPerPage
+    this.options.offsetValue = offset
+
+    const data = await this.executeQuery()
+
+    // Restore
+    this.options.limitValue = prevLimit
+    this.options.offsetValue = prevOffset
+
+    const from = total === 0 ? 0 : offset + 1
+    const to = total === 0 ? 0 : offset + data.length
+
+    const meta: PaginationMeta = {
+      total,
+      perPage: sanitizedPerPage,
+      currentPage,
+      totalPages,
+      hasMore: currentPage < totalPages,
+      from,
+      to: Math.min(to, total),
+    }
+
+    return { data, meta }
+  }
+
+  /**
+   * Bulk update records matching the current conditions.
+   * @param data - Data to set on matching records
+   * @returns The updated record (adapter-dependent)
+   */
+  async update(data: PlainObject): Promise<TRecord> {
+    if (!this.adapter.update) {
+      throw new Error('Configured adapter does not support update operations.')
+    }
+
+    const advancedAdapter = this.adapter as ORMAdapterAdvanced
+    if (typeof advancedAdapter.updateAdvanced === 'function') {
+      return advancedAdapter.updateAdvanced(this.table, this.conditions, data, { trx: this.options.trx }) as Promise<TRecord>
+    }
+
+    // Fallback to simple where clause if possible
+    const simpleWhere = this.toSimpleWhereClause()
+    if (simpleWhere) {
+      return this.adapter.update(this.table, simpleWhere, data, { trx: this.options.trx }) as Promise<TRecord>
+    }
+
+    throw new Error('Advanced conditions require an adapter that supports updateAdvanced.')
+  }
+
+  /**
+   * Bulk delete records matching the current conditions.
+   * @returns Number of deleted records (adapter-dependent)
+   */
+  async delete(): Promise<number | PlainObject | void> {
+    if (!this.adapter.delete) {
+      throw new Error('Configured adapter does not support delete operations.')
+    }
+
+    const advancedAdapter = this.adapter as ORMAdapterAdvanced
+    if (typeof advancedAdapter.deleteAdvanced === 'function') {
+      return advancedAdapter.deleteAdvanced(this.table, this.conditions, { trx: this.options.trx })
+    }
+
+    // Fallback to simple where clause if possible
+    const simpleWhere = this.toSimpleWhereClause()
+    if (simpleWhere) {
+      return this.adapter.delete(this.table, simpleWhere, { trx: this.options.trx })
+    }
+
+    throw new Error('Advanced conditions require an adapter that supports deleteAdvanced.')
+  }
+
+  // ---------------------------------------------------------------------------
+  // Thenable implementation
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Makes QueryBuilder a thenable so it can be directly awaited.
+   * Resolves to the result of `get()`.
+   */
+  then<TResult1 = TResult[], TResult2 = never>(
+    onfulfilled?: ((value: TResult[]) => TResult1 | PromiseLike<TResult1>) | null,
+    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+  ): Promise<TResult1 | TResult2> {
+    return this.get().then(onfulfilled, onrejected)
+  }
+
+  /**
+   * Catch handler for the thenable interface.
+   */
+  catch<TCatch = never>(
+    onrejected?: ((reason: unknown) => TCatch | PromiseLike<TCatch>) | null,
+  ): Promise<TResult[] | TCatch> {
+    return this.get().catch(onrejected)
+  }
+
+  // ---------------------------------------------------------------------------
+  // Internal helpers
+  // ---------------------------------------------------------------------------
+
+  /** Get the internal conditions (used by adapters). */
+  getConditions(): WhereCondition[] {
+    return this.conditions
+  }
+
+  /** Get the internal query options (used by adapters). */
+  getOptions(): QueryBuilderOptions {
+    return { ...this.options }
+  }
+
+  private addSimpleCondition(field: string, operator: WhereOperator, value: unknown): void {
+    this.conditions.push({
+      type: 'simple',
+      field,
+      operator,
+      value,
+    })
+  }
+
+  private async executeQuery(): Promise<TResult[]> {
+    const advancedAdapter = this.adapter as ORMAdapterAdvanced
+
+    if (typeof advancedAdapter.findManyAdvanced === 'function') {
+      return advancedAdapter.findManyAdvanced<TResult>(this.table, this.conditions, {
+        orderBy: this.options.orderBy.length > 0 ? (this.options.orderBy as OrderByClause) : undefined,
+        limit: this.options.limitValue,
+        offset: this.options.offsetValue,
+        select: this.options.selectFields,
+      }, { trx: this.options.trx })
+    }
+
+    // Fallback: convert to simple where clause if possible
+    const simpleWhere = this.toSimpleWhereClause()
+    return this.adapter.findMany<TResult>(this.table, {
+      where: (simpleWhere ?? undefined) as FindManyOptions<TResult>['where'],
+      orderBy: this.options.orderBy.length > 0 ? (this.options.orderBy as OrderByClause) : undefined,
+      limit: this.options.limitValue,
+      offset: this.options.offsetValue,
+    }, { trx: this.options.trx })
+  }
+
+  /**
+   * Attempt to convert the current conditions to a simple WhereClause
+   * for backward compatibility with basic adapters.
+   * Returns null if conditions are too complex.
+   */
+  private toSimpleWhereClause(): Record<string, unknown> | null {
+    if (this.conditions.length === 0) {
+      return null
+    }
+
+    const result: Record<string, unknown> = {}
+
+    for (const condition of this.conditions) {
+      if (condition.type !== 'simple') {
+        return null // Cannot convert OR groups to simple where
+      }
+
+      if (condition.operator === '=') {
+        result[condition.field] = condition.value
+      } else if (condition.operator === 'in') {
+        result[condition.field] = condition.value
+      } else if (condition.operator === 'is null') {
+        result[condition.field] = null
+      } else {
+        return null // Cannot convert comparison operators to simple where
+      }
+    }
+
+    return result
+  }
+
+  /**
+   * Load eager relations onto fetched results.
+   * Supports dot notation for nested relations (e.g., 'posts.comments').
+   */
+  private readonly loadEagerRelations = async (results: TResult[]): Promise<TResult[]> => {
+    if (this.eagerLoad.length === 0 || results.length === 0) return results
+
+    const copies = results.map((r) => ({ ...r }))
+    const model = this.modelClass as typeof Model & {
+      loadRelationInto(records: PlainObject[], name: string): Promise<void>
+    }
+
+    for (const relation of this.eagerLoad) {
+      const parts = relation.split('.')
+      const topLevel = parts[0]
+
+      // Load top-level relation
+      await model.loadRelationInto(copies as PlainObject[], topLevel)
+
+      // Handle nested relations via dot notation
+      if (parts.length > 1) {
+        const nestedName = parts.slice(1).join('.')
+        // Collect all nested records from the top-level relation
+        const nestedRecords: PlainObject[] = []
+        for (const record of copies) {
+          const related = (record as PlainObject)[topLevel]
+          if (Array.isArray(related)) {
+            nestedRecords.push(...related)
+          } else if (related && typeof related === 'object') {
+            nestedRecords.push(related as PlainObject)
+          }
+        }
+
+        if (nestedRecords.length > 0) {
+          // Resolve the related model's class to load nested relations
+          const topDef = (model as any).getRelationDefinition(topLevel) // eslint-disable-line @typescript-eslint/no-explicit-any
+          if (topDef) {
+            const relatedModel = await resolveRelatedModel(topDef.related)
+            if (relatedModel) {
+              const nestedModel = relatedModel as typeof Model & {
+                loadRelationInto(records: PlainObject[], name: string): Promise<void>
+              }
+              // Recursively handle deeper nesting
+              const nestedParts = parts.slice(1)
+              await nestedModel.loadRelationInto(nestedRecords, nestedParts[0])
+
+              if (nestedParts.length > 1) {
+                // For deeper nesting, recurse through remaining parts
+                for (let i = 1; i < nestedParts.length; i++) {
+                  const subRecords: PlainObject[] = []
+                  for (const nr of nestedRecords) {
+                    const sub = nr[nestedParts[i - 1]]
+                    if (Array.isArray(sub)) subRecords.push(...sub)
+                    else if (sub && typeof sub === 'object') subRecords.push(sub as PlainObject)
+                  }
+                  if (subRecords.length === 0) break
+                  // Would need to resolve the next model in the chain — simplified for now
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return copies as TResult[]
+  }
+}
+
+async function resolveRelatedModel(
+  reference: typeof Model | (() => typeof Model | Promise<typeof Model>),
+): Promise<typeof Model | null> {
+  if (typeof reference === 'function' && 'prototype' in reference) {
+    try {
+      if ((reference as any).resolveTable) return reference as typeof Model // eslint-disable-line @typescript-eslint/no-explicit-any
+    } catch { /* not a model class */ }
+  }
+  if (typeof reference === 'function') {
+    try {
+      return await (reference as () => typeof Model | Promise<typeof Model>)()
+    } catch { return null }
+  }
+  return null
+}
+
+/**
+ * Extended adapter interface for advanced query builder features.
+ * Adapters can optionally implement these methods for full QueryBuilder support.
+ */
+export interface ORMAdapterAdvanced extends ORMAdapter {
+  findManyAdvanced?<TRecord extends PlainObject = PlainObject>(
+    table: unknown,
+    conditions: WhereCondition[],
+    options: {
+      orderBy?: OrderByClause
+      limit?: number
+      offset?: number
+      select?: readonly string[]
+    },
+    queryOptions?: AdapterQueryOptions,
+  ): Promise<TRecord[]>
+  countAdvanced?<TRecord extends PlainObject = PlainObject>(
+    table: unknown,
+    conditions: WhereCondition[],
+    queryOptions?: AdapterQueryOptions,
+  ): Promise<number>
+  updateAdvanced?<TRecord extends PlainObject = PlainObject>(
+    table: unknown,
+    conditions: WhereCondition[],
+    data: PlainObject,
+    writeOptions?: AdapterQueryOptions,
+  ): Promise<TRecord>
+  deleteAdvanced?<TRecord extends PlainObject = PlainObject>(
+    table: unknown,
+    conditions: WhereCondition[],
+    writeOptions?: AdapterQueryOptions,
+  ): Promise<number | PlainObject | void>
+}

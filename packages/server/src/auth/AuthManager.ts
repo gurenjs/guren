@@ -1,6 +1,5 @@
 import type { Context } from 'hono'
-import type { Model } from '@guren/orm'
-import type { PlainObject } from '@guren/orm/Model'
+import type { Model, PlainObject } from '@guren/orm'
 import { getSessionFromContext } from '../http/middleware/session'
 import { RequestAuthContext } from './RequestAuthContext'
 import { ModelUserProvider, type ModelUserProviderOptions } from './providers/ModelUserProvider'

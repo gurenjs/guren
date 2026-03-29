@@ -3,6 +3,7 @@ import type { Page } from '@inertiajs/core'
 import React from 'react'
 import { renderToString } from 'react-dom/server'
 import { createPagesResolver as createPagesResolverFactory, type ResolveComponent } from './resolve'
+import type { PageManifest } from './contracts'
 
 type ServerSetupArgs = {
   App: React.ComponentType<any>
@@ -19,6 +20,7 @@ export interface RenderInertiaServerOptions {
   page: Page
   resolve?: ResolveComponent
   pages?: Record<string, () => Promise<unknown>>
+  pageManifest?: PageManifest
   resolveComponentPath?: (name: string) => string
   render?: typeof renderToString
   setup?: (args: ServerSetupArgs) => React.ReactElement
@@ -38,6 +40,7 @@ export async function renderInertiaServer(options: RenderInertiaServerOptions): 
     options.resolve ??
     createPagesResolverFactory({
       pages: options.pages,
+      pageManifest: options.pageManifest,
       resolveComponentPath: options.resolveComponentPath,
     })
 

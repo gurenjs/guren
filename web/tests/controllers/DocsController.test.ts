@@ -1,11 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createControllerContext, readInertiaResponse, type ControllerContext } from '@guren/testing'
-import type { Context } from '@guren/server'
+import {
+  createControllerContext,
+  createControllerModuleMock,
+  readInertiaResponse,
+  type ControllerContext,
+} from '../../../packages/testing/src/controller.js'
+import type { Context } from '@guren/core'
 import type { DocCategoryGroup, DocPage } from '../../app/Services/DocsService.js'
 import { DEFAULT_DOC_LOCALE } from '../../app/Services/DocsService.js'
-import { createControllerModuleMock } from '../../../packages/testing/dist/index.js'
 
-vi.mock('@guren/server', () => createControllerModuleMock())
+vi.mock('@guren/core', () => createControllerModuleMock())
 
 import DocsController from '../../app/Http/Controllers/DocsController.js'
 import { docsService } from '../../app/Services/DocsService.js'
@@ -19,7 +23,11 @@ function createDocsContext(url: string): Context {
   const { pathname } = new URL(url)
   const segments = pathname.split('/').filter(Boolean)
   const [, category, slug] = segments
-  ctx.req.param = (name: string) => {
+  ctx.req.param = (name?: string) => {
+    if (!name) {
+      return undefined
+    }
+
     if (name === 'category') {
       return category ?? undefined
     }

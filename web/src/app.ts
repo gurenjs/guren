@@ -1,7 +1,9 @@
-import { Application } from '@guren/server'
+import { createApp } from '@guren/core'
 import DatabaseProvider from '../app/Providers/DatabaseProvider.js'
+import registerWebRoutes from '../routes/web.js'
 
-const app = new Application({
+const app = createApp({
+  routes: registerWebRoutes,
   providers: [DatabaseProvider],
 })
 

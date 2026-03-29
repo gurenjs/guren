@@ -7,8 +7,17 @@ export type NewUserRecord = typeof users.$inferInsert
 
 export class User extends AuthenticatableModel<UserRecord> {
   static override table = users
+  static fillable = ['name', 'email', 'password']
+  static guarded = ['id', 'passwordHash', 'rememberToken']
   static override readonly recordType = {} as UserRecord
+  static override readonly createType = {} as Omit<NewUserRecord, 'passwordHash'> & {
+    password: string
+  }
   static override relationTypes: { posts: HasManyRecord<PostRecord> } = {
     posts: [],
   }
+}
+
+if (typeof User.hasMany === 'function') {
+  User.hasMany('posts', (() => import('./Post.js').then((module) => module.Post)) as any, 'authorId', 'id')
 }

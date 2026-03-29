@@ -75,3 +75,18 @@ If you find a bug or have an idea for an improvement, open an issue on GitHub. I
 ## Code of Conduct
 
 By participating in this project you agree to uphold our [Code of Conduct](./CODE_OF_CONDUCT.md). Please report unacceptable behaviour to the maintainers listed there.
+
+## Process & Governance
+
+For details on how we manage the project, see these documents:
+
+- **[RFC Process](./contributing/rfc-process.md)** -- when and how to propose significant changes
+- **[Release Cadence](./contributing/release-cadence.md)** -- release schedule, pre-release tags, and hotfix process
+- **[Issue Triage](./contributing/issue-triage.md)** -- priority levels, response SLAs, and stale policy
+- **[Security Policy](./SECURITY.md)** -- how to report vulnerabilities responsibly
+
+## Stability and Breaking Changes
+
+- For breaking changes, open an RFC under `rfcs/` before implementation (see [RFC Process](./contributing/rfc-process.md)).
+- Update release notes and migration documentation in the same PR.
+- Keep runtime compatibility updates aligned with `docs/en/guides/release-policy.md` and `docs/ja/guides/release-policy.md`.

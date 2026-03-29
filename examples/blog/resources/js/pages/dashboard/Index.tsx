@@ -1,82 +1,75 @@
 import { Link } from '@inertiajs/react'
-import { User, Mail, Settings } from 'lucide-react'
+import { User, Mail } from 'lucide-react'
 import Layout from '../../components/Layout.js'
+import { route } from '../../../../.guren/routes.gen'
 
-interface DashboardProps {
-  user?: {
-    id: number
-    name: string
-    email: string
-  } | null
+interface Props {
+  user?: { id: number; name: string; email: string } | null
 }
 
-export default function Dashboard({ user }: DashboardProps) {
+export default function Dashboard({ user }: Props) {
   return (
     <Layout
-      wrapperClassName="bg-zinc-50"
-      mainClassName="max-w-5xl mx-auto px-6 py-12"
+      mainClassName="max-w-4xl mx-auto px-6 pt-10 pb-16 sm:pt-12 sm:pb-24"
     >
       <div className="space-y-12">
         {/* Header Section */}
-        <section className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
-          <div className="space-y-2">
-            <h1 className="text-3xl font-bold tracking-tight text-zinc-900 sm:text-4xl">
-              Dashboard
-            </h1>
-            <p className="text-lg text-zinc-500">
-              Manage your account and view your activity.
-            </p>
-          </div>
+        <section>
+          <h1 className="text-4xl font-semibold tracking-tight text-stone-900 sm:text-5xl">
+            Dashboard
+          </h1>
+          <p className="mt-3 text-base text-stone-400">
+            Manage your account and view your activity.
+          </p>
         </section>
 
         {/* Content Section */}
         <section>
           {user ? (
-            <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-zinc-200">
-              <div className="border-b border-zinc-100 bg-zinc-50/50 px-6 py-4">
-                <h2 className="text-base font-semibold text-zinc-900">Account Information</h2>
-              </div>
-              <div className="p-6">
-                <div className="grid gap-6 sm:grid-cols-2">
+            <div className="rounded-lg bg-white shadow-sm">
+              <div className="p-8">
+                <h2 className="text-sm font-medium uppercase tracking-widest text-stone-400">
+                  Account Information
+                </h2>
+                <div className="mt-6 grid gap-8 sm:grid-cols-2">
                   <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-guren-50 text-guren-600">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-stone-100 text-stone-500">
                       <User className="h-5 w-5" />
                     </div>
                     <div>
-                      <p className="text-sm font-medium text-zinc-500">Full Name</p>
-                      <p className="mt-1 text-base font-medium text-zinc-900">{user.name}</p>
+                      <p className="text-xs text-stone-400">Full Name</p>
+                      <p className="mt-1 font-medium text-stone-900">{user.name}</p>
                     </div>
                   </div>
 
                   <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-guren-50 text-guren-600">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-stone-100 text-stone-500">
                       <Mail className="h-5 w-5" />
                     </div>
                     <div>
-                      <p className="text-sm font-medium text-zinc-500">Email Address</p>
-                      <p className="mt-1 text-base font-medium text-zinc-900">{user.email}</p>
+                      <p className="text-xs text-stone-400">Email Address</p>
+                      <p className="mt-1 font-medium text-stone-900">{user.email}</p>
                     </div>
                   </div>
                 </div>
 
-                <div className="mt-8 flex items-center pt-6 border-t border-zinc-100">
+                <div className="mt-8 border-t border-stone-100 pt-6">
                   <Link
-                    href="/profile"
-                    className="inline-flex items-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-medium text-zinc-900 shadow-sm ring-1 ring-zinc-300 transition hover:bg-zinc-50"
+                    href={route('profile.edit')}
+                    className="text-sm font-medium text-stone-600 underline-offset-4 transition-colors hover:text-stone-900 hover:underline"
                   >
-                    <Settings className="h-4 w-4 text-zinc-500" />
                     Edit Profile
                   </Link>
                 </div>
               </div>
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 py-12 text-center">
-              <p className="text-zinc-500">You are not signed in.</p>
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <p className="text-stone-500">You are not signed in.</p>
               <div className="mt-4">
                 <Link
-                  href="/login"
-                  className="inline-flex items-center justify-center rounded-full bg-guren-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-guren-500"
+                  href={route('login')}
+                  className="inline-flex items-center justify-center rounded-md bg-guren-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-guren-500"
                 >
                   Sign in
                 </Link>

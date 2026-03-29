@@ -1,0 +1,19 @@
+# Default owners for all files. Update to a narrower team/user mapping as maintainers grow.
+* @gurenjs
+
+# CI and release automation
+.github/workflows/ @gurenjs
+
+# Core framework packages
+packages/core/ @gurenjs
+packages/server/ @gurenjs
+packages/orm/ @gurenjs
+packages/cli/ @gurenjs
+packages/testing/ @gurenjs
+packages/inertia-client/ @gurenjs
+packages/create-app/ @gurenjs
+
+# Examples and docs
+examples/ @gurenjs
+web/ @gurenjs
+docs/ @gurenjs

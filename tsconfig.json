@@ -45,6 +45,12 @@
       "@guren/cli/vite": [
         "packages/cli/src/vite/index.ts"
       ],
+      "@guren/openapi": [
+        "packages/openapi/src/index.ts"
+      ],
+      "@guren/openapi/*": [
+        "packages/openapi/src/*"
+      ],
       "@guren/inertia-client": [
         "packages/inertia-client/src/index.ts"
       ],
@@ -72,6 +78,8 @@
   ],
   "exclude": [
     "packages/create-app/templates",
-    "examples/**/resources/js/**/*"
+    "examples/**/resources/js/**/*",
+    "examples/**/e2e/**/*",
+    "examples/**/playwright.config.ts"
   ]
 }

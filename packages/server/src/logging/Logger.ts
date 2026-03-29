@@ -1,0 +1,197 @@
+import type { LogChannel, LogLevel, LogContext, LogEntry } from './types'
+
+export interface LoggerOptions {
+  /**
+   * Keys whose values should be replaced with the replacement string.
+   * Matching is case-insensitive and recursive.
+   */
+  filterKeys?: string[]
+  /** Replacement string for filtered values. Default: '[FILTERED]' */
+  replacement?: string
+}
+
+const DEFAULT_FILTER_KEYS = [
+  'password',
+  'password_confirmation',
+  'token',
+  'secret',
+  'credit_card',
+  'creditCard',
+  'card_number',
+  'cardNumber',
+  'cvv',
+  'ssn',
+  'authorization',
+]
+
+/**
+ * Recursively replace values of sensitive keys in a log context object.
+ */
+export function filterSensitiveData(
+  data: Record<string, unknown>,
+  filterKeys: string[],
+  replacement = '[FILTERED]',
+): Record<string, unknown> {
+  if (filterKeys.length === 0) return data
+
+  const keySet = new Set(filterKeys.map((k) => k.toLowerCase()))
+  return filterObject(data, keySet, replacement)
+}
+
+function filterObject(
+  obj: Record<string, unknown>,
+  keySet: Set<string>,
+  replacement: string,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(obj)) {
+    if (keySet.has(key.toLowerCase())) {
+      result[key] = replacement
+    } else if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      result[key] = filterObject(value as Record<string, unknown>, keySet, replacement)
+    } else if (Array.isArray(value)) {
+      result[key] = value.map((item) =>
+        item !== null && typeof item === 'object' && !Array.isArray(item)
+          ? filterObject(item as Record<string, unknown>, keySet, replacement)
+          : item,
+      )
+    } else {
+      result[key] = value
+    }
+  }
+  return result
+}
+
+/**
+ * Logger instance for writing log entries.
+ */
+export class Logger {
+  private readonly channels: LogChannel[]
+  private readonly baseContext: LogContext
+  private readonly filterKeys: string[]
+  private readonly replacement: string
+
+  constructor(channels: LogChannel[], context: LogContext = {}, options: LoggerOptions = {}) {
+    this.channels = channels
+    this.baseContext = context
+    this.filterKeys = options.filterKeys ?? DEFAULT_FILTER_KEYS
+    this.replacement = options.replacement ?? '[FILTERED]'
+  }
+
+  /**
+   * Log at emergency level (system is unusable).
+   */
+  emergency(message: string, context: LogContext = {}): void {
+    this.log('emergency', message, context)
+  }
+
+  /**
+   * Log at alert level (action must be taken immediately).
+   */
+  alert(message: string, context: LogContext = {}): void {
+    this.log('alert', message, context)
+  }
+
+  /**
+   * Log at critical level (critical conditions).
+   */
+  critical(message: string, context: LogContext = {}): void {
+    this.log('critical', message, context)
+  }
+
+  /**
+   * Log at error level (error conditions).
+   */
+  error(message: string, context: LogContext = {}): void {
+    this.log('error', message, context)
+  }
+
+  /**
+   * Log at warning level (warning conditions).
+   */
+  warning(message: string, context: LogContext = {}): void {
+    this.log('warning', message, context)
+  }
+
+  /**
+   * Alias for warning().
+   */
+  warn(message: string, context: LogContext = {}): void {
+    this.warning(message, context)
+  }
+
+  /**
+   * Log at notice level (normal but significant conditions).
+   */
+  notice(message: string, context: LogContext = {}): void {
+    this.log('notice', message, context)
+  }
+
+  /**
+   * Log at info level (informational messages).
+   */
+  info(message: string, context: LogContext = {}): void {
+    this.log('info', message, context)
+  }
+
+  /**
+   * Log at debug level (debug-level messages).
+   */
+  debug(message: string, context: LogContext = {}): void {
+    this.log('debug', message, context)
+  }
+
+  /**
+   * Log a message at the specified level.
+   */
+  log(level: LogLevel, message: string, context: LogContext = {}): void {
+    const merged = { ...this.baseContext, ...context }
+    const filtered = this.filterKeys.length > 0
+      ? filterSensitiveData(merged, this.filterKeys, this.replacement)
+      : merged
+
+    const entry: LogEntry = {
+      level,
+      message,
+      context: filtered,
+      timestamp: new Date(),
+    }
+
+    for (const channel of this.channels) {
+      try {
+        channel.log(entry)
+      } catch (error) {
+        // Silently ignore logging errors to prevent cascading failures
+        console.error('Logging error:', error)
+      }
+    }
+  }
+
+  /**
+   * Create a new logger with additional context.
+   */
+  withContext(context: LogContext): Logger {
+    return new Logger(this.channels, { ...this.baseContext, ...context }, {
+      filterKeys: this.filterKeys,
+      replacement: this.replacement,
+    })
+  }
+
+  /**
+   * Create a child logger with additional context (alias for withContext).
+   */
+  child(context: LogContext): Logger {
+    return this.withContext(context)
+  }
+
+  /**
+   * Close all channels.
+   */
+  async close(): Promise<void> {
+    for (const channel of this.channels) {
+      if (channel.close) {
+        await channel.close()
+      }
+    }
+  }
+}

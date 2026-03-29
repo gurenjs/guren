@@ -1,177 +1,263 @@
-# Controller Guide
+# Controllers
 
-Controllers coordinate incoming HTTP requests, fetch data through models, and return responses with Inertia or JSON payloads. Every controller lives under `app/Http/Controllers/` and extends the framework’s `Controller` base class. This guide also shows how controllers connect to routes defined in `routes/web.ts`.
+Controllers are where your application logic lives. They receive HTTP requests, interact with models and services, and return responses. Think of them as the glue between what the user asks for and what your app delivers.
 
-## Routing Basics
-Routes are registered in `routes/web.ts` using a Laravel-like DSL. Import controllers and map them to HTTP verbs and paths:
+## Your First Controller
 
-```ts
-// routes/web.ts
-import PostsController from '@/app/Http/Controllers/PostsController'
-
-Route.get('/', [PostsController, 'index'])
-Route.get('/posts/:id', [PostsController, 'show'])
-Route.post('/posts', [PostsController, 'store'])
-```
-
-- Each route takes a path and a `[ControllerClass, 'methodName']` tuple.
-- `Route.group('/posts', () => { ... })` lets you share prefixes and middleware.
-- Register routes once at startup by importing `routes/web.ts` inside `src/main.ts` for its side effects.
-
-For more complex setups, you can create additional route files (e.g. `routes/api.ts`) and import them from `src/main.ts` as well.
-
-See the [Routing Guide](./routing.md) for a deeper dive into groups, middleware, and inline handlers.
-
-## Create a Controller
-Use the CLI to scaffold a controller file:
+Generate a controller with the CLI, then add a couple of methods:
 
 ```bash
 bunx guren make:controller PostsController
 ```
 
-The generator places `PostsController.ts` in `app/Http/Controllers/` with a minimal class definition. You can also create the file manually—just ensure it default-exports a class that extends `Controller`.
-
 ```ts
 // app/Http/Controllers/PostsController.ts
-import { Controller } from '@guren/server'
+import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
 import { Post } from '@/app/Models/Post'
+import { PostResource, type PostResourceData } from '@/app/Http/Resources/PostResource'
+import { ListPostsQuerySchema, PostIdParamSchema } from '@/app/Http/Validators/PostValidator'
+import { pages } from '@/.guren/pages.gen'
 
+type PostsIndexProps = PaginatedPageProps<PostResourceData>
+
+export default class PostsController extends Controller {
+  async index() {
+    const { page } = this.validateQuery(ListPostsQuerySchema)
+    const result = await Post.paginate({ page, perPage: 10, orderBy: ['id', 'desc'] })
+    const paginator = paginate(result, { path: this.request.path ?? '/posts' })
+
+    return this.inertia(pages.posts.Index, {
+      data: result.data.map((post) => new PostResource(post).toJSON()),
+      pagination: {
+        meta: paginator.meta(),
+        links: paginator.links(),
+      },
+    } satisfies PostsIndexProps)
+  }
+
+  async show() {
+    const { id } = this.validateParams(PostIdParamSchema)
+    const post = await Post.findOrFail(id)
+    return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() })
+  }
+}
+```
+
+Wire it up in `routes/web.ts`:
+
+```ts
+import { Router } from '@guren/core'
+import PostsController from '@/app/Http/Controllers/PostsController'
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/posts', [PostsController, 'index'])
+  router.get('/posts/:id', [PostsController, 'show'])
+}
+```
+
+That is all it takes. The `[Controller, 'method']` tuple tells Guren which class to instantiate and which method to call for each request.
+
+## Responding to Requests
+
+Controllers provide helpers for every common response type:
+
+```ts
 export default class PostsController extends Controller {
   async index() {
     const posts = await Post.all()
-    return this.inertia('posts/Index', { posts })
+    return this.json(posts) // 200 JSON
+  }
+
+  async show() {
+    const { id } = this.validateParams(PostIdParamSchema)
+    const post = await Post.findOrFail(id)
+    return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() }) // Inertia page
+  }
+
+  async store() {
+    const data = await this.validateBody(StorePostSchema)
+    const post = await Post.create(data)
+    return this.created({ post: new PostResource(post).toJSON() }) // 201 JSON
+  }
+
+  async update() {
+    await Post.update({ id: 1 }, { title: 'Updated' })
+    return this.redirect('/posts')       // 302 redirect
+  }
+
+  async destroy() {
+    await Post.delete({ id: 1 })
+    return this.noContent()              // 204 empty
   }
 }
 ```
 
-## Route Registration
-Controllers are connected to routes in `routes/web.ts` using the Laravel-style DSL:
+| Helper | Status | Description |
+|--------|--------|-------------|
+| `this.json(data)` | 200 | Return JSON |
+| `this.inertia(component, props)` | 200 | Render an Inertia page |
+| `this.created(data)` | 201 | JSON with 201 status |
+| `this.accepted(data)` | 202 | JSON with 202 status |
+| `this.redirect(url)` | 302 | HTTP redirect |
+| `this.noContent()` | 204 | Empty response |
+
+## Reading Input
+
+Controllers parse both JSON and form-encoded bodies automatically:
 
 ```ts
-import PostsController from '@/app/Http/Controllers/PostsController'
+async store() {
+  // Read a single field
+  const title = await this.input('title')
 
-Route.get('/posts', [PostsController, 'index'])
-Route.post('/posts', [PostsController, 'store'])
-```
+  // Query parameters (synchronous)
+  const page = this.query('page', '1')
 
-The `[Controller, 'method']` tuple tells Guren which class to instantiate and which method to call. Methods can be asynchronous.
+  // Canonical schema-first body parsing
+  const data = await this.validateBody(StorePostSchema)
 
-## Accessing the Request
-- `this.ctx` exposes the full Hono context, including headers and response helpers.
-- `this.request` returns the underlying `Request` object.
-- Use `await this.request.json()` or `await this.request.formData()` to read payloads.
-
-## Returning Responses
-
-| Helper | Purpose |
-|--------|---------|
-| `this.inertia(component, props, options?)` | Render an Inertia page using `resources/js/pages/<component>.tsx`. Returns a `Promise<Response>` so controller actions should be `async` and `return` the call directly. |
-| `this.json(data, init?)` | Return JSON. |
-| `this.redirect(url, status?)` | Redirect to another location (default status 302). |
-
-Return one of these helpers from each controller method. If you need custom headers, you can create a `Response` manually via `return this.ctx.newResponse(body, init)`.
-
-## Sharing Data Across Methods
-Controllers are instantiated per request, so you can set instance fields in one method and reuse them in helpers. For global data (e.g. user information), consider Inertia shared props or middleware.
-
-## Shared Inertia Props
-Use `setInertiaSharedProps()` to inject app-wide data (such as the authenticated user) into every Inertia response:
-
-```ts
-// config/inertia.ts
-import { setInertiaSharedProps, AUTH_CONTEXT_KEY, type AuthContext } from '@guren/server'
-
-setInertiaSharedProps(async (ctx) => {
-  const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
-  return { auth: { user: await auth?.user() } }
-})
-```
-
-Augment the exported `InertiaSharedProps` interface to keep props typed across controllers and React pages:
-
-```ts
-// types/inertia.d.ts
-import type { UserRecord } from '@/app/Models/User'
-
-declare module '@guren/server' {
-  interface InertiaSharedProps {
-    auth: { user: UserRecord | null }
+  // Check if a field exists
+  if (await this.has('email')) {
+    // ...
   }
 }
 ```
 
-When you need a component’s prop type, `InferInertiaProps<ReturnType<Controller['action']>>` includes both the action props and shared props.
+> [!TIP]
+> Body-reading methods (`input`, `has`, `validateBody`) are `async` because they parse the request body. The `query` method reads URL parameters and is synchronous.
 
-## Validation Tips
-Guren does not prescribe a validation library. Use your preferred solution (e.g. Zod) within controller methods:
+## Validation
+
+### Zod Schema Helpers (Recommended)
+
+The simplest approach is to use `validateBody`, `validateQuery`, and `validateParams` with Zod schemas directly in your controller. They accept any object with a `safeParse()` method (Zod, Valibot, etc.) and throw a `ValidationException` (422) on failure:
 
 ```ts
-const data = await this.request.json()
-const payload = PostPayload.parse(data)
-await Post.create(payload)
+import { Controller } from '@guren/core'
+import { z } from 'zod'
+import { Post } from '@/app/Models/Post'
+
+const PostIdParamSchema = z.object({ id: z.coerce.number().int().positive() })
+const StorePostSchema = z.object({ title: z.string().min(1), content: z.string().min(10) })
+const PageQuerySchema = z.object({ page: z.coerce.number().int().min(1).default(1) })
+
+export default class PostsController extends Controller {
+  async index() {
+    const { page } = this.validateQuery(PageQuerySchema) // throws 422
+    const result = await Post.paginate({ page, perPage: 10 })
+    const paginator = paginate(result, { path: this.request.path ?? '/posts' })
+    return this.inertia(pages.posts.Index, {
+      data: result.data.map((post) => new PostResource(post).toJSON()),
+      pagination: {
+        meta: paginator.meta(),
+        links: paginator.links(),
+      },
+    })
+  }
+
+  async show() {
+    const { id } = this.validateParams(PostIdParamSchema) // throws 422
+    const post = await Post.findOrFail(id) // throws 404
+    return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() })
+  }
+
+  async store() {
+    const data = await this.validateBody(StorePostSchema) // throws 422
+    const user = await this.auth.userOrFail() // throws 401
+    const post = await Post.create({ ...data, authorId: user.id })
+    return this.redirect('/posts')
+  }
+}
 ```
 
-Handle validation failures by returning `this.inertia()` with errors or `this.json()` with appropriate status codes.
+| Helper | Input Source | Async |
+|--------|-------------|-------|
+| `this.validateBody(schema)` | Request body (JSON / form) | Yes |
+| `this.validateQuery(schema)` | URL query parameters | No |
+| `this.validateParams(schema)` | Route parameters (`:id`, etc.) | No |
 
-## Testing Controllers
-- Invoke controller methods directly in unit tests by constructing the dependencies you need and calling `setContext(ctx)` before the method.
-- For end-to-end coverage, interact with the running application via `fetch` or your favourite HTTP client and assert on the responses.
+All three throw `ValidationException` (HTTP 422) on failure, which the `ExceptionHandler` renders automatically.
 
-Controllers stay thin when they delegate business logic to models or services. Treat them as orchestration layers that glue together the rest of your application.
+## Dependency Injection
 
-## Model helpers vs Drizzle RQB (side-by-side)
-
-Both access patterns are supported. Use model helpers for quick CRUD; drop to Drizzle’s relational query builder when you need joins, aggregates, or driver-specific features.
+When your controller needs services (caching, events, mail), declare them with `static inject` and Guren resolves them from the container:
 
 ```ts
-// Model-first: concise and consistent
-import { Controller } from '@guren/server'
+import { Controller } from '@guren/core'
+import type { CacheManager, EventManager } from '@guren/core'
 import { Post } from '@/app/Models/Post'
 
 export default class PostsController extends Controller {
+  static inject = ['cache', 'events'] as const
+
+  constructor(
+    private cache: CacheManager,
+    private events: EventManager,
+  ) {
+    super()
+  }
+
   async index() {
-    const posts = await Post.orderBy(['publishedAt', 'desc'], { published: true })
-    return this.inertia('posts/Index', { posts })
+    const cached = await this.cache.get('posts:all')
+    if (cached) return this.json(cached)
+
+    const posts = await Post.all()
+    await this.cache.put('posts:all', posts, 300)
+    return this.json(posts)
   }
 }
 ```
 
-```ts
-// Drizzle RQB: full control, still type-safe
-import { Controller } from '@guren/server'
-import { getDatabase } from '@/config/database'
-import { posts, users } from '@/db/schema'
-import { eq, desc } from 'drizzle-orm'
+The `as const` assertion on `inject` ensures type safety. Each string maps to a key registered in the service container.
 
-export default class PostsController extends Controller {
-  async index() {
-    const db = await getDatabase()
-    const postsWithAuthor = await db
-      .select({
-        id: posts.id,
-        title: posts.title,
-        author: users.name,
-      })
-      .from(posts)
-      .leftJoin(users, eq(posts.authorId, users.id))
-      .where(eq(posts.published, true))
-      .orderBy(desc(posts.publishedAt))
+## Resource Controllers
 
-    return this.inertia('posts/Index', { posts: postsWithAuthor })
-  }
-}
-```
-
-### SSR Options
-
-When the SSR bundle is available, Guren renders pages on the server automatically. You can disable or customize this per-response by passing the `ssr` option:
+Instead of defining seven routes by hand, use `router.resource()`:
 
 ```ts
-return this.inertia('posts/Index', props, {
-  ssr: {
-    enabled: false, // force client-side rendering for this response
-  },
-})
+router.resource('/posts', PostsController)
 ```
 
-Advanced use cases can provide a custom renderer via `ssr.render`, which receives the page payload and may delegate to utilities like `renderInertiaServer()`.
+This generates:
+
+| Method | Path | Controller Method |
+|--------|------|-------------------|
+| GET | `/posts` | `index` |
+| GET | `/posts/create` | `create` |
+| POST | `/posts` | `store` |
+| GET | `/posts/:id` | `show` |
+| GET | `/posts/:id/edit` | `edit` |
+| PUT | `/posts/:id` | `update` |
+| DELETE | `/posts/:id` | `destroy` |
+
+Only methods that exist on your controller are registered. Limit the routes with `only` or `except`:
+
+```ts
+router.resource('/posts', PostsController, { only: ['index', 'show'] })
+```
+
+## Testing Controllers
+
+`TestApp` boots a lightweight instance of your app for expressive HTTP testing:
+
+```ts
+import { TestApp } from '@guren/testing'
+
+const app = await TestApp.create()
+
+// Basic request assertions
+await app.get('/posts').assertOk()
+await app.post('/posts', { title: 'New' }).assertStatus(201)
+
+// Authenticated requests
+await app.actingAs(user).get('/dashboard').assertOk()
+
+// JSON structure assertions
+await app.get('/api/posts')
+  .assertOk()
+  .assertJsonCount(5, 'data')
+  .assertJsonPath('data.0.title', 'Hello')
+```
+
+> [!TIP]
+> Controllers stay thin when they delegate business logic to models or services. Treat them as an orchestration layer that glues your app together.

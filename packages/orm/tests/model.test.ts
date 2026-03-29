@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import {
   Model,
+  defineModel,
   type FindManyOptions,
   type OrderByClause,
   type ORMAdapter,
@@ -11,9 +12,14 @@ import {
 type UserRecord = { id: number; name: string; team?: string }
 type PostRecord = { id: number; title: string; authorId: number }
 
-function createAdapter(records: UserRecord[] = []): { adapter: ORMAdapter; snapshot: () => UserRecord[] } {
+function createAdapter(records: UserRecord[] = []): {
+  adapter: ORMAdapter
+  snapshot: () => UserRecord[]
+  transactionCalls: () => number
+} {
   let nextId = records.length + 1
   const store = [...records]
+  let txCalls = 0
 
   function matches(where?: WhereClause<UserRecord>) {
     if (!where) {
@@ -115,11 +121,16 @@ function createAdapter(records: UserRecord[] = []): { adapter: ORMAdapter; snaps
       store.splice(index, 1)
       return 1
     },
+    async transaction<TResult>(callback: (trx: unknown) => Promise<TResult>): Promise<TResult> {
+      txCalls += 1
+      return callback(adapter)
+    },
   }
 
   return {
     adapter,
     snapshot: () => store.map((record) => ({ ...record })),
+    transactionCalls: () => txCalls,
   }
 }
 
@@ -201,6 +212,39 @@ function createRelationalAdapter(data: { users?: UserRecord[]; posts?: PostRecor
 }
 
 describe('Model', () => {
+  it('supports defineModel() for table-backed models', async () => {
+    const usersTable = {
+      $inferSelect: {} as UserRecord,
+      $inferInsert: {} as Omit<UserRecord, 'id'>,
+    }
+
+    class User extends defineModel(usersTable) {}
+
+    const adapter: ORMAdapter = {
+      async findMany<TRecord extends PlainObject = PlainObject>(table: unknown): Promise<TRecord[]> {
+        expect(table).toBe(usersTable)
+        return [{ id: 1, name: 'Daiki', team: 'core' }] as unknown as TRecord[]
+      },
+      async findUnique<TRecord extends PlainObject = PlainObject>(table: unknown): Promise<TRecord | null> {
+        expect(table).toBe(usersTable)
+        return { id: 1, name: 'Daiki', team: 'core' } as unknown as TRecord
+      },
+      async create<TRecord extends PlainObject = PlainObject>(table: unknown, data: PlainObject): Promise<TRecord> {
+        expect(table).toBe(usersTable)
+        return { id: 2, ...data } as unknown as TRecord
+      },
+    }
+
+    User.useAdapter(adapter)
+
+    expect(await User.find(1)).toEqual({ id: 1, name: 'Daiki', team: 'core' })
+    expect(await User.create({ name: 'Asuka', team: 'infra' })).toEqual({
+      id: 2,
+      name: 'Asuka',
+      team: 'infra',
+    })
+  })
+
   it('delegates CRUD helpers to the configured adapter', async () => {
     class User extends Model<UserRecord> {
       static table = 'users'
@@ -321,6 +365,39 @@ describe('Model', () => {
     expect(postsWithAuthor[0].author?.name).toBe('Shinji')
   })
 
+  it('creates distinct empty arrays for missing hasMany relations', async () => {
+    class User extends Model<UserRecord> {
+      static table = 'users'
+    }
+
+    class Post extends Model<PostRecord> {
+      static table = 'posts'
+    }
+
+    User.hasMany('posts', Post, 'authorId', 'id')
+
+    const adapter = createRelationalAdapter({
+      users: [
+        { id: 1, name: 'Misato', team: 'operations' },
+        { id: 2, name: 'Shinji', team: 'pilots' },
+      ],
+      posts: [],
+    })
+
+    User.useAdapter(adapter)
+    Post.useAdapter(adapter)
+
+    const usersWithPosts = (await User.with('posts')) as Array<UserRecord & { posts: PostRecord[] }>
+    const [first, second] = usersWithPosts
+
+    expect(first.posts).toEqual([])
+    expect(second.posts).toEqual([])
+    expect(first.posts).not.toBe(second.posts)
+
+    first.posts.push({ id: 99, title: 'Scratch', authorId: 1 })
+    expect(second.posts).toEqual([])
+  })
+
   it('supports first() and findOrFail()', async () => {
     class User extends Model<UserRecord> {
       static table = 'users'
@@ -340,6 +417,70 @@ describe('Model', () => {
     expect(shinji?.name).toBe('Shinji')
 
     await expect(User.findOrFail(999)).rejects.toThrow('User not found for id=999')
+  })
+
+  it('supports findWith() with eager-loaded relations', async () => {
+    class User extends Model<UserRecord> {
+      static table = 'users'
+    }
+
+    class Post extends Model<PostRecord> {
+      static table = 'posts'
+    }
+
+    Post.belongsTo('author', User, 'authorId', 'id')
+
+    const adapter = createRelationalAdapter({
+      users: [
+        { id: 1, name: 'Misato', team: 'operations' },
+        { id: 2, name: 'Shinji', team: 'pilots' },
+      ],
+      posts: [
+        { id: 10, title: 'Logistics update', authorId: 1 },
+        { id: 11, title: 'Sync ratios', authorId: 2 },
+      ],
+    })
+
+    User.useAdapter(adapter)
+    Post.useAdapter(adapter)
+
+    const post = await Post.findWith(10, 'author')
+    expect(post).not.toBeNull()
+    expect(post!.id).toBe(10)
+    expect((post as any).author?.name).toBe('Misato')
+
+    const missing = await Post.findWith(999, 'author')
+    expect(missing).toBeNull()
+  })
+
+  it('supports findWithOrFail() with eager-loaded relations', async () => {
+    class User extends Model<UserRecord> {
+      static table = 'users'
+    }
+
+    class Post extends Model<PostRecord> {
+      static table = 'posts'
+    }
+
+    Post.belongsTo('author', User, 'authorId', 'id')
+
+    const adapter = createRelationalAdapter({
+      users: [
+        { id: 1, name: 'Misato', team: 'operations' },
+      ],
+      posts: [
+        { id: 10, title: 'Logistics update', authorId: 1 },
+      ],
+    })
+
+    User.useAdapter(adapter)
+    Post.useAdapter(adapter)
+
+    const post = await Post.findWithOrFail(10, 'author')
+    expect(post.id).toBe(10)
+    expect((post as any).author?.name).toBe('Misato')
+
+    await expect(Post.findWithOrFail(999, 'author')).rejects.toThrow('Post not found for id=999')
   })
 
   it('builds a query starting from the model when provided a database', async () => {
@@ -364,5 +505,316 @@ describe('Model', () => {
     const result = builder.where({ id: 1 })
 
     expect(result).toEqual({ table: 'users', clause: { id: 1 } })
+  })
+
+  it('tracks typed select fields on the query builder', async () => {
+    class User extends Model<UserRecord> {
+      static table = 'users'
+    }
+
+    const advancedAdapter: ORMAdapter = {
+      async findMany<TRecord extends PlainObject = PlainObject>(): Promise<TRecord[]> {
+        return [] as TRecord[]
+      },
+      async findUnique<TRecord extends PlainObject = PlainObject>(): Promise<TRecord | null> {
+        return null
+      },
+      async create<TRecord extends PlainObject = PlainObject>(): Promise<TRecord> {
+        return {} as TRecord
+      },
+    }
+
+    User.useAdapter(advancedAdapter)
+
+    const builder = User.select('id', 'name')
+
+    expect(builder.getOptions().selectFields).toEqual(['id', 'name'])
+  })
+
+  it('runs Model.transaction() via adapter and forwards trx to writes', async () => {
+    class User extends Model<UserRecord> {
+      static table = 'users'
+    }
+
+    const { adapter, transactionCalls } = createAdapter([])
+    User.useAdapter(adapter)
+
+    const created = await User.transaction(async (trx) => {
+      const first = await User.create({ name: 'Ayanami', team: 'pilots' }, { trx })
+      const second = await User.update({ id: first.id }, { team: 'command' }, { trx })
+      return second
+    })
+
+    expect(created.team).toBe('command')
+    expect(transactionCalls()).toBe(1)
+  })
+
+  it('provides transaction-bound scope helpers via Model.transaction callback', async () => {
+    class User extends Model<UserRecord> {
+      static table = 'users'
+    }
+
+    const { adapter, transactionCalls } = createAdapter([{ id: 1, name: 'Asuka', team: 'pilots' }])
+    User.useAdapter(adapter)
+
+    const updated = await User.transaction(async (_trx, txUser) => {
+      const created = await txUser.create({ name: 'Misato', team: 'ops' })
+      expect(created.id).toBeGreaterThan(1)
+      return txUser.update({ id: 1 }, { team: 'command' })
+    })
+
+    expect(updated.team).toBe('command')
+    expect(transactionCalls()).toBe(1)
+  })
+})
+
+function createPaginationAdapter(records: UserRecord[] = []): ORMAdapter {
+  const store = [...records]
+
+  function matches(where?: WhereClause<UserRecord>) {
+    if (!where) {
+      return () => true
+    }
+
+    return (record: UserRecord) =>
+      Object.entries(where as PlainObject).every(([key, value]) => (record as PlainObject)[key] === value)
+  }
+
+  function compare(orderBy: OrderByClause<UserRecord>) {
+    return (left: UserRecord, right: UserRecord) => {
+      for (const { column, direction } of orderBy) {
+        const a = (left as PlainObject)[column]
+        const b = (right as PlainObject)[column]
+
+        if (a === b) {
+          continue
+        }
+
+        if (a == null) {
+          return direction === 'asc' ? -1 : 1
+        }
+
+        if (b == null) {
+          return direction === 'asc' ? 1 : -1
+        }
+
+        if (a > b) {
+          return direction === 'asc' ? 1 : -1
+        }
+
+        if (a < b) {
+          return direction === 'asc' ? -1 : 1
+        }
+      }
+
+      return 0
+    }
+  }
+
+  return {
+    async findMany<TRecord extends PlainObject = PlainObject>(
+      table: unknown,
+      options?: FindManyOptions<TRecord>,
+    ): Promise<TRecord[]> {
+      const { where, orderBy, limit, offset } = options ?? {}
+      let results = store.filter(matches(where as WhereClause<UserRecord> | undefined))
+
+      if (orderBy && orderBy.length > 0) {
+        const typedOrder = orderBy as unknown as OrderByClause<UserRecord>
+        results = [...results].sort(compare(typedOrder))
+      }
+
+      if (typeof offset === 'number' && Number.isFinite(offset)) {
+        results = results.slice(offset)
+      }
+
+      if (typeof limit === 'number' && Number.isFinite(limit)) {
+        results = results.slice(0, limit)
+      }
+
+      return results.map((record) => ({ ...record })) as unknown as TRecord[]
+    },
+
+    async findUnique<TRecord extends PlainObject = PlainObject>(
+      table: unknown,
+      where: WhereClause<TRecord>,
+    ): Promise<TRecord | null> {
+      const record = store.find(matches(where as WhereClause<UserRecord>))
+      return (record ? { ...record } : null) as unknown as TRecord | null
+    },
+
+    async create<TRecord extends PlainObject = PlainObject>(
+      table: unknown,
+      data: PlainObject,
+    ): Promise<TRecord> {
+      throw new Error('Not implemented')
+    },
+
+    async count<TRecord extends PlainObject = PlainObject>(
+      table: unknown,
+      where?: WhereClause<TRecord>,
+    ): Promise<number> {
+      const results = store.filter(matches(where as WhereClause<UserRecord> | undefined))
+      return results.length
+    },
+  }
+}
+
+describe('Model.paginate', () => {
+  it('returns paginated results with metadata', async () => {
+    class User extends Model<UserRecord> {
+      static table = 'users'
+    }
+
+    const records = Array.from({ length: 25 }, (_, i) => ({
+      id: i + 1,
+      name: `User ${i + 1}`,
+      team: i % 2 === 0 ? 'alpha' : 'beta',
+    }))
+
+    User.useAdapter(createPaginationAdapter(records))
+
+    const result = await User.paginate({ page: 1, perPage: 10 })
+
+    expect(result.data).toHaveLength(10)
+    expect(result.meta.total).toBe(25)
+    expect(result.meta.perPage).toBe(10)
+    expect(result.meta.currentPage).toBe(1)
+    expect(result.meta.totalPages).toBe(3)
+    expect(result.meta.hasMore).toBe(true)
+    expect(result.meta.from).toBe(1)
+    expect(result.meta.to).toBe(10)
+  })
+
+  it('returns correct metadata for last page', async () => {
+    class User extends Model<UserRecord> {
+      static table = 'users'
+    }
+
+    const records = Array.from({ length: 25 }, (_, i) => ({
+      id: i + 1,
+      name: `User ${i + 1}`,
+    }))
+
+    User.useAdapter(createPaginationAdapter(records))
+
+    const result = await User.paginate({ page: 3, perPage: 10 })
+
+    expect(result.data).toHaveLength(5)
+    expect(result.meta.currentPage).toBe(3)
+    expect(result.meta.hasMore).toBe(false)
+    expect(result.meta.from).toBe(21)
+    expect(result.meta.to).toBe(25)
+  })
+
+  it('handles empty results', async () => {
+    class User extends Model<UserRecord> {
+      static table = 'users'
+    }
+
+    User.useAdapter(createPaginationAdapter([]))
+
+    const result = await User.paginate()
+
+    expect(result.data).toHaveLength(0)
+    expect(result.meta.total).toBe(0)
+    expect(result.meta.currentPage).toBe(1)
+    expect(result.meta.totalPages).toBe(1)
+    expect(result.meta.hasMore).toBe(false)
+    expect(result.meta.from).toBe(0)
+    expect(result.meta.to).toBe(0)
+  })
+
+  it('clamps page to totalPages when requested page exceeds total', async () => {
+    class User extends Model<UserRecord> {
+      static table = 'users'
+    }
+
+    const records = Array.from({ length: 5 }, (_, i) => ({
+      id: i + 1,
+      name: `User ${i + 1}`,
+    }))
+
+    User.useAdapter(createPaginationAdapter(records))
+
+    const result = await User.paginate({ page: 100, perPage: 10 })
+
+    expect(result.meta.currentPage).toBe(1)
+    expect(result.data).toHaveLength(5)
+  })
+
+  it('sanitizes invalid page values', async () => {
+    class User extends Model<UserRecord> {
+      static table = 'users'
+    }
+
+    const records = [{ id: 1, name: 'User 1' }]
+    User.useAdapter(createPaginationAdapter(records))
+
+    const negativePageResult = await User.paginate({ page: -1 })
+    expect(negativePageResult.meta.currentPage).toBe(1)
+
+    const zeroPageResult = await User.paginate({ page: 0 })
+    expect(zeroPageResult.meta.currentPage).toBe(1)
+
+    const nanPageResult = await User.paginate({ page: NaN })
+    expect(nanPageResult.meta.currentPage).toBe(1)
+  })
+
+  it('sanitizes invalid perPage values', async () => {
+    class User extends Model<UserRecord> {
+      static table = 'users'
+    }
+
+    const records = Array.from({ length: 50 }, (_, i) => ({
+      id: i + 1,
+      name: `User ${i + 1}`,
+    }))
+
+    User.useAdapter(createPaginationAdapter(records))
+
+    const negativeResult = await User.paginate({ perPage: -5 })
+    expect(negativeResult.meta.perPage).toBe(15) // DEFAULT_PAGINATION_SIZE
+
+    const zeroResult = await User.paginate({ perPage: 0 })
+    expect(zeroResult.meta.perPage).toBe(15)
+  })
+
+  it('filters results with where clause', async () => {
+    class User extends Model<UserRecord> {
+      static table = 'users'
+    }
+
+    const records = Array.from({ length: 20 }, (_, i) => ({
+      id: i + 1,
+      name: `User ${i + 1}`,
+      team: i % 2 === 0 ? 'alpha' : 'beta',
+    }))
+
+    User.useAdapter(createPaginationAdapter(records))
+
+    const result = await User.paginate({ where: { team: 'alpha' }, perPage: 5 })
+
+    expect(result.meta.total).toBe(10)
+    expect(result.data).toHaveLength(5)
+    expect(result.data.every((u) => u.team === 'alpha')).toBe(true)
+  })
+
+  it('orders results with orderBy option', async () => {
+    class User extends Model<UserRecord> {
+      static table = 'users'
+    }
+
+    const records = [
+      { id: 1, name: 'Charlie' },
+      { id: 2, name: 'Alice' },
+      { id: 3, name: 'Bob' },
+    ]
+
+    User.useAdapter(createPaginationAdapter(records))
+
+    const result = await User.paginate({ orderBy: 'name' })
+
+    expect(result.data.map((u) => u.name)).toEqual(['Alice', 'Bob', 'Charlie'])
   })
 })

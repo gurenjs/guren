@@ -1,8 +1,8 @@
-import { pgTable, serial, text, timestamp } from '@guren/orm/drizzle'
+import { sqliteTable, integer, text } from 'drizzle-orm/sqlite-core'
 
-export const users = pgTable('users', {
-  id: serial('id').primaryKey(),
+export const users = sqliteTable('users', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
   name: text('name').notNull(),
   email: text('email').notNull(),
-  createdAt: timestamp('created_at', { withTimezone: false }).defaultNow().notNull(),
+  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
 })
