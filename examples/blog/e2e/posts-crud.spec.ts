@@ -7,7 +7,7 @@ test.describe('Posts — public', () => {
 
     await expect(page.getByRole('heading', { name: 'Posts' })).toBeVisible()
     // Verify at least one post article is rendered (posts may be paginated)
-    await expect(page.locator('article').first()).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('article').first()).toBeVisible()
   })
 
   test('viewing a single post shows its content', async ({ page }) => {
@@ -15,7 +15,7 @@ test.describe('Posts — public', () => {
     await page.goto('/posts/1')
     await page.waitForLoadState('networkidle')
 
-    await expect(page.getByRole('heading', { name: 'Introducing Guren' })).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByRole('heading', { name: 'Introducing Guren' })).toBeVisible()
     await expect(page.getByText('A Laravel-inspired TypeScript framework powered by Bun.')).toBeVisible()
   })
 })
@@ -30,7 +30,7 @@ test.describe('Posts — authenticated CRUD', () => {
     await page.waitForLoadState('networkidle')
 
     await page.getByRole('link', { name: 'New post' }).click()
-    await page.waitForURL('/posts/new', { timeout: 10_000 })
+    await page.waitForURL('/posts/new')
     await expect(page.getByRole('heading', { name: 'New Post' })).toBeVisible()
 
     await page.getByLabel('Title').fill(uniqueTitle)
@@ -40,7 +40,7 @@ test.describe('Posts — authenticated CRUD', () => {
 
     // Controller redirects to /posts/:id or /posts after creation
     await page.waitForURL(/\/posts/)
-    await expect(page.getByText(uniqueTitle)).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText(uniqueTitle)).toBeVisible()
   })
 
   test('edit an existing post', async ({ page }) => {
@@ -59,7 +59,7 @@ test.describe('Posts — authenticated CRUD', () => {
     await page.getByRole('button', { name: 'Update Post' }).click()
 
     // Controller redirects to /posts/:id after update
-    await page.waitForURL(/\/posts\/\d+/, { timeout: 10_000 })
+    await page.waitForURL(/\/posts\/\d+/)
     await expect(page.getByText('Introducing Guren (Updated)')).toBeVisible()
 
     // Restore the original title for idempotency
@@ -69,6 +69,6 @@ test.describe('Posts — authenticated CRUD', () => {
     await restoreInput.clear()
     await restoreInput.fill('Introducing Guren')
     await page.getByRole('button', { name: 'Update Post' }).click()
-    await page.waitForURL(/\/posts\/\d+/, { timeout: 10_000 })
+    await page.waitForURL(/\/posts\/\d+/)
   })
 })

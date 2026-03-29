@@ -39,7 +39,7 @@ test.describe('Authentication', () => {
     // Log out — Inertia <Link method="post" as="button"> fires an XHR.
     // LoginController.destroy redirects to '/'.
     await page.getByRole('button', { name: 'Log out' }).click()
-    await page.waitForURL('/', { timeout: 10_000 })
+    await page.waitForURL('/')
 
     await expect(page).toHaveURL('/')
   })
@@ -63,7 +63,7 @@ test.describe('Authentication', () => {
 
     // Should stay on login page and show an error
     await expect(page).toHaveURL(/\/login/)
-    await expect(page.getByText('Invalid credentials')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText('Invalid credentials')).toBeVisible()
   })
 
   test('protected routes redirect unauthenticated users', async ({ page }) => {
