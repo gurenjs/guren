@@ -1,5 +1,11 @@
 # @guren/orm
 
+## 1.0.0-rc.10
+
+### Patch Changes
+
+- Move drizzle-orm from peerDependencies to dependencies so it resolves transitively when create-guren-app is invoked via bunx.
+
 ## 1.0.0-rc.9
 
 ### Patch Changes
