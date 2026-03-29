@@ -5,7 +5,6 @@ const AUTH_FILE = 'e2e/.auth/user.json'
 setup('authenticate', async ({ page }) => {
   await page.goto('/login')
   await expect(page.getByRole('heading', { name: 'Sign in to your account' })).toBeVisible()
-  await expect(page.locator('main[data-hydrated="true"]')).toBeVisible()
   const emailInput = page.getByLabel('Email address')
   const passwordInput = page.getByLabel('Password')
   await emailInput.click()

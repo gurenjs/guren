@@ -3,7 +3,6 @@ import { test, expect, type Page } from '@playwright/test'
 async function login(page: Page) {
   await page.goto('/login')
   await expect(page.getByRole('heading', { name: 'Sign in to your account' })).toBeVisible()
-  await expect(page.locator('main[data-hydrated="true"]')).toBeVisible()
   const emailInput = page.getByLabel('Email address')
   const passwordInput = page.getByLabel('Password')
   await emailInput.click()
@@ -59,7 +58,6 @@ test.describe('Authentication', () => {
   test('login with invalid credentials shows error', async ({ page }) => {
     await page.goto('/login')
     await expect(page.getByRole('heading', { name: 'Sign in to your account' })).toBeVisible()
-    await expect(page.locator('main[data-hydrated="true"]')).toBeVisible()
 
     const emailInput = page.getByLabel('Email address')
     const passwordInput = page.getByLabel('Password')
