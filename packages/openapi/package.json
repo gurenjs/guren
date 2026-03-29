@@ -1,6 +1,6 @@
 {
   "name": "@guren/openapi",
-  "version": "0.2.0-alpha.7",
+  "version": "1.0.0-rc.9",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -33,7 +33,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@guren/core": "^0.2.0-alpha.7"
+    "@guren/core": "^1.0.0-rc.8"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",

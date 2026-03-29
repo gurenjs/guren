@@ -1,6 +1,6 @@
 {
   "name": "@guren/core",
-  "version": "0.2.0-alpha.7",
+  "version": "1.0.0-rc.9",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -33,7 +33,6 @@
       "types": "./dist/vite.d.ts",
       "default": "./dist/vite.js"
     },
-
     "./lambda": {
       "types": "./dist/lambda.d.ts",
       "default": "./dist/lambda.js"
@@ -49,9 +48,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@guren/cli": "^0.2.0-alpha.7",
-    "@guren/orm": "^0.2.0-alpha.7",
-    "@guren/server": "^0.2.0-alpha.7"
+    "@guren/cli": "^1.0.0-rc.9",
+    "@guren/orm": "^1.0.0-rc.9",
+    "@guren/server": "^1.0.0-rc.9"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",

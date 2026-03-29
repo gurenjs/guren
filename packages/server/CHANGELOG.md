@@ -1,5 +1,40 @@
 # @guren/server
 
+## 1.0.0-rc.9
+
+### Patch Changes
+
+- Align all packages to rc.9.
+- Updated dependencies
+  - @guren/inertia-client@1.0.0-rc.9
+
+## 1.0.0-rc.8
+
+### Major Changes
+
+- v1.0 Release Candidate
+
+  New subsystems: OAuth, MySQL adapter, typed broadcasting, OpenAPI generation,
+  production error pages, request ID/logging middleware, plugin test harness,
+  API-only and worker starter kits.
+
+  DX: Golden path standardization, doctor autofixes, CLI consistency,
+  upgrade productization, security defaults.
+
+  Quality: Playwright E2E, CI matrix, nightly canary, benchmarks,
+  smoke tests for all starter kits.
+
+  Docs: Task-completion guides (en/ja), plugin authoring guide,
+  deployment recipes (Docker, Fly.io, VPS, serverless).
+
+  Governance: API stability tiers, deprecation policy, SemVer guidance,
+  RFC process, release cadence, issue triage SLAs.
+
+### Patch Changes
+
+- Updated dependencies
+  - @guren/inertia-client@1.0.0-rc.8
+
 ## 0.2.0-alpha.7
 
 ### Patch Changes
