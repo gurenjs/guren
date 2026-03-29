@@ -117,8 +117,10 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
-    # CI sets NODE_ENV=production (required for Vite asset serving) but runs
-    # over HTTP — the blog app disables Secure cookies when CI env is set.
+    # NODE_ENV=production is required for Vite asset serving.
+    # VITE_DEV_SERVER_URL must be removed from .env (see setup step) —
+    # otherwise autoConfigureInertiaAssets falls back to dev mode.
+    # The blog app also disables Secure cookies when CI is set (HTTP, not HTTPS).
     services:
       postgres:
         image: postgres:15-alpine
@@ -162,6 +164,7 @@ jobs:
         run: |
           cp examples/blog/.env.example examples/blog/.env
           sed -i "s/^APP_KEY=$/APP_KEY=$APP_KEY/" examples/blog/.env
+          sed -i "/^VITE_DEV_SERVER_URL=/d" examples/blog/.env
 
       - name: Run migrations and seed
         working-directory: examples/blog

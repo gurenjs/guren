@@ -49,7 +49,7 @@ Lessons learned from code review cycles. Check these before submitting changes.
 
 ## E2E Tests
 
-- **E2E needs `NODE_ENV=production` for Vite assets but runs over HTTP.** Cookie `Secure` flag must be disabled when `CI` is set (see `examples/blog/src/app.ts`), otherwise all Inertia XHR POSTs fail silently (CSRF/session cookies rejected by browser).
+- **E2E needs `NODE_ENV=production` for Vite assets but runs over HTTP.** Two CI-specific issues: (1) `VITE_DEV_SERVER_URL` in `.env` forces dev-mode asset serving even with production NODE_ENV — remove the line in CI setup. (2) Cookie `Secure` flag must be disabled when `CI` is set (see `examples/blog/src/app.ts`), otherwise Inertia XHR POSTs fail (CSRF/session cookies rejected over HTTP).
 - **Use `storageState` for authenticated tests** — login once in setup, share session across all tests.
 - **Avoid asserting specific post titles in lists** — pagination may push them off page 1.
 - **Use `page.waitForLoadState('networkidle')` after Inertia navigations** in CI.
