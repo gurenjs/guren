@@ -1,5 +1,11 @@
 # create-guren-app
 
+## 1.0.0-rc.14
+
+### Patch Changes
+
+- fix(create-app): remove @guren/cli dependency for bunx compatibility
+
 ## 1.0.0-rc.13
 
 ### Patch Changes
