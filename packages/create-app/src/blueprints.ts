@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { cp, readFile, writeFile } from 'node:fs/promises'
 import { basename, join, relative } from 'node:path'
 import process from 'node:process'
@@ -175,7 +176,12 @@ const blueprintRegistry: Record<AppBlueprintName, AppBlueprint> = {
     },
     transformFiles: DEFAULT_TRANSFORM_FILES,
     postScaffold: async ({ destination }) => {
-      const { runBlueprint } = await import('@guren/cli')
+      let runBlueprint: (name: string, opts: { force: boolean }) => Promise<string[]>
+      try {
+        ;({ runBlueprint } = await import('@guren/cli'))
+      } catch {
+        return
+      }
       const originalCwd = process.cwd()
       try {
         process.chdir(destination)
@@ -249,8 +255,7 @@ async function scaffoldEnvFiles(destination: string): Promise<void> {
     return
   }
 
-  const { generateKeyValue } = await import('@guren/cli')
-  const appKey = generateKeyValue()
+  const appKey = `base64:${randomBytes(32).toString('base64')}`
   const envContent = envExample.replace(/^APP_KEY=.*$/mu, `APP_KEY=${appKey}`)
   await writeFile(envPath, envContent.endsWith('\n') ? envContent : `${envContent}\n`, 'utf8')
 }

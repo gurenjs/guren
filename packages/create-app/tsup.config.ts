@@ -7,6 +7,7 @@ export default defineConfig({
   target: 'node18',
   outDir: 'dist',
   platform: 'node',
+  external: ['@guren/cli'],
   banner: {
     js: '#!/usr/bin/env node',
   },
