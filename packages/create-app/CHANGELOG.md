@@ -1,5 +1,13 @@
 # create-guren-app
 
+## 1.0.0-rc.12
+
+### Patch Changes
+
+- feat(create-app): add database selection, auto-install, and template version fixes
+- Updated dependencies
+  - @guren/cli@1.0.0-rc.12
+
 ## 1.0.0-rc.11
 
 ### Patch Changes

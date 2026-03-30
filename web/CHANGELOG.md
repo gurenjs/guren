@@ -1,5 +1,12 @@
 # web
 
+## 0.1.1-rc.5
+
+### Patch Changes
+
+- Updated dependencies
+  - @guren/cli@1.0.0-rc.12
+
 ## 0.1.1-rc.4
 
 ### Patch Changes
