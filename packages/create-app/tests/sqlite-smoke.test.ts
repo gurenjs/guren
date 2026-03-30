@@ -10,7 +10,7 @@ describe('SQLite default template', () => {
 
     try {
       const dest = join(workspace.dir, 'test-app')
-      await scaffoldAppBlueprint({ destination: dest, renderingMode: 'spa' })
+      await scaffoldAppBlueprint({ destination: dest, renderingMode: 'spa', database: 'sqlite' })
 
       const dbConfig = await readFile(join(dest, 'config/database.ts'), 'utf8')
       expect(dbConfig).toContain('createSqliteDatabase')
@@ -23,8 +23,8 @@ describe('SQLite default template', () => {
       const drizzleConfig = await readFile(join(dest, 'drizzle.config.ts'), 'utf8')
       expect(drizzleConfig).toContain("dialect: 'sqlite'")
 
-      const pkg = await readFile(join(dest, 'package.json'), 'utf8')
-      expect(pkg).not.toContain('"postgres"')
+      const pkg = JSON.parse(await readFile(join(dest, 'package.json'), 'utf8')) as { dependencies?: Record<string, string> }
+      expect(pkg.dependencies?.postgres).toBeUndefined()
 
       const env = await readFile(join(dest, '.env.example'), 'utf8')
       expect(env).toContain('guren.db')

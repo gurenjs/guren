@@ -8,6 +8,9 @@ export const APP_BLUEPRINTS = ['default', 'api', 'blog', 'worker'] as const
 export type AppBlueprintName = (typeof APP_BLUEPRINTS)[number]
 export type RenderingMode = 'spa' | 'ssr'
 
+export const DATABASE_DRIVERS = ['sqlite', 'postgres', 'mysql'] as const
+export type DatabaseDriver = (typeof DATABASE_DRIVERS)[number]
+
 interface TemplateLayer {
   dir: string
   excludePaths?: string[]
@@ -19,6 +22,7 @@ interface BlueprintContext {
   destination: string
   packageName: string
   renderingMode: RenderingMode
+  database: DatabaseDriver
 }
 
 export interface AppBlueprint {
@@ -35,6 +39,7 @@ export interface ScaffoldAppBlueprintOptions {
   blueprint?: string
   destination: string
   renderingMode: RenderingMode
+  database: DatabaseDriver
 }
 
 const DEFAULT_TRANSFORM_FILES = [
@@ -250,6 +255,190 @@ async function scaffoldEnvFiles(destination: string): Promise<void> {
   await writeFile(envPath, envContent.endsWith('\n') ? envContent : `${envContent}\n`, 'utf8')
 }
 
+/* ---------- Database-specific file generators ---------- */
+
+const DATABASE_DEFAULTS = {
+  postgres: { url: 'postgres://guren:guren@localhost:54322/guren', dialect: 'postgresql', dep: { postgres: '^3.4.3' } },
+  mysql:    { url: 'mysql://guren:guren@localhost:33306/guren',    dialect: 'mysql',      dep: { mysql2: '^3.11.3' } },
+  sqlite:   { url: './data/guren.db',                              dialect: 'sqlite',     dep: null },
+} as const satisfies Record<DatabaseDriver, { url: string; dialect: string; dep: Record<string, string> | null }>
+
+function generateDatabaseConfig(driver: DatabaseDriver): string {
+  const { url } = DATABASE_DEFAULTS[driver]
+
+  if (driver === 'postgres') {
+    return `import { createPostgresDatabase } from '@guren/orm'
+import * as schema from '../db/schema.js'
+
+const database = createPostgresDatabase({
+  schema,
+  migrationsFolder: new URL('../db/migrations', import.meta.url),
+  seedersFolder: new URL('../db/seeders', import.meta.url),
+  connectionString: () => process.env.DATABASE_URL ?? '${url}',
+})
+
+export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+`
+  }
+
+  if (driver === 'mysql') {
+    return `import { createMySqlDatabase } from '@guren/orm'
+import * as schema from '../db/schema.js'
+
+const database = createMySqlDatabase({
+  schema,
+  migrationsFolder: new URL('../db/migrations', import.meta.url),
+  seedersFolder: new URL('../db/seeders', import.meta.url),
+  connectionString: () => process.env.DATABASE_URL ?? '${url}',
+})
+
+export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+`
+  }
+
+  return `import { createSqliteDatabase } from '@guren/orm'
+import * as schema from '../db/schema.js'
+
+const database = createSqliteDatabase({
+  schema,
+  migrationsFolder: new URL('../db/migrations', import.meta.url),
+  seedersFolder: new URL('../db/seeders', import.meta.url),
+  filename: () => process.env.DATABASE_URL ?? '${url}',
+})
+
+export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+`
+}
+
+function generateSchema(driver: DatabaseDriver): string {
+  if (driver === 'postgres') {
+    return `import { pgTable, serial, text, timestamp } from '@guren/orm/drizzle'
+
+export const users = pgTable('users', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  email: text('email').notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+})
+`
+  }
+
+  if (driver === 'mysql') {
+    return `import { mysqlTable, int, varchar, timestamp } from '@guren/orm/drizzle'
+
+export const users = mysqlTable('users', {
+  id: int('id').primaryKey().autoincrement(),
+  name: varchar('name', { length: 255 }).notNull(),
+  email: varchar('email', { length: 255 }).notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+})
+`
+  }
+
+  // SQLite uses drizzle-orm directly — @guren/orm/drizzle does not re-export SQLite helpers
+  return `import { sqliteTable, integer, text } from 'drizzle-orm/sqlite-core'
+
+export const users = sqliteTable('users', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  email: text('email').notNull(),
+  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+})
+`
+}
+
+function generateDrizzleConfig(driver: DatabaseDriver): string {
+  const { url, dialect } = DATABASE_DEFAULTS[driver]
+
+  return `import { defineConfig } from 'drizzle-kit'
+
+export default defineConfig({
+  schema: './db/schema.ts',
+  out: './db/migrations',
+  dialect: '${dialect}',
+  dbCredentials: {
+    url: process.env.DATABASE_URL ?? '${url}',
+  },
+})
+`
+}
+
+function generateDockerCompose(driver: DatabaseDriver): string | null {
+  if (driver === 'postgres') {
+    return `services:
+  postgres:
+    image: postgres:17-alpine
+    ports:
+      - '54322:5432'
+    environment:
+      POSTGRES_USER: guren
+      POSTGRES_PASSWORD: guren
+      POSTGRES_DB: guren
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
+`
+  }
+
+  if (driver === 'mysql') {
+    return `services:
+  mysql:
+    image: mysql:8.4
+    ports:
+      - '33306:3306'
+    environment:
+      MYSQL_ROOT_PASSWORD: guren
+      MYSQL_USER: guren
+      MYSQL_PASSWORD: guren
+      MYSQL_DATABASE: guren
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+volumes:
+  mysql_data:
+`
+  }
+
+  return null
+}
+
+async function applyDatabaseConfig(destination: string, driver: DatabaseDriver): Promise<void> {
+  if (driver === 'sqlite') return
+
+  const { url, dep } = DATABASE_DEFAULTS[driver]
+  const dockerCompose = generateDockerCompose(driver)
+
+  // Write all DB-variant files in parallel
+  await Promise.all([
+    writeFile(join(destination, 'config/database.ts'), generateDatabaseConfig(driver), 'utf8'),
+    writeFile(join(destination, 'db/schema.ts'), generateSchema(driver), 'utf8'),
+    writeFile(join(destination, 'drizzle.config.ts'), generateDrizzleConfig(driver), 'utf8'),
+    dockerCompose ? writeFile(join(destination, 'docker-compose.yml'), dockerCompose, 'utf8') : Promise.resolve(),
+    // Update .env and .env.example with the correct DATABASE_URL
+    ...['.env', '.env.example'].map(async (envFile) => {
+      const envPath = join(destination, envFile)
+      try {
+        const content = await readFile(envPath, 'utf8')
+        await writeFile(envPath, content.replace(/^DATABASE_URL=.*$/mu, `DATABASE_URL=${url}`), 'utf8')
+      } catch {
+        // .env may not exist yet for .env.example-only templates
+      }
+    }),
+  ])
+
+  // Add driver dependency to package.json
+  if (dep) {
+    const packageJsonPath = join(destination, 'package.json')
+    const raw = await readFile(packageJsonPath, 'utf8')
+    const pkg = JSON.parse(raw) as { dependencies?: Record<string, string> }
+    pkg.dependencies ??= {}
+    Object.assign(pkg.dependencies, dep)
+    await writeFile(packageJsonPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8')
+  }
+}
+
 export function listAppBlueprints(): AppBlueprintName[] {
   return [...APP_BLUEPRINTS]
 }
@@ -274,6 +463,7 @@ export async function scaffoldAppBlueprint(options: ScaffoldAppBlueprintOptions)
     destination: options.destination,
     packageName,
     renderingMode: options.renderingMode,
+    database: options.database,
   }
   const tokenMap = new Map<string, string>([
     ['guren-app-placeholder', packageName],
@@ -293,6 +483,7 @@ export async function scaffoldAppBlueprint(options: ScaffoldAppBlueprintOptions)
 
   await applyTokenTransforms(options.destination, blueprint.transformFiles, tokenMap)
   await scaffoldEnvFiles(options.destination)
+  await applyDatabaseConfig(options.destination, options.database)
   await blueprint.postScaffold?.(context)
   return blueprint
 }
