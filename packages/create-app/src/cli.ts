@@ -3,11 +3,12 @@ import { relative, resolve } from 'node:path'
 import process from 'node:process'
 import { consola } from 'consola'
 import { defineCommand, runMain } from 'citty'
-import { getAppBlueprint, listAppBlueprints, scaffoldAppBlueprint, type RenderingMode } from './blueprints'
+import { DATABASE_DRIVERS, getAppBlueprint, listAppBlueprints, scaffoldAppBlueprint, type DatabaseDriver, type RenderingMode } from './blueprints'
 import { directoryExists, isDirectoryEmpty } from './utils'
 
 const RENDERING_MODES = ['spa', 'ssr'] as const
 const RENDERING_MODE_SET = new Set<RenderingMode>(RENDERING_MODES)
+const DATABASE_DRIVER_SET = new Set<DatabaseDriver>(DATABASE_DRIVERS)
 
 async function ensureTargetDirectory(path: string, force: boolean): Promise<void> {
   try {
@@ -73,6 +74,51 @@ async function resolveRenderingMode(flagValue: unknown): Promise<RenderingMode> 
   return (value as RenderingMode) ?? 'ssr'
 }
 
+async function resolveDatabase(flagValue: unknown): Promise<DatabaseDriver> {
+  if (typeof flagValue === 'string') {
+    const normalized = flagValue.toLowerCase()
+    if (!DATABASE_DRIVER_SET.has(normalized as DatabaseDriver)) {
+      throw new Error(`Invalid database driver. Supported values are: ${DATABASE_DRIVERS.join(', ')}`)
+    }
+    return normalized as DatabaseDriver
+  }
+
+  if (!process.stdin.isTTY) {
+    return 'sqlite'
+  }
+
+  const result = await consola.prompt('Choose the database driver', {
+    type: 'select',
+    options: [
+      { value: 'sqlite', label: 'SQLite (zero-config, recommended for getting started)' },
+      { value: 'postgres', label: 'PostgreSQL' },
+      { value: 'mysql', label: 'MySQL' },
+    ],
+    initial: 'sqlite',
+    default: 'sqlite',
+  })
+
+  const value = typeof result === 'string' ? result : 'sqlite'
+  return (value as DatabaseDriver) ?? 'sqlite'
+}
+
+async function installDependencies(cwd: string): Promise<boolean> {
+  try {
+    consola.start('Installing dependencies...')
+    const { spawnSync } = await import('node:child_process')
+    const result = spawnSync('bun', ['install'], { cwd, stdio: 'inherit' })
+    if (result.status !== 0) {
+      consola.warn('Failed to install dependencies. Run `bun install` manually.')
+      return false
+    }
+    consola.success('Dependencies installed')
+    return true
+  } catch {
+    consola.warn('Failed to install dependencies. Run `bun install` manually.')
+    return false
+  }
+}
+
 const command = defineCommand({
   meta: {
     name: 'create-guren-app',
@@ -101,6 +147,15 @@ const command = defineCommand({
       type: 'string',
       description: `Starter blueprint to scaffold (${listAppBlueprints().join(', ')})`,
     },
+    db: {
+      type: 'string',
+      description: `Database driver (${DATABASE_DRIVERS.join(', ')})`,
+    },
+    install: {
+      type: 'boolean',
+      description: 'Install dependencies after scaffolding (default: true)',
+      default: true,
+    },
   },
   async run({ args }) {
     const target = args.target as string
@@ -120,13 +175,15 @@ const command = defineCommand({
 
     const blueprint = getAppBlueprint(typeof args.blueprint === 'string' ? args.blueprint : undefined)
     const renderingMode = blueprint.name === 'api'
-      ? 'spa' as const  // API blueprint has no frontend — force SPA (no SSR overlay)
+      ? 'spa'
       : await resolveRenderingMode(args.mode)
+    const database = await resolveDatabase(args.db)
 
     await scaffoldAppBlueprint({
       blueprint: blueprint.name,
       destination: targetDir,
       renderingMode,
+      database,
     })
 
     if (renderingMode === 'ssr') {
@@ -148,14 +205,25 @@ const command = defineCommand({
       }
     }
 
+    const shouldInstall = args.install !== false
+    let installed = false
+    if (shouldInstall) {
+      installed = await installDependencies(targetDir)
+    }
+
     const relativeTarget = relative(process.cwd(), targetDir) || '.'
 
-    consola.success(`Scaffolded a new Guren app (${blueprint.name}/${renderingMode.toUpperCase()}) in ${relativeTarget}`)
+    consola.success(`Scaffolded a new Guren app (${blueprint.name}/${renderingMode.toUpperCase()}/${database}) in ${relativeTarget}`)
     consola.info('Next steps:')
     if (relativeTarget !== '.') {
       consola.log(`  cd ${relativeTarget}`)
     }
-    consola.log('  bun install')
+    if (!installed) {
+      consola.log('  bun install')
+    }
+    if (database !== 'sqlite') {
+      consola.log('  docker compose up -d')
+    }
     consola.log('')
     consola.info('Add features:')
     consola.log('  bunx guren add auth')

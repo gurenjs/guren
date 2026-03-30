@@ -36,6 +36,8 @@ describe('create-guren-app CLI', () => {
           force: false,
           mode: 'spa',
           auth: false,
+          db: 'sqlite',
+          install: false,
         },
       })
 
@@ -67,6 +69,8 @@ describe('create-guren-app CLI', () => {
           force: false,
           mode: 'ssr',
           auth: false,
+          db: 'sqlite',
+          install: false,
         },
       })
 
@@ -92,6 +96,8 @@ describe('create-guren-app CLI', () => {
           mode: 'spa',
           auth: false,
           blueprint: 'blog',
+          db: 'sqlite',
+          install: false,
         },
       })
 
