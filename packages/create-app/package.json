@@ -28,11 +28,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@guren/cli": "^1.0.0-rc.12",
     "citty": "^0.1.6",
-    "consola": "^3.4.2",
-    "mysql2": "^3.11.3",
-    "postgres": "^3.4.3"
+    "consola": "^3.4.2"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",
