@@ -1,5 +1,11 @@
 # @guren/inertia-client
 
+## 1.0.0-rc.11
+
+### Patch Changes
+
+- fix(ci): upgrade to Node 24 for npm OIDC trusted publishing
+
 ## 1.0.0-rc.10
 
 ### Patch Changes
