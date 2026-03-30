@@ -1,6 +1,6 @@
 {
   "name": "@guren/core",
-  "version": "1.0.0-rc.10",
+  "version": "1.0.0-rc.11",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -48,9 +48,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@guren/cli": "^1.0.0-rc.10",
-    "@guren/orm": "^1.0.0-rc.9",
-    "@guren/server": "^1.0.0-rc.10"
+    "@guren/cli": "^1.0.0-rc.11",
+    "@guren/orm": "^1.0.0-rc.11",
+    "@guren/server": "^1.0.0-rc.11"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",
