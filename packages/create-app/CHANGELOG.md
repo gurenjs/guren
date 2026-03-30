@@ -1,5 +1,11 @@
 # create-guren-app
 
+## 1.0.0-rc.13
+
+### Patch Changes
+
+- fix(create-app): add postgres and mysql2 deps for bunx compatibility
+
 ## 1.0.0-rc.12
 
 ### Patch Changes
