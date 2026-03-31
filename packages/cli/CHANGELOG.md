@@ -1,5 +1,13 @@
 # @guren/cli
 
+## 1.0.0-rc.13
+
+### Patch Changes
+
+- fix(server): use figlet importable-fonts for bundled builds
+- Updated dependencies
+  - @guren/core@1.0.0-rc.12
+
 ## 1.0.0-rc.12
 
 ### Patch Changes
