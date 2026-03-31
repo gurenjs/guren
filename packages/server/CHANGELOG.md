@@ -1,5 +1,11 @@
 # @guren/server
 
+## 1.0.0-rc.12
+
+### Patch Changes
+
+- fix(server): use figlet importable-fonts for bundled builds
+
 ## 1.0.0-rc.11
 
 ### Patch Changes
