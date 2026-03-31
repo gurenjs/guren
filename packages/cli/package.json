@@ -16,8 +16,7 @@
     "access": "public"
   },
   "files": [
-    "dist",
-    "fonts"
+    "dist"
   ],
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
