@@ -1,5 +1,11 @@
 # create-guren-app
 
+## 1.0.0-rc.15
+
+### Patch Changes
+
+- fix(create-app): bundle consola and citty for bunx Node.js compatibility
+
 ## 1.0.0-rc.14
 
 ### Patch Changes
