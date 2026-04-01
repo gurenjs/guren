@@ -98,7 +98,8 @@ Inertia のヘルパーでクライアントナビゲーションとフォーム
 ## サーバーサイドレンダリング
 各アプリには既定で `resources/js/ssr.tsx` が入り、`@guren/inertia-client` の `renderInertiaServer()` を呼び出します。`autoConfigureInertiaAssets(app, { importMeta })` でブートすると、Guren は次を自動で処理します。
 
-- 開発時は Vite dev サーバーへ HTML を向けます（`VITE_DEV_SERVER_URL` があれば使用）。
+- 開発時は `bun run dev` と一緒に Vite dev サーバーを自動起動して管理します。
+- `VITE_DEV_SERVER_URL` は、既に起動している外部 Vite dev サーバーへ明示的に向けたい場合だけ使います。
 - 本番ではビルド済みクライアントマニフェスト (`public/assets/.vite/manifest.json`) を検出し、`GUREN_INERTIA_ENTRY`/`GUREN_INERTIA_STYLES` を設定。
 - SSR マニフェスト (`public/assets/.vite/ssr-manifest.json`) を検出し、`GUREN_INERTIA_SSR_ENTRY` / `GUREN_INERTIA_SSR_MANIFEST` を設定してサーバーレンダリングを可能にします。
 
