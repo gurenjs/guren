@@ -3,8 +3,9 @@
  *
  * Uses `bun build` to bundle the server entrypoint into a single file,
  * avoiding circular workspace symlink issues with file copying.
+ * Reads Vite manifests and injects Inertia env vars into .vc-config.json.
  */
-import { cpSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs'
+import { cpSync, mkdirSync, writeFileSync, existsSync, rmSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
@@ -18,6 +19,58 @@ if (existsSync(out)) {
 
 mkdirSync(funcDir, { recursive: true })
 mkdirSync(resolve(out, 'static'), { recursive: true })
+
+// --- Read Vite manifests to derive Inertia env vars ---
+
+type ManifestEntry = { file?: string; css?: string[] }
+type Manifest = Record<string, ManifestEntry>
+
+function loadManifest(...paths: string[]): Manifest | undefined {
+  for (const p of paths) {
+    if (!existsSync(p)) continue
+    try {
+      return JSON.parse(readFileSync(p, 'utf8')) as Manifest
+    } catch {
+      continue
+    }
+  }
+  return undefined
+}
+
+const env: Record<string, string> = {
+  NODE_ENV: 'production',
+}
+
+// Client manifest → entry script + CSS
+const clientManifest = loadManifest(
+  resolve(root, 'public/assets/.vite/manifest.json'),
+)
+if (clientManifest) {
+  const entry = clientManifest['resources/js/app.tsx']
+  if (entry?.file) {
+    env.GUREN_INERTIA_ENTRY = `/assets/${entry.file}`
+  }
+  if (entry?.css?.length) {
+    env.GUREN_INERTIA_STYLES = entry.css.map((f) => `/assets/${f}`).join(',')
+  }
+}
+
+// SSR manifest → SSR entry path (relative to function dir at runtime)
+const ssrManifest = loadManifest(
+  resolve(root, '.guren/ssr/.vite/manifest.json'),
+)
+if (ssrManifest) {
+  const ssrEntry = ssrManifest['resources/js/ssr.tsx']
+  if (ssrEntry?.file) {
+    // At runtime the function runs from /var/task/, SSR bundle is at /var/task/.guren/ssr/
+    env.GUREN_INERTIA_SSR_ENTRY = `./.guren/ssr/${ssrEntry.file}`
+  }
+  env.GUREN_INERTIA_SSR_MANIFEST = './.guren/ssr/.vite/manifest.json'
+}
+
+env.GUREN_INERTIA_IMPORT_MAP = JSON.stringify({
+  '@guren/inertia-client': '/vendor/inertia-client.tsx',
+})
 
 // 1. Vercel routing config
 writeFileSync(
@@ -35,7 +88,7 @@ writeFileSync(
   ),
 )
 
-// 2. Function config
+// 2. Function config with Inertia env vars
 writeFileSync(
   resolve(funcDir, '.vc-config.json'),
   JSON.stringify(
@@ -44,6 +97,7 @@ writeFileSync(
       runtime: 'bun1.x',
       launcherType: 'Nodejs',
       shouldAddHelpers: true,
+      environment: env,
     },
     null,
     2,
@@ -64,49 +118,23 @@ if (result.exitCode !== 0) {
   process.exit(1)
 }
 
-// 4. Copy docs content (read at runtime by DocsService)
-const docsDir = resolve(root, 'app/Services')
-if (existsSync(docsDir)) {
-  // DocsService reads markdown files from disk — check if there's a content directory
-  const contentDirs = ['docs', 'content', 'resources/docs']
-  for (const dir of contentDirs) {
-    const src = resolve(root, dir)
-    if (existsSync(src)) {
-      cpSync(src, resolve(funcDir, dir), { recursive: true })
-    }
-  }
-}
-
-// 5. Copy SSR bundle (dynamically imported at runtime)
+// 4. Copy SSR bundle (dynamically imported at runtime)
 const ssrDir = resolve(root, '.guren/ssr')
 if (existsSync(ssrDir)) {
   cpSync(ssrDir, resolve(funcDir, '.guren/ssr'), { recursive: true })
 }
 
-// 6. Copy Vite manifests (read at runtime for asset URLs)
-const manifestPaths = [
-  'public/assets/.vite/manifest.json',
-  'public/assets/.vite/ssr-manifest.json',
-]
-for (const rel of manifestPaths) {
-  const src = resolve(root, rel)
-  if (existsSync(src)) {
-    const dest = resolve(funcDir, rel)
-    mkdirSync(resolve(dest, '..'), { recursive: true })
-    cpSync(src, dest)
-  }
-}
-
-// 7. Copy db/migrations dir (checked at boot for hasMigrations)
+// 5. Copy db/migrations dir (checked at boot for hasMigrations)
 const migrationsDir = resolve(root, 'db/migrations')
 if (existsSync(migrationsDir)) {
   cpSync(migrationsDir, resolve(funcDir, 'db/migrations'), { recursive: true })
 }
 
-// 8. Static assets (served via Vercel CDN)
+// 6. Static assets (served via Vercel CDN)
 const publicDir = resolve(root, 'public')
 if (existsSync(publicDir)) {
   cpSync(publicDir, resolve(out, 'static'), { recursive: true })
 }
 
 console.log('Vercel Build Output assembled at .vercel/output/')
+console.log('Inertia env:', JSON.stringify(env, null, 2))
