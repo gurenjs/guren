@@ -72,6 +72,11 @@ env.GUREN_INERTIA_IMPORT_MAP = JSON.stringify({
   '@guren/inertia-client': '/vendor/inertia-client.tsx',
 })
 
+// Bun needs writable dirs for cache on Vercel's read-only filesystem
+env.BUN_RUNTIME_TRANSPILER_CACHE_PATH = '/tmp/.bun-cache'
+env.BUN_INSTALL_CACHE_DIR = '/tmp/.bun-install-cache'
+env.TMPDIR = '/tmp'
+
 // 1. Vercel routing config
 writeFileSync(
   resolve(out, 'config.json'),
