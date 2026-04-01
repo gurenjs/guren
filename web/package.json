@@ -14,7 +14,8 @@
     "preview": "NODE_ENV=production bun bin/serve.ts",
     "db:make": "bunx guren make:migration",
     "db:migrate": "bunx guren db:migrate",
-    "db:seed": "bunx guren db:seed"
+    "db:seed": "bunx guren db:seed",
+    "vercel:build": "bun scripts/vercel-build.ts"
   },
   "dependencies": {
     "@guren/cli": "workspace:*",

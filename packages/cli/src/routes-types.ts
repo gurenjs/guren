@@ -1,6 +1,13 @@
 import { relative, resolve } from 'node:path'
 import { writeFileSafe, type WriterOptions } from './utils'
 import { loadRouteDefinitions } from './load-routes'
+import {
+  DECLARATION_MODULE_AUGMENTATION,
+  RUNTIME_TYPE_DEFINITIONS,
+  RUNTIME_ROUTE_FUNCTION,
+  RUNTIME_UTILITY_FUNCTIONS,
+} from './routes-types-fragments'
+
 export type RouteDefinition = {
   method: string
   path: string
@@ -60,11 +67,32 @@ export function buildDeclarationContent(definitions: RouteDefinition[], context:
     ? templateLiterals.map((literal, index) => `    ${index === 0 ? '' : '| '}${literal}`).join('\n')
     : '    never'
 
-  const header = `// Generated from ${context.source} — DO NOT EDIT\n// Run \`guren codegen\` to regenerate.\n\nimport type { RequestPayload, VisitOptions } from '@inertiajs/core'\n\nexport {}\n\n`
-
   const methodUnion = methods.length > 0 ? methods.map((method) => `'${method}'`).join(' | ') : 'never'
 
-  return `${header}declare namespace Guren {\n  export type RouteMethod = ${methodUnion}\n\n  export type RoutePath =\n${routeLines}\n\n  export type RouteUrl = RoutePath | \`${'${'}RoutePath${'}'}?${'${'}string${'}'}\`\n\n  export interface RouteMeta {\n    method: RouteMethod\n    path: RoutePath\n    name?: string\n  }\n}\n\ndeclare module '@inertiajs/react' {\n  interface BaseInertiaLinkProps {\n    href: Guren.RouteUrl\n  }\n}\n\ndeclare module '@inertiajs/core' {\n  interface Router {\n    visit(href: Guren.RouteUrl, options?: VisitOptions): void\n    get(url: Guren.RouteUrl, data?: RequestPayload, options?: Omit<VisitOptions, 'method' | 'data'>): void\n    post(url: Guren.RouteUrl, data?: RequestPayload, options?: Omit<VisitOptions, 'method' | 'data'>): void\n    put(url: Guren.RouteUrl, data?: RequestPayload, options?: Omit<VisitOptions, 'method' | 'data'>): void\n    patch(url: Guren.RouteUrl, data?: RequestPayload, options?: Omit<VisitOptions, 'method' | 'data'>): void\n    delete(url: Guren.RouteUrl, options?: Omit<VisitOptions, 'method'>): void\n    replace(url: Guren.RouteUrl, options?: Omit<VisitOptions, 'replace'>): void\n  }\n}\n`
+  return `\
+// Generated from ${context.source} — DO NOT EDIT
+// Run \`guren codegen\` to regenerate.
+
+import type { RequestPayload, VisitOptions } from '@inertiajs/core'
+
+export {}
+
+declare namespace Guren {
+  export type RouteMethod = ${methodUnion}
+
+  export type RoutePath =
+${routeLines}
+
+  export type RouteUrl = RoutePath | \`\${RoutePath}?\${string}\`
+
+  export interface RouteMeta {
+    method: RouteMethod
+    path: RoutePath
+    name?: string
+  }
+}
+
+${DECLARATION_MODULE_AUGMENTATION}`
 }
 
 export function buildRouteModuleContent(definitions: RouteDefinition[], context: { source: string }): string {
@@ -81,9 +109,21 @@ export function buildRouteModuleContent(definitions: RouteDefinition[], context:
   const helperTree = buildHelperTree(namedDefinitions)
   const helperObject = renderHelperTree(helperTree, 1)
 
-  const header = `// Generated from ${context.source} — DO NOT EDIT\n// Run \`guren codegen\` to regenerate.\n\n`
+  const tsNoCheck = namedDefinitions.length === 0 ? '// @ts-nocheck\n' : ''
 
-  return `${header}export const routeManifest = {\n${manifestEntries}\n} as const\n\nexport type RouteManifest = typeof routeManifest\nexport type RouteName = keyof RouteManifest\nexport type RouteMethod = RouteManifest[RouteName]['method']\nexport type RoutePath = RouteManifest[RouteName]['path']\n\ntype PrimitiveQueryValue = string | number | boolean | null | undefined\ntype QueryValue = PrimitiveQueryValue | readonly PrimitiveQueryValue[]\nexport type RouteQuery = Record<string, QueryValue>\n\ntype NormalizeParamKey<TValue extends string> = TValue extends \`${'${'}infer Key${'}'}?\` ? Key : TValue\ntype PathParamKeys<TPath extends string> =\n  TPath extends \`${'${'}string${'}'}:${'${'}infer Param${'}'}/${'${'}infer Rest${'}'}\`\n    ? NormalizeParamKey<Param> | PathParamKeys<\`/${'${'}Rest${'}'}\`>\n    : TPath extends \`${'${'}string${'}'}:${'${'}infer Param${'}'}\`\n      ? NormalizeParamKey<Param>\n      : never\n\nexport type RouteParams<TName extends RouteName> =\n  [PathParamKeys<RouteManifest[TName]['path']>] extends [never]\n    ? Record<string, never>\n    : { [TKey in PathParamKeys<RouteManifest[TName]['path']>]: string | number }\n\ntype RouteArgs<TName extends RouteName> =\n  [PathParamKeys<RouteManifest[TName]['path']>] extends [never]\n    ? [query?: RouteQuery]\n    : [params: RouteParams<TName>, query?: RouteQuery]\n\nexport function route<TName extends RouteName>(name: TName, ...args: RouteArgs<TName>): string {\n  const definition = routeManifest[name]\n  if (!definition) {\n    throw new Error(\`Route [\${String(name)}] not defined.\`)\n  }\n\n  const [firstArg, secondArg] = args as [RouteQuery | RouteParams<TName> | undefined, RouteQuery | undefined]\n  const params = (args.length > 1 ? firstArg : hasPathParams(definition.path) ? firstArg : undefined) as RouteParams<TName> | undefined\n  const query = (args.length > 1 ? secondArg : hasPathParams(definition.path) ? undefined : firstArg) as RouteQuery | undefined\n  const path = substituteParams(definition.path, params as Record<string, string | number> | undefined)\n  return appendQueryString(path, query)\n}\n\nexport const routes = ${helperObject} as const\n\nfunction hasPathParams(path: string): boolean {\n  return /:[A-Za-z0-9_-]+/u.test(path)\n}\n\nfunction substituteParams(path: string, params?: Record<string, string | number>): string {\n  if (!params) {\n    return path\n  }\n\n  return path.replace(/:([A-Za-z0-9_-]+)/gu, (match, key) => {\n    if (!Object.prototype.hasOwnProperty.call(params, key)) {\n      return match\n    }\n\n    return encodeURIComponent(String(params[key]))\n  })\n}\n\nfunction appendQueryString(path: string, query?: RouteQuery): string {\n  if (!query) {\n    return path\n  }\n\n  const search = new URLSearchParams()\n\n  for (const [key, value] of Object.entries(query)) {\n    if (value == null) {\n      continue\n    }\n\n    if (Array.isArray(value)) {\n      for (const item of value) {\n        if (item != null) {\n          search.append(key, String(item))\n        }\n      }\n      continue\n    }\n\n    search.set(key, String(value))\n  }\n\n  const serialized = search.toString()\n  return serialized ? \`${'${'}path${'}'}?\${serialized}\` : path\n}\n`
+  return `\
+${tsNoCheck}// Generated from ${context.source} — DO NOT EDIT
+// Run \`guren codegen\` to regenerate.
+
+export const routeManifest = {
+${manifestEntries}
+} as const
+
+${RUNTIME_TYPE_DEFINITIONS}
+${RUNTIME_ROUTE_FUNCTION}
+export const routes = ${helperObject} as const
+
+${RUNTIME_UTILITY_FUNCTIONS}`
 }
 
 export function toTypeLiteral(path: string): string {
