@@ -55,7 +55,7 @@ export class HeavyServiceProvider extends ServiceProvider {
 
 | Scope | Pattern | Example |
 |-------|---------|---------|
-| Official (Guren team) | `@guren/plugin-{name}` | `@guren/plugin-sentry` |
+| Official (Guren team) | `@guren/plugin-{name}` | `@guren/plugin-vercel`, `@guren/plugin-sentry` |
 | Community | `guren-plugin-{name}` | `guren-plugin-stripe` |
 
 The class itself should follow the `{Name}ServiceProvider` pattern (e.g., `SentryServiceProvider`, `StripeServiceProvider`).

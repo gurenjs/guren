@@ -124,6 +124,25 @@ export const handler = createLambdaHandler(app)
 
 HTTP、SQS キュー、EventBridge スケジューリング、CLI コマンドの専用ハンドラーを提供しています。詳細は **[サーバーレスデプロイガイド](./serverless.md)** を参照してください。
 
+## Vercel（サーバーレス）
+
+SSR アプリは公式プラグインで Vercel にデプロイできます。プラグインは Vercel の Bun ランタイム上で動作する [Build Output API](https://vercel.com/docs/build-output-api/v3) ディレクトリを生成します。
+
+```bash
+bunx guren plugin @guren/plugin-vercel
+bun add @guren/plugin-vercel
+```
+
+CLI が `src/vercel.ts`、`scripts/vercel-build.ts`、`vercel.json` を自動生成します。ビルドとデプロイ:
+
+```bash
+bun run vercel:build
+vercel deploy --prebuilt
+```
+
+> [!NOTE]
+> このプラグインは SSR アプリ専用です。Vite マニフェストを読み取り、サーバーレス関数に正しい `GUREN_INERTIA_*` 環境変数を注入します。API-only アプリは Docker や Lambda を使ってください。
+
 ## デプロイ後の作業
 - HTTPS を設定（Nginx/Caddy などのリバースプロキシやクラウド機能）。
 - ログ・モニタリングを構成（Bun は stdout/stderr に出力するので、集約先へ転送）。

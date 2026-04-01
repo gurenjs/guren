@@ -126,6 +126,25 @@ export const handler = createLambdaHandler(app)
 
 The framework provides dedicated handlers for HTTP, SQS queues, EventBridge scheduling, and CLI commands. See the **[Serverless Deployment Guide](./serverless.md)** for the full setup including SQS, EventBridge, CDK examples, and infrastructure recommendations.
 
+## Vercel (Serverless)
+
+SSR apps can deploy to Vercel using the official plugin. The plugin assembles a [Build Output API](https://vercel.com/docs/build-output-api/v3) directory that runs on Vercel's Bun runtime.
+
+```bash
+bunx guren plugin @guren/plugin-vercel
+bun add @guren/plugin-vercel
+```
+
+The CLI scaffolds `src/vercel.ts`, `scripts/vercel-build.ts`, and `vercel.json` for you. Build and deploy:
+
+```bash
+bun run vercel:build
+vercel deploy --prebuilt
+```
+
+> [!NOTE]
+> The plugin targets SSR apps only. It reads Vite manifests to inject the correct `GUREN_INERTIA_*` environment variables into the serverless function. API-only apps should use Docker or Lambda instead.
+
 ## Post-Deployment Tasks
 - Follow the [Production Operations Runbook](./operations.md) for SLO, incident response, and backup/restore drill policy.
 - Set up HTTPS (e.g. via a reverse proxy such as Nginx, Caddy, or your cloud platform).

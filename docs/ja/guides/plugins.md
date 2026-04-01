@@ -187,6 +187,17 @@ bun run build
 npm publish
 ```
 
+## 公式プラグインのインストール
+
+公式プラグイン（`@guren/plugin-*`）はCLI経由でインストールでき、`src/app.ts`のパッチと必要なファイルの自動生成を行います:
+
+```bash
+bunx guren plugin @guren/plugin-vercel
+bun add @guren/plugin-vercel
+```
+
+`plugin`コマンドがプロバイダーのimportを追加し、`createApp({ providers })`への登録を自動で行います。
+
 ## Gurenアプリケーションでの使用方法
 
 公開後、ユーザーはプラグインをインストールして登録します:
