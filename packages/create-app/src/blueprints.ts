@@ -74,6 +74,8 @@ const BLOG_OVERLAY_EXCLUDES = [
   '.env',
   '.guren',
   'CLAUDE.md',
+  'db/migrations',
+  'db/schema.ts',
   'node_modules',
   'package.json',
   'public/assets',
@@ -126,7 +128,7 @@ const blueprintRegistry: Record<AppBlueprintName, AppBlueprint> = {
       ['Guren Blog', appTitle],
       ['blog.example.com', `${packageName}.example.com`],
     ]),
-    postScaffold: async ({ destination, renderingMode }) => {
+    postScaffold: async ({ destination, renderingMode, database }) => {
       const packageJsonPath = join(destination, 'package.json')
       const rawPackage = await readFile(packageJsonPath, 'utf8')
       const packageJson = JSON.parse(rawPackage) as {
@@ -151,6 +153,17 @@ const blueprintRegistry: Record<AppBlueprintName, AppBlueprint> = {
       packageJson.dependencies.zod ??= '^4.1.5'
 
       await writeFile(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`, 'utf8')
+
+      // Overwrite schema with blog-specific tables (users with auth fields + posts)
+      const schemaPath = join(destination, 'db/schema.ts')
+      await writeFile(schemaPath, generateBlogSchema(database), 'utf8')
+
+      if (database === 'postgres') {
+        await cp(join(exampleBlogDir, 'db/migrations'), join(destination, 'db/migrations'), {
+          recursive: true,
+          force: true,
+        })
+      }
 
       if (renderingMode === 'spa') {
         const mainPath = join(destination, 'src/main.ts')
@@ -352,6 +365,90 @@ export const users = sqliteTable('users', {
 `
 }
 
+function generateBlogSchema(driver: DatabaseDriver): string {
+  if (driver === 'postgres') {
+    return `import { pgTable, serial, text, integer, uniqueIndex } from '@guren/orm/drizzle'
+
+export const users = pgTable(
+  'users',
+  {
+    id: serial('id').primaryKey(),
+    name: text('name').notNull(),
+    email: text('email').notNull(),
+    passwordHash: text('password_hash').notNull(),
+    rememberToken: text('remember_token'),
+  },
+  (table) => [uniqueIndex('users_email_unique').on(table.email)],
+)
+
+export const posts = pgTable('posts', {
+  id: serial('id').primaryKey(),
+  title: text('title').notNull(),
+  excerpt: text('excerpt').notNull(),
+  body: text('body'),
+  authorId: integer('author_id').notNull().references(() => users.id),
+})
+
+export const schema = { posts, users }
+export type BlogSchema = typeof schema
+`
+  }
+
+  if (driver === 'mysql') {
+    return `import { mysqlTable, int, varchar, text, uniqueIndex } from '@guren/orm/drizzle'
+
+export const users = mysqlTable(
+  'users',
+  {
+    id: int('id').primaryKey().autoincrement(),
+    name: varchar('name', { length: 255 }).notNull(),
+    email: varchar('email', { length: 255 }).notNull(),
+    passwordHash: varchar('password_hash', { length: 255 }).notNull(),
+    rememberToken: varchar('remember_token', { length: 255 }),
+  },
+  (table) => [uniqueIndex('users_email_unique').on(table.email)],
+)
+
+export const posts = mysqlTable('posts', {
+  id: int('id').primaryKey().autoincrement(),
+  title: varchar('title', { length: 255 }).notNull(),
+  excerpt: varchar('excerpt', { length: 500 }).notNull(),
+  body: text('body'),
+  authorId: int('author_id').notNull().references(() => users.id),
+})
+
+export const schema = { posts, users }
+export type BlogSchema = typeof schema
+`
+  }
+
+  return `import { sqliteTable, integer, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
+
+export const users = sqliteTable(
+  'users',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    name: text('name').notNull(),
+    email: text('email').notNull(),
+    passwordHash: text('password_hash').notNull(),
+    rememberToken: text('remember_token'),
+  },
+  (table) => [uniqueIndex('users_email_unique').on(table.email)],
+)
+
+export const posts = sqliteTable('posts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  title: text('title').notNull(),
+  excerpt: text('excerpt').notNull(),
+  body: text('body'),
+  authorId: integer('author_id').notNull().references(() => users.id),
+})
+
+export const schema = { posts, users }
+export type BlogSchema = typeof schema
+`
+}
+
 function generateDrizzleConfig(driver: DatabaseDriver): string {
   const { url, dialect } = DATABASE_DEFAULTS[driver]
 
@@ -410,12 +507,12 @@ volumes:
 }
 
 async function applyDatabaseConfig(destination: string, driver: DatabaseDriver): Promise<void> {
-  if (driver === 'sqlite') return
-
   const { url, dep } = DATABASE_DEFAULTS[driver]
   const dockerCompose = generateDockerCompose(driver)
 
-  // Write all DB-variant files in parallel
+  // Write all DB-variant files in parallel — including SQLite, since overlay
+  // templates (e.g. blog) may ship a PostgreSQL-only schema that must be
+  // replaced with the driver the user actually selected.
   await Promise.all([
     writeFile(join(destination, 'config/database.ts'), generateDatabaseConfig(driver), 'utf8'),
     writeFile(join(destination, 'db/schema.ts'), generateSchema(driver), 'utf8'),
@@ -433,7 +530,7 @@ async function applyDatabaseConfig(destination: string, driver: DatabaseDriver):
     }),
   ])
 
-  // Add driver dependency to package.json
+  // Add driver dependency to package.json (SQLite has dep: null, so this is skipped)
   if (dep) {
     const packageJsonPath = join(destination, 'package.json')
     const raw = await readFile(packageJsonPath, 'utf8')

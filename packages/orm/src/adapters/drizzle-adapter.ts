@@ -176,6 +176,24 @@ function isPromiseLike<T>(value: unknown): value is Promise<T> {
   return typeof value === 'object' && value !== null && 'then' in value && typeof (value as { then: unknown }).then === 'function'
 }
 
+/**
+ * Eagerly call `.returning()` on a query builder if available.
+ * This ensures SQLite (bun-sqlite) drivers return inserted/updated rows
+ * instead of RunResult, since their query builders are thenable —
+ * `resolveMutation`'s `isPromiseLike` check would otherwise win
+ * before the `.returning()` check is reached.
+ */
+async function resolveWithReturning<T>(query: unknown): Promise<{ usedReturning: boolean; row: T | undefined }> {
+  if (query && typeof query === 'object' && 'returning' in query && typeof (query as Record<string, unknown>).returning === 'function') {
+    const rows = await (query as { returning: () => Promise<unknown> }).returning()
+    return {
+      usedReturning: true,
+      row: (Array.isArray(rows) ? rows[0] : rows) as T | undefined,
+    }
+  }
+  return { usedReturning: false, row: undefined }
+}
+
 export const DrizzleAdapter: ORMAdapterAdvanced & {
   configure(db: DrizzleDatabase): void
   getDatabase<TDatabase extends DrizzleDatabase = DrizzleDatabase>(): TDatabase
@@ -274,7 +292,10 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     writeOptions?: AdapterQueryOptions,
   ): Promise<TRecord> {
     const db = resolveExecutor(writeOptions)
-    const result = await resolveMutation(db.insert(table).values(data))
+    const query = db.insert(table).values(data)
+    const { usedReturning, row } = await resolveWithReturning<TRecord>(query)
+    if (usedReturning) return row as TRecord
+    const result = await resolveMutation(query)
     return result as TRecord
   },
 
@@ -290,8 +311,10 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     }
 
     const clause = resolveWhere(table, where)
-    const query = db.update(table).set(data)
-    const result = await resolveMutation(clause ? query.where(clause) : query)
+    const finalQuery = clause ? db.update(table).set(data).where(clause) : db.update(table).set(data)
+    const { usedReturning, row } = await resolveWithReturning<TRecord>(finalQuery)
+    if (usedReturning) return row as TRecord
+    const result = await resolveMutation(finalQuery)
     return result as TRecord
   },
 
@@ -306,8 +329,10 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     }
 
     const clause = resolveWhere(table, where)
-    const query = db.delete(table)
-    const result = await resolveMutation(clause ? query.where(clause) : query)
+    const finalQuery = clause ? db.delete(table).where(clause) : db.delete(table)
+    const { usedReturning, row } = await resolveWithReturning<PlainObject>(finalQuery)
+    if (usedReturning) return row
+    const result = await resolveMutation(finalQuery)
     return result as number | PlainObject | void
   },
 
@@ -405,8 +430,10 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     }
 
     const clause = buildDrizzleConditions(table, conditions)
-    const query = db.update(table).set(data)
-    const result = await resolveMutation(clause ? query.where(clause) : query)
+    const finalQuery = clause ? db.update(table).set(data).where(clause) : db.update(table).set(data)
+    const { usedReturning, row } = await resolveWithReturning<TRecord>(finalQuery)
+    if (usedReturning) return row as TRecord
+    const result = await resolveMutation(finalQuery)
     return result as TRecord
   },
 
@@ -421,8 +448,10 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     }
 
     const clause = buildDrizzleConditions(table, conditions)
-    const query = db.delete(table)
-    const result = await resolveMutation(clause ? query.where(clause) : query)
+    const finalQuery = clause ? db.delete(table).where(clause) : db.delete(table)
+    const { usedReturning, row } = await resolveWithReturning<PlainObject>(finalQuery)
+    if (usedReturning) return row
+    const result = await resolveMutation(finalQuery)
     return result as number | PlainObject | void
   },
 

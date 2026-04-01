@@ -472,6 +472,134 @@ describe('DrizzleAdapter', () => {
       expect(result).toEqual({ id: 1, name: 'Alice' })
     })
 
+    it('prefers returning() over thenable resolution for create', async () => {
+      const expectedRecord = { id: 1, name: 'Alice', email: 'alice@example.com' }
+
+      const db = {
+        select: () => ({ from: () => ({ all: async () => [] }) }),
+        insert: () => ({
+          values: () => {
+            const obj = {
+              // Thenable — would resolve to RunResult without the fix
+              then: (resolve: (v: unknown) => void) => resolve({ changes: 1, lastInsertRowid: 1 }),
+              // returning() — should be preferred and return the actual record
+              returning: async () => [expectedRecord],
+            }
+            return obj
+          },
+        }),
+      }
+
+      DrizzleAdapter.configure(db as never)
+
+      const table = createMockTable()
+      const result = await DrizzleAdapter.create(table, { name: 'Alice', email: 'alice@example.com' })
+
+      expect(result).toEqual(expectedRecord)
+    })
+
+    it('prefers returning() over thenable resolution for update', async () => {
+      const expectedRecord = { id: 1, name: 'Updated', email: 'alice@example.com' }
+
+      const db = {
+        select: () => ({ from: () => ({ all: async () => [] }) }),
+        update: () => ({
+          set: () => ({
+            where: () => ({
+              then: (resolve: (v: unknown) => void) => resolve({ changes: 1 }),
+              returning: async () => [expectedRecord],
+            }),
+          }),
+        }),
+      }
+
+      DrizzleAdapter.configure(db as never)
+
+      const table = createMockTable()
+      const result = await adapter.update(table, { id: 1 }, { name: 'Updated' })
+
+      expect((result as unknown as { name: string }).name).toBe('Updated')
+    })
+
+    it('prefers returning() over thenable resolution for delete', async () => {
+      const expectedRecord = { id: 1, name: 'Alice', email: 'alice@example.com' }
+
+      const db = {
+        select: () => ({ from: () => ({ all: async () => [] }) }),
+        delete: () => ({
+          where: () => ({
+            then: (resolve: (v: unknown) => void) => resolve({ changes: 1 }),
+            returning: async () => [expectedRecord],
+          }),
+        }),
+      }
+
+      DrizzleAdapter.configure(db as never)
+
+      const table = createMockTable()
+      const result = await adapter.delete(table, { id: 1 })
+
+      expect(result).toEqual(expectedRecord)
+    })
+
+    it('does not execute update twice when returning() yields no rows', async () => {
+      let executions = 0
+
+      const db = {
+        select: () => ({ from: () => ({ all: async () => [] }) }),
+        update: () => ({
+          set: () => ({
+            where: () => ({
+              then: (resolve: (v: unknown) => void) => {
+                executions += 1
+                resolve({ changes: 0 })
+              },
+              returning: async () => {
+                executions += 1
+                return []
+              },
+            }),
+          }),
+        }),
+      }
+
+      DrizzleAdapter.configure(db as never)
+
+      const table = createMockTable()
+      const result = await adapter.update(table, { id: 1 }, { name: 'Updated' })
+
+      expect(result).toBeUndefined()
+      expect(executions).toBe(1)
+    })
+
+    it('does not execute delete twice when returning() yields no rows', async () => {
+      let executions = 0
+
+      const db = {
+        select: () => ({ from: () => ({ all: async () => [] }) }),
+        delete: () => ({
+          where: () => ({
+            then: (resolve: (v: unknown) => void) => {
+              executions += 1
+              resolve({ changes: 0 })
+            },
+            returning: async () => {
+              executions += 1
+              return []
+            },
+          }),
+        }),
+      }
+
+      DrizzleAdapter.configure(db as never)
+
+      const table = createMockTable()
+      const result = await adapter.delete(table, { id: 1 })
+
+      expect(result).toBeUndefined()
+      expect(executions).toBe(1)
+    })
+
     it('handles run() method for mutations', async () => {
       const db = {
         select: () => ({ from: () => ({ all: async () => [] }) }),

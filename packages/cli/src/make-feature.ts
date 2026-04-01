@@ -107,7 +107,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   consola.info(`     import { ${singular}PayloadSchema } from '../app/Http/Validators/${singular}Validator.js'`)
   consola.info(`     router.group('/${routeName}', (${routeVar}) => {`)
   consola.info(`       ${routeVar}.get('/', [${singular}Controller, 'index']).name('${routeName}.index')`)
-  consola.info(`       ${routeVar}.get('/new', [${singular}Controller, 'create']).name('${routeName}.create')`)
+  consola.info(`       ${routeVar}.get('/create', [${singular}Controller, 'create']).name('${routeName}.create')`)
   consola.info(`       ${routeVar}.get('/:id', [${singular}Controller, 'show']).name('${routeName}.show')`)
   consola.info(`       ${routeVar}.get('/:id/edit', [${singular}Controller, 'edit']).name('${routeName}.edit')`)
   consola.info(`       ${routeVar}.post('/', { name: '${routeName}.store', body: ${singular}PayloadSchema }, [${singular}Controller, 'store'])`)

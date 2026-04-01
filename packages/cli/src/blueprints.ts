@@ -739,7 +739,7 @@ export default function ${collection}Index({ data, pagination }: Props) {
     <main className="mx-auto max-w-3xl space-y-6 px-6 py-12">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-semibold">${collection}</h1>
-        <Link href="/${routeName}/new" className="rounded bg-black px-4 py-2 text-white">New ${singular}</Link>
+        <Link href="/${routeName}/create" className="rounded bg-black px-4 py-2 text-white">New ${singular}</Link>
       </div>
       <div className="space-y-4">
         {data.map((${variableName}) => (
@@ -913,7 +913,7 @@ async function updateResourceRoutes(singular: string, routeName: string, routeVa
   }
 
   if (!content.includes(`'${routeName}.index'`) && !content.includes(`/${routeName}`)) {
-    const groupBlock = `  router.group('/${routeName}', (${routeVar}) => {\n    ${routeVar}.get('/', [${controllerName}, 'index']).name('${routeName}.index')\n    ${routeVar}.get('/new', [${controllerName}, 'create']).name('${routeName}.create')\n    ${routeVar}.get('/:id', [${controllerName}, 'show']).name('${routeName}.show')\n    ${routeVar}.get('/:id/edit', [${controllerName}, 'edit']).name('${routeName}.edit')\n    ${routeVar}.post('/', [${controllerName}, 'store']).name('${routeName}.store')\n    ${routeVar}.put('/:id', [${controllerName}, 'update']).name('${routeName}.update')\n  })\n`
+    const groupBlock = `  router.group('/${routeName}', (${routeVar}) => {\n    ${routeVar}.get('/', [${controllerName}, 'index']).name('${routeName}.index')\n    ${routeVar}.get('/create', [${controllerName}, 'create']).name('${routeName}.create')\n    ${routeVar}.get('/:id', [${controllerName}, 'show']).name('${routeName}.show')\n    ${routeVar}.get('/:id/edit', [${controllerName}, 'edit']).name('${routeName}.edit')\n    ${routeVar}.post('/', [${controllerName}, 'store']).name('${routeName}.store')\n    ${routeVar}.put('/:id', [${controllerName}, 'update']).name('${routeName}.update')\n  })\n`
     content = content.replace(/\n\}\n(?:\n)?export default/u, `\n${groupBlock}}\n\nexport default`)
     await writeFile(routesPath, content, 'utf8')
   }
