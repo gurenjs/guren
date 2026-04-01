@@ -81,4 +81,6 @@ process.env.GUREN_INERTIA_IMPORT_MAP = JSON.stringify({
 
 await app.boot()
 
-export default app
+export default {
+  fetch: (request: Request) => app.fetch(request),
+}
