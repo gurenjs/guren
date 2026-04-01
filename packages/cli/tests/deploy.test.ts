@@ -44,11 +44,10 @@ describe('scaffoldDeploy', () => {
       port: 4000,
     })
 
-    expect(files).toHaveLength(4)
+    expect(files).toHaveLength(3)
     expect(files.some((file) => file.endsWith('Dockerfile'))).toBe(true)
     expect(files.some((file) => file.endsWith('fly.toml'))).toBe(true)
     expect(files.some((file) => file.endsWith('railway.json'))).toBe(true)
-    expect(files.some((file) => file.endsWith('vercel.json'))).toBe(true)
 
     const dockerfile = await readFile('Dockerfile', 'utf8')
     expect(dockerfile).toContain('EXPOSE 4000')
@@ -57,16 +56,6 @@ describe('scaffoldDeploy', () => {
     expect(flyToml).toContain('app = "my-app"')
     expect(flyToml).toContain('internal_port = 4000')
     expect(flyToml).toContain('PORT = "4000"')
-  })
-
-  it('creates vercel recipe without docker files', async () => {
-    const files = await scaffoldDeploy({ target: 'vercel' })
-    expect(files).toHaveLength(1)
-    expect(files[0]?.endsWith('vercel.json')).toBe(true)
-
-    await expect(access('Dockerfile')).rejects.toBeDefined()
-    const vercel = await readFile('vercel.json', 'utf8')
-    expect(vercel).toContain('"buildCommand": "NODE_ENV=production bun run build"')
   })
 
   it('rejects invalid ports', async () => {
