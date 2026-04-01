@@ -4,6 +4,12 @@ import { join } from 'node:path'
 import { createTempWorkspace } from './helpers'
 
 let capturedCommand: any
+const successMock = mock(() => {})
+const infoMock = mock(() => {})
+const logMock = mock(() => {})
+const warnMock = mock(() => {})
+const debugMock = mock(() => {})
+const errorMock = mock(() => {})
 
 await mock.module('citty', () => ({
   defineCommand: (command: any) => command,
@@ -15,12 +21,12 @@ await mock.module('citty', () => ({
 await mock.module('consola', () => ({
   consola: {
     prompt: async () => 'ssr',
-    success: mock(() => {}),
-    info: mock(() => {}),
-    log: mock(() => {}),
-    warn: mock(() => {}),
-    debug: mock(() => {}),
-    error: mock(() => {}),
+    success: successMock,
+    info: infoMock,
+    log: logMock,
+    warn: warnMock,
+    debug: debugMock,
+    error: errorMock,
   },
 }))
 
@@ -63,6 +69,8 @@ describe('create-guren-app CLI', () => {
   it('scaffolds an SSR project and updates build script', async () => {
     const workspace = await createTempWorkspace('guren-create-app-cli-ssr-')
     try {
+      infoMock.mockClear()
+      logMock.mockClear()
       await capturedCommand.run({
         args: {
           target: 'ssr-app',
@@ -81,6 +89,9 @@ describe('create-guren-app CLI', () => {
       expect(packageJson.scripts?.build).toContain('--ssr')
 
       await access(join(appRoot, 'resources/js/ssr.tsx'))
+
+      expect(infoMock.mock.calls.some((call) => call.join(' ').includes('Optional deploy path:'))).toBe(true)
+      expect(logMock.mock.calls.some((call) => call.join(' ').includes('bunx guren plugin @guren/plugin-vercel'))).toBe(true)
     } finally {
       await workspace.cleanup()
     }

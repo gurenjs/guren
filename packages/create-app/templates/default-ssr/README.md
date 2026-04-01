@@ -29,6 +29,23 @@ Routes are registered through `routes/web.ts`, which exports a registrar consume
 
 Run `bun run build` before deploying. This script internally executes `bunx vite build` and `bunx vite build --ssr` so the Bun server can stream pre-rendered HTML during the first request. After building, `bun run preview` starts the same Bun server in production mode against the generated manifests instead of using Vite's static preview server.
 
+### Deploy To Vercel
+
+Vercel support is available as an official opt-in plugin for SSR apps:
+
+```bash
+bunx guren plugin @guren/plugin-vercel
+bun add @guren/plugin-vercel
+bun run vercel:build
+```
+
+After that, deploy with Vercel's prebuilt flow:
+
+```bash
+vercel build
+vercel deploy --prebuilt
+```
+
 Tailwind CSS is ready to use out of the box. Edit `resources/css/app.css` or add utilities to your components and the dev server will pick them up automatically.
 
 Happy hacking!

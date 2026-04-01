@@ -248,6 +248,10 @@ const command = defineCommand({
       consola.log('')
       consola.info('Production build:')
       consola.log('  bun run build')
+      consola.log('')
+      consola.info('Optional deploy path:')
+      consola.log('  bunx guren plugin @guren/plugin-vercel')
+      consola.log('  bun add @guren/plugin-vercel')
     }
   },
 })

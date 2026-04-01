@@ -14,11 +14,12 @@
     "url": "https://github.com/gurenjs/guren/issues"
   },
   "scripts": {
-    "build": "bun run build:testing && bun run build:orm && bun run build:server && bun run build:openapi && bun run build:cli && bun run build:core && bun run build:create-app && bun run build:inertia",
+    "build": "bun run build:testing && bun run build:orm && bun run build:server && bun run build:openapi && bun run build:cli && bun run build:core && bun run build:plugin-vercel && bun run build:create-app && bun run build:inertia",
     "build:clean": "rm -rf packages/*/dist && bun run build",
     "build:routes": "bun run --cwd examples/blog routes:types",
     "build:testing": "bun run --cwd packages/testing build",
     "build:core": "bun run --cwd packages/core build",
+    "build:plugin-vercel": "bun run --cwd packages/plugin-vercel build",
     "build:server": "bun run --cwd packages/server build",
     "build:orm": "bun run --cwd packages/orm build",
     "build:cli": "bun run --cwd packages/cli build",
@@ -40,7 +41,7 @@
     "changeset": "changeset",
     "version-packages": "changeset version && bun install",
     "release": "bun run build && changeset publish",
-    "test:bun": "bun test packages/server packages/orm packages/core packages/inertia-client packages/create-app packages/cli packages/openapi",
+    "test:bun": "bun test packages/server packages/orm packages/core packages/inertia-client packages/create-app packages/cli packages/openapi packages/plugin-vercel",
     "test:examples": "bun run --cwd examples/blog test && bun run --cwd examples/api test && bun run --cwd web test",
     "test": "bun run test:bun && bun run test:examples",
     "typecheck": "tsc --noEmit && bun run typecheck:blog",

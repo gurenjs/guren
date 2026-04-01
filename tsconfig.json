@@ -57,6 +57,12 @@
       "@guren/inertia-client/*": [
         "packages/inertia-client/src/*"
       ],
+      "@guren/plugin-vercel": [
+        "packages/plugin-vercel/src/index.ts"
+      ],
+      "@guren/plugin-vercel/*": [
+        "packages/plugin-vercel/src/*"
+      ],
       "@guren/testing": [
         "packages/testing/src/index.ts"
       ],

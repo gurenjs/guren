@@ -2017,7 +2017,7 @@ const upgradeCommand = defineCommand({
 const deployCommand = defineCommand({
   meta: {
     name: 'deploy',
-    description: 'Generate deployment recipes for Docker, Fly.io, Railway, or Vercel.',
+    description: 'Generate deployment recipes for Docker, Fly.io, Railway, or a legacy Vercel scaffold.',
   },
   args: {
     target: {
@@ -2057,6 +2057,10 @@ const deployCommand = defineCommand({
       port,
       force: Boolean(args.force),
     })
+
+    if (rawTarget === 'vercel' || rawTarget === 'all') {
+      consola.warn('The built-in Vercel scaffold is legacy. Prefer `bunx guren plugin @guren/plugin-vercel` for SSR web apps.')
+    }
 
     for (const file of createdFiles) {
       consola.success(`Created ${file}`)
