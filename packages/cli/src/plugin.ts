@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import type { WriterOptions } from './utils'
 import { addImport, addProvider } from './patch-helpers'
+import { assertSupportedOfficialVercelPlugin, installOfficialVercelPlugin } from './plugin-vercel'
 
 export interface InstallPluginOptions extends WriterOptions {
   packageName: string
@@ -44,6 +45,10 @@ export async function installPlugin(options: InstallPluginOptions): Promise<stri
     throw new Error('Plugin package name is required.')
   }
 
+  if (packageName === '@guren/plugin-vercel') {
+    await assertSupportedOfficialVercelPlugin()
+  }
+
   const providerName = providerIdentifierForPackage(packageName)
   const providerImport = `import { ${providerName} } from '${packageName}'`
 
@@ -72,6 +77,11 @@ export async function installPlugin(options: InstallPluginOptions): Promise<stri
 
   if (!imported.modified && imported.reason === 'Import already exists' && !registered.modified && registered.reason === 'Provider already registered') {
     messages.push(`${appPath} (already registered)`)
+  }
+
+  if (packageName === '@guren/plugin-vercel') {
+    const pluginFiles = await installOfficialVercelPlugin(options)
+    messages.push(...pluginFiles)
   }
 
   if (!await hasDependency(packageName)) {

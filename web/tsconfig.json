@@ -11,6 +11,12 @@
     "skipLibCheck": true,
     "baseUrl": ".",
     "paths": {
+      "@guren/core": [
+        "../packages/core/src/index.ts"
+      ],
+      "@guren/plugin-vercel": [
+        "../packages/plugin-vercel/src/index.ts"
+      ],
       "@/*": [
         "./app/*"
       ]

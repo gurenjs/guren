@@ -1,13 +1,9 @@
 /**
  * Vercel Serverless Function entrypoint.
  *
- * Inertia env vars are injected via .vc-config.json environment
- * by the vercel-build script. This file just boots the app.
+ * This keeps the web app aligned with the reusable plugin implementation.
  */
 import app from './app.js'
+import { createVercelHandler } from '@guren/plugin-vercel'
 
-await app.boot()
-
-export default {
-  fetch: (request: Request) => app.fetch(request),
-}
+export default await createVercelHandler(app)

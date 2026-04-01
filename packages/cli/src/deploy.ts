@@ -2,7 +2,7 @@ import { access, readFile, writeFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 import { kebabCase, writeFilesSafe, type WriterOptions } from './utils'
 
-export type DeployTarget = 'docker' | 'fly' | 'railway' | 'vercel' | 'all'
+export type DeployTarget = 'docker' | 'fly' | 'railway' | 'all'
 
 export interface DeployOptions extends WriterOptions {
   target?: DeployTarget
@@ -134,27 +134,12 @@ function railwayJsonTemplate(): string {
 `
 }
 
-function vercelJsonTemplate(): string {
-  return `${JSON.stringify({
-    $schema: 'https://openapi.vercel.sh/vercel.json',
-    installCommand: 'bun install',
-    buildCommand: 'NODE_ENV=production bun run build',
-    devCommand: 'bun run dev',
-    routes: [
-      { src: '/(.*)', dest: '/bin/serve.ts' },
-    ],
-  }, null, 2)}
-`
-}
-
 type DeployFile = { path: string; contents: string }
 
 function filesForTarget(target: DeployTarget, appName: string, port: number): DeployFile[] {
   const dockerFile: DeployFile = { path: 'Dockerfile', contents: dockerfileTemplate(port) }
   const flyFile: DeployFile = { path: 'fly.toml', contents: flyTomlTemplate(appName, port) }
   const railwayFile: DeployFile = { path: 'railway.json', contents: railwayJsonTemplate() }
-  const vercelFile: DeployFile = { path: 'vercel.json', contents: vercelJsonTemplate() }
-
   switch (target) {
     case 'docker':
       return [dockerFile]
@@ -162,10 +147,8 @@ function filesForTarget(target: DeployTarget, appName: string, port: number): De
       return [dockerFile, flyFile]
     case 'railway':
       return [dockerFile, railwayFile]
-    case 'vercel':
-      return [vercelFile]
     case 'all':
-      return [dockerFile, flyFile, railwayFile, vercelFile]
+      return [dockerFile, flyFile, railwayFile]
     default: {
       const exhaustive: never = target
       throw new Error(`Unsupported deploy target: ${exhaustive}`)

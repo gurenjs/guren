@@ -2017,12 +2017,12 @@ const upgradeCommand = defineCommand({
 const deployCommand = defineCommand({
   meta: {
     name: 'deploy',
-    description: 'Generate deployment recipes for Docker, Fly.io, Railway, or Vercel.',
+    description: 'Generate deployment recipes for Docker, Fly.io, or Railway.',
   },
   args: {
     target: {
       type: 'string',
-      description: 'Deployment target (docker, fly, railway, vercel, all)',
+      description: 'Deployment target (docker, fly, railway, all)',
       default: 'docker',
     },
     app: {
@@ -2041,9 +2041,9 @@ const deployCommand = defineCommand({
   },
   async run({ args }) {
     const rawTarget = String(args.target ?? 'docker')
-    const allowedTargets = new Set<DeployTarget>(['docker', 'fly', 'railway', 'vercel', 'all'])
+    const allowedTargets = new Set<DeployTarget>(['docker', 'fly', 'railway', 'all'])
     if (!allowedTargets.has(rawTarget as DeployTarget)) {
-      throw new Error(`Invalid deploy target "${rawTarget}". Expected one of: docker, fly, railway, vercel, all.`)
+      throw new Error(`Invalid deploy target "${rawTarget}". Expected one of: docker, fly, railway, all. For Vercel, use \`bunx guren plugin @guren/plugin-vercel\`.`)
     }
 
     const port = args.port === undefined ? undefined : Number(args.port)

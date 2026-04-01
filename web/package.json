@@ -22,6 +22,7 @@
     "@guren/core": "workspace:*",
     "@guren/inertia-client": "workspace:*",
     "@guren/orm": "workspace:*",
+    "@guren/plugin-vercel": "workspace:*",
     "@guren/testing": "workspace:*",
     "@inertiajs/core": "^2.3.18",
     "@inertiajs/react": "^2.3.18",

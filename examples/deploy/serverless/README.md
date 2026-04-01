@@ -39,6 +39,8 @@ Cloudflare Workers use the `workerd` runtime, which lacks several Node.js APIs t
 
 Vercel Edge Functions run on V8 isolates (similar limitations to Workers). Additionally, Guren relies on Bun-specific APIs for hashing and file operations that are unavailable in the Edge runtime.
 
+> **Vercel Bun Runtime:** While Edge Functions are unsupported, SSR apps can deploy to Vercel's Bun serverless runtime via the official `@guren/plugin-vercel` plugin. See the [Deployment Guide](../../docs/en/guides/deployment.md#vercel-serverless) for details.
+
 ### Deno Deploy
 
 While Deno has broader Node.js compatibility, Guren uses Bun-native APIs (`Bun.file`, `Bun.password`, etc.) that do not have Deno equivalents.

@@ -206,6 +206,17 @@ bun run build
 npm publish
 ```
 
+## Installing Official Plugins
+
+Official plugins (`@guren/plugin-*`) can be installed via the CLI, which patches `src/app.ts` and scaffolds any extra files automatically:
+
+```bash
+bunx guren plugin @guren/plugin-vercel
+bun add @guren/plugin-vercel
+```
+
+The `plugin` command adds the provider import and registers it in `createApp({ providers })` for you.
+
 ## Usage in a Guren Application
 
 Once published, users install and register the plugin:

@@ -118,6 +118,19 @@ bun run build
 
 `src/main.ts` reads the generated manifest files through `@guren/core/runtime` to populate `GUREN_INERTIA_ENTRY`, `GUREN_INERTIA_STYLES`, and `GUREN_INERTIA_SSR_ENTRY`, enabling Inertia's server-side rendering path by default.
 
+### Deploying To Vercel
+
+SSR web apps can opt into Vercel support through the official plugin:
+
+```bash
+bunx guren plugin @guren/plugin-vercel
+bun add @guren/plugin-vercel
+bun run vercel:build
+vercel deploy --prebuilt
+```
+
+This keeps the default starter lean while giving Vercel users a maintained Build Output API integration for Bun.
+
 ## Project Structure
 
 - `packages/core/` – framework runtime, routing, controllers, middleware
