@@ -26,6 +26,7 @@ export interface BuildVercelOutputOptions {
   entrypoint?: PathLike
   outputDir?: PathLike
   publicDir?: PathLike
+  docsDir?: PathLike
   ssrDir?: PathLike
   migrationsDir?: PathLike
 }
@@ -50,6 +51,7 @@ export function buildVercelOutput(options: BuildVercelOutputOptions = {}): void 
   const entrypoint = resolvePathLike(options.entrypoint ?? resolve(root, 'src/vercel.ts'))
   const handler = `${basename(entrypoint, extname(entrypoint))}.js`
   const publicDir = resolvePathLike(options.publicDir ?? resolve(root, 'public'))
+  const docsDir = resolvePathLike(options.docsDir ?? resolveNearestDocsDir(root) ?? resolve(root, 'docs'))
   const ssrDir = resolvePathLike(options.ssrDir ?? resolve(root, '.guren/ssr'))
   const migrationsDir = resolvePathLike(options.migrationsDir ?? resolve(root, 'db/migrations'))
 
@@ -111,6 +113,10 @@ export function buildVercelOutput(options: BuildVercelOutputOptions = {}): void 
     cpSync(migrationsDir, resolve(funcDir, 'db/migrations'), { recursive: true })
   }
 
+  if (existsSync(docsDir)) {
+    cpSync(docsDir, resolve(funcDir, 'docs'), { recursive: true })
+  }
+
   if (existsSync(publicDir)) {
     cpSync(publicDir, resolve(out, 'static'), { recursive: true })
   }
@@ -161,6 +167,25 @@ function buildVercelEnvironment(root: string): Record<string, string> {
 
 function resolvePathLike(value: PathLike): string {
   return value instanceof URL ? fileURLToPath(value) : resolve(String(value))
+}
+
+function resolveNearestDocsDir(startDir: string, maxDepth = 6): string | undefined {
+  let currentDir = startDir
+
+  for (let depth = 0; depth < maxDepth; depth += 1) {
+    const candidate = resolve(currentDir, 'docs')
+    if (existsSync(candidate)) {
+      return candidate
+    }
+
+    const parent = resolve(currentDir, '..')
+    if (parent === currentDir) {
+      break
+    }
+    currentDir = parent
+  }
+
+  return undefined
 }
 
 function loadManifest(...paths: string[]): Manifest | undefined {

@@ -55,4 +55,53 @@ describe('@guren/plugin-vercel', () => {
 
     expect(config.handler).toBe('vercel.js')
   })
+
+  it('copies the docs directory into the function bundle', () => {
+    const rootDir = mkdtempSync(join(tmpdir(), 'guren-plugin-vercel-'))
+    tempDirs.push(rootDir)
+
+    const entrypoint = join(rootDir, 'src/index.ts')
+    mkdirSync(join(rootDir, 'src'), { recursive: true })
+    mkdirSync(join(rootDir, 'docs/en/guides'), { recursive: true })
+    writeFileSync(entrypoint, "export default { fetch() { return new Response('ok') } }\n", 'utf8')
+    writeFileSync(join(rootDir, 'docs/en/guides/overview.md'), '# Overview\n\nHello docs.\n', 'utf8')
+
+    buildVercelOutput({
+      rootDir,
+      entrypoint,
+      outputDir: join(rootDir, '.vercel/output'),
+    })
+
+    const copied = readFileSync(
+      join(rootDir, '.vercel/output/functions/index.func/docs/en/guides/overview.md'),
+      'utf8',
+    )
+
+    expect(copied).toContain('Hello docs.')
+  })
+
+  it('finds docs in a parent directory when the app root is nested', () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), 'guren-plugin-vercel-'))
+    tempDirs.push(workspaceDir)
+
+    const rootDir = join(workspaceDir, 'web')
+    const entrypoint = join(rootDir, 'src/index.ts')
+    mkdirSync(join(rootDir, 'src'), { recursive: true })
+    mkdirSync(join(workspaceDir, 'docs/en/guides'), { recursive: true })
+    writeFileSync(entrypoint, "export default { fetch() { return new Response('ok') } }\n", 'utf8')
+    writeFileSync(join(workspaceDir, 'docs/en/guides/overview.md'), '# Overview\n\nParent docs.\n', 'utf8')
+
+    buildVercelOutput({
+      rootDir,
+      entrypoint,
+      outputDir: join(rootDir, '.vercel/output'),
+    })
+
+    const copied = readFileSync(
+      join(rootDir, '.vercel/output/functions/index.func/docs/en/guides/overview.md'),
+      'utf8',
+    )
+
+    expect(copied).toContain('Parent docs.')
+  })
 })
