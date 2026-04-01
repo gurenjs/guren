@@ -128,6 +128,8 @@ describe('create-guren-app CLI', () => {
       await access(join(appRoot, 'app/Services/PostCacheService.ts'))
       await access(join(appRoot, 'config/inertia.ts'))
       await access(join(appRoot, 'smoke.ts'))
+
+      await expect(access(join(appRoot, 'db/migrations/20251103140602_worried_oracle/migration.sql'))).rejects.toThrow()
     } finally {
       await workspace.cleanup()
     }

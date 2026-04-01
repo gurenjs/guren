@@ -1,6 +1,62 @@
 import { describe, expect, it } from 'bun:test'
 import { z } from 'zod'
 import { Router } from '../../src/mvc/Router'
+import { Controller } from '../../src/mvc/Controller'
+
+class StubController extends Controller {
+  async index() { return new Response('index') }
+  async create() { return new Response('create') }
+  async store() { return new Response('store') }
+  async show() { return new Response('show') }
+  async edit() { return new Response('edit') }
+  async update() { return new Response('update') }
+  async destroy() { return new Response('destroy') }
+}
+
+describe('Router resource', () => {
+  it('registers standard CRUD routes', () => {
+    const router = new Router()
+    router.resource('/posts', StubController)
+
+    const defs = router.definitions()
+    const paths = defs.map((d) => `${d.method} ${d.path}`)
+
+    expect(paths).toContain('GET /posts')
+    expect(paths).toContain('GET /posts/create')
+    expect(paths).toContain('POST /posts')
+    expect(paths).toContain('GET /posts/:id')
+    expect(paths).toContain('GET /posts/:id/edit')
+    expect(paths).toContain('PUT /posts/:id')
+    expect(paths).toContain('DELETE /posts/:id')
+  })
+
+  it('/create is registered before /:id', () => {
+    const router = new Router()
+    router.resource('/posts', StubController)
+
+    const defs = router.definitions()
+    const getPaths = defs.filter((d) => d.method === 'GET').map((d) => d.path)
+    const createIndex = getPaths.indexOf('/posts/create')
+    const showIndex = getPaths.indexOf('/posts/:id')
+
+    expect(createIndex).toBeGreaterThan(-1)
+    expect(showIndex).toBeGreaterThan(-1)
+    expect(createIndex).toBeLessThan(showIndex)
+  })
+
+  it('respects except option', () => {
+    const router = new Router()
+    router.resource('/posts', StubController, { except: ['create', 'edit'] })
+
+    const defs = router.definitions()
+    const paths = defs.map((d) => `${d.method} ${d.path}`)
+
+    expect(paths).not.toContain('GET /posts/create')
+    expect(paths).not.toContain('GET /posts/:id/edit')
+    expect(paths).toContain('GET /posts')
+    expect(paths).toContain('GET /posts/:id')
+  })
+})
 
 describe('Router route contract metadata', () => {
   it('includes OpenAPI metadata in route definitions for inline handlers', () => {
