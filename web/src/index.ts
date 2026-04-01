@@ -1,4 +1,3 @@
-import 'hono'
 import app, { ready } from './main.js'
 
 await ready
