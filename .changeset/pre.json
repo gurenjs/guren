@@ -12,7 +12,8 @@
     "@guren/orm": "0.2.0-alpha.7",
     "@guren/server": "0.2.0-alpha.7",
     "@guren/testing": "0.2.0-alpha.7",
-    "web": "0.1.0"
+    "web": "0.1.0",
+    "@guren/plugin-vercel": "0.1.0"
   },
   "changesets": [
     "align-rc10",
@@ -22,6 +23,7 @@
     "align-rc14",
     "align-rc15",
     "align-rc16",
+    "align-rc17",
     "align-rc9",
     "busy-bobcats-smell",
     "dull-tips-go",

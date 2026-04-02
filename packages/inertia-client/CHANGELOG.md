@@ -1,5 +1,13 @@
 # @guren/inertia-client
 
+## 1.0.0-rc.12
+
+### Patch Changes
+
+- feat(cli): add @guren/plugin-vercel and remove legacy deploy vercel target
+  fix(create-app,orm,cli): fix blog blueprint SQLite support and DX issues
+  fix(create-app): comment out VITE_DEV_SERVER_URL in template .env
+
 ## 1.0.0-rc.11
 
 ### Patch Changes
