@@ -58,6 +58,10 @@ describe('create-guren-app CLI', () => {
       expect(packageJson.scripts?.typecheck).toBe('tsc --noEmit')
       expect(envExample).toContain('APP_KEY=')
       expect(env).toContain('APP_KEY=base64:')
+      expect(envExample).not.toContain('\nVITE_DEV_SERVER_URL=')
+      expect(env).not.toContain('\nVITE_DEV_SERVER_URL=')
+      expect(envExample).toContain('# VITE_DEV_SERVER_URL=http://localhost:5173')
+      expect(env).toContain('# VITE_DEV_SERVER_URL=http://localhost:5173')
 
       const readme = await readFile(join(appRoot, 'README.md'), 'utf8')
       expect(readme).toContain('# My App')

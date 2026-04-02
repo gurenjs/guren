@@ -98,7 +98,8 @@ The scaffold ships with Tailwind CSS preconfigured. Edit `resources/css/app.css`
 ## Server-Side Rendering
 Each application ships with a default `resources/js/ssr.tsx` entry that calls `renderInertiaServer()` from `@guren/inertia-client`. When you bootstrap the app with `autoConfigureInertiaAssets(app, { importMeta })`, Guren will:
 
-- Point HTML responses at the Vite dev server during development (using `VITE_DEV_SERVER_URL` when available).
+- Start and manage a Vite dev server automatically during development when `bun run dev` boots the app.
+- Use `VITE_DEV_SERVER_URL` only when you explicitly want to point HTML responses at an already-running external Vite dev server.
 - Detect the built client manifest (`public/assets/.vite/manifest.json`) and automatically seed `GUREN_INERTIA_ENTRY`/`GUREN_INERTIA_STYLES` in production.
 - Locate the SSR manifest (`public/assets/.vite/ssr-manifest.json`) and set `GUREN_INERTIA_SSR_ENTRY` / `GUREN_INERTIA_SSR_MANIFEST` so Inertia can render on the server.
 
