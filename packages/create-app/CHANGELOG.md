@@ -1,5 +1,11 @@
 # create-guren-app
 
+## 1.0.0-rc.17
+
+### Patch Changes
+
+- fix(cli,create-app): fix `add resource` generating pgTable in SQLite projects
+
 ## 1.0.0-rc.16
 
 ### Patch Changes
