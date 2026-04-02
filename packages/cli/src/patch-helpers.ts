@@ -165,3 +165,27 @@ export function ensureDrizzleImports(content: string, needed: string[]): string 
 
   return `import { ${missing.sort().join(', ')} } from '@guren/orm/drizzle'\n${content}`
 }
+
+export function ensureSqliteImports(content: string, needed: string[]): string {
+  const importLines = content.split('\n').filter((line) => line.trimStart().startsWith('import '))
+  const importContent = importLines.join('\n')
+
+  const missing = needed.filter(
+    (name) => !new RegExp(`\\b${name}\\b`).test(importContent),
+  )
+
+  if (missing.length === 0) {
+    return content
+  }
+
+  const existingSqliteImport = /import\s*\{([^}]+)\}\s*from\s*['"]drizzle-orm\/sqlite-core['"]/
+  const match = content.match(existingSqliteImport)
+
+  if (match) {
+    const existingNames = match[1].split(',').map((s) => s.trim()).filter(Boolean)
+    const allNames = [...new Set([...existingNames, ...missing])].sort()
+    return content.replace(existingSqliteImport, `import { ${allNames.join(', ')} } from 'drizzle-orm/sqlite-core'`)
+  }
+
+  return `import { ${missing.sort().join(', ')} } from 'drizzle-orm/sqlite-core'\n${content}`
+}

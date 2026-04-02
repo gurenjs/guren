@@ -231,6 +231,7 @@ const command = defineCommand({
     consola.log('')
     consola.info('Generate types and set up database:')
     consola.log('  bun run codegen')
+    consola.log('  bun run db:make')
     consola.log('  bun run db:migrate')
     consola.log('  bun run db:seed')
     consola.log('')
