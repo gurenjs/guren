@@ -9,7 +9,7 @@ import { makeModel } from './make-model'
 import { makeNotification } from './make-notification'
 import { makeRoute } from './make-route'
 import { makeView } from './make-view'
-import { addImport, addProvider, ensureDrizzleImports } from './patch-helpers'
+import { addImport, addProvider, ensureDrizzleImports, ensureSqliteImports } from './patch-helpers'
 import { camelCase, kebabCase, pascalCase, writeFilesSafe, type WriterOptions } from './utils'
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -872,21 +872,43 @@ export default scheduleTasksKernel
   },
 }
 
+async function detectSchemaDialect(content: string): Promise<'sqlite' | 'pg'> {
+  if (content.includes('sqliteTable') || content.includes('drizzle-orm/sqlite-core')) {
+    return 'sqlite'
+  }
+  return 'pg'
+}
+
 async function updateResourceSchema(collection: string, routeName: string): Promise<void> {
   const schemaPath = resolve(process.cwd(), 'db/schema.ts')
   let content = await readFile(schemaPath, 'utf8')
   const schemaIdentifier = camelCase(collection)
   const tableName = routeName.replaceAll('-', '_')
 
-  if (content.includes(`export const ${schemaIdentifier} = pgTable(`)) {
-    return
+  const dialect = await detectSchemaDialect(content)
+
+  if (dialect === 'sqlite') {
+    if (content.includes(`export const ${schemaIdentifier} = sqliteTable(`)) {
+      return
+    }
+
+    content = ensureSqliteImports(content, ['sqliteTable', 'integer', 'text'])
+
+    const schemaBlock = `\nexport const ${schemaIdentifier} = sqliteTable('${tableName}', {\n  id: integer('id').primaryKey({ autoIncrement: true }),\n  title: text('title').notNull(),\n  body: text('body'),\n  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),\n})\n`
+
+    content = `${content.trimEnd()}\n${schemaBlock}`
+  } else {
+    if (content.includes(`export const ${schemaIdentifier} = pgTable(`)) {
+      return
+    }
+
+    content = ensureDrizzleImports(content, ['pgTable', 'serial', 'text', 'timestamp'])
+
+    const schemaBlock = `\nexport const ${schemaIdentifier} = pgTable('${tableName}', {\n  id: serial('id').primaryKey(),\n  title: text('title').notNull(),\n  body: text('body'),\n  createdAt: timestamp('created_at', { withTimezone: false }).defaultNow().notNull(),\n})\n`
+
+    content = `${content.trimEnd()}\n${schemaBlock}`
   }
 
-  content = ensureDrizzleImports(content, ['pgTable', 'serial', 'text', 'timestamp'])
-
-  const schemaBlock = `\nexport const ${schemaIdentifier} = pgTable('${tableName}', {\n  id: serial('id').primaryKey(),\n  title: text('title').notNull(),\n  body: text('body'),\n  createdAt: timestamp('created_at', { withTimezone: false }).defaultNow().notNull(),\n})\n`
-
-  content = `${content.trimEnd()}\n${schemaBlock}`
   await writeFile(schemaPath, content, 'utf8')
 }
 

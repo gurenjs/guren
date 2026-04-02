@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { addImport, addProvider, hasImport, hasAuthProvider, ensureDrizzleImports } from './patch-helpers'
+import { addImport, addProvider, hasImport, hasAuthProvider, ensureDrizzleImports, ensureSqliteImports } from './patch-helpers'
 
 describe('patch-helpers', () => {
   let tempDir: string
@@ -210,6 +210,38 @@ const app = new Application()`
     it('should return content unchanged when needed list is empty', () => {
       const content = `const x = 1\n`
       const result = ensureDrizzleImports(content, [])
+
+      expect(result).toBe(content)
+    })
+  })
+
+  describe('ensureSqliteImports', () => {
+    it('should add missing imports when no SQLite import exists', () => {
+      const content = `const x = 1\n`
+      const result = ensureSqliteImports(content, ['sqliteTable', 'integer', 'text'])
+
+      expect(result).toContain("import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'")
+      expect(result).toContain('const x = 1')
+    })
+
+    it('should merge into existing SQLite import', () => {
+      const content = `import { sqliteTable, integer } from 'drizzle-orm/sqlite-core'\n\nexport const users = sqliteTable('users', {})\n`
+      const result = ensureSqliteImports(content, ['sqliteTable', 'integer', 'text'])
+
+      expect(result).toContain("import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'")
+      expect(result).not.toContain("import { sqliteTable, integer }")
+    })
+
+    it('should not modify content when all imports already present', () => {
+      const content = `import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'\n\nexport const users = sqliteTable('users', {})\n`
+      const result = ensureSqliteImports(content, ['sqliteTable', 'integer', 'text'])
+
+      expect(result).toBe(content)
+    })
+
+    it('should return content unchanged when needed list is empty', () => {
+      const content = `const x = 1\n`
+      const result = ensureSqliteImports(content, [])
 
       expect(result).toBe(content)
     })
