@@ -1,5 +1,12 @@
 # @guren/example-api
 
+## 0.1.1-rc.9
+
+### Patch Changes
+
+- Updated dependencies
+  - @guren/cli@1.0.0-rc.15
+
 ## 0.1.1-rc.8
 
 ### Patch Changes
