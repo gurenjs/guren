@@ -20,6 +20,7 @@ jobs:
           --health-retries 5
     env:
       REDIS_URL: redis://localhost:6379
+      APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
 
     steps:
       # ----------------------------------------------------------------
@@ -123,6 +124,7 @@ jobs:
           --health-retries 5
     env:
       DATABASE_URL: postgres://guren:guren@localhost:54322/guren
+      APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
 
     steps:
       - uses: actions/checkout@v6
@@ -139,8 +141,17 @@ jobs:
       - name: Generate route types
         run: bun run build:routes
 
+      - name: Build blog frontend
+        run: bun run --cwd examples/blog build
+
       - name: Install Playwright browsers
         run: cd examples/blog && bunx playwright install --with-deps chromium
+
+      - name: Set up blog .env
+        run: |
+          cp examples/blog/.env.example examples/blog/.env
+          sed -i "s/^APP_KEY=$/APP_KEY=$APP_KEY/" examples/blog/.env
+          sed -i "/^VITE_DEV_SERVER_URL=/d" examples/blog/.env
 
       - name: Run migrations and seed
         working-directory: examples/blog
@@ -149,6 +160,8 @@ jobs:
           bun ../../packages/cli/src/bin.ts db:seed --force
 
       - name: Run E2E tests
+        env:
+          NODE_ENV: production
         run: bun run --cwd examples/blog e2e
 
   web-app:
