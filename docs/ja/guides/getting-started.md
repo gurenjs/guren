@@ -86,7 +86,7 @@ docker run --name guren-postgres \
   -e POSTGRES_PASSWORD=guren \
   -e POSTGRES_DB=guren \
   -p 54322:5432 \
-  -d postgres:15
+  -d postgres:17
 ```
 
 `.env` の `DATABASE_URL` を `postgres://guren:guren@localhost:54322/guren` に変更し、`bun run db:migrate` を再実行してください。
