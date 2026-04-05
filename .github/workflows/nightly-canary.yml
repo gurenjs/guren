@@ -18,8 +18,22 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      postgres:
+        image: postgres:17-alpine
+        ports:
+          - 54322:5432
+        env:
+          POSTGRES_USER: guren
+          POSTGRES_PASSWORD: guren
+          POSTGRES_DB: guren
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
       REDIS_URL: redis://localhost:6379
+      DATABASE_URL: postgres://guren:guren@localhost:54322/guren
       APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
 
     steps:
@@ -110,7 +124,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:15-alpine
+        image: postgres:17-alpine
         ports:
           - 54322:5432
         env:

@@ -125,7 +125,7 @@ jobs:
     # The blog app also disables Secure cookies when CI is set (HTTP, not HTTPS).
     services:
       postgres:
-        image: postgres:15-alpine
+        image: postgres:17-alpine
         ports:
           - 54322:5432
         env:

@@ -138,7 +138,7 @@ services:
       retries: 3
 
   postgres:
-    image: postgres:16
+    image: postgres:17
     volumes:
       - pgdata:/var/lib/postgresql/data
     environment:

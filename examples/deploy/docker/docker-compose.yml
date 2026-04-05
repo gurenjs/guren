@@ -11,7 +11,7 @@ services:
         condition: service_healthy
 
   postgres:
-    image: postgres:15-alpine
+    image: postgres:17-alpine
     environment:
       POSTGRES_USER: guren
       POSTGRES_PASSWORD: guren

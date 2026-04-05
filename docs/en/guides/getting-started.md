@@ -85,7 +85,7 @@ docker run --name guren-postgres \
   -e POSTGRES_PASSWORD=guren \
   -e POSTGRES_DB=guren \
   -p 54322:5432 \
-  -d postgres:15
+  -d postgres:17
 ```
 
 Stop the container with `docker stop guren-postgres` when you are done. If you already have a database, just update `DATABASE_URL` instead.
