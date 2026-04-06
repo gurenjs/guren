@@ -152,6 +152,7 @@ async function main() {
   }
 
   console.log('All benchmarks within thresholds.')
+  process.exit(0)
 }
 
 main().catch((err) => {
