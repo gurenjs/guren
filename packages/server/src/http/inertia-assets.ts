@@ -6,6 +6,7 @@ import type { Application } from './Application'
 import { createStaticRewrite, registerDevAssets, type DevAssetsOptions } from './dev-assets'
 import { registerRootPublicAssets } from './public-assets'
 import { parseImportMap } from '../support/import-map'
+import { hash } from '../encryption/Hash'
 
 export interface InertiaAssetsOptions extends DevAssetsOptions {
   /** Default stylesheet entry embedded into Inertia responses. */
@@ -212,6 +213,13 @@ export function autoConfigureInertiaAssets(app: Application, options: AutoConfig
   const clientEntryFile = getManifestFile(clientEntry)
   const clientCssFiles = getManifestCss(clientEntry)
 
+  if (clientManifest?.__raw__) {
+    setEnvIfUserDidNotProvide(
+      'GUREN_INERTIA_VERSION',
+      hash(clientManifest.__raw__, 'sha1').slice(0, 12),
+    )
+  }
+
   if (clientEntryFile) {
     setEnvIfUserDidNotProvide('GUREN_INERTIA_ENTRY', `/public/assets/${clientEntryFile.replace(/^\//u, '')}`)
   }
@@ -276,6 +284,7 @@ type InertiaEnvKey =
   | 'GUREN_INERTIA_STYLES'
   | 'GUREN_INERTIA_SSR_ENTRY'
   | 'GUREN_INERTIA_SSR_MANIFEST'
+  | 'GUREN_INERTIA_VERSION'
 
 function captureInertiaEnvFlags(): Record<InertiaEnvKey, boolean> {
   return {
@@ -283,6 +292,7 @@ function captureInertiaEnvFlags(): Record<InertiaEnvKey, boolean> {
     GUREN_INERTIA_STYLES: process.env.GUREN_INERTIA_STYLES !== undefined,
     GUREN_INERTIA_SSR_ENTRY: process.env.GUREN_INERTIA_SSR_ENTRY !== undefined,
     GUREN_INERTIA_SSR_MANIFEST: process.env.GUREN_INERTIA_SSR_MANIFEST !== undefined,
+    GUREN_INERTIA_VERSION: process.env.GUREN_INERTIA_VERSION !== undefined,
   }
 }
 
@@ -331,7 +341,7 @@ type ViteManifestEntryObject = {
 
 type ViteManifestValue = ViteManifestEntryObject | string[]
 
-type ViteManifest = Record<string, ViteManifestValue> & { __path__?: string }
+type ViteManifest = Record<string, ViteManifestValue> & { __path__?: string; __raw__?: string }
 
 function loadViteManifest(candidatePaths: string[], label: 'client' | 'SSR'): ViteManifest | undefined {
   const command = label === 'SSR' ? 'bunx vite build --ssr' : 'bunx vite build'
@@ -342,6 +352,10 @@ function loadViteManifest(candidatePaths: string[], label: 'client' | 'SSR'): Vi
       const manifest = JSON.parse(raw) as ViteManifest
       Object.defineProperty(manifest, '__path__', {
         value: manifestPath,
+        enumerable: false,
+      })
+      Object.defineProperty(manifest, '__raw__', {
+        value: raw,
         enumerable: false,
       })
       return manifest

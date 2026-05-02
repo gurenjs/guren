@@ -63,16 +63,40 @@ export async function inertia(
   props: Record<string, unknown>,
   options: InertiaOptions = {}
 ): Promise<Response> {
+  const resolvedVersion =
+    options.version ?? process.env.GUREN_INERTIA_VERSION ?? undefined;
+
   const page: InertiaPagePayload = {
     component,
     props,
     url: options.url ?? "",
-    version: options.version,
+    version: resolvedVersion,
   };
 
   const request = options.request;
   const isInertiaVisit = Boolean(request?.headers.get("X-Inertia"));
   const prefersJson = request ? acceptsJson(request) : false;
+  const versionHeader: Record<string, string> = resolvedVersion
+    ? { "X-Inertia-Version": resolvedVersion }
+    : {};
+
+  if (
+    request &&
+    resolvedVersion &&
+    isInertiaVisit &&
+    request.method === "GET"
+  ) {
+    const clientVersion = request.headers.get("X-Inertia-Version");
+    if (clientVersion !== resolvedVersion) {
+      return new Response(null, {
+        status: 409,
+        headers: {
+          "X-Inertia-Location": options.url ?? request.url,
+          Vary: "Accept",
+        },
+      });
+    }
+  }
 
   if (isInertiaVisit || prefersJson) {
     return new Response(serializePage(page), {
@@ -81,7 +105,7 @@ export async function inertia(
         "Content-Type": "application/json; charset=utf-8",
         "X-Inertia": "true",
         Vary: "Accept",
-        ...(options.version ? { "X-Inertia-Version": options.version } : {}),
+        ...versionHeader,
         ...options.headers,
       },
     });
@@ -95,7 +119,7 @@ export async function inertia(
       "Content-Type": "text/html; charset=utf-8",
       "X-Inertia": "true",
       Vary: "Accept",
-      ...(options.version ? { "X-Inertia-Version": options.version } : {}),
+      ...versionHeader,
       ...options.headers,
     },
   });
