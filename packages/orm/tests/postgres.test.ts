@@ -40,9 +40,7 @@ function createMigrationsFolder(withMigrations: boolean): string {
 
 describe('createPostgresDatabase', () => {
   it('runs migrations and returns a configured database', async () => {
-    const schema = { users: {} }
     const database = createPostgresDatabase({
-      schema,
       migrationsFolder: createMigrationsFolder(true),
       connectionString: () => 'postgres://example',
     })
@@ -51,13 +49,11 @@ describe('createPostgresDatabase', () => {
     expect(migrateMock).toHaveBeenCalled()
 
     const db = await database.getDatabase()
-    expect(db).toMatchObject({ config: { schema } })
+    expect(db).toMatchObject({ config: { client: expect.anything() } })
   })
 
   it('configures the Drizzle adapter', async () => {
-    const schema = { users: {} }
     const database = createPostgresDatabase({
-      schema,
       migrationsFolder: createMigrationsFolder(true),
       connectionString: () => 'postgres://example',
     })
@@ -75,7 +71,6 @@ describe('createPostgresDatabase', () => {
   it('skips migrations when drizzle metadata is missing', async () => {
     const migrationsFolder = createMigrationsFolder(false)
     const database = createPostgresDatabase({
-      schema: {},
       migrationsFolder,
       connectionString: () => 'postgres://example',
     })
@@ -89,7 +84,6 @@ describe('createPostgresDatabase', () => {
   it('runs migrations when drizzle metadata exists', async () => {
     const migrationsFolder = createMigrationsFolder(true)
     const database = createPostgresDatabase({
-      schema: {},
       migrationsFolder,
       connectionString: () => 'postgres://example',
     })
@@ -102,7 +96,6 @@ describe('createPostgresDatabase', () => {
 
   it('throws when seeders folder is missing', async () => {
     const database = createPostgresDatabase({
-      schema: {},
       migrationsFolder: createMigrationsFolder(true),
       connectionString: () => 'postgres://example',
     })

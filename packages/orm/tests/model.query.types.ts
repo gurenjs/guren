@@ -16,10 +16,7 @@ class User extends Model<UserRecord> {
 
 class FactoryUser extends defineModel(users) {}
 
-const schema = { users }
-type Schema = typeof schema
-
-declare const db: ReturnType<typeof drizzle<typeof schema>>
+declare const db: ReturnType<typeof drizzle>
 
 // Should accept a Drizzle database without type errors.
 User.query(db).execute()

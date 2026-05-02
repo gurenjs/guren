@@ -8,25 +8,31 @@ import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { runSeeders } from './seeder'
 
 type ConnectionResolver = string | (() => string | undefined)
+type DrizzleConfig = Exclude<Parameters<typeof drizzle>[0], string>
 
-export interface PostgresDatabaseOptions<TSchema extends Record<string, unknown>> {
-  schema: TSchema
+export interface PostgresDatabaseOptions {
   migrationsFolder: string | URL
   connectionString?: ConnectionResolver
   clientOptions?: postgres.Options<Record<string, never>>
   seedersFolder?: string | URL
+  /**
+   * Drizzle relations for RQB v2 (`db.query.*`).
+   * Build with `defineRelations(schema, ...)` from `drizzle-orm`,
+   * or with `relations()` from `drizzle-orm/_relations` for the RQB v1 partial-upgrade path.
+   */
+  relations?: Record<string, unknown>
 }
 
-export interface PostgresDatabase<TSchema extends Record<string, unknown>> {
-  getDatabase(): Promise<PostgresJsDatabase<TSchema>>
+export interface PostgresDatabase {
+  getDatabase(): Promise<PostgresJsDatabase>
   migrateDatabase(): Promise<void>
   closeDatabase(): Promise<void>
   configureOrm(): Promise<void>
   seedDatabase(): Promise<void>
 }
 
-export function createPostgresDatabase<TSchema extends Record<string, unknown>>(options: PostgresDatabaseOptions<TSchema>): PostgresDatabase<TSchema> {
-  const { schema, migrationsFolder, connectionString, clientOptions, seedersFolder } = options
+export function createPostgresDatabase(options: PostgresDatabaseOptions): PostgresDatabase {
+  const { migrationsFolder, connectionString, clientOptions, seedersFolder, relations } = options
 
   const resolvedMigrationsFolder =
     migrationsFolder instanceof URL ? fileURLToPath(migrationsFolder) : resolve(String(migrationsFolder))
@@ -34,7 +40,7 @@ export function createPostgresDatabase<TSchema extends Record<string, unknown>>(
     seedersFolder == null ? undefined : seedersFolder instanceof URL ? fileURLToPath(seedersFolder) : resolve(String(seedersFolder))
 
   let migrationsPromise: Promise<void> | undefined
-  let databasePromise: Promise<PostgresJsDatabase<TSchema>> | undefined
+  let databasePromise: Promise<PostgresJsDatabase> | undefined
   let client: ReturnType<typeof postgres> | undefined
 
   function resolveConnectionString(): string {
@@ -65,7 +71,7 @@ export function createPostgresDatabase<TSchema extends Record<string, unknown>>(
       })
 
       try {
-        const db = drizzle({ client: migrationClient, schema })
+        const db = drizzle({ client: migrationClient, ...(relations ? { relations } : {}) } as DrizzleConfig)
         await migrate(db, { migrationsFolder: resolvedMigrationsFolder })
       } finally {
         await migrationClient.end({ timeout: 0 })
@@ -81,12 +87,12 @@ export function createPostgresDatabase<TSchema extends Record<string, unknown>>(
     await migrationsPromise
   }
 
-  async function getDatabase(): Promise<PostgresJsDatabase<TSchema>> {
+  async function getDatabase(): Promise<PostgresJsDatabase> {
     if (databasePromise) {
       return databasePromise
     }
 
-    const promise = (async () => {
+    const promise = (async (): Promise<PostgresJsDatabase> => {
       await migrateOnce()
       const url = resolveConnectionString()
       client = postgres(url, {
@@ -94,7 +100,7 @@ export function createPostgresDatabase<TSchema extends Record<string, unknown>>(
         ...clientOptions,
       })
 
-      return drizzle({ client, schema })
+      return drizzle({ client, ...(relations ? { relations } : {}) } as DrizzleConfig) as unknown as PostgresJsDatabase
     })()
 
     databasePromise = promise.catch((error) => {

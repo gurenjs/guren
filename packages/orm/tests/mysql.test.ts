@@ -39,9 +39,7 @@ function createMigrationsFolder(withMigrations: boolean): string {
 
 describe('createMySqlDatabase', () => {
   it('runs migrations and returns a configured database', async () => {
-    const schema = { users: {} }
     const database = createMySqlDatabase({
-      schema,
       migrationsFolder: createMigrationsFolder(true),
       connectionString: () => 'mysql://example',
     })
@@ -53,16 +51,13 @@ describe('createMySqlDatabase', () => {
     expect(db).toMatchObject({
       config: {
         connection: { uri: 'mysql://example' },
-        schema,
         mode: 'default',
       },
     })
   })
 
   it('configures the Drizzle adapter', async () => {
-    const schema = { users: {} }
     const database = createMySqlDatabase({
-      schema,
       migrationsFolder: createMigrationsFolder(true),
       connectionString: () => 'mysql://example',
     })
@@ -80,7 +75,6 @@ describe('createMySqlDatabase', () => {
   it('skips migrations when drizzle metadata is missing', async () => {
     const migrationsFolder = createMigrationsFolder(false)
     const database = createMySqlDatabase({
-      schema: {},
       migrationsFolder,
       connectionString: () => 'mysql://example',
     })
@@ -94,7 +88,6 @@ describe('createMySqlDatabase', () => {
   it('runs migrations when drizzle metadata exists', async () => {
     const migrationsFolder = createMigrationsFolder(true)
     const database = createMySqlDatabase({
-      schema: {},
       migrationsFolder,
       connectionString: () => 'mysql://example',
     })
@@ -107,7 +100,6 @@ describe('createMySqlDatabase', () => {
 
   it('throws when seeders folder is missing', async () => {
     const database = createMySqlDatabase({
-      schema: {},
       migrationsFolder: createMigrationsFolder(true),
       connectionString: () => 'mysql://example',
     })

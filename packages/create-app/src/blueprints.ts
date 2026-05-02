@@ -286,10 +286,8 @@ function generateDatabaseConfig(driver: DatabaseDriver): string {
 
   if (driver === 'postgres') {
     return `import { createPostgresDatabase } from '@guren/orm'
-import * as schema from '../db/schema.js'
 
 const database = createPostgresDatabase({
-  schema,
   migrationsFolder: new URL('../db/migrations', import.meta.url),
   seedersFolder: new URL('../db/seeders', import.meta.url),
   connectionString: () => process.env.DATABASE_URL ?? '${url}',
@@ -301,10 +299,8 @@ export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDa
 
   if (driver === 'mysql') {
     return `import { createMySqlDatabase } from '@guren/orm'
-import * as schema from '../db/schema.js'
 
 const database = createMySqlDatabase({
-  schema,
   migrationsFolder: new URL('../db/migrations', import.meta.url),
   seedersFolder: new URL('../db/seeders', import.meta.url),
   connectionString: () => process.env.DATABASE_URL ?? '${url}',
@@ -315,10 +311,8 @@ export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDa
   }
 
   return `import { createSqliteDatabase } from '@guren/orm'
-import * as schema from '../db/schema.js'
 
 const database = createSqliteDatabase({
-  schema,
   migrationsFolder: new URL('../db/migrations', import.meta.url),
   seedersFolder: new URL('../db/seeders', import.meta.url),
   filename: () => process.env.DATABASE_URL ?? '${url}',

@@ -5,13 +5,13 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 const SUPPORTED_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.ts'])
 
-export interface SeederContext<TSchema extends Record<string, unknown>> {
-  db: PostgresJsDatabase<TSchema>
+export interface SeederContext {
+  db: PostgresJsDatabase
 }
 
-export type SeederHandler<TSchema extends Record<string, unknown>> = (context: SeederContext<TSchema>) => unknown
+export type SeederHandler = (context: SeederContext) => unknown
 
-function normalizeSeeder<TSchema extends Record<string, unknown>>(candidate: unknown): SeederHandler<TSchema> | undefined {
+function normalizeSeeder(candidate: unknown): SeederHandler | undefined {
   if (!candidate) {
     return undefined
   }
@@ -20,27 +20,27 @@ function normalizeSeeder<TSchema extends Record<string, unknown>>(candidate: unk
     if ('prototype' in candidate && typeof (candidate as { prototype: unknown }).prototype === 'object') {
       const prototype = (candidate as { prototype: Record<string, unknown> }).prototype
       if (prototype && typeof prototype.run === 'function') {
-        return async (context: SeederContext<TSchema>) => {
-          const instance = new (candidate as new () => { run(ctx: SeederContext<TSchema>): unknown })()
+        return async (context: SeederContext) => {
+          const instance = new (candidate as new () => { run(ctx: SeederContext): unknown })()
           await instance.run(context)
         }
       }
     }
 
-    return candidate as SeederHandler<TSchema>
+    return candidate as SeederHandler
   }
 
   if (typeof candidate === 'object') {
     const run = (candidate as Record<string, unknown>).run
     if (typeof run === 'function') {
-      return run as SeederHandler<TSchema>
+      return run as SeederHandler
     }
   }
 
   return undefined
 }
 
-async function loadSeederModule<TSchema extends Record<string, unknown>>(path: string): Promise<SeederHandler<TSchema> | undefined> {
+async function loadSeederModule(path: string): Promise<SeederHandler | undefined> {
   const module = await import(pathToFileURL(path).href)
   const candidates = [
     module.default,
@@ -51,7 +51,7 @@ async function loadSeederModule<TSchema extends Record<string, unknown>>(path: s
   ]
 
   for (const candidate of candidates) {
-    const handler = normalizeSeeder<TSchema>(candidate)
+    const handler = normalizeSeeder(candidate)
     if (handler) {
       return handler
     }
@@ -60,7 +60,7 @@ async function loadSeederModule<TSchema extends Record<string, unknown>>(path: s
   return undefined
 }
 
-export async function loadSeeders<TSchema extends Record<string, unknown>>(directory: string | URL): Promise<Array<SeederHandler<TSchema>>> {
+export async function loadSeeders(directory: string | URL): Promise<Array<SeederHandler>> {
   const root = directory instanceof URL ? fileURLToPath(directory) : resolve(directory)
   const entries = await readdir(root, { withFileTypes: true })
   const files = entries
@@ -68,10 +68,10 @@ export async function loadSeeders<TSchema extends Record<string, unknown>>(direc
     .map((entry) => resolve(root, entry.name))
     .sort()
 
-  const seeders: Array<SeederHandler<TSchema>> = []
+  const seeders: Array<SeederHandler> = []
 
   for (const file of files) {
-    const handler = await loadSeederModule<TSchema>(file)
+    const handler = await loadSeederModule(file)
     if (handler) {
       seeders.push(handler)
     }
@@ -80,14 +80,14 @@ export async function loadSeeders<TSchema extends Record<string, unknown>>(direc
   return seeders
 }
 
-export async function runSeeders<TSchema extends Record<string, unknown>>(db: PostgresJsDatabase<TSchema>, directory: string | URL): Promise<void> {
-  const seeders = await loadSeeders<TSchema>(directory)
+export async function runSeeders(db: PostgresJsDatabase, directory: string | URL): Promise<void> {
+  const seeders = await loadSeeders(directory)
 
   for (const handler of seeders) {
     await handler({ db })
   }
 }
 
-export function defineSeeder<TSchema extends Record<string, unknown>>(handler: SeederHandler<TSchema>): SeederHandler<TSchema> {
+export function defineSeeder(handler: SeederHandler): SeederHandler {
   return handler
 }

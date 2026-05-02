@@ -8,25 +8,31 @@ import { runSeeders } from './seeder'
 
 type ConnectionResolver = string | (() => string | undefined)
 type MySqlConnectionOptions = Record<string, unknown>
+type DrizzleConfig = Exclude<Parameters<typeof drizzle>[0], string>
 
-export interface MySqlDatabaseOptions<TSchema extends Record<string, unknown>> {
-  schema: TSchema
+export interface MySqlDatabaseOptions {
   migrationsFolder: string | URL
   connectionString?: ConnectionResolver
   clientOptions?: MySqlConnectionOptions
   seedersFolder?: string | URL
+  /**
+   * Drizzle relations for RQB v2 (`db.query.*`).
+   * Build with `defineRelations(schema, ...)` from `drizzle-orm`,
+   * or with `relations()` from `drizzle-orm/_relations` for the RQB v1 partial-upgrade path.
+   */
+  relations?: Record<string, unknown>
 }
 
-export interface MySqlDatabase<TSchema extends Record<string, unknown>> {
-  getDatabase(): Promise<MySql2Database<TSchema>>
+export interface MySqlDatabase {
+  getDatabase(): Promise<MySql2Database>
   migrateDatabase(): Promise<void>
   closeDatabase(): Promise<void>
   configureOrm(): Promise<void>
   seedDatabase(): Promise<void>
 }
 
-export function createMySqlDatabase<TSchema extends Record<string, unknown>>(options: MySqlDatabaseOptions<TSchema>): MySqlDatabase<TSchema> {
-  const { schema, migrationsFolder, connectionString, clientOptions, seedersFolder } = options
+export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabase {
+  const { migrationsFolder, connectionString, clientOptions, seedersFolder, relations } = options
 
   const resolvedMigrationsFolder =
     migrationsFolder instanceof URL ? fileURLToPath(migrationsFolder) : resolve(String(migrationsFolder))
@@ -34,8 +40,8 @@ export function createMySqlDatabase<TSchema extends Record<string, unknown>>(opt
     seedersFolder == null ? undefined : seedersFolder instanceof URL ? fileURLToPath(seedersFolder) : resolve(String(seedersFolder))
 
   let migrationsPromise: Promise<void> | undefined
-  let databasePromise: Promise<MySql2Database<TSchema>> | undefined
-  let database: MySql2Database<TSchema> | undefined
+  let databasePromise: Promise<MySql2Database> | undefined
+  let database: MySql2Database | undefined
 
   function resolveConnectionString(): string {
     const value = typeof connectionString === 'function' ? connectionString() : connectionString
@@ -64,9 +70,9 @@ export function createMySqlDatabase<TSchema extends Record<string, unknown>>(opt
           uri: url,
           ...clientOptions,
         },
-        schema,
         mode: 'default',
-      })
+        ...(relations ? { relations } : {}),
+      } as DrizzleConfig)
 
       try {
         await migrate(migrationDb, { migrationsFolder: resolvedMigrationsFolder })
@@ -84,12 +90,12 @@ export function createMySqlDatabase<TSchema extends Record<string, unknown>>(opt
     await migrationsPromise
   }
 
-  async function getDatabase(): Promise<MySql2Database<TSchema>> {
+  async function getDatabase(): Promise<MySql2Database> {
     if (databasePromise) {
       return databasePromise
     }
 
-    const promise = (async () => {
+    const promise = (async (): Promise<MySql2Database> => {
       await migrateOnce()
       const url = resolveConnectionString()
       const db = drizzle({
@@ -97,9 +103,9 @@ export function createMySqlDatabase<TSchema extends Record<string, unknown>>(opt
           uri: url,
           ...clientOptions,
         },
-        schema,
         mode: 'default',
-      })
+        ...(relations ? { relations } : {}),
+      } as DrizzleConfig) as unknown as MySql2Database
       database = db
       return db
     })()
