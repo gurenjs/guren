@@ -35,10 +35,8 @@ Use `createMySqlDatabase` when your app runs on MySQL-compatible databases.
 ```ts
 // config/database.ts
 import { createMySqlDatabase } from '@guren/orm'
-import * as schema from '../db/schema.js'
 
 const database = createMySqlDatabase({
-  schema,
   migrationsFolder: new URL('../db/migrations', import.meta.url),
   seedersFolder: new URL('../db/seeders', import.meta.url),
   connectionString: () => process.env.DATABASE_URL,
@@ -48,6 +46,9 @@ export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDa
 ```
 
 Like the PostgreSQL and SQLite adapters, the MySQL adapter exposes the same runtime API (`getDatabase`, `migrateDatabase`, `configureOrm`, `seedDatabase`) so switching drivers is mostly an import/configuration change.
+
+> [!TIP]
+> If you want to use Drizzle's relational queries (`db.query.<table>.findMany(...)`), pass a `relations` option built with `defineRelations(schema, ...)` from `drizzle-orm` (RQB v2). The `Model` API in Guren does not require this.
 
 ## Defining Models
 
@@ -622,10 +623,8 @@ Guren supports SQLite out of the box via Bun's built-in SQLite driver. New proje
 ```ts
 // config/database.ts
 import { createSqliteDatabase } from '@guren/orm'
-import * as schema from '../db/schema.js'
 
 const database = createSqliteDatabase({
-  schema,
   migrationsFolder: new URL('../db/migrations', import.meta.url),
   seedersFolder: new URL('../db/seeders', import.meta.url),
   filename: () => process.env.DATABASE_URL ?? './data/guren.db',

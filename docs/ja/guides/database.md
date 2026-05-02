@@ -53,10 +53,8 @@ Guren は Bun 組み込みの SQLite ドライバを使って、SQLite をその
 ```ts
 // config/database.ts
 import { createSqliteDatabase } from '@guren/orm'
-import * as schema from '../db/schema.js'
 
 const database = createSqliteDatabase({
-  schema,
   migrationsFolder: new URL('../db/migrations', import.meta.url),
   seedersFolder: new URL('../db/seeders', import.meta.url),
   filename: () => process.env.DATABASE_URL ?? './data/guren.db',
@@ -77,10 +75,8 @@ MySQL（および互換データベース）を使う場合は `createMySqlDatab
 ```ts
 // config/database.ts
 import { createMySqlDatabase } from '@guren/orm'
-import * as schema from '../db/schema.js'
 
 const database = createMySqlDatabase({
-  schema,
   migrationsFolder: new URL('../db/migrations', import.meta.url),
   seedersFolder: new URL('../db/seeders', import.meta.url),
   connectionString: () => process.env.DATABASE_URL,
@@ -90,6 +86,9 @@ export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDa
 ```
 
 MySQL アダプタも PostgreSQL / SQLite と同じランタイム API（`getDatabase`, `migrateDatabase`, `configureOrm`, `seedDatabase`）を提供するため、切り替え時は主に import と接続設定の変更だけで済みます。
+
+> [!TIP]
+> Drizzle のリレーショナルクエリ (`db.query.<table>.findMany(...)`) を使いたい場合は、`drizzle-orm` の `defineRelations(schema, ...)` で生成した値を `relations` オプションに渡してください (RQB v2)。Guren の `Model` API ではこの設定は不要です。
 
 ## マイグレーションの生成
 Guren CLI は drizzle-kit をラップしており、Drizzle スキーマから SQL ファイルを直接生成できます。
