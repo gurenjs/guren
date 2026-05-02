@@ -51,3 +51,124 @@ describe('InertiaEngine SSR integration', () => {
     expect(body).toContain('SSR')
   })
 })
+
+describe('Inertia asset version mismatch', () => {
+  const buildInertiaRequest = (
+    overrides: { method?: string; version?: string | null } = {},
+  ): Request =>
+    new Request('http://localhost/dashboard', {
+      method: overrides.method ?? 'GET',
+      headers: {
+        'X-Inertia': 'true',
+        ...(overrides.version === null
+          ? {}
+          : { 'X-Inertia-Version': overrides.version ?? 'v1' }),
+      },
+    })
+
+  it('returns 200 when client version matches', async () => {
+    const response = await inertia(
+      'Dashboard',
+      {},
+      {
+        url: '/dashboard',
+        version: 'v1',
+        request: buildInertiaRequest({ version: 'v1' }),
+      },
+    )
+    expect(response.status).toBe(200)
+    expect(response.headers.get('X-Inertia-Version')).toBe('v1')
+  })
+
+  it('returns 409 with X-Inertia-Location when GET version mismatches', async () => {
+    const response = await inertia(
+      'Dashboard',
+      {},
+      {
+        url: '/dashboard',
+        version: 'v1',
+        request: buildInertiaRequest({ version: 'v0' }),
+      },
+    )
+    expect(response.status).toBe(409)
+    expect(response.headers.get('X-Inertia-Location')).toBe('/dashboard')
+  })
+
+  it('falls back to request.url for X-Inertia-Location when options.url is absent', async () => {
+    const response = await inertia(
+      'Dashboard',
+      {},
+      {
+        version: 'v1',
+        request: buildInertiaRequest({ version: 'v0' }),
+      },
+    )
+    expect(response.status).toBe(409)
+    expect(response.headers.get('X-Inertia-Location')).toBe('http://localhost/dashboard')
+  })
+
+  it('returns 409 when client omits X-Inertia-Version', async () => {
+    const response = await inertia(
+      'Dashboard',
+      {},
+      {
+        version: 'v1',
+        request: buildInertiaRequest({ version: null }),
+      },
+    )
+    expect(response.status).toBe(409)
+  })
+
+  it('does not return 409 for non-GET requests', async () => {
+    const response = await inertia(
+      'Dashboard',
+      {},
+      {
+        version: 'v1',
+        request: buildInertiaRequest({ method: 'POST', version: 'v0' }),
+      },
+    )
+    expect(response.status).not.toBe(409)
+  })
+
+  it('does not return 409 for non-Inertia requests', async () => {
+    const request = new Request('http://localhost/dashboard', {
+      method: 'GET',
+      headers: { 'X-Inertia-Version': 'v0' },
+    })
+    const response = await inertia('Dashboard', {}, { version: 'v1', request })
+    expect(response.status).not.toBe(409)
+  })
+
+  it('skips version check when no version is configured', async () => {
+    const response = await inertia(
+      'Dashboard',
+      {},
+      {
+        request: buildInertiaRequest({ version: 'v0' }),
+      },
+    )
+    expect(response.status).toBe(200)
+  })
+
+  it('reads GUREN_INERTIA_VERSION as fallback', async () => {
+    const original = process.env.GUREN_INERTIA_VERSION
+    process.env.GUREN_INERTIA_VERSION = 'env-v1'
+    try {
+      const response = await inertia(
+        'Dashboard',
+        {},
+        {
+          request: buildInertiaRequest({ version: 'env-v0' }),
+        },
+      )
+      expect(response.status).toBe(409)
+    } finally {
+      if (original === undefined) {
+        delete process.env.GUREN_INERTIA_VERSION
+      } else {
+        process.env.GUREN_INERTIA_VERSION = original
+      }
+    }
+  })
+})
