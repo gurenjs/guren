@@ -26,7 +26,7 @@
     "@guren/testing": "workspace:*",
     "@inertiajs/core": "^2.3.18",
     "@inertiajs/react": "^2.3.18",
-    "drizzle-orm": "0.44.7",
+    "drizzle-orm": "1.0.0-rc.1",
     "marked": "^15.0.11",
     "marked-highlight": "^2.2.3",
     "postgres": "^3.4.3",
@@ -37,7 +37,7 @@
   "devDependencies": {
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "drizzle-kit": "0.27.0",
+    "drizzle-kit": "1.0.0-rc.1",
     "typescript": "^5.4.0",
     "@vitejs/plugin-react": "^6.0.0",
     "vite": "^8.0.0",

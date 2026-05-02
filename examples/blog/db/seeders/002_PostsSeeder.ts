@@ -1,7 +1,7 @@
 import type { SeederContext } from '@guren/orm'
-import { posts, schema } from '../../db/schema.js'
+import { posts } from '../../db/schema.js'
 
-export default async function seed({ db }: SeederContext<typeof schema>): Promise<void> {
+export default async function seed({ db }: SeederContext): Promise<void> {
   await db
     .insert(posts)
     .values([

@@ -6,15 +6,20 @@ import { runSeeders } from './seeder'
 
 type ConnectionResolver = string | (() => string | undefined)
 
-export interface SqliteDatabaseOptions<TSchema extends Record<string, unknown>> {
-  schema: TSchema
+export interface SqliteDatabaseOptions {
   migrationsFolder: string | URL
   /** Path to the SQLite database file. Defaults to `./data/guren.db`. */
   filename?: ConnectionResolver
   seedersFolder?: string | URL
+  /**
+   * Drizzle relations for RQB v2 (`db.query.*`).
+   * Build with `defineRelations(schema, ...)` from `drizzle-orm`,
+   * or with `relations()` from `drizzle-orm/_relations` for the RQB v1 partial-upgrade path.
+   */
+  relations?: Record<string, unknown>
 }
 
-export interface SqliteDatabase<TSchema extends Record<string, unknown>> {
+export interface SqliteDatabase {
   getDatabase(): Promise<unknown>
   migrateDatabase(): Promise<void>
   closeDatabase(): Promise<void>
@@ -22,10 +27,8 @@ export interface SqliteDatabase<TSchema extends Record<string, unknown>> {
   seedDatabase(): Promise<void>
 }
 
-export function createSqliteDatabase<TSchema extends Record<string, unknown>>(
-  options: SqliteDatabaseOptions<TSchema>,
-): SqliteDatabase<TSchema> {
-  const { schema, migrationsFolder, filename, seedersFolder } = options
+export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteDatabase {
+  const { migrationsFolder, filename, seedersFolder, relations } = options
 
   const resolvedMigrationsFolder =
     migrationsFolder instanceof URL ? fileURLToPath(migrationsFolder) : resolve(String(migrationsFolder))
@@ -63,7 +66,8 @@ export function createSqliteDatabase<TSchema extends Record<string, unknown>>(
     sqlite.exec('PRAGMA journal_mode = WAL;')
 
     const { drizzle } = await import('drizzle-orm/bun-sqlite')
-    db = drizzle({ client: sqlite, schema })
+    type DrizzleConfig = NonNullable<Exclude<Parameters<typeof drizzle>[0], string>>
+    db = drizzle({ client: sqlite, ...(relations ? { relations } : {}) } as DrizzleConfig)
     return db
   }
 
