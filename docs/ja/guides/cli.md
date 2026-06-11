@@ -64,8 +64,34 @@ bunx guren add plugin @acme/guren-plugin-audit
 | `make:listener <Name>` | イベントリスナークラスを生成 | `bunx guren make:listener SendWelcomeEmail` |
 | `make:notification <Name>` | 通知クラスを生成 | `bunx guren make:notification InvoicePaid` |
 | `make:mail <Name>` | メールクラスを生成 | `bunx guren make:mail WelcomeEmail` |
+| `make:policy <Name>` | 所有者ベースのデフォルトを備えた認可ポリシーを `app/Policies` に生成 | `bunx guren make:policy Post` |
 
 > **Note:** `make:*` は既存ファイルを上書きしません。必要なら `--force` を付けてください。
+
+## 検査・監査コマンド
+
+リリース前のアプリ検証に使えるコマンドです。AIコーディングエージェント向けにも設計されています(`--json` で機械可読な出力になります)。
+
+| コマンド | 説明 | 例 |
+|---------|------|-----|
+| `check` | ルート・コントローラ・ページ・モデル間の整合性を検証 | `bunx guren check --json` |
+| `audit` | セキュリティ監査: 変更系ルートのバリデーション/認証の欠如、文字列補間付き生SQL、ハードコードされた認証情報、無効化されたセキュリティ既定値、mass assignment 設定を検査 | `bunx guren audit --json` |
+| `doctor` | プロジェクトの健全性レポート(環境変数・設定・生成ファイル)と次のアクション | `bunx guren doctor --next` |
+
+`audit` は失敗(fail)を検出すると非ゼロの終了コードを返すため、CI に組み込めます。
+
+```bash
+bunx guren audit
+```
+
+名前付きミドルウェアで保護されたルート(例: `router.middleware('auth').group(...)`)は保護済みと認識されます。`/login` や `/register` などのゲストフローは認証チェックの対象外です。
+
+誤検出は、対象行またはその直前の行に `// guren-audit-ignore` を置くことで抑制できます:
+
+```ts
+// guren-audit-ignore -- ドキュメント用のサンプル値
+const apiKey = 'example-not-a-real-key'
+```
 
 ## デプロイレシピ生成
 

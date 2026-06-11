@@ -83,8 +83,24 @@ interface RateLimitOptions {
 
   /** レート制限キーのプレフィックス（デフォルト: 'rl:'） */
   keyPrefix?: string
+
+  /** プロキシヘッダー (CF-Connecting-IP, True-Client-IP, X-Real-IP, X-Forwarded-For) からクライアントIPを解決（デフォルト: false） */
+  trustProxy?: boolean
 }
 ```
+
+### プロキシ配下でのデプロイ
+
+アプリが常にリバースプロキシや CDN(Cloudflare、ALB、Nginx)の背後にある場合は、`trustProxy` を有効にすると独自の `keyGenerator` を書かずにクライアント単位の制限ができます:
+
+```ts
+createRateLimitMiddleware({
+  limit: 100,
+  trustProxy: true, // CF-Connecting-IP → True-Client-IP → X-Real-IP → X-Forwarded-For[0] の順で解決
+})
+```
+
+> **警告:** `trustProxy` はすべてのリクエストがプロキシを経由する場合のみ有効にしてください。直接公開されたデプロイではクライアントがヘッダーを偽装してクライアント単位の制限を回避できます。そのためデフォルトは `false` です。
 
 ### 完全な設定例
 

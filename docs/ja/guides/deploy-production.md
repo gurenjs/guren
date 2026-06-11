@@ -183,6 +183,7 @@ docker compose -f docker-compose.production.yml logs app --tail 50
 アプリがデプロイされて稼働したら、以下の追加対策を検討してください:
 
 - **リバースプロキシ** — Nginx や Caddy を Bun の前に配置して TLS 終端と静的アセット配信を担当させる
+- **HSTS** — `NODE_ENV=production` では `Strict-Transport-Security: max-age=31536000` が自動送信されます。`createApp` の `securityHeaders: { hsts: { ... } }` で `includeSubDomains`/`preload` を追加、内部で平文 HTTP を配信する場合は `hsts: false` で無効化できます
 - **プロセス監視** — Docker の `restart: unless-stopped` や systemd などのプロセスマネージャーを使用する
 - **ロギング** — 構造化ログを設定し、集約サービスに転送する
 - **バックアップ** — `pg_dump` やマネージドデータベースサービスで定期的な Postgres バックアップをスケジュールする

@@ -85,13 +85,18 @@ bunx guren model:list --format json  # Models as JSON
 # Integrity checking
 bunx guren check                # Validate route↔controller↔page consistency
 bunx guren check --json         # Check results as JSON
+bunx guren audit                # Security audit: validation/auth on mutating routes, raw SQL, secrets, mass assignment
+bunx guren audit --json         # Audit results as JSON (exits non-zero on failures)
 bunx guren doctor --next        # Doctor report + actionable next steps
 
 # Code generation
 bunx guren guidelines           # Auto-generate project-specific coding guidelines
 bunx guren guidelines -o .claude/rules/project-guidelines.md  # Write to file
-bunx guren make:feature Post --fields "title:string,body:text,published:boolean"  # CRUD scaffold
+bunx guren make:feature Post --fields "title:string,body:text,published:boolean"  # CRUD scaffold (store/update require auth by default)
 bunx guren make:feature Post --fields "title:string,body:text" --test  # With test file
+bunx guren make:feature Post --fields "title:string" --public  # Skip auth checks in mutating actions
+bunx guren make:feature Post --fields "title:string" --policy  # Also generate a policy and enforce it in store/update
+bunx guren make:policy Post     # Authorization policy scaffold (app/Policies)
 ```
 
 ## Coding Conventions
@@ -323,6 +328,7 @@ export const handler = createLambdaHandler(app)
 | `packages/cli/src/bin.ts` | CLI entry point |
 | `packages/cli/src/context.ts` | AI agent: project context map generation |
 | `packages/cli/src/check.ts` | AI agent: integrity checking |
+| `packages/cli/src/audit.ts` | AI agent: security audit (validation, auth, raw SQL, secrets) |
 | `packages/cli/src/guidelines.ts` | AI agent: dynamic guidelines generation |
 | `packages/cli/src/model-list.ts` | AI agent: model introspection |
 | `packages/cli/src/model-parser.ts` | AI agent: Babel AST model parsing |

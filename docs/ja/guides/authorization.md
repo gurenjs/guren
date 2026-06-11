@@ -2,291 +2,316 @@
 
 認可は、認証済みユーザーが実行できる操作を制御する仕組みです。Guren は Laravel に着想を得たポリシーベースの認可システムを提供しています。
 
+認可ゲートはアプリの起動時に自動的に作成されます。起動後はどこからでも `getGate()` を呼び出してアビリティの定義やポリシーの登録ができます。手動のセットアップは不要です。
+
 ## ゲート
 
 ゲートは、ユーザーが特定のアクションを実行することを許可されているかどうかを判断するシンプルなクロージャです。
 
 ### ゲートの定義
 
-`Gate`クラスを使用してゲートを定義します。
+`src/app.ts`(boot コールバック内)またはサービスプロバイダでゲートを定義します:
 
 ```typescript
-import { Gate } from '@guren/core'
+import { getGate } from '@guren/core'
+
+const gate = getGate()
 
 // シンプルなゲート
-Gate.define('view-dashboard', (user) => {
-  return user.isAdmin
+gate.define('view-dashboard', (user) => {
+  return user?.isAdmin === true
 })
 
-// リソース付きゲート
-Gate.define('update-post', (user, post) => {
-  return user.id === post.userId
+// リソースを伴うゲート
+gate.define('update-post', (user, post) => {
+  return user?.id === post.userId
 })
 
-// データベースチェック付き非同期ゲート
-Gate.define('delete-comment', async (user, comment) => {
+// データベースチェックを伴う非同期ゲート
+gate.define('delete-comment', async (user, comment) => {
   const post = await Post.find(comment.postId)
-  return user.id === post?.userId
+  return user?.id === post?.userId
 })
 ```
 
 ### ゲートの使用
 
-ゲートメソッドを使用して認可をチェックします。
+`forUser()` でユーザーを束縛してから認可をチェックします:
 
 ```typescript
-import { Gate } from '@guren/core'
+import { getGate } from '@guren/core'
 
-// 許可されているかチェック
-const canView = await Gate.allows('view-dashboard', user)
+const gate = getGate().forUser(user)
 
-// 拒否されているかチェック
-const cannotView = await Gate.denies('view-dashboard', user)
+// 許可されているか
+const canView = await gate.allows('view-dashboard')
 
-// リソース付き
-const canUpdate = await Gate.allows('update-post', user, post)
+// 拒否されているか
+const cannotView = await gate.denies('view-dashboard')
 
-// 認可を確認し、拒否された場合は例外をスロー
-await Gate.authorize('update-post', user, post)
-// 拒否された場合 AuthorizationException をスロー
+// リソースを伴うチェック
+const canUpdate = await gate.allows('update-post', post)
+
+// 認可するか例外を投げる
+await gate.authorize('update-post', post)
+// 拒否時は AuthorizationException (403) をスロー
 ```
 
 ### Beforeコールバック
 
-すべてのゲートチェックの前に実行されるコールバックを登録します。
+すべてのゲートチェックの前に実行されるコールバックを登録します:
 
 ```typescript
-Gate.before((user, ability) => {
-  // スーパー管理者は全て実行可能
-  if (user.isSuperAdmin) {
+getGate().before((user, ability) => {
+  // スーパー管理者はすべての操作が可能
+  if (user?.isSuperAdmin) {
     return true
   }
-  // undefined を返すと通常のゲート判定に進みます
+  // undefined を返すとゲートのチェックに進む
 })
 ```
 
 ### Afterコールバック
 
-すべてのゲートチェックの後に実行されるコールバックを登録します。
+すべてのゲートチェックの後に実行されるコールバックを登録します:
 
 ```typescript
-Gate.after((user, ability, result) => {
+getGate().after((user, ability, result) => {
   // 認可の試行をログに記録
-  logger.info(`ユーザー ${user.id} は ${ability} を ${result ? '許可' : '拒否'} されました`)
+  logger.info(`User ${user?.id} ${result ? 'allowed' : 'denied'} for ${ability}`)
 })
 ```
 
 ## ポリシー
 
-ポリシーは特定のモデルまたはリソースに関する認可ロジックを整理します。
+ポリシーは、特定のモデルやリソースを軸に認可ロジックを整理する仕組みです。
 
 ### ポリシーの作成
 
-```typescript
-import { Policy } from '@guren/core'
-import type { User } from '../Models/User'
-import type { Post } from '../Models/Post'
+CLI でポリシーをスキャフォールドできます:
 
-export class PostPolicy extends Policy<User, Post> {
+```bash
+bunx guren make:policy Post
+```
+
+手書きする場合:
+
+```typescript
+import { Policy, type AuthUser } from '@guren/core'
+import type { PostRecord } from '../Models/Post'
+
+export class PostPolicy extends Policy {
   /**
-   * ユーザーが投稿を閲覧できるかどうかを判断します。
+   * すべての投稿を閲覧できるか
    */
-  viewAny(user: User): boolean {
+  viewAny(user: AuthUser | null): boolean {
     return true
   }
 
   /**
-   * ユーザーが投稿を閲覧できるかどうかを判断します。
+   * この投稿を閲覧できるか
    */
-  view(user: User, post: Post): boolean {
-    return post.published || user.id === post.userId
+  view(user: AuthUser | null, post: PostRecord): boolean {
+    return post.published || user?.id === post.userId
   }
 
   /**
-   * ユーザーが投稿を作成できるかどうかを判断します。
+   * 投稿を作成できるか
    */
-  create(user: User): boolean {
-    return user.verified
+  create(user: AuthUser | null): boolean {
+    return user !== null
   }
 
   /**
-   * ユーザーが投稿を更新できるかどうかを判断します。
+   * この投稿を更新できるか
    */
-  update(user: User, post: Post): boolean {
-    return user.id === post.userId
+  update(user: AuthUser | null, post: PostRecord): boolean {
+    return user?.id === post.userId
   }
 
   /**
-   * ユーザーが投稿を削除できるかどうかを判断します。
+   * この投稿を削除できるか
    */
-  delete(user: User, post: Post): boolean {
-    return user.id === post.userId
-  }
-
-  /**
-   * ユーザーが投稿を復元できるかどうかを判断します。
-   */
-  restore(user: User, post: Post): boolean {
-    return user.id === post.userId
-  }
-
-  /**
-   * ユーザーが投稿を完全に削除できるかどうかを判断します。
-   */
-  forceDelete(user: User, post: Post): boolean {
-    return user.isAdmin
+  delete(user: AuthUser | null, post: PostRecord): boolean {
+    return user?.id === post.userId
   }
 }
 ```
 
 ### ポリシーの登録
 
-Gateクラスにポリシーを登録します。
+`src/app.ts`(boot コールバック内)またはサービスプロバイダでゲートにポリシーを登録します:
 
 ```typescript
-import { Gate } from '@guren/core'
-import { PostPolicy } from './Policies/PostPolicy'
-import { Post } from './Models/Post'
+import { getGate } from '@guren/core'
+import { PostPolicy } from '../app/Policies/PostPolicy'
+import { Post } from '../app/Models/Post'
 
 // モデルクラスで登録
-Gate.policy(Post, new PostPolicy())
+getGate().policy(Post, PostPolicy)
 
-// または文字列キーで登録
-Gate.policy('post', new PostPolicy())
+// 文字列キーでも登録可能
+getGate().policy('post', PostPolicy)
 ```
 
 ### ポリシーの使用
 
+ORM のクエリはコンストラクタ情報を持たない平オブジェクトを返すため、ポリシーを解決するにはモデルクラスをレコードと一緒に渡します:
+
 ```typescript
-// Gate経由でポリシーをチェック
-const canUpdate = await Gate.allows('update', user, post)
+import { getGate } from '@guren/core'
 
-// またはforUserでチェーン可能なチェック
-const canDelete = await Gate.forUser(user).allows('delete', post)
+const gate = getGate().forUser(user)
+const post = await Post.findOrFail(id)
 
-// 例外付き認可
-await Gate.forUser(user).authorize('update', post)
+// ORM レコードには [モデルクラス, レコード] を渡す
+const canUpdate = await gate.allows('update', [Post, post])
+
+// レコードを伴わないアビリティはクラス単体を渡す
+const canCreate = await gate.allows('create', Post)
+
+// 文字列キーも同様に使える
+const canDelete = await gate.allows('delete', ['post', post])
+
+// 認可するか例外を投げる(AuthorizationException, 403)
+await gate.authorize('update', [Post, post])
+```
+
+クラスインスタンス(`new` で生成したオブジェクト)はタプルなしで自動的にポリシーが解決されます:
+
+```typescript
+const canView = await gate.allows('view', somePostInstance)
 ```
 
 ### ポリシーメソッド
 
-ポリシーは以下の標準メソッドをサポートしています。
+ポリシーは以下の標準メソッドをサポートします:
 
 | メソッド | 説明 |
-|--------|-------------|
-| `viewAny` | すべてのリソースを閲覧可能か |
-| `view` | 特定のリソースを閲覧可能か |
-| `create` | 新しいリソースを作成可能か |
-| `update` | リソースを更新可能か |
-| `delete` | リソースを削除可能か |
-| `restore` | ソフト削除されたリソースを復元可能か |
-| `forceDelete` | リソースを完全に削除可能か |
+|---------|------|
+| `viewAny` | すべてのリソースを閲覧できるか |
+| `view` | 特定のリソースを閲覧できるか |
+| `create` | 新しいリソースを作成できるか |
+| `update` | リソースを更新できるか |
+| `delete` | リソースを削除できるか |
+| `restore` | ソフトデリートされたリソースを復元できるか |
+| `forceDelete` | リソースを完全に削除できるか |
 
 ### Beforeメソッド
 
-すべてのポリシーチェックをインターセプトする`before`メソッドを追加します。
+`before` メソッドを追加すると、すべてのポリシーチェックの前に割り込めます:
 
 ```typescript
-export class PostPolicy extends Policy<User, Post> {
-  before(user: User, ability: string): boolean | undefined {
-    // 管理者は投稿に対して何でもできる
-    if (user.isAdmin) {
+export class PostPolicy extends Policy {
+  before(user: AuthUser | null, ability: string): boolean | undefined {
+    // 管理者は投稿に対してあらゆる操作が可能
+    if (user !== null && (user as { isAdmin?: boolean }).isAdmin) {
       return true
     }
-    // undefined を返すと個別のポリシーメソッドで判定します
+    // undefined を返すと個別メソッドのチェックに進む
   }
 }
 ```
 
 ## コントローラー統合
 
-コントローラーで認可を使用します。
+コントローラーには `authorize()` と `can()` ヘルパーが組み込まれています。現在のユーザーは認証コンテキストから自動的に解決されます(ゲストは `null`):
 
 ```typescript
-import { Controller, Gate } from '@guren/core'
-import { PostResource } from '@/app/Http/Resources/PostResource'
+import { Controller } from '@guren/core'
 import { pages } from '@/.guren/pages.gen'
+import { Post } from '@/app/Models/Post'
+import { PostResource } from '@/app/Http/Resources/PostResource'
 
 export default class PostController extends Controller {
-  async show(id: number) {
-    const post = await Post.find(id)
+  async show() {
+    const { id } = this.validateParams(PostIdParamSchema)
+    const post = await Post.findOrFail(id)
 
-    // Gateを使用して認可
-    await Gate.authorize('view', this.user(), post)
+    // 拒否時は AuthorizationException (403) をスロー
+    await this.authorize('view', [Post, post])
 
     return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() })
   }
 
-  async update(id: number) {
-    const post = await Post.find(id)
+  async update() {
+    const { id } = this.validateParams(PostIdParamSchema)
+    const post = await Post.findOrFail(id)
 
-    // 手動で権限をチェック
-    if (await Gate.denies('update', this.user(), post)) {
+    // 例外を投げずにチェック
+    if (!(await this.can('update', [Post, post]))) {
       return this.json({ error: 'Unauthorized' }, 403)
     }
 
-    // 更新ロジック...
+    // 更新処理...
   }
 }
 ```
 
+> **Tip:** `bunx guren make:feature Post --policy` を使うと、ポリシーの生成と `store`/`update` への `authorize()` 呼び出しの組み込みまで自動で行われます。
+
 ## ミドルウェア
 
-ルートレベルのチェック用認可ミドルウェアを作成します。
+ルートレベルのチェック用に認可ミドルウェアを作成できます:
 
 ```typescript
-import { Router, Gate, AuthorizationException } from '@guren/core'
+import { type Router, getGate, AuthorizationException, defineMiddleware } from '@guren/core'
 
-export function authorize(ability: string) {
-  return async (ctx, next) => {
-    const user = ctx.get('user')
+export function authorizeAbility(ability: string) {
+  return defineMiddleware(async (ctx, next) => {
+    const user = ctx.get('user') ?? null
 
-    if (!user || await Gate.denies(ability, user)) {
+    if (await getGate().forUser(user).denies(ability)) {
       throw new AuthorizationException()
     }
 
-    return next()
-  }
+    await next()
+  })
 }
 
 // ルートでの使用
 export function registerWebRoutes(router: Router): void {
-  router.get('/admin', [AdminController, 'index']).middleware(authorize('access-admin'))
+  router.get('/admin', [AdminController, 'index'], authorizeAbility('access-admin'))
 }
 ```
 
 ## ベストプラクティス
 
-1. **モデル固有のロジックにはポリシーを使用** - モデルごとに認可を整理します。
-2. **ゲートはシンプルに** - 特定のモデルに紐付かない能力にはゲートを使用します。
-3. **高コストなチェックはキャッシュ** - 認可にデータベースクエリが必要な場合、キャッシュを検討します。
-4. **beforeコールバックは控えめに** - 使いすぎるとデバッグが難しくなります。
-5. **認可をテスト** - ゲートとポリシーのテストを書きます。
+1. **モデル固有のロジックにはポリシーを使う** - 認可をモデル単位で整理する。
+2. **ゲートはシンプルに保つ** - 特定のモデルに紐づかないアビリティに使う。
+3. **高コストなチェックはキャッシュする** - 認可にデータベースクエリが必要な場合はキャッシュを検討する。
+4. **before コールバックは控えめに** - 多用するとデバッグが難しくなる。
+5. **認可をテストする** - ゲートとポリシーのテストを書く。
 
 ## 認可のテスト
+
+グローバルインスタンスに依存せず、テストごとに新しい `Gate` を生成します:
 
 ```typescript
 import { describe, it, expect, beforeEach } from 'bun:test'
 import { Gate } from '@guren/core'
+import { PostPolicy } from '../app/Policies/PostPolicy'
 
 describe('PostPolicy', () => {
+  let gate: Gate
+
   beforeEach(() => {
-    Gate.clear()
-    Gate.policy('post', new PostPolicy())
+    gate = new Gate()
+    gate.policy('post', PostPolicy)
   })
 
-  it('所有者は投稿を更新できる', async () => {
+  it('allows owner to update post', async () => {
     const user = { id: 1 }
     const post = { id: 1, userId: 1 }
 
-    expect(await Gate.allows('update', user, post)).toBe(true)
+    expect(await gate.forUser(user).allows('update', ['post', post])).toBe(true)
   })
 
-  it('非所有者は投稿を更新できない', async () => {
+  it('denies non-owner from updating post', async () => {
     const user = { id: 2 }
     const post = { id: 1, userId: 1 }
 
-    expect(await Gate.denies('update', user, post)).toBe(true)
+    expect(await gate.forUser(user).denies('update', ['post', post])).toBe(true)
   })
 })
 ```

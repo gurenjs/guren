@@ -18,6 +18,7 @@ bunx guren make:controller <Name>
 bunx guren make:model <Name>
 bunx guren make:view <path>
 bunx guren make:middleware <Name>
+bunx guren make:policy <Name>
 bunx guren make:job <Name>
 bunx guren make:event <Name>
 bunx guren make:listener <Name> --event=<EventName>

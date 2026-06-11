@@ -60,6 +60,7 @@ These commands patch `src/app.ts`, create the matching provider/runtime files, a
 | `make:view <path>` | Generates a React component in `resources/js/pages` | `bunx guren make:view posts/Index` |
 | `make:auth` | Scaffolds login/logout controllers, provider, views, migration, seeder, and routes | `bunx guren make:auth` |
 | `make:middleware <Name>` | Generates a middleware file in `app/Http/Middleware` | `bunx guren make:middleware Auth` |
+| `make:policy <Name>` | Generates an authorization policy in `app/Policies` with owner-based defaults | `bunx guren make:policy Post` |
 | `make:seeder <Name>` | Generates a database seeder file | `bunx guren make:seeder UserSeeder` |
 | `make:job <Name>` | Generates a queueable job class | `bunx guren make:job SendEmail` |
 | `make:event <Name>` | Generates an event class | `bunx guren make:event UserRegistered` |
@@ -68,6 +69,31 @@ These commands patch `src/app.ts`, create the matching provider/runtime files, a
 | `make:mail <Name>` | Generates a mailable class | `bunx guren make:mail WelcomeEmail` |
 
 > **Note:** `make:*` commands avoid overwriting existing files. Use `--force` if you need to replace them.
+
+## Inspection & Audit Commands
+
+Validate your app before shipping — these commands are also designed for AI coding agents (add `--json` for machine-readable output):
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `check` | Validate integrity across routes, controllers, pages, and models | `bunx guren check --json` |
+| `audit` | Security audit: missing input validation or authentication on mutating routes, raw SQL with interpolation, hardcoded credentials, disabled security defaults, mass-assignment configuration | `bunx guren audit --json` |
+| `doctor` | Project health report (env, config, generated files) with actionable next steps | `bunx guren doctor --next` |
+
+`audit` exits with a non-zero status when it finds failures, so you can run it in CI:
+
+```bash
+bunx guren audit
+```
+
+Routes wrapped in named middleware (for example `router.middleware('auth').group(...)`) are recognized as protected. Guest flows such as `/login` and `/register` are excluded from authentication checks.
+
+Suppress a false positive by placing `// guren-audit-ignore` on the flagged line or the line above it:
+
+```ts
+// guren-audit-ignore -- documented example value
+const apiKey = 'example-not-a-real-key'
+```
 
 ## Deployment Recipes
 

@@ -183,6 +183,7 @@ docker compose -f docker-compose.production.yml logs app --tail 50
 Once your app is deployed and running, consider these additional steps:
 
 - **Reverse proxy** — place Nginx or Caddy in front of Bun for TLS termination and static asset serving
+- **HSTS** — `Strict-Transport-Security: max-age=31536000` is sent automatically when `NODE_ENV=production`. Add `includeSubDomains`/`preload` via `securityHeaders: { hsts: { ... } }` in `createApp`, or disable with `hsts: false` if you serve plain HTTP internally
 - **Process monitoring** — use `restart: unless-stopped` in Docker or a process manager like systemd
 - **Logging** — configure structured logging and ship logs to a centralized service
 - **Backups** — schedule regular Postgres backups with `pg_dump` or a managed database service

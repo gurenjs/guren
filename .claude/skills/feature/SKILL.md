@@ -23,11 +23,19 @@ When given a feature name (e.g., "Post", "Product"):
 bunx guren make:feature <Name> --fields "title:string,body:text,published:boolean"
 ```
 
+Useful flags:
+- `--policy` — also generate an authorization policy and enforce it in `store`/`update`
+- `--public` — skip authentication checks in mutating actions (auth is required by default)
+- `--test` — also generate a test file
+
 This generates Validator, Resource, Controller, Views (Index/Show/New/Edit), and Model in one step with:
 - Typed page props (no `any`)
 - `route()` helper for all URLs
 - `ApiRoutes` for form data types
 - `RouteErrors` for validation error types
+- `this.auth.userOrFail()` in `store`/`update` (secure by default)
+
+After wiring routes and codegen, run `bunx guren audit` to verify validation/authentication coverage.
 
 **Or generate individually:**
 
