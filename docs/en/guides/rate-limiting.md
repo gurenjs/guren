@@ -83,8 +83,24 @@ interface RateLimitOptions {
 
   /** Prefix for rate limit keys (default: 'rl:') */
   keyPrefix?: string
+
+  /** Trust proxy headers (CF-Connecting-IP, True-Client-IP, X-Real-IP, X-Forwarded-For) for client IPs (default: false) */
+  trustProxy?: boolean
 }
 ```
+
+### Deployments Behind a Proxy
+
+When your app always sits behind a reverse proxy or CDN (Cloudflare, ALB, Nginx), enable `trustProxy` for per-client limiting without writing a custom `keyGenerator`:
+
+```ts
+createRateLimitMiddleware({
+  limit: 100,
+  trustProxy: true, // resolves CF-Connecting-IP → True-Client-IP → X-Real-IP → X-Forwarded-For[0]
+})
+```
+
+> **Warning:** Enable `trustProxy` only when every request passes through your proxy. On direct deployments clients can spoof these headers to bypass per-client limits — that is why it defaults to `false`.
 
 ### Full Configuration Example
 

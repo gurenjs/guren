@@ -1,6 +1,8 @@
 # Authorization
 
-Authorization determines what an authenticated user is allowed to do. Guren provides a powerful policy-based authorization system inspired by Laravel.
+Authorization determines what an authenticated user is allowed to do. Guren provides a policy-based authorization system inspired by Laravel.
+
+The authorization gate is created automatically when your app boots — call `getGate()` anywhere after boot to define abilities and register policies. No manual setup is required.
 
 ## Gates
 
@@ -8,47 +10,51 @@ Gates are simple closures that determine if a user is authorized to perform a gi
 
 ### Defining Gates
 
-Define gates using the `Gate` class:
+Define gates in `src/app.ts` (inside the boot callback) or a service provider:
 
 ```typescript
-import { Gate } from '@guren/core'
+import { getGate } from '@guren/core'
+
+const gate = getGate()
 
 // Simple gate
-Gate.define('view-dashboard', (user) => {
-  return user.isAdmin
+gate.define('view-dashboard', (user) => {
+  return user?.isAdmin === true
 })
 
 // Gate with a resource
-Gate.define('update-post', (user, post) => {
-  return user.id === post.userId
+gate.define('update-post', (user, post) => {
+  return user?.id === post.userId
 })
 
 // Async gate with database check
-Gate.define('delete-comment', async (user, comment) => {
+gate.define('delete-comment', async (user, comment) => {
   const post = await Post.find(comment.postId)
-  return user.id === post?.userId
+  return user?.id === post?.userId
 })
 ```
 
 ### Using Gates
 
-Check authorization using gate methods:
+Check authorization with a user bound via `forUser()`:
 
 ```typescript
-import { Gate } from '@guren/core'
+import { getGate } from '@guren/core'
+
+const gate = getGate().forUser(user)
 
 // Check if allowed
-const canView = await Gate.allows('view-dashboard', user)
+const canView = await gate.allows('view-dashboard')
 
 // Check if denied
-const cannotView = await Gate.denies('view-dashboard', user)
+const cannotView = await gate.denies('view-dashboard')
 
 // With a resource
-const canUpdate = await Gate.allows('update-post', user, post)
+const canUpdate = await gate.allows('update-post', post)
 
 // Authorize or throw
-await Gate.authorize('update-post', user, post)
-// Throws AuthorizationException if denied
+await gate.authorize('update-post', post)
+// Throws AuthorizationException (403) if denied
 ```
 
 ### Before Callbacks
@@ -56,9 +62,9 @@ await Gate.authorize('update-post', user, post)
 Register a callback that runs before all gate checks:
 
 ```typescript
-Gate.before((user, ability) => {
+getGate().before((user, ability) => {
   // Super admins can do everything
-  if (user.isSuperAdmin) {
+  if (user?.isSuperAdmin) {
     return true
   }
   // Return undefined to continue to the gate
@@ -70,9 +76,9 @@ Gate.before((user, ability) => {
 Register a callback that runs after all gate checks:
 
 ```typescript
-Gate.after((user, ability, result) => {
+getGate().after((user, ability, result) => {
   // Log authorization attempts
-  logger.info(`User ${user.id} ${result ? 'allowed' : 'denied'} for ${ability}`)
+  logger.info(`User ${user?.id} ${result ? 'allowed' : 'denied'} for ${ability}`)
 })
 ```
 
@@ -82,90 +88,99 @@ Policies organize authorization logic around a particular model or resource.
 
 ### Creating Policies
 
-```typescript
-import { Policy } from '@guren/core'
-import type { User } from '../Models/User'
-import type { Post } from '../Models/Post'
+Scaffold a policy with the CLI:
 
-export class PostPolicy extends Policy<User, Post> {
+```bash
+bunx guren make:policy Post
+```
+
+Or write one by hand:
+
+```typescript
+import { Policy, type AuthUser } from '@guren/core'
+import type { PostRecord } from '../Models/Post'
+
+export class PostPolicy extends Policy {
   /**
    * Determine if the user can view any posts.
    */
-  viewAny(user: User): boolean {
+  viewAny(user: AuthUser | null): boolean {
     return true
   }
 
   /**
    * Determine if the user can view the post.
    */
-  view(user: User, post: Post): boolean {
-    return post.published || user.id === post.userId
+  view(user: AuthUser | null, post: PostRecord): boolean {
+    return post.published || user?.id === post.userId
   }
 
   /**
    * Determine if the user can create posts.
    */
-  create(user: User): boolean {
-    return user.verified
+  create(user: AuthUser | null): boolean {
+    return user !== null
   }
 
   /**
    * Determine if the user can update the post.
    */
-  update(user: User, post: Post): boolean {
-    return user.id === post.userId
+  update(user: AuthUser | null, post: PostRecord): boolean {
+    return user?.id === post.userId
   }
 
   /**
    * Determine if the user can delete the post.
    */
-  delete(user: User, post: Post): boolean {
-    return user.id === post.userId
-  }
-
-  /**
-   * Determine if the user can restore the post.
-   */
-  restore(user: User, post: Post): boolean {
-    return user.id === post.userId
-  }
-
-  /**
-   * Determine if the user can permanently delete the post.
-   */
-  forceDelete(user: User, post: Post): boolean {
-    return user.isAdmin
+  delete(user: AuthUser | null, post: PostRecord): boolean {
+    return user?.id === post.userId
   }
 }
 ```
 
 ### Registering Policies
 
-Register policies with the Gate class:
+Register policies on the gate in `src/app.ts` (inside the boot callback) or a service provider:
 
 ```typescript
-import { Gate } from '@guren/core'
-import { PostPolicy } from './Policies/PostPolicy'
-import { Post } from './Models/Post'
+import { getGate } from '@guren/core'
+import { PostPolicy } from '../app/Policies/PostPolicy'
+import { Post } from '../app/Models/Post'
 
 // Register by model class
-Gate.policy(Post, new PostPolicy())
+getGate().policy(Post, PostPolicy)
 
 // Or by string key
-Gate.policy('post', new PostPolicy())
+getGate().policy('post', PostPolicy)
 ```
 
 ### Using Policies
 
+ORM queries return plain records without constructor information, so pass the model class alongside the record to resolve the policy:
+
 ```typescript
-// Check policy via Gate
-const canUpdate = await Gate.allows('update', user, post)
+import { getGate } from '@guren/core'
 
-// Or use forUser for chainable checks
-const canDelete = await Gate.forUser(user).allows('delete', post)
+const gate = getGate().forUser(user)
+const post = await Post.findOrFail(id)
 
-// Authorize with exception
-await Gate.forUser(user).authorize('update', post)
+// Pass [ModelClass, record] for ORM records
+const canUpdate = await gate.allows('update', [Post, post])
+
+// Abilities without a record take the bare class
+const canCreate = await gate.allows('create', Post)
+
+// String keys work the same way
+const canDelete = await gate.allows('delete', ['post', post])
+
+// Authorize with exception (throws AuthorizationException, 403)
+await gate.authorize('update', [Post, post])
+```
+
+Class instances (objects created with `new`) resolve their policy automatically without the tuple:
+
+```typescript
+const canView = await gate.allows('view', somePostInstance)
 ```
 
 ### Policy Methods
@@ -187,10 +202,10 @@ Policies support these standard methods:
 Add a `before` method to intercept all policy checks:
 
 ```typescript
-export class PostPolicy extends Policy<User, Post> {
-  before(user: User, ability: string): boolean | undefined {
+export class PostPolicy extends Policy {
+  before(user: AuthUser | null, ability: string): boolean | undefined {
     // Admins can do anything with posts
-    if (user.isAdmin) {
+    if (user !== null && (user as { isAdmin?: boolean }).isAdmin) {
       return true
     }
     // Return undefined to continue to specific method
@@ -200,28 +215,31 @@ export class PostPolicy extends Policy<User, Post> {
 
 ## Controller Integration
 
-Use authorization in controllers:
+Controllers ship with `authorize()` and `can()` helpers. They resolve the current user from the auth context automatically (guests are `null`):
 
 ```typescript
-import { Controller, Gate } from '@guren/core'
-import { PostResource } from '@/app/Http/Resources/PostResource'
+import { Controller } from '@guren/core'
 import { pages } from '@/.guren/pages.gen'
+import { Post } from '@/app/Models/Post'
+import { PostResource } from '@/app/Http/Resources/PostResource'
 
 export default class PostController extends Controller {
-  async show(id: number) {
-    const post = await Post.find(id)
+  async show() {
+    const { id } = this.validateParams(PostIdParamSchema)
+    const post = await Post.findOrFail(id)
 
-    // Authorize using Gate
-    await Gate.authorize('view', this.user(), post)
+    // Throws AuthorizationException (403) when denied
+    await this.authorize('view', [Post, post])
 
     return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() })
   }
 
-  async update(id: number) {
-    const post = await Post.find(id)
+  async update() {
+    const { id } = this.validateParams(PostIdParamSchema)
+    const post = await Post.findOrFail(id)
 
-    // Check permission manually
-    if (await Gate.denies('update', this.user(), post)) {
+    // Check without throwing
+    if (!(await this.can('update', [Post, post]))) {
       return this.json({ error: 'Unauthorized' }, 403)
     }
 
@@ -230,28 +248,30 @@ export default class PostController extends Controller {
 }
 ```
 
+> **Tip:** `bunx guren make:feature Post --policy` scaffolds the policy and wires `authorize()` calls into `store`/`update` for you.
+
 ## Middleware
 
 Create authorization middleware for route-level checks:
 
 ```typescript
-import { Router, Gate, AuthorizationException } from '@guren/core'
+import { type Router, getGate, AuthorizationException, defineMiddleware } from '@guren/core'
 
-export function authorize(ability: string) {
-  return async (ctx, next) => {
-    const user = ctx.get('user')
+export function authorizeAbility(ability: string) {
+  return defineMiddleware(async (ctx, next) => {
+    const user = ctx.get('user') ?? null
 
-    if (!user || await Gate.denies(ability, user)) {
+    if (await getGate().forUser(user).denies(ability)) {
       throw new AuthorizationException()
     }
 
-    return next()
-  }
+    await next()
+  })
 }
 
 // Usage in routes
 export function registerWebRoutes(router: Router): void {
-  router.get('/admin', [AdminController, 'index']).middleware(authorize('access-admin'))
+  router.get('/admin', [AdminController, 'index'], authorizeAbility('access-admin'))
 }
 ```
 
@@ -265,28 +285,33 @@ export function registerWebRoutes(router: Router): void {
 
 ## Testing Authorization
 
+Instantiate a fresh `Gate` per test instead of relying on the global instance:
+
 ```typescript
 import { describe, it, expect, beforeEach } from 'bun:test'
 import { Gate } from '@guren/core'
+import { PostPolicy } from '../app/Policies/PostPolicy'
 
 describe('PostPolicy', () => {
+  let gate: Gate
+
   beforeEach(() => {
-    Gate.clear()
-    Gate.policy('post', new PostPolicy())
+    gate = new Gate()
+    gate.policy('post', PostPolicy)
   })
 
   it('allows owner to update post', async () => {
     const user = { id: 1 }
     const post = { id: 1, userId: 1 }
 
-    expect(await Gate.allows('update', user, post)).toBe(true)
+    expect(await gate.forUser(user).allows('update', ['post', post])).toBe(true)
   })
 
   it('denies non-owner from updating post', async () => {
     const user = { id: 2 }
     const post = { id: 1, userId: 1 }
 
-    expect(await Gate.denies('update', user, post)).toBe(true)
+    expect(await gate.forUser(user).denies('update', ['post', post])).toBe(true)
   })
 })
 ```

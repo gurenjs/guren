@@ -261,6 +261,11 @@ export class Gate {
 
   /**
    * Check a policy for the given ability.
+   *
+   * The subject may be a class instance (policy resolved via its constructor)
+   * or a `[ModelClass, record]` / `['key', record]` tuple. The tuple form is
+   * required for plain records returned by the ORM, which carry no constructor
+   * information.
    */
   protected async checkPolicy(
     ability: string,
@@ -268,12 +273,30 @@ export class Gate {
     model: unknown,
     additionalArgs: unknown[]
   ): Promise<boolean | undefined> {
-    const modelConstructor = model?.constructor
-    if (!modelConstructor) {
+    let policyKey: unknown
+    let subject: unknown = model
+    let hasSubject = true
+
+    if (
+      Array.isArray(model)
+      && model.length === 2
+      && (typeof model[0] === 'function' || typeof model[0] === 'string')
+    ) {
+      policyKey = model[0]
+      subject = model[1]
+    } else if (typeof model === 'function') {
+      // Bare model class — abilities without a record, e.g. can('create', Post)
+      policyKey = model
+      hasSubject = false
+    } else {
+      policyKey = model?.constructor
+    }
+
+    if (!policyKey) {
       return undefined
     }
 
-    const policyClass = this.policies.get(modelConstructor)
+    const policyClass = this.policies.get(policyKey)
     if (!policyClass) {
       return undefined
     }
@@ -291,7 +314,9 @@ export class Gate {
     // Check ability method
     const method = (policy as Record<string, unknown>)[ability]
     if (typeof method === 'function') {
-      return method.call(policy, user, model, ...additionalArgs)
+      return hasSubject
+        ? method.call(policy, user, subject, ...additionalArgs)
+        : method.call(policy, user, ...additionalArgs)
     }
 
     return undefined

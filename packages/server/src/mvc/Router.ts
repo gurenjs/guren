@@ -143,6 +143,15 @@ export interface RouteDefinition {
     body?: SchemaLike<unknown>
     output?: SchemaLike<unknown>
   }
+  /** Named middleware (aliases or groups) applied to this route */
+  middlewareNames?: string[]
+  /** Whether inline (unnamed) middleware handlers are attached */
+  hasInlineMiddleware?: boolean
+  /** Controller binding when the handler is a [Controller, 'method'] tuple */
+  controller?: {
+    name: string
+    action: string
+  }
   summary?: string
   description?: string
   tags?: string[]
@@ -466,11 +475,16 @@ export class Router<M extends string = never> {
   }
 
   definitions(): RouteDefinition[] {
-    return this.registry.map(({ method, path, name, schemas, openapi }) => ({
+    return this.registry.map(({ method, path, name, schemas, openapi, routeMiddlewareNames, middlewares, handler }) => ({
       method,
       path,
       name,
       schemas,
+      middlewareNames: [...routeMiddlewareNames],
+      hasInlineMiddleware: middlewares.length > 0,
+      controller: isControllerAction(handler)
+        ? { name: handler[0].name, action: String(handler[1]) }
+        : undefined,
       ...openapi,
     }))
   }

@@ -1056,6 +1056,15 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
     })
   }
 
+  if (controllerFiles.length > 0) {
+    steps.push({
+      priority: priority++,
+      title: 'Run the security audit',
+      description: 'Verify validation/authentication coverage on mutating routes and scan for raw SQL and hardcoded credentials.',
+      command: 'bunx guren audit',
+    })
+  }
+
   return steps
 }
 

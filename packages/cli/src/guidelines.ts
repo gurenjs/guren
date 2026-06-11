@@ -7,6 +7,7 @@ import {
   discoverJobFiles,
   discoverMiddlewareFiles,
   discoverValidatorFiles,
+  discoverPolicyFiles,
   classNameFromPath,
   fileExists,
   directoryExists,
@@ -87,6 +88,26 @@ export async function generateGuidelines(options: GuidelinesOptions = {}): Promi
   }
   lines.push('')
 
+  // Authorization
+  lines.push('## Authorization')
+  const policies = excludeBarrelFiles(await discoverPolicyFiles(cwd)).map(classNameFromPath)
+  if (policies.length > 0) {
+    lines.push('- Policies in app/Policies/ — enforce with `await this.authorize(ability, [Model, record])` in controllers')
+    lines.push(`- Available: ${policies.join(', ')}`)
+  } else {
+    lines.push('- No policies found. Scaffold with `bunx guren make:policy <Model>` and register via `getGate().policy(Model, ModelPolicy)`')
+  }
+  lines.push('')
+
+  // Security rules
+  lines.push('## Security Rules (checked by `bunx guren audit`)')
+  lines.push('- Validate every mutating route: call `this.validateBody(schema)` in controller actions (route `body` schemas are type-only for controllers; they are runtime-enforced only for inline handlers)')
+  lines.push("- Protect mutating routes: wrap in `router.middleware('auth').group(...)` or call `this.auth.userOrFail()` (optional reads like `auth.user()` do not enforce)")
+  lines.push('- Never interpolate values into raw SQL (`sql.raw`) — drizzle `sql` templates bind values safely')
+  lines.push('- Never hardcode credentials — read secrets via `process.env`')
+  lines.push('- Declare `static fillable` on models to whitelist mass-assignable columns')
+  lines.push('')
+
   // Resources
   const resources = excludeBarrelFiles(await discoverResourceFiles(cwd)).map(classNameFromPath)
   if (resources.length > 0) {
@@ -123,6 +144,7 @@ export async function generateGuidelines(options: GuidelinesOptions = {}): Promi
   lines.push('5. Create resource in `app/Http/Resources/`')
   lines.push('6. Register routes in `routes/web.ts`')
   lines.push('7. Run `bunx guren codegen` after adding routes')
+  lines.push('8. Run `bunx guren audit` and fix any findings before opening a PR')
   lines.push('')
 
   const output = lines.join('\n')

@@ -7,6 +7,8 @@ import type { AuthContext } from '../auth/types'
 import type { ServiceBindings } from '../container/bindings'
 import { ValidationException } from '../errors/exceptions/ValidationException'
 import { getApiTokenOrFail } from '../auth/api-token'
+import { getGate } from '../authorization/Gate'
+import type { AuthUser } from '../authorization/types'
 
 /** Structural type for DI containers, avoiding a hard dependency on Container. */
 interface ContainerLike {
@@ -212,6 +214,46 @@ export class Controller {
    */
   protected apiTokenUserId(): string | number {
     return this.apiToken().userId
+  }
+
+  // ─── Authorization Helpers ──────────────────────────────────────
+
+  /**
+   * Authorize the current user (or guest) for an ability.
+   * Throws AuthorizationException (403) when denied.
+   *
+   * ORM records are plain objects with no constructor information, so pass
+   * the model class alongside the record to resolve the policy:
+   *
+   * @example
+   * ```typescript
+   * const post = await Post.findOrFail(id)
+   * await this.authorize('update', [Post, post])
+   * await this.authorize('create', Post)
+   * ```
+   */
+  protected async authorize(ability: string, ...args: unknown[]): Promise<void> {
+    await getGate().forUser(await this.gateUser()).authorize(ability, ...args)
+  }
+
+  /**
+   * Check whether the current user (or guest) can perform an ability.
+   *
+   * @example
+   * ```typescript
+   * if (await this.can('update', [Post, post])) { ... }
+   * ```
+   */
+  protected async can(ability: string, ...args: unknown[]): Promise<boolean> {
+    return getGate().forUser(await this.gateUser()).allows(ability, ...args)
+  }
+
+  private async gateUser(): Promise<AuthUser | null> {
+    const auth = this.ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
+    if (!auth) {
+      return null
+    }
+    return (await auth.user()) as AuthUser | null
   }
 
   // ─── Response Helpers ───────────────────────────────────────────

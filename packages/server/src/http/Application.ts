@@ -5,6 +5,8 @@ import { Container, type ServiceProvider } from '../container'
 import { ProviderManager } from '../container/ServiceProvider'
 import { AuthManager } from '../auth/AuthManager'
 import { AuthServiceProvider } from '../providers/AuthServiceProvider'
+import { AuthorizationServiceProvider } from '../providers/AuthorizationServiceProvider'
+import { ErrorServiceProvider } from '../providers/ErrorServiceProvider'
 import { attachAuthContext } from './middleware/auth'
 import { SessionGuard } from '../auth/SessionGuard'
 import type { CreateSessionMiddlewareOptions } from './middleware/session'
@@ -220,9 +222,26 @@ export class Application {
       this.providerManager.register(AuthServiceProvider)
     }
 
+    // Authorization gate is always available; user providers registered
+    // below can resolve 'gate' from the container or use getGate().
+    this.providerManager.register(AuthorizationServiceProvider)
+
+    const userProviders = Array.isArray(this.options.providers) ? this.options.providers : []
+
+    // Exception rendering is on by default so HttpExceptions map to their
+    // status codes (404/422/403) instead of opaque 500s. Registered before
+    // user providers so a custom ErrorServiceProvider subclass wins via
+    // its later hono.onError() call.
+    const hasUserErrorProvider = userProviders.some(
+      (provider) => provider === ErrorServiceProvider || provider.prototype instanceof ErrorServiceProvider,
+    )
+    if (!hasUserErrorProvider) {
+      this.providerManager.register(ErrorServiceProvider)
+    }
+
     // Register user providers
-    if (Array.isArray(this.options.providers)) {
-      this.providerManager.registerMany(this.options.providers)
+    if (userProviders.length > 0) {
+      this.providerManager.registerMany(userProviders)
     }
   }
 

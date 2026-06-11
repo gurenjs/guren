@@ -339,6 +339,40 @@ describe('Policy', () => {
     expect(await guestGate.allows('create', dummyPost)).toBe(false)
   })
 
+  test('resolves policy via [ModelClass, record] tuple for plain records', async () => {
+    // ORM queries return plain objects with no constructor information
+    const plainRecord = { id: 1, authorId: 5, published: true }
+
+    const authorGate = gate.forUser({ id: 5, role: 'user' } as TestUser)
+    const otherGate = gate.forUser({ id: 10, role: 'user' } as TestUser)
+
+    expect(await authorGate.allows('update', [Post, plainRecord])).toBe(true)
+    expect(await otherGate.allows('update', [Post, plainRecord])).toBe(false)
+  })
+
+  test('plain record without tuple cannot resolve a policy (denied)', async () => {
+    const plainRecord = { id: 1, authorId: 5, published: true }
+    const authorGate = gate.forUser({ id: 5, role: 'user' } as TestUser)
+
+    expect(await authorGate.allows('update', plainRecord)).toBe(false)
+  })
+
+  test('resolves policy via bare model class for record-less abilities', async () => {
+    const userGate = gate.forUser({ id: 1, role: 'user' } as TestUser)
+    const guestGate = gate.forUser(null)
+
+    expect(await userGate.allows('create', Post)).toBe(true)
+    expect(await guestGate.allows('create', Post)).toBe(false)
+  })
+
+  test('resolves policy via [stringKey, record] tuple', async () => {
+    gate.policy('post', PostPolicy)
+    const plainRecord = { id: 1, authorId: 5, published: true }
+    const authorGate = gate.forUser({ id: 5, role: 'user' } as TestUser)
+
+    expect(await authorGate.allows('update', ['post', plainRecord])).toBe(true)
+  })
+
   test('unpublished post only visible to author', async () => {
     const unpublishedPost = new Post(1, 5, false)
 

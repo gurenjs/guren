@@ -158,6 +158,44 @@ describe('createRateLimitMiddleware', () => {
     }
   })
 
+  it('separates clients by proxy IP headers when trustProxy is enabled', async () => {
+    app.use('*', createRateLimitMiddleware({ limit: 1, store, trustProxy: true }))
+    app.get('/', (c) => c.text('OK'))
+
+    const clientA1 = await app.request('/', { headers: { 'cf-connecting-ip': '1.1.1.1' } })
+    const clientA2 = await app.request('/', { headers: { 'cf-connecting-ip': '1.1.1.1' } })
+    const clientB1 = await app.request('/', { headers: { 'cf-connecting-ip': '2.2.2.2' } })
+
+    expect(clientA1.status).toBe(200)
+    expect(clientA2.status).toBe(429)
+    expect(clientB1.status).toBe(200)
+  })
+
+  it('uses the first X-Forwarded-For entry when trustProxy is enabled', async () => {
+    app.use('*', createRateLimitMiddleware({ limit: 1, store, trustProxy: true }))
+    app.get('/', (c) => c.text('OK'))
+
+    const first = await app.request('/', { headers: { 'x-forwarded-for': '3.3.3.3, 10.0.0.1' } })
+    const second = await app.request('/', { headers: { 'x-forwarded-for': '3.3.3.3, 10.0.0.2' } })
+    const other = await app.request('/', { headers: { 'x-forwarded-for': '4.4.4.4, 10.0.0.1' } })
+
+    expect(first.status).toBe(200)
+    expect(second.status).toBe(429)
+    expect(other.status).toBe(200)
+  })
+
+  it('ignores proxy headers by default (spoofing cannot bypass limits)', async () => {
+    app.use('*', createRateLimitMiddleware({ limit: 1, store }))
+    app.get('/', (c) => c.text('OK'))
+
+    const first = await app.request('/', { headers: { 'x-forwarded-for': '5.5.5.5' } })
+    const spoofed = await app.request('/', { headers: { 'x-forwarded-for': '6.6.6.6' } })
+
+    expect(first.status).toBe(200)
+    // Different spoofed header still hits the same shared fallback bucket
+    expect(spoofed.status).toBe(429)
+  })
+
   it('blocks requests over the limit', async () => {
     app.use('*', createRateLimitMiddleware({ limit: 3, store }))
     app.get('/', (c) => c.text('OK'))

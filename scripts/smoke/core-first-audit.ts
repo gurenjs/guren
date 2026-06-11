@@ -26,6 +26,7 @@ const ignoredDirNames = new Set([
   '.next',
   '.turbo',
   '.guren',
+  '.vercel',
   'coverage',
 ])
 

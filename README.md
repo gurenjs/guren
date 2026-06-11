@@ -46,7 +46,7 @@ bunx guren add broadcasting    # Real-time (SSE)
 bunx guren add schedule        # Cron scheduling
 ```
 
-Run `bun run codegen` after adding features to regenerate types.
+Run `bun run codegen` after adding features to regenerate types. When you are ready to ship, `bun run build` creates the production build.
 
 ---
 
@@ -57,7 +57,7 @@ Run `bun run codegen` after adding features to regenerate types.
 - **Drizzle ORM** — swap database backends through an adapter (PostgreSQL / SQLite)
 - **End-to-end type safety** — `bunx guren codegen` generates types from schema to frontend props
 - **Batteries included** — auth, queues, mail, cache, notifications, storage, broadcasting, scheduling
-- **AWS Lambda ready** — deploy serverless via `@guren/server/lambda`
+- **AWS Lambda ready** — deploy serverless via `@guren/core/lambda`
 
 ---
 

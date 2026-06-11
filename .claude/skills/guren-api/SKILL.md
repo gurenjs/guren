@@ -205,9 +205,16 @@ Additional auth features:
 ### Authorization (Gate & Policy)
 Source: `packages/server/src/authorization/`
 
-- `Gate.ts` — Define abilities and policies
-- `Policy.ts` — Resource-based authorization
+- `Gate.ts` — Define abilities and policies. The global gate is auto-wired at boot; access via `getGate()`
+- `Policy.ts` — Resource-based authorization. Scaffold with `bunx guren make:policy <Model>`
 - `middleware.ts` — Route-level authorization middleware
+
+Key patterns:
+- Register: `getGate().policy(Post, PostPolicy)` in `src/app.ts` boot callback
+- ORM records are plain objects — pass the model class as a tuple: `await this.authorize('update', [Post, post])`
+- Record-less abilities take the bare class: `await this.authorize('create', Post)`
+- Controllers have `this.authorize(ability, subject)` (throws 403) and `this.can(ability, subject)` (boolean)
+- Full guide: `docs/en/guides/authorization.md`
 
 ### Events & Listeners
 Source: `packages/server/src/events/`

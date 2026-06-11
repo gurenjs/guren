@@ -64,4 +64,30 @@ describe('createSecurityHeaders', () => {
       'max-age=31536000; includeSubDomains; preload',
     )
   })
+
+  test('should enable HSTS by default in production', async () => {
+    const originalEnv = process.env.NODE_ENV
+    process.env.NODE_ENV = 'production'
+    try {
+      const app = createApp()
+      const res = await app.request('/')
+
+      expect(res.headers.get('Strict-Transport-Security')).toBe('max-age=31536000')
+    } finally {
+      process.env.NODE_ENV = originalEnv
+    }
+  })
+
+  test('should allow disabling HSTS in production with false', async () => {
+    const originalEnv = process.env.NODE_ENV
+    process.env.NODE_ENV = 'production'
+    try {
+      const app = createApp({ hsts: false })
+      const res = await app.request('/')
+
+      expect(res.headers.get('Strict-Transport-Security')).toBeNull()
+    } finally {
+      process.env.NODE_ENV = originalEnv
+    }
+  })
 })

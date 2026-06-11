@@ -16,6 +16,7 @@ import { makeJob } from './make-job'
 import { makeListener } from './make-listener'
 import { makeMail } from './make-mail'
 import { makeMiddleware } from './make-middleware'
+import { makePolicy } from './make-policy'
 import { makeMigration } from './make-migration'
 import { makeModel } from './make-model'
 import { makeNotification } from './make-notification'
@@ -49,6 +50,7 @@ import { installPlugin } from './plugin'
 import { displayModels } from './model-list'
 import { displayContext } from './context'
 import { runCheck, renderCheckReport } from './check'
+import { runAudit, renderAuditReport } from './audit'
 import { generateGuidelines } from './guidelines'
 import { makeFeature, parseFieldsString } from './make-feature'
 import { generateKeyValue, writeKeyToEnv } from './key-generate'
@@ -98,6 +100,7 @@ const makeCommandSpecs: MakeCommandSpec[] = [
   { name: 'make:event', description: 'Generate a new event class.', argDescription: 'Event class name', makeFn: makeEvent, resourceName: 'Event' },
   { name: 'make:mail', description: 'Generate a new mailable class.', argDescription: 'Mail class name', makeFn: makeMail, resourceName: 'Mail' },
   { name: 'make:middleware', description: 'Generate a new middleware.', argDescription: 'Middleware name', makeFn: makeMiddleware, resourceName: 'Middleware' },
+  { name: 'make:policy', description: 'Generate a new authorization policy.', argDescription: 'Policy class name', makeFn: makePolicy, resourceName: 'Policy' },
   { name: 'make:seeder', description: 'Generate a new database seeder.', argDescription: 'Seeder class name', makeFn: makeSeeder, resourceName: 'Seeder' },
   { name: 'make:notification', description: 'Generate a new notification class.', argDescription: 'Notification class name', makeFn: makeNotification, resourceName: 'Notification' },
   { name: 'make:provider', description: 'Generate a new service provider.', argDescription: 'Provider class name', makeFn: makeProvider, resourceName: 'Provider' },
@@ -1603,6 +1606,43 @@ const checkCommand = defineCommand({
   },
 })
 
+const auditCommand = defineCommand({
+  meta: {
+    name: 'audit',
+    description: 'Run a security audit: validation, authentication, raw SQL, secrets, mass assignment.',
+  },
+  args: {
+    json: {
+      type: 'boolean',
+      description: 'Output as JSON.',
+    },
+    routes: {
+      type: 'string',
+      description: 'Path to routes entry file.',
+    },
+    app: {
+      type: 'string',
+      description: 'Application root directory.',
+    },
+  },
+  async run({ args }) {
+    const report = await runAudit({
+      cwd: args.app,
+      routesFile: args.routes,
+    })
+
+    if (args.json) {
+      console.log(JSON.stringify(report, null, 2))
+    } else {
+      renderAuditReport(report)
+    }
+
+    if (report.failCount > 0) {
+      process.exitCode = 1
+    }
+  },
+})
+
 const guidelinesCommand = defineCommand({
   meta: {
     name: 'guidelines',
@@ -1656,12 +1696,22 @@ const makeFeatureCommand = defineCommand({
       type: 'boolean',
       description: 'Also generate a test file.',
     },
+    public: {
+      type: 'boolean',
+      description: 'Skip authentication checks in mutating actions (default: auth required).',
+    },
+    policy: {
+      type: 'boolean',
+      description: 'Also generate an authorization policy and enforce it in store/update.',
+    },
   },
   async run({ args }) {
     await makeFeature(args.name as string, {
       fields: args.fields,
       force: Boolean(args.force),
       withTest: Boolean(args.test),
+      publicAccess: Boolean(args.public),
+      withPolicy: Boolean(args.policy),
     })
   },
 })
@@ -2123,6 +2173,7 @@ const main = defineCommand({
     'model:list': modelListCommand,
     context: contextCommand,
     check: checkCommand,
+    audit: auditCommand,
     guidelines: guidelinesCommand,
     'make:feature': makeFeatureCommand,
   },

@@ -10,6 +10,7 @@ import {
   discoverMiddlewareFiles,
   discoverListenerFiles,
   discoverValidatorFiles,
+  discoverPolicyFiles,
   classNameFromPath,
   readIfExists,
   collectFiles,
@@ -30,6 +31,7 @@ export interface ProjectContext {
   middleware: string[]
   listeners: string[]
   validators: string[]
+  policies: string[]
 }
 
 export interface ContextOptions {
@@ -91,6 +93,7 @@ export async function generateContext(options: ContextOptions = {}): Promise<Pro
   const middleware = await toNames(discoverMiddlewareFiles)
   const listeners = await toNames(discoverListenerFiles)
   const validators = await toNames(discoverValidatorFiles)
+  const policies = await toNames(discoverPolicyFiles)
 
   return {
     framework: { name: 'Guren', version },
@@ -104,6 +107,7 @@ export async function generateContext(options: ContextOptions = {}): Promise<Pro
     middleware,
     listeners,
     validators,
+    policies,
   }
 }
 
@@ -169,6 +173,7 @@ export function renderContextMarkdown(ctx: ProjectContext): string {
     ['Middleware', ctx.middleware],
     ['Listeners', ctx.listeners],
     ['Validators', ctx.validators],
+    ['Policies', ctx.policies],
   ]
 
   for (const [title, items] of sections) {

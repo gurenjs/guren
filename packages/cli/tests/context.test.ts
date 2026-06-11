@@ -100,6 +100,7 @@ describe('renderContextMarkdown', () => {
       middleware: [],
       listeners: [],
       validators: [],
+      policies: [],
     })
 
     expect(md).toContain('# Project Context')

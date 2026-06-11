@@ -104,6 +104,10 @@ export function discoverValidatorFiles(appRoot: string): Promise<string[]> {
   return discoverDir(appRoot, 'app/Http/Validators')
 }
 
+export function discoverPolicyFiles(appRoot: string): Promise<string[]> {
+  return discoverDir(appRoot, 'app/Policies')
+}
+
 /**
  * Extract a class name from a file path.
  * e.g., '/app/Models/Post.ts' → 'Post'
