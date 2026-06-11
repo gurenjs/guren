@@ -1,5 +1,8 @@
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
-import { parseFieldsString } from '../src/make-feature'
+import { makeFeature, parseFieldsString } from '../src/make-feature'
+import { createTempWorkspace } from './helpers'
 
 describe('parseFieldsString', () => {
   it('parses simple fields', () => {
@@ -46,5 +49,68 @@ describe('parseFieldsString', () => {
   it('defaults type to string when omitted', () => {
     const fields = parseFieldsString('title')
     expect(fields[0].type).toBe('string')
+  })
+})
+
+describe('makeFeature', () => {
+  it('includes auth checks in mutating actions by default', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-auth-')
+
+    try {
+      await makeFeature('Post', { fields: 'title:string' })
+
+      const controller = await readFile(
+        join(workspace.dir, 'app/Http/Controllers/PostController.ts'),
+        'utf8',
+      )
+
+      const storeBody = controller.slice(controller.indexOf('async store'))
+      expect(storeBody).toContain('await this.auth.userOrFail()')
+      const updateBody = controller.slice(controller.indexOf('async update'))
+      expect(updateBody).toContain('await this.auth.userOrFail()')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('generates a policy and authorize calls with withPolicy', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-policy-')
+
+    try {
+      await makeFeature('Post', { fields: 'title:string', withPolicy: true })
+
+      const controller = await readFile(
+        join(workspace.dir, 'app/Http/Controllers/PostController.ts'),
+        'utf8',
+      )
+      expect(controller).toContain("await this.authorize('create', Post)")
+      expect(controller).toContain("await this.authorize('update', [Post, await Post.findOrFail(id)])")
+
+      const policy = await readFile(
+        join(workspace.dir, 'app/Policies/PostPolicy.ts'),
+        'utf8',
+      )
+      expect(policy).toContain('export class PostPolicy extends Policy')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('skips auth checks with publicAccess', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-public-')
+
+    try {
+      await makeFeature('Post', { fields: 'title:string', publicAccess: true })
+
+      const controller = await readFile(
+        join(workspace.dir, 'app/Http/Controllers/PostController.ts'),
+        'utf8',
+      )
+
+      expect(controller).not.toContain('auth.userOrFail')
+      expect(controller).toContain('validateBody')
+    } finally {
+      await workspace.cleanup()
+    }
   })
 })

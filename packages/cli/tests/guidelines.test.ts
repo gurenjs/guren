@@ -13,7 +13,30 @@ describe('generateGuidelines', () => {
 
       expect(output).toContain('# Project Guidelines')
       expect(output).toContain('## Naming Conventions')
+      expect(output).toContain('## Security Rules (checked by `bunx guren audit`)')
       expect(output).toContain('## When Creating New Features')
+      expect(output).toContain('bunx guren make:policy')
+      expect(output).toContain('Run `bunx guren audit`')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('lists policies when present', async () => {
+    const workspace = await createTempWorkspace('guren-cli-guidelines-policy-')
+
+    try {
+      await mkdir(join(workspace.dir, 'app/Policies'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Policies/PostPolicy.ts'),
+        `export class PostPolicy {}`,
+        'utf8',
+      )
+
+      const output = await generateGuidelines({ cwd: workspace.dir })
+
+      expect(output).toContain('PostPolicy')
+      expect(output).toContain('this.authorize')
     } finally {
       await workspace.cleanup()
     }

@@ -1,6 +1,7 @@
 import { consola } from 'consola'
 import { writeFilesSafe, type WriterOptions, pascalCase, kebabCase } from './utils'
 import { makeModel } from './make-model'
+import { makePolicy } from './make-policy'
 import { makeTest } from './make-test'
 
 export interface FieldDefinition {
@@ -13,6 +14,10 @@ export interface MakeFeatureOptions extends WriterOptions {
   fields?: string
   withTest?: boolean
   withFactory?: boolean
+  /** Skip authentication checks in mutating actions. Defaults to false (auth required). */
+  publicAccess?: boolean
+  /** Also generate an authorization policy and enforce it in mutating actions. */
+  withPolicy?: boolean
 }
 
 const DEFAULT_FIELDS: FieldDefinition[] = [
@@ -48,6 +53,8 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   const routeName = kebabCase(collection)
   const routeVar = routeName.replace(/-([a-z])/g, (_, char: string) => char.toUpperCase())
   const variableName = singular.charAt(0).toLowerCase() + singular.slice(1)
+  const withAuth = !options.publicAccess
+  const withPolicy = Boolean(options.withPolicy)
   const writerOptions: WriterOptions = { force: Boolean(options.force) }
 
   const created = await writeFilesSafe([
@@ -61,7 +68,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     },
     {
       path: `app/Http/Controllers/${singular}Controller.ts`,
-      contents: generateController(singular, collection, routeName, routeVar, variableName, fields),
+      contents: generateController(singular, collection, routeName, routeVar, variableName, fields, withAuth, withPolicy),
     },
     {
       path: `resources/js/pages/${routeName}/Index.tsx`,
@@ -85,6 +92,12 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   const modelPath = await makeModel(singular, writerOptions)
   created.push(modelPath)
 
+  // Optionally create policy
+  if (withPolicy) {
+    const policyPath = await makePolicy(singular, writerOptions)
+    created.push(policyPath)
+  }
+
   // Optionally create test
   if (options.withTest) {
     try {
@@ -99,22 +112,38 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     consola.success(`Created ${file}`)
   }
 
+  const authSuffix = withAuth ? `.middleware('auth')` : ''
   consola.info('')
   consola.info('Next steps:')
   consola.info(`  1. Add table definition to db/schema.ts`)
   consola.info(`  2. Register routes in routes/web.ts with body schemas:`)
   consola.info(`     import ${singular}Controller from '../app/Http/Controllers/${singular}Controller.js'`)
   consola.info(`     import { ${singular}PayloadSchema } from '../app/Http/Validators/${singular}Validator.js'`)
+  if (withAuth) {
+    consola.info(`     router.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))`)
+  }
   consola.info(`     router.group('/${routeName}', (${routeVar}) => {`)
   consola.info(`       ${routeVar}.get('/', [${singular}Controller, 'index']).name('${routeName}.index')`)
   consola.info(`       ${routeVar}.get('/create', [${singular}Controller, 'create']).name('${routeName}.create')`)
   consola.info(`       ${routeVar}.get('/:id', [${singular}Controller, 'show']).name('${routeName}.show')`)
   consola.info(`       ${routeVar}.get('/:id/edit', [${singular}Controller, 'edit']).name('${routeName}.edit')`)
-  consola.info(`       ${routeVar}.post('/', { name: '${routeName}.store', body: ${singular}PayloadSchema }, [${singular}Controller, 'store'])`)
-  consola.info(`       ${routeVar}.put('/:id', { name: '${routeName}.update', body: ${singular}PayloadSchema }, [${singular}Controller, 'update'])`)
+  consola.info(`       ${routeVar}.post('/', { name: '${routeName}.store', body: ${singular}PayloadSchema }, [${singular}Controller, 'store'])${authSuffix}`)
+  consola.info(`       ${routeVar}.put('/:id', { name: '${routeName}.update', body: ${singular}PayloadSchema }, [${singular}Controller, 'update'])${authSuffix}`)
   consola.info(`     })`)
   consola.info(`  3. Run: bunx guren db:migrate`)
   consola.info(`  4. Run: bunx guren codegen`)
+  if (withPolicy) {
+    consola.info(`  5. Register the policy in src/app.ts (inside the boot callback):`)
+    consola.info(`     import { getGate } from '@guren/core'`)
+    consola.info(`     import { ${singular} } from '../app/Models/${singular}.js'`)
+    consola.info(`     import { ${singular}Policy } from '../app/Policies/${singular}Policy.js'`)
+    consola.info(`     getGate().policy(${singular}, ${singular}Policy)`)
+  }
+  if (withAuth) {
+    consola.info('')
+    consola.info(`  Note: store/update call this.auth.userOrFail() — unauthenticated requests get 401.`)
+    consola.info(`  Use --public to scaffold without authentication checks.`)
+  }
 
   return created
 }
@@ -226,7 +255,14 @@ function generateController(
   routeVar: string,
   variableName: string,
   fields: FieldDefinition[],
+  withAuth: boolean,
+  withPolicy: boolean,
 ): string {
+  const authGuard = withAuth ? '    await this.auth.userOrFail()\n' : ''
+  const createGuard = withPolicy ? `    await this.authorize('create', ${singular})\n` : ''
+  const updateGuard = withPolicy
+    ? `    await this.authorize('update', [${singular}, await ${singular}.findOrFail(id)])\n`
+    : ''
   return `import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
 import { pages } from '../../../.guren/pages.gen.js'
 import { ${singular} } from '../../Models/${singular}.js'
@@ -264,7 +300,7 @@ export default class ${singular}Controller extends Controller {
   }
 
   async store(): Promise<Response> {
-    const data = await this.validateBody(${singular}PayloadSchema)
+${authGuard}${createGuard}    const data = await this.validateBody(${singular}PayloadSchema)
     const ${variableName} = await ${singular}.create(data)
     return this.redirect('/${routeName}/' + ${variableName}?.id)
   }
@@ -279,8 +315,8 @@ export default class ${singular}Controller extends Controller {
   }
 
   async update(): Promise<Response> {
-    const { id } = this.validateParams(${singular}IdParamSchema)
-    const data = await this.validateBody(${singular}PayloadSchema)
+${authGuard}    const { id } = this.validateParams(${singular}IdParamSchema)
+${updateGuard}    const data = await this.validateBody(${singular}PayloadSchema)
     await ${singular}.update({ id }, data)
     return this.redirect('/${routeName}/' + id)
   }

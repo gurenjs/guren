@@ -11,6 +11,7 @@ import { makeListener } from '../src/make-listener'
 import { makeMail } from '../src/make-mail'
 import { makeMiddleware } from '../src/make-middleware'
 import { makeNotification } from '../src/make-notification'
+import { makePolicy } from '../src/make-policy'
 import { makeProvider } from '../src/make-provider'
 import { makeResource } from '../src/make-resource'
 import { makeSeeder } from '../src/make-seeder'
@@ -152,6 +153,31 @@ describe('CLI make:* commands', () => {
       expect(content).toContain('LogRequestMiddleware')
       expect(content).toContain('ctx: Context')
       expect(content).toContain('await next()')
+    })
+  })
+
+  describe('makePolicy', () => {
+    it('creates a policy file', async () => {
+      const result = await makePolicy('Post')
+      expect(result).toContain('app/Policies/PostPolicy.ts')
+      expect(fs.existsSync(result)).toBe(true)
+    })
+
+    it('generates correct policy template', async () => {
+      const result = await makePolicy('Post')
+      const content = fs.readFileSync(result, 'utf-8')
+      expect(content).toContain('export class PostPolicy extends Policy')
+      expect(content).toContain('viewAny')
+      expect(content).toContain('update(user: AuthUser | null, post: PostLike)')
+      expect(content).toContain('user.id === post.userId')
+    })
+
+    it('does not duplicate the Policy suffix', async () => {
+      const result = await makePolicy('CommentPolicy')
+      expect(result).toContain('app/Policies/CommentPolicy.ts')
+      const content = fs.readFileSync(result, 'utf-8')
+      expect(content).toContain('class CommentPolicy extends Policy')
+      expect(content).toContain('comment: CommentLike')
     })
   })
 
