@@ -28,9 +28,12 @@ function createMockUser(overrides: Partial<MockUser> = {}): MockUser {
 
 function createMockSession(): Session & { data: Map<string, unknown>; regenerated: boolean } {
   const data = new Map<string, unknown>()
+  const state = { regenerated: false }
   return {
     data,
-    regenerated: false,
+    get regenerated() {
+      return state.regenerated
+    },
     id: 'test-session-id',
     isNew: false,
     get<T>(key: string): T | undefined {
@@ -52,7 +55,7 @@ function createMockSession(): Session & { data: Map<string, unknown>; regenerate
       data.clear()
     },
     regenerate() {
-      this.regenerated = true
+      state.regenerated = true
     },
     invalidate() {},
     flash() {},
