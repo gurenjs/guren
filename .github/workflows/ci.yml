@@ -68,6 +68,9 @@ jobs:
       - name: Docs audit
         run: bun run audit:docs
 
+      - name: Security audit (blog example)
+        run: cd examples/blog && bun ../../packages/cli/src/bin.ts audit
+
       - name: Build example apps
         run: |
           bun run --cwd examples/blog build
