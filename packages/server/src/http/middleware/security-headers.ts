@@ -20,7 +20,11 @@ export interface SecurityHeadersOptions {
   referrerPolicy?: string | false
   /** X-Permitted-Cross-Domain-Policies header. Set to false to disable. Default: 'none' */
   crossDomainPolicies?: string | false
-  /** Strict-Transport-Security header. Default: false (disabled) */
+  /**
+   * Strict-Transport-Security header.
+   * Default: `{ maxAge: 31536000 }` (1 year) when NODE_ENV is 'production', false otherwise.
+   * Browsers ignore HSTS on plain-HTTP responses, so the production default is safe behind TLS terminators.
+   */
   hsts?: HstsOptions | false
 }
 
@@ -52,7 +56,7 @@ export function createSecurityHeaders(options: SecurityHeadersOptions = {}): Mid
     xssProtection = '0',
     referrerPolicy = 'strict-origin-when-cross-origin',
     crossDomainPolicies = 'none',
-    hsts = false,
+    hsts = process.env.NODE_ENV === 'production' ? { maxAge: 31536000 } : false,
   } = options
 
   const hstsValue = hsts !== false ? buildHstsValue(hsts) : null

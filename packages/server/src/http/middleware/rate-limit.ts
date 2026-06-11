@@ -171,6 +171,18 @@ export interface RateLimitOptions {
    * @default 'rl:'
    */
   keyPrefix?: string
+
+  /**
+   * Trust reverse-proxy headers for client IP resolution, checked in order:
+   * `CF-Connecting-IP`, `True-Client-IP`, `X-Real-IP`, then the first entry
+   * of `X-Forwarded-For`. Falls back to `server.requestIP()` when none are set.
+   *
+   * Enable ONLY when every request passes through a proxy that sets or strips
+   * these headers — on direct deployments clients can spoof them to bypass
+   * per-client limits. Ignored when a custom `keyGenerator` is supplied.
+   * @default false
+   */
+  trustProxy?: boolean
 }
 
 let defaultKeyGeneratorWarned = false
@@ -194,6 +206,31 @@ let defaultKeyGeneratorWarned = false
  * Does NOT trust proxy headers by default to prevent rate-limit bypass via
  * header spoofing on direct deployments.
  */
+const PROXY_IP_HEADERS = ['cf-connecting-ip', 'true-client-ip', 'x-real-ip'] as const
+
+/**
+ * Resolve the client IP from trusted reverse-proxy headers.
+ * Returns null when no proxy header is present.
+ */
+function clientIpFromProxyHeaders(ctx: Context): string | null {
+  for (const header of PROXY_IP_HEADERS) {
+    const value = ctx.req.header(header)?.trim()
+    if (value) return value
+  }
+
+  const forwardedFor = ctx.req.header('x-forwarded-for')
+  if (forwardedFor) {
+    const first = forwardedFor.split(',')[0]?.trim()
+    if (first) return first
+  }
+
+  return null
+}
+
+function proxyAwareKeyGenerator(ctx: Context): string {
+  return clientIpFromProxyHeaders(ctx) ?? defaultKeyGenerator(ctx)
+}
+
 function defaultKeyGenerator(ctx: Context): string {
   // Bun.serve passes { server } in env — use server.requestIP() for true client IP
   const env = ctx.env as Record<string, unknown> | undefined
@@ -275,7 +312,8 @@ export function createRateLimitMiddleware(options: RateLimitOptions = {}): Middl
   const {
     limit = 100,
     windowMs = 60000,
-    keyGenerator = defaultKeyGenerator,
+    trustProxy = false,
+    keyGenerator = trustProxy ? proxyAwareKeyGenerator : defaultKeyGenerator,
     store = getDefaultStore(),
     skip,
     onRateLimited,

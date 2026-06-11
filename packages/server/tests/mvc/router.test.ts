@@ -86,6 +86,9 @@ describe('Router route contract metadata', () => {
           params: undefined,
           query: undefined,
         },
+        middlewareNames: [],
+        hasInlineMiddleware: false,
+        controller: undefined,
         summary: 'Create post',
         description: 'Creates a post resource.',
         tags: ['Posts'],
@@ -113,6 +116,9 @@ describe('Router route contract metadata', () => {
           params: undefined,
           query: undefined,
         },
+        middlewareNames: [],
+        hasInlineMiddleware: false,
+        controller: undefined,
         summary: 'Health check',
         description: undefined,
         tags: undefined,
@@ -120,5 +126,44 @@ describe('Router route contract metadata', () => {
         deprecated: undefined,
       },
     ])
+  })
+})
+
+describe('Router definition introspection', () => {
+  it('exposes controller binding for controller action routes', () => {
+    const router = new Router()
+    router.post('/posts', [StubController, 'store'])
+
+    const [def] = router.definitions()
+    expect(def!.controller).toEqual({ name: 'StubController', action: 'store' })
+    expect(def!.hasInlineMiddleware).toBe(false)
+  })
+
+  it('exposes named middleware applied via middleware groups', () => {
+    const router = new Router<'auth'>()
+    router.aliasMiddleware('auth', async (_c, next) => { await next() })
+    router.middleware('auth').group((auth) => {
+      auth.delete('/posts/:id', [StubController, 'destroy'])
+    })
+
+    const [def] = router.definitions()
+    expect(def!.middlewareNames).toEqual(['auth'])
+  })
+
+  it('exposes named middleware applied via the route builder', () => {
+    const router = new Router<'auth'>()
+    router.aliasMiddleware('auth', async (_c, next) => { await next() })
+    router.delete('/posts/:id', [StubController, 'destroy']).middleware('auth')
+
+    const [def] = router.definitions()
+    expect(def!.middlewareNames).toEqual(['auth'])
+  })
+
+  it('reports inline middleware presence', () => {
+    const router = new Router()
+    router.post('/posts', async (_c) => null, async (_c, next) => { await next() })
+
+    const [def] = router.definitions()
+    expect(def!.hasInlineMiddleware).toBe(true)
   })
 })

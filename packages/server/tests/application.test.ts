@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { Application, Controller, createApp } from '../src'
+import { Application, Controller, createApp, getGate, Policy, ErrorServiceProvider } from '../src'
 import { z } from 'zod'
 
 class GreetingController extends Controller {
@@ -173,5 +173,116 @@ describe('Application routing integration', () => {
     expect(failure.status).toBe(400)
     const failureBody = await failure.json() as { errors?: Record<string, string> }
     expect(failureBody.errors?.id).toContain('number')
+  })
+})
+
+describe('Application authorization wiring', () => {
+  class Doc {
+    constructor(public id: number, public ownerId: number) {}
+  }
+
+  it('makes the global gate available after boot without manual wiring', async () => {
+    const app = createApp({
+      routes: (router) => {
+        router.get('/ping', () => 'pong')
+      },
+    })
+    await app.boot()
+
+    const gate = getGate()
+    expect(gate).toBeDefined()
+    gate.define('always', () => true)
+    expect(await gate.allows('always')).toBe(true)
+  })
+
+  it('denies controller authorize() for guests via registered policy (403)', async () => {
+    class DocPolicy extends Policy {
+      update(user: { id: string | number } | null, doc: { ownerId?: unknown }) {
+        return user !== null && user.id === doc.ownerId
+      }
+    }
+
+    class DocController extends Controller {
+      async update() {
+        await this.authorize('update', [Doc, { id: 1, ownerId: 5 }])
+        return this.json({ ok: true })
+      }
+    }
+
+    const app = createApp({
+      routes: (router) => {
+        router.put('/docs/:id', [DocController, 'update'])
+      },
+    })
+    await app.boot()
+    getGate().policy(Doc, DocPolicy)
+
+    const response = await app.fetch(new Request('http://example.com/docs/1', { method: 'PUT' }))
+
+    expect(response.status).toBe(403)
+  })
+
+  it('maps duck-typed statusCode exceptions without manual ErrorServiceProvider', async () => {
+    class NotFoundish extends Error {
+      readonly statusCode = 404
+    }
+
+    const app = createApp({
+      routes: (router) => {
+        router.get('/missing', () => {
+          throw new NotFoundish('Nope')
+        })
+      },
+    })
+    await app.boot()
+
+    const response = await app.fetch(new Request('http://example.com/missing'))
+
+    expect(response.status).toBe(404)
+  })
+
+  it('lets a user-supplied ErrorServiceProvider take precedence', async () => {
+    class CustomErrorProvider extends ErrorServiceProvider {
+      boot(): void {
+        const hono = this.container.make<import('hono').Hono>('hono')
+        hono.onError(() => new Response('custom', { status: 418 }))
+      }
+    }
+
+    const app = createApp({
+      routes: (router) => {
+        router.get('/boom', () => {
+          throw new Error('boom')
+        })
+      },
+      providers: [CustomErrorProvider],
+    })
+    await app.boot()
+
+    const response = await app.fetch(new Request('http://example.com/boom'))
+
+    expect(response.status).toBe(418)
+    expect(await response.text()).toBe('custom')
+  })
+
+  it('controller can() reflects gate definitions', async () => {
+    class StatusController extends Controller {
+      async index() {
+        return this.json({ allowed: await this.can('view-dashboard') })
+      }
+    }
+
+    const app = createApp({
+      routes: (router) => {
+        router.get('/status', [StatusController, 'index'])
+      },
+    })
+    await app.boot()
+    getGate().define('view-dashboard', () => true)
+
+    const response = await app.fetch(new Request('http://example.com/status'))
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ allowed: true })
   })
 })
