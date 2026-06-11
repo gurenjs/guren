@@ -1,6 +1,6 @@
 import type { Session } from '../http/middleware'
 import type { AuthCredentials, Authenticatable, Guard, UserProvider } from './types'
-import { secureStringCompare } from './utils'
+import { generateToken, secureStringCompare } from './utils'
 
 export interface SessionGuardOptions {
   provider: UserProvider
@@ -117,7 +117,7 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
       return
     }
 
-    const token = globalThis.crypto.randomUUID()
+    const token = generateToken(32)
     await this.provider.setRememberToken?.(user, token)
     this.currentSession.set(this.rememberSessionKey(), token)
   }
@@ -128,6 +128,9 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
     if (!session) {
       throw new Error('SessionGuard: session middleware is required to use the session guard.')
     }
+
+    // Rotate the session ID so a pre-authentication session cannot be fixated
+    session.regenerate()
 
     const identifier = this.provider.getId(castUser)
     session.set(this.sessionKey(), identifier)

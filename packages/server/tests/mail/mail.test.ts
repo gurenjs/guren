@@ -288,6 +288,16 @@ describe('Mail (fluent builder)', () => {
     expect(message?.headers?.['X-Custom']).toBe('value')
   })
 
+  it('rejects header values containing CRLF (header injection)', () => {
+    expect(() =>
+      mail(manager).header('X-Custom', 'value\r\nBcc: attacker@example.com'),
+    ).toThrow('newline')
+  })
+
+  it('rejects header names containing CRLF (header injection)', () => {
+    expect(() => mail(manager).header('X-Custom\r\nBcc', 'value')).toThrow('newline')
+  })
+
   it('uses default from address', async () => {
     await mail(manager)
       .to('recipient@example.com')

@@ -35,6 +35,12 @@ describe('renderErrorPage', () => {
     expect(html).not.toContain('The page you are looking for could not be found.')
   })
 
+  test('should HTML-escape the custom message to prevent XSS', () => {
+    const html = renderErrorPage(422, 'User <script>alert(1)</script> already exists')
+    expect(html).not.toContain('<script>alert(1)</script>')
+    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
+  })
+
   test('should fall back to generic title for unknown status codes', () => {
     const html = renderErrorPage(418)
     expect(html).toContain('<title>418 Error</title>')

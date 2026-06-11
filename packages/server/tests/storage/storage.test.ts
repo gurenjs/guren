@@ -48,6 +48,25 @@ describe('LocalDriver', () => {
     })
   })
 
+  describe('path traversal protection', () => {
+    it('rejects writes escaping the storage root', async () => {
+      await expect(driver.put('../escape.txt', 'x')).rejects.toThrow('escapes the storage root')
+    })
+
+    it('rejects reads escaping the storage root', async () => {
+      await expect(driver.get('../../etc/passwd')).rejects.toThrow('escapes the storage root')
+    })
+
+    it('rejects deletes escaping the storage root', async () => {
+      await expect(driver.delete('../../outside.txt')).rejects.toThrow('escapes the storage root')
+    })
+
+    it('allows relative segments that stay within the root', async () => {
+      await driver.put('a/../b.txt', 'ok')
+      expect(await driver.getAsString('b.txt')).toBe('ok')
+    })
+  })
+
   describe('getAsString', () => {
     it('returns content as string', async () => {
       await driver.put('test.txt', 'Hello, World!')

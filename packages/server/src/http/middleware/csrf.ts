@@ -47,8 +47,14 @@ export interface CsrfOptions {
 
 const DEFAULT_PROTECTED_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE']
 
+const DEFAULT_COOKIE_SECURE = typeof process !== 'undefined'
+  ? process.env.NODE_ENV === 'production'
+  : true
+
 function generateToken(): string {
-  return globalThis.crypto.randomUUID()
+  const bytes = new Uint8Array(32)
+  globalThis.crypto.getRandomValues(bytes)
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
 function matchesPattern(path: string, pattern: string): boolean {
@@ -253,7 +259,7 @@ function setXsrfCookie(
   token: string,
   options: CsrfOptions['cookieOptions'] = {},
 ): void {
-  const { path = '/', secure = false, sameSite = 'Lax' } = options
+  const { path = '/', secure = DEFAULT_COOKIE_SECURE, sameSite = 'Lax' } = options
   // httpOnly must be false so JavaScript (Axios) can read the cookie
   ctx.header(
     'Set-Cookie',
