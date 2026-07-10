@@ -125,7 +125,7 @@ export default function Home({ message, codeExamples }: Props) {
               </p>
               <CodeBlock
                 lines={[
-                  '$ bunx create-guren-app@rc my-app',
+                  '$ bunx create-guren-app my-app',
                   '$ cd my-app',
                   '$ bun run dev',
                 ]}
