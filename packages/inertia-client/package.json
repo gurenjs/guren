@@ -43,6 +43,16 @@
       "import": "./dist/channel.js",
       "default": "./dist/channel.js"
     },
+    "./typed-forms": {
+      "types": "./dist/typed-forms.d.ts",
+      "import": "./dist/typed-forms.js",
+      "default": "./dist/typed-forms.js"
+    },
+    "./components": {
+      "types": "./dist/components.d.ts",
+      "import": "./dist/components.js",
+      "default": "./dist/components.js"
+    },
     "./dist/*": {
       "default": "./dist/*"
     },

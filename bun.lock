@@ -15,7 +15,7 @@
     },
     "examples/api": {
       "name": "@guren/example-api",
-      "version": "0.1.1-rc.9",
+      "version": "0.1.1-rc.10",
       "dependencies": {
         "@guren/cli": "workspace:*",
         "@guren/core": "workspace:*",
@@ -67,7 +67,7 @@
     },
     "packages/cli": {
       "name": "@guren/cli",
-      "version": "1.0.0-rc.15",
+      "version": "1.0.0-rc.16",
       "bin": {
         "guren": "./dist/bin.js",
       },
@@ -91,7 +91,7 @@
     },
     "packages/core": {
       "name": "@guren/core",
-      "version": "1.0.0-rc.13",
+      "version": "1.0.0-rc.14",
       "bin": {
         "guren": "./dist/bin.js",
       },
@@ -108,7 +108,7 @@
     },
     "packages/create-app": {
       "name": "create-guren-app",
-      "version": "1.0.0-rc.17",
+      "version": "1.0.0-rc.18",
       "bin": {
         "create-guren-app": "./dist/cli.js",
       },
@@ -124,7 +124,7 @@
     },
     "packages/inertia-client": {
       "name": "@guren/inertia-client",
-      "version": "1.0.0-rc.12",
+      "version": "1.0.0-rc.13",
       "dependencies": {
         "@inertiajs/core": "^2.3.18",
         "@inertiajs/react": "^2.3.18",
@@ -140,7 +140,7 @@
     },
     "packages/openapi": {
       "name": "@guren/openapi",
-      "version": "1.0.0-rc.13",
+      "version": "1.0.0-rc.14",
       "dependencies": {
         "@guren/core": "^1.0.0-rc.13",
       },
@@ -152,7 +152,7 @@
     },
     "packages/orm": {
       "name": "@guren/orm",
-      "version": "1.0.0-rc.12",
+      "version": "1.0.0-rc.13",
       "dependencies": {
         "drizzle-orm": "1.0.0-rc.1",
       },
@@ -186,9 +186,10 @@
     },
     "packages/server": {
       "name": "@guren/server",
-      "version": "1.0.0-rc.13",
+      "version": "1.0.0-rc.14",
       "dependencies": {
-        "@guren/inertia-client": "^1.0.0-rc.12",
+        "@guren/inertia-client": "^1.0.0-rc.13",
+        "@guren/orm": "^1.0.0-rc.13",
         "@modelcontextprotocol/sdk": "^1.27.1",
         "chalk": "^5.3.0",
         "consola": "^3.4.2",
@@ -219,7 +220,7 @@
     },
     "packages/testing": {
       "name": "@guren/testing",
-      "version": "1.0.0-rc.13",
+      "version": "1.0.0-rc.14",
       "devDependencies": {
         "@types/react": "^19.0.0",
         "tsup": "^8.5.0",
@@ -237,7 +238,7 @@
     },
     "web": {
       "name": "web",
-      "version": "0.1.1-rc.8",
+      "version": "0.1.1-rc.9",
       "dependencies": {
         "@guren/cli": "workspace:*",
         "@guren/core": "workspace:*",

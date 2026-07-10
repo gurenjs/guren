@@ -303,7 +303,7 @@ async function assertCanonicalScaffolds(appDir: string): Promise<void> {
 
   const postController = await readFile(join(appDir, 'app/Http/Controllers/PostController.ts'), 'utf8')
   assert(postController.includes('type PostsIndexProps = PaginatedPageProps<PostResourceData>'), 'Resource scaffold must use PaginatedPageProps in index controller.')
-  assert(postController.includes('type PostFormErrors = ValidationErrors'), 'Resource scaffold must expose ValidationErrors in edit flow.')
+  assert(postController.includes('await this.auth.userOrFail()'), 'Resource scaffold must require auth in mutating actions by default.')
   assert(postController.includes('const paginator = paginate(result,'), 'Resource scaffold must use paginate(result, ...) as the canonical paginator path.')
   assert(!postController.includes('.safeParse('), 'Resource scaffold must not use manual safeParse() in PostController.')
   assert(!postController.includes('getEventManager'), 'Resource scaffold must not use event helper singletons in PostController.')

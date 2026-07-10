@@ -9,6 +9,7 @@ export {
   bigint,
   timestamp,
   boolean,
+  jsonb,
   uniqueIndex,
 } from 'drizzle-orm/pg-core'
 

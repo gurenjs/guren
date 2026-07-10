@@ -1,10 +1,10 @@
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { migrate } from 'drizzle-orm/postgres-js/migrator'
-import { existsSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import postgres from 'postgres'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
+import { hasDrizzleMigrations, warnIgnoredFlatSqlMigrations } from './migration-utils'
 import { runSeeders } from './seeder'
 
 type ConnectionResolver = string | (() => string | undefined)
@@ -61,6 +61,7 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
 
     const promise = (async (): Promise<void> => {
       if (!hasDrizzleMigrations(resolvedMigrationsFolder)) {
+        warnIgnoredFlatSqlMigrations(resolvedMigrationsFolder)
         return
       }
 
@@ -144,13 +145,3 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
   }
 }
 
-function hasDrizzleMigrations(migrationsFolder: string): boolean {
-  if (!existsSync(migrationsFolder)) {
-    return false
-  }
-
-  const entries = readdirSync(migrationsFolder, { withFileTypes: true })
-  return entries.some(
-    (entry) => entry.isDirectory() && existsSync(resolve(migrationsFolder, entry.name, 'migration.sql')),
-  )
-}

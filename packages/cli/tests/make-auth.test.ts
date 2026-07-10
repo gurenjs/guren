@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createTempWorkspace } from './helpers'
 import { makeAuth } from '../src/make-auth'
@@ -55,7 +55,7 @@ export function registerWebRoutes(router: Router): void {
 
       const created = await makeAuth({ install: true, force: true })
 
-      expect(created).toHaveLength(14)
+      expect(created).toHaveLength(13)
       expect(created).toEqual(expect.arrayContaining([
         expect.stringContaining('LoginController.ts'),
         expect.stringContaining('routes/auth.ts'),
@@ -63,15 +63,13 @@ export function registerWebRoutes(router: Router): void {
         expect.stringContaining('ProfileValidator.ts'),
       ]))
 
-      const migrations = await readdir(join(workspace.dir, 'db/migrations'))
-      expect(migrations.some((name) => name.endsWith('_create_users_table.sql'))).toBe(true)
-
       const schema = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
       expect(schema).toContain('passwordHash')
 
       const appContent = await readFile(join(workspace.dir, 'src/app.ts'), 'utf8')
       expect(appContent).toContain('AuthProvider')
       expect(appContent).toContain('providers: [DatabaseProvider, AuthProvider]')
+      expect(appContent).toContain('auth: {}')
 
       const routesContent = await readFile(join(workspace.dir, 'routes/web.ts'), 'utf8')
       expect(routesContent).toContain("import { registerAuthRoutes } from './auth.js'")

@@ -40,9 +40,17 @@ async function updateSsrPackageJson(destination: string): Promise<void> {
   await writeFile(packageJsonPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8')
 }
 
-async function installAuthBlueprint(): Promise<void> {
-  const { runBlueprint } = await import('@guren/cli')
-  await runBlueprint('auth', { force: true })
+async function installAuthBlueprint(targetDir: string): Promise<boolean> {
+  // Run the CLI installed in the scaffolded app so the blueprint sees the
+  // app's own dependencies. A bare import of '@guren/cli' from create-guren-app
+  // would fail: it is not a dependency of this package.
+  const { spawnSync } = await import('node:child_process')
+  const cliBin = resolve(targetDir, 'node_modules/@guren/cli/dist/bin.js')
+  const result = spawnSync('bun', [cliBin, 'add', 'auth', '--force'], {
+    cwd: targetDir,
+    stdio: 'inherit',
+  })
+  return result.status === 0
 }
 
 async function resolveRenderingMode(flagValue: unknown): Promise<RenderingMode> {
@@ -192,23 +200,24 @@ const command = defineCommand({
 
     const includeAuth = Boolean(args.auth)
 
-    if (includeAuth) {
-      const originalCwd = process.cwd()
-      try {
-        process.chdir(targetDir)
-        await installAuthBlueprint()
-      } catch (error) {
-        consola.warn('Failed to scaffold authentication automatically. You can run it manually after install with `bunx guren add auth`.')
-        consola.debug(error)
-      } finally {
-        process.chdir(originalCwd)
-      }
-    }
-
     const shouldInstall = args.install !== false
     let installed = false
     if (shouldInstall) {
       installed = await installDependencies(targetDir)
+    }
+
+    let authInstalled = false
+    if (includeAuth) {
+      if (installed) {
+        consola.start('Adding authentication scaffolding...')
+        authInstalled = await installAuthBlueprint(targetDir)
+        if (authInstalled) {
+          consola.success('Authentication scaffolding added')
+        }
+      }
+      if (!authInstalled) {
+        consola.warn('Authentication was not scaffolded automatically. Run `bunx guren add auth` inside the app after installing dependencies.')
+      }
     }
 
     const relativeTarget = relative(process.cwd(), targetDir) || '.'
@@ -240,9 +249,10 @@ const command = defineCommand({
     consola.log('  bun run test')
     consola.log('  bun run dev')
 
-    if (includeAuth) {
+    if (authInstalled) {
       consola.log('')
       consola.info('Auth scaffolding was included automatically.')
+      consola.info('Set up the users table with: bun run db:migrate && bun run db:seed')
     }
 
     if (renderingMode === 'ssr') {

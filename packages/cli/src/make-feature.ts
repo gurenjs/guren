@@ -18,6 +18,8 @@ export interface MakeFeatureOptions extends WriterOptions {
   publicAccess?: boolean
   /** Also generate an authorization policy and enforce it in mutating actions. */
   withPolicy?: boolean
+  /** Print created files and next steps (default: true). Callers that wire routes/schema themselves pass false. */
+  announce?: boolean
 }
 
 const DEFAULT_FIELDS: FieldDefinition[] = [
@@ -106,6 +108,10 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     } catch {
       // Ignore if test creation fails
     }
+  }
+
+  if (options.announce === false) {
+    return created
   }
 
   for (const file of created) {
@@ -476,22 +482,26 @@ ${formFields}
 }
 
 function generateFormField(field: FieldDefinition, formVar: string): string {
+  // Nullable fields are typed `T | null | undefined` — coalesce for controlled inputs.
+  const stringValue = field.nullable ? `${formVar}.data.${field.name} ?? ''` : `${formVar}.data.${field.name}`
   if (field.type === 'boolean') {
+    const checkedValue = field.nullable ? `${formVar}.data.${field.name} ?? false` : `${formVar}.data.${field.name}`
     return `        <label className="flex items-center gap-2">
-          <input type="checkbox" checked={${formVar}.data.${field.name}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.checked)} />
+          <input type="checkbox" checked={${checkedValue}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.checked)} />
           ${field.name}
         </label>`
   }
   if (field.type === 'text') {
-    return `        <textarea value={${formVar}.data.${field.name}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} placeholder="${field.name}" className="w-full rounded border px-3 py-2" />`
+    return `        <textarea value={${stringValue}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} placeholder="${field.name}" className="w-full rounded border px-3 py-2" />`
   }
   if (field.type === 'number') {
-    return `        <input type="number" value={${formVar}.data.${field.name}} onChange={(event) => ${formVar}.setData('${field.name}', Number(event.target.value))} placeholder="${field.name}" className="w-full rounded border px-3 py-2" />`
+    const numberValue = field.nullable ? `${formVar}.data.${field.name} ?? 0` : `${formVar}.data.${field.name}`
+    return `        <input type="number" value={${numberValue}} onChange={(event) => ${formVar}.setData('${field.name}', Number(event.target.value))} placeholder="${field.name}" className="w-full rounded border px-3 py-2" />`
   }
   if (field.type === 'date') {
-    return `        <input type="date" value={${formVar}.data.${field.name}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} className="w-full rounded border px-3 py-2" />`
+    return `        <input type="date" value={${stringValue}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} className="w-full rounded border px-3 py-2" />`
   }
-  return `        <input value={${formVar}.data.${field.name}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} placeholder="${field.name}" className="w-full rounded border px-3 py-2" />`
+  return `        <input value={${stringValue}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} placeholder="${field.name}" className="w-full rounded border px-3 py-2" />`
 }
 
 function pluralize(name: string): string {
