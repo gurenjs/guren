@@ -1,5 +1,16 @@
 # web
 
+## 0.1.1-rc.9
+
+### Patch Changes
+
+- Updated dependencies
+  - @guren/cli@1.0.0-rc.16
+  - @guren/core@1.0.0-rc.14
+  - @guren/orm@1.0.0-rc.13
+  - @guren/testing@1.0.0-rc.14
+  - @guren/inertia-client@1.0.0-rc.13
+
 ## 0.1.1-rc.8
 
 ### Patch Changes
