@@ -701,12 +701,18 @@ const codegenCommand = defineCommand({
     })
     if (pagesOutputPath) consola.success(`Page helpers generated at ${pagesOutputPath}`)
 
-    if (!args.routes) {
+    // Route/API artifacts default to routes/web.ts; skip only when no routes file exists.
+    const { existsSync } = await import('node:fs')
+    const { resolve: resolvePath } = await import('node:path')
+    const routesFile = args.routes ?? 'routes/web.ts'
+    const appRoot = args.app ?? process.cwd()
+    if (!existsSync(resolvePath(appRoot, routesFile))) {
+      consola.warn(`Routes file ${routesFile} not found — skipped route, data, channel, and API client generation.`)
       process.exit(0)
     }
 
     const { outputPath, runtimeOutputPath, definitions } = await generateRouteTypes({
-      routesFile: args.routes,
+      routesFile,
       outputFile: args.out,
       appRoot: args.app,
       ...writerOptions,
@@ -1806,6 +1812,14 @@ const addResourceCommand = defineCommand({
       required: true,
       description: 'Resource name (singular)',
     },
+    fields: {
+      type: 'string',
+      description: 'Comma-separated fields, e.g. "title:string,body:text,published:boolean" (append ? for nullable)',
+    },
+    public: {
+      type: 'boolean',
+      description: 'Skip authentication checks in store/update actions',
+    },
     force: {
       type: 'boolean',
       description: 'Overwrite existing files',
@@ -1815,11 +1829,22 @@ const addResourceCommand = defineCommand({
   async run({ args }) {
     const createdFiles = await runBlueprint('resource', {
       name: String(args.name),
+      fields: typeof args.fields === 'string' ? args.fields : undefined,
+      publicAccess: Boolean(args.public),
       force: Boolean(args.force),
     })
 
     for (const file of createdFiles) {
       consola.success(`Created ${file}`)
+    }
+
+    consola.info('')
+    consola.info('Schema and routes were updated automatically. Next steps:')
+    consola.info('  • Run `bun run db:make` to generate the migration')
+    consola.info('  • Run `bun run db:migrate` to apply it')
+    consola.info('  • Run `bun run codegen` (or `bun run dev`) to refresh generated types')
+    if (!args.public) {
+      consola.info('  • store/update require a signed-in user — pass --public to opt out')
     }
   },
 })

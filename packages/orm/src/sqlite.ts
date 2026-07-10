@@ -1,7 +1,7 @@
-import { existsSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
+import { hasDrizzleMigrations, warnIgnoredFlatSqlMigrations } from './migration-utils'
 import { runSeeders } from './seeder'
 
 type ConnectionResolver = string | (() => string | undefined)
@@ -76,6 +76,7 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
 
     migrationsPromise = (async () => {
       if (!hasDrizzleMigrations(resolvedMigrationsFolder)) {
+        warnIgnoredFlatSqlMigrations(resolvedMigrationsFolder)
         return
       }
 
@@ -126,13 +127,3 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
   }
 }
 
-function hasDrizzleMigrations(migrationsFolder: string): boolean {
-  if (!existsSync(migrationsFolder)) {
-    return false
-  }
-
-  const entries = readdirSync(migrationsFolder, { withFileTypes: true })
-  return entries.some(
-    (entry) => entry.isDirectory() && existsSync(resolve(migrationsFolder, entry.name, 'migration.sql')),
-  )
-}

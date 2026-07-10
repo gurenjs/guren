@@ -1,9 +1,9 @@
 import { drizzle, type MySql2Database } from 'drizzle-orm/mysql2'
 import { migrate } from 'drizzle-orm/mysql2/migrator'
-import { existsSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
+import { hasDrizzleMigrations, warnIgnoredFlatSqlMigrations } from './migration-utils'
 import { runSeeders } from './seeder'
 
 type ConnectionResolver = string | (() => string | undefined)
@@ -61,6 +61,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
 
     const promise = (async (): Promise<void> => {
       if (!hasDrizzleMigrations(resolvedMigrationsFolder)) {
+        warnIgnoredFlatSqlMigrations(resolvedMigrationsFolder)
         return
       }
 
@@ -184,13 +185,3 @@ function isPromiseLike(value: unknown): value is Promise<unknown> {
   return typeof value === 'object' && value !== null && 'then' in value && typeof (value as { then: unknown }).then === 'function'
 }
 
-function hasDrizzleMigrations(migrationsFolder: string): boolean {
-  if (!existsSync(migrationsFolder)) {
-    return false
-  }
-
-  const entries = readdirSync(migrationsFolder, { withFileTypes: true })
-  return entries.some(
-    (entry) => entry.isDirectory() && existsSync(resolve(migrationsFolder, entry.name, 'migration.sql')),
-  )
-}

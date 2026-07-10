@@ -1,5 +1,6 @@
 import { makeAuth } from './make-auth'
 import { makeChannel } from './make-channel'
+import { makeFeature, parseFieldsString, type FieldDefinition } from './make-feature'
 import { makeController } from './make-controller'
 import { makeEvent } from './make-event'
 import { makeJob } from './make-job'
@@ -9,13 +10,17 @@ import { makeModel } from './make-model'
 import { makeNotification } from './make-notification'
 import { makeRoute } from './make-route'
 import { makeView } from './make-view'
-import { addImport, addProvider, ensureDrizzleImports, ensureSqliteImports } from './patch-helpers'
+import { addImport, addProvider, ensureDrizzleImports, ensureMysqlImports, ensureSqliteImports } from './patch-helpers'
 import { camelCase, kebabCase, pascalCase, writeFilesSafe, type WriterOptions } from './utils'
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 export interface RunBlueprintOptions extends WriterOptions {
   name?: string
+  /** Comma-separated field definitions for the resource blueprint, e.g. "title:string,body:text?". */
+  fields?: string
+  /** Skip authentication checks in mutating actions (resource blueprint). */
+  publicAccess?: boolean
 }
 
 export interface BlueprintDefinition {
@@ -613,226 +618,19 @@ export default class BroadcastProvider extends ServiceProvider {
       const collection = pluralizeResourceName(singular)
       const routeName = kebabCase(collection)
       const routeVar = routeName.replace(/-([a-z])/g, (_, char: string) => char.toUpperCase())
-      const variableName = singular.charAt(0).toLowerCase() + singular.slice(1)
-      const writerOptions: WriterOptions = { force: Boolean(options.force) }
+      const fields = parseFieldsString(options.fields ?? '')
 
-      const created = await writeFilesSafe([
-        {
-          path: `app/Http/Validators/${singular}Validator.ts`,
-          contents: `import { z } from 'zod'
+      const created = await makeFeature(singular, {
+        force: Boolean(options.force),
+        fields: options.fields,
+        publicAccess: options.publicAccess,
+        announce: false,
+      })
 
-export const ${singular}IdParamSchema = z.object({
-  id: z.coerce.number().int().positive(),
-})
-
-export const List${collection}QuerySchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
-})
-
-export const ${singular}PayloadSchema = z.object({
-  title: z.string().trim().min(1, 'Title is required.'),
-  body: z.string().trim().min(1, 'Body is required.'),
-})
-
-export type ${singular}Payload = z.infer<typeof ${singular}PayloadSchema>
-`,
-        },
-        {
-          path: `app/Http/Resources/${singular}Resource.ts`,
-          contents: `import { Resource } from '@guren/core'
-import type { ${singular}Record } from '../../Models/${singular}.js'
-
-export interface ${singular}ResourceData extends Record<string, unknown> {
-  id: number
-  title: string
-  body: string | null
-}
-
-export class ${singular}Resource extends Resource<${singular}Record> {
-  toArray(): ${singular}ResourceData {
-    return {
-      id: this.resource.id as number,
-      title: this.resource.title as string,
-      body: (this.resource.body as string | null) ?? null,
-    }
-  }
-
-  override toJSON(): ${singular}ResourceData {
-    return super.toJSON() as ${singular}ResourceData
-  }
-}
-`,
-        },
-        {
-          path: `app/Http/Controllers/${singular}Controller.ts`,
-          contents: `import { Controller, paginate, type PaginatedPageProps, type ValidationErrors } from '@guren/core'
-import { ${singular} } from '../../Models/${singular}.js'
-import { ${singular}Resource, type ${singular}ResourceData } from '../Resources/${singular}Resource.js'
-import { ${singular}IdParamSchema, ${singular}PayloadSchema, List${collection}QuerySchema } from '../Validators/${singular}Validator.js'
-import { pages } from '../../../.guren/pages.gen.js'
-
-type ${collection}IndexProps = PaginatedPageProps<${singular}ResourceData>
-type ${singular}FormErrors = ValidationErrors<'title' | 'body'>
-
-export default class ${singular}Controller extends Controller {
-  async index(): Promise<Response> {
-    const { page } = this.validateQuery(List${collection}QuerySchema)
-    const result = await ${singular}.paginate({ page, perPage: 10, orderBy: ['id', 'desc'] })
-    const paginator = paginate(result, { path: this.request.path ?? '/${routeName}' })
-
-    return this.inertia(pages.${routeVar}.Index, {
-      data: result.data.map((${variableName}) => new ${singular}Resource(${variableName}).toJSON()),
-      pagination: {
-        meta: paginator.meta(),
-        links: paginator.links(),
-      },
-    } satisfies ${collection}IndexProps, { url: this.request.url ?? this.request.path, title: '${collection}' })
-  }
-
-  async show(): Promise<Response> {
-    const { id } = this.validateParams(${singular}IdParamSchema)
-    const ${variableName} = await ${singular}.findOrFail(id)
-
-    return this.inertia(pages.${routeVar}.Show, {
-      ${variableName}: new ${singular}Resource(${variableName}).toJSON(),
-    }, { url: this.request.path, title: '${singular}' })
-  }
-
-  async create(): Promise<Response> {
-    return this.inertia(pages.${routeVar}.New, {}, { url: this.request.path, title: 'New ${singular}' })
-  }
-
-  async store(): Promise<Response> {
-    const data = await this.validateBody(${singular}PayloadSchema)
-    const ${variableName} = await ${singular}.create(data)
-    return this.redirect('/${routeName}/' + ${variableName}?.id)
-  }
-
-  async edit(): Promise<Response> {
-    const { id } = this.validateParams(${singular}IdParamSchema)
-    const ${variableName} = await ${singular}.findOrFail(id)
-    return this.inertia(pages.${routeVar}.Edit, {
-      ${variableName}: new ${singular}Resource(${variableName}).toJSON(),
-      errors: {} as ${singular}FormErrors,
-    }, { url: this.request.path, title: 'Edit ${singular}' })
-  }
-
-  async update(): Promise<Response> {
-    const { id } = this.validateParams(${singular}IdParamSchema)
-    const data = await this.validateBody(${singular}PayloadSchema)
-    await ${singular}.update({ id }, data)
-    return this.redirect('/${routeName}/' + id)
-  }
-}
-`,
-        },
-        {
-          path: `resources/js/pages/${routeName}/Index.tsx`,
-          contents: `import { Link } from '@inertiajs/react'
-import type { PaginatedPageProps } from '@guren/core'
-import type { ${singular}ResourceData } from '../../../../app/Http/Resources/${singular}Resource.js'
-
-interface Props extends PaginatedPageProps<${singular}ResourceData> {}
-
-export default function ${collection}Index({ data, pagination }: Props) {
-  return (
-    <main className="mx-auto max-w-3xl space-y-6 px-6 py-12">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-semibold">${collection}</h1>
-        <Link href="/${routeName}/create" className="rounded bg-black px-4 py-2 text-white">New ${singular}</Link>
-      </div>
-      <div className="space-y-4">
-        {data.map((${variableName}) => (
-          <article key={${variableName}.id} className="rounded border p-4">
-            <Link href={'/${routeName}/' + ${variableName}.id} className="text-xl font-medium">${'${'}${variableName}.title}</Link>
-            <p className="mt-2 text-sm text-zinc-600">${'${'}${variableName}.body ?? ''}</p>
-          </article>
-        ))}
-      </div>
-      <nav className="flex gap-2">
-        {pagination.links.pages.map((page) => (
-          <Link key={page.page} href={page.url ?? '#'} className="rounded border px-3 py-1">
-            {page.page}
-          </Link>
-        ))}
-      </nav>
-    </main>
-  )
-}
-`,
-        },
-        {
-          path: `resources/js/pages/${routeName}/Show.tsx`,
-          contents: `import { Link } from '@inertiajs/react'
-import type { ${singular}ResourceData } from '../../../../app/Http/Resources/${singular}Resource.js'
-
-interface Props {
-  ${variableName}: ${singular}ResourceData
-}
-
-export default function ${singular}Show({ ${variableName} }: Props) {
-  return (
-    <main className="mx-auto max-w-3xl space-y-6 px-6 py-12">
-      <Link href="/${routeName}">Back</Link>
-      <h1 className="text-3xl font-semibold">{${variableName}.title}</h1>
-      <p>{${variableName}.body ?? ''}</p>
-      <Link href={'/${routeName}/' + ${variableName}.id + '/edit'}>Edit</Link>
-    </main>
-  )
-}
-`,
-        },
-        {
-          path: `resources/js/pages/${routeName}/New.tsx`,
-          contents: `import { useForm } from '@inertiajs/react'
-
-export default function New${singular}() {
-  const form = useForm({ title: '', body: '' })
-  return (
-    <main className="mx-auto max-w-3xl px-6 py-12">
-      <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); form.post('/${routeName}') }}>
-        <input value={form.data.title} onChange={(event) => form.setData('title', event.target.value)} placeholder="Title" className="w-full rounded border px-3 py-2" />
-        <textarea value={form.data.body} onChange={(event) => form.setData('body', event.target.value)} placeholder="Body" className="w-full rounded border px-3 py-2" />
-        <button type="submit" className="rounded bg-black px-4 py-2 text-white">Create</button>
-      </form>
-    </main>
-  )
-}
-`,
-        },
-        {
-          path: `resources/js/pages/${routeName}/Edit.tsx`,
-          contents: `import { useForm } from '@inertiajs/react'
-import type { ${singular}ResourceData } from '../../../../app/Http/Resources/${singular}Resource.js'
-import type { ValidationErrors } from '@guren/core'
-
-interface Props {
-  ${variableName}: ${singular}ResourceData
-  errors?: ValidationErrors<'title' | 'body'>
-}
-
-export default function Edit${singular}({ ${variableName} }: Props) {
-  const form = useForm({ title: ${variableName}.title, body: ${variableName}.body ?? '' })
-  return (
-    <main className="mx-auto max-w-3xl px-6 py-12">
-      <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); form.put('/${routeName}/' + ${variableName}.id) }}>
-        <input value={form.data.title} onChange={(event) => form.setData('title', event.target.value)} className="w-full rounded border px-3 py-2" />
-        <textarea value={form.data.body} onChange={(event) => form.setData('body', event.target.value)} className="w-full rounded border px-3 py-2" />
-        <button type="submit" className="rounded bg-black px-4 py-2 text-white">Save</button>
-      </form>
-    </main>
-  )
-}
-`,
-        },
-      ], writerOptions)
-
-      await updateResourceSchema(collection, routeName)
-      const modelPath = await makeModel(singular, writerOptions)
-      await updateResourceContracts(singular, collection, routeName, routeVar, variableName)
+      await updateResourceSchema(collection, routeName, fields)
       await updateResourceRoutes(singular, routeName, routeVar)
 
-      return [...created, modelPath]
+      return created
     },
   },
   schedule: {
@@ -872,14 +670,67 @@ export default scheduleTasksKernel
   },
 }
 
-async function detectSchemaDialect(content: string): Promise<'sqlite' | 'pg'> {
+async function detectSchemaDialect(content: string): Promise<'sqlite' | 'pg' | 'mysql'> {
   if (content.includes('sqliteTable') || content.includes('drizzle-orm/sqlite-core')) {
     return 'sqlite'
+  }
+  if (content.includes('mysqlTable') || content.includes('drizzle-orm/mysql-core')) {
+    return 'mysql'
   }
   return 'pg'
 }
 
-async function updateResourceSchema(collection: string, routeName: string): Promise<void> {
+function sqliteColumn(field: FieldDefinition): { code: string; imports: string[] } {
+  const notNull = field.nullable ? '' : '.notNull()'
+  switch (field.type) {
+    case 'number':
+      return { code: `integer('${snakeCase(field.name)}')${notNull}`, imports: ['integer'] }
+    case 'boolean':
+      return { code: `integer('${snakeCase(field.name)}', { mode: 'boolean' })${notNull}`, imports: ['integer'] }
+    case 'json':
+      return { code: `text('${snakeCase(field.name)}', { mode: 'json' })${notNull}`, imports: ['text'] }
+    default:
+      return { code: `text('${snakeCase(field.name)}')${notNull}`, imports: ['text'] }
+  }
+}
+
+function pgColumn(field: FieldDefinition): { code: string; imports: string[] } {
+  const notNull = field.nullable ? '' : '.notNull()'
+  switch (field.type) {
+    case 'number':
+      return { code: `integer('${snakeCase(field.name)}')${notNull}`, imports: ['integer'] }
+    case 'boolean':
+      return { code: `boolean('${snakeCase(field.name)}')${notNull}`, imports: ['boolean'] }
+    case 'date':
+      return { code: `timestamp('${snakeCase(field.name)}', { withTimezone: false })${notNull}`, imports: ['timestamp'] }
+    case 'json':
+      return { code: `jsonb('${snakeCase(field.name)}')${notNull}`, imports: ['jsonb'] }
+    default:
+      return { code: `text('${snakeCase(field.name)}')${notNull}`, imports: ['text'] }
+  }
+}
+
+function mysqlColumn(field: FieldDefinition): { code: string; imports: string[] } {
+  const notNull = field.nullable ? '' : '.notNull()'
+  switch (field.type) {
+    case 'number':
+      return { code: `int('${snakeCase(field.name)}')${notNull}`, imports: ['int'] }
+    case 'boolean':
+      return { code: `boolean('${snakeCase(field.name)}')${notNull}`, imports: ['boolean'] }
+    case 'date':
+      return { code: `timestamp('${snakeCase(field.name)}')${notNull}`, imports: ['timestamp'] }
+    case 'json':
+      return { code: `json('${snakeCase(field.name)}')${notNull}`, imports: ['json'] }
+    default:
+      return { code: `varchar('${snakeCase(field.name)}', { length: 255 })${notNull}`, imports: ['varchar'] }
+  }
+}
+
+function snakeCase(value: string): string {
+  return value.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()
+}
+
+async function updateResourceSchema(collection: string, routeName: string, fields: FieldDefinition[]): Promise<void> {
   const schemaPath = resolve(process.cwd(), 'db/schema.ts')
   let content = await readFile(schemaPath, 'utf8')
   const schemaIdentifier = camelCase(collection)
@@ -892,9 +743,25 @@ async function updateResourceSchema(collection: string, routeName: string): Prom
       return
     }
 
-    content = ensureSqliteImports(content, ['sqliteTable', 'integer', 'text'])
+    const columns = fields.map((field) => sqliteColumn(field))
+    const imports = [...new Set(['sqliteTable', 'integer', 'text', ...columns.flatMap((c) => c.imports)])]
+    content = ensureSqliteImports(content, imports)
 
-    const schemaBlock = `\nexport const ${schemaIdentifier} = sqliteTable('${tableName}', {\n  id: integer('id').primaryKey({ autoIncrement: true }),\n  title: text('title').notNull(),\n  body: text('body'),\n  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),\n})\n`
+    const fieldLines = fields.map((field, index) => `  ${field.name}: ${columns[index].code},`).join('\n')
+    const schemaBlock = `\nexport const ${schemaIdentifier} = sqliteTable('${tableName}', {\n  id: integer('id').primaryKey({ autoIncrement: true }),\n${fieldLines}\n  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),\n})\n`
+
+    content = `${content.trimEnd()}\n${schemaBlock}`
+  } else if (dialect === 'mysql') {
+    if (content.includes(`export const ${schemaIdentifier} = mysqlTable(`)) {
+      return
+    }
+
+    const columns = fields.map((field) => mysqlColumn(field))
+    const imports = [...new Set(['mysqlTable', 'int', 'timestamp', ...columns.flatMap((c) => c.imports)])]
+    content = ensureMysqlImports(content, imports)
+
+    const fieldLines = fields.map((field, index) => `  ${field.name}: ${columns[index].code},`).join('\n')
+    const schemaBlock = `\nexport const ${schemaIdentifier} = mysqlTable('${tableName}', {\n  id: int('id').primaryKey().autoincrement(),\n${fieldLines}\n  createdAt: timestamp('created_at').defaultNow().notNull(),\n})\n`
 
     content = `${content.trimEnd()}\n${schemaBlock}`
   } else {
@@ -902,9 +769,12 @@ async function updateResourceSchema(collection: string, routeName: string): Prom
       return
     }
 
-    content = ensureDrizzleImports(content, ['pgTable', 'serial', 'text', 'timestamp'])
+    const columns = fields.map((field) => pgColumn(field))
+    const imports = [...new Set(['pgTable', 'serial', 'text', 'timestamp', ...columns.flatMap((c) => c.imports)])]
+    content = ensureDrizzleImports(content, imports)
 
-    const schemaBlock = `\nexport const ${schemaIdentifier} = pgTable('${tableName}', {\n  id: serial('id').primaryKey(),\n  title: text('title').notNull(),\n  body: text('body'),\n  createdAt: timestamp('created_at', { withTimezone: false }).defaultNow().notNull(),\n})\n`
+    const fieldLines = fields.map((field, index) => `  ${field.name}: ${columns[index].code},`).join('\n')
+    const schemaBlock = `\nexport const ${schemaIdentifier} = pgTable('${tableName}', {\n  id: serial('id').primaryKey(),\n${fieldLines}\n  createdAt: timestamp('created_at', { withTimezone: false }).defaultNow().notNull(),\n})\n`
 
     content = `${content.trimEnd()}\n${schemaBlock}`
   }
@@ -912,20 +782,12 @@ async function updateResourceSchema(collection: string, routeName: string): Prom
   await writeFile(schemaPath, content, 'utf8')
 }
 
-async function updateResourceContracts(
-  _singular: string,
-  _collection: string,
-  _routeName: string,
-  _routeVar: string,
-  _variableName: string,
-): Promise<void> {
-}
-
 async function updateResourceRoutes(singular: string, routeName: string, routeVar: string): Promise<void> {
   const controllerName = `${singular}Controller`
   const routesPath = resolve(process.cwd(), 'routes/web.ts')
   let content = await readFile(routesPath, 'utf8')
   const controllerImport = `import ${controllerName} from '../app/Http/Controllers/${controllerName}.js'`
+  const validatorImport = `import { ${singular}PayloadSchema } from '../app/Http/Validators/${singular}Validator.js'`
 
   if (!content.includes(controllerImport)) {
     content = content.replace(
@@ -934,11 +796,48 @@ async function updateResourceRoutes(singular: string, routeName: string, routeVa
     )
   }
 
-  if (!content.includes(`'${routeName}.index'`) && !content.includes(`/${routeName}`)) {
-    const groupBlock = `  router.group('/${routeName}', (${routeVar}) => {\n    ${routeVar}.get('/', [${controllerName}, 'index']).name('${routeName}.index')\n    ${routeVar}.get('/create', [${controllerName}, 'create']).name('${routeName}.create')\n    ${routeVar}.get('/:id', [${controllerName}, 'show']).name('${routeName}.show')\n    ${routeVar}.get('/:id/edit', [${controllerName}, 'edit']).name('${routeName}.edit')\n    ${routeVar}.post('/', [${controllerName}, 'store']).name('${routeName}.store')\n    ${routeVar}.put('/:id', [${controllerName}, 'update']).name('${routeName}.update')\n  })\n`
-    content = content.replace(/\n\}\n(?:\n)?export default/u, `\n${groupBlock}}\n\nexport default`)
-    await writeFile(routesPath, content, 'utf8')
+  if (!content.includes(validatorImport)) {
+    content = content.replace(
+      /(import[^\n]+\n)(\n)?export function/u,
+      `$1${validatorImport}\n\nexport function`,
+    )
   }
+
+  if (!content.includes(`'${routeName}.index'`) && !content.includes(`/${routeName}'`)) {
+    const groupBlock = `\n  router.group('/${routeName}', (${routeVar}) => {\n    ${routeVar}.get('/', [${controllerName}, 'index']).name('${routeName}.index')\n    ${routeVar}.get('/create', [${controllerName}, 'create']).name('${routeName}.create')\n    ${routeVar}.get('/:id', [${controllerName}, 'show']).name('${routeName}.show')\n    ${routeVar}.get('/:id/edit', [${controllerName}, 'edit']).name('${routeName}.edit')\n    ${routeVar}.post('/', { name: '${routeName}.store', body: ${singular}PayloadSchema }, [${controllerName}, 'store'])\n    ${routeVar}.put('/:id', { name: '${routeName}.update', body: ${singular}PayloadSchema }, [${controllerName}, 'update'])\n  })\n`
+
+    // Insert before the closing brace of the route registrar function.
+    const registrarMatch = content.match(/export function [^(]*\(\s*router\s*:\s*Router\s*\)[^{]*\{/u)
+    let inserted = false
+    if (registrarMatch && registrarMatch.index !== undefined) {
+      const openIndex = registrarMatch.index + registrarMatch[0].length - 1
+      let depth = 0
+      let closeIndex = -1
+      for (let i = openIndex; i < content.length; i++) {
+        const char = content[i]
+        if (char === '{') depth++
+        else if (char === '}') {
+          depth--
+          if (depth === 0) {
+            closeIndex = i
+            break
+          }
+        }
+      }
+      if (closeIndex !== -1) {
+        content = content.slice(0, closeIndex) + groupBlock + content.slice(closeIndex)
+        inserted = true
+      }
+    }
+
+    if (!inserted) {
+      throw new Error(
+        `Could not find a route registrar in routes/web.ts. Register the /${routeName} routes manually.`,
+      )
+    }
+  }
+
+  await writeFile(routesPath, content, 'utf8')
 }
 
 export function listBlueprints(): string[] {

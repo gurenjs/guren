@@ -106,6 +106,7 @@
   },
   "dependencies": {
     "@guren/inertia-client": "^1.0.0-rc.13",
+    "@guren/orm": "^1.0.0-rc.13",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "chalk": "^5.3.0",
     "consola": "^3.4.2",

@@ -7,6 +7,7 @@ const sharedExternal = [
   '@aws-sdk/client-sqs',
   '@modelcontextprotocol/sdk',
   '@guren/cli',
+  '@guren/orm',
   'zod',
 ]
 

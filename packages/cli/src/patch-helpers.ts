@@ -189,3 +189,89 @@ export function ensureSqliteImports(content: string, needed: string[]): string {
 
   return `import { ${missing.sort().join(', ')} } from 'drizzle-orm/sqlite-core'\n${content}`
 }
+
+export function ensureMysqlImports(content: string, needed: string[]): string {
+  const importLines = content.split('\n').filter((line) => line.trimStart().startsWith('import '))
+  const importContent = importLines.join('\n')
+
+  const missing = needed.filter(
+    (name) => !new RegExp(`\\b${name}\\b`).test(importContent),
+  )
+
+  if (missing.length === 0) {
+    return content
+  }
+
+  const existingMysqlImport = /import\s*\{([^}]+)\}\s*from\s*['"]drizzle-orm\/mysql-core['"]/
+  const match = content.match(existingMysqlImport)
+
+  if (match) {
+    const existingNames = match[1].split(',').map((s) => s.trim()).filter(Boolean)
+    const allNames = [...new Set([...existingNames, ...missing])].sort()
+    return content.replace(existingMysqlImport, `import { ${allNames.join(', ')} } from 'drizzle-orm/mysql-core'`)
+  }
+
+  return `import { ${missing.sort().join(', ')} } from 'drizzle-orm/mysql-core'\n${content}`
+}
+
+/**
+ * Adds a top-level option to the createApp({ ... }) call in a file.
+ * The value is inserted verbatim, e.g. addCreateAppOption(path, 'auth', '{}').
+ */
+export async function addCreateAppOption(
+  filePath: string,
+  key: string,
+  valueSource: string,
+): Promise<PatchResult> {
+  const absolutePath = resolve(process.cwd(), filePath)
+  let content: string
+
+  try {
+    content = await readFile(absolutePath, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { modified: false, reason: 'File not found' }
+    }
+    throw error
+  }
+
+  const createAppPattern = /createApp\(\s*\{/
+  const match = content.match(createAppPattern)
+
+  if (!match || match.index === undefined) {
+    return { modified: false, reason: 'Could not find a createApp({ ... }) call' }
+  }
+
+  // Scan the createApp options object for an existing top-level `key:`
+  const openBraceIndex = match.index + match[0].length - 1
+  let depth = 0
+  let closeBraceIndex = -1
+  for (let i = openBraceIndex; i < content.length; i++) {
+    const char = content[i]
+    if (char === '{') depth++
+    else if (char === '}') {
+      depth--
+      if (depth === 0) {
+        closeBraceIndex = i
+        break
+      }
+    }
+  }
+
+  if (closeBraceIndex === -1) {
+    return { modified: false, reason: 'Could not parse createApp options object' }
+  }
+
+  const optionsSource = content.slice(openBraceIndex, closeBraceIndex + 1)
+  const keyPattern = new RegExp(`(^|[{,]\\s*)${key}\\s*:`, 'm')
+  if (keyPattern.test(optionsSource)) {
+    return { modified: false, reason: 'Option already set' }
+  }
+
+  const insertion = `\n  ${key}: ${valueSource},`
+  const updated =
+    content.slice(0, openBraceIndex + 1) + insertion + content.slice(openBraceIndex + 1)
+
+  await writeFile(absolutePath, updated, 'utf8')
+  return { modified: true }
+}

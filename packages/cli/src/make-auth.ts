@@ -2,20 +2,15 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, relative, resolve, sep as pathSep } from 'node:path'
 import { consola } from 'consola'
 import { writeFilesSafe, type WriterOptions } from './utils'
-import { addImport, addProvider, ensureDrizzleImports } from './patch-helpers'
-
-function timestamp(): string {
-  const now = new Date()
-  const pad = (value: number, size = 2) => value.toString().padStart(size, '0')
-  return [
-    now.getUTCFullYear(),
-    pad(now.getUTCMonth() + 1),
-    pad(now.getUTCDate()),
-    pad(now.getUTCHours()),
-    pad(now.getUTCMinutes()),
-    pad(now.getUTCSeconds()),
-  ].join('')
-}
+import {
+  addImport,
+  addProvider,
+  addCreateAppOption,
+  ensureDrizzleImports,
+  ensureMysqlImports,
+  ensureSqliteImports,
+} from './patch-helpers'
+import { makeMigration } from './make-migration'
 
 const loginControllerTemplate = `import { Controller, ValidationException } from '@guren/core'
 import { LoginSchema } from '@/Http/Validators/LoginValidator'
@@ -515,18 +510,50 @@ export default defineSeeder(async ({ db }) => {
 })
 `
 
-const migrationTemplate = `CREATE TABLE IF NOT EXISTS users (
-  id SERIAL PRIMARY KEY,
-  name TEXT NOT NULL,
-  email TEXT NOT NULL UNIQUE,
-  password_hash TEXT NOT NULL,
-  remember_token TEXT,
-  created_at TIMESTAMP DEFAULT NOW() NOT NULL,
-  updated_at TIMESTAMP DEFAULT NOW() NOT NULL
-);
+type SchemaDialect = 'sqlite' | 'pg' | 'mysql'
 
-CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users (email);
-`
+function detectSchemaDialect(content: string): SchemaDialect {
+  if (content.includes('sqliteTable') || content.includes('drizzle-orm/sqlite-core')) {
+    return 'sqlite'
+  }
+  if (content.includes('mysqlTable') || content.includes('drizzle-orm/mysql-core')) {
+    return 'mysql'
+  }
+  return 'pg'
+}
+
+const usersTableBlocks: Record<SchemaDialect, string> = {
+  sqlite: `export const users = sqliteTable('users', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  email: text('email').notNull().unique(),
+  passwordHash: text('password_hash').notNull(),
+  rememberToken: text('remember_token'),
+  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+  updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+})
+`,
+  pg: `export const users = pgTable('users', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  email: text('email').notNull().unique(),
+  passwordHash: text('password_hash').notNull(),
+  rememberToken: text('remember_token'),
+  createdAt: timestamp('created_at', { withTimezone: false }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: false }).defaultNow().notNull(),
+})
+`,
+  mysql: `export const users = mysqlTable('users', {
+  id: int('id').primaryKey().autoincrement(),
+  name: varchar('name', { length: 255 }).notNull(),
+  email: varchar('email', { length: 255 }).notNull().unique(),
+  passwordHash: varchar('password_hash', { length: 255 }).notNull(),
+  rememberToken: varchar('remember_token', { length: 255 }),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+})
+`,
+}
 
 async function updateSchema(): Promise<void> {
   const schemaPath = resolve(process.cwd(), 'db/schema.ts')
@@ -546,29 +573,22 @@ async function updateSchema(): Promise<void> {
     return
   }
 
-  // Replace SQLite-specific imports with Postgres imports when switching adapters
-  content = content.replace(
-    /import\s*\{[^}]*\}\s*from\s*['"]drizzle-orm\/sqlite-core['"]\s*\n?/,
-    '',
-  )
+  // Keep the schema in the dialect the app was scaffolded with
+  const dialect = detectSchemaDialect(content)
 
-  // Ensure required Drizzle imports are present
-  content = ensureDrizzleImports(content, ['pgTable', 'serial', 'text', 'timestamp'])
+  if (dialect === 'sqlite') {
+    content = ensureSqliteImports(content, ['sqliteTable', 'integer', 'text'])
+  } else if (dialect === 'mysql') {
+    content = ensureMysqlImports(content, ['mysqlTable', 'int', 'varchar', 'timestamp'])
+  } else {
+    content = ensureDrizzleImports(content, ['pgTable', 'serial', 'text', 'timestamp'])
+  }
 
   // Replace an existing users table that lacks auth columns, or append if absent
-  // Match both pgTable and sqliteTable variants — use `})` on its own line as the end anchor
-  // to avoid premature matching inside nested function calls like `$defaultFn(() => ...)`
-  const usersTablePattern = /export const users = (?:pgTable|sqliteTable)\('users',\s*\{[\s\S]*?\n\}\)\s*\n?/
-  const usersTableBlock = `export const users = pgTable('users', {
-  id: serial('id').primaryKey(),
-  name: text('name').notNull(),
-  email: text('email').notNull(),
-  passwordHash: text('password_hash').notNull(),
-  rememberToken: text('remember_token'),
-  createdAt: timestamp('created_at', { withTimezone: false }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: false }).defaultNow().notNull(),
-})
-`
+  // Use `})` on its own line as the end anchor to avoid premature matching
+  // inside nested function calls like `$defaultFn(() => ...)`
+  const usersTablePattern = /export const users = (?:pgTable|sqliteTable|mysqlTable)\('users',\s*\{[\s\S]*?\n\}\)\s*\n?/
+  const usersTableBlock = usersTableBlocks[dialect]
 
   if (usersTablePattern.test(content)) {
     content = content.replace(usersTablePattern, usersTableBlock)
@@ -577,7 +597,26 @@ async function updateSchema(): Promise<void> {
   }
 
   await writeFile(schemaPath, content, 'utf8')
-  consola.info('Updated db/schema.ts with authentication columns.')
+  consola.info(`Updated db/schema.ts with authentication columns (${dialect}).`)
+}
+
+async function generateUsersMigration(): Promise<boolean> {
+  const { existsSync } = await import('node:fs')
+  if (!existsSync(resolve(process.cwd(), 'node_modules', 'drizzle-kit'))) {
+    consola.info('drizzle-kit is not installed — run `bun run db:make` after `bun install` to generate the users migration.')
+    return false
+  }
+
+  try {
+    await makeMigration({ name: 'create_users_table' })
+    consola.success('Generated users table migration via drizzle-kit.')
+    return true
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    consola.warn(`Could not generate the users migration automatically (${reason}).`)
+    consola.info('Run `bun run db:make` (drizzle-kit generate) to create it from db/schema.ts.')
+    return false
+  }
 }
 
 async function updatePageContracts(): Promise<void> {
@@ -588,7 +627,6 @@ export interface MakeAuthOptions extends WriterOptions {
 }
 
 export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]> {
-  const migrationPath = `db/migrations/${timestamp()}_create_users_table.sql`
   const created = await writeFilesSafe([
     { path: 'app/Http/Controllers/Auth/LoginController.ts', contents: loginControllerTemplate },
     { path: 'app/Http/Controllers/DashboardController.ts', contents: dashboardControllerTemplate },
@@ -602,29 +640,31 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
     { path: 'resources/js/pages/dashboard/Index.tsx', contents: dashboardViewTemplate },
     { path: 'resources/js/pages/profile/Edit.tsx', contents: profileViewTemplate },
     { path: 'routes/auth.ts', contents: routesTemplate },
-    { path: migrationPath, contents: migrationTemplate },
     { path: 'db/seeders/UsersSeeder.ts', contents: seederTemplate },
   ], options)
 
   await updateSchema()
   await updatePageContracts()
+  const migrationGenerated = await generateUsersMigration()
 
   if (options.install) {
-    await installAuth()
+    await installAuth(migrationGenerated)
   } else {
     consola.info('Next steps:')
     consola.info('  • Register AuthProvider in src/app.ts providers array')
+    consola.info('  • Enable sessions and CSRF by adding `auth: {}` to your createApp() options')
     consola.info('  • Import registerAuthRoutes from routes/auth.ts and call it from your routes/web.ts registrar')
+    if (!migrationGenerated) {
+      consola.info('  • Run `bun run db:make` to generate the users migration')
+    }
     consola.info('  • Run `bun run db:migrate` and `bun run db:seed`')
     consola.info('  • Install zod if not already installed: `bun add zod`')
-    consola.info('')
-    consola.info('Session middleware is auto-configured when AuthProvider is registered.')
   }
 
   return created
 }
 
-async function installAuth(): Promise<void> {
+async function installAuth(migrationGenerated = true): Promise<void> {
   consola.info('Installing authentication configuration...')
 
   // Determine app file location (try src/app.ts first, then app.ts)
@@ -673,6 +713,18 @@ async function installAuth(): Promise<void> {
     consola.warn(`Could not add AuthProvider: ${providerResult.reason}`)
   }
 
+  // Enable session + CSRF middleware: AuthServiceProvider is only registered
+  // when createApp() receives an `auth` option.
+  const authOptionResult = await addCreateAppOption(appPath, 'auth', '{}')
+  if (authOptionResult.modified) {
+    consola.success(`Enabled sessions and CSRF via auth option in ${appPath}`)
+  } else if (authOptionResult.reason === 'Option already set') {
+    consola.info(`auth option already set in ${appPath}`)
+  } else {
+    consola.warn(`Could not set the auth option automatically: ${authOptionResult.reason}`)
+    consola.info('Add `auth: {}` to your createApp() options to enable sessions and CSRF.')
+  }
+
   // Add auth routes import to routes/web.ts
   const webRoutesPath = 'routes/web.ts'
   try {
@@ -706,7 +758,10 @@ async function installAuth(): Promise<void> {
   consola.success('Authentication configuration installed!')
   consola.info('Session middleware is auto-configured via AuthServiceProvider (autoSession: true)')
   consola.info('Next steps:')
+  if (!migrationGenerated) {
+    consola.info('  • Run `bun run db:make` to generate the users migration')
+  }
   consola.info('  • Run `bun run db:migrate` to create the users table')
   consola.info('  • Run `bun run db:seed` to create demo user')
-  consola.info('  • Start the dev server and visit /login')
+  consola.info('  • Start the dev server and visit /login (demo@example.com / secret)')
 }
