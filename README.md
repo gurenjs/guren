@@ -16,7 +16,7 @@ Routing, controllers, ORM, authentication, and Inertia.js + React frontend integ
 
 ```bash
 # 1. Scaffold a new app with authentication (dependencies install automatically)
-bunx create-guren-app@rc my-app --auth
+bunx create-guren-app my-app --auth
 cd my-app
 
 # 2. Run migrations and seed the demo user (SQLite by default — no server needed)
@@ -28,8 +28,6 @@ bun run dev
 ```
 
 Open `http://localhost:3333` and sign in at `/login` with `demo@example.com` / `secret`.
-
-> Guren is on the `rc` npm dist-tag while 1.0 stabilizes — always include `@rc` when running `bunx create-guren-app`.
 
 ### Add features as you go
 
