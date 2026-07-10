@@ -179,6 +179,38 @@ describe('Migration Tracker', () => {
     })
   })
 
+  describe('SQL escaping', () => {
+    function createRecordingExecutor(): SqlExecutor & { statements: string[] } {
+      const statements: string[] = []
+      return {
+        statements,
+        async execute(sql: string) {
+          statements.push(sql)
+        },
+        async query<T>(): Promise<T[]> {
+          return []
+        },
+      }
+    }
+
+    it('should escape single quotes in migration names on insert', async () => {
+      const recording = createRecordingExecutor()
+      await recordMigration(recording, "0001_o'brien", 1)
+      expect(recording.statements[0]).toContain("'0001_o''brien'")
+    })
+
+    it('should escape single quotes in migration names on delete', async () => {
+      const recording = createRecordingExecutor()
+      await removeMigrationRecord(recording, "0001_o'brien")
+      expect(recording.statements[0]).toContain("'0001_o''brien'")
+    })
+
+    it('should reject non-integer batch numbers', async () => {
+      const recording = createRecordingExecutor()
+      expect(recordMigration(recording, '0001_x', 1.5)).rejects.toThrow('integer')
+    })
+  })
+
   describe('getLastBatch', () => {
     it('returns 0 when no migrations', async () => {
       await ensureMigrationTable(executor)

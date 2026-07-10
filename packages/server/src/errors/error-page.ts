@@ -3,9 +3,20 @@
  * Shows status code, a generic message, and a link back to the home page.
  * No stack traces or internal details are exposed.
  */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 export function renderErrorPage(statusCode: number, message?: string): string {
   const title = STATUS_TITLES[statusCode] ?? 'Error'
-  const description = message ?? STATUS_DESCRIPTIONS[statusCode] ?? 'An unexpected error occurred.'
+  const description = escapeHtml(
+    message ?? STATUS_DESCRIPTIONS[statusCode] ?? 'An unexpected error occurred.'
+  )
 
   return `<!DOCTYPE html>
 <html lang="en">

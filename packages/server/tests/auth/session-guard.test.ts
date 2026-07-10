@@ -26,10 +26,14 @@ function createMockUser(overrides: Partial<MockUser> = {}): MockUser {
   }
 }
 
-function createMockSession(): Session & { data: Map<string, unknown> } {
+function createMockSession(): Session & { data: Map<string, unknown>; regenerated: boolean } {
   const data = new Map<string, unknown>()
+  const state = { regenerated: false }
   return {
     data,
+    get regenerated() {
+      return state.regenerated
+    },
     id: 'test-session-id',
     isNew: false,
     get<T>(key: string): T | undefined {
@@ -50,13 +54,15 @@ function createMockSession(): Session & { data: Map<string, unknown> } {
     flush() {
       data.clear()
     },
-    regenerate() {},
+    regenerate() {
+      state.regenerated = true
+    },
     invalidate() {},
     flash() {},
     getFlash() { return undefined },
     reflash() {},
     keep() {},
-  } as unknown as Session & { data: Map<string, unknown> }
+  } as unknown as Session & { data: Map<string, unknown>; regenerated: boolean }
 }
 
 function createMockProvider(users: MockUser[] = []): UserProvider<MockUser> {
@@ -195,11 +201,23 @@ describe('SessionGuard', () => {
       expect(guard.login(user)).rejects.toThrow('session middleware is required')
     })
 
+    test('should regenerate the session ID to prevent session fixation', async () => {
+      const guard = createGuard()
+      await guard.login(user)
+      expect(session.regenerated).toBe(true)
+    })
+
     test('should set remember token when remember is true', async () => {
       const guard = createGuard()
       await guard.login<MockUser>(user, true)
       expect(session.get('auth:remember_token')).toBeDefined()
       expect(user.rememberToken).not.toBeNull()
+    })
+
+    test('should generate remember token with 256 bits of entropy', async () => {
+      const guard = createGuard()
+      await guard.login<MockUser>(user, true)
+      expect(user.rememberToken).toMatch(/^[0-9a-f]{64}$/)
     })
 
     test('should clear remember token when remember is false', async () => {

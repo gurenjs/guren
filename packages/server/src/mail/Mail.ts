@@ -184,8 +184,12 @@ export class Mail {
 
   /**
    * Add a custom header.
+   * Rejects CR/LF characters to prevent SMTP header injection.
    */
   header(key: string, value: string): this {
+    if (/[\r\n]/.test(key) || /[\r\n]/.test(value)) {
+      throw new Error('Mail: header names and values cannot contain newline characters.')
+    }
     if (!this.message.headers) {
       this.message.headers = {}
     }

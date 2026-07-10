@@ -74,6 +74,21 @@ export async function getLastBatch(executor: SqlExecutor): Promise<number> {
 }
 
 /**
+ * Escape a value for use inside a single-quoted SQL string literal.
+ * The SqlExecutor interface only accepts raw SQL strings, so values must
+ * be escaped before interpolation.
+ */
+function escapeSqlString(value: string): string {
+  return value.replace(/'/g, "''")
+}
+
+function assertInteger(value: number, label: string): void {
+  if (!Number.isInteger(value)) {
+    throw new Error(`Migration tracker: ${label} must be an integer, got "${value}".`)
+  }
+}
+
+/**
  * Record a migration as applied.
  */
 export async function recordMigration(
@@ -81,8 +96,9 @@ export async function recordMigration(
   name: string,
   batch: number
 ): Promise<void> {
+  assertInteger(batch, 'batch')
   await executor.execute(
-    `INSERT INTO "_guren_migrations" ("name", "batch") VALUES ('${name}', ${batch})`
+    `INSERT INTO "_guren_migrations" ("name", "batch") VALUES ('${escapeSqlString(name)}', ${batch})`
   )
 }
 
@@ -93,7 +109,9 @@ export async function removeMigrationRecord(
   executor: SqlExecutor,
   name: string
 ): Promise<void> {
-  await executor.execute(`DELETE FROM "_guren_migrations" WHERE "name" = '${name}'`)
+  await executor.execute(
+    `DELETE FROM "_guren_migrations" WHERE "name" = '${escapeSqlString(name)}'`
+  )
 }
 
 /**
@@ -104,6 +122,7 @@ export async function getLastBatchMigrations(executor: SqlExecutor): Promise<Mig
   if (lastBatch === 0) {
     return []
   }
+  assertInteger(lastBatch, 'batch')
 
   const rows = await executor.query<MigrationRecord>(
     `SELECT * FROM "_guren_migrations" WHERE "batch" = ${lastBatch} ORDER BY "id" DESC`

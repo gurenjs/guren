@@ -10,7 +10,7 @@ import {
   rename,
 } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join, dirname, relative } from 'node:path'
+import { join, dirname, relative, resolve, sep } from 'node:path'
 import type { StorageDriver, LocalDriverOptions, PutOptions, FileMetadata } from '../types'
 
 /**
@@ -40,9 +40,15 @@ export class LocalDriver implements StorageDriver {
 
   /**
    * Get the full path for a file.
+   * Rejects paths that resolve outside the storage root (e.g. via `../`).
    */
   private fullPath(path: string): string {
-    return join(this.root, path)
+    const root = resolve(this.root)
+    const candidate = resolve(root, path)
+    if (candidate !== root && !candidate.startsWith(root + sep)) {
+      throw new Error(`LocalDriver: path escapes the storage root: "${path}"`)
+    }
+    return candidate
   }
 
   /**
