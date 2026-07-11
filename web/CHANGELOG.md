@@ -1,5 +1,12 @@
 # web
 
+## 0.1.1-rc.12
+
+### Patch Changes
+
+- Updated dependencies [7687a0f]
+  - @guren/orm@1.0.0-rc.16
+
 ## 0.1.1-rc.11
 
 ### Patch Changes
