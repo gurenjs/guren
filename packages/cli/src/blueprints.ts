@@ -402,9 +402,12 @@ export default class EventProvider extends ServiceProvider {
 export default class MailProvider extends ServiceProvider {
   register(): void {
     const manager = createMailManager({
-      default: 'memory',
+      // MAIL_MAILER=log writes messages to the server output (default);
+      // 'memory' keeps them inspectable in tests.
+      default: process.env.MAIL_MAILER === 'memory' ? 'memory' : 'log',
       from: { email: 'noreply@example.com', name: 'Guren App' },
       transports: {
+        log: { driver: 'log' },
         memory: { driver: 'memory' },
       },
     })
@@ -439,14 +442,17 @@ export default class MailProvider extends ServiceProvider {
       const created = await scaffoldFeatureFiles([
         {
           path: 'app/Providers/QueueProvider.ts',
-          contents: `import { ServiceProvider, MemoryDriver, createQueueManager, registerJob, type QueueManager } from '@guren/core'
+          contents: `import { ServiceProvider, MemoryDriver, SyncDriver, createQueueManager, registerJob, type QueueManager } from '@guren/core'
 import { ProcessWelcomeSequenceJob } from '../Jobs/ProcessWelcomeSequenceJob.js'
 
 export default class QueueProvider extends ServiceProvider {
   register(): void {
     const queue = createQueueManager({
-      default: 'memory',
+      // QUEUE_CONNECTION=sync executes jobs inline on dispatch (default,
+      // no worker process needed); 'memory' queues them for a Worker.
+      default: process.env.QUEUE_CONNECTION === 'memory' ? 'memory' : 'sync',
       drivers: {
+        sync: () => new SyncDriver(),
         memory: () => new MemoryDriver(),
       },
     })
@@ -455,9 +461,10 @@ export default class QueueProvider extends ServiceProvider {
   }
 
   boot(): void {
+    // Register job classes before the driver so sync dispatches can resolve them.
+    registerJob(ProcessWelcomeSequenceJob)
     const queue = this.container.make<QueueManager>('queue')
     queue.driver()
-    registerJob(ProcessWelcomeSequenceJob)
   }
 }
 `,

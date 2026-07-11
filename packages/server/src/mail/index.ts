@@ -17,6 +17,7 @@ export type {
 export { SmtpTransport } from './transports/SmtpTransport'
 export { ResendTransport } from './transports/ResendTransport'
 export { MemoryTransport } from './transports/MemoryTransport'
+export { LogTransport, type LogTransportOptions } from './transports/LogTransport'
 
 // Manager
 export { MailManager, createMailManager } from './MailManager'

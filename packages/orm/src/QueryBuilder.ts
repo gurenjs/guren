@@ -359,11 +359,22 @@ export class QueryBuilder<
 
   /**
    * Paginate the query results.
-   * @param page - Page number (1-based, default: 1)
-   * @param perPage - Records per page (default: 15)
-   * @returns Paginated result with data and metadata
+   *
+   * Accepts either positional arguments or the same options object shape as
+   * `Model.paginate()` so the two APIs stay interchangeable:
+   *
+   * @example
+   * await Post.where('published', true).paginate(2, 10)
+   * await Post.where('published', true).paginate({ page: 2, perPage: 10 })
    */
-  async paginate(page = 1, perPage = DEFAULT_PAGINATION_SIZE): Promise<PaginatedResult<TResult>> {
+  async paginate(page?: number, perPage?: number): Promise<PaginatedResult<TResult>>
+  async paginate(options: { page?: number; perPage?: number }): Promise<PaginatedResult<TResult>>
+  async paginate(
+    pageOrOptions: number | { page?: number; perPage?: number } = 1,
+    perPageArg = DEFAULT_PAGINATION_SIZE,
+  ): Promise<PaginatedResult<TResult>> {
+    const page = typeof pageOrOptions === 'object' ? pageOrOptions.page ?? 1 : pageOrOptions
+    const perPage = typeof pageOrOptions === 'object' ? pageOrOptions.perPage ?? DEFAULT_PAGINATION_SIZE : perPageArg
     const sanitizedPage = Number.isFinite(page) && page >= 1 ? Math.floor(page) : 1
     const sanitizedPerPage = Number.isFinite(perPage) && perPage >= 1 ? Math.floor(perPage) : DEFAULT_PAGINATION_SIZE
 

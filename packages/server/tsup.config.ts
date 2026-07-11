@@ -35,7 +35,12 @@ export default defineConfig({
     'src/mcp/index.ts',
   ],
   format: ['esm'],
-  splitting: false,
+  // Multiple entry points MUST share chunks: with splitting disabled each
+  // entry bundles its own copy of module-level state (job registry, mail
+  // manager global, queue driver global), so state set through one entry
+  // is invisible through another (e.g. registerJob via the root entry +
+  // Worker via ./queue never saw each other's registry).
+  splitting: true,
   dts: { only: false },
   outDir: 'dist',
   clean: true,

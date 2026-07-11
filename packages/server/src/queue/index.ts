@@ -23,6 +23,7 @@ export {
 
 // Drivers
 export { MemoryDriver } from './drivers/MemoryDriver'
+export { SyncDriver } from './drivers/SyncDriver'
 export { RedisDriver, type RedisDriverOptions } from './drivers/RedisDriver'
 export { SqsDriver, createSqsAdapter, type SqsDriverOptions, type SqsAdapter } from './drivers/SqsDriver'
 

@@ -10,6 +10,7 @@ import type {
 import { SmtpTransport } from './transports/SmtpTransport'
 import { ResendTransport } from './transports/ResendTransport'
 import { MemoryTransport } from './transports/MemoryTransport'
+import { LogTransport, type LogTransportOptions } from './transports/LogTransport'
 
 /**
  * Mail manager for handling multiple transports.
@@ -78,6 +79,11 @@ export class MailManager {
     // Memory driver factory
     this.registerDriverFactory('memory', (options?: MemoryTransportOptions) => {
       return new MemoryTransport(options)
+    })
+
+    // Log driver factory (development default)
+    this.registerDriverFactory('log', (options?: LogTransportOptions) => {
+      return new LogTransport(options)
     })
   }
 
