@@ -524,3 +524,20 @@ export default function registerRoutes(router: any) {
     }
   })
 })
+
+describe('auth detection with generic type arguments', () => {
+  it('recognizes userOrFail calls with type parameters', () => {
+    const source = `
+export default class TaskController extends Controller {
+  async store(): Promise<Response> {
+    const user = await this.auth.userOrFail<{ id: number }>()
+    const data = await this.validateBody<typeof Schema>(Schema)
+    void user
+    void data
+  }
+}
+`
+    expect(/\bauth\s*\.\s*userOrFail\s*(?:<[^>]*>)?\s*\(/.test(source)).toBe(true)
+    expect(/\bvalidateBody(Safe)?\s*(?:<[^>]*>)?\s*\(/.test(source)).toBe(true)
+  })
+})

@@ -54,8 +54,8 @@ const AUTH_MIDDLEWARE_PATTERN = /auth/i
  * `auth.user()`, `auth.id()`, or `auth.check()` do not enforce anything on
  * their own, so they intentionally do not count as protection.
  */
-const AUTH_CALL_PATTERN = /\bauth\s*\.\s*userOrFail\s*\(|\bthis\s*\.\s*apiToken(?:UserId)?\s*\(/
-const VALIDATE_BODY_PATTERN = /\bvalidateBody(Safe)?\s*\(/
+const AUTH_CALL_PATTERN = /\bauth\s*\.\s*userOrFail\s*(?:<[^>]*>)?\s*\(|\bthis\s*\.\s*apiToken(?:UserId)?\s*(?:<[^>]*>)?\s*\(/
+const VALIDATE_BODY_PATTERN = /\bvalidateBody(Safe)?\s*(?:<[^>]*>)?\s*\(/
 const BODY_ACCESS_PATTERN = /\b(req|request)\s*\.\s*(json|formData|parseBody|text|body|raw)\b|\bparseRequestPayload\s*\(/
 
 function finding(
