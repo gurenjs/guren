@@ -25,14 +25,18 @@ bun run db:migrate
 - First check database is running
 - Show pending migrations
 
-### Rollback
+### Undoing migrations
+Guren migrations are drizzle-kit generated and forward-only — `db:rollback` is
+not supported and will explain the alternatives:
+- Development: `bunx guren db:reset --seed` (drop everything, re-apply, re-seed)
+- Undo an uncommitted migration: delete its folder + journal entry, then `db:reset`
+- Production: write a new forward migration that reverses the change
+
+### Status
 ```bash
-bunx guren db:rollback
-bunx guren db:rollback --step=3
-bunx guren db:rollback --batch
+bunx guren db:status
 ```
-- ALWAYS confirm before running
-- Warn about data loss
+- Shows applied/pending state for every generated migration
 
 ### Fresh (destructive)
 ```bash

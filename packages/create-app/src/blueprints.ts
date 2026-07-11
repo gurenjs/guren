@@ -293,7 +293,7 @@ const database = createPostgresDatabase({
   connectionString: () => process.env.DATABASE_URL ?? '${url}',
 })
 
-export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase, resetDatabase, migrationStatus } = database
 `
   }
 
@@ -306,7 +306,7 @@ const database = createMySqlDatabase({
   connectionString: () => process.env.DATABASE_URL ?? '${url}',
 })
 
-export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase, resetDatabase, migrationStatus } = database
 `
   }
 
@@ -318,7 +318,7 @@ const database = createSqliteDatabase({
   filename: () => process.env.DATABASE_URL ?? '${url}',
 })
 
-export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase, resetDatabase, migrationStatus } = database
 `
 }
 

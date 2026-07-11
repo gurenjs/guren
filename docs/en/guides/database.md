@@ -217,9 +217,7 @@ export class User extends defineModel(users) {
   }
 }
 
-if (typeof User.hasMany === 'function') {
-  User.hasMany('posts', async () => (await import('./Post.js')).Post, 'authorId', 'id')
-}
+User.hasMany('posts', () => import('./Post.js').then((m) => m.Post), 'authorId', 'id')
 
 // app/Models/Post.ts
 export class Post extends defineModel(posts) {
@@ -228,9 +226,7 @@ export class Post extends defineModel(posts) {
   }
 }
 
-if (typeof Post.belongsTo === 'function') {
-  Post.belongsTo('author', async () => (await import('./User.js')).User, 'authorId', 'id')
-}
+Post.belongsTo('author', () => import('./User.js').then((m) => m.User), 'authorId', 'id')
 ```
 
 ### Other relationship types
@@ -306,6 +302,19 @@ Nested relations use dot notation:
 ```ts
 const users = await User.with('posts.comments')
 ```
+
+### Relation Counts
+
+`withCount()` attaches a `${name}Count` field without loading the related rows —
+ideal for list pages that only display totals:
+
+```ts
+const users = await User.withCount('posts')        // users[0].postsCount is number
+const posts = await Post.withCount(['comments', 'author'], { published: true })
+```
+
+Supported for `hasMany`, `hasOne`, `morphMany` (children per record) and
+`belongsTo` (0 or 1).
 
 ## Query Scopes
 

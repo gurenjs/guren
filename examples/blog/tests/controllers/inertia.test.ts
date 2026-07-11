@@ -16,6 +16,13 @@ function createGurenCoreMock() {
       static find = vi.fn()
       static where = vi.fn()
       static update = vi.fn()
+      static hasMany = vi.fn()
+      static hasOne = vi.fn()
+      static belongsTo = vi.fn()
+      static belongsToMany = vi.fn()
+      static with = vi.fn(async () => [])
+      static withCount = vi.fn(async () => [])
+      static findWith = vi.fn(async () => null)
     },
     HasManyRecord: {} as never,
   }

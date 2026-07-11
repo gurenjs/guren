@@ -6,4 +6,4 @@ const database = createSqliteDatabase({
   filename: () => process.env.DATABASE_URL ?? './data/guren.db',
 })
 
-export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase, resetDatabase, migrationStatus } = database

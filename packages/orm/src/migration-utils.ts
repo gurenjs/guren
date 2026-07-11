@@ -37,3 +37,67 @@ export function warnIgnoredFlatSqlMigrations(migrationsFolder: string): void {
     )
   }
 }
+
+export interface LocalMigrationEntry {
+  /** Folder name, e.g. 20260710221915_create_users_table */
+  name: string
+}
+
+/**
+ * Lists drizzle-kit generated migrations (one folder per migration, each
+ * containing migration.sql), sorted the same way the drizzle migrator
+ * applies them.
+ */
+export function listLocalMigrations(migrationsFolder: string): LocalMigrationEntry[] {
+  if (!existsSync(migrationsFolder)) {
+    return []
+  }
+
+  return readdirSync(migrationsFolder, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && existsSync(resolve(migrationsFolder, entry.name, 'migration.sql')))
+    .map((entry) => ({ name: entry.name }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+export interface AppliedMigrationRow {
+  name: string | null
+  appliedAt: string | Date | null
+}
+
+export interface MigrationStatusEntry {
+  name: string
+  applied: boolean
+  appliedAt: Date | null
+}
+
+/**
+ * Joins local migration folders with the rows the drizzle migrator recorded
+ * in its tracker table. Drizzle itself decides pending migrations by name
+ * membership, so status uses the same rule.
+ */
+export function buildMigrationStatus(
+  localMigrations: LocalMigrationEntry[],
+  appliedRows: AppliedMigrationRow[],
+): MigrationStatusEntry[] {
+  const appliedByName = new Map<string, AppliedMigrationRow>()
+  for (const row of appliedRows) {
+    if (row.name) {
+      appliedByName.set(row.name, row)
+    }
+  }
+
+  return localMigrations.map((migration) => {
+    const row = appliedByName.get(migration.name)
+    let appliedAt: Date | null = null
+    if (row?.appliedAt) {
+      const parsed = row.appliedAt instanceof Date ? row.appliedAt : new Date(row.appliedAt)
+      appliedAt = Number.isNaN(parsed.getTime()) ? null : parsed
+    }
+
+    return {
+      name: migration.name,
+      applied: row !== undefined,
+      appliedAt,
+    }
+  })
+}

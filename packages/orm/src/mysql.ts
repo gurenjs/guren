@@ -3,7 +3,7 @@ import { migrate } from 'drizzle-orm/mysql2/migrator'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { hasDrizzleMigrations, warnIgnoredFlatSqlMigrations } from './migration-utils'
+import { buildMigrationStatus, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders } from './seeder'
 
 type ConnectionResolver = string | (() => string | undefined)
@@ -29,6 +29,10 @@ export interface MySqlDatabase {
   closeDatabase(): Promise<void>
   configureOrm(): Promise<void>
   seedDatabase(): Promise<void>
+  /** Drops every table (including the drizzle migration tracker) so migrations can be re-applied from scratch. */
+  resetDatabase(): Promise<void>
+  /** Per-migration applied state derived from the drizzle-kit journal and the __drizzle_migrations table. */
+  migrationStatus(): Promise<MigrationStatusEntry[]>
 }
 
 export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabase {
@@ -143,12 +147,72 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
     await runSeeders(db as unknown as Parameters<typeof runSeeders>[0], resolvedSeedersFolder)
   }
 
+  async function withAdminDb<T>(callback: (db: MySql2Database) => Promise<T>): Promise<T> {
+    const adminDb = drizzle({
+      connection: {
+        uri: resolveConnectionString(),
+        ...clientOptions,
+      },
+      mode: 'default',
+    } as DrizzleConfig) as unknown as MySql2Database
+
+    try {
+      return await callback(adminDb)
+    } finally {
+      await closeClient(adminDb)
+    }
+  }
+
+  async function resetDatabase(): Promise<void> {
+    const { sql } = await import('drizzle-orm')
+
+    await withAdminDb(async (adminDb) => {
+      const [rows] = (await adminDb.execute(
+        sql.raw('SELECT table_name AS name FROM information_schema.tables WHERE table_schema = DATABASE()'),
+      )) as unknown as [Array<{ name: string }>]
+
+      await adminDb.execute(sql.raw('SET FOREIGN_KEY_CHECKS = 0'))
+      try {
+        for (const { name } of rows) {
+          await adminDb.execute(sql.raw(`DROP TABLE IF EXISTS \`${name.replaceAll('`', '``')}\``))
+        }
+      } finally {
+        await adminDb.execute(sql.raw('SET FOREIGN_KEY_CHECKS = 1'))
+      }
+    })
+
+    // Allow migrateDatabase() to re-apply everything from scratch.
+    migrationsPromise = undefined
+  }
+
+  async function migrationStatus(): Promise<MigrationStatusEntry[]> {
+    const localMigrations = listLocalMigrations(resolvedMigrationsFolder)
+    if (localMigrations.length === 0) return []
+
+    const { sql } = await import('drizzle-orm')
+    const appliedRows = await withAdminDb(async (adminDb) => {
+      try {
+        const [rows] = (await adminDb.execute(
+          sql.raw('SELECT name, applied_at FROM __drizzle_migrations'),
+        )) as unknown as [Array<{ name: string | null; applied_at: string | Date | null }>]
+        return rows.map((row) => ({ name: row.name, appliedAt: row.applied_at }))
+      } catch {
+        // Tracker table does not exist yet — nothing applied.
+        return []
+      }
+    })
+
+    return buildMigrationStatus(localMigrations, appliedRows)
+  }
+
   return {
     getDatabase,
     migrateDatabase: migrateOnce,
     closeDatabase,
     configureOrm,
     seedDatabase,
+    resetDatabase,
+    migrationStatus,
   }
 }
 

@@ -683,9 +683,7 @@ export class Post extends defineModel(posts) {
   }
 }
 
-if (typeof Post.belongsTo === 'function') {
-  Post.belongsTo('author', async () => (await import('./User.js')).User, 'authorId', 'id')
-}
+Post.belongsTo('author', () => import('./User.js').then((m) => m.User), 'authorId', 'id')
 ```
 
 ### hasOne
@@ -783,6 +781,17 @@ const users = await User.with('posts.comments')
 ```
 
 `hasMany` リレーションは配列として展開されます（マッチするものがない場合は `[]`）。`belongsTo` は単一の関連レコードまたは外部キーが存在しない場合は `null` を返します。複数のリレーションを配列で渡すこともできます: `await User.with(['posts'])`。
+
+### リレーション件数の取得
+
+`withCount()` は関連レコード本体をロードせずに `${name}Count` フィールドを付与します。件数だけ表示する一覧ページに最適です。
+
+```ts
+const users = await User.withCount('posts')        // users[0].postsCount は number
+const posts = await Post.withCount(['comments', 'author'], { published: true })
+```
+
+`hasMany` / `hasOne` / `morphMany`（レコードごとの子件数）と `belongsTo`（0 または 1）に対応しています。
 
 ## ページネーション
 

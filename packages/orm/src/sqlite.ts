@@ -1,7 +1,7 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { hasDrizzleMigrations, warnIgnoredFlatSqlMigrations } from './migration-utils'
+import { buildMigrationStatus, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders } from './seeder'
 
 type ConnectionResolver = string | (() => string | undefined)
@@ -25,6 +25,10 @@ export interface SqliteDatabase {
   closeDatabase(): Promise<void>
   configureOrm(): Promise<void>
   seedDatabase(): Promise<void>
+  /** Drops every table (including the drizzle migration tracker) so migrations can be re-applied from scratch. */
+  resetDatabase(): Promise<void>
+  /** Per-migration applied state derived from the drizzle-kit journal and the __drizzle_migrations table. */
+  migrationStatus(): Promise<MigrationStatusEntry[]>
 }
 
 export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteDatabase {
@@ -40,6 +44,7 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
         : resolve(String(seedersFolder))
 
   let db: unknown
+  let sqliteClient: { query(sql: string): { all(): unknown[] }; exec(sql: string): void } | undefined
   let migrationsPromise: Promise<void> | undefined
 
   function resolveFilename(): string {
@@ -64,6 +69,7 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
     const { Database } = await import('bun:sqlite')
     const sqlite = new Database(dbPath)
     sqlite.exec('PRAGMA journal_mode = WAL;')
+    sqliteClient = sqlite
 
     const { drizzle } = await import('drizzle-orm/bun-sqlite')
     type DrizzleConfig = NonNullable<Exclude<Parameters<typeof drizzle>[0], string>>
@@ -106,6 +112,46 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
       if (!db) return
       // bun:sqlite Database doesn't need explicit close for WAL mode
       db = undefined
+      sqliteClient = undefined
+    },
+
+    async resetDatabase() {
+      await ensureDatabase()
+      if (!sqliteClient) return
+
+      const tables = sqliteClient
+        .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+        .all() as Array<{ name: string }>
+
+      sqliteClient.exec('PRAGMA foreign_keys = OFF;')
+      try {
+        for (const { name } of tables) {
+          sqliteClient.exec(`DROP TABLE IF EXISTS "${name.replaceAll('"', '""')}"`)
+        }
+      } finally {
+        sqliteClient.exec('PRAGMA foreign_keys = ON;')
+      }
+
+      // Allow migrateDatabase() to re-apply everything from scratch.
+      migrationsPromise = undefined
+    },
+
+    async migrationStatus() {
+      const localMigrations = listLocalMigrations(resolvedMigrationsFolder)
+      if (localMigrations.length === 0) return []
+
+      await ensureDatabase()
+      let appliedRows: Array<{ name: string | null; appliedAt: string | null }> = []
+      try {
+        const rows = sqliteClient
+          ?.query('SELECT name, applied_at FROM __drizzle_migrations')
+          .all() as Array<{ name: string | null; applied_at: string | null }> | undefined
+        appliedRows = (rows ?? []).map((row) => ({ name: row.name, appliedAt: row.applied_at }))
+      } catch {
+        // Tracker table does not exist yet — nothing applied.
+      }
+
+      return buildMigrationStatus(localMigrations, appliedRows)
     },
 
     async configureOrm() {

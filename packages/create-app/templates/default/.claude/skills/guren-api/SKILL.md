@@ -97,6 +97,32 @@ export class User extends AuthenticatableModel<UserRecord> {
 - Both are enforced by `Model.filterFillable()`, called automatically before persistence
 - Always define `fillable` on models that accept user input — this is the second defense layer after Zod validation
 
+**Relationships** — declare once, eager-load anywhere:
+
+```typescript
+// app/Models/User.ts
+export class User extends AuthenticatableModel<UserRecord> {
+  static override relationTypes: { posts: HasManyRecord<PostRecord> } = { posts: [] }
+}
+User.hasMany('posts', () => import('./Post.js').then((m) => m.Post), 'authorId', 'id')
+
+// app/Models/Post.ts
+export class Post extends defineModel(posts) {
+  static override relationTypes: { author: BelongsToRecord<UserRecord> } = { author: null }
+}
+Post.belongsTo('author', () => import('./User.js').then((m) => m.User), 'authorId', 'id')
+
+// Eager loading (typed via relationTypes)
+await User.with('posts')                       // users[0].posts: PostRecord[]
+await User.with('posts.comments')              // nested, dot notation
+await User.where('active', true).with('posts').get()  // QueryBuilder
+await User.findWith(1, 'posts')                // single record + relations
+await User.withCount('posts')                  // users[0].postsCount: number (no rows loaded)
+await Post.withPaginate({ page: 1 }, 'author') // paginated + relations
+```
+
+Also available: `hasOne`, `belongsToMany(pivotTable, ...)`, `hasManyThrough`, `morphMany`/`morphTo`. Full guide: `docs/en/guides/database.md` (Relationships section).
+
 ### Routes
 Source: `packages/server/src/mvc/Router.ts`
 
