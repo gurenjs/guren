@@ -114,3 +114,52 @@ export default function Page({ pagination }: Props) { return null }
     expect(result.rawType).toBeNull()
   })
 })
+
+describe('extractPagePropsFromSource with heritage clauses', () => {
+  it('composes extends clauses with own members as an intersection', () => {
+    const source = `
+import type { PaginatedPageProps } from '@guren/core'
+import type { TaskResourceData } from '../../../app/Http/Resources/TaskResource.js'
+
+interface Props extends PaginatedPageProps<TaskResourceData> {
+  filters: { q: string; status: string }
+}
+
+export default function TasksIndex(props: Props) { return null }
+`
+    const result = extractPagePropsFromSource(source, 'tasks/Index')
+    expect(result.rawType).toBe(`PaginatedPageProps<TaskResourceData> & {
+  filters: { q: string; status: string }
+}`)
+    expect(result.imports.some((statement) => statement.includes('PaginatedPageProps'))).toBe(true)
+  })
+
+  it('keeps empty-bodied interfaces that only extend a base type', () => {
+    const source = `
+import type { PaginatedPageProps } from '@guren/core'
+import type { PostResourceData } from '../../../app/Http/Resources/PostResource.js'
+
+interface Props extends PaginatedPageProps<PostResourceData> {}
+
+export default function PostsIndex(props: Props) { return null }
+`
+    const result = extractPagePropsFromSource(source, 'posts/Index')
+    expect(result.rawType).toBe('PaginatedPageProps<PostResourceData> & {}')
+  })
+
+  it('supports multiple heritage clauses', () => {
+    const source = `
+interface Shared { appName: string }
+interface Meta { title: string }
+interface Props extends Shared, Meta {
+  count: number
+}
+export default function Page(props: Props) { return null }
+`
+    const result = extractPagePropsFromSource(source, 'multi/Page')
+    expect(result.rawType).toBe(`Shared & Meta & {
+  count: number
+}`)
+    expect(result.localTypes).toHaveLength(2)
+  })
+})

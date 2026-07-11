@@ -25,7 +25,8 @@ if (!marker) {
   globalScope[INSTANCE_KEY] = { count: 1, warned: false }
 } else {
   marker.count += 1
-  if (!marker.warned) {
+  const quiet = typeof process !== 'undefined' && process.env.GUREN_QUIET_DUPLICATE_ORM === '1'
+  if (!marker.warned && !quiet) {
     marker.warned = true
     console.warn(
       `[guren/orm] ${marker.count} copies of @guren/orm are loaded in this process. ` +
@@ -33,7 +34,8 @@ if (!marker) {
         'with "database has not been configured" for models imported through the extra copy.\n' +
         '[guren/orm] This usually means mixed @guren/* versions (check `bun pm ls | grep @guren`). ' +
         'Fix it by aligning all @guren/* packages to the same release, e.g. `bunx guren upgrade` or ' +
-        'updating every @guren/* entry in package.json together, then reinstalling.',
+        'updating every @guren/* entry in package.json together, then reinstalling. ' +
+        'Set GUREN_QUIET_DUPLICATE_ORM=1 to silence this warning (e.g. monorepo dev where src and dist copies coexist by design).',
     )
   }
 }

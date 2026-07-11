@@ -95,10 +95,24 @@ export function extractPagePropsFromSource(
     }
   }
 
+  // Interfaces may extend other types (e.g. PaginatedPageProps<T>); compose
+  // the heritage clauses with the body as an intersection so inherited
+  // members stay part of the contract.
+  function interfaceRawType(node: {
+    body: { start?: number | null; end?: number | null }
+    extends?: Array<{ start?: number | null; end?: number | null }> | null
+  }): string {
+    const body = source.slice(node.body.start!, node.body.end!)
+    const heritage = (node.extends ?? [])
+      .map((clause) => source.slice(clause.start!, clause.end!))
+      .filter(Boolean)
+    return heritage.length > 0 ? `${heritage.join(' & ')} & ${body}` : body
+  }
+
   // Strategy 1: `interface Props` / `type Props` / `export interface Props` / `export type Props`
   for (const node of ast.program.body) {
     if (node.type === 'TSInterfaceDeclaration' && node.id.name === 'Props') {
-      result.rawType = source.slice(node.body.start!, node.body.end!)
+      result.rawType = interfaceRawType(node)
       result.localTypes = collectReferencedLocalTypes(result.rawType, localTypeMap, importedNames)
       return result
     }
@@ -110,7 +124,7 @@ export function extractPagePropsFromSource(
     if (node.type === 'ExportNamedDeclaration' && node.declaration) {
       const decl = node.declaration
       if (decl.type === 'TSInterfaceDeclaration' && decl.id.name === 'Props') {
-        result.rawType = source.slice(decl.body.start!, decl.body.end!)
+        result.rawType = interfaceRawType(decl)
         result.localTypes = collectReferencedLocalTypes(result.rawType, localTypeMap, importedNames)
         return result
       }
