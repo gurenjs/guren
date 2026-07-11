@@ -37,6 +37,46 @@ interface TaskInfo {
   expression: string
   timezone?: string
   nextRun?: Date
+  /** Execute the task (bound to ScheduledTask.run() when available). */
+  run?: () => Promise<void>
+  /** Whether the cron expression matches the given time. */
+  isDue?: (date: Date) => boolean
+}
+
+type ScheduledTaskLike = {
+  getName?: () => string
+  getExpression?: () => string
+  getTimezone?: () => string | undefined
+  run?: () => Promise<void>
+  isDue?: (date?: Date) => boolean
+  toTask?: () => ScheduledTaskLike
+  name?: string
+  expression?: string
+  timezone?: string
+  callback?: () => void | Promise<void>
+}
+
+function normalizeTask(raw: ScheduledTaskLike): TaskInfo {
+  // PendingSchedule -> ScheduledTask
+  const task = typeof raw.toTask === 'function' ? raw.toTask() : raw
+
+  if (typeof task.getName === 'function' && typeof task.getExpression === 'function') {
+    return {
+      name: task.getName(),
+      expression: task.getExpression(),
+      timezone: task.getTimezone?.(),
+      run: typeof task.run === 'function' ? () => task.run!() : undefined,
+      isDue: typeof task.isDue === 'function' ? (date) => task.isDue!(date) : undefined,
+    }
+  }
+
+  // Plain TaskDefinition
+  return {
+    name: task.name || 'unnamed',
+    expression: task.expression || '* * * * *',
+    timezone: task.timezone,
+    run: typeof task.callback === 'function' ? async () => { await task.callback!() } : undefined,
+  }
 }
 
 /**
@@ -74,25 +114,12 @@ async function loadScheduleKernel(options: ScheduleOptions = {}): Promise<{ task
 
           if (schedule && typeof schedule.buildTasks === 'function') {
             const tasks = schedule.buildTasks()
-            return {
-              tasks: tasks.map((t: unknown) => ({
-                name: (t as { name?: string }).name || 'unnamed',
-                expression: (t as { expression?: string }).expression || '* * * * *',
-                timezone: (t as { timezone?: string }).timezone,
-              })),
-            }
+            return { tasks: tasks.map((t: unknown) => normalizeTask(t as ScheduledTaskLike)) }
           }
 
           if (schedule && typeof schedule.getTasks === 'function') {
             const tasks = schedule.getTasks()
-            return {
-              tasks: tasks.map((t: unknown) => ({
-                name: (t as { name?: string }).name || 'unnamed',
-                expression: (t as { expression?: string }).expression || '* * * * *',
-                timezone: (t as { timezone?: string }).timezone,
-              })),
-              scheduler: schedule,
-            }
+            return { tasks: tasks.map((t: unknown) => normalizeTask(t as ScheduledTaskLike)) }
           }
         }
       } catch (error) {
@@ -275,25 +302,35 @@ export async function runScheduledTasks(options: ScheduleRunOptions = {}): Promi
     consola.info(`Checking ${tasksToRun.length} task(s) for due execution...`)
   }
 
-  // Note: In a real implementation, this would integrate with the actual scheduler
-  // For now, we just show what would run
+  const now = new Date()
+  let failures = 0
+
   for (const task of tasksToRun) {
-    if (options.force) {
-      consola.info(`  Would run: ${task.name} (${task.expression})`)
-    } else {
+    const due = options.force || (task.isDue ? task.isDue(now) : false)
+
+    if (!due) {
       const nextRun = getNextRunTime(task.expression, task.timezone)
-      if (nextRun) {
-        const diff = nextRun.getTime() - Date.now()
-        if (diff <= 60000) {
-          // Due within 1 minute
-          consola.info(`  Due now: ${task.name}`)
-        } else {
-          consola.info(`  Not due: ${task.name} (${formatTimeUntil(nextRun)})`)
-        }
-      }
+      consola.info(`  Not due: ${task.name}${nextRun ? ` (${formatTimeUntil(nextRun)})` : ''}`)
+      continue
+    }
+
+    if (!task.run) {
+      consola.warn(`  Cannot run: ${task.name} (no runnable callback found)`)
+      continue
+    }
+
+    try {
+      const startedAt = Date.now()
+      await task.run()
+      consola.success(`  Ran: ${task.name} (${Date.now() - startedAt}ms)`)
+    } catch (error) {
+      failures += 1
+      const reason = error instanceof Error ? error.message : String(error)
+      consola.error(`  Failed: ${task.name} — ${reason}`)
     }
   }
 
-  consola.info('')
-  consola.info('Note: To actually run tasks, integrate with the scheduler in your application.')
+  if (failures > 0) {
+    process.exitCode = 1
+  }
 }
