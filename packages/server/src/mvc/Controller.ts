@@ -172,6 +172,40 @@ export class Controller {
     return this.ctx.req
   }
 
+  /**
+   * Get an uploaded file from a multipart request.
+   *
+   * Returns null when the field is missing, is not a file, or the upload is
+   * empty. Hono caches the parsed body, so this composes with other body
+   * reads in the same request.
+   *
+   * @example
+   * ```typescript
+   * const avatar = await this.file('avatar')
+   * if (!avatar) {
+   *   throw ValidationException.withMessages({ avatar: 'Choose a file.' })
+   * }
+   * await storage.disk().put(`avatars/${avatar.name}`, Buffer.from(await avatar.arrayBuffer()))
+   * ```
+   */
+  protected async file(name: string): Promise<File | null> {
+    const body = await this.ctx.req.parseBody({ all: true })
+    const value = body[name]
+    const candidate = Array.isArray(value) ? value[0] : value
+    return candidate instanceof File && candidate.size > 0 ? candidate : null
+  }
+
+  /**
+   * Get all uploaded files for a multipart field (e.g. `<input multiple>`).
+   * Returns an empty array when none were uploaded.
+   */
+  protected async files(name: string): Promise<File[]> {
+    const body = await this.ctx.req.parseBody({ all: true })
+    const value = body[name]
+    const values = Array.isArray(value) ? value : value !== undefined ? [value] : []
+    return values.filter((item): item is File => item instanceof File && item.size > 0)
+  }
+
   protected get auth(): AuthContext {
     const auth = this.ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
     if (!auth) {

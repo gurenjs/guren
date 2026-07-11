@@ -499,7 +499,8 @@ export class TestApp {
 
     const headers: Record<string, string> = { ...this.defaultHeaders }
 
-    if (body !== undefined && body !== null) {
+    // FormData bodies get their multipart boundary from fetch itself.
+    if (body !== undefined && body !== null && !(body instanceof FormData)) {
       headers['Content-Type'] = 'application/json'
     }
 
@@ -521,7 +522,7 @@ export class TestApp {
     }
 
     if (body !== undefined && body !== null) {
-      init.body = JSON.stringify(body)
+      init.body = body instanceof FormData ? body : JSON.stringify(body)
     }
 
     const promise = (async () => {
