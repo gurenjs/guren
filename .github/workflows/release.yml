@@ -84,6 +84,13 @@ jobs:
       - name: Packed artifact audit
         run: bun run smoke:starter:packed
 
+      # Boots a scaffolded app (vendored dists) and drives login + CRUD +
+      # CSRF over HTTP. Catches published-artifact-only breakage that
+      # compile-time smokes cannot see (bundled ORM copies, missing
+      # export map entries, unregistered routes).
+      - name: Golden path runtime smoke
+        run: bun run smoke:golden-path
+
       # upgrade-existing-app smoke skipped in release workflow: it tries to
       # resolve the new version from npm before publish, causing a chicken-and-egg
       # failure. This smoke runs in CI on every PR instead.

@@ -229,6 +229,139 @@ step 15 "Re-run build (post add-on composition)"
 (cd "$APP_DIR" && bun run build)
 
 # ---------------------------------------------------------------------------
+# Step 16: Runtime HTTP smoke — migrate, seed, boot the server, and exercise
+# the auth + CRUD golden path end to end. This is the gate that catches
+# published-artifact-only breakage (bundled ORM copies, missing exports,
+# unregistered routes) that compile-time checks cannot see.
+# ---------------------------------------------------------------------------
+step 16 "Runtime HTTP smoke (login + CRUD + CSRF)"
+
+SERVER_PID=""
+
+stop_server() {
+  if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
+    kill "$SERVER_PID" 2>/dev/null || true
+    wait "$SERVER_PID" 2>/dev/null || true
+  fi
+  SERVER_PID=""
+}
+
+cleanup() {
+  stop_server
+  if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ]; then
+    echo ""
+    echo "=== Cleanup: removing $TEMP_DIR ==="
+    rm -rf "$TEMP_DIR"
+  fi
+}
+
+(cd "$APP_DIR" && bun run db:make)
+(cd "$APP_DIR" && bun run db:migrate)
+(cd "$APP_DIR" && bun run db:seed)
+
+# Assert migrations actually created tables — db:migrate used to report
+# success while silently executing nothing.
+(cd "$APP_DIR" && bun -e "
+import { Database } from 'bun:sqlite'
+const db = new Database('./data/guren.db')
+const tables = db.query(\"SELECT name FROM sqlite_master WHERE type='table'\").all().map((r) => r.name)
+for (const required of ['users', 'posts', 'comments', '__drizzle_migrations']) {
+  if (!tables.includes(required)) {
+    console.error('Missing table after db:migrate: ' + required + ' (found: ' + tables.join(', ') + ')')
+    process.exit(1)
+  }
+}
+console.log('DB tables OK: ' + tables.join(', '))
+")
+
+RUNTIME_PORT="${GUREN_SMOKE_PORT:-3799}"
+RUNTIME_URL="http://localhost:$RUNTIME_PORT"
+COOKIES="$TEMP_DIR/cookies.txt"
+SERVER_LOG="$TEMP_DIR/server.log"
+
+(cd "$APP_DIR" && exec env PORT="$RUNTIME_PORT" NODE_ENV=development bun bin/serve.ts > "$SERVER_LOG" 2>&1) &
+SERVER_PID=$!
+
+echo "Waiting for server on $RUNTIME_URL ..."
+for i in $(seq 1 30); do
+  if curl -sf -o /dev/null "$RUNTIME_URL/health"; then
+    break
+  fi
+  if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+    echo "ERROR: server process exited early. Log:"
+    cat "$SERVER_LOG"
+    exit 1
+  fi
+  sleep 1
+  if [ "$i" = "30" ]; then
+    echo "ERROR: server did not become ready within 30s. Log:"
+    cat "$SERVER_LOG"
+    exit 1
+  fi
+done
+
+http_expect() {
+  local label="$1"
+  local expected="$2"
+  shift 2
+  local status
+  status=$(curl -s -o /dev/null -w "%{http_code}" "$@")
+  if [ "$status" != "$expected" ]; then
+    echo "ERROR: $label — expected HTTP $expected, got $status"
+    echo "--- server log tail ---"
+    tail -40 "$SERVER_LOG"
+    exit 1
+  fi
+  echo "  OK: $label -> $status"
+}
+
+# Unauthenticated pages
+http_expect "GET /login" 200 -c "$COOKIES" "$RUNTIME_URL/login"
+
+XSRF=$(awk '$6 == "XSRF-TOKEN" { print $7 }' "$COOKIES")
+if [ -z "$XSRF" ]; then
+  echo "ERROR: XSRF-TOKEN cookie was not set on GET /login (CSRF middleware not mounted?)"
+  exit 1
+fi
+echo "  OK: XSRF-TOKEN cookie present"
+
+# Login with the seeded demo user
+http_expect "POST /login (valid credentials + CSRF)" 303 \
+  -b "$COOKIES" -c "$COOKIES" -X POST "$RUNTIME_URL/login" \
+  -H "Content-Type: application/json" -H "X-XSRF-TOKEN: $XSRF" \
+  -d '{"email":"demo@example.com","password":"secret","remember":false}'
+
+http_expect "GET /dashboard (authenticated)" 200 -b "$COOKIES" "$RUNTIME_URL/dashboard"
+
+# CRUD create + read
+http_expect "POST /posts (authenticated)" 303 \
+  -b "$COOKIES" -c "$COOKIES" -X POST "$RUNTIME_URL/posts" \
+  -H "Content-Type: application/json" -H "X-XSRF-TOKEN: $XSRF" \
+  -d '{"title":"Golden path runtime","body":"created by smoke test"}'
+
+POSTS_BODY=$(curl -s -b "$COOKIES" "$RUNTIME_URL/posts")
+if ! printf '%s' "$POSTS_BODY" | grep -q "Golden path runtime"; then
+  echo "ERROR: GET /posts does not contain the created post title"
+  exit 1
+fi
+echo "  OK: GET /posts contains created post"
+
+# Security defaults
+http_expect "POST /posts (no CSRF token)" 403 \
+  -X POST "$RUNTIME_URL/posts" -H "Content-Type: application/json" \
+  -d '{"title":"x","body":"y"}'
+
+GUEST_COOKIES="$TEMP_DIR/guest-cookies.txt"
+curl -s -c "$GUEST_COOKIES" -o /dev/null "$RUNTIME_URL/login"
+GUEST_XSRF=$(awk '$6 == "XSRF-TOKEN" { print $7 }' "$GUEST_COOKIES")
+http_expect "POST /posts (guest with valid CSRF)" 401 \
+  -b "$GUEST_COOKIES" -X POST "$RUNTIME_URL/posts" \
+  -H "Content-Type: application/json" -H "X-XSRF-TOKEN: $GUEST_XSRF" \
+  -d '{"title":"guest","body":"blocked"}'
+
+stop_server
+
+# ---------------------------------------------------------------------------
 # Done
 # ---------------------------------------------------------------------------
 echo ""

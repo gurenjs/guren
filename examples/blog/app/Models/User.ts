@@ -18,6 +18,4 @@ export class User extends AuthenticatableModel<UserRecord> {
   }
 }
 
-if (typeof User.hasMany === 'function') {
-  User.hasMany('posts', (() => import('./Post.js').then((module) => module.Post)) as any, 'authorId', 'id')
-}
+User.hasMany('posts', () => import('./Post.js').then((module) => module.Post), 'authorId', 'id')

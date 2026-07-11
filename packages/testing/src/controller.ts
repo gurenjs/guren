@@ -437,6 +437,28 @@ export function createControllerModuleMock() {
     }
 
     static async update(): Promise<void> {}
+
+    // Relation registrars are no-ops so model modules that declare
+    // relations at import time load cleanly under the mock.
+    static hasMany(): void {}
+    static hasOne(): void {}
+    static belongsTo(): void {}
+    static belongsToMany(): void {}
+    static hasManyThrough(): void {}
+    static morphMany(): void {}
+    static morphTo(): void {}
+
+    static async with(): Promise<unknown[]> {
+      return []
+    }
+
+    static async withCount(): Promise<unknown[]> {
+      return []
+    }
+
+    static async findWith(): Promise<unknown> {
+      return null
+    }
   }
   class Resource<T = Record<string, unknown>> {
     public resource: T

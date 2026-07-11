@@ -12,6 +12,8 @@
     "preview": "NODE_ENV=production bun bin/serve.ts",
     "db:make": "bunx guren make:migration",
     "db:migrate": "bunx guren db:migrate",
+    "db:reset": "bunx guren db:reset",
+    "db:status": "bunx guren db:status",
     "db:seed": "bunx guren db:seed"
   },
   "dependencies": {

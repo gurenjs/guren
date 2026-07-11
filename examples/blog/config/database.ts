@@ -6,5 +6,5 @@ const database = createPostgresDatabase({
   connectionString: () => process.env.DATABASE_URL ?? 'postgres://guren:guren@localhost:54322/guren',
 })
 
-export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase, resetDatabase, migrationStatus } = database
 export type BlogDatabase = Awaited<ReturnType<typeof getDatabase>>

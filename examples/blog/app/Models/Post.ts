@@ -14,6 +14,4 @@ export class Post extends defineModel(posts) {
   }
 }
 
-if (typeof Post.belongsTo === 'function') {
-  Post.belongsTo('author', (() => import('./User.js').then((module) => module.User)) as any, 'authorId', 'id')
-}
+Post.belongsTo('author', () => import('./User.js').then((module) => module.User), 'authorId', 'id')

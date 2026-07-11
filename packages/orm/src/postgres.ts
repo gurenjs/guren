@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import postgres from 'postgres'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { hasDrizzleMigrations, warnIgnoredFlatSqlMigrations } from './migration-utils'
+import { buildMigrationStatus, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders } from './seeder'
 
 type ConnectionResolver = string | (() => string | undefined)
@@ -29,6 +29,10 @@ export interface PostgresDatabase {
   closeDatabase(): Promise<void>
   configureOrm(): Promise<void>
   seedDatabase(): Promise<void>
+  /** Drops the public schema (and the drizzle tracker schema) so migrations can be re-applied from scratch. */
+  resetDatabase(): Promise<void>
+  /** Per-migration applied state derived from the drizzle-kit journal and drizzle.__drizzle_migrations. */
+  migrationStatus(): Promise<MigrationStatusEntry[]>
 }
 
 export function createPostgresDatabase(options: PostgresDatabaseOptions): PostgresDatabase {
@@ -136,12 +140,57 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
     await runSeeders(db, resolvedSeedersFolder)
   }
 
+  async function withAdminClient<T>(callback: (client: ReturnType<typeof postgres>) => Promise<T>): Promise<T> {
+    const adminClient = postgres(resolveConnectionString(), {
+      max: 1,
+      ...clientOptions,
+    })
+    try {
+      return await callback(adminClient)
+    } finally {
+      await adminClient.end({ timeout: 0 })
+    }
+  }
+
+  async function resetDatabase(): Promise<void> {
+    await withAdminClient(async (adminClient) => {
+      await adminClient.unsafe('DROP SCHEMA IF EXISTS public CASCADE')
+      await adminClient.unsafe('CREATE SCHEMA public')
+      await adminClient.unsafe('DROP SCHEMA IF EXISTS drizzle CASCADE')
+    })
+
+    // Allow migrateDatabase() to re-apply everything from scratch.
+    migrationsPromise = undefined
+  }
+
+  async function migrationStatus(): Promise<MigrationStatusEntry[]> {
+    const localMigrations = listLocalMigrations(resolvedMigrationsFolder)
+    if (localMigrations.length === 0) return []
+
+    const appliedRows = await withAdminClient(async (adminClient) => {
+      try {
+        const rows = await adminClient.unsafe('SELECT name FROM drizzle.__drizzle_migrations')
+        return rows.map((row) => {
+          const record = row as unknown as { name: string | null }
+          return { name: record.name, appliedAt: null }
+        })
+      } catch {
+        // Tracker table does not exist yet — nothing applied.
+        return []
+      }
+    })
+
+    return buildMigrationStatus(localMigrations, appliedRows)
+  }
+
   return {
     getDatabase,
     migrateDatabase: migrateOnce,
     closeDatabase,
     configureOrm,
     seedDatabase,
+    resetDatabase,
+    migrationStatus,
   }
 }
 

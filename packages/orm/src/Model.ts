@@ -1773,41 +1773,188 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     return copies as Array<TRecordFor<T> & RelationTypePick<T, Names>>
   }
 
-  /** @internal Used by QueryBuilder for eager loading. */
+  /**
+   * Fetch records with related record counts attached as `${name}Count`.
+   * Counts hasMany/hasOne/morphMany children per record without attaching
+   * the related rows themselves; belongsTo yields 0 or 1.
+   *
+   * @example
+   * const users = await User.withCount('posts')
+   * users[0].postsCount // number
+   */
+  static async withCount<T extends typeof Model, K extends RelationKey<T>>(
+    this: T,
+    relations: K | readonly K[],
+    where?: WhereClauseFor<T>,
+  ): Promise<Array<TRecordFor<T> & RelationCountPick<K | readonly K[]>>>
+
+  static async withCount<T extends typeof Model, Names extends RelationNames>(
+    this: T,
+    relations: Names,
+    where?: WhereClauseFor<T>,
+  ): Promise<Array<TRecordFor<T> & RelationCountPick<Names>>> {
+    const records = where ? await this.where(where) : await this.all()
+    if (!records.length) {
+      return records as Array<TRecordFor<T> & RelationCountPick<Names>>
+    }
+
+    const relationList = normalizeRelations(relations)
+    const copies = records.map((record) => ({ ...record })) as Array<PlainObject>
+    for (const relationName of relationList) {
+      await this.loadRelationCountInto(copies, relationName)
+    }
+
+    return copies as Array<TRecordFor<T> & RelationCountPick<Names>>
+  }
+
+  /** @internal Attaches a `${name}Count` field for one relation. */
+  protected static async loadRelationCountInto<T extends typeof Model>(
+    this: T,
+    records: Array<PlainObject>,
+    relationName: string,
+  ): Promise<void> {
+    if (relationName.includes('.')) {
+      throw new Error(`${this.name}: withCount does not support nested relation "${relationName}".`)
+    }
+
+    const definition = this.getRelationDefinition(relationName)
+    if (!definition) {
+      throw new Error(`${this.name}: unknown relation "${relationName}".`)
+    }
+
+    const countField = `${relationName}Count`
+
+    switch (definition.type) {
+      case 'hasMany':
+      case 'hasOne': {
+        const related = await resolveModelReference(definition.related)
+        const { foreignKey, localKey } = definition
+        const values = Array.from(
+          new Set(records.map((record) => record[localKey]).filter((value) => value != null)),
+        )
+
+        const counts = new Map<unknown, number>()
+        if (values.length > 0) {
+          const relatedRecords = (await related.where({ [foreignKey]: values } as WhereClause)) as PlainObject[]
+          for (const item of relatedRecords) {
+            const key = item[foreignKey]
+            counts.set(key, (counts.get(key) ?? 0) + 1)
+          }
+        }
+
+        for (const record of records) {
+          record[countField] = counts.get(record[localKey]) ?? 0
+        }
+        return
+      }
+      case 'morphMany': {
+        const withRelation = records.map((record) => ({ ...record }))
+        await this.loadRelationInto(withRelation, relationName)
+        for (const [index, record] of records.entries()) {
+          const value = withRelation[index]?.[relationName]
+          record[countField] = Array.isArray(value) ? value.length : 0
+        }
+        return
+      }
+      case 'belongsTo': {
+        const related = await resolveModelReference(definition.related)
+        const { foreignKey, ownerKey } = definition
+        const values = Array.from(
+          new Set(records.map((record) => record[foreignKey]).filter((value) => value != null)),
+        )
+
+        const ownerKeys = new Set<unknown>()
+        if (values.length > 0) {
+          const owners = (await related.where({ [ownerKey]: values } as WhereClause)) as PlainObject[]
+          for (const owner of owners) {
+            ownerKeys.add(owner[ownerKey])
+          }
+        }
+
+        for (const record of records) {
+          const key = record[foreignKey]
+          record[countField] = key != null && ownerKeys.has(key) ? 1 : 0
+        }
+        return
+      }
+      default:
+        throw new Error(
+          `${this.name}: withCount does not support ${definition.type} relation "${relationName}".`,
+        )
+    }
+  }
+
+  /**
+   * @internal Used by QueryBuilder for eager loading.
+   * Supports nested paths with dot notation, e.g. `posts.comments`.
+   */
   static async loadRelationInto<T extends typeof Model>(
     this: T,
     records: Array<PlainObject>,
     relationName: string,
   ): Promise<void> {
-    const definition = this.getRelationDefinition(relationName)
+    const [head, ...rest] = relationName.split('.')
+    const definition = this.getRelationDefinition(head)
 
     if (!definition) {
-      throw new Error(`${this.name}: unknown relation "${relationName}".`)
+      throw new Error(`${this.name}: unknown relation "${head}".`)
     }
 
     switch (definition.type) {
       case 'hasMany':
         await this.loadHasMany(records, definition)
-        return
+        break
       case 'hasOne':
         await this.loadHasOne(records, definition)
-        return
+        break
       case 'belongsTo':
         await this.loadBelongsTo(records, definition)
-        return
+        break
       case 'belongsToMany':
         await this.loadBelongsToMany(records, definition)
-        return
+        break
       case 'hasManyThrough':
         await this.loadHasManyThrough(records, definition)
-        return
+        break
       case 'morphMany':
         await this.loadMorphMany(records, definition)
-        return
+        break
       case 'morphTo':
         await this.loadMorphTo(records, definition)
-        return
+        break
     }
+
+    if (rest.length === 0) {
+      return
+    }
+
+    if (definition.type === 'morphTo') {
+      throw new Error(
+        `${this.name}: nested eager loading through morphTo relation "${head}" is not supported.`,
+      )
+    }
+
+    // Collect the loaded child records (deduplicated — belongsTo parents can
+    // share one child copy) and recurse on the related model class.
+    const children: PlainObject[] = []
+    const seen = new Set<PlainObject>()
+    for (const record of records) {
+      const value = record[head]
+      const items = Array.isArray(value) ? value : value != null ? [value] : []
+      for (const item of items) {
+        if (item && typeof item === 'object' && !seen.has(item as PlainObject)) {
+          seen.add(item as PlainObject)
+          children.push(item as PlainObject)
+        }
+      }
+    }
+
+    if (children.length === 0) {
+      return
+    }
+
+    const related = await resolveModelReference(definition.related)
+    await related.loadRelationInto(children, rest.join('.'))
   }
 
   protected static async loadHasMany(
@@ -2144,6 +2291,8 @@ type RelationTypePick<T extends typeof Model, Names> = RelationNameUnion<Names> 
     ? { [K in Keys & keyof RelationTypesFor<T>]: RelationTypesFor<T>[K] }
     : {}
   : {}
+
+type RelationCountPick<Names> = { [K in RelationNameUnion<Names> & string as `${K}Count`]: number }
 
 export interface TransactionModelScope<T extends typeof Model> {
   readonly trx: TransactionHandle
