@@ -316,6 +316,7 @@ export {
   Worker,
   QueueManager,
   MemoryDriver,
+  SyncDriver,
   RedisDriver,
   setQueueDriver,
   getQueueDriver,
@@ -354,6 +355,7 @@ export {
   SmtpTransport,
   ResendTransport,
   MemoryTransport,
+  LogTransport,
 } from './mail'
 export type {
   MailAddress,

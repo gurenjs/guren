@@ -2286,11 +2286,12 @@ type RelationKeyOrString<T extends typeof Model> = RelationKey<T> extends never 
 
 type RelationNameUnion<Names> = Names extends readonly (infer Items)[] ? Items : Names
 
-type RelationTypePick<T extends typeof Model, Names> = RelationNameUnion<Names> extends infer Keys
-  ? Keys extends string
-    ? { [K in Keys & keyof RelationTypesFor<T>]: RelationTypesFor<T>[K] }
-    : {}
-  : {}
+// Note: a single non-distributing mapped type — `Keys extends string ? ...`
+// would distribute over the union and turn with(['a', 'b']) results into
+// `{ a } | { b }` instead of `{ a } & { b }`.
+type RelationTypePick<T extends typeof Model, Names> = {
+  [K in RelationNameUnion<Names> & string & keyof RelationTypesFor<T>]: RelationTypesFor<T>[K]
+}
 
 type RelationCountPick<Names> = { [K in RelationNameUnion<Names> & string as `${K}Count`]: number }
 

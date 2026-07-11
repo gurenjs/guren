@@ -445,35 +445,36 @@ step 17 "Add-on runtime smoke (queue dispatch + mail send)"
 
 cat > "$APP_DIR/addons-check.ts" <<'ADDONS'
 import app, { ready } from './src/main.js'
+import { Job, registerJob } from '@guren/core'
 
 await ready
 
-// Queue: dispatch the scaffolded job and confirm it lands on the driver.
-const queue = app.container.make('queue') as {
-  driver(): {
-    size(queue: string): Promise<number>
-    pop(queue: string): Promise<{ name: string } | null>
+// Queue: the scaffolded default is the sync driver — dispatch must execute
+// the handler inline, in this process, with no worker.
+let probeRan = false
+class SmokeProbeJob extends Job<Record<string, never>> {
+  async handle(): Promise<void> {
+    probeRan = true
   }
 }
-const { ProcessWelcomeSequenceJob } = await import('./app/Jobs/ProcessWelcomeSequenceJob.js')
-const jobId = await ProcessWelcomeSequenceJob.dispatch({ source: 'smoke' })
+registerJob(SmokeProbeJob)
+const jobId = await SmokeProbeJob.dispatch({})
 if (typeof jobId !== 'string' || jobId.length === 0) {
   console.error('Job dispatch did not return a job id')
   process.exit(1)
 }
-const queued = await queue.driver().size('default')
-if (queued < 1) {
-  console.error(`Expected at least 1 queued job, found ${queued}`)
+if (!probeRan) {
+  console.error('SyncDriver did not execute the dispatched job inline')
   process.exit(1)
 }
-const job = await queue.driver().pop('default')
-if (!job || job.name !== 'ProcessWelcomeSequenceJob') {
-  console.error('Queued job missing or wrong name: ' + JSON.stringify(job))
-  process.exit(1)
-}
-console.log('Queue OK: dispatched and popped ' + job.name)
+console.log('Queue OK: sync dispatch executed the job inline')
 
-// Mail: send the scaffolded mailable through the memory transport.
+// The scaffolded sample job must dispatch cleanly too.
+const { ProcessWelcomeSequenceJob } = await import('./app/Jobs/ProcessWelcomeSequenceJob.js')
+await ProcessWelcomeSequenceJob.dispatch({ source: 'smoke' })
+
+// Mail: the scaffolded default is the log transport — send() must succeed
+// and report the log response.
 const mailManager = app.container.make('mail') as never
 const { WelcomeEmailMail } = await import('./app/Mail/WelcomeEmailMail.js')
 const result = (await new WelcomeEmailMail(mailManager).to('smoke@example.com').send()) as {
@@ -485,7 +486,11 @@ if (!result.success) {
   console.error('Mail send failed: ' + JSON.stringify(result))
   process.exit(1)
 }
-console.log('Mail OK: ' + (result.response ?? 'sent'))
+if (result.response !== 'Message written to log') {
+  console.error('Expected the log transport to handle the message, got: ' + JSON.stringify(result))
+  process.exit(1)
+}
+console.log('Mail OK: ' + result.response)
 
 process.exit(0)
 ADDONS

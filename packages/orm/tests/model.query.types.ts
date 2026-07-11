@@ -48,3 +48,40 @@ const txUser = User.inTransaction(trx)
 const _txScope: TransactionModelScope<typeof User> = txUser
 txUser.create({ name: 'Kaworu' })
 txUser.update({ id: 1 }, { name: 'Nagisa' })
+
+// findWith / with() with multiple relations must intersect the relation
+// picks, not distribute them into a union.
+type PostRecordT = { id: number; title: string; authorId: number }
+type CommentRecordT = { id: number; body: string; postId: number }
+
+class RelUser extends Model<UserRecord> {
+  static table = users
+  static override relationTypes: {
+    posts: PostRecordT[]
+    comments: CommentRecordT[]
+  } = { posts: [], comments: [] }
+}
+
+async function _relationIntersection() {
+  const found = await RelUser.findWith(1, ['posts', 'comments'])
+  if (found) {
+    const _posts: PostRecordT[] = found.posts
+    const _comments: CommentRecordT[] = found.comments
+    void _posts
+    void _comments
+  }
+
+  const listed = await RelUser.with(['posts', 'comments'])
+  const first = listed[0]
+  if (first) {
+    const _posts: PostRecordT[] = first.posts
+    const _comments: CommentRecordT[] = first.comments
+    void _posts
+    void _comments
+  }
+
+  const counted = await RelUser.withCount('posts')
+  const _count: number = counted[0].postsCount
+  void _count
+}
+void _relationIntersection
