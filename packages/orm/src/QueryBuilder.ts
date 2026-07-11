@@ -104,7 +104,8 @@ export class QueryBuilder<
     if (typeof fieldOrConditions === 'object' && fieldOrConditions !== null) {
       for (const [key, val] of Object.entries(fieldOrConditions)) {
         if (val !== undefined) {
-          this.addSimpleCondition(key, '=', val)
+          // Array values mean IN — mirrors the adapter's object-where contract
+          this.addSimpleCondition(key, Array.isArray(val) ? 'in' : '=', val)
         }
       }
       return this
@@ -113,7 +114,7 @@ export class QueryBuilder<
     const field = fieldOrConditions as string
 
     if (arguments.length === 2) {
-      this.addSimpleCondition(field, '=', operatorOrValue)
+      this.addSimpleCondition(field, Array.isArray(operatorOrValue) ? 'in' : '=', operatorOrValue)
     } else {
       this.addSimpleCondition(field, operatorOrValue as WhereOperator, value)
     }
@@ -140,14 +141,14 @@ export class QueryBuilder<
     if (typeof fieldOrConditions === 'object' && fieldOrConditions !== null) {
       for (const [key, val] of Object.entries(fieldOrConditions)) {
         if (val !== undefined) {
-          orConditions.push({ type: 'simple', field: key, operator: '=', value: val })
+          orConditions.push({ type: 'simple', field: key, operator: Array.isArray(val) ? 'in' : '=', value: val })
         }
       }
     } else {
       const field = fieldOrConditions as string
 
       if (arguments.length === 2) {
-        orConditions.push({ type: 'simple', field, operator: '=', value: operatorOrValue })
+        orConditions.push({ type: 'simple', field, operator: Array.isArray(operatorOrValue) ? 'in' : '=', value: operatorOrValue })
       } else {
         orConditions.push({ type: 'simple', field, operator: operatorOrValue as WhereOperator, value })
       }
