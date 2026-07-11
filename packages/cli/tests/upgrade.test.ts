@@ -42,7 +42,7 @@ describe('upgradeCanary', () => {
   })
 
   it('updates Guren packages to canary', async () => {
-    const result = await upgradeCanary({ cwd: workspace.dir })
+    const result = await upgradeCanary({ cwd: workspace.dir, tag: 'canary' })
     const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
       dependencies: Record<string, string>
       devDependencies: Record<string, string>
@@ -57,8 +57,39 @@ describe('upgradeCanary', () => {
     expect(packageJson.dependencies.react).toBe('^19.0.0')
   })
 
+
+  it('aligns Guren packages to a resolved rc version by default', async () => {
+    const result = await upgradeCanary({
+      cwd: workspace.dir,
+      versionResolver: async (name) => (name.startsWith('@guren/') ? '1.0.0-rc.99' : null),
+    })
+    const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
+      dependencies: Record<string, string>
+      devDependencies: Record<string, string>
+    }
+
+    expect(result.versionCompatibility?.targetVersion).toBe('rc')
+    expect(packageJson.dependencies['@guren/core']).toBe('^1.0.0-rc.99')
+    expect(packageJson.dependencies['@guren/server']).toBe('^1.0.0-rc.99')
+    expect(packageJson.devDependencies['@guren/testing']).toBe('^1.0.0-rc.99')
+    expect(packageJson.dependencies.react).toBe('^19.0.0')
+  })
+
+  it('leaves packages untouched when the registry lookup fails', async () => {
+    const result = await upgradeCanary({
+      cwd: workspace.dir,
+      versionResolver: async () => null,
+    })
+    const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
+      dependencies: Record<string, string>
+    }
+
+    expect(result.updatedDependencies).toHaveLength(0)
+    expect(packageJson.dependencies['@guren/core']).not.toBe('^null')
+  })
+
   it('supports dry runs', async () => {
-    const result = await upgradeCanary({ cwd: workspace.dir, dryRun: true })
+    const result = await upgradeCanary({ cwd: workspace.dir, dryRun: true , versionResolver: async () => '1.0.0-rc.99' })
     const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
       dependencies: Record<string, string>
       scripts?: Record<string, string>
@@ -75,7 +106,7 @@ describe('upgradeCanary', () => {
   })
 
   it('supports disabling autofix', async () => {
-    const result = await upgradeCanary({ cwd: workspace.dir, noAutofix: true })
+    const result = await upgradeCanary({ cwd: workspace.dir, noAutofix: true, tag: 'canary' })
     const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
       dependencies: Record<string, string>
       scripts?: Record<string, string>
@@ -94,7 +125,7 @@ describe('upgradeCanary', () => {
   })
 
   it('returns a stable json-shaped report', async () => {
-    const result = await upgradeCanary({ cwd: workspace.dir, dryRun: true })
+    const result = await upgradeCanary({ cwd: workspace.dir, dryRun: true , versionResolver: async () => '1.0.0-rc.99' })
 
     expect(result).toHaveProperty('packageJsonPath')
     expect(result).toHaveProperty('updatedDependencies')
@@ -109,15 +140,15 @@ describe('upgradeCanary', () => {
   it('runs install only when dependencies were updated', async () => {
     const installRunner = mock(async () => {})
 
-    await upgradeCanary({ cwd: workspace.dir, install: true, installRunner })
+    await upgradeCanary({ cwd: workspace.dir, install: true, installRunner , versionResolver: async () => '1.0.0-rc.99' })
     expect(installRunner).toHaveBeenCalledTimes(1)
 
-    await upgradeCanary({ cwd: workspace.dir, install: true, installRunner })
+    await upgradeCanary({ cwd: workspace.dir, install: true, installRunner , versionResolver: async () => '1.0.0-rc.99' })
     expect(installRunner).toHaveBeenCalledTimes(1)
   })
 
   it('includes deprecation and codemod results in output', async () => {
-    const result = await upgradeCanary({ cwd: workspace.dir, dryRun: true })
+    const result = await upgradeCanary({ cwd: workspace.dir, dryRun: true , versionResolver: async () => '1.0.0-rc.99' })
 
     expect(result).toHaveProperty('deprecationWarnings')
     expect(result).toHaveProperty('codemodResults')

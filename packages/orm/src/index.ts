@@ -1,3 +1,4 @@
+import './instance-guard'
 export { Model, defineModel } from './Model'
 export { ModelNotFoundException } from './ModelNotFoundException'
 export type {

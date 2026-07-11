@@ -1947,6 +1947,10 @@ const upgradeCommand = defineCommand({
       type: 'boolean',
       description: 'Pin @guren/* dependencies to the canary release tag.',
     },
+    tag: {
+      type: 'string',
+      description: 'npm dist-tag to upgrade to (default: rc). All @guren/* packages are aligned to it.',
+    },
     install: {
       type: 'boolean',
       description: 'Run bun install after package.json is updated.',
@@ -1969,15 +1973,14 @@ const upgradeCommand = defineCommand({
     },
   },
   async run({ args }) {
-    if (!args.canary && !args.checkOnly) {
-      throw new Error('Only `guren upgrade --canary` is currently supported.')
-    }
+    const tag = args.canary ? 'canary' : typeof args.tag === 'string' && args.tag ? args.tag : 'rc'
 
     const result = await upgradeCanary({
       install: Boolean(args.install),
       dryRun: Boolean(args.dryRun),
       noAutofix: Boolean(args.noAutofix),
       checkOnly: Boolean(args.checkOnly),
+      tag,
     })
 
     if (args.json) {
