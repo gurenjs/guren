@@ -1,6 +1,6 @@
 {
   "name": "@guren/example-api",
-  "version": "0.1.1-rc.13",
+  "version": "0.1.1-rc.14",
   "private": true,
   "type": "module",
   "scripts": {
