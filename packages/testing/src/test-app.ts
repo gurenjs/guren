@@ -403,6 +403,47 @@ export class TestApp {
   }
 
   /**
+   * Prime the CSRF protection: performs a GET request to `path`, captures the
+   * session and XSRF-TOKEN cookies, and returns a TestApp that sends them
+   * (plus the `X-XSRF-TOKEN` header) on every subsequent request — so POST,
+   * PUT, PATCH, and DELETE pass the CSRF middleware like a real browser.
+   *
+   * @example
+   * const http = (await TestApp.fromFetch(app.fetch)).actingAs(user)
+   * const csrf = await http.withCsrf()
+   * await csrf.post('/tasks', { title: 'hello' }) // no more 403
+   */
+  async withCsrf(path = '/'): Promise<TestApp> {
+    const response = await this.request('GET', path)
+
+    const cookies = new Map<string, string>()
+    for (const setCookie of response.headers.getSetCookie()) {
+      const [pair] = setCookie.split(';')
+      const separator = pair.indexOf('=')
+      if (separator > 0) {
+        cookies.set(pair.slice(0, separator).trim(), pair.slice(separator + 1).trim())
+      }
+    }
+
+    const xsrfToken = cookies.get('XSRF-TOKEN')
+    if (!xsrfToken) {
+      throw new Error(
+        `withCsrf(): GET ${path} did not set an XSRF-TOKEN cookie. ` +
+          'Ensure session + CSRF middleware are enabled (auth option in createApp).',
+      )
+    }
+
+    const copy = new TestApp(this.fetchFn, this.baseUrl)
+    copy.defaultHeaders = {
+      ...this.defaultHeaders,
+      Cookie: [...cookies.entries()].map(([name, value]) => `${name}=${value}`).join('; '),
+      'X-XSRF-TOKEN': decodeURIComponent(xsrfToken),
+    }
+    copy.authenticatedUser = this.authenticatedUser
+    return copy
+  }
+
+  /**
    * Return a new TestApp that sends `Accept: application/json` on every request.
    */
   json(): TestApp {
