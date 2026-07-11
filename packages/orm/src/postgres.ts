@@ -1,14 +1,36 @@
-import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js'
-import { migrate } from 'drizzle-orm/postgres-js/migrator'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import postgres from 'postgres'
+import type postgres from 'postgres'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { buildMigrationStatus, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders } from './seeder'
 
 type ConnectionResolver = string | (() => string | undefined)
-type DrizzleConfig = Exclude<Parameters<typeof drizzle>[0], string>
+type PostgresJsDrizzle = typeof import('drizzle-orm/postgres-js')
+type DrizzleConfig = Exclude<Parameters<PostgresJsDrizzle['drizzle']>[0], string>
+
+// The postgres driver packages are loaded lazily so importing @guren/orm
+// does not require `postgres` to be installed (e.g. SQLite-only apps).
+async function loadPostgresModules(): Promise<{
+  drizzle: PostgresJsDrizzle['drizzle']
+  migrate: typeof import('drizzle-orm/postgres-js/migrator')['migrate']
+  postgres: typeof postgres
+}> {
+  try {
+    const [{ drizzle }, { migrate }, postgresModule] = await Promise.all([
+      import('drizzle-orm/postgres-js'),
+      import('drizzle-orm/postgres-js/migrator'),
+      import('postgres'),
+    ])
+    return { drizzle, migrate, postgres: postgresModule.default }
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    throw new Error(
+      `createPostgresDatabase() requires the "postgres" package. Install it with \`bun add postgres\`. (${reason})`,
+    )
+  }
+}
 
 export interface PostgresDatabaseOptions {
   migrationsFolder: string | URL
@@ -69,8 +91,9 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
         return
       }
 
+      const { drizzle, migrate, postgres: postgresFactory } = await loadPostgresModules()
       const url = resolveConnectionString()
-      const migrationClient = postgres(url, {
+      const migrationClient = postgresFactory(url, {
         max: 1,
         ...clientOptions,
       })
@@ -99,8 +122,9 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
 
     const promise = (async (): Promise<PostgresJsDatabase> => {
       await migrateOnce()
+      const { drizzle, postgres: postgresFactory } = await loadPostgresModules()
       const url = resolveConnectionString()
-      client = postgres(url, {
+      client = postgresFactory(url, {
         max: 1,
         ...clientOptions,
       })
@@ -141,7 +165,8 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
   }
 
   async function withAdminClient<T>(callback: (client: ReturnType<typeof postgres>) => Promise<T>): Promise<T> {
-    const adminClient = postgres(resolveConnectionString(), {
+    const { postgres: postgresFactory } = await loadPostgresModules()
+    const adminClient = postgresFactory(resolveConnectionString(), {
       max: 1,
       ...clientOptions,
     })

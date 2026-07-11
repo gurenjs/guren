@@ -1,5 +1,4 @@
-import { drizzle, type MySql2Database } from 'drizzle-orm/mysql2'
-import { migrate } from 'drizzle-orm/mysql2/migrator'
+import type { MySql2Database } from 'drizzle-orm/mysql2'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
@@ -8,7 +7,28 @@ import { runSeeders } from './seeder'
 
 type ConnectionResolver = string | (() => string | undefined)
 type MySqlConnectionOptions = Record<string, unknown>
-type DrizzleConfig = Exclude<Parameters<typeof drizzle>[0], string>
+type MySql2Drizzle = typeof import('drizzle-orm/mysql2')
+type DrizzleConfig = Exclude<Parameters<MySql2Drizzle['drizzle']>[0], string>
+
+// The mysql driver packages are loaded lazily so importing @guren/orm
+// does not require `mysql2` to be installed (e.g. SQLite-only apps).
+async function loadMySqlModules(): Promise<{
+  drizzle: MySql2Drizzle['drizzle']
+  migrate: typeof import('drizzle-orm/mysql2/migrator')['migrate']
+}> {
+  try {
+    const [{ drizzle }, { migrate }] = await Promise.all([
+      import('drizzle-orm/mysql2'),
+      import('drizzle-orm/mysql2/migrator'),
+    ])
+    return { drizzle, migrate }
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    throw new Error(
+      `createMySqlDatabase() requires the "mysql2" package. Install it with \`bun add mysql2\`. (${reason})`,
+    )
+  }
+}
 
 export interface MySqlDatabaseOptions {
   migrationsFolder: string | URL
@@ -69,6 +89,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
         return
       }
 
+      const { drizzle, migrate } = await loadMySqlModules()
       const url = resolveConnectionString()
       const migrationDb = drizzle({
         connection: {
@@ -102,6 +123,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
 
     const promise = (async (): Promise<MySql2Database> => {
       await migrateOnce()
+      const { drizzle } = await loadMySqlModules()
       const url = resolveConnectionString()
       const db = drizzle({
         connection: {
@@ -148,6 +170,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
   }
 
   async function withAdminDb<T>(callback: (db: MySql2Database) => Promise<T>): Promise<T> {
+    const { drizzle } = await loadMySqlModules()
     const adminDb = drizzle({
       connection: {
         uri: resolveConnectionString(),
