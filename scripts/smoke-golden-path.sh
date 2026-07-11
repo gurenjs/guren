@@ -28,6 +28,17 @@ step() {
 CLI_BIN="$REPO_ROOT/packages/cli/src/bin.ts"
 CREATE_APP_BIN="$REPO_ROOT/packages/create-app/src/cli.ts"
 
+# Database driver for the scaffolded app. "postgres" expects a reachable
+# server (default: the repo docker-compose instance on port 54322 — run
+# `bun run db:up` locally; CI maps its service container to the same port).
+SMOKE_DB="${GUREN_SMOKE_DB:-sqlite}"
+
+if [ "$SMOKE_DB" = "postgres" ]; then
+  # Use a dedicated database so db:reset never touches a developer's data
+  # on the shared compose instance. CI maps its service to the same port.
+  export DATABASE_URL="${GUREN_SMOKE_DATABASE_URL:-postgres://guren:guren@localhost:54322/guren_smoke}"
+fi
+
 PACKAGES="cli core inertia-client orm server"
 
 # ---------------------------------------------------------------------------
@@ -55,7 +66,7 @@ APP_DIR="$TEMP_DIR/golden-path-app"
 echo "Temp directory: $TEMP_DIR"
 echo "App directory:  $APP_DIR"
 
-bun "$CREATE_APP_BIN" "$APP_DIR" --mode ssr
+bun "$CREATE_APP_BIN" "$APP_DIR" --mode ssr --db "$SMOKE_DB"
 
 # ---------------------------------------------------------------------------
 # Step 2: Vendor local packages and install dependencies
@@ -256,12 +267,74 @@ cleanup() {
 }
 
 (cd "$APP_DIR" && bun run db:make)
-(cd "$APP_DIR" && bun run db:migrate)
+
+if [ "$SMOKE_DB" = "postgres" ]; then
+  # Create the smoke database if missing (CREATE DATABASE has no IF NOT EXISTS).
+  cat > "$TEMP_DIR/ensure-db.ts" <<'ENSUREDB'
+import postgres from 'postgres'
+
+const target = new URL(process.env.DATABASE_URL ?? '')
+const dbName = target.pathname.slice(1)
+const admin = new URL(target.toString())
+admin.pathname = '/postgres'
+
+const sql = postgres(admin.toString(), { max: 1 })
+const exists = await sql`SELECT 1 FROM pg_database WHERE datname = ${dbName}`
+if (exists.length === 0) {
+  await sql.unsafe(`CREATE DATABASE "${dbName.replaceAll('"', '""')}"`)
+  console.log(`Created database ${dbName}`)
+} else {
+  console.log(`Database ${dbName} already exists`)
+}
+await sql.end()
+ENSUREDB
+  (cd "$APP_DIR" && bun "$TEMP_DIR/ensure-db.ts")
+
+  # Drop leftovers from previous runs and exercise resetDatabase() on pg.
+  (cd "$APP_DIR" && bun "$CLI_BIN" db:reset --force)
+else
+  (cd "$APP_DIR" && bun run db:migrate)
+fi
 (cd "$APP_DIR" && bun run db:seed)
+
+# db:status must see every migration as applied on both drivers.
+STATUS_OUTPUT=$(cd "$APP_DIR" && bun "$CLI_BIN" db:status 2>&1)
+printf '%s\n' "$STATUS_OUTPUT"
+if printf '%s' "$STATUS_OUTPUT" | grep -q "pending"; then
+  echo "ERROR: db:status reports pending migrations after db:migrate"
+  exit 1
+fi
+if ! printf '%s' "$STATUS_OUTPUT" | grep -q "applied"; then
+  echo "ERROR: db:status did not report any applied migrations"
+  exit 1
+fi
 
 # Assert migrations actually created tables — db:migrate used to report
 # success while silently executing nothing.
-(cd "$APP_DIR" && bun -e "
+if [ "$SMOKE_DB" = "postgres" ]; then
+  cat > "$TEMP_DIR/dbcheck.ts" <<'DBCHECK'
+import postgres from 'postgres'
+
+const sql = postgres(process.env.DATABASE_URL ?? 'postgres://guren:guren@localhost:54322/guren', { max: 1 })
+const rows = await sql`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`
+const tables = rows.map((row) => row.table_name as string)
+for (const required of ['users', 'posts', 'comments']) {
+  if (!tables.includes(required)) {
+    console.error('Missing table after db:migrate: ' + required + ' (found: ' + tables.join(', ') + ')')
+    process.exit(1)
+  }
+}
+const tracker = await sql`SELECT count(*)::int AS c FROM drizzle.__drizzle_migrations`
+if (Number(tracker[0].c) < 1) {
+  console.error('drizzle.__drizzle_migrations is empty after db:migrate')
+  process.exit(1)
+}
+await sql.end()
+console.log('DB tables OK (postgres): ' + tables.join(', '))
+DBCHECK
+  (cd "$APP_DIR" && bun "$TEMP_DIR/dbcheck.ts")
+else
+  (cd "$APP_DIR" && bun -e "
 import { Database } from 'bun:sqlite'
 const db = new Database('./data/guren.db')
 const tables = db.query(\"SELECT name FROM sqlite_master WHERE type='table'\").all().map((r) => r.name)
@@ -273,6 +346,7 @@ for (const required of ['users', 'posts', 'comments', '__drizzle_migrations']) {
 }
 console.log('DB tables OK: ' + tables.join(', '))
 ")
+fi
 
 RUNTIME_PORT="${GUREN_SMOKE_PORT:-3799}"
 RUNTIME_URL="http://localhost:$RUNTIME_PORT"
@@ -360,6 +434,64 @@ http_expect "POST /posts (guest with valid CSRF)" 401 \
   -d '{"title":"guest","body":"blocked"}'
 
 stop_server
+
+# ---------------------------------------------------------------------------
+# Step 17: Add-on runtime smoke — boot the app once more and exercise the
+# queue (dispatch + pop on the memory driver) and mail (memory transport)
+# wiring that the add-on blueprints installed. Compile-time checks cannot
+# tell whether the providers actually register working managers.
+# ---------------------------------------------------------------------------
+step 17 "Add-on runtime smoke (queue dispatch + mail send)"
+
+cat > "$APP_DIR/addons-check.ts" <<'ADDONS'
+import app, { ready } from './src/main.js'
+
+await ready
+
+// Queue: dispatch the scaffolded job and confirm it lands on the driver.
+const queue = app.container.make('queue') as {
+  driver(): {
+    size(queue: string): Promise<number>
+    pop(queue: string): Promise<{ name: string } | null>
+  }
+}
+const { ProcessWelcomeSequenceJob } = await import('./app/Jobs/ProcessWelcomeSequenceJob.js')
+const jobId = await ProcessWelcomeSequenceJob.dispatch({ source: 'smoke' })
+if (typeof jobId !== 'string' || jobId.length === 0) {
+  console.error('Job dispatch did not return a job id')
+  process.exit(1)
+}
+const queued = await queue.driver().size('default')
+if (queued < 1) {
+  console.error(`Expected at least 1 queued job, found ${queued}`)
+  process.exit(1)
+}
+const job = await queue.driver().pop('default')
+if (!job || job.name !== 'ProcessWelcomeSequenceJob') {
+  console.error('Queued job missing or wrong name: ' + JSON.stringify(job))
+  process.exit(1)
+}
+console.log('Queue OK: dispatched and popped ' + job.name)
+
+// Mail: send the scaffolded mailable through the memory transport.
+const mailManager = app.container.make('mail') as never
+const { WelcomeEmailMail } = await import('./app/Mail/WelcomeEmailMail.js')
+const result = (await new WelcomeEmailMail(mailManager).to('smoke@example.com').send()) as {
+  success: boolean
+  response?: string
+  error?: string
+}
+if (!result.success) {
+  console.error('Mail send failed: ' + JSON.stringify(result))
+  process.exit(1)
+}
+console.log('Mail OK: ' + (result.response ?? 'sent'))
+
+process.exit(0)
+ADDONS
+
+(cd "$APP_DIR" && bun addons-check.ts)
+rm -f "$APP_DIR/addons-check.ts"
 
 # ---------------------------------------------------------------------------
 # Done

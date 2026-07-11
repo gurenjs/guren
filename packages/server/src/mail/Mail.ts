@@ -208,7 +208,26 @@ export class Mail {
   /**
    * Build the final message.
    */
+  /**
+   * Mailable subclasses define their content in build() (subject, body, ...).
+   * It runs automatically before sending, so `new WelcomeMail(manager).to(x).send()`
+   * works without a manual build() call.
+   */
+  protected build?(): this
+
+  private hasRunBuild = false
+
+  private runBuildOnce(): void {
+    if (this.hasRunBuild) {
+      return
+    }
+    this.hasRunBuild = true
+    this.build?.()
+  }
+
   buildMessage(): MailMessage {
+    this.runBuildOnce()
+
     if (!this.message.to || this.message.to.length === 0) {
       throw new Error('Email must have at least one recipient')
     }

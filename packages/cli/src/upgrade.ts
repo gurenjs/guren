@@ -1,4 +1,5 @@
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, writeFile, readdir } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { join, resolve } from 'node:path'
 import {
@@ -23,6 +24,14 @@ export interface UpgradeCanaryOptions {
   noAutofix?: boolean
   checkOnly?: boolean
   installRunner?: (cwd: string) => Promise<void>
+  /**
+   * npm dist-tag to upgrade to (default: 'rc'). 'canary' pins the literal
+   * tag so installs keep floating; any other tag is resolved to a concrete
+   * version and written as ^version.
+   */
+  tag?: string
+  /** Override registry version lookups (used in tests). */
+  versionResolver?: (packageName: string, tag: string) => Promise<string | null>
 }
 
 export interface UpgradedDependency {
@@ -63,6 +72,28 @@ type PackageManifest = Partial<Record<ManifestField, Record<string, string>>> & 
   version?: string
 }
 
+async function findNestedGurenCopies(cwd: string): Promise<string[]> {
+  const gurenRoot = resolve(cwd, 'node_modules', '@guren')
+  if (!existsSync(gurenRoot)) {
+    return []
+  }
+
+  const nested: string[] = []
+  const entries = await readdir(gurenRoot, { withFileTypes: true }).catch(() => [])
+  for (const entry of entries) {
+    const nestedGuren = resolve(gurenRoot, entry.name, 'node_modules', '@guren')
+    if (!existsSync(nestedGuren)) {
+      continue
+    }
+    const inner = await readdir(nestedGuren).catch(() => [])
+    for (const innerName of inner) {
+      nested.push(`@guren/${entry.name} -> @guren/${innerName}`)
+    }
+  }
+
+  return nested
+}
+
 async function runBunInstall(cwd: string): Promise<void> {
   await new Promise<void>((resolvePromise, rejectPromise) => {
     const child = spawn(process.execPath || 'bun', ['install'], {
@@ -85,7 +116,23 @@ async function runBunInstall(cwd: string): Promise<void> {
   })
 }
 
-async function updateManifestDependencies(cwd: string, dryRun = false): Promise<{
+async function resolveDistTagVersion(packageName: string, tag: string): Promise<string | null> {
+  const response = await fetch(`https://registry.npmjs.org/${packageName}`, {
+    headers: { accept: 'application/vnd.npm.install-v1+json' },
+  })
+  if (!response.ok) {
+    return null
+  }
+  const payload = (await response.json()) as { 'dist-tags'?: Record<string, string> }
+  return payload['dist-tags']?.[tag] ?? null
+}
+
+async function updateManifestDependencies(
+  cwd: string,
+  dryRun = false,
+  tag = 'rc',
+  versionResolver: (packageName: string, tag: string) => Promise<string | null> = resolveDistTagVersion,
+): Promise<{
   packageJsonPath: string
   updatedDependencies: UpgradedDependency[]
 }> {
@@ -94,6 +141,16 @@ async function updateManifestDependencies(cwd: string, dryRun = false): Promise<
   const manifest = JSON.parse(raw) as PackageManifest
   const updatedDependencies: UpgradedDependency[] = []
 
+  // 'canary' keeps the floating dist-tag pin; other tags resolve to ^version
+  // so every @guren/* package lands on one coherent release.
+  const resolveTarget = async (name: string): Promise<string | null> => {
+    if (tag === 'canary') {
+      return 'canary'
+    }
+    const version = await versionResolver(name, tag)
+    return version ? `^${version}` : null
+  }
+
   for (const field of MANIFEST_FIELDS) {
     const dependencies = manifest[field]
     if (!dependencies) {
@@ -101,16 +158,26 @@ async function updateManifestDependencies(cwd: string, dryRun = false): Promise<
     }
 
     for (const [name, version] of Object.entries(dependencies)) {
-      if (!GUREN_PACKAGE.test(name) || version === 'canary') {
+      if (!GUREN_PACKAGE.test(name)) {
         continue
       }
 
-      dependencies[name] = 'canary'
+      const nextVersion = await resolveTarget(name)
+      if (nextVersion === null) {
+        console.warn(`[guren upgrade] Could not resolve ${name}@${tag} from the npm registry — leaving it at ${version}.`)
+        continue
+      }
+
+      if (version === nextVersion) {
+        continue
+      }
+
+      dependencies[name] = nextVersion
       updatedDependencies.push({
         field,
         name,
         previousVersion: version,
-        nextVersion: 'canary',
+        nextVersion,
       })
     }
   }
@@ -157,9 +224,11 @@ function collectManualSteps(checks: DoctorCheck[]): string[] {
 
 export async function upgradeCanary(options: UpgradeCanaryOptions = {}): Promise<UpgradeCanaryResult> {
   const cwd = resolve(options.cwd ?? process.cwd())
+  const tag = options.tag ?? 'rc'
+  const manualStepsExtra: string[] = []
 
   // Run version compatibility and deprecation checks
-  const versionCompatibility = await checkVersionCompatibility(cwd, 'canary')
+  const versionCompatibility = await checkVersionCompatibility(cwd, tag)
   const deprecationWarnings = await checkDeprecations(cwd)
 
   // If check-only mode, return early with just the checks
@@ -178,7 +247,7 @@ export async function upgradeCanary(options: UpgradeCanaryOptions = {}): Promise
     }
   }
 
-  const { packageJsonPath, updatedDependencies } = await updateManifestDependencies(cwd, Boolean(options.dryRun))
+  const { packageJsonPath, updatedDependencies } = await updateManifestDependencies(cwd, Boolean(options.dryRun), tag, options.versionResolver)
   const { evaluations } = await getDoctorRuleEvaluations({ cwd })
 
   const candidateAutofixes = evaluations
@@ -218,7 +287,7 @@ export async function upgradeCanary(options: UpgradeCanaryOptions = {}): Promise
   const codemodResults = await runCodemods(
     cwd,
     versionCompatibility.currentVersion,
-    'canary',
+    tag,
     { dryRun: options.dryRun },
   )
 
@@ -227,12 +296,23 @@ export async function upgradeCanary(options: UpgradeCanaryOptions = {}): Promise
     await installRunner(cwd)
   }
 
+  // Nested @guren copies survive plain `bun install` because the lockfile
+  // keeps the old resolution. Two loaded copies of @guren/orm means adapter
+  // state is split and database access fails, so surface it loudly.
+  const nestedCopies = await findNestedGurenCopies(cwd)
+  if (nestedCopies.length > 0) {
+    manualStepsExtra.push(
+      `Duplicate @guren copies detected (${nestedCopies.join(', ')}). ` +
+        'Run `rm -rf node_modules bun.lock && bun install` to dedupe them.',
+    )
+  }
+
   return {
     packageJsonPath,
     updatedDependencies,
     autofixes,
     warnings: warningChecks,
-    manualSteps: collectManualSteps(warningChecks),
+    manualSteps: [...collectManualSteps(warningChecks), ...manualStepsExtra],
     recommendedCommands: [...DOCTOR_RECOMMENDED_COMMANDS],
     versionCompatibility,
     deprecationWarnings,

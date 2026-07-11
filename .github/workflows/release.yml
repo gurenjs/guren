@@ -18,6 +18,19 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: guren
+          POSTGRES_PASSWORD: guren
+          POSTGRES_DB: guren
+        ports:
+          - 54322:5432
+        options: >-
+          --health-cmd "pg_isready -U guren"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
       REDIS_URL: redis://localhost:6379
     permissions:
@@ -90,6 +103,9 @@ jobs:
       # export map entries, unregistered routes).
       - name: Golden path runtime smoke
         run: bun run smoke:golden-path
+
+      - name: Golden path runtime smoke (postgres)
+        run: bun run smoke:golden-path:postgres
 
       # upgrade-existing-app smoke skipped in release workflow: it tries to
       # resolve the new version from npm before publish, causing a chicken-and-egg
