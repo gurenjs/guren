@@ -152,3 +152,30 @@ export default registerWebRoutes
     expect(routesSource).toContain('registerAdminRoutes(router)')
   })
 })
+
+describe('oauth blueprint output', () => {
+  let workspace: TempWorkspace
+
+  beforeEach(async () => {
+    workspace = await createTempWorkspace('guren-cli-oauth-blueprint-')
+  })
+
+  afterEach(async () => {
+    await workspace.cleanup()
+  })
+
+  it('does not shadow the base Controller.redirect() helper', async () => {
+    await runBlueprint('oauth')
+
+    const controller = await readFile('app/Http/Controllers/Auth/OAuthController.ts', 'utf8')
+    // An action named `redirect` overrides the base helper and recurses.
+    expect(controller).not.toMatch(/async redirect\(\)/)
+    expect(controller).toContain('async redirectToProvider()')
+    // Route params are string | undefined — the validator must accept that.
+    expect(controller).toContain('validateProvider(value: string | undefined)')
+
+    const routes = await readFile('routes/oauth.ts', 'utf8')
+    expect(routes).toContain("[OAuthController, 'redirectToProvider']")
+    expect(routes).not.toContain("[OAuthController, 'redirect']")
+  })
+})

@@ -9,7 +9,7 @@ import {
 
 type UserRecord = { id: number; name: string }
 type PostRecord = { id: number; title: string; authorId: number }
-type CommentRecord = { id: number; body: string; postId: number }
+type CommentRecord = { id: number; body: string; postId: number; authorId: number }
 
 function createMultiAdapter(stores: Record<string, PlainObject[]>): ORMAdapter {
   return {
@@ -65,9 +65,9 @@ function setupModels() {
       { id: 12, title: 'Post C', authorId: 2 },
     ],
     comments: [
-      { id: 100, body: 'First!', postId: 10 },
-      { id: 101, body: 'Nice', postId: 10 },
-      { id: 102, body: 'Agreed', postId: 12 },
+      { id: 100, body: 'First!', postId: 10, authorId: 2 },
+      { id: 101, body: 'Nice', postId: 10, authorId: 1 },
+      { id: 102, body: 'Agreed', postId: 12, authorId: 1 },
     ],
   })
 
@@ -116,6 +116,31 @@ describe('nested eager loading', () => {
     expect(users).toHaveLength(1)
     const postA = users[0].posts.find((p: any) => p.title === 'Post A')
     expect(postA.comments).toHaveLength(2)
+  })
+
+  it('should load three-level nesting (posts.comments.author)', async () => {
+    const { User, Comment } = setupModels()
+    Comment.belongsTo('author', User, 'authorId', 'id')
+
+    const users = (await User.with('posts.comments.author')) as any[]
+    const alice = users.find((u) => u.name === 'Alice')
+    const postA = alice.posts.find((p: any) => p.title === 'Post A')
+
+    expect(postA.comments).toHaveLength(2)
+    expect(postA.comments[0].author).toBeDefined()
+    expect(postA.comments[0].author.name).toBe('Bob')
+  })
+
+  it('should load three-level nesting through QueryBuilder.with()', async () => {
+    const { User, Comment } = setupModels()
+    Comment.belongsTo('author', User, 'authorId', 'id')
+
+    const users = (await User.where({ name: 'Alice' }).with('posts.comments.author').get()) as any[]
+    const postA = users[0].posts.find((p: any) => p.title === 'Post A')
+
+    expect(postA.comments[0].author).toBeDefined()
+    expect(postA.comments[0].author.name).toBe('Bob')
+    expect(postA.comments[1].author.name).toBe('Alice')
   })
 })
 

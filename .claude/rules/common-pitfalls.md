@@ -26,9 +26,9 @@ Lessons learned from code review cycles. Check these before submitting changes.
 
 ## Auth Middleware Ordering
 
-- **`attachAuthContext()` must run AFTER session middleware.** It lives in `AuthServiceProvider.register()`, which runs after session middleware is mounted in the same `register()` call.
-- **For apps without `options.auth`**, a fallback `attachAuthContext` is added in `Application.boot()` before `options.boot()`.
-- **Don't move auth context to `boot()`** — routes registered in `options.boot` would lack auth context.
+- **Auth context resolves its session lazily** (at first guard use, not attach time), so `attachAuthContext()` may sit anywhere in the chain — including before session middleware. The session middleware only has to run before an auth *method* is called.
+- **For apps without `options.auth`**, the fallback `attachAuthContext` is attached in the `Application` constructor, so `app.use(requireAuthenticated())` before `boot()` works (#13).
+- **With `options.auth`**, `AuthServiceProvider.register()` mounts session middleware and attaches its own auth context as before.
 
 ## Template Dependencies
 

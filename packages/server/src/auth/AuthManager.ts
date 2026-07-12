@@ -90,18 +90,23 @@ export class AuthManager implements AuthManagerContract {
 
   createAuthContext(ctx: Context, options: AttachContextOptions = {}): AuthContext {
     const guardName = options.guard ?? this.defaultGuard
-    const session = getSessionFromContext(ctx)
+
+    // Resolve the session lazily (at first guard use, not at attach time) so
+    // the auth context can be attached anywhere in the middleware chain —
+    // including before the session middleware — as long as the session
+    // middleware has run by the time an auth method is actually called.
+    const resolveSession = () => getSessionFromContext(ctx)
 
     const guardFactory = (name?: string) => {
       const targetName = name ?? guardName
       return this.createGuard(targetName, {
         ctx,
-        session,
+        session: resolveSession(),
         manager: this,
       })
     }
 
-    return new RequestAuthContext(this, ctx, session, guardFactory)
+    return new RequestAuthContext(this, ctx, resolveSession, guardFactory)
   }
 
   async attempt(name: string, ctx: Context, credentials: AuthCredentials, remember?: boolean): Promise<boolean> {

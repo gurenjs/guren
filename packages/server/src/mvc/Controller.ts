@@ -2,7 +2,7 @@ import type { Context } from 'hono'
 import { inertia, type InertiaOptions } from './inertia/InertiaEngine'
 import { resolveSharedInertiaProps, type ResolvedSharedInertiaProps } from './inertia/shared'
 import { AUTH_CONTEXT_KEY } from '../http/middleware/auth'
-import { parseRequestPayload } from '../http/request'
+import { flattenRequestQueries, parseRequestPayload } from '../http/request'
 import type { AuthContext } from '../auth/types'
 import type { ServiceBindings } from '../container/bindings'
 import { ValidationException } from '../errors/exceptions/ValidationException'
@@ -464,12 +464,7 @@ export class Controller {
 
   /** Flatten query string arrays to scalar values for cleaner schema usage. */
   private flattenQueries(): Record<string, unknown> {
-    const queries = this.ctx.req.queries()
-    const flat: Record<string, unknown> = {}
-    for (const [key, values] of Object.entries(queries)) {
-      flat[key] = values.length === 1 ? values[0] : values
-    }
-    return flat
+    return flattenRequestQueries(this.ctx)
   }
 
   // ─── Validation ─────────────────────────────────────────────────

@@ -2,7 +2,7 @@ import type { Context, MiddlewareHandler, Hono, Next } from 'hono'
 import { Controller } from './Controller'
 import type { Container } from '../container/Container'
 import { mountRoute } from './mount-route'
-import { formatValidationErrors, parseRequestPayload, type ValidationErrorLike } from '../http/request'
+import { flattenRequestQueries, formatValidationErrors, parseRequestPayload, type ValidationErrorLike } from '../http/request'
 import { ValidationException } from '../errors/exceptions/ValidationException'
 import type { ValidationSchema } from '../http/middleware/validation'
 
@@ -728,7 +728,7 @@ function createContractHandler<
       return params
     }
 
-    const query = parseRouteSegment(options.query, ctx.req.query(), 422)
+    const query = parseRouteSegment(options.query, flattenRequestQueries(ctx), 422)
     if (query instanceof Response) {
       return query
     }
@@ -828,10 +828,11 @@ function createContractValidationMiddleware(route: RegisteredRoute): MiddlewareH
     }
 
     if (schemas.query) {
-      const result = parseRouteSegment(schemas.query, c.req.query(), 422)
+      const query = flattenRequestQueries(c)
+      const result = parseRouteSegment(schemas.query, query, 422)
       if (result instanceof Response) {
         throw ValidationException.withMessages(
-          formatValidationErrors((schemas.query.safeParse(c.req.query()) as any).error),
+          formatValidationErrors((schemas.query.safeParse(query) as any).error),
         )
       }
     }

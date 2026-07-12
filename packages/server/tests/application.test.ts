@@ -286,3 +286,39 @@ describe('Application authorization wiring', () => {
     expect(await response.json()).toEqual({ allowed: true })
   })
 })
+
+describe('auth context for pre-boot middleware (#13)', () => {
+  it('requireAuthenticated registered via app.use() before boot() responds 401, not 500', async () => {
+    process.env.APP_KEY ??= 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+    const { createSessionMiddleware } = await import('../src/http/middleware/session')
+    const { requireAuthenticated } = await import('../src/http/middleware/auth')
+
+    const app = new Application()
+    app.use('*', createSessionMiddleware())
+    app.use('/admin', requireAuthenticated())
+    app.router.get('/admin', () => ({ secret: true }))
+    await app.boot()
+
+    const response = await app.fetch(new Request('http://example.com/admin'))
+    expect(response.status).toBe(401)
+  })
+
+  it('auth context session resolves lazily even when attached before session middleware', async () => {
+    process.env.APP_KEY ??= 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+    const { createSessionMiddleware } = await import('../src/http/middleware/session')
+    const { AUTH_CONTEXT_KEY } = await import('../src/http/middleware/auth')
+
+    const app = new Application()
+    // Session middleware registered AFTER the constructor-attached auth context
+    app.use('*', createSessionMiddleware())
+    app.router.get('/whoami', (c) => {
+      const auth = c.get(AUTH_CONTEXT_KEY) as { session(): unknown } | undefined
+      return { hasAuth: Boolean(auth), hasSession: Boolean(auth?.session()) }
+    })
+    await app.boot()
+
+    const response = await app.fetch(new Request('http://example.com/whoami'))
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ hasAuth: true, hasSession: true })
+  })
+})
