@@ -1,4 +1,4 @@
-import type { Context, MiddlewareHandler, Hono } from 'hono'
+import type { Context, MiddlewareHandler, Hono, Next } from 'hono'
 import { Controller } from './Controller'
 import type { Container } from '../container/Container'
 import { mountRoute } from './mount-route'
@@ -36,12 +36,14 @@ export type RouteResult =
 
 /**
  * Handler for a route - either an inline function or a controller action tuple.
+ * Inline handlers receive `next`, so any Hono middleware (e.g.
+ * `broadcast.sseMiddleware()`) can be mounted directly as a terminal handler.
  */
 export type RouteHandler<C extends ControllerConstructor = ControllerConstructor> =
-  | ((c: Context) => RouteResult | Promise<RouteResult>)
+  | ((c: Context, next: Next) => RouteResult | Promise<RouteResult>)
   | ControllerAction<C>
 
-type AnyRouteHandler = ((c: Context) => RouteResult | Promise<RouteResult>) | AnyControllerAction
+type AnyRouteHandler = ((c: Context, next: Next) => RouteResult | Promise<RouteResult>) | AnyControllerAction
 
 /**
  * Model binding resolver function.
@@ -907,8 +909,14 @@ function resolveHandler(
     }
   }
 
-  return async (c) => {
-    const result = await action(c)
+  return async (c, next) => {
+    const result = await action(c, next)
+    // Middleware mounted as a handler may set the response via c.res
+    // (directly or through next()) and return nothing — honor it instead
+    // of synthesizing a 204.
+    if (result === undefined && c.finalized) {
+      return c.res
+    }
     return ensureResponse(result)
   }
 }
