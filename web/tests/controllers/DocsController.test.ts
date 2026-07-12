@@ -108,6 +108,33 @@ describe('DocsController', () => {
     expect(payload.props.categories).toEqual(categories)
   })
 
+  it('serves raw markdown when the slug has a .md suffix', async () => {
+    vi.spyOn(docsService, 'getRawMarkdown').mockResolvedValue('# Routing\n\nDefine routes.')
+
+    const controller = new DocsController()
+    const ctx = createDocsContext('http://guren.dev/docs/guides/routing.md')
+    controller.setContext(ctx)
+
+    const response = await controller.show()
+
+    expect(docsService.getRawMarkdown).toHaveBeenCalledWith('guides', 'routing.md', DEFAULT_DOC_LOCALE)
+    expect(response.headers.get('Content-Type')).toContain('text/markdown')
+    expect(await response.text()).toContain('# Routing')
+  })
+
+  it('returns a plain 404 for missing markdown sources', async () => {
+    vi.spyOn(docsService, 'getRawMarkdown').mockResolvedValue(null)
+
+    const controller = new DocsController()
+    const ctx = createDocsContext('http://guren.dev/docs/guides/missing.md')
+    controller.setContext(ctx)
+
+    const response = await controller.show()
+
+    expect(response.status).toBe(404)
+    expect(response.headers.get('Content-Type')).toContain('text/plain')
+  })
+
   it('returns 404 with normalized active info when page is missing', async () => {
     vi.spyOn(docsService, 'listDocs').mockResolvedValue([])
     vi.spyOn(docsService, 'getDoc').mockResolvedValue(null)

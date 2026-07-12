@@ -1,7 +1,10 @@
 import { Head, Link } from '@inertiajs/react'
 import { useEffect, useState } from 'react'
+import { SITE_DESCRIPTION, SITE_NAME } from '../../../../config/site.js'
 import { Footer } from '../../components/Footer.js'
 import { Header } from '../../components/Header.js'
+import { Seo } from '../../components/Seo.js'
+import { breadcrumbJsonLd, techArticleJsonLd } from '../../lib/structured-data.js'
 import { docsTheme, useDocsPageTheme } from './theme.js'
 
 type DocSummary = {
@@ -152,11 +155,12 @@ function useTableOfContents(doc: DocPage | null) {
   return { items, activeId }
 }
 
-export default function DocsShow({ categories, doc, active, locales = [], basePath }: Props) {
+export default function DocsShow({ categories, doc, active, locale, locales = [], basePath }: Props) {
   useDocsPageTheme()
 
-  const pageTitle = doc ? `${doc.title} – Documentation` : 'Document Not Found'
+  const docLocale: 'en' | 'ja' = locale === 'ja' ? 'ja' : 'en'
   const docLabel = doc?.category === 'tutorials' ? 'Tutorial' : 'Guide'
+  const docPath = doc ? `${basePath}/${doc.category}/${doc.slug}` : basePath
   const nav = buildPrevNext(categories, active, basePath)
   const toc = useTableOfContents(doc)
 
@@ -209,7 +213,31 @@ export default function DocsShow({ categories, doc, active, locales = [], basePa
 
   return (
     <>
-      <Head title={pageTitle} />
+      {doc ? (
+        <Seo
+          title={`${doc.title} — ${SITE_NAME}`}
+          description={doc.description ?? SITE_DESCRIPTION[docLocale]}
+          path={docPath}
+          locale={docLocale}
+          alternates={locales.map((link) => ({ hrefLang: link.code, href: link.href }))}
+          ogType="article"
+          markdownPath={`${docPath}.md`}
+          jsonLd={[
+            techArticleJsonLd({
+              title: doc.title,
+              description: doc.description,
+              path: docPath,
+              locale: docLocale,
+            }),
+            breadcrumbJsonLd([
+              { name: docLocale === 'ja' ? 'ドキュメント' : 'Documentation', path: basePath },
+              { name: doc.title, path: docPath },
+            ]),
+          ]}
+        />
+      ) : (
+        <Head title={`Page not found — ${SITE_NAME}`} />
+      )}
       <Header variant="docs" basePath={basePath} locales={locales} />
 
       <main className={`docs-layout ${toc.items.length > 0 ? 'docs-layout--toc' : ''}`}>

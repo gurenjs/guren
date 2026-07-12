@@ -23,6 +23,11 @@ export default class DocsController extends Controller {
     const categoryParam = this.request.param('category') || undefined
     const slugParam = this.request.param('slug') || undefined
 
+    // /docs/guides/routing.md serves the raw Markdown source for LLM agents.
+    if (slugParam?.endsWith('.md')) {
+      return this.#serveMarkdown(categoryParam, slugParam, DEFAULT_DOC_LOCALE)
+    }
+
     return this.#renderShow({ categoryParam, slugParam, locale: DEFAULT_DOC_LOCALE })
   }
 
@@ -30,7 +35,33 @@ export default class DocsController extends Controller {
     const categoryParam = this.request.param('category') || undefined
     const slugParam = this.request.param('slug') || undefined
 
+    if (slugParam?.endsWith('.md')) {
+      return this.#serveMarkdown(categoryParam, slugParam, 'ja')
+    }
+
     return this.#renderShow({ categoryParam, slugParam, locale: 'ja' })
+  }
+
+  async #serveMarkdown(
+    categoryParam: string | undefined,
+    slugParam: string | undefined,
+    locale: DocLocale,
+  ): Promise<Response> {
+    const markdown = await docsService.getRawMarkdown(categoryParam, slugParam, locale)
+
+    if (!markdown) {
+      return new Response('Not found', {
+        status: 404,
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      })
+    }
+
+    return new Response(markdown, {
+      headers: {
+        'Content-Type': 'text/markdown; charset=utf-8',
+        'Cache-Control': 'public, max-age=3600',
+      },
+    })
   }
 
   async #renderIndex(locale: DocLocale): Promise<Response> {
@@ -44,6 +75,7 @@ export default class DocsController extends Controller {
       {
         url: this.request.path,
         title: this.#titleForLocale(locale),
+        lang: locale,
       },
     )
   }
@@ -64,7 +96,7 @@ export default class DocsController extends Controller {
       docsService.getDoc(categoryParam, slugParam, locale),
     ])
 
-    const pageTitle = doc ? `${doc.title} – Documentation` : this.#notFoundTitle(locale)
+    const pageTitle = doc ? `${doc.title} — Guren` : this.#notFoundTitle(locale)
     const active = doc
       ? { category: doc.category, slug: doc.slug }
       : normalizedCategory && normalizedSlug
@@ -80,6 +112,7 @@ export default class DocsController extends Controller {
         url: this.request.path,
         title: pageTitle,
         status: doc ? 200 : 404,
+        lang: locale,
       },
     )
   }
@@ -105,8 +138,8 @@ export default class DocsController extends Controller {
   }
 
   #titleForLocale(locale: DocLocale): string {
-    if (locale === 'ja') return 'ドキュメント'
-    return 'Documentation'
+    if (locale === 'ja') return 'ドキュメント — Guren'
+    return 'Documentation — Guren'
   }
 
   #notFoundTitle(locale: DocLocale): string {

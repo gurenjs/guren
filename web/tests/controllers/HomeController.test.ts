@@ -21,7 +21,7 @@ describe('HomeController', () => {
 
     expect(response.status).toBe(200)
     expect(payload.component).toBe('Home')
-    expect(payload.props.message).toContain('Build full-stack web apps')
+    expect(payload.props.message).toContain('Laravel feeling')
     expect(payload.url).toBe('/')
   })
 })

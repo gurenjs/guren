@@ -51,6 +51,7 @@ export function Footer({ variant }: FooterProps) {
             <Link href="/docs" className="no-underline transition hover:text-white">Documentation</Link>
             <Link href="/docs/guides/getting-started" className="no-underline transition hover:text-white">Getting Started</Link>
             <Link href="/docs/tutorials/overview" className="no-underline transition hover:text-white">Tutorials</Link>
+            <a href="/llms.txt" className="no-underline transition hover:text-white">llms.txt</a>
           </nav>
         </div>
         <div>
@@ -64,12 +65,19 @@ export function Footer({ variant }: FooterProps) {
         <div>
           <h4 className="mb-4 text-sm font-semibold uppercase tracking-wider text-white/70">Legal</h4>
           <nav className="flex flex-col gap-2.5 text-sm text-white/50">
-            <span>MIT License</span>
+            <a
+              href="https://github.com/gurenjs/guren/blob/main/LICENSE"
+              target="_blank"
+              rel="noreferrer"
+              className="no-underline transition hover:text-white"
+            >
+              MIT License
+            </a>
           </nav>
         </div>
       </div>
       <div className="border-t border-white/10 px-6 py-5 text-center text-sm text-white/40">
-        &copy; {year} Guren Framework. All rights reserved.
+        &copy; {year} Guren Framework &middot; MIT License
       </div>
     </footer>
   )

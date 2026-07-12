@@ -324,6 +324,22 @@ export class DocsService {
     }
   }
 
+  /** Raw markdown source for a doc, or null when the doc does not exist. Used by the .md endpoints and llms-full.txt. */
+  async getRawMarkdown(
+    category: string | undefined,
+    slug: string | undefined,
+    locale: DocLocale = DEFAULT_DOC_LOCALE,
+  ): Promise<string | null> {
+    const normalizedCategory = normalizeDocCategory(category)
+    const normalizedSlug = normalizeDocSlug(slug)
+
+    if (!normalizedCategory || !normalizedSlug) {
+      return null
+    }
+
+    return this.#readMarkdownBySlug(normalizedCategory, normalizedSlug, locale).catch(() => null)
+  }
+
   async #readDirectory(category: DocCategory, locale: DocLocale): Promise<Dirent[]> {
     const dirPath = resolve(this.#rootForLocale(locale), DOC_CATEGORY_CONFIG[category].dir)
     return readdir(dirPath, { withFileTypes: true }).catch(() => [])
