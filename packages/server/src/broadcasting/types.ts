@@ -144,6 +144,12 @@ export interface SSEMiddlewareOptions {
    * Retry delay for SSE reconnection.
    */
   retry?: number
+
+  /**
+   * Function to get the user from the request context, used to authorize
+   * channels requested via the `?channels=` query parameter.
+   */
+  getUser?: (ctx: unknown) => unknown | Promise<unknown>
 }
 
 /**

@@ -211,8 +211,10 @@ export class BroadcastManager {
     const registration = this.findChannelRegistration(channelName)
 
     if (!registration) {
-      // No registration means public access
-      return true
+      // Unregistered channels are treated as public, but names using the
+      // private-/presence- prefixes default to deny — otherwise a typo in
+      // channel registration would silently expose a private channel.
+      return !(channelName.startsWith('private-') || channelName.startsWith('presence-'))
     }
 
     if (registration.type === 'presence') {
@@ -264,6 +266,22 @@ export class BroadcastManager {
       const encoder = new TextEncoder()
       const manager = this
 
+      // Channels requested up front (?channels=a,b) are authorized against
+      // the connecting user and subscribed before the stream starts, so a
+      // plain EventSource works for public channels with zero extra calls.
+      const requestedChannels = (ctx.req.query('channels') ?? '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)
+      const user = options.getUser ? await options.getUser(ctx) : undefined
+      const authorizedChannels: string[] = []
+      for (const channelName of requestedChannels) {
+        const authResult = await this.authorize(channelName, user)
+        if (authResult !== false && authResult !== null) {
+          authorizedChannels.push(channelName)
+        }
+      }
+
       let controller: ReadableStreamDefaultController<Uint8Array> | null = null
       let client: SSEClient | null = null
       let pingTimer: ReturnType<typeof setInterval> | null = null
@@ -313,6 +331,14 @@ export class BroadcastManager {
 
           // Send initial retry configuration
           sendRaw(`retry: ${retry}\n\n`)
+
+          // Tell the client its id so it can authorize private channels
+          // via POST /broadcasting/auth { clientId, channel }.
+          client.send('connected', { clientId, channels: authorizedChannels })
+
+          for (const channelName of authorizedChannels) {
+            manager.subscribeClient(clientId, channelName)
+          }
 
           // Setup ping interval
           pingTimer = setInterval(() => {
@@ -365,7 +391,10 @@ export class BroadcastManager {
         return ctx.json({ error: 'No channel specified' }, 400)
       }
 
-      // Authorize each channel
+      // Authorize each channel; when the payload carries the SSE clientId
+      // (sent to the client in the `connected` event), also subscribe the
+      // client so authorized events actually flow.
+      const clientId = typeof payload.clientId === 'string' ? payload.clientId : undefined
       const results: Record<string, unknown> = {}
 
       for (const ch of channels) {
@@ -373,12 +402,17 @@ export class BroadcastManager {
 
         if (authResult === false || authResult === null) {
           results[ch] = { authorized: false }
-        } else if (authResult === true) {
-          results[ch] = { authorized: true }
+          continue
+        }
+
+        const subscribed = clientId ? this.subscribeClient(clientId, ch) : false
+        if (authResult === true) {
+          results[ch] = { authorized: true, subscribed }
         } else {
           // Presence channel - return member info
           results[ch] = {
             authorized: true,
+            subscribed,
             member: authResult,
           }
         }
