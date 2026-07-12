@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test'
+import { Hono, type MiddlewareHandler } from 'hono'
 import { z } from 'zod'
 import { Router } from '../../src/mvc/Router'
 import { Controller } from '../../src/mvc/Controller'
@@ -165,5 +166,51 @@ describe('Router definition introspection', () => {
 
     const [def] = router.definitions()
     expect(def!.hasInlineMiddleware).toBe(true)
+  })
+})
+
+describe('Router middleware as terminal handler', () => {
+  it('accepts a Hono MiddlewareHandler as the route handler', async () => {
+    const middleware: MiddlewareHandler = async (c) => {
+      return c.text('from middleware')
+    }
+
+    const router = new Router()
+    router.get('/events', middleware)
+
+    const app = new Hono()
+    router.mount(app)
+
+    const response = await app.request('/events')
+    expect(response.status).toBe(200)
+    expect(await response.text()).toBe('from middleware')
+  })
+
+  it('honors a response set via c.res instead of synthesizing a 204', async () => {
+    const middleware: MiddlewareHandler = async (c, next) => {
+      await next()
+      c.res = new Response('finalized', { status: 201 })
+    }
+
+    const router = new Router()
+    router.get('/finalized', middleware)
+
+    const app = new Hono()
+    router.mount(app)
+
+    const response = await app.request('/finalized')
+    expect(response.status).toBe(201)
+    expect(await response.text()).toBe('finalized')
+  })
+
+  it('still converts undefined returns from plain handlers into 204', async () => {
+    const router = new Router()
+    router.get('/empty', () => undefined)
+
+    const app = new Hono()
+    router.mount(app)
+
+    const response = await app.request('/empty')
+    expect(response.status).toBe(204)
   })
 })
