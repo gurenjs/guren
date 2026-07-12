@@ -73,9 +73,35 @@ const DEFAULT_STATE_HASH_ALGORITHM: NonNullable<OAuthStateConfig['hashAlgorithm'
 
 export class MemoryOAuthStateStore implements OAuthStateStore {
   private readonly states = new Map<string, OAuthStatePayload>()
+  private readonly maxEntries: number
+
+  constructor(options: { maxEntries?: number } = {}) {
+    this.maxEntries = options.maxEntries ?? 10_000
+  }
 
   async store(stateHash: string, payload: OAuthStatePayload): Promise<void> {
+    // Bound the store: unauthenticated requests to the authorize endpoint
+    // each create one entry, so an unbounded map is a memory-exhaustion DoS.
+    if (this.states.size >= this.maxEntries) {
+      this.sweepExpired()
+    }
+    // Still full after sweeping — evict oldest entries (insertion order).
+    while (this.states.size >= this.maxEntries) {
+      const oldest = this.states.keys().next().value
+      if (oldest === undefined) break
+      this.states.delete(oldest)
+    }
+
     this.states.set(stateHash, payload)
+  }
+
+  private sweepExpired(): void {
+    const now = Date.now()
+    for (const [hash, payload] of this.states) {
+      if (payload.expiresAt.getTime() <= now) {
+        this.states.delete(hash)
+      }
+    }
   }
 
   async find(stateHash: string): Promise<OAuthStatePayload | null> {

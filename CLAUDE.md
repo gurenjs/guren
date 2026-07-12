@@ -261,12 +261,11 @@ describe('Feature', () => {
 
 ### Controller Tests
 ```typescript
-import { createTestContext } from '@guren/testing'
+import { TestApp } from '@guren/testing'
 
 test('index returns posts', async () => {
-  const ctx = createTestContext()
-  const response = await ctx.get('/posts')
-  expect(response.status).toBe(200)
+  const app = await TestApp.create()
+  await app.get('/posts').assertOk()
 })
 ```
 

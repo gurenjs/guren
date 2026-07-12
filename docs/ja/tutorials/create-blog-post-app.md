@@ -91,7 +91,7 @@ export class Post extends defineModel(posts) {
 注目してほしい点が 2 つあります。
 
 - `PostRecord` はテーブルから型推論されます — レコード型を手書きすることはありません。
-- `fillable` はマスアサインメントの許可リストです: `Post.create()` と `Post.update()` はここに挙げたフィールドしか書き込まないため、悪意あるリクエストボディが `id` や `createdAt` を設定することはできません。
+- `fillable` はマスアサインメントの許可リストです: 許可リスト外のフィールドを `Post.create()` や `Post.update()` に渡すと `MassAssignmentException` がスローされるため、バグやインジェクションの試みが黙って破棄されることなく即座に表面化します。信頼できるサーバーサイドのデータ（シーダーやシステムレコード）には、許可リストをバイパスする `forceCreate()` を使用できます。詳細は[データベースガイド](../guides/database.md)を参照してください。
 
 ## 4. バリデーターを追加する
 

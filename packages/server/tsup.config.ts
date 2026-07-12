@@ -27,6 +27,7 @@ export default defineConfig({
     'src/mail/index.ts',
     'src/notifications/index.ts',
     'src/queue/index.ts',
+    'src/redis/index.ts',
     'src/runtime/index.ts',
     'src/scheduling/index.ts',
     'src/storage/index.ts',

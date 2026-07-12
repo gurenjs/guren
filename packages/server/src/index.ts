@@ -318,6 +318,9 @@ export {
   MemoryDriver,
   SyncDriver,
   RedisDriver,
+  MemoryDriver as MemoryQueueDriver,
+  SyncDriver as SyncQueueDriver,
+  RedisDriver as RedisQueueDriver,
   setQueueDriver,
   getQueueDriver,
   registerJob,
@@ -786,7 +789,8 @@ export { renderErrorPage } from './errors/error-page'
 // Auth: Node.js-compatible hasher (for Lambda / non-Bun runtimes)
 export { NodeHasher } from './auth/password/NodeHasher'
 // Hash: convenience alias for ScryptHasher (used as default in docs)
-export { ScryptHasher as Hash } from './auth/password/ScryptHasher'
+export { DefaultHasher, DefaultHasher as Hash } from './auth/password/DefaultHasher'
+export type { ApplicationOptions, AuthPluginOptions } from './http/Application'
 // Queue: SQS adapter
 export { SqsDriver, createSqsAdapter } from './queue/drivers/SqsDriver'
 // Broadcasting: typed broadcaster

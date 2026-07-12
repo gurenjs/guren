@@ -14,7 +14,7 @@
 |------------|----------|--------|
 | PostgreSQL | 14+      | Supported (primary) |
 | SQLite     | 3.x      | Supported (via Bun native) |
-| MySQL      | 8.x      | Experimental (post-1.0) |
+| MySQL      | 8.x      | Supported (via `createMySqlDatabase`) |
 
 ## Optional Services
 

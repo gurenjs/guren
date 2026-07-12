@@ -14,7 +14,7 @@ export type {
   FindManyOptions,
   PaginateOptions,
   PaginatedResult,
-  PaginationMeta,
+  ModelPaginationMeta,
   ORMAdapter,
   TransactionHandle,
   TransactionModelScope,

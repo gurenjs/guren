@@ -15,3 +15,6 @@ export type { RedisPasswordResetStoreOptions } from './RedisPasswordResetStore'
 
 export { RedisEmailVerificationStore } from './RedisEmailVerificationStore'
 export type { RedisEmailVerificationStoreOptions } from './RedisEmailVerificationStore'
+
+export { RedisOAuthStateStore } from './RedisOAuthStateStore'
+export type { RedisOAuthStateStoreOptions } from './RedisOAuthStateStore'

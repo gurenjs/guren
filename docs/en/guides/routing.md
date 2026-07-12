@@ -254,6 +254,9 @@ Available contract fields:
 | `bind` | Route model binding map |
 | `middlewares` | Array of middleware handlers |
 
+> [!NOTE]
+> Repeated query keys reach the `query` schema as arrays (`?tag=a&tag=b` → `{ tag: ['a', 'b'] }`), while a key that appears once stays a string — see [Array-Style Query Parameters](./validation.md#array-style-query-parameters).
+
 ### OpenAPI Metadata
 
 Route contracts also accept lightweight OpenAPI annotations. These are stored on the route definition and used by the optional `@guren/openapi` plugin to generate an OpenAPI 3.1 document.

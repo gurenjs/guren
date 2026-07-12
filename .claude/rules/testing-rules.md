@@ -76,28 +76,27 @@ describe('formatDate', () => {
 
 ### Controller Tests
 ```typescript
-import { describe, test, expect } from 'bun:test'
-import { createTestContext } from '@guren/testing'
+import { describe, test, beforeAll } from 'bun:test'
+import { TestApp } from '@guren/testing'
 
 describe('PostController', () => {
+  let app: TestApp
+
+  beforeAll(async () => {
+    app = await TestApp.create()
+  })
+
   test('index returns list of posts', async () => {
-    const ctx = createTestContext()
-
-    const response = await ctx.get('/posts')
-
-    expect(response.status).toBe(200)
-    expect(response.json()).toHaveProperty('posts')
+    await app.get('/posts')
+      .assertOk()
+      .assertJsonStructure(['posts'])
   })
 
   test('store creates new post', async () => {
-    const ctx = createTestContext()
-
-    const response = await ctx.post('/posts', {
+    await app.post('/posts', {
       title: 'Test Post',
       content: 'Test content'
-    })
-
-    expect(response.status).toBe(201)
+    }).assertStatus(201)
   })
 })
 ```

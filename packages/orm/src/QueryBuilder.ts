@@ -7,7 +7,7 @@ import type {
   OrderByClause,
   OrderDirection,
   PaginatedResult,
-  PaginationMeta,
+  ModelPaginationMeta,
   PlainObject,
 } from './Model'
 
@@ -398,7 +398,7 @@ export class QueryBuilder<
     const from = total === 0 ? 0 : offset + 1
     const to = total === 0 ? 0 : offset + data.length
 
-    const meta: PaginationMeta = {
+    const meta: ModelPaginationMeta = {
       total,
       perPage: sanitizedPerPage,
       currentPage,
@@ -413,23 +413,44 @@ export class QueryBuilder<
 
   /**
    * Bulk update records matching the current conditions.
+   *
+   * Mass-assignment protection applies exactly as in `Model.update()`:
+   * with a `fillable` allowlist, out-of-allowlist keys throw a
+   * MassAssignmentException. Note that bulk updates skip model hooks,
+   * observers, mutators, and casts by design.
+   *
    * @param data - Data to set on matching records
    * @returns The updated record (adapter-dependent)
    */
   async update(data: PlainObject): Promise<TRecord> {
+    return this.runBulkUpdate(data, true)
+  }
+
+  /**
+   * Bulk update bypassing mass-assignment protection. Use for trusted,
+   * server-side-assembled data — never for raw request input.
+   */
+  async forceUpdate(data: PlainObject): Promise<TRecord> {
+    return this.runBulkUpdate(data, false)
+  }
+
+  private async runBulkUpdate(data: PlainObject, applyFillable: boolean): Promise<TRecord> {
     if (!this.adapter.update) {
       throw new Error('Configured adapter does not support update operations.')
     }
 
+    const model = this.modelClass as typeof Model
+    const payload = applyFillable ? model.filterFillable(data) : { ...data }
+
     const advancedAdapter = this.adapter as ORMAdapterAdvanced
     if (typeof advancedAdapter.updateAdvanced === 'function') {
-      return advancedAdapter.updateAdvanced(this.table, this.conditions, data, { trx: this.options.trx }) as Promise<TRecord>
+      return advancedAdapter.updateAdvanced(this.table, this.conditions, payload, { trx: this.options.trx }) as Promise<TRecord>
     }
 
     // Fallback to simple where clause if possible
     const simpleWhere = this.toSimpleWhereClause()
     if (simpleWhere) {
-      return this.adapter.update(this.table, simpleWhere, data, { trx: this.options.trx }) as Promise<TRecord>
+      return this.adapter.update(this.table, simpleWhere, payload, { trx: this.options.trx }) as Promise<TRecord>
     }
 
     throw new Error('Advanced conditions require an adapter that supports updateAdvanced.')

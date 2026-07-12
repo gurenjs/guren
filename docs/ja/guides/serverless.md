@@ -163,7 +163,7 @@ Lambda のファイルシステムは `/tmp`（512 MB、揮発性）以外は読
 |------|------|
 | **HTTP トリガー** | API Gateway v2（HTTP API）または ALB |
 | **セッション** | Redis（ElastiCache）— インメモリは不可 |
-| **キャッシュ** | `RedisStore` 経由の Redis、または `FileStore` で `/tmp`（揮発性キャッシュ） |
+| **キャッシュ** | `RedisCacheStore` 経由の Redis（`@guren/core/redis` に session/rate-limit/API トークン各ストアも同梱）、または `FileStore` で `/tmp`（揮発性キャッシュ） |
 | **キュー** | `SqsDriver` + `createSqsHandler()` 経由の SQS |
 | **データベース** | RDS PostgreSQL + RDS Proxy（コネクションプーリング） |
 | **スケジューリング** | EventBridge + `createScheduleHandler()` |

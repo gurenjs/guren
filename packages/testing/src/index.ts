@@ -1,7 +1,6 @@
 export * from './auth'
 export * from './inertia'
 export * from './controller'
-export * from './vitest'
 export * from './http'
 export * from './queue'
 export * from './mail'

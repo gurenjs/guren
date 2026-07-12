@@ -5,7 +5,7 @@ Provides the HTTP/MVC runtime: `Application`, `createApp`, app-local `Router`, c
 
 ## Key Exports
 - `Application`, `Context`, `ApplicationContext`, plus provider contracts from `http/` and `plugins/`
-- `createApp`, `Router`, and the legacy `Route` DSL compatibility surface
+- `createApp` and the instance-based `Router`
 - Root exports stay Node-safe: `parseRequestPayload`, `formatValidationErrors`, MVC/auth/middleware/resource APIs
 - Bun/dev asset helpers live under `@guren/server/runtime`
 - Build tooling (`gurenVitePlugin`) lives under `@guren/server/vite`

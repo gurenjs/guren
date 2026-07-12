@@ -140,6 +140,9 @@ export function registerBroadcastRoutes(router: Router): void {
   router.get('/broadcasting/events', broadcast.sseMiddleware({
     pingInterval: 30000,
     retry: 3000,
+    // Resolve the connecting user so channels requested up front via
+    // ?channels= can be authorized when the stream opens
+    getUser: (ctx) => ctx.get('user'),
   }))
 
   router.post('/broadcasting/auth', broadcast.authMiddleware({
@@ -147,6 +150,8 @@ export function registerBroadcastRoutes(router: Router): void {
   }))
 }
 ```
+
+SSE エンドポイントは `?channels=` クエリパラメータを受け取り、指定したチャンネルをストリーム開始前に購読します。リクエストされた各チャンネルは `getUser` が返すユーザーに対して認可されるため、パブリックチャンネルであれば追加のリクエストなしに素の `EventSource` だけで動作します。プライベート・プレゼンスチャンネルは後から `/broadcasting/auth` を通じて購読します（[チャンネルの認可（クライアント）](#チャンネルの認可クライアント)を参照）。
 
 ## WebSocket 基盤
 
@@ -215,53 +220,76 @@ await typed.toChannel('announcements').broadcast('NewPost', { id: 2 })
 
 ### クライアント側の統合
 
+パブリックチャンネルは `?channels=` クエリパラメータで指定すると、ストリーム開始と同時に購読されます。接続直後、サーバーは `clientId` と「認可・購読済みチャンネルの一覧」を載せた `connected` イベントを送信します。プライベート・プレゼンスチャンネルの購読に必要になるため、`clientId` を必ず保持してください。
+
 ```ts
-// SSEに接続
-const eventSource = new EventSource('/broadcasting/events')
+// Connect to SSE and subscribe public channels up front
+const eventSource = new EventSource(
+  '/broadcasting/events?channels=notifications,announcements'
+)
 
-eventSource.onopen = () => {
-  console.log('接続しました')
-}
+// The server sends a `connected` event first — capture the clientId
+let clientId: string | null = null
 
-eventSource.onerror = (error) => {
-  console.error('接続エラー', error)
-}
+eventSource.addEventListener('connected', (e) => {
+  const data = JSON.parse(e.data)
+  clientId = data.clientId
+  console.log('Subscribed channels:', data.channels)
+})
 
-// イベントをリッスン
+// Messages are dispatched by EVENT name, not channel name
 eventSource.addEventListener('NewMessage', (e) => {
   const data = JSON.parse(e.data)
-  console.log('新しいメッセージ:', data)
+  console.log('New message:', data)
 })
 
-// pingをリッスン
+// Listen for ping
 eventSource.addEventListener('ping', () => {
-  console.log('キープアライブping')
+  console.log('Keepalive ping')
 })
+
+eventSource.onerror = (error) => {
+  console.error('Connection error', error)
+}
 ```
 
 ### チャンネルの認可（クライアント）
 
+プライベート・プレゼンスチャンネルは `POST /broadcasting/auth` を通じて購読します。`{ clientId, channel }` を含む 1 回のリクエストで、現在のユーザーに対するチャンネル認可と SSE 接続への購読が同時に行われます。レスポンスにはチャンネルごとに両方の結果が含まれます。
+
 ```ts
-async function subscribeToChannel(channel: string) {
-  // チャンネルを認可
+async function subscribeToPrivateChannel(channel: string) {
+  if (!clientId) {
+    throw new Error('Not connected yet — wait for the `connected` event')
+  }
+
+  // Authorize AND subscribe in one call
   const response = await fetch('/broadcasting/auth', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ channel }),
+    body: JSON.stringify({ clientId, channel }),
     credentials: 'include',
   })
 
   const result = await response.json()
+  // e.g. { 'private-orders.123': { authorized: true, subscribed: true } }
+  return result[channel]?.authorized && result[channel]?.subscribed
+}
 
-  if (result[channel].authorized) {
-    // チャンネルイベントを購読
-    eventSource.addEventListener(channel, (e) => {
-      const data = JSON.parse(e.data)
-      handleChannelEvent(channel, data)
-    })
-  }
+if (await subscribeToPrivateChannel('private-orders.123')) {
+  // Events arrive on the same EventSource, dispatched by event name
+  eventSource.addEventListener('OrderUpdated', (e) => {
+    const data = JSON.parse(e.data)
+    console.log('Order updated:', data)
+  })
 }
 ```
+
+> [!IMPORTANT]
+> リクエストから `clientId` を省略するとチャンネルの認可のみが行われ（`subscribed: false`）、イベントはブラウザに届きません。必ず `connected` イベントで受け取った `clientId` を送信してください。
+
+> [!NOTE]
+> `private-` / `presence-` プレフィックスを持つチャンネルは、認可関数が未登録の場合デフォルトで拒否されます。クライアントが購読する前に `broadcast.privateChannel()` / `broadcast.presenceChannel()` で登録してください。
 
 ## 設定
 

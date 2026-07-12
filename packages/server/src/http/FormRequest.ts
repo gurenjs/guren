@@ -40,6 +40,10 @@ import type { AuthContext } from '../auth'
  * // data is typed as StorePostData
  * ```
  */
+/**
+ * @deprecated Legacy compatibility layer — prefer schema-first validation
+ * via `this.validateBody()` / `validateQuery()` / `validateParams()`.
+ */
 export abstract class FormRequest<T = Record<string, unknown>> {
   protected ctx!: Context
 

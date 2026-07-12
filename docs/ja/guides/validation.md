@@ -354,6 +354,20 @@ export default class PostsController extends Controller {
 > [!TIP]
 > これらのヘルパーは `safeParse()` を実装する任意のスキーマライブラリ（Zod、Valibot、カスタムバリデーター）で動作します。
 
+### 配列形式のクエリパラメータ
+
+同じクエリキーが繰り返された場合、スキーマには配列として渡されます。`?tag=a&tag=b` は `{ tag: ['a', 'b'] }` になります。1 回しか出現しないキーはプレーンな文字列のままなので、1 回以上出現しうるパラメータには `union` を使用してください。
+
+```ts
+const FilterQuerySchema = z.object({
+  // ?tag=a&tag=b -> ['a', 'b'] / ?tag=a -> 'a'
+  tag: z.union([z.string(), z.array(z.string())]).optional()
+    .transform((value) => (typeof value === 'string' ? [value] : value ?? [])),
+})
+```
+
+この挙動は `this.validateQuery()` と、[ルートコントラクト](./routing.md#ルートコントラクト)で付与する `query:` スキーマの両方に適用されます。
+
 ## 型安全なリクエストパース
 
 完全な型安全性のため、リクエストパースと組み合わせます。

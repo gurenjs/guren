@@ -342,14 +342,6 @@ export abstract class Command implements CommandInstance {
     return this.kernel.handle([command, ...args])
   }
 
-  /**
-   * Call another command silently.
-   */
-  async callSilent(command: string, args: string[] = []): Promise<number> {
-    // TODO: Implement silent output
-    return this.call(command, args)
-  }
-
   // ==================
   // Utility Methods
   // ==================
