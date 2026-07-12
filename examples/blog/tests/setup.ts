@@ -1,4 +1,4 @@
 import '@testing-library/jest-dom'
-import { configureInertiaVitest } from '@guren/testing'
+import { configureInertiaVitest } from '@guren/testing/vitest'
 
 configureInertiaVitest()

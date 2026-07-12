@@ -96,6 +96,20 @@ export default class PostsController extends Controller {
 > [!TIP]
 > These helpers work with any schema library that implements `safeParse()` — Zod, Valibot, or custom validators.
 
+### Array-Style Query Parameters
+
+Repeated query keys reach your schema as arrays: `?tag=a&tag=b` becomes `{ tag: ['a', 'b'] }`. A key that appears only once stays a plain string, so use `union` when a parameter may appear one or more times:
+
+```ts
+const FilterQuerySchema = z.object({
+  // ?tag=a&tag=b -> ['a', 'b'] / ?tag=a -> 'a'
+  tag: z.union([z.string(), z.array(z.string())]).optional()
+    .transform((value) => (typeof value === 'string' ? [value] : value ?? [])),
+})
+```
+
+This applies to `this.validateQuery()` and to `query:` schemas attached via [route contracts](./routing.md#route-contracts).
+
 ## Middleware Validation
 
 ### `validateRequest(schema)` Compatibility Middleware

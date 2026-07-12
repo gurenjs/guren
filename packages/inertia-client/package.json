@@ -53,9 +53,6 @@
       "import": "./dist/components.js",
       "default": "./dist/components.js"
     },
-    "./dist/*": {
-      "default": "./dist/*"
-    },
     "./package.json": {
       "default": "./package.json"
     }
@@ -70,14 +67,16 @@
   },
   "dependencies": {
     "@inertiajs/core": "^2.3.18",
-    "@inertiajs/react": "^2.3.18",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "@inertiajs/react": "^2.3.18"
   },
   "devDependencies": {
     "tsup": "^8.5.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "typescript": "^5.4.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   }
 }

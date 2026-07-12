@@ -163,7 +163,7 @@ In-memory stores are lost between invocations. Use Redis (ElastiCache) or Dynamo
 |---------|---------------|
 | **HTTP trigger** | API Gateway v2 (HTTP API) or ALB |
 | **Sessions** | Redis (ElastiCache) — not in-memory |
-| **Cache** | Redis via `RedisStore`, or `FileStore` with `/tmp` for ephemeral cache |
+| **Cache** | Redis via `RedisCacheStore` (`@guren/core/redis` ships session/rate-limit/API-token stores too), or `FileStore` with `/tmp` for ephemeral cache |
 | **Queue** | SQS via `SqsDriver` + `createSqsHandler()` |
 | **Database** | RDS PostgreSQL with RDS Proxy for connection pooling |
 | **Scheduling** | EventBridge + `createScheduleHandler()` |

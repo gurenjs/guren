@@ -24,6 +24,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./vitest": {
+      "types": "./dist/vitest.d.ts",
+      "default": "./dist/vitest.js"
     }
   },
   "scripts": {
@@ -47,5 +51,19 @@
     "vitest": "^3.2.6",
     "tsup": "^8.5.0",
     "typescript": "^5.4.0"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "@testing-library/react": {
+      "optional": true
+    },
+    "@inertiajs/react": {
+      "optional": true
+    }
   }
 }

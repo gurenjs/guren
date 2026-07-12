@@ -118,7 +118,7 @@ export interface PaginateOptions<TRecord extends PlainObject = PlainObject> {
 }
 
 /** Pagination metadata returned with paginated results. */
-export interface PaginationMeta {
+export interface ModelPaginationMeta {
   /** Total number of records matching the query */
   total: number
   /** Number of records per page */
@@ -140,7 +140,7 @@ export interface PaginatedResult<TRecord extends PlainObject = PlainObject> {
   /** Records for the current page */
   data: TRecord[]
   /** Pagination metadata */
-  meta: PaginationMeta
+  meta: ModelPaginationMeta
 }
 
 /**
@@ -1482,7 +1482,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     const from = total === 0 ? 0 : offset + 1
     const to = total === 0 ? 0 : offset + data.length
 
-    const meta: PaginationMeta = {
+    const meta: ModelPaginationMeta = {
       total,
       perPage,
       currentPage,

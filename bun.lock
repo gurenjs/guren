@@ -15,7 +15,7 @@
     },
     "examples/api": {
       "name": "@guren/example-api",
-      "version": "0.1.1-rc.10",
+      "version": "0.1.1-rc.24",
       "dependencies": {
         "@guren/cli": "workspace:*",
         "@guren/core": "workspace:*",
@@ -67,7 +67,7 @@
     },
     "packages/cli": {
       "name": "@guren/cli",
-      "version": "1.0.0-rc.16",
+      "version": "1.0.0-rc.28",
       "bin": {
         "guren": "./dist/bin.js",
       },
@@ -91,7 +91,7 @@
     },
     "packages/core": {
       "name": "@guren/core",
-      "version": "1.0.0-rc.14",
+      "version": "1.0.0-rc.25",
       "bin": {
         "guren": "./dist/bin.js",
       },
@@ -108,7 +108,7 @@
     },
     "packages/create-app": {
       "name": "create-guren-app",
-      "version": "1.0.0-rc.18",
+      "version": "1.0.0-rc.29",
       "bin": {
         "create-guren-app": "./dist/cli.js",
       },
@@ -124,12 +124,10 @@
     },
     "packages/inertia-client": {
       "name": "@guren/inertia-client",
-      "version": "1.0.0-rc.13",
+      "version": "1.0.0-rc.24",
       "dependencies": {
         "@inertiajs/core": "^2.3.18",
         "@inertiajs/react": "^2.3.18",
-        "react": "^19.0.0",
-        "react-dom": "^19.0.0",
       },
       "devDependencies": {
         "@types/react": "^19.0.0",
@@ -137,10 +135,14 @@
         "tsup": "^8.5.0",
         "typescript": "^5.4.0",
       },
+      "peerDependencies": {
+        "react": "^19.0.0",
+        "react-dom": "^19.0.0",
+      },
     },
     "packages/openapi": {
       "name": "@guren/openapi",
-      "version": "1.0.0-rc.14",
+      "version": "1.0.0-rc.25",
       "dependencies": {
         "@guren/core": "^1.0.0-rc.13",
       },
@@ -152,7 +154,7 @@
     },
     "packages/orm": {
       "name": "@guren/orm",
-      "version": "1.0.0-rc.13",
+      "version": "1.0.0-rc.26",
       "dependencies": {
         "drizzle-orm": "1.0.0-rc.1",
       },
@@ -186,17 +188,16 @@
     },
     "packages/server": {
       "name": "@guren/server",
-      "version": "1.0.0-rc.14",
+      "version": "1.0.0-rc.25",
       "dependencies": {
-        "@guren/inertia-client": "^1.0.0-rc.13",
-        "@guren/orm": "^1.0.0-rc.13",
+        "@guren/orm": "^1.0.0-rc.26",
         "@modelcontextprotocol/sdk": "^1.27.1",
         "chalk": "^5.3.0",
         "consola": "^3.4.2",
         "figlet": "^1.7.0",
         "hono": "^4.12.18",
         "ioredis": "^5.9.1",
-        "nodemailer": "^8.0.4",
+        "nodemailer": "^9.0.1",
       },
       "devDependencies": {
         "@types/ioredis": "^5.0.0",
@@ -210,17 +211,19 @@
         "@aws-sdk/client-s3": "^3.0.0",
         "@aws-sdk/client-sqs": "^3.0.0",
         "@aws-sdk/s3-request-presigner": "^3.0.0",
+        "@guren/inertia-client": "^1.0.0-rc.24",
         "vite": ">=7.0.0",
       },
       "optionalPeers": [
         "@aws-sdk/client-s3",
         "@aws-sdk/client-sqs",
         "@aws-sdk/s3-request-presigner",
+        "@guren/inertia-client",
       ],
     },
     "packages/testing": {
       "name": "@guren/testing",
-      "version": "1.0.0-rc.14",
+      "version": "1.0.0-rc.25",
       "devDependencies": {
         "@types/react": "^19.0.0",
         "tsup": "^8.5.0",
@@ -228,17 +231,23 @@
         "vitest": "^3.2.6",
       },
       "peerDependencies": {
-        "@guren/server": ">=1.0.0-rc.13",
+        "@guren/server": ">=1.0.0-rc.25",
         "@inertiajs/react": "^2.3.18",
         "@testing-library/react": "^14.0.0 || ^15.0.0 || ^16.0.0",
         "hono": "^4.12.18",
         "react": "^18.0.0 || ^19.0.0",
         "vitest": "^3.2.6",
       },
+      "optionalPeers": [
+        "@inertiajs/react",
+        "@testing-library/react",
+        "react",
+        "vitest",
+      ],
     },
     "web": {
       "name": "web",
-      "version": "0.1.1-rc.9",
+      "version": "0.1.1-rc.23",
       "dependencies": {
         "@guren/cli": "workspace:*",
         "@guren/core": "workspace:*",
@@ -1046,7 +1055,7 @@
 
     "negotiator": ["negotiator@1.0.0", "", {}, "sha512-8Ofs/AUQh8MaEcrlq5xOX0CQ9ypTF5dl78mjlMNfOK08fzpgTHQRQPBxcPlEtIw0yRpws+Zo/3r+5WRby7u3Gg=="],
 
-    "nodemailer": ["nodemailer@8.0.11", "", {}, "sha512-nrO/pDAUKl+wXX+lx16tDLbnm0fW6sK/x8mgohaCpg+CdCEl482bD4tCuAZk2DyliruiNTIZxRCoWkDqJEnAiA=="],
+    "nodemailer": ["nodemailer@9.0.3", "", {}, "sha512-n+YP+NKwR5zRWa60k3GiQ6Q3B4KXCoAw40dAKeCtYn020iNN74aWK2liXIC3ZEATeGql7we3tE3t8QwhY0eskw=="],
 
     "nwsapi": ["nwsapi@2.2.23", "", {}, "sha512-7wfH4sLbt4M0gCDzGE6vzQBo0bfTKjU7Sfpqy/7gs1qBfYz2vEJH6vXcBKpO3+6Yu1telwd0t9HpyOoLEQQbIQ=="],
 

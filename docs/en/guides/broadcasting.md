@@ -151,6 +151,9 @@ export function registerBroadcastRoutes(router: Router): void {
   router.get('/broadcasting/events', broadcast.sseMiddleware({
     pingInterval: 30000,
     retry: 3000,
+    // Resolve the connecting user so channels requested up front via
+    // ?channels= can be authorized when the stream opens
+    getUser: (ctx) => ctx.get('user'),
   }))
 
   router.post('/broadcasting/auth', broadcast.authMiddleware({
@@ -158,6 +161,8 @@ export function registerBroadcastRoutes(router: Router): void {
   }))
 }
 ```
+
+The SSE endpoint accepts a `?channels=` query parameter listing channels to subscribe before the stream starts. Each requested channel is authorized against the user returned by `getUser`, so a plain `EventSource` works for public channels with zero extra calls. Private and presence channels are subscribed later through `/broadcasting/auth` (see [Authorizing Channels (Client)](#authorizing-channels-client)).
 
 ## WebSocket Foundation
 
@@ -225,19 +230,24 @@ await typed.toChannel('announcements').broadcast('NewPost', { id: 2 })
 
 ### Client-Side Integration
 
+Pass public channels in the `?channels=` query parameter to subscribe them as soon as the stream opens. Right after connecting, the server sends a `connected` event carrying your `clientId` and the list of channels that were authorized and subscribed — capture the `clientId`, because you need it to subscribe to private and presence channels later.
+
 ```ts
-// Connect to SSE
-const eventSource = new EventSource('/broadcasting/events')
+// Connect to SSE and subscribe public channels up front
+const eventSource = new EventSource(
+  '/broadcasting/events?channels=notifications,announcements'
+)
 
-eventSource.onopen = () => {
-  console.log('Connected')
-}
+// The server sends a `connected` event first — capture the clientId
+let clientId: string | null = null
 
-eventSource.onerror = (error) => {
-  console.error('Connection error', error)
-}
+eventSource.addEventListener('connected', (e) => {
+  const data = JSON.parse(e.data)
+  clientId = data.clientId
+  console.log('Subscribed channels:', data.channels)
+})
 
-// Listen for events
+// Messages are dispatched by EVENT name, not channel name
 eventSource.addEventListener('NewMessage', (e) => {
   const data = JSON.parse(e.data)
   console.log('New message:', data)
@@ -247,31 +257,49 @@ eventSource.addEventListener('NewMessage', (e) => {
 eventSource.addEventListener('ping', () => {
   console.log('Keepalive ping')
 })
+
+eventSource.onerror = (error) => {
+  console.error('Connection error', error)
+}
 ```
 
 ### Authorizing Channels (Client)
 
+Private and presence channels are subscribed through `POST /broadcasting/auth`. A single request with `{ clientId, channel }` both authorizes the channel for the current user and subscribes your SSE connection to it — the response reports both results per channel:
+
 ```ts
-async function subscribeToChannel(channel: string) {
-  // Authorize the channel
+async function subscribeToPrivateChannel(channel: string) {
+  if (!clientId) {
+    throw new Error('Not connected yet — wait for the `connected` event')
+  }
+
+  // Authorize AND subscribe in one call
   const response = await fetch('/broadcasting/auth', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ channel }),
+    body: JSON.stringify({ clientId, channel }),
     credentials: 'include',
   })
 
   const result = await response.json()
+  // e.g. { 'private-orders.123': { authorized: true, subscribed: true } }
+  return result[channel]?.authorized && result[channel]?.subscribed
+}
 
-  if (result[channel].authorized) {
-    // Subscribe to channel events
-    eventSource.addEventListener(channel, (e) => {
-      const data = JSON.parse(e.data)
-      handleChannelEvent(channel, data)
-    })
-  }
+if (await subscribeToPrivateChannel('private-orders.123')) {
+  // Events arrive on the same EventSource, dispatched by event name
+  eventSource.addEventListener('OrderUpdated', (e) => {
+    const data = JSON.parse(e.data)
+    console.log('Order updated:', data)
+  })
 }
 ```
+
+> [!IMPORTANT]
+> Omitting `clientId` from the request only authorizes the channel (`subscribed: false`) — no events will reach the browser. Always send the `clientId` you received in the `connected` event.
+
+> [!NOTE]
+> Channels with a `private-` or `presence-` prefix that have no registered authorizer are denied by default. Register them with `broadcast.privateChannel()` / `broadcast.presenceChannel()` before clients can subscribe.
 
 ## Configuration
 

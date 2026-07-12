@@ -36,6 +36,10 @@
     "./lambda": {
       "types": "./dist/lambda.d.ts",
       "default": "./dist/lambda.js"
+    },
+    "./redis": {
+      "types": "./dist/redis.d.ts",
+      "default": "./dist/redis.js"
     }
   },
   "bin": {

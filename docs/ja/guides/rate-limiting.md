@@ -205,46 +205,32 @@ const rateLimiter = createRateLimitMiddleware({
 - **固定ウィンドウ**: ウィンドウ境界でカウンターをリセット。境界付近でバーストを許可。
 - **スライディングウィンドウ**: 各リクエストのタイムスタンプを追跡。より滑らかなレート制限を提供。
 
-### Redisストア（カスタム実装）
+### Redisストア（分散環境）
 
-分散アプリケーション用のRedisバックエンドストアを実装できます。
+分散アプリケーションでは、フレームワークに同梱されている Redis バックエンドのストアを使います。
 
 ```ts
-import type { RateLimitStore, RateLimitEntry } from '@guren/core'
+import { createRateLimitMiddleware } from '@guren/core'
+import { createRedisClient, RedisRateLimitStore, RedisSlidingWindowRateLimitStore } from '@guren/core/redis'
 
-export class RedisRateLimitStore implements RateLimitStore {
-  constructor(private redis: Redis) {}
+const redis = createRedisClient({ url: process.env.REDIS_URL })
 
-  async get(key: string): Promise<RateLimitEntry | null> {
-    const data = await this.redis.hgetall(key)
-    if (!data.count) return null
+const limiter = createRateLimitMiddleware({
+  max: 60,
+  windowMs: 60_000,
+  store: new RedisRateLimitStore(redis),
+})
 
-    return {
-      count: parseInt(data.count, 10),
-      resetAt: parseInt(data.resetAt, 10),
-    }
-  }
-
-  async increment(key: string, windowMs: number): Promise<RateLimitEntry> {
-    const now = Date.now()
-    const resetAt = now + windowMs
-
-    const [count] = await this.redis
-      .multi()
-      .hincrby(key, 'count', 1)
-      .hsetnx(key, 'resetAt', resetAt.toString())
-      .pexpire(key, windowMs)
-      .exec()
-
-    const entry = await this.get(key)
-    return entry ?? { count: 1, resetAt }
-  }
-
-  async reset(key: string): Promise<void> {
-    await this.redis.del(key)
-  }
-}
+// Sliding-window variant for smoother limiting
+const sliding = createRateLimitMiddleware({
+  max: 60,
+  windowMs: 60_000,
+  store: new RedisSlidingWindowRateLimitStore(redis),
+})
 ```
+
+> [!NOTE]
+> 独自のセマンティクスが必要な場合は、`@guren/core` の `RateLimitStore` インターフェース（`get` / `increment` / `reset`）を実装すれば任意のストアとして使えます。
 
 ## ヘルパー関数
 

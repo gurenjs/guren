@@ -45,9 +45,13 @@ export interface DevAssetsOptions {
   rootPublicAssets?: RootPublicAssetsConfig
 }
 
-// get the path to the inertia client bundled with Guren
+// Resolve the inertia client lazily: @guren/inertia-client is an optional
+// peer dependency, and API-only apps must be able to import this module
+// without it installed.
 const require = createRequire(import.meta.url)
-const gurenInertiaClient = require.resolve('@guren/inertia-client/app')
+function resolveGurenInertiaClient(): string {
+  return require.resolve('@guren/inertia-client/app')
+}
 
 /**
  * Registers development asset serving middleware.
@@ -71,7 +75,7 @@ export function registerDevAssets(app: Application, options: DevAssetsOptions): 
   const cssDir = options.cssDir ?? resolve(resourcesDir, 'css')
   const cssRoute = options.cssRoute ?? deriveCssRoute(prefix)
   const inertiaClientPath = options.inertiaClientPath ?? DEFAULT_VENDOR_PATH
-  const inertiaClientSource = options.inertiaClientSource ?? gurenInertiaClient
+  const inertiaClientSource = options.inertiaClientSource ?? resolveGurenInertiaClient()
   const jsxRuntimeUrl = options.jsxRuntimeUrl ?? DEFAULT_JSX_RUNTIME
 
   const resourcesJsDir = resolve(resourcesDir, 'js')

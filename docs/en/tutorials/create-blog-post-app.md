@@ -91,7 +91,7 @@ export class Post extends defineModel(posts) {
 Two things to note:
 
 - `PostRecord` is inferred from the table — you never write the record type by hand.
-- `fillable` is a mass-assignment allowlist: `Post.create()` and `Post.update()` will only write these fields, so a malicious request body can't set `id` or `createdAt`.
+- `fillable` is a mass-assignment allowlist: passing any field outside it to `Post.create()` or `Post.update()` throws a `MassAssignmentException`, so bugs and injection attempts surface immediately instead of being silently discarded. For trusted server-side data (seeders, system records), `forceCreate()` bypasses the allowlist — see the [Database guide](../guides/database.md) for details.
 
 ## 4. Add a validator
 

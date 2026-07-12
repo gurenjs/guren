@@ -96,6 +96,10 @@
     "./lambda": {
       "types": "./dist/lambda/index.d.ts",
       "default": "./dist/lambda/index.js"
+    },
+    "./redis": {
+      "types": "./dist/redis/index.d.ts",
+      "default": "./dist/redis/index.js"
     }
   },
   "scripts": {
@@ -105,7 +109,6 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@guren/inertia-client": "^1.0.0-rc.24",
     "@guren/orm": "^1.0.0-rc.26",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "chalk": "^5.3.0",
@@ -113,13 +116,14 @@
     "figlet": "^1.7.0",
     "hono": "^4.12.18",
     "ioredis": "^5.9.1",
-    "nodemailer": "^8.0.4"
+    "nodemailer": "^9.0.1"
   },
   "peerDependencies": {
     "@aws-sdk/client-s3": "^3.0.0",
     "@aws-sdk/client-sqs": "^3.0.0",
     "@aws-sdk/s3-request-presigner": "^3.0.0",
-    "vite": ">=7.0.0"
+    "vite": ">=7.0.0",
+    "@guren/inertia-client": "^1.0.0-rc.24"
   },
   "peerDependenciesMeta": {
     "@aws-sdk/client-s3": {
@@ -129,6 +133,9 @@
       "optional": true
     },
     "@aws-sdk/s3-request-presigner": {
+      "optional": true
+    },
+    "@guren/inertia-client": {
       "optional": true
     }
   },

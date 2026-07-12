@@ -177,3 +177,55 @@ describe('Model.filterFillable', () => {
     })
   })
 })
+
+  describe('QueryBuilder.update mass assignment (#security-review C1)', () => {
+    function createBuilderAdapter() {
+      const calls: PlainObject[] = []
+      const adapter = {
+        async findMany<T extends PlainObject>(): Promise<T[]> { return [] },
+        async findUnique<T extends PlainObject>(): Promise<T | null> { return null },
+        async create<T extends PlainObject>(_t: unknown, data: PlainObject): Promise<T> { return data as unknown as T },
+        async update<T extends PlainObject>(_t: unknown, _w: unknown, data: PlainObject): Promise<T> {
+          calls.push(data)
+          return data as unknown as T
+        },
+      }
+      return { adapter, calls }
+    }
+
+    it('applies the fillable allowlist on the fluent builder', async () => {
+      class StrictPost extends Model<PlainObject> {
+        static override table = 'posts'
+        static fillable = ['title', 'body']
+      }
+      const { adapter } = createBuilderAdapter()
+      StrictPost.useAdapter(adapter)
+
+      await expect(
+        StrictPost.where({ id: 1 }).update({ title: 'x', authorId: 99 }),
+      ).rejects.toThrow(MassAssignmentException)
+    })
+
+    it('forceUpdate on the builder bypasses the allowlist', async () => {
+      class StrictPost extends Model<PlainObject> {
+        static override table = 'posts'
+        static fillable = ['title', 'body']
+      }
+      const { adapter, calls } = createBuilderAdapter()
+      StrictPost.useAdapter(adapter)
+
+      await StrictPost.where({ id: 1 }).forceUpdate({ authorId: 99 })
+      expect(calls).toEqual([{ authorId: 99 }])
+    })
+
+    it('models without fillable keep guarded stripping on the builder', async () => {
+      class LoosePost extends Model<PlainObject> {
+        static override table = 'posts'
+      }
+      const { adapter, calls } = createBuilderAdapter()
+      LoosePost.useAdapter(adapter)
+
+      await LoosePost.where({ slug: 'a' }).update({ id: 5, title: 'x' })
+      expect(calls).toEqual([{ title: 'x' }])
+    })
+  })

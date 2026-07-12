@@ -55,27 +55,25 @@ describe('ClassName', () => {
 
 ### Controller Test
 ```typescript
-import { describe, it, expect, beforeEach } from 'vitest'
-import { createTestContext } from '@guren/testing'
+import { describe, test, beforeAll } from 'bun:test'
+import { TestApp } from '@guren/testing'
 
 describe('PostController', () => {
-  let ctx: ReturnType<typeof createTestContext>
+  let app: TestApp
 
-  beforeEach(() => {
-    ctx = createTestContext()
+  beforeAll(async () => {
+    app = await TestApp.create()
   })
 
-  it('GET /posts returns list', async () => {
-    const response = await ctx.get('/posts')
-    expect(response.status).toBe(200)
+  test('GET /posts returns list', async () => {
+    await app.get('/posts').assertOk()
   })
 
-  it('POST /posts creates new post', async () => {
-    const response = await ctx.post('/posts', {
+  test('POST /posts creates new post', async () => {
+    await app.post('/posts', {
       title: 'Test',
       content: 'Content'
-    })
-    expect(response.status).toBe(201)
+    }).assertStatus(201)
   })
 })
 ```

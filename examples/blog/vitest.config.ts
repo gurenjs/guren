@@ -41,6 +41,10 @@ export default defineConfig({
         replacement: reactDomClientEntry,
       },
       {
+        find: /^@guren\/testing\/vitest$/,
+        replacement: resolve(rootDir, '../../packages/testing/src/vitest.ts'),
+      },
+      {
         find: /^@guren\/testing$/,
         replacement: resolve(rootDir, '../../packages/testing/src/index.ts'),
       },
