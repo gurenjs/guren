@@ -1,5 +1,25 @@
 # @guren/core
 
+## 1.0.0-rc.22
+
+### Patch Changes
+
+- afe4bfd: Two fixes surfaced by dogfooding i18n in a real app:
+
+  - **CSRF cookie refresh no longer wipes other cookies.** `setXsrfCookie` replaced the `Set-Cookie` header on the finalized response, silently dropping any cookie appended by inner middleware or handlers (e.g. a `locale` cookie). It now appends.
+  - **`I18nConfig` accepts a `loader` option** as the i18n guide documents. Previously only `path` existed, so `MemoryLoader` (or any custom `TranslationLoader`) could not be injected into `createI18n` / `new I18nManager()`. `loader` takes precedence over `path`.
+
+- 7fbf1de: Accept Hono middleware as a terminal route handler:
+
+  - **`RouteHandler` now includes `(c, next)` signatures**, so any Hono `MiddlewareHandler` — including `broadcast.sseMiddleware()` and `broadcast.authMiddleware()` — can be passed directly to `router.get()` / `router.post()` as the docs show, without wrapper closures or `as Promise<Response>` casts.
+  - **Responses set via `c.res` are honored**: a middleware mounted as a handler that finalizes the response through `next()` or `c.res =` no longer gets clobbered by a synthesized `204 No Content`. Plain handlers returning `undefined` still produce `204`.
+
+- Updated dependencies [afe4bfd]
+- Updated dependencies [7fbf1de]
+  - @guren/server@1.0.0-rc.22
+  - @guren/orm@1.0.0-rc.23
+  - @guren/cli@1.0.0-rc.25
+
 ## 1.0.0-rc.21
 
 ### Patch Changes
