@@ -45,6 +45,7 @@
     "runtime-gate-migrations-relations",
     "schedule-run-audit",
     "secure-defaults-release",
+    "sse-subscription-flow",
     "strict-shoes-crash",
     "thick-bottles-search",
     "v1-rc-release"

@@ -1,6 +1,6 @@
 {
   "name": "@guren/server",
-  "version": "1.0.0-rc.20",
+  "version": "1.0.0-rc.21",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -105,8 +105,8 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@guren/inertia-client": "^1.0.0-rc.19",
-    "@guren/orm": "^1.0.0-rc.21",
+    "@guren/inertia-client": "^1.0.0-rc.20",
+    "@guren/orm": "^1.0.0-rc.22",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "chalk": "^5.3.0",
     "consola": "^3.4.2",
