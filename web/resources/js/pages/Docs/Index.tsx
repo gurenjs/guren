@@ -6,10 +6,16 @@ type DocSummary = {
   description?: string
 }
 
+type DocSection = {
+  title: string
+  docs: DocSummary[]
+}
+
 type DocCategoryGroup = {
   category: string
   title: string
   docs: DocSummary[]
+  sections: DocSection[]
 }
 
 type LocaleLink = {
@@ -62,40 +68,49 @@ export default function DocsIndex({ categories, locales = [], basePath }: Props)
               <section key={group.category}>
                 <div className="mb-8 flex items-baseline gap-4">
                   <div className="flex items-center gap-2">
-                    {group.title === 'Guides' ? (
+                    {group.category === 'guides' ? (
                       <BookOpenIcon className="size-5 text-docs-accent" />
                     ) : (
                       <TerminalIcon className="size-5 text-docs-accent" />
                     )}
                     <h2 className="text-2xl font-bold tracking-tight text-docs-heading">
-                      {group.title === 'Guides' ? 'Core Concepts & Guides' : 'Tutorials & Examples'}
+                      {group.title}
                     </h2>
                   </div>
                   <div className="h-px flex-1 bg-docs-border opacity-60" />
                 </div>
 
-                {group.docs.length ? (
-                  <div className="stagger-fade-in grid gap-6" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
-                    {group.docs.map((doc) => (
-                      <Link
-                        key={`${group.category}-${doc.slug}`}
-                        href={`${basePath}/${group.category}/${doc.slug}`}
-                        className="no-underline"
-                      >
-                        <article className="docs-card flex h-full cursor-pointer flex-col rounded-xl border border-docs-border bg-docs-panel p-7">
-                          <h3 className="mb-3 text-[1.15rem] font-semibold text-docs-heading">
-                            {doc.title}
-                          </h3>
-                          {doc.description && (
-                            <p className="flex-1 text-[0.95rem] leading-relaxed text-docs-text-secondary">
-                              {doc.description}
-                            </p>
-                          )}
-                          <div className="mt-6 flex items-center gap-2 text-sm font-semibold text-docs-accent">
-                            Read more <span>→</span>
-                          </div>
-                        </article>
-                      </Link>
+                {group.sections.length ? (
+                  <div className="grid gap-12">
+                    {group.sections.map((section) => (
+                      <div key={`${group.category}-${section.title}`}>
+                        <h3 className="mb-5 text-sm font-bold uppercase tracking-widest text-docs-text-muted">
+                          {section.title}
+                        </h3>
+                        <div className="stagger-fade-in grid gap-6" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
+                          {section.docs.map((doc) => (
+                            <Link
+                              key={`${group.category}-${doc.slug}`}
+                              href={`${basePath}/${group.category}/${doc.slug}`}
+                              className="no-underline"
+                            >
+                              <article className="docs-card flex h-full cursor-pointer flex-col rounded-xl border border-docs-border bg-docs-panel p-7">
+                                <h3 className="mb-3 text-[1.15rem] font-semibold text-docs-heading">
+                                  {doc.title}
+                                </h3>
+                                {doc.description && (
+                                  <p className="flex-1 text-[0.95rem] leading-relaxed text-docs-text-secondary">
+                                    {doc.description}
+                                  </p>
+                                )}
+                                <div className="mt-6 flex items-center gap-2 text-sm font-semibold text-docs-accent">
+                                  Read more <span>→</span>
+                                </div>
+                              </article>
+                            </Link>
+                          ))}
+                        </div>
+                      </div>
                     ))}
                   </div>
                 ) : (

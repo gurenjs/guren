@@ -22,10 +22,9 @@ async function auditEnglishDocs(root: string): Promise<void> {
 
   const firstSteps = await read(root, 'docs/en/guides/first-steps.md')
   assert(firstSteps.includes('@guren/core'), 'First Steps must describe the @guren/core standard path.')
-  assert(firstSteps.includes('PaginatedPageProps<PostResourceData>'), 'First Steps must describe the paginated resource contract.')
-  assert(firstSteps.includes('bunx guren add notifications'), 'First Steps must document the notifications scaffold path.')
-  assert(firstSteps.includes('bunx guren add storage'), 'First Steps must document the storage scaffold path.')
-  assert(firstSteps.includes('bunx guren add broadcasting'), 'First Steps must document the broadcasting scaffold path.')
+  assert(firstSteps.includes('new PostResource(post).toJSON()'), 'First Steps must show explicit resource serialization.')
+  assert(firstSteps.includes('pages.posts.Index'), 'First Steps must use typed page definitions.')
+  assert(firstSteps.includes('validateQuery'), 'First Steps must show schema-based request validation.')
 
   const cli = await read(root, 'docs/en/guides/cli.md')
   assert(cli.includes('bunx guren add notifications'), 'CLI guide must document the notifications scaffold path.')
@@ -74,7 +73,8 @@ async function auditEnglishDocs(root: string): Promise<void> {
 
   const relationships = await read(root, 'docs/en/tutorials/relationships.md')
   assert(relationships.includes('pages.posts.Show'), 'Relationships tutorial must use typed page definitions.')
-  assert(relationships.includes('new PostResource(post).toJSON()'), 'Relationships tutorial must serialize resources explicitly.')
+  assert(relationships.includes("hasMany('comments'"), 'Relationships tutorial must declare the hasMany relation.')
+  assert(relationships.includes(".with('author')"), 'Relationships tutorial must demonstrate eager loading.')
 
   const frontend = await read(root, 'docs/en/guides/frontend.md')
   assert(frontend.includes('interface Props'), 'Frontend guide must show Props interface pattern.')
@@ -82,8 +82,9 @@ async function auditEnglishDocs(root: string): Promise<void> {
   assert(!frontend.includes("this.inertia('posts/Index'"), 'Frontend guide must not use string-based page names in the mainline example.')
 
   const blogTutorial = await read(root, 'docs/en/tutorials/create-blog-post-app.md')
-  assert(blogTutorial.includes('PaginatedPageProps<PostResourceData>'), 'Blog tutorial must show paginated resource contracts.')
+  assert(blogTutorial.includes('PaginatedPageProps<'), 'Blog tutorial must show the paginated page-props contract.')
   assert(blogTutorial.includes('pages.posts.Index'), 'Blog tutorial must use typed page definitions in the controller example.')
+  assert(blogTutorial.includes('validateBody'), 'Blog tutorial must show schema-based body validation.')
 
   const authentication = await read(root, 'docs/en/guides/authentication.md')
   assert(authentication.includes('pages.dashboard.Index'), 'Authentication guide must use typed page definitions for dashboard pages.')
@@ -142,10 +143,9 @@ async function auditEnglishDocs(root: string): Promise<void> {
 async function auditJapaneseDocs(root: string): Promise<void> {
   const firstSteps = await read(root, 'docs/ja/guides/first-steps.md')
   assert(firstSteps.includes('@guren/core'), 'Japanese First Steps must describe the @guren/core standard path.')
-  assert(firstSteps.includes('PaginatedPageProps<PostResourceData>'), 'Japanese First Steps must describe the paginated resource contract.')
-  assert(firstSteps.includes('bunx guren add notifications'), 'Japanese First Steps must document the notifications scaffold path.')
-  assert(firstSteps.includes('bunx guren add storage'), 'Japanese First Steps must document the storage scaffold path.')
-  assert(firstSteps.includes('bunx guren add broadcasting'), 'Japanese First Steps must document the broadcasting scaffold path.')
+  assert(firstSteps.includes('new PostResource(post).toJSON()'), 'Japanese First Steps must show explicit resource serialization.')
+  assert(firstSteps.includes('pages.posts.Index'), 'Japanese First Steps must use typed page definitions.')
+  assert(firstSteps.includes('validateQuery'), 'Japanese First Steps must show schema-based request validation.')
 
   const overview = await read(root, 'docs/ja/guides/overview.md')
   assert(overview.includes("import { Controller, paginate, type PaginatedPageProps } from '@guren/core'"), 'Japanese overview must show the canonical controller import path.')
@@ -193,7 +193,8 @@ async function auditJapaneseDocs(root: string): Promise<void> {
 
   const relationships = await read(root, 'docs/ja/tutorials/relationships.md')
   assert(relationships.includes('pages.posts.Show'), 'Japanese relationships tutorial must use typed page definitions.')
-  assert(relationships.includes('new PostResource(post).toJSON()'), 'Japanese relationships tutorial must serialize resources explicitly.')
+  assert(relationships.includes("hasMany('comments'"), 'Japanese relationships tutorial must declare the hasMany relation.')
+  assert(relationships.includes(".with('author')"), 'Japanese relationships tutorial must demonstrate eager loading.')
 
   const frontend = await read(root, 'docs/ja/guides/frontend.md')
   assert(frontend.includes('PageProps<typeof pages.posts.Index>'), 'Japanese frontend guide must show page-contract-based props.')
@@ -201,8 +202,9 @@ async function auditJapaneseDocs(root: string): Promise<void> {
   assert(!frontend.includes("this.inertia('posts/Index'"), 'Japanese frontend guide must not use string-based page names in the mainline example.')
 
   const blogTutorial = await read(root, 'docs/ja/tutorials/create-blog-post-app.md')
-  assert(blogTutorial.includes('PaginatedPageProps<PostResourceData>'), 'Japanese blog tutorial must show paginated resource contracts.')
+  assert(blogTutorial.includes('PaginatedPageProps<'), 'Japanese blog tutorial must show the paginated page-props contract.')
   assert(blogTutorial.includes('pages.posts.Index'), 'Japanese blog tutorial must use typed page definitions in the controller example.')
+  assert(blogTutorial.includes('validateBody'), 'Japanese blog tutorial must show schema-based body validation.')
 
   const authentication = await read(root, 'docs/ja/guides/authentication.md')
   assert(authentication.includes('pages.dashboard.Index'), 'Japanese authentication guide must use typed page definitions for dashboard pages.')

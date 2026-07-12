@@ -1,9 +1,34 @@
-# Tutorials Overview
+# Tutorials: Build a Mini Blog
 
-Hands-on walkthroughs that apply Guren concepts to real features. Start with any of the guides below once you have a project scaffolded via `bunx create-guren-app` with the dev server (`bun run dev`) and Postgres (`bun run db:up`) running.
+This tutorial series takes you from an empty directory to a small but real blog application. You build it one layer at a time — schema, model, validator, controller, routes, React pages — so by the end you understand how every piece of a Guren app fits together.
 
-If any term is unfamiliar, see the [Glossary](../guides/glossary.md).
+If any term is unfamiliar along the way, check the [Glossary](../guides/glossary.md).
 
-- [Create a Blog Post App](./create-blog-post-app.md)
-- [Authentication Walkthrough](./authentication.md)
-- [Relationships: Posts & Comments](./relationships.md)
+## What you'll build
+
+A mini blog where visitors can:
+
+- Browse a paginated list of posts and read each one
+- Sign in with a user account
+- Write posts (signed-in users only), with each post showing its author
+- Leave comments on posts
+
+## The series
+
+The parts build on each other — each one starts where the previous one ended, so work through them in order:
+
+1. **[Create a Blog Post App](./create-blog-post-app.md)** — Scaffold a fresh app and build posts CRUD by hand: a `posts` table, a `Post` model, Zod validation, a controller, routes, and three React pages. **Final result:** you create a post through a form and see it appear in the list.
+2. **[Add Authentication](./authentication.md)** — Install the auth scaffold with one command, sign in as the demo user, protect post creation behind a login wall, and attach an author to every post. **Final result:** only signed-in users can write posts, and each post shows who wrote it.
+3. **[Relationships: Comments](./relationships.md)** — Add a `comments` table related to both posts and users, declare `hasMany`/`belongsTo` relationships, and build a comment form on the post page. **Final result:** signed-in users can comment on any post, and comments appear with their author's name.
+
+## Prerequisites
+
+- **[Bun](https://bun.sh) 1.1 or later** — the only hard requirement.
+- That's it. The scaffold defaults to **SQLite**, which needs zero configuration — no Docker, no database server. (You can pick PostgreSQL or MySQL when scaffolding, but this course sticks with the SQLite default.)
+
+Each part takes roughly 15–20 minutes.
+
+> [!TIP]
+> This series focuses on building features. For a broader tour of environment setup, rendering modes, and production builds, see [Getting Started](../guides/getting-started.md) and [First Steps: A 10-Minute Tour of One Request](../guides/first-steps.md).
+
+Ready? Start with [Part 1: Create a Blog Post App](./create-blog-post-app.md).

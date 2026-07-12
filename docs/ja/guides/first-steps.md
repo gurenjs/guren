@@ -1,128 +1,159 @@
-# 10分で最初の機能を作る
+# ファーストステップ: 1 つのリクエストを辿る 10 分ツアー
 
-このガイドでは、Guren の推奨フロー（golden path）に沿って認証付きブログアプリを構築します。すべてのインポートは `@guren/core` を使います。
+このツアーでは、単一のリクエスト — `GET /posts` — が Guren アプリのすべてのレイヤーを通る様子を追いかけます: ルート、コントローラー、バリデーション、モデル、リソース、Inertia ページ、そしてテストです。頭の中に地図を作るために読んでください。各ストップには、より深く学べるガイドへのリンクがあります。
 
-## 作るもの
-
-次の要素を持つ小さな posts アプリです。
-
-- 認証 scaffolding（ログイン、登録、プロフィール）
-- posts の CRUD（一覧、詳細、作成、編集、削除）
-- 型付き route/page manifest
-- SSR で動くフルスタックアプリ
-
-## 1. アプリを作る
+前提として、動いているアプリ（[はじめる](./getting-started.md) 参照）に、次のコマンドで posts リソースが生成されているものとします。
 
 ```bash
-bunx create-guren-app posts-app --mode ssr
-cd posts-app
-bun install
+bunx guren add resource posts --fields "title:string,body:text,published:boolean"
 ```
 
-## 2. 認証とリソースを追加する
+自分の手で一歩ずつ作りたい方は、代わりに [ミニブログを作るチュートリアル](../tutorials/overview.md) をどうぞ — 同じ内容をハンズオンでカバーしています。
 
-```bash
-bunx guren add auth
-bunx guren add resource posts --fields "title:string,body:text"
-```
+## 1. ルート
 
-これで次が生成されます。
-
-- `AuthProvider`、login/register/profile の Controller、Validator、routes、ページ
-- `PostController`、`PostResource`、`PostValidator`、CRUD ページ、named routes
-- `db/schema.ts` に posts テーブル定義が追加
-
-> 後から `bunx guren add queue`、`bunx guren add mail`、`bunx guren add events`、`bunx guren add notifications`、`bunx guren add storage`、`bunx guren add broadcasting` などで機能を追加できます。
-
-## 3. 型付き manifest を生成する
-
-```bash
-bun run codegen
-```
-
-`codegen` は次を生成します。
-
-- `.guren/routes.gen.ts` -- named route helper の型情報
-- `.guren/pages.gen.ts` -- 型付き page props の定義
-- `.guren/data.gen.ts` -- JsonResource の型情報
-- `.guren/api-client.gen.ts` -- 型付き API クライアント
-
-## 4. データベースを準備する
-
-```bash
-bun run db:migrate
-bun run db:seed
-```
-
-デフォルトは SQLite のため、追加のセットアップは不要です。
-
-## 5. 型チェックとビルド
-
-```bash
-bun run typecheck
-bun run build
-```
-
-ここまででエラーがなければ、アプリの整合性が取れています。
-
-## 6. アプリを起動する
-
-```bash
-bun run dev
-```
-
-次を開いて確認します。
-
-- `/login` -- 生成された認証フロー（`demo@example.com` / `secret` でサインイン）
-- `/posts` -- 生成された CRUD フロー
-
-## 7. データフローを理解する
-
-標準の resource scaffold は、次のデータフローで動きます。
-
-1. `db/schema.ts` が Drizzle table を定義する
-2. `app/Models/Post.ts` が typed model を公開する
-3. `app/Http/Resources/PostResource.ts` が response shape を定義する
-4. 各ページコンポーネントで Props を定義し、codegen が `.guren/pages.gen.ts` に自動抽出する
-5. `app/Http/Controllers/PostController.ts` が input を検証し、resource 出力を返す
-
-一覧ページの標準的なデータ構造はこうです。
+すべてのリクエストは `routes/web.ts` から始まります。ここで registrar が URL をコントローラーのアクションにマッピングします。
 
 ```ts
-type Props = PaginatedPageProps<PostResourceData>
+import { Router } from '@guren/core'
+import PostController from '@/app/Http/Controllers/PostController'
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/posts', [PostController, 'index'])
+  router.post('/posts', [PostController, 'store'])
+}
 ```
 
-つまりページは次を受け取ります。
+`GET /posts` は 1 行目にマッチするため、Guren は `PostController.index` にディスパッチします。グループ、ミドルウェア、名前付きルートもすべてここに書きます — 詳しくは [ルーティングガイド](./routing.md) を参照してください。
 
-- `data`
-- `pagination.meta`
-- `pagination.links`
+## 2. コントローラー
 
-controller や UI 側で pagination state を組み直す必要はありません。
+`app/Http/Controllers/PostController.ts` がリクエストを処理します。
 
-## 8. 次に触る場所
+```ts
+import { Controller } from '@guren/core'
+import { Post } from '@/app/Models/Post'
+import { PostResource } from '@/app/Http/Resources/PostResource'
+import { ListPostsQuerySchema } from '@/app/Http/Validators/PostValidator'
+import { pages } from '@/.guren/pages.gen'
 
-- post の項目を増やすなら `db/schema.ts`
-- create/update ルールを変えるなら `app/Http/Validators/PostValidator.ts`
-- page/API の出力を変えるなら `app/Http/Resources/PostResource.ts`
-- UI を変えるなら `resources/js/pages/posts/*.tsx`
+export default class PostController extends Controller {
+  async index() {
+    const { page } = this.validateQuery(ListPostsQuerySchema)
+    const result = await Post.paginate({ page, perPage: 20 })
 
-## 9. 推奨する考え方
+    return this.inertia(pages.posts.Index, {
+      data: result.data.map((post) => new PostResource(post).toJSON()),
+    })
+  }
+}
+```
 
-新しい機能を追加するときは、まずこの流れを使います。
+ここでは 3 つのことが起きています: 入力のバリデーション、データの取得、ページのレンダリングです。コントローラーの全機能は [コントローラーガイド](./controllers.md) を参照してください。
+
+## 3. バリデーション
+
+`this.validateQuery(schema)` はクエリ文字列を Zod スキーマでパースし、不正な入力には自動的に 422 を投げます。エラーハンドリングを手書きする必要はありません。
+
+```ts
+import { z } from 'zod'
+
+export const ListPostsQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+})
+```
+
+`validateBody` と `validateParams` も、リクエストボディとルートパラメータに対して同じように動きます。詳しくは [バリデーションガイド](./validation.md) を参照してください。
+
+## 4. モデル
+
+`app/Models/Post.ts` は、クラスを `db/schema.ts` の Drizzle テーブルに結びつけます。
+
+```ts
+import { Model } from '@guren/orm'
+import { posts } from '@/db/schema'
+
+export class Post extends Model<typeof posts> {
+  static table = posts
+}
+```
+
+クエリは Laravel のように読めます: `Post.find(1)`、`Post.findOrFail(1)`（404 を投げます）、`Post.where('published', true).get()`。カラムの型はスキーマからすべての結果へと流れます。詳しくは [データベースガイド](./database.md) を参照してください。
+
+## 5. リソース
+
+`app/Http/Resources/PostResource.ts` は、サーバーから外に出るデータを決めます — 内部カラムがうっかり漏れることはありません。
+
+```ts
+import { Resource } from '@guren/core'
+
+export class PostResource extends Resource<Post> {
+  toArray() {
+    const { id, title, body, published } = this.resource
+    return { id, title, body, published }
+  }
+}
+```
+
+詳しくは [API リソースガイド](./api-resources.md) を参照してください。
+
+## 6. Inertia ページ
+
+`this.inertia(pages.posts.Index, props)` は `resources/js/pages/posts/Index.tsx` をレンダリングします。これはコントローラーの props を直接受け取る、ごく普通の React コンポーネントです — 間に API レイヤーはありません。
+
+```tsx
+import type { PageProps } from '@guren/inertia-client/contracts'
+import { pages } from '@/.guren/pages.gen'
+
+type Props = PageProps<typeof pages.posts.Index>
+
+export default function PostsIndex({ data }: Props) {
+  return (
+    <ul>
+      {data.map((post) => (
+        <li key={post.id}>{post.title}</li>
+      ))}
+    </ul>
+  )
+}
+```
+
+codegen は各ページの `Props` を `.guren/pages.gen.ts` に抽出するため、コントローラーが誤った形の props を渡すとコンパイルエラーになります。カラムをリネームすれば、スキーマからブラウザまで、すべてのレイヤーを TypeScript が指摘してくれます。詳しくは [フロントエンドガイド](./frontend.md) を参照してください。
+
+## 7. テスト
+
+`TestApp` を使えば、起動済みアプリに実際のリクエストを通すことで、この経路全体が動くことを証明できます。
+
+```ts
+import { test } from 'bun:test'
+import { TestApp } from '@guren/testing'
+
+test('lists posts', async () => {
+  const app = await TestApp.create()
+  await app.get('/posts').assertOk()
+})
+```
+
+fluent なアサーション、`actingAs`、データベースヘルパーについては [テストガイド](./testing.md) を参照してください。
+
+## メンタルモデル
+
+Guren アプリのすべての機能は、この同じ経路を通ります。
+
+- **routes** が URL をコントローラーにマッピングし
+- **validators** が入力をパースし
+- **models** がデータアクセスを記述し
+- **resources** が出力の形を決め
+- **pages** が props を定義し
+- **controllers** がそれらすべてを組み立てます
+
+機能を追加するときは、経路全体を一度に雛形生成し、マニフェストを更新します。
 
 ```bash
-bunx guren add resource comments --fields "body:text,postId:number"
+bunx guren add resource comments --fields "body:text,postId:integer"
 bun run codegen
-bun run db:migrate
 ```
 
-その上で各レイヤーの責務を固定します。
+## 次のステップ
 
-- model は data access
-- validator は input parsing
-- resource は output shaping
-- page component は props 定義
-- controller は response composition
-
-これが、Guren が目指している Rails/Laravel 的な DX を実現するための基本パターンです。
+本格的に作り始める準備はできましたか？ **[ミニブログを作るチュートリアル](../tutorials/overview.md)** では、投稿、認証、コメントをハンズオンで作っていきます。見慣れない用語があったら [用語集](./glossary.md) で確認してください。

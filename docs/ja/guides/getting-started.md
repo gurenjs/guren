@@ -1,133 +1,151 @@
-# Getting Started
+# はじめる
 
-`create-guren-app` で新規プロジェクトを作成し、動かすまでの手順です。
+このガイドは 2 部構成です。**Part A** では、Docker もデータベースサーバーも使わず、SQLite で新規 Guren アプリを 5 分程度で動かします。**Part B** ではフルセットアップを扱います: Postgres / MySQL、環境変数、機能ジェネレーター、本番ビルドなどです。まず Part A から始めて、必要になったら Part B に戻ってきてください。
+
+手順は macOS と Linux を対象としていますが、Windows でも WSL2 を使えば同じように動きます。
 
 > [!NOTE]
-> 用語が分からない場合は先に [用語集](./glossary.md) を参照してください。
+> 見慣れない用語があれば [用語集](./glossary.md) を参照してください。
 
-## 前提ツール
-- **Bun 1.1 以降**
-  例: `curl -fsSL https://bun.sh/install | bash`
-- **Node.js（任意）**
-  ランタイムには不要ですが、エディタ補助や型定義に便利です。
+## Part A: クイックスタート（SQLite — Docker 不要）
 
-## Quick Start
+### 前提条件
 
-次の手順で、認証付きブログアプリをゼロから構築できます。
+- **Bun 1.1 以降** — これだけです。
 
 ```bash
-# 1. プロジェクトを作成
-bunx create-guren-app my-app --mode ssr
+curl -fsSL https://bun.sh/install | bash
+```
+
+### 1. プロジェクトを雛形生成する
+
+```bash
+bunx create-guren-app my-app
 cd my-app
-bun install
+```
 
-# 2. 認証とリソースを追加
-bunx guren add auth
-bunx guren add resource posts --fields "title:string,body:text"
+スキャフォールダーは 2 つの質問をします。始めるだけならデフォルトのままで問題ありません。
 
-# 3. 型付きルートヘルパー・ページ Props・API クライアントを生成
-bun run codegen
+- **レンダリングモード**: SSR（デフォルト）または SPA。SSR ではサーバーレンダリングされた HTML と Vite アセットの自動検出が使えます。
+- **データベース**: SQLite（デフォルト、設定不要）、PostgreSQL、または MySQL。
 
-# 4. データベースを準備
-bun run db:migrate
-bun run db:seed
+その後、依存関係をインストールし、生成済みの `APP_KEY` 入りの `.env` ファイルを作成してくれます。プロンプトをスキップしたい場合はフラグを渡します: `--mode ssr`、`--db sqlite`、認証の雛形を最初から含めるなら `--auth` です。
 
-# 5. 型チェックとビルドで整合性を確認
-bun run typecheck
-bun run build
+### 2. 開発サーバーを起動する
 
-# 6. 開発サーバーを起動
+```bash
 bun run dev
 ```
 
-`http://localhost:3000` を開いてアプリを確認します。`/login` で `demo@example.com` / `secret` でサインインできます。
+型付きのルート／ページマニフェストを再生成（codegen）してからサーバーを起動します。`http://localhost:3333` を開いてください。
 
-## 各ステップの補足
+### 3. 何が表示されるか
 
-### プロジェクト作成
+ターミナルには Guren のバージョンと URL を添えた深紅の ASCII バナーが、ブラウザにはウェルカムページが表示されます。SQLite のデータベースファイルは必要になった時点で `./data/guren.db` に作成されます。新規アプリにはまだテーブル定義がないため、初回起動前にマイグレーションを実行する必要はありません。
 
-`--mode ssr` で SSR テンプレートを指定します。SPA を選ぶ場合は `--mode spa` を使います。空でないディレクトリに生成する場合は `--force` を付けてください。
+> [!TIP]
+> バックエンドの変更は Bun 経由でホットリロードされ、開発サーバーはフロントエンドアセット用に Vite を自動起動します。Vite を自分で起動したい場合は `GUREN_DEV_VITE=0` を、スクリプト実行時にバナーを消したい場合は `GUREN_DEV_BANNER=0` を設定してください。
 
-デフォルトのテンプレートは SQLite を使用するため、追加のデータベースセットアップなしですぐに開発を始められます。
+### 最初の機能を追加する
 
-### 機能の追加
+アプリが動いたら、次は何かを作ってみましょう。おすすめの次のステップは **[ミニブログを作るチュートリアル](../tutorials/overview.md)** です。今作ったアプリに、投稿の CRUD、認証、リレーションシップを使ったコメント機能を追加していく 3 部構成のコースです。
 
-`bunx guren add auth` は認証に必要な Provider、Controller、Validator、ルート、ページを一括生成します。`bunx guren add resource posts --fields "title:string,body:text"` は `PostController`、`PostResource`、`PostValidator`、CRUD ページ、named routes を生成します。
+## Part B: フルセットアップ
 
-### codegen
+以下はすべて初回セッションでは省略可能ですが、アプリが成長するにつれて必要になるものです。
 
-`bun run codegen` は次のファイルを生成します。
+### PostgreSQL または MySQL を使う
 
-- `.guren/routes.gen.ts` -- named route helper の型情報
-- `.guren/pages.gen.ts` -- Inertia page props の型情報
-- `.guren/data.gen.ts` -- JsonResource の型情報
-- `.guren/api-client.gen.ts` -- 型付き API クライアント
+雛形生成時に `--db postgres`（または `--db mysql`）を渡すか、プロンプトで選択します。スキャフォールダーが対応するデータベースの `docker-compose.yml` を書き出し、`DATABASE_URL` をそこに向けてくれます。**Docker Desktop（Compose v2）** がインストールされていれば、次のコマンドでデータベースを起動できます。
 
-codegen は `bun run typecheck` や `bun run build` の前に実行してください。
+```bash
+docker compose up -d
+```
+
+デフォルトの接続文字列:
+
+- PostgreSQL: `postgres://guren:guren@localhost:54322/guren`
+- MySQL: `mysql://guren:guren@localhost:33306/guren`
+
+使い終わったら `docker compose down` でコンテナを停止します。
+
+> [!TIP]
+> すでにローカルやクラウドで Postgres が動いていますか？ その場合は Docker を使わず、`DATABASE_URL` をそのインスタンスに向けるだけで構いません — このガイドの残りはそのまま通用します。SQLite で作ったアプリも、あとから `config/database.ts` を更新すれば切り替えられます。詳しくは [データベースガイド](./database.md) を参照してください。
 
 ### 環境変数
 
-```bash
-cp .env.example .env
-```
+スキャフォールダーは `.env.example` から `.env` を作成し、新しい `APP_KEY` を書き込みます。主な設定:
 
-主に `APP_URL`（Inertia に渡すベース URL）、`DATABASE_URL`（接続文字列）、`PORT`（HTTP ポート）を環境に合わせてください。
+- `APP_URL`: Inertia に伝えるベース URL（デフォルト `http://localhost:3333`）。
+- `DATABASE_URL`: 接続文字列 — SQLite ではファイルパス、Postgres / MySQL では URL。
+- `PORT`: 開発サーバーの HTTP ポート（デフォルト `3333`）。
+- `SESSION_DRIVER`、`CACHE_STORE`、`QUEUE_CONNECTION`: デフォルトはインメモリ／同期実行。マルチプロセスでデプロイする場合は `redis` に切り替えます。
 
 > [!CAUTION]
-> `.env` はリポジトリにコミットしないでください。漏洩した場合はデータベースユーザーのローテーションや API キーの再発行を行ってください。
+> `.env` はバージョン管理に含めないでください。もしコミットに認証情報が漏れてしまった場合は、データベースユーザーをローテーションし、ファイル内で参照している API キーをすべて再生成してください。
 
-### 本番環境で PostgreSQL を使う
+### 認証とリソースを追加する
 
-デフォルトの SQLite は開発には十分ですが、本番では PostgreSQL を推奨します。Docker で手軽に立てる例を示します。
-
-```bash
-docker run --name guren-postgres \
-  -e POSTGRES_USER=guren \
-  -e POSTGRES_PASSWORD=guren \
-  -e POSTGRES_DB=guren \
-  -p 54322:5432 \
-  -d postgres:17
-```
-
-`.env` の `DATABASE_URL` を `postgres://guren:guren@localhost:54322/guren` に変更し、`bun run db:migrate` を再実行してください。
-
-## さらに機能を追加する
-
-アプリが動いたら、必要に応じてサブシステムを追加できます。
+Guren には機能一式を雛形生成するジェネレーターが同梱されています。
 
 ```bash
-bunx guren add queue           # バックグラウンドジョブ (Memory/Redis)
-bunx guren add mail            # メール送信 (SMTP/Resend)
-bunx guren add events          # イベントディスパッチとリスナー
-bunx guren add cache           # キャッシュ (Memory/Redis/File)
-bunx guren add notifications   # マルチチャネル通知 (Mail/Database/Slack)
-bunx guren add storage         # ファイルストレージ (Local/S3/Memory)
-bunx guren add broadcasting    # リアルタイムブロードキャスト (SSE)
-bunx guren add schedule        # cron ベースのタスクスケジューリング
+bunx guren add auth
+bunx guren add resource posts --fields "title:string,body:text,published:boolean"
 ```
 
-機能を追加した後は `bun run codegen` を再実行して型を再生成してください。
+`add auth` はユーザー登録、ログイン、ログアウト、セッションミドルウェアをセットアップします。`add resource` は指定したフィールドに基づいて、モデル、マイグレーション、コントローラー、バリデーター、リソース、Inertia ページを生成します。ほかのジェネレーター（キュー、メール、イベント、ストレージなど）は `bunx guren add --help` で確認できます。
 
-## 本番ビルド
-
-本番環境にデプロイする準備ができたらビルドします。
+### 型付きマニフェストを生成する
 
 ```bash
-NODE_ENV=production bun run build
+bun run codegen
 ```
 
-クライアント/SSR ビルドが生成され、ハッシュ付きアセットとマニフェストが `public/assets/` に出力されます。実行中の Bun サーバーはこれを参照して SSR を返します。
+codegen は、エンドツーエンドの型安全を支える型付きルートヘルパーとページマニフェストを書き出します。`bun run dev` と `bun run build` が自動で実行するため、手動で実行する必要があるのは、サーバー停止中にルートやページを追加・リネームした場合だけです。
+
+### マイグレーションとシードデータの投入
+
+リソースを追加した（＝マイグレーションが生成された）ら、スキーマを適用してサンプルデータを投入します。
+
+```bash
+bun run db:migrate && bun run db:seed
+```
+
+これは SQLite、Postgres、MySQL のいずれでも同じように動きます。マイグレーションは `db/schema.ts` の Drizzle スキーマから生成されます。
+
+### 型チェックとテスト
+
+```bash
+bun run typecheck
+```
+
+型エラーは出たそばから修正しましょう — 問題を早期に捕まえるほうが、動いているアプリをデバッグするよりずっと簡単です。テストを追加したら（[テストガイド](./testing.md) 参照）、`bun test` で実行します。
+
+### 本番ビルド
+
+リリースの準備ができたら:
+
+```bash
+bun run build
+bun run preview
+```
+
+`build` はハッシュ付きのクライアントアセット（SSR モードではサーバーアセットも）を `public/assets/` 以下に出力し、ランタイムが読み込むマニフェストも生成します。`preview` は本番サーバーをローカルで起動するので、ビルドの動作確認ができます。ホスティングの選択肢は [デプロイガイド](./deployment.md) を参照してください。
 
 ## 次のステップ
 
-- [10分で最初の機能を作る](./first-steps.md) -- 実際にコードを書きながら流れを理解する
-- [アーキテクチャ](./architecture.md) -- フレームワークの構造を把握する
-- [ルーティング](./routing.md) -- ルート定義の詳細
-- [コントローラー](./controllers.md) -- リクエスト処理のパターン
-- [データベース](./database.md) -- ORM とマイグレーション
-- [フロントエンド](./frontend.md) -- Inertia + React の統合
-- [認証](./authentication.md) -- 認証の詳細設定
-- [テスティング](./testing.md) -- テストの書き方
-- [デプロイ](./deployment.md) -- 本番環境への配置
+- **[ミニブログを作るチュートリアル](../tutorials/overview.md)** — 初めての方におすすめのハンズオンコース。投稿の CRUD、認証、そしてコメントとリレーションシップを扱います。
+- **[ファーストステップ](./first-steps.md)** — 1 つのリクエストがフレームワークをどう流れるかを辿る 10 分のツアー。
 
-ツールの詳細は [CLI リファレンス](./cli.md) を参照してください。
+その後は、次の順番でガイドを読み進めてください。
+
+1. [アーキテクチャ](./architecture.md)
+2. [ルーティングガイド](./routing.md)
+3. [コントローラーガイド](./controllers.md)
+4. [データベースガイド](./database.md)
+5. [フロントエンドガイド](./frontend.md)
+6. [認証ガイド](./authentication.md)
+7. [テストガイド](./testing.md)
+8. [デプロイガイド](./deployment.md)
+
+道中では [CLI リファレンス](./cli.md) を手元に置いておくと便利です。問題を見つけたりアイデアがあれば、ぜひ Issue や PR を送ってください — コントリビューションを歓迎します。

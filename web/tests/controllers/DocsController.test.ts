@@ -48,17 +48,17 @@ describe('DocsController', () => {
   })
 
   it('renders categories on the docs index', async () => {
+    const gettingStarted = {
+      slug: 'getting-started',
+      title: 'Getting Started',
+      description: 'Welcome aboard',
+    }
     const categories: DocCategoryGroup[] = [
       {
         category: 'guides',
         title: 'Guides',
-        docs: [
-          {
-            slug: 'getting-started',
-            title: 'Getting Started',
-            description: 'Welcome aboard',
-          },
-        ],
+        docs: [gettingStarted],
+        sections: [{ title: 'Getting Started', docs: [gettingStarted] }],
       },
     ]
     vi.spyOn(docsService, 'listDocs').mockResolvedValue(categories)

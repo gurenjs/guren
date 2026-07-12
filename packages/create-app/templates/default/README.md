@@ -11,7 +11,7 @@ bun run dev
 
 That's it. No Docker, no database setup — SQLite is ready out of the box.
 
-Visit `http://localhost:3000` to see your app running.
+Visit `http://localhost:3333` to see your app running.
 
 ## Adding Features
 

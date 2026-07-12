@@ -4,7 +4,7 @@ Laravel のような書き心地の、フルスタック TypeScript フレーム
 
 ## まずはコードを見てください
 
-ルート、コントローラー、型付きレスポンス — たった数行で書けます。
+ルート、コントローラー、型付きレスポンス — これだけの行数で書けます。
 
 ```ts
 // routes/web.ts
@@ -55,7 +55,7 @@ export default class TaskController extends Controller {
 }
 ```
 
-React ページにはコントローラーから型付き props がそのまま渡ります — API レイヤーの手書きは不要です。
+React ページはコントローラーから型付きの props を直接受け取ります。API レイヤーを手書きする必要はありません。
 
 ```tsx
 // resources/js/pages/tasks/Index.tsx
@@ -78,7 +78,7 @@ export default function TasksIndex({ data, pagination }: Props) {
 }
 ```
 
-テストは自然な文章のように読めます。
+テストは英語の文章のように読めます。
 
 ```ts
 const app = await TestApp.create({ boot })
@@ -88,44 +88,46 @@ await app.post('/tasks', { title: 'Ship it' }).assertRedirect('/tasks')
 await app.actingAs(user).get('/dashboard').assertOk()
 ```
 
-## Guren の特徴
+## Guren の特長
 
-**Bun ネイティブ。** Guren は Bun ランタイム上で Hono を HTTP レイヤーとして動作します。Node.js の互換レイヤーを経由せず、Bun 上で直接動作します。Bun の高速起動、ネイティブ TypeScript 実行、組み込みテストランナーをそのまま活用できます。
+**最初から Bun ネイティブ。** Guren は Bun ランタイム上で動作し、HTTP レイヤーには Hono を採用しています。Node.js の互換シムは一切ありません。Bun の高速な起動、TypeScript のネイティブ実行、組み込みテストランナーをそのまま活用できます。
 
-**TypeScript で Laravel の開発体験。** Laravel を使ったことがあれば、リソースルーティング、`Controller` と `this.inertia()`、`Model.where().orderBy().get()` といったパターンにはすぐ馴染めます。使ったことがなくても大丈夫です — API は「やりたいこと」がそのまま読めるように設計されています。
+**Laravel の開発体験を、TypeScript で。** Laravel の経験があれば、リソースルーティング、`this.inertia()` を備えた `Controller` 基底クラス、`Model.where().orderBy().get()` といったパターンがすぐに馴染むはずです。経験がなくても心配いりません — API は「読めば何をするか分かる」設計になっています。
 
-**エンドツーエンドの型安全。** Drizzle のスキーマ型が Model に流れ、Controller を通って、React ページの props まで到達します。カラム名を変えると TypeScript がデータベースからブラウザまで、更新が必要な箇所をすべてキャッチします。
+**エンドツーエンドの型安全。** Drizzle スキーマの型がモデルへ、コントローラーを通って React ページの props へと流れます。カラム名を変更すれば、データベースからブラウザまで、更新が必要なすべての箇所を TypeScript が検出します。
 
-**必要な機能を標準搭載。ただし使用は任意。** 認証、バリデーション、キャッシュ、キュー、メール、イベント、ブロードキャスト、スケジューリング — 必要なときにすべて揃っています。各サブシステムは ServiceProvider によるオプトイン方式なので、使うものだけをロードします。
+**バッテリー同梱、ただし強制はしない。** 認証、バリデーション、キャッシュ、キュー、メール、イベント、ブロードキャスト、スケジューリング — 必要になったときにすべて揃っています。各サブシステムは ServiceProvider によるオプトイン方式なので、使うものだけを読み込みます。
 
-**設定より規約。** `bunx guren add auth` や `bunx guren add resource posts` で feature 単位に生成できます。CLI が正しい場所に正しい構造でファイルを作るので、フォルダ構成の議論ではなく機能開発に時間を使えます。
+**設定より規約。** `bunx guren add auth` や `bunx guren add resource posts` で機能一式を生成できます。CLI が適切な場所に適切な構造でファイルを配置するので、フォルダ構成の議論ではなく機能開発に時間を使えます。
 
-**グローバル状態よりアプリ単位。** 生成されたアプリは route registrar を `createApp({ routes })` に渡すため、複数アプリやテスト間でルート状態が混線しません。
+**グローバル状態ではなく registrar 方式のルーター。** 生成されるアプリはルート登録用の registrar を export し、`createApp({ routes })` に渡します。これによりルーティングは各アプリケーションインスタンスにスコープされます。
 
-## はじめよう
+## はじめる
+
+コマンドは 4 つだけ。Docker もデータベースサーバーも不要 — 新規アプリは最初から SQLite で動きます。
 
 ```bash
-bunx create-guren-app my-app --mode ssr
+bunx create-guren-app my-app   # scaffold — accept the default prompts (SSR, SQLite)
 cd my-app
-bun install
-bunx guren add auth
-bunx guren add resource posts --fields "title:string,body:text"
-bun run codegen
-bun run db:migrate && bun run db:seed
-bun run typecheck && bun run build
-bun run dev        # http://localhost:3333 にアクセス
+bun install                    # usually a no-op: the scaffolder installs for you
+bun run dev                    # start the dev server
 ```
 
-## さらに詳しく
+`http://localhost:3333` を開けば、Guren アプリが動いています。
 
-Guren が初めての方は、この順番で進めてください。
+## さらに学ぶ
 
-1. **[はじめの一歩](./first-steps.md)** — 10分で動く機能を作ります。
-2. **[環境構築](./getting-started.md)** — 環境設定とデータベースの準備。
-3. **[ルーティングガイド](./routing.md)** — グループ、ミドルウェア、リソースルート。
-4. **[コントローラーガイド](./controllers.md)** — リクエスト処理、入力ヘルパー、バリデーション。
-5. **[データベースガイド](./database.md)** — Drizzle スキーマ、マイグレーション、QueryBuilder、リレーション。
-6. **[フロントエンドガイド](./frontend.md)** — Inertia.js と React ページ、SSR。
-7. **[テスティングガイド](./testing.md)** — TestApp、アサーション、テストユーティリティ。
+次の順番で進めるのがおすすめです。
 
-CLI コマンドの詳細は [CLI リファレンス](./cli.md) を参照してください。用語がわからないときは [用語集](./glossary.md) をチェックしてください。
+1. **[クイックスタート](./getting-started.md)** — プロジェクトを雛形生成し、5 分程度で動かします。
+2. **[チュートリアル: ミニブログを作る](../tutorials/overview.md)** — **初めての方に最もおすすめ。** 3 部構成のハンズオンコースです。投稿の CRUD を作り、認証を追加し、リレーションシップを使ってコメント機能をつなぎます。完走すれば、動くコードとともにすべてのコアコンセプトに触れたことになります。
+3. **トピック別ガイド** — 全体像を掴んだあとの深掘りに:
+   - [ルーティング](./routing.md) — ルートグループ、ミドルウェア、リソースルート。
+   - [コントローラー](./controllers.md) — リクエスト処理、入力ヘルパー、バリデーション。
+   - [データベース](./database.md) — Drizzle スキーマ、マイグレーション、QueryBuilder、リレーションシップ。
+   - [フロントエンド](./frontend.md) — Inertia による React ページと SSR。
+   - [テスト](./testing.md) — TestApp、fluent なアサーション、テストユーティリティ。
+
+チュートリアルの前に軽くツアーをしたい方は、[ファーストステップ](./first-steps.md) をどうぞ。1 つのリクエストが各レイヤーをどう通るかを 10 分で辿れます。
+
+CLI コマンドの一覧は [CLI リファレンス](./cli.md) を参照してください。見慣れない用語があれば [用語集](./glossary.md) で確認できます。
