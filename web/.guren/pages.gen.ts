@@ -26,10 +26,16 @@ type DocSummary = {
   description?: string
 }
 
+type DocSection = {
+  title: string
+  docs: DocSummary[]
+}
+
 type DocCategoryGroup = {
   category: string
   title: string
   docs: DocSummary[]
+  sections: DocSection[]
 }
 
 type LocaleLink = {
