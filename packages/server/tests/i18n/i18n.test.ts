@@ -498,3 +498,39 @@ describe('Global functions', () => {
     expect(i18n.getLocale()).toBe('en')
   })
 })
+
+describe('I18nConfig loader option', () => {
+  it('accepts a custom loader (MemoryLoader) as documented', async () => {
+    const loader = new MemoryLoader({
+      en: { messages: { hello: 'Hello' } },
+      ja: { messages: { hello: 'こんにちは' } },
+    })
+
+    const i18n = createI18n({
+      locale: 'en',
+      fallbackLocale: 'en',
+      loader,
+    })
+
+    await i18n.loadLocales(['en', 'ja'])
+
+    expect(i18n.t('messages.hello')).toBe('Hello')
+    expect(i18n.forLocale('ja').t('messages.hello')).toBe('こんにちは')
+  })
+
+  it('prefers the loader over path when both are given', async () => {
+    const loader = new MemoryLoader({
+      en: { messages: { source: 'memory' } },
+    })
+
+    const i18n = createI18n({
+      locale: 'en',
+      path: './definitely-missing-lang-dir',
+      loader,
+    })
+
+    await i18n.loadLocale('en')
+
+    expect(i18n.t('messages.source')).toBe('memory')
+  })
+})

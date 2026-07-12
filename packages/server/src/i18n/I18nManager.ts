@@ -18,7 +18,7 @@ export class I18nManager {
 
   constructor(config: I18nConfig) {
     this.config = config
-    this.loader = config.path ? new JsonLoader(config.path) : null
+    this.loader = config.loader ?? (config.path ? new JsonLoader(config.path) : null)
 
     this.translator = new Translator({
       locale: config.locale,
