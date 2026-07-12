@@ -85,10 +85,35 @@ export class ModelUserProvider<User extends Authenticatable = Authenticatable> e
     return (user as PlainObject)[this.idColumn]
   }
 
+  /**
+   * Strip the password hash, remember token, and the model's `hidden`
+   * fields before the record leaves the auth layer. Credential
+   * validation happens on the raw record before sanitizing, so this
+   * never affects login — only what `auth.user()` exposes.
+   */
+  sanitize(user: User): User {
+    const blocked = new Set<string>([
+      this.passwordColumn,
+      this.rememberTokenColumn,
+      ...(((this.model as typeof Model).hidden as string[] | undefined) ?? []),
+    ])
+
+    const clean: PlainObject = {}
+    for (const [key, value] of Object.entries(user as PlainObject)) {
+      if (!blocked.has(key)) {
+        clean[key] = value
+      }
+    }
+
+    return clean as User
+  }
+
   override async setRememberToken(user: User, token: string | null): Promise<void> {
     if (typeof (user as PlainObject)[this.rememberTokenColumn] !== 'undefined') {
       ;(user as PlainObject)[this.rememberTokenColumn] = token
-      await (this.model as typeof Model).update({ [this.idColumn]: this.getId(user) }, { [this.rememberTokenColumn]: token })
+      // forceUpdate: the remember-token column is a trusted server-side
+      // write and is typically not in the model's fillable allowlist.
+      await (this.model as typeof Model).forceUpdate({ [this.idColumn]: this.getId(user) }, { [this.rememberTokenColumn]: token })
     }
   }
 

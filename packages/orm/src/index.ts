@@ -1,6 +1,7 @@
 import './instance-guard'
 export { Model, defineModel } from './Model'
 export { ModelNotFoundException } from './ModelNotFoundException'
+export { MassAssignmentException } from './MassAssignmentException'
 export type {
   PlainObject,
   InferModelRecord,

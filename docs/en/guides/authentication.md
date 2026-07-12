@@ -249,6 +249,8 @@ setInertiaSharedProps(async (ctx) => {
 })
 ```
 
+Sharing `auth.user()` this way is safe by default: the record is sanitized before it leaves the auth layer, so the password hash never reaches the browser (see [Sanitized User Records](#sanitized-user-records)).
+
 Augment `InertiaSharedProps` (see the Controllers guide) to type this `auth` payload for React pages.
 
 > `setInertiaSharedProps` replaces the whole resolver. When several parts of
@@ -288,11 +290,36 @@ export function registerWebRoutes(router: Router): void {
 ## Session Guard Helpers
 
 - `auth.check()` – resolves to `true` when a user is authenticated.
-- `auth.user()` – returns the current user record (or `null`).
+- `auth.user()` – returns the current user record (or `null`), sanitized: the password hash, remember token, and the model's `hidden` fields are stripped.
 - `auth.userOrFail()` – returns the current user or throws `AuthenticationException` (401). Useful when you know the route is protected and want to avoid null checks.
 - `auth.login(user, remember?)` – logs in the given user and optionally issues a remember token.
 - `auth.attempt(credentials, remember?)` – validates credentials using the active guard and logs in on success.
 - `auth.logout()` – clears the session and remember token.
+
+## Sanitized User Records
+
+`auth.user()` — and the cached user available right after `login()` or `attempt()` — never exposes credential material. `ModelUserProvider` strips the password column, the remember-token column, and any fields listed in the model's `static hidden` before the record leaves the auth layer:
+
+```ts
+export class User extends AuthenticatableModel<UserRecord> {
+  static override table = users
+  static override readonly recordType = {} as UserRecord
+  static override hidden = ['passwordHash', 'rememberToken']
+}
+```
+
+The `make:auth` scaffolder generates the user model with this `hidden` declaration out of the box.
+
+Credential validation still runs on the raw database record internally, so login and remember-me tokens are unaffected — sanitization only changes what `auth.user()` exposes to application code.
+
+Custom user providers can opt in by implementing the optional `sanitize(user)` method on the `UserProvider` interface. `SessionGuard` calls it before caching or returning the user:
+
+```ts
+sanitize(user: AuthUser): AuthUser {
+  const { passwordHash, ...safe } = user
+  return safe as AuthUser
+}
+```
 
 ## Remember Tokens
 

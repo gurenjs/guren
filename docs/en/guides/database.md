@@ -193,12 +193,43 @@ export class Post extends Model<PostRecord> {
 }
 ```
 
+When `fillable` is set, passing any field outside the allowlist to `create()` or `update()` throws a `MassAssignmentException` (exported from `@guren/core`). The message names the blocked fields, so a typo or an injection attempt fails loudly at the call site instead of being silently discarded and resurfacing later as a confusing NOT NULL violation:
+
+```ts
+await Post.create({ title: 'Hello', body: '...', status: 'draft', authorId: 1 })
+// MassAssignmentException: Post: mass assignment blocked for field(s) "authorId"
+```
+
+For trusted, server-side-assembled data — OAuth account linking, seeders, system records — bypass the allowlist with `forceCreate()` / `forceUpdate()`:
+
+```ts
+const user = await User.forceCreate({
+  name: profile.name,
+  email: profile.email,
+  passwordHash: `oauth:${provider}:${profile.id}`,
+})
+
+await User.forceUpdate({ id: user.id }, { emailVerifiedAt: new Date() })
+```
+
+> [!WARNING]
+> `forceCreate()` / `forceUpdate()` skip mass-assignment protection entirely. Never pass raw request input to them.
+
+To restore the previous behavior of silently dropping non-fillable fields, opt out per model:
+
+```ts
+  static fillable = ['title', 'body', 'status']
+  static strictFillable = false
+```
+
 Or use `guarded` to block specific fields:
 
 ```ts
   // Denylist — everything except these is assignable
   static guarded = ['id', 'createdAt', 'updatedAt']
 ```
+
+Guarded fields are always silently stripped — the strict throwing behavior applies only to models that declare `fillable`.
 
 > [!NOTE]
 > Use `fillable` or `guarded`, not both. If neither is set, all fields are assignable.
@@ -552,6 +583,8 @@ const json = User.serialize(user)
 // { id: 1, name: "John", email: "john@example.com" }
 // passwordHash and rememberToken are excluded
 ```
+
+Fields listed in `hidden` are also stripped from the record returned by `auth.user()`, so they never leak into Inertia shared props or API responses that expose the authenticated user. See the [Authentication guide](./authentication.md) for details.
 
 ### Visible Fields
 

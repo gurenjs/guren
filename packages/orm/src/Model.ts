@@ -11,6 +11,7 @@ import { ModelNotFoundException } from './ModelNotFoundException'
 import { QueryBuilder } from './QueryBuilder'
 import type { WhereOperator } from './QueryBuilder'
 import { serializeRecord, serializeRecords } from './serialization'
+import { MassAssignmentException } from './MassAssignmentException'
 
 /** Generic plain object type used throughout the ORM. */
 export type PlainObject = Record<string, unknown>
@@ -299,7 +300,12 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
 
   /**
    * Whitelist of fields allowed for mass assignment.
-   * If set, only these fields will be accepted in `create()` and `update()`.
+   * If set, `create()` and `update()` accept only these fields — input
+   * containing any other key throws a MassAssignmentException so bugs
+   * (and injection attempts) surface immediately instead of being
+   * silently discarded. Use `forceCreate()` / `forceUpdate()` for
+   * trusted server-side data, or set `strictFillable = false` to
+   * restore silent discarding.
    *
    * @example
    * class User extends Model<UserRecord> {
@@ -307,6 +313,13 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    * }
    */
   static fillable?: string[]
+
+  /**
+   * When `fillable` is set, controls what happens to input fields outside
+   * the allowlist: `true` (default) throws a MassAssignmentException,
+   * `false` silently discards them (pre-1.0 behavior).
+   */
+  static strictFillable?: boolean
 
   /**
    * Blacklist of fields excluded from mass assignment.
@@ -654,6 +667,13 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   static filterFillable(data: PlainObject): PlainObject {
     const fillableFields = this.fillable
     if (fillableFields) {
+      if (this.strictFillable !== false) {
+        const blocked = Object.keys(data).filter((key) => !fillableFields.includes(key))
+        if (blocked.length > 0) {
+          throw new MassAssignmentException(this.name, blocked)
+        }
+      }
+
       const filtered: PlainObject = {}
       for (const key of fillableFields) {
         if (key in data) {
@@ -1534,8 +1554,37 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     data: TCreateFor<T>,
     writeOptions?: ModelWriteOptions,
   ): Promise<TRecordFor<T>> {
+    return this.runCreate(data, writeOptions, true)
+  }
+
+  /**
+   * Create a record bypassing mass-assignment protection. Use for trusted,
+   * server-side-assembled data (OAuth account linking, seeders, system
+   * records) — never for raw request input.
+   *
+   * @example
+   * const user = await User.forceCreate({
+   *   name: profile.name,
+   *   email: profile.email,
+   *   passwordHash: `oauth:${provider}:${profile.id}`,
+   * })
+   */
+  static async forceCreate<T extends typeof Model>(
+    this: T,
+    data: TCreateFor<T>,
+    writeOptions?: ModelWriteOptions,
+  ): Promise<TRecordFor<T>> {
+    return this.runCreate(data, writeOptions, false)
+  }
+
+  protected static async runCreate<T extends typeof Model>(
+    this: T,
+    data: TCreateFor<T>,
+    writeOptions: ModelWriteOptions | undefined,
+    applyFillable: boolean,
+  ): Promise<TRecordFor<T>> {
     const table = this.resolveTable()
-    const filtered = this.filterFillable(data)
+    const filtered = applyFillable ? this.filterFillable(data) : { ...(data as PlainObject) }
     const payload = await this.preparePersistencePayload(filtered)
 
     const hooks = this.hooks
@@ -1593,13 +1642,36 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     data: Partial<TCreateFor<T>>,
     writeOptions?: ModelWriteOptions,
   ): Promise<TRecordFor<T>> {
+    return this.runUpdate(where, data, writeOptions, true)
+  }
+
+  /**
+   * Update records bypassing mass-assignment protection. Use for trusted,
+   * server-side-assembled data — never for raw request input.
+   */
+  static async forceUpdate<T extends typeof Model>(
+    this: T,
+    where: WhereClauseFor<T>,
+    data: Partial<TCreateFor<T>>,
+    writeOptions?: ModelWriteOptions,
+  ): Promise<TRecordFor<T>> {
+    return this.runUpdate(where, data, writeOptions, false)
+  }
+
+  protected static async runUpdate<T extends typeof Model>(
+    this: T,
+    where: WhereClauseFor<T>,
+    data: Partial<TCreateFor<T>>,
+    writeOptions: ModelWriteOptions | undefined,
+    applyFillable: boolean,
+  ): Promise<TRecordFor<T>> {
     const table = this.resolveTable()
     const adapter = this.getAdapter()
     if (!adapter.update) {
       throw new Error('Configured adapter does not support update operations.')
     }
 
-    const filtered = this.filterFillable(data)
+    const filtered = applyFillable ? this.filterFillable(data) : { ...(data as PlainObject) }
     const payload = await this.preparePersistencePayload(filtered)
 
     const hooks = this.hooks

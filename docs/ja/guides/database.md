@@ -579,6 +579,8 @@ const json = User.serialize(user)
 // passwordHash と rememberToken は除外される
 ```
 
+`hidden` に列挙したフィールドは `auth.user()` が返すレコードからも除去されるため、認証済みユーザーを公開する Inertia 共有 props や API レスポンスに漏れることはありません。詳細は[認証ガイド](./authentication.md)を参照してください。
+
 ### 表示フィールドのホワイトリスト
 
 ブラックリストの代わりにホワイトリストを使用することもできます。
@@ -630,8 +632,37 @@ export class Post extends Model<PostRecord> {
   static override readonly recordType = {} as PostRecord
 
   // これらのフィールドのみ一括代入可能
-  static fillable = ['title', 'content', 'status', 'authorId']
+  static fillable = ['title', 'body', 'status']
 }
+```
+
+`fillable` を設定すると、許可リスト外のフィールドを `create()` や `update()` に渡した場合、`MassAssignmentException`（`@guren/core` からエクスポート）がスローされます。エラーメッセージにはブロックされたフィールド名が含まれるため、タイプミスやインジェクションの試みが黙って破棄されて後から NOT NULL 違反として現れるのではなく、呼び出し箇所でその場で検出できます。
+
+```ts
+await Post.create({ title: 'Hello', body: '...', status: 'draft', authorId: 1 })
+// MassAssignmentException: Post: mass assignment blocked for field(s) "authorId"
+```
+
+OAuth アカウント連携やシーダー、システムレコードなど、サーバーサイドで組み立てた信頼できるデータには、許可リストをバイパスする `forceCreate()` / `forceUpdate()` を使います。
+
+```ts
+const user = await User.forceCreate({
+  name: profile.name,
+  email: profile.email,
+  passwordHash: `oauth:${provider}:${profile.id}`,
+})
+
+await User.forceUpdate({ id: user.id }, { emailVerifiedAt: new Date() })
+```
+
+> [!WARNING]
+> `forceCreate()` / `forceUpdate()` はマスアサインメント保護を完全にスキップします。リクエスト入力をそのまま渡さないでください。
+
+以前の「許可リスト外のフィールドを黙って破棄する」挙動に戻したい場合は、モデルごとにオプトアウトできます。
+
+```ts
+  static fillable = ['title', 'body', 'status']
+  static strictFillable = false
 ```
 
 あるいは、`guarded` で特定のフィールドをブロックし、それ以外をすべて許可することもできます。
@@ -645,6 +676,8 @@ export class Post extends Model<PostRecord> {
   static guarded = ['id', 'createdAt', 'updatedAt']
 }
 ```
+
+`guarded` のフィールドは従来どおり黙って除外されます。例外をスローする厳格な挙動は、`fillable` を宣言したモデルにのみ適用されます。
 
 `fillable` と `guarded` はどちらか一方を使ってください。`fillable` は許可リスト、`guarded` は拒否リストです。どちらも設定されていない場合は、すべてのフィールドが代入可能になります。
 

@@ -247,6 +247,8 @@ setInertiaSharedProps(async (ctx) => {
 })
 ```
 
+このように `auth.user()` を共有する方法はデフォルトで安全です。レコードは認証レイヤーを出る前にサニタイズされるため、パスワードハッシュがブラウザに届くことはありません（後述の「サニタイズされたユーザーレコード」を参照）。
+
 `InertiaSharedProps` を拡張し、React 側でも型付けしてください（詳細はコントローラーガイドを参照）。
 
 > `setInertiaSharedProps` はリゾルバー全体を置き換えます。auth・i18n・flash
@@ -285,11 +287,36 @@ export function registerWebRoutes(router: Router): void {
 ## セッションガードのヘルパー
 
 - `auth.check()` — 認証済みなら `true`。
-- `auth.user()` — 現在のユーザーレコード（または `null`）。
+- `auth.user()` — 現在のユーザーレコード（または `null`）。パスワードハッシュ・remember トークン・モデルの `hidden` フィールドは除去されたサニタイズ済みレコードを返します。
 - `auth.userOrFail()` — 現在のユーザーを返すか、未認証なら `AuthenticationException`（401）をスロー。ルートが保護されていると分かっている場合に、null チェックを省略できます。
 - `auth.login(user, remember?)` — 指定ユーザーでログインし、任意で remember トークンを発行。
 - `auth.attempt(credentials, remember?)` — 資格情報を検証し、成功時にログイン。
 - `auth.logout()` — セッションと remember トークンをクリア。
+
+## サニタイズされたユーザーレコード
+
+`auth.user()`（および `login()` / `attempt()` 直後にキャッシュされるユーザー）が資格情報を露出することはありません。`ModelUserProvider` は、レコードが認証レイヤーを出る前に、パスワードカラム・remember トークンカラム・モデルの `static hidden` に列挙されたフィールドを除去します。
+
+```ts
+export class User extends AuthenticatableModel<UserRecord> {
+  static override table = users
+  static override readonly recordType = {} as UserRecord
+  static override hidden = ['passwordHash', 'rememberToken']
+}
+```
+
+`make:auth` スキャフォルダーは、この `hidden` 宣言を含むユーザーモデルを最初から生成します。
+
+資格情報の検証は内部で生のデータベースレコードに対して行われるため、ログインや remember me の動作には影響しません。サニタイズが変えるのは、`auth.user()` がアプリケーションコードに公開する内容だけです。
+
+カスタムのユーザープロバイダーは、`UserProvider` インターフェースのオプションメソッド `sanitize(user)` を実装することでオプトインできます。`SessionGuard` はユーザーをキャッシュ・返却する前にこのメソッドを呼び出します。
+
+```ts
+sanitize(user: AuthUser): AuthUser {
+  const { passwordHash, ...safe } = user
+  return safe as AuthUser
+}
+```
 
 ## Remember トークン
 

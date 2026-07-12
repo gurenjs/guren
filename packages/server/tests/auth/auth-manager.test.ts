@@ -115,3 +115,29 @@ describe('AuthManager', () => {
     })
   })
 })
+
+describe('ModelUserProvider.sanitize', () => {
+  test('strips the password column, remember token, and model hidden fields', async () => {
+    const { ModelUserProvider } = await import('../../src/auth/providers/ModelUserProvider')
+
+    class FakeUserModel {
+      static hidden = ['apiSecret']
+    }
+
+    const provider = new ModelUserProvider(FakeUserModel as never, {
+      passwordColumn: 'passwordHash',
+      rememberTokenColumn: 'rememberToken',
+    })
+
+    const clean = provider.sanitize({
+      id: 1,
+      email: 'a@x.com',
+      passwordHash: 'scrypt:...',
+      rememberToken: 'tok',
+      apiSecret: 's3cret',
+      name: 'A',
+    } as never) as unknown as Record<string, unknown>
+
+    expect(clean).toEqual({ id: 1, email: 'a@x.com', name: 'A' })
+  })
+})
