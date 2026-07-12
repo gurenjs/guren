@@ -11,7 +11,7 @@ export class RequestAuthContext implements AuthContext {
   constructor(
     private readonly manager: { getDefaultGuard(): string },
     private readonly ctx: Context,
-    private readonly currentSession: Session | undefined,
+    private readonly resolveSession: () => Session | undefined,
     private readonly resolveGuard: GuardResolver,
   ) {}
 
@@ -26,7 +26,7 @@ export class RequestAuthContext implements AuthContext {
   }
 
   session<T extends Session = Session>(): T | undefined {
-    return this.currentSession as T | undefined
+    return this.resolveSession() as T | undefined
   }
 
   async check(): Promise<boolean> {

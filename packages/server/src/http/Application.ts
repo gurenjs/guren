@@ -217,9 +217,14 @@ export class Application {
 
     // AuthServiceProvider (session + CSRF + auth context) is registered
     // when options.auth is set. For apps that manually wire sessions,
-    // auth context is attached as a fallback in boot().
+    // attach the auth context fallback here in the constructor so that
+    // middleware registered via app.use() before boot() (e.g.
+    // requireAuthenticated) still finds it. The context resolves its
+    // session lazily, so running ahead of the session middleware is fine.
     if (this.options.auth) {
       this.providerManager.register(AuthServiceProvider)
+    } else {
+      this.hono.use('*', attachAuthContext((ctx) => this.authManager.createAuthContext(ctx)))
     }
 
     // Authorization gate is always available; user providers registered
@@ -288,12 +293,9 @@ export class Application {
     this.mountSecurityDefaults()
     await this.providerManager.registerAll()
 
-    // If no AuthServiceProvider was registered (no options.auth), attach
-    // auth context as a fallback so manual session + requireAuthenticated works.
-    // Runs before boot() callback so routes registered there have auth context.
-    if (!this.options.auth) {
-      this.hono.use('*', attachAuthContext((ctx) => this.authManager.createAuthContext(ctx)))
-    }
+    // Note: for apps without options.auth, the auth context fallback is
+    // attached in the constructor so middleware registered via app.use()
+    // before boot() can rely on it (see #13).
 
     await this.options.boot?.(this.hono)
 

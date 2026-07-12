@@ -269,3 +269,58 @@ describe('prepared headers on raw Response returns', () => {
     expect(response.headers.get('X-Locale')).toBe('handler')
   })
 })
+
+describe('route contract array query params (#12)', () => {
+  it('preserves repeated query keys as arrays for inline contract handlers', async () => {
+    const router = new Router()
+    router.get('/search', {
+      query: z.object({
+        tag: z.array(z.string()),
+        page: z.coerce.number().default(1),
+      }),
+    }, async ({ query }) => ({ tags: query.tag, page: query.page }))
+
+    const app = new Hono()
+    router.mount(app)
+
+    const response = await app.request('/search?tag=a&tag=b&page=2')
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ tags: ['a', 'b'], page: 2 })
+  })
+
+  it('keeps single occurrences as plain strings', async () => {
+    const router = new Router()
+    router.get('/filter', {
+      query: z.object({ status: z.string() }),
+    }, async ({ query }) => ({ status: query.status }))
+
+    const app = new Hono()
+    router.mount(app)
+
+    const response = await app.request('/filter?status=open')
+    expect(await response.json()).toEqual({ status: 'open' })
+  })
+
+  it('accepts arrays through controller-action contract validation middleware', async () => {
+    class SearchController extends Controller {
+      async index() {
+        return new Response('ok')
+      }
+    }
+
+    const router = new Router()
+    router.get('/posts', {
+      query: z.object({ tag: z.array(z.string()).min(2) }),
+    }, [SearchController, 'index'])
+
+    const app = new Hono()
+    app.onError((err, c) => c.json({ message: err.message }, 422))
+    router.mount(app)
+
+    const ok = await app.request('/posts?tag=a&tag=b')
+    expect(ok.status).toBe(200)
+
+    const bad = await app.request('/posts?tag=a')
+    expect(bad.status).toBe(422)
+  })
+})

@@ -26,6 +26,21 @@ export async function parseRequestPayload(ctx: Context): Promise<Record<string, 
   return {}
 }
 
+/**
+ * Collects query parameters preserving repeated keys as arrays while keeping
+ * single occurrences as plain strings (`?tag=a&tag=b` → `{ tag: ['a', 'b'] }`,
+ * `?page=2` → `{ page: '2' }`). Use this instead of `ctx.req.query()` when
+ * feeding query data into validation schemas.
+ */
+export function flattenRequestQueries(ctx: Context): Record<string, unknown> {
+  const queries = ctx.req.queries()
+  const flat: Record<string, unknown> = {}
+  for (const [key, values] of Object.entries(queries)) {
+    flat[key] = values.length === 1 ? values[0] : values
+  }
+  return flat
+}
+
 export interface ValidationIssueLike {
   path: PropertyKey[]
   message: string

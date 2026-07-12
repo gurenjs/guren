@@ -560,7 +560,9 @@ export class QueryBuilder<
 
   /**
    * Load eager relations onto fetched results.
-   * Supports dot notation for nested relations (e.g., 'posts.comments').
+   * Supports dot notation for nested relations at any depth
+   * (e.g., 'posts.comments.author') — the full path is delegated to
+   * Model.loadRelationInto, which recurses through the relation chain.
    */
   private readonly loadEagerRelations = async (results: TResult[]): Promise<TResult[]> => {
     if (this.eagerLoad.length === 0 || results.length === 0) return results
@@ -571,76 +573,11 @@ export class QueryBuilder<
     }
 
     for (const relation of this.eagerLoad) {
-      const parts = relation.split('.')
-      const topLevel = parts[0]
-
-      // Load top-level relation
-      await model.loadRelationInto(copies as PlainObject[], topLevel)
-
-      // Handle nested relations via dot notation
-      if (parts.length > 1) {
-        const nestedName = parts.slice(1).join('.')
-        // Collect all nested records from the top-level relation
-        const nestedRecords: PlainObject[] = []
-        for (const record of copies) {
-          const related = (record as PlainObject)[topLevel]
-          if (Array.isArray(related)) {
-            nestedRecords.push(...related)
-          } else if (related && typeof related === 'object') {
-            nestedRecords.push(related as PlainObject)
-          }
-        }
-
-        if (nestedRecords.length > 0) {
-          // Resolve the related model's class to load nested relations
-          const topDef = (model as any).getRelationDefinition(topLevel) // eslint-disable-line @typescript-eslint/no-explicit-any
-          if (topDef) {
-            const relatedModel = await resolveRelatedModel(topDef.related)
-            if (relatedModel) {
-              const nestedModel = relatedModel as typeof Model & {
-                loadRelationInto(records: PlainObject[], name: string): Promise<void>
-              }
-              // Recursively handle deeper nesting
-              const nestedParts = parts.slice(1)
-              await nestedModel.loadRelationInto(nestedRecords, nestedParts[0])
-
-              if (nestedParts.length > 1) {
-                // For deeper nesting, recurse through remaining parts
-                for (let i = 1; i < nestedParts.length; i++) {
-                  const subRecords: PlainObject[] = []
-                  for (const nr of nestedRecords) {
-                    const sub = nr[nestedParts[i - 1]]
-                    if (Array.isArray(sub)) subRecords.push(...sub)
-                    else if (sub && typeof sub === 'object') subRecords.push(sub as PlainObject)
-                  }
-                  if (subRecords.length === 0) break
-                  // Would need to resolve the next model in the chain — simplified for now
-                }
-              }
-            }
-          }
-        }
-      }
+      await model.loadRelationInto(copies as PlainObject[], relation)
     }
 
     return copies as TResult[]
   }
-}
-
-async function resolveRelatedModel(
-  reference: typeof Model | (() => typeof Model | Promise<typeof Model>),
-): Promise<typeof Model | null> {
-  if (typeof reference === 'function' && 'prototype' in reference) {
-    try {
-      if ((reference as any).resolveTable) return reference as typeof Model // eslint-disable-line @typescript-eslint/no-explicit-any
-    } catch { /* not a model class */ }
-  }
-  if (typeof reference === 'function') {
-    try {
-      return await (reference as () => typeof Model | Promise<typeof Model>)()
-    } catch { return null }
-  }
-  return null
 }
 
 /**
