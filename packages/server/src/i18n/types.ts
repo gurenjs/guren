@@ -85,9 +85,15 @@ export interface I18nConfig {
   fallbackLocale?: string
 
   /**
-   * Path to translation files.
+   * Path to translation files (constructs a JsonLoader internally).
    */
   path?: string
+
+  /**
+   * Custom translation loader (e.g. JsonLoader, MemoryLoader).
+   * Takes precedence over `path`.
+   */
+  loader?: TranslationLoader
 
   /**
    * Preloaded messages.

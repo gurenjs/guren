@@ -260,9 +260,12 @@ function setXsrfCookie(
   options: CsrfOptions['cookieOptions'] = {},
 ): void {
   const { path = '/', secure = DEFAULT_COOKIE_SECURE, sameSite = 'Lax' } = options
-  // httpOnly must be false so JavaScript (Axios) can read the cookie
+  // httpOnly must be false so JavaScript (Axios) can read the cookie.
+  // Must append: setting Set-Cookie wholesale on the finalized response
+  // wipes cookies added by inner middleware and handlers.
   ctx.header(
     'Set-Cookie',
     `${XSRF_COOKIE_NAME}=${encodeURIComponent(token)}; Path=${path}; SameSite=${sameSite}${secure ? '; Secure' : ''}`,
+    { append: true },
   )
 }

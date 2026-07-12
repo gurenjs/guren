@@ -379,3 +379,53 @@ describe('createCsrfMiddleware', () => {
     expect(token1).toBe(token2) // Same token across session
   })
 })
+
+describe('setXsrfCookie append behavior', () => {
+  it('preserves cookies set by inner middleware and handlers', async () => {
+    const app = createTestApp()
+
+    app.use(async (c, next) => {
+      c.header('Set-Cookie', 'locale=ja; Path=/; SameSite=Lax', { append: true })
+      await next()
+    })
+
+    app.get('/page', (c) => c.text('page content'))
+
+    const res = await app.request('/page')
+    const cookies = res.headers.getSetCookie()
+
+    expect(cookies.some((c) => c.startsWith('locale=ja'))).toBe(true)
+    expect(cookies.some((c) => c.startsWith('XSRF-TOKEN='))).toBe(true)
+  })
+
+  it('preserves cookies on protected methods after a successful mutation', async () => {
+    const app = createTestApp()
+    let token: string | undefined
+
+    app.get('/form', (c) => {
+      token = getCsrfToken(c)
+      return c.text('form')
+    })
+
+    app.post('/submit', (c) => {
+      c.header('Set-Cookie', 'theme=dark; Path=/; SameSite=Lax', { append: true })
+      return c.text('submitted')
+    })
+
+    const getRes = await app.request('/form')
+    const cookie = extractCookie(getRes)
+
+    const postRes = await app.request('/submit', {
+      method: 'POST',
+      headers: {
+        [CSRF_HEADER_NAME]: token!,
+        Cookie: cookie,
+      },
+    })
+
+    expect(postRes.status).toBe(200)
+    const cookies = postRes.headers.getSetCookie()
+    expect(cookies.some((c) => c.startsWith('theme=dark'))).toBe(true)
+    expect(cookies.some((c) => c.startsWith('XSRF-TOKEN='))).toBe(true)
+  })
+})
