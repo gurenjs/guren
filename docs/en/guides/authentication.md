@@ -251,6 +251,17 @@ setInertiaSharedProps(async (ctx) => {
 
 Augment `InertiaSharedProps` (see the Controllers guide) to type this `auth` payload for React pages.
 
+> `setInertiaSharedProps` replaces the whole resolver. When several parts of
+> your app contribute shared props (auth, i18n, flash, …), use
+> `shareInertiaProps` instead — it merges its props over whatever was
+> registered before:
+>
+> ```ts
+> import { shareInertiaProps } from '@guren/core'
+>
+> shareInertiaProps((ctx) => ({ i18n: { locale: detectLocale(ctx) } }))
+> ```
+
 Route middleware makes protecting endpoints straightforward:
 
 ```ts

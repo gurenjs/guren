@@ -18,7 +18,7 @@ export type {
 } from './mvc/Router'
 export { ViewEngine } from './mvc/ViewEngine'
 export { inertia } from './mvc/inertia/InertiaEngine'
-export { setInertiaSharedProps } from './mvc/inertia/shared'
+export { setInertiaSharedProps, getInertiaSharedPropsResolver, shareInertiaProps } from './mvc/inertia/shared'
 export type {
   InertiaOptions,
   InertiaPagePayload,

@@ -249,6 +249,16 @@ setInertiaSharedProps(async (ctx) => {
 
 `InertiaSharedProps` を拡張し、React 側でも型付けしてください（詳細はコントローラーガイドを参照）。
 
+> `setInertiaSharedProps` はリゾルバー全体を置き換えます。auth・i18n・flash
+> など複数箇所から共有 props を提供する場合は、既存の props にマージする
+> `shareInertiaProps` を使ってください:
+>
+> ```ts
+> import { shareInertiaProps } from '@guren/core'
+>
+> shareInertiaProps((ctx) => ({ i18n: { locale: detectLocale(ctx) } }))
+> ```
+
 ルートミドルウェアを使うと保護が簡単です。
 
 ```ts

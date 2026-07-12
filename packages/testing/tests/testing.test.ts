@@ -373,6 +373,37 @@ describe('TestApp', () => {
     const response = await testApp.actingAs(user).get('/protected')
     expect(response.status).toBe(200)
   })
+
+  it('withHeaders sends custom headers on every request', async () => {
+    const app = new Hono()
+    app.get('/echo', (c) => c.json({
+      lang: c.req.header('Accept-Language') ?? null,
+      cookie: c.req.header('Cookie') ?? null,
+    }))
+
+    const testApp = TestApp.fromFetch((request) => app.fetch(request))
+    const localized = testApp.withHeaders({ 'Accept-Language': 'en', Cookie: 'locale=en' })
+
+    await localized.get('/echo').assertJson({ lang: 'en', cookie: 'locale=en' })
+    // The original instance is unchanged
+    await testApp.get('/echo').assertJson({ lang: null, cookie: null })
+  })
+
+  it('withHeader composes with actingAs', async () => {
+    const app = new Hono()
+    app.get('/echo', (c) => c.json({
+      lang: c.req.header('Accept-Language') ?? null,
+      user: c.req.header('X-Testing-User') !== undefined,
+    }))
+
+    const testApp = TestApp.fromFetch((request) => app.fetch(request))
+    const response = await testApp
+      .actingAs({ id: 1 })
+      .withHeader('Accept-Language', 'ja')
+      .get('/echo')
+
+    expect(await response.json()).toEqual({ lang: 'ja', user: true })
+  })
 })
 
 describe('FakeQueue', () => {

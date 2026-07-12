@@ -214,3 +214,58 @@ describe('Router middleware as terminal handler', () => {
     expect(response.status).toBe(204)
   })
 })
+
+describe('prepared headers on raw Response returns', () => {
+  it('merges c.header() values from middleware into controller responses', async () => {
+    const router = new Router()
+    router.get('/posts', [StubController, 'index'])
+
+    const app = new Hono()
+    app.use(async (c, next) => {
+      c.header('X-Locale', 'ja')
+      c.header('Set-Cookie', 'locale=ja; Path=/', { append: true })
+      await next()
+    })
+    router.mount(app)
+
+    const response = await app.request('/posts')
+
+    expect(response.status).toBe(200)
+    expect(await response.text()).toBe('index')
+    expect(response.headers.get('X-Locale')).toBe('ja')
+    expect(response.headers.getSetCookie()).toContain('locale=ja; Path=/')
+  })
+
+  it('merges c.header() values into raw Response returns from inline handlers', async () => {
+    const router = new Router()
+    router.get('/raw', () => new Response('raw body', { headers: { 'X-From-Handler': 'yes' } }))
+
+    const app = new Hono()
+    app.use(async (c, next) => {
+      c.header('X-Locale', 'en')
+      await next()
+    })
+    router.mount(app)
+
+    const response = await app.request('/raw')
+
+    expect(response.headers.get('X-Locale')).toBe('en')
+    expect(response.headers.get('X-From-Handler')).toBe('yes')
+    expect(await response.text()).toBe('raw body')
+  })
+
+  it('lets the handler response win on header conflicts', async () => {
+    const router = new Router()
+    router.get('/conflict', () => new Response('ok', { headers: { 'X-Locale': 'handler' } }))
+
+    const app = new Hono()
+    app.use(async (c, next) => {
+      c.header('X-Locale', 'middleware')
+      await next()
+    })
+    router.mount(app)
+
+    const response = await app.request('/conflict')
+    expect(response.headers.get('X-Locale')).toBe('handler')
+  })
+})
