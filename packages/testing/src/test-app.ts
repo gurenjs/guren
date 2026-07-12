@@ -447,13 +447,31 @@ export class TestApp {
    * Return a new TestApp that sends `Accept: application/json` on every request.
    */
   json(): TestApp {
+    return this.withHeaders({ Accept: 'application/json' })
+  }
+
+  /**
+   * Return a new TestApp that sends the given headers on every request.
+   *
+   * @example
+   * const en = http.withHeaders({ 'Accept-Language': 'en' })
+   * await en.get('/') // rendered with the English locale
+   */
+  withHeaders(headers: Record<string, string>): TestApp {
     const copy = new TestApp(this.fetchFn, this.baseUrl)
     copy.defaultHeaders = {
       ...this.defaultHeaders,
-      Accept: 'application/json',
+      ...headers,
     }
     copy.authenticatedUser = this.authenticatedUser
     return copy
+  }
+
+  /**
+   * Return a new TestApp that sends the given header on every request.
+   */
+  withHeader(name: string, value: string): TestApp {
+    return this.withHeaders({ [name]: value })
   }
 
   /**

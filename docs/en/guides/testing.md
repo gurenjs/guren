@@ -109,6 +109,27 @@ test('API validates input', async () => {
 })
 ```
 
+## Custom Request Headers
+
+Use `withHeaders()` / `withHeader()` to send headers on every request — handy
+for locale detection, API versioning, or bearer tokens. Like `actingAs()` and
+`json()`, they return a new `TestApp`, so variants compose freely:
+
+```ts
+test('renders the English locale', async () => {
+  const en = app.withHeaders({ 'Accept-Language': 'en' })
+  await en.get('/').assertOk()
+})
+
+test('accepts an API token', async () => {
+  await app
+    .withHeader('Authorization', `Bearer ${token}`)
+    .json()
+    .get('/api/me/tasks')
+    .assertOk()
+})
+```
+
 ## Database in Tests
 
 Keep tests isolated by resetting the database between runs:

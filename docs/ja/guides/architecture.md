@@ -108,6 +108,25 @@ export default class AppServiceProvider extends ServiceProvider {
 }
 ```
 
+> **グローバルミドルウェアは `register()` で追加してください。** ルートは
+> `register()` と `boot()` の**間**にマウントされ、Hono はマッチしたルートより
+> 前に登録されたミドルウェアしか適用しません — `boot()` からの `app.use()` は
+> ルートに対して実行されません。リソースの読み込みが必要な場合は両フックとも
+> `async` にできます:
+>
+> ```ts
+> export default class I18nProvider extends ServiceProvider {
+>   async register(): Promise<void> {
+>     const i18n = createI18n({ locale: 'ja', fallbackLocale: 'en', path: './lang' })
+>     await i18n.loadLocales(['en', 'ja'])
+>     setI18n(i18n)
+>
+>     const app = this.container.make<Application>('app')
+>     app.use('*', localeMiddleware) // boot() ではなく register() で
+>   }
+> }
+> ```
+
 ### ファサード
 
 頻繁に使うサービスにはファサードが用意されています。コンテナから遅延解決されるため、import するだけで利用可能です。

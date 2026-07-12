@@ -140,6 +140,25 @@ await app.actingAs(user).post('/posts', data).assertStatus(201)
 await app.get('/dashboard').assertUnauthorized()
 ```
 
+### カスタムリクエストヘッダー
+
+`withHeaders()` / `withHeader()` で全リクエストにヘッダーを付与できます。
+ロケール検出・API バージョニング・Bearer トークンなどに便利です。
+`actingAs()` や `json()` と同様に新しい `TestApp` を返すので、自由に合成できます。
+
+```ts
+// Accept-Language でロケールを切り替えてレンダリング
+const en = app.withHeaders({ 'Accept-Language': 'en' })
+await en.get('/').assertOk()
+
+// API トークン認証と JSON モードの合成
+await app
+  .withHeader('Authorization', `Bearer ${token}`)
+  .json()
+  .get('/api/me/tasks')
+  .assertOk()
+```
+
 ### コンテナフェイクを使ったテスト
 
 コンテナの `fake()` メソッドを使って、サービスをテストダブルに置き換えられます。

@@ -25,6 +25,23 @@ export function getInertiaSharedPropsResolver(): SharedInertiaPropsResolver<Reso
   return resolver
 }
 
+/**
+ * Register additional shared props without replacing resolvers registered
+ * earlier — the new resolver's props are merged over the previous ones.
+ * Use this from app providers so multiple providers can each contribute
+ * shared props (setInertiaSharedProps replaces the resolver wholesale).
+ */
+export function shareInertiaProps<Props extends Record<string, unknown>>(
+  resolverFn: SharedInertiaPropsResolver<Props>,
+): void {
+  const previous = resolver
+  resolver = async (ctx) => {
+    const prev = previous ? await previous(ctx) : ({} as ResolvedSharedInertiaProps)
+    const next = await resolverFn(ctx)
+    return { ...prev, ...next } as ResolvedSharedInertiaProps
+  }
+}
+
 export async function resolveSharedInertiaProps(ctx: Context): Promise<ResolvedSharedInertiaProps> {
   if (!resolver) return {} as ResolvedSharedInertiaProps
 

@@ -105,6 +105,25 @@ export default class AppServiceProvider extends ServiceProvider {
 - **`register()`**: Bind services into the container. Do not resolve other services here—they may not be registered yet.
 - **`boot()`**: Called after every provider's `register()` has run. Safe to resolve and use other services.
 
+> **Global middleware must be attached in `register()`.** Routes are mounted
+> *between* `register()` and `boot()`, and Hono only applies middleware
+> registered ahead of the matched route — `app.use()` from `boot()` never runs
+> for your routes. Both hooks may be `async` if you need to load resources
+> (e.g. translation files) first:
+>
+> ```ts
+> export default class I18nProvider extends ServiceProvider {
+>   async register(): Promise<void> {
+>     const i18n = createI18n({ locale: 'ja', fallbackLocale: 'en', path: './lang' })
+>     await i18n.loadLocales(['en', 'ja'])
+>     setI18n(i18n)
+>
+>     const app = this.container.make<Application>('app')
+>     app.use('*', localeMiddleware) // register(), not boot()
+>   }
+> }
+> ```
+
 ## Routing
 `routes/web.ts` exports a registrar and configures an app-local router:
 

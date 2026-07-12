@@ -905,7 +905,7 @@ function resolveHandler(
 
       const args: unknown[] = resolvedBindings.length > 0 ? [c, ...resolvedBindings] : [c]
       const result = await (method as (...a: unknown[]) => unknown).apply(controller, args)
-      return ensureResponse(result)
+      return ensureResponse(result, c)
     }
   }
 
@@ -917,7 +917,7 @@ function resolveHandler(
     if (result === undefined && c.finalized) {
       return c.res
     }
-    return ensureResponse(result)
+    return ensureResponse(result, c)
   }
 }
 
@@ -949,7 +949,22 @@ async function resolveModelBindings(
   return resolved
 }
 
-function ensureResponse(result: unknown): Response {
+function ensureResponse(result: unknown, c?: Context): Response {
+  const response = buildResponse(result)
+
+  // Handlers and controllers return raw Response objects, which bypass
+  // Hono's response construction — headers staged via c.header() in
+  // upstream middleware would be silently dropped. Rebuild through
+  // c.newResponse() so prepared headers are merged (Set-Cookie appended,
+  // the handler's own headers winning otherwise).
+  if (c) {
+    return c.newResponse(response.body, response) as Response
+  }
+
+  return response
+}
+
+function buildResponse(result: unknown): Response {
   if (result instanceof Response) {
     return result
   }
