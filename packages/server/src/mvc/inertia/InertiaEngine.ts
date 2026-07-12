@@ -12,6 +12,8 @@ export interface InertiaOptions {
   readonly headers?: HeadersInit;
   readonly request?: Request;
   readonly title?: string;
+  /** Value for the root `<html lang>` attribute. Defaults to "en". */
+  readonly lang?: string;
   readonly entry?: string;
   readonly importMap?: Record<string, string>;
   readonly styles?: string[];
@@ -175,9 +177,10 @@ async function renderDocument(
     `<script data-page="app" type="application/json">${serializedPage}</script><div id="app"></div>`;
   const bodyClass = resolveBodyClass(page.component);
   const bodyAttributes = bodyClass ? ` class="${escapeAttribute(bodyClass)}"` : "";
+  const lang = escapeAttribute(options.lang ?? "en");
 
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="${lang}">
   <head>
     ${headSegments.join("\n    ")}
   </head>
