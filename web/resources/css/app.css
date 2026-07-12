@@ -24,21 +24,9 @@
   --color-docs-text-muted: var(--docs-text-muted);
   --color-docs-border: var(--docs-border-soft);
   --color-docs-border-strong: var(--docs-border-strong);
-  --animate-fade-in-up: fade-in-up 0.5s ease-out both;
   --animate-slide-in-right: slide-in-right 0.3s ease-out both;
   --animate-cursor-blink: cursor-blink 1s step-end infinite;
   --animate-gradient-shift: gradient-shift 8s ease infinite;
-}
-
-@keyframes fade-in-up {
-  from {
-    opacity: 0;
-    transform: translateY(16px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 @keyframes slide-in-right {
@@ -530,20 +518,3 @@ pre:hover .docs-copy-btn {
   border-color: var(--docs-accent-strong) !important;
 }
 
-/* ─── Stagger animation for cards ─── */
-.stagger-fade-in > * {
-  animation: fade-in-up 0.5s ease-out both;
-}
-
-.stagger-fade-in > *:nth-child(1) { animation-delay: 0ms; }
-.stagger-fade-in > *:nth-child(2) { animation-delay: 60ms; }
-.stagger-fade-in > *:nth-child(3) { animation-delay: 120ms; }
-.stagger-fade-in > *:nth-child(4) { animation-delay: 180ms; }
-.stagger-fade-in > *:nth-child(5) { animation-delay: 240ms; }
-.stagger-fade-in > *:nth-child(6) { animation-delay: 300ms; }
-.stagger-fade-in > *:nth-child(7) { animation-delay: 360ms; }
-.stagger-fade-in > *:nth-child(8) { animation-delay: 420ms; }
-.stagger-fade-in > *:nth-child(9) { animation-delay: 480ms; }
-.stagger-fade-in > *:nth-child(10) { animation-delay: 540ms; }
-.stagger-fade-in > *:nth-child(11) { animation-delay: 600ms; }
-.stagger-fade-in > *:nth-child(12) { animation-delay: 660ms; }

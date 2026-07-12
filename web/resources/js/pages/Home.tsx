@@ -184,7 +184,7 @@ export default function Home({ message, codeExamples }: Props) {
           >
             紅蓮
           </span>
-          <div className="relative mx-auto max-w-5xl animate-fade-in-up">
+          <div className="relative mx-auto max-w-5xl">
             <p className="text-sm font-medium tracking-wide text-crimson-300">
               <span style={{ fontFamily: '"Hiragino Mincho ProN", "Yu Mincho", serif' }}>紅蓮</span>
               <span className="mx-2 text-crimson-300/50">·</span>
@@ -268,7 +268,7 @@ export default function Home({ message, codeExamples }: Props) {
                 Conventions you know. Types you didn&apos;t have.
               </h2>
             </div>
-            <div className="stagger-fade-in grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
               {features.map((f) => (
                 <FeatureCard key={f.title} icon={f.icon} title={f.title} body={f.body} />
               ))}

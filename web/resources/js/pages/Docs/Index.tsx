@@ -114,7 +114,7 @@ export default function DocsIndex({ categories, locale, locales = [], basePath }
                         <h3 className="mb-5 text-sm font-bold uppercase tracking-widest text-docs-text-muted">
                           {section.title}
                         </h3>
-                        <div className="stagger-fade-in grid gap-6" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
+                        <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
                           {section.docs.map((doc) => (
                             <Link
                               key={`${group.category}-${doc.slug}`}
