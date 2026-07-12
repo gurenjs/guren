@@ -233,7 +233,9 @@ export default class OAuthController extends Controller {
     return this.make<OAuthManager>('oauth')
   }
 
-  async redirect(): Promise<Response> {
+  // Note: not named \`redirect\` — that would shadow the base
+  // Controller.redirect() helper used below.
+  async redirectToProvider(): Promise<Response> {
     const provider = this.validateProvider(this.request.param('provider'))
     const { url } = await this.oauth().authorize(provider)
     return this.redirect(url)
@@ -248,15 +250,17 @@ export default class OAuthController extends Controller {
       return this.json({ error: 'Missing OAuth callback parameters.' }, { status: 400 })
     }
 
+    // Replace this with your own account linking: look the user up by
+    // profile.email, create one when missing, then \`await this.auth.login(user)\`.
     const profile = await this.oauth().user(provider, { code, state })
     return this.json({ provider, profile }, { status: 200 })
   }
 
-  private validateProvider(value: string): SupportedProvider {
-    if (SUPPORTED_PROVIDERS.has(value as SupportedProvider)) {
+  private validateProvider(value: string | undefined): SupportedProvider {
+    if (value && SUPPORTED_PROVIDERS.has(value as SupportedProvider)) {
       return value as SupportedProvider
     }
-    throw new Error(\`Unsupported OAuth provider: \${value}\`)
+    throw new Error(\`Unsupported OAuth provider: \${value ?? '(missing)'}\`)
   }
 }
 `,
@@ -267,7 +271,7 @@ export default class OAuthController extends Controller {
 import OAuthController from '../app/Http/Controllers/Auth/OAuthController.js'
 
 export function registerOAuthRoutes(router: Router): void {
-  router.get('/auth/:provider', [OAuthController, 'redirect']).name('oauth.redirect')
+  router.get('/auth/:provider', [OAuthController, 'redirectToProvider']).name('oauth.redirect')
   router.get('/auth/:provider/callback', [OAuthController, 'callback']).name('oauth.callback')
 }
 
