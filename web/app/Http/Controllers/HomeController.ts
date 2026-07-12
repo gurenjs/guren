@@ -64,13 +64,13 @@ export default class HomeController extends Controller {
     const codeExamples = await getHighlightedExamples()
 
     const props = {
-      message: 'The Laravel feeling, in TypeScript.',
+      message: 'The Laravel feeling, at Bun speed.',
       codeExamples,
     }
 
     return this.inertia(pages.Home, props, {
       url: this.request.path,
-      title: 'Guren — The Laravel feeling, in TypeScript. Built for Bun.',
+      title: 'Guren — The Laravel feeling, at Bun speed. Fullstack TypeScript framework.',
       lang: 'en',
     })
   }

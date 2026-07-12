@@ -7,8 +7,8 @@ export const GITHUB_URL = 'https://github.com/gurenjs/guren'
 export const OG_IMAGE_PATH = '/og.png'
 
 export const SITE_TITLE = {
-  en: 'Guren — The Laravel feeling, in TypeScript. Built for Bun.',
-  ja: 'Guren — Laravel の開発体験を TypeScript で。Bun ネイティブのフルスタックフレームワーク',
+  en: 'Guren — The Laravel feeling, at Bun speed. Fullstack TypeScript framework.',
+  ja: 'Guren — Laravel の開発体験を、Bun の速さで。フルスタック TypeScript フレームワーク',
 } as const
 
 export const SITE_DESCRIPTION = {
