@@ -143,7 +143,7 @@ const blueprintRegistry: Record<AppBlueprintName, AppBlueprint> = {
         packageJson.dependencies['@guren/core'] ??
         packageJson.dependencies['@guren/server'] ??
         packageJson.dependencies['@guren/orm'] ??
-        '^0.2.0-alpha.7'
+        '^1.0.0'
 
       packageJson.scripts.typecheck ??= 'tsc --noEmit'
       packageJson.scripts.smoke ??= 'bun run ./smoke.ts'

@@ -180,7 +180,7 @@ export default function Home({ message, codeExamples }: Props) {
               { label: 'TypeScript-first', icon: <CodeBracketIcon className="mx-auto mb-2 size-6 text-crimson-400" /> },
               { label: 'MIT Licensed', icon: <ShieldCheckIcon className="mx-auto mb-2 size-6 text-crimson-400" /> },
               { label: 'Bun-native', icon: <RocketIcon className="mx-auto mb-2 size-6 text-crimson-400" /> },
-              { label: 'v0.2.x Alpha', icon: <BoltIcon className="mx-auto mb-2 size-6 text-crimson-400" /> },
+              { label: 'v1.0', icon: <BoltIcon className="mx-auto mb-2 size-6 text-crimson-400" /> },
             ].map((stat) => (
               <div key={stat.label}>
                 {stat.icon}

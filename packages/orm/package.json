@@ -1,6 +1,6 @@
 {
   "name": "@guren/orm",
-  "version": "1.0.0-rc.27",
+  "version": "1.0.0",
   "type": "module",
   "license": "MIT",
   "repository": {

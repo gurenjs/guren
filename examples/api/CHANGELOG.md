@@ -1,5 +1,51 @@
 # @guren/example-api
 
+## 0.1.1
+
+### Patch Changes
+
+- Updated dependencies [c2f318d]
+- Updated dependencies [e74eab5]
+- Updated dependencies [9333048]
+- Updated dependencies [dcee3ee]
+- Updated dependencies [b3c9414]
+- Updated dependencies [73d311c]
+- Updated dependencies [7687a0f]
+- Updated dependencies [5fbd7e7]
+- Updated dependencies [83ca2c2]
+- Updated dependencies [38bd637]
+- Updated dependencies [d3a0d2c]
+- Updated dependencies [379d57e]
+- Updated dependencies [c2f318d]
+- Updated dependencies [f9e7441]
+- Updated dependencies [da8707f]
+- Updated dependencies [afe4bfd]
+- Updated dependencies [57f6f35]
+- Updated dependencies [77049eb]
+- Updated dependencies [7fbf1de]
+- Updated dependencies [08ac277]
+- Updated dependencies [c10691c]
+- Updated dependencies [a1fc6ec]
+- Updated dependencies [f7de890]
+- Updated dependencies [73d311c]
+- Updated dependencies [4011200]
+- Updated dependencies [d8c572a]
+- Updated dependencies [8ee89bb]
+- Updated dependencies [3add058]
+- Updated dependencies [7f52ba4]
+- Updated dependencies [bba40d6]
+- Updated dependencies [e0136bd]
+- Updated dependencies [a835522]
+- Updated dependencies [42c6053]
+- Updated dependencies [ac73182]
+- Updated dependencies [11e876c]
+- Updated dependencies [73d311c]
+  - @guren/cli@1.0.0
+  - @guren/core@1.0.0
+  - @guren/testing@1.0.0
+  - @guren/openapi@1.0.0
+  - @guren/orm@1.0.0
+
 ## 0.1.1-rc.25
 
 ### Patch Changes

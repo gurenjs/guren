@@ -1,6 +1,6 @@
 {
   "name": "@guren/inertia-client",
-  "version": "1.0.0-rc.25",
+  "version": "1.0.0",
   "type": "module",
   "license": "MIT",
   "repository": {
