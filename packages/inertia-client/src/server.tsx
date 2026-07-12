@@ -47,9 +47,14 @@ export async function renderInertiaServer(options: RenderInertiaServerOptions): 
   const renderPage = options.render ?? defaultRender
   const setup = options.setup ?? defaultSetup
 
+  const resolveForInertia = async (name: string) => {
+    const mod = await resolve(name)
+    return (mod as { default?: React.ComponentType }).default ?? (mod as unknown as React.ComponentType)
+  }
+
   const result = await createInertiaApp({
     page: options.page,
-    resolve,
+    resolve: resolveForInertia,
     render: renderPage,
     setup({ App, props }) {
       return setup({ App: App as any, props: props as any })

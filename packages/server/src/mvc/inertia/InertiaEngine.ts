@@ -167,9 +167,12 @@ async function renderDocument(
     `<script type="importmap">${importMap}</script>`,
     `<script>window.__INERTIA_PAGE__ = ${serializedPage};</script>`,
   ].filter((segment) => segment && segment.length > 0);
+  // Inertia v3 contract: the initial page ships in a JSON script element
+  // (script[data-page="app"][type="application/json"]); the container div
+  // stays empty. serializePage escapes `<`, so </script> breakout is safe.
   const appMarkup =
     ssrResult?.body ??
-    `<div id="app" data-page="${escapeAttribute(serializedPage)}"></div>`;
+    `<script data-page="app" type="application/json">${serializedPage}</script><div id="app"></div>`;
   const bodyClass = resolveBodyClass(page.component);
   const bodyAttributes = bodyClass ? ` class="${escapeAttribute(bodyClass)}"` : "";
 

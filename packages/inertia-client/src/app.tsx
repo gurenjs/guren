@@ -59,10 +59,17 @@ export function startInertiaClient(options: StartInertiaClientOptions): Promise<
     )
   }
 
+  // Inertia v3's ComponentResolver expects the component itself (or a
+  // module with `default`) — unwrap our PageModule promise explicitly.
+  const resolveForInertia = async (name: string) => {
+    const mod = await resolve(name)
+    return (mod as { default?: React.ComponentType }).default ?? (mod as unknown as React.ComponentType)
+  }
+
   return createInertiaApp({
-    resolve,
+    resolve: resolveForInertia,
     setup({ el, App, props }) {
-      ; (options.setup ?? defaultSetup)({ el, App: App as any, props: props as any })
+      ; (options.setup ?? defaultSetup)({ el: el as HTMLElement, App: App as any, props: props as any })
     },
     progress: options.progress,
     page: initialPage,
@@ -84,6 +91,18 @@ function getInitialPage(): Page | undefined {
     return globalPage
   }
 
+  const scriptEl = typeof document.querySelector === 'function'
+    ? document.querySelector('script[data-page="app"][type="application/json"]')
+    : null
+  if (scriptEl?.textContent) {
+    try {
+      return JSON.parse(scriptEl.textContent) as Page
+    } catch (error) {
+      console.warn('Failed to parse Inertia page script element:', error)
+    }
+  }
+
+  // Legacy (pre-v3) fallback: page payload in the container's data-page attribute.
   const appEl = document.getElementById('app')
   const dataset = appEl?.getAttribute('data-page')
   if (!dataset) {

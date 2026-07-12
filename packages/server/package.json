@@ -114,8 +114,8 @@
     "chalk": "^5.3.0",
     "consola": "^3.4.2",
     "figlet": "^1.7.0",
-    "hono": "^4.12.18",
-    "ioredis": "^5.9.1",
+    "hono": "^4.12.29",
+    "ioredis": "^5.11.1",
     "nodemailer": "^9.0.1"
   },
   "peerDependencies": {

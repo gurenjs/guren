@@ -66,8 +66,8 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@inertiajs/core": "^2.3.18",
-    "@inertiajs/react": "^2.3.18"
+    "@inertiajs/core": "^3.6.1",
+    "@inertiajs/react": "^3.6.1"
   },
   "devDependencies": {
     "tsup": "^8.5.0",
