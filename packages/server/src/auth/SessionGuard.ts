@@ -55,9 +55,15 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
       return null
     }
 
-    this.cachedUser = user
     await this.provider.setRememberToken?.(user, rememberToken)
-    return user
+    const sanitized = this.sanitizeUser(user)
+    this.cachedUser = sanitized
+    return sanitized
+  }
+
+  /** Strip auth-internal fields before a record is cached or exposed. */
+  private sanitizeUser(user: User): User {
+    return this.provider.sanitize ? this.provider.sanitize(user) : user
   }
 
   private async resolveUser(): Promise<User | null> {
@@ -86,8 +92,9 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
       return null
     }
 
-    this.cachedUser = user
-    return user
+    const sanitized = this.sanitizeUser(user)
+    this.cachedUser = sanitized
+    return sanitized
   }
 
   async check(): Promise<boolean> {
@@ -134,7 +141,7 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
 
     const identifier = this.provider.getId(castUser)
     session.set(this.sessionKey(), identifier)
-    this.cachedUser = castUser
+    this.cachedUser = this.sanitizeUser(castUser)
 
     if (remember) {
       await this.remember(castUser)

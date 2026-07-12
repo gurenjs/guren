@@ -361,3 +361,52 @@ describe('SessionGuard', () => {
     })
   })
 })
+
+describe('provider sanitize', () => {
+  function createSanitizingProvider(users: MockUser[]): UserProvider<MockUser> {
+    const base = createMockProvider(users)
+    return {
+      ...base,
+      sanitize(user: MockUser) {
+        const { password: _password, rememberToken: _token, ...clean } = user
+        return clean as unknown as MockUser
+      },
+    }
+  }
+
+  test('user() resolved from the session never exposes sanitized fields', async () => {
+    const user = createMockUser()
+    const session = createMockSession()
+    const guard = new SessionGuard({ provider: createSanitizingProvider([user]), session })
+
+    session.set('auth:user_id', 1)
+
+    const resolved = await guard.user<Record<string, unknown>>()
+    expect(resolved?.id).toBe(1)
+    expect(resolved).not.toHaveProperty('password')
+    expect(resolved).not.toHaveProperty('rememberToken')
+  })
+
+  test('user() after login() is sanitized while credentials still validate', async () => {
+    const user = createMockUser()
+    const session = createMockSession()
+    const guard = new SessionGuard({ provider: createSanitizingProvider([user]), session })
+
+    const ok = await guard.attempt({ email: 'user@test.com', password: 'hashed_password' })
+    expect(ok).toBe(true)
+
+    const resolved = await guard.user<Record<string, unknown>>()
+    expect(resolved?.email).toBe('user@test.com')
+    expect(resolved).not.toHaveProperty('password')
+  })
+
+  test('providers without sanitize keep returning the record as-is', async () => {
+    const user = createMockUser()
+    const session = createMockSession()
+    const guard = new SessionGuard({ provider: createMockProvider([user]), session })
+
+    session.set('auth:user_id', 1)
+    const resolved = await guard.user<Record<string, unknown>>()
+    expect(resolved).toHaveProperty('password')
+  })
+})

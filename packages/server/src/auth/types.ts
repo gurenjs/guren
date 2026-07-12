@@ -29,6 +29,12 @@ export interface UserProvider<User = Authenticatable> {
   getId(user: User): unknown
   setRememberToken?(user: User, token: string | null): Promise<void> | void
   getRememberToken?(user: User): Promise<string | null> | string | null
+  /**
+   * Strip fields that must never leave the auth layer (password hashes,
+   * remember tokens, model `hidden` fields) from a user record before it
+   * is cached or handed to application code via guard.user().
+   */
+  sanitize?(user: User): User
 }
 
 export interface GuardContext {

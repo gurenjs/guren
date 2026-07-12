@@ -5,6 +5,7 @@ export {
   type InferModelRecord,
   type InferModelInsert,
   ModelNotFoundException,
+  MassAssignmentException,
   QueryBuilder,
   SoftDeletes,
   DrizzleAdapter,
