@@ -1,5 +1,16 @@
 # @guren/example-api
 
+## 0.1.1-rc.24
+
+### Patch Changes
+
+- Updated dependencies [a1fc6ec]
+  - @guren/orm@1.0.0-rc.26
+  - @guren/cli@1.0.0-rc.28
+  - @guren/core@1.0.0-rc.25
+  - @guren/testing@1.0.0-rc.25
+  - @guren/openapi@1.0.0-rc.25
+
 ## 0.1.1-rc.23
 
 ### Patch Changes
