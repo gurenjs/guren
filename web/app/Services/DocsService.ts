@@ -9,10 +9,16 @@ export interface DocSummary {
   description?: string
 }
 
+export interface DocSection {
+  title: string
+  docs: DocSummary[]
+}
+
 export interface DocCategoryGroup {
   category: DocCategory
   title: string
   docs: DocSummary[]
+  sections: DocSection[]
 }
 
 export interface DocPage extends DocSummary {
@@ -78,75 +84,84 @@ const DOC_LOCALE_CONFIG = {
   ja: { label: '日本語', dir: 'ja' },
 } as const
 
-const FEATURED_DOC_ORDER = [
-  // Getting Started
-  'overview',
-  'getting-started',
-  'first-steps',
-  'architecture',
+interface DocSectionConfig {
+  title: Record<DocLocale, string>
+  slugs: readonly string[]
+}
 
-  // The Basics
-  'routing',
-  'controllers',
-  'middleware',
-  'csrf',
-  'validation',
-  'error-handling',
-  'database',
-  'frontend',
-
-  // Security
-  'authentication',
-  'authorization',
-  'api-tokens',
-  'password-reset',
-  'email-verification',
-  'encryption',
-
-  // Digging Deeper
-  'events',
-  'queue',
-  'cache',
-  'mail',
-  'notifications',
-  'broadcasting',
-  'storage',
-  'scheduling',
-  'rate-limiting',
-  'logging',
-  'health-checks',
-  'i18n',
-  'api-resources',
-
-  // Testing & Deployment
-  'testing',
-  'deployment',
-  'serverless',
-  'operations',
-
-  // Reference
-  'build-auth-app',
-  'ship-api',
-  'deploy-production',
-  'troubleshoot',
-  'cli',
-  'support-matrix',
-  'upgrading',
-  'release-policy',
-  'glossary',
+const GUIDE_SECTIONS: readonly DocSectionConfig[] = [
+  {
+    title: { en: 'Getting Started', ja: 'はじめに' },
+    slugs: ['overview', 'getting-started', 'first-steps', 'architecture'],
+  },
+  {
+    title: { en: 'The Basics', ja: '基本' },
+    slugs: ['routing', 'controllers', 'middleware', 'csrf', 'validation', 'error-handling', 'database', 'frontend'],
+  },
+  {
+    title: { en: 'Security', ja: 'セキュリティ' },
+    slugs: ['authentication', 'authorization', 'api-tokens', 'password-reset', 'email-verification', 'encryption'],
+  },
+  {
+    title: { en: 'Digging Deeper', ja: '応用機能' },
+    slugs: [
+      'events',
+      'queue',
+      'cache',
+      'mail',
+      'notifications',
+      'broadcasting',
+      'storage',
+      'scheduling',
+      'rate-limiting',
+      'logging',
+      'health-checks',
+      'i18n',
+      'api-resources',
+    ],
+  },
+  {
+    title: { en: 'Testing & Deployment', ja: 'テストとデプロイ' },
+    slugs: ['testing', 'deployment', 'serverless', 'operations'],
+  },
+  {
+    title: { en: 'Reference', ja: 'リファレンス' },
+    slugs: [
+      'build-auth-app',
+      'ship-api',
+      'deploy-production',
+      'troubleshoot',
+      'cli',
+      'plugins',
+      'support-matrix',
+      'upgrading',
+      'release-policy',
+      'glossary',
+    ],
+  },
 ]
-const TUTORIAL_DOC_ORDER = ['overview', 'create-blog-post-app', 'authentication', 'relationships']
+
+const TUTORIAL_SECTIONS: readonly DocSectionConfig[] = [
+  {
+    title: { en: 'Build a Mini Blog', ja: 'ミニブログを作る' },
+    slugs: ['overview', 'create-blog-post-app', 'authentication', 'relationships'],
+  },
+]
+
+const OTHER_SECTION_TITLE: Record<DocLocale, string> = { en: 'Other', ja: 'その他' }
 
 const DOC_CATEGORY_CONFIG = {
   guides: {
-    title: 'Guides',
+    title: { en: 'Guides', ja: 'ガイド' },
     dir: 'guides',
-    order: FEATURED_DOC_ORDER,
+    sections: GUIDE_SECTIONS,
+    order: GUIDE_SECTIONS.flatMap((section) => section.slugs),
   },
   tutorials: {
-    title: 'Tutorials',
+    title: { en: 'Tutorials', ja: 'チュートリアル' },
     dir: 'tutorials',
-    order: TUTORIAL_DOC_ORDER,
+    sections: TUTORIAL_SECTIONS,
+    order: TUTORIAL_SECTIONS.flatMap((section) => section.slugs),
   },
 } as const
 
@@ -243,13 +258,40 @@ export class DocsService {
 
         return {
           category,
-          title: DOC_CATEGORY_CONFIG[category].title,
+          title: DOC_CATEGORY_CONFIG[category].title[locale],
           docs,
+          sections: this.#buildSections(category, docs, locale),
         }
       }),
     )
 
     return groups
+  }
+
+  #buildSections(category: DocCategory, docs: DocSummary[], locale: DocLocale): DocSection[] {
+    const bySlug = new Map(docs.map((doc) => [doc.slug, doc]))
+    const assigned = new Set<string>()
+
+    const sections: DocSection[] = []
+    for (const section of DOC_CATEGORY_CONFIG[category].sections) {
+      const sectionDocs = section.slugs
+        .map((slug) => bySlug.get(slug))
+        .filter((doc): doc is DocSummary => doc !== undefined)
+      for (const doc of sectionDocs) {
+        assigned.add(doc.slug)
+      }
+      if (sectionDocs.length > 0) {
+        sections.push({ title: section.title[locale], docs: sectionDocs })
+      }
+    }
+
+    // Docs on disk that aren't listed in any section config still show up.
+    const leftovers = docs.filter((doc) => !assigned.has(doc.slug))
+    if (leftovers.length > 0) {
+      sections.push({ title: OTHER_SECTION_TITLE[locale], docs: leftovers })
+    }
+
+    return sections
   }
 
   async getDoc(
@@ -320,7 +362,10 @@ export class DocsService {
         continue
       }
 
+      // Descriptions render as plain text — strip inline markdown noise.
       return trimmed
+        .replace(/\[([^\]]+)\]\([^)]*\)/gu, '$1')
+        .replace(/[`*_]/gu, '')
     }
 
     return undefined

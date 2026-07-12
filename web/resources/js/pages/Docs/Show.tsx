@@ -10,10 +10,16 @@ type DocSummary = {
   description?: string
 }
 
+type DocSection = {
+  title: string
+  docs: DocSummary[]
+}
+
 type DocCategoryGroup = {
   category: string
   title: string
   docs: DocSummary[]
+  sections: DocSection[]
 }
 
 type DocPage = DocSummary & {
@@ -211,33 +217,40 @@ export default function DocsShow({ categories, doc, active, locales = [], basePa
         <aside className="docs-sidebar">
           {categories.map((group) => (
             <section key={group.category} className="mb-8">
-              <h2 className="mb-3 pl-2 text-xs font-bold uppercase tracking-widest text-docs-heading">
+              <h2 className="mb-4 pl-2 text-xs font-bold uppercase tracking-widest text-docs-heading">
                 {group.title}
               </h2>
-              <nav className="flex flex-col gap-0.5">
-                {group.docs.map((entry) => {
-                  const isActive = active?.category === group.category && active?.slug === entry.slug
-                  return (
-                    <Link
-                      key={`${group.category}-${entry.slug}`}
-                      href={`${basePath}/${group.category}/${entry.slug}`}
-                      className={`docs-nav-link ${isActive ? 'docs-nav-link--active' : ''}`}
-                      style={{
-                        padding: '0.4rem 0.6rem',
-                        borderRadius: '6px',
-                        textDecoration: 'none',
-                        color: isActive ? docsTheme.accent.strong : docsTheme.text.secondary,
-                        backgroundColor: isActive ? docsTheme.accent.tint : 'transparent',
-                        fontWeight: isActive ? 600 : 400,
-                        fontSize: '0.925rem',
-                        borderLeft: isActive ? `2px solid ${docsTheme.accent.strong}` : '2px solid transparent',
-                      }}
-                    >
-                      {entry.title}
-                    </Link>
-                  )
-                })}
-              </nav>
+              {group.sections.map((section) => (
+                <div key={`${group.category}-${section.title}`} className="mb-5">
+                  <h3 className="mb-2 pl-2 text-[0.7rem] font-semibold uppercase tracking-widest text-docs-text-muted">
+                    {section.title}
+                  </h3>
+                  <nav className="flex flex-col gap-0.5">
+                    {section.docs.map((entry) => {
+                      const isActive = active?.category === group.category && active?.slug === entry.slug
+                      return (
+                        <Link
+                          key={`${group.category}-${entry.slug}`}
+                          href={`${basePath}/${group.category}/${entry.slug}`}
+                          className={`docs-nav-link ${isActive ? 'docs-nav-link--active' : ''}`}
+                          style={{
+                            padding: '0.4rem 0.6rem',
+                            borderRadius: '6px',
+                            textDecoration: 'none',
+                            color: isActive ? docsTheme.accent.strong : docsTheme.text.secondary,
+                            backgroundColor: isActive ? docsTheme.accent.tint : 'transparent',
+                            fontWeight: isActive ? 600 : 400,
+                            fontSize: '0.925rem',
+                            borderLeft: isActive ? `2px solid ${docsTheme.accent.strong}` : '2px solid transparent',
+                          }}
+                        >
+                          {entry.title}
+                        </Link>
+                      )
+                    })}
+                  </nav>
+                </div>
+              ))}
             </section>
           ))}
         </aside>

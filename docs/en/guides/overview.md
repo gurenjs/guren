@@ -104,28 +104,30 @@ await app.actingAs(user).get('/dashboard').assertOk()
 
 ## Get Started
 
+Four commands. No Docker, no database server — a fresh app uses SQLite out of the box:
+
 ```bash
-bunx create-guren-app my-app --mode ssr
+bunx create-guren-app my-app   # scaffold — accept the default prompts (SSR, SQLite)
 cd my-app
-bun install
-bunx guren add auth
-bunx guren add resource posts --fields "title:string,body:text,published:boolean"
-bun run codegen
-bun run db:migrate && bun run db:seed
-bun run typecheck && bun run test
-bun run dev        # visit http://localhost:3333
+bun install                    # usually a no-op: the scaffolder installs for you
+bun run dev                    # start the dev server
 ```
+
+Open `http://localhost:3333` and you have a running Guren app.
 
 ## Learn More
 
-New to Guren? Follow this path:
+Follow this path, in order:
 
-1. **[First Steps](./first-steps.md)** — Build a working feature in 10 minutes.
-2. **[Getting Started](./getting-started.md)** — Environment setup and database configuration.
-3. **[Routing Guide](./routing.md)** — Route groups, middleware, and resource routes.
-4. **[Controller Guide](./controllers.md)** — Request handling, input helpers, and validation.
-5. **[Database Guide](./database.md)** — Drizzle schemas, migrations, QueryBuilder, and relationships.
-6. **[Frontend Guide](./frontend.md)** — Inertia-powered React pages and SSR.
-7. **[Testing Guide](./testing.md)** — TestApp, fluent assertions, and test utilities.
+1. **[Quickstart](./getting-started.md)** — scaffold a project and see it running in about five minutes.
+2. **[Tutorial: Build a Mini Blog](../tutorials/overview.md)** — **recommended for newcomers.** A hands-on three-part course: create a posts CRUD, add authentication, then wire up comments with relationships. When you finish, you have touched every core concept with working code to show for it.
+3. **Topic guides** — deep dives once you know your way around:
+   - [Routing](./routing.md) — route groups, middleware, and resource routes.
+   - [Controllers](./controllers.md) — request handling, input helpers, and validation.
+   - [Database](./database.md) — Drizzle schemas, migrations, QueryBuilder, and relationships.
+   - [Frontend](./frontend.md) — Inertia-powered React pages and SSR.
+   - [Testing](./testing.md) — TestApp, fluent assertions, and test utilities.
+
+Prefer a quick guided tour before the tutorial? [First Steps](./first-steps.md) traces one request through every layer in ten minutes.
 
 For a full reference of CLI commands, see the [CLI Reference](./cli.md). If any term is unfamiliar, check the [Glossary](./glossary.md).
