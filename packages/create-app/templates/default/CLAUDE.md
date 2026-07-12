@@ -4,6 +4,16 @@
 
 A fullstack TypeScript application built with the Guren framework (Laravel-inspired, running on Bun).
 
+## AI Agents: Start Here
+
+Before exploring `node_modules`, use the built-in introspection commands:
+
+```bash
+bunx guren context     # project map: models, routes, controllers, pages (add --json for JSON)
+bunx guren check       # validate route ↔ controller ↔ page consistency — run after changes
+bunx guren codegen     # regenerate .guren/*.gen.ts typed manifests (also runs via `bun run dev`)
+```
+
 ## Project Structure
 
 ```
@@ -59,9 +69,12 @@ bunx guren make:listener <Name> --event=<EventName>
 bunx guren make:mail <Name>
 bunx guren make:test <Name>
 
-# Database
-bun run db:migrate
-bun run db:seed
+# Database workflow: edit db/schema.ts first, then
+bunx guren make:migration <name>   # generate SQL migration via drizzle-kit into db/migrations/
+bun run db:migrate                 # apply pending migrations
+bunx guren db:status               # show applied/pending state
+bun run db:seed                    # run seeders
+# Migrations are forward-only (no rollback). Dev reset: bunx guren db:reset --seed
 
 # Build & test
 bun run build
@@ -134,9 +147,11 @@ export class PostController extends Controller {
 ```
 
 **Validation helpers** (accepts any Zod-like schema with `safeParse`):
-- `this.validateBody(schema)` — parse request body, throw 422 on failure
-- `this.validateQuery(schema)` — parse query parameters
-- `this.validateParams(schema)` — parse route parameters
+- `this.validateBody<T>(schema): Promise<T>` — parse request body
+- `this.validateQuery<T>(schema): T` — parse query parameters
+- `this.validateParams<T>(schema): T` — parse route parameters
+
+All throw `ValidationException` on failure, rendered as HTTP 422 with `{ message, errors: Record<string, string[]> }`. Non-throwing variants (`validateBodySafe` etc.) return `{ success: true, data } | { success: false, errors }`.
 
 ### Models
 ```typescript
@@ -153,20 +168,89 @@ const post = await Post.findOrFail(1)    // throws ModelNotFoundException (404)
 const all = await Post.where('published', true).get()
 ```
 
+**Where clauses** — object form or `(field, operator, value)` form:
+
+```typescript
+await Post.where({ status: 'active', authorId: 1 }).get()  // AND; array value = IN
+await Post.where({ id: [1, 2, 3] }).get()                  // WHERE id IN (1, 2, 3)
+await Post.where('views', '>', 100).orWhere('featured', true).get()
+```
+
+Operators: `=` `!=` `>` `<` `>=` `<=` `like` `in` `not in` `is null` `is not null`.
+Chain: `where` / `orWhere` / `whereNull` / `whereNotNull` / `orderBy(field, 'asc'|'desc')` / `limit` / `offset` / `with` — finish with `get()` / `first()` / `firstOrFail()` / `count()` / `paginate(page?, perPage?)` / `update(data)` / `delete()`.
+
+**Relationships** — declare on the class, eager-load with `with()`:
+
+```typescript
+User.hasMany('posts', () => import('./Post.js').then((m) => m.Post), 'authorId', 'id')
+Post.belongsTo('author', () => import('./User.js').then((m) => m.User), 'authorId', 'id')
+// belongsToMany(name, related, pivotTable, foreignPivotKey, relatedPivotKey, parentKey = 'id', relatedKey = 'id')
+Post.belongsToMany('tags', () => import('./Tag.js').then((m) => m.Tag), postTags, 'postId', 'tagId')
+
+await Post.with('tags')            // eager load; nested via dot: with('author.posts')
+await Post.findWith(1, 'tags')     // single record + relations
+await Post.withCount('tags')       // adds tagsCount, no rows loaded
+```
+
+Also: `hasOne`, `hasManyThrough`, `morphMany`/`morphTo`, `withPaginate`.
+
+**There are no `attach`/`detach`/`sync` pivot helpers.** Manage pivot rows with a model on the pivot table:
+
+```typescript
+export class PostTag extends Model<typeof postTags> { static table = postTags }
+await PostTag.create({ postId, tagId })   // attach
+await PostTag.delete({ postId, tagId })   // detach
+// sync: PostTag.delete({ postId }) then re-create the desired set
+```
+
+**There is no `firstOrCreate` / `updateOrCreate`.** Hand-roll the pattern:
+
+```typescript
+const existing = await Tag.first({ name })  // first(where?) → record | null
+const tag = existing ?? await Tag.create({ name })
+```
+
+For concurrency safety, add a unique index and catch the constraint error, or wrap in `Tag.transaction(async (trx) => ...)`.
+
+**Mass assignment** — `create()` / `update()` filter their input:
+
+```typescript
+export class Post extends Model<typeof posts> {
+  static table = posts
+  static fillable = ['title', 'body', 'authorId']  // whitelist — always set on user-input models
+}
+```
+
+- With `fillable` set, unlisted input keys **throw `MassAssignmentException`** (`static strictFillable = false` restores silent discarding)
+- Without `fillable`, keys in `guarded` (default `['id']`) are silently stripped
+- `forceCreate()` / `forceUpdate()` bypass filtering — trusted server-side data only
+
 ### Routes
 ```typescript
 import { Router } from '@guren/core'
 
 export function registerWebRoutes(router: Router): void {
-  router.get('/posts', PostController.index)
-  router.post('/posts', PostController.store)
-  router.resource('/posts', PostController)
+  router.get('/posts', [PostController, 'index']).name('posts.index')
+  // Attach the Zod body schema so codegen can extract typed ApiRoutes entries
+  router.post('/posts', { name: 'posts.store', body: CreatePostSchema }, [PostController, 'store'])
 
   router.middleware('auth').group((group) => {
-    group.get('/dashboard', DashboardController.index)
+    group.get('/dashboard', [DashboardController, 'index'])
   })
 }
 ```
+
+### Codegen: which Zod constructs survive type extraction
+
+`bunx guren codegen` walks route schemas at runtime (Zod v3 and v4 both supported) and emits `body` types into `ApiRoutes` (`.guren/api-client.gen.ts`):
+
+- **Typed**: primitives (`string`/`number`/`boolean`/`bigint`/`date`), `literal`, `enum`, `array`, nested `object`, `union` / `discriminatedUnion`, `intersection`, `record`, `nullable` (`| null`)
+- **Unwrapped transparently**: `.optional()` and `.default()` (field becomes `key?:`), `.catch()`, `.readonly()`, `.brand()`, `.lazy()`
+- **Validation checks don't change the type**: `.min()`, `.max()`, `.trim()`, `.email()`, regex etc. stay `string`; `z.coerce.number()` is `number`
+- **Input side only**: `.transform()` / `.refine()` chains extract the schema's *input* type — transform output types are NOT reflected
+- **Degrades**: `tuple` → `unknown[]`, `z.nativeEnum()` → `string | number`, unrecognized constructs → `unknown`
+
+So `z.string().trim().min(1).optional().default('x')` survives as `key?: string`. If a generated type comes out as `unknown`, simplify the construct rather than reading `node_modules`.
 
 ### Middleware
 ```typescript
@@ -179,6 +263,25 @@ export const requireAuth = defineMiddleware(async (c, next) => {
   await next()
 })
 ```
+
+## Testing
+
+Uses `bun:test` + `@guren/testing`. Requests run in-process via `app.fetch()` — no server needed.
+
+```typescript
+import { test } from 'bun:test'
+import { TestApp } from '@guren/testing'
+
+test('posts endpoints', async () => {
+  const app = await TestApp.create()
+  await app.get('/posts').assertOk().assertJsonCount(3, 'data')
+  await app.actingAs(user).json().post('/posts', { title: 'Hi' }).assertCreated()
+  await app.get('/posts/999').assertNotFound()
+})
+```
+
+- **Client**: `get(path)` / `post(path, body?)` / `put` / `patch` / `delete`, `actingAs(user)`, `json()`, `withHeader(name, value)` / `withHeaders(obj)`, `await app.withCsrf()` (primes session + XSRF cookies so mutating requests pass CSRF)
+- **Chainable assertions**: `assertStatus(code)`, `assertOk`, `assertCreated`, `assertNoContent`, `assertRedirect(url?)`, `assertNotFound`, `assertForbidden`, `assertUnauthorized`, `assertUnprocessable`, `assertJson(obj)`, `assertJsonCount(n, key?)`, `assertJsonStructure(keys)`, `assertJsonPath(path, value)`, `assertInertia(component, props?)`, `assertCookie(name, value?)`, `assertCookieMissing(name)`, `assertHeader(name, value?)`, `assertHeaderMissing(name)`
 
 ## Key Files
 

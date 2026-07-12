@@ -92,8 +92,8 @@ export class User extends AuthenticatableModel<UserRecord> {
 }
 ```
 
-- `fillable` (whitelist) — only listed fields pass through to `create()` / `update()`
-- `guarded` (blacklist, default: `['id']`) — listed fields are stripped; ignored when `fillable` is set
+- `fillable` (whitelist) — only listed fields pass through to `create()` / `update()`; unlisted input keys **throw `MassAssignmentException`** (set `static strictFillable = false` for silent discarding). Use `forceCreate()` / `forceUpdate()` for trusted server-side data.
+- `guarded` (blacklist, default: `['id']`) — listed fields are silently stripped; ignored when `fillable` is set
 - Both are enforced by `Model.filterFillable()`, called automatically before persistence
 - Always define `fillable` on models that accept user input — this is the second defense layer after Zod validation
 
@@ -121,7 +121,7 @@ await User.withCount('posts')                  // users[0].postsCount: number (n
 await Post.withPaginate({ page: 1 }, 'author') // paginated + relations
 ```
 
-Also available: `hasOne`, `belongsToMany(pivotTable, ...)`, `hasManyThrough`, `morphMany`/`morphTo`. Full guide: `docs/en/guides/database.md` (Relationships section).
+Also available: `hasOne`, `belongsToMany(name, related, pivotTable, foreignPivotKey, relatedPivotKey, parentKey?, relatedKey?)`, `hasManyThrough`, `morphMany`/`morphTo`. There are **no `attach`/`detach`/`sync` pivot helpers and no `firstOrCreate`/`updateOrCreate`** — manage pivot rows via a model on the pivot table (`PivotModel.create(...)` / `PivotModel.delete(...)`), and hand-roll find-or-create with `Model.first(where)` + `Model.create(...)`. Full guide: `docs/en/guides/database.md` (Relationships section).
 
 ### Routes
 Source: `packages/server/src/mvc/Router.ts`
