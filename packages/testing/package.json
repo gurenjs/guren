@@ -1,6 +1,6 @@
 {
   "name": "@guren/testing",
-  "version": "1.0.0-rc.20",
+  "version": "1.0.0-rc.21",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -35,7 +35,7 @@
   },
   "dependencies": {},
   "peerDependencies": {
-    "@guren/server": ">=1.0.0-rc.20",
+    "@guren/server": ">=1.0.0-rc.21",
     "@inertiajs/react": "^2.3.18",
     "@testing-library/react": "^14.0.0 || ^15.0.0 || ^16.0.0",
     "hono": "^4.12.18",
