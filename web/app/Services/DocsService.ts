@@ -92,7 +92,7 @@ interface DocSectionConfig {
 const GUIDE_SECTIONS: readonly DocSectionConfig[] = [
   {
     title: { en: 'Getting Started', ja: 'はじめに' },
-    slugs: ['overview', 'getting-started', 'first-steps', 'architecture'],
+    slugs: ['overview', 'why-guren', 'getting-started', 'first-steps', 'architecture'],
   },
   {
     title: { en: 'The Basics', ja: '基本' },
