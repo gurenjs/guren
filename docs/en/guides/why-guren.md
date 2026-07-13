@@ -67,6 +67,8 @@ Because page props, route params, and request bodies are all typed contracts, an
 
 The result: less context to load, fewer degrees of freedom to get wrong, and mechanical verification of what was produced. That loop — discover, generate, verify — is what makes agent-driven development on Guren dependable rather than hopeful.
 
+**And it is measured, not aspirational.** In a [reproducible agent evaluation](https://github.com/gurenjs/framework-comparison/tree/main/agent-eval) — the same feature task run against six frameworks, scored blind by typecheck, tests, and a hidden HTTP smoke — agents shipped a working feature on Guren in every trial. The same study showed that the agent guidance every new Guren project ships (an auto-loaded `CLAUDE.md` plus path-scoped rules carrying exact, source-verified API signatures) cuts agent cost by 40% against an undocumented baseline. The harness, raw data, and honest limitations are all public.
+
 ## When Not to Choose Guren
 
 No framework is the right answer everywhere. Reach for something else when:
