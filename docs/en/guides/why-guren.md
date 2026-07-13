@@ -1,6 +1,6 @@
 # Why Guren
 
-An honest look at where Guren fits — compared with Hono, Next.js, and Laravel — and why it is built the way it is.
+An honest look at where Guren fits — compared with Hono, Next.js, AdonisJS, and Laravel — and why it is built the way it is.
 
 ## The Short Version
 
@@ -38,6 +38,15 @@ In practice this changes how a feature gets built:
 - **The backend is a first-class citizen.** Queues, scheduled jobs, mail, broadcasting, and policies are framework subsystems — not features you assemble from third-party services around a rendering framework.
 
 Next.js remains the better fit when server-rendered React itself is the product — heavy content sites, granular per-component streaming, or teams committed to the RSC ecosystem.
+
+## Compared with AdonisJS
+
+AdonisJS is the other batteries-included MVC framework in the TypeScript world, and it is excellent — if you want Laravel's architecture on Node.js, it is the established choice. Guren makes two different bets:
+
+- **Bun instead of Node.** Benchmarking the same app (the two Inertia-SSR implementations in our [framework comparison](https://github.com/gurenjs/framework-comparison)) measures Guren at **2.3× the throughput on full SSR pages, 3.5× on the JSON path, and 1.8× faster cold starts** — [methodology and one-click reproduction here](https://github.com/gurenjs/framework-comparison/blob/main/BENCHMARK.md). The app code is held constant, so the gap is the runtime. That is the point: keep the architecture, change the engine.
+- **The TypeScript ecosystem's defaults, not first-party rewrites.** AdonisJS ships its own ORM (Lucid), validator (VineJS), and tooling. Guren assembles what the ecosystem already standardized on — Drizzle, Zod, Vite, Inertia — and adds the conventions. Reaching the same spec app left 991 lines across 38 files to maintain on Guren versus 2,438 across 68 on AdonisJS, with 17 direct dependencies versus 43.
+
+Typing effort is nearly identical — both scaffold well, at roughly 570 versus 600 handwritten lines for the same app — so the choice comes down to the runtime and whose data layer you want to live with.
 
 ## Compared with Laravel and Rails
 
