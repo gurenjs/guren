@@ -36,6 +36,7 @@ describe('create-guren-app CLI', () => {
   it('scaffolds a SPA project and replaces tokens', async () => {
     const workspace = await createTempWorkspace('guren-create-app-cli-')
     try {
+      warnMock.mockClear()
       await capturedCommand.run({
         args: {
           target: 'my-app',
@@ -65,6 +66,10 @@ describe('create-guren-app CLI', () => {
 
       const readme = await readFile(join(appRoot, 'README.md'), 'utf8')
       expect(readme).toContain('# My App')
+
+      // Harness install requires dependencies; without install we point at agent:init
+      await expect(access(join(appRoot, 'CLAUDE.md'))).rejects.toThrow()
+      expect(warnMock.mock.calls.some((call) => call.join(' ').includes('bunx guren agent:init'))).toBe(true)
     } finally {
       await workspace.cleanup()
     }

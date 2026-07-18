@@ -44,7 +44,6 @@ export interface ScaffoldAppBlueprintOptions {
 }
 
 const DEFAULT_TRANSFORM_FILES = [
-  'CLAUDE.md',
   'README.md',
   'package.json',
   'public/index.html',

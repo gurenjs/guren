@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bunx guren:*)",
+      "Bash(bun run codegen:*)",
+      "Bash(bun run typecheck:*)",
+      "Bash(bun test:*)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bunx guren context 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun .claude/hooks/check-after-edit.ts"
+          }
+        ]
+      }
+    ]
+  }
+}
