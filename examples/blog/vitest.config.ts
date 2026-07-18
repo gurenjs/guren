@@ -4,7 +4,6 @@ import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 
 const rootDir = dirname(fileURLToPath(import.meta.url))
-const resolveFromRoot = (...paths: string[]) => resolve(rootDir, ...paths)
 const require = createRequire(import.meta.url)
 const reactEntry = require.resolve('react')
 const reactDomEntry = require.resolve('react-dom')
@@ -19,7 +18,7 @@ export default defineConfig({
   },
   resolve: {
     alias: [
-      { find: '@', replacement: resolveFromRoot('app') },
+      { find: '@', replacement: rootDir },
       {
         find: /^react$/,
         replacement: reactEntry,

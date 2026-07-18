@@ -7,7 +7,7 @@ const resolveFromRoot = (...paths: string[]) => path.resolve(rootDir, ...paths)
 export default defineConfig({
   resolve: {
     alias: [
-      { find: '@', replacement: resolveFromRoot('app') },
+      { find: '@', replacement: rootDir },
       { find: /^@guren\/testing$/, replacement: resolveFromRoot('../packages/testing/src/index.ts') },
       { find: /^@guren\/testing\//, replacement: resolveFromRoot('../packages/testing/src/') },
       { find: /^@guren\/server$/, replacement: resolveFromRoot('../packages/server/src/index.ts') },

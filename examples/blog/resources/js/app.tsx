@@ -2,7 +2,7 @@ import '../css/app.css'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { ErrorBoundary } from '@guren/inertia-client'
-import { pageManifest } from '../../.guren/pages.gen.ts'
+import { pageManifest } from '@/.guren/pages.gen'
 
 let pages: Record<string, () => Promise<unknown>> | undefined
 

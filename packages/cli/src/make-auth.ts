@@ -13,8 +13,8 @@ import {
 import { makeMigration } from './make-migration'
 
 const loginControllerTemplate = `import { Controller, ValidationException } from '@guren/core'
-import { LoginSchema } from '@/Http/Validators/LoginValidator'
-import { pages } from '../../../../.guren/pages.gen.js'
+import { LoginSchema } from '../../Validators/LoginValidator.js'
+import { pages } from '@/.guren/pages.gen'
 
 export default class LoginController extends Controller {
   async show(): Promise<Response> {
@@ -46,7 +46,7 @@ export default class LoginController extends Controller {
 
 const dashboardControllerTemplate = `import { Controller } from '@guren/core'
 import type { UserRecord } from '../../Models/User.js'
-import { pages } from '../../../.guren/pages.gen.js'
+import { pages } from '@/.guren/pages.gen'
 
 export default class DashboardController extends Controller {
   async index(): Promise<Response> {
@@ -66,7 +66,7 @@ export default class DashboardController extends Controller {
 const profileControllerTemplate = `import { Controller, ValidationException } from '@guren/core'
 import { User, type UserRecord } from '../../Models/User.js'
 import { ProfileUpdateSchema } from '../Validators/ProfileValidator.js'
-import { pages } from '../../../.guren/pages.gen.js'
+import { pages } from '@/.guren/pages.gen'
 
 export default class ProfileController extends Controller {
   async edit(): Promise<Response> {

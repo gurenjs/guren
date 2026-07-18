@@ -9,7 +9,7 @@
     ],
     "paths": {
       "@/*": [
-        "./app/*"
+        "./*"
       ],
       "@guren/cli": [
         "../../packages/cli/src/index.ts"

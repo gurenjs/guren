@@ -1,5 +1,5 @@
 import { Controller } from '@guren/core'
-import { pages } from '../../../.guren/pages.gen.js'
+import { pages } from '@/.guren/pages.gen'
 
 export default class HomeController extends Controller {
   async index(): Promise<Response> {

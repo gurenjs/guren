@@ -1,7 +1,7 @@
 import { Link } from '@inertiajs/react'
 import { User, Mail } from 'lucide-react'
 import Layout from '../../components/Layout.js'
-import { route } from '../../../../.guren/routes.gen'
+import { route } from '@/.guren/routes.gen'
 
 interface Props {
   user?: { id: number; name: string; email: string } | null

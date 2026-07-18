@@ -103,7 +103,7 @@ export type ApiRequestOptions<T extends ApiRouteName> =
  *
  * @example
  * \`\`\`typescript
- * import type { ApiRoutes } from '../.guren/api-client.gen'
+ * import type { ApiRoutes } from '@/.guren/api-client.gen'
  *
  * const client = createApiClient<ApiRoutes>({ baseUrl: 'http://localhost:3000' })
  * const posts = await client.request('posts.index')

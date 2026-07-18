@@ -68,7 +68,7 @@ export type TypedLinkProps<
  *
  * @example
  * ```tsx
- * import { routeManifest } from '../.guren/routes.gen'
+ * import { routeManifest } from '@/.guren/routes.gen'
  * const Link = createTypedLink(routeManifest)
  *
  * <Link route="posts.show" params={{ id: 1 }}>View</Link>

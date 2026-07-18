@@ -18,7 +18,7 @@ Source: `packages/server/src/mvc/Controller.ts`
 
 ```typescript
 import { Controller } from '@guren/core'
-import { pages } from '../../../.guren/pages.gen.js'
+import { pages } from '@/.guren/pages.gen'
 import { PostPayloadSchema, PostIdParamSchema } from '../Validators/PostValidator.js'
 
 export default class PostController extends Controller {
@@ -171,9 +171,9 @@ router.post('/posts', { name: 'posts.store', body: PostPayloadSchema }, [PostCon
 
 **3. Frontend derives types** (after `bunx guren codegen`):
 ```typescript
-import type { ApiRoutes } from '../../../../.guren/api-client.gen'
+import type { ApiRoutes } from '@/.guren/api-client.gen'
 import type { RouteErrors } from '@guren/inertia-client/typed-forms'
-import { route } from '../../../../.guren/routes.gen'
+import { route } from '@/.guren/routes.gen'
 
 type PostFormData = ApiRoutes['posts.store']['body']    // { title: string; body: string }
 type PostErrors = RouteErrors<PostFormData>              // Partial<Record<'title' | 'body', string | string[]>>

@@ -10,7 +10,7 @@ import type { UserRecord } from '../../Models/User.js'
 import { PostPayloadSchema, PostFormSchema, PageQuerySchema, PostIdParamSchema } from '../Validators/PostValidator.js'
 import { PostCreated } from '../../Events/PostCreated.js'
 import { PostCacheService, POSTS_PAGE_SIZE } from '../../Services/PostCacheService.js'
-import { pages } from '../../../.guren/pages.gen.js'
+import { pages } from '@/.guren/pages.gen'
 import { PostResource, type PostResourceData } from '../Resources/PostResource.js'
 
 export type PostPageResource = PostResourceData

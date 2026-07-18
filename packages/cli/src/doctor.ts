@@ -119,6 +119,9 @@ type PackageJsonShape = {
 
 type TsconfigShape = {
   include?: string[]
+  compilerOptions?: {
+    paths?: Record<string, string[]>
+  }
 }
 
 async function findFirstExisting(cwd: string, candidates: readonly string[]): Promise<string | null> {
@@ -325,6 +328,44 @@ async function detectTsconfig(context: DoctorRuleContext): Promise<DoctorCheck> 
       fix: 'Add `.guren/**/*` to the tsconfig include list.',
       canAutofix: !includesGenerated,
       manualFix: 'Add `.guren/**/*` to tsconfig.json include.',
+    },
+  )
+}
+
+async function detectTsconfigAlias(context: DoctorRuleContext): Promise<DoctorCheck> {
+  const tsconfig = await readJsonIfExists<TsconfigShape>(context.cwd, 'tsconfig.json')
+
+  if (!tsconfig.exists || tsconfig.parseError || !tsconfig.value) {
+    return createCheck('tsconfig-alias', 'Path Alias', 'pass', 'Skipped (tsconfig.json missing or unparseable; see TypeScript Config check).')
+  }
+
+  const aliasTargets = tsconfig.value.compilerOptions?.paths?.['@/*']
+
+  if (!aliasTargets) {
+    return createCheck(
+      'tsconfig-alias',
+      'Path Alias',
+      'warn',
+      'tsconfig.json does not define the `@/*` path alias.',
+      {
+        fix: 'Add `"paths": { "@/*": ["./*"] }` (with `"baseUrl": "."`) so `@/.guren/*` and `@/app/*` imports resolve.',
+        manualFix: 'Add `"baseUrl": "."` and `"paths": { "@/*": ["./*"] }` to compilerOptions.',
+      },
+    )
+  }
+
+  const mapsToRoot = aliasTargets.some((target) => target === './*' || target === '*')
+
+  return createCheck(
+    'tsconfig-alias',
+    'Path Alias',
+    mapsToRoot ? 'pass' : 'warn',
+    mapsToRoot
+      ? 'tsconfig.json maps `@/*` to the project root.'
+      : `tsconfig.json maps \`@/*\` to ${JSON.stringify(aliasTargets)} instead of the project root. Scaffolded code imports \`@/.guren/*\` and \`@/app/*\` relative to the project root.`,
+    {
+      fix: 'Change the `@/*` mapping to `["./*"]` and update any imports that relied on the old target.',
+      manualFix: 'Set `"paths": { "@/*": ["./*"] }` in tsconfig.json and adjust existing `@/` imports.',
     },
   )
 }
@@ -848,6 +889,7 @@ const doctorRules: DoctorRule[] = [
   { key: 'page-contracts', title: 'Page Types', detect: detectPageContracts },
   ...GENERATED_FILES.map((generatedFile) => createGeneratedManifestRule(generatedFile)),
   { key: 'tsconfig', title: 'TypeScript Config', detect: detectTsconfig, autofix: createTsconfigAutofix },
+  { key: 'tsconfig-alias', title: 'Path Alias', detect: detectTsconfigAlias },
   { key: 'bootstrap', title: 'Bootstrap Style', detect: detectBootstrap },
   { key: 'config-drift', title: 'App Wiring', detect: detectConfigDrift },
   { key: 'scripts', title: 'App Scripts', detect: detectScripts, autofix: createScriptsAutofix },

@@ -76,6 +76,7 @@ describe('runDoctor', () => {
       await writeFile(
         join(workspace.dir, 'tsconfig.json'),
         JSON.stringify({
+          compilerOptions: { baseUrl: '.', paths: { '@/*': ['./*'] } },
           include: ['src/**/*', '.guren/**/*'],
         }, null, 2),
         'utf8',
@@ -509,6 +510,60 @@ describe('runDoctor', () => {
       expect(apiClientCheck?.status).toBe('warn')
       expect(apiClientCheck?.message).toContain('api-client.gen.ts')
       expect(apiClientCheck?.fix).toContain('codegen')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('warns when the @/* alias maps to the app directory instead of the project root', async () => {
+    const workspace = await createTempWorkspace('guren-cli-doctor-alias-')
+
+    try {
+      await writeFile(
+        join(workspace.dir, 'package.json'),
+        JSON.stringify({ name: 'doctor-alias' }, null, 2),
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'tsconfig.json'),
+        JSON.stringify({
+          compilerOptions: { baseUrl: '.', paths: { '@/*': ['./app/*'] } },
+          include: ['.guren/**/*'],
+        }, null, 2),
+        'utf8',
+      )
+
+      const report = await runDoctor({ cwd: workspace.dir, json: true })
+      const aliasCheck = report.checks.find((check) => check.key === 'tsconfig-alias')
+
+      expect(aliasCheck?.status).toBe('warn')
+      expect(aliasCheck?.message).toContain('./app/*')
+      expect(aliasCheck?.fix).toContain('["./*"]')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('warns when the @/* alias is missing entirely', async () => {
+    const workspace = await createTempWorkspace('guren-cli-doctor-alias-missing-')
+
+    try {
+      await writeFile(
+        join(workspace.dir, 'package.json'),
+        JSON.stringify({ name: 'doctor-alias-missing' }, null, 2),
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'tsconfig.json'),
+        JSON.stringify({ include: ['.guren/**/*'] }, null, 2),
+        'utf8',
+      )
+
+      const report = await runDoctor({ cwd: workspace.dir, json: true })
+      const aliasCheck = report.checks.find((check) => check.key === 'tsconfig-alias')
+
+      expect(aliasCheck?.status).toBe('warn')
+      expect(aliasCheck?.message).toContain('@/*')
     } finally {
       await workspace.cleanup()
     }

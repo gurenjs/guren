@@ -186,7 +186,7 @@ Replace `resources/js/pages/posts/Show.tsx` with a version that lists comments a
 
 ```tsx
 import { Link, useForm, usePage } from '@inertiajs/react'
-import { route } from '../../../../.guren/routes.gen'
+import { route } from '@/.guren/routes.gen'
 
 interface CommentData {
   id: number

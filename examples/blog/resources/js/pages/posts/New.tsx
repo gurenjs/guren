@@ -1,6 +1,6 @@
 import { useForm } from '@inertiajs/react'
 import PostForm, { type PostFormValues } from '../../components/PostForm.js'
-import { route } from '../../../../.guren/routes.gen'
+import { route } from '@/.guren/routes.gen'
 
 export default function New() {
   const form = useForm<PostFormValues>({

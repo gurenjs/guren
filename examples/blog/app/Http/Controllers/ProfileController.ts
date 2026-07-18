@@ -1,7 +1,7 @@
 import { Controller, ValidationException } from '@guren/core'
 import { ProfileUpdateSchema } from '../Validators/ProfileValidator.js'
 import { User, type UserRecord } from '../../Models/User.js'
-import { pages } from '../../../.guren/pages.gen.js'
+import { pages } from '@/.guren/pages.gen'
 
 export default class ProfileController extends Controller {
   async edit(): Promise<Response> {

@@ -3,8 +3,8 @@ import { useId, useState } from 'react'
 import Layout from '../../components/Layout.js'
 import { Loader2 } from 'lucide-react'
 import type { RouteErrors } from '@guren/inertia-client/typed-forms'
-import type { ApiRoutes } from '../../../../.guren/api-client.gen'
-import { route } from '../../../../.guren/routes.gen'
+import type { ApiRoutes } from '@/.guren/api-client.gen'
+import { route } from '@/.guren/routes.gen'
 
 type LoginBody = ApiRoutes['login.store']['body']
 

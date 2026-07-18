@@ -127,6 +127,11 @@ import { Model } from '@guren/orm'
 
 // Relative imports within same package
 import { helper } from './utils'
+
+// In application code (templates, examples, scaffolds), `@/` resolves
+// from the project root (tsconfig paths + Guren Vite plugin alias)
+import { pages } from '@/.guren/pages.gen'
+import type { PostResourceData } from '@/app/Http/Resources/PostResource'
 ```
 
 ## Architecture Patterns

@@ -24,7 +24,7 @@ return this.inertia(pages.posts.Index, {
 // resources/js/pages/posts/Index.tsx
 import type { PageProps } from '@guren/inertia-client/contracts'
 import { Head, Link } from '@inertiajs/react'
-import { pages } from '../../../.guren/pages.gen'
+import { pages } from '@/.guren/pages.gen'
 
 type Props = PageProps<typeof pages.posts.Index>
 
@@ -203,7 +203,7 @@ codegen がインポートパスを書き換え、`pages.gen.ts` から同じ型
 ### Tips
 
 - バックエンドとフロントエンドで型を共有するため、モデルから Drizzle 推論型を再エクスポートします（例: `export type PostRecord = typeof posts.$inferSelect`）。
-- `tsconfig.json` で設定したパスエイリアスを使い、長い相対パスを避けます。
+- 長い相対パスの代わりに `@/` エイリアスを使います。`tsconfig.json` の `@/*` → `./*` マッピングがサーバーとエディターを、Guren Vite プラグインが登録する同名エイリアスがフロントエンドビルドをカバーするため、`@/.guren/routes.gen` や `@/app/Http/Resources/PostResource` がどのレイヤーでも解決されます。
 - Props を追加・変更した後は `bun run codegen` を実行して `pages.gen.ts` を更新してください。
 
 ## ホットリロード

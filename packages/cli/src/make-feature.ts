@@ -270,7 +270,7 @@ function generateController(
     ? `    await this.authorize('update', [${singular}, await ${singular}.findOrFail(id)])\n`
     : ''
   return `import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
-import { pages } from '../../../.guren/pages.gen.js'
+import { pages } from '@/.guren/pages.gen'
 import { ${singular} } from '../../Models/${singular}.js'
 import { ${singular}Resource, type ${singular}ResourceData } from '../Resources/${singular}Resource.js'
 import { ${singular}IdParamSchema, ${singular}PayloadSchema, List${collection}QuerySchema } from '../Validators/${singular}Validator.js'
@@ -342,8 +342,8 @@ function generateIndexPage(
 
   return `import { Link } from '@inertiajs/react'
 import type { PaginatedPageProps } from '@guren/core'
-import type { ${singular}ResourceData } from '../../../../app/Http/Resources/${singular}Resource.js'
-import { route } from '../../../../.guren/routes.gen'
+import type { ${singular}ResourceData } from '@/app/Http/Resources/${singular}Resource'
+import { route } from '@/.guren/routes.gen'
 
 interface Props extends PaginatedPageProps<${singular}ResourceData> {}
 
@@ -391,8 +391,8 @@ function generateShowPage(
   }).join('\n')
 
   return `import { Link } from '@inertiajs/react'
-import type { ${singular}ResourceData } from '../../../../app/Http/Resources/${singular}Resource.js'
-import { route } from '../../../../.guren/routes.gen'
+import type { ${singular}ResourceData } from '@/app/Http/Resources/${singular}Resource'
+import { route } from '@/.guren/routes.gen'
 
 interface Props {
   ${variableName}: ${singular}ResourceData
@@ -423,8 +423,8 @@ function generateNewPage(
   const formFields = fields.map((f) => generateFormField(f, 'form')).join('\n')
 
   return `import { useForm } from '@inertiajs/react'
-import type { ApiRoutes } from '../../../../.guren/api-client.gen'
-import { route } from '../../../../.guren/routes.gen'
+import type { ApiRoutes } from '@/.guren/api-client.gen'
+import { route } from '@/.guren/routes.gen'
 
 type ${singular}FormData = ApiRoutes['${routeName}.store']['body']
 
@@ -456,9 +456,9 @@ function generateEditPage(
   const formFields = fields.map((f) => generateFormField(f, 'form')).join('\n')
 
   return `import { useForm } from '@inertiajs/react'
-import type { ApiRoutes } from '../../../../.guren/api-client.gen'
+import type { ApiRoutes } from '@/.guren/api-client.gen'
 import type { RouteErrors } from '@guren/inertia-client/typed-forms'
-import { route } from '../../../../.guren/routes.gen'
+import { route } from '@/.guren/routes.gen'
 
 type ${singular}FormData = ApiRoutes['${routeName}.store']['body']
 

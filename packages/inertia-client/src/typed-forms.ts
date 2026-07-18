@@ -10,7 +10,7 @@
  *
  * @example
  * ```typescript
- * import type { ApiRoutes } from '../.guren/api-client.gen'
+ * import type { ApiRoutes } from '@/.guren/api-client.gen'
  * import type { RouteBody } from '@guren/inertia-client/typed-forms'
  *
  * type PostFormData = RouteBody<ApiRoutes, 'posts.store'>

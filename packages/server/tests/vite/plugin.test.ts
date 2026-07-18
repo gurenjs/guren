@@ -10,7 +10,7 @@ describe('gurenVitePlugin', () => {
 
     expect(config.resolve.alias).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ find: '@' }),
+        expect.objectContaining({ find: '@', replacement: process.cwd() }),
         expect.objectContaining({ find: '@resources' }),
       ]),
     )
