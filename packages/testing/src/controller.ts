@@ -147,12 +147,9 @@ export function createGurenControllerModule() {
         })
       }
 
-      const serialized = JSON.stringify(payload).replace(
-        /[<>&"]/gu,
-        (char) => HTML_ENTITIES[char] ?? char,
-      )
+      const serialized = JSON.stringify(payload).replace(/</gu, '\\u003c')
 
-      return new Response(`<div id="app" data-page="${serialized}"></div>`, {
+      return new Response(`<script data-page="app" type="application/json">${serialized}</script><div id="app"></div>`, {
         status,
         headers: {
           'Content-Type': 'text/html; charset=utf-8',
@@ -699,14 +696,23 @@ export async function readInertiaResponse(response: Response): Promise<{
   }
 
   const body = await response.text()
-  const match = body.match(/data-page="([^"]+)"/)
 
-  if (!match) {
-    throw new Error('Unable to find Inertia payload in HTML response.')
+  // Inertia v3: the payload lives in a JSON script element.
+  const scriptMatch = body.match(
+    /<script[^>]*data-page="app"[^>]*type="application\/json"[^>]*>([\s\S]*?)<\/script>/,
+  )
+
+  let payload: InertiaPayload
+  if (scriptMatch?.[1]) {
+    payload = JSON.parse(scriptMatch[1]) as InertiaPayload
+  } else {
+    // Legacy (pre-v3): payload in the container's data-page attribute.
+    const match = body.match(/data-page="([^"]+)"/)
+    if (!match) {
+      throw new Error('Unable to find Inertia payload in HTML response.')
+    }
+    payload = JSON.parse(decodeHtml(match[1])) as InertiaPayload
   }
-
-  const decoded = decodeHtml(match[1])
-  const payload = JSON.parse(decoded) as InertiaPayload
 
   return {
     format: 'html',

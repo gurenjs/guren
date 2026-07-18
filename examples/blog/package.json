@@ -25,14 +25,14 @@
     "@guren/core": "workspace:*",
     "@guren/testing": "workspace:*",
     "@guren/orm": "workspace:*",
-    "@inertiajs/core": "^2.3.18",
-    "@inertiajs/react": "^2.3.18",
+    "@inertiajs/core": "^3.6.1",
+    "@inertiajs/react": "^3.6.1",
     "lucide-react": "^0.552.0",
-    "drizzle-orm": "1.0.0-rc.1",
+    "drizzle-orm": "1.0.0-rc.4",
     "postgres": "^3.4.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "zod": "^3.24.0"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
@@ -42,7 +42,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^6.0.0",
-    "drizzle-kit": "1.0.0-rc.1",
+    "drizzle-kit": "1.0.0-rc.4",
     "jsdom": "^25.0.0",
     "tailwindcss": "^4.2.2",
     "vite": "^8.0.0",

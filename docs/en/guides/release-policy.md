@@ -10,7 +10,7 @@ Guren uses Semantic Versioning for stable releases:
 - **MINOR**: backward-compatible features
 - **PATCH**: backward-compatible bug fixes and security updates
 
-For `0.x`, breaking changes may occur between minors. Every breaking change must be documented in migration notes.
+From `1.0`, breaking changes ship only in major releases; minors and patches are backward compatible. Every breaking change must be documented in migration notes.
 
 ## Runtime Compatibility Matrix
 

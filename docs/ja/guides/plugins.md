@@ -26,14 +26,14 @@ bun init
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "gurenPlugin": {
-    "compatibility": ">=0.2.0"
+    "compatibility": ">=1.0.0"
   },
   "peerDependencies": {
-    "@guren/core": ">=0.2.0"
+    "@guren/core": ">=1.0.0"
   },
   "devDependencies": {
-    "@guren/core": "^0.2.0",
-    "@guren/testing": "^0.2.0",
+    "@guren/core": "^1.0.0",
+    "@guren/testing": "^1.0.0",
     "typescript": "^5.0.0"
   }
 }
@@ -110,7 +110,7 @@ export function defineAnalyticsPlugin(config: AnalyticsConfig) {
 ```json
 {
   "gurenPlugin": {
-    "compatibility": ">=0.2.0"
+    "compatibility": ">=1.0.0"
   }
 }
 ```

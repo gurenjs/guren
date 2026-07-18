@@ -8,7 +8,7 @@
 
 Routing, controllers, ORM, authentication, and Inertia.js + React frontend integration — all in one cohesive developer experience.
 
-> ⚠️ **Alpha (v0.2.x)** — Breaking changes are expected before 1.0.
+> **v1.0** — Stable. Breaking changes only in major releases, per the [release policy](docs/en/guides/release-policy.md).
 
 ---
 

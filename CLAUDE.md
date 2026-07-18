@@ -3,7 +3,7 @@
 ## Overview
 Guren is a Laravel-inspired fullstack TypeScript framework running on Bun. It combines Hono for HTTP handling, Drizzle ORM for database operations, and Inertia.js for seamless frontend integration.
 
-**Status:** Alpha (v0.2.x) - Breaking changes expected.
+**Status:** Stable (v1.0). Breaking changes only in major releases.
 
 ## Monorepo Structure
 

@@ -57,6 +57,7 @@ describe('startInertiaClient', () => {
       clearHistory: false,
       encryptHistory: false,
       rememberedState: {},
+    rescuedProps: [],
       flash: {},
     }
 
@@ -80,6 +81,7 @@ describe('startInertiaClient', () => {
       clearHistory: false,
       encryptHistory: false,
       rememberedState: {},
+    rescuedProps: [],
       flash: {},
     }
 

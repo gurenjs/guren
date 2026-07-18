@@ -34,6 +34,7 @@ describe('renderInertiaServer', () => {
       clearHistory: false,
       encryptHistory: false,
       rememberedState: {},
+    rescuedProps: [],
       flash: {},
     }
     const pages = {
@@ -60,6 +61,7 @@ describe('renderInertiaServer', () => {
       clearHistory: false,
       encryptHistory: false,
       rememberedState: {},
+    rescuedProps: [],
       flash: {},
     }
     const pages = {

@@ -2,7 +2,7 @@ import { z } from 'zod'
 
 const requiredString = (field: string) =>
   z
-    .string({ required_error: `${field} is required.` })
+    .string({ error: `${field} is required.` })
     .trim()
     .min(1, `${field} is required.`)
 
@@ -15,7 +15,7 @@ export const ProfileUpdateSchema = z
   .object({
     name: requiredString('Name'),
     email: z
-      .string({ required_error: 'Email is required.' })
+      .string({ error: 'Email is required.' })
       .trim()
       .min(1, 'Email is required.')
       .email('Please provide a valid email address.'),
