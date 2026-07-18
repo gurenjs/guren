@@ -1,7 +1,8 @@
-import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import process from 'node:process'
+import { fileExists } from './discovery'
 
 /**
  * AI agent harness installer.
@@ -10,15 +11,16 @@ import process from 'node:process'
  * .claude/agents, .claude/hooks, .claude/settings.json, .mcp.json) into an app.
  *
  * Files fall into two groups:
- * - Managed: .claude/rules, .claude/skills, .claude/agents, .claude/hooks —
- *   owned by the framework, `agent:sync` overwrites them with the latest version.
- * - User-owned: CLAUDE.md, .mcp.json, .claude/settings.json — written once,
- *   never overwritten by `agent:sync` (only by `agent:init --force`).
+ * - Managed: files under MANAGED_PREFIXES — owned by the framework,
+ *   `agent:sync` overwrites them with the latest version.
+ * - User-owned: everything else (CLAUDE.md, .mcp.json, .claude/settings.json,
+ *   and any future top-level template file) — written once, never overwritten
+ *   by `agent:sync` (only by `agent:init --force`).
  */
 
 const templateDir = fileURLToPath(new URL('../templates/agent', import.meta.url))
 
-const USER_OWNED_FILES = new Set(['CLAUDE.md', '.mcp.json', '.claude/settings.json'])
+const MANAGED_PREFIXES = ['.claude/rules/', '.claude/skills/', '.claude/agents/', '.claude/hooks/']
 
 export type AgentHarnessMode = 'init' | 'sync'
 
@@ -62,55 +64,36 @@ async function resolveAppTitle(cwd: string): Promise<string> {
   return toTitleCase(basename(cwd))
 }
 
-async function collectTemplateFiles(dir: string): Promise<string[]> {
-  const entries = await readdir(dir, { withFileTypes: true })
-  const files: string[] = []
-  for (const entry of entries) {
-    const fullPath = join(dir, entry.name)
-    if (entry.isDirectory()) {
-      files.push(...(await collectTemplateFiles(fullPath)))
-    } else if (entry.isFile()) {
-      files.push(fullPath)
-    }
-  }
-  return files
-}
-
-async function fileExists(path: string): Promise<boolean> {
-  try {
-    const stats = await stat(path)
-    return stats.isFile()
-  } catch {
-    return false
-  }
-}
-
 export async function installAgentHarness(options: AgentHarnessOptions = {}): Promise<AgentHarnessResult> {
   const cwd = resolve(options.cwd ?? process.cwd())
   const mode = options.mode ?? 'init'
   const force = Boolean(options.force)
   const appTitle = await resolveAppTitle(cwd)
 
-  const templateFiles = await collectTemplateFiles(templateDir)
+  const entries = await readdir(templateDir, { recursive: true, withFileTypes: true })
   const written: string[] = []
   const skipped: string[] = []
 
-  for (const sourcePath of templateFiles) {
+  for (const entry of entries) {
+    if (!entry.isFile()) {
+      continue
+    }
+    const sourcePath = join(entry.parentPath, entry.name)
     const relPath = relative(templateDir, sourcePath).replaceAll('\\', '/')
     const destPath = join(cwd, relPath)
-    const userOwned = USER_OWNED_FILES.has(relPath)
-    const exists = await fileExists(destPath)
+    const managed = MANAGED_PREFIXES.some((prefix) => relPath.startsWith(prefix))
+    const exists = await fileExists(cwd, relPath)
 
     // sync refreshes managed files; existing user-owned files are only
     // replaced by an explicit init --force
-    const overwrite = force || (mode === 'sync' && !userOwned)
+    const overwrite = force || (mode === 'sync' && managed)
     if (exists && !overwrite) {
       skipped.push(relPath)
       continue
     }
 
     const content = await readFile(sourcePath, 'utf8')
-    const transformed = content.split('__APP_TITLE__').join(appTitle)
+    const transformed = content.replaceAll('__APP_TITLE__', appTitle)
     await mkdir(dirname(destPath), { recursive: true })
     await writeFile(destPath, transformed, 'utf8')
     written.push(relPath)

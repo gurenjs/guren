@@ -53,14 +53,6 @@ async function runAppCli(targetDir: string, cliArgs: string[]): Promise<boolean>
   return result.status === 0
 }
 
-async function installAuthBlueprint(targetDir: string): Promise<boolean> {
-  return runAppCli(targetDir, ['add', 'auth', '--force'])
-}
-
-async function installAgentHarness(targetDir: string): Promise<boolean> {
-  return runAppCli(targetDir, ['agent:init'])
-}
-
 async function resolveRenderingMode(flagValue: unknown): Promise<RenderingMode> {
   if (typeof flagValue === 'string') {
     const normalized = flagValue.toLowerCase()
@@ -217,7 +209,7 @@ const command = defineCommand({
     let harnessInstalled = false
     if (installed) {
       consola.start('Setting up AI agent harness...')
-      harnessInstalled = await installAgentHarness(targetDir)
+      harnessInstalled = await runAppCli(targetDir, ['agent:init'])
       if (harnessInstalled) {
         consola.success('AI agent harness installed (CLAUDE.md, .claude/, .mcp.json)')
       }
@@ -230,7 +222,7 @@ const command = defineCommand({
     if (includeAuth) {
       if (installed) {
         consola.start('Adding authentication scaffolding...')
-        authInstalled = await installAuthBlueprint(targetDir)
+        authInstalled = await runAppCli(targetDir, ['add', 'auth', '--force'])
         if (authInstalled) {
           consola.success('Authentication scaffolding added')
         }
