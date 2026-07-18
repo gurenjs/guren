@@ -1,5 +1,5 @@
-import { readFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { readdir, readFile } from 'node:fs/promises'
+import { join, relative, resolve } from 'node:path'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -256,10 +256,34 @@ async function auditJapaneseDocs(root: string): Promise<void> {
 
 }
 
+// The `@/` alias resolves from the project root; imports like `@/Http/...`
+// are leftovers from the old `@/*` -> `./app/*` mapping and no longer resolve.
+const STALE_APP_ALIAS_PATTERN = /['"]@\/(?:Http|Models|Policies|Events|Jobs|Listeners|Mail|Notifications|Providers|Services|Validators|Console|Exceptions|utils)\//u
+
+async function auditAliasConvention(root: string): Promise<void> {
+  const docsDir = join(root, 'docs')
+  const entries = await readdir(docsDir, { recursive: true, withFileTypes: true })
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.md')) {
+      continue
+    }
+
+    const filePath = join(entry.parentPath, entry.name)
+    const lines = (await readFile(filePath, 'utf8')).split('\n')
+    const hit = lines.findIndex((line) => STALE_APP_ALIAS_PATTERN.test(line))
+    assert(
+      hit === -1,
+      `${relative(root, filePath)}:${hit + 1} uses an app-relative alias import (e.g. \`@/Http/...\`); the \`@/\` alias resolves from the project root, so write \`@/app/...\` instead.`,
+    )
+  }
+}
+
 async function main(): Promise<void> {
   const root = resolve(process.argv[2] ?? '.')
   await auditEnglishDocs(root)
   await auditJapaneseDocs(root)
+  await auditAliasConvention(root)
   console.log(`Docs audit passed for ${root}`)
 }
 

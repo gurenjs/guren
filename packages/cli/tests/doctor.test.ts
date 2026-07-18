@@ -549,6 +549,44 @@ describe('runDoctor', () => {
     }
   })
 
+  it('alias autofix preserves existing compilerOptions and path mappings', async () => {
+    const workspace = await createTempWorkspace('guren-cli-doctor-alias-autofix-')
+
+    try {
+      await writeFile(
+        join(workspace.dir, 'package.json'),
+        JSON.stringify({ name: 'doctor-alias-autofix' }, null, 2),
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'tsconfig.json'),
+        JSON.stringify({
+          compilerOptions: { strict: true, paths: { '#lib/*': ['./lib/*'] } },
+          include: ['.guren/**/*'],
+        }, null, 2),
+        'utf8',
+      )
+
+      const { evaluations } = await getDoctorRuleEvaluations({ cwd: workspace.dir })
+      const aliasEval = evaluations.find((evaluation) => evaluation.check.key === 'tsconfig-alias')
+      expect(aliasEval?.autofix).toBeDefined()
+      await aliasEval!.autofix!.apply(workspace.dir)
+
+      const tsconfig = JSON.parse(await Bun.file(join(workspace.dir, 'tsconfig.json')).text()) as {
+        compilerOptions: { strict?: boolean; baseUrl?: string; paths?: Record<string, string[]> }
+        include: string[]
+      }
+
+      expect(tsconfig.compilerOptions.strict).toBe(true)
+      expect(tsconfig.compilerOptions.baseUrl).toBe('.')
+      expect(tsconfig.compilerOptions.paths?.['#lib/*']).toEqual(['./lib/*'])
+      expect(tsconfig.compilerOptions.paths?.['@/*']).toEqual(['./*'])
+      expect(tsconfig.include).toEqual(['.guren/**/*'])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('warns when a custom baseUrl repoints a root @/* mapping', async () => {
     const workspace = await createTempWorkspace('guren-cli-doctor-alias-baseurl-')
 
