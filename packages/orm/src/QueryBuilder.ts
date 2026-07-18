@@ -1,4 +1,5 @@
 import { DEFAULT_PAGINATION_SIZE } from './Model'
+import { ModelNotFoundException } from './ModelNotFoundException'
 import type {
   AdapterQueryOptions,
   FindManyOptions,
@@ -327,12 +328,12 @@ export class QueryBuilder<
   /**
    * Execute the query and return the first matching record, or throw.
    * @returns The first record
-   * @throws Error if no record matches
+   * @throws ModelNotFoundException (404) if no record matches
    */
   async firstOrFail(): Promise<TResult> {
     const record = await this.first()
     if (record === null) {
-      throw new Error(`${this.modelClass.name} not found`)
+      throw new ModelNotFoundException(this.modelClass.name)
     }
     return record
   }
