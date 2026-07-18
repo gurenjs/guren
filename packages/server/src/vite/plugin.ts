@@ -1,9 +1,9 @@
 import path from 'node:path'
 
 export interface GurenVitePluginOptions {
-  /** Alias for the project root (defaults to `@`, so `@/.guren/routes.gen` and `@/app/Models/Post` resolve from the project root). */
+  /** Alias prefix for application imports such as `@/.guren/routes.gen` (defaults to `@`). */
   appAlias?: string
-  /** Relative path the `appAlias` points to (defaults to `.`, the project root). */
+  /** Directory the alias resolves to, relative to the project root (defaults to `.`, the project root). */
   appDir?: string
   /** Alias for the frontend resources directory (defaults to `@resources`). */
   resourcesAlias?: string

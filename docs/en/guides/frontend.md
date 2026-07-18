@@ -203,7 +203,7 @@ Codegen rewrites the import path so `pages.gen.ts` can reference the same type.
 ### Tips
 
 - Share types between backend and frontend by re-exporting the Drizzle-inferred types from models (e.g. `export type PostRecord = typeof posts.$inferSelect`).
-- Use the `@/` alias instead of long relative imports. It resolves from the project root on both sides: `tsconfig.json` maps `@/*` to `./*` for the server and editor, and the Guren Vite plugin registers the same alias for the frontend build — so `@/.guren/routes.gen` and `@/app/Http/Resources/PostResource` work everywhere.
+- Use the `@/` alias (the project root) instead of long relative imports — it resolves in server code via tsconfig `paths` and in the frontend build via the Guren Vite plugin.
 - Run `bun run codegen` after adding or changing Props to keep `pages.gen.ts` up to date.
 
 ## Hot Reloading

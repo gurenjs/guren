@@ -191,14 +191,18 @@ describe('runDoctor', () => {
       }
       const tsconfig = JSON.parse(await Bun.file(join(workspace.dir, 'tsconfig.json')).text()) as {
         include: string[]
+        compilerOptions?: { baseUrl?: string; paths?: Record<string, string[]> }
       }
 
       expect(packageJson.scripts.build).toBe('bun run codegen && bunx vite build')
       expect(packageJson.scripts.typecheck).toBe('tsc --noEmit')
       expect(packageJson.scripts.codegen).toBe('bunx guren codegen --routes routes/web.ts --out types/generated/routes.d.ts --force')
       expect(tsconfig.include).toContain('.guren/**/*')
+      expect(tsconfig.compilerOptions?.baseUrl).toBe('.')
+      expect(tsconfig.compilerOptions?.paths?.['@/*']).toEqual(['./*'])
       expect(report.fixableChecks.some((check) => check.key === 'scripts')).toBe(false)
       expect(report.fixableChecks.some((check) => check.key === 'tsconfig')).toBe(false)
+      expect(report.fixableChecks.some((check) => check.key === 'tsconfig-alias')).toBe(false)
     } finally {
       await workspace.cleanup()
     }
@@ -539,6 +543,7 @@ describe('runDoctor', () => {
       expect(aliasCheck?.status).toBe('warn')
       expect(aliasCheck?.message).toContain('./app/*')
       expect(aliasCheck?.fix).toContain('["./*"]')
+      expect(aliasCheck?.canAutofix).toBe(false)
     } finally {
       await workspace.cleanup()
     }
@@ -564,6 +569,7 @@ describe('runDoctor', () => {
 
       expect(aliasCheck?.status).toBe('warn')
       expect(aliasCheck?.message).toContain('@/*')
+      expect(aliasCheck?.canAutofix).toBe(true)
     } finally {
       await workspace.cleanup()
     }

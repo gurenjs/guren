@@ -203,7 +203,7 @@ codegen がインポートパスを書き換え、`pages.gen.ts` から同じ型
 ### Tips
 
 - バックエンドとフロントエンドで型を共有するため、モデルから Drizzle 推論型を再エクスポートします（例: `export type PostRecord = typeof posts.$inferSelect`）。
-- 長い相対パスの代わりに `@/` エイリアスを使います。`tsconfig.json` の `@/*` → `./*` マッピングがサーバーとエディターを、Guren Vite プラグインが登録する同名エイリアスがフロントエンドビルドをカバーするため、`@/.guren/routes.gen` や `@/app/Http/Resources/PostResource` がどのレイヤーでも解決されます。
+- 長い相対パスの代わりに `@/` エイリアス(プロジェクトルート)を使います。サーバー側は tsconfig の `paths`、フロントエンドビルドは Guren Vite プラグインが解決します。
 - Props を追加・変更した後は `bun run codegen` を実行して `pages.gen.ts` を更新してください。
 
 ## ホットリロード
