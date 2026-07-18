@@ -102,6 +102,8 @@ await app.actingAs(user).get('/dashboard').assertOk()
 
 **Router registrars over global state.** Generated apps export route registrars and pass them into `createApp({ routes })`, which keeps routing scoped to each application instance.
 
+For a deeper, honest comparison with Hono, Next.js, and Laravel — and how Guren is designed for AI coding agents — see [Why Guren](./why-guren.md).
+
 ## Get Started
 
 Four commands. No Docker, no database server — a fresh app uses SQLite out of the box:

@@ -102,6 +102,8 @@ await app.actingAs(user).get('/dashboard').assertOk()
 
 **グローバル状態ではなく registrar 方式のルーター。** 生成されるアプリはルート登録用の registrar を export し、`createApp({ routes })` に渡します。これによりルーティングは各アプリケーションインスタンスにスコープされます。
 
+Hono・Next.js・Laravel との踏み込んだ比較と、AI コーディングエージェント向けの設計思想については [Why Guren](./why-guren.md) を参照してください。
+
 ## はじめる
 
 コマンドは 4 つだけ。Docker もデータベースサーバーも不要 — 新規アプリは最初から SQLite で動きます。
