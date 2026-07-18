@@ -18,5 +18,5 @@ node_modules/
 # Benchmark outputs
 benchmarks.json
 benchmark-history.json
-# serena regenerates its project config on startup
-.serena/project.yml
+# serena (MCP) tool-local state — regenerated on startup
+.serena/
