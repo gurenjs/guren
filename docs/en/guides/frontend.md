@@ -131,7 +131,7 @@ Page component          codegen              Controller
 
 ```tsx
 // resources/js/pages/posts/Show.tsx
-import type { PostResourceData } from '@/Http/Resources/PostResource'
+import type { PostResourceData } from '@/app/Http/Resources/PostResource'
 
 interface Props {
   post: PostResourceData
@@ -191,7 +191,7 @@ Both `Author` and the `Props` body are extracted into `pages.gen.ts`.
 Types imported from Resource files or other modules are also tracked:
 
 ```tsx
-import type { PostResourceData } from '@/Http/Resources/PostResource'
+import type { PostResourceData } from '@/app/Http/Resources/PostResource'
 
 interface Props {
   post: PostResourceData

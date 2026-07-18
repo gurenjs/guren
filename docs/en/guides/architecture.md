@@ -129,7 +129,7 @@ export default class AppServiceProvider extends ServiceProvider {
 
 ```ts
 import { Router, requireAuthenticated } from '@guren/core'
-import PostController from '@/Http/Controllers/PostController'
+import PostController from '@/app/Http/Controllers/PostController'
 
 export function registerWebRoutes(router: Router): void {
   router.aliasMiddleware('auth', requireAuthenticated())

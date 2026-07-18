@@ -549,6 +549,35 @@ describe('runDoctor', () => {
     }
   })
 
+  it('warns when a custom baseUrl repoints a root @/* mapping', async () => {
+    const workspace = await createTempWorkspace('guren-cli-doctor-alias-baseurl-')
+
+    try {
+      await writeFile(
+        join(workspace.dir, 'package.json'),
+        JSON.stringify({ name: 'doctor-alias-baseurl' }, null, 2),
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'tsconfig.json'),
+        JSON.stringify({
+          compilerOptions: { baseUrl: 'src', paths: { '@/*': ['./*'] } },
+          include: ['.guren/**/*'],
+        }, null, 2),
+        'utf8',
+      )
+
+      const report = await runDoctor({ cwd: workspace.dir, json: true })
+      const aliasCheck = report.checks.find((check) => check.key === 'tsconfig-alias')
+
+      expect(aliasCheck?.status).toBe('warn')
+      expect(aliasCheck?.message).toContain('baseUrl')
+      expect(aliasCheck?.canAutofix).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('warns when the @/* alias is missing entirely', async () => {
     const workspace = await createTempWorkspace('guren-cli-doctor-alias-missing-')
 

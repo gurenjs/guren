@@ -342,21 +342,30 @@ async function detectTsconfigAlias(context: DoctorRuleContext): Promise<DoctorCh
     return createCheck('tsconfig-alias', 'Path Alias', 'pass', 'Skipped (tsconfig.json missing or unparseable; see TypeScript Config check).')
   }
 
-  const aliasTargets = tsconfig.value.compilerOptions?.paths?.['@/*'] ?? []
-  const mapsToRoot = aliasTargets.some((target) => target === './*' || target === '*')
+  const compilerOptions = tsconfig.value.compilerOptions
+  const aliasTargets = compilerOptions?.paths?.['@/*'] ?? []
+  const baseUrl = compilerOptions?.baseUrl
+  // Path mappings resolve relative to baseUrl (or the tsconfig directory when
+  // baseUrl is omitted), so `./*` only means "project root" for a root baseUrl.
+  const baseUrlIsRoot = baseUrl === undefined || baseUrl === '.' || baseUrl === './'
+  const targetsRoot = aliasTargets.some((target) => target === './*' || target === '*')
+  const mapsToRoot = targetsRoot && baseUrlIsRoot
 
   const message = mapsToRoot
     ? 'tsconfig.json maps `@/*` to the project root.'
     : aliasTargets.length === 0
       ? 'tsconfig.json does not define the `@/*` path alias.'
-      : `tsconfig.json maps \`@/*\` to ${JSON.stringify(aliasTargets)} instead of the project root (\`["./*"]\`). Scaffolded code imports \`@/.guren/*\` and \`@/app/*\` relative to the project root; adjust existing \`@/\` imports when changing the mapping.`
+      : !targetsRoot
+        ? `tsconfig.json maps \`@/*\` to ${JSON.stringify(aliasTargets)} instead of the project root (\`["./*"]\`). Scaffolded code imports \`@/.guren/*\` and \`@/app/*\` relative to the project root; adjust existing \`@/\` imports when changing the mapping.`
+        : `tsconfig.json maps \`@/*\` to \`["./*"]\` but \`baseUrl\` is ${JSON.stringify(baseUrl)}, so the alias resolves under that directory instead of the project root.`
 
   return createCheck('tsconfig-alias', 'Path Alias', mapsToRoot ? 'pass' : 'warn', message, {
     fix: TSCONFIG_ALIAS_FIX,
     manualFix: TSCONFIG_ALIAS_FIX,
-    // Only safe to autofix when the alias is absent — rewriting an existing
-    // mapping could break imports that rely on the old target.
-    canAutofix: aliasTargets.length === 0,
+    // Only safe to autofix when the alias is absent and no custom baseUrl would
+    // repoint it — rewriting existing settings could break imports that rely on
+    // the old resolution.
+    canAutofix: aliasTargets.length === 0 && baseUrlIsRoot,
   })
 }
 

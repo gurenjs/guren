@@ -131,7 +131,7 @@ Guren はコントローラーとページコンポーネント間のエンド�
 
 ```tsx
 // resources/js/pages/posts/Show.tsx
-import type { PostResourceData } from '@/Http/Resources/PostResource'
+import type { PostResourceData } from '@/app/Http/Resources/PostResource'
 
 interface Props {
   post: PostResourceData
@@ -191,7 +191,7 @@ interface Props {
 Resource ファイルなど外部モジュールからインポートした型も追跡されます:
 
 ```tsx
-import type { PostResourceData } from '@/Http/Resources/PostResource'
+import type { PostResourceData } from '@/app/Http/Resources/PostResource'
 
 interface Props {
   post: PostResourceData

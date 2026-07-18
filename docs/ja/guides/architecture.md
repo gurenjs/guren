@@ -28,7 +28,7 @@ Guren は Laravel の設計思想を TypeScript 上で再構成し、Bun・Hono�
 
 ```ts
 import { Router } from '@guren/core'
-import PostController from '@/Http/Controllers/PostController'
+import PostController from '@/app/Http/Controllers/PostController'
 
 export function registerWebRoutes(router: Router): void {
   router.get('/', [PostController, 'index'])
