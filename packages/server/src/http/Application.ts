@@ -7,6 +7,7 @@ import { AuthManager } from '../auth/AuthManager'
 import { AuthServiceProvider } from '../providers/AuthServiceProvider'
 import { AuthorizationServiceProvider } from '../providers/AuthorizationServiceProvider'
 import { ErrorServiceProvider } from '../providers/ErrorServiceProvider'
+import { InertiaServiceProvider } from '../providers/InertiaServiceProvider'
 import { attachAuthContext } from './middleware/auth'
 import { SessionGuard } from '../auth/SessionGuard'
 import type { CreateSessionMiddlewareOptions } from './middleware/session'
@@ -247,6 +248,19 @@ export class Application {
     // Register user providers
     if (userProviders.length > 0) {
       this.providerManager.registerMany(userProviders)
+    }
+
+    // Inertia validation handling (303 redirect + flashed errors) is on by
+    // default so ValidationException on Inertia requests doesn't surface as a
+    // raw JSON response in the client's error modal. Registered after user
+    // providers: the first matching exception renderer wins, so a custom
+    // ValidationException renderer registered by a user provider keeps
+    // taking precedence over this default.
+    const hasUserInertiaProvider = userProviders.some(
+      (provider) => provider === InertiaServiceProvider || provider.prototype instanceof InertiaServiceProvider,
+    )
+    if (!hasUserInertiaProvider) {
+      this.providerManager.register(InertiaServiceProvider)
     }
   }
 

@@ -323,6 +323,23 @@ When validation fails, the default response format is:
 }
 ```
 
+### Automatic Handling on Inertia Requests
+
+When a `ValidationException` is thrown during an Inertia request (one carrying the `X-Inertia` header), Guren does not return the JSON payload above. Instead it behaves like Laravel: the errors are flashed to the session and the request is redirected back (`303`) to the previous page. On the next page load the flashed errors are injected into the shared `errors` prop, flattened to one message per field:
+
+```tsx
+function Login({ errors }: { errors?: Record<string, string> }) {
+  return (
+    <form>
+      <input name="email" />
+      {errors?.email && <span className="error">{errors.email}</span>}
+    </form>
+  )
+}
+```
+
+This applies to `validateBody` / `validateQuery` / `validateParams` failures as well as `ValidationException.withMessages(...)` thrown from your own code. Flashing requires session middleware, which is mounted automatically when the `auth` option is set. To customize the behavior, register your own renderer for `ValidationException` in a service provider — it takes precedence over the built-in one.
+
 ### Displaying in Inertia
 
 Use page definitions with `ValidationErrors<T>` so controller and component share the same error shape.

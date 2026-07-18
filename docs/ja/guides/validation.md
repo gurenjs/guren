@@ -258,6 +258,23 @@ const schema = z.object({
 }
 ```
 
+### Inertia リクエストの自動ハンドリング
+
+Inertia リクエスト（`X-Inertia` ヘッダー付き）で `ValidationException` が throw された場合、上記の JSON は返りません。代わりに Laravel と同様に、エラーをセッションに flash して直前のページへ `303` リダイレクトします。次のページロードで flash されたエラーが共有プロップ `errors`（フィールドごとに 1 メッセージへフラット化）として注入されます。
+
+```tsx
+function Login({ errors }: { errors?: Record<string, string> }) {
+  return (
+    <form>
+      <input name="email" />
+      {errors?.email && <span className="error">{errors.email}</span>}
+    </form>
+  )
+}
+```
+
+これは `validateBody` / `validateQuery` / `validateParams` の失敗と、自前のコードから throw した `ValidationException.withMessages(...)` の両方に適用されます。flash にはセッションミドルウェアが必要です（`auth` オプションを設定すると自動でマウントされます）。挙動をカスタマイズしたい場合は、サービスプロバイダで `ValidationException` 用のレンダラーを登録してください。組み込みのレンダラーより優先されます。
+
 ### Inertia での表示
 
 page definition に `ValidationErrors<T>` を載せて、コントローラーとコンポーネントで同じ shape を共有します。
