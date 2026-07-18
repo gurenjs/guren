@@ -2,8 +2,8 @@ import { Link, usePage } from '@inertiajs/react'
 import Layout from '../../components/Layout.js'
 import { Plus, ChevronLeft, ChevronRight } from 'lucide-react'
 import type { PaginatedPageProps } from '@guren/core'
-import type { PostResourceData } from '../../../../app/Http/Resources/PostResource.js'
-import { route } from '../../../../.guren/routes.gen'
+import type { PostResourceData } from '@/app/Http/Resources/PostResource'
+import { route } from '@/.guren/routes.gen'
 
 interface Props extends PaginatedPageProps<PostResourceData> {}
 

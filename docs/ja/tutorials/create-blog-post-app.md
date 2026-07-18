@@ -126,7 +126,7 @@ export const ListPostsQuerySchema = z.object({
 
 ```ts
 import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
-import { pages } from '../../../.guren/pages.gen.js'
+import { pages } from '@/.guren/pages.gen'
 import { Post, type PostRecord } from '../../Models/Post.js'
 import {
   ListPostsQuerySchema,
@@ -219,8 +219,8 @@ Inertia ページは `resources/js/pages/` 以下に置く普通の React コン
 ```tsx
 import { Link } from '@inertiajs/react'
 import type { PaginatedPageProps } from '@guren/core'
-import type { PostRecord } from '../../../../app/Models/Post.js'
-import { route } from '../../../../.guren/routes.gen'
+import type { PostRecord } from '@/app/Models/Post'
+import { route } from '@/.guren/routes.gen'
 
 interface Props extends PaginatedPageProps<PostRecord> {}
 
@@ -278,8 +278,8 @@ export default function PostsIndex({ data: posts, pagination }: Props) {
 
 ```tsx
 import { Link } from '@inertiajs/react'
-import type { PostRecord } from '../../../../app/Models/Post.js'
-import { route } from '../../../../.guren/routes.gen'
+import type { PostRecord } from '@/app/Models/Post'
+import { route } from '@/.guren/routes.gen'
 
 interface Props {
   post: PostRecord
@@ -307,7 +307,7 @@ export default function PostsShow({ post }: Props) {
 
 ```tsx
 import { Link, useForm } from '@inertiajs/react'
-import { route } from '../../../../.guren/routes.gen'
+import { route } from '@/.guren/routes.gen'
 
 type PostFormData = {
   title: string

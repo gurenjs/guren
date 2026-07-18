@@ -12,7 +12,7 @@
     ],
     "paths": {
       "@/*": [
-        "./app/*"
+        "./*"
       ],
       "@guren/core": [
         "../../packages/core/src/index.ts"
@@ -50,10 +50,14 @@
     ".guren/**/*",
     "src/**/*",
     "app/**/*",
+    "bin/**/*",
+    "config/**/*",
+    "db/**/*",
     "routes/**/*",
     "resources/js/**/*",
     "types/**/*",
-    "tests/**/*"
+    "tests/**/*",
+    "drizzle.config.ts"
   ],
   "exclude": ["e2e/**/*", "playwright.config.ts"]
 }

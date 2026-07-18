@@ -6,7 +6,7 @@ import {
   normalizeDocCategory,
   normalizeDocSlug,
 } from '../../Services/DocsService.js'
-import { pages } from '../../../.guren/pages.gen.js'
+import { pages } from '@/.guren/pages.gen.js'
 
 type DocLocale = (typeof DOC_LOCALE_OPTIONS)[number]['code']
 

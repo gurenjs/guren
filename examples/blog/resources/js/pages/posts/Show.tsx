@@ -1,8 +1,8 @@
 import { Link } from '@inertiajs/react'
 import Layout from '../../components/Layout.js'
 import { ArrowLeft } from 'lucide-react'
-import type { PostResourceData } from '../../../../app/Http/Resources/PostResource.js'
-import { route } from '../../../../.guren/routes.gen'
+import type { PostResourceData } from '@/app/Http/Resources/PostResource'
+import { route } from '@/.guren/routes.gen'
 
 interface Props {
   post: PostResourceData

@@ -372,7 +372,7 @@ User.removeGlobalScope('active')
 ```ts
 import { Model } from '@guren/orm'
 import { posts } from '@/db/schema'
-import { slugify } from '@/utils/string'
+import { slugify } from '@/app/utils/string'
 
 export class Post extends Model<typeof posts.$inferSelect> {
   static override table = posts

@@ -4,8 +4,8 @@ import { useEffect } from 'react'
 import Layout from '../../components/Layout.js'
 import { AlertCircle } from 'lucide-react'
 import type { RouteErrors } from '@guren/inertia-client/typed-forms'
-import type { ApiRoutes } from '../../../../.guren/api-client.gen'
-import { route } from '../../../../.guren/routes.gen'
+import type { ApiRoutes } from '@/.guren/api-client.gen'
+import { route } from '@/.guren/routes.gen'
 
 type ProfileFormValues = ApiRoutes['profile.update']['body']
 

@@ -76,6 +76,7 @@ describe('runDoctor', () => {
       await writeFile(
         join(workspace.dir, 'tsconfig.json'),
         JSON.stringify({
+          compilerOptions: { baseUrl: '.', paths: { '@/*': ['./*'] } },
           include: ['src/**/*', '.guren/**/*'],
         }, null, 2),
         'utf8',
@@ -190,14 +191,18 @@ describe('runDoctor', () => {
       }
       const tsconfig = JSON.parse(await Bun.file(join(workspace.dir, 'tsconfig.json')).text()) as {
         include: string[]
+        compilerOptions?: { baseUrl?: string; paths?: Record<string, string[]> }
       }
 
       expect(packageJson.scripts.build).toBe('bun run codegen && bunx vite build')
       expect(packageJson.scripts.typecheck).toBe('tsc --noEmit')
       expect(packageJson.scripts.codegen).toBe('bunx guren codegen --routes routes/web.ts --out types/generated/routes.d.ts --force')
       expect(tsconfig.include).toContain('.guren/**/*')
+      expect(tsconfig.compilerOptions?.baseUrl).toBe('.')
+      expect(tsconfig.compilerOptions?.paths?.['@/*']).toEqual(['./*'])
       expect(report.fixableChecks.some((check) => check.key === 'scripts')).toBe(false)
       expect(report.fixableChecks.some((check) => check.key === 'tsconfig')).toBe(false)
+      expect(report.fixableChecks.some((check) => check.key === 'tsconfig-alias')).toBe(false)
     } finally {
       await workspace.cleanup()
     }
@@ -509,6 +514,129 @@ describe('runDoctor', () => {
       expect(apiClientCheck?.status).toBe('warn')
       expect(apiClientCheck?.message).toContain('api-client.gen.ts')
       expect(apiClientCheck?.fix).toContain('codegen')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('warns when the @/* alias maps to the app directory instead of the project root', async () => {
+    const workspace = await createTempWorkspace('guren-cli-doctor-alias-')
+
+    try {
+      await writeFile(
+        join(workspace.dir, 'package.json'),
+        JSON.stringify({ name: 'doctor-alias' }, null, 2),
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'tsconfig.json'),
+        JSON.stringify({
+          compilerOptions: { baseUrl: '.', paths: { '@/*': ['./app/*'] } },
+          include: ['.guren/**/*'],
+        }, null, 2),
+        'utf8',
+      )
+
+      const report = await runDoctor({ cwd: workspace.dir, json: true })
+      const aliasCheck = report.checks.find((check) => check.key === 'tsconfig-alias')
+
+      expect(aliasCheck?.status).toBe('warn')
+      expect(aliasCheck?.message).toContain('./app/*')
+      expect(aliasCheck?.fix).toContain('["./*"]')
+      expect(aliasCheck?.canAutofix).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('alias autofix preserves existing compilerOptions and path mappings', async () => {
+    const workspace = await createTempWorkspace('guren-cli-doctor-alias-autofix-')
+
+    try {
+      await writeFile(
+        join(workspace.dir, 'package.json'),
+        JSON.stringify({ name: 'doctor-alias-autofix' }, null, 2),
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'tsconfig.json'),
+        JSON.stringify({
+          compilerOptions: { strict: true, paths: { '#lib/*': ['./lib/*'] } },
+          include: ['.guren/**/*'],
+        }, null, 2),
+        'utf8',
+      )
+
+      const { evaluations } = await getDoctorRuleEvaluations({ cwd: workspace.dir })
+      const aliasEval = evaluations.find((evaluation) => evaluation.check.key === 'tsconfig-alias')
+      expect(aliasEval?.autofix).toBeDefined()
+      await aliasEval!.autofix!.apply(workspace.dir)
+
+      const tsconfig = JSON.parse(await Bun.file(join(workspace.dir, 'tsconfig.json')).text()) as {
+        compilerOptions: { strict?: boolean; baseUrl?: string; paths?: Record<string, string[]> }
+        include: string[]
+      }
+
+      expect(tsconfig.compilerOptions.strict).toBe(true)
+      expect(tsconfig.compilerOptions.baseUrl).toBe('.')
+      expect(tsconfig.compilerOptions.paths?.['#lib/*']).toEqual(['./lib/*'])
+      expect(tsconfig.compilerOptions.paths?.['@/*']).toEqual(['./*'])
+      expect(tsconfig.include).toEqual(['.guren/**/*'])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('warns when a custom baseUrl repoints a root @/* mapping', async () => {
+    const workspace = await createTempWorkspace('guren-cli-doctor-alias-baseurl-')
+
+    try {
+      await writeFile(
+        join(workspace.dir, 'package.json'),
+        JSON.stringify({ name: 'doctor-alias-baseurl' }, null, 2),
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'tsconfig.json'),
+        JSON.stringify({
+          compilerOptions: { baseUrl: 'src', paths: { '@/*': ['./*'] } },
+          include: ['.guren/**/*'],
+        }, null, 2),
+        'utf8',
+      )
+
+      const report = await runDoctor({ cwd: workspace.dir, json: true })
+      const aliasCheck = report.checks.find((check) => check.key === 'tsconfig-alias')
+
+      expect(aliasCheck?.status).toBe('warn')
+      expect(aliasCheck?.message).toContain('baseUrl')
+      expect(aliasCheck?.canAutofix).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('warns when the @/* alias is missing entirely', async () => {
+    const workspace = await createTempWorkspace('guren-cli-doctor-alias-missing-')
+
+    try {
+      await writeFile(
+        join(workspace.dir, 'package.json'),
+        JSON.stringify({ name: 'doctor-alias-missing' }, null, 2),
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'tsconfig.json'),
+        JSON.stringify({ include: ['.guren/**/*'] }, null, 2),
+        'utf8',
+      )
+
+      const report = await runDoctor({ cwd: workspace.dir, json: true })
+      const aliasCheck = report.checks.find((check) => check.key === 'tsconfig-alias')
+
+      expect(aliasCheck?.status).toBe('warn')
+      expect(aliasCheck?.message).toContain('@/*')
+      expect(aliasCheck?.canAutofix).toBe(true)
     } finally {
       await workspace.cleanup()
     }

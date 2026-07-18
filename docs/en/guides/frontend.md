@@ -24,7 +24,7 @@ return this.inertia(pages.posts.Index, {
 // resources/js/pages/posts/Index.tsx
 import type { PageProps } from '@guren/inertia-client/contracts'
 import { Head, Link } from '@inertiajs/react'
-import { pages } from '../../../.guren/pages.gen'
+import { pages } from '@/.guren/pages.gen'
 
 type Props = PageProps<typeof pages.posts.Index>
 
@@ -131,7 +131,7 @@ Page component          codegen              Controller
 
 ```tsx
 // resources/js/pages/posts/Show.tsx
-import type { PostResourceData } from '@/Http/Resources/PostResource'
+import type { PostResourceData } from '@/app/Http/Resources/PostResource'
 
 interface Props {
   post: PostResourceData
@@ -191,7 +191,7 @@ Both `Author` and the `Props` body are extracted into `pages.gen.ts`.
 Types imported from Resource files or other modules are also tracked:
 
 ```tsx
-import type { PostResourceData } from '@/Http/Resources/PostResource'
+import type { PostResourceData } from '@/app/Http/Resources/PostResource'
 
 interface Props {
   post: PostResourceData
@@ -203,7 +203,7 @@ Codegen rewrites the import path so `pages.gen.ts` can reference the same type.
 ### Tips
 
 - Share types between backend and frontend by re-exporting the Drizzle-inferred types from models (e.g. `export type PostRecord = typeof posts.$inferSelect`).
-- Use module path aliases (configured in `tsconfig.json`) to avoid long relative imports.
+- Use the `@/` alias (the project root) instead of long relative imports — it resolves in server code via tsconfig `paths` and in the frontend build via the Guren Vite plugin.
 - Run `bun run codegen` after adding or changing Props to keep `pages.gen.ts` up to date.
 
 ## Hot Reloading

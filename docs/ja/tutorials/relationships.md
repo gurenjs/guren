@@ -186,7 +186,7 @@ import { CommentPayloadSchema } from '../app/Http/Validators/CommentValidator.js
 
 ```tsx
 import { Link, useForm, usePage } from '@inertiajs/react'
-import { route } from '../../../../.guren/routes.gen'
+import { route } from '@/.guren/routes.gen'
 
 interface CommentData {
   id: number

@@ -202,7 +202,7 @@ Generated artifacts include:
 - `channelEventManifest` – runtime manifest for discovered channels/events.
 
 ```ts
-import type { ChannelEvents } from '../.guren/channels.gen'
+import type { ChannelEvents } from '@/.guren/channels.gen'
 import { createUseChannel } from '@guren/inertia-client'
 
 const useChannel = createUseChannel<ChannelEvents>()
@@ -219,7 +219,7 @@ This gives you typed channel/event names and inferred payload shapes in the fron
 Use the generated `ChannelEvents` on the server too, so emit-side payloads are checked at compile time.
 
 ```ts
-import type { ChannelEvents } from '../.guren/channels.gen'
+import type { ChannelEvents } from '@/.guren/channels.gen'
 import { createTypedBroadcaster } from '@guren/core'
 
 const typed = createTypedBroadcaster<ChannelEvents>(broadcast)

@@ -77,7 +77,7 @@ const blueprintRegistry: Record<string, BlueprintDefinition> = {
         {
           path: 'app/Http/Controllers/Admin/AdminDashboardController.ts',
           contents: `import { Controller } from '@guren/core'
-import { pages } from '../../../../.guren/pages.gen.js'
+import { pages } from '@/.guren/pages.gen'
 
 export default class AdminDashboardController extends Controller {
   async index(): Promise<Response> {

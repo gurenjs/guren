@@ -119,6 +119,10 @@ type PackageJsonShape = {
 
 type TsconfigShape = {
   include?: string[]
+  compilerOptions?: {
+    baseUrl?: string
+    paths?: Record<string, string[]>
+  }
 }
 
 async function findFirstExisting(cwd: string, candidates: readonly string[]): Promise<string | null> {
@@ -327,6 +331,68 @@ async function detectTsconfig(context: DoctorRuleContext): Promise<DoctorCheck> 
       manualFix: 'Add `.guren/**/*` to tsconfig.json include.',
     },
   )
+}
+
+const TSCONFIG_ALIAS_FIX = 'Set `"baseUrl": "."` and `"paths": { "@/*": ["./*"] }` in compilerOptions so `@/.guren/*` and `@/app/*` imports resolve.'
+
+async function detectTsconfigAlias(context: DoctorRuleContext): Promise<DoctorCheck> {
+  const tsconfig = await readJsonIfExists<TsconfigShape>(context.cwd, 'tsconfig.json')
+
+  if (!tsconfig.exists || tsconfig.parseError || !tsconfig.value) {
+    return createCheck('tsconfig-alias', 'Path Alias', 'pass', 'Skipped (tsconfig.json missing or unparseable; see TypeScript Config check).')
+  }
+
+  const compilerOptions = tsconfig.value.compilerOptions
+  const aliasTargets = compilerOptions?.paths?.['@/*'] ?? []
+  const baseUrl = compilerOptions?.baseUrl
+  // Path mappings resolve relative to baseUrl (or the tsconfig directory when
+  // baseUrl is omitted), so `./*` only means "project root" for a root baseUrl.
+  const baseUrlIsRoot = baseUrl === undefined || baseUrl === '.' || baseUrl === './'
+  const targetsRoot = aliasTargets.some((target) => target === './*' || target === '*')
+  const mapsToRoot = targetsRoot && baseUrlIsRoot
+
+  const message = mapsToRoot
+    ? 'tsconfig.json maps `@/*` to the project root.'
+    : aliasTargets.length === 0
+      ? 'tsconfig.json does not define the `@/*` path alias.'
+      : !targetsRoot
+        ? `tsconfig.json maps \`@/*\` to ${JSON.stringify(aliasTargets)} instead of the project root (\`["./*"]\`). Scaffolded code imports \`@/.guren/*\` and \`@/app/*\` relative to the project root; adjust existing \`@/\` imports when changing the mapping.`
+        : `tsconfig.json maps \`@/*\` to \`["./*"]\` but \`baseUrl\` is ${JSON.stringify(baseUrl)}, so the alias resolves under that directory instead of the project root.`
+
+  return createCheck('tsconfig-alias', 'Path Alias', mapsToRoot ? 'pass' : 'warn', message, {
+    fix: TSCONFIG_ALIAS_FIX,
+    manualFix: TSCONFIG_ALIAS_FIX,
+    // Only safe to autofix when the alias is absent and no custom baseUrl would
+    // repoint it — rewriting existing settings could break imports that rely on
+    // the old resolution.
+    canAutofix: aliasTargets.length === 0 && baseUrlIsRoot,
+  })
+}
+
+async function createTsconfigAliasAutofix(_context: DoctorRuleContext, check: DoctorCheck): Promise<DoctorAutofix | null> {
+  if (check.status === 'pass' || !check.canAutofix) {
+    return null
+  }
+
+  return {
+    key: check.key,
+    title: check.title,
+    summary: 'Add `"baseUrl": "."` and `"paths": { "@/*": ["./*"] }` to tsconfig.json.',
+    async apply(cwd: string) {
+      const current = await readJsonIfExists<TsconfigShape>(cwd, 'tsconfig.json')
+      if (!current.exists || current.parseError || !current.value) {
+        return
+      }
+
+      const nextConfig = { ...current.value }
+      const compilerOptions = { ...nextConfig.compilerOptions }
+      compilerOptions.baseUrl ??= '.'
+      compilerOptions.paths = { ...compilerOptions.paths }
+      compilerOptions.paths['@/*'] ??= ['./*']
+      nextConfig.compilerOptions = compilerOptions
+      await writeJsonFile(cwd, 'tsconfig.json', nextConfig)
+    },
+  }
 }
 
 async function createTsconfigAutofix(_context: DoctorRuleContext, check: DoctorCheck): Promise<DoctorAutofix | null> {
@@ -848,6 +914,7 @@ const doctorRules: DoctorRule[] = [
   { key: 'page-contracts', title: 'Page Types', detect: detectPageContracts },
   ...GENERATED_FILES.map((generatedFile) => createGeneratedManifestRule(generatedFile)),
   { key: 'tsconfig', title: 'TypeScript Config', detect: detectTsconfig, autofix: createTsconfigAutofix },
+  { key: 'tsconfig-alias', title: 'Path Alias', detect: detectTsconfigAlias, autofix: createTsconfigAliasAutofix },
   { key: 'bootstrap', title: 'Bootstrap Style', detect: detectBootstrap },
   { key: 'config-drift', title: 'App Wiring', detect: detectConfigDrift },
   { key: 'scripts', title: 'App Scripts', detect: detectScripts, autofix: createScriptsAutofix },

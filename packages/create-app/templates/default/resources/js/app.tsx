@@ -1,5 +1,5 @@
 import '../css/app.css'
-import { pageManifest } from '../../.guren/pages.gen.ts'
+import { pageManifest } from '@/.guren/pages.gen'
 
 let pages: Record<string, () => Promise<unknown>> | undefined
 

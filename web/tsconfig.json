@@ -18,7 +18,7 @@
         "../packages/plugin-vercel/src/index.ts"
       ],
       "@/*": [
-        "./app/*"
+        "./*"
       ]
     },
     "types": [

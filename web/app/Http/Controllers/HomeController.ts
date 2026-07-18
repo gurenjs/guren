@@ -1,6 +1,6 @@
 import { Controller } from '@guren/core'
 import { codeToHtml } from 'shiki'
-import { pages } from '../../../.guren/pages.gen.js'
+import { pages } from '@/.guren/pages.gen.js'
 
 const CODE_EXAMPLES = {
   Routes: `import { Router } from '@guren/core'

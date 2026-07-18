@@ -6,7 +6,7 @@ const CONTROLLERS_DIR = 'app/Http/Controllers'
 function controllerTemplate(className: string, resourcePath: string): string {
   const pageVar = resourcePath.replace(/-([a-z])/g, (_, char: string) => char.toUpperCase())
   return `import { Controller } from '@guren/core'
-import { pages } from '../../../.guren/pages.gen.js'
+import { pages } from '@/.guren/pages.gen'
 
 export default class ${className} extends Controller {
   async index(): Promise<Response> {

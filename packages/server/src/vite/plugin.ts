@@ -1,9 +1,9 @@
 import path from 'node:path'
 
 export interface GurenVitePluginOptions {
-  /** Alias for the application directory (defaults to `@`). */
+  /** Alias prefix for application imports such as `@/.guren/routes.gen` (defaults to `@`). */
   appAlias?: string
-  /** Relative path to the application directory (defaults to `app`). */
+  /** Directory the alias resolves to, relative to the project root (defaults to `.`, the project root). */
   appDir?: string
   /** Alias for the frontend resources directory (defaults to `@resources`). */
   resourcesAlias?: string
@@ -31,7 +31,7 @@ export interface GurenVitePluginOptions {
 
 const defaultOptions: Required<GurenVitePluginOptions> = {
   appAlias: '@',
-  appDir: 'app',
+  appDir: '.',
   resourcesAlias: '@resources',
   resourcesDir: 'resources/js',
   entry: 'resources/js/app.tsx',

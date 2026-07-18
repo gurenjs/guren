@@ -108,9 +108,9 @@ Generated views follow these patterns for end-to-end type safety:
 ### Form pages (New/Edit) — derive types from ApiRoutes
 
 ```typescript
-import type { ApiRoutes } from '../../../../.guren/api-client.gen'
+import type { ApiRoutes } from '@/.guren/api-client.gen'
 import type { RouteErrors } from '@guren/inertia-client/typed-forms'
-import { route } from '../../../../.guren/routes.gen'
+import { route } from '@/.guren/routes.gen'
 
 type <Name>FormData = ApiRoutes['<names>.store']['body']
 
@@ -123,8 +123,8 @@ form.put(route('<names>.update', { id: <name>.id }))
 
 ```typescript
 import type { PaginatedPageProps } from '@guren/core'
-import type { <Name>ResourceData } from '../../../../app/Http/Resources/<Name>Resource.js'
-import { route } from '../../../../.guren/routes.gen'
+import type { <Name>ResourceData } from '@/app/Http/Resources/<Name>Resource'
+import { route } from '@/.guren/routes.gen'
 
 interface Props extends PaginatedPageProps<<Name>ResourceData> {}
 

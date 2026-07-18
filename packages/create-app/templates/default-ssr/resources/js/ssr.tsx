@@ -1,7 +1,7 @@
 import type { Page } from '@inertiajs/core'
 import { renderInertiaServer } from '@guren/inertia-client'
 import type { InertiaSsrContext, InertiaSsrResult } from '@guren/core'
-import { pageManifest } from '../../.guren/pages.gen.ts'
+import { pageManifest } from '@/.guren/pages.gen'
 
 let pages: Record<string, () => Promise<unknown>> | undefined
 

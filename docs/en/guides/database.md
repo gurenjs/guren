@@ -414,7 +414,7 @@ User.removeGlobalScope('active')
 Hooks run logic at specific points in a record's lifecycle. Use them for auto-generated slugs, timestamps, audit logs, or cache invalidation:
 
 ```ts
-import { slugify } from '@/utils/string'
+import { slugify } from '@/app/utils/string'
 
 export class Post extends Model<PostRecord> {
   static override table = posts

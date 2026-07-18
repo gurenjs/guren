@@ -192,7 +192,7 @@ broadcast.broadcast('announcements', 'NewPost', { id: 1 })
 - `channelEventManifest` – 検出済み channel/event の runtime manifest
 
 ```ts
-import type { ChannelEvents } from '../.guren/channels.gen'
+import type { ChannelEvents } from '@/.guren/channels.gen'
 import { createUseChannel } from '@guren/inertia-client'
 
 const useChannel = createUseChannel<ChannelEvents>()
@@ -209,7 +209,7 @@ const off = feed.on('NewPost', (payload) => {
 生成された `ChannelEvents` をサーバー側 emit にも適用すると、送信時 payload もコンパイル時に検証できます。
 
 ```ts
-import type { ChannelEvents } from '../.guren/channels.gen'
+import type { ChannelEvents } from '@/.guren/channels.gen'
 import { createTypedBroadcaster } from '@guren/core'
 
 const typed = createTypedBroadcaster<ChannelEvents>(broadcast)

@@ -12,7 +12,7 @@
     "types": ["bun-types"],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./app/*"]
+      "@/*": ["./*"]
     }
   },
   "include": ["src/**/*", "app/**/*", "routes/**/*", "config/**/*", "db/**/*", "bin/**/*"],

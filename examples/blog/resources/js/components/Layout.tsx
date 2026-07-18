@@ -1,6 +1,6 @@
 import { Link, usePage } from '@inertiajs/react'
 import { useEffect, useState, type PropsWithChildren } from 'react'
-import { route } from '../../../.guren/routes.gen'
+import { route } from '@/.guren/routes.gen'
 
 type SharedPageProps = {
   auth?: {
