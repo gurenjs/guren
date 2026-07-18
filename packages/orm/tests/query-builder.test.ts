@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'bun:test'
 import { QueryBuilder, type WhereCondition, type ORMAdapterAdvanced } from '../src/QueryBuilder'
 import { Model, type ORMAdapter, type PlainObject, type WhereClause, type FindManyOptions } from '../src/Model'
+import { ModelNotFoundException } from '../src/ModelNotFoundException'
 
 type TestRecord = {
   id: number
@@ -290,8 +291,18 @@ describe('QueryBuilder', () => {
       expect(result).toBeNull()
     })
 
-    it('firstOrFail should throw when no match', async () => {
-      await expect(qb().where('name', 'Nobody').firstOrFail()).rejects.toThrow('not found')
+    it('firstOrFail should throw ModelNotFoundException when no match', async () => {
+      await expect(qb().where('name', 'Nobody').firstOrFail()).rejects.toThrow(ModelNotFoundException)
+    })
+
+    it('firstOrFail exception should carry statusCode 404', async () => {
+      try {
+        await qb().where('name', 'Nobody').firstOrFail()
+        expect.unreachable('firstOrFail should have thrown')
+      } catch (error) {
+        expect(error).toBeInstanceOf(ModelNotFoundException)
+        expect((error as ModelNotFoundException).statusCode).toBe(404)
+      }
     })
 
     it('firstOrFail should return record when match exists', async () => {
