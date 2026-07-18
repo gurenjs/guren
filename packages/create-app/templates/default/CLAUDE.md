@@ -4,6 +4,23 @@
 
 A fullstack TypeScript application built with the Guren framework (Laravel-inspired, running on Bun).
 
+## AI Agents: Start Here
+
+Before exploring `node_modules`, use the built-in introspection commands:
+
+```bash
+bunx guren context     # project map: models, routes, controllers, pages (add --json for JSON)
+bunx guren check       # validate route ↔ controller ↔ page consistency — run after changes
+bunx guren codegen     # regenerate .guren/*.gen.ts typed manifests (also runs via `bun run dev`)
+```
+
+Detailed, verified API rules live in `.claude/rules/*.md` and load automatically
+based on the files you are editing (glob-scoped): `orm-models.md` (models, queries,
+relations), `controllers-http.md` (validation, Inertia, auth), `routes-codegen.md`
+(route options, schema binding, codegen), `testing.md` (TestApp assertions).
+Read the matching rule file before reading `node_modules/@guren/*` — it covers the
+exact signatures.
+
 ## Project Structure
 
 ```
@@ -59,9 +76,12 @@ bunx guren make:listener <Name> --event=<EventName>
 bunx guren make:mail <Name>
 bunx guren make:test <Name>
 
-# Database
-bun run db:migrate
-bun run db:seed
+# Database workflow: edit db/schema.ts first, then
+bunx guren make:migration <name>   # generate SQL migration via drizzle-kit into db/migrations/
+bun run db:migrate                 # apply pending migrations
+bunx guren db:status               # show applied/pending state
+bun run db:seed                    # run seeders
+# Migrations are forward-only (no rollback). Dev reset: bunx guren db:reset --seed
 
 # Build & test
 bun run build
@@ -92,93 +112,53 @@ http://localhost:3333/_guren/mcp
 | `guren_make_component` | 個別コンポーネント生成 |
 | `guren_codegen` | 型マニフェスト生成（routes.gen.ts, pages.gen.ts等） |
 
-## Architecture Patterns
+## Architecture Overview
 
-### Controllers
+The request lifecycle: `routes/web.ts` registers routes on a `Router`, each pointing
+at a `[Controller, 'method']` tuple. Controllers validate input with Zod schemas,
+query models, and render Inertia pages or JSON.
+
 ```typescript
-import { Controller } from '@guren/core'
-import { z } from 'zod'
+// routes/web.ts
+router.get('/posts', [PostController, 'index']).name('posts.index')
+router.post('/posts', { name: 'posts.store', body: CreatePostSchema }, [PostController, 'store'])
 
-const CreatePostSchema = z.object({
-  title: z.string().min(1),
-  body: z.string().min(1),
-})
-
-const PostIdParamSchema = z.object({
-  id: z.coerce.number().int().positive(),
-})
-
+// app/Http/Controllers/PostController.ts
 export class PostController extends Controller {
-  async index() {
-    const result = await Post.paginate({ page: 1, perPage: 15 })
-    const paginator = paginate(result, { path: this.request.path ?? '/posts' })
-    return this.inertia(pages.posts.Index, {
-      data: result.data.map((post) => new PostResource(post).toJSON()),
-      pagination: paginator,
-    })
-  }
-
-  async show() {
-    const { id } = this.validateParams(PostIdParamSchema)
-    const post = await Post.findOrFail(id)
-    return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() })
-  }
-
   async store() {
-    const data = await this.validateBody(CreatePostSchema)
-    const user = await this.auth.userOrFail()
+    const data = await this.validateBody(CreatePostSchema)   // 422 on failure
+    const user = await this.auth.userOrFail()                // 401 if unauthenticated
     const post = await Post.create({ ...data, authorId: user.id })
     return this.redirect('/posts')
   }
 }
-```
 
-**Validation helpers** (accepts any Zod-like schema with `safeParse`):
-- `this.validateBody(schema)` — parse request body, throw 422 on failure
-- `this.validateQuery(schema)` — parse query parameters
-- `this.validateParams(schema)` — parse route parameters
-
-### Models
-```typescript
-import { Model } from '@guren/orm'
-import { posts } from '@/db/schema'
-
-export class Post extends Model<typeof posts> {
-  static table = posts
-}
-
-// Usage
-const post = await Post.find(1)          // returns null if not found
-const post = await Post.findOrFail(1)    // throws ModelNotFoundException (404)
-const all = await Post.where('published', true).get()
-```
-
-### Routes
-```typescript
-import { Router } from '@guren/core'
-
-export function registerWebRoutes(router: Router): void {
-  router.get('/posts', PostController.index)
-  router.post('/posts', PostController.store)
-  router.resource('/posts', PostController)
-
-  router.middleware('auth').group((group) => {
-    group.get('/dashboard', DashboardController.index)
-  })
+// app/Models/Post.ts
+export class Post extends defineModel(posts) {
+  static fillable = ['title', 'body', 'authorId']
 }
 ```
 
-### Middleware
-```typescript
-import { defineMiddleware } from '@guren/core'
+- Models: `await Post.findOrFail(id)` throws a 404; `Post.where(...)` starts a query
+  builder chain. Full API in `.claude/rules/orm-models.md`.
+- Attaching a Zod schema to a route both validates the request automatically and
+  feeds `bunx guren codegen` typed manifests. Details in `.claude/rules/routes-codegen.md`.
+- Middleware: `defineMiddleware(async (c, next) => { ... })` from `@guren/core`;
+  register aliases via `router.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))`.
 
-export const requireAuth = defineMiddleware(async (c, next) => {
-  if (!c.get('user')) {
-    return c.redirect('/login')
-  }
-  await next()
-})
+## Testing
+
+Uses `bun:test` + `@guren/testing`. Requests run in-process via `app.fetch()` — no server needed.
+
+```typescript
+import { TestApp } from '@guren/testing'
+
+const app = await TestApp.create()
+await app.get('/posts').assertOk()
+await app.actingAs(user).json().post('/posts', { title: 'Hi' }).assertCreated()
 ```
+
+Full client and assertion reference: `.claude/rules/testing.md`.
 
 ## Key Files
 
@@ -190,3 +170,4 @@ export const requireAuth = defineMiddleware(async (c, next) => {
 | `routes/web.ts` | Web route definitions |
 | `app/Providers/` | Service providers |
 | `resources/js/pages/` | React page components |
+| `.claude/rules/` | Glob-scoped API rules (auto-loaded per edited path) |
