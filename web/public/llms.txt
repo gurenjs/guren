@@ -43,7 +43,7 @@ bun run codegen          # regenerate types after adding features
 
 ## Key Conventions
 
-- Import from '@guren/core' (never '@guren/server' in app code)
+- Always import framework APIs from '@guren/core' in app code (it re-exports everything; internal packages are not for direct import)
 - Controllers: class methods, this.validateBody(schema) throws 422, this.auth.userOrFail() throws 401
 - Models: Post.find(id) returns null; Post.findOrFail(id) throws 404 automatically
 - Render pages with this.inertia(pages.posts.Index, props) — pages imported from '@/.guren/pages.gen'
