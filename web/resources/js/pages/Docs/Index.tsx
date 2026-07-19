@@ -1,4 +1,4 @@
-import { Head, Link } from '@inertiajs/react'
+import { Link } from '@inertiajs/react'
 
 type DocSummary = {
   slug: string
@@ -27,39 +27,65 @@ type LocaleLink = {
 
 interface Props {
   categories: DocCategoryGroup[]
-  locale: string
+  locale: 'en' | 'ja'
   locales?: LocaleLink[]
   basePath: string
 }
+import { SITE_DESCRIPTION, pageTitle } from '../../../../config/site.js'
 import { Footer } from '../../components/Footer.js'
 import { Header } from '../../components/Header.js'
+import { Seo } from '../../components/Seo.js'
 import { BookOpenIcon, TerminalIcon } from '../../components/icons.js'
 import { useDocsPageTheme } from './theme.js'
 
-export default function DocsIndex({ categories, locales = [], basePath }: Props) {
+const HERO_COPY = {
+  en: {
+    eyebrow: 'Documentation',
+    titleTop: 'Learn Guren,',
+    titleAccent: 'end to end.',
+    lead: 'Guides for every subsystem — routing, models, auth, queues — and tutorials that build a working app. Every page starts with code you can run.',
+    empty: 'No documentation in this section yet.',
+  },
+  ja: {
+    eyebrow: 'ドキュメント',
+    titleTop: 'Guren を、',
+    titleAccent: '最初から最後まで。',
+    lead: 'ルーティング、モデル、認証、キューまで全サブシステムのガイドと、動くアプリを作るチュートリアル。どのページも実行できるコードから始まります。',
+    empty: 'このセクションのドキュメントはまだありません。',
+  },
+} as const
+
+export default function DocsIndex({ categories, locale, locales = [], basePath }: Props) {
   useDocsPageTheme()
+
+  const copy = HERO_COPY[locale]
 
   return (
     <>
-      <Head title="Documentation" />
+      <Seo
+        title={pageTitle(locale === 'ja' ? 'ドキュメント' : 'Documentation')}
+        description={SITE_DESCRIPTION[locale]}
+        path={basePath}
+        locale={locale}
+        alternates={locales.map((link) => ({ hrefLang: link.code, href: link.href }))}
+      />
       <Header variant="docs" basePath={basePath} locales={locales} />
 
       <main className="min-h-[calc(100vh-70px)] bg-docs-page text-docs-text" style={{ fontFamily: 'system-ui, sans-serif' }}>
         <div className="mx-auto max-w-[1200px] px-6 pt-16 pb-24">
           <header className="mb-20 max-w-[800px]">
-            <p className="mb-4 flex items-center gap-2 text-sm font-semibold text-docs-accent">
+            <p className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-widest text-docs-accent">
               <span className="inline-block h-px w-5 bg-docs-accent" />
-              DOCUMENTATION
+              {copy.eyebrow}
             </p>
             <h1 className="mb-6 text-[3.5rem] font-extrabold leading-[1.1] tracking-tight text-docs-heading">
-              Build faster with <br />
+              {copy.titleTop} <br />
               <span className="bg-gradient-to-br from-[#db1b1b] to-[#7f1d1d] bg-clip-text text-transparent">
-                Guren Framework
+                {copy.titleAccent}
               </span>
             </h1>
             <p className="max-w-[640px] text-xl leading-relaxed text-docs-text-secondary">
-              Everything you need to build robust, scalable applications.
-              Explore our comprehensive guides and hands-on tutorials to get started.
+              {copy.lead}
             </p>
           </header>
 
@@ -87,7 +113,7 @@ export default function DocsIndex({ categories, locales = [], basePath }: Props)
                         <h3 className="mb-5 text-sm font-bold uppercase tracking-widest text-docs-text-muted">
                           {section.title}
                         </h3>
-                        <div className="stagger-fade-in grid gap-6" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
+                        <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
                           {section.docs.map((doc) => (
                             <Link
                               key={`${group.category}-${doc.slug}`}
@@ -103,9 +129,6 @@ export default function DocsIndex({ categories, locales = [], basePath }: Props)
                                     {doc.description}
                                   </p>
                                 )}
-                                <div className="mt-6 flex items-center gap-2 text-sm font-semibold text-docs-accent">
-                                  Read more <span>→</span>
-                                </div>
                               </article>
                             </Link>
                           ))}
@@ -114,7 +137,7 @@ export default function DocsIndex({ categories, locales = [], basePath }: Props)
                     ))}
                   </div>
                 ) : (
-                  <p className="italic text-docs-text-muted">No documentation available in this section yet.</p>
+                  <p className="italic text-docs-text-muted">{copy.empty}</p>
                 )}
               </section>
             ))}

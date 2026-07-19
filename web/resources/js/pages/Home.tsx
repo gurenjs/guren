@@ -1,13 +1,15 @@
-import { Head, Link } from '@inertiajs/react'
+import { Link } from '@inertiajs/react'
 import { useState } from 'react'
 interface Props {
-  message: string
   codeExamples: Record<string, string>
 }
+import { GITHUB_URL, SITE_DESCRIPTION, SITE_TITLE } from '../../../config/site.js'
 import { CodeBlock } from '../components/CodeBlock.js'
 import { FeatureCard } from '../components/FeatureCard.js'
 import { Footer } from '../components/Footer.js'
 import { Header } from '../components/Header.js'
+import { Seo } from '../components/Seo.js'
+import { softwareJsonLd, websiteJsonLd } from '../lib/structured-data.js'
 import {
   ArrowRightIcon,
   BoltIcon,
@@ -21,34 +23,34 @@ import {
 
 const features = [
   {
-    icon: <BoltIcon className="size-5" />,
-    title: 'Instant DX',
-    body: 'Hot reload Bun server + Vite + Inertia keeps backend and frontend edits perfectly in sync.',
+    icon: <BookOpenIcon className="size-5" />,
+    title: 'Controllers you already know',
+    body: 'validateBody() throws a 422, findOrFail() a 404, auth.userOrFail() a 401. Write the happy path — the framework answers for the rest.',
   },
   {
     icon: <ShieldCheckIcon className="size-5" />,
-    title: 'Type-safe Stack',
-    body: 'Drizzle ORM powers eloquent-style models with full TypeScript inference out of the box.',
-  },
-  {
-    icon: <TerminalIcon className="size-5" />,
-    title: 'CLI Toolkit',
-    body: 'Generators, route typing, and runtime helpers live under one `guren` command.',
-  },
-  {
-    icon: <BookOpenIcon className="size-5" />,
-    title: 'Laravel-inspired',
-    body: 'Controllers, middleware, routing, validation — all the patterns you love, in TypeScript.',
+    title: 'Types from route to React',
+    body: 'Codegen turns routes, page props, and the API client into compile-time contracts. Rename a route and the build fails — not your users.',
   },
   {
     icon: <CubeIcon className="size-5" />,
-    title: 'Inertia.js',
-    body: 'Build modern SPAs without building an API. Server-side routing with React views.',
+    title: 'Drizzle models, Eloquent manners',
+    body: "Post.where('published', true).get() rides on Drizzle ORM. Models when you want conventions, raw SQL when you don't.",
+  },
+  {
+    icon: <BoltIcon className="size-5" />,
+    title: 'No API layer to babysit',
+    body: 'Inertia.js hands controller props straight to your React components. One repo, one deploy, zero REST/GraphQL glue.',
   },
   {
     icon: <RocketIcon className="size-5" />,
-    title: 'Built on Bun',
-    body: "Leverage Bun's fast runtime, native TypeScript, and built-in package manager.",
+    title: 'Batteries actually included',
+    body: 'Auth, queues, mail, cache, events, scheduling, storage, i18n — first-party subsystems, not a shopping list of npm packages.',
+  },
+  {
+    icon: <TerminalIcon className="size-5" />,
+    title: 'Built for AI agents too',
+    body: 'guren context maps your app, guren check verifies route–controller–page wiring, guren audit gates security. Your agent reads the same docs you do — every page is served as Markdown.',
   },
 ]
 
@@ -105,12 +107,46 @@ const agentCostSteps = [
 const TAB_KEYS = ['Routes', 'Controller', 'Model'] as const
 type TabKey = (typeof TAB_KEYS)[number]
 
-export default function Home({ message, codeExamples }: Props) {
+function CopyCommand({ command }: { command: string }) {
+  const [copied, setCopied] = useState(false)
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(command)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // Clipboard unavailable — the command is still visible to select by hand.
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      className="group inline-flex items-center gap-3 rounded-lg border border-white/15 bg-black/40 px-5 py-3 font-mono text-sm text-white/90 transition hover:border-crimson-400/60"
+      aria-label={`Copy command: ${command}`}
+    >
+      <span className="select-none text-crimson-400">$</span>
+      {command}
+      <span className="select-none text-xs text-white/40 transition group-hover:text-white/70">
+        {copied ? 'copied' : 'copy'}
+      </span>
+    </button>
+  )
+}
+
+export default function Home({ codeExamples }: Props) {
   const [activeTab, setActiveTab] = useState<TabKey>('Routes')
 
   return (
     <>
-      <Head title="Guren — Laravel-inspired TypeScript Framework for Bun" />
+      <Seo
+        title={SITE_TITLE}
+        description={SITE_DESCRIPTION.en}
+        path="/"
+        jsonLd={[websiteJsonLd(), softwareJsonLd()]}
+      />
       <div className="min-h-dvh bg-[radial-gradient(circle_at_10%_20%,rgba(255,190,190,.25),transparent_55%),radial-gradient(circle_at_85%_15%,rgba(183,28,28,.12),transparent_45%),#0f0a0a] text-crimson-50">
         <Header variant="home" />
 
@@ -120,43 +156,43 @@ export default function Home({ message, codeExamples }: Props) {
             aria-hidden
             className="pointer-events-none absolute -right-32 -top-32 h-[500px] w-[500px] rounded-full bg-[radial-gradient(circle,rgba(183,28,28,.2),transparent_65%)]"
           />
-          <div
+          {/* 紅蓮 — the framework's namesake, set vertically like a hanging scroll */}
+          <span
             aria-hidden
-            className="pointer-events-none absolute -left-32 bottom-0 h-[400px] w-[400px] rounded-full bg-[radial-gradient(circle,rgba(255,190,190,.1),transparent_65%)]"
-          />
-          <div className="relative mx-auto max-w-5xl animate-fade-in-up">
-            <p className="text-sm font-semibold uppercase tracking-[0.35em] text-crimson-300">
-              Bun-native MVC Framework
+            className="pointer-events-none absolute right-[6%] top-1/2 hidden h-[23rem] -translate-y-1/2 select-none text-[10rem] font-bold leading-none text-crimson-500/[0.09] lg:block"
+            style={{ writingMode: 'vertical-rl', fontFamily: '"Hiragino Mincho ProN", "Yu Mincho", serif' }}
+          >
+            紅蓮
+          </span>
+          <div className="relative mx-auto max-w-5xl">
+            <p className="text-sm font-medium tracking-wide text-crimson-300">
+              <span style={{ fontFamily: '"Hiragino Mincho ProN", "Yu Mincho", serif' }}>紅蓮</span>
+              <span className="mx-2 text-crimson-300/50">·</span>
+              <span className="font-mono">/gu·ren/</span>
+              <span className="mx-2 text-crimson-300/50">·</span>
+              crimson lotus
             </p>
             <h1 className="mt-5 text-4xl font-extrabold leading-[1.1] tracking-tight text-white sm:text-5xl md:text-6xl">
-              {message.split('Guren').length > 1 ? (
-                <>
-                  {message.split('Guren')[0]}
-                  <span className="bg-gradient-to-r from-crimson-400 to-crimson-600 bg-clip-text text-transparent">Guren</span>
-                  {message.split('Guren')[1]}
-                </>
-              ) : (
-                message
-              )}
+              The{' '}
+              <span className="bg-gradient-to-r from-crimson-400 to-crimson-600 bg-clip-text text-transparent">
+                Laravel feeling
+              </span>
+              , at Bun speed.
             </h1>
             <p className="mt-6 max-w-2xl text-lg leading-relaxed text-white/70 md:text-xl">
-              Bring Laravel-inspired productivity to Bun. Wire up routes, controllers, React-powered
-              Inertia pages, and Drizzle ORM in minutes — then iterate with instant feedback.
+              Guren is a fullstack framework for Bun. Controllers, models, queues, mail — the
+              conventions you know from Laravel, with type safety that runs from the route
+              definition to the React component.
             </p>
-            <div className="mt-10 flex flex-wrap gap-4">
-              <Link
-                href="/docs"
-                className="inline-flex items-center gap-2 rounded-full bg-crimson-500 px-8 py-3.5 font-semibold text-white shadow-lg shadow-crimson-500/30 transition hover:-translate-y-0.5 hover:bg-crimson-600 hover:shadow-xl hover:shadow-crimson-500/40"
-              >
-                Browse docs
-                <ArrowRightIcon className="size-4" />
-              </Link>
+            <div className="mt-10 flex flex-wrap items-center gap-4">
               <Link
                 href="/docs/guides/getting-started"
-                className="inline-flex items-center gap-2 rounded-full border border-white/30 px-8 py-3.5 font-semibold text-white/90 transition hover:border-white/50 hover:text-white"
+                className="inline-flex items-center gap-2 rounded-full bg-crimson-500 px-8 py-3.5 font-semibold text-white shadow-lg shadow-crimson-500/30 transition hover:-translate-y-0.5 hover:bg-crimson-600 hover:shadow-xl hover:shadow-crimson-500/40"
               >
-                Quick start guide
+                Get started
+                <ArrowRightIcon className="size-4" />
               </Link>
+              <CopyCommand command="bunx create-guren-app my-app" />
             </div>
           </div>
         </section>
@@ -165,13 +201,14 @@ export default function Home({ message, codeExamples }: Props) {
         <section className="px-6 py-20">
           <div className="mx-auto grid max-w-5xl items-start gap-12 lg:grid-cols-2">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-crimson-400">See it in action</p>
+              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-crimson-400">The shape of a Guren app</p>
               <h2 className="mt-3 text-3xl font-bold text-white md:text-4xl">
-                Elegant code, <br className="hidden sm:block" />powerful results
+                Three files, <br className="hidden sm:block" />one feature
               </h2>
               <p className="mt-4 text-base leading-relaxed text-white/60">
-                Define routes, build controllers, and query models with a clean, expressive API.
-                Everything is fully typed — your editor knows your schema.
+                A route points at a controller. The controller validates input, queries a model,
+                and returns a typed Inertia page. That&apos;s the whole loop — no serializers, no
+                resolvers, no hand-written API client.
               </p>
               <CodeBlock
                 lines={[
@@ -212,10 +249,10 @@ export default function Home({ message, codeExamples }: Props) {
             <div className="mb-12 text-center">
               <p className="text-sm font-semibold uppercase tracking-[0.3em] text-crimson-400">Why Guren</p>
               <h2 className="mt-3 text-3xl font-bold text-white md:text-4xl">
-                Everything you need to ship fast
+                Conventions you know. Types you didn&apos;t have.
               </h2>
             </div>
-            <div className="stagger-fade-in grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
               {features.map((f) => (
                 <FeatureCard key={f.title} icon={f.icon} title={f.title} body={f.body} />
               ))}
@@ -303,7 +340,7 @@ export default function Home({ message, codeExamples }: Props) {
                 Every number is reproducible with one command.
               </p>
             </div>
-            <div className="stagger-fade-in grid gap-5 sm:grid-cols-3">
+            <div className="grid gap-5 sm:grid-cols-3">
               {benchmarks.map((b) => {
                 const maxRatio = Math.max(...b.bars.map((bar) => bar.ratio))
                 return (
@@ -357,19 +394,26 @@ export default function Home({ message, codeExamples }: Props) {
           </div>
         </section>
 
-        {/* Stats Bar */}
-        <section className="border-y border-white/10 bg-white/[0.02] px-6 py-12">
-          <div className="mx-auto flex max-w-4xl flex-wrap items-center justify-center gap-8 text-center md:gap-16">
-            {[
-              { label: 'TypeScript-first', icon: <CodeBracketIcon className="mx-auto mb-2 size-6 text-crimson-400" /> },
-              { label: 'MIT Licensed', icon: <ShieldCheckIcon className="mx-auto mb-2 size-6 text-crimson-400" /> },
-              { label: 'Bun-native', icon: <RocketIcon className="mx-auto mb-2 size-6 text-crimson-400" /> },
-            ].map((stat) => (
-              <div key={stat.label}>
-                {stat.icon}
-                <p className="text-sm font-semibold text-white/80">{stat.label}</p>
-              </div>
-            ))}
+        {/* Name origin */}
+        <section className="border-y border-white/10 bg-white/[0.02] px-6 py-14">
+          <div className="mx-auto flex max-w-4xl flex-col items-center gap-6 text-center md:flex-row md:gap-10 md:text-left">
+            <span
+              className="h-40 select-none text-7xl font-bold leading-none text-crimson-400/80"
+              style={{ writingMode: 'vertical-rl', fontFamily: '"Hiragino Mincho ProN", "Yu Mincho", serif' }}
+              lang="ja"
+            >
+              紅蓮
+            </span>
+            <div>
+              <p className="text-lg leading-relaxed text-white/80">
+                <em className="font-semibold not-italic text-white">Guren</em> (紅蓮) is Japanese for
+                &ldquo;crimson lotus&rdquo; — the color of a blazing flame.
+              </p>
+              <p className="mt-3 text-base leading-relaxed text-white/55">
+                It is also a nod to where the framework comes from: Laravel&apos;s conventions,
+                re-grown in TypeScript soil. Same flower, different pond.
+              </p>
+            </div>
           </div>
         </section>
 
@@ -380,24 +424,30 @@ export default function Home({ message, codeExamples }: Props) {
             className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(183,28,28,.15),transparent_70%)]"
           />
           <div className="relative mx-auto max-w-2xl text-center">
-            <h2 className="text-3xl font-bold text-white md:text-4xl">Ready to build?</h2>
+            <h2 className="text-3xl font-bold text-white md:text-4xl">
+              Your first app is one command away
+            </h2>
             <p className="mt-4 text-lg text-white/60">
-              Guren is stable at v1.0 — get started in under a minute. No config, no boilerplate.
+              Guren is stable at v1.0. SQLite by default — no Docker, no config, no boilerplate.
             </p>
-            <div className="mt-8 flex flex-wrap justify-center gap-4">
+            <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
+              <CopyCommand command="bunx create-guren-app my-app" />
+            </div>
+            <div className="mt-6 flex flex-wrap justify-center gap-4">
               <Link
                 href="/docs/guides/getting-started"
                 className="inline-flex items-center gap-2 rounded-full bg-crimson-500 px-8 py-3.5 font-semibold text-white shadow-lg shadow-crimson-500/30 transition hover:-translate-y-0.5 hover:bg-crimson-600"
               >
-                Get started
+                Read the quickstart
                 <ArrowRightIcon className="size-4" />
               </Link>
               <a
-                href="https://github.com/gurenjs/guren"
+                href={GITHUB_URL}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center gap-2 rounded-full border border-white/30 px-8 py-3.5 font-semibold text-white/90 transition hover:border-white/50 hover:text-white"
               >
+                <CodeBracketIcon className="size-4" />
                 View on GitHub
               </a>
             </div>

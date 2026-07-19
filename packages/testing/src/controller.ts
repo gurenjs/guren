@@ -110,6 +110,16 @@ export function createGurenControllerModule() {
       return this.ctx.var?.container?.make<T>(key) as T
     }
 
+    text(body: string, init: ResponseInit = {}): Response {
+      return new Response(body, {
+        ...init,
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          ...init.headers,
+        },
+      })
+    }
+
     inertia(
       componentOrPage: string | { id: string; component?: string },
       props: Record<string, unknown>,

@@ -1,4 +1,5 @@
 import { Controller } from '@guren/core'
+import { DOCS_CACHE_CONTROL, docsBasePath, pageTitle, type DocLocale } from '../../../config/site.js'
 import {
   DEFAULT_DOC_LOCALE,
   DOC_LOCALE_OPTIONS,
@@ -7,8 +8,6 @@ import {
   normalizeDocSlug,
 } from '../../Services/DocsService.js'
 import { pages } from '@/.guren/pages.gen.js'
-
-type DocLocale = (typeof DOC_LOCALE_OPTIONS)[number]['code']
 
 export default class DocsController extends Controller {
   async index(): Promise<Response> {
@@ -20,17 +19,42 @@ export default class DocsController extends Controller {
   }
 
   async show(): Promise<Response> {
-    const categoryParam = this.request.param('category') || undefined
-    const slugParam = this.request.param('slug') || undefined
-
-    return this.#renderShow({ categoryParam, slugParam, locale: DEFAULT_DOC_LOCALE })
+    return this.#show(DEFAULT_DOC_LOCALE)
   }
 
   async showJa(): Promise<Response> {
+    return this.#show('ja')
+  }
+
+  async #show(locale: DocLocale): Promise<Response> {
     const categoryParam = this.request.param('category') || undefined
     const slugParam = this.request.param('slug') || undefined
 
-    return this.#renderShow({ categoryParam, slugParam, locale: 'ja' })
+    // /docs/guides/routing.md serves the raw Markdown source for LLM agents.
+    if (slugParam?.endsWith('.md')) {
+      return this.#serveMarkdown(categoryParam, slugParam, locale)
+    }
+
+    return this.#renderShow({ categoryParam, slugParam, locale })
+  }
+
+  async #serveMarkdown(
+    categoryParam: string | undefined,
+    slugParam: string | undefined,
+    locale: DocLocale,
+  ): Promise<Response> {
+    const markdown = await docsService.getRawMarkdown(categoryParam, slugParam, locale)
+
+    if (!markdown) {
+      return this.text('Not found', { status: 404 })
+    }
+
+    return this.text(markdown, {
+      headers: {
+        'Content-Type': 'text/markdown; charset=utf-8',
+        'Cache-Control': DOCS_CACHE_CONTROL,
+      },
+    })
   }
 
   async #renderIndex(locale: DocLocale): Promise<Response> {
@@ -44,6 +68,7 @@ export default class DocsController extends Controller {
       {
         url: this.request.path,
         title: this.#titleForLocale(locale),
+        lang: locale,
       },
     )
   }
@@ -64,7 +89,7 @@ export default class DocsController extends Controller {
       docsService.getDoc(categoryParam, slugParam, locale),
     ])
 
-    const pageTitle = doc ? `${doc.title} – Documentation` : this.#notFoundTitle(locale)
+    const title = doc ? pageTitle(doc.title) : this.#notFoundTitle(locale)
     const active = doc
       ? { category: doc.category, slug: doc.slug }
       : normalizedCategory && normalizedSlug
@@ -78,14 +103,15 @@ export default class DocsController extends Controller {
       { categories, doc, active, locale, locales, basePath },
       {
         url: this.request.path,
-        title: pageTitle,
+        title,
         status: doc ? 200 : 404,
+        lang: locale,
       },
     )
   }
 
   #basePathForLocale(locale: DocLocale): string {
-    return locale === DEFAULT_DOC_LOCALE ? '/docs' : `/docs/${locale}`
+    return docsBasePath(locale)
   }
 
   #localeLinks(
@@ -105,8 +131,7 @@ export default class DocsController extends Controller {
   }
 
   #titleForLocale(locale: DocLocale): string {
-    if (locale === 'ja') return 'ドキュメント'
-    return 'Documentation'
+    return pageTitle(locale === 'ja' ? 'ドキュメント' : 'Documentation')
   }
 
   #notFoundTitle(locale: DocLocale): string {

@@ -1,5 +1,6 @@
 import { Controller } from '@guren/core'
 import { codeToHtml } from 'shiki'
+import { SITE_TITLE } from '../../../config/site.js'
 import { pages } from '@/.guren/pages.gen.js'
 
 const CODE_EXAMPLES = {
@@ -63,11 +64,9 @@ export default class HomeController extends Controller {
   async index(): Promise<Response> {
     const codeExamples = await getHighlightedExamples()
 
-    const props = {
-      message: 'Build full-stack web apps blazingly fast.',
-      codeExamples,
-    }
-
-    return this.inertia(pages.Home, props, { url: this.request.path, title: 'Guren' })
+    return this.inertia(pages.Home, { codeExamples }, {
+      url: this.request.path,
+      title: SITE_TITLE,
+    })
   }
 }
