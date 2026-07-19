@@ -27,11 +27,11 @@ type LocaleLink = {
 
 interface Props {
   categories: DocCategoryGroup[]
-  locale: string
+  locale: 'en' | 'ja'
   locales?: LocaleLink[]
   basePath: string
 }
-import { SITE_DESCRIPTION, SITE_NAME } from '../../../../config/site.js'
+import { SITE_DESCRIPTION, pageTitle } from '../../../../config/site.js'
 import { Footer } from '../../components/Footer.js'
 import { Header } from '../../components/Header.js'
 import { Seo } from '../../components/Seo.js'
@@ -58,16 +58,15 @@ const HERO_COPY = {
 export default function DocsIndex({ categories, locale, locales = [], basePath }: Props) {
   useDocsPageTheme()
 
-  const docLocale: 'en' | 'ja' = locale === 'ja' ? 'ja' : 'en'
-  const copy = HERO_COPY[docLocale]
+  const copy = HERO_COPY[locale]
 
   return (
     <>
       <Seo
-        title={docLocale === 'ja' ? `ドキュメント — ${SITE_NAME}` : `Documentation — ${SITE_NAME}`}
-        description={SITE_DESCRIPTION[docLocale]}
+        title={pageTitle(locale === 'ja' ? 'ドキュメント' : 'Documentation')}
+        description={SITE_DESCRIPTION[locale]}
         path={basePath}
-        locale={docLocale}
+        locale={locale}
         alternates={locales.map((link) => ({ hrefLang: link.code, href: link.href }))}
       />
       <Header variant="docs" basePath={basePath} locales={locales} />

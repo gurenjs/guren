@@ -1,28 +1,32 @@
 import { GITHUB_URL, SITE_DESCRIPTION, SITE_NAME, SITE_URL, absoluteUrl } from '../../../config/site.js'
 
+const WEBSITE_JSON_LD: Record<string, unknown> = {
+  '@context': 'https://schema.org',
+  '@type': 'WebSite',
+  name: SITE_NAME,
+  url: SITE_URL,
+  description: SITE_DESCRIPTION.en,
+}
+
+const SOFTWARE_JSON_LD: Record<string, unknown> = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: SITE_NAME,
+  applicationCategory: 'DeveloperApplication',
+  operatingSystem: 'macOS, Linux, Windows (WSL2)',
+  offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+  description: SITE_DESCRIPTION.en,
+  url: SITE_URL,
+  sameAs: [GITHUB_URL],
+  programmingLanguage: 'TypeScript',
+}
+
 export function websiteJsonLd(): Record<string, unknown> {
-  return {
-    '@context': 'https://schema.org',
-    '@type': 'WebSite',
-    name: SITE_NAME,
-    url: SITE_URL,
-    description: SITE_DESCRIPTION.en,
-  }
+  return WEBSITE_JSON_LD
 }
 
 export function softwareJsonLd(): Record<string, unknown> {
-  return {
-    '@context': 'https://schema.org',
-    '@type': 'SoftwareApplication',
-    name: SITE_NAME,
-    applicationCategory: 'DeveloperApplication',
-    operatingSystem: 'macOS, Linux, Windows (WSL2)',
-    offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
-    description: SITE_DESCRIPTION.en,
-    url: SITE_URL,
-    sameAs: [GITHUB_URL],
-    programmingLanguage: 'TypeScript',
-  }
+  return SOFTWARE_JSON_LD
 }
 
 export function techArticleJsonLd(options: {

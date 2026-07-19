@@ -55,7 +55,7 @@ type DocPage = DocSummary & {
 export interface PagePropsMap {
   'Docs/Index': {
   categories: DocCategoryGroup[]
-  locale: string
+  locale: 'en' | 'ja'
   locales?: LocaleLink[]
   basePath: string
 }
@@ -63,12 +63,11 @@ export interface PagePropsMap {
   categories: DocCategoryGroup[]
   doc: DocPage | null
   active?: { category: string; slug: string }
-  locale: string
+  locale: 'en' | 'ja'
   locales?: LocaleLink[]
   basePath: string
 }
   'Home': {
-  message: string
   codeExamples: Record<string, string>
 }
 }

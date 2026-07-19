@@ -1,4 +1,5 @@
 import { Link } from '@inertiajs/react'
+import { GITHUB_URL } from '../../../config/site.js'
 import { GithubIcon } from './icons.js'
 
 interface FooterProps {
@@ -66,7 +67,7 @@ export function Footer({ variant }: FooterProps) {
           <h4 className="mb-4 text-sm font-semibold uppercase tracking-wider text-white/70">Legal</h4>
           <nav className="flex flex-col gap-2.5 text-sm text-white/50">
             <a
-              href="https://github.com/gurenjs/guren/blob/main/LICENSE"
+              href={`${GITHUB_URL}/blob/main/LICENSE`}
               target="_blank"
               rel="noreferrer"
               className="no-underline transition hover:text-white"

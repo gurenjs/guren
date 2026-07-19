@@ -1,6 +1,6 @@
 import { Head, Link } from '@inertiajs/react'
 import { useEffect, useState } from 'react'
-import { SITE_DESCRIPTION, SITE_NAME } from '../../../../config/site.js'
+import { SITE_DESCRIPTION, pageTitle } from '../../../../config/site.js'
 import { Footer } from '../../components/Footer.js'
 import { Header } from '../../components/Header.js'
 import { Seo } from '../../components/Seo.js'
@@ -41,7 +41,7 @@ interface Props {
   categories: DocCategoryGroup[]
   doc: DocPage | null
   active?: { category: string; slug: string }
-  locale: string
+  locale: 'en' | 'ja'
   locales?: LocaleLink[]
   basePath: string
 }
@@ -158,7 +158,6 @@ function useTableOfContents(doc: DocPage | null) {
 export default function DocsShow({ categories, doc, active, locale, locales = [], basePath }: Props) {
   useDocsPageTheme()
 
-  const docLocale: 'en' | 'ja' = locale === 'ja' ? 'ja' : 'en'
   const docLabel = doc?.category === 'tutorials' ? 'Tutorial' : 'Guide'
   const docPath = doc ? `${basePath}/${doc.category}/${doc.slug}` : basePath
   const nav = buildPrevNext(categories, active, basePath)
@@ -215,10 +214,10 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
     <>
       {doc ? (
         <Seo
-          title={`${doc.title} — ${SITE_NAME}`}
-          description={doc.description ?? SITE_DESCRIPTION[docLocale]}
+          title={pageTitle(doc.title)}
+          description={doc.description ?? SITE_DESCRIPTION[locale]}
           path={docPath}
-          locale={docLocale}
+          locale={locale}
           alternates={locales.map((link) => ({ hrefLang: link.code, href: link.href }))}
           ogType="article"
           markdownPath={`${docPath}.md`}
@@ -227,16 +226,16 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
               title: doc.title,
               description: doc.description,
               path: docPath,
-              locale: docLocale,
+              locale,
             }),
             breadcrumbJsonLd([
-              { name: docLocale === 'ja' ? 'ドキュメント' : 'Documentation', path: basePath },
+              { name: locale === 'ja' ? 'ドキュメント' : 'Documentation', path: basePath },
               { name: doc.title, path: docPath },
             ]),
           ]}
         />
       ) : (
-        <Head title={`Page not found — ${SITE_NAME}`} />
+        <Head title={pageTitle('Page not found')} />
       )}
       <Header variant="docs" basePath={basePath} locales={locales} />
 

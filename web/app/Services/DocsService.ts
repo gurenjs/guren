@@ -328,7 +328,7 @@ export class DocsService {
   async getRawMarkdown(
     category: string | undefined,
     slug: string | undefined,
-    locale: DocLocale = DEFAULT_DOC_LOCALE,
+    locale: DocLocale,
   ): Promise<string | null> {
     const normalizedCategory = normalizeDocCategory(category)
     const normalizedSlug = normalizeDocSlug(slug)

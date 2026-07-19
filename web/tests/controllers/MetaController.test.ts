@@ -8,7 +8,7 @@ import type { DocCategoryGroup } from '../../app/Services/DocsService.js'
 
 vi.mock('@guren/core', () => createControllerModuleMock())
 
-import MetaController from '../../app/Http/Controllers/MetaController.js'
+import MetaController, { resetMetaBodyCache } from '../../app/Http/Controllers/MetaController.js'
 import { docsService } from '../../app/Services/DocsService.js'
 
 const routingDoc = { slug: 'routing', title: 'Routing', description: 'Define routes' }
@@ -30,6 +30,7 @@ function createController(url: string): MetaController {
 describe('MetaController', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    resetMetaBodyCache()
   })
 
   it('serves a sitemap with hreflang alternates for docs pages', async () => {

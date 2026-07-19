@@ -1,7 +1,6 @@
 import { Link } from '@inertiajs/react'
 import { useState } from 'react'
 interface Props {
-  message: string
   codeExamples: Record<string, string>
 }
 import { GITHUB_URL, SITE_DESCRIPTION, SITE_TITLE } from '../../../config/site.js'
@@ -108,25 +107,6 @@ const agentCostSteps = [
 const TAB_KEYS = ['Routes', 'Controller', 'Model'] as const
 type TabKey = (typeof TAB_KEYS)[number]
 
-function HeroTitle({ message }: { message: string }) {
-  const accent = 'Laravel feeling'
-  const index = message.indexOf(accent)
-
-  if (index === -1) {
-    return <>{message}</>
-  }
-
-  return (
-    <>
-      {message.slice(0, index)}
-      <span className="bg-gradient-to-r from-crimson-400 to-crimson-600 bg-clip-text text-transparent">
-        {accent}
-      </span>
-      {message.slice(index + accent.length)}
-    </>
-  )
-}
-
 function CopyCommand({ command }: { command: string }) {
   const [copied, setCopied] = useState(false)
 
@@ -156,13 +136,13 @@ function CopyCommand({ command }: { command: string }) {
   )
 }
 
-export default function Home({ message, codeExamples }: Props) {
+export default function Home({ codeExamples }: Props) {
   const [activeTab, setActiveTab] = useState<TabKey>('Routes')
 
   return (
     <>
       <Seo
-        title={SITE_TITLE.en}
+        title={SITE_TITLE}
         description={SITE_DESCRIPTION.en}
         path="/"
         jsonLd={[websiteJsonLd(), softwareJsonLd()]}
@@ -193,7 +173,11 @@ export default function Home({ message, codeExamples }: Props) {
               crimson lotus
             </p>
             <h1 className="mt-5 text-4xl font-extrabold leading-[1.1] tracking-tight text-white sm:text-5xl md:text-6xl">
-              <HeroTitle message={message} />
+              The{' '}
+              <span className="bg-gradient-to-r from-crimson-400 to-crimson-600 bg-clip-text text-transparent">
+                Laravel feeling
+              </span>
+              , at Bun speed.
             </h1>
             <p className="mt-6 max-w-2xl text-lg leading-relaxed text-white/70 md:text-xl">
               Guren is a fullstack framework for Bun. Controllers, models, queues, mail — the
@@ -356,7 +340,7 @@ export default function Home({ message, codeExamples }: Props) {
                 Every number is reproducible with one command.
               </p>
             </div>
-            <div className="stagger-fade-in grid gap-5 sm:grid-cols-3">
+            <div className="grid gap-5 sm:grid-cols-3">
               {benchmarks.map((b) => {
                 const maxRatio = Math.max(...b.bars.map((bar) => bar.ratio))
                 return (
