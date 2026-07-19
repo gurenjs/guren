@@ -117,6 +117,13 @@ function ensureBuild(
   }
 
   if (isSsrBuild) {
+    // Bundle all dependencies into the SSR output so `.guren/ssr` stays
+    // importable on serverless runtimes that ship without node_modules.
+    config.ssr ??= {}
+    if (config.ssr.noExternal === undefined) {
+      config.ssr.noExternal = true
+    }
+
     if (config.build.outDir === undefined) {
       config.build.outDir = options.ssrOutDir
     }

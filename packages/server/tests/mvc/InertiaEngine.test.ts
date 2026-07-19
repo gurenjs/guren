@@ -52,6 +52,45 @@ describe('InertiaEngine SSR integration', () => {
   })
 })
 
+describe('Inertia import map', () => {
+  it('includes the esm.sh dev fallback outside production', async () => {
+    const previous = process.env.NODE_ENV
+    process.env.NODE_ENV = 'development'
+
+    try {
+      const response = await inertia('Dashboard', {}, { url: '/dashboard' })
+      const body = await response.text()
+
+      expect(body).toContain('type="importmap"')
+      expect(body).toContain('esm.sh/react')
+    } finally {
+      if (previous === undefined) {
+        delete process.env.NODE_ENV
+      } else {
+        process.env.NODE_ENV = previous
+      }
+    }
+  })
+
+  it('omits the esm.sh dev fallback in production', async () => {
+    const previous = process.env.NODE_ENV
+    process.env.NODE_ENV = 'production'
+
+    try {
+      const response = await inertia('Dashboard', {}, { url: '/dashboard' })
+      const body = await response.text()
+
+      expect(body).not.toContain('esm.sh')
+    } finally {
+      if (previous === undefined) {
+        delete process.env.NODE_ENV
+      } else {
+        process.env.NODE_ENV = previous
+      }
+    }
+  })
+})
+
 describe('Inertia asset version mismatch', () => {
   const buildInertiaRequest = (
     overrides: { method?: string; version?: string | null } = {},

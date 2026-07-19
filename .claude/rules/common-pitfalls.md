@@ -42,6 +42,11 @@ Lessons learned from code review cycles. Check these before submitting changes.
 - **Entrypoint is `bun bin/serve.ts`**, not `bun run start` (no `start` script exists in templates).
 - **Copy runtime dirs explicitly**: `bin/`, `src/`, `app/`, `config/`, `routes/`, `public/`, `db/`, `.guren/`.
 
+## Serverless Bundling (Vercel / Lambda)
+
+- **`bun build` inlines `process.env.NODE_ENV` at bundle time** (defaults to `"development"`, even with `--minify`). Runtime `NODE_ENV=production` cannot override it. Always pass `--define 'process.env.NODE_ENV="production"'` when bundling server entrypoints for deployment (`@guren/plugin-vercel` does this).
+- **SSR bundles must be self-contained on serverless.** Function directories ship without `node_modules`, so externalized `react`/`@inertiajs/react` imports fail at runtime and Inertia silently falls back to CSR. The Guren Vite plugin defaults `ssr.noExternal: true` for SSR builds — don't re-externalize deps in `.guren/ssr` unless the deploy target has them installed.
+
 ## ESM Compatibility
 
 - **No `require()` in ESM packages.** Use top-level `import` or dynamic `import()`. Bun tolerates `require()` but Node ESM does not.
