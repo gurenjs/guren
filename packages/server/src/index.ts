@@ -96,6 +96,7 @@ export {
   createOAuthManager,
   createOAuthState,
   verifyOAuthState,
+  sanitizeOAuthRedirect,
   buildOAuthAuthorizeUrl,
   exchangeOAuthCode,
   fetchOAuthUserProfile,

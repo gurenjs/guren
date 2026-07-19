@@ -1,4 +1,9 @@
 import { AuthenticationException } from '../../errors/exceptions/AuthenticationException'
+import {
+  hostMatchesAllowlist,
+  isAppRelativePath,
+  normalizeRedirectTarget,
+} from '../../support/redirect-target'
 import { buildTokenUrl, generateToken, hashToken, parseTokenUrl } from '../utils'
 
 export interface OAuthProviderConfig {
@@ -48,6 +53,12 @@ export interface OAuthStateConfig {
   expiresIn?: number
   stateLength?: number
   hashAlgorithm?: 'sha256' | 'sha512'
+  /**
+   * External hosts allowed as `redirectTo` targets (supports `*.example.com`
+   * wildcards). App-relative paths (`/dashboard`) are always allowed; anything
+   * else is dropped to prevent open redirects.
+   */
+  allowedRedirectHosts?: string[]
 }
 
 export interface OAuthAuthorizeOptions {
@@ -134,6 +145,7 @@ export class OAuthManager {
       expiresIn: options.stateConfig?.expiresIn ?? DEFAULT_STATE_EXPIRES_IN,
       stateLength: options.stateConfig?.stateLength ?? DEFAULT_STATE_LENGTH,
       hashAlgorithm: options.stateConfig?.hashAlgorithm ?? DEFAULT_STATE_HASH_ALGORITHM,
+      allowedRedirectHosts: options.stateConfig?.allowedRedirectHosts ?? [],
     }
   }
 
@@ -168,6 +180,20 @@ export class OAuthManager {
   }
 
   async user(providerName: string, payload: OAuthCallbackPayload): Promise<OAuthUserProfile> {
+    const { profile } = await this.handleCallback(providerName, payload)
+    return profile
+  }
+
+  /**
+   * Verify the callback and return the user profile together with the
+   * sanitized `redirectTo` stored at authorize time. `redirectTo` is safe to
+   * pass to a redirect response: app-relative paths and allowlisted hosts
+   * only.
+   */
+  async handleCallback(
+    providerName: string,
+    payload: OAuthCallbackPayload,
+  ): Promise<{ profile: OAuthUserProfile; redirectTo?: string }> {
     const provider = this.getProvider(providerName)
     const verified = await verifyOAuthState(payload.state, providerName, this.stateStore, this.stateConfig)
     if (!verified) {
@@ -175,7 +201,8 @@ export class OAuthManager {
     }
 
     const token = await exchangeOAuthCode(provider, payload.code)
-    return fetchOAuthUserProfile(provider, token)
+    const profile = await fetchOAuthUserProfile(provider, token)
+    return { profile, redirectTo: verified.redirectTo }
   }
 }
 
@@ -194,7 +221,11 @@ export async function createOAuthState(
   const hashAlgorithm = config.hashAlgorithm ?? DEFAULT_STATE_HASH_ALGORITHM
   const expiresAt = new Date(Date.now() + (config.expiresIn ?? DEFAULT_STATE_EXPIRES_IN))
   const stateHash = hashToken(state, hashAlgorithm)
-  await store.store(stateHash, { provider, redirectTo, expiresAt })
+  await store.store(stateHash, {
+    provider,
+    redirectTo: sanitizeOAuthRedirect(redirectTo, config.allowedRedirectHosts),
+    expiresAt,
+  })
   return { state, expiresAt }
 }
 
@@ -210,7 +241,45 @@ export async function verifyOAuthState(
   if (!payload) return null
   await store.delete(stateHash)
   if (payload.provider !== provider) return null
-  return payload
+  // Re-sanitize on the way out so custom stores and states persisted before
+  // an allowlist change cannot smuggle an unsafe target through.
+  return { ...payload, redirectTo: sanitizeOAuthRedirect(payload.redirectTo, config.allowedRedirectHosts) }
+}
+
+/**
+ * Reduce a `redirectTo` value to a safe target: app-relative paths always
+ * pass; absolute http(s) URLs pass only when their host is in the allowlist
+ * (supports `*.example.com` wildcards). Everything else — protocol-relative
+ * URLs, backslash tricks, `javascript:` and other schemes — returns
+ * `undefined`.
+ */
+export function sanitizeOAuthRedirect(
+  redirectTo: string | undefined,
+  allowedHosts: string[] = [],
+): string | undefined {
+  const value = redirectTo?.trim()
+
+  if (!value) {
+    return undefined
+  }
+
+  const normalized = normalizeRedirectTarget(value)
+
+  if (isAppRelativePath(normalized)) {
+    return normalized
+  }
+
+  try {
+    const target = new URL(normalized)
+
+    if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+      return undefined
+    }
+
+    return hostMatchesAllowlist(target, allowedHosts) ? normalized : undefined
+  } catch {
+    return undefined
+  }
 }
 
 export function buildOAuthAuthorizeUrl(

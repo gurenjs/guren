@@ -1,4 +1,9 @@
 import type { MiddlewareHandler } from 'hono'
+import {
+  hostMatchesAllowlist,
+  isAppRelativePath,
+  normalizeRedirectTarget,
+} from '../../support/redirect-target'
 
 export interface RedirectSafetyOptions {
   /** Additional external hosts allowed as redirect targets. */
@@ -56,11 +61,9 @@ export function isSafeRedirectUrl(
   requestUrl: string,
   allowedHosts: string[] = [],
 ): boolean {
-  // Normalize backslash tricks (e.g., \/evil.com)
-  const normalized = url.replace(/\\/g, '/')
+  const normalized = normalizeRedirectTarget(url)
 
-  // Relative URLs starting with a single slash are always safe
-  if (normalized.startsWith('/') && !normalized.startsWith('//')) {
+  if (isAppRelativePath(normalized)) {
     return true
   }
 
@@ -74,21 +77,9 @@ export function isSafeRedirectUrl(
       return true
     }
 
-    // Check allowed hosts
-    for (const allowed of allowedHosts) {
-      if (allowed.startsWith('*.')) {
-        const suffix = allowed.slice(1).toLowerCase()
-        if (target.hostname.toLowerCase().endsWith(suffix) && target.hostname.length > suffix.length) {
-          return true
-        }
-      } else if (target.host.toLowerCase() === allowed.toLowerCase()) {
-        return true
-      }
-    }
+    return hostMatchesAllowlist(target, allowedHosts)
   } catch {
     // Malformed URLs are not safe
     return false
   }
-
-  return false
 }

@@ -65,6 +65,7 @@ export {
   createDiscordOAuthProviderConfig,
   buildOAuthRedirectUrl,
   parseOAuthRedirectUrl,
+  sanitizeOAuthRedirect,
 } from './oauth'
 export type {
   ApiToken,

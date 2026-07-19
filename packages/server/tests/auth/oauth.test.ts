@@ -8,8 +8,10 @@ import {
   createGoogleOAuthProviderConfig,
   createOAuthState,
   verifyOAuthState,
+  sanitizeOAuthRedirect,
   type OAuthProviderConfig,
 } from '../../src/auth/oauth'
+import { hashToken } from '../../src/auth/utils'
 
 describe('oauth helpers', () => {
   it('builds authorize URL with required params and scopes', () => {
@@ -43,6 +45,66 @@ describe('oauth helpers', () => {
     const secondUse = await verifyOAuthState(state, 'github', store, {})
     expect(secondUse).toBeNull()
   })
+
+  it('drops unsafe redirectTo values when creating state', async () => {
+    const store = new MemoryOAuthStateStore()
+    const { state } = await createOAuthState('github', store, {}, 'https://evil.example.com/phish')
+
+    const payload = await verifyOAuthState(state, 'github', store, {})
+    expect(payload?.redirectTo).toBeUndefined()
+  })
+
+  it('re-sanitizes redirectTo on verify for custom stores', async () => {
+    const store = new MemoryOAuthStateStore()
+    const { state } = await createOAuthState('github', store, {}, '/ok', 'fixed-state')
+
+    // Overwrite the stored payload with an unsafe target, simulating a custom
+    // store (or a state persisted before an allowlist change).
+    await store.store(hashToken(state, 'sha256'), {
+      provider: 'github',
+      redirectTo: '//evil.example.com',
+      expiresAt: new Date(Date.now() + 60_000),
+    })
+
+    const verified = await verifyOAuthState(state, 'github', store, {})
+    expect(verified?.provider).toBe('github')
+    expect(verified?.redirectTo).toBeUndefined()
+  })
+})
+
+describe('sanitizeOAuthRedirect', () => {
+  it('allows app-relative paths', () => {
+    expect(sanitizeOAuthRedirect('/dashboard')).toBe('/dashboard')
+    expect(sanitizeOAuthRedirect('/settings?tab=profile')).toBe('/settings?tab=profile')
+  })
+
+  it('rejects protocol-relative and backslash-crafted URLs', () => {
+    expect(sanitizeOAuthRedirect('//evil.example.com')).toBeUndefined()
+    expect(sanitizeOAuthRedirect('/\\evil.example.com')).toBeUndefined()
+    expect(sanitizeOAuthRedirect('\\/evil.example.com')).toBeUndefined()
+  })
+
+  it('rejects absolute URLs and non-http schemes by default', () => {
+    expect(sanitizeOAuthRedirect('https://evil.example.com/phish')).toBeUndefined()
+    expect(sanitizeOAuthRedirect('javascript:alert(1)')).toBeUndefined()
+    expect(sanitizeOAuthRedirect('data:text/html,x')).toBeUndefined()
+  })
+
+  it('allows allowlisted hosts including wildcards', () => {
+    expect(sanitizeOAuthRedirect('https://app.example.com/next', ['app.example.com'])).toBe(
+      'https://app.example.com/next',
+    )
+    expect(sanitizeOAuthRedirect('https://staging.example.com/next', ['*.example.com'])).toBe(
+      'https://staging.example.com/next',
+    )
+    expect(sanitizeOAuthRedirect('https://example.com.evil.net/', ['*.example.com'])).toBeUndefined()
+    expect(sanitizeOAuthRedirect('ftp://app.example.com/', ['app.example.com'])).toBeUndefined()
+  })
+
+  it('returns undefined for empty values', () => {
+    expect(sanitizeOAuthRedirect(undefined)).toBeUndefined()
+    expect(sanitizeOAuthRedirect('   ')).toBeUndefined()
+  })
 })
 
 describe('OAuthManager', () => {
@@ -51,6 +113,20 @@ describe('OAuthManager', () => {
     clientSecret: 'gh-secret',
     redirectUri: 'https://app.example.com/auth/github/callback',
   })
+
+  const installOAuthFetchMock = (
+    tokenResponse: Record<string, unknown>,
+    userResponse: Record<string, unknown>,
+  ) => {
+    const fetchMock = mock(async (input: string) => {
+      const body = input.includes('/access_token') ? tokenResponse : userResponse
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    ;(globalThis as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch
+  }
 
   beforeEach(() => {
     mock.restore()
@@ -73,25 +149,10 @@ describe('OAuthManager', () => {
     })
     manager.registerProvider('github', githubConfig)
 
-    const tokenResponse = {
-      access_token: 'token-123',
-      token_type: 'bearer',
-      scope: 'read:user',
-    }
-    const userResponse = {
-      id: 42,
-      email: 'octo@example.com',
-      name: 'Octo Cat',
-      avatar_url: 'https://example.com/avatar.png',
-    }
-
-    const fetchMock = mock(async (input: string) => {
-      if (input.includes('/access_token')) {
-        return new Response(JSON.stringify(tokenResponse), { status: 200, headers: { 'Content-Type': 'application/json' } })
-      }
-      return new Response(JSON.stringify(userResponse), { status: 200, headers: { 'Content-Type': 'application/json' } })
-    })
-    ;(globalThis as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch
+    installOAuthFetchMock(
+      { access_token: 'token-123', token_type: 'bearer', scope: 'read:user' },
+      { id: 42, email: 'octo@example.com', name: 'Octo Cat', avatar_url: 'https://example.com/avatar.png' },
+    )
 
     const { state } = await manager.authorize('github')
     const profile = await manager.user('github', { code: 'auth-code', state })
@@ -99,6 +160,30 @@ describe('OAuthManager', () => {
     expect(profile.id).toBe('42')
     expect(profile.email).toBe('octo@example.com')
     expect(profile.token.accessToken).toBe('token-123')
+  })
+
+  it('round-trips sanitized redirectTo through authorize and handleCallback', async () => {
+    const manager = new OAuthManager({
+      stateStore: new MemoryOAuthStateStore(),
+      stateConfig: { allowedRedirectHosts: ['trusted.example.com'] },
+    })
+    manager.registerProvider('github', githubConfig)
+    installOAuthFetchMock({ access_token: 'token-123' }, { id: 42 })
+
+    const roundTrip = async (redirectTo: string) => {
+      const { state } = await manager.authorize('github', { redirectTo })
+      return manager.handleCallback('github', { code: 'auth-code', state })
+    }
+
+    const relative = await roundTrip('/dashboard')
+    expect(relative.redirectTo).toBe('/dashboard')
+    expect(relative.profile.id).toBe('42')
+
+    const unsafe = await roundTrip('https://evil.example.com')
+    expect(unsafe.redirectTo).toBeUndefined()
+
+    const allowlisted = await roundTrip('https://trusted.example.com/welcome')
+    expect(allowlisted.redirectTo).toBe('https://trusted.example.com/welcome')
   })
 
   it('exposes provider presets for google and discord', () => {
