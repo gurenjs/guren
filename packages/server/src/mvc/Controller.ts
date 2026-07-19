@@ -2,6 +2,8 @@ import type { Context } from 'hono'
 import { inertia, type InertiaOptions } from './inertia/InertiaEngine'
 import { resolveSharedInertiaProps, type ResolvedSharedInertiaProps } from './inertia/shared'
 import { AUTH_CONTEXT_KEY } from '../http/middleware/auth'
+import { LOCALE_CONTEXT_KEY } from '../http/middleware/detect-locale'
+import { getI18n } from '../i18n'
 import { flattenRequestQueries, parseRequestPayload } from '../http/request'
 import type { AuthContext } from '../auth/types'
 import type { ServiceBindings } from '../container/bindings'
@@ -13,6 +15,7 @@ import type { AuthUser } from '../authorization/types'
 /** Structural type for DI containers, avoiding a hard dependency on Container. */
 interface ContainerLike {
   make(key: string): unknown
+  has?(key: string): boolean
 }
 
 /**
@@ -336,28 +339,31 @@ export class Controller {
   /**
    * Default `<html lang>` for Inertia responses when `options.lang` is not
    * provided: the request-scoped `locale` context variable (set by locale
-   * middleware) wins over the app-wide i18n locale.
+   * middleware) wins over the app-wide i18n locale (the router-injected
+   * container binding, then the `setI18n()` global).
    */
   #defaultInertiaLang(): string | undefined {
     const vars = this.ctx.var as Record<string, unknown> | undefined
 
-    const requestLocale = vars?.locale
+    const requestLocale = vars?.[LOCALE_CONTEXT_KEY]
     if (typeof requestLocale === 'string' && requestLocale.length > 0) {
       return requestLocale
     }
 
-    const container = vars?.container as
-      | { has?: (key: string) => boolean; make?: (key: string) => unknown }
-      | undefined
-    if (container?.has?.('i18n')) {
-      const i18n = container.make?.('i18n') as { getLocale?: () => string } | undefined
-      const locale = i18n?.getLocale?.()
-      if (typeof locale === 'string' && locale.length > 0) {
-        return locale
+    let i18n: { getLocale?: () => string } | undefined
+
+    if (this._container?.has?.('i18n')) {
+      i18n = this._container.make('i18n') as { getLocale?: () => string }
+    } else {
+      try {
+        i18n = getI18n()
+      } catch {
+        i18n = undefined
       }
     }
 
-    return undefined
+    const locale = i18n?.getLocale?.()
+    return typeof locale === 'string' && locale.length > 0 ? locale : undefined
   }
 
   protected json<T>(data: T, init: ResponseInit = {}): Response {

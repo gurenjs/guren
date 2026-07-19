@@ -88,6 +88,8 @@ export { requestIdMiddleware } from './request-id'
 export { requestLoggingMiddleware } from './request-logging'
 export {
   detectLocaleMiddleware,
+  LOCALE_CONTEXT_KEY,
   type DetectLocaleOptions,
+  type DetectLocaleVariables,
   type LocaleSource,
 } from './detect-locale'

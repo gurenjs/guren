@@ -189,6 +189,7 @@ export {
   requestLoggingMiddleware,
   // Locale detection
   detectLocaleMiddleware,
+  LOCALE_CONTEXT_KEY,
 }
   from './http/middleware'
 export { AUTH_CONTEXT_KEY } from './http/middleware/auth'
@@ -223,6 +224,7 @@ export type {
   ForceHttpsOptions,
   // Locale detection types
   DetectLocaleOptions,
+  DetectLocaleVariables,
   LocaleSource,
 }  from './http/middleware'
 // Validation (advanced)
