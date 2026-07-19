@@ -9,27 +9,25 @@ import {
   verifyApiToken,
 } from '../src/index'
 
-const apiTokens = sqliteTable('api_tokens', {
+const baseColumns = {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   hashedToken: text('hashed_token').notNull().unique(),
   userId: text('user_id').notNull(),
-  abilities: text('abilities', { mode: 'json' }).$type<string[]>().notNull(),
   lastUsedAt: integer('last_used_at', { mode: 'timestamp_ms' }),
   expiresAt: integer('expires_at', { mode: 'timestamp_ms' }),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+}
+
+const apiTokens = sqliteTable('api_tokens', {
+  ...baseColumns,
+  abilities: text('abilities', { mode: 'json' }).$type<string[]>().notNull(),
 })
 
 // Same shape but with a plain text abilities column (no drizzle json mode).
 const apiTokensText = sqliteTable('api_tokens_text', {
-  id: text('id').primaryKey(),
-  name: text('name').notNull(),
-  hashedToken: text('hashed_token').notNull().unique(),
-  userId: text('user_id').notNull(),
+  ...baseColumns,
   abilities: text('abilities').notNull(),
-  lastUsedAt: integer('last_used_at', { mode: 'timestamp_ms' }),
-  expiresAt: integer('expires_at', { mode: 'timestamp_ms' }),
-  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
 })
 
 describe('DatabaseApiTokenStore', () => {
@@ -38,28 +36,20 @@ describe('DatabaseApiTokenStore', () => {
 
   beforeEach(() => {
     sqlite = new Database(':memory:')
-    sqlite.exec(`
-      CREATE TABLE api_tokens (
-        id text primary key,
-        name text not null,
-        hashed_token text not null unique,
-        user_id text not null,
-        abilities text not null,
-        last_used_at integer,
-        expires_at integer,
-        created_at integer not null
-      );
-      CREATE TABLE api_tokens_text (
-        id text primary key,
-        name text not null,
-        hashed_token text not null unique,
-        user_id text not null,
-        abilities text not null,
-        last_used_at integer,
-        expires_at integer,
-        created_at integer not null
-      );
-    `)
+    for (const tableName of ['api_tokens', 'api_tokens_text']) {
+      sqlite.exec(`
+        CREATE TABLE ${tableName} (
+          id text primary key,
+          name text not null,
+          hashed_token text not null unique,
+          user_id text not null,
+          abilities text not null,
+          last_used_at integer,
+          expires_at integer,
+          created_at integer not null
+        );
+      `)
+    }
     DrizzleAdapter.configure(drizzle({ client: sqlite }) as never)
     store = new DatabaseApiTokenStore(apiTokens)
   })
@@ -96,7 +86,7 @@ describe('DatabaseApiTokenStore', () => {
   })
 
   test('rejects expired tokens and deleteExpired removes them', async () => {
-    const { plainTextToken, token } = await createApiToken(store, {
+    const { plainTextToken } = await createApiToken(store, {
       name: 'Short-lived',
       userId: 'user-1',
       expiresIn: -1000, // already expired
@@ -106,7 +96,6 @@ describe('DatabaseApiTokenStore', () => {
 
     await store.deleteExpired()
     expect(await store.findByUserId('user-1')).toHaveLength(0)
-    void token
   })
 
   test('updates lastUsedAt on verification', async () => {
