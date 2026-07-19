@@ -1,4 +1,9 @@
 import { AuthenticationException } from '../../errors/exceptions/AuthenticationException'
+import {
+  hostMatchesAllowlist,
+  isAppRelativePath,
+  normalizeRedirectTarget,
+} from '../../support/redirect-target'
 import { buildTokenUrl, generateToken, hashToken, parseTokenUrl } from '../utils'
 
 export interface OAuthProviderConfig {
@@ -258,10 +263,9 @@ export function sanitizeOAuthRedirect(
     return undefined
   }
 
-  // Normalize backslash tricks (e.g. /\evil.com) before classifying
-  const normalized = value.replace(/\\/g, '/')
+  const normalized = normalizeRedirectTarget(value)
 
-  if (normalized.startsWith('/') && !normalized.startsWith('//')) {
+  if (isAppRelativePath(normalized)) {
     return normalized
   }
 
@@ -272,21 +276,10 @@ export function sanitizeOAuthRedirect(
       return undefined
     }
 
-    for (const allowed of allowedHosts) {
-      if (allowed.startsWith('*.')) {
-        const suffix = allowed.slice(1).toLowerCase()
-        if (target.hostname.toLowerCase().endsWith(suffix) && target.hostname.length > suffix.length) {
-          return normalized
-        }
-      } else if (target.host.toLowerCase() === allowed.toLowerCase()) {
-        return normalized
-      }
-    }
+    return hostMatchesAllowlist(target, allowedHosts) ? normalized : undefined
   } catch {
     return undefined
   }
-
-  return undefined
 }
 
 export function buildOAuthAuthorizeUrl(

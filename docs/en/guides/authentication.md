@@ -75,29 +75,37 @@ router.get('/auth/:provider/callback', [OAuthController, 'callback'])
 
 ### Post-login redirect (`redirectTo`)
 
-Pass `redirectTo` when starting the flow and read it back — sanitized — after the callback:
+Pass `redirectTo` when starting the flow and read it back — sanitized — after the callback. In the scaffolded `OAuthController` (which resolves the manager with `this.oauth()`):
 
 ```ts
 // /auth/github?redirectTo=/settings
-const { url } = await oauth.authorize('github', {
-  redirectTo: this.request.query('redirectTo'),
-})
+async redirectToProvider(): Promise<Response> {
+  const { url } = await this.oauth().authorize('github', {
+    redirectTo: this.request.query('redirectTo'),
+  })
+  return this.redirect(url)
+}
 
-// in the callback action
-const { profile, redirectTo } = await oauth.handleCallback('github', { code, state })
-// ...log the user in...
-return this.redirect(redirectTo ?? '/')
+async callback(): Promise<Response> {
+  const { profile, redirectTo } = await this.oauth().handleCallback('github', { code, state })
+  // ...log the user in...
+  return this.redirect(redirectTo ?? '/')
+}
 ```
 
-`redirectTo` is guarded against open redirects on both ends of the flow: only app-relative paths (`/settings`) survive by default. To allow specific external hosts, configure the allowlist (wildcards supported):
+`redirectTo` is guarded against open redirects on both ends of the flow: only app-relative paths (`/settings`) survive by default. Protocol-relative URLs (`//evil.com`), backslash variants, non-http schemes, and unlisted hosts are dropped — `redirectTo` comes back as `undefined` and your fallback applies.
+
+To allow specific external hosts (wildcards supported), bind the manager with an allowlist before anything resolves it — in a scaffolded app, at the top of `app/Providers/OAuthProvider.ts`'s `register()`:
 
 ```ts
-const oauth = createOAuthManager({
-  stateConfig: { allowedRedirectHosts: ['accounts.example.com', '*.example.org'] },
-})
+this.container.singleton('oauth', () =>
+  createOAuthManager({
+    stateConfig: { allowedRedirectHosts: ['accounts.example.com', '*.example.org'] },
+  }),
+)
 ```
 
-Protocol-relative URLs (`//evil.com`), backslash variants, non-http schemes, and unlisted hosts are dropped — `redirectTo` comes back as `undefined` and your fallback applies.
+> **Note:** `createRedirectSafetyMiddleware` (opt-in) validates `Location` headers with its own separate `allowedHosts` option. If you mount it, keep both allowlists in agreement — otherwise the middleware rewrites an approved external redirect to `/`.
 
 ### Manual Setup
 

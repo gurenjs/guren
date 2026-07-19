@@ -11,6 +11,7 @@ import {
   sanitizeOAuthRedirect,
   type OAuthProviderConfig,
 } from '../../src/auth/oauth'
+import { hashToken } from '../../src/auth/utils'
 
 describe('oauth helpers', () => {
   it('builds authorize URL with required params and scopes', () => {
@@ -55,19 +56,19 @@ describe('oauth helpers', () => {
 
   it('re-sanitizes redirectTo on verify for custom stores', async () => {
     const store = new MemoryOAuthStateStore()
-    await store.store('tampered', {
+    const { state } = await createOAuthState('github', store, {}, '/ok', 'fixed-state')
+
+    // Overwrite the stored payload with an unsafe target, simulating a custom
+    // store (or a state persisted before an allowlist change).
+    await store.store(hashToken(state, 'sha256'), {
       provider: 'github',
       redirectTo: '//evil.example.com',
       expiresAt: new Date(Date.now() + 60_000),
     })
 
-    // Bypass createOAuthState entirely — the payload was written directly.
-    const payload = await store.find('tampered')
-    expect(payload?.redirectTo).toBe('//evil.example.com')
-
-    const { state } = await createOAuthState('github', store, {}, '/ok')
     const verified = await verifyOAuthState(state, 'github', store, {})
-    expect(verified?.redirectTo).toBe('/ok')
+    expect(verified?.provider).toBe('github')
+    expect(verified?.redirectTo).toBeUndefined()
   })
 })
 
@@ -113,6 +114,20 @@ describe('OAuthManager', () => {
     redirectUri: 'https://app.example.com/auth/github/callback',
   })
 
+  const installOAuthFetchMock = (
+    tokenResponse: Record<string, unknown>,
+    userResponse: Record<string, unknown>,
+  ) => {
+    const fetchMock = mock(async (input: string) => {
+      const body = input.includes('/access_token') ? tokenResponse : userResponse
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    ;(globalThis as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch
+  }
+
   beforeEach(() => {
     mock.restore()
   })
@@ -134,25 +149,10 @@ describe('OAuthManager', () => {
     })
     manager.registerProvider('github', githubConfig)
 
-    const tokenResponse = {
-      access_token: 'token-123',
-      token_type: 'bearer',
-      scope: 'read:user',
-    }
-    const userResponse = {
-      id: 42,
-      email: 'octo@example.com',
-      name: 'Octo Cat',
-      avatar_url: 'https://example.com/avatar.png',
-    }
-
-    const fetchMock = mock(async (input: string) => {
-      if (input.includes('/access_token')) {
-        return new Response(JSON.stringify(tokenResponse), { status: 200, headers: { 'Content-Type': 'application/json' } })
-      }
-      return new Response(JSON.stringify(userResponse), { status: 200, headers: { 'Content-Type': 'application/json' } })
-    })
-    ;(globalThis as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch
+    installOAuthFetchMock(
+      { access_token: 'token-123', token_type: 'bearer', scope: 'read:user' },
+      { id: 42, email: 'octo@example.com', name: 'Octo Cat', avatar_url: 'https://example.com/avatar.png' },
+    )
 
     const { state } = await manager.authorize('github')
     const profile = await manager.user('github', { code: 'auth-code', state })
@@ -162,62 +162,28 @@ describe('OAuthManager', () => {
     expect(profile.token.accessToken).toBe('token-123')
   })
 
-  it('returns sanitized redirectTo from handleCallback', async () => {
-    const manager = new OAuthManager({
-      stateStore: new MemoryOAuthStateStore(),
-    })
-    manager.registerProvider('github', githubConfig)
-
-    const fetchMock = mock(async (input: string) => {
-      if (input.includes('/access_token')) {
-        return new Response(JSON.stringify({ access_token: 'token-123' }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        })
-      }
-      return new Response(JSON.stringify({ id: 42 }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      })
-    })
-    ;(globalThis as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch
-
-    const safe = await manager.authorize('github', { redirectTo: '/dashboard' })
-    const safeResult = await manager.handleCallback('github', { code: 'auth-code', state: safe.state })
-    expect(safeResult.redirectTo).toBe('/dashboard')
-    expect(safeResult.profile.id).toBe('42')
-
-    const unsafe = await manager.authorize('github', { redirectTo: 'https://evil.example.com' })
-    const unsafeResult = await manager.handleCallback('github', { code: 'auth-code', state: unsafe.state })
-    expect(unsafeResult.redirectTo).toBeUndefined()
-  })
-
-  it('honors allowedRedirectHosts from stateConfig', async () => {
+  it('round-trips sanitized redirectTo through authorize and handleCallback', async () => {
     const manager = new OAuthManager({
       stateStore: new MemoryOAuthStateStore(),
       stateConfig: { allowedRedirectHosts: ['trusted.example.com'] },
     })
     manager.registerProvider('github', githubConfig)
+    installOAuthFetchMock({ access_token: 'token-123' }, { id: 42 })
 
-    const fetchMock = mock(async (input: string) => {
-      if (input.includes('/access_token')) {
-        return new Response(JSON.stringify({ access_token: 'token-123' }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        })
-      }
-      return new Response(JSON.stringify({ id: 42 }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      })
-    })
-    ;(globalThis as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch
+    const roundTrip = async (redirectTo: string) => {
+      const { state } = await manager.authorize('github', { redirectTo })
+      return manager.handleCallback('github', { code: 'auth-code', state })
+    }
 
-    const { state } = await manager.authorize('github', {
-      redirectTo: 'https://trusted.example.com/welcome',
-    })
-    const result = await manager.handleCallback('github', { code: 'auth-code', state })
-    expect(result.redirectTo).toBe('https://trusted.example.com/welcome')
+    const relative = await roundTrip('/dashboard')
+    expect(relative.redirectTo).toBe('/dashboard')
+    expect(relative.profile.id).toBe('42')
+
+    const unsafe = await roundTrip('https://evil.example.com')
+    expect(unsafe.redirectTo).toBeUndefined()
+
+    const allowlisted = await roundTrip('https://trusted.example.com/welcome')
+    expect(allowlisted.redirectTo).toBe('https://trusted.example.com/welcome')
   })
 
   it('exposes provider presets for google and discord', () => {

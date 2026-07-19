@@ -75,29 +75,37 @@ router.get('/auth/:provider/callback', [OAuthController, 'callback'])
 
 ### ログイン後リダイレクト(`redirectTo`)
 
-フロー開始時に `redirectTo` を渡すと、コールバック後にサニタイズ済みの値として受け取れます:
+フロー開始時に `redirectTo` を渡すと、コールバック後にサニタイズ済みの値として受け取れます。スキャフォールドされた `OAuthController`(`this.oauth()` でマネージャーを解決)では:
 
 ```ts
 // /auth/github?redirectTo=/settings
-const { url } = await oauth.authorize('github', {
-  redirectTo: this.request.query('redirectTo'),
-})
+async redirectToProvider(): Promise<Response> {
+  const { url } = await this.oauth().authorize('github', {
+    redirectTo: this.request.query('redirectTo'),
+  })
+  return this.redirect(url)
+}
 
-// コールバックアクション内
-const { profile, redirectTo } = await oauth.handleCallback('github', { code, state })
-// ...ユーザーをログインさせる...
-return this.redirect(redirectTo ?? '/')
+async callback(): Promise<Response> {
+  const { profile, redirectTo } = await this.oauth().handleCallback('github', { code, state })
+  // ...ユーザーをログインさせる...
+  return this.redirect(redirectTo ?? '/')
+}
 ```
 
-`redirectTo` はフローの入口と出口の両方でオープンリダイレクト対策の検証を通ります。デフォルトで通過するのはアプリ相対パス(`/settings`)のみです。特定の外部ホストを許可する場合は許可リストを設定します(ワイルドカード対応):
+`redirectTo` はフローの入口と出口の両方でオープンリダイレクト対策の検証を通ります。デフォルトで通過するのはアプリ相対パス(`/settings`)のみで、プロトコル相対URL(`//evil.com`)、バックスラッシュ変種、http(s) 以外のスキーム、許可リスト外のホストは破棄され、`redirectTo` は `undefined` になってフォールバックが適用されます。
+
+特定の外部ホストを許可する場合(ワイルドカード対応)は、マネージャーが解決される前に許可リスト付きでバインドします — スキャフォールドアプリでは `app/Providers/OAuthProvider.ts` の `register()` 冒頭で:
 
 ```ts
-const oauth = createOAuthManager({
-  stateConfig: { allowedRedirectHosts: ['accounts.example.com', '*.example.org'] },
-})
+this.container.singleton('oauth', () =>
+  createOAuthManager({
+    stateConfig: { allowedRedirectHosts: ['accounts.example.com', '*.example.org'] },
+  }),
+)
 ```
 
-プロトコル相対URL(`//evil.com`)、バックスラッシュ変種、http(s) 以外のスキーム、許可リスト外のホストは破棄され、`redirectTo` は `undefined` になってフォールバックが適用されます。
+> **Note:** `createRedirectSafetyMiddleware`(オプトイン)は独自の `allowedHosts` オプションで `Location` ヘッダーを検証します。併用する場合は両方の許可リストを揃えてください — ずれていると、許可したはずの外部リダイレクトがミドルウェアに `/` へ書き換えられます。
 
 ### 手動セットアップ
 
