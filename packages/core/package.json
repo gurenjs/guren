@@ -58,6 +58,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.14.10",
+    "drizzle-orm": "1.0.0-rc.4",
     "tsup": "^8.5.0",
     "typescript": "^5.4.0"
   }

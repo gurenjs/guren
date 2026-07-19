@@ -15,7 +15,7 @@
     },
     "examples/api": {
       "name": "@guren/example-api",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "dependencies": {
         "@guren/cli": "workspace:*",
         "@guren/core": "workspace:*",
@@ -67,14 +67,14 @@
     },
     "packages/cli": {
       "name": "@guren/cli",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "bin": {
         "guren": "./dist/bin.js",
       },
       "dependencies": {
         "@babel/parser": "^7.24.7",
         "@guren/core": "^1.0.0",
-        "@guren/orm": "^1.0.0",
+        "@guren/orm": "^1.0.1",
         "citty": "^0.1.6",
         "consola": "^3.4.2",
       },
@@ -102,13 +102,14 @@
       },
       "devDependencies": {
         "@types/node": "^20.14.10",
+        "drizzle-orm": "1.0.0-rc.4",
         "tsup": "^8.5.0",
         "typescript": "^5.4.0",
       },
     },
     "packages/create-app": {
       "name": "create-guren-app",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "bin": {
         "create-guren-app": "./dist/cli.js",
       },
@@ -124,7 +125,7 @@
     },
     "packages/inertia-client": {
       "name": "@guren/inertia-client",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "dependencies": {
         "@inertiajs/core": "^3.6.1",
         "@inertiajs/react": "^3.6.1",
@@ -154,7 +155,7 @@
     },
     "packages/orm": {
       "name": "@guren/orm",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "dependencies": {
         "drizzle-orm": "1.0.0-rc.4",
       },
@@ -176,7 +177,7 @@
     },
     "packages/plugin-vercel": {
       "name": "@guren/plugin-vercel",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "@guren/core": "^1.0.0-rc.12",
       },
@@ -188,9 +189,9 @@
     },
     "packages/server": {
       "name": "@guren/server",
-      "version": "1.0.0",
+      "version": "1.2.0",
       "dependencies": {
-        "@guren/orm": "^1.0.0",
+        "@guren/orm": "^1.0.1",
         "@modelcontextprotocol/sdk": "^1.27.1",
         "chalk": "^5.3.0",
         "consola": "^3.4.2",
@@ -247,7 +248,7 @@
     },
     "web": {
       "name": "web",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "dependencies": {
         "@guren/cli": "workspace:*",
         "@guren/core": "workspace:*",
