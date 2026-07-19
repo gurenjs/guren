@@ -95,7 +95,20 @@ export function buildVercelOutput(options: BuildVercelOutputOptions = {}): void 
   )
 
   const result = Bun.spawnSync({
-    cmd: ['bun', 'build', entrypoint, '--outdir', funcDir, '--target', 'bun', '--minify'],
+    // `bun build` inlines `process.env.NODE_ENV` at bundle time (defaulting to
+    // "development"), so pin it to "production" for the deployed function.
+    cmd: [
+      'bun',
+      'build',
+      entrypoint,
+      '--outdir',
+      funcDir,
+      '--target',
+      'bun',
+      '--minify',
+      '--define',
+      'process.env.NODE_ENV="production"',
+    ],
     cwd: root,
     stdout: 'inherit',
     stderr: 'inherit',

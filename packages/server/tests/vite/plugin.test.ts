@@ -35,5 +35,24 @@ describe('gurenVitePlugin', () => {
     expect(config.build.outDir).toBe('.guren/ssr')
     expect(config.build.manifest).toBe(true)
     expect(config.build.ssr).toContain('resources/js/ssr.tsx')
+    expect(config.ssr.noExternal).toBe(true)
+  })
+
+  it('respects user-provided ssr.noExternal', () => {
+    const plugin = gurenVitePlugin()
+    const config: Record<string, any> = { ssr: { noExternal: ['react'] } }
+
+    plugin.config?.(config, { ssrBuild: true })
+
+    expect(config.ssr.noExternal).toEqual(['react'])
+  })
+
+  it('does not touch ssr config for client builds', () => {
+    const plugin = gurenVitePlugin()
+    const config: Record<string, any> = {}
+
+    plugin.config?.(config, { command: 'build' })
+
+    expect(config.ssr).toBeUndefined()
   })
 })

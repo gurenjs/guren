@@ -48,7 +48,9 @@ export interface InertiaSsrOptions {
 }
 
 const DEFAULT_TITLE = "Guren";
-const DEFAULT_IMPORT_MAP: Record<string, string> = {
+// Dev-only fallback used when serving unbundled sources; production builds
+// bundle React into the Vite assets and must not pull esm.sh dev builds.
+const DEV_FALLBACK_IMPORT_MAP: Record<string, string> = {
   react: "https://esm.sh/react@19.0.0?dev",
   "react/jsx-runtime": "https://esm.sh/react@19.0.0/jsx-runtime?dev",
   "react/jsx-dev-runtime": "https://esm.sh/react@19.0.0/jsx-dev-runtime?dev",
@@ -138,17 +140,13 @@ async function renderDocument(
   const envImportMap = parseImportMap(process.env.GUREN_INERTIA_IMPORT_MAP, {
     context: "GUREN_INERTIA_IMPORT_MAP",
   });
-  const importMap = JSON.stringify(
-    {
-      imports: {
-        ...DEFAULT_IMPORT_MAP,
-        ...envImportMap,
-        ...(options.importMap ?? {}),
-      },
-    },
-    null,
-    2
-  );
+  const isProduction = process.env.NODE_ENV === "production";
+  const importMapEntries = {
+    ...(isProduction ? {} : DEV_FALLBACK_IMPORT_MAP),
+    ...envImportMap,
+    ...(options.importMap ?? {}),
+  };
+  const importMap = JSON.stringify({ imports: importMapEntries }, null, 2);
   const serializedPage = serializePage(page);
   const stylesheetLinks = renderStyles(styles);
   const docsHeadBootstrap = renderDocsHeadBootstrap(page.component);
@@ -164,7 +162,9 @@ async function renderDocument(
     docsHeadBootstrap,
     stylesheetLinks,
     ...headElements,
-    `<script type="importmap">${importMap}</script>`,
+    Object.keys(importMapEntries).length > 0
+      ? `<script type="importmap">${importMap}</script>`
+      : "",
     `<script>window.__INERTIA_PAGE__ = ${serializedPage};</script>`,
   ].filter((segment) => segment && segment.length > 0);
   // Inertia v3 contract: the initial page ships in a JSON script element
