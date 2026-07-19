@@ -37,6 +37,39 @@ export interface UserProvider<User = Authenticatable> {
   sanitize?(user: User): User
 }
 
+/**
+ * Credential-material keys that `ModelUserProvider.sanitize()` strips by
+ * default: the password column (`password` by default, commonly configured
+ * as `passwordHash`/`password_hash`) and the remember-token column
+ * (`remember_token` by default, commonly `rememberToken`).
+ */
+export type DefaultSanitizedKeys =
+  | 'password'
+  | 'passwordHash'
+  | 'password_hash'
+  | 'rememberToken'
+  | 'remember_token'
+
+/**
+ * The shape of a user record after auth-layer sanitization — what
+ * `auth.user()` actually returns at runtime. Removes the default
+ * credential keys plus any extra keys listed in the model's
+ * `static hidden`.
+ *
+ * @example
+ * ```ts
+ * const user = await this.auth.userOrFail<Sanitized<UserRecord>>()
+ * user.passwordHash // compile error — stripped at runtime
+ *
+ * // With additional hidden fields:
+ * type SafeUser = Sanitized<UserRecord, 'twoFactorSecret'>
+ * ```
+ */
+export type Sanitized<User, Hidden extends string = never> = Omit<
+  User,
+  Extract<keyof User, DefaultSanitizedKeys | Hidden>
+>
+
 export interface GuardContext {
   ctx: Context
   session: Session | undefined

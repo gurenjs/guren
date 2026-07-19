@@ -352,6 +352,26 @@ sanitize(user: AuthUser): AuthUser {
 }
 ```
 
+### サニタイズ済みユーザーの型付け
+
+サニタイズはランタイムの処理なので、単に `auth.user<UserRecord>()` と書くと、実際には取り除かれている資格情報フィールドが型の上では残ったままになります。`Sanitized<T>` ヘルパーを使うと、型を実態に一致させられます。
+
+```ts
+import type { Sanitized } from '@guren/core'
+
+// password / passwordHash / rememberToken 系のキーを型から除去
+const user = await this.auth.userOrFail<Sanitized<UserRecord>>()
+
+user.email        // ✅ string
+user.passwordHash // ❌ コンパイルエラー — ランタイムで除去済み
+```
+
+モデルの `static hidden` で追加のフィールドを隠している場合は、第2型引数に列挙します。
+
+```ts
+type SafeUser = Sanitized<UserRecord, 'twoFactorSecret'>
+```
+
 ## Remember トークン
 
 `SessionGuard` は remember トークンを自動管理します。ユーザープロバイダーが `setRememberToken` / `getRememberToken` を実装していれば動作し、`ModelUserProvider` は `rememberTokenColumn` を指定すると対応します。

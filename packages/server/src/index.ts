@@ -117,6 +117,8 @@ export type {
   GuardFactory,
   UserProvider,
   ProviderFactory,
+  DefaultSanitizedKeys,
+  Sanitized,
   PasswordResetConfig,
   PasswordResetTokenStore,
   PasswordResetTokenResult,
