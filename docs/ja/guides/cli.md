@@ -93,6 +93,17 @@ bunx guren audit
 const apiKey = 'example-not-a-real-key'
 ```
 
+## AIエージェントハーネス
+
+`create-guren-app` で作成したアプリには、AIエージェント向けのハーネスが最初から組み込まれます。内容は、プロジェクトガイドの `CLAUDE.md`、`.claude/` 配下の検証済みAPIルール・スキル・サブエージェント、開発サーバーの MCP エンドポイントを指す `.mcp.json`、そしてフィードバックループを構成する hooks です。セッション開始時に `guren context` のプロジェクトマップが読み込まれ、ルート・コントローラ・モデル・スキーマ・ページの編集後には `guren check` が自動で再実行され、失敗があればその場でコーディングエージェントに報告されます。
+
+| コマンド | 説明 | 例 |
+|---------|------|-----|
+| `agent:init` | 既存アプリにエージェントハーネスを導入(既存ファイルはスキップ、`--force` で上書き) | `bunx guren agent:init` |
+| `agent:sync` | フレームワーク管理ファイル(`.claude/` の rules・skills・agents・hooks)を最新版に更新 | `bunx guren agent:sync` |
+
+`agent:sync` はユーザー所有のファイル(`CLAUDE.md`・`.mcp.json`・`.claude/settings.json`)には触れないため、カスタマイズはフレームワークの更新後も維持されます。
+
 ## デプロイレシピ生成
 
 CLI からデプロイ設定ファイルを直接生成できます。
