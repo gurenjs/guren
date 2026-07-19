@@ -320,6 +320,7 @@ export class Controller {
 
     const response = await inertia(component, propsWithShared as Record<string, unknown>, {
       ...rest,
+      lang: rest.lang ?? this.#defaultInertiaLang(),
       url,
       request: ctx.req.raw,
     })
@@ -330,6 +331,33 @@ export class Controller {
     }
 
     return response as InertiaResponse<Component, typeof propsWithShared>
+  }
+
+  /**
+   * Default `<html lang>` for Inertia responses when `options.lang` is not
+   * provided: the request-scoped `locale` context variable (set by locale
+   * middleware) wins over the app-wide i18n locale.
+   */
+  #defaultInertiaLang(): string | undefined {
+    const vars = this.ctx.var as Record<string, unknown> | undefined
+
+    const requestLocale = vars?.locale
+    if (typeof requestLocale === 'string' && requestLocale.length > 0) {
+      return requestLocale
+    }
+
+    const container = vars?.container as
+      | { has?: (key: string) => boolean; make?: (key: string) => unknown }
+      | undefined
+    if (container?.has?.('i18n')) {
+      const i18n = container.make?.('i18n') as { getLocale?: () => string } | undefined
+      const locale = i18n?.getLocale?.()
+      if (typeof locale === 'string' && locale.length > 0) {
+        return locale
+      }
+    }
+
+    return undefined
   }
 
   protected json<T>(data: T, init: ResponseInit = {}): Response {
