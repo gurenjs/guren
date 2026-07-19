@@ -237,7 +237,11 @@ export default class OAuthController extends Controller {
   // Controller.redirect() helper used below.
   async redirectToProvider(): Promise<Response> {
     const provider = this.validateProvider(this.request.param('provider'))
-    const { url } = await this.oauth().authorize(provider)
+    // \`?redirectTo=\` is user input — the manager only keeps app-relative
+    // paths (or hosts allowlisted via stateConfig.allowedRedirectHosts).
+    const { url } = await this.oauth().authorize(provider, {
+      redirectTo: this.request.query('redirectTo'),
+    })
     return this.redirect(url)
   }
 
@@ -251,9 +255,11 @@ export default class OAuthController extends Controller {
     }
 
     // Replace this with your own account linking: look the user up by
-    // profile.email, create one when missing, then \`await this.auth.login(user)\`.
-    const profile = await this.oauth().user(provider, { code, state })
-    return this.json({ provider, profile }, { status: 200 })
+    // profile.email, create one when missing, then \`await this.auth.login(user)\`
+    // and finish with \`return this.redirect(redirectTo ?? '/')\` —
+    // \`redirectTo\` is already sanitized against open redirects.
+    const { profile, redirectTo } = await this.oauth().handleCallback(provider, { code, state })
+    return this.json({ provider, profile, redirectTo }, { status: 200 })
   }
 
   private validateProvider(value: string | undefined): SupportedProvider {

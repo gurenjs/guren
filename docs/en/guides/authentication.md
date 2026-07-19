@@ -66,12 +66,38 @@ Equivalent env names exist for `GOOGLE` and `DISCORD`.
 ### Route flow
 
 ```ts
-router.get('/auth/:provider', [OAuthController, 'redirect'])
+router.get('/auth/:provider', [OAuthController, 'redirectToProvider'])
 router.get('/auth/:provider/callback', [OAuthController, 'callback'])
 ```
 
-`redirect` creates a signed state and redirects to the provider consent screen.  
+`redirectToProvider` creates a signed state and redirects to the provider consent screen.  
 `callback` validates state, exchanges code for token, then fetches the remote profile.
+
+### Post-login redirect (`redirectTo`)
+
+Pass `redirectTo` when starting the flow and read it back — sanitized — after the callback:
+
+```ts
+// /auth/github?redirectTo=/settings
+const { url } = await oauth.authorize('github', {
+  redirectTo: this.request.query('redirectTo'),
+})
+
+// in the callback action
+const { profile, redirectTo } = await oauth.handleCallback('github', { code, state })
+// ...log the user in...
+return this.redirect(redirectTo ?? '/')
+```
+
+`redirectTo` is guarded against open redirects on both ends of the flow: only app-relative paths (`/settings`) survive by default. To allow specific external hosts, configure the allowlist (wildcards supported):
+
+```ts
+const oauth = createOAuthManager({
+  stateConfig: { allowedRedirectHosts: ['accounts.example.com', '*.example.org'] },
+})
+```
+
+Protocol-relative URLs (`//evil.com`), backslash variants, non-http schemes, and unlisted hosts are dropped — `redirectTo` comes back as `undefined` and your fallback applies.
 
 ### Manual Setup
 

@@ -66,12 +66,38 @@ OAUTH_GITHUB_REDIRECT_URI=https://your-app.test/auth/github/callback
 ### ルートフロー
 
 ```ts
-router.get('/auth/:provider', [OAuthController, 'redirect'])
+router.get('/auth/:provider', [OAuthController, 'redirectToProvider'])
 router.get('/auth/:provider/callback', [OAuthController, 'callback'])
 ```
 
-`redirect` は state を生成してプロバイダー同意画面へリダイレクトします。  
+`redirectToProvider` は state を生成してプロバイダー同意画面へリダイレクトします。  
 `callback` は state を検証し、authorization code を token に交換してプロフィールを取得します。
+
+### ログイン後リダイレクト(`redirectTo`)
+
+フロー開始時に `redirectTo` を渡すと、コールバック後にサニタイズ済みの値として受け取れます:
+
+```ts
+// /auth/github?redirectTo=/settings
+const { url } = await oauth.authorize('github', {
+  redirectTo: this.request.query('redirectTo'),
+})
+
+// コールバックアクション内
+const { profile, redirectTo } = await oauth.handleCallback('github', { code, state })
+// ...ユーザーをログインさせる...
+return this.redirect(redirectTo ?? '/')
+```
+
+`redirectTo` はフローの入口と出口の両方でオープンリダイレクト対策の検証を通ります。デフォルトで通過するのはアプリ相対パス(`/settings`)のみです。特定の外部ホストを許可する場合は許可リストを設定します(ワイルドカード対応):
+
+```ts
+const oauth = createOAuthManager({
+  stateConfig: { allowedRedirectHosts: ['accounts.example.com', '*.example.org'] },
+})
+```
+
+プロトコル相対URL(`//evil.com`)、バックスラッシュ変種、http(s) 以外のスキーム、許可リスト外のホストは破棄され、`redirectTo` は `undefined` になってフォールバックが適用されます。
 
 ### 手動セットアップ
 
