@@ -40,13 +40,13 @@ async function updateSsrPackageJson(destination: string): Promise<void> {
   await writeFile(packageJsonPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8')
 }
 
-async function installAuthBlueprint(targetDir: string): Promise<boolean> {
-  // Run the CLI installed in the scaffolded app so the blueprint sees the
+async function runAppCli(targetDir: string, cliArgs: string[]): Promise<boolean> {
+  // Run the CLI installed in the scaffolded app so the command sees the
   // app's own dependencies. A bare import of '@guren/cli' from create-guren-app
   // would fail: it is not a dependency of this package.
   const { spawnSync } = await import('node:child_process')
   const cliBin = resolve(targetDir, 'node_modules/@guren/cli/dist/bin.js')
-  const result = spawnSync('bun', [cliBin, 'add', 'auth', '--force'], {
+  const result = spawnSync('bun', [cliBin, ...cliArgs], {
     cwd: targetDir,
     stdio: 'inherit',
   })
@@ -206,11 +206,23 @@ const command = defineCommand({
       installed = await installDependencies(targetDir)
     }
 
+    let harnessInstalled = false
+    if (installed) {
+      consola.start('Setting up AI agent harness...')
+      harnessInstalled = await runAppCli(targetDir, ['agent:init'])
+      if (harnessInstalled) {
+        consola.success('AI agent harness installed (CLAUDE.md, .claude/, .mcp.json)')
+      }
+    }
+    if (!harnessInstalled) {
+      consola.warn('AI agent harness was not installed automatically. Run `bunx guren agent:init` inside the app after installing dependencies.')
+    }
+
     let authInstalled = false
     if (includeAuth) {
       if (installed) {
         consola.start('Adding authentication scaffolding...')
-        authInstalled = await installAuthBlueprint(targetDir)
+        authInstalled = await runAppCli(targetDir, ['add', 'auth', '--force'])
         if (authInstalled) {
           consola.success('Authentication scaffolding added')
         }

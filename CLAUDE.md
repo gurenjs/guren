@@ -89,6 +89,10 @@ bunx guren audit                # Security audit: validation/auth on mutating ro
 bunx guren audit --json         # Audit results as JSON (exits non-zero on failures)
 bunx guren doctor --next        # Doctor report + actionable next steps
 
+# Agent harness (in scaffolded apps)
+bunx guren agent:init           # Install AI agent harness (CLAUDE.md, .claude/ rules, skills, hooks, .mcp.json)
+bunx guren agent:sync           # Refresh framework-managed harness files to the latest version
+
 # Code generation
 bunx guren guidelines           # Auto-generate project-specific coding guidelines
 bunx guren guidelines -o .claude/rules/project-guidelines.md  # Write to file
@@ -338,6 +342,8 @@ export const handler = createLambdaHandler(app)
 | `packages/cli/src/model-parser.ts` | AI agent: Babel AST model parsing |
 | `packages/cli/src/make-feature.ts` | AI agent: CRUD feature scaffolding |
 | `packages/cli/src/discovery.ts` | AI agent: shared file discovery utilities |
+| `packages/cli/src/agent-harness.ts` | AI agent: harness installer (`agent:init` / `agent:sync`) |
+| `packages/cli/templates/agent/` | AI agent: harness template (CLAUDE.md, .claude/ rules, skills, hooks) |
 | `examples/blog/` | Reference implementation |
 
 ## Before Opening PRs

@@ -14,6 +14,13 @@ bunx guren check       # validate route ↔ controller ↔ page consistency — 
 bunx guren codegen     # regenerate .guren/*.gen.ts typed manifests (also runs via `bun run dev`)
 ```
 
+This project ships with an agent harness wired into `.claude/settings.json`:
+a `SessionStart` hook injects the `guren context` project map, and a
+`PostToolUse` hook (`.claude/hooks/check-after-edit.ts`) re-runs `guren check`
+after edits to routes, controllers, models, schema, or pages and reports
+failures back immediately. Framework-managed files (`.claude/rules`, `skills`,
+`agents`, `hooks`) can be refreshed anytime with `bunx guren agent:sync`.
+
 Detailed, verified API rules live in `.claude/rules/*.md` and load automatically
 based on the files you are editing (glob-scoped): `orm-models.md` (models, queries,
 relations), `controllers-http.md` (validation, Inertia, auth), `routes-codegen.md`

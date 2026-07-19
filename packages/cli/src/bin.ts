@@ -52,6 +52,7 @@ import { displayContext } from './context'
 import { runCheck, renderCheckReport } from './check'
 import { runAudit, renderAuditReport } from './audit'
 import { generateGuidelines } from './guidelines'
+import { installAgentHarness, type AgentHarnessResult } from './agent-harness'
 import { makeFeature, parseFieldsString } from './make-feature'
 import { generateKeyValue, writeKeyToEnv } from './key-generate'
 
@@ -1656,6 +1657,63 @@ const guidelinesCommand = defineCommand({
   },
 })
 
+function reportAgentHarnessResult(result: AgentHarnessResult): void {
+  for (const file of result.written) {
+    consola.success(`Wrote ${file}`)
+  }
+  if (result.skipped.length > 0) {
+    consola.info(`Skipped ${result.skipped.length} existing file(s): ${result.skipped.join(', ')}`)
+  }
+}
+
+const agentInitCommand = defineCommand({
+  meta: {
+    name: 'agent:init',
+    description: 'Install the AI agent harness (CLAUDE.md, .claude/ rules, skills, hooks, .mcp.json).',
+  },
+  args: {
+    force: {
+      type: 'boolean',
+      alias: 'f',
+      description: 'Overwrite existing files, including CLAUDE.md and .claude/settings.json.',
+    },
+    app: {
+      type: 'string',
+      description: 'Application root directory.',
+    },
+  },
+  async run({ args }) {
+    const result = await installAgentHarness({
+      cwd: args.app,
+      mode: 'init',
+      force: Boolean(args.force),
+    })
+    reportAgentHarnessResult(result)
+    consola.success('AI agent harness is ready. Update it later with `bunx guren agent:sync`.')
+  },
+})
+
+const agentSyncCommand = defineCommand({
+  meta: {
+    name: 'agent:sync',
+    description: 'Update framework-managed agent harness files (.claude/ rules, skills, agents, hooks).',
+  },
+  args: {
+    app: {
+      type: 'string',
+      description: 'Application root directory.',
+    },
+  },
+  async run({ args }) {
+    const result = await installAgentHarness({
+      cwd: args.app,
+      mode: 'sync',
+    })
+    reportAgentHarnessResult(result)
+    consola.success('Agent harness synced to the latest framework version.')
+  },
+})
+
 const makeFeatureCommand = defineCommand({
   meta: {
     name: 'make:feature',
@@ -2183,6 +2241,8 @@ const main = defineCommand({
     audit: auditCommand,
     guidelines: guidelinesCommand,
     'make:feature': makeFeatureCommand,
+    'agent:init': agentInitCommand,
+    'agent:sync': agentSyncCommand,
   },
   async run(ctx) {
     if (ctx.args.help || ctx.rawArgs.length === 0) {

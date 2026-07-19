@@ -95,6 +95,17 @@ Suppress a false positive by placing `// guren-audit-ignore` on the flagged line
 const apiKey = 'example-not-a-real-key'
 ```
 
+## AI Agent Harness
+
+Apps scaffolded with `create-guren-app` include an AI agent harness out of the box: a `CLAUDE.md` project guide, verified API rules, skills, and subagents under `.claude/`, an `.mcp.json` pointing at the dev server's MCP endpoint, and hooks that close the feedback loop — the `guren context` project map loads at session start, and `guren check` re-runs automatically after edits to routes, controllers, models, schema, or pages, reporting failures straight back to the coding agent.
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `agent:init` | Install the agent harness into an existing app (skips files that already exist; `--force` overwrites) | `bunx guren agent:init` |
+| `agent:sync` | Refresh framework-managed files (`.claude/` rules, skills, agents, hooks) to the latest version | `bunx guren agent:sync` |
+
+`agent:sync` never touches user-owned files — `CLAUDE.md`, `.mcp.json`, and `.claude/settings.json` — so your customizations survive framework updates.
+
 ## Deployment Recipes
 
 Generate deployment config files directly from the CLI:
