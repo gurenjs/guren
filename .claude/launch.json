@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web-docs",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd web && exec bun bin/serve.ts"],
+      "port": 3333
+    }
+  ]
+}
