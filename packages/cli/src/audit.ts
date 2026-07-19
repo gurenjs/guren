@@ -395,8 +395,87 @@ async function auditSourceFiles(cwd: string, findings: AuditFinding[]): Promise<
 
 // --- Model checks ---
 
+/**
+ * Column names that look like credentials or secrets. Matching columns
+ * must be listed in the model's `static hidden` (or excluded via
+ * `static visible`) so serialize()/toJSON() never exposes them.
+ */
+const SENSITIVE_COLUMN_PATTERN = /(password|passwd|secret|token|salt|hash)/i
+
+/**
+ * Parse db/schema.ts and map each exported table variable to its column
+ * property names (e.g. `users` → ['id', 'email', 'passwordHash']).
+ * Returns null when the schema file is missing or unparsable.
+ */
+async function parseSchemaTableColumns(cwd: string): Promise<Map<string, string[]> | null> {
+  let source: string
+  try {
+    source = await readFile(resolve(cwd, 'db/schema.ts'), 'utf-8')
+  } catch {
+    return null
+  }
+
+  let ast: ReturnType<typeof parse>
+  try {
+    ast = parse(source, { sourceType: 'module', plugins: ['typescript'] })
+  } catch {
+    return null
+  }
+
+  const TABLE_FACTORIES = new Set(['pgTable', 'sqliteTable', 'mysqlTable'])
+  const tables = new Map<string, string[]>()
+
+  for (const node of ast.program.body) {
+    const declaration =
+      node.type === 'ExportNamedDeclaration' && node.declaration?.type === 'VariableDeclaration'
+        ? node.declaration
+        : node.type === 'VariableDeclaration'
+          ? node
+          : null
+    if (!declaration) continue
+
+    for (const declarator of declaration.declarations) {
+      if (declarator.id.type !== 'Identifier') continue
+      if (declarator.init?.type !== 'CallExpression') continue
+
+      const callee = declarator.init.callee
+      if (callee.type !== 'Identifier' || !TABLE_FACTORIES.has(callee.name)) continue
+
+      const columnsArg = declarator.init.arguments.find((arg) => arg.type === 'ObjectExpression')
+      if (!columnsArg || columnsArg.type !== 'ObjectExpression') continue
+
+      const columns: string[] = []
+      for (const prop of columnsArg.properties) {
+        if (prop.type !== 'ObjectProperty') continue
+        if (prop.key.type === 'Identifier') columns.push(prop.key.name)
+        else if (prop.key.type === 'StringLiteral') columns.push(prop.key.value)
+      }
+
+      tables.set(declarator.id.name, columns)
+    }
+  }
+
+  return tables
+}
+
+function extractStaticStringArray(source: string, property: string): string[] | null {
+  const match = new RegExp(
+    `\\bstatic\\s+(?:override\\s+)?(?:readonly\\s+)?${property}(?:\\s*:[^=]+)?\\s*=\\s*\\[([\\s\\S]*?)\\]`,
+  ).exec(source)
+  if (!match) return null
+
+  const entries: string[] = []
+  const literal = /['"\`]([^'"\`]+)['"\`]/g
+  let m: RegExpExecArray | null
+  while ((m = literal.exec(match[1]!)) !== null) {
+    entries.push(m[1]!)
+  }
+  return entries
+}
+
 async function auditModels(cwd: string, findings: AuditFinding[]): Promise<void> {
   const modelFiles = await discoverModelFiles(cwd)
+  const schemaTables = modelFiles.length > 0 ? await parseSchemaTableColumns(cwd) : null
 
   for (const filePath of modelFiles) {
     const relPath = relative(cwd, filePath)
@@ -416,6 +495,35 @@ async function auditModels(cwd: string, findings: AuditFinding[]): Promise<void>
         hasMassAssignmentConfig
           ? undefined
           : `Add 'static fillable = [...]' to ${relPath} to whitelist assignable columns.`,
+        relPath,
+      ),
+    )
+
+    // Sensitive columns must be excluded from serialization via hidden/visible.
+    const tableMatch = /\bstatic\s+(?:override\s+)?(?:readonly\s+)?table\s*=\s*([A-Za-z_$][\w$]*)/.exec(source)
+    const columns = tableMatch ? schemaTables?.get(tableMatch[1]!) : undefined
+    if (!columns) continue
+
+    const sensitiveColumns = columns.filter((column) => SENSITIVE_COLUMN_PATTERN.test(column))
+    if (sensitiveColumns.length === 0) continue
+
+    const hidden = new Set(extractStaticStringArray(source, 'hidden') ?? [])
+    const visible = extractStaticStringArray(source, 'visible')
+    const exposed = sensitiveColumns.filter(
+      (column) => !hidden.has(column) && (visible ? visible.includes(column) : true),
+    )
+
+    findings.push(
+      finding(
+        `hidden-columns:${name}`,
+        `${name} hidden columns`,
+        exposed.length === 0 ? 'pass' : 'warn',
+        exposed.length === 0
+          ? `${name} hides its sensitive column(s): ${sensitiveColumns.join(', ')}.`
+          : `${name} serializes sensitive-looking column(s) ${exposed.join(', ')} — serialize()/toJSON() and Inertia props will expose them.`,
+        exposed.length === 0
+          ? undefined
+          : `Add ${exposed.map((c) => `'${c}'`).join(', ')} to 'static hidden = [...]' in ${relPath}.`,
         relPath,
       ),
     )
