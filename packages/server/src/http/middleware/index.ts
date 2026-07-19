@@ -86,3 +86,8 @@ export {
 } from './force-https'
 export { requestIdMiddleware } from './request-id'
 export { requestLoggingMiddleware } from './request-logging'
+export {
+  detectLocaleMiddleware,
+  type DetectLocaleOptions,
+  type LocaleSource,
+} from './detect-locale'

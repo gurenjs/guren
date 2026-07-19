@@ -3,6 +3,7 @@ import { Hono } from 'hono'
 import { Controller } from '../../src/mvc/Controller'
 import { Container } from '../../src/container/Container'
 import { createI18n } from '../../src/i18n'
+import { detectLocaleMiddleware } from '../../src/http/middleware/detect-locale'
 
 class PageController extends Controller {
   async page() {
@@ -66,5 +67,22 @@ describe('Inertia html lang resolution', () => {
 
   test('falls back to the i18n container locale', async () => {
     expect(await htmlLangOf(createApp({ i18nLocale: 'ja' }))).toBe('ja')
+  })
+
+  test('detectLocaleMiddleware feeds html lang end to end', async () => {
+    const app = new Hono()
+    app.use('*', detectLocaleMiddleware({ supported: ['en', 'ja'] }))
+    app.get('/page', async (c) => {
+      const ctrl = new PageController()
+      ctrl.setContext(c)
+      return ctrl.page()
+    })
+
+    const response = await app.request('/page', {
+      headers: { Accept: 'text/html', 'Accept-Language': 'ja-JP' },
+    })
+    const html = await response.text()
+
+    expect(html).toContain('<html lang="ja"')
   })
 })

@@ -187,6 +187,8 @@ export {
   // Request ID & Logging
   requestIdMiddleware,
   requestLoggingMiddleware,
+  // Locale detection
+  detectLocaleMiddleware,
 }
   from './http/middleware'
 export { AUTH_CONTEXT_KEY } from './http/middleware/auth'
@@ -219,6 +221,9 @@ export type {
   RedirectSafetyOptions,
   // Force HTTPS types
   ForceHttpsOptions,
+  // Locale detection types
+  DetectLocaleOptions,
+  LocaleSource,
 }  from './http/middleware'
 // Validation (advanced)
 export {
