@@ -354,7 +354,7 @@ sanitize(user: AuthUser): AuthUser {
 
 ### サニタイズ済みユーザーの型付け
 
-サニタイズはランタイムの処理なので、単に `auth.user<UserRecord>()` と書くと、実際には取り除かれている資格情報フィールドが型の上では残ったままになります。`Sanitized<T>` ヘルパーを使うと、型を実態に一致させられます。
+サニタイズはランタイムの処理なので、単に `auth.user<UserRecord>()` と書くと、実際には取り除かれている資格情報フィールドが型の上では残ったままになります。`Sanitized<T>` ヘルパーを使うと、慣例的な資格情報キーを型から取り除けます。
 
 ```ts
 import type { Sanitized } from '@guren/core'
@@ -366,11 +366,13 @@ user.email        // ✅ string
 user.passwordHash // ❌ コンパイルエラー — ランタイムで除去済み
 ```
 
-モデルの `static hidden` で追加のフィールドを隠している場合は、第2型引数に列挙します。
+モデルの `static hidden` で追加のフィールドを隠している場合や、資格情報カラムが慣例名(`password`、`passwordHash`、`password_hash`、`rememberToken`、`remember_token`)以外の場合は、第2型引数に列挙します。
 
 ```ts
-type SafeUser = Sanitized<UserRecord, 'twoFactorSecret'>
+type SafeUser = Sanitized<UserRecord, 'twoFactorSecret' | 'credentialDigest'>
 ```
+
+ランタイムが除去するのは「プロバイダーに設定されたカラム + モデルの `static hidden`」そのものです。静的型はこの設定を参照できないため、`Sanitized<T>` は慣例名を反映し、それ以外は第2型引数での指定に委ねます。`static hidden` に漏れている機微カラムは `guren audit` が警告するため、ランタイム側の正しさはそちらで担保できます。
 
 ## Remember トークン
 

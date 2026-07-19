@@ -28,6 +28,22 @@ describe('Sanitized<T>', () => {
     expect(safe.email).toBe('user@example.com')
   })
 
+  test('distributes over union record types', () => {
+    type Admin = { kind: 'admin'; email: string; password: string }
+    type Customer = { kind: 'customer'; phone: string; password: string }
+
+    const admin: Sanitized<Admin | Customer> = { kind: 'admin', email: 'a@example.com' }
+    const customer: Sanitized<Admin | Customer> = { kind: 'customer', phone: '555' }
+
+    // Member-specific safe fields survive after narrowing.
+    if (admin.kind === 'admin') {
+      expect(admin.email).toBe('a@example.com')
+    }
+    if (customer.kind === 'customer') {
+      expect(customer.phone).toBe('555')
+    }
+  })
+
   test('matches what ModelUserProvider.sanitize() strips at runtime', () => {
     class FakeUserModel {
       static hidden = ['twoFactorSecret']
