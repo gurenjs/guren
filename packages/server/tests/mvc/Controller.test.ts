@@ -6,7 +6,7 @@ import { Controller } from '../../src/mvc/Controller'
 // ─── Test Schemas ────────────────────────────────────────────
 
 const BodySchema = z.object({
-  email: z.string().email(),
+  email: z.email(),
   name: z.string().min(1),
 })
 

@@ -75,7 +75,7 @@ import { z } from 'zod'
 import { pages } from '@/.guren/pages.gen'
 
 const LoginSchema = z.object({
-  email: z.string().email(),
+  email: z.email(),
   password: z.string().min(1),
   remember: z.boolean().optional(),
 })

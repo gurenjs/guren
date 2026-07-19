@@ -46,7 +46,7 @@ export function getValidatedData<T = Record<string, unknown>>(ctx: Context): T |
  *
  * const CreateUserSchema = z.object({
  *   name: z.string().min(1),
- *   email: z.string().email(),
+ *   email: z.email(),
  * })
  *
  * app.post('/users', validateRequest(CreateUserSchema), (c) => {
