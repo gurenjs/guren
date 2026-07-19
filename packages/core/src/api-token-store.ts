@@ -99,7 +99,8 @@ export class DatabaseApiTokenStore implements ApiTokenStore {
       id: String(record.id),
       name: String(record.name),
       hashedToken: String(record.hashedToken),
-      userId: record.userId as string | number,
+      userId:
+        typeof record.userId === 'bigint' ? record.userId.toString() : (record.userId as string | number),
       abilities:
         typeof abilities === 'string' ? (JSON.parse(abilities) as string[]) : (abilities as string[]),
       lastUsedAt: toDate(record.lastUsedAt),
