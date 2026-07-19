@@ -1,5 +1,18 @@
 # web
 
+## 0.1.2
+
+### Patch Changes
+
+- Updated dependencies [a3d1191]
+- Updated dependencies [bc79a6a]
+- Updated dependencies [bc79a6a]
+- Updated dependencies [f12e754]
+  - @guren/cli@1.1.0
+  - @guren/orm@1.0.1
+  - @guren/inertia-client@1.0.1
+  - @guren/plugin-vercel@0.1.1
+
 ## 0.1.1
 
 ### Patch Changes

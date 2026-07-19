@@ -1,5 +1,23 @@
 # @guren/server
 
+## 1.1.0
+
+### Minor Changes
+
+- bc79a6a: Resolve the `@/` alias from the project root instead of `app/`. The Vite plugin alias, scaffolded imports (`make:*`, `add resource`), and docs now use root-relative paths like `@/.guren/pages.gen` and `@/app/Http/Resources/PostResource`, removing deep `../../..` relative imports. `guren doctor` gains a `tsconfig-alias` check with autofix. Apps created before this release should update `tsconfig.json` paths to `"@/*": ["./*"]` so newly scaffolded code resolves.
+
+### Patch Changes
+
+- bc79a6a: Auto-register `InertiaServiceProvider` after user providers. Validation errors on Inertia requests are now redirected with the error bag as expected instead of returning a raw JSON 422 that triggered the Inertia error modal. Apps that registered the provider explicitly keep working unchanged.
+- f12e754: Fix Inertia SSR on serverless deployments and stop shipping dev import maps in production.
+
+  - The Guren Vite plugin now defaults `ssr.noExternal` to `true` for SSR builds so `.guren/ssr` bundles are self-contained and importable on runtimes without `node_modules` (Vercel, Lambda).
+  - `@guren/plugin-vercel` pins `process.env.NODE_ENV` to `"production"` when bundling the function entrypoint; `bun build` otherwise inlines it as `"development"`, disabling every production code path at runtime.
+  - The Inertia HTML document no longer emits the esm.sh dev React import map when `NODE_ENV` is `production`.
+
+- Updated dependencies [bc79a6a]
+  - @guren/orm@1.0.1
+
 ## 1.0.0
 
 ### Major Changes

@@ -1,5 +1,11 @@
 # @guren/orm
 
+## 1.0.1
+
+### Patch Changes
+
+- bc79a6a: `QueryBuilder.firstOrFail()` now throws `ModelNotFoundException` (rendered as HTTP 404) instead of a plain `Error` (which rendered as 500), matching `Model.findOrFail()`.
+
 ## 1.0.0
 
 ### Major Changes
