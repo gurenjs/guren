@@ -21,3 +21,6 @@ export {
 } from './Container'
 
 export { ServiceProvider, ProviderManager } from './ServiceProvider'
+
+export { definePlugin } from './definePlugin'
+export type { PluginDefinition, PluginFactory } from './definePlugin'

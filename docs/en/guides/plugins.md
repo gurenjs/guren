@@ -44,11 +44,13 @@ Key points:
 - `@guren/core` and `@guren/testing` are **dev dependencies** for building and testing.
 - The `gurenPlugin.compatibility` field declares which Guren versions your plugin supports.
 
-## Step 2: Create the ServiceProvider
+## Step 2: Define the Plugin
+
+Use the `definePlugin()` helper from `@guren/core`. It captures your configuration in a closure and returns a factory that produces an independent provider class per call, so the same plugin can be registered twice with different configurations:
 
 ```typescript
-// src/AnalyticsServiceProvider.ts
-import { ServiceProvider } from '@guren/core'
+// src/plugin.ts
+import { definePlugin } from '@guren/core'
 
 export interface AnalyticsConfig {
   apiKey: string
@@ -65,61 +67,36 @@ export class AnalyticsClient {
   }
 }
 
-export class AnalyticsServiceProvider extends ServiceProvider {
-  static config: AnalyticsConfig = { apiKey: '' }
+export const analyticsPlugin = definePlugin<AnalyticsConfig>({
+  name: 'analytics',
 
-  register(): void {
-    this.container.singleton('analytics', () => {
-      return new AnalyticsClient(AnalyticsServiceProvider.config)
-    })
-  }
+  register(container, config) {
+    container.singleton('analytics', () => new AnalyticsClient(config))
+  },
 
-  boot(): void {
+  boot(container) {
     // Subscribe to framework events after all providers are registered
-    if (this.container.has('events')) {
-      const events = this.container.make('events')
-      const analytics = this.container.make<AnalyticsClient>('analytics')
+    if (container.has('events')) {
+      const events = container.make('events')
+      const analytics = container.make<AnalyticsClient>('analytics')
       events.on('request.completed', (data: Record<string, unknown>) => {
         analytics.track('page_view', data)
       })
     }
-  }
-}
+  },
+})
 ```
 
-## Step 3: Export the Provider
+Plugins that are expensive to initialize can pass `deferred: true` together with `provides: ['analytics']` so the provider only loads when one of its services is first resolved.
+
+If you need lifecycle behavior beyond what `definePlugin()` covers, you can still export a `ServiceProvider` subclass directly — the class-based contract is unchanged. Avoid storing configuration on a static class property, though: statics are shared, so registering the plugin twice would silently overwrite the first configuration.
+
+## Step 3: Export the Plugin
 
 ```typescript
 // src/index.ts
-export { AnalyticsServiceProvider, AnalyticsClient } from './AnalyticsServiceProvider'
-export type { AnalyticsConfig } from './AnalyticsServiceProvider'
-
-/**
- * Factory helper for configuring the plugin.
- */
-export function defineAnalyticsPlugin(config: import('./AnalyticsServiceProvider').AnalyticsConfig) {
-  return class ConfiguredAnalyticsProvider extends (
-    require('./AnalyticsServiceProvider').AnalyticsServiceProvider
-  ) {
-    static config = config
-  } as typeof import('./AnalyticsServiceProvider').AnalyticsServiceProvider
-}
-```
-
-A cleaner ESM-only approach:
-
-```typescript
-// src/index.ts
-import { AnalyticsServiceProvider } from './AnalyticsServiceProvider'
-import type { AnalyticsConfig } from './AnalyticsServiceProvider'
-
-export { AnalyticsServiceProvider }
-export type { AnalyticsConfig }
-
-export function defineAnalyticsPlugin(config: AnalyticsConfig) {
-  AnalyticsServiceProvider.config = config
-  return AnalyticsServiceProvider
-}
+export { analyticsPlugin, AnalyticsClient } from './plugin'
+export type { AnalyticsConfig } from './plugin'
 ```
 
 ## Step 4: Add Plugin Metadata
@@ -141,34 +118,28 @@ This tells Guren (and other tooling) which framework versions your plugin is des
 Use `createPluginTestApp` and `assertPluginRegisters` from `@guren/testing`:
 
 ```typescript
-// src/AnalyticsServiceProvider.test.ts
+// src/plugin.test.ts
 import { describe, test, expect } from 'bun:test'
 import { createPluginTestApp, assertPluginRegisters } from '@guren/testing'
-import { AnalyticsServiceProvider, AnalyticsClient } from './AnalyticsServiceProvider'
+import { analyticsPlugin, AnalyticsClient } from './plugin'
 
-describe('AnalyticsServiceProvider', () => {
+describe('analyticsPlugin', () => {
   test('should register the analytics service', async () => {
-    AnalyticsServiceProvider.config = { apiKey: 'test-key' }
-
-    const app = await createPluginTestApp([AnalyticsServiceProvider])
+    const app = await createPluginTestApp([analyticsPlugin({ apiKey: 'test-key' })])
 
     // Verify the service is bound
     assertPluginRegisters(app, ['analytics'])
   })
 
   test('should resolve an AnalyticsClient instance', async () => {
-    AnalyticsServiceProvider.config = { apiKey: 'test-key' }
-
-    const app = await createPluginTestApp([AnalyticsServiceProvider])
+    const app = await createPluginTestApp([analyticsPlugin({ apiKey: 'test-key' })])
 
     const client = app.container.make<AnalyticsClient>('analytics')
     expect(client).toBeInstanceOf(AnalyticsClient)
   })
 
   test('should register as a singleton', async () => {
-    AnalyticsServiceProvider.config = { apiKey: 'test-key' }
-
-    const app = await createPluginTestApp([AnalyticsServiceProvider])
+    const app = await createPluginTestApp([analyticsPlugin({ apiKey: 'test-key' })])
 
     const first = app.container.make<AnalyticsClient>('analytics')
     const second = app.container.make<AnalyticsClient>('analytics')
@@ -180,7 +151,7 @@ describe('AnalyticsServiceProvider', () => {
 Run the tests:
 
 ```bash
-bun test src/AnalyticsServiceProvider.test.ts
+bun test src/plugin.test.ts
 ```
 
 ## Step 6: Build
@@ -217,6 +188,8 @@ bun add @guren/plugin-vercel
 
 The `plugin` command adds the provider import and registers it in `createApp({ providers })` for you.
 
+> **Note:** Automatic registration currently supports class-based provider exports only. Plugins built with `definePlugin()` export a factory that must be called with its configuration, so register them manually in `createApp({ providers })` as shown below.
+
 ## Usage in a Guren Application
 
 Once published, users install and register the plugin:
@@ -228,13 +201,13 @@ bun add guren-plugin-analytics
 ```typescript
 // src/app.ts
 import { createApp } from '@guren/core'
-import { defineAnalyticsPlugin } from 'guren-plugin-analytics'
+import { analyticsPlugin } from 'guren-plugin-analytics'
 import { registerWebRoutes } from '@/routes/web'
 
 export const app = createApp({
   routes: registerWebRoutes,
   providers: [
-    defineAnalyticsPlugin({
+    analyticsPlugin({
       apiKey: process.env.ANALYTICS_API_KEY!,
       endpoint: 'https://analytics.example.com',
     }),

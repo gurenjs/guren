@@ -58,43 +58,54 @@ export class HeavyServiceProvider extends ServiceProvider {
 | Official (Guren team) | `@guren/plugin-{name}` | `@guren/plugin-vercel`, `@guren/plugin-sentry` |
 | Community | `guren-plugin-{name}` | `guren-plugin-stripe` |
 
-The class itself should follow the `{Name}ServiceProvider` pattern (e.g., `SentryServiceProvider`, `StripeServiceProvider`).
+The primary export should follow the `{name}Plugin` pattern for `definePlugin()` factories (e.g., `sentryPlugin`, `stripePlugin`), or the `{Name}ServiceProvider` pattern for class-based providers (e.g., `SentryServiceProvider`, `StripeServiceProvider`).
 
 ## Required Exports
 
-Every plugin package must export:
+Every plugin package must export one primary entry consumers pass to `createApp({ providers })` — either:
 
-1. **Default ServiceProvider class** -- the primary export consumers pass to `createApp({ providers })`.
+1. **A `definePlugin()` factory** (recommended for configurable plugins; see below), or
+2. **A ServiceProvider class** for plugins that need no configuration or full lifecycle control.
 
 ```typescript
 // src/index.ts
+export { analyticsPlugin } from './plugin'
+// or
 export { AnalyticsServiceProvider } from './AnalyticsServiceProvider'
 ```
 
-### Optional: `definePlugin()` Helper
+> **Note:** The `guren plugin <pkg>` install command currently auto-registers only class exports matching the `{Name}Provider` heuristic. Factory-based plugins must be registered manually in `createApp({ providers })` until manifest-driven installation (RFC 0001, Part B) ships.
 
-For plugins that accept configuration, expose a factory function:
+### Recommended: the `definePlugin()` Helper
+
+For plugins that accept configuration, use the framework-provided `definePlugin()` helper from `@guren/core` instead of hand-rolling a factory. Each factory call produces an independent provider class with the configuration captured in a closure — never store configuration on a static class property, since statics are shared across registrations:
 
 ```typescript
+import { definePlugin } from '@guren/core'
 import type { AnalyticsConfig } from './types'
 
-export function definePlugin(config: AnalyticsConfig) {
-  return class ConfiguredAnalyticsProvider extends AnalyticsServiceProvider {
-    register(): void {
-      this.container.singleton('analytics', () => new AnalyticsClient(config))
-    }
-  }
-}
+export const analyticsPlugin = definePlugin<AnalyticsConfig>({
+  name: 'analytics',
+  register(container, config) {
+    container.singleton('analytics', () => new AnalyticsClient(config))
+  },
+  boot(container, config) {
+    // Optional: post-registration setup
+  },
+  // Optional: deferred loading, same semantics as ServiceProvider statics
+  // deferred: true,
+  // provides: ['analytics'],
+})
 ```
 
 Users can then use:
 
 ```typescript
-import { definePlugin } from 'guren-plugin-analytics'
+import { analyticsPlugin } from 'guren-plugin-analytics'
 
 createApp({
   providers: [
-    definePlugin({ apiKey: 'sk_...' }),
+    analyticsPlugin({ apiKey: 'sk_...' }),
   ],
 })
 ```
