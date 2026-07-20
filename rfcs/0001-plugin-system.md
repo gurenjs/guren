@@ -111,8 +111,13 @@ Extend the existing `gurenPlugin` package.json field:
     // Existing, now actually enforced
     "compatibility": ">=1.0.0",
     // Named export to register in createApp({ providers }).
-    // Optional; falls back to the current name heuristic (e.g.
-    // @guren/plugin-vercel -> GurenPluginVercelProvider).
+    // Optional. ~~Falls back to the current name heuristic~~ **Amended in
+    // implementation:** the name heuristic only applies to packages with
+    // NO gurenPlugin manifest at all. When a manifest exists but omits
+    // `provider` (e.g. a definePlugin()-only or commands-only plugin),
+    // guessing a name would write an import that doesn't exist -- the CLI
+    // skips automatic registration and prints a reminder to register
+    // manually instead.
     "provider": "AnalyticsServiceProvider",
     // Keys appended to .env.example (and .env if present) when missing
     "env": [

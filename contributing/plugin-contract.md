@@ -74,7 +74,7 @@ export { analyticsPlugin } from './plugin'
 export { AnalyticsServiceProvider } from './AnalyticsServiceProvider'
 ```
 
-> **Note:** `bunx guren plugin <pkg>` registers the class export named by `gurenPlugin.provider`, falling back to the `{PascalPkg}Provider` name heuristic when the field is absent. `definePlugin()` factories must be called with their configuration, so register them manually in `createApp({ providers })`.
+> **Note:** `bunx guren plugin <pkg>` registers the class export named by `gurenPlugin.provider`. The `{PascalPkg}Provider` name heuristic is only used as a fallback for packages with **no `gurenPlugin` manifest at all** (legacy plugins predating the manifest). If a manifest exists but omits `provider` — the case for `definePlugin()` factories, which must be called with their configuration — the CLI does **not** guess a name; it skips automatic registration and prints a reminder to register the export manually in `createApp({ providers })`.
 
 ### Recommended: the `definePlugin()` Helper
 

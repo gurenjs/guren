@@ -148,7 +148,7 @@ export default app
     })
 
     it('registers an incompatible plugin with a warning when ignoreCompatibility is set', async () => {
-      await writeManifestPackage({ compatibility: '>=2.0.0' })
+      await writeManifestPackage({ compatibility: '>=2.0.0', provider: 'AuditProvider' })
 
       const messages = await installPlugin({
         packageName: '@acme/guren-plugin-audit',
@@ -157,7 +157,20 @@ export default app
 
       expect(textsOf(messages, 'warning')).toHaveLength(1)
       const app = await readFile('src/app.ts', 'utf8')
-      expect(app).toContain('providers: [AcmeGurenPluginAuditProvider]')
+      expect(app).toContain('providers: [AuditProvider]')
+    })
+
+    it('does not fabricate a provider name when the manifest omits provider', async () => {
+      await writeManifestPackage({ commands: { entry: 'stubs/audit.ts', names: ['audit:report'] } })
+
+      const messages = await installPlugin({ packageName: '@acme/guren-plugin-audit' })
+
+      expect(textsOf(messages, 'hint')).toContain(
+        '@acme/guren-plugin-audit does not declare a gurenPlugin.provider; register its export manually in createApp({ providers }).',
+      )
+      const app = await readFile('src/app.ts', 'utf8')
+      expect(app).not.toContain('guren-plugin-audit')
+      expect(app).not.toContain('AcmeGurenPluginAuditProvider')
     })
 
     it('publishes declared files and appends env keys', async () => {

@@ -1,5 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it } from 'bun:test'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { createTempWorkspace, writeInstalledPackage, type TempWorkspace } from './helpers'
 import {
   applyEnvEntries,
@@ -174,6 +175,26 @@ describe('plugin-manifest', () => {
       await expect(applyPublishes(PLUGIN_NAME, [
         { from: '/etc/passwd', to: 'config/passwd.ts' },
       ])).rejects.toThrow('absolute paths are not allowed')
+    })
+
+    it('should reject a source that is a symlink escaping the package directory', async () => {
+      const secretPath = join(workspace.dir, 'secret.ts')
+      await writeFile(secretPath, 'export const secret = true\n')
+      await symlink(secretPath, join(workspace.dir, 'node_modules', PLUGIN_NAME, 'stubs', 'escape-link.ts'))
+
+      await expect(applyPublishes(PLUGIN_NAME, [
+        { from: 'stubs/escape-link.ts', to: 'config/audit.ts' },
+      ])).rejects.toThrow('escapes the package directory')
+    })
+
+    it('should reject a target directory that is a symlink escaping the project directory', async () => {
+      const outsideDir = join(workspace.dir, '..', `guren-cli-plugin-manifest-outside-${Date.now()}`)
+      await mkdir(outsideDir, { recursive: true })
+      await symlink(outsideDir, join(workspace.dir, 'config'))
+
+      await expect(applyPublishes(PLUGIN_NAME, [
+        { from: 'stubs/audit.ts', to: 'config/audit.ts' },
+      ])).rejects.toThrow('escapes the project directory')
     })
   })
 })

@@ -1,5 +1,5 @@
-import { copyFile, mkdir, writeFile } from 'node:fs/promises'
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { copyFile, mkdir, realpath, writeFile } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileExists, readIfExists } from './discovery'
 
 /**
@@ -64,6 +64,95 @@ export async function readPluginManifest(
   }
 
   return parsed.gurenPlugin as GurenPluginManifest
+}
+
+/**
+ * Enumerate installed packages (dependencies and devDependencies of the
+ * app's package.json) that declare a `gurenPlugin` manifest.
+ */
+export async function readInstalledPluginManifests(
+  cwd: string = process.cwd(),
+): Promise<Array<{ packageName: string; manifest: GurenPluginManifest }>> {
+  const packageJsonRaw = await readIfExists(cwd, 'package.json')
+  if (packageJsonRaw === null) return []
+
+  let dependencies: string[]
+  try {
+    const parsed = JSON.parse(packageJsonRaw) as {
+      dependencies?: Record<string, string>
+      devDependencies?: Record<string, string>
+    }
+    dependencies = [
+      ...Object.keys(parsed.dependencies ?? {}),
+      ...Object.keys(parsed.devDependencies ?? {}),
+    ]
+  } catch {
+    return []
+  }
+
+  const entries = await Promise.all(
+    dependencies.map(async (packageName) => ({
+      packageName,
+      manifest: await readPluginManifest(packageName, cwd).catch(() => null),
+    })),
+  )
+
+  return entries.flatMap((entry) =>
+    entry.manifest ? [{ packageName: entry.packageName, manifest: entry.manifest }] : [],
+  )
+}
+
+/**
+ * Walk up from `candidate` to the nearest existing ancestor and return its
+ * canonical (symlink-resolved) path, plus the non-existent tail rejoined
+ * onto it. Lets callers realpath-validate a path that doesn't exist yet
+ * (e.g. a publish target about to be created).
+ */
+async function realpathNearestExisting(candidate: string): Promise<string> {
+  const tail: string[] = []
+  let probe = candidate
+
+  for (;;) {
+    try {
+      const real = await realpath(probe)
+      return tail.length > 0 ? join(real, ...tail) : real
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      const parent = dirname(probe)
+      if (parent === probe) return candidate
+      tail.unshift(basename(probe))
+      probe = parent
+    }
+  }
+}
+
+/**
+ * Resolve `relPath` against `baseDir`, returning null when the input is
+ * absolute, escapes the base directory, or — once symlinks are resolved —
+ * points outside it. `baseDir` and any existing ancestor of the resolved
+ * path are canonicalized via `realpath` so a symlink inside the package
+ * (or a symlinked `node_modules` entry) can't be used to read or write
+ * outside the intended directory. The candidate path (not its realpath) is
+ * returned so callers keep operating on the logical location.
+ */
+export async function resolveInside(baseDir: string, relPath: string): Promise<string | null> {
+  if (isAbsolute(relPath)) return null
+
+  const candidate = resolve(baseDir, relPath)
+  if (relative(baseDir, candidate).startsWith('..')) return null
+
+  let realBase: string
+  try {
+    realBase = await realpath(baseDir)
+  } catch {
+    return null
+  }
+
+  const realCandidate = await realpathNearestExisting(candidate)
+  const realRelative = relative(realBase, realCandidate)
+  if (realRelative.startsWith('..') || isAbsolute(realRelative)) return null
+
+  return candidate
 }
 
 /**
@@ -169,20 +258,20 @@ export async function applyPublishes(
       throw new Error(`Invalid publish entry in "${packageName}": absolute paths are not allowed.`)
     }
 
-    const fromPath = resolve(packageDir, entry.from)
-    if (relative(packageDir, fromPath).startsWith('..')) {
+    const fromPath = await resolveInside(packageDir, entry.from)
+    if (fromPath === null) {
       throw new Error(
         `Invalid publish entry in "${packageName}": source "${entry.from}" escapes the package directory.`,
       )
     }
 
-    const toPath = resolve(cwd, entry.to)
-    const toRelative = relative(cwd, toPath)
-    if (toRelative.startsWith('..')) {
+    const toPath = await resolveInside(cwd, entry.to)
+    if (toPath === null) {
       throw new Error(
         `Invalid publish entry in "${packageName}": target "${entry.to}" escapes the project directory.`,
       )
     }
+    const toRelative = relative(cwd, toPath)
     if (!PUBLISH_TARGET_ROOTS.some((root) => toRelative.startsWith(root))) {
       throw new Error(
         `Invalid publish entry in "${packageName}": target "${entry.to}" must be inside ${PUBLISH_TARGET_ROOTS.join(', ')}.`,

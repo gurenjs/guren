@@ -98,25 +98,36 @@ export async function installPlugin(options: InstallPluginOptions): Promise<Plug
     }
   }
 
-  const providerName = manifest?.provider ?? providerIdentifierForPackage(packageName)
-  const providerImport = `import { ${providerName} } from '${packageName}'`
+  if (manifest && !manifest.provider) {
+    // A manifest exists but intentionally omits `provider` -- e.g. a
+    // command-only plugin, or a definePlugin() factory that must be called
+    // with configuration. Fabricating a name here would write an import
+    // that doesn't exist into src/app.ts.
+    messages.push({
+      kind: 'hint',
+      text: `${packageName} does not declare a gurenPlugin.provider; register its export manually in createApp({ providers }).`,
+    })
+  } else {
+    const providerName = manifest?.provider ?? providerIdentifierForPackage(packageName)
+    const providerImport = `import { ${providerName} } from '${packageName}'`
 
-  const appPath = 'src/app.ts'
-  const imported = await addImport(appPath, providerImport)
-  const registered = await addProvider(appPath, providerName)
+    const appPath = 'src/app.ts'
+    const imported = await addImport(appPath, providerImport)
+    const registered = await addProvider(appPath, providerName)
 
-  if (imported.reason === 'File not found' || registered.reason === 'File not found') {
-    throw new Error('src/app.ts was not found. Run this command inside a Guren app.')
-  }
+    if (imported.reason === 'File not found' || registered.reason === 'File not found') {
+      throw new Error('src/app.ts was not found. Run this command inside a Guren app.')
+    }
 
-  if (!registered.modified && registered.reason === 'Could not find providers array') {
-    throw new Error('Could not find providers array in src/app.ts. Please register the provider manually.')
-  }
+    if (!registered.modified && registered.reason === 'Could not find providers array') {
+      throw new Error('Could not find providers array in src/app.ts. Please register the provider manually.')
+    }
 
-  if (imported.modified || registered.modified) {
-    messages.push({ kind: 'updated', text: appPath })
-  } else if (imported.reason === 'Import already exists' && registered.reason === 'Provider already registered') {
-    messages.push({ kind: 'checked', text: `${appPath} (already registered)` })
+    if (imported.modified || registered.modified) {
+      messages.push({ kind: 'updated', text: appPath })
+    } else if (imported.reason === 'Import already exists' && registered.reason === 'Provider already registered') {
+      messages.push({ kind: 'checked', text: `${appPath} (already registered)` })
+    }
   }
 
   if (packageName === '@guren/plugin-vercel') {
