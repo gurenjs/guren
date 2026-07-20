@@ -34,10 +34,10 @@ bunx guren add schedule
 > **Golden path:** まず `bunx guren add auth` と `bunx guren add resource` から始め、アプリの成長に応じて他の機能を追加してください。
 
 ```bash
-bunx guren add plugin @acme/guren-plugin-audit
+bunx guren plugin @acme/guren-plugin-audit
 ```
 
-`add plugin` は `src/app.ts` にプラグイン Provider を自動登録し、依存が未インストールの場合は `bun add <package>` の案内を表示します。
+`plugin`（`add plugin` としても利用可能）は、依存が未インストールの場合に `bun add` でインストールし（`--no-install` でスキップ可能）、プラグインが宣言するGurenバージョン互換性を検証した上で（`--ignore-compatibility` で無視可能）、Providerを `src/app.ts` に自動登録します。プラグインが `gurenPlugin` マニフェストで宣言した設定スタブや環境変数キーも適用されます。`--force` は公開済みファイルの上書きに使います。
 
 これらのコマンドは `src/app.ts` を更新し、対応する provider/runtime ファイルを生成します。
 

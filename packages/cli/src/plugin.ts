@@ -1,11 +1,41 @@
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import type { WriterOptions } from './utils'
+import { runCommand } from './utils'
 import { addImport, addProvider } from './patch-helpers'
+import {
+  applyEnvEntries,
+  applyPublishes,
+  checkPluginCompatibility,
+  readCoreVersion,
+  readPluginManifest,
+  type PublishResult,
+} from './plugin-manifest'
 import { assertSupportedOfficialVercelPlugin, installOfficialVercelPlugin } from './plugin-vercel'
 
 export interface InstallPluginOptions extends WriterOptions {
   packageName: string
+  /** Run `bun add <pkg>` when the dependency is missing. Off by default. */
+  install?: boolean
+  /** Register the plugin even when its declared compatibility range excludes the installed core. */
+  ignoreCompatibility?: boolean
+}
+
+export type PluginInstallMessageKind =
+  | 'installed'
+  | 'updated'
+  | 'checked'
+  | 'skipped'
+  | 'warning'
+  | 'hint'
+
+export interface PluginInstallMessage {
+  kind: PluginInstallMessageKind
+  text: string
+}
+
+function toMessages(kind: PluginInstallMessageKind, texts: string[]): PluginInstallMessage[] {
+  return texts.map((text) => ({ kind, text }))
 }
 
 function providerIdentifierForPackage(packageName: string): string {
@@ -39,7 +69,7 @@ async function hasDependency(packageName: string): Promise<boolean> {
   return Boolean(packageJson.dependencies?.[packageName] ?? packageJson.devDependencies?.[packageName])
 }
 
-export async function installPlugin(options: InstallPluginOptions): Promise<string[]> {
+export async function installPlugin(options: InstallPluginOptions): Promise<PluginInstallMessage[]> {
   const packageName = options.packageName.trim()
   if (!packageName) {
     throw new Error('Plugin package name is required.')
@@ -49,43 +79,84 @@ export async function installPlugin(options: InstallPluginOptions): Promise<stri
     await assertSupportedOfficialVercelPlugin()
   }
 
-  const providerName = providerIdentifierForPackage(packageName)
-  const providerImport = `import { ${providerName} } from '${packageName}'`
+  const messages: PluginInstallMessage[] = []
 
-  const appPath = 'src/app.ts'
-  const imported = await addImport(appPath, providerImport)
-  const registered = await addProvider(appPath, providerName)
-
-  if (!imported.modified && imported.reason === 'File not found') {
-    throw new Error('src/app.ts was not found. Run this command inside a Guren app.')
+  let present = await hasDependency(packageName)
+  if (options.install && !present) {
+    await runCommand('bun', ['add', packageName])
+    present = true
+    messages.push({ kind: 'installed', text: packageName })
   }
 
+  const manifest = await readPluginManifest(packageName)
 
-  if (!registered.modified && registered.reason === 'File not found') {
-    throw new Error('src/app.ts was not found. Run this command inside a Guren app.')
+  if (manifest) {
+    const compatibility = checkPluginCompatibility(manifest, await readCoreVersion())
+    if (compatibility && !compatibility.compatible) {
+      const summary =
+        `${packageName} declares compatibility "${compatibility.range}" but @guren/core ` +
+        `${compatibility.coreVersion} is installed.`
+      if (!options.ignoreCompatibility) {
+        throw new Error(`${summary} Pass --ignore-compatibility to register it anyway.`)
+      }
+      messages.push({ kind: 'warning', text: summary })
+    }
   }
 
-  if (!registered.modified && registered.reason === 'Could not find providers array') {
-    throw new Error('Could not find providers array in src/app.ts. Please register the provider manually.')
-  }
+  if (manifest && !manifest.provider) {
+    // A manifest exists but intentionally omits `provider` -- e.g. a
+    // command-only plugin, or a definePlugin() factory that must be called
+    // with configuration. Fabricating a name here would write an import
+    // that doesn't exist into src/app.ts.
+    messages.push({
+      kind: 'hint',
+      text: `${packageName} does not declare a gurenPlugin.provider; register its export manually in createApp({ providers }).`,
+    })
+  } else {
+    const providerName = manifest?.provider ?? providerIdentifierForPackage(packageName)
+    const providerImport = `import { ${providerName} } from '${packageName}'`
 
-  const messages: string[] = []
+    const appPath = 'src/app.ts'
+    const imported = await addImport(appPath, providerImport)
+    const registered = await addProvider(appPath, providerName)
 
-  if (imported.modified || registered.modified) {
-    messages.push(appPath)
-  }
+    if (imported.reason === 'File not found' || registered.reason === 'File not found') {
+      throw new Error('src/app.ts was not found. Run this command inside a Guren app.')
+    }
 
-  if (!imported.modified && imported.reason === 'Import already exists' && !registered.modified && registered.reason === 'Provider already registered') {
-    messages.push(`${appPath} (already registered)`)
+    if (!registered.modified && registered.reason === 'Could not find providers array') {
+      throw new Error('Could not find providers array in src/app.ts. Please register the provider manually.')
+    }
+
+    if (imported.modified || registered.modified) {
+      messages.push({ kind: 'updated', text: appPath })
+    } else if (imported.reason === 'Import already exists' && registered.reason === 'Provider already registered') {
+      messages.push({ kind: 'checked', text: `${appPath} (already registered)` })
+    }
   }
 
   if (packageName === '@guren/plugin-vercel') {
     const pluginFiles = await installOfficialVercelPlugin(options)
-    messages.push(...pluginFiles)
+    messages.push(...toMessages('updated', pluginFiles))
   }
 
-  if (!await hasDependency(packageName)) {
-    messages.push(`Run: bun add ${packageName}`)
+  // Independent I/O — apply publishes and env entries concurrently.
+  const [published, envModified] = await Promise.all([
+    manifest?.publishes?.length
+      ? applyPublishes(packageName, manifest.publishes, { force: options.force })
+      : Promise.resolve<PublishResult>({ written: [], skipped: [] }),
+    manifest?.env?.length ? applyEnvEntries(manifest.env) : Promise.resolve<string[]>([]),
+  ])
+
+  messages.push(...toMessages('updated', published.written))
+  messages.push(...published.skipped.map((text): PluginInstallMessage => ({
+    kind: 'skipped',
+    text: `${text} (already exists, use --force to overwrite)`,
+  })))
+  messages.push(...toMessages('updated', envModified))
+
+  if (!present) {
+    messages.push({ kind: 'hint', text: `Run: bun add ${packageName}` })
   }
 
   return messages

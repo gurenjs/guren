@@ -106,12 +106,26 @@ export type { AnalyticsConfig } from './plugin'
 ```json
 {
   "gurenPlugin": {
-    "compatibility": ">=1.0.0"
+    "compatibility": ">=1.0.0",
+    "provider": "AnalyticsServiceProvider",
+    "env": [
+      { "key": "ANALYTICS_API_KEY", "comment": "Analytics service API key" }
+    ],
+    "publishes": [
+      { "from": "stubs/analytics.ts", "to": "config/analytics.ts" }
+    ]
   }
 }
 ```
 
-これにより、Guren（および他のツール）がプラグインがどのフレームワークバージョンに対応しているかを把握できます。
+| フィールド | 用途 |
+|-----------|------|
+| `compatibility` | サポートするGurenバージョンのsemver範囲。`bunx guren plugin`のインストール時と`bunx guren doctor`で検証されます。 |
+| `provider` | `bunx guren plugin`が`createApp({ providers })`に登録する名前付きクラスエクスポート。`definePlugin()`ファクトリの場合は省略します（手動登録）。 |
+| `env` | インストール時にアプリの`.env.example`（`.env`が存在すればそちらにも）へ追記される環境変数キー。 |
+| `publishes` | パッケージからアプリへコピーされるファイル（`config/`、`db/migrations/`、`resources/`のみ）。既存ファイルは`--force`なしでは上書きされません。 |
+
+マニフェストは純粋なデータです — CLIはインストール中にプラグインのコードを一切実行しません。
 
 ## ステップ5: テストを書く
 
@@ -177,16 +191,15 @@ bun run build
 npm publish
 ```
 
-## 公式プラグインのインストール
+## プラグインのインストール
 
-公式プラグイン（`@guren/plugin-*`）はCLI経由でインストールでき、`src/app.ts`のパッチと必要なファイルの自動生成を行います:
+公式（`@guren/plugin-*`）・コミュニティ（`guren-plugin-*`）を問わず、プラグインはCLI経由でインストールできます:
 
 ```bash
 bunx guren plugin @guren/plugin-vercel
-bun add @guren/plugin-vercel
 ```
 
-`plugin`コマンドがプロバイダーのimportを追加し、`createApp({ providers })`への登録を自動で行います。
+`plugin`コマンドは、依存が未インストールなら`bun add`でインストールし（`--no-install`でスキップ可能）、プラグインが宣言するGuren互換性を検証した上で（`--ignore-compatibility`で無視して登録可能）、プロバイダーのimport追加と`createApp({ providers })`への登録、マニフェストの`env`・`publishes`エントリの適用を行います。`--force`は公開済みファイルの上書きに使います。
 
 > **注意:** 自動登録が現在対応しているのはクラスベースのプロバイダーエクスポートのみです。`definePlugin()`で作成したプラグインは設定を渡してファクトリを呼び出す必要があるため、下記のように`createApp({ providers })`へ手動で登録してください。
 

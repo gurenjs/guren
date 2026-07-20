@@ -1,7 +1,11 @@
 import { beforeEach, afterEach, describe, expect, it } from 'bun:test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { createTempWorkspace, type TempWorkspace } from './helpers'
-import { installPlugin } from '../src/plugin'
+import { createTempWorkspace, writeInstalledPackage, type TempWorkspace } from './helpers'
+import { installPlugin, type PluginInstallMessage } from '../src/plugin'
+
+function textsOf(messages: PluginInstallMessage[], kind: PluginInstallMessage['kind']): string[] {
+  return messages.filter((message) => message.kind === kind).map((message) => message.text)
+}
 
 describe('installPlugin', () => {
   let workspace: TempWorkspace
@@ -38,10 +42,10 @@ export default app
   })
 
   it('registers provider import and provider entry', async () => {
-    const updated = await installPlugin({ packageName: '@acme/guren-plugin-audit' })
+    const messages = await installPlugin({ packageName: '@acme/guren-plugin-audit' })
 
-    expect(updated).toContain('src/app.ts')
-    expect(updated).toContain('Run: bun add @acme/guren-plugin-audit')
+    expect(textsOf(messages, 'updated')).toContain('src/app.ts')
+    expect(textsOf(messages, 'hint')).toContain('Run: bun add @acme/guren-plugin-audit')
 
     const app = await readFile('src/app.ts', 'utf8')
     expect(app).toContain("import { AcmeGurenPluginAuditProvider } from '@acme/guren-plugin-audit'")
@@ -52,7 +56,7 @@ export default app
     await installPlugin({ packageName: '@acme/guren-plugin-audit' })
     const second = await installPlugin({ packageName: '@acme/guren-plugin-audit' })
 
-    expect(second).toContain('src/app.ts (already registered)')
+    expect(textsOf(second, 'checked')).toContain('src/app.ts (already registered)')
 
     const app = await readFile('src/app.ts', 'utf8')
     const occurrences = app.match(/AcmeGurenPluginAuditProvider/g)?.length ?? 0
@@ -69,20 +73,21 @@ export default app
       },
     }, null, 2))
 
-    const result = await installPlugin({ packageName: '@acme/guren-plugin-audit' })
-    expect(result.some(item => item.startsWith('Run: bun add'))).toBe(false)
+    const messages = await installPlugin({ packageName: '@acme/guren-plugin-audit' })
+    expect(textsOf(messages, 'hint')).toHaveLength(0)
   })
 
   it('scaffolds official Vercel plugin files for SSR apps', async () => {
-    const result = await installPlugin({ packageName: '@guren/plugin-vercel' })
+    const messages = await installPlugin({ packageName: '@guren/plugin-vercel' })
+    const updated = textsOf(messages, 'updated')
 
-    expect(result).toContain('src/app.ts')
-    expect(result).toContain('package.json')
-    expect(result).toContain('.gitignore')
-    expect(result).toContain('src/vercel.ts')
-    expect(result).toContain('scripts/vercel-build.ts')
-    expect(result).toContain('vercel.json')
-    expect(result).toContain('Run: bun add @guren/plugin-vercel')
+    expect(updated).toContain('src/app.ts')
+    expect(updated).toContain('package.json')
+    expect(updated).toContain('.gitignore')
+    expect(updated).toContain('src/vercel.ts')
+    expect(updated).toContain('scripts/vercel-build.ts')
+    expect(updated).toContain('vercel.json')
+    expect(textsOf(messages, 'hint')).toContain('Run: bun add @guren/plugin-vercel')
 
     const app = await readFile('src/app.ts', 'utf8')
     expect(app).toContain("import { GurenPluginVercelProvider } from '@guren/plugin-vercel'")
@@ -101,7 +106,7 @@ export default app
     await installPlugin({ packageName: '@guren/plugin-vercel' })
     const second = await installPlugin({ packageName: '@guren/plugin-vercel' })
 
-    expect(second).toContain('src/app.ts (already registered)')
+    expect(textsOf(second, 'checked')).toContain('src/app.ts (already registered)')
 
     const app = await readFile('src/app.ts', 'utf8')
     const occurrences = app.match(/GurenPluginVercelProvider/g)?.length ?? 0
@@ -109,6 +114,92 @@ export default app
 
     const gitignore = await readFile('.gitignore', 'utf8')
     expect(gitignore.match(/\.vercel/g)?.length ?? 0).toBe(1)
+  })
+
+  describe('gurenPlugin manifest', () => {
+    async function writeManifestPackage(manifest: Record<string, unknown>): Promise<void> {
+      await writeInstalledPackage('@acme/guren-plugin-audit', {
+        version: '1.0.0',
+        gurenPlugin: manifest,
+      }, {
+        'stubs/audit.ts': 'export const audit = true\n',
+      })
+      await writeInstalledPackage('@guren/core', { version: '1.2.0' })
+    }
+
+    it('uses the provider export declared in the manifest', async () => {
+      await writeManifestPackage({ provider: 'AuditProvider' })
+
+      await installPlugin({ packageName: '@acme/guren-plugin-audit' })
+
+      const app = await readFile('src/app.ts', 'utf8')
+      expect(app).toContain("import { AuditProvider } from '@acme/guren-plugin-audit'")
+      expect(app).toContain('providers: [AuditProvider]')
+    })
+
+    it('throws when the plugin is incompatible with the installed core', async () => {
+      await writeManifestPackage({ compatibility: '>=2.0.0' })
+
+      await expect(installPlugin({ packageName: '@acme/guren-plugin-audit' }))
+        .rejects.toThrow('declares compatibility ">=2.0.0"')
+
+      const app = await readFile('src/app.ts', 'utf8')
+      expect(app).not.toContain('guren-plugin-audit')
+    })
+
+    it('registers an incompatible plugin with a warning when ignoreCompatibility is set', async () => {
+      await writeManifestPackage({ compatibility: '>=2.0.0', provider: 'AuditProvider' })
+
+      const messages = await installPlugin({
+        packageName: '@acme/guren-plugin-audit',
+        ignoreCompatibility: true,
+      })
+
+      expect(textsOf(messages, 'warning')).toHaveLength(1)
+      const app = await readFile('src/app.ts', 'utf8')
+      expect(app).toContain('providers: [AuditProvider]')
+    })
+
+    it('does not fabricate a provider name when the manifest omits provider', async () => {
+      await writeManifestPackage({ commands: { entry: 'stubs/audit.ts', names: ['audit:report'] } })
+
+      const messages = await installPlugin({ packageName: '@acme/guren-plugin-audit' })
+
+      expect(textsOf(messages, 'hint')).toContain(
+        '@acme/guren-plugin-audit does not declare a gurenPlugin.provider; register its export manually in createApp({ providers }).',
+      )
+      const app = await readFile('src/app.ts', 'utf8')
+      expect(app).not.toContain('guren-plugin-audit')
+      expect(app).not.toContain('AcmeGurenPluginAuditProvider')
+    })
+
+    it('publishes declared files and appends env keys', async () => {
+      await writeManifestPackage({
+        publishes: [{ from: 'stubs/audit.ts', to: 'config/audit.ts' }],
+        env: [{ key: 'AUDIT_API_KEY', comment: 'Audit API key' }],
+      })
+
+      const messages = await installPlugin({ packageName: '@acme/guren-plugin-audit' })
+      const updated = textsOf(messages, 'updated')
+
+      expect(updated).toContain('config/audit.ts')
+      expect(updated).toContain('.env.example')
+      expect(await readFile('config/audit.ts', 'utf8')).toBe('export const audit = true\n')
+      expect(await readFile('.env.example', 'utf8')).toContain('AUDIT_API_KEY=')
+    })
+
+    it('skips existing published files without force', async () => {
+      await writeManifestPackage({
+        publishes: [{ from: 'stubs/audit.ts', to: 'config/audit.ts' }],
+      })
+      await mkdir('config', { recursive: true })
+      await writeFile('config/audit.ts', 'export const custom = true\n')
+
+      const messages = await installPlugin({ packageName: '@acme/guren-plugin-audit' })
+
+      expect(textsOf(messages, 'skipped')).toContain('config/audit.ts (already exists, use --force to overwrite)')
+      expect(await readFile('config/audit.ts', 'utf8')).toBe('export const custom = true\n')
+    })
   })
 
   it('rejects the official Vercel plugin for non-SSR apps', async () => {

@@ -2,6 +2,7 @@ import { copyFile, readFile, writeFile } from 'node:fs/promises'
 import { resolve, relative } from 'node:path'
 import { consola } from 'consola'
 import { discoverControllerFiles, discoverModelFiles, fileExists, readIfExists, classNameFromPath } from './discovery'
+import { checkPluginCompatibility, readCoreVersion, readPluginManifest } from './plugin-manifest'
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail'
 
@@ -903,6 +904,87 @@ async function detectDatabaseConfig(context: DoctorRuleContext): Promise<DoctorC
   )
 }
 
+async function detectPluginCompatibility(context: DoctorRuleContext): Promise<DoctorCheck> {
+  const packageJsonRaw = await readIfExists(context.cwd, 'package.json')
+  if (packageJsonRaw === null) {
+    return createCheck('plugin-compatibility', 'Plugin Compatibility', 'pass', 'No package.json found; skipping plugin checks.')
+  }
+
+  let dependencies: string[] = []
+  try {
+    const parsed = JSON.parse(packageJsonRaw) as {
+      dependencies?: Record<string, string>
+      devDependencies?: Record<string, string>
+    }
+    dependencies = [
+      ...Object.keys(parsed.dependencies ?? {}),
+      ...Object.keys(parsed.devDependencies ?? {}),
+    ]
+  } catch {
+    return createCheck('plugin-compatibility', 'Plugin Compatibility', 'pass', 'package.json could not be parsed; skipping plugin checks.')
+  }
+
+  const [manifests, coreVersion] = await Promise.all([
+    Promise.all(
+      dependencies.map(async (dependency) => ({
+        dependency,
+        manifest: await readPluginManifest(dependency, context.cwd).catch(() => null),
+      })),
+    ),
+    readCoreVersion(context.cwd),
+  ])
+  const plugins = manifests.flatMap((entry) =>
+    entry.manifest ? [{ dependency: entry.dependency, manifest: entry.manifest }] : [],
+  )
+
+  const incompatible: string[] = []
+  const unverified: string[] = []
+
+  for (const { dependency, manifest } of plugins) {
+    const compatibility = checkPluginCompatibility(manifest, coreVersion)
+    if (compatibility === null && manifest.compatibility) {
+      unverified.push(dependency)
+    } else if (compatibility && !compatibility.compatible) {
+      incompatible.push(
+        `${dependency} (declares "${compatibility.range}", installed @guren/core is ${compatibility.coreVersion})`,
+      )
+    }
+  }
+
+  if (incompatible.length > 0) {
+    return createCheck(
+      'plugin-compatibility',
+      'Plugin Compatibility',
+      'warn',
+      `Incompatible plugins: ${incompatible.join('; ')}.`,
+      {
+        manualFix: 'Upgrade the plugin(s) to a version that supports the installed Guren release, or upgrade @guren/core.',
+      },
+    )
+  }
+
+  if (unverified.length > 0) {
+    return createCheck(
+      'plugin-compatibility',
+      'Plugin Compatibility',
+      'warn',
+      `Could not verify compatibility for: ${unverified.join(', ')} (@guren/core version unresolved).`,
+      {
+        manualFix: 'Install dependencies so node_modules/@guren/core/package.json is available.',
+      },
+    )
+  }
+
+  return createCheck(
+    'plugin-compatibility',
+    'Plugin Compatibility',
+    'pass',
+    plugins.length > 0
+      ? `${plugins.length} plugin(s) compatible with the installed Guren version.`
+      : 'No Guren plugins detected.',
+  )
+}
+
 const doctorRules: DoctorRule[] = [
   { key: 'runtime', title: 'Runtime Environment', detect: detectRuntime },
   { key: 'bun-version', title: 'Bun Version', detect: detectBunVersion },
@@ -919,6 +1001,7 @@ const doctorRules: DoctorRule[] = [
   { key: 'config-drift', title: 'App Wiring', detect: detectConfigDrift },
   { key: 'scripts', title: 'App Scripts', detect: detectScripts, autofix: createScriptsAutofix },
   { key: 'database-config', title: 'Database Configuration', detect: detectDatabaseConfig },
+  { key: 'plugin-compatibility', title: 'Plugin Compatibility', detect: detectPluginCompatibility },
 ]
 
 export async function getDoctorRuleEvaluations(options: { cwd?: string } = {}): Promise<{

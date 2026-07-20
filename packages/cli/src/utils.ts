@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process'
 import { access, mkdir, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 
@@ -18,6 +19,35 @@ export interface ScaffoldConfig {
   extension?: string
   fileName?: (names: ScaffoldNames) => string
   template: (names: ScaffoldNames) => string
+}
+
+/**
+ * Spawn a command with inherited stdio and resolve when it exits cleanly.
+ */
+export async function runCommand(
+  command: string,
+  args: string[],
+  options: { cwd?: string } = {},
+): Promise<void> {
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      stdio: 'inherit',
+      env: process.env,
+    })
+
+    child.on('error', (error) => {
+      rejectPromise(error)
+    })
+
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolvePromise()
+      } else {
+        rejectPromise(new Error(`${command} ${args.join(' ')} exited with code ${code}`))
+      }
+    })
+  })
 }
 
 export async function writeFileSafe(relativePath: string, contents: string, options: WriterOptions = {}): Promise<string> {

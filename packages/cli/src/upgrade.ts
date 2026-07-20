@@ -1,6 +1,5 @@
 import { readFile, writeFile, readdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { spawn } from 'node:child_process'
 import { join, resolve } from 'node:path'
 import {
   DOCTOR_RECOMMENDED_COMMANDS,
@@ -9,6 +8,7 @@ import {
   type DoctorCheck,
 } from './doctor'
 import { checkDeprecations, type DeprecationWarning } from './deprecations'
+import { runCommand } from './utils'
 import { compareVersions, runCodemods, type CodemodResult } from './codemods'
 
 const PACKAGE_JSON = 'package.json'
@@ -95,25 +95,7 @@ async function findNestedGurenCopies(cwd: string): Promise<string[]> {
 }
 
 async function runBunInstall(cwd: string): Promise<void> {
-  await new Promise<void>((resolvePromise, rejectPromise) => {
-    const child = spawn(process.execPath || 'bun', ['install'], {
-      cwd,
-      stdio: 'inherit',
-      env: process.env,
-    })
-
-    child.on('error', (error) => {
-      rejectPromise(error)
-    })
-
-    child.on('close', (code) => {
-      if (code === 0) {
-        resolvePromise()
-      } else {
-        rejectPromise(new Error(`bun install exited with code ${code}`))
-      }
-    })
-  })
+  await runCommand(process.execPath || 'bun', ['install'], { cwd })
 }
 
 async function resolveDistTagVersion(packageName: string, tag: string): Promise<string | null> {
