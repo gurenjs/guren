@@ -24,6 +24,7 @@ describe('FakeQueue', () => {
 
     expect(() => queue.assertPushed(TestJob)).not.toThrow()
     expect(() => queue.assertPushedTimes(TestJob, 1)).not.toThrow()
-    expect(() => queue.assertPushedOn('default', TestJob)).toThrow()
+    expect(() => queue.assertPushedOn('default', TestJob)).not.toThrow()
+    expect(() => queue.assertPushedOn('critical', TestJob)).toThrow()
   })
 })
