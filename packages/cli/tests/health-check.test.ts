@@ -3,15 +3,24 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createTempWorkspace } from './helpers'
 
+// Bun runs all test files in one shared process, and mock.module()
+// replacements are not undone by mock.restore() — a mock missing an export
+// silently breaks any other test file that needs the real one. Mirror
+// consola's full export surface.
+const consolaStub = {
+  info: mock(() => {}),
+  success: mock(() => {}),
+  debug: mock(() => {}),
+  warn: mock(() => {}),
+  error: mock(() => {}),
+  log: mock(() => {}),
+}
+
 await mock.module('consola', () => ({
-  consola: {
-    info: mock(() => {}),
-    success: mock(() => {}),
-    debug: mock(() => {}),
-    warn: mock(() => {}),
-    error: mock(() => {}),
-    log: mock(() => {}),
-  },
+  consola: consolaStub,
+  default: consolaStub,
+  createConsola: () => consolaStub,
+  LogLevels: {},
 }))
 
 const { runHealthCheck } = await import('../src/health-check')

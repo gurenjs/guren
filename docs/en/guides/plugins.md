@@ -127,6 +127,39 @@ Your `package.json` must include the `gurenPlugin` field:
 
 The manifest is pure data — the CLI never executes plugin code during installation.
 
+### Optional: Contribute CLI Commands
+
+Plugins can add commands to the `guren` CLI by declaring them in the manifest:
+
+```json
+{
+  "gurenPlugin": {
+    "commands": {
+      "entry": "./dist/commands.js",
+      "names": ["analytics:flush"]
+    }
+  }
+}
+```
+
+The entry module default-exports a record of citty command definitions keyed by command name:
+
+```typescript
+// src/commands.ts
+import { defineCommand } from 'citty'
+
+export default {
+  'analytics:flush': defineCommand({
+    meta: { name: 'analytics:flush', description: 'Flush queued analytics events' },
+    async run() {
+      // ...
+    },
+  }),
+}
+```
+
+Once the plugin is installed in an app, `bunx guren analytics:flush` runs the command and `bunx guren --help` lists it. Names must contain a `:` namespace, built-in command names always win, and a name declared by two plugins is dropped for both with a warning. The entry module is imported only when one of the declared commands is invoked (or renders its own `--help`) — never for the root listing.
+
 ## Step 5: Write Tests
 
 Use `createPluginTestApp` and `assertPluginRegisters` from `@guren/testing`:

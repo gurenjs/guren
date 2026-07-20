@@ -11,23 +11,40 @@ const warnMock = mock(() => {})
 const debugMock = mock(() => {})
 const errorMock = mock(() => {})
 
+// Bun runs all test files in one shared process, and mock.module()
+// replacements are not undone by mock.restore() — a mock missing an export
+// silently breaks any other test file that needs the real one. Mirror
+// citty's full export surface even though this file only exercises
+// defineCommand/runMain.
 await mock.module('citty', () => ({
+  createMain: (command: any) => () => command,
   defineCommand: (command: any) => command,
+  parseArgs: (args: unknown) => args,
+  renderUsage: async () => '',
+  runCommand: async (command: any) => {
+    capturedCommand = command
+  },
   runMain: async (command: any) => {
     capturedCommand = command
   },
+  showUsage: async () => {},
 }))
 
+const consolaStub = {
+  prompt: async () => 'ssr',
+  success: successMock,
+  info: infoMock,
+  log: logMock,
+  warn: warnMock,
+  debug: debugMock,
+  error: errorMock,
+}
+
 await mock.module('consola', () => ({
-  consola: {
-    prompt: async () => 'ssr',
-    success: successMock,
-    info: infoMock,
-    log: logMock,
-    warn: warnMock,
-    debug: debugMock,
-    error: errorMock,
-  },
+  consola: consolaStub,
+  default: consolaStub,
+  createConsola: () => consolaStub,
+  LogLevels: {},
 }))
 
 await import('../src/cli')

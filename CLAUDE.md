@@ -376,3 +376,4 @@ Available AI-powered skills that Claude can use automatically:
 | `feature` | "full feature", "CRUD", "everything for" | Generate complete CRUD feature with all components at once |
 | `db-manage` | "database", "migration", "reset", "rollback" | Database operations (migrate, rollback, seed, reset) with safety checks |
 | `guren-api` | "how to", "example of", "what is" | API documentation for all subsystems (auth, cache, queue, mail, events, etc.) |
+| `plugin-authoring` | "install a plugin", "create a plugin", "guren plugin" | Install a Guren plugin via `guren plugin <pkg>`, or author a new plugin package (`definePlugin()`, `gurenPlugin` manifest, CLI commands) |

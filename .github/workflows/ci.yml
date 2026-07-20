@@ -12,9 +12,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        bun-version: ['1.3.11']
+        bun-version: ['1.3.14']
         include:
-          - bun-version: '1.3.11'
+          - bun-version: '1.3.14'
             redis: true
           # When a new Bun version is supported, add it here:
           # - bun-version: '1.4.x'
@@ -130,7 +130,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.3.11'
+          bun-version: '1.3.14'
       - run: bun install --frozen-lockfile
       - run: bun run build
       - name: Generate route types
@@ -168,7 +168,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.3.11'
+          bun-version: '1.3.14'
 
       - run: bun install --frozen-lockfile
 
@@ -219,7 +219,7 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.3.11"
+          bun-version: "1.3.14"
 
       - name: Install workspace dependencies
         run: bun install --frozen-lockfile
