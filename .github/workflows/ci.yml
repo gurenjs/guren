@@ -118,6 +118,9 @@ jobs:
       - name: Run tests
         run: bun run test
 
+      - name: Testing package tests (vitest)
+        run: bun run test:testing
+
   sqlite-smoke:
     runs-on: ubuntu-latest
     # No redis service — verifies all tests gracefully skip when Redis is unavailable
