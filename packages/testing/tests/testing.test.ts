@@ -20,7 +20,10 @@ import { Hono } from 'hono'
 
 describe('TestResponse', () => {
   function createResponse(body: string, init: ResponseInit = {}): TestResponse {
-    return new TestResponse(new Response(body, init))
+    // Null-body statuses reject any body (even '') in Node's Response.
+    const nullBodyStatuses = [101, 204, 205, 304]
+    const content = nullBodyStatuses.includes(init.status ?? 200) ? null : body
+    return new TestResponse(new Response(content, init))
   }
 
   function createJsonResponse(data: unknown, init: ResponseInit = {}): TestResponse {

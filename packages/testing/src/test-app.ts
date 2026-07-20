@@ -352,15 +352,21 @@ export class TestApp {
     try {
       ;({ Application } = await import('@guren/core') as { Application: ApplicationConstructor })
     } catch {
-      // Fallback: use a plain Hono app when @guren/server is not available.
-      const { Hono } = await import('hono')
-      const hono = new Hono()
-      if (options.boot) {
-        await options.boot(hono)
-      }
+      try {
+        // @guren/core is not always installed (it aggregates @guren/server);
+        // fall back to the peer dependency, which exports the same Application.
+        ;({ Application } = await import('@guren/server') as { Application: ApplicationConstructor })
+      } catch {
+        // Fallback: use a plain Hono app when @guren/server is not available.
+        const { Hono } = await import('hono')
+        const hono = new Hono()
+        if (options.boot) {
+          await options.boot(hono)
+        }
 
-      const fetchFn = (request: Request) => Promise.resolve(hono.fetch(request))
-      return new TestApp(fetchFn)
+        const fetchFn = (request: Request) => Promise.resolve(hono.fetch(request))
+        return new TestApp(fetchFn)
+      }
     }
 
     const application = new Application({
