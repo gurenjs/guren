@@ -1,5 +1,25 @@
 # @guren/core
 
+## 1.1.0
+
+### Minor Changes
+
+- 2bbc832: Add `DatabaseApiTokenStore`, a database-backed `ApiTokenStore` built on the Guren ORM. Pass the Drizzle table for your `api_tokens` schema and it plugs into `createApiToken`/`verifyApiToken` and the bearer-token middleware with no custom store code, using the app's configured ORM connection. Includes `deleteExpired()` for scheduled pruning and an `abilitiesMode: 'text'` option for plain-text JSON ability columns (JSON-capable columns are the default). The API tokens guide previously told users to hand-roll this class — it now documents the built-in store and the recommended schema.
+
+### Patch Changes
+
+- Updated dependencies [d7be76a]
+- Updated dependencies [9576668]
+- Updated dependencies [15b4be0]
+- Updated dependencies [6e0efe2]
+- Updated dependencies [2f7aae5]
+- Updated dependencies [2f7aae5]
+- Updated dependencies [494ac11]
+- Updated dependencies [7683c66]
+- Updated dependencies [b1098cf]
+  - @guren/cli@1.2.0
+  - @guren/server@1.3.0
+
 ## 1.0.0
 
 ### Major Changes

@@ -1,5 +1,18 @@
 # @guren/server
 
+## 1.3.0
+
+### Minor Changes
+
+- 9576668: Add `definePlugin()` helper for authoring configurable plugins without ServiceProvider boilerplate. Each factory call returns an independent provider class with the configuration captured in a closure, so the same plugin can be registered multiple times with different configurations — replacing the unsafe static-config pattern previously shown in the plugin authoring guide. Supports `deferred`/`provides` for lazy loading. Exported from `@guren/core` alongside `PluginDefinition` and `PluginFactory` types. (RFC 0001, Part A)
+
+  `ProviderManager.register()` now throws when a deferred provider declares no `provides` services — previously such a provider was silently dropped and could never load.
+
+- 15b4be0: Add `detectLocaleMiddleware`: resolves the request locale from the `?locale=` query parameter, a `locale` cookie, or the `Accept-Language` header (region subtags and q-values understood), restricted to a supported-locales allowlist. Sets the `locale` context variable — feeding the `<html lang>` attribute of Inertia responses — and binds request-scoped `t`/`tc` translator helpers when an i18n manager is available (the `setI18n()` global, or one passed via the `i18n` option). Also fixes the `<html lang>` i18n fallback in `Controller.inertia` to read the router-injected container (the previous context-variable lookup never fired in real apps).
+- 6e0efe2: Guard OAuth `redirectTo` against open redirects. State creation and verification both sanitize the value: app-relative paths always pass, absolute URLs only when their host is in the new `stateConfig.allowedRedirectHosts` allowlist (wildcards supported); protocol-relative URLs, backslash variants, and non-http schemes are dropped. New `OAuthManager.handleCallback()` returns the profile together with the sanitized `redirectTo`, and `sanitizeOAuthRedirect()` is exported for custom flows. The `guren add oauth` scaffold now demonstrates the safe round-trip (`?redirectTo=` → `handleCallback`).
+- 7683c66: Add the `Sanitized<T, Hidden>` type helper (and `DefaultSanitizedKeys`). `auth.user()` sanitizes records at runtime — the password column, remember-token column, and the model's `static hidden` fields are stripped — but the type previously still claimed those fields were present. `auth.userOrFail<Sanitized<UserRecord>>()` strips the conventional credential keys from the compile-time type (distributing over union records); columns with non-conventional names and extra hidden fields go in the second type parameter (`Sanitized<UserRecord, 'twoFactorSecret'>`).
+- b1098cf: Wire `TestRequestBuilder.withSession()` to server-side session hydration: the session middleware now reads the `X-Testing-Session` header — only when `GUREN_TESTING` is set, same gate as `X-Testing-User` — parses the JSON payload, and merges it over the stored session data for the request. Tests using `createTestClient(...).get(...).withSession({ ... })` now observe the injected session state instead of an empty session. Malformed or non-object payloads are ignored.
+
 ## 1.2.0
 
 ### Minor Changes
