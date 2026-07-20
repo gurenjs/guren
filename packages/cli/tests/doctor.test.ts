@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { getDoctorRuleEvaluations, runDoctor, buildJsonOutput } from '../src/doctor'
 import type { DoctorJsonOutput } from '../src/doctor'
-import { createTempWorkspace } from './helpers'
+import { createTempWorkspace, writeInstalledPackage } from './helpers'
 
 let consoleLogSpy: ReturnType<typeof spyOn>
 const VALID_APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
@@ -841,6 +841,39 @@ describe('runDoctor', () => {
       expect(driftCheck).toBeDefined()
       expect(driftCheck?.status).toBe('warn')
       expect(driftCheck?.message).toContain('DatabaseProvider')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('warns when an installed plugin is incompatible with the installed core', async () => {
+    const workspace = await createTempWorkspace('guren-cli-doctor-plugin-compat-')
+
+    try {
+      await writeFile(
+        join(workspace.dir, 'package.json'),
+        JSON.stringify({
+          name: 'doctor-plugin-compat',
+          dependencies: {
+            '@guren/core': '^1.0.0',
+            '@acme/guren-plugin-audit': '^1.0.0',
+          },
+        }, null, 2),
+        'utf8',
+      )
+      await writeInstalledPackage('@guren/core', { version: '1.2.0' }, {}, workspace.dir)
+      await writeInstalledPackage('@acme/guren-plugin-audit', {
+        version: '1.0.0',
+        gurenPlugin: { compatibility: '>=2.0.0' },
+      }, {}, workspace.dir)
+
+      const report = await runDoctor({ cwd: workspace.dir, json: true })
+      const pluginCheck = report.checks.find((check) => check.key === 'plugin-compatibility')
+
+      expect(pluginCheck).toBeDefined()
+      expect(pluginCheck?.status).toBe('warn')
+      expect(pluginCheck?.message).toContain('@acme/guren-plugin-audit')
+      expect(pluginCheck?.message).toContain('>=2.0.0')
     } finally {
       await workspace.cleanup()
     }

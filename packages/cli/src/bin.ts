@@ -1928,7 +1928,7 @@ function createAddBlueprintCommand(
 const addPluginCommand = defineCommand({
   meta: {
     name: 'plugin',
-    description: 'Register a third-party plugin provider in src/app.ts.',
+    description: 'Install a plugin package and register its provider in src/app.ts.',
   },
   args: {
     package: {
@@ -1938,23 +1938,47 @@ const addPluginCommand = defineCommand({
     },
     force: {
       type: 'boolean',
-      description: 'Overwrite existing plugin registration',
+      description: 'Overwrite existing plugin registration and published files',
       alias: 'f',
+    },
+    install: {
+      type: 'boolean',
+      default: true,
+      description: 'Install the package with bun add when missing (--no-install to skip)',
+    },
+    'ignore-compatibility': {
+      type: 'boolean',
+      description: 'Register the plugin even when it declares an incompatible Guren version range',
     },
   },
   async run({ args }) {
     const result = await installPlugin({
       packageName: String(args.package),
       force: Boolean(args.force),
+      install: args.install !== false,
+      ignoreCompatibility: Boolean(args['ignore-compatibility']),
     })
 
-    for (const item of result) {
-      if (item.startsWith('Run:')) {
-        consola.info(item)
-      } else if (item.includes('(already registered)')) {
-        consola.info(`Checked ${item}`)
-      } else {
-        consola.success(`Updated ${item}`)
+    for (const message of result) {
+      switch (message.kind) {
+        case 'installed':
+          consola.success(`Installed ${message.text}`)
+          break
+        case 'updated':
+          consola.success(`Updated ${message.text}`)
+          break
+        case 'checked':
+          consola.info(`Checked ${message.text}`)
+          break
+        case 'skipped':
+          consola.info(`Skipped ${message.text}`)
+          break
+        case 'warning':
+          consola.warn(message.text)
+          break
+        case 'hint':
+          consola.info(message.text)
+          break
       }
     }
   },
@@ -2227,6 +2251,7 @@ const main = defineCommand({
     'lang:list': langListCommand,
     'make:lang': makeLangCommand,
     add: addCommand,
+    plugin: addPluginCommand,
     doctor: doctorCommand,
     'key:generate': keyGenerateCommand,
     new: newCommand,

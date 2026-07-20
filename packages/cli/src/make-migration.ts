@@ -1,6 +1,6 @@
 import { access } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { spawn } from 'node:child_process'
+import { runCommand } from './utils'
 
 const DEFAULT_SCHEMA = 'db/schema.ts'
 const DEFAULT_OUTPUT = 'db/migrations'
@@ -44,27 +44,6 @@ async function resolveDrizzleConfig(): Promise<string | undefined> {
   }
 
   return undefined
-}
-
-async function runCommand(command: string, args: string[]): Promise<void> {
-  await new Promise<void>((resolvePromise, rejectPromise) => {
-    const child = spawn(command, args, {
-      stdio: 'inherit',
-      env: process.env,
-    })
-
-    child.on('error', (error) => {
-      rejectPromise(error)
-    })
-
-    child.on('close', (code) => {
-      if (code === 0) {
-        resolvePromise()
-      } else {
-        rejectPromise(new Error(`drizzle-kit exited with code ${code}`))
-      }
-    })
-  })
 }
 
 export async function makeMigration(options: MakeMigrationOptions = {}): Promise<void> {

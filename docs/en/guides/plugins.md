@@ -106,12 +106,26 @@ Your `package.json` must include the `gurenPlugin` field:
 ```json
 {
   "gurenPlugin": {
-    "compatibility": ">=1.0.0"
+    "compatibility": ">=1.0.0",
+    "provider": "AnalyticsServiceProvider",
+    "env": [
+      { "key": "ANALYTICS_API_KEY", "comment": "Analytics service API key" }
+    ],
+    "publishes": [
+      { "from": "stubs/analytics.ts", "to": "config/analytics.ts" }
+    ]
   }
 }
 ```
 
-This tells Guren (and other tooling) which framework versions your plugin is designed for.
+| Field | Purpose |
+|-------|---------|
+| `compatibility` | Semver range of Guren versions your plugin supports. Verified by `bunx guren plugin` at install time and by `bunx guren doctor`. |
+| `provider` | Named class export for `bunx guren plugin` to register in `createApp({ providers })`. Omit for `definePlugin()` factories (registered manually). |
+| `env` | Env keys appended to the app's `.env.example` (and `.env` when present) at install time. |
+| `publishes` | Files copied from your package into the app (`config/`, `db/migrations/`, or `resources/` only). Existing files are never overwritten without `--force`. |
+
+The manifest is pure data — the CLI never executes plugin code during installation.
 
 ## Step 5: Write Tests
 
@@ -177,16 +191,15 @@ bun run build
 npm publish
 ```
 
-## Installing Official Plugins
+## Installing Plugins
 
-Official plugins (`@guren/plugin-*`) can be installed via the CLI, which patches `src/app.ts` and scaffolds any extra files automatically:
+Any plugin — official (`@guren/plugin-*`) or community (`guren-plugin-*`) — can be installed via the CLI:
 
 ```bash
 bunx guren plugin @guren/plugin-vercel
-bun add @guren/plugin-vercel
 ```
 
-The `plugin` command adds the provider import and registers it in `createApp({ providers })` for you.
+The `plugin` command installs the package with `bun add` when missing (pass `--no-install` to skip), verifies the plugin's declared Guren compatibility (`--ignore-compatibility` to register anyway), adds the provider import, registers it in `createApp({ providers })`, and applies any `env` and `publishes` entries from the plugin's `gurenPlugin` manifest. `--force` overwrites already-published files.
 
 > **Note:** Automatic registration currently supports class-based provider exports only. Plugins built with `definePlugin()` export a factory that must be called with its configuration, so register them manually in `createApp({ providers })` as shown below.
 

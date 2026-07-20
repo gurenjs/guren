@@ -35,10 +35,10 @@ bunx guren add schedule
 > **Golden path:** Start with `bunx guren add auth` and `bunx guren add resource`, then add more features as your app grows.
 
 ```bash
-bunx guren add plugin @acme/guren-plugin-audit
+bunx guren plugin @acme/guren-plugin-audit
 ```
 
-`add plugin` wires the plugin provider into `src/app.ts` and prints a `bun add <package>` hint when the dependency is not installed yet.
+`plugin` (also available as `add plugin`) installs the package with `bun add` when missing (pass `--no-install` to skip), verifies the plugin's declared Guren compatibility (`--ignore-compatibility` to override), wires the provider into `src/app.ts`, and applies any config stubs and env keys the plugin declares in its `gurenPlugin` manifest. `--force` overwrites already-published files.
 
 
 These commands patch `src/app.ts`, create the matching provider/runtime files, and keep the generated app aligned with the reference starter.

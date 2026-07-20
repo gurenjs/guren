@@ -74,7 +74,7 @@ export { analyticsPlugin } from './plugin'
 export { AnalyticsServiceProvider } from './AnalyticsServiceProvider'
 ```
 
-> **Note:** The `guren plugin <pkg>` install command currently auto-registers only class exports matching the `{Name}Provider` heuristic. Factory-based plugins must be registered manually in `createApp({ providers })` until manifest-driven installation (RFC 0001, Part B) ships.
+> **Note:** `bunx guren plugin <pkg>` registers the class export named by `gurenPlugin.provider`, falling back to the `{PascalPkg}Provider` name heuristic when the field is absent. `definePlugin()` factories must be called with their configuration, so register them manually in `createApp({ providers })`.
 
 ### Recommended: the `definePlugin()` Helper
 
@@ -119,10 +119,13 @@ Every plugin must declare a `gurenPlugin` field in its `package.json`:
   "name": "guren-plugin-analytics",
   "version": "1.0.0",
   "gurenPlugin": {
-    "compatibility": ">=0.2.0"
+    "compatibility": ">=1.0.0",
+    "provider": "AnalyticsServiceProvider",
+    "env": [{ "key": "ANALYTICS_API_KEY", "comment": "Analytics API key" }],
+    "publishes": [{ "from": "stubs/analytics.ts", "to": "config/analytics.ts" }]
   },
   "peerDependencies": {
-    "@guren/core": ">=0.2.0"
+    "@guren/core": ">=1.0.0"
   }
 }
 ```
@@ -130,8 +133,11 @@ Every plugin must declare a `gurenPlugin` field in its `package.json`:
 | Field | Type | Description |
 |-------|------|-------------|
 | `gurenPlugin.compatibility` | semver range | Guren versions this plugin supports |
+| `gurenPlugin.provider` | string | Named class export registered by `bunx guren plugin`; omit for `definePlugin()` factories |
+| `gurenPlugin.env` | array | Env keys appended to the app's `.env.example` (and `.env` when present) at install time |
+| `gurenPlugin.publishes` | array | Files copied into the app at install time (`config/`, `db/migrations/`, `resources/` targets only) |
 
-The framework may read this field at boot time to warn about incompatible plugins.
+The manifest is declarative data only — the CLI never imports or executes plugin code during installation. `compatibility` is verified by `bunx guren plugin` at install time and by `bunx guren doctor`; there is no boot-time cost.
 
 ## What Plugins CAN Do
 
