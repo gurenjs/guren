@@ -160,22 +160,14 @@ jobs:
       - name: Generate route types
         run: bun run build:routes
       - run: bun run typecheck
-      # See the "Run tests" step in build-and-test for why this retries:
-      # a confirmed Bun test-runner race (not a corrupted install, not a
-      # code issue) that only reproduces inside the real GitHub Actions
-      # runner's full multi-file `bun test` run.
+      # DIAGNOSTIC: split packages/cli into its own bun test invocation to
+      # test whether the citty resolution failure is tied to how many test
+      # files/modules Bun has already loaded in the same process before
+      # reaching packages/cli/tests/plugin-commands.test.ts.
       - name: Run tests (no Redis)
         run: |
-          for attempt in 1 2; do
-            if bun run test:bun; then
-              break
-            fi
-            if [ "$attempt" = "2" ]; then
-              echo "bun run test:bun failed twice; not retrying further." >&2
-              exit 1
-            fi
-            echo "bun run test:bun failed (attempt $attempt/2); retrying..." >&2
-          done
+          bun test packages/cli
+          bun test packages/server packages/orm packages/core packages/inertia-client packages/create-app packages/openapi packages/plugin-vercel
 
   e2e:
     runs-on: ubuntu-latest
