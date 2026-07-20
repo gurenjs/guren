@@ -9,6 +9,7 @@ import {
   checkPluginCompatibility,
   readCoreVersion,
   readPluginManifest,
+  type PublishResult,
 } from './plugin-manifest'
 import { assertSupportedOfficialVercelPlugin, installOfficialVercelPlugin } from './plugin-vercel'
 
@@ -31,6 +32,10 @@ export type PluginInstallMessageKind =
 export interface PluginInstallMessage {
   kind: PluginInstallMessageKind
   text: string
+}
+
+function toMessages(kind: PluginInstallMessageKind, texts: string[]): PluginInstallMessage[] {
+  return texts.map((text) => ({ kind, text }))
 }
 
 function providerIdentifierForPackage(packageName: string): string {
@@ -132,23 +137,23 @@ export async function installPlugin(options: InstallPluginOptions): Promise<Plug
 
   if (packageName === '@guren/plugin-vercel') {
     const pluginFiles = await installOfficialVercelPlugin(options)
-    messages.push(...pluginFiles.map((text): PluginInstallMessage => ({ kind: 'updated', text })))
+    messages.push(...toMessages('updated', pluginFiles))
   }
 
-  if (manifest?.publishes?.length) {
-    const published = await applyPublishes(packageName, manifest.publishes, {
-      force: options.force,
-    })
-    messages.push(...published.written.map((text): PluginInstallMessage => ({ kind: 'updated', text })))
-    messages.push(...published.skipped.map((text): PluginInstallMessage => ({
-      kind: 'skipped',
-      text: `${text} (already exists, use --force to overwrite)`,
-    })))
-  }
+  // Independent I/O — apply publishes and env entries concurrently.
+  const [published, envModified] = await Promise.all([
+    manifest?.publishes?.length
+      ? applyPublishes(packageName, manifest.publishes, { force: options.force })
+      : Promise.resolve<PublishResult>({ written: [], skipped: [] }),
+    manifest?.env?.length ? applyEnvEntries(manifest.env) : Promise.resolve<string[]>([]),
+  ])
 
-  if (manifest?.env?.length) {
-    messages.push(...(await applyEnvEntries(manifest.env)).map((text): PluginInstallMessage => ({ kind: 'updated', text })))
-  }
+  messages.push(...toMessages('updated', published.written))
+  messages.push(...published.skipped.map((text): PluginInstallMessage => ({
+    kind: 'skipped',
+    text: `${text} (already exists, use --force to overwrite)`,
+  })))
+  messages.push(...toMessages('updated', envModified))
 
   if (!present) {
     messages.push({ kind: 'hint', text: `Run: bun add ${packageName}` })

@@ -16,7 +16,7 @@
     "access": "public"
   },
   "gurenPlugin": {
-    "compatibility": ">=1.0.0",
+    "compatibility": ">=1.0.0 <2.0.0",
     "provider": "GurenPluginVercelProvider"
   },
   "files": [

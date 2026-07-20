@@ -247,46 +247,51 @@ export async function applyPublishes(
 ): Promise<PublishResult> {
   const cwd = options.cwd ?? process.cwd()
   const packageDir = resolve(cwd, 'node_modules', packageName)
-  const written: string[] = []
-  const skipped: string[] = []
+  const invalid = (detail: string): Error => new Error(`Invalid publish entry in "${packageName}": ${detail}`)
+
+  // Validate sequentially so the first invalid entry is always the one
+  // reported, then copy files concurrently — each entry targets an
+  // independent path with no cross-entry dependency.
+  const resolved: Array<{ entry: GurenPluginPublishEntry; fromPath: string; toPath: string; toRelative: string }> = []
 
   for (const entry of entries) {
     if (!entry.from || !entry.to) {
-      throw new Error(`Invalid publish entry in "${packageName}": both "from" and "to" are required.`)
+      throw invalid('both "from" and "to" are required.')
     }
     if (isAbsolute(entry.from) || isAbsolute(entry.to)) {
-      throw new Error(`Invalid publish entry in "${packageName}": absolute paths are not allowed.`)
+      throw invalid('absolute paths are not allowed.')
     }
 
     const fromPath = await resolveInside(packageDir, entry.from)
     if (fromPath === null) {
-      throw new Error(
-        `Invalid publish entry in "${packageName}": source "${entry.from}" escapes the package directory.`,
-      )
+      throw invalid(`source "${entry.from}" escapes the package directory.`)
     }
 
     const toPath = await resolveInside(cwd, entry.to)
     if (toPath === null) {
-      throw new Error(
-        `Invalid publish entry in "${packageName}": target "${entry.to}" escapes the project directory.`,
-      )
+      throw invalid(`target "${entry.to}" escapes the project directory.`)
     }
     const toRelative = relative(cwd, toPath)
     if (!PUBLISH_TARGET_ROOTS.some((root) => toRelative.startsWith(root))) {
-      throw new Error(
-        `Invalid publish entry in "${packageName}": target "${entry.to}" must be inside ${PUBLISH_TARGET_ROOTS.join(', ')}.`,
-      )
+      throw invalid(`target "${entry.to}" must be inside ${PUBLISH_TARGET_ROOTS.join(', ')}.`)
     }
 
+    resolved.push({ entry, fromPath, toPath, toRelative })
+  }
+
+  const written: string[] = []
+  const skipped: string[] = []
+
+  await Promise.all(resolved.map(async ({ entry, fromPath, toPath, toRelative }) => {
     if (!options.force && await fileExists(cwd, toRelative)) {
       skipped.push(entry.to)
-      continue
+      return
     }
 
     await mkdir(dirname(toPath), { recursive: true })
     await copyFile(fromPath, toPath)
     written.push(entry.to)
-  }
+  }))
 
   return { written, skipped }
 }

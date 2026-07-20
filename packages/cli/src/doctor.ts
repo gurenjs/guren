@@ -924,17 +924,19 @@ async function detectPluginCompatibility(context: DoctorRuleContext): Promise<Do
     return createCheck('plugin-compatibility', 'Plugin Compatibility', 'pass', 'package.json could not be parsed; skipping plugin checks.')
   }
 
-  const manifests = await Promise.all(
-    dependencies.map(async (dependency) => ({
-      dependency,
-      manifest: await readPluginManifest(dependency, context.cwd).catch(() => null),
-    })),
-  )
+  const [manifests, coreVersion] = await Promise.all([
+    Promise.all(
+      dependencies.map(async (dependency) => ({
+        dependency,
+        manifest: await readPluginManifest(dependency, context.cwd).catch(() => null),
+      })),
+    ),
+    readCoreVersion(context.cwd),
+  ])
   const plugins = manifests.flatMap((entry) =>
     entry.manifest ? [{ dependency: entry.dependency, manifest: entry.manifest }] : [],
   )
 
-  const coreVersion = await readCoreVersion(context.cwd)
   const incompatible: string[] = []
   const unverified: string[] = []
 
