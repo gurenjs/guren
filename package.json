@@ -42,7 +42,7 @@
     "changeset": "changeset",
     "version-packages": "changeset version && bun install",
     "release": "bun run build && changeset publish",
-    "test:bun": "bun test packages/server packages/orm packages/core packages/inertia-client packages/create-app packages/cli packages/openapi packages/plugin-vercel",
+    "test:bun": "bun test --isolate packages/server packages/orm packages/core packages/inertia-client packages/create-app packages/cli packages/openapi packages/plugin-vercel",
     "test:testing": "bun run --cwd packages/testing test",
     "test:examples": "bun run --cwd examples/blog test && bun run --cwd examples/api test && bun run --cwd web test",
     "test": "bun run test:bun && bun run test:examples",

@@ -3,14 +3,23 @@ import { mkdtemp, rm, mkdir, writeFile, readFile, access } from 'node:fs/promise
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
+// Bun runs all test files in one shared process, and mock.module()
+// replacements are not undone by mock.restore() — a mock missing an export
+// silently breaks any other test file that needs the real one. Mirror
+// consola's full export surface.
+const consolaStub = {
+  info: mock(() => {}),
+  success: mock(() => {}),
+  warn: mock(() => {}),
+  error: mock(() => {}),
+  log: mock(() => {}),
+}
+
 await mock.module('consola', () => ({
-  consola: {
-    info: mock(() => {}),
-    success: mock(() => {}),
-    warn: mock(() => {}),
-    error: mock(() => {}),
-    log: mock(() => {}),
-  },
+  consola: consolaStub,
+  default: consolaStub,
+  createConsola: () => consolaStub,
+  LogLevels: {},
 }))
 
 const {
