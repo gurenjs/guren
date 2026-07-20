@@ -15,6 +15,10 @@
   "publishConfig": {
     "access": "public"
   },
+  "gurenPlugin": {
+    "compatibility": ">=1.0.0",
+    "provider": "GurenPluginVercelProvider"
+  },
   "files": [
     "dist"
   ],

@@ -99,7 +99,7 @@ middleware must capture the services they need in a closure during `boot()`.
 The Hono context does not carry the container, and this RFC does not change
 that.
 
-### Part B: `guren add` and the `gurenPlugin` manifest
+### Part B: `guren plugin` and the `gurenPlugin` manifest
 
 #### Manifest schema (declarative only)
 
@@ -131,7 +131,7 @@ Extend the existing `gurenPlugin` package.json field:
 
 Security constraints, aligned with Guren's secure-by-default stance:
 
-- `guren add` **never imports or executes plugin code**. The manifest is pure
+- `guren plugin` **never imports or executes plugin code**. The manifest is pure
   JSON data; there is no Adonis-style executable `configure` script.
 - `publishes.to` is restricted to an allowlist of app directories
   (`config/`, `db/migrations/`, `resources/`); paths are normalized and
@@ -141,15 +141,21 @@ Security constraints, aligned with Guren's secure-by-default stance:
 
 #### Command behavior
 
-`guren add <pkg>` (new primary name; `guren plugin` stays as a hidden alias
-for backward compatibility):
+> **Amendment (implementation):** `guren add` already exists as the blueprint
+> namespace (`guren add auth`, `guren add plugin <pkg>`, ...), so the bare
+> `guren add <pkg>` form proposed here would collide with blueprint names.
+> The implemented primary name is `guren plugin <pkg>` (top-level, previously
+> documented but unwired), with `guren add plugin <pkg>` unchanged.
+
+`guren plugin <pkg>`:
 
 1. If `<pkg>` is not in the app's dependencies, run `bun add <pkg>`
    (`--no-install` opts out and prints the command instead).
 2. Read `node_modules/<pkg>/package.json` → `gurenPlugin` manifest.
 3. Check `compatibility` against the installed `@guren/core` version using
    `Bun.semver.satisfies` (no new dependency; the CLI is Bun-only). Warn and
-   require `--force` to proceed on mismatch.
+   require `--ignore-compatibility` to proceed on mismatch (`--force` stays
+   scoped to file overwrites).
 4. Patch `src/app.ts` via the existing `addImport`/`addProvider` helpers,
    using `gurenPlugin.provider` when present.
 5. Apply `publishes` and `env` entries.
@@ -206,7 +212,7 @@ Resolution in `bin.ts`:
   node_modules): rejected. Code executing because a package landed in
   node_modules contradicts Guren's opt-in security posture (`GUREN_MCP=1`,
   `GUREN_TESTING`, explicit provider lists). Explicit registration stays;
-  `guren add` automates the writing, not the deciding.
+  `guren plugin` automates the writing, not the deciding.
 - **Adonis-style executable configure script** (`node ace add` runs the
   package's `configure.ts`): rejected in favor of the declarative manifest.
   Arbitrary install-time code execution is a supply-chain foothold; the
@@ -215,7 +221,7 @@ Resolution in `bin.ts`:
   manual steps.
 - **Boot-time compatibility checking**: rejected. It taxes every cold start
   (relevant for Lambda/Vercel) to catch a problem that is knowable at install
-  time. `guren add` + `guren doctor` cover it.
+  time. `guren plugin` + `guren doctor` cover it.
 - **Container-registered CLI commands** (what the contract currently claims):
   rejected. It would require booting the full application to enumerate
   commands, making `--help` slow and coupling the CLI to app boot success.
@@ -226,18 +232,19 @@ Resolution in `bin.ts`:
 No breaking changes.
 
 - `definePlugin` is additive; existing class-based plugins keep working.
-- `guren plugin` remains as an alias of `guren add`.
+- `guren plugin <pkg>` is the primary top-level form (see the Part B
+  amendment); `guren add plugin <pkg>` remains available unchanged.
 - Plugins without a `gurenPlugin` manifest still install via the name
   heuristic exactly as today; the manifest only unlocks the extra steps.
 - Docs changes: replace the static-config pattern in the authoring guide
   (en/ja), update the contract's CLI-commands claim to describe the real
   mechanism, and change "may read this field at boot" to "checked by
-  `guren add` and `guren doctor`".
+  `guren plugin` and `guren doctor`".
 
 ## Implementation Order
 
 1. **PR 1 (server, docs):** `definePlugin` + tests + guide/contract updates.
-2. **PR 2 (cli):** `guren add` (manifest, compat check, publishes/env,
+2. **PR 2 (cli):** `guren plugin` (manifest, compat check, publishes/env,
    `bun add`), doctor check, plugin-vercel manifest migration.
 3. **PR 3 (cli):** command extension point + `make:*` template for plugin
    commands modules.
@@ -245,10 +252,12 @@ No breaking changes.
 ## Open Questions
 
 - Should `publishes` support a `migrations` shorthand that timestamps files
-  into `db/migrations/` on copy (so repeated `guren add` runs don't duplicate
+  into `db/migrations/` on copy (so repeated `guren plugin` runs don't duplicate
   them), or is plain file copy with skip-if-exists enough for v1?
-- Should `guren add` run `bun add` by default, or print the command and
-  require `--install`? (This RFC proposes install-by-default with
-  `--no-install`, matching Adonis DX.)
+- ~~Should the install command run `bun add` by default, or print the
+  command and require `--install`?~~ **Resolved:** implemented as
+  install-by-default with `--no-install`. The compatibility gate got its own
+  escape hatch, `--ignore-compatibility`, so `--force` stays scoped to file
+  overwrites.
 - Do we want a `guren remove <pkg>` inverse (unregister provider, leave
   published files)? Deferred unless demand appears.
