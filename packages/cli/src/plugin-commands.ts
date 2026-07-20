@@ -42,7 +42,7 @@ export async function discoverPluginCommands(
       continue
     }
 
-    const entryPath = resolveInside(resolve(cwd, 'node_modules', packageName), commands.entry)
+    const entryPath = await resolveInside(resolve(cwd, 'node_modules', packageName), commands.entry)
     if (entryPath === null) {
       consola.warn(`Ignoring commands from "${packageName}": entry "${commands.entry}" escapes the package directory.`)
       continue
