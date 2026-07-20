@@ -409,6 +409,18 @@ describe('ProviderManager', () => {
     expect(manager.getProviders()).toHaveLength(1)
   })
 
+  it('should throw when a deferred provider declares no provided services', () => {
+    class BrokenDeferredProvider extends ServiceProvider {
+      static deferred = true
+
+      register(): void {}
+    }
+
+    expect(() => manager.register(BrokenDeferredProvider)).toThrow(
+      'must declare at least one service in "provides"',
+    )
+  })
+
   it('should register all providers', async () => {
     class Provider1 extends ServiceProvider {
       register(): void {

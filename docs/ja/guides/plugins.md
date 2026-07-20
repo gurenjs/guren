@@ -44,11 +44,13 @@ bun init
 - `@guren/core`と`@guren/testing`はビルドとテスト用の**devDependencies**です。
 - `gurenPlugin.compatibility`フィールドでサポートするGurenバージョンを宣言します。
 
-## ステップ2: ServiceProviderを作成する
+## ステップ2: プラグインを定義する
+
+`@guren/core`の`definePlugin()`ヘルパーを使用します。設定はクロージャに捕捉され、呼び出しごとに独立したプロバイダークラスを生成するため、同じプラグインを異なる設定で複数回登録できます:
 
 ```typescript
-// src/AnalyticsServiceProvider.ts
-import { ServiceProvider } from '@guren/core'
+// src/plugin.ts
+import { definePlugin } from '@guren/core'
 
 export interface AnalyticsConfig {
   apiKey: string
@@ -65,42 +67,36 @@ export class AnalyticsClient {
   }
 }
 
-export class AnalyticsServiceProvider extends ServiceProvider {
-  static config: AnalyticsConfig = { apiKey: '' }
+export const analyticsPlugin = definePlugin<AnalyticsConfig>({
+  name: 'analytics',
 
-  register(): void {
-    this.container.singleton('analytics', () => {
-      return new AnalyticsClient(AnalyticsServiceProvider.config)
-    })
-  }
+  register(container, config) {
+    container.singleton('analytics', () => new AnalyticsClient(config))
+  },
 
-  boot(): void {
+  boot(container) {
     // 全プロバイダーの登録後にフレームワークイベントをサブスクライブ
-    if (this.container.has('events')) {
-      const events = this.container.make('events')
-      const analytics = this.container.make<AnalyticsClient>('analytics')
+    if (container.has('events')) {
+      const events = container.make('events')
+      const analytics = container.make<AnalyticsClient>('analytics')
       events.on('request.completed', (data: Record<string, unknown>) => {
         analytics.track('page_view', data)
       })
     }
-  }
-}
+  },
+})
 ```
 
-## ステップ3: プロバイダーをエクスポートする
+初期化コストの高いプラグインは`deferred: true`と`provides: ['analytics']`を併せて指定すると、提供するサービスが最初に解決されるまでプロバイダーの読み込みを遅延できます。
+
+`definePlugin()`でカバーできないライフサイクル制御が必要な場合は、従来通り`ServiceProvider`のサブクラスを直接エクスポートすることもできます。ただし設定をstaticプロパティに保存するのは避けてください。staticは共有されるため、プラグインを2回登録すると最初の設定が上書きされます。
+
+## ステップ3: プラグインをエクスポートする
 
 ```typescript
 // src/index.ts
-import { AnalyticsServiceProvider } from './AnalyticsServiceProvider'
-import type { AnalyticsConfig } from './AnalyticsServiceProvider'
-
-export { AnalyticsServiceProvider }
-export type { AnalyticsConfig }
-
-export function defineAnalyticsPlugin(config: AnalyticsConfig) {
-  AnalyticsServiceProvider.config = config
-  return AnalyticsServiceProvider
-}
+export { analyticsPlugin, AnalyticsClient } from './plugin'
+export type { AnalyticsConfig } from './plugin'
 ```
 
 ## ステップ4: プラグインメタデータを追加する
@@ -122,34 +118,28 @@ export function defineAnalyticsPlugin(config: AnalyticsConfig) {
 `@guren/testing`の`createPluginTestApp`と`assertPluginRegisters`を使用します:
 
 ```typescript
-// src/AnalyticsServiceProvider.test.ts
+// src/plugin.test.ts
 import { describe, test, expect } from 'bun:test'
 import { createPluginTestApp, assertPluginRegisters } from '@guren/testing'
-import { AnalyticsServiceProvider, AnalyticsClient } from './AnalyticsServiceProvider'
+import { analyticsPlugin, AnalyticsClient } from './plugin'
 
-describe('AnalyticsServiceProvider', () => {
+describe('analyticsPlugin', () => {
   test('analyticsサービスが登録されること', async () => {
-    AnalyticsServiceProvider.config = { apiKey: 'test-key' }
-
-    const app = await createPluginTestApp([AnalyticsServiceProvider])
+    const app = await createPluginTestApp([analyticsPlugin({ apiKey: 'test-key' })])
 
     // サービスがバインドされていることを確認
     assertPluginRegisters(app, ['analytics'])
   })
 
   test('AnalyticsClientインスタンスが解決されること', async () => {
-    AnalyticsServiceProvider.config = { apiKey: 'test-key' }
-
-    const app = await createPluginTestApp([AnalyticsServiceProvider])
+    const app = await createPluginTestApp([analyticsPlugin({ apiKey: 'test-key' })])
 
     const client = app.container.make<AnalyticsClient>('analytics')
     expect(client).toBeInstanceOf(AnalyticsClient)
   })
 
   test('シングルトンとして登録されること', async () => {
-    AnalyticsServiceProvider.config = { apiKey: 'test-key' }
-
-    const app = await createPluginTestApp([AnalyticsServiceProvider])
+    const app = await createPluginTestApp([analyticsPlugin({ apiKey: 'test-key' })])
 
     const first = app.container.make<AnalyticsClient>('analytics')
     const second = app.container.make<AnalyticsClient>('analytics')
@@ -161,7 +151,7 @@ describe('AnalyticsServiceProvider', () => {
 テストを実行:
 
 ```bash
-bun test src/AnalyticsServiceProvider.test.ts
+bun test src/plugin.test.ts
 ```
 
 ## ステップ6: ビルドする
@@ -198,6 +188,8 @@ bun add @guren/plugin-vercel
 
 `plugin`コマンドがプロバイダーのimportを追加し、`createApp({ providers })`への登録を自動で行います。
 
+> **注意:** 自動登録が現在対応しているのはクラスベースのプロバイダーエクスポートのみです。`definePlugin()`で作成したプラグインは設定を渡してファクトリを呼び出す必要があるため、下記のように`createApp({ providers })`へ手動で登録してください。
+
 ## Gurenアプリケーションでの使用方法
 
 公開後、ユーザーはプラグインをインストールして登録します:
@@ -209,13 +201,13 @@ bun add guren-plugin-analytics
 ```typescript
 // src/app.ts
 import { createApp } from '@guren/core'
-import { defineAnalyticsPlugin } from 'guren-plugin-analytics'
+import { analyticsPlugin } from 'guren-plugin-analytics'
 import { registerWebRoutes } from '@/routes/web'
 
 export const app = createApp({
   routes: registerWebRoutes,
   providers: [
-    defineAnalyticsPlugin({
+    analyticsPlugin({
       apiKey: process.env.ANALYTICS_API_KEY!,
       endpoint: 'https://analytics.example.com',
     }),

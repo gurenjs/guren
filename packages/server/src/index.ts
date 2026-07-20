@@ -633,8 +633,11 @@ export {
   resolve,
   ServiceProvider,
   ProviderManager,
+  definePlugin,
 } from './container'
 export type {
+  PluginDefinition,
+  PluginFactory,
   ServiceFactory,
   ServiceClass,
   ServiceBinding,

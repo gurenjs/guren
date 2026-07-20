@@ -2,6 +2,11 @@ import type { Container } from './Container'
 import type { Provider } from './types'
 
 /**
+ * Constructor shape accepted wherever a provider class can be registered.
+ */
+export type ServiceProviderConstructor = new (container: Container) => ServiceProvider
+
+/**
  * Base service provider class.
  *
  * Service providers are the central place of all application bootstrapping.
@@ -79,9 +84,7 @@ export class ProviderManager {
   /**
    * Register a provider.
    */
-  register(
-    providerOrClass: ServiceProvider | (new (container: Container) => ServiceProvider)
-  ): this {
+  register(providerOrClass: ServiceProvider | ServiceProviderConstructor): this {
     if (this.allBooted) {
       const name =
         providerOrClass instanceof ServiceProvider
@@ -98,6 +101,13 @@ export class ProviderManager {
         ? providerOrClass
         : new providerOrClass(this.container)
 
+    if (provider.isDeferred() && provider.provides().length === 0) {
+      throw new Error(
+        `Deferred provider "${provider.constructor.name}" must declare at least one service in "provides", ` +
+        'otherwise it can never be loaded.',
+      )
+    }
+
     // Deferred providers are loaded on-demand when Container.make() is called
     if (provider.isDeferred()) {
       for (const service of provider.provides()) {
@@ -113,9 +123,7 @@ export class ProviderManager {
   /**
    * Register multiple providers.
    */
-  registerMany(
-    providers: Array<ServiceProvider | (new (container: Container) => ServiceProvider)>
-  ): this {
+  registerMany(providers: Array<ServiceProvider | ServiceProviderConstructor>): this {
     for (const provider of providers) {
       this.register(provider)
     }

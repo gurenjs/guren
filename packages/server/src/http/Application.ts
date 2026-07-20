@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import type { MiddlewareHandler, ExecutionContext } from 'hono'
 import { Router } from '../mvc/Router'
 import { Container, type ServiceProvider } from '../container'
-import { ProviderManager } from '../container/ServiceProvider'
+import { ProviderManager, type ServiceProviderConstructor } from '../container/ServiceProvider'
 import { AuthManager } from '../auth/AuthManager'
 import { AuthServiceProvider } from '../providers/AuthServiceProvider'
 import { AuthorizationServiceProvider } from '../providers/AuthorizationServiceProvider'
@@ -122,7 +122,7 @@ export type BootCallback = (app: Hono) => void | Promise<void>
 /**
  * Service provider class constructor type.
  */
-export type ServiceProviderConstructor = new (container: Container) => ServiceProvider
+export type { ServiceProviderConstructor } from '../container/ServiceProvider'
 export type RouteRegistration = (router: Router) => void | Promise<void>
 export type ApplicationFeatures = Record<string, unknown>
 
