@@ -1,6 +1,6 @@
 {
   "name": "@guren/plugin-vercel",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -36,7 +36,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@guren/core": "^1.0.0-rc.12"
+    "@guren/core": "^1.1.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",

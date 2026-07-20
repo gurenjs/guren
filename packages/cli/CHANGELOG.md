@@ -1,5 +1,20 @@
 # @guren/cli
 
+## 1.2.0
+
+### Minor Changes
+
+- d7be76a: `guren audit` now warns when a model's schema table has sensitive-looking columns (password, secret, token, salt, hash) that are not excluded from serialization via `static hidden` or a `static visible` allowlist. Records passed to `serialize()`/`toJSON()` or Inertia props would otherwise expose those values. Models whose sensitive columns are all covered get a pass finding; models without sensitive columns produce no output.
+- 6e0efe2: Guard OAuth `redirectTo` against open redirects. State creation and verification both sanitize the value: app-relative paths always pass, absolute URLs only when their host is in the new `stateConfig.allowedRedirectHosts` allowlist (wildcards supported); protocol-relative URLs, backslash variants, and non-http schemes are dropped. New `OAuthManager.handleCallback()` returns the profile together with the sanitized `redirectTo`, and `sanitizeOAuthRedirect()` is exported for custom flows. The `guren add oauth` scaffold now demonstrates the safe round-trip (`?redirectTo=` → `handleCallback`).
+- 2f7aae5: Add a `plugin-authoring` skill to the AI agent harness (`bunx guren agent:init` / `agent:sync`). Covers both installing an existing Guren plugin (`bunx guren plugin <pkg>`, including the manifest-driven provider/env/publishes flow and the no-`provider` manual-registration case) and authoring a new plugin package (`definePlugin()`, the `gurenPlugin` manifest fields, contributing CLI commands, and testing with `@guren/testing`).
+- 2f7aae5: Plugins can now contribute CLI commands via the `gurenPlugin.commands` manifest field (RFC 0001, Part C): `{ "entry": "./dist/commands.js", "names": ["myplugin:sync"] }`. Discovery reads only package.json files — the entry module (a default-exported record of citty command definitions) is imported lazily when one of the declared commands is invoked, never for `--help` listing. Command names must be `:`-namespaced, built-in command names always win, and a name declared by two plugins is dropped for both with a warning naming the packages.
+- 494ac11: Turn `guren plugin <pkg>` into a full plugin installer driven by the declarative `gurenPlugin` package.json manifest (RFC 0001, Part B). The command now installs the dependency with `bun add` when missing (`--no-install` to skip), verifies the plugin's declared Guren `compatibility` range against the installed `@guren/core` (`--ignore-compatibility` to override), registers the manifest-declared `provider` export (falling back to the name heuristic), copies declared `publishes` files into `config/`, `db/migrations/`, or `resources/` (path-traversal guarded, never overwriting without `--force`), and appends declared `env` keys to `.env.example`/`.env`. The manifest is pure data — no plugin code is executed during installation. The command is now also registered at the top level (`bunx guren plugin ...` previously only worked as `guren add plugin ...` despite being documented). `bunx guren doctor` gains a Plugin Compatibility check that flags installed plugins whose `compatibility` range excludes the installed core version. `@guren/plugin-vercel` now declares its `gurenPlugin` manifest.
+
+### Patch Changes
+
+- Updated dependencies [2bbc832]
+  - @guren/core@1.1.0
+
 ## 1.1.0
 
 ### Minor Changes
