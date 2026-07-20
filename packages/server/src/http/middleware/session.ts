@@ -231,6 +231,31 @@ class SessionImpl implements Session {
 
 export interface CreateSessionMiddlewareOptions extends SessionOptions {}
 
+const TESTING_SESSION_HEADER = 'x-testing-session'
+
+function resolveTestingSession(ctx: { req: { header: (name: string) => string | undefined } }): SessionData | null {
+  // Only allow testing session injection when GUREN_TESTING is explicitly set.
+  // This prevents external callers from forging session state in production/staging.
+  if (!process.env.GUREN_TESTING) {
+    return null
+  }
+
+  const rawSession = ctx.req.header(TESTING_SESSION_HEADER)
+  if (!rawSession) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(rawSession) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null
+    }
+    return parsed as SessionData
+  } catch {
+    return null
+  }
+}
+
 interface SessionCookieSigner {
   sign(sessionId: string): string
   verify(cookieValue: string | undefined): string | null
@@ -312,7 +337,9 @@ export function createSessionMiddleware(options: CreateSessionMiddlewareOptions 
     const existingId = signer.verify(getCookie(ctx, cookieName))
     const sessionId = existingId ?? globalThis.crypto.randomUUID()
     const isNew = !existingId
-    const initialData = existingId ? (await store.read(existingId)) ?? {} : {}
+    const storedData = existingId ? (await store.read(existingId)) ?? {} : {}
+    const testingData = resolveTestingSession(ctx)
+    const initialData = testingData ? { ...storedData, ...testingData } : storedData
     const session = new SessionImpl(sessionId, initialData, isNew)
     session.ageFlashData()
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { afterEach, describe, expect, it } from 'bun:test'
 import { Hono } from 'hono'
 import {
   createSessionMiddleware,
@@ -374,6 +374,84 @@ describe('createSessionMiddleware', () => {
     expect(setCookie).toContain('Path=/api')
     expect(setCookie).toContain('SameSite=Strict')
     expect(setCookie).toContain('HttpOnly')
+  })
+})
+
+describe('X-Testing-Session hydration', () => {
+  const originalTesting = process.env.GUREN_TESTING
+
+  afterEach(() => {
+    if (originalTesting === undefined) {
+      delete process.env.GUREN_TESTING
+    } else {
+      process.env.GUREN_TESTING = originalTesting
+    }
+  })
+
+  function createTestApp(options?: Parameters<typeof createSessionMiddleware>[0]) {
+    const app = new Hono()
+    app.use(createSessionMiddleware(options))
+    app.get('/session', (c) => c.json(getSessionFromContext(c)?.all() ?? {}))
+    return app
+  }
+
+  it('hydrates session from header when GUREN_TESTING is set', async () => {
+    process.env.GUREN_TESTING = '1'
+    const app = createTestApp()
+
+    const res = await app.request('/session', {
+      headers: { 'X-Testing-Session': JSON.stringify({ step: 2, cart: ['a'] }) },
+    })
+
+    expect(await res.json()).toEqual({ step: 2, cart: ['a'] })
+  })
+
+  it('ignores header when GUREN_TESTING is not set', async () => {
+    delete process.env.GUREN_TESTING
+    const app = createTestApp()
+
+    const res = await app.request('/session', {
+      headers: { 'X-Testing-Session': JSON.stringify({ forged: true }) },
+    })
+
+    expect(await res.json()).toEqual({})
+  })
+
+  it('ignores malformed or non-object header payloads', async () => {
+    process.env.GUREN_TESTING = '1'
+    const app = createTestApp()
+
+    for (const payload of ['not-json', '"string"', '[1,2]', 'null']) {
+      const res = await app.request('/session', {
+        headers: { 'X-Testing-Session': payload },
+      })
+      expect(await res.json()).toEqual({})
+    }
+  })
+
+  it('merges testing data over stored session data', async () => {
+    process.env.GUREN_TESTING = '1'
+    const store = new MemorySessionStore()
+    const app = createTestApp({ store })
+
+    app.get('/set', (c) => {
+      const session = getSessionFromContext(c)
+      session?.set('kept', 'stored')
+      session?.set('overridden', 'stored')
+      return c.text('ok')
+    })
+
+    const res1 = await app.request('/set')
+    const cookie = res1.headers.get('set-cookie')?.split(';')[0] ?? ''
+
+    const res2 = await app.request('/session', {
+      headers: {
+        Cookie: cookie,
+        'X-Testing-Session': JSON.stringify({ overridden: 'testing', added: true }),
+      },
+    })
+
+    expect(await res2.json()).toEqual({ kept: 'stored', overridden: 'testing', added: true })
   })
 })
 

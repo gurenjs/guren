@@ -15,7 +15,14 @@ import {
   createDatabaseAssertions,
   setTestDatabase,
 } from '../src'
-import { Event, Job, attachAuthContext, requireAuthenticated } from '@guren/server'
+import {
+  Event,
+  Job,
+  attachAuthContext,
+  requireAuthenticated,
+  createSessionMiddleware,
+  getSessionFromContext,
+} from '@guren/server'
 import { Hono } from 'hono'
 
 describe('TestResponse', () => {
@@ -387,6 +394,22 @@ describe('TestApp', () => {
     await localized.get('/echo').assertJson({ lang: 'en', cookie: 'locale=en' })
     // The original instance is unchanged
     await testApp.get('/echo').assertJson({ lang: null, cookie: null })
+  })
+
+  it('withSession hydrates the server-side session through session middleware', async () => {
+    process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+    process.env.GUREN_TESTING = '1'
+    const app = new Hono()
+    app.use('*', createSessionMiddleware({ cookieSecure: false }))
+    app.get('/session', (c) => c.json(getSessionFromContext(c)?.all() ?? {}))
+
+    const client = createTestClient((request) => Promise.resolve(app.fetch(request)))
+    const response = await client
+      .get('/session')
+      .withSession({ step: 2, wizard: 'shipping' })
+      .send()
+
+    expect(await response.json()).toEqual({ step: 2, wizard: 'shipping' })
   })
 
   it('withHeader composes with actingAs', async () => {
