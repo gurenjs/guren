@@ -220,83 +220,66 @@ router.post('/api/tokens/revoke-all', async (ctx) => {
 
 ## データベースストレージ
 
-### ApiTokenStoreの実装
+### 組み込みの DatabaseApiTokenStore
+
+本番環境では組み込みの `DatabaseApiTokenStore` を使います。`api_tokens` スキーマの Drizzle テーブルを渡すだけで、カスタムストアの実装は不要です。
 
 ```ts
-import type { ApiTokenStore, ApiToken } from '@guren/core'
+import { DatabaseApiTokenStore } from '@guren/core'
 import { apiTokens } from '@/db/schema'
 
-export class DatabaseApiTokenStore implements ApiTokenStore {
-  async store(token: ApiToken): Promise<void> {
-    await db.insert(apiTokens).values({
-      id: token.id,
-      name: token.name,
-      hashedToken: token.hashedToken,
-      userId: token.userId,
-      abilities: JSON.stringify(token.abilities),
-      lastUsedAt: token.lastUsedAt,
-      expiresAt: token.expiresAt,
-      createdAt: token.createdAt,
-    })
-  }
+const store = new DatabaseApiTokenStore(apiTokens)
 
-  async findByHashedToken(hashedToken: string): Promise<ApiToken | null> {
-    const result = await db.select()
-      .from(apiTokens)
-      .where(eq(apiTokens.hashedToken, hashedToken))
-      .limit(1)
-
-    if (!result[0]) return null
-
-    return {
-      ...result[0],
-      abilities: JSON.parse(result[0].abilities),
-    }
-  }
-
-  async findByUserId(userId: string | number): Promise<ApiToken[]> {
-    const results = await db.select()
-      .from(apiTokens)
-      .where(eq(apiTokens.userId, String(userId)))
-
-    return results.map(r => ({
-      ...r,
-      abilities: JSON.parse(r.abilities),
-    }))
-  }
-
-  async delete(id: string): Promise<void> {
-    await db.delete(apiTokens).where(eq(apiTokens.id, id))
-  }
-
-  async deleteForUser(userId: string | number): Promise<void> {
-    await db.delete(apiTokens).where(eq(apiTokens.userId, String(userId)))
-  }
-
-  async updateLastUsed(id: string, timestamp: Date): Promise<void> {
-    await db.update(apiTokens)
-      .set({ lastUsedAt: timestamp })
-      .where(eq(apiTokens.id, id))
-  }
-}
+// すべてのトークンヘルパーで利用可能
+const { plainTextToken } = await createApiToken(store, {
+  name: 'Mobile App Token',
+  userId: user.id,
+})
 ```
+
+ストアはアプリで設定済みの ORM 接続（標準の `DatabaseProvider` セットアップ）を利用するため、追加の配線は不要です。期限切れトークンは `verifyApiToken` が拒否します。テーブルから削除するには、スケジュールジョブから `store.deleteExpired()` を呼んでください。
 
 ### データベーススキーマ
 
+カラムのプロパティ名は `ApiToken` のフィールドと一致させます。
+
 ```ts
 // db/schema.ts
-import { pgTable, text, timestamp, json } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, jsonb } from 'drizzle-orm/pg-core'
 
 export const apiTokens = pgTable('api_tokens', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   hashedToken: text('hashed_token').notNull().unique(),
   userId: text('user_id').notNull(),
-  abilities: text('abilities').notNull(), // JSON文字列
+  abilities: jsonb('abilities').$type<string[]>().notNull(),
   lastUsedAt: timestamp('last_used_at'),
   expiresAt: timestamp('expires_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 })
+```
+
+`abilities` カラムが `jsonb` ではなく JSON 文字列を保持する text カラムの場合は、`{ abilitiesMode: 'text' }` を渡します。
+
+```ts
+const store = new DatabaseApiTokenStore(apiTokens, { abilitiesMode: 'text' })
+```
+
+### カスタムストア
+
+`ApiTokenStore` インターフェースを実装したオブジェクトであれば何でも利用できます。トークンを外部システムに保存する場合は自前で実装してください。
+
+```ts
+import type { ApiTokenStore, ApiToken } from '@guren/core'
+
+export class ExternalApiTokenStore implements ApiTokenStore {
+  async store(token: ApiToken): Promise<void> { /* ... */ }
+  async findByHashedToken(hashedToken: string): Promise<ApiToken | null> { /* ... */ }
+  async findByUserId(userId: string | number): Promise<ApiToken[]> { /* ... */ }
+  async delete(id: string): Promise<void> { /* ... */ }
+  async deleteForUser(userId: string | number): Promise<void> { /* ... */ }
+  async updateLastUsed(id: string, timestamp: Date): Promise<void> { /* ... */ }
+}
 ```
 
 ## 設定オプション

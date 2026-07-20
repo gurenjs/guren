@@ -220,83 +220,66 @@ router.post('/api/tokens/revoke-all', async (ctx) => {
 
 ## Database Storage
 
-### Implementing ApiTokenStore
+### Built-in DatabaseApiTokenStore
+
+For production, use the built-in `DatabaseApiTokenStore`. Pass it the Drizzle table for your `api_tokens` schema — no custom store code needed:
 
 ```ts
-import type { ApiTokenStore, ApiToken } from '@guren/core'
+import { DatabaseApiTokenStore } from '@guren/core'
 import { apiTokens } from '@/db/schema'
 
-export class DatabaseApiTokenStore implements ApiTokenStore {
-  async store(token: ApiToken): Promise<void> {
-    await db.insert(apiTokens).values({
-      id: token.id,
-      name: token.name,
-      hashedToken: token.hashedToken,
-      userId: token.userId,
-      abilities: JSON.stringify(token.abilities),
-      lastUsedAt: token.lastUsedAt,
-      expiresAt: token.expiresAt,
-      createdAt: token.createdAt,
-    })
-  }
+const store = new DatabaseApiTokenStore(apiTokens)
 
-  async findByHashedToken(hashedToken: string): Promise<ApiToken | null> {
-    const result = await db.select()
-      .from(apiTokens)
-      .where(eq(apiTokens.hashedToken, hashedToken))
-      .limit(1)
-
-    if (!result[0]) return null
-
-    return {
-      ...result[0],
-      abilities: JSON.parse(result[0].abilities),
-    }
-  }
-
-  async findByUserId(userId: string | number): Promise<ApiToken[]> {
-    const results = await db.select()
-      .from(apiTokens)
-      .where(eq(apiTokens.userId, String(userId)))
-
-    return results.map(r => ({
-      ...r,
-      abilities: JSON.parse(r.abilities),
-    }))
-  }
-
-  async delete(id: string): Promise<void> {
-    await db.delete(apiTokens).where(eq(apiTokens.id, id))
-  }
-
-  async deleteForUser(userId: string | number): Promise<void> {
-    await db.delete(apiTokens).where(eq(apiTokens.userId, String(userId)))
-  }
-
-  async updateLastUsed(id: string, timestamp: Date): Promise<void> {
-    await db.update(apiTokens)
-      .set({ lastUsedAt: timestamp })
-      .where(eq(apiTokens.id, id))
-  }
-}
+// Works with every token helper
+const { plainTextToken } = await createApiToken(store, {
+  name: 'Mobile App Token',
+  userId: user.id,
+})
 ```
+
+The store uses the app's configured ORM connection (the standard `DatabaseProvider` setup), so it needs no extra wiring. Expired tokens are already rejected by `verifyApiToken`; call `store.deleteExpired()` from a scheduled job to prune them from the table.
 
 ### Database Schema
 
+Column property names must match the `ApiToken` fields:
+
 ```ts
 // db/schema.ts
-import { pgTable, text, timestamp, json } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, jsonb } from 'drizzle-orm/pg-core'
 
 export const apiTokens = pgTable('api_tokens', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   hashedToken: text('hashed_token').notNull().unique(),
   userId: text('user_id').notNull(),
-  abilities: text('abilities').notNull(), // JSON string
+  abilities: jsonb('abilities').$type<string[]>().notNull(),
   lastUsedAt: timestamp('last_used_at'),
   expiresAt: timestamp('expires_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 })
+```
+
+If your `abilities` column is a plain text column holding a JSON string instead of `jsonb`, pass `{ abilitiesMode: 'text' }`:
+
+```ts
+const store = new DatabaseApiTokenStore(apiTokens, { abilitiesMode: 'text' })
+```
+
+### Custom Stores
+
+Any object implementing the `ApiTokenStore` interface works — implement it yourself when tokens live in an external system:
+
+```ts
+import type { ApiTokenStore, ApiToken } from '@guren/core'
+
+export class ExternalApiTokenStore implements ApiTokenStore {
+  async store(token: ApiToken): Promise<void> { /* ... */ }
+  async findByHashedToken(hashedToken: string): Promise<ApiToken | null> { /* ... */ }
+  async findByUserId(userId: string | number): Promise<ApiToken[]> { /* ... */ }
+  async delete(id: string): Promise<void> { /* ... */ }
+  async deleteForUser(userId: string | number): Promise<void> { /* ... */ }
+  async updateLastUsed(id: string, timestamp: Date): Promise<void> { /* ... */ }
+}
 ```
 
 ## Configuration Options
