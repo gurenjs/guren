@@ -1,6 +1,7 @@
 import { beforeEach, afterEach, describe, expect, it } from 'bun:test'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { runCommand } from 'citty'
 import { createTempWorkspace, writeInstalledPackage, type TempWorkspace } from './helpers'
 import { discoverPluginCommands, createPluginCommandProxy } from '../src/plugin-commands'
 
@@ -121,7 +122,6 @@ describe('plugin-commands', () => {
 
       expect(proxy.meta).toEqual({ name: 'audit:report', description: `Provided by ${PLUGIN_NAME}` })
 
-      const { runCommand } = await import('citty')
       await runCommand(proxy, { rawArgs: ['--out', 'custom.txt'] })
 
       expect(await readFile('custom.txt', 'utf8')).toBe('audit-report\n')
@@ -148,7 +148,6 @@ describe('plugin-commands', () => {
       const [discovered] = await discoverPluginCommands()
       const proxy = createPluginCommandProxy(discovered)
 
-      const { runCommand } = await import('citty')
       await expect(runCommand(proxy, { rawArgs: [] })).rejects.toThrow('does not export a command named "audit:missing"')
     })
   })

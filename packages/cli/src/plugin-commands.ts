@@ -1,7 +1,8 @@
 import { pathToFileURL } from 'node:url'
 import { resolve } from 'node:path'
 import { consola } from 'consola'
-import { defineCommand, runCommand as runCittyCommand, type ArgsDef, type CommandDef } from 'citty'
+import { defineCommand, runCommand as runCittyCommand } from 'citty'
+import type { ArgsDef, CommandDef } from 'citty'
 import { readInstalledPluginManifests, resolveInside } from './plugin-manifest'
 
 /**
