@@ -116,6 +116,29 @@ jobs:
       - name: Golden path smoke test (postgres)
         run: bun run smoke:golden-path:postgres
 
+      - name: Debug environment
+        run: |
+          echo "--- uname -a ---"
+          uname -a
+          echo "--- nproc ---"
+          nproc
+          echo "--- free -h ---"
+          free -h
+          echo "--- ulimit -a ---"
+          ulimit -a
+          echo "--- /proc/sys/vm/overcommit_memory ---"
+          cat /proc/sys/vm/overcommit_memory
+          echo "--- env (sorted) ---"
+          env | sort
+          echo "--- citty install locations ---"
+          find / -maxdepth 8 -path "*/citty/dist/index.mjs" 2>/dev/null | while read -r f; do
+            echo "$f"
+            wc -c "$f"
+            sha256sum "$f"
+            tail -c 300 "$f"
+            echo
+          done
+
       - name: Run tests
         run: bun run test
 
@@ -138,6 +161,28 @@ jobs:
       - name: Generate route types
         run: bun run build:routes
       - run: bun run typecheck
+      - name: Debug environment
+        run: |
+          echo "--- uname -a ---"
+          uname -a
+          echo "--- nproc ---"
+          nproc
+          echo "--- free -h ---"
+          free -h
+          echo "--- ulimit -a ---"
+          ulimit -a
+          echo "--- /proc/sys/vm/overcommit_memory ---"
+          cat /proc/sys/vm/overcommit_memory
+          echo "--- env (sorted) ---"
+          env | sort
+          echo "--- citty install locations ---"
+          find / -maxdepth 8 -path "*/citty/dist/index.mjs" 2>/dev/null | while read -r f; do
+            echo "$f"
+            wc -c "$f"
+            sha256sum "$f"
+            tail -c 300 "$f"
+            echo
+          done
       - name: Run tests (no Redis)
         run: bun run test:bun
 
