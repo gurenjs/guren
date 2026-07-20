@@ -509,6 +509,264 @@ export default function registerRoutes(router: any) {
     }
   })
 
+  it('warns when a sensitive schema column is not hidden', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-hidden-warn-')
+
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'db/schema.ts'),
+        `import { pgTable, text } from 'drizzle-orm/pg-core'
+export const users = pgTable('users', {
+  id: text('id').primaryKey(),
+  email: text('email').notNull(),
+  passwordHash: text('password_hash').notNull(),
+  rememberToken: text('remember_token'),
+})`,
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'app/Models'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Models/User.ts'),
+        `export class User {
+  static table = users
+  static fillable = ['email']
+  static hidden = ['passwordHash']
+}`,
+        'utf8',
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const hidden = report.findings.find(f => f.key === 'hidden-columns:User')
+      expect(hidden).toBeDefined()
+      expect(hidden!.status).toBe('warn')
+      expect(hidden!.message).toContain('rememberToken')
+      expect(hidden!.message).not.toContain('passwordHash,')
+      expect(hidden!.suggestion).toContain("'rememberToken'")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('passes when all sensitive columns are hidden', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-hidden-pass-')
+
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'db/schema.ts'),
+        `export const users = pgTable('users', {
+  id: text('id').primaryKey(),
+  passwordHash: text('password_hash').notNull(),
+})`,
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'app/Models'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Models/User.ts'),
+        `export class User {
+  static table = users
+  static fillable = ['email']
+  static override hidden = ['passwordHash']
+}`,
+        'utf8',
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const hidden = report.findings.find(f => f.key === 'hidden-columns:User')
+      expect(hidden).toBeDefined()
+      expect(hidden!.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('passes when a visible allowlist excludes sensitive columns', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-hidden-visible-')
+
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'db/schema.ts'),
+        `export const users = pgTable('users', {
+  id: text('id').primaryKey(),
+  email: text('email').notNull(),
+  apiSecret: text('api_secret').notNull(),
+})`,
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'app/Models'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Models/User.ts'),
+        `export class User {
+  static table = users
+  static fillable = ['email']
+  static visible = ['id', 'email']
+}`,
+        'utf8',
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const hidden = report.findings.find(f => f.key === 'hidden-columns:User')
+      expect(hidden).toBeDefined()
+      expect(hidden!.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('warns when a non-empty visible allowlist re-exposes a hidden sensitive column', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-hidden-visible-wins-')
+
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'db/schema.ts'),
+        `export const users = pgTable('users', {
+  id: text('id').primaryKey(),
+  passwordHash: text('password_hash').notNull(),
+})`,
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'app/Models'), { recursive: true })
+      // serializeRecord gives a non-empty visible list precedence over hidden.
+      await writeFile(
+        join(workspace.dir, 'app/Models/User.ts'),
+        `export class User {
+  static table = users
+  static fillable = ['email']
+  static hidden = ['passwordHash']
+  static visible = ['id', 'passwordHash']
+}`,
+        'utf8',
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const hidden = report.findings.find(f => f.key === 'hidden-columns:User')
+      expect(hidden).toBeDefined()
+      expect(hidden!.status).toBe('warn')
+      expect(hidden!.suggestion).toContain('static visible')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('ignores an empty visible array like the runtime serializer does', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-hidden-empty-visible-')
+
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'db/schema.ts'),
+        `export const users = pgTable('users', {
+  id: text('id').primaryKey(),
+  passwordHash: text('password_hash').notNull(),
+})`,
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'app/Models'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Models/User.ts'),
+        `export class User {
+  static table = users
+  static fillable = ['email']
+  static visible: string[] = []
+}`,
+        'utf8',
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const hidden = report.findings.find(f => f.key === 'hidden-columns:User')
+      expect(hidden).toBeDefined()
+      expect(hidden!.status).toBe('warn')
+      expect(hidden!.message).toContain('passwordHash')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('does not count commented-out hidden entries', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-hidden-comment-')
+
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'db/schema.ts'),
+        `export const users = pgTable('users', {
+  id: text('id').primaryKey(),
+  passwordHash: text('password_hash').notNull(),
+})`,
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'app/Models'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Models/User.ts'),
+        `export class User {
+  static table = users
+  static fillable = ['email']
+  static hidden = [
+    // 'passwordHash',
+  ]
+}`,
+        'utf8',
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const hidden = report.findings.find(f => f.key === 'hidden-columns:User')
+      expect(hidden).toBeDefined()
+      expect(hidden!.status).toBe('warn')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('emits no hidden-columns finding without sensitive columns or schema', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-hidden-none-')
+
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'db/schema.ts'),
+        `export const posts = pgTable('posts', {
+  id: text('id').primaryKey(),
+  title: text('title').notNull(),
+})`,
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'app/Models'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Models/Post.ts'),
+        `export class Post {
+  static table = posts
+  static fillable = ['title']
+}`,
+        'utf8',
+      )
+      // Model whose table is not in db/schema.ts is skipped silently.
+      await writeFile(
+        join(workspace.dir, 'app/Models/Audit.ts'),
+        `export class Audit {
+  static table = audits
+  static fillable = ['action']
+}`,
+        'utf8',
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      expect(report.findings.find(f => f.key === 'hidden-columns:Post')).toBeUndefined()
+      expect(report.findings.find(f => f.key === 'hidden-columns:Audit')).toBeUndefined()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('degrades gracefully when routes cannot be loaded', async () => {
     const workspace = await createTempWorkspace('guren-cli-audit-noroutes-')
 

@@ -75,7 +75,7 @@ bunx guren add plugin @acme/guren-plugin-audit
 | コマンド | 説明 | 例 |
 |---------|------|-----|
 | `check` | ルート・コントローラ・ページ・モデル間の整合性を検証 | `bunx guren check --json` |
-| `audit` | セキュリティ監査: 変更系ルートのバリデーション/認証の欠如、文字列補間付き生SQL、ハードコードされた認証情報、無効化されたセキュリティ既定値、mass assignment 設定を検査 | `bunx guren audit --json` |
+| `audit` | セキュリティ監査: 変更系ルートのバリデーション/認証の欠如、文字列補間付き生SQL、ハードコードされた認証情報、無効化されたセキュリティ既定値、mass assignment 設定、`static hidden` 未登録の機微カラムを検査 | `bunx guren audit --json` |
 | `doctor` | プロジェクトの健全性レポート(環境変数・設定・生成ファイル)と次のアクション | `bunx guren doctor --next` |
 
 `audit` は失敗(fail)を検出すると非ゼロの終了コードを返すため、CI に組み込めます。

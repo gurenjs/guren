@@ -77,7 +77,7 @@ Validate your app before shipping — these commands are also designed for AI co
 | Command | Description | Example |
 |---------|-------------|---------|
 | `check` | Validate integrity across routes, controllers, pages, and models | `bunx guren check --json` |
-| `audit` | Security audit: missing input validation or authentication on mutating routes, raw SQL with interpolation, hardcoded credentials, disabled security defaults, mass-assignment configuration | `bunx guren audit --json` |
+| `audit` | Security audit: missing input validation or authentication on mutating routes, raw SQL with interpolation, hardcoded credentials, disabled security defaults, mass-assignment configuration, sensitive columns not listed in `static hidden` | `bunx guren audit --json` |
 | `doctor` | Project health report (env, config, generated files) with actionable next steps | `bunx guren doctor --next` |
 
 `audit` exits with a non-zero status when it finds failures, so you can run it in CI:
