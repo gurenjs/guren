@@ -3,6 +3,7 @@
 [![X (Twitter)](https://img.shields.io/badge/follow-%40gurenjs-black?logo=x)](https://x.com/gurenjs)
 [![GitHub Discussions](https://img.shields.io/github/discussions/gurenjs/guren)](https://github.com/gurenjs/guren/discussions)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![GitHub Sponsors](https://img.shields.io/github/sponsors/7nohe?logo=githubsponsors)](https://github.com/sponsors/7nohe)
 
 **A Laravel-inspired fullstack TypeScript framework, built for Bun.**
 
@@ -133,6 +134,10 @@ const post = await Post.findOrFail(1)
 ## Contributing
 
 Issues, discussions, and pull requests are welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup and workflow.
+
+## Support Guren
+
+If Guren is useful to you or your team, consider [sponsoring development on GitHub Sponsors](https://github.com/sponsors/7nohe). Sponsorships fund ongoing maintenance, documentation, and new features.
 
 ## License
 
