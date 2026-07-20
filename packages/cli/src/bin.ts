@@ -2,7 +2,7 @@
 import { spawn } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
-import { defineCommand, runMain, showUsage } from 'citty'
+import { defineCommand, runMain, showUsage, type CommandDef } from 'citty'
 import { listBlueprints, runBlueprint } from './blueprints'
 import { runDoctor } from './doctor'
 import { makeAuth } from './make-auth'
@@ -47,6 +47,7 @@ import { publishLanguageFiles, makeLanguage, listLocales } from './lang'
 import { upgradeCanary } from './upgrade'
 import { scaffoldDeploy, type DeployTarget } from './deploy'
 import { installPlugin } from './plugin'
+import { discoverPluginCommands, createPluginCommandProxy } from './plugin-commands'
 import { displayModels } from './model-list'
 import { displayContext } from './context'
 import { runCheck, renderCheckReport } from './check'
@@ -2203,6 +2204,78 @@ const deployCommand = defineCommand({
   },
 })
 
+const builtinSubCommands = {
+  ...makeCommands,
+  'make:auth': makeAuthCommand,
+  'make:channel': makeChannelCommand,
+  'make:command': makeConsoleCommandCommand,
+  'make:exception': makeExceptionCommand,
+  'make:factory': makeFactoryCommand,
+  'make:listener': makeListenerCommand,
+  'make:migration': makeMigrationCommand,
+  'make:resource': makeResourceCommand,
+  'make:test': makeTestCommand,
+  'db:migrate': migrateCommand,
+  'db:seed': seedCommand,
+  'db:reset': resetCommand,
+  'db:fresh': freshCommand,
+  'db:rollback': rollbackCommand,
+  'db:status': statusCommand,
+  'queue:work': queueWorkCommand,
+  'queue:failed': queueFailedCommand,
+  'queue:retry': queueRetryCommand,
+  'queue:flush': queueFlushCommand,
+  'routes:types': routeTypesCommand,
+  codegen: codegenCommand,
+  'route:list': routeListCommand,
+  'openapi:generate': openApiGenerateCommand,
+  'config:cache': configCacheCommand,
+  'config:clear': configClearCommand,
+  'config:show': configShowCommand,
+  'storage:link': storageLinkCommand,
+  'schedule:list': scheduleListCommand,
+  'schedule:run': scheduleRunCommand,
+  'health:check': healthCheckCommand,
+  'lang:publish': langPublishCommand,
+  'lang:list': langListCommand,
+  'make:lang': makeLangCommand,
+  add: addCommand,
+  plugin: addPluginCommand,
+  doctor: doctorCommand,
+  'key:generate': keyGenerateCommand,
+  new: newCommand,
+  upgrade: upgradeCommand,
+  deploy: deployCommand,
+  console: consoleCommand,
+  dev: devCommand,
+  // AI Agent commands
+  'model:list': modelListCommand,
+  context: contextCommand,
+  check: checkCommand,
+  audit: auditCommand,
+  guidelines: guidelinesCommand,
+  'make:feature': makeFeatureCommand,
+  'agent:init': agentInitCommand,
+  'agent:sync': agentSyncCommand,
+}
+
+// CLI commands declared by installed plugins (gurenPlugin.commands).
+// Discovery only reads package.json files; a plugin's entry module is
+// imported lazily when one of its commands is invoked (or renders its own
+// usage), never for the root --help listing.
+const pluginSubCommands: Record<string, CommandDef> = {}
+try {
+  const discovered = await discoverPluginCommands(
+    process.cwd(),
+    new Set(Object.keys(builtinSubCommands)),
+  )
+  for (const command of discovered) {
+    pluginSubCommands[command.name] = createPluginCommandProxy(command)
+  }
+} catch (error) {
+  consola.warn(`Failed to discover plugin commands: ${error instanceof Error ? error.message : String(error)}`)
+}
+
 const main = defineCommand({
   meta: {
     name: 'guren',
@@ -2215,60 +2288,7 @@ const main = defineCommand({
       description: 'Show this help message',
     },
   },
-  subCommands: {
-    ...makeCommands,
-    'make:auth': makeAuthCommand,
-    'make:channel': makeChannelCommand,
-    'make:command': makeConsoleCommandCommand,
-    'make:exception': makeExceptionCommand,
-    'make:factory': makeFactoryCommand,
-    'make:listener': makeListenerCommand,
-    'make:migration': makeMigrationCommand,
-    'make:resource': makeResourceCommand,
-    'make:test': makeTestCommand,
-    'db:migrate': migrateCommand,
-    'db:seed': seedCommand,
-    'db:reset': resetCommand,
-    'db:fresh': freshCommand,
-    'db:rollback': rollbackCommand,
-    'db:status': statusCommand,
-    'queue:work': queueWorkCommand,
-    'queue:failed': queueFailedCommand,
-    'queue:retry': queueRetryCommand,
-    'queue:flush': queueFlushCommand,
-    'routes:types': routeTypesCommand,
-    codegen: codegenCommand,
-    'route:list': routeListCommand,
-    'openapi:generate': openApiGenerateCommand,
-    'config:cache': configCacheCommand,
-    'config:clear': configClearCommand,
-    'config:show': configShowCommand,
-    'storage:link': storageLinkCommand,
-    'schedule:list': scheduleListCommand,
-    'schedule:run': scheduleRunCommand,
-    'health:check': healthCheckCommand,
-    'lang:publish': langPublishCommand,
-    'lang:list': langListCommand,
-    'make:lang': makeLangCommand,
-    add: addCommand,
-    plugin: addPluginCommand,
-    doctor: doctorCommand,
-    'key:generate': keyGenerateCommand,
-    new: newCommand,
-    upgrade: upgradeCommand,
-    deploy: deployCommand,
-    console: consoleCommand,
-    dev: devCommand,
-    // AI Agent commands
-    'model:list': modelListCommand,
-    context: contextCommand,
-    check: checkCommand,
-    audit: auditCommand,
-    guidelines: guidelinesCommand,
-    'make:feature': makeFeatureCommand,
-    'agent:init': agentInitCommand,
-    'agent:sync': agentSyncCommand,
-  },
+  subCommands: { ...builtinSubCommands, ...pluginSubCommands },
   async run(ctx) {
     if (ctx.args.help || ctx.rawArgs.length === 0) {
       await showUsage(ctx.cmd)

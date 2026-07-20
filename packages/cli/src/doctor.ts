@@ -2,7 +2,7 @@ import { copyFile, readFile, writeFile } from 'node:fs/promises'
 import { resolve, relative } from 'node:path'
 import { consola } from 'consola'
 import { discoverControllerFiles, discoverModelFiles, fileExists, readIfExists, classNameFromPath } from './discovery'
-import { checkPluginCompatibility, readCoreVersion, readPluginManifest } from './plugin-manifest'
+import { checkPluginCompatibility, readCoreVersion, readInstalledPluginManifests } from './plugin-manifest'
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail'
 
@@ -905,48 +905,21 @@ async function detectDatabaseConfig(context: DoctorRuleContext): Promise<DoctorC
 }
 
 async function detectPluginCompatibility(context: DoctorRuleContext): Promise<DoctorCheck> {
-  const packageJsonRaw = await readIfExists(context.cwd, 'package.json')
-  if (packageJsonRaw === null) {
-    return createCheck('plugin-compatibility', 'Plugin Compatibility', 'pass', 'No package.json found; skipping plugin checks.')
-  }
-
-  let dependencies: string[] = []
-  try {
-    const parsed = JSON.parse(packageJsonRaw) as {
-      dependencies?: Record<string, string>
-      devDependencies?: Record<string, string>
-    }
-    dependencies = [
-      ...Object.keys(parsed.dependencies ?? {}),
-      ...Object.keys(parsed.devDependencies ?? {}),
-    ]
-  } catch {
-    return createCheck('plugin-compatibility', 'Plugin Compatibility', 'pass', 'package.json could not be parsed; skipping plugin checks.')
-  }
-
-  const [manifests, coreVersion] = await Promise.all([
-    Promise.all(
-      dependencies.map(async (dependency) => ({
-        dependency,
-        manifest: await readPluginManifest(dependency, context.cwd).catch(() => null),
-      })),
-    ),
+  const [plugins, coreVersion] = await Promise.all([
+    readInstalledPluginManifests(context.cwd),
     readCoreVersion(context.cwd),
   ])
-  const plugins = manifests.flatMap((entry) =>
-    entry.manifest ? [{ dependency: entry.dependency, manifest: entry.manifest }] : [],
-  )
 
   const incompatible: string[] = []
   const unverified: string[] = []
 
-  for (const { dependency, manifest } of plugins) {
+  for (const { packageName, manifest } of plugins) {
     const compatibility = checkPluginCompatibility(manifest, coreVersion)
     if (compatibility === null && manifest.compatibility) {
-      unverified.push(dependency)
+      unverified.push(packageName)
     } else if (compatibility && !compatibility.compatible) {
       incompatible.push(
-        `${dependency} (declares "${compatibility.range}", installed @guren/core is ${compatibility.coreVersion})`,
+        `${packageName} (declares "${compatibility.range}", installed @guren/core is ${compatibility.coreVersion})`,
       )
     }
   }

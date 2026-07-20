@@ -136,6 +136,7 @@ Every plugin must declare a `gurenPlugin` field in its `package.json`:
 | `gurenPlugin.provider` | string | Named class export registered by `bunx guren plugin`; omit for `definePlugin()` factories |
 | `gurenPlugin.env` | array | Env keys appended to the app's `.env.example` (and `.env` when present) at install time |
 | `gurenPlugin.publishes` | array | Files copied into the app at install time (`config/`, `db/migrations/`, `resources/` targets only) |
+| `gurenPlugin.commands` | object | `{ "entry": "./dist/commands.js", "names": ["myplugin:sync"] }` — CLI commands contributed to `guren`. Names must be `:`-namespaced; built-in names win; a name declared by two plugins is dropped for both; the entry module is only imported when a declared command is invoked or renders its own usage |
 
 The manifest is declarative data only — the CLI never imports or executes plugin code during installation. `compatibility` is verified by `bunx guren plugin` at install time and by `bunx guren doctor`; there is no boot-time cost.
 
@@ -147,7 +148,7 @@ Plugins interact with the framework exclusively through the public `Container` a
 - **Add middleware** by accessing the Hono app instance via `this.container.make('hono')`
 - **Subscribe to events** via the EventManager (`this.container.make('events')`)
 - **Extend the container** with new bindings, aliases, and tags
-- **Add CLI commands** by registering them through the container
+- **Add CLI commands** by declaring them in the `gurenPlugin.commands` manifest field (see Plugin Metadata); the entry module is imported only when one of the declared commands is invoked
 - **Provide route macros** by extending the Router via the container
 
 ## What Plugins SHOULD NOT Do

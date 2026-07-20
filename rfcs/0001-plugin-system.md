@@ -208,8 +208,12 @@ Resolution in `bin.ts`:
   provider — and only happens on explicit invocation.
 - Plugin command names **must** contain a `:` namespace; un-namespaced names
   are rejected at discovery with a warning.
-- Conflicts: built-in commands always win. Two plugins declaring the same
-  name is an error naming both packages.
+- Conflicts: built-in commands always win. ~~Two plugins declaring the same
+  name is an error naming both packages.~~ **Amended in implementation:** a
+  name declared by multiple plugins is dropped for all of them, with one
+  warning naming every declaring package — a hard error would brick every
+  `guren` invocation (including `--help`) over a conflict between two
+  third-party packages.
 
 ## Alternatives Considered
 

@@ -127,6 +127,39 @@ export type { AnalyticsConfig } from './plugin'
 
 マニフェストは純粋なデータです — CLIはインストール中にプラグインのコードを一切実行しません。
 
+### オプション: CLIコマンドを追加する
+
+プラグインはマニフェストで宣言することで`guren` CLIにコマンドを追加できます:
+
+```json
+{
+  "gurenPlugin": {
+    "commands": {
+      "entry": "./dist/commands.js",
+      "names": ["analytics:flush"]
+    }
+  }
+}
+```
+
+エントリモジュールは、コマンド名をキーとするcittyコマンド定義のレコードをdefault exportします:
+
+```typescript
+// src/commands.ts
+import { defineCommand } from 'citty'
+
+export default {
+  'analytics:flush': defineCommand({
+    meta: { name: 'analytics:flush', description: 'キューされたイベントをフラッシュ' },
+    async run() {
+      // ...
+    },
+  }),
+}
+```
+
+プラグインをアプリにインストールすると、`bunx guren analytics:flush`でコマンドが実行でき、`bunx guren --help`にも表示されます。コマンド名には`:`名前空間が必須で、ビルトインコマンド名が常に優先され、複数のプラグインが同じ名前を宣言した場合は警告とともに両方とも無効化されます。エントリモジュールがimportされるのは宣言したコマンドが実行される時（またはそのコマンド自身の`--help`を表示する時）だけで、ルートの一覧表示では実行されません。
+
 ## ステップ5: テストを書く
 
 `@guren/testing`の`createPluginTestApp`と`assertPluginRegisters`を使用します:
