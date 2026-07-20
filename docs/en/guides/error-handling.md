@@ -235,7 +235,7 @@ import { formatValidationErrors } from '@guren/core'
 import { z } from 'zod'
 
 const schema = z.object({
-  email: z.string().email(),
+  email: z.email(),
   password: z.string().min(8),
 })
 

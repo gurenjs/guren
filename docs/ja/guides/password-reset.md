@@ -98,7 +98,7 @@ import { User } from '@/app/Models/User'
 import { pages } from '@/.guren/pages.gen'
 
 const ForgotPasswordSchema = z.object({
-  email: z.string().email(),
+  email: z.email(),
 })
 
 const ResetPasswordSchema = z.object({

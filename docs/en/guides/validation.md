@@ -121,7 +121,7 @@ import { Router, validateRequest } from '@guren/core'
 import { z } from 'zod'
 
 const schema = z.object({
-  email: z.string().email(),
+  email: z.email(),
   password: z.string().min(8),
 })
 
@@ -146,7 +146,7 @@ router.put('/users/:id', [UserController, 'update'], validateRequestWith((ctx) =
 
   return z.object({
     name: z.string().min(1),
-    email: z.string().email(),
+    email: z.email(),
     // Only admins can change roles
     role: isAdmin ? z.enum(['user', 'admin']) : z.never().optional(),
   })
@@ -285,7 +285,7 @@ const schema = z.object({
 
 ```ts
 const schema = z.object({
-  email: z.string().email().toLowerCase(),
+  email: z.email().toLowerCase(),
   tags: z.string().transform(s => s.split(',').map(t => t.trim())),
   date: z.string().transform(s => new Date(s)),
 })

@@ -416,7 +416,7 @@ describe('Email Verification', () => {
 async register() {
   const { name, email, password } = await this.validate({
     name: z.string().min(2),
-    email: z.string().email(),
+    email: z.email(),
     password: z.string().min(8),
   })
 
