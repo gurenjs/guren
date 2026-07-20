@@ -98,6 +98,8 @@ export type {
   UserProvider,
   ProviderFactory,
   AttachContextOptions,
+  DefaultSanitizedKeys,
+  Sanitized,
 } from './types'
 export {
   hashToken,

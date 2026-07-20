@@ -355,6 +355,28 @@ sanitize(user: AuthUser): AuthUser {
 }
 ```
 
+### Typing Sanitized Users
+
+Sanitization happens at runtime, so a plain `auth.user<UserRecord>()` would still *type* the record as if the credential fields were present. Use the `Sanitized<T>` helper to strip the conventional credential keys from the type:
+
+```ts
+import type { Sanitized } from '@guren/core'
+
+// Strips password/passwordHash/rememberToken-style keys from the type
+const user = await this.auth.userOrFail<Sanitized<UserRecord>>()
+
+user.email        // ✅ string
+user.passwordHash // ❌ compile error — stripped at runtime
+```
+
+If your model hides additional fields via `static hidden`, or your credential columns use names outside the conventions (`password`, `passwordHash`, `password_hash`, `rememberToken`, `remember_token`), list them in the second type parameter:
+
+```ts
+type SafeUser = Sanitized<UserRecord, 'twoFactorSecret' | 'credentialDigest'>
+```
+
+The runtime strips exactly the columns your provider is configured with plus the model's `static hidden` — a static type cannot see that configuration, so `Sanitized<T>` reflects the conventional names and relies on you to pass anything else. `guren audit` warns about sensitive columns missing from `static hidden`, which keeps the runtime side honest.
+
 ## Remember Tokens
 
 `SessionGuard` manages remember tokens automatically when your user provider implements `setRememberToken` / `getRememberToken`. `ModelUserProvider` handles this when the `rememberTokenColumn` option is supplied.
