@@ -1,4 +1,5 @@
-import { beforeEach, afterEach } from 'vitest'
+import type { TestLifecycleHooks } from './lifecycle'
+import { getTestLifecycleHooks } from './lifecycle'
 
 /**
  * Database connection interface for testing.
@@ -160,8 +161,16 @@ export async function assertNotSoftDeleted(
 /**
  * Use database transactions for test isolation.
  * Each test will run in a transaction that is rolled back after the test.
+ *
+ * Lifecycle hooks are resolved via `getTestLifecycleHooks()` unless passed
+ * explicitly — see that function for runner setup requirements.
  */
-export function useDatabaseTransactions(db?: DatabaseConnection): void {
+export function useDatabaseTransactions(
+  db?: DatabaseConnection,
+  hooks?: TestLifecycleHooks
+): void {
+  const { beforeEach, afterEach } = hooks ?? getTestLifecycleHooks()
+
   beforeEach(async () => {
     const connection = db ?? getTestDatabase()
     await connection.beginTransaction()
@@ -175,11 +184,17 @@ export function useDatabaseTransactions(db?: DatabaseConnection): void {
 
 /**
  * Truncate tables before each test.
+ *
+ * Lifecycle hooks are resolved via `getTestLifecycleHooks()` unless passed
+ * explicitly — see that function for runner setup requirements.
  */
 export function useTruncateTables(
   tables: string[],
-  db?: DatabaseConnection
+  db?: DatabaseConnection,
+  hooks?: TestLifecycleHooks
 ): void {
+  const { beforeEach } = hooks ?? getTestLifecycleHooks()
+
   beforeEach(async () => {
     const connection = db ?? getTestDatabase()
     for (const table of tables) {
