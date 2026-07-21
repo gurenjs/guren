@@ -976,6 +976,32 @@ describe('runDoctor', () => {
     }
   })
 
+  it('passes test-infrastructure when tests are colocated next to source, outside tests/', async () => {
+    const workspace = await createTempWorkspace('guren-cli-doctor-test-infra-colocated-')
+
+    try {
+      await mkdir(join(workspace.dir, 'app/Models'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'package.json'),
+        JSON.stringify({ name: 'doctor-test-infra-colocated' }, null, 2),
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'app/Models/Post.test.ts'),
+        "import { test, expect } from 'bun:test'\ntest('placeholder', () => { expect(true).toBe(true) })\n",
+        'utf8',
+      )
+
+      const report = await runDoctor({ cwd: workspace.dir, json: true })
+      const testInfraCheck = report.checks.find((check) => check.key === 'test-infrastructure')
+
+      expect(testInfraCheck).toBeDefined()
+      expect(testInfraCheck?.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('does not treat non-test files under tests/ as test infrastructure', async () => {
     const workspace = await createTempWorkspace('guren-cli-doctor-test-infra-nontest-')
 

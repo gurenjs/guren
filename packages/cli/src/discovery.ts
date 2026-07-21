@@ -5,13 +5,20 @@ const SOURCE_EXTENSIONS = new Set(['.ts', '.mts', '.js', '.mjs'])
 const TEST_FILE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.js', '.jsx', '.mjs'])
 const TEST_FILE_PATTERN = /\.test\.(ts|tsx|mts|js|jsx|mjs)$/
 
+// Directories that never contain a project's own source/test files — skipped
+// when scanning from the project root (not needed for the scoped app/**
+// discoverers below, which never descend into these anyway).
+const NON_SOURCE_DIR_NAMES = new Set(['node_modules', 'dist', 'build', 'coverage'])
+
 /**
  * Recursively collect files from a directory matching given extensions.
- * Skips dotfiles and declaration files (.d.ts).
+ * Skips dotfiles, declaration files (.d.ts), and any directory named in
+ * `excludeDirNames`.
  */
 export async function collectFiles(
   directory: string,
   extensions: Set<string> = SOURCE_EXTENSIONS,
+  excludeDirNames: Set<string> = new Set(),
 ): Promise<string[]> {
   const results: string[] = []
 
@@ -28,7 +35,8 @@ export async function collectFiles(
     const fullPath = join(directory, entry.name)
 
     if (entry.isDirectory()) {
-      results.push(...(await collectFiles(fullPath, extensions)))
+      if (excludeDirNames.has(entry.name)) continue
+      results.push(...(await collectFiles(fullPath, extensions, excludeDirNames)))
     } else if (entry.isFile()) {
       if (entry.name.endsWith('.d.ts')) continue
       if (extensions.has(extname(entry.name))) {
@@ -111,12 +119,13 @@ export function discoverPolicyFiles(appRoot: string): Promise<string[]> {
 }
 
 /**
- * Discover `*.test.{ts,tsx,mts,js,jsx,mjs}` files under the project's `tests/`
- * directory (the convention used by scaffolded apps and the blog example).
+ * Discover `*.test.{ts,tsx,mts,js,jsx,mjs}` files anywhere in the project:
+ * under `tests/` (the convention used by scaffolded apps and the blog
+ * example) as well as colocated next to source files elsewhere (the
+ * convention this framework's own packages use — see CLAUDE.md).
  */
 export async function discoverTestFiles(appRoot: string): Promise<string[]> {
-  const dir = resolve(appRoot, 'tests')
-  const files = await collectFiles(dir, TEST_FILE_EXTENSIONS)
+  const files = await collectFiles(appRoot, TEST_FILE_EXTENSIONS, NON_SOURCE_DIR_NAMES)
   return files.filter((file) => TEST_FILE_PATTERN.test(file))
 }
 
