@@ -15,6 +15,11 @@ describe('SQLite default template', () => {
       const dbConfig = await readFile(join(dest, 'config/database.ts'), 'utf8')
       expect(dbConfig).toContain('createSqliteDatabase')
       expect(dbConfig).not.toContain('createPostgresDatabase')
+      // Test DB separation: DATABASE_URL wins, otherwise NODE_ENV=test (set
+      // automatically by `bun test`) routes to a dedicated SQLite file so the
+      // test suite never touches the development database.
+      expect(dbConfig).toContain('guren.test.db')
+      expect(dbConfig).toContain("process.env.NODE_ENV === 'test'")
 
       const schema = await readFile(join(dest, 'db/schema.ts'), 'utf8')
       expect(schema).toContain('sqliteTable')
@@ -23,8 +28,12 @@ describe('SQLite default template', () => {
       const drizzleConfig = await readFile(join(dest, 'drizzle.config.ts'), 'utf8')
       expect(drizzleConfig).toContain("dialect: 'sqlite'")
 
-      const pkg = JSON.parse(await readFile(join(dest, 'package.json'), 'utf8')) as { dependencies?: Record<string, string> }
+      const pkg = JSON.parse(await readFile(join(dest, 'package.json'), 'utf8')) as {
+        dependencies?: Record<string, string>
+        devDependencies?: Record<string, string>
+      }
       expect(pkg.dependencies?.postgres).toBeUndefined()
+      expect(pkg.devDependencies?.['@guren/testing']).toBeDefined()
 
       const env = await readFile(join(dest, '.env.example'), 'utf8')
       expect(env).toContain('guren.db')
