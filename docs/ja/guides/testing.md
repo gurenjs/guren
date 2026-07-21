@@ -347,21 +347,37 @@ describe('ユーザーアクション', () => {
 | `assertDispatchedWith(event, data)` | 特定のデータでイベントがディスパッチされたことをアサート |
 | `dispatched(event)` | ディスパッチされたイベントのインスタンスをすべて取得 |
 
-### データベーステスト
+### テストデータベースの分離
 
-実際のデータベースに影響を与えずにテストするために、データベースフェイクを使用します。
+`bun test` は `NODE_ENV=test` を自動的に設定します。新規にスキャフォールドされたプロジェクトの `config/database.ts` はこれを利用して、テストが開発用データベースにまったく触れないようにしています。
+
+```ts
+// config/database.ts
+function resolveDatabaseFilename(): string {
+  if (process.env.NODE_ENV === 'test') {
+    return process.env.TEST_DATABASE_URL ?? './data/guren.test.db'
+  }
+  return process.env.DATABASE_URL ?? './data/guren.db'
+}
+```
+
+テストはデフォルトで `./data/guren.db` とは別ファイルの `./data/guren.test.db` を読み書きします。そのため、テストが作成したデータが開発サーバーで見ているデータに混ざることはありません。テスト用ファイル自体は `TEST_DATABASE_URL` で上書きできます(例: 並列実行する CI シャードごとに別ファイルを割り当てる場合)。それ以外の環境では引き続き `DATABASE_URL` が優先されます。
+
+> [!WARNING]
+> このブランチが導入される前にスキャフォールドされたプロジェクトは、`NODE_ENV` に関係なく `DATABASE_URL`(または `./data/guren.db`)へ直接書き込みます。そのため `bun test` が開発サーバーと同じデータベースを汚染してしまいます。`config/database.ts` に上記の `NODE_ENV === 'test'` 分岐がなければ追加してください。それだけで修正は完了します。
+
+### データのクリーンアップ
+
+ほとんどのスイートでは、テスト専用ファイルによる分離だけで十分です。`config/database.ts` がすでにエクスポートしている `resetDatabase()` / `migrateDatabase()` を `beforeEach` で使い、クリーンな状態にリセットしましょう。
 
 ```typescript
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
-import { DatabaseFake, RefreshDatabase } from '@guren/testing'
+import { describe, it, expect, beforeEach } from 'bun:test'
+import { resetDatabase, migrateDatabase } from '@/config/database'
 
 describe('User モデル', () => {
   beforeEach(async () => {
-    await RefreshDatabase.refresh()
-  })
-
-  afterEach(async () => {
-    await RefreshDatabase.cleanup()
+    await resetDatabase()   // すべてのテーブルを削除
+    await migrateDatabase() // マイグレーションを最初から再適用
   })
 
   it('ユーザーを作成する', async () => {
@@ -375,6 +391,20 @@ describe('User モデル', () => {
   })
 })
 ```
+
+`@guren/testing` には、よりきめ細かいテストごとのクリーンアップ用に `useTruncateTables(tables)` と `useDatabaseTransactions()` も用意されています。これらは各テストの前後にテーブルを truncate したり、トランザクションをロールバックしたりする `beforeEach`/`afterEach` フックを登録します。どちらも、事前に `setTestDatabase()` で登録した以下の形の接続に対して動作します。
+
+```typescript
+interface DatabaseConnection {
+  query<T = unknown>(sql: string, params?: unknown[]): Promise<T[]>
+  execute(sql: string, params?: unknown[]): Promise<void>
+  beginTransaction(): Promise<void>
+  commit(): Promise<void>
+  rollback(): Promise<void>
+}
+```
+
+Guren の SQLite アダプターはこの `DatabaseConnection` をそのまま提供しません — `config/database.ts` の `getDatabase()` が解決するのは内部の Drizzle インスタンスであり、このインターフェースとは形が異なります。そのため、これらのヘルパーを使うにはアダプターを自分で書き、テスト実行前に `setTestDatabase()` へ渡す必要があります。ラップする接続は**モデルが書き込みに使っているものと同一の接続でなければなりません** — 同じファイルへ独立に開いた 2 本目の接続では、1 本目の接続で行った書き込みが見えず、ロールバックもされません。とくに `useDatabaseTransactions()` は、アダプターがその単一の接続を共有している場合にのみ機能します。ここまでの配線が過剰だと感じる場合は、上記の `resetDatabase()` / `migrateDatabase()` パターンの方がシンプルで、この問題自体を回避できます。
 
 ### HTTP テスト
 
