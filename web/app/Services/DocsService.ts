@@ -100,7 +100,7 @@ const GUIDE_SECTIONS: readonly DocSectionConfig[] = [
   },
   {
     title: { en: 'Security', ja: 'セキュリティ' },
-    slugs: ['authentication', 'authorization', 'api-tokens', 'password-reset', 'email-verification', 'encryption'],
+    slugs: ['authentication', 'oauth', 'authorization', 'api-tokens', 'password-reset', 'email-verification', 'encryption'],
   },
   {
     title: { en: 'Digging Deeper', ja: '応用機能' },
