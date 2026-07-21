@@ -351,24 +351,34 @@ describe('TestApp', () => {
   })
 
   it('create({ auth }) mounts session + CSRF middleware like createApp', async () => {
+    const originalAppKey = process.env.APP_KEY
     process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
-    const app = await TestApp.create({
-      auth: {},
-      routes: (router) => {
-        router.get('/form', () => new Response('ok'))
-        router.post('/submit', () => new Response(JSON.stringify({ ok: true }), {
-          headers: { 'Content-Type': 'application/json' },
-        }))
-      },
-    })
+    try {
+      const app = await TestApp.create({
+        auth: {},
+        routes: (router) => {
+          router.get('/form', () => new Response('ok'))
+          router.post('/submit', () => new Response(JSON.stringify({ ok: true }), {
+            headers: { 'Content-Type': 'application/json' },
+          }))
+        },
+      })
 
-    // Without a CSRF token the mutating request is rejected.
-    const blocked = await app.post('/submit', { title: 'x' })
-    expect(blocked.status).toBeGreaterThanOrEqual(400)
+      // Without a CSRF token the mutating request is rejected (403, per
+      // createCsrfMiddleware's default).
+      const blocked = await app.post('/submit', { title: 'x' })
+      expect(blocked.status).toBe(403)
 
-    // withCsrf() primes session + XSRF-TOKEN, after which the mutation passes.
-    const csrf = await app.withCsrf('/form')
-    await csrf.post('/submit', { title: 'x' }).assertOk()
+      // withCsrf() primes session + XSRF-TOKEN, after which the mutation passes.
+      const csrf = await app.withCsrf('/form')
+      await csrf.post('/submit', { title: 'x' }).assertOk()
+    } finally {
+      if (originalAppKey === undefined) {
+        delete process.env.APP_KEY
+      } else {
+        process.env.APP_KEY = originalAppKey
+      }
+    }
   })
 
   it('create() without auth leaves CSRF unmounted', async () => {
