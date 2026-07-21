@@ -12,22 +12,17 @@ const debugMock = mock(() => {})
 const errorMock = mock(() => {})
 
 // Bun runs all test files in one shared process, and mock.module()
-// replacements are not undone by mock.restore() — a mock missing an export
-// silently breaks any other test file that needs the real one. Mirror
-// citty's full export surface even though this file only exercises
-// defineCommand/runMain.
+// replacements are not undone by mock.restore() — even with --isolate the
+// replacement leaks into other test files through the shared module
+// registry. Spread the real module and override only runMain (all this file
+// needs), so leaked imports still get the real defineCommand/runCommand —
+// stubbing runCommand here silently broke the plugin-commands tests.
+const realCitty = await import('citty')
 await mock.module('citty', () => ({
-  createMain: (command: any) => () => command,
-  defineCommand: (command: any) => command,
-  parseArgs: (args: unknown) => args,
-  renderUsage: async () => '',
-  runCommand: async (command: any) => {
-    capturedCommand = command
-  },
+  ...realCitty,
   runMain: async (command: any) => {
     capturedCommand = command
   },
-  showUsage: async () => {},
 }))
 
 const consolaStub = {
