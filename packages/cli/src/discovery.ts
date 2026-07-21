@@ -2,6 +2,8 @@ import { readdir, access, readFile, stat } from 'node:fs/promises'
 import { resolve, join, extname } from 'node:path'
 
 const SOURCE_EXTENSIONS = new Set(['.ts', '.mts', '.js', '.mjs'])
+const TEST_FILE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.js', '.jsx', '.mjs'])
+const TEST_FILE_PATTERN = /\.test\.(ts|tsx|mts|js|jsx|mjs)$/
 
 /**
  * Recursively collect files from a directory matching given extensions.
@@ -106,6 +108,16 @@ export function discoverValidatorFiles(appRoot: string): Promise<string[]> {
 
 export function discoverPolicyFiles(appRoot: string): Promise<string[]> {
   return discoverDir(appRoot, 'app/Policies')
+}
+
+/**
+ * Discover `*.test.{ts,tsx,mts,js,jsx,mjs}` files under the project's `tests/`
+ * directory (the convention used by scaffolded apps and the blog example).
+ */
+export async function discoverTestFiles(appRoot: string): Promise<string[]> {
+  const dir = resolve(appRoot, 'tests')
+  const files = await collectFiles(dir, TEST_FILE_EXTENSIONS)
+  return files.filter((file) => TEST_FILE_PATTERN.test(file))
 }
 
 /**
