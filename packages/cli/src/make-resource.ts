@@ -8,13 +8,13 @@ function resourceTemplate(className: string, modelName: string): string {
 import type { ${modelName}Record } from '../../Models/${modelName}.js'
 
 export interface ${className}Data extends Record<string, unknown> {
-  id: number
+  id: ${modelName}Record['id']
 }
 
 export class ${className} extends Resource<${modelName}Record> {
   toArray(): ${className}Data {
     return {
-      id: this.resource.id as number,
+      id: this.resource.id,
       // Map the remaining ${modelName}Record columns here. Only call
       // .toISOString() on Date columns — text timestamps are already strings.
     }

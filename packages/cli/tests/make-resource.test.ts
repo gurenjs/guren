@@ -16,6 +16,11 @@ describe('makeResource', () => {
       )
       expect(content).toContain('export class CommentResource extends Resource<CommentRecord>')
       expect(content).toContain('export interface CommentResourceData extends Record<string, unknown>')
+      // id type is derived from the record, not hardcoded — a UUID/text primary
+      // key must not be forced through an incorrect `number` cast.
+      expect(content).toContain("id: CommentRecord['id']")
+      expect(content).toContain('id: this.resource.id,')
+      expect(content).not.toContain('as number')
       expect(content).not.toContain('this.resource.createdAt?.toISOString()')
     } finally {
       await workspace.cleanup()
