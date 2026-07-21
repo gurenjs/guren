@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'bun:test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { createTempWorkspace } from './helpers'
 import { buildPageModuleContent, generatePageTypes, type PageDefinition } from '../src/pages-types'
+
+const CLI_BIN_PATH = resolve(import.meta.dir, '../src/bin.ts')
 
 describe('buildPageModuleContent', () => {
   it('generates a runtime manifest and nested page contracts', () => {
@@ -76,4 +78,47 @@ describe('generatePageTypes overwrite behavior', () => {
       await workspace.cleanup()
     }
   })
+
+  // Regression test for `codegenCommand` itself (packages/cli/src/bin.ts),
+  // not just the generator it calls — this is what actually reproduces the
+  // original bug report ("already exists. Use --force to overwrite." on a
+  // plain second `bunx guren codegen` run). The tests above exercise
+  // generatePageTypes() directly with force passed explicitly either way,
+  // so they'd pass unchanged even if codegenCommand stopped forcing it.
+  it('codegen CLI command overwrites existing artifacts on a second run without --force', async () => {
+    const workspace = await createTempWorkspace('guren-cli-codegen-command-')
+    try {
+      await mkdir(join(workspace.dir, 'resources/js/pages'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'resources/js/pages/Home.tsx'),
+        'export default function Home() { return null }\n',
+        'utf8',
+      )
+
+      const runCodegen = () =>
+        Bun.spawn(['bun', CLI_BIN_PATH, 'codegen', '--app', workspace.dir], {
+          stdout: 'pipe',
+          stderr: 'pipe',
+        })
+
+      const first = runCodegen()
+      expect(await first.exited).toBe(0)
+
+      // No routes/web.ts exists in this fixture, so the command generates
+      // pages.gen.ts, warns that routes/data/channel/API-client generation
+      // was skipped, and exits 0 — exercising the exact write path the
+      // original bug hit without needing a full routes/schema fixture.
+      const second = runCodegen()
+      const secondExitCode = await second.exited
+      const secondStderr = await new Response(second.stderr).text()
+
+      expect(secondExitCode).toBe(0)
+      expect(secondStderr).not.toContain('already exists')
+
+      const content = await readFile(join(workspace.dir, '.guren/pages.gen.ts'), 'utf8')
+      expect(content).toContain("'Home': './pages/Home.tsx'")
+    } finally {
+      await workspace.cleanup()
+    }
+  }, 20000)
 })

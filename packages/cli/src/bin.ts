@@ -703,8 +703,11 @@ const codegenCommand = defineCommand({
   args: routeTypesCommand.args,
   async run({ args }) {
     // Unlike make:* and routes:types, codegen's outputs are entirely
-    // generated artifacts under .guren/ — safe to overwrite by default.
-    // --force is still accepted for backward compatibility but is a no-op.
+    // generated artifacts under .guren/ and types/generated/ — safe to
+    // overwrite by default, including custom --out/--pages-out destinations
+    // (those flags exist to redirect where a generated artifact lands, not
+    // to protect hand-maintained files). --force is still accepted for
+    // backward compatibility but is a no-op.
     const writerOptions: WriterOptions = { ...toWriterOptions(args), force: true }
     const { outputPath: pagesOutputPath } = await generatePageTypes({
       appRoot: args.app,
