@@ -848,7 +848,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    * const post = await Post.findWith(1, 'author')
    * const post = await Post.findWith(1, ['author', 'tags'])
    */
-  static async findWith<T extends typeof Model, K extends RelationKey<T>>(
+  static async findWith<T extends typeof Model, K extends RelationPath<T>>(
     this: T,
     id: TRecordFor<T>[keyof TRecordFor<T> & string],
     relations: K | readonly K[],
@@ -888,8 +888,9 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    * @example
    * const post = await Post.findWithOrFail(1, 'author')
    * const post = await Post.findWithOrFail(1, ['author', 'tags'])
+   * const post = await Post.findWithOrFail(1, 'comments.author') // nested
    */
-  static async findWithOrFail<T extends typeof Model, K extends RelationKey<T>>(
+  static async findWithOrFail<T extends typeof Model, K extends RelationPath<T>>(
     this: T,
     id: TRecordFor<T>[keyof TRecordFor<T> & string],
     relations: K | readonly K[],
@@ -1507,7 +1508,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    * // result.data - Users with their posts loaded
    * // result.meta - Pagination metadata
    */
-  static async withPaginate<T extends typeof Model, K extends RelationKey<T>>(
+  static async withPaginate<T extends typeof Model, K extends RelationPath<T>>(
     this: T,
     relations: K | readonly K[],
     options?: PaginateOptions<TRecordFor<T>>,
@@ -1815,8 +1816,11 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    *
    * // With filtering
    * const activeUsersWithPosts = await User.with('posts', { status: 'active' })
+   *
+   * // Nested relations via dot notation
+   * const usersWithPostComments = await User.with('posts.comments')
    */
-  static async with<T extends typeof Model, K extends RelationKey<T>>(
+  static async with<T extends typeof Model, K extends RelationPath<T>>(
     this: T,
     relations: K | readonly K[],
     where?: WhereClauseFor<T>,
@@ -2346,6 +2350,13 @@ type FieldFor<T extends typeof Model> = keyof TRecordFor<T> & string
 
 type RelationNames = string | readonly string[]
 
+// A declared relation key, or a dot-notation nested path rooted at one
+// ('comments.author'). The nested tail is unvalidated — declare the nested
+// record shape inside relationTypes to type the loaded children.
+type RelationPath<T extends typeof Model> = RelationKey<T> | `${RelationKey<T>}.${string}`
+
+type RelationHead<Name> = Name extends `${infer Head}.${string}` ? Head : Name
+
 type RelationTypesFor<T extends typeof Model> = T extends { relationTypes: infer R }
   ? R extends RelationShape
     ? R
@@ -2362,7 +2373,7 @@ type RelationNameUnion<Names> = Names extends readonly (infer Items)[] ? Items :
 // would distribute over the union and turn with(['a', 'b']) results into
 // `{ a } | { b }` instead of `{ a } & { b }`.
 type RelationTypePick<T extends typeof Model, Names> = {
-  [K in RelationNameUnion<Names> & string & keyof RelationTypesFor<T>]: RelationTypesFor<T>[K]
+  [K in RelationHead<RelationNameUnion<Names>> & string & keyof RelationTypesFor<T>]: RelationTypesFor<T>[K]
 }
 
 type RelationCountPick<Names> = { [K in RelationNameUnion<Names> & string as `${K}Count`]: number }
@@ -2459,6 +2470,16 @@ export type HasManyRecord<TRecord extends PlainObject> = TRecord[]
 /** Utility type for belongsTo relation data shape. */
 export type BelongsToRecord<TRecord extends PlainObject> = TRecord | null
 
+/**
+ * Utility type for belongsTo relations backed by a NOT NULL foreign key,
+ * where the parent is guaranteed to exist once loaded. Declare with the
+ * `declare` modifier so no runtime placeholder value is needed:
+ *
+ * @example
+ * declare static relationTypes: { author: BelongsToRequiredRecord<UserRecord> }
+ */
+export type BelongsToRequiredRecord<TRecord extends PlainObject> = TRecord
+
 /** Type for hasOne relation results (single record or null). */
 export type HasOneRelationResult<T extends typeof Model> = TRecordFor<T> | null
 
@@ -2492,7 +2513,7 @@ export type MorphToRecord = PlainObject | null
 /** Utility type: model record with specified relations merged. */
 export type WithRelations<
   T extends typeof Model,
-  K extends RelationKey<T> | readonly RelationKey<T>[],
+  K extends RelationPath<T> | readonly RelationPath<T>[],
 > = TRecordFor<T> & RelationTypePick<T, K>
 
 type ModelClassWithTable<

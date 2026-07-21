@@ -334,6 +334,36 @@ Nested relations use dot notation:
 const users = await User.with('posts.comments')
 ```
 
+Nested paths type only the head segment from `relationTypes`. To get typed
+children, declare the nested shape inside the head relation's record type:
+
+```ts
+export class User extends defineModel(users) {
+  declare static relationTypes: {
+    posts: HasManyRecord<PostRecord & { comments: CommentRecord[] }>
+  }
+}
+
+const loaded = await User.with('posts.comments')
+loaded[0].posts[0].comments // CommentRecord[] — typed end to end
+```
+
+`BelongsToRecord<T>` is always `T | null` — the loader cannot know the row
+exists. When the foreign key is `NOT NULL` and the parent is guaranteed,
+declare the relation with `BelongsToRequiredRecord<T>` instead. Using the
+`declare` modifier skips the runtime placeholder value:
+
+```ts
+export class Comment extends defineModel(comments) {
+  declare static relationTypes: {
+    author: BelongsToRequiredRecord<UserRecord>
+  }
+}
+
+const comments = await Comment.with('author')
+comments[0].author.name // no null check required
+```
+
 ### Relation Counts
 
 `withCount()` attaches a `${name}Count` field without loading the related rows —

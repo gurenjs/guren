@@ -27,6 +27,7 @@ export type {
   HasManyRecord,
   HasOneRecord,
   BelongsToRecord,
+  BelongsToRequiredRecord,
   BelongsToManyRecord,
   HasManyThroughRecord,
   MorphManyRelationResult,
