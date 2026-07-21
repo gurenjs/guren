@@ -80,6 +80,13 @@ Typed relation results — declare `static relationTypes` using these exported t
 `HasManyRecord<T>` = `T[]` · `HasOneRecord<T>` = `T | null` · `BelongsToRecord<T>` = `T | null` ·
 `BelongsToManyRecord<T>` = `T[]` · `HasManyThroughRecord<T>` = `T[]`
 
+**Placeholder value must match the alias's shape**, not always `null`: array-typed relations (`hasMany`/`belongsToMany`/`hasManyThrough`) need `[]`, single-record relations (`hasOne`/`belongsTo`) need `null` — mixing them up is a TS error.
+
+```typescript
+static override relationTypes: { comments: HasManyRecord<CommentRecord> } = { comments: [] }  // hasMany → []
+static override relationTypes: { author: BelongsToRecord<UserRecord> } = { author: null }     // belongsTo → null
+```
+
 ## Eager loading
 
 ```typescript

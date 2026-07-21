@@ -49,6 +49,8 @@ Page prop types come from each page component's `interface Props`, extracted by
 `bunx guren codegen` into `PagePropsMap`. If props don't type-check, re-run codegen.
 Optional third arg: `InertiaResponseOptions` (e.g. `{ status: 422 }`).
 
+**No global shared props by default.** `shareInertiaProps(resolverFn)` (from `@guren/core`) can inject data (e.g. `auth.user`) into every Inertia response, but a fresh scaffold never calls it. `usePage<{ auth: {...} }>()` on the frontend silently resolves to `undefined` — it type-checks but is wrong at runtime. Pass everything a page needs explicitly through `this.inertia(page, { ... })` and declare it in that page's `interface Props`; only reach for `usePage()` for props you have actually wired up via `shareInertiaProps`.
+
 ## Route model binding
 
 ```typescript
@@ -69,6 +71,40 @@ Authorization (policies/gates):
 `await this.authorize('update', [Post, post])` (throws 403) ·
 `await this.can('update', [Post, post]): Promise<boolean>` ·
 API tokens: `this.apiToken()` → `{ userId, abilities }` or throws 401.
+
+**`<T>` defaults to `Authenticatable`** (`{ getAuthIdentifier(): unknown; getAuthPassword(): string; ... }`) — it does **not** have `.id`. Pass your record type explicitly when you need field access: `const user = await this.auth.userOrFail<UserRecord>(); user.id` — omitting `<T>` type-checks until the first `.id`/`.email` access.
+
+## Exceptions
+
+All extend `HttpException` (import from `@guren/core`) and are rendered automatically by the global handler via their `statusCode` — throw directly from a controller method, no try/catch needed:
+
+```typescript
+HttpException.badRequest(msg?)      // 400
+HttpException.unauthorized(msg?)    // 401
+HttpException.forbidden(msg?)       // 403
+HttpException.notFound(msg?)        // 404
+HttpException.conflict(msg?)        // 409
+HttpException.unprocessable(msg?, errors?)  // 422 — same errors shape as validateBody()
+HttpException.internal(msg?)        // 500
+// also: methodNotAllowed / gone / tooManyRequests / notImplemented / badGateway / serviceUnavailable / gatewayTimeout
+
+new ValidationException({ email: ['Already registered'] })          // 422
+ValidationException.withMessages({ email: 'Already registered' })   // string | string[] values
+
+new AuthenticationException(message?, guard?, redirectTo?)          // 401
+AuthenticationException.withRedirect(redirectTo, message?)
+
+new AuthorizationException(message?, action?, resource?)            // 403
+AuthorizationException.deny(resource?)              // e.g. AuthorizationException.deny('Comment')
+AuthorizationException.forAction(action, resource?)
+
+new NotFoundHttpException(message?)                                 // 404
+NotFoundHttpException.forModel('User', 123)
+```
+
+Use `AuthorizationException.deny(...)` for manual ownership checks that don't go through `this.authorize()`/policies.
+
+**`Model.findOrFail()` throws `ModelNotFoundException` from `@guren/orm`** — a separate class that does *not* extend `HttpException`; the handler picks it up via its duck-typed `statusCode: 404`. `forModel()` exists only on `NotFoundHttpException`.
 
 ## Response helpers
 
