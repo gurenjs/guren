@@ -1,11 +1,57 @@
+import { resourceName, writeFileSafe, ensureSuffix } from './utils'
 import type { WriterOptions } from './utils'
-import { resourceName, writeFileSafe } from './utils'
+import { fileExists, readIfExists } from './discovery'
 
 const TEST_ROOT = 'tests'
+const CONTROLLER_TEST_DIR = `${TEST_ROOT}/controllers`
 
 export type TestRunner = 'bun' | 'vitest'
 
-const DEFAULT_RUNNER: TestRunner = 'vitest'
+// Scaffolded apps run their test script via `bun test` and don't ship
+// vitest by default, so `bun:test` is the safe default. `detectRunner`
+// switches to vitest when the target project has opted into it.
+const FALLBACK_RUNNER: TestRunner = 'bun'
+
+const VITEST_CONFIG_CANDIDATES = [
+  'vitest.config.ts',
+  'vitest.config.js',
+  'vitest.config.mts',
+  'vitest.config.mjs',
+  'vitest.config.cts',
+  'vitest.config.cjs',
+]
+
+interface PackageJsonShape {
+  dependencies?: Record<string, string>
+  devDependencies?: Record<string, string>
+}
+
+/**
+ * Detect which test runner the target project (cwd) is set up for.
+ * Looks for a vitest config file, then for a `vitest` dependency in
+ * package.json. Falls back to `bun` when neither is found.
+ */
+export async function detectRunner(cwd: string = process.cwd()): Promise<TestRunner> {
+  for (const candidate of VITEST_CONFIG_CANDIDATES) {
+    if (await fileExists(cwd, candidate)) {
+      return 'vitest'
+    }
+  }
+
+  const pkgRaw = await readIfExists(cwd, 'package.json')
+  if (pkgRaw) {
+    try {
+      const pkg = JSON.parse(pkgRaw) as PackageJsonShape
+      if (pkg.dependencies?.vitest || pkg.devDependencies?.vitest) {
+        return 'vitest'
+      }
+    } catch {
+      // Malformed package.json — fall through to the default runner.
+    }
+  }
+
+  return FALLBACK_RUNNER
+}
 
 function testTemplate(suiteName: string, runner: TestRunner): string {
   const importPath = runner === 'bun' ? 'bun:test' : 'vitest'
@@ -22,6 +68,7 @@ describe('${suiteName}', () => {
 
 export interface MakeTestOptions extends WriterOptions {
   runner?: TestRunner
+  controller?: boolean
 }
 
 export async function makeTest(name: string, options: MakeTestOptions = {}): Promise<string> {
@@ -30,7 +77,7 @@ export async function makeTest(name: string, options: MakeTestOptions = {}): Pro
     throw new Error('Test name is required.')
   }
 
-  const runner = options.runner ?? DEFAULT_RUNNER
+  const runner = options.runner ?? (await detectRunner())
 
   const normalizedPath = trimmed.replace(/^\/+/gu, '').replace(/\/+$/gu, '')
   if (!normalizedPath) {
@@ -40,10 +87,13 @@ export async function makeTest(name: string, options: MakeTestOptions = {}): Pro
   const segments = normalizedPath.split('/').filter(Boolean)
   const baseSegment = segments.pop() ?? 'Example'
   const baseName = baseSegment.replace(/\.(test\.)?(t|j)sx?$/giu, '')
-  const { className } = resourceName(baseName)
+  const { className: baseClassName } = resourceName(baseName)
+  const className = options.controller ? ensureSuffix(baseClassName, 'Controller') : baseClassName
   const fileName = `${className}.test.ts`
-  const filePath = `${TEST_ROOT}/${[...segments, fileName].join('/')}`
+  const filePath = options.controller
+    ? `${CONTROLLER_TEST_DIR}/${fileName}`
+    : `${TEST_ROOT}/${[...segments, fileName].join('/')}`
 
-  const { runner: _runner, ...writer } = options
+  const { runner: _runner, controller: _controller, ...writer } = options
   return writeFileSafe(filePath, testTemplate(className, runner), writer)
 }
