@@ -20,6 +20,19 @@ const app = TestApp.fromFetch(app.fetch)       // wrap an existing fetch fn (not
 
 Both set `GUREN_TESTING=1` so `actingAs()` header auth is accepted.
 
+**Session + CSRF in tests.** `TestApp.create()` accepts `auth` just like `createApp({ auth: {} })`. Without it, session + CSRF middleware are **not** mounted — JSON requests (`app.json().post(...)`) pass with no CSRF check at all, which is fine for quick validation/auth-guard checks but not representative of production. To exercise real CSRF behavior (and for `withCsrf()` to work — it throws `"did not set an XSRF-TOKEN cookie"` otherwise):
+
+```typescript
+const app = await TestApp.create({
+  auth: {},
+  providers: [DatabaseProvider],
+  routes: registerWebRoutes,
+})
+const csrf = await app.withCsrf()
+```
+
+**Not installed by default**: `@guren/testing` isn't in a fresh scaffold's `devDependencies` — run `bun add -d @guren/testing`. The main entry does not require vitest; `useDatabaseTransactions()`/`useTruncateTables()` pick up bun:test's injected globals automatically — under vitest, `import '@guren/testing/vitest'` once in your setup file to register its hooks.
+
 ## Client methods
 
 ```typescript

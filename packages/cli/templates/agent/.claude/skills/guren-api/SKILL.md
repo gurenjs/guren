@@ -1,6 +1,6 @@
 ---
 name: guren-api
-description: Guren framework API documentation, code patterns, and examples. Covers all subsystems — Controllers, Models, Routes, Middleware, Authentication, Authorization, Events, Jobs, Queue, Mail, Cache, Validation, Broadcasting, Notifications, Storage, Scheduling, I18n, Encryption, Health Checks, Error Handling, Container/ServiceProvider, Console Commands, and API Resources. Use when user asks "how to", "how does", "example of", "what is", or needs help understanding any Guren API.
+description: Guren framework API documentation, code patterns, and examples. Covers all subsystems — Controllers, Models, Routes, Middleware, Authentication, Authorization, Events, Jobs, Queue, Mail, Cache, Validation, Broadcasting, Notifications, Storage, Scheduling, I18n, Encryption, Health Checks, Error Handling, Container/ServiceProvider, Console Commands, and API Resources. Use when user asks "how to", "how does", "example of", "what is", or needs help understanding any Guren API — and proactively during implementation whenever you encounter an unfamiliar @guren/* API surface; check this before grepping node_modules dist files.
 ---
 
 # Guren API Documentation Skill
@@ -37,7 +37,7 @@ export default class PostController extends Controller {
 
   async store() {
     const data = await this.validateBody(PostPayloadSchema)  // throws 422
-    const user = await this.auth.userOrFail()                // throws 401
+    const user = await this.auth.userOrFail<UserRecord>()    // throws 401 — <T> defaults to Authenticatable, no .id
     const post = await Post.create({ ...data, authorId: user.id })
     return this.redirect('/posts/' + post?.id)
   }
@@ -228,6 +228,30 @@ Additional auth features:
 - Email Verification: `packages/server/src/auth/email-verification.ts`
 - Password Reset: `packages/server/src/auth/password-reset.ts`
 
+### Testing (@guren/testing)
+Source: `packages/testing/src/`
+
+Not installed by default — `bun add -d @guren/testing`.
+
+```typescript
+import { TestApp } from '@guren/testing'
+
+const app = await TestApp.create({
+  auth: {},                      // mounts session + CSRF middleware (needed for withCsrf())
+  providers: [DatabaseProvider],
+  routes: registerWebRoutes,
+})
+
+await app.get('/posts').assertOk()
+
+const csrf = await app.actingAs(user).withCsrf()   // header auth + primed XSRF cookie
+await csrf.post('/posts', { title: 'Hi' }).assertRedirect('/posts')
+```
+
+- `actingAs(user)` / `withCsrf()` each return a **new** `TestApp` — chain or reassign, don't discard the result
+- Without `auth`, no session/CSRF middleware is mounted — `app.json().post(...)` skips CSRF entirely, fine for quick checks but not production-representative
+- The main entry has no vitest dependency; DB lifecycle helpers (`useDatabaseTransactions` etc.) use bun:test globals automatically — vitest projects `import '@guren/testing/vitest'` once in setup to register hooks
+
 ## Extended Subsystems
 
 ### Authorization (Gate & Policy)
@@ -354,6 +378,34 @@ The ExceptionHandler automatically handles:
 - Any error with a `statusCode` property (duck-typed) → uses that status code (e.g., `ModelNotFoundException` → 404)
 - Other errors → 500 (message hidden unless debug mode)
 
+Factory methods — throw directly from a controller method, no try/catch needed:
+
+```typescript
+HttpException.badRequest(msg?)      // 400
+HttpException.unauthorized(msg?)    // 401
+HttpException.forbidden(msg?)       // 403
+HttpException.notFound(msg?)        // 404
+HttpException.conflict(msg?)        // 409
+HttpException.unprocessable(msg?, errors?)  // 422 — same errors shape as validateBody()
+HttpException.internal(msg?)        // 500
+// also: methodNotAllowed / gone / tooManyRequests / notImplemented / badGateway / serviceUnavailable / gatewayTimeout
+
+new ValidationException({ email: ['Already registered'] })          // 422
+ValidationException.withMessages({ email: 'Already registered' })   // string | string[] values
+
+new AuthenticationException(message?, guard?, redirectTo?)          // 401
+AuthenticationException.withRedirect(redirectTo, message?)
+
+new AuthorizationException(message?, action?, resource?)            // 403
+AuthorizationException.deny(resource?)              // e.g. AuthorizationException.deny('Comment')
+AuthorizationException.forAction(action, resource?)
+
+new NotFoundHttpException(message?)                                 // 404
+NotFoundHttpException.forModel('User', 123)
+```
+
+`Model.findOrFail()` throws `ModelNotFoundException` from `@guren/orm` — it does *not* extend `HttpException`; the handler picks it up via its duck-typed `statusCode: 404`.
+
 ### Container & Service Providers
 Source: `packages/server/src/container/`
 
@@ -406,6 +458,7 @@ Source: `packages/server/src/redis/`
 | Models | `packages/orm/src/Model.ts` |
 | Routes | `packages/server/src/mvc/Route.ts` |
 | Auth | `packages/server/src/auth/` |
+| Testing | `packages/testing/src/` |
 | Authorization | `packages/server/src/authorization/` |
 | Events | `packages/server/src/events/` |
 | Queue/Jobs | `packages/server/src/queue/` |

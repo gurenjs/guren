@@ -35,7 +35,7 @@ export default class PostController extends Controller {
 
   async store() {
     const data = await this.validateBody(PostPayloadSchema)  // throws 422
-    const user = await this.auth.userOrFail()                // throws 401
+    const user = await this.auth.userOrFail<UserRecord>()    // throws 401
     const post = await Post.create({ ...data, authorId: user.id })
     return this.redirect('/posts/' + post?.id)
   }
@@ -54,6 +54,8 @@ All throw `ValidationException` (HTTP 422) on failure.
 **Auth helpers:**
 - `this.auth.user<T>()` — returns user or null
 - `this.auth.userOrFail<T>()` — returns user or throws `AuthenticationException` (401)
+
+`<T>` defaults to `Authenticatable`, which has **no `.id`** — pass your record type (`userOrFail<UserRecord>()`) whenever you access fields.
 
 ### Models
 Source: `packages/orm/src/Model.ts`
@@ -216,8 +218,8 @@ router.middleware('auth').group((auth) => {
 })
 
 // In controller
-const user = await this.auth.user()         // returns user | null
-const user = await this.auth.userOrFail()   // throws AuthenticationException (401)
+const user = await this.auth.user<UserRecord>()         // returns user | null
+const user = await this.auth.userOrFail<UserRecord>()   // throws AuthenticationException (401)
 const isLoggedIn = await this.auth.check()  // returns boolean
 ```
 

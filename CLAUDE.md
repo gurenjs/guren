@@ -169,7 +169,7 @@ export class PostController extends Controller {
 
   async store() {
     const data = await this.validateBody(CreatePostSchema)  // throws 422 on failure
-    const user = await this.auth.userOrFail()  // throws 401 if unauthenticated
+    const user = await this.auth.userOrFail<UserRecord>()  // throws 401 if unauthenticated
     const post = await Post.create({ ...data, authorId: user.id })
     return this.redirect('/posts')
   }

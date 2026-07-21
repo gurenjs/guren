@@ -134,7 +134,7 @@ router.post('/posts', { name: 'posts.store', body: CreatePostSchema }, [PostCont
 export class PostController extends Controller {
   async store() {
     const data = await this.validateBody(CreatePostSchema)   // 422 on failure
-    const user = await this.auth.userOrFail()                // 401 if unauthenticated
+    const user = await this.auth.userOrFail<UserRecord>()    // 401 if unauthenticated
     const post = await Post.create({ ...data, authorId: user.id })
     return this.redirect('/posts')
   }
