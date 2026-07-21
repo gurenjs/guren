@@ -149,7 +149,25 @@ function resolveDatabaseFilename(): string {
 Tests read and write `./data/guren.test.db` by default — a separate file from `./data/guren.db`, so nothing a test creates ever leaks into the data you're looking at in the dev server. Override the test file itself with `TEST_DATABASE_URL` (for example, to give each parallel CI shard its own file); `DATABASE_URL` stays authoritative for every other environment.
 
 > [!WARNING]
-> Scaffolds created before this branch existed write straight to `DATABASE_URL` (or `./data/guren.db`) regardless of `NODE_ENV`, so `bun test` pollutes the same database your dev server reads from. If your `config/database.ts` doesn't have the `NODE_ENV === 'test'` check above, add it — that's the entire fix.
+> Scaffolds created before this branch existed write straight to `DATABASE_URL` (or `./data/guren.db`) regardless of `NODE_ENV`, so `bun test` pollutes the same database your dev server reads from. Retrofit it by replacing the `filename` option, not just adding the helper — the helper alone does nothing until `createSqliteDatabase()` is actually pointed at it:
+>
+> ```diff
+>  import { createSqliteDatabase } from '@guren/orm'
+>
+> +function resolveDatabaseFilename(): string {
+> +  if (process.env.NODE_ENV === 'test') {
+> +    return process.env.TEST_DATABASE_URL ?? './data/guren.test.db'
+> +  }
+> +  return process.env.DATABASE_URL ?? './data/guren.db'
+> +}
+> +
+>  const database = createSqliteDatabase({
+>    migrationsFolder: new URL('../db/migrations', import.meta.url),
+>    seedersFolder: new URL('../db/seeders', import.meta.url),
+> -  filename: () => process.env.DATABASE_URL ?? './data/guren.db',
+> +  filename: resolveDatabaseFilename,
+>  })
+> ```
 
 ### Cleaning Up Between Tests
 
@@ -177,7 +195,7 @@ describe('User Model', () => {
 })
 ```
 
-`@guren/testing` also ships `useTruncateTables(tables)` and `useDatabaseTransactions()` for finer-grained, per-test cleanup — they register `beforeEach`/`afterEach` hooks that truncate tables or roll back a transaction around each test. Both operate on a connection you register up front with `setTestDatabase()`, matching this shape:
+`@guren/testing` also ships `useTruncateTables(tables)` and `useDatabaseTransactions()` for finer-grained, per-test cleanup. `useTruncateTables()` registers a `beforeEach` hook that deletes each table's rows; `useDatabaseTransactions()` registers `beforeEach`/`afterEach` hooks that begin a transaction and roll it back after the test. Both operate on a connection you register up front with `setTestDatabase()`, matching this shape:
 
 ```ts
 interface DatabaseConnection {
@@ -189,7 +207,7 @@ interface DatabaseConnection {
 }
 ```
 
-Guren's SQLite adapter doesn't hand you a ready-made `DatabaseConnection` — `getDatabase()` from `config/database.ts` resolves to the underlying Drizzle instance, not this interface — so using these helpers means writing a small adapter yourself and passing it to `setTestDatabase()` before your tests run. Whatever you wrap **must be the same connection your models write through**; a second, independently-opened connection to the same file won't see (or roll back) writes made via the first one, so `useDatabaseTransactions()` in particular only helps if the adapter shares that single connection. If that sounds like more plumbing than your suite needs, the `resetDatabase()`/`migrateDatabase()` pattern above is simpler and sidesteps the whole question.
+Guren's SQLite adapter doesn't hand you a ready-made `DatabaseConnection` — `getDatabase()` from `config/database.ts` resolves to the underlying Drizzle instance, not this interface — so using these helpers means writing a small adapter yourself and passing it to `setTestDatabase()` before your tests run. `useDatabaseTransactions()` specifically **must wrap the same connection your models write through**: it begins a transaction on `beforeEach` and rolls it back on `afterEach`, and a second, independently-opened connection to the same file won't see (or roll back) writes made via the first one. `useTruncateTables()` has no such requirement — a `DELETE FROM` on any connection to the same database file removes the rows your models see, since it commits immediately rather than participating in a shared transaction. If the adapter plumbing sounds like more than your suite needs, the `resetDatabase()`/`migrateDatabase()` pattern above is simpler and sidesteps the whole question.
 
 ## Faking Services
 

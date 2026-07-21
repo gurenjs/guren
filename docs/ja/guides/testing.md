@@ -364,7 +364,25 @@ function resolveDatabaseFilename(): string {
 テストはデフォルトで `./data/guren.db` とは別ファイルの `./data/guren.test.db` を読み書きします。そのため、テストが作成したデータが開発サーバーで見ているデータに混ざることはありません。テスト用ファイル自体は `TEST_DATABASE_URL` で上書きできます(例: 並列実行する CI シャードごとに別ファイルを割り当てる場合)。それ以外の環境では引き続き `DATABASE_URL` が優先されます。
 
 > [!WARNING]
-> このブランチが導入される前にスキャフォールドされたプロジェクトは、`NODE_ENV` に関係なく `DATABASE_URL`(または `./data/guren.db`)へ直接書き込みます。そのため `bun test` が開発サーバーと同じデータベースを汚染してしまいます。`config/database.ts` に上記の `NODE_ENV === 'test'` 分岐がなければ追加してください。それだけで修正は完了します。
+> このブランチが導入される前にスキャフォールドされたプロジェクトは、`NODE_ENV` に関係なく `DATABASE_URL`(または `./data/guren.db`)へ直接書き込みます。そのため `bun test` が開発サーバーと同じデータベースを汚染してしまいます。後付けする際はヘルパー関数を追加するだけでなく `filename` オプション自体を差し替えてください — ヘルパーを定義しただけでは `createSqliteDatabase()` がまだ古い `filename` を参照したままなので効果がありません:
+>
+> ```diff
+>  import { createSqliteDatabase } from '@guren/orm'
+>
+> +function resolveDatabaseFilename(): string {
+> +  if (process.env.NODE_ENV === 'test') {
+> +    return process.env.TEST_DATABASE_URL ?? './data/guren.test.db'
+> +  }
+> +  return process.env.DATABASE_URL ?? './data/guren.db'
+> +}
+> +
+>  const database = createSqliteDatabase({
+>    migrationsFolder: new URL('../db/migrations', import.meta.url),
+>    seedersFolder: new URL('../db/seeders', import.meta.url),
+> -  filename: () => process.env.DATABASE_URL ?? './data/guren.db',
+> +  filename: resolveDatabaseFilename,
+>  })
+> ```
 
 ### データのクリーンアップ
 
@@ -392,7 +410,7 @@ describe('User モデル', () => {
 })
 ```
 
-`@guren/testing` には、よりきめ細かいテストごとのクリーンアップ用に `useTruncateTables(tables)` と `useDatabaseTransactions()` も用意されています。これらは各テストの前後にテーブルを truncate したり、トランザクションをロールバックしたりする `beforeEach`/`afterEach` フックを登録します。どちらも、事前に `setTestDatabase()` で登録した以下の形の接続に対して動作します。
+`@guren/testing` には、よりきめ細かいテストごとのクリーンアップ用に `useTruncateTables(tables)` と `useDatabaseTransactions()` も用意されています。`useTruncateTables()` は各テーブルの行を削除する `beforeEach` フックのみを登録し、`useDatabaseTransactions()` はトランザクションを開始してテスト後にロールバックする `beforeEach`/`afterEach` フックを登録します。どちらも、事前に `setTestDatabase()` で登録した以下の形の接続に対して動作します。
 
 ```typescript
 interface DatabaseConnection {
@@ -404,7 +422,7 @@ interface DatabaseConnection {
 }
 ```
 
-Guren の SQLite アダプターはこの `DatabaseConnection` をそのまま提供しません — `config/database.ts` の `getDatabase()` が解決するのは内部の Drizzle インスタンスであり、このインターフェースとは形が異なります。そのため、これらのヘルパーを使うにはアダプターを自分で書き、テスト実行前に `setTestDatabase()` へ渡す必要があります。ラップする接続は**モデルが書き込みに使っているものと同一の接続でなければなりません** — 同じファイルへ独立に開いた 2 本目の接続では、1 本目の接続で行った書き込みが見えず、ロールバックもされません。とくに `useDatabaseTransactions()` は、アダプターがその単一の接続を共有している場合にのみ機能します。ここまでの配線が過剰だと感じる場合は、上記の `resetDatabase()` / `migrateDatabase()` パターンの方がシンプルで、この問題自体を回避できます。
+Guren の SQLite アダプターはこの `DatabaseConnection` をそのまま提供しません — `config/database.ts` の `getDatabase()` が解決するのは内部の Drizzle インスタンスであり、このインターフェースとは形が異なります。そのため、これらのヘルパーを使うにはアダプターを自分で書き、テスト実行前に `setTestDatabase()` へ渡す必要があります。**同一の接続でなければならない**という制約があるのは `useDatabaseTransactions()` だけです — `beforeEach` でトランザクションを開始し `afterEach` でロールバックするため、同じファイルへ独立に開いた 2 本目の接続では 1 本目の接続で行った書き込みが見えず、ロールバックもされません。`useTruncateTables()` にはこの制約はありません — `DELETE FROM` は即座にコミットされる操作なので、同じデータベースファイルへの接続であればどれを使ってもモデル側から見える行を削除できます。アダプターの配線が過剰だと感じる場合は、上記の `resetDatabase()` / `migrateDatabase()` パターンの方がシンプルで、この問題自体を回避できます。
 
 ### HTTP テスト
 
