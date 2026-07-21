@@ -1,5 +1,26 @@
 # @guren/cli
 
+## 1.3.0
+
+### Minor Changes
+
+- 8054533: Fix `make:resource --model` generating code that doesn't type-check: it referenced the model's class name (`Resource<Comment>`) instead of its inferred record type, and unconditionally called `.toISOString()` on `createdAt`/`updatedAt` even when the Drizzle schema stores them as `text()` (ISO strings), which throws at runtime. The generated resource now imports and extends `Resource<XRecord>` and leaves timestamp mapping to the developer instead of guessing the column type.
+
+  Fix `make:test` defaulting to a `vitest` import even in projects with no vitest installed (scaffolded apps ship `bun test`, not vitest) — the runner is now auto-detected from `vitest.config.*` / a `vitest` dependency in `package.json`, falling back to `bun:test`; `--runner` still overrides detection when passed explicitly.
+
+  Add the `--controller` flag to `make:test`, which `guren check`'s remediation message already referenced but which didn't exist — it now suffixes the class name with `Controller` and writes to `tests/controllers/${ClassName}.test.ts`, matching `guren check`'s first lookup candidate.
+
+### Patch Changes
+
+- 2f60c3b: Fix and expand the AI agent harness template (`.claude/rules/*.md`, `.claude/skills/guren-api/SKILL.md`, `CLAUDE.md`) shipped by `agent:init`/`agent:sync`:
+
+  - Document the `HttpException`/`ValidationException`/`AuthenticationException`/`AuthorizationException`/`NotFoundHttpException` factory methods in a new "Exceptions" section — previously only findable by grepping `node_modules/@guren/server/dist/*.d.ts`.
+  - Note that `this.auth.userOrFail()`'s `<T>` defaults to `Authenticatable`, which has no `.id`, and fix the `userOrFail()` examples across the templates to use `userOrFail<UserRecord>()` so copy-pasted code type-checks.
+  - Note that array-typed relations (`hasMany`, etc.) need a `[]` placeholder in `relationTypes`, not `null`.
+  - Note that Guren has no global shared Inertia props by default (`shareInertiaProps()` exists but a fresh scaffold never calls it), so `usePage()` for undeclared props silently resolves to `undefined`.
+  - Document `TestApp.create()`'s `auth` option and CSRF testing pattern, and add a "Testing (@guren/testing)" section to the `guren-api` skill (previously absent from the subsystem list entirely).
+  - Change the `guren-api` skill's frontmatter `description` from a purely reactive framing ("use when user asks...") to also prompt proactive use during implementation, before falling back to grepping dist files.
+
 ## 1.2.1
 
 ### Patch Changes
