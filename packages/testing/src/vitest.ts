@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, vi } from 'vitest'
 import type { PropsWithChildren, ReactElement } from 'react'
 import { createInertiaReactMock, resetInertiaPage } from './inertia'
+import { setTestLifecycleHooks } from './lifecycle'
+
+// Importing this module wires vitest's lifecycle hooks into the runner-agnostic
+// helpers on the main entry (useDatabaseTransactions, useTruncateTables).
+setTestLifecycleHooks({ beforeEach, afterEach })
 
 export interface ConfigureInertiaVitestOptions {
   Head?: (props: PropsWithChildren) => ReactElement | null

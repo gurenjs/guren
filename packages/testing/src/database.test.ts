@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   assertDatabaseCount,
   assertDatabaseEmpty,
@@ -84,11 +84,39 @@ describe('database hooks', () => {
     vi.clearAllMocks()
   })
 
-  useDatabaseTransactions(db)
-  useTruncateTables(['users'], db)
+  useDatabaseTransactions(db, { beforeEach, afterEach })
+  useTruncateTables(['users'], db, { beforeEach, afterEach })
 
   it('runs transaction and truncate hooks', () => {
     expect(db.beginTransaction).toHaveBeenCalledTimes(1)
     expect(db.execute).toHaveBeenCalledWith('DELETE FROM users')
+  })
+})
+
+describe('lifecycle hook resolution', () => {
+  it('throws a setup hint when no hooks are registered or injected', async () => {
+    vi.resetModules()
+    const { useDatabaseTransactions: use } = await import('./database')
+    expect(() => use()).toThrow('@guren/testing/vitest')
+  })
+
+  it('uses hooks registered via setTestLifecycleHooks', async () => {
+    vi.resetModules()
+    const { setTestLifecycleHooks } = await import('./lifecycle')
+    const { useDatabaseTransactions: use } = await import('./database')
+
+    const registered = { beforeEach: vi.fn(), afterEach: vi.fn() }
+    setTestLifecycleHooks(registered)
+    use()
+
+    expect(registered.beforeEach).toHaveBeenCalledTimes(1)
+    expect(registered.afterEach).toHaveBeenCalledTimes(1)
+  })
+
+  it('registers vitest hooks when the vitest entry is imported', async () => {
+    vi.resetModules()
+    await import('./vitest')
+    const { getTestLifecycleHooks } = await import('./lifecycle')
+    expect(() => getTestLifecycleHooks()).not.toThrow()
   })
 })

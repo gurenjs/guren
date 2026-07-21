@@ -14,6 +14,7 @@ type ApplicationConstructor = new (options: {
   boot?: BootCallback
   providers?: ProviderConstructor[]
   routes?: RouteRegistration
+  auth?: Record<string, unknown>
 }) => ApplicationLike
 
 /**
@@ -23,6 +24,13 @@ export interface TestAppOptions {
   readonly boot?: BootCallback
   readonly providers?: ProviderConstructor[]
   readonly routes?: RouteRegistration
+  /**
+   * Mirrors `createApp({ auth })`: pass `{}` (or full auth options) to mount
+   * session + CSRF middleware so tests exercise production-like behavior.
+   * Required for `withCsrf()` to work. Ignored by the Hono fallback used when
+   * `@guren/server` is not installed.
+   */
+  readonly auth?: Record<string, unknown>
 }
 
 /**
@@ -373,6 +381,7 @@ export class TestApp {
       boot: options.boot,
       providers: options.providers,
       routes: options.routes,
+      auth: options.auth,
     })
     await application.boot()
 

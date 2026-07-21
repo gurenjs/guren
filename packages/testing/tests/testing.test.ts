@@ -350,6 +350,39 @@ describe('TestApp', () => {
     await app.get('/health').assertOk().assertJson({ ok: true })
   })
 
+  it('create({ auth }) mounts session + CSRF middleware like createApp', async () => {
+    process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+    const app = await TestApp.create({
+      auth: {},
+      routes: (router) => {
+        router.get('/form', () => new Response('ok'))
+        router.post('/submit', () => new Response(JSON.stringify({ ok: true }), {
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      },
+    })
+
+    // Without a CSRF token the mutating request is rejected.
+    const blocked = await app.post('/submit', { title: 'x' })
+    expect(blocked.status).toBeGreaterThanOrEqual(400)
+
+    // withCsrf() primes session + XSRF-TOKEN, after which the mutation passes.
+    const csrf = await app.withCsrf('/form')
+    await csrf.post('/submit', { title: 'x' }).assertOk()
+  })
+
+  it('create() without auth leaves CSRF unmounted', async () => {
+    const app = await TestApp.create({
+      routes: (router) => {
+        router.post('/submit', () => new Response(JSON.stringify({ ok: true }), {
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      },
+    })
+
+    await app.post('/submit', { title: 'x' }).assertOk()
+  })
+
   it('actingAs authenticates requests through auth middleware', async () => {
     const app = new Hono()
     app.use('*', attachAuthContext(() => ({
