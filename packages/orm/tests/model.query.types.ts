@@ -143,6 +143,11 @@ async function _nestedRelationPaths() {
   await NestedRelUser.with('posts.')
   await NestedRelUser.with('posts..comments')
   await NestedRelUser.with('posts.comments.typo')
+
+  // 3+ level paths still resolve the type from the head segment only.
+  const deep = await NestedRelUser.with('posts.comments.author')
+  const _deepPosts: PostRecordT[] = deep[0].posts
+  void _deepPosts
 }
 void _nestedRelationPaths
 
