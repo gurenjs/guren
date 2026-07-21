@@ -2351,7 +2351,13 @@ type FieldFor<T extends typeof Model> = keyof TRecordFor<T> & string
 type RelationNames = string | readonly string[]
 
 // A declared relation key, or a dot-notation nested path rooted at one
-// ('comments.author'). The nested tail is unvalidated — declare the nested
+// ('comments.author'). Only the head segment is checked against
+// relationTypes — the tail is an unvalidated string, so a malformed path
+// ('comments.', 'comments..author') or a typo'd nested segment still
+// type-checks. loadRelationInto() throws "unknown relation" for a bad tail
+// segment at runtime, but only once it actually recurses into at least one
+// loaded child row — if every record's head relation loads zero rows, the
+// tail is never inspected and the call silently no-ops. Declare the nested
 // record shape inside relationTypes to type the loaded children.
 type RelationPath<T extends typeof Model> = RelationKey<T> | `${RelationKey<T>}.${string}`
 

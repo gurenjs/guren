@@ -126,6 +126,23 @@ async function _nestedRelationPaths() {
 
   // @ts-expect-error withCount does not support nested relation paths
   await NestedRelUser.withCount('posts.comments')
+
+  // A mixed array of a plain key and a nested path must still intersect
+  // (not distribute into a union) on the head segments.
+  const mixed = await NestedRelUser.with(['posts', 'posts.comments'] as const)
+  const _mixedPosts: PostRecordT[] = mixed[0].posts
+  void _mixedPosts
+
+  // Only the head segment is validated — everything after the first dot is
+  // an unvalidated string, so these malformed/deeper paths type-check even
+  // though the runtime would throw "unknown relation" for a bad tail (and
+  // even that only once it recurses into an actually-loaded child; see the
+  // RelationPath comment above its definition). This is documented, not a
+  // gap to close here — flagging it so a future edit doesn't "fix" it into
+  // silently narrowing what compiles.
+  await NestedRelUser.with('posts.')
+  await NestedRelUser.with('posts..comments')
+  await NestedRelUser.with('posts.comments.typo')
 }
 void _nestedRelationPaths
 

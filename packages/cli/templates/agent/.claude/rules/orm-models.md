@@ -114,6 +114,8 @@ const post = await Post.findWithOrFail(id, 'comments.author')
 post.comments[0].author   // UserRecord | null — typed end to end
 ```
 
+**The tail after the first dot is unvalidated** — `'comments.'`, `'comments..author'`, `'comments.typo'` all compile. At runtime an unknown tail throws "unknown relation", but only once the loader recurses into an actual loaded child; if the head relation loads zero rows for every record, the tail is never checked and the call silently no-ops. Nesting through `morphTo` always throws at runtime — also not type-checked.
+
 ## No attach/detach/sync — use a pivot model
 
 ```typescript

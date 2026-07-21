@@ -348,6 +348,9 @@ const loaded = await User.with('posts.comments')
 loaded[0].posts[0].comments // CommentRecord[] — typed end to end
 ```
 
+> [!NOTE]
+> Only the head segment (`posts` above) is checked against `relationTypes` — anything after the first dot is an unvalidated string, so a typo'd or malformed tail (`'posts.'`, `'posts..comments'`, `'posts.typo'`) still compiles. At runtime, an unknown tail relation throws — but only once the loader actually has a loaded row to recurse into. If every record's head relation loads zero rows, the tail is never inspected and the call quietly no-ops instead of throwing. Nesting through a `morphTo` relation always throws at runtime regardless — that constraint isn't enforced at the type level either.
+
 `BelongsToRecord<T>` is always `T | null` — the loader cannot know the row
 exists. When the foreign key is `NOT NULL` and the parent is guaranteed,
 declare the relation with `BelongsToRequiredRecord<T>` instead. Using the
