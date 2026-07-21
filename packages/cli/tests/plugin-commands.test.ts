@@ -2,7 +2,7 @@ import { beforeEach, afterEach, describe, expect, it } from 'bun:test'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { runCommand } from 'citty'
-import { createTempWorkspace, writeInstalledPackage, type TempWorkspace } from './helpers'
+import { createTempWorkspace, linkInstalledPackage, writeInstalledPackage, type TempWorkspace } from './helpers'
 import { discoverPluginCommands, createPluginCommandProxy } from '../src/plugin-commands'
 
 const PLUGIN_NAME = '@acme/guren-plugin-audit'
@@ -100,6 +100,20 @@ describe('plugin-commands', () => {
       const discovered = await discoverPluginCommands()
 
       expect(discovered.map((command) => command.name)).toEqual(['other:sync'])
+    })
+
+    it('should discover commands from a per-file symlinked local install', async () => {
+      await writeAppPackageJson({ [PLUGIN_NAME]: 'file:../guren-plugin-audit' })
+      await linkInstalledPackage(PLUGIN_NAME, {
+        gurenPlugin: { commands: { entry: 'dist/commands.mjs', names: ['audit:report'] } },
+      }, {
+        'dist/commands.mjs': 'export default {}\n',
+      })
+
+      const discovered = await discoverPluginCommands()
+
+      expect(discovered).toHaveLength(1)
+      expect(discovered[0].name).toBe('audit:report')
     })
 
     it('should reject entries escaping the package directory', async () => {

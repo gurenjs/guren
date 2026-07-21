@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { consola } from 'consola'
 import { defineCommand, runCommand as runCittyCommand } from 'citty'
 import type { ArgsDef, CommandDef } from 'citty'
-import { readInstalledPluginManifests, resolveInside } from './plugin-manifest'
+import { packageContentRoot, readInstalledPluginManifests, resolveInside } from './plugin-manifest'
 
 /**
  * A CLI command contributed by an installed plugin, discovered from its
@@ -42,7 +42,9 @@ export async function discoverPluginCommands(
       continue
     }
 
-    const entryPath = await resolveInside(resolve(cwd, 'node_modules', packageName), commands.entry)
+    const packageDir = resolve(cwd, 'node_modules', packageName)
+    const contentRoot = await packageContentRoot(packageDir)
+    const entryPath = await resolveInside(packageDir, commands.entry, contentRoot ? [contentRoot] : [])
     if (entryPath === null) {
       consola.warn(`Ignoring commands from "${packageName}": entry "${commands.entry}" escapes the package directory.`)
       continue

@@ -1,7 +1,7 @@
 import { beforeEach, afterEach, describe, expect, it } from 'bun:test'
 import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { createTempWorkspace, writeInstalledPackage, type TempWorkspace } from './helpers'
+import { createTempWorkspace, linkInstalledPackage, writeInstalledPackage, type TempWorkspace } from './helpers'
 import {
   applyEnvEntries,
   applyPublishes,
@@ -175,6 +175,32 @@ describe('plugin-manifest', () => {
       await expect(applyPublishes(PLUGIN_NAME, [
         { from: '/etc/passwd', to: 'config/passwd.ts' },
       ])).rejects.toThrow('absolute paths are not allowed')
+    })
+
+    it('should copy files from a per-file symlinked local install', async () => {
+      await linkInstalledPackage('@acme/guren-plugin-local', {}, {
+        'stubs/hello.ts': 'export const hello = true\n',
+      })
+
+      const result = await applyPublishes('@acme/guren-plugin-local', [
+        { from: 'stubs/hello.ts', to: 'config/hello.ts' },
+      ])
+
+      expect(result.written).toEqual(['config/hello.ts'])
+      expect(await readFile('config/hello.ts', 'utf8')).toBe('export const hello = true\n')
+    })
+
+    it('should still reject escaping sources in a per-file symlinked local install', async () => {
+      await linkInstalledPackage('@acme/guren-plugin-local', {}, {
+        'stubs/hello.ts': 'export const hello = true\n',
+      })
+      const secretPath = join(workspace.dir, 'secret.ts')
+      await writeFile(secretPath, 'export const secret = true\n')
+      await symlink(secretPath, join(workspace.dir, 'node_modules', '@acme/guren-plugin-local', 'stubs', 'escape-link.ts'))
+
+      await expect(applyPublishes('@acme/guren-plugin-local', [
+        { from: 'stubs/escape-link.ts', to: 'config/hello.ts' },
+      ])).rejects.toThrow('escapes the package directory')
     })
 
     it('should reject a source that is a symlink escaping the package directory', async () => {
