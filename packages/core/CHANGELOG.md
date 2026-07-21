@@ -1,5 +1,21 @@
 # @guren/core
 
+## 1.2.0
+
+### Minor Changes
+
+- 0c01602: Accept dot-notation nested relation paths (`with('comments.author')`) in the type signatures of `with()`, `findWith()`, `findWithOrFail()`, and `withPaginate()` — the runtime already supported them. Add `BelongsToRequiredRecord<T>` for belongsTo relations backed by a NOT NULL foreign key, so `relationTypes` can declare the parent as non-nullable (use the `declare` modifier to skip the runtime placeholder).
+
+### Patch Changes
+
+- Updated dependencies [20e7aa4]
+- Updated dependencies [60e2859]
+- Updated dependencies [0c01602]
+- Updated dependencies [df571cf]
+- Updated dependencies [a10aa54]
+  - @guren/cli@1.4.0
+  - @guren/orm@1.1.0
+
 ## 1.1.0
 
 ### Minor Changes
