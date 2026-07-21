@@ -182,7 +182,8 @@ export default function Home({ codeExamples }: Props) {
             <p className="mt-6 max-w-2xl text-lg leading-relaxed text-white/70 md:text-xl">
               Guren is a fullstack framework for Bun. Controllers, models, queues, mail — the
               conventions you know from Laravel, with type safety that runs from the route
-              definition to the React component.
+              definition to the React component. And your AI agent gets the same map you do,
+              shipped with every new app.
             </p>
             <div className="mt-10 flex flex-wrap items-center gap-4">
               <Link
@@ -270,15 +271,17 @@ export default function Home({ codeExamples }: Props) {
               </h2>
               <p className="mt-4 text-base leading-relaxed text-white/60">
                 One command hands an agent your whole project map. Three mechanical gates catch its
-                mistakes before you read the diff. And every new app ships agent guidance whose
-                effect is measured in a public, reproducible evaluation — a 40% cut in agent cost
-                over an undocumented baseline.
+                mistakes before you read the diff. And every new app ships a full agent harness —
+                CLAUDE.md, path-scoped rules, skills, and hooks — whose effect is measured in a
+                public, reproducible evaluation: a 40% cut in agent cost over an undocumented
+                baseline.
               </p>
               <CodeBlock
                 lines={[
-                  '$ bunx guren context   # project map for the agent',
-                  '$ bunx guren check     # routes ↔ controllers ↔ pages',
-                  '$ bunx guren audit     # validation, auth, secrets',
+                  '$ bunx guren context    # project map for the agent',
+                  '$ bunx guren check      # routes ↔ controllers ↔ pages',
+                  '$ bunx guren audit      # validation, auth, secrets',
+                  '$ bunx guren agent:sync # refresh CLAUDE.md & rules',
                 ]}
                 title="Terminal"
               />
