@@ -132,19 +132,55 @@ test('accepts an API token', async () => {
 
 ## Database in Tests
 
-Keep tests isolated by resetting the database between runs:
+### Test Database Isolation
+
+`bun test` sets `NODE_ENV=test` automatically. A fresh scaffold's `config/database.ts` uses that to keep tests off your development database entirely:
 
 ```ts
-import { describe, test, beforeEach, afterEach } from 'bun:test'
-import { RefreshDatabase } from '@guren/testing'
+// config/database.ts
+function resolveDatabaseFilename(): string {
+  if (process.env.NODE_ENV === 'test') {
+    return process.env.TEST_DATABASE_URL ?? './data/guren.test.db'
+  }
+  return process.env.DATABASE_URL ?? './data/guren.db'
+}
+```
+
+Tests read and write `./data/guren.test.db` by default — a separate file from `./data/guren.db`, so nothing a test creates ever leaks into the data you're looking at in the dev server. Override the test file itself with `TEST_DATABASE_URL` (for example, to give each parallel CI shard its own file); `DATABASE_URL` stays authoritative for every other environment.
+
+> [!WARNING]
+> Scaffolds created before this branch existed write straight to `DATABASE_URL` (or `./data/guren.db`) regardless of `NODE_ENV`, so `bun test` pollutes the same database your dev server reads from. Retrofit it by replacing the `filename` option, not just adding the helper — the helper alone does nothing until `createSqliteDatabase()` is actually pointed at it:
+>
+> ```diff
+>  import { createSqliteDatabase } from '@guren/orm'
+>
+> +function resolveDatabaseFilename(): string {
+> +  if (process.env.NODE_ENV === 'test') {
+> +    return process.env.TEST_DATABASE_URL ?? './data/guren.test.db'
+> +  }
+> +  return process.env.DATABASE_URL ?? './data/guren.db'
+> +}
+> +
+>  const database = createSqliteDatabase({
+>    migrationsFolder: new URL('../db/migrations', import.meta.url),
+>    seedersFolder: new URL('../db/seeders', import.meta.url),
+> -  filename: () => process.env.DATABASE_URL ?? './data/guren.db',
+> +  filename: resolveDatabaseFilename,
+>  })
+> ```
+
+### Cleaning Up Between Tests
+
+For most suites, the separate test-database file is isolation enough — reset it back to a clean slate in `beforeEach` using the `resetDatabase()`/`migrateDatabase()` helpers your `config/database.ts` already exports:
+
+```ts
+import { describe, test, expect, beforeEach } from 'bun:test'
+import { resetDatabase, migrateDatabase } from '@/config/database'
 
 describe('User Model', () => {
   beforeEach(async () => {
-    await RefreshDatabase.refresh()
-  })
-
-  afterEach(async () => {
-    await RefreshDatabase.cleanup()
+    await resetDatabase()   // drops every table
+    await migrateDatabase() // re-applies migrations from scratch
   })
 
   test('creates a user', async () => {
@@ -159,8 +195,19 @@ describe('User Model', () => {
 })
 ```
 
-> [!TIP]
-> `RefreshDatabase.refresh()` resets the database to a clean state. Use it in `beforeEach` so every test starts fresh.
+`@guren/testing` also ships `useTruncateTables(tables)` and `useDatabaseTransactions()` for finer-grained, per-test cleanup. `useTruncateTables()` registers a `beforeEach` hook that deletes each table's rows; `useDatabaseTransactions()` registers `beforeEach`/`afterEach` hooks that begin a transaction and roll it back after the test. Both operate on a connection you register up front with `setTestDatabase()`, matching this shape:
+
+```ts
+interface DatabaseConnection {
+  query<T = unknown>(sql: string, params?: unknown[]): Promise<T[]>
+  execute(sql: string, params?: unknown[]): Promise<void>
+  beginTransaction(): Promise<void>
+  commit(): Promise<void>
+  rollback(): Promise<void>
+}
+```
+
+Guren's SQLite adapter doesn't hand you a ready-made `DatabaseConnection` — `getDatabase()` from `config/database.ts` resolves to the underlying Drizzle instance, not this interface — so using these helpers means writing a small adapter yourself and passing it to `setTestDatabase()` before your tests run. `useDatabaseTransactions()` specifically **must wrap the same connection your models write through**: it begins a transaction on `beforeEach` and rolls it back on `afterEach`, and a second, independently-opened connection to the same file won't see (or roll back) writes made via the first one. `useTruncateTables()` has no such requirement — a `DELETE FROM` on any connection to the same database file removes the rows your models see, since it commits immediately rather than participating in a shared transaction. If the adapter plumbing sounds like more than your suite needs, the `resetDatabase()`/`migrateDatabase()` pattern above is simpler and sidesteps the whole question.
 
 ## Faking Services
 
