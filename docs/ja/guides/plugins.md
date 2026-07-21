@@ -217,7 +217,21 @@ bun test src/plugin.test.ts
 }
 ```
 
-## ステップ7: 公開する
+## ステップ7: 公開前にローカルで動作確認する
+
+公開する前に、実際のGurenアプリにプラグインをリンクしてエンドツーエンドで検証しましょう:
+
+```bash
+# アプリのディレクトリで実行
+bun add file:../guren-plugin-analytics
+bunx guren plugin guren-plugin-analytics
+```
+
+`bun add file:`(および`link:`・`workspace:`プロトコル)は、パッケージをコピーするのではなく、プラグインのソースディレクトリへのシンボリックリンクとしてインストールします。プラグインの`package.json`に、ステップ1で`@guren/core`を`devDependencies`として追加した際の`node_modules`がまだ残っている場合、アプリは`@guren/core`を2つの別々のコピーとして読み込んでしまうことがあります — 1つはアプリ自身のインストール、もう1つはプラグイン経由です。これはランタイムでの重複モジュール警告や、コンパイル時の`Property 'bindings' is protected but type 'Container' is not a class derived from 'Container'`のようなTypeScriptエラーとして現れます。
+
+この問題が発生した場合は、アプリにリンクする前にプラグインのパッケージディレクトリ内の`node_modules`を削除してください。プラグイン側に隠蔽するコピーがなくなれば、アプリ自身の`@guren/core`インストールがプラグインの`peerDependencies`を満たすようになります。公開済みのプラグインは`node_modules`を同梱しないため、これは公開前のローカル検証にのみ影響します。
+
+## ステップ8: 公開する
 
 ```bash
 bun run build

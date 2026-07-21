@@ -139,7 +139,17 @@ test('registers the service', async () => {
 })
 ```
 
-### 6. Build and publish
+### 6. Test locally before publishing
+
+```bash
+# from the app you're testing against
+bun add file:../guren-plugin-<name>
+bunx guren plugin guren-plugin-<name>
+```
+
+`bun add file:` (and `link:`/`workspace:`) symlink back to the plugin's source instead of copying it. If the plugin still has its own `node_modules` (from its `@guren/core` devDependency in step 1), the app can load two separate `@guren/core` copies — surfacing as duplicate-module runtime warnings or a `Property 'bindings' is protected...` TypeScript error. Fix: delete `node_modules` inside the plugin package directory before linking it — the app's own `@guren/core` then satisfies the plugin's `peerDependencies` with nothing left to shadow it. Published plugins never ship `node_modules`, so this is a local-testing-only gotcha.
+
+### 7. Build and publish
 
 ```json
 { "scripts": { "build": "tsup src/index.ts --format esm --dts" } }
