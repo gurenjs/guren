@@ -134,8 +134,19 @@ async function realpathNearestExisting(candidate: string): Promise<string> {
  * (or a symlinked `node_modules` entry) can't be used to read or write
  * outside the intended directory. The candidate path (not its realpath) is
  * returned so callers keep operating on the logical location.
+ *
+ * `extraRealRoots` are additional canonical directories the resolved path
+ * may live in. Local installs (`bun add file:`, `link:`, `workspace:*`)
+ * materialize a package as per-file symlinks into the source directory, so
+ * every file's realpath escapes the node_modules entry while the entry
+ * itself does not — package-side callers pass the package's content root
+ * (see packageContentRoot) to accept that layout.
  */
-export async function resolveInside(baseDir: string, relPath: string): Promise<string | null> {
+export async function resolveInside(
+  baseDir: string,
+  relPath: string,
+  extraRealRoots: string[] = [],
+): Promise<string | null> {
   if (isAbsolute(relPath)) return null
 
   const candidate = resolve(baseDir, relPath)
@@ -149,10 +160,28 @@ export async function resolveInside(baseDir: string, relPath: string): Promise<s
   }
 
   const realCandidate = await realpathNearestExisting(candidate)
-  const realRelative = relative(realBase, realCandidate)
-  if (realRelative.startsWith('..') || isAbsolute(realRelative)) return null
+  const containedIn = (root: string): boolean => {
+    const realRelative = relative(root, realCandidate)
+    return !realRelative.startsWith('..') && !isAbsolute(realRelative)
+  }
+  if (![realBase, ...extraRealRoots].some(containedIn)) return null
 
   return candidate
+}
+
+/**
+ * Canonical directory holding a package's actual content: the realpath
+ * parent of its package.json. For a regular npm install this equals the
+ * package directory itself; for per-file-symlink local installs it is the
+ * source directory every file link points into. Returns null when
+ * package.json cannot be resolved.
+ */
+export async function packageContentRoot(packageDir: string): Promise<string | null> {
+  try {
+    return dirname(await realpath(join(packageDir, 'package.json')))
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -247,6 +276,8 @@ export async function applyPublishes(
 ): Promise<PublishResult> {
   const cwd = options.cwd ?? process.cwd()
   const packageDir = resolve(cwd, 'node_modules', packageName)
+  const contentRoot = await packageContentRoot(packageDir)
+  const packageRoots = contentRoot ? [contentRoot] : []
   const invalid = (detail: string): Error => new Error(`Invalid publish entry in "${packageName}": ${detail}`)
 
   // Validate sequentially so the first invalid entry is always the one
@@ -262,7 +293,7 @@ export async function applyPublishes(
       throw invalid('absolute paths are not allowed.')
     }
 
-    const fromPath = await resolveInside(packageDir, entry.from)
+    const fromPath = await resolveInside(packageDir, entry.from, packageRoots)
     if (fromPath === null) {
       throw invalid(`source "${entry.from}" escapes the package directory.`)
     }

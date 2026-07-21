@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -26,6 +26,37 @@ export async function writeInstalledPackage(
     const filePath = join(packageDir, relativePath)
     await mkdir(dirname(filePath), { recursive: true })
     await writeFile(filePath, content)
+  }
+}
+
+/**
+ * Write a fake locally-installed package the way Bun materializes `file:`,
+ * `link:`, and `workspace:` dependencies: node_modules/<name> is a real
+ * directory tree whose files are individual symlinks into the source
+ * directory.
+ */
+export async function linkInstalledPackage(
+  name: string,
+  packageJson: Record<string, unknown>,
+  files: Record<string, string> = {},
+  baseDir: string = process.cwd(),
+): Promise<void> {
+  const sourceDir = join(baseDir, 'local-packages', name)
+  const packageDir = join(baseDir, 'node_modules', name)
+
+  const contents: Record<string, string> = {
+    'package.json': JSON.stringify({ name, ...packageJson }, null, 2),
+    ...files,
+  }
+
+  for (const [relativePath, content] of Object.entries(contents)) {
+    const sourcePath = join(sourceDir, relativePath)
+    await mkdir(dirname(sourcePath), { recursive: true })
+    await writeFile(sourcePath, content)
+
+    const linkPath = join(packageDir, relativePath)
+    await mkdir(dirname(linkPath), { recursive: true })
+    await symlink(sourcePath, linkPath)
   }
 }
 
