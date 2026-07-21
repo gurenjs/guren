@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
-import { collectFiles, classNameFromPath, excludeBarrelFiles } from '../src/discovery'
+import { collectFiles, classNameFromPath, excludeBarrelFiles, discoverTestFiles } from '../src/discovery'
 import { createTempWorkspace } from './helpers'
 
 describe('collectFiles', () => {
@@ -88,5 +88,103 @@ describe('excludeBarrelFiles', () => {
     const files = ['/app/Models/Post.ts', '/app/Models/User.ts']
     const result = excludeBarrelFiles(files)
     expect(result).toHaveLength(2)
+  })
+})
+
+describe('discoverTestFiles', () => {
+  it('finds *.test.ts files under tests/', async () => {
+    const workspace = await createTempWorkspace('guren-cli-discovery-tests-')
+
+    try {
+      await mkdir(join(workspace.dir, 'tests/controllers'), { recursive: true })
+      await writeFile(join(workspace.dir, 'tests/controllers/PostController.test.ts'), '', 'utf8')
+
+      const files = await discoverTestFiles(workspace.dir)
+
+      expect(files).toHaveLength(1)
+      expect(files[0]).toMatch(/PostController\.test\.ts$/)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('finds *.test.tsx files under tests/', async () => {
+    const workspace = await createTempWorkspace('guren-cli-discovery-tests-tsx-')
+
+    try {
+      await mkdir(join(workspace.dir, 'tests/pages'), { recursive: true })
+      await writeFile(join(workspace.dir, 'tests/pages/Login.test.tsx'), '', 'utf8')
+
+      const files = await discoverTestFiles(workspace.dir)
+
+      expect(files).toHaveLength(1)
+      expect(files[0]).toMatch(/Login\.test\.tsx$/)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('ignores non-test files under tests/', async () => {
+    const workspace = await createTempWorkspace('guren-cli-discovery-tests-nontest-')
+
+    try {
+      await mkdir(join(workspace.dir, 'tests'), { recursive: true })
+      await writeFile(join(workspace.dir, 'tests/helpers.ts'), '', 'utf8')
+
+      const files = await discoverTestFiles(workspace.dir)
+
+      expect(files).toHaveLength(0)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('returns an empty array when tests/ does not exist', async () => {
+    const workspace = await createTempWorkspace('guren-cli-discovery-tests-missing-')
+
+    try {
+      const files = await discoverTestFiles(workspace.dir)
+      expect(files).toHaveLength(0)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('finds *.test.ts files colocated next to source, outside tests/', async () => {
+    const workspace = await createTempWorkspace('guren-cli-discovery-tests-colocated-')
+
+    try {
+      await mkdir(join(workspace.dir, 'app/Models'), { recursive: true })
+      await writeFile(join(workspace.dir, 'app/Models/Post.ts'), '', 'utf8')
+      await writeFile(join(workspace.dir, 'app/Models/Post.test.ts'), '', 'utf8')
+
+      const files = await discoverTestFiles(workspace.dir)
+
+      expect(files).toHaveLength(1)
+      expect(files[0]).toMatch(/Post\.test\.ts$/)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('ignores test files under node_modules/dist/build/coverage', async () => {
+    const workspace = await createTempWorkspace('guren-cli-discovery-tests-excluded-dirs-')
+
+    try {
+      await mkdir(join(workspace.dir, 'node_modules/some-pkg'), { recursive: true })
+      await writeFile(join(workspace.dir, 'node_modules/some-pkg/index.test.ts'), '', 'utf8')
+      await mkdir(join(workspace.dir, 'dist'), { recursive: true })
+      await writeFile(join(workspace.dir, 'dist/bundle.test.js'), '', 'utf8')
+      await mkdir(join(workspace.dir, 'build'), { recursive: true })
+      await writeFile(join(workspace.dir, 'build/out.test.js'), '', 'utf8')
+      await mkdir(join(workspace.dir, 'coverage'), { recursive: true })
+      await writeFile(join(workspace.dir, 'coverage/report.test.js'), '', 'utf8')
+
+      const files = await discoverTestFiles(workspace.dir)
+
+      expect(files).toHaveLength(0)
+    } finally {
+      await workspace.cleanup()
+    }
   })
 })

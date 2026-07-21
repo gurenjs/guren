@@ -1,7 +1,7 @@
 import { copyFile, readFile, writeFile } from 'node:fs/promises'
 import { resolve, relative } from 'node:path'
 import { consola } from 'consola'
-import { discoverControllerFiles, discoverModelFiles, fileExists, readIfExists, classNameFromPath } from './discovery'
+import { discoverControllerFiles, discoverModelFiles, discoverTestFiles, fileExists, readIfExists, classNameFromPath } from './discovery'
 import { checkPluginCompatibility, readCoreVersion, readInstalledPluginManifests } from './plugin-manifest'
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail'
@@ -116,6 +116,11 @@ export const CANONICAL_APP_SCRIPTS = {
 
 type PackageJsonShape = {
   scripts?: Record<string, string>
+}
+
+type PackageDependenciesShape = {
+  dependencies?: Record<string, string>
+  devDependencies?: Record<string, string>
 }
 
 type TsconfigShape = {
@@ -904,6 +909,52 @@ async function detectDatabaseConfig(context: DoctorRuleContext): Promise<DoctorC
   )
 }
 
+/**
+ * Checks whether the project has any test foundation at all: either
+ * `@guren/testing` is installed, or at least one `*.test.ts`-style file
+ * already exists under `tests/`. Older `create-guren-app` scaffolds and
+ * hand-rolled projects can have neither, which leaves `guren doctor`
+ * silent even though there is no way to write a controller test.
+ */
+async function hasTestInfrastructure(cwd: string): Promise<boolean> {
+  const packageJson = await readJsonIfExists<PackageDependenciesShape>(cwd, 'package.json')
+  const hasTestingPackage = Boolean(
+    packageJson.value?.dependencies?.['@guren/testing'] ||
+    packageJson.value?.devDependencies?.['@guren/testing'],
+  )
+
+  if (hasTestingPackage) {
+    return true
+  }
+
+  const testFiles = await discoverTestFiles(cwd).catch(() => [] as string[])
+  return testFiles.length > 0
+}
+
+async function detectTestInfrastructure(context: DoctorRuleContext): Promise<DoctorCheck> {
+  const present = await hasTestInfrastructure(context.cwd)
+
+  if (present) {
+    return createCheck(
+      'test-infrastructure',
+      'Test Infrastructure',
+      'pass',
+      'Test infrastructure detected (@guren/testing dependency or test files present).',
+    )
+  }
+
+  return createCheck(
+    'test-infrastructure',
+    'Test Infrastructure',
+    'warn',
+    'No @guren/testing dependency and no test files were found; the project has no test foundation.',
+    {
+      fix: 'Run `bun add -d @guren/testing` and scaffold a first test with `bunx guren make:test`.',
+      manualFix: 'Add @guren/testing to devDependencies and create test files under tests/.',
+    },
+  )
+}
+
 async function detectPluginCompatibility(context: DoctorRuleContext): Promise<DoctorCheck> {
   const [plugins, coreVersion] = await Promise.all([
     readInstalledPluginManifests(context.cwd),
@@ -974,6 +1025,7 @@ const doctorRules: DoctorRule[] = [
   { key: 'config-drift', title: 'App Wiring', detect: detectConfigDrift },
   { key: 'scripts', title: 'App Scripts', detect: detectScripts, autofix: createScriptsAutofix },
   { key: 'database-config', title: 'Database Configuration', detect: detectDatabaseConfig },
+  { key: 'test-infrastructure', title: 'Test Infrastructure', detect: detectTestInfrastructure },
   { key: 'plugin-compatibility', title: 'Plugin Compatibility', detect: detectPluginCompatibility },
 ]
 
@@ -1065,6 +1117,16 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
   let priority = 1
 
   const controllerFiles = await discoverControllerFiles(cwd).catch(() => [] as string[])
+
+  const testInfraPresent = await hasTestInfrastructure(cwd).catch(() => true)
+  if (!testInfraPresent) {
+    steps.push({
+      priority: priority++,
+      title: 'Install test infrastructure',
+      description: 'No @guren/testing dependency and no test files were found; the project has no test foundation.',
+      command: 'bun add -d @guren/testing',
+    })
+  }
 
   try {
     for (const filePath of controllerFiles) {

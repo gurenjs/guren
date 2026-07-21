@@ -38,6 +38,9 @@ describe('runDoctor', () => {
             typecheck: 'tsc --noEmit',
             codegen: 'bunx guren codegen --force',
           },
+          devDependencies: {
+            '@guren/testing': '^1.0.0',
+          },
         }, null, 2),
         'utf8',
       )
@@ -874,6 +877,193 @@ describe('runDoctor', () => {
       expect(pluginCheck?.status).toBe('warn')
       expect(pluginCheck?.message).toContain('@acme/guren-plugin-audit')
       expect(pluginCheck?.message).toContain('>=2.0.0')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('warns when @guren/testing is absent and no test files exist', async () => {
+    const workspace = await createTempWorkspace('guren-cli-doctor-test-infra-warn-')
+
+    try {
+      await writeFile(
+        join(workspace.dir, 'package.json'),
+        JSON.stringify({ name: 'doctor-test-infra-warn' }, null, 2),
+        'utf8',
+      )
+
+      const report = await runDoctor({ cwd: workspace.dir, json: true })
+      const testInfraCheck = report.checks.find((check) => check.key === 'test-infrastructure')
+
+      expect(testInfraCheck).toBeDefined()
+      expect(testInfraCheck?.status).toBe('warn')
+      expect(testInfraCheck?.message).toContain('@guren/testing')
+      expect(testInfraCheck?.fix).toContain('bun add -d @guren/testing')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('passes test-infrastructure when @guren/testing is a devDependency', async () => {
+    const workspace = await createTempWorkspace('guren-cli-doctor-test-infra-devdep-')
+
+    try {
+      await writeFile(
+        join(workspace.dir, 'package.json'),
+        JSON.stringify({
+          name: 'doctor-test-infra-devdep',
+          devDependencies: { '@guren/testing': '^1.0.0' },
+        }, null, 2),
+        'utf8',
+      )
+
+      const report = await runDoctor({ cwd: workspace.dir, json: true })
+      const testInfraCheck = report.checks.find((check) => check.key === 'test-infrastructure')
+
+      expect(testInfraCheck).toBeDefined()
+      expect(testInfraCheck?.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('passes test-infrastructure when @guren/testing is a regular dependency', async () => {
+    const workspace = await createTempWorkspace('guren-cli-doctor-test-infra-dep-')
+
+    try {
+      await writeFile(
+        join(workspace.dir, 'package.json'),
+        JSON.stringify({
+          name: 'doctor-test-infra-dep',
+          dependencies: { '@guren/testing': '^1.0.0' },
+        }, null, 2),
+        'utf8',
+      )
+
+      const report = await runDoctor({ cwd: workspace.dir, json: true })
+      const testInfraCheck = report.checks.find((check) => check.key === 'test-infrastructure')
+
+      expect(testInfraCheck).toBeDefined()
+      expect(testInfraCheck?.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('passes test-infrastructure when test files exist even without @guren/testing', async () => {
+    const workspace = await createTempWorkspace('guren-cli-doctor-test-infra-files-')
+
+    try {
+      await mkdir(join(workspace.dir, 'tests/controllers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'package.json'),
+        JSON.stringify({ name: 'doctor-test-infra-files' }, null, 2),
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'tests/controllers/PostController.test.ts'),
+        "import { test, expect } from 'bun:test'\ntest('placeholder', () => { expect(true).toBe(true) })\n",
+        'utf8',
+      )
+
+      const report = await runDoctor({ cwd: workspace.dir, json: true })
+      const testInfraCheck = report.checks.find((check) => check.key === 'test-infrastructure')
+
+      expect(testInfraCheck).toBeDefined()
+      expect(testInfraCheck?.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('passes test-infrastructure when tests are colocated next to source, outside tests/', async () => {
+    const workspace = await createTempWorkspace('guren-cli-doctor-test-infra-colocated-')
+
+    try {
+      await mkdir(join(workspace.dir, 'app/Models'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'package.json'),
+        JSON.stringify({ name: 'doctor-test-infra-colocated' }, null, 2),
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'app/Models/Post.test.ts'),
+        "import { test, expect } from 'bun:test'\ntest('placeholder', () => { expect(true).toBe(true) })\n",
+        'utf8',
+      )
+
+      const report = await runDoctor({ cwd: workspace.dir, json: true })
+      const testInfraCheck = report.checks.find((check) => check.key === 'test-infrastructure')
+
+      expect(testInfraCheck).toBeDefined()
+      expect(testInfraCheck?.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('does not treat non-test files under tests/ as test infrastructure', async () => {
+    const workspace = await createTempWorkspace('guren-cli-doctor-test-infra-nontest-')
+
+    try {
+      await mkdir(join(workspace.dir, 'tests'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'package.json'),
+        JSON.stringify({ name: 'doctor-test-infra-nontest' }, null, 2),
+        'utf8',
+      )
+      // A helper file, not a *.test.ts file — should not count as test infrastructure.
+      await writeFile(join(workspace.dir, 'tests/helpers.ts'), 'export const noop = () => {}\n', 'utf8')
+
+      const report = await runDoctor({ cwd: workspace.dir, json: true })
+      const testInfraCheck = report.checks.find((check) => check.key === 'test-infrastructure')
+
+      expect(testInfraCheck).toBeDefined()
+      expect(testInfraCheck?.status).toBe('warn')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('surfaces missing test infrastructure as a --next actionable step', async () => {
+    const workspace = await createTempWorkspace('guren-cli-doctor-test-infra-next-')
+
+    try {
+      await writeFile(
+        join(workspace.dir, 'package.json'),
+        JSON.stringify({ name: 'doctor-test-infra-next' }, null, 2),
+        'utf8',
+      )
+
+      const report = await runDoctor({ cwd: workspace.dir, json: true, next: true })
+
+      expect(report.nextSteps).toBeDefined()
+      expect(
+        report.nextSteps?.some((step) => step.command === 'bun add -d @guren/testing'),
+      ).toBe(true)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('does not suggest installing test infrastructure in --next when already present', async () => {
+    const workspace = await createTempWorkspace('guren-cli-doctor-test-infra-next-absent-')
+
+    try {
+      await writeFile(
+        join(workspace.dir, 'package.json'),
+        JSON.stringify({
+          name: 'doctor-test-infra-next-absent',
+          devDependencies: { '@guren/testing': '^1.0.0' },
+        }, null, 2),
+        'utf8',
+      )
+
+      const report = await runDoctor({ cwd: workspace.dir, json: true, next: true })
+
+      expect(
+        report.nextSteps?.some((step) => step.command === 'bun add -d @guren/testing'),
+      ).toBe(false)
     } finally {
       await workspace.cleanup()
     }
