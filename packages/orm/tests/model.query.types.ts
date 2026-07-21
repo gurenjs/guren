@@ -1,6 +1,12 @@
 import { drizzle } from 'drizzle-orm/postgres-js'
 import { pgTable, serial, text } from 'drizzle-orm/pg-core'
-import { Model, defineModel, type TransactionHandle, type TransactionModelScope } from '../src/Model'
+import {
+  Model,
+  defineModel,
+  type BelongsToRequiredRecord,
+  type TransactionHandle,
+  type TransactionModelScope,
+} from '../src/Model'
 
 const users = pgTable('users', {
   id: serial('id').primaryKey(),
@@ -85,3 +91,82 @@ async function _relationIntersection() {
   void _count
 }
 void _relationIntersection
+
+// Nested eager-load paths ('posts.comments') must be accepted by with()/
+// findWith()/findWithOrFail()/withPaginate(). The head segment is typed from
+// relationTypes; declare the nested shape there to type the loaded children.
+class NestedRelUser extends Model<UserRecord> {
+  static table = users
+  declare static relationTypes: {
+    posts: Array<PostRecordT & { comments: CommentRecordT[] }>
+  }
+}
+
+async function _nestedRelationPaths() {
+  const found = await NestedRelUser.findWithOrFail(1, 'posts.comments')
+  const _foundComments: CommentRecordT[] = found.posts[0].comments
+  void _foundComments
+
+  const maybe = await NestedRelUser.findWith(1, 'posts.comments')
+  if (maybe) {
+    const _maybePosts: PostRecordT[] = maybe.posts
+    void _maybePosts
+  }
+
+  const listed = await NestedRelUser.with('posts.comments')
+  const _listedComments: CommentRecordT[] = listed[0].posts[0].comments
+  void _listedComments
+
+  const paged = await NestedRelUser.withPaginate('posts.comments')
+  const _pagedComments: CommentRecordT[] = paged.data[0].posts[0].comments
+  void _pagedComments
+
+  // @ts-expect-error nested paths must be rooted at a declared relation key
+  await NestedRelUser.with('nope.comments')
+
+  // @ts-expect-error withCount does not support nested relation paths
+  await NestedRelUser.withCount('posts.comments')
+
+  // A mixed array of a plain key and a nested path must still intersect
+  // (not distribute into a union) on the head segments.
+  const mixed = await NestedRelUser.with(['posts', 'posts.comments'] as const)
+  const _mixedPosts: PostRecordT[] = mixed[0].posts
+  void _mixedPosts
+
+  // Only the head segment is validated — everything after the first dot is
+  // an unvalidated string, so these malformed/deeper paths type-check even
+  // though the runtime would throw "unknown relation" for a bad tail (and
+  // even that only once it recurses into an actually-loaded child; see the
+  // RelationPath comment above its definition). This is documented, not a
+  // gap to close here — flagging it so a future edit doesn't "fix" it into
+  // silently narrowing what compiles.
+  await NestedRelUser.with('posts.')
+  await NestedRelUser.with('posts..comments')
+  await NestedRelUser.with('posts.comments.typo')
+
+  // 3+ level paths still resolve the type from the head segment only.
+  const deep = await NestedRelUser.with('posts.comments.author')
+  const _deepPosts: PostRecordT[] = deep[0].posts
+  void _deepPosts
+}
+void _nestedRelationPaths
+
+// belongsTo relations backed by a NOT NULL foreign key can opt into a
+// non-nullable declaration via BelongsToRequiredRecord. Using `declare`
+// avoids the runtime placeholder value entirely.
+class RequiredAuthorUser extends Model<UserRecord> {
+  static table = users
+  declare static relationTypes: {
+    author: BelongsToRequiredRecord<UserRecord>
+  }
+}
+
+async function _requiredBelongsTo() {
+  const listed = await RequiredAuthorUser.with('author')
+  const first = listed[0]
+  if (first) {
+    const _authorName: string = first.author.name // no null check required
+    void _authorName
+  }
+}
+void _requiredBelongsTo

@@ -78,25 +78,43 @@ For Inertia/HTTP pagination links wrap it with `paginate` from `@guren/core`:
 
 Typed relation results — declare `static relationTypes` using these exported types:
 `HasManyRecord<T>` = `T[]` · `HasOneRecord<T>` = `T | null` · `BelongsToRecord<T>` = `T | null` ·
-`BelongsToManyRecord<T>` = `T[]` · `HasManyThroughRecord<T>` = `T[]`
+`BelongsToRequiredRecord<T>` = `T` (NOT NULL FK) · `BelongsToManyRecord<T>` = `T[]` · `HasManyThroughRecord<T>` = `T[]`
 
-**Placeholder value must match the alias's shape**, not always `null`: array-typed relations (`hasMany`/`belongsToMany`/`hasManyThrough`) need `[]`, single-record relations (`hasOne`/`belongsTo`) need `null` — mixing them up is a TS error.
+**Placeholder value must match the alias's shape**, not always `null`: array-typed relations (`hasMany`/`belongsToMany`/`hasManyThrough`) need `[]`, single-record relations (`hasOne`/`belongsTo`) need `null` — mixing them up is a TS error. With the `declare` modifier no placeholder is needed at all (type-only, no runtime value).
 
 ```typescript
 static override relationTypes: { comments: HasManyRecord<CommentRecord> } = { comments: [] }  // hasMany → []
 static override relationTypes: { author: BelongsToRecord<UserRecord> } = { author: null }     // belongsTo → null
+// NOT NULL FK: parent always exists once loaded — declare it non-nullable (no placeholder with `declare`)
+declare static relationTypes: { author: BelongsToRequiredRecord<UserRecord> }
 ```
 
 ## Eager loading
 
 ```typescript
-await Post.with('tags')                    // Array<record & { tags: TagRecord[] }>; nested: with('author.posts')
+await Post.with('tags')                    // Array<record & { tags: TagRecord[] }>
 await Post.with(['author', 'tags'], { published: true })  // optional where filter
+await Post.with('comments.author')         // nested via dot notation (see below)
 await Post.findWith(1, 'tags')             // single record + relations, or null
 await Post.findWithOrFail(1, ['author'])   // throws ModelNotFoundException
 await Post.withCount('tags')               // adds tagsCount: number (no nested names)
 await Post.withPaginate('tags', { page: 1 })  // PaginatedResult with relations
 ```
+
+**Nested paths type only the head segment** from `relationTypes`. To get typed
+children, declare the nested shape inside the head relation's record type:
+
+```typescript
+export class Post extends defineModel(posts) {
+  declare static relationTypes: {
+    comments: HasManyRecord<CommentRecord & { author: BelongsToRecord<UserRecord> }>
+  }
+}
+const post = await Post.findWithOrFail(id, 'comments.author')
+post.comments[0].author   // UserRecord | null — typed end to end
+```
+
+**The tail after the first dot is unvalidated** — `'comments.'`, `'comments..author'`, `'comments.typo'` all compile. At runtime an unknown tail throws "unknown relation", but only once the loader recurses into an actual loaded child; if the head relation loads zero rows for every record, the tail is never checked and the call silently no-ops. Nesting through `morphTo` always throws at runtime — also not type-checked.
 
 ## No attach/detach/sync — use a pivot model
 

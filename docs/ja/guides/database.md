@@ -813,6 +813,35 @@ const user = await User.newQuery().with('posts').first()
 const users = await User.with('posts.comments')
 ```
 
+ネストパスの型は `relationTypes` の先頭セグメントのみが反映されます。ネスト先まで型を効かせたい場合は、先頭リレーションのレコード型の中にネストした形を宣言してください。
+
+```ts
+export class User extends defineModel(users) {
+  declare static relationTypes: {
+    posts: HasManyRecord<PostRecord & { comments: CommentRecord[] }>
+  }
+}
+
+const loaded = await User.with('posts.comments')
+loaded[0].posts[0].comments // CommentRecord[] — 末端まで型付き
+```
+
+> [!NOTE]
+> `relationTypes` と照合されるのは先頭セグメント(上記の `posts`)だけです。最初のドット以降は検証されない文字列なので、タイプミスや不正な末尾(`'posts.'`・`'posts..comments'`・`'posts.typo'`)もコンパイルは通ります。ランタイムでは末尾が未知のリレーション名であればエラーになりますが、それはローダーが実際にロード済みの子レコードへ再帰した場合に限られます。すべてのレコードで先頭リレーションが 0 件しかロードされなければ、末尾は一切検査されず静かに何もせず終わります。`morphTo` リレーションを経由したネストは常にランタイムでエラーになりますが、この制約も型レベルでは表現されていません。
+
+`BelongsToRecord<T>` は常に `T | null` です。外部キーが `NOT NULL` で親レコードの存在が保証される場合は、代わりに `BelongsToRequiredRecord<T>` で宣言できます。`declare` 修飾子を使えばランタイム用のプレースホルダ値も不要です。
+
+```ts
+export class Comment extends defineModel(comments) {
+  declare static relationTypes: {
+    author: BelongsToRequiredRecord<UserRecord>
+  }
+}
+
+const comments = await Comment.with('author')
+comments[0].author.name // null チェック不要
+```
+
 `hasMany` リレーションは配列として展開されます（マッチするものがない場合は `[]`）。`belongsTo` は単一の関連レコードまたは外部キーが存在しない場合は `null` を返します。複数のリレーションを配列で渡すこともできます: `await User.with(['posts'])`。
 
 ### リレーション件数の取得
