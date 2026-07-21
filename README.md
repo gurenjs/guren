@@ -120,7 +120,6 @@ const post = await Post.findOrFail(1)
 
 - [Official docs](https://gurenjs.vercel.app/) — tutorials, API reference, guides
 - [examples/blog](./examples/blog) — reference implementation
-- [ROADMAP.md](./ROADMAP.md) — development plans
 
 ---
 
