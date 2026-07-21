@@ -1,5 +1,21 @@
 # @guren/cli
 
+## 1.4.0
+
+### Minor Changes
+
+- 60e2859: Add a `guren doctor` check that detects missing test infrastructure. When a project's `package.json` has no `@guren/testing` in `dependencies`/`devDependencies` and no `*.test.ts`-style files exist under `tests/`, doctor now emits a warning recommending `bun add -d @guren/testing`, and the same signal appears as an actionable step in `guren doctor --next`. This closes a gap where apps scaffolded with older `create-guren-app` versions (or hand-rolled projects) had zero test infrastructure and no doctor signal about it.
+
+### Patch Changes
+
+- 20e7aa4: Make `guren codegen` overwrite existing `.guren/*.gen.ts` artifacts by default. Previously, plain `bunx guren codegen` failed with "already exists. Use --force to overwrite." on any run after the first, even though create-app template scripts always pass `--force` and the generated CLAUDE.md documents plain `bunx guren codegen` as the way to regenerate manifests. `--force` is still accepted for backward compatibility but is now a no-op for this command.
+- 0c01602: Accept dot-notation nested relation paths (`with('comments.author')`) in the type signatures of `with()`, `findWith()`, `findWithOrFail()`, and `withPaginate()` — the runtime already supported them. Add `BelongsToRequiredRecord<T>` for belongsTo relations backed by a NOT NULL foreign key, so `relationTypes` can declare the parent as non-nullable (use the `declare` modifier to skip the runtime placeholder).
+- df571cf: Document a local-testing gotcha in the `plugin-authoring` agent skill (`agent:init`/`agent:sync`) and the plugin authoring guide: linking a plugin into a test app via `bun add file:`/`link:`/`workspace:` symlinks back to the plugin's source directory, so a plugin that still has its own `@guren/core` devDependency installed can end up loaded as two separate module copies alongside the app's — surfacing as duplicate-module runtime warnings or a `Property 'bindings' is protected...` TypeScript error. The fix (delete `node_modules` in the plugin package directory before linking) is now documented; published plugins never ship `node_modules`, so this only affects local testing before publishing.
+- a10aa54: Document SQLite test-database isolation and DB cleanup helpers in the AI agent harness template (`.claude/rules/testing.md`, shipped by `agent:init`/`agent:sync`): the scaffolded `NODE_ENV=test` branch in `config/database.ts` (default `./data/guren.test.db`, `TEST_DATABASE_URL` override, and the retrofit fix for older scaffolds that still write to the dev DB), plus guidance on `resetDatabase()`/`migrateDatabase()` vs. `useTruncateTables()`/`useDatabaseTransactions()` for cleaning up data between tests — including the explicit `DatabaseConnection` requirement and connection-identity caveat for the latter two, since Guren's SQLite adapter doesn't ship a ready-made adapter for them.
+- Updated dependencies [0c01602]
+  - @guren/orm@1.1.0
+  - @guren/core@1.2.0
+
 ## 1.3.0
 
 ### Minor Changes
