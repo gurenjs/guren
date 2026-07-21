@@ -176,8 +176,12 @@ const makeTestCommand = defineCommand({
     },
     runner: {
       type: 'string',
-      description: 'Test runner to scaffold for (bun or vitest)',
+      description: 'Test runner to scaffold for (bun or vitest). Defaults to auto-detecting the target project.',
       valueHint: 'bun|vitest',
+    },
+    controller: {
+      type: 'boolean',
+      description: 'Scaffold a controller test in tests/controllers/ with a Controller suffix',
     },
     force: {
       type: 'boolean',
@@ -200,7 +204,11 @@ const makeTestCommand = defineCommand({
     }
 
     const writerOptions = toWriterOptions(args)
-    const file = await makeTest(args.name, runner ? { ...writerOptions, runner } : writerOptions)
+    const file = await makeTest(args.name, {
+      ...writerOptions,
+      ...(runner ? { runner } : {}),
+      controller: Boolean(args.controller),
+    })
     consola.success(`Test created at ${file}`)
   },
 })
