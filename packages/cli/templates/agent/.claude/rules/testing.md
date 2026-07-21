@@ -31,7 +31,15 @@ const app = await TestApp.create({
 const csrf = await app.withCsrf()
 ```
 
-**Not installed by default**: `@guren/testing` isn't in a fresh scaffold's `devDependencies` — run `bun add -d @guren/testing`. The main entry does not require vitest; `useDatabaseTransactions()`/`useTruncateTables()` pick up bun:test's injected globals automatically — under vitest, `import '@guren/testing/vitest'` once in your setup file to register its hooks.
+**Included in `create-app`-scaffolded apps' `devDependencies`** by default (`default`/`api` blueprints) — if it's missing (e.g. an older scaffold, or a project set up by hand), run `bun add -d @guren/testing`. The main entry does not require vitest; `useDatabaseTransactions()`/`useTruncateTables()` pick up bun:test's injected globals automatically — under vitest, `import '@guren/testing/vitest'` once in your setup file to register its hooks.
+
+## Generating test files
+
+`bunx guren make:test <Name>` auto-detects the runner: explicit `--runner bun|vitest` wins,
+otherwise it checks for a `vitest.config.*` file or a `vitest` dependency in `package.json`,
+falling back to `bun:test`. Pass `--controller` for a controller test — it suffixes the class
+name with `Controller` and writes to `tests/controllers/${ClassName}.test.ts`, matching where
+`guren check` looks for it.
 
 ## Client methods
 

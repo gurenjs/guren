@@ -231,7 +231,7 @@ Additional auth features:
 ### Testing (@guren/testing)
 Source: `packages/testing/src/`
 
-Not installed by default — `bun add -d @guren/testing`.
+Included by default in `create-app`-scaffolded apps' `devDependencies`; if missing, `bun add -d @guren/testing`.
 
 ```typescript
 import { TestApp } from '@guren/testing'
