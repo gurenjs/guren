@@ -217,7 +217,21 @@ Add a build script using `tsup`:
 }
 ```
 
-## Step 7: Publish
+## Step 7: Test Locally Before Publishing
+
+Link the plugin into a real Guren app to verify it end to end before publishing:
+
+```bash
+# from your app's directory
+bun add file:../guren-plugin-analytics
+bunx guren plugin guren-plugin-analytics
+```
+
+`bun add file:` (and the `link:`/`workspace:` protocols) install the package as symlinks back to your plugin's source directory instead of copying it. If your plugin's `package.json` still has its own `node_modules` installed — from adding `@guren/core` as a `devDependency` in Step 1 — the app can end up loading two separate copies of `@guren/core`: one from its own install, one through the plugin's. This shows up as duplicate-module warnings at runtime, or a TypeScript error like `Property 'bindings' is protected but type 'Container' is not a class derived from 'Container'` at compile time.
+
+If you hit this, delete `node_modules` inside your plugin's package directory before linking it into the app — the app's own `@guren/core` install then satisfies the plugin's `peerDependencies` with nothing left to shadow it. A published plugin never ships its `node_modules`, so this only affects local testing before publishing.
+
+## Step 8: Publish
 
 ```bash
 bun run build
