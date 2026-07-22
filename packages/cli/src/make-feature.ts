@@ -135,6 +135,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   consola.info(`       ${routeVar}.get('/:id/edit', [${singular}Controller, 'edit']).name('${routeName}.edit')`)
   consola.info(`       ${routeVar}.post('/', { name: '${routeName}.store', body: ${singular}PayloadSchema }, [${singular}Controller, 'store'])${authSuffix}`)
   consola.info(`       ${routeVar}.put('/:id', { name: '${routeName}.update', body: ${singular}PayloadSchema }, [${singular}Controller, 'update'])${authSuffix}`)
+  consola.info(`       ${routeVar}.delete('/:id', { name: '${routeName}.destroy' }, [${singular}Controller, 'destroy'])${authSuffix}`)
   consola.info(`     })`)
   consola.info(`  3. Run: bunx guren db:migrate`)
   consola.info(`  4. Run: bunx guren codegen`)
@@ -147,7 +148,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   }
   if (withAuth) {
     consola.info('')
-    consola.info(`  Note: store/update call this.auth.userOrFail() — unauthenticated requests get 401.`)
+    consola.info(`  Note: store/update/destroy call this.auth.userOrFail() — unauthenticated requests get 401.`)
     consola.info(`  Use --public to scaffold without authentication checks.`)
   }
 
@@ -269,6 +270,9 @@ function generateController(
   const updateGuard = withPolicy
     ? `    await this.authorize('update', [${singular}, await ${singular}.findOrFail(id)])\n`
     : ''
+  const destroyGuard = withPolicy
+    ? `    await this.authorize('delete', [${singular}, await ${singular}.findOrFail(id)])\n`
+    : ''
   return `import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
 import { pages } from '@/.guren/pages.gen'
 import { ${singular} } from '../../Models/${singular}.js'
@@ -325,6 +329,12 @@ ${authGuard}    const { id } = this.validateParams(${singular}IdParamSchema)
 ${updateGuard}    const data = await this.validateBody(${singular}PayloadSchema)
     await ${singular}.update({ id }, data)
     return this.redirect('/${routeName}/' + id)
+  }
+
+  async destroy(): Promise<Response> {
+${authGuard}    const { id } = this.validateParams(${singular}IdParamSchema)
+${destroyGuard}    await ${singular}.delete({ id })
+    return this.redirect('/${routeName}')
   }
 }
 `
@@ -403,7 +413,18 @@ export default function ${singular}Show({ ${variableName} }: Props) {
     <main className="mx-auto max-w-3xl space-y-6 px-6 py-12">
       <Link href={route('${routeName}.index')}>Back</Link>
 ${fieldRenders}
-      <Link href={route('${routeName}.edit', { id: ${variableName}.id })}>Edit</Link>
+      <div className="flex gap-4">
+        <Link href={route('${routeName}.edit', { id: ${variableName}.id })}>Edit</Link>
+        <Link
+          href={route('${routeName}.destroy', { id: ${variableName}.id })}
+          method="delete"
+          as="button"
+          onBefore={() => window.confirm('Delete this ${variableName}?')}
+          className="text-red-600"
+        >
+          Delete
+        </Link>
+      </div>
     </main>
   )
 }

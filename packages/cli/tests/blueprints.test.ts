@@ -73,6 +73,8 @@ export const users = pgTable('users', {
     const routes = await readFile('routes/web.ts', 'utf8')
     expect(routes).toContain("router.group('/posts'")
     expect(routes).toContain("name('posts.index')")
+    expect(routes).toContain(".delete('/:id'")
+    expect(routes).toContain("name: 'posts.destroy'")
 
     const schema = await readFile('db/schema.ts', 'utf8')
     expect(schema).toContain("export const posts = pgTable('posts'")
