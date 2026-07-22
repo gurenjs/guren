@@ -9,8 +9,9 @@ import {
   classNameFromPath,
 } from './discovery'
 import { loadRouteDefinitions } from './load-routes'
+import { loadAuditConfig, type AuditIgnoreEntry } from './audit-config'
 
-export type AuditStatus = 'pass' | 'warn' | 'fail'
+export type AuditStatus = 'pass' | 'warn' | 'fail' | 'ignored'
 
 export interface AuditFinding {
   key: string
@@ -20,6 +21,8 @@ export interface AuditFinding {
   suggestion?: string
   filePath?: string
   line?: number
+  /** Set when `status` is 'ignored' — the reason from config/audit.ts. */
+  ignoreReason?: string
 }
 
 export interface AuditReport {
@@ -28,12 +31,15 @@ export interface AuditReport {
   passCount: number
   warnCount: number
   failCount: number
+  ignoredCount: number
   routesAnalyzed: boolean
 }
 
 export interface RunAuditOptions {
   cwd?: string
   routesFile?: string
+  /** Explicit path to the ignore config (relative to cwd). Defaults to config/audit.{ts,js,mjs}. */
+  auditConfigFile?: string
 }
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
@@ -80,14 +86,84 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
   await auditSourceFiles(cwd, findings)
   await auditModels(cwd, findings)
 
+  await applyIgnoreConfig(cwd, options.auditConfigFile, findings)
+
   return {
     cwd,
     findings,
     passCount: findings.filter((f) => f.status === 'pass').length,
     warnCount: findings.filter((f) => f.status === 'warn').length,
     failCount: findings.filter((f) => f.status === 'fail').length,
+    ignoredCount: findings.filter((f) => f.status === 'ignored').length,
     routesAnalyzed,
   }
+}
+
+// --- Ignore config ---
+
+/**
+ * Applies config/audit.ts ignore entries to warn/fail findings (matched by
+ * exact `key`). Ignored findings are kept but flipped to status 'ignored'
+ * with `ignoreReason` set, rather than removed — callers see the full
+ * picture. Entries with a missing/empty reason and entries that never
+ * matched any finding are reported back as their own findings so ignore
+ * rules can't silently rot.
+ */
+async function applyIgnoreConfig(
+  cwd: string,
+  auditConfigFile: string | undefined,
+  findings: AuditFinding[],
+): Promise<void> {
+  const { entries, invalidEntries, loadError } = await loadAuditConfig(cwd, auditConfigFile)
+
+  if (loadError) {
+    findings.push(finding('audit-config:load', 'Audit ignore config', 'warn', loadError))
+    return
+  }
+
+  for (const invalid of invalidEntries) {
+    findings.push(
+      finding(
+        'audit-config:invalid',
+        'Audit ignore config',
+        'warn',
+        `Ignore entry for '${invalid.key}' is missing a non-empty 'reason' and was not applied.`,
+        `Add a reason explaining why '${invalid.key}' is safe to ignore.`,
+      ),
+    )
+  }
+
+  for (const unused of applyIgnoreEntries(entries, findings)) {
+    findings.push(
+      finding(
+        `audit-config:unused:${unused.key}`,
+        'Audit ignore config',
+        'warn',
+        `Ignore entry for '${unused.key}' did not match any finding — it may be stale.`,
+        `Remove the entry for '${unused.key}' from config/audit.ts if it's no longer needed.`,
+      ),
+    )
+  }
+}
+
+/**
+ * Flips each warn/fail finding whose `key` matches an ignore entry to status
+ * 'ignored'. Returns the entries that matched nothing, so the caller can
+ * report them as stale.
+ */
+function applyIgnoreEntries(entries: AuditIgnoreEntry[], findings: AuditFinding[]): AuditIgnoreEntry[] {
+  const remaining = new Map(entries.map((entry) => [entry.key, entry]))
+
+  for (const f of findings) {
+    if (f.status !== 'warn' && f.status !== 'fail') continue
+    const entry = remaining.get(f.key)
+    if (!entry) continue
+    remaining.delete(f.key)
+    f.status = 'ignored'
+    f.ignoreReason = entry.reason
+  }
+
+  return [...remaining.values()]
 }
 
 // --- Route-level checks ---
@@ -583,6 +659,10 @@ export function renderAuditReport(report: AuditReport): void {
 
   for (const f of report.findings) {
     if (f.status === 'pass') continue
+    if (f.status === 'ignored') {
+      consola.info(`[ignored] ${f.title}: ${f.message} (${f.ignoreReason})`)
+      continue
+    }
     const log = f.status === 'warn' ? consola.warn : consola.error
     log(`[${f.status}] ${f.title}: ${f.message}`)
     if (f.suggestion) {
@@ -592,10 +672,14 @@ export function renderAuditReport(report: AuditReport): void {
 
   console.log('')
   console.log(
-    `Results: ${report.passCount} passed, ${report.warnCount} warnings, ${report.failCount} failures`,
+    `Results: ${report.passCount} passed, ${report.warnCount} warnings, ${report.failCount} failures, ${report.ignoredCount} ignored`,
   )
 
   if (report.failCount === 0 && report.warnCount === 0) {
-    consola.success('No security findings.')
+    consola.success(
+      report.ignoredCount > 0
+        ? `No unresolved security findings (${report.ignoredCount} ignored via config/audit.ts).`
+        : 'No security findings.',
+    )
   }
 }

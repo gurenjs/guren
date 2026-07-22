@@ -93,6 +93,19 @@ bunx guren audit
 const apiKey = 'example-not-a-real-key'
 ```
 
+ルートレベル・モデルレベルの findings(`authz:*`、`validation:*`、`mass-assignment:*`、`hidden-columns:*`)には、コメントを付けられる特定の行が存在しません。これらはルートレジストラを実行し、モデルを検査することで生成されるためです。代わりに `config/audit.ts` で finding の `key`(`--json` の出力からそのままコピーできます)と必須の `reason` を指定して無視します:
+
+```ts
+// config/audit.ts
+export default {
+  ignore: [
+    { key: 'authz:POST /webhooks/stripe', reason: 'コントローラでHMAC署名を検証済み' },
+  ],
+}
+```
+
+無視された finding はレポートから削除されず、`status: "ignored"` と `ignoreReason` を伴って残ります — 何も黙って握りつぶされません。`reason` が欠落しているエントリや、どの finding にもマッチしなかったエントリは、それ自体が警告として報告されるため、形骸化したルールに気づかないまま放置されることはありません。
+
 ## AIエージェントハーネス
 
 `create-guren-app` で作成したアプリには、AIエージェント向けのハーネスが最初から組み込まれます。内容は、プロジェクトガイドの `CLAUDE.md`、`.claude/` 配下の検証済みAPIルール・スキル・サブエージェント、開発サーバーの MCP エンドポイントを指す `.mcp.json`、そしてフィードバックループを構成する hooks です。セッション開始時に `guren context` のプロジェクトマップが読み込まれ、ルート・コントローラ・モデル・スキーマ・ページの編集後には `guren check` が自動で再実行され、失敗があればその場でコーディングエージェントに報告されます。

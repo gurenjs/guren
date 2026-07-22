@@ -1626,11 +1626,16 @@ const auditCommand = defineCommand({
       type: 'string',
       description: 'Application root directory.',
     },
+    auditConfig: {
+      type: 'string',
+      description: 'Path to the ignore config (defaults to config/audit.{ts,js,mjs}).',
+    },
   },
   async run({ args }) {
     const report = await runAudit({
       cwd: args.app,
       routesFile: args.routes,
+      auditConfigFile: args.auditConfig,
     })
 
     if (args.json) {

@@ -95,6 +95,19 @@ Suppress a false positive by placing `// guren-audit-ignore` on the flagged line
 const apiKey = 'example-not-a-real-key'
 ```
 
+Route- and model-level findings (`authz:*`, `validation:*`, `mass-assignment:*`, `hidden-columns:*`) have no single line to attach a comment to — they come from executing your route registrar and inspecting your models. Ignore those with `config/audit.ts` instead, keyed by the finding's `key` (copy it straight from `--json` output) and a required `reason`:
+
+```ts
+// config/audit.ts
+export default {
+  ignore: [
+    { key: 'authz:POST /webhooks/stripe', reason: 'HMAC signature verified in the controller' },
+  ],
+}
+```
+
+Ignored findings stay in the report with `status: "ignored"` and an `ignoreReason` — nothing is silently dropped. An entry with a missing `reason`, or one that never matches a finding, produces its own warning so stale rules don't rot unnoticed.
+
 ## AI Agent Harness
 
 Apps scaffolded with `create-guren-app` include an AI agent harness out of the box: a `CLAUDE.md` project guide, verified API rules, skills, and subagents under `.claude/`, an `.mcp.json` pointing at the dev server's MCP endpoint, and hooks that close the feedback loop — the `guren context` project map loads at session start, and `guren check` re-runs automatically after edits to routes, controllers, models, schema, or pages, reporting failures straight back to the coding agent.

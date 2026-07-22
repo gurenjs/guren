@@ -783,6 +783,167 @@ export const users = pgTable('users', {
   })
 })
 
+const WEBHOOK_ROUTE = `export default function registerRoutes(router: any) {
+  router.post('/webhooks/stripe', (c: any) => null)
+}`
+
+describe('runAudit ignore config', () => {
+  async function writeAuditConfig(dir: string, contents: string): Promise<void> {
+    await mkdir(join(dir, 'config'), { recursive: true })
+    await writeFile(join(dir, 'config/audit.ts'), contents, 'utf8')
+  }
+
+  it('ignores a route-level finding matched by key with a reason', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-ignore-route-')
+
+    try {
+      await writeRoutes(workspace.dir, WEBHOOK_ROUTE)
+      await writeAuditConfig(
+        workspace.dir,
+        `export default {
+  ignore: [
+    { key: 'authz:POST /webhooks/stripe', reason: 'HMAC signature verified in controller' },
+  ],
+}`,
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const authz = report.findings.find(f => f.key === 'authz:POST /webhooks/stripe')
+      expect(authz).toBeDefined()
+      expect(authz!.status).toBe('ignored')
+      expect(authz!.ignoreReason).toBe('HMAC signature verified in controller')
+      expect(report.ignoredCount).toBe(1)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('ignores a model-level finding matched by key', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-ignore-model-')
+
+    try {
+      await mkdir(join(workspace.dir, 'app/Models'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Models/Post.ts'),
+        `export default class Post {}`,
+        'utf8',
+      )
+      await writeAuditConfig(
+        workspace.dir,
+        `export default {
+  ignore: [
+    { key: 'mass-assignment:Post', reason: 'Seeded internally only, never bound to request input' },
+  ],
+}`,
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const finding = report.findings.find(f => f.key === 'mass-assignment:Post')
+      expect(finding).toBeDefined()
+      expect(finding!.status).toBe('ignored')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('does not apply an ignore entry missing a reason, and warns instead', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-ignore-invalid-')
+
+    try {
+      await writeRoutes(workspace.dir, WEBHOOK_ROUTE)
+      await writeAuditConfig(
+        workspace.dir,
+        `export default {
+  ignore: [
+    { key: 'authz:POST /webhooks/stripe', reason: '' },
+  ],
+}`,
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const authz = report.findings.find(f => f.key === 'authz:POST /webhooks/stripe')
+      expect(authz!.status).toBe('warn')
+      const invalid = report.findings.find(f => f.key === 'audit-config:invalid')
+      expect(invalid).toBeDefined()
+      expect(invalid!.status).toBe('warn')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('warns about an ignore entry that never matched any finding', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-ignore-unused-')
+
+    try {
+      await writeRoutes(
+        workspace.dir,
+        `export default function registerRoutes(router: any) {
+  router.post('/login', (c: any) => null)
+}`,
+      )
+      await writeAuditConfig(
+        workspace.dir,
+        `export default {
+  ignore: [
+    { key: 'authz:POST /nonexistent', reason: 'stale entry' },
+  ],
+}`,
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const unused = report.findings.find(f => f.key === 'audit-config:unused:authz:POST /nonexistent')
+      expect(unused).toBeDefined()
+      expect(unused!.status).toBe('warn')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('warns when the ignore config fails to load, but still runs the rest of the audit', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-ignore-loaderror-')
+
+    try {
+      await writeRoutes(
+        workspace.dir,
+        `export default function registerRoutes(router: any) {
+  router.post('/login', (c: any) => null)
+}`,
+      )
+      await writeAuditConfig(workspace.dir, `throw new Error('boom')`)
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const loadError = report.findings.find(f => f.key === 'audit-config:load')
+      expect(loadError).toBeDefined()
+      expect(loadError!.status).toBe('warn')
+      expect(report.routesAnalyzed).toBe(true)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('behaves exactly as before when no ignore config exists', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-ignore-none-')
+
+    try {
+      await writeRoutes(workspace.dir, WEBHOOK_ROUTE)
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const authz = report.findings.find(f => f.key === 'authz:POST /webhooks/stripe')
+      expect(authz!.status).toBe('warn')
+      expect(report.findings.some(f => f.key.startsWith('audit-config:'))).toBe(false)
+      expect(report.ignoredCount).toBe(0)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+
 describe('auth detection with generic type arguments', () => {
   it('recognizes userOrFail calls with type parameters', () => {
     const source = `
