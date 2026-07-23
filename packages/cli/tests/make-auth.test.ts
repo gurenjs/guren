@@ -82,7 +82,13 @@ export function registerWebRoutes(router: Router): void {
       const appContent = await readFile(join(workspace.dir, 'src/app.ts'), 'utf8')
       expect(appContent).toContain('AuthProvider')
       expect(appContent).toContain('MailProvider')
-      expect(appContent).toContain('providers: [DatabaseProvider, AuthProvider, MailProvider]')
+      // CoreMailServiceProvider must be wired before our own MailProvider so
+      // that container.singleton('mail', ...) resolves to our configured
+      // manager instead of Core's empty-config default — matching the same
+      // Core-then-app convention `guren add mail` uses, so the two stay
+      // compatible if a user layers both onto the same app.
+      expect(appContent).toContain("import { MailServiceProvider as CoreMailServiceProvider } from '@guren/core'")
+      expect(appContent).toContain('providers: [DatabaseProvider, AuthProvider, CoreMailServiceProvider, MailProvider]')
       expect(appContent).toContain('auth: {}')
 
       const routesContent = await readFile(join(workspace.dir, 'routes/web.ts'), 'utf8')

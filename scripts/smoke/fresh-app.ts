@@ -454,7 +454,12 @@ async function main(): Promise<void> {
       await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'add', 'auth'], appDir, runtimeEnv)
       await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'add', 'resource', 'posts'], appDir, runtimeEnv)
       await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'add', 'queue'], appDir, runtimeEnv)
-      await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'add', 'mail'], appDir, runtimeEnv)
+      // --force: `add auth` now also scaffolds app/Providers/MailProvider.ts
+      // (password reset needs a mail manager) — the mail blueprint's own,
+      // more complete MailProvider (memory transport, setMailManager wiring)
+      // intentionally supersedes it here so the assertions below can verify
+      // its shape.
+      await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'add', 'mail', '--force'], appDir, runtimeEnv)
       await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'add', 'events'], appDir, runtimeEnv)
       await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'add', 'cache'], appDir, runtimeEnv)
       await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'add', 'notifications'], appDir, runtimeEnv)

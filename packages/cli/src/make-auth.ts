@@ -1335,6 +1335,22 @@ async function installAuth(migrationGenerated = true, includeExtras = true): Pro
   await wireProvider(appPath, 'AuthProvider', 'app/Providers/AuthProvider.js')
 
   if (includeExtras) {
+    // Wire CoreMailServiceProvider before our own MailProvider — matching
+    // the `guren add mail` blueprint's convention — so `container.singleton(
+    // 'mail', ...)` resolves to our configured manager rather than Core's
+    // empty-config default, regardless of whether `add mail` also runs
+    // (before or after this) against the same app.
+    const coreMailImportResult = await addImport(appPath, "import { MailServiceProvider as CoreMailServiceProvider } from '@guren/core'")
+    if (coreMailImportResult.modified) {
+      consola.success(`Added CoreMailServiceProvider import to ${appPath}`)
+    }
+    const coreMailProviderResult = await addProvider(appPath, 'CoreMailServiceProvider')
+    if (coreMailProviderResult.modified) {
+      consola.success(`Added CoreMailServiceProvider to providers array in ${appPath}`)
+    } else if (coreMailProviderResult.reason !== 'Provider already registered') {
+      consola.warn(`Could not add CoreMailServiceProvider: ${coreMailProviderResult.reason}`)
+    }
+
     await wireProvider(appPath, 'MailProvider', 'app/Providers/MailProvider.js')
   }
 
