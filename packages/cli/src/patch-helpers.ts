@@ -37,11 +37,27 @@ export async function addImport(
   const lines = content.split('\n')
   let insertIndex = 0
   let lastImportIndex = -1
+  let inMultilineImport = false
+  // Matches the line that closes an import statement, e.g. `} from '@guren/core'`,
+  // `import { x } from 'y';`, or a bare side-effect import `import '../config/x.js'`.
+  const importCloses = /(^import\s+['"][^'"]*['"]|from\s+['"][^'"]*['"])\s*;?\s*$/
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim()
-    if (line.startsWith('import ')) {
+
+    if (inMultilineImport) {
       lastImportIndex = i
+      if (importCloses.test(line)) {
+        inMultilineImport = false
+      }
+      continue
+    }
+
+    if (line.startsWith('import ') || line.startsWith("import'") || line.startsWith('import"')) {
+      lastImportIndex = i
+      if (!importCloses.test(line)) {
+        inMultilineImport = true
+      }
     } else if (lastImportIndex >= 0 && line.length > 0 && !line.startsWith('//')) {
       break
     }

@@ -209,7 +209,10 @@ step 10 "Add infrastructure add-on (queue)"
 # ---------------------------------------------------------------------------
 step 11 "Add infrastructure add-on (mail)"
 
-(cd "$APP_DIR" && bun "$CLI_BIN" add mail)
+# --force: `add auth` (step above) already scaffolds app/Providers/MailProvider.ts
+# for password reset — the mail blueprint's own, more complete MailProvider
+# (memory transport, setMailManager wiring) intentionally supersedes it.
+(cd "$APP_DIR" && bun "$CLI_BIN" add mail --force)
 
 # ---------------------------------------------------------------------------
 # Step 12: Add infrastructure add-on — events

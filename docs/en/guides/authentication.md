@@ -18,9 +18,9 @@ For new applications, run the bundled scaffolder with automatic installation (th
 bunx guren make:auth --install
 ```
 
-This command generates login and registration controllers, Inertia pages, a layout, `AuthProvider`, user model, SQL migration, and a demo seeder. The `--install` flag automatically:
+This command generates login, registration, and password reset controllers, Inertia pages, a layout, `AuthProvider`, `MailProvider`, user model, SQL migration, and a demo seeder. The `--install` flag automatically:
 
-1. Registers `AuthProvider` in your `Application` providers array
+1. Registers `AuthProvider` and `MailProvider` in your `Application` providers array
 2. Adds `createSessionMiddleware` with development-friendly defaults (uses `cookieSecure: true` in production)
 3. Wires `registerAuthRoutes(router)` into `routes/web.ts`
 4. Updates `db/schema.ts` to include password and remember-token columns
@@ -35,11 +35,15 @@ bun run dev
 
 Visit `http://localhost:3000/login` and sign in with `demo@example.com` / `secret`, or visit `/register` to create a new account.
 
-Pass `--minimal` to skip the registration scaffold and generate the login-only experience instead:
+Pass `--minimal` to skip the registration and password reset scaffold and generate the login-only experience instead:
 
 ```bash
 bunx guren make:auth --install --minimal
 ```
+
+### Password reset
+
+Clicking "Forgot your password?" on the login page walks through `ForgotPasswordController` and `ResetPasswordController`, which use the framework's `createPasswordResetToken` / `verifyPasswordResetToken` primitives under the hood. The reset token is stored with the generated `app/Auth/PasswordResetStore.ts` (an in-memory store — swap it for a Redis-backed store in production or any multi-instance deployment) and emailed via the generated `config/mail.ts`, which defaults to the `log` driver: reset links print straight to the console, so the flow works with zero setup in development. Set `MAIL_DRIVER=smtp` (and the `SMTP_*` environment variables) once you're ready to send real email.
 
 ## OAuth / Social login
 
