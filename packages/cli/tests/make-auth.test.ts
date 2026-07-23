@@ -381,7 +381,7 @@ export const posts = pgTable('posts', {
       await mkdir(join(workspace.dir, 'db'), { recursive: true })
       await writeFile(join(workspace.dir, 'db/schema.ts'), `export const posts = 'posts'\n`, 'utf8')
 
-      const created = await makeAuth({ force: true, minimal: true, oauth: 'github' })
+      const created = await makeAuth({ force: true, minimal: true, oauth: 'discord' })
 
       expect(created).toEqual(expect.arrayContaining([
         expect.stringContaining('app/Providers/OAuthProvider.ts'),
@@ -392,8 +392,17 @@ export const posts = pgTable('posts', {
         expect.stringContaining('Register.tsx'),
       ]))
 
+      const provider = await readFile(join(workspace.dir, 'app/Providers/OAuthProvider.ts'), 'utf8')
+      expect(provider).toContain('createDiscordOAuthProviderConfig')
+      expect(provider).toContain('OAUTH_DISCORD_CLIENT_ID')
+
+      const controller = await readFile(join(workspace.dir, 'app/Http/Controllers/Auth/OAuthController.ts'), 'utf8')
+      expect(controller).toContain("z.enum(['discord'])")
+      expect(controller).toContain('discordId: profileId')
+
       const loginPage = await readFile(join(workspace.dir, 'resources/js/pages/auth/Login.tsx'), 'utf8')
-      expect(loginPage).toContain('Continue with GitHub')
+      expect(loginPage).toContain('Continue with Discord')
+      expect(loginPage).toContain('href="/auth/discord"')
     } finally {
       await workspace.cleanup()
     }

@@ -250,8 +250,10 @@ function buildOAuthProviderTemplate(providers: string[]): string {
 
   // Matches the wiring convention scaffolded by `guren add oauth`: providers
   // are registered against the shared `oauth` singleton (bound by
-  // CoreOAuthServiceProvider) and only when all three env vars are set, so a
-  // half-configured provider never shows a login button that leads nowhere.
+  // CoreOAuthServiceProvider) and only when all three env vars are set. The
+  // login buttons still render either way — but clicking one fails fast with
+  // a clear "provider not configured" error app-side, instead of redirecting
+  // to the provider with empty credentials and failing confusingly there.
   return `import { ServiceProvider, type OAuthManager, ${factoryImports} } from '@guren/core'
 
 export default class OAuthProvider extends ServiceProvider {
