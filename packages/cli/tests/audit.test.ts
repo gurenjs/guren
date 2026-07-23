@@ -848,6 +848,98 @@ describe('runAudit ignore config', () => {
     }
   })
 
+  it('rejects an entry targeting a line-level finding (secrets) instead of ignoring it', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-ignore-line-level-')
+
+    try {
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'src/config.ts'),
+        `export const apiKey = 'sk-live-1234567890abcdef'\n`,
+        'utf8',
+      )
+      const secretKeyReport = await runAudit({ cwd: workspace.dir })
+      const secretKey = secretKeyReport.findings.find(f => f.key.startsWith('secret:src/config.ts'))!.key
+
+      await writeAuditConfig(
+        workspace.dir,
+        `export default {
+  ignore: [
+    { key: '${secretKey}', reason: 'trying to suppress a hardcoded credential via config' },
+  ],
+}`,
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const secret = report.findings.find(f => f.key === secretKey)
+      expect(secret).toBeDefined()
+      expect(secret!.status).toBe('fail')
+      const unsupported = report.findings.find(f => f.key === `audit-config:unsupported:${secretKey}`)
+      expect(unsupported).toBeDefined()
+      expect(unsupported!.suggestion).toContain('guren-audit-ignore')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('ignores every finding that shares an ignored key, not just the first', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-ignore-duplicate-key-')
+
+    try {
+      await writeRoutes(
+        workspace.dir,
+        `export default function registerRoutes(router: any) {
+  router.post('/widgets', (c: any) => null)
+  router.post('/widgets', (c: any) => null)
+}`,
+      )
+      await writeAuditConfig(
+        workspace.dir,
+        `export default {
+  ignore: [
+    { key: 'authz:POST /widgets', reason: 'both registrations are intentional and reviewed' },
+  ],
+}`,
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const matches = report.findings.filter(f => f.key === 'authz:POST /widgets')
+      expect(matches).toHaveLength(2)
+      expect(matches.every(f => f.status === 'ignored')).toBe(true)
+      expect(report.findings.some(f => f.key.startsWith('audit-config:unused'))).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('reports an ignore entry missing a key as invalid', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-ignore-missing-key-')
+
+    try {
+      await writeRoutes(workspace.dir, WEBHOOK_ROUTE)
+      await writeAuditConfig(
+        workspace.dir,
+        `export default {
+  ignore: [
+    { reason: 'no key set' },
+  ],
+}`,
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const authz = report.findings.find(f => f.key === 'authz:POST /webhooks/stripe')
+      expect(authz!.status).toBe('warn')
+      const invalid = report.findings.find(f => f.key === 'audit-config:invalid')
+      expect(invalid).toBeDefined()
+      expect(invalid!.message).toContain("missing a non-empty 'key'")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('does not apply an ignore entry missing a reason, and warns instead', async () => {
     const workspace = await createTempWorkspace('guren-cli-audit-ignore-invalid-')
 
@@ -938,6 +1030,31 @@ describe('runAudit ignore config', () => {
       expect(authz!.status).toBe('warn')
       expect(report.findings.some(f => f.key.startsWith('audit-config:'))).toBe(false)
       expect(report.ignoredCount).toBe(0)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('loads the ignore config from an explicit auditConfigFile path', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-ignore-explicit-path-')
+
+    try {
+      await writeRoutes(workspace.dir, WEBHOOK_ROUTE)
+      await mkdir(join(workspace.dir, 'custom'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'custom/security-exceptions.ts'),
+        `export default {
+  ignore: [
+    { key: 'authz:POST /webhooks/stripe', reason: 'HMAC signature verified in controller' },
+  ],
+}`,
+        'utf8',
+      )
+
+      const report = await runAudit({ cwd: workspace.dir, auditConfigFile: 'custom/security-exceptions.ts' })
+
+      const authz = report.findings.find(f => f.key === 'authz:POST /webhooks/stripe')
+      expect(authz!.status).toBe('ignored')
     } finally {
       await workspace.cleanup()
     }

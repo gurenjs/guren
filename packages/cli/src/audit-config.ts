@@ -9,15 +9,22 @@ export interface AuditIgnoreEntry {
   reason: string
 }
 
+/** A raw ignore entry that failed validation — `key` is a best-effort label for reporting. */
+export interface InvalidAuditIgnoreEntry {
+  key: string
+  issue: 'missing-key' | 'missing-reason'
+}
+
 export interface AuditConfig {
-  ignore: AuditIgnoreEntry[]
+  /** Unvalidated at the type level — entries are runtime-checked in `loadAuditConfig`. */
+  ignore: unknown[]
 }
 
 export interface LoadedAuditConfig {
-  /** Entries with a non-empty `reason`. Entries missing one are reported via `invalidEntries`. */
+  /** Entries with both a non-empty `key` and `reason`. */
   entries: AuditIgnoreEntry[]
-  /** Raw entries that were rejected for missing/empty `reason`. */
-  invalidEntries: AuditIgnoreEntry[]
+  /** Raw entries rejected for a missing `key` and/or `reason`. */
+  invalidEntries: InvalidAuditIgnoreEntry[]
   /** Set when the config file exists but failed to load or has an unexpected shape. */
   loadError?: string
 }
@@ -26,12 +33,6 @@ const CANDIDATE_FILES = ['config/audit.ts', 'config/audit.js', 'config/audit.mjs
 
 function emptyResult(loadError?: string): LoadedAuditConfig {
   return { entries: [], invalidEntries: [], loadError }
-}
-
-function isAuditIgnoreEntry(value: unknown): value is AuditIgnoreEntry {
-  if (!value || typeof value !== 'object') return false
-  const candidate = value as Record<string, unknown>
-  return typeof candidate.key === 'string' && candidate.key.length > 0
 }
 
 /**
@@ -68,16 +69,22 @@ export async function loadAuditConfig(
   }
 
   const entries: AuditIgnoreEntry[] = []
-  const invalidEntries: AuditIgnoreEntry[] = []
+  const invalidEntries: InvalidAuditIgnoreEntry[] = []
 
   for (const raw of config.ignore) {
-    if (!isAuditIgnoreEntry(raw)) continue
-    const reason = typeof raw.reason === 'string' ? raw.reason.trim() : ''
-    if (reason.length === 0) {
-      invalidEntries.push(raw)
+    const candidate = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+    const key = typeof candidate.key === 'string' ? candidate.key.trim() : ''
+    const reason = typeof candidate.reason === 'string' ? candidate.reason.trim() : ''
+
+    if (key.length === 0) {
+      invalidEntries.push({ key: '<missing key>', issue: 'missing-key' })
       continue
     }
-    entries.push({ key: raw.key, reason })
+    if (reason.length === 0) {
+      invalidEntries.push({ key, issue: 'missing-reason' })
+      continue
+    }
+    entries.push({ key, reason })
   }
 
   return { entries, invalidEntries }

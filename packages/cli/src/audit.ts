@@ -103,11 +103,20 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
 
 /**
  * Applies config/audit.ts ignore entries to warn/fail findings (matched by
- * exact `key`). Ignored findings are kept but flipped to status 'ignored'
- * with `ignoreReason` set, rather than removed — callers see the full
- * picture. Entries with a missing/empty reason and entries that never
- * matched any finding are reported back as their own findings so ignore
- * rules can't silently rot.
+ * exact `key`, applied to every finding sharing that key). Ignored findings
+ * are kept but flipped to status 'ignored' with `ignoreReason` set, rather
+ * than removed — callers see the full picture.
+ *
+ * Only findings with no source `line` are eligible — those are exactly the
+ * route- and model-level findings that have nowhere to attach an inline
+ * `// guren-audit-ignore` comment. Findings tied to a specific line (secrets,
+ * raw SQL, disabled security toggles) already have that inline mechanism, so
+ * config entries targeting them are rejected rather than silently widening
+ * what this file can suppress.
+ *
+ * Entries with a missing/empty reason, entries targeting a line-level
+ * finding, and entries that never matched any finding are all reported back
+ * as their own findings so ignore rules can't silently rot or overreach.
  */
 async function applyIgnoreConfig(
   cwd: string,
@@ -123,47 +132,91 @@ async function applyIgnoreConfig(
 
   for (const invalid of invalidEntries) {
     findings.push(
+      invalid.issue === 'missing-key'
+        ? finding(
+            'audit-config:invalid',
+            'Audit ignore config',
+            'warn',
+            `An ignore entry in config/audit.ts is missing a non-empty 'key' and was skipped.`,
+            `Set 'key' to the exact finding.key from 'guren audit --json'.`,
+          )
+        : finding(
+            'audit-config:invalid',
+            'Audit ignore config',
+            'warn',
+            `Ignore entry for '${invalid.key}' is missing a non-empty 'reason' and was not applied.`,
+            `Add a reason explaining why '${invalid.key}' is safe to ignore.`,
+          ),
+    )
+  }
+
+  const { unused, unsupported } = applyIgnoreEntries(entries, findings)
+
+  for (const entry of unsupported) {
+    findings.push(
       finding(
-        'audit-config:invalid',
+        `audit-config:unsupported:${entry.key}`,
         'Audit ignore config',
         'warn',
-        `Ignore entry for '${invalid.key}' is missing a non-empty 'reason' and was not applied.`,
-        `Add a reason explaining why '${invalid.key}' is safe to ignore.`,
+        `Ignore entry for '${entry.key}' targets a finding tied to a specific source line and was not applied.`,
+        `Use '// guren-audit-ignore' on that line instead of config/audit.ts.`,
       ),
     )
   }
 
-  for (const unused of applyIgnoreEntries(entries, findings)) {
+  for (const entry of unused) {
     findings.push(
       finding(
-        `audit-config:unused:${unused.key}`,
+        `audit-config:unused:${entry.key}`,
         'Audit ignore config',
         'warn',
-        `Ignore entry for '${unused.key}' did not match any finding — it may be stale.`,
-        `Remove the entry for '${unused.key}' from config/audit.ts if it's no longer needed.`,
+        `Ignore entry for '${entry.key}' did not match any finding — it may be stale.`,
+        `Remove the entry for '${entry.key}' from config/audit.ts if it's no longer needed.`,
       ),
     )
   }
 }
 
+interface IgnoreApplicationResult {
+  /** Entries that matched no finding at all. */
+  unused: AuditIgnoreEntry[]
+  /** Entries that matched only line-level findings (rejected, not applied). */
+  unsupported: AuditIgnoreEntry[]
+}
+
 /**
- * Flips each warn/fail finding whose `key` matches an ignore entry to status
- * 'ignored'. Returns the entries that matched nothing, so the caller can
- * report them as stale.
+ * Flips every warn/fail finding whose `key` matches an ignore entry to
+ * status 'ignored' — all findings sharing a key are affected, not just the
+ * first. Findings with a `line` are skipped (see `applyIgnoreConfig`) and
+ * their entries are reported as unsupported instead of unused.
  */
-function applyIgnoreEntries(entries: AuditIgnoreEntry[], findings: AuditFinding[]): AuditIgnoreEntry[] {
-  const remaining = new Map(entries.map((entry) => [entry.key, entry]))
+function applyIgnoreEntries(
+  entries: AuditIgnoreEntry[],
+  findings: AuditFinding[],
+): IgnoreApplicationResult {
+  const byKey = new Map(entries.map((entry) => [entry.key, entry]))
+  const matchedSupported = new Set<string>()
+  const matchedUnsupported = new Set<string>()
 
   for (const f of findings) {
     if (f.status !== 'warn' && f.status !== 'fail') continue
-    const entry = remaining.get(f.key)
+    const entry = byKey.get(f.key)
     if (!entry) continue
-    remaining.delete(f.key)
+
+    if (f.line !== undefined) {
+      matchedUnsupported.add(entry.key)
+      continue
+    }
+
+    matchedSupported.add(entry.key)
     f.status = 'ignored'
     f.ignoreReason = entry.reason
   }
 
-  return [...remaining.values()]
+  const unused = entries.filter((e) => !matchedSupported.has(e.key) && !matchedUnsupported.has(e.key))
+  const unsupported = entries.filter((e) => matchedUnsupported.has(e.key))
+
+  return { unused, unsupported }
 }
 
 // --- Route-level checks ---
