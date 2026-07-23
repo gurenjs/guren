@@ -74,13 +74,14 @@ bunx guren plugin @acme/guren-plugin-audit
 
 | コマンド | 説明 | 例 |
 |---------|------|-----|
-| `check` | ルート・コントローラ・ページ・モデル間の整合性を検証 | `bunx guren check --json` |
+| `check` | ルート・コントローラ・ページ・モデル間の整合性を検証。`guren.arch.ts` があればアーキテクチャ境界も検証 | `bunx guren check --json` |
 | `audit` | セキュリティ監査: 変更系ルートのバリデーション/認証の欠如、文字列補間付き生SQL、ハードコードされた認証情報、無効化されたセキュリティ既定値、mass assignment 設定、`static hidden` 未登録の機微カラムを検査 | `bunx guren audit --json` |
 | `doctor` | プロジェクトの健全性レポート(環境変数・設定・生成ファイル)と次のアクション | `bunx guren doctor --next` |
 
-`audit` は失敗(fail)を検出すると非ゼロの終了コードを返すため、CI に組み込めます。
+`check` と `audit` はいずれも失敗(fail)を検出すると非ゼロの終了コードを返すため、CI に組み込めます。
 
 ```bash
+bunx guren check
 bunx guren audit
 ```
 
@@ -107,6 +108,39 @@ export default {
 無視された finding はレポートから削除されず、`status: "ignored"` と `ignoreReason` を伴って残ります — 何も黙って握りつぶされません。`key` や `reason` が欠落しているエントリ、どの finding にもマッチしなかったエントリは、それ自体が警告として報告されるため、形骸化したルールに気づかないまま放置されることはありません。
 
 `config/audit.ts` が受け付けるのは、ソース行を持たない finding(上記のルート/モデルレベルのもの)のみです。行に紐づく finding(ハードコードされた認証情報、生SQL、無効化されたセキュリティ既定値)には既に `// guren-audit-ignore` という手段があるため、それらを対象にしたエントリは適用されず、インラインコメントを使うよう促す警告になります — 目立たない第二の抑制手段になってしまうことを避けるためです。
+
+### アーキテクチャ境界
+
+プロジェクトルートに `guren.arch.ts` を置くだけで、フラグなしに `guren check` が境界を検証するようになります:
+
+```typescript
+// guren.arch.ts
+import { defineArchRules } from '@guren/cli/arch'
+
+export default defineArchRules({
+  layers: {
+    domain: 'app/Domain/**',
+    http: 'app/Http/**',
+  },
+  rules: [
+    // ドメインロジックはHTTP層に依存してはいけない
+    { from: 'domain', disallow: ['http'] },
+    // コントローラはORMを直接使わずModel経由でクエリする
+    { from: 'http', disallowPackages: ['drizzle-orm'] },
+  ],
+})
+```
+
+各ルールの `from` と `disallow` には、上で定義したレイヤー名か、インラインの glob を指定できます。既存コードベースに新しい境界を導入する際は `severity: 'warn'` から始め、違反がゼロになったら外す(デフォルトの `'fail'` に戻す)運用が安全です。
+
+AIコーディングエージェントや大規模アプリで実用的に使うための2つのフラグ:
+
+```bash
+bunx guren check --arch      # アーキテクチャチェックのみ実行 — 編集フック向けの高速パス
+bunx guren check --changed   # main とのマージベースからの変更ファイルのみを検査対象にする
+```
+
+プロジェクト内のファイルに解決できないimportは、失敗ではなく警告として報告されます — 解決できないパスがビルドをブロックすることはありません。
 
 ## AIエージェントハーネス
 

@@ -2,19 +2,22 @@ import { describe, expect, it, mock } from 'bun:test'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createTempWorkspace } from './helpers'
+import * as realUtils from '../src/utils'
 
 const spawnCalls: Array<{ command: string; args: string[] }> = []
 
-await mock.module('node:child_process', () => ({
-  spawn: (command: string, args: string[]) => {
+// Mock `./utils`'s `runCommand` rather than `node:child_process` directly:
+// `mock.module()` replaces a module in the process-wide registry for the
+// rest of the test run (no per-file scoping), so mocking the shared
+// built-in `node:child_process` would also poison unrelated tests that
+// shell out for real (e.g. changed-files.test.ts calling real git). Mocking
+// this package's own `./utils` module instead keeps the fake scoped to a
+// file no other test touches. Spread the real module so anything besides
+// `runCommand` (e.g. `writeFileSafe`) keeps its real behavior.
+await mock.module('../src/utils', () => ({
+  ...realUtils,
+  runCommand: async (command: string, args: string[]) => {
     spawnCalls.push({ command, args })
-    return {
-      on: (event: string, handler: (value?: number) => void) => {
-        if (event === 'close') {
-          handler(0)
-        }
-      },
-    }
   },
 }))
 

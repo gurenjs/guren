@@ -32,6 +32,10 @@
     "./vite": {
       "types": "./dist/vite/index.d.ts",
       "default": "./dist/vite/index.js"
+    },
+    "./arch": {
+      "types": "./dist/arch/index.d.ts",
+      "default": "./dist/arch/index.js"
     }
   },
   "bin": {
