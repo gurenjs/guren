@@ -83,6 +83,10 @@ bunx guren make:listener <Name> --event=<EventName>
 bunx guren make:mail <Name>
 bunx guren make:test <Name>
 
+# Growing past a flat app/? Scaffold a self-contained module:
+bunx guren make:module <Name>                    # modules/<name>/{index.ts,routes.ts,db/schema.ts}, wired into src/app.ts
+bunx guren make:controller <Name> --module <name> # most make:* commands accept --module
+
 # Database workflow: edit db/schema.ts first, then
 bunx guren make:migration <name>   # generate SQL migration via drizzle-kit into db/migrations/
 bun run db:migrate                 # apply pending migrations

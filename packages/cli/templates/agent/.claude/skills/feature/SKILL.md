@@ -25,6 +25,8 @@ When given a feature name (e.g., "Post", "Product"):
 bunx guren make:feature <Name> --fields "title:string,body:text,published:boolean"
 ```
 
+Add `--module <name>` to scaffold the feature inside an existing `modules/<name>/` directory instead of the project root — app/ files move under `modules/<name>/`, but pages stay top-level, namespaced by module name (`resources/js/pages/<name>/...`), not colocated.
+
 This generates Validator, Resource, Controller, Views (Index/Show/New/Edit), and Model in one step with:
 - Typed page props (no `any`)
 - `route()` helper for all URLs

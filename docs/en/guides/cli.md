@@ -129,6 +129,42 @@ bunx guren check --changed   # restrict checks to files changed vs. the merge ba
 
 An import Guren can't resolve to a project file is reported as a warning, never a failure — an unresolved path shouldn't block your build.
 
+## Application Modules
+
+As an app grows past a couple dozen routes, `guren make:module` gives you a self-contained slice of the app instead of piling everything into one flat `app/`, `routes/`, and `db/schema.ts`:
+
+```bash
+bunx guren make:module Billing
+```
+
+This scaffolds `modules/billing/{index.ts, routes.ts, db/schema.ts}` and wires it in automatically: `db/schema.ts` gets `export * from '../modules/billing/db/schema'`, and `src/app.ts` gets `billingModule` imported and added to `createApp({ modules: [...] })`.
+
+Most `make:*` commands accept `--module <name>` to scaffold inside a module instead of the project root:
+
+```bash
+bunx guren make:controller Invoice --module billing   # modules/billing/app/Http/Controllers/InvoiceController.ts
+bunx guren make:model Invoice --module billing        # modules/billing/app/Models/Invoice.ts
+```
+
+`guren check`, `guren audit`, `guren context`, `model:list`, and `doctor` all scan `modules/*/` automatically — no extra configuration needed. Two exceptions: `make:auth` (authentication is an app-wide concern, not a per-module one) and `make:migration` (drizzle-kit driven; migrations are generated from whichever schema paths `drizzle.config.ts` points at, module or not).
+
+A module's public API is its `index.ts` — the `defineModule()` descriptor it exports — plus `db/schema.ts` for table definitions shared across modules. Once a `modules/` directory exists, `guren check` enforces this automatically, with no `guren.arch.ts` required: a file inside one module reaching into another module's internals (anything other than its `index.ts` or `db/schema.ts`) is a failure, and so is top-level app code doing the same.
+
+```typescript
+// modules/billing/index.ts
+import { defineModule } from '@guren/core'
+import { registerBillingRoutes } from './routes'
+
+export const billingModule = defineModule({
+  name: 'billing',
+  prefix: '/billing',            // optional URL prefix for every route the registrar declares
+  routes: registerBillingRoutes,
+  providers: [BillingServiceProvider],  // optional — appended to the app's provider list
+})
+```
+
+Inertia pages are not colocated inside `modules/<name>/` — they stay under the top-level `resources/js/pages/`, namespaced by module name instead (`resources/js/pages/billing/Invoices/Index.tsx`). `make:feature Invoice --module billing` follows this convention automatically.
+
 ## AI Agent Harness
 
 Apps scaffolded with `create-guren-app` include an AI agent harness out of the box: a `CLAUDE.md` project guide, verified API rules, skills, and subagents under `.claude/`, an `.mcp.json` pointing at the dev server's MCP endpoint, and hooks that close the feedback loop — the `guren context` project map loads at session start, and `guren check` re-runs automatically after edits to routes, controllers, models, schema, or pages, reporting failures straight back to the coding agent.
