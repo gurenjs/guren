@@ -101,6 +101,10 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
 
 // --- Ignore config ---
 
+function configWarning(key: string, message: string, suggestion: string): AuditFinding {
+  return finding(key, 'Audit ignore config', 'warn', message, suggestion)
+}
+
 /**
  * Applies config/audit.ts ignore entries to warn/fail findings (matched by
  * exact `key`, applied to every finding sharing that key). Ignored findings
@@ -133,17 +137,13 @@ async function applyIgnoreConfig(
   for (const invalid of invalidEntries) {
     findings.push(
       invalid.issue === 'missing-key'
-        ? finding(
+        ? configWarning(
             'audit-config:invalid',
-            'Audit ignore config',
-            'warn',
             `An ignore entry in config/audit.ts is missing a non-empty 'key' and was skipped.`,
             `Set 'key' to the exact finding.key from 'guren audit --json'.`,
           )
-        : finding(
+        : configWarning(
             'audit-config:invalid',
-            'Audit ignore config',
-            'warn',
             `Ignore entry for '${invalid.key}' is missing a non-empty 'reason' and was not applied.`,
             `Add a reason explaining why '${invalid.key}' is safe to ignore.`,
           ),
@@ -154,10 +154,8 @@ async function applyIgnoreConfig(
 
   for (const entry of unsupported) {
     findings.push(
-      finding(
+      configWarning(
         `audit-config:unsupported:${entry.key}`,
-        'Audit ignore config',
-        'warn',
         `Ignore entry for '${entry.key}' targets a finding tied to a specific source line and was not applied.`,
         `Use '// guren-audit-ignore' on that line instead of config/audit.ts.`,
       ),
@@ -166,10 +164,8 @@ async function applyIgnoreConfig(
 
   for (const entry of unused) {
     findings.push(
-      finding(
+      configWarning(
         `audit-config:unused:${entry.key}`,
-        'Audit ignore config',
-        'warn',
         `Ignore entry for '${entry.key}' did not match any finding — it may be stale.`,
         `Remove the entry for '${entry.key}' from config/audit.ts if it's no longer needed.`,
       ),
@@ -213,8 +209,15 @@ function applyIgnoreEntries(
     f.ignoreReason = entry.reason
   }
 
-  const unused = entries.filter((e) => !matchedSupported.has(e.key) && !matchedUnsupported.has(e.key))
-  const unsupported = entries.filter((e) => matchedUnsupported.has(e.key))
+  const unused: AuditIgnoreEntry[] = []
+  const unsupported: AuditIgnoreEntry[] = []
+  for (const entry of entries) {
+    if (matchedUnsupported.has(entry.key)) {
+      unsupported.push(entry)
+    } else if (!matchedSupported.has(entry.key)) {
+      unused.push(entry)
+    }
+  }
 
   return { unused, unsupported }
 }
