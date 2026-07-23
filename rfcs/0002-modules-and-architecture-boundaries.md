@@ -324,7 +324,31 @@ making the later migration a file move with no reference changes.
 `packages/cli/src/discovery.ts` extends its walk roots to include
 `modules/*/app/...`. Because `check`, `audit`, `context`, `model:list`,
 and `doctor` all sit on top of `discovery.ts`, this single change makes
-every existing agent command module-aware.
+every existing agent command module-aware ~~for controllers, models,
+and other file-discovery-based checks~~. **Amended in implementation:**
+this covers everything `discovery.ts` walks — but a module's own
+`routes.ts` registrar isn't a file `discovery.ts` scans; it's *executed*,
+by a separate loader (`packages/cli/src/load-routes.ts`) that ran only
+`routes/web.ts` and had no module awareness at all. That gap meant
+`guren codegen` had no typed `route()` for module routes, `guren audit`
+silently skipped auth/validation checks on module routes (a mutating
+route inside a module read the request body unvalidated and audit
+reported nothing — the exact class of bug this RFC's tooling is meant
+to catch), and `openapi:generate`/`guren route:list` both omitted them
+too. Fixed by extracting `Application`'s route-mounting logic (mounting
+a module's registrar via `router.group(prefix, ...)` when prefixed) into
+a shared `mountModuleRoutes(router, module)` in
+`container/defineModule.ts`, used by both `Application.mountRoutes()` at
+boot and `load-routes.ts` for tooling — one implementation, so a routing
+bugfix can't drift between what actually serves and what tooling sees.
+`load-routes.ts` discovers modules by directory scan
+(`modules/<name>/`), matching how the derived boundary rules below
+already treat module presence, not by reading `createApp({ modules })`
+(which would mean executing the real app to find out); a module
+directory present on disk but never passed to `createApp()` will show
+up in generated types and audit coverage even though it won't actually
+be mounted at runtime — an accepted false-positive-availability edge
+case documented here rather than silently shipped.
 
 #### Generators
 
