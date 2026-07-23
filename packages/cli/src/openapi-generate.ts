@@ -49,7 +49,7 @@ export async function generateOpenApiSpec(
 ): Promise<GenerateOpenApiSpecResult> {
   const appRoot = options.appRoot ? resolve(options.appRoot) : process.cwd()
   const routesFile = resolve(appRoot, options.routesFile ?? DEFAULT_ROUTES_FILE)
-  const definitions = await loadRouteDefinitions(routesFile)
+  const definitions = await loadRouteDefinitions(routesFile, appRoot)
 
   if (definitions.length === 0) {
     throw new Error('No routes were registered. Ensure your routes file exports a route registrar and registers routes with the provided router.')

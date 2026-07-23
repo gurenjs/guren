@@ -635,6 +635,7 @@ export {
   ProviderManager,
   definePlugin,
   defineModule,
+  mountModuleRoutes,
 } from './container'
 export type {
   PluginDefinition,

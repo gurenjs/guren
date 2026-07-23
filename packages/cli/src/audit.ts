@@ -154,7 +154,7 @@ async function auditRoutes(
 
   let definitions
   try {
-    definitions = await loadRouteDefinitions(resolvedRoutesFile)
+    definitions = await loadRouteDefinitions(resolvedRoutesFile, cwd)
   } catch (error) {
     findings.push(
       finding(

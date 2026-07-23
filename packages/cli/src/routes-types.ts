@@ -32,7 +32,7 @@ export async function generateRouteTypes(
   const routesFile = resolve(appRoot, options.routesFile ?? DEFAULT_ROUTES_FILE)
   const outputFile = resolve(appRoot, options.outputFile ?? DEFAULT_OUTPUT_FILE)
   const runtimeOutputFile = resolve(appRoot, options.runtimeOutputFile ?? DEFAULT_RUNTIME_OUTPUT_FILE)
-  const definitions = await loadRouteDefinitions(routesFile)
+  const definitions = await loadRouteDefinitions(routesFile, appRoot)
 
   if (definitions.length === 0) {
     throw new Error('No routes were registered. Ensure your routes file exports a route registrar and registers routes with the provided router.')

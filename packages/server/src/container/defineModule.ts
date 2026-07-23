@@ -60,3 +60,36 @@ export function defineModule(definition: ModuleDefinition): GurenModule {
     providers: definition.providers ?? [],
   }
 }
+
+/**
+ * Runs a module's route registrar against `router`, applying its `prefix`
+ * via `router.group()` when set. Shared by `Application.mountRoutes()` (at
+ * boot) and the CLI's route loader (for `guren codegen`/`audit`/`routes`/
+ * `openapi:generate`, which need the same route set without booting a real
+ * app) so both stay in sync — a bugfix to one path fixes the other.
+ *
+ * `router.group(prefix, callback)`'s callback is synchronous — it pushes
+ * the prefix, invokes the callback, then pops it, with no support for
+ * awaiting inside. Capturing the registrar's return value and awaiting it
+ * after `group()` returns preserves prefixing for the common case (a
+ * synchronous registrar, or an async one that calls `router.get`/`post`/
+ * etc. before its first `await`); route calls after an `await` inside an
+ * async, prefixed module registrar would run with the prefix already
+ * popped. Registrars with no prefix don't go through group() and have no
+ * such limitation.
+ */
+export async function mountModuleRoutes(router: Router, gurenModule: GurenModule): Promise<void> {
+  const registrar = gurenModule.routes
+  if (!registrar) return
+
+  if (!gurenModule.prefix) {
+    await registrar(router)
+    return
+  }
+
+  let pending: void | Promise<void> = undefined
+  router.group(gurenModule.prefix, (grouped) => {
+    pending = registrar(grouped)
+  })
+  await pending
+}

@@ -781,6 +781,62 @@ export const users = pgTable('users', {
       await workspace.cleanup()
     }
   })
+
+  it('audits mutating routes registered inside a module (RFC 0002), not just the top-level routes file', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-module-')
+
+    try {
+      // Top-level routes file has no routes of its own — the mutating route
+      // under test lives entirely inside modules/billing/.
+      await writeRoutes(
+        workspace.dir,
+        `export default function registerRoutes(_router: any) {}`,
+      )
+
+      await mkdir(join(workspace.dir, 'modules/billing/app/Http/Controllers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'modules/billing/app/Http/Controllers/InvoiceController.ts'),
+        `export default class InvoiceController {
+  async store() {
+    const data = await this.request.json()
+    return null
+  }
+}`,
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'modules/billing/routes.ts'),
+        `class InvoiceController {
+  async store() { return null }
+}
+export function registerBillingRoutes(router: any) {
+  router.post('/invoices', [InvoiceController, 'store'])
+}`,
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'modules/billing/index.ts'),
+        `import { registerBillingRoutes } from './routes'
+
+export const billingModule = {
+  name: 'billing',
+  providers: [],
+  routes: registerBillingRoutes,
+}`,
+        'utf8',
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      expect(report.routesAnalyzed).toBe(true)
+      const validation = report.findings.find(f => f.key === 'validation:POST /invoices')
+      expect(validation).toBeDefined()
+      expect(validation!.status).toBe('fail')
+      expect(validation!.message).toContain('InvoiceController')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
 })
 
 describe('auth detection with generic type arguments', () => {

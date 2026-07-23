@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import type { MiddlewareHandler, ExecutionContext } from 'hono'
 import { Router } from '../mvc/Router'
-import { Container, type ServiceProvider, type GurenModule } from '../container'
+import { Container, mountModuleRoutes, type ServiceProvider, type GurenModule } from '../container'
 import { ProviderManager, type ServiceProviderConstructor } from '../container/ServiceProvider'
 import { AuthManager } from '../auth/AuthManager'
 import { AuthServiceProvider } from '../providers/AuthServiceProvider'
@@ -305,41 +305,13 @@ export class Application {
       }
 
       for (const gurenModule of this.options.modules ?? []) {
-        if (!gurenModule.routes) continue
-        await this.mountModuleRoutes(gurenModule)
+        await mountModuleRoutes(this.router, gurenModule)
       }
 
       this.routesRegistered = true
     }
 
     this.router.mount(this.hono, { container: this.container })
-  }
-
-  /**
-   * `router.group(prefix, callback)`'s callback is synchronous — it pushes
-   * the prefix, invokes the callback, then pops it, with no support for
-   * awaiting inside. Capturing the registrar's return value and awaiting it
-   * after `group()` returns preserves prefixing for the common case (a
-   * synchronous registrar, or an async one that calls `router.get`/`post`/
-   * etc. before its first `await`); route calls after an `await` inside an
-   * async, prefixed module registrar would run with the prefix already
-   * popped. Registrars with no prefix don't go through group() and have no
-   * such limitation.
-   */
-  private async mountModuleRoutes(gurenModule: GurenModule): Promise<void> {
-    const registrar = gurenModule.routes
-    if (!registrar) return
-
-    if (!gurenModule.prefix) {
-      await registrar(this.router)
-      return
-    }
-
-    let pending: void | Promise<void> = undefined
-    this.router.group(gurenModule.prefix, (grouped) => {
-      pending = registrar(grouped)
-    })
-    await pending
   }
 
   /**
