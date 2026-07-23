@@ -4,6 +4,15 @@ import { dirname, resolve } from 'node:path'
 
 export interface WriterOptions {
   force?: boolean
+  /**
+   * When set (via `--module <name>`), prefixes a generator's output
+   * directory with `modules/<kebab-case root>/` instead of writing to the
+   * project root — e.g. `app/Http/Controllers` becomes
+   * `modules/billing/app/Http/Controllers`. Normalized to kebab-case the
+   * same way `make:module` derives its directory name, so `--module Billing`
+   * and `make:module Billing` target the same `modules/billing/` directory.
+   */
+  root?: string
 }
 
 export type ScaffoldNames = {
@@ -87,7 +96,8 @@ export async function scaffoldFile(name: string, config: ScaffoldConfig, options
   const normalizedName = config.suffix ? ensureSuffix(className, config.suffix) : className
   const baseName = config.fileName ? config.fileName({ rawName: name, className, fileName, normalizedName }) : normalizedName
   const extension = config.extension ?? 'ts'
-  const filePath = extension ? `${config.dir}/${baseName}.${extension}` : `${config.dir}/${baseName}`
+  const dir = options.root ? `modules/${kebabCase(options.root)}/${config.dir}` : config.dir
+  const filePath = extension ? `${dir}/${baseName}.${extension}` : `${dir}/${baseName}`
   const contents = config.template({ rawName: name, className, fileName, normalizedName })
   return writeFileSafe(filePath, contents, options)
 }

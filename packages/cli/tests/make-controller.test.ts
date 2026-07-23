@@ -111,4 +111,19 @@ describe('makeController', () => {
     const fileExists = await access(result).then(() => true).catch(() => false)
     expect(fileExists).toBe(true)
   })
+
+  it('scaffolds under modules/<name>/ when root is set (--module)', async () => {
+    const result = await makeController('Invoice', { root: 'billing' })
+
+    expect(result).toContain('modules/billing/app/Http/Controllers/InvoiceController.ts')
+
+    const content = await readFile(result, 'utf8')
+    expect(content).toContain('class InvoiceController')
+  })
+
+  it('kebab-cases a PascalCase root the same way make:module does', async () => {
+    const result = await makeController('Invoice', { root: 'Billing' })
+
+    expect(result).toContain('modules/billing/app/Http/Controllers/InvoiceController.ts')
+  })
 })

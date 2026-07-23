@@ -113,4 +113,29 @@ describe('makeFeature', () => {
       await workspace.cleanup()
     }
   })
+
+  it('scaffolds app/ files under modules/<name>/ but namespaces pages instead of colocating them (--module)', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-module-')
+
+    try {
+      const created = await makeFeature('Invoice', { fields: 'title:string', root: 'billing' })
+
+      // app/ output moves under modules/<name>/ ...
+      expect(created.some((f) => f.endsWith('modules/billing/app/Http/Controllers/InvoiceController.ts'))).toBe(true)
+      expect(created.some((f) => f.endsWith('modules/billing/app/Models/Invoice.ts'))).toBe(true)
+
+      // ... but pages stay top-level, namespaced by module name per RFC 0002's
+      // "pages are not colocated" decision — NOT modules/billing/resources/js/pages/.
+      expect(created.some((f) => f.endsWith('resources/js/pages/billing/invoices/Index.tsx'))).toBe(true)
+      expect(created.some((f) => f.includes('modules/billing/resources'))).toBe(false)
+
+      const controllerContent = await readFile(
+        join(workspace.dir, 'modules/billing/app/Http/Controllers/InvoiceController.ts'),
+        'utf8',
+      )
+      expect(controllerContent).toContain('class InvoiceController')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
 })

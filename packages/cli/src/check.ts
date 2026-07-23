@@ -33,6 +33,17 @@ export interface RunCheckOptions {
   changed?: boolean
 }
 
+/**
+ * Module name (e.g. `'billing'`) if `filePath` is under `modules/<name>/`,
+ * else `null`. Lets checks that assume a single project-root file (tests,
+ * schema) resolve the right module-scoped equivalent instead of always
+ * looking at the top level.
+ */
+function moduleNameFor(cwd: string, filePath: string): string | null {
+  const match = /^modules\/([^/]+)\//.exec(toPosixRelative(cwd, filePath))
+  return match ? match[1] : null
+}
+
 export async function runCheck(options: RunCheckOptions = {}): Promise<CheckReport> {
   const cwd = resolve(options.cwd ?? process.cwd())
   const checks: CheckResult[] = []
@@ -63,9 +74,11 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     for (const filePath of modelFiles) {
       const relPath = relative(cwd, filePath)
       const name = classNameFromPath(filePath)
-      const hasSchema = await fileExists(cwd, 'db/schema.ts')
+      const moduleName = moduleNameFor(cwd, filePath)
+      const schemaPath = moduleName ? `modules/${moduleName}/db/schema.ts` : 'db/schema.ts'
+      const hasSchema = await fileExists(cwd, schemaPath)
       if (hasSchema) {
-        const schemaContent = await readFile(resolve(cwd, 'db/schema.ts'), 'utf-8')
+        const schemaContent = await readFile(resolve(cwd, schemaPath), 'utf-8')
         const tableLower = name.toLowerCase() + 's'
         const hasTable = schemaContent.includes(`'${tableLower}'`) || schemaContent.includes(`"${tableLower}"`)
         checks.push(
@@ -73,8 +86,8 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
             `model-schema:${name}`,
             `${name} schema`,
             hasTable ? 'pass' : 'warn',
-            hasTable ? `Table definition found for ${name}.` : `No table '${tableLower}' found in db/schema.ts.`,
-            hasTable ? undefined : `Add table definition to db/schema.ts for ${name}.`,
+            hasTable ? `Table definition found for ${name}.` : `No table '${tableLower}' found in ${schemaPath}.`,
+            hasTable ? undefined : `Add table definition to ${schemaPath} for ${name}.`,
             relPath,
           ),
         )
@@ -84,11 +97,18 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // 4. Check missing test files for controllers
     for (const filePath of controllerFiles) {
       const name = classNameFromPath(filePath)
-      const testCandidates = [
-        `tests/controllers/${name}.test.ts`,
-        `tests/${name}.test.ts`,
-        `app/Http/Controllers/${name}.test.ts`,
-      ]
+      const moduleName = moduleNameFor(cwd, filePath)
+      const testCandidates = moduleName
+        ? [
+            `modules/${moduleName}/tests/controllers/${name}.test.ts`,
+            `modules/${moduleName}/tests/${name}.test.ts`,
+            `modules/${moduleName}/app/Http/Controllers/${name}.test.ts`,
+          ]
+        : [
+            `tests/controllers/${name}.test.ts`,
+            `tests/${name}.test.ts`,
+            `app/Http/Controllers/${name}.test.ts`,
+          ]
       let hasTest = false
       for (const candidate of testCandidates) {
         if (await fileExists(cwd, candidate)) {
@@ -96,13 +116,14 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
           break
         }
       }
+      const moduleFlag = moduleName ? ` --module ${moduleName}` : ''
       checks.push(
         check(
           `test:${name}`,
           `${name} tests`,
           hasTest ? 'pass' : 'warn',
           hasTest ? `Test file found for ${name}.` : `No test file found for ${name}.`,
-          hasTest ? undefined : `Run: bunx guren make:test ${name.replace('Controller', '')} --controller`,
+          hasTest ? undefined : `Run: bunx guren make:test ${name.replace('Controller', '')} --controller${moduleFlag}`,
         ),
       )
     }

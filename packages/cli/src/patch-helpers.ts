@@ -105,6 +105,57 @@ export async function addProvider(
 }
 
 /**
+ * Adds an entry to an arbitrary array-valued `createApp({ ... })` option
+ * (e.g. `modules: [...]`), creating the option (via `addCreateAppOption`)
+ * if it isn't present at all yet. Generalizes `addProvider`'s array-editing
+ * logic to a caller-supplied `key` instead of the hardcoded `providers:`.
+ *
+ * `addProvider` is kept as its own independent implementation rather than
+ * delegating here, to avoid changing its existing behavior (it fails with
+ * `'Could not find providers array'` when the array is absent, rather than
+ * creating one) for its existing callers.
+ */
+export async function addToArrayOption(
+  filePath: string,
+  key: string,
+  valueSource: string,
+): Promise<PatchResult> {
+  const absolutePath = resolve(process.cwd(), filePath)
+  let content: string
+
+  try {
+    content = await readFile(absolutePath, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { modified: false, reason: 'File not found' }
+    }
+    throw error
+  }
+
+  const arrayPattern = new RegExp(`${key}:\\s*\\[([\\s\\S]*?)\\]`)
+  const match = content.match(arrayPattern)
+
+  if (!match) {
+    return addCreateAppOption(filePath, key, `[${valueSource}]`)
+  }
+
+  const entries = match[1]
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0)
+
+  if (entries.some((entry) => entry === valueSource)) {
+    return { modified: false, reason: 'Already present' }
+  }
+
+  entries.push(valueSource)
+  const updatedContent = content.replace(arrayPattern, `${key}: [${entries.join(', ')}]`)
+
+  await writeFile(absolutePath, updatedContent, 'utf8')
+  return { modified: true }
+}
+
+/**
  * Checks if a specific import statement exists in a file.
  */
 export async function hasImport(filePath: string, importStatement: string): Promise<boolean> {

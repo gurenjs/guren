@@ -1,9 +1,8 @@
-import { resourceName, writeFileSafe, ensureSuffix } from './utils'
+import { resourceName, writeFileSafe, ensureSuffix, kebabCase } from './utils'
 import type { WriterOptions } from './utils'
 import { fileExists, readIfExists } from './discovery'
 
 const TEST_ROOT = 'tests'
-const CONTROLLER_TEST_DIR = `${TEST_ROOT}/controllers`
 
 export type TestRunner = 'bun' | 'vitest'
 
@@ -90,9 +89,10 @@ export async function makeTest(name: string, options: MakeTestOptions = {}): Pro
   const { className: baseClassName } = resourceName(baseName)
   const className = options.controller ? ensureSuffix(baseClassName, 'Controller') : baseClassName
   const fileName = `${className}.test.ts`
+  const testRoot = options.root ? `modules/${kebabCase(options.root)}/${TEST_ROOT}` : TEST_ROOT
   const filePath = options.controller
-    ? `${CONTROLLER_TEST_DIR}/${fileName}`
-    : `${TEST_ROOT}/${[...segments, fileName].join('/')}`
+    ? `${testRoot}/controllers/${fileName}`
+    : `${testRoot}/${[...segments, fileName].join('/')}`
 
   const { runner: _runner, controller: _controller, ...writer } = options
   return writeFileSafe(filePath, testTemplate(className, runner), writer)

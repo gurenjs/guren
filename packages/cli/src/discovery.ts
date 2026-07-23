@@ -90,9 +90,41 @@ export async function directoryExists(dirPath: string): Promise<boolean> {
   }
 }
 
-function discoverDir(appRoot: string, subDir: string): Promise<string[]> {
-  const dir = resolve(appRoot, subDir)
-  return collectFiles(dir)
+/**
+ * Directories directly under `modules/` (RFC 0002) — each is expected to
+ * mirror the top-level app layout, so `modules/<name>/<subDir>` is scanned
+ * alongside `<appRoot>/<subDir>` for every `discover*Files` function below.
+ * Missing/absent `modules/` (the common case for apps that haven't adopted
+ * modules) resolves to an empty list, not an error.
+ */
+async function listModuleDirs(appRoot: string): Promise<string[]> {
+  let entries
+  try {
+    entries = await readdir(resolve(appRoot, 'modules'), { withFileTypes: true })
+  } catch {
+    return []
+  }
+
+  return entries
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+    .map((entry) => resolve(appRoot, 'modules', entry.name))
+}
+
+/**
+ * Scans `<appRoot>/<subDir>` plus `<subDir>` under every module directory
+ * discovered by `listModuleDirs` — the single fan-out point that makes
+ * every `discover*Files` function below (and everything built on them:
+ * `check`, `audit`, `context`, `model:list`, `doctor`) module-aware for free.
+ */
+async function discoverDir(appRoot: string, subDir: string): Promise<string[]> {
+  const results = await collectFiles(resolve(appRoot, subDir))
+
+  const moduleDirs = await listModuleDirs(appRoot)
+  for (const moduleDir of moduleDirs) {
+    results.push(...(await collectFiles(resolve(moduleDir, subDir))))
+  }
+
+  return results
 }
 
 export function discoverModelFiles(appRoot: string): Promise<string[]> {

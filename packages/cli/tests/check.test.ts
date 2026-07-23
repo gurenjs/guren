@@ -209,4 +209,80 @@ export default class PostController extends Controller {
       await workspace.cleanup()
     }
   })
+
+  it('finds a module controller test under modules/<name>/tests/ instead of warning (RFC 0002)', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-module-test-')
+
+    try {
+      await mkdir(join(workspace.dir, 'modules/billing/app/Http/Controllers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'modules/billing/app/Http/Controllers/InvoiceController.ts'),
+        `export default class InvoiceController {\n  async index() { return null }\n}`,
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'modules/billing/tests/controllers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'modules/billing/tests/controllers/InvoiceController.test.ts'),
+        `test('index', () => {})`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      const testCheck = report.checks.find(c => c.key === 'test:InvoiceController')
+      expect(testCheck).toBeDefined()
+      expect(testCheck!.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('suggests --module in the make:test hint for a module controller missing a test', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-module-test-missing-')
+
+    try {
+      await mkdir(join(workspace.dir, 'modules/billing/app/Http/Controllers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'modules/billing/app/Http/Controllers/InvoiceController.ts'),
+        `export default class InvoiceController {\n  async index() { return null }\n}`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      const testCheck = report.checks.find(c => c.key === 'test:InvoiceController')
+      expect(testCheck).toBeDefined()
+      expect(testCheck!.status).toBe('warn')
+      expect(testCheck!.suggestion).toContain('--module billing')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('checks a module model against the module\'s own db/schema.ts', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-module-schema-')
+
+    try {
+      await mkdir(join(workspace.dir, 'modules/billing/app/Models'), { recursive: true })
+      await writeFile(join(workspace.dir, 'modules/billing/app/Models/Invoice.ts'), 'export class Invoice {}', 'utf8')
+      await mkdir(join(workspace.dir, 'modules/billing/db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'modules/billing/db/schema.ts'),
+        `export const invoices = sqliteTable('invoices', {})`,
+        'utf8',
+      )
+      // A top-level db/schema.ts that does NOT mention 'invoices' — proves the
+      // check looks at the module's own schema file, not the root one.
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'db/schema.ts'), `export const users = sqliteTable('users', {})`, 'utf8')
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      const schemaCheck = report.checks.find(c => c.key === 'model-schema:Invoice')
+      expect(schemaCheck).toBeDefined()
+      expect(schemaCheck!.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
 })

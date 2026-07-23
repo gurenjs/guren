@@ -57,35 +57,44 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   const variableName = singular.charAt(0).toLowerCase() + singular.slice(1)
   const withAuth = !options.publicAccess
   const withPolicy = Boolean(options.withPolicy)
-  const writerOptions: WriterOptions = { force: Boolean(options.force) }
+  const writerOptions: WriterOptions = { force: Boolean(options.force), root: options.root }
+
+  // `--module <name>` moves app/ output under modules/<name>/ (handled by
+  // scaffoldFile for makeModel/makePolicy/makeTest below), but pages are
+  // NOT colocated per RFC 0002's initial scope — they stay under the
+  // top-level resources/js/pages/, namespaced by the module name instead
+  // (resources/js/pages/<module>/<routeName>/...).
+  const moduleName = options.root ? kebabCase(options.root) : undefined
+  const appPrefix = moduleName ? `modules/${moduleName}/` : ''
+  const pagePrefix = moduleName ? `${moduleName}/` : ''
 
   const created = await writeFilesSafe([
     {
-      path: `app/Http/Validators/${singular}Validator.ts`,
+      path: `${appPrefix}app/Http/Validators/${singular}Validator.ts`,
       contents: generateValidator(singular, collection, fields),
     },
     {
-      path: `app/Http/Resources/${singular}Resource.ts`,
+      path: `${appPrefix}app/Http/Resources/${singular}Resource.ts`,
       contents: generateResource(singular, fields),
     },
     {
-      path: `app/Http/Controllers/${singular}Controller.ts`,
+      path: `${appPrefix}app/Http/Controllers/${singular}Controller.ts`,
       contents: generateController(singular, collection, routeName, routeVar, variableName, fields, withAuth, withPolicy),
     },
     {
-      path: `resources/js/pages/${routeName}/Index.tsx`,
+      path: `resources/js/pages/${pagePrefix}${routeName}/Index.tsx`,
       contents: generateIndexPage(singular, collection, routeName, variableName, fields),
     },
     {
-      path: `resources/js/pages/${routeName}/Show.tsx`,
+      path: `resources/js/pages/${pagePrefix}${routeName}/Show.tsx`,
       contents: generateShowPage(singular, routeName, variableName, fields),
     },
     {
-      path: `resources/js/pages/${routeName}/New.tsx`,
+      path: `resources/js/pages/${pagePrefix}${routeName}/New.tsx`,
       contents: generateNewPage(singular, routeName, fields),
     },
     {
-      path: `resources/js/pages/${routeName}/Edit.tsx`,
+      path: `resources/js/pages/${pagePrefix}${routeName}/Edit.tsx`,
       contents: generateEditPage(singular, routeName, variableName, fields),
     },
   ], writerOptions)

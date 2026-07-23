@@ -113,6 +113,26 @@ describe('makeTest', () => {
       await workspace.cleanup()
     }
   })
+
+  it('scaffolds under modules/<name>/tests/ when root is set (--module)', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-test-module-')
+    try {
+      const result = await makeTest('auth/login', { runner: 'bun', root: 'billing' })
+      expect(result).toContain('modules/billing/tests/auth/Login.test.ts')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('scaffolds a module controller test under modules/<name>/tests/controllers/', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-test-module-controller-')
+    try {
+      const result = await makeTest('Invoice', { runner: 'bun', controller: true, root: 'billing' })
+      expect(result).toContain('modules/billing/tests/controllers/InvoiceController.test.ts')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
 })
 
 describe('detectRunner', () => {
