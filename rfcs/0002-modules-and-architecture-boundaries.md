@@ -261,15 +261,27 @@ lives in `@guren/server` and is auto-exported from `@guren/core` via the
 existing `export *`.
 
 `prefix` is sugar over wrapping the registrar in
-`router.group({ prefix })`, but it is deliberately declarative: tooling
+~~`router.group({ prefix })`~~ **Amended in implementation:**
+`router.group(prefix, callback)` — `Router.group()`'s real signature
+takes a plain string prefix, not an options object; there is no
+`{ prefix }` form. It is deliberately declarative: tooling
 (`guren context --scope`, the arch checker) can read a module's URL
 surface statically without executing the registrar. **Route names are
 not prefixed automatically** — name prefixing would ripple into the
 generated `ApiRoutes` types in ways that are hard to scope, so module
 authors name routes explicitly (e.g. `billing.invoices.index`).
-Instead, `guren check` gains cross-module duplicate route-name
+~~Instead, `guren check` gains cross-module duplicate route-name
 detection: a name collision breaks typed-route generation, so it is
-guarded by detection rather than forced renaming.
+guarded by detection rather than forced renaming.~~ **Amended in
+implementation:** this detection was cut from the implementation PR.
+Evaluating each module's route registrar to collect its route names
+means executing arbitrary user code (importing and calling the
+registrar against a live `Router`), not the static-analysis approach
+every other check in this RFC uses — a materially larger and riskier
+undertaking than originally scoped here. Left as a documented,
+not-yet-built follow-up; a collision still surfaces today, just later
+(as a codegen or typecheck failure) rather than as an early `guren
+check` warning.
 
 Modules are listed explicitly rather than auto-discovered from the
 filesystem, for the same reason providers are explicit on serverless
@@ -333,15 +345,33 @@ every existing agent command module-aware.
   `db/schema.ts` (catching modules created by hand). This mirrors the
   RFC's overall stance — enforce conventions with checks rather than
   adding codegen surface.
-- **All `make:*` generators gain `--module <name>`**, which only
+- **Most `make:*` generators gain `--module <name>`**, which only
   switches the output root from the project root to
   `modules/<name>/`. Template content is unchanged. This is a single
-  change to shared plumbing, not per-generator patches: all 21
-  generators already build their file paths through
-  `WriterOptions`/`writeFilesSafe`/`scaffoldFile`
+  change to shared plumbing, not per-generator patches: ~~all 21
+  generators already build their file paths through~~ **Amended in
+  implementation:** 19 of the 23 pre-existing generators build their
+  file paths through `WriterOptions`/`writeFilesSafe`/`scaffoldFile`
   (`packages/cli/src/utils.ts`), which today only exposes `force`. Adding
   a `root` field there and prefixing the paths each generator already
-  constructs is enough — no generator's path-construction logic changes.
+  constructs is enough for those 19 — no generator's path-construction
+  logic changes. The remaining 4 are exceptions, each for a distinct
+  reason:
+  - `make:test` builds its output path directly rather than through
+    `scaffoldFile`, so it needed one manual `root`-aware prefix.
+  - `make:feature` is a composite that calls several of the above
+    generators itself; it forwards `--module` down to them, but keeps
+    Inertia pages at the top level (`resources/js/pages/<name>/...`,
+    namespaced rather than colocated — consistent with "Pages are not
+    colocated" above), since pages are never routed through
+    `scaffoldFile`'s `dir` prefixing to begin with.
+  - `make:auth` does not accept `--module` — authentication is an
+    app-wide concern, not a per-module one, and nothing in this RFC's
+    design implies otherwise.
+  - `make:migration` does not accept `--module` — it's a thin
+    drizzle-kit wrapper (schema/out flags, no `WriterOptions` at all),
+    orthogonal to the scaffold-output-location mechanism `--module`
+    hooks into.
 - Drizzle config templates are updated to document that `drizzle-kit`
   accepts a schema glob (`./db/schema.ts` plus
   `./modules/*/db/schema.ts`) for projects that prefer per-module
@@ -353,14 +383,27 @@ When a `modules/` directory exists, the arch checker adds implicit
 rules even if `guren.arch.ts` is absent:
 
 1. A file inside `modules/<a>/` may not import from `modules/<b>/`
-   **except** `modules/<b>/index.ts` (the module's public API).
-2. Top-level application code may import any module's `index.ts` but
-   not module internals.
+   **except** ~~`modules/<b>/index.ts`~~ **Amended in implementation:**
+   `modules/<b>/index.ts` *or* `modules/<b>/db/schema.ts` (the module's
+   public surface — see below for why schema.ts is included).
+2. Top-level application code may import a module's public surface but
+   not its internals.
 
 Violations report as `fail` with the suggestion "import from
 `modules/<b>` (its index.ts) or move the shared code into the module's
 public API." Explicit `guren.arch.ts` rules compose with (never
 replace) the derived rules.
+
+**Amended in implementation:** the public surface is two files, not
+one. `make:module` wires the project's root `db/schema.ts` to
+`export * from '../modules/<name>/db/schema'` (see "Generators"
+above) — under the RFC's original "except index.ts" wording, that
+re-export is itself a boundary violation, since it imports
+`modules/<name>/db/schema.ts` from outside the module. Rather than
+special-casing the generator's own output, `db/schema.ts` is exempt for
+any importer, on the same reasoning as `index.ts`: it's a second,
+intentionally shared surface (table/column definitions composed across
+modules), not an accidental internals leak.
 
 This is an allow-list ("everything in `modules/<b>/` is disallowed
 except `index.ts`"), which is exactly what the frozen rule vocabulary
@@ -436,7 +479,10 @@ rationale so discussion can challenge them directly:
    `prefix` (declarative, statically readable by tooling). Route-name
    prefixing is rejected for the initial scope because it ripples into
    generated `ApiRoutes` types; cross-module duplicate route-name
-   detection in `guren check` guards the actual failure mode instead.
+   detection in `guren check` was meant to guard the actual failure mode
+   instead, but was cut from the implementation PR (see the "Amended in
+   implementation" note under `defineModule()` above) — it would require
+   executing each module's registrar rather than static analysis.
 2. **Page colocation: deferred.** Ships after the module system, with
    the interim `resources/js/pages/<module>/` convention documented in
    `make:module`. Forward-compatible because page names are
