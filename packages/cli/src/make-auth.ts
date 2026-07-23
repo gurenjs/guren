@@ -44,12 +44,10 @@ export default class LoginController extends Controller {
 }
 `
 
-const registerControllerTemplate = `import { Controller, ScryptHasher, ValidationException } from '@guren/core'
+const registerControllerTemplate = `import { Controller, ValidationException } from '@guren/core'
 import { RegisterSchema } from '../../Validators/RegisterValidator.js'
 import { User } from '../../../Models/User.js'
 import { pages } from '@/.guren/pages.gen'
-
-const hasher = new ScryptHasher()
 
 export default class RegisterController extends Controller {
   async show(): Promise<Response> {
@@ -64,8 +62,9 @@ export default class RegisterController extends Controller {
       throw ValidationException.withMessages({ email: 'An account with this email already exists.' })
     }
 
-    const passwordHash = await hasher.hash(password)
-    const user = await User.create({ name, email, passwordHash })
+    // AuthenticatableModel hashes the virtual \`password\` field into
+    // \`passwordHash\` before persisting — see app/Models/User.ts.
+    const user = await User.create({ name, email, password })
 
     this.auth.session()?.regenerate()
     await this.auth.login(user)
