@@ -1592,18 +1592,37 @@ const checkCommand = defineCommand({
       type: 'string',
       description: 'Application root directory.',
     },
+    arch: {
+      type: 'boolean',
+      description: 'Run only architecture boundary checks (guren.arch.ts). Fast path for edit hooks.',
+    },
+    changed: {
+      type: 'boolean',
+      description: 'Restrict file-scanning checks to files changed vs. the merge base with main.',
+    },
   },
   async run({ args }) {
     const report = await runCheck({
       cwd: args.app,
       json: Boolean(args.json),
       routesFile: args.routes,
+      arch: Boolean(args.arch),
+      changed: Boolean(args.changed),
     })
 
     if (args.json) {
       console.log(JSON.stringify(report, null, 2))
     } else {
       renderCheckReport(report)
+    }
+
+    // Only `--arch` gates on exit code. Plain `guren check` has never set
+    // one (it's a v1.0-stable command; changing that default is a breaking
+    // change reserved for a major release). `--arch` is a brand-new flag
+    // with no prior contract to preserve, so it can gate CI from day one —
+    // that's the intended way to enforce guren.arch.ts boundaries in CI.
+    if (args.arch && report.failCount > 0) {
+      process.exitCode = 1
     }
   },
 })

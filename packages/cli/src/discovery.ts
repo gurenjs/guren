@@ -1,5 +1,5 @@
 import { readdir, access, readFile, stat } from 'node:fs/promises'
-import { resolve, join, extname } from 'node:path'
+import { resolve, join, extname, relative, sep } from 'node:path'
 
 const SOURCE_EXTENSIONS = new Set(['.ts', '.mts', '.js', '.mjs'])
 const TEST_FILE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.js', '.jsx', '.mjs'])
@@ -8,7 +8,11 @@ const TEST_FILE_PATTERN = /\.test\.(ts|tsx|mts|js|jsx|mjs)$/
 // Directories that never contain a project's own source/test files — skipped
 // when scanning from the project root (not needed for the scoped app/**
 // discoverers below, which never descend into these anyway).
-const NON_SOURCE_DIR_NAMES = new Set(['node_modules', 'dist', 'build', 'coverage'])
+export const NON_SOURCE_DIR_NAMES = new Set(['node_modules', 'dist', 'build', 'coverage'])
+
+// Extensions worth parsing for import specifiers when scanning the whole
+// project (arch boundary checks) rather than one known component directory.
+export const IMPORTABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.js', '.jsx', '.mjs'])
 
 /**
  * Recursively collect files from a directory matching given extensions.
@@ -46,6 +50,15 @@ export async function collectFiles(
   }
 
   return results
+}
+
+/**
+ * Path of `absPath` relative to `cwd`, with `/` separators regardless of
+ * platform. Used wherever a path needs to be compared against a glob or a
+ * git-diff entry, both of which are always POSIX-style.
+ */
+export function toPosixRelative(cwd: string, absPath: string): string {
+  return relative(cwd, absPath).split(sep).join('/')
 }
 
 export async function fileExists(cwd: string, relativePath: string): Promise<boolean> {

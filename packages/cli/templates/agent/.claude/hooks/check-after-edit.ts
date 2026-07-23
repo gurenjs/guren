@@ -36,11 +36,14 @@ if (!WATCHED_PATHS.some((prefix) => relPath.startsWith(prefix))) {
 }
 
 // Run the check in-process: this hook fires on every watched edit, and
-// spawning bunx + the CLI would cost a few hundred ms per edit.
+// spawning bunx + the CLI would cost a few hundred ms per edit. `changed:
+// true` restricts file-scanning checks (empty methods, architecture
+// boundaries) to what's actually changed, so this stays fast as the app
+// grows — it falls back to checking everything outside a git repo.
 let report
 try {
   const { runCheck } = await import('@guren/cli')
-  report = await runCheck()
+  report = await runCheck({ changed: true })
 } catch {
   process.exit(0)
 }

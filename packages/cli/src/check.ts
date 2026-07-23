@@ -1,133 +1,131 @@
 import { resolve, relative } from 'node:path'
 import { readFile } from 'node:fs/promises'
-import { parse } from '@babel/parser'
 import { consola } from 'consola'
 import {
   discoverControllerFiles,
   discoverModelFiles,
   fileExists,
   classNameFromPath,
+  toPosixRelative,
 } from './discovery'
-import { listRoutes } from './route-list'
+import { ParseCache } from './parse-cache'
+import { runArchCheck } from './arch-check'
+import { getChangedFiles } from './changed-files'
+import { check, type CheckResult, type CheckReport, type CheckStatus } from './check-result'
 
-export type CheckStatus = 'pass' | 'warn' | 'fail'
-
-export interface CheckResult {
-  key: string
-  title: string
-  status: CheckStatus
-  message: string
-  suggestion?: string
-  filePath?: string
-}
-
-export interface CheckReport {
-  cwd: string
-  checks: CheckResult[]
-  passCount: number
-  warnCount: number
-  failCount: number
-}
+export type { CheckStatus, CheckResult, CheckReport }
 
 export interface RunCheckOptions {
   cwd?: string
   json?: boolean
   routesFile?: string
-}
-
-function check(
-  key: string,
-  title: string,
-  status: CheckStatus,
-  message: string,
-  suggestion?: string,
-  filePath?: string,
-): CheckResult {
-  return { key, title, status, message, suggestion, filePath }
+  /**
+   * Run architecture boundary checks only (`guren.arch.ts` + derived module
+   * rules), skipping the route/controller/page/manifest checks below. Fast
+   * path for the agent-harness edit hook.
+   */
+  arch?: boolean
+  /**
+   * Restrict file-scanning checks (empty methods, arch boundaries) to files
+   * changed vs. the merge base with main, plus uncommitted/untracked files.
+   * Falls back to checking everything when not in a git repo.
+   */
+  changed?: boolean
 }
 
 export async function runCheck(options: RunCheckOptions = {}): Promise<CheckReport> {
   const cwd = resolve(options.cwd ?? process.cwd())
   const checks: CheckResult[] = []
+  const cache = new ParseCache()
 
-  // 1. Check controllers for empty methods
-  const controllerFiles = await discoverControllerFiles(cwd)
-  for (const filePath of controllerFiles) {
-    const relPath = relative(cwd, filePath)
-    const results = await checkEmptyMethods(filePath, relPath)
-    checks.push(...results)
-  }
+  const changedFiles = options.changed ? await getChangedFiles(cwd) : null
+  const filterChanged = (files: string[]): string[] =>
+    changedFiles ? files.filter((f) => changedFiles.has(toPosixRelative(cwd, f))) : files
 
-  // 2. Check controllers reference existing pages
-  for (const filePath of controllerFiles) {
-    const relPath = relative(cwd, filePath)
-    const results = await checkInertiaPages(filePath, cwd, relPath)
-    checks.push(...results)
-  }
+  if (!options.arch) {
+    // 1. Check controllers for empty methods
+    const controllerFiles = filterChanged(await discoverControllerFiles(cwd))
+    for (const filePath of controllerFiles) {
+      const relPath = relative(cwd, filePath)
+      const results = await checkEmptyMethods(cache, filePath, relPath)
+      checks.push(...results)
+    }
 
-  // 3. Check models have migrations
-  const modelFiles = await discoverModelFiles(cwd)
-  for (const filePath of modelFiles) {
-    const relPath = relative(cwd, filePath)
-    const name = classNameFromPath(filePath)
-    const hasSchema = await fileExists(cwd, 'db/schema.ts')
-    if (hasSchema) {
-      const schemaContent = await readFile(resolve(cwd, 'db/schema.ts'), 'utf-8')
-      const tableLower = name.toLowerCase() + 's'
-      const hasTable = schemaContent.includes(`'${tableLower}'`) || schemaContent.includes(`"${tableLower}"`)
+    // 2. Check controllers reference existing pages
+    for (const filePath of controllerFiles) {
+      const relPath = relative(cwd, filePath)
+      const results = await checkInertiaPages(cache, filePath, cwd, relPath)
+      checks.push(...results)
+    }
+
+    // 3. Check models have migrations
+    const modelFiles = filterChanged(await discoverModelFiles(cwd))
+    for (const filePath of modelFiles) {
+      const relPath = relative(cwd, filePath)
+      const name = classNameFromPath(filePath)
+      const hasSchema = await fileExists(cwd, 'db/schema.ts')
+      if (hasSchema) {
+        const schemaContent = await readFile(resolve(cwd, 'db/schema.ts'), 'utf-8')
+        const tableLower = name.toLowerCase() + 's'
+        const hasTable = schemaContent.includes(`'${tableLower}'`) || schemaContent.includes(`"${tableLower}"`)
+        checks.push(
+          check(
+            `model-schema:${name}`,
+            `${name} schema`,
+            hasTable ? 'pass' : 'warn',
+            hasTable ? `Table definition found for ${name}.` : `No table '${tableLower}' found in db/schema.ts.`,
+            hasTable ? undefined : `Add table definition to db/schema.ts for ${name}.`,
+            relPath,
+          ),
+        )
+      }
+    }
+
+    // 4. Check missing test files for controllers
+    for (const filePath of controllerFiles) {
+      const name = classNameFromPath(filePath)
+      const testCandidates = [
+        `tests/controllers/${name}.test.ts`,
+        `tests/${name}.test.ts`,
+        `app/Http/Controllers/${name}.test.ts`,
+      ]
+      let hasTest = false
+      for (const candidate of testCandidates) {
+        if (await fileExists(cwd, candidate)) {
+          hasTest = true
+          break
+        }
+      }
       checks.push(
         check(
-          `model-schema:${name}`,
-          `${name} schema`,
-          hasTable ? 'pass' : 'warn',
-          hasTable ? `Table definition found for ${name}.` : `No table '${tableLower}' found in db/schema.ts.`,
-          hasTable ? undefined : `Add table definition to db/schema.ts for ${name}.`,
-          relPath,
+          `test:${name}`,
+          `${name} tests`,
+          hasTest ? 'pass' : 'warn',
+          hasTest ? `Test file found for ${name}.` : `No test file found for ${name}.`,
+          hasTest ? undefined : `Run: bunx guren make:test ${name.replace('Controller', '')} --controller`,
+        ),
+      )
+    }
+
+    // 5. Check generated manifests are present
+    const manifests = ['.guren/routes.gen.ts', '.guren/pages.gen.ts', '.guren/data.gen.ts']
+    for (const manifest of manifests) {
+      const exists = await fileExists(cwd, manifest)
+      checks.push(
+        check(
+          `manifest:${manifest}`,
+          manifest,
+          exists ? 'pass' : 'warn',
+          exists ? `${manifest} is present.` : `${manifest} is missing.`,
+          exists ? undefined : 'Run: bunx guren codegen',
         ),
       )
     }
   }
 
-  // 4. Check missing test files for controllers
-  for (const filePath of controllerFiles) {
-    const name = classNameFromPath(filePath)
-    const testCandidates = [
-      `tests/controllers/${name}.test.ts`,
-      `tests/${name}.test.ts`,
-      `app/Http/Controllers/${name}.test.ts`,
-    ]
-    let hasTest = false
-    for (const candidate of testCandidates) {
-      if (await fileExists(cwd, candidate)) {
-        hasTest = true
-        break
-      }
-    }
-    checks.push(
-      check(
-        `test:${name}`,
-        `${name} tests`,
-        hasTest ? 'pass' : 'warn',
-        hasTest ? `Test file found for ${name}.` : `No test file found for ${name}.`,
-        hasTest ? undefined : `Run: bunx guren make:test ${name.replace('Controller', '')} --controller`,
-      ),
-    )
-  }
-
-  // 5. Check generated manifests are present
-  const manifests = ['.guren/routes.gen.ts', '.guren/pages.gen.ts', '.guren/data.gen.ts']
-  for (const manifest of manifests) {
-    const exists = await fileExists(cwd, manifest)
-    checks.push(
-      check(
-        `manifest:${manifest}`,
-        manifest,
-        exists ? 'pass' : 'warn',
-        exists ? `${manifest} is present.` : `${manifest} is missing.`,
-        exists ? undefined : 'Run: bunx guren codegen',
-      ),
-    )
-  }
+  // 6. Check architecture boundaries (guren.arch.ts + derived module rules)
+  const archResults = await runArchCheck({ cwd, cache, changedFiles })
+  checks.push(...archResults)
 
   const report: CheckReport = {
     cwd,
@@ -140,16 +138,11 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   return report
 }
 
-async function checkEmptyMethods(filePath: string, relPath: string): Promise<CheckResult[]> {
+async function checkEmptyMethods(cache: ParseCache, filePath: string, relPath: string): Promise<CheckResult[]> {
   const results: CheckResult[] = []
-  const source = await readFile(filePath, 'utf-8')
-
-  let ast: ReturnType<typeof parse>
-  try {
-    ast = parse(source, { sourceType: 'module', plugins: ['typescript'] })
-  } catch {
-    return results
-  }
+  const parsed = await cache.get(filePath)
+  if (!parsed) return results
+  const { ast } = parsed
 
   for (const node of ast.program.body) {
     let classDecl = null
@@ -187,12 +180,17 @@ async function checkEmptyMethods(filePath: string, relPath: string): Promise<Che
 }
 
 async function checkInertiaPages(
+  cache: ParseCache,
   filePath: string,
   cwd: string,
   relPath: string,
 ): Promise<CheckResult[]> {
   const results: CheckResult[] = []
-  const source = await readFile(filePath, 'utf-8')
+  // Reuses the cached source read for this file when available (populated by
+  // checkEmptyMethods above); falls back to a direct read if the file failed
+  // to parse (a syntax error doesn't invalidate this regex-only scan).
+  const parsed = await cache.get(filePath)
+  const source = parsed?.source ?? (await readFile(filePath, 'utf-8'))
 
   // Find this.inertia('PageName', ...) calls via regex (simpler than AST for this)
   const inertiaCallRegex = /this\.inertia\(\s*(?:pages\.[.\w]+|['"]([^'"]+)['"])/g

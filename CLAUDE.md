@@ -83,8 +83,10 @@ bunx guren model:list           # List models with relationships
 bunx guren model:list --format json  # Models as JSON
 
 # Integrity checking
-bunx guren check                # Validate route↔controller↔page consistency
+bunx guren check                # Validate route↔controller↔page consistency + architecture boundaries (exits non-zero on failures)
 bunx guren check --json         # Check results as JSON
+bunx guren check --arch         # Architecture boundary checks only (guren.arch.ts) — fast path for edit hooks
+bunx guren check --changed      # Restrict file-scanning checks to files changed vs. the merge base with main
 bunx guren audit                # Security audit: validation/auth on mutating routes, raw SQL, secrets, mass assignment
 bunx guren audit --json         # Audit results as JSON (exits non-zero on failures)
 bunx guren doctor --next        # Doctor report + actionable next steps
@@ -336,6 +338,9 @@ export const handler = createLambdaHandler(app)
 | `packages/cli/src/bin.ts` | CLI entry point |
 | `packages/cli/src/context.ts` | AI agent: project context map generation |
 | `packages/cli/src/check.ts` | AI agent: integrity checking |
+| `packages/cli/src/arch-check.ts` | AI agent: architecture boundary checking (`guren.arch.ts`, see RFC 0002) |
+| `packages/cli/src/arch/index.ts` | `defineArchRules()` + types, published as the `@guren/cli/arch` subpath |
+| `packages/cli/src/changed-files.ts` | Git-diff-based file filtering shared by `check --changed` |
 | `packages/cli/src/audit.ts` | AI agent: security audit (validation, auth, raw SQL, secrets) |
 | `packages/cli/src/guidelines.ts` | AI agent: dynamic guidelines generation |
 | `packages/cli/src/model-list.ts` | AI agent: model introspection |

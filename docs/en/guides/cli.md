@@ -76,13 +76,14 @@ Validate your app before shipping — these commands are also designed for AI co
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `check` | Validate integrity across routes, controllers, pages, and models | `bunx guren check --json` |
+| `check` | Validate integrity across routes, controllers, pages, and models, plus architecture boundaries when `guren.arch.ts` is present | `bunx guren check --json` |
 | `audit` | Security audit: missing input validation or authentication on mutating routes, raw SQL with interpolation, hardcoded credentials, disabled security defaults, mass-assignment configuration, sensitive columns not listed in `static hidden` | `bunx guren audit --json` |
 | `doctor` | Project health report (env, config, generated files) with actionable next steps | `bunx guren doctor --next` |
 
-`audit` exits with a non-zero status when it finds failures, so you can run it in CI:
+`check` and `audit` both exit with a non-zero status when they find failures, so you can run them in CI:
 
 ```bash
+bunx guren check
 bunx guren audit
 ```
 
@@ -94,6 +95,39 @@ Suppress a false positive by placing `// guren-audit-ignore` on the flagged line
 // guren-audit-ignore -- documented example value
 const apiKey = 'example-not-a-real-key'
 ```
+
+### Architecture boundaries
+
+Drop a `guren.arch.ts` file at your project root and `guren check` starts enforcing it — no flag required:
+
+```typescript
+// guren.arch.ts
+import { defineArchRules } from '@guren/cli/arch'
+
+export default defineArchRules({
+  layers: {
+    domain: 'app/Domain/**',
+    http: 'app/Http/**',
+  },
+  rules: [
+    // Domain logic must not depend on the HTTP layer.
+    { from: 'domain', disallow: ['http'] },
+    // Controllers should query through Models, not the ORM directly.
+    { from: 'http', disallowPackages: ['drizzle-orm'] },
+  ],
+})
+```
+
+Each rule's `from` and `disallow` accept either a layer name declared above or an inline glob. Add `severity: 'warn'` while rolling out a new boundary on an existing codebase, then drop it (defaulting to `'fail'`) once violations reach zero.
+
+Two flags make this practical for AI coding agents and large apps:
+
+```bash
+bunx guren check --arch      # architecture checks only — fast path for an edit hook
+bunx guren check --changed   # restrict checks to files changed vs. the merge base with main
+```
+
+An import Guren can't resolve to a project file is reported as a warning, never a failure — an unresolved path shouldn't block your build.
 
 ## AI Agent Harness
 

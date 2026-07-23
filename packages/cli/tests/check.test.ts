@@ -118,4 +118,95 @@ export default class PostController extends Controller {
       await workspace.cleanup()
     }
   })
+
+  it('does not include arch results when guren.arch.ts is absent (unchanged output)', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-no-arch-')
+
+    try {
+      const report = await runCheck({ cwd: workspace.dir })
+
+      expect(report.checks.some(c => c.key.startsWith('arch:'))).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('merges arch boundary violations into the full report by default', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-arch-merge-')
+
+    try {
+      await writeFile(
+        join(workspace.dir, 'guren.arch.ts'),
+        `export default {
+  layers: { domain: 'app/Domain/**', http: 'app/Http/**' },
+  rules: [{ from: 'domain', disallow: ['http'] }],
+}`,
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'app/Domain'), { recursive: true })
+      await mkdir(join(workspace.dir, 'app/Http/Controllers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Http/Controllers/PostController.ts'),
+        `export class PostController {}`,
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'app/Domain/OrderService.ts'),
+        `import { PostController } from '../Http/Controllers/PostController'\nexport class OrderService {}`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      const archViolation = report.checks.find(c => c.filePath === 'app/Domain/OrderService.ts')
+      expect(archViolation).toBeDefined()
+      expect(archViolation!.status).toBe('fail')
+      expect(report.failCount).toBeGreaterThan(0)
+      // Non-arch checks (e.g. missing test files) still ran alongside it.
+      expect(report.checks.some(c => c.key.startsWith('test:'))).toBe(true)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('with arch:true, skips the route/controller/page/manifest checks', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-arch-only-')
+
+    try {
+      await mkdir(join(workspace.dir, 'app/Http/Controllers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Http/Controllers/PostController.ts'),
+        `export default class PostController {\n  async index() {}\n}`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir, arch: true })
+
+      expect(report.checks.some(c => c.key.startsWith('empty-method:'))).toBe(false)
+      expect(report.checks.some(c => c.key.startsWith('test:'))).toBe(false)
+      expect(report.checks.some(c => c.key.startsWith('manifest:'))).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('with changed:true outside a git repo, checks everything (no filter applied)', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-changed-nogit-')
+
+    try {
+      await mkdir(join(workspace.dir, 'app/Http/Controllers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Http/Controllers/PostController.ts'),
+        `export default class PostController {\n  async index() {}\n}`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir, changed: true })
+
+      const emptyCheck = report.checks.find(c => c.key.includes('empty-method'))
+      expect(emptyCheck).toBeDefined()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
 })
