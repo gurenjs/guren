@@ -1,5 +1,5 @@
 import { consola } from 'consola'
-import { writeFilesSafe, type WriterOptions, pascalCase, kebabCase } from './utils'
+import { writeFilesSafe, type WriterOptions, pascalCase, kebabCase, pagesAccessor } from './utils'
 import { makeModel } from './make-model'
 import { makePolicy } from './make-policy'
 import { makeTest } from './make-test'
@@ -79,15 +79,15 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     },
     {
       path: `${appPrefix}app/Http/Controllers/${singular}Controller.ts`,
-      contents: generateController(singular, collection, routeName, routeVar, variableName, fields, withAuth, withPolicy),
+      contents: generateController(singular, collection, routeName, routeVar, variableName, fields, withAuth, withPolicy, moduleName),
     },
     {
       path: `resources/js/pages/${pagePrefix}${routeName}/Index.tsx`,
-      contents: generateIndexPage(singular, collection, routeName, variableName, fields),
+      contents: generateIndexPage(singular, collection, routeName, variableName, fields, appPrefix),
     },
     {
       path: `resources/js/pages/${pagePrefix}${routeName}/Show.tsx`,
-      contents: generateShowPage(singular, routeName, variableName, fields),
+      contents: generateShowPage(singular, routeName, variableName, fields, appPrefix),
     },
     {
       path: `resources/js/pages/${pagePrefix}${routeName}/New.tsx`,
@@ -272,12 +272,14 @@ function generateController(
   fields: FieldDefinition[],
   withAuth: boolean,
   withPolicy: boolean,
+  moduleName: string | undefined,
 ): string {
   const authGuard = withAuth ? '    await this.auth.userOrFail()\n' : ''
   const createGuard = withPolicy ? `    await this.authorize('create', ${singular})\n` : ''
   const updateGuard = withPolicy
     ? `    await this.authorize('update', [${singular}, await ${singular}.findOrFail(id)])\n`
     : ''
+  const pagesBase = pagesAccessor(moduleName, routeVar)
   return `import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
 import { pages } from '@/.guren/pages.gen'
 import { ${singular} } from '../../Models/${singular}.js'
@@ -292,7 +294,7 @@ export default class ${singular}Controller extends Controller {
     const result = await ${singular}.paginate({ page, perPage: 10, orderBy: ['id', 'desc'] })
     const paginator = paginate(result, { path: this.request.path ?? '/${routeName}' })
 
-    return this.inertia(pages.${routeVar}.Index, {
+    return this.inertia(${pagesBase}.Index, {
       data: result.data.map((${variableName}) => new ${singular}Resource(${variableName}).toJSON()),
       pagination: {
         meta: paginator.meta(),
@@ -305,13 +307,13 @@ export default class ${singular}Controller extends Controller {
     const { id } = this.validateParams(${singular}IdParamSchema)
     const ${variableName} = await ${singular}.findOrFail(id)
 
-    return this.inertia(pages.${routeVar}.Show, {
+    return this.inertia(${pagesBase}.Show, {
       ${variableName}: new ${singular}Resource(${variableName}).toJSON(),
     })
   }
 
   async create(): Promise<Response> {
-    return this.inertia(pages.${routeVar}.New, {})
+    return this.inertia(${pagesBase}.New, {})
   }
 
   async store(): Promise<Response> {
@@ -323,7 +325,7 @@ ${authGuard}${createGuard}    const data = await this.validateBody(${singular}Pa
   async edit(): Promise<Response> {
     const { id } = this.validateParams(${singular}IdParamSchema)
     const ${variableName} = await ${singular}.findOrFail(id)
-    return this.inertia(pages.${routeVar}.Edit, {
+    return this.inertia(${pagesBase}.Edit, {
       ${variableName}: new ${singular}Resource(${variableName}).toJSON(),
       errors: {},
     })
@@ -345,13 +347,14 @@ function generateIndexPage(
   routeName: string,
   variableName: string,
   fields: FieldDefinition[],
+  appPrefix: string,
 ): string {
   const titleField = fields[0]?.name ?? 'id'
   const summaryField = fields.length > 1 ? fields[1]?.name : null
 
   return `import { Link } from '@inertiajs/react'
 import type { PaginatedPageProps } from '@guren/core'
-import type { ${singular}ResourceData } from '@/app/Http/Resources/${singular}Resource'
+import type { ${singular}ResourceData } from '@/${appPrefix}app/Http/Resources/${singular}Resource'
 import { route } from '@/.guren/routes.gen'
 
 interface Props extends PaginatedPageProps<${singular}ResourceData> {}
@@ -391,6 +394,7 @@ function generateShowPage(
   routeName: string,
   variableName: string,
   fields: FieldDefinition[],
+  appPrefix: string,
 ): string {
   const fieldRenders = fields.map((f) => {
     if (f.type === 'boolean') {
@@ -400,7 +404,7 @@ function generateShowPage(
   }).join('\n')
 
   return `import { Link } from '@inertiajs/react'
-import type { ${singular}ResourceData } from '@/app/Http/Resources/${singular}Resource'
+import type { ${singular}ResourceData } from '@/${appPrefix}app/Http/Resources/${singular}Resource'
 import { route } from '@/.guren/routes.gen'
 
 interface Props {

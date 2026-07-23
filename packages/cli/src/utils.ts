@@ -129,3 +129,18 @@ export function resourceName(value: string): { className: string; fileName: stri
 export function ensureSuffix(name: string, suffix: string): string {
   return name.endsWith(suffix) ? name : `${name}${suffix}`
 }
+
+const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/u
+
+/**
+ * Builds a `pages.foo.bar` accessor for a scaffolded controller, matching the
+ * nesting/quoting rules pages-types.ts's codegen uses to build the `pages`
+ * object (one key per resources/js/pages/ directory segment, bracket-quoted
+ * when a segment isn't a valid identifier) so generated code references the
+ * same path codegen will actually produce.
+ */
+export function pagesAccessor(...keys: Array<string | undefined>): string {
+  return keys
+    .filter((key): key is string => Boolean(key))
+    .reduce((acc, key) => acc + (IDENTIFIER_RE.test(key) ? `.${key}` : `['${key.replace(/\\/gu, '\\\\').replace(/'/gu, "\\'")}']`), 'pages')
+}

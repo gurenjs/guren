@@ -70,6 +70,62 @@ const app = new Application()`
       expect(result.modified).toBe(false)
       expect(result.reason).toBe('File not found')
     })
+
+    it('should insert after a multi-line import statement, not inside it', async () => {
+      const filePath = join(tempDir, 'app.ts')
+      const initialContent = `import {
+  createApp,
+  ErrorServiceProvider,
+  InertiaServiceProvider,
+} from '@guren/core'
+import DatabaseProvider from '../app/Providers/DatabaseProvider.js'
+
+const app = createApp({})`
+
+      await writeFile(filePath, initialContent, 'utf8')
+
+      const result = await addImport(filePath, "import { billingModule } from '../modules/billing'")
+
+      expect(result.modified).toBe(true)
+
+      const content = await Bun.file(filePath).text()
+      const lines = content.split('\n')
+
+      // The multi-line import block must stay intact and syntactically valid —
+      // the new import must not be spliced between `import {` and its closing `}`.
+      expect(lines[0]).toBe('import {')
+      expect(lines[1]).toBe('  createApp,')
+      expect(lines.slice(0, 5).join('\n')).toContain("} from '@guren/core'")
+      expect(content.indexOf("import { billingModule } from '../modules/billing'")).toBeGreaterThan(
+        content.indexOf("} from '@guren/core'"),
+      )
+    })
+
+    it('should insert after the last of several imports, some multi-line', async () => {
+      const filePath = join(tempDir, 'app.ts')
+      const initialContent = `import {
+  createApp,
+  ErrorServiceProvider,
+} from '@guren/core'
+import DatabaseProvider from '../app/Providers/DatabaseProvider.js'
+import AuthProvider from '../app/Providers/AuthProvider.js'
+
+const app = createApp({})`
+
+      await writeFile(filePath, initialContent, 'utf8')
+
+      const result = await addImport(filePath, "import { billingModule } from '../modules/billing'")
+
+      expect(result.modified).toBe(true)
+
+      const content = await Bun.file(filePath).text()
+      expect(content.indexOf("import { billingModule } from '../modules/billing'")).toBeGreaterThan(
+        content.indexOf("import AuthProvider from '../app/Providers/AuthProvider.js'"),
+      )
+      expect(content.indexOf("import { billingModule } from '../modules/billing'")).toBeLessThan(
+        content.indexOf('const app = createApp({})'),
+      )
+    })
   })
 
   describe('addProvider', () => {

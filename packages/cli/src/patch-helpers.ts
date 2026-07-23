@@ -37,12 +37,30 @@ export async function addImport(
   const lines = content.split('\n')
   let insertIndex = 0
   let lastImportIndex = -1
+  let inMultilineImport = false
+  let braceDepth = 0
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim()
-    if (line.startsWith('import ')) {
+    const line = lines[i]
+    const trimmed = line.trim()
+    const braceDelta = (line.match(/\{/g)?.length ?? 0) - (line.match(/\}/g)?.length ?? 0)
+
+    if (inMultilineImport) {
       lastImportIndex = i
-    } else if (lastImportIndex >= 0 && line.length > 0 && !line.startsWith('//')) {
+      braceDepth += braceDelta
+      if (braceDepth <= 0) {
+        inMultilineImport = false
+      }
+      continue
+    }
+
+    if (trimmed.startsWith('import ') || trimmed.startsWith('import{')) {
+      lastImportIndex = i
+      braceDepth = braceDelta
+      if (braceDepth > 0) {
+        inMultilineImport = true
+      }
+    } else if (lastImportIndex >= 0 && trimmed.length > 0 && !trimmed.startsWith('//')) {
       break
     }
   }

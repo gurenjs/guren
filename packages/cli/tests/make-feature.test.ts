@@ -134,6 +134,33 @@ describe('makeFeature', () => {
         'utf8',
       )
       expect(controllerContent).toContain('class InvoiceController')
+
+      // The generated pages.gen.ts nests every resources/js/pages/ directory
+      // segment (see pages-types.ts), so a page at
+      // resources/js/pages/billing/invoices/Index.tsx is reached via
+      // pages.billing.invoices.Index — not pages.invoices.Index. The
+      // controller must reference the module-namespaced path or codegen
+      // output and generated code disagree.
+      expect(controllerContent).toContain('pages.billing.invoices.Index')
+      expect(controllerContent).toContain('pages.billing.invoices.Show')
+      expect(controllerContent).toContain('pages.billing.invoices.New')
+      expect(controllerContent).toContain('pages.billing.invoices.Edit')
+      expect(controllerContent).not.toMatch(/this\.inertia\(pages\.invoices\./)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('bracket-quotes a module name that is not a valid identifier (--module)', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-module-hyphen-')
+
+    try {
+      const created = await makeFeature('Invoice', { fields: 'title:string', root: 'billing-ops' })
+      const controllerPath = created.find((f) => f.endsWith('modules/billing-ops/app/Http/Controllers/InvoiceController.ts'))
+      expect(controllerPath).toBeDefined()
+
+      const controllerContent = await readFile(controllerPath as string, 'utf8')
+      expect(controllerContent).toContain("pages['billing-ops'].invoices.Index")
     } finally {
       await workspace.cleanup()
     }

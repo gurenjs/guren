@@ -119,6 +119,10 @@ describe('makeController', () => {
 
     const content = await readFile(result, 'utf8')
     expect(content).toContain('class InvoiceController')
+
+    // pages.gen.ts nests by directory segment (pages-types.ts), so the
+    // generated reference must be namespaced by module, not pages.invoice.Index.
+    expect(content).toContain('inertia(pages.billing.invoice.Index')
   })
 
   it('kebab-cases a PascalCase root the same way make:module does', async () => {
