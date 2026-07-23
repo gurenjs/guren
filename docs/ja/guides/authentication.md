@@ -55,9 +55,21 @@ bunx guren make:auth --install --verify
 
 `users` テーブルに `emailVerifiedAt` カラムが追加され、`VerifyEmailController`（「メールを確認してください」の通知表示・再送・トークン確認を担当）と `VerifyEmail` ページが生成されます。登録時に確認メールが送信され、`/dashboard` の代わりに `/verify-email` へリダイレクトされるようになります。また生成される `/dashboard` ルートには `requireVerifiedEmail` が適用され、未確認のユーザーは確認が完了するまで `/verify-email` に戻されます。確認リンクもパスワードリセットと同じインメモリストア・`log` ドライバのメール設定を使うため、開発環境では設定なしで動作確認できます。`--verify` は登録フローの上に構築されるため、デフォルト（非 `--minimal`）の構成が前提です。
 
+### OAuth ログインボタン
+
+`--oauth` にカンマ区切りのプロバイダー名を渡すと、ログインページ(および `--minimal` でない限り登録ページにも)に「Continue with GitHub / Google / Discord」ボタンをスキャフォールドします。
+
+```bash
+bunx guren make:auth --install --oauth github,google
+```
+
+これにより、プロバイダーごとに `githubId` / `googleId` カラムが `users` テーブルに追加され、各プロバイダーのクライアントID・シークレット・リダイレクトURIがすべて設定されている場合にのみ共有の `OAuthManager` へ登録する `OAuthProvider`(環境変数名は後述の[OAuth / ソーシャルログイン](#oauth-ソーシャルログイン)を参照)と、`redirectToProvider` / `callback` アクションを持つ `OAuthController` が生成されます。コールバックはプロバイダーIDでユーザーを検索し、同じメールアドレスの既存アカウントへの紐付けは新規サインアップとして曖昧さがない場合のみ行い(それ以外は未検証のメールをサイレントに紐付けるのではなく「パスワードでサインインしてください」というメッセージでログインを拒否します)、それ以外の場合はランダムなパスワードで新規アカウントを作成してからログインさせます。`--verify` と異なり `--oauth` は `--minimal` と併用できます。登録スキャフォールドに依存しないためです。
+
+`--oauth` は `OAuthController` / `OAuthProvider` のファイルパスと配線方法を下記の `guren add oauth` と共有しています(コールバックがスタブではなく完成された実装である点のみが異なります)。同じアプリに対して両方を実行しないでください。2回目の実行は(`--force` なしなら)失敗するか、(`--force` ありなら)1回目の生成物を上書きします。
+
 ## OAuth / ソーシャルログイン
 
-Guren には GitHub / Google / Discord 向けの OAuth プリセットが最初から用意されています。
+Guren には GitHub / Google / Discord 向けの OAuth プリセットが最初から用意されています。単体で使える低レベルなスキャフォールドです。`make:auth` のログイン・登録ページに直接組み込まれ、アカウント作成まで自動化された OAuth ボタンが欲しい場合は、代わりに上記の[OAuth ログインボタン](#oauth-ログインボタン)を参照してください。
 
 ### OAuth スキャフォールド
 

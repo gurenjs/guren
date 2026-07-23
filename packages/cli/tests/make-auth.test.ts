@@ -307,4 +307,221 @@ export const users = pgTable(
       await workspace.cleanup()
     }
   })
+
+  it('scaffolds OAuth login with --oauth github,google', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-oauth-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'db/schema.ts'),
+        `import { pgTable, serial, text } from 'drizzle-orm/pg-core'
+
+export const posts = pgTable('posts', {
+  id: serial('id').primaryKey(),
+  title: text('title').notNull(),
+})
+`,
+        'utf8',
+      )
+
+      const created = await makeAuth({ force: true, oauth: 'github,google' })
+
+      expect(created).toEqual(expect.arrayContaining([
+        expect.stringContaining('app/Providers/OAuthProvider.ts'),
+        expect.stringContaining('OAuthController.ts'),
+      ]))
+
+      const provider = await readFile(join(workspace.dir, 'app/Providers/OAuthProvider.ts'), 'utf8')
+      expect(provider).toContain('createGitHubOAuthProviderConfig')
+      expect(provider).toContain('createGoogleOAuthProviderConfig')
+      expect(provider).toContain("oauth.registerProvider('github'")
+      expect(provider).toContain("oauth.registerProvider('google'")
+      expect(provider).toContain('OAUTH_GITHUB_CLIENT_ID')
+      expect(provider).toContain('OAUTH_GITHUB_REDIRECT_URI')
+      expect(provider).toContain('OAUTH_GOOGLE_CLIENT_ID')
+      // Providers register only when all three env vars are present — no
+      // empty-credential fallback that would show a button leading nowhere.
+      expect(provider).toContain('if (githubClientId && githubClientSecret && githubRedirectUri)')
+
+      const controller = await readFile(join(workspace.dir, 'app/Http/Controllers/Auth/OAuthController.ts'), 'utf8')
+      expect(controller).toContain("z.enum(['github', 'google'])")
+      expect(controller).toContain('githubId: profileId')
+      expect(controller).toContain('googleId: profileId')
+      expect(controller).toContain("this.make<OAuthManager>('oauth')")
+      expect(controller).toContain('this.oauth().authorize(provider')
+      expect(controller).toContain('this.oauth().handleCallback(provider')
+      expect(controller).toContain('randomUUID()')
+      expect(controller).toContain('already exists. Sign in with your password instead.')
+
+      const authRoutes = await readFile(join(workspace.dir, 'routes/auth.ts'), 'utf8')
+      expect(authRoutes).toContain("import OAuthController from '../app/Http/Controllers/Auth/OAuthController.js'")
+      expect(authRoutes).toContain("router.get('/auth/:provider', [OAuthController, 'redirectToProvider'], requireGuest({ redirectTo: '/dashboard' }))")
+      expect(authRoutes).toContain("router.get('/auth/:provider/callback', [OAuthController, 'callback'])")
+
+      const loginPage = await readFile(join(workspace.dir, 'resources/js/pages/auth/Login.tsx'), 'utf8')
+      expect(loginPage).toContain('Continue with GitHub')
+      expect(loginPage).toContain('Continue with Google')
+      expect(loginPage).toContain('href="/auth/github"')
+      expect(loginPage).toContain('href="/auth/google"')
+
+      const registerPage = await readFile(join(workspace.dir, 'resources/js/pages/auth/Register.tsx'), 'utf8')
+      expect(registerPage).toContain('Continue with GitHub')
+
+      const schema = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
+      expect(schema).toContain("githubId: text('github_id').unique()")
+      expect(schema).toContain("googleId: text('google_id').unique()")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('scaffolds OAuth buttons on the login page even with --minimal', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-oauth-minimal-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'db/schema.ts'), `export const posts = 'posts'\n`, 'utf8')
+
+      const created = await makeAuth({ force: true, minimal: true, oauth: 'github' })
+
+      expect(created).toEqual(expect.arrayContaining([
+        expect.stringContaining('app/Providers/OAuthProvider.ts'),
+        expect.stringContaining('OAuthController.ts'),
+      ]))
+      expect(created).not.toEqual(expect.arrayContaining([
+        expect.stringContaining('RegisterController.ts'),
+        expect.stringContaining('Register.tsx'),
+      ]))
+
+      const loginPage = await readFile(join(workspace.dir, 'resources/js/pages/auth/Login.tsx'), 'utf8')
+      expect(loginPage).toContain('Continue with GitHub')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('warns and skips unknown OAuth provider names', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-oauth-unknown-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'db/schema.ts'), `export const posts = 'posts'\n`, 'utf8')
+
+      const created = await makeAuth({ force: true, oauth: 'github,bogus' })
+
+      const controller = await readFile(join(workspace.dir, 'app/Http/Controllers/Auth/OAuthController.ts'), 'utf8')
+      expect(controller).toContain("z.enum(['github'])")
+      expect(controller).not.toContain('bogus')
+
+      expect(created).toEqual(expect.arrayContaining([
+        expect.stringContaining('OAuthController.ts'),
+      ]))
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('adds emailVerifiedAt and OAuth id columns together with --verify --oauth', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-oauth-verify-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'db/schema.ts'),
+        `import { pgTable, serial, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core'
+
+export const posts = pgTable('posts', {
+  id: serial('id').primaryKey(),
+  title: text('title').notNull(),
+})
+`,
+        'utf8',
+      )
+
+      await makeAuth({ force: true, verify: true, oauth: 'github,google' })
+
+      const schema = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
+      expect(schema).toContain('emailVerifiedAt: timestamp(')
+      expect(schema).toContain("githubId: text('github_id').unique()")
+      expect(schema).toContain("googleId: text('google_id').unique()")
+      expect(schema.match(/export const users = /g)).toHaveLength(1)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('idempotently adds only the missing provider column on re-run with --force', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-oauth-idempotent-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'db/schema.ts'),
+        `import { pgTable, serial, text } from 'drizzle-orm/pg-core'
+
+export const posts = pgTable('posts', {
+  id: serial('id').primaryKey(),
+  title: text('title').notNull(),
+})
+`,
+        'utf8',
+      )
+
+      await makeAuth({ force: true, oauth: 'github' })
+      const afterFirst = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
+      expect(afterFirst).toContain("githubId: text('github_id').unique()")
+      expect(afterFirst).not.toContain('googleId')
+
+      await makeAuth({ force: true, oauth: 'github,google' })
+      const afterSecond = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
+      expect(afterSecond.match(/githubId: text\('github_id'\)\.unique\(\),/g)).toHaveLength(1)
+      expect(afterSecond).toContain("googleId: text('google_id').unique()")
+      expect(afterSecond.match(/export const users = /g)).toHaveLength(1)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('wires CoreOAuthServiceProvider and OAuthProvider into app.ts with --install --oauth', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-oauth-install-')
+    try {
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      await mkdir(join(workspace.dir, 'routes'), { recursive: true })
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+
+      await writeFile(
+        join(workspace.dir, 'src/app.ts'),
+        `import { createApp } from '@guren/core'
+import DatabaseProvider from '../app/Providers/DatabaseProvider.js'
+import registerWebRoutes from '../routes/web.js'
+
+const app = createApp({
+  routes: registerWebRoutes,
+  providers: [DatabaseProvider],
+})
+
+export default app
+`,
+        'utf8',
+      )
+
+      await writeFile(
+        join(workspace.dir, 'routes/web.ts'),
+        `import { Router } from '@guren/core'
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/', () => 'home')
+}
+`,
+        'utf8',
+      )
+
+      await writeFile(join(workspace.dir, 'db/schema.ts'), `export const posts = 'posts'\n`, 'utf8')
+
+      await makeAuth({ install: true, force: true, minimal: true, oauth: 'github' })
+
+      const appContent = await readFile(join(workspace.dir, 'src/app.ts'), 'utf8')
+      expect(appContent).toContain("import { OAuthServiceProvider as CoreOAuthServiceProvider } from '@guren/core'")
+      expect(appContent).toContain("import OAuthProvider from '../app/Providers/OAuthProvider.js'")
+      expect(appContent).toContain('providers: [DatabaseProvider, AuthProvider, CoreOAuthServiceProvider, OAuthProvider]')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
 })

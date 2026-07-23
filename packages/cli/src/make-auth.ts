@@ -223,6 +223,133 @@ export default class VerifyEmailController extends Controller {
 }
 `
 
+const OAUTH_PROVIDER_FACTORIES: Record<string, string> = {
+  github: 'createGitHubOAuthProviderConfig',
+  google: 'createGoogleOAuthProviderConfig',
+  discord: 'createDiscordOAuthProviderConfig',
+}
+
+function buildOAuthProviderTemplate(providers: string[]): string {
+  const factoryImports = providers.map((provider) => OAUTH_PROVIDER_FACTORIES[provider]).join(', ')
+
+  const registrations = providers
+    .map((provider) => {
+      const upper = provider.toUpperCase()
+      return `    const ${provider}ClientId = process.env.OAUTH_${upper}_CLIENT_ID
+    const ${provider}ClientSecret = process.env.OAUTH_${upper}_CLIENT_SECRET
+    const ${provider}RedirectUri = process.env.OAUTH_${upper}_REDIRECT_URI
+    if (${provider}ClientId && ${provider}ClientSecret && ${provider}RedirectUri) {
+      oauth.registerProvider('${provider}', ${OAUTH_PROVIDER_FACTORIES[provider]}({
+        clientId: ${provider}ClientId,
+        clientSecret: ${provider}ClientSecret,
+        redirectUri: ${provider}RedirectUri,
+      }))
+    }`
+    })
+    .join('\n\n')
+
+  // Matches the wiring convention scaffolded by `guren add oauth`: providers
+  // are registered against the shared `oauth` singleton (bound by
+  // CoreOAuthServiceProvider) and only when all three env vars are set, so a
+  // half-configured provider never shows a login button that leads nowhere.
+  return `import { ServiceProvider, type OAuthManager, ${factoryImports} } from '@guren/core'
+
+export default class OAuthProvider extends ServiceProvider {
+  register(): void {
+    const oauth = this.container.make<OAuthManager>('oauth')
+
+${registrations}
+  }
+}
+`
+}
+
+function buildOAuthControllerTemplate(providers: string[]): string {
+  const providerLiterals = providers.map((provider) => `'${provider}'`).join(', ')
+  const identityEntries = providers
+    .map((provider) => `    ${provider}: { ${provider}Id: profileId },`)
+    .join('\n')
+
+  return `import { Controller, ValidationException, type OAuthManager } from '@guren/core'
+import { randomUUID } from 'node:crypto'
+import { z } from 'zod'
+import { User, type UserRecord } from '../../../Models/User.js'
+
+const ProviderParamSchema = z.object({
+  provider: z.enum([${providerLiterals}]),
+})
+
+const CallbackQuerySchema = z.object({
+  code: z.string(),
+  state: z.string(),
+})
+
+type OAuthProvider = z.infer<typeof ProviderParamSchema>['provider']
+
+function identityWhere(provider: OAuthProvider, profileId: string): Partial<UserRecord> {
+  const identities: Record<OAuthProvider, Partial<UserRecord>> = {
+${identityEntries}
+  }
+  return identities[provider]
+}
+
+export default class OAuthController extends Controller {
+  private oauth(): OAuthManager {
+    return this.make<OAuthManager>('oauth')
+  }
+
+  // Note: not named \`redirect\` — that would shadow the base
+  // Controller.redirect() helper used below.
+  async redirectToProvider(): Promise<Response> {
+    const { provider } = this.validateParams(ProviderParamSchema)
+
+    const { url } = await this.oauth().authorize(provider, {
+      redirectTo: this.request.query('redirectTo') ?? undefined,
+    })
+
+    return this.redirect(url)
+  }
+
+  async callback(): Promise<Response> {
+    const { provider } = this.validateParams(ProviderParamSchema)
+    const { code, state } = this.validateQuery(CallbackQuerySchema)
+
+    const { profile, redirectTo } = await this.oauth().handleCallback(provider, { code, state })
+
+    if (!profile.email) {
+      throw ValidationException.withMessages({ message: 'This provider did not return an email address.' })
+    }
+
+    let [user] = await User.where(identityWhere(provider, profile.id))
+
+    if (!user) {
+      const [existingByEmail] = await User.where({ email: profile.email })
+      if (existingByEmail) {
+        throw ValidationException.withMessages({
+          message: 'An account with this email already exists. Sign in with your password instead.',
+        })
+      }
+
+      // No password was supplied by the user — generate a random one so the
+      // account still satisfies AuthenticatableModel's hashing pipeline.
+      // It's never surfaced to the user and can't realistically be guessed.
+      user = await User.create({
+        name: profile.name ?? profile.email,
+        email: profile.email,
+        password: randomUUID(),
+        ...identityWhere(provider, profile.id),
+      })
+    }
+
+    this.auth.session()?.regenerate()
+    await this.auth.login(user)
+
+    return this.redirect(redirectTo ?? '/dashboard')
+  }
+}
+`
+}
+
 const dashboardControllerTemplate = `import { Controller } from '@guren/core'
 import type { UserRecord } from '../../Models/User.js'
 import { pages } from '@/.guren/pages.gen'
@@ -592,7 +719,40 @@ export default function Layout({ children }: PropsWithChildren) {
 }
 `
 
-function buildLoginViewTemplate(includeRegister: boolean, includeReset: boolean): string {
+const OAUTH_PROVIDER_LABELS: Record<string, string> = {
+  github: 'GitHub',
+  google: 'Google',
+  discord: 'Discord',
+}
+
+function buildOAuthButtonsTemplate(providers: string[]): string {
+  if (providers.length === 0) {
+    return ''
+  }
+
+  const buttons = providers
+    .map(
+      (provider) => `          <a
+            href="/auth/${provider}"
+            className="flex w-full items-center justify-center rounded border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-medium text-slate-100 transition hover:border-emerald-400 hover:text-emerald-200"
+          >
+            Continue with ${OAUTH_PROVIDER_LABELS[provider]}
+          </a>`,
+    )
+    .join('\n')
+
+  return `
+        <div className="mt-6 space-y-3">
+          <div className="flex items-center gap-3 text-xs uppercase tracking-wide text-slate-500">
+            <span className="h-px flex-1 bg-slate-800" />
+            Or continue with
+            <span className="h-px flex-1 bg-slate-800" />
+          </div>
+${buttons}
+        </div>`
+}
+
+function buildLoginViewTemplate(includeRegister: boolean, includeReset: boolean, oauthProviders: string[] = []): string {
   const signUpLink = includeRegister
     ? `
         <p className="mt-2 text-center text-sm text-slate-400">
@@ -711,7 +871,7 @@ export default function Login({ email = '', errors = {} }: Props) {
               Sign in
           </button>
         </form>
-
+${buildOAuthButtonsTemplate(oauthProviders)}
 ${forgotPasswordText}${signUpLink}
       </section>
     </Layout>
@@ -720,7 +880,8 @@ ${forgotPasswordText}${signUpLink}
 `
 }
 
-const registerViewTemplate = `import { Head, Link, useForm } from '@inertiajs/react'
+function buildRegisterViewTemplate(oauthProviders: string[] = []): string {
+  return `import { Head, Link, useForm } from '@inertiajs/react'
 import { useId } from 'react'
 import Layout from '../../components/Layout.js'
 import type { ValidationErrors } from '@guren/core'
@@ -841,7 +1002,7 @@ export default function Register({ errors = {} }: Props) {
             Create account
           </button>
         </form>
-
+${buildOAuthButtonsTemplate(oauthProviders)}
         <p className="mt-6 text-center text-sm text-slate-400">
           Already have an account?{' '}
           <Link href="/login" className="text-emerald-300 transition hover:text-emerald-200">
@@ -853,6 +1014,7 @@ export default function Register({ errors = {} }: Props) {
   )
 }
 `
+}
 
 const forgotPasswordViewTemplate = `import { Head, useForm } from '@inertiajs/react'
 import { useId } from 'react'
@@ -1196,7 +1358,13 @@ export default function ProfileEdit({ profile, status }: Props) {
 }
 `
 
-function buildRoutesTemplate(includeRegister: boolean, includeReset: boolean, includeVerify: boolean): string {
+function buildRoutesTemplate(
+  includeRegister: boolean,
+  includeReset: boolean,
+  includeVerify: boolean,
+  oauthProviders: string[] = [],
+): string {
+  const includeOAuth = oauthProviders.length > 0
   const registerImport = includeRegister
     ? `\nimport RegisterController from '../app/Http/Controllers/Auth/RegisterController.js'`
     : ''
@@ -1234,8 +1402,18 @@ function buildRoutesTemplate(includeRegister: boolean, includeReset: boolean, in
     ? `requireAuthenticated({ redirectTo: '/login' }), requireVerifiedEmail({ redirectTo: '/verify-email' })`
     : `requireAuthenticated({ redirectTo: '/login' })`
 
+  const oauthImport = includeOAuth
+    ? `\nimport OAuthController from '../app/Http/Controllers/Auth/OAuthController.js'`
+    : ''
+  const oauthRoutes = includeOAuth
+    ? `
+  router.get('/auth/:provider', [OAuthController, 'redirectToProvider'], requireGuest({ redirectTo: '/dashboard' })).name('oauth.redirect')
+  router.get('/auth/:provider/callback', [OAuthController, 'callback']).name('oauth.callback')
+`
+    : ''
+
   return `import { Router, requireAuthenticated, requireGuest${requireVerifiedImport} } from '@guren/core'
-import LoginController from '../app/Http/Controllers/Auth/LoginController.js'${registerImport}${resetImport}${verifyImport}
+import LoginController from '../app/Http/Controllers/Auth/LoginController.js'${registerImport}${resetImport}${verifyImport}${oauthImport}
 import DashboardController from '../app/Http/Controllers/DashboardController.js'
 import ProfileController from '../app/Http/Controllers/ProfileController.js'
 
@@ -1243,7 +1421,7 @@ export function registerAuthRoutes(router: Router): void {
   router.get('/login', [LoginController, 'show'], requireGuest({ redirectTo: '/dashboard' })).name('login')
   router.post('/login', [LoginController, 'store'], requireGuest({ redirectTo: '/dashboard' })).name('login.store')
   router.post('/logout', [LoginController, 'destroy'], requireAuthenticated({ redirectTo: '/login' })).name('logout')
-${registerRoutes}${resetRoutes}${verifyRoutes}
+${registerRoutes}${resetRoutes}${verifyRoutes}${oauthRoutes}
   router.get('/dashboard', [DashboardController, 'index'], ${dashboardMiddleware}).name('dashboard')
   router.get('/profile', [ProfileController, 'edit'], requireAuthenticated({ redirectTo: '/login' })).name('profile.edit')
   router.put('/profile', [ProfileController, 'update'], requireAuthenticated({ redirectTo: '/login' })).name('profile.update')
@@ -1322,7 +1500,16 @@ const emailVerifiedAtField: Record<SchemaDialect, string> = {
   mysql: `emailVerifiedAt: timestamp('email_verified_at'),`,
 }
 
-function ensureUsersTableImports(content: string, dialect: SchemaDialect): string {
+function oauthIdFieldLine(provider: string, dialect: SchemaDialect): string {
+  const camel = `${provider}Id`
+  const snake = `${provider}_id`
+  if (dialect === 'mysql') {
+    return `${camel}: varchar('${snake}', { length: 255 }).unique(),`
+  }
+  return `${camel}: text('${snake}').unique(),`
+}
+
+function ensureAuthColumnImports(content: string, dialect: SchemaDialect): string {
   if (dialect === 'sqlite') {
     return ensureSqliteImports(content, ['sqliteTable', 'integer', 'text'])
   }
@@ -1333,25 +1520,31 @@ function ensureUsersTableImports(content: string, dialect: SchemaDialect): strin
 }
 
 /**
- * Insert a column definition right after the `rememberToken` column of a
- * `users` table block, preserving its indentation. Used both to build the
- * "with verification" variant of a fresh table block and to patch an
- * existing one — a single source of truth for the splice, instead of
- * hand-maintaining a second full table-block template per dialect.
+ * Insert one or more column definitions right after the `rememberToken`
+ * column of a `users` table block, preserving its indentation. Used both to
+ * build the "with verify/oauth" variant of a fresh table block and to patch
+ * an existing one — a single source of truth for the splice, instead of
+ * hand-maintaining full table-block template variants per feature
+ * combination.
  */
-function insertColumnAfterRememberToken(content: string, fieldLine: string): string | null {
+function insertColumnsAfterRememberToken(content: string, fieldLines: string[]): string | null {
+  if (fieldLines.length === 0) {
+    return content
+  }
+
   const rememberTokenPattern = /^([ \t]*)rememberToken:[^\n]*\n/m
   let inserted = false
 
   const updated = content.replace(rememberTokenPattern, (line, indent: string) => {
     inserted = true
-    return `${line}${indent}${fieldLine}\n`
+    const insertion = fieldLines.map((fieldLine) => `${indent}${fieldLine}\n`).join('')
+    return `${line}${insertion}`
   })
 
   return inserted ? updated : null
 }
 
-async function updateSchema(includeVerify: boolean): Promise<void> {
+async function updateSchema(includeVerify: boolean, oauthProviders: string[] = []): Promise<void> {
   const schemaPath = resolve(process.cwd(), 'db/schema.ts')
   let content: string
 
@@ -1366,12 +1559,6 @@ async function updateSchema(includeVerify: boolean): Promise<void> {
   }
 
   const hasAuthColumns = content.includes('passwordHash')
-  const hasVerificationColumn = content.includes('emailVerifiedAt')
-
-  if (hasAuthColumns && (!includeVerify || hasVerificationColumn)) {
-    return
-  }
-
   const dialect = detectSchemaDialect(content)
 
   if (hasAuthColumns) {
@@ -1379,32 +1566,55 @@ async function updateSchema(includeVerify: boolean): Promise<void> {
     // run) and may have been customized since — e.g. extra columns or a
     // trailing index callback (`pgTable('users', {...}, (table) => [...])`).
     // Rather than risk mangling a table shape we can't fully parse, insert
-    // just the new column next to the rememberToken column we know we
+    // just the new columns next to the rememberToken column we know we
     // generated, preserving its indentation.
-    const updated = insertColumnAfterRememberToken(content, emailVerifiedAtField[dialect])
+    const missingColumns: Array<{ name: string; line: string }> = []
+    if (includeVerify && !content.includes('emailVerifiedAt')) {
+      missingColumns.push({ name: 'emailVerifiedAt', line: emailVerifiedAtField[dialect] })
+    }
+    for (const provider of oauthProviders) {
+      const name = `${provider}Id`
+      if (!content.includes(name)) {
+        missingColumns.push({ name, line: oauthIdFieldLine(provider, dialect) })
+      }
+    }
+
+    if (missingColumns.length === 0) {
+      return
+    }
+
+    const updated = insertColumnsAfterRememberToken(content, missingColumns.map((c) => c.line))
 
     if (!updated) {
       consola.warn(
-        'Could not locate the rememberToken column in db/schema.ts — add `emailVerifiedAt` to your users table manually for email verification.',
+        `Could not locate the rememberToken column in db/schema.ts — add ${missingColumns.map((c) => c.name).join(', ')} to your users table manually.`,
       )
       return
     }
 
-    content = ensureUsersTableImports(updated, dialect)
+    content = ensureAuthColumnImports(updated, dialect)
 
     await writeFile(schemaPath, content, 'utf8')
-    consola.info(`Added emailVerifiedAt column to db/schema.ts (${dialect}).`)
+    consola.info(`Added ${missingColumns.map((c) => c.name).join(', ')} column(s) to db/schema.ts (${dialect}).`)
     return
   }
 
-  content = ensureUsersTableImports(content, dialect)
+  content = ensureAuthColumnImports(content, dialect)
 
   // Replace an existing users table that lacks auth columns, or append if
   // absent. Use `})` on its own line as the end anchor to avoid premature
   // matching inside nested function calls like `$defaultFn(() => ...)`.
   const usersTablePattern = /export const users = (?:pgTable|sqliteTable|mysqlTable)\('users',\s*\{[\s\S]*?\n\}\)\s*\n?/
-  const usersTableBlock = includeVerify
-    ? insertColumnAfterRememberToken(usersTableBlocks[dialect], emailVerifiedAtField[dialect])!
+  const freshFieldLines: string[] = []
+  if (includeVerify) {
+    freshFieldLines.push(emailVerifiedAtField[dialect])
+  }
+  for (const provider of oauthProviders) {
+    freshFieldLines.push(oauthIdFieldLine(provider, dialect))
+  }
+
+  const usersTableBlock = freshFieldLines.length > 0
+    ? insertColumnsAfterRememberToken(usersTableBlocks[dialect], freshFieldLines)!
     : usersTableBlocks[dialect]
 
   if (usersTablePattern.test(content)) {
@@ -1439,17 +1649,44 @@ async function generateUsersMigration(): Promise<boolean> {
 async function updatePageContracts(): Promise<void> {
 }
 
+const KNOWN_OAUTH_PROVIDERS = ['github', 'google', 'discord'] as const
+
+function parseOAuthProviders(raw: string | undefined): string[] {
+  if (!raw) {
+    return []
+  }
+
+  const seen = new Set<string>()
+  for (const token of raw.split(',')) {
+    const name = token.trim().toLowerCase()
+    if (!name) {
+      continue
+    }
+    if (!(KNOWN_OAUTH_PROVIDERS as readonly string[]).includes(name)) {
+      consola.warn(`Unknown OAuth provider "${name}" — skipping. Supported: ${KNOWN_OAUTH_PROVIDERS.join(', ')}.`)
+      continue
+    }
+    seen.add(name)
+  }
+
+  return Array.from(seen)
+}
+
 export interface MakeAuthOptions extends WriterOptions {
   install?: boolean
   /** Skip registration and password reset scaffolding and generate the login-only experience. */
   minimal?: boolean
   /** Also scaffold email verification. Requires the default (non-minimal) experience. */
   verify?: boolean
+  /** Also scaffold OAuth login buttons. Comma-separated provider names (github, google, discord). */
+  oauth?: string
 }
 
 export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]> {
   const includeExtras = !options.minimal
   const includeVerify = includeExtras && Boolean(options.verify)
+  const oauthProviders = parseOAuthProviders(options.oauth)
+  const includeOAuth = oauthProviders.length > 0
 
   if (options.minimal && options.verify) {
     consola.warn('--verify requires the default (non-minimal) experience — skipping email verification.')
@@ -1464,10 +1701,10 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
     { path: 'app/Http/Validators/LoginValidator.ts', contents: loginValidatorTemplate },
     { path: 'app/Http/Validators/ProfileValidator.ts', contents: profileValidatorTemplate },
     { path: 'resources/js/components/Layout.tsx', contents: layoutTemplate },
-    { path: 'resources/js/pages/auth/Login.tsx', contents: buildLoginViewTemplate(includeExtras, includeExtras) },
+    { path: 'resources/js/pages/auth/Login.tsx', contents: buildLoginViewTemplate(includeExtras, includeExtras, oauthProviders) },
     { path: 'resources/js/pages/dashboard/Index.tsx', contents: dashboardViewTemplate },
     { path: 'resources/js/pages/profile/Edit.tsx', contents: profileViewTemplate },
-    { path: 'routes/auth.ts', contents: buildRoutesTemplate(includeExtras, includeExtras, includeVerify) },
+    { path: 'routes/auth.ts', contents: buildRoutesTemplate(includeExtras, includeExtras, includeVerify, oauthProviders) },
     { path: 'db/seeders/UsersSeeder.ts', contents: seederTemplate },
   ]
 
@@ -1475,7 +1712,7 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
     files.push(
       { path: 'app/Http/Controllers/Auth/RegisterController.ts', contents: buildRegisterControllerTemplate(includeVerify) },
       { path: 'app/Http/Validators/RegisterValidator.ts', contents: registerValidatorTemplate },
-      { path: 'resources/js/pages/auth/Register.tsx', contents: registerViewTemplate },
+      { path: 'resources/js/pages/auth/Register.tsx', contents: buildRegisterViewTemplate(oauthProviders) },
       { path: 'app/Http/Controllers/Auth/ForgotPasswordController.ts', contents: forgotPasswordControllerTemplate },
       { path: 'app/Http/Controllers/Auth/ResetPasswordController.ts', contents: resetPasswordControllerTemplate },
       { path: 'app/Http/Validators/ForgotPasswordValidator.ts', contents: forgotPasswordValidatorTemplate },
@@ -1498,14 +1735,21 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
     )
   }
 
+  if (includeOAuth) {
+    files.push(
+      { path: 'app/Providers/OAuthProvider.ts', contents: buildOAuthProviderTemplate(oauthProviders) },
+      { path: 'app/Http/Controllers/Auth/OAuthController.ts', contents: buildOAuthControllerTemplate(oauthProviders) },
+    )
+  }
+
   const created = await writeFilesSafe(files, options)
 
-  await updateSchema(includeVerify)
+  await updateSchema(includeVerify, oauthProviders)
   await updatePageContracts()
   const migrationGenerated = await generateUsersMigration()
 
   if (options.install) {
-    await installAuth(migrationGenerated, includeExtras)
+    await installAuth(migrationGenerated, includeExtras, oauthProviders)
   } else {
     consola.info('Next steps:')
     consola.info('  • Register AuthProvider in src/app.ts providers array')
@@ -1519,6 +1763,13 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
     }
     consola.info('  • Run `bun run db:migrate` and `bun run db:seed`')
     consola.info('  • Install zod if not already installed: `bun add zod`')
+    if (includeOAuth) {
+      consola.info('  • Register CoreOAuthServiceProvider (from @guren/core) and OAuthProvider in src/app.ts providers array')
+      for (const provider of oauthProviders) {
+        const upper = provider.toUpperCase()
+        consola.info(`  • Set OAUTH_${upper}_CLIENT_ID / OAUTH_${upper}_CLIENT_SECRET / OAUTH_${upper}_REDIRECT_URI in your .env (see .env.example)`)
+      }
+    }
   }
 
   return created
@@ -1549,7 +1800,7 @@ async function wireProvider(appPath: string, providerName: string, providerRelat
   }
 }
 
-async function installAuth(migrationGenerated = true, includeExtras = true): Promise<void> {
+async function installAuth(migrationGenerated = true, includeExtras = true, oauthProviders: string[] = []): Promise<void> {
   consola.info('Installing authentication configuration...')
 
   // Determine app file location (try src/app.ts first, then app.ts)
@@ -1592,6 +1843,21 @@ async function installAuth(migrationGenerated = true, includeExtras = true): Pro
     }
 
     await wireProvider(appPath, 'MailProvider', 'app/Providers/MailProvider.js')
+  }
+
+  if (oauthProviders.length > 0) {
+    const coreImportResult = await addImport(appPath, "import { OAuthServiceProvider as CoreOAuthServiceProvider } from '@guren/core'")
+    if (coreImportResult.modified) {
+      consola.success(`Added CoreOAuthServiceProvider import to ${appPath}`)
+    }
+    const coreProviderResult = await addProvider(appPath, 'CoreOAuthServiceProvider')
+    if (coreProviderResult.modified) {
+      consola.success(`Added CoreOAuthServiceProvider to providers array in ${appPath}`)
+    } else if (coreProviderResult.reason !== 'Provider already registered') {
+      consola.warn(`Could not add CoreOAuthServiceProvider: ${coreProviderResult.reason}`)
+    }
+
+    await wireProvider(appPath, 'OAuthProvider', 'app/Providers/OAuthProvider.js')
   }
 
   // Enable session + CSRF middleware: AuthServiceProvider is only registered
@@ -1645,4 +1911,8 @@ async function installAuth(migrationGenerated = true, includeExtras = true): Pro
   consola.info('  • Run `bun run db:migrate` to create the users table')
   consola.info('  • Run `bun run db:seed` to create demo user')
   consola.info('  • Start the dev server and visit /login (demo@example.com / secret)')
+  for (const provider of oauthProviders) {
+    const upper = provider.toUpperCase()
+    consola.info(`  • Set OAUTH_${upper}_CLIENT_ID / OAUTH_${upper}_CLIENT_SECRET / OAUTH_${upper}_REDIRECT_URI in your .env (see .env.example)`)
+  }
 }
