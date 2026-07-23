@@ -125,8 +125,17 @@ New `packages/cli/src/arch-check.ts`:
 
 Results are emitted as the existing `CheckResult` shape
 (`packages/cli/src/check.ts`) and merged into the `guren check` report,
-so `--json` output, exit codes, and the doctor integration work
+so `--json` output ~~, exit codes,~~ and the doctor integration work
 unchanged.
+
+**Amended in implementation:** plain `guren check` still never sets an
+exit code, arch violations included — CLAUDE.md documents `check` as a
+stable v1.0 command, and making it fail the process on a fresh
+`guren.arch.ts` is a breaking change to existing CI scripts reserved
+for a major release. Only `guren check --arch` (a brand-new flag with
+no prior contract) exits non-zero on failures; that's the intended way
+to gate CI on architecture boundaries. `guren audit`'s existing
+exit-code behavior is unaffected either way.
 
 **Constraint on the implementation:** a single `guren check` invocation
 already runs multiple checkers (route/controller/page consistency,
@@ -145,6 +154,22 @@ failures poison an AI agent's edit loop, so the checker must err toward
 under-reporting with a visible warning rather than blocking on
 uncertainty.
 
+**Amended in implementation:** a whole-declaration type-only import or
+export (`import type { X } from '...'`, `export type { X } from
+'...'`) is exempt from every rule, not just treated as unresolved-safe
+— it compiles away entirely, so it creates no runtime coupling across
+a boundary, and sharing a type (a DTO, a props interface) across
+layers is common and benign. A *mixed* declaration
+(`import { type X, Y } from '...'`) still counts as a real import,
+since some binding in it (`Y`) is a runtime dependency regardless of
+`X`. The resolver also normalizes a specifier's extension before
+matching candidates (`import './Post.js'` resolving to `Post.ts` on
+disk) — implied by "resolve specifiers to project-relative paths"
+above, called out here because it's the difference between the
+checker being usable on NodeNext/bundler-resolution TypeScript (which
+writes `.js` specifiers for `.ts` files) and reporting a false warning
+on nearly every relative import in such a project.
+
 #### CLI surface
 
 ```bash
@@ -160,8 +185,16 @@ guren check --changed    # restrict any checks to files changed vs the merge bas
   with `main`, falling back to `HEAD`), reusable by `guren audit`. It
   exists so the agent-harness `check-after-edit` hook can run per-edit
   without full-project scans.
-- The agent harness template's `check-after-edit.ts` hook and the
-  `dev-workflow` skill are updated to use `guren check --arch --changed`.
+- ~~The agent harness template's `check-after-edit.ts` hook and the
+  `dev-workflow` skill are updated to use `guren check --arch --changed`.~~
+  **Amended in implementation:** the hook keeps running the *full*
+  check (not arch-only) — dropping the existing route/controller/page
+  checks from every edit would be a regression, not a speed-up — and
+  gains only `changed: true` (via `runCheck()`'s options, since the
+  hook already calls `runCheck()` in-process rather than shelling out
+  to the CLI). `dev-workflow` wasn't touched: it documents build/test/
+  typecheck, not `check`/`audit`, which the hook already covers
+  automatically.
 
 ### Part 2: Application modules
 
