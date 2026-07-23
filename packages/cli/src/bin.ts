@@ -229,11 +229,16 @@ const makeAuthCommand = defineCommand({
       description: 'Automatically wire up auth configuration in app.ts and routes',
       alias: 'i',
     },
+    minimal: {
+      type: 'boolean',
+      description: 'Skip registration scaffolding and generate the login-only experience',
+    },
   },
   async run({ args }) {
     const files = await makeAuth({
       ...toWriterOptions(args),
       install: Boolean(args.install),
+      minimal: Boolean(args.minimal),
     })
     for (const file of files) {
       consola.success(`Created ${file}`)

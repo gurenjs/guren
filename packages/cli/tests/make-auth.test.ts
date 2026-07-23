@@ -55,12 +55,15 @@ export function registerWebRoutes(router: Router): void {
 
       const created = await makeAuth({ install: true, force: true })
 
-      expect(created).toHaveLength(13)
+      expect(created).toHaveLength(16)
       expect(created).toEqual(expect.arrayContaining([
         expect.stringContaining('LoginController.ts'),
         expect.stringContaining('routes/auth.ts'),
         expect.stringContaining('ProfileController.ts'),
         expect.stringContaining('ProfileValidator.ts'),
+        expect.stringContaining('RegisterController.ts'),
+        expect.stringContaining('RegisterValidator.ts'),
+        expect.stringContaining('Register.tsx'),
       ]))
 
       const schema = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
@@ -75,13 +78,64 @@ export function registerWebRoutes(router: Router): void {
       expect(routesContent).toContain("import { registerAuthRoutes } from './auth.js'")
       expect(routesContent).toContain('registerAuthRoutes(router)')
 
+      const authRoutes = await readFile(join(workspace.dir, 'routes/auth.ts'), 'utf8')
+      expect(authRoutes).toContain("import RegisterController from '../app/Http/Controllers/Auth/RegisterController.js'")
+      expect(authRoutes).toContain("router.get('/register'")
+      expect(authRoutes).toContain("router.post('/register'")
+
       const loginPage = await readFile(join(workspace.dir, 'resources/js/pages/auth/Login.tsx'), 'utf8')
       expect(loginPage).toContain('interface Props')
+      expect(loginPage).toContain('href="/register"')
 
       const loginController = await readFile(join(workspace.dir, 'app/Http/Controllers/Auth/LoginController.ts'), 'utf8')
       expect(loginController).toContain('validateBody(LoginSchema)')
       expect(loginController).toContain('pages.auth.Login')
       expect(loginController).not.toContain('safeParse')
+
+      const registerController = await readFile(
+        join(workspace.dir, 'app/Http/Controllers/Auth/RegisterController.ts'),
+        'utf8',
+      )
+      expect(registerController).toContain('validateBody(RegisterSchema)')
+      expect(registerController).toContain('pages.auth.Register')
+      expect(registerController).toContain('User.create(')
+
+      const registerValidator = await readFile(
+        join(workspace.dir, 'app/Http/Validators/RegisterValidator.ts'),
+        'utf8',
+      )
+      expect(registerValidator).toContain('passwordConfirmation')
+      expect(registerValidator).toContain('Passwords do not match.')
+
+      const registerPage = await readFile(join(workspace.dir, 'resources/js/pages/auth/Register.tsx'), 'utf8')
+      expect(registerPage).toContain('interface Props')
+      expect(registerPage).toContain("form.post('/register')")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('skips registration scaffolding with --minimal', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-minimal-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'db/schema.ts'), `export const posts = 'posts'\n`, 'utf8')
+
+      const created = await makeAuth({ force: true, minimal: true })
+
+      expect(created).toHaveLength(13)
+      expect(created).not.toEqual(expect.arrayContaining([
+        expect.stringContaining('RegisterController.ts'),
+        expect.stringContaining('RegisterValidator.ts'),
+        expect.stringContaining('Register.tsx'),
+      ]))
+
+      const authRoutes = await readFile(join(workspace.dir, 'routes/auth.ts'), 'utf8')
+      expect(authRoutes).not.toContain('RegisterController')
+      expect(authRoutes).not.toContain("router.get('/register'")
+
+      const loginPage = await readFile(join(workspace.dir, 'resources/js/pages/auth/Login.tsx'), 'utf8')
+      expect(loginPage).not.toContain('href="/register"')
     } finally {
       await workspace.cleanup()
     }
