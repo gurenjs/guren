@@ -8,6 +8,7 @@ import {
   classNameFromPath,
   toPosixRelative,
   listModuleNames,
+  moduleNameFromRelPath,
 } from './discovery'
 import { ParseCache } from './parse-cache'
 import { runArchCheck } from './arch-check'
@@ -41,8 +42,7 @@ export interface RunCheckOptions {
  * looking at the top level.
  */
 function moduleNameFor(cwd: string, filePath: string): string | null {
-  const match = /^modules\/([^/]+)\//.exec(toPosixRelative(cwd, filePath))
-  return match ? match[1] : null
+  return moduleNameFromRelPath(toPosixRelative(cwd, filePath))
 }
 
 /**
@@ -148,17 +148,12 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     for (const filePath of controllerFiles) {
       const name = classNameFromPath(filePath)
       const moduleName = moduleNameFor(cwd, filePath)
-      const testCandidates = moduleName
-        ? [
-            `modules/${moduleName}/tests/controllers/${name}.test.ts`,
-            `modules/${moduleName}/tests/${name}.test.ts`,
-            `modules/${moduleName}/app/Http/Controllers/${name}.test.ts`,
-          ]
-        : [
-            `tests/controllers/${name}.test.ts`,
-            `tests/${name}.test.ts`,
-            `app/Http/Controllers/${name}.test.ts`,
-          ]
+      const prefix = moduleName ? `modules/${moduleName}/` : ''
+      const testCandidates = [
+        `${prefix}tests/controllers/${name}.test.ts`,
+        `${prefix}tests/${name}.test.ts`,
+        `${prefix}app/Http/Controllers/${name}.test.ts`,
+      ]
       let hasTest = false
       for (const candidate of testCandidates) {
         if (await fileExists(cwd, candidate)) {

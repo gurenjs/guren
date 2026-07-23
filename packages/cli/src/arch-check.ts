@@ -6,6 +6,7 @@ import {
   collectFiles,
   toPosixRelative,
   listModuleNames,
+  moduleNameFromRelPath,
   NON_SOURCE_DIR_NAMES,
   IMPORTABLE_EXTENSIONS,
 } from './discovery'
@@ -94,12 +95,12 @@ async function evaluateDerivedModuleRules(
     const resolvedImports = await Promise.all(
       specifiers.map((specifier) => resolveImportSpecifier(cwd, absPath, specifier)),
     )
-    const importerModule = moduleNameOfPath(relPath)
+    const importerModule = moduleNameFromRelPath(relPath)
 
     for (const imp of resolvedImports) {
       if (imp.kind !== 'file') continue
 
-      const targetModule = moduleNameOfPath(imp.fileRelPath)
+      const targetModule = moduleNameFromRelPath(imp.fileRelPath)
       if (!targetModule || targetModule === importerModule) continue
       if (isModulePublicSurface(imp.fileRelPath, targetModule)) continue
 
@@ -128,11 +129,6 @@ async function evaluateDerivedModuleRules(
   }
 
   return results
-}
-
-function moduleNameOfPath(relPath: string): string | null {
-  const match = /^modules\/([^/]+)\//.exec(relPath)
-  return match ? match[1]! : null
 }
 
 function isModulePublicSurface(relPath: string, moduleName: string): boolean {

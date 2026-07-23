@@ -61,6 +61,17 @@ export function toPosixRelative(cwd: string, absPath: string): string {
   return relative(cwd, absPath).split(sep).join('/')
 }
 
+/**
+ * Module name (e.g. `'billing'`) if `relPath` — a POSIX-relative path, as
+ * produced by `toPosixRelative` — is under `modules/<name>/`, else `null`.
+ * The single source of truth for "module path → name" shared by the arch
+ * boundary checks and the consistency checks.
+ */
+export function moduleNameFromRelPath(relPath: string): string | null {
+  const match = /^modules\/([^/]+)\//.exec(relPath)
+  return match ? match[1] : null
+}
+
 export async function fileExists(cwd: string, relativePath: string): Promise<boolean> {
   try {
     await access(resolve(cwd, relativePath))
@@ -126,14 +137,9 @@ async function listModuleDirs(appRoot: string): Promise<string[]> {
  * `check`, `audit`, `context`, `model:list`, `doctor`) module-aware for free.
  */
 async function discoverDir(appRoot: string, subDir: string): Promise<string[]> {
-  const results = await collectFiles(resolve(appRoot, subDir))
-
-  const moduleDirs = await listModuleDirs(appRoot)
-  for (const moduleDir of moduleDirs) {
-    results.push(...(await collectFiles(resolve(moduleDir, subDir))))
-  }
-
-  return results
+  const roots = [appRoot, ...(await listModuleDirs(appRoot))]
+  const groups = await Promise.all(roots.map((root) => collectFiles(resolve(root, subDir))))
+  return groups.flat()
 }
 
 export function discoverModelFiles(appRoot: string): Promise<string[]> {
