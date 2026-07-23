@@ -95,10 +95,12 @@ export default defineArchRules({
 This vocabulary is **frozen by design**. Anything that requires more
 than classifying direct imports — transitive graph analysis, custom
 module resolution, path rewriting, allow-list inheritance — is
-permanently out of scope; users who need it should layer
-dependency-cruiser on top. The ceiling is stated here so feature
-requests can be answered by pointing at the RFC instead of relitigating
-scope per issue.
+permanently out of scope for what a `guren.arch.ts` author can write;
+users who need it should layer dependency-cruiser on top. The ceiling
+is stated here so feature requests can be answered by pointing at the
+RFC instead of relitigating scope per issue. (Part 2's derived module
+rules are the one exception, and are deliberately not exposed through
+this vocabulary — see "Derived boundary rules" below for why.)
 - `defineArchRules` is an identity function providing types, exported
   from a new `@guren/cli/arch` subpath export. It lives in the CLI
   package (not `@guren/core`) because arch rules are a build-time
@@ -125,6 +127,17 @@ Results are emitted as the existing `CheckResult` shape
 (`packages/cli/src/check.ts`) and merged into the `guren check` report,
 so `--json` output, exit codes, and the doctor integration work
 unchanged.
+
+**Constraint on the implementation:** a single `guren check` invocation
+already runs multiple checkers (route/controller/page consistency,
+audit's controller-method scan) that each parse controller and model
+files with Babel. Arch checking must not add a third independent parse
+of the same files in the same process — the checker's file discovery
+and Babel parsing should go through a shared, per-invocation cache
+(keyed by file path) that the other checkers can use too, not a
+parse pipeline private to `arch-check.ts`. This is an implementation
+requirement, not a public API; it doesn't change anything described
+above.
 
 **Severity policy:** a confirmed rule violation is `fail`. An import
 specifier the resolver cannot resolve is `warn`, never `fail` — false
@@ -154,9 +167,14 @@ guren check --changed    # restrict any checks to files changed vs the merge bas
 
 #### Runtime API: `defineModule()`
 
-Modeled directly on `definePlugin()`
-(`packages/server/src/container/definePlugin.ts`) — a module is "a
-plugin that lives inside your application and can register routes":
+Conceptually close to `definePlugin()`
+(`packages/server/src/container/definePlugin.ts`) — both are how you
+extend an app from outside its own `routes/`/`app.ts` — but the shapes
+differ: `definePlugin<TConfig>()` is a factory with a `register`/`boot`
+container lifecycle meant to be instantiated per-config, while a module
+has no config stage and no lifecycle hooks of its own. `defineModule()`
+is a plain descriptor: "a plugin that lives inside your application and
+can register routes":
 
 ```typescript
 // modules/billing/index.ts
@@ -284,7 +302,13 @@ every existing agent command module-aware.
   adding codegen surface.
 - **All `make:*` generators gain `--module <name>`**, which only
   switches the output root from the project root to
-  `modules/<name>/`. Template content is unchanged.
+  `modules/<name>/`. Template content is unchanged. This is a single
+  change to shared plumbing, not per-generator patches: all 21
+  generators already build their file paths through
+  `WriterOptions`/`writeFilesSafe`/`scaffoldFile`
+  (`packages/cli/src/utils.ts`), which today only exposes `force`. Adding
+  a `root` field there and prefixing the paths each generator already
+  constructs is enough — no generator's path-construction logic changes.
 - Drizzle config templates are updated to document that `drizzle-kit`
   accepts a schema glob (`./db/schema.ts` plus
   `./modules/*/db/schema.ts`) for projects that prefer per-module
@@ -303,8 +327,19 @@ rules even if `guren.arch.ts` is absent:
 Violations report as `fail` with the suggestion "import from
 `modules/<b>` (its index.ts) or move the shared code into the module's
 public API." Explicit `guren.arch.ts` rules compose with (never
-replace) the derived rules; an `allow` escape hatch is deliberately
-omitted from the initial scope to keep the contract simple.
+replace) the derived rules.
+
+This is an allow-list ("everything in `modules/<b>/` is disallowed
+except `index.ts`"), which is exactly what the frozen rule vocabulary
+above says it will never support. That is intentional, not an
+oversight: these two rules are the only ones the checker ever derives,
+they are not user-authorable, and they exist to make the zero-config
+default usable rather than to grow into a general escape hatch. Adding
+`allow` to the public vocabulary would let every `guren.arch.ts` author
+punch holes in their own boundaries — the one thing this RFC exists to
+prevent. If demand for a general public-surface primitive (e.g. a
+`publicApi` glob per layer) shows up later, it should be evaluated on
+its own merits rather than smuggled in through this special case.
 
 ### What this RFC does NOT cover
 
