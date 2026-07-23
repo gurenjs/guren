@@ -194,4 +194,77 @@ export function registerWebRoutes(router: Router): void {
       await workspace.cleanup()
     }
   })
+
+  it('scaffolds email verification with --verify', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-verify-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'db/schema.ts'),
+        `import { pgTable, serial, text } from 'drizzle-orm/pg-core'
+
+export const posts = pgTable('posts', {
+  id: serial('id').primaryKey(),
+  title: text('title').notNull(),
+})
+`,
+        'utf8',
+      )
+
+      const created = await makeAuth({ force: true, verify: true })
+
+      expect(created).toEqual(expect.arrayContaining([
+        expect.stringContaining('VerifyEmailController.ts'),
+        expect.stringContaining('VerifyEmail.tsx'),
+        expect.stringContaining('EmailVerificationStore.ts'),
+        expect.stringContaining('EmailVerificationMail.ts'),
+      ]))
+
+      const schema = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
+      expect(schema).toContain('emailVerifiedAt: timestamp(')
+
+      const authRoutes = await readFile(join(workspace.dir, 'routes/auth.ts'), 'utf8')
+      expect(authRoutes).toContain("import VerifyEmailController from '../app/Http/Controllers/Auth/VerifyEmailController.js'")
+      expect(authRoutes).toContain("router.get('/verify-email'")
+      expect(authRoutes).toContain("router.get('/verify-email/confirm'")
+      expect(authRoutes).toContain('requireVerifiedEmail')
+      expect(authRoutes).toContain("router.get('/dashboard', [DashboardController, 'index'], requireAuthenticated({ redirectTo: '/login' }), requireVerifiedEmail({ redirectTo: '/verify-email' }))")
+
+      const registerController = await readFile(
+        join(workspace.dir, 'app/Http/Controllers/Auth/RegisterController.ts'),
+        'utf8',
+      )
+      expect(registerController).toContain('createEmailVerificationToken(')
+      expect(registerController).toContain('sendEmailVerificationMail(')
+      expect(registerController).toContain("this.redirect('/verify-email')")
+
+      const verifyController = await readFile(
+        join(workspace.dir, 'app/Http/Controllers/Auth/VerifyEmailController.ts'),
+        'utf8',
+      )
+      expect(verifyController).toContain('completeEmailVerification(')
+      expect(verifyController).toContain('emailVerifiedAt: new Date()')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('warns and skips --verify when combined with --minimal', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-verify-minimal-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'db/schema.ts'), `export const posts = 'posts'\n`, 'utf8')
+
+      const created = await makeAuth({ force: true, minimal: true, verify: true })
+
+      expect(created).not.toEqual(expect.arrayContaining([
+        expect.stringContaining('VerifyEmailController.ts'),
+      ]))
+
+      const schema = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
+      expect(schema).not.toContain('emailVerifiedAt')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
 })

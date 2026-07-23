@@ -231,7 +231,11 @@ const makeAuthCommand = defineCommand({
     },
     minimal: {
       type: 'boolean',
-      description: 'Skip registration scaffolding and generate the login-only experience',
+      description: 'Skip registration and password reset scaffolding and generate the login-only experience',
+    },
+    verify: {
+      type: 'boolean',
+      description: 'Also scaffold email verification (requires the default, non-minimal experience)',
     },
   },
   async run({ args }) {
@@ -239,6 +243,7 @@ const makeAuthCommand = defineCommand({
       ...toWriterOptions(args),
       install: Boolean(args.install),
       minimal: Boolean(args.minimal),
+      verify: Boolean(args.verify),
     })
     for (const file of files) {
       consola.success(`Created ${file}`)

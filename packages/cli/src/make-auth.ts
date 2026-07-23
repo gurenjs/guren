@@ -44,9 +44,30 @@ export default class LoginController extends Controller {
 }
 `
 
-const registerControllerTemplate = `import { Controller, ValidationException } from '@guren/core'
+function buildRegisterControllerTemplate(includeVerify: boolean): string {
+  const coreImports = includeVerify
+    ? 'Controller, ValidationException, createEmailVerificationToken, buildVerificationUrl'
+    : 'Controller, ValidationException'
+
+  const verifyImports = includeVerify
+    ? `
+import { emailVerificationStore } from '../../../Auth/EmailVerificationStore.js'
+import { sendEmailVerificationMail } from '../../../Mail/EmailVerificationMail.js'`
+    : ''
+
+  const sendVerification = includeVerify
+    ? `
+    const { token } = await createEmailVerificationToken(user.email, emailVerificationStore)
+    const verifyUrl = buildVerificationUrl(\`\${new URL(this.request.url).origin}/verify-email/confirm\`, token, user.email)
+    await sendEmailVerificationMail(this.make('mail'), user.email, verifyUrl)
+`
+    : ''
+
+  const redirectPath = includeVerify ? '/verify-email' : '/dashboard'
+
+  return `import { ${coreImports} } from '@guren/core'
 import { RegisterSchema } from '../../Validators/RegisterValidator.js'
-import { User } from '../../../Models/User.js'
+import { User } from '../../../Models/User.js'${verifyImports}
 import { pages } from '@/.guren/pages.gen'
 
 export default class RegisterController extends Controller {
@@ -65,14 +86,15 @@ export default class RegisterController extends Controller {
     // AuthenticatableModel hashes the virtual \`password\` field into
     // \`passwordHash\` before persisting — see app/Models/User.ts.
     const user = await User.create({ name, email, password })
-
+${sendVerification}
     this.auth.session()?.regenerate()
     await this.auth.login(user)
 
-    return this.redirect('/dashboard')
+    return this.redirect('${redirectPath}')
   }
 }
 `
+}
 
 const forgotPasswordControllerTemplate = `import { Controller, createPasswordResetToken, buildPasswordResetUrl } from '@guren/core'
 import { ForgotPasswordSchema } from '../../Validators/ForgotPasswordValidator.js'
@@ -145,6 +167,58 @@ export default class ResetPasswordController extends Controller {
     await passwordResetStore.deleteForEmail(email)
 
     return this.redirect('/login')
+  }
+}
+`
+
+const verifyEmailControllerTemplate = `import { Controller, createEmailVerificationToken, completeEmailVerification, buildVerificationUrl } from '@guren/core'
+import { User, type UserRecord } from '../../../Models/User.js'
+import { emailVerificationStore } from '../../../Auth/EmailVerificationStore.js'
+import { sendEmailVerificationMail } from '../../../Mail/EmailVerificationMail.js'
+import { pages } from '@/.guren/pages.gen'
+
+const EXPIRED_MESSAGE = 'This verification link is invalid or has expired. Request a new one below.'
+
+export default class VerifyEmailController extends Controller {
+  async notice(): Promise<Response> {
+    const user = await this.auth.userOrFail<UserRecord>()
+    if (user.emailVerifiedAt) {
+      return this.redirect('/dashboard')
+    }
+
+    return this.inertia(pages.auth.VerifyEmail, {}, { url: this.request.path, title: 'Verify email' })
+  }
+
+  async resend(): Promise<Response> {
+    const user = await this.auth.userOrFail<UserRecord>()
+
+    if (!user.emailVerifiedAt) {
+      const { token } = await createEmailVerificationToken(user.email, emailVerificationStore)
+      const verifyUrl = buildVerificationUrl(\`\${new URL(this.request.url).origin}/verify-email/confirm\`, token, user.email)
+      await sendEmailVerificationMail(this.make('mail'), user.email, verifyUrl)
+    }
+
+    return this.inertia(pages.auth.VerifyEmail, {
+      status: 'A new verification link has been sent to your email address.',
+    }, { url: this.request.path, title: 'Verify email' })
+  }
+
+  async confirm(): Promise<Response> {
+    const token = this.request.query('token') ?? ''
+
+    const verifiedEmail = await completeEmailVerification(token, emailVerificationStore, async (email) => {
+      await User.update({ email }, { emailVerifiedAt: new Date() })
+      return email
+    })
+
+    if (!verifiedEmail) {
+      return this.inertia(pages.auth.VerifyEmail, { status: EXPIRED_MESSAGE }, {
+        url: this.request.path,
+        title: 'Verify email',
+      })
+    }
+
+    return this.redirect('/dashboard')
   }
 }
 `
@@ -319,6 +393,39 @@ Click the link below to choose a new password. This link expires in 1 hour.
 \${resetUrl}
 
 If you didn't request this, you can safely ignore this email.
+    \`)
+    .send()
+}
+`
+
+const emailVerificationStoreTemplate = `import { MemoryEmailVerificationStore } from '@guren/core'
+
+// Swap for a Redis-backed store (see @guren/server/redis) in production
+// or any multi-instance deployment — this in-memory store does not
+// survive restarts and is not shared across processes.
+export const emailVerificationStore = new MemoryEmailVerificationStore()
+`
+
+const emailVerificationMailTemplate = `import { mail, type MailManager } from '@guren/core'
+
+export async function sendEmailVerificationMail(manager: MailManager, email: string, verifyUrl: string): Promise<void> {
+  await mail(manager)
+    .to(email)
+    .subject('Verify your email address')
+    .html(\`
+      <h1>Verify your email address</h1>
+      <p>Click the link below to verify your email address.</p>
+      <p><a href="\${verifyUrl}">\${verifyUrl}</a></p>
+      <p>If you didn't create an account, you can safely ignore this email.</p>
+    \`)
+    .text(\`
+Verify your email address
+
+Click the link below to verify your email address.
+
+\${verifyUrl}
+
+If you didn't create an account, you can safely ignore this email.
     \`)
     .send()
 }
@@ -920,6 +1027,52 @@ export default function ResetPassword({ token, email, errors = {} }: Props) {
 }
 `
 
+const verifyEmailViewTemplate = `import { Head, useForm } from '@inertiajs/react'
+import Layout from '../../components/Layout.js'
+
+interface Props {
+  status?: string
+}
+
+export default function VerifyEmail({ status }: Props) {
+  const form = useForm({})
+
+  return (
+    <Layout>
+      <Head title="Verify email" />
+      <section className="rounded-lg border border-slate-800 bg-slate-900/40 p-8 shadow-xl shadow-emerald-500/5">
+        <h1 className="text-2xl font-semibold text-emerald-300">Verify your email</h1>
+        <p className="mt-2 text-sm text-slate-400">
+          We sent a verification link to your email address. Click it to activate your account.
+        </p>
+
+        {status ? (
+          <p className="mt-4 rounded border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-200">
+            {status}
+          </p>
+        ) : null}
+
+        <form
+          className="mt-6"
+          onSubmit={(event) => {
+            event.preventDefault()
+            form.post('/verify-email')
+          }}
+        >
+          <button
+            type="submit"
+            disabled={form.processing}
+            className="w-full rounded bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:opacity-50"
+          >
+            Resend verification email
+          </button>
+        </form>
+      </section>
+    </Layout>
+  )
+}
+`
+
 const dashboardViewTemplate = `import Layout from '../../components/Layout.js'
 
 interface Props {
@@ -1043,7 +1196,7 @@ export default function ProfileEdit({ profile, status }: Props) {
 }
 `
 
-function buildRoutesTemplate(includeRegister: boolean, includeReset: boolean): string {
+function buildRoutesTemplate(includeRegister: boolean, includeReset: boolean, includeVerify: boolean): string {
   const registerImport = includeRegister
     ? `\nimport RegisterController from '../app/Http/Controllers/Auth/RegisterController.js'`
     : ''
@@ -1066,8 +1219,23 @@ function buildRoutesTemplate(includeRegister: boolean, includeReset: boolean): s
 `
     : ''
 
-  return `import { Router, requireAuthenticated, requireGuest } from '@guren/core'
-import LoginController from '../app/Http/Controllers/Auth/LoginController.js'${registerImport}${resetImport}
+  const verifyImport = includeVerify
+    ? `\nimport VerifyEmailController from '../app/Http/Controllers/Auth/VerifyEmailController.js'`
+    : ''
+  const verifyRoutes = includeVerify
+    ? `
+  router.get('/verify-email', [VerifyEmailController, 'notice'], requireAuthenticated({ redirectTo: '/login' })).name('verify-email')
+  router.post('/verify-email', [VerifyEmailController, 'resend'], requireAuthenticated({ redirectTo: '/login' })).name('verify-email.resend')
+  router.get('/verify-email/confirm', [VerifyEmailController, 'confirm'], requireAuthenticated({ redirectTo: '/login' })).name('verify-email.confirm')
+`
+    : ''
+  const requireVerifiedImport = includeVerify ? ', requireVerifiedEmail' : ''
+  const dashboardMiddleware = includeVerify
+    ? `requireAuthenticated({ redirectTo: '/login' }), requireVerifiedEmail({ redirectTo: '/verify-email' })`
+    : `requireAuthenticated({ redirectTo: '/login' })`
+
+  return `import { Router, requireAuthenticated, requireGuest${requireVerifiedImport} } from '@guren/core'
+import LoginController from '../app/Http/Controllers/Auth/LoginController.js'${registerImport}${resetImport}${verifyImport}
 import DashboardController from '../app/Http/Controllers/DashboardController.js'
 import ProfileController from '../app/Http/Controllers/ProfileController.js'
 
@@ -1075,8 +1243,8 @@ export function registerAuthRoutes(router: Router): void {
   router.get('/login', [LoginController, 'show'], requireGuest({ redirectTo: '/dashboard' })).name('login')
   router.post('/login', [LoginController, 'store'], requireGuest({ redirectTo: '/dashboard' })).name('login.store')
   router.post('/logout', [LoginController, 'destroy'], requireAuthenticated({ redirectTo: '/login' })).name('logout')
-${registerRoutes}${resetRoutes}
-  router.get('/dashboard', [DashboardController, 'index'], requireAuthenticated({ redirectTo: '/login' })).name('dashboard')
+${registerRoutes}${resetRoutes}${verifyRoutes}
+  router.get('/dashboard', [DashboardController, 'index'], ${dashboardMiddleware}).name('dashboard')
   router.get('/profile', [ProfileController, 'edit'], requireAuthenticated({ redirectTo: '/login' })).name('profile.edit')
   router.put('/profile', [ProfileController, 'update'], requireAuthenticated({ redirectTo: '/login' })).name('profile.update')
 }
@@ -1148,7 +1316,59 @@ const usersTableBlocks: Record<SchemaDialect, string> = {
 `,
 }
 
-async function updateSchema(): Promise<void> {
+const usersTableBlocksWithVerification: Record<SchemaDialect, string> = {
+  sqlite: `export const users = sqliteTable('users', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  email: text('email').notNull().unique(),
+  passwordHash: text('password_hash').notNull(),
+  rememberToken: text('remember_token'),
+  emailVerifiedAt: integer('email_verified_at', { mode: 'timestamp' }),
+  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+  updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+})
+`,
+  pg: `export const users = pgTable('users', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  email: text('email').notNull().unique(),
+  passwordHash: text('password_hash').notNull(),
+  rememberToken: text('remember_token'),
+  emailVerifiedAt: timestamp('email_verified_at', { withTimezone: false }),
+  createdAt: timestamp('created_at', { withTimezone: false }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: false }).defaultNow().notNull(),
+})
+`,
+  mysql: `export const users = mysqlTable('users', {
+  id: int('id').primaryKey().autoincrement(),
+  name: varchar('name', { length: 255 }).notNull(),
+  email: varchar('email', { length: 255 }).notNull().unique(),
+  passwordHash: varchar('password_hash', { length: 255 }).notNull(),
+  rememberToken: varchar('remember_token', { length: 255 }),
+  emailVerifiedAt: timestamp('email_verified_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+})
+`,
+}
+
+const emailVerifiedAtField: Record<SchemaDialect, string> = {
+  sqlite: `emailVerifiedAt: integer('email_verified_at', { mode: 'timestamp' }),`,
+  pg: `emailVerifiedAt: timestamp('email_verified_at', { withTimezone: false }),`,
+  mysql: `emailVerifiedAt: timestamp('email_verified_at'),`,
+}
+
+function ensureVerifyImports(content: string, dialect: SchemaDialect): string {
+  if (dialect === 'sqlite') {
+    return ensureSqliteImports(content, ['sqliteTable', 'integer', 'text'])
+  }
+  if (dialect === 'mysql') {
+    return ensureMysqlImports(content, ['mysqlTable', 'int', 'varchar', 'timestamp'])
+  }
+  return ensureDrizzleImports(content, ['pgTable', 'serial', 'text', 'timestamp'])
+}
+
+async function updateSchema(includeVerify: boolean): Promise<void> {
   const schemaPath = resolve(process.cwd(), 'db/schema.ts')
   let content: string
 
@@ -1162,26 +1382,48 @@ async function updateSchema(): Promise<void> {
     throw error
   }
 
-  if (content.includes('passwordHash')) {
+  const hasAuthColumns = content.includes('passwordHash')
+  const hasVerificationColumn = content.includes('emailVerifiedAt')
+
+  if (hasAuthColumns && (!includeVerify || hasVerificationColumn)) {
     return
   }
 
-  // Keep the schema in the dialect the app was scaffolded with
   const dialect = detectSchemaDialect(content)
 
-  if (dialect === 'sqlite') {
-    content = ensureSqliteImports(content, ['sqliteTable', 'integer', 'text'])
-  } else if (dialect === 'mysql') {
-    content = ensureMysqlImports(content, ['mysqlTable', 'int', 'varchar', 'timestamp'])
-  } else {
-    content = ensureDrizzleImports(content, ['pgTable', 'serial', 'text', 'timestamp'])
+  if (hasAuthColumns) {
+    // The users table already has auth columns (from an earlier make:auth
+    // run) and may have been customized since — e.g. extra columns or a
+    // trailing index callback (`pgTable('users', {...}, (table) => [...])`).
+    // Rather than risk mangling a table shape we can't fully parse, insert
+    // just the new column next to the rememberToken column we know we
+    // generated, preserving its indentation.
+    const rememberTokenPattern = /^([ \t]*)rememberToken:[^\n]*\n/m
+    const match = content.match(rememberTokenPattern)
+
+    if (!match) {
+      consola.warn(
+        'Could not locate the rememberToken column in db/schema.ts — add `emailVerifiedAt` to your users table manually for email verification.',
+      )
+      return
+    }
+
+    content = ensureVerifyImports(content, dialect)
+    const indent = match[1]
+    content = content.replace(rememberTokenPattern, (line) => `${line}${indent}${emailVerifiedAtField[dialect]}\n`)
+
+    await writeFile(schemaPath, content, 'utf8')
+    consola.info(`Added emailVerifiedAt column to db/schema.ts (${dialect}).`)
+    return
   }
 
-  // Replace an existing users table that lacks auth columns, or append if absent
-  // Use `})` on its own line as the end anchor to avoid premature matching
-  // inside nested function calls like `$defaultFn(() => ...)`
+  content = ensureVerifyImports(content, dialect)
+
+  // Replace an existing users table that lacks auth columns, or append if
+  // absent. Use `})` on its own line as the end anchor to avoid premature
+  // matching inside nested function calls like `$defaultFn(() => ...)`.
   const usersTablePattern = /export const users = (?:pgTable|sqliteTable|mysqlTable)\('users',\s*\{[\s\S]*?\n\}\)\s*\n?/
-  const usersTableBlock = usersTableBlocks[dialect]
+  const usersTableBlock = includeVerify ? usersTableBlocksWithVerification[dialect] : usersTableBlocks[dialect]
 
   if (usersTablePattern.test(content)) {
     content = content.replace(usersTablePattern, usersTableBlock)
@@ -1217,12 +1459,19 @@ async function updatePageContracts(): Promise<void> {
 
 export interface MakeAuthOptions extends WriterOptions {
   install?: boolean
-  /** Skip registration scaffolding and generate the login-only experience. */
+  /** Skip registration and password reset scaffolding and generate the login-only experience. */
   minimal?: boolean
+  /** Also scaffold email verification. Requires the default (non-minimal) experience. */
+  verify?: boolean
 }
 
 export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]> {
   const includeExtras = !options.minimal
+  const includeVerify = includeExtras && Boolean(options.verify)
+
+  if (options.minimal && options.verify) {
+    consola.warn('--verify requires the default (non-minimal) experience — skipping email verification.')
+  }
 
   const files = [
     { path: 'app/Http/Controllers/Auth/LoginController.ts', contents: loginControllerTemplate },
@@ -1236,13 +1485,13 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
     { path: 'resources/js/pages/auth/Login.tsx', contents: buildLoginViewTemplate(includeExtras, includeExtras) },
     { path: 'resources/js/pages/dashboard/Index.tsx', contents: dashboardViewTemplate },
     { path: 'resources/js/pages/profile/Edit.tsx', contents: profileViewTemplate },
-    { path: 'routes/auth.ts', contents: buildRoutesTemplate(includeExtras, includeExtras) },
+    { path: 'routes/auth.ts', contents: buildRoutesTemplate(includeExtras, includeExtras, includeVerify) },
     { path: 'db/seeders/UsersSeeder.ts', contents: seederTemplate },
   ]
 
   if (includeExtras) {
     files.push(
-      { path: 'app/Http/Controllers/Auth/RegisterController.ts', contents: registerControllerTemplate },
+      { path: 'app/Http/Controllers/Auth/RegisterController.ts', contents: buildRegisterControllerTemplate(includeVerify) },
       { path: 'app/Http/Validators/RegisterValidator.ts', contents: registerValidatorTemplate },
       { path: 'resources/js/pages/auth/Register.tsx', contents: registerViewTemplate },
       { path: 'app/Http/Controllers/Auth/ForgotPasswordController.ts', contents: forgotPasswordControllerTemplate },
@@ -1258,9 +1507,18 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
     )
   }
 
+  if (includeVerify) {
+    files.push(
+      { path: 'app/Http/Controllers/Auth/VerifyEmailController.ts', contents: verifyEmailControllerTemplate },
+      { path: 'resources/js/pages/auth/VerifyEmail.tsx', contents: verifyEmailViewTemplate },
+      { path: 'app/Auth/EmailVerificationStore.ts', contents: emailVerificationStoreTemplate },
+      { path: 'app/Mail/EmailVerificationMail.ts', contents: emailVerificationMailTemplate },
+    )
+  }
+
   const created = await writeFilesSafe(files, options)
 
-  await updateSchema()
+  await updateSchema(includeVerify)
   await updatePageContracts()
   const migrationGenerated = await generateUsersMigration()
 

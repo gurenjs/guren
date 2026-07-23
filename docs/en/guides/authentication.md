@@ -45,6 +45,16 @@ bunx guren make:auth --install --minimal
 
 Clicking "Forgot your password?" on the login page walks through `ForgotPasswordController` and `ResetPasswordController`, which use the framework's `createPasswordResetToken` / `verifyPasswordResetToken` primitives under the hood. The reset token is stored with the generated `app/Auth/PasswordResetStore.ts` (an in-memory store — swap it for a Redis-backed store in production or any multi-instance deployment) and emailed via the generated `config/mail.ts`, which defaults to the `log` driver: reset links print straight to the console, so the flow works with zero setup in development. Set `MAIL_DRIVER=smtp` (and the `SMTP_*` environment variables) once you're ready to send real email.
 
+### Email verification
+
+Pass `--verify` to also scaffold an email verification flow:
+
+```bash
+bunx guren make:auth --install --verify
+```
+
+This adds an `emailVerifiedAt` column to the `users` table, a `VerifyEmailController` (shows a "check your email" notice, resends the verification link, and confirms the token), and a `VerifyEmail` page. Registering now sends a verification email and redirects to `/verify-email` instead of `/dashboard`, and the generated `/dashboard` route is guarded with `requireVerifiedEmail` — unverified users are redirected back to `/verify-email` until they confirm. Verification links use the same in-memory store and `log`-driver mail setup as password reset, so this also works with zero setup in development. `--verify` requires the default (non-minimal) experience, since it builds on the registration flow.
+
 ## OAuth / Social login
 
 Wave 4 adds first-party OAuth primitives plus provider presets for GitHub / Google / Discord.
