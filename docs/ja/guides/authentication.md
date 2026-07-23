@@ -18,9 +18,9 @@ Guren には Laravel 由来の認証スタックが同梱され、セッショ�
 bunx guren make:auth --install
 ```
 
-このコマンドはログイン・登録コントローラー、Inertia ページ、レイアウト、`AuthProvider`、ユーザーモデル、SQL マイグレーション、デモシーダーを生成します。`--install` フラグにより自動的に:
+このコマンドはログイン・登録・パスワードリセットのコントローラー、Inertia ページ、レイアウト、`AuthProvider`、`MailProvider`、ユーザーモデル、SQL マイグレーション、デモシーダーを生成します。`--install` フラグにより自動的に:
 
-1. `Application` の providers 配列に `AuthProvider` を登録
+1. `Application` の providers 配列に `AuthProvider` と `MailProvider` を登録
 2. 開発環境用の設定で `createSessionMiddleware` を追加（本番では `cookieSecure: true`）
 3. `routes/web.ts` で `registerAuthRoutes(router)` を接続
 4. `db/schema.ts` にパスワードや remember トークンのカラムを追加
@@ -35,11 +35,15 @@ bun run dev
 
 `http://localhost:3000/login` にアクセスし、`demo@example.com` / `secret` でログインできます。新規アカウントの作成は `/register` から行えます。
 
-登録機能を省略してログインのみを生成したい場合は `--minimal` を付けます。
+登録・パスワードリセット機能を省略してログインのみを生成したい場合は `--minimal` を付けます。
 
 ```bash
 bunx guren make:auth --install --minimal
 ```
+
+### パスワードリセット
+
+ログインページの「Forgot your password?」から `ForgotPasswordController` と `ResetPasswordController` によるフローに入ります。内部ではフレームワークの `createPasswordResetToken` / `verifyPasswordResetToken` を使用しています。リセットトークンは生成される `app/Auth/PasswordResetStore.ts`（インメモリストア。本番や複数インスタンス構成では Redis ベースのストアに差し替えてください）に保存され、生成される `config/mail.ts` 経由でメール送信されます。`config/mail.ts` はデフォルトで `log` ドライバを使うため、リセットリンクはコンソールにそのまま出力され、開発環境では設定なしで動作確認できます。実際にメールを送るには `MAIL_DRIVER=smtp`（および `SMTP_*` の環境変数）を設定してください。
 
 ## OAuth / ソーシャルログイン
 

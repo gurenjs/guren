@@ -55,7 +55,7 @@ export function registerWebRoutes(router: Router): void {
 
       const created = await makeAuth({ install: true, force: true })
 
-      expect(created).toHaveLength(16)
+      expect(created).toHaveLength(26)
       expect(created).toEqual(expect.arrayContaining([
         expect.stringContaining('LoginController.ts'),
         expect.stringContaining('routes/auth.ts'),
@@ -64,6 +64,16 @@ export function registerWebRoutes(router: Router): void {
         expect.stringContaining('RegisterController.ts'),
         expect.stringContaining('RegisterValidator.ts'),
         expect.stringContaining('Register.tsx'),
+        expect.stringContaining('ForgotPasswordController.ts'),
+        expect.stringContaining('ResetPasswordController.ts'),
+        expect.stringContaining('ForgotPasswordValidator.ts'),
+        expect.stringContaining('ResetPasswordValidator.ts'),
+        expect.stringContaining('ForgotPassword.tsx'),
+        expect.stringContaining('ResetPassword.tsx'),
+        expect.stringContaining('PasswordResetStore.ts'),
+        expect.stringContaining('PasswordResetMail.ts'),
+        expect.stringContaining('MailProvider.ts'),
+        expect.stringContaining('config/mail.ts'),
       ]))
 
       const schema = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
@@ -71,7 +81,8 @@ export function registerWebRoutes(router: Router): void {
 
       const appContent = await readFile(join(workspace.dir, 'src/app.ts'), 'utf8')
       expect(appContent).toContain('AuthProvider')
-      expect(appContent).toContain('providers: [DatabaseProvider, AuthProvider]')
+      expect(appContent).toContain('MailProvider')
+      expect(appContent).toContain('providers: [DatabaseProvider, AuthProvider, MailProvider]')
       expect(appContent).toContain('auth: {}')
 
       const routesContent = await readFile(join(workspace.dir, 'routes/web.ts'), 'utf8')
@@ -82,10 +93,16 @@ export function registerWebRoutes(router: Router): void {
       expect(authRoutes).toContain("import RegisterController from '../app/Http/Controllers/Auth/RegisterController.js'")
       expect(authRoutes).toContain("router.get('/register'")
       expect(authRoutes).toContain("router.post('/register'")
+      expect(authRoutes).toContain("router.get('/forgot-password'")
+      expect(authRoutes).toContain("router.post('/forgot-password'")
+      expect(authRoutes).toContain("router.get('/reset-password'")
+      expect(authRoutes).toContain("router.post('/reset-password'")
 
       const loginPage = await readFile(join(workspace.dir, 'resources/js/pages/auth/Login.tsx'), 'utf8')
       expect(loginPage).toContain('interface Props')
       expect(loginPage).toContain('href="/register"')
+      expect(loginPage).toContain('href="/forgot-password"')
+      expect(loginPage).not.toContain('Contact your administrator.')
 
       const loginController = await readFile(join(workspace.dir, 'app/Http/Controllers/Auth/LoginController.ts'), 'utf8')
       expect(loginController).toContain('validateBody(LoginSchema)')
@@ -110,6 +127,28 @@ export function registerWebRoutes(router: Router): void {
       const registerPage = await readFile(join(workspace.dir, 'resources/js/pages/auth/Register.tsx'), 'utf8')
       expect(registerPage).toContain('interface Props')
       expect(registerPage).toContain("form.post('/register')")
+
+      const forgotController = await readFile(
+        join(workspace.dir, 'app/Http/Controllers/Auth/ForgotPasswordController.ts'),
+        'utf8',
+      )
+      expect(forgotController).toContain('validateBody(ForgotPasswordSchema)')
+      expect(forgotController).toContain('createPasswordResetToken(')
+      expect(forgotController).toContain('sendPasswordResetMail(')
+
+      const resetController = await readFile(
+        join(workspace.dir, 'app/Http/Controllers/Auth/ResetPasswordController.ts'),
+        'utf8',
+      )
+      expect(resetController).toContain('validateBody(ResetPasswordSchema)')
+      expect(resetController).toContain('verifyPasswordResetToken(')
+      expect(resetController).toContain('User.update(')
+
+      const mailConfig = await readFile(join(workspace.dir, 'config/mail.ts'), 'utf8')
+      expect(mailConfig).toContain("process.env.MAIL_DRIVER ?? 'log'")
+
+      const mailProvider = await readFile(join(workspace.dir, 'app/Providers/MailProvider.ts'), 'utf8')
+      expect(mailProvider).toContain("this.container.singleton('mail'")
     } finally {
       await workspace.cleanup()
     }
@@ -128,14 +167,23 @@ export function registerWebRoutes(router: Router): void {
         expect.stringContaining('RegisterController.ts'),
         expect.stringContaining('RegisterValidator.ts'),
         expect.stringContaining('Register.tsx'),
+        expect.stringContaining('ForgotPasswordController.ts'),
+        expect.stringContaining('ResetPasswordController.ts'),
+        expect.stringContaining('PasswordResetStore.ts'),
+        expect.stringContaining('MailProvider.ts'),
+        expect.stringContaining('config/mail.ts'),
       ]))
 
       const authRoutes = await readFile(join(workspace.dir, 'routes/auth.ts'), 'utf8')
       expect(authRoutes).not.toContain('RegisterController')
+      expect(authRoutes).not.toContain('ForgotPasswordController')
       expect(authRoutes).not.toContain("router.get('/register'")
+      expect(authRoutes).not.toContain("router.get('/forgot-password'")
 
       const loginPage = await readFile(join(workspace.dir, 'resources/js/pages/auth/Login.tsx'), 'utf8')
       expect(loginPage).not.toContain('href="/register"')
+      expect(loginPage).not.toContain('href="/forgot-password"')
+      expect(loginPage).toContain('Contact your administrator.')
     } finally {
       await workspace.cleanup()
     }
