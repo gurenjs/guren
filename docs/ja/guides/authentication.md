@@ -18,7 +18,7 @@ Guren には Laravel 由来の認証スタックが同梱され、セッショ�
 bunx guren make:auth --install
 ```
 
-このコマンドはコントローラー、Inertia ページ、レイアウト、`AuthProvider`、ユーザーモデル、SQL マイグレーション、デモシーダーを生成します。`--install` フラグにより自動的に:
+このコマンドはログイン・登録コントローラー、Inertia ページ、レイアウト、`AuthProvider`、ユーザーモデル、SQL マイグレーション、デモシーダーを生成します。`--install` フラグにより自動的に:
 
 1. `Application` の providers 配列に `AuthProvider` を登録
 2. 開発環境用の設定で `createSessionMiddleware` を追加（本番では `cookieSecure: true`）
@@ -33,7 +33,13 @@ bun run db:seed
 bun run dev
 ```
 
-`http://localhost:3000/login` にアクセスし、`demo@example.com` / `secret` でログインできます。
+`http://localhost:3000/login` にアクセスし、`demo@example.com` / `secret` でログインできます。新規アカウントの作成は `/register` から行えます。
+
+登録機能を省略してログインのみを生成したい場合は `--minimal` を付けます。
+
+```bash
+bunx guren make:auth --install --minimal
+```
 
 ## OAuth / ソーシャルログイン
 

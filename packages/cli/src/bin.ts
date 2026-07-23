@@ -229,11 +229,16 @@ const makeAuthCommand = defineCommand({
       description: 'Automatically wire up auth configuration in app.ts and routes',
       alias: 'i',
     },
+    minimal: {
+      type: 'boolean',
+      description: 'Skip registration scaffolding and generate the login-only experience',
+    },
   },
   async run({ args }) {
     const files = await makeAuth({
       ...toWriterOptions(args),
       install: Boolean(args.install),
+      minimal: Boolean(args.minimal),
     })
     for (const file of files) {
       consola.success(`Created ${file}`)
@@ -1645,11 +1650,16 @@ const auditCommand = defineCommand({
       type: 'string',
       description: 'Application root directory.',
     },
+    auditConfig: {
+      type: 'string',
+      description: 'Path to the ignore config (defaults to config/audit.{ts,js,mjs}).',
+    },
   },
   async run({ args }) {
     const report = await runAudit({
       cwd: args.app,
       routesFile: args.routes,
+      auditConfigFile: args.auditConfig,
     })
 
     if (args.json) {
@@ -1780,7 +1790,7 @@ const makeFeatureCommand = defineCommand({
     },
     policy: {
       type: 'boolean',
-      description: 'Also generate an authorization policy and enforce it in store/update.',
+      description: 'Also generate an authorization policy and enforce it in store/update/destroy.',
     },
   },
   async run({ args }) {
@@ -1890,7 +1900,7 @@ const addResourceCommand = defineCommand({
     },
     public: {
       type: 'boolean',
-      description: 'Skip authentication checks in store/update actions',
+      description: 'Skip authentication checks in store/update/destroy actions',
     },
     force: {
       type: 'boolean',
@@ -1916,7 +1926,7 @@ const addResourceCommand = defineCommand({
     consola.info('  • Run `bun run db:migrate` to apply it')
     consola.info('  • Run `bun run codegen` (or `bun run dev`) to refresh generated types')
     if (!args.public) {
-      consola.info('  • store/update require a signed-in user — pass --public to opt out')
+      consola.info('  • store/update/destroy require a signed-in user — pass --public to opt out')
     }
   },
 })

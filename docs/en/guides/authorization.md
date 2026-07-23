@@ -248,7 +248,7 @@ export default class PostController extends Controller {
 }
 ```
 
-> **Tip:** `bunx guren make:feature Post --policy` scaffolds the policy and wires `authorize()` calls into `store`/`update` for you.
+> **Tip:** `bunx guren make:feature Post --policy` scaffolds the policy and wires `authorize()` calls into `store`/`update`/`destroy` for you.
 
 ## Middleware
 
