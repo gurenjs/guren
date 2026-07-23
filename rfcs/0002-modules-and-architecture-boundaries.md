@@ -2,7 +2,12 @@
 
 **Author:** Urata Daiki
 **Date:** 2026-07-23
-**Status:** Draft
+**Status:** Accepted (2026-07-24) — the standard two-week discussion window
+was intentionally shortened by the author, who is also the project's
+deciding maintainer. Both parts of the proposal (`guren check --arch` and
+application modules) were fully implemented, dogfooded end-to-end against
+`examples/blog`, and reviewed (including a Codex pass) before acceptance —
+see #140 and #144.
 
 ## Problem
 
