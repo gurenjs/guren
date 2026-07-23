@@ -70,7 +70,8 @@ describe('makeFeature', () => {
       expect(updateBody).toContain('await this.auth.userOrFail()')
       const destroyBody = controller.slice(controller.indexOf('async destroy'))
       expect(destroyBody).toContain('await this.auth.userOrFail()')
-      expect(destroyBody).toContain('await Post.delete({ id })')
+      expect(destroyBody).toContain('await Post.findOrFail(id)')
+      expect(destroyBody).toContain('await Post.delete({ id: post.id })')
     } finally {
       await workspace.cleanup()
     }
@@ -88,7 +89,7 @@ describe('makeFeature', () => {
       )
       expect(controller).toContain("await this.authorize('create', Post)")
       expect(controller).toContain("await this.authorize('update', [Post, await Post.findOrFail(id)])")
-      expect(controller).toContain("await this.authorize('delete', [Post, await Post.findOrFail(id)])")
+      expect(controller).toContain("await this.authorize('delete', [Post, post])")
 
       const policy = await readFile(
         join(workspace.dir, 'app/Policies/PostPolicy.ts'),
@@ -114,7 +115,8 @@ describe('makeFeature', () => {
       expect(controller).not.toContain('auth.userOrFail')
       expect(controller).toContain('validateBody')
       expect(controller).toContain('async destroy')
-      expect(controller).toContain('await Post.delete({ id })')
+      expect(controller).toContain('await Post.findOrFail(id)')
+      expect(controller).toContain('await Post.delete({ id: post.id })')
     } finally {
       await workspace.cleanup()
     }

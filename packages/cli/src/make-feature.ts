@@ -271,7 +271,7 @@ function generateController(
     ? `    await this.authorize('update', [${singular}, await ${singular}.findOrFail(id)])\n`
     : ''
   const destroyGuard = withPolicy
-    ? `    await this.authorize('delete', [${singular}, await ${singular}.findOrFail(id)])\n`
+    ? `    await this.authorize('delete', [${singular}, ${variableName}])\n`
     : ''
   return `import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
 import { pages } from '@/.guren/pages.gen'
@@ -333,7 +333,8 @@ ${updateGuard}    const data = await this.validateBody(${singular}PayloadSchema)
 
   async destroy(): Promise<Response> {
 ${authGuard}    const { id } = this.validateParams(${singular}IdParamSchema)
-${destroyGuard}    await ${singular}.delete({ id })
+    const ${variableName} = await ${singular}.findOrFail(id)
+${destroyGuard}    await ${singular}.delete({ id: ${variableName}.id })
     return this.redirect('/${routeName}')
   }
 }
