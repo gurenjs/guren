@@ -248,7 +248,7 @@ export default class PostController extends Controller {
 }
 ```
 
-> **Tip:** `bunx guren make:feature Post --policy` を使うと、ポリシーの生成と `store`/`update` への `authorize()` 呼び出しの組み込みまで自動で行われます。
+> **Tip:** `bunx guren make:feature Post --policy` を使うと、ポリシーの生成と `store`/`update`/`destroy` への `authorize()` 呼び出しの組み込みまで自動で行われます。
 
 ## ミドルウェア
 

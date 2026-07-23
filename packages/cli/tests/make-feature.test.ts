@@ -64,15 +64,21 @@ describe('makeFeature', () => {
         'utf8',
       )
 
-      const storeBody = controller.slice(controller.indexOf('async store'))
+      const storeBody = controller.slice(controller.indexOf('async store'), controller.indexOf('async update'))
       expect(storeBody).toContain('await this.auth.userOrFail()')
-      const updateBody = controller.slice(controller.indexOf('async update'))
+      const updateBody = controller.slice(controller.indexOf('async update'), controller.indexOf('async destroy'))
       expect(updateBody).toContain('await this.auth.userOrFail()')
 
       // Without --module, redirects stay unprefixed — matches the top-level
       // router.group('/posts', ...) the printed next-steps ask for.
       expect(controller).toContain("this.redirect('/posts/' + post?.id)")
       expect(controller).toContain("this.redirect('/posts/' + id)")
+
+      const destroyBody = controller.slice(controller.indexOf('async destroy'))
+      expect(destroyBody).toContain('await this.auth.userOrFail()')
+      expect(destroyBody).toContain('await Post.findOrFail(id)')
+      expect(destroyBody).toContain('await Post.delete({ id: post.id })')
+      expect(destroyBody).toContain("this.redirect('/posts')")
     } finally {
       await workspace.cleanup()
     }
@@ -90,6 +96,7 @@ describe('makeFeature', () => {
       )
       expect(controller).toContain("await this.authorize('create', Post)")
       expect(controller).toContain("await this.authorize('update', [Post, await Post.findOrFail(id)])")
+      expect(controller).toContain("await this.authorize('delete', [Post, post])")
 
       const policy = await readFile(
         join(workspace.dir, 'app/Policies/PostPolicy.ts'),
@@ -114,6 +121,28 @@ describe('makeFeature', () => {
 
       expect(controller).not.toContain('auth.userOrFail')
       expect(controller).toContain('validateBody')
+      expect(controller).toContain('async destroy')
+      expect(controller).toContain('await Post.findOrFail(id)')
+      expect(controller).toContain('await Post.delete({ id: post.id })')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('generates a delete button on the Show page', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-show-delete-')
+
+    try {
+      await makeFeature('Post', { fields: 'title:string' })
+
+      const showPage = await readFile(
+        join(workspace.dir, 'resources/js/pages/posts/Show.tsx'),
+        'utf8',
+      )
+
+      expect(showPage).toContain("href={route('posts.destroy', { id: post.id })}")
+      expect(showPage).toContain('method="delete"')
+      expect(showPage).toContain("onBefore={() => window.confirm('Delete this post?')}")
     } finally {
       await workspace.cleanup()
     }
@@ -158,6 +187,7 @@ describe('makeFeature', () => {
       // it must match make:module's default prefix.
       expect(controllerContent).toContain("this.redirect('/billing/invoices/' + invoice?.id)")
       expect(controllerContent).toContain("this.redirect('/billing/invoices/' + id)")
+      expect(controllerContent).toContain("this.redirect('/billing/invoices')")
     } finally {
       await workspace.cleanup()
     }

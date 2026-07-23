@@ -56,7 +56,7 @@ bunx guren plugin @acme/guren-plugin-audit
 | `make:controller <Name>` | `app/Http/Controllers` にコントローラーを生成 | `bunx guren make:controller PostController` |
 | `make:model <Name>` | 最小のモデルクラスと型定義を `app/Models` に生成（`db/schema` から `camelCase(Name)s` を import） | `bunx guren make:model Post` |
 | `make:view <path>` | `resources/js/pages` に React コンポーネントを生成 | `bunx guren make:view posts/Index` |
-| `make:auth` | ログイン/ログアウトのコントローラー、プロバイダー、ビュー、マイグレーション、シーダー、ルートをスキャフォールド | `bunx guren make:auth` |
+| `make:auth` | ログイン/ログアウトと新規登録のコントローラー、プロバイダー、ビュー、マイグレーション、シーダー、ルートをスキャフォールド（`--minimal` で登録機能を省略） | `bunx guren make:auth` |
 | `make:middleware <Name>` | `app/Http/Middleware` にミドルウェアを生成 | `bunx guren make:middleware Auth` |
 | `make:seeder <Name>` | データベースシーダーファイルを生成 | `bunx guren make:seeder UserSeeder` |
 | `make:job <Name>` | キュー可能なジョブクラスを生成 | `bunx guren make:job SendEmail` |
@@ -93,6 +93,21 @@ bunx guren audit
 // guren-audit-ignore -- ドキュメント用のサンプル値
 const apiKey = 'example-not-a-real-key'
 ```
+
+ルートレベル・モデルレベルの findings(`authz:*`、`validation:*`、`mass-assignment:*`、`hidden-columns:*`)には、コメントを付けられる特定の行が存在しません。これらはルートレジストラを実行し、モデルを検査することで生成されるためです。代わりに `config/audit.ts` で finding の `key`(`--json` の出力からそのままコピーできます)と必須の `reason` を指定して無視します:
+
+```ts
+// config/audit.ts
+export default {
+  ignore: [
+    { key: 'authz:POST /webhooks/stripe', reason: 'コントローラでHMAC署名を検証済み' },
+  ],
+}
+```
+
+無視された finding はレポートから削除されず、`status: "ignored"` と `ignoreReason` を伴って残ります — 何も黙って握りつぶされません。`key` や `reason` が欠落しているエントリ、どの finding にもマッチしなかったエントリは、それ自体が警告として報告されるため、形骸化したルールに気づかないまま放置されることはありません。
+
+`config/audit.ts` が受け付けるのは、ソース行を持たない finding(上記のルート/モデルレベルのもの)のみです。行に紐づく finding(ハードコードされた認証情報、生SQL、無効化されたセキュリティ既定値)には既に `// guren-audit-ignore` という手段があるため、それらを対象にしたエントリは適用されず、インラインコメントを使うよう促す警告になります — 目立たない第二の抑制手段になってしまうことを避けるためです。
 
 ### アーキテクチャ境界
 

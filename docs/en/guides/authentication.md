@@ -18,7 +18,7 @@ For new applications, run the bundled scaffolder with automatic installation (th
 bunx guren make:auth --install
 ```
 
-This command generates controllers, Inertia pages, a layout, `AuthProvider`, user model, SQL migration, and a demo seeder. The `--install` flag automatically:
+This command generates login and registration controllers, Inertia pages, a layout, `AuthProvider`, user model, SQL migration, and a demo seeder. The `--install` flag automatically:
 
 1. Registers `AuthProvider` in your `Application` providers array
 2. Adds `createSessionMiddleware` with development-friendly defaults (uses `cookieSecure: true` in production)
@@ -33,7 +33,13 @@ bun run db:seed
 bun run dev
 ```
 
-Visit `http://localhost:3000/login` and sign in with `demo@example.com` / `secret`.
+Visit `http://localhost:3000/login` and sign in with `demo@example.com` / `secret`, or visit `/register` to create a new account.
+
+Pass `--minimal` to skip the registration scaffold and generate the login-only experience instead:
+
+```bash
+bunx guren make:auth --install --minimal
+```
 
 ## OAuth / Social login
 

@@ -58,7 +58,7 @@ These commands patch `src/app.ts`, create the matching provider/runtime files, a
 | `make:controller <Name>` | Generates a controller in `app/Http/Controllers` | `bunx guren make:controller PostController` |
 | `make:model <Name>` | Generates a minimal model class and type definition in `app/Models` (imports `camelCase(Name)s` from `db/schema`) | `bunx guren make:model Post` |
 | `make:view <path>` | Generates a React component in `resources/js/pages` | `bunx guren make:view posts/Index` |
-| `make:auth` | Scaffolds login/logout controllers, provider, views, migration, seeder, and routes | `bunx guren make:auth` |
+| `make:auth` | Scaffolds login/logout and registration controllers, provider, views, migration, seeder, and routes (`--minimal` skips registration) | `bunx guren make:auth` |
 | `make:middleware <Name>` | Generates a middleware file in `app/Http/Middleware` | `bunx guren make:middleware Auth` |
 | `make:policy <Name>` | Generates an authorization policy in `app/Policies` with owner-based defaults | `bunx guren make:policy Post` |
 | `make:seeder <Name>` | Generates a database seeder file | `bunx guren make:seeder UserSeeder` |
@@ -95,6 +95,21 @@ Suppress a false positive by placing `// guren-audit-ignore` on the flagged line
 // guren-audit-ignore -- documented example value
 const apiKey = 'example-not-a-real-key'
 ```
+
+Route- and model-level findings (`authz:*`, `validation:*`, `mass-assignment:*`, `hidden-columns:*`) have no single line to attach a comment to — they come from executing your route registrar and inspecting your models. Ignore those with `config/audit.ts` instead, keyed by the finding's `key` (copy it straight from `--json` output) and a required `reason`:
+
+```ts
+// config/audit.ts
+export default {
+  ignore: [
+    { key: 'authz:POST /webhooks/stripe', reason: 'HMAC signature verified in the controller' },
+  ],
+}
+```
+
+Ignored findings stay in the report with `status: "ignored"` and an `ignoreReason` — nothing is silently dropped. An entry with a missing `key`/`reason`, or one that never matches a finding, produces its own warning so stale rules don't rot unnoticed.
+
+`config/audit.ts` only accepts findings that have no source line — the route- and model-level ones above. Line-scoped findings (hardcoded secrets, raw SQL, disabled security toggles) already have `// guren-audit-ignore` for that; an entry targeting one is rejected with a warning pointing you back to the inline comment, rather than becoming a second, less visible way to silence them.
 
 ### Architecture boundaries
 
