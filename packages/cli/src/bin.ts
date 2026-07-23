@@ -1761,7 +1761,7 @@ const makeFeatureCommand = defineCommand({
     },
     policy: {
       type: 'boolean',
-      description: 'Also generate an authorization policy and enforce it in store/update.',
+      description: 'Also generate an authorization policy and enforce it in store/update/destroy.',
     },
   },
   async run({ args }) {
@@ -1871,7 +1871,7 @@ const addResourceCommand = defineCommand({
     },
     public: {
       type: 'boolean',
-      description: 'Skip authentication checks in store/update actions',
+      description: 'Skip authentication checks in store/update/destroy actions',
     },
     force: {
       type: 'boolean',
@@ -1897,7 +1897,7 @@ const addResourceCommand = defineCommand({
     consola.info('  • Run `bun run db:migrate` to apply it')
     consola.info('  • Run `bun run codegen` (or `bun run dev`) to refresh generated types')
     if (!args.public) {
-      consola.info('  • store/update require a signed-in user — pass --public to opt out')
+      consola.info('  • store/update/destroy require a signed-in user — pass --public to opt out')
     }
   },
 })
