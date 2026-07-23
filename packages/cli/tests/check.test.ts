@@ -285,4 +285,76 @@ export default class PostController extends Controller {
       await workspace.cleanup()
     }
   })
+
+  it('passes the module schema-aggregation check when db/schema.ts re-exports the module', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-schema-agg-pass-')
+
+    try {
+      await mkdir(join(workspace.dir, 'modules/billing/db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'modules/billing/db/schema.ts'), `export const invoices = {}`, 'utf8')
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'db/schema.ts'), `export * from '../modules/billing/db/schema'`, 'utf8')
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      const aggCheck = report.checks.find(c => c.key === 'module-schema-aggregation:billing')
+      expect(aggCheck).toBeDefined()
+      expect(aggCheck!.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('warns when a module schema exists but is not re-exported from db/schema.ts', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-schema-agg-missing-')
+
+    try {
+      await mkdir(join(workspace.dir, 'modules/billing/db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'modules/billing/db/schema.ts'), `export const invoices = {}`, 'utf8')
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'db/schema.ts'), `export const users = {}`, 'utf8')
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      const aggCheck = report.checks.find(c => c.key === 'module-schema-aggregation:billing')
+      expect(aggCheck).toBeDefined()
+      expect(aggCheck!.status).toBe('warn')
+      expect(aggCheck!.suggestion).toContain("export * from '../modules/billing/db/schema'")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('warns when a module has a schema but the project has no root db/schema.ts', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-schema-agg-no-root-')
+
+    try {
+      await mkdir(join(workspace.dir, 'modules/billing/db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'modules/billing/db/schema.ts'), `export const invoices = {}`, 'utf8')
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      const aggCheck = report.checks.find(c => c.key === 'module-schema-aggregation:billing')
+      expect(aggCheck).toBeDefined()
+      expect(aggCheck!.status).toBe('warn')
+      expect(aggCheck!.message).toContain('no root db/schema.ts')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('skips a module with no db/schema.ts entirely (nothing to aggregate)', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-schema-agg-no-module-schema-')
+
+    try {
+      await mkdir(join(workspace.dir, 'modules/billing'), { recursive: true })
+      await writeFile(join(workspace.dir, 'modules/billing/index.ts'), `export const billingModule = {}`, 'utf8')
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      expect(report.checks.some(c => c.key.startsWith('module-schema-aggregation:'))).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
 })

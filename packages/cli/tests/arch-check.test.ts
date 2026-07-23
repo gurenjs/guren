@@ -303,3 +303,169 @@ export default {
     }
   })
 })
+
+describe('runArchCheck derived module rules (RFC 0002, zero-config)', () => {
+  it('flags one module reaching into another module\'s internals', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-module-internals-')
+    try {
+      await mkdir(join(workspace.dir, 'modules/billing/app/Models'), { recursive: true })
+      await writeFile(join(workspace.dir, 'modules/billing/app/Models/Invoice.ts'), 'export class Invoice {}', 'utf8')
+      await mkdir(join(workspace.dir, 'modules/inventory'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'modules/inventory/index.ts'),
+        `import { Invoice } from '../billing/app/Models/Invoice'\nexport const inventoryModule = {}`,
+        'utf8',
+      )
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+
+      const violation = results.find((r) => r.filePath === 'modules/inventory/index.ts')
+      expect(violation).toBeDefined()
+      expect(violation!.status).toBe('fail')
+      expect(violation!.message).toContain("modules/billing's internals")
+      expect(violation!.suggestion).toContain('modules/billing (its index.ts)')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('flags top-level app code reaching into a module\'s internals', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-toplevel-internals-')
+    try {
+      await mkdir(join(workspace.dir, 'modules/billing/app/Models'), { recursive: true })
+      await writeFile(join(workspace.dir, 'modules/billing/app/Models/Invoice.ts'), 'export class Invoice {}', 'utf8')
+      await mkdir(join(workspace.dir, 'app/Http/Controllers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Http/Controllers/ReportController.ts'),
+        `import { Invoice } from '../../../modules/billing/app/Models/Invoice'\nexport class ReportController {}`,
+        'utf8',
+      )
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+
+      const violation = results.find((r) => r.filePath === 'app/Http/Controllers/ReportController.ts')
+      expect(violation).toBeDefined()
+      expect(violation!.status).toBe('fail')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('allows importing a module\'s index.ts', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-index-ok-')
+    try {
+      await mkdir(join(workspace.dir, 'modules/billing'), { recursive: true })
+      await writeFile(join(workspace.dir, 'modules/billing/index.ts'), 'export const billingModule = {}', 'utf8')
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'src/app.ts'),
+        `import { billingModule } from '../modules/billing'\nexport const app = { modules: [billingModule] }`,
+        'utf8',
+      )
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+
+      expect(results.some((r) => r.status === 'fail')).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('allows importing a module\'s db/schema.ts (the make:module re-export pattern)', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-schema-ok-')
+    try {
+      await mkdir(join(workspace.dir, 'modules/billing/db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'modules/billing/db/schema.ts'), 'export const invoices = {}', 'utf8')
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'db/schema.ts'), `export * from '../modules/billing/db/schema'`, 'utf8')
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+
+      expect(results.some((r) => r.status === 'fail')).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('allows a file inside a module importing another file in the same module', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-same-module-ok-')
+    try {
+      await mkdir(join(workspace.dir, 'modules/billing/app/Http/Controllers'), { recursive: true })
+      await mkdir(join(workspace.dir, 'modules/billing/app/Models'), { recursive: true })
+      await writeFile(join(workspace.dir, 'modules/billing/app/Models/Invoice.ts'), 'export class Invoice {}', 'utf8')
+      await writeFile(
+        join(workspace.dir, 'modules/billing/app/Http/Controllers/InvoiceController.ts'),
+        `import { Invoice } from '../../Models/Invoice'\nexport class InvoiceController {}`,
+        'utf8',
+      )
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+
+      expect(results.some((r) => r.status === 'fail')).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('returns no results when modules/ is absent', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-no-modules-dir-')
+    try {
+      await mkdir(join(workspace.dir, 'app/Models'), { recursive: true })
+      await writeFile(join(workspace.dir, 'app/Models/Post.ts'), 'export class Post {}', 'utf8')
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+      expect(results).toEqual([])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('passes with a summary when modules/ exists and has no violations', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-module-pass-')
+    try {
+      await mkdir(join(workspace.dir, 'modules/billing'), { recursive: true })
+      await writeFile(join(workspace.dir, 'modules/billing/index.ts'), 'export const billingModule = {}', 'utf8')
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+
+      expect(results).toHaveLength(1)
+      expect(results[0]!.key).toBe('arch:module-summary')
+      expect(results[0]!.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('composes derived module rules with an explicit guren.arch.ts', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-compose-')
+    try {
+      // Explicit config targets app/Domain vs app/Http (unrelated to modules).
+      await writeFile(join(workspace.dir, 'guren.arch.ts'), ARCH_CONFIG, 'utf8')
+      await mkdir(join(workspace.dir, 'app/Domain'), { recursive: true })
+      await mkdir(join(workspace.dir, 'app/Http/Controllers'), { recursive: true })
+      await writeFile(join(workspace.dir, 'app/Http/Controllers/PostController.ts'), 'export class PostController {}', 'utf8')
+      await writeFile(
+        join(workspace.dir, 'app/Domain/OrderService.ts'),
+        `import { PostController } from '../Http/Controllers/PostController'\nexport class OrderService {}`,
+        'utf8',
+      )
+
+      // Separately, a module boundary violation.
+      await mkdir(join(workspace.dir, 'modules/billing/app/Models'), { recursive: true })
+      await writeFile(join(workspace.dir, 'modules/billing/app/Models/Invoice.ts'), 'export class Invoice {}', 'utf8')
+      await mkdir(join(workspace.dir, 'modules/inventory'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'modules/inventory/index.ts'),
+        `import { Invoice } from '../billing/app/Models/Invoice'\nexport const inventoryModule = {}`,
+        'utf8',
+      )
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+
+      expect(results.some((r) => r.filePath === 'app/Domain/OrderService.ts' && r.status === 'fail')).toBe(true)
+      expect(results.some((r) => r.filePath === 'modules/inventory/index.ts' && r.status === 'fail')).toBe(true)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})

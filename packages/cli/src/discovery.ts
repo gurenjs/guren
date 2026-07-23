@@ -91,13 +91,11 @@ export async function directoryExists(dirPath: string): Promise<boolean> {
 }
 
 /**
- * Directories directly under `modules/` (RFC 0002) — each is expected to
- * mirror the top-level app layout, so `modules/<name>/<subDir>` is scanned
- * alongside `<appRoot>/<subDir>` for every `discover*Files` function below.
- * Missing/absent `modules/` (the common case for apps that haven't adopted
- * modules) resolves to an empty list, not an error.
+ * Directory names directly under `modules/` (RFC 0002) — e.g. `['billing',
+ * 'inventory']`. Missing/absent `modules/` (the common case for apps that
+ * haven't adopted modules) resolves to an empty list, not an error.
  */
-async function listModuleDirs(appRoot: string): Promise<string[]> {
+export async function listModuleNames(appRoot: string): Promise<string[]> {
   let entries
   try {
     entries = await readdir(resolve(appRoot, 'modules'), { withFileTypes: true })
@@ -107,7 +105,18 @@ async function listModuleDirs(appRoot: string): Promise<string[]> {
 
   return entries
     .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
-    .map((entry) => resolve(appRoot, 'modules', entry.name))
+    .map((entry) => entry.name)
+}
+
+/**
+ * Absolute paths of directories directly under `modules/` — each is
+ * expected to mirror the top-level app layout, so `modules/<name>/<subDir>`
+ * is scanned alongside `<appRoot>/<subDir>` for every `discover*Files`
+ * function below.
+ */
+async function listModuleDirs(appRoot: string): Promise<string[]> {
+  const names = await listModuleNames(appRoot)
+  return names.map((name) => resolve(appRoot, 'modules', name))
 }
 
 /**

@@ -7,6 +7,7 @@ import {
   fileExists,
   classNameFromPath,
   toPosixRelative,
+  listModuleNames,
 } from './discovery'
 import { ParseCache } from './parse-cache'
 import { runArchCheck } from './arch-check'
@@ -42,6 +43,55 @@ export interface RunCheckOptions {
 function moduleNameFor(cwd: string, filePath: string): string | null {
   const match = /^modules\/([^/]+)\//.exec(toPosixRelative(cwd, filePath))
   return match ? match[1] : null
+}
+
+/**
+ * Verifies every `modules/<name>/db/schema.ts` is re-exported from the
+ * project's root `db/schema.ts` — the wiring `make:module` performs
+ * automatically (RFC 0002). A module without a `db/schema.ts` is skipped
+ * (nothing to aggregate); a project without a root `db/schema.ts` warns
+ * rather than failing, since not every app uses a database.
+ */
+async function checkModuleSchemaAggregation(cwd: string): Promise<CheckResult[]> {
+  const results: CheckResult[] = []
+  const moduleNames = await listModuleNames(cwd)
+
+  for (const moduleName of moduleNames) {
+    const moduleSchemaPath = `modules/${moduleName}/db/schema.ts`
+    if (!(await fileExists(cwd, moduleSchemaPath))) continue
+
+    const rootSchemaPath = 'db/schema.ts'
+    if (!(await fileExists(cwd, rootSchemaPath))) {
+      results.push(
+        check(
+          `module-schema-aggregation:${moduleName}`,
+          `${moduleName} schema aggregation`,
+          'warn',
+          `${moduleSchemaPath} exists but there is no root ${rootSchemaPath} to re-export it from.`,
+          `Create ${rootSchemaPath} and add: export * from '../modules/${moduleName}/db/schema'`,
+        ),
+      )
+      continue
+    }
+
+    const rootSchemaContent = await readFile(resolve(cwd, rootSchemaPath), 'utf-8')
+    // Substring match, tolerant of quote style and a trailing .js/.ts extension.
+    const isReExported = rootSchemaContent.includes(`modules/${moduleName}/db/schema`)
+
+    results.push(
+      check(
+        `module-schema-aggregation:${moduleName}`,
+        `${moduleName} schema aggregation`,
+        isReExported ? 'pass' : 'warn',
+        isReExported
+          ? `${rootSchemaPath} re-exports ${moduleSchemaPath}.`
+          : `${rootSchemaPath} does not re-export ${moduleSchemaPath}.`,
+        isReExported ? undefined : `Add to ${rootSchemaPath}: export * from '../modules/${moduleName}/db/schema'`,
+      ),
+    )
+  }
+
+  return results
 }
 
 export async function runCheck(options: RunCheckOptions = {}): Promise<CheckReport> {
@@ -147,6 +197,12 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   // 6. Check architecture boundaries (guren.arch.ts + derived module rules)
   const archResults = await runArchCheck({ cwd, cache, changedFiles })
   checks.push(...archResults)
+
+  // 7. Check every module's db/schema.ts is re-exported from the root
+  // db/schema.ts (the wiring make:module performs automatically — this
+  // catches modules created or edited by hand).
+  const schemaAggregationResults = await checkModuleSchemaAggregation(cwd)
+  checks.push(...schemaAggregationResults)
 
   const report: CheckReport = {
     cwd,
