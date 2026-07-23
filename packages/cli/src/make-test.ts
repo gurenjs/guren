@@ -1,4 +1,4 @@
-import { resourceName, writeFileSafe, ensureSuffix, kebabCase } from './utils'
+import { resourceName, writeFileSafe, ensureSuffix, safeModuleName } from './utils'
 import type { WriterOptions } from './utils'
 import { fileExists, readIfExists } from './discovery'
 
@@ -89,7 +89,7 @@ export async function makeTest(name: string, options: MakeTestOptions = {}): Pro
   const { className: baseClassName } = resourceName(baseName)
   const className = options.controller ? ensureSuffix(baseClassName, 'Controller') : baseClassName
   const fileName = `${className}.test.ts`
-  const testRoot = options.root ? `modules/${kebabCase(options.root)}/${TEST_ROOT}` : TEST_ROOT
+  const testRoot = options.root ? `modules/${safeModuleName(options.root)}/${TEST_ROOT}` : TEST_ROOT
   const filePath = options.controller
     ? `${testRoot}/controllers/${fileName}`
     : `${testRoot}/${[...segments, fileName].join('/')}`

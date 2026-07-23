@@ -44,6 +44,19 @@ describe('makeModule', () => {
     }
   })
 
+  it('rejects a module name that would escape modules/ (path traversal)', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-module-traversal-')
+    try {
+      await expect(makeModule('../../outside')).rejects.toThrow(/Invalid module name/)
+
+      // Nothing should have been written outside the workspace.
+      const escaped = await readFile(join(workspace.dir, '../../outside/index.ts'), 'utf8').catch(() => null)
+      expect(escaped).toBeNull()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('patches an existing db/schema.ts with a re-export', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-module-schema-patch-')
     try {

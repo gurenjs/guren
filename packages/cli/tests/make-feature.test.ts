@@ -68,6 +68,11 @@ describe('makeFeature', () => {
       expect(storeBody).toContain('await this.auth.userOrFail()')
       const updateBody = controller.slice(controller.indexOf('async update'))
       expect(updateBody).toContain('await this.auth.userOrFail()')
+
+      // Without --module, redirects stay unprefixed — matches the top-level
+      // router.group('/posts', ...) the printed next-steps ask for.
+      expect(controller).toContain("this.redirect('/posts/' + post?.id)")
+      expect(controller).toContain("this.redirect('/posts/' + id)")
     } finally {
       await workspace.cleanup()
     }
@@ -146,6 +151,13 @@ describe('makeFeature', () => {
       expect(controllerContent).toContain('pages.billing.invoices.New')
       expect(controllerContent).toContain('pages.billing.invoices.Edit')
       expect(controllerContent).not.toMatch(/this\.inertia\(pages\.invoices\./)
+
+      // store()/update() redirect to the resource's own show page. Once
+      // --module moves this route under the module's prefix (make:module's
+      // own default is `/<name>`), a bare '/invoices/' + id redirect 404s —
+      // it must match make:module's default prefix.
+      expect(controllerContent).toContain("this.redirect('/billing/invoices/' + invoice?.id)")
+      expect(controllerContent).toContain("this.redirect('/billing/invoices/' + id)")
     } finally {
       await workspace.cleanup()
     }

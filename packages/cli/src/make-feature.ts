@@ -1,5 +1,5 @@
 import { consola } from 'consola'
-import { writeFilesSafe, type WriterOptions, pascalCase, kebabCase, pagesAccessor } from './utils'
+import { writeFilesSafe, type WriterOptions, pascalCase, kebabCase, pagesAccessor, safeModuleName } from './utils'
 import { makeModel } from './make-model'
 import { makePolicy } from './make-policy'
 import { makeTest } from './make-test'
@@ -64,7 +64,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   // NOT colocated per RFC 0002's initial scope — they stay under the
   // top-level resources/js/pages/, namespaced by the module name instead
   // (resources/js/pages/<module>/<routeName>/...).
-  const moduleName = options.root ? kebabCase(options.root) : undefined
+  const moduleName = options.root ? safeModuleName(options.root) : undefined
   const appPrefix = moduleName ? `modules/${moduleName}/` : ''
   const pagePrefix = moduleName ? `${moduleName}/` : ''
 
@@ -128,12 +128,16 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   }
 
   const authSuffix = withAuth ? `.middleware('auth')` : ''
+  const schemaPath = moduleName ? `modules/${moduleName}/db/schema.ts` : 'db/schema.ts'
+  const routesPath = moduleName ? `modules/${moduleName}/routes.ts` : 'routes/web.ts'
+  const controllerImportPath = moduleName ? './app/Http/Controllers' : '../app/Http/Controllers'
+  const validatorImportPath = moduleName ? './app/Http/Validators' : '../app/Http/Validators'
   consola.info('')
   consola.info('Next steps:')
-  consola.info(`  1. Add table definition to db/schema.ts`)
-  consola.info(`  2. Register routes in routes/web.ts with body schemas:`)
-  consola.info(`     import ${singular}Controller from '../app/Http/Controllers/${singular}Controller.js'`)
-  consola.info(`     import { ${singular}PayloadSchema } from '../app/Http/Validators/${singular}Validator.js'`)
+  consola.info(`  1. Add table definition to ${schemaPath}`)
+  consola.info(`  2. Register routes in ${routesPath} with body schemas:`)
+  consola.info(`     import ${singular}Controller from '${controllerImportPath}/${singular}Controller.js'`)
+  consola.info(`     import { ${singular}PayloadSchema } from '${validatorImportPath}/${singular}Validator.js'`)
   if (withAuth) {
     consola.info(`     router.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))`)
   }
@@ -150,14 +154,20 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   if (withPolicy) {
     consola.info(`  5. Register the policy in src/app.ts (inside the boot callback):`)
     consola.info(`     import { getGate } from '@guren/core'`)
-    consola.info(`     import { ${singular} } from '../app/Models/${singular}.js'`)
-    consola.info(`     import { ${singular}Policy } from '../app/Policies/${singular}Policy.js'`)
+    consola.info(`     import { ${singular} } from '${moduleName ? '../modules/' + moduleName : '../app'}/Models/${singular}.js'`)
+    consola.info(`     import { ${singular}Policy } from '${moduleName ? '../modules/' + moduleName : '../app'}/Policies/${singular}Policy.js'`)
     consola.info(`     getGate().policy(${singular}, ${singular}Policy)`)
   }
   if (withAuth) {
     consola.info('')
     consola.info(`  Note: store/update call this.auth.userOrFail() — unauthenticated requests get 401.`)
     consola.info(`  Use --public to scaffold without authentication checks.`)
+  }
+  if (moduleName) {
+    consola.info('')
+    consola.info(`  Note: the generated redirects assume this module keeps its default`)
+    consola.info(`  \`prefix: '/${moduleName}'\` from \`make:module\` — update ${singular}Controller.ts`)
+    consola.info(`  if you changed modules/${moduleName}/index.ts's prefix.`)
   }
 
   return created
@@ -280,6 +290,12 @@ function generateController(
     ? `    await this.authorize('update', [${singular}, await ${singular}.findOrFail(id)])\n`
     : ''
   const pagesBase = pagesAccessor(moduleName, routeVar)
+  // Redirect targets are plain path strings, not resolved through the typed
+  // route() helper, so — unlike pagesBase above — this can't be verified
+  // against the actual mounted path. Assumes `make:module`'s own default
+  // `prefix: '/<name>'` convention; update these if the module's prefix
+  // was changed after scaffolding.
+  const redirectPrefix = moduleName ? `/${moduleName}` : ''
   return `import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
 import { pages } from '@/.guren/pages.gen'
 import { ${singular} } from '../../Models/${singular}.js'
@@ -319,7 +335,7 @@ export default class ${singular}Controller extends Controller {
   async store(): Promise<Response> {
 ${authGuard}${createGuard}    const data = await this.validateBody(${singular}PayloadSchema)
     const ${variableName} = await ${singular}.create(data)
-    return this.redirect('/${routeName}/' + ${variableName}?.id)
+    return this.redirect('${redirectPrefix}/${routeName}/' + ${variableName}?.id)
   }
 
   async edit(): Promise<Response> {
@@ -335,7 +351,7 @@ ${authGuard}${createGuard}    const data = await this.validateBody(${singular}Pa
 ${authGuard}    const { id } = this.validateParams(${singular}IdParamSchema)
 ${updateGuard}    const data = await this.validateBody(${singular}PayloadSchema)
     await ${singular}.update({ id }, data)
-    return this.redirect('/${routeName}/' + id)
+    return this.redirect('${redirectPrefix}/${routeName}/' + id)
   }
 }
 `

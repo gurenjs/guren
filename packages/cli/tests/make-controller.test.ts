@@ -130,4 +130,8 @@ describe('makeController', () => {
 
     expect(result).toContain('modules/billing/app/Http/Controllers/InvoiceController.ts')
   })
+
+  it('rejects a --module value that would escape modules/ (path traversal)', async () => {
+    await expect(makeController('Invoice', { root: '../../outside' })).rejects.toThrow(/Invalid module name/)
+  })
 })

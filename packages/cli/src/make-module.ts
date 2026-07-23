@@ -1,6 +1,6 @@
 import { dirname, relative, sep as pathSep } from 'node:path'
 import { consola } from 'consola'
-import { camelCase, kebabCase, pascalCase, writeFilesSafe, type WriterOptions } from './utils'
+import { camelCase, pascalCase, safeModuleName, writeFilesSafe, type WriterOptions } from './utils'
 import { addImport, addToArrayOption } from './patch-helpers'
 import { fileExists } from './discovery'
 
@@ -21,7 +21,7 @@ export interface MakeModuleResult {
  * hand-edited app.ts.
  */
 export async function makeModule(name: string, options: WriterOptions = {}): Promise<MakeModuleResult> {
-  const moduleName = kebabCase(name)
+  const moduleName = safeModuleName(name)
   const pascalName = pascalCase(name)
   const camelName = camelCase(name)
   const moduleDir = `modules/${moduleName}`

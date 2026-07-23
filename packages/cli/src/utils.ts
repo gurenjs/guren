@@ -96,7 +96,7 @@ export async function scaffoldFile(name: string, config: ScaffoldConfig, options
   const normalizedName = config.suffix ? ensureSuffix(className, config.suffix) : className
   const baseName = config.fileName ? config.fileName({ rawName: name, className, fileName, normalizedName }) : normalizedName
   const extension = config.extension ?? 'ts'
-  const dir = options.root ? `modules/${kebabCase(options.root)}/${config.dir}` : config.dir
+  const dir = options.root ? `modules/${safeModuleName(options.root)}/${config.dir}` : config.dir
   const filePath = extension ? `${dir}/${baseName}.${extension}` : `${dir}/${baseName}`
   const contents = config.template({ rawName: name, className, fileName, normalizedName })
   return writeFileSafe(filePath, contents, options)
@@ -118,6 +118,29 @@ export function kebabCase(value: string): string {
     .replace(/([a-z0-9])([A-Z])/gu, '$1-$2')
     .replace(/[_\s]+/gu, '-')
     .toLowerCase()
+}
+
+const SAFE_MODULE_NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/u
+
+/**
+ * kebab-cases a `--module <name>`/`make:module <name>` value and rejects
+ * anything that would escape the `modules/<name>/` directory it becomes a
+ * path segment of. `kebabCase()` alone doesn't strip `/`, `\`, or `..` — a
+ * name like `../../outside` or `/etc/passwd` would resolve outside the
+ * project root wherever it's interpolated into a scaffold path. Requiring
+ * the result to be one or more alphanumeric segments joined by single
+ * hyphens rejects those, plus anything else that isn't a plain directory
+ * name (empty, all-symbol, leading/trailing hyphen, etc.) in one check.
+ */
+export function safeModuleName(value: string): string {
+  const name = kebabCase(value)
+  if (!SAFE_MODULE_NAME_RE.test(name)) {
+    throw new Error(
+      `Invalid module name "${value}" — it becomes a directory segment under modules/, so it must be one or `
+      + `more alphanumeric segments joined by hyphens (e.g. "billing", "billing-ops").`,
+    )
+  }
+  return name
 }
 
 export function resourceName(value: string): { className: string; fileName: string } {

@@ -7,6 +7,7 @@ import {
   discoverControllerFiles,
   discoverModelFiles,
   classNameFromPath,
+  listModuleNames,
 } from './discovery'
 import { loadRouteDefinitions } from './load-routes'
 
@@ -74,7 +75,7 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
   const cwd = resolve(options.cwd ?? process.cwd())
   const findings: AuditFinding[] = []
 
-  const controllerMethods = await parseControllerMethods(cwd)
+  const controllerMethods = await parseControllerMethods(cwd, findings)
 
   const routesAnalyzed = await auditRoutes(cwd, options.routesFile, controllerMethods, findings)
   await auditSourceFiles(cwd, findings)
@@ -98,10 +99,26 @@ interface ControllerMethodInfo {
 }
 
 /**
- * Map of `ClassName.method` → method body source, for every controller in app/Http/Controllers.
+ * Map of `ClassName.method` → method body source, for every controller in
+ * app/Http/Controllers (module-aware — see discoverControllerFiles).
+ *
+ * The map is keyed by class name alone, with no file/module namespacing —
+ * routes only carry `route.controller.name` (the class's runtime `.name`),
+ * not an import path, so route-level checks below have no way to
+ * disambiguate two same-named controllers in different modules. A flat
+ * app/Http/Controllers/ directory can't produce this collision (the
+ * filesystem itself enforces unique file names), but two modules each
+ * scaffolding their own e.g. `PostController` legitimately can. When that
+ * happens, findings for BOTH controllers' routes are checked against
+ * whichever file was discovered last — a validated action in one module can
+ * make an unsafe, same-named one in another module read as "pass". Push a
+ * `fail` finding so this isn't silently wrong; renaming one class is the
+ * fix (there's no reliable way to disambiguate further without threading
+ * source-file identity through Router/RouteDefinition, a larger change).
  */
-async function parseControllerMethods(cwd: string): Promise<Map<string, ControllerMethodInfo>> {
+async function parseControllerMethods(cwd: string, findings: AuditFinding[]): Promise<Map<string, ControllerMethodInfo>> {
   const methods = new Map<string, ControllerMethodInfo>()
+  const classFiles = new Map<string, string>()
   const controllerFiles = await discoverControllerFiles(cwd)
 
   for (const filePath of controllerFiles) {
@@ -128,6 +145,22 @@ async function parseControllerMethods(cwd: string): Promise<Map<string, Controll
       if (!classDecl) continue
       const className = classDecl.id?.name ?? classNameFromPath(filePath)
 
+      const previousFile = classFiles.get(className)
+      if (previousFile && previousFile !== relPath) {
+        findings.push(
+          finding(
+            `controller-name-collision:${className}`,
+            `${className} name collision`,
+            'fail',
+            `${className} is declared in both ${previousFile} and ${relPath} — route-level auth/validation `
+            + `checks for both controllers are checked against whichever file was scanned last, since routes `
+            + `only carry the class name, not its file. Findings for one may silently apply to the other.`,
+            `Rename one of the two ${className} classes so controller class names are unique across the app.`,
+          ),
+        )
+      }
+      classFiles.set(className, relPath)
+
       for (const member of classDecl.body.body) {
         if (member.type === 'ClassMethod' && member.key.type === 'Identifier') {
           const start = member.body.start ?? 0
@@ -153,8 +186,9 @@ async function auditRoutes(
   const resolvedRoutesFile = resolve(cwd, routesFile ?? 'routes/web.ts')
 
   let definitions
+  const moduleWarnings: string[] = []
   try {
-    definitions = await loadRouteDefinitions(resolvedRoutesFile, cwd)
+    definitions = await loadRouteDefinitions(resolvedRoutesFile, cwd, moduleWarnings)
   } catch (error) {
     findings.push(
       finding(
@@ -166,6 +200,22 @@ async function auditRoutes(
       ),
     )
     return false
+  }
+
+  // A module that failed to load isn't a load-routes.ts *failure* — the rest
+  // of the app is still analyzed — but its own routes went unchecked, which
+  // must be visible in the structured report (not just a console warning)
+  // so `guren audit --json`/CI can't mistake it for a clean pass.
+  for (const [index, message] of moduleWarnings.entries()) {
+    findings.push(
+      finding(
+        `routes:module-load:${index}`,
+        'Route analysis',
+        'warn',
+        message,
+        'Fix the module so its routes can be analyzed, or remove the stale modules/ directory.',
+      ),
+    )
   }
 
   for (const route of definitions) {
@@ -309,6 +359,12 @@ async function auditSourceFiles(cwd: string, findings: AuditFinding[]): Promise<
   for (const dir of SCAN_DIRECTORIES) {
     files.push(...(await collectFiles(resolve(cwd, dir))))
   }
+  // Each modules/<name>/ directory already contains its own app/, routes.ts,
+  // and db/schema.ts, so scanning it as one unit covers all of the above
+  // without re-deriving SCAN_DIRECTORIES per module.
+  for (const moduleName of await listModuleNames(cwd)) {
+    files.push(...(await collectFiles(resolve(cwd, 'modules', moduleName))))
+  }
 
   let secretCount = 0
   let rawSqlCount = 0
@@ -407,23 +463,28 @@ const SENSITIVE_COLUMN_PATTERN = /(password|passwd|secret|token|salt|hash)/i
  * property names (e.g. `users` → ['id', 'email', 'passwordHash']).
  * Returns null when the schema file is missing or unparsable.
  */
-async function parseSchemaTableColumns(cwd: string): Promise<Map<string, string[]> | null> {
+const TABLE_FACTORIES = new Set(['pgTable', 'sqliteTable', 'mysqlTable'])
+
+/**
+ * Parses a Drizzle schema file's top-level `export const x = pgTable(...)`
+ * declarations, merging `identifier -> column names` into `tables`. Ignores
+ * files it can't read or parse (missing/malformed schema files degrade the
+ * hidden-columns check to "unknown", not a thrown error).
+ */
+async function extractTableColumns(schemaPath: string, tables: Map<string, string[]>): Promise<void> {
   let source: string
   try {
-    source = await readFile(resolve(cwd, 'db/schema.ts'), 'utf-8')
+    source = await readFile(schemaPath, 'utf-8')
   } catch {
-    return null
+    return
   }
 
   let ast: ReturnType<typeof parse>
   try {
     ast = parse(source, { sourceType: 'module', plugins: ['typescript'] })
   } catch {
-    return null
+    return
   }
-
-  const TABLE_FACTORIES = new Set(['pgTable', 'sqliteTable', 'mysqlTable'])
-  const tables = new Map<string, string[]>()
 
   for (const node of ast.program.body) {
     const declaration =
@@ -454,8 +515,24 @@ async function parseSchemaTableColumns(cwd: string): Promise<Map<string, string[
       tables.set(declarator.id.name, columns)
     }
   }
+}
 
-  return tables
+/**
+ * Table columns from db/schema.ts plus every modules/<name>/db/schema.ts.
+ * `make:module` wires the latter into the former via `export * from
+ * '../modules/<name>/db/schema'`, so a module's own `pgTable(...)` calls
+ * never appear in the root file's AST — without this, sensitive-column
+ * checks on module models would silently see no columns at all and skip.
+ */
+async function parseSchemaTableColumns(cwd: string): Promise<Map<string, string[]> | null> {
+  const tables = new Map<string, string[]>()
+  await extractTableColumns(resolve(cwd, 'db/schema.ts'), tables)
+
+  for (const moduleName of await listModuleNames(cwd)) {
+    await extractTableColumns(resolve(cwd, 'modules', moduleName, 'db/schema.ts'), tables)
+  }
+
+  return tables.size > 0 ? tables : null
 }
 
 interface ModelSerializationInfo {

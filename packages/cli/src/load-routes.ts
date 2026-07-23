@@ -1,4 +1,4 @@
-import { dirname, resolve } from 'node:path'
+import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
 import { Router, mountModuleRoutes, type GurenModule, type RouteDefinition } from '@guren/core'
@@ -68,17 +68,25 @@ function createImportUrl(file: string): string {
  * export a recognizable `GurenModule`. Non-fatal on purpose — this is a
  * directory-scan discovery, so a module mid-scaffold or a stray directory
  * under `modules/` shouldn't break `guren codegen`/`audit`/`routes`/
- * `openapi:generate` for the whole app. The warning keeps it from being a
- * *silent* miss, which is the failure mode this loader exists to avoid.
+ * `openapi:generate` for the whole app. The warning is always logged via
+ * consola *and* appended to `warnings` when the caller passes one (`guren
+ * audit` turns these into structured findings, so a skipped module's
+ * unaudited routes surface in `--json` output and can fail CI, not just
+ * scroll past in a console log).
  */
-async function loadGurenModule(appRoot: string, moduleName: string): Promise<GurenModule | undefined> {
+async function loadGurenModule(appRoot: string, moduleName: string, warnings?: string[]): Promise<GurenModule | undefined> {
   const indexPath = resolve(appRoot, 'modules', moduleName, 'index.ts')
+
+  const warn = (message: string): void => {
+    consola.warn(message)
+    warnings?.push(message)
+  }
 
   let moduleExports: Record<string, unknown>
   try {
     moduleExports = await import(createImportUrl(indexPath)) as Record<string, unknown>
   } catch (error) {
-    consola.warn(
+    warn(
       `Could not import modules/${moduleName}/index.ts — its routes will be missing from generated types, `
       + `audit results, and the OpenAPI spec: ${error instanceof Error ? error.message : String(error)}`,
     )
@@ -87,7 +95,7 @@ async function loadGurenModule(appRoot: string, moduleName: string): Promise<Gur
 
   const gurenModule = resolveGurenModule(moduleExports)
   if (!gurenModule) {
-    consola.warn(
+    warn(
       `modules/${moduleName}/index.ts doesn't export a defineModule() result — its routes will be missing `
       + `from generated types, audit results, and the OpenAPI spec.`,
     )
@@ -101,9 +109,10 @@ async function loadGurenModule(appRoot: string, moduleName: string): Promise<Gur
  * `modules/*` module's own routes, mounted the same way `Application`
  * mounts them at boot (via the shared `mountModuleRoutes()`) — so
  * `guren codegen`/`audit`/`routes`/`openapi:generate` see exactly the
- * routes that will actually serve. `appRoot` defaults to `routesFile`'s
- * directory when omitted, matching the pre-modules behavior for callers
- * that haven't been updated.
+ * routes that will actually serve. `appRoot` is required (not derived from
+ * `routesFile`) because `--routes <file>` lets callers point at a routes
+ * file anywhere, including nested under a `routes/` directory — `dirname()`
+ * of that path is not reliably the app root modules live under.
  *
  * Module discovery is directory-scan based (any `modules/<name>/` present),
  * not `createApp({ modules })`-based — consistent with how `guren check
@@ -111,8 +120,16 @@ async function loadGurenModule(appRoot: string, moduleName: string): Promise<Gur
  * A module directory that exists on disk but isn't passed to `createApp()`
  * will still show up here (typed routes, audit coverage) even though it
  * won't actually be mounted at runtime.
+ *
+ * `moduleWarnings`, when passed, collects one message per module that was
+ * skipped (import failure or no recognizable `GurenModule` export) — see
+ * `loadGurenModule`.
  */
-export async function loadRouteDefinitions(routesFile: string, appRoot?: string): Promise<RouteDefinition[]> {
+export async function loadRouteDefinitions(
+  routesFile: string,
+  appRoot: string,
+  moduleWarnings?: string[],
+): Promise<RouteDefinition[]> {
   const moduleExports = await import(createImportUrl(routesFile)) as Record<string, unknown>
   const registrar = resolveRegistrar(moduleExports)
 
@@ -125,11 +142,10 @@ export async function loadRouteDefinitions(routesFile: string, appRoot?: string)
   const router = new Router()
   await registrar(router)
 
-  const root = appRoot ?? dirname(routesFile)
-  const moduleNames = await listModuleNames(root)
+  const moduleNames = await listModuleNames(appRoot)
 
   for (const moduleName of moduleNames) {
-    const gurenModule = await loadGurenModule(root, moduleName)
+    const gurenModule = await loadGurenModule(appRoot, moduleName, moduleWarnings)
     if (gurenModule) {
       await mountModuleRoutes(router, gurenModule)
     }

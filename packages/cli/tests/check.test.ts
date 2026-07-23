@@ -185,6 +185,30 @@ export default class PostController extends Controller {
       expect(report.checks.some(c => c.key.startsWith('empty-method:'))).toBe(false)
       expect(report.checks.some(c => c.key.startsWith('test:'))).toBe(false)
       expect(report.checks.some(c => c.key.startsWith('manifest:'))).toBe(false)
+      expect(report.checks.some(c => c.key.startsWith('model-schema:'))).toBe(false)
+      expect(report.checks.some(c => c.key.startsWith('module-schema-aggregation:'))).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('with arch:true, does not run the module schema-aggregation check even when a module needs it', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-arch-only-schema-agg-')
+
+    try {
+      // A module schema that isn't re-exported from the root — outside
+      // --arch mode this fails the schema-aggregation check (see the
+      // "warns when a module schema exists but is not re-exported" test
+      // below). --arch is documented as the architecture-boundary-only
+      // fast path, so this unrelated check must not run under it.
+      await mkdir(join(workspace.dir, 'modules/billing/db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'modules/billing/db/schema.ts'), `export const invoices = {}`, 'utf8')
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'db/schema.ts'), `export const users = {}`, 'utf8')
+
+      const report = await runCheck({ cwd: workspace.dir, arch: true })
+
+      expect(report.checks.some(c => c.key.startsWith('module-schema-aggregation:'))).toBe(false)
     } finally {
       await workspace.cleanup()
     }

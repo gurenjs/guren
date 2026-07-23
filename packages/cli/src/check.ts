@@ -187,17 +187,19 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
         ),
       )
     }
+
+    // 6. Check every module's db/schema.ts is re-exported from the root
+    // db/schema.ts (the wiring make:module performs automatically — this
+    // catches modules created or edited by hand). Not an architecture
+    // boundary rule, so it stays out of `--arch`'s fast path alongside
+    // checks 1-5.
+    const schemaAggregationResults = await checkModuleSchemaAggregation(cwd)
+    checks.push(...schemaAggregationResults)
   }
 
-  // 6. Check architecture boundaries (guren.arch.ts + derived module rules)
+  // 7. Check architecture boundaries (guren.arch.ts + derived module rules)
   const archResults = await runArchCheck({ cwd, cache, changedFiles })
   checks.push(...archResults)
-
-  // 7. Check every module's db/schema.ts is re-exported from the root
-  // db/schema.ts (the wiring make:module performs automatically — this
-  // catches modules created or edited by hand).
-  const schemaAggregationResults = await checkModuleSchemaAggregation(cwd)
-  checks.push(...schemaAggregationResults)
 
   const report: CheckReport = {
     cwd,

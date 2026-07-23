@@ -169,7 +169,11 @@ export const ${name}Module = {
     expect(definitions).toEqual([])
   })
 
-  it('defaults appRoot to the routes file directory when omitted', async () => {
+  it('requires an explicit appRoot — dirname(routesFile) is not reliably the app root', async () => {
+    // routes/web.ts's directory is "routes", not the app root — modules/
+    // lives one level up. There is no correct default to derive here, so
+    // appRoot must be passed explicitly (it's a required parameter, not
+    // just conventionally always supplied).
     await writeFile(
       join(tempDir, 'routes/web.ts'),
       `import type { Router } from '@guren/core'
@@ -180,8 +184,24 @@ export function registerWebRoutes(router: Router): void {
 `,
     )
 
-    const definitions = await loadRouteDefinitions(join(tempDir, 'routes/web.ts'))
+    await mkdir(join(tempDir, 'modules/billing'), { recursive: true })
+    await writeFile(
+      join(tempDir, 'modules/billing/index.ts'),
+      `import type { Router } from '@guren/core'
 
-    expect(definitions.map((d) => d.name)).toEqual(['home'])
+export const billingModule = {
+  name: 'billing',
+  providers: [],
+  routes: (router: Router) => {
+    router.get('/invoices', () => new Response('ok')).name('invoices.index')
+  },
+}
+`,
+    )
+
+    const definitions = await loadRouteDefinitions(join(tempDir, 'routes/web.ts'), tempDir)
+    const names = definitions.map((d) => d.name).sort()
+
+    expect(names).toEqual(['home', 'invoices.index'])
   })
 })

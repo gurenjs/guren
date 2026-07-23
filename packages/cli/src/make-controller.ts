@@ -1,5 +1,5 @@
 import type { WriterOptions } from './utils'
-import { kebabCase, pagesAccessor, scaffoldFile } from './utils'
+import { kebabCase, pagesAccessor, safeModuleName, scaffoldFile } from './utils'
 
 const CONTROLLERS_DIR = 'app/Http/Controllers'
 
@@ -19,7 +19,7 @@ export default class ${className} extends Controller {
 }
 
 export async function makeController(name: string, options: WriterOptions = {}): Promise<string> {
-  const moduleName = options.root ? kebabCase(options.root) : undefined
+  const moduleName = options.root ? safeModuleName(options.root) : undefined
   return scaffoldFile(name, {
     dir: CONTROLLERS_DIR,
     suffix: 'Controller',
