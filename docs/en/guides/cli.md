@@ -407,7 +407,7 @@ bunx guren queue:work --stop-when-empty
 
 ## Shared Options
 
-Common options are centralised under `packages/core/src/cli` so behaviour stays consistent:
+These options behave consistently across every `make:*` and `add` command:
 
 - `--force` / `-f`: Overwrite files even if they already exist.
 - `--dry-run`: Show what would be generated without writing files (planned).

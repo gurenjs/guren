@@ -47,7 +47,7 @@ Clicking "Forgot your password?" on the login page walks through `ForgotPassword
 
 ## OAuth / Social login
 
-Wave 4 adds first-party OAuth primitives plus provider presets for GitHub / Google / Discord.
+Guren ships first-party OAuth primitives plus provider presets for GitHub / Google / Discord.
 
 ### Scaffold OAuth in an app
 

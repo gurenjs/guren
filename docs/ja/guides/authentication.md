@@ -47,7 +47,7 @@ bunx guren make:auth --install --minimal
 
 ## OAuth / ソーシャルログイン
 
-Wave 4 で、GitHub / Google / Discord 向けの OAuth プリセットを追加しました。
+Guren には GitHub / Google / Discord 向けの OAuth プリセットが最初から用意されています。
 
 ### OAuth スキャフォールド
 

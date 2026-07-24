@@ -173,7 +173,7 @@ broadcast.removeWebSocketClient(clientId)
 
 このAPIを使うことで、Bun の WebSocket upgrade ルートを既存の channel/driver 構成に接続できます。
 
-### 型安全 channel codegen（Wave 3）
+### 型安全 channel codegen
 
 `guren codegen` で `.guren/channels.gen.ts` が生成されるようになりました。  
 サーバー側の broadcast 利用箇所からチャンネルとイベント名を抽出します。
@@ -204,7 +204,7 @@ const off = feed.on('NewPost', (payload) => {
 
 これにより、フロント側で channel/event 名だけでなく payload 形状も型安全に扱えます。
 
-### E2E 型安全リアルタイム（Wave 7）
+### E2E 型安全リアルタイム
 
 生成された `ChannelEvents` をサーバー側 emit にも適用すると、送信時 payload もコンパイル時に検証できます。
 

@@ -27,7 +27,7 @@ Guren reimagines Laravel's design principles in TypeScript, tying together Bun, 
 ## Naming Conventions
 - Files that export a single class or type (e.g. controllers, models, HTTP application) use `PascalCase.ts` so the filename mirrors the exported identifier.
 - Utility modules that gather functions or helpers use `kebab-case.ts` (for example `dev-assets.ts`, `inertia-assets.ts`) to distinguish them from class-centric modules.
-- Each directory sticks to one convention; when you add a new file under `packages/core/src/http/`, prefer PascalCase for new classes, while helper-heavy folders such as the asset middleware or CLI utilities should stay in kebab-case.
+- Each directory sticks to one convention; when you add a new file under `app/Http/Controllers/` or `app/Models/`, prefer PascalCase for new classes, while helper-heavy folders should stay in kebab-case.
 
 ## Service Container
 
