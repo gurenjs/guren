@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://gurenjs.vercel.app/sitemap.xml
+Sitemap: https://guren.dev/sitemap.xml

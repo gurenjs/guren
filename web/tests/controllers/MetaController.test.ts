@@ -40,9 +40,9 @@ describe('MetaController', () => {
     const body = await response.text()
 
     expect(response.headers.get('Content-Type')).toContain('application/xml')
-    expect(body).toContain('<loc>https://gurenjs.vercel.app/docs/guides/routing</loc>')
-    expect(body).toContain('<loc>https://gurenjs.vercel.app/docs/ja/guides/routing</loc>')
-    expect(body).toContain('hreflang="ja" href="https://gurenjs.vercel.app/docs/ja/guides/routing"')
+    expect(body).toContain('<loc>https://guren.dev/docs/guides/routing</loc>')
+    expect(body).toContain('<loc>https://guren.dev/docs/ja/guides/routing</loc>')
+    expect(body).toContain('hreflang="ja" href="https://guren.dev/docs/ja/guides/routing"')
     expect(body).toContain('hreflang="x-default"')
   })
 
@@ -55,7 +55,7 @@ describe('MetaController', () => {
     expect(response.headers.get('Content-Type')).toContain('text/plain')
     expect(body).toContain('# Guren')
     expect(body).toContain('## Guides')
-    expect(body).toContain('- [Routing](https://gurenjs.vercel.app/docs/guides/routing.md): Define routes')
+    expect(body).toContain('- [Routing](https://guren.dev/docs/guides/routing.md): Define routes')
     expect(body).toContain('/llms-full.txt')
   })
 
@@ -68,7 +68,7 @@ describe('MetaController', () => {
 
     expect(docsService.getRawMarkdown).toHaveBeenCalledWith('guides', 'routing', 'en')
     expect(body).toContain('# Guren — Full Documentation')
-    expect(body).toContain('<!-- https://gurenjs.vercel.app/docs/guides/routing -->')
+    expect(body).toContain('<!-- https://guren.dev/docs/guides/routing -->')
     expect(body).toContain('# Routing')
   })
 })
