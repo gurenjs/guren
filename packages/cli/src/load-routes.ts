@@ -62,6 +62,10 @@ function createImportUrl(file: string): string {
   return url.href
 }
 
+/** Shared tail for both "module skipped" warnings — keep the wording in one place. */
+const ROUTES_MISSING_CONSEQUENCE =
+  'its routes will be missing from generated types, audit results, and the OpenAPI spec'
+
 /**
  * Loads a `modules/<name>/index.ts` and returns its `defineModule()` result,
  * or `undefined` (with a warning) if the module can't be imported or doesn't
@@ -87,8 +91,8 @@ async function loadGurenModule(appRoot: string, moduleName: string, warnings?: s
     moduleExports = await import(createImportUrl(indexPath)) as Record<string, unknown>
   } catch (error) {
     warn(
-      `Could not import modules/${moduleName}/index.ts — its routes will be missing from generated types, `
-      + `audit results, and the OpenAPI spec: ${error instanceof Error ? error.message : String(error)}`,
+      `Could not import modules/${moduleName}/index.ts — ${ROUTES_MISSING_CONSEQUENCE}: `
+      + `${error instanceof Error ? error.message : String(error)}`,
     )
     return undefined
   }
@@ -96,8 +100,7 @@ async function loadGurenModule(appRoot: string, moduleName: string, warnings?: s
   const gurenModule = resolveGurenModule(moduleExports)
   if (!gurenModule) {
     warn(
-      `modules/${moduleName}/index.ts doesn't export a defineModule() result — its routes will be missing `
-      + `from generated types, audit results, and the OpenAPI spec.`,
+      `modules/${moduleName}/index.ts doesn't export a defineModule() result — ${ROUTES_MISSING_CONSEQUENCE}.`,
     )
   }
 
