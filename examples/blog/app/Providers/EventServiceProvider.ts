@@ -37,10 +37,18 @@ export function initializeEventSystem(): EventManager {
   eventManager = eventManager ?? createEventManager()
 
   mailManager = mailManager ?? createMailManager({
-    default: 'memory',
-    from: { email: 'noreply@blog.example.com', name: 'Guren Blog' },
+    // Defaults to the `log` driver (prints to the console) so verification
+    // and password-reset links are actually visible in development — the
+    // `memory` driver silently discards them, which broke both flows.
+    default: process.env.MAIL_MAILER ?? 'log',
+    from: {
+      email: process.env.MAIL_FROM_ADDRESS ?? 'noreply@blog.example.com',
+      name: process.env.MAIL_FROM_NAME ?? 'Guren Blog',
+    },
     transports: {
+      log: { driver: 'log' },
       memory: { driver: 'memory' },
+      resend: { driver: 'resend', apiKey: process.env.RESEND_API_KEY ?? '' },
     },
   })
   setMailManager(mailManager)

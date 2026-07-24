@@ -103,6 +103,30 @@ describe('RegisterController', () => {
     expect(response.headers.get('Location')).toBe('/verify-email')
   })
 
+  it('lowercases the email before storing it, so it round-trips through the verification token', async () => {
+    mockUserWhere.mockResolvedValue([])
+    mockUserCreate.mockResolvedValue({ id: 2, name: 'Ada Lovelace', email: 'ada@example.com' })
+    mockDispatch.mockResolvedValue('job-id')
+    mockSendEmailVerificationMail.mockResolvedValue(undefined)
+
+    const controller = createController()
+    const ctx = createControllerContext('http://blog.test/register', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: 'Ada Lovelace',
+        email: 'Ada@Example.com',
+        password: 'password123',
+        passwordConfirmation: 'password123',
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    }, { mail: {} }) as unknown as Context
+    controller.setContext(ctx)
+
+    await controller.store()
+
+    expect(mockUserCreate).toHaveBeenCalledWith(expect.objectContaining({ email: 'ada@example.com' }))
+  })
+
   it('rejects registration when the email is already taken', async () => {
     mockUserWhere.mockResolvedValue([{ id: 5, email: 'ada@example.com' }])
 

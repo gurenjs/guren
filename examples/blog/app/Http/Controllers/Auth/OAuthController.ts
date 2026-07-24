@@ -22,6 +22,32 @@ function identityWhere(provider: OAuthProvider, profileId: string): Partial<User
   return identities[provider]
 }
 
+interface GitHubEmail {
+  email: string
+  primary: boolean
+  verified: boolean
+}
+
+// GitHub's /user endpoint returns `email: null` whenever the account's email
+// is set to private, even with the `user:email` scope granted — the primary
+// verified address is only available from this separate endpoint.
+async function fetchGitHubPrimaryEmail(accessToken: string): Promise<string | undefined> {
+  const response = await fetch('https://api.github.com/user/emails', {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'guren-blog',
+    },
+  })
+
+  if (!response.ok) {
+    return undefined
+  }
+
+  const emails = (await response.json()) as GitHubEmail[]
+  return emails.find((entry) => entry.primary && entry.verified)?.email
+}
+
 export default class OAuthController extends Controller {
   private oauth(): OAuthManager {
     return this.make<OAuthManager>('oauth')
@@ -45,14 +71,18 @@ export default class OAuthController extends Controller {
 
     const { profile, redirectTo } = await this.oauth().handleCallback(provider, { code, state })
 
-    if (!profile.email) {
+    const resolvedEmail = (
+      profile.email ?? (provider === 'github' ? await fetchGitHubPrimaryEmail(profile.token.accessToken) : undefined)
+    )?.toLowerCase()
+
+    if (!resolvedEmail) {
       throw ValidationException.withMessages({ message: 'This provider did not return an email address.' })
     }
 
     let [user] = await User.where(identityWhere(provider, profile.id))
 
     if (!user) {
-      const [existingByEmail] = await User.where({ email: profile.email })
+      const [existingByEmail] = await User.where({ email: resolvedEmail })
       if (existingByEmail) {
         throw ValidationException.withMessages({
           message: 'An account with this email already exists. Sign in with your password instead.',
@@ -63,8 +93,8 @@ export default class OAuthController extends Controller {
       // account still satisfies AuthenticatableModel's hashing pipeline.
       // It's never surfaced to the user and can't realistically be guessed.
       user = await User.create({
-        name: profile.name ?? profile.email,
-        email: profile.email,
+        name: profile.name ?? resolvedEmail,
+        email: resolvedEmail,
         password: randomUUID(),
         ...identityWhere(provider, profile.id),
       })
