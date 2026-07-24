@@ -54,7 +54,7 @@ export async function addImport(
       continue
     }
 
-    if (trimmed.startsWith('import ') || trimmed.startsWith('import{')) {
+    if (trimmed.startsWith('import ') || trimmed.startsWith('import{') || trimmed.startsWith("import'") || trimmed.startsWith('import"')) {
       lastImportIndex = i
       braceDepth = braceDelta
       if (braceDepth > 0) {
