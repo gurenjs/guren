@@ -8,7 +8,7 @@ export * from './database'
 export * from './lifecycle'
 export * from './event'
 export { TestApp, PendingTestResponse, factory } from './test-app'
-export type { TestAppOptions } from './test-app'
+export type { TestAppOptions, WorkersTestContext, WorkersTestAppOptions } from './test-app'
 export {
   createPluginTestApp,
   assertPluginRegisters,

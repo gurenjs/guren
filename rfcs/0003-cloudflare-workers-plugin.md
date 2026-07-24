@@ -298,10 +298,15 @@ field (per the plugin contract):
 
 `guren cloudflare:build`:
 
-1. Runs codegen, then the standard Vite client + SSR builds. Codegen is
-   invoked through the installed CLI entry directly (not `bunx guren`) so a
-   clean checkout and CI both work — the Vite route-types plugin
-   intentionally skips generation when `process.env.CI` is set.
+1. ~~Runs codegen, then the standard Vite client + SSR builds, invoking
+   codegen through the installed CLI entry directly.~~
+   **Amended in implementation:** runs the app's own `build` script
+   (`bun run build`), which in every scaffold and in `web/` already chains
+   codegen → Vite client → Vite SSR — one canonical build path instead of
+   the plugin re-implementing it (and the CI codegen-skip concern moves to
+   the app script, where it is already handled). `--skip-app-build` skips
+   this step for pre-built apps; a missing `build` script is a hard error
+   with guidance.
 2. Emits `.cloudflare/worker.js`, a generated wrapper that statically
    imports the app instance (`src/app.ts`) and the built SSR entry —
    resolved from `.guren/ssr/.vite/manifest.json`, the same lookup

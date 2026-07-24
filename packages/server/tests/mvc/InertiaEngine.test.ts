@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { inertia } from '../../src'
+import { inertia, setInertiaSsrRenderer } from '../../src'
 
 describe('InertiaEngine SSR integration', () => {
   it('renders client-side shell when no SSR renderer is configured', async () => {
@@ -49,6 +49,65 @@ describe('InertiaEngine SSR integration', () => {
     expect(body).toContain('<title>SSR Title</title>')
     expect(body).toContain('data-ssr="true"')
     expect(body).toContain('SSR')
+  })
+
+  it('uses the process-wide default renderer registered via setInertiaSsrRenderer', async () => {
+    setInertiaSsrRenderer(async () => ({
+      head: ['<title>Default SSR</title>'],
+      body: '<div id="app" data-ssr="default">Default</div>',
+    }))
+
+    try {
+      const response = await inertia('Dashboard', {}, { url: '/dashboard' })
+      const body = await response.text()
+
+      expect(body).toContain('<title>Default SSR</title>')
+      expect(body).toContain('data-ssr="default"')
+    } finally {
+      setInertiaSsrRenderer(undefined)
+    }
+  })
+
+  it('prefers per-call ssr.render over the default renderer', async () => {
+    setInertiaSsrRenderer(async () => ({
+      head: ['<title>Default SSR</title>'],
+      body: '<div id="app" data-ssr="default">Default</div>',
+    }))
+
+    try {
+      const response = await inertia(
+        'Dashboard',
+        {},
+        {
+          url: '/dashboard',
+          ssr: {
+            render: async () => ({
+              head: ['<title>Per-call SSR</title>'],
+              body: '<div id="app" data-ssr="per-call">PerCall</div>',
+            }),
+          },
+        },
+      )
+      const body = await response.text()
+
+      expect(body).toContain('<title>Per-call SSR</title>')
+      expect(body).not.toContain('data-ssr="default"')
+    } finally {
+      setInertiaSsrRenderer(undefined)
+    }
+  })
+
+  it('clears the default renderer when called with undefined', async () => {
+    setInertiaSsrRenderer(async () => ({
+      head: ['<title>Default SSR</title>'],
+      body: '<div id="app" data-ssr="default">Default</div>',
+    }))
+    setInertiaSsrRenderer(undefined)
+
+    const response = await inertia('Dashboard', {}, { url: '/dashboard' })
+    const body = await response.text()
+
+    expect(body).not.toContain('<title>Default SSR</title>')
   })
 })
 

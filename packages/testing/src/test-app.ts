@@ -34,6 +34,33 @@ export interface TestAppOptions {
 }
 
 /**
+ * Fake ExecutionContext exposed by `TestApp.fromWorkers()`, so tests can
+ * await promises the handler passed to `ctx.waitUntil()`.
+ */
+export interface WorkersTestContext {
+  /** Promises passed to ctx.waitUntil by the handler, for tests to await. */
+  readonly waitUntilPromises: Promise<unknown>[]
+}
+
+type WorkersExecutionContext = {
+  waitUntil(promise: Promise<unknown>): void
+  passThroughOnException?(): void
+}
+
+type WorkersHandler = {
+  fetch(
+    request: Request,
+    env: unknown,
+    ctx: WorkersExecutionContext,
+  ): Response | Promise<Response>
+}
+
+export interface WorkersTestAppOptions {
+  readonly env?: unknown
+  readonly baseUrl?: string
+}
+
+/**
  * A promise-like TestResponse that allows chaining assertions
  * directly on the result of HTTP method calls.
  *
@@ -402,6 +429,40 @@ export class TestApp {
       (req) => Promise.resolve(fetchFn(req)),
       baseUrl,
     )
+  }
+
+  /**
+   * Create a TestApp from a Cloudflare Workers-style fetch handler
+   * (`{ fetch(request, env, ctx) }`).
+   *
+   * A single fake ExecutionContext is shared across all requests made
+   * through the returned TestApp; promises passed to `ctx.waitUntil()` are
+   * collected in `workers.waitUntilPromises` for tests to await.
+   */
+  static fromWorkers(
+    handler: WorkersHandler,
+    options: WorkersTestAppOptions = {},
+  ): TestApp & { workers: WorkersTestContext } {
+    process.env.GUREN_TESTING = '1'
+
+    const waitUntilPromises: Promise<unknown>[] = []
+    const ctx: WorkersExecutionContext = {
+      waitUntil(promise) {
+        waitUntilPromises.push(promise)
+      },
+      passThroughOnException() {},
+    }
+
+    const app = new TestApp(
+      (req) => Promise.resolve(handler.fetch(req, options.env ?? {}, ctx)),
+      options.baseUrl,
+    )
+
+    // Constructor stays private; a single type assertion here attaches the
+    // `workers` context per the documented return type.
+    return Object.assign(app, { workers: { waitUntilPromises } }) as TestApp & {
+      workers: WorkersTestContext
+    }
   }
 
   /**
