@@ -1,4 +1,4 @@
-import { pgTable, serial, text, uniqueIndex, integer } from '@guren/orm/drizzle'
+import { pgTable, serial, text, timestamp, uniqueIndex, integer } from '@guren/orm/drizzle'
 
 export const users = pgTable(
   'users',
@@ -8,6 +8,9 @@ export const users = pgTable(
     email: text('email').notNull(),
     passwordHash: text('password_hash').notNull(),
     rememberToken: text('remember_token'),
+    emailVerifiedAt: timestamp('email_verified_at', { withTimezone: false }),
+    githubId: text('github_id').unique(),
+    googleId: text('google_id').unique(),
   },
   (table) => [uniqueIndex('users_email_unique').on(table.email)],
 )

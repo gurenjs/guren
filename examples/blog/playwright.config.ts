@@ -25,7 +25,7 @@ export default defineConfig({
     // Auth + route protection tests run without saved session
     {
       name: 'unauthenticated',
-      testMatch: /auth\.spec\.ts/,
+      testMatch: /(auth|registration|password-reset)\.spec\.ts/,
       use: { ...devices['Desktop Chrome'] },
     },
     // Tests that need an authenticated session

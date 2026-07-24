@@ -10,7 +10,10 @@ declare namespace Guren {
 
   export type RoutePath =
     '/'
+    | `/auth/${string}`
+    | `/auth/${string}/callback`
     | '/dashboard'
+    | '/forgot-password'
     | '/login'
     | '/logout'
     | '/posts'
@@ -18,6 +21,10 @@ declare namespace Guren {
     | `/posts/${string}/edit`
     | '/posts/new'
     | '/profile'
+    | '/register'
+    | '/reset-password'
+    | '/verify-email'
+    | '/verify-email/confirm'
 
   export type RouteUrl = RoutePath | `${RoutePath}?${string}`
 
