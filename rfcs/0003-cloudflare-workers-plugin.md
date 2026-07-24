@@ -543,10 +543,17 @@ Bun/Lambda/Vercel deployments are unaffected.
    and needs the built worker). Proposal: support (a) as the default via a
    runtime switch in `config/database.ts`, document (b) as the pre-deploy
    check. Needs validation in Part 4.
-3. **Worker size limits.** Free tier caps the compressed worker at 3 MB; the
-   React SSR bundle must fit alongside the server code. Measure with the
-   `web/` app in Part 1; if tight, evaluate disabling SSR (CSR-only Inertia)
-   as the documented fallback.
+3. ~~Worker size limits — measure whether the SSR bundle fits in 3 MB.~~
+   **Resolved during drafting** with a bundle probe of the real `web/` app
+   (app + `@guren/server` + Hono + ORM + `react-dom/server`, minified):
+   **1.10 MB gzipped** — comfortable against the Free plan's 3 MB cap.
+   The full `web/` build including shiki's default bundle (every grammar
+   and theme) measures 2.74 MB gzipped — technically under the cap but
+   with no headroom, so shiki must not ship in the worker as the full
+   bundle. For the blog this resolves cleanly: highlight at write time
+   (store rendered HTML in D1, keeping shiki out of the worker entirely)
+   or use `shiki/core` with only the needed grammars. CSR-only Inertia
+   remains the documented fallback for apps that outgrow the cap.
 4. **`getWorkersEnv` vs. container-based injection.** A module-level accessor
    is simple and mirrors `process.env` ergonomics, but a service-container
    binding would be more testable. Leaning accessor-first with a container
