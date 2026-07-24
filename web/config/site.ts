@@ -1,7 +1,7 @@
 // Shared site metadata. Imported by both server controllers and React pages,
 // so keep this module dependency-free and side-effect-free.
 
-export const SITE_URL = 'https://gurenjs.vercel.app'
+export const SITE_URL = 'https://guren.dev'
 export const SITE_NAME = 'Guren'
 export const GITHUB_URL = 'https://github.com/gurenjs/guren'
 export const OG_IMAGE_PATH = '/og.png'

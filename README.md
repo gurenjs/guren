@@ -118,7 +118,7 @@ const post = await Post.findOrFail(1)
 
 ## Documentation
 
-- [Official docs](https://gurenjs.vercel.app/) — tutorials, API reference, guides
+- [Official docs](https://guren.dev/) — tutorials, API reference, guides
 - [examples/blog](./examples/blog) — reference implementation
 
 ---
