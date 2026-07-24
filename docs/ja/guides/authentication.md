@@ -45,6 +45,16 @@ bunx guren make:auth --install --minimal
 
 ログインページの「Forgot your password?」から `ForgotPasswordController` と `ResetPasswordController` によるフローに入ります。内部ではフレームワークの `createPasswordResetToken` / `verifyPasswordResetToken` を使用しています。リセットトークンは生成される `app/Auth/PasswordResetStore.ts`（インメモリストア。本番や複数インスタンス構成では Redis ベースのストアに差し替えてください）に保存され、生成される `config/mail.ts` 経由でメール送信されます。`config/mail.ts` はデフォルトで `log` ドライバを使うため、リセットリンクはコンソールにそのまま出力され、開発環境では設定なしで動作確認できます。実際にメールを送るには `MAIL_DRIVER=smtp`（および `SMTP_*` の環境変数）を設定してください。
 
+### メール確認
+
+`--verify` を付けるとメール確認フローも一緒にスキャフォールドします。
+
+```bash
+bunx guren make:auth --install --verify
+```
+
+`users` テーブルに `emailVerifiedAt` カラムが追加され、`VerifyEmailController`（「メールを確認してください」の通知表示・再送・トークン確認を担当）と `VerifyEmail` ページが生成されます。登録時に確認メールが送信され、`/dashboard` の代わりに `/verify-email` へリダイレクトされるようになります。また生成される `/dashboard` ルートには `requireVerifiedEmail` が適用され、未確認のユーザーは確認が完了するまで `/verify-email` に戻されます。確認リンクもパスワードリセットと同じインメモリストア・`log` ドライバのメール設定を使うため、開発環境では設定なしで動作確認できます。`--verify` は登録フローの上に構築されるため、デフォルト（非 `--minimal`）の構成が前提です。
+
 ## OAuth / ソーシャルログイン
 
 Guren には GitHub / Google / Discord 向けの OAuth プリセットが最初から用意されています。
