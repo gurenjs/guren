@@ -2,7 +2,7 @@ import { Controller, createPasswordResetToken, buildPasswordResetUrl } from '@gu
 import { ForgotPasswordSchema } from '../../Validators/ForgotPasswordValidator.js'
 import { User } from '../../../Models/User.js'
 import { passwordResetStore } from '../../../Auth/PasswordResetStore.js'
-import { sendPasswordResetMail } from '../../../Mail/PasswordResetMail.js'
+import { SendPasswordResetEmailJob } from '../../../Jobs/SendPasswordResetEmailJob.js'
 import { pages } from '@/.guren/pages.gen'
 
 const STATUS_MESSAGE = "If an account exists for that email, we've sent a password reset link."
@@ -16,12 +16,15 @@ export default class ForgotPasswordController extends Controller {
     const { email } = await this.validateBody(ForgotPasswordSchema)
 
     // Always respond with the same status message whether or not the
-    // account exists, to avoid leaking which emails are registered.
+    // account exists, to avoid leaking which emails are registered. The
+    // email itself is dispatched to a queue rather than awaited inline, so
+    // the (comparatively slow) mail-transport round-trip can't be used as a
+    // timing side-channel to tell known accounts apart from unknown ones.
     const [user] = await User.where({ email })
     if (user) {
       const { token } = await createPasswordResetToken(email, passwordResetStore)
       const resetUrl = buildPasswordResetUrl(`${new URL(this.request.url).origin}/reset-password`, token, email)
-      await sendPasswordResetMail(this.make('mail'), email, resetUrl)
+      await SendPasswordResetEmailJob.dispatch({ email, resetUrl })
     }
 
     return this.inertia(pages.auth.ForgotPassword, { status: STATUS_MESSAGE }, {

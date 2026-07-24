@@ -41,7 +41,6 @@ export function registerAuthRoutes(router: Router<'auth' | 'guest'>): void {
 
     authed.get('/verify-email', { name: 'verify-email' }, [VerifyEmailController, 'notice'])
     authed.post('/verify-email', { name: 'verify-email.resend' }, [VerifyEmailController, 'resend'])
-    authed.get('/verify-email/confirm', { name: 'verify-email.confirm' }, [VerifyEmailController, 'confirm'])
 
     authed
       .get('/dashboard', [DashboardController, 'index'], requireVerifiedEmail({ redirectTo: '/verify-email' }))
@@ -53,4 +52,9 @@ export function registerAuthRoutes(router: Router<'auth' | 'guest'>): void {
 
   // Public: the OAuth provider redirects here directly, before any session exists.
   router.get('/auth/:provider/callback', { name: 'oauth.callback' }, [OAuthController, 'callback'])
+
+  // Public: confirm() validates the signed token itself and doesn't use the
+  // session — gating it behind auth would strand a user who opens the email
+  // link from a different device or after their session expired.
+  router.get('/verify-email/confirm', { name: 'verify-email.confirm' }, [VerifyEmailController, 'confirm'])
 }

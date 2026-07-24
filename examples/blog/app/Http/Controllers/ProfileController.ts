@@ -1,6 +1,8 @@
-import { Controller, ValidationException } from '@guren/core'
+import { Controller, ValidationException, createEmailVerificationToken, buildVerificationUrl } from '@guren/core'
 import { ProfileUpdateSchema } from '../Validators/ProfileValidator.js'
 import { User, type UserRecord } from '../../Models/User.js'
+import { emailVerificationStore } from '../../Auth/EmailVerificationStore.js'
+import { sendEmailVerificationMail } from '../../Mail/EmailVerificationMail.js'
 import { pages } from '@/.guren/pages.gen'
 
 export default class ProfileController extends Controller {
@@ -27,7 +29,9 @@ export default class ProfileController extends Controller {
     const { name, email, password: rawPassword } = await this.validateBody(ProfileUpdateSchema)
     const password = rawPassword ?? ''
 
-    if (email !== authed.email) {
+    const emailChanged = email !== authed.email
+
+    if (emailChanged) {
       const existing = await User.where({ email })
       const conflict = existing.find((user) => user.id !== authed.id)
       if (conflict) {
@@ -44,6 +48,13 @@ export default class ProfileController extends Controller {
       updates.password = password
     }
 
+    if (emailChanged) {
+      // The new address hasn't been proven to belong to this user yet — an
+      // arbitrary replacement email must not inherit the old address's
+      // verified status.
+      updates.emailVerifiedAt = null
+    }
+
     await User.update({ id: authed.id }, updates)
 
     const refreshedUser = await User.find(authed.id)
@@ -53,9 +64,17 @@ export default class ProfileController extends Controller {
 
     await this.auth.login(refreshedUser)
 
+    if (emailChanged) {
+      const { token } = await createEmailVerificationToken(email, emailVerificationStore)
+      const verifyUrl = buildVerificationUrl(`${new URL(this.request.url).origin}/verify-email/confirm`, token, email)
+      await sendEmailVerificationMail(this.make('mail'), email, verifyUrl)
+    }
+
     return this.inertia(pages.profile.Edit, {
       profile: { name, email },
-      status: 'Profile updated successfully.',
+      status: emailChanged
+        ? 'Profile updated. Check your new email address for a verification link.'
+        : 'Profile updated successfully.',
     }, { url: this.request.path, title: 'Edit Profile | Guren Blog' })
   }
 }

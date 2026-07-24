@@ -6,17 +6,17 @@ import {
 } from '@guren/testing'
 import type { Context } from '@guren/core'
 
-const { mockUserWhere, mockSendPasswordResetMail } = vi.hoisted(() => ({
+const { mockUserWhere, mockDispatch } = vi.hoisted(() => ({
   mockUserWhere: vi.fn(),
-  mockSendPasswordResetMail: vi.fn(),
+  mockDispatch: vi.fn(),
 }))
 
 vi.mock('../../app/Models/User.js', () => ({
   User: { where: mockUserWhere },
 }))
 
-vi.mock('../../app/Mail/PasswordResetMail.js', () => ({
-  sendPasswordResetMail: mockSendPasswordResetMail,
+vi.mock('../../app/Jobs/SendPasswordResetEmailJob.js', () => ({
+  SendPasswordResetEmailJob: { dispatch: mockDispatch },
 }))
 
 vi.mock('guren', () => createControllerModuleMock())
@@ -50,7 +50,7 @@ describe('ForgotPasswordController', () => {
 
   it('sends a reset email when the account exists', async () => {
     mockUserWhere.mockResolvedValue([{ id: 1, email: 'ada@example.com' }])
-    mockSendPasswordResetMail.mockResolvedValue(undefined)
+    mockDispatch.mockResolvedValue('job-id')
 
     const controller = new ForgotPasswordController()
     const ctx = createControllerContext('http://blog.test/forgot-password', {
@@ -63,7 +63,7 @@ describe('ForgotPasswordController', () => {
     const response = await controller.store()
     const { payload } = await readInertiaResponse(response)
 
-    expect(mockSendPasswordResetMail).toHaveBeenCalled()
+    expect(mockDispatch).toHaveBeenCalledWith(expect.objectContaining({ email: 'ada@example.com' }))
     expect(payload.props.status).toBe(STATUS_MESSAGE)
   })
 
@@ -81,7 +81,7 @@ describe('ForgotPasswordController', () => {
     const response = await controller.store()
     const { payload } = await readInertiaResponse(response)
 
-    expect(mockSendPasswordResetMail).not.toHaveBeenCalled()
+    expect(mockDispatch).not.toHaveBeenCalled()
     expect(payload.props.status).toBe(STATUS_MESSAGE)
   })
 })

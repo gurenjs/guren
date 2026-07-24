@@ -19,6 +19,7 @@ import { UserLoggedIn } from '../Events/UserLoggedIn.js'
 import { PostCreated } from '../Events/PostCreated.js'
 import { SendWelcomeEmailJob } from '../Jobs/SendWelcomeEmailJob.js'
 import { ProcessNewPostJob } from '../Jobs/ProcessNewPostJob.js'
+import { SendPasswordResetEmailJob } from '../Jobs/SendPasswordResetEmailJob.js'
 
 let eventManager: EventManager | null = null
 let mailManager: MailManager | null = null
@@ -63,6 +64,7 @@ export function initializeEventSystem(): EventManager {
 
   registerJob(SendWelcomeEmailJob)
   registerJob(ProcessNewPostJob)
+  registerJob(SendPasswordResetEmailJob)
   registerListeners(eventManager)
 
   initialized = true
