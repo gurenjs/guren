@@ -1316,49 +1316,13 @@ const usersTableBlocks: Record<SchemaDialect, string> = {
 `,
 }
 
-const usersTableBlocksWithVerification: Record<SchemaDialect, string> = {
-  sqlite: `export const users = sqliteTable('users', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  name: text('name').notNull(),
-  email: text('email').notNull().unique(),
-  passwordHash: text('password_hash').notNull(),
-  rememberToken: text('remember_token'),
-  emailVerifiedAt: integer('email_verified_at', { mode: 'timestamp' }),
-  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
-  updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
-})
-`,
-  pg: `export const users = pgTable('users', {
-  id: serial('id').primaryKey(),
-  name: text('name').notNull(),
-  email: text('email').notNull().unique(),
-  passwordHash: text('password_hash').notNull(),
-  rememberToken: text('remember_token'),
-  emailVerifiedAt: timestamp('email_verified_at', { withTimezone: false }),
-  createdAt: timestamp('created_at', { withTimezone: false }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: false }).defaultNow().notNull(),
-})
-`,
-  mysql: `export const users = mysqlTable('users', {
-  id: int('id').primaryKey().autoincrement(),
-  name: varchar('name', { length: 255 }).notNull(),
-  email: varchar('email', { length: 255 }).notNull().unique(),
-  passwordHash: varchar('password_hash', { length: 255 }).notNull(),
-  rememberToken: varchar('remember_token', { length: 255 }),
-  emailVerifiedAt: timestamp('email_verified_at'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-})
-`,
-}
-
 const emailVerifiedAtField: Record<SchemaDialect, string> = {
   sqlite: `emailVerifiedAt: integer('email_verified_at', { mode: 'timestamp' }),`,
   pg: `emailVerifiedAt: timestamp('email_verified_at', { withTimezone: false }),`,
   mysql: `emailVerifiedAt: timestamp('email_verified_at'),`,
 }
 
-function ensureVerifyImports(content: string, dialect: SchemaDialect): string {
+function ensureUsersTableImports(content: string, dialect: SchemaDialect): string {
   if (dialect === 'sqlite') {
     return ensureSqliteImports(content, ['sqliteTable', 'integer', 'text'])
   }
@@ -1366,6 +1330,25 @@ function ensureVerifyImports(content: string, dialect: SchemaDialect): string {
     return ensureMysqlImports(content, ['mysqlTable', 'int', 'varchar', 'timestamp'])
   }
   return ensureDrizzleImports(content, ['pgTable', 'serial', 'text', 'timestamp'])
+}
+
+/**
+ * Insert a column definition right after the `rememberToken` column of a
+ * `users` table block, preserving its indentation. Used both to build the
+ * "with verification" variant of a fresh table block and to patch an
+ * existing one — a single source of truth for the splice, instead of
+ * hand-maintaining a second full table-block template per dialect.
+ */
+function insertColumnAfterRememberToken(content: string, fieldLine: string): string | null {
+  const rememberTokenPattern = /^([ \t]*)rememberToken:[^\n]*\n/m
+  let inserted = false
+
+  const updated = content.replace(rememberTokenPattern, (line, indent: string) => {
+    inserted = true
+    return `${line}${indent}${fieldLine}\n`
+  })
+
+  return inserted ? updated : null
 }
 
 async function updateSchema(includeVerify: boolean): Promise<void> {
@@ -1398,32 +1381,31 @@ async function updateSchema(includeVerify: boolean): Promise<void> {
     // Rather than risk mangling a table shape we can't fully parse, insert
     // just the new column next to the rememberToken column we know we
     // generated, preserving its indentation.
-    const rememberTokenPattern = /^([ \t]*)rememberToken:[^\n]*\n/m
-    const match = content.match(rememberTokenPattern)
+    const updated = insertColumnAfterRememberToken(content, emailVerifiedAtField[dialect])
 
-    if (!match) {
+    if (!updated) {
       consola.warn(
         'Could not locate the rememberToken column in db/schema.ts — add `emailVerifiedAt` to your users table manually for email verification.',
       )
       return
     }
 
-    content = ensureVerifyImports(content, dialect)
-    const indent = match[1]
-    content = content.replace(rememberTokenPattern, (line) => `${line}${indent}${emailVerifiedAtField[dialect]}\n`)
+    content = ensureUsersTableImports(updated, dialect)
 
     await writeFile(schemaPath, content, 'utf8')
     consola.info(`Added emailVerifiedAt column to db/schema.ts (${dialect}).`)
     return
   }
 
-  content = ensureVerifyImports(content, dialect)
+  content = ensureUsersTableImports(content, dialect)
 
   // Replace an existing users table that lacks auth columns, or append if
   // absent. Use `})` on its own line as the end anchor to avoid premature
   // matching inside nested function calls like `$defaultFn(() => ...)`.
   const usersTablePattern = /export const users = (?:pgTable|sqliteTable|mysqlTable)\('users',\s*\{[\s\S]*?\n\}\)\s*\n?/
-  const usersTableBlock = includeVerify ? usersTableBlocksWithVerification[dialect] : usersTableBlocks[dialect]
+  const usersTableBlock = includeVerify
+    ? insertColumnAfterRememberToken(usersTableBlocks[dialect], emailVerifiedAtField[dialect])!
+    : usersTableBlocks[dialect]
 
   if (usersTablePattern.test(content)) {
     content = content.replace(usersTablePattern, usersTableBlock)

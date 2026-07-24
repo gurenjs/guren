@@ -249,6 +249,46 @@ export const posts = pgTable('posts', {
     }
   })
 
+  it('inserts emailVerifiedAt next to an existing three-argument pgTable users block', async () => {
+    // Regression test: a whole-block regex replace only matches Drizzle's
+    // two-argument pgTable(name, columns) form. A users table already
+    // carrying auth columns *and* a trailing index callback — the shape
+    // make:auth's own generated schema.ts uses once wired up — must get a
+    // single, in-place column insertion, not a duplicated `users` export.
+    const workspace = await createTempWorkspace('guren-cli-make-auth-verify-existing-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'db/schema.ts'),
+        `import { pgTable, serial, text, uniqueIndex } from 'drizzle-orm/pg-core'
+
+export const users = pgTable(
+  'users',
+  {
+    id: serial('id').primaryKey(),
+    name: text('name').notNull(),
+    email: text('email').notNull(),
+    passwordHash: text('password_hash').notNull(),
+    rememberToken: text('remember_token'),
+  },
+  (table) => [uniqueIndex('users_email_unique').on(table.email)],
+)
+`,
+        'utf8',
+      )
+
+      await makeAuth({ force: true, verify: true })
+
+      const schema = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
+      expect(schema.match(/export const users = pgTable\(/g)).toHaveLength(1)
+      expect(schema).toContain("emailVerifiedAt: timestamp('email_verified_at', { withTimezone: false }),")
+      expect(schema).toContain('uniqueIndex')
+      expect(schema).toContain("(table) => [uniqueIndex('users_email_unique').on(table.email)]")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('warns and skips --verify when combined with --minimal', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-auth-verify-minimal-')
     try {
