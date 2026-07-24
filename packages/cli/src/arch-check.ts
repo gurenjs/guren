@@ -2,7 +2,14 @@ import { access } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import type { Statement } from '@babel/types'
 import { check, type CheckResult, type CheckStatus } from './check-result'
-import { collectFiles, toPosixRelative, NON_SOURCE_DIR_NAMES, IMPORTABLE_EXTENSIONS } from './discovery'
+import {
+  collectFiles,
+  toPosixRelative,
+  listModuleNames,
+  moduleNameFromRelPath,
+  NON_SOURCE_DIR_NAMES,
+  IMPORTABLE_EXTENSIONS,
+} from './discovery'
 import { matchesAnyGlob } from './glob-match'
 import { loadArchConfig } from './arch-config'
 import type { ArchLayers, ArchRule, ArchRuleSet } from './arch/index'
@@ -16,9 +23,10 @@ export interface RunArchCheckOptions {
 }
 
 /**
- * Runs `guren.arch.ts` boundary checks. Returns an empty array when no
- * config file is present — architecture checking is opt-in in Phase 1
- * (module-derived zero-config rules land with the module system).
+ * Runs architecture boundary checks: `guren.arch.ts` rules (opt-in — no
+ * results when the file is absent) plus module-derived zero-config rules
+ * (opt-in via the presence of a `modules/` directory instead). The two are
+ * independent and composed together, never one replacing the other.
  */
 export async function runArchCheck(options: RunArchCheckOptions): Promise<CheckResult[]> {
   const { cwd, cache, changedFiles } = options
@@ -36,11 +44,95 @@ export async function runArchCheck(options: RunArchCheckOptions): Promise<CheckR
     ]
   }
 
-  if (!loaded.config) {
-    return []
+  const derivedResults = await evaluateDerivedModuleRules(cwd, cache, changedFiles)
+  const explicitResults = loaded.config ? await evaluateArchRules(cwd, cache, loaded.config, changedFiles) : []
+
+  return [...derivedResults, ...explicitResults]
+}
+
+/**
+ * Zero-config module boundary rules (RFC 0002 "Derived boundary rules"),
+ * active whenever a `modules/` directory exists — no `guren.arch.ts`
+ * required. Two rules, neither user-authorable (the frozen public rule
+ * vocabulary deliberately has no allow-list primitive; these exist only to
+ * make the zero-config default usable):
+ *
+ * 1. A file inside `modules/<a>/` may not import from `modules/<b>/`,
+ *    except that module's public surface.
+ * 2. Top-level application code may import a module's public surface but
+ *    not its internals.
+ *
+ * **Amended from the RFC's original text:** a module's public surface is
+ * not just `index.ts` — `db/schema.ts` is exempt too, since `make:module`
+ * itself wires the project's root `db/schema.ts` to
+ * `export * from '../modules/<name>/db/schema'`, which the RFC's literal
+ * "except index.ts" wording would otherwise flag as a violation of its own
+ * generator's output.
+ */
+async function evaluateDerivedModuleRules(
+  cwd: string,
+  cache: ParseCache,
+  changedFiles: Set<string> | null | undefined,
+): Promise<CheckResult[]> {
+  const moduleNames = await listModuleNames(cwd)
+  if (moduleNames.length === 0) return []
+
+  const results: CheckResult[] = []
+  const files = await collectFiles(cwd, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES)
+  let filesChecked = 0
+
+  for (const absPath of files) {
+    const relPath = toPosixRelative(cwd, absPath)
+    if (changedFiles && !changedFiles.has(relPath)) continue
+
+    const parsed = await cache.get(absPath)
+    if (!parsed) continue
+
+    const specifiers = extractImportSpecifiers(parsed.ast.program.body)
+    if (specifiers.length === 0) continue
+
+    filesChecked += 1
+    const resolvedImports = await Promise.all(
+      specifiers.map((specifier) => resolveImportSpecifier(cwd, absPath, specifier)),
+    )
+    const importerModule = moduleNameFromRelPath(relPath)
+
+    for (const imp of resolvedImports) {
+      if (imp.kind !== 'file') continue
+
+      const targetModule = moduleNameFromRelPath(imp.fileRelPath)
+      if (!targetModule || targetModule === importerModule) continue
+      if (isModulePublicSurface(imp.fileRelPath, targetModule)) continue
+
+      results.push(
+        check(
+          `arch:module-boundary:${relPath}:${imp.specifier}`,
+          'Module boundary',
+          'fail',
+          `${relPath} imports '${imp.specifier}', reaching into modules/${targetModule}'s internals.`,
+          `Import from modules/${targetModule} (its index.ts) or move the shared code into the module's public API.`,
+          relPath,
+        ),
+      )
+    }
   }
 
-  return evaluateArchRules(cwd, cache, loaded.config, changedFiles)
+  if (results.length === 0) {
+    results.push(
+      check(
+        'arch:module-summary',
+        'Module boundaries',
+        'pass',
+        `Checked ${filesChecked} file(s) across ${moduleNames.length} module(s) — no boundary violations.`,
+      ),
+    )
+  }
+
+  return results
+}
+
+function isModulePublicSurface(relPath: string, moduleName: string): boolean {
+  return relPath === `modules/${moduleName}/index.ts` || relPath === `modules/${moduleName}/db/schema.ts`
 }
 
 async function evaluateArchRules(

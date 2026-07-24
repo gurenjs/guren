@@ -4,6 +4,15 @@ import { dirname, resolve } from 'node:path'
 
 export interface WriterOptions {
   force?: boolean
+  /**
+   * When set (via `--module <name>`), prefixes a generator's output
+   * directory with `modules/<kebab-case root>/` instead of writing to the
+   * project root — e.g. `app/Http/Controllers` becomes
+   * `modules/billing/app/Http/Controllers`. Normalized to kebab-case the
+   * same way `make:module` derives its directory name, so `--module Billing`
+   * and `make:module Billing` target the same `modules/billing/` directory.
+   */
+  root?: string
 }
 
 export type ScaffoldNames = {
@@ -87,7 +96,8 @@ export async function scaffoldFile(name: string, config: ScaffoldConfig, options
   const normalizedName = config.suffix ? ensureSuffix(className, config.suffix) : className
   const baseName = config.fileName ? config.fileName({ rawName: name, className, fileName, normalizedName }) : normalizedName
   const extension = config.extension ?? 'ts'
-  const filePath = extension ? `${config.dir}/${baseName}.${extension}` : `${config.dir}/${baseName}`
+  const dir = options.root ? `modules/${safeModuleName(options.root)}/${config.dir}` : config.dir
+  const filePath = extension ? `${dir}/${baseName}.${extension}` : `${dir}/${baseName}`
   const contents = config.template({ rawName: name, className, fileName, normalizedName })
   return writeFileSafe(filePath, contents, options)
 }
@@ -110,6 +120,29 @@ export function kebabCase(value: string): string {
     .toLowerCase()
 }
 
+const SAFE_MODULE_NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/u
+
+/**
+ * kebab-cases a `--module <name>`/`make:module <name>` value and rejects
+ * anything that would escape the `modules/<name>/` directory it becomes a
+ * path segment of. `kebabCase()` alone doesn't strip `/`, `\`, or `..` — a
+ * name like `../../outside` or `/etc/passwd` would resolve outside the
+ * project root wherever it's interpolated into a scaffold path. Requiring
+ * the result to be one or more alphanumeric segments joined by single
+ * hyphens rejects those, plus anything else that isn't a plain directory
+ * name (empty, all-symbol, leading/trailing hyphen, etc.) in one check.
+ */
+export function safeModuleName(value: string): string {
+  const name = kebabCase(value)
+  if (!SAFE_MODULE_NAME_RE.test(name)) {
+    throw new Error(
+      `Invalid module name "${value}" — it becomes a directory segment under modules/, so it must be one or `
+      + `more alphanumeric segments joined by hyphens (e.g. "billing", "billing-ops").`,
+    )
+  }
+  return name
+}
+
 export function resourceName(value: string): { className: string; fileName: string } {
   const className = pascalCase(value)
   const fileName = kebabCase(value)
@@ -118,4 +151,19 @@ export function resourceName(value: string): { className: string; fileName: stri
 
 export function ensureSuffix(name: string, suffix: string): string {
   return name.endsWith(suffix) ? name : `${name}${suffix}`
+}
+
+const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/u
+
+/**
+ * Builds a `pages.foo.bar` accessor for a scaffolded controller, matching the
+ * nesting/quoting rules pages-types.ts's codegen uses to build the `pages`
+ * object (one key per resources/js/pages/ directory segment, bracket-quoted
+ * when a segment isn't a valid identifier) so generated code references the
+ * same path codegen will actually produce.
+ */
+export function pagesAccessor(...keys: Array<string | undefined>): string {
+  return keys
+    .filter((key): key is string => Boolean(key))
+    .reduce((acc, key) => acc + (IDENTIFIER_RE.test(key) ? `.${key}` : `['${key.replace(/\\/gu, '\\\\').replace(/'/gu, "\\'")}']`), 'pages')
 }

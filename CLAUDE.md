@@ -103,6 +103,10 @@ bunx guren make:feature Post --fields "title:string,body:text" --test  # With te
 bunx guren make:feature Post --fields "title:string" --public  # Skip auth checks in mutating actions
 bunx guren make:feature Post --fields "title:string" --policy  # Also generate a policy and enforce it in store/update
 bunx guren make:policy Post     # Authorization policy scaffold (app/Policies)
+
+# Application modules (RFC 0002) — self-contained modules/<name>/ directories
+bunx guren make:module Billing              # Scaffold modules/billing/{index.ts,routes.ts,db/schema.ts}, wire into src/app.ts
+bunx guren make:controller Invoice --module billing  # Most make:* commands accept --module to scaffold inside a module instead of the project root
 ```
 
 ## Coding Conventions
@@ -346,7 +350,9 @@ export const handler = createLambdaHandler(app)
 | `packages/cli/src/model-list.ts` | AI agent: model introspection |
 | `packages/cli/src/model-parser.ts` | AI agent: Babel AST model parsing |
 | `packages/cli/src/make-feature.ts` | AI agent: CRUD feature scaffolding |
-| `packages/cli/src/discovery.ts` | AI agent: shared file discovery utilities |
+| `packages/cli/src/make-module.ts` | AI agent: application module scaffolding (`make:module`, see RFC 0002) |
+| `packages/cli/src/discovery.ts` | AI agent: shared file discovery utilities (module-aware — scans `modules/*/` too) |
+| `packages/server/src/container/defineModule.ts` | `defineModule()` + `GurenModule` type, auto-exported via `@guren/core` |
 | `packages/cli/src/agent-harness.ts` | AI agent: harness installer (`agent:init` / `agent:sync`) |
 | `packages/cli/templates/agent/` | AI agent: harness template (CLAUDE.md, .claude/ rules, skills, hooks) |
 | `examples/blog/` | Reference implementation |

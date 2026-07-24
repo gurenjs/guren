@@ -1,7 +1,14 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
-import { collectFiles, classNameFromPath, excludeBarrelFiles, discoverTestFiles } from '../src/discovery'
+import {
+  collectFiles,
+  classNameFromPath,
+  excludeBarrelFiles,
+  discoverTestFiles,
+  discoverModelFiles,
+  discoverControllerFiles,
+} from '../src/discovery'
 import { createTempWorkspace } from './helpers'
 
 describe('collectFiles', () => {
@@ -183,6 +190,86 @@ describe('discoverTestFiles', () => {
       const files = await discoverTestFiles(workspace.dir)
 
       expect(files).toHaveLength(0)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+
+describe('module-aware discovery (RFC 0002)', () => {
+  it('includes files under modules/<name>/app/Models alongside app/Models', async () => {
+    const workspace = await createTempWorkspace('guren-cli-discovery-modules-models-')
+
+    try {
+      await mkdir(join(workspace.dir, 'app/Models'), { recursive: true })
+      await writeFile(join(workspace.dir, 'app/Models/User.ts'), 'export class User {}', 'utf8')
+
+      await mkdir(join(workspace.dir, 'modules/billing/app/Models'), { recursive: true })
+      await writeFile(join(workspace.dir, 'modules/billing/app/Models/Invoice.ts'), 'export class Invoice {}', 'utf8')
+
+      const files = await discoverModelFiles(workspace.dir)
+
+      expect(files.some(f => f.endsWith('app/Models/User.ts'))).toBe(true)
+      expect(files.some(f => f.endsWith('modules/billing/app/Models/Invoice.ts'))).toBe(true)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('merges controllers from multiple modules', async () => {
+    const workspace = await createTempWorkspace('guren-cli-discovery-modules-multi-')
+
+    try {
+      await mkdir(join(workspace.dir, 'modules/billing/app/Http/Controllers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'modules/billing/app/Http/Controllers/InvoiceController.ts'),
+        'export default class InvoiceController {}',
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'modules/inventory/app/Http/Controllers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'modules/inventory/app/Http/Controllers/ItemController.ts'),
+        'export default class ItemController {}',
+        'utf8',
+      )
+
+      const files = await discoverControllerFiles(workspace.dir)
+
+      expect(files).toHaveLength(2)
+      expect(files.some(f => f.endsWith('InvoiceController.ts'))).toBe(true)
+      expect(files.some(f => f.endsWith('ItemController.ts'))).toBe(true)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('does not error when modules/ is absent', async () => {
+    const workspace = await createTempWorkspace('guren-cli-discovery-modules-absent-')
+
+    try {
+      await mkdir(join(workspace.dir, 'app/Models'), { recursive: true })
+      await writeFile(join(workspace.dir, 'app/Models/User.ts'), 'export class User {}', 'utf8')
+
+      const files = await discoverModelFiles(workspace.dir)
+
+      expect(files).toHaveLength(1)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('ignores a non-directory entry under modules/', async () => {
+    const workspace = await createTempWorkspace('guren-cli-discovery-modules-file-entry-')
+
+    try {
+      await mkdir(join(workspace.dir, 'modules'), { recursive: true })
+      await writeFile(join(workspace.dir, 'modules/.gitkeep'), '', 'utf8')
+      await mkdir(join(workspace.dir, 'app/Models'), { recursive: true })
+      await writeFile(join(workspace.dir, 'app/Models/User.ts'), 'export class User {}', 'utf8')
+
+      const files = await discoverModelFiles(workspace.dir)
+
+      expect(files).toHaveLength(1)
     } finally {
       await workspace.cleanup()
     }

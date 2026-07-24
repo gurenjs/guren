@@ -24,3 +24,6 @@ export { ServiceProvider, ProviderManager } from './ServiceProvider'
 
 export { definePlugin } from './definePlugin'
 export type { PluginDefinition, PluginFactory } from './definePlugin'
+
+export { defineModule, mountModuleRoutes } from './defineModule'
+export type { ModuleDefinition, GurenModule } from './defineModule'

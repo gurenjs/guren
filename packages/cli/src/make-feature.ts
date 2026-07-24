@@ -1,5 +1,5 @@
 import { consola } from 'consola'
-import { writeFilesSafe, type WriterOptions, pascalCase, kebabCase } from './utils'
+import { writeFilesSafe, type WriterOptions, pascalCase, kebabCase, pagesAccessor, safeModuleName } from './utils'
 import { makeModel } from './make-model'
 import { makePolicy } from './make-policy'
 import { makeTest } from './make-test'
@@ -57,35 +57,44 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   const variableName = singular.charAt(0).toLowerCase() + singular.slice(1)
   const withAuth = !options.publicAccess
   const withPolicy = Boolean(options.withPolicy)
-  const writerOptions: WriterOptions = { force: Boolean(options.force) }
+  const writerOptions: WriterOptions = { force: Boolean(options.force), root: options.root }
+
+  // `--module <name>` moves app/ output under modules/<name>/ (handled by
+  // scaffoldFile for makeModel/makePolicy/makeTest below), but pages are
+  // NOT colocated per RFC 0002's initial scope — they stay under the
+  // top-level resources/js/pages/, namespaced by the module name instead
+  // (resources/js/pages/<module>/<routeName>/...).
+  const moduleName = options.root ? safeModuleName(options.root) : undefined
+  const appPrefix = moduleName ? `modules/${moduleName}/` : ''
+  const pagePrefix = moduleName ? `${moduleName}/` : ''
 
   const created = await writeFilesSafe([
     {
-      path: `app/Http/Validators/${singular}Validator.ts`,
+      path: `${appPrefix}app/Http/Validators/${singular}Validator.ts`,
       contents: generateValidator(singular, collection, fields),
     },
     {
-      path: `app/Http/Resources/${singular}Resource.ts`,
+      path: `${appPrefix}app/Http/Resources/${singular}Resource.ts`,
       contents: generateResource(singular, fields),
     },
     {
-      path: `app/Http/Controllers/${singular}Controller.ts`,
-      contents: generateController(singular, collection, routeName, routeVar, variableName, fields, withAuth, withPolicy),
+      path: `${appPrefix}app/Http/Controllers/${singular}Controller.ts`,
+      contents: generateController(singular, collection, routeName, routeVar, variableName, fields, withAuth, withPolicy, moduleName),
     },
     {
-      path: `resources/js/pages/${routeName}/Index.tsx`,
-      contents: generateIndexPage(singular, collection, routeName, variableName, fields),
+      path: `resources/js/pages/${pagePrefix}${routeName}/Index.tsx`,
+      contents: generateIndexPage(singular, collection, routeName, variableName, fields, appPrefix),
     },
     {
-      path: `resources/js/pages/${routeName}/Show.tsx`,
-      contents: generateShowPage(singular, routeName, variableName, fields),
+      path: `resources/js/pages/${pagePrefix}${routeName}/Show.tsx`,
+      contents: generateShowPage(singular, routeName, variableName, fields, appPrefix),
     },
     {
-      path: `resources/js/pages/${routeName}/New.tsx`,
+      path: `resources/js/pages/${pagePrefix}${routeName}/New.tsx`,
       contents: generateNewPage(singular, routeName, fields),
     },
     {
-      path: `resources/js/pages/${routeName}/Edit.tsx`,
+      path: `resources/js/pages/${pagePrefix}${routeName}/Edit.tsx`,
       contents: generateEditPage(singular, routeName, variableName, fields),
     },
   ], writerOptions)
@@ -119,12 +128,16 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   }
 
   const authSuffix = withAuth ? `.middleware('auth')` : ''
+  const schemaPath = moduleName ? `modules/${moduleName}/db/schema.ts` : 'db/schema.ts'
+  const routesPath = moduleName ? `modules/${moduleName}/routes.ts` : 'routes/web.ts'
+  const controllerImportPath = moduleName ? './app/Http/Controllers' : '../app/Http/Controllers'
+  const validatorImportPath = moduleName ? './app/Http/Validators' : '../app/Http/Validators'
   consola.info('')
   consola.info('Next steps:')
-  consola.info(`  1. Add table definition to db/schema.ts`)
-  consola.info(`  2. Register routes in routes/web.ts with body schemas:`)
-  consola.info(`     import ${singular}Controller from '../app/Http/Controllers/${singular}Controller.js'`)
-  consola.info(`     import { ${singular}PayloadSchema } from '../app/Http/Validators/${singular}Validator.js'`)
+  consola.info(`  1. Add table definition to ${schemaPath}`)
+  consola.info(`  2. Register routes in ${routesPath} with body schemas:`)
+  consola.info(`     import ${singular}Controller from '${controllerImportPath}/${singular}Controller.js'`)
+  consola.info(`     import { ${singular}PayloadSchema } from '${validatorImportPath}/${singular}Validator.js'`)
   if (withAuth) {
     consola.info(`     router.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))`)
   }
@@ -140,16 +153,23 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   consola.info(`  3. Run: bunx guren db:migrate`)
   consola.info(`  4. Run: bunx guren codegen`)
   if (withPolicy) {
+    const modelsBase = moduleName ? `../modules/${moduleName}` : '../app'
     consola.info(`  5. Register the policy in src/app.ts (inside the boot callback):`)
     consola.info(`     import { getGate } from '@guren/core'`)
-    consola.info(`     import { ${singular} } from '../app/Models/${singular}.js'`)
-    consola.info(`     import { ${singular}Policy } from '../app/Policies/${singular}Policy.js'`)
+    consola.info(`     import { ${singular} } from '${modelsBase}/Models/${singular}.js'`)
+    consola.info(`     import { ${singular}Policy } from '${modelsBase}/Policies/${singular}Policy.js'`)
     consola.info(`     getGate().policy(${singular}, ${singular}Policy)`)
   }
   if (withAuth) {
     consola.info('')
     consola.info(`  Note: store/update/destroy call this.auth.userOrFail() — unauthenticated requests get 401.`)
     consola.info(`  Use --public to scaffold without authentication checks.`)
+  }
+  if (moduleName) {
+    consola.info('')
+    consola.info(`  Note: the generated redirects assume this module keeps its default`)
+    consola.info(`  \`prefix: '/${moduleName}'\` from \`make:module\` — update ${singular}Controller.ts`)
+    consola.info(`  if you changed modules/${moduleName}/index.ts's prefix.`)
   }
 
   return created
@@ -264,12 +284,20 @@ function generateController(
   fields: FieldDefinition[],
   withAuth: boolean,
   withPolicy: boolean,
+  moduleName: string | undefined,
 ): string {
   const authGuard = withAuth ? '    await this.auth.userOrFail()\n' : ''
   const createGuard = withPolicy ? `    await this.authorize('create', ${singular})\n` : ''
   const updateGuard = withPolicy
     ? `    await this.authorize('update', [${singular}, await ${singular}.findOrFail(id)])\n`
     : ''
+  const pagesBase = pagesAccessor(moduleName, routeVar)
+  // Redirect targets are plain path strings, not resolved through the typed
+  // route() helper, so — unlike pagesBase above — this can't be verified
+  // against the actual mounted path. Assumes `make:module`'s own default
+  // `prefix: '/<name>'` convention; update these if the module's prefix
+  // was changed after scaffolding.
+  const redirectPrefix = moduleName ? `/${moduleName}` : ''
   const destroyGuard = withPolicy
     ? `    await this.authorize('delete', [${singular}, ${variableName}])\n`
     : ''
@@ -287,7 +315,7 @@ export default class ${singular}Controller extends Controller {
     const result = await ${singular}.paginate({ page, perPage: 10, orderBy: ['id', 'desc'] })
     const paginator = paginate(result, { path: this.request.path ?? '/${routeName}' })
 
-    return this.inertia(pages.${routeVar}.Index, {
+    return this.inertia(${pagesBase}.Index, {
       data: result.data.map((${variableName}) => new ${singular}Resource(${variableName}).toJSON()),
       pagination: {
         meta: paginator.meta(),
@@ -300,25 +328,25 @@ export default class ${singular}Controller extends Controller {
     const { id } = this.validateParams(${singular}IdParamSchema)
     const ${variableName} = await ${singular}.findOrFail(id)
 
-    return this.inertia(pages.${routeVar}.Show, {
+    return this.inertia(${pagesBase}.Show, {
       ${variableName}: new ${singular}Resource(${variableName}).toJSON(),
     })
   }
 
   async create(): Promise<Response> {
-    return this.inertia(pages.${routeVar}.New, {})
+    return this.inertia(${pagesBase}.New, {})
   }
 
   async store(): Promise<Response> {
 ${authGuard}${createGuard}    const data = await this.validateBody(${singular}PayloadSchema)
     const ${variableName} = await ${singular}.create(data)
-    return this.redirect('/${routeName}/' + ${variableName}?.id)
+    return this.redirect('${redirectPrefix}/${routeName}/' + ${variableName}?.id)
   }
 
   async edit(): Promise<Response> {
     const { id } = this.validateParams(${singular}IdParamSchema)
     const ${variableName} = await ${singular}.findOrFail(id)
-    return this.inertia(pages.${routeVar}.Edit, {
+    return this.inertia(${pagesBase}.Edit, {
       ${variableName}: new ${singular}Resource(${variableName}).toJSON(),
       errors: {},
     })
@@ -328,14 +356,14 @@ ${authGuard}${createGuard}    const data = await this.validateBody(${singular}Pa
 ${authGuard}    const { id } = this.validateParams(${singular}IdParamSchema)
 ${updateGuard}    const data = await this.validateBody(${singular}PayloadSchema)
     await ${singular}.update({ id }, data)
-    return this.redirect('/${routeName}/' + id)
+    return this.redirect('${redirectPrefix}/${routeName}/' + id)
   }
 
   async destroy(): Promise<Response> {
 ${authGuard}    const { id } = this.validateParams(${singular}IdParamSchema)
     const ${variableName} = await ${singular}.findOrFail(id)
 ${destroyGuard}    await ${singular}.delete({ id: ${variableName}.id })
-    return this.redirect('/${routeName}')
+    return this.redirect('${redirectPrefix}/${routeName}')
   }
 }
 `
@@ -347,13 +375,14 @@ function generateIndexPage(
   routeName: string,
   variableName: string,
   fields: FieldDefinition[],
+  appPrefix: string,
 ): string {
   const titleField = fields[0]?.name ?? 'id'
   const summaryField = fields.length > 1 ? fields[1]?.name : null
 
   return `import { Link } from '@inertiajs/react'
 import type { PaginatedPageProps } from '@guren/core'
-import type { ${singular}ResourceData } from '@/app/Http/Resources/${singular}Resource'
+import type { ${singular}ResourceData } from '@/${appPrefix}app/Http/Resources/${singular}Resource'
 import { route } from '@/.guren/routes.gen'
 
 interface Props extends PaginatedPageProps<${singular}ResourceData> {}
@@ -393,6 +422,7 @@ function generateShowPage(
   routeName: string,
   variableName: string,
   fields: FieldDefinition[],
+  appPrefix: string,
 ): string {
   const fieldRenders = fields.map((f) => {
     if (f.type === 'boolean') {
@@ -402,7 +432,7 @@ function generateShowPage(
   }).join('\n')
 
   return `import { Link } from '@inertiajs/react'
-import type { ${singular}ResourceData } from '@/app/Http/Resources/${singular}Resource'
+import type { ${singular}ResourceData } from '@/${appPrefix}app/Http/Resources/${singular}Resource'
 import { route } from '@/.guren/routes.gen'
 
 interface Props {

@@ -68,10 +68,17 @@ describe('makeFeature', () => {
       expect(storeBody).toContain('await this.auth.userOrFail()')
       const updateBody = controller.slice(controller.indexOf('async update'), controller.indexOf('async destroy'))
       expect(updateBody).toContain('await this.auth.userOrFail()')
+
+      // Without --module, redirects stay unprefixed — matches the top-level
+      // router.group('/posts', ...) the printed next-steps ask for.
+      expect(controller).toContain("this.redirect('/posts/' + post?.id)")
+      expect(controller).toContain("this.redirect('/posts/' + id)")
+
       const destroyBody = controller.slice(controller.indexOf('async destroy'))
       expect(destroyBody).toContain('await this.auth.userOrFail()')
       expect(destroyBody).toContain('await Post.findOrFail(id)')
       expect(destroyBody).toContain('await Post.delete({ id: post.id })')
+      expect(destroyBody).toContain("this.redirect('/posts')")
     } finally {
       await workspace.cleanup()
     }
@@ -136,6 +143,66 @@ describe('makeFeature', () => {
       expect(showPage).toContain("href={route('posts.destroy', { id: post.id })}")
       expect(showPage).toContain('method="delete"')
       expect(showPage).toContain("onBefore={() => window.confirm('Delete this post?')}")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('scaffolds app/ files under modules/<name>/ but namespaces pages instead of colocating them (--module)', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-module-')
+
+    try {
+      const created = await makeFeature('Invoice', { fields: 'title:string', root: 'billing' })
+
+      // app/ output moves under modules/<name>/ ...
+      expect(created.some((f) => f.endsWith('modules/billing/app/Http/Controllers/InvoiceController.ts'))).toBe(true)
+      expect(created.some((f) => f.endsWith('modules/billing/app/Models/Invoice.ts'))).toBe(true)
+
+      // ... but pages stay top-level, namespaced by module name per RFC 0002's
+      // "pages are not colocated" decision — NOT modules/billing/resources/js/pages/.
+      expect(created.some((f) => f.endsWith('resources/js/pages/billing/invoices/Index.tsx'))).toBe(true)
+      expect(created.some((f) => f.includes('modules/billing/resources'))).toBe(false)
+
+      const controllerContent = await readFile(
+        join(workspace.dir, 'modules/billing/app/Http/Controllers/InvoiceController.ts'),
+        'utf8',
+      )
+      expect(controllerContent).toContain('class InvoiceController')
+
+      // The generated pages.gen.ts nests every resources/js/pages/ directory
+      // segment (see pages-types.ts), so a page at
+      // resources/js/pages/billing/invoices/Index.tsx is reached via
+      // pages.billing.invoices.Index — not pages.invoices.Index. The
+      // controller must reference the module-namespaced path or codegen
+      // output and generated code disagree.
+      expect(controllerContent).toContain('pages.billing.invoices.Index')
+      expect(controllerContent).toContain('pages.billing.invoices.Show')
+      expect(controllerContent).toContain('pages.billing.invoices.New')
+      expect(controllerContent).toContain('pages.billing.invoices.Edit')
+      expect(controllerContent).not.toMatch(/this\.inertia\(pages\.invoices\./)
+
+      // store()/update() redirect to the resource's own show page. Once
+      // --module moves this route under the module's prefix (make:module's
+      // own default is `/<name>`), a bare '/invoices/' + id redirect 404s —
+      // it must match make:module's default prefix.
+      expect(controllerContent).toContain("this.redirect('/billing/invoices/' + invoice?.id)")
+      expect(controllerContent).toContain("this.redirect('/billing/invoices/' + id)")
+      expect(controllerContent).toContain("this.redirect('/billing/invoices')")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('bracket-quotes a module name that is not a valid identifier (--module)', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-module-hyphen-')
+
+    try {
+      const created = await makeFeature('Invoice', { fields: 'title:string', root: 'billing-ops' })
+      const controllerPath = created.find((f) => f.endsWith('modules/billing-ops/app/Http/Controllers/InvoiceController.ts'))
+      expect(controllerPath).toBeDefined()
+
+      const controllerContent = await readFile(controllerPath as string, 'utf8')
+      expect(controllerContent).toContain("pages['billing-ops'].invoices.Index")
     } finally {
       await workspace.cleanup()
     }

@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import type { MiddlewareHandler, ExecutionContext } from 'hono'
 import { Router } from '../mvc/Router'
-import { Container, type ServiceProvider } from '../container'
+import { Container, mountModuleRoutes, type ServiceProvider, type GurenModule } from '../container'
 import { ProviderManager, type ServiceProviderConstructor } from '../container/ServiceProvider'
 import { AuthManager } from '../auth/AuthManager'
 import { AuthServiceProvider } from '../providers/AuthServiceProvider'
@@ -132,6 +132,12 @@ export interface ApplicationOptions {
   readonly auth?: AuthPluginOptions
   readonly discover?: boolean
   readonly routes?: RouteRegistration
+  /**
+   * Application modules (RFC 0002) — each module's providers are appended
+   * to `providers` below, and its route registrar runs after `routes`
+   * (wrapped in `router.group(prefix, ...)` when the module declares one).
+   */
+  readonly modules?: GurenModule[]
   readonly features?: ApplicationFeatures
   /**
    * Configure or disable the default security headers middleware.
@@ -232,7 +238,15 @@ export class Application {
     // below can resolve 'gate' from the container or use getGate().
     this.providerManager.register(AuthorizationServiceProvider)
 
-    const userProviders = Array.isArray(this.options.providers) ? this.options.providers : []
+    // Module providers register through the same registerMany() call as
+    // options.providers, before the Error/Inertia override checks below —
+    // so a module-supplied ErrorServiceProvider/InertiaServiceProvider
+    // subclass is recognized just like a top-level one.
+    const moduleProviders = (this.options.modules ?? []).flatMap((module) => module.providers)
+    const userProviders = [
+      ...(Array.isArray(this.options.providers) ? this.options.providers : []),
+      ...moduleProviders,
+    ]
 
     // Exception rendering is on by default so HttpExceptions map to their
     // status codes (404/422/403) instead of opaque 500s. Registered before
@@ -284,9 +298,16 @@ export class Application {
    * Mounts the application router onto the Hono instance.
    */
   async mountRoutes(): Promise<void> {
-    if (this.options.routes && !this.routesRegistered) {
-      // Don't clear — preserve routes added directly to app.router before boot()
-      await this.options.routes(this.router)
+    if (!this.routesRegistered) {
+      if (this.options.routes) {
+        // Don't clear — preserve routes added directly to app.router before boot()
+        await this.options.routes(this.router)
+      }
+
+      for (const gurenModule of this.options.modules ?? []) {
+        await mountModuleRoutes(this.router, gurenModule)
+      }
+
       this.routesRegistered = true
     }
 

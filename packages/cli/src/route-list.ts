@@ -61,7 +61,7 @@ export async function listRoutes(options: RouteListOptions = {}): Promise<RouteI
 
   let definitions
   try {
-    definitions = await loadRouteDefinitions(routesFile)
+    definitions = await loadRouteDefinitions(routesFile, appRoot)
   } catch (error) {
     throw new Error(
       `Failed to import routes file (${routesFile}): ${error instanceof Error ? error.message : String(error)}`

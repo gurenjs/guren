@@ -387,6 +387,27 @@ export default function registerRoutes(router: any) {
     }
   })
 
+  it('detects hardcoded credentials inside a module (RFC 0002)', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-secret-module-')
+
+    try {
+      await mkdir(join(workspace.dir, 'modules/billing'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'modules/billing/config.ts'),
+        `export const apiKey = 'sk-live-1234567890abcdef'\n`,
+        'utf8',
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const secret = report.findings.find(f => f.key.startsWith('secret:modules/billing/config.ts'))
+      expect(secret).toBeDefined()
+      expect(secret!.status).toBe('fail')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('suppresses findings marked with guren-audit-ignore', async () => {
     const workspace = await createTempWorkspace('guren-cli-audit-ignore-')
 
@@ -544,6 +565,48 @@ export const users = pgTable('users', {
       expect(hidden!.message).toContain('rememberToken')
       expect(hidden!.message).not.toContain('passwordHash,')
       expect(hidden!.suggestion).toContain("'rememberToken'")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('checks sensitive columns for a model backed by a module schema (RFC 0002)', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-hidden-module-')
+
+    try {
+      // make:module wires modules/<name>/db/schema.ts into the root
+      // db/schema.ts via `export * from ...` — the table itself is declared
+      // in the module's schema file, not the root one.
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'db/schema.ts'), `export * from '../modules/billing/db/schema'\n`, 'utf8')
+
+      await mkdir(join(workspace.dir, 'modules/billing/db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'modules/billing/db/schema.ts'),
+        `import { pgTable, text } from 'drizzle-orm/pg-core'
+export const invoices = pgTable('invoices', {
+  id: text('id').primaryKey(),
+  title: text('title').notNull(),
+  cardToken: text('card_token').notNull(),
+})`,
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'modules/billing/app/Models'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'modules/billing/app/Models/Invoice.ts'),
+        `export class Invoice {
+  static table = invoices
+  static fillable = ['title']
+}`,
+        'utf8',
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const hidden = report.findings.find(f => f.key === 'hidden-columns:Invoice')
+      expect(hidden).toBeDefined()
+      expect(hidden!.status).toBe('warn')
+      expect(hidden!.message).toContain('cardToken')
     } finally {
       await workspace.cleanup()
     }
@@ -777,6 +840,133 @@ export const users = pgTable('users', {
       const loadWarning = report.findings.find(f => f.key === 'routes:load')
       expect(loadWarning).toBeDefined()
       expect(loadWarning!.status).toBe('warn')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('reports a structured finding — not just a console warning — when a module fails to load', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-module-load-fail-')
+
+    try {
+      await writeRoutes(workspace.dir, `export default function registerRoutes(_router: any) {}`)
+
+      // A module directory whose index.ts fails to import (references a
+      // file that doesn't exist) must not make the audit report look clean —
+      // its routes went entirely unchecked.
+      await mkdir(join(workspace.dir, 'modules/billing'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'modules/billing/index.ts'),
+        `import { registerBillingRoutes } from './does-not-exist'
+export const billingModule = { name: 'billing', providers: [], routes: registerBillingRoutes }`,
+        'utf8',
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      expect(report.routesAnalyzed).toBe(true)
+      const moduleWarning = report.findings.find(f => f.key.startsWith('routes:module-load:'))
+      expect(moduleWarning).toBeDefined()
+      expect(moduleWarning!.status).toBe('warn')
+      expect(moduleWarning!.message).toContain('modules/billing/index.ts')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('fails when two controllers across different modules share a class name', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-controller-collision-')
+
+    try {
+      await writeRoutes(workspace.dir, `export default function registerRoutes(_router: any) {}`)
+
+      await mkdir(join(workspace.dir, 'modules/billing/app/Http/Controllers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'modules/billing/app/Http/Controllers/PostController.ts'),
+        `export default class PostController {
+  async store() {
+    const data = await this.validateBody(schema)
+    return null
+  }
+}`,
+        'utf8',
+      )
+
+      await mkdir(join(workspace.dir, 'modules/inventory/app/Http/Controllers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'modules/inventory/app/Http/Controllers/PostController.ts'),
+        `export default class PostController {
+  async store() {
+    const data = await this.request.json()
+    return null
+  }
+}`,
+        'utf8',
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const collision = report.findings.find(f => f.key === 'controller-name-collision:PostController')
+      expect(collision).toBeDefined()
+      expect(collision!.status).toBe('fail')
+      expect(collision!.message).toContain('modules/billing/app/Http/Controllers/PostController.ts')
+      expect(collision!.message).toContain('modules/inventory/app/Http/Controllers/PostController.ts')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('audits mutating routes registered inside a module (RFC 0002), not just the top-level routes file', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-module-')
+
+    try {
+      // Top-level routes file has no routes of its own — the mutating route
+      // under test lives entirely inside modules/billing/.
+      await writeRoutes(
+        workspace.dir,
+        `export default function registerRoutes(_router: any) {}`,
+      )
+
+      await mkdir(join(workspace.dir, 'modules/billing/app/Http/Controllers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'modules/billing/app/Http/Controllers/InvoiceController.ts'),
+        `export default class InvoiceController {
+  async store() {
+    const data = await this.request.json()
+    return null
+  }
+}`,
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'modules/billing/routes.ts'),
+        `class InvoiceController {
+  async store() { return null }
+}
+export function registerBillingRoutes(router: any) {
+  router.post('/invoices', [InvoiceController, 'store'])
+}`,
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'modules/billing/index.ts'),
+        `import { registerBillingRoutes } from './routes'
+
+export const billingModule = {
+  name: 'billing',
+  providers: [],
+  routes: registerBillingRoutes,
+}`,
+        'utf8',
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      expect(report.routesAnalyzed).toBe(true)
+      const validation = report.findings.find(f => f.key === 'validation:POST /invoices')
+      expect(validation).toBeDefined()
+      expect(validation!.status).toBe('fail')
+      expect(validation!.message).toContain('InvoiceController')
     } finally {
       await workspace.cleanup()
     }

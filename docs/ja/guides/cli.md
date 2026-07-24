@@ -142,6 +142,42 @@ bunx guren check --changed   # main とのマージベースからの変更フ�
 
 プロジェクト内のファイルに解決できないimportは、失敗ではなく警告として報告されます — 解決できないパスがビルドをブロックすることはありません。
 
+## アプリケーションモジュール
+
+ルート数が数十を超えて増えてくると、`guren make:module` を使うことで、フラットな `app/`・`routes/`・`db/schema.ts` に全部を詰め込む代わりに、アプリの自己完結した一部分を切り出せます:
+
+```bash
+bunx guren make:module Billing
+```
+
+これにより `modules/billing/{index.ts, routes.ts, db/schema.ts}` が生成され、自動的に配線されます: `db/schema.ts` には `export * from '../modules/billing/db/schema'` が追加され、`src/app.ts` には `billingModule` の import と `createApp({ modules: [...] })` への登録が追加されます。
+
+ほとんどの `make:*` コマンドは `--module <name>` を受け付け、プロジェクトルートの代わりにモジュール内にスキャフォールドできます:
+
+```bash
+bunx guren make:controller Invoice --module billing   # modules/billing/app/Http/Controllers/InvoiceController.ts
+bunx guren make:model Invoice --module billing        # modules/billing/app/Models/Invoice.ts
+```
+
+`guren check`・`guren audit`・`guren context`・`model:list`・`doctor` はすべて `modules/*/` を自動的にスキャンします — 追加設定は不要です。例外は2つ: `make:auth`(認証はモジュール単位ではなくアプリ全体の関心事)と `make:migration`(drizzle-kit 駆動で、`drizzle.config.ts` が指すスキーマパスからマイグレーションを生成するため、モジュールの有無を問いません)。
+
+モジュールの公開APIは、`defineModule()` の記述をexportする `index.ts` と、モジュール間で共有されるテーブル定義用の `db/schema.ts` です。`modules/` ディレクトリが存在すれば、`guren.arch.ts` なしでも `guren check` がこれを自動的に強制します: あるモジュールが別モジュールの内部(`index.ts` と `db/schema.ts` 以外)に踏み込んでimportすると失敗になり、トップレベルのアプリコードが同じことをしても同様に失敗します。
+
+```typescript
+// modules/billing/index.ts
+import { defineModule } from '@guren/core'
+import { registerBillingRoutes } from './routes'
+
+export const billingModule = defineModule({
+  name: 'billing',
+  prefix: '/billing',            // レジストラが宣言する全ルートに付与する任意のURLプレフィックス
+  routes: registerBillingRoutes,
+  providers: [BillingServiceProvider],  // 任意 — アプリのプロバイダ一覧に追加される
+})
+```
+
+Inertiaのページは `modules/<name>/` 配下にコロケーションされません — トップレベルの `resources/js/pages/` にそのまま置かれ、代わりにモジュール名で名前空間分けされます(`resources/js/pages/billing/Invoices/Index.tsx`)。`make:feature Invoice --module billing` はこの規約に自動的に従います。
+
 ## AIエージェントハーネス
 
 `create-guren-app` で作成したアプリには、AIエージェント向けのハーネスが最初から組み込まれます。内容は、プロジェクトガイドの `CLAUDE.md`、`.claude/` 配下の検証済みAPIルール・スキル・サブエージェント、開発サーバーの MCP エンドポイントを指す `.mcp.json`、そしてフィードバックループを構成する hooks です。セッション開始時に `guren context` のプロジェクトマップが読み込まれ、ルート・コントローラ・モデル・スキーマ・ページの編集後には `guren check` が自動で再実行され、失敗があればその場でコーディングエージェントに報告されます。

@@ -35,7 +35,10 @@ bunx guren make:channel <Name> [--private|--presence]
 bunx guren make:notification <Name>
 bunx guren make:migration <name>
 bunx guren make:route <Name>
+bunx guren make:module <Name>       # scaffolds modules/<name>/ (see below)
 ```
+
+If the project has a `modules/` directory, check whether the component belongs inside an existing module before scaffolding at the project root — most `make:*` commands accept `--module <name>` to output into `modules/<name>/` instead (e.g. `bunx guren make:controller Invoice --module billing`). `make:auth` and `make:migration` don't take `--module`.
 
 ## Workflow
 

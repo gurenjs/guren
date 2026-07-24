@@ -7,6 +7,8 @@ import {
   fileExists,
   classNameFromPath,
   toPosixRelative,
+  listModuleNames,
+  moduleNameFromRelPath,
 } from './discovery'
 import { ParseCache } from './parse-cache'
 import { runArchCheck } from './arch-check'
@@ -31,6 +33,65 @@ export interface RunCheckOptions {
    * Falls back to checking everything when not in a git repo.
    */
   changed?: boolean
+}
+
+/**
+ * Module name (e.g. `'billing'`) if `filePath` is under `modules/<name>/`,
+ * else `null`. Lets checks that assume a single project-root file (tests,
+ * schema) resolve the right module-scoped equivalent instead of always
+ * looking at the top level.
+ */
+function moduleNameFor(cwd: string, filePath: string): string | null {
+  return moduleNameFromRelPath(toPosixRelative(cwd, filePath))
+}
+
+/**
+ * Verifies every `modules/<name>/db/schema.ts` is re-exported from the
+ * project's root `db/schema.ts` — the wiring `make:module` performs
+ * automatically (RFC 0002). A module without a `db/schema.ts` is skipped
+ * (nothing to aggregate); a project without a root `db/schema.ts` warns
+ * rather than failing, since not every app uses a database.
+ */
+async function checkModuleSchemaAggregation(cwd: string): Promise<CheckResult[]> {
+  const results: CheckResult[] = []
+  const moduleNames = await listModuleNames(cwd)
+
+  for (const moduleName of moduleNames) {
+    const moduleSchemaPath = `modules/${moduleName}/db/schema.ts`
+    if (!(await fileExists(cwd, moduleSchemaPath))) continue
+
+    const rootSchemaPath = 'db/schema.ts'
+    if (!(await fileExists(cwd, rootSchemaPath))) {
+      results.push(
+        check(
+          `module-schema-aggregation:${moduleName}`,
+          `${moduleName} schema aggregation`,
+          'warn',
+          `${moduleSchemaPath} exists but there is no root ${rootSchemaPath} to re-export it from.`,
+          `Create ${rootSchemaPath} and add: export * from '../modules/${moduleName}/db/schema'`,
+        ),
+      )
+      continue
+    }
+
+    const rootSchemaContent = await readFile(resolve(cwd, rootSchemaPath), 'utf-8')
+    // Substring match, tolerant of quote style and a trailing .js/.ts extension.
+    const isReExported = rootSchemaContent.includes(`modules/${moduleName}/db/schema`)
+
+    results.push(
+      check(
+        `module-schema-aggregation:${moduleName}`,
+        `${moduleName} schema aggregation`,
+        isReExported ? 'pass' : 'warn',
+        isReExported
+          ? `${rootSchemaPath} re-exports ${moduleSchemaPath}.`
+          : `${rootSchemaPath} does not re-export ${moduleSchemaPath}.`,
+        isReExported ? undefined : `Add to ${rootSchemaPath}: export * from '../modules/${moduleName}/db/schema'`,
+      ),
+    )
+  }
+
+  return results
 }
 
 export async function runCheck(options: RunCheckOptions = {}): Promise<CheckReport> {
@@ -63,9 +124,11 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     for (const filePath of modelFiles) {
       const relPath = relative(cwd, filePath)
       const name = classNameFromPath(filePath)
-      const hasSchema = await fileExists(cwd, 'db/schema.ts')
+      const moduleName = moduleNameFor(cwd, filePath)
+      const schemaPath = moduleName ? `modules/${moduleName}/db/schema.ts` : 'db/schema.ts'
+      const hasSchema = await fileExists(cwd, schemaPath)
       if (hasSchema) {
-        const schemaContent = await readFile(resolve(cwd, 'db/schema.ts'), 'utf-8')
+        const schemaContent = await readFile(resolve(cwd, schemaPath), 'utf-8')
         const tableLower = name.toLowerCase() + 's'
         const hasTable = schemaContent.includes(`'${tableLower}'`) || schemaContent.includes(`"${tableLower}"`)
         checks.push(
@@ -73,8 +136,8 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
             `model-schema:${name}`,
             `${name} schema`,
             hasTable ? 'pass' : 'warn',
-            hasTable ? `Table definition found for ${name}.` : `No table '${tableLower}' found in db/schema.ts.`,
-            hasTable ? undefined : `Add table definition to db/schema.ts for ${name}.`,
+            hasTable ? `Table definition found for ${name}.` : `No table '${tableLower}' found in ${schemaPath}.`,
+            hasTable ? undefined : `Add table definition to ${schemaPath} for ${name}.`,
             relPath,
           ),
         )
@@ -84,10 +147,12 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // 4. Check missing test files for controllers
     for (const filePath of controllerFiles) {
       const name = classNameFromPath(filePath)
+      const moduleName = moduleNameFor(cwd, filePath)
+      const prefix = moduleName ? `modules/${moduleName}/` : ''
       const testCandidates = [
-        `tests/controllers/${name}.test.ts`,
-        `tests/${name}.test.ts`,
-        `app/Http/Controllers/${name}.test.ts`,
+        `${prefix}tests/controllers/${name}.test.ts`,
+        `${prefix}tests/${name}.test.ts`,
+        `${prefix}app/Http/Controllers/${name}.test.ts`,
       ]
       let hasTest = false
       for (const candidate of testCandidates) {
@@ -96,13 +161,14 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
           break
         }
       }
+      const moduleFlag = moduleName ? ` --module ${moduleName}` : ''
       checks.push(
         check(
           `test:${name}`,
           `${name} tests`,
           hasTest ? 'pass' : 'warn',
           hasTest ? `Test file found for ${name}.` : `No test file found for ${name}.`,
-          hasTest ? undefined : `Run: bunx guren make:test ${name.replace('Controller', '')} --controller`,
+          hasTest ? undefined : `Run: bunx guren make:test ${name.replace('Controller', '')} --controller${moduleFlag}`,
         ),
       )
     }
@@ -121,9 +187,17 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
         ),
       )
     }
+
+    // 6. Check every module's db/schema.ts is re-exported from the root
+    // db/schema.ts (the wiring make:module performs automatically — this
+    // catches modules created or edited by hand). Not an architecture
+    // boundary rule, so it stays out of `--arch`'s fast path alongside
+    // checks 1-5.
+    const schemaAggregationResults = await checkModuleSchemaAggregation(cwd)
+    checks.push(...schemaAggregationResults)
   }
 
-  // 6. Check architecture boundaries (guren.arch.ts + derived module rules)
+  // 7. Check architecture boundaries (guren.arch.ts + derived module rules)
   const archResults = await runArchCheck({ cwd, cache, changedFiles })
   checks.push(...archResults)
 

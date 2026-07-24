@@ -38,27 +38,29 @@ export async function addImport(
   let insertIndex = 0
   let lastImportIndex = -1
   let inMultilineImport = false
-  // Matches the line that closes an import statement, e.g. `} from '@guren/core'`,
-  // `import { x } from 'y';`, or a bare side-effect import `import '../config/x.js'`.
-  const importCloses = /(^import\s+['"][^'"]*['"]|from\s+['"][^'"]*['"])\s*;?\s*$/
+  let braceDepth = 0
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim()
+    const line = lines[i]
+    const trimmed = line.trim()
+    const braceDelta = (line.match(/\{/g)?.length ?? 0) - (line.match(/\}/g)?.length ?? 0)
 
     if (inMultilineImport) {
       lastImportIndex = i
-      if (importCloses.test(line)) {
+      braceDepth += braceDelta
+      if (braceDepth <= 0) {
         inMultilineImport = false
       }
       continue
     }
 
-    if (line.startsWith('import ') || line.startsWith("import'") || line.startsWith('import"')) {
+    if (trimmed.startsWith('import ') || trimmed.startsWith('import{') || trimmed.startsWith("import'") || trimmed.startsWith('import"')) {
       lastImportIndex = i
-      if (!importCloses.test(line)) {
+      braceDepth = braceDelta
+      if (braceDepth > 0) {
         inMultilineImport = true
       }
-    } else if (lastImportIndex >= 0 && line.length > 0 && !line.startsWith('//')) {
+    } else if (lastImportIndex >= 0 && trimmed.length > 0 && !trimmed.startsWith('//')) {
       break
     }
   }
@@ -115,6 +117,57 @@ export async function addProvider(
     providersArrayPattern,
     `providers: [${newProvidersContent}]`,
   )
+
+  await writeFile(absolutePath, updatedContent, 'utf8')
+  return { modified: true }
+}
+
+/**
+ * Adds an entry to an arbitrary array-valued `createApp({ ... })` option
+ * (e.g. `modules: [...]`), creating the option (via `addCreateAppOption`)
+ * if it isn't present at all yet. Generalizes `addProvider`'s array-editing
+ * logic to a caller-supplied `key` instead of the hardcoded `providers:`.
+ *
+ * `addProvider` is kept as its own independent implementation rather than
+ * delegating here, to avoid changing its existing behavior (it fails with
+ * `'Could not find providers array'` when the array is absent, rather than
+ * creating one) for its existing callers.
+ */
+export async function addToArrayOption(
+  filePath: string,
+  key: string,
+  valueSource: string,
+): Promise<PatchResult> {
+  const absolutePath = resolve(process.cwd(), filePath)
+  let content: string
+
+  try {
+    content = await readFile(absolutePath, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { modified: false, reason: 'File not found' }
+    }
+    throw error
+  }
+
+  const arrayPattern = new RegExp(`${key}:\\s*\\[([\\s\\S]*?)\\]`)
+  const match = content.match(arrayPattern)
+
+  if (!match) {
+    return addCreateAppOption(filePath, key, `[${valueSource}]`)
+  }
+
+  const entries = match[1]
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0)
+
+  if (entries.some((entry) => entry === valueSource)) {
+    return { modified: false, reason: 'Already present' }
+  }
+
+  entries.push(valueSource)
+  const updatedContent = content.replace(arrayPattern, `${key}: [${entries.join(', ')}]`)
 
   await writeFile(absolutePath, updatedContent, 'utf8')
   return { modified: true }

@@ -20,6 +20,7 @@ import { makeMiddleware } from './make-middleware'
 import { makePolicy } from './make-policy'
 import { makeMigration } from './make-migration'
 import { makeModel } from './make-model'
+import { makeModule } from './make-module'
 import { makeNotification } from './make-notification'
 import { makeProvider } from './make-provider'
 import { makeResource } from './make-resource'
@@ -58,12 +59,19 @@ import { installAgentHarness, type AgentHarnessResult } from './agent-harness'
 import { makeFeature, parseFieldsString } from './make-feature'
 import { generateKeyValue, writeKeyToEnv } from './key-generate'
 
-type ForceableArgs = { force?: boolean }
+type ForceableArgs = { force?: boolean; module?: string }
 
 function toWriterOptions(args: ForceableArgs): WriterOptions {
   return {
     force: Boolean(args.force),
+    root: args.module,
   }
+}
+
+const MODULE_ARG = {
+  type: 'string' as const,
+  description: 'Scaffold inside modules/<name>/ instead of the project root.',
+  alias: 'M',
 }
 
 function createMakeCommand(
@@ -78,6 +86,7 @@ function createMakeCommand(
     args: {
       name: { type: 'positional', required: true, description: argDescription },
       force: { type: 'boolean', description: 'Overwrite existing files', alias: 'f' },
+      module: MODULE_ARG,
     },
     async run({ args }) {
       const file = await makeFn(args.name, toWriterOptions(args))
@@ -188,6 +197,7 @@ const makeTestCommand = defineCommand({
       description: 'Overwrite existing files',
       alias: 'f',
     },
+    module: MODULE_ARG,
   },
   async run({ args }) {
     const runnerArg = args.runner?.toLowerCase()
@@ -246,6 +256,35 @@ const makeAuthCommand = defineCommand({
   },
 })
 
+const makeModuleCommand = defineCommand({
+  meta: {
+    name: 'make:module',
+    description: 'Scaffold a modules/<name>/ directory and wire it into src/app.ts.',
+  },
+  args: {
+    name: {
+      type: 'positional',
+      required: true,
+      description: 'Module name (e.g., billing)',
+    },
+    force: {
+      type: 'boolean',
+      description: 'Overwrite existing files',
+      alias: 'f',
+    },
+  },
+  async run({ args }) {
+    const { moduleDir, filesCreated } = await makeModule(args.name, toWriterOptions(args))
+    for (const file of filesCreated) {
+      consola.success(`Created ${file}`)
+    }
+    consola.info(`Scaffold new components inside it with --module ${args.name}, e.g.:`)
+    consola.info(`  bunx guren make:controller Invoice --module ${args.name}`)
+    consola.info(`  bunx guren make:model Invoice --module ${args.name}`)
+    consola.info(`Module directory: ${moduleDir}`)
+  },
+})
+
 const makeListenerCommand = defineCommand({
   meta: {
     name: 'make:listener',
@@ -267,11 +306,13 @@ const makeListenerCommand = defineCommand({
       description: 'Overwrite existing files',
       alias: 'f',
     },
+    module: MODULE_ARG,
   },
   async run({ args }) {
     const { makeListener: makeListenerFn } = await import('./make-listener')
     const file = await makeListenerFn(args.name, {
       force: Boolean(args.force),
+      root: args.module,
       event: args.event,
     })
     consola.success(`Listener created at ${file}`)
@@ -299,10 +340,12 @@ const makeResourceCommand = defineCommand({
       description: 'Overwrite existing files',
       alias: 'f',
     },
+    module: MODULE_ARG,
   },
   async run({ args }) {
     const file = await makeResource(args.name, {
       force: Boolean(args.force),
+      root: args.module,
       model: args.model,
     })
     consola.success(`Resource created at ${file}`)
@@ -330,10 +373,12 @@ const makeFactoryCommand = defineCommand({
       description: 'Overwrite existing files',
       alias: 'f',
     },
+    module: MODULE_ARG,
   },
   async run({ args }) {
     const file = await makeFactory(args.name, {
       force: Boolean(args.force),
+      root: args.module,
       model: args.model,
     })
     consola.success(`Factory created at ${file}`)
@@ -361,10 +406,12 @@ const makeConsoleCommandCommand = defineCommand({
       description: 'Overwrite existing files',
       alias: 'f',
     },
+    module: MODULE_ARG,
   },
   async run({ args }) {
     const file = await makeCommand(args.name, {
       force: Boolean(args.force),
+      root: args.module,
       command: args.command,
     })
     consola.success(`Command created at ${file}`)
@@ -400,10 +447,12 @@ const makeChannelCommand = defineCommand({
       description: 'Overwrite existing files',
       alias: 'f',
     },
+    module: MODULE_ARG,
   },
   async run({ args }) {
     const file = await makeChannel(args.name, {
       force: Boolean(args.force),
+      root: args.module,
       channel: args.channel,
       private: Boolean(args.private),
       presence: Boolean(args.presence),
@@ -438,10 +487,12 @@ const makeExceptionCommand = defineCommand({
       description: 'Overwrite existing files',
       alias: 'f',
     },
+    module: MODULE_ARG,
   },
   async run({ args }) {
     const file = await makeException(args.name, {
       force: Boolean(args.force),
+      root: args.module,
       status: args.status ? parseInt(args.status, 10) : undefined,
       message: args.message,
     })
@@ -1792,11 +1843,13 @@ const makeFeatureCommand = defineCommand({
       type: 'boolean',
       description: 'Also generate an authorization policy and enforce it in store/update/destroy.',
     },
+    module: MODULE_ARG,
   },
   async run({ args }) {
     await makeFeature(args.name as string, {
       fields: args.fields,
       force: Boolean(args.force),
+      root: args.module,
       withTest: Boolean(args.test),
       publicAccess: Boolean(args.public),
       withPolicy: Boolean(args.policy),
@@ -2251,6 +2304,7 @@ const deployCommand = defineCommand({
 const builtinSubCommands = {
   ...makeCommands,
   'make:auth': makeAuthCommand,
+  'make:module': makeModuleCommand,
   'make:channel': makeChannelCommand,
   'make:command': makeConsoleCommandCommand,
   'make:exception': makeExceptionCommand,

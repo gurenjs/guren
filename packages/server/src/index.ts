@@ -634,10 +634,14 @@ export {
   ServiceProvider,
   ProviderManager,
   definePlugin,
+  defineModule,
+  mountModuleRoutes,
 } from './container'
 export type {
   PluginDefinition,
   PluginFactory,
+  ModuleDefinition,
+  GurenModule,
   ServiceFactory,
   ServiceClass,
   ServiceBinding,
