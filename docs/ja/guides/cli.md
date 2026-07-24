@@ -56,7 +56,7 @@ bunx guren plugin @acme/guren-plugin-audit
 | `make:controller <Name>` | `app/Http/Controllers` にコントローラーを生成 | `bunx guren make:controller PostController` |
 | `make:model <Name>` | 最小のモデルクラスと型定義を `app/Models` に生成（`db/schema` から `camelCase(Name)s` を import） | `bunx guren make:model Post` |
 | `make:view <path>` | `resources/js/pages` に React コンポーネントを生成 | `bunx guren make:view posts/Index` |
-| `make:auth` | ログイン/ログアウト・新規登録・パスワードリセットのコントローラー、プロバイダー、ビュー、マイグレーション、シーダー、ルートをスキャフォールド（`--minimal` で登録・パスワードリセットを省略、`--verify` でメール確認も追加） | `bunx guren make:auth` |
+| `make:auth` | ログイン/ログアウト・新規登録・パスワードリセットのコントローラー、プロバイダー、ビュー、マイグレーション、シーダー、ルートをスキャフォールド（`--minimal` で登録・パスワードリセットを省略、`--verify` でメール確認も追加、`--oauth <providers>` でカンマ区切りのプロバイダー向け OAuth ログインボタンも追加） | `bunx guren make:auth --oauth github,google` |
 | `make:middleware <Name>` | `app/Http/Middleware` にミドルウェアを生成 | `bunx guren make:middleware Auth` |
 | `make:seeder <Name>` | データベースシーダーファイルを生成 | `bunx guren make:seeder UserSeeder` |
 | `make:job <Name>` | キュー可能なジョブクラスを生成 | `bunx guren make:job SendEmail` |

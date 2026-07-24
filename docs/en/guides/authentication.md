@@ -55,9 +55,21 @@ bunx guren make:auth --install --verify
 
 This adds an `emailVerifiedAt` column to the `users` table, a `VerifyEmailController` (shows a "check your email" notice, resends the verification link, and confirms the token), and a `VerifyEmail` page. Registering now sends a verification email and redirects to `/verify-email` instead of `/dashboard`, and the generated `/dashboard` route is guarded with `requireVerifiedEmail` — unverified users are redirected back to `/verify-email` until they confirm. Verification links use the same in-memory store and `log`-driver mail setup as password reset, so this also works with zero setup in development. `--verify` requires the default (non-minimal) experience, since it builds on the registration flow.
 
+### OAuth login buttons
+
+Pass `--oauth` with a comma-separated provider list to also scaffold "Continue with GitHub / Google / Discord" buttons on the login (and, unless `--minimal` is set, registration) pages:
+
+```bash
+bunx guren make:auth --install --oauth github,google
+```
+
+This adds a `githubId` / `googleId` column per provider to the `users` table, an `OAuthProvider` that registers each provider against the shared `OAuthManager` (only once its client ID, secret, and redirect URI are all set — see [OAuth / Social login](#oauth-social-login) below for the env var names), and an `OAuthController` with `redirectToProvider` and `callback` actions. The callback looks up the user by provider ID, links to an existing account of the same email only when a fresh signup is unambiguous (otherwise it rejects the login with "sign in with your password instead" rather than silently linking an unverified email), and otherwise creates a new account with a random password before logging the user in. Unlike `--verify`, `--oauth` works with `--minimal` — it doesn't depend on the registration scaffold.
+
+`--oauth` shares its `OAuthController` / `OAuthProvider` file paths and wiring conventions with `guren add oauth` below, just with a complete (not stub) callback — don't run both against the same app, since the second run either aborts (no `--force`) or overwrites the first (`--force`).
+
 ## OAuth / Social login
 
-Guren ships first-party OAuth primitives plus provider presets for GitHub / Google / Discord.
+Guren ships first-party OAuth primitives plus provider presets for GitHub / Google / Discord. This is a lower-level, standalone scaffold — for OAuth buttons wired directly into `make:auth`'s login/registration pages with automatic account creation, see [OAuth login buttons](#oauth-login-buttons) above instead.
 
 ### Scaffold OAuth in an app
 

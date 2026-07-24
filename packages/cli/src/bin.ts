@@ -247,6 +247,10 @@ const makeAuthCommand = defineCommand({
       type: 'boolean',
       description: 'Also scaffold email verification (requires the default, non-minimal experience)',
     },
+    oauth: {
+      type: 'string',
+      description: 'Also scaffold OAuth login buttons for the given comma-separated providers (github, google, discord)',
+    },
   },
   async run({ args }) {
     const files = await makeAuth({
@@ -254,6 +258,7 @@ const makeAuthCommand = defineCommand({
       install: Boolean(args.install),
       minimal: Boolean(args.minimal),
       verify: Boolean(args.verify),
+      oauth: args.oauth,
     })
     for (const file of files) {
       consola.success(`Created ${file}`)
