@@ -259,7 +259,7 @@ const makeAuthCommand = defineCommand({
 const makeModuleCommand = defineCommand({
   meta: {
     name: 'make:module',
-    description: 'Scaffold a modules/<name>/ directory (RFC 0002) and wire it into src/app.ts.',
+    description: 'Scaffold a modules/<name>/ directory and wire it into src/app.ts.',
   },
   args: {
     name: {
