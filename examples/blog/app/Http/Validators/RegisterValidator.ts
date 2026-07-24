@@ -13,9 +13,9 @@ export const RegisterSchema = z
       .min(1, 'Email is required.')
       .email('The email address is badly formatted.')
       // Lowercased so it round-trips correctly through the password-reset
-      // and email-verification token helpers, which both normalize emails
-      // to lowercase internally (@guren/server's email-verification.ts /
-      // password-reset.ts) before matching against stored records.
+      // and email-verification token helpers (@guren/core), which both
+      // normalize emails to lowercase internally before matching against
+      // stored records.
       .toLowerCase(),
     password: z
       .string({ error: 'Password is required.' })
