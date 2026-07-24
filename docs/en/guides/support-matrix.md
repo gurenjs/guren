@@ -32,5 +32,5 @@
 ## CI Coverage
 
 - Every PR: Bun 1.3.x, no external DB (mocked), Redis service
-- Nightly canary: Same as PR + smoke tests + audits + golden path
+- Nightly: same as PR, plus full runtime smoke tests against a real database, security audits, and an end-to-end scaffold-to-build check
 - Release: Full validation before publish

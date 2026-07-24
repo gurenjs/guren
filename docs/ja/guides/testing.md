@@ -1,51 +1,6 @@
 # テストガイド
 
-Guren には 2 つのスタイルの自動テストがあります。
-
-- **フレームワークのユニット/統合テスト**: パッケージ内（例: `packages/core/tests`）に配置されており、Bun のネイティブな `bun test` ランナーで実行します。
-- **サンプルアプリケーションのテスト**: ブログデモ（`examples/blog`）などは、Vitest と jsdom を使用して、ブラウザと同等の方法で React コンポーネントをレンダリングします。
-
-ランナーの想定が異なるため、それぞれに合った方法で実行してください。
-
-```bash
-# フレームワークパッケージ - Bun のテストランナー
-bun test packages/core/tests
-bun test packages/orm/tests
-bun test packages/core/tests
-bun test packages/cli/tests
-bun test packages/create-app/tests
-bun test packages/inertia-client/tests
-
-# テストユーティリティ - Vitest
-bun run --cwd packages/testing test
-
-# サンプルアプリ - Vitest + jsdom
-bun run --cwd examples/blog test
-bun run --cwd examples/api test
-bun run --cwd web test
-```
-
-### フレームワークパッケージ向けの Bun テストを書く
-
-フレームワークテストは `bun:test` の組み込みアサーションを利用します。完全なアプリケーションの起動なしに、ルーティングレジストリや HTTP ヘルパーなどの低レベルユーティリティを検証するのに役立ちます。
-
-よく使うパターンは以下の通りです。
-
-- コントローラーをインスタンス化し、アクション呼び出し前にスタブした Hono コンテキストで `setContext(ctx)` を呼ぶ。
-- 軽量なフェイク（例: インメモリ ORM アダプター）を使って成功パスと失敗パスをカバーする。
-- コードを所有するパッケージ内でフォーカスしたユニットテストを書く。内側のループを速く保つため、高レベルのアプリケーションテストは控えめに。
-
-スタートポイントが欲しい場合はジェネレーターを使いましょう。
-
-```bash
-# tests/ 配下に Bun スタイルのテストファイルを生成
-bunx guren make:test server/http/request --runner bun
-
-# SPA コード向けの Vitest スタイルのテストファイル
-bunx guren make:test blog/pages/Login
-```
-
-このコマンドは `tests/` 以下にスキャフォールドファイルを書き出します（必要に応じてディレクトリも作成）。デフォルトは Vitest で、`--runner bun` で切り替えられます。
+よく書かれた一つのテストは、ユーザーより先にバグを見つけてくれます。Guren はテストを書くことがブラウザで手動確認するより速く感じられるほど便利にできています。
 
 ## TestApp
 
@@ -483,3 +438,25 @@ it('ユーザー一覧を返す', async () => {
 5. **テストを分離する** - 各テストは独立している必要があります。
 6. **認証には `actingAs()` を使う** - テストでセッションデータを手動設定するのは避けましょう。
 7. **コンテナフェイクを使う** - import のモックではなく、`container.fake()` でサービスを置き換えましょう。
+
+## テストの実行
+
+```bash
+# テストスイート全体
+bun run test
+
+# サーバーサイドコード（Bun のテストランナー）
+bun run test:bun
+
+# フロントエンド / サンプルアプリ（Vitest）
+bun run test:examples
+
+# 単一ファイル
+bun test path/to/file.test.ts
+
+# テストファイルを生成
+bunx guren make:test posts/PostController --runner bun
+```
+
+> [!NOTE]
+> サーバーサイドのコードは Bun ネイティブのテストランナー（`bun:test`）を使います。フロントエンドや React コンポーネントは jsdom を使う Vitest でテストします。フレームワークコードは Bun の高速なフィードバックを、SPA テストはリアルな DOM 挙動を、それぞれ得られるようランナーを使い分けています。

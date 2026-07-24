@@ -184,7 +184,7 @@ broadcast.removeWebSocketClient(clientId)
 
 These APIs provide the server-side foundation so a Bun WebSocket upgrade route can plug into the existing channel/driver system.
 
-### Typed channel codegen (Wave 3)
+### Typed channel codegen
 
 `guren codegen` now generates `.guren/channels.gen.ts` from your server-side broadcast usage.
 
@@ -214,7 +214,7 @@ const off = feed.on('NewPost', (payload) => {
 
 This gives you typed channel/event names and inferred payload shapes in the frontend.
 
-### End-to-end typed realtime flow (Wave 7)
+### End-to-end typed realtime flow
 
 Use the generated `ChannelEvents` on the server too, so emit-side payloads are checked at compile time.
 

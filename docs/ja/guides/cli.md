@@ -405,7 +405,7 @@ bunx guren queue:work --stop-when-empty
 
 ## 共通オプション
 
-オプションは `packages/core/src/cli` で一元化され、挙動が統一されています。
+以下のオプションはすべての `make:*` / `add` コマンドで共通の挙動をします。
 
 - `--force` / `-f`: 既存ファイルを上書き
 - `--dry-run`: 生成内容を表示するだけで書き込まない（予定）

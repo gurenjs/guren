@@ -21,7 +21,7 @@ Guren は Laravel の設計思想を TypeScript 上で再構成し、Bun・Hono�
 ## 命名規約
 - 単一のクラスや型をエクスポートするファイル（コントローラー、モデル、HTTP アプリなど）は `PascalCase.ts` で、ファイル名をエクスポートに揃えます。
 - 関数やユーティリティを集めるモジュールは `kebab-case.ts`（例: `dev-assets.ts`, `inertia-assets.ts`）で、クラス中心のモジュールと区別します。
-- ディレクトリ内ではどちらかに統一します。例: `packages/core/src/http/` は新規クラスなら PascalCase、アセットミドルウェアや CLI ユーティリティのようにヘルパー中心のディレクトリは kebab-case を維持します。
+- ディレクトリ内ではどちらかに統一します。例: `app/Http/Controllers/` や `app/Models/` は新規クラスなら PascalCase、ヘルパー中心のディレクトリは kebab-case を維持します。
 
 ## ルーティング
 `routes/web.ts` は registrar を export します。
