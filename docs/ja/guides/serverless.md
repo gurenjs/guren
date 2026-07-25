@@ -155,14 +155,36 @@ Lambda のファイルシステムは `/tmp`（512 MB、揮発性）以外は読
 
 ### セッション・キャッシュ
 
-インメモリストアはリクエスト間で失われます。セッションとキャッシュには Redis（ElastiCache）または DynamoDB を使ってください。
+インメモリストアはリクエスト間で失われるため、セッションには Lambda の呼び出しをまたいで残るバックエンドが必要です。
+
+多くのアプリでは `DatabaseSessionStore`（`@guren/core`）が推奨のデフォルトです。アプリが元々使っているデータベース（RDS Postgres、MySQL、その他 Drizzle が対応する任意のダイアレクト）にセッションを永続化するため、追加のインフラを用意する必要がありません。
+
+```typescript
+import { DatabaseSessionStore } from '@guren/core'
+import { sessions } from '@/db/schema'
+
+app.use(createSessionMiddleware({ store: new DatabaseSessionStore(sessions) }))
+```
+
+```typescript
+// db/schema.ts
+export const sessions = sqliteTable('sessions', {
+  id: text('id').primaryKey(),
+  data: text('data', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+  expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+})
+```
+
+期限切れの行は読み取り時に「存在しない」として扱われます。テーブルを小さく保つには、スケジュールタスク（例えば `createScheduleHandler` 経由）から `store.deleteExpired()` を呼んでください。
+
+セッションの書き込み頻度が高く、それをメインのデータベースから切り離したい高トラフィックなアプリでは、代わりに `RedisSessionStore`（ElastiCache）を使ってください。キャッシュについては引き続き Redis や DynamoDB が有効です（下のインフラ構成表を参照）。
 
 ## インフラ構成の推奨
 
 | 項目 | 推奨 |
 |------|------|
 | **HTTP トリガー** | API Gateway v2（HTTP API）または ALB |
-| **セッション** | Redis（ElastiCache）— インメモリは不可 |
+| **セッション** | `DatabaseSessionStore`（追加インフラ不要）— またはセッション書き込みが多い場合は `RedisSessionStore`（ElastiCache） |
 | **キャッシュ** | `RedisCacheStore` 経由の Redis（`@guren/core/redis` に session/rate-limit/API トークン各ストアも同梱）、または `FileStore` で `/tmp`（揮発性キャッシュ） |
 | **キュー** | `SqsDriver` + `createSqsHandler()` 経由の SQS |
 | **データベース** | RDS PostgreSQL + RDS Proxy（コネクションプーリング） |

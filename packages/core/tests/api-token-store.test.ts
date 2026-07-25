@@ -139,4 +139,17 @@ describe('DatabaseApiTokenStore', () => {
     expect(result).not.toBeNull()
     expect(result!.abilities).toEqual(['read'])
   })
+
+  test('degrades corrupt text abilities to an empty list instead of throwing', async () => {
+    const textStore = new DatabaseApiTokenStore(apiTokensText, { abilitiesMode: 'text' })
+    sqlite.exec(
+      "INSERT INTO api_tokens_text (id, name, hashed_token, user_id, abilities, created_at) " +
+        `VALUES ('t1', 'Broken', 'hash-1', 'user-1', 'not-json', ${Date.now()})`,
+    )
+
+    const token = await textStore.findByHashedToken('hash-1')
+
+    expect(token).not.toBeNull()
+    expect(token!.abilities).toEqual([])
+  })
 })
