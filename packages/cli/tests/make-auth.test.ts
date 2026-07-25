@@ -934,8 +934,8 @@ export function registerWebRoutes(router: Router): void {
       expect(controller).not.toContain('Email is already in use.')
       expect(controller).toContain('profile: { name, email: user.email }')
 
-      expect(view).toContain('value={profile.email}')
-      expect(view).toContain('readOnly')
+      expect(view).toContain('{profile.email}')
+      expect(view).toContain('Managed by your sign-in provider.')
       expect(view).not.toContain("form.setData('email'")
       expect(view).not.toContain("ValidationErrors<'name' | 'email' | 'password'>")
     } finally {
@@ -957,7 +957,7 @@ export function registerWebRoutes(router: Router): void {
       expect(validator).toContain('name: z')
       expect(validator).toContain('password: z')
       expect(controller).toContain('const { name, password } = await this.validateBody(ProfileUpdateSchema)')
-      expect(view).toContain('readOnly')
+      expect(view).toContain('Managed by your sign-in provider.')
     } finally {
       await workspace.cleanup()
     }
