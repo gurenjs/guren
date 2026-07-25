@@ -134,6 +134,42 @@ describe('OAuthController', () => {
       expect(mockUserCreate).not.toHaveBeenCalled()
     })
 
+    it('refuses to create an account from an address the provider has not verified', async () => {
+      const oauth = createOAuthStub()
+      oauth.handleCallback.mockResolvedValue({
+        profile: { id: 'gh-6', email: 'unverified@example.com', name: 'Unverified', emailVerified: false },
+        redirectTo: null,
+      })
+      mockUserWhere.mockResolvedValue([])
+
+      const controller = createController()
+      const ctx = createControllerContext('http://blog.test/auth/github/callback?code=abc&state=xyz', {}, { oauth }) as unknown as Context
+      controller.setContext(ctx)
+      ;(ctx as unknown as { req: { param: () => Record<string, string> } }).req.param = () => ({ provider: 'github' })
+
+      await expect(controller.callback()).rejects.toThrow()
+      expect(mockUserCreate).not.toHaveBeenCalled()
+    })
+
+    it('signs in an already-linked account even when the provider reports it unverified', async () => {
+      const oauth = createOAuthStub()
+      oauth.handleCallback.mockResolvedValue({
+        profile: { id: 'gh-7', email: 'linked@example.com', name: 'Linked', emailVerified: false },
+        redirectTo: null,
+      })
+      mockUserWhere.mockResolvedValue([{ id: 7, email: 'linked@example.com', githubId: 'gh-7' }])
+
+      const controller = createController()
+      const ctx = createControllerContext('http://blog.test/auth/github/callback?code=abc&state=xyz', {}, { oauth }) as unknown as Context
+      controller.setContext(ctx)
+      ;(ctx as unknown as { req: { param: () => Record<string, string> } }).req.param = () => ({ provider: 'github' })
+
+      const response = await controller.callback()
+
+      expect(mockUserCreate).not.toHaveBeenCalled()
+      expect(response.status).toBe(302)
+    })
+
     it('lowercases the provider email before matching and creating accounts', async () => {
       const oauth = createOAuthStub()
       oauth.handleCallback.mockResolvedValue({
