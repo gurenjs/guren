@@ -135,6 +135,20 @@ describe('DocsController', () => {
     expect(response.headers.get('Content-Type')).toContain('text/plain')
   })
 
+  it('serves a real doc end-to-end without mocks', async () => {
+    const controller = new DocsController()
+    const ctx = createDocsContext('http://guren.dev/docs/guides/routing')
+    controller.setContext(ctx)
+
+    const response = await controller.show()
+    const { payload } = await readInertiaResponse(response)
+
+    expect(response.status).toBe(200)
+    const props = payload.props as { doc: DocPage | null; categories: DocCategoryGroup[] }
+    expect(props.doc?.html).toContain('<h1')
+    expect(props.categories.length).toBeGreaterThan(0)
+  }, 30000)
+
   it('returns 404 with normalized active info when page is missing', async () => {
     vi.spyOn(docsService, 'listDocs').mockResolvedValue([])
     vi.spyOn(docsService, 'getDoc').mockResolvedValue(null)

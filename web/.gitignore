@@ -5,3 +5,6 @@ dist
 .guren
 public/assets
 .vercel
+.dev.vars
+.cloudflare
+data/

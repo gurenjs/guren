@@ -1,6 +1,6 @@
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { resolveDefaultDocsDir } from '../../app/Services/DocsService.js'
+import { resolveDefaultDocsDir } from '../../app/Services/FsDocsStore.js'
 
 describe('resolveDefaultDocsDir', () => {
   const repoRoot = resolve(import.meta.dirname, '../../..')

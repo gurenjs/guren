@@ -10,6 +10,7 @@ import {
   listModuleNames,
 } from './discovery'
 import { loadRouteDefinitions } from './load-routes'
+import { parseSchemaTableColumns } from './schema-parser'
 import { loadAuditConfig, type AuditIgnoreEntry } from './audit-config'
 
 export type AuditStatus = 'pass' | 'warn' | 'fail' | 'ignored'
@@ -589,86 +590,6 @@ async function auditSourceFiles(cwd: string, findings: AuditFinding[]): Promise<
  * `static visible`) so serialize()/toJSON() never exposes them.
  */
 const SENSITIVE_COLUMN_PATTERN = /(password|passwd|secret|token|salt|hash)/i
-
-/**
- * Parse db/schema.ts and map each exported table variable to its column
- * property names (e.g. `users` → ['id', 'email', 'passwordHash']).
- * Returns null when the schema file is missing or unparsable.
- */
-const TABLE_FACTORIES = new Set(['pgTable', 'sqliteTable', 'mysqlTable'])
-
-/**
- * Parses a Drizzle schema file's top-level `export const x = pgTable(...)`
- * declarations, merging `identifier -> column names` into `tables`. Ignores
- * files it can't read or parse (missing/malformed schema files degrade the
- * hidden-columns check to "unknown", not a thrown error).
- */
-async function extractTableColumns(schemaPath: string, tables: Map<string, string[]>): Promise<void> {
-  let source: string
-  try {
-    source = await readFile(schemaPath, 'utf-8')
-  } catch {
-    return
-  }
-
-  let ast: ReturnType<typeof parse>
-  try {
-    ast = parse(source, { sourceType: 'module', plugins: ['typescript'] })
-  } catch {
-    return
-  }
-
-  for (const node of ast.program.body) {
-    const declaration =
-      node.type === 'ExportNamedDeclaration' && node.declaration?.type === 'VariableDeclaration'
-        ? node.declaration
-        : node.type === 'VariableDeclaration'
-          ? node
-          : null
-    if (!declaration) continue
-
-    for (const declarator of declaration.declarations) {
-      if (declarator.id.type !== 'Identifier') continue
-      if (declarator.init?.type !== 'CallExpression') continue
-
-      const callee = declarator.init.callee
-      if (callee.type !== 'Identifier' || !TABLE_FACTORIES.has(callee.name)) continue
-
-      const columnsArg = declarator.init.arguments.find((arg) => arg.type === 'ObjectExpression')
-      if (!columnsArg || columnsArg.type !== 'ObjectExpression') continue
-
-      const columns: string[] = []
-      for (const prop of columnsArg.properties) {
-        if (prop.type !== 'ObjectProperty') continue
-        if (prop.key.type === 'Identifier') columns.push(prop.key.name)
-        else if (prop.key.type === 'StringLiteral') columns.push(prop.key.value)
-      }
-
-      tables.set(declarator.id.name, columns)
-    }
-  }
-}
-
-/**
- * Table columns from db/schema.ts plus every modules/<name>/db/schema.ts.
- * `make:module` wires the latter into the former via `export * from
- * '../modules/<name>/db/schema'`, so a module's own `pgTable(...)` calls
- * never appear in the root file's AST — without this, sensitive-column
- * checks on module models would silently see no columns at all and skip.
- *
- * Also consumed by entity-context.ts — keep behavior general, not
- * audit-specific.
- */
-export async function parseSchemaTableColumns(cwd: string): Promise<Map<string, string[]> | null> {
-  const tables = new Map<string, string[]>()
-  await extractTableColumns(resolve(cwd, 'db/schema.ts'), tables)
-
-  for (const moduleName of await listModuleNames(cwd)) {
-    await extractTableColumns(resolve(cwd, 'modules', moduleName, 'db/schema.ts'), tables)
-  }
-
-  return tables.size > 0 ? tables : null
-}
 
 interface ModelSerializationInfo {
   tableIdentifier?: string

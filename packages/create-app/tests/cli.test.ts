@@ -79,6 +79,13 @@ describe('create-guren-app CLI', () => {
       const readme = await readFile(join(appRoot, 'README.md'), 'utf8')
       expect(readme).toContain('# My App')
 
+      const seedAdr = await readFile(
+        join(appRoot, 'docs/adr/0001-record-architecture-decisions.md'),
+        'utf8',
+      )
+      expect(seedAdr).toContain('kind: adr')
+      expect(seedAdr).toContain('make:adr')
+
       // Harness install requires dependencies; without install we point at agent:init
       await expect(access(join(appRoot, 'CLAUDE.md'))).rejects.toThrow()
       expect(warnMock.mock.calls.some((call) => call.join(' ').includes('bunx guren agent:init'))).toBe(true)

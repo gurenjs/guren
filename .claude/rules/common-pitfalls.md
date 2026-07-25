@@ -20,6 +20,7 @@ Lessons learned from code review cycles. Check these before submitting changes.
 
 - **`X-Testing-User` header is gated behind `GUREN_TESTING` env var.** TestApp sets this automatically. Never trust this header in production.
 - **MCP endpoint requires `GUREN_MCP=1` to mount.** Features that expand attack surface (debug endpoints, code generation APIs) must be opt-in, not opt-out. Security protections (CSRF, headers) are the opposite — enabled by default.
+- **The MCP endpoint is CSRF-exempt and guards its own access.** MCP clients POST JSON-RPC without ever fetching an `XSRF-TOKEN`, so `createCsrfMiddleware` skips that one path while `isMcpEndpointEnabled()` holds. `createMcpAccessGuard()` replaces it and has to stop **two** classes of caller: browser pages (rejected unless the `Origin` is loopback) and non-browser clients (rejected unless the socket peer is loopback). The second half is not optional — templates bind `0.0.0.0`, `Host` is trivially forged so host authorization does not help, and a client that sends no `Origin` is otherwise indistinguishable from a local agent.
 - **Rate limiting default key uses `server.requestIP()` (Bun only).** Falls back to shared per-route bucket with console warning. Docs tell users to supply custom `keyGenerator` in production.
 - **CORS defaults to same-origin** (no `Access-Control-Allow-Origin` header). Users must explicitly set `origin: '*'` if needed.
 - **Host authorization is dev-only** in templates (`process.env.NODE_ENV === 'production' ? false : { ... }`).

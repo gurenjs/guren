@@ -1,11 +1,14 @@
 import { ServiceProvider } from '../container/ServiceProvider'
 import { createMcpServer } from './create-mcp-server'
 import type { GurenCliApi } from './create-mcp-server'
+import { createMcpAccessGuard, isMcpEndpointEnabled, MCP_ENDPOINT_PATH } from './endpoint'
 
 /**
  * Registers the MCP (Model Context Protocol) endpoint at /_guren/mcp.
  *
- * This provider is only active in development mode (NODE_ENV !== 'production').
+ * Only active while `isMcpEndpointEnabled()` holds, so registering this
+ * provider directly honours the same `GUREN_MCP=1` opt-in that `Application`
+ * gates on — and the same condition that exempts the endpoint from CSRF.
  * It allows AI coding agents (Claude Code, Cursor, etc.) to introspect
  * the project structure, run integrity checks, and scaffold code.
  *
@@ -18,7 +21,7 @@ export class McpServiceProvider extends ServiceProvider {
   }
 
   async boot(): Promise<void> {
-    if (process.env.NODE_ENV === 'production') {
+    if (!isMcpEndpointEnabled()) {
       return
     }
 
@@ -44,17 +47,28 @@ export class McpServiceProvider extends ServiceProvider {
     // than failing outright.
     //
     // guren_codegen (generateRouteTypes et al.) has the same staleness
-    // exposure but is deliberately left in-process here: it already fails on
-    // any repeat call because it writes without `force`, so it needs that
-    // fixed before freshness would matter — tracked separately.
+    // exposure and is still left in-process here, so the route-derived
+    // artifacts it writes — routes.gen.ts, routes.d.ts, api-client.gen.ts —
+    // describe the graph as of this process's first route load. It now writes
+    // with `force`, so that snapshot overwrites what is on disk instead of
+    // failing the way it used to. Page, data, and channel manifests are
+    // unaffected: those generators re-scan the filesystem on every call.
+    //
+    // An app using the default Vite setup repairs the difference on the next
+    // save, because routeTypesPlugin's handleHotUpdate spawns `guren codegen`
+    // in a child process. A dev server running without that plugin has no
+    // such repair, and there MCP-driven codegen is the only writer. Moving
+    // codegen behind the same child process is tracked separately.
     const routeAwareCli: GurenCliApi = cli.createFreshContextApi
       ? { ...cli, ...cli.createFreshContextApi() }
       : cli
 
+    hono.use(MCP_ENDPOINT_PATH, createMcpAccessGuard())
+
     // Stateless mode: each request gets a fresh McpServer + transport pair.
     // McpServer.connect() can only be called once per instance, so we
     // create a new server for each request.
-    hono.all('/_guren/mcp', async (c) => {
+    hono.all(MCP_ENDPOINT_PATH, async (c) => {
       const mcpServer = createMcpServer({ cwd, cli: routeAwareCli })
       const transport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: undefined,

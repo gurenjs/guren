@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { parse } from '@babel/parser'
 import type { Statement, Expression, ClassDeclaration, ClassBody } from '@babel/types'
 import { extractDocsTags } from './docs-index'
+import { discoverModelFiles, toPosixRelative, moduleNameFromRelPath } from './discovery'
 
 export interface ModelRelationship {
   name: string
@@ -23,6 +24,29 @@ export interface ModelInfo {
 export async function parseModelFile(filePath: string): Promise<ModelInfo | null> {
   const source = await readFile(filePath, 'utf-8')
   return parseModelSource(source, filePath)
+}
+
+export interface DiscoveredModel {
+  info: ModelInfo
+  /** POSIX path relative to the app root. */
+  relPath: string
+  /** Module the model lives in, or null for the app root. */
+  module: string | null
+}
+
+/**
+ * Every parsable model with its location — the shared discovery+parse
+ * projection behind the entity context, the domain spec view, and
+ * `make:adr --entity`. Unparsable files are dropped.
+ */
+export async function discoverParsedModels(cwd: string): Promise<DiscoveredModel[]> {
+  const files = await discoverModelFiles(cwd)
+  const parsed = await Promise.all(files.map((file) => parseModelFile(file)))
+  return parsed.flatMap((info, index) => {
+    if (!info) return []
+    const relPath = toPosixRelative(cwd, files[index])
+    return [{ info, relPath, module: moduleNameFromRelPath(relPath) }]
+  })
 }
 
 export function parseModelSource(source: string, filePath: string): ModelInfo | null {

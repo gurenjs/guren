@@ -2,6 +2,7 @@ import { describe, test, expect, beforeAll, afterAll } from 'bun:test'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { flattenD1Migrations } from './build'
 
 // Opt-in end-to-end contract test: verifies wrangler applies drizzle-kit
 // generated SQL (tab indentation, backtick quoting, `--> statement-breakpoint`
@@ -41,22 +42,27 @@ describe.skipIf(!enabled)('wrangler d1 migrations (drizzle-kit SQL contract)', (
             binding: 'DB',
             database_name: 'guren-fmt-test',
             database_id: '00000000-0000-0000-0000-000000000000',
-            migrations_dir: 'db/migrations',
+            migrations_dir: 'd1-migrations',
           },
         ],
       }),
     )
     writeFileSync(join(root, 'worker.js'), 'export default { fetch() { return new Response("ok") } }\n')
 
+    // Real drizzle-kit 1.x layout: one folder per migration containing
+    // migration.sql — flattened for wrangler by flattenD1Migrations.
+    mkdirSync(join(root, 'db/migrations/0000_bright_dawn'), { recursive: true })
     writeFileSync(
-      join(root, 'db/migrations/0000_bright_dawn.sql'),
+      join(root, 'db/migrations/0000_bright_dawn/migration.sql'),
       'CREATE TABLE `posts` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`title` text NOT NULL\n);\n--> statement-breakpoint\nCREATE INDEX `posts_title_idx` ON `posts` (`title`);\n',
     )
+    mkdirSync(join(root, 'db/migrations/0001_calm_night'), { recursive: true })
     writeFileSync(
-      join(root, 'db/migrations/0001_calm_night.sql'),
+      join(root, 'db/migrations/0001_calm_night/migration.sql'),
       'ALTER TABLE `posts` ADD `slug` text;\n--> statement-breakpoint\nCREATE UNIQUE INDEX `posts_slug_unique` ON `posts` (`slug`);\n',
     )
     writeFileSync(join(root, 'db/migrations/meta/_journal.json'), '{"version":"7","dialect":"sqlite","entries":[]}\n')
+    flattenD1Migrations(join(root, 'db/migrations'), join(root, 'd1-migrations'))
   })
 
   afterAll(() => {

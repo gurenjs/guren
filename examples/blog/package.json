@@ -6,7 +6,7 @@
   "scripts": {
     "codegen": "bun ../../packages/cli/src/bin.ts codegen --routes routes/web.ts --force",
     "routes:types": "bun run codegen",
-    "dev": "bun run codegen && bun run dev:server",
+    "dev": "bun run codegen && GUREN_MCP=1 bun run dev:server",
     "dev:server": "bun --hot bin/serve.ts",
     "smoke": "bun run ./smoke.ts",
     "test": "vitest run",

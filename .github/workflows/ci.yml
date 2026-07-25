@@ -84,6 +84,11 @@ jobs:
       - name: Security audit (blog example)
         run: cd examples/blog && bun ../../packages/cli/src/bin.ts audit
 
+      # Also the only cross-machine exercise of the spec views' determinism
+      # contract: committed-on-macOS vs regenerated-on-ubuntu.
+      - name: Spec drift (blog example)
+        run: cd examples/blog && bun ../../packages/cli/src/bin.ts check --spec
+
       - name: Build example apps
         run: |
           bun run --cwd examples/blog build
@@ -243,3 +248,6 @@ jobs:
 
       - name: Bundle budget audit
         run: bun run ./scripts/smoke/build-budget.ts --max-kb 600 web
+
+      - name: Assemble Cloudflare worker
+        run: cd web && bun scripts/cloudflare-build.ts

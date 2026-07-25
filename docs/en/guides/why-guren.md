@@ -76,6 +76,8 @@ Because page props, route params, and request bodies are all typed contracts, an
 
 The result: less context to load, fewer degrees of freedom to get wrong, and mechanical verification of what was produced. That loop — discover, generate, verify — is what makes agent-driven development on Guren dependable rather than hopeful.
 
+**And the specification keeps itself honest.** Guren treats project knowledge by one principle: *derived where possible, declared where not, checked always*. ER diagrams, the domain model, and the screen inventory are generated from code (`bunx guren spec:generate`) and drift-gated in CI; decisions that code can't express live as ADRs whose frontmatter links them to the models they govern, validated on every change; and `bunx guren context Invoice` hands anyone — human or agent — everything the project knows about one entity, including the documents linked to it, with the checker vouching that the links are intact and the derived views current. See [Spec-Anchored Development](./spec-anchored.md) for the full loop.
+
 **And it is measured, not aspirational.** In a [reproducible agent evaluation](https://github.com/gurenjs/framework-comparison/tree/main/agent-eval) — the same feature task run against six frameworks, scored blind by typecheck, tests, and a hidden HTTP smoke — agents shipped a working feature on Guren in every trial. The same study showed that the agent guidance every new Guren project ships (an auto-loaded `CLAUDE.md` plus path-scoped rules carrying exact, source-verified API signatures) cuts agent cost by 40% against an undocumented baseline. The harness, raw data, and honest limitations are all public.
 
 ## When Not to Choose Guren

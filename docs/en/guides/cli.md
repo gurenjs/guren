@@ -61,6 +61,7 @@ These commands patch `src/app.ts`, create the matching provider/runtime files, a
 | `make:auth` | Scaffolds login/logout, registration, and password reset controllers, providers, views, migration, seeder, and routes (`--minimal` skips registration and password reset, `--verify` also scaffolds email verification, `--oauth <providers>` also scaffolds OAuth login buttons for the given comma-separated providers, `--oauth-only` drops password login entirely and makes those providers the only way in) | `bunx guren make:auth --oauth github,google` |
 | `make:middleware <Name>` | Generates a middleware file in `app/Http/Middleware` | `bunx guren make:middleware Auth` |
 | `make:policy <Name>` | Generates an authorization policy in `app/Policies` with owner-based defaults | `bunx guren make:policy Post` |
+| `make:adr "<Title>"` | Records an architecture decision as a numbered file under `docs/adr/` with linkable frontmatter; `--entity <Model>` prefills the `entities:`/`related:` links | `bunx guren make:adr "Billing cycle is end-of-month" --entity Invoice` |
 | `make:seeder <Name>` | Generates a database seeder file | `bunx guren make:seeder UserSeeder` |
 | `make:job <Name>` | Generates a queueable job class | `bunx guren make:job SendEmail` |
 | `make:event <Name>` | Generates an event class | `bunx guren make:event UserRegistered` |
@@ -76,16 +77,26 @@ Validate your app before shipping — these commands are also designed for AI co
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `check` | Validate integrity across routes, controllers, pages, and models, plus architecture boundaries when `guren.arch.ts` is present | `bunx guren check --json` |
+| `check` | Validate integrity across routes, controllers, pages, and models, plus doc links, spec-view freshness, and architecture boundaries | `bunx guren check --json` |
 | `audit` | Security audit: missing input validation or authentication on mutating routes, raw SQL with interpolation, hardcoded credentials, disabled security defaults, mass-assignment configuration, sensitive columns not listed in `static hidden` | `bunx guren audit --json` |
 | `doctor` | Project health report (env, config, generated files) with actionable next steps | `bunx guren doctor --next` |
+| `context [Entity]` | Project context map — or, with an entity name, everything about one model: table, relationships, routes with schemas, pages with Props, resource, policy, linked docs (`--module` disambiguates, `"app"` = project root) | `bunx guren context User --json` |
+| `spec:generate` | Regenerates the derived spec views in `docs/spec/` (ER diagram, domain model, screens, module map) — see [Spec-Anchored Development](./spec-anchored.md) | `bunx guren spec:generate` |
 
-`check` and `audit` both exit with a non-zero status when they find failures, so you can run them in CI:
+`audit` exits with a non-zero status when it finds failures. Plain
+`check` is informational — its suite flags are the CI gates, each
+exiting non-zero on failures in that suite:
 
 ```bash
-bunx guren check
 bunx guren audit
+bunx guren check --arch    # architecture boundaries (guren.arch.ts + module rules)
+bunx guren check --docs    # doc links: frontmatter entities/related + @docs tags
+bunx guren check --spec    # docs/spec/ views match a fresh regeneration
 ```
+
+Combining suite flags runs their union. `--changed` restricts any of
+them to files changed against the merge base with `main` — the fast
+path the agent-harness edit hook uses.
 
 Routes wrapped in named middleware (for example `router.middleware('auth').group(...)`) are recognized as protected. Guest flows such as `/login` and `/register` are excluded from authentication checks.
 
@@ -182,7 +193,7 @@ Inertia pages are not colocated inside `modules/<name>/` — they stay under the
 
 ## AI Agent Harness
 
-Apps scaffolded with `create-guren-app` include an AI agent harness out of the box: a `CLAUDE.md` project guide, verified API rules, skills, and subagents under `.claude/`, an `.mcp.json` pointing at the dev server's MCP endpoint, and hooks that close the feedback loop — the `guren context` project map loads at session start, and `guren check` re-runs automatically after edits to routes, controllers, models, schema, or pages, reporting failures straight back to the coding agent.
+Apps scaffolded with `create-guren-app` include an AI agent harness out of the box: a `CLAUDE.md` project guide, verified API rules, skills, and subagents under `.claude/`, an `.mcp.json` pointing at the dev server's MCP endpoint (the scaffolded `dev` script enables it via `GUREN_MCP=1`), and hooks that close the feedback loop — the `guren context` project map loads at session start, and `guren check` re-runs automatically after edits to routes, controllers, models, schema, or pages, reporting failures straight back to the coding agent.
 
 | Command | Description | Example |
 |---------|-------------|---------|

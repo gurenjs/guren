@@ -4,7 +4,6 @@
 export const SITE_URL = 'https://guren.dev'
 export const SITE_NAME = 'Guren'
 export const GITHUB_URL = 'https://github.com/gurenjs/guren'
-export const X_URL = 'https://x.com/gurenjs'
 export const OG_IMAGE_PATH = '/og.png'
 
 export const SITE_TITLE =

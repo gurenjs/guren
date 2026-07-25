@@ -1,0 +1,111 @@
+import { Marked } from 'marked'
+import { markedHighlight } from 'marked-highlight'
+import { createHighlighterCore, type HighlighterCore } from 'shiki/core'
+import { createJavaScriptRegexEngine } from 'shiki/engine/javascript'
+import sanitizeHtml from 'sanitize-html'
+
+// Same theme pair as the docs pipeline (MarkdownRenderer.ts) so blog posts
+// inherit the docs light/dark code styling.
+const POST_THEMES = {
+  light: 'rose-pine-dawn',
+  dark: 'rose-pine-moon',
+} as const
+const PLAIN_LANGUAGE = 'text'
+
+let highlighterPromise: Promise<HighlighterCore> | undefined
+
+// Fine-grained shiki bundle rendered in the Worker at save time: only the
+// grammars blog posts use, with the JavaScript regex engine instead of the
+// oniguruma WASM blob. Deliberately NOT the full 'shiki' entry — that would
+// pull every grammar into the Workers bundle. Lazy so importing this module
+// (e.g. from routes) costs nothing until the first render.
+function loadHighlighter(): Promise<HighlighterCore> {
+  highlighterPromise ??= createHighlighterCore({
+    themes: [
+      import('shiki/dist/themes/rose-pine-dawn.mjs'),
+      import('shiki/dist/themes/rose-pine-moon.mjs'),
+    ],
+    langs: [
+      import('shiki/dist/langs/typescript.mjs'),
+      import('shiki/dist/langs/tsx.mjs'),
+      import('shiki/dist/langs/javascript.mjs'),
+      import('shiki/dist/langs/json.mjs'),
+      import('shiki/dist/langs/bash.mjs'),
+      import('shiki/dist/langs/sql.mjs'),
+      import('shiki/dist/langs/html.mjs'),
+      import('shiki/dist/langs/css.mjs'),
+    ],
+    engine: createJavaScriptRegexEngine(),
+  })
+  return highlighterPromise
+}
+
+async function highlight(code: string, lang?: string): Promise<string> {
+  const highlighter = await loadHighlighter()
+  const requested = lang?.trim().toLowerCase() || PLAIN_LANGUAGE
+  const resolved = highlighter.getLoadedLanguages().includes(requested) ? requested : PLAIN_LANGUAGE
+  return highlighter.codeToHtml(code, {
+    lang: resolved,
+    themes: POST_THEMES,
+    defaultColor: 'light',
+  })
+}
+
+const marked = new Marked()
+marked.setOptions({ gfm: true, breaks: false, async: true })
+marked.use(markedHighlight({ async: true, highlight }))
+
+/**
+ * Allowlist applied to the rendered HTML before it is stored. The output is
+ * later injected with dangerouslySetInnerHTML, so escaping raw HTML in the
+ * markdown source is not enough on its own — markdown syntax itself can carry
+ * `javascript:`/`data:` URLs into href and src. sanitize-html enforces both
+ * an element/attribute allowlist and a URL scheme allowlist.
+ */
+const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
+  allowedTags: [
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'p', 'br', 'hr', 'blockquote',
+    'ul', 'ol', 'li',
+    'strong', 'em', 'del', 'code', 'pre', 'span',
+    'a', 'img',
+    'table', 'thead', 'tbody', 'tr', 'th', 'td',
+  ],
+  allowedAttributes: {
+    a: ['href', 'title'],
+    img: ['src', 'alt', 'title'],
+    // shiki emits inline colors on the wrapper and every token.
+    pre: ['class', 'style', 'tabindex'],
+    code: ['class', 'style'],
+    span: ['class', 'style'],
+    th: ['align'],
+    td: ['align'],
+  },
+  allowedSchemes: ['http', 'https', 'mailto'],
+  allowedSchemesAppliedToAttributes: ['href', 'src'],
+  // `//host/path` inherits the page scheme but still points off-origin —
+  // same trust question as an absolute URL, so it gets no special pass.
+  allowProtocolRelative: false,
+  // Only the color declarations shiki produces; anything else (position,
+  // background-image, …) is dropped.
+  allowedStyles: {
+    '*': {
+      color: [/^#[0-9a-fA-F]{3,8}$/],
+      'background-color': [/^#[0-9a-fA-F]{3,8}$/],
+      // Dual-theme shiki carries the dark palette in custom properties that
+      // app.css switches on — stripping them silently breaks dark mode.
+      '--shiki-dark': [/^#[0-9a-fA-F]{3,8}$/],
+      '--shiki-dark-bg': [/^#[0-9a-fA-F]{3,8}$/],
+      'font-style': [/^italic$|^normal$/],
+      'font-weight': [/^bold$|^normal$|^\d{3}$/],
+      'text-decoration': [/^underline$|^line-through$|^none$/],
+    },
+  },
+  disallowedTagsMode: 'escape',
+}
+
+/** Render post markdown to HTML once, at save time — the read path serves stored HTML. */
+export async function renderPostMarkdown(markdown: string): Promise<string> {
+  const rendered = await marked.parse(markdown, { async: true })
+  return typeof rendered === 'string' ? sanitizeHtml(rendered, SANITIZE_OPTIONS) : ''
+}

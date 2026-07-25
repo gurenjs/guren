@@ -5,6 +5,7 @@ import { getSessionFromContext, type Session } from './session'
 import { deriveAppKeyring, getAppKeyringFromEnv } from '../../encryption/app-key'
 import { MessageSigner } from '../../encryption/MessageSigner'
 import { secureCompare } from '../../encryption/Hash'
+import { isMcpEndpointEnabled, MCP_ENDPOINT_PATH } from '../../mcp/endpoint'
 
 export const CSRF_TOKEN_KEY = '_csrf_token'
 export const CSRF_HEADER_NAME = 'X-CSRF-TOKEN'
@@ -124,6 +125,19 @@ function matchesPattern(path: string, pattern: string): boolean {
 
 function isExcluded(path: string, excludePatterns: string[]): boolean {
   return excludePatterns.some((pattern) => matchesPattern(path, pattern))
+}
+
+/**
+ * The MCP endpoint is exempt wherever CSRF is mounted.
+ *
+ * MCP clients (Claude Code, Cursor) POST JSON-RPC directly and never make a
+ * preceding GET to pick up an `XSRF-TOKEN`, so CSRF would make the endpoint
+ * unreachable for every client Guren ships config for. Nothing is exempted
+ * in production or without `GUREN_MCP=1`, because the route does not exist
+ * there; the endpoint enforces its own local-only access guard instead.
+ */
+function isMcpEndpointRequest(path: string): boolean {
+  return path === MCP_ENDPOINT_PATH && isMcpEndpointEnabled()
 }
 
 /**
@@ -268,6 +282,8 @@ async function getTokenFromRequest(ctx: Context): Promise<string | undefined> {
  * - Supports token submission via form field (_token) or header (X-CSRF-TOKEN)
  * - Keeps verifying tokens stored in sessions by earlier releases until
  *   those sessions expire
+ * - Exempts the dev-only MCP endpoint while it is mounted, since agent
+ *   clients cannot fetch a token first (it guards local-only access instead)
  *
  * `cookie: false` disables the `XSRF-TOKEN` cookie for apps that deliver the
  * token themselves (meta tag / form field). Session-bound tokens still
@@ -310,7 +326,7 @@ export function createCsrfMiddleware(options: CsrfOptions = {}): MiddlewareHandl
     }
 
     // Check if path is excluded
-    if (isExcluded(path, exclude)) {
+    if (isExcluded(path, exclude) || isMcpEndpointRequest(path)) {
       await next()
       return
     }
