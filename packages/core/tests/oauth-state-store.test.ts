@@ -90,6 +90,61 @@ describe('DatabaseOAuthStateStore', () => {
     expect(await store.find('hash-4')).toBeNull()
   })
 
+  test('consume returns the payload and removes the row', async () => {
+    const expiresAt = new Date(Date.now() + 60_000)
+    await store.store('hash-consume', {
+      provider: 'github',
+      redirectTo: '/dashboard',
+      expiresAt,
+    })
+
+    const result = await store.consume('hash-consume')
+
+    expect(result).not.toBeNull()
+    expect(result!.provider).toBe('github')
+    expect(result!.redirectTo).toBe('/dashboard')
+    expect(result!.expiresAt.getTime()).toBe(expiresAt.getTime())
+
+    expect(await store.consume('hash-consume')).toBeNull()
+    expect(await store.find('hash-consume')).toBeNull()
+  })
+
+  test('consume returns null for an unknown state hash', async () => {
+    expect(await store.consume('missing')).toBeNull()
+  })
+
+  test('consume returns null and deletes an expired state', async () => {
+    await store.store('hash-consume-expired', {
+      provider: 'github',
+      expiresAt: new Date(Date.now() - 1000),
+    })
+
+    expect(await store.consume('hash-consume-expired')).toBeNull()
+
+    const row = sqlite
+      .query('SELECT * FROM oauth_states WHERE state_hash = ?')
+      .get('hash-consume-expired')
+    expect(row).toBeNull()
+  })
+
+  test('concurrent consume hands the payload to exactly one caller', async () => {
+    await store.store('hash-race', {
+      provider: 'github',
+      redirectTo: '/dashboard',
+      expiresAt: new Date(Date.now() + 60_000),
+    })
+
+    const results = await Promise.all([
+      store.consume('hash-race'),
+      store.consume('hash-race'),
+      store.consume('hash-race'),
+    ])
+
+    const winners = results.filter((r) => r !== null)
+    expect(winners).toHaveLength(1)
+    expect(winners[0]!.provider).toBe('github')
+  })
+
   test('deleteExpired removes only expired states', async () => {
     await store.store('expired', {
       provider: 'github',

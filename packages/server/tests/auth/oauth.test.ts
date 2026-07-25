@@ -54,6 +54,73 @@ describe('oauth helpers', () => {
     expect(payload?.redirectTo).toBeUndefined()
   })
 
+  it('consume returns the payload exactly once under concurrency', async () => {
+    const store = new MemoryOAuthStateStore()
+    await store.store('hash-1', {
+      provider: 'github',
+      redirectTo: '/dashboard',
+      expiresAt: new Date(Date.now() + 60_000),
+    })
+
+    const results = await Promise.all([store.consume('hash-1'), store.consume('hash-1')])
+
+    const winners = results.filter((r) => r !== null)
+    expect(winners).toHaveLength(1)
+    expect(winners[0]?.provider).toBe('github')
+    expect(await store.find('hash-1')).toBeNull()
+  })
+
+  it('consume returns null for expired state and removes it', async () => {
+    const store = new MemoryOAuthStateStore()
+    await store.store('hash-expired', {
+      provider: 'github',
+      expiresAt: new Date(Date.now() - 1000),
+    })
+
+    expect(await store.consume('hash-expired')).toBeNull()
+    expect(await store.find('hash-expired')).toBeNull()
+  })
+
+  it('only one concurrent verifyOAuthState call succeeds for the same state', async () => {
+    const store = new MemoryOAuthStateStore()
+    const { state } = await createOAuthState('github', store, { expiresIn: 60_000 }, '/dashboard')
+
+    const results = await Promise.all([
+      verifyOAuthState(state, 'github', store, {}),
+      verifyOAuthState(state, 'github', store, {}),
+    ])
+
+    expect(results.filter((r) => r !== null)).toHaveLength(1)
+  })
+
+  it('verifyOAuthState prefers consume over find/delete when available', async () => {
+    const payload = {
+      provider: 'github',
+      redirectTo: '/next',
+      expiresAt: new Date(Date.now() + 60_000),
+    }
+    const calls: string[] = []
+    const store = {
+      store: async () => {},
+      find: async () => {
+        calls.push('find')
+        return payload
+      },
+      delete: async () => {
+        calls.push('delete')
+      },
+      consume: async () => {
+        calls.push('consume')
+        return payload
+      },
+    }
+
+    const verified = await verifyOAuthState('some-state', 'github', store, {})
+
+    expect(verified?.redirectTo).toBe('/next')
+    expect(calls).toEqual(['consume'])
+  })
+
   it('re-sanitizes redirectTo on verify for custom stores', async () => {
     const store = new MemoryOAuthStateStore()
     const { state } = await createOAuthState('github', store, {}, '/ok', 'fixed-state')

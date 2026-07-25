@@ -54,6 +54,17 @@ export interface OAuthStateStore {
   store(stateHash: string, payload: OAuthStatePayload): Promise<void>
   find(stateHash: string): Promise<OAuthStatePayload | null>
   delete(stateHash: string): Promise<void>
+  /**
+   * Atomically fetch and delete a state in one step. Exactly one caller may
+   * receive the payload; every other concurrent caller (and any later call)
+   * must get null. Expired states must also return null, mirroring `find`.
+   *
+   * Optional for backward compatibility: `verifyOAuthState` prefers this
+   * when present. Stores that only implement find/delete keep working, but
+   * leave a window where two concurrent callbacks with the same state can
+   * both pass verification.
+   */
+  consume?(stateHash: string): Promise<OAuthStatePayload | null>
 }
 
 export interface OAuthStateConfig {
@@ -134,6 +145,16 @@ export class MemoryOAuthStateStore implements OAuthStateStore {
 
   async delete(stateHash: string): Promise<void> {
     this.states.delete(stateHash)
+  }
+
+  async consume(stateHash: string): Promise<OAuthStatePayload | null> {
+    // Map.get + Map.delete run synchronously before the first await, so
+    // within one isolate at most one caller can observe the entry.
+    const payload = this.states.get(stateHash)
+    if (!payload) return null
+    this.states.delete(stateHash)
+    if (payload.expiresAt.getTime() <= Date.now()) return null
+    return payload
   }
 
   clear(): void {
@@ -244,13 +265,26 @@ export async function verifyOAuthState(
 ): Promise<OAuthStatePayload | null> {
   const hashAlgorithm = config.hashAlgorithm ?? DEFAULT_STATE_HASH_ALGORITHM
   const stateHash = hashToken(state, hashAlgorithm)
-  const payload = await store.find(stateHash)
+  const payload = typeof store.consume === 'function'
+    ? await store.consume(stateHash)
+    : await findAndDeleteState(store, stateHash)
   if (!payload) return null
-  await store.delete(stateHash)
   if (payload.provider !== provider) return null
   // Re-sanitize on the way out so custom stores and states persisted before
   // an allowlist change cannot smuggle an unsafe target through.
   return { ...payload, redirectTo: sanitizeOAuthRedirect(payload.redirectTo, config.allowedRedirectHosts) }
+}
+
+// Fallback for stores without consume(): two concurrent callbacks can both
+// find() before either delete() lands, so one-time use is not strict here.
+async function findAndDeleteState(
+  store: OAuthStateStore,
+  stateHash: string,
+): Promise<OAuthStatePayload | null> {
+  const payload = await store.find(stateHash)
+  if (!payload) return null
+  await store.delete(stateHash)
+  return payload
 }
 
 /**
