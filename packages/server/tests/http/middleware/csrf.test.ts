@@ -10,7 +10,11 @@ import {
   getCsrfToken,
   verifyCsrfToken,
 } from '../../../src/http/middleware/csrf'
-import { createSessionMiddleware, getSessionFromContext } from '../../../src/http/middleware/session'
+import {
+  createSessionMiddleware,
+  getSessionFromContext,
+  MemorySessionStore,
+} from '../../../src/http/middleware/session'
 
 function createTestApp(csrfOptions?: Parameters<typeof createCsrfMiddleware>[0]) {
   const app = new Hono()
@@ -30,7 +34,7 @@ function extractCookie(res: Response): string {
 }
 
 describe('getCsrfToken', () => {
-  it('generates and stores token in session', async () => {
+  it('returns a stable token across calls within a request', async () => {
     const app = createTestApp()
     let token1: string | undefined
     let token2: string | undefined
@@ -47,23 +51,24 @@ describe('getCsrfToken', () => {
     expect(token1).toBe(token2) // Same token on repeated calls
   })
 
-  it('throws error when session middleware is not registered', async () => {
+  it('works without session middleware (stateless double-submit)', async () => {
     const app = new Hono()
     app.use(createCsrfMiddleware())
 
-    app.get('/token', (c) => {
-      return c.json({ token: getCsrfToken(c) })
-    })
-
-    app.onError((err, c) => {
-      return c.json({ error: err.message }, 500)
-    })
+    app.get('/token', (c) => c.json({ token: getCsrfToken(c) }))
+    app.post('/submit', (c) => c.text('ok'))
 
     const res = await app.request('/token')
-    const body = await res.json()
+    const { token } = (await res.json()) as { token: string }
+    expect(token).toContain('.')
 
-    expect(res.status).toBe(500)
-    expect(body.error).toContain('session middleware')
+    const cookie = extractCookie(res)
+    const post = await app.request('/submit', {
+      method: 'POST',
+      headers: { Cookie: cookie, [CSRF_HEADER_NAME]: token },
+    })
+
+    expect(post.status).toBe(200)
   })
 })
 
@@ -80,22 +85,27 @@ describe('csrfField', () => {
     const html = await res.text()
 
     expect(html).toContain('<input type="hidden" name="_token"')
-    expect(html).toMatch(/value="[a-f0-9-]+"/)
+    expect(html).toMatch(/value="[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"/)
   })
 })
 
 describe('verifyCsrfToken', () => {
-  it('returns true for matching token', async () => {
+  it('returns true for a signed token matching the cookie', async () => {
     const app = createTestApp()
+    let issuedToken: string | undefined
     let result: boolean | undefined
 
-    app.get('/test', (c) => {
-      const token = getCsrfToken(c)
-      result = verifyCsrfToken(c, token)
+    app.get('/issue', (c) => {
+      issuedToken = getCsrfToken(c)
+      return c.text('ok')
+    })
+    app.get('/verify', (c) => {
+      result = verifyCsrfToken(c, issuedToken)
       return c.text('ok')
     })
 
-    await app.request('/test')
+    const res = await app.request('/issue')
+    await app.request('/verify', { headers: { Cookie: extractCookie(res) } })
 
     expect(result).toBe(true)
   })
@@ -429,5 +439,219 @@ describe('setXsrfCookie append behavior', () => {
     const cookies = postRes.headers.getSetCookie()
     expect(cookies.some((c) => c.startsWith('theme=dark'))).toBe(true)
     expect(cookies.some((c) => c.startsWith('XSRF-TOKEN='))).toBe(true)
+  })
+})
+
+describe('stateless double-submit security', () => {
+  it('rejects a forged unsigned cookie/header pair', async () => {
+    const app = createTestApp()
+    app.post('/submit', (c) => c.text('ok'))
+
+    // A sibling-domain attacker can plant a cookie and echo it in the
+    // header, but cannot produce a valid app-key signature.
+    const forged = 'attacker-value.attacker-signature'
+    const res = await app.request('/submit', {
+      method: 'POST',
+      headers: {
+        Cookie: `XSRF-TOKEN=${encodeURIComponent(forged)}`,
+        [CSRF_HEADER_NAME]: forged,
+      },
+    })
+
+    expect(res.status).toBe(403)
+  })
+
+  it('rejects a token whose signature was tampered with', async () => {
+    const app = createTestApp()
+    let token: string | undefined
+    app.get('/form', (c) => {
+      token = getCsrfToken(c)
+      return c.text('ok')
+    })
+    app.post('/submit', (c) => c.text('ok'))
+
+    await app.request('/form')
+    const [value] = token!.split('.')
+    const tampered = `${value}.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA`
+
+    const res = await app.request('/submit', {
+      method: 'POST',
+      headers: {
+        Cookie: `XSRF-TOKEN=${encodeURIComponent(tampered)}`,
+        [CSRF_HEADER_NAME]: tampered,
+      },
+    })
+
+    expect(res.status).toBe(403)
+  })
+
+  it('rejects a signed token that does not match the cookie', async () => {
+    const app = createTestApp()
+    const tokens: string[] = []
+    app.get('/form', (c) => {
+      tokens.push(getCsrfToken(c))
+      return c.text('ok')
+    })
+    app.post('/submit', (c) => c.text('ok'))
+
+    const first = await app.request('/form')
+    await app.request('/form')
+
+    // Two independently minted tokens: use one in the cookie, the other in
+    // the header — both validly signed, but not a pair.
+    const res = await app.request('/submit', {
+      method: 'POST',
+      headers: {
+        Cookie: extractCookie(first),
+        [CSRF_HEADER_NAME]: tokens[1]!,
+      },
+    })
+
+    expect(res.status).toBe(403)
+  })
+
+  it('accepts a legacy session-stored token until the session expires', async () => {
+    const app = createTestApp()
+    app.get('/legacy', (c) => {
+      getSessionFromContext(c)?.set('_csrf_token', 'legacy-hex-token')
+      return c.text('ok')
+    })
+    app.post('/submit', (c) => c.text('ok'))
+
+    const res = await app.request('/legacy')
+    const post = await app.request('/submit', {
+      method: 'POST',
+      headers: {
+        Cookie: extractCookie(res),
+        [CSRF_HEADER_NAME]: 'legacy-hex-token',
+      },
+    })
+
+    expect(post.status).toBe(200)
+  })
+
+  it('costs zero session store operations for a guest GET + POST roundtrip', async () => {
+    const { createSessionMiddleware: makeSession, MemorySessionStore } = await import(
+      '../../../src/http/middleware/session'
+    )
+    const { spyOn } = await import('bun:test')
+    const store = new MemorySessionStore()
+    const writes = spyOn(store, 'write')
+    const touches = spyOn(store, 'touch')
+
+    const app = new Hono()
+    app.use(makeSession({ store }))
+    app.use(createCsrfMiddleware())
+    app.get('/page', (c) => c.json({ token: getCsrfToken(c) }))
+    app.post('/submit', (c) => c.text('ok'))
+
+    const res = await app.request('/page')
+    const { token } = (await res.json()) as { token: string }
+
+    const post = await app.request('/submit', {
+      method: 'POST',
+      headers: {
+        Cookie: extractCookie(res),
+        [CSRF_HEADER_NAME]: token,
+      },
+    })
+
+    expect(post.status).toBe(200)
+    expect(writes).toHaveBeenCalledTimes(0)
+    expect(touches).toHaveBeenCalledTimes(0)
+    // No session cookie was ever issued — only the XSRF token cookie.
+    expect(extractCookie(res)).not.toContain('guren.session=')
+  })
+})
+
+describe('session-bound tokens (cookie-injection immunity)', () => {
+  // A logged-in user: establish a persisted session, then all later
+  // requests carry a stable session id the token binds to.
+  function createBoundApp() {
+    const store = new MemorySessionStore()
+    const app = new Hono()
+    app.use(createSessionMiddleware({ store }))
+    app.use(createCsrfMiddleware())
+    app.get('/login', (c) => {
+      getSessionFromContext(c)?.set('userId', 1)
+      return c.text('ok')
+    })
+    app.get('/form', (c) => c.json({ token: getCsrfToken(c) }))
+    app.post('/submit', (c) => c.text('ok'))
+    return app
+  }
+
+  async function loginCookie(app: Hono): Promise<string> {
+    return extractCookie(await app.request('/login'))
+  }
+
+  it('binds the token to the session and accepts a matching submit', async () => {
+    const app = createBoundApp()
+    const session = await loginCookie(app)
+
+    const formRes = await app.request('/form', { headers: { Cookie: session } })
+    const { token } = (await formRes.json()) as { token: string }
+
+    const post = await app.request('/submit', {
+      method: 'POST',
+      headers: {
+        Cookie: [session, extractCookie(formRes)].filter(Boolean).join('; '),
+        [CSRF_HEADER_NAME]: token,
+      },
+    })
+
+    expect(post.status).toBe(200)
+  })
+
+  it('rejects an attacker-injected valid token from a different session', async () => {
+    const app = createBoundApp()
+
+    // Attacker mints their own legitimately-signed, session-bound token.
+    const attackerSession = await loginCookie(app)
+    const attackerForm = await app.request('/form', { headers: { Cookie: attackerSession } })
+    const { token: attackerToken } = (await attackerForm.json()) as { token: string }
+    const attackerXsrf = extractCookie(attackerForm)
+
+    // Victim's own logged-in session cookie.
+    const victimSession = await loginCookie(app)
+
+    // Attacker plants their XSRF cookie + header on the victim's request.
+    // The token is bound to the attacker's session id, not the victim's.
+    const post = await app.request('/submit', {
+      method: 'POST',
+      headers: {
+        Cookie: [victimSession, attackerXsrf].filter(Boolean).join('; '),
+        [CSRF_HEADER_NAME]: attackerToken,
+      },
+    })
+
+    expect(post.status).toBe(403)
+  })
+
+  it('supports cookie:false for session-bound flows (no XSRF cookie needed)', async () => {
+    const store = new MemorySessionStore()
+    const app = new Hono()
+    app.use(createSessionMiddleware({ store }))
+    app.use(createCsrfMiddleware({ cookie: false }))
+    app.get('/login', (c) => {
+      getSessionFromContext(c)?.set('userId', 1)
+      return c.text('ok')
+    })
+    app.get('/form', (c) => c.json({ token: getCsrfToken(c) }))
+    app.post('/submit', (c) => c.text('ok'))
+
+    const session = extractCookie(await app.request('/login'))
+    const formRes = await app.request('/form', { headers: { Cookie: session } })
+    const { token } = (await formRes.json()) as { token: string }
+
+    // No XSRF-TOKEN cookie is issued; the token verifies against the session id.
+    expect(extractCookie(formRes)).not.toContain('XSRF-TOKEN=')
+
+    const post = await app.request('/submit', {
+      method: 'POST',
+      headers: { Cookie: session, [CSRF_HEADER_NAME]: token },
+    })
+
+    expect(post.status).toBe(200)
   })
 })

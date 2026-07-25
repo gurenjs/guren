@@ -1,6 +1,10 @@
 import type { Context, MiddlewareHandler } from 'hono'
+import { getCookie } from 'hono/cookie'
 import { jsonResponse } from './index'
-import { getSessionFromContext } from './session'
+import { getSessionFromContext, type Session } from './session'
+import { deriveAppKeyring, getAppKeyringFromEnv } from '../../encryption/app-key'
+import { MessageSigner } from '../../encryption/MessageSigner'
+import { secureCompare } from '../../encryption/Hash'
 
 export const CSRF_TOKEN_KEY = '_csrf_token'
 export const CSRF_HEADER_NAME = 'X-CSRF-TOKEN'
@@ -51,10 +55,63 @@ const DEFAULT_COOKIE_SECURE = typeof process !== 'undefined'
   ? process.env.NODE_ENV === 'production'
   : true
 
-function generateToken(): string {
-  const bytes = new Uint8Array(32)
+const CSRF_CONTEXT_KEY = 'guren:csrf-token'
+const CSRF_PURPOSE = 'csrf'
+
+interface CsrfClaims extends Record<string, unknown> {
+  /** Present on session-bound tokens: the session id the token is tied to. */
+  sid?: string
+  /** Present on stateless tokens: random entropy for the double-submit value. */
+  n?: string
+}
+
+// Follows the createXSigner() convention used by email-verification /
+// password-reset / signed-url: derive a purpose-scoped keyring per call
+// (a single HKDF derivation is cheap) and let MessageSigner own the
+// sign/verify/rotation/timing-safe machinery.
+function createCsrfSigner(): MessageSigner {
+  return new MessageSigner(deriveAppKeyring(getAppKeyringFromEnv(), 'csrf-token'))
+}
+
+function randomNonce(): string {
+  const bytes = new Uint8Array(16)
   globalThis.crypto.getRandomValues(bytes)
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+/**
+ * A session with a stable, already-persisted id is bind-able. A brand-new
+ * (isNew) session has no stable id yet — under the write-reduction rules it
+ * may not even be persisted — so it must not anchor a token.
+ */
+function bindableSessionId(session: Session | undefined): string | undefined {
+  return session && !session.isNew ? session.id : undefined
+}
+
+/**
+ * Session-bound when a stable session exists (immune to sibling-subdomain
+ * cookie injection — verification checks the live session id, which an
+ * attacker cannot forge), otherwise a stateless random token (double-submit)
+ * for guests, who carry no authenticated state to protect.
+ */
+function mintCsrfToken(sessionId: string | undefined): string {
+  const signer = createCsrfSigner()
+  return sessionId
+    ? signer.sign({ sid: sessionId }, { purpose: CSRF_PURPOSE })
+    : signer.sign({ n: randomNonce() }, { purpose: CSRF_PURPOSE })
+}
+
+function verifiedClaims(token: string): CsrfClaims | null {
+  return createCsrfSigner().verify<CsrfClaims>(token, { purpose: CSRF_PURPOSE })
+}
+
+/**
+ * A cookie token is reusable only in the mode it was minted for: a bound
+ * token only for its own session, a stateless token only while there is
+ * still no session to bind to.
+ */
+function claimsUsableFor(claims: CsrfClaims, boundId: string | undefined): boolean {
+  return claims.sid !== undefined ? claims.sid === boundId : boundId === undefined
 }
 
 function matchesPattern(path: string, pattern: string): boolean {
@@ -70,23 +127,33 @@ function isExcluded(path: string, excludePatterns: string[]): boolean {
 }
 
 /**
- * Get the CSRF token from the current session.
- * Creates a new token if one doesn't exist.
+ * Get the request's CSRF token.
+ *
+ * Signed token bound to the session when a stable one exists, otherwise a
+ * stateless signed double-submit token for guests. Nothing is stored
+ * server-side, so anonymous page views cost no session writes. A cookie
+ * token that is still valid for this request's mode is reused; otherwise a
+ * fresh token is minted and set on the response by the middleware.
  */
 export function getCsrfToken(ctx: Context): string {
-  const session = getSessionFromContext(ctx)
-
-  if (!session) {
-    throw new Error('CSRF middleware requires session middleware to be registered first.')
+  const pending = ctx.get(CSRF_CONTEXT_KEY) as string | undefined
+  if (pending) {
+    return pending
   }
 
-  let token = session.get(CSRF_TOKEN_KEY) as string | undefined
+  const boundId = bindableSessionId(getSessionFromContext(ctx))
 
-  if (!token) {
-    token = generateToken()
-    session.set(CSRF_TOKEN_KEY, token)
+  const cookieToken = getCookie(ctx, XSRF_COOKIE_NAME)
+  if (cookieToken) {
+    const claims = verifiedClaims(cookieToken)
+    if (claims && claimsUsableFor(claims, boundId)) {
+      ctx.set(CSRF_CONTEXT_KEY, cookieToken)
+      return cookieToken
+    }
   }
 
+  const token = mintCsrfToken(boundId)
+  ctx.set(CSRF_CONTEXT_KEY, token)
   return token
 }
 
@@ -99,34 +166,42 @@ export function csrfField(ctx: Context): string {
 }
 
 /**
- * Verify that the provided token matches the session's CSRF token.
+ * Verify a request token.
+ *
+ * The token must first carry a valid app-key signature (proving this server
+ * minted it). Then, by mode:
+ * - **Session-bound** (token carries a `sid`): the id must match the live
+ *   session. This is immune to cookie injection — a sibling-subdomain
+ *   attacker can plant a cookie but cannot know the victim's session id.
+ * - **Stateless** (guest, no `sid`): the token must match the `XSRF-TOKEN`
+ *   cookie (double-submit). Guests hold no authenticated state to protect.
+ *
+ * Legacy fallback: tokens stored in sessions by earlier releases keep
+ * verifying against the session until those sessions expire. Remove this
+ * branch once all pre-upgrade sessions have aged out (a major release).
  */
 export function verifyCsrfToken(ctx: Context, token: string | undefined): boolean {
   if (!token) {
     return false
   }
 
-  const session = getSessionFromContext(ctx)
-  if (!session) {
-    return false
+  const claims = verifiedClaims(token)
+  if (claims) {
+    if (claims.sid !== undefined) {
+      const boundId = bindableSessionId(getSessionFromContext(ctx))
+      if (boundId !== undefined && secureCompare(claims.sid, boundId)) {
+        return true
+      }
+    } else {
+      const cookieToken = getCookie(ctx, XSRF_COOKIE_NAME)
+      if (cookieToken && secureCompare(token, cookieToken)) {
+        return true
+      }
+    }
   }
 
-  const sessionToken = session.get(CSRF_TOKEN_KEY) as string | undefined
-  if (!sessionToken) {
-    return false
-  }
-
-  // Timing-safe comparison
-  if (token.length !== sessionToken.length) {
-    return false
-  }
-
-  let result = 0
-  for (let i = 0; i < token.length; i++) {
-    result |= token.charCodeAt(i) ^ sessionToken.charCodeAt(i)
-  }
-
-  return result === 0
+  const sessionToken = getSessionFromContext(ctx)?.get(CSRF_TOKEN_KEY) as string | undefined
+  return sessionToken !== undefined && secureCompare(token, sessionToken)
 }
 
 async function getTokenFromRequest(ctx: Context): Promise<string | undefined> {
@@ -182,9 +257,22 @@ async function getTokenFromRequest(ctx: Context): Promise<string | undefined> {
  * Creates a CSRF protection middleware.
  *
  * This middleware:
- * - Generates and stores a CSRF token in the session for GET requests
- * - Validates the CSRF token for state-changing HTTP methods (POST, PUT, PATCH, DELETE)
+ * - Issues a signed token in the `XSRF-TOKEN` cookie on safe requests.
+ *   With a logged-in session the token is bound to the session id; for
+ *   guests it is a stateless double-submit token. Nothing is stored
+ *   server-side, so anonymous traffic costs no session writes and session
+ *   middleware is optional.
+ * - Validates the token for state-changing HTTP methods (POST, PUT, PATCH,
+ *   DELETE): always requires a valid app-key signature, then the bound
+ *   session id or (guest) the cookie match.
  * - Supports token submission via form field (_token) or header (X-CSRF-TOKEN)
+ * - Keeps verifying tokens stored in sessions by earlier releases until
+ *   those sessions expire
+ *
+ * `cookie: false` disables the `XSRF-TOKEN` cookie for apps that deliver the
+ * token themselves (meta tag / form field). Session-bound tokens still
+ * verify without the cookie; guest (stateless) tokens require the cookie, so
+ * disable it only for session-authenticated flows.
  *
  * @example
  * ```ts
@@ -208,12 +296,6 @@ export function createCsrfMiddleware(options: CsrfOptions = {}): MiddlewareHandl
   const protectedMethods = new Set(methods.map((m) => m.toUpperCase()))
 
   return async (ctx, next) => {
-    const session = getSessionFromContext(ctx)
-
-    if (!session) {
-      throw new Error('CSRF middleware requires session middleware to be registered first.')
-    }
-
     const method = ctx.req.method.toUpperCase()
     const path = new URL(ctx.req.url).pathname
 
