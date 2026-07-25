@@ -10,6 +10,12 @@ introspection layer and external prior art (see Prior art), and each part
 ships as its own reviewed PR referencing this RFC. Open Questions remain
 open and will be resolved during implementation with in-place amendments.
 
+**Implementation complete (2026-07-25):** all four parts shipped and
+merged — Part 1 #160, Part 2 #163 (including `make:adr --entity`),
+Part 3 #172, Part 4 #175; #177 carried the principle into the docs
+site and homepage. Every Open Question below now records its
+resolution in place.
+
 ## Problem
 
 In AI-assisted development the bottleneck has inverted: code is written
@@ -372,24 +378,48 @@ Purely additive. Existing applications see no behavior change:
 
 1. **Artifact location.** `docs/spec/` (committed, human-first) is
    proposed, but `.guren/spec/` (generated-only) with a rendered copy
-   in the docs site is defensible. Does committing generated Mermaid
-   create merge-conflict pain on busy repos?
+   in the docs site is defensible. ~~Does committing generated Mermaid
+   create merge-conflict pain on busy repos?~~
+   **Resolved in implementation:** `docs/spec/`, committed, as
+   proposed — the blog example runs the setup. Merge conflicts in
+   generated files are resolved by regenerating, never by hand-merging,
+   and byte-deterministic output keeps that cheap; no pain observed
+   worth the alternative's loss of PR-diff visibility.
 2. **Entity ambiguity UX.** Is `--module` sufficient, or should the
    bundle merge same-named entities across modules with clear
    provenance headers?
+   **Resolved in implementation:** `--module` is required on a name
+   tie (the error lists the candidate locations), with `--module app`
+   selecting the application root — a case the proposal missed. No
+   merged-bundle mode: when the name is duplicated, every join is
+   scoped to the selected location so sibling artifacts can't leak in.
 3. **Reverse relationship edges.** Showing "Post belongsTo User" under
    `guren context User` requires an inverted index over all models —
    ~~include in Part 1, or defer?~~
    **Resolved in implementation:** included in Part 1 as `referencedBy`.
    Every model is already parsed to resolve the entity argument, so the
    inversion is a cheap in-memory pass over data the command has anyway.
-4. **`last_reviewed` TTL.** Ship disabled with config opt-in (as
-   proposed), or default to a generous TTL (e.g. 180 days, warn-only)?
+4. **`last_reviewed` TTL.** ~~Ship disabled with config opt-in (as
+   proposed), or default to a generous TTL (e.g. 180 days, warn-only)?~~
+   **Resolved in implementation:** disabled by default, opt-in via the
+   `check --docs --docs-ttl <days>` flag (warn-only) — a flag rather
+   than the proposed config entry, since no other check reads
+   `guren.config` and one flag needed no new configuration surface.
 5. **Richer code-side vocabulary.** `@coreConcept`/`@businessRule`
    tags plus a `guren glossary` command (living glossary) are a
-   natural follow-up — separate RFC, or fold in here?
+   natural follow-up — ~~separate RFC, or fold in here?~~
+   **Resolved in implementation:** deliberately left out; a future,
+   separate RFC. The shipped vocabulary is `@docs` only, and the
+   harness rule documents exactly that.
 6. **MCP doc content.** Should `guren://context/{entity}` inline
    linked doc *content* (token cost, but one round trip) or only
    paths/titles (proposed)?
-7. **screens.md fidelity.** Props types can be large; render full
-   types, or truncate to top-level keys with a link to the page file?
+   **Resolved in implementation:** paths/titles only, as proposed —
+   the bundle stays small and the agent reads only the documents it
+   decides it needs.
+7. **screens.md fidelity.** Props types can be large; ~~render full
+   types, or truncate to top-level keys with a link to the page file?~~
+   **Resolved in implementation:** full types, whitespace collapsed to
+   one line and pipe characters escaped for the table. Props are the
+   load-bearing column of the screens view; truncation would hide
+   exactly the drift the view exists to show.
