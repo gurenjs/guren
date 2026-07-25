@@ -1,5 +1,5 @@
 import { readdir, access, readFile, stat } from 'node:fs/promises'
-import { resolve, join, basename, extname, relative, sep } from 'node:path'
+import { resolve, join, extname, relative, sep } from 'node:path'
 
 const SOURCE_EXTENSIONS = new Set(['.ts', '.mts', '.js', '.mjs'])
 const TEST_FILE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.js', '.jsx', '.mjs'])
@@ -228,7 +228,8 @@ export async function hasControllerTest(cwd: string, controllerPath: string): Pr
  * e.g., '/app/Models/Post.ts' → 'Post'
  */
 export function classNameFromPath(filePath: string): string {
-  return basename(filePath).replace(/\.(ts|mts|js|mjs)$/, '')
+  const base = filePath.split(/[\\/]/).pop() ?? ''
+  return base.replace(/\.(ts|mts|js|mjs)$/, '')
 }
 
 /**

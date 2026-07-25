@@ -1,4 +1,4 @@
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
 /**
@@ -21,6 +21,8 @@ export interface GurenCliApi {
     validators: string[]
   }>
   renderContextMarkdown(ctx: unknown): string
+  generateEntityContext(entity: string, opts: { cwd: string; module?: string }): Promise<unknown>
+  renderEntityContextMarkdown(ctx: unknown): string
   runCheck(opts: { cwd: string }): Promise<{
     cwd: string
     checks: Array<{ key: string; title: string; status: string; message: string; suggestion?: string }>
@@ -83,6 +85,36 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
       const text =
         format === 'markdown' ? cli.renderContextMarkdown(ctx) : JSON.stringify(ctx, null, 2)
       return { content: [{ type: 'text', text }] }
+    },
+  )
+
+  server.tool(
+    'guren_entity_context',
+    'Get everything about one entity in a single bundle: model (table, columns, relationships, reverse references), routes with validation schemas, controller actions, Inertia pages with props, resource, policy, seeders, and tests. Prefer this over guren_get_context when working on a specific model.',
+    {
+      entity: z.string().describe('Model class name (e.g., "User"). Case-insensitive.'),
+      module: z
+        .string()
+        .optional()
+        .describe('Module name to disambiguate same-named models across modules/; "app" selects the application root'),
+      format: z.enum(['json', 'markdown']).default('markdown').describe('Output format'),
+    },
+    async ({ entity, module, format }) => {
+      try {
+        const ctx = await cli.generateEntityContext(entity, { cwd, module })
+        const text =
+          format === 'markdown'
+            ? cli.renderEntityContextMarkdown(ctx)
+            : JSON.stringify(ctx, null, 2)
+        return { content: [{ type: 'text', text }] }
+      } catch (error) {
+        return {
+          content: [
+            { type: 'text' as const, text: error instanceof Error ? error.message : String(error) },
+          ],
+          isError: true,
+        }
+      }
     },
   )
 
@@ -296,6 +328,28 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
             uri: uri.href,
             mimeType: 'application/json',
             text: JSON.stringify(ctx, null, 2),
+          },
+        ],
+      }
+    },
+  )
+
+  server.resource(
+    'entity-context',
+    new ResourceTemplate('guren://context/{entity}', { list: undefined }),
+    {
+      description:
+        'Entity-centric context bundle: model, routes, controller, pages, resource, policy. For same-named models across modules, use the guren_entity_context tool with its module argument instead.',
+      mimeType: 'text/markdown',
+    },
+    async (uri, variables) => {
+      const ctx = await cli.generateEntityContext(String(variables.entity), { cwd })
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: 'text/markdown',
+            text: cli.renderEntityContextMarkdown(ctx),
           },
         ],
       }

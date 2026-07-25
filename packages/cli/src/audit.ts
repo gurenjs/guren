@@ -655,8 +655,11 @@ async function extractTableColumns(schemaPath: string, tables: Map<string, strin
  * '../modules/<name>/db/schema'`, so a module's own `pgTable(...)` calls
  * never appear in the root file's AST — without this, sensitive-column
  * checks on module models would silently see no columns at all and skip.
+ *
+ * Also consumed by entity-context.ts — keep behavior general, not
+ * audit-specific.
  */
-async function parseSchemaTableColumns(cwd: string): Promise<Map<string, string[]> | null> {
+export async function parseSchemaTableColumns(cwd: string): Promise<Map<string, string[]> | null> {
   const tables = new Map<string, string[]>()
   await extractTableColumns(resolve(cwd, 'db/schema.ts'), tables)
 

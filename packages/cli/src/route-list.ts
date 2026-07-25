@@ -1,6 +1,6 @@
 import { resolve } from 'node:path'
 import { consola } from 'consola'
-import { loadRouteDefinitions } from './load-routes'
+import { loadRouteDefinitions, DEFAULT_ROUTES_FILE } from './load-routes'
 
 export interface RouteListOptions {
   /**
@@ -43,8 +43,6 @@ export interface RouteListOptions {
    */
   reverse?: boolean
 }
-
-const DEFAULT_ROUTES_FILE = 'routes/web.ts'
 
 export interface RouteInfo {
   method: string

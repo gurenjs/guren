@@ -12,6 +12,7 @@ import {
   moduleNameFromRelPath,
 } from './discovery'
 import { ParseCache } from './parse-cache'
+import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath } from './inertia-pages'
 import { runArchCheck } from './arch-check'
 import { getChangedFiles } from './changed-files'
 import { check, type CheckResult, type CheckReport, type CheckStatus } from './check-result'
@@ -255,30 +256,21 @@ async function checkInertiaPages(
   const parsed = await cache.get(filePath)
   const source = parsed?.source ?? (await readFile(filePath, 'utf-8'))
 
-  // Find this.inertia('PageName', ...) calls via regex (simpler than AST for this)
-  const inertiaCallRegex = /this\.inertia\(\s*(?:pages\.[.\w]+|['"]([^'"]+)['"])/g
-  let match
-  while ((match = inertiaCallRegex.exec(source)) !== null) {
-    const pageName = match[1]
-    if (!pageName) continue // pages.xxx pattern — already type-checked
+  for (const ref of extractInertiaPageRefs(source)) {
+    if (ref.form === 'manifest') continue // pages.xxx pattern — already type-checked
 
-    const pagePath = `resources/js/pages/${pageName}.tsx`
-    const exists = await fileExists(cwd, pagePath)
-    if (!exists) {
-      const altPath = `resources/js/pages/${pageName}.jsx`
-      const altExists = await fileExists(cwd, altPath)
-      if (!altExists) {
-        results.push(
-          check(
-            `page:${pageName}`,
-            `Page ${pageName}`,
-            'fail',
-            `Controller references page '${pageName}' but no file found.`,
-            `Create: resources/js/pages/${pageName}.tsx`,
-            relPath,
-          ),
-        )
-      }
+    const pageFile = await resolveInertiaPageFile(cwd, ref.id)
+    if (!pageFile) {
+      results.push(
+        check(
+          `page:${ref.id}`,
+          `Page ${ref.id}`,
+          'fail',
+          `Controller references page '${ref.id}' but no file found.`,
+          `Create: ${expectedInertiaPagePath(ref.id)}`,
+          relPath,
+        ),
+      )
     }
   }
 

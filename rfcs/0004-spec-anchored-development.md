@@ -371,7 +371,10 @@ Purely additive. Existing applications see no behavior change:
    provenance headers?
 3. **Reverse relationship edges.** Showing "Post belongsTo User" under
    `guren context User` requires an inverted index over all models —
-   include in Part 1, or defer?
+   ~~include in Part 1, or defer?~~
+   **Resolved in implementation:** included in Part 1 as `referencedBy`.
+   Every model is already parsed to resolve the entity argument, so the
+   inversion is a cheap in-memory pass over data the command has anyway.
 4. **`last_reviewed` TTL.** Ship disabled with config opt-in (as
    proposed), or default to a generous TTL (e.g. 180 days, warn-only)?
 5. **Richer code-side vocabulary.** `@coreConcept`/`@businessRule`

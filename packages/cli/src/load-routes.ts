@@ -6,6 +6,9 @@ import { listModuleNames } from './discovery'
 
 type RouteRegistrar = (router: Router) => void | Promise<void>
 
+/** Conventional routes entry file, shared by every command that loads routes. */
+export const DEFAULT_ROUTES_FILE = 'routes/web.ts'
+
 const REGISTRAR_EXPORTS = [
   'registerRoutes',
   'registerWebRoutes',
@@ -127,11 +130,17 @@ async function loadGurenModule(appRoot: string, moduleName: string, warnings?: s
  * `moduleWarnings`, when passed, collects one message per module that was
  * skipped (import failure or no recognizable `GurenModule` export) — see
  * `loadGurenModule`.
+ *
+ * `moduleProvenance`, when passed, receives one entry per returned
+ * definition (same order): the module name that mounted the route, or
+ * `null` for routes from the top-level routes file. Lets entity-scoped
+ * consumers attribute routes to a bounded context.
  */
 export async function loadRouteDefinitions(
   routesFile: string,
   appRoot: string,
   moduleWarnings?: string[],
+  moduleProvenance?: Array<string | null>,
 ): Promise<RouteDefinition[]> {
   const moduleExports = await import(createImportUrl(routesFile)) as Record<string, unknown>
   const registrar = resolveRegistrar(moduleExports)
@@ -144,6 +153,8 @@ export async function loadRouteDefinitions(
 
   const router = new Router()
   await registrar(router)
+  let definitionCount = router.definitions().length
+  moduleProvenance?.push(...Array.from({ length: definitionCount }, () => null))
 
   const moduleNames = await listModuleNames(appRoot)
 
@@ -151,6 +162,9 @@ export async function loadRouteDefinitions(
     const gurenModule = await loadGurenModule(appRoot, moduleName, moduleWarnings)
     if (gurenModule) {
       await mountModuleRoutes(router, gurenModule)
+      const mounted = router.definitions().length
+      moduleProvenance?.push(...Array.from({ length: mounted - definitionCount }, () => moduleName))
+      definitionCount = mounted
     }
   }
 

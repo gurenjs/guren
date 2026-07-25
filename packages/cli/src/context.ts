@@ -17,12 +17,12 @@ import {
   excludeBarrelFiles,
 } from './discovery'
 import { parseModelFile, type ModelInfo } from './model-parser'
-import { listRoutes, type RouteInfo } from './route-list'
+import { loadContextRoutes, escapeMarkdownTableCell, type ContextRoute } from './context-route'
 
 export interface ProjectContext {
   framework: { name: string; version: string }
   models: ModelInfo[]
-  routes: RouteInfo[]
+  routes: ContextRoute[]
   pages: string[]
   controllers: string[]
   resources: string[]
@@ -51,49 +51,59 @@ export async function generateContext(options: ContextOptions = {}): Promise<Pro
     version = pkg.dependencies?.['@guren/core'] ?? pkg.devDependencies?.['@guren/core'] ?? 'unknown'
   }
 
-  // Models
-  const modelFiles = await discoverModelFiles(cwd)
-  const models: ModelInfo[] = []
-  for (const f of modelFiles) {
-    const info = await parseModelFile(f)
-    if (info) {
-      info.filePath = relative(cwd, info.filePath)
-      models.push(info)
-    }
-  }
-  models.sort((a, b) => a.className.localeCompare(b.className))
-
-  // Routes
-  let routes: RouteInfo[] = []
-  try {
-    routes = await listRoutes({ appRoot: cwd, routesFile: options.routesFile })
-  } catch {
-    // Routes may not be loadable (missing deps, etc.)
+  const collectModels = async (): Promise<ModelInfo[]> => {
+    const modelFiles = await discoverModelFiles(cwd)
+    const parsed = await Promise.all(modelFiles.map((file) => parseModelFile(file)))
+    const models = parsed.flatMap((info, index) => {
+      if (!info) return []
+      info.filePath = relative(cwd, modelFiles[index])
+      return [info]
+    })
+    return models.sort((a, b) => a.className.localeCompare(b.className))
   }
 
-  // Pages
-  const pagesDir = resolve(cwd, 'resources/js/pages')
-  const pageExts = new Set(['.tsx', '.jsx', '.ts', '.js'])
-  const pageFiles = await collectFiles(pagesDir, pageExts)
-  const pages = pageFiles
-    .map((f) => relative(pagesDir, f).replace(/\.(tsx|jsx|ts|js)$/, ''))
-    .filter((p) => !p.startsWith('contracts'))
-    .sort()
+  const collectPages = async (): Promise<string[]> => {
+    const pagesDir = resolve(cwd, 'resources/js/pages')
+    const pageExts = new Set(['.tsx', '.jsx', '.ts', '.js'])
+    const pageFiles = await collectFiles(pagesDir, pageExts)
+    return pageFiles
+      .map((f) => relative(pagesDir, f).replace(/\.(tsx|jsx|ts|js)$/, ''))
+      .filter((p) => !p.startsWith('contracts'))
+      .sort()
+  }
 
-  // Other components
   const toNames = async (discover: (root: string) => Promise<string[]>) => {
     const files = excludeBarrelFiles(await discover(cwd))
     return files.map(classNameFromPath).sort()
   }
 
-  const controllers = await toNames(discoverControllerFiles)
-  const resources = await toNames(discoverResourceFiles)
-  const events = await toNames(discoverEventFiles)
-  const jobs = await toNames(discoverJobFiles)
-  const middleware = await toNames(discoverMiddlewareFiles)
-  const listeners = await toNames(discoverListenerFiles)
-  const validators = await toNames(discoverValidatorFiles)
-  const policies = await toNames(discoverPolicyFiles)
+  // Every source below is independent — one barrier instead of a dozen
+  // serialized directory walks (plus the route-graph import).
+  const [
+    models,
+    routes,
+    pages,
+    controllers,
+    resources,
+    events,
+    jobs,
+    middleware,
+    listeners,
+    validators,
+    policies,
+  ] = await Promise.all([
+    collectModels(),
+    loadContextRoutes(cwd, options.routesFile),
+    collectPages(),
+    toNames(discoverControllerFiles),
+    toNames(discoverResourceFiles),
+    toNames(discoverEventFiles),
+    toNames(discoverJobFiles),
+    toNames(discoverMiddlewareFiles),
+    toNames(discoverListenerFiles),
+    toNames(discoverValidatorFiles),
+    toNames(discoverPolicyFiles),
+  ])
 
   return {
     framework: { name: 'Guren', version },
@@ -147,10 +157,14 @@ export function renderContextMarkdown(ctx: ProjectContext): string {
   // Routes
   lines.push(`## Routes (${ctx.routes.length})`)
   if (ctx.routes.length > 0) {
-    lines.push('| Method | Path | Name |')
-    lines.push('|--------|------|------|')
+    lines.push('| Method | Path | Name | Controller |')
+    lines.push('|--------|------|------|------------|')
     for (const route of ctx.routes) {
-      lines.push(`| ${route.method} | ${route.path} | ${route.name ?? ''} |`)
+      const controller = route.controller
+        ? `${route.controller.name}.${route.controller.action}`
+        : ''
+      const cells = [route.method, route.path, route.name ?? '', controller]
+      lines.push(`| ${cells.map(escapeMarkdownTableCell).join(' | ')} |`)
     }
   } else {
     lines.push('No routes loaded.')
