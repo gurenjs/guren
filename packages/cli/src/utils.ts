@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { access, mkdir, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 
 export interface WriterOptions {
@@ -76,6 +76,40 @@ export async function writeFileSafe(relativePath: string, contents: string, opti
   await mkdir(dirname(fullPath), { recursive: true })
   await writeFile(fullPath, contents, 'utf8')
   return fullPath
+}
+
+/**
+ * Writes a generated artifact, skipping the write entirely when the file
+ * already holds byte-identical content.
+ *
+ * Codegen re-runs on every save under `resources/js/pages/`,
+ * `app/Http/Resources/`, and `routes/web.ts` (see `vite/route-types.ts`), and
+ * controllers import the results (`@/.guren/pages.gen`). Rewriting unchanged
+ * output bumps those files' mtimes, which wakes up anything watching backend
+ * sources for no reason. Comparing first keeps a no-op run a real no-op.
+ *
+ * Differing content still goes through `writeFileSafe`, so the
+ * "already exists. Use --force to overwrite." guard is untouched — identical
+ * content is simply not a clobber worth guarding against.
+ */
+export async function writeGeneratedFile(
+  relativePath: string,
+  contents: string,
+  options: WriterOptions = {},
+): Promise<string> {
+  const fullPath = resolve(process.cwd(), relativePath)
+
+  try {
+    if ((await readFile(fullPath, 'utf8')) === contents) {
+      return fullPath
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error
+    }
+  }
+
+  return writeFileSafe(relativePath, contents, options)
 }
 
 export async function writeFilesSafe(

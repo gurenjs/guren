@@ -1,6 +1,6 @@
 import { readdir } from 'node:fs/promises'
 import { dirname, extname, relative, resolve } from 'node:path'
-import { writeFileSafe, type WriterOptions } from './utils'
+import { writeGeneratedFile, type WriterOptions } from './utils'
 import { extractPageProps, type ExtractedPageProps } from './page-props-extractor'
 
 export type PageDefinition = {
@@ -57,7 +57,7 @@ export async function generatePageTypes(
   })
 
   const relativeTarget = relative(process.cwd(), outputFile) || outputFile
-  const outputPath = await writeFileSafe(relativeTarget, module, { force: options.force })
+  const outputPath = await writeGeneratedFile(relativeTarget, module, { force: options.force })
 
   return { outputPath, definitions }
 }

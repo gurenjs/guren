@@ -8,7 +8,7 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { dirname, extname, relative, resolve } from 'node:path'
 import { parse } from '@babel/parser'
-import { writeFileSafe, type WriterOptions } from './utils'
+import { writeGeneratedFile, type WriterOptions } from './utils'
 
 export interface ResourceDefinition {
   /** Class name (e.g. 'PostResource') */
@@ -50,7 +50,7 @@ export async function generateDataTypes(
   })
 
   const relativeTarget = relative(process.cwd(), outputFile) || outputFile
-  const outputPath = await writeFileSafe(relativeTarget, module, { force: options.force })
+  const outputPath = await writeGeneratedFile(relativeTarget, module, { force: options.force })
 
   return { outputPath, definitions }
 }

@@ -1,7 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { relative, resolve } from 'node:path'
 import { parse } from '@babel/parser'
-import { writeFileSafe, type WriterOptions } from './utils'
+import { writeGeneratedFile, type WriterOptions } from './utils'
 
 export interface GenerateChannelTypesOptions extends WriterOptions {
   appRoot?: string
@@ -41,7 +41,7 @@ export async function generateChannelTypes(
   })
 
   const relativeTarget = relative(process.cwd(), outputFile) || outputFile
-  const outputPath = await writeFileSafe(relativeTarget, module, { force: options.force })
+  const outputPath = await writeGeneratedFile(relativeTarget, module, { force: options.force })
 
   return { outputPath, channels }
 }
