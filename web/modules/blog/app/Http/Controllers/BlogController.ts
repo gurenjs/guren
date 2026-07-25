@@ -8,11 +8,14 @@ const SlugParamSchema = z.object({
   slug: z.string().min(1),
 })
 
-export function isPublished(post: PostRecord, now: Date = new Date()): boolean {
+/** The summary columns the list view needs — see index(). */
+type PostSummarySource = Pick<PostRecord, 'slug' | 'title' | 'description' | 'publishedAt'>
+
+export function isPublished(post: Pick<PostRecord, 'publishedAt'>, now: Date = new Date()): boolean {
   return post.publishedAt !== null && post.publishedAt.getTime() <= now.getTime()
 }
 
-function toSummary(post: PostRecord) {
+function toSummary(post: PostSummarySource) {
   return {
     slug: post.slug,
     title: post.title,
@@ -23,11 +26,13 @@ function toSummary(post: PostRecord) {
 
 export default class BlogController extends Controller {
   async index(): Promise<Response> {
-    const records = await Post.all()
-    const posts = records
-      .filter((post) => isPublished(post))
-      .sort((a, b) => (b.publishedAt?.getTime() ?? 0) - (a.publishedAt?.getTime() ?? 0))
-      .map(toSummary)
+    // Only the summary columns: bodyMarkdown/bodyHtml are the two large
+    // columns on the table and none of them reach the list view.
+    const records = await Post.select('slug', 'title', 'description', 'publishedAt')
+      .whereNotNull('publishedAt')
+      .orderBy('publishedAt', 'desc')
+      .get()
+    const posts = records.filter((post) => isPublished(post)).map(toSummary)
 
     return this.inertia(
       pages.blog.Index,

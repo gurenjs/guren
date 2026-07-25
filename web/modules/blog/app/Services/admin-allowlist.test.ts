@@ -37,4 +37,16 @@ describe('assertAllowlistedAdmin', () => {
   it('should not throw for the allowlisted id', () => {
     expect(() => assertAllowlistedAdmin('12345', '12345')).not.toThrow()
   })
+
+  it('should reject every account in production when the allowlist is unset', () => {
+    // An env var missed during deployment must not hand post management to
+    // whoever signs in first.
+    expect(isAllowlistedAdmin('12345', undefined, true)).toBe(false)
+    expect(isAllowlistedAdmin('12345', '  ', true)).toBe(false)
+    expect(() => assertAllowlistedAdmin('12345', undefined, true)).toThrow()
+  })
+
+  it('should accept any account outside production when the allowlist is unset', () => {
+    expect(isAllowlistedAdmin('12345', undefined, false)).toBe(true)
+  })
 })

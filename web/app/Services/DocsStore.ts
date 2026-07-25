@@ -5,7 +5,7 @@
 // dev keeps live-editing without shipping the renderer to production.
 import { docsData, type PrerenderedDocsData } from '@/.guren/docs.gen.js'
 
-import type { DocCategory, DocLocale, DocSummary } from './docs-config.js'
+import { shouldUsePrerendered, type DocCategory, type DocLocale, type DocSummary } from './docs-config.js'
 
 export interface RenderedDoc extends DocSummary {
   html: string
@@ -21,14 +21,6 @@ export interface DocsStore {
  * Prebuilt content is preferred in production (or with GUREN_DOCS_PRERENDERED=1);
  * everywhere else the live renderer keeps docs editable without a rebuild.
  */
-export function shouldUsePrerendered(prerendered: boolean): boolean {
-  if (!prerendered) {
-    return false
-  }
-
-  return process.env.NODE_ENV === 'production' || process.env.GUREN_DOCS_PRERENDERED === '1'
-}
-
 export class PrebuiltDocsStore implements DocsStore {
   #data: PrerenderedDocsData
 

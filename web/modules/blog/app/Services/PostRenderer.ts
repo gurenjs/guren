@@ -54,6 +54,24 @@ const marked = new Marked()
 marked.setOptions({ gfm: true, breaks: false, async: true })
 marked.use(markedHighlight({ async: true, highlight }))
 
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+}
+
+// Raw HTML in post markdown is escaped rather than passed through: the
+// rendered HTML is stored and later injected with dangerouslySetInnerHTML,
+// so a compromised or mis-scoped admin account would otherwise mean stored
+// XSS for every reader.
+marked.use({
+  renderer: {
+    html: ({ text }: { text: string }) => escapeHtml(text),
+  },
+})
+
 /** Render post markdown to HTML once, at save time — the read path serves stored HTML. */
 export async function renderPostMarkdown(markdown: string): Promise<string> {
   const rendered = await marked.parse(markdown, { async: true })

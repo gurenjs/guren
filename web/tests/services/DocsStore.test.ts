@@ -1,7 +1,8 @@
 import { resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { DocsService } from '../../app/Services/DocsService.js'
-import { PrebuiltDocsStore, shouldUsePrerendered } from '../../app/Services/DocsStore.js'
+import { PrebuiltDocsStore } from '../../app/Services/DocsStore.js'
+import { shouldUsePrerendered } from '../../app/Services/docs-config.js'
 import { FsDocsStore } from '../../app/Services/FsDocsStore.js'
 
 const repoDocsDir = resolve(import.meta.dirname, '../../../docs')

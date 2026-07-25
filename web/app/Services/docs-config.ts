@@ -284,3 +284,16 @@ export function buildDocSections(
 
   return sections
 }
+
+/**
+ * Prebuilt content is served in production, or when explicitly opted into
+ * locally. Lives here rather than beside a store so callers that only need
+ * the decision (the landing page's code samples) do not pull a generated
+ * data module into their import graph.
+ */
+export function shouldUsePrerendered(prerendered: boolean): boolean {
+  return (
+    prerendered &&
+    (process.env.NODE_ENV === 'production' || process.env.GUREN_DOCS_PRERENDERED === '1')
+  )
+}

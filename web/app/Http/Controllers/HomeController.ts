@@ -1,6 +1,6 @@
 import { Controller } from '@guren/core'
 import { SITE_TITLE } from '../../../config/site.js'
-import { shouldUsePrerendered } from '../../Services/DocsStore.js'
+import { shouldUsePrerendered } from '../../Services/docs-config.js'
 import { homeSamples } from '@/.guren/home-samples.gen.js'
 import { pages } from '@/.guren/pages.gen.js'
 

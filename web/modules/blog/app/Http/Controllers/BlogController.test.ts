@@ -57,18 +57,28 @@ describe('BlogController', () => {
   })
 
   describe('index', () => {
-    it('should list only published posts, newest first', async () => {
+    it('should query published posts newest-first and drop scheduled ones', async () => {
       const older = makePost({ id: 1, slug: 'older', publishedAt: new Date('2026-06-01T00:00:00Z') })
       const newer = makePost({ id: 2, slug: 'newer', publishedAt: new Date('2026-07-01T00:00:00Z') })
-      const draft = makePost({ id: 3, slug: 'draft', publishedAt: null })
       const scheduled = makePost({ id: 4, slug: 'scheduled', publishedAt: new Date(Date.now() + 86_400_000) })
-      vi.spyOn(Post, 'all').mockResolvedValue([older, draft, newer, scheduled])
+      // Ordering and the unpublished filter happen in SQL now, so the mock
+      // returns rows already in query order and the assertions cover the
+      // query shape plus the future-dated guard the database cannot express.
+      const chain = {
+        whereNotNull: vi.fn().mockReturnThis(),
+        orderBy: vi.fn().mockReturnThis(),
+        get: vi.fn().mockResolvedValue([newer, older, scheduled]),
+      }
+      const select = vi.spyOn(Post, 'select').mockReturnValue(chain as never)
 
       const controller = new BlogController()
       controller.setContext(createBlogContext('http://guren.dev/blog'))
 
       const { payload } = await readInertiaResponse(await controller.index())
 
+      expect(select).toHaveBeenCalledWith('slug', 'title', 'description', 'publishedAt')
+      expect(chain.whereNotNull).toHaveBeenCalledWith('publishedAt')
+      expect(chain.orderBy).toHaveBeenCalledWith('publishedAt', 'desc')
       expect(payload.component).toBe('blog/Index')
       expect((payload.props.posts as Array<{ slug: string }>).map((post) => post.slug)).toEqual([
         'newer',
