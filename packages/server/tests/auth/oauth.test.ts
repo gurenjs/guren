@@ -396,10 +396,44 @@ describe('OAuthManager', () => {
     const { state } = await manager.authorize('github')
     const profile = await manager.user('github', { code: 'auth-code', state })
 
-    // The fallback address is a different one than the userinfo response was
-    // read against, and GitHub's lookup only returns verified primaries.
+    // GitHub's lookup filters on the address's own `verified` flag, so it
+    // returns the object form and can claim verification for it.
     expect(profile.email).toBe('primary@example.com')
     expect(profile.emailVerified).toBe(true)
+  })
+
+  it('makes no verification claim for a fallback that returns a bare string', async () => {
+    const manager = new OAuthManager({ stateStore: new MemoryOAuthStateStore() })
+    manager.registerProvider('custom', {
+      ...githubConfig,
+      // The original signature every pre-existing implementation was written
+      // against. It promises nothing about verification, so neither do we.
+      fetchFallbackEmail: async () => 'from-elsewhere@example.com',
+    })
+
+    installOAuthFetchMock({ access_token: 'token-123' }, { id: 42, email: null })
+
+    const { state } = await manager.authorize('custom')
+    const profile = await manager.user('custom', { code: 'auth-code', state })
+
+    expect(profile.email).toBe('from-elsewhere@example.com')
+    expect(profile.emailVerified).toBeUndefined()
+  })
+
+  it('honors an explicit false from a fallback', async () => {
+    const manager = new OAuthManager({ stateStore: new MemoryOAuthStateStore() })
+    manager.registerProvider('custom', {
+      ...githubConfig,
+      fetchFallbackEmail: async () => ({ email: 'unverified@example.com', emailVerified: false }),
+    })
+
+    installOAuthFetchMock({ access_token: 'token-123' }, { id: 42, email: null })
+
+    const { state } = await manager.authorize('custom')
+    const profile = await manager.user('custom', { code: 'auth-code', state })
+
+    expect(profile.email).toBe('unverified@example.com')
+    expect(profile.emailVerified).toBe(false)
   })
 
   it('does not overwrite emailVerified set by a custom mapProfile', async () => {

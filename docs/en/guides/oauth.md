@@ -184,6 +184,12 @@ const discordish: OAuthProviderConfig = {
 
 `mapProfile` owns the whole mapping, so a provider using it sets `emailVerified` itself and `emailVerifiedKey` is ignored. GitHub's `/user` carries no verification field at all, so `emailVerified` stays `undefined` there — except when the private-email fallback runs, since `/user/emails` only yields verified primary addresses.
 
+A `fetchFallbackEmail` hook is read against a response that had no email, so the key above cannot vouch for what it returns. Returning a bare string makes no claim and leaves the field `undefined`; return an object to state one:
+
+```ts
+fetchFallbackEmail: async (token) => ({ email: await lookupEmail(token), emailVerified: true }),
+```
+
 ## State Storage
 
 The one-time `state` value that ties the callback back to the original request is stored server-side. The default `MemoryOAuthStateStore` works for single-process dev, but production deployments with more than one process (load balancers, serverless) need shared storage — otherwise the callback can land on a process that never issued the state.

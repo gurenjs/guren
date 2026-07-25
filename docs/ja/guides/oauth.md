@@ -184,6 +184,12 @@ const discordish: OAuthProviderConfig = {
 
 `mapProfile` はマッピング全体を担うため、それを使うプロバイダーでは `emailVerified` も自分で設定し、`emailVerifiedKey` は無視されます。GitHub の `/user` には検証状態のフィールドがないため `emailVerified` は `undefined` のままですが、メールアドレス非公開時のフォールバックが動いた場合は例外です（`/user/emails` は検証済みのプライマリアドレスしか返さないため）。
 
+`fetchFallbackEmail` はメールアドレスを含まないレスポンスに対して読んだ後に呼ばれるため、上記のキーはその戻り値を保証できません。文字列をそのまま返す場合は検証状態を主張せず `undefined` のままになります。主張する場合はオブジェクトを返してください。
+
+```ts
+fetchFallbackEmail: async (token) => ({ email: await lookupEmail(token), emailVerified: true }),
+```
+
 ## Stateストレージ
 
 コールバックを元のリクエストに結びつける一度限りの `state` 値は、サーバー側で保存されます。デフォルトの `MemoryOAuthStateStore` は単一プロセスの開発環境では動作しますが、複数プロセス（ロードバランサー、サーバーレス）構成の本番環境では共有ストレージが必要です。そうしないと、コールバックがstateを発行していないプロセスに到達してしまう可能性があります。

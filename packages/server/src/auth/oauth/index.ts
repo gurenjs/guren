@@ -31,11 +31,22 @@ export interface OAuthProviderConfig {
    * `user:email` scope was granted. Returns the email to use, or undefined
    * to leave the profile without one.
    *
-   * Only return an address the provider has verified: the resulting profile
-   * reports `emailVerified: true`, since the returned address is a different
-   * one than `emailVerifiedKey` was read against.
+   * The signal read via `emailVerifiedKey` does not carry over to a fallback
+   * address — it was read against a response that had no email. A bare string
+   * therefore makes no verification claim and leaves `profile.emailVerified`
+   * undefined; return `{ email, emailVerified: true }` to assert one.
    */
-  fetchFallbackEmail?: (token: OAuthTokenResult) => Promise<string | undefined>
+  fetchFallbackEmail?: (token: OAuthTokenResult) => Promise<string | OAuthFallbackEmail | undefined>
+}
+
+export interface OAuthFallbackEmail {
+  email: string
+  /**
+   * Whether the provider verified this specific address. Omit it when the
+   * lookup cannot tell — the profile then reports `emailVerified: undefined`
+   * rather than an unfounded claim.
+   */
+  emailVerified?: boolean
 }
 
 export interface OAuthTokenResult {
@@ -439,12 +450,15 @@ export async function fetchOAuthUserProfile(
     : defaultProfileFromUserInfo(raw, token, provider.emailVerifiedKey)
 
   if (!profile.email && provider.fetchFallbackEmail) {
-    const email = await provider.fetchFallbackEmail(token)
+    const fallback = await provider.fetchFallbackEmail(token)
+    const email = typeof fallback === 'string' ? fallback : fallback?.email
     if (email) {
-      // A fallback address is a different one than the userinfo response was
-      // read against, and the contract is that only verified addresses are
-      // returned — so the signal read from `raw` no longer applies to it.
-      return { ...profile, email, emailVerified: true }
+      // The signal read from `raw` was read against a response with no email,
+      // so it cannot vouch for this one. Only the object form claims anything;
+      // a bare string — every implementation written against the original
+      // signature — leaves the field undefined rather than asserting `true`.
+      const emailVerified = typeof fallback === 'string' ? undefined : fallback?.emailVerified
+      return { ...profile, email, emailVerified }
     }
   }
 
@@ -501,7 +515,7 @@ export interface OAuthProviderFactoryInput {
 // GitHub's /user endpoint returns `email: null` whenever the account's email
 // is set to private, even with the `user:email` scope granted — the primary
 // verified address is only available from this separate endpoint.
-async function fetchGitHubPrimaryEmail(token: OAuthTokenResult): Promise<string | undefined> {
+async function fetchGitHubPrimaryEmail(token: OAuthTokenResult): Promise<OAuthFallbackEmail | undefined> {
   const response = await fetch('https://api.github.com/user/emails', {
     headers: {
       Accept: 'application/vnd.github+json',
@@ -526,7 +540,9 @@ async function fetchGitHubPrimaryEmail(token: OAuthTokenResult): Promise<string 
       (entry as { verified?: unknown }).verified === true &&
       typeof (entry as { email?: unknown }).email === 'string',
   )
-  return primary?.email
+  // The `verified === true` filter above is GitHub's own signal for this
+  // address, so this lookup can claim what a generic fallback cannot.
+  return primary ? { email: primary.email, emailVerified: true } : undefined
 }
 
 export function createGitHubOAuthProviderConfig(input: OAuthProviderFactoryInput): OAuthProviderConfig {
