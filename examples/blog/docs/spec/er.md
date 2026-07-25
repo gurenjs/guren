@@ -4,6 +4,8 @@
 
 Entities and attributes are derived from `db/schema.ts` (and every module schema); edges from model relationship declarations and explicit `.references()` foreign keys.
 
+This is a minimal, diff-able view. For interactive exploration of the Drizzle schema, tools like drizzle-lab or Liam ERD complement it.
+
 ```mermaid
 erDiagram
   posts {
