@@ -17,12 +17,13 @@ import {
   excludeBarrelFiles,
 } from './discovery'
 import { parseModelFile, type ModelInfo } from './model-parser'
-import { listRoutes, type RouteInfo } from './route-list'
+import { loadRouteDefinitions } from './load-routes'
+import { routeDefinitionToContextRoute, type ContextRoute } from './entity-context'
 
 export interface ProjectContext {
   framework: { name: string; version: string }
   models: ModelInfo[]
-  routes: RouteInfo[]
+  routes: ContextRoute[]
   pages: string[]
   controllers: string[]
   resources: string[]
@@ -63,10 +64,15 @@ export async function generateContext(options: ContextOptions = {}): Promise<Pro
   }
   models.sort((a, b) => a.className.localeCompare(b.className))
 
-  // Routes
-  let routes: RouteInfo[] = []
+  // Routes — full RouteDefinition payload (controller binding, schemas as
+  // rendered type strings), not the lossy method/path/name view.
+  let routes: ContextRoute[] = []
   try {
-    routes = await listRoutes({ appRoot: cwd, routesFile: options.routesFile })
+    const definitions = await loadRouteDefinitions(
+      resolve(cwd, options.routesFile ?? 'routes/web.ts'),
+      cwd,
+    )
+    routes = definitions.map(routeDefinitionToContextRoute)
   } catch {
     // Routes may not be loadable (missing deps, etc.)
   }
@@ -147,10 +153,13 @@ export function renderContextMarkdown(ctx: ProjectContext): string {
   // Routes
   lines.push(`## Routes (${ctx.routes.length})`)
   if (ctx.routes.length > 0) {
-    lines.push('| Method | Path | Name |')
-    lines.push('|--------|------|------|')
+    lines.push('| Method | Path | Name | Controller |')
+    lines.push('|--------|------|------|------------|')
     for (const route of ctx.routes) {
-      lines.push(`| ${route.method} | ${route.path} | ${route.name ?? ''} |`)
+      const controller = route.controller
+        ? `${route.controller.name}.${route.controller.action}`
+        : ''
+      lines.push(`| ${route.method} | ${route.path} | ${route.name ?? ''} | ${controller} |`)
     }
   } else {
     lines.push('No routes loaded.')

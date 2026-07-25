@@ -23,6 +23,18 @@ function createMockCli(): GurenCliApi {
       validators: ['CreatePostValidator'],
     }),
     renderContextMarkdown: (ctx) => `# Context\n${JSON.stringify(ctx)}`,
+    generateEntityContext: async (entity: string) => {
+      if (entity.toLowerCase() !== 'post') {
+        throw new Error(`Model "${entity}" not found. Available models: Post, User`)
+      }
+      return {
+        entity: 'Post',
+        model: { filePath: 'app/Models/Post.ts', tableName: 'posts', relationships: [] },
+        routes: [{ method: 'GET', path: '/posts', controller: { name: 'PostController', action: 'index' } }],
+        pages: [{ id: 'posts/Index', filePath: 'resources/js/pages/posts/Index.tsx' }],
+      }
+    },
+    renderEntityContextMarkdown: (ctx) => `# Post\n${JSON.stringify(ctx)}`,
     runCheck: async () => ({
       cwd: '/test',
       checks: [
@@ -110,6 +122,7 @@ describe('Guren MCP Server', () => {
     const names = tools.map((t) => t.name)
 
     expect(names).toContain('guren_get_context')
+    expect(names).toContain('guren_entity_context')
     expect(names).toContain('guren_check')
     expect(names).toContain('guren_list_models')
     expect(names).toContain('guren_generate_guidelines')
@@ -117,7 +130,44 @@ describe('Guren MCP Server', () => {
     expect(names).toContain('guren_make_feature')
     expect(names).toContain('guren_make_component')
     expect(names).toContain('guren_codegen')
-    expect(tools).toHaveLength(8)
+    expect(tools).toHaveLength(9)
+  })
+
+  test('guren_entity_context returns markdown by default', async () => {
+    const client = await createTestClient()
+    const result = await client.callTool({
+      name: 'guren_entity_context',
+      arguments: { entity: 'Post' },
+    })
+    const text = (result.content as Array<{ type: string; text: string }>)[0].text
+
+    expect(result.isError).toBeFalsy()
+    expect(text).toStartWith('# Post')
+  })
+
+  test('guren_entity_context returns JSON when requested', async () => {
+    const client = await createTestClient()
+    const result = await client.callTool({
+      name: 'guren_entity_context',
+      arguments: { entity: 'Post', format: 'json' },
+    })
+    const text = (result.content as Array<{ type: string; text: string }>)[0].text
+    const parsed = JSON.parse(text)
+
+    expect(parsed.entity).toBe('Post')
+    expect(parsed.routes[0].controller.name).toBe('PostController')
+  })
+
+  test('guren_entity_context surfaces resolution errors as isError', async () => {
+    const client = await createTestClient()
+    const result = await client.callTool({
+      name: 'guren_entity_context',
+      arguments: { entity: 'Ghost' },
+    })
+    const text = (result.content as Array<{ type: string; text: string }>)[0].text
+
+    expect(result.isError).toBe(true)
+    expect(text).toContain('Model "Ghost" not found')
   })
 
   test('guren_get_context returns JSON by default', async () => {
@@ -234,6 +284,21 @@ describe('Guren MCP Server', () => {
     const parsed = JSON.parse(text)
 
     expect(parsed.framework.name).toBe('guren')
+  })
+
+  test('lists the entity context resource template', async () => {
+    const client = await createTestClient()
+    const { resourceTemplates } = await client.listResourceTemplates()
+
+    expect(resourceTemplates.map((t) => t.uriTemplate)).toContain('guren://context/{entity}')
+  })
+
+  test('reads entity context through the resource template', async () => {
+    const client = await createTestClient()
+    const result = await client.readResource({ uri: 'guren://context/Post' })
+    const text = (result.contents[0] as { text: string }).text
+
+    expect(text).toStartWith('# Post')
   })
 
   test('reads guidelines resource', async () => {

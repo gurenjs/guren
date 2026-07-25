@@ -656,7 +656,7 @@ async function extractTableColumns(schemaPath: string, tables: Map<string, strin
  * never appear in the root file's AST — without this, sensitive-column
  * checks on module models would silently see no columns at all and skip.
  */
-async function parseSchemaTableColumns(cwd: string): Promise<Map<string, string[]> | null> {
+export async function parseSchemaTableColumns(cwd: string): Promise<Map<string, string[]> | null> {
   const tables = new Map<string, string[]>()
   await extractTableColumns(resolve(cwd, 'db/schema.ts'), tables)
 

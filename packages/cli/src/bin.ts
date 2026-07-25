@@ -52,6 +52,7 @@ import { installPlugin } from './plugin'
 import { discoverPluginCommands, createPluginCommandProxy } from './plugin-commands'
 import { displayModels } from './model-list'
 import { displayContext } from './context'
+import { displayEntityContext } from './entity-context'
 import { runCheck, renderCheckReport } from './check'
 import { runAudit, renderAuditReport } from './audit'
 import { generateGuidelines } from './guidelines'
@@ -1615,9 +1616,14 @@ const modelListCommand = defineCommand({
 const contextCommand = defineCommand({
   meta: {
     name: 'context',
-    description: 'Generate a project context map for AI agents.',
+    description: 'Generate a project context map for AI agents. Pass an entity name (e.g. `guren context User`) for an entity-centric bundle.',
   },
   args: {
+    entity: {
+      type: 'positional',
+      required: false,
+      description: 'Model class name for an entity-centric context bundle (case-insensitive).',
+    },
     json: {
       type: 'boolean',
       description: 'Output as JSON.',
@@ -1630,8 +1636,22 @@ const contextCommand = defineCommand({
       type: 'string',
       description: 'Application root directory.',
     },
+    module: {
+      type: 'string',
+      description: 'Module name to disambiguate same-named models (entity mode only).',
+    },
   },
   async run({ args }) {
+    if (args.entity) {
+      await displayEntityContext(args.entity, {
+        cwd: args.app,
+        json: Boolean(args.json),
+        routesFile: args.routes,
+        module: args.module,
+      })
+      return
+    }
+
     await displayContext({
       cwd: args.app,
       json: Boolean(args.json),

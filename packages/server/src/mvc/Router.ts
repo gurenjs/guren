@@ -154,6 +154,8 @@ export interface RouteDefinition {
     name: string
     action: string
   }
+  /** Route model bindings: param name → bound model class name (from `bind`) */
+  bindings?: Record<string, string>
   summary?: string
   description?: string
   tags?: string[]
@@ -477,7 +479,7 @@ export class Router<M extends string = never> {
   }
 
   definitions(): RouteDefinition[] {
-    return this.registry.map(({ method, path, name, schemas, openapi, routeMiddlewareNames, middlewares, handler }) => ({
+    return this.registry.map(({ method, path, name, schemas, openapi, routeMiddlewareNames, middlewares, handler, bindings }) => ({
       method,
       path,
       name,
@@ -486,6 +488,17 @@ export class Router<M extends string = never> {
       hasInlineMiddleware: middlewares.length > 0,
       controller: isControllerAction(handler)
         ? { name: handler[0].name, action: String(handler[1]) }
+        : undefined,
+      bindings: bindings && bindings.size > 0
+        ? Object.fromEntries(
+            [...bindings].flatMap(([param, model]) => {
+              // `bind` values are model classes at runtime; their constructor
+              // name is the introspection payload. Anonymous values carry no
+              // usable name, so they are omitted rather than emitted as ''.
+              const modelName = (model as { name?: string }).name
+              return modelName ? [[param, modelName]] : []
+            }),
+          )
         : undefined,
       ...openapi,
     }))

@@ -34,6 +34,16 @@ export type { DoctorCheck, DoctorReport, DoctorStatus, DoctorJsonOutput, RunDoct
 
 // AI Agent commands
 export { generateContext, renderContextMarkdown, displayContext } from './context'
+export {
+  generateEntityContext,
+  renderEntityContextMarkdown,
+  displayEntityContext,
+  routeDefinitionToContextRoute,
+  EntityResolutionError,
+  type EntityContext,
+  type EntityContextOptions,
+  type ContextRoute,
+} from './entity-context'
 export { runCheck, renderCheckReport } from './check'
 export { generateGuidelines } from './guidelines'
 export { listModels, displayModels } from './model-list'
