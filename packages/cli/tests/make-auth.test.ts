@@ -560,6 +560,133 @@ export const posts = pgTable('posts', {
     }
   })
 
+  it('drops password login, registration, and reset with --oauth-only', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-oauth-only-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'db/schema.ts'),
+        `import { pgTable, serial, text } from 'drizzle-orm/pg-core'
+
+export const posts = pgTable('posts', {
+  id: serial('id').primaryKey(),
+  title: text('title').notNull(),
+})
+`,
+        'utf8',
+      )
+
+      const created = await makeAuth({ force: true, oauth: 'github', oauthOnly: true })
+
+      // Pinned so a newly added scaffold file can't slip into the
+      // passwordless variant unnoticed — the per-file negative assertions
+      // below only cover the files we already know about.
+      expect(created).toHaveLength(13)
+      expect(created).toEqual(expect.arrayContaining([
+        expect.stringContaining('LoginController.ts'),
+        expect.stringContaining('OAuthController.ts'),
+        expect.stringContaining('app/Providers/OAuthProvider.ts'),
+      ]))
+      for (const absent of [
+        'LoginValidator.ts',
+        'RegisterController.ts',
+        'RegisterValidator.ts',
+        'Register.tsx',
+        'ForgotPasswordController.ts',
+        'ResetPasswordController.ts',
+        'ForgotPassword.tsx',
+        'ResetPassword.tsx',
+        'PasswordResetStore.ts',
+        'PasswordResetMail.ts',
+        'MailProvider.ts',
+        'config/mail.ts',
+        // The demo user can only be signed in as with a password — seeding it
+        // would be an unreachable row plus one scrypt hash.
+        'UsersSeeder.ts',
+      ]) {
+        expect(created.join('\n')).not.toContain(absent)
+      }
+
+      const authRoutes = await readFile(join(workspace.dir, 'routes/auth.ts'), 'utf8')
+      expect(authRoutes).toContain("router.get('/login', [LoginController, 'show'], requireGuest({ redirectTo: '/dashboard' })).name('login')")
+      expect(authRoutes).not.toContain("router.post('/login'")
+      expect(authRoutes).not.toContain('RegisterController')
+      expect(authRoutes).not.toContain('ForgotPasswordController')
+      // Logout and the OAuth entry points stay.
+      expect(authRoutes).toContain("router.post('/logout', [LoginController, 'destroy']")
+      expect(authRoutes).toContain("router.get('/auth/:provider', [OAuthController, 'redirectToProvider']")
+      expect(authRoutes).toContain("router.get('/auth/:provider/callback', [OAuthController, 'callback'])")
+
+      const loginController = await readFile(join(workspace.dir, 'app/Http/Controllers/Auth/LoginController.ts'), 'utf8')
+      expect(loginController).not.toContain('LoginSchema')
+      expect(loginController).not.toContain('async store(')
+      expect(loginController).not.toContain('this.auth.attempt(')
+      expect(loginController).toContain('async show(')
+      expect(loginController).toContain('async destroy(')
+
+      const loginPage = await readFile(join(workspace.dir, 'resources/js/pages/auth/Login.tsx'), 'utf8')
+      expect(loginPage).toContain('interface Props')
+      expect(loginPage).toContain('Continue with GitHub')
+      expect(loginPage).toContain('href="/auth/github"')
+      // No password form left behind, and no "or" divider dangling above a
+      // form that no longer exists.
+      expect(loginPage).not.toContain('type="password"')
+      expect(loginPage).not.toContain("form.post('/login')")
+      expect(loginPage).not.toContain('Or continue with')
+      expect(loginPage).not.toContain('href="/register"')
+      expect(loginPage).not.toContain('href="/forgot-password"')
+      // OAuthController still flashes ValidationException messages back here.
+      expect(loginPage).toContain('errors.message')
+
+      // A password set from the profile form could never be used to sign in,
+      // and hashing it is the CPU cost --oauth-only exists to avoid.
+      const profileValidator = await readFile(join(workspace.dir, 'app/Http/Validators/ProfileValidator.ts'), 'utf8')
+      expect(profileValidator).not.toContain('password')
+      const profileController = await readFile(join(workspace.dir, 'app/Http/Controllers/ProfileController.ts'), 'utf8')
+      expect(profileController).not.toContain('password')
+      const profilePage = await readFile(join(workspace.dir, 'resources/js/pages/profile/Edit.tsx'), 'utf8')
+      expect(profilePage).not.toContain('password')
+
+      const schema = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
+      expect(schema).toContain("passwordHash: text('password_hash'),")
+      expect(schema).toContain("githubId: text('github_id').unique()")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('rejects --oauth-only without a supported provider', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-oauth-only-invalid-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'db/schema.ts'), `export const posts = 'posts'\n`, 'utf8')
+
+      // Neither reading is defensible: honouring it leaves no way to sign in,
+      // ignoring it scaffolds the password login the flag opts out of.
+      await expect(makeAuth({ force: true, oauthOnly: true })).rejects.toThrow('--oauth-only requires --oauth')
+      // Same for a provider list that survives parsing with nothing in it.
+      await expect(makeAuth({ force: true, oauthOnly: true, oauth: 'bogus' })).rejects.toThrow('--oauth-only requires --oauth')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('skips --verify under --oauth-only instead of scaffolding a verify flow', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-oauth-only-verify-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'db/schema.ts'), `export const posts = 'posts'\n`, 'utf8')
+
+      const created = await makeAuth({ force: true, oauth: 'github', oauthOnly: true, verify: true })
+
+      expect(created.join('\n')).not.toContain('VerifyEmailController.ts')
+      const schema = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
+      expect(schema).not.toContain('emailVerifiedAt')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('warns and skips unknown OAuth provider names', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-auth-oauth-unknown-')
     try {

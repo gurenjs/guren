@@ -63,9 +63,21 @@ Pass `--oauth` with a comma-separated provider list to also scaffold "Continue w
 bunx guren make:auth --install --oauth github,google
 ```
 
-This adds a `githubId` / `googleId` column per provider to the `users` table, an `OAuthProvider` that registers each provider against the shared `OAuthManager` (only once its client ID, secret, and redirect URI are all set — see [OAuth / Social login](#oauth-social-login) below for the env var names), and an `OAuthController` with `redirectToProvider` and `callback` actions. The callback looks up the user by provider ID, links to an existing account of the same email only when a fresh signup is unambiguous (otherwise it rejects the login with "sign in with your password instead" rather than silently linking an unverified email), and otherwise creates a new account with a random password before logging the user in. Unlike `--verify`, `--oauth` works with `--minimal` — it doesn't depend on the registration scaffold.
+This adds a `githubId` / `googleId` column per provider to the `users` table, an `OAuthProvider` that registers each provider against the shared `OAuthManager` (only once its client ID, secret, and redirect URI are all set — see [OAuth / Social login](#oauth-social-login) below for the env var names), and an `OAuthController` with `redirectToProvider` and `callback` actions. The callback looks up the user by provider ID, refuses to link an existing account with the same email (that account signs in with the method it was created with), and otherwise creates a **passwordless** account before logging the user in — nothing is hashed at signup, and the scaffolded `users.passwordHash` column is left nullable. Unlike `--verify`, `--oauth` works with `--minimal` — it doesn't depend on the registration scaffold.
 
 `--oauth` shares its `OAuthController` / `OAuthProvider` file paths and wiring conventions with `guren add oauth` below, just with a complete (not stub) callback — don't run both against the same app, since the second run either aborts (no `--force`) or overwrites the first (`--force`).
+
+### OAuth as the only sign-in method
+
+`--oauth` still scaffolds password login alongside the buttons. Add `--oauth-only` to drop it entirely:
+
+```bash
+bunx guren make:auth --install --oauth github --oauth-only
+```
+
+`/login` becomes a provider-buttons page with no credential form and no `POST /login` route; `LoginController` keeps only `show()` and `destroy()` (logout). Registration, password reset, the login and profile password fields, `LoginValidator`, and the demo `UsersSeeder` are all skipped — a seeded password could never be used to sign in. `--oauth-only` requires `--oauth` with at least one provider (otherwise the app would have no way in at all) and subsumes `--minimal`; `--verify` is skipped under it, since provider-supplied emails arrive already vouched for.
+
+This is the recommended shape for CPU-metered runtimes such as the Cloudflare Workers free tier, where a single password hash exceeds the per-request CPU budget no matter which hashing algorithm you pick.
 
 ## OAuth / Social login
 

@@ -251,6 +251,10 @@ const makeAuthCommand = defineCommand({
       type: 'string',
       description: 'Also scaffold OAuth login buttons for the given comma-separated providers (github, google, discord)',
     },
+    'oauth-only': {
+      type: 'boolean',
+      description: 'Make OAuth the only sign-in method: skip password login, registration, and password reset (requires --oauth)',
+    },
   },
   async run({ args }) {
     const files = await makeAuth({
@@ -259,6 +263,7 @@ const makeAuthCommand = defineCommand({
       minimal: Boolean(args.minimal),
       verify: Boolean(args.verify),
       oauth: args.oauth,
+      oauthOnly: Boolean(args['oauth-only']),
     })
     for (const file of files) {
       consola.success(`Created ${file}`)

@@ -285,12 +285,16 @@ both are in scope (Part 3):
   synthetic-password hashing, ~~password routes disabled~~. (`static
   passwordHasher` is already configurable per model, but on Free the fix
   is to not hash at all.)
-  **Amended in implementation:** the first two shipped (`--oauth` creates
-  passwordless accounts against a nullable hash column). Disabling
-  password routes is deferred to a follow-up `--oauth-only` scaffold
-  variant — `--oauth` today always scaffolds password login alongside, so
-  the nullability relaxation is table-wide and the scaffold prints that
-  trade-off.
+  **Amended in implementation — complete.** All three shipped. `--oauth`
+  creates passwordless accounts against a nullable hash column, and the
+  follow-up `--oauth-only` flag drops the password routes: no `POST
+  /login`, no registration or password reset, no login/profile password
+  fields, and no demo seeder. `--oauth-only` requires `--oauth` with at
+  least one provider and subsumes `--minimal`. Plain `--oauth` still
+  scaffolds password login alongside, so its nullability relaxation stays
+  table-wide and the scaffold keeps printing that trade-off; under
+  `--oauth-only` there is no password registration path for the relaxation
+  to weaken.
 - **The default OAuth state store is isolate-local memory.** `OAuthManager`
   falls back to `MemoryOAuthStateStore` (`auth/oauth/index.ts`); on Workers
   the redirect and callback are not guaranteed to hit the same isolate, so

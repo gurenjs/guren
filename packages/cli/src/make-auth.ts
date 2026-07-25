@@ -12,7 +12,30 @@ import {
 } from './patch-helpers'
 import { makeMigration } from './make-migration'
 
-const loginControllerTemplate = `import { Controller, ValidationException } from '@guren/core'
+function buildLoginControllerTemplate(oauthOnly: boolean): string {
+  // Passwordless apps keep show() (the OAuth button page) and destroy()
+  // (logout) but have no credential exchange at all — there is no /login POST
+  // route pointing at store(), so scaffolding it would leave a dead action
+  // that still pulls in the password validator.
+  if (oauthOnly) {
+    return `import { Controller } from '@guren/core'
+import { pages } from '@/.guren/pages.gen'
+
+export default class LoginController extends Controller {
+  async show(): Promise<Response> {
+    return this.inertia(pages.auth.Login, {}, { url: this.request.path, title: 'Login' })
+  }
+
+  async destroy(): Promise<Response> {
+    await this.auth.logout()
+    this.auth.session()?.invalidate()
+    return this.redirect('/')
+  }
+}
+`
+  }
+
+  return `import { Controller, ValidationException } from '@guren/core'
 import { LoginSchema } from '../../Validators/LoginValidator.js'
 import { pages } from '@/.guren/pages.gen'
 
@@ -43,6 +66,7 @@ export default class LoginController extends Controller {
   }
 }
 `
+}
 
 function buildRegisterControllerTemplate(includeVerify: boolean): string {
   const coreImports = includeVerify
@@ -385,7 +409,7 @@ export default class DashboardController extends Controller {
 }
 `
 
-function buildProfileControllerTemplate(includeVerify: boolean): string {
+function buildProfileControllerTemplate(includeVerify: boolean, includePassword: boolean): string {
   const coreImports = includeVerify
     ? 'Controller, ValidationException, createEmailVerificationToken, buildVerificationUrl'
     : 'Controller, ValidationException'
@@ -420,6 +444,12 @@ import { sendEmailVerificationMail } from '../../Mail/EmailVerificationMail.js'`
         : 'Profile updated successfully.'`
     : `'Profile updated successfully.'`
 
+  const destructuredFields = includePassword ? '{ name, email, password }' : '{ name, email }'
+  const passwordUpdateField = includePassword
+    ? `
+      ...(password ? { password } : {}),`
+    : ''
+
   return `import { ${coreImports} } from '@guren/core'
 import { User, type UserRecord } from '../../Models/User.js'
 import { ProfileUpdateSchema } from '../Validators/ProfileValidator.js'${verifyImports}
@@ -446,7 +476,7 @@ export default class ProfileController extends Controller {
       return this.redirect('/login')
     }
 
-    const { name, email, password } = await this.validateBody(ProfileUpdateSchema)
+    const ${destructuredFields} = await this.validateBody(ProfileUpdateSchema)
     const emailChanged = email !== user.email
 
     if (emailChanged) {
@@ -459,8 +489,7 @@ export default class ProfileController extends Controller {
 
     await User.update({ id: user.id }, {
       name,
-      email,${verifyResetField}
-      ...(password ? { password } : {}),
+      email,${verifyResetField}${passwordUpdateField}
     })
 
     const refreshed = await User.find(user.id)
@@ -709,7 +738,18 @@ export const ResetPasswordSchema = z
 export type ResetPasswordInput = z.infer<typeof ResetPasswordSchema>
 `
 
-const profileValidatorTemplate = `import { z } from 'zod'
+function buildProfileValidatorTemplate(includePassword: boolean): string {
+  const passwordField = includePassword
+    ? `
+  password: z
+    .string()
+    .trim()
+    .optional()
+    .transform((value) => value ?? '')
+    .refine((value) => value === '' || value.length >= 8, 'Password must be at least 8 characters.'),`
+    : ''
+
+  return `import { z } from 'zod'
 
 export const ProfileUpdateSchema = z.object({
   name: z
@@ -722,17 +762,12 @@ export const ProfileUpdateSchema = z.object({
     .trim()
     .min(1, 'Email is required.')
     .email('Enter a valid email address.')
-    .toLowerCase(),
-  password: z
-    .string()
-    .trim()
-    .optional()
-    .transform((value) => value ?? '')
-    .refine((value) => value === '' || value.length >= 8, 'Password must be at least 8 characters.'),
+    .toLowerCase(),${passwordField}
 })
 
 export type ProfileUpdateInput = z.infer<typeof ProfileUpdateSchema>
 `
+}
 
 const layoutTemplate = `import { Link, usePage } from '@inertiajs/react'
 import type { PropsWithChildren } from 'react'
@@ -789,12 +824,8 @@ const OAUTH_PROVIDER_LABELS: Record<string, string> = {
   discord: 'Discord',
 }
 
-function buildOAuthButtonsTemplate(providers: string[]): string {
-  if (providers.length === 0) {
-    return ''
-  }
-
-  const buttons = providers
+function buildOAuthButtonLinks(providers: string[]): string {
+  return providers
     .map(
       (provider) => `          <a
             href="/auth/${provider}"
@@ -804,6 +835,17 @@ function buildOAuthButtonsTemplate(providers: string[]): string {
           </a>`,
     )
     .join('\n')
+}
+
+/**
+ * OAuth buttons appended *below* a password form — hence the "Or continue
+ * with" divider. Passwordless pages render the buttons on their own via
+ * buildOAuthButtonLinks(), where an "or" would have nothing to refer back to.
+ */
+function buildOAuthButtonsTemplate(providers: string[]): string {
+  if (providers.length === 0) {
+    return ''
+  }
 
   return `
         <div className="mt-6 space-y-3">
@@ -812,8 +854,43 @@ function buildOAuthButtonsTemplate(providers: string[]): string {
             Or continue with
             <span className="h-px flex-1 bg-slate-800" />
           </div>
-${buttons}
+${buildOAuthButtonLinks(providers)}
         </div>`
+}
+
+function buildOAuthOnlyLoginViewTemplate(providers: string[]): string {
+  return `import { Head } from '@inertiajs/react'
+import Layout from '../../components/Layout.js'
+import type { ValidationErrors } from '@guren/core'
+
+interface Props {
+  errors?: ValidationErrors
+}
+
+export default function Login({ errors = {} }: Props) {
+  return (
+    <Layout>
+      <Head title="Sign in" />
+      <section className="rounded-lg border border-slate-800 bg-slate-900/40 p-8 shadow-xl shadow-emerald-500/5">
+        <h1 className="text-2xl font-semibold text-emerald-300">Sign in</h1>
+        <p className="mt-2 text-sm text-slate-400">
+          Choose a provider to continue.
+        </p>
+
+        {errors.message && (
+          <p className="mt-4 rounded border border-rose-500/60 bg-rose-500/10 px-4 py-2 text-sm text-rose-200">
+            {errors.message}
+          </p>
+        )}
+
+        <div className="mt-6 space-y-3">
+${buildOAuthButtonLinks(providers)}
+        </div>
+      </section>
+    </Layout>
+  )
+}
+`
 }
 
 function buildLoginViewTemplate(includeRegister: boolean, includeReset: boolean, oauthProviders: string[] = []): string {
@@ -1330,28 +1407,54 @@ export default function Dashboard({ user }: Props) {
 }
 `
 
-const profileViewTemplate = `import { Head, useForm } from '@inertiajs/react'
+function buildProfileViewTemplate(includePassword: boolean): string {
+  const errorFields = includePassword ? `'name' | 'email' | 'password'` : `'name' | 'email'`
+  const passwordFormField = includePassword
+    ? `
+  password: string`
+    : ''
+  const passwordFormValue = includePassword
+    ? `
+    password: '',`
+    : ''
+  const passwordInput = includePassword
+    ? `
+          <div>
+            <label className="block text-sm font-medium text-slate-200">New password</label>
+            <input
+              type="password"
+              value={form.data.password}
+              onChange={(event) => form.setData('password', event.target.value)}
+              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
+            />
+            {form.errors.password ? <p className="mt-1 text-sm text-rose-300">{form.errors.password}</p> : null}
+          </div>
+`
+    : ''
+  const description = includePassword
+    ? 'Update your account details and password.'
+    : 'Update your account details.'
+
+  return `import { Head, useForm } from '@inertiajs/react'
 import type { FormEvent } from 'react'
 import Layout from '../../components/Layout.js'
 import type { ValidationErrors } from '@guren/core'
 
 interface Props {
   profile: { name: string; email: string }
-  errors?: ValidationErrors<'name' | 'email' | 'password'>
+  errors?: ValidationErrors<${errorFields}>
   status?: string
 }
 
 type ProfileFormValues = {
   name: string
-  email: string
-  password: string
+  email: string${passwordFormField}
 }
 
 export default function ProfileEdit({ profile, status }: Props) {
   const form = useForm<ProfileFormValues>({
     name: profile.name,
-    email: profile.email,
-    password: '',
+    email: profile.email,${passwordFormValue}
   })
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -1365,7 +1468,7 @@ export default function ProfileEdit({ profile, status }: Props) {
       <section className="space-y-6 rounded-lg border border-slate-800 bg-slate-900/40 p-8 shadow-xl shadow-emerald-500/5">
         <header>
           <h1 className="text-2xl font-semibold text-emerald-300">Profile</h1>
-          <p className="mt-2 text-sm text-slate-400">Update your account details and password.</p>
+          <p className="mt-2 text-sm text-slate-400">${description}</p>
         </header>
 
         {status ? (
@@ -1396,18 +1499,7 @@ export default function ProfileEdit({ profile, status }: Props) {
             />
             {form.errors.email ? <p className="mt-1 text-sm text-rose-300">{form.errors.email}</p> : null}
           </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-200">New password</label>
-            <input
-              type="password"
-              value={form.data.password}
-              onChange={(event) => form.setData('password', event.target.value)}
-              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
-            />
-            {form.errors.password ? <p className="mt-1 text-sm text-rose-300">{form.errors.password}</p> : null}
-          </div>
-
+${passwordInput}
           <button
             type="submit"
             disabled={form.processing}
@@ -1421,13 +1513,24 @@ export default function ProfileEdit({ profile, status }: Props) {
   )
 }
 `
+}
 
-function buildRoutesTemplate(
-  includeRegister: boolean,
-  includeReset: boolean,
-  includeVerify: boolean,
-  oauthProviders: string[] = [],
-): string {
+interface RoutesTemplateOptions {
+  includeRegister: boolean
+  includeReset: boolean
+  includeVerify: boolean
+  oauthProviders: string[]
+  /** Omit the password credential exchange: no POST /login, show() only. */
+  oauthOnly: boolean
+}
+
+function buildRoutesTemplate({
+  includeRegister,
+  includeReset,
+  includeVerify,
+  oauthProviders,
+  oauthOnly,
+}: RoutesTemplateOptions): string {
   const includeOAuth = oauthProviders.length > 0
   const registerImport = includeRegister
     ? `\nimport RegisterController from '../app/Http/Controllers/Auth/RegisterController.js'`
@@ -1479,14 +1582,19 @@ function buildRoutesTemplate(
 `
     : ''
 
+  // Passwordless apps expose /login only as the OAuth button page — there is
+  // no credential exchange to POST to.
+  const loginStoreRoute = oauthOnly
+    ? ''
+    : `\n  router.post('/login', [LoginController, 'store'], requireGuest({ redirectTo: '/dashboard' })).name('login.store')`
+
   return `import { Router, requireAuthenticated, requireGuest${requireVerifiedImport} } from '@guren/core'
 import LoginController from '../app/Http/Controllers/Auth/LoginController.js'${registerImport}${resetImport}${verifyImport}${oauthImport}
 import DashboardController from '../app/Http/Controllers/DashboardController.js'
 import ProfileController from '../app/Http/Controllers/ProfileController.js'
 
 export function registerAuthRoutes(router: Router): void {
-  router.get('/login', [LoginController, 'show'], requireGuest({ redirectTo: '/dashboard' })).name('login')
-  router.post('/login', [LoginController, 'store'], requireGuest({ redirectTo: '/dashboard' })).name('login.store')
+  router.get('/login', [LoginController, 'show'], requireGuest({ redirectTo: '/dashboard' })).name('login')${loginStoreRoute}
   router.post('/logout', [LoginController, 'destroy'], requireAuthenticated({ redirectTo: '/login' })).name('logout')
 ${registerRoutes}${resetRoutes}${verifyRoutes}${oauthRoutes}
   router.get('/dashboard', [DashboardController, 'index'], ${dashboardMiddleware}).name('dashboard')
@@ -1634,7 +1742,11 @@ function relaxPasswordHashForOAuth(content: string): string {
   return tableMatch ? content.replace(target, relaxed) : relaxed
 }
 
-async function updateSchema(includeVerify: boolean, oauthProviders: string[] = []): Promise<void> {
+async function updateSchema(
+  includeVerify: boolean,
+  oauthProviders: string[] = [],
+  oauthOnly = false,
+): Promise<void> {
   const schemaPath = resolve(process.cwd(), 'db/schema.ts')
   let content: string
 
@@ -1664,7 +1776,9 @@ async function updateSchema(includeVerify: boolean, oauthProviders: string[] = [
       if (relaxed !== content) {
         content = relaxed
         consola.info(
-          'Made users.passwordHash nullable so OAuth accounts can be passwordless — password-registered rows lose the NOT NULL guard.',
+          oauthOnly
+            ? 'Made users.passwordHash nullable so OAuth accounts can be passwordless — this scaffold no longer serves password login, so existing password rows can only sign in through a provider.'
+            : 'Made users.passwordHash nullable so OAuth accounts can be passwordless — password-registered rows lose the NOT NULL guard.',
         )
       }
     }
@@ -1789,33 +1903,76 @@ export interface MakeAuthOptions extends WriterOptions {
   verify?: boolean
   /** Also scaffold OAuth login buttons. Comma-separated provider names (github, google, discord). */
   oauth?: string
+  /** Scaffold OAuth as the only sign-in method: no password login, registration, or reset. Requires `oauth`. */
+  oauthOnly?: boolean
 }
 
 export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]> {
-  const includeExtras = !options.minimal
-  const includeVerify = includeExtras && Boolean(options.verify)
   const oauthProviders = parseOAuthProviders(options.oauth)
   const includeOAuth = oauthProviders.length > 0
+  const oauthOnly = Boolean(options.oauthOnly)
 
-  if (options.minimal && options.verify) {
-    consola.warn('--verify requires the default (non-minimal) experience — skipping email verification.')
+  // Neither degraded reading of `--oauth-only` without providers is
+  // defensible: honouring it scaffolds an app with no way to sign in, and
+  // ignoring it scaffolds the full password experience the flag exists to
+  // opt out of.
+  if (oauthOnly && !includeOAuth) {
+    throw new Error(
+      `--oauth-only requires --oauth with at least one supported provider (${KNOWN_OAUTH_PROVIDERS.join(', ')}).`,
+    )
+  }
+
+  // Password login is the substrate registration, reset, and the profile
+  // password field all sit on, so --oauth-only subsumes --minimal.
+  const includeExtras = !options.minimal && !oauthOnly
+  const includeVerify = includeExtras && Boolean(options.verify)
+  const includePassword = !oauthOnly
+
+  if (options.verify && !includeExtras) {
+    consola.warn(
+      oauthOnly
+        ? '--verify has nothing to verify without password registration — skipping (OAuth accounts arrive with a provider-vouched email).'
+        : '--verify requires the default (non-minimal) experience — skipping email verification.',
+    )
   }
 
   const files = [
-    { path: 'app/Http/Controllers/Auth/LoginController.ts', contents: loginControllerTemplate },
+    { path: 'app/Http/Controllers/Auth/LoginController.ts', contents: buildLoginControllerTemplate(oauthOnly) },
     { path: 'app/Http/Controllers/DashboardController.ts', contents: dashboardControllerTemplate },
-    { path: 'app/Http/Controllers/ProfileController.ts', contents: buildProfileControllerTemplate(includeVerify) },
+    { path: 'app/Http/Controllers/ProfileController.ts', contents: buildProfileControllerTemplate(includeVerify, includePassword) },
     { path: 'app/Models/User.ts', contents: userModelTemplate },
     { path: 'app/Providers/AuthProvider.ts', contents: authProviderTemplate },
-    { path: 'app/Http/Validators/LoginValidator.ts', contents: loginValidatorTemplate },
-    { path: 'app/Http/Validators/ProfileValidator.ts', contents: profileValidatorTemplate },
+    { path: 'app/Http/Validators/ProfileValidator.ts', contents: buildProfileValidatorTemplate(includePassword) },
     { path: 'resources/js/components/Layout.tsx', contents: layoutTemplate },
-    { path: 'resources/js/pages/auth/Login.tsx', contents: buildLoginViewTemplate(includeExtras, includeExtras, oauthProviders) },
+    {
+      path: 'resources/js/pages/auth/Login.tsx',
+      contents: oauthOnly
+        ? buildOAuthOnlyLoginViewTemplate(oauthProviders)
+        : buildLoginViewTemplate(includeExtras, includeExtras, oauthProviders),
+    },
     { path: 'resources/js/pages/dashboard/Index.tsx', contents: dashboardViewTemplate },
-    { path: 'resources/js/pages/profile/Edit.tsx', contents: profileViewTemplate },
-    { path: 'routes/auth.ts', contents: buildRoutesTemplate(includeExtras, includeExtras, includeVerify, oauthProviders) },
-    { path: 'db/seeders/UsersSeeder.ts', contents: seederTemplate },
+    { path: 'resources/js/pages/profile/Edit.tsx', contents: buildProfileViewTemplate(includePassword) },
+    {
+      path: 'routes/auth.ts',
+      contents: buildRoutesTemplate({
+        includeRegister: includeExtras,
+        includeReset: includeExtras,
+        includeVerify,
+        oauthProviders,
+        oauthOnly,
+      }),
+    },
   ]
+
+  if (includePassword) {
+    files.push(
+      { path: 'app/Http/Validators/LoginValidator.ts', contents: loginValidatorTemplate },
+      // The demo user only exists to be signed in as with a password. Without
+      // password login it is an unreachable row — and seeding it would hash a
+      // password with scrypt, the exact cost --oauth-only avoids.
+      { path: 'db/seeders/UsersSeeder.ts', contents: seederTemplate },
+    )
+  }
 
   if (includeExtras) {
     files.push(
@@ -1853,12 +2010,12 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
 
   const created = await writeFilesSafe(files, options)
 
-  await updateSchema(includeVerify, oauthProviders)
+  await updateSchema(includeVerify, oauthProviders, oauthOnly)
   await updatePageContracts()
   const migrationGenerated = await generateUsersMigration()
 
   if (options.install) {
-    await installAuth(migrationGenerated, includeExtras, oauthProviders)
+    await installAuth(migrationGenerated, includeExtras, oauthProviders, includePassword)
   } else {
     consola.info('Next steps:')
     consola.info('  • Register AuthProvider in src/app.ts providers array')
@@ -1870,7 +2027,7 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
     if (!migrationGenerated) {
       consola.info('  • Run `bun run db:make` to generate the users migration')
     }
-    consola.info('  • Run `bun run db:migrate` and `bun run db:seed`')
+    consola.info(includePassword ? '  • Run `bun run db:migrate` and `bun run db:seed`' : '  • Run `bun run db:migrate`')
     consola.info('  • Install zod if not already installed: `bun add zod`')
     if (includeOAuth) {
       consola.info('  • Register CoreOAuthServiceProvider (from @guren/core) and OAuthProvider in src/app.ts providers array')
@@ -1909,7 +2066,12 @@ async function wireProvider(appPath: string, providerName: string, providerRelat
   }
 }
 
-async function installAuth(migrationGenerated = true, includeExtras = true, oauthProviders: string[] = []): Promise<void> {
+async function installAuth(
+  migrationGenerated = true,
+  includeExtras = true,
+  oauthProviders: string[] = [],
+  includePassword = true,
+): Promise<void> {
   consola.info('Installing authentication configuration...')
 
   // Determine app file location (try src/app.ts first, then app.ts)
@@ -2018,8 +2180,12 @@ async function installAuth(migrationGenerated = true, includeExtras = true, oaut
     consola.info('  • Run `bun run db:make` to generate the users migration')
   }
   consola.info('  • Run `bun run db:migrate` to create the users table')
-  consola.info('  • Run `bun run db:seed` to create demo user')
-  consola.info('  • Start the dev server and visit /login (demo@example.com / secret)')
+  if (includePassword) {
+    consola.info('  • Run `bun run db:seed` to create demo user')
+    consola.info('  • Start the dev server and visit /login (demo@example.com / secret)')
+  } else {
+    consola.info('  • Start the dev server and visit /login — the first provider sign-in creates the account')
+  }
   for (const provider of oauthProviders) {
     const upper = provider.toUpperCase()
     consola.info(`  • Set OAUTH_${upper}_CLIENT_ID / OAUTH_${upper}_CLIENT_SECRET / OAUTH_${upper}_REDIRECT_URI in your .env (see .env.example)`)
