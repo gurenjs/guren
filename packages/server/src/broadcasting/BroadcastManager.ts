@@ -13,6 +13,7 @@ import type {
 } from './types'
 import { Channel, PrivateChannel, PresenceChannel } from './channels'
 import { MemoryDriver } from './drivers'
+import { claimHotDisposable, isHotReloadRuntime } from '../hot-reload/hot-disposables'
 import type { Context } from '../http/Application'
 import type { Middleware } from '../http/middleware'
 import { parseRequestPayload } from '../http/request'
@@ -540,6 +541,30 @@ export class BroadcastManager {
   }
 
   /**
+   * Close every SSE connection this manager is holding.
+   *
+   * Each connection owns a ping timer that is only cleared when the stream is
+   * cancelled or the request aborts. `Bun.serve().stop()` without forcing waits
+   * for in-flight requests instead of cutting them, and an SSE response never
+   * finishes — so on a hot reload those connections outlive the manager, and
+   * their timers go on pinging a stream nobody reads.
+   *
+   * `getClients()` returns a snapshot. A `Map` iterator does tolerate an entry
+   * deleting itself, which is all `cleanup()` does today — but not a `close()`
+   * that reaches another client, which would drop that one from the iteration
+   * unvisited and leave its timer running.
+   */
+  disconnectAll(): void {
+    for (const client of this.getClients()) {
+      try {
+        client.close()
+      } catch {
+        // A stream torn down from the other end is already what we wanted.
+      }
+    }
+  }
+
+  /**
    * Generate a unique client ID.
    */
   protected generateClientId(prefix: 'sse' | 'ws' = 'sse'): string {
@@ -571,9 +596,24 @@ export function getBroadcastManager(): BroadcastManager {
 
 /**
  * Create a broadcast manager.
+ *
+ * Under `bun --hot`, the manager this one replaces has its SSE connections
+ * closed first, so their ping timers stop with it. Registered from the factory
+ * rather than the constructor because the factory is what application code
+ * calls: frame 2 of the stack is the provider that built the manager, not this
+ * file. A bare `new BroadcastManager()` is left alone.
  */
 export function createBroadcastManager(
   options?: BroadcastManagerOptions
 ): BroadcastManager {
-  return new BroadcastManager(options)
+  const manager = new BroadcastManager(options)
+
+  claimHotDisposable(
+    'broadcast-manager',
+    isHotReloadRuntime() ? new Error().stack : undefined,
+    options?.default ?? 'memory',
+    () => manager.disconnectAll(),
+  )
+
+  return manager
 }

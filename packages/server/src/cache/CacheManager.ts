@@ -13,6 +13,7 @@ import { MemoryStore } from './stores/MemoryStore'
 import { RedisStore } from './stores/RedisStore'
 import { FileStore } from './stores/FileStore'
 import { TaggedCache } from './TaggedCache'
+import { claimHotDisposable, isHotReloadRuntime } from '../hot-reload/hot-disposables'
 
 /**
  * Taggable wrapper that adds tag support to any cache store.
@@ -106,8 +107,18 @@ export class CacheManager {
   private readonly defaultStoreName: string
   private readonly storeFactories: Map<string, CacheStoreFactory> = new Map()
   private readonly resolvedStores: Map<string, TaggableCacheStore> = new Map()
+  /**
+   * Where this manager was built, for identifying its stores across hot reloads.
+   *
+   * Captured here rather than in `store()` because stores resolve lazily, from
+   * whichever request first asks for one — a call site that says nothing about
+   * which manager owns the result. Skipped outside `--hot`, where it would be a
+   * formatted stack string held for the manager's lifetime and never read.
+   */
+  private readonly builtAt: string | undefined
 
   constructor(config: CacheConfig = {}) {
+    this.builtAt = isHotReloadRuntime() ? new Error().stack : undefined
     this.defaultStoreName = config.default ?? 'memory'
 
     // Register built-in drivers
@@ -184,9 +195,27 @@ export class CacheManager {
       throw new Error(`Cache store not found: ${storeName}`)
     }
 
-    const store = new TaggableCacheStoreWrapper(factory())
+    const raw = factory()
+    this.stopPreviousStore(storeName, raw)
+
+    const store = new TaggableCacheStoreWrapper(raw)
     this.resolvedStores.set(storeName, store)
     return store
+  }
+
+  /**
+   * Under `bun --hot`, stops the sweep timer held by the store this one replaces.
+   *
+   * Registered from here rather than from `MemoryStore` itself because this is
+   * where the store's name is known, and the name is what keeps two memory
+   * stores in one config from sharing a slot and cancelling each other's sweep.
+   */
+  private stopPreviousStore(storeName: string, store: CacheStore): void {
+    const disposable = store as CacheStore & { destroy?: () => void }
+
+    if (typeof disposable.destroy === 'function') {
+      claimHotDisposable('cache-store', this.builtAt, storeName, () => disposable.destroy?.())
+    }
   }
 
   /**

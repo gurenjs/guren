@@ -1,6 +1,7 @@
 import type { SchedulerOptions } from './types'
 import { Schedule } from './Schedule'
 import { ScheduledTask } from './ScheduledTask'
+import { claimHotDisposable, isHotReloadRuntime, type HotDisposableClaim } from '../hot-reload/hot-disposables'
 
 /**
  * Task scheduler for running periodic tasks.
@@ -30,6 +31,8 @@ export class Scheduler {
   private interval: ReturnType<typeof setInterval> | null = null
   private isRunning = false
   private lastCheck: Date | null = null
+  /** This scheduler's claim on its hot-reload slot while it is running. */
+  private hotReloadClaim: HotDisposableClaim | undefined
 
   constructor(options: SchedulerOptions = {}) {
     this.options = {
@@ -99,6 +102,16 @@ export class Scheduler {
     this.isRunning = true
     this.options.logger('Scheduler started')
 
+    // Under `bun --hot`, stop the scheduler the previous evaluation started —
+    // otherwise both tick, and every scheduled task runs twice per reload.
+    // Keyed on frame 2 of this stack: whoever called `start()`.
+    this.hotReloadClaim = claimHotDisposable(
+      'scheduler',
+      isHotReloadRuntime() ? new Error().stack : undefined,
+      this.options.timezone,
+      () => this.stop(),
+    )
+
     // Run immediately
     this.tick()
 
@@ -125,6 +138,14 @@ export class Scheduler {
       clearInterval(this.interval)
       this.interval = null
     }
+
+    // Give the slot up: a stopped scheduler left holding one keeps itself, and
+    // every task it has been given, reachable from `globalThis` for the rest of
+    // the process — the same leak this registry exists to close. Also reached as
+    // the registry's own teardown, where the slot already belongs to the
+    // replacement and this is a no-op.
+    this.hotReloadClaim?.release()
+    this.hotReloadClaim = undefined
 
     this.isRunning = false
     this.options.logger('Scheduler stopped')
