@@ -59,7 +59,11 @@ export function parseModelSource(source: string, filePath: string): ModelInfo | 
   }
 }
 
-function extractClassDeclaration(node: Statement): ClassDeclaration | null {
+/**
+ * The `ClassDeclaration` in a top-level statement — export named, export
+ * default, or bare. Shared AST-shape knowledge for "the class in this file".
+ */
+export function extractClassDeclaration(node: Statement): ClassDeclaration | null {
   if (node.type === 'ExportNamedDeclaration' && node.declaration?.type === 'ClassDeclaration') {
     return node.declaration
   }

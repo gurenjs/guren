@@ -91,7 +91,14 @@ describe('renderContextMarkdown', () => {
         usesAuth: false,
         hasSoftDeletes: false,
       }],
-      routes: [{ method: 'GET', path: '/posts', name: 'posts.index' }],
+      routes: [
+        {
+          method: 'GET',
+          path: '/posts',
+          name: 'posts.index',
+          controller: { name: 'PostController', action: 'index' },
+        },
+      ],
       pages: ['posts/Index', 'posts/Show'],
       controllers: ['PostController'],
       resources: ['PostResource'],
@@ -107,7 +114,7 @@ describe('renderContextMarkdown', () => {
     expect(md).toContain('Guren 1.0.0')
     expect(md).toContain('### Post')
     expect(md).toContain('belongsTo: `author` → User')
-    expect(md).toContain('| GET | /posts | posts.index |')
+    expect(md).toContain('| GET | /posts | posts.index | PostController.index |')
     expect(md).toContain('- posts/Index')
     expect(md).toContain('- PostController')
   })
