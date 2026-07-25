@@ -257,7 +257,9 @@ export default class OAuthController extends Controller {
     // Replace this with your own account linking: look the user up by
     // profile.email, create one when missing, then \`await this.auth.login(user)\`
     // and finish with \`return this.redirect(redirectTo ?? '/')\` —
-    // \`redirectTo\` is already sanitized against open redirects.
+    // \`redirectTo\` is already sanitized against open redirects. Refuse to
+    // create an account when \`profile.emailVerified === false\`: the provider
+    // is saying it never checked that the address belongs to this user.
     const { profile, redirectTo } = await this.oauth().handleCallback(provider, { code, state })
     return this.json({ provider, profile, redirectTo }, { status: 200 })
   }

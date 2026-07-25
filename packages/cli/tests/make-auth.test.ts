@@ -378,17 +378,21 @@ export const posts = pgTable('posts', {
       expect(controller).not.toContain('password:')
       expect(controller).toContain('already exists. Sign in with the method you originally used.')
 
-      // Returning an email is not a claim that the provider checked it:
-      // Google reports email_verified and Discord reports verified separately.
-      // Creating an account from an unverified address would let it claim an
-      // email it does not own, which the collision check above then makes
-      // permanent for the real owner.
-      expect(controller).toContain('profile.raw.email_verified === false || profile.raw.verified === false')
+      // Returning an email is not a claim that the provider checked it, so the
+      // scaffold reads the typed signal @guren/server maps from the provider's
+      // own key. Creating an account from an unverified address would let it
+      // claim an email it does not own, which the collision check above then
+      // makes permanent for the real owner.
+      expect(controller).toContain('profile.emailVerified === false')
       expect(controller).toContain('has not verified this email address')
+      // Providers that send no signal leave the field undefined — those users
+      // (GitHub's /user, for one) must still be able to sign up.
+      expect(controller).not.toContain('profile.emailVerified !== true')
+      expect(controller).not.toContain('profile.raw.email_verified')
       // Only on the create path — an existing link must not break if the
       // provider's verification status changes later.
       const createBranch = controller.slice(controller.indexOf('if (!user) {'))
-      expect(createBranch).toContain('profile.raw.email_verified')
+      expect(createBranch).toContain('profile.emailVerified === false')
 
       const authRoutes = await readFile(join(workspace.dir, 'routes/auth.ts'), 'utf8')
       expect(authRoutes).toContain("import OAuthController from '../app/Http/Controllers/Auth/OAuthController.js'")
