@@ -84,6 +84,11 @@ jobs:
       - name: Security audit (blog example)
         run: cd examples/blog && bun ../../packages/cli/src/bin.ts audit
 
+      # Also the only cross-machine exercise of the spec views' determinism
+      # contract: committed-on-macOS vs regenerated-on-ubuntu.
+      - name: Spec drift (blog example)
+        run: cd examples/blog && bun ../../packages/cli/src/bin.ts check --spec
+
       - name: Build example apps
         run: |
           bun run --cwd examples/blog build

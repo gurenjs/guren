@@ -88,6 +88,8 @@ bunx guren check                # Validate route↔controller↔page consistency
 bunx guren check --json         # Check results as JSON
 bunx guren check --arch         # Architecture boundary checks only (guren.arch.ts) — fast path for edit hooks
 bunx guren check --docs         # Doc-link checks only: docs/ frontmatter (entities/related) + @docs tags (exits non-zero on failures)
+bunx guren check --spec         # Spec drift checks only: docs/spec/ vs regenerated views (exits non-zero on failures)
+bunx guren spec:generate        # Generate spec views (er/domain/screens/modules) into docs/spec/ — deterministic, committed, drift-gated
 bunx guren check --changed      # Restrict file-scanning checks to files changed vs. the merge base with main
 bunx guren audit                # Security audit: validation/auth on mutating routes, raw SQL, secrets, mass assignment
 bunx guren audit --json         # Audit results as JSON (exits non-zero on failures)
@@ -348,6 +350,9 @@ export const handler = createLambdaHandler(app)
 | `packages/cli/src/docs-index.ts` | AI agent: docs/ frontmatter scanning + `@docs` tag extraction |
 | `packages/cli/src/docs-check.ts` | AI agent: doc-link validation (`guren check --docs`) |
 | `packages/cli/src/make-adr.ts` | AI agent: numbered ADR scaffolding (`make:adr`) |
+| `packages/cli/src/spec-generate.ts` | AI agent: spec view orchestration (`spec:generate`, RFC 0004) |
+| `packages/cli/src/spec-check.ts` | AI agent: spec drift gate (`guren check --spec`) |
+| `packages/cli/src/schema-parser.ts` | Shared Drizzle schema AST parser (tables, columns, FKs) |
 | `packages/cli/src/check.ts` | AI agent: integrity checking |
 | `packages/cli/src/arch-check.ts` | AI agent: architecture boundary checking (`guren.arch.ts`, see RFC 0002) |
 | `packages/cli/src/arch/index.ts` | `defineArchRules()` + types, published as the `@guren/cli/arch` subpath |

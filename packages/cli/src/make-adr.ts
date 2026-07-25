@@ -6,7 +6,6 @@ import { consola } from 'consola'
 import type { WriterOptions } from './utils'
 import { safeModuleName, slugifyProse, writeFileSafe } from './utils'
 import {
-  discoverModelFiles,
   discoverControllerFiles,
   discoverResourceFiles,
   discoverPolicyFiles,
@@ -14,7 +13,7 @@ import {
   toPosixRelative,
   moduleNameFromRelPath,
 } from './discovery'
-import { parseModelFile } from './model-parser'
+import { discoverParsedModels } from './model-parser'
 
 const ADR_DIR = 'docs/adr'
 
@@ -66,14 +65,10 @@ async function resolveAdrPrefill(entity: string, moduleName?: string): Promise<A
   }
 
   const cwd = process.cwd()
-  const modelFiles = await discoverModelFiles(cwd)
-  const parsed = await Promise.all(modelFiles.map((file) => parseModelFile(file)))
   const lower = entity.toLowerCase()
-  const matches = parsed.flatMap((info, index) => {
-    if (!info || info.className.toLowerCase() !== lower) return []
-    const relPath = toPosixRelative(cwd, modelFiles[index])
-    return [{ className: info.className, module: moduleNameFromRelPath(relPath) }]
-  })
+  const matches = (await discoverParsedModels(cwd))
+    .filter((model) => model.info.className.toLowerCase() === lower)
+    .map((model) => ({ className: model.info.className, module: model.module }))
 
   // A module ADR prefers that module's model; a root ADR prefers the root
   // model. Only when neither preference resolves a name tie is it ambiguous.

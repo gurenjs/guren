@@ -262,8 +262,16 @@ see Alternatives for the location discussion):
 |---|---|---|
 | `er.md` | Mermaid `erDiagram` — tables, columns with types, FK edges | schema parser (extended); edges additionally from model relationships, since scaffolded schemas do not emit `.references()` |
 | `domain.md` | Mermaid `classDiagram` — models grouped by module, relationship edges with cardinality | `parseModelFile` output |
-| `screens.md` | Per-screen table: route → controller action → page → Props type → Resource data type | `RouteDefinition` + inertia scan + page-props extraction |
-| `modules.md` | Mermaid graph of modules, their entities, and cross-module dependencies | discovery + the arch-check dependency data |
+| `screens.md` | Per-screen table: route → controller action → page → Props type ~~→ Resource data type~~ | `RouteDefinition` + inertia scan + page-props extraction |
+| `modules.md` | Mermaid graph of modules, their entities, and cross-module dependencies | discovery + ~~the arch-check dependency data~~ a self-contained static-import scan |
+
+**Amended in implementation:** `screens.md` has no separate Resource
+column — resource data types already appear inside the extracted Props
+types (`{ post: PostResourceData }`), so a dedicated column would
+repeat the same information on every row. `modules.md` scans imports
+itself rather than reusing arch-check's helpers: the two disagree on
+purpose (type-only imports count in a context map but not in boundary
+enforcement, and the scan must stay a pure function of the sources).
 
 Design rules, all consequences of the prior art:
 

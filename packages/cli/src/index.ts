@@ -46,6 +46,14 @@ export { routeDefinitionToContextRoute, loadContextRoutes, type ContextRoute } f
 export { createFreshContextApi } from './fresh-context'
 export { scanDocs, parseDocFrontmatter, extractDocsTags, type DocRef } from './docs-index'
 export { runDocsCheck } from './docs-check'
+export {
+  generateSpecArtifacts,
+  writeSpecArtifacts,
+  SPEC_DIR,
+  type SpecArtifact,
+} from './spec-generate'
+export { runSpecCheck } from './spec-check'
+export { parseSchemaTables, parseSchemaTableColumns, type SchemaTable, type SchemaColumn } from './schema-parser'
 export { runCheck, renderCheckReport } from './check'
 export { generateGuidelines } from './guidelines'
 export { listModels, displayModels } from './model-list'

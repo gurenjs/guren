@@ -1,4 +1,6 @@
-import { fileExists } from './discovery'
+import { resolve, relative } from 'node:path'
+import { fileExists, collectFiles } from './discovery'
+import { extractPageProps } from './page-props-extractor'
 
 export interface InertiaPageRef {
   /** Page ID relative to the pages directory, e.g. `posts/Index`. */
@@ -63,4 +65,48 @@ export async function resolveInertiaPageFile(cwd: string, id: string): Promise<s
 /** The path a missing page component *should* live at — used in fix suggestions. */
 export function expectedInertiaPagePath(id: string): string {
   return `resources/js/pages/${id}.tsx`
+}
+
+export interface InertiaPageDescription {
+  id: string
+  /** Component file relative to the app root; absent when no file exists. */
+  filePath?: string
+  /** Props type collapsed to one line, when extractable. */
+  props?: string
+}
+
+/**
+ * Resolve a page ID to its component file and one-line Props type — the
+ * shared projection behind the entity context's Pages section and the
+ * screens spec view.
+ */
+export async function describeInertiaPage(cwd: string, id: string): Promise<InertiaPageDescription> {
+  const filePath = await resolveInertiaPageFile(cwd, id)
+  if (!filePath) return { id }
+
+  let props: string | undefined
+  try {
+    const extracted = await extractPageProps(resolve(cwd, filePath), id)
+    // Props types can span lines; collapse whitespace for one-line rendering.
+    props = extracted.rawType?.replace(/\s+/g, ' ').trim()
+  } catch {
+    // Unparsable page — still list it, just without props.
+  }
+
+  return { id, filePath, props }
+}
+
+const PAGE_COMPONENT_EXTENSIONS = new Set(['.tsx', '.jsx', '.ts', '.js'])
+
+/**
+ * Page IDs for every component file under `resources/js/pages`, sorted,
+ * excluding the shared `contracts/` types directory.
+ */
+export async function listInertiaPageIds(cwd: string): Promise<string[]> {
+  const pagesDir = resolve(cwd, 'resources/js/pages')
+  const files = await collectFiles(pagesDir, PAGE_COMPONENT_EXTENSIONS)
+  return files
+    .map((file) => relative(pagesDir, file).split(/[\\/]/).join('/').replace(/\.(tsx|jsx|ts|js)$/, ''))
+    .filter((id) => !id.startsWith('contracts'))
+    .sort()
 }
