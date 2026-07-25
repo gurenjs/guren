@@ -26,5 +26,5 @@ export function cloudflarePlugin(config: CloudflarePluginConfig = {}): ServicePr
 export { captureWorkersEnv, getWorkersEnv, resetWorkersEnv } from './env'
 export { createWorkersHandler } from './handler'
 export type { WorkersAppLike, WorkersExecutionContext, WorkersHandler } from './handler'
-export { buildCloudflareOutput } from './build'
+export { buildCloudflareOutput, flattenD1Migrations } from './build'
 export type { BuildCloudflareOutputOptions } from './build'

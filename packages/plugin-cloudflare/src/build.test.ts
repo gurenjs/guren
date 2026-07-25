@@ -67,6 +67,16 @@ describe('buildCloudflareOutput', () => {
     expect(existsSync(join(root, '.cloudflare/assets/assets/app-Abc123.js'))).toBe(true)
   })
 
+  test('should drop public/index.html so it cannot shadow the root route', async () => {
+    scaffoldApp(root)
+    writeFileSync(join(root, 'public/index.html'), '<div id="app"></div>')
+
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+
+    expect(existsSync(join(root, '.cloudflare/assets/index.html'))).toBe(false)
+    expect(existsSync(join(root, '.cloudflare/assets/robots.txt'))).toBe(true)
+  })
+
   test('should mirror built assets under the /public/assets base URL path', async () => {
     scaffoldApp(root)
 
@@ -109,7 +119,7 @@ describe('buildCloudflareOutput', () => {
     expect(config.main).toBe('.cloudflare/worker.js')
     expect(config.compatibility_flags).toEqual(['nodejs_compat'])
     expect(config.assets.directory).toBe('.cloudflare/assets')
-    expect(config.d1_databases[0].migrations_dir).toBe('db/migrations')
+    expect(config.d1_databases[0].migrations_dir).toBe('.cloudflare/d1-migrations')
 
     writeFileSync(configPath, '{ "name": "user-edited" }\n')
     await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
@@ -149,6 +159,124 @@ describe('buildCloudflareOutput', () => {
 
     await expect(buildCloudflareOutput({ rootDir: root, skipAppBuild: true })).rejects.toThrow(
       /app entry not found/,
+    )
+  })
+})
+
+describe('flattenD1Migrations', () => {
+  let root: string
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'guren-cf-migrations-'))
+  })
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  test('should flatten drizzle-kit folder migrations into wrangler-visible sql files', async () => {
+    scaffoldApp(root)
+    mkdirSync(join(root, 'db/migrations/20260725064448_third_storm'), { recursive: true })
+    writeFileSync(
+      join(root, 'db/migrations/20260725064448_third_storm/migration.sql'),
+      'CREATE TABLE `posts` (`id` integer PRIMARY KEY);\n',
+    )
+    mkdirSync(join(root, 'db/migrations/meta'), { recursive: true })
+    writeFileSync(join(root, 'db/migrations/meta/_journal.json'), '{}')
+    writeFileSync(join(root, 'db/migrations/0000_flat_legacy.sql'), 'SELECT 1;\n')
+
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+
+    const flattened = join(root, '.cloudflare/d1-migrations')
+    expect(readFileSync(join(flattened, '20260725064448_third_storm.sql'), 'utf8')).toContain('CREATE TABLE')
+    expect(readFileSync(join(flattened, '0000_flat_legacy.sql'), 'utf8')).toContain('SELECT 1')
+    expect(existsSync(join(flattened, 'meta'))).toBe(false)
+
+    const wrangler = JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf8'))
+    expect(wrangler.d1_databases[0].migrations_dir).toBe('.cloudflare/d1-migrations')
+  })
+
+  test('should emit no directory when there are no migrations', async () => {
+    scaffoldApp(root)
+
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+
+    expect(existsSync(join(root, '.cloudflare/d1-migrations'))).toBe(false)
+  })
+})
+
+describe('workers runtime configuration', () => {
+  let root: string
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'guren-cf-config-'))
+  })
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  test('should alias dev-only modules to generated stubs and define NODE_ENV', async () => {
+    scaffoldApp(root)
+
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+
+    const config = JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf8'))
+    expect(config.alias['bun:sqlite']).toBe('./.cloudflare/stub-bun-sqlite.js')
+    expect(config.alias.vite).toBe('./.cloudflare/stub-vite.js')
+    expect(config.alias['@guren/cli']).toBe('./.cloudflare/stub-guren-cli.js')
+    // The SDK is only ever imported through subpaths, which a package-name
+    // alias does not cover.
+    expect(config.alias['@modelcontextprotocol/sdk/server/mcp.js']).toBeDefined()
+    expect(config.define['process.env.NODE_ENV']).toBe('"production"')
+
+    expect(readFileSync(join(root, '.cloudflare/stub-bun-sqlite.js'), 'utf8')).toContain('throw new Error')
+    expect(existsSync(join(root, '.cloudflare/stub-vite.js'))).toBe(true)
+  })
+
+  test('should define import.meta.url so module-scope URL resolution survives', async () => {
+    scaffoldApp(root)
+
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+
+    // Both Vite's createRequire(import.meta.url) and scaffolded
+    // new URL(..., import.meta.url) run at module scope; workerd leaves the
+    // value undefined and the worker never starts without this.
+    const config = JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf8'))
+    expect(config.define['import.meta.url']).toBe('"file:///worker.js"')
+  })
+
+  test('should warn when an existing wrangler config lacks build-owned keys', async () => {
+    scaffoldApp(root)
+    writeJson(join(root, 'wrangler.jsonc'), {
+      name: 'legacy',
+      main: '.cloudflare/worker.js',
+      d1_databases: [{ binding: 'DB', migrations_dir: 'db/migrations' }],
+    })
+    const warnings: string[] = []
+    const original = console.warn
+    console.warn = (message: string) => warnings.push(message)
+
+    try {
+      await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+    } finally {
+      console.warn = original
+    }
+
+    const warning = warnings.join('\n')
+    expect(warning).toContain('alias')
+    expect(warning).toContain('process.env.NODE_ENV')
+    expect(warning).toContain('.cloudflare/d1-migrations')
+  })
+
+  test('should reject migrations that flatten to the same filename', async () => {
+    scaffoldApp(root)
+    mkdirSync(join(root, 'db/migrations/0000_clash'), { recursive: true })
+    writeFileSync(join(root, 'db/migrations/0000_clash/migration.sql'), 'SELECT 1;')
+    writeFileSync(join(root, 'db/migrations/0000_clash.sql'), 'SELECT 2;')
+
+    await expect(buildCloudflareOutput({ rootDir: root, skipAppBuild: true })).rejects.toThrow(
+      /both flatten to/,
     )
   })
 })
