@@ -313,6 +313,32 @@ export default class PostController extends Controller {
     }
   })
 
+  it('accepts a co-located test that matches the controller\'s own extension', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-js-colocated-test-')
+
+    try {
+      await mkdir(join(workspace.dir, 'app/Http/Controllers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Http/Controllers/LegacyController.js'),
+        `export default class LegacyController {\n  async index() { return null }\n}`,
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'app/Http/Controllers/LegacyController.test.js'),
+        `test('index', () => {})`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      const testCheck = report.checks.find(c => c.key === 'test:LegacyController')
+      expect(testCheck).toBeDefined()
+      expect(testCheck!.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('does not treat controller test files as controllers', async () => {
     const workspace = await createTempWorkspace('guren-cli-check-test-not-controller-')
 

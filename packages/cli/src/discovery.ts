@@ -1,5 +1,5 @@
 import { readdir, access, readFile, stat } from 'node:fs/promises'
-import { resolve, join, dirname, extname, relative, sep } from 'node:path'
+import { resolve, join, basename, extname, relative, sep } from 'node:path'
 
 const SOURCE_EXTENSIONS = new Set(['.ts', '.mts', '.js', '.mjs'])
 const TEST_FILE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.js', '.jsx', '.mjs'])
@@ -194,22 +194,26 @@ export async function discoverTestFiles(appRoot: string): Promise<string[]> {
 }
 
 /**
- * Paths that would satisfy "this controller has a test", in probe order:
- * the co-located `<Name>.test.ts` sibling first, then the `tests/` layouts
- * scaffolded apps use. Co-location is the only option for a controller
- * inside `modules/<name>/`, since the module boundary check forbids the
- * project-root `tests/` from importing module internals.
+ * Paths — POSIX-relative to `cwd` — that would satisfy "this controller has
+ * a test", in probe order: the co-located sibling first, then the `tests/`
+ * layouts `make:test` scaffolds. A controller inside `modules/<name>/` is
+ * only ever paired with a test inside the same module, since the module
+ * boundary check forbids the project-root `tests/` from importing module
+ * internals — hence the `modules/<name>/` prefix on the `tests/` candidates.
  */
 export function controllerTestCandidates(cwd: string, controllerPath: string): string[] {
   const name = classNameFromPath(controllerPath)
-  const moduleName = moduleNameFromRelPath(toPosixRelative(cwd, controllerPath))
+  const relPath = toPosixRelative(cwd, controllerPath)
+  const moduleName = moduleNameFromRelPath(relPath)
   const prefix = moduleName ? `modules/${moduleName}/` : ''
 
-  return [
-    join(dirname(controllerPath), `${name}.test.ts`),
-    `${prefix}tests/controllers/${name}.test.ts`,
-    `${prefix}tests/${name}.test.ts`,
-  ]
+  const directories = [relPath.slice(0, relPath.lastIndexOf('/') + 1), `${prefix}tests/controllers/`, `${prefix}tests/`]
+  // A `.js`/`.mts` controller is tested by a `.test.js`/`.test.mts` file, but
+  // `.test.ts` stays a candidate everywhere — a TypeScript test covering a
+  // plain-JS controller is a normal setup, not a missing test.
+  const extensions = Array.from(new Set([extname(controllerPath), '.ts']))
+
+  return directories.flatMap((directory) => extensions.map((extension) => `${directory}${name}.test${extension}`))
 }
 
 export async function hasControllerTest(cwd: string, controllerPath: string): Promise<boolean> {
@@ -224,8 +228,7 @@ export async function hasControllerTest(cwd: string, controllerPath: string): Pr
  * e.g., '/app/Models/Post.ts' → 'Post'
  */
 export function classNameFromPath(filePath: string): string {
-  const base = filePath.split('/').pop() ?? ''
-  return base.replace(/\.(ts|mts|js|mjs)$/, '')
+  return basename(filePath).replace(/\.(ts|mts|js|mjs)$/, '')
 }
 
 /**
