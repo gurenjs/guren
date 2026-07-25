@@ -134,22 +134,14 @@ describe('OAuthController', () => {
       expect(mockUserCreate).not.toHaveBeenCalled()
     })
 
-    it('falls back to the GitHub /user/emails endpoint when the profile email is private', async () => {
+    it('lowercases the provider email before matching and creating accounts', async () => {
       const oauth = createOAuthStub()
       oauth.handleCallback.mockResolvedValue({
-        profile: { id: 'gh-5', email: undefined, name: 'Private Email', token: { accessToken: 'gh-token-abc' } },
+        profile: { id: 'gh-5', email: 'Mixed@Example.com', name: 'Mixed Case' },
         redirectTo: null,
       })
       mockUserWhere.mockResolvedValue([])
-      mockUserCreate.mockResolvedValue({ id: 3, email: 'private@example.com', githubId: 'gh-5' })
-      const fetchMock = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => [
-          { email: 'secondary@example.com', primary: false, verified: true },
-          { email: 'Private@Example.com', primary: true, verified: true },
-        ],
-      })
-      vi.stubGlobal('fetch', fetchMock)
+      mockUserCreate.mockResolvedValue({ id: 3, email: 'mixed@example.com', githubId: 'gh-5' })
 
       const controller = createController()
       const ctx = createControllerContext('http://blog.test/auth/github/callback?code=abc&state=xyz', {}, { oauth }) as unknown as Context
@@ -158,23 +150,16 @@ describe('OAuthController', () => {
 
       const response = await controller.callback()
 
-      expect(fetchMock).toHaveBeenCalledWith(
-        'https://api.github.com/user/emails',
-        expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer gh-token-abc' }) }),
-      )
-      expect(mockUserCreate).toHaveBeenCalledWith(expect.objectContaining({ email: 'private@example.com' }))
+      expect(mockUserCreate).toHaveBeenCalledWith(expect.objectContaining({ email: 'mixed@example.com' }))
       expect(response.status).toBe(302)
-
-      vi.unstubAllGlobals()
     })
 
     it('rejects when the provider does not return an email address', async () => {
       const oauth = createOAuthStub()
       oauth.handleCallback.mockResolvedValue({
-        profile: { id: 'gh-4', email: undefined, name: 'No Email', token: { accessToken: 'gh-token-abc' } },
+        profile: { id: 'gh-4', email: undefined, name: 'No Email' },
         redirectTo: null,
       })
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => [] }))
 
       const controller = createController()
       const ctx = createControllerContext('http://blog.test/auth/github/callback?code=abc&state=xyz', {}, { oauth }) as unknown as Context
@@ -182,8 +167,6 @@ describe('OAuthController', () => {
       ;(ctx as unknown as { req: { param: () => Record<string, string> } }).req.param = () => ({ provider: 'github' })
 
       await expect(controller.callback()).rejects.toThrow()
-
-      vi.unstubAllGlobals()
     })
   })
 })

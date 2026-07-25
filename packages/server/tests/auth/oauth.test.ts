@@ -162,6 +162,50 @@ describe('OAuthManager', () => {
     expect(profile.token.accessToken).toBe('token-123')
   })
 
+  it('falls back to /user/emails when the GitHub profile email is private', async () => {
+    const manager = new OAuthManager({
+      stateStore: new MemoryOAuthStateStore(),
+    })
+    manager.registerProvider('github', githubConfig)
+
+    const fetchMock = mock(async (input: string) => {
+      const body = input.includes('/access_token')
+        ? { access_token: 'token-123' }
+        : input.includes('/user/emails')
+          ? [
+              { email: 'secondary@example.com', primary: false, verified: true },
+              { email: 'unverified@example.com', primary: true, verified: false },
+              { email: 'primary@example.com', primary: true, verified: true },
+            ]
+          : { id: 42, email: null, name: 'Private Octo' }
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    ;(globalThis as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch
+
+    const { state } = await manager.authorize('github')
+    const profile = await manager.user('github', { code: 'auth-code', state })
+
+    expect(profile.email).toBe('primary@example.com')
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/user/emails'))).toBe(true)
+  })
+
+  it('leaves the profile email undefined when the fallback finds nothing', async () => {
+    const manager = new OAuthManager({
+      stateStore: new MemoryOAuthStateStore(),
+    })
+    manager.registerProvider('github', githubConfig)
+
+    installOAuthFetchMock({ access_token: 'token-123' }, { id: 42 })
+
+    const { state } = await manager.authorize('github')
+    const profile = await manager.user('github', { code: 'auth-code', state })
+
+    expect(profile.email).toBeUndefined()
+  })
+
   it('round-trips sanitized redirectTo through authorize and handleCallback', async () => {
     const manager = new OAuthManager({
       stateStore: new MemoryOAuthStateStore(),

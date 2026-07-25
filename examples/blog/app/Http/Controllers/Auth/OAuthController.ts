@@ -22,32 +22,6 @@ function identityWhere(provider: OAuthProvider, profileId: string): Partial<User
   return identities[provider]
 }
 
-interface GitHubEmail {
-  email: string
-  primary: boolean
-  verified: boolean
-}
-
-// GitHub's /user endpoint returns `email: null` whenever the account's email
-// is set to private, even with the `user:email` scope granted — the primary
-// verified address is only available from this separate endpoint.
-async function fetchGitHubPrimaryEmail(accessToken: string): Promise<string | undefined> {
-  const response = await fetch('https://api.github.com/user/emails', {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: 'application/vnd.github+json',
-      'User-Agent': 'guren-blog',
-    },
-  })
-
-  if (!response.ok) {
-    return undefined
-  }
-
-  const emails = (await response.json()) as GitHubEmail[]
-  return emails.find((entry) => entry.primary && entry.verified)?.email
-}
-
 export default class OAuthController extends Controller {
   private oauth(): OAuthManager {
     return this.make<OAuthManager>('oauth')
@@ -71,9 +45,10 @@ export default class OAuthController extends Controller {
 
     const { profile, redirectTo } = await this.oauth().handleCallback(provider, { code, state })
 
-    const resolvedEmail = (
-      profile.email ?? (provider === 'github' ? await fetchGitHubPrimaryEmail(profile.token.accessToken) : undefined)
-    )?.toLowerCase()
+    // GitHub accounts with a private email are handled upstream:
+    // createGitHubOAuthProviderConfig falls back to /user/emails, so
+    // profile.email is already populated whenever one is obtainable.
+    const resolvedEmail = profile.email?.toLowerCase()
 
     if (!resolvedEmail) {
       throw ValidationException.withMessages({ message: 'This provider did not return an email address.' })

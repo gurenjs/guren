@@ -129,6 +129,7 @@ export function registerWebRoutes(router: Router): void {
       )
       expect(registerValidator).toContain('passwordConfirmation')
       expect(registerValidator).toContain('Passwords do not match.')
+      expect(registerValidator).toContain('.toLowerCase()')
 
       const registerPage = await readFile(join(workspace.dir, 'resources/js/pages/auth/Register.tsx'), 'utf8')
       expect(registerPage).toContain('interface Props')
@@ -140,7 +141,16 @@ export function registerWebRoutes(router: Router): void {
       )
       expect(forgotController).toContain('validateBody(ForgotPasswordSchema)')
       expect(forgotController).toContain('createPasswordResetToken(')
-      expect(forgotController).toContain('sendPasswordResetMail(')
+      // Not awaited: the transport round-trip only happens for known
+      // accounts, so awaiting it would leak account existence via timing.
+      expect(forgotController).toContain('void sendPasswordResetMail(')
+      expect(forgotController).not.toContain('await sendPasswordResetMail(')
+
+      const profileController = await readFile(
+        join(workspace.dir, 'app/Http/Controllers/ProfileController.ts'),
+        'utf8',
+      )
+      expect(profileController).not.toContain('emailVerifiedAt')
 
       const resetController = await readFile(
         join(workspace.dir, 'app/Http/Controllers/Auth/ResetPasswordController.ts'),
@@ -244,6 +254,18 @@ export const posts = pgTable('posts', {
       )
       expect(verifyController).toContain('completeEmailVerification(')
       expect(verifyController).toContain('emailVerifiedAt: new Date()')
+
+      // Public — the emailed link must work from any device or expired session.
+      expect(authRoutes).toContain("router.get('/verify-email/confirm', [VerifyEmailController, 'confirm']).name('verify-email.confirm')")
+      expect(authRoutes).not.toContain("router.get('/verify-email/confirm', [VerifyEmailController, 'confirm'], requireAuthenticated")
+
+      // Changing the profile email must reset verification and re-send the link.
+      const profileController = await readFile(
+        join(workspace.dir, 'app/Http/Controllers/ProfileController.ts'),
+        'utf8',
+      )
+      expect(profileController).toContain('emailVerifiedAt: null')
+      expect(profileController).toContain('sendEmailVerificationMail(')
     } finally {
       await workspace.cleanup()
     }
