@@ -410,3 +410,42 @@ describe('provider sanitize', () => {
     expect(resolved).toHaveProperty('password')
   })
 })
+
+describe('ModelUserProvider passwordless accounts', () => {
+  test('rejects password login for an account without a password hash', async () => {
+    const { ModelUserProvider } = await import('../../src/auth/providers/ModelUserProvider')
+
+    const passwordlessUser = { id: 1, email: 'oauth@guren.dev', passwordHash: null }
+    const fakeModel = {
+      async find() {
+        return passwordlessUser
+      },
+      async where() {
+        return [passwordlessUser]
+      },
+    }
+
+    let dummyHashes = 0
+    const provider = new ModelUserProvider(fakeModel as never, {
+      passwordColumn: 'passwordHash',
+      hasher: {
+        async hash(value: string) {
+          dummyHashes += 1
+          return `hashed:${value}`
+        },
+        async verify() {
+          throw new Error('verify must not run against a missing hash')
+        },
+      },
+    })
+
+    const valid = await provider.validateCredentials(passwordlessUser as never, {
+      email: 'oauth@guren.dev',
+      password: 'anything',
+    })
+
+    expect(valid).toBe(false)
+    // The timing-equalization dummy hash ran instead of verify.
+    expect(dummyHashes).toBe(1)
+  })
+})
