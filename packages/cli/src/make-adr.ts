@@ -12,6 +12,7 @@ import {
   discoverPolicyFiles,
   classNameFromPath,
   toPosixRelative,
+  moduleNameFromRelPath,
 } from './discovery'
 import { parseModelFile } from './model-parser'
 
@@ -42,45 +43,77 @@ interface AdrPrefill {
 const EMPTY_PREFILL: AdrPrefill = { entities: [], related: [] }
 
 /**
+ * Entity names are class identifiers, and they are interpolated into the
+ * frontmatter unquoted — anything beyond identifier characters could
+ * inject frontmatter keys (`]`, newlines, `#`, quotes), so it is rejected
+ * outright rather than escaped.
+ */
+const ENTITY_NAME_RE = /^[A-Za-z][A-Za-z0-9_]*$/
+
+/**
  * Prefill for `--entity`: the canonical class name plus the entity's
- * companion files as `related:` entries. A model that doesn't exist yet is
- * prefilled as given — ADR-first flows write the decision before the code,
- * and `guren check --docs` failing until the model lands is the intended
+ * companion files (from the same location as the resolved model) as
+ * `related:` entries. A model that doesn't exist yet is prefilled as
+ * given — ADR-first flows write the decision before the code, and
+ * `guren check --docs` failing until the model lands is the intended
  * "implementation missing" signal.
  */
 async function resolveAdrPrefill(entity: string, moduleName?: string): Promise<AdrPrefill> {
+  if (!ENTITY_NAME_RE.test(entity)) {
+    throw new Error(
+      `Invalid entity name "${entity}" — it is written into YAML frontmatter, so it must be a plain class identifier (letters, digits, underscores).`,
+    )
+  }
+
   const cwd = process.cwd()
   const modelFiles = await discoverModelFiles(cwd)
   const parsed = await Promise.all(modelFiles.map((file) => parseModelFile(file)))
   const lower = entity.toLowerCase()
-  const matches = parsed.flatMap((info, index) =>
-    info && info.className.toLowerCase() === lower
-      ? [{ className: info.className, file: modelFiles[index] }]
-      : [],
-  )
-  // When scaffolding into a module, that module's model wins a name tie.
+  const matches = parsed.flatMap((info, index) => {
+    if (!info || info.className.toLowerCase() !== lower) return []
+    const relPath = toPosixRelative(cwd, modelFiles[index])
+    return [{ className: info.className, module: moduleNameFromRelPath(relPath) }]
+  })
+
+  // A module ADR prefers that module's model; a root ADR prefers the root
+  // model. Only when neither preference resolves a name tie is it ambiguous.
+  const preferredModule = moduleName ?? null
   const match =
-    matches.find(
-      (m) => moduleName && toPosixRelative(cwd, m.file).startsWith(`modules/${moduleName}/`),
-    ) ?? matches[0]
+    matches.find((m) => m.module === preferredModule)
+    ?? (matches.length === 1 ? matches[0] : undefined)
 
   if (!match) {
+    if (matches.length > 1) {
+      const locations = matches.map((m) => m.module ?? 'app').sort()
+      throw new Error(
+        `Model "${entity}" exists in multiple locations: ${locations.join(', ')}. Pass --module <name> to target that module's model (and docs/adr).`,
+      )
+    }
     consola.warn(
       `Model "${entity}" not found — prefilled entities anyway; \`guren check --docs\` will fail until the model exists.`,
     )
     return { entities: [entity], related: [] }
   }
 
-  const related: string[] = []
+  // Companions come from the resolved model's own location, so a module
+  // entity never links a same-named root controller (and vice versa).
   const companions: Array<[(root: string) => Promise<string[]>, string]> = [
     [discoverControllerFiles, `${match.className}Controller`],
     [discoverResourceFiles, `${match.className}Resource`],
     [discoverPolicyFiles, `${match.className}Policy`],
   ]
-  for (const [discover, companionName] of companions) {
-    const file = (await discover(cwd)).find((f) => classNameFromPath(f) === companionName)
-    if (file) related.push(toPosixRelative(cwd, file))
-  }
+  const related = (
+    await Promise.all(
+      companions.map(async ([discover, companionName]) => {
+        const files = (await discover(cwd)).map((file) => toPosixRelative(cwd, file))
+        return files.find(
+          (file) =>
+            classNameFromPath(file) === companionName
+            && moduleNameFromRelPath(file) === match.module,
+        )
+      }),
+    )
+  ).filter((file): file is string => file !== undefined)
 
   return { entities: [match.className], related }
 }

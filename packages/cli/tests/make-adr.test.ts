@@ -219,4 +219,84 @@ describe('makeAdr', () => {
       await workspace.cleanup()
     }
   })
+
+  it('rejects --entity values that are not plain identifiers', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-adr-inject-')
+    try {
+      expect(
+        makeAdr('Injection attempt', { entity: 'Ghost]\nstatus: accepted\nentities: [Post' }),
+      ).rejects.toThrow('Invalid entity name')
+      expect(makeAdr('Injection attempt', { entity: 'Post # comment' })).rejects.toThrow(
+        'Invalid entity name',
+      )
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('resolves name ties by ADR location and scopes companions to it', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-adr-dup-')
+    try {
+      const dir = workspace.dir
+      await mkdir(join(dir, 'app/Models'), { recursive: true })
+      await mkdir(join(dir, 'app/Http/Controllers'), { recursive: true })
+      await mkdir(join(dir, 'modules/billing/app/Models'), { recursive: true })
+      await mkdir(join(dir, 'modules/billing/app/Http/Controllers'), { recursive: true })
+      await writeFile(join(dir, 'app/Models/Post.ts'), 'export class Post {}\n', 'utf8')
+      await writeFile(
+        join(dir, 'app/Http/Controllers/PostController.ts'),
+        'export class PostController {}\n',
+        'utf8',
+      )
+      await writeFile(
+        join(dir, 'modules/billing/app/Models/Post.ts'),
+        'export class Post {}\n',
+        'utf8',
+      )
+      await writeFile(
+        join(dir, 'modules/billing/app/Http/Controllers/PostController.ts'),
+        'export class PostController {}\n',
+        'utf8',
+      )
+
+      // Root ADR prefers the root model and links only root companions
+      const rootAdr = await makeAdr('Root decision', { entity: 'Post' })
+      const rootContent = readFileSync(rootAdr, 'utf8')
+      expect(rootContent).toContain('- app/Http/Controllers/PostController.ts')
+      expect(rootContent).not.toContain('modules/billing')
+
+      // Module ADR prefers the module model and links only its companions
+      const moduleAdr = await makeAdr('Billing decision', { entity: 'Post', root: 'billing' })
+      const moduleContent = readFileSync(moduleAdr, 'utf8')
+      expect(moduleContent).toContain('- modules/billing/app/Http/Controllers/PostController.ts')
+      expect(moduleContent).not.toContain('- app/Http/Controllers/PostController.ts')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('errors on a name tie that no location preference resolves', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-adr-ambiguous-')
+    try {
+      const dir = workspace.dir
+      await mkdir(join(dir, 'modules/billing/app/Models'), { recursive: true })
+      await mkdir(join(dir, 'modules/sales/app/Models'), { recursive: true })
+      await writeFile(
+        join(dir, 'modules/billing/app/Models/Post.ts'),
+        'export class Post {}\n',
+        'utf8',
+      )
+      await writeFile(
+        join(dir, 'modules/sales/app/Models/Post.ts'),
+        'export class Post {}\n',
+        'utf8',
+      )
+
+      expect(makeAdr('Ambiguous decision', { entity: 'Post' })).rejects.toThrow(
+        'multiple locations: billing, sales',
+      )
+    } finally {
+      await workspace.cleanup()
+    }
+  })
 })
