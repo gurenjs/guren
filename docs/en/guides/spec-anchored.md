@@ -75,7 +75,8 @@ last_reviewed: 2026-07-25
 - `entities` links by model class name — `bunx guren context Invoice`
   surfaces the document to whoever touches that model next.
 - `related` links files or globs for docs that govern non-model code.
-- Code links back with a JSDoc tag: `/** @docs docs/adr/0001-billing.md */`.
+- Models and controllers can link back with a JSDoc tag:
+  `/** @docs docs/adr/0001-billing.md */` (tags in other files aren't scanned).
 
 Record decisions with the generator:
 
@@ -100,19 +101,22 @@ bunx guren check --spec    # spec drift only
 bunx guren check --arch    # architecture boundaries only
 ```
 
-Both docs and spec checks are content-activated: an app without `docs/`
-or `docs/spec/` produces zero results, so nothing goes red until you
-adopt the convention. Under `check --changed` (what the agent harness
-runs after every edit), only the documents and views affected by the
-changed files are re-verified, keeping the feedback loop fast.
+Both docs and spec checks are content-activated: with no `docs/`, no
+`docs/spec/`, and no `@docs` tags, they produce zero results — nothing
+goes red until you adopt the convention. Under `check --changed` (what
+the agent harness's edit hook runs after edits to routes, controllers,
+models, schema, or pages), verification narrows to what those changes
+plausibly affect, keeping the loop fast; CI runs the full gates.
 
 ## Why this matters for agents
 
 A stale document is worse than no document for an AI agent — it reads
 the lie with full confidence. Because the derived views regenerate from
-code and the declared links are validated on every change, an agent that
-runs `bunx guren context Invoice` gets context that is *known* to be
-current: the checker said so. The agent harness in every new app teaches
+code and the declared links are validated by the check suite, an agent
+that runs `bunx guren context Invoice` gets context whose links and
+derived views are verified — the checker said so. (Prose freshness is a
+separate, opt-in warning: `check --docs --docs-ttl <days>` flags docs
+whose `last_reviewed` has aged out.) The agent harness in every new app teaches
 this loop — pull the entity context before touching a model, keep
 frontmatter in sync when moving files, regenerate spec views with
 structural changes — and the edit hook enforces it mechanically.

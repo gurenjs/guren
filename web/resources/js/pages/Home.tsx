@@ -275,7 +275,8 @@ export default function Home({ codeExamples }: Props) {
               <p className="mt-4 text-base leading-relaxed text-white/60">
                 One command hands an agent everything your project knows about an entity — or the
                 whole map. The spec keeps itself honest: ER, domain, and screen views regenerate
-                from code, decision records link to the models they govern, and drift fails CI.
+                from code, decision records link to the models they govern, and the check suite's
+                CI gates catch broken links and drift.
                 Mechanical gates catch mistakes before you read the diff, and every new app ships
                 a full agent harness whose effect is measured in a public, reproducible
                 evaluation: a 40% cut in agent cost over an undocumented baseline.
