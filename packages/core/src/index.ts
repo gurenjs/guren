@@ -12,6 +12,7 @@ export {
   createPostgresDatabase,
   createMySqlDatabase,
   createSqliteDatabase,
+  createD1Database,
   runSeeders,
   defineSeeder,
 } from '@guren/orm'
@@ -52,6 +53,8 @@ export type {
   MySqlDatabaseOptions,
   SqliteDatabase,
   SqliteDatabaseOptions,
+  D1DatabaseHandle,
+  D1DatabaseOptions,
   SeederContext,
   SeederHandler,
   SoftDeletesStatic,

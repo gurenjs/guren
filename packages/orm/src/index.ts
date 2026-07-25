@@ -58,6 +58,8 @@ export type { MySqlDatabase, MySqlDatabaseOptions } from './mysql'
 export { createSqliteDatabase } from './sqlite'
 export type { MigrationStatusEntry } from './migration-utils'
 export type { SqliteDatabase, SqliteDatabaseOptions } from './sqlite'
+export { createD1Database } from './d1'
+export type { D1DatabaseHandle, D1DatabaseOptions } from './d1'
 export { runSeeders, defineSeeder, loadSeeders } from './seeder'
 export type { SeederContext, SeederHandler } from './seeder'
 
