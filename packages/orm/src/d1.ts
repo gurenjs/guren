@@ -1,4 +1,4 @@
-import { resolve } from 'node:path'
+import { relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
 
@@ -45,37 +45,54 @@ export interface D1DatabaseHandle {
 export function createD1Database(options: D1DatabaseOptions): D1DatabaseHandle {
   const { binding, migrationsFolder, relations } = options
 
+  // Display-only (wrangler owns the folder): keep strings as the caller wrote
+  // them and relativize URLs, so error guidance never leaks a machine-specific
+  // absolute path into a copy-pasteable wrangler.jsonc value.
   const migrationsHint =
     migrationsFolder == null
       ? 'db/migrations'
       : migrationsFolder instanceof URL
-        ? fileURLToPath(migrationsFolder)
-        : resolve(String(migrationsFolder))
+        ? relative(process.cwd(), fileURLToPath(migrationsFolder))
+        : migrationsFolder
 
-  let db: unknown
+  let databasePromise: Promise<unknown> | undefined
 
-  async function ensureDatabase(): Promise<unknown> {
-    if (db) return db
+  function ensureDatabase(): Promise<unknown> {
+    if (databasePromise) return databasePromise
 
-    const client = binding()
-    if (client == null) {
-      throw new Error(
-        'createD1Database: the "binding" resolver returned no D1 binding. ' +
-          'On Workers this usually means it ran before the first request — defer access ' +
-          '(e.g. binding: () => getWorkersEnv<Env>().DB) and check the d1_databases entry in wrangler.jsonc.',
-      )
-    }
+    const promise = (async () => {
+      const client = binding()
+      if (client == null) {
+        throw new Error(
+          'createD1Database: the "binding" resolver returned no D1 binding. ' +
+            'On Workers this usually means it ran before the first request — defer access ' +
+            '(e.g. binding: () => getWorkersEnv<Env>().DB) and check the d1_databases entry in wrangler.jsonc.',
+        )
+      }
 
-    const { drizzle } = await import('drizzle-orm/d1')
-    type DrizzleConfig = NonNullable<Exclude<Parameters<typeof drizzle>[0], string>>
-    db = drizzle({ client, ...(relations ? { relations } : {}) } as DrizzleConfig)
-    return db
+      // drizzle-orm/d1 only accepts the positional (client, config) form —
+      // unlike bun-sqlite there is no `{ client }` object overload.
+      const { drizzle } = await import('drizzle-orm/d1')
+      type D1Client = Parameters<typeof drizzle>[0]
+      type D1Config = NonNullable<Parameters<typeof drizzle>[1]>
+      return drizzle(client as D1Client, relations ? ({ relations } as D1Config) : undefined)
+    })()
+
+    databasePromise = promise.catch((error) => {
+      databasePromise = undefined
+      throw error
+    })
+    return databasePromise
   }
 
   return {
     getDatabase: ensureDatabase,
 
     async migrateDatabase() {
+      // The drizzle-kit SQL ↔ wrangler format contract is covered by the
+      // opt-in e2e test in packages/plugin-cloudflare/src/wrangler-migrations.test.ts
+      // (GUREN_TEST_WRANGLER=1); keep its hand-written fixtures in sync with
+      // drizzle-kit output when migration generation changes.
       throw new Error(
         'D1 migrations are not applied at runtime. Run `wrangler d1 migrations apply <database>` ' +
           `(local: add --local) with d1_databases[].migrations_dir pointing at ${migrationsHint}.`,
@@ -83,8 +100,9 @@ export function createD1Database(options: D1DatabaseOptions): D1DatabaseHandle {
     },
 
     async closeDatabase() {
-      // D1 sessions have no connection to close; just drop the cached instance.
-      db = undefined
+      // D1 sessions have no connection to close; just drop the cached instance
+      // (mirrors the sqlite factory).
+      databasePromise = undefined
     },
 
     async configureOrm() {
