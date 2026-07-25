@@ -282,9 +282,15 @@ both are in scope (Part 3):
   (`AuthenticatableModel.ts`) — and on Free even one scrypt hash at signup
   blows the CPU budget regardless of hasher. The scaffold needs a genuine
   passwordless mode for OAuth-only apps: nullable password hash, no
-  synthetic-password hashing, password routes disabled. (`static
+  synthetic-password hashing, ~~password routes disabled~~. (`static
   passwordHasher` is already configurable per model, but on Free the fix
   is to not hash at all.)
+  **Amended in implementation:** the first two shipped (`--oauth` creates
+  passwordless accounts against a nullable hash column). Disabling
+  password routes is deferred to a follow-up `--oauth-only` scaffold
+  variant — `--oauth` today always scaffolds password login alongside, so
+  the nullability relaxation is table-wide and the scaffold prints that
+  trade-off.
 - **The default OAuth state store is isolate-local memory.** `OAuthManager`
   falls back to `MemoryOAuthStateStore` (`auth/oauth/index.ts`); on Workers
   the redirect and callback are not guaranteed to hit the same isolate, so

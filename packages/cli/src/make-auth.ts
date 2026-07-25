@@ -1611,6 +1611,29 @@ function insertColumnsAfterRememberToken(content: string, fieldLines: string[]):
   return inserted ? updated : null
 }
 
+// Anchored on `})` at line start to avoid premature matching inside nested
+// function calls like `$defaultFn(() => ...)`.
+const usersTablePattern = /export const users = (?:pgTable|sqliteTable|mysqlTable)\('users',\s*\{[\s\S]*?\n\}\)\s*\n?/
+
+/**
+ * OAuth-created accounts are passwordless, so the users table must accept a
+ * NULL password hash. Applies to both freshly written and pre-existing users
+ * tables (adding --oauth to a password-auth app would otherwise hit a
+ * NOT NULL violation on the first OAuth signup). Scoped to the users table
+ * so a same-named column on another table is never touched, and
+ * line-anchored so argument lists containing commas (mysql
+ * `varchar('password_hash', { length: 255 })`) still match.
+ */
+function relaxPasswordHashForOAuth(content: string): string {
+  const tableMatch = content.match(usersTablePattern)
+  const target = tableMatch ? tableMatch[0] : content
+  const relaxed = target.replace(/^([ \t]*passwordHash:[^\n]*?)\.notNull\(\)/m, '$1')
+  if (relaxed === target) {
+    return content
+  }
+  return tableMatch ? content.replace(target, relaxed) : relaxed
+}
+
 async function updateSchema(includeVerify: boolean, oauthProviders: string[] = []): Promise<void> {
   const schemaPath = resolve(process.cwd(), 'db/schema.ts')
   let content: string
@@ -1625,6 +1648,7 @@ async function updateSchema(includeVerify: boolean, oauthProviders: string[] = [
     throw error
   }
 
+  const originalContent = content
   const hasAuthColumns = content.includes('passwordHash')
   const dialect = detectSchemaDialect(content)
 
@@ -1635,13 +1659,14 @@ async function updateSchema(includeVerify: boolean, oauthProviders: string[] = [
     // Rather than risk mangling a table shape we can't fully parse, insert
     // just the new columns next to the rememberToken column we know we
     // generated, preserving its indentation.
-    const beforeRelax = content
     if (oauthProviders.length > 0) {
-      content = relaxPasswordHashForOAuth(content)
-    }
-    const relaxationChanged = content !== beforeRelax
-    if (relaxationChanged) {
-      consola.info('Made passwordHash nullable in db/schema.ts (OAuth accounts are passwordless).')
+      const relaxed = relaxPasswordHashForOAuth(content)
+      if (relaxed !== content) {
+        content = relaxed
+        consola.info(
+          'Made users.passwordHash nullable so OAuth accounts can be passwordless — password-registered rows lose the NOT NULL guard.',
+        )
+      }
     }
 
     const missingColumns: Array<{ name: string; line: string }> = []
@@ -1656,7 +1681,7 @@ async function updateSchema(includeVerify: boolean, oauthProviders: string[] = [
     }
 
     if (missingColumns.length === 0) {
-      if (relaxationChanged) {
+      if (content !== originalContent) {
         await writeFile(schemaPath, content, 'utf8')
       }
       return
@@ -1668,7 +1693,7 @@ async function updateSchema(includeVerify: boolean, oauthProviders: string[] = [
       consola.warn(
         `Could not locate the rememberToken column in db/schema.ts — add ${missingColumns.map((c) => c.name).join(', ')} to your users table manually.`,
       )
-      if (relaxationChanged) {
+      if (content !== originalContent) {
         await writeFile(schemaPath, content, 'utf8')
       }
       return
@@ -1684,9 +1709,7 @@ async function updateSchema(includeVerify: boolean, oauthProviders: string[] = [
   content = ensureAuthColumnImports(content, dialect)
 
   // Replace an existing users table that lacks auth columns, or append if
-  // absent. Use `})` on its own line as the end anchor to avoid premature
-  // matching inside nested function calls like `$defaultFn(() => ...)`.
-  const usersTablePattern = /export const users = (?:pgTable|sqliteTable|mysqlTable)\('users',\s*\{[\s\S]*?\n\}\)\s*\n?/
+  // absent (usersTablePattern is shared with relaxPasswordHashForOAuth).
   const freshFieldLines: string[] = []
   if (includeVerify) {
     freshFieldLines.push(emailVerifiedAtField[dialect])
@@ -1711,16 +1734,6 @@ async function updateSchema(includeVerify: boolean, oauthProviders: string[] = [
 
   await writeFile(schemaPath, content, 'utf8')
   consola.info(`Updated db/schema.ts with authentication columns (${dialect}).`)
-}
-
-/**
- * OAuth-created accounts are passwordless, so the users table must accept a
- * NULL password hash. Applies to both freshly written and pre-existing users
- * tables (adding --oauth to a password-auth app would otherwise hit a
- * NOT NULL violation on the first OAuth signup).
- */
-function relaxPasswordHashForOAuth(content: string): string {
-  return content.replace(/(passwordHash:\s*[^,\n]+?)\.notNull\(\)/, '$1')
 }
 
 async function generateUsersMigration(): Promise<boolean> {

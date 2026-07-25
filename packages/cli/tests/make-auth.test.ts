@@ -396,7 +396,6 @@ export const posts = pgTable('posts', {
       expect(schema).toContain("googleId: text('google_id').unique()")
       // Passwordless OAuth accounts require a nullable hash column.
       expect(schema).toContain("passwordHash: text('password_hash'),")
-      expect(schema).not.toContain("passwordHash: text('password_hash').notNull()")
     } finally {
       await workspace.cleanup()
     }
@@ -427,10 +426,77 @@ export const users = pgTable('users', {
 
       const schema = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
       expect(schema).toContain("passwordHash: text('password_hash'),")
-      expect(schema).not.toContain("passwordHash: text('password_hash').notNull()")
       expect(schema).toContain("githubId: text('github_id').unique()")
       // Other columns keep their constraints.
       expect(schema).toContain("email: text('email').notNull().unique()")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('relaxes a mysql varchar passwordHash despite the comma in its options', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-oauth-mysql-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'db/schema.ts'),
+        `import { mysqlTable, int, varchar, timestamp } from 'drizzle-orm/mysql-core'
+
+export const users = mysqlTable('users', {
+  id: int('id').primaryKey().autoincrement(),
+  name: varchar('name', { length: 255 }).notNull(),
+  email: varchar('email', { length: 255 }).notNull().unique(),
+  passwordHash: varchar('password_hash', { length: 255 }).notNull(),
+  rememberToken: varchar('remember_token', { length: 255 }),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+})
+`,
+        'utf8',
+      )
+
+      await makeAuth({ force: true, oauth: 'github' })
+
+      const schema = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
+      expect(schema).toContain("passwordHash: varchar('password_hash', { length: 255 }),")
+      expect(schema).toContain("name: varchar('name', { length: 255 }).notNull()")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('leaves a passwordHash column on another table untouched', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-oauth-scope-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'db/schema.ts'),
+        `import { pgTable, serial, text, timestamp } from 'drizzle-orm/pg-core'
+
+export const serviceAccounts = pgTable('service_accounts', {
+  id: serial('id').primaryKey(),
+  passwordHash: text('password_hash').notNull(),
+})
+
+export const users = pgTable('users', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  email: text('email').notNull().unique(),
+  passwordHash: text('password_hash').notNull(),
+  rememberToken: text('remember_token'),
+  createdAt: timestamp('created_at', { withTimezone: false }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: false }).defaultNow().notNull(),
+})
+`,
+        'utf8',
+      )
+
+      await makeAuth({ force: true, oauth: 'github' })
+
+      const schema = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
+      const [serviceAccountsBlock, usersBlock] = schema.split('export const users')
+      expect(serviceAccountsBlock).toContain("passwordHash: text('password_hash').notNull()")
+      expect(usersBlock).toContain("passwordHash: text('password_hash'),")
     } finally {
       await workspace.cleanup()
     }
