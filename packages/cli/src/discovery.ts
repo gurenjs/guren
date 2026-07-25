@@ -1,5 +1,5 @@
 import { readdir, access, readFile, stat } from 'node:fs/promises'
-import { resolve, join, extname, relative, sep } from 'node:path'
+import { resolve, join, extname, relative, sep, posix } from 'node:path'
 
 const SOURCE_EXTENSIONS = new Set(['.ts', '.mts', '.js', '.mjs'])
 const TEST_FILE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.js', '.jsx', '.mjs'])
@@ -140,11 +140,15 @@ export async function listAppRoots(
  * what makes every `discover*Files` function below (and everything built
  * on them: `check`, `audit`, `context`, `model:list`, `doctor`)
  * module-aware for free.
+ *
+ * Test files are excluded: components are frequently tested by a co-located
+ * `<Name>.test.ts` sibling, and those files are tests, not components of the
+ * kind each `discover*Files` function reports.
  */
 async function discoverDir(appRoot: string, subDir: string): Promise<string[]> {
   const roots = await listAppRoots(appRoot)
   const groups = await Promise.all(roots.map((root) => collectFiles(resolve(root.dir, subDir))))
-  return groups.flat()
+  return groups.flat().filter((file) => !TEST_FILE_PATTERN.test(file))
 }
 
 /**
@@ -221,6 +225,41 @@ export function discoverPolicyFiles(appRoot: string): Promise<string[]> {
 export async function discoverTestFiles(appRoot: string): Promise<string[]> {
   const files = await collectFiles(appRoot, TEST_FILE_EXTENSIONS, NON_SOURCE_DIR_NAMES)
   return files.filter((file) => TEST_FILE_PATTERN.test(file))
+}
+
+/**
+ * Paths — POSIX-relative to `cwd` — that would satisfy "this controller has
+ * a test", in probe order: the co-located sibling first, then the `tests/`
+ * layouts `make:test` scaffolds. A controller inside `modules/<name>/` is
+ * only ever paired with a test inside the same module, since the module
+ * boundary check forbids the project-root `tests/` from importing module
+ * internals — hence the `modules/<name>/` prefix on the `tests/` candidates.
+ */
+export function controllerTestCandidates(cwd: string, controllerPath: string): string[] {
+  const name = classNameFromPath(controllerPath)
+  const relPath = toPosixRelative(cwd, controllerPath)
+  const dir = posix.dirname(relPath)
+  const siblingDir = dir === '.' ? '' : `${dir}/`
+  const moduleName = moduleNameFromRelPath(relPath)
+  const prefix = moduleName ? `modules/${moduleName}/` : ''
+
+  // A `.js`/`.mts` controller may be tested by a same-extension sibling, but
+  // `.test.ts` stays a candidate there too. The `tests/` layouts below are
+  // only ever scaffolded by `make:test`, which always emits `.test.ts`.
+  const siblingExtensions = Array.from(new Set([extname(controllerPath), '.ts']))
+
+  return [
+    ...siblingExtensions.map((ext) => `${siblingDir}${name}.test${ext}`),
+    `${prefix}tests/controllers/${name}.test.ts`,
+    `${prefix}tests/${name}.test.ts`,
+  ]
+}
+
+export async function hasControllerTest(cwd: string, controllerPath: string): Promise<boolean> {
+  for (const candidate of controllerTestCandidates(cwd, controllerPath)) {
+    if (await fileExists(cwd, candidate)) return true
+  }
+  return false
 }
 
 /**

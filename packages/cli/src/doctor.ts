@@ -1,7 +1,17 @@
 import { copyFile, readFile, writeFile } from 'node:fs/promises'
 import { resolve, relative } from 'node:path'
 import { consola } from 'consola'
-import { discoverControllerFiles, discoverModelFiles, discoverTestFiles, fileExists, readIfExists, classNameFromPath } from './discovery'
+import {
+  discoverControllerFiles,
+  discoverModelFiles,
+  discoverTestFiles,
+  fileExists,
+  hasControllerTest,
+  readIfExists,
+  classNameFromPath,
+  toPosixRelative,
+  moduleNameFromRelPath,
+} from './discovery'
 import { checkPluginCompatibility, readCoreVersion, readInstalledPluginManifests } from './plugin-manifest'
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail'
@@ -1173,23 +1183,14 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
   try {
     for (const filePath of controllerFiles) {
       const name = classNameFromPath(filePath)
-      const testCandidates = [
-        `tests/controllers/${name}.test.ts`,
-        `tests/${name}.test.ts`,
-      ]
-      let hasTest = false
-      for (const candidate of testCandidates) {
-        if (await fileExists(cwd, candidate)) {
-          hasTest = true
-          break
-        }
-      }
-      if (!hasTest) {
+      if (!(await hasControllerTest(cwd, filePath))) {
+        const moduleName = moduleNameFromRelPath(toPosixRelative(cwd, filePath))
+        const moduleFlag = moduleName ? ` --module ${moduleName}` : ''
         steps.push({
           priority: priority++,
           title: `Add tests for ${name}`,
           description: 'No test file found.',
-          command: `bunx guren make:test ${name.replace('Controller', '')} --controller`,
+          command: `bunx guren make:test ${name.replace('Controller', '')} --controller${moduleFlag}`,
         })
       }
     }

@@ -243,6 +243,59 @@ describe('module-aware discovery (RFC 0002)', () => {
     }
   })
 
+  it('excludes co-located test files from controller discovery', async () => {
+    const workspace = await createTempWorkspace('guren-cli-discovery-colocated-tests-')
+
+    try {
+      await mkdir(join(workspace.dir, 'app/Http/Controllers/Auth'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Http/Controllers/Auth/OAuthController.ts'),
+        'export default class OAuthController {}',
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'app/Http/Controllers/Auth/OAuthController.test.ts'),
+        `test('callback', () => {})`,
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'modules/blog/app/Http/Controllers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'modules/blog/app/Http/Controllers/BlogController.ts'),
+        'export default class BlogController {}',
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'modules/blog/app/Http/Controllers/BlogController.test.ts'),
+        `test('index', () => {})`,
+        'utf8',
+      )
+
+      const files = await discoverControllerFiles(workspace.dir)
+
+      expect(files).toHaveLength(2)
+      expect(files.some(f => f.endsWith('.test.ts'))).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('excludes co-located test files from model discovery', async () => {
+    const workspace = await createTempWorkspace('guren-cli-discovery-model-tests-')
+
+    try {
+      await mkdir(join(workspace.dir, 'app/Models'), { recursive: true })
+      await writeFile(join(workspace.dir, 'app/Models/User.ts'), 'export class User {}', 'utf8')
+      await writeFile(join(workspace.dir, 'app/Models/User.test.ts'), `test('user', () => {})`, 'utf8')
+
+      const files = await discoverModelFiles(workspace.dir)
+
+      expect(files).toHaveLength(1)
+      expect(files[0]!.endsWith('User.ts')).toBe(true)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('does not error when modules/ is absent', async () => {
     const workspace = await createTempWorkspace('guren-cli-discovery-modules-absent-')
 
