@@ -23,7 +23,8 @@ export interface SessionStore {
    * Optional: refresh an existing session's TTL without rewriting its data.
    * The middleware uses this for unchanged sessions (rolling expiry); stores
    * that omit it fall back to a full `write`. Refreshing a session that no
-   * longer exists must be a no-op, not a resurrection.
+   * longer exists — including one that has expired but not yet been swept
+   * from storage — must be a no-op, not a resurrection.
    */
   touch?(id: string, ttlSeconds: number): Promise<void>
 }
@@ -94,6 +95,14 @@ export interface Session {
   forget(key: string): void
   flush(): void
   all(): SessionData
+  /**
+   * Rotate the session id (call after login to mitigate session fixation).
+   * The new id is persisted and the old one destroyed at request end. Known
+   * limitation shared by every multi-process store: a concurrent request
+   * still carrying the old cookie can re-persist the old id afterwards; the
+   * resurrected row holds only pre-rotation data (no auth state), so
+   * fixation does not escalate, but the row can linger until it expires.
+   */
   regenerate(): void
   invalidate(): void
   flash(key: string, value: unknown): void
@@ -210,9 +219,7 @@ class SessionImpl implements Session {
    * every request carrying a session would persist unconditionally.
    */
   ageFlashData(): void {
-    const hadFlash =
-      Object.keys(this._flash.new).length > 0 ||
-      Object.keys(this._flash.old).length > 0
+    const hadFlash = this.hasFlash()
     this._flash.old = { ...this._flash.new }
     this._flash.new = {}
     if (hadFlash) {
@@ -239,17 +246,18 @@ class SessionImpl implements Session {
   }
 
   private hasContent(): boolean {
+    return Object.keys(this.data).length > 0 || this.hasFlash()
+  }
+
+  private hasFlash(): boolean {
     return (
-      Object.keys(this.data).length > 0 ||
       Object.keys(this._flash.new).length > 0 ||
       Object.keys(this._flash.old).length > 0
     )
   }
 
   snapshot(): SessionData {
-    const hasFlash =
-      Object.keys(this._flash.new).length > 0 ||
-      Object.keys(this._flash.old).length > 0
+    const hasFlash = this.hasFlash()
     return {
       ...this.data,
       ...(hasFlash ? { _flash: { new: { ...this._flash.new }, old: { ...this._flash.old } } } : {}),
