@@ -4,7 +4,6 @@ import { parse } from '@babel/parser'
 import type { ClassDeclaration } from '@babel/types'
 import { consola } from 'consola'
 import {
-  discoverModelFiles,
   discoverControllerFiles,
   discoverResourceFiles,
   discoverPolicyFiles,
@@ -16,9 +15,9 @@ import {
   moduleNameFromRelPath,
 } from './discovery'
 import {
-  parseModelFile,
   extractClassDeclaration,
-  type ModelInfo,
+  discoverParsedModels,
+  type DiscoveredModel,
   type ModelRelationship,
 } from './model-parser'
 import { loadRouteDefinitions, DEFAULT_ROUTES_FILE } from './load-routes'
@@ -27,9 +26,8 @@ import {
   escapeMarkdownTableCell,
   type ContextRoute,
 } from './context-route'
-import { extractInertiaPageRefs, resolveInertiaPageFile } from './inertia-pages'
+import { extractInertiaPageRefs, describeInertiaPage } from './inertia-pages'
 import { scanDocs, extractDocsTags, buildEntityDocIndex } from './docs-index'
-import { extractPageProps } from './page-props-extractor'
 import { parseSchemaTableColumns } from './schema-parser'
 
 export interface EntityPage {
@@ -90,22 +88,6 @@ export class EntityResolutionError extends Error {
     super(message)
     this.name = 'EntityResolutionError'
   }
-}
-
-interface DiscoveredModel {
-  info: ModelInfo
-  relPath: string
-  module: string | null
-}
-
-async function discoverParsedModels(cwd: string): Promise<DiscoveredModel[]> {
-  const files = await discoverModelFiles(cwd)
-  const parsed = await Promise.all(files.map((file) => parseModelFile(file)))
-  return parsed.flatMap((info, index) => {
-    if (!info) return []
-    const relPath = toPosixRelative(cwd, files[index])
-    return [{ info, relPath, module: moduleNameFromRelPath(relPath) }]
-  })
 }
 
 function resolveEntity(
@@ -178,23 +160,7 @@ function extractControllerActions(source: string): string[] {
 }
 
 async function resolvePages(cwd: string, pageIds: string[]): Promise<EntityPage[]> {
-  return Promise.all(
-    [...pageIds].sort().map(async (id) => {
-      const filePath = await resolveInertiaPageFile(cwd, id)
-      if (!filePath) return { id }
-
-      let props: string | undefined
-      try {
-        const extracted = await extractPageProps(resolve(cwd, filePath), id)
-        // Props types can span lines; collapse whitespace for one-line rendering.
-        props = extracted.rawType?.replace(/\s+/g, ' ').trim()
-      } catch {
-        // Unparsable page — still list it, just without props.
-      }
-
-      return { id, filePath, props }
-    }),
-  )
+  return Promise.all([...pageIds].sort().map((id) => describeInertiaPage(cwd, id)))
 }
 
 export async function generateEntityContext(

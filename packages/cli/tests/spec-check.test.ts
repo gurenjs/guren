@@ -1,6 +1,6 @@
 import { mkdir, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test'
 import { runSpecCheck } from '../src/spec-check'
 import { writeSpecArtifacts } from '../src/spec-generate'
 import { createTempWorkspace, type TempWorkspace } from './helpers'
@@ -43,6 +43,14 @@ export class Post extends defineModel(posts) {}
     expect(await runSpecCheck({ cwd: workspace.dir })).toEqual([])
   })
 
+  // Mutating tests below restore green here, so order stays irrelevant
+  afterEach(async () => {
+    const { directoryExists } = await import('../src/discovery')
+    if (await directoryExists(join(workspace.dir, 'docs/spec'))) {
+      await writeSpecArtifacts({ cwd: workspace.dir })
+    }
+  })
+
   it('passes when committed views match a fresh regeneration', async () => {
     await writeSpecArtifacts({ cwd: workspace.dir })
 
@@ -70,9 +78,6 @@ export class Post extends defineModel(posts) {}
 
     expect(er?.status).toBe('fail')
     expect(er?.suggestion).toContain('spec:generate')
-
-    // Regenerate to restore green for the following tests
-    await writeSpecArtifacts({ cwd: workspace.dir })
   })
 
   it('fails when a committed view is missing', async () => {
@@ -83,8 +88,6 @@ export class Post extends defineModel(posts) {}
 
     expect(er?.status).toBe('fail')
     expect(er?.message).toContain('missing')
-
-    await writeSpecArtifacts({ cwd: workspace.dir })
   })
 
   it('skips regeneration under --changed when nothing spec-relevant changed', async () => {
@@ -96,12 +99,25 @@ export class Post extends defineModel(posts) {}
     expect(results).toEqual([])
   })
 
-  it('runs under --changed when a spec source changed', async () => {
+  it('regenerates only the views whose sources changed', async () => {
     const results = await runSpecCheck({
       cwd: workspace.dir,
       changedFiles: new Set(['db/schema.ts']),
     })
 
-    expect(results.length).toBeGreaterThan(0)
+    const keys = results.map((r) => r.key)
+    // db/schema.ts feeds er.md (and modules.md via the any-source rule),
+    // but not the screens view
+    expect(keys).toContain('spec-drift:er.md')
+    expect(keys).not.toContain('spec-drift:screens.md')
+  })
+
+  it('re-verifies a view when its committed file itself changed', async () => {
+    const results = await runSpecCheck({
+      cwd: workspace.dir,
+      changedFiles: new Set(['docs/spec/screens.md']),
+    })
+
+    expect(results.map((r) => r.key)).toEqual(['spec-drift:screens.md'])
   })
 })

@@ -76,6 +76,66 @@ export const invoices = pgTable('invoices', { id: serial('id') })
     }
   })
 
+  it('recognizes aliased and namespace-qualified table factories', async () => {
+    const workspace = await createTempWorkspace('guren-cli-schema-alias-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'db/schema.ts'),
+        `import { pgTable as table, serial } from 'drizzle-orm/pg-core'
+import * as p from 'drizzle-orm/pg-core'
+
+export const users = table('users', { id: serial('id') })
+export const posts = p.pgTable('posts', { id: serial('id') })
+`,
+        'utf8',
+      )
+
+      const tables = await parseSchemaTables(workspace.dir)
+
+      expect(tables.map((t) => t.identifier).sort()).toEqual(['posts', 'users'])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('extracts references from block-bodied arrows and function expressions', async () => {
+    const workspace = await createTempWorkspace('guren-cli-schema-refs-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'db/schema.ts'),
+        `import { pgTable, serial, integer, text } from 'drizzle-orm/pg-core'
+
+export const users = pgTable('users', { id: serial('id') })
+
+export const posts = pgTable('posts', {
+  id: serial('id'),
+  authorId: integer('author_id').references(() => { return users.id }),
+  editorId: integer('editor_id').references(function () { return users.id }),
+  tags: text('tags').array(),
+})
+`,
+        'utf8',
+      )
+
+      const tables = await parseSchemaTables(workspace.dir)
+      const posts = tables.find((t) => t.identifier === 'posts')!
+
+      expect(posts.columns.find((c) => c.name === 'authorId')?.references).toEqual({
+        table: 'users',
+        column: 'id',
+      })
+      expect(posts.columns.find((c) => c.name === 'editorId')?.references).toEqual({
+        table: 'users',
+        column: 'id',
+      })
+      expect(posts.columns.find((c) => c.name === 'tags')?.type).toBe('text[]')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('tolerates missing and unparsable schema files', async () => {
     const workspace = await createTempWorkspace('guren-cli-schema-missing-')
     try {

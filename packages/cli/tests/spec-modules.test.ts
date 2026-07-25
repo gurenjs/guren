@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
 import { generateModulesSpec } from '../src/spec-modules'
-import { SPEC_BANNER } from '../src/spec-generate'
+import { SPEC_BANNER } from '../src/spec-artifact'
 import { createTempWorkspace, type TempWorkspace } from './helpers'
 
 describe('modules spec (no modules directory)', () => {
@@ -160,5 +160,40 @@ export const stock = [Invoice, Payment]
     const second = await generateModulesSpec(workspace.dir)
 
     expect(second.content).toBe(first.content)
+  })
+})
+
+describe('modules spec (side-effect imports)', () => {
+  let workspace: TempWorkspace
+
+  beforeAll(async () => {
+    workspace = await createTempWorkspace('guren-cli-spec-modules-sideeffect-')
+    const dir = workspace.dir
+
+    await mkdir(join(dir, 'modules/alpha'), { recursive: true })
+    await mkdir(join(dir, 'modules/beta'), { recursive: true })
+    await writeFile(join(dir, 'package.json'), '{}', 'utf8')
+
+    // The only link between the two modules: a side-effect import, which has
+    // no `from` clause for the specifier pattern to anchor on.
+    await writeFile(
+      join(dir, 'modules/alpha/boot.ts'),
+      "import '@/modules/beta/setup'\n\nexport const booted = true\n",
+      'utf8',
+    )
+    await writeFile(join(dir, 'modules/beta/setup.ts'), 'export const setup = true\n', 'utf8')
+  })
+
+  afterAll(async () => {
+    await workspace.cleanup()
+  })
+
+  it('counts a side-effect import as a dependency edge', async () => {
+    const { content } = await generateModulesSpec(workspace.dir)
+
+    expect(content).toContain('  m_alpha --> m_beta')
+
+    const alphaSection = content.slice(content.indexOf('## alpha'))
+    expect(alphaSection).toContain('Depends on: beta')
   })
 })

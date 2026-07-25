@@ -1,10 +1,42 @@
 import { resolve } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { parse } from '@babel/parser'
-import type { Expression, CallExpression } from '@babel/types'
+import type { Expression, CallExpression, ObjectExpression, Statement } from '@babel/types'
 import { listAppRoots } from './discovery'
 
 const TABLE_FACTORIES = new Set(['pgTable', 'sqliteTable', 'mysqlTable'])
+
+/**
+ * Local names the table factories are imported under — covers
+ * `import { pgTable as table }` aliases. Namespace-qualified calls
+ * (`p.pgTable(...)`) are matched by property name instead.
+ */
+function collectFactoryAliases(body: Statement[]): Set<string> {
+  const aliases = new Set(TABLE_FACTORIES)
+  for (const node of body) {
+    if (node.type !== 'ImportDeclaration') continue
+    for (const specifier of node.specifiers) {
+      if (
+        specifier.type === 'ImportSpecifier'
+        && specifier.imported.type === 'Identifier'
+        && TABLE_FACTORIES.has(specifier.imported.name)
+      ) {
+        aliases.add(specifier.local.name)
+      }
+    }
+  }
+  return aliases
+}
+
+function isTableFactoryCall(call: CallExpression, aliases: Set<string>): boolean {
+  const callee = call.callee
+  if (callee.type === 'Identifier') return aliases.has(callee.name)
+  return (
+    callee.type === 'MemberExpression'
+    && callee.property.type === 'Identifier'
+    && TABLE_FACTORIES.has(callee.property.name)
+  )
+}
 
 export interface SchemaColumnReference {
   /** Exported table identifier the FK points at, e.g. `users`. */
@@ -58,39 +90,89 @@ function unwrapColumnChain(
   return { type: undefined, methods }
 }
 
-/** `.references(() => users.id)` → `{ table: 'users', column: 'id' }`. */
+/**
+ * `.references(() => users.id)` → `{ table: 'users', column: 'id' }`.
+ * Accepts expression arrows, block-bodied arrows, and plain function
+ * expressions — all valid Drizzle forms.
+ */
 function extractReference(call: CallExpression | undefined): SchemaColumnReference | undefined {
   const arg = call?.arguments[0]
-  if (!arg || arg.type !== 'ArrowFunctionExpression') return undefined
-  const body = arg.body
+  if (!arg || (arg.type !== 'ArrowFunctionExpression' && arg.type !== 'FunctionExpression')) {
+    return undefined
+  }
+
+  let returned: Expression | null = null
+  if (arg.body.type === 'BlockStatement') {
+    for (const statement of arg.body.body) {
+      if (statement.type === 'ReturnStatement' && statement.argument) {
+        returned = statement.argument
+        break
+      }
+    }
+  } else {
+    returned = arg.body
+  }
+
   if (
-    body.type !== 'MemberExpression'
-    || body.object.type !== 'Identifier'
-    || body.property.type !== 'Identifier'
+    !returned
+    || returned.type !== 'MemberExpression'
+    || returned.object.type !== 'Identifier'
+    || returned.property.type !== 'Identifier'
   ) {
     return undefined
   }
-  return { table: body.object.name, column: body.property.name }
+  return { table: returned.object.name, column: returned.property.name }
 }
 
-async function parseSchemaFile(
-  schemaPath: string,
-  module: string | null,
-  tables: SchemaTable[],
-): Promise<void> {
+function columnsFromObject(columnsArg: ObjectExpression): SchemaColumn[] {
+  const columns: SchemaColumn[] = []
+  for (const prop of columnsArg.properties) {
+    if (prop.type !== 'ObjectProperty') continue
+
+    let name: string | undefined
+    if (prop.key.type === 'Identifier') name = prop.key.name
+    else if (prop.key.type === 'StringLiteral') name = prop.key.value
+    if (!name) continue
+
+    if (prop.value.type !== 'CallExpression') {
+      columns.push({ name, notNull: false, primaryKey: false })
+      continue
+    }
+
+    const { type, methods } = unwrapColumnChain(prop.value)
+    columns.push({
+      name,
+      type: type && methods.has('array') ? `${type}[]` : type,
+      notNull: methods.has('notNull'),
+      primaryKey: methods.has('primaryKey'),
+      references: extractReference(methods.get('references')),
+    })
+  }
+  return columns
+}
+
+/**
+ * Known limitation: the table factory's third argument (composite primary
+ * keys / foreign keys declared via `(table) => [...]`) is not parsed —
+ * only column-level `.primaryKey()` and `.references()` chains surface.
+ */
+async function parseSchemaFile(schemaPath: string, module: string | null): Promise<SchemaTable[]> {
   let source: string
   try {
     source = await readFile(schemaPath, 'utf-8')
   } catch {
-    return
+    return []
   }
 
   let ast: ReturnType<typeof parse>
   try {
     ast = parse(source, { sourceType: 'module', plugins: ['typescript'] })
   } catch {
-    return
+    return []
   }
+
+  const aliases = collectFactoryAliases(ast.program.body)
+  const tables: SchemaTable[] = []
 
   for (const node of ast.program.body) {
     const declaration =
@@ -104,43 +186,26 @@ async function parseSchemaFile(
     for (const declarator of declaration.declarations) {
       if (declarator.id.type !== 'Identifier') continue
       if (declarator.init?.type !== 'CallExpression') continue
-
-      const callee = declarator.init.callee
-      if (callee.type !== 'Identifier' || !TABLE_FACTORIES.has(callee.name)) continue
+      if (!isTableFactoryCall(declarator.init, aliases)) continue
 
       const nameArg = declarator.init.arguments[0]
       const tableName = nameArg?.type === 'StringLiteral' ? nameArg.value : undefined
 
-      const columnsArg = declarator.init.arguments.find((arg) => arg.type === 'ObjectExpression')
-      if (!columnsArg || columnsArg.type !== 'ObjectExpression') continue
+      const columnsArg = declarator.init.arguments.find(
+        (arg): arg is ObjectExpression => arg.type === 'ObjectExpression',
+      )
+      if (!columnsArg) continue
 
-      const columns: SchemaColumn[] = []
-      for (const prop of columnsArg.properties) {
-        if (prop.type !== 'ObjectProperty') continue
-
-        let name: string | undefined
-        if (prop.key.type === 'Identifier') name = prop.key.name
-        else if (prop.key.type === 'StringLiteral') name = prop.key.value
-        if (!name) continue
-
-        if (prop.value.type !== 'CallExpression') {
-          columns.push({ name, notNull: false, primaryKey: false })
-          continue
-        }
-
-        const { type, methods } = unwrapColumnChain(prop.value)
-        columns.push({
-          name,
-          type,
-          notNull: methods.has('notNull'),
-          primaryKey: methods.has('primaryKey'),
-          references: extractReference(methods.get('references')),
-        })
-      }
-
-      tables.push({ identifier: declarator.id.name, tableName, columns, module })
+      tables.push({
+        identifier: declarator.id.name,
+        tableName,
+        columns: columnsFromObject(columnsArg),
+        module,
+      })
     }
   }
+
+  return tables
 }
 
 /**
@@ -150,11 +215,11 @@ async function parseSchemaFile(
  * degrade the same way the audit's hidden-column check always has.
  */
 export async function parseSchemaTables(cwd: string): Promise<SchemaTable[]> {
-  const tables: SchemaTable[] = []
-  for (const root of await listAppRoots(cwd)) {
-    await parseSchemaFile(resolve(root.dir, 'db/schema.ts'), root.module, tables)
-  }
-  return tables
+  const roots = await listAppRoots(cwd)
+  const groups = await Promise.all(
+    roots.map((root) => parseSchemaFile(resolve(root.dir, 'db/schema.ts'), root.module)),
+  )
+  return groups.flat()
 }
 
 /**

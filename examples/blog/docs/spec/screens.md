@@ -4,22 +4,22 @@
 
 Derived from `routes/web.ts`, controller `this.inertia(...)` calls, and page components under `resources/js/pages/` — those files are the source of truth, not this document.
 
-Page references are resolved per controller file, so a page lists every route on the controller that renders it, not only the single action it belongs to.
+Page references are attributed to the controller action whose body makes the call, so a page lists only the routes of the action that renders it. A page referenced outside any action keeps a row with an empty Routes cell.
 
 ## Pages (11)
 
 | Page | Props | Routes |
 |------|-------|--------|
 | auth/ForgotPassword | { errors?: RouteErrors<ForgotPasswordBody> & { message?: string } status?: string } | GET /forgot-password → ForgotPasswordController.show, POST /forgot-password → ForgotPasswordController.store |
-| auth/Login | { email?: string errors?: RouteErrors<LoginBody> & { message?: string } } | GET /login → LoginController.show, POST /login → LoginController.store, POST /logout → LoginController.destroy |
-| auth/Register | { errors?: RouteErrors<RegisterBody> & { message?: string } } | GET /register → RegisterController.show, POST /register → RegisterController.store |
-| auth/ResetPassword | { token: string email: string errors?: RouteErrors<ResetPasswordBody> & { message?: string } } | GET /reset-password → ResetPasswordController.show, POST /reset-password → ResetPasswordController.store |
+| auth/Login | { email?: string errors?: RouteErrors<LoginBody> & { message?: string } } | GET /login → LoginController.show |
+| auth/Register | { errors?: RouteErrors<RegisterBody> & { message?: string } } | GET /register → RegisterController.show |
+| auth/ResetPassword | { token: string email: string errors?: RouteErrors<ResetPasswordBody> & { message?: string } } | GET /reset-password → ResetPasswordController.show |
 | auth/VerifyEmail | { status?: string } | GET /verify-email → VerifyEmailController.notice, GET /verify-email/confirm → VerifyEmailController.confirm, POST /verify-email → VerifyEmailController.resend |
 | dashboard/Index | { user?: { id: number; name: string; email: string } \| null } | GET /dashboard → DashboardController.index |
-| posts/Edit | { post: PostFormValues \| null postId: number errors?: RouteErrors<PostFormValues> & { message?: string } } | GET / → PostController.index, GET /posts → PostController.index, GET /posts/:id → PostController.show, GET /posts/:id/edit → PostController.edit, GET /posts/new → PostController.create, PATCH /posts/:id → PostController.update, POST /posts → PostController.store, PUT /posts/:id → PostController.update |
-| posts/Index | PaginatedPageProps<PostResourceData> & {} | GET / → PostController.index, GET /posts → PostController.index, GET /posts/:id → PostController.show, GET /posts/:id/edit → PostController.edit, GET /posts/new → PostController.create, PATCH /posts/:id → PostController.update, POST /posts → PostController.store, PUT /posts/:id → PostController.update |
-| posts/New |  | GET / → PostController.index, GET /posts → PostController.index, GET /posts/:id → PostController.show, GET /posts/:id/edit → PostController.edit, GET /posts/new → PostController.create, PATCH /posts/:id → PostController.update, POST /posts → PostController.store, PUT /posts/:id → PostController.update |
-| posts/Show | { post: PostResourceData } | GET / → PostController.index, GET /posts → PostController.index, GET /posts/:id → PostController.show, GET /posts/:id/edit → PostController.edit, GET /posts/new → PostController.create, PATCH /posts/:id → PostController.update, POST /posts → PostController.store, PUT /posts/:id → PostController.update |
+| posts/Edit | { post: PostFormValues \| null postId: number errors?: RouteErrors<PostFormValues> & { message?: string } } | GET /posts/:id/edit → PostController.edit |
+| posts/Index | PaginatedPageProps<PostResourceData> & {} | GET / → PostController.index, GET /posts → PostController.index |
+| posts/New |  | GET /posts/new → PostController.create |
+| posts/Show | { post: PostResourceData } | GET /posts/:id → PostController.show |
 | profile/Edit | { profile: { name: string; email: string } errors?: RouteErrors<ProfileFormValues> status?: string } | GET /profile → ProfileController.edit, PATCH /profile → ProfileController.update, PUT /profile → ProfileController.update |
 
 ## Unrouted pages (1)

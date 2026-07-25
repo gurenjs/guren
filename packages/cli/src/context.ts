@@ -13,11 +13,11 @@ import {
   discoverPolicyFiles,
   classNameFromPath,
   readIfExists,
-  collectFiles,
   excludeBarrelFiles,
 } from './discovery'
 import { parseModelFile, type ModelInfo } from './model-parser'
 import { loadContextRoutes, escapeMarkdownTableCell, type ContextRoute } from './context-route'
+import { listInertiaPageIds } from './inertia-pages'
 
 export interface ProjectContext {
   framework: { name: string; version: string }
@@ -62,16 +62,6 @@ export async function generateContext(options: ContextOptions = {}): Promise<Pro
     return models.sort((a, b) => a.className.localeCompare(b.className))
   }
 
-  const collectPages = async (): Promise<string[]> => {
-    const pagesDir = resolve(cwd, 'resources/js/pages')
-    const pageExts = new Set(['.tsx', '.jsx', '.ts', '.js'])
-    const pageFiles = await collectFiles(pagesDir, pageExts)
-    return pageFiles
-      .map((f) => relative(pagesDir, f).replace(/\.(tsx|jsx|ts|js)$/, ''))
-      .filter((p) => !p.startsWith('contracts'))
-      .sort()
-  }
-
   const toNames = async (discover: (root: string) => Promise<string[]>) => {
     const files = excludeBarrelFiles(await discover(cwd))
     return files.map(classNameFromPath).sort()
@@ -94,7 +84,7 @@ export async function generateContext(options: ContextOptions = {}): Promise<Pro
   ] = await Promise.all([
     collectModels(),
     loadContextRoutes(cwd, options.routesFile),
-    collectPages(),
+    listInertiaPageIds(cwd),
     toNames(discoverControllerFiles),
     toNames(discoverResourceFiles),
     toNames(discoverEventFiles),

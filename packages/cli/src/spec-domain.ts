@@ -1,6 +1,5 @@
-import { discoverModelFiles, toPosixRelative, moduleNameFromRelPath } from './discovery'
-import { parseModelFile, type ModelInfo, type ModelRelationship } from './model-parser'
-import { SPEC_BANNER, compareStrings, type SpecArtifact } from './spec-generate'
+import { discoverParsedModels, type DiscoveredModel, type ModelRelationship } from './model-parser'
+import { SPEC_BANNER, compareStrings, mermaidToken, type SpecArtifact } from './spec-artifact'
 
 const RELATIONSHIP_CARDINALITY: Record<ModelRelationship['type'], [string, string]> = {
   belongsTo: ['*', '1'],
@@ -12,10 +11,15 @@ const RELATIONSHIP_CARDINALITY: Record<ModelRelationship['type'], [string, strin
   morphTo: ['*', '1'],
 }
 
-interface DomainModel {
-  info: ModelInfo
-  relPath: string
-  module: string | null
+function classLines(model: DiscoveredModel, indent: string): string[] {
+  const name = mermaidToken(model.info.className)
+  const traits = [
+    model.info.usesAuth ? 'Authenticatable' : undefined,
+    model.info.hasSoftDeletes ? 'SoftDeletes' : undefined,
+  ].filter((trait): trait is string => trait !== undefined)
+
+  if (traits.length === 0) return [`${indent}class ${name}`]
+  return [`${indent}class ${name} {`, ...traits.map((trait) => `${indent}  <<${trait}>>`), `${indent}}`]
 }
 
 /**
@@ -24,15 +28,9 @@ interface DomainModel {
  * answers one question.
  */
 export async function generateDomainSpec(cwd: string): Promise<SpecArtifact> {
-  const files = await discoverModelFiles(cwd)
-  const parsed = await Promise.all(files.map((file) => parseModelFile(file)))
-  const models: DomainModel[] = parsed
-    .flatMap((info, index) => {
-      if (!info) return []
-      const relPath = toPosixRelative(cwd, files[index])
-      return [{ info, relPath, module: moduleNameFromRelPath(relPath) }]
-    })
-    .sort((a, b) => compareStrings(a.info.className, b.info.className))
+  const models = (await discoverParsedModels(cwd)).sort(
+    (a, b) => compareStrings(a.info.className, b.info.className) || compareStrings(a.relPath, b.relPath),
+  )
 
   const knownClasses = new Set(models.map((m) => m.info.className))
 
@@ -47,34 +45,25 @@ export async function generateDomainSpec(cwd: string): Promise<SpecArtifact> {
     return { fileName: 'domain.md', content: lines.join('\n') }
   }
 
-  lines.push('```mermaid', 'classDiagram')
-
-  const moduleNames = [...new Set(models.map((m) => m.module).filter((m): m is string => m !== null))].sort()
-  const rootModels = models.filter((m) => m.module === null)
-
-  const renderClass = (model: DomainModel, indent: string): void => {
-    const traits = [
-      model.info.usesAuth ? 'Authenticatable' : undefined,
-      model.info.hasSoftDeletes ? 'SoftDeletes' : undefined,
-    ].filter((t): t is string => t !== undefined)
-    if (traits.length === 0) {
-      lines.push(`${indent}class ${model.info.className}`)
-      return
-    }
-    lines.push(`${indent}class ${model.info.className} {`)
-    for (const trait of traits) {
-      lines.push(`${indent}  <<${trait}>>`)
-    }
-    lines.push(`${indent}}`)
+  // One grouping, three consumers: root classes, module namespaces, edges.
+  const byModule = new Map<string | null, DiscoveredModel[]>()
+  for (const model of models) {
+    const list = byModule.get(model.module) ?? []
+    list.push(model)
+    byModule.set(model.module, list)
   }
+  const moduleNames = [...byModule.keys()]
+    .filter((name): name is string => name !== null)
+    .sort(compareStrings)
 
-  for (const model of rootModels) {
-    renderClass(model, '  ')
+  lines.push('```mermaid', 'classDiagram')
+  for (const model of byModule.get(null) ?? []) {
+    lines.push(...classLines(model, '  '))
   }
   for (const moduleName of moduleNames) {
-    lines.push(`  namespace ${moduleName} {`)
-    for (const model of models.filter((m) => m.module === moduleName)) {
-      renderClass(model, '    ')
+    lines.push(`  namespace ${mermaidToken(moduleName)} {`)
+    for (const model of byModule.get(moduleName) ?? []) {
+      lines.push(...classLines(model, '    '))
     }
     lines.push('  }')
   }
@@ -84,11 +73,10 @@ export async function generateDomainSpec(cwd: string): Promise<SpecArtifact> {
       if (!rel.relatedModel || !knownClasses.has(rel.relatedModel)) continue
       const [from, to] = RELATIONSHIP_CARDINALITY[rel.type]
       lines.push(
-        `  ${model.info.className} "${from}" --> "${to}" ${rel.relatedModel} : ${rel.name}`,
+        `  ${mermaidToken(model.info.className)} "${from}" --> "${to}" ${mermaidToken(rel.relatedModel)} : ${rel.name}`,
       )
     }
   }
-
   lines.push('```', '')
 
   lines.push('## Models', '')
