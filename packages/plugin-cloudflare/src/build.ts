@@ -1,5 +1,5 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { relative, resolve, sep } from 'node:path'
+import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 type PathLike = string | URL
@@ -10,6 +10,11 @@ type ManifestEntry = {
 }
 
 type Manifest = Record<string, ManifestEntry>
+
+interface PackageJsonLike {
+  name?: string
+  scripts?: Record<string, string>
+}
 
 export interface BuildCloudflareOutputOptions {
   /** App root directory. Defaults to the current working directory. */
@@ -45,15 +50,23 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   const clientEntryKey = options.clientEntryKey ?? 'resources/js/app.tsx'
   const ssrEntryKey = options.ssrEntryKey ?? 'resources/js/ssr.tsx'
 
+  if (out === root || root.startsWith(out + sep)) {
+    throw new Error(
+      `Cloudflare build: outputDir (${out}) must be a directory outside or below the app root, never the root itself — it is deleted on every build.`,
+    )
+  }
+
+  const packageJson = readPackageJson(root)
+
   if (!options.skipAppBuild) {
-    runAppBuild(root)
+    runAppBuild(root, packageJson.scripts ?? {})
   }
 
   if (!existsSync(appEntry)) {
     throw new Error(`Cloudflare build: app entry not found at ${appEntry}. Pass "appEntry" if your Application lives elsewhere.`)
   }
 
-  const ssrImport = await resolveSsrImport(root, ssrDir, ssrEntryKey)
+  const ssrImport = await resolveSsrImport(ssrDir, ssrEntryKey)
   const assetEnv = resolveClientAssetEnv(root, clientEntryKey)
 
   if (existsSync(out)) {
@@ -65,17 +78,36 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
     cpSync(publicDir, resolve(out, 'assets'), { recursive: true })
   }
 
+  // Built assets are emitted with the Guren Vite plugin's derived base
+  // `/public/assets/` (chunk imports, CSS urls, preloads self-reference that
+  // prefix). Vercel resolves it with a `/public/(.*) -> /$1` rewrite; Workers
+  // Static Assets has no rewrites, so mirror the built-assets directory under
+  // the base URL path as well: the root copy serves `/assets/*`, this copy
+  // serves `/public/assets/*`.
+  const clientAssetsDir = resolve(publicDir, 'assets')
+  if (existsSync(clientAssetsDir)) {
+    cpSync(clientAssetsDir, resolve(out, 'assets/public/assets'), { recursive: true })
+  }
+
   writeFileSync(resolve(out, 'worker.js'), renderWorkerModule({ out, appEntry, ssrImport, assetEnv }))
 
-  scaffoldWranglerConfig(root, out)
+  scaffoldWranglerConfig(root, out, packageJson.name)
 }
 
-function runAppBuild(root: string): void {
+function readPackageJson(root: string): PackageJsonLike {
   const packageJsonPath = resolve(root, 'package.json')
-  const scripts = existsSync(packageJsonPath)
-    ? ((JSON.parse(readFileSync(packageJsonPath, 'utf8')) as { scripts?: Record<string, string> }).scripts ?? {})
-    : {}
+  if (!existsSync(packageJsonPath)) {
+    return {}
+  }
 
+  try {
+    return JSON.parse(readFileSync(packageJsonPath, 'utf8')) as PackageJsonLike
+  } catch {
+    return {}
+  }
+}
+
+function runAppBuild(root: string, scripts: Record<string, string>): void {
   if (!scripts.build) {
     throw new Error(
       'Cloudflare build: no "build" script found in package.json. Add one (codegen + vite build + vite build --ssr) or pass --skip-app-build after building manually.',
@@ -99,7 +131,7 @@ interface SsrImport {
   file: string
 }
 
-async function resolveSsrImport(root: string, ssrDir: string, ssrEntryKey: string): Promise<SsrImport | undefined> {
+async function resolveSsrImport(ssrDir: string, ssrEntryKey: string): Promise<SsrImport | undefined> {
   const manifest = loadManifest(
     resolve(ssrDir, '.vite/manifest.json'),
     resolve(ssrDir, 'manifest.json'),
@@ -114,6 +146,11 @@ async function resolveSsrImport(root: string, ssrDir: string, ssrEntryKey: strin
   }
 
   const file = resolve(ssrDir, entryFile)
+  if (!file.startsWith(ssrDir + sep)) {
+    throw new Error(
+      `Cloudflare build: SSR manifest entry "${entryFile}" escapes the SSR output directory ${ssrDir}.`,
+    )
+  }
   if (!existsSync(file)) {
     throw new Error(`Cloudflare build: SSR manifest points at ${file}, but the file does not exist.`)
   }
@@ -168,11 +205,11 @@ function renderWorkerModule(input: {
   if (input.ssrImport) {
     lines.push(
       "import { setInertiaSsrRenderer } from '@guren/core'",
-      `import * as ssrModule from '${importSpecifier(input.out, input.ssrImport.file)}'`,
+      `import * as ssrModule from ${JSON.stringify(importSpecifier(input.out, input.ssrImport.file))}`,
     )
   }
 
-  lines.push(`import app from '${importSpecifier(input.out, input.appEntry)}'`, '')
+  lines.push(`import app from ${JSON.stringify(importSpecifier(input.out, input.appEntry))}`, '')
 
   if (input.assetEnv.entry) {
     lines.push(`process.env.GUREN_INERTIA_ENTRY = ${JSON.stringify(input.assetEnv.entry)}`)
@@ -194,28 +231,32 @@ function renderWorkerModule(input: {
 }
 
 function importSpecifier(fromDir: string, target: string): string {
-  const specifier = relative(fromDir, target).split(sep).join('/')
+  const rel = relative(fromDir, target)
+  if (isAbsolute(rel)) {
+    throw new Error(
+      `Cloudflare build: ${target} cannot be imported relative to ${fromDir} (different drive or root?). Keep the app, SSR output, and outputDir on the same volume.`,
+    )
+  }
+
+  const specifier = rel.split(sep).join('/')
   return specifier.startsWith('.') ? specifier : `./${specifier}`
 }
 
-function scaffoldWranglerConfig(root: string, out: string): void {
+function scaffoldWranglerConfig(root: string, out: string, packageName: string | undefined): void {
   const configPath = resolve(root, 'wrangler.jsonc')
   if (existsSync(configPath)) {
     return
   }
 
-  const packageJsonPath = resolve(root, 'package.json')
-  const packageName = existsSync(packageJsonPath)
-    ? ((JSON.parse(readFileSync(packageJsonPath, 'utf8')) as { name?: string }).name ?? 'guren-app')
-    : 'guren-app'
-  const appName = packageName.replace(/^@[^/]+\//, '')
+  const appName = (packageName ?? 'guren-app').replace(/^@[^/]+\//, '')
+  const outRelative = relative(root, out).split(sep).join('/')
 
   const config = {
     name: appName,
-    main: `${relative(root, out).split(sep).join('/')}/worker.js`,
+    main: `${outRelative}/worker.js`,
     compatibility_date: new Date().toISOString().slice(0, 10),
     compatibility_flags: ['nodejs_compat'],
-    assets: { directory: `${relative(root, out).split(sep).join('/')}/assets` },
+    assets: { directory: `${outRelative}/assets` },
     d1_databases: [
       {
         binding: 'DB',

@@ -61,6 +61,22 @@ describe('TestApp.fromWorkers', () => {
     await expect(app.workers.waitUntilPromises[0]).resolves.toBeUndefined()
   })
 
+  it('keeps the workers context across builder-method copies', async () => {
+    const app = TestApp.fromWorkers({
+      fetch(_request, _env, ctx) {
+        ctx.waitUntil(Promise.resolve('done'))
+        return new Response('ok')
+      },
+    })
+
+    const chained = app.actingAs({ id: 1 }).withHeaders({ 'X-Extra': '1' })
+
+    await chained.get('/')
+
+    expect(chained.workers).toBe(app.workers)
+    expect(app.workers.waitUntilPromises).toHaveLength(1)
+  })
+
   it('defaults env to an empty object when options.env is omitted', async () => {
     let receivedEnv: unknown
 

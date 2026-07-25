@@ -103,6 +103,41 @@ describe('createWorkersHandler', () => {
     expect(getWorkersEnv<TestEnv>()).toBe(secondEnv)
   })
 
+  test('should reject every concurrent request sharing a failed boot, then recover on retry', async () => {
+    let bootCalls = 0
+    const bootDeferred = deferred<void>()
+    const app: WorkersAppLike = {
+      boot() {
+        bootCalls += 1
+        return bootCalls === 1 ? bootDeferred.promise : Promise.resolve()
+      },
+      fetch() {
+        return new Response('ok')
+      },
+    }
+    const handler = createWorkersHandler(app)
+    const ctx = createExecutionContext()
+    const failedEnv = { DB: 'failed-db' }
+    const retryEnv = { DB: 'retry-db' }
+
+    const first = handler.fetch(new Request('https://example.com/one'), failedEnv, ctx)
+    const second = handler.fetch(new Request('https://example.com/two'), failedEnv, ctx)
+
+    bootDeferred.reject(new Error('boot failed'))
+    const settled = await Promise.allSettled([first, second])
+
+    expect(settled[0].status).toBe('rejected')
+    expect(settled[1].status).toBe('rejected')
+    expect((settled[0] as PromiseRejectedResult).reason.message).toBe('boot failed')
+    expect((settled[1] as PromiseRejectedResult).reason.message).toBe('boot failed')
+
+    const response = await handler.fetch(new Request('https://example.com/three'), retryEnv, ctx)
+
+    expect(bootCalls).toBe(2)
+    expect(await response.text()).toBe('ok')
+    expect(getWorkersEnv<TestEnv>()).toBe(retryEnv)
+  })
+
   test('should pass each request its own env and ctx through to app.fetch', async () => {
     const app: WorkersAppLike = {
       async boot() {},

@@ -312,10 +312,21 @@ field (per the plugin contract):
    resolved from `.guren/ssr/.vite/manifest.json`, the same lookup
    `buildVercelOutput` performs, never a hardcoded filename — registers the
    SSR renderer via `setInertiaSsrRenderer()`, and exports the handler from
-   the single `createWorkersHandler(app)` call site (§1). The build fails
-   if the SSR manifest entry or its `render` export is missing. See below
-   for why this differs from Vercel's approach.
+   the single `createWorkersHandler(app)` call site (§1). ~~The build fails
+   if the SSR manifest entry or its `render` export is missing.~~
+   **Amended in implementation:** a missing SSR manifest (no SSR build at
+   all) produces a CSR-only worker with a warning — SSR is optional and
+   API-only apps have none. A *present but broken* SSR build still fails
+   hard: a manifest entry that escapes the SSR directory, points at a
+   missing file, or resolves to a module without a `render`/default export
+   aborts the build. See below for why this differs from Vercel's approach.
 3. Copies `public/` + Vite client output into `.cloudflare/assets/`.
+   **Added in implementation:** built client assets are additionally
+   mirrored under `.cloudflare/assets/public/assets/` — the Guren Vite
+   plugin derives base `/public/assets/` from its `public/assets` outDir,
+   so emitted chunk imports/preloads self-reference that prefix. Vercel
+   resolves it with a `/public/(.*) → /$1` rewrite; Workers Static Assets
+   has no rewrites, so both URL spaces must exist as real files.
 4. Scaffolds `wrangler.jsonc` on first run (never overwrites):
 
 ```jsonc

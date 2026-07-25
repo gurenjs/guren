@@ -360,6 +360,8 @@ export class TestApp {
   private fetchFn: (request: Request) => Promise<Response>
   private defaultHeaders: Record<string, string> = {}
   private authenticatedUser: unknown = null
+  /** Present when created via fromWorkers(); propagated across builder copies. */
+  workers?: WorkersTestContext
 
   private constructor(
     fetchFn: (request: Request) => Promise<Response>,
@@ -458,11 +460,9 @@ export class TestApp {
       options.baseUrl,
     )
 
-    // Constructor stays private; a single type assertion here attaches the
-    // `workers` context per the documented return type.
-    return Object.assign(app, { workers: { waitUntilPromises } }) as TestApp & {
-      workers: WorkersTestContext
-    }
+    app.workers = { waitUntilPromises }
+    // The assertion only narrows the optional `workers` field to required.
+    return app as TestApp & { workers: WorkersTestContext }
   }
 
   /**
@@ -475,6 +475,7 @@ export class TestApp {
     const copy = new TestApp(this.fetchFn, this.baseUrl)
     copy.defaultHeaders = { ...this.defaultHeaders }
     copy.authenticatedUser = user
+    copy.workers = this.workers
     return copy
   }
 
@@ -516,6 +517,7 @@ export class TestApp {
       'X-XSRF-TOKEN': decodeURIComponent(xsrfToken),
     }
     copy.authenticatedUser = this.authenticatedUser
+    copy.workers = this.workers
     return copy
   }
 
@@ -540,6 +542,7 @@ export class TestApp {
       ...headers,
     }
     copy.authenticatedUser = this.authenticatedUser
+    copy.workers = this.workers
     return copy
   }
 

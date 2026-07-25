@@ -17,6 +17,7 @@ function scaffoldApp(root: string, options: { ssr?: boolean; renderExport?: stri
 
   mkdirSync(join(root, 'public/assets/.vite'), { recursive: true })
   writeFileSync(join(root, 'public/robots.txt'), 'User-agent: *\n')
+  writeFileSync(join(root, 'public/assets/app-Abc123.js'), 'console.log("client")\n')
   writeJson(join(root, 'public/assets/.vite/manifest.json'), {
     'resources/js/app.tsx': { file: 'app-Abc123.js', css: ['app-Def456.css'] },
   })
@@ -49,8 +50,8 @@ describe('buildCloudflareOutput', () => {
     const worker = readFileSync(join(root, '.cloudflare/worker.js'), 'utf8')
     expect(worker).toContain("import { createWorkersHandler } from '@guren/plugin-cloudflare'")
     expect(worker).toContain("import { setInertiaSsrRenderer } from '@guren/core'")
-    expect(worker).toContain("import * as ssrModule from '../.guren/ssr/ssr-Xyz789.js'")
-    expect(worker).toContain("import app from '../src/app.ts'")
+    expect(worker).toContain('import * as ssrModule from "../.guren/ssr/ssr-Xyz789.js"')
+    expect(worker).toContain('import app from "../src/app.ts"')
     expect(worker).toContain('process.env.GUREN_INERTIA_ENTRY = "/assets/app-Abc123.js"')
     expect(worker).toContain('process.env.GUREN_INERTIA_STYLES = "/assets/app-Def456.css"')
     expect(worker).toContain('setInertiaSsrRenderer(ssrModule.render ?? ssrModule.default)')
@@ -63,7 +64,38 @@ describe('buildCloudflareOutput', () => {
     await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
 
     expect(readFileSync(join(root, '.cloudflare/assets/robots.txt'), 'utf8')).toContain('User-agent')
-    expect(existsSync(join(root, '.cloudflare/assets/assets/app-Abc123.js'))).toBe(false)
+    expect(existsSync(join(root, '.cloudflare/assets/assets/app-Abc123.js'))).toBe(true)
+  })
+
+  test('should mirror built assets under the /public/assets base URL path', async () => {
+    scaffoldApp(root)
+
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+
+    expect(existsSync(join(root, '.cloudflare/assets/public/assets/app-Abc123.js'))).toBe(true)
+  })
+
+  test('should reject an SSR manifest entry that escapes the SSR directory', async () => {
+    scaffoldApp(root)
+    writeJson(join(root, '.guren/ssr/.vite/manifest.json'), {
+      'resources/js/ssr.tsx': { file: '../../outside.js' },
+    })
+
+    await expect(buildCloudflareOutput({ rootDir: root, skipAppBuild: true })).rejects.toThrow(
+      /escapes the SSR output directory/,
+    )
+  })
+
+  test('should refuse an outputDir that is or contains the app root', async () => {
+    scaffoldApp(root)
+
+    await expect(
+      buildCloudflareOutput({ rootDir: root, outputDir: root, skipAppBuild: true }),
+    ).rejects.toThrow(/never the root itself/)
+    await expect(
+      buildCloudflareOutput({ rootDir: root, outputDir: join(root, '..'), skipAppBuild: true }),
+    ).rejects.toThrow(/never the root itself/)
+    expect(existsSync(join(root, 'src/app.ts'))).toBe(true)
   })
 
   test('should scaffold wrangler.jsonc once and never overwrite it', async () => {
