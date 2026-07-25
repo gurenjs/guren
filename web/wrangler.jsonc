@@ -1,5 +1,5 @@
 {
-  "name": "web",
+  "name": "guren-web",
   "main": ".cloudflare/worker.js",
   "compatibility_date": "2026-07-25",
   "compatibility_flags": [
@@ -23,12 +23,30 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "web",
-      "database_id": "TODO: run wrangler d1 create guren-web",
+      "database_name": "guren-web",
+      "database_id": "9cb55bab-b69d-4bab-b074-fdd65f468541",
       "migrations_dir": ".cloudflare/d1-migrations"
     }
   ],
   "vars": {
     "NODE_ENV": "production"
-  }
+  },
+  // This worker name previously hosted an abandoned Containers experiment.
+  // Its Durable Object class blocks any deploy that stops exporting it, and
+  // the remote is already at v1 — so v1 is restated as history (wrangler
+  // skips what is applied) and v2 drops the class. Nothing used it.
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "GurenContainer"
+      ]
+    },
+    {
+      "tag": "v2",
+      "deleted_classes": [
+        "GurenContainer"
+      ]
+    }
+  ]
 }
