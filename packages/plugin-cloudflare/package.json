@@ -17,7 +17,6 @@
   },
   "gurenPlugin": {
     "compatibility": ">=1.0.0 <2.0.0",
-    "provider": "GurenPluginCloudflareProvider",
     "commands": {
       "entry": "./dist/commands.js",
       "names": [
