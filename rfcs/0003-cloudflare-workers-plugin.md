@@ -155,7 +155,9 @@ Differences from the other factories:
   slow and unsafe under concurrent isolates. `migrateDatabase()` throws with
   a message pointing at the wrangler command. (See Open Questions for the
   runtime-migrator alternative.)
-- **`closeDatabase()` is a no-op** — D1 sessions have no connection to close.
+- **`closeDatabase()`** ~~is a no-op~~ **Amended in implementation:** drops
+  the cached drizzle instance (mirroring the sqlite factory) rather than
+  doing strictly nothing — D1 still has no connection to close.
 - **`seedDatabase()` throws.** The existing seeder machinery reads seeder
   files from disk (`orm/src/seeder.ts`), and a Worker has no filesystem —
   `wrangler dev` storing local D1 data in SQLite does not give the Worker
