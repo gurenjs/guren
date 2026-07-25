@@ -5,9 +5,19 @@ import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { createMcpServer } from '../../src/mcp/create-mcp-server'
-import type { GurenCliApi } from '../../src/mcp/create-mcp-server'
+import type { CodegenOptions, CodegenResult, GurenCliApi } from '../../src/mcp/create-mcp-server'
 
-function createMockCli(): GurenCliApi {
+const ROUTE_MANIFEST = [{ method: 'GET', path: '/posts', name: 'posts.index' }]
+
+type CodegenCall = { generator: string; options: CodegenOptions; definitions?: unknown[] }
+
+function createMockCli(overrides: Partial<GurenCliApi> = {}, calls?: CodegenCall[]): GurenCliApi {
+  const record =
+    (generator: string, result?: CodegenResult) => async (options: CodegenOptions) => {
+      calls?.push({ generator, options })
+      return result
+    }
+
   return {
     generateContext: async () => ({
       framework: { name: 'guren', version: '0.2.0' },
@@ -83,19 +93,23 @@ function createMockCli(): GurenCliApi {
     makeView: async (name) => `resources/js/pages/${name}.tsx`,
     makeTest: async (name) => `tests/${name}.test.ts`,
     makeRoute: async (name) => `routes/${name}.ts`,
-    generateRouteTypes: async () => {},
-    generatePageTypes: async () => {},
-    generateDataTypes: async () => {},
-    generateChannelTypes: async () => {},
+    generateRouteTypes: record('generateRouteTypes', { definitions: ROUTE_MANIFEST }),
+    generatePageTypes: record('generatePageTypes'),
+    generateDataTypes: record('generateDataTypes'),
+    generateChannelTypes: record('generateChannelTypes'),
+    generateApiClientTypes: async (definitions: unknown[], options: CodegenOptions) => {
+      calls?.push({ generator: 'generateApiClientTypes', options, definitions })
+    },
+    ...overrides,
   }
 }
 
 let testDir: string
 
-async function createTestClient() {
+async function createTestClient(overrides: Partial<GurenCliApi> = {}, calls?: CodegenCall[]) {
   const mcpServer = createMcpServer({
     cwd: testDir,
-    cli: createMockCli(),
+    cli: createMockCli(overrides, calls),
   })
 
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
@@ -267,6 +281,94 @@ describe('Guren MCP Server', () => {
 
     expect(data.generated).toContain('.guren/routes.gen.ts')
     expect(data.generated).toContain('.guren/pages.gen.ts')
+    expect(data.generated).toContain('types/generated/routes.d.ts')
+    expect(data.generated).toContain('.guren/api-client.gen.ts')
+    expect(data.skipped).toEqual([])
+  })
+
+  test('guren_codegen forces every generator and feeds the client the route manifest', async () => {
+    const calls: CodegenCall[] = []
+    const client = await createTestClient({}, calls)
+    await client.callTool({ name: 'guren_codegen', arguments: {} })
+
+    expect(calls.map((call) => call.generator)).toEqual([
+      'generateRouteTypes',
+      'generatePageTypes',
+      'generateDataTypes',
+      'generateChannelTypes',
+      'generateApiClientTypes',
+    ])
+    for (const call of calls) {
+      expect(call.options.force).toBe(true)
+    }
+    expect(calls.at(-1)?.definitions).toEqual(ROUTE_MANIFEST)
+  })
+
+  test('guren_codegen skips the API client when route generation failed', async () => {
+    const client = await createTestClient({
+      generateRouteTypes: async () => {
+        throw new Error('routes/web.ts not found')
+      },
+    })
+    const result = await client.callTool({ name: 'guren_codegen', arguments: {} })
+    const data = JSON.parse((result.content as Array<{ type: string; text: string }>)[0].text)
+
+    expect(data.generated).not.toContain('.guren/api-client.gen.ts')
+    expect(data.skipped).toContainEqual({
+      artifacts: ['.guren/api-client.gen.ts'],
+      reason: 'route generation produced no manifest to build a client from',
+    })
+  })
+
+  test('guren_codegen reports a partial failure as an error, with the reason', async () => {
+    const client = await createTestClient({
+      generateDataTypes: async () => {
+        throw new Error('app/Http/Resources not found')
+      },
+    })
+    const result = await client.callTool({ name: 'guren_codegen', arguments: {} })
+    const data = JSON.parse((result.content as Array<{ type: string; text: string }>)[0].text)
+
+    expect(result.isError).toBe(true)
+    expect(data.generated).toContain('.guren/routes.gen.ts')
+    expect(data.skipped).toEqual([
+      { artifacts: ['.guren/data.gen.ts'], reason: 'app/Http/Resources not found' },
+    ])
+  })
+
+  test('guren_codegen skips an artifact a generator reports as empty', async () => {
+    const client = await createTestClient({
+      generatePageTypes: async () => ({ outputPath: '' }),
+    })
+    const result = await client.callTool({ name: 'guren_codegen', arguments: {} })
+    const data = JSON.parse((result.content as Array<{ type: string; text: string }>)[0].text)
+
+    // Nothing to describe is a shape, not a failure — an app with no page
+    // components must not make the whole run report an error.
+    expect(result.isError).toBe(false)
+    expect(data.generated).not.toContain('.guren/pages.gen.ts')
+    expect(data.skipped).toEqual([
+      { artifacts: ['.guren/pages.gen.ts'], reason: 'nothing to generate' },
+    ])
+  })
+
+  test('guren_codegen is an error when nothing could be generated', async () => {
+    const failing = async () => {
+      throw new Error('routes/web.ts not found')
+    }
+    const client = await createTestClient({
+      generateRouteTypes: failing,
+      generatePageTypes: failing,
+      generateDataTypes: failing,
+      generateChannelTypes: failing,
+    })
+    const result = await client.callTool({ name: 'guren_codegen', arguments: {} })
+    const data = JSON.parse((result.content as Array<{ type: string; text: string }>)[0].text)
+
+    expect(result.isError).toBe(true)
+    expect(data.generated).toEqual([])
+    // The API client makes a fifth: it has no manifest to work from either.
+    expect(data.skipped).toHaveLength(5)
   })
 
   test('lists resources', async () => {

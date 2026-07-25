@@ -47,9 +47,18 @@ export class McpServiceProvider extends ServiceProvider {
     // than failing outright.
     //
     // guren_codegen (generateRouteTypes et al.) has the same staleness
-    // exposure but is deliberately left in-process here: it already fails on
-    // any repeat call because it writes without `force`, so it needs that
-    // fixed before freshness would matter — tracked separately.
+    // exposure and is still left in-process here, so the route-derived
+    // artifacts it writes — routes.gen.ts, routes.d.ts, api-client.gen.ts —
+    // describe the graph as of this process's first route load. It now writes
+    // with `force`, so that snapshot overwrites what is on disk instead of
+    // failing the way it used to. Page, data, and channel manifests are
+    // unaffected: those generators re-scan the filesystem on every call.
+    //
+    // An app using the default Vite setup repairs the difference on the next
+    // save, because routeTypesPlugin's handleHotUpdate spawns `guren codegen`
+    // in a child process. A dev server running without that plugin has no
+    // such repair, and there MCP-driven codegen is the only writer. Moving
+    // codegen behind the same child process is tracked separately.
     const routeAwareCli: GurenCliApi = cli.createFreshContextApi
       ? { ...cli, ...cli.createFreshContextApi() }
       : cli
