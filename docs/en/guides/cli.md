@@ -58,7 +58,7 @@ These commands patch `src/app.ts`, create the matching provider/runtime files, a
 | `make:controller <Name>` | Generates a controller in `app/Http/Controllers` | `bunx guren make:controller PostController` |
 | `make:model <Name>` | Generates a minimal model class and type definition in `app/Models` (imports `camelCase(Name)s` from `db/schema`) | `bunx guren make:model Post` |
 | `make:view <path>` | Generates a React component in `resources/js/pages` | `bunx guren make:view posts/Index` |
-| `make:auth` | Scaffolds login/logout, registration, and password reset controllers, providers, views, migration, seeder, and routes (`--minimal` skips registration and password reset, `--verify` also scaffolds email verification, `--oauth <providers>` also scaffolds OAuth login buttons for the given comma-separated providers) | `bunx guren make:auth --oauth github,google` |
+| `make:auth` | Scaffolds login/logout, registration, and password reset controllers, providers, views, migration, seeder, and routes (`--minimal` skips registration and password reset, `--verify` also scaffolds email verification, `--oauth <providers>` also scaffolds OAuth login buttons for the given comma-separated providers, `--oauth-only` drops password login entirely and makes those providers the only way in) | `bunx guren make:auth --oauth github,google` |
 | `make:middleware <Name>` | Generates a middleware file in `app/Http/Middleware` | `bunx guren make:middleware Auth` |
 | `make:policy <Name>` | Generates an authorization policy in `app/Policies` with owner-based defaults | `bunx guren make:policy Post` |
 | `make:seeder <Name>` | Generates a database seeder file | `bunx guren make:seeder UserSeeder` |

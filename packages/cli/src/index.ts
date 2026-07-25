@@ -44,6 +44,8 @@ export {
 } from './entity-context'
 export { routeDefinitionToContextRoute, loadContextRoutes, type ContextRoute } from './context-route'
 export { createFreshContextApi } from './fresh-context'
+export { scanDocs, parseDocFrontmatter, extractDocsTags, type DocRef } from './docs-index'
+export { runDocsCheck } from './docs-check'
 export { runCheck, renderCheckReport } from './check'
 export { generateGuidelines } from './guidelines'
 export { listModels, displayModels } from './model-list'

@@ -153,6 +153,43 @@ const gitlabConfig: OAuthProviderConfig = {
 oauth.registerProvider('gitlab', gitlabConfig)
 ```
 
+## プロバイダーによるメールアドレスの検証状態
+
+プロバイダーがメールアドレスを返したことは、そのアドレスを検証したという主張ではありません。多くのプロバイダーは検証状態を別に報告しており（Google は OIDC の `email_verified`、Discord は `verified`）、プロフィールでは `profile.emailVerified` として公開されます。
+
+| 値 | 意味 |
+|----|------|
+| `true` | プロバイダーが検証済みと報告している |
+| `false` | プロバイダーが未検証と報告している |
+| `undefined` | プロバイダーがこの情報を返していない（アプリ側で方針を決める） |
+
+`false` の場合はアカウントの**新規作成**を拒否してください。未検証のアドレスをそのまま受け入れると、所有していないメールアドレスを名乗れてしまい、重複メールを弾くコールバックが本来の所有者を恒久的に締め出すことになります。既に紐付け済みのアカウントが後から状態変化で締め出されないよう、チェックは作成パスだけに置きます。
+
+```ts
+if (!user && profile.emailVerified === false) {
+  throw ValidationException.withMessages({
+    message: 'Your provider has not verified this email address.',
+  })
+}
+```
+
+組み込みプリセットは自分のキーを宣言済みです。自前で登録するプロバイダーが標準以外のキー名を使う場合は `emailVerifiedKey` を設定してください。デフォルトでは OIDC の `email_verified` を読み、boolean 値のみを有効な信号として扱います。
+
+```ts
+const discordish: OAuthProviderConfig = {
+  // ...
+  emailVerifiedKey: 'verified',
+}
+```
+
+`mapProfile` はマッピング全体を担うため、それを使うプロバイダーでは `emailVerified` も自分で設定し、`emailVerifiedKey` は無視されます。GitHub の `/user` には検証状態のフィールドがないため `emailVerified` は `undefined` のままですが、メールアドレス非公開時のフォールバックが動いた場合は例外です（`/user/emails` は検証済みのプライマリアドレスしか返さないため）。
+
+`fetchFallbackEmail` はメールアドレスを含まないレスポンスに対して読んだ後に呼ばれるため、上記のキーはその戻り値を保証できません。文字列をそのまま返す場合は検証状態を主張せず `undefined` のままになります。主張する場合はオブジェクトを返してください。
+
+```ts
+fetchFallbackEmail: async (token) => ({ email: await lookupEmail(token), emailVerified: true }),
+```
+
 ## Stateストレージ
 
 コールバックを元のリクエストに結びつける一度限りの `state` 値は、サーバー側で保存されます。デフォルトの `MemoryOAuthStateStore` は単一プロセスの開発環境では動作しますが、複数プロセス（ロードバランサー、サーバーレス）構成の本番環境では共有ストレージが必要です。そうしないと、コールバックがstateを発行していないプロセスに到達してしまう可能性があります。
@@ -205,6 +242,7 @@ interface OAuthProviderConfig {
   tokenAuthMethod?: 'client_secret_post' | 'client_secret_basic'
   userInfoMethod?: 'GET' | 'POST'
   mapProfile?: (raw: Record<string, unknown>, token: OAuthTokenResult) => OAuthUserProfile
+  emailVerifiedKey?: string      // 検証状態を持つユーザー情報のキー（デフォルト: 'email_verified'）
 }
 
 interface OAuthStateConfig {

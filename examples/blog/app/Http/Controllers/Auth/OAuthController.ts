@@ -57,6 +57,21 @@ export default class OAuthController extends Controller {
     let [user] = await User.where(identityWhere(provider, profile.id))
 
     if (!user) {
+      // Returning an email is not a claim that the provider checked it — the
+      // provider reports that separately, and profile.emailVerified carries
+      // the answer. Creating an account from an address the provider says it
+      // never verified would let it claim an email it does not own, and the
+      // collision check below would then turn the real owner away for good.
+      // Only an explicit false is refused: providers that send no signal at
+      // all (GitHub's /user) leave this undefined. Checked only on the create
+      // path, so an already-linked account is not locked out if its provider
+      // status changes later.
+      if (profile.emailVerified === false) {
+        throw ValidationException.withMessages({
+          message: 'Your provider has not verified this email address. Verify it with the provider and try again.',
+        })
+      }
+
       const [existingByEmail] = await User.where({ email: resolvedEmail })
       if (existingByEmail) {
         throw ValidationException.withMessages({
@@ -71,11 +86,10 @@ export default class OAuthController extends Controller {
         name: profile.name ?? resolvedEmail,
         email: resolvedEmail,
         password: randomUUID(),
-        // The provider already vouches for this address (GitHub's fallback
-        // above only accepts primary+verified emails; Google's userinfo
-        // email comes from a verified account) — making the user click a
-        // verification link we never send would just strand them at
-        // /verify-email.
+        // The address got past the check above — either the provider vouches
+        // for it, or it came from GitHub's fallback, which only accepts
+        // primary+verified emails. Making the user click a verification link
+        // we never send would just strand them at /verify-email.
         emailVerifiedAt: new Date(),
         ...identityWhere(provider, profile.id),
       })

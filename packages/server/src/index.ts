@@ -136,6 +136,7 @@ export type {
   OAuthProviderConfig,
   OAuthTokenResult,
   OAuthUserProfile,
+  OAuthFallbackEmail,
   OAuthStatePayload,
   OAuthStateStore,
   OAuthStateConfig,

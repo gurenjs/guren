@@ -64,15 +64,19 @@ function resolveGurenModule(moduleExports: Record<string, unknown>): GurenModule
  * calls `loadRouteDefinitions()` twice sees the route graph as it was on the
  * *first* call. Bun keys `.ts` modules on the resolved path and ignores the
  * query string, so the usual `?v=<timestamp>` cache-busting trick does not
- * re-evaluate anything (verified on Bun 1.3.14), and Bun exposes no way to
- * evict an ES module. Transitive imports — controllers, `modules/*
- * /routes.ts` — were never re-evaluated on any runtime either, so no
- * entry-file-only trick could make the whole graph fresh.
+ * re-evaluate anything (verified on Bun 1.3.11 and 1.3.14, for both `.ts` and
+ * `.js`), and Bun exposes no way to evict an ES module. A query-string variant
+ * would also unify with the plain `routes/web.js` specifier an app boots
+ * with, making that startup import the first load. Transitive imports —
+ * controllers, a module's own `routes.ts` — are never re-evaluated on any
+ * runtime either, so no entry-file-only trick could make the whole graph
+ * fresh even if Bun did honor the query string.
  *
- * That is fine for one-shot CLI commands, which is every caller except the
- * dev-only MCP endpoint. Long-lived in-process callers must instead run the
- * CLI in a fresh child process — see `createFreshContextApi()` in
- * `fresh-context.ts`.
+ * That is fine for one-shot CLI commands and the Vite plugin (which spawns
+ * `guren` as a child process), so every call there is already a fresh
+ * process. Long-lived in-process callers must instead run the CLI in a fresh
+ * child process themselves — see `createFreshContextApi()` in
+ * `fresh-context.ts`, used by the long-lived MCP dev server.
  */
 function importUrl(file: string): string {
   return pathToFileURL(file).href

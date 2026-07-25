@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { parse } from '@babel/parser'
 import type { Statement, Expression, ClassDeclaration, ClassBody } from '@babel/types'
+import { extractDocsTags } from './docs-index'
 
 export interface ModelRelationship {
   name: string
@@ -15,6 +16,8 @@ export interface ModelInfo {
   relationships: ModelRelationship[]
   usesAuth: boolean
   hasSoftDeletes: boolean
+  /** `@docs <path>` tags in the model source (code-side doc links). */
+  docsTags: string[]
 }
 
 export async function parseModelFile(filePath: string): Promise<ModelInfo | null> {
@@ -56,6 +59,7 @@ export function parseModelSource(source: string, filePath: string): ModelInfo | 
     relationships,
     usesAuth,
     hasSoftDeletes,
+    docsTags: extractDocsTags(source),
   }
 }
 

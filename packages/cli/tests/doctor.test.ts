@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
-import { getDoctorRuleEvaluations, runDoctor, buildJsonOutput } from '../src/doctor'
+import { getDoctorRuleEvaluations, runDoctor, buildJsonOutput, suggestNextSteps } from '../src/doctor'
 import type { DoctorJsonOutput } from '../src/doctor'
 import { createTempWorkspace, writeInstalledPackage } from './helpers'
 
@@ -1064,6 +1064,69 @@ describe('runDoctor', () => {
       expect(
         report.nextSteps?.some((step) => step.command === 'bun add -d @guren/testing'),
       ).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+
+describe('suggestNextSteps', () => {
+  it('does not suggest tests for a controller with a co-located test', async () => {
+    const workspace = await createTempWorkspace('guren-cli-doctor-colocated-test-')
+
+    try {
+      await mkdir(join(workspace.dir, 'app/Http/Controllers/Auth'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Http/Controllers/Auth/OAuthController.ts'),
+        `export default class OAuthController {\n  async callback() { return null }\n}`,
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'app/Http/Controllers/Auth/OAuthController.test.ts'),
+        `test('callback', () => {})`,
+        'utf8',
+      )
+
+      const steps = await suggestNextSteps({ cwd: workspace.dir })
+
+      expect(steps.some((step) => step.title.includes('OAuthController'))).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('suggests make:test with --module for a module controller missing a test', async () => {
+    const workspace = await createTempWorkspace('guren-cli-doctor-module-test-')
+
+    try {
+      await mkdir(join(workspace.dir, 'modules/blog/app/Http/Controllers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'modules/blog/app/Http/Controllers/PostsController.ts'),
+        `export default class PostsController {\n  async index() { return null }\n}`,
+        'utf8',
+      )
+      // A test file next to the controller must not be reported as a
+      // controller of its own.
+      await writeFile(
+        join(workspace.dir, 'modules/blog/app/Http/Controllers/PostsController.test.ts'),
+        `test('index', () => {})`,
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'modules/blog/app/Http/Controllers/Auth'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'modules/blog/app/Http/Controllers/Auth/OAuthController.ts'),
+        `export default class OAuthController {\n  async callback() { return null }\n}`,
+        'utf8',
+      )
+
+      const steps = await suggestNextSteps({ cwd: workspace.dir })
+
+      expect(steps.some((step) => step.title.includes('.test'))).toBe(false)
+      expect(steps.some((step) => step.title === 'Add tests for PostsController')).toBe(false)
+
+      const oauthStep = steps.find((step) => step.title === 'Add tests for OAuthController')
+      expect(oauthStep).toBeDefined()
+      expect(oauthStep!.command).toBe('bunx guren make:test OAuth --controller --module blog')
     } finally {
       await workspace.cleanup()
     }
