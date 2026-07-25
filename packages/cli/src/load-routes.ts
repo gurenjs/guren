@@ -59,10 +59,23 @@ function resolveGurenModule(moduleExports: Record<string, unknown>): GurenModule
   return undefined
 }
 
-function createImportUrl(file: string): string {
-  const url = pathToFileURL(file)
-  url.searchParams.set('guren-load-routes', `${Date.now()}-${Math.random().toString(36).slice(2)}`)
-  return url.href
+/**
+ * Every load here is a plain `import()` of the file URL, so a process that
+ * calls `loadRouteDefinitions()` twice sees the route graph as it was on the
+ * *first* call. Bun keys `.ts` modules on the resolved path and ignores the
+ * query string, so the usual `?v=<timestamp>` cache-busting trick does not
+ * re-evaluate anything (verified on Bun 1.3.14), and Bun exposes no way to
+ * evict an ES module. Transitive imports — controllers, `modules/*
+ * /routes.ts` — were never re-evaluated on any runtime either, so no
+ * entry-file-only trick could make the whole graph fresh.
+ *
+ * That is fine for one-shot CLI commands, which is every caller except the
+ * dev-only MCP endpoint. Long-lived in-process callers must instead run the
+ * CLI in a fresh child process — see `createFreshContextApi()` in
+ * `fresh-context.ts`.
+ */
+function importUrl(file: string): string {
+  return pathToFileURL(file).href
 }
 
 /** Shared tail for both "module skipped" warnings — keep the wording in one place. */
@@ -91,7 +104,7 @@ async function loadGurenModule(appRoot: string, moduleName: string, warnings?: s
 
   let moduleExports: Record<string, unknown>
   try {
-    moduleExports = await import(createImportUrl(indexPath)) as Record<string, unknown>
+    moduleExports = await import(importUrl(indexPath)) as Record<string, unknown>
   } catch (error) {
     warn(
       `Could not import modules/${moduleName}/index.ts — ${ROUTES_MISSING_CONSEQUENCE}: `
@@ -142,7 +155,7 @@ export async function loadRouteDefinitions(
   moduleWarnings?: string[],
   moduleProvenance?: Array<string | null>,
 ): Promise<RouteDefinition[]> {
-  const moduleExports = await import(createImportUrl(routesFile)) as Record<string, unknown>
+  const moduleExports = await import(importUrl(routesFile)) as Record<string, unknown>
   const registrar = resolveRegistrar(moduleExports)
 
   if (!registrar) {

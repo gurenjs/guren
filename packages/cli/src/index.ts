@@ -43,6 +43,7 @@ export {
   type EntityContextOptions,
 } from './entity-context'
 export { routeDefinitionToContextRoute, loadContextRoutes, type ContextRoute } from './context-route'
+export { createFreshContextApi } from './fresh-context'
 export { runCheck, renderCheckReport } from './check'
 export { generateGuidelines } from './guidelines'
 export { listModels, displayModels } from './model-list'
