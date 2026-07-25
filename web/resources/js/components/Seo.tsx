@@ -40,10 +40,6 @@ export function Seo({
     <Head>
       <title>{title}</title>
       <meta name="description" content={description} />
-      <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
-      <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192x192.png" />
-      <link rel="icon" type="image/png" sizes="512x512" href="/favicon-512x512.png" />
-      <link rel="apple-touch-icon" sizes="192x192" href="/favicon-192x192.png" />
       <link rel="canonical" href={canonical} />
       {alternates.map((alt) => (
         <link key={alt.hrefLang} rel="alternate" hrefLang={alt.hrefLang} href={absoluteUrl(alt.href)} />
@@ -60,7 +56,6 @@ export function Seo({
       <meta property="og:image" content={ogImage} />
       <meta property="og:locale" content={locale === 'ja' ? 'ja_JP' : 'en_US'} />
       <meta name="twitter:card" content="summary_large_image" />
-      <meta name="twitter:site" content="@gurenjs" />
       <meta name="twitter:title" content={title} />
       <meta name="twitter:description" content={description} />
       <meta name="twitter:image" content={ogImage} />

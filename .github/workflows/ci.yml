@@ -248,3 +248,6 @@ jobs:
 
       - name: Bundle budget audit
         run: bun run ./scripts/smoke/build-budget.ts --max-kb 600 web
+
+      - name: Assemble Cloudflare worker
+        run: cd web && bun scripts/cloudflare-build.ts
