@@ -1,11 +1,14 @@
 import { ServiceProvider } from '../container/ServiceProvider'
 import { createMcpServer } from './create-mcp-server'
 import type { GurenCliApi } from './create-mcp-server'
+import { createMcpAccessGuard, isMcpEndpointEnabled, MCP_ENDPOINT_PATH } from './endpoint'
 
 /**
  * Registers the MCP (Model Context Protocol) endpoint at /_guren/mcp.
  *
- * This provider is only active in development mode (NODE_ENV !== 'production').
+ * Only active while `isMcpEndpointEnabled()` holds, so registering this
+ * provider directly honours the same `GUREN_MCP=1` opt-in that `Application`
+ * gates on — and the same condition that exempts the endpoint from CSRF.
  * It allows AI coding agents (Claude Code, Cursor, etc.) to introspect
  * the project structure, run integrity checks, and scaffold code.
  *
@@ -18,7 +21,7 @@ export class McpServiceProvider extends ServiceProvider {
   }
 
   async boot(): Promise<void> {
-    if (process.env.NODE_ENV === 'production') {
+    if (!isMcpEndpointEnabled()) {
       return
     }
 
@@ -51,10 +54,12 @@ export class McpServiceProvider extends ServiceProvider {
       ? { ...cli, ...cli.createFreshContextApi() }
       : cli
 
+    hono.use(MCP_ENDPOINT_PATH, createMcpAccessGuard())
+
     // Stateless mode: each request gets a fresh McpServer + transport pair.
     // McpServer.connect() can only be called once per instance, so we
     // create a new server for each request.
-    hono.all('/_guren/mcp', async (c) => {
+    hono.all(MCP_ENDPOINT_PATH, async (c) => {
       const mcpServer = createMcpServer({ cwd, cli: routeAwareCli })
       const transport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: undefined,

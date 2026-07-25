@@ -105,14 +105,16 @@ bun run test
 
 ## MCP Server (AI Agent Integration)
 
-`bun run dev` を実行すると、開発サーバーに MCP エンドポイントが自動的に起動します:
+`bun run dev` を実行すると、開発サーバーに MCP エンドポイントが起動します（`dev` スクリプトの `GUREN_MCP=1` で有効化。無い場合は `GUREN_MCP=1 bun run dev`、本番環境では付けても無効です）:
 
 ```
 http://localhost:3333/_guren/mcp
 ```
 
 `.mcp.json` が設定済みなので、Claude Code / Cursor は自動的に接続します。
-本番環境（`NODE_ENV=production`）では無効化されます。
+
+エンドポイントは同一マシンからのアクセスのみ許可します。他オリジンのブラウザページ
+（DNS rebinding 含む）と、LAN 上の別ホストからのリクエストは 403 で拒否されます。
 
 ### 利用可能なツール
 

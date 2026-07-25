@@ -91,4 +91,31 @@ describe('installAgentHarness', () => {
     expect(result.written).toContain('.claude/settings.json')
     await access(join(tempDir, '.mcp.json'))
   })
+
+  it('reports that .mcp.json is dead when no script enables the endpoint', async () => {
+    await writeFile(
+      join(tempDir, 'package.json'),
+      JSON.stringify({ name: 'my-app', scripts: { dev: 'bun run codegen && bun run dev:server' } }),
+      'utf8',
+    )
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'init' })
+
+    expect(result.mcpEndpointNotEnabled).toBe(true)
+  })
+
+  it('stays quiet when a script already enables the endpoint', async () => {
+    await writeFile(
+      join(tempDir, 'package.json'),
+      JSON.stringify({
+        name: 'my-app',
+        scripts: { dev: 'bun run codegen && GUREN_MCP=1 bun run dev:server' },
+      }),
+      'utf8',
+    )
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'init' })
+
+    expect(result.mcpEndpointNotEnabled).toBe(false)
+  })
 })

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "codegen": "bunx guren codegen --force",
-    "dev": "bun run codegen && bun run dev:server",
+    "dev": "bun run codegen && GUREN_MCP=1 bun run dev:server",
     "dev:server": "bun bin/serve.ts",
     "typecheck": "tsc --noEmit",
     "build": "bun run codegen && bunx vite build",
