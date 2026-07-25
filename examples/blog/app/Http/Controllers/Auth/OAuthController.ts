@@ -96,6 +96,12 @@ export default class OAuthController extends Controller {
         name: profile.name ?? resolvedEmail,
         email: resolvedEmail,
         password: randomUUID(),
+        // The provider already vouches for this address (GitHub's fallback
+        // above only accepts primary+verified emails; Google's userinfo
+        // email comes from a verified account) — making the user click a
+        // verification link we never send would just strand them at
+        // /verify-email.
+        emailVerifiedAt: new Date(),
         ...identityWhere(provider, profile.id),
       })
     }

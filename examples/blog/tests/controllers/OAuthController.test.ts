@@ -104,7 +104,12 @@ describe('OAuthController', () => {
       const response = await controller.callback()
 
       expect(mockUserCreate).toHaveBeenCalledWith(
-        expect.objectContaining({ name: 'New Person', email: 'new@example.com', githubId: 'gh-2' }),
+        expect.objectContaining({
+          name: 'New Person',
+          email: 'new@example.com',
+          githubId: 'gh-2',
+          emailVerifiedAt: expect.any(Date),
+        }),
       )
       expect(response.status).toBe(302)
       expect(response.headers.get('Location')).toBe('/dashboard')

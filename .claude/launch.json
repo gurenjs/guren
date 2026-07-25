@@ -6,6 +6,12 @@
       "runtimeExecutable": "bash",
       "runtimeArgs": ["-c", "cd web && exec bun bin/serve.ts"],
       "port": 3333
+    },
+    {
+      "name": "blog",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd examples/blog && exec bun run dev"],
+      "port": 3333
     }
   ]
 }
