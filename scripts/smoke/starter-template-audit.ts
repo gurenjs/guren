@@ -15,7 +15,7 @@ export async function auditStarterTemplate(root: string): Promise<void> {
   const packageJson = await read(root, 'package.json')
   assert(packageJson.includes('"@guren/core"'), 'Starter template must depend on @guren/core.')
   assert(!packageJson.includes('"@guren/server"'), 'Starter template must not depend directly on @guren/server.')
-  assert(packageJson.includes('"dev": "bun run codegen && bun run dev:server"'), 'Starter template must run codegen before dev.')
+  assert(packageJson.includes('"dev": "bun run codegen && GUREN_MCP=1 bun run dev:server"'), 'Starter template must run codegen before dev.')
   assert(packageJson.includes('"build": "bun run codegen && bunx vite build"'), 'Starter template must run codegen before build.')
 
   const appBootstrap = await read(root, 'src/app.ts')
