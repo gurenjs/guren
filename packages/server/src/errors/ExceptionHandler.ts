@@ -125,6 +125,14 @@ export class ExceptionHandler {
       return
     }
 
+    // An app with no reporter configured would otherwise turn a 500 into a
+    // rendered page and nothing else — on a hosted runtime, where stdout is
+    // the only channel back to the operator, that leaves the failure
+    // undiagnosable. Anything registering a reporter owns the reporting.
+    if (this.reporters.length === 0) {
+      console.error('Unhandled exception:', error)
+    }
+
     // Call all reporters
     for (const reporter of this.reporters) {
       try {
