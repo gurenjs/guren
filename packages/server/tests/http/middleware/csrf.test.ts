@@ -10,7 +10,11 @@ import {
   getCsrfToken,
   verifyCsrfToken,
 } from '../../../src/http/middleware/csrf'
-import { createSessionMiddleware, getSessionFromContext } from '../../../src/http/middleware/session'
+import {
+  createSessionMiddleware,
+  getSessionFromContext,
+  MemorySessionStore,
+} from '../../../src/http/middleware/session'
 
 function createTestApp(csrfOptions?: Parameters<typeof createCsrfMiddleware>[0]) {
   const app = new Hono()
@@ -557,5 +561,97 @@ describe('stateless double-submit security', () => {
     expect(touches).toHaveBeenCalledTimes(0)
     // No session cookie was ever issued — only the XSRF token cookie.
     expect(extractCookie(res)).not.toContain('guren.session=')
+  })
+})
+
+describe('session-bound tokens (cookie-injection immunity)', () => {
+  // A logged-in user: establish a persisted session, then all later
+  // requests carry a stable session id the token binds to.
+  function createBoundApp() {
+    const store = new MemorySessionStore()
+    const app = new Hono()
+    app.use(createSessionMiddleware({ store }))
+    app.use(createCsrfMiddleware())
+    app.get('/login', (c) => {
+      getSessionFromContext(c)?.set('userId', 1)
+      return c.text('ok')
+    })
+    app.get('/form', (c) => c.json({ token: getCsrfToken(c) }))
+    app.post('/submit', (c) => c.text('ok'))
+    return app
+  }
+
+  async function loginCookie(app: Hono): Promise<string> {
+    return extractCookie(await app.request('/login'))
+  }
+
+  it('binds the token to the session and accepts a matching submit', async () => {
+    const app = createBoundApp()
+    const session = await loginCookie(app)
+
+    const formRes = await app.request('/form', { headers: { Cookie: session } })
+    const { token } = (await formRes.json()) as { token: string }
+
+    const post = await app.request('/submit', {
+      method: 'POST',
+      headers: {
+        Cookie: [session, extractCookie(formRes)].filter(Boolean).join('; '),
+        [CSRF_HEADER_NAME]: token,
+      },
+    })
+
+    expect(post.status).toBe(200)
+  })
+
+  it('rejects an attacker-injected valid token from a different session', async () => {
+    const app = createBoundApp()
+
+    // Attacker mints their own legitimately-signed, session-bound token.
+    const attackerSession = await loginCookie(app)
+    const attackerForm = await app.request('/form', { headers: { Cookie: attackerSession } })
+    const { token: attackerToken } = (await attackerForm.json()) as { token: string }
+    const attackerXsrf = extractCookie(attackerForm)
+
+    // Victim's own logged-in session cookie.
+    const victimSession = await loginCookie(app)
+
+    // Attacker plants their XSRF cookie + header on the victim's request.
+    // The token is bound to the attacker's session id, not the victim's.
+    const post = await app.request('/submit', {
+      method: 'POST',
+      headers: {
+        Cookie: [victimSession, attackerXsrf].filter(Boolean).join('; '),
+        [CSRF_HEADER_NAME]: attackerToken,
+      },
+    })
+
+    expect(post.status).toBe(403)
+  })
+
+  it('supports cookie:false for session-bound flows (no XSRF cookie needed)', async () => {
+    const store = new MemorySessionStore()
+    const app = new Hono()
+    app.use(createSessionMiddleware({ store }))
+    app.use(createCsrfMiddleware({ cookie: false }))
+    app.get('/login', (c) => {
+      getSessionFromContext(c)?.set('userId', 1)
+      return c.text('ok')
+    })
+    app.get('/form', (c) => c.json({ token: getCsrfToken(c) }))
+    app.post('/submit', (c) => c.text('ok'))
+
+    const session = extractCookie(await app.request('/login'))
+    const formRes = await app.request('/form', { headers: { Cookie: session } })
+    const { token } = (await formRes.json()) as { token: string }
+
+    // No XSRF-TOKEN cookie is issued; the token verifies against the session id.
+    expect(extractCookie(formRes)).not.toContain('XSRF-TOKEN=')
+
+    const post = await app.request('/submit', {
+      method: 'POST',
+      headers: { Cookie: session, [CSRF_HEADER_NAME]: token },
+    })
+
+    expect(post.status).toBe(200)
   })
 })
