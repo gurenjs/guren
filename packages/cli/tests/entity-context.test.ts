@@ -60,6 +60,9 @@ export class Post extends defineModel(posts) {
 import { users } from '../../db/schema.js'
 import type { PostRecord } from './Post.js'
 
+/**
+ * @docs docs/context/users.md
+ */
 export class User extends defineModel(users) {
   static override relationTypes: { posts: HasManyRecord<PostRecord> } = {
     posts: [],
@@ -161,6 +164,23 @@ export default function Index({ posts }: Props) {
     'import { test } from "bun:test"\ntest("noop", () => {})\n',
     'utf8',
   )
+
+  await mkdir(join(dir, 'docs/adr'), { recursive: true })
+  await mkdir(join(dir, 'docs/context'), { recursive: true })
+  await writeFile(
+    join(dir, 'docs/adr/0001-posts-are-public.md'),
+    `---
+kind: adr
+status: accepted
+entities: [Post]
+last_reviewed: 2026-07-25
+---
+
+# Posts are public by default
+`,
+    'utf8',
+  )
+  await writeFile(join(dir, 'docs/context/users.md'), '# User lifecycle\n', 'utf8')
 }
 
 // The blog fixture is read-only for every test in this file, so one shared
@@ -210,6 +230,40 @@ describe('entity context (blog fixture)', () => {
     expect(ctx.factories).toEqual(['db/factories/PostFactory.ts'])
     expect(ctx.seeders).toEqual(['db/seeders/002_PostsSeeder.ts'])
     expect(ctx.tests).toContain('tests/controllers/PostController.test.ts')
+  })
+
+  it('links docs via frontmatter entities and code-side @docs tags', async () => {
+    const post = await generateEntityContext('Post', { cwd: workspace.dir })
+    expect(post.docs).toEqual([
+      {
+        path: 'docs/adr/0001-posts-are-public.md',
+        title: 'Posts are public by default',
+        kind: 'adr',
+        status: 'accepted',
+        lastReviewed: '2026-07-25',
+      },
+    ])
+
+    const user = await generateEntityContext('User', { cwd: workspace.dir })
+    expect(user.docs).toEqual([
+      {
+        path: 'docs/context/users.md',
+        title: 'User lifecycle',
+        kind: undefined,
+        status: undefined,
+        lastReviewed: undefined,
+      },
+    ])
+  })
+
+  it('renders the Linked docs section', async () => {
+    const ctx = await generateEntityContext('Post', { cwd: workspace.dir })
+    const md = renderEntityContextMarkdown(ctx)
+
+    expect(md).toContain('## Linked docs (1)')
+    expect(md).toContain(
+      '- docs/adr/0001-posts-are-public.md — Posts are public by default (adr, accepted, reviewed 2026-07-25)',
+    )
   })
 
   it('resolves entity names case-insensitively', async () => {

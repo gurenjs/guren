@@ -43,6 +43,8 @@ export {
   type EntityContextOptions,
 } from './entity-context'
 export { routeDefinitionToContextRoute, loadContextRoutes, type ContextRoute } from './context-route'
+export { scanDocs, parseDocFrontmatter, extractDocsTags, type DocRef } from './docs-index'
+export { runDocsCheck } from './docs-check'
 export { runCheck, renderCheckReport } from './check'
 export { generateGuidelines } from './guidelines'
 export { listModels, displayModels } from './model-list'

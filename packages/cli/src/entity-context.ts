@@ -28,6 +28,7 @@ import {
   type ContextRoute,
 } from './context-route'
 import { extractInertiaPageRefs, resolveInertiaPageFile } from './inertia-pages'
+import { scanDocs, extractDocsTags, type DocRef } from './docs-index'
 import { extractPageProps } from './page-props-extractor'
 import { parseSchemaTableColumns } from './audit'
 
@@ -36,6 +37,14 @@ export interface EntityPage {
   /** Component file relative to the app root; absent when the referenced page has no file. */
   filePath?: string
   props?: string
+}
+
+export interface EntityDoc {
+  path: string
+  title?: string
+  kind?: string
+  status?: string
+  lastReviewed?: string
 }
 
 export interface EntityContext {
@@ -60,6 +69,8 @@ export interface EntityContext {
   factories: string[]
   seeders: string[]
   tests: string[]
+  /** Docs linked via frontmatter `entities:` or code-side `@docs` tags. */
+  docs: EntityDoc[]
 }
 
 export interface EntityContextOptions {
@@ -259,13 +270,14 @@ export async function generateEntityContext(
   const loadControllerBundle = async (): Promise<{
     controller?: EntityContext['controller']
     pages: EntityPage[]
+    docsTags: string[]
   }> => {
     let files = (await discoverControllerFiles(cwd)).filter(
       (file) => classNameFromPath(file) === controllerName,
     )
     if (duplicated) files = files.filter(inLocation)
     const controllerFile = files.find(inLocation) ?? files[0]
-    if (!controllerFile) return { pages: [] }
+    if (!controllerFile) return { pages: [], docsTags: [] }
 
     const source = await readFile(controllerFile, 'utf-8')
     return {
@@ -278,6 +290,7 @@ export async function generateEntityContext(
         cwd,
         extractInertiaPageRefs(source).map((ref) => ref.id),
       ),
+      docsTags: extractDocsTags(source),
     }
   }
 
@@ -287,7 +300,7 @@ export async function generateEntityContext(
     return tables?.get(match.info.tableName)
   }
 
-  const [columns, routes, controllerBundle, resource, policy, factories, seeders, testFiles] =
+  const [columns, routes, controllerBundle, resource, policy, factories, seeders, testFiles, allDocRefs] =
     await Promise.all([
       loadColumns(),
       loadEntityRoutes(),
@@ -297,6 +310,7 @@ export async function generateEntityContext(
       findDbArtifacts('db/factories', new RegExp(`(?:^|_)${entity}s?Factory\\.`, 'i')),
       findDbArtifacts('db/seeders', new RegExp(`(?:^|_)${entity}s?Seeder\\.`, 'i')),
       discoverTestFiles(cwd),
+      scanDocs(cwd),
     ])
 
   const referencedBy = models
@@ -313,6 +327,30 @@ export async function generateEntityContext(
     .filter((file) => !duplicated || inLocation(file))
     .map((file) => toPosixRelative(cwd, file))
     .sort()
+
+  // Linked docs: frontmatter `entities:` (location-scoped when duplicated)
+  // merged with explicit @docs tags from the model and controller sources
+  // (tags cross scope on purpose — they are declared, not inferred).
+  const toEntityDoc = (ref: DocRef): EntityDoc => ({
+    path: ref.path,
+    title: ref.title,
+    kind: ref.kind,
+    status: ref.status,
+    lastReviewed: ref.lastReviewed,
+  })
+  const linkedDocs = new Map<string, EntityDoc>()
+  const scopedDocRefs = duplicated ? allDocRefs.filter((ref) => ref.module === match.module) : allDocRefs
+  for (const ref of scopedDocRefs) {
+    if (ref.entities.some((name) => name.toLowerCase() === lower)) {
+      linkedDocs.set(ref.path, toEntityDoc(ref))
+    }
+  }
+  for (const tag of [...match.info.docsTags, ...controllerBundle.docsTags]) {
+    if (linkedDocs.has(tag)) continue
+    const ref = allDocRefs.find((candidate) => candidate.path === tag)
+    linkedDocs.set(tag, ref ? toEntityDoc(ref) : { path: tag })
+  }
+  const docs = [...linkedDocs.values()].sort((a, b) => a.path.localeCompare(b.path))
 
   return {
     entity,
@@ -334,6 +372,7 @@ export async function generateEntityContext(
     factories,
     seeders,
     tests,
+    docs,
   }
 }
 
@@ -418,6 +457,17 @@ export function renderEntityContextMarkdown(ctx: EntityContext): string {
   pushList('Factories', ctx.factories)
   pushList('Seeders', ctx.seeders)
   pushList('Tests', ctx.tests)
+
+  if (ctx.docs.length > 0) {
+    lines.push(`## Linked docs (${ctx.docs.length})`)
+    for (const doc of ctx.docs) {
+      const meta = [doc.kind, doc.status, doc.lastReviewed ? `reviewed ${doc.lastReviewed}` : undefined]
+        .filter(Boolean)
+        .join(', ')
+      lines.push(`- ${doc.path}${doc.title ? ` — ${doc.title}` : ''}${meta ? ` (${meta})` : ''}`)
+    }
+    lines.push('')
+  }
 
   return lines.join('\n')
 }
