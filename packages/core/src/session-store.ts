@@ -109,6 +109,15 @@ export class DatabaseSessionStore implements SessionStore {
   }
 
   /**
+   * Refresh an existing session's TTL with a single UPDATE — no data
+   * rewrite, no existence check. Updating a missing row is a no-op, never a
+   * resurrection.
+   */
+  async touch(id: string, ttlSeconds: number): Promise<void> {
+    await this.model.forceUpdate({ id }, { expiresAt: new Date(Date.now() + ttlSeconds * 1000) })
+  }
+
+  /**
    * Delete sessions whose expiration time has passed. Expired rows are
    * already treated as missing (and removed) by `read`; call this from a
    * scheduled job to keep the table small.

@@ -72,6 +72,15 @@ export class RedisSessionStore implements SessionStore {
   }
 
   /**
+   * Refresh an existing session's TTL without rewriting its data.
+   * EXPIRE on a missing key is a no-op, never a resurrection.
+   */
+  async touch(id: string, ttlSeconds: number): Promise<void> {
+    const key = this.prefix + id
+    await this.redis.expire(key, ttlSeconds)
+  }
+
+  /**
    * Get all session keys (for debugging/admin purposes).
    * Note: This uses SCAN to avoid blocking Redis.
    */

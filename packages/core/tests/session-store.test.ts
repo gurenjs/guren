@@ -87,6 +87,26 @@ describe('DatabaseSessionStore', () => {
     await store.destroy('abc')
   })
 
+  test('should refresh the TTL via touch without rewriting data', async () => {
+    await store.write('abc', { userId: 7 }, 1)
+
+    await store.touch('abc', 3600)
+
+    const row = sqlite.query("SELECT expires_at FROM sessions WHERE id = 'abc'").get() as {
+      expires_at: number
+    }
+    expect(row.expires_at).toBeGreaterThan(Date.now() + 3000_000)
+    expect(await store.read('abc')).toEqual({ userId: 7 })
+  })
+
+  test('should never resurrect a missing session via touch', async () => {
+    await store.touch('ghost', 3600)
+
+    expect(await store.read('ghost')).toBeUndefined()
+    const rows = sqlite.query('SELECT COUNT(*) as count FROM sessions').get() as { count: number }
+    expect(rows.count).toBe(0)
+  })
+
   test('should delete only expired rows in deleteExpired', async () => {
     await store.write('live', { userId: 1 }, 3600)
     await store.write('dead', { userId: 2 }, -10)
