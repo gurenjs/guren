@@ -207,6 +207,6 @@ codegen がインポートパスを書き換え、`pages.gen.ts` から同じ型
 - Props を追加・変更した後は `bun run codegen` を実行して `pages.gen.ts` を更新してください。
 
 ## ホットリロード
-`bun run dev` を実行するとフロントエンドとバックエンドが同期して動き、Bun が自動で Vite dev サーバーを起動するため TSX 変更は即時リロードされます。ワークフローを調整したい場合は `@guren/core/runtime` の `startViteDevServer()` を使って自前で Vite を制御できます。
+`bun run dev` を実行すると Bun が自動で Vite dev サーバーを起動するため、TSX の変更は即時リロードされます。対象はフロントエンドのみで、コントローラー・ルート・モデルといったバックエンドのファイルは監視されないため、それらの変更を反映するには開発サーバーを再起動してください。ワークフローを調整したい場合は `@guren/core/runtime` の `startViteDevServer()` を使って自前で Vite を制御できます。
 
 これらのパターンでページとコンポーネントを構成すれば、React と Inertia だけでミニマムなボイラープレートの SPA 体験を得られます。
