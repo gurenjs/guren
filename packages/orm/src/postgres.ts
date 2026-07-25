@@ -2,6 +2,7 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type postgres from 'postgres'
+import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { buildMigrationStatus, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders } from './seeder'
@@ -68,6 +69,10 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
   let migrationsPromise: Promise<void> | undefined
   let databasePromise: Promise<PostgresJsDatabase> | undefined
   let client: ReturnType<typeof postgres> | undefined
+  let activeKey: string | undefined
+  // Captured here, not in getDatabase(), so the caller of this factory is the
+  // frame that identifies the handle across hot reloads.
+  const callSite = new Error().stack
 
   function resolveConnectionString(): string {
     const value = typeof connectionString === 'function' ? connectionString() : connectionString
@@ -124,12 +129,23 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
       await migrateOnce()
       const { drizzle, postgres: postgresFactory } = await loadPostgresModules()
       const url = resolveConnectionString()
-      client = postgresFactory(url, {
+      // Held locally as well as in closure state: a newer evaluation may close
+      // this client while the await below is suspended, which clears `client`.
+      const activeClient = postgresFactory(url, {
         max: 1,
         ...clientOptions,
       })
+      client = activeClient
 
-      return drizzle({ client, ...(relations ? { relations } : {}) } as DrizzleConfig) as unknown as PostgresJsDatabase
+      activeKey = hotReloadKey('postgres', callSite, url)
+      if (activeKey) {
+        await replaceActiveConnection(activeKey, closeDatabase)
+      }
+
+      return drizzle({
+        client: activeClient,
+        ...(relations ? { relations } : {}),
+      } as DrizzleConfig) as unknown as PostgresJsDatabase
     })()
 
     databasePromise = promise.catch((error) => {
@@ -145,9 +161,18 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
       return
     }
 
-    await client.end({ timeout: 0 })
-    client = undefined
-    databasePromise = undefined
+    const key = activeKey
+    activeKey = undefined
+
+    try {
+      await client.end({ timeout: 0 })
+    } finally {
+      client = undefined
+      databasePromise = undefined
+      if (key) {
+        releaseActiveConnection(key, closeDatabase)
+      }
+    }
   }
 
   async function configureOrm(): Promise<void> {

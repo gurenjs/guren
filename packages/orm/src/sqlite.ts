@@ -1,5 +1,6 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { buildMigrationStatus, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders } from './seeder'
@@ -31,6 +32,10 @@ export interface SqliteDatabase {
   migrationStatus(): Promise<MigrationStatusEntry[]>
 }
 
+function isInMemory(dbPath: string): boolean {
+  return dbPath === ':memory:' || dbPath === '' || dbPath.startsWith('file::memory:')
+}
+
 export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteDatabase {
   const { migrationsFolder, filename, seedersFolder, relations } = options
 
@@ -44,8 +49,14 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
         : resolve(String(seedersFolder))
 
   let db: unknown
-  let sqliteClient: { query(sql: string): { all(): unknown[] }; exec(sql: string): void } | undefined
+  let sqliteClient:
+    | { query(sql: string): { all(): unknown[] }; exec(sql: string): void; close(): void }
+    | undefined
   let migrationsPromise: Promise<void> | undefined
+  let activeKey: string | undefined
+  // Captured here, not in ensureDatabase(), so the caller of this factory is
+  // the frame that identifies the handle across hot reloads.
+  const callSite = new Error().stack
 
   function resolveFilename(): string {
     const value = typeof filename === 'function' ? filename() : filename
@@ -73,8 +84,36 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
 
     const { drizzle } = await import('drizzle-orm/bun-sqlite')
     type DrizzleConfig = NonNullable<Exclude<Parameters<typeof drizzle>[0], string>>
-    db = drizzle({ client: sqlite, ...(relations ? { relations } : {}) } as DrizzleConfig)
-    return db
+    // Held locally as well as in closure state: a newer evaluation may close
+    // this handle while the await below is suspended, which clears `db`.
+    const database = drizzle({ client: sqlite, ...(relations ? { relations } : {}) } as DrizzleConfig)
+    db = database
+
+    // In-memory databases share no underlying file, so two of them are distinct
+    // handles even when every option matches — there is nothing to key them on.
+    activeKey = isInMemory(dbPath) ? undefined : hotReloadKey('sqlite', callSite, resolve(dbPath))
+    if (activeKey) {
+      await replaceActiveConnection(activeKey, closeDatabase)
+    }
+
+    return database
+  }
+
+  async function closeDatabase(): Promise<void> {
+    if (!db) return
+
+    const key = activeKey
+    activeKey = undefined
+
+    try {
+      sqliteClient?.close()
+    } finally {
+      db = undefined
+      sqliteClient = undefined
+      if (key) {
+        releaseActiveConnection(key, closeDatabase)
+      }
+    }
   }
 
   async function migrateOnce(): Promise<void> {
@@ -108,12 +147,7 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
 
     migrateDatabase: migrateOnce,
 
-    async closeDatabase() {
-      if (!db) return
-      // bun:sqlite Database doesn't need explicit close for WAL mode
-      db = undefined
-      sqliteClient = undefined
-    },
+    closeDatabase,
 
     async resetDatabase() {
       await ensureDatabase()
