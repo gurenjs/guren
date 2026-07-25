@@ -1,7 +1,8 @@
 process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 
-import { describe, expect, it } from 'bun:test'
+import { afterEach, describe, expect, it } from 'bun:test'
 import { Hono } from 'hono'
+import { MCP_ENDPOINT_PATH } from '../../../src/mcp/endpoint'
 import {
   createCsrfMiddleware,
   CSRF_FORM_FIELD,
@@ -22,6 +23,12 @@ function createTestApp(csrfOptions?: Parameters<typeof createCsrfMiddleware>[0])
   app.use(createCsrfMiddleware(csrfOptions))
   return app
 }
+
+const originalEnv = { ...process.env }
+
+afterEach(() => {
+  process.env = { ...originalEnv }
+})
 
 function extractCookie(res: Response): string {
   // When multiple Set-Cookie headers exist (session + XSRF-TOKEN),
@@ -296,6 +303,43 @@ describe('createCsrfMiddleware', () => {
     // Non-excluded path should still require token
     const dataRes = await app.request('/api/data', { method: 'POST' })
     expect(dataRes.status).toBe(403)
+  })
+
+  it('exempts the MCP endpoint while it is mounted', async () => {
+    process.env.GUREN_MCP = '1'
+
+    const app = createTestApp()
+    app.post(MCP_ENDPOINT_PATH, (c) => c.text('jsonrpc'))
+    app.post('/_guren/other', (c) => c.text('other'))
+
+    // MCP clients POST JSON-RPC without ever fetching a token.
+    const mcpRes = await app.request(MCP_ENDPOINT_PATH, { method: 'POST' })
+    expect(mcpRes.status).toBe(200)
+
+    // The exemption is the endpoint itself, not the whole namespace.
+    const otherRes = await app.request('/_guren/other', { method: 'POST' })
+    expect(otherRes.status).toBe(403)
+  })
+
+  it('protects the MCP path when the endpoint is not mounted', async () => {
+    delete process.env.GUREN_MCP
+
+    const app = createTestApp()
+    app.post(MCP_ENDPOINT_PATH, (c) => c.text('jsonrpc'))
+
+    const res = await app.request(MCP_ENDPOINT_PATH, { method: 'POST' })
+    expect(res.status).toBe(403)
+  })
+
+  it('protects the MCP path in production', async () => {
+    process.env.GUREN_MCP = '1'
+    process.env.NODE_ENV = 'production'
+
+    const app = createTestApp()
+    app.post(MCP_ENDPOINT_PATH, (c) => c.text('jsonrpc'))
+
+    const res = await app.request(MCP_ENDPOINT_PATH, { method: 'POST' })
+    expect(res.status).toBe(403)
   })
 
   it('uses custom error handler when provided', async () => {

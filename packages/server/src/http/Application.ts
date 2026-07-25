@@ -13,6 +13,7 @@ import { SessionGuard } from '../auth/SessionGuard'
 import type { CreateSessionMiddlewareOptions } from './middleware/session'
 import { createSecurityHeaders, type SecurityHeadersOptions } from './middleware/security-headers'
 import { createHostAuthorizationMiddleware, type HostAuthorizationOptions } from './middleware/host-authorization'
+import { isMcpEndpointEnabled } from '../mcp/endpoint'
 import { logDevServerBanner, type DevBannerOptions } from './dev-banner'
 import { startViteDevServer, type StartViteDevServerOptions } from './vite-dev-server'
 
@@ -23,12 +24,15 @@ declare const Bun:
     serve(options: {
       port?: number
       hostname?: string
-      fetch: (request: Request) => Response | Promise<Response>
-    }): { stop?: (closeConnections?: boolean) => void | Promise<void> } | undefined
+      fetch: (request: Request, server: BunServer) => Response | Promise<Response>
+    }): BunServer | undefined
   }
   | undefined
 
-type BunServer = { stop?: (closeConnections?: boolean) => void | Promise<void> }
+type BunServer = {
+  stop?: (closeConnections?: boolean) => void | Promise<void>
+  requestIP?: (request: Request) => { address?: string } | null
+}
 type ViteServer = Awaited<ReturnType<typeof startViteDevServer>>['server']
 const MANAGED_VITE_ENV_FLAG = 'GUREN_MANAGED_VITE_DEV_SERVER'
 const DEFAULT_DEV_ENTRY_PATH = '/resources/js/dev-entry.ts'
@@ -362,16 +366,11 @@ export class Application {
   }
 
   /**
-   * Mounts the MCP endpoint at /_guren/mcp when explicitly enabled.
-   * Requires GUREN_MCP=1 environment variable. Never active in production.
+   * Mounts the MCP endpoint at /_guren/mcp when enabled.
    * This allows AI coding agents to introspect the project.
    */
   private async mountMcpEndpoint(): Promise<void> {
-    if (
-      typeof process === 'undefined' ||
-      process.env?.NODE_ENV === 'production' ||
-      process.env?.GUREN_MCP !== '1'
-    ) {
+    if (!isMcpEndpointEnabled()) {
       return
     }
 
@@ -447,7 +446,10 @@ export class Application {
     const server = Bun.serve({
       port,
       hostname,
-      fetch: (request: Request) => this.fetch(request),
+      // `{ server }` is Bun's convention for reaching the live server from a
+      // handler; middleware reads `ctx.env.server.requestIP()` through it to
+      // learn the socket peer (the MCP access guard, the rate limiter).
+      fetch: (request: Request, server: BunServer) => this.fetch(request, { server }),
     })
     this.bunServer = server
     setActiveBunServer(server)

@@ -33,6 +33,13 @@ export interface AgentHarnessOptions {
 export interface AgentHarnessResult {
   written: string[]
   skipped: string[]
+  /**
+   * True when the installed `.mcp.json` points at an endpoint no script in the
+   * app enables. The endpoint is opt-in via `GUREN_MCP=1`; apps scaffolded
+   * before that landed have a `dev` script that never sets it, so their agent
+   * config would silently fail to connect.
+   */
+  mcpEndpointNotEnabled: boolean
 }
 
 function toTitleCase(value: string): string {
@@ -62,6 +69,22 @@ async function resolveAppTitle(cwd: string): Promise<string> {
     // fall through to directory name
   }
   return toTitleCase(basename(cwd))
+}
+
+/**
+ * Whether any npm script turns the MCP endpoint on.
+ *
+ * Unreadable or malformed `package.json` counts as "enabled" — staying quiet
+ * beats nagging about a file we could not inspect.
+ */
+async function scriptsEnableMcp(cwd: string): Promise<boolean> {
+  try {
+    const raw = await readFile(join(cwd, 'package.json'), 'utf8')
+    const pkg = JSON.parse(raw) as { scripts?: Record<string, string> }
+    return Object.values(pkg.scripts ?? {}).some((script) => script.includes('GUREN_MCP=1'))
+  } catch {
+    return true
+  }
 }
 
 export async function installAgentHarness(options: AgentHarnessOptions = {}): Promise<AgentHarnessResult> {
@@ -99,5 +122,5 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
     written.push(relPath)
   }
 
-  return { written, skipped }
+  return { written, skipped, mcpEndpointNotEnabled: !(await scriptsEnableMcp(cwd)) }
 }

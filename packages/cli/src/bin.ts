@@ -1829,6 +1829,12 @@ function reportAgentHarnessResult(result: AgentHarnessResult): void {
   if (result.skipped.length > 0) {
     consola.info(`Skipped ${result.skipped.length} existing file(s): ${result.skipped.join(', ')}`)
   }
+  if (result.mcpEndpointNotEnabled) {
+    consola.info(
+      '.mcp.json points at the dev server MCP endpoint, which is opt-in. ' +
+      'Add `GUREN_MCP=1` to your `dev` script, or start the server with `GUREN_MCP=1 bun run dev`.',
+    )
+  }
 }
 
 const agentInitCommand = defineCommand({
