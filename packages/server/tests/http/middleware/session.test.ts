@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, it } from 'bun:test'
+import { afterEach, describe, expect, it, spyOn, type Mock } from 'bun:test'
 import { Hono } from 'hono'
 import {
   createSessionMiddleware,
   getSessionFromContext,
   MemorySessionStore,
+  type SessionStore,
 } from '../../../src/http/middleware/session'
 
 const APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
@@ -54,6 +55,30 @@ describe('MemorySessionStore', () => {
     expect(await store.read('session-1')).toBeUndefined()
   })
 
+  it('refreshes the TTL of a live entry via touch', async () => {
+    let currentTime = 1000
+    const store = new MemorySessionStore(() => currentTime)
+
+    await store.write('session-1', { user: 'Alice' }, 60)
+    currentTime = 1000 + 50 * 1000
+    await store.touch('session-1', 60)
+
+    // Past the original expiry, still alive thanks to the refresh.
+    currentTime = 1000 + 90 * 1000
+    expect(await store.read('session-1')).toEqual({ user: 'Alice' })
+  })
+
+  it('never revives an expired entry via touch', async () => {
+    let currentTime = 1000
+    const store = new MemorySessionStore(() => currentTime)
+
+    await store.write('session-1', { user: 'Alice' }, 60)
+    currentTime = 1000 + 61 * 1000
+    await store.touch('session-1', 3600)
+
+    expect(await store.read('session-1')).toBeUndefined()
+  })
+
   it('returns a copy of session data to prevent mutation', async () => {
     const store = new MemorySessionStore()
 
@@ -93,8 +118,21 @@ describe('createSessionMiddleware', () => {
     expect(sessionId).toBeDefined()
     expect(isNew).toBe(true)
 
-    const setCookie = res.headers.get('set-cookie')
-    expect(setCookie).toContain('guren.session=')
+    // An untouched new session is not persisted and issues no cookie.
+    expect(res.headers.get('set-cookie')).toBeNull()
+  })
+
+  it('issues a cookie once a new session stores data', async () => {
+    const app = createTestApp()
+
+    app.get('/test', (c) => {
+      getSessionFromContext(c)?.set('visited', true)
+      return c.text('ok')
+    })
+
+    const res = await app.request('/test')
+
+    expect(res.headers.get('set-cookie')).toContain('guren.session=')
   })
 
   it('reuses existing session when cookie is present', async () => {
@@ -350,7 +388,10 @@ describe('createSessionMiddleware', () => {
   it('respects custom cookie name', async () => {
     const app = createTestApp({ cookieName: 'my_session' })
 
-    app.get('/test', (c) => c.text('ok'))
+    app.get('/test', (c) => {
+      getSessionFromContext(c)?.set('visited', true)
+      return c.text('ok')
+    })
 
     const res = await app.request('/test')
     const setCookie = res.headers.get('set-cookie')
@@ -366,7 +407,10 @@ describe('createSessionMiddleware', () => {
       cookieHttpOnly: true,
     })
 
-    app.get('/test', (c) => c.text('ok'))
+    app.get('/test', (c) => {
+      getSessionFromContext(c)?.set('visited', true)
+      return c.text('ok')
+    })
 
     const res = await app.request('/test')
     const setCookie = res.headers.get('set-cookie')
@@ -374,6 +418,141 @@ describe('createSessionMiddleware', () => {
     expect(setCookie).toContain('Path=/api')
     expect(setCookie).toContain('SameSite=Strict')
     expect(setCookie).toContain('HttpOnly')
+  })
+})
+
+describe('session write volume', () => {
+  function createSpiedStore() {
+    const store = new MemorySessionStore()
+    return {
+      store,
+      writes: spyOn(store, 'write'),
+      touches: spyOn(store, 'touch'),
+      destroys: spyOn(store, 'destroy'),
+    }
+  }
+
+  // A store without touch support exercises the full-write fallback.
+  function createNoTouchStore() {
+    const inner = new MemorySessionStore()
+    const store: SessionStore = {
+      read: (id) => inner.read(id),
+      write: (id, data, ttlSeconds) => inner.write(id, data, ttlSeconds),
+      destroy: (id) => inner.destroy(id),
+    }
+    return { store, writes: spyOn(store, 'write') }
+  }
+
+  // Hono forbids adding routes once a request has been handled, so every
+  // route is registered up front and /login establishes the session.
+  function createCountingApp(store: SessionStore) {
+    const app = new Hono()
+    app.use('*', createSessionMiddleware({ store }))
+    app.get('/login', (c) => {
+      getSessionFromContext(c)?.set('userId', 7)
+      return c.text('ok')
+    })
+    app.get('/page', (c) => c.text('ok'))
+    app.get('/update', (c) => {
+      getSessionFromContext(c)?.set('theme', 'dark')
+      return c.text('ok')
+    })
+    app.get('/flash', (c) => {
+      getSessionFromContext(c)?.flash('status', 'saved')
+      return c.text('ok')
+    })
+    app.get('/rotate', (c) => {
+      getSessionFromContext(c)?.regenerate()
+      return c.text('ok')
+    })
+    return app
+  }
+
+  async function establishSession(app: Hono, writes: Mock<SessionStore['write']>): Promise<string> {
+    const res = await app.request('/login')
+    const cookie = res.headers.get('set-cookie')?.split(';')[0]
+    if (!cookie) throw new Error('expected session cookie')
+    writes.mockClear()
+    return cookie
+  }
+
+  it('performs zero store operations for an anonymous GET that never touches the session', async () => {
+    const { store, writes, touches, destroys } = createSpiedStore()
+    const app = createCountingApp(store)
+
+    await app.request('/page')
+    await app.request('/page')
+
+    expect(writes).toHaveBeenCalledTimes(0)
+    expect(touches).toHaveBeenCalledTimes(0)
+    expect(destroys).toHaveBeenCalledTimes(0)
+  })
+
+  it('refreshes an unchanged session with touch instead of a full write', async () => {
+    const { store, writes, touches } = createSpiedStore()
+    const app = createCountingApp(store)
+    const cookie = await establishSession(app, writes)
+
+    const res = await app.request('/page', { headers: { Cookie: cookie } })
+
+    expect(writes).toHaveBeenCalledTimes(0)
+    expect(touches).toHaveBeenCalledTimes(1)
+    // The rolling cookie is still refreshed.
+    expect(res.headers.get('set-cookie')).toContain('guren.session=')
+  })
+
+  it('falls back to a full write for stores without touch support', async () => {
+    const { store, writes } = createNoTouchStore()
+    const app = createCountingApp(store)
+    const cookie = await establishSession(app, writes)
+
+    await app.request('/page', { headers: { Cookie: cookie } })
+
+    expect(writes).toHaveBeenCalledTimes(1)
+  })
+
+  it('writes once when session data changes', async () => {
+    const { store, writes, touches } = createSpiedStore()
+    const app = createCountingApp(store)
+    const cookie = await establishSession(app, writes)
+
+    await app.request('/update', { headers: { Cookie: cookie } })
+
+    expect(writes).toHaveBeenCalledTimes(1)
+    expect(touches).toHaveBeenCalledTimes(0)
+  })
+
+  it('writes while flash data ages out, then returns to touch-only', async () => {
+    const { store, writes, touches } = createSpiedStore()
+    const app = createCountingApp(store)
+    const cookie = await establishSession(app, writes)
+
+    await app.request('/flash', { headers: { Cookie: cookie } })
+    expect(writes).toHaveBeenCalledTimes(1)
+
+    // Aging moves new -> old: write.
+    await app.request('/page', { headers: { Cookie: cookie } })
+    expect(writes).toHaveBeenCalledTimes(2)
+
+    // Aging clears the consumed old bag: final write.
+    await app.request('/page', { headers: { Cookie: cookie } })
+    expect(writes).toHaveBeenCalledTimes(3)
+
+    // Flash fully drained: back to touch-only.
+    await app.request('/page', { headers: { Cookie: cookie } })
+    expect(writes).toHaveBeenCalledTimes(3)
+    expect(touches).toHaveBeenCalledTimes(1)
+  })
+
+  it('writes the new id and destroys the old one on regeneration', async () => {
+    const { store, writes, destroys } = createSpiedStore()
+    const app = createCountingApp(store)
+    const cookie = await establishSession(app, writes)
+
+    await app.request('/rotate', { headers: { Cookie: cookie } })
+
+    expect(writes).toHaveBeenCalledTimes(1)
+    expect(destroys).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -394,6 +573,23 @@ describe('X-Testing-Session hydration', () => {
     app.get('/session', (c) => c.json(getSessionFromContext(c)?.all() ?? {}))
     return app
   }
+
+  it('persists a new session hydrated with testing data', async () => {
+    process.env.GUREN_TESTING = '1'
+    const store = new MemorySessionStore()
+    const app = createTestApp({ store })
+    const writes = spyOn(store, 'write')
+
+    const res = await app.request('/session', {
+      headers: { 'X-Testing-Session': JSON.stringify({ userId: 7 }) },
+    })
+
+    // Hydrated content counts as content: the empty-new-session rule must
+    // not drop testing sessions.
+    expect(await res.json()).toEqual({ userId: 7 })
+    expect(writes).toHaveBeenCalledTimes(1)
+    expect(res.headers.get('set-cookie')).toContain('guren.session=')
+  })
 
   it('hydrates session from header when GUREN_TESTING is set', async () => {
     process.env.GUREN_TESTING = '1'

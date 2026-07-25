@@ -80,7 +80,7 @@ export class DatabaseSessionStore implements SessionStore {
   async write(id: string, data: SessionData, ttlSeconds: number): Promise<void> {
     const payload = {
       data: this.dataMode === 'text' ? JSON.stringify(data) : data,
-      expiresAt: new Date(Date.now() + ttlSeconds * 1000),
+      expiresAt: this.expiryDate(ttlSeconds),
     }
 
     const existing = await this.model.where({ id }).first()
@@ -109,6 +109,20 @@ export class DatabaseSessionStore implements SessionStore {
   }
 
   /**
+   * Refresh an existing session's TTL with a single conditional UPDATE — no
+   * data rewrite, no existence check. Missing rows and rows that have
+   * already expired (but not yet been swept) are left untouched, never
+   * resurrected — matching the `SessionStore.touch` contract and the memory
+   * store's behavior.
+   */
+  async touch(id: string, ttlSeconds: number): Promise<void> {
+    await this.model
+      .where({ id })
+      .where('expiresAt', '>', new Date())
+      .forceUpdate({ expiresAt: this.expiryDate(ttlSeconds) })
+  }
+
+  /**
    * Delete sessions whose expiration time has passed. Expired rows are
    * already treated as missing (and removed) by `read`; call this from a
    * scheduled job to keep the table small.
@@ -119,5 +133,9 @@ export class DatabaseSessionStore implements SessionStore {
 
   private deserialize(record: PlainObject): SessionData {
     return decodeJsonColumn<SessionData>(record.data, {})
+  }
+
+  private expiryDate(ttlSeconds: number): Date {
+    return new Date(Date.now() + ttlSeconds * 1000)
   }
 }

@@ -19,6 +19,14 @@ export interface SessionStore {
    * Destroy a session. Implementations must treat repeated calls as safe.
    */
   destroy(id: string): Promise<void>
+  /**
+   * Optional: refresh an existing session's TTL without rewriting its data.
+   * The middleware uses this for unchanged sessions (rolling expiry); stores
+   * that omit it fall back to a full `write`. Refreshing a session that no
+   * longer exists — including one that has expired but not yet been swept
+   * from storage — must be a no-op, not a resurrection.
+   */
+  touch?(id: string, ttlSeconds: number): Promise<void>
 }
 
 export class MemorySessionStore implements SessionStore {
@@ -47,6 +55,14 @@ export class MemorySessionStore implements SessionStore {
 
   async destroy(id: string): Promise<void> {
     this.store.delete(id)
+  }
+
+  async touch(id: string, ttlSeconds: number): Promise<void> {
+    const entry = this.store.get(id)
+    if (!entry || entry.expiresAt <= this.now()) {
+      return
+    }
+    entry.expiresAt = this.now() + ttlSeconds * 1000
   }
 }
 
@@ -79,6 +95,14 @@ export interface Session {
   forget(key: string): void
   flush(): void
   all(): SessionData
+  /**
+   * Rotate the session id (call after login to mitigate session fixation).
+   * The new id is persisted and the old one destroyed at request end. Known
+   * limitation shared by every multi-process store: a concurrent request
+   * still carrying the old cookie can re-persist the old id afterwards; the
+   * resurrected row holds only pre-rotation data (no auth state), so
+   * fixation does not escalate, but the row can linger until it expires.
+   */
   regenerate(): void
   invalidate(): void
   flash(key: string, value: unknown): void
@@ -191,11 +215,16 @@ class SessionImpl implements Session {
   /**
    * Age flash data: move `new` → `old`, clear previous `old`.
    * Called at the start of each request by the session middleware.
+   * Only dirties the session when there was flash data to age — otherwise
+   * every request carrying a session would persist unconditionally.
    */
   ageFlashData(): void {
+    const hadFlash = this.hasFlash()
     this._flash.old = { ...this._flash.new }
     this._flash.new = {}
-    this.dirty = true
+    if (hadFlash) {
+      this.dirty = true
+    }
   }
 
   markTouched(): void {
@@ -211,13 +240,24 @@ class SessionImpl implements Session {
   }
 
   shouldPersist(): boolean {
-    return this.dirty || this.isNew
+    // Empty brand-new sessions are not persisted: an anonymous request that
+    // never stores anything must not cost a database write (or a cookie).
+    return this.dirty || (this.isNew && this.hasContent())
+  }
+
+  private hasContent(): boolean {
+    return Object.keys(this.data).length > 0 || this.hasFlash()
+  }
+
+  private hasFlash(): boolean {
+    return (
+      Object.keys(this._flash.new).length > 0 ||
+      Object.keys(this._flash.old).length > 0
+    )
   }
 
   snapshot(): SessionData {
-    const hasFlash =
-      Object.keys(this._flash.new).length > 0 ||
-      Object.keys(this._flash.old).length > 0
+    const hasFlash = this.hasFlash()
     return {
       ...this.data,
       ...(hasFlash ? { _flash: { new: { ...this._flash.new }, old: { ...this._flash.old } } } : {}),
@@ -362,7 +402,13 @@ export function createSessionMiddleware(options: CreateSessionMiddlewareOptions 
 
       if (!session.shouldPersist()) {
         if (existingId) {
-          await store.write(existingId, session.snapshot(), ttlSeconds)
+          // Rolling expiry for an unchanged session: a TTL refresh, not a
+          // full rewrite, when the store supports it.
+          if (store.touch) {
+            await store.touch(existingId, ttlSeconds)
+          } else {
+            await store.write(existingId, session.snapshot(), ttlSeconds)
+          }
 
           setCookie(ctx, cookieName, signer.sign(existingId), {
             path: cookiePath,
@@ -378,6 +424,11 @@ export function createSessionMiddleware(options: CreateSessionMiddlewareOptions 
 
       const nextId = session.id
       await store.write(nextId, session.snapshot(), ttlSeconds)
+      // Known limitation shared by every multi-process store: a concurrent
+      // request still carrying the old cookie can re-persist the old id
+      // after this destroy. The resurrected session holds only pre-rotation
+      // data (no auth state), so fixation does not escalate, but the row can
+      // reappear until it expires.
       if (session.wasRegenerated() && session.originalSessionId() !== nextId) {
         await store.destroy(session.originalSessionId())
       }
