@@ -80,6 +80,13 @@ export async function addImport(
 export async function addProvider(
   filePath: string,
   providerName: string,
+  /**
+   * Custom "already registered" check over the existing array entries.
+   * Defaults to exact-match against `providerName`; factory registrations
+   * pass a prefix check so a configured call like `vercelPlugin({ ... })`
+   * counts as registered.
+   */
+  isRegistered?: (entries: string[]) => boolean,
 ): Promise<PatchResult> {
   const absolutePath = resolve(process.cwd(), filePath)
   let content: string
@@ -107,7 +114,10 @@ export async function addProvider(
     .map(p => p.trim())
     .filter(p => p.length > 0)
 
-  if (providers.some(p => p === providerName)) {
+  const alreadyRegistered = isRegistered
+    ? isRegistered(providers)
+    : providers.some(p => p === providerName)
+  if (alreadyRegistered) {
     return { modified: false, reason: 'Provider already registered' }
   }
 

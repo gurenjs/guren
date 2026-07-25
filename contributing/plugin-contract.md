@@ -75,6 +75,8 @@ export { AnalyticsServiceProvider } from './AnalyticsServiceProvider'
 ```
 
 > **Note:** `bunx guren plugin <pkg>` registers the class export named by `gurenPlugin.provider`. The `{PascalPkg}Provider` name heuristic is only used as a fallback for packages with **no `gurenPlugin` manifest at all** (legacy plugins predating the manifest). If a manifest exists but omits `provider` — the case for `definePlugin()` factories, which must be called with their configuration — the CLI does **not** guess a name; it skips automatic registration and prints a reminder to register the export manually in `createApp({ providers })`.
+>
+> **Official-plugin exception:** the CLI ships a table of official plugins whose primary export is a *zero-config* `definePlugin()` factory (`@guren/plugin-vercel` → `vercelPlugin()`, `@guren/plugin-cloudflare` → `cloudflarePlugin()`) and auto-registers those as call expressions, e.g. `providers: [vercelPlugin()]`. The table exists because the documented flow runs `guren plugin <pkg>` *before* `bun add <pkg>`, when no manifest is readable yet; it is not open to third-party packages. Precedence: an installed manifest that declares `provider` (a stale class-shaped release) always wins over the table, and an existing configured call (e.g. `vercelPlugin({ ... })`) counts as already registered.
 
 ### Recommended: the `definePlugin()` Helper
 
