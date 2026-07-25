@@ -261,6 +261,85 @@ export default class PostController extends Controller {
     }
   })
 
+  it('accepts a co-located test next to a nested controller', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-colocated-test-')
+
+    try {
+      await mkdir(join(workspace.dir, 'app/Http/Controllers/Auth'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Http/Controllers/Auth/OAuthController.ts'),
+        `export default class OAuthController {\n  async callback() { return null }\n}`,
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'app/Http/Controllers/Auth/OAuthController.test.ts'),
+        `test('callback', () => {})`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      const testCheck = report.checks.find(c => c.key === 'test:OAuthController')
+      expect(testCheck).toBeDefined()
+      expect(testCheck!.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('accepts a co-located test next to a module controller', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-module-colocated-test-')
+
+    try {
+      await mkdir(join(workspace.dir, 'modules/blog/app/Http/Controllers/Auth'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'modules/blog/app/Http/Controllers/Auth/OAuthController.ts'),
+        `export default class OAuthController {\n  async callback() { return null }\n}`,
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'modules/blog/app/Http/Controllers/Auth/OAuthController.test.ts'),
+        `test('callback', () => {})`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      const testCheck = report.checks.find(c => c.key === 'test:OAuthController')
+      expect(testCheck).toBeDefined()
+      expect(testCheck!.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('does not treat controller test files as controllers', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-test-not-controller-')
+
+    try {
+      await mkdir(join(workspace.dir, 'modules/blog/app/Http/Controllers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'modules/blog/app/Http/Controllers/BlogController.ts'),
+        `export default class BlogController {\n  async index() { return null }\n}`,
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'modules/blog/app/Http/Controllers/BlogController.test.ts'),
+        `test('index', () => {})`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      expect(report.checks.some(c => c.key === 'test:BlogController.test')).toBe(false)
+      expect(report.checks.every(c => !c.key.endsWith('.test'))).toBe(true)
+      const testCheck = report.checks.find(c => c.key === 'test:BlogController')
+      expect(testCheck!.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('suggests --module in the make:test hint for a module controller missing a test', async () => {
     const workspace = await createTempWorkspace('guren-cli-check-module-test-missing-')
 

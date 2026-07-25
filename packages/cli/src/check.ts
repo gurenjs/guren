@@ -5,6 +5,7 @@ import {
   discoverControllerFiles,
   discoverModelFiles,
   fileExists,
+  hasControllerTest,
   classNameFromPath,
   toPosixRelative,
   listModuleNames,
@@ -148,19 +149,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     for (const filePath of controllerFiles) {
       const name = classNameFromPath(filePath)
       const moduleName = moduleNameFor(cwd, filePath)
-      const prefix = moduleName ? `modules/${moduleName}/` : ''
-      const testCandidates = [
-        `${prefix}tests/controllers/${name}.test.ts`,
-        `${prefix}tests/${name}.test.ts`,
-        `${prefix}app/Http/Controllers/${name}.test.ts`,
-      ]
-      let hasTest = false
-      for (const candidate of testCandidates) {
-        if (await fileExists(cwd, candidate)) {
-          hasTest = true
-          break
-        }
-      }
+      const hasTest = await hasControllerTest(cwd, filePath)
       const moduleFlag = moduleName ? ` --module ${moduleName}` : ''
       checks.push(
         check(

@@ -1,5 +1,5 @@
 import { readdir, access, readFile, stat } from 'node:fs/promises'
-import { resolve, join, extname, relative, sep } from 'node:path'
+import { resolve, join, dirname, extname, relative, sep } from 'node:path'
 
 const SOURCE_EXTENSIONS = new Set(['.ts', '.mts', '.js', '.mjs'])
 const TEST_FILE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.js', '.jsx', '.mjs'])
@@ -135,11 +135,15 @@ async function listModuleDirs(appRoot: string): Promise<string[]> {
  * discovered by `listModuleDirs` — the single fan-out point that makes
  * every `discover*Files` function below (and everything built on them:
  * `check`, `audit`, `context`, `model:list`, `doctor`) module-aware for free.
+ *
+ * Test files are excluded: components are frequently tested by a co-located
+ * `<Name>.test.ts` sibling, and those files are tests, not components of the
+ * kind each `discover*Files` function reports.
  */
 async function discoverDir(appRoot: string, subDir: string): Promise<string[]> {
   const roots = [appRoot, ...(await listModuleDirs(appRoot))]
   const groups = await Promise.all(roots.map((root) => collectFiles(resolve(root, subDir))))
-  return groups.flat()
+  return groups.flat().filter((file) => !TEST_FILE_PATTERN.test(file))
 }
 
 export function discoverModelFiles(appRoot: string): Promise<string[]> {
@@ -187,6 +191,32 @@ export function discoverPolicyFiles(appRoot: string): Promise<string[]> {
 export async function discoverTestFiles(appRoot: string): Promise<string[]> {
   const files = await collectFiles(appRoot, TEST_FILE_EXTENSIONS, NON_SOURCE_DIR_NAMES)
   return files.filter((file) => TEST_FILE_PATTERN.test(file))
+}
+
+/**
+ * Paths that would satisfy "this controller has a test", in probe order:
+ * the co-located `<Name>.test.ts` sibling first, then the `tests/` layouts
+ * scaffolded apps use. Co-location is the only option for a controller
+ * inside `modules/<name>/`, since the module boundary check forbids the
+ * project-root `tests/` from importing module internals.
+ */
+export function controllerTestCandidates(cwd: string, controllerPath: string): string[] {
+  const name = classNameFromPath(controllerPath)
+  const moduleName = moduleNameFromRelPath(toPosixRelative(cwd, controllerPath))
+  const prefix = moduleName ? `modules/${moduleName}/` : ''
+
+  return [
+    join(dirname(controllerPath), `${name}.test.ts`),
+    `${prefix}tests/controllers/${name}.test.ts`,
+    `${prefix}tests/${name}.test.ts`,
+  ]
+}
+
+export async function hasControllerTest(cwd: string, controllerPath: string): Promise<boolean> {
+  for (const candidate of controllerTestCandidates(cwd, controllerPath)) {
+    if (await fileExists(cwd, candidate)) return true
+  }
+  return false
 }
 
 /**
