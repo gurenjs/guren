@@ -194,7 +194,7 @@ export async function discoverTestFiles(appRoot: string): Promise<string[]> {
  * e.g., '/app/Models/Post.ts' → 'Post'
  */
 export function classNameFromPath(filePath: string): string {
-  const base = filePath.split('/').pop() ?? ''
+  const base = filePath.split(/[\\/]/).pop() ?? ''
   return base.replace(/\.(ts|mts|js|mjs)$/, '')
 }
 

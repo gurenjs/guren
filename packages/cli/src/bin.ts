@@ -1638,7 +1638,7 @@ const contextCommand = defineCommand({
     },
     module: {
       type: 'string',
-      description: 'Module name to disambiguate same-named models (entity mode only).',
+      description: 'Module name to disambiguate same-named models; "app" selects the application root (entity mode only).',
     },
   },
   async run({ args }) {

@@ -1,12 +1,12 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { describe, expect, it } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
 import {
   generateEntityContext,
   renderEntityContextMarkdown,
   EntityResolutionError,
 } from '../src/entity-context'
-import { createTempWorkspace } from './helpers'
+import { createTempWorkspace, type TempWorkspace } from './helpers'
 
 async function writeBlogFixture(dir: string): Promise<void> {
   await mkdir(join(dir, 'app/Models'), { recursive: true })
@@ -16,6 +16,7 @@ async function writeBlogFixture(dir: string): Promise<void> {
   await mkdir(join(dir, 'routes'), { recursive: true })
   await mkdir(join(dir, 'resources/js/pages/posts'), { recursive: true })
   await mkdir(join(dir, 'db/seeders'), { recursive: true })
+  await mkdir(join(dir, 'db/factories'), { recursive: true })
   await mkdir(join(dir, 'tests/controllers'), { recursive: true })
 
   await writeFile(join(dir, 'package.json'), '{}', 'utf8')
@@ -97,7 +98,13 @@ export function registerWebRoutes(router: Router): void {
 
   await writeFile(
     join(dir, 'app/Http/Controllers/PostController.ts'),
-    `export class PostController {
+    `class UnexportedHelper {
+  irrelevant() {
+    return null
+  }
+}
+
+export class PostController {
   async index() {
     return this.inertia('posts/Index', { posts: [] })
   }
@@ -145,174 +152,182 @@ export default function Index({ posts }: Props) {
     'utf8',
   )
   await writeFile(
+    join(dir, 'db/factories/PostFactory.ts'),
+    'export default class PostFactory {}\n',
+    'utf8',
+  )
+  await writeFile(
     join(dir, 'tests/controllers/PostController.test.ts'),
     'import { test } from "bun:test"\ntest("noop", () => {})\n',
     'utf8',
   )
 }
 
-describe('generateEntityContext', () => {
-  it('joins model, routes, controller, pages, resource, policy, seeders, and tests', async () => {
-    const workspace = await createTempWorkspace('guren-cli-entity-context-')
+// The blog fixture is read-only for every test in this file, so one shared
+// workspace serves them all (createTempWorkspace chdirs; tests run serially).
+describe('entity context (blog fixture)', () => {
+  let workspace: TempWorkspace
 
-    try {
-      await writeBlogFixture(workspace.dir)
+  beforeAll(async () => {
+    workspace = await createTempWorkspace('guren-cli-entity-context-')
+    await writeBlogFixture(workspace.dir)
+  })
 
-      const ctx = await generateEntityContext('Post', { cwd: workspace.dir })
+  afterAll(async () => {
+    await workspace.cleanup()
+  })
 
-      expect(ctx.entity).toBe('Post')
-      expect(ctx.module).toBeUndefined()
+  it('joins model, routes, controller, pages, resource, policy, factories, seeders, and tests', async () => {
+    const ctx = await generateEntityContext('Post', { cwd: workspace.dir })
 
-      expect(ctx.model.filePath).toBe('app/Models/Post.ts')
-      expect(ctx.model.tableName).toBe('posts')
-      expect(ctx.model.columns).toEqual(['id', 'title', 'authorId'])
-      expect(ctx.model.relationships).toEqual([
-        { name: 'author', type: 'belongsTo', relatedModel: 'User' },
-      ])
+    expect(ctx.entity).toBe('Post')
+    expect(ctx.module).toBeUndefined()
 
-      // posts.index via controller-name convention, posts.show via bind — not /about
-      expect(ctx.routes).toHaveLength(2)
-      expect(ctx.routes.map((r) => r.name).sort()).toEqual(['posts.index', 'posts.show'])
-      const show = ctx.routes.find((r) => r.name === 'posts.show')
-      expect(show?.bindings).toEqual({ id: 'Post' })
-      expect(show?.controller).toEqual({ name: 'PostController', action: 'show' })
+    expect(ctx.model.filePath).toBe('app/Models/Post.ts')
+    expect(ctx.model.tableName).toBe('posts')
+    expect(ctx.model.columns).toEqual(['id', 'title', 'authorId'])
+    expect(ctx.model.relationships).toEqual([
+      { name: 'author', type: 'belongsTo', relatedModel: 'User' },
+    ])
 
-      expect(ctx.controller?.filePath).toBe('app/Http/Controllers/PostController.ts')
-      expect(ctx.controller?.actions).toEqual(['index', 'show'])
+    // posts.index via controller-name convention, posts.show via bind — not /about
+    expect(ctx.routes).toHaveLength(2)
+    expect(ctx.routes.map((r) => r.name).sort()).toEqual(['posts.index', 'posts.show'])
+    const show = ctx.routes.find((r) => r.name === 'posts.show')
+    expect(show?.bindings).toEqual({ id: 'Post' })
+    expect(show?.controller).toEqual({ name: 'PostController', action: 'show' })
 
-      expect(ctx.pages.map((p) => p.id)).toEqual(['posts/Index', 'posts/Show'])
-      const index = ctx.pages.find((p) => p.id === 'posts/Index')
-      expect(index?.props).toContain('posts')
+    // Exported controller class wins over the unexported helper above it
+    expect(ctx.controller?.filePath).toBe('app/Http/Controllers/PostController.ts')
+    expect(ctx.controller?.actions).toEqual(['index', 'show'])
 
-      expect(ctx.resource?.filePath).toBe('app/Http/Resources/PostResource.ts')
-      expect(ctx.policy?.filePath).toBe('app/Policies/PostPolicy.ts')
-      expect(ctx.seeders).toEqual(['db/seeders/002_PostsSeeder.ts'])
-      expect(ctx.tests).toContain('tests/controllers/PostController.test.ts')
-    } finally {
-      await workspace.cleanup()
-    }
+    expect(ctx.pages.map((p) => p.id)).toEqual(['posts/Index', 'posts/Show'])
+    const index = ctx.pages.find((p) => p.id === 'posts/Index')
+    expect(index?.props).toContain('posts')
+
+    expect(ctx.resource).toBe('app/Http/Resources/PostResource.ts')
+    expect(ctx.policy).toBe('app/Policies/PostPolicy.ts')
+    expect(ctx.factories).toEqual(['db/factories/PostFactory.ts'])
+    expect(ctx.seeders).toEqual(['db/seeders/002_PostsSeeder.ts'])
+    expect(ctx.tests).toContain('tests/controllers/PostController.test.ts')
   })
 
   it('resolves entity names case-insensitively', async () => {
-    const workspace = await createTempWorkspace('guren-cli-entity-case-')
+    const ctx = await generateEntityContext('post', { cwd: workspace.dir })
 
-    try {
-      await writeBlogFixture(workspace.dir)
-
-      const ctx = await generateEntityContext('post', { cwd: workspace.dir })
-
-      expect(ctx.entity).toBe('Post')
-    } finally {
-      await workspace.cleanup()
-    }
+    expect(ctx.entity).toBe('Post')
   })
 
   it('collects reverse relationship edges under referencedBy', async () => {
-    const workspace = await createTempWorkspace('guren-cli-entity-reverse-')
+    const ctx = await generateEntityContext('User', { cwd: workspace.dir })
 
-    try {
-      await writeBlogFixture(workspace.dir)
-
-      const ctx = await generateEntityContext('User', { cwd: workspace.dir })
-
-      expect(ctx.referencedBy).toEqual([
-        { model: 'Post', relationship: 'author', type: 'belongsTo' },
-      ])
-      expect(ctx.routes).toHaveLength(0)
-    } finally {
-      await workspace.cleanup()
-    }
+    expect(ctx.referencedBy).toEqual([
+      { model: 'Post', relationship: 'author', type: 'belongsTo' },
+    ])
+    expect(ctx.routes).toHaveLength(0)
   })
 
   it('throws EntityResolutionError listing available models for unknown entities', async () => {
-    const workspace = await createTempWorkspace('guren-cli-entity-unknown-')
-
-    try {
-      await writeBlogFixture(workspace.dir)
-
-      expect(generateEntityContext('Ghost', { cwd: workspace.dir })).rejects.toThrow(
-        EntityResolutionError,
-      )
-      expect(generateEntityContext('Ghost', { cwd: workspace.dir })).rejects.toThrow(
-        'Available models: Post, User',
-      )
-    } finally {
-      await workspace.cleanup()
-    }
+    expect(generateEntityContext('Ghost', { cwd: workspace.dir })).rejects.toThrow(
+      EntityResolutionError,
+    )
+    expect(generateEntityContext('Ghost', { cwd: workspace.dir })).rejects.toThrow(
+      'Available models: Post, User',
+    )
   })
 
-  it('requires --module when the same model exists in multiple locations', async () => {
-    const workspace = await createTempWorkspace('guren-cli-entity-ambiguous-')
-
-    try {
-      await mkdir(join(workspace.dir, 'app/Models'), { recursive: true })
-      await mkdir(join(workspace.dir, 'modules/crm/app/Models'), { recursive: true })
-      await writeFile(join(workspace.dir, 'package.json'), '{}', 'utf8')
-      await writeFile(
-        join(workspace.dir, 'app/Models/Post.ts'),
-        'export class Post {}\n',
-        'utf8',
-      )
-      await writeFile(
-        join(workspace.dir, 'modules/crm/app/Models/Post.ts'),
-        'export class Post {}\n',
-        'utf8',
-      )
-
-      expect(generateEntityContext('Post', { cwd: workspace.dir })).rejects.toThrow(
-        'multiple locations: app, crm',
-      )
-
-      const ctx = await generateEntityContext('Post', { cwd: workspace.dir, module: 'crm' })
-      expect(ctx.module).toBe('crm')
-      expect(ctx.model.filePath).toBe('modules/crm/app/Models/Post.ts')
-    } finally {
-      await workspace.cleanup()
-    }
-  })
-})
-
-describe('renderEntityContextMarkdown', () => {
   it('renders the entity bundle as markdown', async () => {
-    const workspace = await createTempWorkspace('guren-cli-entity-markdown-')
+    const ctx = await generateEntityContext('Post', { cwd: workspace.dir })
+    const md = renderEntityContextMarkdown(ctx)
 
-    try {
-      await writeBlogFixture(workspace.dir)
-
-      const ctx = await generateEntityContext('Post', { cwd: workspace.dir })
-      const md = renderEntityContextMarkdown(ctx)
-
-      expect(md).toContain('# Post')
-      expect(md).toContain('## Model — app/Models/Post.ts (table: `posts`)')
-      expect(md).toContain('- Columns: id, title, authorId')
-      expect(md).toContain('- belongsTo: `author` → User')
-      expect(md).toContain('## Routes (2)')
-      expect(md).toContain('| GET | /posts | posts.index | PostController.index |')
-      expect(md).toContain('- Actions: index, show')
-      expect(md).toContain('- posts/Index — Props:')
-      expect(md).toContain('## Resource — app/Http/Resources/PostResource.ts')
-      expect(md).toContain('## Policy — app/Policies/PostPolicy.ts')
-      expect(md).toContain('## Seeders (1)')
-      expect(md).toContain('## Tests (1)')
-    } finally {
-      await workspace.cleanup()
-    }
+    expect(md).toContain('# Post')
+    expect(md).toContain('## Model — app/Models/Post.ts (table: `posts`)')
+    expect(md).toContain('- Columns: id, title, authorId')
+    expect(md).toContain('- belongsTo: `author` → User')
+    expect(md).toContain('## Routes (2)')
+    expect(md).toContain('| GET | /posts | posts.index | PostController.index |')
+    expect(md).toContain('- Actions: index, show')
+    expect(md).toContain('- posts/Index — Props:')
+    expect(md).toContain('## Resource — app/Http/Resources/PostResource.ts')
+    expect(md).toContain('## Policy — app/Policies/PostPolicy.ts')
+    expect(md).toContain('## Factories (1)')
+    expect(md).toContain('## Seeders (1)')
+    expect(md).toContain('## Tests (1)')
   })
 
   it('renders reverse references for the target entity', async () => {
-    const workspace = await createTempWorkspace('guren-cli-entity-md-reverse-')
+    const ctx = await generateEntityContext('User', { cwd: workspace.dir })
+    const md = renderEntityContextMarkdown(ctx)
 
-    try {
-      await writeBlogFixture(workspace.dir)
+    expect(md).toContain('## Referenced by')
+    expect(md).toContain('- Post — belongsTo `author`')
+    expect(md).toContain('No routes reference this entity.')
+  })
+})
 
-      const ctx = await generateEntityContext('User', { cwd: workspace.dir })
-      const md = renderEntityContextMarkdown(ctx)
+describe('entity context (duplicated entity across locations)', () => {
+  let workspace: TempWorkspace
 
-      expect(md).toContain('## Referenced by')
-      expect(md).toContain('- Post — belongsTo `author`')
-      expect(md).toContain('No routes reference this entity.')
-    } finally {
-      await workspace.cleanup()
-    }
+  beforeAll(async () => {
+    workspace = await createTempWorkspace('guren-cli-entity-ambiguous-')
+    const dir = workspace.dir
+
+    await mkdir(join(dir, 'app/Models'), { recursive: true })
+    await mkdir(join(dir, 'app/Http/Resources'), { recursive: true })
+    await mkdir(join(dir, 'db/seeders'), { recursive: true })
+    await mkdir(join(dir, 'modules/crm/app/Models'), { recursive: true })
+    await mkdir(join(dir, 'modules/crm/app/Http/Resources'), { recursive: true })
+    await writeFile(join(dir, 'package.json'), '{}', 'utf8')
+
+    await writeFile(join(dir, 'app/Models/Post.ts'), 'export class Post {}\n', 'utf8')
+    await writeFile(
+      join(dir, 'modules/crm/app/Models/Post.ts'),
+      'export class Post {}\n',
+      'utf8',
+    )
+    await writeFile(
+      join(dir, 'app/Http/Resources/PostResource.ts'),
+      'export class PostResource {}\n',
+      'utf8',
+    )
+    await writeFile(
+      join(dir, 'modules/crm/app/Http/Resources/PostResource.ts'),
+      'export class PostResource {}\n',
+      'utf8',
+    )
+    // Root-only seeder: must not leak into the crm bundle
+    await writeFile(
+      join(dir, 'db/seeders/001_PostsSeeder.ts'),
+      'export async function seed() {}\n',
+      'utf8',
+    )
+  })
+
+  afterAll(async () => {
+    await workspace.cleanup()
+  })
+
+  it('requires --module when the same model exists in multiple locations', async () => {
+    expect(generateEntityContext('Post', { cwd: workspace.dir })).rejects.toThrow(
+      'multiple locations: app, crm',
+    )
+  })
+
+  it('scopes every join to the selected module', async () => {
+    const ctx = await generateEntityContext('Post', { cwd: workspace.dir, module: 'crm' })
+
+    expect(ctx.module).toBe('crm')
+    expect(ctx.model.filePath).toBe('modules/crm/app/Models/Post.ts')
+    expect(ctx.resource).toBe('modules/crm/app/Http/Resources/PostResource.ts')
+    expect(ctx.seeders).toEqual([])
+  })
+
+  it('selects the application root via --module app', async () => {
+    const ctx = await generateEntityContext('Post', { cwd: workspace.dir, module: 'app' })
+
+    expect(ctx.module).toBeUndefined()
+    expect(ctx.model.filePath).toBe('app/Models/Post.ts')
+    expect(ctx.resource).toBe('app/Http/Resources/PostResource.ts')
+    expect(ctx.seeders).toEqual(['db/seeders/001_PostsSeeder.ts'])
   })
 })

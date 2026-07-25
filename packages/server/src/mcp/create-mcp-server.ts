@@ -96,7 +96,7 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
       module: z
         .string()
         .optional()
-        .describe('Module name to disambiguate same-named models across modules/'),
+        .describe('Module name to disambiguate same-named models across modules/; "app" selects the application root'),
       format: z.enum(['json', 'markdown']).default('markdown').describe('Output format'),
     },
     async ({ entity, module, format }) => {
@@ -338,7 +338,8 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
     'entity-context',
     new ResourceTemplate('guren://context/{entity}', { list: undefined }),
     {
-      description: 'Entity-centric context bundle: model, routes, controller, pages, resource, policy',
+      description:
+        'Entity-centric context bundle: model, routes, controller, pages, resource, policy. For same-named models across modules, use the guren_entity_context tool with its module argument instead.',
       mimeType: 'text/markdown',
     },
     async (uri, variables) => {

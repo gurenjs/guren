@@ -55,6 +55,8 @@ type ModelBindingResolver = (value: string) => Promise<unknown>
  */
 interface BindableModel {
   findOrFail(id: unknown, key?: string): Promise<unknown>
+  /** Bound values are model classes at runtime; the constructor name is the introspection payload. */
+  readonly name?: string
 }
 
 type SchemaLike<T = unknown> = ValidationSchema<T> | undefined
@@ -215,6 +217,8 @@ export class Router<M extends string = never> {
   private readonly middlewareAliases: Map<string, MiddlewareHandler> = new Map()
   private readonly middlewareGroups: Map<string, string[]> = new Map()
   private readonly modelBindings: Map<string, ModelBindingResolver> = new Map()
+  /** Model class names for router-level bind(param, Model) calls — resolver-only binds carry no name. */
+  private readonly modelBindingNames: Map<string, string> = new Map()
 
   aliasMiddleware<N extends string>(name: N, handler: MiddlewareHandler): Router<M | N> {
     this.middlewareAliases.set(name, handler)
@@ -234,6 +238,7 @@ export class Router<M extends string = never> {
     if (typeof modelOrResolver === 'function' && 'findOrFail' in modelOrResolver) {
       // Model class with static findOrFail — wrap in resolver
       const model = modelOrResolver as unknown as BindableModel
+      if (model.name) this.modelBindingNames.set(param, model.name)
       this.modelBindings.set(param, async (value: string) => {
         return model.findOrFail(value)
       })
@@ -476,6 +481,7 @@ export class Router<M extends string = never> {
     this.middlewareAliases.clear()
     this.middlewareGroups.clear()
     this.modelBindings.clear()
+    this.modelBindingNames.clear()
   }
 
   definitions(): RouteDefinition[] {
@@ -489,17 +495,7 @@ export class Router<M extends string = never> {
       controller: isControllerAction(handler)
         ? { name: handler[0].name, action: String(handler[1]) }
         : undefined,
-      bindings: bindings && bindings.size > 0
-        ? Object.fromEntries(
-            [...bindings].flatMap(([param, model]) => {
-              // `bind` values are model classes at runtime; their constructor
-              // name is the introspection payload. Anonymous values carry no
-              // usable name, so they are omitted rather than emitted as ''.
-              const modelName = (model as { name?: string }).name
-              return modelName ? [[param, modelName]] : []
-            }),
-          )
-        : undefined,
+      bindings: serializeBindings(path, bindings, this.modelBindingNames),
       ...openapi,
     }))
   }
@@ -1000,6 +996,32 @@ function buildResponse(result: unknown): Response {
   }
 
   return new Response(String(result))
+}
+
+/**
+ * Introspectable model bindings for a route: per-route `bind` entries plus
+ * router-level `bind(param, Model)` calls whose param appears in the path
+ * (route-level entries win). Bindings without a usable constructor name
+ * (anonymous classes, custom resolvers) are omitted rather than emitted
+ * as an empty string.
+ */
+function serializeBindings(
+  path: string,
+  routeBindings: Map<string, BindableModel> | undefined,
+  routerBindingNames: Map<string, string>,
+): Record<string, string> | undefined {
+  const entries = new Map<string, string>()
+
+  for (const param of path.match(/:(\w+)/g) ?? []) {
+    const name = routerBindingNames.get(param.slice(1))
+    if (name) entries.set(param.slice(1), name)
+  }
+
+  for (const [param, model] of routeBindings ?? []) {
+    if (model.name) entries.set(param, model.name)
+  }
+
+  return entries.size > 0 ? Object.fromEntries(entries) : undefined
 }
 
 function isControllerAction(action: AnyRouteHandler): action is AnyControllerAction {

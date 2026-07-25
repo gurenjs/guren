@@ -38,12 +38,11 @@ export {
   generateEntityContext,
   renderEntityContextMarkdown,
   displayEntityContext,
-  routeDefinitionToContextRoute,
   EntityResolutionError,
   type EntityContext,
   type EntityContextOptions,
-  type ContextRoute,
 } from './entity-context'
+export { routeDefinitionToContextRoute, loadContextRoutes, type ContextRoute } from './context-route'
 export { runCheck, renderCheckReport } from './check'
 export { generateGuidelines } from './guidelines'
 export { listModels, displayModels } from './model-list'

@@ -1,8 +1,8 @@
-import { resolve } from 'node:path'
+import { resolve, basename } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { parse } from '@babel/parser'
+import type { ClassDeclaration } from '@babel/types'
 import { consola } from 'consola'
-import type { RouteDefinition } from '@guren/core'
 import {
   discoverModelFiles,
   discoverControllerFiles,
@@ -14,43 +14,28 @@ import {
   collectFiles,
   toPosixRelative,
   moduleNameFromRelPath,
-  fileExists,
 } from './discovery'
-import { parseModelFile, type ModelInfo, type ModelRelationship } from './model-parser'
-import { loadRouteDefinitions } from './load-routes'
-import { schemaToTypeString } from './schema-type-extractor'
+import {
+  parseModelFile,
+  extractClassDeclaration,
+  type ModelInfo,
+  type ModelRelationship,
+} from './model-parser'
+import { loadRouteDefinitions, DEFAULT_ROUTES_FILE } from './load-routes'
+import {
+  routeDefinitionToContextRoute,
+  escapeMarkdownTableCell,
+  type ContextRoute,
+} from './context-route'
+import { extractInertiaPageRefs, resolveInertiaPageFile } from './inertia-pages'
 import { extractPageProps } from './page-props-extractor'
 import { parseSchemaTableColumns } from './audit'
 
-const DEFAULT_ROUTES_FILE = 'routes/web.ts'
-
-/**
- * Serializable route view shared by the whole-project context and the
- * entity bundle: `RouteDefinition` with its live Zod schema objects
- * replaced by rendered type strings, so `--json` output stays clean.
- */
-export interface ContextRoute {
-  method: string
-  path: string
-  name?: string
-  controller?: { name: string; action: string }
-  bindings?: Record<string, string>
-  middleware?: string[]
-  params?: string
-  query?: string
-  body?: string
-  output?: string
-}
-
 export interface EntityPage {
   id: string
-  filePath: string
+  /** Component file relative to the app root; absent when the referenced page has no file. */
+  filePath?: string
   props?: string
-}
-
-export interface EntityFileRef {
-  className: string
-  filePath: string
 }
 
 export interface EntityContext {
@@ -70,8 +55,9 @@ export interface EntityContext {
   routes: ContextRoute[]
   controller?: { className: string; filePath: string; actions: string[] }
   pages: EntityPage[]
-  resource?: EntityFileRef
-  policy?: EntityFileRef
+  resource?: string
+  policy?: string
+  factories: string[]
   seeders: string[]
   tests: string[]
 }
@@ -85,31 +71,13 @@ export interface EntityContextOptions {
 
 /**
  * Thrown when the entity argument can't be resolved to exactly one model —
- * unknown name, or the same class name in more than one module. The CLI and
- * the MCP tool both surface `message` verbatim.
+ * unknown name, or the same class name in more than one location. The CLI
+ * and the MCP tool both surface `message` verbatim.
  */
 export class EntityResolutionError extends Error {
-  constructor(
-    message: string,
-    readonly candidates: string[] = [],
-  ) {
+  constructor(message: string) {
     super(message)
     this.name = 'EntityResolutionError'
-  }
-}
-
-export function routeDefinitionToContextRoute(def: RouteDefinition): ContextRoute {
-  return {
-    method: def.method.toUpperCase(),
-    path: def.path,
-    name: def.name,
-    controller: def.controller,
-    bindings: def.bindings,
-    middleware: def.middlewareNames && def.middlewareNames.length > 0 ? def.middlewareNames : undefined,
-    params: schemaToTypeString(def.schemas?.params),
-    query: schemaToTypeString(def.schemas?.query),
-    body: schemaToTypeString(def.schemas?.body),
-    output: schemaToTypeString(def.schemas?.output),
   }
 }
 
@@ -121,33 +89,31 @@ interface DiscoveredModel {
 
 async function discoverParsedModels(cwd: string): Promise<DiscoveredModel[]> {
   const files = await discoverModelFiles(cwd)
-  const models: DiscoveredModel[] = []
-  for (const file of files) {
-    const info = await parseModelFile(file)
-    if (!info) continue
-    const relPath = toPosixRelative(cwd, file)
-    models.push({ info, relPath, module: moduleNameFromRelPath(relPath) })
-  }
-  return models
+  const parsed = await Promise.all(files.map((file) => parseModelFile(file)))
+  return parsed.flatMap((info, index) => {
+    if (!info) return []
+    const relPath = toPosixRelative(cwd, files[index])
+    return [{ info, relPath, module: moduleNameFromRelPath(relPath) }]
+  })
 }
 
 function resolveEntity(
   entityName: string,
-  models: DiscoveredModel[],
+  sameName: DiscoveredModel[],
+  allModels: DiscoveredModel[],
   moduleFilter?: string,
 ): DiscoveredModel {
-  const lower = entityName.toLowerCase()
-  let matches = models.filter((m) => m.info.className.toLowerCase() === lower)
-  if (moduleFilter) {
-    matches = matches.filter((m) => m.module === moduleFilter)
-  }
+  // `--module app` selects the application root — the label the ambiguity
+  // error uses for it — since root models have no module name of their own.
+  const matches = moduleFilter
+    ? sameName.filter((m) => (m.module ?? 'app') === moduleFilter)
+    : sameName
 
   if (matches.length === 0) {
-    const available = models.map((m) => m.info.className).sort()
+    const available = allModels.map((m) => m.info.className).sort()
     throw new EntityResolutionError(
       `Model "${entityName}" not found${moduleFilter ? ` in module "${moduleFilter}"` : ''}.`
         + (available.length > 0 ? ` Available models: ${available.join(', ')}` : ' No models discovered.'),
-      available,
     )
   }
 
@@ -155,15 +121,31 @@ function resolveEntity(
     const locations = matches.map((m) => m.module ?? 'app').sort()
     throw new EntityResolutionError(
       `Model "${entityName}" exists in multiple locations: ${locations.join(', ')}. Pass --module <name> to disambiguate.`,
-      locations,
     )
   }
 
   return matches[0]
 }
 
-/** Public class method names of the first exported class in a source file. */
-function extractClassActions(source: string): string[] {
+function publicMethodNames(classDecl: ClassDeclaration): string[] {
+  const actions: string[] = []
+  for (const member of classDecl.body.body) {
+    if (member.type !== 'ClassMethod') continue
+    if (member.key.type !== 'Identifier') continue
+    if (member.key.name === 'constructor') continue
+    if (member.accessibility === 'private' || member.accessibility === 'protected') continue
+    if (member.static) continue
+    actions.push(member.key.name)
+  }
+  return actions
+}
+
+/**
+ * Public method names of the controller class in a source file. Exported
+ * classes win over unexported helpers declared alongside them; a bare
+ * class is only used when nothing is exported.
+ */
+function extractControllerActions(source: string): string[] {
   let ast: ReturnType<typeof parse>
   try {
     ast = parse(source, { sourceType: 'module', plugins: ['typescript'] })
@@ -171,95 +153,37 @@ function extractClassActions(source: string): string[] {
     return []
   }
 
+  let unexported: ClassDeclaration | null = null
   for (const node of ast.program.body) {
-    const classDecl =
-      node.type === 'ExportNamedDeclaration' && node.declaration?.type === 'ClassDeclaration'
-        ? node.declaration
-        : node.type === 'ExportDefaultDeclaration' && node.declaration?.type === 'ClassDeclaration'
-          ? node.declaration
-          : node.type === 'ClassDeclaration'
-            ? node
-            : null
+    const classDecl = extractClassDeclaration(node)
     if (!classDecl) continue
-
-    const actions: string[] = []
-    for (const member of classDecl.body.body) {
-      if (member.type !== 'ClassMethod') continue
-      if (member.key.type !== 'Identifier') continue
-      if (member.key.name === 'constructor') continue
-      if (member.accessibility === 'private' || member.accessibility === 'protected') continue
-      if (member.static) continue
-      actions.push(member.key.name)
+    if (node.type !== 'ClassDeclaration') {
+      return publicMethodNames(classDecl)
     }
-    return actions
+    unexported ??= classDecl
   }
 
-  return []
-}
-
-/**
- * Page IDs referenced from a controller source via `this.inertia(...)` —
- * both the string-literal form (`this.inertia('posts/Index')`) and the
- * typed-manifest form (`this.inertia(pages.posts.Index)`), the same two
- * shapes `guren check` recognizes.
- */
-function extractInertiaPageIds(source: string): string[] {
-  const inertiaCallRegex = /this\.inertia\(\s*(?:pages\.([\w.]+)|['"]([^'"]+)['"])/g
-  const ids = new Set<string>()
-  let match: RegExpExecArray | null
-  while ((match = inertiaCallRegex.exec(source)) !== null) {
-    const id = match[1] ? match[1].split('.').join('/') : match[2]
-    if (id) ids.add(id)
-  }
-  return [...ids]
+  return unexported ? publicMethodNames(unexported) : []
 }
 
 async function resolvePages(cwd: string, pageIds: string[]): Promise<EntityPage[]> {
-  const pages: EntityPage[] = []
-  for (const id of pageIds.sort()) {
-    let filePath: string | undefined
-    for (const ext of ['tsx', 'jsx']) {
-      const candidate = `resources/js/pages/${id}.${ext}`
-      if (await fileExists(cwd, candidate)) {
-        filePath = candidate
-        break
+  return Promise.all(
+    [...pageIds].sort().map(async (id) => {
+      const filePath = await resolveInertiaPageFile(cwd, id)
+      if (!filePath) return { id }
+
+      let props: string | undefined
+      try {
+        const extracted = await extractPageProps(resolve(cwd, filePath), id)
+        // Props types can span lines; collapse whitespace for one-line rendering.
+        props = extracted.rawType?.replace(/\s+/g, ' ').trim()
+      } catch {
+        // Unparsable page — still list it, just without props.
       }
-    }
 
-    if (!filePath) {
-      pages.push({ id, filePath: `resources/js/pages/${id}.tsx` })
-      continue
-    }
-
-    let props: string | undefined
-    try {
-      const extracted = await extractPageProps(resolve(cwd, filePath), id)
-      // Props types can span lines; collapse whitespace for one-line rendering.
-      props = extracted.rawType?.replace(/\s+/g, ' ').trim() ?? undefined
-    } catch {
-      // Unparsable page — still list it, just without props.
-    }
-
-    pages.push({ id, filePath, props })
-  }
-  return pages
-}
-
-async function findSeeders(cwd: string, entityName: string): Promise<string[]> {
-  const roots = [cwd, ...(await listModuleNames(cwd)).map((name) => resolve(cwd, 'modules', name))]
-  const seederPattern = new RegExp(`(?:^|_)${entityName}s?Seeder\\.`, 'i')
-
-  const seeders: string[] = []
-  for (const root of roots) {
-    const files = await collectFiles(resolve(root, 'db/seeders'))
-    for (const file of files) {
-      const base = file.split('/').pop() ?? ''
-      if (seederPattern.test(base)) {
-        seeders.push(toPosixRelative(cwd, file))
-      }
-    }
-  }
-  return seeders.sort()
+      return { id, filePath, props }
+    }),
+  )
 }
 
 export async function generateEntityContext(
@@ -269,17 +193,112 @@ export async function generateEntityContext(
   const cwd = resolve(options.cwd ?? process.cwd())
 
   const models = await discoverParsedModels(cwd)
-  const match = resolveEntity(entityName, models, options.module)
+  const lower = entityName.toLowerCase()
+  const sameName = models.filter((m) => m.info.className.toLowerCase() === lower)
+  const match = resolveEntity(entityName, sameName, models, options.module)
   const entity = match.info.className
+  const controllerName = `${entity}Controller`
 
-  // Schema columns (names only until the Part 3 schema parser lands)
-  let columns: string[] | undefined
-  if (match.info.tableName) {
-    const tables = await parseSchemaTableColumns(cwd)
-    columns = tables?.get(match.info.tableName)
+  // When the same class name exists in more than one location, every join
+  // below is restricted to the selected location — otherwise artifacts of
+  // the sibling entity would leak into the bundle.
+  const duplicated = sameName.length > 1
+  const locationOf = (file: string) => moduleNameFromRelPath(toPosixRelative(cwd, file))
+  const inLocation = (file: string) => locationOf(file) === match.module
+
+  const findComponent = async (
+    discover: (root: string) => Promise<string[]>,
+    className: string,
+  ): Promise<string | undefined> => {
+    let files = (await discover(cwd)).filter((file) => classNameFromPath(file) === className)
+    if (duplicated) files = files.filter(inLocation)
+    const file = files.find(inLocation) ?? files[0]
+    return file ? toPosixRelative(cwd, file) : undefined
   }
 
-  // Reverse relationship edges from every other model
+  const findDbArtifacts = async (subDir: string, filePattern: RegExp): Promise<string[]> => {
+    const moduleNames = await listModuleNames(cwd)
+    let roots: Array<{ module: string | null; dir: string }> = [
+      { module: null, dir: cwd },
+      ...moduleNames.map((name) => ({ module: name, dir: resolve(cwd, 'modules', name) })),
+    ]
+    if (duplicated) roots = roots.filter((root) => root.module === match.module)
+
+    const groups = await Promise.all(roots.map((root) => collectFiles(resolve(root.dir, subDir))))
+    return groups
+      .flat()
+      .filter((file) => filePattern.test(basename(file)))
+      .map((file) => toPosixRelative(cwd, file))
+      .sort()
+  }
+
+  const loadEntityRoutes = async (): Promise<ContextRoute[]> => {
+    try {
+      const provenance: Array<string | null> = []
+      const definitions = await loadRouteDefinitions(
+        resolve(cwd, options.routesFile ?? DEFAULT_ROUTES_FILE),
+        cwd,
+        undefined,
+        provenance,
+      )
+      return definitions
+        .filter((def, index) => {
+          const matchesEntity =
+            def.controller?.name === controllerName
+            || (def.bindings !== undefined && Object.values(def.bindings).includes(entity))
+          if (!matchesEntity) return false
+          return duplicated ? provenance[index] === match.module : true
+        })
+        .map(routeDefinitionToContextRoute)
+    } catch {
+      // Routes may not be loadable (missing deps, etc.) — degrade to a route-less bundle.
+      return []
+    }
+  }
+
+  const loadControllerBundle = async (): Promise<{
+    controller?: EntityContext['controller']
+    pages: EntityPage[]
+  }> => {
+    let files = (await discoverControllerFiles(cwd)).filter(
+      (file) => classNameFromPath(file) === controllerName,
+    )
+    if (duplicated) files = files.filter(inLocation)
+    const controllerFile = files.find(inLocation) ?? files[0]
+    if (!controllerFile) return { pages: [] }
+
+    const source = await readFile(controllerFile, 'utf-8')
+    return {
+      controller: {
+        className: controllerName,
+        filePath: toPosixRelative(cwd, controllerFile),
+        actions: extractControllerActions(source),
+      },
+      pages: await resolvePages(
+        cwd,
+        extractInertiaPageRefs(source).map((ref) => ref.id),
+      ),
+    }
+  }
+
+  const loadColumns = async (): Promise<string[] | undefined> => {
+    if (!match.info.tableName) return undefined
+    const tables = await parseSchemaTableColumns(cwd)
+    return tables?.get(match.info.tableName)
+  }
+
+  const [columns, routes, controllerBundle, resource, policy, factories, seeders, testFiles] =
+    await Promise.all([
+      loadColumns(),
+      loadEntityRoutes(),
+      loadControllerBundle(),
+      findComponent(discoverResourceFiles, `${entity}Resource`),
+      findComponent(discoverPolicyFiles, `${entity}Policy`),
+      findDbArtifacts('db/factories', new RegExp(`(?:^|_)${entity}s?Factory\\.`, 'i')),
+      findDbArtifacts('db/seeders', new RegExp(`(?:^|_)${entity}s?Seeder\\.`, 'i')),
+      discoverTestFiles(cwd),
+    ])
+
   const referencedBy = models
     .filter((m) => m !== match)
     .flatMap((m) =>
@@ -289,60 +308,9 @@ export async function generateEntityContext(
     )
     .sort((a, b) => a.model.localeCompare(b.model) || a.relationship.localeCompare(b.relationship))
 
-  // Routes: controller-name convention plus route model bindings
-  const controllerName = `${entity}Controller`
-  let routes: ContextRoute[] = []
-  try {
-    const definitions = await loadRouteDefinitions(
-      resolve(cwd, options.routesFile ?? DEFAULT_ROUTES_FILE),
-      cwd,
-    )
-    routes = definitions
-      .filter(
-        (def) =>
-          def.controller?.name === controllerName
-          || (def.bindings && Object.values(def.bindings).includes(entity)),
-      )
-      .map(routeDefinitionToContextRoute)
-  } catch {
-    // Routes may not be loadable (missing deps, etc.) — same tolerance as generateContext.
-  }
-
-  // Controller (prefer the one in the entity's own module when duplicated)
-  const controllerFiles = (await discoverControllerFiles(cwd)).filter(
-    (file) => classNameFromPath(file) === controllerName,
-  )
-  const controllerFile =
-    controllerFiles.find(
-      (file) => moduleNameFromRelPath(toPosixRelative(cwd, file)) === match.module,
-    ) ?? controllerFiles[0]
-
-  let controller: EntityContext['controller']
-  let pages: EntityPage[] = []
-  if (controllerFile) {
-    const source = await readFile(controllerFile, 'utf-8')
-    controller = {
-      className: controllerName,
-      filePath: toPosixRelative(cwd, controllerFile),
-      actions: extractClassActions(source),
-    }
-    pages = await resolvePages(cwd, extractInertiaPageIds(source))
-  }
-
-  const findByClassName = async (
-    discover: (root: string) => Promise<string[]>,
-    className: string,
-  ): Promise<EntityFileRef | undefined> => {
-    const file = (await discover(cwd)).find((f) => classNameFromPath(f) === className)
-    return file ? { className, filePath: toPosixRelative(cwd, file) } : undefined
-  }
-
-  const resource = await findByClassName(discoverResourceFiles, `${entity}Resource`)
-  const policy = await findByClassName(discoverPolicyFiles, `${entity}Policy`)
-  const seeders = await findSeeders(cwd, entity)
-
-  const tests = (await discoverTestFiles(cwd))
-    .filter((file) => (file.split('/').pop() ?? '').includes(entity))
+  const tests = testFiles
+    .filter((file) => basename(file).includes(entity))
+    .filter((file) => !duplicated || inLocation(file))
     .map((file) => toPosixRelative(cwd, file))
     .sort()
 
@@ -359,10 +327,11 @@ export async function generateEntityContext(
     },
     referencedBy,
     routes,
-    controller,
-    pages,
+    controller: controllerBundle.controller,
+    pages: controllerBundle.pages,
     resource,
     policy,
+    factories,
     seeders,
     tests,
   }
@@ -405,9 +374,8 @@ export function renderEntityContextMarkdown(ctx: EntityContext): string {
     lines.push('|--------|------|------|--------|--------|------|')
     for (const route of ctx.routes) {
       const action = route.controller ? `${route.controller.name}.${route.controller.action}` : ''
-      lines.push(
-        `| ${route.method} | ${route.path} | ${route.name ?? ''} | ${action} | ${route.params ?? ''} | ${route.body ?? ''} |`,
-      )
+      const cells = [route.method, route.path, route.name ?? '', action, route.params ?? '', route.body ?? '']
+      lines.push(`| ${cells.map(escapeMarkdownTableCell).join(' | ')} |`)
     }
   } else {
     lines.push('No routes reference this entity.')
@@ -423,36 +391,33 @@ export function renderEntityContextMarkdown(ctx: EntityContext): string {
   if (ctx.pages.length > 0) {
     lines.push(`## Pages (${ctx.pages.length})`)
     for (const page of ctx.pages) {
+      const missing = page.filePath ? '' : ' (page file missing)'
       const props = page.props ? ` — Props: \`${page.props}\`` : ''
-      lines.push(`- ${page.id}${props}`)
+      lines.push(`- ${page.id}${missing}${props}`)
     }
     lines.push('')
   }
 
-  const singleRefs: Array<[string, EntityFileRef | undefined]> = [
-    ['Resource', ctx.resource],
-    ['Policy', ctx.policy],
-  ]
-  for (const [title, ref] of singleRefs) {
-    if (ref) {
-      lines.push(`## ${title} — ${ref.filePath}`)
-      lines.push('')
-    }
+  if (ctx.resource) {
+    lines.push(`## Resource — ${ctx.resource}`)
+    lines.push('')
+  }
+  if (ctx.policy) {
+    lines.push(`## Policy — ${ctx.policy}`)
+    lines.push('')
   }
 
-  const listSections: Array<[string, string[]]> = [
-    ['Seeders', ctx.seeders],
-    ['Tests', ctx.tests],
-  ]
-  for (const [title, items] of listSections) {
-    if (items.length > 0) {
-      lines.push(`## ${title} (${items.length})`)
-      for (const item of items) {
-        lines.push(`- ${item}`)
-      }
-      lines.push('')
+  const pushList = (title: string, items: string[]): void => {
+    if (items.length === 0) return
+    lines.push(`## ${title} (${items.length})`)
+    for (const item of items) {
+      lines.push(`- ${item}`)
     }
+    lines.push('')
   }
+  pushList('Factories', ctx.factories)
+  pushList('Seeders', ctx.seeders)
+  pushList('Tests', ctx.tests)
 
   return lines.join('\n')
 }
