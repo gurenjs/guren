@@ -266,11 +266,17 @@ ${registrations}
 `
 }
 
-function buildOAuthControllerTemplate(providers: string[]): string {
+function buildOAuthControllerTemplate(providers: string[], includeVerify: boolean): string {
   const providerLiterals = providers.map((provider) => `'${provider}'`).join(', ')
   const identityEntries = providers
     .map((provider) => `    ${provider}: { ${provider}Id: profileId },`)
     .join('\n')
+
+  // The provider already vouches for this address, so an OAuth-created
+  // account is verified on arrival — without this, requireVerifiedEmail
+  // would strand OAuth users at /verify-email forever, since this
+  // controller never sends a verification email for them to click.
+  const emailVerifiedAtField = includeVerify ? '\n        emailVerifiedAt: new Date(),' : ''
 
   return `import { Controller, ValidationException, type OAuthManager } from '@guren/core'
 import { randomUUID } from 'node:crypto'
@@ -338,7 +344,7 @@ export default class OAuthController extends Controller {
       user = await User.create({
         name: profile.name ?? profile.email,
         email: profile.email,
-        password: randomUUID(),
+        password: randomUUID(),${emailVerifiedAtField}
         ...identityWhere(provider, profile.id),
       })
     }
@@ -1740,7 +1746,7 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
   if (includeOAuth) {
     files.push(
       { path: 'app/Providers/OAuthProvider.ts', contents: buildOAuthProviderTemplate(oauthProviders) },
-      { path: 'app/Http/Controllers/Auth/OAuthController.ts', contents: buildOAuthControllerTemplate(oauthProviders) },
+      { path: 'app/Http/Controllers/Auth/OAuthController.ts', contents: buildOAuthControllerTemplate(oauthProviders, includeVerify) },
     )
   }
 

@@ -451,6 +451,27 @@ export const posts = pgTable('posts', {
       expect(schema).toContain("githubId: text('github_id').unique()")
       expect(schema).toContain("googleId: text('google_id').unique()")
       expect(schema.match(/export const users = /g)).toHaveLength(1)
+
+      // Without this, requireVerifiedEmail would strand every OAuth signup
+      // at /verify-email forever — OAuthController never sends a
+      // verification email, so there'd be nothing for them to click.
+      const controller = await readFile(join(workspace.dir, 'app/Http/Controllers/Auth/OAuthController.ts'), 'utf8')
+      expect(controller).toContain('emailVerifiedAt: new Date()')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('omits emailVerifiedAt from OAuthController when --verify is not enabled', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-oauth-no-verify-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'db/schema.ts'), `export const posts = 'posts'\n`, 'utf8')
+
+      await makeAuth({ force: true, oauth: 'github' })
+
+      const controller = await readFile(join(workspace.dir, 'app/Http/Controllers/Auth/OAuthController.ts'), 'utf8')
+      expect(controller).not.toContain('emailVerifiedAt')
     } finally {
       await workspace.cleanup()
     }
