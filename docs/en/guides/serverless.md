@@ -155,14 +155,36 @@ Lambda has a read-only filesystem except for `/tmp` (512 MB, ephemeral). Use `/t
 
 ### Sessions & Cache
 
-In-memory stores are lost between invocations. Use Redis (ElastiCache) or DynamoDB for sessions and cache.
+In-memory stores are lost between invocations, so sessions need a backend that survives across Lambda invocations.
+
+For most apps, `DatabaseSessionStore` (from `@guren/core`) is the recommended default — it persists sessions in the same database your app already talks to (RDS Postgres, MySQL, or any Drizzle-supported dialect), so there's no extra infrastructure to provision:
+
+```typescript
+import { DatabaseSessionStore } from '@guren/core'
+import { sessions } from '@/db/schema'
+
+app.use(createSessionMiddleware({ store: new DatabaseSessionStore(sessions) }))
+```
+
+```typescript
+// db/schema.ts
+export const sessions = sqliteTable('sessions', {
+  id: text('id').primaryKey(),
+  data: text('data', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+  expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+})
+```
+
+Expired rows are treated as missing on read; call `store.deleteExpired()` from a scheduled task (e.g. via `createScheduleHandler`) to keep the table small.
+
+For high-traffic apps that want to keep session churn off the primary database, use `RedisSessionStore` (ElastiCache) instead. Cache still benefits from Redis or DynamoDB — see the infrastructure table below.
 
 ## Infrastructure Recommendations
 
 | Concern | Recommendation |
 |---------|---------------|
 | **HTTP trigger** | API Gateway v2 (HTTP API) or ALB |
-| **Sessions** | Redis (ElastiCache) — not in-memory |
+| **Sessions** | `DatabaseSessionStore` (no extra infra) — or `RedisSessionStore` (ElastiCache) for high session churn |
 | **Cache** | Redis via `RedisCacheStore` (`@guren/core/redis` ships session/rate-limit/API-token stores too), or `FileStore` with `/tmp` for ephemeral cache |
 | **Queue** | SQS via `SqsDriver` + `createSqsHandler()` |
 | **Database** | RDS PostgreSQL with RDS Proxy for connection pooling |

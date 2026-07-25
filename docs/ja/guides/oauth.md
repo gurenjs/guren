@@ -6,7 +6,7 @@ Guren は「GitHub / Google / Discordでサインイン」のようなログイ�
 
 - **OAuthManager** – プロバイダーを登録し、認可 → コールバックのフローを駆動します。
 - **OAuthProviderConfig** – 1つのプロバイダー（GitHub、Google、Discord、または任意の OAuth 2.0 プロバイダー）のクライアントID/シークレット、エンドポイント、スコープ。
-- **OAuthStateStore** – CSRFとオープンリダイレクト攻撃を防ぐ、一度限りのstateストレージ。デフォルトはメモリ、マルチプロセス構成ではRedisを使用します。
+- **OAuthStateStore** – CSRFとオープンリダイレクト攻撃を防ぐ、一度限りのstateストレージ。デフォルトはメモリ、マルチプロセス構成では `DatabaseOAuthStateStore`（またはRedis）を使用します。
 - **プロバイダーファクトリ** – `createGitHubOAuthProviderConfig`、`createGoogleOAuthProviderConfig`、`createDiscordOAuthProviderConfig` が各プロバイダーの既知のエンドポイントをあらかじめ埋めてくれます。
 
 ## 基本的な使い方
@@ -157,6 +157,29 @@ oauth.registerProvider('gitlab', gitlabConfig)
 
 コールバックを元のリクエストに結びつける一度限りの `state` 値は、サーバー側で保存されます。デフォルトの `MemoryOAuthStateStore` は単一プロセスの開発環境では動作しますが、複数プロセス（ロードバランサー、サーバーレス）構成の本番環境では共有ストレージが必要です。そうしないと、コールバックがstateを発行していないプロセスに到達してしまう可能性があります。
 
+ほとんどのアプリでは `DatabaseOAuthStateStore` が推奨のデフォルトです。アプリが既に使っているデータベースにstateを保存するため、追加のインフラは不要です:
+
+```ts
+import { createOAuthManager, DatabaseOAuthStateStore } from '@guren/core'
+import { oauthStates } from '@/db/schema'
+
+export const oauth = createOAuthManager({
+  stateStore: new DatabaseOAuthStateStore(oauthStates),
+})
+```
+
+```ts
+// db/schema.ts（sqliteダイアレクトの例）
+export const oauthStates = sqliteTable('oauth_states', {
+  stateHash: text('state_hash').primaryKey(),
+  provider: text('provider').notNull(),
+  redirectTo: text('redirect_to'),
+  expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+})
+```
+
+期限切れのstate行は参照時に削除されます。まとめて掃除する場合はスケジュールジョブから `store.deleteExpired()` を呼んでください。既にRedisを運用しているアプリではRedisも引き続き使えます:
+
 ```ts
 import { createOAuthManager } from '@guren/core'
 import { createRedisClient, RedisOAuthStateStore } from '@guren/core/redis'
@@ -221,7 +244,7 @@ describe('GitHub OAuth', () => {
 
 2. **`allowedRedirectHosts` を明示的に設定する**: 設定しない場合、アプリ相対パスの `redirectTo` のみが許可されます（最も安全なデフォルト）。ログイン後に別ドメインへリダイレクトする場合のみホストを追加してください。
 
-3. **本番環境ではRedisのstateストレージを使う**: `MemoryOAuthStateStore` は同じログインからのすべてのリクエストが同一プロセスに届く場合にのみ機能します。
+3. **本番環境では共有stateストアを使う**: `MemoryOAuthStateStore` は同じログインからのすべてのリクエストが同一プロセスに届く場合にのみ機能します。`DatabaseOAuthStateStore`（追加インフラ不要）か `RedisOAuthStateStore` を使ってください。
 
 4. **メールアドレスではなくプロバイダーIDでアカウントを照合する**: プロバイダーの `profile.id`（例: `githubId`）をユーザーモデルに保存してください。メールアドレスは未検証だったり、プロバイダー間で使い回されたりする場合があります。
 

@@ -214,7 +214,11 @@ app.use(createSessionMiddleware({
 ```
 
 `read` treats expired rows as missing (and deletes them opportunistically);
-a `sessions:prune` console command handles bulk cleanup.
+~~a `sessions:prune` console command handles bulk cleanup.~~
+**Amended in implementation:** bulk cleanup is a `deleteExpired()` method
+on the store, mirroring `DatabaseApiTokenStore.deleteExpired()` — the
+established precedent ships no built-in console command and documents
+calling it from a scheduled job instead.
 
 **This deliberately solves more than Workers.** The same store removes the
 "Redis required" caveat from the Lambda and Vercel guides: those apps

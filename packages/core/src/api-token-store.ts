@@ -1,5 +1,6 @@
 import { Model, type PlainObject } from '@guren/orm'
 import type { ApiToken, ApiTokenStore } from '@guren/server'
+import { toDate } from './store-utils'
 
 /**
  * Options for DatabaseApiTokenStore.
@@ -108,11 +109,4 @@ export class DatabaseApiTokenStore implements ApiTokenStore {
       createdAt: toDate(record.createdAt) ?? new Date(0),
     }
   }
-}
-
-function toDate(value: unknown): Date | null {
-  if (value == null) return null
-  if (value instanceof Date) return value
-  if (typeof value === 'string' || typeof value === 'number') return new Date(value)
-  return null
 }

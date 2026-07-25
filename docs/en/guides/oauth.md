@@ -6,7 +6,7 @@ Guren ships an OAuth 2.0 authorization-code flow for "Sign in with GitHub / Goog
 
 - **OAuthManager** – Registers providers and drives the authorize → callback flow.
 - **OAuthProviderConfig** – Client ID/secret, endpoints, and scopes for one provider (GitHub, Google, Discord, or any OAuth 2.0 provider).
-- **OAuthStateStore** – One-time state storage that prevents CSRF and open-redirect attacks. Memory by default, Redis for multi-process deployments.
+- **OAuthStateStore** – One-time state storage that prevents CSRF and open-redirect attacks. Memory by default; use `DatabaseOAuthStateStore` (or Redis) for multi-process deployments.
 - **Provider factories** – `createGitHubOAuthProviderConfig`, `createGoogleOAuthProviderConfig`, `createDiscordOAuthProviderConfig` pre-fill the well-known endpoints for each provider.
 
 ## Basic Setup
@@ -157,6 +157,29 @@ oauth.registerProvider('gitlab', gitlabConfig)
 
 The one-time `state` value that ties the callback back to the original request is stored server-side. The default `MemoryOAuthStateStore` works for single-process dev, but production deployments with more than one process (load balancers, serverless) need shared storage — otherwise the callback can land on a process that never issued the state.
 
+For most apps, `DatabaseOAuthStateStore` is the recommended default — it stores state in the same database your app already uses, with no extra infrastructure:
+
+```ts
+import { createOAuthManager, DatabaseOAuthStateStore } from '@guren/core'
+import { oauthStates } from '@/db/schema'
+
+export const oauth = createOAuthManager({
+  stateStore: new DatabaseOAuthStateStore(oauthStates),
+})
+```
+
+```ts
+// db/schema.ts (sqlite dialect shown)
+export const oauthStates = sqliteTable('oauth_states', {
+  stateHash: text('state_hash').primaryKey(),
+  provider: text('provider').notNull(),
+  redirectTo: text('redirect_to'),
+  expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+})
+```
+
+Expired state rows are removed as they are encountered; call `store.deleteExpired()` from a scheduled job for bulk cleanup. Redis remains available for apps that already run it:
+
 ```ts
 import { createOAuthManager } from '@guren/core'
 import { createRedisClient, RedisOAuthStateStore } from '@guren/core/redis'
@@ -221,7 +244,7 @@ describe('GitHub OAuth', () => {
 
 2. **Set `allowedRedirectHosts` explicitly**: without it, only app-relative `redirectTo` paths are honored, which is the safest default. Add hosts only if you redirect to a separate domain after login.
 
-3. **Use Redis state storage in production**: `MemoryOAuthStateStore` only works when every request from the same login hits the same process.
+3. **Use a shared state store in production**: `MemoryOAuthStateStore` only works when every request from the same login hits the same process. Use `DatabaseOAuthStateStore` (no extra infrastructure) or `RedisOAuthStateStore`.
 
 4. **Match accounts by provider ID, not email**: store the provider's `profile.id` (e.g. `githubId`) on your user model. Emails can be unverified or reused across providers.
 
