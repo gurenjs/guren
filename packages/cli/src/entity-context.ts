@@ -30,7 +30,7 @@ import {
 import { extractInertiaPageRefs, resolveInertiaPageFile } from './inertia-pages'
 import { scanDocs, extractDocsTags, buildEntityDocIndex } from './docs-index'
 import { extractPageProps } from './page-props-extractor'
-import { parseSchemaTableColumns } from './audit'
+import { parseSchemaTableColumns } from './schema-parser'
 
 export interface EntityPage {
   id: string

@@ -24,6 +24,7 @@ import { makeModule } from './make-module'
 import { makeNotification } from './make-notification'
 import { makeProvider } from './make-provider'
 import { makeAdr } from './make-adr'
+import { writeSpecArtifacts } from './spec-generate'
 import { makeResource } from './make-resource'
 import { makeRoute } from './make-route'
 import { makeSeeder } from './make-seeder'
@@ -119,6 +120,26 @@ const makeCommandSpecs: MakeCommandSpec[] = [
   { name: 'make:notification', description: 'Generate a new notification class.', argDescription: 'Notification class name', makeFn: makeNotification, resourceName: 'Notification' },
   { name: 'make:provider', description: 'Generate a new service provider.', argDescription: 'Provider class name', makeFn: makeProvider, resourceName: 'Provider' },
 ]
+
+const specGenerateCommand = defineCommand({
+  meta: {
+    name: 'spec:generate',
+    description: 'Generate spec views (ER, domain model, screens, modules) into docs/spec.',
+  },
+  args: {
+    routes: {
+      type: 'string',
+      description: 'Path to routes entry file.',
+    },
+    app: {
+      type: 'string',
+      description: 'Application root directory.',
+    },
+  },
+  async run({ args }) {
+    await writeSpecArtifacts({ cwd: args.app, routesFile: args.routes })
+  },
+})
 
 // make:adr takes an extra --entity flag beyond the shared writer options,
 // so it gets its own command instead of a makeCommandSpecs entry.
@@ -1714,6 +1735,10 @@ const checkCommand = defineCommand({
       type: 'boolean',
       description: 'Run only doc-link checks (docs/ frontmatter + @docs tags).',
     },
+    spec: {
+      type: 'boolean',
+      description: 'Run only spec drift checks (docs/spec/ vs regenerated views).',
+    },
     'docs-ttl': {
       type: 'string',
       description: 'Warn when a doc\'s last_reviewed is older than N days.',
@@ -1731,6 +1756,7 @@ const checkCommand = defineCommand({
       arch: Boolean(args.arch),
       docs: Boolean(args.docs),
       docsTtlDays: args['docs-ttl'] ? Number(args['docs-ttl']) : undefined,
+      spec: Boolean(args.spec),
       changed: Boolean(args.changed),
     })
 
@@ -1740,13 +1766,13 @@ const checkCommand = defineCommand({
       renderCheckReport(report)
     }
 
-    // Only `--arch` and `--docs` gate on exit code. Plain `guren check` has
-    // never set one (it's a v1.0-stable command; changing that default is a
-    // breaking change reserved for a major release). The fast-path flags
-    // are new, with no prior contract to preserve, so they can gate CI from
-    // day one — that's the intended way to enforce boundaries and doc
-    // links in CI.
-    if ((args.arch || args.docs) && report.failCount > 0) {
+    // Only the suite flags (`--arch`/`--docs`/`--spec`) gate on exit code.
+    // Plain `guren check` has never set one (it's a v1.0-stable command;
+    // changing that default is a breaking change reserved for a major
+    // release). The fast-path flags are new, with no prior contract to
+    // preserve, so they can gate CI from day one — that's the intended way
+    // to enforce boundaries, doc links, and spec freshness in CI.
+    if ((args.arch || args.docs || args.spec) && report.failCount > 0) {
       process.exitCode = 1
     }
   },
@@ -2373,6 +2399,7 @@ const deployCommand = defineCommand({
 const builtinSubCommands = {
   ...makeCommands,
   'make:adr': makeAdrCommand,
+  'spec:generate': specGenerateCommand,
   'make:auth': makeAuthCommand,
   'make:module': makeModuleCommand,
   'make:channel': makeChannelCommand,

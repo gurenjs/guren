@@ -14,6 +14,7 @@ import { ParseCache } from './parse-cache'
 import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath } from './inertia-pages'
 import { runArchCheck } from './arch-check'
 import { runDocsCheck } from './docs-check'
+import { runSpecCheck } from './spec-check'
 import { getChangedFiles } from './changed-files'
 import { check, type CheckResult, type CheckReport, type CheckStatus } from './check-result'
 
@@ -43,6 +44,8 @@ export interface RunCheckOptions {
   docs?: boolean
   /** Warn when a doc's `last_reviewed` is older than this many days. Off when unset. */
   docsTtlDays?: number
+  /** Run spec drift checks only (docs/spec/ vs regenerated views). */
+  spec?: boolean
 }
 
 /**
@@ -113,13 +116,14 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   const filterChanged = (files: string[]): string[] =>
     changedFiles ? files.filter((f) => changedFiles.has(toPosixRelative(cwd, f))) : files
 
-  // `--arch` / `--docs` select suites; combining them runs the union (never
-  // silently nothing). No flag = every suite.
-  const selected = new Set<'arch' | 'docs'>([
+  // `--arch` / `--docs` / `--spec` select suites; combining them runs the
+  // union (never silently nothing). No flag = every suite.
+  const selected = new Set<'arch' | 'docs' | 'spec'>([
     ...(options.arch ? (['arch'] as const) : []),
     ...(options.docs ? (['docs'] as const) : []),
+    ...(options.spec ? (['spec'] as const) : []),
   ])
-  const runs = (suite: 'core' | 'arch' | 'docs'): boolean =>
+  const runs = (suite: 'core' | 'arch' | 'docs' | 'spec'): boolean =>
     selected.size === 0 || (suite !== 'core' && selected.has(suite))
 
   if (runs('core')) {
@@ -224,7 +228,15 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     checks.push(...docsResults)
   }
 
-  // 8. Check architecture boundaries (guren.arch.ts + derived module rules)
+  // 8. Spec drift checks (docs/spec/ vs regenerated views, RFC 0004).
+  // Content-activated like docs; under --changed it only regenerates when
+  // a spec-relevant file changed.
+  if (runs('spec')) {
+    const specResults = await runSpecCheck({ cwd, routesFile: options.routesFile, changedFiles })
+    checks.push(...specResults)
+  }
+
+  // 9. Check architecture boundaries (guren.arch.ts + derived module rules)
   if (runs('arch')) {
     const archResults = await runArchCheck({ cwd, cache, changedFiles })
     checks.push(...archResults)
