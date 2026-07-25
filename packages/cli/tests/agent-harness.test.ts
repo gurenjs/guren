@@ -25,6 +25,7 @@ describe('installAgentHarness', () => {
     expect(result.written).toContain('.claude/settings.json')
     expect(result.written).toContain('.claude/hooks/check-after-edit.ts')
     expect(result.written).toContain('.claude/rules/orm-models.md')
+    expect(result.written).toContain('.claude/rules/docs-and-spec.md')
     expect(result.written).toContain('.claude/skills/dev-workflow/SKILL.md')
     expect(result.written).toContain('.claude/agents/code-review.md')
 
