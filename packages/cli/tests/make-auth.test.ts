@@ -905,4 +905,97 @@ export function registerWebRoutes(router: Router): void {
       await workspace.cleanup()
     }
   })
+
+  async function readProfileScaffold(dir: string) {
+    return {
+      controller: await readFile(join(dir, 'app/Http/Controllers/ProfileController.ts'), 'utf8'),
+      validator: await readFile(join(dir, 'app/Http/Validators/ProfileValidator.ts'), 'utf8'),
+      view: await readFile(join(dir, 'resources/js/pages/profile/Edit.tsx'), 'utf8'),
+    }
+  }
+
+  it('scaffolds the profile email read-only with --oauth and no --verify', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-oauth-profile-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'db/schema.ts'), `export const posts = 'posts'\n`, 'utf8')
+
+      await makeAuth({ force: true, oauth: 'github' })
+
+      const { controller, validator, view } = await readProfileScaffold(workspace.dir)
+
+      // The update action must never receive an email, even from a
+      // hand-crafted request that bypasses the form.
+      expect(validator).not.toContain('email')
+      expect(controller).toContain('const { name, password } = await this.validateBody(ProfileUpdateSchema)')
+      expect(controller).not.toContain('emailChanged')
+      expect(controller).not.toContain('Email is already in use.')
+      expect(controller).toContain('profile: { name, email: user.email }')
+
+      expect(view).toContain('value={profile.email}')
+      expect(view).toContain('readOnly')
+      expect(view).not.toContain("form.setData('email'")
+      expect(view).not.toContain("ValidationErrors<'name' | 'email' | 'password'>")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('scaffolds the profile email read-only with --oauth --minimal', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-oauth-minimal-profile-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'db/schema.ts'), `export const posts = 'posts'\n`, 'utf8')
+
+      await makeAuth({ force: true, minimal: true, oauth: 'github' })
+
+      const { controller, validator, view } = await readProfileScaffold(workspace.dir)
+
+      expect(validator).not.toContain('email')
+      expect(controller).toContain('const { name, password } = await this.validateBody(ProfileUpdateSchema)')
+      expect(view).toContain('readOnly')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('keeps the profile email editable with --oauth --verify', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-oauth-verify-profile-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'db/schema.ts'), `export const posts = 'posts'\n`, 'utf8')
+
+      await makeAuth({ force: true, verify: true, oauth: 'github' })
+
+      const { controller, validator, view } = await readProfileScaffold(workspace.dir)
+
+      expect(validator).toContain("email('Enter a valid email address.')")
+      expect(controller).toContain('const { name, email, password } = await this.validateBody(ProfileUpdateSchema)')
+      // A replacement address loses the old one's verified status and has to
+      // be re-proven before it counts.
+      expect(controller).toContain('emailVerifiedAt: null')
+      expect(view).toContain("form.setData('email'")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('keeps the profile email editable without --oauth', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-profile-editable-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'db/schema.ts'), `export const posts = 'posts'\n`, 'utf8')
+
+      await makeAuth({ force: true })
+
+      const { controller, validator, view } = await readProfileScaffold(workspace.dir)
+
+      expect(validator).toContain("email('Enter a valid email address.')")
+      expect(controller).toContain('const { name, email, password } = await this.validateBody(ProfileUpdateSchema)')
+      expect(controller).toContain('Email is already in use.')
+      expect(view).toContain("form.setData('email'")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
 })

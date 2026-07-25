@@ -424,7 +424,10 @@ export default class DashboardController extends Controller {
  * first sign-in. Nothing re-verifies it here — `--verify` is unavailable in
  * this mode — so the only safe form is one that can't change it.
  */
-function buildProviderOwnedEmailProfileControllerTemplate(): string {
+function buildProviderOwnedEmailProfileControllerTemplate(includePassword: boolean): string {
+  const destructuredFields = includePassword ? '{ name, password }' : '{ name }'
+  const updateFields = includePassword ? '{ name, ...(password ? { password } : {}) }' : '{ name }'
+
   return `import { Controller } from '@guren/core'
 import { User, type UserRecord } from '../../Models/User.js'
 import { ProfileUpdateSchema } from '../Validators/ProfileValidator.js'
@@ -451,10 +454,10 @@ export default class ProfileController extends Controller {
       return this.redirect('/login')
     }
 
-    // Only the name is editable — the email belongs to the OAuth provider.
-    const { name } = await this.validateBody(ProfileUpdateSchema)
+    // The email belongs to the OAuth provider — it is not editable here.
+    const ${destructuredFields} = await this.validateBody(ProfileUpdateSchema)
 
-    await User.update({ id: user.id }, { name })
+    await User.update({ id: user.id }, ${updateFields})
 
     const refreshed = await User.find(user.id)
     if (refreshed) {
@@ -472,7 +475,7 @@ export default class ProfileController extends Controller {
 
 function buildProfileControllerTemplate({ includeVerify, includePassword, providerOwnedEmail }: AuthFeatures): string {
   if (providerOwnedEmail) {
-    return buildProviderOwnedEmailProfileControllerTemplate()
+    return buildProviderOwnedEmailProfileControllerTemplate(includePassword)
   }
 
   const coreImports = includeVerify
@@ -1489,10 +1492,12 @@ export default function Dashboard({ user }: Props) {
 `
 
 function buildProfileViewTemplate({ includePassword, providerOwnedEmail }: AuthFeatures): string {
-  const errorFields = includePassword
-    ? `'name' | 'email' | 'password'`
-    : providerOwnedEmail
-      ? `'name'`
+  const errorFields = providerOwnedEmail
+    ? includePassword
+      ? `'name' | 'password'`
+      : `'name'`
+    : includePassword
+      ? `'name' | 'email' | 'password'`
       : `'name' | 'email'`
   const emailFormField = providerOwnedEmail
     ? ''
@@ -2101,11 +2106,17 @@ function resolveAuthFeatures(options: MakeAuthOptions): AuthFeatures {
     )
   }
 
+  // An OAuth account's email is asserted by the provider. Without --verify,
+  // nothing in the scaffold can re-prove a replacement, so the profile form
+  // must not accept one — that covers --oauth-only (which always disables
+  // --verify) as well as plain --oauth without --verify.
+  const providerOwnedEmail = oauthProviders.length > 0 && !includeVerify
+
   return {
     includeExtras,
     includeVerify,
     includePassword: !oauthOnly,
-    providerOwnedEmail: oauthOnly,
+    providerOwnedEmail,
     oauthProviders,
   }
 }
