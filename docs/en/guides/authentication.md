@@ -77,6 +77,10 @@ bunx guren make:auth --install --oauth github --oauth-only
 
 `/login` becomes a provider-buttons page with no credential form and no `POST /login` route; `LoginController` keeps only `show()` and `destroy()` (logout). Registration, password reset, the login and profile password fields, `LoginValidator`, and the demo `UsersSeeder` are all skipped — a seeded password could never be used to sign in. `--oauth-only` requires `--oauth` with at least one provider (otherwise the app would have no way in at all) and subsumes `--minimal`; `--verify` is skipped under it, since provider-supplied emails arrive already vouched for.
 
+The profile page shows the email read-only in this mode, and `ProfileUpdateSchema` omits the field entirely. Because nothing re-verifies an edited address here, an editable email would let an account claim one it has never proven — and `OAuthController`'s collision check would then turn that squatted address away when its real owner first signs in.
+
+`make:auth` only writes the files it scaffolds; it never deletes. Converting an existing password app with `--oauth-only --force` therefore leaves the old registration and reset files behind — the scaffold prints the list. Delete them: the stale `db/seeders/UsersSeeder.ts` in particular is picked up by `db:seed` rather than by the route table, so a dead `routes/auth.ts` does not neutralize it.
+
 This is the recommended shape for CPU-metered runtimes such as the Cloudflare Workers free tier, where a single password hash exceeds the per-request CPU budget no matter which hashing algorithm you pick.
 
 ## OAuth / Social login

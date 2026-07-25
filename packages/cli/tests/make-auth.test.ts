@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { consola } from 'consola'
 import { createTempWorkspace } from './helpers'
 import { makeAuth } from '../src/make-auth'
 
@@ -647,6 +648,17 @@ export const posts = pgTable('posts', {
       const profilePage = await readFile(join(workspace.dir, 'resources/js/pages/profile/Edit.tsx'), 'utf8')
       expect(profilePage).not.toContain('password')
 
+      // The email is provider-vouched and nothing re-verifies it in this mode,
+      // so the profile must not be able to replace it — otherwise an account
+      // could claim an address it never proved, and OAuthController's
+      // collision check would then reject the real owner's first sign-in.
+      expect(profileValidator).not.toContain('email')
+      expect(profileController).toContain('const { name } = await this.validateBody(ProfileUpdateSchema)')
+      expect(profileController).not.toContain('Email is already in use.')
+      expect(profileController).toContain('User.update({ id: user.id }, { name })')
+      expect(profilePage).not.toContain("form.setData('email'")
+      expect(profilePage).toContain('Managed by your sign-in provider.')
+
       const schema = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
       expect(schema).toContain("passwordHash: text('password_hash'),")
       expect(schema).toContain("githubId: text('github_id').unique()")
@@ -665,6 +677,38 @@ export const posts = pgTable('posts', {
       // Same for a provider list that survives parsing with nothing in it.
       await expect(makeAuth({ force: true, oauthOnly: true, oauth: 'bogus' })).rejects.toThrow('--oauth-only requires --oauth')
     } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('warns about password files left behind when converting an app to --oauth-only', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-oauth-only-convert-')
+    const warnings: string[] = []
+    const originalWarn = consola.warn
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'db/schema.ts'), `export const posts = 'posts'\n`, 'utf8')
+
+      // First a normal password scaffold, then convert it.
+      await makeAuth({ force: true })
+
+      consola.warn = ((...args: unknown[]) => {
+        warnings.push(args.map(String).join(' '))
+      }) as typeof consola.warn
+
+      await makeAuth({ force: true, oauth: 'github', oauthOnly: true })
+
+      // make:auth only writes the files it scaffolds — it never deletes — so
+      // the password artifacts survive and must at least be reported.
+      const report = warnings.join('\n')
+      expect(report).toContain('db/seeders/UsersSeeder.ts')
+      expect(report).toContain('app/Http/Validators/LoginValidator.ts')
+      expect(report).toContain('app/Http/Controllers/Auth/RegisterController.ts')
+      // The seeder is found by db:seed rather than routed, so a dead route
+      // table does not neutralize it.
+      expect(report).toContain('still runs on `db:seed`')
+    } finally {
+      consola.warn = originalWarn
       await workspace.cleanup()
     }
   })

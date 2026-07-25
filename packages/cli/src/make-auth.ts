@@ -403,7 +403,65 @@ export default class DashboardController extends Controller {
 }
 `
 
-function buildProfileControllerTemplate({ includeVerify, includePassword }: AuthFeatures): string {
+/**
+ * When OAuth is the only way in, the stored email is a copy of what the
+ * provider vouched for and the profile form must not be able to replace it:
+ * an account could otherwise claim an address it has never proven, and
+ * OAuthController's email-collision check would then reject the real owner's
+ * first sign-in. Nothing re-verifies it here — `--verify` is unavailable in
+ * this mode — so the only safe form is one that can't change it.
+ */
+function buildProviderOwnedEmailProfileControllerTemplate(): string {
+  return `import { Controller } from '@guren/core'
+import { User, type UserRecord } from '../../Models/User.js'
+import { ProfileUpdateSchema } from '../Validators/ProfileValidator.js'
+import { pages } from '@/.guren/pages.gen'
+
+export default class ProfileController extends Controller {
+  async edit(): Promise<Response> {
+    const user = await this.auth.user<UserRecord | null>()
+    if (!user) {
+      return this.redirect('/login')
+    }
+
+    return this.inertia(pages.profile.Edit, {
+      profile: {
+        name: user.name,
+        email: user.email,
+      },
+    }, { url: this.request.path, title: 'Profile' })
+  }
+
+  async update(): Promise<Response> {
+    const user = await this.auth.user<UserRecord | null>()
+    if (!user) {
+      return this.redirect('/login')
+    }
+
+    // Only the name is editable — the email belongs to the OAuth provider.
+    const { name } = await this.validateBody(ProfileUpdateSchema)
+
+    await User.update({ id: user.id }, { name })
+
+    const refreshed = await User.find(user.id)
+    if (refreshed) {
+      await this.auth.login(refreshed)
+    }
+
+    return this.inertia(pages.profile.Edit, {
+      profile: { name, email: user.email },
+      status: 'Profile updated successfully.',
+    }, { url: this.request.path, title: 'Profile' })
+  }
+}
+`
+}
+
+function buildProfileControllerTemplate({ includeVerify, includePassword, providerOwnedEmail }: AuthFeatures): string {
+  if (providerOwnedEmail) {
+    return buildProviderOwnedEmailProfileControllerTemplate()
+  }
+
   const coreImports = includeVerify
     ? 'Controller, ValidationException, createEmailVerificationToken, buildVerificationUrl'
     : 'Controller, ValidationException'
@@ -732,7 +790,20 @@ export const ResetPasswordSchema = z
 export type ResetPasswordInput = z.infer<typeof ResetPasswordSchema>
 `
 
-function buildProfileValidatorTemplate(includePassword: boolean): string {
+function buildProfileValidatorTemplate({ includePassword, providerOwnedEmail }: AuthFeatures): string {
+  // Omitted rather than made read-only in the UI alone: Zod strips unknown
+  // keys, so leaving the field out is what actually stops a hand-crafted
+  // request from carrying one.
+  const emailField = providerOwnedEmail
+    ? ''
+    : `
+  email: z
+    .string()
+    .trim()
+    .min(1, 'Email is required.')
+    .email('Enter a valid email address.')
+    .toLowerCase(),`
+
   const passwordField = includePassword
     ? `
   password: z
@@ -750,13 +821,7 @@ export const ProfileUpdateSchema = z.object({
     .string()
     .trim()
     .min(1, 'Name is required.')
-    .max(120, 'Name must be 120 characters or fewer.'),
-  email: z
-    .string()
-    .trim()
-    .min(1, 'Email is required.')
-    .email('Enter a valid email address.')
-    .toLowerCase(),${passwordField}
+    .max(120, 'Name must be 120 characters or fewer.'),${emailField}${passwordField}
 })
 
 export type ProfileUpdateInput = z.infer<typeof ProfileUpdateSchema>
@@ -1410,8 +1475,40 @@ export default function Dashboard({ user }: Props) {
 }
 `
 
-function buildProfileViewTemplate(includePassword: boolean): string {
-  const errorFields = includePassword ? `'name' | 'email' | 'password'` : `'name' | 'email'`
+function buildProfileViewTemplate({ includePassword, providerOwnedEmail }: AuthFeatures): string {
+  const errorFields = includePassword
+    ? `'name' | 'email' | 'password'`
+    : providerOwnedEmail
+      ? `'name'`
+      : `'name' | 'email'`
+  const emailFormField = providerOwnedEmail
+    ? ''
+    : `
+  email: string`
+  const emailFormValue = providerOwnedEmail
+    ? ''
+    : `
+    email: profile.email,`
+  const emailInput = providerOwnedEmail
+    ? `
+          <div>
+            <label className="block text-sm font-medium text-slate-200">Email</label>
+            <p className="mt-1 w-full rounded border border-slate-800 bg-slate-900 px-3 py-2 text-slate-400">
+              {profile.email}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">Managed by your sign-in provider.</p>
+          </div>`
+    : `
+          <div>
+            <label className="block text-sm font-medium text-slate-200">Email</label>
+            <input
+              type="email"
+              value={form.data.email}
+              onChange={(event) => form.setData('email', event.target.value)}
+              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
+            />
+            {form.errors.email ? <p className="mt-1 text-sm text-rose-300">{form.errors.email}</p> : null}
+          </div>`
   const passwordFormField = includePassword
     ? `
   password: string`
@@ -1450,14 +1547,12 @@ interface Props {
 }
 
 type ProfileFormValues = {
-  name: string
-  email: string${passwordFormField}
+  name: string${emailFormField}${passwordFormField}
 }
 
 export default function ProfileEdit({ profile, status }: Props) {
   const form = useForm<ProfileFormValues>({
-    name: profile.name,
-    email: profile.email,${passwordFormValue}
+    name: profile.name,${emailFormValue}${passwordFormValue}
   })
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -1491,17 +1586,7 @@ export default function ProfileEdit({ profile, status }: Props) {
             />
             {form.errors.name ? <p className="mt-1 text-sm text-rose-300">{form.errors.name}</p> : null}
           </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-200">Email</label>
-            <input
-              type="email"
-              value={form.data.email}
-              onChange={(event) => form.setData('email', event.target.value)}
-              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
-            />
-            {form.errors.email ? <p className="mt-1 text-sm text-rose-300">{form.errors.email}</p> : null}
-          </div>
+${emailInput}
 ${passwordInput}
           <button
             type="submit"
@@ -1862,6 +1947,49 @@ async function generateUsersMigration(): Promise<boolean> {
 async function updatePageContracts(): Promise<void> {
 }
 
+/**
+ * Files this run no longer scaffolds are omitted, never deleted — so
+ * re-running an existing password app with `--oauth-only` leaves them on
+ * disk. The rewritten routes/auth.ts makes the stale controllers unreachable,
+ * but `db/seeders/UsersSeeder.ts` is discovered by `db:seed` rather than
+ * routed, so it would still hash a password and insert an account that has no
+ * way to sign in. Report what is left rather than deleting files we did not
+ * write on this run.
+ */
+const PASSWORD_SCAFFOLD_PATHS = [
+  'app/Http/Validators/LoginValidator.ts',
+  'db/seeders/UsersSeeder.ts',
+  'app/Http/Controllers/Auth/RegisterController.ts',
+  'app/Http/Controllers/Auth/ForgotPasswordController.ts',
+  'app/Http/Controllers/Auth/ResetPasswordController.ts',
+  'app/Http/Validators/RegisterValidator.ts',
+  'app/Http/Validators/ForgotPasswordValidator.ts',
+  'app/Http/Validators/ResetPasswordValidator.ts',
+  'resources/js/pages/auth/Register.tsx',
+  'resources/js/pages/auth/ForgotPassword.tsx',
+  'resources/js/pages/auth/ResetPassword.tsx',
+  'app/Auth/PasswordResetStore.ts',
+  'app/Mail/PasswordResetMail.ts',
+]
+
+async function warnAboutStalePasswordScaffold(): Promise<void> {
+  const { existsSync } = await import('node:fs')
+  const leftovers = PASSWORD_SCAFFOLD_PATHS.filter((path) => existsSync(resolve(process.cwd(), path)))
+
+  if (leftovers.length === 0) {
+    return
+  }
+
+  consola.warn(
+    `These password-auth files from an earlier make:auth run are no longer wired into routes/auth.ts — delete them: ${leftovers.join(', ')}`,
+  )
+  if (leftovers.includes('db/seeders/UsersSeeder.ts')) {
+    consola.warn(
+      'db/seeders/UsersSeeder.ts still runs on `db:seed` and would insert a password account that cannot sign in.',
+    )
+  }
+}
+
 const KNOWN_OAUTH_PROVIDERS = ['github', 'google', 'discord'] as const
 
 function parseOAuthProviders(raw: string | undefined): string[] {
@@ -1911,6 +2039,8 @@ interface AuthFeatures {
   includeVerify: boolean
   /** Password credentials: POST /login, the login validator, password fields, the demo seeder. */
   includePassword: boolean
+  /** The email comes from the OAuth provider and must not be locally editable. */
+  providerOwnedEmail: boolean
   /** Providers to scaffold buttons, a callback, and id columns for. */
   oauthProviders: string[]
 }
@@ -1942,7 +2072,13 @@ function resolveAuthFeatures(options: MakeAuthOptions): AuthFeatures {
     )
   }
 
-  return { includeExtras, includeVerify, includePassword: !oauthOnly, oauthProviders }
+  return {
+    includeExtras,
+    includeVerify,
+    includePassword: !oauthOnly,
+    providerOwnedEmail: oauthOnly,
+    oauthProviders,
+  }
 }
 
 export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]> {
@@ -1956,7 +2092,7 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
     { path: 'app/Http/Controllers/ProfileController.ts', contents: buildProfileControllerTemplate(features) },
     { path: 'app/Models/User.ts', contents: userModelTemplate },
     { path: 'app/Providers/AuthProvider.ts', contents: authProviderTemplate },
-    { path: 'app/Http/Validators/ProfileValidator.ts', contents: buildProfileValidatorTemplate(includePassword) },
+    { path: 'app/Http/Validators/ProfileValidator.ts', contents: buildProfileValidatorTemplate(features) },
     { path: 'resources/js/components/Layout.tsx', contents: layoutTemplate },
     {
       path: 'resources/js/pages/auth/Login.tsx',
@@ -1965,7 +2101,7 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
         : buildOAuthOnlyLoginViewTemplate(oauthProviders),
     },
     { path: 'resources/js/pages/dashboard/Index.tsx', contents: dashboardViewTemplate },
-    { path: 'resources/js/pages/profile/Edit.tsx', contents: buildProfileViewTemplate(includePassword) },
+    { path: 'resources/js/pages/profile/Edit.tsx', contents: buildProfileViewTemplate(features) },
     { path: 'routes/auth.ts', contents: buildRoutesTemplate(features) },
   ]
 
@@ -2017,6 +2153,9 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
 
   await updateSchema(features)
   await updatePageContracts()
+  if (!includePassword) {
+    await warnAboutStalePasswordScaffold()
+  }
   const migrationGenerated = await generateUsersMigration()
 
   if (options.install) {
