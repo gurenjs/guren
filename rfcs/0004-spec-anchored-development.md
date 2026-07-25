@@ -2,7 +2,13 @@
 
 **Author:** Urata Daiki
 **Date:** 2026-07-25
-**Status:** Draft
+**Status:** Accepted (2026-07-25) — the standard two-week discussion window
+was intentionally shortened by the author, who is also the project's
+deciding maintainer. Unlike RFC 0002, acceptance precedes implementation;
+the design is grounded in an infrastructure survey of the existing CLI
+introspection layer and external prior art (see Prior art), and each part
+ships as its own reviewed PR referencing this RFC. Open Questions remain
+open and will be resolved during implementation with in-place amendments.
 
 ## Problem
 
