@@ -18,12 +18,35 @@ export interface OAuthProviderConfig {
   userInfoMethod?: 'GET' | 'POST'
   mapProfile?: (raw: Record<string, unknown>, token: OAuthTokenResult) => OAuthUserProfile
   /**
+   * Key in the userinfo response carrying the provider's own verification
+   * signal for the email address — Discord returns `verified`, for example.
+   * Defaults to OIDC's standard `email_verified` claim. Only boolean values
+   * are read; anything else leaves `profile.emailVerified` undefined. Ignored
+   * when `mapProfile` is set, since that owns the whole mapping.
+   */
+  emailVerifiedKey?: string
+  /**
    * Fallback used when the userinfo response carries no email — e.g. GitHub
    * returns `email: null` for accounts with a private email even when the
    * `user:email` scope was granted. Returns the email to use, or undefined
    * to leave the profile without one.
+   *
+   * The signal read via `emailVerifiedKey` does not carry over to a fallback
+   * address — it was read against a response that had no email. A bare string
+   * therefore makes no verification claim and leaves `profile.emailVerified`
+   * undefined; return `{ email, emailVerified: true }` to assert one.
    */
-  fetchFallbackEmail?: (token: OAuthTokenResult) => Promise<string | undefined>
+  fetchFallbackEmail?: (token: OAuthTokenResult) => Promise<string | OAuthFallbackEmail | undefined>
+}
+
+export interface OAuthFallbackEmail {
+  email: string
+  /**
+   * Whether the provider verified this specific address. Omit it when the
+   * lookup cannot tell — the profile then reports `emailVerified: undefined`
+   * rather than an unfounded claim.
+   */
+  emailVerified?: boolean
 }
 
 export interface OAuthTokenResult {
@@ -40,6 +63,15 @@ export interface OAuthUserProfile {
   email?: string
   name?: string
   avatar?: string
+  /**
+   * Whether the provider itself verified `email`. Tri-state on purpose:
+   * `true` — the provider asserts the address is verified; `false` — it
+   * asserts it is not; `undefined` — the provider sends no such signal
+   * (GitHub's `/user`, for instance), so the consumer decides its own policy.
+   * Returning an email is not by itself a claim that it was checked, so
+   * treating `undefined` as verified is a decision, not a default.
+   */
+  emailVerified?: boolean
   token: OAuthTokenResult
   raw: Record<string, unknown>
 }
@@ -415,21 +447,40 @@ export async function fetchOAuthUserProfile(
   const raw = await response.json() as Record<string, unknown>
   const profile = provider.mapProfile
     ? provider.mapProfile(raw, token)
-    : defaultProfileFromUserInfo(raw, token)
+    : defaultProfileFromUserInfo(raw, token, provider.emailVerifiedKey)
 
   if (!profile.email && provider.fetchFallbackEmail) {
-    const email = await provider.fetchFallbackEmail(token)
+    const fallback = await provider.fetchFallbackEmail(token)
+    const email = typeof fallback === 'string' ? fallback : fallback?.email
     if (email) {
-      return { ...profile, email }
+      // The signal read from `raw` was read against a response with no email,
+      // so it cannot vouch for this one. Only the object form claims anything;
+      // a bare string — every implementation written against the original
+      // signature — leaves the field undefined rather than asserting `true`.
+      const emailVerified = typeof fallback === 'string' ? undefined : fallback?.emailVerified
+      return { ...profile, email, emailVerified }
     }
   }
 
   return profile
 }
 
+// OIDC's standard claim, so hand-configured OIDC providers get it without
+// declaring anything. Provider-specific keys belong on the provider config.
+const DEFAULT_EMAIL_VERIFIED_KEY = 'email_verified'
+
+function readEmailVerified(
+  raw: Record<string, unknown>,
+  key: string = DEFAULT_EMAIL_VERIFIED_KEY,
+): boolean | undefined {
+  const value = raw[key]
+  return typeof value === 'boolean' ? value : undefined
+}
+
 function defaultProfileFromUserInfo(
   raw: Record<string, unknown>,
   token: OAuthTokenResult,
+  emailVerifiedKey?: string,
 ): OAuthUserProfile {
   const idCandidate = raw.id ?? raw.sub
   const id = typeof idCandidate === 'string' || typeof idCandidate === 'number'
@@ -442,6 +493,7 @@ function defaultProfileFromUserInfo(
   return {
     id,
     email: typeof raw.email === 'string' ? raw.email : undefined,
+    emailVerified: readEmailVerified(raw, emailVerifiedKey),
     name: typeof raw.name === 'string' ? raw.name : undefined,
     avatar:
       typeof raw.avatar_url === 'string' ? raw.avatar_url
@@ -463,7 +515,7 @@ export interface OAuthProviderFactoryInput {
 // GitHub's /user endpoint returns `email: null` whenever the account's email
 // is set to private, even with the `user:email` scope granted — the primary
 // verified address is only available from this separate endpoint.
-async function fetchGitHubPrimaryEmail(token: OAuthTokenResult): Promise<string | undefined> {
+async function fetchGitHubPrimaryEmail(token: OAuthTokenResult): Promise<OAuthFallbackEmail | undefined> {
   const response = await fetch('https://api.github.com/user/emails', {
     headers: {
       Accept: 'application/vnd.github+json',
@@ -488,7 +540,9 @@ async function fetchGitHubPrimaryEmail(token: OAuthTokenResult): Promise<string 
       (entry as { verified?: unknown }).verified === true &&
       typeof (entry as { email?: unknown }).email === 'string',
   )
-  return primary?.email
+  // The `verified === true` filter above is GitHub's own signal for this
+  // address, so this lookup can claim what a generic fallback cannot.
+  return primary ? { email: primary.email, emailVerified: true } : undefined
 }
 
 export function createGitHubOAuthProviderConfig(input: OAuthProviderFactoryInput): OAuthProviderConfig {
@@ -509,6 +563,7 @@ export function createGoogleOAuthProviderConfig(input: OAuthProviderFactoryInput
     tokenUrl: 'https://oauth2.googleapis.com/token',
     userInfoUrl: 'https://openidconnect.googleapis.com/v1/userinfo',
     scopes: input.scopes ?? ['openid', 'profile', 'email'],
+    emailVerifiedKey: 'email_verified',
   }
 }
 
@@ -519,6 +574,7 @@ export function createDiscordOAuthProviderConfig(input: OAuthProviderFactoryInpu
     tokenUrl: 'https://discord.com/api/oauth2/token',
     userInfoUrl: 'https://discord.com/api/users/@me',
     scopes: input.scopes ?? ['identify', 'email'],
+    emailVerifiedKey: 'verified',
   }
 }
 

@@ -357,13 +357,14 @@ export default class OAuthController extends Controller {
 
     if (!user) {
       // Providers report separately whether they actually verified the
-      // address (Google's \`email_verified\`, Discord's \`verified\`) — returning
-      // it in the profile is not a claim that it was checked. Creating an
-      // account from an unverified one would let it claim an email it does
-      // not own, and the collision check below would then turn the real owner
-      // away for good. Checked only on the create path: an already-linked
-      // account should not be locked out if its provider status changes later.
-      if (profile.raw.email_verified === false || profile.raw.verified === false) {
+      // address — returning it in the profile is not a claim that it was
+      // checked. Creating an account from an unverified one would let it claim
+      // an email it does not own, and the collision check below would then turn
+      // the real owner away for good. Only an explicit \`false\` is refused:
+      // providers that send no signal at all leave this undefined. Checked only
+      // on the create path, so an already-linked account is not locked out if
+      // its provider status changes later.
+      if (profile.emailVerified === false) {
         throw ValidationException.withMessages({
           message: 'Your provider has not verified this email address. Verify it with the provider and try again.',
         })
