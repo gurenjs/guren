@@ -14,18 +14,29 @@
  *
  * Only the storage carries over from `Application.listen()`, though, not its
  * simplicity: a process has exactly one Bun server, so `listen()` can replace
- * whatever it finds unconditionally. Connections have no such guarantee — an
- * app may well open one pool for web requests and another for background jobs
- * against the same database — so a re-evaluated factory has to be told apart
- * from a second factory created deliberately alongside the first. Closing a
- * live handle would be a worse bug than the leak, so this only runs under
- * `--hot`, and only when the factory's own source location can be determined to
- * key it by. The one case that still collides is a loop opening the same
- * database from a single line more than once — a duplicate by construction; a
- * loop over per-tenant URLs is keyed apart by its target.
+ * whatever it finds unconditionally. Connections have no such guarantee, so a
+ * handle is identified by the file that built it and the database it points at.
+ *
+ * That pair is what survives an edit. Keying on the exact line would be more
+ * precise, but a line number changes the moment anything above it does — adding
+ * an import to `config/database.ts` would orphan the previous entry and leak the
+ * connection it was holding, during the very workflow this exists to fix. The
+ * file is stable across every edit that isn't a rename.
+ *
+ * The cost of that choice: two handles built in one file against one database —
+ * separate pools for web requests and background jobs, say — share a key, so the
+ * second replaces the first. Give them their own module to keep them apart. This
+ * only runs under `--hot`, so the mistake surfaces immediately in dev rather
+ * than anywhere it could reach production.
  */
 
 type Teardown = () => Promise<void> | void
+
+interface ActiveConnection {
+  teardown: Teardown
+  /** Resolves once this claim has finished closing the client it replaced. */
+  settled: Promise<void>
+}
 
 const REGISTRY_KEY = Symbol.for('guren.orm.activeConnections')
 
@@ -40,10 +51,10 @@ const REGISTRY_KEY = Symbol.for('guren.orm.activeConnections')
 const TEARDOWN_TIMEOUT_MS = 5_000
 
 type GlobalWithRegistry = typeof globalThis & {
-  [REGISTRY_KEY]?: Map<string, Teardown>
+  [REGISTRY_KEY]?: Map<string, ActiveConnection>
 }
 
-function getRegistry(): Map<string, Teardown> {
+function getRegistry(): Map<string, ActiveConnection> {
   const scope = globalThis as GlobalWithRegistry
   const existing = scope[REGISTRY_KEY]
 
@@ -51,7 +62,7 @@ function getRegistry(): Map<string, Teardown> {
     return existing
   }
 
-  const registry = new Map<string, Teardown>()
+  const registry = new Map<string, ActiveConnection>()
   scope[REGISTRY_KEY] = registry
   return registry
 }
@@ -68,17 +79,20 @@ function isHotReloadRuntime(): boolean {
 }
 
 /**
- * The source location that called a `create*Database()` factory.
+ * The file that called a `create*Database()` factory.
  *
  * `stack` must come from an `Error` constructed inside the factory itself, so
- * frame 0 is `Error`, frame 1 is the factory, and frame 2 is the caller. A hot
- * reload re-runs the same line of the same file and reproduces this exactly;
- * two factories written side by side never share it.
+ * frame 0 is `Error`, frame 1 is the factory, and frame 2 is the caller. Only
+ * the path is kept: a reload re-runs the same file, but not necessarily at the
+ * same line.
  */
-export function describeCallSite(stack: string | undefined): string | undefined {
+export function describeCallerFile(stack: string | undefined): string | undefined {
   const caller = stack?.split('\n')[2]
+  // Matched as one `file:line:column` run, then trimmed: letting the group stop
+  // at the first `:` would leave the line number attached, since a greedy path
+  // match backtracks no further than it has to.
   const location = caller?.match(/\(?([^()\s]+:\d+(?::\d+)?)\)?\s*$/)?.[1]
-  return location ?? undefined
+  return location?.replace(/:\d+(?::\d+)?$/, '') || undefined
 }
 
 /**
@@ -90,41 +104,22 @@ export function hotReloadKey(driver: string, stack: string | undefined, target: 
     return undefined
   }
 
-  const callSite = describeCallSite(stack)
-  if (!callSite) {
+  const callerFile = describeCallerFile(stack)
+  if (!callerFile) {
     return undefined
   }
 
-  // The target is part of the key so a factory helper that opens one database
-  // per tenant from a single line does not collapse them all into one slot.
-  return `${driver}|${callSite}|${target}`
+  // The target is part of the key so one module opening a database per tenant
+  // does not collapse them all into a single slot.
+  return `${driver}|${callerFile}|${target}`
 }
 
-/**
- * Records `teardown` as the active client for `key` and closes whichever client
- * held the slot before it.
- *
- * `timeoutMs` exists so tests can exercise the give-up path without waiting out
- * the real budget; callers should leave it at the default.
- */
-export async function replaceActiveConnection(
-  key: string,
-  teardown: Teardown,
-  timeoutMs: number = TEARDOWN_TIMEOUT_MS,
-): Promise<void> {
-  const registry = getRegistry()
-  const previous = registry.get(key)
-  registry.set(key, teardown)
-
-  if (!previous || previous === teardown) {
-    return
-  }
-
+async function closeWithTimeout(teardown: Teardown, timeoutMs: number): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined
 
   try {
     await Promise.race([
-      Promise.resolve(previous()),
+      Promise.resolve(teardown()),
       new Promise<void>((resolveTimeout) => {
         timer = setTimeout(() => {
           console.warn(
@@ -144,12 +139,52 @@ export async function replaceActiveConnection(
 }
 
 /**
+ * Records `teardown` as the active client for `key` and closes whichever client
+ * held the slot before it.
+ *
+ * Claims on one key are serialized: a claim waits for the claim it supersedes to
+ * finish its own replacement before tearing it down. Without that, three reloads
+ * arriving inside the teardown window let the third close the second's client
+ * while the second was still initializing, and the second would go on to hand
+ * its caller a client that is already closed.
+ *
+ * `timeoutMs` exists so tests can exercise the give-up path without waiting out
+ * the real budget; callers should leave it at the default.
+ */
+export async function replaceActiveConnection(
+  key: string,
+  teardown: Teardown,
+  timeoutMs: number = TEARDOWN_TIMEOUT_MS,
+): Promise<void> {
+  const registry = getRegistry()
+  const previous = registry.get(key)
+
+  if (previous?.teardown === teardown) {
+    return
+  }
+
+  const settled = (async () => {
+    if (!previous) {
+      return
+    }
+
+    // Let the superseded claim finish before pulling its client out from under
+    // it, then close it.
+    await previous.settled.catch(() => {})
+    await closeWithTimeout(previous.teardown, timeoutMs)
+  })()
+
+  registry.set(key, { teardown, settled })
+  await settled
+}
+
+/**
  * Frees the slot held by `teardown`, unless a newer client already took it.
  */
 export function releaseActiveConnection(key: string, teardown: Teardown): void {
   const registry = getRegistry()
 
-  if (registry.get(key) === teardown) {
+  if (registry.get(key)?.teardown === teardown) {
     registry.delete(key)
   }
 }

@@ -129,17 +129,23 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
       await migrateOnce()
       const { drizzle, postgres: postgresFactory } = await loadPostgresModules()
       const url = resolveConnectionString()
-      client = postgresFactory(url, {
+      // Held locally as well as in closure state: a newer evaluation may close
+      // this client while the await below is suspended, which clears `client`.
+      const activeClient = postgresFactory(url, {
         max: 1,
         ...clientOptions,
       })
+      client = activeClient
 
       activeKey = hotReloadKey('postgres', callSite, url)
       if (activeKey) {
         await replaceActiveConnection(activeKey, closeDatabase)
       }
 
-      return drizzle({ client, ...(relations ? { relations } : {}) } as DrizzleConfig) as unknown as PostgresJsDatabase
+      return drizzle({
+        client: activeClient,
+        ...(relations ? { relations } : {}),
+      } as DrizzleConfig) as unknown as PostgresJsDatabase
     })()
 
     databasePromise = promise.catch((error) => {

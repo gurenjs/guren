@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { describeCallSite, hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
+import { describeCallerFile, hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 
 function withHotRuntime<T>(callback: () => T): T {
   process.execArgv.push('--hot')
@@ -10,8 +10,8 @@ function withHotRuntime<T>(callback: () => T): T {
   }
 }
 
-describe('describeCallSite', () => {
-  test('should return the frame that called the factory', () => {
+describe('describeCallerFile', () => {
+  test('should return the file that called the factory', () => {
     const stack = [
       'Error',
       '    at createPostgresDatabase (/app/node_modules/@guren/orm/dist/index.js:120:15)',
@@ -19,7 +19,7 @@ describe('describeCallSite', () => {
       '    at /app/src/app.ts:9:1',
     ].join('\n')
 
-    expect(describeCallSite(stack)).toBe('/app/config/database.ts:3:18')
+    expect(describeCallerFile(stack)).toBe('/app/config/database.ts')
   })
 
   test('should read a frame that carries a function name', () => {
@@ -29,34 +29,42 @@ describe('describeCallSite', () => {
       '    at makeDatabase (/app/config/database.ts:12:20)',
     ].join('\n')
 
-    expect(describeCallSite(stack)).toBe('/app/config/database.ts:12:20')
+    expect(describeCallerFile(stack)).toBe('/app/config/database.ts')
+  })
+
+  test('should read a frame that carries no column', () => {
+    expect(describeCallerFile('Error\n    at factory (/app/dist/index.js:1:1)\n    at /app/config/database.ts:3')).toBe(
+      '/app/config/database.ts',
+    )
   })
 
   test('should return undefined when there is no caller frame', () => {
-    expect(describeCallSite(undefined)).toBeUndefined()
-    expect(describeCallSite('Error')).toBeUndefined()
-    expect(describeCallSite('Error\n    at createPostgresDatabase (/app/dist/index.js:120:15)')).toBeUndefined()
+    expect(describeCallerFile(undefined)).toBeUndefined()
+    expect(describeCallerFile('Error')).toBeUndefined()
+    expect(describeCallerFile('Error\n    at createPostgresDatabase (/app/dist/index.js:120:15)')).toBeUndefined()
   })
 
-  test('should distinguish two call sites in the same file', () => {
+  test('should stay identical when the call moves to another line', () => {
+    // The whole point of dropping line and column: adding an import above the
+    // factory must not orphan the entry holding the previous connection.
     const at = (line: number) =>
-      describeCallSite(`Error\n    at factory (/app/dist/index.js:1:1)\n    at /app/config/database.ts:${line}:18`)
+      describeCallerFile(`Error\n    at factory (/app/dist/index.js:1:1)\n    at /app/config/database.ts:${line}:18`)
 
-    expect(at(3)).not.toBe(at(9))
+    expect(at(3)).toBe(at(9))
+    expect(at(3)).toBe('/app/config/database.ts')
   })
 
   test('should parse a stack this runtime actually produced', () => {
     // The fixtures above are hand-written, so they would keep passing if the
     // engine changed its stack format and every real key silently became
     // undefined — leaking again, quietly. This asserts against the real thing.
-    const factory = () => describeCallSite(new Error().stack)
-    const callers: (string | undefined)[] = []
-    for (let i = 0; i < 2; i += 1) callers.push(factory())
+    const factory = () => describeCallerFile(new Error().stack)
 
-    expect(callers[0]).toContain('active-connections.test.ts')
-    // One call site repeated — what a hot reload reproduces — must stay stable.
-    expect(callers[0]).toBe(callers[1])
-    expect(factory()).not.toBe(callers[0])
+    const here = factory()
+    expect(here).toBeDefined()
+    expect(here).toEndWith('active-connections.test.ts')
+    // A call from a different line of this same file must produce the same key.
+    expect(factory()).toBe(here)
   })
 })
 
@@ -70,7 +78,7 @@ describe('hotReloadKey', () => {
   test('should key by call site under --hot', () => {
     withHotRuntime(() => {
       expect(hotReloadKey('postgres', stack, 'postgres://example')).toBe(
-        'postgres|/app/config/database.ts:3:18|postgres://example',
+        'postgres|/app/config/database.ts|postgres://example',
       )
     })
   })
@@ -81,16 +89,29 @@ describe('hotReloadKey', () => {
     })
   })
 
-  test('should separate factories written on different lines', () => {
+  test('should survive the factory call moving to another line', () => {
     withHotRuntime(() => {
-      const web = hotReloadKey('postgres', stack, 'postgres://example')
-      const jobs = hotReloadKey(
+      const before = hotReloadKey('postgres', stack, 'postgres://example')
+      const afterEdit = hotReloadKey(
         'postgres',
         'Error\n    at factory (/app/dist/index.js:1:1)\n    at /app/config/database.ts:9:18',
         'postgres://example',
       )
 
-      expect(web).not.toBe(jobs)
+      expect(before).toBe(afterEdit)
+    })
+  })
+
+  test('should separate factories built in different modules', () => {
+    withHotRuntime(() => {
+      const primary = hotReloadKey('postgres', stack, 'postgres://example')
+      const reporting = hotReloadKey(
+        'postgres',
+        'Error\n    at factory (/app/dist/index.js:1:1)\n    at /app/config/reporting-database.ts:3:18',
+        'postgres://example',
+      )
+
+      expect(primary).not.toBe(reporting)
     })
   })
 

@@ -84,7 +84,10 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
 
     const { drizzle } = await import('drizzle-orm/bun-sqlite')
     type DrizzleConfig = NonNullable<Exclude<Parameters<typeof drizzle>[0], string>>
-    db = drizzle({ client: sqlite, ...(relations ? { relations } : {}) } as DrizzleConfig)
+    // Held locally as well as in closure state: a newer evaluation may close
+    // this handle while the await below is suspended, which clears `db`.
+    const database = drizzle({ client: sqlite, ...(relations ? { relations } : {}) } as DrizzleConfig)
+    db = database
 
     // In-memory databases share no underlying file, so two of them are distinct
     // handles even when every option matches — there is nothing to key them on.
@@ -93,7 +96,7 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
       await replaceActiveConnection(activeKey, closeDatabase)
     }
 
-    return db
+    return database
   }
 
   async function closeDatabase(): Promise<void> {

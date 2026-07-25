@@ -16,12 +16,7 @@ function isOpen(db: unknown): boolean {
   }
 }
 
-/**
- * A hot reload re-runs the same line of the same file, so repeating one call
- * site is what a reload looks like from inside the factory. It has to be a real
- * loop: JavaScriptCore reports the *caller* of a one-line wrapper, so routing
- * through a helper would produce two different call sites instead of one.
- */
+/** Repeated calls from this module stand in for successive hot reloads. */
 function reevaluate(options: SqliteDatabaseOptions, times: number): SqliteDatabase[] {
   const evaluations: SqliteDatabase[] = []
   for (let i = 0; i < times; i += 1) evaluations.push(createSqliteDatabase(options))
@@ -64,28 +59,47 @@ describe('createSqliteDatabase hot-reload teardown', () => {
     await current.closeDatabase()
   })
 
-  test('should leave a factory written elsewhere in the source untouched', async () => {
-    // Two factories built side by side are distinct handles, not a reload —
-    // even with identical options — so neither may close the other.
+  test('should replace a handle whose call moved to another line', async () => {
+    // The key is the calling file, not the line, so an edit above the factory
+    // still resolves to the same handle instead of orphaning the old one.
     const options = {
       migrationsFolder: join(workDir, 'migrations'),
       filename: join(workDir, 'app.db'),
     }
 
-    const web = createSqliteDatabase(options)
-    const jobs = createSqliteDatabase(options)
+    const before = createSqliteDatabase(options)
+    const beforeDb = await before.getDatabase()
+    expect(isOpen(beforeDb)).toBe(true)
 
-    const webDb = await web.getDatabase()
-    const jobsDb = await jobs.getDatabase()
+    const afterEdit = createSqliteDatabase(options)
+    const afterEditDb = await afterEdit.getDatabase()
 
-    expect(isOpen(webDb)).toBe(true)
-    expect(isOpen(jobsDb)).toBe(true)
+    expect(isOpen(beforeDb)).toBe(false)
+    expect(isOpen(afterEditDb)).toBe(true)
 
-    await web.closeDatabase()
-    await jobs.closeDatabase()
+    await afterEdit.closeDatabase()
   })
 
-  test('should leave one call site that opens different files alone', async () => {
+  test('should hand every claim a usable handle when reloads overlap', async () => {
+    // Three claims land inside one teardown window. Without serializing them the
+    // third closes the second's client mid-initialization, and the second
+    // resolves to undefined — which would then be configured into the adapter.
+    const [first, second, third] = reevaluate(
+      { migrationsFolder: join(workDir, 'migrations'), filename: join(workDir, 'app.db') },
+      3,
+    )
+
+    await first.getDatabase()
+    const [secondDb, thirdDb] = await Promise.all([second.getDatabase(), third.getDatabase()])
+
+    expect(secondDb).toBeDefined()
+    expect(thirdDb).toBeDefined()
+    expect(isOpen(thirdDb)).toBe(true)
+
+    await third.closeDatabase()
+  })
+
+  test('should leave a handle for a different database file open', async () => {
     const opened: SqliteDatabase[] = []
     for (const name of ['first.db', 'second.db']) {
       opened.push(
