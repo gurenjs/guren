@@ -415,11 +415,12 @@ The runtime strips exactly the columns your provider is configured with plus the
 
 ## Example Application
 
-The blog example now includes:
+The blog example includes the full authentication stack:
 
-- `AuthProvider` for guard/provider setup
-- `LoginController` & `DashboardController`
-- Inertia pages at `resources/js/pages/auth/Login.tsx` and `resources/js/pages/dashboard/Index.tsx`
+- `AuthProvider` and `OAuthProvider` for guard/provider setup
+- Login, registration, password reset, and email verification controllers, plus `DashboardController`
+- Inertia pages under `resources/js/pages/auth/` (`Login`, `Register`, `ForgotPassword`, `ResetPassword`, `VerifyEmail`) and `resources/js/pages/dashboard/Index.tsx`
+- OAuth login buttons for GitHub and Google
 - Database schema, migration, and seeder for `users`
 
 Run the demo with:
@@ -428,4 +429,4 @@ Run the demo with:
 bun run dev
 ```
 
-Visit `http://localhost:3000/login` and sign in using the seeded credentials `demo@example.com` / `secret`.
+Visit `http://localhost:3333/login` and sign in using the seeded credentials `demo@guren.dev` / `secret`, or visit `/register` to create a new account.

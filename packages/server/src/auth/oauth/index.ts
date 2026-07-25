@@ -17,6 +17,13 @@ export interface OAuthProviderConfig {
   tokenAuthMethod?: 'client_secret_post' | 'client_secret_basic'
   userInfoMethod?: 'GET' | 'POST'
   mapProfile?: (raw: Record<string, unknown>, token: OAuthTokenResult) => OAuthUserProfile
+  /**
+   * Fallback used when the userinfo response carries no email — e.g. GitHub
+   * returns `email: null` for accounts with a private email even when the
+   * `user:email` scope was granted. Returns the email to use, or undefined
+   * to leave the profile without one.
+   */
+  fetchFallbackEmail?: (token: OAuthTokenResult) => Promise<string | undefined>
 }
 
 export interface OAuthTokenResult {
@@ -372,10 +379,24 @@ export async function fetchOAuthUserProfile(
   }
 
   const raw = await response.json() as Record<string, unknown>
-  if (provider.mapProfile) {
-    return provider.mapProfile(raw, token)
+  const profile = provider.mapProfile
+    ? provider.mapProfile(raw, token)
+    : defaultProfileFromUserInfo(raw, token)
+
+  if (!profile.email && provider.fetchFallbackEmail) {
+    const email = await provider.fetchFallbackEmail(token)
+    if (email) {
+      return { ...profile, email }
+    }
   }
 
+  return profile
+}
+
+function defaultProfileFromUserInfo(
+  raw: Record<string, unknown>,
+  token: OAuthTokenResult,
+): OAuthUserProfile {
   const idCandidate = raw.id ?? raw.sub
   const id = typeof idCandidate === 'string' || typeof idCandidate === 'number'
     ? String(idCandidate)
@@ -405,6 +426,37 @@ export interface OAuthProviderFactoryInput {
   scopes?: string[]
 }
 
+// GitHub's /user endpoint returns `email: null` whenever the account's email
+// is set to private, even with the `user:email` scope granted — the primary
+// verified address is only available from this separate endpoint.
+async function fetchGitHubPrimaryEmail(token: OAuthTokenResult): Promise<string | undefined> {
+  const response = await fetch('https://api.github.com/user/emails', {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      Authorization: `Bearer ${token.accessToken}`,
+      'User-Agent': 'guren-oauth',
+    },
+  })
+
+  if (!response.ok) {
+    return undefined
+  }
+
+  const emails = await response.json() as unknown
+  if (!Array.isArray(emails)) {
+    return undefined
+  }
+
+  const primary = emails.find(
+    (entry): entry is { email: string } =>
+      typeof entry === 'object' && entry !== null &&
+      (entry as { primary?: unknown }).primary === true &&
+      (entry as { verified?: unknown }).verified === true &&
+      typeof (entry as { email?: unknown }).email === 'string',
+  )
+  return primary?.email
+}
+
 export function createGitHubOAuthProviderConfig(input: OAuthProviderFactoryInput): OAuthProviderConfig {
   return {
     ...input,
@@ -412,6 +464,7 @@ export function createGitHubOAuthProviderConfig(input: OAuthProviderFactoryInput
     tokenUrl: 'https://github.com/login/oauth/access_token',
     userInfoUrl: 'https://api.github.com/user',
     scopes: input.scopes ?? ['read:user', 'user:email'],
+    fetchFallbackEmail: fetchGitHubPrimaryEmail,
   }
 }
 

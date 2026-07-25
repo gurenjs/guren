@@ -114,12 +114,17 @@ export default class ForgotPasswordController extends Controller {
     const { email } = await this.validateBody(ForgotPasswordSchema)
 
     // Always respond with the same status message whether or not the
-    // account exists, to avoid leaking which emails are registered.
+    // account exists, to avoid leaking which emails are registered. The
+    // mail send is deliberately not awaited: the transport round-trip only
+    // happens for known accounts, so awaiting it would let response timing
+    // (or a transport failure) reveal which emails exist.
     const [user] = await User.where({ email })
     if (user) {
       const { token } = await createPasswordResetToken(email, passwordResetStore)
       const resetUrl = buildPasswordResetUrl(\`\${new URL(this.request.url).origin}/reset-password\`, token, email)
-      await sendPasswordResetMail(this.make('mail'), email, resetUrl)
+      void sendPasswordResetMail(this.make('mail'), email, resetUrl).catch((error) => {
+        console.error('Failed to send password reset email:', error)
+      })
     }
 
     return this.inertia(pages.auth.ForgotPassword, { status: STATUS_MESSAGE }, {
@@ -266,11 +271,17 @@ ${registrations}
 `
 }
 
-function buildOAuthControllerTemplate(providers: string[]): string {
+function buildOAuthControllerTemplate(providers: string[], includeVerify: boolean): string {
   const providerLiterals = providers.map((provider) => `'${provider}'`).join(', ')
   const identityEntries = providers
     .map((provider) => `    ${provider}: { ${provider}Id: profileId },`)
     .join('\n')
+
+  // The provider already vouches for this address, so an OAuth-created
+  // account is verified on arrival — without this, requireVerifiedEmail
+  // would strand OAuth users at /verify-email forever, since this
+  // controller never sends a verification email for them to click.
+  const emailVerifiedAtField = includeVerify ? '\n        emailVerifiedAt: new Date(),' : ''
 
   return `import { Controller, ValidationException, type OAuthManager } from '@guren/core'
 import { randomUUID } from 'node:crypto'
@@ -318,14 +329,17 @@ export default class OAuthController extends Controller {
 
     const { profile, redirectTo } = await this.oauth().handleCallback(provider, { code, state })
 
-    if (!profile.email) {
+    // Lowercased to match how registration stores emails; provider casing
+    // isn't guaranteed to be stable across logins.
+    const email = profile.email?.toLowerCase()
+    if (!email) {
       throw ValidationException.withMessages({ message: 'This provider did not return an email address.' })
     }
 
     let [user] = await User.where(identityWhere(provider, profile.id))
 
     if (!user) {
-      const [existingByEmail] = await User.where({ email: profile.email })
+      const [existingByEmail] = await User.where({ email })
       if (existingByEmail) {
         throw ValidationException.withMessages({
           message: 'An account with this email already exists. Sign in with your password instead.',
@@ -336,9 +350,9 @@ export default class OAuthController extends Controller {
       // account still satisfies AuthenticatableModel's hashing pipeline.
       // It's never surfaced to the user and can't realistically be guessed.
       user = await User.create({
-        name: profile.name ?? profile.email,
-        email: profile.email,
-        password: randomUUID(),
+        name: profile.name ?? email,
+        email,
+        password: randomUUID(),${emailVerifiedAtField}
         ...identityWhere(provider, profile.id),
       })
     }
@@ -371,9 +385,44 @@ export default class DashboardController extends Controller {
 }
 `
 
-const profileControllerTemplate = `import { Controller, ValidationException } from '@guren/core'
+function buildProfileControllerTemplate(includeVerify: boolean): string {
+  const coreImports = includeVerify
+    ? 'Controller, ValidationException, createEmailVerificationToken, buildVerificationUrl'
+    : 'Controller, ValidationException'
+
+  const verifyImports = includeVerify
+    ? `
+import { emailVerificationStore } from '../../Auth/EmailVerificationStore.js'
+import { sendEmailVerificationMail } from '../../Mail/EmailVerificationMail.js'`
+    : ''
+
+  const verifyResetField = includeVerify
+    ? `
+      // The new address hasn't been proven to belong to this user yet — an
+      // arbitrary replacement email must not inherit the old address's
+      // verified status.
+      ...(emailChanged ? { emailVerifiedAt: null } : {}),`
+    : ''
+
+  const verifyResend = includeVerify
+    ? `
+    if (emailChanged) {
+      const { token } = await createEmailVerificationToken(email, emailVerificationStore)
+      const verifyUrl = buildVerificationUrl(\`\${new URL(this.request.url).origin}/verify-email/confirm\`, token, email)
+      await sendEmailVerificationMail(this.make('mail'), email, verifyUrl)
+    }
+`
+    : ''
+
+  const statusMessage = includeVerify
+    ? `emailChanged
+        ? 'Profile updated. Check your new email address for a verification link.'
+        : 'Profile updated successfully.'`
+    : `'Profile updated successfully.'`
+
+  return `import { ${coreImports} } from '@guren/core'
 import { User, type UserRecord } from '../../Models/User.js'
-import { ProfileUpdateSchema } from '../Validators/ProfileValidator.js'
+import { ProfileUpdateSchema } from '../Validators/ProfileValidator.js'${verifyImports}
 import { pages } from '@/.guren/pages.gen'
 
 export default class ProfileController extends Controller {
@@ -398,8 +447,9 @@ export default class ProfileController extends Controller {
     }
 
     const { name, email, password } = await this.validateBody(ProfileUpdateSchema)
+    const emailChanged = email !== user.email
 
-    if (email !== user.email) {
+    if (emailChanged) {
       const existing = await User.where({ email })
       const conflict = existing.find((candidate) => candidate.id !== user.id)
       if (conflict) {
@@ -409,7 +459,7 @@ export default class ProfileController extends Controller {
 
     await User.update({ id: user.id }, {
       name,
-      email,
+      email,${verifyResetField}
       ...(password ? { password } : {}),
     })
 
@@ -417,14 +467,15 @@ export default class ProfileController extends Controller {
     if (refreshed) {
       await this.auth.login(refreshed)
     }
-
+${verifyResend}
     return this.inertia(pages.profile.Edit, {
       profile: { name, email },
-      status: 'Profile updated successfully.',
+      status: ${statusMessage},
     }, { url: this.request.path, title: 'Profile' })
   }
 }
 `
+}
 
 const userModelTemplate = `import { AuthenticatableModel } from '@guren/core'
 import { users } from '../../db/schema.js'
@@ -496,7 +547,7 @@ export default class MailProvider extends ServiceProvider {
 
 const passwordResetStoreTemplate = `import { MemoryPasswordResetStore } from '@guren/core'
 
-// Swap for a Redis-backed store (see @guren/server/redis) in production
+// Swap for a Redis-backed store (see @guren/core/redis) in production
 // or any multi-instance deployment — this in-memory store does not
 // survive restarts and is not shared across processes.
 export const passwordResetStore = new MemoryPasswordResetStore()
@@ -529,7 +580,7 @@ If you didn't request this, you can safely ignore this email.
 
 const emailVerificationStoreTemplate = `import { MemoryEmailVerificationStore } from '@guren/core'
 
-// Swap for a Redis-backed store (see @guren/server/redis) in production
+// Swap for a Redis-backed store (see @guren/core/redis) in production
 // or any multi-instance deployment — this in-memory store does not
 // survive restarts and is not shared across processes.
 export const emailVerificationStore = new MemoryEmailVerificationStore()
@@ -563,11 +614,14 @@ If you didn't create an account, you can safely ignore this email.
 const loginValidatorTemplate = `import { z } from 'zod'
 
 export const LoginSchema = z.object({
+  // Lowercased to match how registration stores emails — a case-sensitive
+  // lookup would otherwise reject the same address typed with different casing.
   email: z
     .string()
     .trim()
     .min(1, 'Email is required.')
-    .email('The email address is badly formatted.'),
+    .email('The email address is badly formatted.')
+    .toLowerCase(),
   password: z
     .string()
     .min(1, 'Password is required.'),
@@ -595,11 +649,15 @@ export const RegisterSchema = z
       .trim()
       .min(1, 'Name is required.')
       .max(120, 'Name must be 120 characters or fewer.'),
+    // Lowercased so it round-trips correctly through the password-reset and
+    // email-verification token helpers, which normalize emails to lowercase
+    // internally before matching against stored records.
     email: z
       .string()
       .trim()
       .min(1, 'Email is required.')
-      .email('The email address is badly formatted.'),
+      .email('The email address is badly formatted.')
+      .toLowerCase(),
     password: z
       .string()
       .min(8, 'Password must be at least 8 characters.'),
@@ -618,11 +676,14 @@ export type RegisterInput = z.infer<typeof RegisterSchema>
 const forgotPasswordValidatorTemplate = `import { z } from 'zod'
 
 export const ForgotPasswordSchema = z.object({
+  // Lowercased to match how registration stores emails and how the
+  // password-reset token helpers normalize emails internally.
   email: z
     .string()
     .trim()
     .min(1, 'Email is required.')
-    .email('The email address is badly formatted.'),
+    .email('The email address is badly formatted.')
+    .toLowerCase(),
 })
 
 export type ForgotPasswordInput = z.infer<typeof ForgotPasswordSchema>
@@ -660,7 +721,8 @@ export const ProfileUpdateSchema = z.object({
     .string()
     .trim()
     .min(1, 'Email is required.')
-    .email('Enter a valid email address.'),
+    .email('Enter a valid email address.')
+    .toLowerCase(),
   password: z
     .string()
     .trim()
@@ -1396,7 +1458,10 @@ function buildRoutesTemplate(
     ? `
   router.get('/verify-email', [VerifyEmailController, 'notice'], requireAuthenticated({ redirectTo: '/login' })).name('verify-email')
   router.post('/verify-email', [VerifyEmailController, 'resend'], requireAuthenticated({ redirectTo: '/login' })).name('verify-email.resend')
-  router.get('/verify-email/confirm', [VerifyEmailController, 'confirm'], requireAuthenticated({ redirectTo: '/login' })).name('verify-email.confirm')
+  // Public: confirm() validates the signed token itself and doesn't use the
+  // session — gating it behind auth would strand a user who opens the email
+  // link from a different device or after their session expired.
+  router.get('/verify-email/confirm', [VerifyEmailController, 'confirm']).name('verify-email.confirm')
 `
     : ''
   const requireVerifiedImport = includeVerify ? ', requireVerifiedEmail' : ''
@@ -1697,7 +1762,7 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
   const files = [
     { path: 'app/Http/Controllers/Auth/LoginController.ts', contents: loginControllerTemplate },
     { path: 'app/Http/Controllers/DashboardController.ts', contents: dashboardControllerTemplate },
-    { path: 'app/Http/Controllers/ProfileController.ts', contents: profileControllerTemplate },
+    { path: 'app/Http/Controllers/ProfileController.ts', contents: buildProfileControllerTemplate(includeVerify) },
     { path: 'app/Models/User.ts', contents: userModelTemplate },
     { path: 'app/Providers/AuthProvider.ts', contents: authProviderTemplate },
     { path: 'app/Http/Validators/LoginValidator.ts', contents: loginValidatorTemplate },
@@ -1740,7 +1805,7 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
   if (includeOAuth) {
     files.push(
       { path: 'app/Providers/OAuthProvider.ts', contents: buildOAuthProviderTemplate(oauthProviders) },
-      { path: 'app/Http/Controllers/Auth/OAuthController.ts', contents: buildOAuthControllerTemplate(oauthProviders) },
+      { path: 'app/Http/Controllers/Auth/OAuthController.ts', contents: buildOAuthControllerTemplate(oauthProviders, includeVerify) },
     )
   }
 

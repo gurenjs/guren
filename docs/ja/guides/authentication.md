@@ -412,11 +412,12 @@ type SafeUser = Sanitized<UserRecord, 'twoFactorSecret' | 'credentialDigest'>
 
 ## 実例アプリ
 
-ブログの例には以下が含まれます:
+ブログの例には認証機能一式が含まれます:
 
-- ガード/プロバイダー設定用の `AuthProvider`
-- `LoginController` と `DashboardController`
-- `resources/js/pages/auth/Login.tsx` と `resources/js/pages/dashboard/Index.tsx` の Inertia ページ
+- ガード/プロバイダー設定用の `AuthProvider` と `OAuthProvider`
+- ログイン・登録・パスワードリセット・メール確認の各コントローラー、および `DashboardController`
+- `resources/js/pages/auth/` 配下の Inertia ページ(`Login`・`Register`・`ForgotPassword`・`ResetPassword`・`VerifyEmail`)と `resources/js/pages/dashboard/Index.tsx`
+- GitHub・Google 向けの OAuth ログインボタン
 - `users` 用のスキーマ、マイグレーション、シーダー
 
 デモを実行します。
@@ -425,4 +426,4 @@ type SafeUser = Sanitized<UserRecord, 'twoFactorSecret' | 'credentialDigest'>
 bun run dev
 ```
 
-`http://localhost:3000/login` にアクセスし、シード済みの `demo@example.com` / `secret` でログインできます。
+`http://localhost:3333/login` にアクセスし、シード済みの `demo@guren.dev` / `secret` でログインするか、`/register` から新規アカウントを作成できます。

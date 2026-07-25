@@ -129,6 +129,7 @@ export function registerWebRoutes(router: Router): void {
       )
       expect(registerValidator).toContain('passwordConfirmation')
       expect(registerValidator).toContain('Passwords do not match.')
+      expect(registerValidator).toContain('.toLowerCase()')
 
       const registerPage = await readFile(join(workspace.dir, 'resources/js/pages/auth/Register.tsx'), 'utf8')
       expect(registerPage).toContain('interface Props')
@@ -140,7 +141,16 @@ export function registerWebRoutes(router: Router): void {
       )
       expect(forgotController).toContain('validateBody(ForgotPasswordSchema)')
       expect(forgotController).toContain('createPasswordResetToken(')
-      expect(forgotController).toContain('sendPasswordResetMail(')
+      // Not awaited: the transport round-trip only happens for known
+      // accounts, so awaiting it would leak account existence via timing.
+      expect(forgotController).toContain('void sendPasswordResetMail(')
+      expect(forgotController).not.toContain('await sendPasswordResetMail(')
+
+      const profileController = await readFile(
+        join(workspace.dir, 'app/Http/Controllers/ProfileController.ts'),
+        'utf8',
+      )
+      expect(profileController).not.toContain('emailVerifiedAt')
 
       const resetController = await readFile(
         join(workspace.dir, 'app/Http/Controllers/Auth/ResetPasswordController.ts'),
@@ -244,6 +254,18 @@ export const posts = pgTable('posts', {
       )
       expect(verifyController).toContain('completeEmailVerification(')
       expect(verifyController).toContain('emailVerifiedAt: new Date()')
+
+      // Public — the emailed link must work from any device or expired session.
+      expect(authRoutes).toContain("router.get('/verify-email/confirm', [VerifyEmailController, 'confirm']).name('verify-email.confirm')")
+      expect(authRoutes).not.toContain("router.get('/verify-email/confirm', [VerifyEmailController, 'confirm'], requireAuthenticated")
+
+      // Changing the profile email must reset verification and re-send the link.
+      const profileController = await readFile(
+        join(workspace.dir, 'app/Http/Controllers/ProfileController.ts'),
+        'utf8',
+      )
+      expect(profileController).toContain('emailVerifiedAt: null')
+      expect(profileController).toContain('sendEmailVerificationMail(')
     } finally {
       await workspace.cleanup()
     }
@@ -451,6 +473,27 @@ export const posts = pgTable('posts', {
       expect(schema).toContain("githubId: text('github_id').unique()")
       expect(schema).toContain("googleId: text('google_id').unique()")
       expect(schema.match(/export const users = /g)).toHaveLength(1)
+
+      // Without this, requireVerifiedEmail would strand every OAuth signup
+      // at /verify-email forever — OAuthController never sends a
+      // verification email, so there'd be nothing for them to click.
+      const controller = await readFile(join(workspace.dir, 'app/Http/Controllers/Auth/OAuthController.ts'), 'utf8')
+      expect(controller).toContain('emailVerifiedAt: new Date()')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('omits emailVerifiedAt from OAuthController when --verify is not enabled', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-oauth-no-verify-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'db/schema.ts'), `export const posts = 'posts'\n`, 'utf8')
+
+      await makeAuth({ force: true, oauth: 'github' })
+
+      const controller = await readFile(join(workspace.dir, 'app/Http/Controllers/Auth/OAuthController.ts'), 'utf8')
+      expect(controller).not.toContain('emailVerifiedAt')
     } finally {
       await workspace.cleanup()
     }

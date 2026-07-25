@@ -3,12 +3,14 @@ import {
   ErrorServiceProvider,
   InertiaServiceProvider,
   AuthServiceProvider as CoreAuthServiceProvider,
+  OAuthServiceProvider as CoreOAuthServiceProvider,
   NotificationServiceProvider as CoreNotificationServiceProvider,
   StorageServiceProvider as CoreStorageServiceProvider,
   BroadcastServiceProvider as CoreBroadcastServiceProvider,
 } from '@guren/core'
 import DatabaseProvider from '../app/Providers/DatabaseProvider.js'
 import AuthProvider from '../app/Providers/AuthProvider.js'
+import OAuthProvider from '../app/Providers/OAuthProvider.js'
 import CacheProvider from '../app/Providers/CacheProvider.js'
 import requestLogger from '../app/Http/middleware/requestLogger.js'
 import EventServiceProvider from '../app/Providers/EventServiceProvider.js'
@@ -29,6 +31,8 @@ const app = createApp({
     CoreAuthServiceProvider,
     DatabaseProvider,
     AuthProvider,
+    CoreOAuthServiceProvider,
+    OAuthProvider,
     CacheProvider,
     CoreNotificationServiceProvider,
     NotificationProvider,

@@ -5,6 +5,7 @@ import { Loader2 } from 'lucide-react'
 import type { RouteErrors } from '@guren/inertia-client/typed-forms'
 import type { ApiRoutes } from '@/.guren/api-client.gen'
 import { route } from '@/.guren/routes.gen'
+import OAuthButtons from '../../components/OAuthButtons.js'
 
 type LoginBody = ApiRoutes['login.store']['body']
 
@@ -49,9 +50,9 @@ export default function Login({ email: initialEmail = '', errors = {} }: Props) 
             Sign in to your account
           </h2>
           <p className="mt-2 text-sm text-stone-400">
-            Or{' '}
-            <Link href="/register" className="font-medium text-stone-600 hover:text-stone-900">
-              contact your administrator
+            Don&apos;t have an account?{' '}
+            <Link href={route('register')} className="font-medium text-stone-600 hover:text-stone-900">
+              Sign up
             </Link>
           </p>
         </div>
@@ -124,9 +125,9 @@ export default function Login({ email: initialEmail = '', errors = {} }: Props) 
               </div>
 
               <div className="text-sm">
-                <a href="#" className="font-medium text-stone-500 hover:text-stone-700">
+                <Link href={route('forgot-password')} className="font-medium text-stone-500 hover:text-stone-700">
                   Forgot password?
-                </a>
+                </Link>
               </div>
             </div>
 
@@ -143,6 +144,8 @@ export default function Login({ email: initialEmail = '', errors = {} }: Props) 
               </button>
             </div>
           </form>
+
+          <OAuthButtons />
         </div>
       </div>
     </Layout>
