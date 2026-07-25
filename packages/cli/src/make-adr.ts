@@ -2,7 +2,7 @@ import { readdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 import type { WriterOptions } from './utils'
-import { safeModuleName, writeFileSafe } from './utils'
+import { safeModuleName, slugifyProse, writeFileSafe } from './utils'
 
 const ADR_DIR = 'docs/adr'
 
@@ -47,21 +47,9 @@ last_reviewed: ${lastReviewed}
 `
 }
 
-/**
- * kebab-cases an ADR title for its filename. Unlike `kebabCase()` in utils,
- * this drops punctuation instead of preserving it (titles are prose, not
- * identifiers), so `"Use HTTP/2 — why?"` becomes `use-http-2-why`. A title
- * with no ASCII alphanumerics at all (e.g. a fully Japanese title) would
- * otherwise slug to the empty string and produce `0001-.md`, so it falls
- * back to `adr` and leaves the number as the distinguishing part.
- */
+/** kebab-case slug for a prose ADR title, e.g. `"Use HTTP/2 — why?"` → `use-http-2-why`. */
 export function adrSlug(title: string): string {
-  const slug = title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, '-')
-    .replace(/^-+|-+$/gu, '')
-
-  return slug || 'adr'
+  return slugifyProse(title, '-', 'adr')
 }
 
 /** Highest existing `NNNN-` prefix in `dir`, plus one, zero-padded to four digits. */

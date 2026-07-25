@@ -113,7 +113,16 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   const filterChanged = (files: string[]): string[] =>
     changedFiles ? files.filter((f) => changedFiles.has(toPosixRelative(cwd, f))) : files
 
-  if (!options.arch && !options.docs) {
+  // `--arch` / `--docs` select suites; combining them runs the union (never
+  // silently nothing). No flag = every suite.
+  const selected = new Set<'arch' | 'docs'>([
+    ...(options.arch ? (['arch'] as const) : []),
+    ...(options.docs ? (['docs'] as const) : []),
+  ])
+  const runs = (suite: 'core' | 'arch' | 'docs'): boolean =>
+    selected.size === 0 || (suite !== 'core' && selected.has(suite))
+
+  if (runs('core')) {
     // 1. Check controllers for empty methods
     const controllerFiles = filterChanged(await discoverControllerFiles(cwd))
     for (const filePath of controllerFiles) {
@@ -210,13 +219,13 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   // 7. Doc-link checks (docs/ frontmatter + @docs tags, RFC 0004). Runs in
   // plain mode and under --docs; content-activated, so apps without the
   // docs convention contribute zero results here.
-  if (!options.arch) {
-    const docsResults = await runDocsCheck({ cwd, changedFiles, ttlDays: options.docsTtlDays })
+  if (runs('docs')) {
+    const docsResults = await runDocsCheck({ cwd, changedFiles, ttlDays: options.docsTtlDays, cache })
     checks.push(...docsResults)
   }
 
   // 8. Check architecture boundaries (guren.arch.ts + derived module rules)
-  if (!options.docs) {
+  if (runs('arch')) {
     const archResults = await runArchCheck({ cwd, cache, changedFiles })
     checks.push(...archResults)
   }

@@ -84,7 +84,7 @@ bunx guren model:list           # List models with relationships
 bunx guren model:list --format json  # Models as JSON
 
 # Integrity checking
-bunx guren check                # Validate route↔controller↔page consistency + architecture boundaries (exits non-zero on failures)
+bunx guren check                # Validate route↔controller↔page consistency, architecture boundaries, and doc links (informational; only --arch/--docs set the exit code)
 bunx guren check --json         # Check results as JSON
 bunx guren check --arch         # Architecture boundary checks only (guren.arch.ts) — fast path for edit hooks
 bunx guren check --docs         # Doc-link checks only: docs/ frontmatter (entities/related) + @docs tags (exits non-zero on failures)

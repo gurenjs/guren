@@ -2,7 +2,7 @@ import { resolve } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import {
   collectFiles,
-  listModuleNames,
+  listAppRoots,
   toPosixRelative,
 } from './discovery'
 
@@ -42,6 +42,40 @@ function unquote(value: string): string {
 }
 
 /**
+ * Strip a trailing YAML comment (` # …`) from an unquoted value. Quoted
+ * values keep their content verbatim — `unquote` handles them afterwards.
+ */
+function stripInlineComment(value: string): string {
+  if (value.startsWith("'") || value.startsWith('"')) return value
+  return value.replace(/\s+#.*$/, '').trim()
+}
+
+/** Split an inline array body on commas that are not inside quotes. */
+function splitInlineArray(inner: string): string[] {
+  const parts: string[] = []
+  let current = ''
+  let quote: string | null = null
+
+  for (const char of inner) {
+    if (quote) {
+      current += char
+      if (char === quote) quote = null
+    } else if (char === "'" || char === '"') {
+      current += char
+      quote = char
+    } else if (char === ',') {
+      parts.push(current)
+      current = ''
+    } else {
+      current += char
+    }
+  }
+  parts.push(current)
+
+  return parts.map((part) => unquote(part.trim())).filter((part) => part !== '')
+}
+
+/**
  * Parse a leading `---` frontmatter block. Deliberately a minimal YAML
  * subset — scalars, inline arrays (`[a, b]`), and block lists (`- item`) —
  * the frozen vocabulary the docs convention needs, same philosophy as
@@ -54,36 +88,36 @@ export function parseDocFrontmatter(
   if (!match) return null
 
   const data: Record<string, string | string[]> = {}
-  let currentListKey: string | null = null
+  let currentList: string[] | null = null
 
   for (const line of match[1].split(/\r?\n/)) {
     if (!line.trim()) continue
 
     const item = /^\s*-\s+(.+)$/.exec(line)
-    if (item && currentListKey) {
-      ;(data[currentListKey] as string[]).push(unquote(item[1].trim()))
+    if (item && currentList) {
+      const entry = stripInlineComment(item[1].trim())
+      if (entry) currentList.push(unquote(entry))
       continue
     }
 
     const kv = /^([A-Za-z_][\w-]*):\s*(.*)$/.exec(line)
     if (!kv) {
-      currentListKey = null
+      currentList = null
       continue
     }
 
     const key = kv[1]
-    const value = kv[2].trim()
+    const value = stripInlineComment(kv[2].trim())
+    currentList = null
 
     if (value === '') {
-      data[key] = []
-      currentListKey = key
+      const list: string[] = []
+      data[key] = list
+      currentList = list
     } else if (value.startsWith('[') && value.endsWith(']')) {
-      const inner = value.slice(1, -1).trim()
-      data[key] = inner === '' ? [] : inner.split(',').map((part) => unquote(part.trim()))
-      currentListKey = null
+      data[key] = splitInlineArray(value.slice(1, -1))
     } else {
       data[key] = unquote(value)
-      currentListKey = null
     }
   }
 
@@ -105,17 +139,11 @@ function toScalar(value: string | string[] | undefined): string | undefined {
  * without a docs convention see zero refs, never an error.
  */
 export async function scanDocs(cwd: string): Promise<DocRef[]> {
-  const roots = [
-    { module: null as string | null, dir: resolve(cwd, 'docs') },
-    ...(await listModuleNames(cwd)).map((name) => ({
-      module: name as string | null,
-      dir: resolve(cwd, 'modules', name, 'docs'),
-    })),
-  ]
+  const roots = await listAppRoots(cwd)
 
   const groups = await Promise.all(
     roots.map(async (root) => {
-      const files = await collectFiles(root.dir, MARKDOWN_EXTENSIONS)
+      const files = await collectFiles(resolve(root.dir, 'docs'), MARKDOWN_EXTENSIONS)
       return Promise.all(
         files.map(async (file): Promise<DocRef> => {
           const source = await readFile(file, 'utf-8')

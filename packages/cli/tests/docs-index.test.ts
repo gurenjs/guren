@@ -39,6 +39,29 @@ body`)
     expect(parsed!.data.entities).toEqual(['User'])
   })
 
+  it('strips inline YAML comments from unquoted values', () => {
+    const parsed = parseDocFrontmatter(`---
+status: superseded # replaced by 0009
+entities: [Post] # main entity
+related:
+  - app/Models/Post.ts # the model
+---
+`)
+
+    expect(parsed!.data.status).toBe('superseded')
+    expect(parsed!.data.entities).toEqual(['Post'])
+    expect(parsed!.data.related).toEqual(['app/Models/Post.ts'])
+  })
+
+  it('respects quoted commas inside inline arrays', () => {
+    const parsed = parseDocFrontmatter(`---
+related: ["config/foo,bar.json", app/Models/Post.ts]
+---
+`)
+
+    expect(parsed!.data.related).toEqual(['config/foo,bar.json', 'app/Models/Post.ts'])
+  })
+
   it('returns null when there is no frontmatter', () => {
     expect(parseDocFrontmatter('# Just a heading\n')).toBeNull()
   })

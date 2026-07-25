@@ -9,7 +9,7 @@ import {
   discoverResourceFiles,
   discoverPolicyFiles,
   discoverTestFiles,
-  listModuleNames,
+  listAppRoots,
   classNameFromPath,
   collectFiles,
   toPosixRelative,
@@ -28,7 +28,7 @@ import {
   type ContextRoute,
 } from './context-route'
 import { extractInertiaPageRefs, resolveInertiaPageFile } from './inertia-pages'
-import { scanDocs, extractDocsTags, type DocRef } from './docs-index'
+import { scanDocs, extractDocsTags, buildEntityDocIndex } from './docs-index'
 import { extractPageProps } from './page-props-extractor'
 import { parseSchemaTableColumns } from './audit'
 
@@ -228,11 +228,7 @@ export async function generateEntityContext(
   }
 
   const findDbArtifacts = async (subDir: string, filePattern: RegExp): Promise<string[]> => {
-    const moduleNames = await listModuleNames(cwd)
-    let roots: Array<{ module: string | null; dir: string }> = [
-      { module: null, dir: cwd },
-      ...moduleNames.map((name) => ({ module: name, dir: resolve(cwd, 'modules', name) })),
-    ]
+    let roots = await listAppRoots(cwd)
     if (duplicated) roots = roots.filter((root) => root.module === match.module)
 
     const groups = await Promise.all(roots.map((root) => collectFiles(resolve(root.dir, subDir))))
@@ -331,26 +327,21 @@ export async function generateEntityContext(
   // Linked docs: frontmatter `entities:` (location-scoped when duplicated)
   // merged with explicit @docs tags from the model and controller sources
   // (tags cross scope on purpose — they are declared, not inferred).
-  const toEntityDoc = (ref: DocRef): EntityDoc => ({
-    path: ref.path,
-    title: ref.title,
-    kind: ref.kind,
-    status: ref.status,
-    lastReviewed: ref.lastReviewed,
-  })
-  const linkedDocs = new Map<string, EntityDoc>()
   const scopedDocRefs = duplicated ? allDocRefs.filter((ref) => ref.module === match.module) : allDocRefs
-  for (const ref of scopedDocRefs) {
-    if (ref.entities.some((name) => name.toLowerCase() === lower)) {
-      linkedDocs.set(ref.path, toEntityDoc(ref))
-    }
-  }
-  for (const tag of [...match.info.docsTags, ...controllerBundle.docsTags]) {
-    if (linkedDocs.has(tag)) continue
-    const ref = allDocRefs.find((candidate) => candidate.path === tag)
-    linkedDocs.set(tag, ref ? toEntityDoc(ref) : { path: tag })
-  }
-  const docs = [...linkedDocs.values()].sort((a, b) => a.path.localeCompare(b.path))
+  const docRefByPath = new Map(allDocRefs.map((ref) => [ref.path, ref] as const))
+  const linkedPaths = new Set([
+    ...(buildEntityDocIndex(scopedDocRefs).get(lower) ?? []).map((ref) => ref.path),
+    ...match.info.docsTags,
+    ...controllerBundle.docsTags,
+  ])
+  const docs = [...linkedPaths]
+    .sort((a, b) => a.localeCompare(b))
+    .map((path): EntityDoc => {
+      const ref = docRefByPath.get(path)
+      return ref
+        ? { path, title: ref.title, kind: ref.kind, status: ref.status, lastReviewed: ref.lastReviewed }
+        : { path }
+    })
 
   return {
     entity,

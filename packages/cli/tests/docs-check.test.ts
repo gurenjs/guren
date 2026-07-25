@@ -2,6 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
 import { runDocsCheck } from '../src/docs-check'
+import { runCheck } from '../src/check'
 import { createTempWorkspace, type TempWorkspace } from './helpers'
 
 describe('runDocsCheck', () => {
@@ -110,7 +111,7 @@ last_reviewed: 2020-01-01
   it('warns when every doc linked to an entity is superseded', async () => {
     const results = await runDocsCheck({ cwd: workspace.dir })
 
-    const superseded = results.find((r) => r.key === 'docs-superseded:legacy')
+    const superseded = results.find((r) => r.key === 'docs-superseded:Legacy')
     expect(superseded?.status).toBe('warn')
     expect(superseded?.message).toContain('docs/adr/0003-superseded.md')
   })
@@ -118,7 +119,7 @@ last_reviewed: 2020-01-01
   it('does not flag entities that also have a current doc', async () => {
     const results = await runDocsCheck({ cwd: workspace.dir })
 
-    expect(results.find((r) => r.key === 'docs-superseded:post')).toBeUndefined()
+    expect(results.find((r) => r.key === 'docs-superseded:Post')).toBeUndefined()
   })
 
   it('validates @docs tags in model sources', async () => {
@@ -160,6 +161,84 @@ last_reviewed: 2020-01-01
     expect(results.some((r) => r.key === 'docs-links:docs/adr/0001-valid.md')).toBe(false)
     // Tag validation follows changed source files, none of which changed here
     expect(results.some((r) => r.key.startsWith('docs-tag:'))).toBe(false)
+  })
+
+  it('pulls docs into --changed scope when their model was deleted', async () => {
+    // app/Models/Ghost.ts never existed on disk, mirroring a deletion whose
+    // path is still present in the changed-files set.
+    const results = await runDocsCheck({
+      cwd: workspace.dir,
+      changedFiles: new Set(['app/Models/Ghost.ts']),
+    })
+
+    const entity = results.find((r) => r.key === 'docs-entity:docs/adr/0002-broken.md:Ghost')
+    expect(entity?.status).toBe('fail')
+  })
+
+  it('matches globs against non-source files', async () => {
+    const scoped = await createTempWorkspace('guren-cli-docs-glob-')
+    try {
+      await mkdir(join(scoped.dir, 'docs'), { recursive: true })
+      await mkdir(join(scoped.dir, 'db/migrations'), { recursive: true })
+      await writeFile(join(scoped.dir, 'package.json'), '{}', 'utf8')
+      await writeFile(join(scoped.dir, 'db/migrations/0001_init.sql'), 'select 1;', 'utf8')
+      await writeFile(
+        join(scoped.dir, 'docs/migrations.md'),
+        `---
+related: [db/migrations/*.sql]
+---
+# Migrations
+`,
+        'utf8',
+      )
+
+      const results = await runDocsCheck({ cwd: scoped.dir })
+      expect(results.find((r) => r.key === 'docs-links:docs/migrations.md')?.status).toBe('pass')
+    } finally {
+      await scoped.cleanup()
+    }
+  })
+
+  it('rejects related entries and @docs tags that escape the app root', async () => {
+    const scoped = await createTempWorkspace('guren-cli-docs-escape-')
+    try {
+      await mkdir(join(scoped.dir, 'docs'), { recursive: true })
+      await mkdir(join(scoped.dir, 'app/Models'), { recursive: true })
+      await writeFile(join(scoped.dir, 'package.json'), '{}', 'utf8')
+      await writeFile(
+        join(scoped.dir, 'app/Models/Post.ts'),
+        '/** @docs ../outside.md */\nexport class Post {}\n',
+        'utf8',
+      )
+      await writeFile(
+        join(scoped.dir, 'docs/escape.md'),
+        `---
+related: [../outside.md]
+---
+# Escape
+`,
+        'utf8',
+      )
+
+      const results = await runDocsCheck({ cwd: scoped.dir })
+      expect(
+        results.find((r) => r.key === 'docs-related:docs/escape.md:../outside.md')?.status,
+      ).toBe('fail')
+      expect(
+        results.find((r) => r.key === 'docs-tag:app/Models/Post.ts:../outside.md')?.status,
+      ).toBe('fail')
+    } finally {
+      await scoped.cleanup()
+    }
+  })
+
+  it('runs the union when --arch and --docs are combined', async () => {
+    const report = await runCheck({ cwd: workspace.dir, arch: true, docs: true })
+
+    // Docs suite ran (broken doc fails), arch suite ran, core suite did not
+    expect(report.checks.some((c) => c.key.startsWith('docs-related:'))).toBe(true)
+    expect(report.checks.some((c) => c.key.startsWith('manifest:'))).toBe(false)
+    expect(report.failCount).toBeGreaterThan(0)
   })
 
   it('produces zero results for apps without docs or tags', async () => {

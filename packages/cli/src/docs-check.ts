@@ -1,18 +1,16 @@
-import { resolve } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import {
   discoverModelFiles,
   discoverControllerFiles,
   fileExists,
-  directoryExists,
-  collectFiles,
+  collectAllFiles,
   toPosixRelative,
   classNameFromPath,
-  IMPORTABLE_EXTENSIONS,
-  NON_SOURCE_DIR_NAMES,
 } from './discovery'
 import { matchesGlob } from './glob-match'
-import { scanDocs, extractDocsTags, type DocRef } from './docs-index'
+import { parseModelFile } from './model-parser'
+import { scanDocs, extractDocsTags, buildEntityDocIndex, type DocRef } from './docs-index'
+import type { ParseCache } from './parse-cache'
 import { check, type CheckResult } from './check-result'
 
 export interface DocsCheckOptions {
@@ -21,6 +19,8 @@ export interface DocsCheckOptions {
   changedFiles?: Set<string> | null
   /** Warn when `last_reviewed` is older than this many days. Off when unset. */
   ttlDays?: number
+  /** Reuses sources already read by the surrounding `runCheck`, when present. */
+  cache?: ParseCache
 }
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
@@ -30,15 +30,34 @@ function hasGlobChars(entry: string): boolean {
 }
 
 /**
+ * Doc links are app-root-relative by convention; absolute paths and `..`
+ * segments would validate files outside the project.
+ */
+function isAppRootRelative(entry: string): boolean {
+  return !entry.startsWith('/') && !/^[A-Za-z]:/.test(entry) && !entry.split('/').includes('..')
+}
+
+/** Calendar-day difference, treating both sides as dates (not instants). */
+function daysSince(isoDate: string): number | null {
+  const reviewedAt = Date.parse(isoDate)
+  if (Number.isNaN(reviewedAt)) return null
+  const now = new Date()
+  const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())
+  return Math.floor((todayUtc - reviewedAt) / MS_PER_DAY)
+}
+
+const MODEL_FILE_PATTERN = /(?:^|\/)app\/Models\/[^/]+\.(?:ts|mts|js|mjs)$/
+
+/**
  * Doc-link validation (RFC 0004): frontmatter `related` paths/globs must
  * resolve, `entities` must name real models, `@docs` tags in model and
  * controller sources must point at existing files, and entities whose only
- * linked docs are superseded ADRs get flagged. Activates on content — an
- * app with no docs and no tags produces zero results, so nothing goes red
- * on projects that haven't adopted the convention.
+ * linked docs are superseded get flagged. Activates on content — an app
+ * with no docs and no tags produces zero results, so nothing goes red on
+ * projects that haven't adopted the convention.
  */
 export async function runDocsCheck(options: DocsCheckOptions): Promise<CheckResult[]> {
-  const { cwd, changedFiles, ttlDays } = options
+  const { cwd, changedFiles, ttlDays, cache } = options
   const results: CheckResult[] = []
 
   const [refs, modelFiles, controllerFiles] = await Promise.all([
@@ -47,82 +66,101 @@ export async function runDocsCheck(options: DocsCheckOptions): Promise<CheckResu
     discoverControllerFiles(cwd),
   ])
 
-  const modelNames = new Set(modelFiles.map((file) => classNameFromPath(file).toLowerCase()))
+  // Lowercased name → canonical class name, parsed from model sources (the
+  // same identity `guren context <Entity>` resolves against); filename is
+  // the fallback for unparsable files.
+  const parsedModels = await Promise.all(modelFiles.map((file) => parseModelFile(file)))
+  const modelNames = new Map(
+    parsedModels.map((info, index) => {
+      const className = info?.className ?? classNameFromPath(modelFiles[index])
+      return [className.toLowerCase(), className] as const
+    }),
+  )
 
-  // Lazily built once, only when some doc uses a glob: POSIX-relative
-  // source-file list to match `related` globs against.
-  let projectFiles: string[] | null = null
+  // Lazily built once, only when some doc uses a glob. Holds the promise so
+  // concurrent glob entries share one scan.
+  let projectFilesPromise: Promise<string[]> | null = null
   const globMatchesSomething = async (glob: string): Promise<boolean> => {
-    projectFiles ??= (await collectFiles(cwd, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES)).map(
-      (file) => toPosixRelative(cwd, file),
+    projectFilesPromise ??= collectAllFiles(cwd).then((files) =>
+      files.map((file) => toPosixRelative(cwd, file)),
     )
-    return projectFiles.some((file) => matchesGlob(file, glob))
+    return (await projectFilesPromise).some((file) => matchesGlob(file, glob))
   }
 
-  const changedModelNames = changedFiles
+  const entryResolves = async (entry: string): Promise<boolean> => {
+    if (!isAppRootRelative(entry)) return false
+    // `fileExists` is access()-based, so it accepts directories too.
+    return hasGlobChars(entry) ? globMatchesSomething(entry) : fileExists(cwd, entry)
+  }
+
+  // --changed scoping. Entity names are derived from changed *paths* (not
+  // the discovered file list) so a deleted model still pulls the docs that
+  // referenced it into scope and fails their dangling `entities:` links.
+  const changedList = changedFiles ? [...changedFiles] : null
+  const changedModelNames = changedList
     ? new Set(
-        modelFiles
-          .filter((file) => changedFiles.has(toPosixRelative(cwd, file)))
-          .map((file) => classNameFromPath(file).toLowerCase()),
+        changedList
+          .filter((path) => MODEL_FILE_PATTERN.test(path))
+          .map((path) => classNameFromPath(path).toLowerCase()),
       )
     : null
 
   const docInChangedScope = (ref: DocRef): boolean => {
-    if (!changedFiles) return true
-    if (changedFiles.has(ref.path)) return true
-    if (ref.entities.some((entity) => changedModelNames?.has(entity.toLowerCase()))) return true
-    return ref.related.some((entry) =>
-      hasGlobChars(entry)
-        ? [...changedFiles].some((file) => matchesGlob(file, entry))
-        : changedFiles.has(entry.replace(/\/$/, '')),
-    )
+    if (!changedList) return true
+    if (changedFiles!.has(ref.path)) return true
+    if (ref.entities.some((entity) => changedModelNames!.has(entity.toLowerCase()))) return true
+    return ref.related.some((entry) => {
+      if (hasGlobChars(entry)) return changedList.some((file) => matchesGlob(file, entry))
+      const normalized = entry.replace(/\/$/, '')
+      // A directory target is in scope when anything beneath it changed.
+      return changedList.some((file) => file === normalized || file.startsWith(`${normalized}/`))
+    })
   }
 
-  const linkedDocs = refs.filter((ref) => ref.hasFrontmatter)
+  const docsWithFrontmatter = refs.filter((ref) => ref.hasFrontmatter)
+  const inScope = new Set(docsWithFrontmatter.filter(docInChangedScope).map((ref) => ref.path))
 
-  for (const ref of linkedDocs) {
-    if (!docInChangedScope(ref)) continue
+  for (const ref of docsWithFrontmatter) {
+    if (!inScope.has(ref.path)) continue
 
-    let broken = 0
+    const relatedChecks = await Promise.all(
+      ref.related.map(async (entry) => ({ entry, ok: await entryResolves(entry) })),
+    )
+    const brokenRelated = relatedChecks.filter((result) => !result.ok).map((result) => result.entry)
+    const brokenEntities = ref.entities.filter((entity) => !modelNames.has(entity.toLowerCase()))
 
-    for (const entry of ref.related) {
-      const resolves = hasGlobChars(entry)
-        ? await globMatchesSomething(entry)
-        : (await fileExists(cwd, entry)) || (await directoryExists(resolve(cwd, entry)))
-      if (!resolves) {
-        broken += 1
-        results.push(
-          check(
-            `docs-related:${ref.path}:${entry}`,
-            `${ref.path} → ${entry}`,
-            'fail',
-            `Doc references '${entry}' but nothing matches it (renamed or deleted?).`,
-            `Update the 'related' entry in ${ref.path} or restore the path.`,
-            ref.path,
-          ),
-        )
-      }
+    for (const entry of brokenRelated) {
+      const escapes = !isAppRootRelative(entry)
+      results.push(
+        check(
+          `docs-related:${ref.path}:${entry}`,
+          `${ref.path} → ${entry}`,
+          'fail',
+          escapes
+            ? `Doc references '${entry}', which is not app-root-relative.`
+            : `Doc references '${entry}' but nothing matches it (renamed or deleted?).`,
+          `Update the 'related' entry in ${ref.path}${escapes ? ' to an app-root-relative path' : ' or restore the path'}.`,
+          ref.path,
+        ),
+      )
     }
 
-    for (const entity of ref.entities) {
-      if (!modelNames.has(entity.toLowerCase())) {
-        broken += 1
-        results.push(
-          check(
-            `docs-entity:${ref.path}:${entity}`,
-            `${ref.path} → ${entity}`,
-            'fail',
-            `Doc lists entity '${entity}' but no such model exists.`,
-            `Fix the 'entities' entry in ${ref.path} or add the model.`,
-            ref.path,
-          ),
-        )
-      }
+    for (const entity of brokenEntities) {
+      results.push(
+        check(
+          `docs-entity:${ref.path}:${entity}`,
+          `${ref.path} → ${entity}`,
+          'fail',
+          `Doc lists entity '${entity}' but no such model exists.`,
+          `Fix the 'entities' entry in ${ref.path} or add the model.`,
+          ref.path,
+        ),
+      )
     }
 
     if (ttlDays && ttlDays > 0 && ref.lastReviewed) {
-      const reviewedAt = Date.parse(ref.lastReviewed)
-      if (!Number.isNaN(reviewedAt) && Date.now() - reviewedAt > ttlDays * MS_PER_DAY) {
+      const age = daysSince(ref.lastReviewed)
+      if (age !== null && age > ttlDays) {
         results.push(
           check(
             `docs-stale:${ref.path}`,
@@ -136,13 +174,14 @@ export async function runDocsCheck(options: DocsCheckOptions): Promise<CheckResu
       }
     }
 
-    if (broken === 0 && (ref.related.length > 0 || ref.entities.length > 0)) {
+    const totalLinks = ref.related.length + ref.entities.length
+    if (totalLinks > 0 && brokenRelated.length === 0 && brokenEntities.length === 0) {
       results.push(
         check(
           `docs-links:${ref.path}`,
           `${ref.path} links`,
           'pass',
-          `All ${ref.related.length + ref.entities.length} link(s) resolve.`,
+          `All ${totalLinks} link(s) resolve.`,
           undefined,
           ref.path,
         ),
@@ -150,25 +189,17 @@ export async function runDocsCheck(options: DocsCheckOptions): Promise<CheckResu
     }
   }
 
-  // Entities whose only frontmatter-linked docs are superseded ADRs: the
-  // entity still "has documentation", but nothing current governs it.
-  const byEntity = new Map<string, DocRef[]>()
-  for (const ref of linkedDocs) {
-    for (const entity of ref.entities) {
-      const key = entity.toLowerCase()
-      if (!modelNames.has(key)) continue
-      const list = byEntity.get(key) ?? []
-      list.push(ref)
-      byEntity.set(key, list)
-    }
-  }
-  for (const [entityKey, docs] of byEntity) {
+  // Entities whose only frontmatter-linked docs are superseded: the entity
+  // still "has documentation", but nothing current governs it.
+  for (const [entityKey, docs] of buildEntityDocIndex(docsWithFrontmatter)) {
+    const canonicalName = modelNames.get(entityKey)
+    if (!canonicalName) continue
     const allSuperseded = docs.every((ref) => ref.status === 'superseded')
-    if (allSuperseded && (!changedFiles || docs.some(docInChangedScope))) {
+    if (allSuperseded && docs.some((ref) => inScope.has(ref.path))) {
       results.push(
         check(
-          `docs-superseded:${entityKey}`,
-          `${docs[0].entities.find((e) => e.toLowerCase() === entityKey) ?? entityKey} docs`,
+          `docs-superseded:${canonicalName}`,
+          `${canonicalName} docs`,
           'warn',
           `Every doc linked to this entity is superseded (${docs.map((d) => d.path).join(', ')}).`,
           `Write or link a current doc for the entity, or remove it from the superseded doc's 'entities'.`,
@@ -177,25 +208,34 @@ export async function runDocsCheck(options: DocsCheckOptions): Promise<CheckResu
     }
   }
 
-  // Code-side @docs tags must point at existing files.
+  // Code-side @docs tags must point at existing files inside the app root.
   const sourceFiles = [...modelFiles, ...controllerFiles].filter(
     (file) => !changedFiles || changedFiles.has(toPosixRelative(cwd, file)),
   )
-  for (const file of sourceFiles) {
-    const relPath = toPosixRelative(cwd, file)
-    const source = await readFile(file, 'utf-8')
+  const sources = await Promise.all(
+    sourceFiles.map(async (file) => ({
+      relPath: toPosixRelative(cwd, file),
+      source: (await cache?.get(file))?.source ?? (await readFile(file, 'utf-8')),
+    })),
+  )
+  for (const { relPath, source } of sources) {
     for (const tag of extractDocsTags(source)) {
-      const exists = await fileExists(cwd, tag)
-      results.push(
-        check(
-          `docs-tag:${relPath}:${tag}`,
-          `${relPath} @docs`,
-          exists ? 'pass' : 'fail',
-          exists ? `@docs ${tag} resolves.` : `@docs tag points at '${tag}' but the file does not exist.`,
-          exists ? undefined : `Fix the @docs path in ${relPath} or restore ${tag}.`,
-          relPath,
-        ),
-      )
+      const key = `docs-tag:${relPath}:${tag}`
+      const title = `${relPath} @docs`
+      if (isAppRootRelative(tag) && (await fileExists(cwd, tag))) {
+        results.push(check(key, title, 'pass', `@docs ${tag} resolves.`, undefined, relPath))
+      } else {
+        results.push(
+          check(
+            key,
+            title,
+            'fail',
+            `@docs tag points at '${tag}' but no such file exists inside the app root.`,
+            `Fix the @docs path in ${relPath} or restore ${tag}.`,
+            relPath,
+          ),
+        )
+      }
     }
   }
 
