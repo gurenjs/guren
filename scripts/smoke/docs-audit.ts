@@ -30,6 +30,17 @@ async function auditEnglishDocs(root: string): Promise<void> {
   assert(cli.includes('bunx guren add notifications'), 'CLI guide must document the notifications scaffold path.')
   assert(cli.includes('bunx guren add storage'), 'CLI guide must document the storage scaffold path.')
   assert(cli.includes('bunx guren add broadcasting'), 'CLI guide must document the broadcasting scaffold path.')
+  assert(cli.includes('bunx guren spec:generate'), 'CLI guide must document the spec view generator.')
+  assert(cli.includes('bunx guren check --docs'), 'CLI guide must document the doc-link CI gate.')
+  assert(cli.includes('bunx guren check --spec'), 'CLI guide must document the spec drift CI gate.')
+  assert(!cli.includes('`check` and `audit` both exit'), 'CLI guide must not claim plain check sets an exit code — only the suite flags gate CI.')
+
+  const specAnchored = await read(root, 'docs/en/guides/spec-anchored.md')
+  assert(specAnchored.includes('Derived where possible, declared where not, checked always'), 'Spec-anchored guide must state the principle.')
+  assert(specAnchored.includes('bunx guren spec:generate'), 'Spec-anchored guide must document spec:generate.')
+  assert(specAnchored.includes('bunx guren context User'), 'Spec-anchored guide must document entity context.')
+  assert(specAnchored.includes('bunx guren make:adr'), 'Spec-anchored guide must document make:adr.')
+  assert(specAnchored.includes('bunx guren check --docs'), 'Spec-anchored guide must document the doc-link gate.')
 
   const overview = await read(root, 'docs/en/guides/overview.md')
   assert(overview.includes("import { Controller, paginate, type PaginatedPageProps } from '@guren/core'"), 'Overview must show the canonical controller import path.')
