@@ -35,6 +35,17 @@ describe('admin route guard', () => {
     await app.get('/admin').assertRedirect('/auth/github')
   })
 
+  it('should guard every admin mutation route', async () => {
+    // CSRF is primed like a real browser so the requests reach the auth
+    // guard — moving any of these out of the blog.auth group fails this.
+    const app = await (await createBlogTestApp()).withCsrf('/blog')
+
+    await app.post('/admin/posts').assertRedirect('/auth/github')
+    await app.post('/admin/posts/1').assertRedirect('/auth/github')
+    await app.post('/admin/posts/1/delete').assertRedirect('/auth/github')
+    await app.post('/admin/posts/1/publish').assertRedirect('/auth/github')
+  })
+
   it('should leave the public blog index unguarded', async () => {
     const app = await createBlogTestApp()
 

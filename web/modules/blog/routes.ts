@@ -24,7 +24,7 @@ export function registerBlogRoutes(baseRouter: Router): void {
       authed.get('/posts/:id/edit', [PostsController, 'edit']).name('admin.posts.edit')
       authed.post('/posts/:id', [PostsController, 'update']).name('admin.posts.update')
       authed.post('/posts/:id/delete', [PostsController, 'destroy']).name('admin.posts.destroy')
-      authed.post('/posts/:id/publish', [PostsController, 'togglePublish']).name('admin.posts.publish')
+      authed.post('/posts/:id/publish', [PostsController, 'setPublished']).name('admin.posts.publish')
     })
   })
 }

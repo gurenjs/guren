@@ -83,12 +83,19 @@ const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
   },
   allowedSchemes: ['http', 'https', 'mailto'],
   allowedSchemesAppliedToAttributes: ['href', 'src'],
+  // `//host/path` inherits the page scheme but still points off-origin —
+  // same trust question as an absolute URL, so it gets no special pass.
+  allowProtocolRelative: false,
   // Only the color declarations shiki produces; anything else (position,
   // background-image, …) is dropped.
   allowedStyles: {
     '*': {
       color: [/^#[0-9a-fA-F]{3,8}$/],
       'background-color': [/^#[0-9a-fA-F]{3,8}$/],
+      // Dual-theme shiki carries the dark palette in custom properties that
+      // app.css switches on — stripping them silently breaks dark mode.
+      '--shiki-dark': [/^#[0-9a-fA-F]{3,8}$/],
+      '--shiki-dark-bg': [/^#[0-9a-fA-F]{3,8}$/],
       'font-style': [/^italic$|^normal$/],
       'font-weight': [/^bold$|^normal$|^\d{3}$/],
       'text-decoration': [/^underline$|^line-through$|^none$/],

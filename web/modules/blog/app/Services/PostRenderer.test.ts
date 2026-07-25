@@ -63,6 +63,20 @@ describe('sanitization', () => {
     expect(html).not.toMatch(/href=/)
   })
 
+  it('should strip protocol-relative URLs from href and src', async () => {
+    const html = await renderPostMarkdown('![x](//evil.test/p.png) and [l](//evil.test/a)')
+
+    expect(html).not.toContain('//evil.test')
+    expect(html).toMatch(/<img[^>]*alt="x"/)
+  })
+
+  it('should keep the shiki dark-theme custom properties dark mode depends on', async () => {
+    const code = await renderPostMarkdown('```ts\nconst a = 1\n```')
+
+    expect(code).toContain('--shiki-dark:')
+    expect(code).toContain('--shiki-dark-bg:')
+  })
+
   it('should keep legitimate markdown and highlighted code intact', async () => {
     const html = await renderPostMarkdown('**bold** [link](https://guren.dev)')
     const code = await renderPostMarkdown('```ts\nconst a: number = 1\n```')

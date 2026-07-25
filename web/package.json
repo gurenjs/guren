@@ -17,7 +17,9 @@
     "db:make": "bunx guren make:migration",
     "db:migrate": "bunx guren db:migrate",
     "db:seed": "bunx guren db:seed",
-    "vercel:build": "bun scripts/vercel-build.ts"
+    "vercel:build": "bun scripts/vercel-build.ts",
+    "cloudflare:build": "bun run build && bun scripts/cloudflare-build.ts",
+    "deploy:cloudflare": "bun run cloudflare:build && bunx wrangler deploy"
   },
   "dependencies": {
     "@guren/cli": "workspace:*",

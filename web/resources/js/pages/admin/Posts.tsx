@@ -26,7 +26,7 @@ export default function AdminPosts({ posts }: Props) {
   useDocsPageTheme()
 
   const togglePublish = (post: AdminPostSummary) => {
-    router.post(`/admin/posts/${post.id}/publish`)
+    router.post(`/admin/posts/${post.id}/publish`, { published: !post.publishedAt })
   }
 
   const destroy = (post: AdminPostSummary) => {

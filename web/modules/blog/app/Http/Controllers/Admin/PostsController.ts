@@ -16,6 +16,10 @@ const PostIdParamSchema = z.object({
   id: z.coerce.number().int().positive(),
 })
 
+const SetPublishedSchema = z.object({
+  published: z.boolean(),
+})
+
 function toAdminSummary(post: PostRecord) {
   return {
     id: post.id,
@@ -54,16 +58,26 @@ export default class PostsController extends Controller {
 
   async store(): Promise<Response> {
     const data = await this.validateBody(PostPayloadSchema)
-    const slug = await uniqueSlug(data.title, slugTaken)
     const bodyHtml = await renderPostMarkdown(data.bodyMarkdown)
 
-    await Post.create({
-      slug,
-      title: data.title,
-      description: data.description || null,
-      bodyMarkdown: data.bodyMarkdown,
-      bodyHtml,
-    })
+    const createWithFreshSlug = async () =>
+      Post.create({
+        slug: await uniqueSlug(data.title, slugTaken),
+        title: data.title,
+        description: data.description || null,
+        bodyMarkdown: data.bodyMarkdown,
+        bodyHtml,
+      })
+
+    try {
+      await createWithFreshSlug()
+    } catch (error) {
+      // The slug probe and the insert are not atomic; a concurrent create
+      // can win the same slug in between. The unique index catches it —
+      // re-probe (which now sees the winner) and try once more.
+      if (!/unique/i.test(error instanceof Error ? error.message : '')) throw error
+      await createWithFreshSlug()
+    }
 
     return this.redirect('/admin')
   }
@@ -117,14 +131,18 @@ export default class PostsController extends Controller {
     return this.redirect('/admin')
   }
 
-  async togglePublish(): Promise<Response> {
+  async setPublished(): Promise<Response> {
     const { id } = this.validateParams(PostIdParamSchema)
     const post = await Post.findOrFail(id)
+    const { published } = await this.validateBody(SetPublishedSchema)
 
+    // The client states the outcome it wants instead of toggling, so a
+    // double-submitted form is idempotent rather than a second flip. A
+    // re-publish keeps the original publishedAt (stable dates in feeds).
     await Post.update(
       { id },
       {
-        publishedAt: post.publishedAt ? null : new Date(),
+        publishedAt: published ? (post.publishedAt ?? new Date()) : null,
         updatedAt: new Date(),
       },
     )
