@@ -120,30 +120,64 @@ export async function listModuleNames(appRoot: string): Promise<string[]> {
 }
 
 /**
- * Absolute paths of directories directly under `modules/` — each is
- * expected to mirror the top-level app layout, so `modules/<name>/<subDir>`
- * is scanned alongside `<appRoot>/<subDir>` for every `discover*Files`
- * function below.
+ * The app root plus every `modules/<name>/` directory, each tagged with
+ * its module name — the single "root + modules" fan-out point shared by
+ * the `discover*Files` functions below, `scanDocs`, and the entity
+ * context's db-artifact scans.
  */
-async function listModuleDirs(appRoot: string): Promise<string[]> {
+export async function listAppRoots(
+  appRoot: string,
+): Promise<Array<{ module: string | null; dir: string }>> {
   const names = await listModuleNames(appRoot)
-  return names.map((name) => resolve(appRoot, 'modules', name))
+  return [
+    { module: null, dir: appRoot },
+    ...names.map((name) => ({ module: name, dir: resolve(appRoot, 'modules', name) })),
+  ]
 }
 
 /**
- * Scans `<appRoot>/<subDir>` plus `<subDir>` under every module directory
- * discovered by `listModuleDirs` — the single fan-out point that makes
- * every `discover*Files` function below (and everything built on them:
- * `check`, `audit`, `context`, `model:list`, `doctor`) module-aware for free.
+ * Scans `<appRoot>/<subDir>` plus `<subDir>` under every module directory —
+ * what makes every `discover*Files` function below (and everything built
+ * on them: `check`, `audit`, `context`, `model:list`, `doctor`)
+ * module-aware for free.
  *
  * Test files are excluded: components are frequently tested by a co-located
  * `<Name>.test.ts` sibling, and those files are tests, not components of the
  * kind each `discover*Files` function reports.
  */
 async function discoverDir(appRoot: string, subDir: string): Promise<string[]> {
-  const roots = [appRoot, ...(await listModuleDirs(appRoot))]
-  const groups = await Promise.all(roots.map((root) => collectFiles(resolve(root, subDir))))
+  const roots = await listAppRoots(appRoot)
+  const groups = await Promise.all(roots.map((root) => collectFiles(resolve(root.dir, subDir))))
   return groups.flat().filter((file) => !TEST_FILE_PATTERN.test(file))
+}
+
+/**
+ * Recursively collect every file under `directory`, skipping only
+ * dependency/build directories and `.git`. Unlike `collectFiles`, dotfiles
+ * and all extensions are included — docs `related:` globs may target
+ * markdown, JSON, workflows, or migrations, not just source files.
+ */
+export async function collectAllFiles(directory: string): Promise<string[]> {
+  const results: string[] = []
+
+  let entries
+  try {
+    entries = await readdir(directory, { withFileTypes: true })
+  } catch {
+    return results
+  }
+
+  for (const entry of entries) {
+    const fullPath = join(directory, entry.name)
+    if (entry.isDirectory()) {
+      if (NON_SOURCE_DIR_NAMES.has(entry.name) || entry.name === '.git') continue
+      results.push(...(await collectAllFiles(fullPath)))
+    } else if (entry.isFile()) {
+      results.push(fullPath)
+    }
+  }
+
+  return results
 }
 
 export function discoverModelFiles(appRoot: string): Promise<string[]> {

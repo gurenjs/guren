@@ -59,6 +59,26 @@ function resolveGurenModule(moduleExports: Record<string, unknown>): GurenModule
   return undefined
 }
 
+/**
+ * A per-call unique import URL, so a runtime that keys its module cache on the
+ * full URL re-evaluates the file instead of replaying the first load.
+ *
+ * Bun keys modules on the resolved path and ignores the query string (verified
+ * on 1.3.11 and 1.3.14, for both `.ts` and `.js`), so this is inert there. It
+ * also unifies the `routes/web.js` specifier an app boots with against this
+ * `.ts` URL, which makes that startup import the first load — every call here
+ * then replays the route set as it stood when the process started, and only a
+ * fresh process picks up an edit. One-shot CLI commands and the Vite plugin
+ * (which spawns `guren` as a child process) get that fresh process; the
+ * long-lived MCP dev server does not. Transitive imports (controllers, a
+ * module's own routes file) are never re-evaluated on any runtime — only the
+ * entry file is ever a candidate.
+ *
+ * Measured on Bun: a repeat call costs tens of microseconds and JSC's
+ * ModuleRecord count holds constant over 100k calls, so there is nothing here
+ * to memoize. That rests on Bun's current behavior — if a future version keys
+ * on the full URL, both the cost and the registry growth become real.
+ */
 function createImportUrl(file: string): string {
   const url = pathToFileURL(file)
   url.searchParams.set('guren-load-routes', `${Date.now()}-${Math.random().toString(36).slice(2)}`)

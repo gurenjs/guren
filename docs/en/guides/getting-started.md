@@ -44,7 +44,7 @@ This regenerates the typed route/page manifests (codegen) and boots the server. 
 A crimson ASCII banner in the terminal with the Guren version and URLs, and the welcome page in your browser. The SQLite database file is created on demand at `./data/guren.db` — the fresh app defines no tables yet, so there is nothing to migrate before your first run.
 
 > [!TIP]
-> Backend changes hot-reload via Bun, and the dev server spawns Vite automatically for frontend assets. Set `GUREN_DEV_VITE=0` to run Vite yourself, or `GUREN_DEV_BANNER=0` to silence the banner in scripts.
+> The dev server spawns Vite automatically for frontend assets, so edits to your React pages appear instantly. Backend changes — controllers, routes, models — are not watched: stop the dev server (`Ctrl+C`) and run `bun run dev` again to pick them up. Set `GUREN_DEV_VITE=0` to run Vite yourself, or `GUREN_DEV_BANNER=0` to silence the banner in scripts.
 
 ### Add your first feature
 

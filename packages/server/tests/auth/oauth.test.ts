@@ -297,6 +297,168 @@ describe('OAuthManager', () => {
     expect(allowlisted.redirectTo).toBe('https://trusted.example.com/welcome')
   })
 
+  it('reports the provider verification signal from the configured key', async () => {
+    // Discord names it `verified`, not OIDC's `email_verified` — the preset
+    // declares the key so the shared mapper never has to know about it.
+    const discordConfig = createDiscordOAuthProviderConfig({
+      clientId: 'd-id',
+      clientSecret: 'd-secret',
+      redirectUri: 'https://app.example.com/auth/discord/callback',
+    })
+    const manager = new OAuthManager({ stateStore: new MemoryOAuthStateStore() })
+    manager.registerProvider('discord', discordConfig)
+
+    // Discord's token endpoint is `/api/oauth2/token`, which the shared
+    // `installOAuthFetchMock` helper would misroute to the userinfo body.
+    const fetchMock = mock(async (input: string) => {
+      const body = input.includes('/oauth2/token')
+        ? { access_token: 'token-123' }
+        : { id: '99', email: 'user@example.com', verified: false }
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    ;(globalThis as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch
+
+    const { state } = await manager.authorize('discord')
+    const profile = await manager.user('discord', { code: 'auth-code', state })
+
+    expect(profile.email).toBe('user@example.com')
+    expect(profile.emailVerified).toBe(false)
+  })
+
+  it('reads the OIDC email_verified claim by default', async () => {
+    const oidcConfig: OAuthProviderConfig = {
+      clientId: 'oidc-id',
+      clientSecret: 'oidc-secret',
+      redirectUri: 'https://app.example.com/auth/oidc/callback',
+      authorizeUrl: 'https://provider.example.com/authorize',
+      tokenUrl: 'https://provider.example.com/access_token',
+      userInfoUrl: 'https://provider.example.com/userinfo',
+    }
+    const manager = new OAuthManager({ stateStore: new MemoryOAuthStateStore() })
+    manager.registerProvider('oidc', oidcConfig)
+
+    installOAuthFetchMock(
+      { access_token: 'token-123' },
+      { sub: 'user-1', email: 'user@example.com', email_verified: true },
+    )
+
+    const { state } = await manager.authorize('oidc')
+    expect((await manager.user('oidc', { code: 'auth-code', state })).emailVerified).toBe(true)
+
+    // Non-boolean values carry no signal — the field stays undefined rather
+    // than coercing a string into a verification claim.
+    installOAuthFetchMock(
+      { access_token: 'token-123' },
+      { sub: 'user-1', email: 'user@example.com', email_verified: 'true' },
+    )
+    const { state: second } = await manager.authorize('oidc')
+    expect((await manager.user('oidc', { code: 'auth-code', state: second })).emailVerified).toBeUndefined()
+  })
+
+  it('leaves emailVerified undefined when the provider sends no signal', async () => {
+    const manager = new OAuthManager({ stateStore: new MemoryOAuthStateStore() })
+    manager.registerProvider('github', githubConfig)
+
+    // GitHub's /user carries no verification field. Consumers must be able to
+    // tell "no signal" apart from "the provider says no".
+    installOAuthFetchMock(
+      { access_token: 'token-123' },
+      { id: 42, email: 'octo@example.com', name: 'Octo Cat' },
+    )
+
+    const { state } = await manager.authorize('github')
+    const profile = await manager.user('github', { code: 'auth-code', state })
+
+    expect(profile.email).toBe('octo@example.com')
+    expect(profile.emailVerified).toBeUndefined()
+  })
+
+  it('marks a fallback email as verified', async () => {
+    const manager = new OAuthManager({ stateStore: new MemoryOAuthStateStore() })
+    manager.registerProvider('github', githubConfig)
+
+    const fetchMock = mock(async (input: string) => {
+      const body = input.includes('/access_token')
+        ? { access_token: 'token-123' }
+        : input.includes('/user/emails')
+          ? [{ email: 'primary@example.com', primary: true, verified: true }]
+          : { id: 42, email: null }
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    ;(globalThis as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch
+
+    const { state } = await manager.authorize('github')
+    const profile = await manager.user('github', { code: 'auth-code', state })
+
+    // GitHub's lookup filters on the address's own `verified` flag, so it
+    // returns the object form and can claim verification for it.
+    expect(profile.email).toBe('primary@example.com')
+    expect(profile.emailVerified).toBe(true)
+  })
+
+  it('makes no verification claim for a fallback that returns a bare string', async () => {
+    const manager = new OAuthManager({ stateStore: new MemoryOAuthStateStore() })
+    manager.registerProvider('custom', {
+      ...githubConfig,
+      // The original signature every pre-existing implementation was written
+      // against. It promises nothing about verification, so neither do we.
+      fetchFallbackEmail: async () => 'from-elsewhere@example.com',
+    })
+
+    installOAuthFetchMock({ access_token: 'token-123' }, { id: 42, email: null })
+
+    const { state } = await manager.authorize('custom')
+    const profile = await manager.user('custom', { code: 'auth-code', state })
+
+    expect(profile.email).toBe('from-elsewhere@example.com')
+    expect(profile.emailVerified).toBeUndefined()
+  })
+
+  it('honors an explicit false from a fallback', async () => {
+    const manager = new OAuthManager({ stateStore: new MemoryOAuthStateStore() })
+    manager.registerProvider('custom', {
+      ...githubConfig,
+      fetchFallbackEmail: async () => ({ email: 'unverified@example.com', emailVerified: false }),
+    })
+
+    installOAuthFetchMock({ access_token: 'token-123' }, { id: 42, email: null })
+
+    const { state } = await manager.authorize('custom')
+    const profile = await manager.user('custom', { code: 'auth-code', state })
+
+    expect(profile.email).toBe('unverified@example.com')
+    expect(profile.emailVerified).toBe(false)
+  })
+
+  it('does not overwrite emailVerified set by a custom mapProfile', async () => {
+    const manager = new OAuthManager({ stateStore: new MemoryOAuthStateStore() })
+    manager.registerProvider('custom', {
+      ...githubConfig,
+      emailVerifiedKey: 'verified',
+      mapProfile: (raw, token) => ({
+        id: String(raw.id),
+        email: 'mapped@example.com',
+        emailVerified: true,
+        token,
+        raw,
+      }),
+    })
+
+    installOAuthFetchMock({ access_token: 'token-123' }, { id: 42, verified: false })
+
+    const { state } = await manager.authorize('custom')
+    const profile = await manager.user('custom', { code: 'auth-code', state })
+
+    expect(profile.email).toBe('mapped@example.com')
+    expect(profile.emailVerified).toBe(true)
+  })
+
   it('exposes provider presets for google and discord', () => {
     const google = createGoogleOAuthProviderConfig({
       clientId: 'g-id',
@@ -311,5 +473,8 @@ describe('OAuthManager', () => {
 
     expect(google.authorizeUrl).toContain('accounts.google.com')
     expect(discord.authorizeUrl).toContain('discord.com')
+    // Each preset declares how to read its own verification signal.
+    expect(google.emailVerifiedKey).toBe('email_verified')
+    expect(discord.emailVerifiedKey).toBe('verified')
   })
 })

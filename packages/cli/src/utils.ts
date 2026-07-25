@@ -113,6 +113,22 @@ export function camelCase(value: string): string {
   return pascal.charAt(0).toLowerCase() + pascal.slice(1)
 }
 
+/**
+ * Slug for prose input (ADR titles, migration names): lowercase,
+ * non-alphanumeric runs collapse to `separator`, edges trimmed. Unlike
+ * `kebabCase()`, punctuation is dropped rather than preserved. Input with
+ * no ASCII alphanumerics at all (e.g. a fully Japanese title) falls back
+ * to `fallback` so the sequence number stays the distinguishing part.
+ */
+export function slugifyProse(value: string, separator: string, fallback: string): string {
+  const slug = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, separator)
+    .replace(new RegExp(`^[${separator}]+|[${separator}]+$`, 'gu'), '')
+
+  return slug || fallback
+}
+
 export function kebabCase(value: string): string {
   return value
     .replace(/([a-z0-9])([A-Z])/gu, '$1-$2')

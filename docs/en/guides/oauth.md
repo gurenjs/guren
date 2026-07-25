@@ -153,6 +153,43 @@ const gitlabConfig: OAuthProviderConfig = {
 oauth.registerProvider('gitlab', gitlabConfig)
 ```
 
+## Provider Email Verification
+
+A provider returning an email is not a claim that it checked the address. Most report that separately — Google sends OIDC's `email_verified`, Discord sends `verified` — and the profile exposes it as `profile.emailVerified`:
+
+| Value | Meaning |
+|-------|---------|
+| `true` | The provider says it verified the address |
+| `false` | The provider says it did **not** |
+| `undefined` | The provider sends no such signal — your app decides |
+
+Refuse to *create* an account on `false`: an unverified address lets a user claim an email they do not own, and a callback that rejects duplicate emails then locks the real owner out for good. Check it only on the create path so an already-linked account is not stranded if its status changes later:
+
+```ts
+if (!user && profile.emailVerified === false) {
+  throw ValidationException.withMessages({
+    message: 'Your provider has not verified this email address.',
+  })
+}
+```
+
+The built-in presets declare their own key. For a provider you register yourself, set `emailVerifiedKey` when it uses a non-standard name — the default reads OIDC's `email_verified`, and only boolean values count:
+
+```ts
+const discordish: OAuthProviderConfig = {
+  // ...
+  emailVerifiedKey: 'verified',
+}
+```
+
+`mapProfile` owns the whole mapping, so a provider using it sets `emailVerified` itself and `emailVerifiedKey` is ignored. GitHub's `/user` carries no verification field at all, so `emailVerified` stays `undefined` there — except when the private-email fallback runs, since `/user/emails` only yields verified primary addresses.
+
+A `fetchFallbackEmail` hook is read against a response that had no email, so the key above cannot vouch for what it returns. Returning a bare string makes no claim and leaves the field `undefined`; return an object to state one:
+
+```ts
+fetchFallbackEmail: async (token) => ({ email: await lookupEmail(token), emailVerified: true }),
+```
+
 ## State Storage
 
 The one-time `state` value that ties the callback back to the original request is stored server-side. The default `MemoryOAuthStateStore` works for single-process dev, but production deployments with more than one process (load balancers, serverless) need shared storage — otherwise the callback can land on a process that never issued the state.
@@ -205,6 +242,7 @@ interface OAuthProviderConfig {
   tokenAuthMethod?: 'client_secret_post' | 'client_secret_basic'
   userInfoMethod?: 'GET' | 'POST'
   mapProfile?: (raw: Record<string, unknown>, token: OAuthTokenResult) => OAuthUserProfile
+  emailVerifiedKey?: string      // Userinfo key holding the verification signal (default: 'email_verified')
 }
 
 interface OAuthStateConfig {
