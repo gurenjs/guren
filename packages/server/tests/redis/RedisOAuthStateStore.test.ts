@@ -1,0 +1,99 @@
+import { describe, expect, it } from 'bun:test'
+import type { Redis } from 'ioredis'
+import { RedisOAuthStateStore } from '../../src/redis/RedisOAuthStateStore'
+
+/**
+ * In-memory stand-in covering the commands RedisOAuthStateStore uses.
+ * eval mirrors the real GET+DEL script contract: the read and the delete
+ * happen in one atomic step, so only one caller can receive the value.
+ */
+class FakeRedis {
+  private readonly data = new Map<string, string>()
+
+  async psetex(key: string, _ttlMs: number, value: string): Promise<'OK'> {
+    this.data.set(key, value)
+    return 'OK'
+  }
+
+  async get(key: string): Promise<string | null> {
+    return this.data.get(key) ?? null
+  }
+
+  async del(...keys: string[]): Promise<number> {
+    let removed = 0
+    for (const key of keys) {
+      if (this.data.delete(key)) removed++
+    }
+    return removed
+  }
+
+  async eval(_script: string, _numKeys: number, key: string): Promise<string | null> {
+    const value = this.data.get(key) ?? null
+    if (value !== null) {
+      this.data.delete(key)
+    }
+    return value
+  }
+}
+
+const createStore = () => {
+  const redis = new FakeRedis()
+  return new RedisOAuthStateStore(redis as unknown as Redis, { prefix: 'test:oauthstate:' })
+}
+
+describe('RedisOAuthStateStore', () => {
+  it('consume returns the payload once and deletes the key', async () => {
+    const store = createStore()
+    const expiresAt = new Date(Date.now() + 60_000)
+    await store.store('hash-1', { provider: 'github', redirectTo: '/dashboard', expiresAt })
+
+    const first = await store.consume('hash-1')
+    expect(first).not.toBeNull()
+    expect(first!.provider).toBe('github')
+    expect(first!.redirectTo).toBe('/dashboard')
+    expect(first!.expiresAt.getTime()).toBe(expiresAt.getTime())
+
+    expect(await store.consume('hash-1')).toBeNull()
+    expect(await store.find('hash-1')).toBeNull()
+  })
+
+  it('consume returns null for an unknown state hash', async () => {
+    const store = createStore()
+    expect(await store.consume('missing')).toBeNull()
+  })
+
+  it('consume returns null for an expired payload', async () => {
+    // Write an already-expired payload directly, simulating one whose
+    // embedded expiry lapsed while the Redis TTL has not fired yet.
+    const redis = new FakeRedis()
+    const store = new RedisOAuthStateStore(redis as unknown as Redis)
+    await redis.psetex(
+      'oauthstate:hash-expired',
+      60_000,
+      JSON.stringify({
+        provider: 'github',
+        expiresAt: new Date(Date.now() - 1000).toISOString(),
+      }),
+    )
+
+    expect(await store.consume('hash-expired')).toBeNull()
+    // The key was still consumed atomically.
+    expect(await redis.get('oauthstate:hash-expired')).toBeNull()
+  })
+
+  it('concurrent consume hands the payload to exactly one caller', async () => {
+    const store = createStore()
+    await store.store('hash-race', {
+      provider: 'github',
+      expiresAt: new Date(Date.now() + 60_000),
+    })
+
+    const results = await Promise.all([
+      store.consume('hash-race'),
+      store.consume('hash-race'),
+      store.consume('hash-race'),
+    ])
+
+    expect(results.filter((r) => r !== null)).toHaveLength(1)
+  })
+})

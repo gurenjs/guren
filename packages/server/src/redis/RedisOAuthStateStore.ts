@@ -30,6 +30,16 @@ export interface RedisOAuthStateStoreOptions {
  * const oauth = createOAuthManager({ stateStore: new RedisOAuthStateStore(redis) })
  * ```
  */
+// GET + DEL in one script so consumption is atomic on the Redis side.
+// GETDEL would do the same but requires Redis >= 6.2; EVAL works everywhere.
+const CONSUME_SCRIPT = `
+local value = redis.call('GET', KEYS[1])
+if value then
+  redis.call('DEL', KEYS[1])
+end
+return value
+`
+
 export class RedisOAuthStateStore implements OAuthStateStore {
   private readonly prefix: string
 
@@ -61,18 +71,42 @@ export class RedisOAuthStateStore implements OAuthStateStore {
       return null
     }
 
+    const payload = this.parsePayload(data)
+    if (!payload) {
+      return null
+    }
+    if (payload.expiresAt.getTime() <= Date.now()) {
+      await this.delete(stateHash)
+      return null
+    }
+    return payload
+  }
+
+  async consume(stateHash: string): Promise<OAuthStatePayload | null> {
+    const data = (await this.redis.eval(
+      CONSUME_SCRIPT,
+      1,
+      `${this.prefix}${stateHash}`,
+    )) as string | null
+    if (!data) {
+      return null
+    }
+
+    const payload = this.parsePayload(data)
+    if (!payload || payload.expiresAt.getTime() <= Date.now()) {
+      return null
+    }
+    return payload
+  }
+
+  private parsePayload(data: string): OAuthStatePayload | null {
     try {
       const parsed = JSON.parse(data) as { provider: string; redirectTo?: string; expiresAt: string }
-      const payload: OAuthStatePayload = {
+      return {
         provider: parsed.provider,
         redirectTo: parsed.redirectTo,
         expiresAt: new Date(parsed.expiresAt),
       }
-      if (payload.expiresAt.getTime() <= Date.now()) {
-        await this.delete(stateHash)
-        return null
-      }
-      return payload
     } catch {
       return null
     }
