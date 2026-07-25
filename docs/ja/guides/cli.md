@@ -65,6 +65,7 @@ bunx guren plugin @acme/guren-plugin-audit
 | `make:notification <Name>` | 通知クラスを生成 | `bunx guren make:notification InvoicePaid` |
 | `make:mail <Name>` | メールクラスを生成 | `bunx guren make:mail WelcomeEmail` |
 | `make:policy <Name>` | 所有者ベースのデフォルトを備えた認可ポリシーを `app/Policies` に生成 | `bunx guren make:policy Post` |
+| `make:adr "<Title>"` | アーキテクチャ意思決定を採番付きファイルとして `docs/adr/` に記録(リンク可能なfrontmatter付き)。`--entity <Model>` で `entities:`/`related:` を自動補完 | `bunx guren make:adr "Billing cycle is end-of-month" --entity Invoice` |
 
 > **Note:** `make:*` は既存ファイルを上書きしません。必要なら `--force` を付けてください。
 
@@ -74,16 +75,26 @@ bunx guren plugin @acme/guren-plugin-audit
 
 | コマンド | 説明 | 例 |
 |---------|------|-----|
-| `check` | ルート・コントローラ・ページ・モデル間の整合性を検証。`guren.arch.ts` があればアーキテクチャ境界も検証 | `bunx guren check --json` |
+| `check` | ルート・コントローラ・ページ・モデル間の整合性に加え、docリンク・スペックビューの鮮度・アーキテクチャ境界を検証 | `bunx guren check --json` |
 | `audit` | セキュリティ監査: 変更系ルートのバリデーション/認証の欠如、文字列補間付き生SQL、ハードコードされた認証情報、無効化されたセキュリティ既定値、mass assignment 設定、`static hidden` 未登録の機微カラムを検査 | `bunx guren audit --json` |
 | `doctor` | プロジェクトの健全性レポート(環境変数・設定・生成ファイル)と次のアクション | `bunx guren doctor --next` |
+| `context [Entity]` | プロジェクトコンテキストマップ。エンティティ名を渡すと1モデルのすべて — テーブル・リレーション・スキーマ付きルート・Props付きページ・Resource・Policy・紐付きdocs — を出力(同名モデルは `--module` で解決、`"app"` はプロジェクトルート) | `bunx guren context User --json` |
+| `spec:generate` | `docs/spec/` の導出スペックビュー(ER図・ドメインモデル・画面一覧・モジュールマップ)を再生成 — 詳細は[スペックアンカード開発](./spec-anchored.md) | `bunx guren spec:generate` |
 
-`check` と `audit` はいずれも失敗(fail)を検出すると非ゼロの終了コードを返すため、CI に組み込めます。
+`audit` は失敗(fail)を検出すると非ゼロの終了コードを返します。
+プレーンな `check` は情報提供で、CIをゲートするのは各スイートフラグです
+(それぞれのスイートの失敗で非ゼロexit):
 
 ```bash
-bunx guren check
 bunx guren audit
+bunx guren check --arch    # アーキテクチャ境界(guren.arch.ts + モジュールルール)
+bunx guren check --docs    # docリンク: frontmatterのentities/related + @docsタグ
+bunx guren check --spec    # docs/spec/ が再生成結果と一致するか
 ```
+
+スイートフラグは併用すると和集合で実行されます。`--changed` はいずれの
+スイートも main とのマージベースからの変更ファイルに限定します —
+エージェントハーネスのedit hookが使う高速パスです。
 
 名前付きミドルウェアで保護されたルート(例: `router.middleware('auth').group(...)`)は保護済みと認識されます。`/login` や `/register` などのゲストフローは認証チェックの対象外です。
 

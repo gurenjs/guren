@@ -125,6 +125,10 @@ const GUIDE_SECTIONS: readonly DocSectionConfig[] = [
     slugs: ['testing', 'deployment', 'serverless', 'operations'],
   },
   {
+    title: { en: 'AI-Native Development', ja: 'AIネイティブ開発' },
+    slugs: ['spec-anchored'],
+  },
+  {
     title: { en: 'Reference', ja: 'リファレンス' },
     slugs: [
       'build-auth-app',

@@ -269,19 +269,23 @@ export default function Home({ codeExamples }: Props) {
               <h2 className="mt-3 text-3xl font-bold text-white md:text-4xl">
                 Built for AI coding agents
               </h2>
+              <p className="mt-3 font-mono text-sm tracking-wide text-crimson-300/90">
+                derived where possible · declared where not · checked always
+              </p>
               <p className="mt-4 text-base leading-relaxed text-white/60">
-                One command hands an agent your whole project map. Three mechanical gates catch its
-                mistakes before you read the diff. And every new app ships a full agent harness —
-                CLAUDE.md, path-scoped rules, skills, and hooks — whose effect is measured in a
-                public, reproducible evaluation: a 40% cut in agent cost over an undocumented
-                baseline.
+                One command hands an agent everything your project knows about an entity — or the
+                whole map. The spec keeps itself honest: ER, domain, and screen views regenerate
+                from code, decision records link to the models they govern, and drift fails CI.
+                Mechanical gates catch mistakes before you read the diff, and every new app ships
+                a full agent harness whose effect is measured in a public, reproducible
+                evaluation: a 40% cut in agent cost over an undocumented baseline.
               </p>
               <CodeBlock
                 lines={[
-                  '$ bunx guren context    # project map for the agent',
-                  '$ bunx guren check      # routes ↔ controllers ↔ pages',
-                  '$ bunx guren audit      # validation, auth, secrets',
-                  '$ bunx guren agent:sync # refresh CLAUDE.md & rules',
+                  '$ bunx guren context User    # one entity: model, routes, pages, linked docs',
+                  '$ bunx guren spec:generate   # ER, domain, screens — derived from code',
+                  '$ bunx guren check           # wiring, doc links, spec freshness',
+                  '$ bunx guren audit           # validation, auth, secrets',
                 ]}
                 title="Terminal"
               />
