@@ -193,7 +193,7 @@
       "name": "@guren/plugin-vercel",
       "version": "0.1.2",
       "dependencies": {
-        "@guren/core": "^1.0.0-rc.12",
+        "@guren/core": "^1.1.0",
       },
       "devDependencies": {
         "@types/node": "^20.14.10",
@@ -268,17 +268,16 @@
         "@guren/core": "workspace:*",
         "@guren/inertia-client": "workspace:*",
         "@guren/orm": "workspace:*",
+        "@guren/plugin-cloudflare": "workspace:*",
         "@guren/plugin-vercel": "workspace:*",
         "@guren/testing": "workspace:*",
         "@inertiajs/core": "^3.6.1",
         "@inertiajs/react": "^3.6.1",
         "drizzle-orm": "1.0.0-rc.4",
-        "marked": "^15.0.11",
-        "marked-highlight": "^2.2.3",
         "postgres": "^3.4.3",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
-        "shiki": "^3.15.0",
+        "zod": "^4.4.3",
       },
       "devDependencies": {
         "@tailwindcss/vite": "^4.2.2",
@@ -286,6 +285,9 @@
         "@types/react-dom": "^19.0.0",
         "@vitejs/plugin-react": "^6.0.0",
         "drizzle-kit": "1.0.0-rc.4",
+        "marked": "^15.0.11",
+        "marked-highlight": "^2.2.3",
+        "shiki": "^3.15.0",
         "tailwindcss": "^4.2.2",
         "typescript": "^5.4.0",
         "vite": "^8.0.0",
@@ -1425,6 +1427,8 @@
     "vite-node/vite": ["vite@5.4.21", "", { "dependencies": { "esbuild": "^0.21.3", "postcss": "^8.4.43", "rollup": "^4.20.0" }, "optionalDependencies": { "fsevents": "~2.3.3" }, "peerDependencies": { "@types/node": "^18.0.0 || >=20.0.0", "less": "*", "lightningcss": "^1.21.0", "sass": "*", "sass-embedded": "*", "stylus": "*", "sugarss": "*", "terser": "^5.4.0" }, "optionalPeers": ["@types/node", "less", "lightningcss", "sass", "sass-embedded", "stylus", "sugarss", "terser"], "bin": { "vite": "bin/vite.js" } }, "sha512-o5a9xKjbtuhY6Bi5S3+HvbRERmouabWbyUcpXXUA1u+GNUKoROi9byOJ8M0nHbHYHkYICiMlqxkg1KkYmm25Sw=="],
 
     "vitest/vite": ["vite@5.4.21", "", { "dependencies": { "esbuild": "^0.21.3", "postcss": "^8.4.43", "rollup": "^4.20.0" }, "optionalDependencies": { "fsevents": "~2.3.3" }, "peerDependencies": { "@types/node": "^18.0.0 || >=20.0.0", "less": "*", "lightningcss": "^1.21.0", "sass": "*", "sass-embedded": "*", "stylus": "*", "sugarss": "*", "terser": "^5.4.0" }, "optionalPeers": ["@types/node", "less", "lightningcss", "sass", "sass-embedded", "stylus", "sugarss", "terser"], "bin": { "vite": "bin/vite.js" } }, "sha512-o5a9xKjbtuhY6Bi5S3+HvbRERmouabWbyUcpXXUA1u+GNUKoROi9byOJ8M0nHbHYHkYICiMlqxkg1KkYmm25Sw=="],
+
+    "web/zod": ["zod@4.4.3", "", {}, "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="],
 
     "whatwg-encoding/iconv-lite": ["iconv-lite@0.6.3", "", { "dependencies": { "safer-buffer": ">= 2.1.2 < 3.0.0" } }, "sha512-4fCk79wshMdzMp2rH06qWrJE4iolqLhCUH+OiuIgU++RB0+94NlDL81atO7GX55uUKueo0txHNtvEyI6D7WdMw=="],
 

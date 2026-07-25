@@ -1,9 +1,24 @@
-import { createPostgresDatabase } from '@guren/orm'
+import { createD1Database, createSqliteDatabase } from '@guren/core'
+import { getWorkersEnv } from '@guren/plugin-cloudflare'
 
-const database = createPostgresDatabase({
-  migrationsFolder: new URL('../db/migrations', import.meta.url),
-  seedersFolder: new URL('../db/seeders', import.meta.url),
-  connectionString: () => process.env.DATABASE_URL ?? 'postgres://guren:guren@localhost:54322/guren',
-})
+interface WorkersEnv {
+  DB: unknown
+}
+
+/** workerd identifies itself through the standard navigator user agent. */
+export function isWorkersRuntime(): boolean {
+  return typeof navigator !== 'undefined' && navigator.userAgent === 'Cloudflare-Workers'
+}
+
+const database = isWorkersRuntime()
+  ? createD1Database({
+      binding: () => getWorkersEnv<WorkersEnv>().DB,
+      migrationsFolder: new URL('../db/migrations', import.meta.url),
+    })
+  : createSqliteDatabase({
+      migrationsFolder: new URL('../db/migrations', import.meta.url),
+      seedersFolder: new URL('../db/seeders', import.meta.url),
+      filename: () => process.env.DATABASE_URL ?? './data/guren.db',
+    })
 
 export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database

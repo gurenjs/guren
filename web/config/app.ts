@@ -1,24 +1,32 @@
-import { existsSync, readdirSync } from 'node:fs'
-import { resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { configureOrm, seedDatabase } from './database.js'
+import { configureOrm, isWorkersRuntime, seedDatabase } from './database.js'
 
 let bootstrapped = false
-const MIGRATIONS_FOLDER = fileURLToPath(new URL('../db/migrations', import.meta.url))
 
-function hasMigrations(): boolean {
-  if (!existsSync(MIGRATIONS_FOLDER)) {
+async function hasMigrations(): Promise<boolean> {
+  // On Workers there is no filesystem to probe — migrations are applied
+  // out-of-band with `wrangler d1 migrations apply` and the ORM simply
+  // connects to the already-migrated database.
+  if (isWorkersRuntime()) {
+    return true
+  }
+
+  const { existsSync, readdirSync } = await import('node:fs')
+  const { resolve } = await import('node:path')
+  const { fileURLToPath } = await import('node:url')
+  const migrationsFolder = fileURLToPath(new URL('../db/migrations', import.meta.url))
+
+  if (!existsSync(migrationsFolder)) {
     return false
   }
 
-  const entries = readdirSync(MIGRATIONS_FOLDER, { withFileTypes: true })
+  const entries = readdirSync(migrationsFolder, { withFileTypes: true })
   for (const entry of entries) {
-    if (entry.isDirectory() && existsSync(resolve(MIGRATIONS_FOLDER, entry.name, 'migration.sql'))) {
+    if (entry.isDirectory() && existsSync(resolve(migrationsFolder, entry.name, 'migration.sql'))) {
       return true
     }
   }
 
-  return existsSync(resolve(MIGRATIONS_FOLDER, 'meta/_journal.json'))
+  return existsSync(resolve(migrationsFolder, 'meta/_journal.json'))
 }
 
 export async function bootModels(): Promise<void> {
@@ -26,14 +34,18 @@ export async function bootModels(): Promise<void> {
     return
   }
 
-  if (!hasMigrations()) {
+  if (!(await hasMigrations())) {
     bootstrapped = true
     return
   }
 
   try {
     await configureOrm()
-    await seedDatabase()
+    if (!isWorkersRuntime()) {
+      // D1 seeding is a CLI workflow (`wrangler d1 execute`); the factory's
+      // seedDatabase() intentionally throws on Workers.
+      await seedDatabase()
+    }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
     console.warn('Skipping ORM bootstrap:', reason)

@@ -1,7 +1,6 @@
 import { Link } from '@inertiajs/react'
 import { useEffect } from 'react'
-import { X_URL } from '../../../config/site.js'
-import { GithubIcon, XIcon, XLogoIcon } from './icons.js'
+import { GithubIcon, XIcon } from './icons.js'
 
 interface LocaleLink {
   code: string
@@ -80,15 +79,6 @@ export function MobileMenu({ open, onClose, basePath, locales = [] }: MobileMenu
           >
             <GithubIcon className="size-4" />
             GitHub
-          </a>
-          <a
-            href={X_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-[0.95rem] font-medium text-gray-700 no-underline transition hover:bg-gray-100"
-          >
-            <XLogoIcon className="size-4" />
-            X
           </a>
         </nav>
         {locales.length > 1 && (

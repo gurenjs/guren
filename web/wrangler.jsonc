@@ -1,0 +1,33 @@
+{
+  "name": "web",
+  "main": ".cloudflare/worker.js",
+  "compatibility_date": "2026-07-25",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "assets": {
+    "directory": ".cloudflare/assets"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "web",
+      "database_id": "TODO: run wrangler d1 create guren-web",
+      "migrations_dir": ".cloudflare/d1-migrations"
+    }
+  ],
+  "vars": {
+    "NODE_ENV": "production"
+  },
+  "alias": {
+    "bun:sqlite": "./.cloudflare/stub-bun-sqlite.js",
+    "vite": "./.cloudflare/stub-vite.js",
+    "shiki": "./stubs/shiki.js",
+    "@guren/cli": "./.cloudflare/stub-guren-cli.js",
+    "@modelcontextprotocol/sdk": "./.cloudflare/stub-mcp-sdk.js"
+  },
+  "define": {
+    "process.env.NODE_ENV": "\"production\"",
+    "import.meta.url": "\"file:///worker.js\""
+  }
+}
