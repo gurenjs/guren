@@ -1,6 +1,6 @@
 import { Model, type PlainObject } from '@guren/orm'
 import type { SessionData, SessionStore } from '@guren/server'
-import { decodeJsonColumn, isExpired } from './store-utils'
+import { decodeJsonColumn, isExpired } from './store-utils.js'
 
 /**
  * Options for DatabaseSessionStore.

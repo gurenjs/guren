@@ -1,6 +1,6 @@
 import { Model, type PlainObject } from '@guren/orm'
 import type { ApiToken, ApiTokenStore } from '@guren/server'
-import { decodeJsonColumn, toDate } from './store-utils'
+import { decodeJsonColumn, toDate } from './store-utils.js'
 
 /**
  * Options for DatabaseApiTokenStore.

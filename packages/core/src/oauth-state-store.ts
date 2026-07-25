@@ -1,6 +1,6 @@
 import { Model } from '@guren/orm'
 import type { OAuthStatePayload, OAuthStateStore } from '@guren/server'
-import { isExpired, toDate } from './store-utils'
+import { isExpired, toDate } from './store-utils.js'
 
 /**
  * Database-backed OAuth state store built on the Guren ORM.
