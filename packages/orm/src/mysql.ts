@@ -1,6 +1,7 @@
 import type { MySql2Database } from 'drizzle-orm/mysql2'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { buildMigrationStatus, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders } from './seeder'
@@ -66,6 +67,10 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
   let migrationsPromise: Promise<void> | undefined
   let databasePromise: Promise<MySql2Database> | undefined
   let database: MySql2Database | undefined
+  let activeKey: string | undefined
+  // Captured here, not in getDatabase(), so the caller of this factory is the
+  // frame that identifies the handle across hot reloads.
+  const callSite = new Error().stack
 
   function resolveConnectionString(): string {
     const value = typeof connectionString === 'function' ? connectionString() : connectionString
@@ -134,6 +139,12 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
         ...(relations ? { relations } : {}),
       } as DrizzleConfig) as unknown as MySql2Database
       database = db
+
+      activeKey = hotReloadKey('mysql', callSite, url)
+      if (activeKey) {
+        await replaceActiveConnection(activeKey, closeDatabase)
+      }
+
       return db
     })()
 
@@ -150,9 +161,18 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
       return
     }
 
-    await closeClient(database)
-    database = undefined
-    databasePromise = undefined
+    const key = activeKey
+    activeKey = undefined
+
+    try {
+      await closeClient(database)
+    } finally {
+      database = undefined
+      databasePromise = undefined
+      if (key) {
+        releaseActiveConnection(key, closeDatabase)
+      }
+    }
   }
 
   async function configureOrm(): Promise<void> {
