@@ -356,6 +356,19 @@ export default class OAuthController extends Controller {
     let [user] = await User.where(identityWhere(provider, profile.id))
 
     if (!user) {
+      // Providers report separately whether they actually verified the
+      // address (Google's \`email_verified\`, Discord's \`verified\`) — returning
+      // it in the profile is not a claim that it was checked. Creating an
+      // account from an unverified one would let it claim an email it does
+      // not own, and the collision check below would then turn the real owner
+      // away for good. Checked only on the create path: an already-linked
+      // account should not be locked out if its provider status changes later.
+      if (profile.raw.email_verified === false || profile.raw.verified === false) {
+        throw ValidationException.withMessages({
+          message: 'Your provider has not verified this email address. Verify it with the provider and try again.',
+        })
+      }
+
       const [existingByEmail] = await User.where({ email })
       if (existingByEmail) {
         throw ValidationException.withMessages({
@@ -1948,13 +1961,16 @@ async function updatePageContracts(): Promise<void> {
 }
 
 /**
- * Files this run no longer scaffolds are omitted, never deleted — so
- * re-running an existing password app with `--oauth-only` leaves them on
- * disk. The rewritten routes/auth.ts makes the stale controllers unreachable,
- * but `db/seeders/UsersSeeder.ts` is discovered by `db:seed` rather than
- * routed, so it would still hash a password and insert an account that has no
- * way to sign in. Report what is left rather than deleting files we did not
- * write on this run.
+ * Every file only the password experience needs — login, registration, reset,
+ * and the mail and email-verification wiring that exist to serve them.
+ *
+ * Files this run no longer scaffolds are omitted, never deleted, so
+ * re-running an existing password app with `--oauth-only` leaves all of these
+ * on disk. The rewritten routes/auth.ts makes the stale controllers
+ * unreachable, but `db/seeders/UsersSeeder.ts` is discovered by `db:seed`
+ * rather than routed, so it would still hash a password and insert an account
+ * that has no way to sign in. Report what is left rather than deleting files
+ * we did not write on this run.
  */
 const PASSWORD_SCAFFOLD_PATHS = [
   'app/Http/Validators/LoginValidator.ts',
@@ -1962,15 +1978,23 @@ const PASSWORD_SCAFFOLD_PATHS = [
   'app/Http/Controllers/Auth/RegisterController.ts',
   'app/Http/Controllers/Auth/ForgotPasswordController.ts',
   'app/Http/Controllers/Auth/ResetPasswordController.ts',
+  'app/Http/Controllers/Auth/VerifyEmailController.ts',
   'app/Http/Validators/RegisterValidator.ts',
   'app/Http/Validators/ForgotPasswordValidator.ts',
   'app/Http/Validators/ResetPasswordValidator.ts',
   'resources/js/pages/auth/Register.tsx',
   'resources/js/pages/auth/ForgotPassword.tsx',
   'resources/js/pages/auth/ResetPassword.tsx',
+  'resources/js/pages/auth/VerifyEmail.tsx',
   'app/Auth/PasswordResetStore.ts',
+  'app/Auth/EmailVerificationStore.ts',
   'app/Mail/PasswordResetMail.ts',
+  'app/Mail/EmailVerificationMail.ts',
+  'app/Providers/MailProvider.ts',
+  'config/mail.ts',
 ]
+
+const MAIL_SCAFFOLD_PATHS = ['app/Providers/MailProvider.ts', 'config/mail.ts']
 
 async function warnAboutStalePasswordScaffold(): Promise<void> {
   const { existsSync } = await import('node:fs')
@@ -1981,11 +2005,16 @@ async function warnAboutStalePasswordScaffold(): Promise<void> {
   }
 
   consola.warn(
-    `These password-auth files from an earlier make:auth run are no longer wired into routes/auth.ts — delete them: ${leftovers.join(', ')}`,
+    `These files from an earlier make:auth run serve password login only and are no longer wired into routes/auth.ts — delete them: ${leftovers.join(', ')}`,
   )
   if (leftovers.includes('db/seeders/UsersSeeder.ts')) {
     consola.warn(
       'db/seeders/UsersSeeder.ts still runs on `db:seed` and would insert a password account that cannot sign in.',
+    )
+  }
+  if (leftovers.some((path) => MAIL_SCAFFOLD_PATHS.includes(path))) {
+    consola.warn(
+      'src/app.ts may still register MailProvider and CoreMailServiceProvider from that run — remove them too if nothing else sends mail.',
     )
   }
 }

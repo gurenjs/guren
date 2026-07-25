@@ -378,6 +378,18 @@ export const posts = pgTable('posts', {
       expect(controller).not.toContain('password:')
       expect(controller).toContain('already exists. Sign in with the method you originally used.')
 
+      // Returning an email is not a claim that the provider checked it:
+      // Google reports email_verified and Discord reports verified separately.
+      // Creating an account from an unverified address would let it claim an
+      // email it does not own, which the collision check above then makes
+      // permanent for the real owner.
+      expect(controller).toContain('profile.raw.email_verified === false || profile.raw.verified === false')
+      expect(controller).toContain('has not verified this email address')
+      // Only on the create path — an existing link must not break if the
+      // provider's verification status changes later.
+      const createBranch = controller.slice(controller.indexOf('if (!user) {'))
+      expect(createBranch).toContain('profile.raw.email_verified')
+
       const authRoutes = await readFile(join(workspace.dir, 'routes/auth.ts'), 'utf8')
       expect(authRoutes).toContain("import OAuthController from '../app/Http/Controllers/Auth/OAuthController.js'")
       expect(authRoutes).toContain("router.get('/auth/:provider', [OAuthController, 'redirectToProvider'], requireGuest({ redirectTo: '/dashboard' }))")
@@ -690,7 +702,7 @@ export const posts = pgTable('posts', {
       await writeFile(join(workspace.dir, 'db/schema.ts'), `export const posts = 'posts'\n`, 'utf8')
 
       // First a normal password scaffold, then convert it.
-      await makeAuth({ force: true })
+      await makeAuth({ force: true, verify: true })
 
       consola.warn = ((...args: unknown[]) => {
         warnings.push(args.map(String).join(' '))
@@ -701,12 +713,30 @@ export const posts = pgTable('posts', {
       // make:auth only writes the files it scaffolds — it never deletes — so
       // the password artifacts survive and must at least be reported.
       const report = warnings.join('\n')
-      expect(report).toContain('db/seeders/UsersSeeder.ts')
-      expect(report).toContain('app/Http/Validators/LoginValidator.ts')
-      expect(report).toContain('app/Http/Controllers/Auth/RegisterController.ts')
+      // Every file the password experience owns, including the mail wiring
+      // that only exists to serve reset and verification.
+      for (const stale of [
+        'app/Http/Validators/LoginValidator.ts',
+        'db/seeders/UsersSeeder.ts',
+        'app/Http/Controllers/Auth/RegisterController.ts',
+        'app/Http/Controllers/Auth/ForgotPasswordController.ts',
+        'app/Http/Controllers/Auth/ResetPasswordController.ts',
+        'app/Auth/PasswordResetStore.ts',
+        'app/Mail/PasswordResetMail.ts',
+        'app/Providers/MailProvider.ts',
+        'config/mail.ts',
+        // --verify's artifacts are password-experience-only too.
+        'app/Http/Controllers/Auth/VerifyEmailController.ts',
+        'app/Auth/EmailVerificationStore.ts',
+        'app/Mail/EmailVerificationMail.ts',
+      ]) {
+        expect(report).toContain(stale)
+      }
       // The seeder is found by db:seed rather than routed, so a dead route
       // table does not neutralize it.
       expect(report).toContain('still runs on `db:seed`')
+      // Nothing rewrites the providers array, so the mail wiring survives too.
+      expect(report).toContain('src/app.ts may still register MailProvider')
     } finally {
       consola.warn = originalWarn
       await workspace.cleanup()
