@@ -656,11 +656,9 @@ export const posts = pgTable('posts', {
   })
 
   it('rejects --oauth-only without a supported provider', async () => {
+    // No schema fixture: the guard rejects before any file is read or written.
     const workspace = await createTempWorkspace('guren-cli-make-auth-oauth-only-invalid-')
     try {
-      await mkdir(join(workspace.dir, 'db'), { recursive: true })
-      await writeFile(join(workspace.dir, 'db/schema.ts'), `export const posts = 'posts'\n`, 'utf8')
-
       // Neither reading is defensible: honouring it leaves no way to sign in,
       // ignoring it scaffolds the password login the flag opts out of.
       await expect(makeAuth({ force: true, oauthOnly: true })).rejects.toThrow('--oauth-only requires --oauth')

@@ -12,39 +12,23 @@ import {
 } from './patch-helpers'
 import { makeMigration } from './make-migration'
 
-function buildLoginControllerTemplate(oauthOnly: boolean): string {
-  // Passwordless apps keep show() (the OAuth button page) and destroy()
-  // (logout) but have no credential exchange at all — there is no /login POST
-  // route pointing at store(), so scaffolding it would leave a dead action
-  // that still pulls in the password validator.
-  if (oauthOnly) {
-    return `import { Controller } from '@guren/core'
-import { pages } from '@/.guren/pages.gen'
+// Passwordless apps keep show() (the OAuth button page) and destroy()
+// (logout) but have no credential exchange at all — there is no POST /login
+// route pointing at store(), so scaffolding it would leave a dead action that
+// still pulls in the password validator.
+function buildLoginControllerTemplate(includePassword: boolean): string {
+  const coreImports = includePassword ? 'Controller, ValidationException' : 'Controller'
+  const validatorImport = includePassword
+    ? `\nimport { LoginSchema } from '../../Validators/LoginValidator.js'`
+    : ''
 
-export default class LoginController extends Controller {
-  async show(): Promise<Response> {
-    return this.inertia(pages.auth.Login, {}, { url: this.request.path, title: 'Login' })
-  }
+  const showBody = includePassword
+    ? `    const email = this.request.query('email') ?? ''
+    return this.inertia(pages.auth.Login, { email }, { url: this.request.path, title: 'Login' })`
+    : `    return this.inertia(pages.auth.Login, {}, { url: this.request.path, title: 'Login' })`
 
-  async destroy(): Promise<Response> {
-    await this.auth.logout()
-    this.auth.session()?.invalidate()
-    return this.redirect('/')
-  }
-}
-`
-  }
-
-  return `import { Controller, ValidationException } from '@guren/core'
-import { LoginSchema } from '../../Validators/LoginValidator.js'
-import { pages } from '@/.guren/pages.gen'
-
-export default class LoginController extends Controller {
-  async show(): Promise<Response> {
-    const email = this.request.query('email') ?? ''
-    return this.inertia(pages.auth.Login, { email }, { url: this.request.path, title: 'Login' })
-  }
-
+  const storeAction = includePassword
+    ? `
   async store(): Promise<Response> {
     const { email, password, remember } = await this.validateBody(LoginSchema)
 
@@ -58,7 +42,17 @@ export default class LoginController extends Controller {
 
     return this.redirect('/dashboard')
   }
+`
+    : ''
 
+  return `import { ${coreImports} } from '@guren/core'${validatorImport}
+import { pages } from '@/.guren/pages.gen'
+
+export default class LoginController extends Controller {
+  async show(): Promise<Response> {
+${showBody}
+  }
+${storeAction}
   async destroy(): Promise<Response> {
     await this.auth.logout()
     this.auth.session()?.invalidate()
@@ -409,7 +403,7 @@ export default class DashboardController extends Controller {
 }
 `
 
-function buildProfileControllerTemplate(includeVerify: boolean, includePassword: boolean): string {
+function buildProfileControllerTemplate({ includeVerify, includePassword }: AuthFeatures): string {
   const coreImports = includeVerify
     ? 'Controller, ValidationException, createEmailVerificationToken, buildVerificationUrl'
     : 'Controller, ValidationException'
@@ -838,26 +832,38 @@ function buildOAuthButtonLinks(providers: string[]): string {
 }
 
 /**
- * OAuth buttons appended *below* a password form — hence the "Or continue
- * with" divider. Passwordless pages render the buttons on their own via
- * buildOAuthButtonLinks(), where an "or" would have nothing to refer back to.
+ * The `divider` variant appends the buttons *below* a password form — hence
+ * the "Or continue with" rule. Passwordless pages pass `divider: false`,
+ * where an "or" would have nothing to refer back to.
  */
-function buildOAuthButtonsTemplate(providers: string[]): string {
+function buildOAuthButtonsTemplate(providers: string[], { divider = true } = {}): string {
   if (providers.length === 0) {
     return ''
   }
 
-  return `
-        <div className="mt-6 space-y-3">
+  const dividerBlock = divider
+    ? `
           <div className="flex items-center gap-3 text-xs uppercase tracking-wide text-slate-500">
             <span className="h-px flex-1 bg-slate-800" />
             Or continue with
             <span className="h-px flex-1 bg-slate-800" />
-          </div>
+          </div>`
+    : ''
+
+  return `
+        <div className="mt-6 space-y-3">${dividerBlock}
 ${buildOAuthButtonLinks(providers)}
         </div>`
 }
 
+/**
+ * A separate template rather than more holes in buildLoginViewTemplate: the
+ * convention in this file is to splice fragments in when a variant *adds or
+ * drops fields*, and to write a second template when the component's
+ * structure changes. Here the entire controlled form — useForm, useId, every
+ * input, the submit button — is gone, so splicing would leave a builder whose
+ * two outputs share little more than the card chrome.
+ */
 function buildOAuthOnlyLoginViewTemplate(providers: string[]): string {
   return `import { Head } from '@inertiajs/react'
 import Layout from '../../components/Layout.js'
@@ -882,10 +888,7 @@ export default function Login({ errors = {} }: Props) {
             {errors.message}
           </p>
         )}
-
-        <div className="mt-6 space-y-3">
-${buildOAuthButtonLinks(providers)}
-        </div>
+${buildOAuthButtonsTemplate(providers, { divider: false })}
       </section>
     </Layout>
   )
@@ -1515,37 +1518,27 @@ ${passwordInput}
 `
 }
 
-interface RoutesTemplateOptions {
-  includeRegister: boolean
-  includeReset: boolean
-  includeVerify: boolean
-  oauthProviders: string[]
-  /** Omit the password credential exchange: no POST /login, show() only. */
-  oauthOnly: boolean
-}
-
 function buildRoutesTemplate({
-  includeRegister,
-  includeReset,
+  includeExtras,
   includeVerify,
+  includePassword,
   oauthProviders,
-  oauthOnly,
-}: RoutesTemplateOptions): string {
+}: AuthFeatures): string {
   const includeOAuth = oauthProviders.length > 0
-  const registerImport = includeRegister
+  const registerImport = includeExtras
     ? `\nimport RegisterController from '../app/Http/Controllers/Auth/RegisterController.js'`
     : ''
-  const registerRoutes = includeRegister
+  const registerRoutes = includeExtras
     ? `
   router.get('/register', [RegisterController, 'show'], requireGuest({ redirectTo: '/dashboard' })).name('register')
   router.post('/register', [RegisterController, 'store'], requireGuest({ redirectTo: '/dashboard' })).name('register.store')
 `
     : ''
 
-  const resetImport = includeReset
+  const resetImport = includeExtras
     ? `\nimport ForgotPasswordController from '../app/Http/Controllers/Auth/ForgotPasswordController.js'\nimport ResetPasswordController from '../app/Http/Controllers/Auth/ResetPasswordController.js'`
     : ''
-  const resetRoutes = includeReset
+  const resetRoutes = includeExtras
     ? `
   router.get('/forgot-password', [ForgotPasswordController, 'show'], requireGuest({ redirectTo: '/dashboard' })).name('forgot-password')
   router.post('/forgot-password', [ForgotPasswordController, 'store'], requireGuest({ redirectTo: '/dashboard' })).name('forgot-password.store')
@@ -1584,9 +1577,9 @@ function buildRoutesTemplate({
 
   // Passwordless apps expose /login only as the OAuth button page — there is
   // no credential exchange to POST to.
-  const loginStoreRoute = oauthOnly
-    ? ''
-    : `\n  router.post('/login', [LoginController, 'store'], requireGuest({ redirectTo: '/dashboard' })).name('login.store')`
+  const loginStoreRoute = includePassword
+    ? `\n  router.post('/login', [LoginController, 'store'], requireGuest({ redirectTo: '/dashboard' })).name('login.store')`
+    : ''
 
   return `import { Router, requireAuthenticated, requireGuest${requireVerifiedImport} } from '@guren/core'
 import LoginController from '../app/Http/Controllers/Auth/LoginController.js'${registerImport}${resetImport}${verifyImport}${oauthImport}
@@ -1742,11 +1735,7 @@ function relaxPasswordHashForOAuth(content: string): string {
   return tableMatch ? content.replace(target, relaxed) : relaxed
 }
 
-async function updateSchema(
-  includeVerify: boolean,
-  oauthProviders: string[] = [],
-  oauthOnly = false,
-): Promise<void> {
+async function updateSchema({ includeVerify, includePassword, oauthProviders }: AuthFeatures): Promise<void> {
   const schemaPath = resolve(process.cwd(), 'db/schema.ts')
   let content: string
 
@@ -1776,9 +1765,10 @@ async function updateSchema(
       if (relaxed !== content) {
         content = relaxed
         consola.info(
-          oauthOnly
-            ? 'Made users.passwordHash nullable so OAuth accounts can be passwordless — this scaffold no longer serves password login, so existing password rows can only sign in through a provider.'
-            : 'Made users.passwordHash nullable so OAuth accounts can be passwordless — password-registered rows lose the NOT NULL guard.',
+          'Made users.passwordHash nullable so OAuth accounts can be passwordless — '
+            + (includePassword
+              ? 'password-registered rows lose the NOT NULL guard.'
+              : 'this scaffold no longer serves password login, so existing password rows can only sign in through a provider.'),
         )
       }
     }
@@ -1907,16 +1897,33 @@ export interface MakeAuthOptions extends WriterOptions {
   oauthOnly?: boolean
 }
 
-export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]> {
+/**
+ * What the scaffold is actually going to contain, derived once from the raw
+ * options. Everything downstream — every template builder, the schema patch,
+ * the install step — consumes these capabilities rather than the flags that
+ * produced them, so a second way to switch a capability off lands in
+ * resolveAuthFeatures() alone.
+ */
+interface AuthFeatures {
+  /** Registration and password reset, plus the mail wiring they need. */
+  includeExtras: boolean
+  /** Email verification. Builds on the registration flow. */
+  includeVerify: boolean
+  /** Password credentials: POST /login, the login validator, password fields, the demo seeder. */
+  includePassword: boolean
+  /** Providers to scaffold buttons, a callback, and id columns for. */
+  oauthProviders: string[]
+}
+
+function resolveAuthFeatures(options: MakeAuthOptions): AuthFeatures {
   const oauthProviders = parseOAuthProviders(options.oauth)
-  const includeOAuth = oauthProviders.length > 0
   const oauthOnly = Boolean(options.oauthOnly)
 
   // Neither degraded reading of `--oauth-only` without providers is
   // defensible: honouring it scaffolds an app with no way to sign in, and
   // ignoring it scaffolds the full password experience the flag exists to
   // opt out of.
-  if (oauthOnly && !includeOAuth) {
+  if (oauthOnly && oauthProviders.length === 0) {
     throw new Error(
       `--oauth-only requires --oauth with at least one supported provider (${KNOWN_OAUTH_PROVIDERS.join(', ')}).`,
     )
@@ -1926,7 +1933,6 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
   // password field all sit on, so --oauth-only subsumes --minimal.
   const includeExtras = !options.minimal && !oauthOnly
   const includeVerify = includeExtras && Boolean(options.verify)
-  const includePassword = !oauthOnly
 
   if (options.verify && !includeExtras) {
     consola.warn(
@@ -1936,32 +1942,31 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
     )
   }
 
+  return { includeExtras, includeVerify, includePassword: !oauthOnly, oauthProviders }
+}
+
+export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]> {
+  const features = resolveAuthFeatures(options)
+  const { includeExtras, includeVerify, includePassword, oauthProviders } = features
+  const includeOAuth = oauthProviders.length > 0
+
   const files = [
-    { path: 'app/Http/Controllers/Auth/LoginController.ts', contents: buildLoginControllerTemplate(oauthOnly) },
+    { path: 'app/Http/Controllers/Auth/LoginController.ts', contents: buildLoginControllerTemplate(includePassword) },
     { path: 'app/Http/Controllers/DashboardController.ts', contents: dashboardControllerTemplate },
-    { path: 'app/Http/Controllers/ProfileController.ts', contents: buildProfileControllerTemplate(includeVerify, includePassword) },
+    { path: 'app/Http/Controllers/ProfileController.ts', contents: buildProfileControllerTemplate(features) },
     { path: 'app/Models/User.ts', contents: userModelTemplate },
     { path: 'app/Providers/AuthProvider.ts', contents: authProviderTemplate },
     { path: 'app/Http/Validators/ProfileValidator.ts', contents: buildProfileValidatorTemplate(includePassword) },
     { path: 'resources/js/components/Layout.tsx', contents: layoutTemplate },
     {
       path: 'resources/js/pages/auth/Login.tsx',
-      contents: oauthOnly
-        ? buildOAuthOnlyLoginViewTemplate(oauthProviders)
-        : buildLoginViewTemplate(includeExtras, includeExtras, oauthProviders),
+      contents: includePassword
+        ? buildLoginViewTemplate(includeExtras, includeExtras, oauthProviders)
+        : buildOAuthOnlyLoginViewTemplate(oauthProviders),
     },
     { path: 'resources/js/pages/dashboard/Index.tsx', contents: dashboardViewTemplate },
     { path: 'resources/js/pages/profile/Edit.tsx', contents: buildProfileViewTemplate(includePassword) },
-    {
-      path: 'routes/auth.ts',
-      contents: buildRoutesTemplate({
-        includeRegister: includeExtras,
-        includeReset: includeExtras,
-        includeVerify,
-        oauthProviders,
-        oauthOnly,
-      }),
-    },
+    { path: 'routes/auth.ts', contents: buildRoutesTemplate(features) },
   ]
 
   if (includePassword) {
@@ -2010,12 +2015,12 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
 
   const created = await writeFilesSafe(files, options)
 
-  await updateSchema(includeVerify, oauthProviders, oauthOnly)
+  await updateSchema(features)
   await updatePageContracts()
   const migrationGenerated = await generateUsersMigration()
 
   if (options.install) {
-    await installAuth(migrationGenerated, includeExtras, oauthProviders, includePassword)
+    await installAuth(features, migrationGenerated)
   } else {
     consola.info('Next steps:')
     consola.info('  • Register AuthProvider in src/app.ts providers array')
@@ -2067,10 +2072,8 @@ async function wireProvider(appPath: string, providerName: string, providerRelat
 }
 
 async function installAuth(
-  migrationGenerated = true,
-  includeExtras = true,
-  oauthProviders: string[] = [],
-  includePassword = true,
+  { includeExtras, includePassword, oauthProviders }: AuthFeatures,
+  migrationGenerated: boolean,
 ): Promise<void> {
   consola.info('Installing authentication configuration...')
 
