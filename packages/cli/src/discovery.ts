@@ -1,5 +1,5 @@
 import { readdir, access, readFile, stat } from 'node:fs/promises'
-import { resolve, join, extname, relative, sep } from 'node:path'
+import { resolve, join, extname, relative, sep, posix } from 'node:path'
 
 const SOURCE_EXTENSIONS = new Set(['.ts', '.mts', '.js', '.mjs'])
 const TEST_FILE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.js', '.jsx', '.mjs'])
@@ -204,16 +204,21 @@ export async function discoverTestFiles(appRoot: string): Promise<string[]> {
 export function controllerTestCandidates(cwd: string, controllerPath: string): string[] {
   const name = classNameFromPath(controllerPath)
   const relPath = toPosixRelative(cwd, controllerPath)
+  const dir = posix.dirname(relPath)
+  const siblingDir = dir === '.' ? '' : `${dir}/`
   const moduleName = moduleNameFromRelPath(relPath)
   const prefix = moduleName ? `modules/${moduleName}/` : ''
 
-  const directories = [relPath.slice(0, relPath.lastIndexOf('/') + 1), `${prefix}tests/controllers/`, `${prefix}tests/`]
-  // A `.js`/`.mts` controller is tested by a `.test.js`/`.test.mts` file, but
-  // `.test.ts` stays a candidate everywhere — a TypeScript test covering a
-  // plain-JS controller is a normal setup, not a missing test.
-  const extensions = Array.from(new Set([extname(controllerPath), '.ts']))
+  // A `.js`/`.mts` controller may be tested by a same-extension sibling, but
+  // `.test.ts` stays a candidate there too. The `tests/` layouts below are
+  // only ever scaffolded by `make:test`, which always emits `.test.ts`.
+  const siblingExtensions = Array.from(new Set([extname(controllerPath), '.ts']))
 
-  return directories.flatMap((directory) => extensions.map((extension) => `${directory}${name}.test${extension}`))
+  return [
+    ...siblingExtensions.map((ext) => `${siblingDir}${name}.test${ext}`),
+    `${prefix}tests/controllers/${name}.test.ts`,
+    `${prefix}tests/${name}.test.ts`,
+  ]
 }
 
 export async function hasControllerTest(cwd: string, controllerPath: string): Promise<boolean> {
