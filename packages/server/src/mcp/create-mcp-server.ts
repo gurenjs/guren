@@ -2,6 +2,32 @@ import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mc
 import { z } from 'zod'
 
 /**
+ * Options the `.guren/*.gen.ts` generators are called with. Only `force`
+ * reaches them — they resolve every path against the process cwd, which the
+ * codegen tool sets before calling. `cwd` rides along to name the project the
+ * call is for.
+ */
+export interface CodegenOptions {
+  cwd: string
+  force?: boolean
+}
+
+/**
+ * What a generator reports back. An empty `outputPath` means the generator
+ * found nothing to describe and wrote no file (a project with no page
+ * components, for instance).
+ *
+ * `definitions` is the route manifest `generateRouteTypes` builds. It stays
+ * opaque here — this package only carries it from one CLI call to the next
+ * (`generateApiClientTypes` consumes it) and never reads inside it, so
+ * mirroring the CLI's route shape would only create something to keep in sync.
+ */
+export interface CodegenResult {
+  outputPath?: string
+  definitions?: unknown[]
+}
+
+/**
  * CLI functions that the MCP server wraps.
  * These are injected at runtime to avoid circular dependencies
  * (@guren/server cannot depend on @guren/cli directly).
@@ -52,10 +78,18 @@ export interface GurenCliApi {
   makeView(name: string, opts: { force?: boolean }): Promise<string | string[]>
   makeTest(name: string, opts: { force?: boolean }): Promise<string | string[]>
   makeRoute(name: string, opts: { force?: boolean }): Promise<string | string[]>
-  generateRouteTypes(opts: { cwd: string }): Promise<unknown>
-  generatePageTypes(opts: { cwd: string }): Promise<unknown>
-  generateDataTypes(opts: { cwd: string }): Promise<unknown>
-  generateChannelTypes(opts: { cwd: string }): Promise<unknown>
+  generateRouteTypes(opts: CodegenOptions): Promise<CodegenResult | void>
+  generatePageTypes(opts: CodegenOptions): Promise<CodegenResult | void>
+  generateDataTypes(opts: CodegenOptions): Promise<CodegenResult | void>
+  generateChannelTypes(opts: CodegenOptions): Promise<CodegenResult | void>
+  /**
+   * Takes the route manifest `generateRouteTypes` returns, so it can only run
+   * after that succeeded.
+   */
+  generateApiClientTypes(
+    definitions: unknown[],
+    opts: CodegenOptions,
+  ): Promise<CodegenResult | void>
   /**
    * Route-dependent context generation that re-runs the CLI in a fresh
    * process. Optional because `@guren/cli` is resolved from the app at
@@ -272,44 +306,74 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
 
   server.tool(
     'guren_codegen',
-    'Generate type-safe route, page, data, and channel type manifests (.guren/*.gen.ts files).',
+    'Generate the type-safe route, page, data, and channel manifests plus the API client (.guren/ and types/generated/).',
     {},
     async () => {
       const originalCwd = process.cwd()
       try {
         process.chdir(cwd)
+
+        // `force` matches what `guren codegen` passes: every artifact below is
+        // generated output, so overwriting it is the whole point — without it
+        // the writer rejects each one as "already exists" from the second run
+        // onwards.
+        const options: CodegenOptions = { cwd, force: true }
+
         const generated: string[] = []
+        const skipped: Array<{ artifacts: string[]; reason: string }> = []
+        let failed = false
 
-        try {
-          await cli.generateRouteTypes({ cwd })
-          generated.push('.guren/routes.gen.ts')
-        } catch {
-          /* skip if routes not configured */
+        /**
+         * Runs one generator and files its artifacts under `generated` or
+         * `skipped`. A generator that returns an empty `outputPath` had
+         * nothing to describe, which is a normal shape for a project rather
+         * than a failure; a throw is the opposite, and is what `isError`
+         * reports on.
+         */
+        const run = async (
+          artifacts: string[],
+          generate: () => Promise<CodegenResult | void>,
+        ): Promise<CodegenResult | void> => {
+          try {
+            const result = await generate()
+            if (result?.outputPath === '') {
+              skipped.push({ artifacts, reason: 'nothing to generate' })
+            } else {
+              generated.push(...artifacts)
+            }
+            return result
+          } catch (error) {
+            failed = true
+            skipped.push({
+              artifacts,
+              reason: error instanceof Error ? error.message : String(error),
+            })
+          }
         }
 
-        try {
-          await cli.generatePageTypes({ cwd })
-          generated.push('.guren/pages.gen.ts')
-        } catch {
-          /* skip if pages not configured */
-        }
-
-        try {
-          await cli.generateDataTypes({ cwd })
-          generated.push('.guren/data.gen.ts')
-        } catch {
-          /* skip if resources not configured */
-        }
-
-        try {
-          await cli.generateChannelTypes({ cwd })
-          generated.push('.guren/channels.gen.ts')
-        } catch {
-          /* skip if channels not configured */
-        }
+        // Ordered as `guren codegen` orders it, and for the same reason at the
+        // end: the API client is built from the route manifest, so it can only
+        // run once routes has produced one.
+        const routes = await run(
+          ['.guren/routes.gen.ts', 'types/generated/routes.d.ts'],
+          () => cli.generateRouteTypes(options),
+        )
+        await run(['.guren/pages.gen.ts'], () => cli.generatePageTypes(options))
+        await run(['.guren/data.gen.ts'], () => cli.generateDataTypes(options))
+        await run(['.guren/channels.gen.ts'], () => cli.generateChannelTypes(options))
+        await run(['.guren/api-client.gen.ts'], () => {
+          if (!routes?.definitions) {
+            throw new Error('route generation produced no manifest to build a client from')
+          }
+          return cli.generateApiClientTypes(routes.definitions, options)
+        })
 
         return {
-          content: [{ type: 'text', text: JSON.stringify({ generated }, null, 2) }],
+          content: [{ type: 'text', text: JSON.stringify({ generated, skipped }, null, 2) }],
+          // A generator that found nothing to describe is not a failure — an
+          // app with no page components is a normal shape — so only a thrown
+          // one makes the run an error, even when other artifacts landed.
+          isError: failed,
         }
       } finally {
         process.chdir(originalCwd)
