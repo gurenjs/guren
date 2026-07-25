@@ -1,6 +1,6 @@
 import { Link } from '@inertiajs/react'
-import { GITHUB_URL } from '../../../config/site.js'
-import { GithubIcon } from './icons.js'
+import { GITHUB_URL, X_URL } from '../../../config/site.js'
+import { GithubIcon, XLogoIcon } from './icons.js'
 
 interface FooterProps {
   variant: 'home' | 'docs'
@@ -27,6 +27,15 @@ export function Footer({ variant }: FooterProps) {
             >
               <GithubIcon className="size-4" />
               GitHub
+            </a>
+            <a
+              href={X_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-1.5 no-underline transition hover:text-docs-accent"
+              aria-label="Guren on X"
+            >
+              <XLogoIcon className="size-4" />
             </a>
           </div>
         </div>
@@ -61,6 +70,7 @@ export function Footer({ variant }: FooterProps) {
             <a href="https://github.com/gurenjs/guren" target="_blank" rel="noreferrer" className="no-underline transition hover:text-white">GitHub</a>
             <a href="https://github.com/gurenjs/guren/issues" target="_blank" rel="noreferrer" className="no-underline transition hover:text-white">Issues</a>
             <a href="https://github.com/gurenjs/guren/discussions" target="_blank" rel="noreferrer" className="no-underline transition hover:text-white">Discussions</a>
+            <a href={X_URL} target="_blank" rel="noreferrer" className="no-underline transition hover:text-white">X</a>
           </nav>
         </div>
         <div>

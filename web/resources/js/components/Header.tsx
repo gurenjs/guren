@@ -1,7 +1,8 @@
 import { Link } from '@inertiajs/react'
 import { useState } from 'react'
+import { X_URL } from '../../../config/site.js'
 import { useColorMode } from '../pages/Docs/theme.js'
-import { GithubIcon, MenuIcon, MoonIcon, SunIcon } from './icons.js'
+import { GithubIcon, MenuIcon, MoonIcon, SunIcon, XLogoIcon } from './icons.js'
 import { MobileMenu } from './MobileMenu.js'
 
 interface LocaleLink {
@@ -72,6 +73,15 @@ export function Header({ variant, basePath = '/docs', locales = [] }: HeaderProp
                   <GithubIcon className="size-4" />
                   GitHub
                 </a>
+                <a
+                  href={X_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1.5 transition hover:text-white"
+                  aria-label="Guren on X"
+                >
+                  <XLogoIcon className="size-4" />
+                </a>
               </nav>
               <ColorModeButton variant="home" />
               <button
@@ -115,6 +125,15 @@ export function Header({ variant, basePath = '/docs', locales = [] }: HeaderProp
               >
                 <GithubIcon className="size-4" />
                 GitHub
+              </a>
+              <a
+                href={X_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-1.5 text-docs-text-muted no-underline transition hover:text-docs-accent"
+                aria-label="Guren on X"
+              >
+                <XLogoIcon className="size-4" />
               </a>
             </nav>
             {locales.length > 1 && (
