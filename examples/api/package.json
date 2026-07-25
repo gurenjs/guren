@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun bin/serve.ts",
+    "dev": "bun --hot bin/serve.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "openapi:generate": "bunx guren openapi:generate --routes routes/api.ts --title \"Guren Example API\" --version \"0.1.0\" --description \"Example API for authentication, tokens, and task management.\" --out .guren/openapi.gen.json",

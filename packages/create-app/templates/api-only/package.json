@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun run codegen && bun run dev:server",
-    "dev:server": "bun bin/serve.ts",
+    "dev:server": "bun --hot bin/serve.ts",
     "codegen": "bunx guren codegen --routes routes/api.ts --force",
     "typecheck": "tsc --noEmit",
     "db:make": "bunx guren make:migration",

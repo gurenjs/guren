@@ -34,6 +34,7 @@ describe('runDoctor', () => {
           name: 'doctor-pass',
           scripts: {
             dev: 'bun run dev',
+            'dev:server': 'bun --hot bin/serve.ts',
             build: 'bun run build',
             typecheck: 'tsc --noEmit',
             codegen: 'bunx guren codegen --force',
@@ -197,6 +198,7 @@ describe('runDoctor', () => {
         compilerOptions?: { baseUrl?: string; paths?: Record<string, string[]> }
       }
 
+      expect(packageJson.scripts['dev:server']).toBe('bun --hot bin/serve.ts')
       expect(packageJson.scripts.build).toBe('bun run codegen && bunx vite build')
       expect(packageJson.scripts.typecheck).toBe('tsc --noEmit')
       expect(packageJson.scripts.codegen).toBe('bunx guren codegen --routes routes/web.ts --out types/generated/routes.d.ts --force')

@@ -33,7 +33,7 @@ Short definitions for common terms in the Guren docs.
 - **SPA**: Single page app navigation without full reloads.
 - **SSR**: Server-side rendering for the first HTML response.
 - **Props**: Data passed to React components.
-- **HMR**: Hot reload of frontend changes during development, handled by Vite. Backend changes need a dev-server restart.
+- **HMR**: Hot reload of frontend changes during development, handled by Vite. Backend changes (controllers, routes, models) reload too, since the dev server runs under `bun --hot`.
 - **Inertia page**: A React component referenced by `this.inertia(...)`.
 
 ## CLI

@@ -311,7 +311,7 @@ That's the full mini blog: public reading, authenticated writing, related data a
 The `.with('author')` call is missing in `PostController.show`, or `Comment.belongsTo('author', ...)` was never registered (it must run at module load, after the class definition).
 
 **Submitting a comment redirects to `/login` even though you're signed in.**
-Sessions were reset (dev server restart with the in-memory session driver) — sign in again. If it persists, confirm the route has `.middleware('auth')` and not a typo'd alias name.
+Sessions were reset (with the in-memory session driver, either a dev server restart or a hot reload from editing backend code) — sign in again. If it persists, confirm the route has `.middleware('auth')` and not a typo'd alias name.
 
 **`no such table: comments`.**
 The migration wasn't applied. Run `bun run db:make create_comments_table` then `bun run db:migrate`.
