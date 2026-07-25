@@ -90,6 +90,7 @@ describe('renderContextMarkdown', () => {
         relationships: [{ name: 'author', type: 'belongsTo', relatedModel: 'User' }],
         usesAuth: false,
         hasSoftDeletes: false,
+        docsTags: [],
       }],
       routes: [
         {

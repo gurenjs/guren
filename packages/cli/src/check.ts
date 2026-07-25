@@ -13,6 +13,7 @@ import {
 import { ParseCache } from './parse-cache'
 import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath } from './inertia-pages'
 import { runArchCheck } from './arch-check'
+import { runDocsCheck } from './docs-check'
 import { getChangedFiles } from './changed-files'
 import { check, type CheckResult, type CheckReport, type CheckStatus } from './check-result'
 
@@ -34,6 +35,14 @@ export interface RunCheckOptions {
    * Falls back to checking everything when not in a git repo.
    */
   changed?: boolean
+  /**
+   * Run doc-link checks only (docs/ frontmatter + @docs tags), skipping
+   * everything else. Like `--arch`, a brand-new fast path that gates on
+   * exit code from day one.
+   */
+  docs?: boolean
+  /** Warn when a doc's `last_reviewed` is older than this many days. Off when unset. */
+  docsTtlDays?: number
 }
 
 /**
@@ -104,7 +113,16 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   const filterChanged = (files: string[]): string[] =>
     changedFiles ? files.filter((f) => changedFiles.has(toPosixRelative(cwd, f))) : files
 
-  if (!options.arch) {
+  // `--arch` / `--docs` select suites; combining them runs the union (never
+  // silently nothing). No flag = every suite.
+  const selected = new Set<'arch' | 'docs'>([
+    ...(options.arch ? (['arch'] as const) : []),
+    ...(options.docs ? (['docs'] as const) : []),
+  ])
+  const runs = (suite: 'core' | 'arch' | 'docs'): boolean =>
+    selected.size === 0 || (suite !== 'core' && selected.has(suite))
+
+  if (runs('core')) {
     // 1. Check controllers for empty methods
     const controllerFiles = filterChanged(await discoverControllerFiles(cwd))
     for (const filePath of controllerFiles) {
@@ -198,9 +216,19 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     checks.push(...schemaAggregationResults)
   }
 
-  // 7. Check architecture boundaries (guren.arch.ts + derived module rules)
-  const archResults = await runArchCheck({ cwd, cache, changedFiles })
-  checks.push(...archResults)
+  // 7. Doc-link checks (docs/ frontmatter + @docs tags, RFC 0004). Runs in
+  // plain mode and under --docs; content-activated, so apps without the
+  // docs convention contribute zero results here.
+  if (runs('docs')) {
+    const docsResults = await runDocsCheck({ cwd, changedFiles, ttlDays: options.docsTtlDays, cache })
+    checks.push(...docsResults)
+  }
+
+  // 8. Check architecture boundaries (guren.arch.ts + derived module rules)
+  if (runs('arch')) {
+    const archResults = await runArchCheck({ cwd, cache, changedFiles })
+    checks.push(...archResults)
+  }
 
   const report: CheckReport = {
     cwd,

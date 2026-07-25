@@ -79,13 +79,15 @@ Commands designed for AI coding agents to understand, validate, and generate cod
 # Project introspection
 bunx guren context              # Project context map (markdown)
 bunx guren context --json       # Project context map (JSON)
+bunx guren context User         # Entity-centric bundle: model, routes, pages, resource, policy, linked docs (--module to disambiguate, "app" = root)
 bunx guren model:list           # List models with relationships
 bunx guren model:list --format json  # Models as JSON
 
 # Integrity checking
-bunx guren check                # Validate route↔controller↔page consistency + architecture boundaries (exits non-zero on failures)
+bunx guren check                # Validate route↔controller↔page consistency, architecture boundaries, and doc links (informational; only --arch/--docs set the exit code)
 bunx guren check --json         # Check results as JSON
 bunx guren check --arch         # Architecture boundary checks only (guren.arch.ts) — fast path for edit hooks
+bunx guren check --docs         # Doc-link checks only: docs/ frontmatter (entities/related) + @docs tags (exits non-zero on failures)
 bunx guren check --changed      # Restrict file-scanning checks to files changed vs. the merge base with main
 bunx guren audit                # Security audit: validation/auth on mutating routes, raw SQL, secrets, mass assignment
 bunx guren audit --json         # Audit results as JSON (exits non-zero on failures)
@@ -103,6 +105,7 @@ bunx guren make:feature Post --fields "title:string,body:text" --test  # With te
 bunx guren make:feature Post --fields "title:string" --public  # Skip auth checks in mutating actions
 bunx guren make:feature Post --fields "title:string" --policy  # Also generate a policy and enforce it in store/update
 bunx guren make:policy Post     # Authorization policy scaffold (app/Policies)
+bunx guren make:adr "Billing cycle is end-of-month"  # Numbered ADR under docs/adr with linkable frontmatter (entities/related)
 
 # Application modules (RFC 0002) — self-contained modules/<name>/ directories
 bunx guren make:module Billing              # Scaffold modules/billing/{index.ts,routes.ts,db/schema.ts}, wire into src/app.ts
@@ -341,6 +344,10 @@ export const handler = createLambdaHandler(app)
 | `packages/server/src/auth/password/NodeHasher.ts` | Node.js-compatible password hasher |
 | `packages/cli/src/bin.ts` | CLI entry point |
 | `packages/cli/src/context.ts` | AI agent: project context map generation |
+| `packages/cli/src/entity-context.ts` | AI agent: entity-centric context bundles (`guren context <Entity>`, RFC 0004) |
+| `packages/cli/src/docs-index.ts` | AI agent: docs/ frontmatter scanning + `@docs` tag extraction |
+| `packages/cli/src/docs-check.ts` | AI agent: doc-link validation (`guren check --docs`) |
+| `packages/cli/src/make-adr.ts` | AI agent: numbered ADR scaffolding (`make:adr`) |
 | `packages/cli/src/check.ts` | AI agent: integrity checking |
 | `packages/cli/src/arch-check.ts` | AI agent: architecture boundary checking (`guren.arch.ts`, see RFC 0002) |
 | `packages/cli/src/arch/index.ts` | `defineArchRules()` + types, published as the `@guren/cli/arch` subpath |

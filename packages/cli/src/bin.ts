@@ -23,6 +23,7 @@ import { makeModel } from './make-model'
 import { makeModule } from './make-module'
 import { makeNotification } from './make-notification'
 import { makeProvider } from './make-provider'
+import { makeAdr } from './make-adr'
 import { makeResource } from './make-resource'
 import { makeRoute } from './make-route'
 import { makeSeeder } from './make-seeder'
@@ -118,6 +119,28 @@ const makeCommandSpecs: MakeCommandSpec[] = [
   { name: 'make:notification', description: 'Generate a new notification class.', argDescription: 'Notification class name', makeFn: makeNotification, resourceName: 'Notification' },
   { name: 'make:provider', description: 'Generate a new service provider.', argDescription: 'Provider class name', makeFn: makeProvider, resourceName: 'Provider' },
 ]
+
+// make:adr takes an extra --entity flag beyond the shared writer options,
+// so it gets its own command instead of a makeCommandSpecs entry.
+const makeAdrCommand = defineCommand({
+  meta: {
+    name: 'make:adr',
+    description: 'Generate a numbered ADR under docs/adr with linkable frontmatter.',
+  },
+  args: {
+    name: { type: 'positional', required: true, description: 'Decision title (quoted prose)' },
+    entity: {
+      type: 'string',
+      description: 'Model class name to prefill entities:/related: with (case-insensitive).',
+    },
+    force: { type: 'boolean', description: 'Overwrite existing files', alias: 'f' },
+    module: MODULE_ARG,
+  },
+  async run({ args }) {
+    const file = await makeAdr(args.name, { ...toWriterOptions(args), entity: args.entity })
+    consola.success(`ADR created at ${file}`)
+  },
+})
 
 const makeCommands = Object.fromEntries(
   makeCommandSpecs.map((spec) => [
@@ -1687,6 +1710,14 @@ const checkCommand = defineCommand({
       type: 'boolean',
       description: 'Run only architecture boundary checks (guren.arch.ts). Fast path for edit hooks.',
     },
+    docs: {
+      type: 'boolean',
+      description: 'Run only doc-link checks (docs/ frontmatter + @docs tags).',
+    },
+    'docs-ttl': {
+      type: 'string',
+      description: 'Warn when a doc\'s last_reviewed is older than N days.',
+    },
     changed: {
       type: 'boolean',
       description: 'Restrict file-scanning checks to files changed vs. the merge base with main.',
@@ -1698,6 +1729,8 @@ const checkCommand = defineCommand({
       json: Boolean(args.json),
       routesFile: args.routes,
       arch: Boolean(args.arch),
+      docs: Boolean(args.docs),
+      docsTtlDays: args['docs-ttl'] ? Number(args['docs-ttl']) : undefined,
       changed: Boolean(args.changed),
     })
 
@@ -1707,12 +1740,13 @@ const checkCommand = defineCommand({
       renderCheckReport(report)
     }
 
-    // Only `--arch` gates on exit code. Plain `guren check` has never set
-    // one (it's a v1.0-stable command; changing that default is a breaking
-    // change reserved for a major release). `--arch` is a brand-new flag
-    // with no prior contract to preserve, so it can gate CI from day one —
-    // that's the intended way to enforce guren.arch.ts boundaries in CI.
-    if (args.arch && report.failCount > 0) {
+    // Only `--arch` and `--docs` gate on exit code. Plain `guren check` has
+    // never set one (it's a v1.0-stable command; changing that default is a
+    // breaking change reserved for a major release). The fast-path flags
+    // are new, with no prior contract to preserve, so they can gate CI from
+    // day one — that's the intended way to enforce boundaries and doc
+    // links in CI.
+    if ((args.arch || args.docs) && report.failCount > 0) {
       process.exitCode = 1
     }
   },
@@ -2338,6 +2372,7 @@ const deployCommand = defineCommand({
 
 const builtinSubCommands = {
   ...makeCommands,
+  'make:adr': makeAdrCommand,
   'make:auth': makeAuthCommand,
   'make:module': makeModuleCommand,
   'make:channel': makeChannelCommand,

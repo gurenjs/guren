@@ -1,6 +1,6 @@
 import { access } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { runCommand } from './utils'
+import { runCommand, slugifyProse } from './utils'
 
 const DEFAULT_SCHEMA = 'db/schema.ts'
 const DEFAULT_OUTPUT = 'db/migrations'
@@ -18,12 +18,7 @@ export interface MakeMigrationOptions {
 }
 
 function toSlug(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    || 'migration'
+  return slugifyProse(value, '_', 'migration')
 }
 
 async function resolveDrizzleConfig(): Promise<string | undefined> {
