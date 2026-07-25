@@ -34,11 +34,28 @@ export class McpServiceProvider extends ServiceProvider {
       (import('@guren/cli') as Promise<GurenCliApi>),
     ])
 
+    // This provider lives inside a long-running dev server, so the CLI's
+    // route loading — which imports routes/web.ts and everything it reaches —
+    // would answer every request from the module graph captured at the first
+    // one. Bun offers no way to evict an ES module, so route-dependent
+    // context generation runs the CLI in a child process instead. Guarded
+    // because @guren/cli is resolved from the app and may predate the helper;
+    // an older CLI keeps the previous in-process (stale) behaviour rather
+    // than failing outright.
+    //
+    // guren_codegen (generateRouteTypes et al.) has the same staleness
+    // exposure but is deliberately left in-process here: it already fails on
+    // any repeat call because it writes without `force`, so it needs that
+    // fixed before freshness would matter — tracked separately.
+    const routeAwareCli: GurenCliApi = cli.createFreshContextApi
+      ? { ...cli, ...cli.createFreshContextApi() }
+      : cli
+
     // Stateless mode: each request gets a fresh McpServer + transport pair.
     // McpServer.connect() can only be called once per instance, so we
     // create a new server for each request.
     hono.all('/_guren/mcp', async (c) => {
-      const mcpServer = createMcpServer({ cwd, cli })
+      const mcpServer = createMcpServer({ cwd, cli: routeAwareCli })
       const transport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
       })

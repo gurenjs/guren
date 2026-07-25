@@ -60,29 +60,26 @@ function resolveGurenModule(moduleExports: Record<string, unknown>): GurenModule
 }
 
 /**
- * A per-call unique import URL, so a runtime that keys its module cache on the
- * full URL re-evaluates the file instead of replaying the first load.
+ * Every load here is a plain `import()` of the file URL, so a process that
+ * calls `loadRouteDefinitions()` twice sees the route graph as it was on the
+ * *first* call. Bun keys `.ts` modules on the resolved path and ignores the
+ * query string, so the usual `?v=<timestamp>` cache-busting trick does not
+ * re-evaluate anything (verified on Bun 1.3.11 and 1.3.14, for both `.ts` and
+ * `.js`), and Bun exposes no way to evict an ES module. A query-string variant
+ * would also unify with the plain `routes/web.js` specifier an app boots
+ * with, making that startup import the first load. Transitive imports —
+ * controllers, a module's own `routes.ts` — are never re-evaluated on any
+ * runtime either, so no entry-file-only trick could make the whole graph
+ * fresh even if Bun did honor the query string.
  *
- * Bun keys modules on the resolved path and ignores the query string (verified
- * on 1.3.11 and 1.3.14, for both `.ts` and `.js`), so this is inert there. It
- * also unifies the `routes/web.js` specifier an app boots with against this
- * `.ts` URL, which makes that startup import the first load — every call here
- * then replays the route set as it stood when the process started, and only a
- * fresh process picks up an edit. One-shot CLI commands and the Vite plugin
- * (which spawns `guren` as a child process) get that fresh process; the
- * long-lived MCP dev server does not. Transitive imports (controllers, a
- * module's own routes file) are never re-evaluated on any runtime — only the
- * entry file is ever a candidate.
- *
- * Measured on Bun: a repeat call costs tens of microseconds and JSC's
- * ModuleRecord count holds constant over 100k calls, so there is nothing here
- * to memoize. That rests on Bun's current behavior — if a future version keys
- * on the full URL, both the cost and the registry growth become real.
+ * That is fine for one-shot CLI commands and the Vite plugin (which spawns
+ * `guren` as a child process), so every call there is already a fresh
+ * process. Long-lived in-process callers must instead run the CLI in a fresh
+ * child process themselves — see `createFreshContextApi()` in
+ * `fresh-context.ts`, used by the long-lived MCP dev server.
  */
-function createImportUrl(file: string): string {
-  const url = pathToFileURL(file)
-  url.searchParams.set('guren-load-routes', `${Date.now()}-${Math.random().toString(36).slice(2)}`)
-  return url.href
+function importUrl(file: string): string {
+  return pathToFileURL(file).href
 }
 
 /** Shared tail for both "module skipped" warnings — keep the wording in one place. */
@@ -111,7 +108,7 @@ async function loadGurenModule(appRoot: string, moduleName: string, warnings?: s
 
   let moduleExports: Record<string, unknown>
   try {
-    moduleExports = await import(createImportUrl(indexPath)) as Record<string, unknown>
+    moduleExports = await import(importUrl(indexPath)) as Record<string, unknown>
   } catch (error) {
     warn(
       `Could not import modules/${moduleName}/index.ts — ${ROUTES_MISSING_CONSEQUENCE}: `
@@ -162,7 +159,7 @@ export async function loadRouteDefinitions(
   moduleWarnings?: string[],
   moduleProvenance?: Array<string | null>,
 ): Promise<RouteDefinition[]> {
-  const moduleExports = await import(createImportUrl(routesFile)) as Record<string, unknown>
+  const moduleExports = await import(importUrl(routesFile)) as Record<string, unknown>
   const registrar = resolveRegistrar(moduleExports)
 
   if (!registrar) {

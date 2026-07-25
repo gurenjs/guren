@@ -43,6 +43,7 @@ export {
   type EntityContextOptions,
 } from './entity-context'
 export { routeDefinitionToContextRoute, loadContextRoutes, type ContextRoute } from './context-route'
+export { createFreshContextApi } from './fresh-context'
 export { scanDocs, parseDocFrontmatter, extractDocsTags, type DocRef } from './docs-index'
 export { runDocsCheck } from './docs-check'
 export { runCheck, renderCheckReport } from './check'

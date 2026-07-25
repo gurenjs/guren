@@ -56,6 +56,12 @@ export interface GurenCliApi {
   generatePageTypes(opts: { cwd: string }): Promise<unknown>
   generateDataTypes(opts: { cwd: string }): Promise<unknown>
   generateChannelTypes(opts: { cwd: string }): Promise<unknown>
+  /**
+   * Route-dependent context generation that re-runs the CLI in a fresh
+   * process. Optional because `@guren/cli` is resolved from the app at
+   * runtime and may predate it — see `McpServiceProvider`.
+   */
+  createFreshContextApi?: () => Pick<GurenCliApi, 'generateContext' | 'generateEntityContext'>
 }
 
 export interface CreateMcpServerOptions {
