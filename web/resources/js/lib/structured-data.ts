@@ -1,4 +1,4 @@
-import { GITHUB_URL, SITE_DESCRIPTION, SITE_NAME, SITE_URL, absoluteUrl } from '../../../config/site.js'
+import { GITHUB_URL, SITE_DESCRIPTION, SITE_NAME, SITE_URL, X_URL, absoluteUrl } from '../../../config/site.js'
 
 const WEBSITE_JSON_LD: Record<string, unknown> = {
   '@context': 'https://schema.org',
@@ -17,7 +17,7 @@ const SOFTWARE_JSON_LD: Record<string, unknown> = {
   offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
   description: SITE_DESCRIPTION.en,
   url: SITE_URL,
-  sameAs: [GITHUB_URL],
+  sameAs: [GITHUB_URL, X_URL],
   programmingLanguage: 'TypeScript',
 }
 
