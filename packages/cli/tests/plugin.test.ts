@@ -90,8 +90,8 @@ export default app
     expect(textsOf(messages, 'hint')).toContain('Run: bun add @guren/plugin-vercel')
 
     const app = await readFile('src/app.ts', 'utf8')
-    expect(app).toContain("import { GurenPluginVercelProvider } from '@guren/plugin-vercel'")
-    expect(app).toContain('providers: [GurenPluginVercelProvider]')
+    expect(app).toContain("import { vercelPlugin } from '@guren/plugin-vercel'")
+    expect(app).toContain('providers: [vercelPlugin()]')
 
     const packageJson = JSON.parse(await readFile('package.json', 'utf8')) as { scripts?: Record<string, string> }
     expect(packageJson.scripts?.['vercel:build']).toBe('bun scripts/vercel-build.ts')
@@ -109,7 +109,7 @@ export default app
     expect(textsOf(second, 'checked')).toContain('src/app.ts (already registered)')
 
     const app = await readFile('src/app.ts', 'utf8')
-    const occurrences = app.match(/GurenPluginVercelProvider/g)?.length ?? 0
+    const occurrences = app.match(/vercelPlugin/g)?.length ?? 0
     expect(occurrences).toBe(2)
 
     const gitignore = await readFile('.gitignore', 'utf8')
@@ -217,6 +217,6 @@ export default app
     await expect(installPlugin({ packageName: '@guren/plugin-vercel' })).rejects.toThrow('SSR web apps only')
 
     const app = await readFile('src/app.ts', 'utf8')
-    expect(app).not.toContain('GurenPluginVercelProvider')
+    expect(app).not.toContain('vercelPlugin')
   })
 })

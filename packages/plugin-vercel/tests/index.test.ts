@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it } from 'bun:test'
-import { buildVercelOutput, createVercelHandler, GurenPluginVercelProvider } from '../src/index'
+import { buildVercelOutput, createVercelHandler, vercelPlugin } from '../src/index'
 
 const tempDirs: string[] = []
 
@@ -31,8 +31,13 @@ describe('@guren/plugin-vercel', () => {
     expect(await response.text()).toBe('ok:/hello')
   })
 
-  it('exports the official provider class', () => {
-    expect(typeof GurenPluginVercelProvider).toBe('function')
+  it('returns an independent provider class per factory call', () => {
+    const first = vercelPlugin()
+    const second = vercelPlugin({})
+
+    expect(typeof first).toBe('function')
+    expect(first).not.toBe(second)
+    expect(first.name).toBe('vercelPluginProvider')
   })
 
   it('matches the configured handler filename to the bundled entrypoint', () => {
