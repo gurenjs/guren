@@ -2,6 +2,7 @@ import { Marked } from 'marked'
 import { markedHighlight } from 'marked-highlight'
 import { createHighlighterCore, type HighlighterCore } from 'shiki/core'
 import { createJavaScriptRegexEngine } from 'shiki/engine/javascript'
+import sanitizeHtml from 'sanitize-html'
 
 // Same theme pair as the docs pipeline (MarkdownRenderer.ts) so blog posts
 // inherit the docs light/dark code styling.
@@ -54,26 +55,50 @@ const marked = new Marked()
 marked.setOptions({ gfm: true, breaks: false, async: true })
 marked.use(markedHighlight({ async: true, highlight }))
 
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-}
-
-// Raw HTML in post markdown is escaped rather than passed through: the
-// rendered HTML is stored and later injected with dangerouslySetInnerHTML,
-// so a compromised or mis-scoped admin account would otherwise mean stored
-// XSS for every reader.
-marked.use({
-  renderer: {
-    html: ({ text }: { text: string }) => escapeHtml(text),
+/**
+ * Allowlist applied to the rendered HTML before it is stored. The output is
+ * later injected with dangerouslySetInnerHTML, so escaping raw HTML in the
+ * markdown source is not enough on its own — markdown syntax itself can carry
+ * `javascript:`/`data:` URLs into href and src. sanitize-html enforces both
+ * an element/attribute allowlist and a URL scheme allowlist.
+ */
+const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
+  allowedTags: [
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'p', 'br', 'hr', 'blockquote',
+    'ul', 'ol', 'li',
+    'strong', 'em', 'del', 'code', 'pre', 'span',
+    'a', 'img',
+    'table', 'thead', 'tbody', 'tr', 'th', 'td',
+  ],
+  allowedAttributes: {
+    a: ['href', 'title'],
+    img: ['src', 'alt', 'title'],
+    // shiki emits inline colors on the wrapper and every token.
+    pre: ['class', 'style', 'tabindex'],
+    code: ['class', 'style'],
+    span: ['class', 'style'],
+    th: ['align'],
+    td: ['align'],
   },
-})
+  allowedSchemes: ['http', 'https', 'mailto'],
+  allowedSchemesAppliedToAttributes: ['href', 'src'],
+  // Only the color declarations shiki produces; anything else (position,
+  // background-image, …) is dropped.
+  allowedStyles: {
+    '*': {
+      color: [/^#[0-9a-fA-F]{3,8}$/],
+      'background-color': [/^#[0-9a-fA-F]{3,8}$/],
+      'font-style': [/^italic$|^normal$/],
+      'font-weight': [/^bold$|^normal$|^\d{3}$/],
+      'text-decoration': [/^underline$|^line-through$|^none$/],
+    },
+  },
+  disallowedTagsMode: 'escape',
+}
 
 /** Render post markdown to HTML once, at save time — the read path serves stored HTML. */
 export async function renderPostMarkdown(markdown: string): Promise<string> {
   const rendered = await marked.parse(markdown, { async: true })
-  return typeof rendered === 'string' ? rendered : ''
+  return typeof rendered === 'string' ? sanitizeHtml(rendered, SANITIZE_OPTIONS) : ''
 }

@@ -5,6 +5,18 @@
   "compatibility_flags": [
     "nodejs_compat"
   ],
+  "alias": {
+    "bun:sqlite": "./.cloudflare/stub-bun-sqlite.js",
+    "vite": "./.cloudflare/stub-vite.js",
+    "@guren/cli": "./.cloudflare/stub-guren-cli.js",
+    "@modelcontextprotocol/sdk/server/mcp.js": "./.cloudflare/stub-mcp-server.js",
+    "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js": "./.cloudflare/stub-mcp-transport.js",
+    "shiki": "./stubs/shiki.js"
+  },
+  "define": {
+    "process.env.NODE_ENV": "\"production\"",
+    "import.meta.url": "\"file:///worker.js\""
+  },
   "assets": {
     "directory": ".cloudflare/assets"
   },
@@ -18,16 +30,5 @@
   ],
   "vars": {
     "NODE_ENV": "production"
-  },
-  "alias": {
-    "bun:sqlite": "./.cloudflare/stub-bun-sqlite.js",
-    "vite": "./.cloudflare/stub-vite.js",
-    "shiki": "./stubs/shiki.js",
-    "@guren/cli": "./.cloudflare/stub-guren-cli.js",
-    "@modelcontextprotocol/sdk": "./.cloudflare/stub-mcp-sdk.js"
-  },
-  "define": {
-    "process.env.NODE_ENV": "\"production\"",
-    "import.meta.url": "\"file:///worker.js\""
   }
 }
