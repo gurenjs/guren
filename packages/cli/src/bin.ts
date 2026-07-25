@@ -118,8 +118,29 @@ const makeCommandSpecs: MakeCommandSpec[] = [
   { name: 'make:seeder', description: 'Generate a new database seeder.', argDescription: 'Seeder class name', makeFn: makeSeeder, resourceName: 'Seeder' },
   { name: 'make:notification', description: 'Generate a new notification class.', argDescription: 'Notification class name', makeFn: makeNotification, resourceName: 'Notification' },
   { name: 'make:provider', description: 'Generate a new service provider.', argDescription: 'Provider class name', makeFn: makeProvider, resourceName: 'Provider' },
-  { name: 'make:adr', description: 'Generate a numbered ADR under docs/adr with linkable frontmatter.', argDescription: 'Decision title (quoted prose)', makeFn: makeAdr, resourceName: 'ADR' },
 ]
+
+// make:adr takes an extra --entity flag beyond the shared writer options,
+// so it gets its own command instead of a makeCommandSpecs entry.
+const makeAdrCommand = defineCommand({
+  meta: {
+    name: 'make:adr',
+    description: 'Generate a numbered ADR under docs/adr with linkable frontmatter.',
+  },
+  args: {
+    name: { type: 'positional', required: true, description: 'Decision title (quoted prose)' },
+    entity: {
+      type: 'string',
+      description: 'Model class name to prefill entities:/related: with (case-insensitive).',
+    },
+    force: { type: 'boolean', description: 'Overwrite existing files', alias: 'f' },
+    module: MODULE_ARG,
+  },
+  async run({ args }) {
+    const file = await makeAdr(args.name, { ...toWriterOptions(args), entity: args.entity })
+    consola.success(`ADR created at ${file}`)
+  },
+})
 
 const makeCommands = Object.fromEntries(
   makeCommandSpecs.map((spec) => [
@@ -2346,6 +2367,7 @@ const deployCommand = defineCommand({
 
 const builtinSubCommands = {
   ...makeCommands,
+  'make:adr': makeAdrCommand,
   'make:auth': makeAuthCommand,
   'make:module': makeModuleCommand,
   'make:channel': makeChannelCommand,

@@ -177,4 +177,46 @@ describe('makeAdr', () => {
       await workspace.cleanup()
     }
   })
+
+  it('prefills entities and related from a resolved --entity', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-adr-entity-')
+    try {
+      await mkdir(join(workspace.dir, 'app/Models'), { recursive: true })
+      await mkdir(join(workspace.dir, 'app/Http/Controllers'), { recursive: true })
+      await mkdir(join(workspace.dir, 'app/Http/Resources'), { recursive: true })
+      await writeFile(join(workspace.dir, 'app/Models/Post.ts'), 'export class Post {}\n', 'utf8')
+      await writeFile(
+        join(workspace.dir, 'app/Http/Controllers/PostController.ts'),
+        'export class PostController {}\n',
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'app/Http/Resources/PostResource.ts'),
+        'export class PostResource {}\n',
+        'utf8',
+      )
+
+      // Case-insensitive input canonicalizes to the parsed class name
+      const result = await makeAdr('Posts are public', { entity: 'post' })
+      const content = readFileSync(result, 'utf8')
+
+      expect(content).toContain('entities: [Post]')
+      expect(content).toContain('related:\n  - app/Http/Controllers/PostController.ts\n  - app/Http/Resources/PostResource.ts')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('prefills an unknown --entity as given, with empty related', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-adr-ghost-')
+    try {
+      const result = await makeAdr('Future decision', { entity: 'Ghost' })
+      const content = readFileSync(result, 'utf8')
+
+      expect(content).toContain('entities: [Ghost]')
+      expect(content).toContain('related: []')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
 })

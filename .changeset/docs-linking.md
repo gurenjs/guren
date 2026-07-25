@@ -21,3 +21,8 @@ feat: doc–code linking (RFC 0004 Part 2)
   `--arch --docs` together runs the union of both suites.
 - `make:adr "Title"` scaffolds numbered ADRs under `docs/adr/` with
   prefilled, linkable frontmatter (`--module` targets a module's docs).
+  `--entity <Model>` prefills `entities:` with the canonical class name
+  and `related:` with the entity's controller/resource/policy files; an
+  entity that doesn't exist yet is prefilled as given, so ADR-first
+  flows get a failing `check --docs` as the "implementation missing"
+  signal.
