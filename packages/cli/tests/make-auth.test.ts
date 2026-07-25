@@ -372,8 +372,10 @@ export const posts = pgTable('posts', {
       expect(controller).toContain("this.make<OAuthManager>('oauth')")
       expect(controller).toContain('this.oauth().authorize(provider')
       expect(controller).toContain('this.oauth().handleCallback(provider')
-      expect(controller).toContain('randomUUID()')
-      expect(controller).toContain('already exists. Sign in with your password instead.')
+      // OAuth accounts are passwordless — no synthetic password is hashed.
+      expect(controller).not.toContain('randomUUID')
+      expect(controller).not.toContain('password:')
+      expect(controller).toContain('already exists. Sign in with the method you originally used.')
 
       const authRoutes = await readFile(join(workspace.dir, 'routes/auth.ts'), 'utf8')
       expect(authRoutes).toContain("import OAuthController from '../app/Http/Controllers/Auth/OAuthController.js'")
@@ -392,6 +394,68 @@ export const posts = pgTable('posts', {
       const schema = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
       expect(schema).toContain("githubId: text('github_id').unique()")
       expect(schema).toContain("googleId: text('google_id').unique()")
+      // Passwordless OAuth accounts require a nullable hash column.
+      expect(schema).toContain("passwordHash: text('password_hash'),")
+      expect(schema).not.toContain("passwordHash: text('password_hash').notNull()")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('relaxes an existing notNull passwordHash when adding --oauth', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-oauth-relax-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'db/schema.ts'),
+        `import { pgTable, serial, text, timestamp } from 'drizzle-orm/pg-core'
+
+export const users = pgTable('users', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  email: text('email').notNull().unique(),
+  passwordHash: text('password_hash').notNull(),
+  rememberToken: text('remember_token'),
+  createdAt: timestamp('created_at', { withTimezone: false }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: false }).defaultNow().notNull(),
+})
+`,
+        'utf8',
+      )
+
+      await makeAuth({ force: true, oauth: 'github' })
+
+      const schema = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
+      expect(schema).toContain("passwordHash: text('password_hash'),")
+      expect(schema).not.toContain("passwordHash: text('password_hash').notNull()")
+      expect(schema).toContain("githubId: text('github_id').unique()")
+      // Other columns keep their constraints.
+      expect(schema).toContain("email: text('email').notNull().unique()")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('keeps passwordHash notNull without --oauth', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-notnull-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'db/schema.ts'),
+        `import { pgTable, serial, text } from 'drizzle-orm/pg-core'
+
+export const posts = pgTable('posts', {
+  id: serial('id').primaryKey(),
+  title: text('title').notNull(),
+})
+`,
+        'utf8',
+      )
+
+      await makeAuth({ force: true })
+
+      const schema = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
+      expect(schema).toContain("passwordHash: text('password_hash').notNull()")
     } finally {
       await workspace.cleanup()
     }

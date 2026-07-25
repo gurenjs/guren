@@ -76,3 +76,21 @@ describe('AuthenticatableModel', () => {
     expect('plainPassword' in persisted).toBe(false)
   })
 })
+
+describe('passwordless accounts (OAuth)', () => {
+  it('persists no password hash when no password is supplied', async () => {
+    type UserRecord = { id?: number; email: string; passwordHash?: string | null }
+
+    class User extends AuthenticatableModel<UserRecord> {
+      static override table = 'users'
+    }
+
+    const captured: PlainObject[] = []
+    User.useAdapter(createAdapter(captured))
+
+    await User.create({ email: 'oauth@guren.dev' })
+
+    expect(captured[0]).not.toHaveProperty('passwordHash')
+    expect(captured[0]).not.toHaveProperty('password')
+  })
+})

@@ -284,7 +284,6 @@ function buildOAuthControllerTemplate(providers: string[], includeVerify: boolea
   const emailVerifiedAtField = includeVerify ? '\n        emailVerifiedAt: new Date(),' : ''
 
   return `import { Controller, ValidationException, type OAuthManager } from '@guren/core'
-import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import { User, type UserRecord } from '../../../Models/User.js'
 
@@ -342,17 +341,18 @@ export default class OAuthController extends Controller {
       const [existingByEmail] = await User.where({ email })
       if (existingByEmail) {
         throw ValidationException.withMessages({
-          message: 'An account with this email already exists. Sign in with your password instead.',
+          message: 'An account with this email already exists. Sign in with the method you originally used.',
         })
       }
 
-      // No password was supplied by the user — generate a random one so the
-      // account still satisfies AuthenticatableModel's hashing pipeline.
-      // It's never surfaced to the user and can't realistically be guessed.
+      // OAuth accounts are passwordless: the model's hashing pipeline is
+      // skipped when no password is supplied, and password login safely
+      // rejects accounts without a hash. Hashing a synthetic password here
+      // would also blow the request CPU budget on metered runtimes
+      // (Cloudflare Workers free tier).
       user = await User.create({
         name: profile.name ?? email,
-        email,
-        password: randomUUID(),${emailVerifiedAtField}
+        email,${emailVerifiedAtField}
         ...identityWhere(provider, profile.id),
       })
     }
@@ -1635,6 +1635,15 @@ async function updateSchema(includeVerify: boolean, oauthProviders: string[] = [
     // Rather than risk mangling a table shape we can't fully parse, insert
     // just the new columns next to the rememberToken column we know we
     // generated, preserving its indentation.
+    const beforeRelax = content
+    if (oauthProviders.length > 0) {
+      content = relaxPasswordHashForOAuth(content)
+    }
+    const relaxationChanged = content !== beforeRelax
+    if (relaxationChanged) {
+      consola.info('Made passwordHash nullable in db/schema.ts (OAuth accounts are passwordless).')
+    }
+
     const missingColumns: Array<{ name: string; line: string }> = []
     if (includeVerify && !content.includes('emailVerifiedAt')) {
       missingColumns.push({ name: 'emailVerifiedAt', line: emailVerifiedAtField[dialect] })
@@ -1647,6 +1656,9 @@ async function updateSchema(includeVerify: boolean, oauthProviders: string[] = [
     }
 
     if (missingColumns.length === 0) {
+      if (relaxationChanged) {
+        await writeFile(schemaPath, content, 'utf8')
+      }
       return
     }
 
@@ -1656,6 +1668,9 @@ async function updateSchema(includeVerify: boolean, oauthProviders: string[] = [
       consola.warn(
         `Could not locate the rememberToken column in db/schema.ts — add ${missingColumns.map((c) => c.name).join(', ')} to your users table manually.`,
       )
+      if (relaxationChanged) {
+        await writeFile(schemaPath, content, 'utf8')
+      }
       return
     }
 
@@ -1690,8 +1705,22 @@ async function updateSchema(includeVerify: boolean, oauthProviders: string[] = [
     content = `${content.trimEnd()}\n\n${usersTableBlock}`
   }
 
+  if (oauthProviders.length > 0) {
+    content = relaxPasswordHashForOAuth(content)
+  }
+
   await writeFile(schemaPath, content, 'utf8')
   consola.info(`Updated db/schema.ts with authentication columns (${dialect}).`)
+}
+
+/**
+ * OAuth-created accounts are passwordless, so the users table must accept a
+ * NULL password hash. Applies to both freshly written and pre-existing users
+ * tables (adding --oauth to a password-auth app would otherwise hit a
+ * NOT NULL violation on the first OAuth signup).
+ */
+function relaxPasswordHashForOAuth(content: string): string {
+  return content.replace(/(passwordHash:\s*[^,\n]+?)\.notNull\(\)/, '$1')
 }
 
 async function generateUsersMigration(): Promise<boolean> {
