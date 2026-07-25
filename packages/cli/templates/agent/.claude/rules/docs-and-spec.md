@@ -51,14 +51,16 @@ last_reviewed: 2026-07-25
   under `docs/adr/` with prefilled frontmatter. `--entity <Model>` fills
   `entities:`/`related:` automatically.
 
-`guren check` validates these links: a renamed `related` path, an unknown
-entity, or a broken `@docs` tag fails. **After implementing a decision,
-add the entity to its ADR's `entities:` list.** After renaming or moving
-files a doc references, update the doc's frontmatter in the same change.
+`guren check` reports broken links — a renamed `related` path, an
+unknown entity, a dangling `@docs` tag — as failures in its output;
+`guren check --docs` is the CI gate (exits non-zero on them). **After
+implementing a decision, add the entity to its ADR's `entities:`
+list.** After renaming or moving files a doc references, update the
+doc's frontmatter in the same change.
 
 ## Generated spec views (docs/spec/)
 
-If `docs/spec/` exists, it holds four generated views (ER diagram, domain
+If `docs/spec/` exists, it holds generated views (ER diagram, domain
 model, screens, module map). They are derived from code and drift-gated:
 
 ```bash

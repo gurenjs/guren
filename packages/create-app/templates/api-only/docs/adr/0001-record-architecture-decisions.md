@@ -34,13 +34,14 @@ Each ADR declares what it governs in its frontmatter:
 - `status:` — `draft` → `accepted`; mark `superseded` when replaced
   (and write the replacement).
 
-`bunx guren check` verifies these links: renaming a file a doc points
-at, or removing a model a doc names, fails the check until the doc is
-updated. Keep frontmatter current in the same change that moves the
-code.
+Once declared, the links are verified: `bunx guren check` reports a
+renamed file a doc points at, or a removed model a doc names, as a
+failure, and `bunx guren check --docs` gates CI on it (non-zero exit).
+Keep frontmatter current in the same change that moves the code.
 
 ## Consequences
 
 Decisions stay discoverable from the code they govern, at the cost of
-writing them down and keeping links fresh — which the checker enforces,
-so the links can be trusted.
+writing them down and keeping links fresh — declared links are checked,
+so they can be trusted. (An ADR with no links, like this one, is valid;
+it simply isn't surfaced by `guren context`.)

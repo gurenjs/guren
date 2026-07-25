@@ -12,7 +12,9 @@ feat: teach scaffolds and the agent harness the docs/spec conventions
   to docs, schema, models, controllers, routes, and pages): start
   entity work with `guren context <Entity>`, keep doc frontmatter
   current when moving files, regenerate `docs/spec/` views after
-  structural changes. The harness `CLAUDE.md` and MCP tool table now
-  cover `guren context <Entity>`, `spec:generate`, `make:adr`, and
-  `guren_entity_context`. Existing apps pick this up via
-  `bunx guren agent:sync`.
+  structural changes. Existing apps receive the rule via
+  `bunx guren agent:sync`. The harness `CLAUDE.md` (start-here block
+  and MCP tool table, now covering `guren context <Entity>`,
+  `spec:generate`, `make:adr`, and `guren_entity_context`) applies to
+  new `agent:init` installs — `CLAUDE.md` is user-owned and never
+  overwritten by sync.
