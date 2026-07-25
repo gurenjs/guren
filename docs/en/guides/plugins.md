@@ -248,7 +248,7 @@ bunx guren plugin @guren/plugin-vercel
 
 The `plugin` command installs the package with `bun add` when missing (pass `--no-install` to skip), verifies the plugin's declared Guren compatibility (`--ignore-compatibility` to register anyway), adds the provider import, registers it in `createApp({ providers })`, and applies any `env` and `publishes` entries from the plugin's `gurenPlugin` manifest. `--force` overwrites already-published files.
 
-> **Note:** Automatic registration currently supports class-based provider exports only. Plugins built with `definePlugin()` export a factory that must be called with its configuration, so register them manually in `createApp({ providers })` as shown below.
+> **Note:** Automatic registration covers class-based provider exports and the official zero-config factory plugins (`@guren/plugin-vercel`, `@guren/plugin-cloudflare`), which are registered as `providers: [vercelPlugin()]`-style calls. Third-party plugins built with `definePlugin()` export a factory that must be called with its configuration, so register them manually in `createApp({ providers })` as shown below.
 
 ## Usage in a Guren Application
 

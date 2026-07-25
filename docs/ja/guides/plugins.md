@@ -248,7 +248,7 @@ bunx guren plugin @guren/plugin-vercel
 
 `plugin`コマンドは、依存が未インストールなら`bun add`でインストールし（`--no-install`でスキップ可能）、プラグインが宣言するGuren互換性を検証した上で（`--ignore-compatibility`で無視して登録可能）、プロバイダーのimport追加と`createApp({ providers })`への登録、マニフェストの`env`・`publishes`エントリの適用を行います。`--force`は公開済みファイルの上書きに使います。
 
-> **注意:** 自動登録が現在対応しているのはクラスベースのプロバイダーエクスポートのみです。`definePlugin()`で作成したプラグインは設定を渡してファクトリを呼び出す必要があるため、下記のように`createApp({ providers })`へ手動で登録してください。
+> **注意:** 自動登録が対応しているのは、クラスベースのプロバイダーエクスポートと、公式のゼロ設定ファクトリプラグイン(`@guren/plugin-vercel`・`@guren/plugin-cloudflare`。`providers: [vercelPlugin()]`形式の呼び出しで登録されます)です。サードパーティの`definePlugin()`プラグインは設定を渡してファクトリを呼び出す必要があるため、下記のように`createApp({ providers })`へ手動で登録してください。
 
 ## Gurenアプリケーションでの使用方法
 

@@ -1,7 +1,7 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, extname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ServiceProvider } from '@guren/core'
+import { definePlugin, type ServiceProviderConstructor } from '@guren/core'
 
 type PathLike = string | URL
 
@@ -31,8 +31,27 @@ export interface BuildVercelOutputOptions {
   migrationsDir?: PathLike
 }
 
-export class GurenPluginVercelProvider extends ServiceProvider {
-  register(): void {}
+/**
+ * Configuration for the Vercel plugin. Currently empty — reserved so future
+ * fields never force another registration-shape change.
+ */
+export interface VercelPluginConfig {}
+
+const factory = definePlugin<VercelPluginConfig>({
+  name: 'vercel',
+  register() {},
+})
+
+/**
+ * Register the Vercel plugin.
+ *
+ * @example
+ * ```typescript
+ * createApp({ providers: [vercelPlugin()] })
+ * ```
+ */
+export function vercelPlugin(config: VercelPluginConfig = {}): ServiceProviderConstructor {
+  return factory(config)
 }
 
 export async function createVercelHandler(app: VercelAppLike): Promise<VercelHandler> {

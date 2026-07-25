@@ -11,7 +11,7 @@ import {
   readPluginManifest,
   type PublishResult,
 } from './plugin-manifest'
-import { assertSupportedOfficialVercelPlugin, installOfficialVercelPlugin } from './plugin-vercel'
+import { assertSupportedOfficialVercelPlugin, installOfficialVercelPlugin, VERCEL_PLUGIN_PACKAGE } from './plugin-vercel'
 
 export interface InstallPluginOptions extends WriterOptions {
   packageName: string
@@ -36,6 +36,20 @@ export interface PluginInstallMessage {
 
 function toMessages(kind: PluginInstallMessageKind, texts: string[]): PluginInstallMessage[] {
   return texts.map((text) => ({ kind, text }))
+}
+
+/**
+ * Official plugins whose primary export is a zero-config `definePlugin()`
+ * factory rather than a provider class, mapped to the factory's export name.
+ *
+ * This table cannot become a manifest field: the documented flow runs
+ * `guren plugin <pkg>` before `bun add <pkg>`, so no manifest is readable at
+ * registration time. An installed manifest that declares `provider` (a stale
+ * class-shaped release) always wins over this table.
+ */
+const OFFICIAL_FACTORY_PLUGINS: Record<string, string> = {
+  [VERCEL_PLUGIN_PACKAGE]: 'vercelPlugin',
+  '@guren/plugin-cloudflare': 'cloudflarePlugin',
 }
 
 function providerIdentifierForPackage(packageName: string): string {
@@ -75,7 +89,7 @@ export async function installPlugin(options: InstallPluginOptions): Promise<Plug
     throw new Error('Plugin package name is required.')
   }
 
-  if (packageName === '@guren/plugin-vercel') {
+  if (packageName === VERCEL_PLUGIN_PACKAGE) {
     await assertSupportedOfficialVercelPlugin()
   }
 
@@ -103,7 +117,12 @@ export async function installPlugin(options: InstallPluginOptions): Promise<Plug
     }
   }
 
-  if (manifest && !manifest.provider) {
+  // An installed manifest that names a provider class describes the actual
+  // installed version and takes precedence over the official-factory table
+  // (which describes the latest release, for the register-before-install flow).
+  const factoryName = manifest?.provider ? undefined : OFFICIAL_FACTORY_PLUGINS[packageName]
+
+  if (manifest && !manifest.provider && !factoryName) {
     // A manifest exists but intentionally omits `provider` -- e.g. a
     // command-only plugin, or a definePlugin() factory that must be called
     // with configuration. Fabricating a name here would write an import
@@ -113,12 +132,24 @@ export async function installPlugin(options: InstallPluginOptions): Promise<Plug
       text: `${packageName} does not declare a gurenPlugin.provider; register its export manually in createApp({ providers }).`,
     })
   } else {
-    const providerName = manifest?.provider ?? providerIdentifierForPackage(packageName)
+    // Official plugins expose a zero-config definePlugin() factory; the
+    // generic manifest path can only register named provider classes, so
+    // their factory-call expression is known here instead.
+    const providerName = factoryName
+      ?? manifest?.provider
+      ?? providerIdentifierForPackage(packageName)
+    const providerExpression = factoryName ? `${factoryName}()` : providerName
     const providerImport = `import { ${providerName} } from '${packageName}'`
 
     const appPath = 'src/app.ts'
     const imported = await addImport(appPath, providerImport)
-    const registered = await addProvider(appPath, providerName)
+    // A user may already have a configured call (e.g. `vercelPlugin({ ... })`)
+    // registered; any entry invoking the factory counts as registered.
+    const registered = await addProvider(
+      appPath,
+      providerExpression,
+      factoryName ? (entries) => entries.some((entry) => entry.startsWith(`${factoryName}(`)) : undefined,
+    )
 
     if (imported.reason === 'File not found' || registered.reason === 'File not found') {
       throw new Error('src/app.ts was not found. Run this command inside a Guren app.')
@@ -135,7 +166,7 @@ export async function installPlugin(options: InstallPluginOptions): Promise<Plug
     }
   }
 
-  if (packageName === '@guren/plugin-vercel') {
+  if (packageName === VERCEL_PLUGIN_PACKAGE) {
     const pluginFiles = await installOfficialVercelPlugin(options)
     messages.push(...toMessages('updated', pluginFiles))
   }

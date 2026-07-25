@@ -2,7 +2,7 @@ import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import type { WriterOptions } from './utils'
 
-const VERCEL_PLUGIN_PACKAGE = '@guren/plugin-vercel'
+export const VERCEL_PLUGIN_PACKAGE = '@guren/plugin-vercel'
 
 export async function installOfficialVercelPlugin(options: WriterOptions = {}): Promise<string[]> {
   await assertSupportedSsrApp()

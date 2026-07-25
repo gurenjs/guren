@@ -90,8 +90,8 @@ export default app
     expect(textsOf(messages, 'hint')).toContain('Run: bun add @guren/plugin-vercel')
 
     const app = await readFile('src/app.ts', 'utf8')
-    expect(app).toContain("import { GurenPluginVercelProvider } from '@guren/plugin-vercel'")
-    expect(app).toContain('providers: [GurenPluginVercelProvider]')
+    expect(app).toContain("import { vercelPlugin } from '@guren/plugin-vercel'")
+    expect(app).toContain('providers: [vercelPlugin()]')
 
     const packageJson = JSON.parse(await readFile('package.json', 'utf8')) as { scripts?: Record<string, string> }
     expect(packageJson.scripts?.['vercel:build']).toBe('bun scripts/vercel-build.ts')
@@ -109,11 +109,63 @@ export default app
     expect(textsOf(second, 'checked')).toContain('src/app.ts (already registered)')
 
     const app = await readFile('src/app.ts', 'utf8')
-    const occurrences = app.match(/GurenPluginVercelProvider/g)?.length ?? 0
+    const occurrences = app.match(/vercelPlugin/g)?.length ?? 0
     expect(occurrences).toBe(2)
 
     const gitignore = await readFile('.gitignore', 'utf8')
     expect(gitignore.match(/\.vercel/g)?.length ?? 0).toBe(1)
+  })
+
+  it('honors a stale installed manifest that still declares a class provider', async () => {
+    await writeInstalledPackage('@guren/plugin-vercel', {
+      version: '0.1.2',
+      gurenPlugin: { provider: 'GurenPluginVercelProvider' },
+    })
+    await writeInstalledPackage('@guren/core', { version: '1.2.0' })
+
+    await installPlugin({ packageName: '@guren/plugin-vercel' })
+
+    const app = await readFile('src/app.ts', 'utf8')
+    expect(app).toContain("import { GurenPluginVercelProvider } from '@guren/plugin-vercel'")
+    expect(app).toContain('providers: [GurenPluginVercelProvider]')
+    expect(app).not.toContain('vercelPlugin')
+  })
+
+  it('registers the factory when the installed manifest omits provider', async () => {
+    await writeInstalledPackage('@guren/plugin-vercel', {
+      version: '0.2.0',
+      gurenPlugin: { compatibility: '>=1.0.0 <2.0.0' },
+    })
+    await writeInstalledPackage('@guren/core', { version: '1.2.0' })
+
+    await installPlugin({ packageName: '@guren/plugin-vercel' })
+
+    const app = await readFile('src/app.ts', 'utf8')
+    expect(app).toContain("import { vercelPlugin } from '@guren/plugin-vercel'")
+    expect(app).toContain('providers: [vercelPlugin()]')
+  })
+
+  it('treats an existing configured factory call as already registered', async () => {
+    await installPlugin({ packageName: '@guren/plugin-vercel' })
+    const original = await readFile('src/app.ts', 'utf8')
+    await writeFile('src/app.ts', original.replace('vercelPlugin()', 'vercelPlugin({ future: true })'))
+
+    const second = await installPlugin({ packageName: '@guren/plugin-vercel' })
+
+    expect(textsOf(second, 'checked')).toContain('src/app.ts (already registered)')
+    const app = await readFile('src/app.ts', 'utf8')
+    expect(app).toContain('vercelPlugin({ future: true })')
+    expect(app).not.toContain('vercelPlugin()')
+  })
+
+  it('auto-registers the official Cloudflare factory plugin', async () => {
+    const messages = await installPlugin({ packageName: '@guren/plugin-cloudflare' })
+
+    expect(textsOf(messages, 'updated')).toContain('src/app.ts')
+
+    const app = await readFile('src/app.ts', 'utf8')
+    expect(app).toContain("import { cloudflarePlugin } from '@guren/plugin-cloudflare'")
+    expect(app).toContain('providers: [cloudflarePlugin()]')
   })
 
   describe('gurenPlugin manifest', () => {
@@ -217,6 +269,6 @@ export default app
     await expect(installPlugin({ packageName: '@guren/plugin-vercel' })).rejects.toThrow('SSR web apps only')
 
     const app = await readFile('src/app.ts', 'utf8')
-    expect(app).not.toContain('GurenPluginVercelProvider')
+    expect(app).not.toContain('vercelPlugin')
   })
 })
