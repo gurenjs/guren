@@ -53,6 +53,16 @@ export class DatabaseOAuthStateStore implements OAuthStateStore {
   }
 
   async find(stateHash: string): Promise<OAuthStatePayload | null> {
+    const record = await this.fetchLive(stateHash)
+    return record ? mapRecordToPayload(record) : null
+  }
+
+  /**
+   * Fetch the row for `stateHash`, clearing it out and returning null if
+   * expired. Shared by `find` and `consume`, which otherwise diverge only
+   * in what they do with a live row.
+   */
+  private async fetchLive(stateHash: string): Promise<Record<string, unknown> | null> {
     const record = await this.model.where({ stateHash }).first()
     if (!record) {
       return null
@@ -66,12 +76,7 @@ export class DatabaseOAuthStateStore implements OAuthStateStore {
       return null
     }
 
-    return {
-      provider: String(record.provider),
-      redirectTo: record.redirectTo == null ? undefined : String(record.redirectTo),
-      // isExpired above guarantees this parses.
-      expiresAt: toDate(record.expiresAt) as Date,
-    }
+    return record
   }
 
   async delete(stateHash: string): Promise<void> {
@@ -104,13 +109,8 @@ export class DatabaseOAuthStateStore implements OAuthStateStore {
    * matched" signal.
    */
   async consume(stateHash: string): Promise<OAuthStatePayload | null> {
-    const record = await this.model.where({ stateHash }).first()
+    const record = await this.fetchLive(stateHash)
     if (!record) {
-      return null
-    }
-
-    if (isExpired(record.expiresAt)) {
-      await this.model.where({ stateHash, expiresAt: record.expiresAt }).delete()
       return null
     }
 
@@ -118,18 +118,11 @@ export class DatabaseOAuthStateStore implements OAuthStateStore {
     // DELETE actually removes the row may return the payload. RETURNING
     // drivers (postgres, sqlite, d1) yield the deleted row or undefined;
     // MySQL yields a result carrying affectedRows — both distinguish the
-    // winner from concurrent losers.
+    // winner from concurrent losers. The pre-delete read above is what
+    // supplies the payload on MySQL, which has no RETURNING to read it
+    // back from the delete itself.
     const result = await this.model.where({ stateHash, expiresAt: record.expiresAt }).delete()
-    if (!deleteRemovedRow(result)) {
-      return null
-    }
-
-    return {
-      provider: String(record.provider),
-      redirectTo: record.redirectTo == null ? undefined : String(record.redirectTo),
-      // isExpired above guarantees this parses.
-      expiresAt: toDate(record.expiresAt) as Date,
-    }
+    return deleteRemovedRow(result) ? mapRecordToPayload(record) : null
   }
 
   /**
@@ -139,6 +132,19 @@ export class DatabaseOAuthStateStore implements OAuthStateStore {
    */
   async deleteExpired(now: Date = new Date()): Promise<void> {
     await this.model.where('expiresAt', '<=', now).delete()
+  }
+}
+
+/**
+ * Build the public payload from a live (non-expired) row. Shared by `find`
+ * and `consume` so the column-to-payload mapping only lives in one place.
+ */
+function mapRecordToPayload(record: Record<string, unknown>): OAuthStatePayload {
+  return {
+    provider: String(record.provider),
+    redirectTo: record.redirectTo == null ? undefined : String(record.redirectTo),
+    // fetchLive's isExpired check guarantees this parses.
+    expiresAt: toDate(record.expiresAt) as Date,
   }
 }
 
