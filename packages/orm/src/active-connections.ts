@@ -8,18 +8,21 @@
  * per reload until the server refuses new ones.
  *
  * `globalThis` survives re-evaluation, so it is where the previous client's
- * teardown is parked. `Application.listen()` uses the same approach for the Bun
+ * teardown is parked — the same storage `Application.listen()` uses for the Bun
  * and Vite dev servers. Bun does not expose `import.meta.hot` to `bun --hot`
  * (checked on 1.3.14), so there is no reload hook to register with instead.
  *
- * The hard part is telling a re-evaluated factory apart from a second factory
- * created deliberately alongside the first — an app may well open one pool for
- * web requests and another for background jobs against the same database.
- * Closing a live handle would be a worse bug than the leak, so this only runs
- * under `--hot`, and only when the factory's own source location can be
- * determined to key it by. The one case that still collides is a loop opening
- * the same database from a single line more than once — a duplicate by
- * construction; a loop over per-tenant URLs is keyed apart by its target.
+ * Only the storage carries over from `Application.listen()`, though, not its
+ * simplicity: a process has exactly one Bun server, so `listen()` can replace
+ * whatever it finds unconditionally. Connections have no such guarantee — an
+ * app may well open one pool for web requests and another for background jobs
+ * against the same database — so a re-evaluated factory has to be told apart
+ * from a second factory created deliberately alongside the first. Closing a
+ * live handle would be a worse bug than the leak, so this only runs under
+ * `--hot`, and only when the factory's own source location can be determined to
+ * key it by. The one case that still collides is a loop opening the same
+ * database from a single line more than once — a duplicate by construction; a
+ * loop over per-tenant URLs is keyed apart by its target.
  */
 
 type Teardown = () => Promise<void> | void

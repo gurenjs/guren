@@ -28,17 +28,23 @@ function reevaluate(options: SqliteDatabaseOptions, times: number): SqliteDataba
   return evaluations
 }
 
-describe('createSqliteDatabase hot-reload teardown', () => {
-  let workDir: string
+let workDir: string
 
+beforeEach(() => {
+  workDir = mkdtempSync(join(tmpdir(), 'guren-sqlite-'))
+})
+
+afterEach(() => {
+  rmSync(workDir, { recursive: true, force: true })
+})
+
+describe('createSqliteDatabase hot-reload teardown', () => {
   beforeEach(() => {
-    workDir = mkdtempSync(join(tmpdir(), 'guren-sqlite-hot-'))
     process.execArgv.push('--hot')
   })
 
   afterEach(() => {
     process.execArgv.splice(process.execArgv.indexOf('--hot'), 1)
-    rmSync(workDir, { recursive: true, force: true })
   })
 
   test('should close the handle a previous evaluation left open', async () => {
@@ -116,16 +122,6 @@ describe('createSqliteDatabase hot-reload teardown', () => {
 })
 
 describe('createSqliteDatabase outside a hot-reloading runtime', () => {
-  let workDir: string
-
-  beforeEach(() => {
-    workDir = mkdtempSync(join(tmpdir(), 'guren-sqlite-cold-'))
-  })
-
-  afterEach(() => {
-    rmSync(workDir, { recursive: true, force: true })
-  })
-
   test('should never close another handle', async () => {
     // Same call site, same options — a reload would replace here, but without
     // `--hot` nothing may be torn down.
@@ -146,16 +142,6 @@ describe('createSqliteDatabase outside a hot-reloading runtime', () => {
 })
 
 describe('createSqliteDatabase closeDatabase', () => {
-  let workDir: string
-
-  beforeEach(() => {
-    workDir = mkdtempSync(join(tmpdir(), 'guren-sqlite-close-'))
-  })
-
-  afterEach(() => {
-    rmSync(workDir, { recursive: true, force: true })
-  })
-
   test('should close the underlying handle', async () => {
     const database = createSqliteDatabase({
       migrationsFolder: join(workDir, 'migrations'),

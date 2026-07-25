@@ -44,6 +44,20 @@ describe('describeCallSite', () => {
 
     expect(at(3)).not.toBe(at(9))
   })
+
+  test('should parse a stack this runtime actually produced', () => {
+    // The fixtures above are hand-written, so they would keep passing if the
+    // engine changed its stack format and every real key silently became
+    // undefined — leaking again, quietly. This asserts against the real thing.
+    const factory = () => describeCallSite(new Error().stack)
+    const callers: (string | undefined)[] = []
+    for (let i = 0; i < 2; i += 1) callers.push(factory())
+
+    expect(callers[0]).toContain('active-connections.test.ts')
+    // One call site repeated — what a hot reload reproduces — must stay stable.
+    expect(callers[0]).toBe(callers[1])
+    expect(factory()).not.toBe(callers[0])
+  })
 })
 
 describe('hotReloadKey', () => {
