@@ -1,6 +1,6 @@
 import { Model, type PlainObject } from '@guren/orm'
 import type { ApiToken, ApiTokenStore } from '@guren/server'
-import { toDate } from './store-utils'
+import { decodeJsonColumn, toDate } from './store-utils'
 
 /**
  * Options for DatabaseApiTokenStore.
@@ -102,8 +102,9 @@ export class DatabaseApiTokenStore implements ApiTokenStore {
       hashedToken: String(record.hashedToken),
       userId:
         typeof record.userId === 'bigint' ? record.userId.toString() : (record.userId as string | number),
-      abilities:
-        typeof abilities === 'string' ? (JSON.parse(abilities) as string[]) : (abilities as string[]),
+      // Corrupt text degrades to no abilities (deny-by-default) instead of
+      // throwing on every verification of the affected token.
+      abilities: decodeJsonColumn<string[]>(abilities, []),
       lastUsedAt: toDate(record.lastUsedAt),
       expiresAt: toDate(record.expiresAt),
       createdAt: toDate(record.createdAt) ?? new Date(0),

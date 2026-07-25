@@ -1,6 +1,6 @@
 import { Model, type PlainObject } from '@guren/orm'
 import type { SessionData, SessionStore } from '@guren/server'
-import { toDate } from './store-utils'
+import { decodeJsonColumn, isExpired } from './store-utils'
 
 /**
  * Options for DatabaseSessionStore.
@@ -36,6 +36,11 @@ export interface DatabaseSessionStoreOptions {
  * })
  * ```
  *
+ * Session values must be JSON-serializable: Dates come back as ISO strings,
+ * `undefined` properties are dropped, and `bigint` values fail to serialize —
+ * unlike `MemorySessionStore`, which keeps live references. Store primitives
+ * and plain objects/arrays in sessions.
+ *
  * @example
  * ```ts
  * import { DatabaseSessionStore } from '@guren/core'
@@ -61,9 +66,11 @@ export class DatabaseSessionStore implements SessionStore {
       return undefined
     }
 
-    const expiresAt = toDate(record.expiresAt)
-    if (expiresAt && expiresAt.getTime() <= Date.now()) {
-      await this.destroy(id)
+    if (isExpired(record.expiresAt)) {
+      // Delete only the observed row version (raw value equality binds
+      // portably across column modes), so a concurrent request that just
+      // refreshed this id cannot have its fresh session deleted.
+      await this.model.where({ id, expiresAt: record.expiresAt }).delete()
       return undefined
     }
 
@@ -84,9 +91,15 @@ export class DatabaseSessionStore implements SessionStore {
 
     try {
       await this.model.forceCreate({ id, ...payload })
-    } catch {
-      // Lost a concurrent-create race on the primary key — the row exists
-      // now, so converge on an update.
+    } catch (error) {
+      // Only a lost concurrent-create race leaves the row present; any other
+      // insert failure must propagate instead of silently "succeeding" via a
+      // zero-row update. (Dialect error shapes are not normalized by the
+      // adapter, so existence is the portable discriminator.)
+      const nowExists = await this.model.where({ id }).first()
+      if (!nowExists) {
+        throw error
+      }
       await this.model.forceUpdate({ id }, payload)
     }
   }
@@ -101,18 +114,10 @@ export class DatabaseSessionStore implements SessionStore {
    * scheduled job to keep the table small.
    */
   async deleteExpired(now: Date = new Date()): Promise<void> {
-    await this.model.where('expiresAt', '<', now).delete()
+    await this.model.where('expiresAt', '<=', now).delete()
   }
 
   private deserialize(record: PlainObject): SessionData {
-    const data = record.data
-    if (typeof data === 'string') {
-      try {
-        return JSON.parse(data) as SessionData
-      } catch {
-        return {}
-      }
-    }
-    return (data ?? {}) as SessionData
+    return decodeJsonColumn<SessionData>(record.data, {})
   }
 }

@@ -1,6 +1,6 @@
 import { Model } from '@guren/orm'
 import type { OAuthStatePayload, OAuthStateStore } from '@guren/server'
-import { toDate } from './store-utils'
+import { isExpired, toDate } from './store-utils'
 
 /**
  * Database-backed OAuth state store built on the Guren ORM.
@@ -26,10 +26,10 @@ import { toDate } from './store-utils'
  *
  * @example
  * ```ts
- * import { DatabaseOAuthStateStore } from '@guren/core'
+ * import { createOAuthManager, DatabaseOAuthStateStore } from '@guren/core'
  * import { oauthStates } from '@/db/schema'
  *
- * const oauth = new OAuthManager(config, {
+ * export const oauth = createOAuthManager({
  *   stateStore: new DatabaseOAuthStateStore(oauthStates),
  * })
  * ```
@@ -58,16 +58,19 @@ export class DatabaseOAuthStateStore implements OAuthStateStore {
       return null
     }
 
-    const expiresAt = toDate(record.expiresAt)
-    if (expiresAt && expiresAt.getTime() <= Date.now()) {
-      await this.delete(stateHash)
+    if (isExpired(record.expiresAt)) {
+      // Delete only the observed row version (raw value equality binds
+      // portably across column modes), so a concurrent re-issue of the same
+      // hash cannot be deleted out from under its request.
+      await this.model.where({ stateHash, expiresAt: record.expiresAt }).delete()
       return null
     }
 
     return {
       provider: String(record.provider),
       redirectTo: record.redirectTo == null ? undefined : String(record.redirectTo),
-      expiresAt: expiresAt ?? new Date(0),
+      // isExpired above guarantees this parses.
+      expiresAt: toDate(record.expiresAt) as Date,
     }
   }
 
@@ -81,6 +84,6 @@ export class DatabaseOAuthStateStore implements OAuthStateStore {
    * the table small.
    */
   async deleteExpired(now: Date = new Date()): Promise<void> {
-    await this.model.where('expiresAt', '<', now).delete()
+    await this.model.where('expiresAt', '<=', now).delete()
   }
 }

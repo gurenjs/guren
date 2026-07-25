@@ -199,9 +199,11 @@ Model/QueryBuilder API rather than any drizzle dialect type.
 // types. Each claimed dialect gets a compile-time + integration test.
 export const sessions = sqliteTable('sessions', {
   id: text('id').primaryKey(),
-  data: text('data').notNull(),          // JSON-serialized SessionData
-  expiresAt: integer('expires_at').notNull(),
+  data: text('data', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+  expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
 })
+// (plain text/integer columns work with `{ dataMode: 'text' }` and a
+// numeric expiry — the store's reads accept both representations)
 ```
 
 ```ts

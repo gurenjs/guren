@@ -109,6 +109,57 @@ describe('DatabaseSessionStore', () => {
     expect(typeof row.data).toBe('string')
   })
 
+  test('should treat a numeric-string expiry (pg bigint shape) correctly', async () => {
+    sqlite.exec('CREATE TABLE sessions_str (id text primary key, data text not null, expires_at text not null)')
+    const sessionsStr = sqliteTable('sessions_str', {
+      id: text('id').primaryKey(),
+      data: text('data').notNull(),
+      expiresAt: text('expires_at').notNull(),
+    })
+    const strStore = new DatabaseSessionStore(sessionsStr, { dataMode: 'text' })
+
+    sqlite.exec(
+      `INSERT INTO sessions_str (id, data, expires_at) VALUES ('live', '{"a":1}', '${Date.now() + 60_000}'), ('dead', '{}', '${Date.now() - 60_000}')`,
+    )
+
+    expect(await strStore.read('live')).toEqual({ a: 1 })
+    expect(await strStore.read('dead')).toBeUndefined()
+  })
+
+  test('should treat an unparseable expiry as expired (fail closed)', async () => {
+    sqlite.exec(
+      "INSERT INTO sessions (id, data, expires_at) VALUES ('garbled', '{}', 'not-a-date')",
+    )
+
+    expect(await store.read('garbled')).toBeUndefined()
+  })
+
+  test('should delete rows expiring exactly at the cleanup boundary', async () => {
+    const boundary = new Date()
+    await store.write('edge', {}, 0)
+
+    await store.deleteExpired(new Date(boundary.getTime() + 1))
+
+    const rows = sqlite.query('SELECT COUNT(*) as count FROM sessions').get() as { count: number }
+    expect(rows.count).toBe(0)
+  })
+
+  test('should rethrow create failures that are not concurrent-create races', async () => {
+    sqlite.exec(
+      "CREATE TABLE sessions_checked (id text primary key CHECK (id != 'forbidden'), data text not null, expires_at integer not null)",
+    )
+    const sessionsChecked = sqliteTable('sessions_checked', {
+      ...baseColumns,
+      data: text('data').notNull(),
+    })
+    const checkedStore = new DatabaseSessionStore(sessionsChecked, { dataMode: 'text' })
+
+    await expect(checkedStore.write('forbidden', {}, 60)).rejects.toThrow()
+
+    const rows = sqlite.query('SELECT COUNT(*) as count FROM sessions_checked').get() as { count: number }
+    expect(rows.count).toBe(0)
+  })
+
   test('should return empty session data for a corrupt text payload', async () => {
     const textStore = new DatabaseSessionStore(sessionsText, { dataMode: 'text' })
     sqlite.exec(
