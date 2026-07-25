@@ -1,5 +1,5 @@
 import { relative, resolve } from 'node:path'
-import { writeFileSafe, type WriterOptions } from './utils'
+import { writeGeneratedFile, type WriterOptions } from './utils'
 import { loadRouteDefinitions } from './load-routes'
 import {
   DECLARATION_MODULE_AUGMENTATION,
@@ -47,8 +47,8 @@ export async function generateRouteTypes(
 
   const relativeTarget = relative(process.cwd(), outputFile) || outputFile
   const relativeRuntimeTarget = relative(process.cwd(), runtimeOutputFile) || runtimeOutputFile
-  const outputPath = await writeFileSafe(relativeTarget, declaration, { force: options.force })
-  const runtimeOutputPath = await writeFileSafe(relativeRuntimeTarget, runtimeModule, { force: options.force })
+  const outputPath = await writeGeneratedFile(relativeTarget, declaration, { force: options.force })
+  const runtimeOutputPath = await writeGeneratedFile(relativeRuntimeTarget, runtimeModule, { force: options.force })
 
   return {
     outputPath,

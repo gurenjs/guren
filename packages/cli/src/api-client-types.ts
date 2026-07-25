@@ -6,7 +6,7 @@
  * separate frontend applications.
  */
 import { relative, resolve } from 'node:path'
-import { writeFileSafe, type WriterOptions } from './utils'
+import { writeGeneratedFile, type WriterOptions } from './utils'
 import { schemaToTypeString } from './schema-type-extractor'
 
 export interface RouteDefinitionLike {
@@ -44,7 +44,7 @@ export async function generateApiClientTypes(
   const module = buildApiClientContent(definitions)
 
   const relativeTarget = relative(process.cwd(), outputFile) || outputFile
-  const outputPath = await writeFileSafe(relativeTarget, module, { force: options.force })
+  const outputPath = await writeGeneratedFile(relativeTarget, module, { force: options.force })
 
   return { outputPath }
 }
