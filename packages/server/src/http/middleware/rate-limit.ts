@@ -1,4 +1,5 @@
 import type { MiddlewareHandler, Context } from 'hono'
+import { claimHotDisposable, isHotReloadRuntime, type HotDisposableClaim } from '../../hot-reload/hot-disposables'
 
 /**
  * Rate limit entry stored in the backing store.
@@ -35,11 +36,32 @@ export interface RateLimitStore {
  */
 abstract class BaseMemoryStore implements RateLimitStore {
   protected cleanupInterval?: ReturnType<typeof setInterval>
+  /**
+   * This store's claim on its hot-reload slot, if it holds one.
+   *
+   * Unlike the cache sweep, this interval is not `unref()`ed, so a leaked one
+   * both duplicates work and keeps the process alive on its own.
+   */
+  private readonly hotReloadClaim: HotDisposableClaim | undefined
 
   constructor(cleanupIntervalMs = 60000) {
-    if (cleanupIntervalMs > 0) {
-      this.cleanupInterval = setInterval(() => this.cleanup(), cleanupIntervalMs)
+    if (cleanupIntervalMs <= 0) {
+      return
     }
+
+    this.cleanupInterval = setInterval(() => this.cleanup(), cleanupIntervalMs)
+
+    // Resolves to whoever wrote `new MemoryRateLimitStore()`. The subclasses
+    // declare no constructor, so the engine puts a synthetic frame for the
+    // implicit one between here and that caller — `describeCallerFile()` steps
+    // over it. The class name keeps the two store flavours apart when one module
+    // builds both.
+    this.hotReloadClaim = claimHotDisposable(
+      'rate-limit-store',
+      isHotReloadRuntime() ? new Error().stack : undefined,
+      this.constructor.name,
+      () => this.destroy(),
+    )
   }
 
   abstract get(key: string): Promise<RateLimitEntry | null>
@@ -54,6 +76,10 @@ abstract class BaseMemoryStore implements RateLimitStore {
       clearInterval(this.cleanupInterval)
       this.cleanupInterval = undefined
     }
+
+    // Also reached as the registry's teardown for this store, in which case the
+    // slot already belongs to the replacement and this release is a no-op.
+    this.hotReloadClaim?.release()
   }
 }
 
