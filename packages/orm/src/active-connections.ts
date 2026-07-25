@@ -79,6 +79,28 @@ function isHotReloadRuntime(): boolean {
 }
 
 /**
+ * The path a single stack frame points at, without its line and column.
+ *
+ * The two shapes a frame comes in are matched separately rather than by one
+ * pattern loose enough to cover both. `at fn (/path/file.ts:1:2)` is tried
+ * first, because its parentheses bound the path; a pattern that also had to
+ * accept the bare `at /path/file.ts:1:2` could only bound it by whitespace, and
+ * would truncate `/Users/me/My Projects/app/config` to `Projects/app/config`.
+ * Nothing constrains what the path itself may contain — spaces and parentheses
+ * are both ordinary in a macOS directory name, and excluding either is how the
+ * truncation happened in the first place.
+ *
+ * Both shapes require a trailing `:line`, so frames that name no location at
+ * all — `at native`, `at <anonymous>` — are rejected instead of being read as a
+ * path. Both path groups are lazy for the same reason both are anchored: a
+ * greedy one would swallow the line number and leave the column to satisfy
+ * `:\d+`, returning `/path/file.ts:1`.
+ */
+function parseFrameLocation(frame: string | undefined): string | undefined {
+  return frame?.match(/\((.+?):\d+(?::\d+)?\)\s*$/)?.[1] ?? frame?.match(/^\s*at\s+(.+?):\d+(?::\d+)?\s*$/)?.[1]
+}
+
+/**
  * The file that called a `create*Database()` factory.
  *
  * `stack` must come from an `Error` constructed inside the factory itself, so
@@ -87,12 +109,7 @@ function isHotReloadRuntime(): boolean {
  * same line.
  */
 export function describeCallerFile(stack: string | undefined): string | undefined {
-  const caller = stack?.split('\n')[2]
-  // Matched as one `file:line:column` run, then trimmed: letting the group stop
-  // at the first `:` would leave the line number attached, since a greedy path
-  // match backtracks no further than it has to.
-  const location = caller?.match(/\(?([^()\s]+:\d+(?::\d+)?)\)?\s*$/)?.[1]
-  return location?.replace(/:\d+(?::\d+)?$/, '') || undefined
+  return parseFrameLocation(stack?.split('\n')[2])
 }
 
 /**
