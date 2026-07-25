@@ -656,8 +656,8 @@ async function extractTableColumns(schemaPath: string, tables: Map<string, strin
  * never appear in the root file's AST — without this, sensitive-column
  * checks on module models would silently see no columns at all and skip.
  *
- * Also consumed by entity-context.ts (RFC 0004 Part 1); slated to move
- * into the shared schema parser that RFC 0004 Part 3 introduces.
+ * Also consumed by entity-context.ts — keep behavior general, not
+ * audit-specific.
  */
 export async function parseSchemaTableColumns(cwd: string): Promise<Map<string, string[]> | null> {
   const tables = new Map<string, string[]>()
