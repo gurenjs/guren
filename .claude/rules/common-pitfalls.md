@@ -9,6 +9,12 @@ Lessons learned from code review cycles. Check these before submitting changes.
 - **When adding ORM exports**, they must be explicitly listed in `packages/core/src/index.ts` (allowlist, not `export *`).
 - **Don't reference non-existent symbols in docs.** Verify imports compile before documenting them.
 
+## Stale Build Artifacts
+
+- **A stale `dist/` can fail tests silently, not just loudly.** The documented symptom is a DTS build error (`could not find declaration file`), but a stale artifact can also load fine and merely *lack a field added since it was built* — which surfaces as a confusing `toEqual` mismatch in an unrelated package's unit test.
+- **`packages/cli` tests reach `@guren/server` through `dist/`, not `src/`.** `@guren/core` resolves to `packages/core/src/index.ts`, but its `export * from '@guren/server'` follows the workspace symlink to `packages/server`'s `exports`, which points at `dist/index.js`. So anything a CLI test loads via `@guren/core` (routers, route definitions) is the *built* server, however fresh the source is.
+- **`git stash` does not make a checkout clean.** `dist/` is untracked, so stashing leaves stale artifacts in place. When a test fails only on one machine, rebuild before bisecting: `bun run build:clean` (or `bun run build:<pkg>` for a targeted check).
+
 ## CI Environment
 
 - **Never use `bunx guren` in CI.** The `guren` package is not on npm. Use `bun packages/cli/src/bin.ts` directly.
