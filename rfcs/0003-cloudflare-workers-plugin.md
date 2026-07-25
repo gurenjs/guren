@@ -298,19 +298,35 @@ field (per the plugin contract):
 
 `guren cloudflare:build`:
 
-1. Runs codegen, then the standard Vite client + SSR builds. Codegen is
-   invoked through the installed CLI entry directly (not `bunx guren`) so a
-   clean checkout and CI both work — the Vite route-types plugin
-   intentionally skips generation when `process.env.CI` is set.
+1. ~~Runs codegen, then the standard Vite client + SSR builds, invoking
+   codegen through the installed CLI entry directly.~~
+   **Amended in implementation:** runs the app's own `build` script
+   (`bun run build`), which in every scaffold and in `web/` already chains
+   codegen → Vite client → Vite SSR — one canonical build path instead of
+   the plugin re-implementing it (and the CI codegen-skip concern moves to
+   the app script, where it is already handled). `--skip-app-build` skips
+   this step for pre-built apps; a missing `build` script is a hard error
+   with guidance.
 2. Emits `.cloudflare/worker.js`, a generated wrapper that statically
    imports the app instance (`src/app.ts`) and the built SSR entry —
    resolved from `.guren/ssr/.vite/manifest.json`, the same lookup
    `buildVercelOutput` performs, never a hardcoded filename — registers the
    SSR renderer via `setInertiaSsrRenderer()`, and exports the handler from
-   the single `createWorkersHandler(app)` call site (§1). The build fails
-   if the SSR manifest entry or its `render` export is missing. See below
-   for why this differs from Vercel's approach.
+   the single `createWorkersHandler(app)` call site (§1). ~~The build fails
+   if the SSR manifest entry or its `render` export is missing.~~
+   **Amended in implementation:** a missing SSR manifest (no SSR build at
+   all) produces a CSR-only worker with a warning — SSR is optional and
+   API-only apps have none. A *present but broken* SSR build still fails
+   hard: a manifest entry that escapes the SSR directory, points at a
+   missing file, or resolves to a module without a `render`/default export
+   aborts the build. See below for why this differs from Vercel's approach.
 3. Copies `public/` + Vite client output into `.cloudflare/assets/`.
+   **Added in implementation:** built client assets are additionally
+   mirrored under `.cloudflare/assets/public/assets/` — the Guren Vite
+   plugin derives base `/public/assets/` from its `public/assets` outDir,
+   so emitted chunk imports/preloads self-reference that prefix. Vercel
+   resolves it with a `/public/(.*) → /$1` rewrite; Workers Static Assets
+   has no rewrites, so both URL spaces must exist as real files.
 4. Scaffolds `wrangler.jsonc` on first run (never overwrites):
 
 ```jsonc

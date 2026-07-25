@@ -49,6 +49,23 @@ export interface InertiaSsrOptions {
   render?: InertiaSsrRenderer;
 }
 
+let defaultSsrRenderer: InertiaSsrRenderer | undefined;
+
+/**
+ * Register a process-wide default SSR renderer.
+ *
+ * Serverless adapters whose bundlers cannot resolve a runtime file path
+ * (Cloudflare Workers has no filesystem for `GUREN_INERTIA_SSR_ENTRY`'s
+ * dynamic import) register the statically imported renderer once at module
+ * scope. Per-call `ssr.render` still takes precedence; pass `undefined` to
+ * clear (test isolation).
+ */
+export function setInertiaSsrRenderer(
+  renderer: InertiaSsrRenderer | undefined
+): void {
+  defaultSsrRenderer = renderer;
+}
+
 const DEFAULT_TITLE = "Guren";
 // Dev-only fallback used when serving unbundled sources; production builds
 // bundle React into the Vite assets and must not pull esm.sh dev builds.
@@ -207,6 +224,7 @@ async function tryRenderSsr(
 
   const renderer =
     ssrOptions?.render ??
+    defaultSsrRenderer ??
     (await loadSsrRenderer(
       ssrOptions?.entry ?? process.env.GUREN_INERTIA_SSR_ENTRY
     ));

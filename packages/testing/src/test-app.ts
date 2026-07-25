@@ -34,6 +34,33 @@ export interface TestAppOptions {
 }
 
 /**
+ * Fake ExecutionContext exposed by `TestApp.fromWorkers()`, so tests can
+ * await promises the handler passed to `ctx.waitUntil()`.
+ */
+export interface WorkersTestContext {
+  /** Promises passed to ctx.waitUntil by the handler, for tests to await. */
+  readonly waitUntilPromises: Promise<unknown>[]
+}
+
+type WorkersExecutionContext = {
+  waitUntil(promise: Promise<unknown>): void
+  passThroughOnException?(): void
+}
+
+type WorkersHandler = {
+  fetch(
+    request: Request,
+    env: unknown,
+    ctx: WorkersExecutionContext,
+  ): Response | Promise<Response>
+}
+
+export interface WorkersTestAppOptions {
+  readonly env?: unknown
+  readonly baseUrl?: string
+}
+
+/**
  * A promise-like TestResponse that allows chaining assertions
  * directly on the result of HTTP method calls.
  *
@@ -333,6 +360,8 @@ export class TestApp {
   private fetchFn: (request: Request) => Promise<Response>
   private defaultHeaders: Record<string, string> = {}
   private authenticatedUser: unknown = null
+  /** Present when created via fromWorkers(); propagated across builder copies. */
+  workers?: WorkersTestContext
 
   private constructor(
     fetchFn: (request: Request) => Promise<Response>,
@@ -405,6 +434,38 @@ export class TestApp {
   }
 
   /**
+   * Create a TestApp from a Cloudflare Workers-style fetch handler
+   * (`{ fetch(request, env, ctx) }`).
+   *
+   * A single fake ExecutionContext is shared across all requests made
+   * through the returned TestApp; promises passed to `ctx.waitUntil()` are
+   * collected in `workers.waitUntilPromises` for tests to await.
+   */
+  static fromWorkers(
+    handler: WorkersHandler,
+    options: WorkersTestAppOptions = {},
+  ): TestApp & { workers: WorkersTestContext } {
+    process.env.GUREN_TESTING = '1'
+
+    const waitUntilPromises: Promise<unknown>[] = []
+    const ctx: WorkersExecutionContext = {
+      waitUntil(promise) {
+        waitUntilPromises.push(promise)
+      },
+      passThroughOnException() {},
+    }
+
+    const app = new TestApp(
+      (req) => Promise.resolve(handler.fetch(req, options.env ?? {}, ctx)),
+      options.baseUrl,
+    )
+
+    app.workers = { waitUntilPromises }
+    // The assertion only narrows the optional `workers` field to required.
+    return app as TestApp & { workers: WorkersTestContext }
+  }
+
+  /**
    * Return a new TestApp that injects the given user as the authenticated user.
    *
    * The user is injected by setting a custom header that auth middleware
@@ -414,6 +475,7 @@ export class TestApp {
     const copy = new TestApp(this.fetchFn, this.baseUrl)
     copy.defaultHeaders = { ...this.defaultHeaders }
     copy.authenticatedUser = user
+    copy.workers = this.workers
     return copy
   }
 
@@ -455,6 +517,7 @@ export class TestApp {
       'X-XSRF-TOKEN': decodeURIComponent(xsrfToken),
     }
     copy.authenticatedUser = this.authenticatedUser
+    copy.workers = this.workers
     return copy
   }
 
@@ -479,6 +542,7 @@ export class TestApp {
       ...headers,
     }
     copy.authenticatedUser = this.authenticatedUser
+    copy.workers = this.workers
     return copy
   }
 
