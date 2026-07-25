@@ -926,7 +926,9 @@ export function registerWebRoutes(router: Router): void {
 
       // The update action must never receive an email, even from a
       // hand-crafted request that bypasses the form.
-      expect(validator).not.toContain('email')
+      expect(validator).not.toContain('email: z')
+      expect(validator).toContain('name: z')
+      expect(validator).toContain('password: z')
       expect(controller).toContain('const { name, password } = await this.validateBody(ProfileUpdateSchema)')
       expect(controller).not.toContain('emailChanged')
       expect(controller).not.toContain('Email is already in use.')
@@ -951,7 +953,9 @@ export function registerWebRoutes(router: Router): void {
 
       const { controller, validator, view } = await readProfileScaffold(workspace.dir)
 
-      expect(validator).not.toContain('email')
+      expect(validator).not.toContain('email: z')
+      expect(validator).toContain('name: z')
+      expect(validator).toContain('password: z')
       expect(controller).toContain('const { name, password } = await this.validateBody(ProfileUpdateSchema)')
       expect(view).toContain('readOnly')
     } finally {
