@@ -119,6 +119,10 @@ export const DOCTOR_RECOMMENDED_COMMANDS = [
 
 export const CANONICAL_APP_SCRIPTS = {
   dev: 'bun run codegen && bun run dev:server',
+  // `dev` delegates here, so the pair has to be added together — adding `dev`
+  // alone leaves it calling a script that does not exist. `--hot` is what makes
+  // backend edits take effect without restarting the server.
+  'dev:server': 'bun --hot bin/serve.ts',
   build: 'bun run codegen && bunx vite build',
   typecheck: 'tsc --noEmit',
   codegen: 'bunx guren codegen --routes routes/web.ts --out types/generated/routes.d.ts --force',
@@ -487,7 +491,7 @@ async function detectScripts(context: DoctorRuleContext): Promise<DoctorCheck> {
       'warn',
       'package.json is missing, so recommended app scripts could not be verified.',
       {
-        fix: 'Add `dev`, `build`, `typecheck`, and `codegen` scripts to package.json.',
+        fix: 'Add `dev`, `dev:server`, `build`, `typecheck`, and `codegen` scripts to package.json.',
         manualFix: 'Create package.json and add the standard app scripts.',
       },
     )
@@ -514,12 +518,12 @@ async function detectScripts(context: DoctorRuleContext): Promise<DoctorCheck> {
     'App Scripts',
     missingScripts.length === 0 ? 'pass' : 'warn',
     missingScripts.length === 0
-      ? 'package.json exposes dev/build/typecheck/codegen scripts.'
+      ? 'package.json exposes dev/dev:server/build/typecheck/codegen scripts.'
       : `package.json is missing recommended scripts: ${missingScripts.join(', ')}.`,
     {
-      fix: 'Add `dev`, `build`, `typecheck`, and `codegen` scripts to package.json.',
+      fix: 'Add `dev`, `dev:server`, `build`, `typecheck`, and `codegen` scripts to package.json.',
       canAutofix: missingScripts.length > 0,
-      manualFix: 'Add the standard dev/build/typecheck/codegen scripts to package.json.',
+      manualFix: 'Add the standard dev/dev:server/build/typecheck/codegen scripts to package.json.',
     },
   )
 }

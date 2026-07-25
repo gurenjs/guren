@@ -13,7 +13,7 @@ Lessons learned from code review cycles. Check these before submitting changes.
 
 - **Never use `bunx guren` in CI.** The `guren` package is not on npm. Use `bun packages/cli/src/bin.ts` directly.
 - **Vite route-types plugin calls `bunx guren` internally.** The plugin skips generation when `process.env.CI` is set.
-- **E2E webServer in CI uses `bun run dev:server`** (not `bun run dev` which triggers codegen).
+- **E2E webServer in CI uses `bun run e2e:server`** — not `bun run dev` (triggers codegen) and not `bun run dev:server` (runs under `bun --hot`, so the server would reload mid-test if anything touched a watched file).
 - **`bun run --cwd` with `bunx` can resolve from npm instead of local.** Use `cd dir && bun ...` or direct paths.
 
 ## Security Defaults

@@ -1,6 +1,6 @@
 ---
 '@guren/cli': minor
-'@guren/create-app': minor
+'create-guren-app': minor
 ---
 
 feat: teach scaffolds and the agent harness the docs/spec conventions

@@ -207,6 +207,18 @@ Codegen rewrites the import path so `pages.gen.ts` can reference the same type.
 - Run `bun run codegen` after adding or changing Props to keep `pages.gen.ts` up to date.
 
 ## Hot Reloading
-Running `bun run dev` automatically launches the Vite dev server from the Bun process, so changes to TSX files trigger instant reloads without extra commands. This covers the frontend only — backend files (controllers, routes, models) are not watched, so restart the dev server to pick those changes up. If you need to customize that workflow, import `startViteDevServer()` from `@guren/core/runtime` and manage the Vite instance yourself.
+Running `bun run dev` automatically launches the Vite dev server from the Bun process, so changes to TSX files trigger instant reloads without extra commands.
+
+Backend files reload too: `dev:server` runs `bun --hot bin/serve.ts`, so edits to controllers, routes, and models take effect on the next request without a restart. Adding a route re-runs codegen and reloads once more, then settles. State held in the process does not survive a reload: the memory-backed session and cache stores are rebuilt empty, and module-level variables are reinitialized. External stores — Redis, your database — are unaffected, so you stay signed in as long as sessions live outside the process.
+
+If your project predates this default, add the flag yourself:
+
+```json
+"dev:server": "bun --hot bin/serve.ts"
+```
+
+Keep `@guren/cli` current when you do. Older versions rewrote the generated files under `.guren/` on every codegen run even when the output was unchanged, and since your controllers import those files, the rewrite triggers another reload — an endless loop.
+
+If you need to customize this workflow, import `startViteDevServer()` from `@guren/core/runtime` and manage the Vite instance yourself.
 
 By structuring your pages and components with these patterns, you get a smooth SPA experience with minimal boilerplate, powered entirely by React and Inertia.

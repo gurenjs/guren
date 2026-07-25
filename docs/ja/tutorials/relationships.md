@@ -311,7 +311,7 @@ export default function PostsShow({ post, comments }: Props) {
 `PostController.show` の `.with('author')` 呼び出しが抜けているか、`Comment.belongsTo('author', ...)` が登録されていません（クラス定義の後、モジュール読み込み時に実行される必要があります）。
 
 **サインインしているのに、コメントを送信すると `/login` にリダイレクトされる。**
-セッションがリセットされています（インメモリのセッションドライバーで開発サーバーを再起動した場合）— もう一度サインインしてください。それでも続く場合は、ルートに `.middleware('auth')` が付いていて、エイリアス名にタイポがないか確認してください。
+セッションがリセットされています（インメモリのセッションドライバーで、開発サーバーを再起動したか、バックエンドの編集でホットリロードが走った場合）— もう一度サインインしてください。それでも続く場合は、ルートに `.middleware('auth')` が付いていて、エイリアス名にタイポがないか確認してください。
 
 **`no such table: comments`。**
 マイグレーションが適用されていません。`bun run db:make create_comments_table` に続けて `bun run db:migrate` を実行してください。

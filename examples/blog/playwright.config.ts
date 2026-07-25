@@ -40,7 +40,11 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: isCI ? 'CI=1 bun run dev:server' : 'bun run dev',
+    // Not `dev:server` — that runs under `bun --hot`, which belongs to local
+    // development, not a test run that should hold still.
+    // `CI=1` is passed explicitly: the server reads it to drop the cookie
+    // `Secure` flag, without which Inertia's XHR POSTs fail over plain HTTP.
+    command: isCI ? 'CI=1 bun run e2e:server' : 'bun run dev',
     url: 'http://localhost:3333',
     reuseExistingServer: !isCI,
     timeout: isCI ? 60_000 : 30_000,
