@@ -1,5 +1,21 @@
 # @guren/testing
 
+## 1.2.0
+
+### Minor Changes
+
+- db4450e: Added `@guren/plugin-cloudflare` — the Cloudflare Workers deploy adapter (RFC 0003 Part 1). `createWorkersHandler(app)` wraps a Guren `Application` in a Workers module handler with lazy, deduplicated boot on the first request (bindings arrive with `fetch`, so boot cannot run at module scope) and passes each request's `env`/`ExecutionContext` through to Hono untouched. `getWorkersEnv<Env>()` exposes the first request's bindings to boot-time config behind a write-once holder, and `guren cloudflare:build` assembles a deployable `.cloudflare/` directory: the app's canonical build, a generated worker entry that statically wires the built SSR bundle, copied static assets for Workers Static Assets, and a `wrangler.jsonc` scaffold (D1 binding, `nodejs_compat`, drizzle migrations dir).
+
+  The plugin's provider follows the `definePlugin()` factory shape (`cloudflarePlugin()` — configuration reserved for upcoming session/OAuth-state wiring), so there is no auto-registered class provider; the CLI command works regardless via the `gurenPlugin.commands` manifest.
+
+  Supporting additions: `setInertiaSsrRenderer()` in `@guren/server` registers a process-wide default SSR renderer (per-call `ssr.render` still wins) so filesystem-free runtimes can use a static import instead of the `GUREN_INERTIA_SSR_ENTRY` dynamic import, and `TestApp.fromWorkers(handler, { env })` in `@guren/testing` drives a Workers-style handler with a fake `ExecutionContext` for testing the lazy-boot lifecycle.
+
+### Patch Changes
+
+- 1581bcd: Cover model declarations in the controller module mock.
+
+  `createControllerModuleMock()` stubbed `AuthenticatableModel` but not `defineModel`, so a controller test failed to even load when a model it imported used the function form — which `@guren/core` exports right alongside the class form. The stub also lacked the read/write entry points controllers reach for (`all`, `create`, `findOrFail`, `first`, `select`, `delete`); tests drive model behaviour by spying on those, and a spy cannot replace a method that was never defined.
+
 ## 1.1.0
 
 ### Minor Changes

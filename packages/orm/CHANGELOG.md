@@ -1,5 +1,25 @@
 # @guren/orm
 
+## 1.2.0
+
+### Minor Changes
+
+- 360d1f4: Added `createD1Database` — the Cloudflare D1 factory (RFC 0003 Part 2), alongside the postgres/mysql/sqlite factories and re-exported from `@guren/core`. It takes a deferred `binding` resolver (`binding: () => getWorkersEnv<Env>().DB` — bindings reach runtime-portable app code via the plugin's write-once holder, populated on the first request) and wires `drizzle-orm/d1` into the ORM adapter. D1 speaks the SQLite dialect, so schemas written for `createSqliteDatabase` port unchanged.
+
+  The operational surface is deliberately different from the other factories: `migrateDatabase()`, `seedDatabase()`, `resetDatabase()`, and `migrationStatus()` throw with guidance instead of executing — wrangler owns the D1 migration lifecycle (`wrangler d1 migrations apply` over the same drizzle-kit-generated SQL files, `migrations_dir` pointing at `db/migrations`). The drizzle-kit SQL format contract (statement-breakpoint separators, filename ordering, idempotent re-apply) is covered by an opt-in end-to-end test against wrangler's local D1 (`GUREN_TEST_WRANGLER=1`).
+
+### Patch Changes
+
+- a2c7b8c: Fixed a database connection leak under `bun --hot`. Each hot reload re-runs the module graph in the same process, so `createPostgresDatabase()`, `createMySqlDatabase()`, and `createSqliteDatabase()` opened a fresh client while the one the previous evaluation opened stayed connected with nothing left to close it — roughly one leaked connection per reload, which exhausts a default Postgres `max_connections` over a long dev session. The factories now park their teardown on a `globalThis` registry (the same approach `Application.listen()` already uses for the Bun and Vite dev servers) and close the previous client before serving from the new one.
+
+  This only applies under `bun --hot`. A handle is identified by the file that built it and the database it points at, so it is replaced only by a later evaluation of that same file. Nothing is ever torn down automatically in production, tests, CLI commands, or serverless. The one thing to know: two handles built in a single file against a single database — separate pools for web requests and background jobs, say — share that identity under `--hot`, so the second replaces the first. Give them their own module to keep them apart.
+
+  As part of this, `closeDatabase()` on a SQLite database now actually closes the underlying `bun:sqlite` handle instead of only dropping its reference.
+
+- d5d0c5b: Fixed the `bun --hot` connection registry truncating call-site paths that contain a space or parentheses. The stack frame naming the caller was parsed with a pattern that excluded both characters from the path, so a project under `/Users/me/My Projects` was recorded as `Projects/app/config/database.ts`.
+
+  The truncation was deterministic, so the key stayed stable across reloads and connection replacement kept working. What it cost was identity: a registry slot is keyed by driver, caller file, and connection target, so two call sites that truncate to the same path — two apps in one monorepo booted by a single dev process, pointed at one database — would share a slot, and the second would close the first's live connection. Frames are now matched by shape (`at fn (/path/file.ts:1:2)` and the bare `at /path/file.ts:1:2`) with nothing excluded from the path itself.
+
 ## 1.1.0
 
 ### Minor Changes

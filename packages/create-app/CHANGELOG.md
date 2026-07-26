@@ -1,5 +1,48 @@
 # create-guren-app
 
+## 1.3.0
+
+### Minor Changes
+
+- 7a128ed: Reload backend changes without restarting the dev server
+
+  `dev:server` now runs `bun --hot bin/serve.ts` in both templates, so edits to
+  controllers, routes, and models take effect on the next request instead of
+  requiring a manual restart. In the default frontend template, adding a route
+  re-runs codegen and reloads once more, then settles.
+
+  Keep `@guren/cli` current before adding the flag to an existing project. The
+  reload only settles because codegen leaves `.guren/*.gen.ts` untouched when the
+  output is unchanged; older versions rewrote them on every run, and since your
+  controllers import those files, each rewrite triggers the next reload.
+
+  State held in the process does not survive a reload: the memory-backed session
+  and cache stores are rebuilt empty, and module-level variables are
+  reinitialized. External stores — Redis, the database — are unaffected.
+
+  `guren doctor` now counts `dev:server` among the scripts an app is expected to
+  have, so its autofix no longer adds a `dev` script that calls a missing one.
+
+- 3d6b5d5: feat: teach scaffolds and the agent harness the docs/spec conventions
+
+  - New apps ship with `docs/adr/0001-record-architecture-decisions.md`,
+    a seed ADR explaining the frontmatter convention, `make:adr`, and the
+    link checking `guren check` performs.
+  - The agent harness gains `.claude/rules/docs-and-spec.md` (glob-scoped
+    to docs, schema, models, controllers, routes, and pages): start
+    entity work with `guren context <Entity>`, keep doc frontmatter
+    current when moving files, regenerate `docs/spec/` views after
+    structural changes. Existing apps receive the rule via
+    `bunx guren agent:sync`. The harness `CLAUDE.md` (start-here block
+    and MCP tool table, now covering `guren context <Entity>`,
+    `spec:generate`, `make:adr`, and `guren_entity_context`) applies to
+    new `agent:init` installs — `CLAUDE.md` is user-owned and never
+    overwritten by sync.
+
+### Patch Changes
+
+- ac6e4ce: Add commented `OAUTH_DISCORD_*` entries to both `.env.example` templates, matching the existing GitHub/Google blocks — `guren make:auth --oauth discord` and `guren add oauth` both point users at `.env.example` for these variable names.
+
 ## 1.2.0
 
 ### Minor Changes

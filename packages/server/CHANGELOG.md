@@ -1,5 +1,113 @@
 # @guren/server
 
+## 1.4.0
+
+### Minor Changes
+
+- 5196935: Added application modules — a `modules/<name>/` directory convention for composing self-contained slices of an app instead of piling everything into one flat `app/`, `routes/`, and `db/schema.ts`. `defineModule()` (new in `@guren/server`, re-exported from `@guren/core`) declares a module's routes and providers; `Application` folds them into its provider list and route mounting at boot via the new `mountModuleRoutes()`.
+
+  On the CLI side: `guren make:module <name>` scaffolds and auto-wires a module (`index.ts`, `routes.ts`, `db/schema.ts`, plus `src/app.ts`/`db/schema.ts` patching). Most `make:*` generators accept `--module <name>` to scaffold inside a module instead of the project root. `guren check`, `guren audit`, `guren context`, `model:list`, and `doctor` are all module-aware automatically, and once any `modules/` directory exists, `guren check` derives zero-config boundary rules that flag cross-module imports reaching past a module's public surface (`index.ts` or `db/schema.ts`) — no `guren.arch.ts` authoring required. `guren codegen`, `guren audit`, `openapi:generate`, and `guren route:list` all see routes registered inside a module's own `routes.ts`, not just the top-level `routes/web.ts`.
+
+- 0138070: feat: entity-centric context bundles (RFC 0004 Part 1)
+
+  - `guren context <Entity>` joins everything the CLI knows about one model
+    into a single markdown/JSON bundle: model metadata (table, columns,
+    relationships, reverse references), routes with validation schemas,
+    controller actions, Inertia pages with extracted Props, resource,
+    policy, factories, seeders, and tests. Same-named models across
+    modules are disambiguated with `--module` (`--module app` selects the
+    application root), and every join is scoped to the selected location
+    when the name is duplicated.
+  - `guren context` (whole-project) now reports routes from the full
+    `RouteDefinition` payload — the Routes table gains a Controller column
+    and JSON output includes controller bindings and schema type strings.
+  - `RouteDefinition` gains `bindings` (param name → bound model class
+    name) so route model bindings are introspectable.
+  - The MCP endpoint exposes the bundle as the `guren_entity_context` tool
+    and the `guren://context/{entity}` resource template.
+
+- 97aa6c7: Let apps configure the server-rendered Inertia document through `setInertiaDocument()`.
+
+  The `<body>` class and the critical CSS inlined into `<head>` were hardcoded to page components named `Docs/*`. Any other page whose theme is applied by a client effect painted the stylesheet's default surface color first and only corrected itself once React hydrated — a visible flash on the very first frame.
+
+  `setInertiaDocument({ bodyClass, criticalCss, prepaintScript })` moves that decision to the app. Each field takes a string or a function of the page component, so a docs section can claim a light surface while marketing pages keep a dark one. The same three fields exist on `InertiaOptions` for per-response overrides. Call it at module scope in the app entry so every runtime — the Bun server, serverless handlers, generated worker bundles — picks it up.
+
+  The old `Docs/*` special case is gone, but no scaffold or template ever emitted a page component under that name, so nothing needs migrating:
+
+  ```typescript
+  setInertiaDocument({
+    bodyClass: ({ component }) =>
+      component.startsWith("Docs/") ? "docs-theme" : undefined,
+  });
+  ```
+
+- 88e6d4f: fix: make the `guren_codegen` MCP tool regenerate changed artifacts
+
+  The tool called the CLI generators without `force`, so as soon as a route
+  changed — the one case where regeneration matters — the writer refused with
+  "already exists. Use --force to overwrite." A blanket `catch {}` per generator
+  swallowed that, and the tool reported `{"generated": []}` as a success. It now
+  passes `force: true`, the way `guren codegen` already does, since these
+  outputs are generated artifacts that exist to be overwritten.
+
+  Skips are no longer silent. The response carries a `skipped` array naming each
+  artifact and the reason it was not produced, and a generator that throws now
+  marks the whole run as an error even when other artifacts were written. A
+  generator that simply found nothing to describe — an app with no page
+  components, for instance — is reported as a skip rather than a failure.
+
+  The tool also generates `.guren/api-client.gen.ts`, which it previously left
+  out even though `guren codegen` produces it. Because the API client is built
+  from the route manifest, an agent that added a route through MCP got every
+  other artifact refreshed while the client silently went stale.
+
+- f7186c7: Add `fetchFallbackEmail` to `OAuthProviderConfig`: an optional async hook consulted when the userinfo response carries no email. `createGitHubOAuthProviderConfig` now supplies a default implementation that fetches the primary verified address from GitHub's `/user/emails` endpoint — GitHub returns `email: null` for accounts with a private email even when the `user:email` scope was granted, which previously made OAuth sign-in fail for those accounts.
+- 10a9bd1: Add `emailVerified` to `OAuthUserProfile`. Providers report whether they actually verified an address separately from the address itself — Google sends OIDC's `email_verified`, Discord sends `verified` — and until now that signal was only reachable through the untyped `profile.raw` bag. The field is tri-state on purpose: `true` (the provider asserts verified), `false` (it asserts not verified), `undefined` (no signal, so the app decides its own policy).
+
+  Provider configs declare where to read it via `emailVerifiedKey`, so the shared mapper knows only OIDC's standard `email_verified` claim; the Google and Discord presets each declare their own key, and only boolean values are read. GitHub's `/user` carries no such field, so `emailVerified` stays `undefined` there — except when the private-email fallback runs, which reports `true` because `/user/emails` only yields verified primary addresses. `mapProfile` still owns the whole mapping when set.
+
+  `fetchFallbackEmail` may now also return `{ email, emailVerified }` instead of a bare string, since the signal read from the userinfo response cannot vouch for an address that response did not contain. This is additive: implementations written against the original signature keep compiling, and a bare string deliberately claims nothing, leaving `emailVerified` undefined rather than asserting `true` on their behalf.
+
+  `make:auth --oauth`'s scaffolded `OAuthController` now checks `profile.emailVerified === false` instead of matching provider-specific keys on `profile.raw`. Same behavior, no provider names in generated application code.
+
+- db4450e: Added `@guren/plugin-cloudflare` — the Cloudflare Workers deploy adapter (RFC 0003 Part 1). `createWorkersHandler(app)` wraps a Guren `Application` in a Workers module handler with lazy, deduplicated boot on the first request (bindings arrive with `fetch`, so boot cannot run at module scope) and passes each request's `env`/`ExecutionContext` through to Hono untouched. `getWorkersEnv<Env>()` exposes the first request's bindings to boot-time config behind a write-once holder, and `guren cloudflare:build` assembles a deployable `.cloudflare/` directory: the app's canonical build, a generated worker entry that statically wires the built SSR bundle, copied static assets for Workers Static Assets, and a `wrangler.jsonc` scaffold (D1 binding, `nodejs_compat`, drizzle migrations dir).
+
+  The plugin's provider follows the `definePlugin()` factory shape (`cloudflarePlugin()` — configuration reserved for upcoming session/OAuth-state wiring), so there is no auto-registered class provider; the CLI command works regardless via the `gurenPlugin.commands` manifest.
+
+  Supporting additions: `setInertiaSsrRenderer()` in `@guren/server` registers a process-wide default SSR renderer (per-call `ssr.render` still wins) so filesystem-free runtimes can use a static import instead of the `GUREN_INERTIA_SSR_ENTRY` dynamic import, and `TestApp.fromWorkers(handler, { env })` in `@guren/testing` drives a Workers-style handler with a fake `ExecutionContext` for testing the lazy-boot lifecycle.
+
+- 1a6b738: Reduced session write volume (RFC 0003 Part 3): the session middleware no longer persists on every request, which matters anywhere writes are metered (Cloudflare D1's free tier allows 100k row writes/day — previously every page view consumed one).
+
+  - **Empty new sessions are not persisted and issue no cookie.** An anonymous request that never stores anything now costs zero store operations. Sessions (and their cookie) appear the moment anything is stored. Apps that relied on every visitor receiving a session cookie unconditionally will see it appear on first actual session use instead. (With the default auth stack this happens on the first CSRF-protected page, unchanged for now.)
+  - **Flash aging only dirties sessions that carried flash data**, instead of marking every loaded session dirty on every request.
+  - **New optional `SessionStore.touch(id, ttlSeconds)`** — rolling expiry for unchanged sessions becomes a TTL refresh instead of a full data rewrite. Implemented in `MemorySessionStore`, `RedisSessionStore` (EXPIRE), and `DatabaseSessionStore` (single UPDATE). Stores without `touch` keep the previous full-write fallback, and touching a missing session is a no-op — an expired session is no longer resurrected as an empty row by its stale cookie.
+
+- f60c041: CSRF protection moves out of the session into signed tokens (RFC 0003 Part 3), using the app keyring via `MessageSigner` (`APP_PREVIOUS_KEYS` rotation supported). The token is **bound to the session** when a logged-in one exists and **stateless double-submit** for guests:
+
+  - **Logged-in (session-bound):** the token carries the session id and is verified against the live session — immune to cookie injection, including a sibling-subdomain attacker who plants their own validly-signed token (it is bound to _their_ session id, not the victim's). This preserves the security posture of the previous session-stored token.
+  - **Guest (stateless):** a signed random token verified against the `XSRF-TOKEN` cookie. Guests hold no authenticated state to protect, and nothing is stored server-side — so anonymous page views cost zero session writes and no session cookie. Completing the write-volume work, a guest GET + form POST roundtrip now performs no session store operations at all, which is what makes the default auth stack viable on write-metered databases like Cloudflare D1's free tier.
+
+  The CSRF middleware no longer requires session middleware to be registered; `getCsrfToken()` no longer throws without it. `cookie: false` now works for session-authenticated flows (bound tokens verify without the cookie). Tokens stored in sessions by earlier releases keep verifying via a legacy fallback until those sessions expire, so in-flight sessions survive the upgrade — no action required.
+
+### Patch Changes
+
+- b49e052: Report unhandled exceptions to the console when no reporter is registered.
+
+  An app that never called `reporter()` turned a 500 into a rendered error page and nothing else. On a hosted runtime, where stdout is the only channel back to the operator, that left production failures with no trace to follow — the cause could only be found by bisecting the code. Anything that registers a reporter still owns reporting entirely; this only fills the empty case.
+
+- 7fc5692: Fixed leaked interval timers under `bun --hot`. Each hot reload re-runs the module graph in the same process, and a `setInterval` callback keeps its owner reachable — so the cache sweep, rate-limit cleanup, SSE ping, and scheduler timers built by the previous evaluation went on firing against objects nothing referenced any more, one extra timer per reload. The rate-limit and SSE timers are not `unref()`ed, so those also duplicated work and held the process open on their own; a duplicated scheduler would have run every scheduled task twice per reload. Each owner now parks its teardown on a `globalThis` registry — the same approach `Application.listen()` already uses for the Bun and Vite dev servers — and stops its predecessor before taking over.
+
+  This only applies under `bun --hot`. An owner is identified by the file that built it plus a discriminator (the cache store's name, the rate-limit store's class, the scheduler's timezone), so it is replaced only by a later evaluation of that same file. Nothing is ever torn down automatically in production, tests, CLI commands, or serverless.
+
+  Three things to know. Cache stores are tracked from the cache configuration, so a store built by calling `new MemoryStore()` directly in application code is not covered — every path the templates and examples take goes through cache config. Broadcast managers are tracked from `createBroadcastManager()`, so a bare `new BroadcastManager()` is likewise left alone. And because every manager built through `createCacheManager()` reports that factory as its call site, the store name is the whole of a cache store's identity: two cache managers in one process would share a slot per store name, so the second store under a given name stops the first one's sweep. Apps have one cache manager.
+
+  As part of this, `BroadcastManager` gained a public `disconnectAll()` that closes every SSE connection it is holding, which is what stops those connections' ping timers.
+
+- Updated dependencies [360d1f4]
+- Updated dependencies [a2c7b8c]
+- Updated dependencies [d5d0c5b]
+  - @guren/orm@1.2.0
+
 ## 1.3.0
 
 ### Minor Changes
