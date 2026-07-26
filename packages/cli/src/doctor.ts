@@ -1265,13 +1265,23 @@ export function renderDoctorReport(report: DoctorReport): void {
     const prefix = check.status === 'pass' ? '[ok]' : check.status === 'warn' ? '[warn]' : '[fail]'
     const log = check.status === 'pass' ? consola.success : check.status === 'warn' ? consola.warn : consola.error
     log(`${prefix} ${check.title}: ${check.message}`)
-    if (check.fix) {
-      consola.info(`       Fix: ${check.fix}`)
+
+    // Several rules build one check with a ternary status and attach the same
+    // options bag to both branches, so a passing check still carries the text
+    // describing how to repair it. Printing that turns a clean report into a
+    // wall of instructions for problems the project does not have.
+    if (check.status === 'pass') {
+      continue
+    }
+
+    // `fix` and `manualFix` restate each other everywhere they are both set,
+    // so show one line. `manualFix` alone is the shape a few rules use.
+    const remediation = check.fix ?? check.manualFix
+    if (remediation) {
+      consola.info(`       Fix: ${remediation}`)
     }
     if (check.canAutofix) {
-      consola.info('       Autofix: available')
-    } else if (check.manualFix) {
-      consola.info(`       Manual: ${check.manualFix}`)
+      consola.info('       Autofix: available — run `guren upgrade`')
     }
   }
 

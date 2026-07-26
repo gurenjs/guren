@@ -2,18 +2,20 @@ import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test'
 import { mkdtemp, rm, mkdir, writeFile, readFile, access } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { consola as realConsola } from 'consola'
 
 // Bun runs all test files in one shared process, and mock.module()
-// replacements are not undone by mock.restore() — a mock missing an export
-// silently breaks any other test file that needs the real one. Mirror
-// consola's full export surface.
-const consolaStub = {
+// replacements are not undone by mock.restore() — a mock missing a method
+// silently breaks any other test file that needs the real one. Hand-listing
+// the surface drifts (this stub predates `box`), so inherit from the real
+// instance and shadow only the calls that would print.
+const consolaStub = Object.assign(Object.create(realConsola) as typeof realConsola, {
   info: mock(() => {}),
   success: mock(() => {}),
   warn: mock(() => {}),
   error: mock(() => {}),
   log: mock(() => {}),
-}
+})
 
 await mock.module('consola', () => ({
   consola: consolaStub,
