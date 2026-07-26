@@ -54,6 +54,7 @@
     "db:migrate": "GUREN_QUIET_DUPLICATE_ORM=1 bun run --cwd examples/blog db:migrate",
     "db:seed": "GUREN_QUIET_DUPLICATE_ORM=1 bun run --cwd examples/blog db:seed",
     "db:up": "docker compose up -d postgres",
+    "db:up:mysql": "docker compose up -d mysql",
     "db:down": "docker compose down",
     "db:logs": "docker compose logs -f postgres",
     "bench": "bun run ./scripts/benchmarks/run-benchmarks.ts",

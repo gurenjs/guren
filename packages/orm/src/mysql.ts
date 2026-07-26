@@ -9,6 +9,10 @@ import { runSeeders } from './seeder'
 type ConnectionResolver = string | (() => string | undefined)
 type MySqlConnectionOptions = Record<string, unknown>
 type MySql2Drizzle = typeof import('drizzle-orm/mysql2')
+type MySql2Module = typeof import('mysql2')
+type CreatePool = MySql2Module['createPool']
+type MySqlPool = ReturnType<CreatePool>
+type MySqlPoolOptions = Parameters<CreatePool>[0]
 type DrizzleConfig = Exclude<Parameters<MySql2Drizzle['drizzle']>[0], string>
 
 // The mysql driver packages are loaded lazily so importing @guren/orm
@@ -16,13 +20,15 @@ type DrizzleConfig = Exclude<Parameters<MySql2Drizzle['drizzle']>[0], string>
 async function loadMySqlModules(): Promise<{
   drizzle: MySql2Drizzle['drizzle']
   migrate: typeof import('drizzle-orm/mysql2/migrator')['migrate']
+  createPool: CreatePool
 }> {
   try {
-    const [{ drizzle }, { migrate }] = await Promise.all([
+    const [{ drizzle }, { migrate }, { createPool }] = await Promise.all([
       import('drizzle-orm/mysql2'),
       import('drizzle-orm/mysql2/migrator'),
+      import('mysql2'),
     ])
-    return { drizzle, migrate }
+    return { drizzle, migrate, createPool }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
     throw new Error(
@@ -66,7 +72,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
 
   let migrationsPromise: Promise<void> | undefined
   let databasePromise: Promise<MySql2Database> | undefined
-  let database: MySql2Database | undefined
+  let client: MySqlPool | undefined
   let activeKey: string | undefined
   // Captured here, not in getDatabase(), so the caller of this factory is the
   // frame that identifies the handle across hot reloads.
@@ -81,6 +87,15 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
     }
 
     return resolved
+  }
+
+  // The pool is built here rather than handed to drizzle as `connection`:
+  // drizzle's own wiring builds it through `mysql2/promise`, whose wrapper
+  // exposes no `.config` for the driver to write `supportBigNumbers` onto, so
+  // every query throws before reaching a socket. The callback-API pool it
+  // accepts as `client` does expose one.
+  function createClient(createPool: CreatePool, url: string): MySqlPool {
+    return createPool({ uri: url, ...clientOptions } as MySqlPoolOptions)
   }
 
   async function migrateOnce(): Promise<void> {
@@ -99,22 +114,19 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
         return
       }
 
-      const { drizzle, migrate } = await loadMySqlModules()
+      const { drizzle, migrate, createPool } = await loadMySqlModules()
       const url = resolveConnectionString()
       endpoint = describeConnectionEndpoint(url)
-      const migrationDb = drizzle({
-        connection: {
-          uri: url,
-          ...clientOptions,
-        },
-        mode: 'default',
-        ...(relations ? { relations } : {}),
-      } as DrizzleConfig)
+      const migrationClient = createClient(createPool, url)
 
       try {
+        const migrationDb = drizzle({
+          client: migrationClient,
+          ...(relations ? { relations } : {}),
+        } as DrizzleConfig)
         await migrate(migrationDb, { migrationsFolder: resolvedMigrationsFolder })
       } finally {
-        await closeClient(migrationDb)
+        await closePool(migrationClient)
       }
     })()
 
@@ -133,24 +145,22 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
 
     const promise = (async (): Promise<MySql2Database> => {
       await migrateOnce()
-      const { drizzle } = await loadMySqlModules()
+      const { drizzle, createPool } = await loadMySqlModules()
       const url = resolveConnectionString()
-      const db = drizzle({
-        connection: {
-          uri: url,
-          ...clientOptions,
-        },
-        mode: 'default',
-        ...(relations ? { relations } : {}),
-      } as DrizzleConfig) as unknown as MySql2Database
-      database = db
+      // Held locally as well as in closure state: a newer evaluation may close
+      // this client while the await below is suspended, which clears `client`.
+      const activeClient = createClient(createPool, url)
+      client = activeClient
 
       activeKey = hotReloadKey('mysql', callSite, url)
       if (activeKey) {
         await replaceActiveConnection(activeKey, closeDatabase)
       }
 
-      return db
+      return drizzle({
+        client: activeClient,
+        ...(relations ? { relations } : {}),
+      } as DrizzleConfig) as unknown as MySql2Database
     })()
 
     databasePromise = promise.catch((error) => {
@@ -162,7 +172,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
   }
 
   async function closeDatabase(): Promise<void> {
-    if (!database) {
+    if (!client) {
       return
     }
 
@@ -170,9 +180,9 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
     activeKey = undefined
 
     try {
-      await closeClient(database)
+      await closePool(client)
     } finally {
-      database = undefined
+      client = undefined
       databasePromise = undefined
       if (key) {
         releaseActiveConnection(key, closeDatabase)
@@ -199,15 +209,10 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
   }
 
   async function withAdminDb<T>(callback: (db: MySql2Database) => Promise<T>): Promise<T> {
-    const { drizzle } = await loadMySqlModules()
+    const { drizzle, createPool } = await loadMySqlModules()
     const url = resolveConnectionString()
-    const adminDb = drizzle({
-      connection: {
-        uri: url,
-        ...clientOptions,
-      },
-      mode: 'default',
-    } as DrizzleConfig) as unknown as MySql2Database
+    const adminClient = createClient(createPool, url)
+    const adminDb = drizzle({ client: adminClient } as DrizzleConfig) as unknown as MySql2Database
 
     try {
       return await callback(adminDb)
@@ -215,7 +220,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
       // Rethrowing raw would surface the driver's bare code with no message.
       throw new Error(describeDatabaseFailure(error, describeConnectionEndpoint(url)))
     } finally {
-      await closeClient(adminDb)
+      await closePool(adminClient)
     }
   }
 
@@ -276,26 +281,9 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
   }
 }
 
-async function closeClient(db: unknown): Promise<void> {
-  if (typeof db !== 'object' || db === null) {
-    return
-  }
-
-  const maybeClient = (db as { $client?: unknown }).$client as { end?: (...args: unknown[]) => unknown } | undefined
-  if (!maybeClient || typeof maybeClient.end !== 'function') {
-    return
-  }
-
-  if (maybeClient.end.length === 0) {
-    const maybePromise = maybeClient.end()
-    if (isPromiseLike(maybePromise)) {
-      await maybePromise
-    }
-    return
-  }
-
+async function closePool(pool: MySqlPool): Promise<void> {
   await new Promise<void>((resolveClose, rejectClose) => {
-    maybeClient.end?.((error?: unknown) => {
+    pool.end((error) => {
       if (error) {
         rejectClose(error)
         return
@@ -303,9 +291,5 @@ async function closeClient(db: unknown): Promise<void> {
       resolveClose()
     })
   })
-}
-
-function isPromiseLike(value: unknown): value is Promise<unknown> {
-  return typeof value === 'object' && value !== null && 'then' in value && typeof (value as { then: unknown }).then === 'function'
 }
 
