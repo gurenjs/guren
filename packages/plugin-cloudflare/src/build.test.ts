@@ -54,7 +54,7 @@ describe('buildCloudflareOutput', () => {
     expect(worker).toContain('import app from "../src/app.ts"')
     expect(worker).toContain('process.env.GUREN_INERTIA_ENTRY = "/assets/app-Abc123.js"')
     expect(worker).toContain('process.env.GUREN_INERTIA_STYLES = "/assets/app-Def456.css"')
-    expect(worker).toContain('setInertiaSsrRenderer(ssrModule.render ?? ssrModule.default)')
+    expect(worker).toContain('setInertiaSsrRenderer(ssrModule.render)')
     expect(worker).toContain('export default createWorkersHandler(app)')
   })
 
@@ -142,7 +142,10 @@ describe('buildCloudflareOutput', () => {
     await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
 
     const worker = readFileSync(join(root, '.cloudflare/worker.js'), 'utf8')
-    expect(worker).toContain('setInertiaSsrRenderer(ssrModule.render ?? ssrModule.default)')
+    // The generated entry names the export the chunk has, so esbuild has no
+    // absent binding to warn about at deploy time.
+    expect(worker).toContain('setInertiaSsrRenderer(ssrModule.default)')
+    expect(worker).not.toContain('ssrModule.render')
   })
 
   test('should throw when the SSR entry exports no renderer', async () => {

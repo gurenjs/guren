@@ -267,6 +267,12 @@ function runAppBuild(root: string, scripts: Record<string, string>): void {
 interface SsrImport {
   /** Absolute path of the built SSR entry chunk. */
   file: string
+  /**
+   * Export the chunk actually exposes the renderer under. Recorded here so the
+   * generated worker can name it, instead of probing both shapes and leaving a
+   * reference to whichever one is absent.
+   */
+  rendererExport: 'render' | 'default'
 }
 
 async function resolveSsrImport(ssrDir: string, ssrEntryKey: string): Promise<SsrImport | undefined> {
@@ -294,14 +300,18 @@ async function resolveSsrImport(ssrDir: string, ssrEntryKey: string): Promise<Ss
   }
 
   const module = (await import(pathToFileURL(file).href)) as Record<string, unknown>
-  const renderer = module.render ?? module.default
-  if (typeof renderer !== 'function') {
+  // Same order and the same per-candidate function test the runtime loader
+  // applies, so the build accepts exactly what the server would run.
+  const rendererExport = (['render', 'default'] as const).find(
+    (name) => typeof module[name] === 'function',
+  )
+  if (!rendererExport) {
     throw new Error(
       `Cloudflare build: SSR entry ${file} does not export a renderer (expected a named "render" or default export).`,
     )
   }
 
-  return { file }
+  return { file, rendererExport }
 }
 
 interface ClientAssetEnv {
@@ -360,7 +370,11 @@ function renderWorkerModule(input: {
   }
 
   if (input.ssrImport) {
-    lines.push('setInertiaSsrRenderer(ssrModule.render ?? ssrModule.default)', '')
+    // Name the export the chunk really has. Probing both shapes made esbuild
+    // warn on every deploy that the missing one "will always be undefined" —
+    // on the exact line whose failure mode is a silent fall back to CSR, so
+    // the noise was indistinguishable from the real thing.
+    lines.push(`setInertiaSsrRenderer(ssrModule.${input.ssrImport.rendererExport})`, '')
   }
 
   lines.push('export default createWorkersHandler(app)', '')
