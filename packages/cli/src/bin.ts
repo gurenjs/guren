@@ -48,7 +48,7 @@ import { createStorageLink, removeStorageLink } from './storage-link'
 import { listScheduledTasks, runScheduledTasks } from './schedule'
 import { runHealthCheck } from './health-check'
 import { publishLanguageFiles, makeLanguage, listLocales } from './lang'
-import { upgradeCanary } from './upgrade'
+import { upgradeCanary, DEFAULT_UPGRADE_TAG } from './upgrade'
 import { scaffoldDeploy, type DeployTarget } from './deploy'
 import { installPlugin } from './plugin'
 import { discoverPluginCommands, createPluginCommandProxy } from './plugin-commands'
@@ -2230,7 +2230,7 @@ const upgradeCommand = defineCommand({
     },
     tag: {
       type: 'string',
-      description: 'npm dist-tag to upgrade to (default: rc). All @guren/* packages are aligned to it.',
+      description: `npm dist-tag to upgrade to (default: ${DEFAULT_UPGRADE_TAG}). All @guren/* packages are aligned to it.`,
     },
     install: {
       type: 'boolean',
@@ -2254,7 +2254,7 @@ const upgradeCommand = defineCommand({
     },
   },
   async run({ args }) {
-    const tag = args.canary ? 'canary' : typeof args.tag === 'string' && args.tag ? args.tag : 'rc'
+    const tag = args.canary ? 'canary' : typeof args.tag === 'string' && args.tag ? args.tag : DEFAULT_UPGRADE_TAG
 
     const result = await upgradeCanary({
       install: Boolean(args.install),
@@ -2273,7 +2273,7 @@ const upgradeCommand = defineCommand({
     if (result.versionCompatibility) {
       const vc = result.versionCompatibility
       if (vc.warnings.length > 0) {
-        consola.box('Version compatibility')
+        consola.box(vc.downgrade ? 'Downgrade' : 'Version compatibility')
         for (const warning of vc.warnings) {
           consola.warn(warning)
         }

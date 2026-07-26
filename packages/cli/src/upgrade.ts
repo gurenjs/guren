@@ -15,6 +15,19 @@ const PACKAGE_JSON = 'package.json'
 const GUREN_PACKAGE = /^(?:@guren\/|create-guren-app$)/u
 const MANIFEST_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'] as const
 
+/**
+ * npm dist-tag `guren upgrade` targets when none is given.
+ *
+ * `latest`, not `rc`: the `rc` tag still points at the pre-1.0 candidates it
+ * was cut for, so defaulting to it walks a released app backwards across the
+ * 1.0 boundary. The duplicate-`@guren/orm` runtime warning names this command
+ * as its remedy, which is exactly when a silent downgrade would hurt most.
+ */
+export const DEFAULT_UPGRADE_TAG = 'latest'
+
+/** Version specifiers that name a location instead of a release. */
+const NON_REGISTRY_SPECIFIER = /^(?:workspace|catalog|link|file|npm|git|github|portal):/u
+
 type ManifestField = (typeof MANIFEST_FIELDS)[number]
 
 export interface UpgradeCanaryOptions {
@@ -25,9 +38,9 @@ export interface UpgradeCanaryOptions {
   checkOnly?: boolean
   installRunner?: (cwd: string) => Promise<void>
   /**
-   * npm dist-tag to upgrade to (default: 'rc'). 'canary' pins the literal
-   * tag so installs keep floating; any other tag is resolved to a concrete
-   * version and written as ^version.
+   * npm dist-tag to upgrade to (default: {@link DEFAULT_UPGRADE_TAG}).
+   * 'canary' pins the literal tag so installs keep floating; any other tag is
+   * resolved to a concrete version and written as ^version.
    */
   tag?: string
   /** Override registry version lookups (used in tests). */
@@ -63,7 +76,10 @@ export interface UpgradeCanaryResult {
 export interface VersionCompatibility {
   compatible: boolean
   currentVersion: string
+  /** Concrete version the tag resolved to, or the tag when it could not be resolved. */
   targetVersion: string
+  /** True when the resolved target is older than what the app already pins. */
+  downgrade: boolean
   warnings: string[]
 }
 
@@ -109,11 +125,32 @@ async function resolveDistTagVersion(packageName: string, tag: string): Promise<
   return payload['dist-tags']?.[tag] ?? null
 }
 
+type VersionResolver = (packageName: string, tag: string) => Promise<string | null>
+
+/**
+ * Resolve each package once. The tag is looked up both to report the target
+ * version and to rewrite the manifest, and a package appears in more than one
+ * manifest field in real apps.
+ */
+function memoizeResolver(resolver: VersionResolver): VersionResolver {
+  const cache = new Map<string, Promise<string | null>>()
+  return (packageName, tag) => {
+    const key = `${packageName}@${tag}`
+    const cached = cache.get(key)
+    if (cached) {
+      return cached
+    }
+    const pending = resolver(packageName, tag)
+    cache.set(key, pending)
+    return pending
+  }
+}
+
 async function updateManifestDependencies(
   cwd: string,
   dryRun = false,
-  tag = 'rc',
-  versionResolver: (packageName: string, tag: string) => Promise<string | null> = resolveDistTagVersion,
+  tag = DEFAULT_UPGRADE_TAG,
+  versionResolver: VersionResolver = resolveDistTagVersion,
 ): Promise<{
   packageJsonPath: string
   updatedDependencies: UpgradedDependency[]
@@ -174,19 +211,34 @@ async function updateManifestDependencies(
   }
 }
 
-export async function checkVersionCompatibility(cwd: string, targetTag: string): Promise<VersionCompatibility> {
+/** True when the specifier names a release we can order against another one. */
+function isComparableVersion(specifier: string): boolean {
+  return !NON_REGISTRY_SPECIFIER.test(specifier) && !Number.isNaN(compareVersions(specifier, specifier))
+}
+
+export async function checkVersionCompatibility(
+  cwd: string,
+  targetTag: string,
+  versionResolver: VersionResolver = resolveDistTagVersion,
+): Promise<VersionCompatibility> {
   const manifestPath = join(cwd, 'package.json')
   const raw = await readFile(manifestPath, 'utf-8').catch(() => null)
-  if (!raw) return { compatible: true, currentVersion: 'unknown', targetVersion: targetTag, warnings: [] }
+  if (!raw) {
+    return { compatible: true, currentVersion: 'unknown', targetVersion: targetTag, downgrade: false, warnings: [] }
+  }
 
   const manifest = JSON.parse(raw)
   const deps = { ...manifest.dependencies, ...manifest.devDependencies }
 
-  // Find current Guren version
-  const currentVersion = Object.entries(deps)
-    .filter(([k]) => k.startsWith('@guren/'))
-    .map(([, v]) => String(v).replace(/^[\^~]/, ''))[0] ?? 'unknown'
+  // Reference the first @guren/* package whose pin names a release. A
+  // `workspace:*` or `catalog:` entry names a location, so it cannot anchor
+  // the comparison below.
+  const reference = Object.entries(deps)
+    .filter(([name]) => name.startsWith('@guren/'))
+    .map(([name, specifier]) => [name, String(specifier).replace(/^[\^~]/, '')] as const)
+    .find(([, version]) => isComparableVersion(version))
 
+  const currentVersion = reference?.[1] ?? 'unknown'
   const warnings: string[] = []
 
   // Check Bun version compatibility
@@ -195,7 +247,27 @@ export async function checkVersionCompatibility(cwd: string, targetTag: string):
     warnings.push(`Bun ${bunVersion} may not be compatible. Recommend Bun 1.3.x or later.`)
   }
 
-  return { compatible: warnings.length === 0, currentVersion, targetVersion: targetTag, warnings }
+  // Report the version the tag points at rather than the tag itself, so that
+  // a tag left behind by an older release line cannot walk an app backwards
+  // while the report still reads as a clean upgrade.
+  let targetVersion = targetTag
+  let downgrade = false
+  if (reference && targetTag !== 'canary') {
+    const resolved = await versionResolver(reference[0], targetTag).catch(() => null)
+    if (resolved) {
+      targetVersion = resolved
+      if (compareVersions(resolved, currentVersion) < 0) {
+        downgrade = true
+        warnings.push(
+          `Tag "${targetTag}" resolves ${reference[0]} to ${resolved}, which is older than the ${currentVersion} ` +
+            `this app already pins. Continuing would downgrade it. ` +
+            `Run with --tag ${DEFAULT_UPGRADE_TAG} for the current release.`,
+        )
+      }
+    }
+  }
+
+  return { compatible: warnings.length === 0, currentVersion, targetVersion, downgrade, warnings }
 }
 
 function collectManualSteps(checks: DoctorCheck[]): string[] {
@@ -206,11 +278,12 @@ function collectManualSteps(checks: DoctorCheck[]): string[] {
 
 export async function upgradeCanary(options: UpgradeCanaryOptions = {}): Promise<UpgradeCanaryResult> {
   const cwd = resolve(options.cwd ?? process.cwd())
-  const tag = options.tag ?? 'rc'
+  const tag = options.tag ?? DEFAULT_UPGRADE_TAG
   const manualStepsExtra: string[] = []
+  const versionResolver = memoizeResolver(options.versionResolver ?? resolveDistTagVersion)
 
   // Run version compatibility and deprecation checks
-  const versionCompatibility = await checkVersionCompatibility(cwd, tag)
+  const versionCompatibility = await checkVersionCompatibility(cwd, tag, versionResolver)
   const deprecationWarnings = await checkDeprecations(cwd)
 
   // If check-only mode, return early with just the checks
@@ -229,7 +302,7 @@ export async function upgradeCanary(options: UpgradeCanaryOptions = {}): Promise
     }
   }
 
-  const { packageJsonPath, updatedDependencies } = await updateManifestDependencies(cwd, Boolean(options.dryRun), tag, options.versionResolver)
+  const { packageJsonPath, updatedDependencies } = await updateManifestDependencies(cwd, Boolean(options.dryRun), tag, versionResolver)
   const { evaluations } = await getDoctorRuleEvaluations({ cwd })
 
   const candidateAutofixes = evaluations
@@ -265,11 +338,12 @@ export async function upgradeCanary(options: UpgradeCanaryOptions = {}): Promise
       return true
     })
 
-  // Run codemods for the version transition
+  // Run codemods for the version transition. The resolved version is what the
+  // codemod ranges are written against; the tag name never matched any of them.
   const codemodResults = await runCodemods(
     cwd,
     versionCompatibility.currentVersion,
-    tag,
+    versionCompatibility.targetVersion,
     { dryRun: options.dryRun },
   )
 

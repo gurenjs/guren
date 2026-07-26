@@ -2,7 +2,7 @@ import { beforeEach, afterEach, describe, expect, it, mock } from 'bun:test'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createTempWorkspace, type TempWorkspace } from './helpers'
-import { upgradeCanary, checkVersionCompatibility } from '../src/upgrade'
+import { upgradeCanary, checkVersionCompatibility, DEFAULT_UPGRADE_TAG } from '../src/upgrade'
 import { findApplicableCodemods, compareVersions, codemods, type Codemod } from '../src/codemods'
 import { checkDeprecations, deprecations } from '../src/deprecations'
 
@@ -58,21 +58,67 @@ describe('upgradeCanary', () => {
   })
 
 
-  it('aligns Guren packages to a resolved rc version by default', async () => {
+  it('resolves the default tag and reports the version it landed on', async () => {
+    const tags: string[] = []
     const result = await upgradeCanary({
       cwd: workspace.dir,
-      versionResolver: async (name) => (name.startsWith('@guren/') ? '1.0.0-rc.99' : null),
+      versionResolver: async (name, tag) => {
+        tags.push(tag)
+        return name.startsWith('@guren/') ? '1.0.0-rc.99' : null
+      },
     })
     const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
       dependencies: Record<string, string>
       devDependencies: Record<string, string>
     }
 
-    expect(result.versionCompatibility?.targetVersion).toBe('rc')
+    expect(tags.every((tag) => tag === DEFAULT_UPGRADE_TAG)).toBe(true)
+    // The report names the resolved version, not the tag, so a tag pointing at
+    // an older line cannot read as a clean upgrade.
+    expect(result.versionCompatibility?.targetVersion).toBe('1.0.0-rc.99')
+    expect(result.versionCompatibility?.downgrade).toBe(false)
     expect(packageJson.dependencies['@guren/core']).toBe('^1.0.0-rc.99')
     expect(packageJson.dependencies['@guren/server']).toBe('^1.0.0-rc.99')
     expect(packageJson.devDependencies['@guren/testing']).toBe('^1.0.0-rc.99')
     expect(packageJson.dependencies.react).toBe('^19.0.0')
+  })
+
+  it('defaults to the latest tag rather than a release-candidate one', () => {
+    expect(DEFAULT_UPGRADE_TAG).toBe('latest')
+  })
+
+  it('warns when the requested tag resolves to an older version', async () => {
+    await writeFile(
+      packageJsonPath,
+      JSON.stringify({
+        name: 'downgrade-test',
+        dependencies: { '@guren/core': '^1.3.0' },
+      }, null, 2),
+      'utf8',
+    )
+
+    const result = await upgradeCanary({
+      cwd: workspace.dir,
+      tag: 'rc',
+      versionResolver: async () => '1.0.0-rc.26',
+    })
+
+    expect(result.versionCompatibility?.downgrade).toBe(true)
+    expect(result.versionCompatibility?.compatible).toBe(false)
+    expect(result.versionCompatibility?.warnings.join('\n')).toContain('would downgrade')
+  })
+
+  it('resolves each package once even though it appears in several lookups', async () => {
+    const calls: string[] = []
+    await upgradeCanary({
+      cwd: workspace.dir,
+      versionResolver: async (name) => {
+        calls.push(name)
+        return '1.5.0'
+      },
+    })
+
+    expect(calls.length).toBe(new Set(calls).size)
   })
 
   it('leaves packages untouched when the registry lookup fails', async () => {
@@ -211,6 +257,42 @@ describe('checkVersionCompatibility', () => {
     }
   })
 
+  it('skips pins that name a location instead of a release', async () => {
+    await writeFile(
+      join(workspace.dir, 'package.json'),
+      JSON.stringify({
+        name: 'compat-test',
+        dependencies: {
+          '@guren/server': 'workspace:*',
+          '@guren/core': '^1.3.0',
+        },
+      }, null, 2),
+      'utf8',
+    )
+
+    const result = await checkVersionCompatibility(workspace.dir, 'latest', async () => '1.3.0')
+
+    // `workspace:*` comes first but cannot anchor a comparison, so the check
+    // falls through to the next @guren/* pin that names a release.
+    expect(result.currentVersion).toBe('1.3.0')
+    expect(result.downgrade).toBe(false)
+  })
+
+  it('flags a resolved version older than the current pin', async () => {
+    const result = await checkVersionCompatibility(workspace.dir, 'rc', async () => '0.1.0')
+
+    expect(result.downgrade).toBe(true)
+    expect(result.targetVersion).toBe('0.1.0')
+    expect(result.warnings.join('\n')).toContain('older than')
+  })
+
+  it('leaves the tag in place when the registry lookup fails', async () => {
+    const result = await checkVersionCompatibility(workspace.dir, 'latest', async () => null)
+
+    expect(result.targetVersion).toBe('latest')
+    expect(result.downgrade).toBe(false)
+  })
+
   it('handles missing package.json gracefully', async () => {
     const { mkdtemp } = await import('node:fs/promises')
     const { tmpdir } = await import('node:os')
@@ -242,6 +324,28 @@ describe('compareVersions', () => {
   it('compares patch versions correctly', () => {
     expect(compareVersions('1.0.1', '1.0.0')).toBeGreaterThan(0)
     expect(compareVersions('1.0.0', '1.0.1')).toBeLessThan(0)
+  })
+
+  // Guren shipped its entire 1.0 line as 1.0.0-rc.N, so these are the
+  // comparisons the upgrade path actually makes.
+  it('ranks a release above a prerelease of the same version', () => {
+    expect(compareVersions('1.0.0', '1.0.0-rc.4')).toBeGreaterThan(0)
+    expect(compareVersions('1.0.0-rc.4', '1.0.0')).toBeLessThan(0)
+  })
+
+  it('orders prereleases numerically, not lexically', () => {
+    expect(compareVersions('1.0.0-rc.29', '1.0.0-rc.4')).toBeGreaterThan(0)
+    expect(compareVersions('1.0.0-rc.4', '1.0.0-rc.29')).toBeLessThan(0)
+    expect(compareVersions('1.0.0-rc.4', '1.0.0-rc.4')).toBe(0)
+  })
+
+  it('ranks alphanumeric identifiers above numeric ones and shorter above longer', () => {
+    expect(compareVersions('1.0.0-alpha', '1.0.0-rc.1')).toBeLessThan(0)
+    expect(compareVersions('1.0.0-rc.1', '1.0.0-rc.1.1')).toBeLessThan(0)
+  })
+
+  it('reports unordered for specifiers that are not versions', () => {
+    expect(compareVersions('workspace:*', '1.0.0')).toBeNaN()
   })
 })
 

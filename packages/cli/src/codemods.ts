@@ -94,13 +94,66 @@ export interface CodemodResult {
   files?: string[]
 }
 
+/**
+ * Compare two semver versions, prerelease tags included.
+ *
+ * Splitting on '.' alone turns `1.0.0-rc.4` into `[1, 0, NaN, 4]`, and a NaN
+ * difference is neither greater nor less than zero — so every comparison
+ * involving a prerelease used to answer "unordered", which reads as "equal"
+ * to callers that only test for `< 0` or `> 0`. Guren shipped its whole 1.0
+ * line as `1.0.0-rc.N`, so that covered the versions most likely to be
+ * compared. Returns NaN only when a version is not numeric at all.
+ */
 export function compareVersions(a: string, b: string): number {
-  const pa = a.split('.').map(Number)
-  const pb = b.split('.').map(Number)
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const na = pa[i] ?? 0
-    const nb = pb[i] ?? 0
+  const [mainA = '', preA] = splitPrerelease(a)
+  const [mainB = '', preB] = splitPrerelease(b)
+
+  const numbersA = mainA.split('.').map(Number)
+  const numbersB = mainB.split('.').map(Number)
+  for (let i = 0; i < Math.max(numbersA.length, numbersB.length); i++) {
+    const na = numbersA[i] ?? 0
+    const nb = numbersB[i] ?? 0
+    if (Number.isNaN(na) || Number.isNaN(nb)) {
+      return Number.NaN
+    }
     if (na !== nb) return na - nb
   }
+
+  // A release outranks any prerelease of the same version (1.0.0 > 1.0.0-rc.4).
+  if (preA === undefined && preB === undefined) return 0
+  if (preA === undefined) return 1
+  if (preB === undefined) return -1
+
+  return comparePrerelease(preA, preB)
+}
+
+function splitPrerelease(version: string): [string, string | undefined] {
+  const index = version.indexOf('-')
+  return index === -1 ? [version, undefined] : [version.slice(0, index), version.slice(index + 1)]
+}
+
+function comparePrerelease(a: string, b: string): number {
+  const partsA = a.split('.')
+  const partsB = b.split('.')
+
+  for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
+    const pa = partsA[i]
+    const pb = partsB[i]
+    // Fewer identifiers sorts lower (rc.1 < rc.1.1).
+    if (pa === undefined) return -1
+    if (pb === undefined) return 1
+    if (pa === pb) continue
+
+    const na = Number(pa)
+    const nb = Number(pb)
+    const numericA = !Number.isNaN(na)
+    const numericB = !Number.isNaN(nb)
+    if (numericA && numericB) return na - nb
+    // Numeric identifiers sort lower than alphanumeric ones.
+    if (numericA) return -1
+    if (numericB) return 1
+    return pa < pb ? -1 : 1
+  }
+
   return 0
 }
