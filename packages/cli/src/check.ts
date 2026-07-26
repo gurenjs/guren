@@ -6,7 +6,7 @@ import {
   discoverModelFiles,
   fileExists,
   hasControllerTest,
-  controllerTestCandidates,
+  describeControllerTestMiss,
   classNameFromPath,
   toPosixRelative,
   listModuleNames,
@@ -175,20 +175,13 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       const moduleName = moduleNameFor(cwd, filePath)
       const hasTest = await hasControllerTest(cwd, filePath)
       const moduleFlag = moduleName ? ` --module ${moduleName}` : ''
-      checks.push(
-        check(
-          `test:${name}`,
-          `${name} tests`,
-          hasTest ? 'pass' : 'warn',
-          hasTest
-            ? `Test file found for ${name}.`
-            : `No test file named after ${name} (looked for ${controllerTestCandidates(cwd, filePath).join(', ')}). ` +
-              'Detection is by filename only, so a test covering these routes under another name is not counted.',
-          hasTest
-            ? undefined
-            : `If these routes are not already covered, run: bunx guren make:test ${name.replace('Controller', '')} --controller${moduleFlag}`,
-        ),
-      )
+      const message = hasTest
+        ? `Test file found for ${name}.`
+        : describeControllerTestMiss(cwd, filePath)
+      const suggestion = hasTest
+        ? undefined
+        : `If these routes are not already covered, run: bunx guren make:test ${name.replace('Controller', '')} --controller${moduleFlag}`
+      checks.push(check(`test:${name}`, `${name} tests`, hasTest ? 'pass' : 'warn', message, suggestion))
     }
 
     // 5. Check generated manifests are present

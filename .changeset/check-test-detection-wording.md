@@ -14,13 +14,14 @@ An app that groups tests by feature hits this on every controller. Worse,
 command — on a real app that was 10 of 21 steps, every one of them proposing to
 duplicate coverage that already existed.
 
-Detection is unchanged; what it says about itself is not. `guren check` now names
-the miss as a naming one, lists the paths it probed, and states that detection is
-by filename only. `doctor --next` retitles the step from `Add tests for X` to
-`Confirm test coverage for X`, and both the check's suggestion and the step's
-description ask for that confirmation first — the structured `title`, `command`,
-and `suggestion` fields are what agents and the MCP surface act on, so cautious
-prose alone would not have changed the outcome.
+Detection is unchanged; what it says about itself is not. Both reporting sites now
+share one sentence, `describeControllerTestMiss`, which names the miss as a naming
+one, lists the paths probed, and says detection is by filename only. `doctor
+--next` retitles the step from `Add tests for X` to `Confirm test coverage for X`,
+and both the check's suggestion and the step's description ask for that
+confirmation first — the structured `title`, `command`, and `suggestion` fields
+are what agents and the MCP surface act on, so cautious prose alone would not have
+changed the outcome.
 
 Detection was left alone deliberately. The documented way to test a controller is
 to boot the app and drive its routes through `TestApp`, and such a test

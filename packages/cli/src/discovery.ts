@@ -235,14 +235,10 @@ export async function discoverTestFiles(appRoot: string): Promise<string[]> {
  * boundary check forbids the project-root `tests/` from importing module
  * internals — hence the `modules/<name>/` prefix on the `tests/` candidates.
  *
- * Detection is by filename and nothing else, which bounds what it can know: a
- * match here says a file is named after the controller, not that it exercises
- * it, and a miss says nothing about coverage. An app that groups tests by
- * feature (`tests/controllers/tasks.test.ts` covering `TaskController`) reads
- * as untested. Reading the test contents would not rescue it either — the
- * documented way to test a controller boots the app and drives its routes
- * through `TestApp`, naming neither the controller nor its file. Callers must
- * phrase a miss as "no test named after this controller", never "no coverage".
+ * Detection is by filename and nothing else: a match says a file is named after
+ * the controller, not that it exercises it, and a miss says nothing about
+ * coverage. Report a miss with {@link describeControllerTestMiss} so that bound
+ * is stated wherever it surfaces.
  */
 export function controllerTestCandidates(cwd: string, controllerPath: string): string[] {
   const name = classNameFromPath(controllerPath)
@@ -262,6 +258,17 @@ export function controllerTestCandidates(cwd: string, controllerPath: string): s
     `${prefix}tests/controllers/${name}.test.ts`,
     `${prefix}tests/${name}.test.ts`,
   ]
+}
+
+/**
+ * How a miss must be phrased — one string, because `guren check` and
+ * `guren doctor --next` both report it and a doc comment cannot keep two
+ * wordings in step.
+ */
+export function describeControllerTestMiss(cwd: string, controllerPath: string): string {
+  const name = classNameFromPath(controllerPath)
+  const candidates = controllerTestCandidates(cwd, controllerPath).join(', ')
+  return `No test file named after ${name} (filename-only detection; looked for ${candidates}).`
 }
 
 export async function hasControllerTest(cwd: string, controllerPath: string): Promise<boolean> {

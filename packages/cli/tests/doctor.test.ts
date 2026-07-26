@@ -1129,6 +1129,10 @@ describe('suggestNextSteps', () => {
       const oauthStep = steps.find((step) => step.title === 'Confirm test coverage for OAuthController')
       expect(oauthStep).toBeDefined()
       expect(oauthStep!.command).toBe('bunx guren make:test OAuth --controller --module blog')
+      // The description is the other half of the wording; without this it is the
+      // half free to drift away from `guren check`.
+      expect(oauthStep!.description).toContain('filename-only detection')
+      expect(oauthStep!.description).toContain('already covered under another name')
     } finally {
       await workspace.cleanup()
     }
