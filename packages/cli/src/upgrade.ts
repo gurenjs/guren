@@ -21,6 +21,9 @@ export const DEFAULT_UPGRADE_TAG = 'latest'
 /** The one tag pinned literally, so installs keep following it. */
 export const CANARY_TAG = 'canary'
 
+/** Kept in step with what `@guren/orm` depends on, not with each other. */
+const DRIZZLE_PACKAGES = ['drizzle-orm', 'drizzle-kit'] as const
+
 type ManifestField = (typeof MANIFEST_FIELDS)[number]
 
 export interface UpgradeCanaryOptions {
@@ -38,6 +41,12 @@ export interface UpgradeCanaryOptions {
   tag?: string
   /** Override registry version lookups (used in tests). */
   versionResolver?: (packageName: string, tag: string) => Promise<string | null>
+  /** Override registry dependency-pin lookups (used in tests). */
+  dependencyPinResolver?: (
+    packageName: string,
+    version: string,
+    dependency: string,
+  ) => Promise<string | null>
 }
 
 export interface UpgradedDependency {
@@ -121,7 +130,40 @@ async function resolveDistTagVersion(packageName: string, tag: string): Promise<
   return tags[tag] ?? null
 }
 
+interface Packument {
+  versions?: Record<string, { dependencies?: Record<string, string> }>
+}
+
+/**
+ * The full package document. Only worth its size for reading what a published
+ * version depends on; tag lookups use the dist-tags endpoint above instead.
+ */
+async function fetchPackument(packageName: string): Promise<Packument | null> {
+  const response = await fetch(`https://registry.npmjs.org/${packageName}`, {
+    headers: { accept: 'application/vnd.npm.install-v1+json' },
+  })
+  if (!response.ok) {
+    return null
+  }
+  return (await response.json()) as Packument
+}
+
+/** Read what a published version of a package pins one of its dependencies to. */
+async function resolveDependencyPin(
+  packageName: string,
+  version: string,
+  dependency: string,
+): Promise<string | null> {
+  const payload = await fetchPackument(packageName)
+  return payload?.versions?.[version]?.dependencies?.[dependency] ?? null
+}
+
 type VersionResolver = (packageName: string, tag: string) => Promise<string | null>
+type DependencyPinResolver = (
+  packageName: string,
+  version: string,
+  dependency: string,
+) => Promise<string | null>
 
 /**
  * Resolve each package once. The tag is looked up both to report the target
@@ -147,11 +189,71 @@ function memoizeResolver(resolver: VersionResolver): VersionResolver {
   }
 }
 
+/**
+ * Align the app's `drizzle-orm` and `drizzle-kit` pins with the version
+ * `@guren/orm` depends on.
+ *
+ * `@guren/orm` names an exact `drizzle-orm` version under `dependencies`, not a
+ * range, so an app pinning a different one gets a second nested copy on install
+ * — the app builds its table descriptors against one copy while the adapter
+ * runs on the other. Aligning `@guren/*` alone is what leaves that behind.
+ *
+ * `drizzle-kit` has no upstream declaration to read: it is not a dependency of
+ * `@guren/orm`, only of apps and templates. Matching it to `drizzle-orm` is the
+ * repo's convention (the two ship as a pair), not a fact from the registry.
+ */
+async function alignDrizzlePins(
+  manifest: PackageManifest,
+  tag: string,
+  versionResolver: VersionResolver,
+  pinResolver: DependencyPinResolver,
+  updatedDependencies: UpgradedDependency[],
+): Promise<void> {
+  const fieldsWithDrizzle = MANIFEST_FIELDS.filter((field) =>
+    DRIZZLE_PACKAGES.some((name) => manifest[field]?.[name]),
+  )
+  // Only meaningful for an app that uses the ORM: the pin being matched is the
+  // one @guren/orm brings with it.
+  const usesGurenOrm = MANIFEST_FIELDS.some((field) => manifest[field]?.['@guren/orm'])
+  if (fieldsWithDrizzle.length === 0 || !usesGurenOrm) {
+    return
+  }
+
+  const ormVersion = await versionResolver('@guren/orm', tag)
+  if (!ormVersion) {
+    return
+  }
+
+  const pin = await pinResolver('@guren/orm', ormVersion, 'drizzle-orm')
+  if (!pin) {
+    console.warn(
+      `[guren upgrade] Could not read the drizzle-orm version @guren/orm@${ormVersion} depends on — leaving the drizzle pins alone.`,
+    )
+    return
+  }
+
+  for (const field of fieldsWithDrizzle) {
+    const dependencies = manifest[field]
+    if (!dependencies) {
+      continue
+    }
+    for (const name of DRIZZLE_PACKAGES) {
+      const current = dependencies[name]
+      if (!current || current === pin) {
+        continue
+      }
+      dependencies[name] = pin
+      updatedDependencies.push({ field, name, previousVersion: current, nextVersion: pin })
+    }
+  }
+}
+
 async function updateManifestDependencies(
   cwd: string,
   dryRun = false,
   tag = DEFAULT_UPGRADE_TAG,
   versionResolver: VersionResolver = resolveDistTagVersion,
+  pinResolver: DependencyPinResolver = resolveDependencyPin,
 ): Promise<{
   packageJsonPath: string
   updatedDependencies: UpgradedDependency[]
@@ -213,6 +315,8 @@ async function updateManifestDependencies(
       })
     }
   }
+
+  await alignDrizzlePins(manifest, tag, versionResolver, pinResolver, updatedDependencies)
 
   if (!dryRun && updatedDependencies.length > 0) {
     await writeFile(packageJsonPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
@@ -328,7 +432,7 @@ export async function upgradeCanary(options: UpgradeCanaryOptions = {}): Promise
     }
   }
 
-  const { packageJsonPath, updatedDependencies } = await updateManifestDependencies(cwd, Boolean(options.dryRun), tag, versionResolver)
+  const { packageJsonPath, updatedDependencies } = await updateManifestDependencies(cwd, Boolean(options.dryRun), tag, versionResolver, options.dependencyPinResolver)
   const { evaluations } = await getDoctorRuleEvaluations({ cwd })
 
   const candidateAutofixes = evaluations

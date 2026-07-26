@@ -131,6 +131,90 @@ describe('upgradeCanary', () => {
     expect(result.versionCompatibility?.warnings.join('\n')).toContain('would downgrade')
   })
 
+  it('aligns drizzle pins with the version @guren/orm depends on', async () => {
+    await writeFile(
+      packageJsonPath,
+      JSON.stringify({
+        name: 'drizzle-test',
+        dependencies: {
+          '@guren/orm': '^1.0.0',
+          'drizzle-orm': '1.0.0-rc.1',
+        },
+        devDependencies: {
+          'drizzle-kit': '1.0.0-rc.1',
+        },
+      }, null, 2),
+      'utf8',
+    )
+
+    const result = await upgradeCanary({
+      cwd: workspace.dir,
+      versionResolver: async () => '1.2.0',
+      dependencyPinResolver: async () => '1.0.0-rc.4',
+    })
+    const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
+      dependencies: Record<string, string>
+      devDependencies: Record<string, string>
+    }
+
+    // Written exactly, matching how @guren/orm pins it — a caret would let the
+    // app resolve a different copy than the adapter runs on.
+    expect(packageJson.dependencies['drizzle-orm']).toBe('1.0.0-rc.4')
+    expect(packageJson.devDependencies['drizzle-kit']).toBe('1.0.0-rc.4')
+    expect(result.updatedDependencies.some((dependency) => dependency.name === 'drizzle-orm')).toBe(true)
+    expect(result.updatedDependencies.some((dependency) => dependency.name === 'drizzle-kit')).toBe(true)
+  })
+
+  it('leaves drizzle alone for an app that does not use @guren/orm', async () => {
+    await writeFile(
+      packageJsonPath,
+      JSON.stringify({
+        name: 'no-orm-test',
+        dependencies: {
+          '@guren/core': '^1.0.0',
+          'drizzle-orm': '1.0.0-rc.1',
+        },
+      }, null, 2),
+      'utf8',
+    )
+
+    await upgradeCanary({
+      cwd: workspace.dir,
+      versionResolver: async () => '1.3.0',
+      dependencyPinResolver: async () => '1.0.0-rc.4',
+    })
+    const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
+      dependencies: Record<string, string>
+    }
+
+    expect(packageJson.dependencies['drizzle-orm']).toBe('1.0.0-rc.1')
+  })
+
+  it('leaves drizzle alone when the pin cannot be read', async () => {
+    await writeFile(
+      packageJsonPath,
+      JSON.stringify({
+        name: 'drizzle-unreadable',
+        dependencies: {
+          '@guren/orm': '^1.0.0',
+          'drizzle-orm': '1.0.0-rc.1',
+        },
+      }, null, 2),
+      'utf8',
+    )
+
+    await upgradeCanary({
+      cwd: workspace.dir,
+      versionResolver: async () => '1.2.0',
+      dependencyPinResolver: async () => null,
+    })
+    const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
+      dependencies: Record<string, string>
+    }
+
+    expect(packageJson.dependencies['drizzle-orm']).toBe('1.0.0-rc.1')
+  })
+
   it('resolves each package once even though it appears in several lookups', async () => {
     const calls: string[] = []
     await upgradeCanary({
