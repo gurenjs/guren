@@ -177,6 +177,29 @@ describe('describeMigrationFailure', () => {
     expect(message).toContain('column "slug" of relation "posts" already exists')
   })
 
+  test('should treat a mysql2 connect timeout as a connection failure', () => {
+    // mysql2 reports a connect timeout as ETIMEDOUT with syscall 'connect';
+    // a read that times out mid-query does not carry that syscall.
+    const cause = Object.assign(new Error('connect ETIMEDOUT'), { code: 'ETIMEDOUT', syscall: 'connect' })
+    const error = new Error('Failed query: CREATE TABLE `__drizzle_migrations`', { cause })
+
+    const message = describeMigrationFailure(error, 'db.internal:33306')
+
+    expect(message).toBe(
+      'cannot connect to the database at db.internal:33306 (ETIMEDOUT). Is it running and accepting connections?',
+    )
+  })
+
+  test('should keep the in-flight query when a read times out mid-migration', () => {
+    const cause = Object.assign(new Error('read ETIMEDOUT'), { code: 'ETIMEDOUT', syscall: 'read' })
+    const error = new Error('Failed query: ALTER TABLE `posts` ADD COLUMN `slug` text', { cause })
+
+    const message = describeMigrationFailure(error, 'db.internal:33306')
+
+    expect(message).toContain('ALTER TABLE `posts`')
+    expect(message).not.toContain('cannot connect')
+  })
+
   test('should keep the in-flight query when the connection drops mid-migration', () => {
     // ECONNRESET/EPIPE can hit halfway through a run, so which migration was
     // executing is the useful part — unlike a server that was never reached.

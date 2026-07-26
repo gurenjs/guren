@@ -15,7 +15,7 @@ This guide walks you through building and shipping a JSON API with Guren. You wi
 The `api` blueprint skips Inertia and frontend tooling, giving you a lean JSON API starter:
 
 ```bash
-bunx create-guren-app my-api --blueprint api
+bunx create-guren-app my-api --blueprint api --db postgres
 cd my-api
 bun install
 ```

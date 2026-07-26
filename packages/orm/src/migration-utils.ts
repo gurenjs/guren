@@ -43,6 +43,11 @@ export function warnIgnoredFlatSqlMigrations(migrationsFolder: string): void {
  * drizzle happened to be sending is noise. Deliberately excludes mid-flight
  * failures like ECONNRESET and EPIPE — those can hit halfway through a
  * migration run, where the query text is the useful part.
+ *
+ * ETIMEDOUT is absent for the same reason, and is instead recognised through
+ * `syscall: 'connect'` below: mysql2 reports a connect timeout as
+ * `ETIMEDOUT`/`syscall: 'connect'`, while a read that times out mid-query does
+ * not carry that syscall.
  */
 const PRE_CONNECTION_ERROR_CODES = new Set([
   'CONNECT_TIMEOUT',
@@ -52,6 +57,15 @@ const PRE_CONNECTION_ERROR_CODES = new Set([
   'ENETUNREACH',
   'ENOTFOUND',
 ])
+
+/** True when this error was raised while establishing the connection. */
+function failedWhileConnecting(error: unknown): boolean {
+  const { code, syscall } = error as { code?: unknown; syscall?: unknown }
+  if (typeof code === 'string' && PRE_CONNECTION_ERROR_CODES.has(code)) {
+    return true
+  }
+  return syscall === 'connect' && typeof code === 'string' && code !== ''
+}
 
 /** Walks the cause chain (and AggregateError members) collecting every nested error. */
 function collectCauses(error: unknown, seen = new Set<unknown>()): unknown[] {
@@ -87,10 +101,10 @@ export function describeMigrationFailure(error: unknown, endpoint?: string): str
     .map((cause) => (cause as { code?: unknown }).code)
     .filter((code): code is string => typeof code === 'string' && code !== '')
 
-  const preConnectionCode = codes.find((code) => PRE_CONNECTION_ERROR_CODES.has(code))
-  if (preConnectionCode) {
+  const connectFailure = causes.find(failedWhileConnecting) as { code: string } | undefined
+  if (connectFailure) {
     const target = endpoint ? `the database at ${endpoint}` : 'the database'
-    return `cannot connect to ${target} (${preConnectionCode}). Is it running and accepting connections?`
+    return `cannot connect to ${target} (${connectFailure.code}). Is it running and accepting connections?`
   }
 
   const messages: string[] = []

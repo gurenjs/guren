@@ -13,7 +13,7 @@ This guide walks you through building an application with user registration, log
 ## 1. Scaffold the Project
 
 ```bash
-bunx create-guren-app my-auth-app --mode ssr
+bunx create-guren-app my-auth-app --mode ssr --db postgres
 cd my-auth-app
 bun install
 ```

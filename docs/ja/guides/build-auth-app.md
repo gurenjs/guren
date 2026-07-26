@@ -13,7 +13,7 @@
 ## 1. プロジェクトを作成する
 
 ```bash
-bunx create-guren-app my-auth-app --mode ssr
+bunx create-guren-app my-auth-app --mode ssr --db postgres
 cd my-auth-app
 bun install
 ```

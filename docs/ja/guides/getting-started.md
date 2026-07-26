@@ -67,7 +67,7 @@ bun run db:up
 - PostgreSQL: `postgres://guren:guren@localhost:54322/guren`
 - MySQL: `mysql://guren:guren@localhost:33306/guren`
 
-使い終わったら `docker compose down` でコンテナを停止します。
+使い終わったら `bun run db:down` でコンテナを停止します。
 
 > [!TIP]
 > すでにローカルやクラウドで Postgres が動いていますか？ その場合は Docker を使わず、`DATABASE_URL` をそのインスタンスに向けるだけで構いません — このガイドの残りはそのまま通用します。SQLite で作ったアプリも、あとから `config/database.ts` を更新すれば切り替えられます。詳しくは [データベースガイド](./database.md) を参照してください。

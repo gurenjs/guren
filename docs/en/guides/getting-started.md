@@ -67,7 +67,7 @@ Default connection strings:
 - PostgreSQL: `postgres://guren:guren@localhost:54322/guren`
 - MySQL: `mysql://guren:guren@localhost:33306/guren`
 
-Stop the container with `docker compose down` when you are done.
+Stop the container with `bun run db:down` when you are done.
 
 > [!TIP]
 > Already running Postgres locally or in the cloud? Skip Docker entirely and point `DATABASE_URL` at that instance — the rest of the guide works unchanged. An existing SQLite app can switch later by updating `config/database.ts`; see the [Database Guide](./database.md).
