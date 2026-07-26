@@ -94,6 +94,11 @@ jobs:
           bun run --cwd examples/blog build
           bun run --cwd web build
 
+      # The plugin's unit tests build against synthetic fixtures; only a real
+      # Vite build proves its manifest lookup still finds the asset paths.
+      - name: Vercel build audit (example app)
+        run: bun run ./scripts/smoke/vercel-build-audit.ts examples/blog
+
       - name: Bundle budget audit
         run: bun run audit:bundle-budgets
 

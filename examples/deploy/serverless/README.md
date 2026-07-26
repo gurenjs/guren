@@ -57,3 +57,14 @@ If you want serverless scaling without Lambda's cold-start constraints, deploy t
 | Fly.io | Machines | See `deploy/fly/` recipe; scale-to-zero with Fly Machines |
 
 These platforms run the full Bun runtime, so every Guren feature works without adaptation.
+
+## Function and Edge Runtimes
+
+Two targets run Guren without a container, each with its own plugin:
+
+| Target | Recipe | Trade-off |
+|--------|--------|-----------|
+| Vercel | `deploy/vercel/` | Full Bun runtime; the function filesystem is not durable, so use a managed database |
+| Cloudflare Workers | `deploy/cloudflare/` | No filesystem and 10 ms of CPU per request on the free plan, which rules out password hashing — pair it with D1 and OAuth |
+
+Unlike the container platforms above, both need session and OAuth state in a shared store: requests are not guaranteed to reach the same instance.
