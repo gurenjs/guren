@@ -1,0 +1,6 @@
+{
+  "app": "bun bin/app.ts",
+  "context": {
+    "@aws-cdk/core:checkSecretUsage": true
+  }
+}

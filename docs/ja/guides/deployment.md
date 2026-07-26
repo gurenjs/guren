@@ -111,18 +111,20 @@ docker run --env-file .env.prod -p 3333:3333 my-app
 
 ## AWS Lambda（サーバーレス）
 
-`@guren/core/lambda` アダプターで Guren を AWS Lambda 上で動かせます。トラフィックが変動するアプリやインフラ管理を最小化したい場合に最適です。
+Guren は AWS Lambda の Node.js ランタイム上で動作します。トラフィックが変動するアプリやインフラ管理を最小化したい場合に最適です。公式プラグインがバンドルを担当し、インフラ用の CDK コンストラクトも同梱しています:
 
-```typescript
-// lambda.ts
-import app from './src/app'
-import { createLambdaHandler } from '@guren/core/lambda'
-
-await app.boot()
-export const handler = createLambdaHandler(app)
+```bash
+bunx guren plugin @guren/plugin-lambda
+bun add @guren/plugin-lambda
 ```
 
-HTTP、SQS キュー、EventBridge スケジューリング、CLI コマンドの専用ハンドラーを提供しています。詳細は **[サーバーレスデプロイガイド](./serverless.md)** を参照してください。
+CLI は `src/lambda.ts`（その export がそのまま Lambda ハンドラーになります）をスキャフォールドし、`lambda:build` コマンドを登録します:
+
+```bash
+bunx guren lambda:build
+```
+
+ビルドは `.lambda/` ディレクトリを生成します: 自己完結の関数バンドル、S3 用にステージングされた静的アセット、関数が必要とする環境変数の一覧です。HTTP、SQS キュー、EventBridge スケジューリング、CLI コマンドの専用ハンドラーを提供しています。データベース・SSR・CDK デプロイまで含めた詳細は **[サーバーレスデプロイガイド](./serverless.md)** を参照してください。
 
 ## Vercel（サーバーレス）
 
