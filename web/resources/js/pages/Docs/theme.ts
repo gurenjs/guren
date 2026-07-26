@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
+import { COLOR_MODE_STORAGE_KEY as STORAGE_KEY } from '../../../../config/theme.js'
 
 export const docsTheme = {
   fontFamily: 'system-ui, sans-serif',
@@ -30,20 +31,9 @@ export const docsTheme = {
 
 export type DocsTheme = typeof docsTheme
 
-export function useDocsPageTheme() {
-  useEffect(() => {
-    document.body.classList.add('docs-theme')
-    return () => {
-      document.body.classList.remove('docs-theme')
-    }
-  }, [])
-}
-
 // ─── Color mode (light / dark / system) ───
 
 export type ColorMode = 'light' | 'dark' | 'system'
-
-const STORAGE_KEY = 'guren-color-mode'
 
 function getStoredMode(): ColorMode {
   if (typeof window === 'undefined') return 'system'

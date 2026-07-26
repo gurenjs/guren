@@ -1,7 +1,11 @@
-import { describe, expect, it } from 'bun:test'
-import { inertia, setInertiaSsrRenderer } from '../../src'
+import { afterEach, describe, expect, it } from 'bun:test'
+import { inertia, setInertiaDocument, setInertiaSsrRenderer } from '../../src'
 
 describe('InertiaEngine SSR integration', () => {
+  afterEach(() => {
+    setInertiaDocument(undefined)
+  })
+
   it('renders client-side shell when no SSR renderer is configured', async () => {
     const response = await inertia('Dashboard', { stats: { users: 2 } }, { url: '/dashboard' })
     const body = await response.text()
@@ -12,21 +16,91 @@ describe('InertiaEngine SSR integration', () => {
   })
 
 
-  it('adds docs body class for docs pages', async () => {
+  it('ships a bare body and head when no document options are registered', async () => {
     const response = await inertia('Docs/Show', { categories: [] }, { url: '/docs/guides/overview' })
     const body = await response.text()
 
-    expect(body).toContain('<body class="docs-theme">')
+    expect(body).toContain('<body>')
+    expect(body).not.toContain('id="guren-critical"')
   })
 
+  it('applies the app-wide body class to every page component', async () => {
+    setInertiaDocument({ bodyClass: 'app-theme' })
 
-  it('injects docs prepaint critical style and script', async () => {
+    const response = await inertia('Dashboard', {}, { url: '/dashboard' })
+    const body = await response.text()
+
+    expect(body).toContain('<body class="app-theme">')
+  })
+
+  it('resolves document options per page component', async () => {
+    setInertiaDocument({
+      bodyClass: ({ component }) => (component.startsWith('Docs/') ? 'docs-theme' : undefined),
+    })
+
+    const docs = await inertia('Docs/Show', { categories: [] }, { url: '/docs/guides/overview' })
+    const home = await inertia('Home', {}, { url: '/' })
+
+    expect(await docs.text()).toContain('<body class="docs-theme">')
+    expect(await home.text()).toContain('<body>')
+  })
+
+  it('inlines critical CSS and the prepaint script into the head', async () => {
+    setInertiaDocument({
+      criticalCss: 'body{background:#ffffff;}',
+      prepaintScript: "document.documentElement.classList.add('dark');",
+    })
+
     const response = await inertia('Docs/Show', { categories: [] }, { url: '/docs/guides/overview' })
     const body = await response.text()
 
-    expect(body).toContain('id="guren-docs-critical"')
-    expect(body).toContain("localStorage.getItem('guren-color-mode')")
-    expect(body).toContain("prefers-color-scheme: dark")
+    expect(body).toContain('<style id="guren-critical">body{background:#ffffff;}</style>')
+    expect(body).toContain("<script>document.documentElement.classList.add('dark');</script>")
+  })
+
+  it('places the critical CSS and prepaint script ahead of the stylesheet links', async () => {
+    setInertiaDocument({
+      criticalCss: 'body{background:#ffffff;}',
+      prepaintScript: "document.documentElement.classList.add('dark');",
+    })
+
+    const response = await inertia(
+      'Docs/Show',
+      {},
+      { url: '/docs/guides/overview', styles: ['/assets/app.css'] },
+    )
+    const body = await response.text()
+
+    expect(body.indexOf('id="guren-critical"')).toBeLessThan(body.indexOf('/assets/app.css'))
+    expect(body.indexOf('classList.add')).toBeLessThan(body.indexOf('/assets/app.css'))
+  })
+
+  it('treats an empty per-call override as a suppression of the app-wide default', async () => {
+    setInertiaDocument({ bodyClass: 'docs-theme', criticalCss: 'body{background:#ffffff;}' })
+
+    const response = await inertia(
+      'Docs/Show',
+      {},
+      { url: '/docs/guides/overview', bodyClass: '', criticalCss: '' },
+    )
+    const body = await response.text()
+
+    expect(body).toContain('<body>')
+    expect(body).not.toContain('id="guren-critical"')
+  })
+
+  it('lets per-call options override the app-wide document defaults', async () => {
+    setInertiaDocument({ bodyClass: 'docs-theme', criticalCss: 'body{background:#ffffff;}' })
+
+    const response = await inertia(
+      'Docs/Show',
+      { categories: [] },
+      { url: '/docs/guides/overview', bodyClass: 'print-theme', criticalCss: 'body{background:#000000;}' },
+    )
+    const body = await response.text()
+
+    expect(body).toContain('<body class="print-theme">')
+    expect(body).toContain('<style id="guren-critical">body{background:#000000;}</style>')
   })
 
   it('utilizes provided SSR renderer when available', async () => {

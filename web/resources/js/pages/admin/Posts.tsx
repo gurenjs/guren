@@ -1,6 +1,5 @@
 import { Head, Link, router } from '@inertiajs/react'
 import { pageTitle } from '../../../../config/site.js'
-import { useDocsPageTheme } from '../Docs/theme.js'
 
 type AdminPostSummary = {
   id: number
@@ -23,8 +22,6 @@ function formatDate(iso: string): string {
 }
 
 export default function AdminPosts({ posts }: Props) {
-  useDocsPageTheme()
-
   const togglePublish = (post: AdminPostSummary) => {
     router.post(`/admin/posts/${post.id}/publish`, { published: !post.publishedAt })
   }

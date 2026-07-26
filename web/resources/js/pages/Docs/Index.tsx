@@ -36,7 +36,6 @@ import { Footer } from '../../components/Footer.js'
 import { Header } from '../../components/Header.js'
 import { Seo } from '../../components/Seo.js'
 import { BookOpenIcon, TerminalIcon } from '../../components/icons.js'
-import { useDocsPageTheme } from './theme.js'
 
 const HERO_COPY = {
   en: {
@@ -56,8 +55,6 @@ const HERO_COPY = {
 } as const
 
 export default function DocsIndex({ categories, locale, locales = [], basePath }: Props) {
-  useDocsPageTheme()
-
   const copy = HERO_COPY[locale]
 
   return (
