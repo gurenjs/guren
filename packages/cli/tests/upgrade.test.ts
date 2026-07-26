@@ -58,21 +58,90 @@ describe('upgradeCanary', () => {
   })
 
 
-  it('aligns Guren packages to a resolved rc version by default', async () => {
+  it('resolves the default tag and reports the version it landed on', async () => {
+    const tags: string[] = []
     const result = await upgradeCanary({
       cwd: workspace.dir,
-      versionResolver: async (name) => (name.startsWith('@guren/') ? '1.0.0-rc.99' : null),
+      versionResolver: async (name, tag) => {
+        tags.push(tag)
+        return name.startsWith('@guren/') ? '1.0.0-rc.99' : null
+      },
     })
     const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
       dependencies: Record<string, string>
       devDependencies: Record<string, string>
     }
 
-    expect(result.versionCompatibility?.targetVersion).toBe('rc')
+    expect(tags.every((tag) => tag === 'latest')).toBe(true)
+    // The report names the resolved version, not the tag, so a tag pointing at
+    // an older line cannot read as a clean upgrade.
+    expect(result.versionCompatibility?.targetVersion).toBe('1.0.0-rc.99')
+    expect(result.versionCompatibility?.downgrade).toBe(false)
     expect(packageJson.dependencies['@guren/core']).toBe('^1.0.0-rc.99')
     expect(packageJson.dependencies['@guren/server']).toBe('^1.0.0-rc.99')
     expect(packageJson.devDependencies['@guren/testing']).toBe('^1.0.0-rc.99')
     expect(packageJson.dependencies.react).toBe('^19.0.0')
+  })
+
+  it('degrades to a warning when the registry lookup throws', async () => {
+    const result = await upgradeCanary({
+      cwd: workspace.dir,
+      versionResolver: async () => {
+        throw new Error('ENOTFOUND registry.npmjs.org')
+      },
+    })
+
+    // A cached rejection used to be replayed uncaught by the second caller,
+    // taking the whole command down when the registry was unreachable.
+    expect(result.updatedDependencies).toHaveLength(0)
+    expect(result.versionCompatibility?.resolvedTarget).toBe(false)
+    expect(result.versionCompatibility?.warnings.join('\n')).toContain('Could not resolve')
+  })
+
+  it('does not call an unresolved tag compatible, and runs no codemods for it', async () => {
+    const result = await upgradeCanary({
+      cwd: workspace.dir,
+      versionResolver: async () => null,
+    })
+
+    expect(result.versionCompatibility?.resolvedTarget).toBe(false)
+    expect(result.versionCompatibility?.compatible).toBe(false)
+    expect(result.versionCompatibility?.targetVersion).toBe('latest')
+    expect(result.codemodResults).toHaveLength(0)
+  })
+
+  it('warns when the requested tag resolves to an older version', async () => {
+    await writeFile(
+      packageJsonPath,
+      JSON.stringify({
+        name: 'downgrade-test',
+        dependencies: { '@guren/core': '^1.3.0' },
+      }, null, 2),
+      'utf8',
+    )
+
+    const result = await upgradeCanary({
+      cwd: workspace.dir,
+      tag: 'rc',
+      versionResolver: async () => '1.0.0-rc.26',
+    })
+
+    expect(result.versionCompatibility?.downgrade).toBe(true)
+    expect(result.versionCompatibility?.compatible).toBe(false)
+    expect(result.versionCompatibility?.warnings.join('\n')).toContain('would downgrade')
+  })
+
+  it('resolves each package once even though it appears in several lookups', async () => {
+    const calls: string[] = []
+    await upgradeCanary({
+      cwd: workspace.dir,
+      versionResolver: async (name) => {
+        calls.push(name)
+        return '1.5.0'
+      },
+    })
+
+    expect(calls).toEqual([...new Set(calls)])
   })
 
   it('leaves packages untouched when the registry lookup fails', async () => {
@@ -211,6 +280,42 @@ describe('checkVersionCompatibility', () => {
     }
   })
 
+  it('skips pins that name a location instead of a release', async () => {
+    await writeFile(
+      join(workspace.dir, 'package.json'),
+      JSON.stringify({
+        name: 'compat-test',
+        dependencies: {
+          '@guren/server': 'workspace:*',
+          '@guren/core': '^1.3.0',
+        },
+      }, null, 2),
+      'utf8',
+    )
+
+    const result = await checkVersionCompatibility(workspace.dir, 'latest', async () => '1.3.0')
+
+    // `workspace:*` comes first but cannot anchor a comparison, so the check
+    // falls through to the next @guren/* pin that names a release.
+    expect(result.currentVersion).toBe('1.3.0')
+    expect(result.downgrade).toBe(false)
+  })
+
+  it('flags a resolved version older than the current pin', async () => {
+    const result = await checkVersionCompatibility(workspace.dir, 'rc', async () => '0.1.0')
+
+    expect(result.downgrade).toBe(true)
+    expect(result.targetVersion).toBe('0.1.0')
+    expect(result.warnings.join('\n')).toContain('older than')
+  })
+
+  it('leaves the tag in place when the registry lookup fails', async () => {
+    const result = await checkVersionCompatibility(workspace.dir, 'latest', async () => null)
+
+    expect(result.targetVersion).toBe('latest')
+    expect(result.downgrade).toBe(false)
+  })
+
   it('handles missing package.json gracefully', async () => {
     const { mkdtemp } = await import('node:fs/promises')
     const { tmpdir } = await import('node:os')
@@ -242,6 +347,35 @@ describe('compareVersions', () => {
   it('compares patch versions correctly', () => {
     expect(compareVersions('1.0.1', '1.0.0')).toBeGreaterThan(0)
     expect(compareVersions('1.0.0', '1.0.1')).toBeLessThan(0)
+  })
+
+  // Guren shipped its entire 1.0 line as 1.0.0-rc.N, so prerelease precedence is
+  // what the upgrade path actually compares. One ascending list covers every
+  // pair, including the transitive ones a case-by-case list would miss.
+  it('orders prereleases below their release, and numerically among themselves', () => {
+    const ascending = ['1.0.0-alpha', '1.0.0-rc.1', '1.0.0-rc.1.1', '1.0.0-rc.4', '1.0.0-rc.29', '1.0.0', '1.0.1']
+
+    for (const [index, lower] of ascending.entries()) {
+      expect(compareVersions(lower, lower)).toBe(0)
+      for (const higher of ascending.slice(index + 1)) {
+        expect(compareVersions(lower, higher)).toBeLessThan(0)
+        expect(compareVersions(higher, lower)).toBeGreaterThan(0)
+      }
+    }
+  })
+
+  it('ignores build metadata, which carries no precedence', () => {
+    expect(compareVersions('1.0.0+foo', '1.0.0+bar')).toBe(0)
+    expect(compareVersions('1.0.0-alpha+foo', '1.0.0-alpha+bar')).toBe(0)
+    expect(compareVersions('1.5.0+build', '1.5.1')).toBeLessThan(0)
+  })
+
+  it('reports unordered for anything that is not one exact version', () => {
+    // A partial pin is the dangerous one: Bun.semver ranks `1.3` *above*
+    // `1.3.0`, which would read as a downgrade.
+    for (const specifier of ['workspace:*', '^1.0.0', '1.3', 'latest', 'catalog:']) {
+      expect(compareVersions(specifier, '1.0.0')).toBeNaN()
+    }
   })
 })
 

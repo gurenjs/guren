@@ -94,13 +94,26 @@ export interface CodemodResult {
   files?: string[]
 }
 
+/**
+ * A single concrete semver version — three numeric segments, with optional
+ * prerelease and build metadata. Ranges (`^1.0.0`), partial pins (`1.3`), tag
+ * names, and `workspace:`-style specifiers are all excluded, so callers can use
+ * this to ask "is this orderable" without a second classification.
+ */
+const EXACT_VERSION = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]+)?$/u
+
+export function isExactVersion(specifier: string): boolean {
+  return EXACT_VERSION.test(specifier)
+}
+
+/**
+ * Order two versions, prereleases included. Returns NaN when either side is not
+ * an exact version — including a partial pin like `1.3`, which `Bun.semver`
+ * ranks *above* `1.3.0` rather than equal to it.
+ */
 export function compareVersions(a: string, b: string): number {
-  const pa = a.split('.').map(Number)
-  const pb = b.split('.').map(Number)
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const na = pa[i] ?? 0
-    const nb = pb[i] ?? 0
-    if (na !== nb) return na - nb
+  if (!isExactVersion(a) || !isExactVersion(b)) {
+    return Number.NaN
   }
-  return 0
+  return Bun.semver.order(a, b)
 }

@@ -9,11 +9,17 @@ import {
 } from './doctor'
 import { checkDeprecations, type DeprecationWarning } from './deprecations'
 import { runCommand } from './utils'
-import { compareVersions, runCodemods, type CodemodResult } from './codemods'
+import { compareVersions, isExactVersion, runCodemods, type CodemodResult } from './codemods'
 
 const PACKAGE_JSON = 'package.json'
 const GUREN_PACKAGE = /^(?:@guren\/|create-guren-app$)/u
 const MANIFEST_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'] as const
+
+/** `latest`, not `rc` — the `rc` tag still points at Guren's pre-1.0 candidates. */
+export const DEFAULT_UPGRADE_TAG = 'latest'
+
+/** The one tag pinned literally, so installs keep following it. */
+export const CANARY_TAG = 'canary'
 
 type ManifestField = (typeof MANIFEST_FIELDS)[number]
 
@@ -25,9 +31,9 @@ export interface UpgradeCanaryOptions {
   checkOnly?: boolean
   installRunner?: (cwd: string) => Promise<void>
   /**
-   * npm dist-tag to upgrade to (default: 'rc'). 'canary' pins the literal
-   * tag so installs keep floating; any other tag is resolved to a concrete
-   * version and written as ^version.
+   * npm dist-tag to upgrade to (default: {@link DEFAULT_UPGRADE_TAG}).
+   * 'canary' pins the literal tag so installs keep floating; any other tag is
+   * resolved to a concrete version and written as ^version.
    */
   tag?: string
   /** Override registry version lookups (used in tests). */
@@ -63,7 +69,12 @@ export interface UpgradeCanaryResult {
 export interface VersionCompatibility {
   compatible: boolean
   currentVersion: string
+  /** Concrete version the tag resolved to, or the tag when it could not be resolved. */
   targetVersion: string
+  /** True when `targetVersion` is a version the registry returned, not the tag name. */
+  resolvedTarget: boolean
+  /** True when the resolved target is older than what the app already pins. */
+  downgrade: boolean
   warnings: string[]
 }
 
@@ -99,21 +110,48 @@ async function runBunInstall(cwd: string): Promise<void> {
 }
 
 async function resolveDistTagVersion(packageName: string, tag: string): Promise<string | null> {
-  const response = await fetch(`https://registry.npmjs.org/${packageName}`, {
-    headers: { accept: 'application/vnd.npm.install-v1+json' },
-  })
+  // The dist-tags endpoint returns just the tag map. The full packument carries
+  // every published version's metadata — 33 KB for @guren/cli against 61 B
+  // here, and it grows with every release.
+  const response = await fetch(`https://registry.npmjs.org/-/package/${packageName}/dist-tags`)
   if (!response.ok) {
     return null
   }
-  const payload = (await response.json()) as { 'dist-tags'?: Record<string, string> }
-  return payload['dist-tags']?.[tag] ?? null
+  const tags = (await response.json()) as Record<string, string>
+  return tags[tag] ?? null
+}
+
+type VersionResolver = (packageName: string, tag: string) => Promise<string | null>
+
+/**
+ * Resolve each package once. The tag is looked up both to report the target
+ * version and to rewrite the manifest, and a package appears in more than one
+ * manifest field in real apps.
+ */
+function memoizeResolver(resolver: VersionResolver): VersionResolver {
+  const cache = new Map<string, Promise<string | null>>()
+  return (packageName, tag) => {
+    const key = `${packageName}@${tag}`
+    const cached = cache.get(key)
+    if (cached) {
+      return cached
+    }
+    // Cache the normalized result, never a rejected promise: replaying one to a
+    // caller that does not catch took the whole command down when the registry
+    // was unreachable.
+    const pending = Promise.resolve()
+      .then(() => resolver(packageName, tag))
+      .catch(() => null)
+    cache.set(key, pending)
+    return pending
+  }
 }
 
 async function updateManifestDependencies(
   cwd: string,
   dryRun = false,
-  tag = 'rc',
-  versionResolver: (packageName: string, tag: string) => Promise<string | null> = resolveDistTagVersion,
+  tag = DEFAULT_UPGRADE_TAG,
+  versionResolver: VersionResolver = resolveDistTagVersion,
 ): Promise<{
   packageJsonPath: string
   updatedDependencies: UpgradedDependency[]
@@ -126,11 +164,23 @@ async function updateManifestDependencies(
   // 'canary' keeps the floating dist-tag pin; other tags resolve to ^version
   // so every @guren/* package lands on one coherent release.
   const resolveTarget = async (name: string): Promise<string | null> => {
-    if (tag === 'canary') {
-      return 'canary'
+    if (tag === CANARY_TAG) {
+      return CANARY_TAG
     }
     const version = await versionResolver(name, tag)
     return version ? `^${version}` : null
+  }
+
+  // Warm every distinct package concurrently first. The loop below then hits the
+  // memo, so one round trip replaces one per package — and an unreachable
+  // registry costs a single connect timeout instead of one for each.
+  if (tag !== CANARY_TAG) {
+    const names = new Set(
+      MANIFEST_FIELDS.flatMap((field) => Object.keys(manifest[field] ?? {})).filter((name) =>
+        GUREN_PACKAGE.test(name),
+      ),
+    )
+    await Promise.all([...names].map((name) => versionResolver(name, tag)))
   }
 
   for (const field of MANIFEST_FIELDS) {
@@ -174,19 +224,35 @@ async function updateManifestDependencies(
   }
 }
 
-export async function checkVersionCompatibility(cwd: string, targetTag: string): Promise<VersionCompatibility> {
+export async function checkVersionCompatibility(
+  cwd: string,
+  targetTag: string,
+  versionResolver: VersionResolver = resolveDistTagVersion,
+): Promise<VersionCompatibility> {
   const manifestPath = join(cwd, 'package.json')
   const raw = await readFile(manifestPath, 'utf-8').catch(() => null)
-  if (!raw) return { compatible: true, currentVersion: 'unknown', targetVersion: targetTag, warnings: [] }
+  if (!raw) {
+    return {
+      compatible: true,
+      currentVersion: 'unknown',
+      targetVersion: targetTag,
+      resolvedTarget: false,
+      downgrade: false,
+      warnings: [],
+    }
+  }
 
   const manifest = JSON.parse(raw)
   const deps = { ...manifest.dependencies, ...manifest.devDependencies }
 
-  // Find current Guren version
-  const currentVersion = Object.entries(deps)
-    .filter(([k]) => k.startsWith('@guren/'))
-    .map(([, v]) => String(v).replace(/^[\^~]/, ''))[0] ?? 'unknown'
+  // Anchor on the first @guren/* pin that names an exact release: a
+  // `workspace:*` entry names a location and a partial `1.3` cannot be ordered.
+  const reference = Object.entries(deps)
+    .filter(([name]) => name.startsWith('@guren/'))
+    .map(([name, specifier]) => ({ name, version: String(specifier).replace(/^[\^~]/, '') }))
+    .find(({ version }) => isExactVersion(version))
 
+  const currentVersion = reference?.version ?? 'unknown'
   const warnings: string[] = []
 
   // Check Bun version compatibility
@@ -195,7 +261,39 @@ export async function checkVersionCompatibility(cwd: string, targetTag: string):
     warnings.push(`Bun ${bunVersion} may not be compatible. Recommend Bun 1.3.x or later.`)
   }
 
-  return { compatible: warnings.length === 0, currentVersion, targetVersion: targetTag, warnings }
+  // Resolve the tag so the report names a version: a tag left behind by an
+  // older release line must not read as a clean upgrade. Only the anchor pin is
+  // checked, and tags can resolve per-package, so this is a safety net over the
+  // common case rather than a guarantee for every rewrite the updater makes.
+  const resolved =
+    reference && targetTag !== CANARY_TAG
+      // The resolver passed in by upgradeCanary already normalizes failures;
+      // this catch covers a direct call with a raw one.
+      ? await versionResolver(reference.name, targetTag).catch(() => null)
+      : null
+
+  let downgrade = false
+  if (reference && targetTag !== CANARY_TAG && !resolved) {
+    warnings.push(
+      `Could not resolve ${reference.name}@${targetTag} from the npm registry, so the target version is unknown.`,
+    )
+  } else if (resolved && compareVersions(resolved, currentVersion) < 0) {
+    downgrade = true
+    warnings.push(
+      `Tag "${targetTag}" resolves ${reference?.name} to ${resolved}, which is older than the ${currentVersion} ` +
+        `this app already pins. Continuing would downgrade it. ` +
+        `Run with --tag ${DEFAULT_UPGRADE_TAG} for the current release.`,
+    )
+  }
+
+  return {
+    compatible: warnings.length === 0,
+    currentVersion,
+    targetVersion: resolved ?? targetTag,
+    resolvedTarget: resolved !== null,
+    downgrade,
+    warnings,
+  }
 }
 
 function collectManualSteps(checks: DoctorCheck[]): string[] {
@@ -206,11 +304,12 @@ function collectManualSteps(checks: DoctorCheck[]): string[] {
 
 export async function upgradeCanary(options: UpgradeCanaryOptions = {}): Promise<UpgradeCanaryResult> {
   const cwd = resolve(options.cwd ?? process.cwd())
-  const tag = options.tag ?? 'rc'
+  const tag = options.tag ?? DEFAULT_UPGRADE_TAG
   const manualStepsExtra: string[] = []
+  const versionResolver = memoizeResolver(options.versionResolver ?? resolveDistTagVersion)
 
   // Run version compatibility and deprecation checks
-  const versionCompatibility = await checkVersionCompatibility(cwd, tag)
+  const versionCompatibility = await checkVersionCompatibility(cwd, tag, versionResolver)
   const deprecationWarnings = await checkDeprecations(cwd)
 
   // If check-only mode, return early with just the checks
@@ -229,7 +328,7 @@ export async function upgradeCanary(options: UpgradeCanaryOptions = {}): Promise
     }
   }
 
-  const { packageJsonPath, updatedDependencies } = await updateManifestDependencies(cwd, Boolean(options.dryRun), tag, options.versionResolver)
+  const { packageJsonPath, updatedDependencies } = await updateManifestDependencies(cwd, Boolean(options.dryRun), tag, versionResolver)
   const { evaluations } = await getDoctorRuleEvaluations({ cwd })
 
   const candidateAutofixes = evaluations
@@ -265,13 +364,16 @@ export async function upgradeCanary(options: UpgradeCanaryOptions = {}): Promise
       return true
     })
 
-  // Run codemods for the version transition
-  const codemodResults = await runCodemods(
-    cwd,
-    versionCompatibility.currentVersion,
-    tag,
-    { dryRun: options.dryRun },
-  )
+  // Codemod ranges are written against versions, so an unresolved tag name has
+  // nothing to match and running them would silently select none.
+  const codemodResults = versionCompatibility.resolvedTarget
+    ? await runCodemods(
+        cwd,
+        versionCompatibility.currentVersion,
+        versionCompatibility.targetVersion,
+        { dryRun: options.dryRun },
+      )
+    : []
 
   if (!options.dryRun && options.install && updatedDependencies.length > 0) {
     const installRunner = options.installRunner ?? runBunInstall
