@@ -26,6 +26,16 @@ function countOccurrences(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1
 }
 
+const ANSI_PATTERN = /\x1b\[[0-9;]*m/g
+
+// consola renders `showUsage`'s markdown-style code spans as ANSI styling on
+// a TTY, but leaves the literal backticks in place on CI's non-TTY stdout
+// (e.g. "USAGE `guren [OPTIONS] ...`"). Strip both so assertions work in
+// either environment.
+function plainText(text: string): string {
+  return text.replace(ANSI_PATTERN, '').replace(/`/g, '')
+}
+
 describe('guren CLI error reporting', () => {
   it('reports a failing command once and exits 1', async () => {
     const workspace = await createTempWorkspace('guren-cli-bin-error-')
@@ -46,7 +56,7 @@ describe('guren CLI error reporting', () => {
 
       expect(exitCode).toBe(1)
       expect(countOccurrences(stderr, 'Unknown command')).toBe(1)
-      expect(stdout).toContain('USAGE guren')
+      expect(plainText(stdout)).toContain('USAGE guren')
     } finally {
       await workspace.cleanup()
     }
@@ -59,7 +69,7 @@ describe('guren CLI error reporting', () => {
 
       expect(exitCode).toBe(1)
       expect(countOccurrences(stderr, 'Missing required positional argument')).toBe(1)
-      expect(stdout).toContain('USAGE guren make:controller')
+      expect(plainText(stdout)).toContain('USAGE guren make:controller')
     } finally {
       await workspace.cleanup()
     }
@@ -71,8 +81,9 @@ describe('guren CLI error reporting', () => {
       const { exitCode, stdout } = await runBin(['make:controller', '--help'], workspace.dir)
 
       expect(exitCode).toBe(0)
-      expect(stdout).toContain('USAGE guren make:controller')
-      expect(stdout).toContain('Controller class name')
+      const normalized = plainText(stdout)
+      expect(normalized).toContain('USAGE guren make:controller')
+      expect(normalized).toContain('Controller class name')
     } finally {
       await workspace.cleanup()
     }
