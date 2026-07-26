@@ -54,7 +54,7 @@ describe('buildCloudflareOutput', () => {
     expect(worker).toContain('import app from "../src/app.ts"')
     expect(worker).toContain('process.env.GUREN_INERTIA_ENTRY = "/assets/app-Abc123.js"')
     expect(worker).toContain('process.env.GUREN_INERTIA_STYLES = "/assets/app-Def456.css"')
-    expect(worker).toContain('setInertiaSsrRenderer(ssrModule.render ?? ssrModule.default)')
+    expect(worker).toContain('setInertiaSsrRenderer(ssrModule.render)')
     expect(worker).toContain('export default createWorkersHandler(app)')
   })
 
@@ -142,7 +142,21 @@ describe('buildCloudflareOutput', () => {
     await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
 
     const worker = readFileSync(join(root, '.cloudflare/worker.js'), 'utf8')
-    expect(worker).toContain('setInertiaSsrRenderer(ssrModule.render ?? ssrModule.default)')
+    expect(worker).toContain('setInertiaSsrRenderer(ssrModule.default)')
+    expect(worker).not.toContain('ssrModule.render')
+  })
+
+  test('should prefer a callable default over a non-function render', async () => {
+    scaffoldApp(root, {
+      renderExport: 'export const render = 42\nexport default () => ({ body: "", head: [] })',
+    })
+
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+
+    // What the runtime loader would pick: each candidate is tested for being a
+    // function, so a non-callable `render` does not shadow a valid default.
+    const worker = readFileSync(join(root, '.cloudflare/worker.js'), 'utf8')
+    expect(worker).toContain('setInertiaSsrRenderer(ssrModule.default)')
   })
 
   test('should throw when the SSR entry exports no renderer', async () => {

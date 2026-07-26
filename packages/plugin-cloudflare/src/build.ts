@@ -267,6 +267,8 @@ function runAppBuild(root: string, scripts: Record<string, string>): void {
 interface SsrImport {
   /** Absolute path of the built SSR entry chunk. */
   file: string
+  /** Export name the chunk exposes the renderer under; the worker names it directly. */
+  rendererExport: 'render' | 'default'
 }
 
 async function resolveSsrImport(ssrDir: string, ssrEntryKey: string): Promise<SsrImport | undefined> {
@@ -294,14 +296,20 @@ async function resolveSsrImport(ssrDir: string, ssrEntryKey: string): Promise<Ss
   }
 
   const module = (await import(pathToFileURL(file).href)) as Record<string, unknown>
-  const renderer = module.render ?? module.default
-  if (typeof renderer !== 'function') {
+  // Mirrors extractSsrRenderer in @guren/server (mvc/inertia/InertiaEngine.ts):
+  // same order, same per-candidate function test, so the build accepts exactly
+  // what the server would run. Kept as a copy rather than an import — build.ts
+  // otherwise depends on node builtins alone.
+  const rendererExport = (['render', 'default'] as const).find(
+    (name) => typeof module[name] === 'function',
+  )
+  if (!rendererExport) {
     throw new Error(
       `Cloudflare build: SSR entry ${file} does not export a renderer (expected a named "render" or default export).`,
     )
   }
 
-  return { file }
+  return { file, rendererExport }
 }
 
 interface ClientAssetEnv {
@@ -360,7 +368,7 @@ function renderWorkerModule(input: {
   }
 
   if (input.ssrImport) {
-    lines.push('setInertiaSsrRenderer(ssrModule.render ?? ssrModule.default)', '')
+    lines.push(`setInertiaSsrRenderer(ssrModule.${input.ssrImport.rendererExport})`, '')
   }
 
   lines.push('export default createWorkersHandler(app)', '')
