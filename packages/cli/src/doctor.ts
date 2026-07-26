@@ -190,6 +190,16 @@ function createCheck(
     manualFix?: string
   } = {},
 ): DoctorCheck {
+  // A passing check carries no remediation, whatever the caller passed. Several
+  // rules build one check with a ternary status and hand the same options bag to
+  // both branches, so the pass branch arrived describing how to repair a problem
+  // the project does not have. Enforcing it here covers the report, `--json`,
+  // and anything added later — the alternative was each consumer filtering by
+  // status, which `buildJsonOutput` did not.
+  if (status === 'pass') {
+    return { key, title, status, message }
+  }
+
   return {
     key,
     title,
@@ -1255,13 +1265,25 @@ export function renderDoctorReport(report: DoctorReport): void {
     const prefix = check.status === 'pass' ? '[ok]' : check.status === 'warn' ? '[warn]' : '[fail]'
     const log = check.status === 'pass' ? consola.success : check.status === 'warn' ? consola.warn : consola.error
     log(`${prefix} ${check.title}: ${check.message}`)
-    if (check.fix) {
-      consola.info(`       Fix: ${check.fix}`)
+
+    if (check.status === 'pass') {
+      continue
+    }
+
+    // Some rules set both fields to the same string; others put a required extra
+    // step in `manualFix` (repair tsconfig.json *and* add `.guren/**/*`; install
+    // Bun from a URL rather than `bun upgrade`, which cannot run when Bun is
+    // missing). Dedupe, then the first line is the fix and any second is the
+    // step it does not cover.
+    const steps = [...new Set([check.fix, check.manualFix].filter((step): step is string => Boolean(step)))]
+    for (const [index, step] of steps.entries()) {
+      consola.info(`       ${index === 0 ? 'Fix' : 'Manual'}: ${step}`)
     }
     if (check.canAutofix) {
-      consola.info('       Autofix: available')
-    } else if (check.manualFix) {
-      consola.info(`       Manual: ${check.manualFix}`)
+      // Not an instruction: `guren upgrade` also realigns every @guren/*
+      // dependency, which is more than someone chasing one check asked for,
+      // and `guren doctor` has no --fix of its own.
+      consola.info('       Autofix: available — applied by `guren upgrade`')
     }
   }
 

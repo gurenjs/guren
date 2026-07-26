@@ -1,8 +1,9 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
-import { getDoctorRuleEvaluations, runDoctor, buildJsonOutput, suggestNextSteps } from '../src/doctor'
-import type { DoctorJsonOutput } from '../src/doctor'
+import { consola } from 'consola'
+import { getDoctorRuleEvaluations, runDoctor, buildJsonOutput, suggestNextSteps, renderDoctorReport } from '../src/doctor'
+import type { DoctorCheck, DoctorJsonOutput } from '../src/doctor'
 import { createTempWorkspace, writeInstalledPackage } from './helpers'
 
 let consoleLogSpy: ReturnType<typeof spyOn>
@@ -1132,5 +1133,115 @@ describe('suggestNextSteps', () => {
     } finally {
       await workspace.cleanup()
     }
+  })
+})
+
+describe('renderDoctorReport', () => {
+  function captureReport(checks: DoctorCheck[]): string[] {
+    const lines: string[] = []
+    const spies = (['success', 'warn', 'error', 'info'] as const).map((level) =>
+      spyOn(consola, level).mockImplementation(((message: unknown) => {
+        lines.push(String(message))
+      }) as never),
+    )
+    const boxSpy = spyOn(consola, 'box').mockImplementation((() => {}) as never)
+
+    try {
+      renderDoctorReport({
+        cwd: '/tmp/render-test',
+        checks,
+        fixableChecks: [],
+        manualChecks: [],
+        hasWarnings: checks.some((check) => check.status === 'warn'),
+        hasFailures: checks.some((check) => check.status === 'fail'),
+        recommendedCommands: [],
+      })
+    } finally {
+      for (const spy of spies) spy.mockRestore()
+      boxSpy.mockRestore()
+    }
+
+    return lines
+  }
+
+  it('does not print remediation for a check that passed', () => {
+    const lines = captureReport([
+      {
+        key: 'generated:.guren/routes.gen.ts',
+        title: '.guren/routes.gen.ts',
+        status: 'pass',
+        message: 'Generated manifest present at .guren/routes.gen.ts.',
+        fix: 'Run guren codegen --force to regenerate .guren/routes.gen.ts.',
+        manualFix: 'Run guren codegen --force to regenerate .guren/routes.gen.ts.',
+      },
+    ])
+
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toContain('[ok]')
+    expect(lines.some((line) => line.includes('Fix:'))).toBe(false)
+  })
+
+  it('collapses a duplicated remediation into one line', () => {
+    const lines = captureReport([
+      {
+        key: 'generated:.guren/routes.gen.ts',
+        title: '.guren/routes.gen.ts',
+        status: 'warn',
+        message: 'Missing .guren/routes.gen.ts.',
+        fix: 'Run guren codegen --force to regenerate .guren/routes.gen.ts.',
+        manualFix: 'Run guren codegen --force to regenerate .guren/routes.gen.ts.',
+      },
+    ])
+
+    expect(lines.filter((line) => line.includes('Fix:'))).toHaveLength(1)
+    expect(lines.some((line) => line.includes('Manual:'))).toBe(false)
+  })
+
+  it('keeps a manual step that says more than the fix', () => {
+    // `bun upgrade` cannot run when Bun is missing, so the URL in manualFix is
+    // the only usable instruction — dropping it as a duplicate would strand
+    // the reader.
+    const lines = captureReport([
+      {
+        key: 'bun-version',
+        title: 'Bun Version',
+        status: 'fail',
+        message: 'Bun was not detected.',
+        fix: 'Install or update Bun with `bun upgrade`.',
+        manualFix: 'Install Bun from https://bun.sh and ensure version >= 1.1.0.',
+      },
+    ])
+
+    expect(lines.some((line) => line.includes('Fix: Install or update Bun'))).toBe(true)
+    expect(lines.some((line) => line.includes('Manual: Install Bun from https://bun.sh'))).toBe(true)
+  })
+
+  it('falls back to manualFix when a rule sets only that field', () => {
+    const lines = captureReport([
+      {
+        key: 'plugin-compatibility',
+        title: 'Plugin compatibility',
+        status: 'warn',
+        message: 'A plugin declares an incompatible range.',
+        manualFix: 'Upgrade the plugin or pin a compatible Guren release.',
+      },
+    ])
+
+    expect(lines.some((line) => line.includes('Fix: Upgrade the plugin'))).toBe(true)
+  })
+
+  it('names the command that applies an autofix', () => {
+    const lines = captureReport([
+      {
+        key: 'env-file',
+        title: 'Environment File',
+        status: 'warn',
+        message: 'No .env file detected.',
+        fix: 'Create a .env file.',
+        canAutofix: true,
+      },
+    ])
+
+    expect(lines.some((line) => line.includes('Autofix: available — applied by `guren upgrade`'))).toBe(true)
   })
 })
