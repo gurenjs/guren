@@ -30,7 +30,9 @@ web/                # Documentation site
 bun run build
 
 # Run tests
-bun run test:bun      # Framework unit tests
+bun run test:bun      # Framework unit tests (packages auto-discovered)
+bun run test:bun:list # Print which packages test:bun covers
+bun run test:bun cli  # Narrow to one or more packages
 bun run test:examples # Example app tests
 bun run test          # Full test suite
 
@@ -49,12 +51,24 @@ bun run db:seed       # Run seeders
 
 ## Build Order & Troubleshooting
 
-`bun run build` executes packages sequentially in dependency order:
-`testing → orm → server → openapi → cli → core → create-app → inertia`
+`bun run build` runs `scripts/build-packages.ts`, which discovers every package
+under `packages/` that has a `build` script, topologically sorts them by their
+`dependencies`/`peerDependencies`, and builds them sequentially. **New packages
+(plugins included) need no script wiring** — they are picked up automatically.
+
+```bash
+bun run build:list    # print the resolved order without building
+```
+
+Discovery and the topological sort live in `scripts/workspace-packages.ts`, shared
+with `scripts/test-packages.ts` (which backs `test:bun`). The one manual knob there
+is `ignoredEdges`: `@guren/cli` and `@guren/core` depend on each other, so core's
+edge on cli is dropped to break the cycle. Any *other* cycle fails the build with
+an explicit error.
 
 **Stale `.d.ts` issue:** If DTS build fails (e.g., `@guren/core` cannot find `@guren/server` types), old `dist/` artifacts are likely interfering. Run:
 ```bash
-bun run build:clean   # rm -rf packages/*/dist && bun run build
+bun run build:clean   # remove each package's dist/ then build
 ```
 
 **Rule:** Always use `bun run build:clean` instead of `bun run build` when:
@@ -65,11 +79,12 @@ bun run build:clean   # rm -rf packages/*/dist && bun run build
 ## Package-Specific Builds
 
 ```bash
-bun run build:server  # Build @guren/server
-bun run build:orm     # Build @guren/orm
-bun run build:cli     # Build @guren/cli
-# etc.
+bun run build server   # Build @guren/server only
+bun run build cli orm  # Build a subset, still in dependency order
 ```
+
+Named shortcuts (`bun run build:server`, `build:orm`, `build:cli`, …) remain for
+the long-standing packages.
 
 ## AI Agent Commands
 
