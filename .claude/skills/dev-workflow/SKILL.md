@@ -21,13 +21,18 @@ Build all packages in the correct dependency order.
 bun run build
 ```
 
-Build order: testing → orm → server → cli → core → create-app → inertia-client
+The order is derived from each package's `dependencies`/`peerDependencies`, so new
+packages (plugins included) are picked up without editing any script. Print it with:
+
+```bash
+bun run build:list
+```
 
 **Single package:**
 ```bash
-bun run build:server  # @guren/server
-bun run build:orm     # @guren/orm
-bun run build:cli     # @guren/cli
+bun run build server  # @guren/server
+bun run build orm     # @guren/orm
+bun run build cli     # @guren/cli
 ```
 
 **On failure:** Identify the failing package and show the TypeScript/build error. The issue is usually in that package's `src/` directory.
@@ -67,8 +72,11 @@ bun run test
 ```
 
 Runs:
-- `bun run test:bun` — Framework tests (packages/server, packages/orm, packages/cli, etc.)
+- `bun run test:bun` — Framework tests. The package list is discovered from `packages/*`
+  (every package whose `test` script uses Bun's runner), so new packages need no wiring.
+  `bun run test:bun:list` prints it; `bun run test:bun <pkg>` narrows it.
 - `bun run test:examples` — Example app tests (blog, api)
+- `bun run test:testing` — `@guren/testing` only (vitest, so not part of `test:bun`)
 
 **On failure:** Identify the failing test file and test name, show the error, suggest fixes.
 
