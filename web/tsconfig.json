@@ -14,9 +14,6 @@
       "@guren/core": [
         "../packages/core/src/index.ts"
       ],
-      "@guren/plugin-vercel": [
-        "../packages/plugin-vercel/src/index.ts"
-      ],
       "@guren/plugin-cloudflare": [
         "../packages/plugin-cloudflare/dist/index",
         "../packages/plugin-cloudflare/dist/index.d.ts"
