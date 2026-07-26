@@ -151,6 +151,7 @@ describe('upgradeCanary', () => {
       cwd: workspace.dir,
       versionResolver: async () => '1.2.0',
       dependencyPinResolver: async () => '1.0.0-rc.4',
+      versionExistsResolver: async () => true,
     })
     const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
       dependencies: Record<string, string>
@@ -163,6 +164,107 @@ describe('upgradeCanary', () => {
     expect(packageJson.devDependencies['drizzle-kit']).toBe('1.0.0-rc.4')
     expect(result.updatedDependencies.some((dependency) => dependency.name === 'drizzle-orm')).toBe(true)
     expect(result.updatedDependencies.some((dependency) => dependency.name === 'drizzle-kit')).toBe(true)
+  })
+
+  it('does not overwrite drizzle specifiers that name a location', async () => {
+    await writeFile(
+      packageJsonPath,
+      JSON.stringify({
+        name: 'drizzle-local',
+        dependencies: {
+          '@guren/orm': '^1.0.0',
+          'drizzle-orm': 'workspace:*',
+        },
+      }, null, 2),
+      'utf8',
+    )
+
+    await upgradeCanary({
+      cwd: workspace.dir,
+      versionResolver: async () => '1.2.0',
+      dependencyPinResolver: async () => '1.0.0-rc.4',
+      versionExistsResolver: async () => true,
+    })
+    const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
+      dependencies: Record<string, string>
+    }
+
+    expect(packageJson.dependencies['drizzle-orm']).toBe('workspace:*')
+  })
+
+  it('does not narrow a published peer range', async () => {
+    await writeFile(
+      packageJsonPath,
+      JSON.stringify({
+        name: 'drizzle-peer',
+        dependencies: { '@guren/orm': '^1.0.0' },
+        peerDependencies: { 'drizzle-orm': '^1' },
+      }, null, 2),
+      'utf8',
+    )
+
+    await upgradeCanary({
+      cwd: workspace.dir,
+      versionResolver: async () => '1.2.0',
+      dependencyPinResolver: async () => '1.0.0-rc.4',
+      versionExistsResolver: async () => true,
+    })
+    const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
+      peerDependencies: Record<string, string>
+    }
+
+    expect(packageJson.peerDependencies['drizzle-orm']).toBe('^1')
+  })
+
+  it('skips drizzle-kit when the matching version was never published', async () => {
+    await writeFile(
+      packageJsonPath,
+      JSON.stringify({
+        name: 'drizzle-kit-missing',
+        dependencies: { '@guren/orm': '^1.0.0', 'drizzle-orm': '1.0.0-rc.1' },
+        devDependencies: { 'drizzle-kit': '0.31.0' },
+      }, null, 2),
+      'utf8',
+    )
+
+    await upgradeCanary({
+      cwd: workspace.dir,
+      versionResolver: async () => '1.2.0',
+      dependencyPinResolver: async () => '1.0.0-rc.4',
+      // drizzle-kit rides its own release line, so the ORM's drizzle-orm
+      // version need not exist for it.
+      versionExistsResolver: async (name) => name !== 'drizzle-kit',
+    })
+    const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
+      dependencies: Record<string, string>
+      devDependencies: Record<string, string>
+    }
+
+    expect(packageJson.dependencies['drizzle-orm']).toBe('1.0.0-rc.4')
+    expect(packageJson.devDependencies['drizzle-kit']).toBe('0.31.0')
+  })
+
+  it('leaves drizzle alone when the ORM depends on a range rather than one version', async () => {
+    await writeFile(
+      packageJsonPath,
+      JSON.stringify({
+        name: 'drizzle-range',
+        dependencies: { '@guren/orm': '^1.0.0', 'drizzle-orm': '1.0.0-rc.1' },
+      }, null, 2),
+      'utf8',
+    )
+
+    await upgradeCanary({
+      cwd: workspace.dir,
+      versionResolver: async () => '1.2.0',
+      dependencyPinResolver: async () => '^1.0.0',
+      versionExistsResolver: async () => true,
+    })
+    const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
+      dependencies: Record<string, string>
+    }
+
+    expect(packageJson.dependencies['drizzle-orm']).toBe('1.0.0-rc.1')
   })
 
   it('leaves drizzle alone for an app that does not use @guren/orm', async () => {

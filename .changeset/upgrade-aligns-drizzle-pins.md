@@ -21,11 +21,24 @@ for apps.
 
 The command now reads the `drizzle-orm` version the target `@guren/orm` depends
 on straight from its registry metadata and writes that, exactly, to both
-`drizzle-orm` and `drizzle-kit`. It only acts on apps that declare `@guren/orm`
-and already have a drizzle entry, never adds one, and leaves both alone when the
-pin cannot be read.
+`drizzle-orm` and `drizzle-kit`. It only rewrites entries that already exist,
+never adds one, and stands down rather than guessing when:
 
-`drizzle-kit` is matched to `drizzle-orm` by convention rather than from
-metadata: it is not a dependency of `@guren/orm`, so the registry has nothing to
-say about it — the two simply ship as a pair, which is what the templates and
-`packages/orm` already assume.
+- the entry names a location instead of a release (`workspace:`, `file:`,
+  `catalog:`, a git URL) — usually a local drizzle build being developed
+  against, which a registry release would silently replace;
+- the field is `peerDependencies` or `optionalDependencies` — a peer range is a
+  compatibility window a library publishes, not an installed copy to dedupe, and
+  narrowing it to one exact version shrinks what that library claims to support;
+- `@guren/orm` depends on a range rather than one exact version — deduping only
+  works when there is a single version to converge on;
+- the version was never published for `drizzle-kit`.
+
+That last one matters because `drizzle-kit` is matched by convention, not from
+metadata: it is not a dependency of `@guren/orm`, so the registry says nothing
+about it, and the two packages have not always shared a release line. Writing a
+`drizzle-kit` version that does not exist would break the next install, so its
+existence is checked first and the entry is left alone with a warning otherwise.
+
+Registry documents are fetched once per package for the whole command, so adding
+these lookups does not add requests.
