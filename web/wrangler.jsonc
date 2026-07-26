@@ -9,6 +9,10 @@
     {
       "pattern": "guren.dev",
       "custom_domain": true
+    },
+    {
+      "pattern": "www.guren.dev",
+      "custom_domain": true
     }
   ],
   "compatibility_date": "2026-07-25",
