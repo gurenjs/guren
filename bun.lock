@@ -269,7 +269,6 @@
         "@guren/inertia-client": "workspace:*",
         "@guren/orm": "workspace:*",
         "@guren/plugin-cloudflare": "workspace:*",
-        "@guren/plugin-vercel": "workspace:*",
         "@guren/testing": "workspace:*",
         "@inertiajs/core": "^3.6.1",
         "@inertiajs/react": "^3.6.1",
