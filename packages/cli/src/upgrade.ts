@@ -24,6 +24,13 @@ export const CANARY_TAG = 'canary'
 /** Kept in step with what `@guren/orm` depends on, not with each other. */
 const DRIZZLE_PACKAGES = ['drizzle-orm', 'drizzle-kit'] as const
 
+/**
+ * A specifier pointing at a place rather than the registry. Unlike a range,
+ * which can be converged onto a published version, this cannot — rewriting it
+ * would change what the app actually runs.
+ */
+const LOCATION_SPECIFIER = /^(?:workspace|catalog|link|file|npm|git|github|portal|patch):|^[.~/]/u
+
 /** Fields that describe what gets installed, so a duplicate copy is possible. */
 const DRIZZLE_ALIGNED_FIELDS = ['dependencies', 'devDependencies'] as const
 
@@ -280,7 +287,7 @@ async function alignDrizzlePins(
       // `workspace:`, `file:`, `catalog:` and friends name a location on
       // purpose — usually a local drizzle build being developed against.
       // Replacing that with a registry release changes what the app runs.
-      if (NON_REGISTRY_SPECIFIER.test(current)) {
+      if (LOCATION_SPECIFIER.test(current)) {
         console.warn(
           `[guren upgrade] ${field}.${name} is "${current}", which names a location rather than a release — leaving it alone. Align it with drizzle-orm ${pin} yourself if you want the ORM's copy deduped.`,
         )
