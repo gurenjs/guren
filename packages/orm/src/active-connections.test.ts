@@ -38,6 +38,53 @@ describe('describeCallerFile', () => {
     )
   })
 
+  test('should keep a path that contains spaces intact', () => {
+    // "My Projects", iCloud's "Mobile Documents" — ordinary on macOS. A
+    // truncated path no longer identifies the caller: two call sites that
+    // truncate alike land on one registry slot, and under `--hot` the second
+    // would close the first's live connection.
+    const bare = [
+      'Error',
+      '    at createPostgresDatabase (/app/dist/index.js:1:1)',
+      '    at /Users/me/My Projects/app/config/database.ts:3:18',
+    ].join('\n')
+    const named = [
+      'Error',
+      '    at createPostgresDatabase (/app/dist/index.js:1:1)',
+      '    at makeDatabase (/Users/me/My Projects/app/config/database.ts:3:18)',
+    ].join('\n')
+
+    expect(describeCallerFile(bare)).toBe('/Users/me/My Projects/app/config/database.ts')
+    expect(describeCallerFile(named)).toBe('/Users/me/My Projects/app/config/database.ts')
+  })
+
+  test('should keep a path that contains parentheses intact', () => {
+    // Same failure as the spaces above: the path is whatever the frame says it
+    // is, so nothing about it may be excluded — a named frame is bounded by its
+    // own trailing `)`, not by the first one it happens to contain.
+    const bare = ['Error', '    at factory (/app/dist/index.js:1:1)', '    at /app (old)/config/database.ts:3:18'].join(
+      '\n',
+    )
+    const named = [
+      'Error',
+      '    at factory (/app/dist/index.js:1:1)',
+      '    at makeDatabase (/app (old)/config/database.ts:3:18)',
+    ].join('\n')
+
+    expect(describeCallerFile(bare)).toBe('/app (old)/config/database.ts')
+    expect(describeCallerFile(named)).toBe('/app (old)/config/database.ts')
+  })
+
+  test('should reject a frame that names no location', () => {
+    // Rejecting is the safe failure: no key means the handle is left alone, and
+    // a leaked connection beats closing a live one that belongs to someone else.
+    const frame = (last: string) => describeCallerFile(`Error\n    at factory (/app/dist/index.js:1:1)\n${last}`)
+
+    expect(frame('    at native')).toBeUndefined()
+    expect(frame('    at <anonymous>')).toBeUndefined()
+    expect(frame('    at makeDatabase (native)')).toBeUndefined()
+  })
+
   test('should return undefined when there is no caller frame', () => {
     expect(describeCallerFile(undefined)).toBeUndefined()
     expect(describeCallerFile('Error')).toBeUndefined()
