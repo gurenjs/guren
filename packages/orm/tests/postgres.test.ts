@@ -8,8 +8,10 @@ const drizzleMock = mock((config: Record<string, unknown>) => ({
   config,
 }))
 const migrateMock = mock(async () => {})
+let unsafeImpl: (query: string) => Promise<unknown[]> = async () => []
 const postgresMock = mock((_url: string, _options: Record<string, unknown>) => ({
   end: mock(async () => {}),
+  unsafe: (query: string) => unsafeImpl(query),
 }))
 
 await mock.module('drizzle-orm/postgres-js', () => ({
@@ -116,7 +118,8 @@ describe('createPostgresDatabase', () => {
     expect(error?.message).toBe(
       'Failed to run database migrations: cannot connect to the database at db.internal:54322 (ECONNREFUSED). Is it running and accepting connections?',
     )
-    // The connection string's password must never reach the log.
+    // Canary: keeps the credential check alive if the assertion above is
+    // ever loosened from toBe to toContain.
     expect(error?.message).not.toContain('hunter2')
   })
 
@@ -139,6 +142,68 @@ describe('createPostgresDatabase', () => {
 
     expect(error?.message).toContain('ALTER TABLE "posts"')
     expect(error?.message).toContain('column "slug" of relation "posts" already exists')
+  })
+
+  it('reports an unreachable server from db:status instead of calling every migration pending', async () => {
+    const migrationsFolder = createMigrationsFolder(true)
+    const database = createPostgresDatabase({
+      migrationsFolder,
+      connectionString: () => 'postgres://guren:hunter2@db.internal:54322/guren',
+    })
+
+    // postgres-js reports an unreachable server as a message-less AggregateError,
+    // which the tracker-table catch would otherwise read as "nothing applied".
+    unsafeImpl = async () => {
+      throw Object.assign(new AggregateError([], ''), { code: 'ECONNREFUSED' })
+    }
+
+    const error = await database.migrationStatus().then(
+      () => null,
+      (reason: unknown) => reason as Error,
+    )
+    unsafeImpl = async () => []
+
+    expect(error?.message).toBe(
+      'cannot connect to the database at db.internal:54322 (ECONNREFUSED). Is it running and accepting connections?',
+    )
+  })
+
+  it('still reports nothing applied when only the tracker table is missing', async () => {
+    const migrationsFolder = createMigrationsFolder(true)
+    const database = createPostgresDatabase({
+      migrationsFolder,
+      connectionString: () => 'postgres://guren:hunter2@db.internal:54322/guren',
+    })
+
+    unsafeImpl = async () => {
+      throw Object.assign(new Error('relation "drizzle.__drizzle_migrations" does not exist'), { code: '42P01' })
+    }
+
+    const status = await database.migrationStatus()
+    unsafeImpl = async () => []
+
+    expect(status).toEqual([{ name: '20240101000000_init', applied: false, appliedAt: null }])
+  })
+
+  it('describes an unreachable server when resetting rather than throwing a message-less error', async () => {
+    const database = createPostgresDatabase({
+      migrationsFolder: createMigrationsFolder(true),
+      connectionString: () => 'postgres://guren:hunter2@db.internal:54322/guren',
+    })
+
+    unsafeImpl = async () => {
+      throw Object.assign(new AggregateError([], ''), { code: 'ECONNREFUSED' })
+    }
+
+    const error = await database.resetDatabase().then(
+      () => null,
+      (reason: unknown) => reason as Error,
+    )
+    unsafeImpl = async () => []
+
+    expect(error?.message).toBe(
+      'cannot connect to the database at db.internal:54322 (ECONNREFUSED). Is it running and accepting connections?',
+    )
   })
 
   it('throws when seeders folder is missing', async () => {

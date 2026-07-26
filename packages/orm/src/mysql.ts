@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, describeConnectionEndpoint, describeMigrationFailure, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isConnectionFailure, migrationFailure, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders } from './seeder'
 
 type ConnectionResolver = string | (() => string | undefined)
@@ -88,7 +88,9 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
       return migrationsPromise
     }
 
-    // Captured for the error handler below, which runs outside this closure.
+    // Resolved inside the IIFE below: resolveConnectionString() throws when no
+    // connection string is configured, so it must not run before the
+    // no-migrations early return. The catch handler needs it afterwards.
     let endpoint: string | undefined
 
     const promise = (async (): Promise<void> => {
@@ -118,7 +120,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
 
     migrationsPromise = promise.catch((error) => {
       migrationsPromise = undefined
-      throw new Error(`Failed to run database migrations: ${describeMigrationFailure(error, endpoint)}`)
+      throw migrationFailure(error, endpoint)
     })
 
     await migrationsPromise
@@ -194,9 +196,10 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
 
   async function withAdminDb<T>(callback: (db: MySql2Database) => Promise<T>): Promise<T> {
     const { drizzle } = await loadMySqlModules()
+    const url = resolveConnectionString()
     const adminDb = drizzle({
       connection: {
-        uri: resolveConnectionString(),
+        uri: url,
         ...clientOptions,
       },
       mode: 'default',
@@ -204,6 +207,9 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
 
     try {
       return await callback(adminDb)
+    } catch (error) {
+      // Rethrowing raw would surface the driver's bare code with no message.
+      throw new Error(describeDatabaseFailure(error, describeConnectionEndpoint(url)))
     } finally {
       await closeClient(adminDb)
     }
@@ -242,7 +248,11 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
           sql.raw('SELECT name, applied_at FROM __drizzle_migrations'),
         )) as unknown as [Array<{ name: string | null; applied_at: string | Date | null }>]
         return rows.map((row) => ({ name: row.name, appliedAt: row.applied_at }))
-      } catch {
+      } catch (error) {
+        // An unreachable server reaches this catch too, and reporting it as
+        // "nothing applied" makes db:status indistinguishable from a database
+        // that is up with no migrations run.
+        if (isConnectionFailure(error)) throw error
         // Tracker table does not exist yet — nothing applied.
         return []
       }

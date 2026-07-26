@@ -3,7 +3,7 @@ import { relative, resolve } from 'node:path'
 import process from 'node:process'
 import { consola } from 'consola'
 import { defineCommand, runMain } from 'citty'
-import { DATABASE_DRIVERS, getAppBlueprint, listAppBlueprints, scaffoldAppBlueprint, type DatabaseDriver, type RenderingMode } from './blueprints'
+import { DATABASE_DRIVERS, getAppBlueprint, listAppBlueprints, scaffoldAppBlueprint, usesDatabaseContainer, type DatabaseDriver, type RenderingMode } from './blueprints'
 import { directoryExists, isDirectoryEmpty } from './utils'
 
 const RENDERING_MODES = ['spa', 'ssr'] as const
@@ -242,7 +242,7 @@ const command = defineCommand({
     if (!installed) {
       consola.log('  bun install')
     }
-    if (database !== 'sqlite') {
+    if (usesDatabaseContainer(database)) {
       consola.log('  bun run db:up')
     }
     consola.log('')

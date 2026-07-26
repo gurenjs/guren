@@ -470,6 +470,15 @@ export default defineConfig({
 `
 }
 
+/**
+ * True when the driver runs in a container the scaffolder provisions — the one
+ * fact that decides docker-compose.yml, the db:up/db:down scripts, and whether
+ * the next-steps output mentions starting a database.
+ */
+export function usesDatabaseContainer(driver: DatabaseDriver): boolean {
+  return generateDockerCompose(driver) !== null
+}
+
 function generateDockerCompose(driver: DatabaseDriver): string | null {
   if (driver === 'postgres') {
     return `services:
@@ -551,8 +560,8 @@ async function applyDatabaseConfig(destination: string, driver: DatabaseDriver):
     // migration failure.
     if (dockerCompose) {
       pkg.scripts ??= {}
-      pkg.scripts['db:up'] ??= 'docker compose up -d'
-      pkg.scripts['db:down'] ??= 'docker compose down'
+      pkg.scripts['db:up'] = 'docker compose up -d'
+      pkg.scripts['db:down'] = 'docker compose down'
     }
 
     await writeFile(packageJsonPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8')

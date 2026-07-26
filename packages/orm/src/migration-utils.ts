@@ -58,17 +58,26 @@ const PRE_CONNECTION_ERROR_CODES = new Set([
   'ENOTFOUND',
 ])
 
-/** True when this error was raised while establishing the connection. */
-function failedWhileConnecting(error: unknown): boolean {
-  const { code, syscall } = error as { code?: unknown; syscall?: unknown }
-  if (typeof code === 'string' && PRE_CONNECTION_ERROR_CODES.has(code)) {
-    return true
-  }
-  return syscall === 'connect' && typeof code === 'string' && code !== ''
+interface CauseLike {
+  code?: unknown
+  message?: unknown
+  syscall?: unknown
 }
 
-/** Walks the cause chain (and AggregateError members) collecting every nested error. */
-function collectCauses(error: unknown, seen = new Set<unknown>()): unknown[] {
+/** True when this error was raised while establishing the connection. */
+function failedWhileConnecting(error: CauseLike): error is CauseLike & { code: string } {
+  const { code, syscall } = error
+  if (typeof code !== 'string' || code === '') {
+    return false
+  }
+  return PRE_CONNECTION_ERROR_CODES.has(code) || syscall === 'connect'
+}
+
+/**
+ * Walks the cause chain (and AggregateError members) collecting every nested
+ * error, outwards-in. `seen` bounds the walk on self-referencing chains.
+ */
+function collectCauses(error: unknown, seen = new Set<unknown>()): CauseLike[] {
   if (error == null || typeof error !== 'object' || seen.has(error)) {
     return []
   }
@@ -79,11 +88,16 @@ function collectCauses(error: unknown, seen = new Set<unknown>()): unknown[] {
     ...('cause' in error ? [(error as { cause: unknown }).cause] : []),
   ]
 
-  return [error, ...nested.flatMap((child) => collectCauses(child, seen))]
+  return [error as CauseLike, ...nested.flatMap((child) => collectCauses(child, seen))]
+}
+
+/** True when the failure means the database server was never reached. */
+export function isConnectionFailure(error: unknown): boolean {
+  return collectCauses(error).some(failedWhileConnecting)
 }
 
 /**
- * Turns a migration failure into a message that names the actual problem.
+ * Turns a database failure into a message that names the actual problem.
  *
  * Drizzle wraps driver failures in a DrizzleQueryError whose message is the SQL
  * it was running — for a fresh database that is `CREATE SCHEMA IF NOT EXISTS
@@ -92,42 +106,49 @@ function collectCauses(error: unknown, seen = new Set<unknown>()): unknown[] {
  * unreachable server (postgres-js reports `ECONNREFUSED` on `cause` and leaves
  * that error's message empty) or a SQL error whose text also lives on `cause`.
  *
- * `endpoint` is included only as host:port / filename — never the connection
- * string, which carries credentials.
+ * `endpoint` is included only as host:port — never the connection string, which
+ * carries credentials.
  */
-export function describeMigrationFailure(error: unknown, endpoint?: string): string {
+export function describeDatabaseFailure(error: unknown, endpoint?: string): string {
   const causes = collectCauses(error)
-  const codes = causes
-    .map((cause) => (cause as { code?: unknown }).code)
-    .filter((code): code is string => typeof code === 'string' && code !== '')
 
-  const connectFailure = causes.find(failedWhileConnecting) as { code: string } | undefined
+  const connectFailure = causes.find(failedWhileConnecting)
   if (connectFailure) {
     const target = endpoint ? `the database at ${endpoint}` : 'the database'
     return `cannot connect to ${target} (${connectFailure.code}). Is it running and accepting connections?`
   }
 
-  const messages: string[] = []
-  for (const cause of causes) {
-    const message = (cause as { message?: unknown }).message
-    if (typeof message === 'string' && message.trim() !== '' && !messages.includes(message)) {
-      messages.push(message)
-    }
-  }
+  const messages = [
+    ...new Set(
+      causes
+        .map((cause) => cause.message)
+        .filter((message): message is string => typeof message === 'string' && message.trim() !== ''),
+    ),
+  ]
 
   if (messages.length === 0) {
     return error instanceof Error ? error.message : String(error)
   }
 
   // A driver that reports only a code (postgres-js leaves the message empty)
-  // would otherwise leave the outer query text unexplained. collectCauses walks
-  // outwards-in, so the last code is the deepest one — the driver's, not a
-  // SQLSTATE an outer frame happened to copy.
-  if (messages.length === 1 && codes.length > 0) {
-    return `${messages[0]} (${codes[codes.length - 1]})`
+  // would otherwise leave the outer query text unexplained. The deepest code is
+  // the driver's, not a SQLSTATE an outer frame happened to copy.
+  if (messages.length === 1) {
+    const deepestCode = causes.reduce<string | undefined>(
+      (found, cause) => (typeof cause.code === 'string' && cause.code !== '' ? cause.code : found),
+      undefined,
+    )
+    if (deepestCode) {
+      return `${messages[0]} (${deepestCode})`
+    }
   }
 
   return messages.join(' — ')
+}
+
+/** Wraps a migration failure in the message `db:migrate` reports. */
+export function migrationFailure(error: unknown, endpoint?: string): Error {
+  return new Error(`Failed to run database migrations: ${describeDatabaseFailure(error, endpoint)}`)
 }
 
 /**

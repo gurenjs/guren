@@ -118,7 +118,8 @@ describe('createMySqlDatabase', () => {
     expect(error?.message).toBe(
       'Failed to run database migrations: cannot connect to the database at db.internal:33306 (ECONNREFUSED). Is it running and accepting connections?',
     )
-    // The connection string's password must never reach the log.
+    // Canary: keeps the credential check alive if the assertion above is
+    // ever loosened from toBe to toContain.
     expect(error?.message).not.toContain('hunter2')
   })
 

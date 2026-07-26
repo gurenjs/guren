@@ -199,6 +199,7 @@ describe('create-guren-app CLI', () => {
       await workspace.cleanup()
     }
   })
+
   it('gives container-backed drivers a single driver dependency and db:up/db:down scripts', async () => {
     const workspace = await createTempWorkspace('guren-create-app-cli-postgres-')
     try {

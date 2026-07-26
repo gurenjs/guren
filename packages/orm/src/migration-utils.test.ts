@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { buildMigrationStatus, describeConnectionEndpoint, describeMigrationFailure, listLocalMigrations } from './migration-utils'
+import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, listLocalMigrations } from './migration-utils'
 import { createSqliteDatabase } from './sqlite'
 
 function writeDrizzleMigration(migrationsDir: string, name: string, sql: string): void {
@@ -145,7 +145,7 @@ describe('describeConnectionEndpoint', () => {
   })
 })
 
-describe('describeMigrationFailure', () => {
+describe('describeDatabaseFailure', () => {
   test('should report a connection failure instead of the query drizzle happened to be running', () => {
     // Shape produced by drizzle + postgres-js when the server is unreachable:
     // the outer message names the migrator's own bookkeeping statement and the
@@ -154,7 +154,7 @@ describe('describeMigrationFailure', () => {
     Object.assign(cause, { code: 'ECONNREFUSED' })
     const error = new Error('Failed query: CREATE SCHEMA IF NOT EXISTS "drizzle"\nparams: ', { cause })
 
-    const message = describeMigrationFailure(error, 'localhost:54322')
+    const message = describeDatabaseFailure(error, 'localhost:54322')
 
     expect(message).toContain('cannot connect to the database at localhost:54322')
     expect(message).toContain('ECONNREFUSED')
@@ -163,7 +163,7 @@ describe('describeMigrationFailure', () => {
 
   test('should describe a connection failure without an endpoint', () => {
     const error = new Error('Failed query: SELECT 1', { cause: Object.assign(new Error(''), { code: 'ENOTFOUND' }) })
-    expect(describeMigrationFailure(error)).toContain('cannot connect to the database (ENOTFOUND)')
+    expect(describeDatabaseFailure(error)).toContain('cannot connect to the database (ENOTFOUND)')
   })
 
   test('should keep the real SQL error when the database is reachable', () => {
@@ -171,7 +171,7 @@ describe('describeMigrationFailure', () => {
       cause: new Error('column "slug" of relation "posts" already exists'),
     })
 
-    const message = describeMigrationFailure(error, 'localhost:54322')
+    const message = describeDatabaseFailure(error, 'localhost:54322')
 
     expect(message).toContain('ALTER TABLE "posts"')
     expect(message).toContain('column "slug" of relation "posts" already exists')
@@ -183,7 +183,7 @@ describe('describeMigrationFailure', () => {
     const cause = Object.assign(new Error('connect ETIMEDOUT'), { code: 'ETIMEDOUT', syscall: 'connect' })
     const error = new Error('Failed query: CREATE TABLE `__drizzle_migrations`', { cause })
 
-    const message = describeMigrationFailure(error, 'db.internal:33306')
+    const message = describeDatabaseFailure(error, 'db.internal:33306')
 
     expect(message).toBe(
       'cannot connect to the database at db.internal:33306 (ETIMEDOUT). Is it running and accepting connections?',
@@ -194,7 +194,7 @@ describe('describeMigrationFailure', () => {
     const cause = Object.assign(new Error('read ETIMEDOUT'), { code: 'ETIMEDOUT', syscall: 'read' })
     const error = new Error('Failed query: ALTER TABLE `posts` ADD COLUMN `slug` text', { cause })
 
-    const message = describeMigrationFailure(error, 'db.internal:33306')
+    const message = describeDatabaseFailure(error, 'db.internal:33306')
 
     expect(message).toContain('ALTER TABLE `posts`')
     expect(message).not.toContain('cannot connect')
@@ -207,7 +207,7 @@ describe('describeMigrationFailure', () => {
       cause: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }),
     })
 
-    const message = describeMigrationFailure(error, 'localhost:54322')
+    const message = describeDatabaseFailure(error, 'localhost:54322')
 
     expect(message).toContain('ALTER TABLE "posts"')
     expect(message).toContain('ECONNRESET')
@@ -219,7 +219,7 @@ describe('describeMigrationFailure', () => {
       cause: Object.assign(new Error(''), { code: 'EPIPE' }),
     })
 
-    expect(describeMigrationFailure(error, 'localhost:54322')).toBe(
+    expect(describeDatabaseFailure(error, 'localhost:54322')).toBe(
       'Failed query: ALTER TABLE "posts" ADD COLUMN "slug" text (EPIPE)',
     )
   })
@@ -228,21 +228,21 @@ describe('describeMigrationFailure', () => {
     const error = Object.assign(new Error('Failed query: SELECT 1'), { code: '42P06' })
     error.cause = Object.assign(new Error(''), { code: 'EPIPE' })
 
-    expect(describeMigrationFailure(error)).toBe('Failed query: SELECT 1 (EPIPE)')
+    expect(describeDatabaseFailure(error)).toBe('Failed query: SELECT 1 (EPIPE)')
   })
 
   test('should surface a cause nested inside an AggregateError', () => {
     const error = new Error('outer', { cause: new AggregateError([Object.assign(new Error(''), { code: 'ECONNREFUSED' })], '') })
-    expect(describeMigrationFailure(error, 'db:5432')).toContain('ECONNREFUSED')
+    expect(describeDatabaseFailure(error, 'db:5432')).toContain('ECONNREFUSED')
   })
 
   test('should not loop forever on a self-referencing cause chain', () => {
     const error = new Error('boom') as Error & { cause?: unknown }
     error.cause = error
-    expect(describeMigrationFailure(error)).toBe('boom')
+    expect(describeDatabaseFailure(error)).toBe('boom')
   })
 
   test('should stringify non-Error rejections', () => {
-    expect(describeMigrationFailure('plain string failure')).toBe('plain string failure')
+    expect(describeDatabaseFailure('plain string failure')).toBe('plain string failure')
   })
 })

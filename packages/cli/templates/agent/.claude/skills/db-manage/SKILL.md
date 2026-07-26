@@ -54,10 +54,17 @@ bun run db:seed
 
 ### Reset
 
-Full reset: stop container, start fresh, migrate, and seed.
+Full reset. On a container-backed project, stop the container, start it fresh,
+then migrate and seed:
 
 ```bash
 bun run db:down && bun run db:up && sleep 3 && bun run db:migrate && bun run db:seed
+```
+
+On SQLite there is no container — `db:reset` drops every table in place:
+
+```bash
+bun run db:reset && bun run db:migrate && bun run db:seed
 ```
 
 - This destroys all existing data in the development database
@@ -75,10 +82,14 @@ bunx guren make:migration <name>
 Then provide schema template.
 
 ### Container Management
+
+Only projects scaffolded with PostgreSQL or MySQL have a `docker-compose.yml`
+and these scripts. SQLite projects have neither — the database is a file.
+
 ```bash
-bun run db:up    # Start PostgreSQL
-bun run db:down  # Stop
-bun run db:logs  # View logs
+bun run db:up    # Start the database container
+bun run db:down  # Stop it
+docker compose logs -f   # Follow its logs
 ```
 
 ## Safety Rules
@@ -89,7 +100,7 @@ bun run db:logs  # View logs
    - Warn about data loss
 
 2. **Error handling:**
-   - DB not running → suggest `bun run db:up`
+   - DB not running → suggest `bun run db:up` (container-backed projects only)
    - Migration failed → show error, suggest rollback
 
 3. **Production:**

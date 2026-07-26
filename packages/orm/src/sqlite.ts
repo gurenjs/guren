@@ -2,7 +2,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, describeMigrationFailure, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, migrationFailure, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders } from './seeder'
 
 type ConnectionResolver = string | (() => string | undefined)
@@ -133,7 +133,7 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
     migrationsPromise = migrationsPromise.catch((error) => {
       migrationsPromise = undefined
       // No endpoint: a SQLite file has no host, so only the cause chain adds signal.
-      throw new Error(`Failed to run database migrations: ${describeMigrationFailure(error)}`)
+      throw migrationFailure(error)
     })
 
     await migrationsPromise
