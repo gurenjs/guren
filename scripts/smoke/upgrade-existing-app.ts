@@ -108,6 +108,10 @@ async function main(): Promise<void> {
     let installInvoked = false
     const result = await upgradeCanary({
       cwd: appDir,
+      // Named explicitly: this smoke runs in the nightly canary workflow, so
+      // it has to keep exercising the canary path rather than following the
+      // command's default tag wherever that points.
+      tag: 'canary',
       install: true,
       installRunner: async (cwd) => {
         installInvoked = true

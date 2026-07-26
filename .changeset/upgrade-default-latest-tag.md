@@ -22,8 +22,10 @@ Three changes:
   to, and a new `downgrade` field is set when that version is older than what
   the app already pins. The CLI prints it as a warning under a `Downgrade`
   heading rather than a success line. An explicit `--tag` is still honoured —
-  the point is that it is no longer silent. Codemods also receive the resolved
-  version instead of the tag string, which no codemod range could ever match.
+  the point is that it is no longer silent. For any tag other than `canary`,
+  codemods now receive that resolved version instead of the tag string, which no
+  codemod range could ever match; `--canary` keeps pinning the floating tag, so
+  it still passes the literal `canary` through.
 - `compareVersions` handles prereleases. `'1.0.0-rc.4'.split('.')` yielded
   `[1, 0, NaN, 4]`, and a NaN difference is neither greater nor less than zero,
   so every comparison against a `1.0.0-rc.N` version answered "unordered" —
