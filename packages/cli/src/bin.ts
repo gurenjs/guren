@@ -2382,7 +2382,7 @@ const deployCommand = defineCommand({
     const rawTarget = String(args.target ?? 'docker')
     const allowedTargets = new Set<DeployTarget>(['docker', 'fly', 'railway', 'all'])
     if (!allowedTargets.has(rawTarget as DeployTarget)) {
-      throw new Error(`Invalid deploy target "${rawTarget}". Expected one of: docker, fly, railway, all. For Vercel, use \`bunx guren plugin @guren/plugin-vercel\`.`)
+      throw new Error(`Invalid deploy target "${rawTarget}". Expected one of: docker, fly, railway, all. For Vercel, use \`bunx guren plugin @guren/plugin-vercel\`; for AWS Lambda, use \`bunx guren plugin @guren/plugin-lambda\`.`)
     }
 
     const port = args.port === undefined ? undefined : Number(args.port)

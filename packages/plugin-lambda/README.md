@@ -32,6 +32,29 @@ It is generated output — add `.lambda` to `.gitignore` (the installer does thi
 
 The runtime adapters live in the framework itself — `createLambdaHandler`, `createSqsHandler`, `createScheduleHandler`, and `createConsoleHandler` from `@guren/core/lambda`.
 
+## Infrastructure (CDK)
+
+The `@guren/plugin-lambda/cdk` subpath ships a construct that provisions the whole topology (`aws-cdk-lib` is an optional peer dependency):
+
+```typescript
+import { GurenLambdaApp } from '@guren/plugin-lambda/cdk'
+
+new GurenLambdaApp(stack, 'App', {
+  functionDir: '../.lambda/function',
+  assets: { dir: '../.lambda/assets' },   // S3 + CloudFront
+  queue: {},                              // SQS + worker + DLQ
+  console: true,                          // aws lambda invoke '{"command":"db:migrate"}'
+  dataApi: {                              // DATABASE_* env + rds-data/secret grants
+    database: 'appdb',
+    resourceArn: process.env.DATABASE_RESOURCE_ARN!,
+    secretArn: process.env.DATABASE_SECRET_ARN!,
+  },
+  environment: { APP_KEY: process.env.APP_KEY! },
+})
+```
+
+HTTP API, queue worker with partial batch failures, EventBridge scheduling, and asset routing (`/assets/*`, `/public/*`) come wired with the handler names `lambda:build` emits. Every sub-resource is exposed as a property for further customization.
+
 ## Things Lambda changes
 
 - **Bundle time is production.** `bun build` inlines `process.env.NODE_ENV` when bundling; the build pins it to `"production"` so runtime configuration cannot accidentally ship a development bundle.
