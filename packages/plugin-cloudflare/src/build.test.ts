@@ -142,10 +142,21 @@ describe('buildCloudflareOutput', () => {
     await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
 
     const worker = readFileSync(join(root, '.cloudflare/worker.js'), 'utf8')
-    // The generated entry names the export the chunk has, so esbuild has no
-    // absent binding to warn about at deploy time.
     expect(worker).toContain('setInertiaSsrRenderer(ssrModule.default)')
     expect(worker).not.toContain('ssrModule.render')
+  })
+
+  test('should prefer a callable default over a non-function render', async () => {
+    scaffoldApp(root, {
+      renderExport: 'export const render = 42\nexport default () => ({ body: "", head: [] })',
+    })
+
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+
+    // What the runtime loader would pick: each candidate is tested for being a
+    // function, so a non-callable `render` does not shadow a valid default.
+    const worker = readFileSync(join(root, '.cloudflare/worker.js'), 'utf8')
+    expect(worker).toContain('setInertiaSsrRenderer(ssrModule.default)')
   })
 
   test('should throw when the SSR entry exports no renderer', async () => {
