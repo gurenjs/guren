@@ -98,6 +98,29 @@ const benchmarks: Benchmark[] = [
   },
 ]
 
+const deployTargets = [
+  {
+    name: 'Bun server',
+    detail: 'Self-host on any VPS or container. The runtime you develop on is the one that serves production.',
+    href: '/docs/guides/deployment',
+  },
+  {
+    name: 'Cloudflare Workers',
+    detail: 'Workers + D1 at the edge, on the free plan if you like. This site is a Guren app running there.',
+    href: '/docs/guides/cloudflare',
+  },
+  {
+    name: 'Vercel',
+    detail: "One plugin scaffolds the build — and it runs on Vercel's Bun runtime, so the engine travels with you.",
+    href: '/docs/guides/deployment',
+  },
+  {
+    name: 'AWS Lambda',
+    detail: 'A handler adapter and Node-compatible defaults take the same app serverless.',
+    href: '/docs/guides/serverless',
+  },
+]
+
 const agentCostSteps = [
   { name: 'Bare repo', cost: 5.54, display: '$5.54', accent: false },
   { name: 'Big CLAUDE.md', cost: 4.51, display: '$4.51', accent: false },
@@ -342,8 +365,8 @@ export default function Home({ codeExamples }: Props) {
                 Fast where it counts
               </h2>
               <p className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-white/60">
-                The same spec app on Guren and on the equivalent Node.js MVC stack, benchmarked
-                under identical conditions. The app code is held constant, so the gap is Bun itself —
+                The same spec app on Guren and on the equivalent Node.js MVC stack, self-hosted and
+                benchmarked under identical conditions. The app code is held constant, so the gap is Bun itself —
                 and that is the point: keep the Laravel-style architecture, change the engine.
                 Every number is reproducible with one command.
               </p>
@@ -398,6 +421,39 @@ export default function Home({ codeExamples }: Props) {
                 Read the full comparison
                 <ArrowRightIcon className="size-3.5" />
               </Link>
+            </div>
+          </div>
+        </section>
+
+        {/* Deploy targets */}
+        <section className="border-t border-white/10 px-6 py-20">
+          <div className="mx-auto max-w-5xl">
+            <div className="mb-12 text-center">
+              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-crimson-400">Bun-first, deploy anywhere</p>
+              <h2 className="mt-3 text-3xl font-bold text-white md:text-4xl">
+                Develop on Bun. Ship where you want.
+              </h2>
+              <p className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-white/60">
+                Bun is the development experience — one toolchain for the dev server, tests, and
+                codegen. Deployment is an adapter: pick a target, install the plugin, ship the
+                same app.
+              </p>
+            </div>
+            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+              {deployTargets.map((t) => (
+                <Link
+                  key={t.name}
+                  href={t.href}
+                  className="group rounded-xl border border-white/10 bg-white/[0.03] p-6 transition hover:border-crimson-400/40 hover:bg-white/[0.05]"
+                >
+                  <p className="font-semibold text-white">{t.name}</p>
+                  <p className="mt-2 text-sm leading-relaxed text-white/55">{t.detail}</p>
+                  <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-crimson-300 transition group-hover:text-crimson-200">
+                    Deployment guide
+                    <ArrowRightIcon className="size-3.5" />
+                  </span>
+                </Link>
+              ))}
             </div>
           </div>
         </section>

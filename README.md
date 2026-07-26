@@ -56,7 +56,7 @@ Run `bun run codegen` after adding features to regenerate types. When you are re
 - **Drizzle ORM** — swap database backends through an adapter (PostgreSQL / SQLite)
 - **End-to-end type safety** — `bunx guren codegen` generates types from schema to frontend props
 - **Batteries included** — auth, queues, mail, cache, notifications, storage, broadcasting, scheduling
-- **AWS Lambda ready** — deploy serverless via `@guren/core/lambda`
+- **Bun-first, deploy anywhere** — develop on the Bun toolchain, then self-host on a Bun server or ship to AWS Lambda, Vercel, or Cloudflare Workers with first-party plugins
 
 ---
 
