@@ -38,17 +38,19 @@ export function warnIgnoredFlatSqlMigrations(migrationsFolder: string): void {
   }
 }
 
-/** Driver error codes that mean the server was never reached. */
-const CONNECTION_ERROR_CODES = new Set([
-  'ECONNREFUSED',
-  'ECONNRESET',
+/**
+ * Driver error codes that mean the server was never reached, so the statement
+ * drizzle happened to be sending is noise. Deliberately excludes mid-flight
+ * failures like ECONNRESET and EPIPE — those can hit halfway through a
+ * migration run, where the query text is the useful part.
+ */
+const PRE_CONNECTION_ERROR_CODES = new Set([
+  'CONNECT_TIMEOUT',
   'EAI_AGAIN',
+  'ECONNREFUSED',
   'EHOSTUNREACH',
   'ENETUNREACH',
   'ENOTFOUND',
-  'EPIPE',
-  'ETIMEDOUT',
-  'CONNECT_TIMEOUT',
 ])
 
 /** Walks the cause chain (and AggregateError members) collecting every nested error. */
@@ -81,14 +83,14 @@ function collectCauses(error: unknown, seen = new Set<unknown>()): unknown[] {
  */
 export function describeMigrationFailure(error: unknown, endpoint?: string): string {
   const causes = collectCauses(error)
-
-  const connectionCode = causes
+  const codes = causes
     .map((cause) => (cause as { code?: unknown }).code)
-    .find((code): code is string => typeof code === 'string' && CONNECTION_ERROR_CODES.has(code))
+    .filter((code): code is string => typeof code === 'string' && code !== '')
 
-  if (connectionCode) {
+  const preConnectionCode = codes.find((code) => PRE_CONNECTION_ERROR_CODES.has(code))
+  if (preConnectionCode) {
     const target = endpoint ? `the database at ${endpoint}` : 'the database'
-    return `cannot connect to ${target} (${connectionCode}). Is it running and accepting connections?`
+    return `cannot connect to ${target} (${preConnectionCode}). Is it running and accepting connections?`
   }
 
   const messages: string[] = []
@@ -101,6 +103,12 @@ export function describeMigrationFailure(error: unknown, endpoint?: string): str
 
   if (messages.length === 0) {
     return error instanceof Error ? error.message : String(error)
+  }
+
+  // A driver that reports only a code (postgres-js leaves the message empty)
+  // would otherwise leave the outer query text unexplained.
+  if (messages.length === 1 && codes.length > 0) {
+    return `${messages[0]} (${codes[0]})`
   }
 
   return messages.join(' — ')

@@ -80,6 +80,8 @@ The `--force` flag bypasses the cache and regenerates all manifests from scratch
    bun run db:up
    ```
 
+   Projects scaffolded before `db:up` existed do not have that script — run `docker compose up -d` instead, or add it to `package.json`.
+
 2. Verify the connection string in `.env`:
 
    ```dotenv
@@ -97,7 +99,7 @@ The `--force` flag bypasses the cache and regenerates all manifests from scratch
    You should see `0.0.0.0:54322`. If `docker compose ps` reports `Up` but this command prints nothing, publishing failed (this happens after a Docker Desktop restart). Recreate the container — the named volume survives, so no data is lost:
 
    ```bash
-   bun run db:down && bun run db:up
+   docker compose down && docker compose up -d
    ```
 
 ---

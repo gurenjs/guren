@@ -177,6 +177,30 @@ describe('describeMigrationFailure', () => {
     expect(message).toContain('column "slug" of relation "posts" already exists')
   })
 
+  test('should keep the in-flight query when the connection drops mid-migration', () => {
+    // ECONNRESET/EPIPE can hit halfway through a run, so which migration was
+    // executing is the useful part — unlike a server that was never reached.
+    const error = new Error('Failed query: ALTER TABLE "posts" ADD COLUMN "slug" text', {
+      cause: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }),
+    })
+
+    const message = describeMigrationFailure(error, 'localhost:54322')
+
+    expect(message).toContain('ALTER TABLE "posts"')
+    expect(message).toContain('ECONNRESET')
+    expect(message).not.toContain('cannot connect')
+  })
+
+  test('should append a bare error code when no cause carries a message', () => {
+    const error = new Error('Failed query: ALTER TABLE "posts" ADD COLUMN "slug" text', {
+      cause: Object.assign(new Error(''), { code: 'EPIPE' }),
+    })
+
+    expect(describeMigrationFailure(error, 'localhost:54322')).toBe(
+      'Failed query: ALTER TABLE "posts" ADD COLUMN "slug" text (EPIPE)',
+    )
+  })
+
   test('should surface a cause nested inside an AggregateError', () => {
     const error = new Error('outer', { cause: new AggregateError([Object.assign(new Error(''), { code: 'ECONNREFUSED' })], '') })
     expect(describeMigrationFailure(error, 'db:5432')).toContain('ECONNREFUSED')

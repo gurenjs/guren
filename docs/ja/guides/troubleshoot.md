@@ -80,6 +80,8 @@ bun run codegen --force
    bun run db:up
    ```
 
+   `db:up` が追加される前に生成したプロジェクトにはこのスクリプトがありません。その場合は `docker compose up -d` を実行するか、`package.json` に追加してください。
+
 2. `.env` の接続文字列を確認する:
 
    ```dotenv
@@ -97,7 +99,7 @@ bun run codegen --force
    `0.0.0.0:54322` が表示されれば正常です。`docker compose ps` が `Up` と表示していても、このコマンドが何も返さない場合はポートの公開に失敗しています(Docker Desktop の再起動後などに起こります)。コンテナを作り直してください — 名前付きボリュームは残るのでデータは失われません:
 
    ```bash
-   bun run db:down && bun run db:up
+   docker compose down && docker compose up -d
    ```
 
 ---

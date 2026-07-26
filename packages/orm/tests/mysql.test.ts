@@ -98,6 +98,30 @@ describe('createMySqlDatabase', () => {
     expect(migrateMock).toHaveBeenCalled()
   })
 
+  it('reports an unreachable server instead of the query drizzle was running', async () => {
+    const database = createMySqlDatabase({
+      migrationsFolder: createMigrationsFolder(true),
+      connectionString: () => 'mysql://guren:hunter2@db.internal:33306/guren',
+    })
+
+    migrateMock.mockImplementationOnce(async () => {
+      throw new Error('Failed query: CREATE TABLE `__drizzle_migrations`', {
+        cause: Object.assign(new Error(''), { code: 'ECONNREFUSED' }),
+      })
+    })
+
+    const error = await database.migrateDatabase().then(
+      () => null,
+      (reason: unknown) => reason as Error,
+    )
+
+    expect(error?.message).toBe(
+      'Failed to run database migrations: cannot connect to the database at db.internal:33306 (ECONNREFUSED). Is it running and accepting connections?',
+    )
+    // The connection string's password must never reach the log.
+    expect(error?.message).not.toContain('hunter2')
+  })
+
   it('throws when seeders folder is missing', async () => {
     const database = createMySqlDatabase({
       migrationsFolder: createMigrationsFolder(true),

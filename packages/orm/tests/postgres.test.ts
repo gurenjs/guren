@@ -94,6 +94,53 @@ describe('createPostgresDatabase', () => {
     expect(migrateMock).toHaveBeenCalled()
   })
 
+  it('reports an unreachable server instead of the query drizzle was running', async () => {
+    const database = createPostgresDatabase({
+      migrationsFolder: createMigrationsFolder(true),
+      connectionString: () => 'postgres://guren:hunter2@db.internal:54322/guren',
+    })
+
+    // Shape drizzle + postgres-js produce when the server is not reachable: the
+    // outer message names the migrator's own bookkeeping statement, and the
+    // AggregateError cause carries the code with no message of its own.
+    const cause = Object.assign(new AggregateError([], ''), { code: 'ECONNREFUSED' })
+    migrateMock.mockImplementationOnce(async () => {
+      throw new Error('Failed query: CREATE SCHEMA IF NOT EXISTS "drizzle"\nparams: ', { cause })
+    })
+
+    const error = await database.migrateDatabase().then(
+      () => null,
+      (reason: unknown) => reason as Error,
+    )
+
+    expect(error?.message).toBe(
+      'Failed to run database migrations: cannot connect to the database at db.internal:54322 (ECONNREFUSED). Is it running and accepting connections?',
+    )
+    // The connection string's password must never reach the log.
+    expect(error?.message).not.toContain('hunter2')
+  })
+
+  it('keeps the failing statement when the server is reachable', async () => {
+    const database = createPostgresDatabase({
+      migrationsFolder: createMigrationsFolder(true),
+      connectionString: () => 'postgres://guren:hunter2@db.internal:54322/guren',
+    })
+
+    migrateMock.mockImplementationOnce(async () => {
+      throw new Error('Failed query: ALTER TABLE "posts" ADD COLUMN "slug" text', {
+        cause: new Error('column "slug" of relation "posts" already exists'),
+      })
+    })
+
+    const error = await database.migrateDatabase().then(
+      () => null,
+      (reason: unknown) => reason as Error,
+    )
+
+    expect(error?.message).toContain('ALTER TABLE "posts"')
+    expect(error?.message).toContain('column "slug" of relation "posts" already exists')
+  })
+
   it('throws when seeders folder is missing', async () => {
     const database = createPostgresDatabase({
       migrationsFolder: createMigrationsFolder(true),
