@@ -76,8 +76,7 @@ Built assets carry the Guren Vite plugin's derived base, `/public/assets/` — c
 
 Without it the page's entry script still loads — the plugin injects that path directly — but the chunks it imports 404, so the app never starts.
 
-> [!NOTE]
-> This entry is compiled into the deployment's routing when **Vercel** runs the build. A `--prebuilt` upload is routed by the `config.json` the plugin emits, which does not carry it — so prefer the git integration, or add the route to the emitted config yourself.
+The plugin emits the same mapping into `.vercel/output/config.json`, so a `--prebuilt` upload — routed by that file alone — behaves the same way. Keeping it in `vercel.json` covers builds Vercel runs itself.
 
 ## Notes
 
