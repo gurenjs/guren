@@ -1,3 +1,5 @@
+import { mock } from 'bun:test'
+import { consola as realConsola } from 'consola'
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -73,4 +75,25 @@ export async function createTempWorkspace(prefix: string): Promise<TempWorkspace
       await rm(dir, { recursive: true, force: true })
     },
   }
+}
+
+/**
+ * A consola stand-in that silences output without hiding the rest of the API.
+ *
+ * `mock.module()` is not undone between files in Bun's shared process, so a
+ * hand-listed stub silently breaks any later file that calls a method it forgot
+ * — which is how `box` came to be missing. Inheriting from the real instance
+ * keeps every other method callable; the printing ones are shadowed explicitly,
+ * because inherited ones still reach the real logger.
+ */
+export function createConsolaStub(extra: Record<string, unknown> = {}): typeof realConsola {
+  return Object.assign(Object.create(realConsola) as typeof realConsola, {
+    info: mock(() => {}),
+    success: mock(() => {}),
+    warn: mock(() => {}),
+    error: mock(() => {}),
+    log: mock(() => {}),
+    box: mock(() => {}),
+    ...extra,
+  })
 }

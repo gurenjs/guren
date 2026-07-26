@@ -30,8 +30,20 @@ instruction: `guren upgrade` also realigns every `@guren/*` dependency, which is
 more than someone chasing a single check asked for, and `guren doctor` has no
 `--fix` of its own.
 
-Rule definitions and the `--json` output are unchanged, so `guren upgrade`'s
-autofix path and its manual-step collection still see the same fields.
+The fix is in `createCheck` rather than the report: a passing check now carries
+no remediation at all, whatever the caller passed. `guren doctor --json` had the
+same defect — on a healthy app it reported `fix: "Run guren codegen --force…"`
+for nine manifests that were present — and enforcing the invariant once covers
+the report, the JSON, and anything added later. The field stays present and
+nullable and `version: 1` is unchanged, so the JSON shape is the same; only
+wrong data disappears from it. `guren upgrade`'s autofix path and manual-step
+collection already filtered by status, so they are unaffected.
+
+Left as follow-up: `fix` and `manualFix` are not really two concepts. Three
+consumers treat them three ways — the report prints both, `--json` emits both
+raw, and `guren upgrade` reads `manualFix ?? fix`. The genuine case is narrow
+("the suggested command cannot run"), and naming it that way would be clearer
+than a second general field, but it touches the JSON surface.
 `renderDoctorReport` had no test coverage; it now has cases for each branch.
 
 Writing those tests surfaced why it had none: two test files replace the

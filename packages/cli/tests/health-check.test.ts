@@ -1,22 +1,9 @@
 import { describe, expect, it, mock } from 'bun:test'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { consola as realConsola } from 'consola'
-import { createTempWorkspace } from './helpers'
+import { createTempWorkspace, createConsolaStub } from './helpers'
 
-// Bun runs all test files in one shared process, and mock.module()
-// replacements are not undone by mock.restore() — a mock missing a method
-// silently breaks any other test file that needs the real one. Hand-listing
-// the surface drifts (this stub predates `box`), so inherit from the real
-// instance and shadow only the calls that would print.
-const consolaStub = Object.assign(Object.create(realConsola) as typeof realConsola, {
-  info: mock(() => {}),
-  success: mock(() => {}),
-  debug: mock(() => {}),
-  warn: mock(() => {}),
-  error: mock(() => {}),
-  log: mock(() => {}),
-})
+const consolaStub = createConsolaStub({ debug: mock(() => {}) })
 
 await mock.module('consola', () => ({
   consola: consolaStub,
