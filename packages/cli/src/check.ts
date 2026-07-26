@@ -6,6 +6,7 @@ import {
   discoverModelFiles,
   fileExists,
   hasControllerTest,
+  controllerTestCandidates,
   classNameFromPath,
   toPosixRelative,
   listModuleNames,
@@ -179,7 +180,10 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
           `test:${name}`,
           `${name} tests`,
           hasTest ? 'pass' : 'warn',
-          hasTest ? `Test file found for ${name}.` : `No test file found for ${name}.`,
+          hasTest
+            ? `Test file found for ${name}.`
+            : `No test file named after ${name} (looked for ${controllerTestCandidates(cwd, filePath).join(', ')}). ` +
+              'A test that drives its routes through TestApp without naming the class is not detected.',
           hasTest ? undefined : `Run: bunx guren make:test ${name.replace('Controller', '')} --controller${moduleFlag}`,
         ),
       )

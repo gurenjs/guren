@@ -57,6 +57,45 @@ export default class PostController extends Controller {
     }
   })
 
+  it('says the warning is about naming, not coverage, and lists what it looked for', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-test-wording-')
+
+    try {
+      await mkdir(join(workspace.dir, 'app/Http/Controllers'), { recursive: true })
+      await mkdir(join(workspace.dir, 'tests/controllers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Http/Controllers/TaskController.ts'),
+        `export default class TaskController {
+  async index() { return null }
+}`,
+        'utf8',
+      )
+      // Covers the controller by driving its routes, the way the docs show —
+      // it names neither the class nor its file, so detection cannot see it.
+      await writeFile(
+        join(workspace.dir, 'tests/controllers/tasks.test.ts'),
+        `import { TestApp } from '@guren/testing'
+test('lists tasks', async () => {
+  const app = await TestApp.create()
+  await app.get('/tasks').assertOk()
+})`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+      const testCheck = report.checks.find((c) => c.key === 'test:TaskController')
+
+      expect(testCheck!.status).toBe('warn')
+      expect(testCheck!.message).toContain('No test file named after TaskController')
+      expect(testCheck!.message).toContain('tests/controllers/TaskController.test.ts')
+      expect(testCheck!.message).toContain('TestApp')
+      // The old wording asserted an absence it cannot establish.
+      expect(testCheck!.message).not.toContain('No test file found')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('passes when test file exists', async () => {
     const workspace = await createTempWorkspace('guren-cli-check-tests-pass-')
 

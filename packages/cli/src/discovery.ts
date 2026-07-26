@@ -234,6 +234,14 @@ export async function discoverTestFiles(appRoot: string): Promise<string[]> {
  * only ever paired with a test inside the same module, since the module
  * boundary check forbids the project-root `tests/` from importing module
  * internals — hence the `modules/<name>/` prefix on the `tests/` candidates.
+ *
+ * Detection is by filename and nothing else, which bounds what it can know.
+ * The documented way to test a controller is to boot the app and drive its
+ * routes through `TestApp`, and such a test names neither the controller nor
+ * its file — so an app that groups tests by feature (`tests/controllers/
+ * tasks.test.ts` covering `TaskController`) reads as untested here, and no
+ * amount of parsing the test would say otherwise. Callers must phrase the
+ * result as "no test named after this controller", never "no coverage".
  */
 export function controllerTestCandidates(cwd: string, controllerPath: string): string[] {
   const name = classNameFromPath(controllerPath)

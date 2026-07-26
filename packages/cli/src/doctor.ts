@@ -1193,7 +1193,10 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
         steps.push({
           priority: priority++,
           title: `Add tests for ${name}`,
-          description: 'No test file found.',
+          // Detection is by filename, so confirm the routes are really
+          // uncovered before acting — a route-level TestApp test names no
+          // controller and is invisible here.
+          description: `No test file named after ${name}. Check whether its routes are already covered by a differently named test before adding one.`,
           command: `bunx guren make:test ${name.replace('Controller', '')} --controller${moduleFlag}`,
         })
       }
