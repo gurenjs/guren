@@ -1274,14 +1274,21 @@ export function renderDoctorReport(report: DoctorReport): void {
       continue
     }
 
-    // `fix` and `manualFix` restate each other everywhere they are both set,
-    // so show one line. `manualFix` alone is the shape a few rules use.
-    const remediation = check.fix ?? check.manualFix
-    if (remediation) {
-      consola.info(`       Fix: ${remediation}`)
+    // Some rules set both fields to the same string; others put a required
+    // extra step in `manualFix` (repair tsconfig.json *and* add
+    // `.guren/**/*`; install Bun from a URL rather than `bun upgrade`, which
+    // cannot run when Bun is missing). Drop the duplicate, keep the addition.
+    if (check.fix) {
+      consola.info(`       Fix: ${check.fix}`)
+    }
+    if (check.manualFix && check.manualFix !== check.fix) {
+      consola.info(`       ${check.fix ? 'Manual' : 'Fix'}: ${check.manualFix}`)
     }
     if (check.canAutofix) {
-      consola.info('       Autofix: available — run `guren upgrade`')
+      // Not an instruction: `guren upgrade` also realigns every @guren/*
+      // dependency, which is more than someone chasing one check asked for,
+      // and `guren doctor` has no --fix of its own.
+      consola.info('       Autofix: available — applied by `guren upgrade`')
     }
   }
 

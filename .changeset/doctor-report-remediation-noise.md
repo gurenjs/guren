@@ -20,10 +20,15 @@ path-alias rules:
 On a healthy app that turned a clean report into a wall of instructions for
 problems it does not have.
 
-The renderer now skips remediation for passing checks and prints one line for
-the rest, using `manualFix` only when a rule sets it alone. The `Autofix`
-line names the command that applies it — `guren doctor` has no `--fix` flag, so
-"available" on its own left nowhere to go.
+The renderer now skips remediation for passing checks, and prints `Manual:` only
+when it says something `Fix:` does not — the duplicate goes, the addition stays.
+A few rules genuinely differ there: the tsconfig parse error needs the file
+repaired *and* `.guren/**/*` added, and a missing Bun cannot be fixed by
+`bun upgrade`, only by the install URL `manualFix` carries. The `Autofix` line
+now says which command applies it, phrased as information rather than an
+instruction: `guren upgrade` also realigns every `@guren/*` dependency, which is
+more than someone chasing a single check asked for, and `guren doctor` has no
+`--fix` of its own.
 
 Rule definitions and the `--json` output are unchanged, so `guren upgrade`'s
 autofix path and its manual-step collection still see the same fields.

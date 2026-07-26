@@ -1181,7 +1181,7 @@ describe('renderDoctorReport', () => {
     expect(lines.some((line) => line.includes('Fix:'))).toBe(false)
   })
 
-  it('prints a single remediation line for a failing check', () => {
+  it('collapses a duplicated remediation into one line', () => {
     const lines = captureReport([
       {
         key: 'generated:.guren/routes.gen.ts',
@@ -1195,6 +1195,25 @@ describe('renderDoctorReport', () => {
 
     expect(lines.filter((line) => line.includes('Fix:'))).toHaveLength(1)
     expect(lines.some((line) => line.includes('Manual:'))).toBe(false)
+  })
+
+  it('keeps a manual step that says more than the fix', () => {
+    // `bun upgrade` cannot run when Bun is missing, so the URL in manualFix is
+    // the only usable instruction — dropping it as a duplicate would strand
+    // the reader.
+    const lines = captureReport([
+      {
+        key: 'bun-version',
+        title: 'Bun Version',
+        status: 'fail',
+        message: 'Bun was not detected.',
+        fix: 'Install or update Bun with `bun upgrade`.',
+        manualFix: 'Install Bun from https://bun.sh and ensure version >= 1.1.0.',
+      },
+    ])
+
+    expect(lines.some((line) => line.includes('Fix: Install or update Bun'))).toBe(true)
+    expect(lines.some((line) => line.includes('Manual: Install Bun from https://bun.sh'))).toBe(true)
   })
 
   it('falls back to manualFix when a rule sets only that field', () => {
@@ -1223,6 +1242,6 @@ describe('renderDoctorReport', () => {
       },
     ])
 
-    expect(lines.some((line) => line.includes('Autofix: available — run `guren upgrade`'))).toBe(true)
+    expect(lines.some((line) => line.includes('Autofix: available — applied by `guren upgrade`'))).toBe(true)
   })
 })
