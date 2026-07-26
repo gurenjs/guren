@@ -40,5 +40,12 @@ about it, and the two packages have not always shared a release line. Writing a
 `drizzle-kit` version that does not exist would break the next install, so its
 existence is checked first and the entry is left alone with a warning otherwise.
 
-Registry documents are fetched once per package for the whole command, so adding
-these lookups does not add requests.
+The lookups read one published version's manifest
+(`registry.npmjs.org/<name>/<version-or-tag>`) rather than the package's full
+document: `@guren/orm/latest` is 2 KB and carries the version *and* its
+dependencies in a single request, where the abbreviated packument is 28 KB — and
+`drizzle-kit`'s is 1.2 MB, which is what checking one version used to cost. That
+adds one request when the pins already agree and two when they have drifted; a
+package appearing in both `dependencies` and `devDependencies` is still asked
+about once. `--tag canary` returns before any of it, so that mode stays
+offline.

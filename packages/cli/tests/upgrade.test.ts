@@ -1,4 +1,4 @@
-import { beforeEach, afterEach, describe, expect, it, mock } from 'bun:test'
+import { beforeEach, afterEach, describe, expect, it, mock, spyOn } from 'bun:test'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createTempWorkspace, type TempWorkspace } from './helpers'
@@ -136,13 +136,8 @@ describe('upgradeCanary', () => {
       packageJsonPath,
       JSON.stringify({
         name: 'drizzle-test',
-        dependencies: {
-          '@guren/orm': '^1.0.0',
-          'drizzle-orm': '1.0.0-rc.1',
-        },
-        devDependencies: {
-          'drizzle-kit': '1.0.0-rc.1',
-        },
+        dependencies: { '@guren/orm': '^1.0.0', 'drizzle-orm': '1.0.0-rc.1' },
+        devDependencies: { 'drizzle-kit': '1.0.0-rc.1' },
       }, null, 2),
       'utf8',
     )
@@ -150,8 +145,10 @@ describe('upgradeCanary', () => {
     const result = await upgradeCanary({
       cwd: workspace.dir,
       versionResolver: async () => '1.2.0',
-      dependencyPinResolver: async () => '1.0.0-rc.4',
-      versionExistsResolver: async () => true,
+      manifestResolver: async (name) =>
+        name === '@guren/orm'
+          ? { version: '1.2.0', dependencies: { 'drizzle-orm': '1.0.0-rc.4' } }
+          : { version: '1.0.0-rc.4' },
     })
     const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
       dependencies: Record<string, string>
@@ -162,158 +159,120 @@ describe('upgradeCanary', () => {
     // app resolve a different copy than the adapter runs on.
     expect(packageJson.dependencies['drizzle-orm']).toBe('1.0.0-rc.4')
     expect(packageJson.devDependencies['drizzle-kit']).toBe('1.0.0-rc.4')
-    expect(result.updatedDependencies.some((dependency) => dependency.name === 'drizzle-orm')).toBe(true)
-    expect(result.updatedDependencies.some((dependency) => dependency.name === 'drizzle-kit')).toBe(true)
-  })
-
-  it('does not overwrite drizzle specifiers that name a location', async () => {
-    await writeFile(
-      packageJsonPath,
-      JSON.stringify({
-        name: 'drizzle-local',
-        dependencies: {
-          '@guren/orm': '^1.0.0',
-          'drizzle-orm': 'workspace:*',
-        },
-      }, null, 2),
-      'utf8',
-    )
-
-    await upgradeCanary({
-      cwd: workspace.dir,
-      versionResolver: async () => '1.2.0',
-      dependencyPinResolver: async () => '1.0.0-rc.4',
-      versionExistsResolver: async () => true,
+    expect(result.updatedDependencies).toContainEqual({
+      field: 'dependencies',
+      name: 'drizzle-orm',
+      previousVersion: '1.0.0-rc.1',
+      nextVersion: '1.0.0-rc.4',
     })
-    const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
-      dependencies: Record<string, string>
-    }
-
-    expect(packageJson.dependencies['drizzle-orm']).toBe('workspace:*')
+    expect(result.updatedDependencies).toContainEqual({
+      field: 'devDependencies',
+      name: 'drizzle-kit',
+      previousVersion: '1.0.0-rc.1',
+      nextVersion: '1.0.0-rc.4',
+    })
   })
 
-  it('does not narrow a published peer range', async () => {
-    await writeFile(
-      packageJsonPath,
-      JSON.stringify({
-        name: 'drizzle-peer',
+  // Every path that declines to write, with the entry that must survive and the
+  // warning the user gets. Adding a case is a row, not another copied block.
+  const ORM_PINS_RC4 = { version: '1.2.0', dependencies: { 'drizzle-orm': '1.0.0-rc.4' } }
+  const declines = [
+    {
+      label: 'a specifier that names a location',
+      manifest: { dependencies: { '@guren/orm': '^1.0.0', 'drizzle-orm': 'workspace:*' } },
+      manifestResolver: async () => ORM_PINS_RC4,
+      survives: ['dependencies', 'drizzle-orm', 'workspace:*'],
+      warning: 'names a location rather than a release',
+    },
+    {
+      label: 'a published peer range',
+      manifest: { dependencies: { '@guren/orm': '^1.0.0' }, peerDependencies: { 'drizzle-orm': '^1' } },
+      manifestResolver: async () => ORM_PINS_RC4,
+      survives: ['peerDependencies', 'drizzle-orm', '^1'],
+      warning: null,
+    },
+    {
+      label: 'a drizzle-kit version that was never published',
+      manifest: {
         dependencies: { '@guren/orm': '^1.0.0' },
-        peerDependencies: { 'drizzle-orm': '^1' },
-      }, null, 2),
-      'utf8',
-    )
-
-    await upgradeCanary({
-      cwd: workspace.dir,
-      versionResolver: async () => '1.2.0',
-      dependencyPinResolver: async () => '1.0.0-rc.4',
-      versionExistsResolver: async () => true,
-    })
-    const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
-      peerDependencies: Record<string, string>
-    }
-
-    expect(packageJson.peerDependencies['drizzle-orm']).toBe('^1')
-  })
-
-  it('skips drizzle-kit when the matching version was never published', async () => {
-    await writeFile(
-      packageJsonPath,
-      JSON.stringify({
-        name: 'drizzle-kit-missing',
-        dependencies: { '@guren/orm': '^1.0.0', 'drizzle-orm': '1.0.0-rc.1' },
         devDependencies: { 'drizzle-kit': '0.31.0' },
-      }, null, 2),
-      'utf8',
-    )
+      },
+      manifestResolver: async (name: string) => (name === '@guren/orm' ? ORM_PINS_RC4 : null),
+      survives: ['devDependencies', 'drizzle-kit', '0.31.0'],
+      warning: 'does not exist on npm',
+    },
+    {
+      label: 'an ORM that depends on a range rather than one version',
+      manifest: { dependencies: { '@guren/orm': '^1.0.0', 'drizzle-orm': '1.0.0-rc.1' } },
+      manifestResolver: async () => ({ version: '1.2.0', dependencies: { 'drizzle-orm': '^1.0.0' } }),
+      survives: ['dependencies', 'drizzle-orm', '1.0.0-rc.1'],
+      warning: 'not a single exact version',
+    },
+    {
+      label: 'an app that does not use @guren/orm',
+      manifest: { dependencies: { '@guren/core': '^1.0.0', 'drizzle-orm': '1.0.0-rc.1' } },
+      manifestResolver: async () => ORM_PINS_RC4,
+      survives: ['dependencies', 'drizzle-orm', '1.0.0-rc.1'],
+      warning: null,
+    },
+  ] as const
 
-    await upgradeCanary({
-      cwd: workspace.dir,
-      versionResolver: async () => '1.2.0',
-      dependencyPinResolver: async () => '1.0.0-rc.4',
-      // drizzle-kit rides its own release line, so the ORM's drizzle-orm
-      // version need not exist for it.
-      versionExistsResolver: async (name) => name !== 'drizzle-kit',
+  for (const { label, manifest, manifestResolver, survives, warning } of declines) {
+    it(`leaves drizzle alone for ${label}`, async () => {
+      await writeFile(packageJsonPath, JSON.stringify({ name: 'decline', ...manifest }, null, 2), 'utf8')
+      const warnings: string[] = []
+      const warnSpy = spyOn(console, 'warn').mockImplementation(((message: unknown) => {
+        warnings.push(String(message))
+      }) as never)
+
+      try {
+        await upgradeCanary({
+          cwd: workspace.dir,
+          versionResolver: async () => '1.2.0',
+          manifestResolver,
+        })
+      } finally {
+        warnSpy.mockRestore()
+      }
+
+      const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as Record<
+        string,
+        Record<string, string>
+      >
+      const [field, name, value] = survives
+      expect(packageJson[field]?.[name]).toBe(value)
+      if (warning) {
+        expect(warnings.join('\n')).toContain(warning)
+      }
     })
-    const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
-      dependencies: Record<string, string>
-      devDependencies: Record<string, string>
-    }
+  }
 
-    expect(packageJson.dependencies['drizzle-orm']).toBe('1.0.0-rc.4')
-    expect(packageJson.devDependencies['drizzle-kit']).toBe('0.31.0')
-  })
-
-  it('leaves drizzle alone when the ORM depends on a range rather than one version', async () => {
+  it('makes no registry call for drizzle under the canary tag', async () => {
     await writeFile(
       packageJsonPath,
       JSON.stringify({
-        name: 'drizzle-range',
+        name: 'canary-drizzle',
         dependencies: { '@guren/orm': '^1.0.0', 'drizzle-orm': '1.0.0-rc.1' },
       }, null, 2),
       'utf8',
     )
 
+    let looked = false
     await upgradeCanary({
       cwd: workspace.dir,
-      versionResolver: async () => '1.2.0',
-      dependencyPinResolver: async () => '^1.0.0',
-      versionExistsResolver: async () => true,
+      tag: 'canary',
+      manifestResolver: async () => {
+        looked = true
+        return null
+      },
     })
     const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
       dependencies: Record<string, string>
     }
 
-    expect(packageJson.dependencies['drizzle-orm']).toBe('1.0.0-rc.1')
-  })
-
-  it('leaves drizzle alone for an app that does not use @guren/orm', async () => {
-    await writeFile(
-      packageJsonPath,
-      JSON.stringify({
-        name: 'no-orm-test',
-        dependencies: {
-          '@guren/core': '^1.0.0',
-          'drizzle-orm': '1.0.0-rc.1',
-        },
-      }, null, 2),
-      'utf8',
-    )
-
-    await upgradeCanary({
-      cwd: workspace.dir,
-      versionResolver: async () => '1.3.0',
-      dependencyPinResolver: async () => '1.0.0-rc.4',
-    })
-    const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
-      dependencies: Record<string, string>
-    }
-
-    expect(packageJson.dependencies['drizzle-orm']).toBe('1.0.0-rc.1')
-  })
-
-  it('leaves drizzle alone when the pin cannot be read', async () => {
-    await writeFile(
-      packageJsonPath,
-      JSON.stringify({
-        name: 'drizzle-unreadable',
-        dependencies: {
-          '@guren/orm': '^1.0.0',
-          'drizzle-orm': '1.0.0-rc.1',
-        },
-      }, null, 2),
-      'utf8',
-    )
-
-    await upgradeCanary({
-      cwd: workspace.dir,
-      versionResolver: async () => '1.2.0',
-      dependencyPinResolver: async () => null,
-    })
-    const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
-      dependencies: Record<string, string>
-    }
-
+    // canary keeps a floating pin, so there is nothing to converge on — and the
+    // mode stays offline.
+    expect(looked).toBe(false)
     expect(packageJson.dependencies['drizzle-orm']).toBe('1.0.0-rc.1')
   })
 

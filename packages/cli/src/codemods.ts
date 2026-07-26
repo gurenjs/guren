@@ -107,6 +107,17 @@ export function isExactVersion(specifier: string): boolean {
 }
 
 /**
+ * A specifier pointing at a place rather than the registry. Unlike a range,
+ * which can be converged onto a published version, this cannot — rewriting it
+ * would change what the app actually runs.
+ */
+const LOCATION_SPECIFIER = /^(?:workspace|catalog|link|file|npm|git|github|portal|patch):|^[./]/u
+
+export function isLocationSpecifier(specifier: string): boolean {
+  return LOCATION_SPECIFIER.test(specifier)
+}
+
+/**
  * Order two versions, prereleases included. Returns NaN when either side is not
  * an exact version — including a partial pin like `1.3`, which `Bun.semver`
  * ranks *above* `1.3.0` rather than equal to it.
