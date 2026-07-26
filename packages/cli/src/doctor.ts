@@ -7,6 +7,7 @@ import {
   discoverTestFiles,
   fileExists,
   hasControllerTest,
+  describeControllerTestMiss,
   readIfExists,
   classNameFromPath,
   toPosixRelative,
@@ -1192,8 +1193,11 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
         const moduleFlag = moduleName ? ` --module ${moduleName}` : ''
         steps.push({
           priority: priority++,
-          title: `Add tests for ${name}`,
-          description: 'No test file found.',
+          // Titled as a question, not an action: detection is by filename, so a
+          // consumer reading only the title and command (agents do) would
+          // otherwise write a duplicate of a test that exists under another name.
+          title: `Confirm test coverage for ${name}`,
+          description: `${describeControllerTestMiss(cwd, filePath)} Check whether these routes are already covered under another name before adding a test.`,
           command: `bunx guren make:test ${name.replace('Controller', '')} --controller${moduleFlag}`,
         })
       }
