@@ -78,6 +78,8 @@ export interface VersionCompatibility {
   currentVersion: string
   /** Concrete version the tag resolved to, or the tag when it could not be resolved. */
   targetVersion: string
+  /** True when `targetVersion` is a version the registry returned, not the tag name. */
+  resolvedTarget: boolean
   /** True when the resolved target is older than what the app already pins. */
   downgrade: boolean
   warnings: string[]
@@ -140,7 +142,13 @@ function memoizeResolver(resolver: VersionResolver): VersionResolver {
     if (cached) {
       return cached
     }
-    const pending = resolver(packageName, tag)
+    // Normalize failures to null rather than caching a rejected promise. One
+    // caller wraps the lookup in .catch and the other does not, so a cached
+    // rejection would be handled the first time and abort the whole upgrade
+    // the second — an offline registry took the command down entirely.
+    const pending = Promise.resolve()
+      .then(() => resolver(packageName, tag))
+      .catch(() => null)
     cache.set(key, pending)
     return pending
   }
@@ -224,7 +232,14 @@ export async function checkVersionCompatibility(
   const manifestPath = join(cwd, 'package.json')
   const raw = await readFile(manifestPath, 'utf-8').catch(() => null)
   if (!raw) {
-    return { compatible: true, currentVersion: 'unknown', targetVersion: targetTag, downgrade: false, warnings: [] }
+    return {
+      compatible: true,
+      currentVersion: 'unknown',
+      targetVersion: targetTag,
+      resolvedTarget: false,
+      downgrade: false,
+      warnings: [],
+    }
   }
 
   const manifest = JSON.parse(raw)
@@ -250,11 +265,22 @@ export async function checkVersionCompatibility(
   // Report the version the tag points at rather than the tag itself, so that
   // a tag left behind by an older release line cannot walk an app backwards
   // while the report still reads as a clean upgrade.
+  //
+  // Only the first comparable @guren/* pin anchors this. Tags can resolve
+  // per-package, so it is a safety net over the common case (one release line
+  // across every entry), not a guarantee for every rewrite the updater makes.
   let targetVersion = targetTag
+  let resolvedTarget = false
   let downgrade = false
   if (reference && targetTag !== 'canary') {
     const resolved = await versionResolver(reference[0], targetTag).catch(() => null)
+    if (!resolved) {
+      warnings.push(
+        `Could not resolve ${reference[0]}@${targetTag} from the npm registry, so the target version is unknown.`,
+      )
+    }
     if (resolved) {
+      resolvedTarget = true
       targetVersion = resolved
       if (compareVersions(resolved, currentVersion) < 0) {
         downgrade = true
@@ -267,7 +293,7 @@ export async function checkVersionCompatibility(
     }
   }
 
-  return { compatible: warnings.length === 0, currentVersion, targetVersion, downgrade, warnings }
+  return { compatible: warnings.length === 0, currentVersion, targetVersion, resolvedTarget, downgrade, warnings }
 }
 
 function collectManualSteps(checks: DoctorCheck[]): string[] {
@@ -338,14 +364,16 @@ export async function upgradeCanary(options: UpgradeCanaryOptions = {}): Promise
       return true
     })
 
-  // Run codemods for the version transition. The resolved version is what the
-  // codemod ranges are written against; the tag name never matched any of them.
-  const codemodResults = await runCodemods(
-    cwd,
-    versionCompatibility.currentVersion,
-    versionCompatibility.targetVersion,
-    { dryRun: options.dryRun },
-  )
+  // Codemod ranges are written against versions, so an unresolved tag name has
+  // nothing to match and running them would silently select none.
+  const codemodResults = versionCompatibility.resolvedTarget
+    ? await runCodemods(
+        cwd,
+        versionCompatibility.currentVersion,
+        versionCompatibility.targetVersion,
+        { dryRun: options.dryRun },
+      )
+    : []
 
   if (!options.dryRun && options.install && updatedDependencies.length > 0) {
     const installRunner = options.installRunner ?? runBunInstall

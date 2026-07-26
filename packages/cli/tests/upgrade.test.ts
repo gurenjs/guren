@@ -87,6 +87,33 @@ describe('upgradeCanary', () => {
     expect(DEFAULT_UPGRADE_TAG).toBe('latest')
   })
 
+  it('degrades to a warning when the registry lookup throws', async () => {
+    const result = await upgradeCanary({
+      cwd: workspace.dir,
+      versionResolver: async () => {
+        throw new Error('ENOTFOUND registry.npmjs.org')
+      },
+    })
+
+    // A cached rejection used to be replayed uncaught by the second caller,
+    // taking the whole command down when the registry was unreachable.
+    expect(result.updatedDependencies).toHaveLength(0)
+    expect(result.versionCompatibility?.resolvedTarget).toBe(false)
+    expect(result.versionCompatibility?.warnings.join('\n')).toContain('Could not resolve')
+  })
+
+  it('does not call an unresolved tag compatible, and runs no codemods for it', async () => {
+    const result = await upgradeCanary({
+      cwd: workspace.dir,
+      versionResolver: async () => null,
+    })
+
+    expect(result.versionCompatibility?.resolvedTarget).toBe(false)
+    expect(result.versionCompatibility?.compatible).toBe(false)
+    expect(result.versionCompatibility?.targetVersion).toBe(DEFAULT_UPGRADE_TAG)
+    expect(result.codemodResults).toHaveLength(0)
+  })
+
   it('warns when the requested tag resolves to an older version', async () => {
     await writeFile(
       packageJsonPath,
@@ -342,6 +369,12 @@ describe('compareVersions', () => {
   it('ranks alphanumeric identifiers above numeric ones and shorter above longer', () => {
     expect(compareVersions('1.0.0-alpha', '1.0.0-rc.1')).toBeLessThan(0)
     expect(compareVersions('1.0.0-rc.1', '1.0.0-rc.1.1')).toBeLessThan(0)
+  })
+
+  it('ignores build metadata, which carries no precedence', () => {
+    expect(compareVersions('1.0.0+foo', '1.0.0+bar')).toBe(0)
+    expect(compareVersions('1.0.0-alpha+foo', '1.0.0-alpha+bar')).toBe(0)
+    expect(compareVersions('1.5.0+build', '1.5.1')).toBeLessThan(0)
   })
 
   it('reports unordered for specifiers that are not versions', () => {

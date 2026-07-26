@@ -128,8 +128,13 @@ export function compareVersions(a: string, b: string): number {
 }
 
 function splitPrerelease(version: string): [string, string | undefined] {
-  const index = version.indexOf('-')
-  return index === -1 ? [version, undefined] : [version.slice(0, index), version.slice(index + 1)]
+  // Build metadata carries no precedence, so `1.5.0+build` must order exactly
+  // as `1.5.0` — left in, its non-numeric tail made the comparison NaN.
+  const withoutBuild = version.split('+', 1)[0] ?? version
+  const index = withoutBuild.indexOf('-')
+  return index === -1
+    ? [withoutBuild, undefined]
+    : [withoutBuild.slice(0, index), withoutBuild.slice(index + 1)]
 }
 
 function comparePrerelease(a: string, b: string): number {

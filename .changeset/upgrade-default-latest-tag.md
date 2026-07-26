@@ -26,6 +26,12 @@ Three changes:
   codemods now receive that resolved version instead of the tag string, which no
   codemod range could ever match; `--canary` keeps pinning the floating tag, so
   it still passes the literal `canary` through.
+- A registry lookup that throws now degrades to "could not resolve" instead of
+  taking the command down. The lookup is memoized, and one caller wraps it in
+  `.catch` while the other does not, so a cached rejection was handled once and
+  rethrown the second time — an unreachable registry aborted the whole upgrade.
+  An unresolved tag is also no longer reported as compatible, and codemods are
+  skipped for it, since a tag name matches no codemod range.
 - `compareVersions` handles prereleases. `'1.0.0-rc.4'.split('.')` yielded
   `[1, 0, NaN, 4]`, and a NaN difference is neither greater nor less than zero,
   so every comparison against a `1.0.0-rc.N` version answered "unordered" —
@@ -33,4 +39,10 @@ Three changes:
   1.0 line in that shape, so this covered exactly the versions the upgrade path
   compares. A release now outranks its own prereleases, prerelease identifiers
   order numerically rather than lexically, and non-version specifiers such as
-  `workspace:*` return NaN so callers can skip them.
+  `workspace:*` return NaN so callers can skip them. Build metadata is stripped,
+  since it carries no precedence — `1.5.0+build` versus `1.5.1` used to be
+  unordered.
+
+The downgrade check anchors on the first comparable `@guren/*` pin. Tags can
+resolve per-package, so this is a safety net over the common case of one release
+line across every entry rather than a guarantee for each individual rewrite.
