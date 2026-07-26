@@ -43,7 +43,7 @@ Next.js と Guren は答えている問いが違います。Next.js は React �
 
 AdonisJS は TypeScript 世界のもう一つのバッテリー同梱 MVC フレームワークで、素晴らしい選択肢です — Laravel のアーキテクチャを Node.js で使いたいなら定番です。Guren は 2 つ、異なる賭けをしています:
 
-- **Node ではなく Bun。** 同一仕様アプリ同士のベンチマーク（[フレームワーク比較リポジトリ](https://github.com/gurenjs/framework-comparison)の Inertia SSR 実装 2 つ）で、Guren は **SSR ページで 2.3 倍、JSON 経路で 3.5 倍のスループット、コールドスタートは 1.8 倍高速**という結果です — [手法とワンクリック追試はこちら](https://github.com/gurenjs/framework-comparison/blob/main/BENCHMARK.md)。アプリのコードは同一なので、この差はランタイムの差です。それこそが要点で、アーキテクチャはそのまま、エンジンだけ替わります。
+- **Node ではなく Bun。** 同一仕様アプリ同士のベンチマーク（[フレームワーク比較リポジトリ](https://github.com/gurenjs/framework-comparison)の Inertia SSR 実装 2 つ）で、Guren は **SSR ページで 2.3 倍、JSON 経路で 3.5 倍のスループット、コールドスタートは 1.8 倍高速**という結果です — [手法とワンクリック追試はこちら](https://github.com/gurenjs/framework-comparison/blob/main/BENCHMARK.md)。アプリのコードは同一なので、この差はランタイムの差です。それこそが要点で、アーキテクチャはそのまま、エンジンだけ替わります。そして Bun に賭けてもデプロイ先が縛られるわけではありません — AWS Lambda・Vercel・Cloudflare Workers 向けの公式プラグインがあり、[guren.dev](https://guren.dev/) 自身も Workers 上で動く Guren アプリです。
 - **独自実装ではなく TypeScript エコシステムの定番を採用。** AdonisJS は独自の ORM（Lucid）やバリデータ（VineJS）を持ちます。Guren はエコシステムで既に標準となった部品 — Drizzle、Zod、Vite、Inertia — を組み立て、そこに規約を載せます。同一仕様アプリの実装で、保守対象のコードは Guren 991 行 / 38 ファイルに対して AdonisJS 2,438 行 / 68 ファイル、直接依存は 17 対 43 でした。
 
 タイプ量はほぼ互角です（どちらもスキャフォールドが優秀で、手書きは約 570 行対 600 行）。選択はランタイムと、どのデータ層と付き合いたいかで決まります。
@@ -86,7 +86,7 @@ bun run typecheck   # 型付き page props とルート契約のズレはビル�
 
 - **プロダクトがレンダリング中心。** コンポーネント単位のストリーミング SSR、細粒度のキャッシュ、RSC エコシステムは Next.js のホームグラウンドです。
 - **極小フットプリントのサービスが欲しい。** Webhook レシーバーやエッジファンクションに MVC は不要です — 素の Hono の方が軽量です。
-- **チームが別のランタイムにコミットしている。** Guren は設計上 Bun ネイティブです。Node.js ランタイムでのサーバーレスデプロイはサポートしていますが、主たる開発体験は Bun を前提としています。
+- **チームが Bun で開発できない。** Guren は設計上 Bun ファーストです: 開発サーバー・テストランナー・CLI は Bun を前提としています。デプロイはポータブルで、AWS Lambda・Vercel・Cloudflare Workers 向けの公式プラグインがありますが、開発マシンで Bun を使えないなら別のフレームワークの方が適しています。
 
 ## 次のステップ
 
