@@ -1,4 +1,4 @@
-import { beforeEach, afterEach, describe, expect, it, mock } from 'bun:test'
+import { beforeEach, afterEach, describe, expect, it, mock, spyOn } from 'bun:test'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createTempWorkspace, type TempWorkspace } from './helpers'
@@ -129,6 +129,151 @@ describe('upgradeCanary', () => {
     expect(result.versionCompatibility?.downgrade).toBe(true)
     expect(result.versionCompatibility?.compatible).toBe(false)
     expect(result.versionCompatibility?.warnings.join('\n')).toContain('would downgrade')
+  })
+
+  it('aligns drizzle pins with the version @guren/orm depends on', async () => {
+    await writeFile(
+      packageJsonPath,
+      JSON.stringify({
+        name: 'drizzle-test',
+        dependencies: { '@guren/orm': '^1.0.0', 'drizzle-orm': '1.0.0-rc.1' },
+        devDependencies: { 'drizzle-kit': '1.0.0-rc.1' },
+      }, null, 2),
+      'utf8',
+    )
+
+    const result = await upgradeCanary({
+      cwd: workspace.dir,
+      versionResolver: async () => '1.2.0',
+      manifestResolver: async (name) =>
+        name === '@guren/orm'
+          ? { version: '1.2.0', dependencies: { 'drizzle-orm': '1.0.0-rc.4' } }
+          : { version: '1.0.0-rc.4' },
+    })
+    const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
+      dependencies: Record<string, string>
+      devDependencies: Record<string, string>
+    }
+
+    // Written exactly, matching how @guren/orm pins it — a caret would let the
+    // app resolve a different copy than the adapter runs on.
+    expect(packageJson.dependencies['drizzle-orm']).toBe('1.0.0-rc.4')
+    expect(packageJson.devDependencies['drizzle-kit']).toBe('1.0.0-rc.4')
+    expect(result.updatedDependencies).toContainEqual({
+      field: 'dependencies',
+      name: 'drizzle-orm',
+      previousVersion: '1.0.0-rc.1',
+      nextVersion: '1.0.0-rc.4',
+    })
+    expect(result.updatedDependencies).toContainEqual({
+      field: 'devDependencies',
+      name: 'drizzle-kit',
+      previousVersion: '1.0.0-rc.1',
+      nextVersion: '1.0.0-rc.4',
+    })
+  })
+
+  // Every path that declines to write, with the entry that must survive and the
+  // warning the user gets. Adding a case is a row, not another copied block.
+  const ORM_PINS_RC4 = { version: '1.2.0', dependencies: { 'drizzle-orm': '1.0.0-rc.4' } }
+  const declines = [
+    {
+      label: 'a specifier that names a location',
+      manifest: { dependencies: { '@guren/orm': '^1.0.0', 'drizzle-orm': 'workspace:*' } },
+      manifestResolver: async () => ORM_PINS_RC4,
+      survives: ['dependencies', 'drizzle-orm', 'workspace:*'],
+      warning: 'names a location rather than a release',
+    },
+    {
+      label: 'a published peer range',
+      manifest: { dependencies: { '@guren/orm': '^1.0.0' }, peerDependencies: { 'drizzle-orm': '^1' } },
+      manifestResolver: async () => ORM_PINS_RC4,
+      survives: ['peerDependencies', 'drizzle-orm', '^1'],
+      warning: null,
+    },
+    {
+      label: 'a drizzle-kit version that was never published',
+      manifest: {
+        dependencies: { '@guren/orm': '^1.0.0' },
+        devDependencies: { 'drizzle-kit': '0.31.0' },
+      },
+      manifestResolver: async (name: string) => (name === '@guren/orm' ? ORM_PINS_RC4 : null),
+      survives: ['devDependencies', 'drizzle-kit', '0.31.0'],
+      warning: 'does not exist on npm',
+    },
+    {
+      label: 'an ORM that depends on a range rather than one version',
+      manifest: { dependencies: { '@guren/orm': '^1.0.0', 'drizzle-orm': '1.0.0-rc.1' } },
+      manifestResolver: async () => ({ version: '1.2.0', dependencies: { 'drizzle-orm': '^1.0.0' } }),
+      survives: ['dependencies', 'drizzle-orm', '1.0.0-rc.1'],
+      warning: 'not a single exact version',
+    },
+    {
+      label: 'an app that does not use @guren/orm',
+      manifest: { dependencies: { '@guren/core': '^1.0.0', 'drizzle-orm': '1.0.0-rc.1' } },
+      manifestResolver: async () => ORM_PINS_RC4,
+      survives: ['dependencies', 'drizzle-orm', '1.0.0-rc.1'],
+      warning: null,
+    },
+  ] as const
+
+  for (const { label, manifest, manifestResolver, survives, warning } of declines) {
+    it(`leaves drizzle alone for ${label}`, async () => {
+      await writeFile(packageJsonPath, JSON.stringify({ name: 'decline', ...manifest }, null, 2), 'utf8')
+      const warnings: string[] = []
+      const warnSpy = spyOn(console, 'warn').mockImplementation(((message: unknown) => {
+        warnings.push(String(message))
+      }) as never)
+
+      try {
+        await upgradeCanary({
+          cwd: workspace.dir,
+          versionResolver: async () => '1.2.0',
+          manifestResolver,
+        })
+      } finally {
+        warnSpy.mockRestore()
+      }
+
+      const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as Record<
+        string,
+        Record<string, string>
+      >
+      const [field, name, value] = survives
+      expect(packageJson[field]?.[name]).toBe(value)
+      if (warning) {
+        expect(warnings.join('\n')).toContain(warning)
+      }
+    })
+  }
+
+  it('makes no registry call for drizzle under the canary tag', async () => {
+    await writeFile(
+      packageJsonPath,
+      JSON.stringify({
+        name: 'canary-drizzle',
+        dependencies: { '@guren/orm': '^1.0.0', 'drizzle-orm': '1.0.0-rc.1' },
+      }, null, 2),
+      'utf8',
+    )
+
+    let looked = false
+    await upgradeCanary({
+      cwd: workspace.dir,
+      tag: 'canary',
+      manifestResolver: async () => {
+        looked = true
+        return null
+      },
+    })
+    const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
+      dependencies: Record<string, string>
+    }
+
+    // canary keeps a floating pin, so there is nothing to converge on — and the
+    // mode stays offline.
+    expect(looked).toBe(false)
+    expect(packageJson.dependencies['drizzle-orm']).toBe('1.0.0-rc.1')
   })
 
   it('resolves each package once even though it appears in several lookups', async () => {

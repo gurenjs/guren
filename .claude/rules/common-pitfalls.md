@@ -39,7 +39,7 @@ Lessons learned from code review cycles. Check these before submitting changes.
 
 ## Template Dependencies
 
-- **Keep `drizzle-orm` and `drizzle-kit` versions aligned** across `packages/orm/package.json` (peerDeps), `templates/default/package.json`, and `templates/api-only/package.json`.
+- **Keep `drizzle-orm` and `drizzle-kit` versions aligned** across `packages/orm/package.json` (an exact pin under `dependencies`, not peerDeps) and both `packages/create-app/templates/*/package.json`. `guren upgrade` propagates the ORM's pin into apps, and checks the companion version exists before writing it — the two packages have never shared numbers on their stable lines.
 - **API-only template has no Vite, React, or Inertia.** Force SPA mode in CLI (`blueprint === 'api'` → skip SSR).
 - **Default template always calls `configureOrm()`** even without migrations (models need a DB connection).
 
