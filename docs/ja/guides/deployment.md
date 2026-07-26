@@ -143,6 +143,22 @@ vercel deploy --prebuilt
 > [!NOTE]
 > このプラグインは SSR アプリ専用です。Vite マニフェストを読み取り、サーバーレス関数に正しい `GUREN_INERTIA_*` 環境変数を注入します。API-only アプリは Docker や Lambda を使ってください。
 
+## Cloudflare Workers
+
+公式プラグインを使うと、データベースに D1 を用いて Cloudflare Workers 上でアプリを動かせます。
+
+```bash
+bunx guren plugin @guren/plugin-cloudflare
+bun add @guren/plugin-cloudflare
+```
+
+```bash
+bunx guren cloudflare:build
+bunx wrangler deploy
+```
+
+Workers にはファイルシステムがなく、リクエスト間でメモリを共有しません。そのためセッションと OAuth state はデータベースに保存する必要があり、マイグレーションはアプリの外側で適用します。D1・シークレット・無料プランの制限・ローカル開発を含む詳細は **[Cloudflare Workers へのデプロイ](./cloudflare.md)** を参照してください。
+
 ## デプロイ後の作業
 - HTTPS を設定（Nginx/Caddy などのリバースプロキシやクラウド機能）。
 - ログ・モニタリングを構成（Bun は stdout/stderr に出力するので、集約先へ転送）。
