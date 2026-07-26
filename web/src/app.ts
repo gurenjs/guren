@@ -17,8 +17,8 @@ import registerWebRoutes from '../routes/web.js'
 
 const secureCookies = process.env.NODE_ENV === 'production' && !process.env.CI
 
-// Registered at module scope so every entrypoint picks it up — the Bun server,
-// the Vercel handler, and the generated Workers bundle all import this module.
+// Registered at module scope so every entrypoint picks it up — both the Bun
+// server and the generated Workers bundle import this module.
 setInertiaDocument({
   bodyClass: ({ component }) => (usesLightSurface(component) ? LIGHT_SURFACE_BODY_CLASS : undefined),
   criticalCss: ({ component }) => (usesLightSurface(component) ? LIGHT_SURFACE_CRITICAL_CSS : undefined),

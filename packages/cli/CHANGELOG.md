@@ -1,5 +1,184 @@
 # @guren/cli
 
+## 1.5.0
+
+### Minor Changes
+
+- 5196935: Added application modules — a `modules/<name>/` directory convention for composing self-contained slices of an app instead of piling everything into one flat `app/`, `routes/`, and `db/schema.ts`. `defineModule()` (new in `@guren/server`, re-exported from `@guren/core`) declares a module's routes and providers; `Application` folds them into its provider list and route mounting at boot via the new `mountModuleRoutes()`.
+
+  On the CLI side: `guren make:module <name>` scaffolds and auto-wires a module (`index.ts`, `routes.ts`, `db/schema.ts`, plus `src/app.ts`/`db/schema.ts` patching). Most `make:*` generators accept `--module <name>` to scaffold inside a module instead of the project root. `guren check`, `guren audit`, `guren context`, `model:list`, and `doctor` are all module-aware automatically, and once any `modules/` directory exists, `guren check` derives zero-config boundary rules that flag cross-module imports reaching past a module's public surface (`index.ts` or `db/schema.ts`) — no `guren.arch.ts` authoring required. `guren codegen`, `guren audit`, `openapi:generate`, and `guren route:list` all see routes registered inside a module's own `routes.ts`, not just the top-level `routes/web.ts`.
+
+- 5196935: `guren check` now enforces architecture boundaries. Drop a `guren.arch.ts` file at the project root to define layers and disallowed cross-layer imports (or disallowed packages), and violations are reported alongside the existing route/controller/page checks. Two new flags support this for AI coding agents and large apps: `guren check --arch` runs only the architecture checks (a fast path for an edit hook), and `guren check --changed` restricts any check to files changed versus the merge base with `main`.
+- c395b27: feat: doc–code linking (RFC 0004 Part 2)
+
+  - `docs/` frontmatter convention: markdown under `docs/` (and
+    `modules/*/docs/`) can declare `kind`, `status`, `entities`,
+    `related` (paths or globs), and `last_reviewed`.
+  - `guren context <Entity>` gains a **Linked docs** section, resolved
+    from frontmatter `entities:` and code-side `@docs <path>` JSDoc tags
+    on models and controllers.
+  - `guren check --docs` validates the links deterministically: dangling
+    `related` paths/globs and unknown `entities` fail; entities whose
+    only docs are superseded warn; `--docs-ttl <days>` warns on stale
+    `last_reviewed`. Content-activated — apps without the convention see
+    zero results — and participates in `check --changed`. Doc-link
+    results also appear in plain `guren check`, so agent-harness edit
+    hooks surface dangling links when the files they govern change —
+    intentional: that is exactly when the link should be fixed.
+    `--arch --docs` together runs the union of both suites.
+  - `make:adr "Title"` scaffolds numbered ADRs under `docs/adr/` with
+    prefilled, linkable frontmatter (`--module` targets a module's docs).
+    `--entity <Model>` prefills `entities:` with the canonical class name
+    and `related:` with the entity's controller/resource/policy files; an
+    entity that doesn't exist yet is prefilled as given, so ADR-first
+    flows get a failing `check --docs` as the "implementation missing"
+    signal.
+
+- 0138070: feat: entity-centric context bundles (RFC 0004 Part 1)
+
+  - `guren context <Entity>` joins everything the CLI knows about one model
+    into a single markdown/JSON bundle: model metadata (table, columns,
+    relationships, reverse references), routes with validation schemas,
+    controller actions, Inertia pages with extracted Props, resource,
+    policy, factories, seeders, and tests. Same-named models across
+    modules are disambiguated with `--module` (`--module app` selects the
+    application root), and every join is scoped to the selected location
+    when the name is duplicated.
+  - `guren context` (whole-project) now reports routes from the full
+    `RouteDefinition` payload — the Routes table gains a Controller column
+    and JSON output includes controller bindings and schema type strings.
+  - `RouteDefinition` gains `bindings` (param name → bound model class
+    name) so route model bindings are introspectable.
+  - The MCP endpoint exposes the bundle as the `guren_entity_context` tool
+    and the `guren://context/{entity}` resource template.
+
+- 3d6b5d5: feat: teach scaffolds and the agent harness the docs/spec conventions
+
+  - New apps ship with `docs/adr/0001-record-architecture-decisions.md`,
+    a seed ADR explaining the frontmatter convention, `make:adr`, and the
+    link checking `guren check` performs.
+  - The agent harness gains `.claude/rules/docs-and-spec.md` (glob-scoped
+    to docs, schema, models, controllers, routes, and pages): start
+    entity work with `guren context <Entity>`, keep doc frontmatter
+    current when moving files, regenerate `docs/spec/` views after
+    structural changes. Existing apps receive the rule via
+    `bunx guren agent:sync`. The harness `CLAUDE.md` (start-here block
+    and MCP tool table, now covering `guren context <Entity>`,
+    `spec:generate`, `make:adr`, and `guren_entity_context`) applies to
+    new `agent:init` installs — `CLAUDE.md` is user-owned and never
+    overwritten by sync.
+
+- c9095a1: `guren make:auth --verify` now scaffolds an email verification flow (`VerifyEmailController`, a `VerifyEmail` page, an `emailVerifiedAt` users column, and an in-memory `EmailVerificationStore`). Registration sends a verification email and redirects to `/verify-email` instead of `/dashboard`, and the generated `/dashboard` route is guarded with `requireVerifiedEmail`. Also fixes `updateSchema()` corrupting a `users` table defined with Drizzle's three-argument form (e.g. `pgTable('users', {...}, (table) => [...])`) by inserting the new column next to the `rememberToken` field instead of attempting a whole-block replace.
+- 8d1f495: `guren make:auth --oauth-only` scaffolds OAuth as an app's only sign-in method, completing RFC 0003 §4's passwordless requirement. `/login` becomes a provider-buttons page with no credential form and no `POST /login` route, and `LoginController` keeps only `show()` and `destroy()` (logout). Registration, password reset, `LoginValidator`, the login and profile password fields, and the demo `UsersSeeder` are all skipped — a seeded password could never be used to sign in, and hashing one is the per-request CPU cost the flag exists to avoid on metered runtimes like the Cloudflare Workers free tier.
+
+  `--oauth-only` requires `--oauth` with at least one supported provider (honouring it without providers would scaffold an app with no way in, and ignoring it would scaffold the password login the flag opts out of), subsumes `--minimal`, and skips `--verify` with a warning since provider-supplied emails arrive already vouched for. Scaffolding the password variants is unchanged, byte for byte.
+
+  Two consequences of removing the password surface are handled explicitly. The profile email is scaffolded read-only and dropped from `ProfileUpdateSchema`: with no verification flow in this mode, an editable email would let an account claim an address it never proved, and `OAuthController`'s collision check would then reject that address's real owner on their first sign-in. And because `make:auth` only ever writes the files it scaffolds, converting an existing password app with `--oauth-only --force` now reports the password files left on disk — notably `db/seeders/UsersSeeder.ts`, which `db:seed` finds without going through the route table.
+
+- ac6e4ce: `guren make:auth --oauth <providers>` now scaffolds OAuth login buttons for a comma-separated list of providers (`github`, `google`, `discord`). It adds a `<provider>Id` column per provider to the `users` table, an `OAuthProvider` that registers each provider against the shared `OAuthManager` (only once its client ID, secret, and redirect URI are all set), and an `OAuthController` with `redirectToProvider`/`callback` actions — sharing file paths and DI wiring conventions with `guren add oauth`, but with a complete callback that links or creates the account and logs the user in instead of a stub. Unlike `--verify`, `--oauth` works with `--minimal`. Also generalizes `updateSchema()`'s column-injection logic so `--verify` and `--oauth` can add their columns together without duplicating the `users` table.
+- 8beb966: `guren make:auth` now scaffolds a password reset flow (`ForgotPasswordController`, `ResetPasswordController`, a `config/mail.ts` defaulting to the `log` driver, and an in-memory `PasswordResetStore`) by default, alongside a fix for `addImport` corrupting multi-line leading import statements when wiring providers into `src/app.ts`. Pass `--minimal` to skip registration and password reset scaffolding.
+- 6cfdb5c: `guren make:auth` now scaffolds a registration flow (`RegisterController`, `RegisterSchema` with password confirmation, and a `Register` page) by default, wired into `routes/auth.ts` and linked from the login page. Pass `--minimal` to reproduce the previous login-only scaffold.
+- 0131222: `make:auth --oauth` now scaffolds truly passwordless OAuth accounts (RFC 0003 Part 3): OAuth-created users are stored without a password instead of hashing a synthetic random one — the model's hashing pipeline already skips absent passwords, and password login safely rejects accounts without a hash (timing-equalized). On CPU-metered runtimes (Cloudflare Workers free tier), this also removes the one scrypt hash per OAuth signup that would have blown the request budget.
+
+  The scaffolded `users` table now leaves `passwordHash` nullable when `--oauth` is enabled, and adding `--oauth` to an existing password-auth app relaxes the existing `notNull` in `db/schema.ts` (run `db:make` to generate the migration; the relaxation is scoped to the `users` table and handles every dialect, including mysql's comma-carrying `varchar` options). Note the trade-off: because `--oauth` still scaffolds password login alongside, the relaxation is table-wide — password-registered rows lose the database-level NOT NULL guard (the scaffold prints this). Pass `--oauth-only` to drop password login entirely instead. The email-collision message is provider-agnostic now ("Sign in with the method you originally used").
+
+- 52dbaaf: BREAKING (`@guren/plugin-vercel`): the provider export changed from the `GurenPluginVercelProvider` class to a `vercelPlugin(config?)` factory built on `definePlugin()`, aligning with `@guren/plugin-cloudflare` and the plugin contract's recommended shape. The config object is empty today and reserved so future fields never force another registration-shape change. Update registrations from `providers: [GurenPluginVercelProvider]` to `providers: [vercelPlugin()]`; `createVercelHandler` and `buildVercelOutput` are unchanged. The `gurenPlugin.provider` manifest field is dropped accordingly.
+
+  `@guren/cli`: `guren plugin` now knows the official factory-shaped plugins (`@guren/plugin-vercel`, `@guren/plugin-cloudflare`) and auto-registers them as `providers: [vercelPlugin()]`-style call expressions in `src/app.ts` — previously factory plugins could only print a "register manually" hint.
+
+- 6905725: feat: derived spec views with a drift gate (RFC 0004 Part 3)
+
+  - `guren spec:generate` renders four deterministic markdown views into
+    `docs/spec/`: `er.md` (Mermaid ER diagram from the Drizzle schema,
+    edges from model relationships and explicit `.references()` FKs),
+    `domain.md` (Mermaid class diagram of models grouped by module),
+    `screens.md` (route → controller action → page → Props inventory),
+    and `modules.md` (module context map with cross-module dependency
+    edges). Output is byte-stable — stable sorts, no timestamps — so PR
+    diffs show exactly what a code change did to the spec.
+  - `guren check --spec` is the tbls-style drift gate: it regenerates the
+    views in memory and fails (non-zero exit) when the committed files
+    differ or are missing. Content-activated on `docs/spec/`; under
+    `check --changed` it only regenerates when a spec-relevant file
+    (schema, models, controllers, routes, pages, resources) changed.
+  - The Drizzle schema parser is promoted to a shared `schema-parser.ts`
+    (column types, nullability, primary keys, `.references()` targets);
+    the audit's sensitive-column check and the entity context consume it.
+
+### Patch Changes
+
+- f7186c7: Fix a stray `@guren/server/redis` reference in `make:auth`'s password-reset/email-verification store comments — it should point at `@guren/core/redis`, the public subpath. Also fully adopt `make:auth`'s auth stack (registration, password reset, email verification, GitHub/Google OAuth) into `examples/blog`, replacing the login-only reference implementation.
+- 6ec0cfe: fix: skip rewriting generated artifacts whose content is unchanged
+
+  `guren codegen` wrote `.guren/pages.gen.ts`, `.guren/routes.gen.ts`,
+  `.guren/data.gen.ts`, `.guren/channels.gen.ts`, `.guren/api-client.gen.ts`,
+  and `types/generated/routes.d.ts` unconditionally, so every run bumped
+  their mtimes even when the output was byte-identical. Since the Vite plugin
+  regenerates on each save under `resources/js/pages/`,
+  `app/Http/Resources/`, and `routes/web.ts`, a frontend-only edit churned
+  files that backend code imports. The generators now compare the existing
+  file first and skip the write when nothing changed; content that differs
+  still goes through the usual `--force` guard.
+
+  As a consequence, `guren routes:types` without `--force` no longer errors
+  with "already exists. Use --force to overwrite." when the existing file is
+  already byte-identical to what it would generate — identical content is not
+  a clobber. Output that differs is still refused without `--force`.
+
+- 7a128ed: Reload backend changes without restarting the dev server
+
+  `dev:server` now runs `bun --hot bin/serve.ts` in both templates, so edits to
+  controllers, routes, and models take effect on the next request instead of
+  requiring a manual restart. In the default frontend template, adding a route
+  re-runs codegen and reloads once more, then settles.
+
+  Keep `@guren/cli` current before adding the flag to an existing project. The
+  reload only settles because codegen leaves `.guren/*.gen.ts` untouched when the
+  output is unchanged; older versions rewrote them on every run, and since your
+  controllers import those files, each rewrite triggers the next reload.
+
+  State held in the process does not survive a reload: the memory-backed session
+  and cache stores are rebuilt empty, and module-level variables are
+  reinitialized. External stores — Redis, the database — are unaffected.
+
+  `guren doctor` now counts `dev:server` among the scripts an app is expected to
+  have, so its autofix no longer adds a `dev` script that calls a missing one.
+
+- 0b8ec64: Fixed `make:auth --oauth <providers>` scaffolding a profile form that let an account replace the email its identity provider had vouched for. Without `--verify` nothing in the generated app can re-prove a new address, so the account could end up asserting an email it had never owned — and the generated `OAuthController` would then turn that assertion into a rejection for the address's real owner on their first sign-in.
+
+  `--oauth` without `--verify` now scaffolds the profile email read-only: the field is dropped from `ProfileUpdateSchema` and `ProfileController.update()` no longer reads one, so a hand-crafted request cannot carry an address either. `--oauth --verify`, and every scaffold without `--oauth`, keep the editable email field unchanged.
+
+  This does not make an email address exclusive to whoever owns the mailbox. Registration still accepts any well-formed email and `users.email` is unique, so an account holding an address still blocks that address's first OAuth sign-in — the fix only stops a provider-vouched account from silently moving off the address it proved.
+
+- f7186c7: Harden `make:auth` templates with fixes discovered while adopting the full auth stack in a real app:
+
+  - Validators lowercase the email field, so mixed-case input round-trips correctly through login, password-reset, and email-verification lookups (the token helpers normalize to lowercase internally).
+  - `/verify-email/confirm` is scaffolded as a public route — it validates the signed token itself, and gating it behind auth stranded users who opened the emailed link from another device or after their session expired.
+  - `ProfileController.update()` clears `emailVerifiedAt` and re-sends the verification email when the address changes (with `--verify`), instead of letting an unproven replacement address inherit verified status.
+  - `ForgotPasswordController` no longer awaits the reset-email send inline; the transport round-trip only happened for known accounts, so response timing could reveal which emails are registered.
+  - `OAuthController` lowercases the provider email before matching and creating accounts.
+
+- f7186c7: Fix `make:auth --verify --oauth <providers>`: newly created OAuth accounts are now marked email-verified at creation. Previously they were left unverified, and since `OAuthController` never sends a verification email, `requireVerifiedEmail` would strand every OAuth signup at `/verify-email` with no way to get past it. The OAuth provider already vouches for the address, so there's nothing to re-verify.
+- 10a9bd1: Add `emailVerified` to `OAuthUserProfile`. Providers report whether they actually verified an address separately from the address itself — Google sends OIDC's `email_verified`, Discord sends `verified` — and until now that signal was only reachable through the untyped `profile.raw` bag. The field is tri-state on purpose: `true` (the provider asserts verified), `false` (it asserts not verified), `undefined` (no signal, so the app decides its own policy).
+
+  Provider configs declare where to read it via `emailVerifiedKey`, so the shared mapper knows only OIDC's standard `email_verified` claim; the Google and Discord presets each declare their own key, and only boolean values are read. GitHub's `/user` carries no such field, so `emailVerified` stays `undefined` there — except when the private-email fallback runs, which reports `true` because `/user/emails` only yields verified primary addresses. `mapProfile` still owns the whole mapping when set.
+
+  `fetchFallbackEmail` may now also return `{ email, emailVerified }` instead of a bare string, since the signal read from the userinfo response cannot vouch for an address that response did not contain. This is additive: implementations written against the original signature keep compiling, and a bare string deliberately claims nothing, leaving `emailVerified` undefined rather than asserting `true` on their behalf.
+
+  `make:auth --oauth`'s scaffolded `OAuthController` now checks `profile.emailVerified === false` instead of matching provider-specific keys on `profile.raw`. Same behavior, no provider names in generated application code.
+
+- 8d1f495: Fix `make:auth --oauth`: the scaffolded `OAuthController` no longer creates an account from an email address the provider has not verified. Google reports `email_verified` and Discord reports `verified` alongside the address, and returning an email is not a claim that it was checked — so an unverified one could previously create an authenticated account holding an address it did not own, and the callback's email-collision check would then permanently turn the real owner away on their first sign-in. The check runs only on the account-creation path, so an already-linked account is not locked out if its provider status changes later.
+
+  This changes the generated `OAuthController.ts` for every `--oauth` variant; the rest of the scaffold is untouched. GitHub was already safe here — its fallback email lookup requires a verified primary address.
+
+- Updated dependencies [88b45c4]
+- Updated dependencies [360d1f4]
+- Updated dependencies [a2c7b8c]
+- Updated dependencies [d5d0c5b]
+- Updated dependencies [1a6b738]
+  - @guren/core@1.3.0
+  - @guren/orm@1.2.0
+
 ## 1.4.0
 
 ### Minor Changes

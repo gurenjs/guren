@@ -1,5 +1,63 @@
 # @guren/core
 
+## 1.3.0
+
+### Minor Changes
+
+- 88b45c4: Added `DatabaseSessionStore` and `DatabaseOAuthStateStore` (RFC 0003 Part 3) — database-backed stores built on the Guren ORM, next to the existing `DatabaseApiTokenStore`. Both work on any configured connection (SQLite, Postgres, MySQL, Cloudflare D1), which makes them the serverless defaults: sessions no longer require Redis on Lambda/Vercel/Workers (reads are strongly consistent, so login → redirect → read works), and OAuth state survives the authorize redirect landing on a different instance than the callback — the default `MemoryOAuthStateStore` is per-isolate memory and cannot guarantee that.
+
+  Expired rows are treated as missing (and removed, guarded so a concurrently refreshed row survives) on read; expiry checks fail closed — a missing or unparseable `expiresAt` (including postgres.js bigint numeric strings) counts as expired. Both stores expose `deleteExpired()` for scheduled bulk cleanup, mirroring `DatabaseApiTokenStore`. Schema shapes are documented on each class (`sessions`: `id`/`data`/`expiresAt`; `oauth_states`: `stateHash`/`provider`/`redirectTo`/`expiresAt`). Session values must be JSON-serializable (documented on the class).
+
+  Minor behavior fix in `DatabaseApiTokenStore`: a corrupt text-mode `abilities` column now degrades to an empty ability list (deny-by-default) instead of throwing on every verification of the affected token.
+
+- 360d1f4: Added `createD1Database` — the Cloudflare D1 factory (RFC 0003 Part 2), alongside the postgres/mysql/sqlite factories and re-exported from `@guren/core`. It takes a deferred `binding` resolver (`binding: () => getWorkersEnv<Env>().DB` — bindings reach runtime-portable app code via the plugin's write-once holder, populated on the first request) and wires `drizzle-orm/d1` into the ORM adapter. D1 speaks the SQLite dialect, so schemas written for `createSqliteDatabase` port unchanged.
+
+  The operational surface is deliberately different from the other factories: `migrateDatabase()`, `seedDatabase()`, `resetDatabase()`, and `migrationStatus()` throw with guidance instead of executing — wrangler owns the D1 migration lifecycle (`wrangler d1 migrations apply` over the same drizzle-kit-generated SQL files, `migrations_dir` pointing at `db/migrations`). The drizzle-kit SQL format contract (statement-breakpoint separators, filename ordering, idempotent re-apply) is covered by an opt-in end-to-end test against wrangler's local D1 (`GUREN_TEST_WRANGLER=1`).
+
+- 1a6b738: Reduced session write volume (RFC 0003 Part 3): the session middleware no longer persists on every request, which matters anywhere writes are metered (Cloudflare D1's free tier allows 100k row writes/day — previously every page view consumed one).
+
+  - **Empty new sessions are not persisted and issue no cookie.** An anonymous request that never stores anything now costs zero store operations. Sessions (and their cookie) appear the moment anything is stored. Apps that relied on every visitor receiving a session cookie unconditionally will see it appear on first actual session use instead. (With the default auth stack this happens on the first CSRF-protected page, unchanged for now.)
+  - **Flash aging only dirties sessions that carried flash data**, instead of marking every loaded session dirty on every request.
+  - **New optional `SessionStore.touch(id, ttlSeconds)`** — rolling expiry for unchanged sessions becomes a TTL refresh instead of a full data rewrite. Implemented in `MemorySessionStore`, `RedisSessionStore` (EXPIRE), and `DatabaseSessionStore` (single UPDATE). Stores without `touch` keep the previous full-write fallback, and touching a missing session is a no-op — an expired session is no longer resurrected as an empty row by its stale cookie.
+
+### Patch Changes
+
+- Updated dependencies [5196935]
+- Updated dependencies [5196935]
+- Updated dependencies [f7186c7]
+- Updated dependencies [6ec0cfe]
+- Updated dependencies [7a128ed]
+- Updated dependencies [c395b27]
+- Updated dependencies [0138070]
+- Updated dependencies [b49e052]
+- Updated dependencies [3d6b5d5]
+- Updated dependencies [97aa6c7]
+- Updated dependencies [c9095a1]
+- Updated dependencies [8d1f495]
+- Updated dependencies [0b8ec64]
+- Updated dependencies [ac6e4ce]
+- Updated dependencies [8beb966]
+- Updated dependencies [6cfdb5c]
+- Updated dependencies [f7186c7]
+- Updated dependencies [88e6d4f]
+- Updated dependencies [f7186c7]
+- Updated dependencies [f7186c7]
+- Updated dependencies [0131222]
+- Updated dependencies [10a9bd1]
+- Updated dependencies [8d1f495]
+- Updated dependencies [360d1f4]
+- Updated dependencies [a2c7b8c]
+- Updated dependencies [d5d0c5b]
+- Updated dependencies [db4450e]
+- Updated dependencies [52dbaaf]
+- Updated dependencies [7fc5692]
+- Updated dependencies [1a6b738]
+- Updated dependencies [6905725]
+- Updated dependencies [f60c041]
+  - @guren/server@1.4.0
+  - @guren/cli@1.5.0
+  - @guren/orm@1.2.0
+
 ## 1.2.0
 
 ### Minor Changes

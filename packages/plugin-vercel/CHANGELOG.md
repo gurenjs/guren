@@ -1,5 +1,26 @@
 # @guren/plugin-vercel
 
+## 0.2.0
+
+### Minor Changes
+
+- 52dbaaf: BREAKING (`@guren/plugin-vercel`): the provider export changed from the `GurenPluginVercelProvider` class to a `vercelPlugin(config?)` factory built on `definePlugin()`, aligning with `@guren/plugin-cloudflare` and the plugin contract's recommended shape. The config object is empty today and reserved so future fields never force another registration-shape change. Update registrations from `providers: [GurenPluginVercelProvider]` to `providers: [vercelPlugin()]`; `createVercelHandler` and `buildVercelOutput` are unchanged. The `gurenPlugin.provider` manifest field is dropped accordingly.
+
+  `@guren/cli`: `guren plugin` now knows the official factory-shaped plugins (`@guren/plugin-vercel`, `@guren/plugin-cloudflare`) and auto-registers them as `providers: [vercelPlugin()]`-style call expressions in `src/app.ts` — previously factory plugins could only print a "register manually" hint.
+
+### Patch Changes
+
+- d347625: Route the asset base back onto the output root in the emitted deployment config.
+
+  Built assets self-reference `/public/assets/`, the base the Guren Vite plugin derives, while the files themselves are copied to the output root. The emitted `config.json` carried no mapping between the two, so on a `--prebuilt` upload — routed by that file alone, and the flow the deployment guide documents — every chunk the entry script imports missed the filesystem handler, fell through to the function, and came back as HTML. The page loaded and the app never started.
+
+  Deployments built by Vercel itself were unaffected, since `vercel.json`'s `rewrites` are compiled into routing on that path. That is why the failure stayed hidden.
+
+- Updated dependencies [88b45c4]
+- Updated dependencies [360d1f4]
+- Updated dependencies [1a6b738]
+  - @guren/core@1.3.0
+
 ## 0.1.2
 
 ### Patch Changes
