@@ -17,9 +17,11 @@ export type {
   ResourceRouteOptions,
 } from './mvc/Router'
 export { ViewEngine } from './mvc/ViewEngine'
-export { inertia, setInertiaSsrRenderer } from './mvc/inertia/InertiaEngine'
+export { inertia, setInertiaSsrRenderer, setInertiaDocument } from './mvc/inertia/InertiaEngine'
 export { setInertiaSharedProps, getInertiaSharedPropsResolver, shareInertiaProps } from './mvc/inertia/shared'
 export type {
+  InertiaDocumentContext,
+  InertiaDocumentOptions,
   InertiaOptions,
   InertiaPagePayload,
   InertiaSsrContext,

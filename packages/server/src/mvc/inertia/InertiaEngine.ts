@@ -5,7 +5,16 @@ import { parseImportMap } from "../../support/import-map";
 
 ensureErrorStackTracePolyfill();
 
-export interface InertiaOptions {
+/**
+ * Per-response form of {@link InertiaDocumentOptions}: the same fields, already
+ * resolved to strings. Each one overrides the app-wide default registered
+ * through {@link setInertiaDocument}.
+ */
+type InertiaDocumentOverrides = {
+  readonly [K in keyof InertiaDocumentOptions]?: string;
+};
+
+export interface InertiaOptions extends InertiaDocumentOverrides {
   readonly url?: string;
   readonly version?: string;
   readonly status?: number;
@@ -47,6 +56,68 @@ export interface InertiaSsrOptions {
   entry?: string;
   manifest?: string;
   render?: InertiaSsrRenderer;
+}
+
+export interface InertiaDocumentContext {
+  /** Page component being rendered, e.g. `"Docs/Show"`. */
+  readonly component: string;
+}
+
+type InertiaDocumentValue =
+  | string
+  | ((context: InertiaDocumentContext) => string | undefined);
+
+export interface InertiaDocumentOptions {
+  /**
+   * Class attribute for the root `<body>` element. Pass a function to vary it
+   * per page component — a docs section that needs a light surface while the
+   * marketing pages keep a dark one, for instance.
+   */
+  readonly bodyClass?: InertiaDocumentValue;
+  /**
+   * CSS inlined into `<head>` ahead of the stylesheet links. Keep it to the
+   * few declarations that decide the first paint (surface and text colors);
+   * the main stylesheet still wins for everything it defines later.
+   */
+  readonly criticalCss?: InertiaDocumentValue;
+  /**
+   * Body of a blocking inline `<script>` executed before the first paint.
+   * Use it for theme prepaint logic that has to read `localStorage` or
+   * `matchMedia` before React hydrates.
+   */
+  readonly prepaintScript?: InertiaDocumentValue;
+}
+
+let documentOptions: InertiaDocumentOptions | undefined;
+
+/**
+ * Register app-wide document defaults for server-rendered Inertia responses.
+ *
+ * Without this, the `<body>` ships without a class and nothing is inlined into
+ * `<head>`, so a page whose theme is applied by a client effect flashes the
+ * stylesheet's default surface color until React hydrates. Call it at module
+ * scope in the app entry so every runtime (Bun, serverless handlers, generated
+ * worker bundles) picks it up.
+ *
+ * Registration is process-wide and not request-scoped: calling this while
+ * requests are in flight leaks the new policy into them. Use the matching
+ * {@link InertiaOptions} fields for a single response instead.
+ *
+ * The values are emitted verbatim inside `<style>` / `<script>` elements —
+ * they are developer-authored assets, never user input.
+ *
+ * ```typescript
+ * setInertiaDocument({
+ *   bodyClass: ({ component }) => (component.startsWith('Docs/') ? 'docs-theme' : undefined),
+ * })
+ * ```
+ *
+ * Pass `undefined` to clear (test isolation).
+ */
+export function setInertiaDocument(
+  options: InertiaDocumentOptions | undefined
+): void {
+  documentOptions = options;
 }
 
 let defaultSsrRenderer: InertiaSsrRenderer | undefined;
@@ -168,7 +239,16 @@ async function renderDocument(
   const importMap = JSON.stringify({ imports: importMapEntries }, null, 2);
   const serializedPage = serializePage(page);
   const stylesheetLinks = renderStyles(styles);
-  const docsHeadBootstrap = renderDocsHeadBootstrap(page.component);
+  const criticalCss = resolveDocumentValue(
+    "criticalCss",
+    options,
+    page.component
+  );
+  const prepaintScript = resolveDocumentValue(
+    "prepaintScript",
+    options,
+    page.component
+  );
   const ssrResult = await tryRenderSsr(page, options);
   const headElements = (ssrResult?.head ?? []).map(normalizeHeadElement);
   const hasCustomTitle = headElements.some((element) =>
@@ -178,7 +258,10 @@ async function renderDocument(
     '<meta charset="utf-8" />',
     '<meta name="viewport" content="width=device-width, initial-scale=1" />',
     hasCustomTitle ? "" : `<title>${title}</title>`,
-    docsHeadBootstrap,
+    // Both must precede the stylesheet links: they exist to settle the first
+    // paint before the app's own CSS arrives.
+    criticalCss ? `<style id="guren-critical">${criticalCss}</style>` : "",
+    prepaintScript ? `<script>${prepaintScript}</script>` : "",
     stylesheetLinks,
     ...headElements,
     Object.keys(importMapEntries).length > 0
@@ -192,7 +275,7 @@ async function renderDocument(
   const appMarkup =
     ssrResult?.body ??
     `<script data-page="app" type="application/json">${serializedPage}</script><div id="app"></div>`;
-  const bodyClass = resolveBodyClass(page.component);
+  const bodyClass = resolveDocumentValue("bodyClass", options, page.component);
   const bodyAttributes = bodyClass ? ` class="${escapeAttribute(bodyClass)}"` : "";
   const lang = escapeAttribute(options.lang ?? "en");
 
@@ -345,40 +428,27 @@ function normalizeHeadElement(element: unknown): string {
   );
 }
 
-function resolveBodyClass(componentName: string): string {
-  return componentName.startsWith("Docs/") ? "docs-theme" : "";
-}
+/**
+ * Resolves one document field: the per-response override wins, then the
+ * app-wide default, then the empty string (meaning "emit nothing").
+ */
+function resolveDocumentValue(
+  key: keyof InertiaDocumentOptions,
+  options: InertiaOptions,
+  componentName: string
+): string {
+  const override = options[key];
 
-function renderDocsHeadBootstrap(componentName: string): string {
-  if (!componentName.startsWith("Docs/")) {
-    return "";
+  if (override !== undefined) {
+    return override;
   }
 
-  const criticalStyles = [
-    "html,body{background:#ffffff;color:#1f2937;}",
-    "body.docs-theme{background:#ffffff;color:#1f2937;}",
-    "html.dark,html.dark body,html.dark body.docs-theme{background:#1a1a2e;color:#e0def4;}",
-    ".size-4{width:1rem;height:1rem;}",
-    ".size-5{width:1.25rem;height:1.25rem;}",
-    ".size-6{width:1.5rem;height:1.5rem;}",
-    ".size-8{width:2rem;height:2rem;}",
-    ".size-9{width:2.25rem;height:2.25rem;}",
-  ].join("");
+  const value = documentOptions?.[key];
 
-  const prepaintScript = [
-    "(function(){",
-    "try{",
-    "var mode=localStorage.getItem('guren-color-mode')||'system';",
-    "var dark=mode==='dark'||(mode!=='light'&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);",
-    "var root=document.documentElement;",
-    "root.classList.toggle('dark',dark);",
-    "root.style.colorScheme=dark?'dark':'light';",
-    "}catch(_){",
-    "}",
-    "})();",
-  ].join("");
-
-  return `<style id="guren-docs-critical">${criticalStyles}</style><script>${prepaintScript}</script>`;
+  return (
+    (typeof value === "function" ? value({ component: componentName }) : value) ??
+    ""
+  );
 }
 
 function serializePage(page: InertiaPagePayload): string {
