@@ -56,7 +56,8 @@
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",
     "db:logs": "docker compose logs -f postgres",
-    "bench": "bun run ./scripts/benchmarks/run-benchmarks.ts"
+    "bench": "bun run ./scripts/benchmarks/run-benchmarks.ts",
+    "audit:vercel-build": "bun run ./scripts/smoke/vercel-build-audit.ts examples/blog"
   },
   "workspaces": [
     "packages/*",
