@@ -7,15 +7,18 @@ import {
   absoluteUrl,
   docPaths,
 } from '../../../config/site.js'
+import { xmlEscape } from '../../../config/xml.js'
 import { docsService, type DocCategoryGroup } from '../../Services/DocsService.js'
 import { listPublishedPosts, type PublishedPost } from '../../../modules/blog/index.js'
 
-function xmlEscape(value: string): string {
-  return value
-    .replace(/&/gu, '&amp;')
-    .replace(/</gu, '&lt;')
-    .replace(/>/gu, '&gt;')
-    .replace(/"/gu, '&quot;')
+/**
+ * Post titles and descriptions are author-written free text, so they are
+ * flattened before going into llms.txt: a newline or a bracket would otherwise
+ * split one entry into several, or break the link, in a document whose whole
+ * value is being machine-parseable.
+ */
+function mdInline(value: string): string {
+  return value.replace(/\s+/gu, ' ').replace(/([\[\]])/gu, '\\$1').trim()
 }
 
 function sitemapEntry(path: string, alternates?: { en: string; ja: string }): string {
@@ -68,7 +71,7 @@ export default class MetaController extends Controller {
       cachedBody('sitemap:docs', buildDocsSitemapEntries),
       listPublishedPosts(),
     ])
-    const xml = wrapSitemap(docsEntries, posts)
+    const xml = renderSitemap(docsEntries, posts)
 
     return this.text(xml, {
       headers: {
@@ -83,7 +86,7 @@ export default class MetaController extends Controller {
       cachedBody('llms:docs', buildLlmsDocsSections),
       listPublishedPosts(),
     ])
-    const body = wrapLlms(docsSections, posts)
+    const body = renderLlms(docsSections, posts)
 
     return this.text(body, { headers: { 'Cache-Control': DOCS_CACHE_CONTROL } })
   }
@@ -115,7 +118,7 @@ async function buildDocsSitemapEntries(): Promise<string> {
   return entries.join('\n')
 }
 
-function wrapSitemap(docsEntries: string, posts: PublishedPost[]): string {
+function renderSitemap(docsEntries: string, posts: PublishedPost[]): string {
   const blogEntries = [
     sitemapEntry('/blog'),
     ...posts.map((post) => sitemapEntry(`/blog/${post.slug}`)),
@@ -150,7 +153,7 @@ async function buildLlmsDocsSections(): Promise<string> {
   return lines.join('\n')
 }
 
-function wrapLlms(docsSections: string, posts: PublishedPost[]): string {
+function renderLlms(docsSections: string, posts: PublishedPost[]): string {
   const lines: string[] = [
     `# ${SITE_NAME}`,
     '',
@@ -168,7 +171,8 @@ function wrapLlms(docsSections: string, posts: PublishedPost[]): string {
     lines.push('')
     for (const post of posts) {
       const url = absoluteUrl(`/blog/${post.slug}`)
-      lines.push(`- [${post.title}](${url})${post.description ? `: ${post.description}` : ''}`)
+      const description = post.description ? `: ${mdInline(post.description)}` : ''
+      lines.push(`- [${mdInline(post.title)}](${url})${description}`)
     }
     lines.push('')
   }

@@ -70,6 +70,15 @@ describe('buildRssFeed', () => {
     expect(xml).not.toContain('<generics>')
   })
 
+  // A single stray control character makes the whole document unparseable,
+  // so one bad post must not take the entire feed down with it.
+  test('drops control characters XML 1.0 forbids', () => {
+    const xml = buildRssFeed([post({ title: 'Bad\u0000title\u0008here' })])
+
+    expect(xml).toContain('<title>Badtitlehere</title>')
+    expect(xml).not.toMatch(/[\u0000-\u0008]/u)
+  })
+
   test('omits the description element when a post has none', () => {
     const xml = buildRssFeed([post({ description: null })])
 

@@ -6,23 +6,18 @@ import {
 import type { Context } from '@guren/core'
 import type { DocCategoryGroup } from '../../app/Services/DocsService.js'
 
-// The sitemap and llms.txt list blog posts, so this controller reaches the blog
-// module's public surface — which loads its service providers. The shared
-// controller mock does not carry ServiceProvider/defineModule, so they are
-// spread over rather than replacing it.
-vi.mock('@guren/core', () => ({
-  ...createControllerModuleMock(),
-  ServiceProvider: class {
-    constructor(public container: unknown) {}
-    register(): void {}
-    boot(): void {}
-  },
-  defineModule: <T,>(definition: T): T => definition,
+vi.mock('@guren/core', () => createControllerModuleMock())
+
+// Mocked at the boundary this controller actually depends on. Loading the real
+// blog module here would drag its providers, routes and controllers into a
+// docs-endpoint unit test for the sake of one query function.
+vi.mock('../../modules/blog/index.js', () => ({
+  listPublishedPosts: vi.fn(),
 }))
 
 import MetaController, { resetMetaBodyCache } from '../../app/Http/Controllers/MetaController.js'
 import { docsService } from '../../app/Services/DocsService.js'
-import * as blogModule from '../../modules/blog/index.js'
+import { listPublishedPosts } from '../../modules/blog/index.js'
 
 const routingDoc = { slug: 'routing', title: 'Routing', description: 'Define routes' }
 const categories: DocCategoryGroup[] = [
@@ -49,8 +44,8 @@ const post = {
 
 describe('MetaController', () => {
   beforeEach(() => {
-    // Default to an empty blog so docs-focused cases do not reach the database.
-    vi.spyOn(blogModule, 'listPublishedPosts').mockResolvedValue([])
+    // Default to an empty blog so docs-focused cases stay about docs.
+    vi.mocked(listPublishedPosts).mockReset().mockResolvedValue([])
   })
 
   afterEach(() => {
@@ -99,7 +94,7 @@ describe('MetaController', () => {
 
   it('lists the blog index and published posts in the sitemap', async () => {
     vi.spyOn(docsService, 'listDocs').mockResolvedValue(categories)
-    vi.spyOn(blogModule, 'listPublishedPosts').mockResolvedValue([post])
+    vi.mocked(listPublishedPosts).mockResolvedValue([post])
 
     const response = await createController('http://guren.dev/sitemap.xml').sitemap()
     const body = await response.text()
@@ -110,7 +105,7 @@ describe('MetaController', () => {
 
   it('lists published posts and the feed in llms.txt', async () => {
     vi.spyOn(docsService, 'listDocs').mockResolvedValue(categories)
-    vi.spyOn(blogModule, 'listPublishedPosts').mockResolvedValue([post])
+    vi.mocked(listPublishedPosts).mockResolvedValue([post])
 
     const response = await createController('http://guren.dev/llms.txt').llms()
     const body = await response.text()
@@ -120,6 +115,22 @@ describe('MetaController', () => {
       '- [Starting a blog](https://guren.dev/blog/starting-a-blog): Why the Guren blog is built with Guren.',
     )
     expect(body).toContain('https://guren.dev/blog/rss.xml')
+  })
+
+  // llms.txt is a machine-parsed list, so a title carrying a newline or a
+  // bracket must not split one entry into several or break the link.
+  it('flattens author-written text in llms.txt entries', async () => {
+    vi.spyOn(docsService, 'listDocs').mockResolvedValue(categories)
+    vi.mocked(listPublishedPosts).mockResolvedValue([
+      { ...post, title: 'Multi\nline [bracketed]', description: 'a\n\nb' },
+    ])
+
+    const response = await createController('http://guren.dev/llms.txt').llms()
+    const body = await response.text()
+
+    expect(body).toContain(
+      '- [Multi line \\[bracketed\\]](https://guren.dev/blog/starting-a-blog): a b',
+    )
   })
 
   it('omits the blog section from llms.txt when nothing is published', async () => {
@@ -135,7 +146,7 @@ describe('MetaController', () => {
   // so a post published after the first request has to still show up.
   it('re-reads posts on every request instead of serving a memoized list', async () => {
     vi.spyOn(docsService, 'listDocs').mockResolvedValue(categories)
-    const listPosts = vi.spyOn(blogModule, 'listPublishedPosts').mockResolvedValue([])
+    const listPosts = vi.mocked(listPublishedPosts).mockResolvedValue([])
 
     const first = await (await createController('http://guren.dev/sitemap.xml').sitemap()).text()
     expect(first).not.toContain('/blog/starting-a-blog')

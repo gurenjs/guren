@@ -1,44 +1,14 @@
 import { SITE_NAME, absoluteUrl } from '../../../../config/site.js'
+import { xmlEscape } from '../../../../config/xml.js'
 import type { PublishedPost } from './published-posts.js'
-
-const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const MONTHS = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-]
-
-function pad(value: number): string {
-  return String(value).padStart(2, '0')
-}
 
 /**
  * RSS 2.0 requires RFC-822 dates, not ISO-8601 — readers that parse strictly
- * drop items with an ISO timestamp. Always UTC, so no zone table is needed.
+ * drop items with an ISO timestamp. ES2018 fixed toUTCString() at exactly that
+ * form ("Www, DD Mmm YYYY HH:MM:SS GMT"), locale-independent.
  */
 export function toRfc822(date: Date): string {
-  const day = DAYS[date.getUTCDay()]
-  const month = MONTHS[date.getUTCMonth()]
-  const time = `${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`
-
-  return `${day}, ${pad(date.getUTCDate())} ${month} ${date.getUTCFullYear()} ${time} GMT`
-}
-
-function xmlEscape(value: string): string {
-  return value
-    .replace(/&/gu, '&amp;')
-    .replace(/</gu, '&lt;')
-    .replace(/>/gu, '&gt;')
-    .replace(/"/gu, '&quot;')
+  return date.toUTCString()
 }
 
 function item(post: PublishedPost): string {
