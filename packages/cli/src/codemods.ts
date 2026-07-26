@@ -95,70 +95,25 @@ export interface CodemodResult {
 }
 
 /**
- * Compare two semver versions, prerelease tags included.
- *
- * Splitting on '.' alone turns `1.0.0-rc.4` into `[1, 0, NaN, 4]`, and a NaN
- * difference is neither greater nor less than zero — so every comparison
- * involving a prerelease used to answer "unordered", which reads as "equal"
- * to callers that only test for `< 0` or `> 0`. Guren shipped its whole 1.0
- * line as `1.0.0-rc.N`, so that covered the versions most likely to be
- * compared. Returns NaN only when a version is not numeric at all.
+ * A single concrete semver version — three numeric segments, with optional
+ * prerelease and build metadata. Ranges (`^1.0.0`), partial pins (`1.3`), tag
+ * names, and `workspace:`-style specifiers are all excluded, so callers can use
+ * this to ask "is this orderable" without a second classification.
+ */
+const EXACT_VERSION = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]+)?$/u
+
+export function isExactVersion(specifier: string): boolean {
+  return EXACT_VERSION.test(specifier)
+}
+
+/**
+ * Order two versions, prereleases included. Returns NaN when either side is not
+ * an exact version — including a partial pin like `1.3`, which `Bun.semver`
+ * ranks *above* `1.3.0` rather than equal to it.
  */
 export function compareVersions(a: string, b: string): number {
-  const [mainA = '', preA] = splitPrerelease(a)
-  const [mainB = '', preB] = splitPrerelease(b)
-
-  const numbersA = mainA.split('.').map(Number)
-  const numbersB = mainB.split('.').map(Number)
-  for (let i = 0; i < Math.max(numbersA.length, numbersB.length); i++) {
-    const na = numbersA[i] ?? 0
-    const nb = numbersB[i] ?? 0
-    if (Number.isNaN(na) || Number.isNaN(nb)) {
-      return Number.NaN
-    }
-    if (na !== nb) return na - nb
+  if (!isExactVersion(a) || !isExactVersion(b)) {
+    return Number.NaN
   }
-
-  // A release outranks any prerelease of the same version (1.0.0 > 1.0.0-rc.4).
-  if (preA === undefined && preB === undefined) return 0
-  if (preA === undefined) return 1
-  if (preB === undefined) return -1
-
-  return comparePrerelease(preA, preB)
-}
-
-function splitPrerelease(version: string): [string, string | undefined] {
-  // Build metadata carries no precedence, so `1.5.0+build` must order exactly
-  // as `1.5.0` — left in, its non-numeric tail made the comparison NaN.
-  const withoutBuild = version.split('+', 1)[0] ?? version
-  const index = withoutBuild.indexOf('-')
-  return index === -1
-    ? [withoutBuild, undefined]
-    : [withoutBuild.slice(0, index), withoutBuild.slice(index + 1)]
-}
-
-function comparePrerelease(a: string, b: string): number {
-  const partsA = a.split('.')
-  const partsB = b.split('.')
-
-  for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
-    const pa = partsA[i]
-    const pb = partsB[i]
-    // Fewer identifiers sorts lower (rc.1 < rc.1.1).
-    if (pa === undefined) return -1
-    if (pb === undefined) return 1
-    if (pa === pb) continue
-
-    const na = Number(pa)
-    const nb = Number(pb)
-    const numericA = !Number.isNaN(na)
-    const numericB = !Number.isNaN(nb)
-    if (numericA && numericB) return na - nb
-    // Numeric identifiers sort lower than alphanumeric ones.
-    if (numericA) return -1
-    if (numericB) return 1
-    return pa < pb ? -1 : 1
-  }
-
-  return 0
+  return Bun.semver.order(a, b)
 }

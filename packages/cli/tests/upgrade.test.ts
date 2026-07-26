@@ -2,7 +2,7 @@ import { beforeEach, afterEach, describe, expect, it, mock } from 'bun:test'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createTempWorkspace, type TempWorkspace } from './helpers'
-import { upgradeCanary, checkVersionCompatibility, DEFAULT_UPGRADE_TAG } from '../src/upgrade'
+import { upgradeCanary, checkVersionCompatibility } from '../src/upgrade'
 import { findApplicableCodemods, compareVersions, codemods, type Codemod } from '../src/codemods'
 import { checkDeprecations, deprecations } from '../src/deprecations'
 
@@ -72,7 +72,7 @@ describe('upgradeCanary', () => {
       devDependencies: Record<string, string>
     }
 
-    expect(tags.every((tag) => tag === DEFAULT_UPGRADE_TAG)).toBe(true)
+    expect(tags.every((tag) => tag === 'latest')).toBe(true)
     // The report names the resolved version, not the tag, so a tag pointing at
     // an older line cannot read as a clean upgrade.
     expect(result.versionCompatibility?.targetVersion).toBe('1.0.0-rc.99')
@@ -81,10 +81,6 @@ describe('upgradeCanary', () => {
     expect(packageJson.dependencies['@guren/server']).toBe('^1.0.0-rc.99')
     expect(packageJson.devDependencies['@guren/testing']).toBe('^1.0.0-rc.99')
     expect(packageJson.dependencies.react).toBe('^19.0.0')
-  })
-
-  it('defaults to the latest tag rather than a release-candidate one', () => {
-    expect(DEFAULT_UPGRADE_TAG).toBe('latest')
   })
 
   it('degrades to a warning when the registry lookup throws', async () => {
@@ -110,7 +106,7 @@ describe('upgradeCanary', () => {
 
     expect(result.versionCompatibility?.resolvedTarget).toBe(false)
     expect(result.versionCompatibility?.compatible).toBe(false)
-    expect(result.versionCompatibility?.targetVersion).toBe(DEFAULT_UPGRADE_TAG)
+    expect(result.versionCompatibility?.targetVersion).toBe('latest')
     expect(result.codemodResults).toHaveLength(0)
   })
 
@@ -145,7 +141,7 @@ describe('upgradeCanary', () => {
       },
     })
 
-    expect(calls.length).toBe(new Set(calls).size)
+    expect(calls).toEqual([...new Set(calls)])
   })
 
   it('leaves packages untouched when the registry lookup fails', async () => {
@@ -353,22 +349,19 @@ describe('compareVersions', () => {
     expect(compareVersions('1.0.0', '1.0.1')).toBeLessThan(0)
   })
 
-  // Guren shipped its entire 1.0 line as 1.0.0-rc.N, so these are the
-  // comparisons the upgrade path actually makes.
-  it('ranks a release above a prerelease of the same version', () => {
-    expect(compareVersions('1.0.0', '1.0.0-rc.4')).toBeGreaterThan(0)
-    expect(compareVersions('1.0.0-rc.4', '1.0.0')).toBeLessThan(0)
-  })
+  // Guren shipped its entire 1.0 line as 1.0.0-rc.N, so prerelease precedence is
+  // what the upgrade path actually compares. One ascending list covers every
+  // pair, including the transitive ones a case-by-case list would miss.
+  it('orders prereleases below their release, and numerically among themselves', () => {
+    const ascending = ['1.0.0-alpha', '1.0.0-rc.1', '1.0.0-rc.1.1', '1.0.0-rc.4', '1.0.0-rc.29', '1.0.0', '1.0.1']
 
-  it('orders prereleases numerically, not lexically', () => {
-    expect(compareVersions('1.0.0-rc.29', '1.0.0-rc.4')).toBeGreaterThan(0)
-    expect(compareVersions('1.0.0-rc.4', '1.0.0-rc.29')).toBeLessThan(0)
-    expect(compareVersions('1.0.0-rc.4', '1.0.0-rc.4')).toBe(0)
-  })
-
-  it('ranks alphanumeric identifiers above numeric ones and shorter above longer', () => {
-    expect(compareVersions('1.0.0-alpha', '1.0.0-rc.1')).toBeLessThan(0)
-    expect(compareVersions('1.0.0-rc.1', '1.0.0-rc.1.1')).toBeLessThan(0)
+    for (const [index, lower] of ascending.entries()) {
+      expect(compareVersions(lower, lower)).toBe(0)
+      for (const higher of ascending.slice(index + 1)) {
+        expect(compareVersions(lower, higher)).toBeLessThan(0)
+        expect(compareVersions(higher, lower)).toBeGreaterThan(0)
+      }
+    }
   })
 
   it('ignores build metadata, which carries no precedence', () => {
@@ -377,8 +370,12 @@ describe('compareVersions', () => {
     expect(compareVersions('1.5.0+build', '1.5.1')).toBeLessThan(0)
   })
 
-  it('reports unordered for specifiers that are not versions', () => {
-    expect(compareVersions('workspace:*', '1.0.0')).toBeNaN()
+  it('reports unordered for anything that is not one exact version', () => {
+    // A partial pin is the dangerous one: Bun.semver ranks `1.3` *above*
+    // `1.3.0`, which would read as a downgrade.
+    for (const specifier of ['workspace:*', '^1.0.0', '1.3', 'latest', 'catalog:']) {
+      expect(compareVersions(specifier, '1.0.0')).toBeNaN()
+    }
   })
 })
 

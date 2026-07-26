@@ -6,6 +6,7 @@ import { upgradeCanary } from '../../packages/cli/src/upgrade'
 const repoRoot = resolve(import.meta.dir, '../..')
 const appFixture = resolve(repoRoot, 'examples/blog')
 const tempRootBase = resolve(repoRoot, '.upgrade-existing-smoke-')
+const FIXTURE_VERSION = '9.9.9'
 
 const localPackageDirs = {
   '@guren/cli': resolve(repoRoot, 'packages/cli'),
@@ -108,10 +109,11 @@ async function main(): Promise<void> {
     let installInvoked = false
     const result = await upgradeCanary({
       cwd: appDir,
-      // Named explicitly: this smoke runs in the nightly canary workflow, so
-      // it has to keep exercising the canary path rather than following the
-      // command's default tag wherever that points.
-      tag: 'canary',
+      // Resolve to a fixture version instead of the registry. The smoke checks
+      // that upgrade rewrites pins and restores scripts/tsconfig, none of which
+      // needs a real lookup — and pinning the tag to `canary` instead would
+      // skip resolution entirely, leaving the resolved path uncovered.
+      versionResolver: async () => FIXTURE_VERSION,
       install: true,
       installRunner: async (cwd) => {
         installInvoked = true

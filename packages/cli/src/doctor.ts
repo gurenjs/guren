@@ -13,6 +13,7 @@ import {
   moduleNameFromRelPath,
 } from './discovery'
 import { checkPluginCompatibility, readCoreVersion, readInstalledPluginManifests } from './plugin-manifest'
+import { compareVersions } from './codemods'
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail'
 
@@ -557,17 +558,6 @@ async function createScriptsAutofix(_context: DoctorRuleContext, check: DoctorCh
 }
 
 const MIN_BUN_VERSION = '1.1.0'
-
-function compareVersions(a: string, b: string): number {
-  const pa = a.split('.').map(Number)
-  const pb = b.split('.').map(Number)
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const na = pa[i] ?? 0
-    const nb = pb[i] ?? 0
-    if (na !== nb) return na - nb
-  }
-  return 0
-}
 
 async function detectBunVersion(context: DoctorRuleContext): Promise<DoctorCheck> {
   const bunVersion = typeof process !== 'undefined' && process.versions?.bun

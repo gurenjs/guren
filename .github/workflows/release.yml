@@ -107,9 +107,11 @@ jobs:
       - name: Golden path runtime smoke (postgres)
         run: bun run smoke:golden-path:postgres
 
-      # upgrade-existing-app smoke skipped in release workflow: it tries to
-      # resolve the new version from npm before publish, causing a chicken-and-egg
-      # failure. This smoke runs in CI on every PR instead.
+      # upgrade-existing-app smoke skipped here: it installs the workspace
+      # packages from local paths, which the release workflow's published
+      # artifacts are meant to supersede. It resolves versions from a fixture
+      # rather than npm, so the old chicken-and-egg reason no longer applies —
+      # it runs in the nightly canary workflow.
 
       - name: Run tests
         run: bun run test
