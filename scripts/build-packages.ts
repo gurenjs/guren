@@ -17,6 +17,7 @@ import { join } from 'node:path'
 
 import {
   collectPackages,
+  parseArgs,
   selectPackages,
   sortByDependencies,
   type WorkspacePackage,
@@ -38,10 +39,12 @@ async function build(pkg: WorkspacePackage): Promise<void> {
   console.log(`[build] ${pkg.name} done in ${Date.now() - started}ms`)
 }
 
-const args = process.argv.slice(2)
-const clean = args.includes('--clean')
-const listOnly = args.includes('--list')
-const selectors = args.filter((arg) => !arg.startsWith('--'))
+const { flags, positionals: selectors } = parseArgs(process.argv.slice(2), [
+  'clean',
+  'list',
+])
+const clean = flags.clean
+const listOnly = flags.list
 
 const buildable = (await collectPackages()).filter((pkg) => pkg.scripts.build)
 const targets = selectPackages(sortByDependencies(buildable), selectors)

@@ -16,18 +16,21 @@
 // Positional arguments select packages by directory name or package name.
 // Everything after a bare `--` is forwarded to `bun test` verbatim.
 
-import { collectPackages, repoRoot, selectPackages } from './workspace-packages.ts'
+import { collectPackages, parseArgs, repoRoot, selectPackages } from './workspace-packages.ts'
 
-const argv = process.argv.slice(2)
-const separator = argv.indexOf('--')
-const ownArgs = separator === -1 ? argv : argv.slice(0, separator)
-const forwarded = separator === -1 ? [] : argv.slice(separator + 1)
+// Packages on a runner other than Bun's own (@guren/testing uses vitest) keep
+// their own root script instead of joining this one. An explicit list survives
+// a `test` script being reworded — a regex sniffing the script string would not.
+const nonBunTestPackages = new Set(['@guren/testing'])
 
-const listOnly = ownArgs.includes('--list')
-const selectors = ownArgs.filter((arg) => !arg.startsWith('--'))
+const { flags, positionals: selectors, forwarded } = parseArgs(
+  process.argv.slice(2),
+  ['list'],
+)
+const listOnly = flags.list
 
-const bunTestPackages = (await collectPackages()).filter((pkg) =>
-  /^bun test\b/.test(pkg.scripts.test ?? ''),
+const bunTestPackages = (await collectPackages()).filter(
+  (pkg) => pkg.scripts.test && !nonBunTestPackages.has(pkg.name),
 )
 const targets = selectPackages(bunTestPackages, selectors)
 

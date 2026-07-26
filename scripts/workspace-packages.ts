@@ -20,6 +20,27 @@ export interface WorkspacePackage {
   dependencies: string[]
 }
 
+/**
+ * Splits argv into recognized boolean flags, everything after a bare `--`
+ * (returned verbatim, for forwarding to a spawned process), and the remaining
+ * positional arguments (package selectors).
+ */
+export function parseArgs(
+  argv: string[],
+  booleanFlags: string[],
+): { flags: Record<string, boolean>; positionals: string[]; forwarded: string[] } {
+  const separator = argv.indexOf('--')
+  const ownArgs = separator === -1 ? argv : argv.slice(0, separator)
+  const forwarded = separator === -1 ? [] : argv.slice(separator + 1)
+
+  const flags: Record<string, boolean> = {}
+  for (const flag of booleanFlags) flags[flag] = ownArgs.includes(`--${flag}`)
+
+  const positionals = ownArgs.filter((arg) => !arg.startsWith('--'))
+
+  return { flags, positionals, forwarded }
+}
+
 export async function collectPackages(): Promise<WorkspacePackage[]> {
   const entries = await readdir(packagesDir, { withFileTypes: true })
   const packages: WorkspacePackage[] = []
@@ -78,37 +99,46 @@ export function sortByDependencies(
     }
   }
 
-  const pending = new Map(
-    packages.map((pkg) => [
-      pkg.name,
-      new Set(
-        pkg.dependencies.filter(
-          (dep) => byName.has(dep) && !ignored.has(`${pkg.name} ${dep}`),
-        ),
-      ),
-    ]),
-  )
+  // Kahn's algorithm: track each package's remaining dependency count and the
+  // set of packages waiting on it, so finishing one package only touches its
+  // actual dependents instead of rescanning every still-pending package.
+  const remainingDeps = new Map<string, number>()
+  const dependents = new Map<string, WorkspacePackage[]>()
 
+  for (const pkg of packages) {
+    const deps = pkg.dependencies.filter(
+      (dep) => byName.has(dep) && !ignored.has(`${pkg.name} ${dep}`),
+    )
+    remainingDeps.set(pkg.name, deps.length)
+    for (const dep of deps) {
+      if (!dependents.has(dep)) dependents.set(dep, [])
+      dependents.get(dep)!.push(pkg)
+    }
+  }
+
+  const queue = packages.filter((pkg) => remainingDeps.get(pkg.name) === 0)
   const ordered: WorkspacePackage[] = []
 
-  while (ordered.length < packages.length) {
-    const ready = packages.filter(
-      (pkg) => pending.has(pkg.name) && pending.get(pkg.name)!.size === 0,
+  while (queue.length > 0) {
+    const pkg = queue.shift()!
+    ordered.push(pkg)
+
+    for (const dependent of dependents.get(pkg.name) ?? []) {
+      const remaining = remainingDeps.get(dependent.name)! - 1
+      remainingDeps.set(dependent.name, remaining)
+      if (remaining === 0) queue.push(dependent)
+    }
+  }
+
+  if (ordered.length < packages.length) {
+    const remaining = packages
+      .filter((pkg) => remainingDeps.get(pkg.name) !== 0)
+      .map((pkg) => pkg.name)
+      .join(', ')
+    throw new Error(
+      `Dependency cycle between workspace packages: ${remaining}. ` +
+        'Add the offending edge to ignoredEdges in scripts/workspace-packages.ts.',
     )
-
-    if (ready.length === 0) {
-      const remaining = [...pending.keys()].join(', ')
-      throw new Error(
-        `Dependency cycle between workspace packages: ${remaining}. ` +
-          'Add the offending edge to ignoredEdges in scripts/workspace-packages.ts.',
-      )
-    }
-
-    for (const pkg of ready) {
-      ordered.push(pkg)
-      pending.delete(pkg.name)
-      for (const remaining of pending.values()) remaining.delete(pkg.name)
-    }
   }
 
   return ordered
