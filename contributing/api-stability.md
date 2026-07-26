@@ -22,7 +22,7 @@ Stable APIs include all exports from the `@guren/core` package index:
 
 **From `@guren/orm` (re-exported via `@guren/core`):**
 - `Model`, `defineModel`
-- `DrizzleAdapter`, `createPostgresDatabase`, `createSqliteDatabase`
+- `DrizzleAdapter`, `createPostgresDatabase`, `createSqliteDatabase`, `createMySqlDatabase`, `createAwsDataApiDatabase`
 - `runSeeders`, `defineSeeder`, `loadSeeders`
 - All exported types: `InferModelRecord`, `InferModelInsert`, `PlainObject`, `WhereClause`, `FindManyOptions`, `PaginateOptions`, `PaginatedResult`, etc.
 
