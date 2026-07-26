@@ -201,6 +201,13 @@ describe('describeMigrationFailure', () => {
     )
   })
 
+  test('should append the driver code rather than a SQLSTATE on an outer frame', () => {
+    const error = Object.assign(new Error('Failed query: SELECT 1'), { code: '42P06' })
+    error.cause = Object.assign(new Error(''), { code: 'EPIPE' })
+
+    expect(describeMigrationFailure(error)).toBe('Failed query: SELECT 1 (EPIPE)')
+  })
+
   test('should surface a cause nested inside an AggregateError', () => {
     const error = new Error('outer', { cause: new AggregateError([Object.assign(new Error(''), { code: 'ECONNREFUSED' })], '') })
     expect(describeMigrationFailure(error, 'db:5432')).toContain('ECONNREFUSED')

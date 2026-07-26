@@ -106,9 +106,11 @@ export function describeMigrationFailure(error: unknown, endpoint?: string): str
   }
 
   // A driver that reports only a code (postgres-js leaves the message empty)
-  // would otherwise leave the outer query text unexplained.
+  // would otherwise leave the outer query text unexplained. collectCauses walks
+  // outwards-in, so the last code is the deepest one — the driver's, not a
+  // SQLSTATE an outer frame happened to copy.
   if (messages.length === 1 && codes.length > 0) {
-    return `${messages[0]} (${codes[0]})`
+    return `${messages[0]} (${codes[codes.length - 1]})`
   }
 
   return messages.join(' — ')
