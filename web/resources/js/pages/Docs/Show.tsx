@@ -5,7 +5,7 @@ import { Footer } from '../../components/Footer.js'
 import { Header } from '../../components/Header.js'
 import { Seo } from '../../components/Seo.js'
 import { breadcrumbJsonLd, techArticleJsonLd } from '../../lib/structured-data.js'
-import { docsTheme, useDocsPageTheme } from './theme.js'
+import { docsTheme } from './theme.js'
 
 type DocSummary = {
   slug: string
@@ -156,8 +156,6 @@ function useTableOfContents(doc: DocPage | null) {
 }
 
 export default function DocsShow({ categories, doc, active, locale, locales = [], basePath }: Props) {
-  useDocsPageTheme()
-
   const docLabel = doc?.category === 'tutorials' ? 'Tutorial' : 'Guide'
   const docPath = doc ? `${basePath}/${doc.category}/${doc.slug}` : basePath
   const nav = buildPrevNext(categories, active, basePath)

@@ -3,7 +3,6 @@ import { SITE_DESCRIPTION, pageTitle } from '../../../../config/site.js'
 import { Footer } from '../../components/Footer.js'
 import { Header } from '../../components/Header.js'
 import { Seo } from '../../components/Seo.js'
-import { useDocsPageTheme } from '../Docs/theme.js'
 
 type BlogPostSummary = {
   slug: string
@@ -26,8 +25,6 @@ function formatDate(iso: string | null): string {
 }
 
 export default function BlogIndex({ posts }: Props) {
-  useDocsPageTheme()
-
   return (
     <>
       <Seo

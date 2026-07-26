@@ -1,7 +1,6 @@
 import { Head, Link, useForm } from '@inertiajs/react'
 import type { FormEvent } from 'react'
 import { pageTitle } from '../../../../config/site.js'
-import { useDocsPageTheme } from '../Docs/theme.js'
 
 type EditablePost = {
   id: number
@@ -16,8 +15,6 @@ interface Props {
 }
 
 export default function AdminPostForm({ post }: Props) {
-  useDocsPageTheme()
-
   const form = useForm({
     title: post?.title ?? '',
     description: post?.description ?? '',
