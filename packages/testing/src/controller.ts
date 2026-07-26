@@ -466,7 +466,54 @@ export function createControllerModuleMock() {
     static async findWith(): Promise<unknown> {
       return null
     }
+
+    // Read/write entry points a controller commonly reaches for. They are
+    // inert, but they have to exist: tests drive model behaviour by spying
+    // on them, and a spy cannot replace a method that was never defined.
+    static async all(): Promise<unknown[]> {
+      return []
+    }
+
+    static async create(): Promise<unknown> {
+      return {}
+    }
+
+    static async findOrFail(): Promise<unknown> {
+      return {}
+    }
+
+    static async first(): Promise<unknown> {
+      return null
+    }
+
+    static async delete(): Promise<void> {}
+
+    /** Chainable like the real query builder, and awaitable at any point. */
+    static select(): Record<string, unknown> {
+      const query: Record<string, unknown> = {
+        get: async () => [],
+        first: async () => null,
+        then: (resolve: (value: unknown[]) => unknown) => resolve([]),
+      }
+      for (const method of ['where', 'whereNotNull', 'whereNull', 'orderBy', 'limit', 'offset']) {
+        query[method] = () => query
+      }
+      return query
+    }
   }
+  /**
+   * `defineModel()` is the function form of a model declaration, and
+   * `@guren/core` exports it alongside the class form — so a controller
+   * under test can reach it through any model module it imports. It returns
+   * the same inert stub, named after the table it was given.
+   */
+  function defineModel(table: unknown, config: Record<string, unknown> = {}) {
+    return class DefinedModel extends AuthenticatableModel {
+      static override table = table
+      static config = config
+    }
+  }
+
   class Resource<T = Record<string, unknown>> {
     public resource: T
     public additionalData: Record<string, unknown> = {}
@@ -670,6 +717,7 @@ export function createControllerModuleMock() {
     Listener,
     Job,
     AuthenticatableModel,
+    defineModel,
     Resource,
     JsonResource,
     collect,
