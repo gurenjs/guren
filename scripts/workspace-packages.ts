@@ -36,7 +36,18 @@ export function parseArgs(
   const flags: Record<string, boolean> = {}
   for (const flag of booleanFlags) flags[flag] = ownArgs.includes(`--${flag}`)
 
-  const positionals = ownArgs.filter((arg) => !arg.startsWith('--'))
+  const positionals: string[] = []
+  for (const arg of ownArgs) {
+    if (!arg.startsWith('--')) {
+      positionals.push(arg)
+      continue
+    }
+    if (!booleanFlags.includes(arg.slice(2))) {
+      throw new Error(
+        `Unknown flag: ${arg}. Recognized flags: ${booleanFlags.map((f) => `--${f}`).join(', ')}`,
+      )
+    }
+  }
 
   return { flags, positionals, forwarded }
 }
@@ -52,11 +63,16 @@ export async function collectPackages(): Promise<WorkspacePackage[]> {
     const manifestPath = join(dir, 'package.json')
     if (!(await Bun.file(manifestPath).exists())) continue
 
-    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
+    let manifest: {
       name?: string
       scripts?: Record<string, string>
       dependencies?: Record<string, string>
       peerDependencies?: Record<string, string>
+    }
+    try {
+      manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+    } catch (cause) {
+      throw new Error(`Failed to parse ${manifestPath}`, { cause })
     }
 
     if (!manifest.name) continue

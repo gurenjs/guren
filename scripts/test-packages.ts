@@ -34,14 +34,14 @@ const bunTestPackages = (await collectPackages()).filter(
 )
 const targets = selectPackages(bunTestPackages, selectors)
 
-if (targets.length === 0) {
-  console.error('[test] no packages with a `bun test` script were found')
-  process.exit(1)
-}
-
 if (listOnly) {
   for (const pkg of targets) console.log(pkg.name)
   process.exit(0)
+}
+
+if (targets.length === 0) {
+  console.error('[test] no packages with a `bun test` script were found')
+  process.exit(1)
 }
 
 const testArgs = [
@@ -53,7 +53,7 @@ const testArgs = [
 
 console.log(`[test] ${targets.map((pkg) => pkg.name).join(', ')}`)
 
-const proc = Bun.spawn(['bun', ...testArgs], {
+const proc = Bun.spawn([process.execPath, ...testArgs], {
   cwd: repoRoot,
   stdout: 'inherit',
   stderr: 'inherit',

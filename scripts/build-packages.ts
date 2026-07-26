@@ -23,9 +23,10 @@ import {
   type WorkspacePackage,
 } from './workspace-packages.ts'
 
-async function build(pkg: WorkspacePackage): Promise<void> {
+/** Returns the child's exit code; a non-zero code means the caller should stop and propagate it. */
+async function build(pkg: WorkspacePackage): Promise<number> {
   const started = Date.now()
-  const proc = Bun.spawn(['bun', 'run', 'build'], {
+  const proc = Bun.spawn([process.execPath, 'run', 'build'], {
     cwd: pkg.dir,
     stdout: 'inherit',
     stderr: 'inherit',
@@ -33,10 +34,12 @@ async function build(pkg: WorkspacePackage): Promise<void> {
 
   const exitCode = await proc.exited
   if (exitCode !== 0) {
-    throw new Error(`${pkg.name} build failed with exit code ${exitCode}`)
+    console.error(`[build] ${pkg.name} failed with exit code ${exitCode}`)
+    return exitCode
   }
 
   console.log(`[build] ${pkg.name} done in ${Date.now() - started}ms`)
+  return 0
 }
 
 const { flags, positionals: selectors } = parseArgs(process.argv.slice(2), [
@@ -46,8 +49,13 @@ const { flags, positionals: selectors } = parseArgs(process.argv.slice(2), [
 const clean = flags.clean
 const listOnly = flags.list
 
-const buildable = (await collectPackages()).filter((pkg) => pkg.scripts.build)
-const targets = selectPackages(sortByDependencies(buildable), selectors)
+// Sort the full workspace graph — including packages without a `build` script
+// — before filtering, so a buildable package that transitively depends on a
+// non-buildable one keeps its correct relative order.
+const buildable = sortByDependencies(await collectPackages()).filter(
+  (pkg) => pkg.scripts.build,
+)
+const targets = selectPackages(buildable, selectors)
 
 if (listOnly) {
   for (const [index, pkg] of targets.entries()) {
@@ -66,5 +74,6 @@ if (clean) {
 console.log(`[build] ${targets.map((pkg) => pkg.name).join(' → ')}`)
 
 for (const pkg of targets) {
-  await build(pkg)
+  const exitCode = await build(pkg)
+  if (exitCode !== 0) process.exit(exitCode)
 }
