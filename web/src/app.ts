@@ -3,6 +3,7 @@ import {
   AuthServiceProvider as CoreAuthServiceProvider,
   DatabaseSessionStore,
 } from '@guren/core'
+import { redirectToCanonicalHost } from '../app/Http/Middleware/canonical-host.js'
 import DatabaseProvider from '../app/Providers/DatabaseProvider.js'
 import { sessions } from '../db/schema.js'
 import { blogModule } from '../modules/blog/index.js'
@@ -29,5 +30,9 @@ const app = createApp({
     },
   },
 })
+
+// Both hostnames are routed to this worker, so the redirect lives here
+// rather than in DNS.
+app.use('*', redirectToCanonicalHost)
 
 export default app

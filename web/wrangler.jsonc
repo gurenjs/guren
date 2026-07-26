@@ -1,6 +1,20 @@
 {
   "name": "guren-web",
   "main": ".cloudflare/worker.js",
+  // Serves the site at its own domain. Cloudflare is already authoritative
+  // for the zone, so deploying this claims the hostname and issues the
+  // certificate; the apex A records pointing elsewhere have to be removed
+  // first or the record conflicts.
+  "routes": [
+    {
+      "pattern": "guren.dev",
+      "custom_domain": true
+    },
+    {
+      "pattern": "www.guren.dev",
+      "custom_domain": true
+    }
+  ],
   "compatibility_date": "2026-07-25",
   "compatibility_flags": [
     "nodejs_compat"
