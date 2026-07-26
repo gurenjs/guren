@@ -22,6 +22,10 @@ interface FunctionConfig {
   environment?: Record<string, string>
 }
 
+interface OutputConfig {
+  routes?: Array<{ src?: string; dest?: string; handle?: string }>
+}
+
 const appDir = resolve(process.argv[2] ?? 'examples/blog')
 const clientManifest = resolve(appDir, 'public/assets/.vite/manifest.json')
 
@@ -85,6 +89,18 @@ try {
 
   if (!config.handler) {
     failures.push('The function config has no handler.')
+  }
+
+  // A --prebuilt upload is routed by this file alone, so the asset base has
+  // to be mapped here rather than in vercel.json.
+  const routes = (JSON.parse(readFileSync(resolve(outputDir, 'config.json'), 'utf8')) as OutputConfig)
+    .routes ?? []
+  const assetRoute = routes.findIndex((route) => route.src === '/public/(.*)')
+  const filesystem = routes.findIndex((route) => route.handle === 'filesystem')
+  if (assetRoute < 0) {
+    failures.push('The output config has no /public/(.*) route, so chunk imports would 404 on a prebuilt deploy.')
+  } else if (filesystem >= 0 && assetRoute > filesystem) {
+    failures.push('The /public/(.*) route must come before the filesystem handler.')
   }
 
   summary = {

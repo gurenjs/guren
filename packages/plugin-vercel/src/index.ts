@@ -89,6 +89,16 @@ export function buildVercelOutput(options: BuildVercelOutputOptions = {}): void 
       {
         version: 3,
         routes: [
+          // Built assets self-reference the Vite plugin's derived base,
+          // `/public/assets/`, while the files themselves are copied to the
+          // output root. Without this the entry script still loads — its path
+          // is injected directly — but every chunk it imports falls through
+          // to the function and comes back as HTML.
+          //
+          // A `rewrites` entry in vercel.json only covers builds Vercel runs
+          // itself; a `--prebuilt` upload is routed by this file alone, which
+          // is the flow the deployment guide documents.
+          { src: '/public/(.*)', dest: '/$1' },
           { handle: 'filesystem' },
           { src: '/(.*)', dest: '/index' },
         ],

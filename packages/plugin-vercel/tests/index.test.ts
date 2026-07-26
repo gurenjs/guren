@@ -61,6 +61,30 @@ describe('@guren/plugin-vercel', () => {
     expect(config.handler).toBe('vercel.js')
   })
 
+  it('routes the asset base back onto the output root', () => {
+    // Built assets self-reference `/public/assets/` while the files land at
+    // the output root, so a deployment routed only by this file — which is
+    // what `--prebuilt` does — needs the mapping here rather than in
+    // vercel.json.
+    const rootDir = mkdtempSync(join(tmpdir(), 'guren-plugin-vercel-'))
+    const outputDir = join(rootDir, '.vercel/output')
+    const entrypoint = join(rootDir, 'src/vercel.ts')
+    mkdirSync(join(rootDir, 'src'), { recursive: true })
+    writeFileSync(entrypoint, "export default { fetch() { return new Response('ok') } }\n", 'utf8')
+
+    buildVercelOutput({ rootDir, outputDir, entrypoint })
+
+    const config = JSON.parse(readFileSync(join(outputDir, 'config.json'), 'utf8'))
+    const routes = config.routes as Array<Record<string, string>>
+
+    expect(routes[0]).toEqual({ src: '/public/(.*)', dest: '/$1' })
+    // It has to win before the filesystem handler, which would otherwise
+    // miss and fall through to the function.
+    expect(routes.findIndex((route) => route.handle === 'filesystem')).toBeGreaterThan(0)
+
+    rmSync(rootDir, { recursive: true, force: true })
+  })
+
   it('copies the docs directory into the function bundle', () => {
     const rootDir = mkdtempSync(join(tmpdir(), 'guren-plugin-vercel-'))
     tempDirs.push(rootDir)
