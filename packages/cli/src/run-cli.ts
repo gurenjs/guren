@@ -17,7 +17,8 @@ async function resolveSubCommand(
   if (subCommands && Object.keys(subCommands).length > 0) {
     const index = rawArgs.findIndex((arg) => !arg.startsWith('-'))
     const name = rawArgs[index]
-    const subCommand = name ? await resolveValue(subCommands[name]) : undefined
+    const declared = name !== undefined && Object.prototype.hasOwnProperty.call(subCommands, name)
+    const subCommand = declared ? await resolveValue(subCommands[name]) : undefined
     if (subCommand) {
       return resolveSubCommand(subCommand, rawArgs.slice(index + 1), cmd)
     }
