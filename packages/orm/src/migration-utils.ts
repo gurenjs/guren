@@ -151,6 +151,11 @@ export function migrationFailure(error: unknown, endpoint?: string): Error {
   return new Error(`Failed to run database migrations: ${describeDatabaseFailure(error, endpoint)}`)
 }
 
+/** Wraps a seeding failure in the message `db:seed` reports. */
+export function seedFailure(error: unknown, endpoint?: string): Error {
+  return new Error(`Failed to seed the database: ${describeDatabaseFailure(error, endpoint)}`)
+}
+
 /**
  * Reduces a connection string to host:port for error messages, dropping the
  * credentials it embeds. Returns undefined when the value does not parse.

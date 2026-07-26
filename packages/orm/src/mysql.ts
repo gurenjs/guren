@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isConnectionFailure, migrationFailure, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isConnectionFailure, migrationFailure, seedFailure, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders } from './seeder'
 
 type ConnectionResolver = string | (() => string | undefined)
@@ -191,7 +191,11 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
     }
 
     const db = await getDatabase()
-    await runSeeders(db as unknown as Parameters<typeof runSeeders>[0], resolvedSeedersFolder)
+    try {
+      await runSeeders(db as unknown as Parameters<typeof runSeeders>[0], resolvedSeedersFolder)
+    } catch (error) {
+      throw seedFailure(error, describeConnectionEndpoint(resolveConnectionString()))
+    }
   }
 
   async function withAdminDb<T>(callback: (db: MySql2Database) => Promise<T>): Promise<T> {

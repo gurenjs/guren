@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import type postgres from 'postgres'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isConnectionFailure, migrationFailure, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isConnectionFailure, migrationFailure, seedFailure, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders } from './seeder'
 
 type ConnectionResolver = string | (() => string | undefined)
@@ -191,7 +191,11 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
     }
 
     const db = await getDatabase()
-    await runSeeders(db, resolvedSeedersFolder)
+    try {
+      await runSeeders(db, resolvedSeedersFolder)
+    } catch (error) {
+      throw seedFailure(error, describeConnectionEndpoint(resolveConnectionString()))
+    }
   }
 
   async function withAdminClient<T>(callback: (client: ReturnType<typeof postgres>) => Promise<T>): Promise<T> {

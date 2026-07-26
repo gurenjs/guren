@@ -1,4 +1,4 @@
-import { describe, expect, it, mock } from 'bun:test'
+import { afterEach, describe, expect, it, mock } from 'bun:test'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -41,6 +41,10 @@ function createMigrationsFolder(withMigrations: boolean): string {
 }
 
 describe('createPostgresDatabase', () => {
+  afterEach(() => {
+    unsafeImpl = async () => []
+  })
+
   it('runs migrations and returns a configured database', async () => {
     const database = createPostgresDatabase({
       migrationsFolder: createMigrationsFolder(true),
@@ -161,7 +165,6 @@ describe('createPostgresDatabase', () => {
       () => null,
       (reason: unknown) => reason as Error,
     )
-    unsafeImpl = async () => []
 
     expect(error?.message).toBe(
       'cannot connect to the database at db.internal:54322 (ECONNREFUSED). Is it running and accepting connections?',
@@ -180,7 +183,6 @@ describe('createPostgresDatabase', () => {
     }
 
     const status = await database.migrationStatus()
-    unsafeImpl = async () => []
 
     expect(status).toEqual([{ name: '20240101000000_init', applied: false, appliedAt: null }])
   })
@@ -199,11 +201,38 @@ describe('createPostgresDatabase', () => {
       () => null,
       (reason: unknown) => reason as Error,
     )
-    unsafeImpl = async () => []
 
     expect(error?.message).toBe(
       'cannot connect to the database at db.internal:54322 (ECONNREFUSED). Is it running and accepting connections?',
     )
+  })
+
+  it('describes a seeder failure instead of leaving the driver message on the cause', async () => {
+    const seedersFolder = mkdtempSync(join(tmpdir(), 'guren-orm-seeders-'))
+    writeFileSync(
+      join(seedersFolder, 'BrokenSeeder.ts'),
+      'export default async function run() {\n' +
+        "  throw new Error('Failed query: INSERT INTO posts (title) VALUES ($1)', {\n" +
+        "    cause: new Error('null value in column \"body\" violates not-null constraint'),\n" +
+        '  })\n' +
+        '}\n',
+    )
+
+    const database = createPostgresDatabase({
+      migrationsFolder: createMigrationsFolder(true),
+      seedersFolder,
+      connectionString: () => 'postgres://guren:hunter2@db.internal:54322/guren',
+    })
+
+    const error = await database.seedDatabase().then(
+      () => null,
+      (reason: unknown) => reason as Error,
+    )
+
+    expect(error?.message).toContain('Failed to seed the database:')
+    expect(error?.message).toContain('INSERT INTO posts')
+    expect(error?.message).toContain('violates not-null constraint')
+    expect(error?.message).not.toContain('hunter2')
   })
 
   it('throws when seeders folder is missing', async () => {

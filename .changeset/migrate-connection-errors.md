@@ -15,15 +15,20 @@ running and accepting connections?`, with the host and port only so the
 connection string's credentials stay out of the log. Genuine SQL failures now
 carry the driver's message alongside the query instead of the query alone.
 
-Two sibling commands had the same blind spot. `db:status` caught an unreachable
+Three sibling commands had the same blind spot. `db:status` caught an unreachable
 server in the branch written for "the tracker table does not exist yet", so it
 reported every migration as pending and exited 0 — indistinguishable from a
 healthy database with nothing applied; it now fails with the connection error.
 `db:reset` rethrew the driver error untouched, and a message-less
-`AggregateError` printed as a bare `ERROR` line with nothing after it.
+`AggregateError` printed as a bare `ERROR` line with nothing after it. `db:seed`
+reported the failing statement without the driver's explanation of why it failed.
 
 Scaffolding with PostgreSQL or MySQL also writes `db:up` and `db:down` scripts
 next to the generated `docker-compose.yml`, so starting the database is
 discoverable from `package.json`. The selected driver is no longer listed in both
 `dependencies` and `devDependencies`, which made `bun install` warn about a
 duplicate dependency on the first command a new project runs.
+
+The AI agent harness that `agent:init` installs is updated to match: its database
+skill pointed agents at a `db:logs` script that nothing scaffolds, and handed
+container commands to SQLite projects, which have no container.

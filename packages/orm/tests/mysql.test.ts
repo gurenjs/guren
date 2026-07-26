@@ -1,9 +1,10 @@
-import { describe, expect, it, mock } from 'bun:test'
+import { afterEach, describe, expect, it, mock } from 'bun:test'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { DrizzleAdapter } from '../src/adapters/drizzle-adapter'
 
+let executeImpl: () => Promise<unknown> = async () => [[]]
 const drizzleMock = mock((config: unknown) => ({
   $client: {
     end: mock((cb?: (err?: unknown) => void) => {
@@ -11,6 +12,7 @@ const drizzleMock = mock((config: unknown) => ({
       return undefined
     }),
   },
+  execute: () => executeImpl(),
   config,
 }))
 const migrateMock = mock(async () => {})
@@ -38,6 +40,10 @@ function createMigrationsFolder(withMigrations: boolean): string {
 }
 
 describe('createMySqlDatabase', () => {
+  afterEach(() => {
+    executeImpl = async () => [[]]
+  })
+
   it('runs migrations and returns a configured database', async () => {
     const database = createMySqlDatabase({
       migrationsFolder: createMigrationsFolder(true),
@@ -121,6 +127,41 @@ describe('createMySqlDatabase', () => {
     // Canary: keeps the credential check alive if the assertion above is
     // ever loosened from toBe to toContain.
     expect(error?.message).not.toContain('hunter2')
+  })
+
+  it('reports an unreachable server from db:status instead of calling every migration pending', async () => {
+    const database = createMySqlDatabase({
+      migrationsFolder: createMigrationsFolder(true),
+      connectionString: () => 'mysql://guren:hunter2@db.internal:33306/guren',
+    })
+
+    executeImpl = async () => {
+      throw Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED', syscall: 'connect' })
+    }
+
+    const error = await database.migrationStatus().then(
+      () => null,
+      (reason: unknown) => reason as Error,
+    )
+
+    expect(error?.message).toBe(
+      'cannot connect to the database at db.internal:33306 (ECONNREFUSED). Is it running and accepting connections?',
+    )
+  })
+
+  it('still reports nothing applied when only the tracker table is missing', async () => {
+    const database = createMySqlDatabase({
+      migrationsFolder: createMigrationsFolder(true),
+      connectionString: () => 'mysql://guren:hunter2@db.internal:33306/guren',
+    })
+
+    executeImpl = async () => {
+      throw Object.assign(new Error("Table 'guren.__drizzle_migrations' doesn't exist"), { code: 'ER_NO_SUCH_TABLE' })
+    }
+
+    expect(await database.migrationStatus()).toEqual([
+      { name: '20240101000000_init', applied: false, appliedAt: null },
+    ])
   })
 
   it('throws when seeders folder is missing', async () => {
