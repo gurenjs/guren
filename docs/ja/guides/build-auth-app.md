@@ -38,7 +38,7 @@ bunx guren add auth
 ## 3. データベースを起動する
 
 ```bash
-docker compose up -d
+bun run db:up
 ```
 
 マイグレーションを実行して `users` テーブルを作成します:

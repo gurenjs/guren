@@ -23,7 +23,7 @@ bun install
 ## 2. Start the Database
 
 ```bash
-docker compose up -d
+bun run db:up
 ```
 
 ## 3. Define Your Schema

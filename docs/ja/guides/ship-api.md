@@ -23,7 +23,7 @@ bun install
 ## 2. データベースを起動する
 
 ```bash
-docker compose up -d
+bun run db:up
 ```
 
 ## 3. スキーマを定義する

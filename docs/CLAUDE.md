@@ -21,7 +21,7 @@
 - Surface the most relevant next steps at the end of each document
 
 ## Maintenance Checklist
-- After editing, run `rg` on `docs/` for disallowed terms (`packages/core`, `citty`, `consola`, `bun run db:up`, etc.)
+- After editing, run `rg` on `docs/` for disallowed terms (`packages/core`, `citty`, `consola`, etc.)
 - Keep Quick Start and Getting Started aligned whenever the scaffold workflow changes
 - Update examples promptly if `create-guren-app` template changes
 - Keep `testing.md` synchronized with `@guren/testing` helpers and CLI commands

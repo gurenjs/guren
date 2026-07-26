@@ -59,7 +59,7 @@ bun run dev
 雛形生成時に `--db postgres`（または `--db mysql`）を渡すか、プロンプトで選択します。スキャフォールダーが対応するデータベースの `docker-compose.yml` を書き出し、`DATABASE_URL` をそこに向けてくれます。**Docker Desktop（Compose v2）** がインストールされていれば、次のコマンドでデータベースを起動できます。
 
 ```bash
-docker compose up -d
+bun run db:up
 ```
 
 デフォルトの接続文字列:

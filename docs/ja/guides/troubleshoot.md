@@ -68,14 +68,16 @@ bun run codegen --force
 
 ### データベースへの "Connection refused"
 
-**原因:** Postgres コンテナが起動していないか、`DATABASE_URL` のホストまたはポートが間違っている。
+`bun run db:migrate` が `cannot connect to the database at localhost:54322 (ECONNREFUSED)` で失敗します。
+
+**原因:** Postgres コンテナが起動していない、ポートがホストに公開されていない、または `DATABASE_URL` のホストかポートが間違っている。
 
 **解決方法:**
 
 1. データベースコンテナを起動する:
 
    ```bash
-   docker compose up -d
+   bun run db:up
    ```
 
 2. `.env` の接続文字列を確認する:
@@ -86,10 +88,16 @@ bun run codegen --force
 
    デフォルトポートはシステムの Postgres との競合を避けるため `54322`(標準の `5432` ではない)です。
 
-3. コンテナが正常に起動しているか確認する:
+3. コンテナがポートを**ホストに公開している**か確認する:
 
    ```bash
-   docker compose ps
+   docker compose port postgres 5432
+   ```
+
+   `0.0.0.0:54322` が表示されれば正常です。`docker compose ps` が `Up` と表示していても、このコマンドが何も返さない場合はポートの公開に失敗しています(Docker Desktop の再起動後などに起こります)。コンテナを作り直してください — 名前付きボリュームは残るのでデータは失われません:
+
+   ```bash
+   bun run db:down && bun run db:up
    ```
 
 ---

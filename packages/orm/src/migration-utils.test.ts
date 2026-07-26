@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { buildMigrationStatus, listLocalMigrations } from './migration-utils'
+import { buildMigrationStatus, describeConnectionEndpoint, describeMigrationFailure, listLocalMigrations } from './migration-utils'
 import { createSqliteDatabase } from './sqlite'
 
 function writeDrizzleMigration(migrationsDir: string, name: string, sql: string): void {
@@ -121,5 +121,74 @@ describe('createSqliteDatabase resetDatabase/migrationStatus', () => {
     await database.migrateDatabase()
     const remigrated = await database.migrationStatus()
     expect(remigrated[0].applied).toBe(true)
+  })
+})
+
+describe('describeConnectionEndpoint', () => {
+  test('should reduce a connection string to host and port', () => {
+    expect(describeConnectionEndpoint('postgres://guren:guren@localhost:54322/guren')).toBe('localhost:54322')
+  })
+
+  test('should not leak credentials from the connection string', () => {
+    const endpoint = describeConnectionEndpoint('mysql://root:sup3rs3cret@db.internal:33306/app')
+    expect(endpoint).toBe('db.internal:33306')
+    expect(endpoint).not.toContain('sup3rs3cret')
+    expect(endpoint).not.toContain('root')
+  })
+
+  test('should omit the port when the connection string has none', () => {
+    expect(describeConnectionEndpoint('postgres://guren@example.com/guren')).toBe('example.com')
+  })
+
+  test('should return undefined for values that are not URLs', () => {
+    expect(describeConnectionEndpoint('./data/guren.db')).toBeUndefined()
+  })
+})
+
+describe('describeMigrationFailure', () => {
+  test('should report a connection failure instead of the query drizzle happened to be running', () => {
+    // Shape produced by drizzle + postgres-js when the server is unreachable:
+    // the outer message names the migrator's own bookkeeping statement and the
+    // AggregateError cause carries the code but no message at all.
+    const cause = new AggregateError([], '')
+    Object.assign(cause, { code: 'ECONNREFUSED' })
+    const error = new Error('Failed query: CREATE SCHEMA IF NOT EXISTS "drizzle"\nparams: ', { cause })
+
+    const message = describeMigrationFailure(error, 'localhost:54322')
+
+    expect(message).toContain('cannot connect to the database at localhost:54322')
+    expect(message).toContain('ECONNREFUSED')
+    expect(message).not.toContain('CREATE SCHEMA')
+  })
+
+  test('should describe a connection failure without an endpoint', () => {
+    const error = new Error('Failed query: SELECT 1', { cause: Object.assign(new Error(''), { code: 'ENOTFOUND' }) })
+    expect(describeMigrationFailure(error)).toContain('cannot connect to the database (ENOTFOUND)')
+  })
+
+  test('should keep the real SQL error when the database is reachable', () => {
+    const error = new Error('Failed query: ALTER TABLE "posts" ADD COLUMN "slug" text NOT NULL', {
+      cause: new Error('column "slug" of relation "posts" already exists'),
+    })
+
+    const message = describeMigrationFailure(error, 'localhost:54322')
+
+    expect(message).toContain('ALTER TABLE "posts"')
+    expect(message).toContain('column "slug" of relation "posts" already exists')
+  })
+
+  test('should surface a cause nested inside an AggregateError', () => {
+    const error = new Error('outer', { cause: new AggregateError([Object.assign(new Error(''), { code: 'ECONNREFUSED' })], '') })
+    expect(describeMigrationFailure(error, 'db:5432')).toContain('ECONNREFUSED')
+  })
+
+  test('should not loop forever on a self-referencing cause chain', () => {
+    const error = new Error('boom') as Error & { cause?: unknown }
+    error.cause = error
+    expect(describeMigrationFailure(error)).toBe('boom')
+  })
+
+  test('should stringify non-Error rejections', () => {
+    expect(describeMigrationFailure('plain string failure')).toBe('plain string failure')
   })
 })

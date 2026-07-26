@@ -38,7 +38,7 @@ This scaffolds:
 ## 3. Start the Database
 
 ```bash
-docker compose up -d
+bun run db:up
 ```
 
 Then run the generated migration to create the `users` table:

@@ -59,7 +59,7 @@ Everything below is optional for your first session, but you will want it as you
 Pass `--db postgres` (or `--db mysql`) when scaffolding, or pick it at the prompt. The scaffolder then writes a `docker-compose.yml` for the matching database and points `DATABASE_URL` at it. With **Docker Desktop (Compose v2)** installed, start the database with:
 
 ```bash
-docker compose up -d
+bun run db:up
 ```
 
 Default connection strings:

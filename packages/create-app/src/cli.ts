@@ -243,7 +243,7 @@ const command = defineCommand({
       consola.log('  bun install')
     }
     if (database !== 'sqlite') {
-      consola.log('  docker compose up -d')
+      consola.log('  bun run db:up')
     }
     consola.log('')
     consola.info('Add features:')

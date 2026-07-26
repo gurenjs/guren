@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, describeConnectionEndpoint, describeMigrationFailure, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders } from './seeder'
 
 type ConnectionResolver = string | (() => string | undefined)
@@ -88,6 +88,9 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
       return migrationsPromise
     }
 
+    // Captured for the error handler below, which runs outside this closure.
+    let endpoint: string | undefined
+
     const promise = (async (): Promise<void> => {
       if (!hasDrizzleMigrations(resolvedMigrationsFolder)) {
         warnIgnoredFlatSqlMigrations(resolvedMigrationsFolder)
@@ -96,6 +99,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
 
       const { drizzle, migrate } = await loadMySqlModules()
       const url = resolveConnectionString()
+      endpoint = describeConnectionEndpoint(url)
       const migrationDb = drizzle({
         connection: {
           uri: url,
@@ -114,8 +118,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
 
     migrationsPromise = promise.catch((error) => {
       migrationsPromise = undefined
-      const reason = error instanceof Error ? error.message : String(error)
-      throw new Error(`Failed to run database migrations: ${reason}`)
+      throw new Error(`Failed to run database migrations: ${describeMigrationFailure(error, endpoint)}`)
     })
 
     await migrationsPromise

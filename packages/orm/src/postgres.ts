@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import type postgres from 'postgres'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, describeConnectionEndpoint, describeMigrationFailure, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders } from './seeder'
 
 type ConnectionResolver = string | (() => string | undefined)
@@ -90,6 +90,9 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
       return migrationsPromise
     }
 
+    // Captured for the error handler below, which runs outside this closure.
+    let endpoint: string | undefined
+
     const promise = (async (): Promise<void> => {
       if (!hasDrizzleMigrations(resolvedMigrationsFolder)) {
         warnIgnoredFlatSqlMigrations(resolvedMigrationsFolder)
@@ -98,6 +101,7 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
 
       const { drizzle, migrate, postgres: postgresFactory } = await loadPostgresModules()
       const url = resolveConnectionString()
+      endpoint = describeConnectionEndpoint(url)
       const migrationClient = postgresFactory(url, {
         max: 1,
         ...clientOptions,
@@ -113,8 +117,7 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
 
     migrationsPromise = promise.catch((error) => {
       migrationsPromise = undefined
-      const reason = error instanceof Error ? error.message : String(error)
-      throw new Error(`Failed to run database migrations: ${reason}`)
+      throw new Error(`Failed to run database migrations: ${describeMigrationFailure(error, endpoint)}`)
     })
 
     await migrationsPromise
