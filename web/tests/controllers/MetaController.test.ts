@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createControllerContext,
   createControllerModuleMock,
@@ -6,10 +6,23 @@ import {
 import type { Context } from '@guren/core'
 import type { DocCategoryGroup } from '../../app/Services/DocsService.js'
 
-vi.mock('@guren/core', () => createControllerModuleMock())
+// The sitemap and llms.txt list blog posts, so this controller reaches the blog
+// module's public surface — which loads its service providers. The shared
+// controller mock does not carry ServiceProvider/defineModule, so they are
+// spread over rather than replacing it.
+vi.mock('@guren/core', () => ({
+  ...createControllerModuleMock(),
+  ServiceProvider: class {
+    constructor(public container: unknown) {}
+    register(): void {}
+    boot(): void {}
+  },
+  defineModule: <T,>(definition: T): T => definition,
+}))
 
 import MetaController, { resetMetaBodyCache } from '../../app/Http/Controllers/MetaController.js'
 import { docsService } from '../../app/Services/DocsService.js'
+import * as blogModule from '../../modules/blog/index.js'
 
 const routingDoc = { slug: 'routing', title: 'Routing', description: 'Define routes' }
 const categories: DocCategoryGroup[] = [
@@ -27,7 +40,19 @@ function createController(url: string): MetaController {
   return controller
 }
 
+const post = {
+  slug: 'starting-a-blog',
+  title: 'Starting a blog',
+  description: 'Why the Guren blog is built with Guren.',
+  publishedAt: new Date('2026-07-26T09:05:00Z'),
+}
+
 describe('MetaController', () => {
+  beforeEach(() => {
+    // Default to an empty blog so docs-focused cases do not reach the database.
+    vi.spyOn(blogModule, 'listPublishedPosts').mockResolvedValue([])
+  })
+
   afterEach(() => {
     vi.restoreAllMocks()
     resetMetaBodyCache()
@@ -70,5 +95,54 @@ describe('MetaController', () => {
     expect(body).toContain('# Guren — Full Documentation')
     expect(body).toContain('<!-- https://guren.dev/docs/guides/routing -->')
     expect(body).toContain('# Routing')
+  })
+
+  it('lists the blog index and published posts in the sitemap', async () => {
+    vi.spyOn(docsService, 'listDocs').mockResolvedValue(categories)
+    vi.spyOn(blogModule, 'listPublishedPosts').mockResolvedValue([post])
+
+    const response = await createController('http://guren.dev/sitemap.xml').sitemap()
+    const body = await response.text()
+
+    expect(body).toContain('<loc>https://guren.dev/blog</loc>')
+    expect(body).toContain('<loc>https://guren.dev/blog/starting-a-blog</loc>')
+  })
+
+  it('lists published posts and the feed in llms.txt', async () => {
+    vi.spyOn(docsService, 'listDocs').mockResolvedValue(categories)
+    vi.spyOn(blogModule, 'listPublishedPosts').mockResolvedValue([post])
+
+    const response = await createController('http://guren.dev/llms.txt').llms()
+    const body = await response.text()
+
+    expect(body).toContain('## Blog')
+    expect(body).toContain(
+      '- [Starting a blog](https://guren.dev/blog/starting-a-blog): Why the Guren blog is built with Guren.',
+    )
+    expect(body).toContain('https://guren.dev/blog/rss.xml')
+  })
+
+  it('omits the blog section from llms.txt when nothing is published', async () => {
+    vi.spyOn(docsService, 'listDocs').mockResolvedValue(categories)
+
+    const response = await createController('http://guren.dev/llms.txt').llms()
+    const body = await response.text()
+
+    expect(body).not.toContain('## Blog')
+  })
+
+  // The docs half is memoized per process; posts are rows the admin UI mutates,
+  // so a post published after the first request has to still show up.
+  it('re-reads posts on every request instead of serving a memoized list', async () => {
+    vi.spyOn(docsService, 'listDocs').mockResolvedValue(categories)
+    const listPosts = vi.spyOn(blogModule, 'listPublishedPosts').mockResolvedValue([])
+
+    const first = await (await createController('http://guren.dev/sitemap.xml').sitemap()).text()
+    expect(first).not.toContain('/blog/starting-a-blog')
+
+    listPosts.mockResolvedValue([post])
+    const second = await (await createController('http://guren.dev/sitemap.xml').sitemap()).text()
+
+    expect(second).toContain('<loc>https://guren.dev/blog/starting-a-blog</loc>')
   })
 })
