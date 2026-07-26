@@ -12,6 +12,7 @@ import {
   type PublishResult,
 } from './plugin-manifest'
 import { assertSupportedOfficialVercelPlugin, installOfficialVercelPlugin, VERCEL_PLUGIN_PACKAGE } from './plugin-vercel'
+import { installOfficialLambdaPlugin, LAMBDA_PLUGIN_PACKAGE } from './plugin-lambda'
 
 export interface InstallPluginOptions extends WriterOptions {
   packageName: string
@@ -50,6 +51,30 @@ function toMessages(kind: PluginInstallMessageKind, texts: string[]): PluginInst
 const OFFICIAL_FACTORY_PLUGINS: Record<string, string> = {
   [VERCEL_PLUGIN_PACKAGE]: 'vercelPlugin',
   '@guren/plugin-cloudflare': 'cloudflarePlugin',
+  [LAMBDA_PLUGIN_PACKAGE]: 'lambdaPlugin',
+}
+
+interface OfficialPluginScaffolder {
+  /** Runs before anything is installed or modified; throw to abort. */
+  precheck?: () => Promise<void>
+  /** Writes the plugin's project files; returns the paths it touched. */
+  scaffold: (options: WriterOptions) => Promise<string[]>
+}
+
+/**
+ * Official plugins that scaffold project files the manifest `publishes`
+ * mechanism cannot write (it is restricted to config/, db/migrations/, and
+ * resources/). Keyed like OFFICIAL_FACTORY_PLUGINS and looked up once, so
+ * adding an official plugin means adding table rows, not branches.
+ */
+const OFFICIAL_PLUGIN_SCAFFOLDERS: Record<string, OfficialPluginScaffolder> = {
+  [VERCEL_PLUGIN_PACKAGE]: {
+    precheck: assertSupportedOfficialVercelPlugin,
+    scaffold: installOfficialVercelPlugin,
+  },
+  [LAMBDA_PLUGIN_PACKAGE]: {
+    scaffold: installOfficialLambdaPlugin,
+  },
 }
 
 function providerIdentifierForPackage(packageName: string): string {
@@ -89,9 +114,8 @@ export async function installPlugin(options: InstallPluginOptions): Promise<Plug
     throw new Error('Plugin package name is required.')
   }
 
-  if (packageName === VERCEL_PLUGIN_PACKAGE) {
-    await assertSupportedOfficialVercelPlugin()
-  }
+  const scaffolder = OFFICIAL_PLUGIN_SCAFFOLDERS[packageName]
+  await scaffolder?.precheck?.()
 
   const messages: PluginInstallMessage[] = []
 
@@ -166,9 +190,8 @@ export async function installPlugin(options: InstallPluginOptions): Promise<Plug
     }
   }
 
-  if (packageName === VERCEL_PLUGIN_PACKAGE) {
-    const pluginFiles = await installOfficialVercelPlugin(options)
-    messages.push(...toMessages('updated', pluginFiles))
+  if (scaffolder) {
+    messages.push(...toMessages('updated', await scaffolder.scaffold(options)))
   }
 
   // Independent I/O — apply publishes and env entries concurrently.

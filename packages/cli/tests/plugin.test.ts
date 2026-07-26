@@ -116,6 +116,41 @@ export default app
     expect(gitignore.match(/\.vercel/g)?.length ?? 0).toBe(1)
   })
 
+  it('scaffolds official Lambda plugin files', async () => {
+    const messages = await installPlugin({ packageName: '@guren/plugin-lambda' })
+    const updated = textsOf(messages, 'updated')
+
+    expect(updated).toContain('src/app.ts')
+    expect(updated).toContain('.gitignore')
+    expect(updated).toContain('src/lambda.ts')
+    expect(textsOf(messages, 'hint')).toContain('Run: bun add @guren/plugin-lambda')
+
+    const app = await readFile('src/app.ts', 'utf8')
+    expect(app).toContain("import { lambdaPlugin } from '@guren/plugin-lambda'")
+    expect(app).toContain('providers: [lambdaPlugin()]')
+
+    expect(await readFile('.gitignore', 'utf8')).toContain('.lambda')
+
+    const entrypoint = await readFile('src/lambda.ts', 'utf8')
+    expect(entrypoint).toContain("from '@guren/core/lambda'")
+    expect(entrypoint).toContain('export const http = createLambdaHandler(app)')
+    expect(entrypoint).toContain('export const queue = createSqsHandler()')
+  })
+
+  it('is idempotent for the official Lambda plugin', async () => {
+    await installPlugin({ packageName: '@guren/plugin-lambda' })
+    const second = await installPlugin({ packageName: '@guren/plugin-lambda' })
+
+    expect(textsOf(second, 'checked')).toContain('src/app.ts (already registered)')
+
+    const app = await readFile('src/app.ts', 'utf8')
+    const occurrences = app.match(/lambdaPlugin/g)?.length ?? 0
+    expect(occurrences).toBe(2)
+
+    const gitignore = await readFile('.gitignore', 'utf8')
+    expect(gitignore.match(/\.lambda/g)?.length ?? 0).toBe(1)
+  })
+
   it('honors a stale installed manifest that still declares a class provider', async () => {
     await writeInstalledPackage('@guren/plugin-vercel', {
       version: '0.1.2',

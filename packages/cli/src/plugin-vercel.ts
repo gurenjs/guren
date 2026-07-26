@@ -1,6 +1,7 @@
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname, resolve } from 'node:path'
+import { access, readFile, writeFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import type { WriterOptions } from './utils'
+import { ensureGitignoreEntry, ensureScaffoldFile } from './plugin-scaffold'
 
 export const VERCEL_PLUGIN_PACKAGE = '@guren/plugin-vercel'
 
@@ -13,11 +14,11 @@ export async function installOfficialVercelPlugin(options: WriterOptions = {}): 
     updated.push('package.json')
   }
 
-  if (await ensureGitignore(options)) {
+  if (await ensureGitignoreEntry('.vercel')) {
     updated.push('.gitignore')
   }
 
-  if (await ensureFile(
+  if (await ensureScaffoldFile(
     'src/vercel.ts',
     vercelEntrypointTemplate(),
     options,
@@ -25,7 +26,7 @@ export async function installOfficialVercelPlugin(options: WriterOptions = {}): 
     updated.push('src/vercel.ts')
   }
 
-  if (await ensureFile(
+  if (await ensureScaffoldFile(
     'scripts/vercel-build.ts',
     vercelBuildTemplate(),
     options,
@@ -33,7 +34,7 @@ export async function installOfficialVercelPlugin(options: WriterOptions = {}): 
     updated.push('scripts/vercel-build.ts')
   }
 
-  if (await ensureFile(
+  if (await ensureScaffoldFile(
     'vercel.json',
     vercelConfigTemplate(),
     options,
@@ -98,52 +99,6 @@ async function ensurePackageJsonScripts(options: WriterOptions): Promise<boolean
   }
 
   await writeFile(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`, 'utf8')
-  return true
-}
-
-async function ensureGitignore(options: WriterOptions): Promise<boolean> {
-  const gitignorePath = resolve(process.cwd(), '.gitignore')
-  let content = ''
-
-  try {
-    content = await readFile(gitignorePath, 'utf8')
-  } catch {
-    content = ''
-  }
-
-  if (content.split(/\r?\n/u).includes('.vercel')) {
-    return false
-  }
-
-  if (content && !content.endsWith('\n')) {
-    content += '\n'
-  }
-
-  content += '.vercel\n'
-  await writeFile(gitignorePath, content, 'utf8')
-  return true
-}
-
-async function ensureFile(relativePath: string, contents: string, options: WriterOptions): Promise<boolean> {
-  const absolutePath = resolve(process.cwd(), relativePath)
-
-  try {
-    const existing = await readFile(absolutePath, 'utf8')
-    if (existing === contents) {
-      return false
-    }
-
-    if (!options.force) {
-      return false
-    }
-  } catch {
-    await mkdir(dirname(absolutePath), { recursive: true })
-    await writeFile(absolutePath, contents, 'utf8')
-    return true
-  }
-
-  await mkdir(dirname(absolutePath), { recursive: true })
-  await writeFile(absolutePath, contents, 'utf8')
   return true
 }
 
