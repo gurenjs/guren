@@ -42,7 +42,7 @@ function createMigrationsFolder(): string {
 }
 
 describeMySql('createMySqlDatabase against a real MySQL server (requires MYSQL_URL)', () => {
-  let database: MySqlDatabase
+  let database: MySqlDatabase | undefined
 
   beforeAll(async () => {
     await ensureDatabase(MYSQL_URL as string)
@@ -54,10 +54,20 @@ describeMySql('createMySqlDatabase against a real MySQL server (requires MYSQL_U
   })
 
   afterAll(async () => {
-    await database.closeDatabase()
+    // beforeAll may have thrown before `database` was assigned — don't mask
+    // that failure with a "Cannot read properties of undefined" here.
+    await database?.closeDatabase()
   })
 
+  function getDatabaseHandle(): MySqlDatabase {
+    if (!database) {
+      throw new Error('beforeAll did not set up the database handle')
+    }
+    return database
+  }
+
   it('runs migrations and queries through the real driver', async () => {
+    const database = getDatabaseHandle()
     const db = await database.getDatabase()
 
     const [rows] = (await db.execute(sql`SELECT 1 AS one`)) as unknown as [Array<{ one: number }>]
@@ -71,6 +81,7 @@ describeMySql('createMySqlDatabase against a real MySQL server (requires MYSQL_U
   })
 
   it('reports the applied migration', async () => {
+    const database = getDatabaseHandle()
     await database.migrateDatabase()
 
     const status = await database.migrationStatus()
@@ -79,6 +90,7 @@ describeMySql('createMySqlDatabase against a real MySQL server (requires MYSQL_U
   })
 
   it('drops every table on reset', async () => {
+    const database = getDatabaseHandle()
     await database.migrateDatabase()
     await database.resetDatabase()
 
