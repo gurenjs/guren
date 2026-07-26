@@ -41,6 +41,13 @@ export function Seo({
       <title>{title}</title>
       <meta name="description" content={description} />
       <link rel="canonical" href={canonical} />
+      {/* Site-wide so a reader pointed at any page discovers the one feed. */}
+      <link
+        rel="alternate"
+        type="application/rss+xml"
+        title={`${SITE_NAME} Blog`}
+        href={absoluteUrl('/blog/rss.xml')}
+      />
       {alternates.map((alt) => (
         <link key={alt.hrefLang} rel="alternate" hrefLang={alt.hrefLang} href={absoluteUrl(alt.href)} />
       ))}

@@ -7,14 +7,18 @@ import {
   absoluteUrl,
   docPaths,
 } from '../../../config/site.js'
+import { xmlEscape } from '../../../config/xml.js'
 import { docsService, type DocCategoryGroup } from '../../Services/DocsService.js'
+import { listPublishedPosts, type PublishedPost } from '../../../modules/blog/index.js'
 
-function xmlEscape(value: string): string {
-  return value
-    .replace(/&/gu, '&amp;')
-    .replace(/</gu, '&lt;')
-    .replace(/>/gu, '&gt;')
-    .replace(/"/gu, '&quot;')
+/**
+ * Post titles and descriptions are author-written free text, so they are
+ * flattened before going into llms.txt: a newline or a bracket would otherwise
+ * split one entry into several, or break the link, in a document whose whole
+ * value is being machine-parseable.
+ */
+function mdInline(value: string): string {
+  return value.replace(/\s+/gu, ' ').replace(/([\[\]])/gu, '\\$1').trim()
 }
 
 function sitemapEntry(path: string, alternates?: { en: string; ja: string }): string {
@@ -33,6 +37,9 @@ function sitemapEntry(path: string, alternates?: { en: string; ja: string }): st
 
 // Docs content is immutable per deploy, so each body is built once per process
 // (Cache-Control alone does not spare the origin — max-age has no CDN guarantee).
+// Blog posts are deliberately outside this cache: they are rows the admin UI
+// mutates at runtime, and memoizing them per isolate would leave a published
+// post visible from some isolates and missing from others until the next deploy.
 const bodyCache = new Map<string, Promise<string>>()
 
 function cachedBody(key: string, build: () => Promise<string>): Promise<string> {
@@ -60,7 +67,11 @@ export function resetMetaBodyCache(): void {
  */
 export default class MetaController extends Controller {
   async sitemap(): Promise<Response> {
-    const xml = await cachedBody('sitemap', buildSitemap)
+    const [docsEntries, posts] = await Promise.all([
+      cachedBody('sitemap:docs', buildDocsSitemapEntries),
+      listPublishedPosts(),
+    ])
+    const xml = renderSitemap(docsEntries, posts)
 
     return this.text(xml, {
       headers: {
@@ -71,7 +82,11 @@ export default class MetaController extends Controller {
   }
 
   async llms(): Promise<Response> {
-    const body = await cachedBody('llms', buildLlms)
+    const [docsSections, posts] = await Promise.all([
+      cachedBody('llms:docs', buildLlmsDocsSections),
+      listPublishedPosts(),
+    ])
+    const body = renderLlms(docsSections, posts)
 
     return this.text(body, { headers: { 'Cache-Control': DOCS_CACHE_CONTROL } })
   }
@@ -83,7 +98,7 @@ export default class MetaController extends Controller {
   }
 }
 
-async function buildSitemap(): Promise<string> {
+async function buildDocsSitemapEntries(): Promise<string> {
   const categories = await docsService.listDocs('en')
 
   const entries: string[] = [
@@ -100,28 +115,28 @@ async function buildSitemap(): Promise<string> {
     }
   }
 
+  return entries.join('\n')
+}
+
+function renderSitemap(docsEntries: string, posts: PublishedPost[]): string {
+  const blogEntries = [
+    sitemapEntry('/blog'),
+    ...posts.map((post) => sitemapEntry(`/blog/${post.slug}`)),
+  ]
+
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">',
-    ...entries,
+    docsEntries,
+    ...blogEntries,
     '</urlset>',
     '',
   ].join('\n')
 }
 
-async function buildLlms(): Promise<string> {
+async function buildLlmsDocsSections(): Promise<string> {
   const categories = await docsService.listDocs('en')
-
-  const lines: string[] = [
-    `# ${SITE_NAME}`,
-    '',
-    `> ${SITE_DESCRIPTION.en}`,
-    '',
-    'Guren pairs Laravel-style conventions (controllers, models, middleware, validation) with the TypeScript ecosystem: Bun runtime, Hono HTTP, Drizzle ORM, and Inertia.js + React. Codegen keeps routes, page props, and API clients typed end to end.',
-    '',
-    'Every documentation page is also available as raw Markdown: append `.md` to its URL.',
-    '',
-  ]
+  const lines: string[] = []
 
   for (const group of categories) {
     lines.push(`## ${group.title}`)
@@ -135,11 +150,39 @@ async function buildLlms(): Promise<string> {
     lines.push('')
   }
 
+  return lines.join('\n')
+}
+
+function renderLlms(docsSections: string, posts: PublishedPost[]): string {
+  const lines: string[] = [
+    `# ${SITE_NAME}`,
+    '',
+    `> ${SITE_DESCRIPTION.en}`,
+    '',
+    'Guren pairs Laravel-style conventions (controllers, models, middleware, validation) with the TypeScript ecosystem: Bun runtime, Hono HTTP, Drizzle ORM, and Inertia.js + React. Codegen keeps routes, page props, and API clients typed end to end.',
+    '',
+    'Every documentation page is also available as raw Markdown: append `.md` to its URL.',
+    '',
+    docsSections,
+  ]
+
+  if (posts.length > 0) {
+    lines.push('## Blog')
+    lines.push('')
+    for (const post of posts) {
+      const url = absoluteUrl(`/blog/${post.slug}`)
+      const description = post.description ? `: ${mdInline(post.description)}` : ''
+      lines.push(`- [${mdInline(post.title)}](${url})${description}`)
+    }
+    lines.push('')
+  }
+
   lines.push('## Optional')
   lines.push('')
   lines.push(`- [Full documentation as one file](${absoluteUrl('/llms-full.txt')})`)
   lines.push(`- [GitHub repository](${GITHUB_URL})`)
   lines.push(`- [Japanese documentation](${absoluteUrl('/docs/ja')})`)
+  lines.push(`- [Blog RSS feed](${absoluteUrl('/blog/rss.xml')})`)
   lines.push('')
 
   return lines.join('\n')

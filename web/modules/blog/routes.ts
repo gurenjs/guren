@@ -1,5 +1,6 @@
 import { Router, requireAuthenticated } from '@guren/core'
 import BlogController from './app/Http/Controllers/BlogController.js'
+import FeedController from './app/Http/Controllers/FeedController.js'
 import PostsController from './app/Http/Controllers/Admin/PostsController.js'
 import OAuthController from './app/Http/Controllers/Auth/OAuthController.js'
 
@@ -10,6 +11,8 @@ export function registerBlogRoutes(baseRouter: Router): void {
   )
 
   router.get('/blog', [BlogController, 'index']).name('blog.index')
+  // Ahead of /blog/:slug, which would otherwise claim "rss.xml" as a slug.
+  router.get('/blog/rss.xml', [FeedController, 'rss']).name('blog.rss')
   router.get('/blog/:slug', [BlogController, 'show']).name('blog.show')
 
   router.get('/auth/github', [OAuthController, 'redirectToProvider']).name('auth.github')

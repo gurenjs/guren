@@ -2,6 +2,7 @@ import { Controller } from '@guren/core'
 import { z } from 'zod'
 import { pageTitle } from '../../../../../config/site.js'
 import { Post, type PostRecord } from '../../Models/Post.js'
+import { isPublished, listPublishedPosts } from '../../Services/published-posts.js'
 import { pages } from '@/.guren/pages.gen.js'
 
 const SlugParamSchema = z.object({
@@ -10,10 +11,6 @@ const SlugParamSchema = z.object({
 
 /** The summary columns the list view needs — see index(). */
 type PostSummarySource = Pick<PostRecord, 'slug' | 'title' | 'description' | 'publishedAt'>
-
-export function isPublished(post: Pick<PostRecord, 'publishedAt'>, now: Date = new Date()): boolean {
-  return post.publishedAt !== null && post.publishedAt.getTime() <= now.getTime()
-}
 
 function toSummary(post: PostSummarySource) {
   return {
@@ -26,13 +23,7 @@ function toSummary(post: PostSummarySource) {
 
 export default class BlogController extends Controller {
   async index(): Promise<Response> {
-    // Only the summary columns: bodyMarkdown/bodyHtml are the two large
-    // columns on the table and none of them reach the list view.
-    const records = await Post.select('slug', 'title', 'description', 'publishedAt')
-      .whereNotNull('publishedAt')
-      .orderBy('publishedAt', 'desc')
-      .get()
-    const posts = records.filter((post) => isPublished(post)).map(toSummary)
+    const posts = (await listPublishedPosts()).map(toSummary)
 
     return this.inertia(
       pages.blog.Index,

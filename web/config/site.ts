@@ -14,7 +14,7 @@ export const SITE_DESCRIPTION = {
   ja: 'Guren は Bun ネイティブのフルスタック TypeScript フレームワーク。Laravel 流の MVC コントローラ、Drizzle ORM モデル、Inertia + React ページ、ルートからコンポーネントまでの型安全性を備えています。',
 } as const
 
-/** Cache policy for machine-facing endpoints (sitemap, llms.txt, raw Markdown). */
+/** Cache policy for machine-facing endpoints (sitemap, llms.txt, RSS, raw Markdown). */
 export const DOCS_CACHE_CONTROL = 'public, max-age=3600'
 
 export function absoluteUrl(path: string): string {
