@@ -1192,11 +1192,11 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
         const moduleFlag = moduleName ? ` --module ${moduleName}` : ''
         steps.push({
           priority: priority++,
-          title: `Add tests for ${name}`,
-          // Detection is by filename, so confirm the routes are really
-          // uncovered before acting — a route-level TestApp test names no
-          // controller and is invisible here.
-          description: `No test file named after ${name}. Check whether its routes are already covered by a differently named test before adding one.`,
+          // Titled as a question, not an action: detection is by filename, so a
+          // consumer reading only the title and command (agents do) would
+          // otherwise write a duplicate of a test that exists under another name.
+          title: `Confirm test coverage for ${name}`,
+          description: `No test file named after ${name}. Detection is by filename only — check whether these routes are already covered under another name before adding a test.`,
           command: `bunx guren make:test ${name.replace('Controller', '')} --controller${moduleFlag}`,
         })
       }

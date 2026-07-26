@@ -88,7 +88,8 @@ test('lists tasks', async () => {
       expect(testCheck!.status).toBe('warn')
       expect(testCheck!.message).toContain('No test file named after TaskController')
       expect(testCheck!.message).toContain('tests/controllers/TaskController.test.ts')
-      expect(testCheck!.message).toContain('TestApp')
+      expect(testCheck!.message).toContain('Detection is by filename only')
+      expect(testCheck!.suggestion).toContain('If these routes are not already covered')
       // The old wording asserted an absence it cannot establish.
       expect(testCheck!.message).not.toContain('No test file found')
     } finally {

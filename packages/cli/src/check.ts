@@ -183,8 +183,10 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
           hasTest
             ? `Test file found for ${name}.`
             : `No test file named after ${name} (looked for ${controllerTestCandidates(cwd, filePath).join(', ')}). ` +
-              'A test that drives its routes through TestApp without naming the class is not detected.',
-          hasTest ? undefined : `Run: bunx guren make:test ${name.replace('Controller', '')} --controller${moduleFlag}`,
+              'Detection is by filename only, so a test covering these routes under another name is not counted.',
+          hasTest
+            ? undefined
+            : `If these routes are not already covered, run: bunx guren make:test ${name.replace('Controller', '')} --controller${moduleFlag}`,
         ),
       )
     }

@@ -1124,9 +1124,9 @@ describe('suggestNextSteps', () => {
       const steps = await suggestNextSteps({ cwd: workspace.dir })
 
       expect(steps.some((step) => step.title.includes('.test'))).toBe(false)
-      expect(steps.some((step) => step.title === 'Add tests for PostsController')).toBe(false)
+      expect(steps.some((step) => step.title === 'Confirm test coverage for PostsController')).toBe(false)
 
-      const oauthStep = steps.find((step) => step.title === 'Add tests for OAuthController')
+      const oauthStep = steps.find((step) => step.title === 'Confirm test coverage for OAuthController')
       expect(oauthStep).toBeDefined()
       expect(oauthStep!.command).toBe('bunx guren make:test OAuth --controller --module blog')
     } finally {
