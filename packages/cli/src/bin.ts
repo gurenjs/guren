@@ -2,8 +2,9 @@
 import { spawn } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
-import { defineCommand, runMain, showUsage } from 'citty'
+import { defineCommand, showUsage } from 'citty'
 import type { CommandDef } from 'citty'
+import { runCli } from './run-cli'
 import { listBlueprints, runBlueprint } from './blueprints'
 import { runDoctor } from './doctor'
 import { makeAuth } from './make-auth'
@@ -2510,11 +2511,7 @@ const main = defineCommand({
   },
 })
 
-runMain(main).catch((error) => {
-  if (error instanceof Error) {
-    consola.error(error.message)
-  } else {
-    consola.error(String(error))
-  }
-  process.exit(1)
-})
+const exitCode = await runCli(main, process.argv.slice(2))
+if (exitCode !== 0) {
+  process.exit(exitCode)
+}
