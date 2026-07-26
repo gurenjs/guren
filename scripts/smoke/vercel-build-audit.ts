@@ -41,6 +41,11 @@ const outputDir = mkdtempSync(join(tmpdir(), 'guren-vercel-audit-'))
 // without asking every example app to adopt a deployment target.
 const entrypoint = resolve(appDir, 'src/.vercel-audit-entry.ts')
 
+// Collected rather than exited on: `process.exit` inside the try would skip
+// the cleanup below and leave the throwaway entrypoint in the app's src/.
+const failures: string[] = []
+let summary: Record<string, string | undefined> = {}
+
 try {
   writeFileSync(entrypoint, "export default { fetch: () => new Response('ok') }\n", 'utf8')
 
@@ -48,13 +53,12 @@ try {
 
   const configPath = resolve(outputDir, 'functions/index.func/.vc-config.json')
   if (!existsSync(configPath)) {
-    console.error(`Vercel build audit: the build produced no function config at ${configPath}.`)
-    process.exit(1)
+    failures.push(`The build produced no function config at ${configPath}.`)
+    throw new Error('missing function config')
   }
 
   const config = JSON.parse(readFileSync(configPath, 'utf8')) as FunctionConfig
   const env = config.environment ?? {}
-  const failures: string[] = []
 
   // The entry is the one value the browser cannot recover on its own: with it
   // empty, the page renders without ever loading the client bundle.
@@ -70,25 +74,45 @@ try {
     failures.push(`GUREN_INERTIA_ENTRY names ${entryFile}, which does not exist in the build output.`)
   }
 
+  // The SSR entry comes from a second manifest, so it can go missing on its
+  // own — and without it the function renders nothing server-side.
+  if (existsSync(resolve(appDir, '.guren/ssr')) && !env.GUREN_INERTIA_SSR_ENTRY) {
+    failures.push(
+      'GUREN_INERTIA_SSR_ENTRY is unset even though the app has an SSR build — ' +
+        'the SSR manifest lookup failed.',
+    )
+  }
+
   if (!config.handler) {
     failures.push('The function config has no handler.')
   }
 
-  if (failures.length > 0) {
-    console.error('Vercel build audit failed:')
-    for (const failure of failures) {
-      console.error(`  - ${failure}`)
-    }
-    process.exit(1)
+  summary = {
+    handler: config.handler,
+    entry: env.GUREN_INERTIA_ENTRY,
+    styles: env.GUREN_INERTIA_STYLES,
+    ssrEntry: env.GUREN_INERTIA_SSR_ENTRY,
   }
-
-  console.log(`Vercel build audit passed for ${appDir}`)
-  console.log(`  handler: ${config.handler}`)
-  console.log(`  GUREN_INERTIA_ENTRY: ${env.GUREN_INERTIA_ENTRY}`)
-  if (env.GUREN_INERTIA_STYLES) {
-    console.log(`  GUREN_INERTIA_STYLES: ${env.GUREN_INERTIA_STYLES}`)
+} catch (error) {
+  if (failures.length === 0) {
+    failures.push(error instanceof Error ? error.message : String(error))
   }
 } finally {
   rmSync(entrypoint, { force: true })
   rmSync(outputDir, { recursive: true, force: true })
+}
+
+if (failures.length > 0) {
+  console.error('Vercel build audit failed:')
+  for (const failure of failures) {
+    console.error(`  - ${failure}`)
+  }
+  process.exit(1)
+}
+
+console.log(`Vercel build audit passed for ${appDir}`)
+for (const [label, value] of Object.entries(summary)) {
+  if (value) {
+    console.log(`  ${label}: ${value}`)
+  }
 }

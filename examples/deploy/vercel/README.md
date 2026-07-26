@@ -36,11 +36,14 @@ Add the same values to the `preview` environment if you want pull request deploy
 ### 3. Deploy
 
 ```bash
+bun run build
 bun run vercel:build
 vercel deploy --prebuilt
 ```
 
-`vercel:build` runs your app's build, then writes `.vercel/output/`. Deploying with `--prebuilt` uploads that directory as-is rather than rebuilding on Vercel.
+`vercel:build` only assembles `.vercel/output/` — it does not build the app. Run the app build first, or the assembled function has no manifests to read and ships without its asset paths.
+
+Deploying from git instead runs `buildCommand` from `vercel.json`, which chains both steps for you.
 
 ### 4. Run migrations
 
@@ -65,13 +68,16 @@ If those variables end up empty, the page still renders but Inertia falls back t
 
 ## Why the `rewrites` Entry Is Required
 
-Built assets carry the Guren Vite plugin's derived base, `/public/assets/` — chunk imports, CSS urls, and preloads all reference that prefix. The rewrite maps it back onto the output directory:
+Built assets carry the Guren Vite plugin's derived base, `/public/assets/` — chunk imports, CSS urls, and preloads all reference that prefix, while the files themselves are copied to the output root. The rewrite maps the prefix back:
 
 ```json
 { "source": "/public/(.*)", "destination": "/$1" }
 ```
 
-Without it, the HTML loads but every asset 404s.
+Without it the page's entry script still loads — the plugin injects that path directly — but the chunks it imports 404, so the app never starts.
+
+> [!NOTE]
+> This entry is compiled into the deployment's routing when **Vercel** runs the build. A `--prebuilt` upload is routed by the `config.json` the plugin emits, which does not carry it — so prefer the git integration, or add the route to the emitted config yourself.
 
 ## Notes
 
