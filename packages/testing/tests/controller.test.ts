@@ -283,6 +283,26 @@ describe('createControllerModuleMock', () => {
     expect(controller.request.path).toBe('/users/1')
     expect(controller.request.method).toBe('GET')
   })
+
+  it('defines application modules and their providers', () => {
+    const { ServiceProvider, defineModule } = createControllerModuleMock()
+
+    class WidgetProvider extends ServiceProvider {
+      register(): void {}
+    }
+
+    const widgets = defineModule({ name: 'widgets', providers: [WidgetProvider] })
+    const bare = defineModule({ name: 'bare' })
+
+    expect(widgets.providers).toEqual([WidgetProvider])
+    expect(bare.providers).toEqual([])
+
+    const provider = new WidgetProvider('container')
+    provider.register()
+    provider.boot()
+
+    expect(provider.container).toBe('container')
+  })
 })
 
 describe('readInertiaResponse', () => {

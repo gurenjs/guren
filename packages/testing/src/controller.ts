@@ -693,6 +693,37 @@ export function createControllerModuleMock() {
   const getApiToken = (): { userId: number | string; abilities: string[] } | null => {
     return null
   }
+  /**
+   * A module's `index.ts` calls `defineModule()` at import time and lists
+   * providers that `extend ServiceProvider`, so both are evaluated as soon as
+   * a controller reaches the module's public surface. Without them here, such
+   * a controller cannot be loaded under this mock at all.
+   *
+   * `defineModule` mirrors the real one in
+   * `packages/server/src/container/defineModule.ts` — same four fields, same
+   * `providers` normalization — spelled out by hand because this file imports
+   * nothing, so the mock never depends on a fresh framework build.
+   */
+  class ServiceProvider {
+    constructor(public container: unknown) {}
+
+    register(): void {}
+
+    boot(): void {}
+  }
+
+  const defineModule = (definition: {
+    name: string
+    prefix?: string
+    routes?: unknown
+    providers?: unknown[]
+  }) => ({
+    name: definition.name,
+    prefix: definition.prefix,
+    routes: definition.routes,
+    providers: definition.providers ?? [],
+  })
+
   const createEventManager = () => ({
     on: () => {},
     emit: async () => {},
@@ -723,6 +754,8 @@ export function createControllerModuleMock() {
     collect,
     ValidationException,
     AuthenticationException,
+    ServiceProvider,
+    defineModule,
     MemoryApiTokenStore,
     createApiToken,
     revokeApiToken,
