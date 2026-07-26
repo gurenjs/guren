@@ -3,6 +3,7 @@ import { SITE_DESCRIPTION, pageTitle } from '../../../../config/site.js'
 import { Footer } from '../../components/Footer.js'
 import { Header } from '../../components/Header.js'
 import { Seo } from '../../components/Seo.js'
+import { RssIcon } from '../../components/icons.js'
 
 type BlogPostSummary = {
   slug: string
@@ -37,9 +38,21 @@ export default function BlogIndex({ posts }: Props) {
 
       <main className="mx-auto w-full max-w-[760px] px-6 py-16">
         <header className="mb-12">
-          <h1 className="mb-3 text-[2.75rem] font-extrabold leading-[1.1] tracking-tight text-docs-heading">
-            Blog
-          </h1>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-4">
+            <h1 className="text-[2.75rem] font-extrabold leading-[1.1] tracking-tight text-docs-heading">
+              Blog
+            </h1>
+            {/* Browsers dropped their feed indicators, so the visible link is
+                the only way a reader finds the feed. */}
+            <a
+              href="/blog/rss.xml"
+              title="Subscribe via RSS"
+              className="flex items-center gap-1.5 rounded-full border border-docs-border px-3.5 py-1.5 text-sm font-medium text-docs-text-secondary no-underline transition hover:border-docs-accent hover:text-docs-accent"
+            >
+              <RssIcon className="size-4" />
+              RSS
+            </a>
+          </div>
           <p className="text-lg leading-relaxed text-docs-text-secondary">
             News, releases, and notes from the Guren team.
           </p>

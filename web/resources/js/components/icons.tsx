@@ -114,3 +114,11 @@ export function RocketIcon(props: IconProps) {
     </svg>
   )
 }
+
+export function RssIcon(props: IconProps) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
+      <path fillRule="evenodd" d="M3.75 3a.75.75 0 0 0-.75.75v.75c0 .414.336.75.75.75 8.284 0 15 6.716 15 15 0 .414.336.75.75.75h.75a.75.75 0 0 0 .75-.75C21 11.42 13.58 4 4.5 4a.75.75 0 0 0-.75-.75Zm0 5.25a.75.75 0 0 0-.75.75v.75c0 .414.336.75.75.75a9 9 0 0 1 9 9c0 .414.336.75.75.75h.75a.75.75 0 0 0 .75-.75c0-6.213-5.037-11.25-11.25-11.25Zm1.5 7.5a2.25 2.25 0 1 0 0 4.5 2.25 2.25 0 0 0 0-4.5Z" clipRule="evenodd" />
+    </svg>
+  )
+}

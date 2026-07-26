@@ -1,6 +1,6 @@
 import { Link } from '@inertiajs/react'
 import { GITHUB_URL } from '../../../config/site.js'
-import { GithubIcon } from './icons.js'
+import { GithubIcon, RssIcon } from './icons.js'
 
 interface FooterProps {
   variant: 'home' | 'docs'
@@ -19,6 +19,14 @@ export function Footer({ variant }: FooterProps) {
           </div>
           <div className="flex items-center gap-4">
             <Link href="/docs" className="no-underline transition hover:text-docs-accent">Docs</Link>
+            <Link href="/blog" className="no-underline transition hover:text-docs-accent">Blog</Link>
+            <a
+              href="/blog/rss.xml"
+              className="flex items-center gap-1.5 no-underline transition hover:text-docs-accent"
+            >
+              <RssIcon className="size-4" />
+              RSS
+            </a>
             <a
               href="https://github.com/gurenjs/guren"
               target="_blank"
@@ -52,6 +60,8 @@ export function Footer({ variant }: FooterProps) {
             <Link href="/docs" className="no-underline transition hover:text-white">Documentation</Link>
             <Link href="/docs/guides/getting-started" className="no-underline transition hover:text-white">Getting Started</Link>
             <Link href="/docs/tutorials/overview" className="no-underline transition hover:text-white">Tutorials</Link>
+            <Link href="/blog" className="no-underline transition hover:text-white">Blog</Link>
+            <a href="/blog/rss.xml" className="no-underline transition hover:text-white">RSS</a>
             <a href="/llms.txt" className="no-underline transition hover:text-white">llms.txt</a>
           </nav>
         </div>
