@@ -470,6 +470,15 @@ export default defineConfig({
 `
 }
 
+/**
+ * True when the driver runs in a container the scaffolder provisions — the one
+ * fact that decides docker-compose.yml, the db:up/db:down scripts, and whether
+ * the next-steps output mentions starting a database.
+ */
+export function usesDatabaseContainer(driver: DatabaseDriver): boolean {
+  return generateDockerCompose(driver) !== null
+}
+
 function generateDockerCompose(driver: DatabaseDriver): string | null {
   if (driver === 'postgres') {
     return `services:
@@ -535,13 +544,26 @@ async function applyDatabaseConfig(destination: string, driver: DatabaseDriver):
     }),
   ])
 
-  // Add driver dependency to package.json (SQLite has dep: null, so this is skipped)
-  if (dep) {
+  // SQLite needs neither a driver dependency nor a container, so both edits are skipped.
+  if (dep || dockerCompose) {
     const packageJsonPath = join(destination, 'package.json')
     const raw = await readFile(packageJsonPath, 'utf8')
-    const pkg = JSON.parse(raw) as { dependencies?: Record<string, string> }
-    pkg.dependencies ??= {}
-    Object.assign(pkg.dependencies, dep)
+    const pkg = JSON.parse(raw) as { scripts?: Record<string, string>; dependencies?: Record<string, string> }
+
+    if (dep) {
+      pkg.dependencies ??= {}
+      Object.assign(pkg.dependencies, dep)
+    }
+
+    // Without these, the generated docker-compose.yml is something the user has
+    // to discover on their own — and an unstarted container surfaces only as a
+    // migration failure.
+    if (dockerCompose) {
+      pkg.scripts ??= {}
+      pkg.scripts['db:up'] = 'docker compose up -d'
+      pkg.scripts['db:down'] = 'docker compose down'
+    }
+
     await writeFile(packageJsonPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8')
   }
 }

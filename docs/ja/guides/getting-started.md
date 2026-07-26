@@ -59,7 +59,7 @@ bun run dev
 雛形生成時に `--db postgres`（または `--db mysql`）を渡すか、プロンプトで選択します。スキャフォールダーが対応するデータベースの `docker-compose.yml` を書き出し、`DATABASE_URL` をそこに向けてくれます。**Docker Desktop（Compose v2）** がインストールされていれば、次のコマンドでデータベースを起動できます。
 
 ```bash
-docker compose up -d
+bun run db:up
 ```
 
 デフォルトの接続文字列:
@@ -67,7 +67,7 @@ docker compose up -d
 - PostgreSQL: `postgres://guren:guren@localhost:54322/guren`
 - MySQL: `mysql://guren:guren@localhost:33306/guren`
 
-使い終わったら `docker compose down` でコンテナを停止します。
+使い終わったら `bun run db:down` でコンテナを停止します。
 
 > [!TIP]
 > すでにローカルやクラウドで Postgres が動いていますか？ その場合は Docker を使わず、`DATABASE_URL` をそのインスタンスに向けるだけで構いません — このガイドの残りはそのまま通用します。SQLite で作ったアプリも、あとから `config/database.ts` を更新すれば切り替えられます。詳しくは [データベースガイド](./database.md) を参照してください。

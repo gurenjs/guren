@@ -402,6 +402,9 @@ Codegen hasn't run since you added the pages. Run `bun run codegen` (or restart 
 **`no such table: posts` when opening `/posts`.**
 The migration was never generated or applied. Run `bun run db:make create_posts_table` and then `bun run db:migrate`.
 
+**`bun run db:migrate` fails with "cannot connect to the database".**
+You picked PostgreSQL or MySQL instead of SQLite when scaffolding. Start the container first with `bun run db:up`. See [Troubleshooting](../guides/troubleshoot.md) for the details.
+
 **Submitting the form does nothing.**
 It almost certainly returned a 422. Check that your page renders `form.errors.title` and `form.errors.body` — the messages are there, you're just not showing them. The network tab (an `X-Inertia` POST to `/posts`) confirms it.
 

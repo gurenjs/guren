@@ -199,4 +199,72 @@ describe('create-guren-app CLI', () => {
       await workspace.cleanup()
     }
   })
+
+  it('gives container-backed drivers a single driver dependency and db:up/db:down scripts', async () => {
+    const workspace = await createTempWorkspace('guren-create-app-cli-postgres-')
+    try {
+      await capturedCommand.run({
+        args: {
+          target: 'pg-app',
+          force: false,
+          mode: 'spa',
+          auth: false,
+          db: 'postgres',
+          install: false,
+        },
+      })
+
+      const appRoot = join(workspace.dir, 'pg-app')
+      await access(join(appRoot, 'docker-compose.yml'))
+
+      const packageJson = JSON.parse(await readFile(join(appRoot, 'package.json'), 'utf8')) as {
+        scripts?: Record<string, string>
+        dependencies?: Record<string, string>
+        devDependencies?: Record<string, string>
+      }
+
+      expect(packageJson.scripts?.['db:up']).toBe('docker compose up -d')
+      expect(packageJson.scripts?.['db:down']).toBe('docker compose down')
+
+      // Listing the driver in both trees makes `bun install` warn about a
+      // duplicate dependency on the very first command a user runs.
+      expect(packageJson.dependencies?.postgres).toBeDefined()
+      expect(packageJson.devDependencies?.postgres).toBeUndefined()
+      expect(packageJson.devDependencies?.mysql2).toBeUndefined()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('leaves SQLite projects without container scripts or driver packages', async () => {
+    const workspace = await createTempWorkspace('guren-create-app-cli-sqlite-db-')
+    try {
+      await capturedCommand.run({
+        args: {
+          target: 'lite-app',
+          force: false,
+          mode: 'spa',
+          auth: false,
+          db: 'sqlite',
+          install: false,
+        },
+      })
+
+      const appRoot = join(workspace.dir, 'lite-app')
+      await expect(access(join(appRoot, 'docker-compose.yml'))).rejects.toThrow()
+
+      const packageJson = JSON.parse(await readFile(join(appRoot, 'package.json'), 'utf8')) as {
+        scripts?: Record<string, string>
+        dependencies?: Record<string, string>
+        devDependencies?: Record<string, string>
+      }
+
+      expect(packageJson.scripts?.['db:up']).toBeUndefined()
+      expect(packageJson.dependencies?.postgres).toBeUndefined()
+      expect(packageJson.devDependencies?.postgres).toBeUndefined()
+      expect(packageJson.devDependencies?.mysql2).toBeUndefined()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
 })

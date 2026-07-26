@@ -59,7 +59,7 @@ Everything below is optional for your first session, but you will want it as you
 Pass `--db postgres` (or `--db mysql`) when scaffolding, or pick it at the prompt. The scaffolder then writes a `docker-compose.yml` for the matching database and points `DATABASE_URL` at it. With **Docker Desktop (Compose v2)** installed, start the database with:
 
 ```bash
-docker compose up -d
+bun run db:up
 ```
 
 Default connection strings:
@@ -67,7 +67,7 @@ Default connection strings:
 - PostgreSQL: `postgres://guren:guren@localhost:54322/guren`
 - MySQL: `mysql://guren:guren@localhost:33306/guren`
 
-Stop the container with `docker compose down` when you are done.
+Stop the container with `bun run db:down` when you are done.
 
 > [!TIP]
 > Already running Postgres locally or in the cloud? Skip Docker entirely and point `DATABASE_URL` at that instance — the rest of the guide works unchanged. An existing SQLite app can switch later by updating `config/database.ts`; see the [Database Guide](./database.md).

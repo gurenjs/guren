@@ -2,7 +2,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, migrationFailure, seedFailure, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders } from './seeder'
 
 type ConnectionResolver = string | (() => string | undefined)
@@ -132,8 +132,8 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
 
     migrationsPromise = migrationsPromise.catch((error) => {
       migrationsPromise = undefined
-      const reason = error instanceof Error ? error.message : String(error)
-      throw new Error(`Failed to run database migrations: ${reason}`)
+      // No endpoint: a SQLite file has no host, so only the cause chain adds signal.
+      throw migrationFailure(error)
     })
 
     await migrationsPromise
@@ -199,10 +199,15 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
         throw new Error('No seeders folder configured. Provide "seedersFolder" when calling createSqliteDatabase().')
       }
       const database = await ensureDatabase()
-      await runSeeders(
-        database as Parameters<typeof runSeeders>[0],
-        resolvedSeedersFolder,
-      )
+      try {
+        // No endpoint: a SQLite file has no host, so only the cause chain adds signal.
+        await runSeeders(
+          database as Parameters<typeof runSeeders>[0],
+          resolvedSeedersFolder,
+        )
+      } catch (error) {
+        throw seedFailure(error)
+      }
     },
   }
 }

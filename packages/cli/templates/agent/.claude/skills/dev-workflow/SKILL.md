@@ -22,7 +22,7 @@ bun run dev
 ```
 
 **Prerequisites check before starting:**
-1. Database running? If not: `bun run db:up`
+1. Database running? Container-backed projects start it with `bun run db:up`; SQLite needs nothing.
 2. Migrations applied? If not: `bun run db:migrate`
 
 **After startup:**

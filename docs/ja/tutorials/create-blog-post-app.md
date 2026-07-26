@@ -402,6 +402,9 @@ bun run codegen
 **`/posts` を開くと `no such table: posts`。**
 マイグレーションが生成されていないか、適用されていません。`bun run db:make create_posts_table` に続けて `bun run db:migrate` を実行してください。
 
+**`bun run db:migrate` が "cannot connect to the database" で失敗する。**
+スキャフォールド時に SQLite ではなく PostgreSQL / MySQL を選んでいます。先に `bun run db:up` でコンテナを起動してください。詳しくは[トラブルシューティング](../guides/troubleshoot.md)を参照してください。
+
 **フォームを送信しても何も起きない。**
 ほぼ間違いなく 422 が返っています。ページが `form.errors.title` と `form.errors.body` を描画しているか確認してください — メッセージは届いているのに、表示していないだけです。ネットワークタブ（`/posts` への `X-Inertia` POST）で確認できます。
 

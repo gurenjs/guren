@@ -15,7 +15,7 @@
 `api` ブループリントを指定すると、Inertia やフロントエンドツールを省いた軽量な API スターターが生成されます:
 
 ```bash
-bunx create-guren-app my-api --blueprint api
+bunx create-guren-app my-api --blueprint api --db postgres
 cd my-api
 bun install
 ```
@@ -23,7 +23,7 @@ bun install
 ## 2. データベースを起動する
 
 ```bash
-docker compose up -d
+bun run db:up
 ```
 
 ## 3. スキーマを定義する

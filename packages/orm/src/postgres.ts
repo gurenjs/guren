@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import type postgres from 'postgres'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isConnectionFailure, migrationFailure, seedFailure, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders } from './seeder'
 
 type ConnectionResolver = string | (() => string | undefined)
@@ -90,6 +90,11 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
       return migrationsPromise
     }
 
+    // Resolved inside the IIFE below: resolveConnectionString() throws when no
+    // connection string is configured, so it must not run before the
+    // no-migrations early return. The catch handler needs it afterwards.
+    let endpoint: string | undefined
+
     const promise = (async (): Promise<void> => {
       if (!hasDrizzleMigrations(resolvedMigrationsFolder)) {
         warnIgnoredFlatSqlMigrations(resolvedMigrationsFolder)
@@ -98,6 +103,7 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
 
       const { drizzle, migrate, postgres: postgresFactory } = await loadPostgresModules()
       const url = resolveConnectionString()
+      endpoint = describeConnectionEndpoint(url)
       const migrationClient = postgresFactory(url, {
         max: 1,
         ...clientOptions,
@@ -113,8 +119,7 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
 
     migrationsPromise = promise.catch((error) => {
       migrationsPromise = undefined
-      const reason = error instanceof Error ? error.message : String(error)
-      throw new Error(`Failed to run database migrations: ${reason}`)
+      throw migrationFailure(error, endpoint)
     })
 
     await migrationsPromise
@@ -186,17 +191,26 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
     }
 
     const db = await getDatabase()
-    await runSeeders(db, resolvedSeedersFolder)
+    try {
+      await runSeeders(db, resolvedSeedersFolder)
+    } catch (error) {
+      throw seedFailure(error, describeConnectionEndpoint(resolveConnectionString()))
+    }
   }
 
   async function withAdminClient<T>(callback: (client: ReturnType<typeof postgres>) => Promise<T>): Promise<T> {
     const { postgres: postgresFactory } = await loadPostgresModules()
-    const adminClient = postgresFactory(resolveConnectionString(), {
+    const url = resolveConnectionString()
+    const adminClient = postgresFactory(url, {
       max: 1,
       ...clientOptions,
     })
     try {
       return await callback(adminClient)
+    } catch (error) {
+      // postgres-js reports an unreachable server as an AggregateError whose
+      // message is empty, so rethrowing raw prints a bare "ERROR" line.
+      throw new Error(describeDatabaseFailure(error, describeConnectionEndpoint(url)))
     } finally {
       await adminClient.end({ timeout: 0 })
     }
@@ -224,7 +238,11 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
           const record = row as unknown as { name: string | null }
           return { name: record.name, appliedAt: null }
         })
-      } catch {
+      } catch (error) {
+        // An unreachable server reaches this catch too, and reporting it as
+        // "nothing applied" makes db:status indistinguishable from a database
+        // that is up with no migrations run.
+        if (isConnectionFailure(error)) throw error
         // Tracker table does not exist yet — nothing applied.
         return []
       }

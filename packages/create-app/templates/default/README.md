@@ -48,6 +48,8 @@ bunx guren add schedule       # task scheduling
 | `bun run db:seed` | Seed the database |
 | `bun run codegen` | Regenerate route/page types |
 
+If you scaffolded with PostgreSQL or MySQL, this project also has a `docker-compose.yml` and `bun run db:up` / `bun run db:down` to start and stop the database container. Start it before `bun run db:migrate`.
+
 Run `bun run build` before `bun run preview` so the production server can read the generated manifests from `public/assets`.
 
 ## Switching to PostgreSQL

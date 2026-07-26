@@ -13,7 +13,7 @@ This guide walks you through building an application with user registration, log
 ## 1. Scaffold the Project
 
 ```bash
-bunx create-guren-app my-auth-app --mode ssr
+bunx create-guren-app my-auth-app --mode ssr --db postgres
 cd my-auth-app
 bun install
 ```
@@ -38,7 +38,7 @@ This scaffolds:
 ## 3. Start the Database
 
 ```bash
-docker compose up -d
+bun run db:up
 ```
 
 Then run the generated migration to create the `users` table:

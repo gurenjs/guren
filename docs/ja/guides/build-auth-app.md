@@ -13,7 +13,7 @@
 ## 1. プロジェクトを作成する
 
 ```bash
-bunx create-guren-app my-auth-app --mode ssr
+bunx create-guren-app my-auth-app --mode ssr --db postgres
 cd my-auth-app
 bun install
 ```
@@ -38,7 +38,7 @@ bunx guren add auth
 ## 3. データベースを起動する
 
 ```bash
-docker compose up -d
+bun run db:up
 ```
 
 マイグレーションを実行して `users` テーブルを作成します:

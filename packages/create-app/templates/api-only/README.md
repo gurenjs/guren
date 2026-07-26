@@ -10,6 +10,8 @@ bun run db:migrate
 bun run dev
 ```
 
+If you scaffolded with PostgreSQL or MySQL, this project also has a `docker-compose.yml` and `bun run db:up` / `bun run db:down` to start and stop the database container. Start it before `bun run db:migrate`.
+
 ## API Endpoints
 
 - `GET /health` — Health check
