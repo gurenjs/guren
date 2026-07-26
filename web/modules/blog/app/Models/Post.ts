@@ -1,4 +1,4 @@
-import { defineModel } from '@guren/orm'
+import { defineModel } from '@guren/core'
 import { posts } from '../../../../db/schema.js'
 
 export type PostRecord = typeof posts.$inferSelect

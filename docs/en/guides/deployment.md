@@ -145,6 +145,22 @@ vercel deploy --prebuilt
 > [!NOTE]
 > The plugin targets SSR apps only. It reads Vite manifests to inject the correct `GUREN_INERTIA_*` environment variables into the serverless function. API-only apps should use Docker or Lambda instead.
 
+## Cloudflare Workers
+
+Apps can run on Cloudflare Workers with D1 as the database, via the official plugin.
+
+```bash
+bunx guren plugin @guren/plugin-cloudflare
+bun add @guren/plugin-cloudflare
+```
+
+```bash
+bunx guren cloudflare:build
+bunx wrangler deploy
+```
+
+Workers has no filesystem and shares no memory between requests, so sessions and OAuth state must be database-backed, and migrations are applied out of band. See the **[Cloudflare Workers Deployment Guide](./cloudflare.md)** for the full setup including D1, secrets, free-plan limits, and local development.
+
 ## Post-Deployment Tasks
 - Follow the [Production Operations Runbook](./operations.md) for SLO, incident response, and backup/restore drill policy.
 - Set up HTTPS (e.g. via a reverse proxy such as Nginx, Caddy, or your cloud platform).

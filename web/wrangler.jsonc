@@ -1,5 +1,5 @@
 {
-  "name": "web",
+  "name": "guren-web",
   "main": ".cloudflare/worker.js",
   "compatibility_date": "2026-07-25",
   "compatibility_flags": [
@@ -11,7 +11,13 @@
     "@guren/cli": "./.cloudflare/stub-guren-cli.js",
     "@modelcontextprotocol/sdk/server/mcp.js": "./.cloudflare/stub-mcp-server.js",
     "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js": "./.cloudflare/stub-mcp-transport.js",
-    "shiki": "./stubs/shiki.js"
+    "shiki": "./stubs/shiki.js",
+    // Monorepo-only: app code resolves @guren/core through tsconfig paths to
+    // source while prebuilt dist files resolve @guren/orm through
+    // node_modules, so the bundle ends up with two ORM copies — and the
+    // adapter each model uses is configured on only one of them. Pinning the
+    // specifier keeps a single copy, and with it a single configured adapter.
+    "@guren/orm": "../packages/orm/dist/index.js"
   },
   "define": {
     "process.env.NODE_ENV": "\"production\"",
@@ -23,12 +29,35 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "web",
-      "database_id": "TODO: run wrangler d1 create guren-web",
+      "database_name": "guren-web",
+      "database_id": "9cb55bab-b69d-4bab-b074-fdd65f468541",
       "migrations_dir": ".cloudflare/d1-migrations"
     }
   ],
+  // Retains request logs and uncaught errors so a production failure can be
+  // diagnosed after the fact rather than only while a tail happens to run.
+  "observability": {
+    "enabled": true
+  },
   "vars": {
     "NODE_ENV": "production"
-  }
+  },
+  // This worker name previously hosted an abandoned Containers experiment.
+  // Its Durable Object class blocks any deploy that stops exporting it, and
+  // the remote is already at v1 — so v1 is restated as history (wrangler
+  // skips what is applied) and v2 drops the class. Nothing used it.
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "GurenContainer"
+      ]
+    },
+    {
+      "tag": "v2",
+      "deleted_classes": [
+        "GurenContainer"
+      ]
+    }
+  ]
 }
