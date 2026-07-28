@@ -695,6 +695,144 @@ describe('runDoctor integration', () => {
   })
 })
 
+describe('AST-based matching', () => {
+  // The regex generation of this scanner documented aliased imports as a
+  // known gap in both directions. The AST resolves them, so an aliased
+  // remediation must count and an aliased hazard must still warn.
+  it('recognizes an aliased NodeHasher construction as remediation', async () => {
+    const files = {
+      'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER,
+      'app/Models/User.ts': `import { AuthenticatableModel, NodeHasher as RuntimeHasher } from '@guren/core'
+export class User extends AuthenticatableModel {
+  protected static passwordHasher = new RuntimeHasher()
+}
+`,
+    }
+
+    await withApp('guren-ast-alias-hasher-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      expect((await deployChecks(dir))['deploy-password-hashing'].status).toBe('pass')
+    })
+  })
+
+  it('still warns on an aliased AutoDiscovery construction', async () => {
+    const files = {
+      'src/app.ts': `import { AutoDiscovery as Discovery } from '@guren/core'
+const discovery = new Discovery({ basePath: 'app' })
+`,
+    }
+
+    await withApp('guren-ast-alias-discovery-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      expect((await deployChecks(dir))['deploy-provider-discovery'].status).toBe('warn')
+    })
+  })
+
+  it('recognizes an aliased backed session store', async () => {
+    const files = {
+      'src/app.ts': `import { createApp, DatabaseSessionStore as SessionStore } from '@guren/core'
+export const app = createApp({ auth: { sessionOptions: { store: new SessionStore(sessions) } } })
+`,
+    }
+
+    await withApp('guren-ast-alias-store-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      expect((await deployChecks(dir))['deploy-runtime-stores'].status).toBe('pass')
+    })
+  })
+
+  // Line-scanning could not see a value split from its key; the AST can.
+  it('suppresses the session warning when autoSession: false spans multiple lines', async () => {
+    const files = {
+      'src/app.ts': `import { createApp } from '@guren/core'
+export const app = createApp({
+  auth: {
+    autoSession:
+      false,
+  },
+})
+`,
+    }
+
+    await withApp('guren-ast-multiline-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      expect((await deployChecks(dir))['deploy-runtime-stores'].status).toBe('pass')
+    })
+  })
+
+  it('ignores constructions inside comments and string literals', async () => {
+    const files = {
+      'src/notes.ts': `// migration note: replace new MemoryStore() before deploying
+export const doc = 'call new MemoryDriver() to enqueue locally'
+`,
+    }
+
+    await withApp('guren-ast-comments-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      expect((await analyzeDeployRuntime(dir)).memoryStoreSignals).toEqual([])
+    })
+  })
+
+  it('ignores an auth key in a TypeScript type position', async () => {
+    const files = {
+      'src/types.ts': `export interface AppOptions {
+  auth: { autoSession?: boolean }
+}
+`,
+    }
+
+    await withApp('guren-ast-type-pos-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      expect((await analyzeDeployRuntime(dir)).sessionSignals).toEqual([])
+    })
+  })
+
+  // Regex-era false positive: the make:auth mail config contains
+  // `auth: { user, pass }` for SMTP credentials, which has nothing to do
+  // with sessions. Scoping the auth-key signal to createApp options fixes it.
+  it('does not read SMTP mailer auth config as a session', async () => {
+    const files = {
+      'config/mail.ts': `export const mail = {
+  transport: 'smtp',
+  auth: {
+    user: process.env.SMTP_USER ?? '',
+    pass: process.env.SMTP_PASS ?? '',
+  },
+}
+`,
+    }
+
+    await withApp('guren-ast-smtp-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      expect((await deployChecks(dir))['deploy-runtime-stores'].status).toBe('pass')
+    })
+  })
+
+  it('counts a shorthand auth property in createApp options', async () => {
+    const files = {
+      'src/app.ts': `import { createApp } from '@guren/core'
+const auth = {}
+export const app = createApp({ auth })
+`,
+    }
+
+    await withApp('guren-ast-shorthand-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      const check = (await deployChecks(dir))['deploy-runtime-stores']
+
+      expect(check.status).toBe('warn')
+      expect(check.message).toContain('sessions are enabled')
+    })
+  })
+
+  it('skips a file that fails to parse without failing the run', async () => {
+    const files = {
+      'src/broken.ts': `export const = this is not valid typescript {{{`,
+      'src/app.ts': SESSION_APP,
+    }
+
+    await withApp('guren-ast-broken-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      // The broken file contributes nothing; the valid one still signals.
+      const check = (await deployChecks(dir))['deploy-runtime-stores']
+
+      expect(check.status).toBe('warn')
+      expect(check.message).toContain('sessions are enabled')
+    })
+  })
+})
+
 describe('test files are excluded from the scan', () => {
   // A test fixture constructing a backed store would otherwise satisfy the
   // remediation check on behalf of an app that never wires one up, hiding a

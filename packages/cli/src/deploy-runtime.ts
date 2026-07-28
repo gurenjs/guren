@@ -1,5 +1,6 @@
 import { readFile, readdir } from 'node:fs/promises'
 import { extname, join, resolve } from 'node:path'
+import { parse, type ParserPlugin } from '@babel/parser'
 import {
   collectFiles,
   toPosixRelative,
@@ -69,12 +70,6 @@ const DEPLOY_PLUGIN_PACKAGES: Record<string, DeployTargetId> = {
   '@guren/plugin-vercel': 'vercel',
 }
 
-/**
- * The Lambda adapter ships inside `@guren/core`/`@guren/server` rather than a
- * plugin package, so it is detected from source imports instead.
- */
-const LAMBDA_SOURCE_PATTERN = /@guren\/(?:core|server)\/lambda|\bcreateLambdaHandler\b/
-
 export interface DeployTargetDetection {
   profile: DeployTargetProfile
   /** Human-readable evidence, e.g. `@guren/plugin-cloudflare in package.json`. */
@@ -93,7 +88,7 @@ export interface DeployRuntimeAnalysis {
   targets: DeployTargetDetection[]
   /** Evidence that the app authenticates with passwords at all. */
   passwordAuthSignals: SourceSignal[]
-  /** `NodeHasher` references — the remediation for a Bun-less runtime. */
+  /** `NodeHasher` constructions — the remediation for a Bun-less runtime. */
   nodeHasherSignals: SourceSignal[]
   /** Evidence that sessions are enabled. */
   sessionSignals: SourceSignal[]
@@ -117,123 +112,286 @@ const DEPLOY_SCAN_DIRS = ['src', 'app', 'config', 'db', 'routes', 'modules', 'bi
 /** Test files are excluded from the scan — see readAppSources. */
 const TEST_FILE_PATTERN = /\.(test|spec)\.[cm]?[jt]sx?$/
 
-type SymbolPatterns = ReadonlyArray<readonly [symbol: string, pattern: RegExp]>
+// --- AST signal extraction -------------------------------------------------
+//
+// Signals are read from a Babel AST (the same parser audit.ts and
+// model-parser.ts already use), not from per-line regexes. That buys, in one
+// mechanism, everything the regex generation of this file had to carve out
+// case by case: aliased imports resolve to their canonical names, values
+// split across lines match, and text inside comments, string literals, and
+// TypeScript type positions can no longer trip a check. Files that fail to
+// parse contribute no signals rather than failing the doctor run.
+
+type SignalKind =
+  | 'passwordAuth'
+  | 'nodeHasher'
+  | 'session'
+  | 'sessionDisabled'
+  | 'oauth'
+  | 'backedSession'
+  | 'backedOAuth'
+  | 'memoryStore'
+  | 'discovery'
+  | 'lambda'
+
+interface ExtractedSignal {
+  kind: SignalKind
+  symbol: string
+  line: number
+}
 
 /**
- * Signals that the password hasher is actually reached: `auth.attempt()` is
- * the entry point app code calls to verify a password (`guard.attempt()` sits
- * underneath it but is never called directly outside the framework's own
- * tests), and an explicitly constructed `ScryptHasher` hashes one (seeders do
- * this).
+ * Classes whose construction is a signal. Construction — not a bare import —
+ * is what counts throughout: a leftover import survives long after the app
+ * stops using the thing it names, and must neither satisfy a remediation
+ * (NodeHasher, the backed stores) nor raise a warning (AutoDiscovery).
  *
- * Deliberately excludes `AuthenticatableModel`, `passwordColumn`, and a
- * `passwordHash` column. OAuth-only apps keep all three — the guard needs
- * `passwordColumn` to reject password logins for hash-less accounts — while
- * never invoking a hasher, so matching them reports a break that cannot happen.
- *
- * Known gap: a registration-only app that creates password-hashing records
- * (`User.create({ password })`) without ever calling `auth.attempt()` would
- * pass undetected. `make:auth` always scaffolds login alongside registration,
- * so this shape doesn't occur in generated apps; a hand-rolled register-only
- * flow is the one case this misses.
+ * ScryptHasher counts as password authentication because constructing one is
+ * only ever done to hash a password (seeders do this). AutoDiscovery maps to
+ * `discovery`; `ApplicationOptions.discover` is deliberately not a signal —
+ * it is declared but never read anywhere in @guren/server, so warning about
+ * it would flag a config key that has no effect.
  */
-const PASSWORD_AUTH_PATTERNS: SymbolPatterns = [
-  ['auth.attempt', /\bauth\s*\.\s*attempt\s*\(/],
-  ['ScryptHasher', /\bnew\s+ScryptHasher\s*\(/],
-]
+const CONSTRUCTED_SIGNALS: Record<string, SignalKind> = {
+  ScryptHasher: 'passwordAuth',
+  NodeHasher: 'nodeHasher',
+  DatabaseSessionStore: 'backedSession',
+  RedisSessionStore: 'backedSession',
+  DatabaseOAuthStateStore: 'backedOAuth',
+  RedisOAuthStateStore: 'backedOAuth',
+  MemorySessionStore: 'memoryStore',
+  MemoryOAuthStateStore: 'memoryStore',
+  MemoryApiTokenStore: 'memoryStore',
+  MemoryPasswordResetStore: 'memoryStore',
+  MemoryEmailVerificationStore: 'memoryStore',
+  MemoryRateLimitStore: 'memoryStore',
+  MemoryStore: 'memoryStore',
+  MemoryDriver: 'memoryStore',
+  AutoDiscovery: 'discovery',
+}
+
+/** Framework functions whose call is a signal. */
+const CALLED_SIGNALS: Record<string, SignalKind> = {
+  createSessionMiddleware: 'session',
+  createOAuthManager: 'oauth',
+  createLambdaHandler: 'lambda',
+}
 
 /**
- * Only a constructed hasher counts — a bare import survives long after the
- * app stops using it. Known gap: `import { NodeHasher as X }; new X()` isn't
- * recognized, since matching an aliased import would need to correlate two
- * separate lines rather than test each line independently. Line-scanning for
- * a literal name is the established pattern throughout this file.
+ * Identifiers whose mere reference (outside an import declaration) is a
+ * signal — OAuthServiceProvider is listed in `createApp({ providers })`
+ * rather than constructed or called.
  */
-const NODE_HASHER_PATTERNS: SymbolPatterns = [['NodeHasher', /\bnew\s+NodeHasher\s*\(/]]
+const REFERENCED_SIGNALS: Record<string, SignalKind> = {
+  OAuthServiceProvider: 'oauth',
+}
 
 /**
- * `AuthServiceProvider` attaches session middleware whenever `options.auth`
- * is present at all and `autoSession` isn't explicitly `false` — `make:auth`
- * itself instructs users to add exactly `auth: {}` to enable sessions and
- * CSRF, so a bare `auth: {}` is the single most common real-world shape and
- * must be caught, not just an explicit `autoSession`/`sessionOptions` key.
- * Requiring the `{` after `auth:` keeps this from matching the unrelated
- * `'auth:user_id'`-style session-key string literals used elsewhere.
- *
- * The explicit opt-out (`autoSession: false`) is intentionally NOT excluded
- * here: `auth: {` alone can't see what the object it opens contains, and
- * `autoSession: false` may sit on a different line or in a different file
- * from the `auth: {` that matched. It is tracked separately in
- * SESSION_DISABLED_PATTERNS and suppresses the warning at the analysis level
- * instead, where it can be checked app-wide rather than line-by-line.
+ * The Lambda adapter ships inside `@guren/core`/`@guren/server` rather than a
+ * plugin package, so it is detected from these import sources (plus bare
+ * `createLambdaHandler` calls via CALLED_SIGNALS).
  */
-const SESSION_PATTERNS: SymbolPatterns = [
-  ['auth', /\bauth\s*:\s*\{/],
-  ['autoSession', /\bautoSession\b/],
-  ['sessionOptions', /\bsessionOptions\b/],
-  ['createSessionMiddleware', /\bcreateSessionMiddleware\b/],
-]
+const LAMBDA_IMPORT_SOURCES = new Set(['@guren/core/lambda', '@guren/server/lambda'])
+
+interface BabelNode {
+  type: string
+  loc?: { start: { line: number } }
+  [key: string]: unknown
+}
 
 /**
- * Known gap: `autoSession:` and `false` split across two lines (e.g. a
- * multi-line-formatted value) won't match, since each pattern is tested
- * against one line at a time. Prettier never breaks a boolean property value
- * onto its own line, so this doesn't occur in formatted code.
+ * Minimal generic AST walker. Recurses into every node-shaped child unless
+ * the visitor returns `false` for the current node.
  */
-const SESSION_DISABLED_PATTERNS: SymbolPatterns = [
-  ['autoSession: false', /\bautoSession\s*:\s*false\b/],
-]
+function walk(value: unknown, visit: (node: BabelNode) => boolean | void): void {
+  if (Array.isArray(value)) {
+    for (const item of value) walk(item, visit)
+    return
+  }
+  if (value === null || typeof value !== 'object') return
+  const node = value as BabelNode
+  if (typeof node.type !== 'string') return
 
-const OAUTH_PATTERNS: SymbolPatterns = [
-  ['createOAuthManager', /\bcreateOAuthManager\b/],
-  ['OAuthServiceProvider', /\bOAuthServiceProvider\b/],
-]
+  if (visit(node) === false) return
+
+  for (const [key, child] of Object.entries(node)) {
+    if (key === 'loc' || key === 'leadingComments' || key === 'trailingComments' || key === 'innerComments') {
+      continue
+    }
+    walk(child, visit)
+  }
+}
+
+function propertyKeyName(property: BabelNode): string | null {
+  if (property.computed) return null
+  const key = property.key as BabelNode | undefined
+  if (key?.type === 'Identifier') return key.name as string
+  if (key?.type === 'StringLiteral') return key.value as string
+  return null
+}
+
+function lineOf(node: BabelNode): number {
+  return node.loc?.start.line ?? 1
+}
 
 /**
- * Backed stores count as remediation only where they are constructed, not
- * merely imported — a leftover import would otherwise silence the warning for
- * an app that no longer wires the store up. Stores built in one module and
- * passed in from another still match, because the whole app tree is scanned.
+ * Extract every deploy-runtime signal from one source file. Returns null when
+ * the file does not parse — the caller skips it.
  */
-const BACKED_SESSION_PATTERNS: SymbolPatterns = [
-  ['DatabaseSessionStore', /\bnew\s+DatabaseSessionStore\s*\(/],
-  ['RedisSessionStore', /\bnew\s+RedisSessionStore\s*\(/],
-]
+function extractSignals(source: string, plugins: ParserPlugin[]): ExtractedSignal[] | null {
+  let ast
+  try {
+    ast = parse(source, { sourceType: 'module', plugins, allowAwaitOutsideFunction: true })
+  } catch {
+    return null
+  }
 
-const BACKED_OAUTH_PATTERNS: SymbolPatterns = [
-  ['DatabaseOAuthStateStore', /\bnew\s+DatabaseOAuthStateStore\s*\(/],
-  ['RedisOAuthStateStore', /\bnew\s+RedisOAuthStateStore\s*\(/],
-]
+  // Named-import aliases (`import { NodeHasher as X }`) resolve to their
+  // canonical exported names, so every table below matches aliased use too.
+  const aliases = new Map<string, string>()
+  for (const statement of ast.program.body) {
+    if (statement.type !== 'ImportDeclaration') continue
+    for (const specifier of statement.specifiers) {
+      if (specifier.type === 'ImportSpecifier') {
+        const imported = specifier.imported
+        aliases.set(specifier.local.name, imported.type === 'Identifier' ? imported.name : imported.value)
+      }
+    }
+  }
+  const canonical = (name: string): string => aliases.get(name) ?? name
 
-/**
- * In-memory stores instantiated explicitly. Unlike the implicit defaults these
- * need no gating signal — constructing one is unambiguous.
- */
-const MEMORY_STORE_PATTERNS: SymbolPatterns = [
-  ['MemorySessionStore', /\bnew\s+MemorySessionStore\s*\(/],
-  ['MemoryOAuthStateStore', /\bnew\s+MemoryOAuthStateStore\s*\(/],
-  ['MemoryApiTokenStore', /\bnew\s+MemoryApiTokenStore\s*\(/],
-  ['MemoryPasswordResetStore', /\bnew\s+MemoryPasswordResetStore\s*\(/],
-  ['MemoryEmailVerificationStore', /\bnew\s+MemoryEmailVerificationStore\s*\(/],
-  ['MemoryRateLimitStore', /\bnew\s+MemoryRateLimitStore\s*\(/],
-  ['MemoryStore', /\bnew\s+MemoryStore\s*\(/],
-  ['MemoryDriver', /\bnew\s+MemoryDriver\s*\(/],
-]
+  const signals: ExtractedSignal[] = []
+  const seen = new Set<string>()
+  const emit = (kind: SignalKind, symbol: string, line: number): void => {
+    const key = `${kind} ${symbol}`
+    if (seen.has(key)) return
+    seen.add(key)
+    signals.push({ kind, symbol, line })
+  }
 
-/**
- * Only a constructed AutoDiscovery counts — a bare import isn't active use.
- * `ApplicationOptions.discover` is deliberately not matched here: it is
- * declared but never read anywhere in @guren/server, so it has no effect —
- * warning about it would flag a config key that doesn't actually do anything.
- */
-const DISCOVERY_PATTERNS: SymbolPatterns = [
-  ['AutoDiscovery', /\bnew\s+AutoDiscovery\s*\(/],
-]
+  walk(ast.program, (node) => {
+    switch (node.type) {
+      case 'ImportDeclaration': {
+        const source = node.source as BabelNode
+        if (LAMBDA_IMPORT_SOURCES.has(source.value as string)) {
+          emit('lambda', source.value as string, lineOf(node))
+        }
+        // Import specifiers are declarations, not usage — never signals.
+        return false
+      }
+
+      case 'ExportNamedDeclaration':
+      case 'ExportAllDeclaration': {
+        const source = node.source as BabelNode | null
+        if (source && LAMBDA_IMPORT_SOURCES.has(source.value as string)) {
+          emit('lambda', source.value as string, lineOf(node))
+        }
+        return
+      }
+
+      case 'NewExpression': {
+        const callee = node.callee as BabelNode
+        if (callee?.type === 'Identifier') {
+          const name = canonical(callee.name as string)
+          const kind = CONSTRUCTED_SIGNALS[name]
+          if (kind) emit(kind, name, lineOf(node))
+        }
+        return
+      }
+
+      case 'CallExpression': {
+        const callee = node.callee as BabelNode
+        if (callee?.type === 'Identifier') {
+          const name = canonical(callee.name as string)
+          const kind = CALLED_SIGNALS[name]
+          if (kind) emit(kind, name, lineOf(node))
+
+          // An `auth` key in createApp's options object enables sessions:
+          // AuthServiceProvider attaches session middleware whenever
+          // `options.auth` is present and autoSession isn't explicitly false.
+          // `make:auth` itself tells users to add exactly `auth: {}`, so the
+          // bare key with no session-specific fields is the most common
+          // real-world shape. Scoping to createApp (rather than any `auth:`
+          // object) keeps SMTP-style `auth: { user, pass }` mailer config
+          // from reading as a session.
+          if (name === 'createApp') {
+            const first = (node.arguments as BabelNode[])[0]
+            if (first?.type === 'ObjectExpression') {
+              for (const property of first.properties as BabelNode[]) {
+                if (property.type === 'ObjectProperty' && propertyKeyName(property) === 'auth') {
+                  emit('session', 'auth', lineOf(property))
+                }
+              }
+            }
+          }
+        } else if (callee?.type === 'MemberExpression') {
+          // `auth.attempt(...)` / `this.auth.attempt(...)` is the entry point
+          // app code calls to verify a password (`guard.attempt()` sits
+          // underneath it but is never called directly outside the
+          // framework's own tests). Known gap: a registration-only app that
+          // creates password-hashing records without ever calling attempt()
+          // passes undetected — `make:auth` always scaffolds login alongside
+          // registration, so that shape doesn't occur in generated apps.
+          const property = callee.property as BabelNode
+          const object = callee.object as BabelNode
+          const isAttempt = property?.type === 'Identifier' && property.name === 'attempt'
+          const onAuth =
+            (object?.type === 'Identifier' && object.name === 'auth') ||
+            (object?.type === 'MemberExpression' &&
+              (object.property as BabelNode)?.type === 'Identifier' &&
+              (object.property as BabelNode).name === 'auth')
+          if (isAttempt && onAuth) emit('passwordAuth', 'auth.attempt', lineOf(node))
+        } else if (callee?.type === 'Import') {
+          const first = (node.arguments as BabelNode[])[0]
+          if (first?.type === 'StringLiteral' && LAMBDA_IMPORT_SOURCES.has(first.value as string)) {
+            emit('lambda', first.value as string, lineOf(node))
+          }
+        }
+        return
+      }
+
+      case 'ObjectProperty': {
+        // autoSession/sessionOptions count wherever they appear — session
+        // config objects are routinely built outside the createApp call and
+        // passed in. `autoSession: false` additionally raises the disabled
+        // signal, which suppresses the session warning at the analysis level:
+        // the opt-out may live in a different object or file than the
+        // `auth` key that raised the signal.
+        const keyName = propertyKeyName(node)
+        if (keyName === 'autoSession') {
+          emit('session', 'autoSession', lineOf(node))
+          const value = node.value as BabelNode
+          if (value?.type === 'BooleanLiteral' && value.value === false) {
+            emit('sessionDisabled', 'autoSession: false', lineOf(node))
+          }
+        } else if (keyName === 'sessionOptions') {
+          emit('session', 'sessionOptions', lineOf(node))
+        }
+        return
+      }
+
+      case 'Identifier': {
+        const name = canonical(node.name as string)
+        const kind = REFERENCED_SIGNALS[name]
+        if (kind) emit(kind, name, lineOf(node))
+        return
+      }
+    }
+  })
+
+  return signals
+}
 
 interface ScannedFile {
   filePath: string
-  /** Split once per file and reused across every pattern pass in findSignals. */
-  lines: string[]
+  signals: ExtractedSignal[]
+}
+
+function parserPluginsFor(path: string): ParserPlugin[] {
+  // JSX is off for .ts/.mts so angle-bracket type assertions still parse;
+  // everywhere else it is harmless and lets .tsx/.jsx through.
+  const ext = extname(path)
+  return ext === '.ts' || ext === '.mts' ? ['typescript'] : ['typescript', 'jsx']
 }
 
 /**
@@ -255,8 +413,9 @@ async function readRootSourceFiles(cwd: string): Promise<string[]> {
 }
 
 /**
- * Read the app's own source files from a bounded set of roots: the directories
- * in DEPLOY_SCAN_DIRS plus any source file in the project root.
+ * Read and signal-scan the app's own source files from a bounded set of
+ * roots: the directories in DEPLOY_SCAN_DIRS plus any source file in the
+ * project root.
  *
  * Test files are excluded. A fixture that constructs a backed store or a
  * NodeHasher would otherwise satisfy the remediation check on behalf of an
@@ -279,26 +438,13 @@ async function readAppSources(cwd: string): Promise<ScannedFile[]> {
     paths.map(async (path) => {
       const content = await readFile(path, 'utf8').catch(() => null)
       if (content === null) return null
-      return { filePath: toPosixRelative(cwd, path), lines: content.split('\n') }
+      const signals = extractSignals(content, parserPluginsFor(path))
+      if (signals === null) return null
+      return { filePath: toPosixRelative(cwd, path), signals }
     }),
   )
 
   return scanned.filter((file): file is ScannedFile => file !== null)
-}
-
-function findSignals(files: ScannedFile[], patterns: SymbolPatterns): SourceSignal[] {
-  const signals: SourceSignal[] = []
-
-  for (const file of files) {
-    for (const [symbol, pattern] of patterns) {
-      const index = file.lines.findIndex((line) => pattern.test(line))
-      if (index !== -1) {
-        signals.push({ symbol, filePath: file.filePath, line: index + 1 })
-      }
-    }
-  }
-
-  return signals
 }
 
 /**
@@ -318,7 +464,7 @@ async function detectDeployTargets(cwd: string, files: ScannedFile[]): Promise<D
     }
   }
 
-  const lambdaFile = files.find((file) => file.lines.some((line) => LAMBDA_SOURCE_PATTERN.test(line)))
+  const lambdaFile = files.find((file) => file.signals.some((signal) => signal.kind === 'lambda'))
   if (lambdaFile) {
     detections.push({
       profile: DEPLOY_TARGET_PROFILES.lambda,
@@ -338,17 +484,24 @@ export async function analyzeDeployRuntime(cwd: string): Promise<DeployRuntimeAn
   const files = await readAppSources(cwd)
   const targets = await detectDeployTargets(cwd, files)
 
+  const collect = (kind: SignalKind): SourceSignal[] =>
+    files.flatMap((file) =>
+      file.signals
+        .filter((signal) => signal.kind === kind)
+        .map((signal) => ({ symbol: signal.symbol, filePath: file.filePath, line: signal.line })),
+    )
+
   return {
     targets,
-    passwordAuthSignals: findSignals(files, PASSWORD_AUTH_PATTERNS),
-    nodeHasherSignals: findSignals(files, NODE_HASHER_PATTERNS),
-    sessionSignals: findSignals(files, SESSION_PATTERNS),
-    sessionDisabledSignals: findSignals(files, SESSION_DISABLED_PATTERNS),
-    oauthSignals: findSignals(files, OAUTH_PATTERNS),
-    backedSessionSignals: findSignals(files, BACKED_SESSION_PATTERNS),
-    backedOAuthSignals: findSignals(files, BACKED_OAUTH_PATTERNS),
-    memoryStoreSignals: findSignals(files, MEMORY_STORE_PATTERNS),
-    discoverySignals: findSignals(files, DISCOVERY_PATTERNS),
+    passwordAuthSignals: collect('passwordAuth'),
+    nodeHasherSignals: collect('nodeHasher'),
+    sessionSignals: collect('session'),
+    sessionDisabledSignals: collect('sessionDisabled'),
+    oauthSignals: collect('oauth'),
+    backedSessionSignals: collect('backedSession'),
+    backedOAuthSignals: collect('backedOAuth'),
+    memoryStoreSignals: collect('memoryStore'),
+    discoverySignals: collect('discovery'),
   }
 }
 
