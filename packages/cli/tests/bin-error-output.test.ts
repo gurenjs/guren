@@ -91,6 +91,19 @@ describe('guren CLI error reporting', () => {
     }
   })
 
+  it('reports an unknown command a stray flag precedes, naming the command', async () => {
+    const workspace = await createTempWorkspace('guren-cli-bin-leading-flag-unknown-')
+    try {
+      const { exitCode, stderr } = await runBin(['--zzz', 'definitely-not-a-command'], workspace.dir)
+
+      expect(exitCode).toBe(1)
+      expect(countOccurrences(stderr, 'Unknown command')).toBe(1)
+      expect(stderr).toContain('definitely-not-a-command')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('reports flags without a command once, with usage, and exits 1', async () => {
     const workspace = await createTempWorkspace('guren-cli-bin-no-command-')
     try {
