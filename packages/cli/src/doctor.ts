@@ -18,6 +18,7 @@ import { compareVersions } from './codemods'
 import {
   analyzeDeployRuntime,
   bunlessTargets,
+  formatParseCaveat,
   formatSignals,
   formatTargetLabels,
   type DeployRuntimeAnalysis,
@@ -1057,20 +1058,24 @@ function detectDeployPasswordHashing(analysis: DeployRuntimeAnalysis): DoctorChe
   }
 
   const labels = formatTargetLabels(bunless)
+  // Signal-dependent verdicts carry the parse caveat: a pass computed over an
+  // incomplete scan should say so. The target-only verdicts above don't — a
+  // parse failure can't change which deploy targets are declared.
+  const caveat = formatParseCaveat(analysis)
 
   if (analysis.passwordAuthSignals.length === 0) {
-    return createCheck(key, title, 'pass', `${labels} detected, and no password authentication was found.`)
+    return createCheck(key, title, 'pass', `${labels} detected, and no password authentication was found.${caveat}`)
   }
 
   if (analysis.nodeHasherSignals.length > 0) {
-    return createCheck(key, title, 'pass', `${labels} detected, and NodeHasher is configured.`)
+    return createCheck(key, title, 'pass', `${labels} detected, and NodeHasher is configured.${caveat}`)
   }
 
   return createCheck(
     key,
     title,
     'warn',
-    `${labels} detected with password authentication (${formatSignals(analysis.passwordAuthSignals)}), but NodeHasher is never referenced. The default ScryptHasher uses Bun.password, which is unavailable on this runtime.`,
+    `${labels} detected with password authentication (${formatSignals(analysis.passwordAuthSignals)}), but NodeHasher is never referenced. The default ScryptHasher uses Bun.password, which is unavailable on this runtime.${caveat}`,
     { fix: NODE_HASHER_FIX, manualFix: NODE_HASHER_FIX },
   )
 }
@@ -1113,15 +1118,17 @@ function detectDeployRuntimeStores(analysis: DeployRuntimeAnalysis): DoctorCheck
     )
   }
 
+  const caveat = formatParseCaveat(analysis)
+
   if (issues.length === 0) {
-    return createCheck(key, title, 'pass', `${labels} detected, and no in-memory store defaults were found.`)
+    return createCheck(key, title, 'pass', `${labels} detected, and no in-memory store defaults were found.${caveat}`)
   }
 
   return createCheck(
     key,
     title,
     'warn',
-    `${labels} shares no memory between requests, but ${issues.join('; ')}.`,
+    `${labels} shares no memory between requests, but ${issues.join('; ')}.${caveat}`,
     { fix: BACKED_STORE_FIX, manualFix: BACKED_STORE_FIX },
   )
 }
@@ -1142,9 +1149,10 @@ function detectDeployProviderDiscovery(analysis: DeployRuntimeAnalysis): DoctorC
   }
 
   const labels = formatTargetLabels(analysis.targets)
+  const caveat = formatParseCaveat(analysis)
 
   if (analysis.discoverySignals.length === 0) {
-    return createCheck(key, title, 'pass', `${labels} detected, and provider discovery is not used.`)
+    return createCheck(key, title, 'pass', `${labels} detected, and provider discovery is not used.${caveat}`)
   }
 
   const blockers = analysis.targets.map((target) => `${target.profile.label}: ${target.profile.discoveryBlocker}`)
@@ -1153,7 +1161,7 @@ function detectDeployProviderDiscovery(analysis: DeployRuntimeAnalysis): DoctorC
     key,
     title,
     'warn',
-    `${labels} detected, but the app uses filesystem provider discovery (${formatSignals(analysis.discoverySignals)}). ${blockers.join(' ')}`,
+    `${labels} detected, but the app uses filesystem provider discovery (${formatSignals(analysis.discoverySignals)}). ${blockers.join(' ')}${caveat}`,
     { fix: EXPLICIT_PROVIDERS_FIX, manualFix: EXPLICIT_PROVIDERS_FIX },
   )
 }

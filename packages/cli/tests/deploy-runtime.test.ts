@@ -904,18 +904,36 @@ export const store = new guren.DatabaseSessionStore(sessions)
     })
   })
 
-  it('skips a file that fails to parse without failing the run', async () => {
+  it('skips a file that fails to parse, and says so in the check message', async () => {
     const files = {
       'src/broken.ts': `export const = this is not valid typescript {{{`,
       'src/app.ts': SESSION_APP,
     }
 
     await withApp('guren-ast-broken-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      // The broken file contributes nothing; the valid one still signals.
+      const analysis = await analyzeDeployRuntime(dir)
+      expect(analysis.unparsedFiles).toEqual(['src/broken.ts'])
+
+      // The broken file contributes nothing; the valid one still signals —
+      // and the verdict discloses that the scan was incomplete, so a skipped
+      // file is a visible caveat rather than a silent false negative.
       const check = (await deployChecks(dir))['deploy-runtime-stores']
 
       expect(check.status).toBe('warn')
       expect(check.message).toContain('sessions are enabled')
+      expect(check.message).toContain('could not be parsed and were not scanned: src/broken.ts')
+    })
+  })
+
+  it('adds no parse caveat when every file parses', async () => {
+    const files = { 'src/app.ts': SESSION_APP }
+
+    await withApp('guren-ast-clean-scan-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      const analysis = await analyzeDeployRuntime(dir)
+      expect(analysis.unparsedFiles).toEqual([])
+
+      const check = (await deployChecks(dir))['deploy-runtime-stores']
+      expect(check.message).not.toContain('could not be parsed')
     })
   })
 })

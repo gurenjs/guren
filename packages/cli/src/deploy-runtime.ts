@@ -104,6 +104,13 @@ export interface DeployRuntimeAnalysis {
   memoryStoreSignals: SourceSignal[]
   /** Explicit use of filesystem-scanning provider discovery. */
   discoverySignals: SourceSignal[]
+  /**
+   * Files that failed to parse and therefore contributed no signals. Surfaced
+   * in the check messages so a missed hazard or remediation is a visible
+   * caveat, not a silent false negative — the same stance ESLint (parse
+   * errors are errors) and semgrep (skipped files are counted) take.
+   */
+  unparsedFiles: string[]
 }
 
 /** Directories scanned for the symbols above. */
@@ -504,7 +511,7 @@ async function readRootSourceFiles(cwd: string): Promise<string[]> {
  * application that never wires one up, hiding a real production gap — and a
  * fixture enabling sessions would report sessions the app itself never enables.
  */
-async function readAppSources(cwd: string): Promise<ScannedFile[]> {
+async function readAppSources(cwd: string): Promise<{ files: ScannedFile[]; unparsed: string[] }> {
   const [directoryFiles, rootFiles] = await Promise.all([
     Promise.all(
       DEPLOY_SCAN_DIRS.map((dir) =>
@@ -518,15 +525,22 @@ async function readAppSources(cwd: string): Promise<ScannedFile[]> {
 
   const scanned = await Promise.all(
     paths.map(async (path) => {
+      const filePath = toPosixRelative(cwd, path)
       const content = await readFile(path, 'utf8').catch(() => null)
       if (content === null) return null
-      const signals = extractSignals(content, parserPluginsFor(path))
-      if (signals === null) return null
-      return { filePath: toPosixRelative(cwd, path), signals }
+      return { filePath, signals: extractSignals(content, parserPluginsFor(path)) }
     }),
   )
 
-  return scanned.filter((file): file is ScannedFile => file !== null)
+  const files: ScannedFile[] = []
+  const unparsed: string[] = []
+  for (const entry of scanned) {
+    if (entry === null) continue
+    if (entry.signals === null) unparsed.push(entry.filePath)
+    else files.push({ filePath: entry.filePath, signals: entry.signals })
+  }
+
+  return { files, unparsed }
 }
 
 /**
@@ -563,7 +577,7 @@ async function detectDeployTargets(cwd: string, files: ScannedFile[]): Promise<D
  * still in force.
  */
 export async function analyzeDeployRuntime(cwd: string): Promise<DeployRuntimeAnalysis> {
-  const files = await readAppSources(cwd)
+  const { files, unparsed } = await readAppSources(cwd)
   const targets = await detectDeployTargets(cwd, files)
 
   const collect = (kind: SignalKind): SourceSignal[] =>
@@ -584,7 +598,21 @@ export async function analyzeDeployRuntime(cwd: string): Promise<DeployRuntimeAn
     backedOAuthSignals: collect('backedOAuth'),
     memoryStoreSignals: collect('memoryStore'),
     discoverySignals: collect('discovery'),
+    unparsedFiles: unparsed,
   }
+}
+
+/**
+ * Caveat appended to signal-dependent check messages when files were skipped:
+ * a verdict computed over an incomplete scan should say so.
+ */
+export function formatParseCaveat(analysis: DeployRuntimeAnalysis): string {
+  const { unparsedFiles } = analysis
+  if (unparsedFiles.length === 0) return ''
+
+  const shown = unparsedFiles.slice(0, 3).join(', ')
+  const more = unparsedFiles.length > 3 ? ` and ${unparsedFiles.length - 3} more` : ''
+  return ` Note: ${unparsedFiles.length} file(s) could not be parsed and were not scanned: ${shown}${more}.`
 }
 
 /** Targets that lack `Bun.password`, so the default `ScryptHasher` breaks. */
