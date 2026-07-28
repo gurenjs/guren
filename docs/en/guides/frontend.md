@@ -95,6 +95,19 @@ Handle validation errors by returning them from the controller and reading `form
 ## Assets and Styling
 The scaffold ships with Tailwind CSS preconfigured. Edit `resources/css/app.css` or add custom CSS frameworks as needed. If you introduce additional assets (images, fonts), place them under `public/`.
 
+## Favicon and Document Head
+The production document is built by the server, not from `public/index.html`, so a `<link>` added to that file never reaches a browser. Register site-wide head markup with `setInertiaDocument()` instead — the scaffold already links the placeholder `public/favicon.svg` from `src/app.ts` (`config/inertia.ts` in the blog blueprint):
+
+```typescript
+import { setInertiaDocument } from '@guren/core'
+
+setInertiaDocument({
+  head: '<link rel="icon" type="image/svg+xml" href="/favicon.svg" />',
+})
+```
+
+The markup is emitted verbatim, so keep it to developer-authored strings. Files at the root of `public/` are served by the Bun runtime; on Node-based deployments serve them from a CDN.
+
 ## Server-Side Rendering
 Each application ships with a default `resources/js/ssr.tsx` entry that calls `renderInertiaServer()` from `@guren/inertia-client`. When you bootstrap the app with `autoConfigureInertiaAssets(app, { importMeta })`, Guren will:
 

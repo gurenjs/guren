@@ -95,6 +95,19 @@ Inertia のヘルパーでクライアントナビゲーションとフォーム
 ## アセットとスタイル
 スキャフォールドには Tailwind CSS が設定済みです。`resources/css/app.css` を編集するか、好みの CSS フレームワークを追加してください。画像やフォントなどの追加アセットは `public/` 配下に置きます。
 
+## favicon とドキュメント head
+本番の HTML はサーバー側で組み立てられ、`public/index.html` は読み込まれません。そのため同ファイルに `<link>` を書いてもブラウザには届きません。サイト全体の head マークアップは `setInertiaDocument()` で登録します。スキャフォールドでは `src/app.ts`（blog ブループリントでは `config/inertia.ts`）からプレースホルダーの `public/favicon.svg` をリンク済みです。
+
+```typescript
+import { setInertiaDocument } from '@guren/core'
+
+setInertiaDocument({
+  head: '<link rel="icon" type="image/svg+xml" href="/favicon.svg" />',
+})
+```
+
+マークアップはそのまま出力されるため、開発者が記述した文字列のみを渡してください。`public/` 直下のファイルは Bun ランタイムが配信します。Node ベースのデプロイでは CDN から配信してください。
+
 ## サーバーサイドレンダリング
 各アプリには既定で `resources/js/ssr.tsx` が入り、`@guren/inertia-client` の `renderInertiaServer()` を呼び出します。`autoConfigureInertiaAssets(app, { importMeta })` でブートすると、Guren は次を自動で処理します。
 

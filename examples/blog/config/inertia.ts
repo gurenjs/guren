@@ -1,4 +1,16 @@
-import { setInertiaSharedProps, AUTH_CONTEXT_KEY, getCsrfToken, type AuthContext } from '@guren/core'
+import {
+  setInertiaSharedProps,
+  setInertiaDocument,
+  AUTH_CONTEXT_KEY,
+  getCsrfToken,
+  type AuthContext,
+} from '@guren/core'
+
+// Rendered into every server-rendered document. Replace public/favicon.svg
+// with your own artwork, or add more tags here (Open Graph, apple-touch-icon).
+setInertiaDocument({
+  head: '<link rel="icon" type="image/svg+xml" href="/favicon.svg" />',
+})
 
 setInertiaSharedProps(async (ctx) => {
   const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
