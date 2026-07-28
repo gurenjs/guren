@@ -19,7 +19,6 @@ import { readDeclaredDependencyNames } from './plugin-manifest'
 type DeployTargetId = 'cloudflare' | 'vercel' | 'lambda'
 
 export interface DeployTargetProfile {
-  id: DeployTargetId
   label: string
   /**
    * Whether `Bun.password` — the backend behind the default `ScryptHasher` —
@@ -34,13 +33,11 @@ export interface DeployTargetProfile {
 
 const DEPLOY_TARGET_PROFILES: Record<DeployTargetId, DeployTargetProfile> = {
   cloudflare: {
-    id: 'cloudflare',
     label: 'Cloudflare Workers',
     hasBunRuntime: false,
     discoveryBlocker: 'Workers has no filesystem and no Bun runtime, so `Bun.Glob` scanning finds nothing.',
   },
   vercel: {
-    id: 'vercel',
     label: 'Vercel',
     // The function is a `bun build` bundle; buildVercelOutput copies
     // .guren/ssr, db/migrations, docs and public into it, never `app/`.
@@ -48,7 +45,6 @@ const DEPLOY_TARGET_PROFILES: Record<DeployTargetId, DeployTargetProfile> = {
     discoveryBlocker: 'The Vercel function is a `bun build` bundle that ships no `app/` directory to scan.',
   },
   lambda: {
-    id: 'lambda',
     label: 'AWS Lambda',
     hasBunRuntime: false,
     discoveryBlocker: 'Lambda runs Node.js, where `Bun.Glob` is unavailable.',
@@ -105,15 +101,17 @@ export interface DeployRuntimeAnalysis {
   /** Explicit use of filesystem-scanning provider discovery. */
   discoverySignals: SourceSignal[]
   /**
-   * Files that failed to parse and therefore contributed no signals. Surfaced
-   * in the check messages so a missed hazard or remediation is a visible
-   * caveat, not a silent false negative — the same stance ESLint (parse
-   * errors are errors) and semgrep (skipped files are counted) take.
+   * Files that could not be read or parsed and therefore contributed no
+   * signals. Surfaced in every deploy check message so a missed hazard or
+   * remediation is a visible caveat, not a silent false negative — the same
+   * stance ESLint (parse errors are errors) and semgrep (skipped files are
+   * counted) take. Note this also covers *target* detection: the Lambda
+   * adapter is found in source, so a skipped file can hide a target too.
    */
   unparsedFiles: string[]
 }
 
-/** Directories scanned for the symbols above. */
+/** Directories scanned for signal symbols. */
 const DEPLOY_SCAN_DIRS = ['src', 'app', 'config', 'db', 'routes', 'modules', 'bin', 'functions', 'api'] as const
 
 /** Test files are excluded from the scan — see readAppSources. */
@@ -233,6 +231,9 @@ const TYPE_ONLY_NODES = new Set([
   'TSConstructSignatureDeclaration',
   'TSTypeLiteral',
   'TSQualifiedName',
+  // `class X implements Y` / `interface A extends B`. A class's `extends`
+  // clause is a plain expression on `superClass`, so it stays walkable.
+  'TSExpressionWithTypeArguments',
 ])
 
 /**
@@ -263,11 +264,13 @@ function walk(value: unknown, visit: (node: BabelNode) => boolean | void): void 
 
   if (visit(node) === false) return
 
-  for (const [key, child] of Object.entries(node)) {
+  // for...in rather than Object.entries: the latter allocates an entry array
+  // per node, which measurably dominates traversal on a large AST.
+  for (const key in node) {
     if (key === 'loc' || key === 'leadingComments' || key === 'trailingComments' || key === 'innerComments') {
       continue
     }
-    walk(child, visit)
+    walk(node[key], visit)
   }
 }
 
@@ -301,10 +304,17 @@ function extractSignals(source: string, plugins: ParserPlugin[]): ExtractedSigna
   // export from another package never resolves to a signal.
   const gurenNames = new Map<string, string>()
   const gurenNamespaces = new Set<string>()
+  // Whether the file imports from Guren at all, type-only imports included.
+  // The two signals resolved structurally rather than through a binding —
+  // `auth.attempt()` (a controller property) and the session option keys —
+  // use this to stay inside Guren code: without it any library's
+  // `auth.attempt()` or `sessionOptions` key raised a Guren signal.
+  let importsGuren = false
   for (const statement of ast.program.body) {
     if (statement.type !== 'ImportDeclaration') continue
-    if (statement.importKind === 'type') continue
     if (!statement.source.value.startsWith(GUREN_PACKAGE_PREFIX)) continue
+    importsGuren = true
+    if (statement.importKind === 'type') continue
     for (const specifier of statement.specifiers) {
       if (specifier.type === 'ImportSpecifier') {
         if (specifier.importKind === 'type') continue
@@ -372,8 +382,10 @@ function extractSignals(source: string, plugins: ParserPlugin[]): ExtractedSigna
 
       case 'NewExpression': {
         const name = resolve(node.callee as BabelNode)
-        const kind = name ? CONSTRUCTED_SIGNALS[name] : undefined
-        if (name && kind) emit(kind, name, lineOf(node))
+        if (name) {
+          const kind = CONSTRUCTED_SIGNALS[name]
+          if (kind) emit(kind, name, lineOf(node))
+        }
         return
       }
 
@@ -423,7 +435,7 @@ function extractSignals(source: string, plugins: ParserPlugin[]): ExtractedSigna
             (object?.type === 'MemberExpression' &&
               (object.property as BabelNode)?.type === 'Identifier' &&
               (object.property as BabelNode).name === 'auth')
-          if (isAttempt && onAuth) emit('passwordAuth', 'auth.attempt', lineOf(node))
+          if (isAttempt && onAuth && importsGuren) emit('passwordAuth', 'auth.attempt', lineOf(node))
         } else if (callee?.type === 'Import') {
           const first = (node.arguments as BabelNode[])[0]
           if (first?.type === 'StringLiteral' && LAMBDA_IMPORT_SOURCES.has(first.value as string)) {
@@ -436,18 +448,22 @@ function extractSignals(source: string, plugins: ParserPlugin[]): ExtractedSigna
       case 'ObjectProperty': {
         // autoSession/sessionOptions count wherever they appear — session
         // config objects are routinely built outside the createApp call and
-        // passed in. `autoSession: false` additionally raises the disabled
-        // signal, which suppresses the session warning at the analysis level:
-        // the opt-out may live in a different object or file than the
-        // `auth` key that raised the signal.
+        // passed in — but only inside a file that imports from Guren, since
+        // neither key is distinctive enough to claim on its own.
+        //
+        // `autoSession: false` is the deliberate exception: it *suppresses*
+        // the warning, so it is read everywhere, gate or no gate. Missing an
+        // opt-out warns a correctly-configured app, which is the failure
+        // direction this check exists to avoid; missing an opt-in only costs
+        // a warning the `auth` key already raises in the common shape.
         const keyName = propertyKeyName(node)
         if (keyName === 'autoSession') {
-          emit('session', 'autoSession', lineOf(node))
+          if (importsGuren) emit('session', 'autoSession', lineOf(node))
           const value = node.value as BabelNode
           if (value?.type === 'BooleanLiteral' && value.value === false) {
             emit('sessionDisabled', 'autoSession: false', lineOf(node))
           }
-        } else if (keyName === 'sessionOptions') {
+        } else if (keyName === 'sessionOptions' && importsGuren) {
           emit('session', 'sessionOptions', lineOf(node))
         }
         return
@@ -455,8 +471,10 @@ function extractSignals(source: string, plugins: ParserPlugin[]): ExtractedSigna
 
       case 'Identifier': {
         const name = resolve(node)
-        const kind = name ? REFERENCED_SIGNALS[name] : undefined
-        if (name && kind) emit(kind, name, lineOf(node))
+        if (name) {
+          const kind = REFERENCED_SIGNALS[name]
+          if (kind) emit(kind, name, lineOf(node))
+        }
         return
       }
     }
@@ -485,8 +503,9 @@ function parserPluginsFor(path: string): ParserPlugin[] {
 
 /**
  * Source files sitting directly in the project root. Deploy entrypoints
- * (`lambda.ts`, `worker.ts`) conventionally live there, and collectFiles only
- * recurses, so the root's own files need their own non-recursive pass.
+ * (`lambda.ts`, `worker.ts`) conventionally live there, and no DEPLOY_SCAN_DIRS
+ * entry covers the root itself — pointing collectFiles at it would walk the
+ * whole tree, so the root gets its own non-recursive pass.
  */
 async function readRootSourceFiles(cwd: string): Promise<string[]> {
   try {
@@ -527,7 +546,10 @@ async function readAppSources(cwd: string): Promise<{ files: ScannedFile[]; unpa
     paths.map(async (path) => {
       const filePath = toPosixRelative(cwd, path)
       const content = await readFile(path, 'utf8').catch(() => null)
-      if (content === null) return null
+      // An unreadable file is reported alongside an unparseable one: both
+      // contribute no signals, and silently dropping either is the hole the
+      // caveat exists to close.
+      if (content === null) return { filePath, signals: null }
       return { filePath, signals: extractSignals(content, parserPluginsFor(path)) }
     }),
   )
@@ -612,7 +634,7 @@ export function formatParseCaveat(analysis: DeployRuntimeAnalysis): string {
 
   const shown = unparsedFiles.slice(0, 3).join(', ')
   const more = unparsedFiles.length > 3 ? ` and ${unparsedFiles.length - 3} more` : ''
-  return ` Note: ${unparsedFiles.length} file(s) could not be parsed and were not scanned: ${shown}${more}.`
+  return ` Note: ${unparsedFiles.length} file(s) could not be read or parsed and were not scanned: ${shown}${more}.`
 }
 
 /** Targets that lack `Bun.password`, so the default `ScryptHasher` breaks. */

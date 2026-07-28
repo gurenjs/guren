@@ -1045,6 +1045,10 @@ function detectDeployPasswordHashing(analysis: DeployRuntimeAnalysis): DoctorChe
   const title = 'Deploy Password Hashing'
 
   const bunless = bunlessTargets(analysis)
+  // Every verdict carries the parse caveat, target-only ones included: the
+  // Lambda adapter is detected from source, so a skipped file can hide a
+  // target and turn a real warning into "no deploy target detected".
+  const caveat = formatParseCaveat(analysis)
 
   if (bunless.length === 0) {
     return createCheck(
@@ -1052,16 +1056,12 @@ function detectDeployPasswordHashing(analysis: DeployRuntimeAnalysis): DoctorChe
       title,
       'pass',
       analysis.targets.length > 0
-        ? `${formatTargetLabels(analysis.targets)} runs on Bun, so the default ScryptHasher applies.`
-        : 'No deploy plugin or Lambda adapter detected.',
+        ? `${formatTargetLabels(analysis.targets)} runs on Bun, so the default ScryptHasher applies.${caveat}`
+        : `No deploy plugin or Lambda adapter detected.${caveat}`,
     )
   }
 
   const labels = formatTargetLabels(bunless)
-  // Signal-dependent verdicts carry the parse caveat: a pass computed over an
-  // incomplete scan should say so. The target-only verdicts above don't — a
-  // parse failure can't change which deploy targets are declared.
-  const caveat = formatParseCaveat(analysis)
 
   if (analysis.passwordAuthSignals.length === 0) {
     return createCheck(key, title, 'pass', `${labels} detected, and no password authentication was found.${caveat}`)
@@ -1075,7 +1075,7 @@ function detectDeployPasswordHashing(analysis: DeployRuntimeAnalysis): DoctorChe
     key,
     title,
     'warn',
-    `${labels} detected with password authentication (${formatSignals(analysis.passwordAuthSignals)}), but NodeHasher is never referenced. The default ScryptHasher uses Bun.password, which is unavailable on this runtime.${caveat}`,
+    `${labels} detected with password authentication (${formatSignals(analysis.passwordAuthSignals)}), but NodeHasher is never constructed. The default ScryptHasher uses Bun.password, which is unavailable on this runtime.${caveat}`,
     { fix: NODE_HASHER_FIX, manualFix: NODE_HASHER_FIX },
   )
 }
@@ -1091,8 +1091,10 @@ function detectDeployRuntimeStores(analysis: DeployRuntimeAnalysis): DoctorCheck
   const key = 'deploy-runtime-stores'
   const title = 'Deploy Runtime Stores'
 
+  const caveat = formatParseCaveat(analysis)
+
   if (analysis.targets.length === 0) {
-    return createCheck(key, title, 'pass', 'No deploy plugin or Lambda adapter detected.')
+    return createCheck(key, title, 'pass', `No deploy plugin or Lambda adapter detected.${caveat}`)
   }
 
   const labels = formatTargetLabels(analysis.targets)
@@ -1118,8 +1120,6 @@ function detectDeployRuntimeStores(analysis: DeployRuntimeAnalysis): DoctorCheck
     )
   }
 
-  const caveat = formatParseCaveat(analysis)
-
   if (issues.length === 0) {
     return createCheck(key, title, 'pass', `${labels} detected, and no in-memory store defaults were found.${caveat}`)
   }
@@ -1144,12 +1144,13 @@ function detectDeployProviderDiscovery(analysis: DeployRuntimeAnalysis): DoctorC
   const key = 'deploy-provider-discovery'
   const title = 'Deploy Provider Discovery'
 
+  const caveat = formatParseCaveat(analysis)
+
   if (analysis.targets.length === 0) {
-    return createCheck(key, title, 'pass', 'No deploy plugin or Lambda adapter detected.')
+    return createCheck(key, title, 'pass', `No deploy plugin or Lambda adapter detected.${caveat}`)
   }
 
   const labels = formatTargetLabels(analysis.targets)
-  const caveat = formatParseCaveat(analysis)
 
   if (analysis.discoverySignals.length === 0) {
     return createCheck(key, title, 'pass', `${labels} detected, and provider discovery is not used.${caveat}`)

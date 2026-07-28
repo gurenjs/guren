@@ -121,7 +121,7 @@ describe('deploy target detection', () => {
       const { targets } = await analyzeDeployRuntime(dir)
 
       expect(targets).toHaveLength(1)
-      expect(targets[0].profile.id).toBe('cloudflare')
+      expect(targets[0].profile.label).toBe('Cloudflare Workers')
       expect(targets[0].detectedVia).toContain('@guren/plugin-cloudflare')
     })
   })
@@ -131,7 +131,7 @@ describe('deploy target detection', () => {
       const { targets } = await analyzeDeployRuntime(dir)
 
       expect(targets).toHaveLength(1)
-      expect(targets[0].profile.id).toBe('vercel')
+      expect(targets[0].profile.label).toBe('Vercel')
       // buildVercelOutput emits `runtime: 'bun1.x'`, so Bun.password exists.
       expect(targets[0].profile.hasBunRuntime).toBe(true)
     })
@@ -146,7 +146,7 @@ describe('deploy target detection', () => {
       const { targets } = await analyzeDeployRuntime(dir)
 
       expect(targets).toHaveLength(1)
-      expect(targets[0].profile.id).toBe('lambda')
+      expect(targets[0].profile.label).toBe('AWS Lambda')
       expect(targets[0].detectedVia).toContain('lambda.ts')
     })
   })
@@ -159,7 +159,7 @@ describe('deploy target detection', () => {
     await withApp('guren-deploy-lambda-server-', files, {}, async (dir) => {
       const { targets } = await analyzeDeployRuntime(dir)
 
-      expect(targets.map((target) => target.profile.id)).toEqual(['lambda'])
+      expect(targets.map((target) => target.profile.label)).toEqual(['AWS Lambda'])
     })
   })
 
@@ -176,7 +176,7 @@ export const handler = createLambdaHandler(app)
     await withApp('guren-deploy-lambda-call-', files, {}, async (dir) => {
       const { targets } = await analyzeDeployRuntime(dir)
 
-      expect(targets.map((target) => target.profile.id)).toEqual(['lambda'])
+      expect(targets.map((target) => target.profile.label)).toEqual(['AWS Lambda'])
     })
   })
 
@@ -187,7 +187,7 @@ export const handler = createLambdaHandler(app)
     await withApp('guren-deploy-multi-', files, deps, async (dir) => {
       const { targets } = await analyzeDeployRuntime(dir)
 
-      expect(targets.map((target) => target.profile.id).sort()).toEqual(['cloudflare', 'lambda'])
+      expect(targets.map((target) => target.profile.label).sort()).toEqual(['AWS Lambda', 'Cloudflare Workers'])
     })
   })
 
@@ -761,15 +761,66 @@ export const app = createApp({
     })
   })
 
+  // The file imports the very symbols it names in prose, so source-aware name
+  // filtering alone cannot carry this test — only comment/string handling can.
   it('ignores constructions inside comments and string literals', async () => {
     const files = {
-      'src/notes.ts': `// migration note: replace new MemoryStore() before deploying
+      'src/notes.ts': `import { MemoryStore, MemoryDriver } from '@guren/core'
+
+// migration note: replace new MemoryStore() before deploying
 export const doc = 'call new MemoryDriver() to enqueue locally'
 `,
     }
 
     await withApp('guren-ast-comments-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
       expect((await analyzeDeployRuntime(dir)).memoryStoreSignals).toEqual([])
+    })
+  })
+
+  // Both keys are generic enough that another library's config would claim
+  // them; they only count inside a file that imports from Guren.
+  it('ignores session option keys in a file with no Guren import', async () => {
+    const files = {
+      'config/other.ts': `export const cfg = { sessionOptions: { maxAge: 1 }, autoSession: true }\n`,
+    }
+
+    await withApp('guren-ast-foreign-session-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      expect((await analyzeDeployRuntime(dir)).sessionSignals).toEqual([])
+    })
+  })
+
+  it('ignores an unrelated auth.attempt() in a file with no Guren import', async () => {
+    const files = {
+      'src/other.ts': `import { auth } from 'some-auth-sdk'\nexport const ok = await auth.attempt({})\n`,
+    }
+
+    await withApp('guren-ast-foreign-attempt-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      expect((await analyzeDeployRuntime(dir)).passwordAuthSignals).toEqual([])
+    })
+  })
+
+  // Suppression stays ungated on purpose: missing an opt-out would warn a
+  // correctly-configured app, the failure direction this check avoids.
+  it('still reads autoSession: false from a file with no Guren import', async () => {
+    const files = {
+      'config/session.ts': `export const session = { autoSession: false }\n`,
+      'src/app.ts': `import { createApp } from '@guren/core'\nexport const app = createApp({ auth: {} })\n`,
+    }
+
+    await withApp('guren-ast-ungated-optout-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      expect((await deployChecks(dir))['deploy-runtime-stores'].status).toBe('pass')
+    })
+  })
+
+  it('ignores a signal name used only in an implements clause', async () => {
+    const files = {
+      'src/provider.ts': `import { OAuthServiceProvider } from '@guren/core'
+export class Custom implements OAuthServiceProvider {}
+`,
+    }
+
+    await withApp('guren-ast-implements-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      expect((await analyzeDeployRuntime(dir)).oauthSignals).toEqual([])
     })
   })
 
@@ -921,7 +972,26 @@ export const store = new guren.DatabaseSessionStore(sessions)
 
       expect(check.status).toBe('warn')
       expect(check.message).toContain('sessions are enabled')
-      expect(check.message).toContain('could not be parsed and were not scanned: src/broken.ts')
+      expect(check.message).toContain('could not be read or parsed and were not scanned: src/broken.ts')
+    })
+  })
+
+  // The Lambda target is detected from source, so a skipped file can hide a
+  // target entirely. "No deploy plugin detected" computed over an incomplete
+  // scan has to disclose that, or the caveat has a hole exactly where the
+  // scan was least complete.
+  it('carries the caveat on the no-target verdict, since a skipped file can hide a Lambda target', async () => {
+    const files = { 'lambda.ts': `import { createLambdaHandler } from '@guren/core/lambda'\nexport const = broken {{{` }
+
+    await withApp('guren-caveat-no-target-', files, {}, async (dir) => {
+      const analysis = await analyzeDeployRuntime(dir)
+      expect(analysis.targets).toEqual([])
+      expect(analysis.unparsedFiles).toEqual(['lambda.ts'])
+
+      for (const check of Object.values(await deployChecks(dir))) {
+        expect(check.message).toContain('No deploy plugin or Lambda adapter detected.')
+        expect(check.message).toContain('could not be read or parsed')
+      }
     })
   })
 
