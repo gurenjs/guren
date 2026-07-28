@@ -19,7 +19,7 @@ bunx guren lambda:build
 
 | Path | Contents |
 |------|----------|
-| `function/` | Self-contained ESM bundle (`handler.js`) plus the SSR bundle and Drizzle migrations — deploy this as the function code (handlers: `handler.http`, `handler.queue`, ...) |
+| `function/` | Self-contained ESM bundle (`handler.js`) plus the SSR bundle, Drizzle migrations, and seeders — deploy this as the function code (handlers: `handler.http`, `handler.queue`, ...) |
 | `assets/` | `public/` staged for S3, with built assets mirrored under both `/assets/` and `/public/assets/` |
 | `env.json` | Environment the function expects (`NODE_ENV`, Inertia asset entries) — the same values are baked into the bundle as defaults |
 

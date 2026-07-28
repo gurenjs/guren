@@ -36,6 +36,9 @@ function scaffoldApp(root: string, options: { ssr?: boolean; renderExport?: stri
   mkdirSync(join(root, 'db/migrations/20260101000000_init'), { recursive: true })
   writeFileSync(join(root, 'db/migrations/20260101000000_init/migration.sql'), 'CREATE TABLE posts (id serial);\n')
 
+  mkdirSync(join(root, 'db/seeders'), { recursive: true })
+  writeFileSync(join(root, 'db/seeders/001_init.ts'), 'export default async () => {}\n')
+
   if (ssr) {
     mkdirSync(join(root, '.guren/ssr/.vite'), { recursive: true })
     writeFileSync(join(root, '.guren/ssr/ssr-Xyz789.js'), `${renderExport}\n`)
@@ -133,19 +136,56 @@ describe('buildLambdaOutput', () => {
     expect(report.bakedEntry).toBe('/assets/app-Abc123.js')
   })
 
-  test('should copy the SSR bundle and migrations into the function directory', async () => {
+  test('should copy the SSR bundle, migrations, and seeders into the function directory', async () => {
     scaffoldApp(root)
 
     await buildLambdaOutput({ rootDir: root, skipAppBuild: true })
 
     expect(existsSync(join(root, '.lambda/function/.guren/ssr/ssr-Xyz789.js'))).toBe(true)
     expect(existsSync(join(root, '.lambda/function/db/migrations/20260101000000_init/migration.sql'))).toBe(true)
+    expect(existsSync(join(root, '.lambda/function/db/seeders/001_init.ts'))).toBe(true)
 
     const env = JSON.parse(readFileSync(join(root, '.lambda/env.json'), 'utf8'))
     expect(env.NODE_ENV).toBe('production')
     expect(env.GUREN_INERTIA_ENTRY).toBe('/assets/app-Abc123.js')
     expect(env.GUREN_INERTIA_SSR_ENTRY).toBe('./.guren/ssr/ssr-Xyz789.js')
     expect(env.GUREN_INERTIA_SSR_MANIFEST).toBe('./.guren/ssr/.vite/manifest.json')
+  })
+
+  test('should define import.meta.url so `new URL("../db/migrations", import.meta.url)` resolves against the function root', async () => {
+    // Regression test: config/database.ts and config/app.ts (both the
+    // scaffolded default template and examples/blog) resolve their
+    // migrations/seeders folders via `new URL('../db/migrations',
+    // import.meta.url)` from a file one directory below the app root
+    // (config/). Left undefined, every module in the single bundled
+    // output shares one real import.meta.url — the deployed
+    // `file:///var/task/handler.js` — collapsing that expression to
+    // `/var/db/migrations` instead of `/var/task/db/migrations`, silently
+    // skipping configureOrm()/seedDatabase() in production.
+    scaffoldApp(root)
+    writeFileSync(
+      join(root, 'src/lambda.ts'),
+      [
+        "const resolved = new URL('../db/migrations', import.meta.url)",
+        'export const http = () => resolved.pathname',
+        'export const queue = () => "queue"',
+        'export const schedule = () => "schedule"',
+        'const consoleHandler = () => "console"',
+        'export { consoleHandler as console }',
+        '',
+      ].join('\n'),
+    )
+
+    await buildLambdaOutput({ rootDir: root, skipAppBuild: true })
+
+    const probe = 'const m = await import(process.argv[1]); console.log(m.http())'
+    const result = Bun.spawnSync({
+      cmd: [process.execPath, '-e', probe, join(root, '.lambda/function/handler.js')],
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout.toString().trim()).toBe('/var/task/db/migrations')
   })
 
   test('should stage public files for S3 with the /public/assets mirror', async () => {

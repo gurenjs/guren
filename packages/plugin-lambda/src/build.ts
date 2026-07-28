@@ -29,6 +29,8 @@ export interface BuildLambdaOutputOptions {
   ssrDir?: PathLike
   /** Drizzle migrations copied into the function. Defaults to `<root>/db/migrations`. */
   migrationsDir?: PathLike
+  /** Seeders copied into the function. Defaults to `<root>/db/seeders`. */
+  seedersDir?: PathLike
   /** Client manifest key for the frontend entry. Defaults to `resources/js/app.tsx`. */
   clientEntryKey?: string
   /** SSR manifest key for the server entry. Defaults to `resources/js/ssr.tsx`. */
@@ -97,6 +99,7 @@ export async function buildLambdaOutput(options: BuildLambdaOutputOptions = {}):
   const publicDir = resolvePathLike(options.publicDir ?? resolve(root, 'public'))
   const ssrDir = resolvePathLike(options.ssrDir ?? resolve(root, '.guren/ssr'))
   const migrationsDir = resolvePathLike(options.migrationsDir ?? resolve(root, 'db/migrations'))
+  const seedersDir = resolvePathLike(options.seedersDir ?? resolve(root, 'db/seeders'))
   const clientEntryKey = options.clientEntryKey ?? 'resources/js/app.tsx'
   const ssrEntryKey = options.ssrEntryKey ?? 'resources/js/ssr.tsx'
 
@@ -145,6 +148,10 @@ export async function buildLambdaOutput(options: BuildLambdaOutputOptions = {}):
 
   if (existsSync(migrationsDir)) {
     cpSync(migrationsDir, resolve(funcDir, 'db/migrations'), { recursive: true })
+  }
+
+  if (existsSync(seedersDir)) {
+    cpSync(seedersDir, resolve(funcDir, 'db/seeders'), { recursive: true })
   }
 
   writeFileSync(resolve(out, 'env.json'), `${JSON.stringify({ NODE_ENV: 'production', ...env }, null, 2)}\n`)
@@ -253,9 +260,19 @@ async function bundleHandler(handlerEntry: string, funcDir: string): Promise<voi
     outdir: funcDir,
     target: 'node',
     minify: true,
-    // `bun build` inlines `process.env.NODE_ENV` at bundle time (defaulting to
-    // "development"), so pin it to "production" for the deployed function.
-    define: { 'process.env.NODE_ENV': '"production"' },
+    define: {
+      // `bun build` inlines `process.env.NODE_ENV` at bundle time (defaulting
+      // to "development"), so pin it to "production" for the deployed function.
+      'process.env.NODE_ENV': '"production"',
+      // Every module in the bundle shares one `import.meta.url` — the real
+      // runtime value of the single output file, `file:///var/task/handler.js`.
+      // That breaks the framework's `new URL('../db/migrations', import.meta.url)`
+      // convention (config/database.ts, config/app.ts's migration check): those
+      // files live one directory below the app root, so the same expression
+      // must resolve from one level under /var/task to reach the db/migrations
+      // and db/seeders folders `lambda:build` copies next to the bundle.
+      'import.meta.url': '"file:///var/task/config/lambda.js"',
+    },
     // Provided by the managed Lambda runtime.
     external: ['@aws-sdk/*'],
     plugins: [
