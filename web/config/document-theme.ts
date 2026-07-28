@@ -27,6 +27,14 @@ const SIZE_UTILITIES = `
 
 export const LIGHT_SURFACE_CRITICAL_CSS = `${SURFACE_CSS}${SIZE_UTILITIES}`
 
+/** Favicon links, site-wide — the framework has no default of its own. */
+export const FAVICON_HEAD = `
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+<link rel="icon" type="image/png" sizes="192x192" href="/favicon-192x192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/favicon-512x512.png" />
+<link rel="apple-touch-icon" sizes="192x192" href="/favicon-192x192.png" />
+`.trim()
+
 /**
  * Resolves the color mode before the first paint, so a dark-mode reader never
  * sees a light flash. Mirrors `applyMode()` in
