@@ -15,7 +15,7 @@ import { readDeclaredDependencyNames } from './plugin-manifest'
  * docs/{en,ja}/guides/serverless.md; the checks below are their mechanical
  * counterpart.
  */
-export type DeployTargetId = 'cloudflare' | 'vercel' | 'lambda'
+type DeployTargetId = 'cloudflare' | 'vercel' | 'lambda'
 
 export interface DeployTargetProfile {
   id: DeployTargetId
@@ -54,7 +54,16 @@ const DEPLOY_TARGET_PROFILES: Record<DeployTargetId, DeployTargetProfile> = {
   },
 }
 
-/** Deploy plugin package names, matched against the app's own package.json. */
+/**
+ * Deploy plugin package names, matched against the app's own package.json.
+ *
+ * Matched by name rather than driven off the `gurenPlugin` manifest for two
+ * reasons: the manifest lives in `node_modules/<pkg>/package.json`, so reading
+ * it would stop detection working before `bun install`, and the Lambda target
+ * ships inside `@guren/core` with no plugin package for a manifest to live in.
+ * A manifest field would therefore cover two of three targets and leave the
+ * third here anyway — two sources of truth instead of one.
+ */
 const DEPLOY_PLUGIN_PACKAGES: Record<string, DeployTargetId> = {
   '@guren/plugin-cloudflare': 'cloudflare',
   '@guren/plugin-vercel': 'vercel',
@@ -82,8 +91,6 @@ export interface SourceSignal {
 
 export interface DeployRuntimeAnalysis {
   targets: DeployTargetDetection[]
-  /** Targets that lack `Bun.password`, so the default `ScryptHasher` breaks. */
-  bunlessTargets: DeployTargetDetection[]
   /** Evidence that the app authenticates with passwords at all. */
   passwordAuthSignals: SourceSignal[]
   /** `NodeHasher` references — the remediation for a Bun-less runtime. */
@@ -106,6 +113,9 @@ export interface DeployRuntimeAnalysis {
 
 /** Directories scanned for the symbols above. */
 const DEPLOY_SCAN_DIRS = ['src', 'app', 'config', 'db', 'routes', 'modules', 'bin', 'functions', 'api'] as const
+
+/** Test files are excluded from the scan — see readAppSources. */
+const TEST_FILE_PATTERN = /\.(test|spec)\.[cm]?[jt]sx?$/
 
 type SymbolPatterns = ReadonlyArray<readonly [symbol: string, pattern: RegExp]>
 
@@ -215,9 +225,6 @@ const MEMORY_STORE_PATTERNS: SymbolPatterns = [
  * `ApplicationOptions.discover` is deliberately not matched here: it is
  * declared but never read anywhere in @guren/server, so it has no effect —
  * warning about it would flag a config key that doesn't actually do anything.
- *
- * Known gap: `import { AutoDiscovery as X }; new X()` isn't recognized, the
- * same aliased-import limitation as NODE_HASHER_PATTERNS above.
  */
 const DISCOVERY_PATTERNS: SymbolPatterns = [
   ['AutoDiscovery', /\bnew\s+AutoDiscovery\s*\(/],
@@ -225,43 +232,54 @@ const DISCOVERY_PATTERNS: SymbolPatterns = [
 
 interface ScannedFile {
   filePath: string
-  content: string
   /** Split once per file and reused across every pattern pass in findSignals. */
   lines: string[]
 }
 
 /**
- * Read the app's own source files from a bounded set of roots: the directories
- * in DEPLOY_SCAN_DIRS plus any source file sitting directly in the project root
- * (deploy entrypoints like `lambda.ts` or `worker.ts` conventionally live there).
+ * Source files sitting directly in the project root. Deploy entrypoints
+ * (`lambda.ts`, `worker.ts`) conventionally live there, and collectFiles only
+ * recurses, so the root's own files need their own non-recursive pass.
  */
-async function readAppSources(cwd: string): Promise<ScannedFile[]> {
-  const directoryFiles = await Promise.all(
-    DEPLOY_SCAN_DIRS.map((dir) =>
-      collectFiles(resolve(cwd, dir), IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES),
-    ),
-  )
-
-  const rootFiles: string[] = []
+async function readRootSourceFiles(cwd: string): Promise<string[]> {
   try {
-    for (const entry of await readdir(cwd, { withFileTypes: true })) {
-      if (!entry.isFile() || entry.name.startsWith('.')) continue
-      if (entry.name.endsWith('.d.ts')) continue
-      if (IMPORTABLE_EXTENSIONS.has(extname(entry.name))) {
-        rootFiles.push(join(cwd, entry.name))
-      }
-    }
+    const entries = await readdir(cwd, { withFileTypes: true })
+    return entries
+      .filter((entry) => entry.isFile() && !entry.name.startsWith('.') && !entry.name.endsWith('.d.ts'))
+      .filter((entry) => IMPORTABLE_EXTENSIONS.has(extname(entry.name)))
+      .map((entry) => join(cwd, entry.name))
   } catch {
     // An unreadable project root leaves the directory scans as the only input.
+    return []
   }
+}
 
-  const paths = [...rootFiles, ...directoryFiles.flat()]
+/**
+ * Read the app's own source files from a bounded set of roots: the directories
+ * in DEPLOY_SCAN_DIRS plus any source file in the project root.
+ *
+ * Test files are excluded. A fixture that constructs a backed store or a
+ * NodeHasher would otherwise satisfy the remediation check on behalf of an
+ * application that never wires one up, hiding a real production gap — and a
+ * fixture enabling sessions would report sessions the app itself never enables.
+ */
+async function readAppSources(cwd: string): Promise<ScannedFile[]> {
+  const [directoryFiles, rootFiles] = await Promise.all([
+    Promise.all(
+      DEPLOY_SCAN_DIRS.map((dir) =>
+        collectFiles(resolve(cwd, dir), IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES),
+      ),
+    ),
+    readRootSourceFiles(cwd),
+  ])
+
+  const paths = [...rootFiles, ...directoryFiles.flat()].filter((path) => !TEST_FILE_PATTERN.test(path))
 
   const scanned = await Promise.all(
     paths.map(async (path) => {
       const content = await readFile(path, 'utf8').catch(() => null)
       if (content === null) return null
-      return { filePath: toPosixRelative(cwd, path), content, lines: content.split('\n') }
+      return { filePath: toPosixRelative(cwd, path), lines: content.split('\n') }
     }),
   )
 
@@ -287,11 +305,7 @@ function findSignals(files: ScannedFile[], patterns: SymbolPatterns): SourceSign
  * Deploy targets declared by the app: plugin packages from its package.json
  * dependencies, plus the Lambda adapter detected from source imports.
  */
-export async function detectDeployTargets(cwd: string): Promise<DeployTargetDetection[]> {
-  return detectTargetsIn(cwd, await readAppSources(cwd))
-}
-
-async function detectTargetsIn(cwd: string, files: ScannedFile[]): Promise<DeployTargetDetection[]> {
+async function detectDeployTargets(cwd: string, files: ScannedFile[]): Promise<DeployTargetDetection[]> {
   const detections: DeployTargetDetection[] = []
 
   const declared = new Set(await readDeclaredDependencyNames(cwd))
@@ -304,7 +318,7 @@ async function detectTargetsIn(cwd: string, files: ScannedFile[]): Promise<Deplo
     }
   }
 
-  const lambdaFile = files.find((file) => LAMBDA_SOURCE_PATTERN.test(file.content))
+  const lambdaFile = files.find((file) => file.lines.some((line) => LAMBDA_SOURCE_PATTERN.test(line)))
   if (lambdaFile) {
     detections.push({
       profile: DEPLOY_TARGET_PROFILES.lambda,
@@ -322,11 +336,10 @@ async function detectTargetsIn(cwd: string, files: ScannedFile[]): Promise<Deplo
  */
 export async function analyzeDeployRuntime(cwd: string): Promise<DeployRuntimeAnalysis> {
   const files = await readAppSources(cwd)
-  const targets = await detectTargetsIn(cwd, files)
+  const targets = await detectDeployTargets(cwd, files)
 
   return {
     targets,
-    bunlessTargets: targets.filter((target) => !target.profile.hasBunRuntime),
     passwordAuthSignals: findSignals(files, PASSWORD_AUTH_PATTERNS),
     nodeHasherSignals: findSignals(files, NODE_HASHER_PATTERNS),
     sessionSignals: findSignals(files, SESSION_PATTERNS),
@@ -337,6 +350,11 @@ export async function analyzeDeployRuntime(cwd: string): Promise<DeployRuntimeAn
     memoryStoreSignals: findSignals(files, MEMORY_STORE_PATTERNS),
     discoverySignals: findSignals(files, DISCOVERY_PATTERNS),
   }
+}
+
+/** Targets that lack `Bun.password`, so the default `ScryptHasher` breaks. */
+export function bunlessTargets(analysis: DeployRuntimeAnalysis): DeployTargetDetection[] {
+  return analysis.targets.filter((target) => !target.profile.hasBunRuntime)
 }
 
 export function formatTargetLabels(targets: DeployTargetDetection[]): string {

@@ -17,6 +17,7 @@ import { checkPluginCompatibility, readCoreVersion, readInstalledPluginManifests
 import { compareVersions } from './codemods'
 import {
   analyzeDeployRuntime,
+  bunlessTargets,
   formatSignals,
   formatTargetLabels,
   type DeployRuntimeAnalysis,
@@ -1042,7 +1043,9 @@ function detectDeployPasswordHashing(analysis: DeployRuntimeAnalysis): DoctorChe
   const key = 'deploy-password-hashing'
   const title = 'Deploy Password Hashing'
 
-  if (analysis.bunlessTargets.length === 0) {
+  const bunless = bunlessTargets(analysis)
+
+  if (bunless.length === 0) {
     return createCheck(
       key,
       title,
@@ -1053,7 +1056,7 @@ function detectDeployPasswordHashing(analysis: DeployRuntimeAnalysis): DoctorChe
     )
   }
 
-  const labels = formatTargetLabels(analysis.bunlessTargets)
+  const labels = formatTargetLabels(bunless)
 
   if (analysis.passwordAuthSignals.length === 0) {
     return createCheck(key, title, 'pass', `${labels} detected, and no password authentication was found.`)

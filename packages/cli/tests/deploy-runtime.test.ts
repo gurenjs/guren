@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
-import { analyzeDeployRuntime, detectDeployTargets } from '../src/deploy-runtime'
+import { analyzeDeployRuntime } from '../src/deploy-runtime'
 import { buildJsonOutput, getDoctorRuleEvaluations, runDoctor } from '../src/doctor'
 import type { DoctorCheck, DoctorStatus } from '../src/doctor'
 import { createTempWorkspace } from './helpers'
@@ -115,10 +115,10 @@ const SESSION_APP = `import { createApp } from '@guren/core'
 export const app = createApp({ auth: { autoSession: true } })
 `
 
-describe('detectDeployTargets', () => {
+describe('deploy target detection', () => {
   it('detects the Cloudflare plugin from package.json dependencies', async () => {
     await withApp('guren-deploy-cf-', {}, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      const targets = await detectDeployTargets(dir)
+      const { targets } = await analyzeDeployRuntime(dir)
 
       expect(targets).toHaveLength(1)
       expect(targets[0].profile.id).toBe('cloudflare')
@@ -128,7 +128,7 @@ describe('detectDeployTargets', () => {
 
   it('detects the Vercel plugin and marks it as a Bun runtime', async () => {
     await withApp('guren-deploy-vercel-', {}, { '@guren/plugin-vercel': '^0.2.0' }, async (dir) => {
-      const targets = await detectDeployTargets(dir)
+      const { targets } = await analyzeDeployRuntime(dir)
 
       expect(targets).toHaveLength(1)
       expect(targets[0].profile.id).toBe('vercel')
@@ -143,7 +143,7 @@ describe('detectDeployTargets', () => {
     }
 
     await withApp('guren-deploy-lambda-', files, {}, async (dir) => {
-      const targets = await detectDeployTargets(dir)
+      const { targets } = await analyzeDeployRuntime(dir)
 
       expect(targets).toHaveLength(1)
       expect(targets[0].profile.id).toBe('lambda')
@@ -157,7 +157,7 @@ describe('detectDeployTargets', () => {
     }
 
     await withApp('guren-deploy-lambda-server-', files, {}, async (dir) => {
-      const targets = await detectDeployTargets(dir)
+      const { targets } = await analyzeDeployRuntime(dir)
 
       expect(targets.map((target) => target.profile.id)).toEqual(['lambda'])
     })
@@ -168,7 +168,7 @@ describe('detectDeployTargets', () => {
     const deps = { '@guren/plugin-cloudflare': '^0.2.0' }
 
     await withApp('guren-deploy-multi-', files, deps, async (dir) => {
-      const targets = await detectDeployTargets(dir)
+      const { targets } = await analyzeDeployRuntime(dir)
 
       expect(targets.map((target) => target.profile.id).sort()).toEqual(['cloudflare', 'lambda'])
     })
@@ -176,7 +176,7 @@ describe('detectDeployTargets', () => {
 
   it('reports no target for a plain Bun app', async () => {
     await withApp('guren-deploy-none-', { 'src/app.ts': SESSION_APP }, {}, async (dir) => {
-      expect(await detectDeployTargets(dir)).toEqual([])
+      expect((await analyzeDeployRuntime(dir)).targets).toEqual([])
     })
   })
 })
@@ -594,6 +594,39 @@ describe('runDoctor integration', () => {
       expect(report.fixableChecks.map((check) => check.key)).not.toContain('deploy-runtime-stores')
       expect(json.summary.total).toBe(json.checks.length)
       expect(Array.isArray(json.nextSteps)).toBe(true)
+    })
+  })
+})
+
+describe('test files are excluded from the scan', () => {
+  // A test fixture constructing a backed store would otherwise satisfy the
+  // remediation check on behalf of an app that never wires one up, hiding a
+  // real production gap.
+  it('does not let a store constructed in a test file mask a production gap', async () => {
+    const files = {
+      'src/app.ts': SESSION_APP,
+      'src/app.test.ts': `import { DatabaseSessionStore } from '@guren/core'
+const store = new DatabaseSessionStore(sessions)
+`,
+    }
+
+    await withApp('guren-scan-test-mask-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      const check = (await deployChecks(dir))['deploy-runtime-stores']
+
+      expect(check.status).toBe('warn')
+      expect(check.message).toContain('sessions are enabled')
+    })
+  })
+
+  it('does not raise a session signal from a test fixture alone', async () => {
+    const files = {
+      'src/routes.test.ts': `const app = createApp({ auth: { autoSession: true } })\n`,
+    }
+
+    await withApp('guren-scan-test-signal-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      const analysis = await analyzeDeployRuntime(dir)
+
+      expect(analysis.sessionSignals).toEqual([])
     })
   })
 })
