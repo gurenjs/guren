@@ -53,15 +53,13 @@ jobs:
           - 33306:3306
         options: >-
           --health-cmd "mysqladmin ping -h127.0.0.1 -uguren -pguren"
-          --health-interval 10s
+          --health-interval 5s
           --health-timeout 5s
-          --health-retries 10
+          --health-retries 20
     env:
       REDIS_URL: redis://localhost:6379
-      # Drives the ORM's MySQL integration test, which is the only coverage of
-      # the real drizzle-orm/mysql2 adapter (the unit tests mock it out). It gets
-      # its own database because it drops every table in the one it points at.
-      MYSQL_URL: mysql://root:guren@localhost:33306/guren_orm_test
+      # Drives the ORM's MySQL integration test, which creates its own database.
+      MYSQL_URL: mysql://root:guren@localhost:33306/guren
       APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
 
     steps:

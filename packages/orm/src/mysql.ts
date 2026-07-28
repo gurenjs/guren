@@ -9,14 +9,18 @@ import { runSeeders } from './seeder'
 type ConnectionResolver = string | (() => string | undefined)
 type MySqlConnectionOptions = Record<string, unknown>
 type MySql2Drizzle = typeof import('drizzle-orm/mysql2')
-type MySql2Module = typeof import('mysql2')
-type CreatePool = MySql2Module['createPool']
+type CreatePool = typeof import('mysql2')['createPool']
 type MySqlPool = ReturnType<CreatePool>
-type MySqlPoolOptions = Parameters<CreatePool>[0]
 type DrizzleConfig = Exclude<Parameters<MySql2Drizzle['drizzle']>[0], string>
 
 // The mysql driver packages are loaded lazily so importing @guren/orm
 // does not require `mysql2` to be installed (e.g. SQLite-only apps).
+//
+// `createPool` comes from mysql2's callback API on purpose: drizzle builds its
+// own pool through `mysql2/promise` when handed a `connection:`, and that
+// wrapper exposes no `.config` for the driver to write `supportBigNumbers`
+// onto, so every query throws before reaching a socket. Pools built here are
+// passed to `drizzle({ client })` instead.
 async function loadMySqlModules(): Promise<{
   drizzle: MySql2Drizzle['drizzle']
   migrate: typeof import('drizzle-orm/mysql2/migrator')['migrate']
@@ -89,15 +93,6 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
     return resolved
   }
 
-  // The pool is built here rather than handed to drizzle as `connection`:
-  // drizzle's own wiring builds it through `mysql2/promise`, whose wrapper
-  // exposes no `.config` for the driver to write `supportBigNumbers` onto, so
-  // every query throws before reaching a socket. The callback-API pool it
-  // accepts as `client` does expose one.
-  function createClient(createPool: CreatePool, url: string): MySqlPool {
-    return createPool({ uri: url, ...clientOptions } as MySqlPoolOptions)
-  }
-
   async function migrateOnce(): Promise<void> {
     if (migrationsPromise) {
       return migrationsPromise
@@ -117,7 +112,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
       const { drizzle, migrate, createPool } = await loadMySqlModules()
       const url = resolveConnectionString()
       endpoint = describeConnectionEndpoint(url)
-      const migrationClient = createClient(createPool, url)
+      const migrationClient = createPool({ uri: url, ...clientOptions })
 
       try {
         const migrationDb = drizzle({
@@ -149,7 +144,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
       const url = resolveConnectionString()
       // Held locally as well as in closure state: a newer evaluation may close
       // this client while the await below is suspended, which clears `client`.
-      const activeClient = createClient(createPool, url)
+      const activeClient = createPool({ uri: url, ...clientOptions })
       client = activeClient
 
       activeKey = hotReloadKey('mysql', callSite, url)
@@ -211,7 +206,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
   async function withAdminDb<T>(callback: (db: MySql2Database) => Promise<T>): Promise<T> {
     const { drizzle, createPool } = await loadMySqlModules()
     const url = resolveConnectionString()
-    const adminClient = createClient(createPool, url)
+    const adminClient = createPool({ uri: url, ...clientOptions })
     const adminDb = drizzle({ client: adminClient } as DrizzleConfig) as unknown as MySql2Database
 
     try {
@@ -283,13 +278,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
 
 async function closePool(pool: MySqlPool): Promise<void> {
   await new Promise<void>((resolveClose, rejectClose) => {
-    pool.end((error) => {
-      if (error) {
-        rejectClose(error)
-        return
-      }
-      resolveClose()
-    })
+    pool.end((error) => (error ? rejectClose(error) : resolveClose()))
   })
 }
 

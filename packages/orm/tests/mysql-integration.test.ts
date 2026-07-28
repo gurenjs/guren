@@ -8,23 +8,27 @@ import { createMySqlDatabase, type MySqlDatabase } from '../src/mysql'
 // The unit tests mock `drizzle-orm/mysql2` away, so they cannot see driver-level
 // breakage (a wiring shape the adapter rejects, a migrator that never runs).
 // CI supplies MYSQL_URL from a mysql service container; locally, start one with
-// `bun run db:up:mysql`.
-//
-// MYSQL_URL must name a database dedicated to this test — the reset below drops
-// every table in it — and a user allowed to create that database, since the
-// compose service only grants the app user rights on its own.
+// `bun run db:up:mysql`. MYSQL_URL needs a user allowed to create a database,
+// since the compose service only grants the app user rights on its own.
 const MYSQL_URL = process.env.MYSQL_URL
 const describeMySql = MYSQL_URL ? describe : describe.skip
 
-async function ensureDatabase(url: string): Promise<void> {
-  const { createPool } = await import('mysql2/promise')
-  const target = new URL(url)
-  const name = decodeURIComponent(target.pathname.slice(1))
-  target.pathname = '/mysql'
+// Derived rather than taken from MYSQL_URL: the reset below drops every table
+// in the database it runs against, and MYSQL_URL is the same string a
+// scaffolded app puts in DATABASE_URL.
+const TEST_DATABASE = 'guren_orm_test'
 
-  const pool = createPool({ uri: target.toString() })
+function databaseUrl(url: string, database: string): string {
+  const target = new URL(url)
+  target.pathname = `/${database}`
+  return target.toString()
+}
+
+async function ensureTestDatabase(url: string): Promise<void> {
+  const { createPool } = await import('mysql2/promise')
+  const pool = createPool({ uri: databaseUrl(url, 'mysql') })
   try {
-    await pool.query(`CREATE DATABASE IF NOT EXISTS \`${name.replaceAll('`', '``')}\``)
+    await pool.query(`CREATE DATABASE IF NOT EXISTS \`${TEST_DATABASE}\``)
   } finally {
     await pool.end()
   }
@@ -42,13 +46,14 @@ function createMigrationsFolder(): string {
 }
 
 describeMySql('createMySqlDatabase against a real MySQL server (requires MYSQL_URL)', () => {
-  let database: MySqlDatabase | undefined
+  let database: MySqlDatabase
 
   beforeAll(async () => {
-    await ensureDatabase(MYSQL_URL as string)
+    const url = MYSQL_URL as string
+    await ensureTestDatabase(url)
     database = createMySqlDatabase({
       migrationsFolder: createMigrationsFolder(),
-      connectionString: () => MYSQL_URL,
+      connectionString: () => databaseUrl(url, TEST_DATABASE),
     })
     await database.resetDatabase()
   })
@@ -59,15 +64,7 @@ describeMySql('createMySqlDatabase against a real MySQL server (requires MYSQL_U
     await database?.closeDatabase()
   })
 
-  function getDatabaseHandle(): MySqlDatabase {
-    if (!database) {
-      throw new Error('beforeAll did not set up the database handle')
-    }
-    return database
-  }
-
   it('runs migrations and queries through the real driver', async () => {
-    const database = getDatabaseHandle()
     const db = await database.getDatabase()
 
     const [rows] = (await db.execute(sql`SELECT 1 AS one`)) as unknown as [Array<{ one: number }>]
@@ -81,7 +78,6 @@ describeMySql('createMySqlDatabase against a real MySQL server (requires MYSQL_U
   })
 
   it('reports the applied migration', async () => {
-    const database = getDatabaseHandle()
     await database.migrateDatabase()
 
     const status = await database.migrationStatus()
@@ -90,7 +86,6 @@ describeMySql('createMySqlDatabase against a real MySQL server (requires MYSQL_U
   })
 
   it('drops every table on reset', async () => {
-    const database = getDatabaseHandle()
     await database.migrateDatabase()
     await database.resetDatabase()
 

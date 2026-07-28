@@ -44,10 +44,8 @@ bun run dev
 
 # Database
 bun run db:up         # Start PostgreSQL container
-bun run db:up:mysql   # Start MySQL container. The ORM's MySQL integration test
-                      # skips unless MYSQL_URL is set; it drops every table in
-                      # that database, so give it a dedicated one:
-                      # MYSQL_URL=mysql://root:guren@localhost:33306/guren_orm_test
+bun run db:up:mysql   # Start MySQL container (the ORM's MySQL integration test
+                      # skips unless MYSQL_URL is set)
 bun run db:down       # Stop containers
 bun run db:migrate    # Run migrations
 bun run db:seed       # Run seeders

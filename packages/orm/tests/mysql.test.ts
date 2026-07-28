@@ -4,22 +4,17 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { DrizzleAdapter } from '../src/adapters/drizzle-adapter'
 
+// Annotated because `end` reads `pool` from its own initializer.
 interface FakePool {
-  options: unknown
   ended: boolean
-  config: Record<string, unknown>
   end(callback?: (error?: unknown) => void): void
 }
 
 let executeImpl: () => Promise<unknown> = async () => [[]]
 const createdPools: FakePool[] = []
-const createPoolMock = mock((options: unknown) => {
+const createPoolMock = mock(() => {
   const pool: FakePool = {
-    options,
     ended: false,
-    // The callback-API pool exposes `config`; drizzle's own promise-API pool
-    // does not, which is why the adapter builds the pool itself.
-    config: {},
     end(callback) {
       pool.ended = true
       callback?.()
@@ -75,15 +70,18 @@ describe('createMySqlDatabase', () => {
 
     await database.migrateDatabase()
     expect(migrateMock).toHaveBeenCalled()
-    // The migration pool is short-lived and must not outlive the migration.
-    expect(createdPools.at(0)?.ended).toBe(true)
 
     const db = await database.getDatabase()
     expect(createPoolMock).toHaveBeenLastCalledWith({ uri: 'mysql://example', connectTimeout: 1234 })
-    expect(db).toMatchObject({ config: { client: createdPools.at(-1) } })
+
+    const [migrationPool, activePool] = createdPools
+    // The migration pool is short-lived and must not outlive the migration.
+    expect(migrationPool?.ended).toBe(true)
+    // `client`, not `connection`: drizzle must be handed the pool we built.
+    expect((db as unknown as { config: { client: unknown } }).config.client).toBe(activePool)
 
     await database.closeDatabase()
-    expect(createdPools.at(-1)?.ended).toBe(true)
+    expect(activePool?.ended).toBe(true)
   })
 
   it('configures the Drizzle adapter', async () => {
