@@ -86,6 +86,13 @@ export interface InertiaDocumentOptions {
    * `matchMedia` before React hydrates.
    */
   readonly prepaintScript?: InertiaDocumentValue;
+  /**
+   * Raw markup inlined into `<head>`, ahead of the critical CSS and stylesheet
+   * links. Unescaped — the app author owns this string. Use it for static,
+   * site-wide tags the framework has no way to infer on its own, such as
+   * `<link rel="icon">` favicons.
+   */
+  readonly head?: InertiaDocumentValue;
 }
 
 let documentOptions: InertiaDocumentOptions | undefined;
@@ -103,8 +110,9 @@ let documentOptions: InertiaDocumentOptions | undefined;
  * requests are in flight leaks the new policy into them. Use the matching
  * {@link InertiaOptions} fields for a single response instead.
  *
- * The values are emitted verbatim inside `<style>` / `<script>` elements —
- * they are developer-authored assets, never user input.
+ * The values are emitted verbatim — inside `<style>` / `<script>` elements,
+ * or as raw markup for `head` — they are developer-authored assets, never
+ * user input.
  *
  * ```typescript
  * setInertiaDocument({
@@ -249,6 +257,7 @@ async function renderDocument(
     options,
     page.component
   );
+  const headMarkup = resolveDocumentValue("head", options, page.component);
   const ssrResult = await tryRenderSsr(page, options);
   const headElements = (ssrResult?.head ?? []).map(normalizeHeadElement);
   const hasCustomTitle = headElements.some((element) =>
@@ -258,6 +267,7 @@ async function renderDocument(
     '<meta charset="utf-8" />',
     '<meta name="viewport" content="width=device-width, initial-scale=1" />',
     hasCustomTitle ? "" : `<title>${title}</title>`,
+    headMarkup ?? "",
     // Both must precede the stylesheet links: they exist to settle the first
     // paint before the app's own CSS arrives.
     criticalCss ? `<style id="guren-critical">${criticalCss}</style>` : "",

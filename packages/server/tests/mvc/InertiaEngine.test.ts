@@ -58,6 +58,17 @@ describe('InertiaEngine SSR integration', () => {
     expect(body).toContain("<script>document.documentElement.classList.add('dark');</script>")
   })
 
+  it('inlines raw head markup such as favicon links', async () => {
+    setInertiaDocument({
+      head: '<link rel="icon" type="image/png" href="/favicon-32x32.png" />',
+    })
+
+    const response = await inertia('Docs/Show', { categories: [] }, { url: '/docs/guides/overview' })
+    const body = await response.text()
+
+    expect(body).toContain('<link rel="icon" type="image/png" href="/favicon-32x32.png" />')
+  })
+
   it('places the critical CSS and prepaint script ahead of the stylesheet links', async () => {
     setInertiaDocument({
       criticalCss: 'body{background:#ffffff;}',

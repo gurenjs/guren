@@ -8,6 +8,7 @@ import { redirectToCanonicalHost } from '../app/Http/Middleware/canonical-host.j
 import DatabaseProvider from '../app/Providers/DatabaseProvider.js'
 import {
   COLOR_MODE_PREPAINT_SCRIPT,
+  FAVICON_HEAD,
   LIGHT_SURFACE_CRITICAL_CSS,
 } from '../config/document-theme.js'
 import { LIGHT_SURFACE_BODY_CLASS, usesLightSurface } from '../config/theme.js'
@@ -24,6 +25,7 @@ setInertiaDocument({
   criticalCss: ({ component }) => (usesLightSurface(component) ? LIGHT_SURFACE_CRITICAL_CSS : undefined),
   prepaintScript: ({ component }) =>
     usesLightSurface(component) ? COLOR_MODE_PREPAINT_SCRIPT : undefined,
+  head: FAVICON_HEAD,
 })
 
 const app = createApp({
