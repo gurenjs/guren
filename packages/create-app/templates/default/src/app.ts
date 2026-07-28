@@ -1,4 +1,5 @@
-import { createApp, setInertiaDocument } from '@guren/core'
+import { createApp } from '@guren/core'
+import { setInertiaDocument } from '@guren/core'
 import DatabaseProvider from '../app/Providers/DatabaseProvider.js'
 import { registerWebRoutes } from '../routes/web.js'
 
