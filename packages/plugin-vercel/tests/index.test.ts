@@ -1,18 +1,29 @@
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { afterEach, describe, expect, it } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { buildVercelOutput, createVercelHandler, vercelPlugin } from '../src/index'
 
-const tempDirs: string[] = []
+const DEFAULT_ENTRYPOINT_SOURCE = "export default { fetch() { return new Response('ok') } }\n"
+
+/**
+ * Writes a minimal buildable app under `root` and returns it as
+ * `buildVercelOutput` options, so a test can just `buildVercelOutput(app)`.
+ */
+function scaffoldApp(
+  root: string,
+  options: { entrypoint?: string; source?: string } = {},
+): { rootDir: string; entrypoint: string; outputDir: string } {
+  const { entrypoint = 'src/index.ts', source = DEFAULT_ENTRYPOINT_SOURCE } = options
+  const entrypointPath = join(root, entrypoint)
+
+  mkdirSync(dirname(entrypointPath), { recursive: true })
+  writeFileSync(entrypointPath, source, 'utf8')
+
+  return { rootDir: root, entrypoint: entrypointPath, outputDir: join(root, '.vercel/output') }
+}
 
 describe('@guren/plugin-vercel', () => {
-  afterEach(() => {
-    for (const dir of tempDirs.splice(0)) {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
-
   it('creates a Vercel fetch handler from a bootable app', async () => {
     let booted = false
     const app = {
@@ -40,126 +51,94 @@ describe('@guren/plugin-vercel', () => {
     expect(first.name).toBe('vercelPluginProvider')
   })
 
-  it('matches the configured handler filename to the bundled entrypoint', () => {
-    const rootDir = mkdtempSync(join(tmpdir(), 'guren-plugin-vercel-'))
-    tempDirs.push(rootDir)
+  describe('buildVercelOutput', () => {
+    let root: string
 
-    const entrypoint = join(rootDir, 'src/vercel.ts')
-    mkdirSync(join(rootDir, 'src'), { recursive: true })
-    writeFileSync(entrypoint, "export default { fetch() { return new Response('ok') } }\n", 'utf8')
-
-    buildVercelOutput({
-      rootDir,
-      entrypoint,
-      outputDir: join(rootDir, '.vercel/output'),
+    beforeEach(() => {
+      root = mkdtempSync(join(tmpdir(), 'guren-plugin-vercel-'))
     })
 
-    const config = JSON.parse(
-      readFileSync(join(rootDir, '.vercel/output/functions/index.func/.vc-config.json'), 'utf8'),
-    ) as { handler: string }
-
-    expect(config.handler).toBe('vercel.js')
-  })
-
-  it('routes the asset base back onto the output root', () => {
-    // Built assets self-reference `/public/assets/` while the files land at
-    // the output root, so a deployment routed only by this file — which is
-    // what `--prebuilt` does — needs the mapping here rather than in
-    // vercel.json.
-    const rootDir = mkdtempSync(join(tmpdir(), 'guren-plugin-vercel-'))
-    const outputDir = join(rootDir, '.vercel/output')
-    const entrypoint = join(rootDir, 'src/vercel.ts')
-    mkdirSync(join(rootDir, 'src'), { recursive: true })
-    writeFileSync(entrypoint, "export default { fetch() { return new Response('ok') } }\n", 'utf8')
-
-    buildVercelOutput({ rootDir, outputDir, entrypoint })
-
-    const config = JSON.parse(readFileSync(join(outputDir, 'config.json'), 'utf8'))
-    const routes = config.routes as Array<Record<string, string>>
-
-    expect(routes[0]).toEqual({ src: '/public/(.*)', dest: '/$1' })
-    // It has to win before the filesystem handler, which would otherwise
-    // miss and fall through to the function.
-    expect(routes.findIndex((route) => route.handle === 'filesystem')).toBeGreaterThan(0)
-
-    rmSync(rootDir, { recursive: true, force: true })
-  })
-
-  it('copies the docs directory into the function bundle', () => {
-    const rootDir = mkdtempSync(join(tmpdir(), 'guren-plugin-vercel-'))
-    tempDirs.push(rootDir)
-
-    const entrypoint = join(rootDir, 'src/index.ts')
-    mkdirSync(join(rootDir, 'src'), { recursive: true })
-    mkdirSync(join(rootDir, 'docs/en/guides'), { recursive: true })
-    writeFileSync(entrypoint, "export default { fetch() { return new Response('ok') } }\n", 'utf8')
-    writeFileSync(join(rootDir, 'docs/en/guides/overview.md'), '# Overview\n\nHello docs.\n', 'utf8')
-
-    buildVercelOutput({
-      rootDir,
-      entrypoint,
-      outputDir: join(rootDir, '.vercel/output'),
+    afterEach(() => {
+      rmSync(root, { recursive: true, force: true })
     })
 
-    const copied = readFileSync(
-      join(rootDir, '.vercel/output/functions/index.func/docs/en/guides/overview.md'),
-      'utf8',
-    )
+    it('matches the configured handler filename to the bundled entrypoint', () => {
+      const app = scaffoldApp(root, { entrypoint: 'src/vercel.ts' })
 
-    expect(copied).toContain('Hello docs.')
-  })
+      buildVercelOutput(app)
 
-  it('preserves class names through the bundler', async () => {
-    // Regression guard for the bundler flags in src/index.ts — see the comment
-    // on that argv for why mangled class names outlive a deploy.
-    const rootDir = mkdtempSync(join(tmpdir(), 'guren-plugin-vercel-'))
-    tempDirs.push(rootDir)
+      const config = JSON.parse(
+        readFileSync(join(app.outputDir, 'functions/index.func/.vc-config.json'), 'utf8'),
+      ) as { handler: string }
 
-    const entrypoint = join(rootDir, 'src/index.ts')
-    mkdirSync(join(rootDir, 'src'), { recursive: true })
-    writeFileSync(
-      entrypoint,
-      'class GurenJobProbe {}\nexport default { fetch() { return new Response(GurenJobProbe.name) } }\n',
-      'utf8',
-    )
-
-    buildVercelOutput({
-      rootDir,
-      entrypoint,
-      outputDir: join(rootDir, '.vercel/output'),
+      expect(config.handler).toBe('vercel.js')
     })
 
-    // Asserting on the runtime name rather than the bundle text: `.name` is
-    // what the queue registry and notification types actually read, and it
-    // survives any reformatting the bundler may do.
-    const bundled = await import(join(rootDir, '.vercel/output/functions/index.func/index.js'))
-    const response = await bundled.default.fetch(new Request('http://example.com/'))
+    it('routes the asset base back onto the output root', () => {
+      // Built assets self-reference `/public/assets/` while the files land at
+      // the output root, so a deployment routed only by this file — which is
+      // what `--prebuilt` does — needs the mapping here rather than in
+      // vercel.json.
+      const app = scaffoldApp(root, { entrypoint: 'src/vercel.ts' })
 
-    expect(await response.text()).toBe('GurenJobProbe')
-  })
+      buildVercelOutput(app)
 
-  it('finds docs in a parent directory when the app root is nested', () => {
-    const workspaceDir = mkdtempSync(join(tmpdir(), 'guren-plugin-vercel-'))
-    tempDirs.push(workspaceDir)
+      const config = JSON.parse(readFileSync(join(app.outputDir, 'config.json'), 'utf8'))
+      const routes = config.routes as Array<Record<string, string>>
 
-    const rootDir = join(workspaceDir, 'web')
-    const entrypoint = join(rootDir, 'src/index.ts')
-    mkdirSync(join(rootDir, 'src'), { recursive: true })
-    mkdirSync(join(workspaceDir, 'docs/en/guides'), { recursive: true })
-    writeFileSync(entrypoint, "export default { fetch() { return new Response('ok') } }\n", 'utf8')
-    writeFileSync(join(workspaceDir, 'docs/en/guides/overview.md'), '# Overview\n\nParent docs.\n', 'utf8')
-
-    buildVercelOutput({
-      rootDir,
-      entrypoint,
-      outputDir: join(rootDir, '.vercel/output'),
+      expect(routes[0]).toEqual({ src: '/public/(.*)', dest: '/$1' })
+      // It has to win before the filesystem handler, which would otherwise
+      // miss and fall through to the function.
+      expect(routes.findIndex((route) => route.handle === 'filesystem')).toBeGreaterThan(0)
     })
 
-    const copied = readFileSync(
-      join(rootDir, '.vercel/output/functions/index.func/docs/en/guides/overview.md'),
-      'utf8',
-    )
+    it('copies the docs directory into the function bundle', () => {
+      const app = scaffoldApp(root)
+      mkdirSync(join(root, 'docs/en/guides'), { recursive: true })
+      writeFileSync(join(root, 'docs/en/guides/overview.md'), '# Overview\n\nHello docs.\n', 'utf8')
 
-    expect(copied).toContain('Parent docs.')
+      buildVercelOutput(app)
+
+      const copied = readFileSync(
+        join(app.outputDir, 'functions/index.func/docs/en/guides/overview.md'),
+        'utf8',
+      )
+
+      expect(copied).toContain('Hello docs.')
+    })
+
+    it('preserves class names through the bundler', async () => {
+      // Regression guard for the bundler flags in src/index.ts — see the comment
+      // on that argv for why mangled class names outlive a deploy.
+      const app = scaffoldApp(root, {
+        source:
+          'class GurenJobProbe {}\nexport default { fetch() { return new Response(GurenJobProbe.name) } }\n',
+      })
+
+      buildVercelOutput(app)
+
+      // Asserting on the runtime name rather than the bundle text: `.name` is
+      // what the queue registry and notification types actually read, and it
+      // survives any reformatting the bundler may do.
+      const bundled = await import(join(app.outputDir, 'functions/index.func/index.js'))
+      const response = await bundled.default.fetch(new Request('http://example.com/'))
+
+      expect(await response.text()).toBe('GurenJobProbe')
+    })
+
+    it('finds docs in a parent directory when the app root is nested', () => {
+      const app = scaffoldApp(join(root, 'web'))
+      mkdirSync(join(root, 'docs/en/guides'), { recursive: true })
+      writeFileSync(join(root, 'docs/en/guides/overview.md'), '# Overview\n\nParent docs.\n', 'utf8')
+
+      buildVercelOutput(app)
+
+      const copied = readFileSync(
+        join(app.outputDir, 'functions/index.func/docs/en/guides/overview.md'),
+        'utf8',
+      )
+
+      expect(copied).toContain('Parent docs.')
+    })
   })
 })
