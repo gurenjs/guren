@@ -163,6 +163,18 @@ describe('deploy target detection', () => {
     })
   })
 
+  // LAMBDA_SOURCE_PATTERN is an alternation; this covers the createLambdaHandler
+  // half on its own, which every other Lambda fixture pairs with an import path.
+  it('detects the Lambda adapter from a bare createLambdaHandler call', async () => {
+    const files = { 'src/handler.ts': `export const handler = createLambdaHandler(app)\n` }
+
+    await withApp('guren-deploy-lambda-bare-', files, {}, async (dir) => {
+      const { targets } = await analyzeDeployRuntime(dir)
+
+      expect(targets.map((target) => target.profile.id)).toEqual(['lambda'])
+    })
+  })
+
   it('detects several targets at once', async () => {
     const files = { 'lambda.ts': `import { createLambdaHandler } from '@guren/core/lambda'\n` }
     const deps = { '@guren/plugin-cloudflare': '^0.2.0' }
@@ -430,6 +442,63 @@ export const oauth = createOAuthManager({})
     })
   })
 
+  // Without these the whole BACKED_OAUTH_PATTERNS table could be broken and
+  // every other test would still pass — a correctly-configured OAuth app would
+  // then be warned at, the exact false positive this check exists to avoid.
+  for (const store of ['DatabaseOAuthStateStore', 'RedisOAuthStateStore'] as const) {
+    it(`passes once ${store} is constructed`, async () => {
+      const files = {
+        'app/Providers/OAuthProvider.ts': `import { createOAuthManager } from '@guren/core'
+export const oauth = createOAuthManager({ stateStore: new ${store}(oauthStates) })
+`,
+      }
+
+      await withApp(`guren-stores-oauth-ok-${store}-`, files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+        expect((await deployChecks(dir))['deploy-runtime-stores'].status).toBe('pass')
+      })
+    })
+  }
+
+  it('still warns when a backed OAuth store is imported but never constructed', async () => {
+    const files = {
+      'app/Providers/OAuthProvider.ts': `import { createOAuthManager, DatabaseOAuthStateStore } from '@guren/core'
+export const oauth = createOAuthManager({})
+`,
+    }
+
+    await withApp('guren-stores-oauth-import-only-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      expect((await deployChecks(dir))['deploy-runtime-stores'].status).toBe('warn')
+    })
+  })
+
+  it('treats OAuthServiceProvider as an OAuth signal', async () => {
+    const files = {
+      'src/app.ts': `import { createApp, OAuthServiceProvider } from '@guren/core'
+export const app = createApp({ providers: [OAuthServiceProvider] })
+`,
+    }
+
+    await withApp('guren-stores-oauth-provider-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      const check = (await deployChecks(dir))['deploy-runtime-stores']
+
+      expect(check.status).toBe('warn')
+      expect(check.message).toContain('OAuth is configured')
+    })
+  })
+
+  it('treats createSessionMiddleware as a session signal', async () => {
+    const files = {
+      'src/app.ts': `import { createSessionMiddleware } from '@guren/core'\napp.use('*', createSessionMiddleware({}))\n`,
+    }
+
+    await withApp('guren-stores-session-mw-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      const check = (await deployChecks(dir))['deploy-runtime-stores']
+
+      expect(check.status).toBe('warn')
+      expect(check.message).toContain('sessions are enabled')
+    })
+  })
+
   it('warns about explicitly constructed in-memory cache and queue stores', async () => {
     const files = {
       'config/cache.ts': `import { MemoryStore } from '@guren/core'\nexport const store = new MemoryStore()\n`,
@@ -445,6 +514,34 @@ export const oauth = createOAuthManager({})
       expect(check.message).toContain('MemoryDriver (config/queue.ts:2)')
     })
   })
+
+  // Every entry in MEMORY_STORE_PATTERNS, so a typo in any one of them can't
+  // hide behind the two that the cache/queue case above happens to cover.
+  const MEMORY_STORES = [
+    'MemorySessionStore',
+    'MemoryOAuthStateStore',
+    'MemoryApiTokenStore',
+    'MemoryPasswordResetStore',
+    'MemoryEmailVerificationStore',
+    'MemoryRateLimitStore',
+    'MemoryStore',
+    'MemoryDriver',
+  ] as const
+
+  for (const store of MEMORY_STORES) {
+    it(`warns about an explicitly constructed ${store}`, async () => {
+      const files = {
+        'config/stores.ts': `import { ${store} } from '@guren/core'\nexport const s = new ${store}()\n`,
+      }
+
+      await withApp(`guren-stores-mem-${store}-`, files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+        const check = (await deployChecks(dir))['deploy-runtime-stores']
+
+        expect(check.status).toBe('warn')
+        expect(check.message).toContain(`${store} (config/stores.ts:2)`)
+      })
+    })
+  }
 
   it('passes for an app with no session, OAuth, or in-memory store signals', async () => {
     const files = { 'src/app.ts': `import { createApp } from '@guren/core'\nexport const app = createApp({})\n` }
@@ -618,6 +715,18 @@ const store = new DatabaseSessionStore(sessions)
     })
   })
 
+  for (const name of ['app.spec.ts', 'app.test.tsx', 'app.spec.js'] as const) {
+    it(`excludes ${name}`, async () => {
+      const files = {
+        [`src/${name}`]: `import { MemoryStore } from '@guren/core'\nexport const s = new MemoryStore()\n`,
+      }
+
+      await withApp(`guren-scan-excl-${name}-`, files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+        expect((await analyzeDeployRuntime(dir)).memoryStoreSignals).toEqual([])
+      })
+    })
+  }
+
   it('does not raise a session signal from a test fixture alone', async () => {
     const files = {
       'src/routes.test.ts': `const app = createApp({ auth: { autoSession: true } })\n`,
@@ -632,6 +741,33 @@ const store = new DatabaseSessionStore(sessions)
 })
 
 describe('analyzeDeployRuntime', () => {
+  // Every entry in DEPLOY_SCAN_DIRS. Without this, dropping a directory from
+  // that list — including `functions`/`api`, added for serverless entrypoint
+  // layouts — would silently stop the whole scan there with no test failing.
+  for (const dir of ['src', 'app', 'config', 'db', 'routes', 'modules', 'bin', 'functions', 'api'] as const) {
+    it(`scans the ${dir}/ directory`, async () => {
+      const files = {
+        [`${dir}/probe.ts`]: `import { MemoryStore } from '@guren/core'\nexport const s = new MemoryStore()\n`,
+      }
+
+      await withApp(`guren-deploy-scan-${dir}-`, files, {}, async (workspace) => {
+        const analysis = await analyzeDeployRuntime(workspace)
+
+        expect(analysis.memoryStoreSignals.map((signal) => signal.filePath)).toContain(`${dir}/probe.ts`)
+      })
+    })
+  }
+
+  it('scans source files sitting directly in the project root', async () => {
+    const files = { 'worker.ts': `import { MemoryStore } from '@guren/core'\nexport const s = new MemoryStore()\n` }
+
+    await withApp('guren-deploy-scan-root-', files, {}, async (dir) => {
+      const analysis = await analyzeDeployRuntime(dir)
+
+      expect(analysis.memoryStoreSignals.map((signal) => signal.filePath)).toContain('worker.ts')
+    })
+  })
+
   it('scans modules/ trees as well as the project root', async () => {
     const files = {
       'modules/billing/index.ts': `import { MemoryStore } from '@guren/core'\nexport const store = new MemoryStore()\n`,
