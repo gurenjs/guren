@@ -51,7 +51,8 @@ Lessons learned from code review cycles. Check these before submitting changes.
 
 ## Serverless Bundling (Vercel / Lambda)
 
-- **`bun build` inlines `process.env.NODE_ENV` at bundle time** (defaults to `"development"`, even with `--minify`). Runtime `NODE_ENV=production` cannot override it. Always pass `--define 'process.env.NODE_ENV="production"'` when bundling server entrypoints for deployment (`@guren/plugin-vercel` does this).
+- **`bun build` inlines `process.env.NODE_ENV` at bundle time** (defaults to `"development"`, regardless of minification). Runtime `NODE_ENV=production` cannot override it. Always pass `--define 'process.env.NODE_ENV="production"'` when bundling server entrypoints for deployment (`@guren/plugin-vercel` does this).
+- **Never bundle app code with identifier mangling** — no bare `--minify`, no esbuild/oxc `minify: true`. Guren keys durable records on class names: the queue registry stores `JobClass.name` in every queued message, notifications persist `constructor.name` as their `type`, and `HttpException` reports `this.constructor.name`. Mangled, records written by one deploy stop resolving after the next. Use `--minify-whitespace --minify-syntax` (or `minify: { whitespace: true, syntax: true, identifiers: false }`). `--keep-names`/`keepNames` is **not** a substitute: as of Bun 1.3.14 it is accepted and silently leaves class names mangled.
 - **SSR bundles must be self-contained on serverless.** Function directories ship without `node_modules`, so externalized `react`/`@inertiajs/react` imports fail at runtime and Inertia silently falls back to CSR. The Guren Vite plugin defaults `ssr.noExternal: true` for SSR builds — don't re-externalize deps in `.guren/ssr` unless the deploy target has them installed.
 
 ## ESM Compatibility

@@ -109,6 +109,35 @@ describe('@guren/plugin-vercel', () => {
     expect(copied).toContain('Hello docs.')
   })
 
+  it('preserves class names through the bundler', async () => {
+    // Regression guard for the bundler flags in src/index.ts — see the comment
+    // on that argv for why mangled class names outlive a deploy.
+    const rootDir = mkdtempSync(join(tmpdir(), 'guren-plugin-vercel-'))
+    tempDirs.push(rootDir)
+
+    const entrypoint = join(rootDir, 'src/index.ts')
+    mkdirSync(join(rootDir, 'src'), { recursive: true })
+    writeFileSync(
+      entrypoint,
+      'class GurenJobProbe {}\nexport default { fetch() { return new Response(GurenJobProbe.name) } }\n',
+      'utf8',
+    )
+
+    buildVercelOutput({
+      rootDir,
+      entrypoint,
+      outputDir: join(rootDir, '.vercel/output'),
+    })
+
+    // Asserting on the runtime name rather than the bundle text: `.name` is
+    // what the queue registry and notification types actually read, and it
+    // survives any reformatting the bundler may do.
+    const bundled = await import(join(rootDir, '.vercel/output/functions/index.func/index.js'))
+    const response = await bundled.default.fetch(new Request('http://example.com/'))
+
+    expect(await response.text()).toBe('GurenJobProbe')
+  })
+
   it('finds docs in a parent directory when the app root is nested', () => {
     const workspaceDir = mkdtempSync(join(tmpdir(), 'guren-plugin-vercel-'))
     tempDirs.push(workspaceDir)

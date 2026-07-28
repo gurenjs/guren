@@ -126,6 +126,15 @@ export function buildVercelOutput(options: BuildVercelOutputOptions = {}): void 
   const result = Bun.spawnSync({
     // `bun build` inlines `process.env.NODE_ENV` at bundle time (defaulting to
     // "development"), so pin it to "production" for the deployed function.
+    //
+    // Whitespace and syntax only — never plain `--minify`, which also mangles
+    // identifiers. Guren keys durable records on class names: the queue
+    // registry stores `JobClass.name` in every queued message, and
+    // notifications persist `constructor.name` as their `type`. Mangled, a job
+    // dispatched by one deploy resolves to nothing after the next.
+    //
+    // Not `--keep-names`: as of Bun 1.3.14 it is accepted and silently leaves
+    // class names mangled, so it cannot replace this.
     cmd: [
       'bun',
       'build',
@@ -134,7 +143,8 @@ export function buildVercelOutput(options: BuildVercelOutputOptions = {}): void 
       funcDir,
       '--target',
       'bun',
-      '--minify',
+      '--minify-whitespace',
+      '--minify-syntax',
       '--define',
       'process.env.NODE_ENV="production"',
     ],
