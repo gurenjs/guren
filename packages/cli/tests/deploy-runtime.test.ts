@@ -163,12 +163,17 @@ describe('deploy target detection', () => {
     })
   })
 
-  // LAMBDA_SOURCE_PATTERN is an alternation; this covers the createLambdaHandler
-  // half on its own, which every other Lambda fixture pairs with an import path.
-  it('detects the Lambda adapter from a bare createLambdaHandler call', async () => {
-    const files = { 'src/handler.ts': `export const handler = createLambdaHandler(app)\n` }
+  // The adapter is also detected from the call itself, not only from the
+  // `@guren/*/lambda` import path — this fixture imports it from `@guren/core`,
+  // which is not one of LAMBDA_IMPORT_SOURCES.
+  it('detects the Lambda adapter from a createLambdaHandler call', async () => {
+    const files = {
+      'src/handler.ts': `import { createLambdaHandler } from '@guren/core'
+export const handler = createLambdaHandler(app)
+`,
+    }
 
-    await withApp('guren-deploy-lambda-bare-', files, {}, async (dir) => {
+    await withApp('guren-deploy-lambda-call-', files, {}, async (dir) => {
       const { targets } = await analyzeDeployRuntime(dir)
 
       expect(targets.map((target) => target.profile.id)).toEqual(['lambda'])
@@ -448,7 +453,7 @@ export const oauth = createOAuthManager({})
   for (const store of ['DatabaseOAuthStateStore', 'RedisOAuthStateStore'] as const) {
     it(`passes once ${store} is constructed`, async () => {
       const files = {
-        'app/Providers/OAuthProvider.ts': `import { createOAuthManager } from '@guren/core'
+        'app/Providers/OAuthProvider.ts': `import { createOAuthManager, ${store} } from '@guren/core'
 export const oauth = createOAuthManager({ stateStore: new ${store}(oauthStates) })
 `,
       }
@@ -814,6 +819,88 @@ export const app = createApp({ auth })
 
       expect(check.status).toBe('warn')
       expect(check.message).toContain('sessions are enabled')
+    })
+  })
+
+  // Resolving names bare made any same-named export satisfy a remediation.
+  // An unrelated `NodeHasher` silently marked a Workers app as fixed, which is
+  // the worst direction for this check: it hides a real production break.
+  it('does not let a same-named import from another package satisfy the hasher remediation', async () => {
+    const files = {
+      'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER,
+      'app/lib/hash.ts': `import { NodeHasher } from 'some-other-package'\nexport const h = new NodeHasher()\n`,
+    }
+
+    await withApp('guren-ast-foreign-hasher-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      expect((await deployChecks(dir))['deploy-password-hashing'].status).toBe('warn')
+    })
+  })
+
+  it('does not let a same-named import from another package satisfy the store remediation', async () => {
+    const files = {
+      'src/app.ts': SESSION_APP,
+      'src/stores.ts': `import { DatabaseSessionStore } from './my-own'\nexport const s = new DatabaseSessionStore(x)\n`,
+    }
+
+    await withApp('guren-ast-foreign-store-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      expect((await deployChecks(dir))['deploy-runtime-stores'].status).toBe('warn')
+    })
+  })
+
+  // A decorator anywhere in the file used to make it unparseable, and an
+  // unparseable file contributes nothing — hiding every signal it holds.
+  it('still sees signals in a file that uses decorators', async () => {
+    const files = {
+      'src/app.ts': `import { AutoDiscovery } from '@guren/core'
+
+@sealed
+class Registry {
+  @log accessor entries = []
+}
+
+const discovery = new AutoDiscovery({ basePath: 'app' })
+`,
+    }
+
+    await withApp('guren-ast-decorators-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      expect((await deployChecks(dir))['deploy-provider-discovery'].status).toBe('warn')
+    })
+  })
+
+  // Deliberately a *value* import: a `import type` one is filtered out of the
+  // binding map before the walker runs, so it would pass without exercising
+  // the type-node skip at all.
+  it('ignores a value-imported signal name used only as a type', async () => {
+    const files = {
+      'src/types.ts': `import { OAuthServiceProvider } from '@guren/core'
+export let provider: OAuthServiceProvider
+export type Alias = OAuthServiceProvider
+export function build(p: OAuthServiceProvider): typeof OAuthServiceProvider | null {
+  return null
+}
+`,
+    }
+
+    await withApp('guren-ast-type-ref-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      expect((await analyzeDeployRuntime(dir)).oauthSignals).toEqual([])
+    })
+  })
+
+  it('resolves namespace imports for constructions and calls', async () => {
+    const files = {
+      'src/app.ts': `import * as guren from '@guren/core'
+export const app = guren.createApp({ auth: {} })
+export const oauth = guren.createOAuthManager({})
+export const store = new guren.DatabaseSessionStore(sessions)
+`,
+    }
+
+    await withApp('guren-ast-namespace-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      const analysis = await analyzeDeployRuntime(dir)
+
+      expect(analysis.sessionSignals.map((s) => s.symbol)).toContain('auth')
+      expect(analysis.oauthSignals.map((s) => s.symbol)).toContain('createOAuthManager')
+      expect(analysis.backedSessionSignals.map((s) => s.symbol)).toContain('DatabaseSessionStore')
     })
   })
 

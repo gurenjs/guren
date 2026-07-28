@@ -117,10 +117,22 @@ const TEST_FILE_PATTERN = /\.(test|spec)\.[cm]?[jt]sx?$/
 // Signals are read from a Babel AST (the same parser audit.ts and
 // model-parser.ts already use), not from per-line regexes. That buys, in one
 // mechanism, everything the regex generation of this file had to carve out
-// case by case: aliased imports resolve to their canonical names, values
-// split across lines match, and text inside comments, string literals, and
-// TypeScript type positions can no longer trip a check. Files that fail to
-// parse contribute no signals rather than failing the doctor run.
+// case by case: values split across lines match, and text inside comments,
+// string literals, and TypeScript type positions cannot trip a check.
+//
+// Every signal name is resolved through the file's own `@guren/*` value
+// imports rather than matched bare. A name only means the Guren API of that
+// name when it was imported from Guren, so `import { NodeHasher } from
+// './my-own'` no longer satisfies a remediation and an unrelated
+// `DatabaseSessionStore` no longer hides a real gap. Aliases and namespace
+// imports resolve to their canonical exported names, so `NodeHasher as X`
+// and `g.NodeHasher` both count.
+//
+// Known limitations, both needing scope/dataflow analysis this deliberately
+// stops short of: a local binding that shadows an imported signal name still
+// counts, and an options object built elsewhere and passed into createApp
+// (`const o = { auth: {} }; createApp(o)`) is not seen — though any
+// `autoSession`/`sessionOptions` key inside it is, wherever it lives.
 
 type SignalKind =
   | 'passwordAuth'
@@ -186,6 +198,36 @@ const REFERENCED_SIGNALS: Record<string, SignalKind> = {
   OAuthServiceProvider: 'oauth',
 }
 
+/** Only names imported from a Guren package resolve to a signal. */
+const GUREN_PACKAGE_PREFIX = '@guren/'
+
+/**
+ * Type-only syntax. Skipped wholesale so an identifier in a type annotation,
+ * generic constraint, type query, or interface body never reads as usage.
+ * Nodes that merely *carry* a type while wrapping a real expression
+ * (TSAsExpression, TSNonNullExpression, TSSatisfiesExpression) are absent
+ * here on purpose — their expression still has to be walked.
+ */
+const TYPE_ONLY_NODES = new Set([
+  'TSTypeAnnotation',
+  'TSTypeReference',
+  'TSTypeQuery',
+  'TSTypeParameterDeclaration',
+  'TSTypeParameterInstantiation',
+  'TSInterfaceDeclaration',
+  'TSTypeAliasDeclaration',
+  'TSDeclareFunction',
+  'TSDeclareMethod',
+  'TSModuleDeclaration',
+  'TSIndexSignature',
+  'TSPropertySignature',
+  'TSMethodSignature',
+  'TSCallSignatureDeclaration',
+  'TSConstructSignatureDeclaration',
+  'TSTypeLiteral',
+  'TSQualifiedName',
+])
+
 /**
  * The Lambda adapter ships inside `@guren/core`/`@guren/server` rather than a
  * plugin package, so it is detected from these import sources (plus bare
@@ -246,19 +288,48 @@ function extractSignals(source: string, plugins: ParserPlugin[]): ExtractedSigna
     return null
   }
 
-  // Named-import aliases (`import { NodeHasher as X }`) resolve to their
-  // canonical exported names, so every table below matches aliased use too.
-  const aliases = new Map<string, string>()
+  // Value imports from `@guren/*`, mapping the file's local name to the
+  // canonical exported name. Type-only imports are excluded — they cannot be
+  // constructed or called — and so is every non-Guren source, so a same-named
+  // export from another package never resolves to a signal.
+  const gurenNames = new Map<string, string>()
+  const gurenNamespaces = new Set<string>()
   for (const statement of ast.program.body) {
     if (statement.type !== 'ImportDeclaration') continue
+    if (statement.importKind === 'type') continue
+    if (!statement.source.value.startsWith(GUREN_PACKAGE_PREFIX)) continue
     for (const specifier of statement.specifiers) {
       if (specifier.type === 'ImportSpecifier') {
+        if (specifier.importKind === 'type') continue
         const imported = specifier.imported
-        aliases.set(specifier.local.name, imported.type === 'Identifier' ? imported.name : imported.value)
+        gurenNames.set(specifier.local.name, imported.type === 'Identifier' ? imported.name : imported.value)
+      } else if (specifier.type === 'ImportNamespaceSpecifier') {
+        gurenNamespaces.add(specifier.local.name)
       }
     }
   }
-  const canonical = (name: string): string => aliases.get(name) ?? name
+
+  /**
+   * Canonical Guren export name for a callee/identifier, or null when it does
+   * not resolve to one. Covers plain and aliased named imports plus
+   * `ns.Member` access through a namespace import.
+   */
+  const resolve = (node: BabelNode | undefined): string | null => {
+    if (!node) return null
+    if (node.type === 'Identifier') return gurenNames.get(node.name as string) ?? null
+    if (node.type === 'MemberExpression' && !node.computed) {
+      const object = node.object as BabelNode
+      const property = node.property as BabelNode
+      if (
+        object?.type === 'Identifier' &&
+        property?.type === 'Identifier' &&
+        gurenNamespaces.has(object.name as string)
+      ) {
+        return property.name as string
+      }
+    }
+    return null
+  }
 
   const signals: ExtractedSignal[] = []
   const seen = new Set<string>()
@@ -270,6 +341,8 @@ function extractSignals(source: string, plugins: ParserPlugin[]): ExtractedSigna
   }
 
   walk(ast.program, (node) => {
+    if (TYPE_ONLY_NODES.has(node.type)) return false
+
     switch (node.type) {
       case 'ImportDeclaration': {
         const source = node.source as BabelNode
@@ -282,6 +355,7 @@ function extractSignals(source: string, plugins: ParserPlugin[]): ExtractedSigna
 
       case 'ExportNamedDeclaration':
       case 'ExportAllDeclaration': {
+        if (node.exportKind === 'type') return false
         const source = node.source as BabelNode | null
         if (source && LAMBDA_IMPORT_SOURCES.has(source.value as string)) {
           emit('lambda', source.value as string, lineOf(node))
@@ -290,19 +364,17 @@ function extractSignals(source: string, plugins: ParserPlugin[]): ExtractedSigna
       }
 
       case 'NewExpression': {
-        const callee = node.callee as BabelNode
-        if (callee?.type === 'Identifier') {
-          const name = canonical(callee.name as string)
-          const kind = CONSTRUCTED_SIGNALS[name]
-          if (kind) emit(kind, name, lineOf(node))
-        }
+        const name = resolve(node.callee as BabelNode)
+        const kind = name ? CONSTRUCTED_SIGNALS[name] : undefined
+        if (name && kind) emit(kind, name, lineOf(node))
         return
       }
 
       case 'CallExpression': {
         const callee = node.callee as BabelNode
-        if (callee?.type === 'Identifier') {
-          const name = canonical(callee.name as string)
+        const name = resolve(callee)
+
+        if (name) {
           const kind = CALLED_SIGNALS[name]
           if (kind) emit(kind, name, lineOf(node))
 
@@ -324,13 +396,17 @@ function extractSignals(source: string, plugins: ParserPlugin[]): ExtractedSigna
               }
             }
           }
-        } else if (callee?.type === 'MemberExpression') {
+        }
+
+        if (callee?.type === 'MemberExpression') {
           // `auth.attempt(...)` / `this.auth.attempt(...)` is the entry point
           // app code calls to verify a password (`guard.attempt()` sits
           // underneath it but is never called directly outside the
-          // framework's own tests). Known gap: a registration-only app that
-          // creates password-hashing records without ever calling attempt()
-          // passes undetected — `make:auth` always scaffolds login alongside
+          // framework's own tests). Resolved structurally rather than through
+          // the import map: `auth` here is a controller property, not an
+          // import. Known gap: a registration-only app that creates
+          // password-hashing records without ever calling attempt() passes
+          // undetected — `make:auth` always scaffolds login alongside
           // registration, so that shape doesn't occur in generated apps.
           const property = callee.property as BabelNode
           const object = callee.object as BabelNode
@@ -371,9 +447,9 @@ function extractSignals(source: string, plugins: ParserPlugin[]): ExtractedSigna
       }
 
       case 'Identifier': {
-        const name = canonical(node.name as string)
-        const kind = REFERENCED_SIGNALS[name]
-        if (kind) emit(kind, name, lineOf(node))
+        const name = resolve(node)
+        const kind = name ? REFERENCED_SIGNALS[name] : undefined
+        if (name && kind) emit(kind, name, lineOf(node))
         return
       }
     }
@@ -387,11 +463,17 @@ interface ScannedFile {
   signals: ExtractedSignal[]
 }
 
+/**
+ * Decorators and auto-accessors are enabled everywhere: without them a single
+ * `@Injectable`-style class makes the whole file unparseable, and an
+ * unparseable file contributes no signals at all — silently hiding every
+ * hazard and remediation it contains. JSX is off for .ts/.mts so
+ * angle-bracket type assertions still parse; elsewhere it lets .tsx through.
+ */
 function parserPluginsFor(path: string): ParserPlugin[] {
-  // JSX is off for .ts/.mts so angle-bracket type assertions still parse;
-  // everywhere else it is harmless and lets .tsx/.jsx through.
+  const base: ParserPlugin[] = ['typescript', 'decorators', 'decoratorAutoAccessors']
   const ext = extname(path)
-  return ext === '.ts' || ext === '.mts' ? ['typescript'] : ['typescript', 'jsx']
+  return ext === '.ts' || ext === '.mts' ? base : [...base, 'jsx']
 }
 
 /**
