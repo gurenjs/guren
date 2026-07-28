@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
 import { defineCommand, showUsage } from 'citty'
 import type { CommandDef } from 'citty'
-import { runCli } from './run-cli'
+import { runCli, UsageError } from './run-cli'
 import { listBlueprints, runBlueprint } from './blueprints'
 import { runDoctor } from './doctor'
 import { makeAuth } from './make-auth'
@@ -2500,17 +2500,19 @@ const main = defineCommand({
       return
     }
 
-    const [commandName] = ctx.rawArgs
+    // citty dispatches on the first non-flag argument, not on rawArgs[0], and
+    // calls this handler again once that subcommand returns. Read the name the
+    // same way so a flag in front of it (`guren --zzz model:list`) does not
+    // look like a command of its own. A name citty does not have never reaches
+    // here — it throws `Unknown command` before running anything — so the only
+    // state left to report is flags with no command at all.
+    const commandName = ctx.rawArgs.find((arg) => !arg.startsWith('-'))
     const subCommands = ctx.cmd.subCommands ?? {}
     if (commandName && Object.prototype.hasOwnProperty.call(subCommands, commandName)) {
       return
     }
 
-    if (commandName) {
-      consola.error(`Unknown command: ${commandName}`)
-      await showUsage(ctx.cmd)
-      process.exit(1)
-    }
+    throw new UsageError('No command specified.')
   },
 })
 

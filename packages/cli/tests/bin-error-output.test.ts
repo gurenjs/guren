@@ -77,6 +77,46 @@ describe('guren CLI error reporting', () => {
     }
   })
 
+  it('runs the command a stray flag precedes without reporting it as unknown', async () => {
+    const workspace = await createTempWorkspace('guren-cli-bin-leading-flag-')
+    try {
+      const { exitCode, stderr } = await runBin(['--zzz', 'model:list'], workspace.dir)
+
+      // citty dispatches on the first non-flag argument, so `model:list` runs.
+      expect(stderr).toContain('No models found')
+      expect(countOccurrences(stderr, 'Unknown command')).toBe(0)
+      expect(exitCode).toBe(0)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('reports an unknown command a stray flag precedes, naming the command', async () => {
+    const workspace = await createTempWorkspace('guren-cli-bin-leading-flag-unknown-')
+    try {
+      const { exitCode, stderr } = await runBin(['--zzz', 'definitely-not-a-command'], workspace.dir)
+
+      expect(exitCode).toBe(1)
+      expect(countOccurrences(stderr, 'Unknown command')).toBe(1)
+      expect(stderr).toContain('definitely-not-a-command')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('reports flags without a command once, with usage, and exits 1', async () => {
+    const workspace = await createTempWorkspace('guren-cli-bin-no-command-')
+    try {
+      const { exitCode, stdout, stderr } = await runBin(['--zzz'], workspace.dir)
+
+      expect(exitCode).toBe(1)
+      expect(countOccurrences(stderr, 'No command specified')).toBe(1)
+      expect(plainText(stdout)).toContain('USAGE guren')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('reports a missing required argument once, with subcommand usage, and exits 1', async () => {
     const workspace = await createTempWorkspace('guren-cli-bin-missing-arg-')
     try {

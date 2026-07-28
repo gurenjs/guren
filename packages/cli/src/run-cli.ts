@@ -26,8 +26,22 @@ async function resolveSubCommand(
   return [cmd, parent]
 }
 
+/**
+ * Raised by a command whose arguments cannot be dispatched, so `runCli` reports
+ * it the way it reports citty's own dispatch failures: usage, then the message,
+ * exit code 1.
+ */
+export class UsageError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'UsageError'
+  }
+}
+
 function isUsageError(error: unknown): error is Error {
-  return error instanceof Error && error.name === 'CLIError'
+  // citty raises `CLIError` for its own dispatch failures but does not export
+  // the class; commands raise `UsageError` for the same class of failure.
+  return error instanceof UsageError || (error instanceof Error && error.name === 'CLIError')
 }
 
 /**
