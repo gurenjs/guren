@@ -259,7 +259,15 @@ async function bundleHandler(handlerEntry: string, funcDir: string): Promise<voi
     entrypoints: [handlerEntry],
     outdir: funcDir,
     target: 'node',
-    minify: true,
+    // `identifiers: false`: class names are runtime identity here.
+    // `registerJob()`/`getJob()` key the job registry on `JobClass.name`, and
+    // that name is serialized into every queued message (SqsDriver,
+    // RedisDriver), a notification's persisted `type`, and `HttpException.name`
+    // — mangling silently breaks all of them.
+    //
+    // Not `keepNames`/`--keep-names`: as of Bun 1.3.14 both are accepted and
+    // silently leave class names mangled, so they cannot replace this.
+    minify: { whitespace: true, syntax: true, identifiers: false },
     define: {
       // `bun build` inlines `process.env.NODE_ENV` at bundle time (defaulting
       // to "development"), so pin it to "production" for the deployed function.

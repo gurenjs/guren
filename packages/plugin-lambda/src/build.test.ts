@@ -9,14 +9,46 @@ function writeJson(path: string, value: unknown): void {
   writeFileSync(path, JSON.stringify(value, null, 2))
 }
 
-function scaffoldApp(root: string, options: { ssr?: boolean; renderExport?: string } = {}): void {
-  const { ssr = true, renderExport = 'export const render = () => ({ body: "", head: [] })' } = options
+/**
+ * Import the bundle in a fresh process, like Lambda does, and return what its
+ * `http` export produces. Tests vary only that export via `scaffoldApp`'s
+ * `entry` option; running out-of-process is required because `bun test
+ * --isolate` resolves an in-process dynamic import of a top-level-await module
+ * before the wrapper has settled.
+ */
+function probeHttpExport(root: string): string {
+  const probe = 'const m = await import(process.argv[1]); console.log(m.http())'
+  const result = Bun.spawnSync({
+    cmd: [process.execPath, '-e', probe, join(root, '.lambda/function/handler.js')],
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
+
+  expect(result.stderr.toString()).toBe('')
+  expect(result.exitCode).toBe(0)
+  return result.stdout.toString().trim()
+}
+
+interface ScaffoldOptions {
+  ssr?: boolean
+  renderExport?: string
+  /** Lines placed above the handler exports, plus the body of the `http` export. */
+  entry?: { preamble?: string[]; http: string }
+}
+
+function scaffoldApp(root: string, options: ScaffoldOptions = {}): void {
+  const {
+    ssr = true,
+    renderExport = 'export const render = () => ({ body: "", head: [] })',
+    entry = { http: 'process.env.NODE_ENV' },
+  } = options
 
   mkdirSync(join(root, 'src'), { recursive: true })
   writeFileSync(
     join(root, 'src/lambda.ts'),
     [
-      'export const http = () => process.env.NODE_ENV',
+      ...(entry.preamble ?? []),
+      `export const http = () => ${entry.http}`,
       'export const queue = () => "queue"',
       'export const schedule = () => "schedule"',
       'const consoleHandler = () => "console"',
@@ -136,6 +168,19 @@ describe('buildLambdaOutput', () => {
     expect(report.bakedEntry).toBe('/assets/app-Abc123.js')
   })
 
+  test('should preserve class names through minification', async () => {
+    // Regression test for the `minify` option in bundleHandler: the framework
+    // keys the job registry on `JobClass.name`, so mangled identifiers make
+    // `getJob()` miss and no job code ever runs.
+    scaffoldApp(root, {
+      entry: { preamble: ['class ProcessNewPostJob { handle() {} }'], http: 'ProcessNewPostJob.name' },
+    })
+
+    await buildLambdaOutput({ rootDir: root, skipAppBuild: true })
+
+    expect(probeHttpExport(root)).toBe('ProcessNewPostJob')
+  })
+
   test('should copy the SSR bundle, migrations, and seeders into the function directory', async () => {
     scaffoldApp(root)
 
@@ -162,30 +207,16 @@ describe('buildLambdaOutput', () => {
     // `file:///var/task/handler.js` — collapsing that expression to
     // `/var/db/migrations` instead of `/var/task/db/migrations`, silently
     // skipping configureOrm()/seedDatabase() in production.
-    scaffoldApp(root)
-    writeFileSync(
-      join(root, 'src/lambda.ts'),
-      [
-        "const resolved = new URL('../db/migrations', import.meta.url)",
-        'export const http = () => resolved.pathname',
-        'export const queue = () => "queue"',
-        'export const schedule = () => "schedule"',
-        'const consoleHandler = () => "console"',
-        'export { consoleHandler as console }',
-        '',
-      ].join('\n'),
-    )
+    scaffoldApp(root, {
+      entry: {
+        preamble: ["const resolved = new URL('../db/migrations', import.meta.url)"],
+        http: 'resolved.pathname',
+      },
+    })
 
     await buildLambdaOutput({ rootDir: root, skipAppBuild: true })
 
-    const probe = 'const m = await import(process.argv[1]); console.log(m.http())'
-    const result = Bun.spawnSync({
-      cmd: [process.execPath, '-e', probe, join(root, '.lambda/function/handler.js')],
-      stdout: 'pipe',
-      stderr: 'pipe',
-    })
-    expect(result.exitCode).toBe(0)
-    expect(result.stdout.toString().trim()).toBe('/var/task/db/migrations')
+    expect(probeHttpExport(root)).toBe('/var/task/db/migrations')
   })
 
   test('should stage public files for S3 with the /public/assets mirror', async () => {
