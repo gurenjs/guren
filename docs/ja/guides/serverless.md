@@ -286,3 +286,6 @@ const consoleFn = new lambda.Function(this, 'Console', {
 
 > [!NOTE]
 > Lambda にデプロイする前に、`esbuild` や `tsup` でアプリをバンドルしてください。すべての依存がデプロイパッケージに含まれていることを確認してください。
+
+> [!WARNING]
+> バンドラーの識別子マングリングは無効にしてください。Guren はキュー投入されたジョブ、永続化された通知の種別、HTTP 例外の名前といった永続レコードにクラス名を保存するため、マングルすると前回のデプロイが書き込んだレコードを解決できなくなります。`bun build` では `--minify` ではなく `--minify-whitespace --minify-syntax` を、`esbuild` では `minifyIdentifiers: false` を、`tsup` では `minify` ではなく `minifyWhitespace` と `minifySyntax` を指定します。Bun では `--keep-names` / `keepNames` は代替になりません。Bun 1.3.14 時点でフラグは受け付けられますが、クラス名はマングルされたままです。
