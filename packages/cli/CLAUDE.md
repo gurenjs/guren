@@ -16,7 +16,7 @@ Ships the Citty-based CLI (`guren` bin) with generators and database helpers. Ge
 - Ensure new commands reuse `toWriterOptions` and shared logging via `consola`
 - Keep `runtime.ts` as the single entry for boot helpers; extend `MaybeApplication` instead of reaching into app internals from commands
 - When touching route type output, regenerate `examples/blog/types/generated/routes.d.ts` to verify compatibility
-- Prefer defining subcommands with `defineCommand()` and wiring the root command via `runMain()`
+- Prefer defining subcommands with `defineCommand()` and wiring the root command via `runCli()` from `run-cli.ts` (citty's own `runMain()` reports each failure twice and exits the process itself)
 - Reuse shared option helpers (such as the `force` writer option) instead of ad-hoc flag parsing
 
 ## Build & Distribution

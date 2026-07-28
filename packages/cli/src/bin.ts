@@ -2,8 +2,9 @@
 import { spawn } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
-import { defineCommand, runMain, showUsage } from 'citty'
+import { defineCommand, showUsage } from 'citty'
 import type { CommandDef } from 'citty'
+import { runCli } from './run-cli'
 import { listBlueprints, runBlueprint } from './blueprints'
 import { runDoctor } from './doctor'
 import { makeAuth } from './make-auth'
@@ -2489,7 +2490,10 @@ const main = defineCommand({
       description: 'Show this help message',
     },
   },
-  subCommands: { ...builtinSubCommands, ...pluginSubCommands },
+  // Null-prototype so a name like `valueOf` or `constructor` can never
+  // resolve to an inherited Object member. citty's own dispatch indexes this
+  // map unguarded and would otherwise invoke the inherited value as a command.
+  subCommands: Object.assign(Object.create(null), builtinSubCommands, pluginSubCommands),
   async run(ctx) {
     if (ctx.args.help || ctx.rawArgs.length === 0) {
       await showUsage(ctx.cmd)
@@ -2510,11 +2514,7 @@ const main = defineCommand({
   },
 })
 
-runMain(main).catch((error) => {
-  if (error instanceof Error) {
-    consola.error(error.message)
-  } else {
-    consola.error(String(error))
-  }
-  process.exit(1)
-})
+const exitCode = await runCli(main, process.argv.slice(2))
+if (exitCode !== 0) {
+  process.exit(exitCode)
+}
