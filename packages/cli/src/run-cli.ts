@@ -35,20 +35,38 @@ function isUsageError(error: unknown): error is Error {
  * with its stack and once as a bare message — before exiting the process
  * itself, leaving callers no way to intervene. Returns the exit code instead
  * of exiting so the caller decides how the process ends.
+ *
+ * Upgrading citty does not remove the need for this wrapper: 0.2.x prints the
+ * error once but still calls `process.exit()` from inside `runMain`, and it
+ * reports through `console.error` rather than `consola`, which would bypass
+ * the log level the rest of the CLI honours. A citty major bump is also a
+ * breaking change for plugin authors, who write `CommandDef`s against it.
+ *
+ * `resolveValue` and `resolveSubCommand` mirror internals citty 0.1.6 does not
+ * export; `tests/bin-error-output.test.ts` covers them end to end so drift on
+ * an upgrade surfaces there.
  */
 export async function runCli(cmd: AnyCommandDef, rawArgs: string[]): Promise<number> {
+  const usage = async (): Promise<void> => {
+    await showUsage(...(await resolveSubCommand(cmd, rawArgs)))
+  }
+
+  const failWithUsage = async (message: string): Promise<number> => {
+    await usage()
+    consola.error(message)
+    return 1
+  }
+
   try {
     if (rawArgs.includes('--help') || rawArgs.includes('-h')) {
-      await showUsage(...(await resolveSubCommand(cmd, rawArgs)))
+      await usage()
       return 0
     }
 
     if (rawArgs.length === 1 && rawArgs[0] === '--version') {
       const meta = await resolveValue(cmd.meta)
       if (!meta?.version) {
-        await showUsage(...(await resolveSubCommand(cmd, rawArgs)))
-        consola.error('No version specified')
-        return 1
+        return failWithUsage('No version specified')
       }
       consola.log(meta.version)
       return 0
@@ -58,13 +76,11 @@ export async function runCli(cmd: AnyCommandDef, rawArgs: string[]): Promise<num
     return 0
   } catch (error) {
     if (isUsageError(error)) {
-      await showUsage(...(await resolveSubCommand(cmd, rawArgs)))
-      consola.error(error.message)
-    } else {
-      // Non-Error throwables (Bun's ResolveMessage, for one) render as an
-      // empty object when handed to consola directly, hiding the message.
-      consola.error(error instanceof Error ? error : String(error))
+      return failWithUsage(error.message)
     }
+    // Non-Error throwables (Bun's ResolveMessage, for one) render as an
+    // empty object when handed to consola directly, hiding the message.
+    consola.error(error instanceof Error ? error : String(error))
     return 1
   }
 }

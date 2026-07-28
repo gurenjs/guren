@@ -2490,7 +2490,10 @@ const main = defineCommand({
       description: 'Show this help message',
     },
   },
-  subCommands: { ...builtinSubCommands, ...pluginSubCommands },
+  // Null-prototype so a name like `valueOf` or `constructor` can never
+  // resolve to an inherited Object member. citty's own dispatch indexes this
+  // map unguarded and would otherwise invoke the inherited value as a command.
+  subCommands: Object.assign(Object.create(null), builtinSubCommands, pluginSubCommands),
   async run(ctx) {
     if (ctx.args.help || ctx.rawArgs.length === 0) {
       await showUsage(ctx.cmd)

@@ -1,5 +1,6 @@
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'bun:test'
+import { stripAnsi } from 'consola/utils'
 import { createTempWorkspace } from './helpers'
 
 const CLI_BIN_PATH = resolve(import.meta.dir, '../src/bin.ts')
@@ -26,14 +27,12 @@ function countOccurrences(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1
 }
 
-const ANSI_PATTERN = /\x1b\[[0-9;]*m/g
-
 // consola renders `showUsage`'s markdown-style code spans as ANSI styling on
 // a TTY, but leaves the literal backticks in place on CI's non-TTY stdout
 // (e.g. "USAGE `guren [OPTIONS] ...`"). Strip both so assertions work in
 // either environment.
 function plainText(text: string): string {
-  return text.replace(ANSI_PATTERN, '').replace(/`/g, '')
+  return stripAnsi(text).replace(/`/g, '')
 }
 
 describe('guren CLI error reporting', () => {
@@ -57,6 +56,22 @@ describe('guren CLI error reporting', () => {
       expect(exitCode).toBe(1)
       expect(countOccurrences(stderr, 'Unknown command')).toBe(1)
       expect(plainText(stdout)).toContain('USAGE guren')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('treats a name inherited from Object.prototype as an unknown command', async () => {
+    const workspace = await createTempWorkspace('guren-cli-bin-proto-')
+    try {
+      const results = await Promise.all(
+        ['valueOf', 'toString', 'constructor'].map((name) => runBin([name], workspace.dir)),
+      )
+
+      for (const { exitCode, stderr } of results) {
+        expect(exitCode).toBe(1)
+        expect(countOccurrences(stderr, 'Unknown command')).toBe(1)
+      }
     } finally {
       await workspace.cleanup()
     }
@@ -92,13 +107,16 @@ describe('guren CLI error reporting', () => {
   it('renders root usage for `--help` and for no arguments, exiting 0', async () => {
     const workspace = await createTempWorkspace('guren-cli-bin-help-')
     try {
-      const withFlag = await runBin(['--help'], workspace.dir)
-      expect(withFlag.exitCode).toBe(0)
-      expect(withFlag.stdout).toContain('Guren framework CLI utilities.')
+      const [withFlag, withoutArgs] = await Promise.all([
+        runBin(['--help'], workspace.dir),
+        runBin([], workspace.dir),
+      ])
 
-      const withoutArgs = await runBin([], workspace.dir)
+      expect(withFlag.exitCode).toBe(0)
+      expect(plainText(withFlag.stdout)).toContain('Guren framework CLI utilities.')
+
       expect(withoutArgs.exitCode).toBe(0)
-      expect(withoutArgs.stdout).toContain('Guren framework CLI utilities.')
+      expect(plainText(withoutArgs.stdout)).toContain('Guren framework CLI utilities.')
     } finally {
       await workspace.cleanup()
     }

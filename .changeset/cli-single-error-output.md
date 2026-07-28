@@ -9,3 +9,7 @@ bare message — and then exits the process itself, so the CLI's own error
 handler never ran. The root command is now wired through a local wrapper that
 keeps `--help`, `-h`, `--version`, unknown-command usage, and plugin
 subcommand proxying intact while owning the error path.
+
+A command name inherited from `Object.prototype` is also rejected properly
+now. `guren valueOf` used to fail with a raw internal `TypeError`, and
+`guren toString` took a different path than any other unknown name.
