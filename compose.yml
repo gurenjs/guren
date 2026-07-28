@@ -18,5 +18,28 @@ services:
       start_period: 5s
       timeout: 3s
 
+  # Port and credentials match what `create-guren-app --db mysql` scaffolds, so
+  # MYSQL_URL is the same string in a fresh app and in the ORM integration test.
+  mysql:
+    image: mysql:8.4
+    container_name: guren-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: guren
+      MYSQL_USER: guren
+      MYSQL_PASSWORD: guren
+      MYSQL_DATABASE: guren
+    ports:
+      - "33306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h127.0.0.1 -uguren -pguren"]
+      interval: 5s
+      retries: 20
+      start_period: 20s
+      timeout: 3s
+
 volumes:
   postgres_data:
+  mysql_data:

@@ -4,18 +4,34 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { DrizzleAdapter } from '../src/adapters/drizzle-adapter'
 
+// Annotated because `end` reads `pool` from its own initializer.
+interface FakePool {
+  ended: boolean
+  end(callback?: (error?: unknown) => void): void
+}
+
 let executeImpl: () => Promise<unknown> = async () => [[]]
+const createdPools: FakePool[] = []
+const createPoolMock = mock(() => {
+  const pool: FakePool = {
+    ended: false,
+    end(callback) {
+      pool.ended = true
+      callback?.()
+    },
+  }
+  createdPools.push(pool)
+  return pool
+})
 const drizzleMock = mock((config: unknown) => ({
-  $client: {
-    end: mock((cb?: (err?: unknown) => void) => {
-      cb?.()
-      return undefined
-    }),
-  },
   execute: () => executeImpl(),
   config,
 }))
 const migrateMock = mock(async () => {})
+
+await mock.module('mysql2', () => ({
+  createPool: createPoolMock,
+}))
 
 await mock.module('drizzle-orm/mysql2', () => ({
   drizzle: drizzleMock,
@@ -42,24 +58,30 @@ function createMigrationsFolder(withMigrations: boolean): string {
 describe('createMySqlDatabase', () => {
   afterEach(() => {
     executeImpl = async () => [[]]
+    createdPools.length = 0
   })
 
-  it('runs migrations and returns a configured database', async () => {
+  it('runs migrations and hands drizzle a pool it owns', async () => {
     const database = createMySqlDatabase({
       migrationsFolder: createMigrationsFolder(true),
       connectionString: () => 'mysql://example',
+      clientOptions: { connectTimeout: 1234 },
     })
 
     await database.migrateDatabase()
     expect(migrateMock).toHaveBeenCalled()
 
     const db = await database.getDatabase()
-    expect(db).toMatchObject({
-      config: {
-        connection: { uri: 'mysql://example' },
-        mode: 'default',
-      },
-    })
+    expect(createPoolMock).toHaveBeenLastCalledWith({ uri: 'mysql://example', connectTimeout: 1234 })
+
+    const [migrationPool, activePool] = createdPools
+    // The migration pool is short-lived and must not outlive the migration.
+    expect(migrationPool?.ended).toBe(true)
+    // `client`, not `connection`: drizzle must be handed the pool we built.
+    expect((db as unknown as { config: { client: unknown } }).config.client).toBe(activePool)
+
+    await database.closeDatabase()
+    expect(activePool?.ended).toBe(true)
   })
 
   it('configures the Drizzle adapter', async () => {

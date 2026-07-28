@@ -44,7 +44,9 @@ bun run dev
 
 # Database
 bun run db:up         # Start PostgreSQL container
-bun run db:down       # Stop container
+bun run db:up:mysql   # Start MySQL container (the ORM's MySQL integration test
+                      # skips unless MYSQL_URL is set)
+bun run db:down       # Stop containers
 bun run db:migrate    # Run migrations
 bun run db:seed       # Run seeders
 ```

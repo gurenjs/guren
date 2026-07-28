@@ -42,8 +42,24 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: guren
+          MYSQL_USER: guren
+          MYSQL_PASSWORD: guren
+          MYSQL_DATABASE: guren
+        ports:
+          - 33306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h127.0.0.1 -uguren -pguren"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     env:
       REDIS_URL: redis://localhost:6379
+      # Drives the ORM's MySQL integration test, which creates its own database.
+      MYSQL_URL: mysql://root:guren@localhost:33306/guren
       APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
 
     steps:
