@@ -194,6 +194,20 @@ const app = createApp({
 })
 ```
 
+### Migrations & Seeding
+
+The scaffolded `config/app.ts` seeds the database on boot as a local development convenience and skips it when `NODE_ENV=production`. Keep that guard — Lambda boots the app on every cold start, so boot-time seeding would re-run against production data.
+
+**Migrations** ship with the function: `lambda:build` copies `db/migrations/` next to the bundle, so a `db:migrate` command registered on your `ConsoleKernel` can apply them in place. See [Console — `createConsoleHandler(kernel)`](#console--createconsolehandlerkernel) for how to invoke it.
+
+**Seeders cannot run inside the function.** They are ordinary `.ts` modules that import your schema and `@guren/core`, and the deployed function is a self-contained bundle with no `node_modules` and no TypeScript loader — the Node.js runtime rejects them outright. Seed from somewhere that has the project source instead:
+
+```bash
+DATABASE_URL='<production connection string>' bunx guren db:seed --force
+```
+
+If a dataset must ship with the release rather than be applied by hand, express it as a migration so it travels with the function.
+
 ### Storage & Filesystem
 
 Lambda has a read-only filesystem except for `/tmp` (512 MB, ephemeral). Use `/tmp` only for transient cache. For persistent storage, use S3 via the `S3Driver`.
