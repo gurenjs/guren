@@ -3,10 +3,13 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { createSqsHandler, type SqsEvent } from '../../src/lambda'
 import { Job, registerJob, clearJobRegistry } from '../../src/queue/Job'
 
+const handled: Array<{ value: number }> = []
+
 class SuccessJob extends Job<{ value: number }> {
-  async handle({ value }: { value: number }): Promise<void> {
+  async handle(payload: { value: number }): Promise<void> {
     // Simulate successful processing
-    if (value < 0) throw new Error('negative value')
+    if (payload.value < 0) throw new Error('negative value')
+    handled.push(payload)
   }
 }
 
@@ -54,6 +57,7 @@ describe('createSqsHandler', () => {
     registerJob(SuccessJob)
     registerJob(FailingJob)
     failedCallPayload = null
+    handled.length = 0
   })
 
   afterEach(() => {
@@ -90,6 +94,10 @@ describe('createSqsHandler', () => {
 
     expect(result.batchItemFailures).toHaveLength(1)
     expect(result.batchItemFailures[0].itemIdentifier).toBe('msg-2')
+    // The surviving records must actually reach the job with their payloads
+    // intact — an empty batchItemFailures list alone is also what a handler
+    // that silently resolved nothing would return.
+    expect(handled).toEqual([{ value: 1 }, { value: 3 }])
   })
 
   test('should report failure for unknown job classes', async () => {
@@ -120,6 +128,14 @@ describe('createSqsHandler', () => {
 
     expect(result.batchItemFailures).toHaveLength(1)
     expect(failedCallPayload).toEqual({ id: 'test-123' })
+  })
+
+  test('should tolerate an empty batch', async () => {
+    const handler = createSqsHandler()
+
+    const result = await handler({ Records: [] })
+
+    expect(result.batchItemFailures).toHaveLength(0)
   })
 
   test('should not call failed handler when retries remain', async () => {
