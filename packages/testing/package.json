@@ -39,7 +39,7 @@
   },
   "dependencies": {},
   "peerDependencies": {
-    "@guren/server": ">=1.5.0",
+    "@guren/server": ">=1.0.0",
     "@inertiajs/react": "^3.6.1",
     "@testing-library/react": "^14.0.0 || ^15.0.0 || ^16.0.0",
     "hono": "^4.12.29",

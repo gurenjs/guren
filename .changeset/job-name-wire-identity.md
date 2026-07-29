@@ -61,5 +61,11 @@ member called `notifiableType` which is not an optional `string` — a different
 type, or a `private`/`protected` member — will stop satisfying `Notifiable` and
 needs to rename it.
 
-`@guren/testing` imports `resolveJobName` from `@guren/server`, so its peer
-range on `@guren/server` is raised to `>=1.5.0`.
+`@guren/testing` now imports `resolveJobName` and `resolveNotifiableType` from
+`@guren/server`. Its `@guren/server` peer range stays at `>=1.0.0` — tightening
+it would only be satisfied once `@guren/server` itself is released at the
+version shipping this feature, which breaks workspace linking against the
+not-yet-released version in the meantime, and `.changeset/config.json`'s
+`onlyUpdatePeerDependentsWhenOutOfRange` deliberately keeps this range wide so
+routine `@guren/server` bumps don't force a spurious major on `@guren/testing`.
+Pair a current `@guren/testing` with a current `@guren/server`.
