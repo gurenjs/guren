@@ -328,6 +328,39 @@ await notifications.send(user, new WelcomeNotification())
 // bunx guren queue:work --queue=notifications
 ```
 
+### Workers in a Separate Process
+
+A queued notification is stored as data, so the worker rebuilds the class to
+deliver it. When the worker shares the process that sent the notification, this
+happens automatically. When you run `queue:work` as its own process, register
+the notification classes it needs from a provider:
+
+```ts
+import { ServiceProvider, registerNotification } from '@guren/core'
+import { WelcomeNotification } from '@/app/Notifications/WelcomeNotification'
+
+export class NotificationServiceProvider extends ServiceProvider {
+  register(): void {
+    registerNotification(WelcomeNotification)
+  }
+}
+```
+
+An unregistered notification fails loudly rather than silently delivering
+nothing.
+
+Two things do not survive the queue, because only a notification's own
+properties are stored:
+
+- **Constructor arguments.** Keep anything a channel needs in a property, as
+  `WelcomeNotification` does above — the constructor is not re-run.
+- **Values JSON cannot represent**, such as `Map`, `Set`, or `#private` fields.
+  Prefer plain values.
+
+Routing is unaffected: `routeNotificationFor()` is called when the notification
+is queued and the resulting routes travel with it, so per-recipient addresses
+and webhooks arrive intact.
+
 ## Conditional Notifications
 
 ### shouldSend Method

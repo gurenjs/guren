@@ -3,7 +3,7 @@
 "@guren/testing": minor
 ---
 
-feat: let jobs and notifiables pin their durable identity
+feat: let jobs pin their durable wire identity
 
 Queue identity was derived entirely from the class name — registration,
 dispatch, and worker lookup all keyed on `jobClass.name`. That breaks a queued
@@ -33,37 +33,17 @@ share the parent's wire name declares it explicitly.
 
 ### Upgrading
 
-The framework's own jobs now declare a `jobName`, which changes two wire names:
+The framework's own jobs now declare a `jobName`, pinning their wire name
+against future bundler mangling. In a normal, unmangled build this is a no-op —
+the declared name already equals the class name for both `SendMailJob` and
+`SendNotificationJob` — so it only matters going forward. **If a previous
+deploy was bundled with identifier mangling**, those jobs were queued under the
+mangled name (`a`, `t`, …) and will not resolve against the now-declared one;
+drain the affected queues before upgrading.
 
-- `SendNotificationJob` — `NotificationManager` dispatches an internal
-  subclass, so its messages were previously written as
-  `BoundSendNotificationJob` and are now written as `SendNotificationJob`.
-- `SendMailJob` — unchanged for a normal build, where the declared name already
-  equals the class name. **Not** unchanged if your previous deploy was bundled
-  with identifier mangling: those messages were queued under the mangled name
-  (`a`, `t`, …) and will not resolve against the declared one.
-
-**Drain queued notifications — and queued mail, if any previous deploy mangled
-identifiers — before upgrading.** Messages left under the old names will fail to
-resolve.
-
-Notifiables gained the matching escape hatch. `Notification.type` was already
-overridable, but the notifiable side hardcoded `constructor.name` into the
-persisted `notifiableType` column. `Notifiable` now accepts an optional
-`notifiableType`, honored by both `DatabaseChannel` and
-`NotificationManager.serializeNotifiable()`. The declared type is also restored
-onto the notifiable that the queue worker rebuilds — that notifiable is a plain
-object, so without it the type degrades to `'Object'` on the queued path.
-
-The new property is optional, so implementors need not add anything. It is not
-purely additive at the type level, though: an implementor that already has a
-member called `notifiableType` which is not an optional `string` — a different
-type, or a `private`/`protected` member — will stop satisfying `Notifiable` and
-needs to rename it.
-
-`@guren/testing` now imports `resolveJobName` and `resolveNotifiableType` from
-`@guren/server`. Its `@guren/server` peer range stays at `>=1.0.0` — tightening
-it would only be satisfied once `@guren/server` itself is released at the
+`@guren/testing` now imports `resolveJobName` from `@guren/server`. Its
+`@guren/server` peer range stays at `>=1.0.0` — tightening it would only be
+satisfied once `@guren/server` itself is released at the
 version shipping this feature, which breaks workspace linking against the
 not-yet-released version in the meantime, and `.changeset/config.json`'s
 `onlyUpdatePeerDependentsWhenOutOfRange` deliberately keeps this range wide so

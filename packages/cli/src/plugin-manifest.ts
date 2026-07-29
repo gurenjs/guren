@@ -67,28 +67,37 @@ export async function readPluginManifest(
 }
 
 /**
- * Enumerate installed packages (dependencies and devDependencies of the
- * app's package.json) that declare a `gurenPlugin` manifest.
+ * Package names declared in the app's own package.json `dependencies` and
+ * `devDependencies` — no node_modules lookup, so this resolves even for a
+ * package that has never been installed. Returns `[]` when package.json is
+ * missing or fails to parse.
  */
-export async function readInstalledPluginManifests(
-  cwd: string = process.cwd(),
-): Promise<Array<{ packageName: string; manifest: GurenPluginManifest }>> {
+export async function readDeclaredDependencyNames(cwd: string = process.cwd()): Promise<string[]> {
   const packageJsonRaw = await readIfExists(cwd, 'package.json')
   if (packageJsonRaw === null) return []
 
-  let dependencies: string[]
   try {
     const parsed = JSON.parse(packageJsonRaw) as {
       dependencies?: Record<string, string>
       devDependencies?: Record<string, string>
     }
-    dependencies = [
+    return [
       ...Object.keys(parsed.dependencies ?? {}),
       ...Object.keys(parsed.devDependencies ?? {}),
     ]
   } catch {
     return []
   }
+}
+
+/**
+ * Enumerate installed packages (dependencies and devDependencies of the
+ * app's package.json) that declare a `gurenPlugin` manifest.
+ */
+export async function readInstalledPluginManifests(
+  cwd: string = process.cwd(),
+): Promise<Array<{ packageName: string; manifest: GurenPluginManifest }>> {
+  const dependencies = await readDeclaredDependencyNames(cwd)
 
   const entries = await Promise.all(
     dependencies.map(async (packageName) => ({

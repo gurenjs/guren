@@ -1,11 +1,12 @@
 import type { Notifiable } from './types'
 
 /**
- * Resolve the type name a notifiable is persisted and queued under.
+ * Resolve the stable type name of a notifiable.
  *
- * Prefers an explicit `notifiableType` over the constructor name, which a
- * bundler may mangle and which is lost once the notifiable is rebuilt from a
- * queued payload. Mirrors `resolveJobName()` on the queue side.
+ * Channels that record which entity a notification belongs to should use this
+ * rather than reading `constructor.name` directly: a notifiable rebuilt from a
+ * queue payload carries its original name in `notifiableType`, and its
+ * constructor is a plain object.
  */
 export function resolveNotifiableType(notifiable: Notifiable): string {
   return notifiable.notifiableType ?? notifiable.constructor?.name ?? 'Unknown'

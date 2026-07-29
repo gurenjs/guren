@@ -15,7 +15,6 @@ export type {
 } from './types'
 
 export { Notification } from './Notification'
-export { resolveNotifiableType } from './notifiable-type'
 
 export {
   NotificationManager,
@@ -23,6 +22,15 @@ export {
   getNotificationManager,
   createNotificationManager,
 } from './NotificationManager'
+
+export {
+  registerNotification,
+  getNotification,
+  clearNotificationRegistry,
+  type NotificationConstructor,
+} from './registry'
+
+export { resolveNotifiableType } from './notifiable-type'
 
 export {
   MailChannel,
