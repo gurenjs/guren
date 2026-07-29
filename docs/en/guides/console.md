@@ -154,7 +154,7 @@ bun run console send-digest
 bun run console users:create ada@example.com --admin
 ```
 
-The kernel handles three names on its own, so you get discovery for free:
+The kernel handles three names on its own, so discovery needs no code of your own:
 
 ```bash
 bun run console list              # every registered command, as a table
@@ -163,6 +163,11 @@ bun run console help users:create # usage, arguments, and options for one comman
 ```
 
 An unrecognised name exits `1` and suggests the closest matches.
+
+Note that `bin/console.ts` boots the application before dispatching, so even
+`list` pays that cost — and in a development app with migrations, boot also runs
+your seeders. Reach for `list` and `help` freely in development; on a deployed
+environment, remember the invocation is a full boot.
 
 `kernel.handle()` resolves to the exit code rather than terminating the process, which is what makes it testable:
 
