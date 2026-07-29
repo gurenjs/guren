@@ -35,6 +35,13 @@ async function auditEnglishDocs(root: string): Promise<void> {
   assert(cli.includes('bunx guren check --spec'), 'CLI guide must document the spec drift CI gate.')
   assert(!cli.includes('`check` and `audit` both exit'), 'CLI guide must not claim plain check sets an exit code — only the suite flags gate CI.')
 
+  const consoleGuide = await read(root, 'docs/en/guides/console.md')
+  assert(consoleGuide.includes('bunx guren make:command'), 'Console guide must document the make:command scaffold.')
+  assert(consoleGuide.includes("import { ConsoleKernel } from '@guren/core'"), 'Console guide must build the kernel from @guren/core.')
+  assert(consoleGuide.includes('export const kernel = new ConsoleKernel('), 'Console guide must name the kernel export `kernel`, matching what the serverless recipes import.')
+  assert(consoleGuide.includes('kernel.register('), 'Console guide must show that generated commands are registered explicitly.')
+  assert(consoleGuide.includes('kernel.handle('), 'Console guide must show how argv reaches the kernel.')
+
   const specAnchored = await read(root, 'docs/en/guides/spec-anchored.md')
   assert(specAnchored.includes('Derived where possible, declared where not, checked always'), 'Spec-anchored guide must state the principle.')
   assert(specAnchored.includes('bunx guren spec:generate'), 'Spec-anchored guide must document spec:generate.')
@@ -164,6 +171,13 @@ async function auditJapaneseDocs(root: string): Promise<void> {
   assert(overview.includes('pages.tasks.Index'), 'Japanese overview must show typed page definitions instead of string page names.')
   assert(!overview.includes("this.inertia('Tasks/Index'"), 'Japanese overview must not use string-based page names in the controller example.')
   assert(!overview.includes('await this.only('), 'Japanese overview must not use legacy this.only() input handling.')
+
+  const consoleGuide = await read(root, 'docs/ja/guides/console.md')
+  assert(consoleGuide.includes('bunx guren make:command'), 'Japanese console guide must document the make:command scaffold.')
+  assert(consoleGuide.includes("import { ConsoleKernel } from '@guren/core'"), 'Japanese console guide must build the kernel from @guren/core.')
+  assert(consoleGuide.includes('export const kernel = new ConsoleKernel('), 'Japanese console guide must name the kernel export `kernel`, matching what the serverless recipes import.')
+  assert(consoleGuide.includes('kernel.register('), 'Japanese console guide must show that generated commands are registered explicitly.')
+  assert(consoleGuide.includes('kernel.handle('), 'Japanese console guide must show how argv reaches the kernel.')
 
   const routing = await read(root, 'docs/ja/guides/routing.md')
   assert(routing.includes("import { Router } from '@guren/core'"), 'Japanese routing guide must use Router from @guren/core.')

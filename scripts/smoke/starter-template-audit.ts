@@ -26,6 +26,13 @@ export async function auditStarterTemplate(root: string): Promise<void> {
   const mainEntry = await read(root, 'src/main.ts')
   assert(mainEntry.includes("from '@guren/core/runtime'"), 'Starter template must use @guren/core/runtime in src/main.ts.')
 
+  assert(packageJson.includes('"console": "bun bin/console.ts"'), 'Starter template must expose a console script so generated commands are runnable.')
+  const consoleEntry = await read(root, 'src/console.ts')
+  assert(consoleEntry.includes('export const kernel = new ConsoleKernel('), 'Starter template must export the console kernel as `kernel` — the serverless recipes import it by that name.')
+  const consoleRunner = await read(root, 'bin/console.ts')
+  assert(consoleRunner.includes("import { kernel } from '../src/console.js'"), 'Starter template console runner must dispatch through src/console.ts.')
+  assert(consoleRunner.includes('await ready'), 'Starter template console runner must boot the app before dispatching, or database-backed commands fail.')
+
   const viteConfig = await read(root, 'vite.config.ts')
   assert(viteConfig.includes("from '@guren/core/vite'"), 'Starter template must use @guren/core/vite.')
   assert(viteConfig.includes('publicDir: false'), 'Starter template must disable publicDir copying in Vite config.')

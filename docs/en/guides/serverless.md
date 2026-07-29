@@ -82,23 +82,9 @@ Runs due tasks when invoked by EventBridge. Configure an EventBridge rule with `
 
 ### Console — `createConsoleHandler(kernel)`
 
-Executes commands registered on your app's `ConsoleKernel`. The kernel has no built-in commands — the scaffolded `src/lambda.ts` ships a commented-out example that registers `db:migrate`; uncomment it (and the `console` export) to enable the handler:
+Executes the commands registered on your app's `ConsoleKernel` — the one `src/console.ts` exports as `kernel`. See the [console commands guide](./console.md) for defining commands and registering them.
 
-```typescript
-import { Command, ConsoleKernel } from '@guren/core'
-import { migrateDatabase } from '../config/database.js'
-
-class MigrateCommand extends Command {
-  static signature = 'db:migrate'
-  static description = 'Apply pending database migrations'
-  async handle(): Promise<void> {
-    await migrateDatabase()
-  }
-}
-
-const kernel = new ConsoleKernel()
-kernel.register(MigrateCommand)
-```
+The kernel has no built-in commands. The scaffolded `src/lambda.ts` ships a commented-out `db:migrate` example; uncomment it and the `console` export to enable the handler.
 
 Invoke via AWS CLI:
 

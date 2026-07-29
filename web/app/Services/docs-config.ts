@@ -61,6 +61,7 @@ const GUIDE_SECTIONS: readonly DocSectionConfig[] = [
       'broadcasting',
       'storage',
       'scheduling',
+      'console',
       'rate-limiting',
       'logging',
       'health-checks',

@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { spawn } from 'node:child_process'
+import { basename, join, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
 import { defineCommand, showUsage } from 'citty'
@@ -476,6 +477,15 @@ const makeConsoleCommandCommand = defineCommand({
       command: args.command,
     })
     consola.success(`Command created at ${file}`)
+
+    // Nothing discovers app/Console/Commands automatically — an unregistered
+    // command is dead code, so spell out the one wiring step.
+    const className = basename(file, '.ts')
+    const fromConsoleEntry = relative(join(process.cwd(), 'src'), file).replace(/\.ts$/u, '.js')
+    consola.info('Register it with your console kernel in src/console.ts:')
+    consola.info(`  import ${className} from '${fromConsoleEntry}'`)
+    consola.info(`  kernel.register(${className})`)
+    consola.info('See docs/guides/console.md for the full walkthrough.')
   },
 })
 
