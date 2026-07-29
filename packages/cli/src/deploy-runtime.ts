@@ -53,14 +53,9 @@ const DEPLOY_TARGET_PROFILES: Record<DeployTargetId, DeployTargetProfile> = {
 
 /**
  * Deploy plugin package names, matched against the app's own package.json.
- *
  * Matched by name rather than driven off the `gurenPlugin` manifest because the
  * manifest lives in `node_modules/<pkg>/package.json`, so reading it would stop
  * detection working before `bun install`.
- *
- * Lambda is also reachable without its plugin — the adapter ships inside
- * `@guren/core`, so an app can import `createLambdaHandler` and deploy by hand.
- * That path is caught by the source scan instead; see `detectDeployTargets`.
  */
 const DEPLOY_PLUGIN_PACKAGES: Record<string, DeployTargetId> = {
   '@guren/plugin-cloudflare': 'cloudflare',
@@ -584,18 +579,18 @@ async function detectDeployTargets(cwd: string, files: ScannedFile[]): Promise<D
     }
   }
 
-  // Only when the plugin did not already declare it — an app installing
-  // @guren/plugin-lambda also gets a scaffolded src/lambda.ts importing the
-  // adapter, and reporting the same target twice would double every warning.
-  const lambdaDeclared = detections.some((detection) => detection.profile === DEPLOY_TARGET_PROFILES.lambda)
-  const lambdaFile = lambdaDeclared
-    ? undefined
-    : files.find((file) => file.signals.some((signal) => signal.kind === 'lambda'))
-  if (lambdaFile) {
-    detections.push({
-      profile: DEPLOY_TARGET_PROFILES.lambda,
-      detectedVia: `Lambda adapter imported in ${lambdaFile.filePath}`,
-    })
+  // The Lambda adapter ships inside @guren/core, so a hand-rolled deploy can
+  // import it without installing the plugin — catch that from source imports.
+  // Skipped when the plugin already declared the target: installing it also
+  // scaffolds src/lambda.ts, and reporting Lambda twice doubles every warning.
+  if (!declared.has('@guren/plugin-lambda')) {
+    const lambdaFile = files.find((file) => file.signals.some((signal) => signal.kind === 'lambda'))
+    if (lambdaFile) {
+      detections.push({
+        profile: DEPLOY_TARGET_PROFILES.lambda,
+        detectedVia: `Lambda adapter imported in ${lambdaFile.filePath}`,
+      })
+    }
   }
 
   return detections
