@@ -15,6 +15,14 @@ import {
 } from './discovery'
 import { checkPluginCompatibility, readCoreVersion, readInstalledPluginManifests } from './plugin-manifest'
 import { compareVersions } from './codemods'
+import {
+  analyzeDeployRuntime,
+  bunlessTargets,
+  formatParseCaveat,
+  formatSignals,
+  formatTargetLabels,
+  type DeployRuntimeAnalysis,
+} from './deploy-runtime'
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail'
 
@@ -1024,6 +1032,141 @@ async function detectPluginCompatibility(context: DoctorRuleContext): Promise<Do
   )
 }
 
+const NODE_HASHER_FIX = 'Set `static passwordHasher = new NodeHasher()` on the AuthenticatableModel subclass and pass `hasher: new NodeHasher()` to `auth.useModel()`. ScryptHasher and NodeHasher produce incompatible hash formats, so existing passwords must be rehashed.'
+
+/**
+ * `ScryptHasher` — the default for both password hashing and verification —
+ * runs on `Bun.password`, which does not exist on Workers or Lambda. Only
+ * warns for apps that actually authenticate with passwords; OAuth-only apps
+ * never reach the hasher.
+ */
+function detectDeployPasswordHashing(analysis: DeployRuntimeAnalysis): DoctorCheck {
+  const key = 'deploy-password-hashing'
+  const title = 'Deploy Password Hashing'
+
+  const bunless = bunlessTargets(analysis)
+  // Every verdict carries the parse caveat, target-only ones included: the
+  // Lambda adapter is detected from source, so a skipped file can hide a
+  // target and turn a real warning into "no deploy target detected".
+  const caveat = formatParseCaveat(analysis)
+
+  if (bunless.length === 0) {
+    return createCheck(
+      key,
+      title,
+      'pass',
+      analysis.targets.length > 0
+        ? `${formatTargetLabels(analysis.targets)} runs on Bun, so the default ScryptHasher applies.${caveat}`
+        : `No deploy plugin or Lambda adapter detected.${caveat}`,
+    )
+  }
+
+  const labels = formatTargetLabels(bunless)
+
+  if (analysis.passwordAuthSignals.length === 0) {
+    return createCheck(key, title, 'pass', `${labels} detected, and no password authentication was found.${caveat}`)
+  }
+
+  if (analysis.nodeHasherSignals.length > 0) {
+    return createCheck(key, title, 'pass', `${labels} detected, and NodeHasher is configured.${caveat}`)
+  }
+
+  return createCheck(
+    key,
+    title,
+    'warn',
+    `${labels} detected with password authentication (${formatSignals(analysis.passwordAuthSignals)}), but NodeHasher is never constructed. The default ScryptHasher uses Bun.password, which is unavailable on this runtime.${caveat}`,
+    { fix: NODE_HASHER_FIX, manualFix: NODE_HASHER_FIX },
+  )
+}
+
+const BACKED_STORE_FIX = 'Use DatabaseSessionStore and DatabaseOAuthStateStore from `@guren/core`, or the Redis equivalents from `@guren/core/redis`, and a Redis-backed cache/queue driver.'
+
+/**
+ * Serverless targets share no memory between invocations, so in-memory stores
+ * drop every session, cache entry, queued job, and OAuth state in production
+ * while working perfectly in local development.
+ */
+function detectDeployRuntimeStores(analysis: DeployRuntimeAnalysis): DoctorCheck {
+  const key = 'deploy-runtime-stores'
+  const title = 'Deploy Runtime Stores'
+
+  const caveat = formatParseCaveat(analysis)
+
+  if (analysis.targets.length === 0) {
+    return createCheck(key, title, 'pass', `No deploy plugin or Lambda adapter detected.${caveat}`)
+  }
+
+  const labels = formatTargetLabels(analysis.targets)
+  const issues: string[] = []
+
+  if (analysis.memoryStoreSignals.length > 0) {
+    issues.push(`in-memory stores are constructed explicitly (${formatSignals(analysis.memoryStoreSignals)})`)
+  }
+
+  if (
+    analysis.sessionSignals.length > 0 &&
+    analysis.backedSessionSignals.length === 0 &&
+    analysis.sessionDisabledSignals.length === 0
+  ) {
+    issues.push(
+      `sessions are enabled (${formatSignals(analysis.sessionSignals)}) with no DatabaseSessionStore or RedisSessionStore`,
+    )
+  }
+
+  if (analysis.oauthSignals.length > 0 && analysis.backedOAuthSignals.length === 0) {
+    issues.push(
+      `OAuth is configured (${formatSignals(analysis.oauthSignals)}) with no DatabaseOAuthStateStore or RedisOAuthStateStore`,
+    )
+  }
+
+  if (issues.length === 0) {
+    return createCheck(key, title, 'pass', `${labels} detected, and no in-memory store defaults were found.${caveat}`)
+  }
+
+  return createCheck(
+    key,
+    title,
+    'warn',
+    `${labels} shares no memory between requests, but ${issues.join('; ')}.${caveat}`,
+    { fix: BACKED_STORE_FIX, manualFix: BACKED_STORE_FIX },
+  )
+}
+
+const EXPLICIT_PROVIDERS_FIX = 'List providers explicitly in `createApp({ providers: [...] })` instead of discovering them from the filesystem.'
+
+/**
+ * `AutoDiscovery` scans directories with `Bun.Glob` and imports what it finds.
+ * Every deploy target breaks that, either by having no Bun runtime or by
+ * shipping a bundle with no source tree to scan.
+ */
+function detectDeployProviderDiscovery(analysis: DeployRuntimeAnalysis): DoctorCheck {
+  const key = 'deploy-provider-discovery'
+  const title = 'Deploy Provider Discovery'
+
+  const caveat = formatParseCaveat(analysis)
+
+  if (analysis.targets.length === 0) {
+    return createCheck(key, title, 'pass', `No deploy plugin or Lambda adapter detected.${caveat}`)
+  }
+
+  const labels = formatTargetLabels(analysis.targets)
+
+  if (analysis.discoverySignals.length === 0) {
+    return createCheck(key, title, 'pass', `${labels} detected, and provider discovery is not used.${caveat}`)
+  }
+
+  const blockers = analysis.targets.map((target) => `${target.profile.label}: ${target.profile.discoveryBlocker}`)
+
+  return createCheck(
+    key,
+    title,
+    'warn',
+    `${labels} detected, but the app uses filesystem provider discovery (${formatSignals(analysis.discoverySignals)}). ${blockers.join(' ')}${caveat}`,
+    { fix: EXPLICIT_PROVIDERS_FIX, manualFix: EXPLICIT_PROVIDERS_FIX },
+  )
+}
+
 const doctorRules: DoctorRule[] = [
   { key: 'runtime', title: 'Runtime Environment', detect: detectRuntime },
   { key: 'bun-version', title: 'Bun Version', detect: detectBunVersion },
@@ -1051,17 +1194,30 @@ export async function getDoctorRuleEvaluations(options: { cwd?: string } = {}): 
   const cwd = resolve(options.cwd ?? process.cwd())
   const context: DoctorRuleContext = { cwd }
 
-  const evaluations = await Promise.all(
-    doctorRules.map(async (rule) => {
-      const check = await rule.detect(context)
-      const autofix = rule.autofix && check.status !== 'pass'
-        ? await rule.autofix(context, check)
-        : null
-      return { check, autofix } as DoctorRuleEvaluation
-    }),
-  )
+  // The deploy-runtime checks share one filesystem scan, computed once here
+  // rather than through the DoctorRule interface (they need no autofix and no
+  // per-rule context beyond cwd, so a plain analysis object is simpler than
+  // wrapping each in its own `detect` closure).
+  const [ruleEvaluations, deployAnalysis] = await Promise.all([
+    Promise.all(
+      doctorRules.map(async (rule) => {
+        const check = await rule.detect(context)
+        const autofix = rule.autofix && check.status !== 'pass'
+          ? await rule.autofix(context, check)
+          : null
+        return { check, autofix } as DoctorRuleEvaluation
+      }),
+    ),
+    analyzeDeployRuntime(cwd),
+  ])
 
-  return { cwd, evaluations }
+  const deployEvaluations: DoctorRuleEvaluation[] = [
+    { check: detectDeployPasswordHashing(deployAnalysis), autofix: null },
+    { check: detectDeployRuntimeStores(deployAnalysis), autofix: null },
+    { check: detectDeployProviderDiscovery(deployAnalysis), autofix: null },
+  ]
+
+  return { cwd, evaluations: [...ruleEvaluations, ...deployEvaluations] }
 }
 
 export async function runDoctor(options: RunDoctorOptions = {}): Promise<DoctorReport> {
