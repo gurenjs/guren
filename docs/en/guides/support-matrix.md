@@ -15,6 +15,7 @@
 | PostgreSQL | 14+      | Supported (primary) |
 | SQLite     | 3.x      | Supported (via Bun native) |
 | MySQL      | 8.x      | Supported (via `createMySqlDatabase`) |
+| Aurora Serverless v2 (Data API) | PostgreSQL 14+ | Supported (via `createAwsDataApiDatabase`) |
 
 ## Optional Services
 

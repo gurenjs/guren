@@ -2,7 +2,7 @@
 
 Guren は Drizzle ORM と PostgreSQL を組み合わせて使います。このガイドでは、スキーマ定義、マイグレーション、シーダー、アプリケーションコードからの日常的な利用方法を説明します。
 
-現在は PostgreSQL / SQLite / MySQL をサポートしています。
+現在は PostgreSQL / SQLite / MySQL / Aurora Serverless（AWS Data API）をサポートしています。
 
 ## 設定の概要
 - `config/database.ts`: データベース接続を生成し、フレームワークに公開します。
@@ -89,6 +89,38 @@ MySQL アダプタも PostgreSQL / SQLite と同じランタイム API（`getDat
 
 > [!TIP]
 > Drizzle のリレーショナルクエリ (`db.query.<table>.findMany(...)`) を使いたい場合は、`drizzle-orm` の `defineRelations(schema, ...)` で生成した値を `relations` オプションに渡してください (RQB v2)。Guren の `Model` API ではこの設定は不要です。
+
+## Aurora Serverless（AWS Data API）サポート
+
+AWS Lambda 上で RDS Data API を有効にした Aurora Serverless v2 に接続する場合は `createAwsDataApiDatabase` を使います。Data API は HTTP ベースのため、接続プールの管理が不要で、Lambda 関数を VPC 内に配置する必要もありません。
+
+```ts
+// config/database.ts
+import { createAwsDataApiDatabase } from '@guren/orm'
+
+const database = createAwsDataApiDatabase({
+  migrationsFolder: new URL('../db/migrations', import.meta.url),
+  seedersFolder: new URL('../db/seeders', import.meta.url),
+  // 各設定は環境変数へのフォールバックもあります:
+  // DATABASE_NAME, DATABASE_RESOURCE_ARN, DATABASE_SECRET_ARN
+  database: () => process.env.DATABASE_NAME,
+  resourceArn: () => process.env.DATABASE_RESOURCE_ARN,
+  secretArn: () => process.env.DATABASE_SECRET_ARN,
+})
+
+export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+```
+
+ドライバパッケージも合わせてインストールしてください:
+
+```bash
+bun add @aws-sdk/client-rds-data
+```
+
+このアダプタも他のドライバと同じランタイム API を提供し、マイグレーションは標準の drizzle-kit フォルダを使用します。意図的な違いが 1 つあります: `getDatabase()` は保留中のマイグレーションを自動実行**しません** — Lambda ではこのチェックがコールドスタートのたびに直列の Data API 往復を数回消費するためです。マイグレーションは帯域外で実行するか（ローカルでは `bun run db:migrate`、デプロイ後はコンソールハンドラ）、`migrateOnStart: true` で従来の挙動に戻せます。Data API に対して `drizzle-kit generate`/`push` を実行する場合は、`drizzle.config.ts` に `driver: 'aws-data-api'` と同じ `database`/`resourceArn`/`secretArn` を設定してください。
+
+> [!NOTE]
+> 認証は AWS SDK の標準クレデンシャルチェーン（Lambda 上では IAM ロール、ローカルでは `AWS_PROFILE`）を使用します。リージョンやクレデンシャルを明示的に指定する場合は `clientOptions` を渡してください。
 
 ## マイグレーションの生成
 Guren CLI は drizzle-kit をラップしており、Drizzle スキーマから SQL ファイルを直接生成できます。

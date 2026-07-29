@@ -15,6 +15,7 @@
 | PostgreSQL | 14+       | サポート（プライマリ） |
 | SQLite     | 3.x       | サポート（Bun ネイティブ経由） |
 | MySQL      | 8.x       | サポート（`createMySqlDatabase` 経由） |
+| Aurora Serverless v2（Data API） | PostgreSQL 14+ | サポート（`createAwsDataApiDatabase` 経由） |
 
 ## オプションサービス
 

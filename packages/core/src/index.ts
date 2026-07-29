@@ -13,6 +13,7 @@ export {
   createMySqlDatabase,
   createSqliteDatabase,
   createD1Database,
+  createAwsDataApiDatabase,
   runSeeders,
   defineSeeder,
 } from '@guren/orm'
@@ -55,6 +56,8 @@ export type {
   SqliteDatabaseOptions,
   D1DatabaseHandle,
   D1DatabaseOptions,
+  AwsDataApiDatabase,
+  AwsDataApiDatabaseOptions,
   SeederContext,
   SeederHandler,
   SoftDeletesStatic,

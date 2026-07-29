@@ -35,7 +35,7 @@ export async function getMigrationStatus(): Promise<MigrationStatusRow[]> {
   if (!status) {
     throw new Error(
       'config/database.ts must export migrationStatus(). It is returned by ' +
-        'createSqliteDatabase()/createPostgresDatabase()/createMySqlDatabase() — ' +
+        'createSqliteDatabase()/createPostgresDatabase()/createMySqlDatabase()/createAwsDataApiDatabase() — ' +
         'add it to the export list in config/database.ts.',
     )
   }

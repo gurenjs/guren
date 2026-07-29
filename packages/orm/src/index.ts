@@ -60,6 +60,8 @@ export type { MigrationStatusEntry } from './migration-utils'
 export type { SqliteDatabase, SqliteDatabaseOptions } from './sqlite'
 export { createD1Database } from './d1'
 export type { D1DatabaseHandle, D1DatabaseOptions } from './d1'
+export { createAwsDataApiDatabase } from './aws-data-api'
+export type { AwsDataApiDatabase, AwsDataApiDatabaseOptions } from './aws-data-api'
 export { runSeeders, defineSeeder, loadSeeders } from './seeder'
 export type { SeederContext, SeederHandler } from './seeder'
 

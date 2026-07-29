@@ -1,6 +1,6 @@
 # Database
 
-Guren uses Drizzle ORM and supports PostgreSQL, SQLite, and MySQL. You define your schema in TypeScript, derive models from those tables, and get a fluent query API that feels like Laravel Eloquent while staying fully type-safe.
+Guren uses Drizzle ORM and supports PostgreSQL, SQLite, MySQL, and Aurora Serverless (AWS Data API). You define your schema in TypeScript, derive models from those tables, and get a fluent query API that feels like Laravel Eloquent while staying fully type-safe.
 
 ## Connecting to the Database
 
@@ -49,6 +49,38 @@ Like the PostgreSQL and SQLite adapters, the MySQL adapter exposes the same runt
 
 > [!TIP]
 > If you want to use Drizzle's relational queries (`db.query.<table>.findMany(...)`), pass a `relations` option built with `defineRelations(schema, ...)` from `drizzle-orm` (RQB v2). The `Model` API in Guren does not require this.
+
+## Aurora Serverless (AWS Data API)
+
+Use `createAwsDataApiDatabase` when your app runs on AWS Lambda against Aurora Serverless v2 with the RDS Data API enabled. The Data API is HTTP-based, so there is no connection pool to manage and the Lambda function does not need to run inside a VPC.
+
+```ts
+// config/database.ts
+import { createAwsDataApiDatabase } from '@guren/orm'
+
+const database = createAwsDataApiDatabase({
+  migrationsFolder: new URL('../db/migrations', import.meta.url),
+  seedersFolder: new URL('../db/seeders', import.meta.url),
+  // Each setting also falls back to an environment variable:
+  // DATABASE_NAME, DATABASE_RESOURCE_ARN, DATABASE_SECRET_ARN
+  database: () => process.env.DATABASE_NAME,
+  resourceArn: () => process.env.DATABASE_RESOURCE_ARN,
+  secretArn: () => process.env.DATABASE_SECRET_ARN,
+})
+
+export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database
+```
+
+Install the driver package alongside it:
+
+```bash
+bun add @aws-sdk/client-rds-data
+```
+
+The adapter exposes the same runtime API as the other drivers, and migrations use the standard drizzle-kit folders. One deliberate difference: `getDatabase()` does **not** run pending migrations automatically — on Lambda that check would cost several serialized Data API round trips on every cold start. Run migrations out of band (`bun run db:migrate`, or the console handler once deployed), or opt back in with `migrateOnStart: true`. For `drizzle-kit generate`/`push` against the Data API, set `driver: 'aws-data-api'` in `drizzle.config.ts` with the same `database`/`resourceArn`/`secretArn` credentials.
+
+> [!NOTE]
+> Authentication uses the standard AWS SDK credential chain (IAM role on Lambda, `AWS_PROFILE` locally). Pass `clientOptions` to override the region or credentials explicitly.
 
 ## Defining Models
 
