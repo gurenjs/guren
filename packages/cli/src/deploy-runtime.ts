@@ -351,7 +351,7 @@ function extractSignals(source: string, plugins: ParserPlugin[]): ExtractedSigna
   const signals: ExtractedSignal[] = []
   const seen = new Set<string>()
   const emit = (kind: SignalKind, symbol: string, line: number): void => {
-    const key = `${kind} ${symbol}`
+    const key = `${kind}\x00${symbol}`
     if (seen.has(key)) return
     seen.add(key)
     signals.push({ kind, symbol, line })
