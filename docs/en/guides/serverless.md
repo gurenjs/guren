@@ -82,7 +82,25 @@ Runs due tasks when invoked by EventBridge. Configure an EventBridge rule with `
 
 ### Console — `createConsoleHandler(kernel)`
 
-Executes CLI commands on Lambda. Invoke via AWS CLI:
+Executes commands registered on your app's `ConsoleKernel`. The kernel has no built-in commands — the scaffolded `src/lambda.ts` ships a commented-out example that registers `db:migrate`; uncomment it (and the `console` export) to enable the handler:
+
+```typescript
+import { Command, ConsoleKernel } from '@guren/core'
+import { migrateDatabase } from '../config/database.js'
+
+class MigrateCommand extends Command {
+  static signature = 'db:migrate'
+  static description = 'Apply pending database migrations'
+  async handle(): Promise<void> {
+    await migrateDatabase()
+  }
+}
+
+const kernel = new ConsoleKernel()
+kernel.register(MigrateCommand)
+```
+
+Invoke via AWS CLI:
 
 ```bash
 aws lambda invoke --function-name my-app-console \
@@ -198,7 +216,7 @@ const app = createApp({
 
 The scaffolded `config/app.ts` seeds the database on boot as a local development convenience and skips it when `NODE_ENV=production`. Keep that guard — Lambda boots the app on every cold start, so boot-time seeding would re-run against production data.
 
-**Migrations** ship with the function: `lambda:build` copies `db/migrations/` next to the bundle, so a `db:migrate` command registered on your `ConsoleKernel` can apply them in place. See [Console — `createConsoleHandler(kernel)`](#console--createconsolehandlerkernel) for how to invoke it.
+**Migrations** ship with the function: `lambda:build` copies `db/migrations/` next to the bundle, so the scaffold's `db:migrate` console command can apply them in place once you uncomment it. See [Console — `createConsoleHandler(kernel)`](#console--createconsolehandlerkernel) for the command definition and how to invoke it.
 
 **Seeders cannot run inside the function.** They are ordinary `.ts` modules that import your schema and `@guren/core`, and the deployed function is a self-contained bundle with no `node_modules` and no TypeScript loader — the Node.js runtime rejects them outright. Seed from somewhere that has the project source instead:
 
