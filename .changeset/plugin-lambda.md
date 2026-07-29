@@ -10,7 +10,7 @@ Add `@guren/plugin-lambda`: first-class AWS Lambda deployment tooling.
 contributes a `lambda:build` command that assembles a `.lambda/` directory:
 a self-contained ESM bundle for the Node.js runtime with
 `process.env.NODE_ENV` pinned to `"production"`, the SSR bundle plus Drizzle
-migrations and seeders alongside it, static assets staged for S3, and an
+migrations alongside it, static assets staged for S3, and an
 `env.json` describing the function environment. Dev-only modules
 (`bun:sqlite`, `vite`, the MCP endpoint's generators) are replaced with
 throwing stubs so the bundle neither ships dev tooling nor fails to import on

@@ -29,8 +29,6 @@ export interface BuildLambdaOutputOptions {
   ssrDir?: PathLike
   /** Drizzle migrations copied into the function. Defaults to `<root>/db/migrations`. */
   migrationsDir?: PathLike
-  /** Seeders copied into the function. Defaults to `<root>/db/seeders`. */
-  seedersDir?: PathLike
   /** Client manifest key for the frontend entry. Defaults to `resources/js/app.tsx`. */
   clientEntryKey?: string
   /** SSR manifest key for the server entry. Defaults to `resources/js/ssr.tsx`. */
@@ -99,7 +97,6 @@ export async function buildLambdaOutput(options: BuildLambdaOutputOptions = {}):
   const publicDir = resolvePathLike(options.publicDir ?? resolve(root, 'public'))
   const ssrDir = resolvePathLike(options.ssrDir ?? resolve(root, '.guren/ssr'))
   const migrationsDir = resolvePathLike(options.migrationsDir ?? resolve(root, 'db/migrations'))
-  const seedersDir = resolvePathLike(options.seedersDir ?? resolve(root, 'db/seeders'))
   const clientEntryKey = options.clientEntryKey ?? 'resources/js/app.tsx'
   const ssrEntryKey = options.ssrEntryKey ?? 'resources/js/ssr.tsx'
 
@@ -146,12 +143,12 @@ export async function buildLambdaOutput(options: BuildLambdaOutputOptions = {}):
     cpSync(ssrDir, resolve(funcDir, '.guren/ssr'), { recursive: true })
   }
 
+  // Migrations travel with the function so a console-handler `db:migrate` can
+  // apply them in place. Seeders deliberately do not: they are raw .ts modules
+  // importing the app's schema and @guren/* packages, which the self-contained
+  // bundle can never resolve — run them from the project source instead.
   if (existsSync(migrationsDir)) {
     cpSync(migrationsDir, resolve(funcDir, 'db/migrations'), { recursive: true })
-  }
-
-  if (existsSync(seedersDir)) {
-    cpSync(seedersDir, resolve(funcDir, 'db/seeders'), { recursive: true })
   }
 
   writeFileSync(resolve(out, 'env.json'), `${JSON.stringify({ NODE_ENV: 'production', ...env }, null, 2)}\n`)
@@ -278,7 +275,7 @@ async function bundleHandler(handlerEntry: string, funcDir: string): Promise<voi
       // convention (config/database.ts, config/app.ts's migration check): those
       // files live one directory below the app root, so the same expression
       // must resolve from one level under /var/task to reach the db/migrations
-      // and db/seeders folders `lambda:build` copies next to the bundle.
+      // folder `lambda:build` copies next to the bundle.
       'import.meta.url': '"file:///var/task/config/lambda.js"',
     },
     // Provided by the managed Lambda runtime.

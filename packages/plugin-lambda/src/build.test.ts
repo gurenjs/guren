@@ -181,14 +181,17 @@ describe('buildLambdaOutput', () => {
     expect(probeHttpExport(root)).toBe('ProcessNewPostJob')
   })
 
-  test('should copy the SSR bundle, migrations, and seeders into the function directory', async () => {
+  test('should copy the SSR bundle and migrations, but never seeders, into the function directory', async () => {
     scaffoldApp(root)
 
     await buildLambdaOutput({ rootDir: root, skipAppBuild: true })
 
     expect(existsSync(join(root, '.lambda/function/.guren/ssr/ssr-Xyz789.js'))).toBe(true)
     expect(existsSync(join(root, '.lambda/function/db/migrations/20260101000000_init/migration.sql'))).toBe(true)
-    expect(existsSync(join(root, '.lambda/function/db/seeders/001_init.ts'))).toBe(true)
+    // Seeders are raw .ts modules importing the app's schema and @guren/*
+    // packages — the self-contained bundle can never load them, so shipping
+    // them would only suggest a seeding path that does not exist.
+    expect(existsSync(join(root, '.lambda/function/db/seeders'))).toBe(false)
 
     const env = JSON.parse(readFileSync(join(root, '.lambda/env.json'), 'utf8'))
     expect(env.NODE_ENV).toBe('production')
