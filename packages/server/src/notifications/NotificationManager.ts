@@ -317,6 +317,7 @@ interface SerializedNotification {
  * Job for sending queued notifications.
  */
 class SendNotificationJob extends Job<SendNotificationPayload> {
+  static jobName = 'SendNotificationJob'
   static queue = 'notifications'
   static maxAttempts = 3
 

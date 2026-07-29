@@ -340,6 +340,7 @@ export {
   getJob,
   getRegisteredJobs,
   clearJobRegistry,
+  resolveJobName,
   createQueueManager,
   processJob,
   FailedJobReporter,

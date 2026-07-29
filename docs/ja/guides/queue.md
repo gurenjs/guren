@@ -56,6 +56,7 @@ export class SendWelcomeEmailJob extends Job<SendWelcomeEmailPayload> {
 
 | プロパティ | デフォルト | 説明 |
 |-----------|-----------|------|
+| `jobName` | クラス名 | キューのメッセージに記録される安定した名前 |
 | `queue` | `'default'` | このジョブタイプのキュー名 |
 | `maxAttempts` | `3` | 失敗前の最大リトライ回数 |
 | `backoff` | `'exponential'` | リトライ遅延戦略 |
@@ -64,6 +65,59 @@ export class SendWelcomeEmailJob extends Job<SendWelcomeEmailPayload> {
 - `'exponential'`: 2^attempt × 1000ms (1秒, 2秒, 4秒, 8秒, ...)
 - `'linear'`: attempt × 1000ms (1秒, 2秒, 3秒, ...)
 - `number`: ミリ秒単位の固定遅延
+
+### ジョブ名を固定する
+
+ジョブをディスパッチすると、その名前がキューのメッセージに書き込まれ、ワーカーは
+その名前からクラスを引き直します。デフォルトではクラス名がそのまま使われるため、
+次の2つのケースで処理中のメッセージが解決できなくなります。
+
+- **クラスのリネーム。** 旧名で積まれたメッセージが解決できなくなります。
+- **識別子をマングルするバンドル。** デプロイされたクラス名が `a` のような名前に
+  なり、`a` として登録されるため、マングルしていないビルド（または別のマングル結果）
+  が書き込んだメッセージが孤立します。デプロイ側の注意点は
+  [サーバーレス](./serverless.md) を参照してください。
+
+`jobName` を宣言すると、両方のケースで名前を固定できます。
+
+```ts
+import { Job } from '@guren/core'
+
+export class SendWelcomeEmailJob extends Job<{ userId: string }> {
+  // クラス名が最終的に何になろうと 'SendWelcomeEmailJob' として積まれる
+  static jobName = 'SendWelcomeEmailJob'
+  static queue = 'emails'
+
+  async handle({ userId }: { userId: string }): Promise<void> {
+    // ...
+  }
+}
+```
+
+固定したあとはクラス名を自由に変更できます。永続化されるのは `jobName` だけで、
+これが `registerJob()` のキーであり、ワーカーが解決に使う文字列です。`jobName` を
+持たないジョブは従来どおりクラス名で解決されるため、この設定はオプトインです。
+
+JavaScript の static メンバーは継承されますが、サブクラスは親の `jobName` を
+**継承しません**。自分で宣言するまでは自身のクラス名で解決されます。
+
+```ts
+class BaseJob extends Job<void> {
+  static jobName = 'BaseJob'
+}
+
+class DerivedJob extends BaseJob {}                  // 'DerivedJob' として積まれる
+class ProxyJob extends BaseJob {
+  static jobName = BaseJob.jobName                   // 'BaseJob' として積まれる
+}
+```
+
+この規則がないと、両方のクラスを登録したときにレジストリの同じエントリに潰れ、
+後から登録したほうが先のものを追い出してしまいます。
+
+すでに永続キューにメッセージが残っているジョブの `jobName` を変更・追加することは
+リネームそのものです。先にキューを空にするか、バックログが消えるまで旧名の登録を
+残してください。
 
 ## ジョブのディスパッチ
 

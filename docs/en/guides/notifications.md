@@ -256,6 +256,29 @@ class User implements Notifiable {
 }
 ```
 
+### Pinning the Notifiable Type
+
+The database channel persists a `notifiableType` alongside each record, and it
+defaults to the constructor name. That name is lost in two places: a bundler can
+mangle it, and a notifiable rebuilt from a queued payload is a plain object, so
+its constructor name is `Object`.
+
+Declare `notifiableType` to pin it — the mirror of `Notification.type` on the
+notification side:
+
+```ts
+class User implements Notifiable {
+  notifiableType = 'User'
+
+  routeNotificationFor(channel: string): string | null {
+    // ...
+  }
+}
+```
+
+The declared type is serialized into the queue payload and restored onto the
+notifiable the worker rebuilds, so it survives the round trip.
+
 ## Queued Notifications
 
 ### Configure Queue

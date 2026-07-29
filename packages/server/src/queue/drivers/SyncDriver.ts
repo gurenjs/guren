@@ -22,7 +22,7 @@ export class SyncDriver implements QueueDriver {
     const JobClass = getJob(job.name)
     if (!JobClass) {
       throw new Error(
-        `SyncDriver: job class "${job.name}" is not registered. Call registerJob(${job.name}) before dispatching.`,
+        `SyncDriver: job class "${job.name}" is not registered. Call registerJob() with the class whose jobName (or class name) is "${job.name}".`,
       )
     }
 

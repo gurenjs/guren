@@ -18,6 +18,7 @@ export {
   getJob,
   getRegisteredJobs,
   clearJobRegistry,
+  resolveJobName,
   type JobClass,
 } from './Job'
 
