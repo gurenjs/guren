@@ -42,10 +42,9 @@ export const queue = createSqsHandler()
 // import { scheduler } from './scheduler.js'
 // export const schedule = createScheduleHandler(scheduler)
 
-// Console commands — uncomment to run kernel commands with \`aws lambda
-// invoke\`. The kernel has no built-in commands; this registers db:migrate.
-// (Seeders cannot run inside the function — they import project source the
-// bundle cannot resolve. Run \`bunx guren db:seed --force\` instead.)
+// Console commands — uncomment to run kernel commands (the kernel has no
+// built-in ones) with \`aws lambda invoke\`.
+// Seeders can't run in the bundle — use \`bunx guren db:seed --force\` instead.
 // import { Command, ConsoleKernel } from '@guren/core'
 // import { createConsoleHandler } from '@guren/core/lambda'
 // import { migrateDatabase } from '../config/database.js'
