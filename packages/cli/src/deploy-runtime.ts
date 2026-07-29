@@ -313,7 +313,7 @@ function extractSignals(ast: File): ExtractedSignal[] {
   const signals: ExtractedSignal[] = []
   const seen = new Set<string>()
   const emit = (kind: SignalKind, symbol: string, line: number): void => {
-    const key = `${kind}\u0000${symbol}`
+    const key = `${kind}\x00${symbol}`
     if (seen.has(key)) return
     seen.add(key)
     signals.push({ kind, symbol, line })
