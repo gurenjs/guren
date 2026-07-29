@@ -54,15 +54,17 @@ const DEPLOY_TARGET_PROFILES: Record<DeployTargetId, DeployTargetProfile> = {
 /**
  * Deploy plugin package names, matched against the app's own package.json.
  *
- * Matched by name rather than driven off the `gurenPlugin` manifest for two
- * reasons: the manifest lives in `node_modules/<pkg>/package.json`, so reading
- * it would stop detection working before `bun install`, and the Lambda target
- * ships inside `@guren/core` with no plugin package for a manifest to live in.
- * A manifest field would therefore cover two of three targets and leave the
- * third here anyway — two sources of truth instead of one.
+ * Matched by name rather than driven off the `gurenPlugin` manifest because the
+ * manifest lives in `node_modules/<pkg>/package.json`, so reading it would stop
+ * detection working before `bun install`.
+ *
+ * Lambda is also reachable without its plugin — the adapter ships inside
+ * `@guren/core`, so an app can import `createLambdaHandler` and deploy by hand.
+ * That path is caught by the source scan instead; see `detectDeployTargets`.
  */
 const DEPLOY_PLUGIN_PACKAGES: Record<string, DeployTargetId> = {
   '@guren/plugin-cloudflare': 'cloudflare',
+  '@guren/plugin-lambda': 'lambda',
   '@guren/plugin-vercel': 'vercel',
 }
 
@@ -582,7 +584,13 @@ async function detectDeployTargets(cwd: string, files: ScannedFile[]): Promise<D
     }
   }
 
-  const lambdaFile = files.find((file) => file.signals.some((signal) => signal.kind === 'lambda'))
+  // Only when the plugin did not already declare it — an app installing
+  // @guren/plugin-lambda also gets a scaffolded src/lambda.ts importing the
+  // adapter, and reporting the same target twice would double every warning.
+  const lambdaDeclared = detections.some((detection) => detection.profile === DEPLOY_TARGET_PROFILES.lambda)
+  const lambdaFile = lambdaDeclared
+    ? undefined
+    : files.find((file) => file.signals.some((signal) => signal.kind === 'lambda'))
   if (lambdaFile) {
     detections.push({
       profile: DEPLOY_TARGET_PROFILES.lambda,
