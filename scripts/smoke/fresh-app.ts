@@ -2,7 +2,7 @@ import { cp, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/pr
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import process from 'node:process'
-import { auditStarterTemplate } from './starter-template-audit'
+import { auditConsoleWiring, auditStarterTemplate } from './starter-template-audit'
 
 type PackageName =
   | '@guren/cli'
@@ -239,6 +239,7 @@ async function assertPackedArtifacts(packageTarballs: Map<string, string>, packR
 
       if (packageName === 'create-guren-app') {
         await auditStarterTemplate(join(extractDir, 'package/templates/default'))
+        await auditConsoleWiring(join(extractDir, 'package/templates/api-only'))
       }
     }
   }

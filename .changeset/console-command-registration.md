@@ -13,7 +13,7 @@ documentation describing how.
 Scaffolded apps now ship `src/console.ts`, which exports a `ConsoleKernel` as
 `kernel` (the name the serverless recipes already import), plus a
 `bin/console.ts` runner exposed as the `console` package script. `make:command`
-prints the import and `kernel.register()` line needed to wire its output in.
+prints the import and `kernel.registerMany()` line needed to wire its output in.
 
 Registration stays explicit rather than globbing `app/Console/Commands`, so a
 bundled deployment resolves the same commands as a local checkout.

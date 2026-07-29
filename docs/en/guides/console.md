@@ -43,8 +43,6 @@ bunx guren make:command SendDigest --command reports:digest
 
 ## Signature Syntax
 
-The signature string declares the command name, its positional arguments, and its options:
-
 ```ts
 static signature = 'users:create {email} {name?} {--admin} {--role=member}'
 ```
@@ -129,10 +127,10 @@ import app from './app.js'
 
 export const kernel = new ConsoleKernel({ container: app.container })
 
-kernel.register(SendDigestCommand)
+kernel.registerMany([SendDigestCommand])
 ```
 
-Passing `app.container` lets commands resolve services with `this.resolve()`. Register several at once with `registerMany([FirstCommand, SecondCommand])`.
+Passing `app.container` lets commands resolve services with `this.resolve()`. `register(OneCommand)` is equivalent for a single class.
 
 If your project predates this file, create it yourself — the export must be named `kernel`, since the deployment recipes import it by that name.
 
@@ -159,9 +157,9 @@ bun run console users:create ada@example.com --admin
 The kernel handles three names on its own, so you get discovery for free:
 
 ```bash
-bun run console list              # every registered command, with descriptions
+bun run console list              # every registered command, as a table
+bun run console                   # every registered command, grouped by namespace
 bun run console help users:create # usage, arguments, and options for one command
-bun run console                   # same as `list`
 ```
 
 An unrecognised name exits `1` and suggests the closest matches.
@@ -169,13 +167,21 @@ An unrecognised name exits `1` and suggests the closest matches.
 `kernel.handle()` resolves to the exit code rather than terminating the process, which is what makes it testable:
 
 ```ts
+import { beforeEach, expect, test } from 'bun:test'
 import { BufferedOutput } from '@guren/core'
 import { kernel } from '../src/console'
 
-test('send-digest reports how many digests went out', async () => {
-  const output = new BufferedOutput()
-  kernel.setOutput(output)
+let output: BufferedOutput
 
+// `setOutput()` replaces the kernel's output with no restore path, and the
+// kernel is a module singleton — install a fresh buffer per test so one
+// test's output never lands in another's assertions.
+beforeEach(() => {
+  output = new BufferedOutput()
+  kernel.setOutput(output)
+})
+
+test('send-digest reports how many digests went out', async () => {
   expect(await kernel.handle(['send-digest'])).toBe(0)
   expect(output.contains('Done!')).toBe(true)
 })
@@ -200,27 +206,27 @@ This requires the calling command to have been dispatched through a kernel — `
 
 ## Modules
 
-Commands scaffolded with `--module` land under `modules/<name>/app/Console/Commands/`. Register them in the same root `src/console.ts`; there is no per-module console kernel:
+Commands scaffolded with `--module` land under `modules/<name>/app/Console/Commands/`. There is no per-module console kernel, so register them in the same root `src/console.ts` — but export them from the module's `index.ts` first. Importing the command file directly reaches into the module's internals, which `bunx guren check --arch` reports as a failure:
 
 ```ts
-import InvoiceCommand from '../modules/billing/app/Console/Commands/InvoiceCommand.js'
+// modules/billing/index.ts
+export { default as InvoiceCommand } from './app/Console/Commands/InvoiceCommand.js'
+```
 
-kernel.register(InvoiceCommand)
+```ts
+// src/console.ts
+import { InvoiceCommand } from '../modules/billing/index.js'
+
+kernel.registerMany([InvoiceCommand])
 ```
 
 ## Running in Deployed Environments
 
 Where the kernel runs depends on the platform:
 
-- **A long-lived server or container** — run `bun bin/console.ts <command>` inside it, the same way you would locally. This is also how you drive commands from a container-based scheduler or cron entry.
+- **A long-lived server or container** — run `bun run console <command>` inside it, the same way you would locally. This is also how you drive commands from a container-based scheduler or cron entry.
 - **Serverless** — export a dedicated handler that feeds the kernel and deploy it as its own function. See the [serverless guide](./serverless.md) for the `createConsoleHandler(kernel)` adapter and how to invoke it.
 
 Commands that touch the database need the application booted first, which is why `bin/console.ts` awaits `ready` before dispatching. Skipping the boot leaves models unconfigured and every query fails.
 
 For work that should run *on a timer* rather than on demand, see the [task scheduling guide](./scheduling.md) — a scheduler can invoke commands, and the two subsystems are separate on purpose.
-
-## Related
-
-- [CLI Reference](./cli.md) — the `guren` framework CLI, including `make:command` and the interactive REPL.
-- [Task Scheduling](./scheduling.md) — running work on a cron-like schedule.
-- [Serverless](./serverless.md) — running commands on AWS Lambda.

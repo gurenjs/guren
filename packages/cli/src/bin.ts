@@ -1,6 +1,5 @@
 #!/usr/bin/env bun
 import { spawn } from 'node:child_process'
-import { basename, join, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
 import { defineCommand, showUsage } from 'citty'
@@ -10,7 +9,7 @@ import { listBlueprints, runBlueprint } from './blueprints'
 import { runDoctor } from './doctor'
 import { makeAuth } from './make-auth'
 import { makeChannel } from './make-channel'
-import { makeCommand } from './make-command'
+import { makeCommand, printCommandRegistrationGuidance } from './make-command'
 import { makeController } from './make-controller'
 import { makeEvent } from './make-event'
 import { makeException } from './make-exception'
@@ -477,15 +476,7 @@ const makeConsoleCommandCommand = defineCommand({
       command: args.command,
     })
     consola.success(`Command created at ${file}`)
-
-    // Nothing discovers app/Console/Commands automatically — an unregistered
-    // command is dead code, so spell out the one wiring step.
-    const className = basename(file, '.ts')
-    const fromConsoleEntry = relative(join(process.cwd(), 'src'), file).replace(/\.ts$/u, '.js')
-    consola.info('Register it with your console kernel in src/console.ts:')
-    consola.info(`  import ${className} from '${fromConsoleEntry}'`)
-    consola.info(`  kernel.register(${className})`)
-    consola.info('See: https://guren.dev/docs/guides/console')
+    printCommandRegistrationGuidance(args.name, file)
   },
 })
 

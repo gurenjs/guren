@@ -43,8 +43,6 @@ bunx guren make:command SendDigest --command reports:digest
 
 ## シグネチャの構文
 
-シグネチャ文字列でコマンド名・位置引数・オプションを宣言します。
-
 ```ts
 static signature = 'users:create {email} {name?} {--admin} {--role=member}'
 ```
@@ -129,10 +127,10 @@ import app from './app.js'
 
 export const kernel = new ConsoleKernel({ container: app.container })
 
-kernel.register(SendDigestCommand)
+kernel.registerMany([SendDigestCommand])
 ```
 
-`app.container` を渡すと、コマンド内で `this.resolve()` によるサービス解決ができるようになります。複数まとめて登録するには `registerMany([FirstCommand, SecondCommand])` を使います。
+`app.container` を渡すと、コマンド内で `this.resolve()` によるサービス解決ができるようになります。1 クラスだけなら `register(OneCommand)` でも同じです。
 
 このファイルが無い時期に作られたプロジェクトでは、自分で作成してください。デプロイ用のレシピがこの名前で import するため、**エクスポート名は必ず `kernel`** にする必要があります。
 
@@ -159,9 +157,9 @@ bun run console users:create ada@example.com --admin
 カーネルは次の 3 つを自前で処理するため、コマンド一覧やヘルプは追加実装なしで使えます。
 
 ```bash
-bun run console list              # 登録済みコマンドを説明つきで一覧表示
+bun run console list              # 登録済みコマンドを表形式で一覧表示
+bun run console                   # 登録済みコマンドを名前空間ごとにグループ表示
 bun run console help users:create # 特定コマンドの使い方・引数・オプション
-bun run console                   # list と同じ
 ```
 
 未知の名前を渡すと終了コード `1` になり、近い候補を提案します。
@@ -169,13 +167,21 @@ bun run console                   # list と同じ
 `kernel.handle()` はプロセスを終了させず終了コードを解決して返すため、テストが書けます。
 
 ```ts
+import { beforeEach, expect, test } from 'bun:test'
 import { BufferedOutput } from '@guren/core'
 import { kernel } from '../src/console'
 
-test('send-digest reports how many digests went out', async () => {
-  const output = new BufferedOutput()
-  kernel.setOutput(output)
+let output: BufferedOutput
 
+// setOutput() は出力を差し替えるだけで元に戻す手段がなく、カーネルは
+// モジュールシングルトンです。テストごとに新しいバッファを入れて、
+// あるテストの出力が別のテストのアサーションに混ざらないようにします。
+beforeEach(() => {
+  output = new BufferedOutput()
+  kernel.setOutput(output)
+})
+
+test('send-digest reports how many digests went out', async () => {
   expect(await kernel.handle(['send-digest'])).toBe(0)
   expect(output.contains('Done!')).toBe(true)
 })
@@ -200,27 +206,27 @@ async handle(): Promise<number | void> {
 
 ## モジュール
 
-`--module` を付けて生成したコマンドは `modules/<name>/app/Console/Commands/` に置かれます。モジュールごとのコンソールカーネルは存在しないため、ルートの `src/console.ts` にまとめて登録してください。
+`--module` を付けて生成したコマンドは `modules/<name>/app/Console/Commands/` に置かれます。モジュールごとのコンソールカーネルは存在しないため、ルートの `src/console.ts` にまとめて登録しますが、先にモジュールの `index.ts` からエクスポートしてください。コマンドのファイルを直接 import するとモジュールの内部に手を伸ばすことになり、`bunx guren check --arch` が失敗として報告します。
 
 ```ts
-import InvoiceCommand from '../modules/billing/app/Console/Commands/InvoiceCommand.js'
+// modules/billing/index.ts
+export { default as InvoiceCommand } from './app/Console/Commands/InvoiceCommand.js'
+```
 
-kernel.register(InvoiceCommand)
+```ts
+// src/console.ts
+import { InvoiceCommand } from '../modules/billing/index.js'
+
+kernel.registerMany([InvoiceCommand])
 ```
 
 ## デプロイ環境での実行
 
 カーネルをどこで動かすかは、プラットフォームによって変わります。
 
-- **常駐サーバー / コンテナ** — その中で `bun bin/console.ts <command>` をローカルと同じように実行します。コンテナベースのスケジューラや cron からコマンドを起動する場合もこの形です。
+- **常駐サーバー / コンテナ** — その中で `bun run console <command>` をローカルと同じように実行します。コンテナベースのスケジューラや cron からコマンドを起動する場合もこの形です。
 - **サーバーレス** — カーネルに処理を渡す専用ハンドラをエクスポートし、独立した関数としてデプロイします。`createConsoleHandler(kernel)` アダプタと呼び出し方法は [サーバーレスガイド](./serverless.md) を参照してください。
 
 データベースに触れるコマンドは、先にアプリケーションが起動している必要があります。`bin/console.ts` がディスパッチ前に `ready` を await しているのはこのためです。起動を飛ばすとモデルが未設定のままになり、すべてのクエリが失敗します。
 
 オンデマンドではなく**定期実行**したい処理については [タスクスケジューリングガイド](./scheduling.md) を参照してください。スケジューラからコマンドを起動できますが、2 つのサブシステムは意図的に分離されています。
-
-## 関連ドキュメント
-
-- [CLI リファレンス](./cli.md) — `guren` フレームワーク CLI。`make:command` と対話型 REPL を含む。
-- [タスクスケジューリング](./scheduling.md) — cron 相当のスケジュールでの実行。
-- [サーバーレス](./serverless.md) — AWS Lambda 上でのコマンド実行。

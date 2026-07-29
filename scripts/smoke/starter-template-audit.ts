@@ -11,6 +11,23 @@ async function read(root: string, relativePath: string): Promise<string> {
   return readFile(join(root, relativePath), 'utf8')
 }
 
+/**
+ * Console wiring is identical in every app template, so it is audited on its
+ * own — `auditStarterTemplate` only covers the default template's Vite and
+ * React files, which the API-only template does not have.
+ */
+export async function auditConsoleWiring(root: string): Promise<void> {
+  const packageJson = await read(root, 'package.json')
+  assert(packageJson.includes('"console": "bun bin/console.ts"'), `${root} must expose a console script so generated commands are runnable.`)
+
+  const consoleEntry = await read(root, 'src/console.ts')
+  assert(consoleEntry.includes('export const kernel ='), `${root} must export the console kernel as \`kernel\` — the serverless recipes import it by that name.`)
+
+  const consoleRunner = await read(root, 'bin/console.ts')
+  assert(consoleRunner.includes("import { kernel } from '../src/console.js'"), `${root} console runner must dispatch through src/console.ts.`)
+  assert(consoleRunner.includes('await ready'), `${root} console runner must boot the app before dispatching, or database-backed commands fail.`)
+}
+
 export async function auditStarterTemplate(root: string): Promise<void> {
   const packageJson = await read(root, 'package.json')
   assert(packageJson.includes('"@guren/core"'), 'Starter template must depend on @guren/core.')
@@ -26,12 +43,7 @@ export async function auditStarterTemplate(root: string): Promise<void> {
   const mainEntry = await read(root, 'src/main.ts')
   assert(mainEntry.includes("from '@guren/core/runtime'"), 'Starter template must use @guren/core/runtime in src/main.ts.')
 
-  assert(packageJson.includes('"console": "bun bin/console.ts"'), 'Starter template must expose a console script so generated commands are runnable.')
-  const consoleEntry = await read(root, 'src/console.ts')
-  assert(consoleEntry.includes('export const kernel = new ConsoleKernel('), 'Starter template must export the console kernel as `kernel` — the serverless recipes import it by that name.')
-  const consoleRunner = await read(root, 'bin/console.ts')
-  assert(consoleRunner.includes("import { kernel } from '../src/console.js'"), 'Starter template console runner must dispatch through src/console.ts.')
-  assert(consoleRunner.includes('await ready'), 'Starter template console runner must boot the app before dispatching, or database-backed commands fail.')
+  await auditConsoleWiring(root)
 
   const viteConfig = await read(root, 'vite.config.ts')
   assert(viteConfig.includes("from '@guren/core/vite'"), 'Starter template must use @guren/core/vite.')
@@ -48,6 +60,12 @@ async function main(): Promise<void> {
   const root = resolve(process.argv[2] ?? 'packages/create-app/templates/default')
   await auditStarterTemplate(root)
   console.log(`Starter template audit passed for ${root}`)
+
+  if (process.argv[2] === undefined) {
+    const apiRoot = resolve('packages/create-app/templates/api-only')
+    await auditConsoleWiring(apiRoot)
+    console.log(`Console wiring audit passed for ${apiRoot}`)
+  }
 }
 
 if (import.meta.path === Bun.main) {

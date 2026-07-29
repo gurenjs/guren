@@ -1,6 +1,5 @@
-import { dirname, relative, sep as pathSep } from 'node:path'
 import { consola } from 'consola'
-import { camelCase, pascalCase, safeModuleName, writeFilesSafe, type WriterOptions } from './utils'
+import { camelCase, pascalCase, relativeImportPath, safeModuleName, writeFilesSafe, type WriterOptions } from './utils'
 import { addImport, addToArrayOption } from './patch-helpers'
 import { fileExists } from './discovery'
 
@@ -123,11 +122,4 @@ async function patchAppEntry(moduleDir: string, camelName: string): Promise<void
     consola.warn(`Could not register the module automatically: ${modulesResult.reason}`)
     consola.info(`Add \`modules: [${moduleBinding}]\` to your createApp() options.`)
   }
-}
-
-function relativeImportPath(fromFile: string, toDir: string): string {
-  const base = dirname(fromFile)
-  const rel = relative(base, toDir) || toDir
-  const normalized = rel.split(pathSep).join('/')
-  return normalized.startsWith('.') ? normalized : `./${normalized}`
 }
