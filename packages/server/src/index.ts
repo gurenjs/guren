@@ -579,8 +579,13 @@ export {
   DatabaseChannel,
   SlackChannel,
   MemoryChannel,
+  registerNotification,
+  getNotification,
+  clearNotificationRegistry,
+  resolveNotifiableType,
 } from './notifications'
 export type {
+  NotificationConstructor,
   NotificationChannel,
   Notifiable,
   DatabaseNotification,

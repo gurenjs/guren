@@ -18,6 +18,15 @@ export interface Notifiable {
   routeNotificationFor(channel: string): string | null
 
   /**
+   * Stable type name for this notifiable (optional).
+   *
+   * Defaults to the constructor name. Set this when the notifiable is rebuilt
+   * from a queue payload, or when the class name is not durable (bundlers that
+   * mangle identifiers).
+   */
+  notifiableType?: string
+
+  /**
    * Database notifications (optional).
    */
   notifications?: DatabaseNotification[]

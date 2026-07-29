@@ -5,6 +5,7 @@ import type {
   DatabaseChannelOptions,
 } from '../types'
 import type { Notification } from '../Notification'
+import { resolveNotifiableType } from '../notifiable-type'
 
 /**
  * Database notification channel.
@@ -86,7 +87,7 @@ export class DatabaseChannel implements NotificationChannel {
    * Get the notifiable type.
    */
   protected getNotifiableType(notifiable: Notifiable): string {
-    return notifiable.constructor?.name ?? 'Unknown'
+    return resolveNotifiableType(notifiable)
   }
 
   /**

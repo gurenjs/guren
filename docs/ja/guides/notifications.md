@@ -294,6 +294,30 @@ await notifications.send(user, new WelcomeNotification())
 // bunx guren queue:work --queue=notifications
 ```
 
+### 別プロセスで動かすワーカー
+
+キューに入った通知はデータとして保存されるため、ワーカーは配信時にクラスを復元します。通知を送ったプロセスとワーカーが同じ場合、この登録は自動で行われます。`queue:work` を独立したプロセスとして動かす場合は、必要な通知クラスをプロバイダから登録してください。
+
+```ts
+import { ServiceProvider, registerNotification } from '@guren/core'
+import { WelcomeNotification } from '@/app/Notifications/WelcomeNotification'
+
+export class NotificationServiceProvider extends ServiceProvider {
+  register(): void {
+    registerNotification(WelcomeNotification)
+  }
+}
+```
+
+未登録の通知は、何も配信されないまま黙って終わるのではなくエラーになります。
+
+保存されるのは通知の自前のプロパティだけなので、次の2つはキューを越えられません。
+
+- **コンストラクタ引数**。コンストラクタは再実行されないため、チャンネルが必要とする値は上記の `WelcomeNotification` のようにプロパティとして保持してください。
+- **JSONで表現できない値**（`Map`・`Set`・`#private` フィールドなど）。素の値を使ってください。
+
+ルーティングは影響を受けません。`routeNotificationFor()` はキュー投入時に呼ばれ、解決されたルートが通知と一緒に運ばれるため、受信者ごとのアドレスやWebhookはそのまま届きます。
+
 ## 条件付き通知
 
 ### shouldSendメソッド
