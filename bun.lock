@@ -194,7 +194,7 @@
     },
     "packages/plugin-lambda": {
       "name": "@guren/plugin-lambda",
-      "version": "0.1.0",
+      "version": "0.0.0",
       "dependencies": {
         "@guren/core": "^1.3.0",
         "citty": "^0.1.6",
@@ -204,6 +204,14 @@
         "tsup": "^8.5.0",
         "typescript": "^5.4.0",
       },
+      "peerDependencies": {
+        "aws-cdk-lib": "^2.156.0",
+        "constructs": "^10.0.0",
+      },
+      "optionalPeers": [
+        "aws-cdk-lib",
+        "constructs",
+      ],
     },
     "packages/plugin-vercel": {
       "name": "@guren/plugin-vercel",
