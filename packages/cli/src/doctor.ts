@@ -15,6 +15,7 @@ import {
 } from './discovery'
 import { checkPluginCompatibility, readCoreVersion, readInstalledPluginManifests } from './plugin-manifest'
 import { compareVersions } from './codemods'
+import { parseSourceFile } from './parse-cache'
 import {
   analyzeDeployRuntime,
   bunlessTargets,
@@ -1302,13 +1303,8 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
   try {
     for (const filePath of controllerFiles) {
       const source = await readFile(filePath, 'utf-8')
-      const { parse } = await import('@babel/parser')
-      let ast
-      try {
-        ast = parse(source, { sourceType: 'module', plugins: ['typescript'] })
-      } catch {
-        continue
-      }
+      const ast = parseSourceFile(source, filePath)
+      if (!ast) continue
 
       for (const node of ast.program.body) {
         let classDecl = null

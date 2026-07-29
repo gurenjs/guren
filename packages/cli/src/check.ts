@@ -230,6 +230,28 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     checks.push(...archResults)
   }
 
+  // Every checker above treats a file it couldn't parse as contributing
+  // nothing, which is indistinguishable from a file with nothing wrong. Report
+  // the skipped ones once, after all suites have finished asking the cache, so
+  // a clean run over an incomplete scan says so instead of implying coverage.
+  const skipped = cache.skippedFiles()
+  if (skipped.length > 0) {
+    const shown = skipped
+      .slice(0, 3)
+      .map(({ filePath, reason }) => `${toPosixRelative(cwd, filePath)} (${reason})`)
+      .join(', ')
+    const more = skipped.length > 3 ? ` and ${skipped.length - 3} more` : ''
+    checks.push(
+      check(
+        'scan-coverage',
+        'Scan coverage',
+        'warn',
+        `${skipped.length} file(s) were skipped and not checked: ${shown}${more}.`,
+        'Fix the syntax error (or file permissions) so these files are covered — until then results here are incomplete.',
+      ),
+    )
+  }
+
   const report: CheckReport = {
     cwd,
     checks,

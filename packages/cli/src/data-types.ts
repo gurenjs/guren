@@ -104,7 +104,7 @@ async function extractResourceType(
   outputDirectory: string,
 ): Promise<ResourceDefinition | null> {
   const source = await readFile(filePath, 'utf-8')
-  const imports = collectTypeImports(source).map((statement) =>
+  const imports = collectTypeImports(source, filePath).map((statement) =>
     rewriteImportStatement(statement, dirname(filePath), outputDirectory),
   )
 
@@ -139,8 +139,8 @@ async function extractResourceType(
   return null
 }
 
-function collectTypeImports(source: string): string[] {
-  const ast = parseSourceFile(source)
+function collectTypeImports(source: string, filePath: string): string[] {
+  const ast = parseSourceFile(source, filePath)
   if (!ast) return []
 
   const imports: string[] = []

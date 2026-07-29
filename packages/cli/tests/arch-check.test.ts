@@ -97,6 +97,8 @@ export class OrderService {
   @observable total = 0
   @log accessor entries = []
 
+  constructor(@inject('Clock') private clock: unknown) {}
+
   @measure run() {
     return PostController
   }

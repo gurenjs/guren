@@ -9,14 +9,6 @@ export interface BabelNode {
 }
 
 /**
- * Comment arrays hang off nodes and hold entries that are node-shaped enough
- * to fool a structural check — they carry a `type` of `CommentLine`/
- * `CommentBlock`. Walking them wastes traversal on text that is by definition
- * not code, so they're skipped by key.
- */
-const SKIPPED_KEYS = new Set(['loc', 'leadingComments', 'trailingComments', 'innerComments'])
-
-/**
  * Minimal generic AST walker. Recurses into every node-shaped child unless
  * the visitor returns `false` for the current node, which prunes its subtree.
  */
@@ -34,12 +26,11 @@ export function walk(value: unknown, visit: (node: BabelNode) => boolean | void)
   // for...in rather than Object.entries: the latter allocates an entry array
   // per node, which measurably dominates traversal on a large AST.
   for (const key in node) {
-    if (SKIPPED_KEYS.has(key)) continue
+    // `leadingComments`/`trailingComments`/`innerComments` hold entries
+    // node-shaped enough to fool a structural check — they carry a `type` of
+    // `CommentLine`/`CommentBlock` — so walking them spends traversal on text
+    // that is by definition not code.
+    if (key === 'loc' || key.endsWith('Comments')) continue
     walk(node[key], visit)
   }
-}
-
-/** Line a node starts on, defaulting to 1 when location info is absent. */
-export function lineOf(node: BabelNode): number {
-  return node.loc?.start.line ?? 1
 }

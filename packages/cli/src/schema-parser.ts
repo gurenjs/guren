@@ -164,7 +164,7 @@ async function parseSchemaFile(schemaPath: string, module: string | null): Promi
     return []
   }
 
-  const ast = parseSourceFile(source)
+  const ast = parseSourceFile(source, schemaPath)
   if (!ast) return []
 
   const aliases = collectFactoryAliases(ast.program.body)

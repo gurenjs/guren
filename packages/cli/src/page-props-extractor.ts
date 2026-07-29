@@ -21,16 +21,19 @@ export async function extractPageProps(
   pageId: string,
 ): Promise<ExtractedPageProps> {
   const source = await readFile(filePath, 'utf-8')
-  return extractPagePropsFromSource(source, pageId)
+  return extractPagePropsFromSource(source, pageId, filePath)
 }
 
 export function extractPagePropsFromSource(
   source: string,
   pageId: string,
+  // Pages are `.tsx`; the default only applies to direct-source callers (tests),
+  // since extractPageProps passes the real path.
+  filePath = 'page.tsx',
 ): ExtractedPageProps {
   const result: ExtractedPageProps = { pageId, rawType: null, imports: [], localTypes: [] }
 
-  const ast = parseSourceFile(source, { jsx: true })
+  const ast = parseSourceFile(source, filePath)
   if (!ast) return result
 
   // Collect imported type names (to distinguish from local types)

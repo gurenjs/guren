@@ -138,8 +138,8 @@ function publicMethodNames(classDecl: ClassDeclaration): string[] {
  * classes win over unexported helpers declared alongside them; a bare
  * class is only used when nothing is exported.
  */
-function extractControllerActions(source: string): string[] {
-  const ast = parseSourceFile(source)
+function extractControllerActions(source: string, filePath: string): string[] {
+  const ast = parseSourceFile(source, filePath)
   if (!ast) return []
 
   let unexported: ClassDeclaration | null = null
@@ -242,7 +242,7 @@ export async function generateEntityContext(
       controller: {
         className: controllerName,
         filePath: toPosixRelative(cwd, controllerFile),
-        actions: extractControllerActions(source),
+        actions: extractControllerActions(source, controllerFile),
       },
       pages: await resolvePages(
         cwd,

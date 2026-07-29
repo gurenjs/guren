@@ -512,6 +512,70 @@ test('lists tasks', async () => {
     }
   })
 
+  // A checker that skips a file it could not parse is indistinguishable from
+  // one that found nothing wrong, which is how a decorated file could go
+  // unchecked while the report still read clean.
+  it('reports files that were skipped because they could not be parsed', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-scan-coverage-')
+    try {
+      await mkdir(join(workspace.dir, 'app/Http/Controllers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Http/Controllers/BrokenController.ts'),
+        'export class BrokenController { index( {{{{',
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      const coverage = report.checks.find((c) => c.key === 'scan-coverage')
+      expect(coverage?.status).toBe('warn')
+      expect(coverage?.message).toContain('app/Http/Controllers/BrokenController.ts')
+      expect(coverage?.message).toContain('unparsed')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // Breadth is whatever the active suites asked the cache for, which the module
+  // rules widen to every importable file. A junk file outside app/Http or
+  // app/Models is therefore named too — accurate, since the boundary scan
+  // genuinely could not read it — but it is a warn, so exit codes are unaffected.
+  it('names files outside the controller/model dirs once module rules widen the scan', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-scan-coverage-wide-')
+    try {
+      await mkdir(join(workspace.dir, 'modules/billing'), { recursive: true })
+      await mkdir(join(workspace.dir, 'app'), { recursive: true })
+      await writeFile(join(workspace.dir, 'modules/billing/index.ts'), 'export const billingModule = {}', 'utf8')
+      await writeFile(join(workspace.dir, 'app/junk.ts'), 'not valid {{{{ typescript', 'utf8')
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      expect(report.checks.find((c) => c.key === 'scan-coverage')?.message).toContain('app/junk.ts')
+      // A warn, never a fail — `check --arch` in CI must not start failing on it.
+      expect(report.failCount).toBe(0)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('reports no scan-coverage warning when every file parses', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-scan-coverage-clean-')
+    try {
+      await mkdir(join(workspace.dir, 'app/Http/Controllers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Http/Controllers/PostController.ts'),
+        '@Injectable()\nexport class PostController {\n  index() { return 1 }\n}',
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      expect(report.checks.some((c) => c.key === 'scan-coverage')).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('skips a module with no db/schema.ts entirely (nothing to aggregate)', async () => {
     const workspace = await createTempWorkspace('guren-cli-check-schema-agg-no-module-schema-')
 

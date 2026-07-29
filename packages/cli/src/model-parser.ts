@@ -50,7 +50,7 @@ export async function discoverParsedModels(cwd: string): Promise<DiscoveredModel
 }
 
 export function parseModelSource(source: string, filePath: string): ModelInfo | null {
-  const ast = parseSourceFile(source, { filePath })
+  const ast = parseSourceFile(source, filePath)
   if (!ast) return null
 
   let classDecl: ClassDeclaration | null = null

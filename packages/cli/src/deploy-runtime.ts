@@ -1,14 +1,14 @@
-import { readdir } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import { extname, join, resolve } from 'node:path'
 import type { File } from '@babel/types'
-import { walk, lineOf, type BabelNode } from './ast-walk'
+import { walk, type BabelNode } from './ast-walk'
 import {
   collectFiles,
   toPosixRelative,
   IMPORTABLE_EXTENSIONS,
   NON_SOURCE_DIR_NAMES,
 } from './discovery'
-import { ParseCache } from './parse-cache'
+import { parseSourceFile } from './parse-cache'
 import { readDeclaredDependencyNames } from './plugin-manifest'
 
 /**
@@ -245,6 +245,11 @@ const TYPE_ONLY_NODES = new Set([
  */
 const LAMBDA_IMPORT_SOURCES = new Set(['@guren/core/lambda', '@guren/server/lambda'])
 
+/** Line a node starts on, defaulting to 1 when location info is absent. */
+function lineOf(node: BabelNode): number {
+  return node.loc?.start.line ?? 1
+}
+
 function propertyKeyName(property: BabelNode): string | null {
   if (property.computed) return null
   const key = property.key as BabelNode | undefined
@@ -308,7 +313,7 @@ function extractSignals(ast: File): ExtractedSignal[] {
   const signals: ExtractedSignal[] = []
   const seen = new Set<string>()
   const emit = (kind: SignalKind, symbol: string, line: number): void => {
-    const key = `${kind} ${symbol}`
+    const key = `${kind}\u0000${symbol}`
     if (seen.has(key)) return
     seen.add(key)
     signals.push({ kind, symbol, line })
@@ -486,22 +491,29 @@ async function readAppSources(cwd: string): Promise<{ files: ScannedFile[]; unpa
 
   const paths = [...rootFiles, ...directoryFiles.flat()].filter((path) => !TEST_FILE_PATTERN.test(path))
 
-  const cache = new ParseCache()
+  // Signals are extracted inside the map so each AST is released as soon as
+  // its file is reduced to signals. A ParseCache would be the obvious fit but
+  // is the wrong tool here: DEPLOY_SCAN_DIRS never covers the project root, so
+  // no path in this list repeats and the cache would score zero hits while
+  // holding every AST alive until the whole scan finished.
   const scanned = await Promise.all(
-    paths.map(async (path) => ({
-      filePath: toPosixRelative(cwd, path),
-      outcome: await cache.read(path),
-    })),
+    paths.map(async (path) => {
+      const filePath = toPosixRelative(cwd, path)
+      const source = await readFile(path, 'utf8').catch(() => null)
+      // An unreadable file is reported alongside an unparseable one: both
+      // contribute no signals, and silently dropping either is the hole the
+      // caveat exists to close.
+      if (source === null) return { filePath, signals: null }
+      const ast = parseSourceFile(source, path)
+      return { filePath, signals: ast ? extractSignals(ast) : null }
+    }),
   )
 
   const files: ScannedFile[] = []
   const unparsed: string[] = []
-  for (const { filePath, outcome } of scanned) {
-    // An unreadable file is reported alongside an unparseable one: both
-    // contribute no signals, and silently dropping either is the hole the
-    // caveat exists to close.
-    if (outcome.status !== 'parsed') unparsed.push(filePath)
-    else files.push({ filePath, signals: extractSignals(outcome.ast) })
+  for (const { filePath, signals } of scanned) {
+    if (signals === null) unparsed.push(filePath)
+    else files.push({ filePath, signals })
   }
 
   return { files, unparsed }
