@@ -74,6 +74,46 @@ describe('runArchCheck', () => {
     }
   })
 
+  // A decorated class used to make the whole file unparseable, and arch-check
+  // skips files it cannot parse — so a real boundary violation in a file using
+  // `@Injectable`-style decorators was silently invisible to `check --arch`.
+  it('sees a boundary violation in a file that uses decorators', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-decorators-')
+    try {
+      await writeFile(join(workspace.dir, 'guren.arch.ts'), ARCH_CONFIG, 'utf8')
+      await mkdir(join(workspace.dir, 'app/Domain'), { recursive: true })
+      await mkdir(join(workspace.dir, 'app/Http/Controllers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Http/Controllers/PostController.ts'),
+        `export class PostController {}`,
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'app/Domain/OrderService.ts'),
+        `import { PostController } from '../Http/Controllers/PostController'
+
+@Injectable()
+export class OrderService {
+  @observable total = 0
+  @log accessor entries = []
+
+  @measure run() {
+    return PostController
+  }
+}`,
+        'utf8',
+      )
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+      const violation = results.find((r) => r.filePath === 'app/Domain/OrderService.ts')
+      expect(violation).toBeDefined()
+      expect(violation!.status).toBe('fail')
+      expect(violation!.message).toContain('disallowed layer')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('flags a disallowed package import from a layer', async () => {
     const workspace = await createTempWorkspace('guren-cli-arch-pkg-')
     try {

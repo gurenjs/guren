@@ -10,6 +10,7 @@ import {
   listModuleNames,
 } from './discovery'
 import { loadRouteDefinitions } from './load-routes'
+import { parseSourceFile, parserPluginsFor } from './parse-cache'
 import { parseSchemaTableColumns } from './schema-parser'
 import { loadAuditConfig, type AuditIgnoreEntry } from './audit-config'
 
@@ -258,12 +259,8 @@ async function parseControllerMethods(cwd: string, findings: AuditFinding[]): Pr
     const source = await readFile(filePath, 'utf-8')
     const relPath = relative(cwd, filePath)
 
-    let ast: ReturnType<typeof parse>
-    try {
-      ast = parse(source, { sourceType: 'module', plugins: ['typescript'] })
-    } catch {
-      continue
-    }
+    const ast = parseSourceFile(source, { filePath })
+    if (!ast) continue
 
     for (const node of ast.program.body) {
       let classDecl = null
@@ -606,8 +603,16 @@ function parseModelSerializationInfo(source: string): ModelSerializationInfo {
 
   let ast: ReturnType<typeof parse>
   try {
-    // errorRecovery: `override` members parse-error without an extends clause
-    ast = parse(source, { sourceType: 'module', plugins: ['typescript'], errorRecovery: true })
+    // Parsed here rather than through parseSourceFile because of
+    // errorRecovery: `override` members parse-error without an extends clause,
+    // and a half-AST is better than nothing for this scan. It shares the
+    // plugin list so a decorated model stays readable.
+    ast = parse(source, {
+      sourceType: 'module',
+      plugins: parserPluginsFor(),
+      allowAwaitOutsideFunction: true,
+      errorRecovery: true,
+    })
   } catch {
     return info
   }

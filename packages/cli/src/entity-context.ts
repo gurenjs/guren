@@ -1,6 +1,5 @@
 import { resolve, basename } from 'node:path'
 import { readFile } from 'node:fs/promises'
-import { parse } from '@babel/parser'
 import type { ClassDeclaration } from '@babel/types'
 import { consola } from 'consola'
 import {
@@ -21,6 +20,7 @@ import {
   type ModelRelationship,
 } from './model-parser'
 import { loadRouteDefinitions, DEFAULT_ROUTES_FILE } from './load-routes'
+import { parseSourceFile } from './parse-cache'
 import {
   routeDefinitionToContextRoute,
   escapeMarkdownTableCell,
@@ -139,12 +139,8 @@ function publicMethodNames(classDecl: ClassDeclaration): string[] {
  * class is only used when nothing is exported.
  */
 function extractControllerActions(source: string): string[] {
-  let ast: ReturnType<typeof parse>
-  try {
-    ast = parse(source, { sourceType: 'module', plugins: ['typescript'] })
-  } catch {
-    return []
-  }
+  const ast = parseSourceFile(source)
+  if (!ast) return []
 
   let unexported: ClassDeclaration | null = null
   for (const node of ast.program.body) {

@@ -1,6 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { relative, resolve } from 'node:path'
-import { parse } from '@babel/parser'
+import { walk, type BabelNode } from './ast-walk'
+import { parseSourceFile } from './parse-cache'
 import { writeGeneratedFile, type WriterOptions } from './utils'
 
 export interface GenerateChannelTypesOptions extends WriterOptions {
@@ -15,7 +16,7 @@ interface ChannelDefinition {
 }
 
 type ChannelDefinitionMap = Map<string, ChannelDefinition>
-type AstNode = { type: string; [key: string]: unknown }
+type AstNode = BabelNode
 type MemberExpressionNode = AstNode & {
   type: 'MemberExpression'
   object: AstNode
@@ -109,7 +110,7 @@ async function collectChannelDefinitions(directory: string): Promise<ChannelDefi
 
   for (const filePath of files) {
     const source = await readFile(filePath, 'utf8')
-    extractDefinitionsFromSource(source, definitions)
+    extractDefinitionsFromSource(source, definitions, filePath)
   }
 
   return definitions
@@ -138,15 +139,19 @@ async function listSourceFiles(directory: string): Promise<string[]> {
   return files
 }
 
-function extractDefinitionsFromSource(source: string, definitions: ChannelDefinitionMap): void {
-  let ast: ReturnType<typeof parse>
-  try {
-    ast = parse(source, { sourceType: 'module', plugins: ['typescript', 'jsx'] })
-  } catch {
-    return
-  }
+function extractDefinitionsFromSource(
+  source: string,
+  definitions: ChannelDefinitionMap,
+  filePath?: string,
+): void {
+  // Plugins come from the extension rather than a fixed `typescript`+`jsx`
+  // pair: JSX on a `.ts` file makes `<Type>value` cast syntax parse as an
+  // unterminated JSX element, so a channel file using one was silently
+  // contributing no channels.
+  const ast = parseSourceFile(source, { filePath })
+  if (!ast) return
 
-  visitNode(ast.program as unknown as AstNode, (node) => {
+  walk(ast.program, (node) => {
     if (node.type !== 'CallExpression') return
     const callee = node.callee as AstNode | undefined
     if (!callee || callee.type !== 'MemberExpression') return
@@ -238,27 +243,6 @@ function getLiteralString(value: unknown): string | null {
   }
 
   return null
-}
-
-function visitNode(node: AstNode, callback: (node: AstNode) => void): void {
-  callback(node)
-  const entries = Object.entries(node as unknown as Record<string, unknown>)
-  for (const [, value] of entries) {
-    if (!value) continue
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        if (isNode(item)) visitNode(item, callback)
-      }
-      continue
-    }
-    if (isNode(value)) {
-      visitNode(value, callback)
-    }
-  }
-}
-
-function isNode(value: unknown): value is AstNode {
-  return Boolean(value && typeof value === 'object' && 'type' in (value as Record<string, unknown>))
 }
 
 function normalizePrivate(value: string): string {

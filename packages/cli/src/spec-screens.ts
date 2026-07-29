@@ -1,6 +1,5 @@
 import { resolve } from 'node:path'
 import { readFile } from 'node:fs/promises'
-import { parse } from '@babel/parser'
 import type { ClassDeclaration } from '@babel/types'
 import { discoverControllerFiles, classNameFromPath, toPosixRelative, fileExists } from './discovery'
 import {
@@ -10,6 +9,7 @@ import {
 } from './context-route'
 import { loadRouteDefinitions, DEFAULT_ROUTES_FILE } from './load-routes'
 import { extractClassDeclaration } from './model-parser'
+import { parseSourceFile } from './parse-cache'
 import {
   extractInertiaPageRefs,
   describeInertiaPage,
@@ -43,12 +43,8 @@ interface ControllerPageRefs {
  * nothing is exported.
  */
 function findControllerClass(source: string): ClassDeclaration | null {
-  let ast: ReturnType<typeof parse>
-  try {
-    ast = parse(source, { sourceType: 'module', plugins: ['typescript'] })
-  } catch {
-    return null
-  }
+  const ast = parseSourceFile(source)
+  if (!ast) return null
 
   let unexported: ClassDeclaration | null = null
   for (const node of ast.program.body) {

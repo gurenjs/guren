@@ -7,8 +7,8 @@
  */
 import { readdir, readFile } from 'node:fs/promises'
 import { dirname, extname, relative, resolve } from 'node:path'
-import { parse } from '@babel/parser'
 import { writeGeneratedFile, type WriterOptions } from './utils'
+import { parseSourceFile } from './parse-cache'
 
 export interface ResourceDefinition {
   /** Class name (e.g. 'PostResource') */
@@ -140,12 +140,8 @@ async function extractResourceType(
 }
 
 function collectTypeImports(source: string): string[] {
-  let ast: ReturnType<typeof parse>
-  try {
-    ast = parse(source, { sourceType: 'module', plugins: ['typescript'] })
-  } catch {
-    return []
-  }
+  const ast = parseSourceFile(source)
+  if (!ast) return []
 
   const imports: string[] = []
   for (const node of ast.program.body) {

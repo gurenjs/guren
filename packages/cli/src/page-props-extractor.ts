@@ -7,7 +7,7 @@
  * 3. Local type/interface definitions referenced by Props (transitively)
  */
 import { readFile } from 'node:fs/promises'
-import { parse } from '@babel/parser'
+import { parseSourceFile } from './parse-cache'
 
 export interface ExtractedPageProps {
   pageId: string
@@ -30,15 +30,8 @@ export function extractPagePropsFromSource(
 ): ExtractedPageProps {
   const result: ExtractedPageProps = { pageId, rawType: null, imports: [], localTypes: [] }
 
-  let ast: ReturnType<typeof parse>
-  try {
-    ast = parse(source, {
-      sourceType: 'module',
-      plugins: ['typescript', 'jsx'],
-    })
-  } catch {
-    return result
-  }
+  const ast = parseSourceFile(source, { jsx: true })
+  if (!ast) return result
 
   // Collect imported type names (to distinguish from local types)
   const importedNames = new Set<string>()

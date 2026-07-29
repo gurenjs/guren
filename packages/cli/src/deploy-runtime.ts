@@ -1,12 +1,14 @@
-import { readFile, readdir } from 'node:fs/promises'
+import { readdir } from 'node:fs/promises'
 import { extname, join, resolve } from 'node:path'
-import { parse, type ParserPlugin } from '@babel/parser'
+import type { File } from '@babel/types'
+import { walk, lineOf, type BabelNode } from './ast-walk'
 import {
   collectFiles,
   toPosixRelative,
   IMPORTABLE_EXTENSIONS,
   NON_SOURCE_DIR_NAMES,
 } from './discovery'
+import { ParseCache } from './parse-cache'
 import { readDeclaredDependencyNames } from './plugin-manifest'
 
 /**
@@ -243,37 +245,6 @@ const TYPE_ONLY_NODES = new Set([
  */
 const LAMBDA_IMPORT_SOURCES = new Set(['@guren/core/lambda', '@guren/server/lambda'])
 
-interface BabelNode {
-  type: string
-  loc?: { start: { line: number } }
-  [key: string]: unknown
-}
-
-/**
- * Minimal generic AST walker. Recurses into every node-shaped child unless
- * the visitor returns `false` for the current node.
- */
-function walk(value: unknown, visit: (node: BabelNode) => boolean | void): void {
-  if (Array.isArray(value)) {
-    for (const item of value) walk(item, visit)
-    return
-  }
-  if (value === null || typeof value !== 'object') return
-  const node = value as BabelNode
-  if (typeof node.type !== 'string') return
-
-  if (visit(node) === false) return
-
-  // for...in rather than Object.entries: the latter allocates an entry array
-  // per node, which measurably dominates traversal on a large AST.
-  for (const key in node) {
-    if (key === 'loc' || key === 'leadingComments' || key === 'trailingComments' || key === 'innerComments') {
-      continue
-    }
-    walk(node[key], visit)
-  }
-}
-
 function propertyKeyName(property: BabelNode): string | null {
   if (property.computed) return null
   const key = property.key as BabelNode | undefined
@@ -282,22 +253,8 @@ function propertyKeyName(property: BabelNode): string | null {
   return null
 }
 
-function lineOf(node: BabelNode): number {
-  return node.loc?.start.line ?? 1
-}
-
-/**
- * Extract every deploy-runtime signal from one source file. Returns null when
- * the file does not parse — the caller skips it.
- */
-function extractSignals(source: string, plugins: ParserPlugin[]): ExtractedSignal[] | null {
-  let ast
-  try {
-    ast = parse(source, { sourceType: 'module', plugins, allowAwaitOutsideFunction: true })
-  } catch {
-    return null
-  }
-
+/** Extract every deploy-runtime signal from one parsed source file. */
+function extractSignals(ast: File): ExtractedSignal[] {
   // Value imports from `@guren/*`, mapping the file's local name to the
   // canonical exported name. Type-only imports are excluded — they cannot be
   // constructed or called — and so is every non-Guren source, so a same-named
@@ -489,19 +446,6 @@ interface ScannedFile {
 }
 
 /**
- * Decorators and auto-accessors are enabled everywhere: without them a single
- * `@Injectable`-style class makes the whole file unparseable, and an
- * unparseable file contributes no signals at all — silently hiding every
- * hazard and remediation it contains. JSX is off for .ts/.mts so
- * angle-bracket type assertions still parse; elsewhere it lets .tsx through.
- */
-function parserPluginsFor(path: string): ParserPlugin[] {
-  const base: ParserPlugin[] = ['typescript', 'decorators', 'decoratorAutoAccessors']
-  const ext = extname(path)
-  return ext === '.ts' || ext === '.mts' ? base : [...base, 'jsx']
-}
-
-/**
  * Source files sitting directly in the project root. Deploy entrypoints
  * (`lambda.ts`, `worker.ts`) conventionally live there, and no DEPLOY_SCAN_DIRS
  * entry covers the root itself — pointing collectFiles at it would walk the
@@ -542,24 +486,22 @@ async function readAppSources(cwd: string): Promise<{ files: ScannedFile[]; unpa
 
   const paths = [...rootFiles, ...directoryFiles.flat()].filter((path) => !TEST_FILE_PATTERN.test(path))
 
+  const cache = new ParseCache()
   const scanned = await Promise.all(
-    paths.map(async (path) => {
-      const filePath = toPosixRelative(cwd, path)
-      const content = await readFile(path, 'utf8').catch(() => null)
-      // An unreadable file is reported alongside an unparseable one: both
-      // contribute no signals, and silently dropping either is the hole the
-      // caveat exists to close.
-      if (content === null) return { filePath, signals: null }
-      return { filePath, signals: extractSignals(content, parserPluginsFor(path)) }
-    }),
+    paths.map(async (path) => ({
+      filePath: toPosixRelative(cwd, path),
+      outcome: await cache.read(path),
+    })),
   )
 
   const files: ScannedFile[] = []
   const unparsed: string[] = []
-  for (const entry of scanned) {
-    if (entry === null) continue
-    if (entry.signals === null) unparsed.push(entry.filePath)
-    else files.push({ filePath: entry.filePath, signals: entry.signals })
+  for (const { filePath, outcome } of scanned) {
+    // An unreadable file is reported alongside an unparseable one: both
+    // contribute no signals, and silently dropping either is the hole the
+    // caveat exists to close.
+    if (outcome.status !== 'parsed') unparsed.push(filePath)
+    else files.push({ filePath, signals: extractSignals(outcome.ast) })
   }
 
   return { files, unparsed }

@@ -241,6 +241,48 @@ related: [../outside.md]
     expect(report.failCount).toBeGreaterThan(0)
   })
 
+  // Entity identity comes from the parsed class name, with the filename as a
+  // fallback for unparsable models. A decorated model used to take that
+  // fallback, so a doc linking the real class name was reported as pointing at
+  // a model that doesn't exist — a false failure on a correct doc.
+  it('resolves entities of a decorated model whose class name differs from its filename', async () => {
+    const scoped = await createTempWorkspace('guren-cli-docs-decorators-')
+    try {
+      await mkdir(join(scoped.dir, 'app/Models'), { recursive: true })
+      await mkdir(join(scoped.dir, 'docs'), { recursive: true })
+      await writeFile(join(scoped.dir, 'package.json'), '{}', 'utf8')
+
+      await writeFile(
+        join(scoped.dir, 'app/Models/Article.ts'),
+        `@Entity()
+export class BlogPost {
+  @column accessor title = ''
+}
+`,
+        'utf8',
+      )
+      await writeFile(
+        join(scoped.dir, 'docs/blog-post.md'),
+        `---
+kind: guide
+entities: [BlogPost]
+related:
+  - app/Models/Article.ts
+---
+# Blog posts
+`,
+        'utf8',
+      )
+
+      const results = await runDocsCheck({ cwd: scoped.dir })
+
+      expect(results.some((r) => r.key.startsWith('docs-entity:'))).toBe(false)
+      expect(results.find((r) => r.key === 'docs-links:docs/blog-post.md')?.status).toBe('pass')
+    } finally {
+      await scoped.cleanup()
+    }
+  })
+
   it('produces zero results for apps without docs or tags', async () => {
     const empty = await createTempWorkspace('guren-cli-docs-none-')
     try {
