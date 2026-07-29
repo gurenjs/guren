@@ -25,6 +25,17 @@ describe('parserPluginCandidates', () => {
       expect(candidates.some((plugins) => plugins.includes('decorators-legacy'))).toBe(true)
     }
   })
+
+  // The two decorator plugins can't be enabled together (Babel throws a config
+  // error), so whichever goes first is a real cost, not a free choice: legacy
+  // covers both the leading-decorator form and constructor parameter
+  // decorators, standard alone covers only the leading form. Legacy first
+  // makes the DI-flavoured case this fix targets cost one parse instead of two.
+  it('tries the legacy decorator dialect before the standard one', () => {
+    for (const path of [undefined, 'a.ts', 'a.tsx']) {
+      expect(parserPluginCandidates(path)[0]).toContain('decorators-legacy')
+    }
+  })
 })
 
 describe('parseSourceFile', () => {
@@ -64,6 +75,22 @@ describe('parseSourceFile', () => {
 
   it('returns null only when every dialect rejects the source', () => {
     expect(parseSourceFile('class {{{{', 'a.ts')).toBeNull()
+  })
+
+  // A known, permanent gap rather than a missing candidate: the two decorator
+  // plugins are mutually exclusive in Babel, so no plugin set can accept a
+  // file that mixes the one form only `decorators` parses (a trailing
+  // `export @Dec class X`) with the one form only `decorators-legacy` parses
+  // (a constructor parameter decorator). Documented in the DECORATOR_PLUGINS
+  // comment; this test exists so a future change to the candidate list
+  // doesn't accidentally "fix" this by asserting it should now succeed.
+  it('remains unparseable when a file mixes forms only different dialects accept', () => {
+    const source = `declare function dec(...args: unknown[]): unknown
+
+export @dec class Controller {
+  constructor(@dec private service: string) {}
+}`
+    expect(parseSourceFile(source, 'a.ts')).toBeNull()
   })
 
   // errorRecovery makes the *first* candidate succeed where it would otherwise
@@ -130,6 +157,29 @@ describe('ParseCache', () => {
       expect(await cache.source(join(dir, 'broken.ts'))).toBe('export class {{{{')
       expect(await cache.get(join(dir, 'broken.ts'))).toBeNull()
       expect(await cache.source(join(dir, 'nope.ts'))).toBeNull()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // source() delivers value for an unparsed file (that's the whole point of
+  // the regex-only scans it exists for), so a caller asking only for source
+  // was fully served — it must not show up in scan-coverage as "skipped and
+  // not checked" when nothing it needed went unmet. Only get() (which really
+  // did fail to produce what it was asked for) records the unparsed case.
+  it('does not record a file as skipped when source() delivers it despite a parse failure', async () => {
+    const workspace = await createTempWorkspace('guren-cli-parse-cache-source-not-skipped-')
+    try {
+      const dir = workspace.dir
+      await writeFile(join(dir, 'broken.ts'), '/** @docs docs/example.md */\nexport class {{{{', 'utf8')
+
+      const cache = new ParseCache()
+      expect(await cache.source(join(dir, 'broken.ts'))).toContain('@docs docs/example.md')
+      expect(cache.skippedFiles()).toEqual([])
+
+      // get() on the same file needs an AST it can't have, so it does count.
+      expect(await cache.get(join(dir, 'broken.ts'))).toBeNull()
+      expect(cache.skippedFiles()).toEqual([{ filePath: join(dir, 'broken.ts'), reason: 'unparsed' }])
     } finally {
       await workspace.cleanup()
     }

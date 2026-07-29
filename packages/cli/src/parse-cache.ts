@@ -34,16 +34,23 @@ export type ParseOutcome =
  * | `export @Dec class X {}`           | yes          | no                  |
  * | `constructor(@inject() private x)` | no           | yes                 |
  *
- * Parameter decorators are the norm in DI-flavoured apps (tsyringe,
- * InversifyJS, `experimentalDecorators: true`) — exactly the code this fix
- * exists to make visible — so covering only the standard dialect would have
- * left the reported bug in place for its most common real-world shape.
- * Standard goes first because it is the spec-track dialect.
+ * Legacy goes first: parameter decorators are the norm in DI-flavoured apps
+ * (tsyringe, InversifyJS, `experimentalDecorators: true`) — exactly the code
+ * this fix exists to make visible, and the shape this repo's own fixtures use
+ * — while `export @Dec class X` (the one form legacy alone can't parse) is a
+ * rarer style. This ordering makes the common case cost one parse attempt
+ * instead of two; the two Babel plugins cannot both be enabled at once
+ * (`@babel/parser` throws a config error), so there is no way to try them
+ * together and no way to avoid a second attempt for whichever form the first
+ * guess didn't cover.
+ *
+ * One combination is unparseable under either order: a single file mixing
+ * `export @Dec class X` with a legacy parameter decorator has no plugin set
+ * that accepts both halves at once. Verified as a genuine `@babel/parser`
+ * limitation, not a gap in this list — see the "unparseable under any
+ * dialect" test in parse-cache.test.ts.
  */
-const DECORATOR_DIALECTS: readonly ParserPlugin[][] = [
-  ['decorators', 'decoratorAutoAccessors'],
-  ['decorators-legacy', 'decoratorAutoAccessors'],
-]
+const DECORATOR_PLUGINS: readonly ParserPlugin[] = ['decorators-legacy', 'decorators']
 
 /** Whether the JSX variant should be attempted before the non-JSX one. */
 function prefersJsx(filePath?: string): boolean {
@@ -70,11 +77,11 @@ function prefersJsx(filePath?: string): boolean {
 export function parserPluginCandidates(filePath?: string): ParserPlugin[][] {
   const jsxOrder = prefersJsx(filePath) ? [true, false] : [false, true]
   return jsxOrder.flatMap((jsx) =>
-    DECORATOR_DIALECTS.map((dialect) => [
-      'typescript' as ParserPlugin,
-      ...dialect,
-      ...(jsx ? (['jsx'] as ParserPlugin[]) : []),
-    ]),
+    DECORATOR_PLUGINS.map((dialect) => {
+      const plugins: ParserPlugin[] = ['typescript', dialect, 'decoratorAutoAccessors']
+      if (jsx) plugins.push('jsx')
+      return plugins
+    }),
   )
 }
 
@@ -85,6 +92,14 @@ export interface ParseSourceOptions {
    * parse" is the signal to skip a file rather than draw conclusions from a
    * fragment, and the cache is keyed by path alone so it could hold only one
    * option set anyway.
+   *
+   * Note this makes the retry ladder moot for its one caller
+   * (`parseModelSerializationInfo`): with recovery on, the first candidate
+   * returns a (partial, error-bearing) AST instead of throwing, so later
+   * candidates are never tried. That caller only reads static property
+   * literals, never constructor parameters or decorator arguments, so which
+   * dialect's partial AST it gets does not change the result — confirmed by
+   * the "keeps static members readable" test in parse-cache.test.ts.
    */
   errorRecovery?: boolean
 }
@@ -125,16 +140,22 @@ export function parseSourceFile(
  * Plugin selection is derived from the path, not caller-supplied, so the cache
  * stays correct regardless of which checker asks first.
  *
- * The cache also remembers which requested files produced no AST. That list is
- * what lets `runCheck` report an incomplete scan rather than quietly returning
- * fewer results — a checker that skipped a file it could not read is otherwise
- * indistinguishable from one that found nothing wrong.
+ * The cache also remembers which requested files it could not fully serve —
+ * see `skippedFiles()`. That list is scoped to one cache instance for the
+ * lifetime of one `runCheck()` call; it would silently mix results from
+ * unrelated calls if a cache were ever hoisted and reused across them; nothing
+ * in this codebase does that today.
  */
 export class ParseCache {
   private readonly cache = new Map<string, Promise<ParseOutcome>>()
   private readonly skipped = new Map<string, 'unparsed' | 'unreadable'>()
 
-  /** Full outcome, distinguishing an unreadable file from an unparseable one. */
+  /**
+   * Full outcome, distinguishing an unreadable file from an unparseable one.
+   * Exposed for tests only (promise-identity is how the read-once guarantee is
+   * verified) — production callers want `get()` or `source()`, which record
+   * `skippedFiles()` against the contract they actually needed.
+   */
   read(filePath: string): Promise<ParseOutcome> {
     let pending = this.cache.get(filePath)
     if (!pending) {
@@ -144,26 +165,37 @@ export class ParseCache {
     return pending
   }
 
-  /** AST plus source, or null when the file could not be read or parsed. */
+  /**
+   * AST plus source, or null when the file could not be read or parsed. Either
+   * way this caller needed an AST and didn't get one, so it counts as skipped.
+   */
   async get(filePath: string): Promise<ParsedFile | null> {
     const outcome = await this.read(filePath)
-    return outcome.status === 'parsed' ? { ast: outcome.ast, source: outcome.source } : null
+    if (outcome.status === 'parsed') return { ast: outcome.ast, source: outcome.source }
+    this.skipped.set(filePath, outcome.status)
+    return null
   }
 
   /**
    * File contents regardless of whether they parsed, or null when unreadable.
    * For the regex-only scans, which a syntax error elsewhere in the file
-   * shouldn't disable.
+   * shouldn't disable — an `unparsed` outcome still satisfies this caller, so
+   * it is not recorded as skipped; only a genuinely unreadable file is.
    */
   async source(filePath: string): Promise<string | null> {
     const outcome = await this.read(filePath)
-    return outcome.status === 'unreadable' ? null : outcome.source
+    if (outcome.status === 'unreadable') {
+      this.skipped.set(filePath, 'unreadable')
+      return null
+    }
+    return outcome.source
   }
 
   /**
-   * Requested files that yielded no AST, for reporting. Only reflects what
-   * callers actually asked for, so it never warns about a file no checker
-   * looked at.
+   * Requested files that some caller needed but could not get — an AST from
+   * `get()`, or any content at all from `source()`. A file that only ever
+   * failed to parse but was successfully read via `source()` is not here,
+   * because nothing that asked for it went unserved.
    */
   skippedFiles(): { filePath: string; reason: 'unparsed' | 'unreadable' }[] {
     return [...this.skipped].map(([filePath, reason]) => ({ filePath, reason }))
@@ -174,15 +206,10 @@ export class ParseCache {
     try {
       source = await readFile(filePath, 'utf-8')
     } catch {
-      this.skipped.set(filePath, 'unreadable')
       return { status: 'unreadable' }
     }
 
     const ast = parseSourceFile(source, filePath)
-    if (!ast) {
-      this.skipped.set(filePath, 'unparsed')
-      return { status: 'unparsed', source }
-    }
-    return { status: 'parsed', ast, source }
+    return ast ? { status: 'parsed', ast, source } : { status: 'unparsed', source }
   }
 }

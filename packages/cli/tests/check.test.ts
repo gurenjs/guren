@@ -33,6 +33,27 @@ export default class PostController extends Controller {
     }
   })
 
+  // extractClassDeclaration (shared with audit.ts/spec-screens.ts) also
+  // matches a bare, non-exported class — a case the inline check this used to
+  // do before this fix did not cover.
+  it('detects an empty method on a bare, non-exported controller class', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-empty-bare-class-')
+    try {
+      await mkdir(join(workspace.dir, 'app/Http/Controllers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Http/Controllers/PostController.ts'),
+        `class PostController {\n  index() {}\n}`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      expect(report.checks.some((c) => c.key.startsWith('empty-method:'))).toBe(true)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('warns about missing test files', async () => {
     const workspace = await createTempWorkspace('guren-cli-check-tests-')
 

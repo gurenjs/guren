@@ -7,6 +7,7 @@ import {
   toPosixRelative,
   IMPORTABLE_EXTENSIONS,
   NON_SOURCE_DIR_NAMES,
+  formatTruncatedList,
 } from './discovery'
 import { parseSourceFile } from './parse-cache'
 import { readDeclaredDependencyNames } from './plugin-manifest'
@@ -586,9 +587,8 @@ export function formatParseCaveat(analysis: DeployRuntimeAnalysis): string {
   const { unparsedFiles } = analysis
   if (unparsedFiles.length === 0) return ''
 
-  const shown = unparsedFiles.slice(0, 3).join(', ')
-  const more = unparsedFiles.length > 3 ? ` and ${unparsedFiles.length - 3} more` : ''
-  return ` Note: ${unparsedFiles.length} file(s) could not be read or parsed and were not scanned: ${shown}${more}.`
+  const shown = formatTruncatedList(unparsedFiles)
+  return ` Note: ${unparsedFiles.length} file(s) could not be read or parsed and were not scanned: ${shown}.`
 }
 
 /** Targets that lack `Bun.password`, so the default `ScryptHasher` breaks. */

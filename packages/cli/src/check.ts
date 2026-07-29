@@ -11,7 +11,9 @@ import {
   toPosixRelative,
   listModuleNames,
   moduleNameFromRelPath,
+  formatTruncatedList,
 } from './discovery'
+import { extractClassDeclaration } from './model-parser'
 import { ParseCache } from './parse-cache'
 import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath } from './inertia-pages'
 import { runArchCheck } from './arch-check'
@@ -236,17 +238,15 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   // a clean run over an incomplete scan says so instead of implying coverage.
   const skipped = cache.skippedFiles()
   if (skipped.length > 0) {
-    const shown = skipped
-      .slice(0, 3)
-      .map(({ filePath, reason }) => `${toPosixRelative(cwd, filePath)} (${reason})`)
-      .join(', ')
-    const more = skipped.length > 3 ? ` and ${skipped.length - 3} more` : ''
+    const shown = formatTruncatedList(
+      skipped.map(({ filePath, reason }) => `${toPosixRelative(cwd, filePath)} (${reason})`),
+    )
     checks.push(
       check(
         'scan-coverage',
         'Scan coverage',
         'warn',
-        `${skipped.length} file(s) were skipped and not checked: ${shown}${more}.`,
+        `${skipped.length} file(s) were skipped and not checked: ${shown}.`,
         'Fix the syntax error (or file permissions) so these files are covered — until then results here are incomplete.',
       ),
     )
@@ -270,13 +270,7 @@ async function checkEmptyMethods(cache: ParseCache, filePath: string, relPath: s
   const { ast } = parsed
 
   for (const node of ast.program.body) {
-    let classDecl = null
-    if (node.type === 'ExportNamedDeclaration' && node.declaration?.type === 'ClassDeclaration') {
-      classDecl = node.declaration
-    } else if (node.type === 'ExportDefaultDeclaration' && node.declaration?.type === 'ClassDeclaration') {
-      classDecl = node.declaration
-    }
-
+    const classDecl = extractClassDeclaration(node)
     if (!classDecl) continue
     const className = classDecl.id?.name ?? classNameFromPath(filePath)
 

@@ -15,6 +15,7 @@ import {
 } from './discovery'
 import { checkPluginCompatibility, readCoreVersion, readInstalledPluginManifests } from './plugin-manifest'
 import { compareVersions } from './codemods'
+import { extractClassDeclaration } from './model-parser'
 import { parseSourceFile } from './parse-cache'
 import {
   analyzeDeployRuntime,
@@ -1307,12 +1308,7 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
       if (!ast) continue
 
       for (const node of ast.program.body) {
-        let classDecl = null
-        if (node.type === 'ExportNamedDeclaration' && node.declaration?.type === 'ClassDeclaration') {
-          classDecl = node.declaration
-        } else if (node.type === 'ExportDefaultDeclaration' && node.declaration?.type === 'ClassDeclaration') {
-          classDecl = node.declaration
-        }
+        const classDecl = extractClassDeclaration(node)
         if (!classDecl) continue
         const className = classDecl.id?.name ?? classNameFromPath(filePath)
 
@@ -1334,7 +1330,8 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
       }
     }
   } catch {
-    // Ignore parse failures
+    // Ignore unreadable files — parseSourceFile itself never throws, it
+    // returns null and the loop above already skips that case.
   }
 
   try {
