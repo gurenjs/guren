@@ -485,7 +485,7 @@ const makeConsoleCommandCommand = defineCommand({
     consola.info('Register it with your console kernel in src/console.ts:')
     consola.info(`  import ${className} from '${fromConsoleEntry}'`)
     consola.info(`  kernel.register(${className})`)
-    consola.info('See docs/guides/console.md for the full walkthrough.')
+    consola.info('See: https://guren.dev/docs/guides/console')
   },
 })
 

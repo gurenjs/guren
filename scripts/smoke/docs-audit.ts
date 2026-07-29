@@ -34,6 +34,8 @@ async function auditEnglishDocs(root: string): Promise<void> {
   assert(cli.includes('bunx guren check --docs'), 'CLI guide must document the doc-link CI gate.')
   assert(cli.includes('bunx guren check --spec'), 'CLI guide must document the spec drift CI gate.')
   assert(!cli.includes('`check` and `audit` both exit'), 'CLI guide must not claim plain check sets an exit code — only the suite flags gate CI.')
+  assert(cli.includes('`make:command <Name>`'), 'CLI guide must list make:command in the scaffold table.')
+  assert(cli.includes('bun run console <command>'), 'CLI guide must distinguish the app command runner from the `guren console` REPL.')
 
   const consoleGuide = await read(root, 'docs/en/guides/console.md')
   assert(consoleGuide.includes('bunx guren make:command'), 'Console guide must document the make:command scaffold.')

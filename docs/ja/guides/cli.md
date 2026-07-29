@@ -64,6 +64,7 @@ bunx guren plugin @acme/guren-plugin-audit
 | `make:listener <Name>` | イベントリスナークラスを生成 | `bunx guren make:listener SendWelcomeEmail` |
 | `make:notification <Name>` | 通知クラスを生成 | `bunx guren make:notification InvoicePaid` |
 | `make:mail <Name>` | メールクラスを生成 | `bunx guren make:mail WelcomeEmail` |
+| `make:command <Name>` | `app/Console/Commands` にコンソールコマンドを生成。`--command <name>` で呼び出し名を指定。`src/console.ts` への登録が必要（[コンソールコマンドガイド](./console.md)参照） | `bunx guren make:command SendDigest --command reports:digest` |
 | `make:policy <Name>` | 所有者ベースのデフォルトを備えた認可ポリシーを `app/Policies` に生成 | `bunx guren make:policy Post` |
 | `make:adr "<Title>"` | アーキテクチャ意思決定を採番付きファイルとして `docs/adr/` に記録(リンク可能なfrontmatter付き)。`--entity <Model>` で `entities:`/`related:` を自動補完 | `bunx guren make:adr "Billing cycle is end-of-month" --entity Invoice` |
 
@@ -454,6 +455,8 @@ CLI はデフォルトテンプレートをコピーし、メタデータを更�
 ```bash
 bunx guren console
 ```
+
+> これは対話型 REPL であり、アプリケーションが定義するコマンドではありません。後者を実行するには `bun run console <command>` を使います（[コンソールコマンドガイド](./console.md)参照）。
 
 アプリケーションをブート（`src/main.ts` と登録済みプロバイダーを尊重）し、`app`、`auth`、発見済みモデル、DB ヘルパー、`@guren/testing` のユーティリティなどを事前ロードしたプロンプトに入ります。`:help` でショートカット、`:editor` で複数行入力を使えます。
 

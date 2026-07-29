@@ -68,6 +68,7 @@ These commands patch `src/app.ts`, create the matching provider/runtime files, a
 | `make:listener <Name>` | Generates an event listener class | `bunx guren make:listener SendWelcomeEmail` |
 | `make:notification <Name>` | Generates a notification class | `bunx guren make:notification InvoicePaid` |
 | `make:mail <Name>` | Generates a mailable class | `bunx guren make:mail WelcomeEmail` |
+| `make:command <Name>` | Generates a console command in `app/Console/Commands`; `--command <name>` sets the invocation name. Register it in `src/console.ts` — see the [console commands guide](./console.md) | `bunx guren make:command SendDigest --command reports:digest` |
 
 > **Note:** `make:*` commands avoid overwriting existing files. Use `--force` if you need to replace them.
 
@@ -456,6 +457,8 @@ Launch the framework-aware console with:
 ```bash
 bunx guren console
 ```
+
+> This is an interactive REPL, not your application's commands. To run those, use `bun run console <command>` — see the [console commands guide](./console.md).
 
 The command boots your application (honouring `src/main.ts` and registered providers), then drops into a prompt preloaded with useful globals—`app`, `auth`, discovered models, database helpers, and utilities from `@guren/testing`. Use `:help` to explore console shortcuts, or `:editor` when you need a multiline buffer.
 
