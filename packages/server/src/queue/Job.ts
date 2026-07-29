@@ -58,6 +58,18 @@ function generateJobId(): string {
  */
 export abstract class Job<T = unknown> {
   /**
+   * Stable wire name for this job.
+   *
+   * Queued messages record this name, and the worker resolves the class back
+   * from it. When omitted the class name is used, which breaks if a bundler
+   * mangles identifiers or if the class is later renamed while messages are
+   * still in flight. Set it to pin the name across both.
+   *
+   * @default the class name
+   */
+  static jobName?: string
+
+  /**
    * The queue this job should be dispatched to.
    * @default 'default'
    */
@@ -118,7 +130,7 @@ export abstract class Job<T = unknown> {
 
     const job: QueuedJob<T> = {
       id: jobId,
-      name: this.name,
+      name: resolveJobName(this),
       payload,
       queue: options.queue ?? this.queue,
       attempts: 0,
@@ -171,12 +183,31 @@ export abstract class Job<T = unknown> {
 export interface JobClass<T = unknown> {
   new (): Job<T>
   name: string
+  jobName?: string
   queue: string
   maxAttempts: number
   backoff: 'exponential' | 'linear' | number
   dispatch(payload: T, options?: JobOptions): Promise<string>
   dispatchAfter(delayMs: number, payload: T, options?: Omit<JobOptions, 'delay'>): Promise<string>
   calculateRetryDelay(attempts: number): number
+}
+
+/**
+ * Resolve the wire name a job is queued and looked up under.
+ *
+ * Prefers an explicit `jobName` over the class name so that renaming the class
+ * or bundling with identifier mangling does not orphan queued messages.
+ *
+ * Only an *own* `jobName` counts. Static members are inherited, so reading it
+ * off the prototype chain would make every subclass of a pinned job claim its
+ * parent's identity and overwrite it in the registry. A subclass that wants a
+ * pinned name declares its own.
+ */
+export function resolveJobName(jobClass: Pick<JobClass, 'name' | 'jobName'>): string {
+  const own = Object.prototype.hasOwnProperty.call(jobClass, 'jobName')
+    ? jobClass.jobName
+    : undefined
+  return own ?? jobClass.name
 }
 
 /**
@@ -188,7 +219,7 @@ const jobRegistry = new Map<string, JobClass>()
  * Register a job class for the worker to use.
  */
 export function registerJob<T>(jobClass: JobClass<T>): void {
-  jobRegistry.set(jobClass.name, jobClass as JobClass)
+  jobRegistry.set(resolveJobName(jobClass), jobClass as JobClass)
 }
 
 /**

@@ -306,6 +306,7 @@ export function getMailManager(): MailManager | null {
  * Job for sending emails via the queue.
  */
 class SendMailJob extends Job<SendMailJobPayload> {
+  static jobName = 'SendMailJob'
   static queue = 'default'
   static maxAttempts = 3
   static backoff: 'exponential' = 'exponential'

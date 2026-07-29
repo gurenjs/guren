@@ -129,9 +129,10 @@ export function buildVercelOutput(options: BuildVercelOutputOptions = {}): void 
     //
     // Whitespace and syntax only — never plain `--minify`, which also mangles
     // identifiers. Guren keys durable records on class names: the queue
-    // registry stores `JobClass.name` in every queued message, and
-    // notifications persist `constructor.name` as their `type`. Mangled, a job
-    // dispatched by one deploy resolves to nothing after the next.
+    // registry stores each job's wire name (its class name unless it declares a
+    // jobName) in every queued message, and notifications persist
+    // `constructor.name` as their `type`. Mangled, a job dispatched by one
+    // deploy resolves to nothing after the next.
     //
     // Not `--keep-names`: as of Bun 1.3.14 it is accepted and silently leaves
     // class names mangled, so it cannot replace this.

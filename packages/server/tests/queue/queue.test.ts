@@ -7,6 +7,7 @@ import {
   getJob,
   clearJobRegistry,
   getRegisteredJobs,
+  resolveJobName,
   MemoryDriver,
   Worker,
   processJob,
@@ -200,6 +201,101 @@ describe('Job Registry', () => {
 
     clearJobRegistry()
     expect(getRegisteredJobs().size).toBe(0)
+  })
+})
+
+describe('Job wire name', () => {
+  let driver: MemoryDriver
+
+  beforeEach(() => {
+    driver = new MemoryDriver()
+    setQueueDriver(driver)
+    clearJobRegistry()
+  })
+
+  it('resolves, registers and dispatches by class name when jobName is not declared', async () => {
+    class PlainJob extends Job<void> {
+      handle() {}
+    }
+
+    expect(resolveJobName(PlainJob)).toBe('PlainJob')
+
+    registerJob(PlainJob)
+    expect(getJob('PlainJob')).toBe(PlainJob)
+
+    await PlainJob.dispatch(undefined)
+    const queued = await driver.pop('default')
+    expect(queued?.name).toBe('PlainJob')
+  })
+
+  it('prefers an explicit jobName over the class name', () => {
+    class MangledName extends Job<void> {
+      static jobName = 'StableJob'
+      handle() {}
+    }
+
+    expect(resolveJobName(MangledName)).toBe('StableJob')
+
+    registerJob(MangledName)
+    expect(getJob('StableJob')).toBe(MangledName)
+    expect(getJob('MangledName')).toBeUndefined()
+  })
+
+  it('dispatches and resolves round-trip under the declared jobName', async () => {
+    const handled: string[] = []
+
+    class MangledName extends Job<{ id: string }> {
+      static jobName = 'StableJob'
+      handle(payload: { id: string }) {
+        handled.push(payload.id)
+      }
+    }
+
+    registerJob(MangledName)
+    await MangledName.dispatch({ id: 'abc' })
+
+    const queued = await driver.pop('default')
+    expect(queued?.name).toBe('StableJob')
+
+    // Simulate the worker resolving a message written by an earlier deploy.
+    const Resolved = getJob(queued!.name)
+    expect(Resolved).toBe(MangledName as unknown as JobClass)
+    await new Resolved!().handle(queued!.payload)
+    expect(handled).toEqual(['abc'])
+  })
+
+  it('does not let a subclass inherit its parent jobName', () => {
+    class BaseJob extends Job<void> {
+      static jobName = 'StableBase'
+      handle() {}
+    }
+    class DerivedJob extends BaseJob {}
+
+    // Statics are inherited, so `DerivedJob.jobName` reads 'StableBase' — but
+    // resolution must ignore it, or registering the subclass would evict the
+    // parent from the registry under a name it never declared.
+    expect(DerivedJob.jobName).toBe('StableBase')
+    expect(resolveJobName(DerivedJob)).toBe('DerivedJob')
+
+    registerJob(BaseJob)
+    registerJob(DerivedJob)
+
+    expect(getRegisteredJobs().size).toBe(2)
+    expect(getJob('StableBase')).toBe(BaseJob as unknown as JobClass)
+    expect(getJob('DerivedJob')).toBe(DerivedJob as unknown as JobClass)
+  })
+
+  it('lets a subclass opt back into its parent name by declaring it', () => {
+    class BaseJob extends Job<void> {
+      static jobName = 'StableBase'
+      handle() {}
+    }
+    class BoundJob extends BaseJob {
+      static override jobName = BaseJob.jobName
+    }
+
+    registerJob(BoundJob)
+    expect(getJob('StableBase')).toBe(BoundJob as unknown as JobClass)
   })
 })
 

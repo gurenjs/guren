@@ -1,4 +1,4 @@
-import { getJob } from '@guren/server'
+import { getJob, resolveJobName } from '@guren/server'
 import type { FailedJob, QueuedJob, QueueDriver, JobClass } from '@guren/server'
 
 /**
@@ -25,7 +25,7 @@ export class FakeQueueDriver implements QueueDriver {
   private jobClasses = new Map<string, JobClass>()
 
   registerJobClass<T>(jobClass: JobClass<T>): void {
-    this.jobClasses.set(jobClass.name, jobClass as JobClass)
+    this.jobClasses.set(resolveJobName(jobClass), jobClass as JobClass)
   }
 
   async push(job: QueuedJob): Promise<void> {
@@ -125,8 +125,9 @@ export class FakeQueueDriver implements QueueDriver {
    * Get jobs of a specific type.
    */
   getJobsOf<T>(jobClass: JobClass<T>): RecordedJob<T>[] {
+    const name = resolveJobName(jobClass)
     return this.jobs.filter(
-      (j) => j.jobClass === jobClass || j.jobName === jobClass.name
+      (j) => j.jobClass === jobClass || j.jobName === name
     ) as RecordedJob<T>[]
   }
 }
@@ -157,7 +158,7 @@ export class FakeQueue {
     const delay = options.delay ?? 0
     const queuedJob: QueuedJob<T> = {
       id: `fake-job-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      name: jobClass.name,
+      name: resolveJobName(jobClass),
       payload,
       queue: options.queue ?? jobClass.queue,
       attempts: 0,
@@ -178,16 +179,17 @@ export class FakeQueue {
     callback?: (payload: T) => boolean
   ): void {
     const jobs = this.driver.getJobsOf(jobClass)
+    const name = resolveJobName(jobClass)
 
     if (jobs.length === 0) {
-      throw new Error(`Expected job [${jobClass.name}] to be pushed`)
+      throw new Error(`Expected job [${name}] to be pushed`)
     }
 
     if (callback) {
       const match = jobs.some((j) => callback(j.payload))
       if (!match) {
         throw new Error(
-          `Expected job [${jobClass.name}] to match callback, but none did`
+          `Expected job [${name}] to match callback, but none did`
         )
       }
     }
@@ -198,10 +200,11 @@ export class FakeQueue {
    */
   assertPushedTimes<T>(jobClass: JobClass<T>, times: number): void {
     const jobs = this.driver.getJobsOf(jobClass)
+    const name = resolveJobName(jobClass)
 
     if (jobs.length !== times) {
       throw new Error(
-        `Expected job [${jobClass.name}] to be pushed ${times} times, got ${jobs.length}`
+        `Expected job [${name}] to be pushed ${times} times, got ${jobs.length}`
       )
     }
   }
@@ -211,10 +214,11 @@ export class FakeQueue {
    */
   assertNotPushed<T>(jobClass: JobClass<T>): void {
     const jobs = this.driver.getJobsOf(jobClass)
+    const name = resolveJobName(jobClass)
 
     if (jobs.length > 0) {
       throw new Error(
-        `Expected job [${jobClass.name}] not to be pushed, but it was pushed ${jobs.length} times`
+        `Expected job [${name}] not to be pushed, but it was pushed ${jobs.length} times`
       )
     }
   }
@@ -238,11 +242,12 @@ export class FakeQueue {
    */
   assertPushedOn<T>(queue: string, jobClass: JobClass<T>): void {
     const jobs = this.driver.getJobsOf(jobClass)
+    const name = resolveJobName(jobClass)
     const match = jobs.some((j) => j.options.queue === queue)
 
     if (!match) {
       throw new Error(
-        `Expected job [${jobClass.name}] to be pushed to queue [${queue}]`
+        `Expected job [${name}] to be pushed to queue [${queue}]`
       )
     }
   }
@@ -252,11 +257,12 @@ export class FakeQueue {
    */
   assertPushedWithDelay<T>(jobClass: JobClass<T>, delay: number): void {
     const jobs = this.driver.getJobsOf(jobClass)
+    const name = resolveJobName(jobClass)
     const match = jobs.some((j) => j.options.delay === delay)
 
     if (!match) {
       throw new Error(
-        `Expected job [${jobClass.name}] to be pushed with delay [${delay}]`
+        `Expected job [${name}] to be pushed with delay [${delay}]`
       )
     }
   }

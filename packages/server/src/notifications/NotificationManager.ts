@@ -7,6 +7,7 @@ import type {
 } from './types'
 import type { Notification } from './Notification'
 import { Job, registerJob, getQueueDriver } from '../queue'
+import { resolveNotifiableType } from './notifiable-type'
 
 /**
  * Notification manager for sending notifications through multiple channels.
@@ -227,7 +228,7 @@ export class NotificationManager {
   protected serializeNotifiable(notifiable: Notifiable): SerializedNotifiable {
     // Basic serialization - can be overridden for custom behavior
     return {
-      type: notifiable.constructor?.name ?? 'Unknown',
+      type: resolveNotifiableType(notifiable),
       data: { ...notifiable } as Record<string, unknown>,
     }
   }
@@ -253,6 +254,9 @@ export class NotificationManager {
     const manager = this
 
     class BoundSendNotificationJob extends SendNotificationJob {
+      // Declared, not inherited: this subclass is a binding proxy for the same
+      // job, so it deliberately keeps the parent's wire name.
+      static jobName = SendNotificationJob.jobName
       static notificationManager = manager
     }
 
@@ -300,6 +304,7 @@ class SendNotificationJob extends Job<SendNotificationPayload> {
     // Reconstruct notifiable (basic)
     const notifiable: Notifiable = {
       ...payload.notifiableData.data,
+      notifiableType: payload.notifiableData.type,
       routeNotificationFor(channel: string): string | null {
         const key = `${channel}Route` as keyof typeof payload.notifiableData.data
         const value = payload.notifiableData.data[key]

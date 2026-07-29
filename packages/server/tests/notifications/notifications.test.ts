@@ -14,6 +14,7 @@ import {
   type SlackMessage,
   type NotificationChannel,
 } from '../../src/notifications'
+import { MemoryDriver, setQueueDriver, getJob, clearJobRegistry } from '../../src/queue'
 
 // Test notification classes
 class TestNotification extends Notification {
@@ -80,6 +81,7 @@ class ConditionalNotification extends Notification {
 // Test notifiable
 class TestUser implements Notifiable {
   notifications: any[] = []
+  notifiableType?: string
 
   constructor(
     public id: number,
@@ -624,6 +626,31 @@ describe('DatabaseChannel', () => {
       expect(stored.createdAt).toBe(notification.createdAt)
     })
 
+    it('should prefer an explicit notifiableType over the constructor name', async () => {
+      const renamed = new TestUser(2, 'renamed@example.com')
+      renamed.notifications = []
+      renamed.notifiableType = 'App\\Models\\User'
+
+      await channel.send(renamed, new MultiChannelNotification())
+
+      expect(renamed.notifications[0].notifiableType).toBe('App\\Models\\User')
+    })
+
+    it('should preserve notifiableType for a notifiable rebuilt from a queue payload', async () => {
+      // A queued notifiable arrives as a plain object, so `constructor.name`
+      // is 'Object' — the serialized type is the only surviving identity.
+      const rebuilt: Notifiable = {
+        id: 3,
+        notifiableType: 'TestUser',
+        routeNotificationFor: () => null,
+        notifications: [],
+      } as unknown as Notifiable
+
+      await channel.send(rebuilt, new MultiChannelNotification())
+
+      expect(rebuilt.notifications![0].notifiableType).toBe('TestUser')
+    })
+
     it('should not store if toDatabase returns undefined', async () => {
       const notification = new TestNotification()
       await channel.send(user, notification)
@@ -864,6 +891,74 @@ describe('Global notification manager', () => {
     setNotificationManager(manager)
 
     expect(getNotificationManager()).toBe(manager)
+  })
+})
+
+describe('queued notification job identity', () => {
+  // No `delay`, so the message is immediately available to pop. The file's
+  // module-level QueuedNotification sets one, so it cannot be reused here.
+  class ImmediateQueuedNotification extends Notification {
+    static override shouldQueue = true
+    static override queue = 'notifications'
+    via(): string[] {
+      return ['memory']
+    }
+  }
+
+  let driver: MemoryDriver
+  let manager: NotificationManager
+
+  beforeEach(() => {
+    clearJobRegistry()
+    driver = new MemoryDriver()
+    setQueueDriver(driver)
+    manager = createNotificationManager({
+      channels: { memory: new MemoryChannel() },
+    })
+  })
+
+  it('queues under the pinned jobName and resolves back to the job class', async () => {
+    await manager.send(
+      new TestUser(1, 'queued@example.com'),
+      new ImmediateQueuedNotification()
+    )
+
+    const queued = await driver.pop('notifications')
+    // The manager dispatches an internal subclass; the pinned jobName keeps the
+    // wire name stable regardless of what that subclass is called.
+    expect(queued?.name).toBe('SendNotificationJob')
+    expect(getJob(queued!.name)).toBeDefined()
+
+    const payload = queued!.payload as { notifiableData: { type: string } }
+    expect(payload.notifiableData.type).toBe('TestUser')
+  })
+
+  it('serializes a declared notifiableType and restores it on the rebuilt notifiable', async () => {
+    // Deliberately different from the constructor name, so the assertions
+    // cannot pass on the `constructor.name` fallback.
+    const user = new TestUser(1, 'queued@example.com')
+    user.notifiableType = 'App\\Models\\User'
+
+    await manager.send(user, new ImmediateQueuedNotification())
+
+    const queued = await driver.pop('notifications')
+    const payload = queued!.payload as { notifiableData: { type: string } }
+    expect(payload.notifiableData.type).toBe('App\\Models\\User')
+
+    // And the worker restores it onto the plain object it rebuilds, whose own
+    // constructor name would otherwise be 'Object'. The job is bound to this
+    // manager, so patching it here captures what `handle()` hands to the
+    // channels. (Routing through the real channels is not an option: the
+    // rebuilt notification's via() delivers to none.)
+    let rebuilt: Notifiable | undefined
+    manager.sendNow = async (notifiable: Notifiable) => {
+      rebuilt = notifiable
+    }
+
+    await new (getJob(queued!.name)!)().handle(queued!.payload)
+
+    expect(rebuilt?.constructor?.name).toBe('Object')
+    expect(rebuilt?.notifiableType).toBe('App\\Models\\User')
   })
 })
 

@@ -245,6 +245,29 @@ class User implements Notifiable {
 }
 ```
 
+### Notifiable の型名を固定する
+
+データベースチャネルは各レコードに `notifiableType` を保存します。既定ではコンスト
+ラクタ名が使われますが、この名前は2つの場面で失われます。バンドラーによるマングルと、
+キューのペイロードから復元された Notifiable がプレーンオブジェクトになる（コンスト
+ラクタ名が `Object` になる）場合です。
+
+`notifiableType` を宣言すると固定できます。通知側の `Notification.type` に対応する
+仕組みです。
+
+```ts
+class User implements Notifiable {
+  notifiableType = 'User'
+
+  routeNotificationFor(channel: string): string | null {
+    // ...
+  }
+}
+```
+
+宣言した型名はキューのペイロードにシリアライズされ、ワーカー側で復元される Notifiable
+にも復元されるため、ラウンドトリップを通過します。
+
 ## キュー対応通知
 
 ### キューの設定

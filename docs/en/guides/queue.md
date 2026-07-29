@@ -56,6 +56,7 @@ export class SendWelcomeEmailJob extends Job<SendWelcomeEmailPayload> {
 
 | Property | Default | Description |
 |----------|---------|-------------|
+| `jobName` | the class name | Stable wire name recorded in queued messages |
 | `queue` | `'default'` | Queue name for this job type |
 | `maxAttempts` | `3` | Maximum retry attempts before failing |
 | `backoff` | `'exponential'` | Retry delay strategy |
@@ -64,6 +65,59 @@ export class SendWelcomeEmailJob extends Job<SendWelcomeEmailPayload> {
 - `'exponential'`: 2^attempt × 1000ms (1s, 2s, 4s, 8s, ...)
 - `'linear'`: attempt × 1000ms (1s, 2s, 3s, ...)
 - `number`: Fixed delay in milliseconds
+
+### Pinning a Job's Wire Identity
+
+Dispatching a job writes its name into the queued message, and the worker uses
+that name to look the class back up. By default the name is the class name, so
+two things break in-flight messages:
+
+- **Renaming the class.** Messages queued under the old name no longer resolve.
+- **Bundling with identifier mangling.** The deployed class is named something
+  like `a`, so it registers under `a` and messages written by an unmangled — or
+  differently mangled — build are orphaned. See
+  [Serverless](./serverless.md) for the deployment side of this.
+
+Declare `jobName` to pin the name across both:
+
+```ts
+import { Job } from '@guren/core'
+
+export class SendWelcomeEmailJob extends Job<{ userId: string }> {
+  // Queued as 'SendWelcomeEmailJob' whatever the class ends up being called
+  static jobName = 'SendWelcomeEmailJob'
+  static queue = 'emails'
+
+  async handle({ userId }: { userId: string }): Promise<void> {
+    // ...
+  }
+}
+```
+
+Once pinned, the class is free to be renamed — only `jobName` is durable, and it
+is the string `registerJob()` keys on and the worker resolves. Jobs without a
+`jobName` keep resolving by class name, so this is opt-in.
+
+A subclass does **not** inherit its parent's `jobName`, even though JavaScript
+statics are inherited. It resolves by its own class name until it declares one:
+
+```ts
+class BaseJob extends Job<void> {
+  static jobName = 'BaseJob'
+}
+
+class DerivedJob extends BaseJob {}                  // queued as 'DerivedJob'
+class ProxyJob extends BaseJob {
+  static jobName = BaseJob.jobName                   // queued as 'BaseJob'
+}
+```
+
+Without that rule, registering both classes would collapse them onto one
+registry entry and the second registration would evict the first.
+
+Changing or adding a `jobName` on a job that already has messages in a durable
+queue is itself a rename: drain the queue first, or keep the old name registered
+until the backlog clears.
 
 ## Dispatching Jobs
 

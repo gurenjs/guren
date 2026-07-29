@@ -15,6 +15,7 @@ export type {
 } from './types'
 
 export { Notification } from './Notification'
+export { resolveNotifiableType } from './notifiable-type'
 
 export {
   NotificationManager,
