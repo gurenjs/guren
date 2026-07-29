@@ -296,3 +296,16 @@ export function excludeBarrelFiles(files: string[]): string[] {
     return !base.startsWith('index.')
   })
 }
+
+/**
+ * Renders the first `limit` items, then `and N more` — the shape a
+ * caveat/warning uses to name a handful of examples without listing an
+ * unbounded list. Shared by `guren check`'s scan-coverage warning and the
+ * deploy checks' unparsed-file caveat, which both name a possibly-long list of
+ * files that failed to read or parse.
+ */
+export function formatTruncatedList(items: string[], limit = 3): string {
+  const shown = items.slice(0, limit).join(', ')
+  const more = items.length > limit ? ` and ${items.length - limit} more` : ''
+  return `${shown}${more}`
+}

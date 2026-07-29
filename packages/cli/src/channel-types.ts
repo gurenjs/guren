@@ -1,6 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { relative, resolve } from 'node:path'
-import { parse } from '@babel/parser'
+import { walk, type BabelNode } from './ast-walk'
+import { parseSourceFile } from './parse-cache'
 import { writeGeneratedFile, type WriterOptions } from './utils'
 
 export interface GenerateChannelTypesOptions extends WriterOptions {
@@ -15,11 +16,10 @@ interface ChannelDefinition {
 }
 
 type ChannelDefinitionMap = Map<string, ChannelDefinition>
-type AstNode = { type: string; [key: string]: unknown }
-type MemberExpressionNode = AstNode & {
+type MemberExpressionNode = BabelNode & {
   type: 'MemberExpression'
-  object: AstNode
-  property: AstNode
+  object: BabelNode
+  property: BabelNode
   computed?: boolean
 }
 
@@ -109,7 +109,7 @@ async function collectChannelDefinitions(directory: string): Promise<ChannelDefi
 
   for (const filePath of files) {
     const source = await readFile(filePath, 'utf8')
-    extractDefinitionsFromSource(source, definitions)
+    extractDefinitionsFromSource(source, definitions, filePath)
   }
 
   return definitions
@@ -138,17 +138,21 @@ async function listSourceFiles(directory: string): Promise<string[]> {
   return files
 }
 
-function extractDefinitionsFromSource(source: string, definitions: ChannelDefinitionMap): void {
-  let ast: ReturnType<typeof parse>
-  try {
-    ast = parse(source, { sourceType: 'module', plugins: ['typescript', 'jsx'] })
-  } catch {
-    return
-  }
+function extractDefinitionsFromSource(
+  source: string,
+  definitions: ChannelDefinitionMap,
+  filePath?: string,
+): void {
+  // Plugins come from the extension rather than a fixed `typescript`+`jsx`
+  // pair: JSX on a `.ts` file makes `<Type>value` cast syntax parse as an
+  // unterminated JSX element, so a channel file using one was silently
+  // contributing no channels.
+  const ast = parseSourceFile(source, filePath)
+  if (!ast) return
 
-  visitNode(ast.program as unknown as AstNode, (node) => {
+  walk(ast.program, (node) => {
     if (node.type !== 'CallExpression') return
-    const callee = node.callee as AstNode | undefined
+    const callee = node.callee as BabelNode | undefined
     if (!callee || callee.type !== 'MemberExpression') return
     const member = callee as MemberExpressionNode
     if (member.computed) return
@@ -192,9 +196,9 @@ function extractDefinitionsFromSource(source: string, definitions: ChannelDefini
   })
 }
 
-function resolveChannelFromBroadcastChain(value: AstNode): string | null {
+function resolveChannelFromBroadcastChain(value: BabelNode): string | null {
   if (value.type !== 'CallExpression') return null
-  const callee = value.callee as AstNode | undefined
+  const callee = value.callee as BabelNode | undefined
   if (!callee || callee.type !== 'MemberExpression') return null
   const member = callee as MemberExpressionNode
   if (member.computed) return null
@@ -238,27 +242,6 @@ function getLiteralString(value: unknown): string | null {
   }
 
   return null
-}
-
-function visitNode(node: AstNode, callback: (node: AstNode) => void): void {
-  callback(node)
-  const entries = Object.entries(node as unknown as Record<string, unknown>)
-  for (const [, value] of entries) {
-    if (!value) continue
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        if (isNode(item)) visitNode(item, callback)
-      }
-      continue
-    }
-    if (isNode(value)) {
-      visitNode(value, callback)
-    }
-  }
-}
-
-function isNode(value: unknown): value is AstNode {
-  return Boolean(value && typeof value === 'object' && 'type' in (value as Record<string, unknown>))
 }
 
 function normalizePrivate(value: string): string {
@@ -317,11 +300,11 @@ function renderPayloadUnion(payloads: Set<string>): string {
 
 function renderPayloadType(value: unknown): string {
   if (!value || typeof value !== 'object') return 'unknown'
-  const node = value as AstNode
+  const node = value as BabelNode
   return normalizePayloadType(node)
 }
 
-function normalizePayloadType(node: AstNode): string {
+function normalizePayloadType(node: BabelNode): string {
   switch (node.type) {
     case 'StringLiteral':
       return 'string'
@@ -342,13 +325,13 @@ function normalizePayloadType(node: AstNode): string {
   }
 }
 
-function renderObjectPayloadType(node: AstNode): string {
+function renderObjectPayloadType(node: BabelNode): string {
   const properties = ((node as { properties?: unknown[] }).properties ?? []) as unknown[]
   const entries: string[] = []
 
   for (const property of properties) {
     if (!property || typeof property !== 'object') return 'unknown'
-    const propNode = property as AstNode
+    const propNode = property as BabelNode
     if (propNode.type !== 'ObjectProperty') return 'unknown'
     if ((propNode as { computed?: boolean }).computed) return 'unknown'
 
@@ -356,7 +339,7 @@ function renderObjectPayloadType(node: AstNode): string {
     if (!key) return 'unknown'
     const valueNode = (propNode as { value?: unknown }).value
     if (!valueNode || typeof valueNode !== 'object') return 'unknown'
-    const valueType = normalizePayloadType(valueNode as AstNode)
+    const valueType = normalizePayloadType(valueNode as BabelNode)
     entries.push(`${key}: ${valueType}`)
   }
 
@@ -364,7 +347,7 @@ function renderObjectPayloadType(node: AstNode): string {
   return `{ ${entries.join('; ')} }`
 }
 
-function renderArrayPayloadType(node: AstNode): string {
+function renderArrayPayloadType(node: BabelNode): string {
   const elements = ((node as { elements?: unknown[] }).elements ?? []).filter(Boolean)
   if (elements.length === 0) return 'unknown[]'
 
@@ -374,7 +357,7 @@ function renderArrayPayloadType(node: AstNode): string {
       elementTypes.add('unknown')
       continue
     }
-    elementTypes.add(normalizePayloadType(element as AstNode))
+    elementTypes.add(normalizePayloadType(element as BabelNode))
   }
 
   const union = renderPayloadUnion(elementTypes)

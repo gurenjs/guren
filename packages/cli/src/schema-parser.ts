@@ -1,8 +1,8 @@
 import { resolve } from 'node:path'
 import { readFile } from 'node:fs/promises'
-import { parse } from '@babel/parser'
 import type { Expression, CallExpression, ObjectExpression, Statement } from '@babel/types'
 import { listAppRoots } from './discovery'
+import { parseSourceFile } from './parse-cache'
 
 const TABLE_FACTORIES = new Set(['pgTable', 'sqliteTable', 'mysqlTable'])
 
@@ -164,12 +164,8 @@ async function parseSchemaFile(schemaPath: string, module: string | null): Promi
     return []
   }
 
-  let ast: ReturnType<typeof parse>
-  try {
-    ast = parse(source, { sourceType: 'module', plugins: ['typescript'] })
-  } catch {
-    return []
-  }
+  const ast = parseSourceFile(source, schemaPath)
+  if (!ast) return []
 
   const aliases = collectFactoryAliases(ast.program.body)
   const tables: SchemaTable[] = []

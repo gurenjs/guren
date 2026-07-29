@@ -11,7 +11,9 @@ import {
   toPosixRelative,
   listModuleNames,
   moduleNameFromRelPath,
+  formatTruncatedList,
 } from './discovery'
+import { extractClassDeclaration } from './model-parser'
 import { ParseCache } from './parse-cache'
 import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath } from './inertia-pages'
 import { runArchCheck } from './arch-check'
@@ -230,6 +232,26 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     checks.push(...archResults)
   }
 
+  // Every checker above treats a file it couldn't parse as contributing
+  // nothing, which is indistinguishable from a file with nothing wrong. Report
+  // the skipped ones once, after all suites have finished asking the cache, so
+  // a clean run over an incomplete scan says so instead of implying coverage.
+  const skipped = cache.skippedFiles()
+  if (skipped.length > 0) {
+    const shown = formatTruncatedList(
+      skipped.map(({ filePath, reason }) => `${toPosixRelative(cwd, filePath)} (${reason})`),
+    )
+    checks.push(
+      check(
+        'scan-coverage',
+        'Scan coverage',
+        'warn',
+        `${skipped.length} file(s) were skipped and not checked: ${shown}.`,
+        'Fix the syntax error (or file permissions) so these files are covered — until then results here are incomplete.',
+      ),
+    )
+  }
+
   const report: CheckReport = {
     cwd,
     checks,
@@ -248,13 +270,7 @@ async function checkEmptyMethods(cache: ParseCache, filePath: string, relPath: s
   const { ast } = parsed
 
   for (const node of ast.program.body) {
-    let classDecl = null
-    if (node.type === 'ExportNamedDeclaration' && node.declaration?.type === 'ClassDeclaration') {
-      classDecl = node.declaration
-    } else if (node.type === 'ExportDefaultDeclaration' && node.declaration?.type === 'ClassDeclaration') {
-      classDecl = node.declaration
-    }
-
+    const classDecl = extractClassDeclaration(node)
     if (!classDecl) continue
     const className = classDecl.id?.name ?? classNameFromPath(filePath)
 
@@ -289,11 +305,10 @@ async function checkInertiaPages(
   relPath: string,
 ): Promise<CheckResult[]> {
   const results: CheckResult[] = []
-  // Reuses the cached source read for this file when available (populated by
-  // checkEmptyMethods above); falls back to a direct read if the file failed
-  // to parse (a syntax error doesn't invalidate this regex-only scan).
-  const parsed = await cache.get(filePath)
-  const source = parsed?.source ?? (await readFile(filePath, 'utf-8'))
+  // A syntax error doesn't invalidate this regex-only scan, so it asks the
+  // cache for source rather than an AST — the file is read once either way.
+  const source = await cache.source(filePath)
+  if (source === null) return results
 
   for (const ref of extractInertiaPageRefs(source)) {
     if (ref.form === 'manifest') continue // pages.xxx pattern — already type-checked

@@ -64,4 +64,56 @@ describe('generateChannelTypes', () => {
       await workspace.cleanup()
     }
   })
+
+  // Plugins used to be a fixed typescript+jsx pair for every extension. In a
+  // `.ts` file that makes `<Type>value` cast syntax parse as an unterminated
+  // JSX element, so the file silently contributed no channels at all.
+  it('collects channels from a .ts file using angle-bracket type assertions', async () => {
+    const workspace = await createTempWorkspace('guren-cli-channel-types-cast-')
+    try {
+      await mkdir(join(workspace.dir, 'app/Providers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Providers/BroadcastProvider.ts'),
+        `export function setup(broadcast: any, raw: unknown) {
+  const id = <number>raw
+  broadcast.channel('announcements', () => true)
+  broadcast.broadcast('announcements', 'NewPost', { id: 1 })
+  return id
+}
+`,
+        'utf8',
+      )
+
+      const { channels } = await generateChannelTypes({ appRoot: workspace.dir, force: true })
+      expect(channels).toContain('announcements')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('collects channels from a decorated provider class', async () => {
+    const workspace = await createTempWorkspace('guren-cli-channel-types-decorators-')
+    try {
+      await mkdir(join(workspace.dir, 'app/Providers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Providers/BroadcastProvider.ts'),
+        `@Injectable()
+export class BroadcastProvider {
+  @log accessor registered = false
+
+  boot(broadcast: any) {
+    broadcast.channel('announcements', () => true)
+    broadcast.broadcast('announcements', 'NewPost', { id: 1 })
+  }
+}
+`,
+        'utf8',
+      )
+
+      const { channels } = await generateChannelTypes({ appRoot: workspace.dir, force: true })
+      expect(channels).toContain('announcements')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
 })

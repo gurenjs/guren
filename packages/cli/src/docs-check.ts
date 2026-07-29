@@ -212,13 +212,16 @@ export async function runDocsCheck(options: DocsCheckOptions): Promise<CheckResu
   const sourceFiles = [...modelFiles, ...controllerFiles].filter(
     (file) => !changedFiles || changedFiles.has(toPosixRelative(cwd, file)),
   )
+  // Source, not AST: a `@docs` tag lives in a comment, so a file the parser
+  // rejects still has tags worth validating.
   const sources = await Promise.all(
     sourceFiles.map(async (file) => ({
       relPath: toPosixRelative(cwd, file),
-      source: (await cache?.get(file))?.source ?? (await readFile(file, 'utf-8')),
+      source: cache ? await cache.source(file) : await readFile(file, 'utf-8').catch(() => null),
     })),
   )
   for (const { relPath, source } of sources) {
+    if (source === null) continue
     for (const tag of extractDocsTags(source)) {
       const key = `docs-tag:${relPath}:${tag}`
       const title = `${relPath} @docs`

@@ -1,6 +1,5 @@
 import { resolve } from 'node:path'
 import { readFile } from 'node:fs/promises'
-import { parse } from '@babel/parser'
 import type { ClassDeclaration } from '@babel/types'
 import { discoverControllerFiles, classNameFromPath, toPosixRelative, fileExists } from './discovery'
 import {
@@ -10,6 +9,7 @@ import {
 } from './context-route'
 import { loadRouteDefinitions, DEFAULT_ROUTES_FILE } from './load-routes'
 import { extractClassDeclaration } from './model-parser'
+import { parseSourceFile } from './parse-cache'
 import {
   extractInertiaPageRefs,
   describeInertiaPage,
@@ -42,13 +42,9 @@ interface ControllerPageRefs {
  * unexported helper declared alongside it; a bare class is only used when
  * nothing is exported.
  */
-function findControllerClass(source: string): ClassDeclaration | null {
-  let ast: ReturnType<typeof parse>
-  try {
-    ast = parse(source, { sourceType: 'module', plugins: ['typescript'] })
-  } catch {
-    return null
-  }
+function findControllerClass(source: string, filePath: string): ClassDeclaration | null {
+  const ast = parseSourceFile(source, filePath)
+  if (!ast) return null
 
   let unexported: ClassDeclaration | null = null
   for (const node of ast.program.body) {
@@ -66,11 +62,11 @@ function findControllerClass(source: string): ClassDeclaration | null {
  * attribution is what lets a page join to the routes of the single action
  * that renders it rather than to every route on the controller.
  */
-function collectControllerPageRefs(source: string): ControllerPageRefs {
+function collectControllerPageRefs(source: string, filePath: string): ControllerPageRefs {
   const byAction = new Map<string, Set<string>>()
   const attributed = new Set<string>()
 
-  const classDecl = findControllerClass(source)
+  const classDecl = findControllerClass(source, filePath)
   for (const member of classDecl?.body.body ?? []) {
     if (member.type !== 'ClassMethod') continue
     if (member.key.type !== 'Identifier') continue
@@ -108,7 +104,7 @@ async function collectPagesByController(cwd: string): Promise<Map<string, Contro
   const entries = await Promise.all(
     files.map(async (file) => {
       const source = await readFile(file, 'utf-8')
-      return [classNameFromPath(file), collectControllerPageRefs(source)] as const
+      return [classNameFromPath(file), collectControllerPageRefs(source, file)] as const
     }),
   )
 

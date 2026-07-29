@@ -1,6 +1,5 @@
 import { resolve, relative } from 'node:path'
 import { readFile } from 'node:fs/promises'
-import { parse } from '@babel/parser'
 import { consola } from 'consola'
 import {
   collectFiles,
@@ -10,6 +9,8 @@ import {
   listModuleNames,
 } from './discovery'
 import { loadRouteDefinitions } from './load-routes'
+import { extractClassDeclaration } from './model-parser'
+import { parseSourceFile } from './parse-cache'
 import { parseSchemaTableColumns } from './schema-parser'
 import { loadAuditConfig, type AuditIgnoreEntry } from './audit-config'
 
@@ -258,23 +259,11 @@ async function parseControllerMethods(cwd: string, findings: AuditFinding[]): Pr
     const source = await readFile(filePath, 'utf-8')
     const relPath = relative(cwd, filePath)
 
-    let ast: ReturnType<typeof parse>
-    try {
-      ast = parse(source, { sourceType: 'module', plugins: ['typescript'] })
-    } catch {
-      continue
-    }
+    const ast = parseSourceFile(source, filePath)
+    if (!ast) continue
 
     for (const node of ast.program.body) {
-      let classDecl = null
-      if (node.type === 'ExportNamedDeclaration' && node.declaration?.type === 'ClassDeclaration') {
-        classDecl = node.declaration
-      } else if (node.type === 'ExportDefaultDeclaration' && node.declaration?.type === 'ClassDeclaration') {
-        classDecl = node.declaration
-      } else if (node.type === 'ClassDeclaration') {
-        classDecl = node
-      }
-
+      const classDecl = extractClassDeclaration(node)
       if (!classDecl) continue
       const className = classDecl.id?.name ?? classNameFromPath(filePath)
 
@@ -601,26 +590,16 @@ interface ModelSerializationInfo {
  * Extract `static table`, `static hidden`, and `static visible` from a model
  * source via AST (regexes would count string literals inside comments).
  */
-function parseModelSerializationInfo(source: string): ModelSerializationInfo {
+function parseModelSerializationInfo(source: string, filePath: string): ModelSerializationInfo {
   const info: ModelSerializationInfo = {}
 
-  let ast: ReturnType<typeof parse>
-  try {
-    // errorRecovery: `override` members parse-error without an extends clause
-    ast = parse(source, { sourceType: 'module', plugins: ['typescript'], errorRecovery: true })
-  } catch {
-    return info
-  }
+  // errorRecovery: `override` members parse-error without an extends clause,
+  // and a half-AST is better than nothing for this scan.
+  const ast = parseSourceFile(source, filePath, { errorRecovery: true })
+  if (!ast) return info
 
   for (const node of ast.program.body) {
-    const classDecl =
-      node.type === 'ExportNamedDeclaration' && node.declaration?.type === 'ClassDeclaration'
-        ? node.declaration
-        : node.type === 'ExportDefaultDeclaration' && node.declaration?.type === 'ClassDeclaration'
-          ? node.declaration
-          : node.type === 'ClassDeclaration'
-            ? node
-            : null
+    const classDecl = extractClassDeclaration(node)
     if (!classDecl) continue
 
     for (const member of classDecl.body.body) {
@@ -671,7 +650,7 @@ async function auditModels(cwd: string, findings: AuditFinding[]): Promise<void>
     )
 
     // Sensitive columns must be excluded from serialization via hidden/visible.
-    const info = parseModelSerializationInfo(source)
+    const info = parseModelSerializationInfo(source, filePath)
     const columns = info.tableIdentifier ? schemaTables?.get(info.tableIdentifier) : undefined
     if (!columns) continue
 

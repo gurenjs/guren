@@ -1,12 +1,15 @@
 import { readFile, readdir } from 'node:fs/promises'
 import { extname, join, resolve } from 'node:path'
-import { parse, type ParserPlugin } from '@babel/parser'
+import type { File } from '@babel/types'
+import { walk, type BabelNode } from './ast-walk'
 import {
   collectFiles,
   toPosixRelative,
   IMPORTABLE_EXTENSIONS,
   NON_SOURCE_DIR_NAMES,
+  formatTruncatedList,
 } from './discovery'
+import { parseSourceFile } from './parse-cache'
 import { readDeclaredDependencyNames } from './plugin-manifest'
 
 /**
@@ -243,35 +246,9 @@ const TYPE_ONLY_NODES = new Set([
  */
 const LAMBDA_IMPORT_SOURCES = new Set(['@guren/core/lambda', '@guren/server/lambda'])
 
-interface BabelNode {
-  type: string
-  loc?: { start: { line: number } }
-  [key: string]: unknown
-}
-
-/**
- * Minimal generic AST walker. Recurses into every node-shaped child unless
- * the visitor returns `false` for the current node.
- */
-function walk(value: unknown, visit: (node: BabelNode) => boolean | void): void {
-  if (Array.isArray(value)) {
-    for (const item of value) walk(item, visit)
-    return
-  }
-  if (value === null || typeof value !== 'object') return
-  const node = value as BabelNode
-  if (typeof node.type !== 'string') return
-
-  if (visit(node) === false) return
-
-  // for...in rather than Object.entries: the latter allocates an entry array
-  // per node, which measurably dominates traversal on a large AST.
-  for (const key in node) {
-    if (key === 'loc' || key === 'leadingComments' || key === 'trailingComments' || key === 'innerComments') {
-      continue
-    }
-    walk(node[key], visit)
-  }
+/** Line a node starts on, defaulting to 1 when location info is absent. */
+function lineOf(node: BabelNode): number {
+  return node.loc?.start.line ?? 1
 }
 
 function propertyKeyName(property: BabelNode): string | null {
@@ -282,22 +259,8 @@ function propertyKeyName(property: BabelNode): string | null {
   return null
 }
 
-function lineOf(node: BabelNode): number {
-  return node.loc?.start.line ?? 1
-}
-
-/**
- * Extract every deploy-runtime signal from one source file. Returns null when
- * the file does not parse — the caller skips it.
- */
-function extractSignals(source: string, plugins: ParserPlugin[]): ExtractedSignal[] | null {
-  let ast
-  try {
-    ast = parse(source, { sourceType: 'module', plugins, allowAwaitOutsideFunction: true })
-  } catch {
-    return null
-  }
-
+/** Extract every deploy-runtime signal from one parsed source file. */
+function extractSignals(ast: File): ExtractedSignal[] {
   // Value imports from `@guren/*`, mapping the file's local name to the
   // canonical exported name. Type-only imports are excluded — they cannot be
   // constructed or called — and so is every non-Guren source, so a same-named
@@ -489,19 +452,6 @@ interface ScannedFile {
 }
 
 /**
- * Decorators and auto-accessors are enabled everywhere: without them a single
- * `@Injectable`-style class makes the whole file unparseable, and an
- * unparseable file contributes no signals at all — silently hiding every
- * hazard and remediation it contains. JSX is off for .ts/.mts so
- * angle-bracket type assertions still parse; elsewhere it lets .tsx through.
- */
-function parserPluginsFor(path: string): ParserPlugin[] {
-  const base: ParserPlugin[] = ['typescript', 'decorators', 'decoratorAutoAccessors']
-  const ext = extname(path)
-  return ext === '.ts' || ext === '.mts' ? base : [...base, 'jsx']
-}
-
-/**
  * Source files sitting directly in the project root. Deploy entrypoints
  * (`lambda.ts`, `worker.ts`) conventionally live there, and no DEPLOY_SCAN_DIRS
  * entry covers the root itself — pointing collectFiles at it would walk the
@@ -542,24 +492,29 @@ async function readAppSources(cwd: string): Promise<{ files: ScannedFile[]; unpa
 
   const paths = [...rootFiles, ...directoryFiles.flat()].filter((path) => !TEST_FILE_PATTERN.test(path))
 
+  // Signals are extracted inside the map so each AST is released as soon as
+  // its file is reduced to signals. A ParseCache would be the obvious fit but
+  // is the wrong tool here: DEPLOY_SCAN_DIRS never covers the project root, so
+  // no path in this list repeats and the cache would score zero hits while
+  // holding every AST alive until the whole scan finished.
   const scanned = await Promise.all(
     paths.map(async (path) => {
       const filePath = toPosixRelative(cwd, path)
-      const content = await readFile(path, 'utf8').catch(() => null)
+      const source = await readFile(path, 'utf8').catch(() => null)
       // An unreadable file is reported alongside an unparseable one: both
       // contribute no signals, and silently dropping either is the hole the
       // caveat exists to close.
-      if (content === null) return { filePath, signals: null }
-      return { filePath, signals: extractSignals(content, parserPluginsFor(path)) }
+      if (source === null) return { filePath, signals: null }
+      const ast = parseSourceFile(source, path)
+      return { filePath, signals: ast ? extractSignals(ast) : null }
     }),
   )
 
   const files: ScannedFile[] = []
   const unparsed: string[] = []
-  for (const entry of scanned) {
-    if (entry === null) continue
-    if (entry.signals === null) unparsed.push(entry.filePath)
-    else files.push({ filePath: entry.filePath, signals: entry.signals })
+  for (const { filePath, signals } of scanned) {
+    if (signals === null) unparsed.push(filePath)
+    else files.push({ filePath, signals })
   }
 
   return { files, unparsed }
@@ -632,9 +587,8 @@ export function formatParseCaveat(analysis: DeployRuntimeAnalysis): string {
   const { unparsedFiles } = analysis
   if (unparsedFiles.length === 0) return ''
 
-  const shown = unparsedFiles.slice(0, 3).join(', ')
-  const more = unparsedFiles.length > 3 ? ` and ${unparsedFiles.length - 3} more` : ''
-  return ` Note: ${unparsedFiles.length} file(s) could not be read or parsed and were not scanned: ${shown}${more}.`
+  const shown = formatTruncatedList(unparsedFiles)
+  return ` Note: ${unparsedFiles.length} file(s) could not be read or parsed and were not scanned: ${shown}.`
 }
 
 /** Targets that lack `Bun.password`, so the default `ScryptHasher` breaks. */

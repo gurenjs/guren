@@ -8,6 +8,7 @@ import {
   discoverTestFiles,
   discoverModelFiles,
   discoverControllerFiles,
+  formatTruncatedList,
 } from '../src/discovery'
 import { createTempWorkspace } from './helpers'
 
@@ -95,6 +96,24 @@ describe('excludeBarrelFiles', () => {
     const files = ['/app/Models/Post.ts', '/app/Models/User.ts']
     const result = excludeBarrelFiles(files)
     expect(result).toHaveLength(2)
+  })
+})
+
+describe('formatTruncatedList', () => {
+  it('joins items with no truncation when under the limit', () => {
+    expect(formatTruncatedList(['a.ts', 'b.ts'])).toBe('a.ts, b.ts')
+  })
+
+  it('shows the first N items and counts the rest', () => {
+    expect(formatTruncatedList(['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts'])).toBe('a.ts, b.ts, c.ts and 2 more')
+  })
+
+  it('respects a custom limit', () => {
+    expect(formatTruncatedList(['a.ts', 'b.ts', 'c.ts'], 1)).toBe('a.ts and 2 more')
+  })
+
+  it('returns an empty string for an empty list', () => {
+    expect(formatTruncatedList([])).toBe('')
   })
 })
 

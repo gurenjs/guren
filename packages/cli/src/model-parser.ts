@@ -1,8 +1,8 @@
 import { readFile } from 'node:fs/promises'
-import { parse } from '@babel/parser'
 import type { Statement, Expression, ClassDeclaration, ClassBody } from '@babel/types'
 import { extractDocsTags } from './docs-index'
 import { discoverModelFiles, toPosixRelative, moduleNameFromRelPath } from './discovery'
+import { parseSourceFile } from './parse-cache'
 
 export interface ModelRelationship {
   name: string
@@ -50,15 +50,8 @@ export async function discoverParsedModels(cwd: string): Promise<DiscoveredModel
 }
 
 export function parseModelSource(source: string, filePath: string): ModelInfo | null {
-  let ast: ReturnType<typeof parse>
-  try {
-    ast = parse(source, {
-      sourceType: 'module',
-      plugins: ['typescript'],
-    })
-  } catch {
-    return null
-  }
+  const ast = parseSourceFile(source, filePath)
+  if (!ast) return null
 
   let classDecl: ClassDeclaration | null = null
 

@@ -18,6 +18,7 @@ Ships the Citty-based CLI (`guren` bin) with generators and database helpers. Ge
 - When touching route type output, regenerate `examples/blog/types/generated/routes.d.ts` to verify compatibility
 - Prefer defining subcommands with `defineCommand()` and wiring the root command via `runCli()` from `run-cli.ts` (citty's own `runMain()` reports each failure twice and exits the process itself)
 - Reuse shared option helpers (such as the `force` writer option) instead of ad-hoc flag parsing
+- Parse app-authored source only through `parseSourceFile()` / `ParseCache` (`parse-cache.ts`); never call `@babel/parser` directly, and pass the file path so plugin selection can order its attempts. Plugin choice is not a per-call detail — no single set parses every decorator dialect and JSX/cast combination TypeScript accepts, and a wrong set makes the whole file unparseable, which every caller treats as "contributes nothing" without saying so
 
 ## Build & Distribution
 - Built via `bun run --cwd packages/cli build`; bin entry is `src/bin.ts`

@@ -1049,6 +1049,32 @@ describe('runDoctor', () => {
     }
   })
 
+  // A decorated controller used to be silently invisible here (the empty-method
+  // scan hand-rolled its own Babel parse without decorator plugins). Also
+  // covers extractClassDeclaration matching a bare, non-exported class, which
+  // this scan's own inline extraction previously did not.
+  it('suggests implementing an empty method on a decorated, non-exported controller', async () => {
+    const workspace = await createTempWorkspace('guren-cli-doctor-empty-method-decorated-')
+    try {
+      await mkdir(join(workspace.dir, 'app/Http/Controllers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Http/Controllers/TaskController.ts'),
+        `@Injectable()
+class TaskController {
+  constructor(@inject('Repo') private repo: unknown) {}
+  index() {}
+}`,
+        'utf8',
+      )
+
+      const steps = await suggestNextSteps({ cwd: workspace.dir })
+
+      expect(steps.some((step) => step.title === 'Implement TaskController.index()')).toBe(true)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('does not suggest installing test infrastructure in --next when already present', async () => {
     const workspace = await createTempWorkspace('guren-cli-doctor-test-infra-next-absent-')
 

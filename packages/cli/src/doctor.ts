@@ -15,6 +15,8 @@ import {
 } from './discovery'
 import { checkPluginCompatibility, readCoreVersion, readInstalledPluginManifests } from './plugin-manifest'
 import { compareVersions } from './codemods'
+import { extractClassDeclaration } from './model-parser'
+import { parseSourceFile } from './parse-cache'
 import {
   analyzeDeployRuntime,
   bunlessTargets,
@@ -1302,21 +1304,11 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
   try {
     for (const filePath of controllerFiles) {
       const source = await readFile(filePath, 'utf-8')
-      const { parse } = await import('@babel/parser')
-      let ast
-      try {
-        ast = parse(source, { sourceType: 'module', plugins: ['typescript'] })
-      } catch {
-        continue
-      }
+      const ast = parseSourceFile(source, filePath)
+      if (!ast) continue
 
       for (const node of ast.program.body) {
-        let classDecl = null
-        if (node.type === 'ExportNamedDeclaration' && node.declaration?.type === 'ClassDeclaration') {
-          classDecl = node.declaration
-        } else if (node.type === 'ExportDefaultDeclaration' && node.declaration?.type === 'ClassDeclaration') {
-          classDecl = node.declaration
-        }
+        const classDecl = extractClassDeclaration(node)
         if (!classDecl) continue
         const className = classDecl.id?.name ?? classNameFromPath(filePath)
 
@@ -1338,7 +1330,8 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
       }
     }
   } catch {
-    // Ignore parse failures
+    // Ignore unreadable files — parseSourceFile itself never throws, it
+    // returns null and the loop above already skips that case.
   }
 
   try {
