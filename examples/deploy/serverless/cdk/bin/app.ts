@@ -29,7 +29,8 @@ new GurenLambdaApp(stack, 'App', {
 
   // Console function: run ConsoleKernel commands in the deployed environment.
   // Requires the `console` export in src/lambda.ts — the scaffold ships a
-  // commented-out db:migrate command; uncomment it before `lambda:build`.
+  // commented-out db:migrate command; uncomment it before `lambda:build`,
+  // then invoke it:
   //   aws lambda invoke --function-name ... \
   //     --cli-binary-format raw-in-base64-out \
   //     --payload '{"command":"db:migrate"}' out.json
