@@ -42,9 +42,24 @@ export const queue = createSqsHandler()
 // import { scheduler } from './scheduler.js'
 // export const schedule = createScheduleHandler(scheduler)
 
-// Console commands (migrations, seeders) — export once you have a kernel:
+// Console commands — uncomment to run kernel commands with \`aws lambda
+// invoke\`. The kernel has no built-in commands; this registers db:migrate.
+// (Seeders cannot run inside the function — they import project source the
+// bundle cannot resolve. Run \`bunx guren db:seed --force\` instead.)
+// import { Command, ConsoleKernel } from '@guren/core'
 // import { createConsoleHandler } from '@guren/core/lambda'
-// import { kernel } from './console.js'
+// import { migrateDatabase } from '../config/database.js'
+//
+// class MigrateCommand extends Command {
+//   static signature = 'db:migrate'
+//   static description = 'Apply pending database migrations'
+//   async handle(): Promise<void> {
+//     await migrateDatabase()
+//   }
+// }
+//
+// const kernel = new ConsoleKernel()
+// kernel.register(MigrateCommand)
 // const consoleHandler = createConsoleHandler(kernel)
 // export { consoleHandler as console }
 `
