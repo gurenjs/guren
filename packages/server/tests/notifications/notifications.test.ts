@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, mock } from 'bun:test'
+import { describe, expect, it, beforeEach, afterEach, mock } from 'bun:test'
 import {
   Notification,
   NotificationManager,
@@ -9,11 +9,19 @@ import {
   createNotificationManager,
   setNotificationManager,
   getNotificationManager,
+  registerNotification,
+  clearNotificationRegistry,
   type Notifiable,
   type NotificationMailMessage,
   type SlackMessage,
   type NotificationChannel,
 } from '../../src/notifications'
+import {
+  MemoryDriver,
+  setQueueDriver,
+  getJob,
+  clearJobRegistry,
+} from '../../src/queue'
 
 // Test notification classes
 class TestNotification extends Notification {
@@ -855,6 +863,282 @@ describe('MailChannel', () => {
         })
       )
     })
+  })
+})
+
+describe('Queued notifications', () => {
+  // Routing shaped like the documented Notifiable: the channel name has no
+  // relationship to the property holding the route, so it can only survive the
+  // queue if routeNotificationFor() is actually consulted at dispatch.
+  class QueuedUser implements Notifiable {
+    constructor(
+      public id: number,
+      public email: string,
+      public slackId?: string
+    ) {}
+
+    routeNotificationFor(channel: string): string | null {
+      switch (channel) {
+        case 'mail':
+          return this.email
+        case 'slack':
+          return this.slackId ?? null
+        default:
+          return null
+      }
+    }
+  }
+
+  class QueuedMultiChannel extends Notification {
+    static shouldQueue = true
+
+    // Constructor argument, kept as an own property. The argument is not
+    // recoverable from the payload, so re-running the constructor during
+    // rebuild would throw on the undefined order.
+    orderId: number
+
+    constructor(order: { id: number }) {
+      super()
+      this.orderId = order.id
+    }
+
+    via(_notifiable: Notifiable): string[] {
+      return ['mail', 'database', 'slack']
+    }
+
+    toMail(_notifiable: Notifiable): NotificationMailMessage {
+      return { subject: `Order #${this.orderId}`, html: '<p>Shipped</p>' }
+    }
+
+    toDatabase(_notifiable: Notifiable): Record<string, unknown> {
+      return { orderId: this.orderId }
+    }
+
+    toSlack(_notifiable: Notifiable): SlackMessage {
+      return { text: `Order #${this.orderId} shipped` }
+    }
+  }
+
+  class QueuedConditional extends Notification {
+    static shouldQueue = true
+
+    constructor(private shouldSendFlag: boolean = true) {
+      super()
+    }
+
+    via(_notifiable: Notifiable): string[] {
+      return ['database']
+    }
+
+    toDatabase(_notifiable: Notifiable): Record<string, unknown> {
+      return { key: 'value' }
+    }
+
+    shouldSend(_notifiable: Notifiable): boolean {
+      return this.shouldSendFlag
+    }
+  }
+
+  let driver: MemoryDriver
+  let manager: NotificationManager
+  let user: QueuedUser
+  let dbChannel: DatabaseChannel
+  const originalFetch = global.fetch
+
+  beforeEach(() => {
+    driver = new MemoryDriver()
+    setQueueDriver(driver)
+    manager = new NotificationManager()
+    dbChannel = new DatabaseChannel()
+    user = new QueuedUser(1, 'test@example.com', 'https://hooks.slack.com/user')
+
+    // QueuedMultiChannel sends through all three; each test overrides the one
+    // it asserts on.
+    manager.registerChannel('database', dbChannel)
+    manager.registerChannel('mail', { name: 'mail', send: async () => {} })
+    manager.registerChannel('slack', { name: 'slack', send: async () => {} })
+  })
+
+  afterEach(() => {
+    global.fetch = originalFetch
+  })
+
+  /**
+   * Pop the queued job and hand back what a worker would run, forcing the
+   * payload through JSON so drivers that persist (Redis/SQS) are represented.
+   */
+  async function takeQueuedJob() {
+    const queued = await driver.pop('notifications')
+    if (!queued) {
+      throw new Error('Expected a job to be queued')
+    }
+    const JobClass = getJob(queued.name)
+    if (!JobClass) {
+      throw new Error(`Job "${queued.name}" is not registered`)
+    }
+    return {
+      JobClass,
+      payload: JSON.parse(JSON.stringify(queued.payload)),
+    }
+  }
+
+  async function processQueue(): Promise<void> {
+    const { JobClass, payload } = await takeQueuedJob()
+    await new JobClass().handle(payload as never)
+  }
+
+  it('should queue instead of sending immediately', async () => {
+    await manager.send(user, new QueuedConditional())
+
+    expect(dbChannel.getStored()).toHaveLength(0)
+  })
+
+  it('should register the job without any dispatch', () => {
+    clearJobRegistry()
+    expect(getJob('SendNotificationJob')).toBeUndefined()
+
+    // What a worker process does at boot: it may never send a notification.
+    new NotificationManager().registerQueueJob()
+
+    expect(getJob('SendNotificationJob')).toBeDefined()
+  })
+
+  it('should persist the job under a stable name', async () => {
+    await manager.send(user, new QueuedConditional())
+
+    const queued = await driver.pop('notifications')
+    expect(queued?.name).toBe('SendNotificationJob')
+  })
+
+  it('should deliver through the database channel', async () => {
+    const notification = new QueuedMultiChannel({ id: 42 })
+    await manager.send(user, notification)
+    await processQueue()
+
+    const stored = dbChannel.getStored()
+    expect(stored).toHaveLength(1)
+    expect(stored[0].type).toBe('QueuedMultiChannel')
+    expect(stored[0].data).toEqual({ orderId: 42 })
+    expect(stored[0].id).toBe(notification.id)
+    expect(stored[0].notifiableId).toBe(1)
+    expect(stored[0].notifiableType).toBe('QueuedUser')
+  })
+
+  it('should revive createdAt as a Date', async () => {
+    const notification = new QueuedMultiChannel({ id: 1 })
+    await manager.send(user, notification)
+    await processQueue()
+
+    const stored = dbChannel.getStored()[0]
+    expect(stored.createdAt).toBeInstanceOf(Date)
+    expect(stored.createdAt.getTime()).toBe(notification.createdAt.getTime())
+  })
+
+  it('should deliver through the mail channel', async () => {
+    const sendMock = mock(() => Promise.resolve({ success: true }))
+    const mailChannel = new MailChannel({
+      transport: () => ({ send: sendMock }),
+    } as any)
+    manager.registerChannel('mail', mailChannel)
+
+    await manager.send(user, new QueuedMultiChannel({ id: 7 }))
+    await processQueue()
+
+    expect(sendMock).toHaveBeenCalledTimes(1)
+    expect(sendMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: [{ email: 'test@example.com' }],
+        subject: 'Order #7',
+      })
+    )
+  })
+
+  it('should deliver through the slack channel', async () => {
+    const fetchMock = mock(() =>
+      Promise.resolve(new Response('ok', { status: 200 }))
+    )
+    // @ts-ignore
+    global.fetch = fetchMock
+
+    manager.registerChannel(
+      'slack',
+      new SlackChannel('https://hooks.slack.com/default')
+    )
+
+    await manager.send(user, new QueuedMultiChannel({ id: 9 }))
+    await processQueue()
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ]
+    expect(url).toBe('https://hooks.slack.com/user')
+    expect(JSON.parse(init.body as string).text).toBe('Order #9 shipped')
+  })
+
+  it('should honor user-defined shouldSend after rebuild', async () => {
+    await manager.send(user, new QueuedConditional(false))
+    await processQueue()
+
+    expect(dbChannel.getStored()).toHaveLength(0)
+  })
+
+  it('should throw for an unregistered notification type', async () => {
+    await manager.send(user, new QueuedConditional())
+
+    const { JobClass, payload } = await takeQueuedJob()
+
+    clearNotificationRegistry()
+
+    await expect(new JobClass().handle(payload as never)).rejects.toThrow(
+      'Notification type "QueuedConditional" is not registered'
+    )
+
+    // Explicit registration makes the same payload deliverable again.
+    registerNotification(QueuedConditional)
+    await expect(new JobClass().handle(payload as never)).resolves.toBeUndefined()
+  })
+
+  it('should register a custom type getter under the key the payload uses', async () => {
+    class Renamed extends QueuedConditional {
+      override get type(): string {
+        return 'order.shipped'
+      }
+    }
+
+    await manager.send(user, new Renamed())
+    const { JobClass, payload } = await takeQueuedJob()
+    expect(payload.notificationType).toBe('order.shipped')
+
+    // A separate worker process registers the class, not an instance: the
+    // default key must still match what the payload carries.
+    clearNotificationRegistry()
+    registerNotification(Renamed)
+
+    await expect(new JobClass().handle(payload as never)).resolves.toBeUndefined()
+    expect(dbChannel.getStored()).toHaveLength(1)
+  })
+
+  it('should preserve routes that the channel name does not imply', async () => {
+    const fetchMock = mock(() =>
+      Promise.resolve(new Response('ok', { status: 200 }))
+    )
+    // @ts-ignore
+    global.fetch = fetchMock
+
+    // The route lives on `slackId`, so nothing about the payload shape reveals
+    // it. Only routeNotificationFor() knows, and it cannot survive the queue.
+    manager.registerChannel(
+      'slack',
+      new SlackChannel('https://hooks.slack.com/org-wide-default')
+    )
+
+    await manager.send(user, new QueuedMultiChannel({ id: 3 }))
+    await processQueue()
+
+    const [url] = fetchMock.mock.calls[0] as unknown as [string]
+    expect(url).toBe('https://hooks.slack.com/user')
   })
 })
 

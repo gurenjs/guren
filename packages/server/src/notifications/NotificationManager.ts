@@ -6,7 +6,13 @@ import type {
   NotificationClass,
 } from './types'
 import type { Notification } from './Notification'
-import { Job, registerJob, getQueueDriver } from '../queue'
+import {
+  registerNotification,
+  getNotification,
+  type NotificationConstructor,
+} from './registry'
+import { resolveNotifiableType } from './notifiable-type'
+import { Job, registerJob } from '../queue'
 
 /**
  * Notification manager for sending notifications through multiple channels.
@@ -177,12 +183,21 @@ export class NotificationManager {
     notification: Notification,
     queueConfig: { queue?: string; delay?: number }
   ): Promise<void> {
-    // Create and register the job
-    const job = this.createNotificationJob()
-    registerJob(job)
+    const job = this.registerQueueJob()
+
+    // Register the notification class so the worker can rebuild a real
+    // instance. Explicit registerNotification() is only needed when the worker
+    // runs in a separate process from the dispatch.
+    registerNotification(
+      notification.constructor as NotificationConstructor,
+      notification.type
+    )
 
     const payload: SendNotificationPayload = {
-      notifiableData: this.serializeNotifiable(notifiable),
+      notifiableData: this.serializeNotifiable(
+        notifiable,
+        notification.via(notifiable)
+      ),
       notificationData: this.serializeNotification(notification),
       notificationType: notification.type,
     }
@@ -223,40 +238,56 @@ export class NotificationManager {
 
   /**
    * Serialize notifiable for queue storage.
+   *
+   * Routing is resolved here rather than in the worker: `routeNotificationFor`
+   * is arbitrary user code — often a closure on an object literal — and cannot
+   * be reconstructed from a payload.
+   *
+   * @param channels - Channels to resolve routes for
    */
-  protected serializeNotifiable(notifiable: Notifiable): SerializedNotifiable {
+  protected serializeNotifiable(
+    notifiable: Notifiable,
+    channels: string[] = []
+  ): SerializedNotifiable {
+    const routes: Record<string, string | null> = {}
+    for (const channel of channels) {
+      routes[channel] = notifiable.routeNotificationFor(channel)
+    }
+
     // Basic serialization - can be overridden for custom behavior
     return {
-      type: notifiable.constructor?.name ?? 'Unknown',
+      type: resolveNotifiableType(notifiable),
+      routes,
       data: { ...notifiable } as Record<string, unknown>,
     }
   }
 
   /**
    * Serialize notification for queue storage.
+   *
+   * Only own enumerable properties are captured. Behaviour is restored by
+   * rebuilding the registered class in the job handler, not by serializing it.
    */
   protected serializeNotification(
     notification: Notification
   ): SerializedNotification {
     return {
-      type: notification.type,
       id: notification.id,
+      createdAt: notification.createdAt.toISOString(),
       data: { ...notification } as Record<string, unknown>,
     }
   }
 
   /**
-   * Create the notification job class.
+   * Bind this manager to the queued-notification job and register it.
+   *
+   * Call this during boot in a process that runs a worker but may never send
+   * a notification itself: without it, the worker cannot resolve the job.
    */
-  protected createNotificationJob(): typeof SendNotificationJob {
-    // Bind manager reference for job handler
-    const manager = this
-
-    class BoundSendNotificationJob extends SendNotificationJob {
-      static notificationManager = manager
-    }
-
-    return BoundSendNotificationJob
+  registerQueueJob(): typeof SendNotificationJob {
+    SendNotificationJob.notificationManager = this
+    registerJob(SendNotificationJob)
+    return SendNotificationJob
   }
 }
 
@@ -271,12 +302,14 @@ interface SendNotificationPayload {
 
 interface SerializedNotifiable {
   type: string
+  /** Channel routes resolved at dispatch time. Absent on legacy payloads. */
+  routes?: Record<string, string | null>
   data: Record<string, unknown>
 }
 
 interface SerializedNotification {
-  type: string
   id: string
+  createdAt: string
   data: Record<string, unknown>
 }
 
@@ -284,7 +317,6 @@ interface SerializedNotification {
  * Job for sending queued notifications.
  */
 class SendNotificationJob extends Job<SendNotificationPayload> {
-  static jobName = 'SendNotificationJob'
   static queue = 'notifications'
   static maxAttempts = 3
 
@@ -297,39 +329,69 @@ class SendNotificationJob extends Job<SendNotificationPayload> {
       throw new Error('NotificationManager not set on SendNotificationJob')
     }
 
-    // Reconstruct notifiable (basic)
-    const notifiable: Notifiable = {
-      ...payload.notifiableData.data,
+    const notifiable = this.rebuildNotifiable(payload.notifiableData)
+    const notification = this.rebuildNotification(
+      payload.notificationType,
+      payload.notificationData
+    )
+
+    await manager.sendNow(notifiable, notification)
+  }
+
+  /**
+   * Rebuild the notifiable from its serialized data.
+   */
+  protected rebuildNotifiable(serialized: SerializedNotifiable): Notifiable {
+    const { data, routes } = serialized
+
+    return {
+      ...data,
+      notifiableType: serialized.type,
       routeNotificationFor(channel: string): string | null {
-        const key = `${channel}Route` as keyof typeof payload.notifiableData.data
-        const value = payload.notifiableData.data[key]
+        if (routes && channel in routes) {
+          return routes[channel] ?? null
+        }
+
+        // Legacy payloads carry no routes: fall back to the conventions the
+        // previous implementation guessed at.
+        const value = data[`${channel}Route`]
         if (typeof value === 'string') return value
 
-        // Fallback to common fields
         if (channel === 'mail') {
-          const email = payload.notifiableData.data['email']
+          const email = data['email']
           return typeof email === 'string' ? email : null
         }
         return null
       },
     }
+  }
 
-    // Reconstruct notification (basic)
-    const notification = {
-      ...payload.notificationData.data,
-      id: payload.notificationData.id,
-      type: payload.notificationType,
-      via: () => {
-        const viaChannels = (payload.notificationData.data as { _viaChannels?: string[] })._viaChannels
-        return viaChannels ?? []
-      },
-      shouldSend: () => true,
-      toMail: (payload.notificationData.data as { toMail?: unknown }).toMail,
-      toDatabase: (payload.notificationData.data as { toDatabase?: unknown }).toDatabase,
-      toSlack: (payload.notificationData.data as { toSlack?: unknown }).toSlack,
-    } as unknown as import('./Notification').Notification
+  /**
+   * Rebuild a real notification instance from its serialized data.
+   *
+   * The class is looked up in the notification registry and instantiated via
+   * its prototype, so prototype methods (`via`, `toMail`, `toDatabase`,
+   * `toSlack`, `shouldSend`) are restored without running the constructor.
+   */
+  protected rebuildNotification(
+    type: string,
+    serialized: SerializedNotification
+  ): Notification {
+    const NotificationClass = getNotification(type)
+    if (!NotificationClass) {
+      throw new Error(
+        `Notification type "${type}" is not registered. ` +
+          `Call registerNotification(${type}) before running the queue worker.`
+      )
+    }
 
-    await manager.sendNow(notifiable, notification)
+    // createdAt is revived explicitly: queue drivers that persist JSON turn
+    // Dates into strings.
+    return Object.assign(
+      Object.create(NotificationClass.prototype) as Notification,
+      serialized.data,
+      { id: serialized.id, createdAt: new Date(serialized.createdAt) }
+    )
   }
 }
 

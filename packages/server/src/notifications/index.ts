@@ -24,6 +24,15 @@ export {
 } from './NotificationManager'
 
 export {
+  registerNotification,
+  getNotification,
+  clearNotificationRegistry,
+  type NotificationConstructor,
+} from './registry'
+
+export { resolveNotifiableType } from './notifiable-type'
+
+export {
   MailChannel,
   type MailChannelOptions,
   DatabaseChannel,
