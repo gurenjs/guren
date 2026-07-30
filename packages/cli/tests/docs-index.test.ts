@@ -255,6 +255,16 @@ Inline \`[code](/not-a-link.md)\` too, but [real](./real.md).
     expect(extractMarkdownLinks('[esc](./escaped\\)paren.md)')).toEqual(['./escaped)paren.md'])
   })
 
+  it('keeps backslashes that are not markdown escapes', () => {
+    // Dropping them would erase the separators in a Windows-style
+    // target before the containment checks in docs-check ever see them.
+    expect(extractMarkdownLinks(String.raw`[a](..\app\Architecture.md)`)).toEqual([
+      String.raw`..\app\Architecture.md`,
+    ])
+    // Escapable punctuation still unescapes.
+    expect(extractMarkdownLinks(String.raw`[a](./esc\)paren.md)`)).toEqual(['./esc)paren.md'])
+  })
+
   it('rejects unquoted text after a destination, which is not a link', () => {
     expect(extractMarkdownLinks('[not a link](./missing.md arbitrary words)')).toEqual([])
   })

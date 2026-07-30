@@ -353,6 +353,9 @@ function toActorEvents(value: DocFrontmatterValue | undefined): DocActorEvent[] 
 
 const URL_SCHEME_REGEX = /^[a-z][a-z0-9+.-]*:/i
 
+/** The punctuation a markdown backslash escape may precede (CommonMark). */
+const ESCAPABLE = /^[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]$/
+
 /**
  * The destination of a markdown link starting at `open` (the index of
  * `(`), honoring balanced parentheses so `./use-(legacy)-api.md` survives.
@@ -372,9 +375,11 @@ export function readLinkDestination(
   for (; index < text.length; index += 1) {
     const char = text[index]
 
-    if (char === '\\' && index + 1 < text.length) {
-      // An escaped character is literal, including `\)` — it must not
-      // close the destination.
+    if (char === '\\' && ESCAPABLE.test(text[index + 1] ?? '')) {
+      // A markdown escape yields the literal character, so `\)` cannot
+      // close the destination. A backslash before anything else stays
+      // part of the path — dropping it would erase the separators in a
+      // Windows-style target before containment checks ever see them.
       if (depth > 0) target.push(text[index + 1])
       index += 1
       continue
