@@ -61,12 +61,10 @@ All throw `ValidationException` (HTTP 422) on failure.
 Source: `packages/orm/src/Model.ts`
 
 ```typescript
-import { Model } from '@guren/orm'
+import { defineModel } from '@guren/orm'
 import { posts } from '@/db/schema'
 
-export class Post extends Model<typeof posts.$inferSelect> {
-  static table = posts
-}
+export class Post extends defineModel(posts) {}
 
 // Usage
 await Post.find(1)                              // returns null if not found
@@ -87,6 +85,7 @@ export class Post extends defineModel(posts) {
 
 export class User extends AuthenticatableModel<UserRecord> {
   static override table = users
+  declare static readonly recordType: UserRecord
   // Whitelist for mass assignment
   static fillable = ['name', 'email', 'password']
   // Blacklist: these fields are always stripped (ignored when fillable is set)

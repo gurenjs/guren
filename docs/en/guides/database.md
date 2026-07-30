@@ -538,6 +538,7 @@ Instead of permanently removing records, soft deletes set a `deletedAt` timestam
 
 ```ts
 import { SoftDeletes, defineModel } from '@guren/orm'
+import { posts } from '@/db/schema'
 
 export class Post extends SoftDeletes(defineModel(posts)) {}
 ```

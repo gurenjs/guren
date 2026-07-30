@@ -217,6 +217,7 @@ type SelectFrom<TDatabase> = TDatabase extends { select: (...args: any[]) => inf
  * class LegacyUser extends Model<UserRecord> {
  *   static override table = users  // Drizzle table
  *   declare static readonly recordType: UserRecord
+ *   declare static readonly createType: NewUserRecord
  * }
  *
  * // Query records
@@ -2538,9 +2539,14 @@ type ModelClassWithTable<
 /**
  * Create a table-backed model base class from a Drizzle table.
  *
+ * `recordType` and `createType` are inferred from the table. The inferred
+ * createType requires every non-defaulted column — AuthenticatableModel user
+ * models typically want a looser payload (plain `password` instead of
+ * `passwordHash`), so extend that base directly and redeclare the markers
+ * with `declare static readonly` instead of passing it as `base`.
+ *
  * @example
  * export class Post extends defineModel(posts) {}
- * export class User extends defineModel(users, { base: AuthenticatableModel }) {}
  */
 export function defineModel<
   TTable extends TableShape,

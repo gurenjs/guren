@@ -293,6 +293,8 @@ export class User extends AuthenticatableModel<UserRecord> {
 }
 ```
 
+認証モデルは `defineModel()` ではなく `AuthenticatableModel` を直接継承します。`defineModel` が推論する `createType` は `passwordHash` カラムを `create()` で必須にしてしまいますが、認証フローでは平文の `password` を渡して自動ハッシュ化させるためです。`declare` の行はコンパイル時の型マーカーを再宣言するだけで、JavaScript には出力されません。
+
 既定の `AuthServiceProvider` は `users` プロバイダーを使う `web` ガードを自動登録します。追加のガード（例: トークンベース API）が必要なら、`context.auth.registerGuard('api', factory)` を呼び、必要に応じて `context.auth.setDefaultGuard('api')` で既定を差し替えます。
 
 ## コントローラーとルート

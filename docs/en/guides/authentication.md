@@ -295,6 +295,8 @@ export class User extends AuthenticatableModel<UserRecord> {
 }
 ```
 
+Auth models extend `AuthenticatableModel` directly instead of using `defineModel()`: the inferred `createType` would require the `passwordHash` column on `create()`, while the auth flow supplies a plain `password` that is hashed automatically. The `declare` line redeclares the compile-time type marker and emits no JavaScript.
+
 The default `AuthServiceProvider` automatically registers a `web` guard that uses the `users` provider. If you need additional guards (e.g. token-based APIs), call `auth.registerGuard('api', factory)` inside the provider and set it as default via `auth.setDefaultGuard('api')` when appropriate.
 
 ## Controllers & Routes

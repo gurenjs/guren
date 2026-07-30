@@ -481,8 +481,6 @@ before イベント（`creating`、`updating`、`deleting`、`saving`）で `fal
 import { SoftDeletes, defineModel } from '@guren/orm'
 import { posts } from '@/db/schema'
 
-export type PostRecord = typeof posts.$inferSelect
-
 export class Post extends SoftDeletes(defineModel(posts)) {}
 ```
 

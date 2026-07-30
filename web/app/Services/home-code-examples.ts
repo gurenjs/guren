@@ -28,9 +28,7 @@ export function routes(router: Router) {
     return this.redirect('/posts')
   }
 }`,
-  Model: `export class Post extends Model {
-  static table = posts
-}
+  Model: `export class Post extends defineModel(posts) {}
 
 const post = await Post.findOrFail(1)
 const all = await Post
