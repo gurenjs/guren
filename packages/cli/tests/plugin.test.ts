@@ -1,5 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it } from 'bun:test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import { createTempWorkspace, writeInstalledPackage, type TempWorkspace } from './helpers'
 import { installPlugin, type PluginInstallMessage } from '../src/plugin'
 
@@ -126,7 +127,15 @@ export default app
     // Projects predating src/console.ts would otherwise get an entrypoint
     // importing a file they don't have.
     expect(updated).toContain('src/console.ts')
-    expect(await readFile('src/console.ts', 'utf8')).toContain('export const kernel =')
+    // Pinned to the create-app templates so the two can't silently drift —
+    // this is exactly what happened once, when #223 rewrote both templates'
+    // comment without touching this scaffold's copy.
+    const consoleEntry = await readFile('src/console.ts', 'utf8')
+    const canonicalConsoleEntry = await readFile(
+      resolve(import.meta.dir, '../../create-app/templates/default/src/console.ts'),
+      'utf8',
+    )
+    expect(consoleEntry).toBe(canonicalConsoleEntry)
     expect(textsOf(messages, 'hint')).toContain('Run: bun add @guren/plugin-lambda')
 
     const app = await readFile('src/app.ts', 'utf8')
