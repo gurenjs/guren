@@ -62,7 +62,7 @@ The stack outputs the CloudFront URL (serve traffic from here) and the raw API e
 
 ### 5. Run migrations
 
-The console function executes commands registered on your app's `ConsoleKernel`. The scaffolded `src/lambda.ts` ships a commented-out `db:migrate` command — uncomment it (and the `console` export) before building, then invoke it inside the deployed environment:
+Register a `db:migrate` command in `src/console.ts` (see the [serverless guide](../../../docs/en/guides/serverless.md)), uncomment the `console` export in `src/lambda.ts` before building, then invoke it inside the deployed environment:
 
 ```bash
 aws lambda invoke --function-name <stack>-Console... \

@@ -1,5 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it } from 'bun:test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import { createTempWorkspace, writeInstalledPackage, type TempWorkspace } from './helpers'
 import { installPlugin, type PluginInstallMessage } from '../src/plugin'
 
@@ -123,6 +124,18 @@ export default app
     expect(updated).toContain('src/app.ts')
     expect(updated).toContain('.gitignore')
     expect(updated).toContain('src/lambda.ts')
+    // Projects predating src/console.ts would otherwise get an entrypoint
+    // importing a file they don't have.
+    expect(updated).toContain('src/console.ts')
+    // Pinned to the create-app templates so the two can't silently drift —
+    // this is exactly what happened once, when #223 rewrote both templates'
+    // comment without touching this scaffold's copy.
+    const consoleEntry = await readFile('src/console.ts', 'utf8')
+    const canonicalConsoleEntry = await readFile(
+      resolve(import.meta.dir, '../../create-app/templates/default/src/console.ts'),
+      'utf8',
+    )
+    expect(consoleEntry).toBe(canonicalConsoleEntry)
     expect(textsOf(messages, 'hint')).toContain('Run: bun add @guren/plugin-lambda')
 
     const app = await readFile('src/app.ts', 'utf8')
@@ -135,6 +148,10 @@ export default app
     expect(entrypoint).toContain("from '@guren/core/lambda'")
     expect(entrypoint).toContain('export const http = createLambdaHandler(app)')
     expect(entrypoint).toContain('export const queue = createSqsHandler()')
+
+    // A second kernel here would diverge from `bun run console`'s command set.
+    expect(entrypoint).toContain("import { kernel } from './console.js'")
+    expect(entrypoint).not.toContain('new ConsoleKernel(')
   })
 
   it('is idempotent for the official Lambda plugin', async () => {

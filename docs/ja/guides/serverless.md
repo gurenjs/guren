@@ -84,9 +84,30 @@ EventBridge から呼び出されたときに実行予定のタスクを処理�
 
 アプリの `ConsoleKernel` に登録したコマンド — `src/console.ts` が `kernel` としてエクスポートするもの — を実行します。コマンドの定義と登録については [コンソールコマンドガイド](./console.md) を参照してください。
 
-カーネルに組み込みコマンドはありません。スキャフォールドされた `src/lambda.ts` に `db:migrate` のコメントアウト済みの例が同梱されているので、それと `console` export のコメントを外して有効化します。
+スキャフォールドされた `src/lambda.ts` の `console` export のコメントを外すとハンドラが有効になります。
 
-AWS CLI から呼び出します:
+カーネルに組み込みコマンドはありません。マイグレーション用のコマンドが必要になるのは Data API アダプタだけです（`getDatabase()` が意図的に未適用のマイグレーションを実行しないため。他のアダプタは初回利用時に適用します）。このトレードオフと `migrateOnStart` については [Aurora Serverless の項](./database.md#aurora-serverlessaws-data-apiサポート) を参照してください。いずれにせよ、帯域外で実行すればリクエストパスからレイテンシを外せます。
+
+```bash
+bunx guren make:command Migrate --command db:migrate
+```
+
+```typescript
+// app/Console/Commands/MigrateCommand.ts
+import { Command } from '@guren/core'
+import { migrateDatabase } from '../../../config/database.js'
+
+export default class MigrateCommand extends Command {
+  static signature = 'db:migrate'
+  static description = 'Apply pending database migrations'
+
+  async handle(): Promise<void> {
+    await migrateDatabase()
+  }
+}
+```
+
+`make:command` が `src/console.ts` への登録行を出力します。そのうえで AWS CLI から呼び出します:
 
 ```bash
 aws lambda invoke --function-name my-app-console \
@@ -202,7 +223,7 @@ const app = createApp({
 
 スキャフォールドされた `config/app.ts` は、ローカル開発の利便性としてブート時にシードを実行し、`NODE_ENV=production` ではスキップします。このガードはそのまま残してください。Lambda はコールドスタートのたびにアプリをブートするため、ブート時シードは本番データに対して繰り返し実行されてしまいます。
 
-**マイグレーションは関数に同梱されます。** `lambda:build` が `db/migrations/` をバンドルの隣にコピーするため、スキャフォールドの `db:migrate` コンソールコマンドのコメントを外せばその場で適用できます。コマンド定義と呼び出し方は [コンソール — `createConsoleHandler(kernel)`](#コンソール--createconsolehandlerkernel) を参照してください。
+**マイグレーションは関数に同梱されます。** `lambda:build` が `db/migrations/` をバンドルの隣にコピーするため、`db:migrate` コンソールコマンドでその場で適用できます。コマンド定義と呼び出し方は [コンソール — `createConsoleHandler(kernel)`](#コンソール--createconsolehandlerkernel) を参照してください。
 
 **シーダーは関数内では実行できません。** シーダーはスキーマや `@guren/core` を import する通常の `.ts` モジュールですが、デプロイされる関数は `node_modules` も TypeScript ローダーも持たない自己完結バンドルであり、Node.js ランタイムはこれらを読み込めません。プロジェクトのソースがある環境からシードしてください:
 
