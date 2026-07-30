@@ -1,5 +1,437 @@
 # @guren/cli
 
+## 1.6.0
+
+### Minor Changes
+
+- 27137f9: Console commands are wired up automatically, and `guren check` reports the ones that are not.
+
+  `make:command` wrote a class and printed the registration step for the user to
+  perform by hand. Forgetting it left dead code with no signal — the same bug the
+  console entrypoint was added to fix, recurring once per generated command.
+
+  `make:command` now performs that wiring: a project-level command is imported
+  and appended to `kernel.registerMany([...])` in `src/console.ts`, and
+  `bunx guren check` warns about any command class a console entrypoint never
+  uses outside its imports.
+
+  `defineModule()` gains a `commands` field alongside `routes` and `providers`,
+  so a module's commands reach the root kernel through its public surface:
+
+  ```ts
+  // modules/billing/index.ts — make:command --module billing writes this
+  export const billingModule = defineModule({
+    name: "billing",
+    commands: [InvoiceCommand],
+  });
+
+  // src/console.ts — add once per module
+  kernel.registerMany(billingModule.commands);
+  ```
+
+  Previously the only route was re-exporting the command from the module's
+  `index.ts`, because importing it directly from `src/console.ts` reaches into
+  module internals and fails `guren check --arch`.
+
+  `guren context` now lists console commands, which were invisible to it before.
+
+- 4e8ccc2: Add `@guren/plugin-lambda`: first-class AWS Lambda deployment tooling.
+
+  `guren plugin @guren/plugin-lambda` registers `lambdaPlugin()` and scaffolds
+  `src/lambda.ts` (the module whose exports become Lambda handlers). The plugin
+  contributes a `lambda:build` command that assembles a `.lambda/` directory:
+  a self-contained ESM bundle for the Node.js runtime with
+  `process.env.NODE_ENV` pinned to `"production"`, the SSR bundle plus Drizzle
+  migrations alongside it, static assets staged for S3, and an
+  `env.json` describing the function environment. Dev-only modules
+  (`bun:sqlite`, `vite`, the MCP endpoint's generators) are replaced with
+  throwing stubs so the bundle neither ships dev tooling nor fails to import on
+  Lambda.
+
+  `import.meta.url` is pinned so the framework's
+  `new URL('../db/migrations', import.meta.url)` convention keeps resolving
+  against the function root. Bundling collapses every module onto the output
+  file's own URL (`file:///var/task/handler.js`), which would otherwise point
+  that expression one directory too high and silently skip
+  `configureOrm()`/`seedDatabase()` at boot.
+
+### Patch Changes
+
+- a7aec95: Add `createAwsDataApiDatabase()` for Aurora Serverless v2 via the RDS Data API.
+
+  The factory mirrors the other database factories (`getDatabase`, `migrateDatabase`,
+  `configureOrm`, `seedDatabase`, `resetDatabase`, `migrationStatus`) on top of
+  `drizzle-orm/aws-data-api/pg`. The Data API is HTTP-based, so Lambda apps get a
+  Postgres-compatible connection without a connection pool, RDS Proxy, or VPC
+  placement. Connection settings resolve from options or the `DATABASE_NAME`,
+  `DATABASE_RESOURCE_ARN`, and `DATABASE_SECRET_ARN` environment variables;
+  `@aws-sdk/client-rds-data` is an optional peer dependency. Unlike the other
+  factories, `getDatabase()` does not run pending migrations automatically —
+  on Lambda that check costs serialized Data API round trips on every cold
+  start. Run migrations out of band, or opt back in with `migrateOnStart: true`.
+
+- 0dabfaa: fix: `guren check` and `doctor --next` no longer claim a controller is untested when it is only named differently
+
+  Controller-test detection matches filenames — `<Name>Controller.test.ts` beside
+  the controller or under `tests/`, the layouts `make:test` scaffolds. It reported
+  a miss as `No test file found for TaskController.`, an assertion about coverage
+  that the check cannot make.
+
+  An app that groups tests by feature hits this on every controller. Worse,
+  `doctor --next` promoted each miss to a numbered next step with a `make:test`
+  command — on a real app that was 10 of 21 steps, every one of them proposing to
+  duplicate coverage that already existed.
+
+  Detection is unchanged; what it says about itself is not. Both reporting sites now
+  share one sentence, `describeControllerTestMiss`, which names the miss as a naming
+  one, lists the paths probed, and says detection is by filename only. `doctor
+--next` retitles the step from `Add tests for X` to `Confirm test coverage for X`,
+  and both the check's suggestion and the step's description ask for that
+  confirmation first — the structured `title`, `command`, and `suggestion` fields
+  are what agents and the MCP surface act on, so cautious prose alone would not have
+  changed the outcome.
+
+  Detection was left alone deliberately. The documented way to test a controller is
+  to boot the app and drive its routes through `TestApp`, and such a test
+  references neither the controller class nor its file — so no amount of parsing
+  the test would find the link, and guessing from filename shape (`tasks.test.ts`
+  → `TaskController`) would silence real gaps to hide this one. The bound is now
+  recorded on `controllerTestCandidates` so callers keep phrasing results as
+  "no test named after this controller". Note the same bound in the other
+  direction: a `TaskController.test.ts` that never mentions the class still counts,
+  because only the filename is ever examined.
+
+  `guren context <Entity>` has its own filename matcher with the same blind spot;
+  that one is untouched here.
+
+- d857bd8: A failing `guren` command now reports its error once instead of twice.
+
+  citty's `runMain()` logs a thrown error twice — once with its stack, once as a
+  bare message — and then exits the process itself, so the CLI's own error
+  handler never ran. The root command is now wired through a local wrapper that
+  keeps `--help`, `-h`, `--version`, unknown-command usage, and plugin
+  subcommand proxying intact while owning the error path.
+
+  A command name inherited from `Object.prototype` is also rejected properly
+  now. `guren valueOf` used to fail with a raw internal `TypeError`, and
+  `guren toString` took a different path than any other unknown name.
+
+- c8f89d7: Console commands generated by `make:command` are now runnable.
+
+  `make:command` wrote a class to `app/Console/Commands` that nothing ever
+  registered — no template, example, or bootstrap built a `ConsoleKernel`, so the
+  generated file was dead code unless the user hand-wired a kernel with no
+  documentation describing how.
+
+  Scaffolded apps now ship `src/console.ts`, which exports a `ConsoleKernel` as
+  `kernel` (the name the serverless recipes already import), plus a
+  `bin/console.ts` runner exposed as the `console` package script. `make:command`
+  prints the import and `kernel.registerMany()` line needed to wire its output in.
+
+  Registration stays explicit rather than globbing `app/Console/Commands`, so a
+  bundled deployment resolves the same commands as a local checkout.
+
+  The new [console commands guide](https://guren.dev/docs/guides/console) covers
+  signatures, output and prompt helpers, testing a kernel with `BufferedOutput`,
+  and running commands on a server or on Lambda.
+
+- 473ac6c: fix: `guren doctor` stops printing repair instructions for checks that passed
+
+  Five rules build a single check with a ternary status and hand the same options
+  bag to both branches, so a passing check still carried the `fix` and `manualFix`
+  text describing how to repair it. The report printed that text regardless of
+  status, and because `fix` and `manualFix` restate each other, each passing check
+  produced two extra lines — identical ones for the generated-manifest and
+  path-alias rules:
+
+  ```
+  ✔ [ok] .guren/routes.gen.ts: Generated manifest present at .guren/routes.gen.ts.
+  ℹ        Fix: Run guren codegen --force to regenerate .guren/routes.gen.ts.
+  ℹ        Manual: Run guren codegen --force to regenerate .guren/routes.gen.ts.
+  ```
+
+  On a healthy app that turned a clean report into a wall of instructions for
+  problems it does not have.
+
+  The renderer now skips remediation for passing checks, and prints `Manual:` only
+  when it says something `Fix:` does not — the duplicate goes, the addition stays.
+  A few rules genuinely differ there: the tsconfig parse error needs the file
+  repaired _and_ `.guren/**/*` added, and a missing Bun cannot be fixed by
+  `bun upgrade`, only by the install URL `manualFix` carries. The `Autofix` line
+  now says which command applies it, phrased as information rather than an
+  instruction: `guren upgrade` also realigns every `@guren/*` dependency, which is
+  more than someone chasing a single check asked for, and `guren doctor` has no
+  `--fix` of its own.
+
+  The fix is in `createCheck` rather than the report: a passing check now carries
+  no remediation at all, whatever the caller passed. `guren doctor --json` had the
+  same defect — on a healthy app it reported `fix: "Run guren codegen --force…"`
+  for nine manifests that were present — and enforcing the invariant once covers
+  the report, the JSON, and anything added later. The field stays present and
+  nullable and `version: 1` is unchanged, so the JSON shape is the same; only
+  wrong data disappears from it. `guren upgrade`'s autofix path and manual-step
+  collection already filtered by status, so they are unaffected.
+
+  Left as follow-up: `fix` and `manualFix` are not really two concepts. Three
+  consumers treat them three ways — the report prints both, `--json` emits both
+  raw, and `guren upgrade` reads `manualFix ?? fix`. The genuine case is narrow
+  ("the suggested command cannot run"), and naming it that way would be clearer
+  than a second general field, but it touches the JSON surface.
+  `renderDoctorReport` had no test coverage; it now has cases for each branch.
+
+  Writing those tests surfaced why it had none: two test files replace the
+  `consola` module with a hand-listed stub, and `mock.module()` is not undone
+  between files in Bun's shared process, so every file loaded after them saw a
+  `consola` without `box` — which is the first call `renderDoctorReport` makes.
+  Both stubs now inherit from the real instance and shadow only the methods that
+  print, so the surface cannot drift out from under an unrelated test again.
+
+- f365707: The Lambda console handler now dispatches the app's own console kernel.
+
+  The scaffolded `src/lambda.ts` built a second `ConsoleKernel` inline and
+  registered a single `db:migrate` command on it. An app therefore had two
+  kernels with different command sets: register five commands in `src/console.ts`,
+  uncomment the Lambda console export, and the deployed function still knew only
+  `db:migrate` — with nothing to warn you.
+
+  The scaffold now imports `kernel` from `src/console.ts`, so every command
+  reachable through `bun run console` is reachable on Lambda under the same name.
+  The `db:migrate` recipe moved to the serverless guide, since needing it at all
+  is specific to deploying where no CLI exists.
+
+- 7d18f07: Name the real cause when a database command fails, and give container-backed apps `db:up`/`db:down`
+
+  `db:migrate` against a database that is not reachable used to report `Failed to
+run database migrations: Failed query: CREATE SCHEMA IF NOT EXISTS "drizzle"` —
+  the migrator's own bookkeeping statement, not anything the user wrote. The
+  driver's `ECONNREFUSED` lived on the error's `cause`, which was discarded. It now
+  reports `cannot connect to the database at localhost:54322 (ECONNREFUSED). Is it
+running and accepting connections?`, with the host and port only so the
+  connection string's credentials stay out of the log. Genuine SQL failures now
+  carry the driver's message alongside the query instead of the query alone.
+
+  Three sibling commands had the same blind spot. `db:status` caught an unreachable
+  server in the branch written for "the tracker table does not exist yet", so it
+  reported every migration as pending and exited 0 — indistinguishable from a
+  healthy database with nothing applied; it now fails with the connection error.
+  `db:reset` rethrew the driver error untouched, and a message-less
+  `AggregateError` printed as a bare `ERROR` line with nothing after it. `db:seed`
+  reported the failing statement without the driver's explanation of why it failed.
+
+  Scaffolding with PostgreSQL or MySQL also writes `db:up` and `db:down` scripts
+  next to the generated `docker-compose.yml`, so starting the database is
+  discoverable from `package.json`. The selected driver is no longer listed in both
+  `dependencies` and `devDependencies`, which made `bun install` warn about a
+  duplicate dependency on the first command a new project runs.
+
+  The AI agent harness that `agent:init` installs is updated to match: its database
+  skill pointed agents at a `db:logs` script that nothing scaffolds, and handed
+  container commands to SQLite projects, which have no container.
+
+- 3d67c4b: fix: a decorated class no longer makes a file invisible to `guren check`, `doctor`, `audit`, and codegen
+
+  The CLI's Babel parsers did not enable any decorator plugin. A single
+  `@Injectable`-style class therefore made the _whole file_ unparseable — and
+  every caller treats an unparseable file as contributing nothing, silently.
+  Concretely, in an app that uses decorators:
+
+  - `check --arch` skipped the file, so a real module- or layer-boundary
+    violation in it was never reported. The summary still said `no violations`.
+  - `check --docs` fell back to the filename for the model's identity, so a doc
+    whose `entities:` names the actual class was reported as pointing at a model
+    that does not exist — a failure on a correct doc. (Its `@docs`-tag scan was
+    never affected: that path already re-read the file directly.)
+  - `doctor --next` emitted no "Implement `X.y()`" steps for the file.
+  - `audit`, `context <Entity>`, `model:list`, `spec:generate`, and the `data`,
+    `channels`, and page-props codegen all dropped the file the same way.
+
+  Plugin selection now lives in one place, `parseSourceFile()`, shared by every
+  call site that parses app-authored source.
+
+  **Plugin choice is a retry, not a guess.** No single Babel plugin set parses
+  everything TypeScript accepts, so picking one and baking it in is what made
+  this class of bug possible in the first place:
+
+  | source                             | `decorators` | `decorators-legacy` |
+  | ---------------------------------- | ------------ | ------------------- |
+  | `@Dec export class X {}`           | yes          | yes                 |
+  | `export @Dec class X {}`           | yes          | no                  |
+  | `constructor(@inject() private x)` | no           | yes                 |
+
+  The same is true of JSX in the other direction: `<Type>value` cast syntax
+  parses only _without_ the `jsx` plugin, a JSX element only _with_ it. So the
+  file extension now _orders_ the attempts instead of deciding them, and a file
+  counts as unparseable only once every dialect has rejected it. Parameter
+  decorators (tsyringe, InversifyJS, `experimentalDecorators: true`) and `.js`
+  React components both parse now; previously each was silently dropped by
+  whichever rule guessed wrong.
+
+  **Skipped files are now reported — for the suites that share the cache.**
+  Making more files parse does not fix the underlying hazard, which is that a
+  checker skipping a file it could not read is indistinguishable from one that
+  found nothing wrong. `guren check` now ends with a `scan-coverage` warning
+  naming files that some checker needed and couldn't get: the core suite
+  (empty-method scan, Inertia page refs), `--arch`, and `--docs`' `@docs`-tag
+  scan. `guren doctor`'s deploy checks already did this; this brings `check` in
+  line for those suites.
+
+  Not yet covered: `--spec`'s controller scan and `--docs`' model-identity
+  lookup (which falls back to filename, `parseModelFile`) parse independently of
+  this cache, so a file failing there produces no `scan-coverage` entry — a
+  known gap, not silently claimed as fixed.
+
+  Two related fixes fell out of centralizing it:
+
+  - `channels` codegen parsed **every** extension with the `jsx` plugin,
+    including `.ts`, so a channel provider using `<Type>value` contributed no
+    channels at all.
+  - `ParseCache` could not tell callers _why_ a file produced no AST. It now
+    returns `parsed` / `unparsed` / `unreadable` and keeps the source of a file
+    the parser rejected, so the regex-only scans in `check` and `docs-check` stop
+    re-reading files behind the cache.
+
+  `errorRecovery` remains opt-in per call (audit's model-serialization scan wants
+  a partial AST; every other caller uses "did not parse" as the signal to skip a
+  file) and is never used by the cache, which is keyed by path alone.
+
+  Legacy decorators are tried before standard ones: the two Babel plugins can't
+  both be enabled at once, and parameter decorators — the DI-flavoured shape this
+  fix exists to cover — parse only under the legacy dialect, so trying it first
+  makes that common case cost one parse attempt instead of two. One combination
+  remains genuinely unparseable under either order — a single file mixing
+  `export @Dec class X` with a legacy parameter decorator — because no Babel
+  plugin set accepts both halves at once; that's now a documented, tested
+  limitation rather than a silent gap.
+
+  `scan-coverage` no longer misreports a file as skipped when a caller only
+  needed its source text and got it (the `@docs`-tag scan, Inertia page refs):
+  only a caller that genuinely needed an AST and didn't get one — or a file that
+  couldn't be read at all — counts. Also reused `extractClassDeclaration` in
+  `check.ts`'s and `doctor.ts`'s empty-method scans (previously duplicated
+  two-branch inline logic that, unlike the shared helper, didn't match a bare,
+  non-exported class) and extracted the "first 3, then `and N more`" truncation
+  `check.ts` and `deploy-runtime.ts` both needed into a shared helper.
+
+- aa091f7: Add the `GurenLambdaApp` CDK construct under `@guren/plugin-lambda/cdk`.
+
+  One construct provisions the full serverless topology for a Guren app: an
+  HTTP API in front of the `http` handler, an SQS queue + worker with a
+  dead-letter queue and partial batch failures, an EventBridge rule for the
+  scheduler, a console function for CLI commands, CloudFront + S3 serving
+  the staged assets (including per-file behaviors for root-level public files),
+  and a `dataApi` option that wires the DATABASE\_\* environment and IAM grants
+  for Aurora's RDS Data API onto every function. `aws-cdk-lib` and
+  `constructs` are optional peer dependencies. The `guren deploy` error message
+  now points AWS Lambda users at the plugin.
+
+- 704d407: fix: `guren upgrade` aligns `drizzle-orm` and `drizzle-kit` with what `@guren/orm` depends on
+
+  `@guren/orm` names an exact `drizzle-orm` version under `dependencies`, not a
+  range. Upgrading only the `@guren/*` entries therefore left apps pinning a
+  different one with two copies installed:
+
+  ```
+  node_modules/drizzle-orm                         -> 1.0.0-rc.1   (the app's pin)
+  node_modules/@guren/orm/node_modules/drizzle-orm -> 1.0.0-rc.4   (what the ORM brings)
+  ```
+
+  The app builds its table descriptors against one copy while the adapter runs on
+  the other — the same split-state hazard the duplicate-`@guren/orm` warning
+  exists for, and `guren upgrade` was the step that introduced it. `CLAUDE.md`
+  already tells contributors to keep these versions aligned; nothing enforced it
+  for apps.
+
+  The command now reads the `drizzle-orm` version the target `@guren/orm` depends
+  on straight from its registry metadata and writes that, exactly, to both
+  `drizzle-orm` and `drizzle-kit`. It only rewrites entries that already exist,
+  never adds one, and stands down rather than guessing when:
+
+  - the entry names a location instead of a release (`workspace:`, `file:`,
+    `catalog:`, a git URL) — usually a local drizzle build being developed
+    against, which a registry release would silently replace;
+  - the field is `peerDependencies` or `optionalDependencies` — a peer range is a
+    compatibility window a library publishes, not an installed copy to dedupe, and
+    narrowing it to one exact version shrinks what that library claims to support;
+  - `@guren/orm` depends on a range rather than one exact version — deduping only
+    works when there is a single version to converge on;
+  - the version was never published for `drizzle-kit`.
+
+  That last one matters because `drizzle-kit` is matched by convention, not from
+  metadata: it is not a dependency of `@guren/orm`, so the registry says nothing
+  about it, and the two packages have not always shared a release line. Writing a
+  `drizzle-kit` version that does not exist would break the next install, so its
+  existence is checked first and the entry is left alone with a warning otherwise.
+
+  The lookups read one published version's manifest
+  (`registry.npmjs.org/<name>/<version-or-tag>`) rather than the package's full
+  document: `@guren/orm/latest` is 2 KB and carries the version _and_ its
+  dependencies in a single request, where the abbreviated packument is 28 KB — and
+  `drizzle-kit`'s is 1.2 MB, which is what checking one version used to cost. That
+  adds one request when the pins already agree and two when they have drifted; a
+  package appearing in both `dependencies` and `devDependencies` is still asked
+  about once. `--tag canary` returns before any of it, so that mode stays
+  offline.
+
+- 5c3ba53: fix: `guren upgrade` defaults to the `latest` dist-tag and refuses to downgrade silently
+
+  The default was `rc`, a tag still pointing at the pre-1.0 release candidates it
+  was cut for. Running `guren upgrade` with no arguments on a released app
+  rewrote every `@guren/*` pin backwards across the 1.0 boundary — and reported
+  it as `✔ Version compatible (1.0.0 -> rc)`, because the compatibility line
+  printed the tag name instead of the version it resolves to. The runtime warning
+  for duplicate `@guren/orm` copies names this command as its remedy, so the path
+  most likely to be taken by someone fixing a version mismatch was the one that
+  introduced a bigger one.
+
+  Three changes:
+
+  - The default tag is now `latest`, exported as `DEFAULT_UPGRADE_TAG` so the CLI
+    flag description, the programmatic default, and `upgradeCanary()` cannot drift
+    apart. `--tag rc` and `--canary` still work.
+  - `versionCompatibility.targetVersion` now carries the version the tag resolved
+    to, and a new `downgrade` field is set when that version is older than what
+    the app already pins. The CLI prints it as a warning under a `Downgrade`
+    heading rather than a success line. An explicit `--tag` is still honoured —
+    the point is that it is no longer silent. For any tag other than `canary`,
+    codemods now receive that resolved version instead of the tag string, which no
+    codemod range could ever match; `--canary` keeps pinning the floating tag, so
+    it still passes the literal `canary` through.
+  - A registry lookup that throws now degrades to "could not resolve" instead of
+    taking the command down. The lookup is memoized, and one caller wraps it in
+    `.catch` while the other does not, so a cached rejection was handled once and
+    rethrown the second time — an unreachable registry aborted the whole upgrade.
+    An unresolved tag is also no longer reported as compatible, and codemods are
+    skipped for it, since a tag name matches no codemod range.
+  - `compareVersions` handles prereleases. `'1.0.0-rc.4'.split('.')` yielded
+    `[1, 0, NaN, 4]`, and a NaN difference is neither greater nor less than zero,
+    so every comparison against a `1.0.0-rc.N` version answered "unordered" —
+    which reads as "equal" to callers testing for `< 0`. Guren shipped its whole
+    1.0 line in that shape, so this covered exactly the versions the upgrade path
+    compares. It now delegates to `Bun.semver.order`, the comparator this package
+    already uses for plugin compatibility ranges, behind a guard that returns NaN
+    for anything that is not one exact version — including a partial pin like
+    `1.3`, which `Bun.semver` ranks _above_ `1.3.0`. `guren doctor` had a private
+    copy of the old implementation for its Bun version floor, so a Bun prerelease
+    such as `1.1.1-canary.3` was reported as below the minimum; it now shares the
+    fixed one.
+
+  `guren upgrade --check-only` needs the network now, since resolving the tag is
+  what the check reports. Version lookups read the registry's `dist-tags`
+  endpoint instead of the full packument (61 B rather than ~33 KB per package,
+  which grew with every release), and every package resolves concurrently, so an
+  unreachable registry costs one connect timeout rather than one per package.
+
+  The downgrade check anchors on the first comparable `@guren/*` pin. Tags can
+  resolve per-package, so this is a safety net over the common case of one release
+  line across every entry rather than a guarantee for each individual rewrite.
+
+- Updated dependencies [a7aec95]
+- Updated dependencies [7d18f07]
+- Updated dependencies [f448a0a]
+- Updated dependencies [4b8ed69]
+  - @guren/orm@1.3.0
+  - @guren/core@1.4.0
+
 ## 1.5.0
 
 ### Minor Changes

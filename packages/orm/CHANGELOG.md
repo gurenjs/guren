@@ -1,5 +1,65 @@
 # @guren/orm
 
+## 1.3.0
+
+### Minor Changes
+
+- a7aec95: Add `createAwsDataApiDatabase()` for Aurora Serverless v2 via the RDS Data API.
+
+  The factory mirrors the other database factories (`getDatabase`, `migrateDatabase`,
+  `configureOrm`, `seedDatabase`, `resetDatabase`, `migrationStatus`) on top of
+  `drizzle-orm/aws-data-api/pg`. The Data API is HTTP-based, so Lambda apps get a
+  Postgres-compatible connection without a connection pool, RDS Proxy, or VPC
+  placement. Connection settings resolve from options or the `DATABASE_NAME`,
+  `DATABASE_RESOURCE_ARN`, and `DATABASE_SECRET_ARN` environment variables;
+  `@aws-sdk/client-rds-data` is an optional peer dependency. Unlike the other
+  factories, `getDatabase()` does not run pending migrations automatically —
+  on Lambda that check costs serialized Data API round trips on every cold
+  start. Run migrations out of band, or opt back in with `migrateOnStart: true`.
+
+### Patch Changes
+
+- 7d18f07: Name the real cause when a database command fails, and give container-backed apps `db:up`/`db:down`
+
+  `db:migrate` against a database that is not reachable used to report `Failed to
+run database migrations: Failed query: CREATE SCHEMA IF NOT EXISTS "drizzle"` —
+  the migrator's own bookkeeping statement, not anything the user wrote. The
+  driver's `ECONNREFUSED` lived on the error's `cause`, which was discarded. It now
+  reports `cannot connect to the database at localhost:54322 (ECONNREFUSED). Is it
+running and accepting connections?`, with the host and port only so the
+  connection string's credentials stay out of the log. Genuine SQL failures now
+  carry the driver's message alongside the query instead of the query alone.
+
+  Three sibling commands had the same blind spot. `db:status` caught an unreachable
+  server in the branch written for "the tracker table does not exist yet", so it
+  reported every migration as pending and exited 0 — indistinguishable from a
+  healthy database with nothing applied; it now fails with the connection error.
+  `db:reset` rethrew the driver error untouched, and a message-less
+  `AggregateError` printed as a bare `ERROR` line with nothing after it. `db:seed`
+  reported the failing statement without the driver's explanation of why it failed.
+
+  Scaffolding with PostgreSQL or MySQL also writes `db:up` and `db:down` scripts
+  next to the generated `docker-compose.yml`, so starting the database is
+  discoverable from `package.json`. The selected driver is no longer listed in both
+  `dependencies` and `devDependencies`, which made `bun install` warn about a
+  duplicate dependency on the first command a new project runs.
+
+  The AI agent harness that `agent:init` installs is updated to match: its database
+  skill pointed agents at a `db:logs` script that nothing scaffolds, and handed
+  container commands to SQLite projects, which have no container.
+
+- f448a0a: Fix `createMySqlDatabase()`, which failed on every query
+
+  Any statement against a MySQL app — including the first one `db:migrate` runs —
+  threw `undefined is not an object (evaluating
+'client.config.supportBigNumbers = !0')` before touching a socket, so MySQL was
+  unusable even though `create-guren-app --db mysql` offers it. Passing a
+  connection to `drizzle()` makes it build the pool through `mysql2/promise`,
+  whose wrapper exposes no `config` object for the driver to write that flag onto.
+  The ORM now creates the pool itself with `mysql2`'s callback API and hands
+  drizzle a client, matching how the PostgreSQL helper already works, and closes
+  that pool directly instead of reaching for drizzle's `$client`.
+
 ## 1.2.0
 
 ### Minor Changes
