@@ -175,16 +175,47 @@ body {
 }
 @media (prefers-reduced-motion: reduce) { .panel { transition: none; } }
 .panel.open { transform: none; }
-.panel-close {
-  position: sticky; top: 0; float: right;
-  font-family: var(--mono); font-size: 0.78rem;
+
+.panel-bar {
+  position: sticky; top: 0; z-index: 2;
+  display: flex; justify-content: flex-end; gap: 0.4rem;
+  margin: -2rem -1.75rem 1.25rem; padding: 0.75rem 1.25rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.panel-bar button {
+  font-family: var(--mono); font-size: 0.72rem;
   color: var(--text-muted); background: var(--panel);
   border: 1px solid var(--border-strong); border-radius: 3px;
   padding: 0.2rem 0.55rem; cursor: pointer;
 }
-.panel-close:hover, .panel-close:focus-visible { color: var(--accent-strong); border-color: var(--accent); }
+.panel-bar button:hover, .panel-bar button:focus-visible { color: var(--accent-strong); border-color: var(--accent); }
+
+/* ---- reading mode: the panel takes the whole viewport ---- */
+.panel.expanded { width: 100vw; border-left: none; box-shadow: none; }
+.panel.expanded .doc-detail {
+  display: grid;
+  grid-template-columns: 16rem minmax(0, 44rem);
+  gap: 1.1rem 3.5rem;
+  justify-content: center;
+  padding-top: 1rem;
+}
+.panel.expanded .doc-head { grid-column: 1 / -1; max-width: 63.5rem; width: 100%; margin: 0 auto; }
+.panel.expanded .frontmatter { grid-column: 1; align-self: start; position: sticky; top: 3rem; }
+.panel.expanded .prose, .panel.expanded .rel-note { grid-column: 2; }
+.panel.expanded .doc-detail h1 { font-size: 2rem; }
+.panel.expanded .description { font-size: 1.05rem; max-width: 60ch; }
+.panel.expanded .prose { gap: 1.1rem; }
+.panel.expanded .prose p, .panel.expanded .prose li { font-size: 1.05rem; line-height: 1.8; }
+.panel.expanded .prose h2 { font-size: 1.35rem; margin-top: 1rem; }
+.panel.expanded .prose h3 { font-size: 1.1rem; margin-top: 0.6rem; }
+@media (max-width: 60rem) {
+  .panel.expanded .doc-detail { display: flex; flex-direction: column; }
+  .panel.expanded .frontmatter { position: static; }
+}
 
 .doc-detail { display: flex; flex-direction: column; gap: 0.9rem; line-height: 1.6; }
+.doc-head { display: flex; flex-direction: column; gap: 0.9rem; }
 .path { font-family: var(--mono); font-size: 0.72rem; color: var(--text-muted); overflow-wrap: anywhere; }
 .doc-detail h1 { font-size: 1.45rem; letter-spacing: -0.015em; text-wrap: balance; }
 .doc-detail h1.mono-title { font-family: var(--mono); font-size: 1.05rem; word-break: break-all; }
@@ -266,7 +297,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   <span><span class="swatch derives"></span>derives (regenerated from code)</span>
 </div>
 
-<p class="hint">click a node · drag to rearrange</p>
+<p class="hint">click a node · f for reading mode · drag to rearrange</p>
 
 <div class="empty-state" id="empty-state">
   <div>
@@ -277,7 +308,10 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 </div>
 
 <aside class="panel" id="panel" aria-hidden="true">
-  <button class="panel-close" id="close">esc ✕</button>
+  <div class="panel-bar">
+    <button id="expand" aria-pressed="false" title="Toggle reading mode (f)">⤢ expand</button>
+    <button id="close">esc ✕</button>
+  </div>
   <div id="panel-content"></div>
 </aside>
 
@@ -310,12 +344,20 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 
   const mermaidReady = () =>
     typeof window.mermaid !== 'undefined' && window.mermaid !== null
-  if (mermaidReady()) {
-    const dark = matchMedia('(prefers-color-scheme: dark)').matches
-      ? document.documentElement.dataset.theme !== 'light'
-      : document.documentElement.dataset.theme === 'dark'
-    window.mermaid.initialize({ startOnLoad: false, theme: dark ? 'dark' : 'neutral', securityLevel: 'strict' })
+  const prefersDark = matchMedia('(prefers-color-scheme: dark)')
+  const isDarkTheme = () => {
+    const override = document.documentElement.dataset.theme
+    return override === 'dark' || (override !== 'light' && prefersDark.matches)
   }
+  function initMermaid() {
+    if (!mermaidReady()) return
+    window.mermaid.initialize({
+      startOnLoad: false,
+      theme: isDarkTheme() ? 'dark' : 'neutral',
+      securityLevel: 'strict',
+    })
+  }
+  initMermaid()
 
   // ---- helpers ----
   const el = (tag, cls, text) => {
@@ -592,9 +634,10 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 
   function buildDocDetail(doc) {
     const root = el('article', 'doc-detail')
-    root.append(el('p', 'path', doc.path))
-    root.append(el('h1', '', doc.title || doc.path))
-    if (doc.description) root.append(el('p', 'description', doc.description))
+    const head = el('div', 'doc-head')
+    head.append(el('p', 'path', doc.path))
+    head.append(el('h1', '', doc.title || doc.path))
+    if (doc.description) head.append(el('p', 'description', doc.description))
 
     const chips = el('div', 'chips')
     chips.append(el('span', 'chip chip-type', doc.type || 'untyped'))
@@ -603,7 +646,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     if (doc.staleAfter && Date.parse(doc.staleAfter) <= Date.now()) {
       chips.append(el('span', 'chip chip-stale', 'stale'))
     }
-    root.append(chips)
+    head.append(chips)
+    root.append(head)
 
     const front = el('div', 'frontmatter')
     front.append(el('p', 'panel-label', 'Frontmatter'))
@@ -645,9 +689,10 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 
   function buildSatelliteDetail(node) {
     const root = el('article', 'doc-detail')
-    root.append(el('p', 'path', node.kind === 'entity' ? 'Model entity' : 'Code'))
-    const title = el('h1', 'mono-title', node.id.replace(/^entity:/, ''))
-    root.append(title)
+    const head = el('div', 'doc-head')
+    head.append(el('p', 'path', node.kind === 'entity' ? 'Model entity' : 'Code'))
+    head.append(el('h1', 'mono-title', node.id.replace(/^entity:/, '')))
+    root.append(head)
 
     const governedBy = edges.filter((e) => e.to === node.id && e.relation !== 'derives')
     const feeds = edges.filter((e) => e.from === node.id && e.relation === 'derives')
@@ -699,6 +744,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     const pres = content.querySelectorAll('pre.mermaid:not([data-processed])')
     if (pres.length === 0) return
     if (mermaidReady()) {
+      // Keep the source around so a theme change can re-render.
+      pres.forEach((pre) => { if (!pre.dataset.source) pre.dataset.source = pre.textContent })
       window.mermaid.run({ nodes: pres }).catch(() => {})
     } else {
       pres.forEach((pre) => {
@@ -709,6 +756,19 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
       })
     }
   }
+
+  // Re-render open diagrams when the color scheme flips — an already
+  // processed SVG keeps its old palette otherwise.
+  prefersDark.addEventListener('change', () => {
+    if (!mermaidReady()) return
+    initMermaid()
+    content.querySelectorAll('pre.mermaid[data-processed]').forEach((pre) => {
+      if (!pre.dataset.source) return
+      pre.textContent = pre.dataset.source
+      pre.removeAttribute('data-processed')
+    })
+    runMermaid()
+  })
 
   function openPanel(id, options) {
     const node = byId.get(id)
@@ -733,8 +793,27 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     nodeEls.forEach(({ g }) => g.classList.remove('selected'))
   }
 
+  // Reading mode: the panel takes the whole viewport. The preference
+  // sticks while browsing from doc to doc until toggled back.
+  const expandButton = document.getElementById('expand')
+  let expanded = false
+  function setExpanded(value) {
+    expanded = value
+    panel.classList.toggle('expanded', value)
+    expandButton.textContent = value ? '⤡ collapse' : '⤢ expand'
+    expandButton.setAttribute('aria-pressed', String(value))
+  }
+  expandButton.addEventListener('click', () => setExpanded(!expanded))
+
   document.getElementById('close').addEventListener('click', closePanel)
-  addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closePanel() })
+  addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape') closePanel()
+    const typing = ev.target instanceof HTMLElement && ev.target.matches('input, textarea')
+    if (ev.key === 'f' && selected && !typing && !ev.metaKey && !ev.ctrlKey) {
+      ev.preventDefault()
+      setExpanded(!expanded)
+    }
+  })
   svg.addEventListener('pointerdown', (ev) => { if (ev.target === svg) closePanel() })
 
   // ---- data loading & freshness ----
