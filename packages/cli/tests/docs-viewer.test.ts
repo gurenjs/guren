@@ -73,6 +73,42 @@ Everyone can read.
   })
 })
 
+describe('buildDocsViewerData link resolution', () => {
+  it('emits the app-root path a body link resolves to, fragments included', async () => {
+    const workspace = await createTempWorkspace('guren-cli-docs-viewer-links-')
+    try {
+      const dir = workspace.dir
+      await mkdir(join(dir, 'docs/adr'), { recursive: true })
+      await writeFile(join(dir, 'package.json'), '{}', 'utf8')
+      await writeFile(
+        join(dir, 'docs/adr/0001-first.md'),
+        `---
+type: adr
+---
+
+# First
+
+Superseded by [the second](/adr/0002-second.md#context) and see
+[the site](https://example.com).
+`,
+        'utf8',
+      )
+      await writeFile(join(dir, 'docs/adr/0002-second.md'), '---\ntype: adr\n---\n\n# Second\n', 'utf8')
+
+      const data = await buildDocsViewerData(dir)
+      const first = data.docs.find((doc) => doc.path === 'docs/adr/0001-first.md')!
+
+      // The fragment is dropped so the target matches a graph node id;
+      // external URLs stay verbatim.
+      expect(first.html).toContain('data-target="docs/adr/0002-second.md"')
+      expect(first.html).toContain('data-target="https://example.com"')
+      expect(data.nodes.some((node) => node.id === 'docs/adr/0002-second.md')).toBe(true)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+
 describe('docsViewerAssetPath', () => {
   it('points at the shipped UI shell', async () => {
     const path = docsViewerAssetPath()

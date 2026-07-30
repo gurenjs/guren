@@ -52,6 +52,20 @@ export interface DocsViewerData {
 
 const FRONTMATTER_BLOCK = /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/
 const LEADING_H1 = /^\s*(?:<!--[\s\S]*?-->\s*)?#\s+.*$/m
+const URL_SCHEME = /^[a-z][a-z0-9+.-]*:/i
+
+/**
+ * The graph node id a body link points at, mirroring how `scanDocs`
+ * derived the edge for the same link: external URLs and bare anchors
+ * stay as written, and a fragment is dropped before resolution.
+ * Unresolvable targets keep their literal text.
+ */
+function resolveViewerLink(docPath: string, target: string): string {
+  if (URL_SCHEME.test(target) || target.startsWith('#')) return target
+  const withoutFragment = target.split('#')[0]
+  if (withoutFragment === '') return target
+  return resolveDocLink(docPath, withoutFragment) ?? target
+}
 
 export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> {
   const refs = await scanDocs(cwd)
@@ -80,9 +94,7 @@ export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> 
         // Links carry the app-root path they resolve to, so the viewer
         // navigates by map lookup instead of re-deriving the resolution
         // rules client-side (where they would drift).
-        html: renderDocHtml(body, {
-          resolveLink: (target) => resolveDocLink(ref.path, target) ?? target,
-        }),
+        html: renderDocHtml(body, { resolveLink: (target) => resolveViewerLink(ref.path, target) }),
       }
     }),
   )
