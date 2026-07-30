@@ -311,4 +311,36 @@ describe('buildLambdaOutput', () => {
     ).rejects.toThrow(/never the root itself/)
     expect(existsSync(join(root, 'src/lambda.ts'))).toBe(true)
   })
+
+  test('should refuse the filesystem root as outputDir', async () => {
+    scaffoldApp(root)
+
+    // `out + sep` is "//" here, which no absolute path is prefixed by — a
+    // string-prefix containment test lets this through to the rmSync.
+    await expect(
+      buildLambdaOutput({ rootDir: root, outputDir: '/', skipAppBuild: true }),
+    ).rejects.toThrow(/never the root itself or a parent of it/)
+    expect(existsSync(join(root, 'src/lambda.ts'))).toBe(true)
+  })
+
+  test('should make an unlisted MCP SDK subpath throw rather than resolve empty', async () => {
+    scaffoldApp(root, {
+      entry: {
+        preamble: ["import * as sdk from '@modelcontextprotocol/sdk/server/unlisted.js'"],
+        http: 'String(sdk)',
+      },
+    })
+
+    await buildLambdaOutput({ rootDir: root, skipAppBuild: true })
+
+    const probe = 'await import(process.argv[1])'
+    const result = Bun.spawnSync({
+      cmd: [process.execPath, '-e', probe, join(root, '.lambda/function/handler.js')],
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+
+    expect(result.exitCode).not.toBe(0)
+    expect(result.stderr.toString()).toContain('The MCP endpoint is unavailable on AWS Lambda')
+  })
 })

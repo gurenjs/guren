@@ -102,6 +102,7 @@ export class GurenLambdaApp extends Construct {
     const memorySize = props.memorySize ?? 512
     const environment: Record<string, string> = {
       NODE_ENV: 'production',
+      ...dataApiEnvironment(props.dataApi),
       // `guren lambda:build` writes the environment the bundle expects (asset
       // and SSR locations) next to the function directory; explicit props win.
       ...readBuildEnvironment(props.functionDir),
@@ -190,20 +191,9 @@ export class GurenLambdaApp extends Construct {
     }
 
     if (props.dataApi) {
-      const dataApiEnv: Record<string, string> = {
-        DATABASE_RESOURCE_ARN: props.dataApi.resourceArn,
-        DATABASE_SECRET_ARN: props.dataApi.secretArn,
-        ...(props.dataApi.database ? { DATABASE_NAME: props.dataApi.database } : {}),
-      }
-
+      // The DATABASE_* variables are already in `environment` above, where the
+      // spread order gives env.json and explicit props precedence over them.
       for (const fn of functions) {
-        for (const [key, value] of Object.entries(dataApiEnv)) {
-          // Explicit `environment` props win over the derived values.
-          if (!(key in environment)) {
-            fn.addEnvironment(key, value)
-          }
-        }
-
         fn.addToRolePolicy(new iam.PolicyStatement({
           actions: [
             'rds-data:ExecuteStatement',
@@ -285,7 +275,19 @@ export class GurenLambdaApp extends Construct {
       new CfnOutput(this, 'DistributionUrl', { value: `https://${this.distribution.distributionDomainName}` })
     }
 
-    new CfnOutput(this, 'ApiUrl', { value: this.httpApi.apiEndpoint ?? '' })
+    new CfnOutput(this, 'ApiUrl', { value: this.httpApi.apiEndpoint })
+  }
+}
+
+function dataApiEnvironment(dataApi: GurenLambdaAppProps['dataApi']): Record<string, string> {
+  if (!dataApi) {
+    return {}
+  }
+
+  return {
+    DATABASE_RESOURCE_ARN: dataApi.resourceArn,
+    DATABASE_SECRET_ARN: dataApi.secretArn,
+    ...(dataApi.database ? { DATABASE_NAME: dataApi.database } : {}),
   }
 }
 

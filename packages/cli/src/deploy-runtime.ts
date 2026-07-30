@@ -583,7 +583,7 @@ async function detectDeployTargets(cwd: string, files: ScannedFile[]): Promise<D
   // import it without installing the plugin — catch that from source imports.
   // Skipped when the plugin already declared the target: installing it also
   // scaffolds src/lambda.ts, and reporting Lambda twice doubles every warning.
-  if (!declared.has('@guren/plugin-lambda')) {
+  if (!detections.some((detection) => detection.profile === DEPLOY_TARGET_PROFILES.lambda)) {
     const lambdaFile = files.find((file) => file.signals.some((signal) => signal.kind === 'lambda'))
     if (lambdaFile) {
       detections.push({

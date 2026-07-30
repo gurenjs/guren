@@ -49,6 +49,11 @@ new GurenLambdaApp(stack, 'App', {
     secretArn: process.env.DATABASE_SECRET_ARN!,
   },
 
+  // `environment` values are stored as plaintext Lambda configuration and are
+  // written into the synthesized template under cdk.out — so anything here is
+  // readable by whoever can see your cloud assembly or CI logs. Fine for a
+  // throwaway stack; for a real deployment keep APP_KEY in Secrets Manager and
+  // load it at boot instead of baking it into the stack.
   environment: {
     APP_KEY: process.env.APP_KEY!,
   },
