@@ -7,10 +7,10 @@ import {
   assertOutputDirOutsideRoot,
   DEV_ONLY_MODULES,
   importSpecifier,
-  loadManifest,
   MCP_SDK_SUBPATH_PREFIX,
+  readManifest,
   resolvePathLike,
-  ssrManifestRelativePath,
+  ssrRuntimePaths,
 } from './deploy-build'
 
 describe('assertOutputDirOutsideRoot', () => {
@@ -99,7 +99,7 @@ describe('importSpecifier', () => {
   })
 })
 
-describe('loadManifest', () => {
+describe('readManifest', () => {
   let dir: string
 
   beforeEach(() => {
@@ -110,11 +110,12 @@ describe('loadManifest', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  test('should return the first manifest that exists', () => {
+  test('should return the first manifest that exists, and its path', () => {
     writeFileSync(join(dir, 'second.json'), JSON.stringify({ 'a.tsx': { file: 'a.js' } }))
 
-    expect(loadManifest(join(dir, 'missing.json'), join(dir, 'second.json'))).toEqual({
-      'a.tsx': { file: 'a.js' },
+    expect(readManifest(join(dir, 'missing.json'), join(dir, 'second.json'))).toEqual({
+      manifest: { 'a.tsx': { file: 'a.js' } },
+      path: join(dir, 'second.json'),
     })
   })
 
@@ -122,12 +123,41 @@ describe('loadManifest', () => {
     writeFileSync(join(dir, 'broken.json'), '{ not json')
     writeFileSync(join(dir, 'good.json'), JSON.stringify({ 'b.tsx': { file: 'b.js' } }))
 
-    expect(loadManifest(join(dir, 'broken.json'), join(dir, 'good.json'))).toEqual({
-      'b.tsx': { file: 'b.js' },
+    expect(readManifest(join(dir, 'broken.json'), join(dir, 'good.json'))?.path).toBe(
+      join(dir, 'good.json'),
+    )
+  })
+
+  test('should return undefined when nothing is found', () => {
+    expect(readManifest(join(dir, 'a.json'), join(dir, 'b.json'))).toBeUndefined()
+  })
+})
+
+describe('ssrRuntimePaths', () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'guren-ssr-paths-'))
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test('should place the entry and manifest under the caller prefix', () => {
+    mkdirSync(join(dir, '.vite'), { recursive: true })
+    writeFileSync(
+      join(dir, '.vite/manifest.json'),
+      JSON.stringify({ 'resources/js/ssr.tsx': { file: 'ssr.js' } }),
+    )
+
+    expect(ssrRuntimePaths(dir, join(dir, 'ssr.js'), './.guren/ssr')).toEqual({
+      entry: './.guren/ssr/ssr.js',
+      manifest: './.guren/ssr/.vite/manifest.json',
     })
   })
 
-  test('should report the path it actually parsed, not the first that exists', () => {
+  test('should name the manifest it actually parsed, not the first that exists', () => {
     // A malformed .vite/manifest.json alongside a valid flat one: naming the
     // file that merely exists publishes the path to the one that was skipped.
     mkdirSync(join(dir, '.vite'), { recursive: true })
@@ -137,15 +167,20 @@ describe('loadManifest', () => {
       JSON.stringify({ 'resources/js/ssr.tsx': { file: 'ssr.js' } }),
     )
 
-    expect(ssrManifestRelativePath(dir, './.guren/ssr')).toBe('./.guren/ssr/manifest.json')
+    expect(ssrRuntimePaths(dir, join(dir, 'ssr.js'), './.guren/ssr').manifest).toBe(
+      './.guren/ssr/manifest.json',
+    )
   })
 
-  test('should return undefined when no manifest parses', () => {
-    expect(ssrManifestRelativePath(dir, './.guren/ssr')).toBeUndefined()
-  })
+  test('should omit the manifest when none parses', () => {
+    mkdirSync(join(dir, '.vite'), { recursive: true })
+    writeFileSync(join(dir, '.vite/manifest.json'), '{ not json')
+    writeFileSync(join(dir, 'manifest.json'), 'also { not json')
 
-  test('should return undefined when nothing is found', () => {
-    expect(loadManifest(join(dir, 'a.json'), join(dir, 'b.json'))).toBeUndefined()
+    expect(ssrRuntimePaths(dir, join(dir, 'ssr.js'), './.guren/ssr')).toEqual({
+      entry: './.guren/ssr/ssr.js',
+      manifest: undefined,
+    })
   })
 })
 

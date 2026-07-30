@@ -39,20 +39,13 @@ export function resolvePathLike(value: PathLike): string {
 }
 
 /**
- * Read the first manifest that exists, tolerating both Vite layouts
- * (`.vite/manifest.json` and the flat `manifest.json` older configs emit).
- * A malformed file is skipped rather than fatal — the caller decides what a
- * missing manifest means for its platform.
- */
-export function loadManifest(...paths: string[]): Manifest | undefined {
-  return readManifest(...paths)?.manifest
-}
-
-/**
- * As `loadManifest`, but also reports which path was read. A caller that
- * publishes the manifest location to the runtime has to name the file that was
- * actually parsed: testing which one *exists* picks the malformed one that
- * `loadManifest` just skipped.
+ * Read the first manifest that parses, tolerating both Vite layouts
+ * (`.vite/manifest.json` and the flat `manifest.json` older configs emit), and
+ * report which path it was. A malformed file is skipped rather than fatal —
+ * the caller decides what a missing manifest means for its platform. The path
+ * is part of the result because a caller publishing the manifest location to
+ * the runtime has to name the file that was actually parsed: testing which one
+ * *exists* picks the malformed one that was just skipped.
  */
 export function readManifest(
   ...paths: string[]
@@ -72,8 +65,8 @@ export function readManifest(
   return undefined
 }
 
-/** The two layouts `loadManifest` accepts, in preference order. */
-export function manifestPaths(dir: string): [string, string] {
+/** The two layouts `readManifest` accepts, in preference order. */
+function manifestPaths(dir: string): [string, string] {
   return [resolve(dir, '.vite/manifest.json'), resolve(dir, 'manifest.json')]
 }
 
@@ -81,21 +74,29 @@ export function manifestPaths(dir: string): [string, string] {
  * Resolve symlinks in the parts of `path` that exist, keeping the trailing
  * components that do not. `realpathSync` throws on a path that is not there
  * yet, and an output directory usually is not on a first build.
+ *
+ * A sibling of `realpathNearestExisting` in `@guren/cli`'s plugin-manifest.ts,
+ * kept as a copy because this module must not import beyond node builtins and
+ * cli cannot be imported from core. Only ENOENT walks up, matching the twin:
+ * any other failure (an unreadable or non-directory ancestor) is surfaced
+ * rather than silently treated as nonexistent — this feeds a deletion guard,
+ * which must not compare a path it could not actually resolve.
  */
 function realpathOfNearestExisting(path: string): string {
-  let existing = path
-  const missing: string[] = []
-
-  while (!existsSync(existing)) {
-    const parent = dirname(existing)
-    if (parent === existing) {
-      return path
+  try {
+    return realpathSync(path)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error
     }
-    missing.unshift(basename(existing))
-    existing = parent
   }
 
-  return resolve(realpathSync(existing), ...missing)
+  const parent = dirname(path)
+  if (parent === path) {
+    return path
+  }
+
+  return resolve(realpathOfNearestExisting(parent), basename(path))
 }
 
 /**
@@ -187,7 +188,7 @@ export function resolveClientAssetEnv(
   clientEntryKey: string,
   label: string,
 ): ClientAssetEnv {
-  const manifest = loadManifest(...manifestPaths(resolve(publicDir, 'assets')))
+  const manifest = readManifest(...manifestPaths(resolve(publicDir, 'assets')))?.manifest
 
   const entry = manifest?.[clientEntryKey]
   if (!entry?.file) {
@@ -216,7 +217,7 @@ export function resolveSsrEntryFile(
   ssrEntryKey: string,
   label: string,
 ): string | undefined {
-  const manifest = loadManifest(...manifestPaths(ssrDir))
+  const manifest = readManifest(...manifestPaths(ssrDir))?.manifest
 
   const entryFile = manifest?.[ssrEntryKey]?.file
   if (!entryFile) {
@@ -235,21 +236,31 @@ export function resolveSsrEntryFile(
 }
 
 /**
- * Path of the SSR manifest that `resolveSsrEntryFile` actually read, relative
- * to the function root, for platforms that pass it to the runtime.
+ * Runtime locations of a staged SSR bundle, for platforms that copy `ssrDir`
+ * under the function root and hand the layout to the server through
+ * environment variables. `prefix` is where the caller stages the directory —
+ * it cannot be derived here because staging happens later in the caller's own
+ * flow.
  *
- * Derived from the file that parsed rather than the first one that exists:
- * both Vite layouts occur in the wild, and a malformed `.vite/manifest.json`
- * alongside a valid flat one would otherwise publish the path to the file that
- * was skipped.
+ * The manifest path is derived from the file that parsed rather than the
+ * first one that exists: both Vite layouts occur in the wild, and a malformed
+ * `.vite/manifest.json` alongside a valid flat one would otherwise publish the
+ * path to the file that was skipped. It is optional only for the mid-build
+ * race where the manifest vanishes between `resolveSsrEntryFile` and this
+ * call — callers already hold a chunk path that manifest produced.
  */
-export function ssrManifestRelativePath(ssrDir: string, prefix: string): string | undefined {
+export function ssrRuntimePaths(
+  ssrDir: string,
+  ssrFile: string,
+  prefix: string,
+): { entry: string; manifest?: string } {
+  const under = (target: string) => `${prefix}/${relative(ssrDir, target).split(sep).join('/')}`
   const read = readManifest(...manifestPaths(ssrDir))
-  if (!read) {
-    return undefined
-  }
 
-  return `${prefix}/${relative(ssrDir, read.path).split(sep).join('/')}`
+  return {
+    entry: under(ssrFile),
+    manifest: read ? under(read.path) : undefined,
+  }
 }
 
 /**

@@ -1,5 +1,5 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { relative, resolve, sep } from 'node:path'
+import { resolve } from 'node:path'
 import {
   DEV_ONLY_MODULES,
   importSpecifier,
@@ -10,7 +10,7 @@ import {
   resolveClientAssetEnv,
   resolvePathLike,
   resolveSsrEntryFile,
-  ssrManifestRelativePath,
+  ssrRuntimePaths,
   stageStaticAssets,
   type ClientAssetEnv,
   type DevOnlyModule,
@@ -175,10 +175,10 @@ function buildLambdaEnvironment(
   if (ssrFile) {
     // Relative specifiers resolve from process.cwd(), which is the function
     // root (/var/task) on Lambda — where the SSR bundle is copied.
-    env.GUREN_INERTIA_SSR_ENTRY = `./.guren/ssr/${relative(ssrDir, ssrFile).split(sep).join('/')}`
-    const manifestPath = ssrManifestRelativePath(ssrDir, './.guren/ssr')
-    if (manifestPath) {
-      env.GUREN_INERTIA_SSR_MANIFEST = manifestPath
+    const ssrPaths = ssrRuntimePaths(ssrDir, ssrFile, './.guren/ssr')
+    env.GUREN_INERTIA_SSR_ENTRY = ssrPaths.entry
+    if (ssrPaths.manifest) {
+      env.GUREN_INERTIA_SSR_MANIFEST = ssrPaths.manifest
     }
   }
 

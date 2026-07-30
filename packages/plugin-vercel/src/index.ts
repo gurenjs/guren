@@ -1,5 +1,5 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { basename, extname, relative, resolve, sep } from 'node:path'
+import { basename, extname, resolve } from 'node:path'
 import { definePlugin, type ServiceProviderConstructor } from '@guren/core'
 import {
   assertOutputDirOutsideRoot,
@@ -7,7 +7,7 @@ import {
   resolveClientAssetEnv,
   resolvePathLike,
   resolveSsrEntryFile,
-  ssrManifestRelativePath,
+  ssrRuntimePaths,
   type PathLike,
 } from '@guren/core/internal/deploy-build'
 
@@ -80,6 +80,14 @@ export function buildVercelOutput(options: BuildVercelOutputOptions = {}): void 
   // delete waits until the environment resolves — a stale or partial SSR build
   // must not take the previous deploy output with it.
   assertOutputDirOutsideRoot(out, root, LABEL)
+
+  // Checked here rather than left to the spawned `bun build`, which only
+  // fails after the previous output is gone.
+  if (!existsSync(entrypoint)) {
+    throw new Error(
+      `${LABEL}: entrypoint not found at ${entrypoint}. Run \`bunx guren plugin @guren/plugin-vercel\` to scaffold src/vercel.ts, or pass "entrypoint".`,
+    )
+  }
 
   const env = buildVercelEnvironment(publicDir, ssrDir)
 
@@ -200,10 +208,10 @@ function buildVercelEnvironment(publicDir: string, ssrDir: string): Record<strin
   if (ssrFile) {
     // Relative specifiers resolve from the function root, where the SSR bundle
     // is copied.
-    env.GUREN_INERTIA_SSR_ENTRY = `./.guren/ssr/${relative(ssrDir, ssrFile).split(sep).join('/')}`
-    const manifestPath = ssrManifestRelativePath(ssrDir, './.guren/ssr')
-    if (manifestPath) {
-      env.GUREN_INERTIA_SSR_MANIFEST = manifestPath
+    const ssrPaths = ssrRuntimePaths(ssrDir, ssrFile, './.guren/ssr')
+    env.GUREN_INERTIA_SSR_ENTRY = ssrPaths.entry
+    if (ssrPaths.manifest) {
+      env.GUREN_INERTIA_SSR_MANIFEST = ssrPaths.manifest
     }
   }
 

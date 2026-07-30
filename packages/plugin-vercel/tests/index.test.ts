@@ -116,11 +116,13 @@ describe('@guren/plugin-vercel', () => {
       expect(config.environment.GUREN_INERTIA_SSR_MANIFEST).toBe('./.guren/ssr/manifest.json')
     })
 
-    it('fails when the SSR manifest names a chunk that is not on disk', () => {
+    it('fails when the SSR manifest names a chunk that is not on disk, keeping the previous output', () => {
       // Previously written into the function environment unchecked, so a stale
       // or partial SSR build deployed and fell back to CSR at request time.
       // Cloudflare and Lambda already treated this as fatal.
       const app = scaffoldApp(root, { entrypoint: 'src/vercel.ts' })
+      mkdirSync(join(app.outputDir, 'functions'), { recursive: true })
+      writeFileSync(join(app.outputDir, 'config.json'), '{ "previous": true }')
       mkdirSync(join(root, '.guren/ssr/.vite'), { recursive: true })
       writeFileSync(
         join(root, '.guren/ssr/.vite/manifest.json'),
@@ -128,6 +130,21 @@ describe('@guren/plugin-vercel', () => {
       )
 
       expect(() => buildVercelOutput(app)).toThrow(/but the file does not exist/)
+      // Deleting before validation would take the last deployable artifact
+      // with it, leaving nothing to roll back to.
+      expect(readFileSync(join(app.outputDir, 'config.json'), 'utf8')).toBe('{ "previous": true }')
+    })
+
+    it('fails on a missing entrypoint before touching the previous output', () => {
+      // The spawned `bun build` would also fail on this, but only after the
+      // previous output was deleted.
+      const app = scaffoldApp(root, { entrypoint: 'src/vercel.ts' })
+      rmSync(app.entrypoint)
+      mkdirSync(join(app.outputDir, 'functions'), { recursive: true })
+      writeFileSync(join(app.outputDir, 'config.json'), '{ "previous": true }')
+
+      expect(() => buildVercelOutput(app)).toThrow(/entrypoint not found/)
+      expect(readFileSync(join(app.outputDir, 'config.json'), 'utf8')).toBe('{ "previous": true }')
     })
 
     it('matches the configured handler filename to the bundled entrypoint', () => {
