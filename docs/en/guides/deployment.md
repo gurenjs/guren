@@ -113,18 +113,20 @@ Mount your configuration or secrets as needed for your hosting environment.
 
 ## AWS Lambda (Serverless)
 
-Guren runs on AWS Lambda via the `@guren/core/lambda` adapter — ideal for variable traffic or minimal infrastructure management.
+Guren runs on AWS Lambda's Node.js runtime — ideal for variable traffic or minimal infrastructure management. The official plugin handles bundling and ships a CDK construct for the infrastructure:
 
-```typescript
-// lambda.ts
-import app from './src/app'
-import { createLambdaHandler } from '@guren/core/lambda'
-
-await app.boot()
-export const handler = createLambdaHandler(app)
+```bash
+bunx guren plugin @guren/plugin-lambda
+bun add @guren/plugin-lambda
 ```
 
-The framework provides dedicated handlers for HTTP, SQS queues, EventBridge scheduling, and CLI commands. See the **[Serverless Deployment Guide](./serverless.md)** for the full setup including SQS, EventBridge, CDK examples, and infrastructure recommendations.
+The CLI scaffolds `src/lambda.ts` (whose exports become your Lambda handlers) and registers a `lambda:build` command:
+
+```bash
+bunx guren lambda:build
+```
+
+The build assembles a `.lambda/` directory: a self-contained function bundle, static assets staged for S3, and the environment the function expects. The framework provides dedicated handlers for HTTP, SQS queues, EventBridge scheduling, and CLI commands. See the **[Serverless Deployment Guide](./serverless.md)** for the full setup including the database, SSR, and CDK deployment.
 
 ## Vercel (Serverless)
 

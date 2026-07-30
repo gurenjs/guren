@@ -41,9 +41,11 @@ export async function bootModels(): Promise<void> {
 
   try {
     await configureOrm()
-    if (!isWorkersRuntime()) {
-      // D1 seeding is a CLI workflow (`wrangler d1 execute`); the factory's
-      // seedDatabase() intentionally throws on Workers.
+    // D1 seeding is a CLI workflow (`wrangler d1 execute`); the factory's
+    // seedDatabase() intentionally throws on Workers. Seeding is also one-shot
+    // provisioning rather than part of booting, so it stays out of production
+    // boots on every runtime — run `bunx guren db:seed` explicitly instead.
+    if (!isWorkersRuntime() && process.env.NODE_ENV !== 'production') {
       await seedDatabase()
     }
   } catch (error) {

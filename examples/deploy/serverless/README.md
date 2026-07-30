@@ -1,70 +1,90 @@
-# Serverless Deployment
+# Deploy to AWS Lambda
 
-## Supported: AWS Lambda
+Deploy a Guren application to AWS Lambda on the Node.js runtime with the official `@guren/plugin-lambda` plugin. The plugin bundles the app; the bundled CDK construct provisions the stack — HTTP API, SQS worker, EventBridge scheduler, console function, and CloudFront + S3 for assets.
 
-Guren provides first-class AWS Lambda support via the `createLambdaHandler` adapter. The adapter handles API Gateway and ALB events, SQS queue processing, and EventBridge scheduled tasks.
+## Prerequisites
 
-See the full guide: [docs/en/guides/serverless.md](../../docs/en/guides/serverless.md)
+- An AWS account and credentials configured locally (`aws configure` or SSO)
+- The AWS CDK bootstrapped in the target account/region (`bunx cdk bootstrap`, once)
+- A Guren app with `src/app.ts`
 
-Quick start:
+## Steps
 
-```typescript
-// lambda.ts
-import app from './src/app'
-import { createLambdaHandler } from '@guren/core/lambda'
+### 1. Install the plugin
 
-await app.boot()
-export const handler = createLambdaHandler(app)
+```bash
+bunx guren plugin @guren/plugin-lambda
+bun add @guren/plugin-lambda
 ```
 
-### Infrastructure recommendations
+This registers `lambdaPlugin()`, scaffolds `src/lambda.ts` (whose exports become the Lambda handlers), and ignores `.lambda`. The plugin also contributes the `lambda:build` command to the `guren` CLI.
 
-- **HTTP**: API Gateway v2 (HTTP API) or Application Load Balancer
-- **Database**: RDS PostgreSQL or Aurora Serverless v2
-- **Sessions/Cache**: ElastiCache Redis (not in-memory stores)
-- **Static assets**: S3 + CloudFront (do not serve through Lambda)
-- **Password hashing**: Use `NodeHasher` instead of `ScryptHasher` on Node.js runtimes
+### 2. Point the database at the RDS Data API
 
-## Not Supported
+Create an Aurora Serverless v2 cluster with the Data API enabled, then switch `config/database.ts` to `createAwsDataApiDatabase`:
 
-### Cloudflare Workers
+```typescript
+import { createAwsDataApiDatabase } from '@guren/core'
 
-Cloudflare Workers use the `workerd` runtime, which lacks several Node.js APIs that Guren depends on. Key incompatibilities:
+const database = createAwsDataApiDatabase({
+  migrationsFolder: new URL('../db/migrations', import.meta.url),
+  seedersFolder: new URL('../db/seeders', import.meta.url),
+  // Reads DATABASE_NAME / DATABASE_RESOURCE_ARN / DATABASE_SECRET_ARN
+})
+```
 
-- No native `node:crypto` support required by session and encryption subsystems
-- No `node:fs` access needed by view resolution and asset loading
-- Connection pooling model differs from what Drizzle ORM expects
+```bash
+bun add @aws-sdk/client-rds-data
+```
 
-### Vercel Edge Functions
+> [!IMPORTANT]
+> Sessions must survive across invocations — in-memory stores silently log every user out on the next cold start. Use `DatabaseSessionStore` (see the [Serverless Guide](../../../docs/en/guides/serverless.md)).
 
-Vercel Edge Functions run on V8 isolates (similar limitations to Workers). Additionally, Guren relies on Bun-specific APIs for hashing and file operations that are unavailable in the Edge runtime.
+### 3. Build
 
-> **Vercel Bun Runtime:** While Edge Functions are unsupported, SSR apps can deploy to Vercel's Bun serverless runtime via the official `@guren/plugin-vercel` plugin. See the [Deployment Guide](../../docs/en/guides/deployment.md#vercel-serverless) for details.
+```bash
+bunx guren lambda:build
+```
 
-### Deno Deploy
+Produces `.lambda/function` (the code bundle), `.lambda/assets` (S3 staging), and `.lambda/env.json`. Rebuild before every deploy — the output is generated, not committed.
 
-While Deno has broader Node.js compatibility, Guren uses Bun-native APIs (`Bun.file`, `Bun.password`, etc.) that do not have Deno equivalents.
+### 4. Deploy the stack
 
-## Recommended Alternatives for Container-Based Serverless
+Copy the `cdk/` directory from this recipe next to your app, then:
 
-If you want serverless scaling without Lambda's cold-start constraints, deploy the standard Docker image to a container-based platform:
+```bash
+cd cdk
+bun install
+bunx cdk deploy
+```
 
-| Platform | Service | Notes |
-|----------|---------|-------|
-| AWS | ECS Fargate | Use the `deploy/docker/Dockerfile`; scales to zero with Fargate Spot |
-| GCP | Cloud Run | Supports Bun images; automatic HTTPS and scaling |
-| Azure | Container Apps | Bun images work; integrates with Azure Database for PostgreSQL |
-| Fly.io | Machines | See `deploy/fly/` recipe; scale-to-zero with Fly Machines |
+The stack outputs the CloudFront URL (serve traffic from here) and the raw API endpoint.
 
-These platforms run the full Bun runtime, so every Guren feature works without adaptation.
+### 5. Run migrations
 
-## Function and Edge Runtimes
+The console function executes commands registered on your app's `ConsoleKernel`. The scaffolded `src/lambda.ts` ships a commented-out `db:migrate` command — uncomment it (and the `console` export) before building, then invoke it inside the deployed environment:
 
-Two targets run Guren without a container, each with its own plugin:
+```bash
+aws lambda invoke --function-name <stack>-Console... \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"command": "db:migrate"}' response.json
+```
 
-| Target | Recipe | Trade-off |
-|--------|--------|-----------|
-| Vercel | `deploy/vercel/` | Full Bun runtime; the function filesystem is not durable, so use a managed database |
-| Cloudflare Workers | `deploy/cloudflare/` | No filesystem and 10 ms of CPU per request on the free plan, which rules out password hashing — pair it with D1 and OAuth |
+> [!WARNING]
+> The HTTP function serves requests as soon as the stack is up — before migrations have run. Deploy, migrate, then route traffic (or ship migrations in the same release pipeline step).
 
-Unlike the container platforms above, both need session and OAuth state in a shared store: requests are not guaranteed to reach the same instance.
+## What Must Be Different on Lambda
+
+| Concern | Why |
+|---------|-----|
+| Database via Data API | Lambda's connection churn exhausts classic Postgres pools; the Data API is HTTP and needs no pool or VPC |
+| Sessions in the database or Redis | In-memory state is lost between invocations |
+| Password hashing via Node scrypt | `Bun.password` does not exist on the Node.js runtime — the default hasher detects this automatically |
+| Assets on S3 + CloudFront | The function ships no static file serving; asset URLs are baked into the bundle as same-origin defaults |
+| Providers listed explicitly | Provider auto-discovery requires Bun's glob APIs |
+
+## Container-Based Alternatives
+
+If you want serverless scaling with the full Bun runtime instead of Lambda's Node.js runtime, deploy the standard Docker image to ECS Fargate, Cloud Run, or Fly Machines — see the [docker](../docker/) and [fly](../fly/) recipes. Every Guren feature works there without adaptation.
+
+Full guide: [Serverless Deployment Guide](../../../docs/en/guides/serverless.md)

@@ -56,16 +56,13 @@ const DEPLOY_TARGET_PROFILES: Record<DeployTargetId, DeployTargetProfile> = {
 
 /**
  * Deploy plugin package names, matched against the app's own package.json.
- *
- * Matched by name rather than driven off the `gurenPlugin` manifest for two
- * reasons: the manifest lives in `node_modules/<pkg>/package.json`, so reading
- * it would stop detection working before `bun install`, and the Lambda target
- * ships inside `@guren/core` with no plugin package for a manifest to live in.
- * A manifest field would therefore cover two of three targets and leave the
- * third here anyway — two sources of truth instead of one.
+ * Matched by name rather than driven off the `gurenPlugin` manifest because the
+ * manifest lives in `node_modules/<pkg>/package.json`, so reading it would stop
+ * detection working before `bun install`.
  */
 const DEPLOY_PLUGIN_PACKAGES: Record<string, DeployTargetId> = {
   '@guren/plugin-cloudflare': 'cloudflare',
+  '@guren/plugin-lambda': 'lambda',
   '@guren/plugin-vercel': 'vercel',
 }
 
@@ -537,12 +534,18 @@ async function detectDeployTargets(cwd: string, files: ScannedFile[]): Promise<D
     }
   }
 
-  const lambdaFile = files.find((file) => file.signals.some((signal) => signal.kind === 'lambda'))
-  if (lambdaFile) {
-    detections.push({
-      profile: DEPLOY_TARGET_PROFILES.lambda,
-      detectedVia: `Lambda adapter imported in ${lambdaFile.filePath}`,
-    })
+  // The Lambda adapter ships inside @guren/core, so a hand-rolled deploy can
+  // import it without installing the plugin — catch that from source imports.
+  // Skipped when the plugin already declared the target: installing it also
+  // scaffolds src/lambda.ts, and reporting Lambda twice doubles every warning.
+  if (!detections.some((detection) => detection.profile === DEPLOY_TARGET_PROFILES.lambda)) {
+    const lambdaFile = files.find((file) => file.signals.some((signal) => signal.kind === 'lambda'))
+    if (lambdaFile) {
+      detections.push({
+        profile: DEPLOY_TARGET_PROFILES.lambda,
+        detectedVia: `Lambda adapter imported in ${lambdaFile.filePath}`,
+      })
+    }
   }
 
   return detections

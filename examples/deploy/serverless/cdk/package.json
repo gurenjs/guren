@@ -1,0 +1,17 @@
+{
+  "name": "guren-app-cdk",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "cdk deploy",
+    "synth": "cdk synth"
+  },
+  "dependencies": {
+    "@guren/plugin-lambda": "^0.1.0",
+    "aws-cdk-lib": "^2.156.0",
+    "constructs": "^10.0.0"
+  },
+  "devDependencies": {
+    "aws-cdk": "^2.1000.0"
+  }
+}

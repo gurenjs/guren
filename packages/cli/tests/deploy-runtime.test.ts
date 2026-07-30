@@ -137,6 +137,32 @@ describe('deploy target detection', () => {
     })
   })
 
+  it('detects the Lambda plugin from package.json dependencies', async () => {
+    await withApp('guren-deploy-lambda-plugin-', {}, { '@guren/plugin-lambda': '^0.1.0' }, async (dir) => {
+      const { targets } = await analyzeDeployRuntime(dir)
+
+      expect(targets).toHaveLength(1)
+      expect(targets[0].profile.label).toBe('AWS Lambda')
+      expect(targets[0].detectedVia).toContain('@guren/plugin-lambda')
+    })
+  })
+
+  it('reports Lambda once when the plugin and the adapter import are both present', async () => {
+    // Installing the plugin also scaffolds src/lambda.ts, so this is the normal
+    // shape of a plugin-based app — both detectors fire on it and every deploy
+    // warning would otherwise be emitted twice.
+    const files = {
+      'src/lambda.ts': `import { createLambdaHandler } from '@guren/core/lambda'\n`,
+    }
+
+    await withApp('guren-deploy-lambda-both-', files, { '@guren/plugin-lambda': '^0.1.0' }, async (dir) => {
+      const { targets } = await analyzeDeployRuntime(dir)
+
+      expect(targets).toHaveLength(1)
+      expect(targets[0].detectedVia).toContain('@guren/plugin-lambda')
+    })
+  })
+
   it('detects the Lambda adapter from a @guren/core/lambda import', async () => {
     const files = {
       'lambda.ts': `import { createLambdaHandler } from '@guren/core/lambda'\nexport const handler = createLambdaHandler(app)\n`,
