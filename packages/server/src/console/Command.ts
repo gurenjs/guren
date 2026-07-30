@@ -36,6 +36,8 @@ export abstract class Command implements CommandInstance {
   /**
    * The command signature.
    * Format: 'command:name {arg} {--option}'
+   * Tokens may carry a description: 'command:name {arg : What it is}'
+   * See `parseSignature` for the full grammar.
    */
   static signature: string
 

@@ -94,6 +94,132 @@ describe('parseSignature', () => {
     expect(result.options[2].name).toBe('cc')
     expect(result.options[2].array).toBe(true)
   })
+
+  test('parses argument description containing spaces', () => {
+    const result = parseSignature('reports:digest {email : The recipient address}')
+    expect(result.arguments).toHaveLength(1)
+    expect(result.arguments[0].name).toBe('email')
+    expect(result.arguments[0].description).toBe('The recipient address')
+    expect(result.arguments[0].required).toBe(true)
+  })
+
+  test('parses option description containing spaces', () => {
+    const result = parseSignature('reports:digest {--dry-run : Do not send anything}')
+    expect(result.options).toHaveLength(1)
+    expect(result.options[0].name).toBe('dry-run')
+    expect(result.options[0].description).toBe('Do not send anything')
+    expect(result.options[0].requiresValue).toBe(false)
+  })
+
+  test('parses description with whitespace on only one side of the colon', () => {
+    const trailing = parseSignature('reports:digest {email: The recipient}')
+    expect(trailing.arguments[0].name).toBe('email')
+    expect(trailing.arguments[0].description).toBe('The recipient')
+
+    const leading = parseSignature('reports:digest {email :Recipient}')
+    expect(leading.arguments[0].name).toBe('email')
+    expect(leading.arguments[0].description).toBe('Recipient')
+  })
+
+  test('parses one-sided separator on a token carrying a marker', () => {
+    const optional = parseSignature('reports:digest {name?: Display name}')
+    expect(optional.arguments[0].name).toBe('name')
+    expect(optional.arguments[0].required).toBe(false)
+    expect(optional.arguments[0].description).toBe('Display name')
+
+    const defaulted = parseSignature('reports:digest {role=user: The assigned role}')
+    expect(defaulted.arguments[0].name).toBe('role')
+    expect(defaulted.arguments[0].defaultValue).toBe('user')
+    expect(defaulted.arguments[0].description).toBe('The assigned role')
+  })
+
+  test('parses argument default value with description', () => {
+    const result = parseSignature('reports:digest {role=user : The role to assign}')
+    expect(result.arguments[0].name).toBe('role')
+    expect(result.arguments[0].defaultValue).toBe('user')
+    expect(result.arguments[0].required).toBe(false)
+    expect(result.arguments[0].description).toBe('The role to assign')
+  })
+
+  test('parses array argument with description', () => {
+    const result = parseSignature('send:email {emails* : One or more addresses}')
+    expect(result.arguments[0].name).toBe('emails')
+    expect(result.arguments[0].array).toBe(true)
+    expect(result.arguments[0].description).toBe('One or more addresses')
+  })
+
+  test('parses option default value with description', () => {
+    const result = parseSignature('users:create {--role=user : The role to assign}')
+    expect(result.options[0].name).toBe('role')
+    expect(result.options[0].defaultValue).toBe('user')
+    expect(result.options[0].requiresValue).toBe(true)
+    expect(result.options[0].description).toBe('The role to assign')
+  })
+
+  test('parses array option with description', () => {
+    const result = parseSignature('users:create {--tag=* : Tags to attach}')
+    expect(result.options[0].name).toBe('tag')
+    expect(result.options[0].array).toBe(true)
+    expect(result.options[0].requiresValue).toBe(true)
+    expect(result.options[0].description).toBe('Tags to attach')
+  })
+
+  test('parses option shortcut with description', () => {
+    const result = parseSignature('mail:send {-q|--queue : Push onto the queue}')
+    expect(result.options[0].name).toBe('queue')
+    expect(result.options[0].shortcut).toBe('q')
+    expect(result.options[0].description).toBe('Push onto the queue')
+  })
+
+  test('parses value-requiring option with description', () => {
+    const result = parseSignature('mail:send {--subject= : Subject line}')
+    expect(result.options[0].name).toBe('subject')
+    expect(result.options[0].requiresValue).toBe(true)
+    expect(result.options[0].defaultValue).toBeUndefined()
+    expect(result.options[0].description).toBe('Subject line')
+  })
+
+  test('parses a signature spread over multiple lines', () => {
+    const result = parseSignature(`reports:digest
+      {email : The recipient address}
+      {--dry-run : Skip delivery}`)
+
+    expect(result.name).toBe('reports:digest')
+    expect(result.arguments).toHaveLength(1)
+    expect(result.arguments[0].name).toBe('email')
+    expect(result.arguments[0].description).toBe('The recipient address')
+    expect(result.options).toHaveLength(1)
+    expect(result.options[0].name).toBe('dry-run')
+    expect(result.options[0].description).toBe('Skip delivery')
+  })
+
+  test('keeps colons inside default values out of descriptions', () => {
+    const result = parseSignature('site:ping {--url=https://example.com}')
+    expect(result.options[0].name).toBe('url')
+    expect(result.options[0].defaultValue).toBe('https://example.com')
+    expect(result.options[0].description).toBeUndefined()
+  })
+
+  test('parses multiple described tokens in one signature', () => {
+    const result = parseSignature(
+      'reports:digest {email : The recipient address} {period? : Reporting period} {--dry-run : Skip delivery} {--limit=10 : Maximum rows}'
+    )
+
+    expect(result.name).toBe('reports:digest')
+    expect(result.arguments).toHaveLength(2)
+    expect(result.arguments[0].name).toBe('email')
+    expect(result.arguments[0].description).toBe('The recipient address')
+    expect(result.arguments[1].name).toBe('period')
+    expect(result.arguments[1].required).toBe(false)
+    expect(result.arguments[1].description).toBe('Reporting period')
+
+    expect(result.options).toHaveLength(2)
+    expect(result.options[0].name).toBe('dry-run')
+    expect(result.options[0].description).toBe('Skip delivery')
+    expect(result.options[1].name).toBe('limit')
+    expect(result.options[1].defaultValue).toBe('10')
+    expect(result.options[1].description).toBe('Maximum rows')
+  })
 })
 
 describe('Input', () => {
@@ -141,6 +267,17 @@ describe('Input', () => {
   test('uses default option value', () => {
     const input = new Input('users:create {--role=user}', [])
     expect(input.option<string>('role')).toBe('user')
+  })
+
+  test('resolves values for tokens carrying a description', () => {
+    const input = new Input(
+      'reports:digest {email : The recipient address} {--dry-run : Skip delivery} {--limit=10 : Maximum rows}',
+      ['ops@example.com', '--dry-run', '--limit', '25']
+    )
+
+    expect(input.argument<string>('email')).toBe('ops@example.com')
+    expect(input.option<boolean>('dry-run')).toBe(true)
+    expect(input.option<string>('limit')).toBe('25')
   })
 
   test('parses short option', () => {
