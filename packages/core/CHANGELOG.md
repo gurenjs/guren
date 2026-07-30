@@ -1,5 +1,81 @@
 # @guren/core
 
+## 1.4.0
+
+### Minor Changes
+
+- a7aec95: Add `createAwsDataApiDatabase()` for Aurora Serverless v2 via the RDS Data API.
+
+  The factory mirrors the other database factories (`getDatabase`, `migrateDatabase`,
+  `configureOrm`, `seedDatabase`, `resetDatabase`, `migrationStatus`) on top of
+  `drizzle-orm/aws-data-api/pg`. The Data API is HTTP-based, so Lambda apps get a
+  Postgres-compatible connection without a connection pool, RDS Proxy, or VPC
+  placement. Connection settings resolve from options or the `DATABASE_NAME`,
+  `DATABASE_RESOURCE_ARN`, and `DATABASE_SECRET_ARN` environment variables;
+  `@aws-sdk/client-rds-data` is an optional peer dependency. Unlike the other
+  factories, `getDatabase()` does not run pending migrations automatically —
+  on Lambda that check costs serialized Data API round trips on every cold
+  start. Run migrations out of band, or opt back in with `migrateOnStart: true`.
+
+- 4b8ed69: Share the deploy plugins' build-time helpers through `@guren/core/internal/deploy-build`
+
+  The Cloudflare, Lambda, and Vercel plugins each carried their own copy of the
+  manifest and path helpers, the static-asset staging step, and the SSR manifest
+  lookup. Cloudflare and Lambda separately listed the dev-only modules a deployed
+  bundle has to stub. That list describes the module graph of any app importing
+  `@guren/core`, so keeping it in two places had already let the copies drift.
+
+  Four behaviour fixes fall out of the plugins now sharing one implementation:
+
+  - `buildVercelOutput` gained the output-directory guard it never had. It
+    deletes `outputDir` before writing, so pointing it at the project previously
+    deleted the source tree.
+  - No plugin accepts the filesystem root as `outputDir`. The old check compared
+    strings, and `out + sep` is `//` at the root, which no absolute path is
+    prefixed by.
+  - `buildCloudflareOutput` and `buildVercelOutput` now honour a custom
+    `publicDir` when reading the client manifest instead of always looking under
+    `<root>/public`. Vercel likewise honours `ssrDir`.
+  - `buildVercelOutput` no longer reports `GUREN_INERTIA_SSR_MANIFEST` as
+    `.vite/manifest.json` when the SSR build emitted the flat `manifest.json`
+    layout instead.
+
+  `buildVercelOutput` now fails when the SSR manifest names a chunk that is not
+  on disk, or one that escapes the SSR output directory. It previously wrote the
+  entry into the function environment unchecked, so a stale or partial SSR build
+  deployed and fell back to client-side rendering at request time. Cloudflare and
+  Lambda already treated this as fatal. It also checks the entrypoint exists
+  before deleting the previous output — the spawned `bun build` caught a missing
+  `src/vercel.ts` too, but only after the last deployable artifact was gone.
+
+  Stubs for the dev-only modules are emitted as throwing functions rather than
+  classes. The stubbed names mix constructors (`new Database()`) with plain calls
+  (`createServer()`), and only a function reports the intended message under
+  both — a class invoked without `new` reports "Class constructor cannot be
+  invoked without 'new'" instead.
+
+### Patch Changes
+
+- Updated dependencies [a7aec95]
+- Updated dependencies [0dabfaa]
+- Updated dependencies [d857bd8]
+- Updated dependencies [c8f89d7]
+- Updated dependencies [473ac6c]
+- Updated dependencies [e5b8688]
+- Updated dependencies [f365707]
+- Updated dependencies [7d18f07]
+- Updated dependencies [27137f9]
+- Updated dependencies [f448a0a]
+- Updated dependencies [3d67c4b]
+- Updated dependencies [aa091f7]
+- Updated dependencies [4e8ccc2]
+- Updated dependencies [ba3aae4]
+- Updated dependencies [704d407]
+- Updated dependencies [5c3ba53]
+  - @guren/orm@1.3.0
+  - @guren/cli@1.6.0
+  - @guren/server@1.5.0
+
 ## 1.3.0
 
 ### Minor Changes

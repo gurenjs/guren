@@ -1,5 +1,140 @@
 # @guren/server
 
+## 1.5.0
+
+### Minor Changes
+
+- e5b8688: feat: let jobs pin their durable wire identity
+
+  Queue identity was derived entirely from the class name — registration,
+  dispatch, and worker lookup all keyed on `jobClass.name`. That breaks a queued
+  message whenever the class name changes between the write and the read: a class
+  renamed while a backlog drains, or a bundler that mangles identifiers. The
+  Vercel plugin hit the second case in production and was fixed at the bundler
+  level, but that fix does not reach a user running their own esbuild or rollup
+  over a Guren app.
+
+  Jobs may now declare a stable wire name:
+
+  ```ts
+  export class SendWelcomeEmailJob extends Job<{ userId: string }> {
+    static jobName = "SendWelcomeEmailJob";
+  }
+  ```
+
+  `registerJob()` and `Job.dispatch()` resolve the name through a new exported
+  `resolveJobName()` helper, which `@guren/testing`'s `FakeQueue` uses as well so
+  the fake keys jobs exactly as the real driver does. Jobs without a `jobName`
+  keep resolving by class name — this is opt-in and backward compatible.
+
+  Only an **own** `jobName` counts. Statics are inherited, so resolving through
+  the prototype chain would make every subclass of a pinned job claim its
+  parent's identity and evict it from the registry. A subclass that wants to
+  share the parent's wire name declares it explicitly.
+
+  ### Upgrading
+
+  The framework's own jobs now declare a `jobName`, pinning their wire name
+  against future bundler mangling. In a normal, unmangled build this is a no-op —
+  the declared name already equals the class name for both `SendMailJob` and
+  `SendNotificationJob` — so it only matters going forward. **If a previous
+  deploy was bundled with identifier mangling**, those jobs were queued under the
+  mangled name (`a`, `t`, …) and will not resolve against the now-declared one;
+  drain the affected queues before upgrading.
+
+  `@guren/testing` now imports `resolveJobName` from `@guren/server`. Its
+  `@guren/server` peer range stays at `>=1.0.0` — tightening it would only be
+  satisfied once `@guren/server` itself is released at the
+  version shipping this feature, which breaks workspace linking against the
+  not-yet-released version in the meantime, and `.changeset/config.json`'s
+  `onlyUpdatePeerDependentsWhenOutOfRange` deliberately keeps this range wide so
+  routine `@guren/server` bumps don't force a spurious major on `@guren/testing`.
+  Pair a current `@guren/testing` with a current `@guren/server`.
+
+- 27137f9: Console commands are wired up automatically, and `guren check` reports the ones that are not.
+
+  `make:command` wrote a class and printed the registration step for the user to
+  perform by hand. Forgetting it left dead code with no signal — the same bug the
+  console entrypoint was added to fix, recurring once per generated command.
+
+  `make:command` now performs that wiring: a project-level command is imported
+  and appended to `kernel.registerMany([...])` in `src/console.ts`, and
+  `bunx guren check` warns about any command class a console entrypoint never
+  uses outside its imports.
+
+  `defineModule()` gains a `commands` field alongside `routes` and `providers`,
+  so a module's commands reach the root kernel through its public surface:
+
+  ```ts
+  // modules/billing/index.ts — make:command --module billing writes this
+  export const billingModule = defineModule({
+    name: "billing",
+    commands: [InvoiceCommand],
+  });
+
+  // src/console.ts — add once per module
+  kernel.registerMany(billingModule.commands);
+  ```
+
+  Previously the only route was re-exporting the command from the module's
+  `index.ts`, because importing it directly from `src/console.ts` reaches into
+  module internals and fails `guren check --arch`.
+
+  `guren context` now lists console commands, which were invisible to it before.
+
+### Patch Changes
+
+- ba3aae4: Fix queued notifications delivering nothing
+
+  A notification with `static shouldQueue = true` was queued and picked up by the
+  worker, but no channel was ever invoked. Serialization spread the notification
+  into a plain payload (`{ ...notification }`), which copies only own enumerable
+  properties — `via`, `toMail`, `toDatabase` and `toSlack` all live on the
+  prototype and were dropped. The job handler then rebuilt a shim that read the
+  delivery channels from a `_viaChannels` field nothing ever wrote, so `via()`
+  returned an empty list and the send loop had nothing to iterate. The
+  synchronous path was unaffected.
+
+  Queued notifications are now rebuilt as real instances. Notification classes
+  are recorded in a registry keyed on `notification.type` and restored with
+  `Object.create(prototype)`, which brings back every prototype method without
+  re-running the constructor (constructor arguments are not recoverable from a
+  payload). Registration happens automatically when a notification is queued,
+  which covers a worker sharing the dispatching process; a worker in a separate
+  process should call the newly exported `registerNotification()` at boot, and an
+  unregistered type now throws instead of failing silently.
+
+  Routing survives the queue too. The worker used to guess a notifiable's routes
+  from a `${channel}Route` property convention that the documented `Notifiable`
+  does not follow, so a queued notification to a user routing Slack via
+  `this.slackId` silently fell back to the org-wide webhook. `routeNotificationFor()`
+  is arbitrary user code — frequently a closure on an object literal — and cannot
+  be rebuilt from a payload, so it is now called at dispatch and the resolved
+  routes travel with the job. Payloads written before this release still fall
+  back to the old convention.
+
+  The job itself was also unreachable from a dedicated worker. It was registered
+  only as a side effect of dispatching, under the name of an internal per-manager
+  subclass, so `guren queue:work` running as its own process failed every
+  notification with `Job class not found`. That subclass is gone — since the
+  queue registry keys on the class name, every manager overwrote the same entry
+  anyway — leaving one `SendNotificationJob` that `NotificationServiceProvider`
+  registers on boot via the new `NotificationManager#registerQueueJob()`.
+
+  Also: `createdAt` is serialized explicitly and revived as a `Date`, so drivers
+  that persist JSON (Redis, SQS) no longer hand channels a string. `Notifiable`
+  gained an optional `notifiableType`, honored by `DatabaseChannel` through the
+  newly exported `resolveNotifiableType()`, so a notifiable rebuilt from a
+  payload keeps its original type name instead of recording `Object`.
+
+  Because rebuilt notifications are real instances, a user-defined `shouldSend()`
+  is now honored on the queued path; the previous shim hardcoded it to `true`.
+
+- Updated dependencies [a7aec95]
+- Updated dependencies [7d18f07]
+- Updated dependencies [f448a0a]
+  - @guren/orm@1.3.0
+
 ## 1.4.0
 
 ### Minor Changes
