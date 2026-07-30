@@ -4,6 +4,7 @@ import type { WriterOptions } from './utils'
 import { camelCase, ensureSuffix, kebabCase, relativeImportPath, resourceName, safeModuleName, scaffoldFile } from './utils'
 import { addImport, addToArrayArgument, addToArrayOption } from './patch-helpers'
 import { fileExists, readIfExists } from './discovery'
+import { registersCommandsOf } from './check'
 
 const COMMANDS_DIR = 'app/Console/Commands'
 const CONSOLE_ENTRY = 'src/console.ts'
@@ -144,7 +145,9 @@ async function printModuleConsoleHopGuidance(moduleName: string): Promise<void> 
   const moduleBinding = `${camelCase(moduleName)}Module`
   const consoleSource = await readIfExists(process.cwd(), CONSOLE_ENTRY)
 
-  if (consoleSource?.includes(`${moduleBinding}.commands`)) return
+  // Same test `guren check` applies, so the two never disagree about whether
+  // this step is still outstanding.
+  if (consoleSource !== null && registersCommandsOf(consoleSource, [moduleBinding])) return
 
   consola.info(`Register the module's commands with your console kernel in ${CONSOLE_ENTRY}:`)
   consola.info(`  import { ${moduleBinding} } from '../modules/${moduleName}/index.js'`)

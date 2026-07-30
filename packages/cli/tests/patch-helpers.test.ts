@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
-import { addImport, addToArrayOption } from '../src/patch-helpers'
+import { addImport, addToArrayArgument, addToArrayOption } from '../src/patch-helpers'
 import { createTempWorkspace } from './helpers'
 
 describe('addImport', () => {
@@ -243,5 +243,85 @@ const app = createApp({
     } finally {
       await workspace.cleanup()
     }
+  })
+})
+
+describe('addToArrayArgument', () => {
+  async function withConsole(contents: string, run: () => Promise<void>): Promise<string> {
+    const workspace = await createTempWorkspace('guren-cli-array-argument-')
+    try {
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      await writeFile(join(workspace.dir, 'src/console.ts'), contents, 'utf8')
+      await run()
+      return await readFile(join(workspace.dir, 'src/console.ts'), 'utf8')
+    } finally {
+      await workspace.cleanup()
+    }
+  }
+
+  it('appends to an empty array literal', async () => {
+    const result = await withConsole('kernel.registerMany([])\n', async () => {
+      expect((await addToArrayArgument('src/console.ts', 'registerMany', 'Alpha')).modified).toBe(true)
+    })
+    expect(result).toBe('kernel.registerMany([Alpha])\n')
+  })
+
+  it('skips a call that only appears in a comment', async () => {
+    const source = `// kernel.registerMany([Disabled])
+/**
+ * kernel.registerMany([Documented])
+ */
+kernel.registerMany([Real])
+`
+    const result = await withConsole(source, async () => {
+      expect((await addToArrayArgument('src/console.ts', 'registerMany', 'Alpha')).modified).toBe(true)
+    })
+    expect(result).toContain('// kernel.registerMany([Disabled])')
+    expect(result).toContain(' * kernel.registerMany([Documented])')
+    expect(result).toContain('kernel.registerMany([Real, Alpha])')
+  })
+
+  it('is not fooled by a URL earlier on the same line', async () => {
+    const result = await withConsole(`const docs = 'https://guren.dev'; kernel.registerMany([])\n`, async () => {
+      expect((await addToArrayArgument('src/console.ts', 'registerMany', 'Alpha')).modified).toBe(true)
+    })
+    expect(result).toContain('kernel.registerMany([Alpha])')
+  })
+
+  it('appends before a trailing comment rather than into it', async () => {
+    const source = `kernel.registerMany([
+  Existing, // primary
+])
+`
+    const result = await withConsole(source, async () => {
+      await addToArrayArgument('src/console.ts', 'registerMany', 'Alpha')
+    })
+    expect(result).toContain('Existing, Alpha, // primary')
+  })
+
+  it('appends at the top level of a nested array', async () => {
+    const result = await withConsole('kernel.registerMany([Basic, ...(dev ? [Dev] : [])])\n', async () => {
+      await addToArrayArgument('src/console.ts', 'registerMany', 'Alpha')
+    })
+    expect(result).toBe('kernel.registerMany([Basic, ...(dev ? [Dev] : []), Alpha])\n')
+  })
+
+  it('leaves a call whose argument is not an array literal alone', async () => {
+    const source = `kernel.registerMany(billingModule.commands)
+kernel.registerMany([Real])
+`
+    const result = await withConsole(source, async () => {
+      await addToArrayArgument('src/console.ts', 'registerMany', 'Alpha')
+    })
+    expect(result).toContain('kernel.registerMany(billingModule.commands)')
+    expect(result).toContain('kernel.registerMany([Real, Alpha])')
+  })
+
+  it('reports Already present without rewriting the file', async () => {
+    const source = 'kernel.registerMany([\n  Alpha,\n])\n'
+    const result = await withConsole(source, async () => {
+      expect((await addToArrayArgument('src/console.ts', 'registerMany', 'Alpha')).reason).toBe('Already present')
+    })
+    expect(result).toBe(source)
   })
 })

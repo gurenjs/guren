@@ -1,4 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises'
+import { readIfExists } from './discovery'
 import { resolve } from 'node:path'
 import { escapeRegExp } from './utils'
 
@@ -8,63 +9,115 @@ export interface PatchResult {
 }
 
 /**
- * File contents, or `null` when the file does not exist — the one condition
- * every patch below reports as `'File not found'` rather than throwing.
- */
-async function readFileOrNull(absolutePath: string): Promise<string | null> {
-  try {
-    return await readFile(absolutePath, 'utf8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return null
-    }
-    throw error
-  }
-}
-
-/**
- * Whether `index` falls inside a `//` line comment. These patches match by
- * regex, so a commented-out example of the very call they look for — a
- * disabled `// kernel.registerMany([Foo])`, say — would otherwise be edited
- * in place of the real one, leaving the file "patched" but unchanged in
- * behavior.
- */
-function isInLineComment(content: string, index: number): boolean {
-  const lineStart = content.lastIndexOf('\n', index) + 1
-  const commentStart = content.slice(lineStart, index).indexOf('//')
-  return commentStart !== -1
-}
-
-/**
- * Finds the first match of `pattern` that is not inside a line comment.
- */
-function matchOutsideComments(content: string, pattern: RegExp): RegExpExecArray | null {
-  const scanner = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`)
-
-  for (let match = scanner.exec(content); match !== null; match = scanner.exec(content)) {
-    if (!isInLineComment(content, match.index)) return match
-  }
-
-  return null
-}
-
-/**
- * Entries of an array literal's interior, e.g. `'A, B'` -> `['A', 'B']`, or
- * `null` when the interior carries a comment. Splitting on commas and
- * re-joining on one line would fold a trailing `// keep this` over the rest
- * of the statement, so an array a human has annotated is left for them to
- * edit rather than silently mangled.
+ * A copy of `source` with the contents of comments and string literals
+ * blanked out, character for character, so every index still lines up with
+ * the original.
  *
- * Shared so that "is this entry already present" means the same thing for
- * every array a patch edits.
+ * These patches locate their edit site by regex, and text that merely *looks*
+ * like code is the failure mode in both directions: a disabled
+ * `// kernel.registerMany([Foo])` or a docblock example gets edited in place
+ * of the real call, while a `'https://…'` earlier on the line makes a real
+ * call look commented out. Matching against the mask and slicing from the
+ * original settles both, and keeps brace/bracket counting from tripping over
+ * a `{` inside a string.
  */
-function parseArrayEntries(inner: string): string[] | null {
-  if (inner.includes('//') || inner.includes('/*')) return null
+function maskNonCode(source: string): string {
+  const mask = source.split('')
+  let i = 0
 
-  return inner
+  while (i < source.length) {
+    const char = source[i]
+    const next = source[i + 1]
+
+    // Comments are blanked whole, delimiters included, so that nothing inside
+    // one can ever read as the last code token on a line.
+    if (char === '/' && next === '/') {
+      while (i < source.length && source[i] !== '\n') mask[i++] = ' '
+      continue
+    }
+
+    if (char === '/' && next === '*') {
+      const end = source.indexOf('*/', i + 2)
+      const stop = end === -1 ? source.length : end + 2
+      while (i < stop) mask[i++] = ' '
+      continue
+    }
+
+    // String and template bodies are blanked but their quotes are kept, so a
+    // string entry still ends where the code ends.
+    if (char === '"' || char === "'" || char === '`') {
+      i++
+      while (i < source.length && source[i] !== char) {
+        if (source[i] === '\\') mask[i++] = ' '
+        mask[i++] = ' '
+      }
+      i++
+      continue
+    }
+
+    i++
+  }
+
+  return mask.join('')
+}
+
+/**
+ * First match of `pattern` that lands in real code rather than a comment or
+ * a string. Indices refer to `content`; read spans out of `content`, not out
+ * of the mask, which is blanked.
+ */
+function matchInCode(content: string, pattern: RegExp): RegExpExecArray | null {
+  return new RegExp(pattern.source, 'g').exec(maskNonCode(content))
+}
+
+/**
+ * Index of the delimiter closing the one at `openIndex`, or `-1`. Counts
+ * depth over the masked source, so nesting is respected and a bracket inside
+ * a string or comment does not shift the result.
+ */
+export function findClosingDelimiter(content: string, openIndex: number, open: string, close: string): number {
+  const masked = maskNonCode(content)
+  let depth = 0
+
+  for (let i = openIndex; i < masked.length; i++) {
+    if (masked[i] === open) depth++
+    else if (masked[i] === close) {
+      depth--
+      if (depth === 0) return i
+    }
+  }
+
+  return -1
+}
+
+/**
+ * Entries of an array literal's interior, e.g. `'A, B'` -> `['A', 'B']`.
+ * Comment and string text is blanked first, so a name that only appears in a
+ * comment is not mistaken for an existing entry.
+ */
+function parseArrayEntries(inner: string): string[] {
+  return maskNonCode(inner)
     .split(',')
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0)
+}
+
+/**
+ * `arrayInterior` with `valueSource` appended. The existing text is preserved
+ * verbatim rather than re-joined from parsed entries: re-joining collapses a
+ * formatted multi-line array onto one line and folds any trailing `// note`
+ * over the rest of the statement.
+ */
+function appendArrayEntry(arrayInterior: string, valueSource: string): string {
+  // Length of the interior up to its last code character: everything after it
+  // is whitespace or a trailing comment, and the new entry has to go before
+  // that or it lands inside the comment.
+  const codeLength = maskNonCode(arrayInterior).replace(/\s+$/u, '').length
+  const code = arrayInterior.slice(0, codeLength)
+  const trailing = arrayInterior.slice(codeLength)
+
+  if (code.trim() === '') return `${valueSource}${trailing}`
+  return code.endsWith(',') ? `${code} ${valueSource},${trailing}` : `${code}, ${valueSource}${trailing}`
 }
 
 /**
@@ -76,7 +129,7 @@ export async function addImport(
   importStatement: string,
 ): Promise<PatchResult> {
   const absolutePath = resolve(process.cwd(), filePath)
-  const content = await readFileOrNull(absolutePath)
+  const content = await readIfExists(process.cwd(), filePath)
 
   if (content === null) {
     return { modified: false, reason: 'File not found' }
@@ -145,7 +198,7 @@ export async function addProvider(
   isRegistered?: (entries: string[]) => boolean,
 ): Promise<PatchResult> {
   const absolutePath = resolve(process.cwd(), filePath)
-  const content = await readFileOrNull(absolutePath)
+  const content = await readIfExists(process.cwd(), filePath)
 
   if (content === null) {
     return { modified: false, reason: 'File not found' }
@@ -161,10 +214,6 @@ export async function addProvider(
 
   const providersContent = match[1]
   const providers = parseArrayEntries(providersContent)
-
-  if (providers === null) {
-    return { modified: false, reason: 'Providers array contains comments' }
-  }
 
   const alreadyRegistered = isRegistered
     ? isRegistered(providers)
@@ -196,25 +245,16 @@ function findCallOptionsSpan(
   callName: string,
 ): { start: number; end: number } | string {
   const callPattern = new RegExp(`\\b${escapeRegExp(callName)}\\(\\s*\\{`)
-  const match = matchOutsideComments(content, callPattern)
+  const match = matchInCode(content, callPattern)
 
   if (!match) {
     return `Could not find a ${callName}({ ... }) call`
   }
 
   const start = match.index + match[0].length - 1
-  let depth = 0
+  const end = findClosingDelimiter(content, start, '{', '}')
 
-  for (let i = start; i < content.length; i++) {
-    const char = content[i]
-    if (char === '{') depth++
-    else if (char === '}') {
-      depth--
-      if (depth === 0) return { start, end: i }
-    }
-  }
-
-  return `Could not parse ${callName} options object`
+  return end === -1 ? `Could not parse ${callName} options object` : { start, end }
 }
 
 /**
@@ -240,7 +280,7 @@ export async function addToArrayOption(
   callName = 'createApp',
 ): Promise<PatchResult> {
   const absolutePath = resolve(process.cwd(), filePath)
-  const content = await readFileOrNull(absolutePath)
+  const content = await readIfExists(process.cwd(), filePath)
 
   if (content === null) {
     return { modified: false, reason: 'File not found' }
@@ -253,26 +293,27 @@ export async function addToArrayOption(
   }
 
   const optionsSource = content.slice(span.start, span.end + 1)
-  const arrayPattern = new RegExp(`${escapeRegExp(key)}:\\s*\\[([\\s\\S]*?)\\]`)
-  const match = optionsSource.match(arrayPattern)
+  const keyMatch = matchInCode(optionsSource, new RegExp(`(?:^|[{,]\\s*)${escapeRegExp(key)}\\s*:\\s*\\[`))
 
-  if (!match) {
+  if (!keyMatch) {
     return addCreateAppOption(filePath, key, `[${valueSource}]`, callName)
   }
 
-  const entries = parseArrayEntries(match[1])
+  const open = span.start + keyMatch.index + keyMatch[0].length - 1
+  const close = findClosingDelimiter(content, open, '[', ']')
 
-  if (entries === null) {
-    return { modified: false, reason: `${key} array contains comments` }
+  if (close === -1) {
+    return { modified: false, reason: `Could not parse the ${key} array` }
   }
 
-  if (entries.some((entry) => entry === valueSource)) {
+  const interior = content.slice(open + 1, close)
+
+  if (parseArrayEntries(interior).some((entry) => entry === valueSource)) {
     return { modified: false, reason: 'Already present' }
   }
 
-  entries.push(valueSource)
-  const updatedOptions = optionsSource.replace(arrayPattern, `${key}: [${entries.join(', ')}]`)
-  const updatedContent = content.slice(0, span.start) + updatedOptions + content.slice(span.end + 1)
+  const updatedContent
+    = content.slice(0, open + 1) + appendArrayEntry(interior, valueSource) + content.slice(close)
 
   await writeFile(absolutePath, updatedContent, 'utf8')
   return { modified: true }
@@ -295,35 +336,36 @@ export async function addToArrayArgument(
   valueSource: string,
 ): Promise<PatchResult> {
   const absolutePath = resolve(process.cwd(), filePath)
-  const content = await readFileOrNull(absolutePath)
+  const content = await readIfExists(process.cwd(), filePath)
 
   if (content === null) {
     return { modified: false, reason: 'File not found' }
   }
 
   const callPattern = new RegExp(
-    `(?:[\\w$]+(?:\\.[\\w$]+)*\\.)?${escapeRegExp(methodName)}\\s*\\(\\s*\\[([\\s\\S]*?)\\]\\s*\\)`,
+    `(?:[\\w$]+(?:\\.[\\w$]+)*\\.)?${escapeRegExp(methodName)}\\s*\\(\\s*\\[`,
   )
-  const match = matchOutsideComments(content, callPattern)
+  const match = matchInCode(content, callPattern)
 
   if (!match) {
     return { modified: false, reason: `Could not find a ${methodName}([ ... ]) call` }
   }
 
-  const entries = parseArrayEntries(match[1])
+  const open = match.index + match[0].length - 1
+  const close = findClosingDelimiter(content, open, '[', ']')
 
-  if (entries === null) {
-    return { modified: false, reason: `${methodName}() array contains comments` }
+  if (close === -1) {
+    return { modified: false, reason: `Could not parse the ${methodName}() array` }
   }
 
-  if (entries.some((entry) => entry === valueSource)) {
+  const interior = content.slice(open + 1, close)
+
+  if (parseArrayEntries(interior).some((entry) => entry === valueSource)) {
     return { modified: false, reason: 'Already present' }
   }
 
-  entries.push(valueSource)
-  const replacement = match[0].replace(/\[[\s\S]*\]/, `[${entries.join(', ')}]`)
   const updatedContent
-    = content.slice(0, match.index) + replacement + content.slice(match.index + match[0].length)
+    = content.slice(0, open + 1) + appendArrayEntry(interior, valueSource) + content.slice(close)
 
   await writeFile(absolutePath, updatedContent, 'utf8')
   return { modified: true }
@@ -454,7 +496,7 @@ export async function addCreateAppOption(
   callName = 'createApp',
 ): Promise<PatchResult> {
   const absolutePath = resolve(process.cwd(), filePath)
-  const content = await readFileOrNull(absolutePath)
+  const content = await readIfExists(process.cwd(), filePath)
 
   if (content === null) {
     return { modified: false, reason: 'File not found' }

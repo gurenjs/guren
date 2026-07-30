@@ -882,6 +882,50 @@ kernel.registerMany([InvoiceCommand])`,
     }
   })
 
+  it('does not credit a prefix-sharing module (billing vs billing-reports)', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-console-prefix-')
+
+    try {
+      for (const [name, cls, binding] of [
+        ['billing', 'InvoiceCommand', 'billingModule'],
+        ['billing-reports', 'DigestCommand', 'billingReportsModule'],
+      ] as const) {
+        await mkdir(join(workspace.dir, `modules/${name}/app/Console/Commands`), { recursive: true })
+        await writeFile(
+          join(workspace.dir, `modules/${name}/app/Console/Commands/${cls}.ts`),
+          COMMAND_SOURCE.replace(/SendDigestCommand/g, cls),
+          'utf8',
+        )
+        await writeFile(
+          join(workspace.dir, `modules/${name}/index.ts`),
+          `import { defineModule } from '@guren/core'
+import ${cls} from './app/Console/Commands/${cls}.js'
+
+export const ${binding} = defineModule({ name: '${name}', commands: [${cls}] })`,
+          'utf8',
+        )
+      }
+
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'src/console.ts'),
+        `import { ConsoleKernel } from '@guren/core'
+import { billingReportsModule } from '../modules/billing-reports/index.js'
+
+export const kernel = new ConsoleKernel()
+kernel.registerMany(billingReportsModule.commands)`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      expect(report.checks.find(c => c.key === 'console-module-commands:billing-reports')!.status).toBe('pass')
+      expect(report.checks.find(c => c.key === 'console-module-commands:billing')!.status).toBe('warn')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it("warns when a module's commands never reach a kernel", async () => {
     const workspace = await createTempWorkspace('guren-cli-check-console-module-hop-')
 

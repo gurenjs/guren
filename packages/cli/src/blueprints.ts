@@ -10,7 +10,7 @@ import { makeModel } from './make-model'
 import { makeNotification } from './make-notification'
 import { makeRoute } from './make-route'
 import { makeView } from './make-view'
-import { addImport, addProvider, ensureDrizzleImports, ensureMysqlImports, ensureSqliteImports } from './patch-helpers'
+import { addImport, addProvider, ensureDrizzleImports, ensureMysqlImports, ensureSqliteImports, findClosingDelimiter } from './patch-helpers'
 import { camelCase, kebabCase, pascalCase, writeFilesSafe, type WriterOptions } from './utils'
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -830,19 +830,7 @@ async function updateResourceRoutes(singular: string, routeName: string, routeVa
     let inserted = false
     if (registrarMatch && registrarMatch.index !== undefined) {
       const openIndex = registrarMatch.index + registrarMatch[0].length - 1
-      let depth = 0
-      let closeIndex = -1
-      for (let i = openIndex; i < content.length; i++) {
-        const char = content[i]
-        if (char === '{') depth++
-        else if (char === '}') {
-          depth--
-          if (depth === 0) {
-            closeIndex = i
-            break
-          }
-        }
-      }
+      const closeIndex = findClosingDelimiter(content, openIndex, '{', '}')
       if (closeIndex !== -1) {
         content = content.slice(0, closeIndex) + groupBlock + content.slice(closeIndex)
         inserted = true

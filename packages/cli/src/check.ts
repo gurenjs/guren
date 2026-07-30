@@ -132,28 +132,44 @@ const CONSOLE_ENTRY = 'src/console.ts'
 interface EntrySource {
   /** Top-level statements minus `import` declarations. */
   body: string
-  /** Local bindings introduced by imports whose specifier contains `fragment`. */
-  bindingsFrom(fragment: string): string[]
+  /** One entry per `import`: its specifier and the local names it binds. */
+  imports: Array<{ specifier: string; names: string[] }>
 }
 
 async function readEntrySource(cache: ParseCache, absPath: string): Promise<EntrySource | null> {
   const parsed = await cache.get(absPath)
   if (!parsed) return null
 
-  const imports = parsed.ast.program.body.filter((node) => node.type === 'ImportDeclaration')
   const body = parsed.ast.program.body
     .filter((node) => node.type !== 'ImportDeclaration')
     .map((node) => parsed.source.slice(node.start ?? 0, node.end ?? 0))
     .join('\n')
 
-  return {
-    body,
-    bindingsFrom(fragment) {
-      return imports
-        .filter((node) => node.source.value.includes(fragment))
-        .flatMap((node) => node.specifiers.map((specifier) => specifier.local.name))
-    },
-  }
+  const imports = parsed.ast.program.body
+    .filter((node) => node.type === 'ImportDeclaration')
+    .map((node) => ({
+      specifier: node.source.value,
+      names: node.specifiers.map((specifier) => specifier.local.name),
+    }))
+
+  return { body, imports }
+}
+
+/**
+ * Local names `entry` imports from inside `modules/<moduleName>/`. The
+ * trailing slash is load-bearing: a bare `modules/billing` substring also
+ * matches `modules/billing-reports`, which would credit one module's
+ * registration to another.
+ */
+function bindingsFromModule(entry: EntrySource, moduleName: string): string[] {
+  return entry.imports
+    .filter((imported) => imported.specifier.includes(`modules/${moduleName}/`))
+    .flatMap((imported) => imported.names)
+}
+
+/** Whether `body` uses `name` as an identifier. */
+function referencesName(body: string, name: string): boolean {
+  return new RegExp(`\\b${escapeRegExp(name)}\\b`, 'u').test(body)
 }
 
 /**
@@ -164,7 +180,7 @@ async function readEntrySource(cache: ParseCache, absPath: string): Promise<Entr
  * more than one module in play: matching `.commands` anywhere would report a
  * module as registered because a *different* module's line is present.
  */
-function registersCommandsOf(body: string, bindings: string[]): boolean {
+export function registersCommandsOf(body: string, bindings: string[]): boolean {
   return bindings.some((binding) =>
     new RegExp(`\\b${escapeRegExp(binding)}\\s*(?:\\.\\s*[\\w$]+\\s*)*\\.\\s*commands\\b`, 'u').test(body),
   )
@@ -185,13 +201,10 @@ function registersCommandsOf(body: string, bindings: string[]): boolean {
  * - a module's command must be named by `modules/<name>/index.ts`
  *   (`defineModule({ commands: [...] })`), the module's public surface
  *
- * Detection is a name reference outside the entry's imports, and nothing
- * more: it says the entrypoint uses the class, not that the kernel ends up
- * with it. Import statements are excluded because a leftover
- * `import SendDigestCommand from ...` is exactly the state this check exists
- * to catch — the command is still dead, and counting the import would report
- * it as wired. `warn`, never `fail`, since a name reference is not proof of
- * registration in the other direction either.
+ * Detection is a name reference outside the entry's imports (see
+ * {@link EntrySource}), and nothing more: it says the entrypoint uses the
+ * class, not that the kernel ends up with it. `warn`, never `fail`, since a
+ * name reference is not proof of registration in the other direction either.
  *
  * Not filtered by `--changed`, unlike the file-scanning checks above: what
  * decides the outcome is the *entrypoint's* content, so the edit that breaks
@@ -204,6 +217,8 @@ async function checkConsoleCommandRegistration(cwd: string, cache: ParseCache): 
   if (commandFiles.length === 0) return []
 
   const results: CheckResult[] = []
+  // Read at most once, however many modules ask about it.
+  let consoleEntry: EntrySource | null | undefined
 
   // Grouped by entrypoint so a missing one is reported once, not once per
   // command it would have registered.
@@ -218,12 +233,16 @@ async function checkConsoleCommandRegistration(cwd: string, cache: ParseCache): 
 
   for (const [entry, { moduleName, files }] of byEntry) {
     const names = files.map((file) => classNameFromPath(file))
+    const entryKey = `console-entry:${entry}`
+    const entryTitle = moduleName ? `${moduleName} console registration` : 'Console entrypoint'
 
+    // Probed separately because `readEntrySource` returns null for a missing
+    // file and an unparseable one alike, and those want different advice.
     if (!(await fileExists(cwd, entry))) {
       results.push(
         check(
-          `console-entry:${entry}`,
-          moduleName ? `${moduleName} console registration` : 'Console entrypoint',
+          entryKey,
+          entryTitle,
           'warn',
           `${names.join(', ')} ${names.length === 1 ? 'exists' : 'exist'} but there is no ${entry} to register `
           + `${names.length === 1 ? 'it' : 'them'} in.`,
@@ -242,8 +261,8 @@ async function checkConsoleCommandRegistration(cwd: string, cache: ParseCache): 
     if (entrySource === null) {
       results.push(
         check(
-          `console-entry:${entry}`,
-          moduleName ? `${moduleName} console registration` : 'Console entrypoint',
+          entryKey,
+          entryTitle,
           'warn',
           `${entry} could not be parsed, so ${names.join(', ')} cannot be verified as registered.`,
           `Check ${entry} for a syntax error.`,
@@ -254,7 +273,7 @@ async function checkConsoleCommandRegistration(cwd: string, cache: ParseCache): 
 
     for (const filePath of files) {
       const name = classNameFromPath(filePath)
-      const registered = new RegExp(`\\b${name}\\b`, 'u').test(entrySource.body)
+      const registered = referencesName(entrySource.body, name)
       const suggestion = moduleName
         ? `Import ${name} in ${entry} and add it to defineModule({ commands: [...] }).`
         : `Import ${name} in ${entry} and add it to kernel.registerMany([...]).`
@@ -275,7 +294,8 @@ async function checkConsoleCommandRegistration(cwd: string, cache: ParseCache): 
     }
 
     if (moduleName) {
-      results.push(await checkModuleCommandHop(cwd, cache, moduleName, names))
+      consoleEntry ??= await readEntrySource(cache, resolve(cwd, CONSOLE_ENTRY))
+      results.push(checkModuleCommandHop(consoleEntry, moduleName, names))
     }
   }
 
@@ -292,23 +312,24 @@ async function checkConsoleCommandRegistration(cwd: string, cache: ParseCache): 
  * `commands` array registered wholesale, or the individual classes registered
  * by name (what a project predating the `commands` field does).
  */
-async function checkModuleCommandHop(
-  cwd: string,
-  cache: ParseCache,
+function checkModuleCommandHop(
+  entry: EntrySource | null,
   moduleName: string,
   commandNames: string[],
-): Promise<CheckResult> {
+): CheckResult {
   const binding = `${camelCase(moduleName)}Module`
-  const entry = await readEntrySource(cache, resolve(cwd, CONSOLE_ENTRY))
 
-  // A binding from the module's own import, so that `.commands` belonging to
-  // a *different* module can't satisfy this one. The conventional name is a
-  // fallback for imports through a path alias, which carry no `modules/<name>`.
-  const bindings = [...entry?.bindingsFrom(`modules/${moduleName}`) ?? [], binding]
+  // Bindings come from the module's own import, so that `.commands` belonging
+  // to a *different* module cannot satisfy this one. Only when that lookup
+  // finds nothing — an import through a path alias, say — does the
+  // conventional name stand in; adding it unconditionally could only
+  // manufacture a pass.
+  const imported = entry === null ? [] : bindingsFromModule(entry, moduleName)
+  const bindings = imported.length > 0 ? imported : [binding]
   const hopped
     = entry !== null
     && (registersCommandsOf(entry.body, bindings)
-      || commandNames.every((name) => new RegExp(`\\b${name}\\b`, 'u').test(entry.body)))
+      || commandNames.every((name) => referencesName(entry.body, name)))
 
   return check(
     `console-module-commands:${moduleName}`,
