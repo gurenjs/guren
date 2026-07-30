@@ -58,23 +58,36 @@ available to MCP-connected agents as the `guren_entity_context` tool.
 ## Declared: linking docs to code
 
 Decisions and business context live as markdown under `docs/` (and
-`modules/<name>/docs/`). Frontmatter declares what a document governs:
+`modules/<name>/docs/`). The directory is an
+[Open Knowledge Format](https://github.com/GoogleCloudPlatform/knowledge-catalog/tree/main/okf)
+(OKF) bundle: each document is markdown with YAML frontmatter, `type`
+is the one field the format requires, and relations are ordinary
+markdown links plus Guren's validated extensions:
 
 ```yaml
 ---
-kind: adr
-status: accepted
+type: adr
+status: stable            # draft | stable | deprecated (absent = stable)
 entities: [Invoice]
 related:
   - app/Http/Controllers/InvoiceController.ts
   - modules/billing/**
-last_reviewed: 2026-07-25
+generated: { by: human:ada, at: 2026-07-25T09:00:00Z }
+verified: { by: human:grace, at: 2026-07-26T09:00:00Z }
 ---
 ```
 
 - `entities` links by model class name — `bunx guren context Invoice`
   surfaces the document to whoever touches that model next.
 - `related` links files or globs for docs that govern non-model code.
+  Both are Guren extensions to OKF (which permits producer-defined keys).
+- Ordinary markdown links in the body are OKF's own relation mechanism
+  and are validated too — `[orders](/adr/0002-orders.md)` resolves from
+  the doc's `docs/` bundle root, relative paths from the doc itself.
+- `generated` and `verified` record who wrote and who confirmed the
+  content, in OKF's actor convention (`human:<id>`, `process:<id>`, or
+  `<producer>/<version>` for agents) — in an agent-maintained corpus,
+  provenance is what makes a document trustable.
 - Models and controllers can link back with a JSDoc tag:
   `/** @docs docs/adr/0001-billing.md */` (tags in other files aren't scanned).
 
@@ -85,8 +98,10 @@ bunx guren make:adr "Billing cycle is end-of-month" --entity Invoice
 ```
 
 It numbers the file under `docs/adr/`, prefills the frontmatter, and
-`--entity` fills `entities:` and `related:` from what already exists.
-Every new Guren app ships with a seed ADR explaining the convention.
+`--entity` fills `entities:` and `related:` from what already exists
+(`--by` overrides the `generated.by` actor, which defaults to the git
+author). Every new Guren app ships with a seed ADR explaining the
+convention.
 
 ## Checked: the gates
 
@@ -114,9 +129,9 @@ A stale document is worse than no document for an AI agent — it reads
 the lie with full confidence. Because the derived views regenerate from
 code and the declared links are validated by the check suite, an agent
 that runs `bunx guren context Invoice` gets context whose links and
-derived views are verified — the checker said so. (Prose freshness is a
-separate, opt-in warning: `check --docs --docs-ttl <days>` flags docs
-whose `last_reviewed` has aged out.) The agent harness in every new app teaches
+derived views are verified — the checker said so. (Prose freshness is
+declared per document: a doc that sets OKF's `stale_after: <date>`
+gets a warning once that day passes.) The agent harness in every new app teaches
 this loop — pull the entity context before touching a model, keep
 frontmatter in sync when moving files, regenerate spec views with
 structural changes — and the edit hook enforces it mechanically.

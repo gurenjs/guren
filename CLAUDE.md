@@ -104,7 +104,7 @@ bunx guren model:list --format json  # Models as JSON
 bunx guren check                # Validate route↔controller↔page consistency, console command registration, architecture boundaries, and doc links (informational; only --arch/--docs set the exit code)
 bunx guren check --json         # Check results as JSON
 bunx guren check --arch         # Architecture boundary checks only (guren.arch.ts) — fast path for edit hooks
-bunx guren check --docs         # Doc-link checks only: docs/ frontmatter (entities/related) + @docs tags (exits non-zero on failures)
+bunx guren check --docs         # Doc-link checks only: OKF frontmatter (type/entities/related) + body markdown links + @docs tags (exits non-zero on failures)
 bunx guren check --spec         # Spec drift checks only: docs/spec/ vs regenerated views (exits non-zero on failures)
 bunx guren spec:generate        # Generate spec views (er/domain/screens/modules) into docs/spec/ — deterministic, committed, drift-gated
 bunx guren check --changed      # Restrict file-scanning checks to files changed vs. the merge base with main

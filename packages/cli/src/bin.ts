@@ -155,11 +155,20 @@ const makeAdrCommand = defineCommand({
       type: 'string',
       description: 'Model class name to prefill entities:/related: with (case-insensitive).',
     },
+    by: {
+      type: 'string',
+      description:
+        'OKF actor for generated.by (human:<id>, process:<id>, or <producer>/<version>). Defaults to the git author.',
+    },
     force: { type: 'boolean', description: 'Overwrite existing files', alias: 'f' },
     module: MODULE_ARG,
   },
   async run({ args }) {
-    const file = await makeAdr(args.name, { ...toWriterOptions(args), entity: args.entity })
+    const file = await makeAdr(args.name, {
+      ...toWriterOptions(args),
+      entity: args.entity,
+      by: args.by,
+    })
     consola.success(`ADR created at ${file}`)
   },
 })
@@ -1742,10 +1751,6 @@ const checkCommand = defineCommand({
       type: 'boolean',
       description: 'Run only spec drift checks (docs/spec/ vs regenerated views).',
     },
-    'docs-ttl': {
-      type: 'string',
-      description: 'Warn when a doc\'s last_reviewed is older than N days.',
-    },
     changed: {
       type: 'boolean',
       description: 'Restrict file-scanning checks to files changed vs. the merge base with main.',
@@ -1758,7 +1763,6 @@ const checkCommand = defineCommand({
       routesFile: args.routes,
       arch: Boolean(args.arch),
       docs: Boolean(args.docs),
-      docsTtlDays: args['docs-ttl'] ? Number(args['docs-ttl']) : undefined,
       spec: Boolean(args.spec),
       changed: Boolean(args.changed),
     })

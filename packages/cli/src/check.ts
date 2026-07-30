@@ -47,8 +47,6 @@ export interface RunCheckOptions {
    * exit code from day one.
    */
   docs?: boolean
-  /** Warn when a doc's `last_reviewed` is older than this many days. Off when unset. */
-  docsTtlDays?: number
   /** Run spec drift checks only (docs/spec/ vs regenerated views). */
   spec?: boolean
 }
@@ -212,7 +210,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   // plain mode and under --docs; content-activated, so apps without the
   // docs convention contribute zero results here.
   if (runs('docs')) {
-    const docsResults = await runDocsCheck({ cwd, changedFiles, ttlDays: options.docsTtlDays, cache })
+    const docsResults = await runDocsCheck({ cwd, changedFiles, cache })
     checks.push(...docsResults)
   }
 

@@ -40,9 +40,14 @@ export interface EntityPage {
 export interface EntityDoc {
   path: string
   title?: string
-  kind?: string
+  /** OKF `type` (adr, context, guide, spec, …). */
+  type?: string
   status?: string
-  lastReviewed?: string
+  description?: string
+  /** OKF `generated.at` — when the content last meaningfully changed. */
+  generatedAt?: string
+  /** Latest OKF `verified[].at`, when the doc records verification events. */
+  verifiedAt?: string
 }
 
 export interface EntityContext {
@@ -300,9 +305,21 @@ export async function generateEntityContext(
     .sort((a, b) => a.localeCompare(b))
     .map((path): EntityDoc => {
       const ref = docRefByPath.get(path)
-      return ref
-        ? { path, title: ref.title, kind: ref.kind, status: ref.status, lastReviewed: ref.lastReviewed }
-        : { path }
+      if (!ref) return { path }
+      const verifiedAt = ref.verified
+        .map((event) => event.at)
+        .filter((at): at is string => at !== undefined)
+        .sort()
+        .at(-1)
+      return {
+        path,
+        title: ref.title,
+        type: ref.type,
+        status: ref.status,
+        description: ref.description,
+        generatedAt: ref.generated?.at,
+        verifiedAt,
+      }
     })
 
   return {
@@ -414,7 +431,11 @@ export function renderEntityContextMarkdown(ctx: EntityContext): string {
   if (ctx.docs.length > 0) {
     lines.push(`## Linked docs (${ctx.docs.length})`)
     for (const doc of ctx.docs) {
-      const meta = [doc.kind, doc.status, doc.lastReviewed ? `reviewed ${doc.lastReviewed}` : undefined]
+      const meta = [
+        doc.type,
+        doc.status,
+        doc.verifiedAt ? `verified ${doc.verifiedAt}` : undefined,
+      ]
         .filter(Boolean)
         .join(', ')
       lines.push(`- ${doc.path}${doc.title ? ` — ${doc.title}` : ''}${meta ? ` (${meta})` : ''}`)

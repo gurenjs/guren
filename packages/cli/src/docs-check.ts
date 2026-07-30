@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises'
+import { posix } from 'node:path'
 import {
   discoverModelFiles,
   discoverControllerFiles,
@@ -17,13 +18,9 @@ export interface DocsCheckOptions {
   cwd: string
   /** Restrict validation to changed docs and tags in changed source files. */
   changedFiles?: Set<string> | null
-  /** Warn when `last_reviewed` is older than this many days. Off when unset. */
-  ttlDays?: number
   /** Reuses sources already read by the surrounding `runCheck`, when present. */
   cache?: ParseCache
 }
-
-const MS_PER_DAY = 24 * 60 * 60 * 1000
 
 function hasGlobChars(entry: string): boolean {
   return entry.includes('*')
@@ -37,27 +34,50 @@ function isAppRootRelative(entry: string): boolean {
   return !entry.startsWith('/') && !/^[A-Za-z]:/.test(entry) && !entry.split('/').includes('..')
 }
 
-/** Calendar-day difference, treating both sides as dates (not instants). */
-function daysSince(isoDate: string): number | null {
-  const reviewedAt = Date.parse(isoDate)
-  if (Number.isNaN(reviewedAt)) return null
+/**
+ * OKF §5.5: content is stale when `today >= stale_after`. An absolute
+ * date keeps this a plain comparison; an unparseable date is not stale
+ * (the producer's mistake shows up in review, not as a false alarm).
+ */
+function isStale(staleAfter: string): boolean {
+  const staleAt = Date.parse(staleAfter)
+  if (Number.isNaN(staleAt)) return false
   const now = new Date()
-  const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())
-  return Math.floor((todayUtc - reviewedAt) / MS_PER_DAY)
+  return Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) >= staleAt
 }
 
 const MODEL_FILE_PATTERN = /(?:^|\/)app\/Models\/[^/]+\.(?:ts|mts|js|mjs)$/
 
 /**
- * Doc-link validation (RFC 0004): frontmatter `related` paths/globs must
- * resolve, `entities` must name real models, `@docs` tags in model and
- * controller sources must point at existing files, and entities whose only
- * linked docs are superseded get flagged. Activates on content — an app
- * with no docs and no tags produces zero results, so nothing goes red on
- * projects that haven't adopted the convention.
+ * Resolve a body markdown link to an app-root-relative path. A leading
+ * `/` is bundle-relative (OKF §6.1): it resolves from the doc's own
+ * `docs/` root, so `/adr/0002-x.md` in `docs/adr/0001-y.md` means
+ * `docs/adr/0002-x.md` and module docs stay within their module's
+ * bundle. Anything else is relative to the doc's directory and may
+ * reach into the app (`../../app/...`). Null when the target escapes
+ * the app root.
+ */
+function resolveDocLink(docPath: string, target: string): string | null {
+  const base = target.startsWith('/')
+    ? docPath.slice(0, docPath.indexOf('docs/') + 'docs/'.length)
+    : posix.dirname(docPath)
+  const joined = posix.join(base, target.startsWith('/') ? target.slice(1) : target)
+  return joined === '..' || joined.startsWith('../') ? null : joined
+}
+
+/**
+ * Doc-link validation (RFC 0004): docs are OKF concept documents, so
+ * frontmatter must carry `type` (the one field OKF requires), body
+ * markdown links (OKF's relation mechanism) must resolve, frontmatter
+ * `related` paths/globs must resolve, `entities` must name real models,
+ * `@docs` tags in model and controller sources must point at existing
+ * files, and entities whose only linked docs are superseded get flagged.
+ * Activates on content — an app with no docs and no tags produces zero
+ * results, so nothing goes red on projects that haven't adopted the
+ * convention.
  */
 export async function runDocsCheck(options: DocsCheckOptions): Promise<CheckResult[]> {
-  const { cwd, changedFiles, ttlDays, cache } = options
+  const { cwd, changedFiles, cache } = options
   const results: CheckResult[] = []
 
   const [refs, modelFiles, controllerFiles] = await Promise.all([
@@ -109,11 +129,23 @@ export async function runDocsCheck(options: DocsCheckOptions): Promise<CheckResu
     if (!changedList) return true
     if (changedFiles!.has(ref.path)) return true
     if (ref.entities.some((entity) => changedModelNames!.has(entity.toLowerCase()))) return true
-    return ref.related.some((entry) => {
-      if (hasGlobChars(entry)) return changedList.some((file) => matchesGlob(file, entry))
-      const normalized = entry.replace(/\/$/, '')
+    const targetChanged = (path: string): boolean => {
+      const normalized = path.replace(/\/$/, '')
       // A directory target is in scope when anything beneath it changed.
       return changedList.some((file) => file === normalized || file.startsWith(`${normalized}/`))
+    }
+    if (
+      ref.related.some((entry) =>
+        hasGlobChars(entry)
+          ? changedList.some((file) => matchesGlob(file, entry))
+          : targetChanged(entry),
+      )
+    ) {
+      return true
+    }
+    return ref.links.some((target) => {
+      const resolved = resolveDocLink(ref.path, target)
+      return resolved !== null && targetChanged(resolved)
     })
   }
 
@@ -123,11 +155,51 @@ export async function runDocsCheck(options: DocsCheckOptions): Promise<CheckResu
   for (const ref of docsWithFrontmatter) {
     if (!inScope.has(ref.path)) continue
 
+    if (!ref.type) {
+      results.push(
+        check(
+          `docs-type:${ref.path}`,
+          `${ref.path} type`,
+          'fail',
+          `Doc has frontmatter but no 'type' — the one field OKF requires.`,
+          `Add a 'type:' field (adr, context, guide, spec, …) to ${ref.path}.`,
+          ref.path,
+        ),
+      )
+    }
+
     const relatedChecks = await Promise.all(
       ref.related.map(async (entry) => ({ entry, ok: await entryResolves(entry) })),
     )
     const brokenRelated = relatedChecks.filter((result) => !result.ok).map((result) => result.entry)
     const brokenEntities = ref.entities.filter((entity) => !modelNames.has(entity.toLowerCase()))
+
+    const linkChecks = await Promise.all(
+      ref.links.map(async (target) => {
+        const resolved = resolveDocLink(ref.path, target)
+        return { target, ok: resolved !== null && (await fileExists(cwd, resolved)) }
+      }),
+    )
+    const brokenLinks = linkChecks.filter((result) => !result.ok).map((result) => result.target)
+
+    // A missing target is a warn, not a fail: OKF §6.1 treats a broken
+    // link as possibly not-yet-written knowledge, not as malformed. A
+    // link that escapes the app root is malformed and fails.
+    for (const target of brokenLinks) {
+      const escapes = resolveDocLink(ref.path, target) === null
+      results.push(
+        check(
+          `docs-link:${ref.path}:${target}`,
+          `${ref.path} → ${target}`,
+          escapes ? 'fail' : 'warn',
+          escapes
+            ? `Doc links to '${target}', which escapes the app root.`
+            : `Doc links to '${target}' but no such file exists (renamed, deleted, or not written yet?).`,
+          `Fix the markdown link in ${ref.path}${escapes ? '' : ', restore the target, or write the missing doc'}.`,
+          ref.path,
+        ),
+      )
+    }
 
     for (const entry of brokenRelated) {
       const escapes = !isAppRootRelative(entry)
@@ -158,24 +230,26 @@ export async function runDocsCheck(options: DocsCheckOptions): Promise<CheckResu
       )
     }
 
-    if (ttlDays && ttlDays > 0 && ref.lastReviewed) {
-      const age = daysSince(ref.lastReviewed)
-      if (age !== null && age > ttlDays) {
-        results.push(
-          check(
-            `docs-stale:${ref.path}`,
-            `${ref.path} freshness`,
-            'warn',
-            `last_reviewed (${ref.lastReviewed}) is older than ${ttlDays} days.`,
-            `Re-read ${ref.path}, update it if needed, and bump last_reviewed.`,
-            ref.path,
-          ),
-        )
-      }
+    if (ref.staleAfter && isStale(ref.staleAfter)) {
+      results.push(
+        check(
+          `docs-stale:${ref.path}`,
+          `${ref.path} freshness`,
+          'warn',
+          `stale_after (${ref.staleAfter}) has passed — the doc declares its content stale.`,
+          `Re-read ${ref.path}, update it if needed, and move stale_after forward (or remove it).`,
+          ref.path,
+        ),
+      )
     }
 
-    const totalLinks = ref.related.length + ref.entities.length
-    if (totalLinks > 0 && brokenRelated.length === 0 && brokenEntities.length === 0) {
+    const totalLinks = ref.related.length + ref.entities.length + ref.links.length
+    if (
+      totalLinks > 0
+      && brokenRelated.length === 0
+      && brokenEntities.length === 0
+      && brokenLinks.length === 0
+    ) {
       results.push(
         check(
           `docs-links:${ref.path}`,
@@ -189,20 +263,41 @@ export async function runDocsCheck(options: DocsCheckOptions): Promise<CheckResu
     }
   }
 
-  // Entities whose only frontmatter-linked docs are superseded: the entity
+  // OKF conformance (§11) asks every non-reserved doc to carry
+  // frontmatter with a `type`. Only warn, and only once the app has
+  // adopted the convention — a project with zero frontmatter docs stays
+  // silent, preserving the activates-on-content principle.
+  if (docsWithFrontmatter.length > 0) {
+    for (const ref of refs) {
+      if (ref.hasFrontmatter) continue
+      if (changedFiles && !changedFiles.has(ref.path)) continue
+      results.push(
+        check(
+          `docs-frontmatter:${ref.path}`,
+          `${ref.path} frontmatter`,
+          'warn',
+          `Doc has no frontmatter, so it is not an OKF concept document and never links to anything.`,
+          `Add a frontmatter block with at least a 'type:' field to ${ref.path}.`,
+          ref.path,
+        ),
+      )
+    }
+  }
+
+  // Entities whose only frontmatter-linked docs are deprecated: the entity
   // still "has documentation", but nothing current governs it.
   for (const [entityKey, docs] of buildEntityDocIndex(docsWithFrontmatter)) {
     const canonicalName = modelNames.get(entityKey)
     if (!canonicalName) continue
-    const allSuperseded = docs.every((ref) => ref.status === 'superseded')
-    if (allSuperseded && docs.some((ref) => inScope.has(ref.path))) {
+    const allDeprecated = docs.every((ref) => ref.status === 'deprecated')
+    if (allDeprecated && docs.some((ref) => inScope.has(ref.path))) {
       results.push(
         check(
-          `docs-superseded:${canonicalName}`,
+          `docs-deprecated:${canonicalName}`,
           `${canonicalName} docs`,
           'warn',
-          `Every doc linked to this entity is superseded (${docs.map((d) => d.path).join(', ')}).`,
-          `Write or link a current doc for the entity, or remove it from the superseded doc's 'entities'.`,
+          `Every doc linked to this entity is deprecated (${docs.map((d) => d.path).join(', ')}).`,
+          `Write or link a current doc for the entity, or remove it from the deprecated doc's 'entities'.`,
         ),
       )
     }

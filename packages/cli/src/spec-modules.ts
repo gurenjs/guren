@@ -10,7 +10,7 @@ import {
   IMPORTABLE_EXTENSIONS,
   NON_SOURCE_DIR_NAMES,
 } from './discovery'
-import { SPEC_BANNER, compareStrings, mermaidToken, type SpecArtifact } from './spec-artifact'
+import { SPEC_BANNER, specFrontmatter, compareStrings, mermaidToken, type SpecArtifact } from './spec-artifact'
 
 /** Label for the application root, which has no module name of its own. */
 const APP = 'app'
@@ -173,7 +173,13 @@ export async function generateModulesSpec(cwd: string): Promise<SpecArtifact> {
 
   const locations = [...(appParticipates ? [APP] : []), ...moduleNames]
 
-  const lines: string[] = [SPEC_BANNER, '', '# Modules', '']
+  const lines: string[] = [
+    ...specFrontmatter('Modules', 'Application modules, the models each owns, and the dependencies between them.'),
+    SPEC_BANNER,
+    '',
+    '# Modules',
+    '',
+  ]
   lines.push(
     moduleNames.length > 0
       ? `Application modules under \`modules/\`, the models each owns, and the dependencies between them — `

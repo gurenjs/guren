@@ -170,10 +170,11 @@ export default function Index({ posts }: Props) {
   await writeFile(
     join(dir, 'docs/adr/0001-posts-are-public.md'),
     `---
-kind: adr
-status: accepted
+type: adr
+status: stable
 entities: [Post]
-last_reviewed: 2026-07-25
+generated: { by: human:ada, at: 2026-07-20T09:00:00Z }
+verified: { by: human:grace, at: 2026-07-25T09:00:00Z }
 ---
 
 # Posts are public by default
@@ -238,9 +239,11 @@ describe('entity context (blog fixture)', () => {
       {
         path: 'docs/adr/0001-posts-are-public.md',
         title: 'Posts are public by default',
-        kind: 'adr',
-        status: 'accepted',
-        lastReviewed: '2026-07-25',
+        type: 'adr',
+        status: 'stable',
+        description: undefined,
+        generatedAt: '2026-07-20T09:00:00Z',
+        verifiedAt: '2026-07-25T09:00:00Z',
       },
     ])
 
@@ -249,9 +252,11 @@ describe('entity context (blog fixture)', () => {
       {
         path: 'docs/context/users.md',
         title: 'User lifecycle',
-        kind: undefined,
+        type: undefined,
         status: undefined,
-        lastReviewed: undefined,
+        description: undefined,
+        generatedAt: undefined,
+        verifiedAt: undefined,
       },
     ])
   })
@@ -262,7 +267,7 @@ describe('entity context (blog fixture)', () => {
 
     expect(md).toContain('## Linked docs (1)')
     expect(md).toContain(
-      '- docs/adr/0001-posts-are-public.md — Posts are public by default (adr, accepted, reviewed 2026-07-25)',
+      '- docs/adr/0001-posts-are-public.md — Posts are public by default (adr, stable, verified 2026-07-25T09:00:00Z)',
     )
   })
 

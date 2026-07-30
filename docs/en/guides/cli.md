@@ -91,7 +91,7 @@ exiting non-zero on failures in that suite:
 ```bash
 bunx guren audit
 bunx guren check --arch    # architecture boundaries (guren.arch.ts + module rules)
-bunx guren check --docs    # doc links: frontmatter entities/related + @docs tags
+bunx guren check --docs    # doc links: OKF frontmatter (type/entities/related) + body links + @docs tags
 bunx guren check --spec    # docs/spec/ views match a fresh regeneration
 ```
 

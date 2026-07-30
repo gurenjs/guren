@@ -89,7 +89,7 @@ bunx guren plugin @acme/guren-plugin-audit
 ```bash
 bunx guren audit
 bunx guren check --arch    # アーキテクチャ境界(guren.arch.ts + モジュールルール)
-bunx guren check --docs    # docリンク: frontmatterのentities/related + @docsタグ
+bunx guren check --docs    # docリンク: OKF frontmatter(type/entities/related)+ 本文リンク + @docsタグ
 bunx guren check --spec    # docs/spec/ が再生成結果と一致するか
 ```
 

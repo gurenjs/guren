@@ -1,4 +1,4 @@
-import { resolve } from 'node:path'
+import { basename, resolve } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import {
   collectFiles,
@@ -8,28 +8,61 @@ import {
 
 const MARKDOWN_EXTENSIONS = new Set(['.md'])
 
+/** One `{ by, at }` event from OKF's `generated` / `verified` families. */
+export interface DocActorEvent {
+  /** Actor per OKF §7: `human:<id>`, `process:<id>`, or `<producer>/<version>`. */
+  by?: string
+  /** ISO 8601 datetime, verbatim. */
+  at?: string
+}
+
 /**
  * A markdown document under `docs/` (or `modules/<name>/docs/`) with its
- * parsed frontmatter. Documents without frontmatter are still listed
- * (`hasFrontmatter: false`) but never linked or validated.
+ * parsed frontmatter — an OKF (Open Knowledge Format v0.2) concept
+ * document. OKF requires only `type`; `title`/`description`/`resource`/
+ * `tags` are its recommended fields, `generated`/`verified`/`status`/
+ * `stale_after` its trust and lifecycle families, and `entities`/`related`
+ * are Guren's producer extensions. The reserved filenames `index.md` and
+ * `log.md` are never concepts and are excluded from the scan. Documents
+ * without frontmatter are still listed (`hasFrontmatter: false`) but
+ * never linked.
  */
 export interface DocRef {
   /** Path relative to the app root (POSIX separators). */
   path: string
   /** Module whose `docs/` directory contains the file, or null for the root `docs/`. */
   module: string | null
-  /** First `# heading` in the body, if any. */
+  /** Frontmatter `title`, falling back to the first `# heading` in the body. */
   title?: string
-  kind?: string
+  /** OKF `type` — the one field the format requires (adr, context, guide, spec, …). */
+  type?: string
+  /** OKF lifecycle `status`: draft | stable | deprecated. Absent means stable. */
   status?: string
+  description?: string
+  /** Canonical URI of the asset the concept describes, when it has one. */
+  resource?: string
+  tags: string[]
   /** Model class names this document governs (frontmatter `entities`). */
   entities: string[]
   /** Paths or globs this document governs (frontmatter `related`). */
   related: string[]
-  /** Frontmatter `last_reviewed` (YYYY-MM-DD), verbatim. */
-  lastReviewed?: string
+  /** OKF `generated` — who/what last wrote the content, and when. */
+  generated?: DocActorEvent
+  /** OKF `verified` — confirmation events; a bare mapping parses as one entry. */
+  verified: DocActorEvent[]
+  /** OKF `stale_after` (YYYY-MM-DD) — content is stale on/after this day. */
+  staleAfter?: string
+  /**
+   * Local markdown link targets in the body — OKF's relation mechanism.
+   * External links, bare anchors, and links inside code are excluded;
+   * fragments are stripped.
+   */
+  links: string[]
   hasFrontmatter: boolean
 }
+
+/** OKF reserved filenames (§3.1) — navigation, never concept documents. */
+const RESERVED_FILENAMES = new Set(['index.md', 'log.md'])
 
 function unquote(value: string): string {
   if (
@@ -134,6 +167,66 @@ function toScalar(value: string | string[] | undefined): string | undefined {
 }
 
 /**
+ * Parse a YAML inline map (`{ by: human:ada, at: 2026-06-25T09:00:00Z }`)
+ * into a flat string record — the shape OKF's `generated` and `verified`
+ * entries use. Values may contain colons (datetimes, actor ids), so each
+ * part splits on the first `key:` prefix only. Null when the value is not
+ * an inline map.
+ */
+function parseInlineMap(value: string): Record<string, string> | null {
+  const trimmed = value.trim()
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return null
+  const record: Record<string, string> = {}
+  for (const part of splitInlineArray(trimmed.slice(1, -1))) {
+    const kv = /^([A-Za-z_][\w-]*):\s*(.*)$/.exec(part)
+    if (kv) record[kv[1]] = unquote(kv[2].trim())
+  }
+  return record
+}
+
+function toActorEvent(value: string | string[] | undefined): DocActorEvent | undefined {
+  if (typeof value !== 'string') return undefined
+  const map = parseInlineMap(value)
+  if (!map) return undefined
+  return { by: map.by, at: map.at }
+}
+
+/**
+ * OKF `verified` accepts a list of `{ by, at }` maps or a bare mapping;
+ * consumers must treat the bare form as a one-element list (§5.2).
+ */
+function toActorEvents(value: string | string[] | undefined): DocActorEvent[] {
+  if (value === undefined) return []
+  const entries = Array.isArray(value) ? value : [value]
+  return entries
+    .map((entry) => toActorEvent(entry))
+    .filter((event): event is DocActorEvent => event !== undefined)
+}
+
+const MARKDOWN_LINK_REGEX = /!?\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
+const URL_SCHEME_REGEX = /^[a-z][a-z0-9+.-]*:/i
+
+/**
+ * Local markdown link targets in a doc body — OKF expresses relations as
+ * plain markdown links, so these are graph edges worth validating. Code
+ * fences and inline code are stripped first (docs about the docs
+ * convention quote example links), external URLs and bare `#anchor` links
+ * are skipped, and fragments are dropped from what remains.
+ */
+export function extractMarkdownLinks(body: string): string[] {
+  const withoutCode = body.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '')
+  const targets = new Set<string>()
+  let match: RegExpExecArray | null
+  while ((match = MARKDOWN_LINK_REGEX.exec(withoutCode)) !== null) {
+    const target = match[1]
+    if (URL_SCHEME_REGEX.test(target) || target.startsWith('#')) continue
+    const withoutFragment = target.split('#')[0]
+    if (withoutFragment !== '') targets.add(withoutFragment)
+  }
+  return [...targets]
+}
+
+/**
  * Every markdown file under the root `docs/` plus each module's `docs/`,
  * with parsed frontmatter. Missing directories resolve to nothing — apps
  * without a docs convention see zero refs, never an error.
@@ -145,23 +238,31 @@ export async function scanDocs(cwd: string): Promise<DocRef[]> {
     roots.map(async (root) => {
       const files = await collectFiles(resolve(root.dir, 'docs'), MARKDOWN_EXTENSIONS)
       return Promise.all(
-        files.map(async (file): Promise<DocRef> => {
-          const source = await readFile(file, 'utf-8')
-          const parsed = parseDocFrontmatter(source)
-          const body = parsed?.body ?? source
-          const data = parsed?.data ?? {}
-          return {
-            path: toPosixRelative(cwd, file),
-            module: root.module,
-            title: /^#\s+(.+)$/m.exec(body)?.[1].trim(),
-            kind: toScalar(data.kind),
-            status: toScalar(data.status),
-            entities: toStringList(data.entities),
-            related: toStringList(data.related),
-            lastReviewed: toScalar(data.last_reviewed),
-            hasFrontmatter: parsed !== null,
-          }
-        }),
+        files
+          .filter((file) => !RESERVED_FILENAMES.has(basename(file).toLowerCase()))
+          .map(async (file): Promise<DocRef> => {
+            const source = await readFile(file, 'utf-8')
+            const parsed = parseDocFrontmatter(source)
+            const body = parsed?.body ?? source
+            const data = parsed?.data ?? {}
+            return {
+              path: toPosixRelative(cwd, file),
+              module: root.module,
+              title: toScalar(data.title) ?? /^#\s+(.+)$/m.exec(body)?.[1].trim(),
+              type: toScalar(data.type),
+              status: toScalar(data.status),
+              description: toScalar(data.description),
+              resource: toScalar(data.resource),
+              tags: toStringList(data.tags),
+              entities: toStringList(data.entities),
+              related: toStringList(data.related),
+              generated: toActorEvent(data.generated),
+              verified: toActorEvents(data.verified),
+              staleAfter: toScalar(data.stale_after),
+              links: parsed ? extractMarkdownLinks(body) : [],
+              hasFrontmatter: parsed !== null,
+            }
+          }),
       )
     }),
   )

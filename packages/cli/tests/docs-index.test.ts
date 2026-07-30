@@ -1,54 +1,60 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
-import { parseDocFrontmatter, scanDocs, extractDocsTags, buildEntityDocIndex } from '../src/docs-index'
+import {
+  parseDocFrontmatter,
+  scanDocs,
+  extractDocsTags,
+  extractMarkdownLinks,
+  buildEntityDocIndex,
+} from '../src/docs-index'
 import { createTempWorkspace } from './helpers'
 
 describe('parseDocFrontmatter', () => {
   it('parses scalars, inline arrays, and block lists', () => {
     const parsed = parseDocFrontmatter(`---
-kind: adr
-status: accepted
+type: adr
+status: stable
 entities: [User, Invoice]
 related:
   - app/Models/Invoice.ts
   - modules/billing/**
-last_reviewed: 2026-07-25
+stale_after: 2026-07-25
 ---
 
 # Billing cycle
 `)
 
     expect(parsed).not.toBeNull()
-    expect(parsed!.data.kind).toBe('adr')
-    expect(parsed!.data.status).toBe('accepted')
+    expect(parsed!.data.type).toBe('adr')
+    expect(parsed!.data.status).toBe('stable')
     expect(parsed!.data.entities).toEqual(['User', 'Invoice'])
     expect(parsed!.data.related).toEqual(['app/Models/Invoice.ts', 'modules/billing/**'])
-    expect(parsed!.data.last_reviewed).toBe('2026-07-25')
+    expect(parsed!.data.stale_after).toBe('2026-07-25')
     expect(parsed!.body).toContain('# Billing cycle')
   })
 
   it('strips quotes from values', () => {
     const parsed = parseDocFrontmatter(`---
-kind: "adr"
+type: "adr"
 entities: ['User']
 ---
 body`)
 
-    expect(parsed!.data.kind).toBe('adr')
+    expect(parsed!.data.type).toBe('adr')
     expect(parsed!.data.entities).toEqual(['User'])
   })
 
   it('strips inline YAML comments from unquoted values', () => {
     const parsed = parseDocFrontmatter(`---
-status: superseded # replaced by 0009
+status: deprecated # replaced by 0009
 entities: [Post] # main entity
 related:
   - app/Models/Post.ts # the model
 ---
 `)
 
-    expect(parsed!.data.status).toBe('superseded')
+    expect(parsed!.data.status).toBe('deprecated')
     expect(parsed!.data.entities).toEqual(['Post'])
     expect(parsed!.data.related).toEqual(['app/Models/Post.ts'])
   })
@@ -79,8 +85,37 @@ entities: []
   })
 })
 
+describe('extractMarkdownLinks', () => {
+  it('extracts local link and image targets, stripping fragments', () => {
+    const links = extractMarkdownLinks(`
+See [orders](/adr/0002-orders.md#joins) and [the model](../../app/Models/Post.ts).
+![diagram](./diagram.png)
+`)
+
+    expect(links).toEqual(['/adr/0002-orders.md', '../../app/Models/Post.ts', './diagram.png'])
+  })
+
+  it('skips external URLs, bare anchors, and links inside code', () => {
+    const links = extractMarkdownLinks(`
+[dashboard](https://example.com/dash) [mail](mailto:a@b.c) [above](#schema)
+
+\`\`\`markdown
+[example](/tables/customers.md)
+\`\`\`
+
+Inline \`[code](/not-a-link.md)\` too, but [real](./real.md).
+`)
+
+    expect(links).toEqual(['./real.md'])
+  })
+
+  it('deduplicates repeated targets', () => {
+    expect(extractMarkdownLinks('[a](./x.md) and [b](./x.md#frag)')).toEqual(['./x.md'])
+  })
+})
+
 describe('scanDocs', () => {
-  it('scans root docs/ and module docs/, extracting titles', async () => {
+  it('scans root docs/ and module docs/, extracting OKF frontmatter', async () => {
     const workspace = await createTempWorkspace('guren-cli-docs-scan-')
 
     try {
@@ -90,12 +125,21 @@ describe('scanDocs', () => {
       await writeFile(
         join(dir, 'docs/adr/0001-billing-cycle.md'),
         `---
-kind: adr
-status: accepted
+type: adr
+status: stable
+description: Billing runs end-of-month.
+tags: [billing, finance]
 entities: [Post]
+generated: { by: my-agent/1.0, at: 2026-07-25T09:00:00Z }
+verified:
+  - { by: human:ada, at: 2026-07-26T09:00:00Z }
+  - { by: process:nightly, at: 2026-07-27T02:00:00Z }
+stale_after: 2026-12-31
 ---
 
 # Billing cycle is end-of-month
+
+Linked to [context](/context.md).
 `,
         'utf8',
       )
@@ -111,14 +155,70 @@ entities: [Post]
       const adr = refs.find((r) => r.path === 'docs/adr/0001-billing-cycle.md')
       expect(adr?.module).toBeNull()
       expect(adr?.title).toBe('Billing cycle is end-of-month')
-      expect(adr?.kind).toBe('adr')
+      expect(adr?.type).toBe('adr')
+      expect(adr?.status).toBe('stable')
+      expect(adr?.description).toBe('Billing runs end-of-month.')
+      expect(adr?.tags).toEqual(['billing', 'finance'])
       expect(adr?.entities).toEqual(['Post'])
+      expect(adr?.generated).toEqual({ by: 'my-agent/1.0', at: '2026-07-25T09:00:00Z' })
+      expect(adr?.verified).toEqual([
+        { by: 'human:ada', at: '2026-07-26T09:00:00Z' },
+        { by: 'process:nightly', at: '2026-07-27T02:00:00Z' },
+      ])
+      expect(adr?.staleAfter).toBe('2026-12-31')
+      expect(adr?.links).toEqual(['/context.md'])
       expect(adr?.hasFrontmatter).toBe(true)
 
       const moduleDoc = refs.find((r) => r.path === 'modules/billing/docs/context.md')
       expect(moduleDoc?.module).toBe('billing')
       expect(moduleDoc?.hasFrontmatter).toBe(false)
       expect(moduleDoc?.title).toBe('Billing context')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('prefers frontmatter title and treats a bare verified mapping as one entry', async () => {
+    const workspace = await createTempWorkspace('guren-cli-docs-title-')
+
+    try {
+      const dir = workspace.dir
+      await mkdir(join(dir, 'docs'), { recursive: true })
+      await writeFile(
+        join(dir, 'docs/billing.md'),
+        `---
+type: context
+title: Billing overview
+verified: { by: human:ada, at: 2026-07-26T09:00:00Z }
+---
+
+# A different heading
+`,
+        'utf8',
+      )
+
+      const [ref] = await scanDocs(dir)
+
+      expect(ref.title).toBe('Billing overview')
+      expect(ref.verified).toEqual([{ by: 'human:ada', at: '2026-07-26T09:00:00Z' }])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('skips the reserved index.md and log.md filenames', async () => {
+    const workspace = await createTempWorkspace('guren-cli-docs-reserved-')
+
+    try {
+      const dir = workspace.dir
+      await mkdir(join(dir, 'docs/adr'), { recursive: true })
+      await writeFile(join(dir, 'docs/index.md'), '# Listing\n', 'utf8')
+      await writeFile(join(dir, 'docs/adr/log.md'), '# Update log\n', 'utf8')
+      await writeFile(join(dir, 'docs/adr/0001-x.md'), '---\ntype: adr\n---\n\n# X\n', 'utf8')
+
+      const refs = await scanDocs(dir)
+
+      expect(refs.map((r) => r.path)).toEqual(['docs/adr/0001-x.md'])
     } finally {
       await workspace.cleanup()
     }
@@ -168,15 +268,21 @@ describe('buildEntityDocIndex', () => {
       {
         path: 'docs/a.md',
         module: null,
+        tags: [],
         entities: ['Post', 'User'],
         related: [],
+        verified: [],
+        links: [],
         hasFrontmatter: true,
       },
       {
         path: 'docs/b.md',
         module: null,
+        tags: [],
         entities: ['Post'],
         related: [],
+        verified: [],
+        links: [],
         hasFrontmatter: true,
       },
     ])
