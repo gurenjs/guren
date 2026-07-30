@@ -185,6 +185,21 @@ kernel.registerMany([])
       }
     })
 
+    it('scaffolds but does not invent an index when the module has none', async () => {
+      const workspace = await createTempWorkspace('guren-cli-cmd-register-module-noindex-')
+      try {
+        const file = await scaffoldAndRegister('Invoice', { root: 'billing' })
+
+        expect(file).toContain('modules/billing/app/Console/Commands/InvoiceCommand.ts')
+        // Registration is skipped with printed guidance — writing a bare
+        // index.ts here would clobber the module's public surface contract.
+        const index = await readFile(join(workspace.dir, 'modules/billing/index.ts'), 'utf8').catch(() => null)
+        expect(index).toBeNull()
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+
     it('does not reach into the module from src/console.ts', async () => {
       const workspace = await createTempWorkspace('guren-cli-cmd-register-module-boundary-')
       try {

@@ -396,6 +396,82 @@ kernel.registerMany([InvoiceCommand])`,
     }
   })
 
+  it("accepts bracket access to the module's commands", async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-console-bracket-access-')
+
+    try {
+      await mkdir(join(workspace.dir, 'modules/billing/app/Console/Commands'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'modules/billing/app/Console/Commands/InvoiceCommand.ts'),
+        COMMAND_SOURCE.replace(/SendDigestCommand/g, 'InvoiceCommand'),
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'modules/billing/index.ts'),
+        `import { defineModule } from '@guren/core'
+import InvoiceCommand from './app/Console/Commands/InvoiceCommand.js'
+
+export const billingModule = defineModule({ name: 'billing', commands: [InvoiceCommand] })`,
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'src/console.ts'),
+        `import { ConsoleKernel } from '@guren/core'
+import { billingModule } from '../modules/billing/index.js'
+
+export const kernel = new ConsoleKernel()
+kernel.registerMany(billingModule['commands'])`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      expect(report.checks.find(c => c.key === 'console-module-commands:billing')!.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('falls back to the conventional binding name for a path-alias import', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-console-alias-')
+
+    try {
+      await mkdir(join(workspace.dir, 'modules/billing/app/Console/Commands'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'modules/billing/app/Console/Commands/InvoiceCommand.ts'),
+        COMMAND_SOURCE.replace(/SendDigestCommand/g, 'InvoiceCommand'),
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'modules/billing/index.ts'),
+        `import { defineModule } from '@guren/core'
+import InvoiceCommand from './app/Console/Commands/InvoiceCommand.js'
+
+export const billingModule = defineModule({ name: 'billing', commands: [InvoiceCommand] })`,
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      // The specifier carries no modules/billing/, so the import lookup finds
+      // nothing and the conventional billingModule name has to stand in.
+      await writeFile(
+        join(workspace.dir, 'src/console.ts'),
+        `import { ConsoleKernel } from '@guren/core'
+import { billingModule } from '#billing'
+
+export const kernel = new ConsoleKernel()
+kernel.registerMany(billingModule.commands)`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      expect(report.checks.find(c => c.key === 'console-module-commands:billing')!.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it("warns when a module's commands never reach a kernel", async () => {
     const workspace = await createTempWorkspace('guren-cli-check-console-module-hop-')
 

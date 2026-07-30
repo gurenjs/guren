@@ -349,3 +349,85 @@ kernel.registerMany([Real])
     expect(result).toBe(source)
   })
 })
+
+describe('addToArrayOption — call scoping', () => {
+  it('edits the named call, not an earlier call with the same key', async () => {
+    const workspace = await createTempWorkspace('guren-cli-array-option-scope-')
+    try {
+      // Under a file-global key search, analytics' array — the first
+      // `commands: [...]` in the file — would be the one edited.
+      await writeFile(
+        join(workspace.dir, 'mod.ts'),
+        `analytics({ commands: [Tracker] })
+export const m = defineModule({ name: 'billing', commands: [Old] })
+`,
+        'utf8',
+      )
+      const result = await addToArrayOption('mod.ts', 'commands', 'New', 'defineModule')
+      expect(result.modified).toBe(true)
+
+      const content = await readFile(join(workspace.dir, 'mod.ts'), 'utf8')
+      expect(content).toContain('analytics({ commands: [Tracker] })')
+      expect(content).toContain("defineModule({ name: 'billing', commands: [Old, New] })")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('creates the option on the named call when only an unrelated call has the key', async () => {
+    const workspace = await createTempWorkspace('guren-cli-array-option-scope-create-')
+    try {
+      await writeFile(
+        join(workspace.dir, 'mod.ts'),
+        `analytics({ commands: [Tracker] })
+export const m = defineModule({ name: 'billing' })
+`,
+        'utf8',
+      )
+      const result = await addToArrayOption('mod.ts', 'commands', 'New', 'defineModule')
+      expect(result.modified).toBe(true)
+
+      const content = await readFile(join(workspace.dir, 'mod.ts'), 'utf8')
+      expect(content).toContain('analytics({ commands: [Tracker] })')
+      expect(content).toMatch(/defineModule\(\{\s*commands: \[New\],/)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+
+describe('addToArrayArgument — safe declines', () => {
+  it('declines without corrupting a file whose masking cannot be trusted', async () => {
+    const workspace = await createTempWorkspace('guren-cli-array-argument-regex-')
+    try {
+      // A regex literal containing a quote defeats the string mask — telling
+      // a regex from division needs a real lexer (the AST follow-up). The
+      // contract until then: decline with a reason and leave the file alone,
+      // never edit the wrong site.
+      const source = "const apostrophe = /'/; kernel.registerMany([])\n"
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      await writeFile(join(workspace.dir, 'src/console.ts'), source, 'utf8')
+
+      const result = await addToArrayArgument('src/console.ts', 'registerMany', 'Alpha')
+      expect(result.modified).toBe(false)
+      expect(result.reason).toContain('Could not find')
+      expect(await readFile(join(workspace.dir, 'src/console.ts'), 'utf8')).toBe(source)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('appends into an empty multi-line array without touching its shape', async () => {
+    const workspace = await createTempWorkspace('guren-cli-array-argument-empty-multiline-')
+    try {
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      await writeFile(join(workspace.dir, 'src/console.ts'), 'kernel.registerMany([\n])\n', 'utf8')
+
+      const result = await addToArrayArgument('src/console.ts', 'registerMany', 'Alpha')
+      expect(result.modified).toBe(true)
+      expect(await readFile(join(workspace.dir, 'src/console.ts'), 'utf8')).toBe('kernel.registerMany([Alpha\n])\n')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
