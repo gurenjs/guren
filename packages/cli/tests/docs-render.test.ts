@@ -71,6 +71,39 @@ bunx guren check --docs
     expect(html).toContain('data-target="&quot;onmouseover=&quot;globalThis.pwned=1"')
   })
 
+  it('applies markdown precedence: code over links, emphasis over both', () => {
+    // Link syntax inside a code span stays literal — matching what
+    // extractMarkdownLinks() does when it derives graph edges.
+    expect(renderDocHtml('`[orders](/adr/0002.md)`')).toContain(
+      '<code>[orders](/adr/0002.md)</code>',
+    )
+    expect(renderDocHtml('`[orders](/adr/0002.md)`')).not.toContain('md-link')
+
+    // Emphasis wrapping a link bolds the anchor instead of leaving the
+    // asterisks behind.
+    expect(renderDocHtml('**[Decision](./decision.md)**')).toContain(
+      '<strong><a class="md-link" data-target="./decision.md">Decision</a></strong>',
+    )
+  })
+
+  it('renders code and emphasis inside a link label', () => {
+    expect(renderDocHtml('[**bold** label](./x.md)')).toContain(
+      '<a class="md-link" data-target="./x.md"><strong>bold</strong> label</a>',
+    )
+    expect(renderDocHtml('[`code` label](./x.md)')).toContain(
+      '<a class="md-link" data-target="./x.md"><code>code</code> label</a>',
+    )
+  })
+
+  it('cannot have its internal placeholders forged from doc content', () => {
+    // Rendering parks finished HTML behind NUL-delimited markers; doc
+    // content carrying those bytes must not be able to address them.
+    const html = renderDocHtml('a \u00000\u0000 b [real](./r.md)')
+
+    expect(html).not.toContain('\u0000')
+    expect(html).toContain('data-target="./r.md"')
+  })
+
   it('escapes markup around a bracket that never becomes a link', () => {
     // The link scanner splits on '['; the slice before an unmatched one
     // must still be escaped, or a stray bracket makes everything before

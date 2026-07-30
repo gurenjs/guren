@@ -29,8 +29,52 @@ export function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;')
 }
 
-/** Inline spans, applied to raw (unescaped) text. */
+/**
+ * Inline spans over raw text, in markdown's precedence order: code
+ * first (so link syntax inside a code span stays literal), then links,
+ * then emphasis across what remains (so `**[label](target)**` bolds the
+ * link rather than leaving the asterisks behind).
+ *
+ * Finished HTML is parked behind placeholders while the later passes
+ * run, which is why the input's own NUL characters are dropped first —
+ * otherwise doc content could forge a placeholder and inject markup.
+ */
 function inline(text: string, resolveLink?: (target: string) => string): string {
+  const parked: string[] = []
+  const park = (html: string): string => {
+    parked.push(html)
+    return `\u0000${parked.length - 1}\u0000`
+  }
+
+  const rendered = renderInline(text.replace(/\u0000/g, ''), park, resolveLink)
+
+  // Restoring is iterative: a link label can itself hold a code span.
+  let out = rendered
+  for (let pass = 0; pass < 4 && out.includes('\u0000'); pass += 1) {
+    out = out.replace(/\u0000(\d+)\u0000/g, (_match, index: string) => parked[Number(index)] ?? '')
+  }
+  return out
+}
+
+function renderInline(
+  text: string,
+  park: (html: string) => string,
+  resolveLink?: (target: string) => string,
+  withLinks = true,
+): string {
+  const withCode = text.replace(/`([^`]+)`/g, (_match, code: string) =>
+    park(`<code>${escapeHtml(code)}</code>`),
+  )
+  const withMarks = withLinks ? parkLinks(withCode, park, resolveLink) : withCode
+  return emphasis(escapeHtml(withMarks))
+}
+
+/** Replace every markdown link with a parked anchor. */
+function parkLinks(
+  text: string,
+  park: (html: string) => string,
+  resolveLink?: (target: string) => string,
+): string {
   const out: string[] = []
   let index = 0
 
@@ -42,29 +86,25 @@ function inline(text: string, resolveLink?: (target: string) => string): string 
     const destination =
       close !== -1 && text[close + 1] === '(' ? readLinkDestination(text, close + 1) : null
     if (destination === null) {
-      // Not a link after all — the slice still has to be escaped, or a
-      // stray `[` anywhere in the document would leave everything
-      // before it as raw markup.
-      out.push(spans(text.slice(index, open + 1)))
+      out.push(text.slice(index, open + 1))
       index = open + 1
       continue
     }
 
-    out.push(spans(text.slice(index, open)))
-    const label = spans(text.slice(open + 1, close))
+    out.push(text.slice(index, open))
+    const label = renderInline(text.slice(open + 1, close), park, undefined, false)
     const target = resolveLink ? resolveLink(destination.target) : destination.target
-    out.push(`<a class="md-link" data-target="${escapeHtml(target)}">${label}</a>`)
+    out.push(park(`<a class="md-link" data-target="${escapeHtml(target)}">${label}</a>`))
     index = destination.end + 1
   }
 
-  out.push(spans(text.slice(index)))
+  out.push(text.slice(index))
   return out.join('')
 }
 
-/** Code, bold, and emphasis over a link-free slice. */
-function spans(text: string): string {
-  return escapeHtml(text)
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
+/** Bold and emphasis over already-escaped text. */
+function emphasis(escaped: string): string {
+  return escaped
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>')
 }
