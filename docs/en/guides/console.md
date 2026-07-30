@@ -118,7 +118,7 @@ These read from stdin, so guard them behind a `--force`-style option if the comm
 
 Nothing scans `app/Console/Commands` for you. A generated command is dead code until a kernel registers it — deliberately, so that deployments never depend on filesystem globbing.
 
-Scaffolded apps ship `src/console.ts` for exactly this:
+Scaffolded apps ship `src/console.ts` for exactly this, and `bunx guren make:command` adds the import and the registration to it for you:
 
 ```ts
 import { ConsoleKernel } from '@guren/core'
@@ -132,7 +132,16 @@ kernel.registerMany([SendDigestCommand])
 
 Passing `app.container` lets commands resolve services with `this.resolve()`. `register(OneCommand)` is equivalent for a single class.
 
-If your project predates this file, create it yourself — the export must be named `kernel`, since the deployment recipes import it by that name.
+If your project predates this file, create it yourself — the export must be named `kernel`, since the deployment recipes import it by that name. `make:command` prints the exact lines to add when it cannot patch the file itself.
+
+Because registration is explicit, `bunx guren check` warns about any command class no console entrypoint uses:
+
+```
+⚠ SendDigestCommand registration: src/console.ts never uses SendDigestCommand
+  outside its imports, so no kernel receives it.
+```
+
+An import on its own does not count — that is precisely the state left behind when a registration is deleted but the import is not.
 
 ## Running Commands
 
@@ -211,19 +220,31 @@ This requires the calling command to have been dispatched through a kernel — `
 
 ## Modules
 
-Commands scaffolded with `--module` land under `modules/<name>/app/Console/Commands/`. There is no per-module console kernel, so register them in the same root `src/console.ts` — but export them from the module's `index.ts` first. Importing the command file directly reaches into the module's internals, which `bunx guren check --arch` reports as a failure:
+Commands scaffolded with `--module` land under `modules/<name>/app/Console/Commands/`. There is no per-module console kernel, so they reach the root kernel through the module's own descriptor — `defineModule()` carries a `commands` array alongside `routes` and `providers`, which `make:command --module` fills in:
 
 ```ts
 // modules/billing/index.ts
-export { default as InvoiceCommand } from './app/Console/Commands/InvoiceCommand.js'
+import { defineModule } from '@guren/core'
+import InvoiceCommand from './app/Console/Commands/InvoiceCommand.js'
+
+export const billingModule = defineModule({
+  name: 'billing',
+  prefix: '/billing',
+  routes: registerBillingRoutes,
+  commands: [InvoiceCommand],
+})
 ```
 
 ```ts
 // src/console.ts
-import { InvoiceCommand } from '../modules/billing/index.js'
+import { billingModule } from '../modules/billing/index.js'
 
-kernel.registerMany([InvoiceCommand])
+kernel.registerMany(billingModule.commands)
 ```
+
+That second line is the one step the scaffold leaves to you — add it once per module, and every later `make:command --module billing` is picked up automatically. `bunx guren check` warns until you do.
+
+Importing a command file straight from `src/console.ts` would work at runtime but reaches into the module's internals, which `bunx guren check --arch` reports as a failure — `modules/<name>/index.ts` and `modules/<name>/db/schema.ts` are the module's only public surface.
 
 ## Running in Deployed Environments
 

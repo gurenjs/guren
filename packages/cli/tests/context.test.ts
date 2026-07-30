@@ -61,10 +61,16 @@ export class Post extends defineModel(posts) {}`,
       await mkdir(join(workspace.dir, 'app/Http/Resources'), { recursive: true })
       await mkdir(join(workspace.dir, 'app/Events'), { recursive: true })
       await mkdir(join(workspace.dir, 'app/Jobs'), { recursive: true })
+      await mkdir(join(workspace.dir, 'app/Console/Commands'), { recursive: true })
       await writeFile(join(workspace.dir, 'app/Http/Controllers/PostController.ts'), 'export default class {}', 'utf8')
       await writeFile(join(workspace.dir, 'app/Http/Resources/PostResource.ts'), 'export class PostResource {}', 'utf8')
       await writeFile(join(workspace.dir, 'app/Events/PostCreated.ts'), 'export class PostCreated {}', 'utf8')
       await writeFile(join(workspace.dir, 'app/Jobs/SendEmail.ts'), 'export class SendEmail {}', 'utf8')
+      await writeFile(
+        join(workspace.dir, 'app/Console/Commands/SendDigestCommand.ts'),
+        'export default class SendDigestCommand {}',
+        'utf8',
+      )
       await writeFile(join(workspace.dir, 'package.json'), '{}', 'utf8')
 
       const ctx = await generateContext({ cwd: workspace.dir })
@@ -73,6 +79,7 @@ export class Post extends defineModel(posts) {}`,
       expect(ctx.resources).toContain('PostResource')
       expect(ctx.events).toContain('PostCreated')
       expect(ctx.jobs).toContain('SendEmail')
+      expect(ctx.commands).toContain('SendDigestCommand')
     } finally {
       await workspace.cleanup()
     }
@@ -109,6 +116,7 @@ describe('renderContextMarkdown', () => {
       listeners: [],
       validators: [],
       policies: [],
+      commands: ['SendDigestCommand'],
     })
 
     expect(md).toContain('# Project Context')
@@ -118,5 +126,6 @@ describe('renderContextMarkdown', () => {
     expect(md).toContain('| GET | /posts | posts.index | PostController.index |')
     expect(md).toContain('- posts/Index')
     expect(md).toContain('- PostController')
+    expect(md).toContain('## Console Commands (1)')
   })
 })

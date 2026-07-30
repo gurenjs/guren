@@ -217,6 +217,17 @@ export function discoverPolicyFiles(appRoot: string): Promise<string[]> {
 }
 
 /**
+ * Console command classes (`make:command` output). Unlike controllers or
+ * jobs, nothing loads these by scanning the directory at runtime —
+ * registration with a `ConsoleKernel` is explicit — so this discovery exists
+ * for tooling only: `guren context` lists them, and `guren check` warns about
+ * any that no console entrypoint references.
+ */
+export function discoverCommandFiles(appRoot: string): Promise<string[]> {
+  return discoverDir(appRoot, 'app/Console/Commands')
+}
+
+/**
  * Discover `*.test.{ts,tsx,mts,js,jsx,mjs}` files anywhere in the project:
  * under `tests/` (the convention used by scaffolded apps and the blog
  * example) as well as colocated next to source files elsewhere (the

@@ -6,6 +6,10 @@ export interface PatchResult {
   reason?: string
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 /**
  * Adds an import statement to a file if not already present.
  * Inserts the import at the top of the file, after any existing imports.
@@ -133,10 +137,12 @@ export async function addProvider(
 }
 
 /**
- * Adds an entry to an arbitrary array-valued `createApp({ ... })` option
- * (e.g. `modules: [...]`), creating the option (via `addCreateAppOption`)
- * if it isn't present at all yet. Generalizes `addProvider`'s array-editing
- * logic to a caller-supplied `key` instead of the hardcoded `providers:`.
+ * Adds an entry to an arbitrary array-valued option of a single-object-
+ * argument call (e.g. `modules: [...]` in `createApp({ ... })`, or
+ * `commands: [...]` in `defineModule({ ... })`), creating the option (via
+ * `addCreateAppOption`) if it isn't present at all yet. Generalizes
+ * `addProvider`'s array-editing logic to a caller-supplied `key` instead of
+ * the hardcoded `providers:`.
  *
  * `addProvider` is kept as its own independent implementation rather than
  * delegating here, to avoid changing its existing behavior (it fails with
@@ -147,6 +153,7 @@ export async function addToArrayOption(
   filePath: string,
   key: string,
   valueSource: string,
+  callName = 'createApp',
 ): Promise<PatchResult> {
   const absolutePath = resolve(process.cwd(), filePath)
   let content: string
@@ -164,7 +171,7 @@ export async function addToArrayOption(
   const match = content.match(arrayPattern)
 
   if (!match) {
-    return addCreateAppOption(filePath, key, `[${valueSource}]`)
+    return addCreateAppOption(filePath, key, `[${valueSource}]`, callName)
   }
 
   const entries = match[1]
@@ -178,6 +185,61 @@ export async function addToArrayOption(
 
   entries.push(valueSource)
   const updatedContent = content.replace(arrayPattern, `${key}: [${entries.join(', ')}]`)
+
+  await writeFile(absolutePath, updatedContent, 'utf8')
+  return { modified: true }
+}
+
+/**
+ * Adds an entry to an array literal passed straight to a method call, e.g.
+ * the `kernel.registerMany([...])` in a project's `src/console.ts`. The
+ * receiver is matched loosely (any identifier or member expression, or none)
+ * so a kernel bound to a name other than `kernel` still gets patched.
+ *
+ * Only a call whose argument is an array *literal* matches, which is what
+ * makes this safe in a console entrypoint that also contains
+ * `kernel.registerMany(billingModule.commands)` — that form is skipped
+ * rather than mangled.
+ */
+export async function addToArrayArgument(
+  filePath: string,
+  methodName: string,
+  valueSource: string,
+): Promise<PatchResult> {
+  const absolutePath = resolve(process.cwd(), filePath)
+  let content: string
+
+  try {
+    content = await readFile(absolutePath, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { modified: false, reason: 'File not found' }
+    }
+    throw error
+  }
+
+  const callPattern = new RegExp(
+    `(?:[\\w$]+(?:\\.[\\w$]+)*\\.)?${escapeRegExp(methodName)}\\s*\\(\\s*\\[([\\s\\S]*?)\\]\\s*\\)`,
+  )
+  const match = content.match(callPattern)
+
+  if (!match) {
+    return { modified: false, reason: `Could not find a ${methodName}([ ... ]) call` }
+  }
+
+  const entries = match[1]
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0)
+
+  if (entries.some((entry) => entry === valueSource)) {
+    return { modified: false, reason: 'Already present' }
+  }
+
+  entries.push(valueSource)
+  const replacement = match[0].replace(/\[[\s\S]*\]/, `[${entries.join(', ')}]`)
+  const updatedContent
+    = content.slice(0, match.index!) + replacement + content.slice(match.index! + match[0].length)
 
   await writeFile(absolutePath, updatedContent, 'utf8')
   return { modified: true }
@@ -296,11 +358,16 @@ export function ensureMysqlImports(content: string, needed: string[]): string {
 /**
  * Adds a top-level option to the createApp({ ... }) call in a file.
  * The value is inserted verbatim, e.g. addCreateAppOption(path, 'auth', '{}').
+ *
+ * `callName` selects which single-object-argument call to edit — the default
+ * targets `createApp({ ... })`; `'defineModule'` targets a module's
+ * `modules/<name>/index.ts` descriptor.
  */
 export async function addCreateAppOption(
   filePath: string,
   key: string,
   valueSource: string,
+  callName = 'createApp',
 ): Promise<PatchResult> {
   const absolutePath = resolve(process.cwd(), filePath)
   let content: string
@@ -314,14 +381,14 @@ export async function addCreateAppOption(
     throw error
   }
 
-  const createAppPattern = /createApp\(\s*\{/
+  const createAppPattern = new RegExp(`\\b${escapeRegExp(callName)}\\(\\s*\\{`)
   const match = content.match(createAppPattern)
 
   if (!match || match.index === undefined) {
-    return { modified: false, reason: 'Could not find a createApp({ ... }) call' }
+    return { modified: false, reason: `Could not find a ${callName}({ ... }) call` }
   }
 
-  // Scan the createApp options object for an existing top-level `key:`
+  // Scan the call's options object for an existing top-level `key:`
   const openBraceIndex = match.index + match[0].length - 1
   let depth = 0
   let closeBraceIndex = -1
@@ -338,7 +405,7 @@ export async function addCreateAppOption(
   }
 
   if (closeBraceIndex === -1) {
-    return { modified: false, reason: 'Could not parse createApp options object' }
+    return { modified: false, reason: `Could not parse ${callName} options object` }
   }
 
   const optionsSource = content.slice(openBraceIndex, closeBraceIndex + 1)

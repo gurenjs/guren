@@ -2,18 +2,22 @@ import { resolve, relative } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { consola } from 'consola'
 import {
+  discoverCommandFiles,
   discoverControllerFiles,
   discoverModelFiles,
+  excludeBarrelFiles,
   fileExists,
   hasControllerTest,
   describeControllerTestMiss,
   classNameFromPath,
+  readIfExists,
   toPosixRelative,
   listModuleNames,
   moduleNameFromRelPath,
   formatTruncatedList,
 } from './discovery'
 import { extractClassDeclaration } from './model-parser'
+import { camelCase } from './utils'
 import { ParseCache } from './parse-cache'
 import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath } from './inertia-pages'
 import { runArchCheck } from './arch-check'
@@ -106,6 +110,160 @@ async function checkModuleSchemaAggregation(cwd: string): Promise<CheckResult[]>
         isReExported ? undefined : `Add to ${rootSchemaPath}: export * from '../modules/${moduleName}/db/schema'`,
       ),
     )
+  }
+
+  return results
+}
+
+const CONSOLE_ENTRY = 'src/console.ts'
+
+/**
+ * Source text of `absPath`'s top-level statements with `import` declarations
+ * dropped, or `null` when the file can't be read or parsed. Lets a check ask
+ * "is this name *used* here", rather than "does this name appear here" — an
+ * import alone is not a use.
+ *
+ * Re-exports (`export { X } from './x'`) are kept: for a module's `index.ts`
+ * they are a way of putting a name on the module's public surface, which is
+ * the thing being asked about.
+ */
+async function sourceOutsideImports(cache: ParseCache, absPath: string): Promise<string | null> {
+  const parsed = await cache.get(absPath)
+  if (!parsed) return null
+
+  return parsed.ast.program.body
+    .filter((node) => node.type !== 'ImportDeclaration')
+    .map((node) => parsed.source.slice(node.start ?? 0, node.end ?? 0))
+    .join('\n')
+}
+
+/**
+ * Verifies every class under `app/Console/Commands` is referenced by the
+ * console entrypoint that would register it. Nothing scans that directory at
+ * runtime — a `ConsoleKernel` only knows the commands it was handed, so a
+ * generated-but-unregistered command is dead code that no other signal
+ * reports. `make:command` performs this wiring, so a warning here means a
+ * command was written or moved by hand.
+ *
+ * Registration takes two shapes, and each command is only checked against
+ * its own:
+ * - a project-level command must be named by `src/console.ts`
+ *   (`kernel.registerMany([SendDigestCommand])`)
+ * - a module's command must be named by `modules/<name>/index.ts`
+ *   (`defineModule({ commands: [...] })`), the module's public surface
+ *
+ * Detection is a name reference outside the entry's imports, and nothing
+ * more: it says the entrypoint uses the class, not that the kernel ends up
+ * with it. Import statements are excluded because a leftover
+ * `import SendDigestCommand from ...` is exactly the state this check exists
+ * to catch — the command is still dead, and counting the import would report
+ * it as wired. `warn`, never `fail`, since a name reference is not proof of
+ * registration in the other direction either.
+ */
+async function checkConsoleCommandRegistration(cwd: string, cache: ParseCache): Promise<CheckResult[]> {
+  const commandFiles = excludeBarrelFiles(await discoverCommandFiles(cwd))
+  if (commandFiles.length === 0) return []
+
+  const results: CheckResult[] = []
+  const sources = new Map<string, string | null>()
+  const readEntry = async (path: string): Promise<string | null> => {
+    if (!sources.has(path)) sources.set(path, await readIfExists(cwd, path))
+    return sources.get(path) ?? null
+  }
+
+  // Grouped by entrypoint so a missing one is reported once, not once per
+  // command it would have registered.
+  const byEntry = new Map<string, { moduleName: string | null; files: string[] }>()
+  for (const filePath of commandFiles) {
+    const moduleName = moduleNameFor(cwd, filePath)
+    const entry = moduleName ? `modules/${moduleName}/index.ts` : CONSOLE_ENTRY
+    const group = byEntry.get(entry) ?? { moduleName, files: [] }
+    group.files.push(filePath)
+    byEntry.set(entry, group)
+  }
+
+  for (const [entry, { moduleName, files }] of byEntry) {
+    const source = await readEntry(entry)
+    const names = files.map((file) => classNameFromPath(file))
+
+    if (source === null) {
+      results.push(
+        check(
+          `console-entry:${entry}`,
+          moduleName ? `${moduleName} console registration` : 'Console entrypoint',
+          'warn',
+          `${names.join(', ')} exist but there is no ${entry} to register them in.`,
+          moduleName
+            ? `Create ${entry} with defineModule({ commands: [${names.join(', ')}] }).`
+            : `Create ${entry} exporting a ConsoleKernel, then add: kernel.registerMany([${names.join(', ')}])`,
+        ),
+      )
+      continue
+    }
+
+    const registrationText = await sourceOutsideImports(cache, resolve(cwd, entry))
+
+    if (registrationText === null) {
+      results.push(
+        check(
+          `console-entry:${entry}`,
+          moduleName ? `${moduleName} console registration` : 'Console entrypoint',
+          'warn',
+          `${entry} could not be parsed, so ${names.join(', ')} cannot be verified as registered.`,
+          `Check ${entry} for a syntax error.`,
+        ),
+      )
+      continue
+    }
+
+    for (const filePath of files) {
+      const name = classNameFromPath(filePath)
+      const registered = new RegExp(`\\b${name}\\b`, 'u').test(registrationText)
+      const suggestion = moduleName
+        ? `Import ${name} in ${entry} and add it to defineModule({ commands: [...] }).`
+        : `Import ${name} in ${entry} and add it to kernel.registerMany([...]).`
+
+      results.push(
+        check(
+          `console-command:${name}`,
+          `${name} registration`,
+          registered ? 'pass' : 'warn',
+          registered
+            ? `${entry} references ${name} outside its imports.`
+            : `${entry} never uses ${name} outside its imports, so no kernel receives it.`,
+          registered ? undefined : suggestion,
+          toPosixRelative(cwd, filePath),
+        ),
+      )
+    }
+
+    // `source` (not `registrationText`) below: the hop is recognized by the
+    // module import *and* a `.commands` use, so the import line matters here.
+
+    // A module's commands only reach a kernel once the project's console
+    // entrypoint registers them — a second hop `make:command` cannot patch.
+    // Checked separately so a wired-up module never warns for the per-file
+    // rule above and this one at once.
+    if (moduleName) {
+      const consoleSource = await readEntry(CONSOLE_ENTRY)
+      const binding = `${camelCase(moduleName)}Module`
+      const hopped
+        = consoleSource !== null
+        && consoleSource.includes(`modules/${moduleName}`)
+        && /\.commands\b/u.test(consoleSource)
+
+      results.push(
+        check(
+          `console-module-commands:${moduleName}`,
+          `${moduleName} console commands`,
+          hopped ? 'pass' : 'warn',
+          hopped
+            ? `${CONSOLE_ENTRY} registers ${moduleName}'s commands.`
+            : `${CONSOLE_ENTRY} does not register ${moduleName}'s commands, so they never reach a kernel.`,
+          hopped ? undefined : `Add to ${CONSOLE_ENTRY}: kernel.registerMany(${binding}.commands)`,
+        ),
+      )
+    }
   }
 
   return results
@@ -208,9 +366,16 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // checks 1-5.
     const schemaAggregationResults = await checkModuleSchemaAggregation(cwd)
     checks.push(...schemaAggregationResults)
+
+    // 7. Check every console command is registered with a kernel (the wiring
+    // make:command performs automatically — this catches commands written or
+    // moved by hand). Content-activated: apps with no app/Console/Commands
+    // contribute nothing here.
+    const commandRegistrationResults = await checkConsoleCommandRegistration(cwd, cache)
+    checks.push(...commandRegistrationResults)
   }
 
-  // 7. Doc-link checks (docs/ frontmatter + @docs tags, RFC 0004). Runs in
+  // 8. Doc-link checks (docs/ frontmatter + @docs tags, RFC 0004). Runs in
   // plain mode and under --docs; content-activated, so apps without the
   // docs convention contribute zero results here.
   if (runs('docs')) {
@@ -218,7 +383,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     checks.push(...docsResults)
   }
 
-  // 8. Spec drift checks (docs/spec/ vs regenerated views, RFC 0004).
+  // 9. Spec drift checks (docs/spec/ vs regenerated views, RFC 0004).
   // Content-activated like docs; under --changed it only regenerates when
   // a spec-relevant file changed.
   if (runs('spec')) {
@@ -226,7 +391,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     checks.push(...specResults)
   }
 
-  // 9. Check architecture boundaries (guren.arch.ts + derived module rules)
+  // 10. Check architecture boundaries (guren.arch.ts + derived module rules)
   if (runs('arch')) {
     const archResults = await runArchCheck({ cwd, cache, changedFiles })
     checks.push(...archResults)
