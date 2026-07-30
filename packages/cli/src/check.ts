@@ -173,6 +173,23 @@ function referencesName(body: string, name: string): boolean {
 }
 
 /**
+ * Whether `entry` imports `name` from inside `modules/<moduleName>/`. Pairing
+ * this with {@link referencesName} is what stops one module's registration
+ * from covering another's identically-named command — two modules may each
+ * ship an `InvoiceCommand`, and the bare name cannot tell them apart.
+ */
+function importsNameFromModule(entry: EntrySource, moduleName: string, name: string): boolean {
+  return entry.imports.some(
+    (imported) => imported.specifier.includes(`modules/${moduleName}/`) && imported.names.includes(name),
+  )
+}
+
+/** Whether `entry` registers `name`, having imported it from that module. */
+function registersModuleCommand(entry: EntrySource | null, moduleName: string, name: string): boolean {
+  return entry !== null && importsNameFromModule(entry, moduleName, name) && referencesName(entry.body, name)
+}
+
+/**
  * Whether `body` registers `binding`'s commands — `billingModule.commands`,
  * or a member chain ending there for a namespace import.
  *
@@ -182,7 +199,10 @@ function referencesName(body: string, name: string): boolean {
  */
 export function registersCommandsOf(body: string, bindings: string[]): boolean {
   return bindings.some((binding) =>
-    new RegExp(`\\b${escapeRegExp(binding)}\\s*(?:\\.\\s*[\\w$]+\\s*)*\\.\\s*commands\\b`, 'u').test(body),
+    new RegExp(
+      `\\b${escapeRegExp(binding)}\\s*(?:\\.\\s*[\\w$]+\\s*)*(?:\\.\\s*commands\\b|\\[\\s*['"\`]commands['"\`]\\s*\\])`,
+      'u',
+    ).test(body),
   )
 }
 
@@ -271,9 +291,19 @@ async function checkConsoleCommandRegistration(cwd: string, cache: ParseCache): 
       continue
     }
 
+    if (moduleName) {
+      consoleEntry ??= await readEntrySource(cache, resolve(cwd, CONSOLE_ENTRY))
+    }
+
     for (const filePath of files) {
       const name = classNameFromPath(filePath)
-      const registered = referencesName(entrySource.body, name)
+      // A module command also counts when the console entry imports it from
+      // that module and registers it directly — the module's index may expose
+      // it through a barrel (`export * from './commands.js'`) that never spells
+      // the class name out.
+      const registered
+        = referencesName(entrySource.body, name)
+        || (moduleName !== null && registersModuleCommand(consoleEntry ?? null, moduleName, name))
       const suggestion = moduleName
         ? `Import ${name} in ${entry} and add it to defineModule({ commands: [...] }).`
         : `Import ${name} in ${entry} and add it to kernel.registerMany([...]).`
@@ -294,8 +324,7 @@ async function checkConsoleCommandRegistration(cwd: string, cache: ParseCache): 
     }
 
     if (moduleName) {
-      consoleEntry ??= await readEntrySource(cache, resolve(cwd, CONSOLE_ENTRY))
-      results.push(checkModuleCommandHop(consoleEntry, moduleName, names))
+      results.push(checkModuleCommandHop(consoleEntry ?? null, moduleName, names))
     }
   }
 
@@ -329,7 +358,7 @@ function checkModuleCommandHop(
   const hopped
     = entry !== null
     && (registersCommandsOf(entry.body, bindings)
-      || commandNames.every((name) => referencesName(entry.body, name)))
+      || commandNames.every((name) => registersModuleCommand(entry, moduleName, name)))
 
   return check(
     `console-module-commands:${moduleName}`,

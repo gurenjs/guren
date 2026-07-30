@@ -317,6 +317,30 @@ kernel.registerMany([Real])
     expect(result).toContain('kernel.registerMany([Real, Alpha])')
   })
 
+  it('does not match a longer method name ending in the target', async () => {
+    const source = 'function unregisterMany(_: unknown[]) {}\nunregisterMany([])\n'
+    const result = await withConsole(source, async () => {
+      expect((await addToArrayArgument('src/console.ts', 'registerMany', 'Alpha')).modified).toBe(false)
+    })
+    expect(result).toBe(source)
+  })
+
+  it('edits a key whose colon is separated by a comment', async () => {
+    const workspace = await createTempWorkspace('guren-cli-array-option-comment-')
+    try {
+      await writeFile(
+        join(workspace.dir, 'mod.ts'),
+        'export const m = defineModule({ name: "billing", commands /* note */: [Old] })\n',
+        'utf8',
+      )
+      await addToArrayOption('mod.ts', 'commands', 'New', 'defineModule')
+      const result = await readFile(join(workspace.dir, 'mod.ts'), 'utf8')
+      expect(result).toContain('commands /* note */: [Old, New]')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('reports Already present without rewriting the file', async () => {
     const source = 'kernel.registerMany([\n  Alpha,\n])\n'
     const result = await withConsole(source, async () => {

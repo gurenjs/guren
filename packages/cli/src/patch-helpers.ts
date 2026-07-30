@@ -342,8 +342,10 @@ export async function addToArrayArgument(
     return { modified: false, reason: 'File not found' }
   }
 
+  // The leading lookbehind is what keeps `unregisterMany([])` from matching
+  // on its `registerMany` suffix when the optional receiver group is absent.
   const callPattern = new RegExp(
-    `(?:[\\w$]+(?:\\.[\\w$]+)*\\.)?${escapeRegExp(methodName)}\\s*\\(\\s*\\[`,
+    `(?<![\\w$])(?:[\\w$]+(?:\\.[\\w$]+)*\\.)?${escapeRegExp(methodName)}\\s*\\(\\s*\\[`,
   )
   const match = matchInCode(content, callPattern)
 

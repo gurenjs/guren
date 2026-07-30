@@ -926,6 +926,85 @@ kernel.registerMany(billingReportsModule.commands)`,
     }
   })
 
+  it('does not let one module\'s command cover another module\'s same-named class', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-console-samename-')
+
+    try {
+      for (const name of ['billing', 'analytics']) {
+        await mkdir(join(workspace.dir, `modules/${name}/app/Console/Commands`), { recursive: true })
+        await writeFile(
+          join(workspace.dir, `modules/${name}/app/Console/Commands/InvoiceCommand.ts`),
+          COMMAND_SOURCE.replace(/SendDigestCommand/g, 'InvoiceCommand'),
+          'utf8',
+        )
+        await writeFile(
+          join(workspace.dir, `modules/${name}/index.ts`),
+          `export { default as InvoiceCommand } from './app/Console/Commands/InvoiceCommand.js'`,
+          'utf8',
+        )
+      }
+
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      // Only analytics' InvoiceCommand is imported and registered.
+      await writeFile(
+        join(workspace.dir, 'src/console.ts'),
+        `import { ConsoleKernel } from '@guren/core'
+import { InvoiceCommand } from '../modules/analytics/index.js'
+
+export const kernel = new ConsoleKernel()
+kernel.registerMany([InvoiceCommand])`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      expect(report.checks.find(c => c.key === 'console-module-commands:analytics')!.status).toBe('pass')
+      expect(report.checks.find(c => c.key === 'console-module-commands:billing')!.status).toBe('warn')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('accepts a command exposed through a barrel re-export in the module index', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-console-barrel-')
+
+    try {
+      await mkdir(join(workspace.dir, 'modules/billing/app/Console/Commands'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'modules/billing/app/Console/Commands/InvoiceCommand.ts'),
+        COMMAND_SOURCE.replace(/SendDigestCommand/g, 'InvoiceCommand'),
+        'utf8',
+      )
+      // The index never spells the class name out.
+      await writeFile(
+        join(workspace.dir, 'modules/billing/index.ts'),
+        `export * from './commands.js'`,
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'modules/billing/commands.ts'),
+        `export { default as InvoiceCommand } from './app/Console/Commands/InvoiceCommand.js'`,
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'src/console.ts'),
+        `import { ConsoleKernel } from '@guren/core'
+import { InvoiceCommand } from '../modules/billing/index.js'
+
+export const kernel = new ConsoleKernel()
+kernel.registerMany([InvoiceCommand])`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      expect(report.checks.find(c => c.key === 'console-command:billing/InvoiceCommand')!.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it("warns when a module's commands never reach a kernel", async () => {
     const workspace = await createTempWorkspace('guren-cli-check-console-module-hop-')
 
