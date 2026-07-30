@@ -1,10 +1,11 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { relative, resolve, sep } from 'node:path'
 import {
   DEV_ONLY_MODULES,
   importSpecifier,
   MCP_SDK_SUBPATH_PREFIX,
   renderDevOnlyStub,
+  assertOutputDirOutsideRoot,
   resetOutputDir,
   resolveClientAssetEnv,
   resolvePathLike,
@@ -104,7 +105,10 @@ export async function buildLambdaOutput(options: BuildLambdaOutputOptions = {}):
   const clientEntryKey = options.clientEntryKey ?? 'resources/js/app.tsx'
   const ssrEntryKey = options.ssrEntryKey ?? 'resources/js/ssr.tsx'
 
-  resetOutputDir(out, root, 'Lambda build')
+  // Validated up front so a bad option fails before running the app build,
+  // but the delete waits until every check below has passed — a failed build
+  // must not take the previous deploy output with it.
+  assertOutputDirOutsideRoot(out, root, 'Lambda build')
 
   if (!options.skipAppBuild) {
     runAppBuild(root)
@@ -118,6 +122,8 @@ export async function buildLambdaOutput(options: BuildLambdaOutputOptions = {}):
 
   const ssrFile = resolveSsrEntry(ssrDir, ssrEntryKey)
   const assetEnv = resolveClientAssetEnv(publicDir, clientEntryKey, 'Lambda build')
+
+  resetOutputDir(out, root, 'Lambda build')
 
   const funcDir = resolve(out, 'function')
   mkdirSync(funcDir, { recursive: true })
@@ -170,7 +176,10 @@ function buildLambdaEnvironment(
     // Relative specifiers resolve from process.cwd(), which is the function
     // root (/var/task) on Lambda — where the SSR bundle is copied.
     env.GUREN_INERTIA_SSR_ENTRY = `./.guren/ssr/${relative(ssrDir, ssrFile).split(sep).join('/')}`
-    env.GUREN_INERTIA_SSR_MANIFEST = ssrManifestRelativePath(ssrDir, './.guren/ssr')
+    const manifestPath = ssrManifestRelativePath(ssrDir, './.guren/ssr')
+    if (manifestPath) {
+      env.GUREN_INERTIA_SSR_MANIFEST = manifestPath
+    }
   }
 
   return env

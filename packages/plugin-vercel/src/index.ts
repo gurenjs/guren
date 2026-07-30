@@ -1,7 +1,8 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, extname, relative, resolve, sep } from 'node:path'
 import { definePlugin, type ServiceProviderConstructor } from '@guren/core'
 import {
+  assertOutputDirOutsideRoot,
   resetOutputDir,
   resolveClientAssetEnv,
   resolvePathLike,
@@ -75,12 +76,17 @@ export function buildVercelOutput(options: BuildVercelOutputOptions = {}): void 
   const ssrDir = resolvePathLike(options.ssrDir ?? resolve(root, '.guren/ssr'))
   const migrationsDir = resolvePathLike(options.migrationsDir ?? resolve(root, 'db/migrations'))
 
+  // Validated up front so a bad option fails before anything else, but the
+  // delete waits until the environment resolves — a stale or partial SSR build
+  // must not take the previous deploy output with it.
+  assertOutputDirOutsideRoot(out, root, LABEL)
+
+  const env = buildVercelEnvironment(publicDir, ssrDir)
+
   resetOutputDir(out, root, LABEL)
 
   mkdirSync(funcDir, { recursive: true })
   mkdirSync(resolve(out, 'static'), { recursive: true })
-
-  const env = buildVercelEnvironment(publicDir, ssrDir)
 
   writeFileSync(
     resolve(out, 'config.json'),
@@ -195,7 +201,10 @@ function buildVercelEnvironment(publicDir: string, ssrDir: string): Record<strin
     // Relative specifiers resolve from the function root, where the SSR bundle
     // is copied.
     env.GUREN_INERTIA_SSR_ENTRY = `./.guren/ssr/${relative(ssrDir, ssrFile).split(sep).join('/')}`
-    env.GUREN_INERTIA_SSR_MANIFEST = ssrManifestRelativePath(ssrDir, './.guren/ssr')
+    const manifestPath = ssrManifestRelativePath(ssrDir, './.guren/ssr')
+    if (manifestPath) {
+      env.GUREN_INERTIA_SSR_MANIFEST = manifestPath
+    }
   }
 
   env.GUREN_INERTIA_IMPORT_MAP = JSON.stringify({

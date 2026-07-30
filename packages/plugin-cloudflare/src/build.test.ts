@@ -108,6 +108,19 @@ describe('buildCloudflareOutput', () => {
     expect(existsSync(join(root, 'src/app.ts'))).toBe(true)
   })
 
+  test('should keep the previous output when the build fails', async () => {
+    scaffoldApp(root)
+    mkdirSync(join(root, '.cloudflare'), { recursive: true })
+    writeFileSync(join(root, '.cloudflare/worker.js'), '// previous deploy\n')
+    rmSync(join(root, 'src/app.ts'))
+
+    await expect(buildCloudflareOutput({ rootDir: root, skipAppBuild: true })).rejects.toThrow(
+      /app entry not found/,
+    )
+
+    expect(readFileSync(join(root, '.cloudflare/worker.js'), 'utf8')).toBe('// previous deploy\n')
+  })
+
   test('should refuse the filesystem root as outputDir', async () => {
     scaffoldApp(root)
 

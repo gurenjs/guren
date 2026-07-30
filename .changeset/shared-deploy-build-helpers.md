@@ -28,6 +28,12 @@ Four behaviour fixes fall out of the plugins now sharing one implementation:
   `.vite/manifest.json` when the SSR build emitted the flat `manifest.json`
   layout instead.
 
+`buildVercelOutput` now fails when the SSR manifest names a chunk that is not
+on disk, or one that escapes the SSR output directory. It previously wrote the
+entry into the function environment unchecked, so a stale or partial SSR build
+deployed and fell back to client-side rendering at request time. Cloudflare and
+Lambda already treated this as fatal.
+
 Stubs for the dev-only modules are emitted as throwing functions rather than
 classes. The stubbed names mix constructors (`new Database()`) with plain calls
 (`createServer()`), and only a function reports the intended message under

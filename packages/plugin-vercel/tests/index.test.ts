@@ -116,6 +116,20 @@ describe('@guren/plugin-vercel', () => {
       expect(config.environment.GUREN_INERTIA_SSR_MANIFEST).toBe('./.guren/ssr/manifest.json')
     })
 
+    it('fails when the SSR manifest names a chunk that is not on disk', () => {
+      // Previously written into the function environment unchecked, so a stale
+      // or partial SSR build deployed and fell back to CSR at request time.
+      // Cloudflare and Lambda already treated this as fatal.
+      const app = scaffoldApp(root, { entrypoint: 'src/vercel.ts' })
+      mkdirSync(join(root, '.guren/ssr/.vite'), { recursive: true })
+      writeFileSync(
+        join(root, '.guren/ssr/.vite/manifest.json'),
+        JSON.stringify({ 'resources/js/ssr.tsx': { file: 'ssr-Gone.js' } }),
+      )
+
+      expect(() => buildVercelOutput(app)).toThrow(/but the file does not exist/)
+    })
+
     it('matches the configured handler filename to the bundled entrypoint', () => {
       const app = scaffoldApp(root, { entrypoint: 'src/vercel.ts' })
 

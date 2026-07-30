@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { isBuiltin } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -10,6 +10,7 @@ import {
   loadManifest,
   MCP_SDK_SUBPATH_PREFIX,
   resolvePathLike,
+  ssrManifestRelativePath,
 } from './deploy-build'
 
 describe('assertOutputDirOutsideRoot', () => {
@@ -48,6 +49,35 @@ describe('assertOutputDirOutsideRoot', () => {
     expect(() => assertOutputDirOutsideRoot('/', '/app', 'Test build')).toThrow(
       /never the root itself or a parent of it/,
     )
+  })
+
+  test('should reject an outputDir that reaches the app root through a symlink', () => {
+    // The delete follows symlinks, so a lexical comparison is not enough. On
+    // macOS /tmp is itself a symlink to /private/tmp, so this is ordinary.
+    const base = realpathSync(mkdtempSync(join(tmpdir(), 'guren-symlink-')))
+    try {
+      mkdirSync(join(base, 'real/app'), { recursive: true })
+      symlinkSync(join(base, 'real'), join(base, 'link'))
+
+      expect(() =>
+        assertOutputDirOutsideRoot(join(base, 'link/app'), join(base, 'real/app'), 'Test build'),
+      ).toThrow(/never the root itself or a parent of it/)
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  test('should still accept an output directory that does not exist yet', () => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), 'guren-symlink-')))
+    try {
+      mkdirSync(join(base, 'app'), { recursive: true })
+
+      expect(() =>
+        assertOutputDirOutsideRoot(join(base, 'app/.out'), join(base, 'app'), 'Test build'),
+      ).not.toThrow()
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
   })
 
   test('should name the calling platform in the message', () => {
@@ -97,6 +127,23 @@ describe('loadManifest', () => {
     })
   })
 
+  test('should report the path it actually parsed, not the first that exists', () => {
+    // A malformed .vite/manifest.json alongside a valid flat one: naming the
+    // file that merely exists publishes the path to the one that was skipped.
+    mkdirSync(join(dir, '.vite'), { recursive: true })
+    writeFileSync(join(dir, '.vite/manifest.json'), '{ not json')
+    writeFileSync(
+      join(dir, 'manifest.json'),
+      JSON.stringify({ 'resources/js/ssr.tsx': { file: 'ssr.js' } }),
+    )
+
+    expect(ssrManifestRelativePath(dir, './.guren/ssr')).toBe('./.guren/ssr/manifest.json')
+  })
+
+  test('should return undefined when no manifest parses', () => {
+    expect(ssrManifestRelativePath(dir, './.guren/ssr')).toBeUndefined()
+  })
+
   test('should return undefined when nothing is found', () => {
     expect(loadManifest(join(dir, 'a.json'), join(dir, 'b.json'))).toBeUndefined()
   })
@@ -139,9 +186,16 @@ describe('the built artifact', () => {
       throw new Error(`Expected ${built}; run \`bun run build core\` before this test.`)
     }
 
-    const specifiers = [...readFileSync(built, 'utf8').matchAll(/from\s*["']([^"']+)["']/g)].map(
-      ([, specifier]) => specifier,
-    )
+    // Every import form, not just `from "..."`: a side-effect import or a
+    // dynamic `import()` of a bundled chunk would otherwise slip past while the
+    // builtin `from` imports kept the assertion green.
+    const source = readFileSync(built, 'utf8')
+    const specifiers = [
+      ...source.matchAll(/from\s*["']([^"']+)["']/g),
+      ...source.matchAll(/(?:^|[^.\w])import\s*["']([^"']+)["']/g),
+      ...source.matchAll(/\bimport\s*\(\s*["']([^"']+)["']/g),
+      ...source.matchAll(/\brequire\s*\(\s*["']([^"']+)["']/g),
+    ].map(([, specifier]) => specifier)
 
     expect(specifiers.length).toBeGreaterThan(0)
     for (const specifier of specifiers) {

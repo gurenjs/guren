@@ -5,6 +5,7 @@ import {
   DEV_ONLY_MODULES,
   importSpecifier,
   renderDevOnlyStub,
+  assertOutputDirOutsideRoot,
   resetOutputDir,
   resolveClientAssetEnv,
   resolvePathLike,
@@ -55,7 +56,10 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   const clientEntryKey = options.clientEntryKey ?? 'resources/js/app.tsx'
   const ssrEntryKey = options.ssrEntryKey ?? 'resources/js/ssr.tsx'
 
-  resetOutputDir(out, root, 'Cloudflare build')
+  // Validated up front so a bad option fails before running the app build,
+  // but the delete waits until every check below has passed — a failed build
+  // must not take the previous deploy output with it.
+  assertOutputDirOutsideRoot(out, root, 'Cloudflare build')
 
   const packageJson = readPackageJson(root)
 
@@ -69,6 +73,8 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
 
   const ssrImport = await resolveSsrImport(ssrDir, ssrEntryKey)
   const assetEnv = resolveClientAssetEnv(publicDir, clientEntryKey, 'Cloudflare build')
+
+  resetOutputDir(out, root, 'Cloudflare build')
 
   // Workers Static Assets serves `/` from index.html BEFORE the worker runs,
   // and has no rewrites for the built assets' `/public/assets/` base — both

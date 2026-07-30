@@ -312,6 +312,22 @@ describe('buildLambdaOutput', () => {
     expect(existsSync(join(root, 'src/lambda.ts'))).toBe(true)
   })
 
+  test('should keep the previous output when the build fails', async () => {
+    scaffoldApp(root)
+    // A previous successful deploy, and an entrypoint that has gone missing.
+    mkdirSync(join(root, '.lambda/function'), { recursive: true })
+    writeFileSync(join(root, '.lambda/function/handler.js'), 'export const http = () => "old"\n')
+    rmSync(join(root, 'src/lambda.ts'))
+
+    await expect(buildLambdaOutput({ rootDir: root, skipAppBuild: true })).rejects.toThrow(
+      /entrypoint not found/,
+    )
+
+    // Deleting up front would take the last deployable artifact with it,
+    // leaving nothing to roll back to or inspect.
+    expect(existsSync(join(root, '.lambda/function/handler.js'))).toBe(true)
+  })
+
   test('should refuse the filesystem root as outputDir', async () => {
     scaffoldApp(root)
 

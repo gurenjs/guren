@@ -21,8 +21,8 @@
  * is fatal, and how an SSR bundle's renderer export is verified are all
  * per-plugin by design.
  */
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
-import { isAbsolute, relative, resolve, sep } from 'node:path'
+import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export type PathLike = string | URL
@@ -45,13 +45,25 @@ export function resolvePathLike(value: PathLike): string {
  * missing manifest means for its platform.
  */
 export function loadManifest(...paths: string[]): Manifest | undefined {
+  return readManifest(...paths)?.manifest
+}
+
+/**
+ * As `loadManifest`, but also reports which path was read. A caller that
+ * publishes the manifest location to the runtime has to name the file that was
+ * actually parsed: testing which one *exists* picks the malformed one that
+ * `loadManifest` just skipped.
+ */
+export function readManifest(
+  ...paths: string[]
+): { manifest: Manifest; path: string } | undefined {
   for (const path of paths) {
     if (!existsSync(path)) {
       continue
     }
 
     try {
-      return JSON.parse(readFileSync(path, 'utf8')) as Manifest
+      return { manifest: JSON.parse(readFileSync(path, 'utf8')) as Manifest, path }
     } catch {
       continue
     }
@@ -66,26 +78,50 @@ export function manifestPaths(dir: string): [string, string] {
 }
 
 /**
+ * Resolve symlinks in the parts of `path` that exist, keeping the trailing
+ * components that do not. `realpathSync` throws on a path that is not there
+ * yet, and an output directory usually is not on a first build.
+ */
+function realpathOfNearestExisting(path: string): string {
+  let existing = path
+  const missing: string[] = []
+
+  while (!existsSync(existing)) {
+    const parent = dirname(existing)
+    if (parent === existing) {
+      return path
+    }
+    missing.unshift(basename(existing))
+    existing = parent
+  }
+
+  return resolve(realpathSync(existing), ...missing)
+}
+
+/**
  * Throw unless `out` is safe to delete: it must be neither the app root nor a
  * directory containing it.
  *
- * Containment is decided with `relative` rather than a string prefix because
- * `out + sep` is `//` at the filesystem root, which no absolute path is
- * prefixed by — a prefix test lets `outputDir: '/'` through.
+ * Both paths are resolved through their symlinks first, because the delete
+ * that follows does too. Comparing lexically accepts `outputDir` values that
+ * reach the app root the long way — on macOS `/tmp` is itself a symlink to
+ * `/private/tmp`, so this is not a contrived case.
  *
- * The escape test is `'..'` exactly or a `'../'` prefix, not `startsWith('..')`:
- * a directory legitimately named `..-source` inside `out` yields the relative
- * path `..-source`, which the looser test would read as an escape and wave
- * through.
+ * Containment is then decided with `relative` rather than a string prefix
+ * because `out + sep` is `//` at the filesystem root, which no absolute path
+ * is prefixed by — a prefix test lets `outputDir: '/'` through. The escape
+ * test is `'..'` exactly or a `'../'` prefix, not `startsWith('..')`: a
+ * directory legitimately named `..-source` inside `out` yields the relative
+ * path `..-source`, which the looser test would read as an escape.
  *
- * Exported separately from `resetOutputDir` so it can be exercised without a
- * filesystem, but plugins should call `resetOutputDir` — it is what keeps the
- * delete from being reachable on its own.
+ * Exported separately from `resetOutputDir` so a caller can validate the
+ * option early and delete later, but the delete itself should always go
+ * through `resetOutputDir`.
  *
  * @param label Platform name for the error message, e.g. `'Lambda build'`.
  */
 export function assertOutputDirOutsideRoot(out: string, root: string, label: string): void {
-  const outToRoot = relative(out, root)
+  const outToRoot = relative(realpathOfNearestExisting(out), realpathOfNearestExisting(root))
   const rootIsInsideOut =
     outToRoot !== '..' && !outToRoot.startsWith(`..${sep}`) && !isAbsolute(outToRoot)
 
@@ -200,13 +236,20 @@ export function resolveSsrEntryFile(
 
 /**
  * Path of the SSR manifest that `resolveSsrEntryFile` actually read, relative
- * to the function root, for platforms that pass it to the runtime. Both Vite
- * layouts occur in the wild, so this must follow the fallback rather than
- * assume `.vite/`.
+ * to the function root, for platforms that pass it to the runtime.
+ *
+ * Derived from the file that parsed rather than the first one that exists:
+ * both Vite layouts occur in the wild, and a malformed `.vite/manifest.json`
+ * alongside a valid flat one would otherwise publish the path to the file that
+ * was skipped.
  */
-export function ssrManifestRelativePath(ssrDir: string, prefix: string): string {
-  const [nested] = manifestPaths(ssrDir)
-  return existsSync(nested) ? `${prefix}/.vite/manifest.json` : `${prefix}/manifest.json`
+export function ssrManifestRelativePath(ssrDir: string, prefix: string): string | undefined {
+  const read = readManifest(...manifestPaths(ssrDir))
+  if (!read) {
+    return undefined
+  }
+
+  return `${prefix}/${relative(ssrDir, read.path).split(sep).join('/')}`
 }
 
 /**
