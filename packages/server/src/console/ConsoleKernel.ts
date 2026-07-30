@@ -2,7 +2,14 @@ import type { Container } from '../container'
 import type { CommandClass, ConsoleKernelOptions, OutputInterface } from './types'
 import { Command } from './Command'
 import { Output, BufferedOutput } from './Output'
-import { parseSignature } from './Input'
+import { argumentLabel, formatUsage, optionLabel, parseSignature } from './Input'
+
+/**
+ * Left-align a help label so the column after it starts at `width`.
+ */
+function padded(label: string, width: number): string {
+  return label + ' '.repeat(Math.max(2, width - label.length))
+}
 
 /**
  * Console kernel for managing and executing commands.
@@ -166,8 +173,7 @@ export class ConsoleKernel {
 
       for (const [name, cmd] of commands) {
         const displayName = namespace ? name.slice(namespace.length + 1) : name
-        const padding = ' '.repeat(Math.max(2, 20 - displayName.length))
-        this.output.line(`    ${displayName}${padding}${cmd.description}`)
+        this.output.line(`    ${padded(displayName, 20)}${cmd.description}`)
       }
 
       this.output.line('')
@@ -191,15 +197,17 @@ export class ConsoleKernel {
     this.output.line('')
     this.output.line(`  ${CommandClass.description || 'No description'}`)
     this.output.line('')
-    this.output.line(`Usage: ${CommandClass.signature}`)
+    this.output.line(`Usage: ${formatUsage(parsed)}`)
 
     if (parsed.arguments.length > 0) {
       this.output.line('')
       this.output.line('Arguments:')
       for (const arg of parsed.arguments) {
-        const required = arg.required ? '(required)' : '(optional)'
-        const defaultVal = arg.defaultValue ? ` [default: ${arg.defaultValue}]` : ''
-        this.output.line(`  ${arg.name}  ${required}${defaultVal}`)
+        const columns: string[] = []
+        if (arg.description) columns.push(arg.description)
+        columns.push(arg.required ? '(required)' : '(optional)')
+        if (arg.defaultValue) columns.push(`[default: ${arg.defaultValue}]`)
+        this.output.line(`  ${padded(argumentLabel(arg), 24)}${columns.join(' ')}`)
       }
     }
 
@@ -208,10 +216,12 @@ export class ConsoleKernel {
       this.output.line('Options:')
       for (const opt of parsed.options) {
         const shortcut = opt.shortcut ? `-${opt.shortcut}, ` : '    '
-        const defaultVal = opt.defaultValue !== undefined && opt.defaultValue !== false
-          ? ` [default: ${opt.defaultValue}]`
-          : ''
-        this.output.line(`  ${shortcut}--${opt.name}${defaultVal}`)
+        const columns: string[] = []
+        if (opt.description) columns.push(opt.description)
+        if (opt.defaultValue !== undefined && opt.defaultValue !== false) {
+          columns.push(`[default: ${opt.defaultValue}]`)
+        }
+        this.output.line(`  ${padded(shortcut + optionLabel(opt), 24)}${columns.join(' ')}`)
       }
     }
 

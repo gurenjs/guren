@@ -161,6 +161,41 @@ function splitInlineDescription(
 }
 
 /**
+ * The label an argument is displayed with in help output.
+ */
+export function argumentLabel(arg: ArgumentDefinition): string {
+  return arg.array ? `${arg.name}...` : arg.name
+}
+
+/**
+ * The label an option is displayed with in help output, carrying whether it
+ * takes a value and whether it may be repeated.
+ */
+export function optionLabel(opt: OptionDefinition): string {
+  if (opt.array) return `--${opt.name}=<value>...`
+  if (opt.requiresValue) return `--${opt.name}=<value>`
+  return `--${opt.name}`
+}
+
+/**
+ * Build a usage line from a parsed signature.
+ */
+export function formatUsage(parsed: ParsedSignature): string {
+  const parts = [parsed.name]
+
+  if (parsed.options.length > 0) {
+    parts.push('[options]')
+  }
+
+  for (const arg of parsed.arguments) {
+    const label = argumentLabel(arg)
+    parts.push(arg.required ? `<${label}>` : `[${label}]`)
+  }
+
+  return parts.join(' ')
+}
+
+/**
  * Parse an argument definition.
  */
 function parseArgument(content: string, description?: string): ArgumentDefinition {

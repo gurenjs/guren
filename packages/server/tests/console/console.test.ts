@@ -740,6 +740,46 @@ describe('ConsoleKernel', () => {
     expect(output.contains('Usage:')).toBe(true)
   })
 
+  test('shows command help with argument and option descriptions', async () => {
+    class DescribedCommand extends Command {
+      static signature =
+        'reports:digest {email : The recipient address} {period? : Reporting period} {--dry-run : Skip delivery} {--limit=10 : Maximum rows}'
+      static description = 'Send the digest report'
+
+      async handle(): Promise<void> {}
+    }
+
+    kernel.register(DescribedCommand)
+    const result = await kernel.handle(['help', 'reports:digest'])
+
+    expect(result).toBe(0)
+    expect(output.contains('Usage: reports:digest [options] <email> [period]')).toBe(true)
+    expect(output.contains('The recipient address')).toBe(true)
+    expect(output.contains('Reporting period')).toBe(true)
+    expect(output.contains('Skip delivery')).toBe(true)
+    expect(output.contains('Maximum rows')).toBe(true)
+    expect(output.contains('[default: 10]')).toBe(true)
+  })
+
+  test('shows whether an option takes a value or repeats', async () => {
+    class ArityCommand extends Command {
+      static signature =
+        'mail:send {emails* : Recipients} {--subject= : Subject line} {--tag=* : Tags to attach} {--dry-run : Skip delivery}'
+      static description = 'Send mail'
+
+      async handle(): Promise<void> {}
+    }
+
+    kernel.register(ArityCommand)
+    const result = await kernel.handle(['help', 'mail:send'])
+
+    expect(result).toBe(0)
+    expect(output.contains('Usage: mail:send [options] <emails...>')).toBe(true)
+    expect(output.contains('--subject=<value>')).toBe(true)
+    expect(output.contains('--tag=<value>...')).toBe(true)
+    expect(output.contains('--dry-run ')).toBe(true)
+  })
+
   test('lists commands', async () => {
     kernel.register(TestCommand)
     kernel.register(FailingCommand)
