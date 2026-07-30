@@ -353,6 +353,12 @@ function toActorEvents(value: DocFrontmatterValue | undefined): DocActorEvent[] 
 
 const URL_SCHEME_REGEX = /^[a-z][a-z0-9+.-]*:/i
 
+/**
+ * A link reference definition line (`[label]: ./target.md "Title"`).
+ * Indented up to three spaces, per CommonMark.
+ */
+const LINK_DEFINITION_RE = /^ {0,3}\[[^\]]+\]:\s*(?:<([^>\n]*)>|(\S+))(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*$/
+
 /** The punctuation a markdown backslash escape may precede (CommonMark). */
 const ESCAPABLE = /^[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]$/
 
@@ -368,6 +374,15 @@ export function readLinkDestination(
   text: string,
   open: number,
 ): { target: string; end: number } | null {
+  // `<…>` wraps a destination that may contain spaces.
+  if (text[open + 1] === '<') {
+    const close = text.indexOf('>', open + 2)
+    if (close === -1) return null
+    const wrapped = text.slice(open + 2, close)
+    if (wrapped.includes('\n')) return null
+    return readAfterDestination(text, close + 1, wrapped)
+  }
+
   const target: string[] = []
   let depth = 0
   let index = open
@@ -422,7 +437,7 @@ function readAfterDestination(
   from: number,
   target: string,
 ): { target: string; end: number } | null {
-  if (target === '') return null
+  if (target.trim() === '') return null
   const rest = text.slice(from)
   const match = TRAILING_TITLE_RE.exec(rest)
   if (!match || match[0].includes('\n')) return null
@@ -440,6 +455,18 @@ export function extractMarkdownLinks(body: string): string[] {
   const withoutCode = body.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '')
   const targets = new Set<string>()
 
+  const add = (target: string): void => {
+    // `//host/path` is a protocol-relative URL, not a bundle path.
+    if (URL_SCHEME_REGEX.test(target) || target.startsWith('#') || target.startsWith('//')) return
+    const withoutFragment = target.split('#')[0]
+    if (withoutFragment !== '') targets.add(withoutFragment)
+  }
+
+  for (const line of withoutCode.split(/\r?\n/)) {
+    const definition = LINK_DEFINITION_RE.exec(line)
+    if (definition) add(definition[1] ?? definition[2])
+  }
+
   let index = 0
   while (index < withoutCode.length) {
     const open = withoutCode.indexOf('[', index)
@@ -454,11 +481,7 @@ export function extractMarkdownLinks(body: string): string[] {
       continue
     }
     index = destination.end + 1
-
-    const target = destination.target
-    if (URL_SCHEME_REGEX.test(target) || target.startsWith('#')) continue
-    const withoutFragment = target.split('#')[0]
-    if (withoutFragment !== '') targets.add(withoutFragment)
+    add(destination.target)
   }
 
   return [...targets]

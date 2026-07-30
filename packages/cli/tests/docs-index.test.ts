@@ -255,6 +255,26 @@ Inline \`[code](/not-a-link.md)\` too, but [real](./real.md).
     expect(extractMarkdownLinks('[esc](./escaped\\)paren.md)')).toEqual(['./escaped)paren.md'])
   })
 
+  it('extracts link reference definitions, so that form stays validated', () => {
+    const links = extractMarkdownLinks(`See [replacement][new].
+
+[new]: ./0002-replacement.md
+[titled]: <./with spaces.md> "A title"
+`)
+
+    expect(links).toEqual(['./0002-replacement.md', './with spaces.md'])
+  })
+
+  it('accepts an angle-bracket destination', () => {
+    expect(extractMarkdownLinks('[design](<./design docs/overview.md>)')).toEqual([
+      './design docs/overview.md',
+    ])
+  })
+
+  it('treats a protocol-relative URL as external', () => {
+    expect(extractMarkdownLinks('[external](//example.com/docs)')).toEqual([])
+  })
+
   it('keeps backslashes that are not markdown escapes', () => {
     // Dropping them would erase the separators in a Windows-style
     // target before the containment checks in docs-check ever see them.
