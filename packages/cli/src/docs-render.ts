@@ -42,7 +42,10 @@ function inline(text: string, resolveLink?: (target: string) => string): string 
     const destination =
       close !== -1 && text[close + 1] === '(' ? readLinkDestination(text, close + 1) : null
     if (destination === null) {
-      out.push(text.slice(index, open + 1))
+      // Not a link after all — the slice still has to be escaped, or a
+      // stray `[` anywhere in the document would leave everything
+      // before it as raw markup.
+      out.push(spans(text.slice(index, open + 1)))
       index = open + 1
       continue
     }

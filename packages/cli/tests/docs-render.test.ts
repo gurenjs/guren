@@ -71,6 +71,24 @@ bunx guren check --docs
     expect(html).toContain('data-target="&quot;onmouseover=&quot;globalThis.pwned=1"')
   })
 
+  it('escapes markup around a bracket that never becomes a link', () => {
+    // The link scanner splits on '['; the slice before an unmatched one
+    // must still be escaped, or a stray bracket makes everything before
+    // it raw markup.
+    const cases = [
+      '<img src=x onerror=alert(1)>[\n',
+      '<script>alert(1)</script>[broken\n',
+      '[x](./a.md) then <b>raw</b> and [unclosed\n',
+    ]
+
+    for (const source of cases) {
+      const html = renderDocHtml(source)
+      expect(html).not.toContain('<img')
+      expect(html).not.toContain('<script')
+      expect(html).not.toContain('<b>')
+    }
+  })
+
   it('keeps balanced parentheses in a link destination', () => {
     const html = renderDocHtml('[migration](./use-(legacy)-api.md)\n')
 
