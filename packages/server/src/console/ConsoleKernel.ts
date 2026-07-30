@@ -1,14 +1,35 @@
 import type { Container } from '../container'
-import type { CommandClass, ConsoleKernelOptions, OutputInterface } from './types'
+import type {
+  CommandClass,
+  ConsoleKernelOptions,
+  OptionDefinition,
+  OutputInterface,
+} from './types'
 import { Command } from './Command'
 import { Output, BufferedOutput } from './Output'
 import { argumentLabel, formatUsage, optionLabel, parseSignature } from './Input'
 
 /**
- * Left-align a help label so the column after it starts at `width`.
+ * The column help text starts at: past the longest label, and never narrower
+ * than `min` so that a list of short labels still reads as a column.
  */
-function padded(label: string, width: number): string {
-  return label + ' '.repeat(Math.max(2, width - label.length))
+function helpColumn(labels: string[], min: number): number {
+  return Math.max(min, ...labels.map((label) => label.length + 2))
+}
+
+/**
+ * Emit one help row: a label padded out to `column`, followed by whichever of
+ * its annotations are present.
+ */
+function helpRow(
+  output: OutputInterface,
+  indent: string,
+  label: string,
+  column: number,
+  annotations: Array<string | undefined>
+): void {
+  const padding = ' '.repeat(Math.max(2, column - label.length))
+  output.line(`${indent}${label}${padding}${annotations.filter(Boolean).join(' ')}`)
 }
 
 /**
@@ -163,17 +184,27 @@ export class ConsoleKernel {
     this.output.info('Available Commands:')
     this.output.line('')
 
-    // Group commands by namespace
-    const grouped = this.groupCommands()
+    // Group commands by namespace, dropping the namespace from the label
+    const groups = Array.from(this.groupCommands(), ([namespace, commands]) => ({
+      namespace,
+      entries: Array.from(commands, ([name, cmd]) => ({
+        label: namespace ? name.slice(namespace.length + 1) : name,
+        description: cmd.description,
+      })),
+    }))
 
-    for (const [namespace, commands] of grouped) {
-      if (namespace) {
-        this.output.line(`  ${namespace}`)
+    const column = helpColumn(
+      groups.flatMap((group) => group.entries.map((entry) => entry.label)),
+      20
+    )
+
+    for (const group of groups) {
+      if (group.namespace) {
+        this.output.line(`  ${group.namespace}`)
       }
 
-      for (const [name, cmd] of commands) {
-        const displayName = namespace ? name.slice(namespace.length + 1) : name
-        this.output.line(`    ${padded(displayName, 20)}${cmd.description}`)
+      for (const entry of group.entries) {
+        helpRow(this.output, '    ', entry.label, column, [entry.description])
       }
 
       this.output.line('')
@@ -199,15 +230,25 @@ export class ConsoleKernel {
     this.output.line('')
     this.output.line(`Usage: ${formatUsage(parsed)}`)
 
+    // One column for both blocks, so arguments and options line up with each other
+    const optionShortcut = (opt: OptionDefinition) => (opt.shortcut ? `-${opt.shortcut}, ` : '    ')
+    const column = helpColumn(
+      [
+        ...parsed.arguments.map(argumentLabel),
+        ...parsed.options.map((opt) => optionShortcut(opt) + optionLabel(opt)),
+      ],
+      24
+    )
+
     if (parsed.arguments.length > 0) {
       this.output.line('')
       this.output.line('Arguments:')
       for (const arg of parsed.arguments) {
-        const columns: string[] = []
-        if (arg.description) columns.push(arg.description)
-        columns.push(arg.required ? '(required)' : '(optional)')
-        if (arg.defaultValue) columns.push(`[default: ${arg.defaultValue}]`)
-        this.output.line(`  ${padded(argumentLabel(arg), 24)}${columns.join(' ')}`)
+        helpRow(this.output, '  ', argumentLabel(arg), column, [
+          arg.description,
+          arg.required ? '(required)' : '(optional)',
+          arg.defaultValue ? `[default: ${arg.defaultValue}]` : undefined,
+        ])
       }
     }
 
@@ -215,13 +256,12 @@ export class ConsoleKernel {
       this.output.line('')
       this.output.line('Options:')
       for (const opt of parsed.options) {
-        const shortcut = opt.shortcut ? `-${opt.shortcut}, ` : '    '
-        const columns: string[] = []
-        if (opt.description) columns.push(opt.description)
-        if (opt.defaultValue !== undefined && opt.defaultValue !== false) {
-          columns.push(`[default: ${opt.defaultValue}]`)
-        }
-        this.output.line(`  ${padded(shortcut + optionLabel(opt), 24)}${columns.join(' ')}`)
+        helpRow(this.output, '  ', optionShortcut(opt) + optionLabel(opt), column, [
+          opt.description,
+          opt.defaultValue !== undefined && opt.defaultValue !== false
+            ? `[default: ${opt.defaultValue}]`
+            : undefined,
+        ])
       }
     }
 

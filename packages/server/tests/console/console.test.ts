@@ -654,6 +654,19 @@ describe('Command', () => {
 // ConsoleKernel Tests
 // ===================
 
+/**
+ * The non-blank lines of a help screen with runs of whitespace collapsed, so an
+ * assertion can pin which description belongs to which label without depending
+ * on the column width — 'aligns help descriptions past the longest label'
+ * covers the padding itself.
+ */
+function helpLines(output: BufferedOutput): string[] {
+  return output
+    .getLines()
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter((line) => line.length > 0)
+}
+
 describe('ConsoleKernel', () => {
   let kernel: ConsoleKernel
   let output: BufferedOutput
@@ -753,12 +766,17 @@ describe('ConsoleKernel', () => {
     const result = await kernel.handle(['help', 'reports:digest'])
 
     expect(result).toBe(0)
-    expect(output.contains('Usage: reports:digest [options] <email> [period]')).toBe(true)
-    expect(output.contains('The recipient address')).toBe(true)
-    expect(output.contains('Reporting period')).toBe(true)
-    expect(output.contains('Skip delivery')).toBe(true)
-    expect(output.contains('Maximum rows')).toBe(true)
-    expect(output.contains('[default: 10]')).toBe(true)
+    expect(helpLines(output)).toEqual([
+      'INFO Command: reports:digest',
+      'Send the digest report',
+      'Usage: reports:digest [options] <email> [period]',
+      'Arguments:',
+      'email The recipient address (required)',
+      'period Reporting period (optional)',
+      'Options:',
+      '--dry-run Skip delivery',
+      '--limit=<value> Maximum rows [default: 10]',
+    ])
   })
 
   test('shows whether an option takes a value or repeats', async () => {
@@ -774,10 +792,40 @@ describe('ConsoleKernel', () => {
     const result = await kernel.handle(['help', 'mail:send'])
 
     expect(result).toBe(0)
-    expect(output.contains('Usage: mail:send [options] <emails...>')).toBe(true)
-    expect(output.contains('--subject=<value>')).toBe(true)
-    expect(output.contains('--tag=<value>...')).toBe(true)
-    expect(output.contains('--dry-run ')).toBe(true)
+    expect(helpLines(output)).toEqual([
+      'INFO Command: mail:send',
+      'Send mail',
+      'Usage: mail:send [options] <emails...>',
+      'Arguments:',
+      'emails... Recipients (required)',
+      'Options:',
+      '--subject=<value> Subject line',
+      '--tag=<value>... Tags to attach',
+      '--dry-run Skip delivery',
+    ])
+  })
+
+  test('aligns help descriptions past the longest label', async () => {
+    class WideCommand extends Command {
+      static signature =
+        'queue:work {--connection= : Connection name} {--max-attempts=3 : Retries} {-t|--attachment=* : Files to attach} {--dry-run : Skip}'
+      static description = 'Process queued jobs'
+
+      async handle(): Promise<void> {}
+    }
+
+    kernel.register(WideCommand)
+    await kernel.handle(['help', 'queue:work'])
+
+    // The longest label is '  -t, --attachment=<value>...', so every description
+    // starts two columns past it rather than overflowing a fixed column.
+    const rows = output.getLines().filter((line) => line.includes('--'))
+    expect(rows).toEqual([
+      '      --connection=<value>     Connection name',
+      '      --max-attempts=<value>   Retries [default: 3]',
+      '  -t, --attachment=<value>...  Files to attach',
+      '      --dry-run                Skip',
+    ])
   })
 
   test('lists commands', async () => {
