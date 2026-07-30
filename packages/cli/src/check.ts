@@ -10,10 +10,11 @@ import {
   classNameFromPath,
   toPosixRelative,
   listModuleNames,
-  moduleNameFromRelPath,
+  moduleNameFor,
   formatTruncatedList,
 } from './discovery'
 import { extractClassDeclaration } from './model-parser'
+import { checkConsoleCommandRegistration } from './console-check'
 import { ParseCache } from './parse-cache'
 import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath } from './inertia-pages'
 import { runArchCheck } from './arch-check'
@@ -50,16 +51,6 @@ export interface RunCheckOptions {
   docsTtlDays?: number
   /** Run spec drift checks only (docs/spec/ vs regenerated views). */
   spec?: boolean
-}
-
-/**
- * Module name (e.g. `'billing'`) if `filePath` is under `modules/<name>/`,
- * else `null`. Lets checks that assume a single project-root file (tests,
- * schema) resolve the right module-scoped equivalent instead of always
- * looking at the top level.
- */
-function moduleNameFor(cwd: string, filePath: string): string | null {
-  return moduleNameFromRelPath(toPosixRelative(cwd, filePath))
 }
 
 /**
@@ -208,9 +199,16 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // checks 1-5.
     const schemaAggregationResults = await checkModuleSchemaAggregation(cwd)
     checks.push(...schemaAggregationResults)
+
+    // 7. Check every console command is registered with a kernel (the wiring
+    // make:command performs automatically — this catches commands written or
+    // moved by hand). Content-activated: apps with no app/Console/Commands
+    // contribute nothing here.
+    const commandRegistrationResults = await checkConsoleCommandRegistration(cwd, cache)
+    checks.push(...commandRegistrationResults)
   }
 
-  // 7. Doc-link checks (docs/ frontmatter + @docs tags, RFC 0004). Runs in
+  // 8. Doc-link checks (docs/ frontmatter + @docs tags, RFC 0004). Runs in
   // plain mode and under --docs; content-activated, so apps without the
   // docs convention contribute zero results here.
   if (runs('docs')) {
@@ -218,7 +216,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     checks.push(...docsResults)
   }
 
-  // 8. Spec drift checks (docs/spec/ vs regenerated views, RFC 0004).
+  // 9. Spec drift checks (docs/spec/ vs regenerated views, RFC 0004).
   // Content-activated like docs; under --changed it only regenerates when
   // a spec-relevant file changed.
   if (runs('spec')) {
@@ -226,7 +224,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     checks.push(...specResults)
   }
 
-  // 9. Check architecture boundaries (guren.arch.ts + derived module rules)
+  // 10. Check architecture boundaries (guren.arch.ts + derived module rules)
   if (runs('arch')) {
     const archResults = await runArchCheck({ cwd, cache, changedFiles })
     checks.push(...archResults)

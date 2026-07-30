@@ -124,7 +124,7 @@ const token = await this.secret('API token')
 
 `app/Console/Commands` を自動でスキャンする仕組みはありません。生成したコマンドはカーネルに登録するまでデッドコードです。これは意図的な設計で、デプロイがファイルシステムの glob に依存しないようにするためです。
 
-スキャフォールドされたアプリには、まさにこのための `src/console.ts` が含まれています。
+スキャフォールドされたアプリには、まさにこのための `src/console.ts` が含まれています。`bunx guren make:command` は、生成したコマンドの import と登録をこのファイルへ自動で追記します。
 
 ```ts
 import { ConsoleKernel } from '@guren/core'
@@ -138,7 +138,16 @@ kernel.registerMany([SendDigestCommand])
 
 `app.container` を渡すと、コマンド内で `this.resolve()` によるサービス解決ができるようになります。1 クラスだけなら `register(OneCommand)` でも同じです。
 
-このファイルが無い時期に作られたプロジェクトでは、自分で作成してください。デプロイ用のレシピがこの名前で import するため、**エクスポート名は必ず `kernel`** にする必要があります。
+このファイルが無い時期に作られたプロジェクトでは、自分で作成してください。デプロイ用のレシピがこの名前で import するため、**エクスポート名は必ず `kernel`** にする必要があります。自動で追記できなかった場合、`make:command` が追加すべき行をそのまま出力します。
+
+登録が明示的である以上、どのコンソールエントリからも使われていないコマンドクラスは `bunx guren check` が警告します。
+
+```
+⚠ SendDigestCommand registration: src/console.ts never uses SendDigestCommand
+  outside its imports, so no kernel receives it.
+```
+
+import が残っているだけでは登録済みとは見なしません。登録行だけを消して import を消し忘れた状態が、まさにこの警告で拾いたい状態だからです。
 
 ## コマンドを実行する
 
@@ -217,19 +226,31 @@ async handle(): Promise<number | void> {
 
 ## モジュール
 
-`--module` を付けて生成したコマンドは `modules/<name>/app/Console/Commands/` に置かれます。モジュールごとのコンソールカーネルは存在しないため、ルートの `src/console.ts` にまとめて登録しますが、先にモジュールの `index.ts` からエクスポートしてください。コマンドのファイルを直接 import するとモジュールの内部に手を伸ばすことになり、`bunx guren check --arch` が失敗として報告します。
+`--module` を付けて生成したコマンドは `modules/<name>/app/Console/Commands/` に置かれます。モジュールごとのコンソールカーネルは存在しないため、モジュール自身のディスクリプタ経由でルートのカーネルへ渡します。`defineModule()` は `routes` や `providers` と並んで `commands` 配列を持ち、`make:command --module` がここに追記します。
 
 ```ts
 // modules/billing/index.ts
-export { default as InvoiceCommand } from './app/Console/Commands/InvoiceCommand.js'
+import { defineModule } from '@guren/core'
+import InvoiceCommand from './app/Console/Commands/InvoiceCommand.js'
+
+export const billingModule = defineModule({
+  name: 'billing',
+  prefix: '/billing',
+  routes: registerBillingRoutes,
+  commands: [InvoiceCommand],
+})
 ```
 
 ```ts
 // src/console.ts
-import { InvoiceCommand } from '../modules/billing/index.js'
+import { billingModule } from '../modules/billing/index.js'
 
-kernel.registerMany([InvoiceCommand])
+kernel.registerMany(billingModule.commands)
 ```
+
+この 2 つ目の行だけはスキャフォールドが自動化しません。モジュールごとに一度書けば、以降の `make:command --module billing` は自動的に拾われます。書くまでは `bunx guren check` が警告します。
+
+コマンドのファイルを `src/console.ts` から直接 import しても実行時には動きますが、モジュールの内部に手を伸ばすことになり、`bunx guren check --arch` が失敗として報告します。モジュールの公開面は `modules/<name>/index.ts` と `modules/<name>/db/schema.ts` だけです。
 
 ## デプロイ環境での実行
 

@@ -1,3 +1,4 @@
+import type { CommandClass } from '../console/types'
 import type { Router } from '../mvc/Router'
 import type { ServiceProviderConstructor } from './ServiceProvider'
 
@@ -22,17 +23,30 @@ export interface ModuleDefinition {
   routes?: (router: Router) => void | Promise<void>
   /** Providers appended to the application's provider list. */
   providers?: ServiceProviderConstructor[]
+  /**
+   * Console commands the module owns, exposed so the project's console
+   * entrypoint can register them without importing module internals:
+   * `kernel.registerMany(billingModule.commands)`. Nothing registers them
+   * automatically — `Application` never builds a `ConsoleKernel`, and
+   * command registration stays explicit so a bundled deployment resolves
+   * the same commands as a local checkout.
+   */
+  commands?: CommandClass[]
 }
 
 /**
- * A module as `Application` consumes it — `providers` normalized to always
- * be an array so callers don't repeat the `?? []` fallback.
+ * A module as `Application` consumes it — `providers` and `commands`
+ * normalized to always be arrays so callers don't repeat the `?? []`
+ * fallback. `commands` in particular is read by hand-written console
+ * entrypoints (`kernel.registerMany(billingModule.commands)`), where an
+ * `undefined` would be a runtime error rather than a no-op.
  */
 export interface GurenModule {
   name: string
   prefix?: string
   routes?: (router: Router) => void | Promise<void>
   providers: ServiceProviderConstructor[]
+  commands: CommandClass[]
 }
 
 /**
@@ -46,10 +60,14 @@ export interface GurenModule {
  *   prefix: '/billing',
  *   routes: registerBillingRoutes,
  *   providers: [BillingServiceProvider],
+ *   commands: [InvoiceCommand],
  * })
  *
  * // src/app.ts
  * createApp({ routes, providers, modules: [billingModule] })
+ *
+ * // src/console.ts
+ * kernel.registerMany(billingModule.commands)
  * ```
  */
 export function defineModule(definition: ModuleDefinition): GurenModule {
@@ -58,6 +76,7 @@ export function defineModule(definition: ModuleDefinition): GurenModule {
     prefix: definition.prefix,
     routes: definition.routes,
     providers: definition.providers ?? [],
+    commands: definition.commands ?? [],
   }
 }
 

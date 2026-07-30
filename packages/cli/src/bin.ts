@@ -9,7 +9,7 @@ import { listBlueprints, runBlueprint } from './blueprints'
 import { runDoctor } from './doctor'
 import { makeAuth } from './make-auth'
 import { makeChannel } from './make-channel'
-import { makeCommand, printCommandRegistrationGuidance } from './make-command'
+import { makeCommand, registerScaffoldedCommand } from './make-command'
 import { makeController } from './make-controller'
 import { makeEvent } from './make-event'
 import { makeException } from './make-exception'
@@ -470,13 +470,14 @@ const makeConsoleCommandCommand = defineCommand({
     module: MODULE_ARG,
   },
   async run({ args }) {
-    const file = await makeCommand(args.name, {
+    const options = {
       force: Boolean(args.force),
       root: args.module,
       command: args.command,
-    })
+    }
+    const file = await makeCommand(args.name, options)
     consola.success(`Command created at ${file}`)
-    printCommandRegistrationGuidance(args.name, file)
+    await registerScaffoldedCommand(args.name, file, options)
   },
 })
 

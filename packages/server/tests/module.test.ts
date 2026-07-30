@@ -117,4 +117,27 @@ describe('Application module wiring', () => {
     const app = new Application({ modules: [emptyModule] })
     await expect(app.boot()).resolves.toBeUndefined()
   })
+
+  it('normalizes commands to an empty array when a module declares none', () => {
+    // A console entrypoint calls `kernel.registerMany(module.commands)`
+    // directly — an `undefined` here would be a runtime error, not a no-op.
+    const emptyModule = defineModule({ name: 'empty' })
+    expect(emptyModule.commands).toEqual([])
+  })
+
+  it('carries declared commands through to the module object', () => {
+    class InvoiceCommand {
+      static signature = 'invoice'
+      static description = 'x'
+      setInput(): void {}
+      setOutput(): void {}
+      setKernel(): void {}
+      async run(): Promise<number> {
+        return 0
+      }
+    }
+
+    const billingModule = defineModule({ name: 'billing', commands: [InvoiceCommand] })
+    expect(billingModule.commands).toEqual([InvoiceCommand])
+  })
 })

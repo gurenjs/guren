@@ -72,6 +72,16 @@ export function moduleNameFromRelPath(relPath: string): string | null {
   return match ? match[1] : null
 }
 
+/**
+ * `moduleNameFromRelPath` for an absolute path: module name if `filePath`
+ * is under `<cwd>/modules/<name>/`, else `null`. Lets checks that assume a
+ * single project-root file (tests, schema, console entry) resolve the right
+ * module-scoped equivalent instead of always looking at the top level.
+ */
+export function moduleNameFor(cwd: string, filePath: string): string | null {
+  return moduleNameFromRelPath(toPosixRelative(cwd, filePath))
+}
+
 export async function fileExists(cwd: string, relativePath: string): Promise<boolean> {
   try {
     await access(resolve(cwd, relativePath))
@@ -214,6 +224,17 @@ export function discoverValidatorFiles(appRoot: string): Promise<string[]> {
 
 export function discoverPolicyFiles(appRoot: string): Promise<string[]> {
   return discoverDir(appRoot, 'app/Policies')
+}
+
+/**
+ * Console command classes (`make:command` output). Unlike controllers or
+ * jobs, nothing loads these by scanning the directory at runtime —
+ * registration with a `ConsoleKernel` is explicit — so this discovery exists
+ * for tooling only: `guren context` lists them, and `guren check` warns about
+ * any that no console entrypoint references.
+ */
+export function discoverCommandFiles(appRoot: string): Promise<string[]> {
+  return discoverDir(appRoot, 'app/Console/Commands')
 }
 
 /**

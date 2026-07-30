@@ -11,6 +11,7 @@ import {
   discoverListenerFiles,
   discoverValidatorFiles,
   discoverPolicyFiles,
+  discoverCommandFiles,
   classNameFromPath,
   readIfExists,
   excludeBarrelFiles,
@@ -32,6 +33,7 @@ export interface ProjectContext {
   listeners: string[]
   validators: string[]
   policies: string[]
+  commands: string[]
 }
 
 export interface ContextOptions {
@@ -81,6 +83,7 @@ export async function generateContext(options: ContextOptions = {}): Promise<Pro
     listeners,
     validators,
     policies,
+    commands,
   ] = await Promise.all([
     collectModels(),
     loadContextRoutes(cwd, options.routesFile),
@@ -93,6 +96,7 @@ export async function generateContext(options: ContextOptions = {}): Promise<Pro
     toNames(discoverListenerFiles),
     toNames(discoverValidatorFiles),
     toNames(discoverPolicyFiles),
+    toNames(discoverCommandFiles),
   ])
 
   return {
@@ -108,6 +112,7 @@ export async function generateContext(options: ContextOptions = {}): Promise<Pro
     listeners,
     validators,
     policies,
+    commands,
   }
 }
 
@@ -178,6 +183,7 @@ export function renderContextMarkdown(ctx: ProjectContext): string {
     ['Listeners', ctx.listeners],
     ['Validators', ctx.validators],
     ['Policies', ctx.policies],
+    ['Console Commands', ctx.commands],
   ]
 
   for (const [title, items] of sections) {

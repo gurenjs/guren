@@ -1,9 +1,123 @@
 import { readFile, writeFile } from 'node:fs/promises'
+import { readIfExists } from './discovery'
 import { resolve } from 'node:path'
+import { escapeRegExp } from './utils'
 
 export interface PatchResult {
   modified: boolean
   reason?: string
+}
+
+/**
+ * A copy of `source` with the contents of comments and string literals
+ * blanked out, character for character, so every index still lines up with
+ * the original.
+ *
+ * These patches locate their edit site by regex, and text that merely *looks*
+ * like code is the failure mode in both directions: a disabled
+ * `// kernel.registerMany([Foo])` or a docblock example gets edited in place
+ * of the real call, while a `'https://…'` earlier on the line makes a real
+ * call look commented out. Matching against the mask and slicing from the
+ * original settles both, and keeps brace/bracket counting from tripping over
+ * a `{` inside a string.
+ */
+function maskNonCode(source: string): string {
+  const mask = source.split('')
+  let i = 0
+
+  while (i < source.length) {
+    const char = source[i]
+    const next = source[i + 1]
+
+    // Comments are blanked whole, delimiters included, so that nothing inside
+    // one can ever read as the last code token on a line.
+    if (char === '/' && next === '/') {
+      while (i < source.length && source[i] !== '\n') mask[i++] = ' '
+      continue
+    }
+
+    if (char === '/' && next === '*') {
+      const end = source.indexOf('*/', i + 2)
+      const stop = end === -1 ? source.length : end + 2
+      while (i < stop) mask[i++] = ' '
+      continue
+    }
+
+    // String and template bodies are blanked but their quotes are kept, so a
+    // string entry still ends where the code ends.
+    if (char === '"' || char === "'" || char === '`') {
+      i++
+      while (i < source.length && source[i] !== char) {
+        if (source[i] === '\\') mask[i++] = ' '
+        mask[i++] = ' '
+      }
+      i++
+      continue
+    }
+
+    i++
+  }
+
+  return mask.join('')
+}
+
+/**
+ * First match of `pattern` that lands in real code rather than a comment or
+ * a string. Indices refer to `content`; read spans out of `content`, not out
+ * of the mask, which is blanked.
+ */
+function matchInCode(content: string, pattern: RegExp): RegExpExecArray | null {
+  return new RegExp(pattern.source, 'g').exec(maskNonCode(content))
+}
+
+/**
+ * Index of the delimiter closing the one at `openIndex`, or `-1`. Counts
+ * depth over the masked source, so nesting is respected and a bracket inside
+ * a string or comment does not shift the result.
+ */
+export function findClosingDelimiter(content: string, openIndex: number, open: string, close: string): number {
+  const masked = maskNonCode(content)
+  let depth = 0
+
+  for (let i = openIndex; i < masked.length; i++) {
+    if (masked[i] === open) depth++
+    else if (masked[i] === close) {
+      depth--
+      if (depth === 0) return i
+    }
+  }
+
+  return -1
+}
+
+/**
+ * Entries of an array literal's interior, e.g. `'A, B'` -> `['A', 'B']`.
+ * Comment and string text is blanked first, so a name that only appears in a
+ * comment is not mistaken for an existing entry.
+ */
+function parseArrayEntries(inner: string): string[] {
+  return maskNonCode(inner)
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0)
+}
+
+/**
+ * `arrayInterior` with `valueSource` appended. The existing text is preserved
+ * verbatim rather than re-joined from parsed entries: re-joining collapses a
+ * formatted multi-line array onto one line and folds any trailing `// note`
+ * over the rest of the statement.
+ */
+function appendArrayEntry(arrayInterior: string, valueSource: string): string {
+  // Length of the interior up to its last code character: everything after it
+  // is whitespace or a trailing comment, and the new entry has to go before
+  // that or it lands inside the comment.
+  const codeLength = maskNonCode(arrayInterior).replace(/\s+$/u, '').length
+  const code = arrayInterior.slice(0, codeLength)
+  const trailing = arrayInterior.slice(codeLength)
+
+  if (code.trim() === '') return `${valueSource}${trailing}`
+  return code.endsWith(',') ? `${code} ${valueSource},${trailing}` : `${code}, ${valueSource}${trailing}`
 }
 
 /**
@@ -15,19 +129,14 @@ export async function addImport(
   importStatement: string,
 ): Promise<PatchResult> {
   const absolutePath = resolve(process.cwd(), filePath)
-  let content: string
+  const content = await readIfExists(process.cwd(), filePath)
 
-  try {
-    content = await readFile(absolutePath, 'utf8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return { modified: false, reason: 'File not found' }
-    }
-    throw error
+  if (content === null) {
+    return { modified: false, reason: 'File not found' }
   }
 
   const normalizedImport = importStatement.trim()
-  const importPattern = normalizedImport.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const importPattern = escapeRegExp(normalizedImport)
   const regex = new RegExp(`^\\s*${importPattern}\\s*$`, 'm')
 
   if (regex.test(content)) {
@@ -89,15 +198,10 @@ export async function addProvider(
   isRegistered?: (entries: string[]) => boolean,
 ): Promise<PatchResult> {
   const absolutePath = resolve(process.cwd(), filePath)
-  let content: string
+  const content = await readIfExists(process.cwd(), filePath)
 
-  try {
-    content = await readFile(absolutePath, 'utf8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return { modified: false, reason: 'File not found' }
-    }
-    throw error
+  if (content === null) {
+    return { modified: false, reason: 'File not found' }
   }
 
   // Find the providers array and add the provider
@@ -109,10 +213,7 @@ export async function addProvider(
   }
 
   const providersContent = match[1]
-  const providers = providersContent
-    .split(',')
-    .map(p => p.trim())
-    .filter(p => p.length > 0)
+  const providers = parseArrayEntries(providersContent)
 
   const alreadyRegistered = isRegistered
     ? isRegistered(providers)
@@ -133,10 +234,39 @@ export async function addProvider(
 }
 
 /**
- * Adds an entry to an arbitrary array-valued `createApp({ ... })` option
- * (e.g. `modules: [...]`), creating the option (via `addCreateAppOption`)
- * if it isn't present at all yet. Generalizes `addProvider`'s array-editing
- * logic to a caller-supplied `key` instead of the hardcoded `providers:`.
+ * Index range of the `{ ... }` options object passed to `callName(` — the
+ * span every "edit an option of this call" patch works within, so that a
+ * `key:` belonging to some other call in the same file is never touched.
+ * Returns the failure `reason` as a string when the call or its object
+ * cannot be located.
+ */
+function findCallOptionsSpan(
+  content: string,
+  callName: string,
+): { start: number; end: number } | string {
+  const callPattern = new RegExp(`\\b${escapeRegExp(callName)}\\(\\s*\\{`)
+  const match = matchInCode(content, callPattern)
+
+  if (!match) {
+    return `Could not find a ${callName}({ ... }) call`
+  }
+
+  const start = match.index + match[0].length - 1
+  const end = findClosingDelimiter(content, start, '{', '}')
+
+  return end === -1 ? `Could not parse ${callName} options object` : { start, end }
+}
+
+/**
+ * Adds an entry to an arbitrary array-valued option of a single-object-
+ * argument call (e.g. `modules: [...]` in `createApp({ ... })`, or
+ * `commands: [...]` in `defineModule({ ... })`), creating the option (via
+ * `addCreateAppOption`) if it isn't present at all yet. Generalizes
+ * `addProvider`'s array-editing logic to a caller-supplied `key` instead of
+ * the hardcoded `providers:`.
+ *
+ * The search is scoped to `callName`'s own options object, so a same-named
+ * key on an unrelated call in the file is left alone.
  *
  * `addProvider` is kept as its own independent implementation rather than
  * delegating here, to avoid changing its existing behavior (it fails with
@@ -147,37 +277,97 @@ export async function addToArrayOption(
   filePath: string,
   key: string,
   valueSource: string,
+  callName = 'createApp',
 ): Promise<PatchResult> {
   const absolutePath = resolve(process.cwd(), filePath)
-  let content: string
+  const content = await readIfExists(process.cwd(), filePath)
 
-  try {
-    content = await readFile(absolutePath, 'utf8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return { modified: false, reason: 'File not found' }
-    }
-    throw error
+  if (content === null) {
+    return { modified: false, reason: 'File not found' }
   }
 
-  const arrayPattern = new RegExp(`${key}:\\s*\\[([\\s\\S]*?)\\]`)
-  const match = content.match(arrayPattern)
+  const span = findCallOptionsSpan(content, callName)
 
-  if (!match) {
-    return addCreateAppOption(filePath, key, `[${valueSource}]`)
+  if (typeof span === 'string') {
+    return { modified: false, reason: span }
   }
 
-  const entries = match[1]
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0)
+  const optionsSource = content.slice(span.start, span.end + 1)
+  const keyMatch = matchInCode(optionsSource, new RegExp(`(?:^|[{,]\\s*)${escapeRegExp(key)}\\s*:\\s*\\[`))
 
-  if (entries.some((entry) => entry === valueSource)) {
+  if (!keyMatch) {
+    return addCreateAppOption(filePath, key, `[${valueSource}]`, callName)
+  }
+
+  const open = span.start + keyMatch.index + keyMatch[0].length - 1
+  const close = findClosingDelimiter(content, open, '[', ']')
+
+  if (close === -1) {
+    return { modified: false, reason: `Could not parse the ${key} array` }
+  }
+
+  const interior = content.slice(open + 1, close)
+
+  if (parseArrayEntries(interior).some((entry) => entry === valueSource)) {
     return { modified: false, reason: 'Already present' }
   }
 
-  entries.push(valueSource)
-  const updatedContent = content.replace(arrayPattern, `${key}: [${entries.join(', ')}]`)
+  const updatedContent
+    = content.slice(0, open + 1) + appendArrayEntry(interior, valueSource) + content.slice(close)
+
+  await writeFile(absolutePath, updatedContent, 'utf8')
+  return { modified: true }
+}
+
+/**
+ * Adds an entry to an array literal passed straight to a method call, e.g.
+ * the `kernel.registerMany([...])` in a project's `src/console.ts`. The
+ * receiver is matched loosely (any identifier or member expression, or none)
+ * so a kernel bound to a name other than `kernel` still gets patched.
+ *
+ * Only a call whose argument is an array *literal* matches, which is what
+ * makes this safe in a console entrypoint that also contains
+ * `kernel.registerMany(billingModule.commands)` — that form is skipped
+ * rather than mangled.
+ */
+export async function addToArrayArgument(
+  filePath: string,
+  methodName: string,
+  valueSource: string,
+): Promise<PatchResult> {
+  const absolutePath = resolve(process.cwd(), filePath)
+  const content = await readIfExists(process.cwd(), filePath)
+
+  if (content === null) {
+    return { modified: false, reason: 'File not found' }
+  }
+
+  // The leading lookbehind is what keeps `unregisterMany([])` from matching
+  // on its `registerMany` suffix when the optional receiver group is absent.
+  const callPattern = new RegExp(
+    `(?<![\\w$])(?:[\\w$]+(?:\\.[\\w$]+)*\\.)?${escapeRegExp(methodName)}\\s*\\(\\s*\\[`,
+  )
+  const match = matchInCode(content, callPattern)
+
+  if (!match) {
+    return { modified: false, reason: `Could not find a ${methodName}([ ... ]) call` }
+  }
+
+  const open = match.index + match[0].length - 1
+  const close = findClosingDelimiter(content, open, '[', ']')
+
+  if (close === -1) {
+    return { modified: false, reason: `Could not parse the ${methodName}() array` }
+  }
+
+  const interior = content.slice(open + 1, close)
+
+  if (parseArrayEntries(interior).some((entry) => entry === valueSource)) {
+    return { modified: false, reason: 'Already present' }
+  }
+
+  const updatedContent
+    = content.slice(0, open + 1) + appendArrayEntry(interior, valueSource) + content.slice(close)
 
   await writeFile(absolutePath, updatedContent, 'utf8')
   return { modified: true }
@@ -192,7 +382,7 @@ export async function hasImport(filePath: string, importStatement: string): Prom
   try {
     const content = await readFile(absolutePath, 'utf8')
     const normalizedImport = importStatement.trim()
-    const importPattern = normalizedImport.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const importPattern = escapeRegExp(normalizedImport)
     const regex = new RegExp(`^\\s*${importPattern}\\s*$`, 'm')
     return regex.test(content)
   } catch {
@@ -296,53 +486,33 @@ export function ensureMysqlImports(content: string, needed: string[]): string {
 /**
  * Adds a top-level option to the createApp({ ... }) call in a file.
  * The value is inserted verbatim, e.g. addCreateAppOption(path, 'auth', '{}').
+ *
+ * `callName` selects which single-object-argument call to edit — the default
+ * targets `createApp({ ... })`; `'defineModule'` targets a module's
+ * `modules/<name>/index.ts` descriptor.
  */
 export async function addCreateAppOption(
   filePath: string,
   key: string,
   valueSource: string,
+  callName = 'createApp',
 ): Promise<PatchResult> {
   const absolutePath = resolve(process.cwd(), filePath)
-  let content: string
+  const content = await readIfExists(process.cwd(), filePath)
 
-  try {
-    content = await readFile(absolutePath, 'utf8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return { modified: false, reason: 'File not found' }
-    }
-    throw error
+  if (content === null) {
+    return { modified: false, reason: 'File not found' }
   }
 
-  const createAppPattern = /createApp\(\s*\{/
-  const match = content.match(createAppPattern)
+  const span = findCallOptionsSpan(content, callName)
 
-  if (!match || match.index === undefined) {
-    return { modified: false, reason: 'Could not find a createApp({ ... }) call' }
+  if (typeof span === 'string') {
+    return { modified: false, reason: span }
   }
 
-  // Scan the createApp options object for an existing top-level `key:`
-  const openBraceIndex = match.index + match[0].length - 1
-  let depth = 0
-  let closeBraceIndex = -1
-  for (let i = openBraceIndex; i < content.length; i++) {
-    const char = content[i]
-    if (char === '{') depth++
-    else if (char === '}') {
-      depth--
-      if (depth === 0) {
-        closeBraceIndex = i
-        break
-      }
-    }
-  }
-
-  if (closeBraceIndex === -1) {
-    return { modified: false, reason: 'Could not parse createApp options object' }
-  }
-
+  const { start: openBraceIndex, end: closeBraceIndex } = span
   const optionsSource = content.slice(openBraceIndex, closeBraceIndex + 1)
-  const keyPattern = new RegExp(`(^|[{,]\\s*)${key}\\s*:`, 'm')
+  const keyPattern = new RegExp(`(^|[{,]\\s*)${escapeRegExp(key)}\\s*:`, 'm')
   if (keyPattern.test(optionsSource)) {
     return { modified: false, reason: 'Option already set' }
   }
