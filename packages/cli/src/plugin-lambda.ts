@@ -44,6 +44,7 @@ export const queue = createSqsHandler()
 
 // Console commands — uncomment to run kernel commands (the kernel has no
 // built-in ones) with \`aws lambda invoke\`.
+// Writing commands: https://guren.dev/docs/guides/console
 // Seeders can't run in the bundle — use \`bunx guren db:seed --force\` instead.
 // import { Command, ConsoleKernel } from '@guren/core'
 // import { createConsoleHandler } from '@guren/core/lambda'
