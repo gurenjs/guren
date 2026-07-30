@@ -84,11 +84,15 @@ Runs due tasks when invoked by EventBridge. Configure an EventBridge rule with `
 
 Executes the commands registered on your app's `ConsoleKernel` — the one `src/console.ts` exports as `kernel`. See the [console commands guide](./console.md) for defining commands and registering them.
 
-Uncomment the `console` export in the scaffolded `src/lambda.ts` to enable the handler. Because it dispatches the app's own kernel, every command you register in `src/console.ts` is reachable on Lambda under the same name you use locally.
+Uncomment the `console` export in the scaffolded `src/lambda.ts` to enable the handler.
 
-The kernel has no built-in commands, so applying migrations needs one of your own. `lambda:build` copies `db/migrations/` next to the bundle, so it can run in place:
+The kernel has no built-in commands. You need a migration command only on the Data API adapter, whose `getDatabase()` deliberately skips pending migrations — the other adapters apply them on first use. See [the Aurora Serverless notes](./database.md#aurora-serverless-aws-data-api) for that tradeoff and the `migrateOnStart` alternative. Running them out of band keeps the latency off the request path either way:
 
-```ts
+```bash
+bunx guren make:command Migrate --command db:migrate
+```
+
+```typescript
 // app/Console/Commands/MigrateCommand.ts
 import { Command } from '@guren/core'
 import { migrateDatabase } from '../../../config/database.js'
@@ -103,7 +107,7 @@ export default class MigrateCommand extends Command {
 }
 ```
 
-Register it in `src/console.ts`, then invoke via AWS CLI:
+`make:command` prints the line that registers it in `src/console.ts`. Then invoke via AWS CLI:
 
 ```bash
 aws lambda invoke --function-name my-app-console \

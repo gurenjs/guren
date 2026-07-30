@@ -84,11 +84,15 @@ EventBridge から呼び出されたときに実行予定のタスクを処理�
 
 アプリの `ConsoleKernel` に登録したコマンド — `src/console.ts` が `kernel` としてエクスポートするもの — を実行します。コマンドの定義と登録については [コンソールコマンドガイド](./console.md) を参照してください。
 
-スキャフォールドされた `src/lambda.ts` の `console` export のコメントを外すとハンドラが有効になります。アプリ自身のカーネルをディスパッチするため、`src/console.ts` に登録したコマンドはすべて、ローカルと同じ名前で Lambda 上でも呼び出せます。
+スキャフォールドされた `src/lambda.ts` の `console` export のコメントを外すとハンドラが有効になります。
 
-カーネルに組み込みコマンドはないので、マイグレーションの適用には自分のコマンドが必要です。`lambda:build` が `db/migrations/` をバンドルの隣にコピーするため、その場で実行できます。
+カーネルに組み込みコマンドはありません。マイグレーション用のコマンドが必要になるのは Data API アダプタだけです（`getDatabase()` が意図的に未適用のマイグレーションを実行しないため。他のアダプタは初回利用時に適用します）。このトレードオフと `migrateOnStart` については [Aurora Serverless の項](./database.md#aurora-serverlessaws-data-apiサポート) を参照してください。いずれにせよ、帯域外で実行すればリクエストパスからレイテンシを外せます。
 
-```ts
+```bash
+bunx guren make:command Migrate --command db:migrate
+```
+
+```typescript
 // app/Console/Commands/MigrateCommand.ts
 import { Command } from '@guren/core'
 import { migrateDatabase } from '../../../config/database.js'
@@ -103,7 +107,7 @@ export default class MigrateCommand extends Command {
 }
 ```
 
-これを `src/console.ts` に登録したうえで、AWS CLI から呼び出します:
+`make:command` が `src/console.ts` への登録行を出力します。そのうえで AWS CLI から呼び出します:
 
 ```bash
 aws lambda invoke --function-name my-app-console \

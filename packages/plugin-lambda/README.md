@@ -43,7 +43,7 @@ new GurenLambdaApp(stack, 'App', {
   functionDir: '../.lambda/function',
   assets: { dir: '../.lambda/assets' },   // S3 + CloudFront
   queue: {},                              // SQS + worker + DLQ
-  console: true,                          // aws lambda invoke '{"command":"db:migrate"}'
+  console: true,                          // aws lambda invoke, dispatching src/console.ts's kernel
   dataApi: {                              // DATABASE_* env + rds-data/secret grants
     database: 'appdb',
     resourceArn: process.env.DATABASE_RESOURCE_ARN!,

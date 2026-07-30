@@ -123,6 +123,10 @@ export default app
     expect(updated).toContain('src/app.ts')
     expect(updated).toContain('.gitignore')
     expect(updated).toContain('src/lambda.ts')
+    // Projects predating src/console.ts would otherwise get an entrypoint
+    // importing a file they don't have.
+    expect(updated).toContain('src/console.ts')
+    expect(await readFile('src/console.ts', 'utf8')).toContain('export const kernel =')
     expect(textsOf(messages, 'hint')).toContain('Run: bun add @guren/plugin-lambda')
 
     const app = await readFile('src/app.ts', 'utf8')
@@ -136,9 +140,7 @@ export default app
     expect(entrypoint).toContain('export const http = createLambdaHandler(app)')
     expect(entrypoint).toContain('export const queue = createSqsHandler()')
 
-    // The console handler must dispatch the kernel src/console.ts exports.
-    // Building a second kernel here would give the deployed console function a
-    // different command set than `bun run console`.
+    // A second kernel here would diverge from `bun run console`'s command set.
     expect(entrypoint).toContain("import { kernel } from './console.js'")
     expect(entrypoint).not.toContain('new ConsoleKernel(')
   })

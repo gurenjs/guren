@@ -10,11 +10,31 @@ export async function installOfficialLambdaPlugin(options: WriterOptions = {}): 
     updated.push('.gitignore')
   }
 
+  // The entrypoint's console handler imports src/console.ts, which projects
+  // created before that file existed do not have. Scaffold it here so
+  // uncommenting the console export can't fail to resolve; apps that already
+  // have one keep it untouched.
+  if (await ensureScaffoldFile('src/console.ts', consoleKernelTemplate(), options)) {
+    updated.push('src/console.ts')
+  }
+
   if (await ensureScaffoldFile('src/lambda.ts', lambdaEntrypointTemplate(), options)) {
     updated.push('src/lambda.ts')
   }
 
   return updated
+}
+
+function consoleKernelTemplate(): string {
+  return `import { ConsoleKernel } from '@guren/core'
+import app from './app.js'
+
+export const kernel = new ConsoleKernel({ container: app.container })
+
+// Register the classes \`bunx guren make:command\` writes to app/Console/Commands:
+//   import SendDigestCommand from '../app/Console/Commands/SendDigestCommand.js'
+kernel.registerMany([])
+`
 }
 
 function lambdaEntrypointTemplate(): string {
@@ -42,9 +62,8 @@ export const queue = createSqsHandler()
 // import { scheduler } from './scheduler.js'
 // export const schedule = createScheduleHandler(scheduler)
 
-// Console commands — uncomment to run them with \`aws lambda invoke\`. This
-// dispatches the kernel src/console.ts exports, so every command registered
-// there is reachable here too, under the same name as \`bun run console\`.
+// Console commands — uncomment to run them with \`aws lambda invoke\`, under
+// the same names as \`bun run console\`.
 // Writing and registering commands: https://guren.dev/docs/guides/console
 // Seeders can't run in the bundle — use \`bunx guren db:seed --force\` instead.
 // import { createConsoleHandler } from '@guren/core/lambda'
