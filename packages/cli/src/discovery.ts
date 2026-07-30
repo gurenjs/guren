@@ -72,6 +72,16 @@ export function moduleNameFromRelPath(relPath: string): string | null {
   return match ? match[1] : null
 }
 
+/**
+ * `moduleNameFromRelPath` for an absolute path: module name if `filePath`
+ * is under `<cwd>/modules/<name>/`, else `null`. Lets checks that assume a
+ * single project-root file (tests, schema, console entry) resolve the right
+ * module-scoped equivalent instead of always looking at the top level.
+ */
+export function moduleNameFor(cwd: string, filePath: string): string | null {
+  return moduleNameFromRelPath(toPosixRelative(cwd, filePath))
+}
+
 export async function fileExists(cwd: string, relativePath: string): Promise<boolean> {
   try {
     await access(resolve(cwd, relativePath))

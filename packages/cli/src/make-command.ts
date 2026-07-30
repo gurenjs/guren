@@ -4,7 +4,7 @@ import type { WriterOptions } from './utils'
 import { camelCase, ensureSuffix, kebabCase, relativeImportPath, resourceName, safeModuleName, scaffoldFile } from './utils'
 import { addImport, addToArrayArgument, addToArrayOption } from './patch-helpers'
 import { fileExists, readIfExists } from './discovery'
-import { registersCommandsOf } from './check'
+import { registersCommandsOf } from './console-check'
 
 const COMMANDS_DIR = 'app/Console/Commands'
 const CONSOLE_ENTRY = 'src/console.ts'

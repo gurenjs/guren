@@ -371,6 +371,7 @@ export const handler = createLambdaHandler(app)
 | `packages/cli/src/spec-check.ts` | AI agent: spec drift gate (`guren check --spec`) |
 | `packages/cli/src/schema-parser.ts` | Shared Drizzle schema AST parser (tables, columns, FKs) |
 | `packages/cli/src/check.ts` | AI agent: integrity checking |
+| `packages/cli/src/console-check.ts` | AI agent: console command registration checks (part of `guren check`) |
 | `packages/cli/src/arch-check.ts` | AI agent: architecture boundary checking (`guren.arch.ts`, see RFC 0002) |
 | `packages/cli/src/arch/index.ts` | `defineArchRules()` + types, published as the `@guren/cli/arch` subpath |
 | `packages/cli/src/changed-files.ts` | Git-diff-based file filtering shared by `check --changed` |
