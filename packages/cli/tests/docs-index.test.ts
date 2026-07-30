@@ -143,6 +143,42 @@ body`)
     expect(parsed!.data.status).toBe('stable')
   })
 
+  it('parses dash-only list items whose mapping starts on the next line', () => {
+    const parsed = parseDocFrontmatter(`---
+verified:
+  -
+    by: human:ada
+    at: T1
+  -
+    by: human:bob
+    at: T2
+status: stable
+---
+body`)
+
+    expect(parsed!.data.verified).toEqual([
+      { by: 'human:ada', at: 'T1' },
+      { by: 'human:bob', at: 'T2' },
+    ])
+    expect(parsed!.data.status).toBe('stable')
+  })
+
+  it('keeps a # that sits inside a nested quoted scalar', () => {
+    const inArray = parseDocFrontmatter('---\ntags: ["C # language", docs]\n---\nbody')
+    expect(inArray!.data.tags).toEqual(['C # language', 'docs'])
+
+    const inMapping = parseDocFrontmatter('---\nverified: { by: "human:ada #1", at: T1 }\n---\nbody')
+    expect(inMapping!.data.verified).toEqual({ by: 'human:ada #1', at: 'T1' })
+
+    const inItem = parseDocFrontmatter(`---
+verified:
+  - by: "human:ada #1"
+    at: T1
+---
+body`)
+    expect(inItem!.data.verified).toEqual([{ by: 'human:ada #1', at: 'T1' }])
+  })
+
   it('unescapes quotes inside quoted scalars', () => {
     const parsed = parseDocFrontmatter(`---
 title: "He said \\"hello\\"" # a note
@@ -217,6 +253,10 @@ Inline \`[code](/not-a-link.md)\` too, but [real](./real.md).
   it('accepts an optional link title and escaped parentheses', () => {
     expect(extractMarkdownLinks('[guide](./guide.md "More details")')).toEqual(['./guide.md'])
     expect(extractMarkdownLinks('[esc](./escaped\\)paren.md)')).toEqual(['./escaped)paren.md'])
+  })
+
+  it('rejects unquoted text after a destination, which is not a link', () => {
+    expect(extractMarkdownLinks('[not a link](./missing.md arbitrary words)')).toEqual([])
   })
 
   it('deduplicates repeated targets', () => {

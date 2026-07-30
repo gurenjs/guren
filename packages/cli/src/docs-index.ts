@@ -101,18 +101,27 @@ function endOfQuoted(value: string, start: number): number {
 }
 
 /**
- * Strip a trailing YAML comment (` # …`). For a quoted scalar the
- * comment starts after the closing quote, so the quoted span is kept
- * verbatim and only what follows is dropped; `unquote` handles the
- * quotes afterwards.
+ * Strip a trailing YAML comment. A `#` only starts one at the beginning
+ * or after whitespace, and never inside a quoted scalar — including a
+ * scalar nested in an array, mapping, or list item (`tags: ["C # lang"]`),
+ * which is why this scans rather than testing the first character.
  */
 function stripInlineComment(value: string): string {
-  const quote = value[0]
-  if (quote === "'" || quote === '"') {
-    const end = endOfQuoted(value, 0)
-    return end === -1 ? value : value.slice(0, end)
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index]
+
+    if (char === '"' || char === "'") {
+      const end = endOfQuoted(value, index)
+      if (end === -1) break
+      index = end - 1
+      continue
+    }
+
+    if (char === '#' && (index === 0 || /\s/.test(value[index - 1]))) {
+      return value.slice(0, index).trim()
+    }
   }
-  return value.replace(/\s+#.*$/, '').trim()
+  return value.trim()
 }
 
 /**
@@ -213,6 +222,8 @@ export function parseDocFrontmatter(
   // The mapping started by the most recent `- key: value` item, so its
   // sibling lines (`  at: …`) join it rather than starting a new entry.
   let itemMapping: DocMapping | null = null
+  // A `-` whose mapping body starts on the next line.
+  let pendingItem = false
 
   const closeBlock = (): void => {
     if (openKey !== null && openMapping !== null) data[openKey] = openMapping
@@ -220,6 +231,7 @@ export function parseDocFrontmatter(
     openList = null
     openMapping = null
     itemMapping = null
+    pendingItem = false
   }
 
   for (const rawLine of match[1].split(/\r?\n/)) {
@@ -229,7 +241,15 @@ export function parseDocFrontmatter(
     const item = /^(\s*)-\s*(.*)$/.exec(rawLine)
     if (item && openList) {
       const entry = stripInlineComment(item[2].trim())
-      if (!entry) continue
+      if (!entry) {
+        // `-` alone opens an entry whose body is on the following
+        // indented lines; the mapping is created when the first one
+        // arrives, so a stray dash contributes nothing.
+        itemMapping = null
+        pendingItem = true
+        continue
+      }
+      pendingItem = false
       const inline = parseInlineMapping(entry)
       if (inline) {
         openList.push(inline)
@@ -260,6 +280,13 @@ export function parseDocFrontmatter(
     const value = stripInlineComment(kv[2].trim())
 
     if (indented && openKey !== null) {
+      // The first entry under a dash-only item starts that item's mapping.
+      if (pendingItem && openList !== null) {
+        itemMapping = { [key]: unquote(value) }
+        openList.push(itemMapping)
+        pendingItem = false
+        continue
+      }
       // A sibling of the current list item's mapping…
       if (itemMapping !== null) {
         itemMapping[key] = unquote(value)
@@ -377,31 +404,24 @@ export function readLinkDestination(
   return null
 }
 
-/** Skip an optional link title and return at the closing paren. */
+/**
+ * What may legally follow a destination: nothing, or a single quoted
+ * title, before the closing paren. Anything else means this was never a
+ * link (`[x](./a.md some words)`), so reporting it as one would produce
+ * a phantom broken-link warning.
+ */
+const TRAILING_TITLE_RE = /^\s*(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\((?:[^)\\]|\\.)*\))?\s*\)/
+
 function readAfterDestination(
   text: string,
   from: number,
   target: string,
 ): { target: string; end: number } | null {
-  let quote: string | null = null
-  for (let index = from; index < text.length; index += 1) {
-    const char = text[index]
-    if (char === '\\') {
-      index += 1
-      continue
-    }
-    if (quote) {
-      if (char === quote) quote = null
-      continue
-    }
-    if (char === '"' || char === "'") {
-      quote = char
-      continue
-    }
-    if (char === ')') return target === '' ? null : { target, end: index }
-    if (char === '\n') return null
-  }
-  return null
+  if (target === '') return null
+  const rest = text.slice(from)
+  const match = TRAILING_TITLE_RE.exec(rest)
+  if (!match || match[0].includes('\n')) return null
+  return { target, end: from + match[0].length - 1 }
 }
 
 /**
@@ -471,7 +491,11 @@ export async function scanDocs(cwd: string): Promise<DocRef[]> {
               related: toStringList(data.related),
               generated: toActorEvent(data.generated),
               verified: toActorEvents(data.verified),
-              staleAfter: toScalar(data.stale_after),
+              // Present but not a scalar (`stale_after:` with no value)
+              // becomes '' so the checker can flag it rather than read
+              // it as absent.
+              staleAfter:
+                'stale_after' in data ? (toScalar(data.stale_after) ?? '') : undefined,
               links: parsed ? extractMarkdownLinks(body) : [],
               hasFrontmatter: parsed !== null,
             }
