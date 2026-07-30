@@ -104,6 +104,13 @@ bunx guren check --docs
     expect(html).toContain('data-target="./r.md"')
   })
 
+  it('hides link reference definitions, which carry no visible text', () => {
+    const html = renderDocHtml('See [replacement][new].\n\n[new]: ./0002.md\n')
+
+    expect(html).toContain('<p>See [replacement][new].</p>')
+    expect(html).not.toContain('./0002.md')
+  })
+
   it('escapes markup around a bracket that never becomes a link', () => {
     // The link scanner splits on '['; the slice before an unmatched one
     // must still be escaped, or a stray bracket makes everything before

@@ -61,7 +61,7 @@ const URL_SCHEME = /^[a-z][a-z0-9+.-]*:/i
  * Unresolvable targets keep their literal text.
  */
 function resolveViewerLink(docPath: string, target: string): string {
-  if (URL_SCHEME.test(target) || target.startsWith('#')) return target
+  if (URL_SCHEME.test(target) || target.startsWith('#') || target.startsWith('//')) return target
   const withoutFragment = target.split('#')[0]
   if (withoutFragment === '') return target
   return resolveDocLink(docPath, withoutFragment) ?? target

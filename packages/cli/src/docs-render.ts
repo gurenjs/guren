@@ -14,6 +14,9 @@
  */
 import { readLinkDestination } from './docs-index'
 
+/** `[label]: ./target.md "Title"` — metadata, never rendered. */
+const LINK_DEFINITION_LINE = /^ {0,3}\[[^\]]+\]:\s*\S+/
+
 /**
  * Escapes for both element and attribute contexts — quotes included,
  * since link targets are interpolated into a `data-target="…"` value and
@@ -197,7 +200,12 @@ export function renderDocHtml(source: string, options: RenderDocOptions = {}): s
       continue
     }
 
-    if (line.trim() === '' || line.trimStart().startsWith('<!--')) {
+    if (
+      line.trim() === ''
+      || line.trimStart().startsWith('<!--')
+      // A link reference definition carries no visible text.
+      || LINK_DEFINITION_LINE.test(line)
+    ) {
       index += 1
       continue
     }
