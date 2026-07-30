@@ -108,6 +108,51 @@ describe('buildCloudflareOutput', () => {
     expect(existsSync(join(root, 'src/app.ts'))).toBe(true)
   })
 
+  test('should keep the previous output when the build fails', async () => {
+    scaffoldApp(root)
+    mkdirSync(join(root, '.cloudflare'), { recursive: true })
+    writeFileSync(join(root, '.cloudflare/worker.js'), '// previous deploy\n')
+    rmSync(join(root, 'src/app.ts'))
+
+    await expect(buildCloudflareOutput({ rootDir: root, skipAppBuild: true })).rejects.toThrow(
+      /app entry not found/,
+    )
+
+    expect(readFileSync(join(root, '.cloudflare/worker.js'), 'utf8')).toBe('// previous deploy\n')
+  })
+
+  test('should refuse the filesystem root as outputDir', async () => {
+    scaffoldApp(root)
+
+    // `out + sep` is "//" here, which no absolute path is prefixed by — a
+    // string-prefix containment test lets this through to the rmSync.
+    await expect(
+      buildCloudflareOutput({ rootDir: root, outputDir: '/', skipAppBuild: true }),
+    ).rejects.toThrow(/never the root itself or a parent of it/)
+    expect(existsSync(join(root, 'src/app.ts'))).toBe(true)
+  })
+
+  test('should read the client manifest from a custom publicDir', async () => {
+    scaffoldApp(root)
+
+    // Move the built client somewhere other than <root>/public: the manifest
+    // lookup has to follow `publicDir`, not assume the default location.
+    mkdirSync(join(root, 'web-root/assets/.vite'), { recursive: true })
+    writeJson(join(root, 'web-root/assets/.vite/manifest.json'), {
+      'resources/js/app.tsx': { file: 'app-Custom999.js', css: ['app-Custom999.css'] },
+    })
+
+    await buildCloudflareOutput({
+      rootDir: root,
+      publicDir: join(root, 'web-root'),
+      skipAppBuild: true,
+    })
+
+    const worker = readFileSync(join(root, '.cloudflare/worker.js'), 'utf8')
+    expect(worker).toContain('process.env.GUREN_INERTIA_ENTRY = "/assets/app-Custom999.js"')
+    expect(worker).toContain('process.env.GUREN_INERTIA_STYLES = "/assets/app-Custom999.css"')
+  })
+
   test('should scaffold wrangler.jsonc once and never overwrite it', async () => {
     scaffoldApp(root)
 
@@ -281,6 +326,22 @@ describe('workers runtime configuration', () => {
     expect(warning).toContain('alias')
     expect(warning).toContain('process.env.NODE_ENV')
     expect(warning).toContain('.cloudflare/d1-migrations')
+  })
+
+  test('should write a stub file for every aliased specifier', async () => {
+    scaffoldApp(root)
+
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+
+    // The alias map and the files on disk are derived from one list but through
+    // two code paths; a stub the config points at but the build never writes
+    // fails only at `wrangler deploy`.
+    const config = JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf8'))
+    const aliases = Object.values(config.alias) as string[]
+    expect(aliases.length).toBeGreaterThan(0)
+    for (const target of aliases) {
+      expect(existsSync(join(root, target.replace(/^\.\//, '')))).toBe(true)
+    }
   })
 
   test('should reject migrations that flatten to the same filename', async () => {

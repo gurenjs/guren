@@ -1,16 +1,18 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, extname, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { definePlugin, type ServiceProviderConstructor } from '@guren/core'
+import {
+  assertOutputDirOutsideRoot,
+  resetOutputDir,
+  resolveClientAssetEnv,
+  resolvePathLike,
+  resolveSsrEntryFile,
+  ssrRuntimePaths,
+  type PathLike,
+} from '@guren/core/internal/deploy-build'
 
-type PathLike = string | URL
-
-type ManifestEntry = {
-  file?: string
-  css?: string[]
-}
-
-type Manifest = Record<string, ManifestEntry>
+/** Prefixes every diagnostic this build emits. */
+const LABEL = 'Vercel build'
 
 export interface VercelAppLike {
   boot(): Promise<void>
@@ -74,14 +76,25 @@ export function buildVercelOutput(options: BuildVercelOutputOptions = {}): void 
   const ssrDir = resolvePathLike(options.ssrDir ?? resolve(root, '.guren/ssr'))
   const migrationsDir = resolvePathLike(options.migrationsDir ?? resolve(root, 'db/migrations'))
 
-  if (existsSync(out)) {
-    rmSync(out, { recursive: true, force: true })
+  // Validated up front so a bad option fails before anything else, but the
+  // delete waits until the environment resolves — a stale or partial SSR build
+  // must not take the previous deploy output with it.
+  assertOutputDirOutsideRoot(out, root, LABEL)
+
+  // Checked here rather than left to the spawned `bun build`, which only
+  // fails after the previous output is gone.
+  if (!existsSync(entrypoint)) {
+    throw new Error(
+      `${LABEL}: entrypoint not found at ${entrypoint}. Run \`bunx guren plugin @guren/plugin-vercel\` to scaffold src/vercel.ts, or pass "entrypoint".`,
+    )
   }
+
+  const env = buildVercelEnvironment(publicDir, ssrDir)
+
+  resetOutputDir(out, root, LABEL)
 
   mkdirSync(funcDir, { recursive: true })
   mkdirSync(resolve(out, 'static'), { recursive: true })
-
-  const env = buildVercelEnvironment(root)
 
   writeFileSync(
     resolve(out, 'config.json'),
@@ -175,7 +188,7 @@ export function buildVercelOutput(options: BuildVercelOutputOptions = {}): void 
   }
 }
 
-function buildVercelEnvironment(root: string): Record<string, string> {
+function buildVercelEnvironment(publicDir: string, ssrDir: string): Record<string, string> {
   const env: Record<string, string> = {
     NODE_ENV: 'production',
     BUN_RUNTIME_TRANSPILER_CACHE_PATH: '/tmp/.bun-cache',
@@ -183,32 +196,23 @@ function buildVercelEnvironment(root: string): Record<string, string> {
     TMPDIR: '/tmp',
   }
 
-  const clientManifest = loadManifest(
-    resolve(root, 'public/assets/.vite/manifest.json'),
-    resolve(root, 'public/assets/manifest.json'),
-  )
-
-  if (clientManifest) {
-    const entry = clientManifest['resources/js/app.tsx']
-    if (entry?.file) {
-      env.GUREN_INERTIA_ENTRY = `/assets/${entry.file}`
-    }
-    if (entry?.css?.length) {
-      env.GUREN_INERTIA_STYLES = entry.css.map((file) => `/assets/${file}`).join(',')
-    }
+  const assetEnv = resolveClientAssetEnv(publicDir, 'resources/js/app.tsx', LABEL)
+  if (assetEnv.entry) {
+    env.GUREN_INERTIA_ENTRY = assetEnv.entry
+  }
+  if (assetEnv.styles) {
+    env.GUREN_INERTIA_STYLES = assetEnv.styles
   }
 
-  const ssrManifest = loadManifest(
-    resolve(root, '.guren/ssr/.vite/manifest.json'),
-    resolve(root, '.guren/ssr/manifest.json'),
-  )
-
-  if (ssrManifest) {
-    const ssrEntry = ssrManifest['resources/js/ssr.tsx']
-    if (ssrEntry?.file) {
-      env.GUREN_INERTIA_SSR_ENTRY = `./.guren/ssr/${ssrEntry.file}`
+  const ssrFile = resolveSsrEntryFile(ssrDir, 'resources/js/ssr.tsx', LABEL)
+  if (ssrFile) {
+    // Relative specifiers resolve from the function root, where the SSR bundle
+    // is copied.
+    const ssrPaths = ssrRuntimePaths(ssrDir, ssrFile, './.guren/ssr')
+    env.GUREN_INERTIA_SSR_ENTRY = ssrPaths.entry
+    if (ssrPaths.manifest) {
+      env.GUREN_INERTIA_SSR_MANIFEST = ssrPaths.manifest
     }
-    env.GUREN_INERTIA_SSR_MANIFEST = './.guren/ssr/.vite/manifest.json'
   }
 
   env.GUREN_INERTIA_IMPORT_MAP = JSON.stringify({
@@ -216,10 +220,6 @@ function buildVercelEnvironment(root: string): Record<string, string> {
   })
 
   return env
-}
-
-function resolvePathLike(value: PathLike): string {
-  return value instanceof URL ? fileURLToPath(value) : resolve(String(value))
 }
 
 function resolveNearestDocsDir(startDir: string, maxDepth = 6): string | undefined {
@@ -241,18 +241,3 @@ function resolveNearestDocsDir(startDir: string, maxDepth = 6): string | undefin
   return undefined
 }
 
-function loadManifest(...paths: string[]): Manifest | undefined {
-  for (const path of paths) {
-    if (!existsSync(path)) {
-      continue
-    }
-
-    try {
-      return JSON.parse(readFileSync(path, 'utf8')) as Manifest
-    } catch {
-      continue
-    }
-  }
-
-  return undefined
-}

@@ -62,6 +62,91 @@ describe('@guren/plugin-vercel', () => {
       rmSync(root, { recursive: true, force: true })
     })
 
+    it('refuses an outputDir that is, contains, or is the root of the app', () => {
+      // The build deletes outputDir before writing it, so a caller that points
+      // it at the project (or at `/`) would lose the source tree.
+      const app = scaffoldApp(root, { entrypoint: 'src/vercel.ts' })
+
+      for (const outputDir of [root, join(root, '..'), '/']) {
+        expect(() => buildVercelOutput({ ...app, outputDir })).toThrow(
+          /never the root itself or a parent of it/,
+        )
+      }
+      expect(readFileSync(app.entrypoint, 'utf8')).toBe(DEFAULT_ENTRYPOINT_SOURCE)
+    })
+
+    it('reads the client manifest from a custom publicDir', () => {
+      const app = scaffoldApp(root, { entrypoint: 'src/vercel.ts' })
+      mkdirSync(join(root, 'web-root/assets/.vite'), { recursive: true })
+      writeFileSync(
+        join(root, 'web-root/assets/.vite/manifest.json'),
+        JSON.stringify({
+          'resources/js/app.tsx': { file: 'app-Custom999.js', css: ['app-Custom999.css'] },
+        }),
+      )
+
+      buildVercelOutput({ ...app, publicDir: join(root, 'web-root') })
+
+      const config = JSON.parse(
+        readFileSync(join(app.outputDir, 'functions/index.func/.vc-config.json'), 'utf8'),
+      ) as { environment: Record<string, string> }
+
+      expect(config.environment.GUREN_INERTIA_ENTRY).toBe('/assets/app-Custom999.js')
+      expect(config.environment.GUREN_INERTIA_STYLES).toBe('/assets/app-Custom999.css')
+    })
+
+    it('points GUREN_INERTIA_SSR_MANIFEST at the layout the SSR build produced', () => {
+      // Older Vite configs emit a flat manifest.json; naming the .vite path
+      // unconditionally leaves the runtime loading a file that is not there.
+      const app = scaffoldApp(root, { entrypoint: 'src/vercel.ts' })
+      mkdirSync(join(root, '.guren/ssr'), { recursive: true })
+      writeFileSync(join(root, '.guren/ssr/ssr-Xyz789.js'), 'export const render = () => ({})\n')
+      writeFileSync(
+        join(root, '.guren/ssr/manifest.json'),
+        JSON.stringify({ 'resources/js/ssr.tsx': { file: 'ssr-Xyz789.js' } }),
+      )
+
+      buildVercelOutput(app)
+
+      const config = JSON.parse(
+        readFileSync(join(app.outputDir, 'functions/index.func/.vc-config.json'), 'utf8'),
+      ) as { environment: Record<string, string> }
+
+      expect(config.environment.GUREN_INERTIA_SSR_ENTRY).toBe('./.guren/ssr/ssr-Xyz789.js')
+      expect(config.environment.GUREN_INERTIA_SSR_MANIFEST).toBe('./.guren/ssr/manifest.json')
+    })
+
+    it('fails when the SSR manifest names a chunk that is not on disk, keeping the previous output', () => {
+      // Previously written into the function environment unchecked, so a stale
+      // or partial SSR build deployed and fell back to CSR at request time.
+      // Cloudflare and Lambda already treated this as fatal.
+      const app = scaffoldApp(root, { entrypoint: 'src/vercel.ts' })
+      mkdirSync(join(app.outputDir, 'functions'), { recursive: true })
+      writeFileSync(join(app.outputDir, 'config.json'), '{ "previous": true }')
+      mkdirSync(join(root, '.guren/ssr/.vite'), { recursive: true })
+      writeFileSync(
+        join(root, '.guren/ssr/.vite/manifest.json'),
+        JSON.stringify({ 'resources/js/ssr.tsx': { file: 'ssr-Gone.js' } }),
+      )
+
+      expect(() => buildVercelOutput(app)).toThrow(/but the file does not exist/)
+      // Deleting before validation would take the last deployable artifact
+      // with it, leaving nothing to roll back to.
+      expect(readFileSync(join(app.outputDir, 'config.json'), 'utf8')).toBe('{ "previous": true }')
+    })
+
+    it('fails on a missing entrypoint before touching the previous output', () => {
+      // The spawned `bun build` would also fail on this, but only after the
+      // previous output was deleted.
+      const app = scaffoldApp(root, { entrypoint: 'src/vercel.ts' })
+      rmSync(app.entrypoint)
+      mkdirSync(join(app.outputDir, 'functions'), { recursive: true })
+      writeFileSync(join(app.outputDir, 'config.json'), '{ "previous": true }')
+
+      expect(() => buildVercelOutput(app)).toThrow(/entrypoint not found/)
+      expect(readFileSync(join(app.outputDir, 'config.json'), 'utf8')).toBe('{ "previous": true }')
+    })
+
     it('matches the configured handler filename to the bundled entrypoint', () => {
       const app = scaffoldApp(root, { entrypoint: 'src/vercel.ts' })
 

@@ -116,6 +116,10 @@ export async function readInstalledPluginManifests(
  * canonical (symlink-resolved) path, plus the non-existent tail rejoined
  * onto it. Lets callers realpath-validate a path that doesn't exist yet
  * (e.g. a publish target about to be created).
+ *
+ * A sibling of `realpathOfNearestExisting` in `@guren/core`'s internal
+ * deploy-build module, kept as a copy because that module cannot import cli.
+ * Keep the two in step, especially the ENOENT-only walk-up.
  */
 async function realpathNearestExisting(candidate: string): Promise<string> {
   const tail: string[] = []

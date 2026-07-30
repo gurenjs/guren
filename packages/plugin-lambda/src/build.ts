@@ -1,16 +1,22 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { isAbsolute, relative, resolve, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import {
+  DEV_ONLY_MODULES,
+  importSpecifier,
+  MCP_SDK_SUBPATH_PREFIX,
+  renderDevOnlyStub,
+  assertOutputDirOutsideRoot,
+  resetOutputDir,
+  resolveClientAssetEnv,
+  resolvePathLike,
+  resolveSsrEntryFile,
+  ssrRuntimePaths,
+  stageStaticAssets,
+  type ClientAssetEnv,
+  type DevOnlyModule,
+  type PathLike,
+} from '@guren/core/internal/deploy-build'
 import { LAMBDA_HANDLER_EXPORTS, LAMBDA_HANDLER_MODULE } from './handlers'
-
-type PathLike = string | URL
-
-type ManifestEntry = {
-  file?: string
-  css?: string[]
-}
-
-type Manifest = Record<string, ManifestEntry>
 
 export interface BuildLambdaOutputOptions {
   /** App root directory. Defaults to the current working directory. */
@@ -37,44 +43,35 @@ export interface BuildLambdaOutputOptions {
 
 const MCP_UNAVAILABLE = 'The MCP endpoint is unavailable on AWS Lambda — it generates files on disk.'
 
-function mcpStub(exportNames: string[]): string {
-  const throwing = exportNames
-    .map((name) => `export class ${name} { constructor() { throw new Error(${JSON.stringify(MCP_UNAVAILABLE)}) } }`)
-    .join('\n')
-  return `${throwing}\nexport default {}\n`
-}
-
 /**
- * Modules that exist in every Guren app's graph but can never run on the
- * Lambda Node.js runtime, reached only through dev-time branches: `bun:sqlite`
- * (the local sqlite ORM factory), `vite` (the dev asset server), and the
- * opt-in MCP endpoint's generators. They are replaced with throwing stubs
- * rather than left external — inlining a lazily-imported module hoists that
- * module's own static imports to the bundle top level, so an external module
- * reached this way (the MCP SDK) would fail at import time on Lambda even
- * though no code path ever runs it. Stubbing also keeps megabytes of dev
- * tooling out of the bundle.
+ * Why the dev-only modules in `DEV_ONLY_MODULES` cannot run here, worded for
+ * this platform: each names the Lambda-appropriate replacement.
  */
-const DEV_ONLY_STUBS: Record<string, string> = {
-  'bun:sqlite':
-    'export const Database = class { constructor() { throw new Error("bun:sqlite is unavailable on AWS Lambda — use createAwsDataApiDatabase() or createPostgresDatabase().") } }\nexport default { Database }\n',
-  vite:
-    'export function createServer() { throw new Error("The Vite dev server is unavailable on AWS Lambda — serve assets from S3/CloudFront.") }\nexport default { createServer }\n',
-  '@guren/cli': `// ${MCP_UNAVAILABLE}\nexport {}\n`,
-  '@modelcontextprotocol/sdk/server/mcp.js': mcpStub(['McpServer', 'ResourceTemplate']),
-  '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js': mcpStub(['WebStandardStreamableHTTPServerTransport']),
+const UNAVAILABLE_ON_LAMBDA: Record<DevOnlyModule['kind'], string> = {
+  sqlite: 'bun:sqlite is unavailable on AWS Lambda — use createAwsDataApiDatabase() or createPostgresDatabase().',
+  vite: 'The Vite dev server is unavailable on AWS Lambda — serve assets from S3/CloudFront.',
+  mcp: MCP_UNAVAILABLE,
 }
 
-// The MCP SDK is only ever reached through subpaths, so any of them — not
-// just the two listed above — must resolve to a stub rather than the real
-// package. Unlisted subpaths get `unlistedMcpStub` in onLoad.
-const MCP_SDK_PREFIX = '@modelcontextprotocol/sdk/'
+/**
+ * Dev-only modules replaced with throwing stubs rather than left external.
+ * Inlining a lazily-imported module hoists that module's own static imports to
+ * the bundle top level, so an external module reached this way (the MCP SDK)
+ * would fail at import time on Lambda even though no code path ever runs it.
+ * Stubbing also keeps megabytes of dev tooling out of the bundle.
+ */
+const DEV_ONLY_STUBS: Record<string, string> = Object.fromEntries(
+  DEV_ONLY_MODULES.map((module) => [
+    module.specifier,
+    renderDevOnlyStub(module, UNAVAILABLE_ON_LAMBDA[module.kind]),
+  ]),
+)
 
 /**
- * Fallback for an MCP SDK subpath the table does not name. It cannot know
- * which names the importer destructures, so it throws on evaluation rather
- * than resolving to an empty module: a subpath reached from app code (not
- * Guren's disabled MCP endpoint) must fail loudly at build or cold start,
+ * Fallback for an MCP SDK subpath `DEV_ONLY_MODULES` does not name. It cannot
+ * know which names the importer destructures, so it throws on evaluation
+ * rather than resolving to an empty module: a subpath reached from app code
+ * (not Guren's disabled MCP endpoint) must fail loudly at build or cold start,
  * never silently hand back missing exports.
  */
 const unlistedMcpStub = `throw new Error(${JSON.stringify(MCP_UNAVAILABLE)})\n`
@@ -83,10 +80,13 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-// Derived from DEV_ONLY_STUBS so the record stays the only list of stubbed
+// Derived from the shared list so it stays the only enumeration of stubbed
 // specifiers — a hand-maintained regex could silently fall out of sync.
 const STUB_FILTER = new RegExp(
-  `^(?:${[...Object.keys(DEV_ONLY_STUBS).map(escapeRegExp), `${escapeRegExp(MCP_SDK_PREFIX)}.+`].join('|')})$`,
+  `^(?:${[
+    ...DEV_ONLY_MODULES.map((module) => escapeRegExp(module.specifier)),
+    `${escapeRegExp(MCP_SDK_SUBPATH_PREFIX)}.+`,
+  ].join('|')})$`,
 )
 
 /**
@@ -105,15 +105,10 @@ export async function buildLambdaOutput(options: BuildLambdaOutputOptions = {}):
   const clientEntryKey = options.clientEntryKey ?? 'resources/js/app.tsx'
   const ssrEntryKey = options.ssrEntryKey ?? 'resources/js/ssr.tsx'
 
-  // Compared with `relative` rather than a string prefix: `out + sep` is `//`
-  // at the filesystem root, which no absolute path starts with, so a prefix
-  // test would wave `outputDir: '/'` straight through to the rmSync below.
-  const outToRoot = relative(out, root)
-  if (outToRoot === '' || (!outToRoot.startsWith('..') && !isAbsolute(outToRoot))) {
-    throw new Error(
-      `Lambda build: outputDir (${out}) must be a directory outside or below the app root, never the root itself or a parent of it — it is deleted on every build.`,
-    )
-  }
+  // Validated up front so a bad option fails before running the app build,
+  // but the delete waits until every check below has passed — a failed build
+  // must not take the previous deploy output with it.
+  assertOutputDirOutsideRoot(out, root, 'Lambda build')
 
   if (!options.skipAppBuild) {
     runAppBuild(root)
@@ -126,11 +121,10 @@ export async function buildLambdaOutput(options: BuildLambdaOutputOptions = {}):
   }
 
   const ssrFile = resolveSsrEntry(ssrDir, ssrEntryKey)
-  const assetEnv = resolveClientAssetEnv(publicDir, clientEntryKey)
+  const assetEnv = resolveClientAssetEnv(publicDir, clientEntryKey, 'Lambda build')
 
-  if (existsSync(out)) {
-    rmSync(out, { recursive: true, force: true })
-  }
+  resetOutputDir(out, root, 'Lambda build')
+
   const funcDir = resolve(out, 'function')
   mkdirSync(funcDir, { recursive: true })
 
@@ -165,33 +159,6 @@ export async function buildLambdaOutput(options: BuildLambdaOutputOptions = {}):
   }
 }
 
-/**
- * Copy `public/` into the S3 staging directory. Vite emits built assets that
- * self-reference the derived base `/public/assets/`, while HTML references use
- * `/assets/`; S3 has no rewrites, so the built-assets directory is mirrored
- * under both prefixes. The dev-mode `index.html` shell is dropped — it must
- * never shadow the app's root route.
- */
-function stageStaticAssets(publicDir: string, assetsOut: string): void {
-  mkdirSync(assetsOut, { recursive: true })
-
-  if (!existsSync(publicDir)) {
-    return
-  }
-
-  cpSync(publicDir, assetsOut, { recursive: true })
-
-  const shadowingIndex = resolve(assetsOut, 'index.html')
-  if (existsSync(shadowingIndex)) {
-    rmSync(shadowingIndex)
-  }
-
-  const clientAssetsDir = resolve(publicDir, 'assets')
-  if (existsSync(clientAssetsDir)) {
-    cpSync(clientAssetsDir, resolve(assetsOut, 'public/assets'), { recursive: true })
-  }
-}
-
 function buildLambdaEnvironment(
   assetEnv: ClientAssetEnv,
   ssrFile: string | undefined,
@@ -208,12 +175,11 @@ function buildLambdaEnvironment(
   if (ssrFile) {
     // Relative specifiers resolve from process.cwd(), which is the function
     // root (/var/task) on Lambda — where the SSR bundle is copied.
-    env.GUREN_INERTIA_SSR_ENTRY = `./.guren/ssr/${relative(ssrDir, ssrFile).split(sep).join('/')}`
-    // Point at whichever manifest layout the SSR build actually produced —
-    // resolveSsrEntry accepts the root-level fallback too.
-    env.GUREN_INERTIA_SSR_MANIFEST = existsSync(resolve(ssrDir, '.vite/manifest.json'))
-      ? './.guren/ssr/.vite/manifest.json'
-      : './.guren/ssr/manifest.json'
+    const ssrPaths = ssrRuntimePaths(ssrDir, ssrFile, './.guren/ssr')
+    env.GUREN_INERTIA_SSR_ENTRY = ssrPaths.entry
+    if (ssrPaths.manifest) {
+      env.GUREN_INERTIA_SSR_MANIFEST = ssrPaths.manifest
+    }
   }
 
   return env
@@ -242,7 +208,7 @@ function renderHandlerModule(input: {
   lines.push(
     '// Imported dynamically so the assignments above run before the app module',
     '// graph evaluates — static imports are hoisted past them.',
-    `const module = await import(${JSON.stringify(importSpecifier(input.out, input.entrypoint))})`,
+    `const module = await import(${JSON.stringify(importSpecifier(input.out, input.entrypoint, 'Lambda build'))})`,
     '',
   )
 
@@ -361,24 +327,9 @@ function runAppBuild(root: string): void {
 
 /** Absolute path of the built SSR entry chunk, or undefined for CSR-only apps. */
 function resolveSsrEntry(ssrDir: string, ssrEntryKey: string): string | undefined {
-  const manifest = loadManifest(
-    resolve(ssrDir, '.vite/manifest.json'),
-    resolve(ssrDir, 'manifest.json'),
-  )
-
-  const entryFile = manifest?.[ssrEntryKey]?.file
-  if (!entryFile) {
+  const file = resolveSsrEntryFile(ssrDir, ssrEntryKey, 'Lambda build')
+  if (!file) {
     return undefined
-  }
-
-  const file = resolve(ssrDir, entryFile)
-  if (!file.startsWith(ssrDir + sep)) {
-    throw new Error(
-      `Lambda build: SSR manifest entry "${entryFile}" escapes the SSR output directory ${ssrDir}.`,
-    )
-  }
-  if (!existsSync(file)) {
-    throw new Error(`Lambda build: SSR manifest points at ${file}, but the file does not exist.`)
   }
 
   // Checked statically rather than by importing the chunk: executing the SSR
@@ -407,59 +358,3 @@ function hasRendererExport(source: string): boolean {
   )
 }
 
-interface ClientAssetEnv {
-  entry?: string
-  styles?: string
-}
-
-function resolveClientAssetEnv(publicDir: string, clientEntryKey: string): ClientAssetEnv {
-  const manifest = loadManifest(
-    resolve(publicDir, 'assets/.vite/manifest.json'),
-    resolve(publicDir, 'assets/manifest.json'),
-  )
-
-  const entry = manifest?.[clientEntryKey]
-  if (!entry?.file) {
-    console.warn(
-      `Lambda build: no client manifest entry for "${clientEntryKey}"; GUREN_INERTIA_ENTRY will not be set.`,
-    )
-    return {}
-  }
-
-  return {
-    entry: `/assets/${entry.file}`,
-    styles: entry.css?.length ? entry.css.map((file) => `/assets/${file}`).join(',') : undefined,
-  }
-}
-
-function importSpecifier(fromDir: string, target: string): string {
-  const rel = relative(fromDir, target)
-  if (isAbsolute(rel)) {
-    throw new Error(
-      `Lambda build: ${target} cannot be imported relative to ${fromDir} (different drive or root?). Keep the app, SSR output, and outputDir on the same volume.`,
-    )
-  }
-
-  const specifier = rel.split(sep).join('/')
-  return specifier.startsWith('.') ? specifier : `./${specifier}`
-}
-
-function resolvePathLike(value: PathLike): string {
-  return value instanceof URL ? fileURLToPath(value) : resolve(String(value))
-}
-
-function loadManifest(...paths: string[]): Manifest | undefined {
-  for (const path of paths) {
-    if (!existsSync(path)) {
-      continue
-    }
-
-    try {
-      return JSON.parse(readFileSync(path, 'utf8')) as Manifest
-    } catch {
-      continue
-    }
-  }
-
-  return undefined
-}

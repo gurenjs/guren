@@ -1,15 +1,21 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { isAbsolute, relative, resolve, sep } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
-
-type PathLike = string | URL
-
-type ManifestEntry = {
-  file?: string
-  css?: string[]
-}
-
-type Manifest = Record<string, ManifestEntry>
+import { relative, resolve, sep } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import {
+  DEV_ONLY_MODULES,
+  importSpecifier,
+  renderDevOnlyStub,
+  assertOutputDirOutsideRoot,
+  resetOutputDir,
+  resolveClientAssetEnv,
+  resolvePathLike,
+  resolveSsrEntryFile,
+  stageStaticAssets,
+  type ClientAssetEnv,
+  type DevOnlyModule,
+  type DevOnlySpecifier,
+  type PathLike,
+} from '@guren/core/internal/deploy-build'
 
 interface PackageJsonLike {
   name?: string
@@ -50,11 +56,10 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   const clientEntryKey = options.clientEntryKey ?? 'resources/js/app.tsx'
   const ssrEntryKey = options.ssrEntryKey ?? 'resources/js/ssr.tsx'
 
-  if (out === root || root.startsWith(out + sep)) {
-    throw new Error(
-      `Cloudflare build: outputDir (${out}) must be a directory outside or below the app root, never the root itself — it is deleted on every build.`,
-    )
-  }
+  // Validated up front so a bad option fails before running the app build,
+  // but the delete waits until every check below has passed — a failed build
+  // must not take the previous deploy output with it.
+  assertOutputDirOutsideRoot(out, root, 'Cloudflare build')
 
   const packageJson = readPackageJson(root)
 
@@ -67,35 +72,14 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   }
 
   const ssrImport = await resolveSsrImport(ssrDir, ssrEntryKey)
-  const assetEnv = resolveClientAssetEnv(root, clientEntryKey)
+  const assetEnv = resolveClientAssetEnv(publicDir, clientEntryKey, 'Cloudflare build')
 
-  if (existsSync(out)) {
-    rmSync(out, { recursive: true, force: true })
-  }
-  mkdirSync(resolve(out, 'assets'), { recursive: true })
+  resetOutputDir(out, root, 'Cloudflare build')
 
-  if (existsSync(publicDir)) {
-    cpSync(publicDir, resolve(out, 'assets'), { recursive: true })
-  }
-
-  // Workers Static Assets serves index.html for `/` BEFORE the worker runs,
-  // which would shadow the app's root route. public/index.html is the
-  // dev-mode Vite shell in Guren apps — never a production page.
-  const shadowingIndex = resolve(out, 'assets/index.html')
-  if (existsSync(shadowingIndex)) {
-    rmSync(shadowingIndex)
-  }
-
-  // Built assets are emitted with the Guren Vite plugin's derived base
-  // `/public/assets/` (chunk imports, CSS urls, preloads self-reference that
-  // prefix). Vercel resolves it with a `/public/(.*) -> /$1` rewrite; Workers
-  // Static Assets has no rewrites, so mirror the built-assets directory under
-  // the base URL path as well: the root copy serves `/assets/*`, this copy
-  // serves `/public/assets/*`.
-  const clientAssetsDir = resolve(publicDir, 'assets')
-  if (existsSync(clientAssetsDir)) {
-    cpSync(clientAssetsDir, resolve(out, 'assets/public/assets'), { recursive: true })
-  }
+  // Workers Static Assets serves `/` from index.html BEFORE the worker runs,
+  // and has no rewrites for the built assets' `/public/assets/` base — both
+  // handled by the shared staging step.
+  stageStaticAssets(publicDir, resolve(out, 'assets'))
 
   writeFileSync(resolve(out, 'worker.js'), renderWorkerModule({ out, appEntry, ssrImport, assetEnv }))
 
@@ -106,72 +90,57 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   scaffoldWranglerConfig(root, out, packageJson.name)
 }
 
-/**
- * Modules that exist in every Guren app's graph but can never run on
- * Workers, reached only through dev-time branches: `bun:sqlite` (the local
- * sqlite ORM factory, opposite the D1 branch of `config/database.ts`) and
- * `vite` (the dev asset server `Application` starts when serving locally).
- * Bundlers follow those imports anyway — even dynamic ones — so without
- * stubs the build either fails to resolve or ships megabytes of dev
- * tooling. Each stub throws if a code path ever really reaches it.
- */
 const MCP_UNAVAILABLE = 'The MCP endpoint is unavailable on Cloudflare Workers — it generates files on disk.'
 
 /**
- * Stubs must carry the exact names their importers destructure: an empty
- * module fails the bundle with "no matching export", not at runtime.
+ * Why the dev-only modules in `DEV_ONLY_MODULES` cannot run here, worded for
+ * this platform: each names the Workers-appropriate replacement.
  */
-function mcpStub(exportNames: string[]): string {
-  const throwing = exportNames
-    .map((name) => `export class ${name} { constructor() { throw new Error(${JSON.stringify(MCP_UNAVAILABLE)}) } }`)
-    .join('\n')
-  return `${throwing}\nexport default {}\n`
+const UNAVAILABLE_ON_WORKERS: Record<DevOnlyModule['kind'], string> = {
+  sqlite: 'bun:sqlite is unavailable on Cloudflare Workers — use createD1Database().',
+  vite: 'The Vite dev server is unavailable on Cloudflare Workers — assets are served by Workers Static Assets.',
+  mcp: MCP_UNAVAILABLE,
 }
 
-const DEV_ONLY_STUBS: Record<string, { file: string; source: string }> = {
-  'bun:sqlite': {
-    file: 'stub-bun-sqlite.js',
-    source:
-      'export const Database = class { constructor() { throw new Error("bun:sqlite is unavailable on Cloudflare Workers — use createD1Database().") } }\nexport default { Database }\n',
-  },
-  vite: {
-    file: 'stub-vite.js',
-    source:
-      'export function createServer() { throw new Error("The Vite dev server is unavailable on Cloudflare Workers — assets are served by Workers Static Assets.") }\nexport default { createServer }\n',
-  },
-  // The opt-in MCP endpoint's lazy imports still drag the CLI generators
-  // (and Babel) plus the MCP SDK into the bundle. `@guren/cli` is imported
-  // bare, but the SDK is only ever reached through subpaths — and an alias
-  // on a package name does not cover them, so each subpath is listed.
-  // `@guren/cli` is imported bare and only read through namespace property
-  // access, so an empty module suffices; the SDK subpaths are destructured
-  // and need their names present. A package-name alias does not cover
-  // subpaths, so each is listed.
-  '@guren/cli': {
-    file: 'stub-guren-cli.js',
-    source: `// ${MCP_UNAVAILABLE}\nexport {}\n`,
-  },
-  '@modelcontextprotocol/sdk/server/mcp.js': {
-    file: 'stub-mcp-server.js',
-    source: mcpStub(['McpServer', 'ResourceTemplate']),
-  },
-  '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js': {
-    file: 'stub-mcp-transport.js',
-    source: mcpStub(['WebStandardStreamableHTTPServerTransport']),
-  },
+/**
+ * Wrangler resolves an `alias` to a path on disk, so unlike a bundler plugin
+ * each stub needs a file of its own. The names are deliberately hand-written
+ * rather than derived: they are baked into every app's committed
+ * `wrangler.jsonc`, which the scaffold never overwrites, so deriving them
+ * would rename files out from under existing apps for no benefit.
+ *
+ * Keyed on `DevOnlySpecifier`, so adding an entry to `DEV_ONLY_MODULES` is a
+ * compile error here until it gets a filename — the drift a derived name would
+ * have prevented, caught by the type system instead.
+ */
+const STUB_FILES: Record<DevOnlySpecifier, string> = {
+  'bun:sqlite': 'stub-bun-sqlite.js',
+  vite: 'stub-vite.js',
+  '@guren/cli': 'stub-guren-cli.js',
+  '@modelcontextprotocol/sdk/server/mcp.js': 'stub-mcp-server.js',
+  '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js': 'stub-mcp-transport.js',
 }
 
 function writeDevOnlyStubs(out: string): void {
-  for (const stub of Object.values(DEV_ONLY_STUBS)) {
-    writeFileSync(resolve(out, stub.file), stub.source)
+  for (const module of DEV_ONLY_MODULES) {
+    writeFileSync(
+      resolve(out, STUB_FILES[module.specifier]),
+      renderDevOnlyStub(module, UNAVAILABLE_ON_WORKERS[module.kind]),
+    )
   }
 }
 
+/**
+ * A package-name alias does not cover subpaths, so every stubbed specifier —
+ * including each MCP SDK subpath — needs its own entry. Unlike the Lambda
+ * plugin's bundler hook, wrangler cannot match a prefix, so an SDK subpath
+ * added upstream needs a new `DEV_ONLY_MODULES` entry to stay stubbed here.
+ */
 function devOnlyAliases(outRelative: string): Record<string, string> {
   return Object.fromEntries(
-    Object.entries(DEV_ONLY_STUBS).map(([specifier, stub]) => [
-      specifier,
-      `./${outRelative}/${stub.file}`,
+    DEV_ONLY_MODULES.map((module) => [
+      module.specifier,
+      `./${outRelative}/${STUB_FILES[module.specifier]}`,
     ]),
   )
 }
@@ -272,27 +241,12 @@ interface SsrImport {
 }
 
 async function resolveSsrImport(ssrDir: string, ssrEntryKey: string): Promise<SsrImport | undefined> {
-  const manifest = loadManifest(
-    resolve(ssrDir, '.vite/manifest.json'),
-    resolve(ssrDir, 'manifest.json'),
-  )
-
-  const entryFile = manifest?.[ssrEntryKey]?.file
-  if (!entryFile) {
+  const file = resolveSsrEntryFile(ssrDir, ssrEntryKey, 'Cloudflare build')
+  if (!file) {
     console.warn(
       `Cloudflare build: no SSR manifest entry for "${ssrEntryKey}" under ${ssrDir}; generating a CSR-only worker.`,
     )
     return undefined
-  }
-
-  const file = resolve(ssrDir, entryFile)
-  if (!file.startsWith(ssrDir + sep)) {
-    throw new Error(
-      `Cloudflare build: SSR manifest entry "${entryFile}" escapes the SSR output directory ${ssrDir}.`,
-    )
-  }
-  if (!existsSync(file)) {
-    throw new Error(`Cloudflare build: SSR manifest points at ${file}, but the file does not exist.`)
   }
 
   const module = (await import(pathToFileURL(file).href)) as Record<string, unknown>
@@ -312,31 +266,6 @@ async function resolveSsrImport(ssrDir: string, ssrEntryKey: string): Promise<Ss
   return { file, rendererExport }
 }
 
-interface ClientAssetEnv {
-  entry?: string
-  styles?: string
-}
-
-function resolveClientAssetEnv(root: string, clientEntryKey: string): ClientAssetEnv {
-  const manifest = loadManifest(
-    resolve(root, 'public/assets/.vite/manifest.json'),
-    resolve(root, 'public/assets/manifest.json'),
-  )
-
-  const entry = manifest?.[clientEntryKey]
-  if (!entry?.file) {
-    console.warn(
-      `Cloudflare build: no client manifest entry for "${clientEntryKey}"; GUREN_INERTIA_ENTRY will not be set.`,
-    )
-    return {}
-  }
-
-  return {
-    entry: `/assets/${entry.file}`,
-    styles: entry.css?.length ? entry.css.map((file) => `/assets/${file}`).join(',') : undefined,
-  }
-}
-
 function renderWorkerModule(input: {
   out: string
   appEntry: string
@@ -351,11 +280,11 @@ function renderWorkerModule(input: {
   if (input.ssrImport) {
     lines.push(
       "import { setInertiaSsrRenderer } from '@guren/core'",
-      `import * as ssrModule from ${JSON.stringify(importSpecifier(input.out, input.ssrImport.file))}`,
+      `import * as ssrModule from ${JSON.stringify(importSpecifier(input.out, input.ssrImport.file, 'Cloudflare build'))}`,
     )
   }
 
-  lines.push(`import app from ${JSON.stringify(importSpecifier(input.out, input.appEntry))}`, '')
+  lines.push(`import app from ${JSON.stringify(importSpecifier(input.out, input.appEntry, 'Cloudflare build'))}`, '')
 
   if (input.assetEnv.entry) {
     lines.push(`process.env.GUREN_INERTIA_ENTRY = ${JSON.stringify(input.assetEnv.entry)}`)
@@ -374,18 +303,6 @@ function renderWorkerModule(input: {
   lines.push('export default createWorkersHandler(app)', '')
 
   return lines.join('\n')
-}
-
-function importSpecifier(fromDir: string, target: string): string {
-  const rel = relative(fromDir, target)
-  if (isAbsolute(rel)) {
-    throw new Error(
-      `Cloudflare build: ${target} cannot be imported relative to ${fromDir} (different drive or root?). Keep the app, SSR output, and outputDir on the same volume.`,
-    )
-  }
-
-  const specifier = rel.split(sep).join('/')
-  return specifier.startsWith('.') ? specifier : `./${specifier}`
 }
 
 function scaffoldWranglerConfig(root: string, out: string, packageName: string | undefined): void {
@@ -453,8 +370,9 @@ function warnMissingBuildOwnedKeys(configPath: string, outRelative: string): voi
 
   const missing: string[] = []
   const alias = config.alias as Record<string, string> | undefined
-  if (!alias || Object.keys(devOnlyAliases(outRelative)).some((key) => !(key in alias))) {
-    missing.push(`"alias": ${JSON.stringify(devOnlyAliases(outRelative))}`)
+  const expectedAliases = devOnlyAliases(outRelative)
+  if (!alias || Object.keys(expectedAliases).some((key) => !(key in alias))) {
+    missing.push(`"alias": ${JSON.stringify(expectedAliases)}`)
   }
   const define = config.define as Record<string, string> | undefined
   if (!define?.['process.env.NODE_ENV']) {
@@ -472,22 +390,3 @@ function warnMissingBuildOwnedKeys(configPath: string, outRelative: string): voi
   }
 }
 
-function resolvePathLike(value: PathLike): string {
-  return value instanceof URL ? fileURLToPath(value) : resolve(String(value))
-}
-
-function loadManifest(...paths: string[]): Manifest | undefined {
-  for (const path of paths) {
-    if (!existsSync(path)) {
-      continue
-    }
-
-    try {
-      return JSON.parse(readFileSync(path, 'utf8')) as Manifest
-    } catch {
-      continue
-    }
-  }
-
-  return undefined
-}
