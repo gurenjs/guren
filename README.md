@@ -104,12 +104,10 @@ export function registerWebRoutes(router: Router): void {
 ### Model
 
 ```typescript
-import { Model } from '@guren/orm'
+import { defineModel } from '@guren/orm'
 import { posts } from '@/db/schema'
 
-export class Post extends Model<typeof posts> {
-  static table = posts
-}
+export class Post extends defineModel(posts) {}
 
 const post = await Post.findOrFail(1)
 ```

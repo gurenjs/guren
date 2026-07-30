@@ -286,7 +286,7 @@ export type UserRecord = typeof users.$inferSelect
 
 export class User extends AuthenticatableModel<UserRecord> {
   static override table = users
-  static override readonly recordType = {} as UserRecord
+  declare static readonly recordType: UserRecord
   // 任意で上書き可能:
   // static override passwordField = 'plainPassword'
   // static override passwordHashField = 'password_digest'
@@ -384,7 +384,7 @@ export function registerWebRoutes(router: Router): void {
 ```ts
 export class User extends AuthenticatableModel<UserRecord> {
   static override table = users
-  static override readonly recordType = {} as UserRecord
+  declare static readonly recordType: UserRecord
   static override hidden = ['passwordHash', 'rememberToken']
 }
 ```

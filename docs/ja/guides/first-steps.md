@@ -70,12 +70,10 @@ export const ListPostsQuerySchema = z.object({
 `app/Models/Post.ts` は、クラスを `db/schema.ts` の Drizzle テーブルに結びつけます。
 
 ```ts
-import { Model } from '@guren/orm'
+import { defineModel } from '@guren/orm'
 import { posts } from '@/db/schema'
 
-export class Post extends Model<typeof posts> {
-  static table = posts
-}
+export class Post extends defineModel(posts) {}
 ```
 
 クエリは Laravel のように読めます: `Post.find(1)`、`Post.findOrFail(1)`（404 を投げます）、`Post.where('published', true).get()`。カラムの型はスキーマからすべての結果へと流れます。詳しくは [データベースガイド](./database.md) を参照してください。

@@ -327,15 +327,12 @@ const recentViaModel = await Post.query(db)
 再利用可能なクエリ制約を、モデル上の名前付きスコープとして定義できます。スコープを使えば、よく使うフィルタを見つけやすく、組み合わせやすくなります。
 
 ```ts
-import { Model, type QueryBuilder } from '@guren/orm'
+import { defineModel, type QueryBuilder } from '@guren/orm'
 import { posts } from '@/db/schema'
 
 export type PostRecord = typeof posts.$inferSelect
 
-export class Post extends Model<PostRecord> {
-  static override table = posts
-  static override readonly recordType = {} as PostRecord
-
+export class Post extends defineModel(posts) {
   static scopes = {
     published: (q: QueryBuilder<PostRecord>) => q.where('status', 'published'),
     popular: (q: QueryBuilder<PostRecord>) => q.where('views', '>', 1000),
@@ -402,13 +399,11 @@ User.removeGlobalScope('active')
 フックを使うと、モデルのライフサイクルの特定のポイントでロジックを実行できます。静的な `hooks` オブジェクトとして定義します。
 
 ```ts
-import { Model } from '@guren/orm'
+import { defineModel } from '@guren/orm'
 import { posts } from '@/db/schema'
 import { slugify } from '@/app/utils/string'
 
-export class Post extends Model<typeof posts.$inferSelect> {
-  static override table = posts
-
+export class Post extends defineModel(posts) {
   static hooks = {
     creating: async (data) => {
       // 新しいレコードが挿入される前に実行
@@ -483,15 +478,12 @@ before イベント（`creating`、`updating`、`deleting`、`saving`）で `fal
 ソフトデリートは、レコードを実際に削除する代わりに `deletedAt` タイムスタンプを設定して削除済みとしてマークします。`SoftDeletes` をミックスインして有効にします。
 
 ```ts
-import { Model, SoftDeletes } from '@guren/orm'
+import { SoftDeletes, defineModel } from '@guren/orm'
 import { posts } from '@/db/schema'
 
 export type PostRecord = typeof posts.$inferSelect
 
-export class Post extends SoftDeletes(Model)<PostRecord> {
-  static override table = posts
-  static override readonly recordType = {} as PostRecord
-}
+export class Post extends SoftDeletes(defineModel(posts)) {}
 ```
 
 スキーマに `deletedAt`（または同等の）タイムスタンプカラムが必要です。
@@ -523,10 +515,7 @@ await Post.forceDelete({ id: 1 })
 `static casts` を定義すると、データベースから読み取ったカラムの値を自動的に変換できます。
 
 ```ts
-export class Post extends Model<PostRecord> {
-  static override table = posts
-  static override readonly recordType = {} as PostRecord
-
+export class Post extends defineModel(posts) {
   static casts = {
     metadata: 'json',       // JSON 文字列をオブジェクトにパース
     publishedAt: 'date',    // Date インスタンスに変換
@@ -659,10 +648,7 @@ const json = User.serializeMany(users)
 `fillable` または `guarded` で、`create()` や `update()` で設定可能なフィールドを制御できます。
 
 ```ts
-export class Post extends Model<PostRecord> {
-  static override table = posts
-  static override readonly recordType = {} as PostRecord
-
+export class Post extends defineModel(posts) {
   // これらのフィールドのみ一括代入可能
   static fillable = ['title', 'body', 'status']
 }
@@ -700,10 +686,7 @@ await User.forceUpdate({ id: user.id }, { emailVerifiedAt: new Date() })
 あるいは、`guarded` で特定のフィールドをブロックし、それ以外をすべて許可することもできます。
 
 ```ts
-export class Post extends Model<PostRecord> {
-  static override table = posts
-  static override readonly recordType = {} as PostRecord
-
+export class Post extends defineModel(posts) {
   // これらのフィールドは一括代入から保護される
   static guarded = ['id', 'createdAt', 'updatedAt']
 }
@@ -721,15 +704,13 @@ ORM には、一般的な Eloquent スタイルのリレーション層が組み
 
 ```ts
 // app/Models/User.ts
-import { Model, type HasManyRecord } from '@guren/orm'
+import { defineModel, type HasManyRecord } from '@guren/orm'
 import { users } from '@/db/schema'
 import type { PostRecord } from '@/app/Models/Post'
 
 export type UserRecord = typeof users.$inferSelect
 
-export class User extends Model<UserRecord> {
-  static override table = users
-  static override readonly recordType = {} as UserRecord
+export class User extends defineModel(users) {
   static override relationTypes: { posts: HasManyRecord<PostRecord> } = {
     posts: [],
   }

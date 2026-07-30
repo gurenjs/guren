@@ -210,10 +210,13 @@ type SelectFrom<TDatabase> = TDatabase extends { select: (...args: any[]) => inf
  * CRUD, querying, pagination, and eager-loading of relationships.
  *
  * @example
- * // Define a model
- * class User extends Model<UserRecord> {
+ * // Define a model — recordType/createType are inferred from the Drizzle table
+ * class User extends defineModel(users) {}
+ *
+ * // Or, when extending Model directly, redeclare the type markers
+ * class LegacyUser extends Model<UserRecord> {
  *   static override table = users  // Drizzle table
- *   static override readonly recordType = {} as UserRecord
+ *   declare static readonly recordType: UserRecord
  * }
  *
  * // Query records
@@ -236,9 +239,9 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   protected static ormAdapter: ORMAdapter = DrizzleAdapter
   /** The database table (e.g., Drizzle table schema). */
   protected static table: unknown
-  /** Type marker for TypeScript inference. Define as `{} as YourRecordType`. */
+  /** Type marker for TypeScript inference. Set by `defineModel()`; when extending `Model` directly, redeclare as `declare static readonly recordType: YourRecordType`. */
   static readonly recordType: unknown = undefined as unknown
-  /** Type marker for insert/update payload inference. Define as `{} as typeof table.$inferInsert`. */
+  /** Type marker for insert/update payload inference. Set by `defineModel()`; when extending `Model` directly, redeclare as `declare static readonly createType: YourCreateType`. */
   static readonly createType: unknown = undefined as unknown
   protected static relationDefinitions?: Map<string, RelationDefinition>
   /** Type marker for relation types. Define relation types here for type inference. */
