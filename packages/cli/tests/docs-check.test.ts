@@ -344,6 +344,102 @@ See [invoicing](/invoicing.md).
     }
   })
 
+  it('resolves bundle-relative links in a module whose name ends in docs', async () => {
+    const scoped = await createTempWorkspace('guren-cli-docs-apidocs-')
+    try {
+      await mkdir(join(scoped.dir, 'modules/apidocs/docs'), { recursive: true })
+      await writeFile(join(scoped.dir, 'package.json'), '{}', 'utf8')
+      await writeFile(
+        join(scoped.dir, 'modules/apidocs/docs/overview.md'),
+        '---\ntype: context\n---\n# Overview\n\nSee [target](/target.md).\n',
+        'utf8',
+      )
+      await writeFile(
+        join(scoped.dir, 'modules/apidocs/docs/target.md'),
+        '---\ntype: context\n---\n# Target\n',
+        'utf8',
+      )
+
+      const results = await runDocsCheck({ cwd: scoped.dir })
+
+      // 'docs/' also occurs inside 'apidocs/', so a substring-based bundle
+      // root would resolve this one directory too high and report it broken.
+      expect(
+        results.find((r) => r.key === 'docs-links:modules/apidocs/docs/overview.md')?.status,
+      ).toBe('pass')
+    } finally {
+      await scoped.cleanup()
+    }
+  })
+
+  it('rejects backslash traversal in related entries and body links', async () => {
+    const scoped = await createTempWorkspace('guren-cli-docs-backslash-')
+    try {
+      await mkdir(join(scoped.dir, 'docs'), { recursive: true })
+      await writeFile(join(scoped.dir, 'package.json'), '{}', 'utf8')
+      await writeFile(
+        join(scoped.dir, 'docs/escape.md'),
+        '---\ntype: context\nrelated: ["..\\\\..\\\\outside.md"]\n---\n# Escape\n\n[out](..\\\\..\\\\outside.md)\n',
+        'utf8',
+      )
+
+      const results = await runDocsCheck({ cwd: scoped.dir })
+
+      expect(results.find((r) => r.key.startsWith('docs-related:docs/escape.md'))?.status).toBe(
+        'fail',
+      )
+      expect(results.find((r) => r.key.startsWith('docs-link:docs/escape.md'))?.status).toBe('fail')
+    } finally {
+      await scoped.cleanup()
+    }
+  })
+
+  it('warns on a status outside the OKF lifecycle values', async () => {
+    const scoped = await createTempWorkspace('guren-cli-docs-status-')
+    try {
+      await mkdir(join(scoped.dir, 'docs'), { recursive: true })
+      await writeFile(join(scoped.dir, 'package.json'), '{}', 'utf8')
+      await writeFile(
+        join(scoped.dir, 'docs/legacy.md'),
+        '---\ntype: adr\nstatus: accepted\n---\n# Legacy status\n',
+        'utf8',
+      )
+
+      const results = await runDocsCheck({ cwd: scoped.dir })
+
+      expect(results.find((r) => r.key === 'docs-status:docs/legacy.md')?.status).toBe('warn')
+    } finally {
+      await scoped.cleanup()
+    }
+  })
+
+  it('warns when stale_after is not a real calendar date', async () => {
+    const scoped = await createTempWorkspace('guren-cli-docs-stale-format-')
+    try {
+      await mkdir(join(scoped.dir, 'docs'), { recursive: true })
+      await writeFile(join(scoped.dir, 'package.json'), '{}', 'utf8')
+      await writeFile(
+        join(scoped.dir, 'docs/prose.md'),
+        '---\ntype: context\nstale_after: tomorrow\n---\n# Prose\n',
+        'utf8',
+      )
+      await writeFile(
+        join(scoped.dir, 'docs/rolled.md'),
+        '---\ntype: context\nstale_after: 2026-02-30\n---\n# Rolled\n',
+        'utf8',
+      )
+
+      const results = await runDocsCheck({ cwd: scoped.dir })
+
+      // Silently unparseable dates would promise a freshness policy the
+      // checker never enforces.
+      expect(results.find((r) => r.key === 'docs-stale-after:docs/prose.md')?.status).toBe('warn')
+      expect(results.find((r) => r.key === 'docs-stale-after:docs/rolled.md')?.status).toBe('warn')
+    } finally {
+      await scoped.cleanup()
+    }
+  })
+
   it('runs the union when --arch and --docs are combined', async () => {
     const report = await runCheck({ cwd: workspace.dir, arch: true, docs: true })
 

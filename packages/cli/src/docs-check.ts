@@ -28,20 +28,46 @@ function hasGlobChars(entry: string): boolean {
 
 /**
  * Doc links are app-root-relative by convention; absolute paths and `..`
- * segments would validate files outside the project.
+ * segments would validate files outside the project. Backslashes count
+ * as separators: on Windows `path.resolve` treats them as such, so a
+ * `..\..\outside.md` that only split on `/` would slip past this and
+ * resolve outside the app root.
  */
 function isAppRootRelative(entry: string): boolean {
-  return !entry.startsWith('/') && !/^[A-Za-z]:/.test(entry) && !entry.split('/').includes('..')
+  if (entry.startsWith('/') || entry.startsWith('\\') || /^[A-Za-z]:/.test(entry)) return false
+  return !entry.split(/[/\\]/).includes('..')
+}
+
+/**
+ * The `docs/` bundle a document belongs to, with a trailing slash — the
+ * root for its bundle-relative (`/…`) links. Matched structurally rather
+ * than by searching for `docs/`, which would find the wrong segment in a
+ * module named e.g. `apidocs`.
+ */
+function bundleRoot(docPath: string): string {
+  return /^(?:modules\/[^/]+\/)?docs\//.exec(docPath)?.[0] ?? ''
+}
+
+/** OKF §5.4 lifecycle values. */
+const DOC_STATUSES = new Set(['draft', 'stable', 'deprecated'])
+
+/**
+ * A real `YYYY-MM-DD` calendar date. `Date.parse` alone would accept
+ * `2026-02-30` (rolled forward to March 2) and reject nothing loudly,
+ * so the round-trip check rejects out-of-range days.
+ */
+function parseCalendarDate(value: string): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
+  const time = Date.parse(value)
+  if (Number.isNaN(time)) return null
+  return new Date(time).toISOString().slice(0, 10) === value ? time : null
 }
 
 /**
  * OKF §5.5: content is stale when `today >= stale_after`. An absolute
- * date keeps this a plain comparison; an unparseable date is not stale
- * (the producer's mistake shows up in review, not as a false alarm).
+ * date keeps this a plain comparison.
  */
-function isStale(staleAfter: string): boolean {
-  const staleAt = Date.parse(staleAfter)
-  if (Number.isNaN(staleAt)) return false
+function isStale(staleAt: number): boolean {
   const now = new Date()
   return Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) >= staleAt
 }
@@ -57,11 +83,15 @@ const MODEL_FILE_PATTERN = /(?:^|\/)app\/Models\/[^/]+\.(?:ts|mts|js|mjs)$/
  * reach into the app (`../../app/...`). Null when the target escapes
  * the app root.
  */
-function resolveDocLink(docPath: string, target: string): string | null {
-  const base = target.startsWith('/')
-    ? docPath.slice(0, docPath.indexOf('docs/') + 'docs/'.length)
-    : posix.dirname(docPath)
-  const joined = posix.join(base, target.startsWith('/') ? target.slice(1) : target)
+export function resolveDocLink(docPath: string, target: string): string | null {
+  // Backslashes are separators on Windows; normalize before resolving so
+  // traversal cannot hide behind them (see isAppRootRelative).
+  const normalized = target.replace(/\\/g, '/')
+  if (/^[A-Za-z]:/.test(normalized)) return null
+
+  const fromBundleRoot = normalized.startsWith('/')
+  const base = fromBundleRoot ? bundleRoot(docPath) : posix.dirname(docPath)
+  const joined = posix.join(base, fromBundleRoot ? normalized.slice(1) : normalized)
   return joined === '..' || joined.startsWith('../') ? null : joined
 }
 
@@ -230,17 +260,46 @@ export async function runDocsCheck(options: DocsCheckOptions): Promise<CheckResu
       )
     }
 
-    if (ref.staleAfter && isStale(ref.staleAfter)) {
+    if (ref.status !== undefined && !DOC_STATUSES.has(ref.status)) {
       results.push(
         check(
-          `docs-stale:${ref.path}`,
-          `${ref.path} freshness`,
+          `docs-status:${ref.path}`,
+          `${ref.path} status`,
           'warn',
-          `stale_after (${ref.staleAfter}) has passed — the doc declares its content stale.`,
-          `Re-read ${ref.path}, update it if needed, and move stale_after forward (or remove it).`,
+          `status '${ref.status}' is outside the OKF lifecycle values (draft, stable, deprecated).`,
+          `Use one of draft | stable | deprecated in ${ref.path}, or drop the field (absent means stable).`,
           ref.path,
         ),
       )
+    }
+
+    if (ref.staleAfter) {
+      const staleAt = parseCalendarDate(ref.staleAfter)
+      if (staleAt === null) {
+        // A date the checker cannot read would silently never fire, so
+        // the doc would claim a freshness policy it does not have.
+        results.push(
+          check(
+            `docs-stale-after:${ref.path}`,
+            `${ref.path} stale_after`,
+            'warn',
+            `stale_after '${ref.staleAfter}' is not a calendar date, so freshness is never checked.`,
+            `Write stale_after as YYYY-MM-DD in ${ref.path}.`,
+            ref.path,
+          ),
+        )
+      } else if (isStale(staleAt)) {
+        results.push(
+          check(
+            `docs-stale:${ref.path}`,
+            `${ref.path} freshness`,
+            'warn',
+            `stale_after (${ref.staleAfter}) has passed — the doc declares its content stale.`,
+            `Re-read ${ref.path}, update it if needed, and move stale_after forward (or remove it).`,
+            ref.path,
+          ),
+        )
+      }
     }
 
     const totalLinks = ref.related.length + ref.entities.length + ref.links.length

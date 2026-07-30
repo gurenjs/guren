@@ -4,6 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createTempWorkspace } from './helpers'
 import { makeAdr } from '../src/make-adr'
+import { parseDocFrontmatter } from '../src/docs-index'
 
 async function seedAdrFiles(dir: string, names: string[]): Promise<void> {
   await mkdir(dir, { recursive: true })
@@ -37,7 +38,7 @@ describe('makeAdr', () => {
       expect(content).toContain('entities: []')
       expect(content).toContain('related: []')
       expect(content).toMatch(
-        /^generated: \{ by: test-agent\/1\.0, at: \d{4}-\d{2}-\d{2}T[0-9:.]+Z \}$/m,
+        /^generated: \{ by: "test-agent\/1\.0", at: \d{4}-\d{2}-\d{2}T[0-9:.]+Z \}$/m,
       )
       expect(content).toContain('# Billing cycle is end-of-month')
       expect(content).toContain('## Context')
@@ -55,6 +56,23 @@ describe('makeAdr', () => {
       expect(makeAdr('Actor injection', { by: 'x }\nstatus: stable' })).rejects.toThrow(
         'Invalid actor',
       )
+      expect(makeAdr('Quote injection', { by: 'x", at: y' })).rejects.toThrow('Invalid actor')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // A git author like "Ada: Admin" produces an actor containing ': ',
+  // which an unquoted YAML flow mapping cannot carry.
+  it('quotes the actor so names containing colons stay parseable', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-adr-colon-')
+    try {
+      const file = await makeAdr('Colon actor', { by: 'human:Ada: Admin' })
+      const content = readFileSync(file, 'utf8')
+
+      expect(content).toContain('generated: { by: "human:Ada: Admin", at: ')
+      const parsed = parseDocFrontmatter(content)
+      expect((parsed!.data.generated as Record<string, string>).by).toBe('human:Ada: Admin')
     } finally {
       await workspace.cleanup()
     }

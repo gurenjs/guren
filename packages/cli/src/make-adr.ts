@@ -162,7 +162,10 @@ function adrTemplate(title: string, actor: string | null, generatedAt: string, p
     prefill.related.length > 0
       ? `related:\n${prefill.related.map((path) => `  - ${path}`).join('\n')}`
       : 'related: []'
-  const generated = actor === null ? '' : `\ngenerated: { by: ${actor}, at: ${generatedAt} }`
+  // Quoted: an actor may legitimately contain `: ` (a git author like
+  // "Ada: Admin"), which would otherwise make the flow mapping invalid
+  // YAML. ACTOR_RE already excludes quotes, so no escaping is needed.
+  const generated = actor === null ? '' : `\ngenerated: { by: "${actor}", at: ${generatedAt} }`
 
   return `---
 type: adr

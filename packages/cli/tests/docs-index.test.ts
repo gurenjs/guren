@@ -68,6 +68,49 @@ related: ["config/foo,bar.json", app/Models/Post.ts]
     expect(parsed!.data.related).toEqual(['config/foo,bar.json', 'app/Models/Post.ts'])
   })
 
+  it('parses block mappings for the OKF trust families', () => {
+    const parsed = parseDocFrontmatter(`---
+type: adr
+generated:
+  by: process:builder
+  at: 2026-07-30T09:00:00Z
+verified:
+  by: human:ada
+  at: 2026-07-30T10:00:00Z
+---
+body`)
+
+    expect(parsed!.data.generated).toEqual({ by: 'process:builder', at: '2026-07-30T09:00:00Z' })
+    expect(parsed!.data.verified).toEqual({ by: 'human:ada', at: '2026-07-30T10:00:00Z' })
+  })
+
+  it('parses a block list of inline mappings', () => {
+    const parsed = parseDocFrontmatter(`---
+verified:
+  - { by: human:ada, at: T1 }
+  - { by: process:nightly, at: T2 }
+---
+body`)
+
+    expect(parsed!.data.verified).toEqual([
+      { by: 'human:ada', at: 'T1' },
+      { by: 'process:nightly', at: 'T2' },
+    ])
+  })
+
+  it('strips comments that follow a quoted scalar', () => {
+    const parsed = parseDocFrontmatter(`---
+type: "adr" # architectural decision
+status: "" # TODO
+---
+body`)
+
+    expect(parsed!.data.type).toBe('adr')
+    // An empty quoted scalar is empty, not the comment text — otherwise a
+    // doc with no real type would satisfy the required-field check.
+    expect(parsed!.data.status).toBe('')
+  })
+
   it('returns null when there is no frontmatter', () => {
     expect(parseDocFrontmatter('# Just a heading\n')).toBeNull()
   })
@@ -107,6 +150,12 @@ Inline \`[code](/not-a-link.md)\` too, but [real](./real.md).
 `)
 
     expect(links).toEqual(['./real.md'])
+  })
+
+  it('keeps balanced parentheses inside a destination', () => {
+    expect(extractMarkdownLinks('[migration](./use-(legacy)-api.md)')).toEqual([
+      './use-(legacy)-api.md',
+    ])
   })
 
   it('deduplicates repeated targets', () => {
