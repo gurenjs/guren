@@ -273,7 +273,10 @@ export async function runDocsCheck(options: DocsCheckOptions): Promise<CheckResu
       )
     }
 
-    if (ref.staleAfter) {
+    // Presence, not truthiness: an empty `stale_after:` is a malformed
+    // date, and skipping it would let the doc claim a freshness policy
+    // the checker never enforces.
+    if (ref.staleAfter !== undefined) {
       const staleAt = parseCalendarDate(ref.staleAfter)
       if (staleAt === null) {
         // A date the checker cannot read would silently never fire, so

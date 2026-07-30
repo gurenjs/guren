@@ -64,14 +64,40 @@ export interface DocRef {
 /** OKF reserved filenames (§3.1) — navigation, never concept documents. */
 const RESERVED_FILENAMES = new Set(['index.md', 'log.md'])
 
+/**
+ * Strip the surrounding quotes from a YAML scalar, undoing the escapes
+ * each quoting style defines: `\"` inside double quotes, `''` inside
+ * single quotes.
+ */
 function unquote(value: string): string {
-  if (
-    (value.startsWith("'") && value.endsWith("'"))
-    || (value.startsWith('"') && value.endsWith('"'))
-  ) {
-    return value.slice(1, -1)
+  const quote = value[0]
+  if ((quote !== "'" && quote !== '"') || value.length < 2 || !value.endsWith(quote)) {
+    return value
   }
-  return value
+  const inner = value.slice(1, -1)
+  return quote === '"' ? inner.replace(/\\(.)/g, '$1') : inner.replace(/''/g, "'")
+}
+
+/**
+ * The index just past a quoted scalar starting at `start`, honoring the
+ * escapes each style defines. `-1` when the scalar is unterminated.
+ */
+function endOfQuoted(value: string, start: number): number {
+  const quote = value[start]
+  for (let index = start + 1; index < value.length; index += 1) {
+    if (quote === '"' && value[index] === '\\') {
+      index += 1
+      continue
+    }
+    if (value[index] !== quote) continue
+    // `''` inside a single-quoted scalar is an escaped quote, not the end.
+    if (quote === "'" && value[index + 1] === "'") {
+      index += 1
+      continue
+    }
+    return index + 1
+  }
+  return -1
 }
 
 /**
@@ -83,31 +109,41 @@ function unquote(value: string): string {
 function stripInlineComment(value: string): string {
   const quote = value[0]
   if (quote === "'" || quote === '"') {
-    const closing = value.indexOf(quote, 1)
-    return closing === -1 ? value : value.slice(0, closing + 1)
+    const end = endOfQuoted(value, 0)
+    return end === -1 ? value : value.slice(0, end)
   }
   return value.replace(/\s+#.*$/, '').trim()
 }
 
-/** Split an inline array body on commas that are not inside quotes. */
+/**
+ * Split an inline collection body on commas that separate entries —
+ * commas inside quotes or nested `{}`/`[]` belong to an entry.
+ */
 function splitInlineArray(inner: string): string[] {
   const parts: string[] = []
   let current = ''
-  let quote: string | null = null
+  let depth = 0
 
-  for (const char of inner) {
-    if (quote) {
-      current += char
-      if (char === quote) quote = null
-    } else if (char === "'" || char === '"') {
-      current += char
-      quote = char
-    } else if (char === ',') {
+  for (let index = 0; index < inner.length; index += 1) {
+    const char = inner[index]
+
+    if (char === "'" || char === '"') {
+      const end = endOfQuoted(inner, index)
+      const span = end === -1 ? inner.slice(index) : inner.slice(index, end)
+      current += span
+      index += span.length - 1
+      continue
+    }
+
+    if (char === '{' || char === '[') depth += 1
+    else if (char === '}' || char === ']') depth -= 1
+    else if (char === ',' && depth === 0) {
       parts.push(current)
       current = ''
-    } else {
-      current += char
+      continue
     }
+
+    current += char
   }
   parts.push(current)
 
@@ -121,30 +157,44 @@ function splitInlineArray(inner: string): string[] {
  * part splits on the first `key:` prefix only. Null when the value is not
  * an inline mapping.
  */
-function parseInlineMapping(value: string): Record<string, string> | null {
+function parseInlineMapping(value: string): DocMapping | null {
   const trimmed = value.trim()
   if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return null
-  const record: Record<string, string> = {}
+  const record: DocMapping = {}
   for (const part of splitInlineArray(trimmed.slice(1, -1))) {
-    const kv = /^([A-Za-z_][\w-]*):\s*(.*)$/.exec(part)
-    if (kv) record[kv[1]] = unquote(kv[2].trim())
+    const kv = KEY_VALUE_RE.exec(part)
+    if (kv) record[kv[1]] = unquote(stripInlineComment(kv[2].trim()))
   }
   return record
 }
 
 /** A frontmatter value: scalar, list, or (for `generated`/`verified`) a mapping. */
-export type DocFrontmatterValue = string | string[] | DocMapping | DocMapping[]
+export type DocFrontmatterValue = string | string[] | DocMapping | DocMapping[] | Array<string | DocMapping>
 
 /** A `{ by, at }`-shaped mapping, however it was written. */
 export type DocMapping = Record<string, string>
 
+const KEY_VALUE_RE = /^([A-Za-z_][\w-]*):\s*(.*)$/
+
+/** Whatever an inline scalar position holds: a mapping, a list, or a string. */
+function parseInlineValue(value: string): DocFrontmatterValue {
+  const mapping = parseInlineMapping(value)
+  if (mapping) return mapping
+  if (value.startsWith('[') && value.endsWith(']')) {
+    const entries = splitInlineArray(value.slice(1, -1))
+    const mapped = entries.map((entry) => parseInlineMapping(entry) ?? entry)
+    return mapped as DocFrontmatterValue
+  }
+  return unquote(value)
+}
+
 /**
  * Parse a leading `---` frontmatter block. Deliberately a minimal YAML
- * subset — scalars, inline arrays (`[a, b]`), block lists (`- item`),
- * inline mappings (`{ by: x, at: y }`), and block mappings (indented
- * `key: value` lines) — the frozen vocabulary the docs convention needs,
- * same philosophy as `glob-match.ts`. Anything else is ignored, never an
- * error.
+ * subset — scalars, inline collections (`[a, b]`, `{ by: x }`), block
+ * lists (`- item`, including `- by: x` mappings), and block mappings
+ * (indented `key: value` lines) — the frozen vocabulary the docs
+ * convention needs, same philosophy as `glob-match.ts`. Anything else is
+ * ignored, never an error.
  */
 export function parseDocFrontmatter(
   source: string,
@@ -153,35 +203,54 @@ export function parseDocFrontmatter(
   if (!match) return null
 
   const data: Record<string, DocFrontmatterValue> = {}
-  // The key whose block body (list items or mapping entries) subsequent
-  // indented lines belong to, and what has accumulated under it so far.
+
+  // The top-level key whose indented body is being collected, and where
+  // the collected entries go. A key can turn out to hold a list or a
+  // mapping; whichever appears first wins.
   let openKey: string | null = null
   let openList: Array<string | DocMapping> | null = null
   let openMapping: DocMapping | null = null
+  // The mapping started by the most recent `- key: value` item, so its
+  // sibling lines (`  at: …`) join it rather than starting a new entry.
+  let itemMapping: DocMapping | null = null
 
   const closeBlock = (): void => {
-    if (openKey !== null && openMapping !== null && Object.keys(openMapping).length > 0) {
-      data[openKey] = openMapping
-    }
+    if (openKey !== null && openMapping !== null) data[openKey] = openMapping
     openKey = null
     openList = null
     openMapping = null
+    itemMapping = null
   }
 
   for (const rawLine of match[1].split(/\r?\n/)) {
-    if (!rawLine.trim()) continue
+    // Blank lines and whole-line comments never change structure.
+    if (!rawLine.trim() || /^\s*#/.test(rawLine)) continue
 
-    const item = /^\s*-\s+(.+)$/.exec(rawLine)
+    const item = /^(\s*)-\s*(.*)$/.exec(rawLine)
     if (item && openList) {
-      const entry = stripInlineComment(item[1].trim())
+      const entry = stripInlineComment(item[2].trim())
       if (!entry) continue
-      const mapping = parseInlineMapping(entry)
-      openList.push(mapping ?? unquote(entry))
+      const inline = parseInlineMapping(entry)
+      if (inline) {
+        openList.push(inline)
+        itemMapping = null
+        continue
+      }
+      // `- by: human:ada` opens a mapping the following indented
+      // siblings extend.
+      const kv = KEY_VALUE_RE.exec(entry)
+      if (kv && kv[2] !== '') {
+        itemMapping = { [kv[1]]: unquote(kv[2].trim()) }
+        openList.push(itemMapping)
+        continue
+      }
+      openList.push(unquote(entry))
+      itemMapping = null
       continue
     }
 
     const indented = /^\s/.test(rawLine)
-    const kv = /^\s*([A-Za-z_][\w-]*):\s*(.*)$/.exec(rawLine)
+    const kv = KEY_VALUE_RE.exec(rawLine.trim())
     if (!kv) {
       closeBlock()
       continue
@@ -190,15 +259,18 @@ export function parseDocFrontmatter(
     const key = kv[1]
     const value = stripInlineComment(kv[2].trim())
 
-    // An indented `key: value` under an open key is a block mapping entry.
-    if (indented && openKey !== null && openList !== null && openList.length === 0) {
-      openMapping ??= {}
-      openMapping[key] = unquote(value)
-      continue
-    }
-    if (indented && openMapping !== null) {
-      openMapping[key] = unquote(value)
-      continue
+    if (indented && openKey !== null) {
+      // A sibling of the current list item's mapping…
+      if (itemMapping !== null) {
+        itemMapping[key] = unquote(value)
+        continue
+      }
+      // …otherwise a block-mapping entry under the open key.
+      if (openList !== null && openList.length === 0) {
+        openMapping ??= {}
+        openMapping[key] = unquote(value)
+        continue
+      }
     }
 
     closeBlock()
@@ -206,14 +278,11 @@ export function parseDocFrontmatter(
     if (value === '') {
       // Could still become a list or a mapping; the next line decides.
       const list: Array<string | DocMapping> = []
-      data[key] = list as string[]
+      data[key] = list
       openKey = key
       openList = list
-    } else if (value.startsWith('[') && value.endsWith(']')) {
-      data[key] = splitInlineArray(value.slice(1, -1))
     } else {
-      const mapping = parseInlineMapping(value)
-      data[key] = mapping ?? unquote(value)
+      data[key] = parseInlineValue(value)
     }
   }
   closeBlock()
@@ -225,7 +294,8 @@ function toStringList(value: DocFrontmatterValue | undefined): string[] {
   if (value === undefined) return []
   if (typeof value === 'string') return [value]
   if (!Array.isArray(value)) return []
-  return value.filter((entry): entry is string => typeof entry === 'string')
+  const entries: Array<string | DocMapping> = value
+  return entries.filter((entry): entry is string => typeof entry === 'string')
 }
 
 function toScalar(value: DocFrontmatterValue | undefined): string | undefined {
@@ -268,14 +338,68 @@ export function readLinkDestination(
   text: string,
   open: number,
 ): { target: string; end: number } | null {
+  const target: string[] = []
   let depth = 0
-  for (let index = open; index < text.length; index += 1) {
+  let index = open
+
+  for (; index < text.length; index += 1) {
     const char = text[index]
-    if (char === '(') depth += 1
-    else if (char === ')') {
+
+    if (char === '\\' && index + 1 < text.length) {
+      // An escaped character is literal, including `\)` — it must not
+      // close the destination.
+      if (depth > 0) target.push(text[index + 1])
+      index += 1
+      continue
+    }
+
+    if (char === '(') {
+      depth += 1
+      if (depth > 1) target.push(char)
+      continue
+    }
+
+    if (char === ')') {
       depth -= 1
-      if (depth === 0) return { target: text.slice(open + 1, index), end: index }
-    } else if (/\s/.test(char)) return null
+      if (depth === 0) return { target: target.join(''), end: index }
+      target.push(char)
+      continue
+    }
+
+    // Whitespace ends the destination; what follows may be an optional
+    // title (`[x](./a.md "Title")`), which is skipped to the closing
+    // paren rather than making the whole link unparseable.
+    if (/\s/.test(char)) return readAfterDestination(text, index, target.join(''))
+
+    target.push(char)
+  }
+
+  return null
+}
+
+/** Skip an optional link title and return at the closing paren. */
+function readAfterDestination(
+  text: string,
+  from: number,
+  target: string,
+): { target: string; end: number } | null {
+  let quote: string | null = null
+  for (let index = from; index < text.length; index += 1) {
+    const char = text[index]
+    if (char === '\\') {
+      index += 1
+      continue
+    }
+    if (quote) {
+      if (char === quote) quote = null
+      continue
+    }
+    if (char === '"' || char === "'") {
+      quote = char
+      continue
+    }
+    if (char === ')') return target === '' ? null : { target, end: index }
+    if (char === '\n') return null
   }
   return null
 }

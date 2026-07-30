@@ -98,6 +98,62 @@ body`)
     ])
   })
 
+  it('parses a block list of block mappings', () => {
+    const parsed = parseDocFrontmatter(`---
+verified:
+  - by: human:ada
+    at: T1
+  - by: process:nightly
+    at: T2
+status: stable
+---
+body`)
+
+    expect(parsed!.data.verified).toEqual([
+      { by: 'human:ada', at: 'T1' },
+      { by: 'process:nightly', at: 'T2' },
+    ])
+    // The key after the block must stay top-level.
+    expect(parsed!.data.status).toBe('stable')
+  })
+
+  it('parses an inline sequence of mappings', () => {
+    const parsed = parseDocFrontmatter(`---
+verified: [{ by: human:ada, at: T1 }, { by: process:nightly, at: T2 }]
+---
+body`)
+
+    expect(parsed!.data.verified).toEqual([
+      { by: 'human:ada', at: 'T1' },
+      { by: 'process:nightly', at: 'T2' },
+    ])
+  })
+
+  it('keeps a block mapping open across a comment line', () => {
+    const parsed = parseDocFrontmatter(`---
+generated:
+  by: process:builder
+  # who ran it
+  at: T1
+status: stable
+---
+body`)
+
+    expect(parsed!.data.generated).toEqual({ by: 'process:builder', at: 'T1' })
+    expect(parsed!.data.status).toBe('stable')
+  })
+
+  it('unescapes quotes inside quoted scalars', () => {
+    const parsed = parseDocFrontmatter(`---
+title: "He said \\"hello\\"" # a note
+other: 'Ada''s guide'
+---
+body`)
+
+    expect(parsed!.data.title).toBe('He said "hello"')
+    expect(parsed!.data.other).toBe("Ada's guide")
+  })
+
   it('strips comments that follow a quoted scalar', () => {
     const parsed = parseDocFrontmatter(`---
 type: "adr" # architectural decision
@@ -156,6 +212,11 @@ Inline \`[code](/not-a-link.md)\` too, but [real](./real.md).
     expect(extractMarkdownLinks('[migration](./use-(legacy)-api.md)')).toEqual([
       './use-(legacy)-api.md',
     ])
+  })
+
+  it('accepts an optional link title and escaped parentheses', () => {
+    expect(extractMarkdownLinks('[guide](./guide.md "More details")')).toEqual(['./guide.md'])
+    expect(extractMarkdownLinks('[esc](./escaped\\)paren.md)')).toEqual(['./escaped)paren.md'])
   })
 
   it('deduplicates repeated targets', () => {

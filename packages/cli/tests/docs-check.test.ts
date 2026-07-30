@@ -428,6 +428,11 @@ See [invoicing](/invoicing.md).
         '---\ntype: context\nstale_after: 2026-02-30\n---\n# Rolled\n',
         'utf8',
       )
+      await writeFile(
+        join(scoped.dir, 'docs/empty.md'),
+        '---\ntype: context\nstale_after: ""\n---\n# Empty\n',
+        'utf8',
+      )
 
       const results = await runDocsCheck({ cwd: scoped.dir })
 
@@ -435,6 +440,7 @@ See [invoicing](/invoicing.md).
       // checker never enforces.
       expect(results.find((r) => r.key === 'docs-stale-after:docs/prose.md')?.status).toBe('warn')
       expect(results.find((r) => r.key === 'docs-stale-after:docs/rolled.md')?.status).toBe('warn')
+      expect(results.find((r) => r.key === 'docs-stale-after:docs/empty.md')?.status).toBe('warn')
     } finally {
       await scoped.cleanup()
     }
