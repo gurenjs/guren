@@ -790,7 +790,7 @@ kernel.registerMany(billingModule.commands)`,
 
       const report = await runCheck({ cwd: workspace.dir })
 
-      const commandCheck = report.checks.find(c => c.key === 'console-command:InvoiceCommand')
+      const commandCheck = report.checks.find(c => c.key === 'console-command:billing/InvoiceCommand')
       expect(commandCheck).toBeDefined()
       expect(commandCheck!.status).toBe('pass')
       expect(commandCheck!.message).toContain('modules/billing/index.ts')
@@ -798,6 +798,85 @@ kernel.registerMany(billingModule.commands)`,
       const hopCheck = report.checks.find(c => c.key === 'console-module-commands:billing')
       expect(hopCheck).toBeDefined()
       expect(hopCheck!.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it("does not credit one module's registration to another", async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-console-two-modules-')
+
+    try {
+      for (const name of ['billing', 'analytics']) {
+        const cls = `${name[0]!.toUpperCase()}${name.slice(1)}Command`
+        await mkdir(join(workspace.dir, `modules/${name}/app/Console/Commands`), { recursive: true })
+        await writeFile(
+          join(workspace.dir, `modules/${name}/app/Console/Commands/${cls}.ts`),
+          COMMAND_SOURCE.replace(/SendDigestCommand/g, cls),
+          'utf8',
+        )
+        await writeFile(
+          join(workspace.dir, `modules/${name}/index.ts`),
+          `import { defineModule } from '@guren/core'
+import ${cls} from './app/Console/Commands/${cls}.js'
+
+export const ${name}Module = defineModule({ name: '${name}', commands: [${cls}] })`,
+          'utf8',
+        )
+      }
+
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      // Both imported, only billing registered — analytics' commands are dead.
+      await writeFile(
+        join(workspace.dir, 'src/console.ts'),
+        `import { ConsoleKernel } from '@guren/core'
+import { billingModule } from '../modules/billing/index.js'
+import { analyticsModule } from '../modules/analytics/index.js'
+
+export const kernel = new ConsoleKernel()
+kernel.registerMany(billingModule.commands)`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      expect(report.checks.find(c => c.key === 'console-module-commands:billing')!.status).toBe('pass')
+      expect(report.checks.find(c => c.key === 'console-module-commands:analytics')!.status).toBe('warn')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('accepts a module whose commands are registered by name rather than as an array', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-console-by-name-')
+
+    try {
+      await mkdir(join(workspace.dir, 'modules/billing/app/Console/Commands'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'modules/billing/app/Console/Commands/InvoiceCommand.ts'),
+        COMMAND_SOURCE.replace(/SendDigestCommand/g, 'InvoiceCommand'),
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'modules/billing/index.ts'),
+        `export { default as InvoiceCommand } from './app/Console/Commands/InvoiceCommand.js'`,
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      // The shape a project predating the `commands` field uses.
+      await writeFile(
+        join(workspace.dir, 'src/console.ts'),
+        `import { ConsoleKernel } from '@guren/core'
+import { InvoiceCommand } from '../modules/billing/index.js'
+
+export const kernel = new ConsoleKernel()
+kernel.registerMany([InvoiceCommand])`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      expect(report.checks.find(c => c.key === 'console-module-commands:billing')!.status).toBe('pass')
     } finally {
       await workspace.cleanup()
     }
@@ -834,7 +913,7 @@ kernel.registerMany([])`,
       const report = await runCheck({ cwd: workspace.dir })
 
       // The module wired it up correctly, so only the second hop warns.
-      expect(report.checks.find(c => c.key === 'console-command:InvoiceCommand')!.status).toBe('pass')
+      expect(report.checks.find(c => c.key === 'console-command:billing/InvoiceCommand')!.status).toBe('pass')
 
       const hopCheck = report.checks.find(c => c.key === 'console-module-commands:billing')
       expect(hopCheck).toBeDefined()

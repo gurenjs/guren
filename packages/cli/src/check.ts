@@ -10,14 +10,13 @@ import {
   hasControllerTest,
   describeControllerTestMiss,
   classNameFromPath,
-  readIfExists,
   toPosixRelative,
   listModuleNames,
   moduleNameFromRelPath,
   formatTruncatedList,
 } from './discovery'
 import { extractClassDeclaration } from './model-parser'
-import { camelCase } from './utils'
+import { camelCase, escapeRegExp } from './utils'
 import { ParseCache } from './parse-cache'
 import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath } from './inertia-pages'
 import { runArchCheck } from './arch-check'
@@ -118,23 +117,57 @@ async function checkModuleSchemaAggregation(cwd: string): Promise<CheckResult[]>
 const CONSOLE_ENTRY = 'src/console.ts'
 
 /**
- * Source text of `absPath`'s top-level statements with `import` declarations
- * dropped, or `null` when the file can't be read or parsed. Lets a check ask
- * "is this name *used* here", rather than "does this name appear here" — an
- * import alone is not a use.
+ * A parsed entrypoint split into the two halves a registration check needs:
+ * the local names it imports from a given path, and its source *outside* the
+ * import statements.
  *
- * Re-exports (`export { X } from './x'`) are kept: for a module's `index.ts`
- * they are a way of putting a name on the module's public surface, which is
- * the thing being asked about.
+ * The split matters because an import alone is not a use: a leftover
+ * `import SendDigestCommand from ...` next to an emptied `registerMany([])`
+ * is exactly the state these checks exist to catch.
+ *
+ * Re-exports (`export { X } from './x'`) count as body, not imports: for a
+ * module's `index.ts` they put a name on the module's public surface, which
+ * is the thing being asked about.
  */
-async function sourceOutsideImports(cache: ParseCache, absPath: string): Promise<string | null> {
+interface EntrySource {
+  /** Top-level statements minus `import` declarations. */
+  body: string
+  /** Local bindings introduced by imports whose specifier contains `fragment`. */
+  bindingsFrom(fragment: string): string[]
+}
+
+async function readEntrySource(cache: ParseCache, absPath: string): Promise<EntrySource | null> {
   const parsed = await cache.get(absPath)
   if (!parsed) return null
 
-  return parsed.ast.program.body
+  const imports = parsed.ast.program.body.filter((node) => node.type === 'ImportDeclaration')
+  const body = parsed.ast.program.body
     .filter((node) => node.type !== 'ImportDeclaration')
     .map((node) => parsed.source.slice(node.start ?? 0, node.end ?? 0))
     .join('\n')
+
+  return {
+    body,
+    bindingsFrom(fragment) {
+      return imports
+        .filter((node) => node.source.value.includes(fragment))
+        .flatMap((node) => node.specifiers.map((specifier) => specifier.local.name))
+    },
+  }
+}
+
+/**
+ * Whether `body` registers `binding`'s commands — `billingModule.commands`,
+ * or a member chain ending there for a namespace import.
+ *
+ * Resolving the binding from the import first is what keeps this honest with
+ * more than one module in play: matching `.commands` anywhere would report a
+ * module as registered because a *different* module's line is present.
+ */
+function registersCommandsOf(body: string, bindings: string[]): boolean {
+  return bindings.some((binding) =>
+    new RegExp(`\\b${escapeRegExp(binding)}\\s*(?:\\.\\s*[\\w$]+\\s*)*\\.\\s*commands\\b`, 'u').test(body),
+  )
 }
 
 /**
@@ -171,11 +204,6 @@ async function checkConsoleCommandRegistration(cwd: string, cache: ParseCache): 
   if (commandFiles.length === 0) return []
 
   const results: CheckResult[] = []
-  const sources = new Map<string, string | null>()
-  const readEntry = async (path: string): Promise<string | null> => {
-    if (!sources.has(path)) sources.set(path, await readIfExists(cwd, path))
-    return sources.get(path) ?? null
-  }
 
   // Grouped by entrypoint so a missing one is reported once, not once per
   // command it would have registered.
@@ -189,10 +217,9 @@ async function checkConsoleCommandRegistration(cwd: string, cache: ParseCache): 
   }
 
   for (const [entry, { moduleName, files }] of byEntry) {
-    const source = await readEntry(entry)
     const names = files.map((file) => classNameFromPath(file))
 
-    if (source === null) {
+    if (!(await fileExists(cwd, entry))) {
       results.push(
         check(
           `console-entry:${entry}`,
@@ -210,9 +237,9 @@ async function checkConsoleCommandRegistration(cwd: string, cache: ParseCache): 
       continue
     }
 
-    const registrationText = await sourceOutsideImports(cache, resolve(cwd, entry))
+    const entrySource = await readEntrySource(cache, resolve(cwd, entry))
 
-    if (registrationText === null) {
+    if (entrySource === null) {
       results.push(
         check(
           `console-entry:${entry}`,
@@ -227,14 +254,15 @@ async function checkConsoleCommandRegistration(cwd: string, cache: ParseCache): 
 
     for (const filePath of files) {
       const name = classNameFromPath(filePath)
-      const registered = new RegExp(`\\b${name}\\b`, 'u').test(registrationText)
+      const registered = new RegExp(`\\b${name}\\b`, 'u').test(entrySource.body)
       const suggestion = moduleName
         ? `Import ${name} in ${entry} and add it to defineModule({ commands: [...] }).`
         : `Import ${name} in ${entry} and add it to kernel.registerMany([...]).`
 
       results.push(
         check(
-          `console-command:${name}`,
+          // Module-qualified: a root and a module command may share a name.
+          `console-command:${moduleName ? `${moduleName}/` : ''}${name}`,
           `${name} registration`,
           registered ? 'pass' : 'warn',
           registered
@@ -246,36 +274,51 @@ async function checkConsoleCommandRegistration(cwd: string, cache: ParseCache): 
       )
     }
 
-    // `source` (not `registrationText`) below: the hop is recognized by the
-    // module import *and* a `.commands` use, so the import line matters here.
-
-    // A module's commands only reach a kernel once the project's console
-    // entrypoint registers them — a second hop `make:command` cannot patch.
-    // Checked separately so a wired-up module never warns for the per-file
-    // rule above and this one at once.
     if (moduleName) {
-      const consoleSource = await readEntry(CONSOLE_ENTRY)
-      const binding = `${camelCase(moduleName)}Module`
-      const hopped
-        = consoleSource !== null
-        && consoleSource.includes(`modules/${moduleName}`)
-        && /\.commands\b/u.test(consoleSource)
-
-      results.push(
-        check(
-          `console-module-commands:${moduleName}`,
-          `${moduleName} console commands`,
-          hopped ? 'pass' : 'warn',
-          hopped
-            ? `${CONSOLE_ENTRY} registers ${moduleName}'s commands.`
-            : `${CONSOLE_ENTRY} does not register ${moduleName}'s commands, so they never reach a kernel.`,
-          hopped ? undefined : `Add to ${CONSOLE_ENTRY}: kernel.registerMany(${binding}.commands)`,
-        ),
-      )
+      results.push(await checkModuleCommandHop(cwd, cache, moduleName, names))
     }
   }
 
   return results
+}
+
+/**
+ * Whether the project's console entrypoint registers `moduleName`'s commands
+ * — the one hop `make:command` cannot patch, since
+ * `kernel.registerMany(<module>.commands)` is a statement rather than an entry
+ * in an existing array.
+ *
+ * Two shapes count, because both leave the commands runnable: the module's
+ * `commands` array registered wholesale, or the individual classes registered
+ * by name (what a project predating the `commands` field does).
+ */
+async function checkModuleCommandHop(
+  cwd: string,
+  cache: ParseCache,
+  moduleName: string,
+  commandNames: string[],
+): Promise<CheckResult> {
+  const binding = `${camelCase(moduleName)}Module`
+  const entry = await readEntrySource(cache, resolve(cwd, CONSOLE_ENTRY))
+
+  // A binding from the module's own import, so that `.commands` belonging to
+  // a *different* module can't satisfy this one. The conventional name is a
+  // fallback for imports through a path alias, which carry no `modules/<name>`.
+  const bindings = [...entry?.bindingsFrom(`modules/${moduleName}`) ?? [], binding]
+  const hopped
+    = entry !== null
+    && (registersCommandsOf(entry.body, bindings)
+      || commandNames.every((name) => new RegExp(`\\b${name}\\b`, 'u').test(entry.body)))
+
+  return check(
+    `console-module-commands:${moduleName}`,
+    `${moduleName} console commands`,
+    hopped ? 'pass' : 'warn',
+    hopped
+      ? `${CONSOLE_ENTRY} registers ${moduleName}'s commands.`
+      : `${CONSOLE_ENTRY} does not register ${moduleName}'s commands, so they never reach a kernel.`,
+    hopped ? undefined : `Add to ${CONSOLE_ENTRY}: kernel.registerMany(${binding}.commands)`,
+  )
 }
 
 export async function runCheck(options: RunCheckOptions = {}): Promise<CheckReport> {

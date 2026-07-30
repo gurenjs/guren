@@ -1,10 +1,9 @@
-import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { consola } from 'consola'
 import type { WriterOptions } from './utils'
 import { camelCase, ensureSuffix, kebabCase, relativeImportPath, resourceName, safeModuleName, scaffoldFile } from './utils'
 import { addImport, addToArrayArgument, addToArrayOption } from './patch-helpers'
-import { fileExists } from './discovery'
+import { fileExists, readIfExists } from './discovery'
 
 const COMMANDS_DIR = 'app/Console/Commands'
 const CONSOLE_ENTRY = 'src/console.ts'
@@ -80,7 +79,7 @@ async function registerRootCommand(className: string, file: string): Promise<voi
 
   if (!(await fileExists(process.cwd(), CONSOLE_ENTRY))) {
     consola.warn(`No ${CONSOLE_ENTRY} found — ${className} is not registered yet.`)
-    printRootRegistrationGuidance(className, specifier, { createEntry: true })
+    printRootRegistrationGuidance(className, specifier)
     return
   }
 
@@ -105,7 +104,6 @@ async function registerRootCommand(className: string, file: string): Promise<voi
 
 async function registerModuleCommand(className: string, file: string, moduleName: string): Promise<void> {
   const indexPath = `modules/${moduleName}/index.ts`
-  const moduleBinding = `${camelCase(moduleName)}Module`
   const specifier = commandSpecifier(indexPath, file)
 
   if (!(await fileExists(process.cwd(), indexPath))) {
@@ -132,7 +130,7 @@ async function registerModuleCommand(className: string, file: string, moduleName
     consola.info(`${className} is already registered in ${indexPath}`)
   }
 
-  await printModuleConsoleHopGuidance(moduleName, moduleBinding)
+  await printModuleConsoleHopGuidance(moduleName)
 }
 
 /**
@@ -142,33 +140,24 @@ async function registerModuleCommand(className: string, file: string, moduleName
  * in an existing array. Printed only when that line is actually absent, so a
  * project that already made the hop for this module stays quiet.
  */
-async function printModuleConsoleHopGuidance(moduleName: string, moduleBinding: string): Promise<void> {
-  const consoleExists = await fileExists(process.cwd(), CONSOLE_ENTRY)
+async function printModuleConsoleHopGuidance(moduleName: string): Promise<void> {
+  const moduleBinding = `${camelCase(moduleName)}Module`
+  const consoleSource = await readIfExists(process.cwd(), CONSOLE_ENTRY)
 
-  if (consoleExists) {
-    const content = await readFile(join(process.cwd(), CONSOLE_ENTRY), 'utf8')
-    if (content.includes(`${moduleBinding}.commands`)) return
-  }
+  if (consoleSource?.includes(`${moduleBinding}.commands`)) return
 
   consola.info(`Register the module's commands with your console kernel in ${CONSOLE_ENTRY}:`)
   consola.info(`  import { ${moduleBinding} } from '../modules/${moduleName}/index.js'`)
   consola.info(`  kernel.registerMany(${moduleBinding}.commands)`)
-  if (!consoleExists) {
+  if (consoleSource === null) {
     consola.info(`Create ${CONSOLE_ENTRY} first if your project predates it.`)
   }
   consola.info('See: https://guren.dev/docs/guides/console')
 }
 
-function printRootRegistrationGuidance(
-  className: string,
-  specifier: string,
-  options: { createEntry?: boolean } = {},
-): void {
+function printRootRegistrationGuidance(className: string, specifier: string): void {
   consola.info(`Register it with your console kernel in ${CONSOLE_ENTRY}:`)
   consola.info(`  import ${className} from '${specifier}'`)
   consola.info(`  kernel.registerMany([${className}])`)
-  if (options.createEntry) {
-    consola.info(`Create ${CONSOLE_ENTRY} first if your project predates it.`)
-  }
   consola.info('See: https://guren.dev/docs/guides/console')
 }

@@ -1,37 +1,27 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'bun:test'
 import { makeCommand, registerScaffoldedCommand } from '../src/make-command'
+import { makeModule } from '../src/make-module'
 import { createTempWorkspace } from './helpers'
 
-const CONSOLE_TEMPLATE = `import { ConsoleKernel } from '@guren/core'
-import app from './app.js'
+// The real scaffolded entrypoint, not a copy of it: this suite asserts that
+// make:command can patch what create-guren-app actually writes, which a
+// hand-copied fixture stops proving the moment the template is edited.
+const TEMPLATE_CONSOLE_ENTRY = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '../../create-app/templates/default/src/console.ts',
+)
 
-export const kernel = new ConsoleKernel({ container: app.container })
-
-// Register the classes \`bunx guren make:command\` writes to app/Console/Commands:
-//   import SendDigestCommand from '../app/Console/Commands/SendDigestCommand.js'
-kernel.registerMany([])
-`
-
-const MODULE_INDEX = `import { defineModule } from '@guren/core'
-import { registerBillingRoutes } from './routes'
-
-export const billingModule = defineModule({
-  name: 'billing',
-  prefix: '/billing',
-  routes: registerBillingRoutes,
-})
-`
-
-async function writeConsoleEntry(dir: string, contents = CONSOLE_TEMPLATE): Promise<void> {
+async function writeConsoleEntry(dir: string, contents?: string): Promise<void> {
   await mkdir(join(dir, 'src'), { recursive: true })
-  await writeFile(join(dir, 'src/console.ts'), contents, 'utf8')
+  await writeFile(join(dir, 'src/console.ts'), contents ?? (await readFile(TEMPLATE_CONSOLE_ENTRY, 'utf8')), 'utf8')
 }
 
-async function writeModuleIndex(dir: string, contents = MODULE_INDEX): Promise<void> {
-  await mkdir(join(dir, 'modules/billing'), { recursive: true })
-  await writeFile(join(dir, 'modules/billing/index.ts'), contents, 'utf8')
+/** The module descriptor `make:module` itself writes, for the same reason. */
+async function writeModuleIndex(): Promise<void> {
+  await makeModule('billing')
 }
 
 async function scaffoldAndRegister(name: string, options: { root?: string } = {}): Promise<string> {
@@ -154,7 +144,7 @@ kernel.registerMany([])
     it('adds a commands option to the module descriptor', async () => {
       const workspace = await createTempWorkspace('guren-cli-cmd-register-module-')
       try {
-        await writeModuleIndex(workspace.dir)
+        await writeModuleIndex()
 
         await scaffoldAndRegister('Invoice', { root: 'billing' })
 
@@ -169,7 +159,7 @@ kernel.registerMany([])
     it('appends to a commands array the module already declares', async () => {
       const workspace = await createTempWorkspace('guren-cli-cmd-register-module-append-')
       try {
-        await writeModuleIndex(workspace.dir)
+        await writeModuleIndex()
 
         await scaffoldAndRegister('Invoice', { root: 'billing' })
         await scaffoldAndRegister('Dunning', { root: 'billing' })
@@ -184,7 +174,7 @@ kernel.registerMany([])
     it('normalizes --module Billing to the same modules/billing descriptor', async () => {
       const workspace = await createTempWorkspace('guren-cli-cmd-register-module-case-')
       try {
-        await writeModuleIndex(workspace.dir)
+        await writeModuleIndex()
 
         await scaffoldAndRegister('Invoice', { root: 'Billing' })
 
@@ -199,7 +189,7 @@ kernel.registerMany([])
       const workspace = await createTempWorkspace('guren-cli-cmd-register-module-boundary-')
       try {
         await writeConsoleEntry(workspace.dir)
-        await writeModuleIndex(workspace.dir)
+        await writeModuleIndex()
 
         await scaffoldAndRegister('Invoice', { root: 'billing' })
 

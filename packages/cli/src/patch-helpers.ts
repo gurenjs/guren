@@ -1,13 +1,70 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { escapeRegExp } from './utils'
 
 export interface PatchResult {
   modified: boolean
   reason?: string
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/**
+ * File contents, or `null` when the file does not exist — the one condition
+ * every patch below reports as `'File not found'` rather than throwing.
+ */
+async function readFileOrNull(absolutePath: string): Promise<string | null> {
+  try {
+    return await readFile(absolutePath, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null
+    }
+    throw error
+  }
+}
+
+/**
+ * Whether `index` falls inside a `//` line comment. These patches match by
+ * regex, so a commented-out example of the very call they look for — a
+ * disabled `// kernel.registerMany([Foo])`, say — would otherwise be edited
+ * in place of the real one, leaving the file "patched" but unchanged in
+ * behavior.
+ */
+function isInLineComment(content: string, index: number): boolean {
+  const lineStart = content.lastIndexOf('\n', index) + 1
+  const commentStart = content.slice(lineStart, index).indexOf('//')
+  return commentStart !== -1
+}
+
+/**
+ * Finds the first match of `pattern` that is not inside a line comment.
+ */
+function matchOutsideComments(content: string, pattern: RegExp): RegExpExecArray | null {
+  const scanner = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`)
+
+  for (let match = scanner.exec(content); match !== null; match = scanner.exec(content)) {
+    if (!isInLineComment(content, match.index)) return match
+  }
+
+  return null
+}
+
+/**
+ * Entries of an array literal's interior, e.g. `'A, B'` -> `['A', 'B']`, or
+ * `null` when the interior carries a comment. Splitting on commas and
+ * re-joining on one line would fold a trailing `// keep this` over the rest
+ * of the statement, so an array a human has annotated is left for them to
+ * edit rather than silently mangled.
+ *
+ * Shared so that "is this entry already present" means the same thing for
+ * every array a patch edits.
+ */
+function parseArrayEntries(inner: string): string[] | null {
+  if (inner.includes('//') || inner.includes('/*')) return null
+
+  return inner
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0)
 }
 
 /**
@@ -19,19 +76,14 @@ export async function addImport(
   importStatement: string,
 ): Promise<PatchResult> {
   const absolutePath = resolve(process.cwd(), filePath)
-  let content: string
+  const content = await readFileOrNull(absolutePath)
 
-  try {
-    content = await readFile(absolutePath, 'utf8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return { modified: false, reason: 'File not found' }
-    }
-    throw error
+  if (content === null) {
+    return { modified: false, reason: 'File not found' }
   }
 
   const normalizedImport = importStatement.trim()
-  const importPattern = normalizedImport.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const importPattern = escapeRegExp(normalizedImport)
   const regex = new RegExp(`^\\s*${importPattern}\\s*$`, 'm')
 
   if (regex.test(content)) {
@@ -93,15 +145,10 @@ export async function addProvider(
   isRegistered?: (entries: string[]) => boolean,
 ): Promise<PatchResult> {
   const absolutePath = resolve(process.cwd(), filePath)
-  let content: string
+  const content = await readFileOrNull(absolutePath)
 
-  try {
-    content = await readFile(absolutePath, 'utf8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return { modified: false, reason: 'File not found' }
-    }
-    throw error
+  if (content === null) {
+    return { modified: false, reason: 'File not found' }
   }
 
   // Find the providers array and add the provider
@@ -113,10 +160,11 @@ export async function addProvider(
   }
 
   const providersContent = match[1]
-  const providers = providersContent
-    .split(',')
-    .map(p => p.trim())
-    .filter(p => p.length > 0)
+  const providers = parseArrayEntries(providersContent)
+
+  if (providers === null) {
+    return { modified: false, reason: 'Providers array contains comments' }
+  }
 
   const alreadyRegistered = isRegistered
     ? isRegistered(providers)
@@ -137,12 +185,48 @@ export async function addProvider(
 }
 
 /**
+ * Index range of the `{ ... }` options object passed to `callName(` — the
+ * span every "edit an option of this call" patch works within, so that a
+ * `key:` belonging to some other call in the same file is never touched.
+ * Returns the failure `reason` as a string when the call or its object
+ * cannot be located.
+ */
+function findCallOptionsSpan(
+  content: string,
+  callName: string,
+): { start: number; end: number } | string {
+  const callPattern = new RegExp(`\\b${escapeRegExp(callName)}\\(\\s*\\{`)
+  const match = matchOutsideComments(content, callPattern)
+
+  if (!match) {
+    return `Could not find a ${callName}({ ... }) call`
+  }
+
+  const start = match.index + match[0].length - 1
+  let depth = 0
+
+  for (let i = start; i < content.length; i++) {
+    const char = content[i]
+    if (char === '{') depth++
+    else if (char === '}') {
+      depth--
+      if (depth === 0) return { start, end: i }
+    }
+  }
+
+  return `Could not parse ${callName} options object`
+}
+
+/**
  * Adds an entry to an arbitrary array-valued option of a single-object-
  * argument call (e.g. `modules: [...]` in `createApp({ ... })`, or
  * `commands: [...]` in `defineModule({ ... })`), creating the option (via
  * `addCreateAppOption`) if it isn't present at all yet. Generalizes
  * `addProvider`'s array-editing logic to a caller-supplied `key` instead of
  * the hardcoded `providers:`.
+ *
+ * The search is scoped to `callName`'s own options object, so a same-named
+ * key on an unrelated call in the file is left alone.
  *
  * `addProvider` is kept as its own independent implementation rather than
  * delegating here, to avoid changing its existing behavior (it fails with
@@ -156,35 +240,39 @@ export async function addToArrayOption(
   callName = 'createApp',
 ): Promise<PatchResult> {
   const absolutePath = resolve(process.cwd(), filePath)
-  let content: string
+  const content = await readFileOrNull(absolutePath)
 
-  try {
-    content = await readFile(absolutePath, 'utf8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return { modified: false, reason: 'File not found' }
-    }
-    throw error
+  if (content === null) {
+    return { modified: false, reason: 'File not found' }
   }
 
-  const arrayPattern = new RegExp(`${key}:\\s*\\[([\\s\\S]*?)\\]`)
-  const match = content.match(arrayPattern)
+  const span = findCallOptionsSpan(content, callName)
+
+  if (typeof span === 'string') {
+    return { modified: false, reason: span }
+  }
+
+  const optionsSource = content.slice(span.start, span.end + 1)
+  const arrayPattern = new RegExp(`${escapeRegExp(key)}:\\s*\\[([\\s\\S]*?)\\]`)
+  const match = optionsSource.match(arrayPattern)
 
   if (!match) {
     return addCreateAppOption(filePath, key, `[${valueSource}]`, callName)
   }
 
-  const entries = match[1]
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0)
+  const entries = parseArrayEntries(match[1])
+
+  if (entries === null) {
+    return { modified: false, reason: `${key} array contains comments` }
+  }
 
   if (entries.some((entry) => entry === valueSource)) {
     return { modified: false, reason: 'Already present' }
   }
 
   entries.push(valueSource)
-  const updatedContent = content.replace(arrayPattern, `${key}: [${entries.join(', ')}]`)
+  const updatedOptions = optionsSource.replace(arrayPattern, `${key}: [${entries.join(', ')}]`)
+  const updatedContent = content.slice(0, span.start) + updatedOptions + content.slice(span.end + 1)
 
   await writeFile(absolutePath, updatedContent, 'utf8')
   return { modified: true }
@@ -207,30 +295,26 @@ export async function addToArrayArgument(
   valueSource: string,
 ): Promise<PatchResult> {
   const absolutePath = resolve(process.cwd(), filePath)
-  let content: string
+  const content = await readFileOrNull(absolutePath)
 
-  try {
-    content = await readFile(absolutePath, 'utf8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return { modified: false, reason: 'File not found' }
-    }
-    throw error
+  if (content === null) {
+    return { modified: false, reason: 'File not found' }
   }
 
   const callPattern = new RegExp(
     `(?:[\\w$]+(?:\\.[\\w$]+)*\\.)?${escapeRegExp(methodName)}\\s*\\(\\s*\\[([\\s\\S]*?)\\]\\s*\\)`,
   )
-  const match = content.match(callPattern)
+  const match = matchOutsideComments(content, callPattern)
 
   if (!match) {
     return { modified: false, reason: `Could not find a ${methodName}([ ... ]) call` }
   }
 
-  const entries = match[1]
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0)
+  const entries = parseArrayEntries(match[1])
+
+  if (entries === null) {
+    return { modified: false, reason: `${methodName}() array contains comments` }
+  }
 
   if (entries.some((entry) => entry === valueSource)) {
     return { modified: false, reason: 'Already present' }
@@ -239,7 +323,7 @@ export async function addToArrayArgument(
   entries.push(valueSource)
   const replacement = match[0].replace(/\[[\s\S]*\]/, `[${entries.join(', ')}]`)
   const updatedContent
-    = content.slice(0, match.index!) + replacement + content.slice(match.index! + match[0].length)
+    = content.slice(0, match.index) + replacement + content.slice(match.index + match[0].length)
 
   await writeFile(absolutePath, updatedContent, 'utf8')
   return { modified: true }
@@ -254,7 +338,7 @@ export async function hasImport(filePath: string, importStatement: string): Prom
   try {
     const content = await readFile(absolutePath, 'utf8')
     const normalizedImport = importStatement.trim()
-    const importPattern = normalizedImport.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const importPattern = escapeRegExp(normalizedImport)
     const regex = new RegExp(`^\\s*${importPattern}\\s*$`, 'm')
     return regex.test(content)
   } catch {
@@ -370,46 +454,21 @@ export async function addCreateAppOption(
   callName = 'createApp',
 ): Promise<PatchResult> {
   const absolutePath = resolve(process.cwd(), filePath)
-  let content: string
+  const content = await readFileOrNull(absolutePath)
 
-  try {
-    content = await readFile(absolutePath, 'utf8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return { modified: false, reason: 'File not found' }
-    }
-    throw error
+  if (content === null) {
+    return { modified: false, reason: 'File not found' }
   }
 
-  const createAppPattern = new RegExp(`\\b${escapeRegExp(callName)}\\(\\s*\\{`)
-  const match = content.match(createAppPattern)
+  const span = findCallOptionsSpan(content, callName)
 
-  if (!match || match.index === undefined) {
-    return { modified: false, reason: `Could not find a ${callName}({ ... }) call` }
+  if (typeof span === 'string') {
+    return { modified: false, reason: span }
   }
 
-  // Scan the call's options object for an existing top-level `key:`
-  const openBraceIndex = match.index + match[0].length - 1
-  let depth = 0
-  let closeBraceIndex = -1
-  for (let i = openBraceIndex; i < content.length; i++) {
-    const char = content[i]
-    if (char === '{') depth++
-    else if (char === '}') {
-      depth--
-      if (depth === 0) {
-        closeBraceIndex = i
-        break
-      }
-    }
-  }
-
-  if (closeBraceIndex === -1) {
-    return { modified: false, reason: `Could not parse ${callName} options object` }
-  }
-
+  const { start: openBraceIndex, end: closeBraceIndex } = span
   const optionsSource = content.slice(openBraceIndex, closeBraceIndex + 1)
-  const keyPattern = new RegExp(`(^|[{,]\\s*)${key}\\s*:`, 'm')
+  const keyPattern = new RegExp(`(^|[{,]\\s*)${escapeRegExp(key)}\\s*:`, 'm')
   if (keyPattern.test(optionsSource)) {
     return { modified: false, reason: 'Option already set' }
   }

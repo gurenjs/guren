@@ -3,16 +3,13 @@ import { readIfExists, directoryExists } from './discovery'
 import { generateSpecArtifacts, SPEC_VIEWS, type SpecViewDescriptor } from './spec-generate'
 import { SPEC_DIR } from './spec-artifact'
 import { check, type CheckResult } from './check-result'
+import { escapeRegExp } from './utils'
 
 export interface SpecCheckOptions {
   cwd: string
   routesFile?: string
   /** Regenerate only the views whose sources changed. */
   changedFiles?: Set<string> | null
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 /**

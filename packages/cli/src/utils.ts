@@ -181,6 +181,13 @@ export function relativeImportPath(fromFile: string, toPath: string): string {
   return normalized.startsWith('.') ? normalized : `./${normalized}`
 }
 
+/**
+ * Escapes `value` for literal use inside a `RegExp` source string.
+ */
+export function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 const SAFE_MODULE_NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/u
 
 /**
