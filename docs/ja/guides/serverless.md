@@ -84,9 +84,26 @@ EventBridge から呼び出されたときに実行予定のタスクを処理�
 
 アプリの `ConsoleKernel` に登録したコマンド — `src/console.ts` が `kernel` としてエクスポートするもの — を実行します。コマンドの定義と登録については [コンソールコマンドガイド](./console.md) を参照してください。
 
-カーネルに組み込みコマンドはありません。スキャフォールドされた `src/lambda.ts` に `db:migrate` のコメントアウト済みの例が同梱されているので、それと `console` export のコメントを外して有効化します。
+スキャフォールドされた `src/lambda.ts` の `console` export のコメントを外すとハンドラが有効になります。アプリ自身のカーネルをディスパッチするため、`src/console.ts` に登録したコマンドはすべて、ローカルと同じ名前で Lambda 上でも呼び出せます。
 
-AWS CLI から呼び出します:
+カーネルに組み込みコマンドはないので、マイグレーションの適用には自分のコマンドが必要です。`lambda:build` が `db/migrations/` をバンドルの隣にコピーするため、その場で実行できます。
+
+```ts
+// app/Console/Commands/MigrateCommand.ts
+import { Command } from '@guren/core'
+import { migrateDatabase } from '../../../config/database.js'
+
+export default class MigrateCommand extends Command {
+  static signature = 'db:migrate'
+  static description = 'Apply pending database migrations'
+
+  async handle(): Promise<void> {
+    await migrateDatabase()
+  }
+}
+```
+
+これを `src/console.ts` に登録したうえで、AWS CLI から呼び出します:
 
 ```bash
 aws lambda invoke --function-name my-app-console \
@@ -202,7 +219,7 @@ const app = createApp({
 
 スキャフォールドされた `config/app.ts` は、ローカル開発の利便性としてブート時にシードを実行し、`NODE_ENV=production` ではスキップします。このガードはそのまま残してください。Lambda はコールドスタートのたびにアプリをブートするため、ブート時シードは本番データに対して繰り返し実行されてしまいます。
 
-**マイグレーションは関数に同梱されます。** `lambda:build` が `db/migrations/` をバンドルの隣にコピーするため、スキャフォールドの `db:migrate` コンソールコマンドのコメントを外せばその場で適用できます。コマンド定義と呼び出し方は [コンソール — `createConsoleHandler(kernel)`](#コンソール--createconsolehandlerkernel) を参照してください。
+**マイグレーションは関数に同梱されます。** `lambda:build` が `db/migrations/` をバンドルの隣にコピーするため、`db:migrate` コンソールコマンドでその場で適用できます。コマンド定義と呼び出し方は [コンソール — `createConsoleHandler(kernel)`](#コンソール--createconsolehandlerkernel) を参照してください。
 
 **シーダーは関数内では実行できません。** シーダーはスキーマや `@guren/core` を import する通常の `.ts` モジュールですが、デプロイされる関数は `node_modules` も TypeScript ローダーも持たない自己完結バンドルであり、Node.js ランタイムはこれらを読み込めません。プロジェクトのソースがある環境からシードしてください:
 

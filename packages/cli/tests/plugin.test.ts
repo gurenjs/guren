@@ -135,6 +135,12 @@ export default app
     expect(entrypoint).toContain("from '@guren/core/lambda'")
     expect(entrypoint).toContain('export const http = createLambdaHandler(app)')
     expect(entrypoint).toContain('export const queue = createSqsHandler()')
+
+    // The console handler must dispatch the kernel src/console.ts exports.
+    // Building a second kernel here would give the deployed console function a
+    // different command set than `bun run console`.
+    expect(entrypoint).toContain("import { kernel } from './console.js'")
+    expect(entrypoint).not.toContain('new ConsoleKernel(')
   })
 
   it('is idempotent for the official Lambda plugin', async () => {

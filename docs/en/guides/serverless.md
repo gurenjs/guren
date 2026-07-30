@@ -84,9 +84,26 @@ Runs due tasks when invoked by EventBridge. Configure an EventBridge rule with `
 
 Executes the commands registered on your app's `ConsoleKernel` — the one `src/console.ts` exports as `kernel`. See the [console commands guide](./console.md) for defining commands and registering them.
 
-The kernel has no built-in commands. The scaffolded `src/lambda.ts` ships a commented-out `db:migrate` example; uncomment it and the `console` export to enable the handler.
+Uncomment the `console` export in the scaffolded `src/lambda.ts` to enable the handler. Because it dispatches the app's own kernel, every command you register in `src/console.ts` is reachable on Lambda under the same name you use locally.
 
-Invoke via AWS CLI:
+The kernel has no built-in commands, so applying migrations needs one of your own. `lambda:build` copies `db/migrations/` next to the bundle, so it can run in place:
+
+```ts
+// app/Console/Commands/MigrateCommand.ts
+import { Command } from '@guren/core'
+import { migrateDatabase } from '../../../config/database.js'
+
+export default class MigrateCommand extends Command {
+  static signature = 'db:migrate'
+  static description = 'Apply pending database migrations'
+
+  async handle(): Promise<void> {
+    await migrateDatabase()
+  }
+}
+```
+
+Register it in `src/console.ts`, then invoke via AWS CLI:
 
 ```bash
 aws lambda invoke --function-name my-app-console \
@@ -202,7 +219,7 @@ const app = createApp({
 
 The scaffolded `config/app.ts` seeds the database on boot as a local development convenience and skips it when `NODE_ENV=production`. Keep that guard — Lambda boots the app on every cold start, so boot-time seeding would re-run against production data.
 
-**Migrations** ship with the function: `lambda:build` copies `db/migrations/` next to the bundle, so the scaffold's `db:migrate` console command can apply them in place once you uncomment it. See [Console — `createConsoleHandler(kernel)`](#console--createconsolehandlerkernel) for the command definition and how to invoke it.
+**Migrations** ship with the function: `lambda:build` copies `db/migrations/` next to the bundle, so a `db:migrate` console command can apply them in place. See [Console — `createConsoleHandler(kernel)`](#console--createconsolehandlerkernel) for the command and how to invoke it.
 
 **Seeders cannot run inside the function.** They are ordinary `.ts` modules that import your schema and `@guren/core`, and the deployed function is a self-contained bundle with no `node_modules` and no TypeScript loader — the Node.js runtime rejects them outright. Seed from somewhere that has the project source instead:
 
