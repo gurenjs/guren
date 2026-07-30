@@ -159,6 +159,12 @@ async function sourceOutsideImports(cache: ParseCache, absPath: string): Promise
  * to catch — the command is still dead, and counting the import would report
  * it as wired. `warn`, never `fail`, since a name reference is not proof of
  * registration in the other direction either.
+ *
+ * Not filtered by `--changed`, unlike the file-scanning checks above: what
+ * decides the outcome is the *entrypoint's* content, so the edit that breaks
+ * registration is usually to a file that isn't the command's. Filtering by
+ * changed command files would report nothing for exactly that edit. The cost
+ * is a directory walk over `app/Console/Commands` plus one read per entry.
  */
 async function checkConsoleCommandRegistration(cwd: string, cache: ParseCache): Promise<CheckResult[]> {
   const commandFiles = excludeBarrelFiles(await discoverCommandFiles(cwd))
@@ -192,9 +198,12 @@ async function checkConsoleCommandRegistration(cwd: string, cache: ParseCache): 
           `console-entry:${entry}`,
           moduleName ? `${moduleName} console registration` : 'Console entrypoint',
           'warn',
-          `${names.join(', ')} exist but there is no ${entry} to register them in.`,
+          `${names.join(', ')} ${names.length === 1 ? 'exists' : 'exist'} but there is no ${entry} to register `
+          + `${names.length === 1 ? 'it' : 'them'} in.`,
           moduleName
-            ? `Create ${entry} with defineModule({ commands: [${names.join(', ')}] }).`
+            // Both hops, since neither alone leaves the commands runnable.
+            ? `Create ${entry} with defineModule({ commands: [${names.join(', ')}] }), then add to `
+              + `${CONSOLE_ENTRY}: kernel.registerMany(${camelCase(moduleName)}Module.commands)`
             : `Create ${entry} exporting a ConsoleKernel, then add: kernel.registerMany([${names.join(', ')}])`,
         ),
       )

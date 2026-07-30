@@ -726,6 +726,26 @@ kernel.registerMany([])`,
     }
   })
 
+  it('warns rather than passing when the console entrypoint cannot be parsed', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-console-unparseable-')
+
+    try {
+      await writeRootCommand(workspace.dir)
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      await writeFile(join(workspace.dir, 'src/console.ts'), 'kernel.registerMany([SendDigestCommand', 'utf8')
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      const entryCheck = report.checks.find(c => c.key === 'console-entry:src/console.ts')
+      expect(entryCheck).toBeDefined()
+      expect(entryCheck!.status).toBe('warn')
+      expect(entryCheck!.message).toContain('could not be parsed')
+      expect(report.checks.some(c => c.key.startsWith('console-command:'))).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('contributes nothing when the project has no console commands', async () => {
     const workspace = await createTempWorkspace('guren-cli-check-console-none-')
 
