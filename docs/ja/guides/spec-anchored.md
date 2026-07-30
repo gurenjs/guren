@@ -104,6 +104,17 @@ bunx guren make:adr "Billing cycle is end-of-month" --entity Invoice
 上書きします。新規Gurenアプリには、この規約を説明するシードADRが
 最初から同梱されています。
 
+## 閲覧: ドキュメントビューアー
+
+`bun run dev` は読み取り専用のビューアーも
+`http://localhost:3333/_guren/docs` にマウントします(`dev` スクリプトの
+`GUREN_DOCS=1` で有効化。本番では決して起動せず、自分のマシンからしか
+到達できません)。バンドル全体をインタラクティブなリレーショングラフ —
+文書・エンティティ・コードパスがノード、検証済みリンクがエッジ — として
+描画し、ノードをクリックするとfrontmatter・trust tier・リンク検証結果
+付きでその文書が開きます。図は `devDependencies` に `mermaid` があれば
+描画されます(新規アプリには最初から入っています)。
+
 ## 検証: ゲート
 
 `bunx guren check` は、route/controller/pageの整合性チェックと並んで、

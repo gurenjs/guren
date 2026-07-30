@@ -1,0 +1,760 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Guren docs</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; }
+
+:root {
+  --page: #fffdfd;
+  --panel: #ffffff;
+  --raised: #fdf4f4;
+  --border: #ecdcdc;
+  --border-strong: #d9c4c4;
+  --text: #241b1b;
+  --text-secondary: #5c4d4d;
+  --text-muted: #9a8a8a;
+  --accent: #db1b1b;
+  --accent-strong: #991b1b;
+  --accent-tint: #fff1f2;
+  --spec: #6c5f9e;
+  --spec-tint: #f2effa;
+  --pass: #2f7a62;
+  --warn: #a8721a;
+  --fail: #a3324f;
+  --grid-dot: rgba(155, 120, 120, 0.18);
+  --serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --page: #16162a; --panel: #1e1e34; --raised: #232340; --border: #2e2e4a;
+    --border-strong: #3d3d5c; --text: #e0def4; --text-secondary: #a8a3c4;
+    --text-muted: #6e6a86; --accent: #f05a5a; --accent-strong: #eb6f92;
+    --accent-tint: #2b1f38; --spec: #9d8fd4; --spec-tint: #262040;
+    --pass: #5fb894; --warn: #e0a33e; --fail: #eb6f92;
+    --grid-dot: rgba(150, 140, 190, 0.14);
+  }
+}
+:root[data-theme="dark"] {
+  --page: #16162a; --panel: #1e1e34; --raised: #232340; --border: #2e2e4a;
+  --border-strong: #3d3d5c; --text: #e0def4; --text-secondary: #a8a3c4;
+  --text-muted: #6e6a86; --accent: #f05a5a; --accent-strong: #eb6f92;
+  --accent-tint: #2b1f38; --spec: #9d8fd4; --spec-tint: #262040;
+  --pass: #5fb894; --warn: #e0a33e; --fail: #eb6f92;
+  --grid-dot: rgba(150, 140, 190, 0.14);
+}
+:root[data-theme="light"] {
+  --page: #fffdfd; --panel: #ffffff; --raised: #fdf4f4; --border: #ecdcdc;
+  --border-strong: #d9c4c4; --text: #241b1b; --text-secondary: #5c4d4d;
+  --text-muted: #9a8a8a; --accent: #db1b1b; --accent-strong: #991b1b;
+  --accent-tint: #fff1f2; --spec: #6c5f9e; --spec-tint: #f2effa;
+  --pass: #2f7a62; --warn: #a8721a; --fail: #a3324f;
+  --grid-dot: rgba(155, 120, 120, 0.18);
+}
+
+html, body { height: 100%; }
+body {
+  background: var(--page);
+  background-image: radial-gradient(var(--grid-dot) 1px, transparent 1px);
+  background-size: 26px 26px;
+  color: var(--text);
+  font-family: var(--serif);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+#graph { position: fixed; inset: 0; cursor: grab; }
+#graph.dragging { cursor: grabbing; }
+
+/* ---- graph marks ---- */
+.edge { stroke: var(--border-strong); stroke-width: 1.2; }
+.edge.derives { stroke-dasharray: 4 5; }
+.edge.warn { stroke: var(--warn); }
+.edge.fail { stroke: var(--fail); }
+.edge.dim { opacity: 0.12; }
+.edge.hidden { display: none; }
+.edge.hot { stroke: var(--accent); opacity: 1; }
+.edge.hot.derives { stroke: var(--spec); }
+
+.node { cursor: pointer; outline: none; }
+.node circle { transition: stroke-width 120ms ease; }
+.node.dim { opacity: 0.18; }
+.node.hidden { display: none; }
+.node text {
+  font-family: var(--mono);
+  fill: var(--text-secondary);
+  text-anchor: middle;
+  pointer-events: none;
+}
+.node .name { font-size: 11.5px; }
+.node .kindtag { font-size: 8.5px; letter-spacing: 0.12em; text-transform: uppercase; fill: var(--text-muted); }
+
+.node.doc circle { fill: var(--accent-tint); stroke: var(--accent); stroke-width: 1.6; }
+.node.doc.spec circle { fill: var(--spec-tint); stroke: var(--spec); }
+.node.entity circle { fill: var(--page); stroke: var(--pass); stroke-width: 1.6; }
+.node.code circle { fill: var(--raised); stroke: var(--border-strong); stroke-width: 1.2; }
+.node:hover circle, .node.selected circle, .node:focus-visible circle { stroke-width: 3; }
+.node.selected .halo { display: block; }
+.halo { display: none; fill: none; stroke: var(--accent); stroke-opacity: 0.35; stroke-width: 7; }
+.node.doc.spec .halo { stroke: var(--spec); }
+
+/* ---- overlays ---- */
+.hud {
+  position: fixed; top: 1.5rem; left: 1.75rem; z-index: 4;
+  display: flex; flex-direction: column; gap: 0.4rem;
+}
+.brand-mark { font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); }
+.hud h1 { font-size: 1.5rem; letter-spacing: -0.015em; }
+.hud .sub { font-family: var(--mono); font-size: 0.72rem; color: var(--text-muted); }
+.stats { display: flex; gap: 1.5rem; margin-top: 0.35rem; }
+.stat { display: flex; flex-direction: column; }
+.stat-value { font-family: var(--mono); font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+.stat-label { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted); }
+
+.controls { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.75rem; }
+.controls input[type="search"] {
+  font-family: var(--mono); font-size: 0.78rem;
+  color: var(--text); background: var(--panel);
+  border: 1px solid var(--border-strong); border-radius: 3px;
+  padding: 0.35rem 0.6rem; width: 15rem;
+}
+.controls input[type="search"]::placeholder { color: var(--text-muted); }
+.kind-toggles { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+.kind-toggles button {
+  font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.06em;
+  color: var(--text-secondary); background: var(--panel);
+  border: 1px solid var(--border-strong); border-radius: 2px;
+  padding: 0.18rem 0.5rem; cursor: pointer;
+}
+.kind-toggles button[aria-pressed="false"] { opacity: 0.4; text-decoration: line-through; }
+.kind-toggles button:hover { border-color: var(--accent); }
+
+.legend {
+  position: fixed; bottom: 1.5rem; left: 1.75rem; z-index: 4;
+  display: flex; flex-direction: column; gap: 0.35rem;
+  font-family: var(--mono); font-size: 0.72rem; color: var(--text-secondary);
+  pointer-events: none;
+}
+.legend .swatch { display: inline-block; width: 0.85rem; height: 0; border-top: 2px solid var(--border-strong); vertical-align: middle; margin-right: 0.5rem; }
+.legend .swatch.derives { border-top-style: dashed; }
+.legend .dot { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 50%; vertical-align: baseline; margin-right: 0.5rem; }
+.legend .dot.adr { background: var(--accent-tint); border: 1.5px solid var(--accent); }
+.legend .dot.spec { background: var(--spec-tint); border: 1.5px solid var(--spec); }
+.legend .dot.entity { background: var(--page); border: 1.5px solid var(--pass); }
+.legend .dot.code { background: var(--raised); border: 1.5px solid var(--border-strong); }
+
+.hint {
+  position: fixed; bottom: 1.5rem; right: 1.75rem; z-index: 4;
+  font-family: var(--mono); font-size: 0.72rem; color: var(--text-muted);
+  pointer-events: none;
+}
+.panel-open .hint { display: none; }
+
+.empty-state {
+  position: fixed; inset: 0; display: none;
+  align-items: center; justify-content: center; z-index: 3;
+}
+.empty-state.visible { display: flex; }
+.empty-state div { max-width: 34rem; text-align: center; color: var(--text-secondary); line-height: 1.7; }
+.empty-state code { font-family: var(--mono); font-size: 0.85em; background: var(--raised); padding: 0.08em 0.32em; border-radius: 2px; }
+
+/* ---- detail panel ---- */
+.panel {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 6;
+  width: min(30rem, 92vw);
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  box-shadow: -18px 0 40px rgba(20, 10, 15, 0.12);
+  transform: translateX(calc(100% + 3rem));
+  transition: transform 240ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  overflow-y: auto;
+  padding: 2rem 1.75rem 3rem;
+}
+@media (prefers-reduced-motion: reduce) { .panel { transition: none; } }
+.panel.open { transform: none; }
+.panel-close {
+  position: sticky; top: 0; float: right;
+  font-family: var(--mono); font-size: 0.78rem;
+  color: var(--text-muted); background: var(--panel);
+  border: 1px solid var(--border-strong); border-radius: 3px;
+  padding: 0.2rem 0.55rem; cursor: pointer;
+}
+.panel-close:hover, .panel-close:focus-visible { color: var(--accent-strong); border-color: var(--accent); }
+
+.doc-detail { display: flex; flex-direction: column; gap: 0.9rem; line-height: 1.6; }
+.path { font-family: var(--mono); font-size: 0.72rem; color: var(--text-muted); overflow-wrap: anywhere; }
+.doc-detail h1 { font-size: 1.45rem; letter-spacing: -0.015em; text-wrap: balance; }
+.doc-detail h1.mono-title { font-family: var(--mono); font-size: 1.05rem; word-break: break-all; }
+.description { color: var(--text-secondary); }
+.description code, .rel-note code { font-family: var(--mono); font-size: 0.85em; background: var(--raised); padding: 0.08em 0.32em; border-radius: 2px; }
+.chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.chip {
+  font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.06em;
+  padding: 0.14rem 0.5rem; border-radius: 2px;
+  border: 1px solid var(--border-strong); color: var(--text-secondary);
+}
+.chip-type { border-color: var(--accent); color: var(--accent-strong); }
+.chip-trust-human-reviewed { border-color: var(--pass); color: var(--pass); }
+.chip-status-deprecated, .chip-stale { border-color: var(--warn); color: var(--warn); }
+
+.frontmatter {
+  background: var(--raised); border: 1px solid var(--border); border-radius: 4px;
+  padding: 1rem; display: flex; flex-direction: column; gap: 0.5rem;
+  font-family: var(--mono);
+}
+.panel-label { font-size: 0.64rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-muted); }
+.panel-label-spaced { margin-top: 0.5rem; padding-top: 0.7rem; border-top: 1px solid var(--border); }
+.meta-grid { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.28rem 0.75rem; font-size: 0.72rem; }
+.meta-key { color: var(--text-muted); }
+.meta-value { color: var(--text-secondary); overflow-wrap: anywhere; }
+.relations { list-style: none; display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.72rem; padding: 0; }
+.relations li { display: flex; gap: 0.5rem; align-items: baseline; }
+.rel-empty { color: var(--text-muted); }
+.rel-target { color: var(--text-secondary); overflow-wrap: anywhere; }
+.rel-target.as-link { color: var(--accent-strong); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.rel-note { color: var(--text-secondary); font-size: 0.95rem; }
+.verdict.pass { color: var(--pass); }
+.verdict.warn { color: var(--warn); }
+.verdict.fail { color: var(--fail); }
+
+.prose { display: flex; flex-direction: column; gap: 0.85rem; }
+.prose h2 { font-size: 1.05rem; margin-top: 0.5rem; }
+.prose h3 { font-size: 0.95rem; margin-top: 0.3rem; }
+.prose p, .prose li { color: var(--text); font-size: 0.95rem; }
+.prose ul { display: flex; flex-direction: column; gap: 0.25rem; padding-left: 1.1rem; }
+.prose li.nested { margin-left: 1rem; color: var(--text-secondary); font-size: 0.9rem; }
+.prose code { font-family: var(--mono); font-size: 0.85em; background: var(--raised); padding: 0.08em 0.32em; border-radius: 2px; color: var(--accent-strong); }
+.prose .md-link { color: var(--accent-strong); font-family: var(--mono); font-size: 0.9em; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.prose pre.code { background: var(--raised); border: 1px solid var(--border); border-radius: 4px; padding: 0.8rem 0.9rem; overflow-x: auto; }
+.prose pre.code code { background: none; padding: 0; color: var(--text-secondary); font-size: 0.78rem; }
+.prose pre.mermaid { background: var(--raised); border: 1px solid var(--border); border-radius: 4px; padding: 0.9rem; overflow-x: auto; font-family: var(--mono); font-size: 0.78rem; color: var(--text-secondary); }
+.mermaid-hint { font-family: var(--mono); font-size: 0.7rem; color: var(--text-muted); }
+.table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 4px; }
+.prose table { border-collapse: collapse; width: 100%; font-family: var(--mono); font-size: 0.7rem; }
+.prose th, .prose td { text-align: left; padding: 0.45rem 0.65rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+.prose th { background: var(--panel); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.62rem; font-weight: 400; white-space: nowrap; }
+.prose td { color: var(--text-secondary); }
+.prose tr:last-child td { border-bottom: none; }
+
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+</head>
+<body>
+
+<svg id="graph" role="application" aria-label="Documentation graph"></svg>
+
+<header class="hud">
+  <span class="brand-mark">Guren</span>
+  <h1>docs graph</h1>
+  <span class="sub" id="subtitle">OKF bundle</span>
+  <div class="stats" id="stats"></div>
+  <div class="controls">
+    <input type="search" id="search" placeholder="filter nodes…" aria-label="Filter nodes" />
+    <div class="kind-toggles" id="kind-toggles" role="group" aria-label="Node kinds"></div>
+  </div>
+</header>
+
+<div class="legend">
+  <span><span class="dot adr"></span>doc</span>
+  <span><span class="dot spec"></span>generated spec</span>
+  <span><span class="dot entity"></span>model entity</span>
+  <span><span class="dot code"></span>code</span>
+  <span><span class="swatch"></span>governs / links — verified</span>
+  <span><span class="swatch derives"></span>derives (regenerated from code)</span>
+</div>
+
+<p class="hint">click a node · drag to rearrange</p>
+
+<div class="empty-state" id="empty-state">
+  <div>
+    <p>No documents found. Create the bundle's first concept with
+    <code>bunx guren make:adr "Title"</code> — markdown with an OKF
+    frontmatter under <code>docs/</code> appears here.</p>
+  </div>
+</div>
+
+<aside class="panel" id="panel" aria-hidden="true">
+  <button class="panel-close" id="close">esc ✕</button>
+  <div id="panel-content"></div>
+</aside>
+
+<script src="/_guren/docs/assets/mermaid.js" id="mermaid-script"></script>
+<script>
+(() => {
+  'use strict'
+  const DATA_URL = '/_guren/docs/data.json'
+  const RADIUS = { doc: 22, entity: 15, code: 10 }
+  const VERDICT_GLYPH = { pass: '●', warn: '▲', fail: '✕' }
+  const svg = document.getElementById('graph')
+  const NS = 'http://www.w3.org/2000/svg'
+
+  // The simulation runs in a fixed virtual space and the SVG scales it
+  // to the viewport (viewBox), so layout never depends on window size or
+  // on the tab being visible while it settles.
+  const W = 1200, H = 800
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H)
+  svg.setAttribute('preserveAspectRatio', 'xMidYMid meet')
+
+  // ---- state ----
+  let data = { nodes: [], edges: [], docs: [] }
+  let docByPath = new Map()
+  let nodes = [], edges = [], byId = new Map(), neighbors = new Map()
+  let nodeEls = [], edgeEls = []
+  let selected = null
+  let etag = null
+  const kindEnabled = { doc: true, spec: true, entity: true, code: true }
+  let searchTerm = ''
+
+  const mermaidReady = () =>
+    typeof window.mermaid !== 'undefined' && window.mermaid !== null
+  if (mermaidReady()) {
+    const dark = matchMedia('(prefers-color-scheme: dark)').matches
+      ? document.documentElement.dataset.theme !== 'light'
+      : document.documentElement.dataset.theme === 'dark'
+    window.mermaid.initialize({ startOnLoad: false, theme: dark ? 'dark' : 'neutral', securityLevel: 'strict' })
+  }
+
+  // ---- helpers ----
+  const el = (tag, cls, text) => {
+    const node = document.createElement(tag)
+    if (cls) node.className = cls
+    if (text !== undefined) node.textContent = text
+    return node
+  }
+  const svgEl = (tag) => document.createElementNS(NS, tag)
+  const kindOf = (n) => (n.kind === 'doc' && n.docType === 'spec' ? 'spec' : n.kind)
+
+  // ---- graph construction ----
+  function rebuild(newData) {
+    const previous = byId
+    data = newData
+    docByPath = new Map(data.docs.map((d) => [d.path, d]))
+    nodes = data.nodes.map((n) => {
+      const old = previous.get(n.id)
+      return Object.assign({}, n, {
+        x: old ? old.x : W / 2 + (Math.random() - 0.5) * 60,
+        y: old ? old.y : H / 2 + (Math.random() - 0.5) * 60,
+        vx: 0, vy: 0,
+        r: RADIUS[n.kind],
+      })
+    })
+    // Fresh graphs get ring seeding: docs inner, satellites outer.
+    if (previous.size === 0) {
+      const docs = nodes.filter((n) => n.kind === 'doc')
+      const sats = nodes.filter((n) => n.kind !== 'doc')
+      docs.forEach((n, i) => {
+        const a = (i / Math.max(docs.length, 1)) * Math.PI * 2
+        n.x = W / 2 + Math.cos(a) * 130; n.y = H / 2 + Math.sin(a) * 130
+      })
+      sats.forEach((n, i) => {
+        const a = (i / Math.max(sats.length, 1)) * Math.PI * 2 + 0.5
+        n.x = W / 2 + Math.cos(a) * 300; n.y = H / 2 + Math.sin(a) * 300
+      })
+    }
+    edges = data.edges
+    byId = new Map(nodes.map((n) => [n.id, n]))
+    neighbors = new Map(nodes.map((n) => [n.id, new Set([n.id])]))
+    edges.forEach((e) => {
+      if (neighbors.has(e.from)) neighbors.get(e.from).add(e.to)
+      if (neighbors.has(e.to)) neighbors.get(e.to).add(e.from)
+    })
+    renderDom()
+    renderStats()
+    applyFilters()
+    document.getElementById('empty-state').classList.toggle('visible', data.docs.length === 0)
+    if (selected && !byId.has(selected)) closePanel()
+    else if (selected) openPanel(selected, { keepScroll: true })
+    settle(320)
+    reheat()
+  }
+
+  function renderDom() {
+    svg.textContent = ''
+    const edgeLayer = svgEl('g')
+    const nodeLayer = svgEl('g')
+    svg.append(edgeLayer, nodeLayer)
+
+    edgeEls = edges.map((e) => {
+      const line = svgEl('line')
+      line.setAttribute('class', 'edge ' + e.relation + (e.verdict !== 'pass' ? ' ' + e.verdict : ''))
+      edgeLayer.append(line)
+      return { e, line }
+    })
+
+    nodeEls = nodes.map((n) => {
+      const g = svgEl('g')
+      g.setAttribute('class', 'node ' + n.kind + (kindOf(n) === 'spec' ? ' spec' : ''))
+      g.setAttribute('tabindex', '0')
+      g.setAttribute('role', 'button')
+      g.setAttribute('aria-label', n.label)
+
+      const halo = svgEl('circle')
+      halo.setAttribute('class', 'halo')
+      halo.setAttribute('r', n.r + 5)
+      const circle = svgEl('circle')
+      circle.setAttribute('r', n.r)
+      g.append(halo, circle)
+
+      if (n.kind === 'doc' && n.docType) {
+        const tag = svgEl('text')
+        tag.setAttribute('class', 'kindtag')
+        tag.setAttribute('dy', '3')
+        tag.textContent = n.docType
+        g.append(tag)
+      }
+      const name = svgEl('text')
+      name.setAttribute('class', 'name')
+      name.setAttribute('dy', String(n.r + 15))
+      name.textContent = n.label
+      g.append(name)
+
+      wireNode(n, g)
+      nodeLayer.append(g)
+      return { n, g }
+    })
+  }
+
+  function renderStats() {
+    const human = data.docs.filter((d) => d.trustTier === 'human-reviewed').length
+    const stats = [
+      ['concepts', String(data.docs.length)],
+      ['relations', String(data.edges.length)],
+      ['human-reviewed', String(human)],
+    ]
+    const host = document.getElementById('stats')
+    host.textContent = ''
+    for (const [label, value] of stats) {
+      const stat = el('div', 'stat')
+      stat.append(el('span', 'stat-value', value), el('span', 'stat-label', label))
+      host.append(stat)
+    }
+  }
+
+  // ---- force simulation ----
+  let alpha = 1, dragged = null, ticking = false
+  function step() {
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i], b = nodes[j]
+        let dx = b.x - a.x, dy = b.y - a.y
+        const d2 = dx * dx + dy * dy || 1
+        const d = Math.sqrt(d2)
+        const push = Math.min(3200 / d2, 8)
+        dx /= d; dy /= d
+        a.vx -= dx * push; a.vy -= dy * push
+        b.vx += dx * push; b.vy += dy * push
+      }
+    }
+    edges.forEach((e) => {
+      const a = byId.get(e.from), b = byId.get(e.to)
+      if (!a || !b) return
+      const rest = a.kind === 'doc' && b.kind === 'doc' ? 190 : 120
+      const dx = b.x - a.x, dy = b.y - a.y
+      const d = Math.sqrt(dx * dx + dy * dy) || 1
+      const pull = (d - rest) * 0.012
+      a.vx += (dx / d) * pull; a.vy += (dy / d) * pull
+      b.vx -= (dx / d) * pull; b.vy -= (dy / d) * pull
+    })
+    nodes.forEach((n) => {
+      n.vx += (W / 2 - n.x) * 0.0035
+      n.vy += (H / 2 - n.y) * 0.0035
+      if (n !== dragged) { n.x += n.vx * alpha; n.y += n.vy * alpha }
+      n.vx *= 0.86; n.vy *= 0.86
+      const m = 30
+      n.x = Math.max(m, Math.min(W - m, n.x))
+      n.y = Math.max(m, Math.min(H - m, n.y))
+    })
+    alpha = Math.max(alpha * 0.995, 0.02)
+  }
+  function tick() {
+    ticking = true
+    step()
+    render()
+    if (alpha > 0.02 || dragged) requestAnimationFrame(tick)
+    else ticking = false
+  }
+  // Settling runs synchronously so the layout never depends on
+  // requestAnimationFrame — a background tab gets no frames, and the
+  // graph would otherwise freeze mid-simulation until focused.
+  function settle(steps) {
+    alpha = 1
+    for (let i = 0; i < steps; i++) step()
+    alpha = 0.02
+    render()
+  }
+  function reheat() {
+    alpha = 0.9
+    if (!ticking) requestAnimationFrame(tick)
+  }
+  function render() {
+    edgeEls.forEach(({ e, line }) => {
+      const a = byId.get(e.from), b = byId.get(e.to)
+      if (!a || !b) return
+      line.setAttribute('x1', a.x); line.setAttribute('y1', a.y)
+      line.setAttribute('x2', b.x); line.setAttribute('y2', b.y)
+    })
+    nodeEls.forEach(({ n, g }) => g.setAttribute('transform', 'translate(' + n.x + ',' + n.y + ')'))
+  }
+
+  // ---- interaction ----
+  function wireNode(n, g) {
+    let moved = false
+    g.addEventListener('pointerdown', (ev) => {
+      dragged = n; moved = false
+      svg.classList.add('dragging')
+      g.setPointerCapture(ev.pointerId)
+      reheat()
+    })
+    g.addEventListener('pointermove', (ev) => {
+      if (dragged !== n) return
+      moved = true
+      const pt = svg.createSVGPoint()
+      pt.x = ev.clientX; pt.y = ev.clientY
+      const p = pt.matrixTransform(svg.getScreenCTM().inverse())
+      n.x = p.x; n.y = p.y
+    })
+    const finish = () => { if (dragged === n) { dragged = null; svg.classList.remove('dragging') } }
+    g.addEventListener('pointerup', () => { finish(); if (!moved) openPanel(n.id) })
+    g.addEventListener('pointercancel', finish)
+    g.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); openPanel(n.id) }
+    })
+    g.addEventListener('pointerenter', () => highlight(n.id))
+    g.addEventListener('pointerleave', () => highlight(null))
+  }
+
+  function highlight(id) {
+    const hood = id ? neighbors.get(id) : null
+    nodeEls.forEach(({ n, g }) => g.classList.toggle('dim', !!hood ? !hood.has(n.id) : dimmedBySearch(n)))
+    edgeEls.forEach(({ e, line }) => {
+      const touches = !!id && (e.from === id || e.to === id)
+      line.classList.toggle('hot', touches)
+      line.classList.toggle('dim', !!hood ? !touches : searchTerm !== '' && !(matchesSearch(byId.get(e.from)) || matchesSearch(byId.get(e.to))))
+    })
+  }
+
+  // ---- filters ----
+  const matchesSearch = (n) =>
+    !n || searchTerm === '' || (n.label + ' ' + n.id).toLowerCase().includes(searchTerm)
+  const dimmedBySearch = (n) => searchTerm !== '' && !matchesSearch(n)
+
+  function applyFilters() {
+    nodeEls.forEach(({ n, g }) => {
+      g.classList.toggle('hidden', !kindEnabled[kindOf(n)])
+      g.classList.toggle('dim', dimmedBySearch(n))
+    })
+    edgeEls.forEach(({ e, line }) => {
+      const a = byId.get(e.from), b = byId.get(e.to)
+      const visible = a && b && kindEnabled[kindOf(a)] && kindEnabled[kindOf(b)]
+      line.classList.toggle('hidden', !visible)
+      line.classList.toggle('dim', searchTerm !== '' && !(matchesSearch(a) || matchesSearch(b)))
+    })
+  }
+
+  document.getElementById('search').addEventListener('input', (ev) => {
+    searchTerm = ev.target.value.trim().toLowerCase()
+    applyFilters()
+  })
+
+  const toggleHost = document.getElementById('kind-toggles')
+  for (const kind of ['doc', 'spec', 'entity', 'code']) {
+    const button = el('button', '', kind)
+    button.setAttribute('aria-pressed', 'true')
+    button.addEventListener('click', () => {
+      kindEnabled[kind] = !kindEnabled[kind]
+      button.setAttribute('aria-pressed', String(kindEnabled[kind]))
+      applyFilters()
+    })
+    toggleHost.append(button)
+  }
+
+  // ---- detail panel ----
+  const panel = document.getElementById('panel')
+  const content = document.getElementById('panel-content')
+
+  function metaRow(grid, key, value) {
+    grid.append(el('div', 'meta-key', key), el('div', 'meta-value', value))
+  }
+  const actorLine = (event) =>
+    (event.by || '—') + (event.at ? ' · ' + event.at : '')
+
+  function relationItem(target, verdict, openTarget) {
+    const li = el('li')
+    li.append(el('span', 'verdict ' + verdict, VERDICT_GLYPH[verdict]))
+    const span = el('span', 'rel-target' + (openTarget ? ' as-link' : ''), target)
+    if (openTarget) span.addEventListener('click', () => openPanel(openTarget))
+    li.append(span)
+    return li
+  }
+
+  function buildDocDetail(doc) {
+    const root = el('article', 'doc-detail')
+    root.append(el('p', 'path', doc.path))
+    root.append(el('h1', '', doc.title || doc.path))
+    if (doc.description) root.append(el('p', 'description', doc.description))
+
+    const chips = el('div', 'chips')
+    chips.append(el('span', 'chip chip-type', doc.type || 'untyped'))
+    chips.append(el('span', 'chip chip-status-' + (doc.status || 'stable'), doc.status || 'stable'))
+    chips.append(el('span', 'chip chip-trust-' + doc.trustTier, doc.trustTier))
+    if (doc.staleAfter && Date.parse(doc.staleAfter) <= Date.now()) {
+      chips.append(el('span', 'chip chip-stale', 'stale'))
+    }
+    root.append(chips)
+
+    const front = el('div', 'frontmatter')
+    front.append(el('p', 'panel-label', 'Frontmatter'))
+    const grid = el('div', 'meta-grid')
+    metaRow(grid, 'type', doc.type || '—')
+    metaRow(grid, 'status', doc.status || 'stable')
+    metaRow(grid, 'generated', doc.generated ? actorLine(doc.generated) : '—')
+    metaRow(grid, 'verified', doc.verified.length > 0 ? doc.verified.map(actorLine).join('\n') : '—')
+    if (doc.staleAfter) metaRow(grid, 'stale_after', doc.staleAfter)
+    if (doc.tags.length > 0) metaRow(grid, 'tags', doc.tags.join(', '))
+    front.append(grid)
+
+    front.append(el('p', 'panel-label panel-label-spaced', 'Relations'))
+    const list = el('ul', 'relations')
+    const outgoing = edges.filter((e) => e.from === doc.path)
+    if (outgoing.length === 0) list.append(el('li', 'rel-empty', 'No declared links.'))
+    for (const e of outgoing) {
+      const label = e.to.replace(/^entity:/, '')
+      list.append(relationItem(label, e.verdict, byId.has(e.to) ? e.to : null))
+    }
+    front.append(list)
+    root.append(front)
+
+    const prose = el('div', 'prose')
+    prose.innerHTML = doc.html
+    prose.querySelectorAll('.md-link').forEach((link) => {
+      link.addEventListener('click', () => {
+        const target = link.dataset.target || ''
+        const hit = data.docs.find((d) => {
+          const bundleRoot = d.path.slice(0, d.path.indexOf('docs/') + 5)
+          return target.startsWith('/') ? d.path === bundleRoot + target.slice(1) : d.path.endsWith(target.replace(/^\.\//, ''))
+        })
+        if (hit) openPanel(hit.path)
+      })
+    })
+    root.append(prose)
+    return root
+  }
+
+  function buildSatelliteDetail(node) {
+    const root = el('article', 'doc-detail')
+    root.append(el('p', 'path', node.kind === 'entity' ? 'Model entity' : 'Code'))
+    const title = el('h1', 'mono-title', node.id.replace(/^entity:/, ''))
+    root.append(title)
+
+    const governedBy = edges.filter((e) => e.to === node.id && e.relation !== 'derives')
+    const feeds = edges.filter((e) => e.from === node.id && e.relation === 'derives')
+
+    const front = el('div', 'frontmatter')
+    if (governedBy.length > 0) {
+      front.append(el('p', 'panel-label', 'Governed by'))
+      const list = el('ul', 'relations')
+      for (const e of governedBy) {
+        const doc = docByPath.get(e.from)
+        list.append(relationItem(doc && doc.title ? doc.title : e.from, e.verdict, e.from))
+      }
+      front.append(list)
+    }
+    if (feeds.length > 0) {
+      front.append(el('p', 'panel-label' + (governedBy.length > 0 ? ' panel-label-spaced' : ''), 'Feeds spec views'))
+      const list = el('ul', 'relations')
+      for (const e of feeds) {
+        const doc = docByPath.get(e.to)
+        list.append(relationItem(doc && doc.title ? doc.title : e.to, e.verdict, e.to))
+      }
+      front.append(list)
+    }
+    if (governedBy.length === 0 && feeds.length === 0) {
+      front.append(el('p', 'panel-label', 'Unlinked'))
+      const list = el('ul', 'relations')
+      list.append(el('li', 'rel-empty', 'Nothing links here.'))
+      front.append(list)
+    }
+    root.append(front)
+
+    const note = el('p', 'rel-note')
+    if (node.kind === 'entity') {
+      note.innerHTML =
+        'A model class linked by name from doc frontmatter (survives file moves). Explore it with <code></code>.'
+      note.querySelector('code').textContent = 'guren context ' + node.label
+    } else if (feeds.length > 0 && governedBy.length === 0) {
+      note.innerHTML =
+        'Source code a generated spec view derives from — change it and <code>guren check --spec</code> flags the stale view until <code>guren spec:generate</code> reruns.'
+    } else {
+      note.innerHTML =
+        'A code path linked from doc frontmatter. Renaming it without updating the doc fails <code>guren check --docs</code>.'
+    }
+    root.append(note)
+    return root
+  }
+
+  function runMermaid() {
+    const pres = content.querySelectorAll('pre.mermaid:not([data-processed])')
+    if (pres.length === 0) return
+    if (mermaidReady()) {
+      window.mermaid.run({ nodes: pres }).catch(() => {})
+    } else {
+      pres.forEach((pre) => {
+        pre.setAttribute('data-processed', 'true')
+        pre.after(Object.assign(el('p', 'mermaid-hint'), {
+          textContent: 'diagram source shown — bun add -d mermaid to render it',
+        }))
+      })
+    }
+  }
+
+  function openPanel(id, options) {
+    const node = byId.get(id)
+    if (!node) return
+    selected = id
+    content.textContent = ''
+    const doc = docByPath.get(id)
+    content.append(doc ? buildDocDetail(doc) : buildSatelliteDetail(node))
+    nodeEls.forEach(({ n, g }) => g.classList.toggle('selected', n.id === id))
+    panel.classList.add('open')
+    panel.setAttribute('aria-hidden', 'false')
+    document.body.classList.add('panel-open')
+    if (!(options && options.keepScroll)) panel.scrollTop = 0
+    requestAnimationFrame(runMermaid)
+  }
+
+  function closePanel() {
+    selected = null
+    panel.classList.remove('open')
+    panel.setAttribute('aria-hidden', 'true')
+    document.body.classList.remove('panel-open')
+    nodeEls.forEach(({ g }) => g.classList.remove('selected'))
+  }
+
+  document.getElementById('close').addEventListener('click', closePanel)
+  addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closePanel() })
+  svg.addEventListener('pointerdown', (ev) => { if (ev.target === svg) closePanel() })
+
+  // ---- data loading & freshness ----
+  async function load() {
+    try {
+      const headers = etag ? { 'If-None-Match': etag } : {}
+      const response = await fetch(DATA_URL, { headers })
+      if (response.status === 304) return
+      if (!response.ok) return
+      etag = response.headers.get('etag')
+      rebuild(await response.json())
+    } catch {
+      // Dev server restarting (bun --hot) — the next poll catches up.
+    }
+  }
+
+  document.getElementById('subtitle').textContent = 'OKF bundle · ' + location.host
+  load()
+  setInterval(() => { if (!document.hidden) load() }, 5000)
+})()
+</script>
+</body>
+</html>

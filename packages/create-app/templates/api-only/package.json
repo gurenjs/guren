@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun run codegen && GUREN_MCP=1 bun run dev:server",
+    "dev": "bun run codegen && GUREN_MCP=1 GUREN_DOCS=1 bun run dev:server",
     "dev:server": "bun --hot bin/serve.ts",
     "console": "bun bin/console.ts",
     "codegen": "bunx guren codegen --routes routes/api.ts --force",
@@ -27,6 +27,7 @@
     "@guren/testing": "^1.0.0",
     "bun-types": "^1.3.1",
     "drizzle-kit": "1.0.0-rc.4",
+    "mermaid": "^11.0.0",
     "typescript": "^5.4.0"
   }
 }

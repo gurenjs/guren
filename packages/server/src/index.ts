@@ -826,3 +826,15 @@ export { createRedisClient } from './redis/client'
 // MCP: available via '@guren/server/mcp' subpath import.
 // Not re-exported here to avoid pulling @modelcontextprotocol/sdk
 // types into the main DTS bundle (causes OOM in tsup).
+// Docs viewer (RFC 0005): dev-only, loopback-guarded OKF bundle UI
+export { DocsViewerServiceProvider } from './docs-viewer/DocsViewerServiceProvider'
+export {
+  DOCS_VIEWER_PATH,
+  isDocsViewerEnabled,
+  createDocsViewerAccessGuard,
+} from './docs-viewer/endpoint'
+export {
+  createLoopbackGuard,
+  isLoopbackAddress,
+  isLoopbackOrigin,
+} from './http/middleware/loopback-guard'

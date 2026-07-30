@@ -103,6 +103,17 @@ It numbers the file under `docs/adr/`, prefills the frontmatter, and
 author). Every new Guren app ships with a seed ADR explaining the
 convention.
 
+## Browsing: the docs viewer
+
+`bun run dev` also mounts a read-only viewer at
+`http://localhost:3333/_guren/docs` (enabled by the `dev` script's
+`GUREN_DOCS=1`; never in production, and only reachable from your own
+machine). It renders the whole bundle as an interactive relation graph —
+documents, entities, and code paths as nodes, validated links as
+edges — and clicking a node opens the document with its frontmatter,
+trust tier, and link verdicts. Diagrams render when `mermaid` is in
+your `devDependencies` (new apps ship with it).
+
 ## Checked: the gates
 
 `bunx guren check` reports broken doc links (a renamed `related` path,

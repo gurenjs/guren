@@ -44,8 +44,25 @@ export {
 } from './entity-context'
 export { routeDefinitionToContextRoute, loadContextRoutes, type ContextRoute } from './context-route'
 export { createFreshContextApi } from './fresh-context'
-export { scanDocs, parseDocFrontmatter, extractDocsTags, type DocRef } from './docs-index'
-export { runDocsCheck } from './docs-check'
+export {
+  scanDocs,
+  parseDocFrontmatter,
+  extractDocsTags,
+  extractMarkdownLinks,
+  type DocRef,
+  type DocActorEvent,
+} from './docs-index'
+export { runDocsCheck, resolveDocLink } from './docs-check'
+export { buildDocsGraph, type DocsGraph, type DocsGraphNode, type DocsGraphEdge } from './docs-graph'
+export { renderDocHtml } from './docs-render'
+export {
+  buildDocsViewerData,
+  docsViewerAssetPath,
+  docTrustTier,
+  type DocsViewerData,
+  type DocsViewerDoc,
+  type DocTrustTier,
+} from './docs-viewer'
 export {
   generateSpecArtifacts,
   writeSpecArtifacts,

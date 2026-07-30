@@ -14,6 +14,7 @@ import type { CreateSessionMiddlewareOptions } from './middleware/session'
 import { createSecurityHeaders, type SecurityHeadersOptions } from './middleware/security-headers'
 import { createHostAuthorizationMiddleware, type HostAuthorizationOptions } from './middleware/host-authorization'
 import { isMcpEndpointEnabled } from '../mcp/endpoint'
+import { isDocsViewerEnabled } from '../docs-viewer/endpoint'
 import { logDevServerBanner, type DevBannerOptions } from './dev-banner'
 import { startViteDevServer, type StartViteDevServerOptions } from './vite-dev-server'
 
@@ -340,6 +341,7 @@ export class Application {
 
     await this.mountRoutes()
     await this.mountMcpEndpoint()
+    await this.mountDocsViewer()
     await this.providerManager.bootAll()
   }
 
@@ -381,6 +383,25 @@ export class Application {
       await provider.boot()
     } catch {
       // MCP SDK not installed or failed to load — skip silently
+    }
+  }
+
+  /**
+   * Mounts the docs viewer at /_guren/docs when enabled (RFC 0005).
+   * A read-only, loopback-guarded UI over the project's OKF docs bundle.
+   */
+  private async mountDocsViewer(): Promise<void> {
+    if (!isDocsViewerEnabled()) {
+      return
+    }
+
+    try {
+      const { DocsViewerServiceProvider } = await import('../docs-viewer/DocsViewerServiceProvider')
+      const provider = new DocsViewerServiceProvider(this.container)
+      provider.register()
+      await provider.boot()
+    } catch {
+      // @guren/cli not resolvable from this app — skip silently
     }
   }
 
