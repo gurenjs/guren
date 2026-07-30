@@ -155,10 +155,16 @@ export function resetOutputDir(out: string, root: string, label: string): void {
  * Relative specifier for importing `target` from a module written into
  * `fromDir`, in POSIX form so the emitted source is platform-agnostic.
  *
+ * Both paths go through their symlinks first, because the bundler resolving
+ * the emitted import does too. A link that changes path depth — on macOS
+ * `/tmp` is `/private/tmp` and `os.tmpdir()` lives under `/var`, a link to
+ * `/private/var` — otherwise yields a specifier with the wrong number of
+ * `..` segments, and the build fails on a path that plainly exists.
+ *
  * @param label Platform name for the error message, e.g. `'Lambda build'`.
  */
 export function importSpecifier(fromDir: string, target: string, label: string): string {
-  const rel = relative(fromDir, target)
+  const rel = relative(realpathOfNearestExisting(fromDir), realpathOfNearestExisting(target))
   if (isAbsolute(rel)) {
     throw new Error(
       `${label}: ${target} cannot be imported relative to ${fromDir} (different drive or root?). Keep the app, SSR output, and outputDir on the same volume.`,
