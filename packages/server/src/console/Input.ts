@@ -55,7 +55,7 @@ export function parseSignature(signature: string): ParsedSignature {
   const options: OptionDefinition[] = []
 
   for (const token of tokens) {
-    const [content, description] = extractDescription(token)
+    const [content, description] = splitSpacedDescription(token)
 
     // Skip empty tokens
     if (!content) continue
@@ -102,7 +102,6 @@ function tokenizeSignature(signature: string): { name: string; tokens: string[] 
       depth--
       if (depth === 0) {
         tokens.push(signature.slice(start + 1, i))
-        start = -1
       }
     }
   }
@@ -111,19 +110,17 @@ function tokenizeSignature(signature: string): { name: string; tokens: string[] 
 }
 
 /**
- * Separator between a token and its description: a colon with whitespace on at
- * least one side. Requiring that whitespace keeps colons inside default values
- * (`{--url=https://example.com}`) intact.
+ * A colon with whitespace on at least one side. See `parseSignature` for why
+ * the whitespace is required.
  */
-const DESCRIPTION_SEPARATOR = /\s+:\s*|\s*:\s+/
+const DESCRIPTION_SEPARATOR = /\s+:\s*|:\s+/
 
 /**
- * Split a token into its definition and its description.
- *
- * This runs before the `?` / `*` / `=default` markers are stripped, so a
+ * Stage one of two: split a whole token into its definition and its
+ * description, before the `?` / `*` / `=default` markers are stripped, so a
  * description may contain any of those characters.
  */
-function extractDescription(token: string): [string, string | undefined] {
+function splitSpacedDescription(token: string): [string, string | undefined] {
   const match = DESCRIPTION_SEPARATOR.exec(token)
 
   if (!match) {
@@ -137,27 +134,27 @@ function extractDescription(token: string): [string, string | undefined] {
 }
 
 /**
- * Strip a colon-delimited description written without any surrounding
- * whitespace (`name:description`).
+ * Stage two of two: settle a definition's final name and description, stripping
+ * a description written with no surrounding whitespace (`name:description`).
  *
- * This is the fallback for `extractDescription`, and it runs *after* the
- * markers have been stripped so that colons inside a default value survive.
- * Nothing is stripped once a description is already known.
+ * This runs *after* the markers have been stripped, which is what keeps colons
+ * inside a default value out of descriptions. A description found by
+ * `splitSpacedDescription` is never overwritten — a name may legitimately
+ * contain a colon once stage one has claimed the description.
  */
-function splitInlineDescription(
+function resolveNameAndDescription(
   name: string,
   description?: string
-): [string, string | undefined] {
-  if (description !== undefined) {
-    return [name, description]
+): { name: string; description: string | undefined } {
+  if (description === undefined) {
+    const colonIndex = name.indexOf(':')
+    if (colonIndex !== -1) {
+      description = name.slice(colonIndex + 1).trim() || undefined
+      name = name.slice(0, colonIndex)
+    }
   }
 
-  const colonIndex = name.indexOf(':')
-  if (colonIndex === -1) {
-    return [name, undefined]
-  }
-
-  return [name.slice(0, colonIndex), name.slice(colonIndex + 1).trim() || undefined]
+  return { name: name.trim(), description }
 }
 
 /**
@@ -224,9 +221,12 @@ function parseArgument(content: string, description?: string): ArgumentDefinitio
     required = false
   }
 
-  ;[name, description] = splitInlineDescription(name, description)
-
-  return { name: name.trim(), description, required, array, defaultValue }
+  return {
+    ...resolveNameAndDescription(name, description),
+    required,
+    array,
+    defaultValue,
+  }
 }
 
 /**
@@ -268,14 +268,18 @@ function parseOption(content: string, description?: string): OptionDefinition {
     }
   }
 
-  ;[name, description] = splitInlineDescription(name, description)
-
   // Boolean options default to false
   if (!requiresValue && defaultValue === undefined) {
     defaultValue = false
   }
 
-  return { name: name.trim(), shortcut, description, requiresValue, defaultValue, array }
+  return {
+    ...resolveNameAndDescription(name, description),
+    shortcut,
+    requiresValue,
+    defaultValue,
+    array,
+  }
 }
 
 /**
