@@ -75,6 +75,47 @@ describe('@guren/plugin-vercel', () => {
       expect(readFileSync(app.entrypoint, 'utf8')).toBe(DEFAULT_ENTRYPOINT_SOURCE)
     })
 
+    it('reads the client manifest from a custom publicDir', () => {
+      const app = scaffoldApp(root, { entrypoint: 'src/vercel.ts' })
+      mkdirSync(join(root, 'web-root/assets/.vite'), { recursive: true })
+      writeFileSync(
+        join(root, 'web-root/assets/.vite/manifest.json'),
+        JSON.stringify({
+          'resources/js/app.tsx': { file: 'app-Custom999.js', css: ['app-Custom999.css'] },
+        }),
+      )
+
+      buildVercelOutput({ ...app, publicDir: join(root, 'web-root') })
+
+      const config = JSON.parse(
+        readFileSync(join(app.outputDir, 'functions/index.func/.vc-config.json'), 'utf8'),
+      ) as { environment: Record<string, string> }
+
+      expect(config.environment.GUREN_INERTIA_ENTRY).toBe('/assets/app-Custom999.js')
+      expect(config.environment.GUREN_INERTIA_STYLES).toBe('/assets/app-Custom999.css')
+    })
+
+    it('points GUREN_INERTIA_SSR_MANIFEST at the layout the SSR build produced', () => {
+      // Older Vite configs emit a flat manifest.json; naming the .vite path
+      // unconditionally leaves the runtime loading a file that is not there.
+      const app = scaffoldApp(root, { entrypoint: 'src/vercel.ts' })
+      mkdirSync(join(root, '.guren/ssr'), { recursive: true })
+      writeFileSync(join(root, '.guren/ssr/ssr-Xyz789.js'), 'export const render = () => ({})\n')
+      writeFileSync(
+        join(root, '.guren/ssr/manifest.json'),
+        JSON.stringify({ 'resources/js/ssr.tsx': { file: 'ssr-Xyz789.js' } }),
+      )
+
+      buildVercelOutput(app)
+
+      const config = JSON.parse(
+        readFileSync(join(app.outputDir, 'functions/index.func/.vc-config.json'), 'utf8'),
+      ) as { environment: Record<string, string> }
+
+      expect(config.environment.GUREN_INERTIA_SSR_ENTRY).toBe('./.guren/ssr/ssr-Xyz789.js')
+      expect(config.environment.GUREN_INERTIA_SSR_MANIFEST).toBe('./.guren/ssr/manifest.json')
+    })
+
     it('matches the configured handler filename to the bundled entrypoint', () => {
       const app = scaffoldApp(root, { entrypoint: 'src/vercel.ts' })
 

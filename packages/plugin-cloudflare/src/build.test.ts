@@ -315,40 +315,20 @@ describe('workers runtime configuration', () => {
     expect(warning).toContain('.cloudflare/d1-migrations')
   })
 
-  test('should warn when an existing wrangler config aliases stale stub filenames', async () => {
+  test('should write a stub file for every aliased specifier', async () => {
     scaffoldApp(root)
-    // Every key is present, so a keys-only check passes this config — but the
-    // MCP values name files a specifier-derived build no longer writes, and
-    // wrangler would resolve the alias to nothing.
-    writeJson(join(root, 'wrangler.jsonc'), {
-      name: 'legacy',
-      main: '.cloudflare/worker.js',
-      alias: {
-        'bun:sqlite': './.cloudflare/stub-bun-sqlite.js',
-        vite: './.cloudflare/stub-vite.js',
-        '@guren/cli': './.cloudflare/stub-guren-cli.js',
-        '@modelcontextprotocol/sdk/server/mcp.js': './.cloudflare/stub-mcp-server.js',
-        '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js':
-          './.cloudflare/stub-mcp-transport.js',
-      },
-      define: { 'process.env.NODE_ENV': '"production"' },
-    })
-    const warnings: string[] = []
-    const original = console.warn
-    console.warn = (message: string) => warnings.push(message)
 
-    try {
-      await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
-    } finally {
-      console.warn = original
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+
+    // The alias map and the files on disk are derived from one list but through
+    // two code paths; a stub the config points at but the build never writes
+    // fails only at `wrangler deploy`.
+    const config = JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf8'))
+    const aliases = Object.values(config.alias) as string[]
+    expect(aliases.length).toBeGreaterThan(0)
+    for (const target of aliases) {
+      expect(existsSync(join(root, target.replace(/^\.\//, '')))).toBe(true)
     }
-
-    const warning = warnings.join('\n')
-    expect(warning).toContain('predates this plugin version')
-    // The replacement map is printed so it can be pasted in.
-    expect(warning).toContain('stub-modelcontextprotocol-sdk-server-mcp-js.js')
-    // The stub files it names are the ones this build actually wrote.
-    expect(existsSync(join(root, '.cloudflare/stub-modelcontextprotocol-sdk-server-mcp-js.js'))).toBe(true)
   })
 
   test('should reject migrations that flatten to the same filename', async () => {

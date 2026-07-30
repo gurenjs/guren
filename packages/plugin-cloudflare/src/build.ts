@@ -2,19 +2,19 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, write
 import { relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
-  assertOutputDirOutsideRoot,
   DEV_ONLY_MODULES,
   importSpecifier,
-  loadManifest,
+  renderDevOnlyStub,
+  resetOutputDir,
   resolveClientAssetEnv,
   resolvePathLike,
+  resolveSsrEntryFile,
+  stageStaticAssets,
   type ClientAssetEnv,
   type DevOnlyModule,
+  type DevOnlySpecifier,
   type PathLike,
 } from '@guren/core/internal/deploy-build'
-
-/** Prefixes every diagnostic this build emits. */
-const LABEL = 'Cloudflare build'
 
 interface PackageJsonLike {
   name?: string
@@ -55,7 +55,7 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   const clientEntryKey = options.clientEntryKey ?? 'resources/js/app.tsx'
   const ssrEntryKey = options.ssrEntryKey ?? 'resources/js/ssr.tsx'
 
-  assertOutputDirOutsideRoot(out, root, LABEL)
+  resetOutputDir(out, root, 'Cloudflare build')
 
   const packageJson = readPackageJson(root)
 
@@ -68,35 +68,12 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   }
 
   const ssrImport = await resolveSsrImport(ssrDir, ssrEntryKey)
-  const assetEnv = resolveClientAssetEnv(publicDir, clientEntryKey, LABEL)
+  const assetEnv = resolveClientAssetEnv(publicDir, clientEntryKey, 'Cloudflare build')
 
-  if (existsSync(out)) {
-    rmSync(out, { recursive: true, force: true })
-  }
-  mkdirSync(resolve(out, 'assets'), { recursive: true })
-
-  if (existsSync(publicDir)) {
-    cpSync(publicDir, resolve(out, 'assets'), { recursive: true })
-  }
-
-  // Workers Static Assets serves index.html for `/` BEFORE the worker runs,
-  // which would shadow the app's root route. public/index.html is the
-  // dev-mode Vite shell in Guren apps — never a production page.
-  const shadowingIndex = resolve(out, 'assets/index.html')
-  if (existsSync(shadowingIndex)) {
-    rmSync(shadowingIndex)
-  }
-
-  // Built assets are emitted with the Guren Vite plugin's derived base
-  // `/public/assets/` (chunk imports, CSS urls, preloads self-reference that
-  // prefix). Vercel resolves it with a `/public/(.*) -> /$1` rewrite; Workers
-  // Static Assets has no rewrites, so mirror the built-assets directory under
-  // the base URL path as well: the root copy serves `/assets/*`, this copy
-  // serves `/public/assets/*`.
-  const clientAssetsDir = resolve(publicDir, 'assets')
-  if (existsSync(clientAssetsDir)) {
-    cpSync(clientAssetsDir, resolve(out, 'assets/public/assets'), { recursive: true })
-  }
+  // Workers Static Assets serves `/` from index.html BEFORE the worker runs,
+  // and has no rewrites for the built assets' `/public/assets/` base — both
+  // handled by the shared staging step.
+  stageStaticAssets(publicDir, resolve(out, 'assets'))
 
   writeFileSync(resolve(out, 'worker.js'), renderWorkerModule({ out, appEntry, ssrImport, assetEnv }))
 
@@ -120,36 +97,30 @@ const UNAVAILABLE_ON_WORKERS: Record<DevOnlyModule['kind'], string> = {
 }
 
 /**
- * Stubs must carry the exact names their importers destructure: an empty
- * module fails the bundle with "no matching export", not at runtime. Emitted
- * as functions rather than classes because the stubbed names mix constructors
- * (`new Database()`) with plain calls (`createServer()`), and only a function
- * throws the intended message under both.
- */
-function renderStub({ kind, exportNames }: DevOnlyModule): string {
-  const message = UNAVAILABLE_ON_WORKERS[kind]
-  if (exportNames.length === 0) {
-    return `// ${message}\nexport {}\n`
-  }
-
-  const throwing = exportNames
-    .map((name) => `export function ${name}() { throw new Error(${JSON.stringify(message)}) }`)
-    .join('\n')
-  return `${throwing}\nexport default { ${exportNames.join(', ')} }\n`
-}
-
-/**
  * Wrangler resolves an `alias` to a path on disk, so unlike a bundler plugin
- * each stub needs a file of its own. Derived from the specifier rather than
- * hand-named so `DEV_ONLY_MODULES` stays the only place a module is listed.
+ * each stub needs a file of its own. The names are deliberately hand-written
+ * rather than derived: they are baked into every app's committed
+ * `wrangler.jsonc`, which the scaffold never overwrites, so deriving them
+ * would rename files out from under existing apps for no benefit.
+ *
+ * Keyed on `DevOnlySpecifier`, so adding an entry to `DEV_ONLY_MODULES` is a
+ * compile error here until it gets a filename — the drift a derived name would
+ * have prevented, caught by the type system instead.
  */
-function stubFileName(specifier: string): string {
-  return `stub-${specifier.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '')}.js`
+const STUB_FILES: Record<DevOnlySpecifier, string> = {
+  'bun:sqlite': 'stub-bun-sqlite.js',
+  vite: 'stub-vite.js',
+  '@guren/cli': 'stub-guren-cli.js',
+  '@modelcontextprotocol/sdk/server/mcp.js': 'stub-mcp-server.js',
+  '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js': 'stub-mcp-transport.js',
 }
 
 function writeDevOnlyStubs(out: string): void {
   for (const module of DEV_ONLY_MODULES) {
-    writeFileSync(resolve(out, stubFileName(module.specifier)), renderStub(module))
+    writeFileSync(
+      resolve(out, STUB_FILES[module.specifier]),
+      renderDevOnlyStub(module, UNAVAILABLE_ON_WORKERS[module.kind]),
+    )
   }
 }
 
@@ -163,7 +134,7 @@ function devOnlyAliases(outRelative: string): Record<string, string> {
   return Object.fromEntries(
     DEV_ONLY_MODULES.map((module) => [
       module.specifier,
-      `./${outRelative}/${stubFileName(module.specifier)}`,
+      `./${outRelative}/${STUB_FILES[module.specifier]}`,
     ]),
   )
 }
@@ -264,27 +235,12 @@ interface SsrImport {
 }
 
 async function resolveSsrImport(ssrDir: string, ssrEntryKey: string): Promise<SsrImport | undefined> {
-  const manifest = loadManifest(
-    resolve(ssrDir, '.vite/manifest.json'),
-    resolve(ssrDir, 'manifest.json'),
-  )
-
-  const entryFile = manifest?.[ssrEntryKey]?.file
-  if (!entryFile) {
+  const file = resolveSsrEntryFile(ssrDir, ssrEntryKey, 'Cloudflare build')
+  if (!file) {
     console.warn(
       `Cloudflare build: no SSR manifest entry for "${ssrEntryKey}" under ${ssrDir}; generating a CSR-only worker.`,
     )
     return undefined
-  }
-
-  const file = resolve(ssrDir, entryFile)
-  if (!file.startsWith(ssrDir + sep)) {
-    throw new Error(
-      `Cloudflare build: SSR manifest entry "${entryFile}" escapes the SSR output directory ${ssrDir}.`,
-    )
-  }
-  if (!existsSync(file)) {
-    throw new Error(`Cloudflare build: SSR manifest points at ${file}, but the file does not exist.`)
   }
 
   const module = (await import(pathToFileURL(file).href)) as Record<string, unknown>
@@ -318,11 +274,11 @@ function renderWorkerModule(input: {
   if (input.ssrImport) {
     lines.push(
       "import { setInertiaSsrRenderer } from '@guren/core'",
-      `import * as ssrModule from ${JSON.stringify(importSpecifier(input.out, input.ssrImport.file, LABEL))}`,
+      `import * as ssrModule from ${JSON.stringify(importSpecifier(input.out, input.ssrImport.file, 'Cloudflare build'))}`,
     )
   }
 
-  lines.push(`import app from ${JSON.stringify(importSpecifier(input.out, input.appEntry, LABEL))}`, '')
+  lines.push(`import app from ${JSON.stringify(importSpecifier(input.out, input.appEntry, 'Cloudflare build'))}`, '')
 
   if (input.assetEnv.entry) {
     lines.push(`process.env.GUREN_INERTIA_ENTRY = ${JSON.stringify(input.assetEnv.entry)}`)
@@ -409,10 +365,7 @@ function warnMissingBuildOwnedKeys(configPath: string, outRelative: string): voi
   const missing: string[] = []
   const alias = config.alias as Record<string, string> | undefined
   const expectedAliases = devOnlyAliases(outRelative)
-  // Values as well as keys: the stub filenames are derived from the specifier,
-  // so a config written by a version that hand-named them still has every key
-  // while pointing at files this build no longer writes.
-  if (!alias || Object.entries(expectedAliases).some(([key, value]) => alias[key] !== value)) {
+  if (!alias || Object.keys(expectedAliases).some((key) => !(key in alias))) {
     missing.push(`"alias": ${JSON.stringify(expectedAliases)}`)
   }
   const define = config.define as Record<string, string> | undefined

@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { isBuiltin } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -28,6 +29,15 @@ describe('assertOutputDirOutsideRoot', () => {
 
   test('should reject a parent of the app root', () => {
     expect(() => assertOutputDirOutsideRoot('/app', '/app/nested', 'Test build')).toThrow(
+      /never the root itself or a parent of it/,
+    )
+  })
+
+  test('should reject a root inside out whose name begins with ..', () => {
+    // `relative` returns "..-source" here. Testing `startsWith('..')` reads
+    // that as an escape and lets the delete run over a directory that really
+    // is inside the output directory.
+    expect(() => assertOutputDirOutsideRoot('/tmp/app', '/tmp/app/..-source', 'Test build')).toThrow(
       /never the root itself or a parent of it/,
     )
   })
@@ -108,30 +118,34 @@ describe('DEV_ONLY_MODULES', () => {
       module.specifier.startsWith('@modelcontextprotocol/'),
     )
 
+    // A package-name alias does not cover subpaths, so a bare package entry
+    // would silently leave the real SDK in a Workers bundle.
     expect(sdkEntries.length).toBeGreaterThan(0)
     for (const entry of sdkEntries) {
       expect(entry.specifier.startsWith(MCP_SDK_SUBPATH_PREFIX)).toBe(true)
-      // A package-name alias does not cover subpaths, so a bare package entry
-      // would silently leave the real SDK in a Workers bundle.
-      expect(entry.specifier).not.toBe(MCP_SDK_SUBPATH_PREFIX.replace(/\/$/, ''))
     }
   })
+})
 
-  test('should not list the same specifier twice', () => {
-    const specifiers = DEV_ONLY_MODULES.map((module) => module.specifier)
-    expect(new Set(specifiers).size).toBe(specifiers.length)
-  })
+describe('the built artifact', () => {
+  test('should import nothing but node builtins', () => {
+    // The module documents this, and the plugins rely on it: importing it must
+    // not drag the framework runtime into a developer's build. It holds today
+    // only because this tsup entry happens to share no code with core's
+    // others — the day one does, ESM splitting emits a chunk and the property
+    // disappears with nothing else to notice.
+    const built = join(import.meta.dir, '../../dist/internal/deploy-build.js')
+    if (!existsSync(built)) {
+      throw new Error(`Expected ${built}; run \`bun run build core\` before this test.`)
+    }
 
-  test('should give every destructured module its export names', () => {
-    // `@guren/cli` is read only through namespace property access, so an empty
-    // module suffices; everything else is destructured and needs its names, or
-    // the bundle fails with "no matching export".
-    for (const module of DEV_ONLY_MODULES) {
-      if (module.specifier === '@guren/cli') {
-        expect(module.exportNames).toEqual([])
-      } else {
-        expect(module.exportNames.length).toBeGreaterThan(0)
-      }
+    const specifiers = [...readFileSync(built, 'utf8').matchAll(/from\s*["']([^"']+)["']/g)].map(
+      ([, specifier]) => specifier,
+    )
+
+    expect(specifiers.length).toBeGreaterThan(0)
+    for (const specifier of specifiers) {
+      expect(isBuiltin(specifier)).toBe(true)
     }
   })
 })
@@ -139,9 +153,24 @@ describe('DEV_ONLY_MODULES', () => {
 describe('the module graph this list describes', () => {
   const repoRoot = join(import.meta.dir, '../../../..')
 
+  /**
+   * Files that actually import `specifier`, matched on the import form rather
+   * than the bare string: `vite` alone also hits a `@vite-ignore` comment and
+   * an identifier, which would leave this green after the real import was
+   * deleted — the exact drift the check exists to catch.
+   */
   function importersOf(specifier: string): string {
+    const escaped = specifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const { stdout } = Bun.spawnSync({
-      cmd: ['git', 'grep', '-l', '--fixed-strings', specifier, '--', 'packages/server/src', 'packages/orm/src'],
+      cmd: [
+        'git',
+        'grep',
+        '-lE',
+        `(from|import\\(|require\\()[[:space:]]*['"]${escaped}['"]`,
+        '--',
+        'packages/server/src',
+        'packages/orm/src',
+      ],
       cwd: repoRoot,
       stdout: 'pipe',
       stderr: 'pipe',
@@ -149,10 +178,9 @@ describe('the module graph this list describes', () => {
     return stdout.toString().trim()
   }
 
-  // Checked per entry, not as one alternation: the point of the list is to
-  // track @guren/core's own dev-only imports, and a single matching entry
-  // would otherwise mask every stale one. A framework change that drops an
-  // import should surface here rather than as dead weight in every plugin.
+  // Checked per entry, not as one alternation: a single matching entry would
+  // otherwise mask every stale one. A framework change that drops one of these
+  // imports should surface here rather than as dead weight in every plugin.
   test.each(DEV_ONLY_MODULES.map((module) => module.specifier))(
     'should still be imported by the framework: %s',
     (specifier) => {
@@ -160,9 +188,30 @@ describe('the module graph this list describes', () => {
     },
   )
 
-  test('should detect a specifier the framework does not import', () => {
-    // Guards the check above: without this, a `git grep` that silently stopped
-    // working would let every case pass.
+  test('should not match a specifier that is merely mentioned', () => {
+    // Guards the check above two ways: a grep that silently stopped working
+    // would let every case pass, and a substring match would accept a module
+    // the framework only names in a comment.
     expect(importersOf('@guren/not-a-real-dev-only-module')).toBe('')
+    expect(importersOf('vit')).toBe('')
+  })
+
+  test.each(
+    DEV_ONLY_MODULES.filter((module) => module.exportNames.length > 0).map((module) => [
+      module.specifier,
+      module.exportNames,
+    ] as const),
+  )('should name exports the importer actually destructures: %s', (specifier, exportNames) => {
+    // A wrong name here still renders a stub, and only fails at bundle time
+    // with "no matching export" — so check the names against the real importer.
+    const found = importersOf(specifier)
+    expect(found).not.toBe('')
+
+    const files = found.split('\n')
+    const source = files.map((file) => readFileSync(join(repoRoot, file), 'utf8')).join('\n')
+
+    for (const name of exportNames) {
+      expect(source).toContain(name)
+    }
   })
 })

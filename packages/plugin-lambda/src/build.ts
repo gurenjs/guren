@@ -1,21 +1,21 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { relative, resolve, sep } from 'node:path'
 import {
-  assertOutputDirOutsideRoot,
   DEV_ONLY_MODULES,
   importSpecifier,
-  loadManifest,
   MCP_SDK_SUBPATH_PREFIX,
+  renderDevOnlyStub,
+  resetOutputDir,
   resolveClientAssetEnv,
   resolvePathLike,
+  resolveSsrEntryFile,
+  ssrManifestRelativePath,
+  stageStaticAssets,
   type ClientAssetEnv,
   type DevOnlyModule,
   type PathLike,
 } from '@guren/core/internal/deploy-build'
 import { LAMBDA_HANDLER_EXPORTS, LAMBDA_HANDLER_MODULE } from './handlers'
-
-/** Prefixes every diagnostic this build emits. */
-const LABEL = 'Lambda build'
 
 export interface BuildLambdaOutputOptions {
   /** App root directory. Defaults to the current working directory. */
@@ -53,30 +53,6 @@ const UNAVAILABLE_ON_LAMBDA: Record<DevOnlyModule['kind'], string> = {
 }
 
 /**
- * Render a dev-only module as inline source for the bundler plugin below.
- *
- * Every name the importer destructures has to be present or the bundle fails
- * with "no matching export", so each is emitted as a throwing function. A
- * function rather than a class deliberately: the stubbed names are a mix of
- * constructors (`new Database()`) and plain calls (`createServer()`), and only
- * a function throws the intended message under both — invoking a class without
- * `new` reports "Class constructor cannot be invoked without 'new'" instead. A
- * module read only through namespace property access needs no names, and gets
- * a bare comment.
- */
-function renderStub({ kind, exportNames }: DevOnlyModule): string {
-  const message = UNAVAILABLE_ON_LAMBDA[kind]
-  if (exportNames.length === 0) {
-    return `// ${message}\nexport {}\n`
-  }
-
-  const throwing = exportNames
-    .map((name) => `export function ${name}() { throw new Error(${JSON.stringify(message)}) }`)
-    .join('\n')
-  return `${throwing}\nexport default { ${exportNames.join(', ')} }\n`
-}
-
-/**
  * Dev-only modules replaced with throwing stubs rather than left external.
  * Inlining a lazily-imported module hoists that module's own static imports to
  * the bundle top level, so an external module reached this way (the MCP SDK)
@@ -84,7 +60,10 @@ function renderStub({ kind, exportNames }: DevOnlyModule): string {
  * Stubbing also keeps megabytes of dev tooling out of the bundle.
  */
 const DEV_ONLY_STUBS: Record<string, string> = Object.fromEntries(
-  DEV_ONLY_MODULES.map((module) => [module.specifier, renderStub(module)]),
+  DEV_ONLY_MODULES.map((module) => [
+    module.specifier,
+    renderDevOnlyStub(module, UNAVAILABLE_ON_LAMBDA[module.kind]),
+  ]),
 )
 
 /**
@@ -125,7 +104,7 @@ export async function buildLambdaOutput(options: BuildLambdaOutputOptions = {}):
   const clientEntryKey = options.clientEntryKey ?? 'resources/js/app.tsx'
   const ssrEntryKey = options.ssrEntryKey ?? 'resources/js/ssr.tsx'
 
-  assertOutputDirOutsideRoot(out, root, LABEL)
+  resetOutputDir(out, root, 'Lambda build')
 
   if (!options.skipAppBuild) {
     runAppBuild(root)
@@ -138,11 +117,8 @@ export async function buildLambdaOutput(options: BuildLambdaOutputOptions = {}):
   }
 
   const ssrFile = resolveSsrEntry(ssrDir, ssrEntryKey)
-  const assetEnv = resolveClientAssetEnv(publicDir, clientEntryKey, LABEL)
+  const assetEnv = resolveClientAssetEnv(publicDir, clientEntryKey, 'Lambda build')
 
-  if (existsSync(out)) {
-    rmSync(out, { recursive: true, force: true })
-  }
   const funcDir = resolve(out, 'function')
   mkdirSync(funcDir, { recursive: true })
 
@@ -177,33 +153,6 @@ export async function buildLambdaOutput(options: BuildLambdaOutputOptions = {}):
   }
 }
 
-/**
- * Copy `public/` into the S3 staging directory. Vite emits built assets that
- * self-reference the derived base `/public/assets/`, while HTML references use
- * `/assets/`; S3 has no rewrites, so the built-assets directory is mirrored
- * under both prefixes. The dev-mode `index.html` shell is dropped — it must
- * never shadow the app's root route.
- */
-function stageStaticAssets(publicDir: string, assetsOut: string): void {
-  mkdirSync(assetsOut, { recursive: true })
-
-  if (!existsSync(publicDir)) {
-    return
-  }
-
-  cpSync(publicDir, assetsOut, { recursive: true })
-
-  const shadowingIndex = resolve(assetsOut, 'index.html')
-  if (existsSync(shadowingIndex)) {
-    rmSync(shadowingIndex)
-  }
-
-  const clientAssetsDir = resolve(publicDir, 'assets')
-  if (existsSync(clientAssetsDir)) {
-    cpSync(clientAssetsDir, resolve(assetsOut, 'public/assets'), { recursive: true })
-  }
-}
-
 function buildLambdaEnvironment(
   assetEnv: ClientAssetEnv,
   ssrFile: string | undefined,
@@ -221,11 +170,7 @@ function buildLambdaEnvironment(
     // Relative specifiers resolve from process.cwd(), which is the function
     // root (/var/task) on Lambda — where the SSR bundle is copied.
     env.GUREN_INERTIA_SSR_ENTRY = `./.guren/ssr/${relative(ssrDir, ssrFile).split(sep).join('/')}`
-    // Point at whichever manifest layout the SSR build actually produced —
-    // resolveSsrEntry accepts the root-level fallback too.
-    env.GUREN_INERTIA_SSR_MANIFEST = existsSync(resolve(ssrDir, '.vite/manifest.json'))
-      ? './.guren/ssr/.vite/manifest.json'
-      : './.guren/ssr/manifest.json'
+    env.GUREN_INERTIA_SSR_MANIFEST = ssrManifestRelativePath(ssrDir, './.guren/ssr')
   }
 
   return env
@@ -254,7 +199,7 @@ function renderHandlerModule(input: {
   lines.push(
     '// Imported dynamically so the assignments above run before the app module',
     '// graph evaluates — static imports are hoisted past them.',
-    `const module = await import(${JSON.stringify(importSpecifier(input.out, input.entrypoint, LABEL))})`,
+    `const module = await import(${JSON.stringify(importSpecifier(input.out, input.entrypoint, 'Lambda build'))})`,
     '',
   )
 
@@ -373,24 +318,9 @@ function runAppBuild(root: string): void {
 
 /** Absolute path of the built SSR entry chunk, or undefined for CSR-only apps. */
 function resolveSsrEntry(ssrDir: string, ssrEntryKey: string): string | undefined {
-  const manifest = loadManifest(
-    resolve(ssrDir, '.vite/manifest.json'),
-    resolve(ssrDir, 'manifest.json'),
-  )
-
-  const entryFile = manifest?.[ssrEntryKey]?.file
-  if (!entryFile) {
+  const file = resolveSsrEntryFile(ssrDir, ssrEntryKey, 'Lambda build')
+  if (!file) {
     return undefined
-  }
-
-  const file = resolve(ssrDir, entryFile)
-  if (!file.startsWith(ssrDir + sep)) {
-    throw new Error(
-      `Lambda build: SSR manifest entry "${entryFile}" escapes the SSR output directory ${ssrDir}.`,
-    )
-  }
-  if (!existsSync(file)) {
-    throw new Error(`Lambda build: SSR manifest points at ${file}, but the file does not exist.`)
   }
 
   // Checked statically rather than by importing the chunk: executing the SSR
