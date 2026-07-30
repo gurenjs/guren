@@ -1,6 +1,6 @@
 # @guren/core
 
-The framework entry point for [Guren](https://guren.dev/) — a Laravel-inspired fullstack TypeScript framework, built for Bun. Application code imports everything from this one package: routing, controllers, validation, authentication, the ORM surface, queues, mail, events, and the rest of the framework API.
+The framework entry point for [Guren](https://guren.dev/) — a Laravel-inspired fullstack TypeScript framework, built for Bun. Application code imports the whole framework API from this one package.
 
 ```bash
 bun add @guren/core
@@ -15,9 +15,13 @@ bunx create-guren-app my-app --auth
 ## Usage
 
 ```typescript
-import { Controller, Router, createApp } from '@guren/core'
-import { Model } from '@guren/core'
+import { Controller, Router, defineModel } from '@guren/core'
 import { z } from 'zod'
+import { posts } from '@/db/schema'
+
+class Post extends defineModel(posts) {
+  static fillable = ['title', 'body']
+}
 
 class PostController extends Controller {
   async store() {
@@ -46,7 +50,9 @@ Boot the app with `createApp({ routes, providers })`, then `app.boot()` and `app
 | `@guren/core/lambda` | AWS Lambda adapters: `createLambdaHandler`, `createSqsHandler`, `createScheduleHandler`, `createConsoleHandler` |
 | `@guren/core/redis` | Redis-backed session, cache, and queue stores |
 
-The `guren` CLI ships with this package too — `bunx guren` inside an app gives you scaffolding (`make:*`), codegen, migrations, and the integrity checks (`check`, `audit`, `doctor`).
+## CLI
+
+The `guren` CLI ships with this package. `bunx guren` inside an app gives you scaffolding (`make:*`), codegen, migrations, and the integrity checks (`check`, `audit`, `doctor`).
 
 ## Documentation
 
