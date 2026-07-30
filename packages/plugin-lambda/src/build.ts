@@ -1,16 +1,21 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { isAbsolute, relative, resolve, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { relative, resolve, sep } from 'node:path'
+import {
+  assertOutputDirOutsideRoot,
+  DEV_ONLY_MODULES,
+  importSpecifier,
+  loadManifest,
+  MCP_SDK_SUBPATH_PREFIX,
+  resolveClientAssetEnv,
+  resolvePathLike,
+  type ClientAssetEnv,
+  type DevOnlyModule,
+  type PathLike,
+} from '@guren/core/internal/deploy-build'
 import { LAMBDA_HANDLER_EXPORTS, LAMBDA_HANDLER_MODULE } from './handlers'
 
-type PathLike = string | URL
-
-type ManifestEntry = {
-  file?: string
-  css?: string[]
-}
-
-type Manifest = Record<string, ManifestEntry>
+/** Prefixes every diagnostic this build emits. */
+const LABEL = 'Lambda build'
 
 export interface BuildLambdaOutputOptions {
   /** App root directory. Defaults to the current working directory. */
@@ -37,44 +42,56 @@ export interface BuildLambdaOutputOptions {
 
 const MCP_UNAVAILABLE = 'The MCP endpoint is unavailable on AWS Lambda — it generates files on disk.'
 
-function mcpStub(exportNames: string[]): string {
-  const throwing = exportNames
-    .map((name) => `export class ${name} { constructor() { throw new Error(${JSON.stringify(MCP_UNAVAILABLE)}) } }`)
-    .join('\n')
-  return `${throwing}\nexport default {}\n`
-}
-
 /**
- * Modules that exist in every Guren app's graph but can never run on the
- * Lambda Node.js runtime, reached only through dev-time branches: `bun:sqlite`
- * (the local sqlite ORM factory), `vite` (the dev asset server), and the
- * opt-in MCP endpoint's generators. They are replaced with throwing stubs
- * rather than left external — inlining a lazily-imported module hoists that
- * module's own static imports to the bundle top level, so an external module
- * reached this way (the MCP SDK) would fail at import time on Lambda even
- * though no code path ever runs it. Stubbing also keeps megabytes of dev
- * tooling out of the bundle.
+ * Why the dev-only modules in `DEV_ONLY_MODULES` cannot run here, worded for
+ * this platform: each names the Lambda-appropriate replacement.
  */
-const DEV_ONLY_STUBS: Record<string, string> = {
-  'bun:sqlite':
-    'export const Database = class { constructor() { throw new Error("bun:sqlite is unavailable on AWS Lambda — use createAwsDataApiDatabase() or createPostgresDatabase().") } }\nexport default { Database }\n',
-  vite:
-    'export function createServer() { throw new Error("The Vite dev server is unavailable on AWS Lambda — serve assets from S3/CloudFront.") }\nexport default { createServer }\n',
-  '@guren/cli': `// ${MCP_UNAVAILABLE}\nexport {}\n`,
-  '@modelcontextprotocol/sdk/server/mcp.js': mcpStub(['McpServer', 'ResourceTemplate']),
-  '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js': mcpStub(['WebStandardStreamableHTTPServerTransport']),
+const UNAVAILABLE_ON_LAMBDA: Record<DevOnlyModule['kind'], string> = {
+  sqlite: 'bun:sqlite is unavailable on AWS Lambda — use createAwsDataApiDatabase() or createPostgresDatabase().',
+  vite: 'The Vite dev server is unavailable on AWS Lambda — serve assets from S3/CloudFront.',
+  mcp: MCP_UNAVAILABLE,
 }
 
-// The MCP SDK is only ever reached through subpaths, so any of them — not
-// just the two listed above — must resolve to a stub rather than the real
-// package. Unlisted subpaths get `unlistedMcpStub` in onLoad.
-const MCP_SDK_PREFIX = '@modelcontextprotocol/sdk/'
+/**
+ * Render a dev-only module as inline source for the bundler plugin below.
+ *
+ * Every name the importer destructures has to be present or the bundle fails
+ * with "no matching export", so each is emitted as a throwing function. A
+ * function rather than a class deliberately: the stubbed names are a mix of
+ * constructors (`new Database()`) and plain calls (`createServer()`), and only
+ * a function throws the intended message under both — invoking a class without
+ * `new` reports "Class constructor cannot be invoked without 'new'" instead. A
+ * module read only through namespace property access needs no names, and gets
+ * a bare comment.
+ */
+function renderStub({ kind, exportNames }: DevOnlyModule): string {
+  const message = UNAVAILABLE_ON_LAMBDA[kind]
+  if (exportNames.length === 0) {
+    return `// ${message}\nexport {}\n`
+  }
+
+  const throwing = exportNames
+    .map((name) => `export function ${name}() { throw new Error(${JSON.stringify(message)}) }`)
+    .join('\n')
+  return `${throwing}\nexport default { ${exportNames.join(', ')} }\n`
+}
 
 /**
- * Fallback for an MCP SDK subpath the table does not name. It cannot know
- * which names the importer destructures, so it throws on evaluation rather
- * than resolving to an empty module: a subpath reached from app code (not
- * Guren's disabled MCP endpoint) must fail loudly at build or cold start,
+ * Dev-only modules replaced with throwing stubs rather than left external.
+ * Inlining a lazily-imported module hoists that module's own static imports to
+ * the bundle top level, so an external module reached this way (the MCP SDK)
+ * would fail at import time on Lambda even though no code path ever runs it.
+ * Stubbing also keeps megabytes of dev tooling out of the bundle.
+ */
+const DEV_ONLY_STUBS: Record<string, string> = Object.fromEntries(
+  DEV_ONLY_MODULES.map((module) => [module.specifier, renderStub(module)]),
+)
+
+/**
+ * Fallback for an MCP SDK subpath `DEV_ONLY_MODULES` does not name. It cannot
+ * know which names the importer destructures, so it throws on evaluation
+ * rather than resolving to an empty module: a subpath reached from app code
+ * (not Guren's disabled MCP endpoint) must fail loudly at build or cold start,
  * never silently hand back missing exports.
  */
 const unlistedMcpStub = `throw new Error(${JSON.stringify(MCP_UNAVAILABLE)})\n`
@@ -83,10 +100,13 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-// Derived from DEV_ONLY_STUBS so the record stays the only list of stubbed
+// Derived from the shared list so it stays the only enumeration of stubbed
 // specifiers — a hand-maintained regex could silently fall out of sync.
 const STUB_FILTER = new RegExp(
-  `^(?:${[...Object.keys(DEV_ONLY_STUBS).map(escapeRegExp), `${escapeRegExp(MCP_SDK_PREFIX)}.+`].join('|')})$`,
+  `^(?:${[
+    ...DEV_ONLY_MODULES.map((module) => escapeRegExp(module.specifier)),
+    `${escapeRegExp(MCP_SDK_SUBPATH_PREFIX)}.+`,
+  ].join('|')})$`,
 )
 
 /**
@@ -105,15 +125,7 @@ export async function buildLambdaOutput(options: BuildLambdaOutputOptions = {}):
   const clientEntryKey = options.clientEntryKey ?? 'resources/js/app.tsx'
   const ssrEntryKey = options.ssrEntryKey ?? 'resources/js/ssr.tsx'
 
-  // Compared with `relative` rather than a string prefix: `out + sep` is `//`
-  // at the filesystem root, which no absolute path starts with, so a prefix
-  // test would wave `outputDir: '/'` straight through to the rmSync below.
-  const outToRoot = relative(out, root)
-  if (outToRoot === '' || (!outToRoot.startsWith('..') && !isAbsolute(outToRoot))) {
-    throw new Error(
-      `Lambda build: outputDir (${out}) must be a directory outside or below the app root, never the root itself or a parent of it — it is deleted on every build.`,
-    )
-  }
+  assertOutputDirOutsideRoot(out, root, LABEL)
 
   if (!options.skipAppBuild) {
     runAppBuild(root)
@@ -126,7 +138,7 @@ export async function buildLambdaOutput(options: BuildLambdaOutputOptions = {}):
   }
 
   const ssrFile = resolveSsrEntry(ssrDir, ssrEntryKey)
-  const assetEnv = resolveClientAssetEnv(publicDir, clientEntryKey)
+  const assetEnv = resolveClientAssetEnv(publicDir, clientEntryKey, LABEL)
 
   if (existsSync(out)) {
     rmSync(out, { recursive: true, force: true })
@@ -242,7 +254,7 @@ function renderHandlerModule(input: {
   lines.push(
     '// Imported dynamically so the assignments above run before the app module',
     '// graph evaluates — static imports are hoisted past them.',
-    `const module = await import(${JSON.stringify(importSpecifier(input.out, input.entrypoint))})`,
+    `const module = await import(${JSON.stringify(importSpecifier(input.out, input.entrypoint, LABEL))})`,
     '',
   )
 
@@ -407,59 +419,3 @@ function hasRendererExport(source: string): boolean {
   )
 }
 
-interface ClientAssetEnv {
-  entry?: string
-  styles?: string
-}
-
-function resolveClientAssetEnv(publicDir: string, clientEntryKey: string): ClientAssetEnv {
-  const manifest = loadManifest(
-    resolve(publicDir, 'assets/.vite/manifest.json'),
-    resolve(publicDir, 'assets/manifest.json'),
-  )
-
-  const entry = manifest?.[clientEntryKey]
-  if (!entry?.file) {
-    console.warn(
-      `Lambda build: no client manifest entry for "${clientEntryKey}"; GUREN_INERTIA_ENTRY will not be set.`,
-    )
-    return {}
-  }
-
-  return {
-    entry: `/assets/${entry.file}`,
-    styles: entry.css?.length ? entry.css.map((file) => `/assets/${file}`).join(',') : undefined,
-  }
-}
-
-function importSpecifier(fromDir: string, target: string): string {
-  const rel = relative(fromDir, target)
-  if (isAbsolute(rel)) {
-    throw new Error(
-      `Lambda build: ${target} cannot be imported relative to ${fromDir} (different drive or root?). Keep the app, SSR output, and outputDir on the same volume.`,
-    )
-  }
-
-  const specifier = rel.split(sep).join('/')
-  return specifier.startsWith('.') ? specifier : `./${specifier}`
-}
-
-function resolvePathLike(value: PathLike): string {
-  return value instanceof URL ? fileURLToPath(value) : resolve(String(value))
-}
-
-function loadManifest(...paths: string[]): Manifest | undefined {
-  for (const path of paths) {
-    if (!existsSync(path)) {
-      continue
-    }
-
-    try {
-      return JSON.parse(readFileSync(path, 'utf8')) as Manifest
-    } catch {
-      continue
-    }
-  }
-
-  return undefined
-}

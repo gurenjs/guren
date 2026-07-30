@@ -1,16 +1,15 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, extname, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { definePlugin, type ServiceProviderConstructor } from '@guren/core'
+import {
+  assertOutputDirOutsideRoot,
+  loadManifest,
+  resolvePathLike,
+  type PathLike,
+} from '@guren/core/internal/deploy-build'
 
-type PathLike = string | URL
-
-type ManifestEntry = {
-  file?: string
-  css?: string[]
-}
-
-type Manifest = Record<string, ManifestEntry>
+/** Prefixes every diagnostic this build emits. */
+const LABEL = 'Vercel build'
 
 export interface VercelAppLike {
   boot(): Promise<void>
@@ -73,6 +72,8 @@ export function buildVercelOutput(options: BuildVercelOutputOptions = {}): void 
   const docsDir = resolvePathLike(options.docsDir ?? resolveNearestDocsDir(root) ?? resolve(root, 'docs'))
   const ssrDir = resolvePathLike(options.ssrDir ?? resolve(root, '.guren/ssr'))
   const migrationsDir = resolvePathLike(options.migrationsDir ?? resolve(root, 'db/migrations'))
+
+  assertOutputDirOutsideRoot(out, root, LABEL)
 
   if (existsSync(out)) {
     rmSync(out, { recursive: true, force: true })
@@ -218,10 +219,6 @@ function buildVercelEnvironment(root: string): Record<string, string> {
   return env
 }
 
-function resolvePathLike(value: PathLike): string {
-  return value instanceof URL ? fileURLToPath(value) : resolve(String(value))
-}
-
 function resolveNearestDocsDir(startDir: string, maxDepth = 6): string | undefined {
   let currentDir = startDir
 
@@ -241,18 +238,3 @@ function resolveNearestDocsDir(startDir: string, maxDepth = 6): string | undefin
   return undefined
 }
 
-function loadManifest(...paths: string[]): Manifest | undefined {
-  for (const path of paths) {
-    if (!existsSync(path)) {
-      continue
-    }
-
-    try {
-      return JSON.parse(readFileSync(path, 'utf8')) as Manifest
-    } catch {
-      continue
-    }
-  }
-
-  return undefined
-}

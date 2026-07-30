@@ -46,6 +46,9 @@ Internal APIs carry no stability guarantee. They may change or disappear in any 
 - Being accessible only via deep imports (e.g., `@guren/server/internal`, `@guren/orm/src/utils`)
 - Residing in files prefixed with `_` or directories named `internal`
 
+Current internal subpaths:
+- `@guren/core/internal/deploy-build` -- build-time helpers the official deploy plugins share (manifest and path resolution, the output-directory guard, and the list of dev-only modules a deployed bundle must stub). Exists to keep one copy of knowledge about the framework's own module graph, not as an extension point.
+
 ## How to Determine Stability
 
 Use this decision tree:

@@ -62,6 +62,19 @@ describe('@guren/plugin-vercel', () => {
       rmSync(root, { recursive: true, force: true })
     })
 
+    it('refuses an outputDir that is, contains, or is the root of the app', () => {
+      // The build deletes outputDir before writing it, so a caller that points
+      // it at the project (or at `/`) would lose the source tree.
+      const app = scaffoldApp(root, { entrypoint: 'src/vercel.ts' })
+
+      for (const outputDir of [root, join(root, '..'), '/']) {
+        expect(() => buildVercelOutput({ ...app, outputDir })).toThrow(
+          /never the root itself or a parent of it/,
+        )
+      }
+      expect(readFileSync(app.entrypoint, 'utf8')).toBe(DEFAULT_ENTRYPOINT_SOURCE)
+    })
+
     it('matches the configured handler filename to the bundled entrypoint', () => {
       const app = scaffoldApp(root, { entrypoint: 'src/vercel.ts' })
 

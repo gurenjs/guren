@@ -108,6 +108,38 @@ describe('buildCloudflareOutput', () => {
     expect(existsSync(join(root, 'src/app.ts'))).toBe(true)
   })
 
+  test('should refuse the filesystem root as outputDir', async () => {
+    scaffoldApp(root)
+
+    // `out + sep` is "//" here, which no absolute path is prefixed by — a
+    // string-prefix containment test lets this through to the rmSync.
+    await expect(
+      buildCloudflareOutput({ rootDir: root, outputDir: '/', skipAppBuild: true }),
+    ).rejects.toThrow(/never the root itself or a parent of it/)
+    expect(existsSync(join(root, 'src/app.ts'))).toBe(true)
+  })
+
+  test('should read the client manifest from a custom publicDir', async () => {
+    scaffoldApp(root)
+
+    // Move the built client somewhere other than <root>/public: the manifest
+    // lookup has to follow `publicDir`, not assume the default location.
+    mkdirSync(join(root, 'web-root/assets/.vite'), { recursive: true })
+    writeJson(join(root, 'web-root/assets/.vite/manifest.json'), {
+      'resources/js/app.tsx': { file: 'app-Custom999.js', css: ['app-Custom999.css'] },
+    })
+
+    await buildCloudflareOutput({
+      rootDir: root,
+      publicDir: join(root, 'web-root'),
+      skipAppBuild: true,
+    })
+
+    const worker = readFileSync(join(root, '.cloudflare/worker.js'), 'utf8')
+    expect(worker).toContain('process.env.GUREN_INERTIA_ENTRY = "/assets/app-Custom999.js"')
+    expect(worker).toContain('process.env.GUREN_INERTIA_STYLES = "/assets/app-Custom999.css"')
+  })
+
   test('should scaffold wrangler.jsonc once and never overwrite it', async () => {
     scaffoldApp(root)
 
@@ -281,6 +313,42 @@ describe('workers runtime configuration', () => {
     expect(warning).toContain('alias')
     expect(warning).toContain('process.env.NODE_ENV')
     expect(warning).toContain('.cloudflare/d1-migrations')
+  })
+
+  test('should warn when an existing wrangler config aliases stale stub filenames', async () => {
+    scaffoldApp(root)
+    // Every key is present, so a keys-only check passes this config — but the
+    // MCP values name files a specifier-derived build no longer writes, and
+    // wrangler would resolve the alias to nothing.
+    writeJson(join(root, 'wrangler.jsonc'), {
+      name: 'legacy',
+      main: '.cloudflare/worker.js',
+      alias: {
+        'bun:sqlite': './.cloudflare/stub-bun-sqlite.js',
+        vite: './.cloudflare/stub-vite.js',
+        '@guren/cli': './.cloudflare/stub-guren-cli.js',
+        '@modelcontextprotocol/sdk/server/mcp.js': './.cloudflare/stub-mcp-server.js',
+        '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js':
+          './.cloudflare/stub-mcp-transport.js',
+      },
+      define: { 'process.env.NODE_ENV': '"production"' },
+    })
+    const warnings: string[] = []
+    const original = console.warn
+    console.warn = (message: string) => warnings.push(message)
+
+    try {
+      await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+    } finally {
+      console.warn = original
+    }
+
+    const warning = warnings.join('\n')
+    expect(warning).toContain('predates this plugin version')
+    // The replacement map is printed so it can be pasted in.
+    expect(warning).toContain('stub-modelcontextprotocol-sdk-server-mcp-js.js')
+    // The stub files it names are the ones this build actually wrote.
+    expect(existsSync(join(root, '.cloudflare/stub-modelcontextprotocol-sdk-server-mcp-js.js'))).toBe(true)
   })
 
   test('should reject migrations that flatten to the same filename', async () => {
