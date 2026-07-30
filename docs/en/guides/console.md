@@ -59,7 +59,13 @@ static signature = 'users:create {email} {name?} {--admin} {--role=member}'
 | `{-o\|--opt}` | Option with a short alias |
 | `{--opt=*}` | Option that may be repeated |
 
-Each token must be a single whitespace-free `{...}` group. Anything else in the signature string is ignored, so a stray space inside the braces silently drops that argument.
+Add ` : ` after any token to describe it. The description shows up in `help <command>` next to the argument or option:
+
+```ts
+static signature = 'users:create {email : The address to invite} {--admin : Grant admin rights}'
+```
+
+Anything outside a `{...}` group is ignored, so the command name is the only bare text a signature should carry.
 
 Read the parsed values inside `handle()`:
 

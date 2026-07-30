@@ -2,7 +2,7 @@ import { Command } from '@guren/core'
 import { Post } from '../../Models/Post.js'
 
 export default class PostStatsCommand extends Command {
-  static signature = 'posts:stats {--limit=5}'
+  static signature = 'posts:stats {--limit=5 : How many recent titles to list}'
   static description = 'Summarise the posts currently in the database'
 
   async handle(): Promise<void> {
