@@ -19,6 +19,18 @@ import type {
  * - `{--option=default}` - Option with default value
  * - `{-o|--option}` - Option with shortcut
  * - `{--option=*}` - Array option
+ * - `{argument : Description}` - Argument with a description
+ * - `{--option= : Description}` - Option with a description
+ *
+ * A description is separated from the token by a colon with whitespace on at
+ * least one side, so it may contain spaces and colons freely. Requiring that
+ * whitespace keeps colons inside default values (`{--url=https://example.com}`)
+ * out of descriptions.
+ *
+ * A colon with no whitespace at all (`{argument:Description}`) is accepted for
+ * a single-word description, but only on a token carrying no other marker:
+ * `{argument?}`, `{argument*}` and `{--option=default}` must use the spaced
+ * form, since their markers are stripped before that fallback runs.
  *
  * @example
  * ```typescript
@@ -31,33 +43,29 @@ import type {
  * //     { name: 'role', requiresValue: true, defaultValue: 'user' }
  * //   ]
  * // }
+ *
+ * parseSignature('users:create {name : The full name} {--admin : Grant admin rights}')
+ * // => arguments[0].description === 'The full name'
+ * //    options[0].description === 'Grant admin rights'
  * ```
  */
 export function parseSignature(signature: string): ParsedSignature {
-  const parts = signature.split(/\s+/)
-  const name = parts[0]
+  const { name, tokens } = tokenizeSignature(signature)
   const args: ArgumentDefinition[] = []
   const options: OptionDefinition[] = []
 
-  for (let i = 1; i < parts.length; i++) {
-    const part = parts[i]
+  for (const token of tokens) {
+    const [content, description] = splitSpacedDescription(token)
 
-    // Skip empty parts
-    if (!part) continue
+    // Skip empty tokens
+    if (!content) continue
 
-    // Must be wrapped in braces
-    if (!part.startsWith('{') || !part.endsWith('}')) {
-      continue
-    }
-
-    const content = part.slice(1, -1).trim()
-
-    if (content.startsWith('--') || content.startsWith('-')) {
+    if (content.startsWith('-')) {
       // Option
-      options.push(parseOption(content))
+      options.push(parseOption(content, description))
     } else {
       // Argument
-      args.push(parseArgument(content))
+      args.push(parseArgument(content, description))
     }
   }
 
@@ -65,9 +73,129 @@ export function parseSignature(signature: string): ParsedSignature {
 }
 
 /**
+ * Split a signature into its command name and its brace-delimited tokens.
+ *
+ * Tokens are found by scanning for balanced `{...}` groups so that a token may
+ * contain whitespace (a description, for instance). Unterminated groups are
+ * skipped.
+ */
+function tokenizeSignature(signature: string): { name: string; tokens: string[] } {
+  const firstBrace = signature.indexOf('{')
+  const head = firstBrace === -1 ? signature : signature.slice(0, firstBrace)
+  const name = head.trim().split(/\s+/)[0]
+
+  if (firstBrace === -1) {
+    return { name, tokens: [] }
+  }
+
+  const tokens: string[] = []
+  let depth = 0
+  let start = -1
+
+  for (let i = firstBrace; i < signature.length; i++) {
+    const char = signature[i]
+
+    if (char === '{') {
+      if (depth === 0) start = i
+      depth++
+    } else if (char === '}' && depth > 0) {
+      depth--
+      if (depth === 0) {
+        tokens.push(signature.slice(start + 1, i))
+      }
+    }
+  }
+
+  return { name, tokens }
+}
+
+/**
+ * A colon with whitespace on at least one side. See `parseSignature` for why
+ * the whitespace is required.
+ */
+const DESCRIPTION_SEPARATOR = /\s+:\s*|:\s+/
+
+/**
+ * Stage one of two: split a whole token into its definition and its
+ * description, before the `?` / `*` / `=default` markers are stripped, so a
+ * description may contain any of those characters.
+ */
+function splitSpacedDescription(token: string): [string, string | undefined] {
+  const match = DESCRIPTION_SEPARATOR.exec(token)
+
+  if (!match) {
+    return [token.trim(), undefined]
+  }
+
+  const content = token.slice(0, match.index).trim()
+  const description = token.slice(match.index + match[0].length).trim()
+
+  return [content, description || undefined]
+}
+
+/**
+ * Stage two of two: settle a definition's final name and description, stripping
+ * a description written with no surrounding whitespace (`name:description`).
+ *
+ * This runs *after* the markers have been stripped, which is what keeps colons
+ * inside a default value out of descriptions. A description found by
+ * `splitSpacedDescription` is never overwritten — a name may legitimately
+ * contain a colon once stage one has claimed the description.
+ */
+function resolveNameAndDescription(
+  name: string,
+  description?: string
+): { name: string; description: string | undefined } {
+  if (description === undefined) {
+    const colonIndex = name.indexOf(':')
+    if (colonIndex !== -1) {
+      description = name.slice(colonIndex + 1).trim() || undefined
+      name = name.slice(0, colonIndex)
+    }
+  }
+
+  return { name: name.trim(), description }
+}
+
+/**
+ * The label an argument is displayed with in help output.
+ */
+export function argumentLabel(arg: ArgumentDefinition): string {
+  return arg.array ? `${arg.name}...` : arg.name
+}
+
+/**
+ * The label an option is displayed with in help output, carrying whether it
+ * takes a value and whether it may be repeated.
+ */
+export function optionLabel(opt: OptionDefinition): string {
+  if (opt.array) return `--${opt.name}=<value>...`
+  if (opt.requiresValue) return `--${opt.name}=<value>`
+  return `--${opt.name}`
+}
+
+/**
+ * Build a usage line from a parsed signature.
+ */
+export function formatUsage(parsed: ParsedSignature): string {
+  const parts = [parsed.name]
+
+  if (parsed.options.length > 0) {
+    parts.push('[options]')
+  }
+
+  for (const arg of parsed.arguments) {
+    const label = argumentLabel(arg)
+    parts.push(arg.required ? `<${label}>` : `[${label}]`)
+  }
+
+  return parts.join(' ')
+}
+
+/**
  * Parse an argument definition.
  */
-function parseArgument(content: string): ArgumentDefinition {
+function parseArgument(content: string, description?: string): ArgumentDefinition {
   let name = content
   let required = true
   let array = false
@@ -93,21 +221,18 @@ function parseArgument(content: string): ArgumentDefinition {
     required = false
   }
 
-  // Extract description if present (after :)
-  let description: string | undefined
-  const colonIndex = name.indexOf(':')
-  if (colonIndex !== -1) {
-    description = name.slice(colonIndex + 1)
-    name = name.slice(0, colonIndex)
+  return {
+    ...resolveNameAndDescription(name, description),
+    required,
+    array,
+    defaultValue,
   }
-
-  return { name, description, required, array, defaultValue }
 }
 
 /**
  * Parse an option definition.
  */
-function parseOption(content: string): OptionDefinition {
+function parseOption(content: string, description?: string): OptionDefinition {
   let name = content
   let shortcut: string | undefined
   let requiresValue = false
@@ -143,20 +268,18 @@ function parseOption(content: string): OptionDefinition {
     }
   }
 
-  // Extract description if present
-  let description: string | undefined
-  const colonIndex = name.indexOf(':')
-  if (colonIndex !== -1) {
-    description = name.slice(colonIndex + 1)
-    name = name.slice(0, colonIndex)
-  }
-
   // Boolean options default to false
   if (!requiresValue && defaultValue === undefined) {
     defaultValue = false
   }
 
-  return { name, shortcut, description, requiresValue, defaultValue, array }
+  return {
+    ...resolveNameAndDescription(name, description),
+    shortcut,
+    requiresValue,
+    defaultValue,
+    array,
+  }
 }
 
 /**
