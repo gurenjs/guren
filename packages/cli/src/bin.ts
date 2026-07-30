@@ -9,7 +9,7 @@ import { listBlueprints, runBlueprint } from './blueprints'
 import { runDoctor } from './doctor'
 import { makeAuth } from './make-auth'
 import { makeChannel } from './make-channel'
-import { makeCommand } from './make-command'
+import { makeCommand, printCommandRegistrationGuidance } from './make-command'
 import { makeController } from './make-controller'
 import { makeEvent } from './make-event'
 import { makeException } from './make-exception'
@@ -476,6 +476,7 @@ const makeConsoleCommandCommand = defineCommand({
       command: args.command,
     })
     consola.success(`Command created at ${file}`)
+    printCommandRegistrationGuidance(args.name, file)
   },
 })
 

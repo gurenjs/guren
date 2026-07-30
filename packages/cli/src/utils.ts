@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname, resolve } from 'node:path'
+import { dirname, relative, resolve, sep as pathSep } from 'node:path'
 
 export interface WriterOptions {
   force?: boolean
@@ -168,6 +168,17 @@ export function kebabCase(value: string): string {
     .replace(/([a-z0-9])([A-Z])/gu, '$1-$2')
     .replace(/[_\s]+/gu, '-')
     .toLowerCase()
+}
+
+/**
+ * Builds the ESM specifier that `fromFile` would use to import `toPath`.
+ * Separators are normalized to `/` so generated and printed import lines stay
+ * valid on Windows, where `path.relative()` yields `\`.
+ */
+export function relativeImportPath(fromFile: string, toPath: string): string {
+  const rel = relative(dirname(fromFile), toPath) || toPath
+  const normalized = rel.split(pathSep).join('/')
+  return normalized.startsWith('.') ? normalized : `./${normalized}`
 }
 
 const SAFE_MODULE_NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/u

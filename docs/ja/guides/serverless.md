@@ -82,23 +82,9 @@ EventBridge から呼び出されたときに実行予定のタスクを処理�
 
 ### コンソール — `createConsoleHandler(kernel)`
 
-アプリの `ConsoleKernel` に登録したコマンドを実行します。カーネルに組み込みコマンドはありません — スキャフォールドされた `src/lambda.ts` に `db:migrate` を登録するコメントアウト済みの例が同梱されているので、それ（と `console` export）のコメントを外して有効化します:
+アプリの `ConsoleKernel` に登録したコマンド — `src/console.ts` が `kernel` としてエクスポートするもの — を実行します。コマンドの定義と登録については [コンソールコマンドガイド](./console.md) を参照してください。
 
-```typescript
-import { Command, ConsoleKernel } from '@guren/core'
-import { migrateDatabase } from '../config/database.js'
-
-class MigrateCommand extends Command {
-  static signature = 'db:migrate'
-  static description = 'Apply pending database migrations'
-  async handle(): Promise<void> {
-    await migrateDatabase()
-  }
-}
-
-const kernel = new ConsoleKernel()
-kernel.register(MigrateCommand)
-```
+カーネルに組み込みコマンドはありません。スキャフォールドされた `src/lambda.ts` に `db:migrate` のコメントアウト済みの例が同梱されているので、それと `console` export のコメントを外して有効化します。
 
 AWS CLI から呼び出します:
 

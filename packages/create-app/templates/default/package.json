@@ -7,6 +7,7 @@
     "codegen": "bunx guren codegen --force",
     "dev": "bun run codegen && GUREN_MCP=1 bun run dev:server",
     "dev:server": "bun --hot bin/serve.ts",
+    "console": "bun bin/console.ts",
     "typecheck": "tsc --noEmit",
     "build": "bun run codegen && bunx vite build",
     "preview": "NODE_ENV=production bun bin/serve.ts",
