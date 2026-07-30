@@ -49,6 +49,7 @@ export {
   parseDocFrontmatter,
   extractDocsTags,
   extractMarkdownLinks,
+  readLinkDestination,
   type DocRef,
   type DocActorEvent,
 } from './docs-index'

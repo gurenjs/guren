@@ -11,7 +11,7 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 import { scanDocs, type DocActorEvent, type DocRef } from './docs-index'
-import { runDocsCheck } from './docs-check'
+import { runDocsCheck, resolveDocLink } from './docs-check'
 import { buildDocsGraph, type DocsGraphEdge, type DocsGraphNode } from './docs-graph'
 import { renderDocHtml } from './docs-render'
 
@@ -77,7 +77,12 @@ export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> 
         verified: ref.verified,
         staleAfter: ref.staleAfter,
         trustTier: docTrustTier(ref),
-        html: renderDocHtml(body),
+        // Links carry the app-root path they resolve to, so the viewer
+        // navigates by map lookup instead of re-deriving the resolution
+        // rules client-side (where they would drift).
+        html: renderDocHtml(body, {
+          resolveLink: (target) => resolveDocLink(ref.path, target) ?? target,
+        }),
       }
     }),
   )

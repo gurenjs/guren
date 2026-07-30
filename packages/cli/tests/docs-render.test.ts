@@ -64,6 +64,28 @@ bunx guren check --docs
     expect(html).toContain('<pre class="code"><code>bunx guren check --docs</code></pre>')
   })
 
+  it('escapes quotes so a link target cannot break out of the attribute', () => {
+    const html = renderDocHtml('[hover]("onmouseover="globalThis.pwned=1)\n')
+
+    expect(html).not.toContain('onmouseover="')
+    expect(html).toContain('data-target="&quot;onmouseover=&quot;globalThis.pwned=1"')
+  })
+
+  it('keeps balanced parentheses in a link destination', () => {
+    const html = renderDocHtml('[migration](./use-(legacy)-api.md)\n')
+
+    expect(html).toContain('data-target="./use-(legacy)-api.md"')
+    expect(html).toContain('>migration</a>')
+  })
+
+  it('emits the resolved target when a resolver is supplied', () => {
+    const html = renderDocHtml('See [orders](../adr/0002.md#joins).\n', {
+      resolveLink: (target) => (target === '../adr/0002.md#joins' ? 'docs/adr/0002.md' : target),
+    })
+
+    expect(html).toContain('data-target="docs/adr/0002.md"')
+  })
+
   it('escapes HTML in prose and code, and drops comments', () => {
     const html = renderDocHtml(`<!-- generated banner -->
 

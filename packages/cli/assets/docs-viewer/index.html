@@ -258,7 +258,8 @@ body {
 .prose ul { display: flex; flex-direction: column; gap: 0.25rem; padding-left: 1.1rem; }
 .prose li.nested { margin-left: 1rem; color: var(--text-secondary); font-size: 0.9rem; }
 .prose code { font-family: var(--mono); font-size: 0.85em; background: var(--raised); padding: 0.08em 0.32em; border-radius: 2px; color: var(--accent-strong); }
-.prose .md-link { color: var(--accent-strong); font-family: var(--mono); font-size: 0.9em; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.prose .md-link { color: var(--text-secondary); font-family: var(--mono); font-size: 0.9em; }
+.prose .md-link.as-link { color: var(--accent-strong); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 .prose pre.code { background: var(--raised); border: 1px solid var(--border); border-radius: 4px; padding: 0.8rem 0.9rem; overflow-x: auto; }
 .prose pre.code code { background: none; padding: 0; color: var(--text-secondary); font-size: 0.78rem; }
 .prose pre.mermaid { background: var(--raised); border: 1px solid var(--border); border-radius: 4px; padding: 0.9rem; overflow-x: auto; font-family: var(--mono); font-size: 0.78rem; color: var(--text-secondary); }
@@ -673,15 +674,13 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 
     const prose = el('div', 'prose')
     prose.innerHTML = doc.html
+    // data-target already carries the app-root path the server resolved
+    // (bundle-relative and fragment rules included), so this is a lookup.
     prose.querySelectorAll('.md-link').forEach((link) => {
-      link.addEventListener('click', () => {
-        const target = link.dataset.target || ''
-        const hit = data.docs.find((d) => {
-          const bundleRoot = d.path.slice(0, d.path.indexOf('docs/') + 5)
-          return target.startsWith('/') ? d.path === bundleRoot + target.slice(1) : d.path.endsWith(target.replace(/^\.\//, ''))
-        })
-        if (hit) openPanel(hit.path)
-      })
+      const target = link.dataset.target || ''
+      if (!byId.has(target)) return
+      link.classList.add('as-link')
+      link.addEventListener('click', () => openPanel(target))
     })
     root.append(prose)
     return root
