@@ -57,12 +57,10 @@ bunx guren make:model Task
 スキーマと関連付けます:
 
 ```typescript
-import { Model } from '@guren/core'
+import { defineModel } from '@guren/core'
 import { tasks } from '@/db/schema'
 
-export class Task extends Model<typeof tasks> {
-  static table = tasks
-}
+export class Task extends defineModel(tasks) {}
 ```
 
 ## 5. コントローラーを作成する

@@ -286,12 +286,14 @@ export type UserRecord = typeof users.$inferSelect
 
 export class User extends AuthenticatableModel<UserRecord> {
   static override table = users
-  static override readonly recordType = {} as UserRecord
+  declare static readonly recordType: UserRecord
   // 任意で上書き可能:
   // static override passwordField = 'plainPassword'
   // static override passwordHashField = 'password_digest'
 }
 ```
+
+認証モデルは `defineModel()` ではなく `AuthenticatableModel` を直接継承します。`defineModel` が推論する `createType` は `passwordHash` カラムを `create()` で必須にしてしまいますが、認証フローでは平文の `password` を渡して自動ハッシュ化させるためです。`declare` の行はコンパイル時の型マーカーを再宣言するだけで、JavaScript には出力されません。
 
 既定の `AuthServiceProvider` は `users` プロバイダーを使う `web` ガードを自動登録します。追加のガード（例: トークンベース API）が必要なら、`context.auth.registerGuard('api', factory)` を呼び、必要に応じて `context.auth.setDefaultGuard('api')` で既定を差し替えます。
 
@@ -384,7 +386,7 @@ export function registerWebRoutes(router: Router): void {
 ```ts
 export class User extends AuthenticatableModel<UserRecord> {
   static override table = users
-  static override readonly recordType = {} as UserRecord
+  declare static readonly recordType: UserRecord
   static override hidden = ['passwordHash', 'rememberToken']
 }
 ```

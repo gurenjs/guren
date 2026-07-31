@@ -27,9 +27,7 @@ export interface SoftDeletesStatic {
  * records via a global scope named 'softDelete'.
  *
  * @example
- * class Post extends SoftDeletes(Model)<PostRecord> {
- *   static table = posts
- * }
+ * class Post extends SoftDeletes(defineModel(posts)) {}
  *
  * // Soft delete a record (sets deletedAt)
  * await Post.delete({ id: 1 })

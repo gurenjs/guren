@@ -216,10 +216,7 @@ await Post.transaction(async (_trx, txPost) => {
 Control which fields can be set through `create()` and `update()`:
 
 ```ts
-export class Post extends Model<PostRecord> {
-  static override table = posts
-  static override readonly recordType = {} as PostRecord
-
+export class Post extends defineModel(posts) {
   // Allowlist — only these fields are assignable
   static fillable = ['title', 'body', 'status']
 }
@@ -417,10 +414,7 @@ Supported for `hasMany`, `hasOne`, `morphMany` (children per record) and
 Scopes encapsulate common filters so you can reuse them by name:
 
 ```ts
-export class Post extends Model<PostRecord> {
-  static override table = posts
-  static override readonly recordType = {} as PostRecord
-
+export class Post extends defineModel(posts) {
   static scopes = {
     published: (q: QueryBuilder<PostRecord>) => q.where('status', 'published'),
     popular: (q: QueryBuilder<PostRecord>) => q.where('views', '>', 1000),
@@ -481,9 +475,7 @@ Hooks run logic at specific points in a record's lifecycle. Use them for auto-ge
 ```ts
 import { slugify } from '@/app/utils/string'
 
-export class Post extends Model<PostRecord> {
-  static override table = posts
-
+export class Post extends defineModel(posts) {
   static hooks = {
     creating: async (data) => {
       data.slug = slugify(data.title)
@@ -545,12 +537,10 @@ Observers and inline hooks coexist — hooks fire first, then observers.
 Instead of permanently removing records, soft deletes set a `deletedAt` timestamp. Users can recover deleted content, and queries automatically exclude trashed records.
 
 ```ts
-import { Model, SoftDeletes } from '@guren/orm'
+import { SoftDeletes, defineModel } from '@guren/orm'
+import { posts } from '@/db/schema'
 
-export class Post extends SoftDeletes(Model)<PostRecord> {
-  static override table = posts
-  static override readonly recordType = {} as PostRecord
-}
+export class Post extends SoftDeletes(defineModel(posts)) {}
 ```
 
 ```ts
@@ -570,10 +560,7 @@ await Post.forceDelete({ id: 1 })           // Permanent removal
 Automatically convert column values when reading from the database:
 
 ```ts
-export class Post extends Model<PostRecord> {
-  static override table = posts
-  static override readonly recordType = {} as PostRecord
-
+export class Post extends defineModel(posts) {
   static casts = {
     metadata: 'json',       // JSON string -> object
     publishedAt: 'date',    // string -> Date

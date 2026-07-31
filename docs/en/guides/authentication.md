@@ -288,12 +288,14 @@ export type UserRecord = typeof users.$inferSelect
 
 export class User extends AuthenticatableModel<UserRecord> {
   static override table = users
-  static override readonly recordType = {} as UserRecord
+  declare static readonly recordType: UserRecord
   // Optional:
   // static override passwordField = 'plainPassword'
   // static override passwordHashField = 'password_digest'
 }
 ```
+
+Auth models extend `AuthenticatableModel` directly instead of using `defineModel()`: the inferred `createType` would require the `passwordHash` column on `create()`, while the auth flow supplies a plain `password` that is hashed automatically. The `declare` line redeclares the compile-time type marker and emits no JavaScript.
 
 The default `AuthServiceProvider` automatically registers a `web` guard that uses the `users` provider. If you need additional guards (e.g. token-based APIs), call `auth.registerGuard('api', factory)` inside the provider and set it as default via `auth.setDefaultGuard('api')` when appropriate.
 
@@ -387,7 +389,7 @@ export function registerWebRoutes(router: Router): void {
 ```ts
 export class User extends AuthenticatableModel<UserRecord> {
   static override table = users
-  static override readonly recordType = {} as UserRecord
+  declare static readonly recordType: UserRecord
   static override hidden = ['passwordHash', 'rememberToken']
 }
 ```

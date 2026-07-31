@@ -22,8 +22,11 @@ export class Post extends defineModel(posts) {
 Post.belongsTo('author', () => import('./User.js').then((m) => m.User), 'authorId', 'id')
 ```
 
-`class Post extends Model<typeof posts> { static table = posts }` also works.
-Auth user models: `defineModel(users, { base: AuthenticatableModel })`.
+Auth user models extend `AuthenticatableModel<UserRecord>` directly: set `static override table = users`
+and redeclare the type markers with `declare static readonly recordType: UserRecord` (plus `createType`
+when the create payload differs, e.g. `Omit<NewUserRecord, 'passwordHash'> & { password: string }`).
+Do **not** use `defineModel(users, { base: AuthenticatableModel })` — the inferred createType requires
+every non-defaulted column, so `create({ name, email, password })` would demand `passwordHash`.
 
 ## Statics
 

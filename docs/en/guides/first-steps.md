@@ -70,12 +70,10 @@ export const ListPostsQuerySchema = z.object({
 `app/Models/Post.ts` binds a class to a Drizzle table from `db/schema.ts`:
 
 ```ts
-import { Model } from '@guren/orm'
+import { defineModel } from '@guren/orm'
 import { posts } from '@/db/schema'
 
-export class Post extends Model<typeof posts> {
-  static table = posts
-}
+export class Post extends defineModel(posts) {}
 ```
 
 Queries read like Laravel: `Post.find(1)`, `Post.findOrFail(1)` (throws a 404), `Post.where('published', true).get()`. Column types flow from the schema into every result. See the [Database Guide](./database.md).

@@ -9,8 +9,8 @@ export class User extends AuthenticatableModel<UserRecord> {
   static override table = users
   static fillable = ['name', 'email', 'password']
   static guarded = ['id', 'passwordHash', 'createdAt', 'updatedAt']
-  static override readonly recordType = {} as UserRecord
-  static override readonly createType = {} as Omit<NewUserRecord, 'passwordHash'> & {
+  declare static readonly recordType: UserRecord
+  declare static readonly createType: Omit<NewUserRecord, 'passwordHash'> & {
     password: string
   }
   static override relationTypes: { tasks: HasManyRecord<TaskRecord> } = {

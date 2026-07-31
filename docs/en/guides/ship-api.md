@@ -57,12 +57,10 @@ bunx guren make:model Task
 Then wire it to your schema:
 
 ```typescript
-import { Model } from '@guren/core'
+import { defineModel } from '@guren/core'
 import { tasks } from '@/db/schema'
 
-export class Task extends Model<typeof tasks> {
-  static table = tasks
-}
+export class Task extends defineModel(tasks) {}
 ```
 
 ## 5. Create the Controller

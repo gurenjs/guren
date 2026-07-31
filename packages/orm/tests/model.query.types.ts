@@ -17,7 +17,7 @@ export type UserRecord = typeof users.$inferSelect
 
 class User extends Model<UserRecord> {
   static override table = users
-  static override readonly recordType = {} as UserRecord
+  declare static readonly recordType: UserRecord
 }
 
 class FactoryUser extends defineModel(users) {}
