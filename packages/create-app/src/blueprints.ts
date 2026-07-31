@@ -259,7 +259,12 @@ export const users = pgTable('users', {
   }
 
   if (driver === 'mysql') {
-    return `import { mysqlTable, int, varchar, timestamp } from '@guren/orm/drizzle'
+    // MySQL uses drizzle-orm directly — @guren/orm/drizzle re-exports the
+    // PostgreSQL builders under the plain names (`timestamp`, `text`), so a
+    // MySQL table imported from there is built out of pg column builders.
+    // This is also the module `guren add auth` / `add resource` merge their
+    // new columns into.
+    return `import { mysqlTable, int, varchar, timestamp } from 'drizzle-orm/mysql-core'
 
 export const users = mysqlTable('users', {
   id: int('id').primaryKey().autoincrement(),
