@@ -70,6 +70,34 @@ const WEBHOOK_PATH_PATTERN = /(webhook|callback)/i
 
 const AUTH_MIDDLEWARE_PATTERN = /auth/i
 
+export type AuthMiddlewareVerdict =
+  /** A middleware in the chain carries the framework's authentication capability. */
+  | 'verified'
+  /** Old server without capability support; a middleware *name* matched /auth/i. */
+  | 'legacy-name-match'
+  /** Capabilities are supported, no guard found, but a name looks auth-like. */
+  | 'unverified-auth-name'
+  /** No authentication middleware detected by any signal. */
+  | 'none'
+
+/**
+ * Exported for tests. `route` is the shape `Router.definitions()` returns:
+ * `capabilities` is always present (possibly empty) on servers with
+ * capability support, and absent entirely on older servers.
+ */
+export function authMiddlewareVerdict(route: {
+  middlewareNames?: string[]
+  capabilities?: { authentication?: { mode: string } }
+}): AuthMiddlewareVerdict {
+  if (route.capabilities?.authentication?.mode === 'required') return 'verified'
+
+  const nameMatches = (route.middlewareNames ?? []).some((name) => AUTH_MIDDLEWARE_PATTERN.test(name))
+  if (route.capabilities === undefined) {
+    return nameMatches ? 'legacy-name-match' : 'none'
+  }
+  return nameMatches ? 'unverified-auth-name' : 'none'
+}
+
 /**
  * Calls that actually reject unauthenticated requests. Optional reads like
  * `auth.user()`, `auth.id()`, or `auth.check()` do not enforce anything on
@@ -464,7 +492,13 @@ async function auditRoutes(
     if (GUEST_PATH_PATTERN.test(route.path)) continue
 
     const middlewareNames = route.middlewareNames ?? []
-    const hasAuthMiddleware = middlewareNames.some((name) => AUTH_MIDDLEWARE_PATTERN.test(name))
+    // Capability verdict (RFC 0007): the server stamps its auth guards
+    // (requireAuthenticated/requireGuest) and definitions() aggregates the
+    // stamps across aliases, groups, and inline handlers. An older server
+    // emits no `capabilities` field at all — only then fall back to the
+    // pre-capability name heuristic so mixed-version apps don't regress.
+    const verdict = authMiddlewareVerdict(route)
+    const hasAuthMiddleware = verdict === 'verified' || verdict === 'legacy-name-match'
     const hasControllerAuth = methodInfo ? AUTH_CALL_PATTERN.test(methodInfo.body) : false
 
     if (hasAuthMiddleware || hasControllerAuth) {
@@ -473,9 +507,21 @@ async function auditRoutes(
           `authz:${routeLabel}`,
           routeLabel,
           'pass',
-          hasAuthMiddleware
-            ? `Protected by middleware: ${middlewareNames.join(', ')}.`
-            : `Controller checks authentication in ${controllerKey}.`,
+          verdict === 'verified'
+            ? 'Protected by an authentication guard (verified via middleware capabilities).'
+            : verdict === 'legacy-name-match'
+              ? `Protected by middleware: ${middlewareNames.join(', ')}.`
+              : `Controller checks authentication in ${controllerKey}.`,
+        ),
+      )
+    } else if (verdict === 'unverified-auth-name') {
+      findings.push(
+        finding(
+          `authz:${routeLabel}`,
+          routeLabel,
+          'warn',
+          `Middleware (${middlewareNames.join(', ')}) is named like an auth guard but is not one the framework recognizes.`,
+          'Use requireAuthenticated() from @guren/core (recognized inline or aliased), or suppress via config/audit.ts if this middleware really enforces authentication.',
         ),
       )
     } else if (route.hasInlineMiddleware) {
@@ -484,8 +530,8 @@ async function auditRoutes(
           `authz:${routeLabel}`,
           routeLabel,
           'warn',
-          'Inline middleware is attached but cannot be inspected — verify it enforces authentication.',
-          'Prefer named middleware via router.aliasMiddleware() so audits can verify protection.',
+          'Inline middleware is attached but is not a recognized authentication guard.',
+          'Use requireAuthenticated() from @guren/core (recognized inline or aliased), or suppress via config/audit.ts if this middleware really enforces authentication.',
         ),
       )
     } else if (WEBHOOK_PATH_PATTERN.test(route.path)) {
