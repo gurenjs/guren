@@ -863,6 +863,8 @@ import type { PropsWithChildren } from 'react'
 export default function Layout({ children }: PropsWithChildren) {
   const { props } = usePage<{ auth?: { user?: { name?: string } } }>()
   const user = props.auth?.user
+  const navButtonClass =
+    'rounded border border-emerald-500 px-3 py-1 text-emerald-200 transition hover:bg-emerald-500 hover:text-slate-950'
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
@@ -879,19 +881,14 @@ export default function Layout({ children }: PropsWithChildren) {
               Dashboard
             </Link>
             {user ? (
-              <form method="post" action="/logout">
-                <button
-                  type="submit"
-                  className="rounded border border-emerald-500 px-3 py-1 text-emerald-200 transition hover:bg-emerald-500 hover:text-slate-950"
-                >
-                  Log out
-                </button>
-              </form>
+              // Inertia's HTTP client copies the XSRF-TOKEN cookie into the
+              // request header. A native <form> does not, so CSRF protection
+              // would answer 403 and leave the session signed in.
+              <Link href="/logout" method="post" as="button" className={navButtonClass}>
+                Log out
+              </Link>
             ) : (
-              <Link
-                href="/login"
-                className="rounded border border-emerald-500 px-3 py-1 text-emerald-200 transition hover:bg-emerald-500 hover:text-slate-950"
-              >
+              <Link href="/login" className={navButtonClass}>
                 Sign in
               </Link>
             )}

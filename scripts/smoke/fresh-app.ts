@@ -328,6 +328,12 @@ async function assertCanonicalScaffolds(appDir: string): Promise<void> {
 
   const postsIndexPage = await readFile(join(appDir, 'resources/js/pages/posts/Index.tsx'), 'utf8')
   assert(postsIndexPage.includes('interface Props') || postsIndexPage.includes('PaginatedPageProps'), 'Posts index page must define Props.')
+
+  const layout = await readFile(join(appDir, 'resources/js/components/Layout.tsx'), 'utf8')
+  assert(!layout.includes('action="/logout"'), 'Auth layout must not log out through a native form POST — CSRF rejects it.')
+  assert(layout.includes('href="/logout"'), 'Auth layout must log out through an Inertia Link.')
+  assert(layout.includes('method="post"'), 'Auth layout logout Link must POST — the default GET does not match the route.')
+  assert(layout.includes('as="button"'), 'Auth layout logout Link must render as a button.')
 }
 
 async function assertFeatureScaffolds(appDir: string): Promise<void> {
