@@ -44,8 +44,25 @@ export {
 } from './entity-context'
 export { routeDefinitionToContextRoute, loadContextRoutes, type ContextRoute } from './context-route'
 export { createFreshContextApi } from './fresh-context'
-export { scanDocs, parseDocFrontmatter, extractDocsTags, type DocRef } from './docs-index'
+export {
+  scanDocs,
+  parseDocFrontmatter,
+  extractDocsTags,
+  extractMarkdownLinks,
+  type DocRef,
+  type DocActorEvent,
+} from './docs-index'
 export { runDocsCheck } from './docs-check'
+// The docs viewer's server-side half calls exactly these two (see
+// DocsViewerCliApi); the graph builder and renderer behind them stay
+// package-internal.
+export {
+  buildDocsViewerData,
+  docsViewerAssetPath,
+  type DocsViewerData,
+  type DocsViewerDoc,
+  type DocTrustTier,
+} from './docs-viewer'
 export {
   generateSpecArtifacts,
   writeSpecArtifacts,

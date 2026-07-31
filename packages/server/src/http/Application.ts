@@ -14,6 +14,7 @@ import type { CreateSessionMiddlewareOptions } from './middleware/session'
 import { createSecurityHeaders, type SecurityHeadersOptions } from './middleware/security-headers'
 import { createHostAuthorizationMiddleware, type HostAuthorizationOptions } from './middleware/host-authorization'
 import { isMcpEndpointEnabled } from '../mcp/endpoint'
+import { isDocsViewerEnabled } from '../docs-viewer/endpoint'
 import { logDevServerBanner, type DevBannerOptions } from './dev-banner'
 import { startViteDevServer, type StartViteDevServerOptions } from './vite-dev-server'
 
@@ -339,7 +340,18 @@ export class Application {
     await this.options.boot?.(this.hono)
 
     await this.mountRoutes()
-    await this.mountMcpEndpoint()
+    // MCP endpoint (/_guren/mcp): project introspection for AI agents.
+    await this.mountDevEndpoint(
+      isMcpEndpointEnabled(),
+      async () => (await import('../mcp/McpServiceProvider')).McpServiceProvider,
+      'GUREN_MCP=1 but the MCP endpoint could not load — is @modelcontextprotocol/sdk installed?',
+    )
+    // Docs viewer (/_guren/docs): read-only UI over the OKF docs bundle (RFC 0005).
+    await this.mountDevEndpoint(
+      isDocsViewerEnabled(),
+      async () => (await import('../docs-viewer/DocsViewerServiceProvider')).DocsViewerServiceProvider,
+      'GUREN_DOCS=1 but the docs viewer could not load — is @guren/cli resolvable from this app?',
+    )
     await this.providerManager.bootAll()
   }
 
@@ -366,22 +378,33 @@ export class Application {
   }
 
   /**
-   * Mounts the MCP endpoint at /_guren/mcp when enabled.
-   * This allows AI coding agents to introspect the project.
+   * Mounts an opt-in, dev-only framework endpoint: the MCP endpoint
+   * (/_guren/mcp) and the docs viewer (/_guren/docs) both work this way.
+   *
+   * Only the dynamic import is allowed to fail silently — these
+   * providers reach optional dependencies (the MCP SDK, @guren/cli) that
+   * an app need not have installed, and `missing` names that case. A
+   * failure inside the provider's own boot is a real problem and is
+   * rethrown, rather than leaving the developer with a silent 404.
    */
-  private async mountMcpEndpoint(): Promise<void> {
-    if (!isMcpEndpointEnabled()) {
+  private async mountDevEndpoint(
+    enabled: boolean,
+    load: () => Promise<new (container: Container) => ServiceProvider>,
+    missing: string,
+  ): Promise<void> {
+    if (!enabled) return
+
+    let provider: ServiceProvider
+    try {
+      const Provider = await load()
+      provider = new Provider(this.container)
+    } catch {
+      console.warn(`[guren] ${missing}`)
       return
     }
 
-    try {
-      const { McpServiceProvider } = await import('../mcp/McpServiceProvider')
-      const provider = new McpServiceProvider(this.container)
-      provider.register()
-      await provider.boot()
-    } catch {
-      // MCP SDK not installed or failed to load — skip silently
-    }
+    provider.register?.()
+    await provider.boot?.()
   }
 
   /**

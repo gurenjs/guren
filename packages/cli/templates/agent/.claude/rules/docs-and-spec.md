@@ -74,6 +74,16 @@ failures; broken body links and passed `stale_after` dates warn).
 `entities:` list.** After renaming or moving files a doc references,
 update the doc's frontmatter in the same change.
 
+## Browsing the bundle: the docs viewer
+
+`bun run dev` mounts a read-only viewer at
+`http://localhost:3333/_guren/docs` (the `dev` script's `GUREN_DOCS=1`;
+dev-only, loopback-only): the whole bundle as an interactive relation
+graph — docs, entities, and code as nodes, validated links as edges,
+click-through to each document with its frontmatter and trust tier.
+Point the developer there when they ask how the docs hang together;
+it renders the same data `guren context` and `guren check --docs` use.
+
 ## Generated spec views (docs/spec/)
 
 If `docs/spec/` exists, it holds generated views (ER diagram, domain

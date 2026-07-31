@@ -394,8 +394,14 @@ export const handler = createLambdaHandler(app)
 3. Run `bun run test` - all tests pass
 4. Run `bun run audit:core-first` - no `@guren/server` references in docs/templates
 5. Run `bun run audit:docs` - docs reference valid commands and APIs
-6. Review `.claude/rules/common-pitfalls.md` - check for known gotchas
-7. Follow commit message convention
+6. **If you touched `packages/create-app/templates/**` or `packages/cli/templates/**`:**
+   also run `bun run audit:starter-template` and `bun run smoke:starter` /
+   `smoke:starter:api`. The audits assert scaffold contents literally, so a
+   change that reads as harmless (an added env var in a `dev` script) fails CI
+   while `build`/`typecheck`/`test` stay green. The smokes scaffold a real app
+   and take several minutes — judge them by exit code, not by wall time.
+7. Review `.claude/rules/common-pitfalls.md` - check for known gotchas
+8. Follow commit message convention
 
 ## Claude Code Agents
 
