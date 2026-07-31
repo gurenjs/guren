@@ -140,9 +140,14 @@ the JSON report so CI can require a completed scan.
 - **`check --ci`**: plain `guren check` has never set an exit code (a stable
   v1.0 contract this RFC does not change). The new flag gates on any failing
   check, giving scaffolded CI a real gate without a breaking change.
-- **Template dotfile handling**: templates ship `_github/` and the scaffolder
+- **Template dotfile handling**: ~~templates ship `_github/` and the scaffolder
   renames it, extending the existing `_gitignore` mechanism
-  (`packages/create-app/src/blueprints.ts`) to directories.
+  (`packages/create-app/src/blueprints.ts`) to directories.~~
+  **Amended in implementation:** unnecessary — npm keeps dot-directories under
+  `files` entries (it strips only files literally named `.gitignore`, which is
+  what the `_gitignore` convention works around), so templates ship `.github/`
+  as-is. The packed-artifact audit asserts the workflow survives `npm pack` so
+  an npm behavior change cannot regress this silently.
 
 The API-only blueprint gets a variant without browser-specific steps.
 
