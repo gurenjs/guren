@@ -281,21 +281,27 @@ Pair this with the `AuthenticatableModel` base class (see below) to get automati
 Models that extend `AuthenticatableModel` receive first-class password handling. Providing a plain `password` property when calling `create` or `update` automatically hashes and stores it in the `passwordHash` column (configurable via static properties). The framework never persists the plain text password, and authentication continues to rely on the same hashing algorithm as the providers.
 
 ```ts
-import { AuthenticatableModel } from '@guren/core'
+import { AuthenticatableModel, defineModel } from '@guren/core'
 import { users } from '@/db/schema.js'
 
 export type UserRecord = typeof users.$inferSelect
 
-export class User extends AuthenticatableModel<UserRecord> {
-  static override table = users
-  declare static readonly recordType: UserRecord
+export class User extends defineModel(users, {
+  base: AuthenticatableModel,
+  optionalOnCreate: ['passwordHash'],
+  requireOnCreate: ['password'],
+}) {
   // Optional:
   // static override passwordField = 'plainPassword'
   // static override passwordHashField = 'password_digest'
 }
 ```
 
-Auth models extend `AuthenticatableModel` directly instead of using `defineModel()`: the inferred `createType` would require the `passwordHash` column on `create()`, while the auth flow supplies a plain `password` that is hashed automatically. The `declare` line redeclares the compile-time type marker and emits no JavaScript.
+Pass `AuthenticatableModel` as the `base` and reshape the create payload in the same call. The type `defineModel()` infers from the table requires every non-defaulted column, which is the wrong shape here: callers pass a plain `password` the model hashes for them, not a `passwordHash`. `optionalOnCreate` makes the column optional and `requireOnCreate` makes the virtual field required, both at the type level with no cast and no redeclared markers.
+
+Optional means optional: a caller may still pass `passwordHash` and it will type-check. Mass assignment is what keeps a request body from setting its own hash — leave the column out of `fillable`, or list it in `guarded` on models that set no `fillable`.
+
+Leave `requireOnCreate` off when accounts can also arrive without a password — an OAuth-only sign-up, for instance — so `password` stays optional.
 
 The default `AuthServiceProvider` automatically registers a `web` guard that uses the `users` provider. If you need additional guards (e.g. token-based APIs), call `auth.registerGuard('api', factory)` inside the provider and set it as default via `auth.setDefaultGuard('api')` when appropriate.
 
@@ -387,9 +393,11 @@ export function registerWebRoutes(router: Router): void {
 `auth.user()` — and the cached user available right after `login()` or `attempt()` — never exposes credential material. `ModelUserProvider` strips the password column, the remember-token column, and any fields listed in the model's `static hidden` before the record leaves the auth layer:
 
 ```ts
-export class User extends AuthenticatableModel<UserRecord> {
-  static override table = users
-  declare static readonly recordType: UserRecord
+export class User extends defineModel(users, {
+  base: AuthenticatableModel,
+  optionalOnCreate: ['passwordHash'],
+  requireOnCreate: ['password'],
+}) {
   static override hidden = ['passwordHash', 'rememberToken']
 }
 ```

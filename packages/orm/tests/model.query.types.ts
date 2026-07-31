@@ -4,13 +4,23 @@ import {
   Model,
   defineModel,
   type BelongsToRequiredRecord,
+  type PlainObject,
   type TransactionHandle,
   type TransactionModelScope,
 } from '../src/Model'
+import { SoftDeletes } from '../src/SoftDeletes'
 
 const users = pgTable('users', {
   id: serial('id').primaryKey(),
   name: text('name').notNull(),
+})
+
+const accounts = pgTable('accounts', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  email: text('email').notNull(),
+  passwordHash: text('password_hash').notNull(),
+  githubId: text('github_id'),
 })
 
 export type UserRecord = typeof users.$inferSelect
@@ -170,3 +180,120 @@ async function _requiredBelongsTo() {
   }
 }
 void _requiredBelongsTo
+
+// defineModel's create payload can be reshaped at the type level. The base
+// below mirrors @guren/server's AuthenticatableModel, which the ORM cannot
+// import (that would invert the package dependency) — examples/blog and
+// examples/api typecheck the same options against the real class.
+abstract class PasswordHashingModel<TRecord extends PlainObject = PlainObject> extends Model<TRecord> {
+  declare static readonly createType: PlainObject & {
+    password?: string
+    plainPassword?: string
+  }
+}
+
+class Account extends defineModel(accounts, {
+  base: PasswordHashingModel,
+  optionalOnCreate: ['passwordHash'],
+  requireOnCreate: ['password'],
+}) {}
+
+// Making the column optional alone leaves the base's `password` optional too —
+// what a model backed solely by OAuth wants, since it never supplies one.
+class OAuthAccount extends defineModel(accounts, {
+  base: PasswordHashingModel,
+  optionalOnCreate: ['passwordHash'],
+}) {}
+
+async function _reshapedCreatePayload() {
+  await Account.update({ id: 1 }, { password: 'rotated' })
+
+  await OAuthAccount.create({ name: 'Ada', email: 'ada@example.com' })
+
+  const created = await Account.create({ name: 'Ada', email: 'ada@example.com', password: 'secret' })
+  const _hash: string = created.passwordHash // the record type keeps every column
+  void _hash
+}
+void _reshapedCreatePayload
+
+// requireOnCreate in isolation: no column is made optional here, so the only
+// thing missing from the call below is the base's virtual `password`.
+class RequirePasswordAccount extends defineModel(accounts, {
+  base: PasswordHashingModel,
+  requireOnCreate: ['password'],
+}) {}
+async function _requireOnCreateAddsTheNamedField() {
+  await RequirePasswordAccount.create({
+    name: 'Ada',
+    email: 'ada@example.com',
+    passwordHash: 'precomputed',
+    password: 'secret',
+  })
+
+  // @ts-expect-error requireOnCreate put `password` on the required list
+  await RequirePasswordAccount.create({ name: 'Ada', email: 'ada@example.com', passwordHash: 'precomputed' })
+}
+void _requireOnCreateAddsTheNamedField
+
+// optionalOnCreate in isolation: the named column stops being required and
+// keeps its own type, and nothing else moves. The last two calls are what fail
+// if the option's keys ever widen from literals to `string`, which would make
+// every column optional.
+class DerivedHashAccount extends defineModel(accounts, { optionalOnCreate: ['passwordHash'] }) {}
+async function _optionalOnCreateDropsOnlyTheNamedRequirement() {
+  await DerivedHashAccount.create({ name: 'Ada', email: 'ada@example.com' })
+  await DerivedHashAccount.create({ name: 'Ada', email: 'ada@example.com', passwordHash: 'precomputed' })
+
+  // @ts-expect-error the column stays typed even though it is now optional
+  await DerivedHashAccount.create({ name: 'Ada', email: 'ada@example.com', passwordHash: 42 })
+
+  // @ts-expect-error the other columns are still required
+  await DerivedHashAccount.create({ name: 'Ada' })
+}
+void _optionalOnCreateDropsOnlyTheNamedRequirement
+
+// Both options are checked against the table columns and the base's own
+// named create fields, so typos fail to compile.
+// @ts-expect-error 'passwordHassh' is not a column of the table
+class _BadOptional extends defineModel(accounts, { optionalOnCreate: ['passwordHassh'] }) {}
+void _BadOptional
+class _BadRequire extends defineModel(accounts, {
+  base: PasswordHashingModel,
+  // @ts-expect-error 'passwrod' is neither a column nor a field of the base
+  requireOnCreate: ['passwrod'],
+}) {}
+void _BadRequire
+
+// The pre-existing explicit-type-argument spelling still resolves to the type
+// it names, so adding the two option parameters after TCreate is not a break.
+type LegacyCreate = { name: string; email: string; password: string }
+class LegacyAccount extends defineModel<typeof accounts, typeof PasswordHashingModel, LegacyCreate>(accounts, {
+  base: PasswordHashingModel,
+  createType: {} as LegacyCreate,
+}) {}
+async function _explicitTypeArgumentsStillGovern() {
+  await LegacyAccount.create({ name: 'Ada', email: 'ada@example.com', password: 'secret' })
+
+  // @ts-expect-error the explicitly named create type still applies
+  await LegacyAccount.create({ name: 'Ada' })
+}
+void _explicitTypeArgumentsStillGovern
+
+// Without options the create payload still requires every non-defaulted column.
+class PlainAccount extends defineModel(accounts) {}
+async function _inferredCreatePayload() {
+  // @ts-expect-error passwordHash is not defaulted, so it stays required
+  await PlainAccount.create({ name: 'Ada', email: 'ada@example.com' })
+}
+void _inferredCreatePayload
+
+// The SoftDeletes mixin must preserve the inferred markers.
+class SoftAccount extends SoftDeletes(defineModel(accounts)) {}
+async function _softDeletesPreservesInference() {
+  const found = await SoftAccount.find(1)
+  if (found) {
+    const _email: string = found.email
+    void _email
+  }
+}
+void _softDeletesPreservesInference

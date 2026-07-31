@@ -279,21 +279,27 @@ export default class AuthProvider extends ServiceProvider {
 `AuthenticatableModel` を継承したモデルはパスワード処理が組み込まれます。`create` や `update` に平文 `password` を渡すと自動でハッシュ化し、`passwordHash` カラム（静的プロパティで変更可）に保存します。平文は保持せず、プロバイダーと同じアルゴリズムで認証を行います。
 
 ```ts
-import { AuthenticatableModel } from '@guren/core'
+import { AuthenticatableModel, defineModel } from '@guren/core'
 import { users } from '@/db/schema.js'
 
 export type UserRecord = typeof users.$inferSelect
 
-export class User extends AuthenticatableModel<UserRecord> {
-  static override table = users
-  declare static readonly recordType: UserRecord
+export class User extends defineModel(users, {
+  base: AuthenticatableModel,
+  optionalOnCreate: ['passwordHash'],
+  requireOnCreate: ['password'],
+}) {
   // 任意で上書き可能:
   // static override passwordField = 'plainPassword'
   // static override passwordHashField = 'password_digest'
 }
 ```
 
-認証モデルは `defineModel()` ではなく `AuthenticatableModel` を直接継承します。`defineModel` が推論する `createType` は `passwordHash` カラムを `create()` で必須にしてしまいますが、認証フローでは平文の `password` を渡して自動ハッシュ化させるためです。`declare` の行はコンパイル時の型マーカーを再宣言するだけで、JavaScript には出力されません。
+`AuthenticatableModel` を `base` に渡し、同じ呼び出しで create のペイロードを整えます。`defineModel()` がテーブルから推論する型はデフォルト値のない全カラムを必須にしますが、ここではそれが正しい形ではありません。呼び出し側が渡すのは平文の `password` であって `passwordHash` ではないからです。`optionalOnCreate` がカラムを任意にし、`requireOnCreate` が仮想フィールドを必須にします。どちらも型レベルの指定で、キャストも型マーカーの再宣言も不要です。
+
+任意にするだけなので、呼び出し側が `passwordHash` を渡しても型としては通ります。リクエストボディが自前のハッシュを設定するのを防ぐのはマスアサインメント側です。`fillable` にこのカラムを入れない、あるいは `fillable` を設定しないモデルでは `guarded` に列挙してください。
+
+OAuth 専用のサインアップなどパスワードなしでアカウントが作られる場合は `requireOnCreate` を付けず、`password` を任意のままにします。
 
 既定の `AuthServiceProvider` は `users` プロバイダーを使う `web` ガードを自動登録します。追加のガード（例: トークンベース API）が必要なら、`context.auth.registerGuard('api', factory)` を呼び、必要に応じて `context.auth.setDefaultGuard('api')` で既定を差し替えます。
 
@@ -384,9 +390,11 @@ export function registerWebRoutes(router: Router): void {
 `auth.user()`（および `login()` / `attempt()` 直後にキャッシュされるユーザー）が資格情報を露出することはありません。`ModelUserProvider` は、レコードが認証レイヤーを出る前に、パスワードカラム・remember トークンカラム・モデルの `static hidden` に列挙されたフィールドを除去します。
 
 ```ts
-export class User extends AuthenticatableModel<UserRecord> {
-  static override table = users
-  declare static readonly recordType: UserRecord
+export class User extends defineModel(users, {
+  base: AuthenticatableModel,
+  optionalOnCreate: ['passwordHash'],
+  requireOnCreate: ['password'],
+}) {
   static override hidden = ['passwordHash', 'rememberToken']
 }
 ```

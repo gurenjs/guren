@@ -159,9 +159,11 @@ export class <Name> extends defineModel(<names>) {
 For User models, also define `guarded` to explicitly protect sensitive fields:
 
 ```typescript
-export class User extends AuthenticatableModel<UserRecord> {
-  static override table = users
-  declare static readonly recordType: UserRecord
+export class User extends defineModel(users, {
+  base: AuthenticatableModel,
+  optionalOnCreate: ['passwordHash'],
+  requireOnCreate: ['password'],
+}) {
   static fillable = ['name', 'email', 'password']
   static guarded = ['id', 'passwordHash', 'rememberToken']
 }

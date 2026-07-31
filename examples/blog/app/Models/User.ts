@@ -1,19 +1,18 @@
-import { AuthenticatableModel, type HasManyRecord } from '@guren/core'
+import { AuthenticatableModel, defineModel, type HasManyRecord } from '@guren/core'
 import { users } from '../../db/schema.js'
 import type { PostRecord } from './Post.js'
 
 export type UserRecord = typeof users.$inferSelect
 export type NewUserRecord = typeof users.$inferInsert
 
-export class User extends AuthenticatableModel<UserRecord> {
-  static override table = users
+export class User extends defineModel(users, {
+  base: AuthenticatableModel,
+  optionalOnCreate: ['passwordHash'],
+  requireOnCreate: ['password'],
+}) {
   static fillable = ['name', 'email', 'password', 'emailVerifiedAt', 'githubId', 'googleId']
   static guarded = ['id', 'passwordHash', 'rememberToken']
   static override hidden = ['passwordHash', 'rememberToken']
-  declare static readonly recordType: UserRecord
-  declare static readonly createType: Omit<NewUserRecord, 'passwordHash'> & {
-    password: string
-  }
   static override relationTypes: { posts: HasManyRecord<PostRecord> } = {
     posts: [],
   }
