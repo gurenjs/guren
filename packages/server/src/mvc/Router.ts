@@ -591,15 +591,13 @@ export class Router<M extends string = never> {
     const aggregated: MiddlewareCapabilities = {}
     const visited = seen ?? new Set<string>()
 
-    const merge = (handler: MiddlewareHandler): void => {
-      const capabilities = capabilitiesOf(handler)
-      if (!capabilities) return
-      if (capabilities.authentication) {
-        // 'required' wins: a route that both requires auth and (oddly)
-        // requires guest is reported as requiring auth.
-        if (!aggregated.authentication || capabilities.authentication.mode === 'required') {
-          aggregated.authentication = capabilities.authentication
-        }
+    const absorb = (capabilities: MiddlewareCapabilities | undefined): void => {
+      const auth = capabilities?.authentication
+      if (!auth) return
+      // 'required' wins: a route that both requires auth and (oddly)
+      // requires guest is reported as requiring auth.
+      if (!aggregated.authentication || auth.mode === 'required') {
+        aggregated.authentication = auth
       }
     }
 
@@ -609,20 +607,14 @@ export class Router<M extends string = never> {
 
       const groupNames = this.middlewareGroups.get(name)
       if (groupNames) {
-        const nested = this.aggregateCapabilities(groupNames, [], visited)
-        if (nested.authentication) {
-          if (!aggregated.authentication || nested.authentication.mode === 'required') {
-            aggregated.authentication = nested.authentication
-          }
-        }
+        absorb(this.aggregateCapabilities(groupNames, [], visited))
         continue
       }
 
-      const handler = this.middlewareAliases.get(name)
-      if (handler) merge(handler)
+      absorb(capabilitiesOf(this.middlewareAliases.get(name)))
     }
 
-    for (const handler of inline) merge(handler)
+    for (const handler of inline) absorb(capabilitiesOf(handler))
 
     return aggregated
   }

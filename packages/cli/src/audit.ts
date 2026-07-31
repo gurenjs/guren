@@ -9,6 +9,7 @@ import {
   listModuleNames,
 } from './discovery'
 import { loadRouteDefinitions } from './load-routes'
+import type { RouteDefinition } from '@guren/core'
 import {
   classifyFindingKey,
   primaryClassificationId,
@@ -70,6 +71,9 @@ const WEBHOOK_PATH_PATTERN = /(webhook|callback)/i
 
 const AUTH_MIDDLEWARE_PATTERN = /auth/i
 
+const UNRECOGNIZED_GUARD_SUGGESTION =
+  'Use requireAuthenticated() from @guren/core (recognized inline or aliased), or suppress via config/audit.ts if this middleware really enforces authentication.'
+
 export type AuthMiddlewareVerdict =
   /** A middleware in the chain carries the framework's authentication capability. */
   | 'verified'
@@ -83,12 +87,13 @@ export type AuthMiddlewareVerdict =
 /**
  * Exported for tests. `route` is the shape `Router.definitions()` returns:
  * `capabilities` is always present (possibly empty) on servers with
- * capability support, and absent entirely on older servers.
+ * capability support, and absent entirely on older servers. Typed against
+ * the server's own RouteDefinition so a capability-shape change over there
+ * breaks this compile instead of silently mis-detecting.
  */
-export function authMiddlewareVerdict(route: {
-  middlewareNames?: string[]
-  capabilities?: { authentication?: { mode: string } }
-}): AuthMiddlewareVerdict {
+export function authMiddlewareVerdict(
+  route: Pick<RouteDefinition, 'middlewareNames' | 'capabilities'>,
+): AuthMiddlewareVerdict {
   if (route.capabilities?.authentication?.mode === 'required') return 'verified'
 
   const nameMatches = (route.middlewareNames ?? []).some((name) => AUTH_MIDDLEWARE_PATTERN.test(name))
@@ -521,7 +526,7 @@ async function auditRoutes(
           routeLabel,
           'warn',
           `Middleware (${middlewareNames.join(', ')}) is named like an auth guard but is not one the framework recognizes.`,
-          'Use requireAuthenticated() from @guren/core (recognized inline or aliased), or suppress via config/audit.ts if this middleware really enforces authentication.',
+          UNRECOGNIZED_GUARD_SUGGESTION,
         ),
       )
     } else if (route.hasInlineMiddleware) {
@@ -531,7 +536,7 @@ async function auditRoutes(
           routeLabel,
           'warn',
           'Inline middleware is attached but is not a recognized authentication guard.',
-          'Use requireAuthenticated() from @guren/core (recognized inline or aliased), or suppress via config/audit.ts if this middleware really enforces authentication.',
+          UNRECOGNIZED_GUARD_SUGGESTION,
         ),
       )
     } else if (WEBHOOK_PATH_PATTERN.test(route.path)) {
