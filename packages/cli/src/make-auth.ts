@@ -2,6 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, relative, resolve, sep as pathSep } from 'node:path'
 import { consola } from 'consola'
 import { writeFilesSafe, type WriterOptions } from './utils'
+import { readIfExists } from './discovery'
 import {
   addImport,
   addProvider,
@@ -1713,7 +1714,15 @@ ${registerRoutes}${resetRoutes}${verifyRoutes}${oauthRoutes}
 `
 }
 
-const seederTemplate = `import { defineSeeder, ScryptHasher } from '@guren/core'
+// Re-running the seeder must not fail on the unique email. MySQL has no
+// `onConflictDoNothing` — INSERT IGNORE is its equivalent, and it is a
+// builder method that has to come before values().
+function buildSeederTemplate(dialect: SchemaDialect): string {
+  const isMysql = dialect === 'mysql'
+  const ignore = isMysql ? '\n    .ignore()' : ''
+  const onConflict = isMysql ? '' : '\n    .onConflictDoNothing({ target: users.email })'
+
+  return `import { defineSeeder, ScryptHasher } from '@guren/core'
 import { users } from '../schema.js'
 
 export default defineSeeder(async ({ db }) => {
@@ -1721,19 +1730,25 @@ export default defineSeeder(async ({ db }) => {
   const passwordHash = await hasher.hash('secret')
 
   await db
-    .insert(users)
+    .insert(users)${ignore}
     .values([
       {
         name: 'Demo User',
         email: 'demo@example.com',
         passwordHash,
       },
-    ])
-    .onConflictDoNothing({ target: users.email })
+    ])${onConflict}
 })
 `
+}
 
 type SchemaDialect = 'sqlite' | 'pg' | 'mysql'
+
+/** Dialect of the project's db/schema.ts, defaulting to pg when there is none yet. */
+async function detectProjectDialect(): Promise<SchemaDialect> {
+  const content = await readIfExists(process.cwd(), 'db/schema.ts')
+  return content === null ? 'pg' : detectSchemaDialect(content)
+}
 
 function detectSchemaDialect(content: string): SchemaDialect {
   if (content.includes('sqliteTable') || content.includes('drizzle-orm/sqlite-core')) {
@@ -2170,8 +2185,9 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
       { path: 'app/Http/Validators/LoginValidator.ts', contents: loginValidatorTemplate },
       // The demo user only exists to be signed in as with a password. Without
       // password login it is an unreachable row — and seeding it would hash a
-      // password with scrypt, the exact cost --oauth-only avoids.
-      { path: 'db/seeders/UsersSeeder.ts', contents: seederTemplate },
+      // password with scrypt, the exact cost --oauth-only avoids. The seeder is
+      // the only dialect-sensitive file here, so the schema is read only now.
+      { path: 'db/seeders/UsersSeeder.ts', contents: buildSeederTemplate(await detectProjectDialect()) },
     )
   }
 

@@ -4,9 +4,13 @@ import { makeModel } from './make-model'
 import { makePolicy } from './make-policy'
 import { makeTest } from './make-test'
 
+export const FIELD_TYPES = ['string', 'number', 'boolean', 'text', 'date', 'json'] as const
+
+export type FieldType = (typeof FIELD_TYPES)[number]
+
 export interface FieldDefinition {
   name: string
-  type: 'string' | 'number' | 'boolean' | 'text' | 'date' | 'json'
+  type: FieldType
   nullable?: boolean
 }
 
@@ -39,12 +43,18 @@ export function parseFieldsString(fieldsStr: string): FieldDefinition[] {
 
     if (!name) throw new Error(`Invalid field definition: "${field}"`)
 
-    const validTypes = ['string', 'number', 'boolean', 'text', 'date', 'json']
-    if (!validTypes.includes(type)) {
-      throw new Error(`Invalid field type "${type}" for field "${name}". Valid: ${validTypes.join(', ')}`)
+    // The name is interpolated raw into interfaces, object literals, and
+    // property access, so anything that is not an identifier would emit
+    // generated code that does not parse.
+    if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/u.test(name)) {
+      throw new Error(`Invalid field name "${name}". Field names must be valid JavaScript identifiers.`)
     }
 
-    return { name, type: type as FieldDefinition['type'], nullable }
+    if (!(FIELD_TYPES as readonly string[]).includes(type)) {
+      throw new Error(`Invalid field type "${type}" for field "${name}". Valid: ${FIELD_TYPES.join(', ')}`)
+    }
+
+    return { name, type: type as FieldType, nullable }
   })
 }
 
@@ -95,7 +105,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     },
     {
       path: `resources/js/pages/${pagePrefix}${routeName}/Edit.tsx`,
-      contents: generateEditPage(singular, routeName, variableName, fields),
+      contents: generateEditPage(singular, routeName, variableName, fields, appPrefix),
     },
   ], writerOptions)
 
@@ -177,45 +187,139 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
 
 // --- Template generators ---
 
-function drizzleColumnType(field: FieldDefinition): string {
-  const map: Record<string, string> = {
-    string: 'text',
-    text: 'text',
-    number: 'integer',
-    boolean: 'boolean',
-    date: 'timestamp',
-    json: 'jsonb',
-  }
-  const col = map[field.type] ?? 'text'
-  const nullable = field.nullable ? '' : '.notNull()'
-  return `${field.name}: ${col}('${field.name}')${nullable}`
+// Keyed by FieldType rather than string so a new field type fails to compile
+// until every mapping below covers it — a silent `?? 'string'` fallback is how
+// a type ends up generating code for the wrong column shape.
+const ZOD_SCHEMAS: Record<FieldType, string> = {
+  string: 'z.string().trim().min(1)',
+  text: 'z.string().trim().min(1)',
+  number: 'z.coerce.number()',
+  boolean: 'z.boolean()',
+  date: 'z.coerce.date()',
+  json: 'z.record(z.string(), z.unknown())',
+}
+
+const TS_TYPES: Record<FieldType, string> = {
+  string: 'string',
+  text: 'string',
+  number: 'number',
+  boolean: 'boolean',
+  date: 'string',
+  json: 'Record<string, unknown>',
 }
 
 function zodFieldType(field: FieldDefinition): string {
-  const map: Record<string, string> = {
-    string: 'z.string().trim().min(1)',
-    text: 'z.string().trim().min(1)',
-    number: 'z.coerce.number()',
-    boolean: 'z.boolean()',
-    date: 'z.coerce.date()',
-    json: 'z.record(z.unknown())',
-  }
-  let schema = map[field.type] ?? 'z.string()'
-  if (field.nullable) schema += '.nullable().optional()'
-  return schema
+  const schema = ZOD_SCHEMAS[field.type]
+  return field.nullable ? `${schema}.nullable().optional()` : schema
 }
 
 function tsFieldType(field: FieldDefinition): string {
-  const map: Record<string, string> = {
-    string: 'string',
-    text: 'string',
-    number: 'number',
-    boolean: 'boolean',
-    date: 'string',
-    json: 'Record<string, unknown>',
-  }
-  const base = map[field.type] ?? 'string'
+  const base = TS_TYPES[field.type]
   return field.nullable ? `${base} | null` : base
+}
+
+/**
+ * Expression that reads a column off the model record and returns it in the
+ * JSON-serializable shape `tsFieldType()` promises.
+ *
+ * Date columns are the only ones that need real work: the record type is a
+ * `Date` on postgres/mysql/sqlite timestamp columns, so it has to be turned
+ * into an ISO string explicitly. The `string | number | Date` cast keeps the
+ * expression valid whichever representation the column was hand-edited to.
+ */
+function resourceValueExpression(field: FieldDefinition): string {
+  const source = `this.resource.${field.name}`
+
+  if (field.type === 'date') {
+    const iso = `new Date(${source} as string | number | Date).toISOString()`
+    return field.nullable ? `${source} == null ? null : ${iso}` : iso
+  }
+
+  return field.nullable
+    ? `(${source} as ${tsFieldType(field)}) ?? null`
+    : `${source} as ${tsFieldType(field)}`
+}
+
+/**
+ * Expression that renders a `ResourceData` field as page text. Booleans read
+ * better as Yes/No, and objects are not valid `ReactNode`s.
+ */
+function resourceDisplayExpression(field: FieldDefinition, variableName: string): string {
+  const access = `${variableName}.${field.name}`
+
+  if (field.type === 'boolean') return `${access} ? 'Yes' : 'No'`
+  if (field.type === 'json') return `JSON.stringify(${access})`
+  return field.nullable ? `${access} ?? ''` : access
+}
+
+/**
+ * The form data type for the New/Edit pages.
+ *
+ * It is the route's request body type, except that `json` fields are edited as
+ * raw JSON text: an object value fails Inertia's `FormDataType` constraint
+ * (`unknown` is not `FormDataConvertible`) and cannot back a textarea, so the
+ * form holds the source text and `submitStatements()` parses it on submit.
+ */
+function formDataType(routeName: string, fields: FieldDefinition[]): string {
+  const body = `ApiRoutes['${routeName}.store']['body']`
+  const jsonFields = fields.filter((f) => f.type === 'json')
+  if (jsonFields.length === 0) return body
+
+  const omitted = jsonFields.map((f) => `'${f.name}'`).join(' | ')
+  const overrides = jsonFields.map((f) => `${f.name}: string`).join('; ')
+  return `Omit<${body}, ${omitted}> & { ${overrides} }`
+}
+
+/**
+ * The `onSubmit` attribute for the New/Edit form.
+ *
+ * With no json fields this is the one-liner it has always been. json fields
+ * hold source text that has to become an object before it is sent, and a typo
+ * in that text must surface as a form error rather than an exception thrown out
+ * of the handler — so those pages get a block body that parses first and
+ * installs the transform only once every field parsed.
+ */
+function submitHandler(fields: FieldDefinition[], submitCall: string): string {
+  const jsonFields = fields.filter((f) => f.type === 'json')
+
+  if (jsonFields.length === 0) {
+    return `onSubmit={(event) => { event.preventDefault(); ${submitCall} }}`
+  }
+
+  const parses = jsonFields.map((f) => {
+    const parse = f.nullable
+      ? `form.data.${f.name} ? JSON.parse(form.data.${f.name}) : null`
+      : `JSON.parse(form.data.${f.name})`
+    return `        let ${f.name}: unknown
+        try {
+          ${f.name} = ${parse}
+        } catch {
+          form.setError('${f.name}', 'Enter valid JSON.')
+          return
+        }`
+  }).join('\n')
+
+  const overrides = jsonFields.map((f) => f.name).join(', ')
+
+  return `onSubmit={(event) => {
+        event.preventDefault()
+${parses}
+        form.transform((data) => ({ ...data, ${overrides} }))
+        ${submitCall}
+      }}`
+}
+
+/** Module-level helpers the generated form fields call. */
+function formPageHelpers(fields: FieldDefinition[]): string {
+  if (!fields.some((f) => f.type === 'date')) return ''
+
+  return `
+function toDateInputValue(value: Date | string | null | undefined): string {
+  if (!value) return ''
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10)
+}
+`
 }
 
 function generateValidator(singular: string, collection: string, fields: FieldDefinition[]): string {
@@ -246,12 +350,7 @@ function generateResource(singular: string, fields: FieldDefinition[]): string {
 
   const toArrayFields = [
     '      id: this.resource.id as number,',
-    ...fields.map((f) => {
-      if (f.nullable) {
-        return `      ${f.name}: (this.resource.${f.name} as ${tsFieldType(f)}) ?? null,`
-      }
-      return `      ${f.name}: this.resource.${f.name} as ${tsFieldType(f)},`
-    }),
+    ...fields.map((f) => `      ${f.name}: ${resourceValueExpression(f)},`),
   ].join('\n')
 
   return `import { Resource } from '@guren/core'
@@ -377,8 +476,8 @@ function generateIndexPage(
   fields: FieldDefinition[],
   appPrefix: string,
 ): string {
-  const titleField = fields[0]?.name ?? 'id'
-  const summaryField = fields.length > 1 ? fields[1]?.name : null
+  const titleField = fields[0] ? resourceDisplayExpression(fields[0], variableName) : `${variableName}.id`
+  const summaryField = fields[1] ? resourceDisplayExpression(fields[1], variableName) : null
 
   return `import { Link } from '@inertiajs/react'
 import type { PaginatedPageProps } from '@guren/core'
@@ -397,8 +496,8 @@ export default function ${collection}Index({ data, pagination }: Props) {
       <div className="space-y-4">
         {data.map((${variableName}) => (
           <article key={${variableName}.id} className="rounded border p-4">
-            <Link href={route('${routeName}.show', { id: ${variableName}.id })} className="text-xl font-medium">{${variableName}.${titleField}}</Link>
-${summaryField ? `            <p className="mt-2 text-sm text-zinc-600">{${variableName}.${summaryField} ?? ''}</p>` : ''}
+            <Link href={route('${routeName}.show', { id: ${variableName}.id })} className="text-xl font-medium">{${titleField}}</Link>
+${summaryField ? `            <p className="mt-2 text-sm text-zinc-600">{${summaryField}}</p>` : ''}
           </article>
         ))}
       </div>
@@ -424,12 +523,9 @@ function generateShowPage(
   fields: FieldDefinition[],
   appPrefix: string,
 ): string {
-  const fieldRenders = fields.map((f) => {
-    if (f.type === 'boolean') {
-      return `      <p><strong>${f.name}:</strong> {${variableName}.${f.name} ? 'Yes' : 'No'}</p>`
-    }
-    return `      <p><strong>${f.name}:</strong> {${variableName}.${f.name}${f.nullable ? " ?? ''" : ''}}</p>`
-  }).join('\n')
+  const fieldRenders = fields
+    .map((f) => `      <p><strong>${f.name}:</strong> {${resourceDisplayExpression(f, variableName)}}</p>`)
+    .join('\n')
 
   return `import { Link } from '@inertiajs/react'
 import type { ${singular}ResourceData } from '@/${appPrefix}app/Http/Resources/${singular}Resource'
@@ -467,24 +563,22 @@ function generateNewPage(
   routeName: string,
   fields: FieldDefinition[],
 ): string {
-  const defaults = fields.map((f) => {
-    const defaultVal = f.type === 'boolean' ? 'false' : f.type === 'number' ? '0' : "''"
-    return `${f.name}: ${defaultVal}`
-  }).join(', ')
+  const defaults = fields.map((f) => `${f.name}: ${newPageDefault(f)}`).join(', ')
 
   const formFields = fields.map((f) => generateFormField(f, 'form')).join('\n')
+  const onSubmit = submitHandler(fields, `form.post(route('${routeName}.store'))`)
 
   return `import { useForm } from '@inertiajs/react'
 import type { ApiRoutes } from '@/.guren/api-client.gen'
 import { route } from '@/.guren/routes.gen'
 
-type ${singular}FormData = ApiRoutes['${routeName}.store']['body']
-
+type ${singular}FormData = ${formDataType(routeName, fields)}
+${formPageHelpers(fields)}
 export default function New${singular}() {
   const form = useForm<${singular}FormData>({ ${defaults} })
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
-      <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); form.post(route('${routeName}.store')) }}>
+      <form className="space-y-4" ${onSubmit}>
 ${formFields}
         <button type="submit" className="rounded bg-black px-4 py-2 text-white">Create</button>
       </form>
@@ -499,31 +593,31 @@ function generateEditPage(
   routeName: string,
   variableName: string,
   fields: FieldDefinition[],
+  appPrefix: string,
 ): string {
-  const defaults = fields.map((f) => {
-    const defaultVal = f.nullable ? ` ?? ${f.type === 'boolean' ? 'false' : f.type === 'number' ? '0' : "''"}` : ''
-    return `${f.name}: ${variableName}.${f.name}${defaultVal}`
-  }).join(', ')
+  const defaults = fields.map((f) => `${f.name}: ${editPageDefault(f, variableName)}`).join(', ')
 
   const formFields = fields.map((f) => generateFormField(f, 'form')).join('\n')
+  const onSubmit = submitHandler(fields, `form.put(route('${routeName}.update', { id: ${variableName}.id }))`)
 
   return `import { useForm } from '@inertiajs/react'
 import type { ApiRoutes } from '@/.guren/api-client.gen'
 import type { RouteErrors } from '@guren/inertia-client/typed-forms'
+import type { ${singular}ResourceData } from '@/${appPrefix}app/Http/Resources/${singular}Resource'
 import { route } from '@/.guren/routes.gen'
 
-type ${singular}FormData = ApiRoutes['${routeName}.store']['body']
+type ${singular}FormData = ${formDataType(routeName, fields)}
 
 interface Props {
-  ${variableName}: ${singular}FormData & { id: number }
+  ${variableName}: ${singular}ResourceData
   errors?: RouteErrors<${singular}FormData> & { message?: string }
 }
-
+${formPageHelpers(fields)}
 export default function Edit${singular}({ ${variableName} }: Props) {
   const form = useForm<${singular}FormData>({ ${defaults} })
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
-      <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); form.put(route('${routeName}.update', { id: ${variableName}.id })) }}>
+      <form className="space-y-4" ${onSubmit}>
 ${formFields}
         <button type="submit" className="rounded bg-black px-4 py-2 text-white">Save</button>
       </form>
@@ -531,6 +625,43 @@ ${formFields}
   )
 }
 `
+}
+
+/** Initial form value for a field on the New page. */
+function newPageDefault(field: FieldDefinition): string {
+  switch (field.type) {
+    case 'boolean':
+      return 'false'
+    case 'number':
+      return '0'
+    case 'date':
+      // The form data type is the route body type, so this is a real `Date`
+      // — Inertia serializes it to an ISO string that `z.coerce.date()` reads.
+      return field.nullable ? 'null' : 'new Date()'
+    case 'json':
+      return field.nullable ? "''" : "'{}'"
+    default:
+      return "''"
+  }
+}
+
+/** Initial form value for a field on the Edit page, read off the resource props. */
+function editPageDefault(field: FieldDefinition, variableName: string): string {
+  const access = `${variableName}.${field.name}`
+
+  switch (field.type) {
+    case 'date':
+      // `ResourceData` carries dates as ISO strings; the form wants a `Date`.
+      return field.nullable ? `${access} ? new Date(${access}) : null` : `new Date(${access})`
+    case 'json':
+      return field.nullable ? `${access} ? JSON.stringify(${access}) : ''` : `JSON.stringify(${access})`
+    case 'boolean':
+      return field.nullable ? `${access} ?? false` : access
+    case 'number':
+      return field.nullable ? `${access} ?? 0` : access
+    default:
+      return field.nullable ? `${access} ?? ''` : access
+  }
 }
 
 function generateFormField(field: FieldDefinition, formVar: string): string {
@@ -551,7 +682,18 @@ function generateFormField(field: FieldDefinition, formVar: string): string {
     return `        <input type="number" value={${numberValue}} onChange={(event) => ${formVar}.setData('${field.name}', Number(event.target.value))} placeholder="${field.name}" className="w-full rounded border px-3 py-2" />`
   }
   if (field.type === 'date') {
-    return `        <input type="date" value={${stringValue}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} className="w-full rounded border px-3 py-2" />`
+    // A cleared required input would set an invalid Date, which serializes to
+    // null and which `z.coerce.date()` then reads as the epoch — `required`
+    // keeps the browser from submitting that instead of storing 1970-01-01.
+    const onChange = field.nullable
+      ? `event.target.value ? new Date(event.target.value) : null`
+      : `new Date(event.target.value)`
+    const required = field.nullable ? '' : ' required'
+    return `        <input type="date"${required} value={toDateInputValue(${formVar}.data.${field.name})} onChange={(event) => ${formVar}.setData('${field.name}', ${onChange})} className="w-full rounded border px-3 py-2" />`
+  }
+  if (field.type === 'json') {
+    // The form holds JSON source text; onSubmit parses it back into an object.
+    return `        <textarea value={${stringValue}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} placeholder="${field.name} (JSON)" className="w-full rounded border px-3 py-2 font-mono text-sm" />`
   }
   return `        <input value={${stringValue}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} placeholder="${field.name}" className="w-full rounded border px-3 py-2" />`
 }

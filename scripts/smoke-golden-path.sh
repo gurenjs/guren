@@ -31,6 +31,10 @@ CREATE_APP_BIN="$REPO_ROOT/packages/create-app/src/cli.ts"
 # Database driver for the scaffolded app. "postgres" expects a reachable
 # server (default: the repo docker-compose instance on port 54322 — run
 # `bun run db:up` locally; CI maps its service container to the same port).
+#
+# There is no "mysql" variant: db:reset followed by db:seed replays migrations
+# against existing tables on MySQL, so the runtime steps below cannot pass yet.
+# `mysqlColumn()` is covered by unit tests in packages/cli/tests instead.
 SMOKE_DB="${GUREN_SMOKE_DB:-sqlite}"
 
 if [ "$SMOKE_DB" = "postgres" ]; then
@@ -195,7 +199,10 @@ fi
 # ---------------------------------------------------------------------------
 step 9 "Add resource scaffold (comments)"
 
-(cd "$APP_DIR" && bun "$CLI_BIN" add resource comments --fields "body:text,postId:number")
+# The field list covers every branch of the dialect column mappers
+# (text/number/boolean/date/json) so the typecheck below is what catches
+# generated code that only compiles for the simplest column types.
+(cd "$APP_DIR" && bun "$CLI_BIN" add resource comments --fields "body:text,postId:number,published:boolean,publishedAt:date,meta:json")
 
 # ---------------------------------------------------------------------------
 # Step 10: Add infrastructure add-on — queue
@@ -422,6 +429,42 @@ if ! printf '%s' "$POSTS_BODY" | grep -q "Golden path runtime"; then
   exit 1
 fi
 echo "  OK: GET /posts contains created post"
+
+# The token rotates on each accepted request, so re-read it from the jar the
+# previous POST just rewrote.
+XSRF=$(awk '$6 == "XSRF-TOKEN" { print $7 }' "$COOKIES")
+
+# The comments resource carries every column type. Typechecking the generated
+# code does not prove a `Date` or a JSON object survives the round trip through
+# the dialect's timestamp/json columns — this write does.
+http_expect "POST /comments (date + json payload)" 303 \
+  -b "$COOKIES" -c "$COOKIES" -X POST "$RUNTIME_URL/comments" \
+  -H "Content-Type: application/json" -H "X-XSRF-TOKEN: $XSRF" \
+  -d '{"body":"typed columns","postId":1,"published":true,"publishedAt":"2026-02-03T00:00:00.000Z","meta":{"origin":"golden-path-json"}}'
+
+COMMENTS_BODY=$(curl -s -b "$COOKIES" "$RUNTIME_URL/comments")
+if ! printf '%s' "$COMMENTS_BODY" | grep -q "typed columns"; then
+  echo "ERROR: GET /comments does not contain the created comment"
+  exit 1
+fi
+# The json column must come back as an object, not as the string "[object
+# Object]" a text column would have stored.
+if ! printf '%s' "$COMMENTS_BODY" | grep -q "golden-path-json"; then
+  echo "ERROR: GET /comments did not round-trip the json column"
+  printf '%s\n' "$COMMENTS_BODY" | head -40
+  exit 1
+fi
+# The resource serializes date columns as ISO strings. sqlite's timestamp-mode
+# integer round-trips the instant exactly, but postgres `timestamp without time
+# zone` shifts it by the server's UTC offset, so the day is asserted loosely —
+# what this checks is that a Date went in and a Date came back, not that the
+# two dialects agree on the instant.
+if ! printf '%s' "$COMMENTS_BODY" | grep -qE '2026-02-0[23]T[0-9]{2}:[0-9]{2}:[0-9]{2}'; then
+  echo "ERROR: GET /comments did not round-trip the date column"
+  printf '%s\n' "$COMMENTS_BODY" | head -40
+  exit 1
+fi
+echo "  OK: GET /comments round-tripped date and json columns"
 
 # Security defaults
 http_expect "POST /posts (no CSRF token)" 403 \

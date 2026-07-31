@@ -1038,4 +1038,32 @@ export function registerWebRoutes(router: Router): void {
       await workspace.cleanup()
     }
   })
+
+  // The seeder has to be re-runnable, and `onConflictDoNothing` does not exist
+  // on MySQL — INSERT IGNORE is its equivalent.
+  for (const [dialect, table, expected, absent] of [
+    ['mysql', 'mysqlTable', '.ignore()', '.onConflictDoNothing'],
+    ['pg', 'pgTable', '.onConflictDoNothing({ target: users.email })', '.ignore()'],
+    ['sqlite', 'sqliteTable', '.onConflictDoNothing({ target: users.email })', '.ignore()'],
+  ] as const) {
+    it(`seeds the demo user with the ${dialect} conflict clause`, async () => {
+      const workspace = await createTempWorkspace(`guren-cli-make-auth-seeder-${dialect}-`)
+      try {
+        await mkdir(join(workspace.dir, 'db'), { recursive: true })
+        await writeFile(
+          join(workspace.dir, 'db/schema.ts'),
+          `export const users = ${table}('users', {})\n`,
+          'utf8',
+        )
+
+        await makeAuth({ force: true })
+
+        const seeder = await readFile(join(workspace.dir, 'db/seeders/UsersSeeder.ts'), 'utf8')
+        expect(seeder).toContain(expected)
+        expect(seeder).not.toContain(absent)
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+  }
 })
