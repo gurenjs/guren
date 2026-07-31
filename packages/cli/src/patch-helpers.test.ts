@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { addImport, addProvider, hasImport, hasAuthProvider, ensureDrizzleImports, ensureSqliteImports } from './patch-helpers'
+import { addImport, addProvider, hasImport, hasAuthProvider, ensureDrizzleImports, ensureMysqlImports, ensureSqliteImports } from './patch-helpers'
 
 describe('patch-helpers', () => {
   let tempDir: string
@@ -300,6 +300,55 @@ const app = new Application()`
       const result = ensureSqliteImports(content, [])
 
       expect(result).toBe(content)
+    })
+  })
+
+  describe('ensureMysqlImports', () => {
+    // The header `create-guren-app --db mysql` scaffolds.
+    const scaffoldedSchema = `import { mysqlTable, int, varchar, timestamp } from 'drizzle-orm/mysql-core'\n\nexport const users = mysqlTable('users', {})\n`
+
+    it('should add missing imports when no MySQL import exists', () => {
+      const content = `const x = 1\n`
+      const result = ensureMysqlImports(content, ['mysqlTable', 'int', 'varchar'])
+
+      expect(result).toContain("import { int, mysqlTable, varchar } from 'drizzle-orm/mysql-core'")
+      expect(result).toContain('const x = 1')
+    })
+
+    it('should merge new column builders into the scaffolded MySQL import', () => {
+      const result = ensureMysqlImports(scaffoldedSchema, ['mysqlTable', 'int', 'timestamp', 'boolean'])
+
+      expect(result).toContain(
+        "import { boolean, int, mysqlTable, timestamp, varchar } from 'drizzle-orm/mysql-core'",
+      )
+      // One import line, not a second one appended alongside it.
+      expect(result.match(/^import /gmu)).toHaveLength(1)
+    })
+
+    it('should not modify content when all imports already present', () => {
+      const result = ensureMysqlImports(scaffoldedSchema, ['mysqlTable', 'int', 'varchar', 'timestamp'])
+
+      expect(result).toBe(scaffoldedSchema)
+    })
+
+    it('should return content unchanged when needed list is empty', () => {
+      const content = `const x = 1\n`
+      const result = ensureMysqlImports(content, [])
+
+      expect(result).toBe(content)
+    })
+
+    // Documents why the mysql scaffold must not import from
+    // `@guren/orm/drizzle`: the merge is not module-scoped, so a same-named
+    // builder already in scope from another dialect satisfies the requirement
+    // and the MySQL one is never imported. Scoping the match per module would
+    // be an improvement — update this test rather than treating it as a
+    // regression.
+    it('should not re-import a name another module already brought into scope', () => {
+      const mixed = `import { mysqlTable, int, varchar, timestamp } from '@guren/orm/drizzle'\n\nexport const users = mysqlTable('users', {})\n`
+      const result = ensureMysqlImports(mixed, ['mysqlTable', 'int', 'varchar', 'timestamp'])
+
+      expect(result).toBe(mixed)
     })
   })
 })

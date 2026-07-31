@@ -405,6 +405,32 @@ export async function hasAuthProvider(filePath: string): Promise<boolean> {
   }
 }
 
+export type SchemaDialect = 'sqlite' | 'pg' | 'mysql'
+
+/**
+ * The drizzle dialect an app's `db/schema.ts` is written in. Every patcher
+ * that appends columns or tables has to agree on this — `add auth` and
+ * `add resource` writing different dialects into one schema is silent, since
+ * drizzle's table builders accept a foreign dialect's column builders.
+ */
+export function detectSchemaDialect(content: string): SchemaDialect {
+  if (content.includes('sqliteTable') || content.includes('drizzle-orm/sqlite-core')) {
+    return 'sqlite'
+  }
+  if (content.includes('mysqlTable') || content.includes('drizzle-orm/mysql-core')) {
+    return 'mysql'
+  }
+  return 'pg'
+}
+
+/**
+ * The dialect of the app's `db/schema.ts`. An app that has none yet reads as
+ * PostgreSQL, the same default an empty schema yields.
+ */
+export async function readSchemaDialect(cwd: string = process.cwd()): Promise<SchemaDialect> {
+  return detectSchemaDialect((await readIfExists(cwd, 'db/schema.ts')) ?? '')
+}
+
 /**
  * Ensures that a set of named Drizzle imports are present in file content.
  * Merges into an existing `@guren/orm/drizzle` import or prepends a new one.

@@ -141,6 +141,10 @@ jobs:
       - name: Golden path smoke test (postgres)
         run: bun run smoke:golden-path:postgres
 
+      # The only place a --db mysql scaffold is typechecked and migrated.
+      - name: Golden path smoke test (mysql)
+        run: bun run smoke:golden-path:mysql
+
       - name: Run tests
         run: bun run test
 

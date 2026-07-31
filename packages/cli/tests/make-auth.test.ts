@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { consola } from 'consola'
-import { createTempWorkspace } from './helpers'
+import { createTempWorkspace, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE } from './helpers'
 import { makeAuth } from '../src/make-auth'
 
 describe('makeAuth', () => {
@@ -481,6 +481,41 @@ export const users = mysqlTable('users', {
       await workspace.cleanup()
     }
   })
+
+  // MySQL has no ON CONFLICT: onConflictDoNothing() is undefined on its query
+  // builder and throws when the seeder runs.
+  const seederUpserts = [
+    {
+      dialect: 'mysql',
+      schema: MYSQL_SCHEMA_FIXTURE,
+      expected: ".onDuplicateKeyUpdate({ set: { name: 'Demo User' } })",
+      forbidden: 'onConflictDoNothing',
+    },
+    {
+      dialect: 'pg',
+      schema: PG_SCHEMA_FIXTURE,
+      expected: '.onConflictDoNothing({ target: users.email })',
+      forbidden: 'onDuplicateKeyUpdate',
+    },
+  ]
+
+  for (const { dialect, schema, expected, forbidden } of seederUpserts) {
+    it(`seeds the demo user with the ${dialect} upsert`, async () => {
+      const workspace = await createTempWorkspace(`guren-cli-make-auth-seeder-${dialect}-`)
+      try {
+        await mkdir(join(workspace.dir, 'db'), { recursive: true })
+        await writeFile(join(workspace.dir, 'db/schema.ts'), schema, 'utf8')
+
+        await makeAuth({ force: true })
+
+        const seeder = await readFile(join(workspace.dir, 'db/seeders/UsersSeeder.ts'), 'utf8')
+        expect(seeder).toContain(expected)
+        expect(seeder).not.toContain(forbidden)
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+  }
 
   it('leaves a passwordHash column on another table untouched', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-auth-oauth-scope-')

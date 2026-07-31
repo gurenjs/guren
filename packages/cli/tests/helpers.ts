@@ -62,6 +62,33 @@ export async function linkInstalledPackage(
   }
 }
 
+/**
+ * The `db/schema.ts` a fresh app starts from, per dialect. Kept in the shape
+ * `create-guren-app` scaffolds so the patchers are exercised against what
+ * users actually have on disk — notably, MySQL apps import their builders
+ * from `drizzle-orm/mysql-core`, never from the PostgreSQL-first
+ * `@guren/orm/drizzle` subpath.
+ */
+export const PG_SCHEMA_FIXTURE = `import { pgTable, serial, text, timestamp } from '@guren/orm/drizzle'
+
+export const users = pgTable('users', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  email: text('email').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: false }).defaultNow().notNull(),
+})
+`
+
+export const MYSQL_SCHEMA_FIXTURE = `import { mysqlTable, int, varchar, timestamp } from 'drizzle-orm/mysql-core'
+
+export const users = mysqlTable('users', {
+  id: int('id').primaryKey().autoincrement(),
+  name: varchar('name', { length: 255 }).notNull(),
+  email: varchar('email', { length: 255 }).notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+})
+`
+
 export async function createTempWorkspace(prefix: string): Promise<TempWorkspace> {
   const dir = await mkdtemp(join(tmpdir(), prefix))
   const originalCwd = process.cwd()

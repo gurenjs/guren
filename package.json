@@ -39,6 +39,7 @@
     "smoke:upgrade-existing-app": "bun run ./scripts/smoke/upgrade-existing-app.ts",
     "smoke:golden-path": "bash ./scripts/smoke-golden-path.sh",
     "smoke:golden-path:postgres": "GUREN_SMOKE_DB=postgres bash ./scripts/smoke-golden-path.sh",
+    "smoke:golden-path:mysql": "GUREN_SMOKE_DB=mysql bash ./scripts/smoke-golden-path.sh",
     "changeset": "changeset",
     "version-packages": "changeset version && bun install",
     "release": "bun run build && changeset publish",

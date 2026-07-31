@@ -1,7 +1,23 @@
 import { beforeEach, afterEach, describe, expect, it } from 'bun:test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { createTempWorkspace, type TempWorkspace } from './helpers'
+import { createTempWorkspace, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, type TempWorkspace } from './helpers'
 import { listBlueprints, runBlueprint } from '../src/blueprints'
+
+/** The directories and route file the resource blueprint expects to patch. */
+async function seedResourceWorkspace(schema: string): Promise<void> {
+  await mkdir('resources/js/pages', { recursive: true })
+  await mkdir('routes', { recursive: true })
+  await mkdir('db', { recursive: true })
+  await writeFile('routes/web.ts', `import { Router } from '@guren/core'
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/', () => 'home')
+}
+
+export default registerWebRoutes
+`)
+  await writeFile('db/schema.ts', schema)
+}
 
 describe('blueprints', () => {
   let workspace: TempWorkspace
@@ -32,26 +48,7 @@ describe('blueprints', () => {
   })
 
   it('runs the resource blueprint', async () => {
-    await mkdir('resources/js/pages', { recursive: true })
-    await mkdir('routes', { recursive: true })
-    await mkdir('db', { recursive: true })
-    await writeFile('routes/web.ts', `import { Router } from '@guren/core'
-
-export function registerWebRoutes(router: Router): void {
-  router.get('/', () => 'home')
-}
-
-export default registerWebRoutes
-`)
-    await writeFile('db/schema.ts', `import { pgTable, serial, text, timestamp } from '@guren/orm/drizzle'
-
-export const users = pgTable('users', {
-  id: serial('id').primaryKey(),
-  name: text('name').notNull(),
-  email: text('email').notNull(),
-  createdAt: timestamp('created_at', { withTimezone: false }).defaultNow().notNull(),
-})
-`)
+    await seedResourceWorkspace(PG_SCHEMA_FIXTURE)
 
     const files = await runBlueprint('resource', { name: 'Post' })
 
@@ -78,6 +75,29 @@ export const users = pgTable('users', {
 
     const schema = await readFile('db/schema.ts', 'utf8')
     expect(schema).toContain("export const posts = pgTable('posts'")
+  })
+
+  it('adds resource tables to a mysql schema without borrowing another dialect', async () => {
+    await seedResourceWorkspace(MYSQL_SCHEMA_FIXTURE)
+
+    await runBlueprint('resource', {
+      name: 'Post',
+      fields: 'title:string,views:number,published:boolean,publishedAt:date,meta:json',
+    })
+
+    const schema = await readFile('db/schema.ts', 'utf8')
+
+    expect(schema).toContain("export const posts = mysqlTable('posts'")
+    expect(schema).toContain("publishedAt: timestamp('published_at').notNull()")
+    expect(schema).toContain("meta: json('meta').notNull()")
+    expect(schema).toContain("published: boolean('published').notNull()")
+    // Every builder — the scaffolded ones and the ones this run added — must
+    // come from mysql-core. `@guren/orm/drizzle` re-exports the pg builders
+    // under the same names, and mixing them is silent at build time.
+    const importedModules = [...schema.matchAll(/import\s*\{[^}]*\}\s*from\s*['"]([^'"]+)['"]/g)].map(
+      (match) => match[1],
+    )
+    expect([...new Set(importedModules)]).toEqual(['drizzle-orm/mysql-core'])
   })
 
   it('rejects unknown blueprints', async () => {

@@ -6,10 +6,14 @@ import {
   addImport,
   addProvider,
   addCreateAppOption,
+  detectSchemaDialect,
   ensureDrizzleImports,
   ensureMysqlImports,
   ensureSqliteImports,
+  readSchemaDialect,
+  type SchemaDialect,
 } from './patch-helpers'
+import { readIfExists } from './discovery'
 import { makeMigration } from './make-migration'
 
 // Passwordless apps keep show() (the OAuth button page) and destroy()
@@ -1714,7 +1718,19 @@ ${registerRoutes}${resetRoutes}${verifyRoutes}${oauthRoutes}
 `
 }
 
-const seederTemplate = `import { defineSeeder, ScryptHasher } from '@guren/core'
+/**
+ * Re-running the seeder must not fail on the unique email. MySQL has no
+ * ON CONFLICT clause — drizzle exposes INSERT ... ON DUPLICATE KEY UPDATE
+ * instead, and calling `.onConflictDoNothing()` on a MySQL query builder
+ * throws at runtime ("is not a function").
+ */
+function buildSeederTemplate(dialect: SchemaDialect): string {
+  const idempotentInsert =
+    dialect === 'mysql'
+      ? `.onDuplicateKeyUpdate({ set: { name: 'Demo User' } })`
+      : `.onConflictDoNothing({ target: users.email })`
+
+  return `import { defineSeeder, ScryptHasher } from '@guren/core'
 import { users } from '../schema.js'
 
 export default defineSeeder(async ({ db }) => {
@@ -1730,20 +1746,9 @@ export default defineSeeder(async ({ db }) => {
         passwordHash,
       },
     ])
-    .onConflictDoNothing({ target: users.email })
+    ${idempotentInsert}
 })
 `
-
-type SchemaDialect = 'sqlite' | 'pg' | 'mysql'
-
-function detectSchemaDialect(content: string): SchemaDialect {
-  if (content.includes('sqliteTable') || content.includes('drizzle-orm/sqlite-core')) {
-    return 'sqlite'
-  }
-  if (content.includes('mysqlTable') || content.includes('drizzle-orm/mysql-core')) {
-    return 'mysql'
-  }
-  return 'pg'
 }
 
 const usersTableBlocks: Record<SchemaDialect, string> = {
@@ -1854,18 +1859,13 @@ function relaxPasswordHashForOAuth(content: string): string {
 
 async function updateSchema({ includeVerify, includePassword, oauthProviders }: AuthFeatures): Promise<void> {
   const schemaPath = resolve(process.cwd(), 'db/schema.ts')
-  let content: string
+  const existing = await readIfExists(process.cwd(), 'db/schema.ts')
 
-  try {
-    content = await readFile(schemaPath, 'utf8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return
-    }
-
-    throw error
+  if (existing === null) {
+    return
   }
 
+  let content = existing
   const originalContent = content
   const hasAuthColumns = content.includes('passwordHash')
   const dialect = detectSchemaDialect(content)
@@ -2172,7 +2172,7 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
       // The demo user only exists to be signed in as with a password. Without
       // password login it is an unreachable row — and seeding it would hash a
       // password with scrypt, the exact cost --oauth-only avoids.
-      { path: 'db/seeders/UsersSeeder.ts', contents: seederTemplate },
+      { path: 'db/seeders/UsersSeeder.ts', contents: buildSeederTemplate(await readSchemaDialect()) },
     )
   }
 

@@ -10,7 +10,7 @@ import { makeModel } from './make-model'
 import { makeNotification } from './make-notification'
 import { makeRoute } from './make-route'
 import { makeView } from './make-view'
-import { addImport, addProvider, ensureDrizzleImports, ensureMysqlImports, ensureSqliteImports, findClosingDelimiter } from './patch-helpers'
+import { addImport, addProvider, detectSchemaDialect, ensureDrizzleImports, ensureMysqlImports, ensureSqliteImports, findClosingDelimiter } from './patch-helpers'
 import { camelCase, kebabCase, pascalCase, writeFilesSafe, type WriterOptions } from './utils'
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -689,16 +689,6 @@ export default scheduleTasksKernel
   },
 }
 
-async function detectSchemaDialect(content: string): Promise<'sqlite' | 'pg' | 'mysql'> {
-  if (content.includes('sqliteTable') || content.includes('drizzle-orm/sqlite-core')) {
-    return 'sqlite'
-  }
-  if (content.includes('mysqlTable') || content.includes('drizzle-orm/mysql-core')) {
-    return 'mysql'
-  }
-  return 'pg'
-}
-
 function sqliteColumn(field: FieldDefinition): { code: string; imports: string[] } {
   const notNull = field.nullable ? '' : '.notNull()'
   switch (field.type) {
@@ -755,7 +745,7 @@ async function updateResourceSchema(collection: string, routeName: string, field
   const schemaIdentifier = camelCase(collection)
   const tableName = routeName.replaceAll('-', '_')
 
-  const dialect = await detectSchemaDialect(content)
+  const dialect = detectSchemaDialect(content)
 
   if (dialect === 'sqlite') {
     if (content.includes(`export const ${schemaIdentifier} = sqliteTable(`)) {
