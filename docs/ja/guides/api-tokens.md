@@ -253,9 +253,9 @@ export const apiTokens = pgTable('api_tokens', {
   hashedToken: text('hashed_token').notNull().unique(),
   userId: text('user_id').notNull(),
   abilities: jsonb('abilities').$type<string[]>().notNull(),
-  lastUsedAt: timestamp('last_used_at'),
-  expiresAt: timestamp('expires_at'),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 ```
 

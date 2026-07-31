@@ -15,11 +15,16 @@ export const posts = pgTable('posts', {
   title: text('title').notNull(),
   body: text('body').notNull(),
   status: text('status').notNull().default('draft'),
-  publishedAt: timestamp('published_at'),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
+  publishedAt: timestamp('published_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 })
 ```
+
+On PostgreSQL, give every timestamp column `{ withTimezone: true }`. A
+`timestamp without time zone` stores a bare wall clock with no offset, so
+`defaultNow()` records it in the database session's zone while your app reads
+it back as UTC, and any client other than your app sees a different instant.
 
 ```ts
 // config/database.ts

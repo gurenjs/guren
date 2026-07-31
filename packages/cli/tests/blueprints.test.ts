@@ -167,7 +167,7 @@ export const users = pgTable('users', {
         "body: text('body').notNull()",
         "count: integer('count').notNull()",
         "active: boolean('active').notNull()",
-        "publishedAt: timestamp('published_at', { withTimezone: false }).notNull()",
+        "publishedAt: timestamp('published_at', { withTimezone: true }).notNull()",
         "meta: jsonb('meta').notNull()",
       ],
     },
