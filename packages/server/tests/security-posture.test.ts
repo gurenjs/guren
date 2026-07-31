@@ -79,6 +79,19 @@ describe('security posture: default response headers', () => {
 
     expect(response.headers.get('Access-Control-Allow-Origin')).toBeNull()
   })
+
+  it('host authorization is opt-in: a bare Application serves any Host header', async () => {
+    // Documented tradeoff, not an endorsement: the framework cannot know the
+    // app's legitimate hosts, so scaffolded templates opt in for development
+    // (create-app passes hostAuthorization) rather than the core guessing.
+    // If host authorization ever becomes a default, this test must flip.
+    const app = await bootDefaultApp()
+    const response = await app.fetch(
+      new Request('http://example.com/probe', { headers: { Host: 'evil.example' } }),
+    )
+
+    expect(response.status).toBe(200)
+  })
 })
 
 describe('security posture: session and CSRF defaults for auth apps', () => {
@@ -144,7 +157,7 @@ describe('security posture: session and CSRF defaults for auth apps', () => {
     expect(xsrfCookie!).not.toMatch(/HttpOnly/i)
   })
 
-  it('session cookie defaults to HttpOnly + SameSite=Lax, Secure only in production', async () => {
+  it('session cookie defaults to HttpOnly + SameSite=Lax, without Secure outside production', async () => {
     const { app } = await bootAuthApp()
 
     const response = await app.fetch(new Request('http://example.com/remember'))
@@ -156,6 +169,20 @@ describe('security posture: session and CSRF defaults for auth apps', () => {
     expect(sessionCookie!).toMatch(/HttpOnly/i)
     expect(sessionCookie!).toMatch(/SameSite=Lax/i)
     expect(sessionCookie!).not.toMatch(/;\s*Secure/i)
+  })
+
+  it('marks both session and XSRF cookies Secure when booted in production', async () => {
+    await withEnv({ NODE_ENV: 'production' }, async () => {
+      const { app } = await bootAuthApp()
+
+      const response = await app.fetch(new Request('http://example.com/remember'))
+      const cookies = response.headers.getSetCookie()
+      const sessionCookie = cookies.find((cookie) => cookie.startsWith('guren.session='))
+      const xsrfCookie = cookies.find((cookie) => cookie.startsWith('XSRF-TOKEN='))
+
+      expect(sessionCookie!).toMatch(/;\s*Secure/i)
+      expect(xsrfCookie!).toMatch(/;\s*Secure/i)
+    })
   })
 
   it('ignores the X-Testing-User header unless GUREN_TESTING is set', async () => {
