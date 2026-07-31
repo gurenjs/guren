@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import * as fs from 'node:fs'
+import * as os from 'node:os'
 import * as path from 'node:path'
 import { makeChannel } from '../src/make-channel'
 import { makeCommand } from '../src/make-command'
@@ -16,15 +17,15 @@ import { makeProvider } from '../src/make-provider'
 import { makeResource } from '../src/make-resource'
 import { makeSeeder } from '../src/make-seeder'
 
-const TEST_DIR = '/tmp/guren-cli-test'
+// A fixed, predictable path under the shared OS temp dir let another process
+// pre-plant a symlink there before a test wrote through it. mkdtempSync's
+// random suffix is what makes the directory this test writes into
+// unguessable, so it has to be created fresh per test rather than reused.
+let TEST_DIR: string
 
 describe('CLI make:* commands', () => {
   beforeEach(() => {
-    // Change working directory to test directory
-    if (fs.existsSync(TEST_DIR)) {
-      fs.rmSync(TEST_DIR, { recursive: true })
-    }
-    fs.mkdirSync(TEST_DIR, { recursive: true })
+    TEST_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'guren-cli-test-'))
     process.chdir(TEST_DIR)
   })
 
