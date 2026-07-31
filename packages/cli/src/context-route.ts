@@ -38,7 +38,9 @@ export function routeDefinitionToContextRoute(def: RouteDefinition): ContextRout
     hasInlineMiddleware: def.hasInlineMiddleware || undefined,
     params: schemaToTypeString(def.schemas?.params),
     query: schemaToTypeString(def.schemas?.query),
-    body: schemaToTypeString(def.schemas?.body),
+    // The body is documented as something to send, so it renders the schema's
+    // input side — a coerced date reads as the ISO string a caller writes.
+    body: schemaToTypeString(def.schemas?.body, { io: 'input' }),
     output: schemaToTypeString(def.schemas?.output),
     summary: def.summary,
     description: def.description,

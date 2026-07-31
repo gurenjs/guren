@@ -148,6 +148,81 @@ describe('makeFeature', () => {
     }
   })
 
+  // A date column is a `Date` in the database, an ISO string on the wire, and a
+  // bare `YYYY-MM-DD` in a date input. Each layer has to name its own shape or
+  // the scaffold does not type-check — see the RouteBody note below.
+  it('keeps a date field a string all the way through the form', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-date-')
+
+    try {
+      await makeFeature('Event', { fields: 'startsAt:date' })
+
+      const resource = await readFile(
+        join(workspace.dir, 'app/Http/Resources/EventResource.ts'),
+        'utf8',
+      )
+      expect(resource).toContain('startsAt: string')
+      // Casting the Date straight to string is what TypeScript rejects.
+      expect(resource).toContain('startsAt: (this.resource.startsAt as Date).toISOString()')
+
+      const newPage = await readFile(join(workspace.dir, 'resources/js/pages/events/New.tsx'), 'utf8')
+      // `type="date"` renders nothing for a full ISO timestamp.
+      expect(newPage).toContain('value={form.data.startsAt.slice(0, 10)}')
+      expect(newPage).toContain("setData('startsAt', event.target.value)")
+      expect(newPage).toContain("startsAt: ''")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('edits a json field as text without letting mid-edit JSON clear it', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-json-')
+
+    try {
+      await makeFeature('Event', { fields: 'meta:json' })
+
+      const validator = await readFile(
+        join(workspace.dir, 'app/Http/Validators/EventValidator.ts'),
+        'utf8',
+      )
+      // Zod 4 requires the key type; `any` keeps the value assignable to
+      // Inertia's FormDataType, which rejects `unknown`.
+      expect(validator).toContain('meta: z.record(z.string(), z.any())')
+
+      const newPage = await readFile(join(workspace.dir, 'resources/js/pages/events/New.tsx'), 'utf8')
+      // Uncontrolled: a controlled textarea would reject every keystroke that
+      // leaves the JSON temporarily unparseable.
+      expect(newPage).toContain('defaultValue={JSON.stringify(form.data.meta, null, 2)}')
+      expect(newPage).toContain("setData('meta', JSON.parse(event.target.value))")
+      expect(newPage).toContain('meta: {}')
+
+      const showPage = await readFile(join(workspace.dir, 'resources/js/pages/events/Show.tsx'), 'utf8')
+      // An object is not a valid React child.
+      expect(showPage).toContain('{JSON.stringify(event.meta)}')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('derives form types through RouteBody rather than indexing ApiRoutes', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-routebody-')
+
+    try {
+      await makeFeature('Post', { fields: 'title:string' })
+
+      for (const page of ['New.tsx', 'Edit.tsx']) {
+        const source = await readFile(join(workspace.dir, 'resources/js/pages/posts', page), 'utf8')
+        expect(source).toContain("type PostFormData = RouteBody<ApiRoutes, 'posts.store'>")
+        expect(source).toContain("from '@guren/inertia-client/typed-forms'")
+        // The record is named `post` here, but an entity whose variable name is
+        // `event` would collide with a submit handler that also took `event`.
+        expect(source).toContain('onSubmit={(submitEvent) =>')
+      }
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('scaffolds app/ files under modules/<name>/ but namespaces pages instead of colocating them (--module)', async () => {
     const workspace = await createTempWorkspace('guren-cli-feature-module-')
 

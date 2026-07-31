@@ -198,7 +198,10 @@ function zodFieldType(field: FieldDefinition): string {
     number: 'z.coerce.number()',
     boolean: 'z.boolean()',
     date: 'z.coerce.date()',
-    json: 'z.record(z.unknown())',
+    // Zod 4 requires an explicit key type for records. The value is `any`
+    // rather than `unknown` because Inertia's `useForm` refuses to hold an
+    // `unknown` — narrow this to the object's real shape once you know it.
+    json: 'z.record(z.string(), z.any())',
   }
   let schema = map[field.type] ?? 'z.string()'
   if (field.nullable) schema += '.nullable().optional()'
@@ -216,6 +219,32 @@ function tsFieldType(field: FieldDefinition): string {
   }
   const base = map[field.type] ?? 'string'
   return field.nullable ? `${base} | null` : base
+}
+
+/**
+ * How a resource reads one column off its record.
+ *
+ * A `date` column is a `Date` on the record but serializes to an ISO string,
+ * which is what `tsFieldType` declares — so it is converted rather than cast.
+ */
+function resourceFieldExpression(field: FieldDefinition): string {
+  const access = `this.resource.${field.name}`
+  if (field.type === 'date') {
+    return field.nullable
+      ? `(${access} as Date | null)?.toISOString() ?? null`
+      : `(${access} as Date).toISOString()`
+  }
+  return field.nullable
+    ? `(${access} as ${tsFieldType(field)}) ?? null`
+    : `${access} as ${tsFieldType(field)}`
+}
+
+/** The empty value a form starts a field at, matching its wire type. */
+function emptyFormValue(field: FieldDefinition): string {
+  if (field.type === 'boolean') return 'false'
+  if (field.type === 'number') return '0'
+  if (field.type === 'json') return '{}'
+  return "''"
 }
 
 function generateValidator(singular: string, collection: string, fields: FieldDefinition[]): string {
@@ -246,12 +275,7 @@ function generateResource(singular: string, fields: FieldDefinition[]): string {
 
   const toArrayFields = [
     '      id: this.resource.id as number,',
-    ...fields.map((f) => {
-      if (f.nullable) {
-        return `      ${f.name}: (this.resource.${f.name} as ${tsFieldType(f)}) ?? null,`
-      }
-      return `      ${f.name}: this.resource.${f.name} as ${tsFieldType(f)},`
-    }),
+    ...fields.map((f) => `      ${f.name}: ${resourceFieldExpression(f)},`),
   ].join('\n')
 
   return `import { Resource } from '@guren/core'
@@ -428,6 +452,10 @@ function generateShowPage(
     if (f.type === 'boolean') {
       return `      <p><strong>${f.name}:</strong> {${variableName}.${f.name} ? 'Yes' : 'No'}</p>`
     }
+    if (f.type === 'json') {
+      // An object is not renderable as a React child.
+      return `      <p><strong>${f.name}:</strong> {JSON.stringify(${variableName}.${f.name})}</p>`
+    }
     return `      <p><strong>${f.name}:</strong> {${variableName}.${f.name}${f.nullable ? " ?? ''" : ''}}</p>`
   }).join('\n')
 
@@ -467,24 +495,22 @@ function generateNewPage(
   routeName: string,
   fields: FieldDefinition[],
 ): string {
-  const defaults = fields.map((f) => {
-    const defaultVal = f.type === 'boolean' ? 'false' : f.type === 'number' ? '0' : "''"
-    return `${f.name}: ${defaultVal}`
-  }).join(', ')
+  const defaults = fields.map((f) => `${f.name}: ${emptyFormValue(f)}`).join(', ')
 
   const formFields = fields.map((f) => generateFormField(f, 'form')).join('\n')
 
   return `import { useForm } from '@inertiajs/react'
 import type { ApiRoutes } from '@/.guren/api-client.gen'
+import type { RouteBody } from '@guren/inertia-client/typed-forms'
 import { route } from '@/.guren/routes.gen'
 
-type ${singular}FormData = ApiRoutes['${routeName}.store']['body']
+type ${singular}FormData = RouteBody<ApiRoutes, '${routeName}.store'>
 
 export default function New${singular}() {
   const form = useForm<${singular}FormData>({ ${defaults} })
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
-      <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); form.post(route('${routeName}.store')) }}>
+      <form className="space-y-4" onSubmit={(submitEvent) => { submitEvent.preventDefault(); form.post(route('${routeName}.store')) }}>
 ${formFields}
         <button type="submit" className="rounded bg-black px-4 py-2 text-white">Create</button>
       </form>
@@ -501,7 +527,7 @@ function generateEditPage(
   fields: FieldDefinition[],
 ): string {
   const defaults = fields.map((f) => {
-    const defaultVal = f.nullable ? ` ?? ${f.type === 'boolean' ? 'false' : f.type === 'number' ? '0' : "''"}` : ''
+    const defaultVal = f.nullable ? ` ?? ${emptyFormValue(f)}` : ''
     return `${f.name}: ${variableName}.${f.name}${defaultVal}`
   }).join(', ')
 
@@ -509,10 +535,10 @@ function generateEditPage(
 
   return `import { useForm } from '@inertiajs/react'
 import type { ApiRoutes } from '@/.guren/api-client.gen'
-import type { RouteErrors } from '@guren/inertia-client/typed-forms'
+import type { RouteBody, RouteErrors } from '@guren/inertia-client/typed-forms'
 import { route } from '@/.guren/routes.gen'
 
-type ${singular}FormData = ApiRoutes['${routeName}.store']['body']
+type ${singular}FormData = RouteBody<ApiRoutes, '${routeName}.store'>
 
 interface Props {
   ${variableName}: ${singular}FormData & { id: number }
@@ -523,7 +549,7 @@ export default function Edit${singular}({ ${variableName} }: Props) {
   const form = useForm<${singular}FormData>({ ${defaults} })
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
-      <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); form.put(route('${routeName}.update', { id: ${variableName}.id })) }}>
+      <form className="space-y-4" onSubmit={(submitEvent) => { submitEvent.preventDefault(); form.put(route('${routeName}.update', { id: ${variableName}.id })) }}>
 ${formFields}
         <button type="submit" className="rounded bg-black px-4 py-2 text-white">Save</button>
       </form>
@@ -551,7 +577,27 @@ function generateFormField(field: FieldDefinition, formVar: string): string {
     return `        <input type="number" value={${numberValue}} onChange={(event) => ${formVar}.setData('${field.name}', Number(event.target.value))} placeholder="${field.name}" className="w-full rounded border px-3 py-2" />`
   }
   if (field.type === 'date') {
-    return `        <input type="date" value={${stringValue}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} className="w-full rounded border px-3 py-2" />`
+    // The value arrives as an ISO timestamp but `type="date"` only renders a
+    // bare `YYYY-MM-DD`, and shows nothing at all for anything longer.
+    const dateValue = field.nullable ? `(${stringValue})` : stringValue
+    return `        <input type="date" value={${dateValue}.slice(0, 10)} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} className="w-full rounded border px-3 py-2" />`
+  }
+  if (field.type === 'json') {
+    // Uncontrolled: a controlled textarea driven by the parsed object would
+    // reject every keystroke that leaves the JSON temporarily invalid.
+    const jsonValue = field.nullable ? `${formVar}.data.${field.name} ?? {}` : `${formVar}.data.${field.name}`
+    return `        <textarea
+          defaultValue={JSON.stringify(${jsonValue}, null, 2)}
+          onChange={(event) => {
+            try {
+              ${formVar}.setData('${field.name}', JSON.parse(event.target.value))
+            } catch {
+              // Mid-edit JSON is expected; keep the last value that parsed.
+            }
+          }}
+          placeholder="${field.name}"
+          className="w-full rounded border px-3 py-2 font-mono text-sm"
+        />`
   }
   return `        <input value={${stringValue}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} placeholder="${field.name}" className="w-full rounded border px-3 py-2" />`
 }
