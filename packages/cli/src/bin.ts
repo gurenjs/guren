@@ -1987,7 +1987,9 @@ const newCommand = defineCommand({
     },
     blueprint: {
       type: 'string',
-      description: 'Application blueprint to scaffold (default or blog).',
+      // Not enumerated here: this shells out to create-guren-app, which owns
+      // the list. A second hardcoded copy is how `blog` stayed advertised.
+      description: 'Application blueprint to scaffold (see `create-guren-app --help`).',
     },
   },
   async run({ args }) {

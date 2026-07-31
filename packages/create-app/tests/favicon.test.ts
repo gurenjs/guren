@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'bun:test'
 import { access, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { scaffoldAppBlueprint } from '../src/blueprints'
+import { listAppBlueprints, scaffoldAppBlueprint } from '../src/blueprints'
 import { createTempWorkspace } from './helpers'
 
 /**
  * The scaffolded document is built by InertiaEngine, which never reads
  * public/index.html — only a `setInertiaDocument({ head })` registration
- * reaches a browser tab. The blog blueprint overlays its own src/app.ts, so
- * each blueprint has to be checked where it actually registers the markup.
+ * reaches a browser tab. A blueprint may register it from either file, so each
+ * one has to be checked where it actually does.
  */
 const REGISTRATION_FILES = ['src/app.ts', 'config/inertia.ts']
 
@@ -34,7 +34,10 @@ async function findFaviconHref(appRoot: string): Promise<string | undefined> {
   return undefined
 }
 
-describe.each(['default', 'blog', 'worker'])('%s blueprint favicon', (blueprint) => {
+// `api` is the one exclusion: it ships no Inertia, React, or public/.
+const FRONTEND_BLUEPRINTS = listAppBlueprints().filter((name) => name !== 'api')
+
+describe.each(FRONTEND_BLUEPRINTS)('%s blueprint favicon', (blueprint) => {
   it('registers a favicon link pointing at a file that ships in public/', async () => {
     const workspace = await createTempWorkspace(`guren-favicon-${blueprint}-`)
 
