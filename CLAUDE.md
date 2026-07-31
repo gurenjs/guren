@@ -97,6 +97,7 @@ Commands designed for AI coding agents to understand, validate, and generate cod
 bunx guren context              # Project context map (markdown)
 bunx guren context --json       # Project context map (JSON)
 bunx guren context User         # Entity-centric bundle: model, routes, pages, resource, policy, linked docs (--module to disambiguate, "app" = root)
+bunx guren docs:graph           # OKF docs relation graph (--entity/--path narrows; --json for agents)
 bunx guren model:list           # List models with relationships
 bunx guren model:list --format json  # Models as JSON
 

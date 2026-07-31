@@ -74,6 +74,12 @@ failures; broken body links and passed `stale_after` dates warn).
 `entities:` list.** After renaming or moving files a doc references,
 update the doc's frontmatter in the same change.
 
+Ask before you break: `bunx guren docs:graph --path <file>` (or the
+`guren_docs_graph` MCP tool) shows which documents govern a file and
+which spec views regenerate from it — the neighborhood of one node in
+the relation graph. Query it *before* renaming or moving something a
+doc might reference; `guren check` only reports the breakage after.
+
 ## Browsing the bundle: the docs viewer
 
 `bun run dev` mounts a read-only viewer at

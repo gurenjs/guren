@@ -96,6 +96,16 @@ export interface GurenCliApi {
    * runtime and may predate it — see `McpServiceProvider`.
    */
   createFreshContextApi?: () => Pick<GurenCliApi, 'generateContext' | 'generateEntityContext'>
+  /**
+   * The OKF docs relation graph (RFC 0005). Optional for the same
+   * runtime-resolution reason as above.
+   */
+  buildDocsGraphReport?(options: {
+    cwd?: string
+    entity?: string
+    path?: string
+  }): Promise<{ focus: string[]; nodes: unknown[]; edges: unknown[] }>
+  renderDocsGraphMarkdown?(report: unknown): string
 }
 
 export interface CreateMcpServerOptions {
@@ -157,6 +167,42 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
       }
     },
   )
+
+  if (cli.buildDocsGraphReport && cli.renderDocsGraphMarkdown) {
+    const { buildDocsGraphReport, renderDocsGraphMarkdown } = cli
+    server.tool(
+      'guren_docs_graph',
+      'The OKF docs relation graph: documents, entities, and code paths as nodes, verified relations (governs, body links, spec-view derivation) as edges. Narrow with entity or path to answer "which docs govern this, and which spec views regenerate from it?" BEFORE renaming or editing a file — guren_check only reports the breakage afterwards.',
+      {
+        entity: z
+          .string()
+          .optional()
+          .describe('Narrow to the neighborhood of one model entity (case-insensitive).'),
+        path: z
+          .string()
+          .optional()
+          .describe('Narrow to the neighborhood of one app-root-relative path (e.g. "app/Http/Controllers/PostController.ts").'),
+        format: z.enum(['json', 'markdown']).default('markdown').describe('Output format'),
+      },
+      async ({ entity, path, format }) => {
+        try {
+          const report = await buildDocsGraphReport({ cwd, entity, path })
+          const text =
+            format === 'markdown'
+              ? renderDocsGraphMarkdown(report)
+              : JSON.stringify(report, null, 2)
+          return { content: [{ type: 'text', text }] }
+        } catch (error) {
+          return {
+            content: [
+              { type: 'text' as const, text: error instanceof Error ? error.message : String(error) },
+            ],
+            isError: true,
+          }
+        }
+      },
+    )
+  }
 
   server.tool(
     'guren_check',

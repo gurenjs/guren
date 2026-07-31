@@ -26,6 +26,7 @@ import { makeNotification } from './make-notification'
 import { makeProvider } from './make-provider'
 import { makeAdr } from './make-adr'
 import { writeSpecArtifacts } from './spec-generate'
+import { buildDocsGraphReport, renderDocsGraphMarkdown } from './docs-graph'
 import { makeResource } from './make-resource'
 import { makeRoute } from './make-route'
 import { makeSeeder } from './make-seeder'
@@ -139,6 +140,40 @@ const specGenerateCommand = defineCommand({
   },
   async run({ args }) {
     await writeSpecArtifacts({ cwd: args.app, routesFile: args.routes })
+  },
+})
+
+const docsGraphCommand = defineCommand({
+  meta: {
+    name: 'docs:graph',
+    description:
+      'Show the OKF docs relation graph: documents, entities, code paths, and verified edges. Narrow with --entity or --path to answer "what governs this?" before renaming or editing.',
+  },
+  args: {
+    entity: {
+      type: 'string',
+      description: 'Narrow to the neighborhood of one model entity (case-insensitive).',
+    },
+    path: {
+      type: 'string',
+      description: 'Narrow to the neighborhood of one app-root-relative path.',
+    },
+    app: {
+      type: 'string',
+      description: 'Application root directory.',
+    },
+    json: {
+      type: 'boolean',
+      description: 'Output as JSON.',
+    },
+  },
+  async run({ args }) {
+    const report = await buildDocsGraphReport({
+      cwd: args.app,
+      entity: args.entity,
+      path: args.path,
+    })
+    console.log(args.json ? JSON.stringify(report, null, 2) : renderDocsGraphMarkdown(report))
   },
 })
 
@@ -2336,6 +2371,7 @@ const builtinSubCommands = {
   ...makeCommands,
   'make:adr': makeAdrCommand,
   'spec:generate': specGenerateCommand,
+  'docs:graph': docsGraphCommand,
   'make:auth': makeAuthCommand,
   'make:module': makeModuleCommand,
   'make:channel': makeChannelCommand,

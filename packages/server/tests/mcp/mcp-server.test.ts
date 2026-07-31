@@ -147,6 +147,51 @@ describe('Guren MCP Server', () => {
     expect(tools).toHaveLength(9)
   })
 
+  test('guren_docs_graph registers only when the CLI provides it', async () => {
+    const bare = await createTestClient()
+    const bareNames = (await bare.listTools()).tools.map((tool) => tool.name)
+    expect(bareNames).not.toContain('guren_docs_graph')
+
+    const withGraph = await createTestClient({
+      buildDocsGraphReport: async () => ({ focus: [], nodes: [], edges: [] }),
+      renderDocsGraphMarkdown: () => '# Docs Graph',
+    })
+    const names = (await withGraph.listTools()).tools.map((tool) => tool.name)
+    expect(names).toContain('guren_docs_graph')
+  })
+
+  test('guren_docs_graph narrows by path and returns markdown by default', async () => {
+    const seen: Array<Record<string, unknown>> = []
+    const client = await createTestClient({
+      buildDocsGraphReport: async (options) => {
+        seen.push(options)
+        return {
+          focus: ['app/Http/Controllers/PostController.ts'],
+          nodes: [{ id: 'docs/adr/0001-posts.md', kind: 'doc', label: 'Posts are public' }],
+          edges: [
+            {
+              from: 'docs/adr/0001-posts.md',
+              to: 'app/Http/Controllers/PostController.ts',
+              relation: 'governs',
+              verdict: 'pass',
+            },
+          ],
+        }
+      },
+      renderDocsGraphMarkdown: (report) =>
+        `# Docs Graph\nNeighborhood of: ${(report as { focus: string[] }).focus.join(', ')}`,
+    })
+
+    const result = await client.callTool({
+      name: 'guren_docs_graph',
+      arguments: { path: 'app/Http/Controllers/PostController.ts' },
+    })
+    const text = (result.content as Array<{ type: string; text: string }>)[0].text
+
+    expect(seen[0]).toMatchObject({ path: 'app/Http/Controllers/PostController.ts' })
+    expect(text).toContain('Neighborhood of: app/Http/Controllers/PostController.ts')
+  })
+
   test('guren_entity_context returns markdown by default', async () => {
     const client = await createTestClient()
     const result = await client.callTool({

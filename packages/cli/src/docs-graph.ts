@@ -9,8 +9,8 @@
  * uses). Consumed by the docs viewer endpoint; no filesystem access.
  */
 import { posix } from 'node:path'
-import type { DocRef } from './docs-index'
-import { resolveDocLink } from './docs-check'
+import { scanDocs, type DocRef } from './docs-index'
+import { resolveDocLink, runDocsCheck } from './docs-check'
 import type { CheckResult, CheckStatus } from './check-result'
 import { SPEC_VIEWS } from './spec-generate'
 import { SPEC_DIR } from './spec-artifact'
@@ -130,4 +130,128 @@ export function buildDocsGraph(refs: DocRef[], checks: CheckResult[]): DocsGraph
   }
 
   return { nodes, edges }
+}
+
+
+export interface DocsGraphReportOptions {
+  cwd?: string
+  /** Narrow to the neighborhood of one model entity (case-insensitive). */
+  entity?: string
+  /** Narrow to the neighborhood of one app-root-relative path. */
+  path?: string
+}
+
+export interface DocsGraphReport extends DocsGraph {
+  /** The node ids the report was narrowed to, empty for the whole graph. */
+  focus: string[]
+}
+
+/**
+ * Whether a focus path names this node: exactly, or by falling under a
+ * directory node (`app/Models/` covers `app/Models/Post.ts`).
+ */
+function nodeMatchesPath(node: DocsGraphNode, path: string): boolean {
+  if (node.id === path) return true
+  return node.id.endsWith('/') && path.startsWith(node.id)
+}
+
+/**
+ * The docs relation graph, optionally narrowed to one node's
+ * neighborhood — the agent-facing entry behind `guren docs:graph` and
+ * the MCP tool. Narrowing answers the impact question directly: which
+ * documents govern this path or entity, and which spec views regenerate
+ * from it, before a rename or edit rather than after `check` fails.
+ */
+export async function buildDocsGraphReport(
+  options: DocsGraphReportOptions = {},
+): Promise<DocsGraphReport> {
+  const cwd = options.cwd ?? process.cwd()
+  const refs = await scanDocs(cwd)
+  const checks = await runDocsCheck({ cwd })
+  const { nodes, edges } = buildDocsGraph(refs, checks)
+
+  const focus = nodes.filter((node) => {
+    if (options.entity !== undefined && node.kind === 'entity') {
+      return node.label.toLowerCase() === options.entity.toLowerCase()
+    }
+    if (options.path !== undefined && node.kind !== 'entity') {
+      return nodeMatchesPath(node, options.path)
+    }
+    return false
+  })
+
+  if (options.entity === undefined && options.path === undefined) {
+    return { focus: [], nodes, edges }
+  }
+
+  const focusIds = new Set(focus.map((node) => node.id))
+  if (focusIds.size === 0) {
+    // Narrowing was requested but nothing matched: echo the request so
+    // the caller (and the renderer) can tell this apart from an
+    // un-narrowed report of an empty bundle.
+    return { focus: [options.entity ?? options.path ?? ''], nodes: [], edges: [] }
+  }
+  const keptEdges = edges.filter((edge) => focusIds.has(edge.from) || focusIds.has(edge.to))
+  const keptIds = new Set(focusIds)
+  for (const edge of keptEdges) {
+    keptIds.add(edge.from)
+    keptIds.add(edge.to)
+  }
+
+  return {
+    focus: [...focusIds],
+    nodes: nodes.filter((node) => keptIds.has(node.id)),
+    edges: keptEdges,
+  }
+}
+
+const VERDICT_GLYPH: Record<CheckStatus, string> = { pass: 'ok', warn: 'warn', fail: 'FAIL' }
+
+/** Human-readable rendering, mirroring `guren context`'s markdown style. */
+export function renderDocsGraphMarkdown(report: DocsGraphReport): string {
+  const lines: string[] = ['# Docs Graph', '']
+
+  if (report.focus.length > 0) {
+    lines.push(`Neighborhood of: ${report.focus.join(', ')}`, '')
+  }
+  if (report.nodes.length === 0) {
+    lines.push(
+      report.focus.length === 0
+        ? 'No OKF documents found under docs/.'
+        : 'Nothing in the docs graph references this target.',
+      '',
+    )
+    return lines.join('\n')
+  }
+
+  const byKind = new Map<string, DocsGraphNode[]>()
+  for (const node of report.nodes) {
+    const list = byKind.get(node.kind) ?? []
+    list.push(node)
+    byKind.set(node.kind, list)
+  }
+  const KIND_TITLES: Array<[DocsGraphNode['kind'], string]> = [
+    ['doc', 'Documents'],
+    ['entity', 'Entities'],
+    ['code', 'Code'],
+  ]
+  for (const [kind, title] of KIND_TITLES) {
+    const nodes = byKind.get(kind)
+    if (!nodes) continue
+    lines.push(`## ${title} (${nodes.length})`)
+    for (const node of nodes) {
+      const type = node.docType ? ` (${node.docType})` : ''
+      lines.push(`- ${node.id}${node.kind === 'doc' && node.label !== node.id ? ` — ${node.label}` : ''}${type}`)
+    }
+    lines.push('')
+  }
+
+  lines.push(`## Relations (${report.edges.length})`)
+  for (const edge of report.edges) {
+    const verdict = edge.verdict === 'pass' ? '' : ` [${VERDICT_GLYPH[edge.verdict]}]`
+    lines.push(`- ${edge.from} —${edge.relation}→ ${edge.to}${verdict}`)
+  }
+  lines.push('')
+
+  return lines.join('\n')
 }
