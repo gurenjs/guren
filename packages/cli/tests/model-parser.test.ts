@@ -60,6 +60,50 @@ if (typeof User.hasMany === 'function') {
     expect(result!.relationships[0].type).toBe('hasMany')
   })
 
+  it('parses AuthenticatableModel passed as a defineModel base', () => {
+    const source = `
+import { AuthenticatableModel, defineModel, type HasManyRecord } from '@guren/core'
+import { users } from '../../db/schema.js'
+import type { PostRecord } from './Post.js'
+
+export class User extends defineModel(users, {
+  base: AuthenticatableModel,
+  optionalOnCreate: ['passwordHash'],
+  requireOnCreate: ['password'],
+}) {
+  static override relationTypes: { posts: HasManyRecord<PostRecord> } = {
+    posts: [],
+  }
+}
+
+if (typeof User.hasMany === 'function') {
+  User.hasMany('posts', (() => import('./Post.js').then((module) => module.Post)) as any, 'authorId', 'id')
+}
+`
+    const result = parseModelSource(source, '/app/Models/User.ts')
+
+    expect(result).not.toBeNull()
+    expect(result!.className).toBe('User')
+    expect(result!.tableName).toBe('users')
+    expect(result!.usesAuth).toBe(true)
+    expect(result!.relationships).toHaveLength(1)
+    expect(result!.relationships[0].name).toBe('posts')
+  })
+
+  it('does not flag a plain defineModel model as authenticatable', () => {
+    const source = `
+import { defineModel } from '@guren/orm'
+import { posts } from '../../db/schema.js'
+
+export class Post extends defineModel(posts, { optionalOnCreate: ['slug'] }) {}
+`
+    const result = parseModelSource(source, '/app/Models/Post.ts')
+
+    expect(result).not.toBeNull()
+    expect(result!.tableName).toBe('posts')
+    expect(result!.usesAuth).toBe(false)
+  })
+
   it('detects SoftDeletes', () => {
     const source = `
 import { defineModel, SoftDeletes } from '@guren/orm'

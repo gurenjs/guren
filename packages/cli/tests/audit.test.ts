@@ -530,6 +530,50 @@ export default function registerRoutes(router: any) {
     }
   })
 
+  it('resolves the table from defineModel, not just from `static table`', async () => {
+    // A model that binds its table through defineModel() used to fall out of
+    // this check entirely — the table never resolved, so no column was ever
+    // compared against `hidden`.
+    const workspace = await createTempWorkspace('guren-cli-audit-hidden-define-model-')
+
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'db/schema.ts'),
+        `import { pgTable, text } from 'drizzle-orm/pg-core'
+export const users = pgTable('users', {
+  id: text('id').primaryKey(),
+  email: text('email').notNull(),
+  passwordHash: text('password_hash').notNull(),
+})`,
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'app/Models'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Models/User.ts'),
+        `import { AuthenticatableModel, defineModel } from '@guren/core'
+import { users } from '../../db/schema.js'
+
+export class User extends defineModel(users, {
+  base: AuthenticatableModel,
+  optionalOnCreate: ['passwordHash'],
+}) {
+  static guarded = ['id', 'passwordHash']
+}`,
+        'utf8',
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const hidden = report.findings.find(f => f.key === 'hidden-columns:User')
+      expect(hidden).toBeDefined()
+      expect(hidden!.status).toBe('warn')
+      expect(hidden!.message).toContain('passwordHash')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('warns when a sensitive schema column is not hidden', async () => {
     const workspace = await createTempWorkspace('guren-cli-audit-hidden-warn-')
 

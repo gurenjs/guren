@@ -99,6 +99,22 @@ export class Post extends defineModel(posts) {}
 
 That is all you need. `Post` now has `find`, `create`, `where`, `paginate`, and dozens more methods.
 
+### Reshaping the create payload
+
+The type `defineModel()` infers for `create()` requires every column without a database default. When the model derives a column itself, say so in the same call rather than hand-writing a type:
+
+```ts
+export class User extends defineModel(users, {
+  base: AuthenticatableModel,
+  optionalOnCreate: ['passwordHash'],  // derived from `password`, so callers need not pass it
+  requireOnCreate: ['password'],     // demand the virtual field instead
+}) {}
+```
+
+`optionalOnCreate` makes columns optional — they keep their type, callers just need not supply them. `requireOnCreate` goes the other way, and accepts both table columns (Drizzle marks defaulted ones optional) and fields contributed by `base`. Both are type-level only and are checked against the real keys, so a typo fails to compile.
+
+Neither closes the payload: a create type always admits unknown keys as `unknown`, so `fillable`/`guarded` remain what reject an unwanted field at runtime.
+
 ## Querying Data
 
 Start simple, then build up:

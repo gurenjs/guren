@@ -22,11 +22,24 @@ export class Post extends defineModel(posts) {
 Post.belongsTo('author', () => import('./User.js').then((m) => m.User), 'authorId', 'id')
 ```
 
-Auth user models extend `AuthenticatableModel<UserRecord>` directly: set `static override table = users`
-and redeclare the type markers with `declare static readonly recordType: UserRecord` (plus `createType`
-when the create payload differs, e.g. `Omit<NewUserRecord, 'passwordHash'> & { password: string }`).
-Do **not** use `defineModel(users, { base: AuthenticatableModel })` — the inferred createType requires
-every non-defaulted column, so `create({ name, email, password })` would demand `passwordHash`.
+Auth user models use the same `defineModel()` call with `AuthenticatableModel` as the base, plus the
+options that reshape the create payload — the model hashes a plain `password` into `passwordHash`, so
+the column becomes optional and the virtual field becomes required:
+
+```typescript
+export class User extends defineModel(users, {
+  base: AuthenticatableModel,
+  optionalOnCreate: ['passwordHash'],
+  requireOnCreate: ['password'],
+}) {
+  static guarded = ['id', 'passwordHash', 'rememberToken']
+  static override hidden = ['passwordHash', 'rememberToken']
+}
+```
+
+Drop `requireOnCreate` when accounts can also be created without a password (OAuth-only sign-up).
+Optional means optional — passing `passwordHash` still type-checks. Mass assignment is the guard:
+keep it out of `fillable`, or in `guarded` on models that set no `fillable`.
 
 ## Statics
 

@@ -46,6 +46,22 @@ export class Post extends defineModel(posts) {}
 // Drizzle の推論型がそのまま Post.find() などの静的ヘルパーに流れます。
 ```
 
+### create のペイロードを整える
+
+`defineModel()` が `create()` 用に推論する型は、データベース側のデフォルト値を持たない全カラムを必須にします。モデル自身が値を導出するカラムがある場合は、型を手書きせず同じ呼び出しで指定します。
+
+```ts
+export class User extends defineModel(users, {
+  base: AuthenticatableModel,
+  optionalOnCreate: ['passwordHash'],  // password から生成するので渡さなくてよい
+  requireOnCreate: ['password'],     // 代わりに仮想フィールドを必須にする
+}) {}
+```
+
+`optionalOnCreate` はカラムを任意にします（型はそのままで、渡さなくてよくなります）。`requireOnCreate` は逆にフィールドを必須にし、テーブルのカラム（Drizzle はデフォルト値付きを任意にします）と `base` が提供するフィールドの両方を受け付けます。どちらも型レベルのみの指定で、実際のキーと照合されるためタイポはコンパイルエラーになります。
+
+どちらもペイロードを閉じるわけではありません。create の型は未知のキーを `unknown` として受け入れるため、意図しないフィールドを実行時に弾くのは引き続き `fillable` / `guarded` です。
+
 ## SQLite サポート
 
 Guren は Bun 組み込みの SQLite ドライバを使って、SQLite をそのままサポートします。新規プロジェクトはデフォルトで SQLite を使用するため、Docker や外部データベースのセットアップは不要です。
