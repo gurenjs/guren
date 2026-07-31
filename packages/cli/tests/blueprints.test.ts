@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it } from 'bun:test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { createTempWorkspace, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, type TempWorkspace } from './helpers'
+import { createTempWorkspace, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, SQLITE_SCHEMA_FIXTURE, type TempWorkspace } from './helpers'
 import { listBlueprints, runBlueprint } from '../src/blueprints'
 
 /** The directories and route file the resource blueprint expects to patch. */
@@ -75,6 +75,26 @@ describe('blueprints', () => {
 
     const schema = await readFile('db/schema.ts', 'utf8')
     expect(schema).toContain("export const posts = pgTable('posts'")
+  })
+
+  // SQLite is the default dialect and was the only one with no `date` case: a
+  // date field fell through to `text()`, and the `Date` the validator produces
+  // binds to a text column as null — every date silently dropped on write.
+  it('stores a date as a timestamp on the default sqlite schema', async () => {
+    await seedResourceWorkspace(SQLITE_SCHEMA_FIXTURE)
+
+    await runBlueprint('resource', {
+      name: 'Post',
+      fields: 'title:string,views:number,published:boolean,publishedAt:date,meta:json',
+    })
+
+    const schema = await readFile('db/schema.ts', 'utf8')
+
+    expect(schema).toContain("export const posts = sqliteTable('posts'")
+    expect(schema).toContain("publishedAt: integer('published_at', { mode: 'timestamp' }).notNull()")
+    expect(schema).not.toContain("publishedAt: text('published_at')")
+    expect(schema).toContain("published: integer('published', { mode: 'boolean' }).notNull()")
+    expect(schema).toContain("meta: text('meta', { mode: 'json' }).notNull()")
   })
 
   it('adds resource tables to a mysql schema without borrowing another dialect', async () => {

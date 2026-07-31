@@ -1,6 +1,6 @@
 import { makeAuth } from './make-auth'
 import { makeChannel } from './make-channel'
-import { makeFeature, parseFieldsString, type FieldDefinition } from './make-feature'
+import { makeFeature, parseFieldsString, type FieldDefinition, type FieldType } from './make-feature'
 import { makeController } from './make-controller'
 import { makeEvent } from './make-event'
 import { makeJob } from './make-job'
@@ -689,50 +689,55 @@ export default scheduleTasksKernel
   },
 }
 
-function sqliteColumn(field: FieldDefinition): { code: string; imports: string[] } {
+type Column = { code: string; imports: string[] }
+
+/**
+ * Keyed by `FieldType` rather than switched with a `default:` arm, so a new
+ * field type fails to compile in every dialect. A `default:` here is how
+ * `date` went missing from SQLite: dates fell through to a `text` column, and
+ * the `Date` the validator produces binds to that as `null` — every date
+ * silently written away on the default database.
+ */
+function sqliteColumn(field: FieldDefinition): Column {
+  const name = snakeCase(field.name)
   const notNull = field.nullable ? '' : '.notNull()'
-  switch (field.type) {
-    case 'number':
-      return { code: `integer('${snakeCase(field.name)}')${notNull}`, imports: ['integer'] }
-    case 'boolean':
-      return { code: `integer('${snakeCase(field.name)}', { mode: 'boolean' })${notNull}`, imports: ['integer'] }
-    case 'json':
-      return { code: `text('${snakeCase(field.name)}', { mode: 'json' })${notNull}`, imports: ['text'] }
-    default:
-      return { code: `text('${snakeCase(field.name)}')${notNull}`, imports: ['text'] }
+  const columns: Record<FieldType, Column> = {
+    string: { code: `text('${name}')${notNull}`, imports: ['text'] },
+    text: { code: `text('${name}')${notNull}`, imports: ['text'] },
+    number: { code: `integer('${name}')${notNull}`, imports: ['integer'] },
+    boolean: { code: `integer('${name}', { mode: 'boolean' })${notNull}`, imports: ['integer'] },
+    date: { code: `integer('${name}', { mode: 'timestamp' })${notNull}`, imports: ['integer'] },
+    json: { code: `text('${name}', { mode: 'json' })${notNull}`, imports: ['text'] },
   }
+  return columns[field.type]
 }
 
-function pgColumn(field: FieldDefinition): { code: string; imports: string[] } {
+function pgColumn(field: FieldDefinition): Column {
+  const name = snakeCase(field.name)
   const notNull = field.nullable ? '' : '.notNull()'
-  switch (field.type) {
-    case 'number':
-      return { code: `integer('${snakeCase(field.name)}')${notNull}`, imports: ['integer'] }
-    case 'boolean':
-      return { code: `boolean('${snakeCase(field.name)}')${notNull}`, imports: ['boolean'] }
-    case 'date':
-      return { code: `timestamp('${snakeCase(field.name)}', { withTimezone: false })${notNull}`, imports: ['timestamp'] }
-    case 'json':
-      return { code: `jsonb('${snakeCase(field.name)}')${notNull}`, imports: ['jsonb'] }
-    default:
-      return { code: `text('${snakeCase(field.name)}')${notNull}`, imports: ['text'] }
+  const columns: Record<FieldType, Column> = {
+    string: { code: `text('${name}')${notNull}`, imports: ['text'] },
+    text: { code: `text('${name}')${notNull}`, imports: ['text'] },
+    number: { code: `integer('${name}')${notNull}`, imports: ['integer'] },
+    boolean: { code: `boolean('${name}')${notNull}`, imports: ['boolean'] },
+    date: { code: `timestamp('${name}', { withTimezone: false })${notNull}`, imports: ['timestamp'] },
+    json: { code: `jsonb('${name}')${notNull}`, imports: ['jsonb'] },
   }
+  return columns[field.type]
 }
 
-function mysqlColumn(field: FieldDefinition): { code: string; imports: string[] } {
+function mysqlColumn(field: FieldDefinition): Column {
+  const name = snakeCase(field.name)
   const notNull = field.nullable ? '' : '.notNull()'
-  switch (field.type) {
-    case 'number':
-      return { code: `int('${snakeCase(field.name)}')${notNull}`, imports: ['int'] }
-    case 'boolean':
-      return { code: `boolean('${snakeCase(field.name)}')${notNull}`, imports: ['boolean'] }
-    case 'date':
-      return { code: `timestamp('${snakeCase(field.name)}')${notNull}`, imports: ['timestamp'] }
-    case 'json':
-      return { code: `json('${snakeCase(field.name)}')${notNull}`, imports: ['json'] }
-    default:
-      return { code: `varchar('${snakeCase(field.name)}', { length: 255 })${notNull}`, imports: ['varchar'] }
+  const columns: Record<FieldType, Column> = {
+    string: { code: `varchar('${name}', { length: 255 })${notNull}`, imports: ['varchar'] },
+    text: { code: `varchar('${name}', { length: 255 })${notNull}`, imports: ['varchar'] },
+    number: { code: `int('${name}')${notNull}`, imports: ['int'] },
+    boolean: { code: `boolean('${name}')${notNull}`, imports: ['boolean'] },
+    date: { code: `timestamp('${name}')${notNull}`, imports: ['timestamp'] },
+    json: { code: `json('${name}')${notNull}`, imports: ['json'] },
   }
+  return columns[field.type]
 }
 
 function snakeCase(value: string): string {

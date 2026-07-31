@@ -4,9 +4,9 @@ import { makeModel } from './make-model'
 import { makePolicy } from './make-policy'
 import { makeTest } from './make-test'
 
-export type FieldType = 'string' | 'number' | 'boolean' | 'text' | 'date' | 'json'
+export const FIELD_TYPES = ['string', 'number', 'boolean', 'text', 'date', 'json'] as const
 
-export const FIELD_TYPES: readonly FieldType[] = ['string', 'number', 'boolean', 'text', 'date', 'json']
+export type FieldType = (typeof FIELD_TYPES)[number]
 
 export interface FieldDefinition {
   name: string
@@ -42,6 +42,13 @@ export function parseFieldsString(fieldsStr: string): FieldDefinition[] {
     const type = nullable ? rawType.slice(0, -1) : rawType
 
     if (!name) throw new Error(`Invalid field definition: "${field}"`)
+
+    // The name becomes an object key, a property access and a state key in the
+    // generated code, so anything that is not an identifier produces a file
+    // that cannot be parsed — better to say so than to emit it.
+    if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)) {
+      throw new Error(`Invalid field name "${name}". Use a valid identifier, e.g. "publishedAt".`)
+    }
 
     if (!FIELD_TYPES.includes(type as FieldType)) {
       throw new Error(`Invalid field type "${type}" for field "${name}". Valid: ${FIELD_TYPES.join(', ')}`)
@@ -239,13 +246,17 @@ function emptyFormValue(field: FieldDefinition): string {
 }
 
 /**
- * Reading a field out of form state. Nullable columns are typed
- * `T | null | undefined`, which no controlled input accepts, so they coalesce
- * to the same empty value the form was seeded with.
+ * Reading a nullable column. It is typed `T | null | undefined`, which neither
+ * a controlled input nor `useForm`'s seed accepts, so it coalesces to the same
+ * empty value the form starts at. Parenthesized so the result can be used as a
+ * receiver — `(a ?? '').slice(...)` — since `??` binds looser than member access.
  */
+function withEmptyFallback(field: FieldDefinition, access: string): string {
+  return field.nullable ? `(${access} ?? ${emptyFormValue(field)})` : access
+}
+
 function formValue(field: FieldDefinition, formVar: string): string {
-  const access = `${formVar}.data.${field.name}`
-  return field.nullable ? `${access} ?? ${emptyFormValue(field)}` : access
+  return withEmptyFallback(field, `${formVar}.data.${field.name}`)
 }
 
 function generateValidator(singular: string, collection: string, fields: FieldDefinition[]): string {
@@ -502,9 +513,9 @@ function generateNewPage(
   const defaults = fields.map((f) => `${f.name}: ${emptyFormValue(f)}`).join(', ')
 
   const formFields = fields.map((f) => generateFormField(f, 'form')).join('\n')
-  const fieldState = generateFormFieldState(fields)
+  const state = generateFormState(fields, 'form')
 
-  return `${reactImport(fieldState)}import { useForm } from '@inertiajs/react'
+  return `${state.imports}import { useForm } from '@inertiajs/react'
 import type { ApiRoutes } from '@/.guren/api-client.gen'
 import type { RouteBody } from '@guren/inertia-client/typed-forms'
 import { route } from '@/.guren/routes.gen'
@@ -513,7 +524,7 @@ type ${singular}FormData = RouteBody<ApiRoutes, '${routeName}.store'>
 
 export default function New${singular}() {
   const form = useForm<${singular}FormData>({ ${defaults} })
-${fieldState ? `${fieldState}\n` : ''}  return (
+${state.hooks}  return (
     <main className="mx-auto max-w-3xl px-6 py-12">
       <form className="space-y-4" onSubmit={(submitEvent) => { submitEvent.preventDefault(); form.post(route('${routeName}.store')) }}>
 ${formFields}
@@ -531,15 +542,14 @@ function generateEditPage(
   variableName: string,
   fields: FieldDefinition[],
 ): string {
-  const defaults = fields.map((f) => {
-    const defaultVal = f.nullable ? ` ?? ${emptyFormValue(f)}` : ''
-    return `${f.name}: ${variableName}.${f.name}${defaultVal}`
-  }).join(', ')
+  const defaults = fields
+    .map((f) => `${f.name}: ${withEmptyFallback(f, `${variableName}.${f.name}`)}`)
+    .join(', ')
 
   const formFields = fields.map((f) => generateFormField(f, 'form')).join('\n')
-  const fieldState = generateFormFieldState(fields)
+  const state = generateFormState(fields, 'form')
 
-  return `${reactImport(fieldState)}import { useForm } from '@inertiajs/react'
+  return `${state.imports}import { useForm } from '@inertiajs/react'
 import type { ApiRoutes } from '@/.guren/api-client.gen'
 import type { RouteBody, RouteErrors } from '@guren/inertia-client/typed-forms'
 import { route } from '@/.guren/routes.gen'
@@ -553,7 +563,7 @@ interface Props {
 
 export default function Edit${singular}({ ${variableName} }: Props) {
   const form = useForm<${singular}FormData>({ ${defaults} })
-${fieldState ? `${fieldState}\n` : ''}  return (
+${state.hooks}  return (
     <main className="mx-auto max-w-3xl px-6 py-12">
       <form className="space-y-4" onSubmit={(submitEvent) => { submitEvent.preventDefault(); form.put(route('${routeName}.update', { id: ${variableName}.id })) }}>
 ${formFields}
@@ -582,8 +592,7 @@ function generateFormField(field: FieldDefinition, formVar: string): string {
   if (field.type === 'date') {
     // The value arrives as an ISO timestamp but `type="date"` only renders a
     // bare `YYYY-MM-DD`, and shows nothing at all for anything longer.
-    const dateValue = field.nullable ? `(${value})` : value
-    return `        <input type="date" value={${dateValue}.slice(0, 10)} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} className="w-full rounded border px-3 py-2" />`
+    return `        <input type="date" value={${value}.slice(0, 10)} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} className="w-full rounded border px-3 py-2" />`
   }
   if (field.type === 'json') {
     // Uncontrolled: a controlled textarea driven by the parsed object would
@@ -591,36 +600,46 @@ function generateFormField(field: FieldDefinition, formVar: string): string {
     // flag is what keeps that from being silent — without it, submitting
     // half-typed JSON would quietly send the last value that parsed.
     return `        <textarea
-          defaultValue={JSON.stringify(${value}, null, 2)}
+          defaultValue={jsonText.${field.name}}
           onChange={(event) => {
             try {
               ${formVar}.setData('${field.name}', JSON.parse(event.target.value))
-              set${pascalCase(field.name)}Invalid(false)
+              setJsonErrors((prev) => ({ ...prev, ${field.name}: false }))
             } catch {
-              set${pascalCase(field.name)}Invalid(true)
+              setJsonErrors((prev) => ({ ...prev, ${field.name}: true }))
             }
           }}
           placeholder="${field.name}"
           className="w-full rounded border px-3 py-2 font-mono text-sm"
         />
-        {${field.name}Invalid && (
+        {jsonErrors.${field.name} && (
           <p className="text-sm text-red-600">${field.name} is not valid JSON — fix it or the last valid value is submitted.</p>
         )}`
   }
   return `        <input value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} placeholder="${field.name}" className="w-full rounded border px-3 py-2" />`
 }
 
-/** Only pages carrying field state import React. */
-function reactImport(fieldState: string): string {
-  return fieldState ? "import { useState } from 'react'\n" : ''
-}
+/**
+ * The hooks a page's JSON fields need, and the import that comes with them.
+ *
+ * Both are keyed by field name in one record rather than declared per field:
+ * two fields whose names differ only in punctuation would otherwise generate
+ * the same identifier, and `jsonText` is seeded once so an Edit page is not
+ * re-serializing its record on every keystroke.
+ */
+function generateFormState(fields: FieldDefinition[], formVar: string): { imports: string; hooks: string } {
+  const jsonFields = fields.filter((f) => f.type === 'json')
+  if (jsonFields.length === 0) return { imports: '', hooks: '' }
 
-/** The `useState` lines the JSON fields' validity flags need, if any. */
-function generateFormFieldState(fields: FieldDefinition[]): string {
-  return fields
-    .filter((f) => f.type === 'json')
-    .map((f) => `  const [${f.name}Invalid, set${pascalCase(f.name)}Invalid] = useState(false)`)
-    .join('\n')
+  const initial = jsonFields
+    .map((f) => `${f.name}: JSON.stringify(${formValue(f, formVar)}, null, 2)`)
+    .join(', ')
+
+  return {
+    imports: "import { useState } from 'react'\n",
+    hooks: `  const [jsonText] = useState(() => ({ ${initial} }))\n`
+      + '  const [jsonErrors, setJsonErrors] = useState<Record<string, boolean>>({})\n',
+  }
 }
 
 function pluralize(name: string): string {

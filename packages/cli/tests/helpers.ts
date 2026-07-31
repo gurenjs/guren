@@ -79,6 +79,16 @@ export const users = pgTable('users', {
 })
 `
 
+/** The dialect every `create-guren-app` blueprint defaults to. */
+export const SQLITE_SCHEMA_FIXTURE = `import { sqliteTable, integer, text } from 'drizzle-orm/sqlite-core'
+
+export const users = sqliteTable('users', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  email: text('email').notNull(),
+})
+`
+
 export const MYSQL_SCHEMA_FIXTURE = `import { mysqlTable, int, varchar, timestamp } from 'drizzle-orm/mysql-core'
 
 export const users = mysqlTable('users', {

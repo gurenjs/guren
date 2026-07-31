@@ -7,9 +7,6 @@ import { schemaToTypeString } from './schema-type-extractor'
  * Serializable route view shared by the whole-project context and the
  * entity bundle: `RouteDefinition` with its live Zod schema objects
  * replaced by rendered type strings, so `--json` output stays clean.
- *
- * `body` renders the request side of its schema; `params`, `query` and
- * `output` render the parsed side. See the call site for why.
  */
 export interface ContextRoute {
   method: string

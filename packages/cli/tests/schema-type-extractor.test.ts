@@ -32,17 +32,17 @@ describe('schemaToTypeString', () => {
       expect(output(z.coerce.number())).toBe('number')
     })
 
-    it('leaves non-coercing schemas identical on both sides', () => {
-      for (const schema of [z.date(), z.number(), z.boolean(), z.string()]) {
-        expect(input(schema)).toBe(output(schema)!)
+    // Coerced strings and booleans are already JSON-native, so widening them
+    // would only cost callers precision — a bare `boolean` is what a
+    // checkbox's `checked` needs.
+    it('renders schemas with no wire/parsed gap identically on both sides', () => {
+      for (const [schema, type] of [
+        [z.date(), 'Date'], [z.number(), 'number'], [z.boolean(), 'boolean'], [z.string(), 'string'],
+        [z.coerce.string(), 'string'], [z.coerce.boolean(), 'boolean'],
+      ] as const) {
+        expect(input(schema)).toBe(type)
+        expect(output(schema)).toBe(type)
       }
-    })
-
-    // Already JSON-native, so widening them would only cost callers precision —
-    // a bare `boolean` is what a checkbox's `checked` needs.
-    it('does not widen coerced strings or booleans', () => {
-      expect(input(z.coerce.string())).toBe('string')
-      expect(input(z.coerce.boolean())).toBe('boolean')
     })
 
     it('applies through wrappers and into object fields', () => {
@@ -113,6 +113,34 @@ describe('schemaToTypeString', () => {
 
       expect(input(schema)).toBe('{ value: string }')
       expect(output(schema)).toBe('{ value?: string }')
+    })
+
+    it('treats prefault like default, and nonoptional as required', () => {
+      expect(input(z.object({ a: z.string().prefault('p') }))).toBe('{ a?: string }')
+      expect(output(z.object({ a: z.string().prefault('p') }))).toBe('{ a: string }')
+      expect(input(z.object({ a: z.string().optional().nonoptional() }))).toBe('{ a: string }')
+    })
+
+    // `zodToType` and `isOptional` walk separately, so a wrapper added to one
+    // unwrap list and not the other silently makes an optional field required.
+    it('looks through the same wrappers when deciding presence as when reading the type', () => {
+      for (const schema of [
+        z.object({ a: z.string().optional().readonly() }),
+        z.object({ a: z.string().optional().catch('x') }),
+        z3.object({ a: z3.string().optional().brand<'Tagged'>() }),
+      ]) {
+        expect(input(schema)).toBe('{ a?: string }')
+        expect(output(schema)).toBe('{ a?: string }')
+      }
+    })
+
+    // The type comes from the in side for a transform; presence has to agree,
+    // or one field is described by two different nodes.
+    it('agrees with the rendered type when a pipe output is a transform', () => {
+      const schema = z.object({ a: z.string().optional().transform((s) => s?.length) })
+
+      expect(input(schema)).toBe('{ a?: string }')
+      expect(output(schema)).toBe('{ a?: string }')
     })
   })
 

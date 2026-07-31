@@ -39,6 +39,14 @@ describe('parseFieldsString', () => {
     expect(() => parseFieldsString(':string')).toThrow('Invalid field definition')
   })
 
+  // The name lands in an object key and a property access, so a non-identifier
+  // silently produced a page that could not be parsed.
+  it('throws for a field name that is not an identifier', () => {
+    expect(() => parseFieldsString('my-name:string')).toThrow('Invalid field name')
+    expect(() => parseFieldsString('2fa:boolean')).toThrow('Invalid field name')
+    expect(() => parseFieldsString('_meta:json')).not.toThrow()
+  })
+
   it('handles whitespace', () => {
     const fields = parseFieldsString(' title : string , body : text ')
     expect(fields).toHaveLength(2)
@@ -162,9 +170,6 @@ describe('makeFeature', () => {
         'utf8',
       )
       expect(resource).toContain('startsAt: string')
-      // Casting the column straight to string is what TypeScript rejects, and
-      // calling .toISOString() on it breaks under SQLite, where the driver
-      // hands back a string rather than a Date.
       expect(resource).toContain(
         'startsAt: new Date(this.resource.startsAt as string | number | Date).toISOString()',
       )
@@ -196,16 +201,16 @@ describe('makeFeature', () => {
       const newPage = await readFile(join(workspace.dir, 'resources/js/pages/events/New.tsx'), 'utf8')
       // Uncontrolled: a controlled textarea would reject every keystroke that
       // leaves the JSON temporarily unparseable.
-      expect(newPage).toContain('defaultValue={JSON.stringify(form.data.meta, null, 2)}')
+      expect(newPage).toContain('defaultValue={jsonText.meta}')
       expect(newPage).toContain("setData('meta', JSON.parse(event.target.value))")
       expect(newPage).toContain('meta: {}')
 
       // Without the flag, submitting half-typed JSON silently sends the last
       // value that parsed, with the textarea still showing the newer text.
       expect(newPage).toContain("import { useState } from 'react'")
-      expect(newPage).toContain('const [metaInvalid, setMetaInvalid] = useState(false)')
-      expect(newPage).toContain('setMetaInvalid(true)')
-      expect(newPage).toContain('{metaInvalid && (')
+      expect(newPage).toContain('const [jsonErrors, setJsonErrors] = useState<Record<string, boolean>>({})')
+      expect(newPage).toContain('setJsonErrors((prev) => ({ ...prev, meta: true }))')
+      expect(newPage).toContain('{jsonErrors.meta && (')
 
       const showPage = await readFile(join(workspace.dir, 'resources/js/pages/events/Show.tsx'), 'utf8')
       // An object is not a valid React child.
@@ -233,14 +238,20 @@ describe('makeFeature', () => {
     }
   })
 
-  it('only imports useState on pages that need field state', async () => {
-    const workspace = await createTempWorkspace('guren-cli-feature-no-state-')
+  // Two fields differing only in punctuation used to generate one identifier —
+  // `_meta` and `meta` both became `setMetaInvalid`, a duplicate declaration.
+  it('keeps two similarly named json fields apart', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-json-names-')
 
     try {
-      await makeFeature('Post', { fields: 'title:string,body:text' })
+      await makeFeature('Thing', { fields: '_meta:json,meta:json' })
 
-      const newPage = await readFile(join(workspace.dir, 'resources/js/pages/posts/New.tsx'), 'utf8')
-      expect(newPage).not.toContain('useState')
+      const newPage = await readFile(join(workspace.dir, 'resources/js/pages/things/New.tsx'), 'utf8')
+
+      expect(newPage).toContain('{jsonErrors._meta && (')
+      expect(newPage).toContain('{jsonErrors.meta && (')
+      // One hook pair for the page, not one per field.
+      expect(newPage.match(/useState/g)).toHaveLength(3)
     } finally {
       await workspace.cleanup()
     }
@@ -259,6 +270,8 @@ describe('makeFeature', () => {
         // The record is named `post` here, but an entity whose variable name is
         // `event` would collide with a submit handler that also took `event`.
         expect(source).toContain('onSubmit={(submitEvent) =>')
+        // No json field, so nothing on the page needs state.
+        expect(source).not.toContain('useState')
       }
     } finally {
       await workspace.cleanup()

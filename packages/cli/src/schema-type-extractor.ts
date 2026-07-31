@@ -30,20 +30,23 @@ interface SchemaTypeOptions {
 
 /**
  * The wire types a coercing schema accepts, where they differ from the parsed
- * type. Anything absent here renders the same on both sides — `z.coerce.string()`
- * and `z.coerce.boolean()` are already JSON-native, and a bare `boolean` is what
- * a checkbox's `checked` wants.
- *
- * Deliberately narrower than the full set Zod would coerce (`z.coerce.number()`
- * also takes `boolean`, `z.coerce.boolean()` takes anything at all): these are
- * the request types generated code has to *satisfy*, so narrow is both safe and
- * usable — a caller can always widen the schema if it really means "anything".
+ * type; absent means the two sides are identical. Deliberately narrower than
+ * what Zod would really coerce (`z.coerce.boolean()` takes anything at all) —
+ * a generated type is one callers must *satisfy*, so it stays JSON-native and
+ * usable, and `boolean` stays bare so it can still drive a checkbox.
  */
 const COERCED_INPUT_TYPES: Record<string, string> = {
   number: 'number | string',
   bigint: 'string',
   date: 'string',
 }
+
+/**
+ * Wrappers that neither add to a type nor decide presence — whatever they wrap
+ * answers both questions. `zodToType` and `isOptional` walk separately, so this
+ * is the one list keeping them from disagreeing about what to look through.
+ */
+const TRANSPARENT_WRAPPERS = new Set(['catch', 'readonly', 'branded', 'lazy', 'effects'])
 
 function getTypeName(z: ZodAnyLike): string | undefined {
   // v3: _def.typeName = "ZodString" etc.
@@ -86,6 +89,10 @@ function zodToType(z: ZodAnyLike, io: SchemaIo): string {
   // to be checked before the plain type mapping below claims the parsed type.
   if (io === 'input' && def.coerce === true && t in COERCED_INPUT_TYPES) {
     return COERCED_INPUT_TYPES[t]
+  }
+
+  if (TRANSPARENT_WRAPPERS.has(t)) {
+    return inner(def) ? zodToType(inner(def)!, io) : 'unknown'
   }
 
   switch (t) {
@@ -133,23 +140,18 @@ function zodToType(z: ZodAnyLike, io: SchemaIo): string {
       return `{ ${fields.join('; ')} }`
     }
 
-    case 'optional':
-      return inner(def) ? zodToType(inner(def)!, io) : 'unknown'
-
     case 'nullable': {
       const i = inner(def)
       return i ? `${zodToType(i, io)} | null` : 'unknown | null'
     }
 
+    // Presence-deciding wrappers (see `isOptional`) that pass the type through.
+    // `effects` is v3's `.transform()`/`.refine()`; a transform's output has no
+    // readable type, so the wrapped input type is the best available answer.
+    case 'optional':
     case 'default':
-    case 'catch':
-    case 'readonly':
-    case 'branded':
-    case 'lazy':
-      return inner(def) ? zodToType(inner(def)!, io) : 'unknown'
-
-    case 'effects':
-      // v3: .transform()/.refine() wraps in ZodEffects
+    case 'prefault':
+    case 'nonoptional':
       return inner(def) ? zodToType(inner(def)!, io) : 'unknown'
 
     case 'pipe':
@@ -211,8 +213,10 @@ function zodToType(z: ZodAnyLike, io: SchemaIo): string {
 }
 
 function inner(def: Record<string, unknown>): ZodAnyLike | undefined {
-  // v3: innerType or schema, v4: innerType
-  return (def.innerType ?? def.schema) as ZodAnyLike | undefined
+  // v3: innerType or schema; v3's `.brand()` uses `type`, which in v4 holds the
+  // type *name* instead — so it only counts when it is actually a schema.
+  const candidate = def.innerType ?? def.schema ?? def.type
+  return candidate && typeof candidate === 'object' ? (candidate as ZodAnyLike) : undefined
 }
 
 /**
@@ -223,21 +227,39 @@ function isOptional(z: ZodAnyLike, io: SchemaIo): boolean {
   const tn = getTypeName(z)
   if (!tn) return false
   const t = normalizeTypeName(tn)
-  if (t === 'optional') return true
   const def = z._def ?? {}
-  const i = inner(def)
-  // `.default()` fills a missing value in, so the field may be left out of a
-  // request but is always there once parsed.
-  if (t === 'default') return io === 'input'
-  // `.catch()` swallows any failure, so nothing is ever required of a caller;
-  // on the way out it is only absent if what it wraps could be.
-  if (t === 'catch') return io === 'input' || (i ? isOptional(i, io) : false)
-  if (t === 'pipe' || t === 'pipeline') {
-    const side = (io === 'input' ? def.in : def.out) as ZodAnyLike | undefined
-    return side ? isOptional(side, io) : false
+  const look = (s: unknown): boolean => (s ? isOptional(s as ZodAnyLike, io) : false)
+
+  if (TRANSPARENT_WRAPPERS.has(t)) {
+    // `.catch()` swallows any failure, so an omitted key is never rejected;
+    // on the way out it is absent only if what it wraps could be.
+    if (t === 'catch' && io === 'input') return true
+    return look(inner(def))
   }
-  if ((t === 'effects' || t === 'nullable') && i) return isOptional(i, io)
-  return false
+
+  switch (t) {
+    case 'optional':
+      return true
+    // Both fill a missing value in: the field may be left out of a request but
+    // is always there once parsed.
+    case 'default':
+    case 'prefault':
+      return io === 'input'
+    case 'nonoptional':
+      return false
+    case 'nullable':
+      return look(inner(def))
+    case 'pipe':
+    case 'pipeline': {
+      // Read the side being rendered — and when the out side is a transform,
+      // read the in side, matching what `zodToType` reports for that node.
+      const to = def.out as ZodAnyLike | undefined
+      if (io === 'output' && to && !isTransform(to)) return look(to)
+      return look(def.in)
+    }
+    default:
+      return false
+  }
 }
 
 function wrapComplex(type: string): string {

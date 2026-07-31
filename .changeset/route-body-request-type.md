@@ -21,8 +21,10 @@ report its input type, since a transform's output is a function with no
 recoverable type.
 
 Field *presence* follows the same split, which it previously did not: a
-`.default()` or `.catch()` field may be omitted from a request but is always
-there once parsed, so it is optional in `body` and required in `response`.
+`.default()`, `.prefault()` or `.catch()` field may be omitted from a request
+but is always there once parsed, so it is optional in `body` and required in
+`response`. `.readonly()`, `.brand()` and `.nonoptional()` are now understood
+too — the first two previously made an optional field look required.
 
 **Regenerating may surface new type errors in app code**, and they are pointing
 at something real. A form field previously typed `Date` was already sending a
@@ -57,6 +59,16 @@ Fixed alongside, all of which blocked the same scaffold from compiling:
   Postgres hands back a `Date`.
 - The scaffolded Edit page named its submit event `event`, shadowing the record
   prop for any entity whose variable name is also `event`.
+- `guren add resource` had no `date` case for SQLite — the default database —
+  so a date field became a `text` column, and the `Date` the generated
+  validator produces binds to that as `null`. **Every date was silently
+  dropped on write.** SQLite now gets `integer(..., { mode: 'timestamp' })`,
+  matching what Postgres and MySQL already did. The three dialect column
+  builders are keyed by field type rather than falling through a `default:`
+  arm, so a new field type cannot go missing from one dialect again.
+- A field name that is not a valid identifier (`my-name:string`) generated a
+  page that could not be parsed. `make:feature` now rejects it with a message
+  instead.
 
 Two known limits, both deliberate:
 
