@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
-import { spawn } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
 import { defineCommand, showUsage } from 'citty'
 import type { CommandDef } from 'citty'
 import { runCli, UsageError } from './run-cli'
+import { newCommand } from './new-command'
 import { listBlueprints, runBlueprint } from './blueprints'
 import { runDoctor } from './doctor'
 import { makeAuth } from './make-auth'
@@ -204,27 +204,6 @@ function reportSuccess(action: string, message: string, json: boolean, extra?: R
   } else {
     consola.success(message)
   }
-}
-
-async function runBunCommand(args: string[]): Promise<void> {
-  await new Promise<void>((resolvePromise, rejectPromise) => {
-    const child = spawn(process.execPath || 'bun', args, {
-      stdio: 'inherit',
-      env: process.env,
-    })
-
-    child.on('error', (error) => {
-      rejectPromise(error)
-    })
-
-    child.on('close', (code) => {
-      if (code === 0) {
-        resolvePromise()
-      } else {
-        rejectPromise(new Error(`bun ${args.join(' ')} exited with code ${code}`))
-      }
-    })
-  })
 }
 
 const makeTestCommand = defineCommand({
@@ -1962,62 +1941,6 @@ const makeFeatureCommand = defineCommand({
       publicAccess: Boolean(args.public),
       withPolicy: Boolean(args.policy),
     })
-  },
-})
-
-const newCommand = defineCommand({
-  meta: {
-    name: 'new',
-    description: 'Scaffold a new Guren application via create-guren-app.',
-  },
-  args: {
-    target: {
-      type: 'positional',
-      description: 'Directory to create the application in',
-      default: '.',
-    },
-    force: {
-      type: 'boolean',
-      alias: 'f',
-      description: 'Overwrite existing files in the target directory',
-    },
-    mode: {
-      type: 'string',
-      description: 'Rendering mode to scaffold (spa or ssr)',
-    },
-    auth: {
-      type: 'boolean',
-      description: 'Include authentication scaffolding',
-    },
-    blueprint: {
-      type: 'string',
-      description: 'Application blueprint to scaffold (default or blog).',
-    },
-  },
-  async run({ args }) {
-    const commandArgs = ['x', 'create-guren-app']
-
-    if (args.target) {
-      commandArgs.push(String(args.target))
-    }
-
-    if (args.force) {
-      commandArgs.push('--force')
-    }
-
-    if (args.mode) {
-      commandArgs.push('--mode', String(args.mode))
-    }
-
-    if (args.auth) {
-      commandArgs.push('--auth')
-    }
-
-    if (args.blueprint) {
-      commandArgs.push('--blueprint', String(args.blueprint))
-    }
-
-    await runBunCommand(commandArgs)
   },
 })
 
