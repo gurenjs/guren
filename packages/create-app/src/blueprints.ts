@@ -1,20 +1,33 @@
 import { randomBytes } from 'node:crypto'
 import { cp, readFile, writeFile } from 'node:fs/promises'
-import { basename, join, relative } from 'node:path'
+import { basename, join } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
-import { toPackageName, toTitleCase } from './utils'
+import { directoryExists, toPackageName, toTitleCase } from './utils'
 
-export const APP_BLUEPRINTS = ['default', 'api', 'blog', 'worker'] as const
+export const APP_BLUEPRINTS = ['default', 'api', 'worker'] as const
 export type AppBlueprintName = (typeof APP_BLUEPRINTS)[number]
 export type RenderingMode = 'spa' | 'ssr'
 
 export const DATABASE_DRIVERS = ['sqlite', 'postgres', 'mysql'] as const
 export type DatabaseDriver = (typeof DATABASE_DRIVERS)[number]
 
-interface TemplateLayer {
-  dir: string
-  excludePaths?: string[]
+/**
+ * The directory holding every template a blueprint can copy from. It is the
+ * only source tree in this package's `files` field, so a layer resolved outside
+ * it scaffolds fine from the monorepo and ENOENTs from an npm install: that is
+ * how the `blog` blueprint shipped broken for releases, overlaying
+ * `examples/blog`, which no tarball contains.
+ *
+ * Layers are therefore named, not pathed — `TemplateName` makes a layer outside
+ * this directory unrepresentable rather than merely asserted against.
+ */
+export const TEMPLATES_ROOT = fileURLToPath(new URL('../templates', import.meta.url))
+
+type TemplateName = 'default' | 'default-ssr' | 'api-only'
+
+export function templateDir(name: TemplateName): string {
+  return join(TEMPLATES_ROOT, name)
 }
 
 interface BlueprintContext {
@@ -29,10 +42,9 @@ interface BlueprintContext {
 export interface AppBlueprint {
   name: AppBlueprintName
   description: string
-  baseTemplate: TemplateLayer
-  overlayTemplateDirs: Partial<Record<RenderingMode, TemplateLayer[]>>
+  baseTemplate: TemplateName
+  overlayTemplates: Partial<Record<RenderingMode, TemplateName[]>>
   transformFiles: string[]
-  replacements?: (context: BlueprintContext) => Map<string, string>
   postScaffold?: (context: BlueprintContext) => Promise<void>
 }
 
@@ -52,139 +64,35 @@ const DEFAULT_TRANSFORM_FILES = [
   'resources/js/pages/Home.tsx',
 ]
 
-const BLOG_TRANSFORM_FILES = [
-  'README.md',
-  'public/index.html',
-  'app/Providers/EventServiceProvider.ts',
-  'app/Http/Controllers/Auth/LoginController.ts',
-  'app/Http/Controllers/DashboardController.ts',
-  'app/Http/Controllers/PostController.ts',
-  'app/Http/Controllers/ProfileController.ts',
-  'resources/js/components/Layout.tsx',
-]
-
 const API_TRANSFORM_FILES = [
   'README.md',
   'package.json',
   'bin/serve.ts',
 ]
 
-const BLOG_OVERLAY_EXCLUDES = [
-  '.env',
-  '.guren',
-  'CLAUDE.md',
-  'db/migrations',
-  'db/schema.ts',
-  'node_modules',
-  'package.json',
-  'public/assets',
-  'tests',
-  'tsconfig.json',
-  'types/generated',
-  'vitest.config.ts',
-]
-
-const defaultTemplateDir = fileURLToPath(new URL('../templates/default', import.meta.url))
-const defaultSsrOverlayDir = fileURLToPath(new URL('../templates/default-ssr', import.meta.url))
-const apiTemplateDir = fileURLToPath(new URL('../templates/api-only', import.meta.url))
-const exampleBlogDir = fileURLToPath(new URL('../../../examples/blog', import.meta.url))
-
 const blueprintRegistry: Record<AppBlueprintName, AppBlueprint> = {
   default: {
     name: 'default',
     description: 'The standard Guren starter blueprint.',
-    baseTemplate: {
-      dir: defaultTemplateDir,
-    },
-    overlayTemplateDirs: {
-      ssr: [{ dir: defaultSsrOverlayDir }],
+    baseTemplate: 'default',
+    overlayTemplates: {
+      ssr: ['default-ssr'],
     },
     transformFiles: DEFAULT_TRANSFORM_FILES,
   },
   api: {
     name: 'api',
     description: 'API-only starter — no Inertia, no React, no frontend assets.',
-    baseTemplate: {
-      dir: apiTemplateDir,
-    },
-    overlayTemplateDirs: {},
+    baseTemplate: 'api-only',
+    overlayTemplates: {},
     transformFiles: API_TRANSFORM_FILES,
-  },
-  blog: {
-    name: 'blog',
-    description: 'The canonical blog-style starter used by the examples workspace.',
-    baseTemplate: {
-      dir: defaultTemplateDir,
-    },
-    overlayTemplateDirs: {
-      spa: [{ dir: exampleBlogDir, excludePaths: BLOG_OVERLAY_EXCLUDES }],
-      ssr: [{ dir: exampleBlogDir, excludePaths: BLOG_OVERLAY_EXCLUDES }],
-    },
-    transformFiles: [...new Set([...DEFAULT_TRANSFORM_FILES, ...BLOG_TRANSFORM_FILES])],
-    replacements: ({ appTitle, packageName }) => new Map<string, string>([
-      ['@guren/example-blog', packageName],
-      ['Guren Blog Example', `${appTitle} Example`],
-      ['Guren Blog', appTitle],
-      ['blog.example.com', `${packageName}.example.com`],
-    ]),
-    postScaffold: async ({ destination, renderingMode, database }) => {
-      const packageJsonPath = join(destination, 'package.json')
-      const rawPackage = await readFile(packageJsonPath, 'utf8')
-      const packageJson = JSON.parse(rawPackage) as {
-        scripts?: Record<string, string>
-        dependencies?: Record<string, string>
-      }
-
-      packageJson.scripts ??= {}
-      packageJson.dependencies ??= {}
-
-      const gurenVersion =
-        packageJson.dependencies['@guren/core'] ??
-        packageJson.dependencies['@guren/server'] ??
-        packageJson.dependencies['@guren/orm'] ??
-        '^1.0.0'
-
-      packageJson.scripts.typecheck ??= 'tsc --noEmit'
-      packageJson.scripts.smoke ??= 'bun run ./smoke.ts'
-      packageJson.dependencies['@guren/core'] ??= gurenVersion
-      packageJson.dependencies['@inertiajs/core'] ??= '^2.2.15'
-      packageJson.dependencies['lucide-react'] ??= '^0.552.0'
-      packageJson.dependencies.zod ??= '^4.1.5'
-
-      await writeFile(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`, 'utf8')
-
-      // Overwrite schema with blog-specific tables (users with auth fields + posts)
-      const schemaPath = join(destination, 'db/schema.ts')
-      await writeFile(schemaPath, generateBlogSchema(database), 'utf8')
-
-      if (database === 'postgres') {
-        await cp(join(exampleBlogDir, 'db/migrations'), join(destination, 'db/migrations'), {
-          recursive: true,
-          force: true,
-        })
-      }
-
-      if (renderingMode === 'spa') {
-        const mainPath = join(destination, 'src/main.ts')
-        const mainSource = await readFile(mainPath, 'utf8')
-        if (!mainSource.includes('enableSsr: false')) {
-          const updated = mainSource.replace(
-            'autoConfigureInertiaAssets(app, {\n  importMeta: import.meta,\n})',
-            'autoConfigureInertiaAssets(app, {\n  importMeta: import.meta,\n  enableSsr: false,\n})',
-          )
-          await writeFile(mainPath, updated, 'utf8')
-        }
-      }
-    },
   },
   worker: {
     name: 'worker',
     description: 'Full-stack app pre-configured with queue, events, cache, and scheduling',
-    baseTemplate: {
-      dir: defaultTemplateDir,
-    },
-    overlayTemplateDirs: {
-      ssr: [{ dir: defaultSsrOverlayDir }],
+    baseTemplate: 'default',
+    overlayTemplates: {
+      ssr: ['default-ssr'],
     },
     transformFiles: DEFAULT_TRANSFORM_FILES,
     postScaffold: async ({ destination }) => {
@@ -216,33 +124,8 @@ function replaceTokens(content: string, tokens: Map<string, string>): string {
   return updated
 }
 
-async function copyTemplate(template: string, destination: string): Promise<void> {
-  await cp(template, destination, { recursive: true, force: true })
-}
-
-function normalizePath(value: string): string {
-  return value.replaceAll('\\', '/').replace(/\/+$/u, '')
-}
-
-function shouldExclude(templateRoot: string, sourcePath: string, excludePaths: string[] = []): boolean {
-  const relativePath = normalizePath(relative(templateRoot, sourcePath))
-
-  if (relativePath === '' || relativePath === '.') {
-    return false
-  }
-
-  return excludePaths.some((candidate) => {
-    const normalizedCandidate = normalizePath(candidate)
-    return relativePath === normalizedCandidate || relativePath.startsWith(`${normalizedCandidate}/`)
-  })
-}
-
-async function copyLayer(layer: TemplateLayer, destination: string): Promise<void> {
-  await cp(layer.dir, destination, {
-    recursive: true,
-    force: true,
-    filter: (sourcePath) => !shouldExclude(layer.dir, sourcePath, layer.excludePaths),
-  })
+async function copyLayer(layer: TemplateName, destination: string): Promise<void> {
+  await cp(templateDir(layer), destination, { recursive: true, force: true })
 }
 
 async function applyTokenTransforms(destination: string, files: string[], tokens: Map<string, string>): Promise<void> {
@@ -370,90 +253,6 @@ export const users = sqliteTable('users', {
 `
 }
 
-function generateBlogSchema(driver: DatabaseDriver): string {
-  if (driver === 'postgres') {
-    return `import { pgTable, serial, text, integer, uniqueIndex } from '@guren/orm/drizzle'
-
-export const users = pgTable(
-  'users',
-  {
-    id: serial('id').primaryKey(),
-    name: text('name').notNull(),
-    email: text('email').notNull(),
-    passwordHash: text('password_hash').notNull(),
-    rememberToken: text('remember_token'),
-  },
-  (table) => [uniqueIndex('users_email_unique').on(table.email)],
-)
-
-export const posts = pgTable('posts', {
-  id: serial('id').primaryKey(),
-  title: text('title').notNull(),
-  excerpt: text('excerpt').notNull(),
-  body: text('body'),
-  authorId: integer('author_id').notNull().references(() => users.id),
-})
-
-export const schema = { posts, users }
-export type BlogSchema = typeof schema
-`
-  }
-
-  if (driver === 'mysql') {
-    return `import { mysqlTable, int, varchar, text, uniqueIndex } from '@guren/orm/drizzle'
-
-export const users = mysqlTable(
-  'users',
-  {
-    id: int('id').primaryKey().autoincrement(),
-    name: varchar('name', { length: 255 }).notNull(),
-    email: varchar('email', { length: 255 }).notNull(),
-    passwordHash: varchar('password_hash', { length: 255 }).notNull(),
-    rememberToken: varchar('remember_token', { length: 255 }),
-  },
-  (table) => [uniqueIndex('users_email_unique').on(table.email)],
-)
-
-export const posts = mysqlTable('posts', {
-  id: int('id').primaryKey().autoincrement(),
-  title: varchar('title', { length: 255 }).notNull(),
-  excerpt: varchar('excerpt', { length: 500 }).notNull(),
-  body: text('body'),
-  authorId: int('author_id').notNull().references(() => users.id),
-})
-
-export const schema = { posts, users }
-export type BlogSchema = typeof schema
-`
-  }
-
-  return `import { sqliteTable, integer, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
-
-export const users = sqliteTable(
-  'users',
-  {
-    id: integer('id').primaryKey({ autoIncrement: true }),
-    name: text('name').notNull(),
-    email: text('email').notNull(),
-    passwordHash: text('password_hash').notNull(),
-    rememberToken: text('remember_token'),
-  },
-  (table) => [uniqueIndex('users_email_unique').on(table.email)],
-)
-
-export const posts = sqliteTable('posts', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  title: text('title').notNull(),
-  excerpt: text('excerpt').notNull(),
-  body: text('body'),
-  authorId: integer('author_id').notNull().references(() => users.id),
-})
-
-export const schema = { posts, users }
-export type BlogSchema = typeof schema
-`
-}
-
 function generateDrizzleConfig(driver: DatabaseDriver): string {
   const { url, dialect } = DATABASE_DEFAULTS[driver]
 
@@ -524,9 +323,9 @@ async function applyDatabaseConfig(destination: string, driver: DatabaseDriver):
   const { url, dep } = DATABASE_DEFAULTS[driver]
   const dockerCompose = generateDockerCompose(driver)
 
-  // Write all DB-variant files in parallel — including SQLite, since overlay
-  // templates (e.g. blog) may ship a PostgreSQL-only schema that must be
-  // replaced with the driver the user actually selected.
+  // Write all DB-variant files in parallel — including SQLite, since an overlay
+  // template may ship a schema written for one driver that has to be replaced
+  // with the driver the user actually selected.
   await Promise.all([
     writeFile(join(destination, 'config/database.ts'), generateDatabaseConfig(driver), 'utf8'),
     writeFile(join(destination, 'db/schema.ts'), generateSchema(driver), 'utf8'),
@@ -572,6 +371,39 @@ export function listAppBlueprints(): AppBlueprintName[] {
   return [...APP_BLUEPRINTS]
 }
 
+/**
+ * The templates a blueprint copies from, in copy order: base first, then
+ * overlays, each overwriting what came before. Omit `renderingMode` for every
+ * mode the blueprint supports — what the packaging checks need; pass one for
+ * the templates a single scaffold will actually copy.
+ *
+ * Repeats are returned as-is rather than deduped: a name listed twice means
+ * "copy it again at this point", and collapsing it would silently change which
+ * template wins.
+ */
+export function listBlueprintTemplates(
+  blueprint: AppBlueprint,
+  renderingMode?: RenderingMode,
+): TemplateName[] {
+  const overlays = renderingMode
+    ? blueprint.overlayTemplates[renderingMode] ?? []
+    : Object.values(blueprint.overlayTemplates).flat()
+
+  return [blueprint.baseTemplate, ...overlays]
+}
+
+export async function assertBlueprintLayersExist(blueprint: AppBlueprint, renderingMode: RenderingMode): Promise<void> {
+  for (const layer of listBlueprintTemplates(blueprint, renderingMode)) {
+    if (!await directoryExists(templateDir(layer))) {
+      throw new Error(
+        `Blueprint "${blueprint.name}" is missing its template directory "${templateDir(layer)}". ` +
+        'This build of create-guren-app is incomplete — please report it at ' +
+        'https://github.com/gurenjs/guren/issues and try `npm create guren-app@latest` meanwhile.',
+      )
+    }
+  }
+}
+
 export function getAppBlueprint(name: string | undefined): AppBlueprint {
   const blueprintName = (name ?? 'default') as AppBlueprintName
   const blueprint = blueprintRegistry[blueprintName]
@@ -600,14 +432,12 @@ export async function scaffoldAppBlueprint(options: ScaffoldAppBlueprintOptions)
     ['__APP_NAME__', appName],
   ])
 
-  for (const [token, replacement] of blueprint.replacements?.(context) ?? []) {
-    tokenMap.set(token, replacement)
-  }
+  // Checked up front so a missing layer fails before anything is written —
+  // otherwise the base template lands and the user is left with a half-built app.
+  await assertBlueprintLayersExist(blueprint, options.renderingMode)
 
-  await copyLayer(blueprint.baseTemplate, options.destination)
-
-  for (const overlay of blueprint.overlayTemplateDirs[options.renderingMode] ?? []) {
-    await copyLayer(overlay, options.destination)
+  for (const layer of listBlueprintTemplates(blueprint, options.renderingMode)) {
+    await copyLayer(layer, options.destination)
   }
 
   await applyTokenTransforms(options.destination, blueprint.transformFiles, tokenMap)

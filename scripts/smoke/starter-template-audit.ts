@@ -1,5 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import { getAppBlueprint, listAppBlueprints, listBlueprintTemplates } from '../../packages/create-app/src/blueprints'
+import { directoryExists } from '../../packages/create-app/src/utils'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -9,6 +11,41 @@ function assert(condition: unknown, message: string): asserts condition {
 
 async function read(root: string, relativePath: string): Promise<string> {
   return readFile(join(root, relativePath), 'utf8')
+}
+
+/**
+ * `create-guren-app` only publishes the directories in its `files` field, so a
+ * template the registry names but the tarball omits is invisible to every
+ * in-repo test — the directory resolves fine from the monorepo checkout. That is
+ * how the `blog` blueprint shipped broken: it overlaid `examples/blog`, which no
+ * tarball contains, and `--blueprint blog` from npm died in `cp` with a raw
+ * ENOENT.
+ *
+ * The registry is read from source, because importing the packed bundle would
+ * execute its `runMain()`. Source and bundle are then tied together by checking
+ * that the shipped `dist/` still names each template — otherwise a stale build
+ * could ship a CLI that disagrees with the registry this audit just verified.
+ *
+ * @param root The extracted `package/` directory of a create-guren-app tarball.
+ */
+export async function auditBlueprintTemplates(root: string): Promise<void> {
+  const bundle = await readFile(join(root, 'dist/cli.js'), 'utf8')
+
+  for (const blueprint of listAppBlueprints()) {
+    const templates = listBlueprintTemplates(getAppBlueprint(blueprint))
+    assert(templates.length > 0, `Blueprint "${blueprint}" declares no template.`)
+
+    for (const template of templates) {
+      assert(
+        await directoryExists(join(root, 'templates', template)),
+        `Blueprint "${blueprint}" needs template "${template}", which is missing from the create-guren-app tarball.`,
+      )
+      assert(
+        bundle.includes(`"${template}"`) || bundle.includes(`'${template}'`),
+        `The packed create-guren-app dist/ never names the "${template}" template that blueprint "${blueprint}" declares in src — the tarball was built from stale sources.`,
+      )
+    }
+  }
 }
 
 /**

@@ -67,7 +67,10 @@ export function createNewCommand(runCreateApp: CommandRunner = runBunCommand) {
       },
       blueprint: {
         type: 'string',
-        description: 'Starter blueprint to scaffold (default, api, blog, worker)',
+        // Not enumerated here: this is forwarded to create-guren-app, which
+        // owns the list. A hardcoded copy here is how `blog` stayed advertised
+        // after it was dropped from create-guren-app's own blueprint registry.
+        description: 'Application blueprint to scaffold (see `create-guren-app --help`).',
       },
       db: {
         type: 'string',
