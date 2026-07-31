@@ -22,10 +22,12 @@ async function collectTemplateFiles(): Promise<string[]> {
       continue
     }
 
+    // Recursive readdir yields platform separators; normalize so the
+    // assertions below can be written one way.
     // A template directory can hold a package.json, so someone running
     // `bun install` in one would otherwise drag dependency ignore files in.
     files.push(...entries
-      .map((entry) => `${pkg.name}/templates/${entry}`)
+      .map((entry) => `${pkg.name}/templates/${entry.replaceAll('\\', '/')}`)
       .filter((entry) => !entry.split('/').includes('node_modules')))
   }
 

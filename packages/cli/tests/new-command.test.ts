@@ -125,5 +125,6 @@ describe('guren new', () => {
     expect(usage).toContain('USAGE guren new')
     expect(usage).toContain('--db')
     expect(usage).toContain('--install')
+    expect(usage).toContain('--git')
   })
 })

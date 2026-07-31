@@ -152,7 +152,9 @@ async function resolveGitInit(flagValue: unknown, target: { dir: string; wasEmpt
 
 async function isInsideGitWorkTree(cwd: string): Promise<boolean> {
   const { spawnSync } = await import('node:child_process')
-  const result = spawnSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd, stdio: 'pipe' })
+  const result = spawnSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd, stdio: 'pipe', env: process.env })
+  // `status === 0` first: a missing git binary leaves stdout null, and the
+  // short-circuit is what keeps this a graceful "not a repo" rather than a throw.
   return result.status === 0 && result.stdout.toString().trim() === 'true'
 }
 

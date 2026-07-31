@@ -131,8 +131,10 @@ const TEMPLATE_DOTFILES = new Map<string, string>([['_gitignore', '.gitignore']]
 async function copyLayer(layer: TemplateName, destination: string): Promise<void> {
   // Collected from the copy itself rather than by walking the destination:
   // `--force` scaffolds into a directory that may already hold files this
-  // layer never wrote, and those are none of our business to rename.
-  const dotfiles: string[] = []
+  // layer never wrote, and those are none of our business to rename. A Set
+  // because neither Node nor Bun documents `filter` as running exactly once
+  // per entry, and a repeat would make the second rename fail on ENOENT.
+  const dotfiles = new Set<string>()
   const source = templateDir(layer)
 
   await cp(source, destination, {
@@ -140,7 +142,7 @@ async function copyLayer(layer: TemplateName, destination: string): Promise<void
     force: true,
     filter: (sourcePath) => {
       if (TEMPLATE_DOTFILES.has(basename(sourcePath))) {
-        dotfiles.push(relative(source, sourcePath))
+        dotfiles.add(relative(source, sourcePath))
       }
       return true
     },

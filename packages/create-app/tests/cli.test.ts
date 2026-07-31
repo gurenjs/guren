@@ -231,12 +231,14 @@ describe('create-guren-app CLI', () => {
     }
   })
 
-  it('keeps the restored .gitignore across an overlay layer', async () => {
+  // Deliberately NOT a test of overlay precedence: `default-ssr` ships no
+  // `_gitignore`, so no current blueprint can demonstrate an overlay's own
+  // ignore file replacing the base one. copyLayer restores per layer rather
+  // than once at the end so that it will, but only a template that does not
+  // exist yet would prove it — this covers the multi-layer path only.
+  it('restores the .gitignore in a multi-layer scaffold', async () => {
     const workspace = await createTempWorkspace('guren-create-app-cli-gitignore-overlay-')
     try {
-      // SSR copies default-ssr on top of default, so this covers the
-      // multi-layer path — the restore happens per layer, and a second copy
-      // must neither undo it nor leave the undotted original behind.
       await capturedCommand.run({
         args: {
           target: 'ssr-ignored',
