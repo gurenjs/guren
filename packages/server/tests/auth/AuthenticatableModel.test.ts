@@ -55,6 +55,25 @@ describe('AuthenticatableModel', () => {
     expect('password' in persisted).toBe(false)
   })
 
+  it('hashes the password on query-builder bulk updates', async () => {
+    type UserRecord = { id?: number; email: string; passwordHash?: string }
+
+    class User extends AuthenticatableModel<UserRecord> {
+      static override table = 'users'
+      static override guarded = ['id']
+    }
+
+    const captured: PlainObject[] = []
+    User.useAdapter(createAdapter(captured))
+
+    await User.where('email', 'demo@guren.dev').update({ password: 'secret' })
+
+    const persisted = captured[0]
+    expect(persisted.passwordHash).toBeDefined()
+    expect(persisted.passwordHash).not.toBe('secret')
+    expect('password' in persisted).toBe(false)
+  })
+
   it('supports custom password and hash column names', async () => {
     type MemberRecord = { id?: number; passwordDigest?: string }
 

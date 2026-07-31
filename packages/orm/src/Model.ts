@@ -745,6 +745,11 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     return result
   }
 
+  /** @internal Lets QueryBuilder bulk updates run the same payload preparation as `Model.update()`. */
+  static async prepareBulkPersistencePayload(data: PlainObject): Promise<PlainObject> {
+    return this.preparePersistencePayload(data)
+  }
+
   protected static getRelationDefinitions(): Map<string, RelationDefinition> {
     if (!Object.prototype.hasOwnProperty.call(this, 'relationDefinitions') || !this.relationDefinitions) {
       this.relationDefinitions = new Map()
