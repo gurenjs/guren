@@ -92,4 +92,22 @@ describeMySql('createMySqlDatabase against a real MySQL server (requires MYSQL_U
     const status = await database.migrationStatus()
     expect(status[0]).toMatchObject({ applied: false })
   })
+
+  // Views are listed by information_schema.tables but DROP TABLE only warns on
+  // them, so a reset that treats every row as a table leaves them behind while
+  // still reporting success. The next migration run then fails on
+  // `CREATE VIEW ... Table 'x' already exists` — a reset that did not reset.
+  it('drops views on reset, not just base tables', async () => {
+    // The preceding test leaves the database empty.
+    await database.migrateDatabase()
+    const db = await database.getDatabase()
+    await db.execute(sql`CREATE OR REPLACE VIEW \`widget_names\` AS SELECT \`name\` FROM \`widgets\``)
+
+    await database.resetDatabase()
+
+    const [remaining] = (await db.execute(
+      sql`SELECT table_name AS name FROM information_schema.tables WHERE table_schema = DATABASE()`,
+    )) as unknown as [Array<{ name: string }>]
+    expect(remaining.map((row) => row.name)).toEqual([])
+  })
 })

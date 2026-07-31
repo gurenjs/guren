@@ -223,14 +223,24 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
     const { sql } = await import('drizzle-orm')
 
     await withAdminDb(async (adminDb) => {
+      // table_type is selected because information_schema.tables lists views
+      // alongside base tables, and DROP TABLE on a view raises a warning
+      // rather than an error. Dropping every row as a table therefore leaves
+      // views standing while reporting a successful reset, and the replayed
+      // migration then dies on `CREATE VIEW ... Table 'x' already exists`.
       const [rows] = (await adminDb.execute(
-        sql.raw('SELECT table_name AS name FROM information_schema.tables WHERE table_schema = DATABASE()'),
-      )) as unknown as [Array<{ name: string }>]
+        sql.raw(
+          'SELECT table_name AS name, table_type AS type FROM information_schema.tables WHERE table_schema = DATABASE()',
+        ),
+      )) as unknown as [Array<{ name: string; type: string }>]
 
       await adminDb.execute(sql.raw('SET FOREIGN_KEY_CHECKS = 0'))
       try {
-        for (const { name } of rows) {
-          await adminDb.execute(sql.raw(`DROP TABLE IF EXISTS \`${name.replaceAll('`', '``')}\``))
+        for (const { name, type } of rows) {
+          const quoted = `\`${name.replaceAll('`', '``')}\``
+          await adminDb.execute(
+            sql.raw(type === 'VIEW' ? `DROP VIEW IF EXISTS ${quoted}` : `DROP TABLE IF EXISTS ${quoted}`),
+          )
         }
       } finally {
         await adminDb.execute(sql.raw('SET FOREIGN_KEY_CHECKS = 1'))
