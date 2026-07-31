@@ -5,14 +5,35 @@ Scaffolding CLI that copies templates from `templates/default` and replaces toke
 
 ## Key Files
 - `src/cli.ts`: Citty command definition
+- `src/blueprints.ts`: blueprint registry, template layering, database-variant files
 - `src/utils.ts`: filesystem helpers (`directoryExists`, `isDirectoryEmpty`, etc.)
 - `templates/default`: Bun project template; token map lives in `cli.ts`
+- `templates/blog`: curated blog starter, overlaid on `templates/default`
 
 ## Conventions
 - **Never put a file literally named `.gitignore` in `templates/`.** npm strips those from published tarballs, so it works from the monorepo and ships nothing to real users. Name it `_gitignore`; `copyLayer` restores the dot after each layer copies. `tests/templates.test.ts` guards this.
 - Keep template imports aligned with the latest package split (use scoped packages, not legacy `guren`)
 - When adding templates, register them via the token replacement list and ensure README next-steps stay accurate
 - Utilities should remain Node-compatible (no Bun-specific APIs here)
+
+## Templates
+- **Every layer must live under `templates/`** — it is the only source tree in
+  the `files` field, so a layer outside it works from the monorepo and ENOENTs
+  from npm. `TemplateName` makes that a type error; `tests/packaging.test.ts`
+  and `auditBlueprintTemplates` check the published tarball.
+- **`transformFiles` paths are read unconditionally.** A listed file that the
+  blueprint does not ship makes scaffolding throw.
+- **`applyDatabaseConfig` overwrites `db/schema.ts`.** A template needing more
+  than the generic `users` table ships `db/schema.<driver>.ts` per driver
+  instead; the scaffolder selects one and deletes the others.
+- **Advertise nothing without a smoke.** Each blueprint gets a
+  `smoke:starter:<name>` script and a CI step — `bun run typecheck` and
+  `bun run build` inside a real scaffold are the only things that catch a
+  template drifting from the framework.
+- **`templates/blog` was authored from canonical generator output** (`guren add
+  auth` + `guren add resource posts` on the default template) and then curated.
+  Regenerating that output is the cheapest way to see what the framework now
+  considers idiomatic when the template needs updating.
 
 ## Build
 - Build with `bun run --cwd packages/create-app build`

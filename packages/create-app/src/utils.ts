@@ -13,6 +13,19 @@ export async function directoryExists(path: string): Promise<boolean> {
   }
 }
 
+export async function fileExists(path: string): Promise<boolean> {
+  try {
+    const stats = await stat(path)
+    return stats.isFile()
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return false
+    }
+
+    throw error
+  }
+}
+
 export async function isDirectoryEmpty(path: string): Promise<boolean> {
   try {
     const entries = await readdir(path)

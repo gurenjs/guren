@@ -34,6 +34,7 @@
     "audit:docs": "bun run ./scripts/smoke/docs-audit.ts",
     "smoke:starter": "bun run ./scripts/smoke/fresh-app.ts",
     "smoke:starter:api": "GUREN_SMOKE_BLUEPRINT=api bun run ./scripts/smoke/fresh-app.ts",
+    "smoke:starter:blog": "GUREN_SMOKE_BLUEPRINT=blog bun run ./scripts/smoke/fresh-app.ts",
     "smoke:starter:worker": "GUREN_SMOKE_BLUEPRINT=worker bun run ./scripts/smoke/fresh-app.ts",
     "smoke:starter:packed": "GUREN_SMOKE_INSTALL_MODE=packed bun run ./scripts/smoke/fresh-app.ts",
     "smoke:upgrade-existing-app": "bun run ./scripts/smoke/upgrade-existing-app.ts",
