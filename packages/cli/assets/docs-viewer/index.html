@@ -411,7 +411,6 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     if (selected && !byId.has(selected)) closePanel()
     else if (selected) openPanel(selected, { keepScroll: true })
     settle(320)
-    reheat()
   }
 
   function renderDom() {
@@ -570,12 +569,20 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   }
 
   function highlight(id) {
-    const hood = id ? neighbors.get(id) : null
-    nodeEls.forEach(({ n, g }) => g.classList.toggle('dim', !!hood ? !hood.has(n.id) : dimmedBySearch(n)))
+    // Unhovering restores the filter state rather than restating it —
+    // the search-dim rule lives in applyFilters only.
+    if (!id) {
+      edgeEls.forEach(({ line }) => line.classList.remove('hot'))
+      applyFilters()
+      return
+    }
+
+    const hood = neighbors.get(id)
+    nodeEls.forEach(({ n, g }) => g.classList.toggle('dim', !hood.has(n.id)))
     edgeEls.forEach(({ e, line }) => {
-      const touches = !!id && (e.from === id || e.to === id)
+      const touches = e.from === id || e.to === id
       line.classList.toggle('hot', touches)
-      line.classList.toggle('dim', !!hood ? !touches : searchTerm !== '' && !(matchesSearch(byId.get(e.from)) || matchesSearch(byId.get(e.to))))
+      line.classList.toggle('dim', !touches)
     })
   }
 
@@ -644,9 +651,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     chips.append(el('span', 'chip chip-type', doc.type || 'untyped'))
     chips.append(el('span', 'chip chip-status-' + (doc.status || 'stable'), doc.status || 'stable'))
     chips.append(el('span', 'chip chip-trust-' + doc.trustTier, doc.trustTier))
-    if (doc.staleAfter && Date.parse(doc.staleAfter) <= Date.now()) {
-      chips.append(el('span', 'chip chip-stale', 'stale'))
-    }
+    if (doc.stale) chips.append(el('span', 'chip chip-stale', 'stale'))
     head.append(chips)
     root.append(head)
 
@@ -666,8 +671,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     const outgoing = edges.filter((e) => e.from === doc.path)
     if (outgoing.length === 0) list.append(el('li', 'rel-empty', 'No declared links.'))
     for (const e of outgoing) {
-      const label = e.to.replace(/^entity:/, '')
-      list.append(relationItem(label, e.verdict, byId.has(e.to) ? e.to : null))
+      const node = byId.get(e.to)
+      list.append(relationItem(node ? node.label : e.to, e.verdict, node ? e.to : null))
     }
     front.append(list)
     root.append(front)
@@ -686,40 +691,37 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     return root
   }
 
+  const docLabel = (path) => {
+    const doc = docByPath.get(path)
+    return doc && doc.title ? doc.title : path
+  }
+
+  /** A titled list of edges, reading `endpoint` ('from' | 'to') off each. */
+  function relationSection(front, title, spaced, edgeList, endpoint) {
+    front.append(el('p', 'panel-label' + (spaced ? ' panel-label-spaced' : ''), title))
+    const list = el('ul', 'relations')
+    if (edgeList.length === 0) list.append(el('li', 'rel-empty', 'Nothing links here.'))
+    for (const e of edgeList) {
+      list.append(relationItem(docLabel(e[endpoint]), e.verdict, e[endpoint]))
+    }
+    front.append(list)
+  }
+
   function buildSatelliteDetail(node) {
     const root = el('article', 'doc-detail')
     const head = el('div', 'doc-head')
     head.append(el('p', 'path', node.kind === 'entity' ? 'Model entity' : 'Code'))
-    head.append(el('h1', 'mono-title', node.id.replace(/^entity:/, '')))
+    head.append(el('h1', 'mono-title', node.label))
     root.append(head)
 
     const governedBy = edges.filter((e) => e.to === node.id && e.relation !== 'derives')
     const feeds = edges.filter((e) => e.from === node.id && e.relation === 'derives')
 
     const front = el('div', 'frontmatter')
-    if (governedBy.length > 0) {
-      front.append(el('p', 'panel-label', 'Governed by'))
-      const list = el('ul', 'relations')
-      for (const e of governedBy) {
-        const doc = docByPath.get(e.from)
-        list.append(relationItem(doc && doc.title ? doc.title : e.from, e.verdict, e.from))
-      }
-      front.append(list)
-    }
-    if (feeds.length > 0) {
-      front.append(el('p', 'panel-label' + (governedBy.length > 0 ? ' panel-label-spaced' : ''), 'Feeds spec views'))
-      const list = el('ul', 'relations')
-      for (const e of feeds) {
-        const doc = docByPath.get(e.to)
-        list.append(relationItem(doc && doc.title ? doc.title : e.to, e.verdict, e.to))
-      }
-      front.append(list)
-    }
+    if (governedBy.length > 0) relationSection(front, 'Governed by', false, governedBy, 'from')
+    if (feeds.length > 0) relationSection(front, 'Feeds spec views', governedBy.length > 0, feeds, 'to')
     if (governedBy.length === 0 && feeds.length === 0) {
-      front.append(el('p', 'panel-label', 'Unlinked'))
-      const list = el('ul', 'relations')
-      list.append(el('li', 'rel-empty', 'Nothing links here.'))
-      front.append(list)
+      relationSection(front, 'Unlinked', false, [], 'from')
     }
     root.append(front)
 

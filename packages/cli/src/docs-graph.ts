@@ -5,12 +5,13 @@
  * nodes, their declared relations (`entities`, `related`, body markdown
  * links) become verdict-colored edges, and generated spec views gain
  * derivation edges from the code sources they regenerate from
- * (`SPEC_VIEWS[].sourceLabels` — the same descriptor the drift gate
+ * (`SPEC_VIEWS[].sources` — the same descriptor the drift gate
  * uses). Consumed by the docs viewer endpoint; no filesystem access.
  */
+import { posix } from 'node:path'
 import type { DocRef } from './docs-index'
 import { resolveDocLink } from './docs-check'
-import type { CheckResult } from './check-result'
+import type { CheckResult, CheckStatus } from './check-result'
 import { SPEC_VIEWS } from './spec-generate'
 import { SPEC_DIR } from './spec-artifact'
 
@@ -28,7 +29,8 @@ export interface DocsGraphEdge {
   to: string
   /** governs = frontmatter declaration, links = body markdown link, derives = spec-view source. */
   relation: 'governs' | 'links' | 'derives'
-  verdict: 'pass' | 'warn' | 'fail'
+  /** The verdict `runDocsCheck` recorded for this relation. */
+  verdict: CheckStatus
 }
 
 export interface DocsGraph {
@@ -36,9 +38,9 @@ export interface DocsGraph {
   edges: DocsGraphEdge[]
 }
 
+/** Display label for a path node; a trailing slash is not a segment. */
 function basename(path: string): string {
-  const trimmed = path.replace(/\/$/, '')
-  return trimmed.slice(trimmed.lastIndexOf('/') + 1) || trimmed
+  return posix.basename(path.replace(/\/$/, '')) || path
 }
 
 /**
@@ -46,13 +48,12 @@ function basename(path: string): string {
  * is a pass: the checker only emits per-link entries for problems (plus
  * one aggregate pass entry per document).
  */
-function verdictOf(checks: CheckResult[], key: string): DocsGraphEdge['verdict'] {
-  const hit = checks.find((check) => check.key === key)
-  if (!hit) return 'pass'
-  return hit.status === 'fail' ? 'fail' : hit.status === 'warn' ? 'warn' : 'pass'
+function verdictOf(byKey: Map<string, CheckResult>, key: string): CheckStatus {
+  return byKey.get(key)?.status ?? 'pass'
 }
 
 export function buildDocsGraph(refs: DocRef[], checks: CheckResult[]): DocsGraph {
+  const byKey = new Map(checks.map((check) => [check.key, check]))
   const nodes: DocsGraphNode[] = []
   const edges: DocsGraphEdge[] = []
   const seen = new Set<string>()
@@ -83,7 +84,7 @@ export function buildDocsGraph(refs: DocRef[], checks: CheckResult[]): DocsGraph
         from: ref.path,
         to: id,
         relation: 'governs',
-        verdict: verdictOf(checks, `docs-entity:${ref.path}:${entity}`),
+        verdict: verdictOf(byKey, `docs-entity:${ref.path}:${entity}`),
       })
     }
 
@@ -93,7 +94,7 @@ export function buildDocsGraph(refs: DocRef[], checks: CheckResult[]): DocsGraph
         from: ref.path,
         to: target,
         relation: 'governs',
-        verdict: verdictOf(checks, `docs-related:${ref.path}:${target}`),
+        verdict: verdictOf(byKey, `docs-related:${ref.path}:${target}`),
       })
     }
 
@@ -102,14 +103,13 @@ export function buildDocsGraph(refs: DocRef[], checks: CheckResult[]): DocsGraph
       // nodes; anything else (code, assets, missing files) is a code node
       // keyed by its resolved app-root path so links from different docs
       // to the same file share one node.
-      const resolved = resolveDocLink(ref.path, target)
-      const id = resolved !== null && docPaths.has(resolved) ? resolved : (resolved ?? target)
+      const id = resolveDocLink(ref.path, target) ?? target
       if (!docPaths.has(id)) addNode({ id, kind: 'code', label: basename(target) })
       edges.push({
         from: ref.path,
         to: id,
         relation: 'links',
-        verdict: verdictOf(checks, `docs-link:${ref.path}:${target}`),
+        verdict: verdictOf(byKey, `docs-link:${ref.path}:${target}`),
       })
     }
   }
@@ -119,9 +119,13 @@ export function buildDocsGraph(refs: DocRef[], checks: CheckResult[]): DocsGraph
   for (const view of SPEC_VIEWS) {
     const specPath = `${SPEC_DIR}/${view.fileName}`
     if (!docPaths.has(specPath)) continue
-    for (const label of view.sourceLabels) {
+    // Several patterns can share a label (a root and a module schema are
+    // both `db/schema.ts` to a reader), so the node set dedupes them.
+    for (const { label } of view.sources) {
       addNode({ id: label, kind: 'code', label: basename(label) })
-      edges.push({ from: label, to: specPath, relation: 'derives', verdict: 'pass' })
+      if (!edges.some((edge) => edge.from === label && edge.to === specPath)) {
+        edges.push({ from: label, to: specPath, relation: 'derives', verdict: 'pass' })
+      }
     }
   }
 

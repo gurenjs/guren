@@ -50,13 +50,11 @@ export const SPEC_VIEWS: SpecViewDescriptor[] = [
   {
     fileName: 'er.md',
     sources: [...SCHEMA_SOURCES, ...MODEL_SOURCES],
-    sourceLabels: ['db/schema.ts', 'app/Models/'],
     generate: (cwd) => generateErSpec(cwd),
   },
   {
     fileName: 'domain.md',
     sources: MODEL_SOURCES,
-    sourceLabels: ['app/Models/'],
     generate: (cwd) => generateDomainSpec(cwd),
   },
   {

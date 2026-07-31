@@ -49,17 +49,16 @@ export {
   parseDocFrontmatter,
   extractDocsTags,
   extractMarkdownLinks,
-  readLinkDestination,
   type DocRef,
   type DocActorEvent,
 } from './docs-index'
-export { runDocsCheck, resolveDocLink } from './docs-check'
-export { buildDocsGraph, type DocsGraph, type DocsGraphNode, type DocsGraphEdge } from './docs-graph'
-export { renderDocHtml } from './docs-render'
+export { runDocsCheck } from './docs-check'
+// The docs viewer's server-side half calls exactly these two (see
+// DocsViewerCliApi); the graph builder and renderer behind them stay
+// package-internal.
 export {
   buildDocsViewerData,
   docsViewerAssetPath,
-  docTrustTier,
   type DocsViewerData,
   type DocsViewerDoc,
   type DocTrustTier,

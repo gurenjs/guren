@@ -10,7 +10,7 @@
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
-import { scanDocs, type DocActorEvent, type DocRef } from './docs-index'
+import { localLinkTarget, parseDocFrontmatter, scanDocs, type DocActorEvent, type DocRef } from './docs-index'
 import { runDocsCheck, resolveDocLink } from './docs-check'
 import { buildDocsGraph, type DocsGraphEdge, type DocsGraphNode } from './docs-graph'
 import { renderDocHtml } from './docs-render'
@@ -39,6 +39,12 @@ export interface DocsViewerDoc {
   generated?: DocActorEvent
   verified: DocActorEvent[]
   staleAfter?: string
+  /**
+   * Whether `stale_after` has passed, as `guren check --docs` judged it.
+   * Derived here so the UI does not re-implement the calendar-day rule
+   * (a bare `Date.parse` accepts `2026-02-30` and rolls it forward).
+   */
+  stale: boolean
   trustTier: DocTrustTier
   /** Rendered body; the leading H1 is dropped (the panel header carries the title). */
   html: string
@@ -50,32 +56,32 @@ export interface DocsViewerData {
   docs: DocsViewerDoc[]
 }
 
-const FRONTMATTER_BLOCK = /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/
 const LEADING_H1 = /^\s*(?:<!--[\s\S]*?-->\s*)?#\s+.*$/m
-const URL_SCHEME = /^[a-z][a-z0-9+.-]*:/i
-
 /**
- * The graph node id a body link points at, mirroring how `scanDocs`
- * derived the edge for the same link: external URLs and bare anchors
- * stay as written, and a fragment is dropped before resolution.
- * Unresolvable targets keep their literal text.
+ * The graph node id a body link points at. `localLinkTarget` is the
+ * same filter `scanDocs` ran to derive the edge, so the rendered target
+ * and the node id cannot disagree; anything it rejects, and anything
+ * that fails to resolve, keeps its literal text.
  */
 function resolveViewerLink(docPath: string, target: string): string {
-  if (URL_SCHEME.test(target) || target.startsWith('#') || target.startsWith('//')) return target
-  const withoutFragment = target.split('#')[0]
-  if (withoutFragment === '') return target
-  return resolveDocLink(docPath, withoutFragment) ?? target
+  const local = localLinkTarget(target)
+  if (local === null) return target
+  return resolveDocLink(docPath, local) ?? target
 }
 
 export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> {
   const refs = await scanDocs(cwd)
   const checks = await runDocsCheck({ cwd })
   const { nodes, edges } = buildDocsGraph(refs, checks)
+  const staleDocs = new Set(
+    checks.filter((check) => check.key.startsWith('docs-stale:')).map((check) => check.filePath),
+  )
 
   const docs = await Promise.all(
     refs.map(async (ref): Promise<DocsViewerDoc> => {
       const source = await readFile(resolve(cwd, ref.path), 'utf-8').catch(() => '')
-      const body = source.replace(FRONTMATTER_BLOCK, '').replace(LEADING_H1, '')
+      // The panel header carries the title, so the body H1 would repeat it.
+      const body = (parseDocFrontmatter(source)?.body ?? source).replace(LEADING_H1, '')
       return {
         path: ref.path,
         module: ref.module,
@@ -90,6 +96,7 @@ export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> 
         generated: ref.generated,
         verified: ref.verified,
         staleAfter: ref.staleAfter,
+        stale: staleDocs.has(ref.path),
         trustTier: docTrustTier(ref),
         // Links carry the app-root path they resolve to, so the viewer
         // navigates by map lookup instead of re-deriving the resolution
