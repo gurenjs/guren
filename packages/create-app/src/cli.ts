@@ -110,6 +110,79 @@ async function resolveDatabase(flagValue: unknown): Promise<DatabaseDriver> {
   return (value as DatabaseDriver) ?? 'sqlite'
 }
 
+async function resolveGitInit(flagValue: unknown, target: { dir: string; wasEmpty: boolean }): Promise<boolean> {
+  if (flagValue === false) {
+    return false
+  }
+
+  // Nothing below can flip an unset flag to true, so bail before spawning git.
+  if (flagValue !== true && !process.stdin.isTTY) {
+    return false
+  }
+
+  const declined = (reason: string): false => {
+    if (flagValue === true) {
+      consola.warn(`Skipping git initialization: ${reason}`)
+    }
+    return false
+  }
+
+  // `git add -A` would sweep whatever was already here into the initial commit.
+  if (!target.wasEmpty) {
+    return declined('the target directory already contained files.')
+  }
+
+  // A nested repository inside an existing checkout is never what the user
+  // wanted, so this wins even over an explicit --git.
+  if (await isInsideGitWorkTree(target.dir)) {
+    return declined('the target directory is already inside a git repository.')
+  }
+
+  if (flagValue === true) {
+    return true
+  }
+
+  const result = await consola.prompt('Initialize a git repository with an initial commit?', {
+    type: 'confirm',
+    initial: true,
+  })
+
+  return result === true
+}
+
+async function isInsideGitWorkTree(cwd: string): Promise<boolean> {
+  const { spawnSync } = await import('node:child_process')
+  const result = spawnSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd, stdio: 'pipe' })
+  return result.status === 0 && result.stdout.toString().trim() === 'true'
+}
+
+async function initGitRepository(cwd: string): Promise<void> {
+  const { spawnSync } = await import('node:child_process')
+  // Plain `git init` so the user's own init.defaultBranch decides the branch name.
+  // `env` is passed explicitly (not omitted) so a caller that sets
+  // GIT_AUTHOR_*/GIT_COMMITTER_* on process.env just before this runs — the
+  // test suite does, to give the commit an identity in CI — is guaranteed to
+  // reach the child process.
+  const run = (args: string[]) => spawnSync('git', args, { cwd, stdio: 'pipe', env: process.env })
+
+  consola.start('Initializing git repository...')
+
+  for (const args of [['init'], ['add', '-A']]) {
+    if (run(args).status !== 0) {
+      consola.warn(`Failed to run \`git ${args.join(' ')}\`. Initialize the repository manually.`)
+      return
+    }
+  }
+
+  if (run(['commit', '-m', 'chore: initial commit']).status !== 0) {
+    consola.warn('Created a git repository, but the initial commit failed (git identity may be unset).')
+    consola.warn('Set `git config user.name` and `git config user.email`, then run `git commit -m "chore: initial commit"`.')
+    return
+  }
+
+  consola.success('Initialized a git repository with an initial commit')
+}
+
 async function installDependencies(cwd: string): Promise<boolean> {
   try {
     consola.start('Installing dependencies...')
@@ -164,18 +237,23 @@ const command = defineCommand({
       description: 'Install dependencies after scaffolding (default: true)',
       default: true,
     },
+    git: {
+      type: 'boolean',
+      description: 'Initialize a git repository and create an initial commit (prompted when interactive, off otherwise)',
+    },
   },
   async run({ args }) {
     const target = args.target as string
     const force = Boolean(args.force)
     const targetDir = resolve(process.cwd(), target)
 
+    // Emptiness is checked even under --force: it also decides whether an
+    // initial commit would sweep up files the scaffolder did not write.
+    let targetWasEmpty = true
     if (await directoryExists(targetDir)) {
-      if (!force) {
-        const empty = await isDirectoryEmpty(targetDir)
-        if (!empty) {
-          throw new Error(`Directory "${targetDir}" is not empty. Use --force to scaffold anyway.`)
-        }
+      targetWasEmpty = await isDirectoryEmpty(targetDir)
+      if (!force && !targetWasEmpty) {
+        throw new Error(`Directory "${targetDir}" is not empty. Use --force to scaffold anyway.`)
       }
     } else {
       await ensureTargetDirectory(targetDir, true)
@@ -186,6 +264,8 @@ const command = defineCommand({
       ? 'spa'
       : await resolveRenderingMode(args.mode)
     const database = await resolveDatabase(args.db)
+    // Asked here, applied last: every prompt runs before the long work starts.
+    const shouldInitGit = await resolveGitInit(args.git, { dir: targetDir, wasEmpty: targetWasEmpty })
 
     await scaffoldAppBlueprint({
       blueprint: blueprint.name,
@@ -230,6 +310,11 @@ const command = defineCommand({
       if (!authInstalled) {
         consola.warn('Authentication was not scaffolded automatically. Run `bunx guren add auth` inside the app after installing dependencies.')
       }
+    }
+
+    // Last, so the harness and auth scaffolding land in the initial commit.
+    if (shouldInitGit) {
+      await initGitRepository(targetDir)
     }
 
     const relativeTarget = relative(process.cwd(), targetDir) || '.'

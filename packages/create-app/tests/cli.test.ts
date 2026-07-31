@@ -1,5 +1,6 @@
 import { describe, expect, it, mock } from 'bun:test'
-import { readFile, access } from 'node:fs/promises'
+import { readFile, access, mkdir, writeFile } from 'node:fs/promises'
+import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { createTempWorkspace } from './helpers'
 
@@ -27,6 +28,7 @@ await mock.module('citty', () => ({
 
 const consolaStub = {
   prompt: async () => 'ssr',
+  start: mock(() => {}),
   success: successMock,
   info: infoMock,
   log: logMock,
@@ -193,6 +195,199 @@ describe('create-guren-app CLI', () => {
       expect(packageJson.dependencies?.postgres).toBeDefined()
       expect(packageJson.devDependencies?.postgres).toBeUndefined()
       expect(packageJson.devDependencies?.mysql2).toBeUndefined()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('scaffolds a .gitignore, which npm would have stripped from the template', async () => {
+    const workspace = await createTempWorkspace('guren-create-app-cli-gitignore-')
+    try {
+      await capturedCommand.run({
+        args: {
+          target: 'ignored-app',
+          force: false,
+          mode: 'spa',
+          auth: false,
+          db: 'sqlite',
+          install: false,
+        },
+      })
+
+      const appRoot = join(workspace.dir, 'ignored-app')
+      const gitignore = await readFile(join(appRoot, '.gitignore'), 'utf8')
+
+      expect(gitignore).toContain('node_modules')
+      expect(gitignore).toContain('.env')
+      expect(gitignore).toContain('public/assets/')
+
+      // The nested one guards the codegen output under types/generated/.
+      const nested = await readFile(join(appRoot, 'types/generated/.gitignore'), 'utf8')
+      expect(nested).toContain('routes.d.ts')
+
+      await expect(access(join(appRoot, '_gitignore'))).rejects.toThrow()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('keeps the restored .gitignore across an overlay layer', async () => {
+    const workspace = await createTempWorkspace('guren-create-app-cli-gitignore-overlay-')
+    try {
+      // SSR copies default-ssr on top of default, so this covers the
+      // multi-layer path — the restore happens per layer, and a second copy
+      // must neither undo it nor leave the undotted original behind.
+      await capturedCommand.run({
+        args: {
+          target: 'ssr-ignored',
+          force: false,
+          mode: 'ssr',
+          auth: false,
+          db: 'sqlite',
+          install: false,
+        },
+      })
+
+      const appRoot = join(workspace.dir, 'ssr-ignored')
+      expect(await readFile(join(appRoot, '.gitignore'), 'utf8')).toContain('.guren/ssr/')
+      await expect(access(join(appRoot, '_gitignore'))).rejects.toThrow()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('initializes a git repository without committing the generated .env', async () => {
+    const workspace = await createTempWorkspace('guren-create-app-cli-git-')
+    // `git commit` needs an identity, and CI runners don't configure one
+    // globally (unlike most developer machines, which is why this only
+    // surfaced in CI). initGitRepository() intentionally leaves that to the
+    // user's own `git config` — scope it here instead so the test observes
+    // the commit succeeding rather than the graceful "identity unset" warning.
+    const gitEnvKeys = ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL'] as const
+    const previousGitEnv = Object.fromEntries(gitEnvKeys.map((key) => [key, process.env[key]]))
+    process.env.GIT_AUTHOR_NAME = 'Guren Test'
+    process.env.GIT_AUTHOR_EMAIL = 'guren-test@example.com'
+    process.env.GIT_COMMITTER_NAME = 'Guren Test'
+    process.env.GIT_COMMITTER_EMAIL = 'guren-test@example.com'
+    try {
+      await capturedCommand.run({
+        args: {
+          target: 'git-app',
+          force: false,
+          mode: 'spa',
+          auth: false,
+          db: 'sqlite',
+          install: false,
+          git: true,
+        },
+      })
+
+      const appRoot = join(workspace.dir, 'git-app')
+
+      // `git add -A` alone populates the index, so assert the commit landed —
+      // otherwise a broken commit step would still leave ls-files green.
+      const head = spawnSync('git', ['log', '--format=%s', '-1'], { cwd: appRoot, encoding: 'utf8' })
+      expect(head.status).toBe(0)
+      expect(head.stdout.trim()).toBe('chore: initial commit')
+
+      // Read the commit itself, not the index, for the same reason.
+      const files = spawnSync('git', ['ls-tree', '-r', '--name-only', 'HEAD'], { cwd: appRoot, encoding: 'utf8' })
+        .stdout.split('\n').filter(Boolean)
+
+      // .env holds the freshly generated APP_KEY and must never be committed.
+      expect(files).not.toContain('.env')
+      expect(files).toContain('.env.example')
+      expect(files).toContain('.gitignore')
+      expect(files).toContain('package.json')
+    } finally {
+      for (const key of gitEnvKeys) {
+        if (previousGitEnv[key] === undefined) {
+          delete process.env[key]
+        } else {
+          process.env[key] = previousGitEnv[key]
+        }
+      }
+      await workspace.cleanup()
+    }
+  })
+
+  it('does not commit pre-existing files when --force scaffolds into a used directory', async () => {
+    const workspace = await createTempWorkspace('guren-create-app-cli-git-force-')
+    try {
+      warnMock.mockClear()
+      const appRoot = join(workspace.dir, 'used-app')
+      await mkdir(appRoot, { recursive: true })
+      await writeFile(join(appRoot, 'credentials.json'), '{"token":"secret"}\n', 'utf8')
+
+      await capturedCommand.run({
+        args: {
+          target: 'used-app',
+          force: true,
+          mode: 'spa',
+          auth: false,
+          db: 'sqlite',
+          install: false,
+          git: true,
+        },
+      })
+
+      await expect(access(join(appRoot, '.git'))).rejects.toThrow()
+      expect(warnMock.mock.calls.some((call) => call.join(' ').includes('already contained files'))).toBe(true)
+
+      // The pre-existing file must survive the scaffold untouched either way.
+      expect(await readFile(join(appRoot, 'credentials.json'), 'utf8')).toContain('secret')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('leaves a pre-existing _gitignore in the target directory alone', async () => {
+    const workspace = await createTempWorkspace('guren-create-app-cli-force-dotfile-')
+    try {
+      const appRoot = join(workspace.dir, 'forced-app')
+      await mkdir(join(appRoot, 'vendor'), { recursive: true })
+      await writeFile(join(appRoot, 'vendor/_gitignore'), 'not-a-template\n', 'utf8')
+
+      await capturedCommand.run({
+        args: {
+          target: 'forced-app',
+          force: true,
+          mode: 'spa',
+          auth: false,
+          db: 'sqlite',
+          install: false,
+        },
+      })
+
+      // Only files this scaffold wrote get the dot restored.
+      expect(await readFile(join(appRoot, 'vendor/_gitignore'), 'utf8')).toBe('not-a-template\n')
+      await expect(access(join(appRoot, 'vendor/.gitignore'))).rejects.toThrow()
+      await access(join(appRoot, '.gitignore'))
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('does not nest a repository inside an existing git work tree', async () => {
+    const workspace = await createTempWorkspace('guren-create-app-cli-git-nested-')
+    try {
+      warnMock.mockClear()
+      expect(spawnSync('git', ['init'], { cwd: workspace.dir }).status).toBe(0)
+
+      await capturedCommand.run({
+        args: {
+          target: 'nested-app',
+          force: false,
+          mode: 'spa',
+          auth: false,
+          db: 'sqlite',
+          install: false,
+          git: true,
+        },
+      })
+
+      await expect(access(join(workspace.dir, 'nested-app/.git'))).rejects.toThrow()
+      expect(warnMock.mock.calls.some((call) => call.join(' ').includes('already inside a git repository'))).toBe(true)
     } finally {
       await workspace.cleanup()
     }

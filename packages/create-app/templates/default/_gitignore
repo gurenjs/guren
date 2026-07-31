@@ -1,0 +1,7 @@
+node_modules
+dist
+.env
+data/
+public/assets/
+.guren/ssr/
+.DS_Store
