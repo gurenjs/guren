@@ -60,7 +60,7 @@ export interface MySqlDatabase {
   closeDatabase(): Promise<void>
   configureOrm(): Promise<void>
   seedDatabase(): Promise<void>
-  /** Drops every table (including the drizzle migration tracker) so migrations can be re-applied from scratch. */
+  /** Drops every table and view (including the drizzle migration tracker) so migrations can be re-applied from scratch. */
   resetDatabase(): Promise<void>
   /** Per-migration applied state derived from the drizzle-kit journal and the __drizzle_migrations table. */
   migrationStatus(): Promise<MigrationStatusEntry[]>
@@ -224,10 +224,9 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
 
     await withAdminDb(async (adminDb) => {
       // table_type is selected because information_schema.tables lists views
-      // alongside base tables, and DROP TABLE on a view raises a warning
-      // rather than an error. Dropping every row as a table therefore leaves
-      // views standing while reporting a successful reset, and the replayed
-      // migration then dies on `CREATE VIEW ... Table 'x' already exists`.
+      // alongside base tables, and MySQL answers DROP TABLE on a view with a
+      // warning rather than an error — so dropping every row as a table
+      // silently leaves views standing behind a successful-looking reset.
       const [rows] = (await adminDb.execute(
         sql.raw(
           'SELECT table_name AS name, table_type AS type FROM information_schema.tables WHERE table_schema = DATABASE()',
@@ -237,9 +236,9 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
       await adminDb.execute(sql.raw('SET FOREIGN_KEY_CHECKS = 0'))
       try {
         for (const { name, type } of rows) {
-          const quoted = `\`${name.replaceAll('`', '``')}\``
+          const identifier = sql.identifier(name)
           await adminDb.execute(
-            sql.raw(type === 'VIEW' ? `DROP VIEW IF EXISTS ${quoted}` : `DROP TABLE IF EXISTS ${quoted}`),
+            type === 'VIEW' ? sql`DROP VIEW IF EXISTS ${identifier}` : sql`DROP TABLE IF EXISTS ${identifier}`,
           )
         }
       } finally {
