@@ -352,6 +352,59 @@ describe('QueryBuilder', () => {
       const results = await qb().where('name', 'Alice').get()
       expect(results[0].score).toBe(100)
     })
+
+    it('should run payloads through preparePersistencePayload overrides', async () => {
+      const PreparedModel = class extends Model<TestRecord> {
+        static table = 'tests' as any
+        static getAdapter() { return adapter as ORMAdapter }
+        static resolveTable() { return 'tests' }
+
+        protected static override async preparePersistencePayload(data: PlainObject): Promise<PlainObject> {
+          const payload = await super.preparePersistencePayload(data)
+          if (typeof payload.name === 'string') {
+            payload.name = payload.name.toUpperCase()
+          }
+          return payload
+        }
+      }
+
+      await new QueryBuilder<TestRecord>(PreparedModel).where('id', 1).update({ name: 'renamed' })
+      const results = await qb().where('id', 1).get()
+      expect(results[0].name).toBe('RENAMED')
+    })
+
+    it('should run forceUpdate payloads through preparePersistencePayload overrides', async () => {
+      const PreparedModel = class extends Model<TestRecord> {
+        static table = 'tests' as any
+        static getAdapter() { return adapter as ORMAdapter }
+        static resolveTable() { return 'tests' }
+
+        protected static override async preparePersistencePayload(data: PlainObject): Promise<PlainObject> {
+          const payload = await super.preparePersistencePayload(data)
+          if (typeof payload.name === 'string') {
+            payload.name = payload.name.toUpperCase()
+          }
+          return payload
+        }
+      }
+
+      await new QueryBuilder<TestRecord>(PreparedModel).where('id', 2).forceUpdate({ name: 'renamed' })
+      const results = await qb().where('id', 2).get()
+      expect(results[0].name).toBe('RENAMED')
+    })
+
+    it('should apply casts to bulk update payloads', async () => {
+      const CastModel = class extends Model<TestRecord> {
+        static table = 'tests' as any
+        static override casts = { score: 'number' } as const
+        static getAdapter() { return adapter as ORMAdapter }
+        static resolveTable() { return 'tests' }
+      }
+
+      await new QueryBuilder<TestRecord>(CastModel).where('id', 3).update({ score: '42' })
+      const results = await qb().where('id', 3).get()
+      expect(results[0].score).toBe(42)
+    })
   })
 
   describe('delete', () => {

@@ -1,16 +1,17 @@
-import { AuthenticatableModel } from '@guren/core'
+import { AuthenticatableModel, defineModel } from '@guren/core'
 import { users } from '../../../../db/schema.js'
 
 export type UserRecord = typeof users.$inferSelect
 export type NewUserRecord = typeof users.$inferInsert
 
 // Accounts are created exclusively through GitHub OAuth (passwordless), so
-// createType omits passwordHash and no password field exists at all.
-export class User extends AuthenticatableModel<UserRecord> {
-  static override table = users
+// passwordHash is never supplied and no password is ever required — unlike a
+// model that also offers password sign-up.
+export class User extends defineModel(users, {
+  base: AuthenticatableModel,
+  optionalOnCreate: ['passwordHash'],
+}) {
   static fillable = ['name', 'email', 'githubId']
   static guarded = ['id', 'passwordHash', 'rememberToken']
   static override hidden = ['passwordHash', 'rememberToken']
-  declare static readonly recordType: UserRecord
-  declare static readonly createType: Omit<NewUserRecord, 'passwordHash'>
 }

@@ -745,6 +745,11 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     return result
   }
 
+  /** @internal Lets QueryBuilder bulk updates run the same payload preparation as `Model.update()`. */
+  static async prepareBulkPersistencePayload(data: PlainObject): Promise<PlainObject> {
+    return this.preparePersistencePayload(data)
+  }
+
   protected static getRelationDefinitions(): Map<string, RelationDefinition> {
     if (!Object.prototype.hasOwnProperty.call(this, 'relationDefinitions') || !this.relationDefinitions) {
       this.relationDefinitions = new Map()
@@ -2526,39 +2531,91 @@ export type WithRelations<
   K extends RelationPath<T> | readonly RelationPath<T>[],
 > = TRecordFor<T> & RelationTypePick<T, K>
 
-type ModelClassWithTable<
-  TTable extends TableShape,
-  TBase extends typeof Model = typeof Model,
-  TCreate extends PlainObject = InferModelInsert<TTable> & TCreateFor<TBase>,
-> = TBase & {
+type ModelClassWithTable<TTable extends TableShape, TBase extends typeof Model, TCreate extends PlainObject> = TBase & {
   readonly table: TTable
   readonly recordType: InferModelRecord<TTable>
   readonly createType: TCreate
 }
 
 /**
+ * Keys of `T` excluding its string/number index signature, so that a base
+ * class whose `createType` widens to `PlainObject` still contributes its
+ * named fields (and only those) to `requireOnCreate`.
+ */
+type NamedKeys<T> = keyof {
+  [K in keyof T as string extends K ? never : number extends K ? never : K]: never
+}
+
+/** A key that can appear in a model's create payload: a table column, or a named field its base contributes. */
+type CreateKey<TTable extends TableShape, TBase extends typeof Model> =
+  | keyof InferModelInsert<TTable>
+  | NamedKeys<TCreateFor<TBase>>
+
+type CreateShape<
+  TTable extends TableShape,
+  TBase extends typeof Model,
+  TOptional extends keyof InferModelInsert<TTable>,
+  TRequire extends CreateKey<TTable, TBase>,
+> = Partial<Pick<InferModelInsert<TTable>, TOptional>> &
+  Omit<InferModelInsert<TTable>, TOptional> &
+  TCreateFor<TBase> &
+  Required<Pick<InferModelInsert<TTable> & TCreateFor<TBase>, TRequire & keyof (InferModelInsert<TTable> & TCreateFor<TBase>)>>
+
+/**
  * Create a table-backed model base class from a Drizzle table.
  *
  * `recordType` and `createType` are inferred from the table. The inferred
- * createType requires every non-defaulted column — AuthenticatableModel user
- * models typically want a looser payload (plain `password` instead of
- * `passwordHash`), so extend that base directly and redeclare the markers
- * with `declare static readonly` instead of passing it as `base`.
+ * createType requires every non-defaulted column, which is not always the
+ * payload a model accepts: `AuthenticatableModel` hashes a plain `password`
+ * into `passwordHash`, so a user model wants the column optional and the
+ * virtual field required. `optionalOnCreate` and `requireOnCreate` reshape the
+ * inferred type without any cast.
  *
  * @example
  * export class Post extends defineModel(posts) {}
+ *
+ * export class User extends defineModel(users, {
+ *   base: AuthenticatableModel,
+ *   optionalOnCreate: ['passwordHash'],
+ *   requireOnCreate: ['password'],
+ * }) {}
  */
 export function defineModel<
   TTable extends TableShape,
   TBase extends typeof Model = typeof Model,
-  TCreate extends PlainObject = InferModelInsert<TTable> & TCreateFor<TBase>,
+  // Stays third so the pre-existing `defineModel<TTable, TBase, TCreate>()`
+  // spelling keeps working; the two option-driven parameters go after it and
+  // the create shape is resolved in the return type instead of as a default,
+  // which may only reference parameters declared before it.
+  TCreate extends PlainObject | undefined = undefined,
+  const TOptional extends keyof InferModelInsert<TTable> = never,
+  const TRequire extends CreateKey<TTable, TBase> = never,
 >(
   table: TTable,
   options: {
     base?: TBase
+    /**
+     * Columns the model fills in itself, so callers need not pass them.
+     * Type-level only.
+     */
+    optionalOnCreate?: readonly TOptional[]
+    /**
+     * Fields to make required on the create payload. Accepts table columns
+     * (Drizzle marks defaulted ones optional) and named fields contributed by
+     * `base`, such as `AuthenticatableModel`'s virtual `password`.
+     * Type-level only.
+     */
+    requireOnCreate?: readonly TRequire[]
+    /** @deprecated Prefer `optionalOnCreate`/`requireOnCreate`, which need no value to infer from. */
     createType?: TCreate
   } = {},
-): ModelClassWithTable<TTable, TBase, TCreate> {
+): ModelClassWithTable<
+  TTable,
+  TBase,
+  TCreate extends PlainObject ? TCreate : CreateShape<TTable, TBase, TOptional, TRequire>
+> {
+  type ResolvedCreate = TCreate extends PlainObject ? TCreate : CreateShape<TTable, TBase, TOptional, TRequire>
+
   const BaseClass = (options.base ?? Model) as typeof Model
 
   abstract class DefinedModel extends BaseClass {}
@@ -2566,10 +2623,10 @@ export function defineModel<
   ;(DefinedModel as typeof Model & { table: TTable }).table = table
   ;(DefinedModel as typeof Model & { recordType: InferModelRecord<TTable> }).recordType =
     {} as InferModelRecord<TTable>
-  ;(DefinedModel as typeof Model & { createType: TCreate }).createType =
-    (options.createType ?? ({} as InferModelInsert<TTable> & TCreateFor<TBase>)) as TCreate
+  ;(DefinedModel as typeof Model & { createType: ResolvedCreate }).createType =
+    (options.createType ?? {}) as ResolvedCreate
 
-  return DefinedModel as ModelClassWithTable<TTable, TBase, TCreate>
+  return DefinedModel as ModelClassWithTable<TTable, TBase, ResolvedCreate>
 }
 
 function normalizeOrderBy<TRecord extends PlainObject>(order: OrderByInput<TRecord>): OrderByClause<TRecord> {

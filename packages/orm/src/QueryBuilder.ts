@@ -417,8 +417,11 @@ export class QueryBuilder<
    *
    * Mass-assignment protection applies exactly as in `Model.update()`:
    * with a `fillable` allowlist, out-of-allowlist keys throw a
-   * MassAssignmentException. Note that bulk updates skip model hooks,
-   * observers, mutators, and casts by design.
+   * MassAssignmentException. The payload also runs through the same
+   * persistence preparation as `Model.update()` — mutators, casts, and
+   * `preparePersistencePayload` overrides (e.g. password hashing on
+   * authenticatable models). Per-record hooks and observers are still
+   * skipped by design.
    *
    * @param data - Data to set on matching records
    * @returns The updated record (adapter-dependent)
@@ -441,7 +444,8 @@ export class QueryBuilder<
     }
 
     const model = this.modelClass as typeof Model
-    const payload = applyFillable ? model.filterFillable(data) : { ...data }
+    const filtered = applyFillable ? model.filterFillable(data) : { ...data }
+    const payload = await model.prepareBulkPersistencePayload(filtered)
 
     const advancedAdapter = this.adapter as ORMAdapterAdvanced
     if (typeof advancedAdapter.updateAdvanced === 'function') {

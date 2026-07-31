@@ -544,6 +544,38 @@ export const posts = pgTable('posts', {
     }
   })
 
+  it('requires a password on create only when password sign-up is the sole way in', async () => {
+    const passwordOnly = await createTempWorkspace('guren-cli-make-auth-user-model-')
+    try {
+      await mkdir(join(passwordOnly.dir, 'db'), { recursive: true })
+      await makeAuth({ force: true })
+
+      const model = await readFile(join(passwordOnly.dir, 'app/Models/User.ts'), 'utf8')
+      expect(model).toContain('base: AuthenticatableModel')
+      expect(model).toContain("optionalOnCreate: ['passwordHash']")
+      expect(model).toContain("requireOnCreate: ['password']")
+      // The create type still admits passwordHash, so the guard against a
+      // request body setting its own hash has to be a runtime one.
+      expect(model).toContain("static guarded = ['id', 'passwordHash', 'rememberToken']")
+    } finally {
+      await passwordOnly.cleanup()
+    }
+
+    // OAuth accounts arrive without a password, so requiring one would make
+    // the generated OAuth controller's User.create() fail to compile.
+    const withOAuth = await createTempWorkspace('guren-cli-make-auth-user-model-oauth-')
+    try {
+      await mkdir(join(withOAuth.dir, 'db'), { recursive: true })
+      await makeAuth({ force: true, oauth: 'github' })
+
+      const model = await readFile(join(withOAuth.dir, 'app/Models/User.ts'), 'utf8')
+      expect(model).toContain("optionalOnCreate: ['passwordHash']")
+      expect(model).not.toContain('requireOnCreate')
+    } finally {
+      await withOAuth.cleanup()
+    }
+  })
+
   it('scaffolds OAuth buttons on the login page even with --minimal', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-auth-oauth-minimal-')
     try {

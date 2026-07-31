@@ -6,7 +6,7 @@
   "scripts": {
     "codegen": "bun ../../packages/cli/src/bin.ts codegen --routes routes/web.ts --force",
     "routes:types": "bun run codegen",
-    "dev": "bun run codegen && GUREN_MCP=1 bun run dev:server",
+    "dev": "bun run codegen && GUREN_MCP=1 GUREN_DOCS=1 bun run dev:server",
     "dev:server": "bun --hot bin/serve.ts",
     "console": "bun bin/console.ts",
     "smoke": "bun run ./smoke.ts",
@@ -46,6 +46,7 @@
     "@vitejs/plugin-react": "^6.0.0",
     "drizzle-kit": "1.0.0-rc.4",
     "jsdom": "^25.0.0",
+    "mermaid": "^11.0.0",
     "tailwindcss": "^4.2.2",
     "vite": "^8.0.0",
     "vitest": "^3.2.6"

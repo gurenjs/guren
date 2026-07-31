@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import type { Statement, Expression, ClassDeclaration, ClassBody } from '@babel/types'
+import type { Statement, Expression, ClassDeclaration, ClassBody, Node, ObjectProperty } from '@babel/types'
 import { extractDocsTags } from './docs-index'
 import { discoverModelFiles, toPosixRelative, moduleNameFromRelPath } from './discovery'
 import { parseSourceFile } from './parse-cache'
@@ -97,36 +97,47 @@ export function extractClassDeclaration(node: Statement): ClassDeclaration | nul
   return null
 }
 
-function analyzeClassHeader(
-  classDecl: ClassDeclaration,
-  source: string,
-): { tableName?: string; usesAuth: boolean; hasSoftDeletes: boolean } {
+/**
+ * Whether an expression names `AuthenticatableModel`, as a bare identifier or
+ * with type arguments (`AuthenticatableModel<UserRecord>`). Both the superclass
+ * and `defineModel`'s `base` option accept either spelling, so both go through
+ * here. Matching is by name only — an aliased import is not resolved.
+ */
+function isAuthenticatableBase(node: Node): boolean {
+  const target = node.type === 'TSInstantiationExpression' ? node.expression : node
+  return target.type === 'Identifier' && target.name === 'AuthenticatableModel'
+}
+
+/** The name of an object property key, for both `{ base: X }` and `{ 'base': X }`. */
+function propertyKeyName(property: ObjectProperty): string | undefined {
+  if (property.computed) return undefined
+  if (property.key.type === 'Identifier') return property.key.name
+  if (property.key.type === 'StringLiteral') return property.key.value
+  return undefined
+}
+
+/**
+ * The identifier a model binds its table to, from either supported spelling:
+ * `defineModel(users, …)` or `static table = users`. Callers that only look
+ * for the latter silently stop covering every model written the modern way,
+ * so anything resolving a model's table goes through here.
+ */
+export function extractTableIdentifier(classDecl: ClassDeclaration): string | undefined {
   let tableName: string | undefined
-  let usesAuth = false
-  const hasSoftDeletes = source.includes('SoftDeletes')
 
   const superClass = classDecl.superClass
-  if (superClass) {
-    // defineModel(posts) pattern
-    if (superClass.type === 'CallExpression') {
-      const callee = superClass.callee
-      if (callee.type === 'Identifier' && callee.name === 'defineModel') {
-        const firstArg = superClass.arguments[0]
-        if (firstArg?.type === 'Identifier') {
-          tableName = firstArg.name
-        }
+  if (superClass?.type === 'CallExpression') {
+    const callee = superClass.callee
+    if (callee.type === 'Identifier' && callee.name === 'defineModel') {
+      const firstArg = superClass.arguments[0]
+      if (firstArg?.type === 'Identifier') {
+        tableName = firstArg.name
       }
-    }
-    // AuthenticatableModel pattern
-    if (superClass.type === 'Identifier' && superClass.name === 'AuthenticatableModel') {
-      usesAuth = true
-    }
-    if (superClass.type === 'TSInstantiationExpression' && superClass.expression.type === 'Identifier' && superClass.expression.name === 'AuthenticatableModel') {
-      usesAuth = true
     }
   }
 
-  // Check for static table = xxx
+  // An explicit `static table` wins: a class may extend defineModel(x) and
+  // still repoint the table.
   for (const member of classDecl.body.body) {
     if (
       member.type === 'ClassProperty' &&
@@ -139,7 +150,39 @@ function analyzeClassHeader(
     }
   }
 
-  return { tableName, usesAuth, hasSoftDeletes }
+  return tableName
+}
+
+function analyzeClassHeader(
+  classDecl: ClassDeclaration,
+  source: string,
+): { tableName?: string; usesAuth: boolean; hasSoftDeletes: boolean } {
+  let usesAuth = false
+  const hasSoftDeletes = source.includes('SoftDeletes')
+
+  const superClass = classDecl.superClass
+  if (superClass) {
+    // defineModel(users, { base: AuthenticatableModel }) — the auth base
+    // arrives as an option rather than as the superclass itself.
+    if (superClass.type === 'CallExpression') {
+      const callee = superClass.callee
+      if (callee.type === 'Identifier' && callee.name === 'defineModel') {
+        const options = superClass.arguments[1]
+        if (options?.type === 'ObjectExpression') {
+          usesAuth ||= options.properties.some(
+            (property) =>
+              property.type === 'ObjectProperty' &&
+              propertyKeyName(property) === 'base' &&
+              isAuthenticatableBase(property.value),
+          )
+        }
+      }
+    }
+    // AuthenticatableModel pattern
+    usesAuth ||= isAuthenticatableBase(superClass)
+  }
+
+  return { tableName: extractTableIdentifier(classDecl), usesAuth, hasSoftDeletes }
 }
 
 /**

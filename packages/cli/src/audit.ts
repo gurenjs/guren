@@ -9,7 +9,7 @@ import {
   listModuleNames,
 } from './discovery'
 import { loadRouteDefinitions } from './load-routes'
-import { extractClassDeclaration } from './model-parser'
+import { extractClassDeclaration, extractTableIdentifier } from './model-parser'
 import { parseSourceFile } from './parse-cache'
 import { parseSchemaTableColumns } from './schema-parser'
 import { loadAuditConfig, type AuditIgnoreEntry } from './audit-config'
@@ -587,8 +587,10 @@ interface ModelSerializationInfo {
 }
 
 /**
- * Extract `static table`, `static hidden`, and `static visible` from a model
- * source via AST (regexes would count string literals inside comments).
+ * Extract the model's table plus `static hidden`/`static visible` from a model
+ * source via AST (regexes would count string literals inside comments). The
+ * table is resolved through `extractTableIdentifier`, so models that bind it
+ * via `defineModel(users, …)` are covered as well as `static table = users`.
  */
 function parseModelSerializationInfo(source: string, filePath: string): ModelSerializationInfo {
   const info: ModelSerializationInfo = {}
@@ -602,12 +604,12 @@ function parseModelSerializationInfo(source: string, filePath: string): ModelSer
     const classDecl = extractClassDeclaration(node)
     if (!classDecl) continue
 
+    info.tableIdentifier = extractTableIdentifier(classDecl) ?? info.tableIdentifier
+
     for (const member of classDecl.body.body) {
       if (member.type !== 'ClassProperty' || !member.static || member.key.type !== 'Identifier') continue
 
-      if (member.key.name === 'table' && member.value?.type === 'Identifier') {
-        info.tableIdentifier = member.value.name
-      } else if (
+      if (
         (member.key.name === 'hidden' || member.key.name === 'visible') &&
         member.value?.type === 'ArrayExpression'
       ) {

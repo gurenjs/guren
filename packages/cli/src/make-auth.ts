@@ -575,19 +575,32 @@ ${verifyResend}
 `
 }
 
-const userModelTemplate = `import { AuthenticatableModel } from '@guren/core'
+/**
+ * OAuth accounts are created without a password, so `password` can only be
+ * required on the create payload when password sign-up is the sole way in.
+ */
+function buildUserModelTemplate(requirePassword: boolean): string {
+  const requireOnCreate = requirePassword ? "\n  requireOnCreate: ['password']," : ''
+
+  return `import { AuthenticatableModel, defineModel } from '@guren/core'
 import { users } from '../../db/schema.js'
 
 export type UserRecord = typeof users.$inferSelect
 
-export class User extends AuthenticatableModel<UserRecord> {
-  static override table = users
-  declare static readonly recordType: UserRecord
+export class User extends defineModel(users, {
+  base: AuthenticatableModel,
+  // Derived from the plain \`password\`, so callers never set it directly
+  optionalOnCreate: ['passwordHash'],${requireOnCreate}
+}) {
+  // Stripped from create()/update() payloads — this is what stops a request
+  // body from setting its own hash
+  static guarded = ['id', 'passwordHash', 'rememberToken']
 
   // Never serialized by Model.serialize() and stripped from auth.user()
   static override hidden = ['passwordHash', 'rememberToken']
 }
 `
+}
 
 const authProviderTemplate = `import { ServiceProvider } from '@guren/core'
 import type { AuthManager } from '@guren/core'
@@ -2076,6 +2089,8 @@ interface AuthFeatures {
   includePassword: boolean
   /** The email comes from the OAuth provider and must not be locally editable. */
   providerOwnedEmail: boolean
+  /** Every account is created with a password, so the user model can require one. */
+  passwordOnlySignUp: boolean
   /** Providers to scaffold buttons, a callback, and id columns for. */
   oauthProviders: string[]
 }
@@ -2113,25 +2128,30 @@ function resolveAuthFeatures(options: MakeAuthOptions): AuthFeatures {
   // --verify) as well as plain --oauth without --verify.
   const providerOwnedEmail = oauthProviders.length > 0 && !includeVerify
 
+  // OAuth accounts are created passwordless, so the user model can only
+  // require a password when no provider can produce an account without one.
+  const passwordOnlySignUp = !oauthOnly && oauthProviders.length === 0
+
   return {
     includeExtras,
     includeVerify,
     includePassword: !oauthOnly,
     providerOwnedEmail,
+    passwordOnlySignUp,
     oauthProviders,
   }
 }
 
 export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]> {
   const features = resolveAuthFeatures(options)
-  const { includeExtras, includeVerify, includePassword, oauthProviders } = features
+  const { includeExtras, includeVerify, includePassword, passwordOnlySignUp, oauthProviders } = features
   const includeOAuth = oauthProviders.length > 0
 
   const files = [
     { path: 'app/Http/Controllers/Auth/LoginController.ts', contents: buildLoginControllerTemplate(includePassword) },
     { path: 'app/Http/Controllers/DashboardController.ts', contents: dashboardControllerTemplate },
     { path: 'app/Http/Controllers/ProfileController.ts', contents: buildProfileControllerTemplate(features) },
-    { path: 'app/Models/User.ts', contents: userModelTemplate },
+    { path: 'app/Models/User.ts', contents: buildUserModelTemplate(passwordOnlySignUp) },
     { path: 'app/Providers/AuthProvider.ts', contents: authProviderTemplate },
     { path: 'app/Http/Validators/ProfileValidator.ts', contents: buildProfileValidatorTemplate(features) },
     { path: 'resources/js/components/Layout.tsx', contents: layoutTemplate },

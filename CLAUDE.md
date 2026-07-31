@@ -104,7 +104,7 @@ bunx guren model:list --format json  # Models as JSON
 bunx guren check                # Validate route↔controller↔page consistency, console command registration, architecture boundaries, and doc links (informational; only --arch/--docs set the exit code)
 bunx guren check --json         # Check results as JSON
 bunx guren check --arch         # Architecture boundary checks only (guren.arch.ts) — fast path for edit hooks
-bunx guren check --docs         # Doc-link checks only: docs/ frontmatter (entities/related) + @docs tags (exits non-zero on failures)
+bunx guren check --docs         # Doc-link checks only: OKF frontmatter (type/entities/related) + body markdown links + @docs tags (exits non-zero on failures)
 bunx guren check --spec         # Spec drift checks only: docs/spec/ vs regenerated views (exits non-zero on failures)
 bunx guren spec:generate        # Generate spec views (er/domain/screens/modules) into docs/spec/ — deterministic, committed, drift-gated
 bunx guren check --changed      # Restrict file-scanning checks to files changed vs. the merge base with main
@@ -362,7 +362,9 @@ export const handler = createLambdaHandler(app)
 | `packages/cli/src/bin.ts` | CLI entry point |
 | `packages/cli/src/context.ts` | AI agent: project context map generation |
 | `packages/cli/src/entity-context.ts` | AI agent: entity-centric context bundles (`guren context <Entity>`, RFC 0004) |
-| `packages/cli/src/docs-index.ts` | AI agent: docs/ frontmatter scanning + `@docs` tag extraction |
+| `packages/cli/src/docs-index.ts` | AI agent: docs/ scanning (DocRef, entity index, `@docs` tags); facade over the parsers below |
+| `packages/cli/src/docs-frontmatter.ts` | AI agent: the YAML-subset frontmatter parser (OKF fields) |
+| `packages/cli/src/docs-links.ts` | AI agent: markdown link scanning shared by check, graph, and renderer |
 | `packages/cli/src/docs-check.ts` | AI agent: doc-link validation (`guren check --docs`) |
 | `packages/cli/src/make-adr.ts` | AI agent: numbered ADR scaffolding (`make:adr`) |
 | `packages/cli/src/spec-generate.ts` | AI agent: spec view orchestration (`spec:generate`, RFC 0004) |
@@ -392,8 +394,14 @@ export const handler = createLambdaHandler(app)
 3. Run `bun run test` - all tests pass
 4. Run `bun run audit:core-first` - no `@guren/server` references in docs/templates
 5. Run `bun run audit:docs` - docs reference valid commands and APIs
-6. Review `.claude/rules/common-pitfalls.md` - check for known gotchas
-7. Follow commit message convention
+6. **If you touched `packages/create-app/templates/**` or `packages/cli/templates/**`:**
+   also run `bun run audit:starter-template` and `bun run smoke:starter` /
+   `smoke:starter:api`. The audits assert scaffold contents literally, so a
+   change that reads as harmless (an added env var in a `dev` script) fails CI
+   while `build`/`typecheck`/`test` stay green. The smokes scaffold a real app
+   and take several minutes — judge them by exit code, not by wall time.
+7. Review `.claude/rules/common-pitfalls.md` - check for known gotchas
+8. Follow commit message convention
 
 ## Claude Code Agents
 

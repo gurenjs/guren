@@ -59,23 +59,36 @@ bunx guren context User
 ## 宣言: ドキュメントとコードの紐付け
 
 意思決定やビジネス背景は `docs/`(および `modules/<name>/docs/`)配下の
-Markdownとして残します。frontmatterが「この文書が何を統べるか」を宣言します:
+Markdownとして残します。このディレクトリは
+[Open Knowledge Format](https://github.com/GoogleCloudPlatform/knowledge-catalog/tree/main/okf)
+(OKF)バンドルです: 各文書はYAML frontmatter付きのMarkdownで、フォーマットが
+必須とする唯一のフィールドが `type`、リレーションは通常のMarkdownリンクと
+Gurenの検証付き拡張で表現します:
 
 ```yaml
 ---
-kind: adr
-status: accepted
+type: adr
+status: stable            # draft | stable | deprecated(省略時 = stable)
 entities: [Invoice]
 related:
   - app/Http/Controllers/InvoiceController.ts
   - modules/billing/**
-last_reviewed: 2026-07-25
+generated: { by: human:ada, at: 2026-07-25T09:00:00Z }
+verified: { by: human:grace, at: 2026-07-26T09:00:00Z }
 ---
 ```
 
 - `entities` はモデルのクラス名でリンクします — `bunx guren context Invoice`
   が、次にそのモデルを触る誰かにこの文書を提示します。
 - `related` はモデル以外のコードを統べる文書のためのファイル/globリンクです。
+  どちらもOKFに対するGurenの生産者拡張です(OKFは追加キーを明示的に許容します)。
+- 本文中の通常のMarkdownリンクはOKF自身のリレーション機構で、これも検証
+  されます — `[orders](/adr/0002-orders.md)` は文書自身の `docs/` バンドル
+  ルートから、相対パスは文書の場所から解決されます。
+- `generated` と `verified` は「誰が書いたか」「誰が確認したか」をOKFの
+  actor規約(`human:<id>`、`process:<id>`、エージェントは `<producer>/<version>`)
+  で記録します — エージェントが保守するコーパスでは、この来歴こそが文書を
+  信頼可能にします。
 - モデルとコントローラからは JSDoc タグで逆リンクを張れます:
   `/** @docs docs/adr/0001-billing.md */`(それ以外のファイルのタグは走査されません)
 
@@ -87,8 +100,20 @@ bunx guren make:adr "Billing cycle is end-of-month" --entity Invoice
 
 `docs/adr/` 配下に採番されたファイルを作り、frontmatterを記入済みに
 します。`--entity` は既存のコードから `entities:` と `related:` を
-自動補完します。新規Gurenアプリには、この規約を説明するシードADRが
+自動補完し、`--by` は `generated.by` のactor(既定はgitの作者)を
+上書きします。新規Gurenアプリには、この規約を説明するシードADRが
 最初から同梱されています。
+
+## 閲覧: ドキュメントビューアー
+
+`bun run dev` は読み取り専用のビューアーも
+`http://localhost:3333/_guren/docs` にマウントします(`dev` スクリプトの
+`GUREN_DOCS=1` で有効化。本番では決して起動せず、自分のマシンからしか
+到達できません)。バンドル全体をインタラクティブなリレーショングラフ —
+文書・エンティティ・コードパスがノード、検証済みリンクがエッジ — として
+描画し、ノードをクリックするとfrontmatter・trust tier・リンク検証結果
+付きでその文書が開きます。図は `devDependencies` に `mermaid` があれば
+描画されます(新規アプリには最初から入っています)。
 
 ## 検証: ゲート
 
@@ -117,9 +142,9 @@ edit hookがルート・コントローラ・モデル・スキーマ・ペー�
 エージェントは嘘を全幅の信頼で読みます。導出ビューはコードから再生成
 され、宣言リンクはcheckスイートが検証するので、`bunx guren context Invoice`
 を実行したエージェントが得るコンテキストは「リンクと導出ビューは検証済み
-だとチェッカーが確認したもの」です(本文の鮮度は別軸のオプトイン警告で、
-`check --docs --docs-ttl <days>` が `last_reviewed` の古い文書を指摘
-します)。新規アプリのエージェントハーネスはこのループを
+だとチェッカーが確認したもの」です(本文の鮮度は文書ごとの宣言で、
+OKFの `stale_after: <date>` を設定した文書はその日を過ぎると警告
+されます)。新規アプリのエージェントハーネスはこのループを
 教えます — モデルに触る前にエンティティコンテキストを引く、ファイルを
 動かしたらfrontmatterも同じ変更で更新する、構造を変えたらスペックビュー
 を再生成する — そしてedit hookがそれを機械的に強制します。

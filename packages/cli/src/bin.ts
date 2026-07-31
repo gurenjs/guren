@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
-import { spawn } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
 import { defineCommand, showUsage } from 'citty'
 import type { CommandDef } from 'citty'
 import { runCli, UsageError } from './run-cli'
+import { newCommand } from './new-command'
 import { listBlueprints, runBlueprint } from './blueprints'
 import { runDoctor } from './doctor'
 import { makeAuth } from './make-auth'
@@ -155,11 +155,20 @@ const makeAdrCommand = defineCommand({
       type: 'string',
       description: 'Model class name to prefill entities:/related: with (case-insensitive).',
     },
+    by: {
+      type: 'string',
+      description:
+        'OKF actor for generated.by (human:<id>, process:<id>, or <producer>/<version>). Defaults to the git author.',
+    },
     force: { type: 'boolean', description: 'Overwrite existing files', alias: 'f' },
     module: MODULE_ARG,
   },
   async run({ args }) {
-    const file = await makeAdr(args.name, { ...toWriterOptions(args), entity: args.entity })
+    const file = await makeAdr(args.name, {
+      ...toWriterOptions(args),
+      entity: args.entity,
+      by: args.by,
+    })
     consola.success(`ADR created at ${file}`)
   },
 })
@@ -195,27 +204,6 @@ function reportSuccess(action: string, message: string, json: boolean, extra?: R
   } else {
     consola.success(message)
   }
-}
-
-async function runBunCommand(args: string[]): Promise<void> {
-  await new Promise<void>((resolvePromise, rejectPromise) => {
-    const child = spawn(process.execPath || 'bun', args, {
-      stdio: 'inherit',
-      env: process.env,
-    })
-
-    child.on('error', (error) => {
-      rejectPromise(error)
-    })
-
-    child.on('close', (code) => {
-      if (code === 0) {
-        resolvePromise()
-      } else {
-        rejectPromise(new Error(`bun ${args.join(' ')} exited with code ${code}`))
-      }
-    })
-  })
 }
 
 const makeTestCommand = defineCommand({
@@ -1742,10 +1730,6 @@ const checkCommand = defineCommand({
       type: 'boolean',
       description: 'Run only spec drift checks (docs/spec/ vs regenerated views).',
     },
-    'docs-ttl': {
-      type: 'string',
-      description: 'Warn when a doc\'s last_reviewed is older than N days.',
-    },
     changed: {
       type: 'boolean',
       description: 'Restrict file-scanning checks to files changed vs. the merge base with main.',
@@ -1758,7 +1742,6 @@ const checkCommand = defineCommand({
       routesFile: args.routes,
       arch: Boolean(args.arch),
       docs: Boolean(args.docs),
-      docsTtlDays: args['docs-ttl'] ? Number(args['docs-ttl']) : undefined,
       spec: Boolean(args.spec),
       changed: Boolean(args.changed),
     })
@@ -1958,64 +1941,6 @@ const makeFeatureCommand = defineCommand({
       publicAccess: Boolean(args.public),
       withPolicy: Boolean(args.policy),
     })
-  },
-})
-
-const newCommand = defineCommand({
-  meta: {
-    name: 'new',
-    description: 'Scaffold a new Guren application via create-guren-app.',
-  },
-  args: {
-    target: {
-      type: 'positional',
-      description: 'Directory to create the application in',
-      default: '.',
-    },
-    force: {
-      type: 'boolean',
-      alias: 'f',
-      description: 'Overwrite existing files in the target directory',
-    },
-    mode: {
-      type: 'string',
-      description: 'Rendering mode to scaffold (spa or ssr)',
-    },
-    auth: {
-      type: 'boolean',
-      description: 'Include authentication scaffolding',
-    },
-    blueprint: {
-      type: 'string',
-      // Not enumerated here: this shells out to create-guren-app, which owns
-      // the list. A second hardcoded copy is how `blog` stayed advertised.
-      description: 'Application blueprint to scaffold (see `create-guren-app --help`).',
-    },
-  },
-  async run({ args }) {
-    const commandArgs = ['x', 'create-guren-app']
-
-    if (args.target) {
-      commandArgs.push(String(args.target))
-    }
-
-    if (args.force) {
-      commandArgs.push('--force')
-    }
-
-    if (args.mode) {
-      commandArgs.push('--mode', String(args.mode))
-    }
-
-    if (args.auth) {
-      commandArgs.push('--auth')
-    }
-
-    if (args.blueprint) {
-      commandArgs.push('--blueprint', String(args.blueprint))
-    }
-
-    await runBunCommand(commandArgs)
   },
 })
 

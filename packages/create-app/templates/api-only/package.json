@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun run codegen && GUREN_MCP=1 bun run dev:server",
+    "dev": "bun run codegen && GUREN_MCP=1 GUREN_DOCS=1 bun run dev:server",
     "dev:server": "bun --hot bin/serve.ts",
     "console": "bun bin/console.ts",
     "codegen": "bunx guren codegen --routes routes/api.ts --force",

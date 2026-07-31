@@ -29,34 +29,60 @@ behavior they describe.
 
 ## Linking docs to code
 
-Markdown under `docs/` (and `modules/<name>/docs/`) declares what it
-governs via frontmatter:
+`docs/` (and each `modules/<name>/docs/`) is an OKF (Open Knowledge
+Format) bundle: markdown files with YAML frontmatter, where `type` is
+the one required field. A doc declares what it governs via frontmatter:
 
 ```yaml
 ---
-kind: adr                # adr | context | guide
-status: accepted         # adr only: draft | accepted | superseded
+type: adr                # REQUIRED. adr | context | guide | spec | …
+status: stable           # draft | stable | deprecated (absent = stable)
 entities: [User, Invoice]
 related:
   - app/Http/Controllers/InvoiceController.ts
   - modules/billing/**
-last_reviewed: 2026-07-25
+generated: { by: my-agent/1.0, at: 2026-07-25T09:00:00Z }
+verified: { by: human:ada, at: 2026-07-26T09:00:00Z }
+stale_after: 2026-12-31  # optional; stale on/after this day
 ---
 ```
 
 - `entities` links by model class name (survives file moves) — this is
-  what `guren context <Entity>` traverses.
+  what `guren context <Entity>` traverses. `related` links files or
+  globs. Both are Guren extensions to OKF and are validated strictly.
+- Ordinary markdown links in the body (`[customers](/adr/0002-x.md)`,
+  `[controller](../../app/Http/Controllers/InvoiceController.ts)`) are
+  OKF's relation mechanism and are validated too — a leading `/` means
+  the doc's own `docs/` bundle root; relative paths may reach into the
+  app.
+- `generated` records who wrote the content (`human:<id>`,
+  `process:<id>`, or `<producer>/<version>` for agents — use your own
+  actor when you write docs); `verified` records who confirmed it.
+  `index.md` and `log.md` are reserved for navigation/history, never
+  concepts.
 - Code can link back with a JSDoc tag: `/** @docs docs/adr/0007-billing.md */`.
 - Record decisions with `bunx guren make:adr "Title"` — numbered file
   under `docs/adr/` with prefilled frontmatter. `--entity <Model>` fills
-  `entities:`/`related:` automatically.
+  `entities:`/`related:`; `--by <actor>` sets `generated.by` (defaults
+  to the git author).
 
-`guren check` reports broken links — a renamed `related` path, an
-unknown entity, a dangling `@docs` tag — as failures in its output;
-`guren check --docs` is the CI gate (exits non-zero on them). **After
-implementing a decision, add the entity to its ADR's `entities:`
-list.** After renaming or moving files a doc references, update the
-doc's frontmatter in the same change.
+`guren check` reports broken links — a missing `type`, a renamed
+`related` path, an unknown entity, a dangling `@docs` tag — in its
+output; `guren check --docs` is the CI gate (exits non-zero on
+failures; broken body links and passed `stale_after` dates warn).
+**After implementing a decision, add the entity to its ADR's
+`entities:` list.** After renaming or moving files a doc references,
+update the doc's frontmatter in the same change.
+
+## Browsing the bundle: the docs viewer
+
+`bun run dev` mounts a read-only viewer at
+`http://localhost:3333/_guren/docs` (the `dev` script's `GUREN_DOCS=1`;
+dev-only, loopback-only): the whole bundle as an interactive relation
+graph — docs, entities, and code as nodes, validated links as edges,
+click-through to each document with its frontmatter and trust tier.
+Point the developer there when they ask how the docs hang together;
+it renders the same data `guren context` and `guren check --docs` use.
 
 ## Generated spec views (docs/spec/)
 

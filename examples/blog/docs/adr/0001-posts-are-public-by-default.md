@@ -1,11 +1,11 @@
 ---
-kind: adr
-status: accepted
+type: adr
+status: stable
 entities: [Post]
 related:
   - app/Http/Controllers/PostController.ts
   - app/Http/Resources/PostResource.ts
-last_reviewed: 2026-07-25
+verified: { by: human:7nohe, at: 2026-07-25T00:00:00Z }
 ---
 
 # Posts are public by default

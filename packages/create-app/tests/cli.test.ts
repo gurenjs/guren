@@ -83,7 +83,7 @@ describe('create-guren-app CLI', () => {
         join(appRoot, 'docs/adr/0001-record-architecture-decisions.md'),
         'utf8',
       )
-      expect(seedAdr).toContain('kind: adr')
+      expect(seedAdr).toContain('type: adr')
       expect(seedAdr).toContain('make:adr')
 
       // Harness install requires dependencies; without install we point at agent:init

@@ -91,7 +91,8 @@ export class Invoice extends defineModel(invoices) {}
     const artifact = await generateErSpec(workspace.dir)
 
     expect(artifact.fileName).toBe('er.md')
-    expect(artifact.content.startsWith(SPEC_BANNER)).toBe(true)
+    expect(artifact.content.startsWith('---\ntype: spec\n')).toBe(true)
+    expect(artifact.content).toContain(SPEC_BANNER)
     expect(artifact.content).toContain('erDiagram')
     expect(artifact.content).toContain('serial id PK')
     expect(artifact.content).toContain('integer authorId FK')

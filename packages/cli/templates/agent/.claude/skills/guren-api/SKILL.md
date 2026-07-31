@@ -83,9 +83,12 @@ export class Post extends defineModel(posts) {
   static fillable = ['title', 'excerpt', 'body', 'authorId']
 }
 
-export class User extends AuthenticatableModel<UserRecord> {
-  static override table = users
-  declare static readonly recordType: UserRecord
+export class User extends defineModel(users, {
+  base: AuthenticatableModel,
+  // The model hashes a plain `password` into `passwordHash`
+  optionalOnCreate: ['passwordHash'],
+  requireOnCreate: ['password'],
+}) {
   // Whitelist for mass assignment
   static fillable = ['name', 'email', 'password']
   // Blacklist: these fields are always stripped (ignored when fillable is set)
@@ -102,7 +105,7 @@ export class User extends AuthenticatableModel<UserRecord> {
 
 ```typescript
 // app/Models/User.ts
-export class User extends AuthenticatableModel<UserRecord> {
+export class User extends defineModel(users, { base: AuthenticatableModel, optionalOnCreate: ['passwordHash'] }) {
   static override relationTypes: { posts: HasManyRecord<PostRecord> } = { posts: [] }
 }
 User.hasMany('posts', () => import('./Post.js').then((m) => m.Post), 'authorId', 'id')

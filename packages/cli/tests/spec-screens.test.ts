@@ -100,8 +100,9 @@ describe('screens spec', () => {
 
     expect(artifact.fileName).toBe('screens.md')
     const lines = artifact.content.split('\n')
-    expect(lines[0]).toBe(SPEC_BANNER)
-    expect(lines[1]).toBe('')
+    expect(lines[0]).toBe('---')
+    expect(lines[1]).toBe('type: spec')
+    expect(lines).toContain(SPEC_BANNER)
     expect(artifact.content.endsWith('\n')).toBe(true)
     expect(artifact.content.endsWith('\n\n')).toBe(false)
     expect(artifact.content).toContain('# Screens')

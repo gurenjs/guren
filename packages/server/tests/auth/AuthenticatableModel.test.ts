@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test'
+import { defineModel } from '@guren/orm'
 import type { FindManyOptions, ORMAdapter, PlainObject, WhereClause } from '@guren/orm'
 import { AuthenticatableModel } from '../../src/auth/AuthenticatableModel'
 
@@ -54,6 +55,25 @@ describe('AuthenticatableModel', () => {
     expect('password' in persisted).toBe(false)
   })
 
+  it('hashes the password on query-builder bulk updates', async () => {
+    type UserRecord = { id?: number; email: string; passwordHash?: string }
+
+    class User extends AuthenticatableModel<UserRecord> {
+      static override table = 'users'
+      static override guarded = ['id']
+    }
+
+    const captured: PlainObject[] = []
+    User.useAdapter(createAdapter(captured))
+
+    await User.where('email', 'demo@guren.dev').update({ password: 'secret' })
+
+    const persisted = captured[0]
+    expect(persisted.passwordHash).toBeDefined()
+    expect(persisted.passwordHash).not.toBe('secret')
+    expect('password' in persisted).toBe(false)
+  })
+
   it('supports custom password and hash column names', async () => {
     type MemberRecord = { id?: number; passwordDigest?: string }
 
@@ -74,6 +94,36 @@ describe('AuthenticatableModel', () => {
     const persisted = captured[0]
     expect(persisted.passwordDigest).toBeDefined()
     expect('plainPassword' in persisted).toBe(false)
+  })
+})
+
+describe('as a defineModel base', () => {
+  // The user models in scaffolded apps reach the hashing pipeline through the
+  // subclass defineModel() synthesizes, not by extending this class directly.
+  // Every other check on that path is a type check, so this is what would fail
+  // if the base ever stopped composing and signups started storing plaintext.
+  const usersTable = {
+    $inferSelect: {} as { id: number; email: string; passwordHash: string },
+    $inferInsert: {} as { id?: number; email: string; passwordHash: string },
+  }
+
+  it('hashes the password field for a model built with defineModel', async () => {
+    class User extends defineModel(usersTable, {
+      base: AuthenticatableModel,
+      optionalOnCreate: ['passwordHash'],
+      requireOnCreate: ['password'],
+    }) {}
+
+    const captured: PlainObject[] = []
+    User.useAdapter(createAdapter(captured))
+
+    const created = await User.create({ email: 'demo@guren.dev', password: 'secret' })
+
+    expect(created.passwordHash).toBeDefined()
+    expect(created.passwordHash).not.toBe('secret')
+    expect('password' in created).toBe(false)
+    expect(captured[0]).toHaveProperty('passwordHash')
+    expect(captured[0]).not.toHaveProperty('password')
   })
 })
 
