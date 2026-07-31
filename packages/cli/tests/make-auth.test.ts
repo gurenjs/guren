@@ -206,6 +206,24 @@ export function registerWebRoutes(router: Router): void {
     }
   })
 
+  it('logs out through Inertia so the CSRF token reaches the request', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-logout-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'db/schema.ts'), `export const posts = 'posts'\n`, 'utf8')
+
+      await makeAuth({ force: true })
+
+      const layout = await readFile(join(workspace.dir, 'resources/js/components/Layout.tsx'), 'utf8')
+      expect(layout).not.toContain('action="/logout"')
+      expect(layout).toContain('href="/logout"')
+      expect(layout).toContain('method="post"')
+      expect(layout).toContain('as="button"')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('scaffolds email verification with --verify', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-auth-verify-')
     try {
