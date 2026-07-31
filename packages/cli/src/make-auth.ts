@@ -2167,7 +2167,8 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
       { path: 'app/Http/Validators/LoginValidator.ts', contents: loginValidatorTemplate },
       // The demo user only exists to be signed in as with a password. Without
       // password login it is an unreachable row — and seeding it would hash a
-      // password with scrypt, the exact cost --oauth-only avoids.
+      // password with scrypt, the exact cost --oauth-only avoids. The seeder is
+      // the only dialect-sensitive file here, so the schema is read only now.
       { path: 'db/seeders/UsersSeeder.ts', contents: buildSeederTemplate(await readSchemaDialect()) },
     )
   }

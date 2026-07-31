@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { consola } from 'consola'
-import { createTempWorkspace, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE } from './helpers'
+import { createTempWorkspace, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, SQLITE_SCHEMA_FIXTURE } from './helpers'
 import { makeAuth } from '../src/make-auth'
 
 describe('makeAuth', () => {
@@ -512,6 +512,12 @@ export const users = mysqlTable('users', {
     {
       dialect: 'pg',
       schema: PG_SCHEMA_FIXTURE,
+      expected: '.onConflictDoNothing({ target: users.email })',
+      forbidden: 'onDuplicateKeyUpdate',
+    },
+    {
+      dialect: 'sqlite',
+      schema: SQLITE_SCHEMA_FIXTURE,
       expected: '.onConflictDoNothing({ target: users.email })',
       forbidden: 'onDuplicateKeyUpdate',
     },

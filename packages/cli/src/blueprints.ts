@@ -1,6 +1,6 @@
 import { makeAuth } from './make-auth'
 import { makeChannel } from './make-channel'
-import { makeFeature, parseFieldsString, type FieldDefinition } from './make-feature'
+import { makeFeature, parseFieldsString, type FieldDefinition, type FieldType } from './make-feature'
 import { makeController } from './make-controller'
 import { makeEvent } from './make-event'
 import { makeJob } from './make-job'
@@ -689,50 +689,51 @@ export default scheduleTasksKernel
   },
 }
 
-function sqliteColumn(field: FieldDefinition): { code: string; imports: string[] } {
-  const notNull = field.nullable ? '' : '.notNull()'
-  switch (field.type) {
-    case 'number':
-      return { code: `integer('${snakeCase(field.name)}')${notNull}`, imports: ['integer'] }
-    case 'boolean':
-      return { code: `integer('${snakeCase(field.name)}', { mode: 'boolean' })${notNull}`, imports: ['integer'] }
-    case 'json':
-      return { code: `text('${snakeCase(field.name)}', { mode: 'json' })${notNull}`, imports: ['text'] }
-    default:
-      return { code: `text('${snakeCase(field.name)}')${notNull}`, imports: ['text'] }
-  }
+interface ColumnCode {
+  code: string
+  imports: string[]
 }
 
-function pgColumn(field: FieldDefinition): { code: string; imports: string[] } {
-  const notNull = field.nullable ? '' : '.notNull()'
-  switch (field.type) {
-    case 'number':
-      return { code: `integer('${snakeCase(field.name)}')${notNull}`, imports: ['integer'] }
-    case 'boolean':
-      return { code: `boolean('${snakeCase(field.name)}')${notNull}`, imports: ['boolean'] }
-    case 'date':
-      return { code: `timestamp('${snakeCase(field.name)}', { withTimezone: false })${notNull}`, imports: ['timestamp'] }
-    case 'json':
-      return { code: `jsonb('${snakeCase(field.name)}')${notNull}`, imports: ['jsonb'] }
-    default:
-      return { code: `text('${snakeCase(field.name)}')${notNull}`, imports: ['text'] }
-  }
+/**
+ * Per-dialect column builders, keyed by field type.
+ *
+ * The `Record<FieldType, …>` is load-bearing: these used to be switches with a
+ * `default:` arm, which is how sqlite shipped without a `date` case and quietly
+ * emitted a text column for it. A missing key now fails to compile.
+ */
+type ColumnMapping = Record<FieldType, (name: string, notNull: string) => ColumnCode>
+
+const SQLITE_COLUMNS: ColumnMapping = {
+  string: (name, notNull) => ({ code: `text('${name}')${notNull}`, imports: ['text'] }),
+  text: (name, notNull) => ({ code: `text('${name}')${notNull}`, imports: ['text'] }),
+  number: (name, notNull) => ({ code: `integer('${name}')${notNull}`, imports: ['integer'] }),
+  boolean: (name, notNull) => ({ code: `integer('${name}', { mode: 'boolean' })${notNull}`, imports: ['integer'] }),
+  // Timestamp mode keeps the record type a `Date`, matching pg/mysql — a bare
+  // text column would reject the `Date` that `z.coerce.date()` produces.
+  date: (name, notNull) => ({ code: `integer('${name}', { mode: 'timestamp' })${notNull}`, imports: ['integer'] }),
+  json: (name, notNull) => ({ code: `text('${name}', { mode: 'json' })${notNull}`, imports: ['text'] }),
 }
 
-function mysqlColumn(field: FieldDefinition): { code: string; imports: string[] } {
-  const notNull = field.nullable ? '' : '.notNull()'
-  switch (field.type) {
-    case 'number':
-      return { code: `int('${snakeCase(field.name)}')${notNull}`, imports: ['int'] }
-    case 'boolean':
-      return { code: `boolean('${snakeCase(field.name)}')${notNull}`, imports: ['boolean'] }
-    case 'date':
-      return { code: `timestamp('${snakeCase(field.name)}')${notNull}`, imports: ['timestamp'] }
-    case 'json':
-      return { code: `json('${snakeCase(field.name)}')${notNull}`, imports: ['json'] }
-    default:
-      return { code: `varchar('${snakeCase(field.name)}', { length: 255 })${notNull}`, imports: ['varchar'] }
-  }
+const PG_COLUMNS: ColumnMapping = {
+  string: (name, notNull) => ({ code: `text('${name}')${notNull}`, imports: ['text'] }),
+  text: (name, notNull) => ({ code: `text('${name}')${notNull}`, imports: ['text'] }),
+  number: (name, notNull) => ({ code: `integer('${name}')${notNull}`, imports: ['integer'] }),
+  boolean: (name, notNull) => ({ code: `boolean('${name}')${notNull}`, imports: ['boolean'] }),
+  date: (name, notNull) => ({ code: `timestamp('${name}', { withTimezone: false })${notNull}`, imports: ['timestamp'] }),
+  json: (name, notNull) => ({ code: `jsonb('${name}')${notNull}`, imports: ['jsonb'] }),
+}
+
+const MYSQL_COLUMNS: ColumnMapping = {
+  string: (name, notNull) => ({ code: `varchar('${name}', { length: 255 })${notNull}`, imports: ['varchar'] }),
+  text: (name, notNull) => ({ code: `varchar('${name}', { length: 255 })${notNull}`, imports: ['varchar'] }),
+  number: (name, notNull) => ({ code: `int('${name}')${notNull}`, imports: ['int'] }),
+  boolean: (name, notNull) => ({ code: `boolean('${name}')${notNull}`, imports: ['boolean'] }),
+  date: (name, notNull) => ({ code: `timestamp('${name}')${notNull}`, imports: ['timestamp'] }),
+  json: (name, notNull) => ({ code: `json('${name}')${notNull}`, imports: ['json'] }),
+}
+
+function buildColumn(mapping: ColumnMapping, field: FieldDefinition): ColumnCode {
+  return mapping[field.type](snakeCase(field.name), field.nullable ? '' : '.notNull()')
 }
 
 function snakeCase(value: string): string {
@@ -752,7 +753,7 @@ async function updateResourceSchema(collection: string, routeName: string, field
       return
     }
 
-    const columns = fields.map((field) => sqliteColumn(field))
+    const columns = fields.map((field) => buildColumn(SQLITE_COLUMNS, field))
     const imports = [...new Set(['sqliteTable', 'integer', 'text', ...columns.flatMap((c) => c.imports)])]
     content = ensureSqliteImports(content, imports)
 
@@ -765,7 +766,7 @@ async function updateResourceSchema(collection: string, routeName: string, field
       return
     }
 
-    const columns = fields.map((field) => mysqlColumn(field))
+    const columns = fields.map((field) => buildColumn(MYSQL_COLUMNS, field))
     const imports = [...new Set(['mysqlTable', 'int', 'timestamp', ...columns.flatMap((c) => c.imports)])]
     content = ensureMysqlImports(content, imports)
 
@@ -778,7 +779,7 @@ async function updateResourceSchema(collection: string, routeName: string, field
       return
     }
 
-    const columns = fields.map((field) => pgColumn(field))
+    const columns = fields.map((field) => buildColumn(PG_COLUMNS, field))
     const imports = [...new Set(['pgTable', 'serial', 'text', 'timestamp', ...columns.flatMap((c) => c.imports)])]
     content = ensureDrizzleImports(content, imports)
 
