@@ -1311,3 +1311,71 @@ export default class TaskController extends Controller {
     expect(/\bvalidateBody(Safe)?\s*(?:<[^>]*>)?\s*\(/.test(source)).toBe(true)
   })
 })
+
+describe('finding classifications', () => {
+  it('tags rule findings with versioned standards and leaves infra findings untagged', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-taxonomy-')
+
+    try {
+      await writeController(
+        workspace.dir,
+        'PostController',
+        `export default class PostController {
+  async store() {
+    const data = await this.request.json()
+    return null
+  }
+}`,
+      )
+      await writeRoutes(
+        workspace.dir,
+        `class PostController {
+  async store() { return null }
+}
+export default function registerRoutes(router: any) {
+  router.post('/posts', [PostController, 'store'])
+}`,
+      )
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'src/leak.ts'),
+        `export const apiKey = 'sk-live-abcdef1234567890'\n`,
+        'utf8',
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const validation = report.findings.find(f => f.key === 'validation:POST /posts')
+      expect(validation!.classifications).toEqual([
+        { standard: 'OWASP Top 10', version: '2021', id: 'A03', name: 'Injection' },
+        { standard: 'CWE', id: 'CWE-20', name: 'Improper Input Validation' },
+      ])
+
+      const authz = report.findings.find(f => f.key === 'authz:POST /posts')
+      expect(authz!.classifications?.[0]).toEqual({
+        standard: 'OWASP Top 10',
+        version: '2021',
+        id: 'A01',
+        name: 'Broken Access Control',
+      })
+
+      const secret = report.findings.find(f => f.key.startsWith('secret:src/leak.ts'))
+      expect(secret).toBeDefined()
+      expect(secret!.classifications?.map(c => c.id)).toEqual(['A07', 'CWE-798'])
+
+      // Passing findings carry the rule's classification too — the taxonomy
+      // describes the check, not the failure.
+      const massAssignmentPass = report.findings.find(f => f.key === 'raw-sql:none')
+      expect(massAssignmentPass!.classifications?.[0]?.id).toBe('A03')
+
+      // Infrastructure findings (config load, module load) are not security
+      // rules and stay untagged.
+      const infra = report.findings.filter(f => f.key.startsWith('routes:') || f.key.startsWith('audit-config:'))
+      for (const entry of infra) {
+        expect(entry.classifications).toBeUndefined()
+      }
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})

@@ -10,6 +10,11 @@ import {
 } from './discovery'
 import { loadRouteDefinitions } from './load-routes'
 import {
+  classifyFindingKey,
+  primaryClassificationId,
+  type AuditClassification,
+} from './audit-taxonomy'
+import {
   classUsesAuthenticatableBase,
   extractClassDeclaration,
   extractTableIdentifier,
@@ -31,6 +36,8 @@ export interface AuditFinding {
   line?: number
   /** Set when `status` is 'ignored' — the reason from config/audit.ts. */
   ignoreReason?: string
+  /** Standard references (OWASP Top 10 / OWASP API Security / CWE) for the rule. */
+  classifications?: AuditClassification[]
 }
 
 export interface AuditReport {
@@ -94,6 +101,10 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
   auditForceWrites(controllerMethods, findings)
   await auditSourceFiles(cwd, findings)
   await auditModels(cwd, findings)
+
+  for (const entry of findings) {
+    entry.classifications ??= classifyFindingKey(entry.key)
+  }
 
   await applyIgnoreConfig(cwd, options.auditConfigFile, findings)
 
@@ -757,7 +768,8 @@ export function renderAuditReport(report: AuditReport): void {
       continue
     }
     const log = f.status === 'warn' ? consola.warn : consola.error
-    log(`[${f.status}] ${f.title}: ${f.message}`)
+    const classification = primaryClassificationId(f.classifications)
+    log(`[${f.status}]${classification ? ` [${classification}]` : ''} ${f.title}: ${f.message}`)
     if (f.suggestion) {
       consola.info(`       → ${f.suggestion}`)
     }
