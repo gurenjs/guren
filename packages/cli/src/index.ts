@@ -60,6 +60,7 @@ export {
   renderDocsGraphMarkdown,
   type DocsGraphReport,
   type DocsGraphReportOptions,
+  type DocsGraphQuery,
   type DocsGraph,
   type DocsGraphNode,
   type DocsGraphEdge,

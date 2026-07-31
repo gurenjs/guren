@@ -159,6 +159,7 @@ related: [app/Http/Controllers/PostController.ts]
       const report = await buildDocsGraphReport({ cwd: workspace.dir })
 
       expect(report.focus).toEqual([])
+      expect(report.query).toBeUndefined()
       expect(report.nodes.some((n) => n.id === 'docs/adr/0002-other.md')).toBe(true)
     } finally {
       await workspace.cleanup()
@@ -176,6 +177,7 @@ related: [app/Http/Controllers/PostController.ts]
       })
 
       expect(report.focus).toEqual(['app/Http/Controllers/PostController.ts'])
+      expect(report.query).toEqual({ path: 'app/Http/Controllers/PostController.ts' })
       // The governing doc is pulled in; the unrelated doc is not.
       expect(report.nodes.some((n) => n.id === 'docs/adr/0001-posts.md')).toBe(true)
       expect(report.nodes.some((n) => n.id === 'docs/adr/0002-other.md')).toBe(false)
@@ -228,11 +230,68 @@ related: [app/Http/Controllers/PostController.ts]
     try {
       await writeFixture(workspace.dir)
 
-      const report = await buildDocsGraphReport({ cwd: workspace.dir, path: 'config/nope.ts' })
+      const report = await buildDocsGraphReport({ cwd: workspace.dir, path: 'config/nope.md' })
       const markdown = renderDocsGraphMarkdown(report)
 
       expect(report.nodes).toHaveLength(0)
-      expect(markdown).toContain('Nothing in the docs graph references this target.')
+      expect(report.focus).toEqual([])
+      expect(report.query).toEqual({ path: 'config/nope.md' })
+      expect(markdown).toContain('Nothing in the docs graph references "config/nope.md".')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('reaches spec views from module paths via the drift-gate patterns', async () => {
+    const workspace = await createTempWorkspace('guren-cli-docs-graph-module-')
+    try {
+      const dir = workspace.dir
+      await mkdir(join(dir, 'docs/spec'), { recursive: true })
+      await writeFile(join(dir, 'package.json'), '{}', 'utf8')
+      await writeFile(join(dir, 'docs/spec/er.md'), '---\ntype: spec\n---\n# ER Diagram\n', 'utf8')
+
+      // The node label collapses module schemas to `db/schema.ts`; the
+      // SPEC_VIEWS pattern is what says this module file feeds the view.
+      const report = await buildDocsGraphReport({ cwd: dir, path: 'modules/billing/db/schema.ts' })
+
+      expect(report.focus).toContain('db/schema.ts')
+      expect(report.nodes.some((n) => n.id === 'docs/spec/er.md')).toBe(true)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('matches glob-form related entries and normalizes the query path', async () => {
+    const workspace = await createTempWorkspace('guren-cli-docs-graph-glob-')
+    try {
+      const dir = workspace.dir
+      await mkdir(join(dir, 'docs'), { recursive: true })
+      await mkdir(join(dir, 'modules/billing'), { recursive: true })
+      await writeFile(join(dir, 'package.json'), '{}', 'utf8')
+      await writeFile(join(dir, 'modules/billing/routes.ts'), 'export {}\n', 'utf8')
+      await writeFile(
+        join(dir, 'docs/billing.md'),
+        '---\ntype: context\nrelated: ["modules/billing/**"]\n---\n# Billing\n',
+        'utf8',
+      )
+
+      const report = await buildDocsGraphReport({ cwd: dir, path: './modules/billing/routes.ts' })
+
+      expect(report.focus).toContain('modules/billing/**')
+      expect(report.nodes.some((n) => n.id === 'docs/billing.md')).toBe(true)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('rejects narrowing by entity and path at once', async () => {
+    const workspace = await createTempWorkspace('guren-cli-docs-graph-both-')
+    try {
+      await writeFixture(workspace.dir)
+
+      await expect(
+        buildDocsGraphReport({ cwd: workspace.dir, entity: 'Post', path: 'app/Models/Post.ts' }),
+      ).rejects.toThrow('either entity or path')
     } finally {
       await workspace.cleanup()
     }
