@@ -20,6 +20,18 @@ const DEFAULT_PAGES_DIR = 'resources/js/pages'
 const DEFAULT_OUTPUT_FILE = '.guren/pages.gen.ts'
 const PAGE_COMPONENT_EXTENSIONS = new Set(['.tsx', '.jsx'])
 
+/**
+ * Whether codegen would emit a pages manifest for this app: true only when
+ * the pages directory contains page components — `generatePageTypes` writes
+ * nothing otherwise. check (and eventually doctor) share this predicate so
+ * "is .guren/pages.gen.ts expected?" cannot drift from codegen's actual rule
+ * (an API-only app must not be told to generate one).
+ */
+export async function appEmitsPageManifest(appRoot: string, pagesDir?: string): Promise<boolean> {
+  const definitions = await collectPageDefinitions(resolve(appRoot, pagesDir ?? DEFAULT_PAGES_DIR))
+  return definitions.length > 0
+}
+
 export async function generatePageTypes(
   options: GeneratePageTypesOptions = {},
 ): Promise<{ outputPath: string; definitions: PageDefinition[] }> {

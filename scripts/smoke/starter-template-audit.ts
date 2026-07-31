@@ -52,13 +52,7 @@ export async function auditBlueprintTemplates(root: string): Promise<void> {
   // Assert the scaffolded CI workflow survives packing so an npm behavior
   // change can never silently ship templates without their workflow.
   for (const template of ['default', 'api-only']) {
-    const workflow = join(root, 'templates', template, '.github/workflows/ci.yml')
-    let contents = ''
-    try {
-      contents = await readFile(workflow, 'utf8')
-    } catch {
-      // fall through to the assert below with the empty string
-    }
+    const contents = await read(root, `templates/${template}/.github/workflows/ci.yml`).catch(() => '')
     assert(
       contents.includes('guren check --ci'),
       `templates/${template}/.github/workflows/ci.yml is missing from the create-guren-app tarball (or lost its check gate).`,

@@ -25,6 +25,7 @@ import { checkSchemaTimestamps } from './schema-check'
 import { schemaPathFor } from './schema-parser'
 import { ParseCache } from './parse-cache'
 import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath } from './inertia-pages'
+import { appEmitsPageManifest } from './pages-types'
 import { runArchCheck } from './arch-check'
 import { runDocsCheck } from './docs-check'
 import { runSpecCheck } from './spec-check'
@@ -181,13 +182,15 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       const suggestion = hasTest
         ? undefined
         : `If these routes are not already covered, run: bunx guren make:test ${name.replace('Controller', '')} --controller${moduleFlag}`
-      checks.push(check(`test:${name}`, `${name} tests`, hasTest ? 'pass' : 'warn', message, suggestion))
+      // Advisory: a missing test is advice, not an integrity failure, so
+      // exit-code gates (check --ci) must not fail on it.
+      checks.push({ ...check(`test:${name}`, `${name} tests`, hasTest ? 'pass' : 'warn', message, suggestion), advisory: true })
     }
 
     // 5. Check generated manifests are present. The pages manifest only
     // exists for apps with Inertia pages — codegen never emits it in an
     // API-only app, so demanding it there is a false positive.
-    const hasPages = await fileExists(cwd, 'resources/js/pages')
+    const hasPages = await appEmitsPageManifest(cwd)
     const manifests = [
       '.guren/routes.gen.ts',
       ...(hasPages ? ['.guren/pages.gen.ts'] : []),

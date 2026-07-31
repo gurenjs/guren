@@ -102,3 +102,19 @@ describe('check --ci exit gating', () => {
     }
   })
 })
+
+describe('check --ci flag combinations', () => {
+  it('refuses suite flags so a narrowed run cannot pose as the full gate', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-ci-suite-')
+
+    try {
+      await writeCodegenManifests(workspace.dir)
+
+      // Even a workspace with nothing to report exits 1 — the failure is
+      // the flag combination itself, not a finding.
+      expect(await runBin(['check', '--ci', '--docs'], workspace.dir)).toBe(1)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})

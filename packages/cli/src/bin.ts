@@ -1775,6 +1775,14 @@ const checkCommand = defineCommand({
     },
   },
   async run({ args }) {
+    // --ci promises a full-suite gate; letting a suite flag narrow the run
+    // underneath it would report success while docs/spec/core went unchecked.
+    if (args.ci && (args.arch || args.docs || args.spec)) {
+      consola.error('check --ci runs the full suite — drop --arch/--docs/--spec (they gate on their own).')
+      process.exitCode = 1
+      return
+    }
+
     const report = await runCheck({
       cwd: args.app,
       json: Boolean(args.json),
@@ -1802,13 +1810,10 @@ const checkCommand = defineCommand({
     }
     // --ci also gates on warns: most integrity problems (a missing codegen
     // manifest, an unregistered console command) report as 'warn', so a
-    // fail-only gate would wave nearly everything through. Test-coverage
-    // nudges (`test:*`) are advice rather than integrity and are exempt —
-    // scaffolding a controller must not turn CI red until a test exists.
-    const gating = report.checks.filter(
-      (c) => c.status === 'fail' || (c.status === 'warn' && !c.key.startsWith('test:')),
-    )
-    if (args.ci && gating.length > 0) {
+    // fail-only gate would wave nearly everything through. Advisory checks
+    // (test-coverage nudges) are exempt — the flag lives on the result, so
+    // JSON consumers see the same rule this gate applies.
+    if (args.ci && report.checks.some((c) => !c.advisory && c.status !== 'pass')) {
       process.exitCode = 1
     }
   },

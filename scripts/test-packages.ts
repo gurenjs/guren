@@ -44,21 +44,36 @@ if (targets.length === 0) {
   process.exit(1)
 }
 
-console.log(`[test] ${targets.map((pkg) => pkg.name).join(', ')}`)
-
-// One `bun test` per package, from the package's own directory: a single
-// root-cwd run ignores per-package bunfig.toml, and create-app relies on
-// its `[test] root` to keep the *.test.ts files its templates ship for
-// scaffolded apps out of the monorepo's own suite.
-let failed = false
-for (const pkg of targets) {
-  console.log(`\n[test] ${pkg.name}`)
-  const proc = Bun.spawn([process.execPath, 'test', '--isolate', ...forwarded], {
-    cwd: pkg.dir,
-    stdout: 'inherit',
-    stderr: 'inherit',
-  })
-  if ((await proc.exited) !== 0) failed = true
+// A single root-cwd run ignores per-package bunfig.toml, so each package's
+// `[test] root` (create-app uses it to keep the *.test.ts files its
+// templates ship for scaffolded apps out of the monorepo suite) is resolved
+// here and passed as the package's path filter instead. One invocation, so
+// forwarded flags like `-t <pattern>` keep matching across packages rather
+// than failing in every package the pattern misses.
+async function testPathFor(pkg: { dir: string; relativeDir: string }): Promise<string> {
+  try {
+    const bunfig = await Bun.file(`${pkg.dir}/bunfig.toml`).text()
+    const root = bunfig.match(/^\s*root\s*=\s*"([^"]+)"/m)?.[1]
+    if (root) return `${pkg.relativeDir}/${root}`
+  } catch {
+    // no bunfig — the package directory itself is the test root
+  }
+  return pkg.relativeDir
 }
 
-process.exit(failed ? 1 : 0)
+const testArgs = [
+  'test',
+  '--isolate',
+  ...forwarded,
+  ...(await Promise.all(targets.map(testPathFor))),
+]
+
+console.log(`[test] ${targets.map((pkg) => pkg.name).join(', ')}`)
+
+const proc = Bun.spawn([process.execPath, ...testArgs], {
+  cwd: repoRoot,
+  stdout: 'inherit',
+  stderr: 'inherit',
+})
+
+process.exit(await proc.exited)
