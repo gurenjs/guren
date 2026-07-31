@@ -44,19 +44,21 @@ if (targets.length === 0) {
   process.exit(1)
 }
 
-const testArgs = [
-  'test',
-  '--isolate',
-  ...forwarded,
-  ...targets.map((pkg) => pkg.relativeDir),
-]
-
 console.log(`[test] ${targets.map((pkg) => pkg.name).join(', ')}`)
 
-const proc = Bun.spawn([process.execPath, ...testArgs], {
-  cwd: repoRoot,
-  stdout: 'inherit',
-  stderr: 'inherit',
-})
+// One `bun test` per package, from the package's own directory: a single
+// root-cwd run ignores per-package bunfig.toml, and create-app relies on
+// its `[test] root` to keep the *.test.ts files its templates ship for
+// scaffolded apps out of the monorepo's own suite.
+let failed = false
+for (const pkg of targets) {
+  console.log(`\n[test] ${pkg.name}`)
+  const proc = Bun.spawn([process.execPath, 'test', '--isolate', ...forwarded], {
+    cwd: pkg.dir,
+    stdout: 'inherit',
+    stderr: 'inherit',
+  })
+  if ((await proc.exited) !== 0) failed = true
+}
 
-process.exit(await proc.exited)
+process.exit(failed ? 1 : 0)

@@ -184,8 +184,15 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       checks.push(check(`test:${name}`, `${name} tests`, hasTest ? 'pass' : 'warn', message, suggestion))
     }
 
-    // 5. Check generated manifests are present
-    const manifests = ['.guren/routes.gen.ts', '.guren/pages.gen.ts', '.guren/data.gen.ts']
+    // 5. Check generated manifests are present. The pages manifest only
+    // exists for apps with Inertia pages — codegen never emits it in an
+    // API-only app, so demanding it there is a false positive.
+    const hasPages = await fileExists(cwd, 'resources/js/pages')
+    const manifests = [
+      '.guren/routes.gen.ts',
+      ...(hasPages ? ['.guren/pages.gen.ts'] : []),
+      '.guren/data.gen.ts',
+    ]
     for (const manifest of manifests) {
       const exists = await fileExists(cwd, manifest)
       checks.push(

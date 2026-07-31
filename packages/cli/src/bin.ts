@@ -1769,6 +1769,10 @@ const checkCommand = defineCommand({
       type: 'boolean',
       description: 'Restrict file-scanning checks to files changed vs. the merge base with main.',
     },
+    ci: {
+      type: 'boolean',
+      description: 'Exit non-zero when any check fails or warns (runs the full suite; for CI gates).',
+    },
   },
   async run({ args }) {
     const report = await runCheck({
@@ -1787,13 +1791,24 @@ const checkCommand = defineCommand({
       renderCheckReport(report)
     }
 
-    // Only the suite flags (`--arch`/`--docs`/`--spec`) gate on exit code.
-    // Plain `guren check` has never set one (it's a v1.0-stable command;
-    // changing that default is a breaking change reserved for a major
-    // release). The fast-path flags are new, with no prior contract to
-    // preserve, so they can gate CI from day one — that's the intended way
-    // to enforce boundaries, doc links, and spec freshness in CI.
+    // Only the suite flags (`--arch`/`--docs`/`--spec`) and the opt-in
+    // `--ci` gate on exit code. Plain `guren check` has never set one (it's
+    // a v1.0-stable command; changing that default is a breaking change
+    // reserved for a major release). These flags are newer, with no prior
+    // contract to preserve, so they can gate CI from day one — that's the
+    // intended way to enforce checks in CI without breaking the default.
     if ((args.arch || args.docs || args.spec) && report.failCount > 0) {
+      process.exitCode = 1
+    }
+    // --ci also gates on warns: most integrity problems (a missing codegen
+    // manifest, an unregistered console command) report as 'warn', so a
+    // fail-only gate would wave nearly everything through. Test-coverage
+    // nudges (`test:*`) are advice rather than integrity and are exempt —
+    // scaffolding a controller must not turn CI red until a test exists.
+    const gating = report.checks.filter(
+      (c) => c.status === 'fail' || (c.status === 'warn' && !c.key.startsWith('test:')),
+    )
+    if (args.ci && gating.length > 0) {
       process.exitCode = 1
     }
   },
