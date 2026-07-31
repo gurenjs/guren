@@ -25,8 +25,6 @@ function cwe(id: string, name: string): AuditClassification {
   return { standard: 'CWE', id, name }
 }
 
-export const OWASP_A06_VULNERABLE_COMPONENTS = owasp('A06', 'Vulnerable and Outdated Components')
-
 /**
  * Rule classifications, keyed by finding-key prefix (`authz:`, `secret:`, …).
  * Infrastructure findings (routes:load, audit-config:*) carry none.
@@ -61,7 +59,10 @@ const RULE_CLASSIFICATIONS: Record<string, AuditClassification[]> = {
     owaspApi('API3', 'Broken Object Property Level Authorization'),
     cwe('CWE-200', 'Exposure of Sensitive Information to an Unauthorized Actor'),
   ],
-  deps: [OWASP_A06_VULNERABLE_COMPONENTS, cwe('CWE-1395', 'Dependency on Vulnerable Third-Party Component')],
+  deps: [
+    owasp('A06', 'Vulnerable and Outdated Components'),
+    cwe('CWE-1395', 'Dependency on Vulnerable Third-Party Component'),
+  ],
 }
 
 export function classifyFindingKey(key: string): AuditClassification[] | undefined {
