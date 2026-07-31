@@ -170,10 +170,11 @@ export default function Index({ posts }: Props) {
   await writeFile(
     join(dir, 'docs/adr/0001-posts-are-public.md'),
     `---
-kind: adr
-status: accepted
+type: adr
+status: stable
 entities: [Post]
-last_reviewed: 2026-07-25
+generated: { by: human:ada, at: 2026-07-20T09:00:00Z }
+verified: { by: human:grace, at: 2026-07-25T09:00:00Z }
 ---
 
 # Posts are public by default
@@ -238,9 +239,11 @@ describe('entity context (blog fixture)', () => {
       {
         path: 'docs/adr/0001-posts-are-public.md',
         title: 'Posts are public by default',
-        kind: 'adr',
-        status: 'accepted',
-        lastReviewed: '2026-07-25',
+        type: 'adr',
+        status: 'stable',
+        description: undefined,
+        generatedAt: '2026-07-20T09:00:00Z',
+        verifiedAt: '2026-07-25T09:00:00Z',
       },
     ])
 
@@ -249,11 +252,43 @@ describe('entity context (blog fixture)', () => {
       {
         path: 'docs/context/users.md',
         title: 'User lifecycle',
-        kind: undefined,
+        type: undefined,
         status: undefined,
-        lastReviewed: undefined,
+        description: undefined,
+        generatedAt: undefined,
+        verifiedAt: undefined,
       },
     ])
+  })
+
+  it('reports the chronologically latest verification, not the lexically last', async () => {
+    const scoped = await createTempWorkspace('guren-cli-entity-verified-')
+    try {
+      await mkdir(join(scoped.dir, 'app/Models'), { recursive: true })
+      await mkdir(join(scoped.dir, 'docs'), { recursive: true })
+      await writeFile(join(scoped.dir, 'package.json'), '{}', 'utf8')
+      await writeFile(join(scoped.dir, 'app/Models/Post.ts'), 'export class Post {}\n', 'utf8')
+      // The first entry sorts later as a string but is the earlier instant.
+      await writeFile(
+        join(scoped.dir, 'docs/posts.md'),
+        `---
+type: adr
+entities: [Post]
+verified:
+  - { by: human:a, at: 2026-01-01T00:00:00+09:00 }
+  - { by: human:b, at: 2025-12-31T16:00:00Z }
+---
+# Posts
+`,
+        'utf8',
+      )
+
+      const ctx = await generateEntityContext('Post', { cwd: scoped.dir })
+
+      expect(ctx.docs[0].verifiedAt).toBe('2025-12-31T16:00:00Z')
+    } finally {
+      await scoped.cleanup()
+    }
   })
 
   it('renders the Linked docs section', async () => {
@@ -262,7 +297,7 @@ describe('entity context (blog fixture)', () => {
 
     expect(md).toContain('## Linked docs (1)')
     expect(md).toContain(
-      '- docs/adr/0001-posts-are-public.md — Posts are public by default (adr, accepted, reviewed 2026-07-25)',
+      '- docs/adr/0001-posts-are-public.md — Posts are public by default (adr, stable, verified 2026-07-25T09:00:00Z)',
     )
   })
 

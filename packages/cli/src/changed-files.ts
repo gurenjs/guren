@@ -8,7 +8,7 @@ import { resolve, relative, sep } from 'node:path'
  * command otherwise fails. Callers treat `null` as "can't determine changed
  * files" — the caller decides whether that means "check everything".
  */
-function runGit(cwd: string, args: string[]): Promise<string[] | null> {
+export function runGit(cwd: string, args: string[]): Promise<string[] | null> {
   return new Promise((resolvePromise) => {
     let proc
     try {

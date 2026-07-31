@@ -14,6 +14,7 @@ import {
   moduleNameFromRelPath,
 } from './discovery'
 import { discoverParsedModels } from './model-parser'
+import { runGit } from './changed-files'
 
 const ADR_DIR = 'docs/adr'
 
@@ -32,6 +33,13 @@ export interface MakeAdrOptions extends WriterOptions {
    * companion controller/resource/policy files prefill `related:`.
    */
   entity?: string
+  /**
+   * OKF actor for `generated.by` (§7): `human:<id>`, `process:<id>`, or
+   * `<producer>/<version>` for agents. Defaults to the git author as
+   * `human:<user.name>`; when neither is available the scaffold omits
+   * `generated` entirely (a concept with just `type` is conformant).
+   */
+  by?: string
 }
 
 interface AdrPrefill {
@@ -113,20 +121,50 @@ async function resolveAdrPrefill(entity: string, moduleName?: string): Promise<A
   return { entities: [match.className], related }
 }
 
-function adrTemplate(title: string, lastReviewed: string, prefill: AdrPrefill): string {
+/**
+ * The actor is written into a double-quoted YAML scalar, so only what
+ * could break that scalar is rejected — quotes, backslashes, newlines.
+ * Shape questions (OKF §7) are `guren check --docs`'s to warn about,
+ * and git author names are not ASCII, so no character allowlist here.
+ */
+const ACTOR_RE = /^[^"\\\r\n]+$/
+
+/** The git author as an OKF `human:<id>` actor, or null when unavailable. */
+async function gitAuthorActor(): Promise<string | null> {
+  const [name] = (await runGit(process.cwd(), ['config', 'user.name'])) ?? []
+  if (name === undefined) return null
+  return ACTOR_RE.test(`human:${name}`) ? `human:${name}` : null
+}
+
+async function resolveActor(by?: string): Promise<string | null> {
+  if (by !== undefined) {
+    if (!ACTOR_RE.test(by)) {
+      throw new Error(
+        `Invalid actor "${by}" — it is written into a quoted YAML scalar, so it cannot contain quotes, backslashes, or newlines.`,
+      )
+    }
+    return by
+  }
+  return gitAuthorActor()
+}
+
+function adrTemplate(title: string, actor: string | null, generatedAt: string, prefill: AdrPrefill): string {
   const entities =
     prefill.entities.length > 0 ? `entities: [${prefill.entities.join(', ')}]` : 'entities: []'
   const related =
     prefill.related.length > 0
       ? `related:\n${prefill.related.map((path) => `  - ${path}`).join('\n')}`
       : 'related: []'
+  // Quoted: an actor may legitimately contain `: ` (a git author like
+  // "Ada: Admin"), which would otherwise make the flow mapping invalid
+  // YAML. ACTOR_RE already excludes quotes, so no escaping is needed.
+  const generated = actor === null ? '' : `\ngenerated: { by: "${actor}", at: ${generatedAt} }`
 
   return `---
-kind: adr
+type: adr
 status: draft
 ${entities}
-${related}
-last_reviewed: ${lastReviewed}
+${related}${generated}
 ---
 
 # ${title}
@@ -170,23 +208,18 @@ async function nextSequenceNumber(dir: string): Promise<string> {
   return String(highest + 1).padStart(4, '0')
 }
 
-/** Local-calendar `YYYY-MM-DD` (not UTC, so the stamp matches the author's day). */
-function today(): string {
-  const now = new Date()
-  const month = String(now.getMonth() + 1).padStart(2, '0')
-  const day = String(now.getDate()).padStart(2, '0')
-  return `${now.getFullYear()}-${month}-${day}`
-}
-
 export async function makeAdr(title: string, options: MakeAdrOptions = {}): Promise<string> {
   const moduleName = options.root ? safeModuleName(options.root) : undefined
   const dir = moduleName ? `modules/${moduleName}/${ADR_DIR}` : ADR_DIR
-  const prefill = options.entity ? await resolveAdrPrefill(options.entity, moduleName) : EMPTY_PREFILL
+  const [prefill, actor] = await Promise.all([
+    options.entity ? resolveAdrPrefill(options.entity, moduleName) : EMPTY_PREFILL,
+    resolveActor(options.by),
+  ])
   const sequence = await nextSequenceNumber(dir)
 
   return writeFileSafe(
     `${dir}/${sequence}-${adrSlug(title)}.md`,
-    adrTemplate(title.trim(), today(), prefill),
+    adrTemplate(title.trim(), actor, new Date().toISOString(), prefill),
     options,
   )
 }

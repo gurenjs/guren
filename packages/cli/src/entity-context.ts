@@ -37,12 +37,38 @@ export interface EntityPage {
   props?: string
 }
 
+/**
+ * The most recent of a set of ISO 8601 timestamps. Compared as instants,
+ * not strings: OKF permits offsets, so `2026-01-01T00:00:00+09:00` is
+ * earlier than `2025-12-31T16:00:00Z` despite sorting after it.
+ * Unparseable values lose to any real timestamp.
+ */
+function latestTimestamp(values: string[]): string | undefined {
+  let latest: string | undefined
+  let latestAt = Number.NEGATIVE_INFINITY
+
+  for (const value of values) {
+    const at = Date.parse(value)
+    const rank = Number.isNaN(at) ? Number.NEGATIVE_INFINITY : at
+    if (latest === undefined || rank > latestAt) {
+      latest = value
+      latestAt = rank
+    }
+  }
+  return latest
+}
+
 export interface EntityDoc {
   path: string
   title?: string
-  kind?: string
+  /** OKF `type` (adr, context, guide, spec, …). */
+  type?: string
   status?: string
-  lastReviewed?: string
+  description?: string
+  /** OKF `generated.at` — when the content last meaningfully changed. */
+  generatedAt?: string
+  /** Latest OKF `verified[].at`, when the doc records verification events. */
+  verifiedAt?: string
 }
 
 export interface EntityContext {
@@ -300,9 +326,19 @@ export async function generateEntityContext(
     .sort((a, b) => a.localeCompare(b))
     .map((path): EntityDoc => {
       const ref = docRefByPath.get(path)
-      return ref
-        ? { path, title: ref.title, kind: ref.kind, status: ref.status, lastReviewed: ref.lastReviewed }
-        : { path }
+      if (!ref) return { path }
+      const verifiedAt = latestTimestamp(
+        ref.verified.map((event) => event.at).filter((at): at is string => at !== undefined),
+      )
+      return {
+        path,
+        title: ref.title,
+        type: ref.type,
+        status: ref.status,
+        description: ref.description,
+        generatedAt: ref.generated?.at,
+        verifiedAt,
+      }
     })
 
   return {
@@ -414,7 +450,11 @@ export function renderEntityContextMarkdown(ctx: EntityContext): string {
   if (ctx.docs.length > 0) {
     lines.push(`## Linked docs (${ctx.docs.length})`)
     for (const doc of ctx.docs) {
-      const meta = [doc.kind, doc.status, doc.lastReviewed ? `reviewed ${doc.lastReviewed}` : undefined]
+      const meta = [
+        doc.type,
+        doc.status,
+        doc.verifiedAt ? `verified ${doc.verifiedAt}` : undefined,
+      ]
         .filter(Boolean)
         .join(', ')
       lines.push(`- ${doc.path}${doc.title ? ` — ${doc.title}` : ''}${meta ? ` (${meta})` : ''}`)

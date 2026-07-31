@@ -4,6 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createTempWorkspace } from './helpers'
 import { makeAdr } from '../src/make-adr'
+import { parseDocFrontmatter } from '../src/docs-index'
 
 async function seedAdrFiles(dir: string, names: string[]): Promise<void> {
   await mkdir(dir, { recursive: true })
@@ -28,20 +29,62 @@ describe('makeAdr', () => {
   it('fills in the frontmatter and section skeleton', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-adr-template-')
     try {
-      const result = await makeAdr('Billing cycle is end-of-month')
+      const result = await makeAdr('Billing cycle is end-of-month', { by: 'test-agent/1.0' })
       const content = readFileSync(result, 'utf8')
 
       expect(content.startsWith('---\n')).toBe(true)
-      expect(content).toContain('kind: adr')
+      expect(content).toContain('type: adr')
       expect(content).toContain('status: draft')
       expect(content).toContain('entities: []')
       expect(content).toContain('related: []')
-      expect(content).toMatch(/^last_reviewed: \d{4}-\d{2}-\d{2}$/m)
+      expect(content).toMatch(
+        /^generated: \{ by: "test-agent\/1\.0", at: \d{4}-\d{2}-\d{2}T[0-9:.]+Z \}$/m,
+      )
       expect(content).toContain('# Billing cycle is end-of-month')
       expect(content).toContain('## Context')
       expect(content).toContain('## Decision')
       expect(content).toContain('## Consequences')
       expect(content.endsWith('\n')).toBe(true)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('rejects --by actors that could break out of the frontmatter', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-adr-actor-')
+    try {
+      expect(makeAdr('Actor injection', { by: 'x }\nstatus: stable' })).rejects.toThrow(
+        'Invalid actor',
+      )
+      expect(makeAdr('Quote injection', { by: 'x", at: y' })).rejects.toThrow('Invalid actor')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('accepts non-ASCII actors - git authors are not ASCII', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-adr-unicode-')
+    try {
+      const file = await makeAdr('Unicode actor', { by: 'human:\u5c71\u7530\u592a\u90ce' })
+      const parsed = parseDocFrontmatter(readFileSync(file, 'utf8'))
+
+      expect((parsed!.data.generated as Record<string, string>).by).toBe('human:\u5c71\u7530\u592a\u90ce')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // A git author like "Ada: Admin" produces an actor containing ': ',
+  // which an unquoted YAML flow mapping cannot carry.
+  it('quotes the actor so names containing colons stay parseable', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-adr-colon-')
+    try {
+      const file = await makeAdr('Colon actor', { by: 'human:Ada: Admin' })
+      const content = readFileSync(file, 'utf8')
+
+      expect(content).toContain('generated: { by: "human:Ada: Admin", at: ')
+      const parsed = parseDocFrontmatter(content)
+      expect((parsed!.data.generated as Record<string, string>).by).toBe('human:Ada: Admin')
     } finally {
       await workspace.cleanup()
     }
@@ -158,7 +201,7 @@ describe('makeAdr', () => {
       expect(first).toContain('docs/adr/0001-billing-cycle.md')
       expect(second).toContain('docs/adr/0002-billing-cycle.md')
       expect(existsSync(first)).toBe(true)
-      expect(readFileSync(first, 'utf8')).toContain('kind: adr')
+      expect(readFileSync(first, 'utf8')).toContain('type: adr')
     } finally {
       await workspace.cleanup()
     }
@@ -224,7 +267,7 @@ describe('makeAdr', () => {
     const workspace = await createTempWorkspace('guren-cli-make-adr-inject-')
     try {
       expect(
-        makeAdr('Injection attempt', { entity: 'Ghost]\nstatus: accepted\nentities: [Post' }),
+        makeAdr('Injection attempt', { entity: 'Ghost]\nstatus: stable\nentities: [Post' }),
       ).rejects.toThrow('Invalid entity name')
       expect(makeAdr('Injection attempt', { entity: 'Post # comment' })).rejects.toThrow(
         'Invalid entity name',

@@ -1,5 +1,5 @@
 import { discoverParsedModels, type DiscoveredModel, type ModelRelationship } from './model-parser'
-import { SPEC_BANNER, compareStrings, mermaidToken, type SpecArtifact } from './spec-artifact'
+import { specHeader, compareStrings, mermaidToken, type SpecArtifact } from './spec-artifact'
 
 const RELATIONSHIP_CARDINALITY: Record<ModelRelationship['type'], [string, string]> = {
   belongsTo: ['*', '1'],
@@ -34,7 +34,7 @@ export async function generateDomainSpec(cwd: string): Promise<SpecArtifact> {
 
   const knownClasses = new Set(models.map((m) => m.info.className))
 
-  const lines: string[] = [SPEC_BANNER, '', '# Domain Model', '']
+  const lines: string[] = specHeader('Domain Model', 'Model classes and their declared relationships, grouped by module.')
   lines.push(
     'Model classes and their declared relationships, grouped by module. Attributes live in the ER view (`er.md`).',
     '',

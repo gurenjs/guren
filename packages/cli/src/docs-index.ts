@@ -1,136 +1,117 @@
-import { resolve } from 'node:path'
+import { basename, resolve } from 'node:path'
 import { readFile } from 'node:fs/promises'
+import {
+  parseDocFrontmatter,
+  type DocFrontmatterValue,
+  type DocMapping,
+} from './docs-frontmatter'
+import { extractMarkdownLinks } from './docs-links'
 import {
   collectFiles,
   listAppRoots,
   toPosixRelative,
 } from './discovery'
 
+// docs-index is the package's doc-scanning facade: the parsers live in
+// their own modules, but consumers (and the public index) reach them
+// from here.
+export {
+  parseDocFrontmatter,
+  type DocFrontmatterValue,
+  type DocMapping,
+} from './docs-frontmatter'
+export { extractMarkdownLinks, localLinkTarget, readLinkDestination } from './docs-links'
+
 const MARKDOWN_EXTENSIONS = new Set(['.md'])
+
+/** One `{ by, at }` event from OKF's `generated` / `verified` families. */
+export interface DocActorEvent {
+  /** Actor per OKF §7: `human:<id>`, `process:<id>`, or `<producer>/<version>`. */
+  by?: string
+  /** ISO 8601 datetime, verbatim. */
+  at?: string
+}
 
 /**
  * A markdown document under `docs/` (or `modules/<name>/docs/`) with its
- * parsed frontmatter. Documents without frontmatter are still listed
- * (`hasFrontmatter: false`) but never linked or validated.
+ * parsed frontmatter — an OKF (Open Knowledge Format v0.2) concept
+ * document. OKF requires only `type`; `title`/`description`/`resource`/
+ * `tags` are its recommended fields, `generated`/`verified`/`status`/
+ * `stale_after` its trust and lifecycle families, and `entities`/`related`
+ * are Guren's producer extensions. The reserved filenames `index.md` and
+ * `log.md` are never concepts and are excluded from the scan. Documents
+ * without frontmatter are still listed (`hasFrontmatter: false`) but
+ * never linked.
  */
 export interface DocRef {
   /** Path relative to the app root (POSIX separators). */
   path: string
   /** Module whose `docs/` directory contains the file, or null for the root `docs/`. */
   module: string | null
-  /** First `# heading` in the body, if any. */
+  /** Frontmatter `title`, falling back to the first `# heading` in the body. */
   title?: string
-  kind?: string
+  /** OKF `type` — the one field the format requires (adr, context, guide, spec, …). */
+  type?: string
+  /** OKF lifecycle `status`: draft | stable | deprecated. Absent means stable. */
   status?: string
+  description?: string
+  /** Canonical URI of the asset the concept describes, when it has one. */
+  resource?: string
+  tags: string[]
   /** Model class names this document governs (frontmatter `entities`). */
   entities: string[]
   /** Paths or globs this document governs (frontmatter `related`). */
   related: string[]
-  /** Frontmatter `last_reviewed` (YYYY-MM-DD), verbatim. */
-  lastReviewed?: string
+  /** OKF `generated` — who/what last wrote the content, and when. */
+  generated?: DocActorEvent
+  /** OKF `verified` — confirmation events; a bare mapping parses as one entry. */
+  verified: DocActorEvent[]
+  /** OKF `stale_after` (YYYY-MM-DD) — content is stale on/after this day. */
+  staleAfter?: string
+  /**
+   * Local markdown link targets in the body — OKF's relation mechanism.
+   * External links, bare anchors, and links inside code are excluded;
+   * fragments are stripped.
+   */
+  links: string[]
   hasFrontmatter: boolean
 }
 
-function unquote(value: string): string {
-  if (
-    (value.startsWith("'") && value.endsWith("'"))
-    || (value.startsWith('"') && value.endsWith('"'))
-  ) {
-    return value.slice(1, -1)
-  }
-  return value
-}
+/** OKF reserved filenames (§3.1) — navigation, never concept documents. */
+const RESERVED_FILENAMES = new Set(['index.md', 'log.md'])
 
-/**
- * Strip a trailing YAML comment (` # …`) from an unquoted value. Quoted
- * values keep their content verbatim — `unquote` handles them afterwards.
- */
-function stripInlineComment(value: string): string {
-  if (value.startsWith("'") || value.startsWith('"')) return value
-  return value.replace(/\s+#.*$/, '').trim()
-}
-
-/** Split an inline array body on commas that are not inside quotes. */
-function splitInlineArray(inner: string): string[] {
-  const parts: string[] = []
-  let current = ''
-  let quote: string | null = null
-
-  for (const char of inner) {
-    if (quote) {
-      current += char
-      if (char === quote) quote = null
-    } else if (char === "'" || char === '"') {
-      current += char
-      quote = char
-    } else if (char === ',') {
-      parts.push(current)
-      current = ''
-    } else {
-      current += char
-    }
-  }
-  parts.push(current)
-
-  return parts.map((part) => unquote(part.trim())).filter((part) => part !== '')
-}
-
-/**
- * Parse a leading `---` frontmatter block. Deliberately a minimal YAML
- * subset — scalars, inline arrays (`[a, b]`), and block lists (`- item`) —
- * the frozen vocabulary the docs convention needs, same philosophy as
- * `glob-match.ts`. Anything else is ignored, never an error.
- */
-export function parseDocFrontmatter(
-  source: string,
-): { data: Record<string, string | string[]>; body: string } | null {
-  const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(source)
-  if (!match) return null
-
-  const data: Record<string, string | string[]> = {}
-  let currentList: string[] | null = null
-
-  for (const line of match[1].split(/\r?\n/)) {
-    if (!line.trim()) continue
-
-    const item = /^\s*-\s+(.+)$/.exec(line)
-    if (item && currentList) {
-      const entry = stripInlineComment(item[1].trim())
-      if (entry) currentList.push(unquote(entry))
-      continue
-    }
-
-    const kv = /^([A-Za-z_][\w-]*):\s*(.*)$/.exec(line)
-    if (!kv) {
-      currentList = null
-      continue
-    }
-
-    const key = kv[1]
-    const value = stripInlineComment(kv[2].trim())
-    currentList = null
-
-    if (value === '') {
-      const list: string[] = []
-      data[key] = list
-      currentList = list
-    } else if (value.startsWith('[') && value.endsWith(']')) {
-      data[key] = splitInlineArray(value.slice(1, -1))
-    } else {
-      data[key] = unquote(value)
-    }
-  }
-
-  return { data, body: source.slice(match[0].length) }
-}
-
-function toStringList(value: string | string[] | undefined): string[] {
+function toStringList(value: DocFrontmatterValue | undefined): string[] {
   if (value === undefined) return []
-  return Array.isArray(value) ? value : [value]
+  if (typeof value === 'string') return [value]
+  if (!Array.isArray(value)) return []
+  return value.filter((entry): entry is string => typeof entry === 'string')
 }
 
-function toScalar(value: string | string[] | undefined): string | undefined {
+function toScalar(value: DocFrontmatterValue | undefined): string | undefined {
   return typeof value === 'string' ? value : undefined
+}
+
+
+function toActorEvent(value: DocFrontmatterValue | undefined): DocActorEvent | undefined {
+  // Mapping recognition belongs to the parser: by the time a value gets
+  // here every `{ … }` is already a DocMapping, so a string is one the
+  // parser judged a plain scalar (a quoted one, say) and re-parsing it
+  // would override that.
+  if (value === undefined || typeof value === 'string' || Array.isArray(value)) return undefined
+  return { by: value.by, at: value.at }
+}
+
+/**
+ * OKF `verified` accepts a list of `{ by, at }` mappings or a bare
+ * mapping; consumers must treat the bare form as a one-element list
+ * (§5.2). Both the inline (`{ … }`) and block (indented) YAML forms
+ * reach here.
+ */
+function toActorEvents(value: DocFrontmatterValue | undefined): DocActorEvent[] {
+  if (value === undefined) return []
+  return (Array.isArray(value) ? value : [value])
+    .map((entry) => toActorEvent(entry))
+    .filter((event): event is DocActorEvent => event !== undefined)
 }
 
 /**
@@ -145,23 +126,35 @@ export async function scanDocs(cwd: string): Promise<DocRef[]> {
     roots.map(async (root) => {
       const files = await collectFiles(resolve(root.dir, 'docs'), MARKDOWN_EXTENSIONS)
       return Promise.all(
-        files.map(async (file): Promise<DocRef> => {
-          const source = await readFile(file, 'utf-8')
-          const parsed = parseDocFrontmatter(source)
-          const body = parsed?.body ?? source
-          const data = parsed?.data ?? {}
-          return {
-            path: toPosixRelative(cwd, file),
-            module: root.module,
-            title: /^#\s+(.+)$/m.exec(body)?.[1].trim(),
-            kind: toScalar(data.kind),
-            status: toScalar(data.status),
-            entities: toStringList(data.entities),
-            related: toStringList(data.related),
-            lastReviewed: toScalar(data.last_reviewed),
-            hasFrontmatter: parsed !== null,
-          }
-        }),
+        files
+          .filter((file) => !RESERVED_FILENAMES.has(basename(file).toLowerCase()))
+          .map(async (file): Promise<DocRef> => {
+            const source = await readFile(file, 'utf-8')
+            const parsed = parseDocFrontmatter(source)
+            const body = parsed?.body ?? source
+            const data = parsed?.data ?? {}
+            return {
+              path: toPosixRelative(cwd, file),
+              module: root.module,
+              title: toScalar(data.title) ?? /^#\s+(.+)$/m.exec(body)?.[1].trim(),
+              type: toScalar(data.type),
+              status: toScalar(data.status),
+              description: toScalar(data.description),
+              resource: toScalar(data.resource),
+              tags: toStringList(data.tags),
+              entities: toStringList(data.entities),
+              related: toStringList(data.related),
+              generated: toActorEvent(data.generated),
+              verified: toActorEvents(data.verified),
+              // Present but not a scalar (`stale_after:` with no value)
+              // becomes '' so the checker can flag it rather than read
+              // it as absent.
+              staleAfter:
+                'stale_after' in data ? (toScalar(data.stale_after) ?? '') : undefined,
+              links: parsed ? extractMarkdownLinks(body) : [],
+              hasFrontmatter: parsed !== null,
+            }
+          }),
       )
     }),
   )
