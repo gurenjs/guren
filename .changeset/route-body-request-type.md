@@ -46,8 +46,10 @@ Fixed alongside, all of which blocked the same scaffold from compiling:
   that tolerates mid-edit JSON while flagging it, and rendered with
   `JSON.stringify` instead of being passed to React as an object. A json column
   is also no longer used as the Index page's heading, where React refused to
-  render it. Apps that customized this validator keep their own version; only
-  newly scaffolded features change.
+  render it. Scaffolding a json field now emits a `useState` flag on the form
+  pages, so a parse failure is visible rather than silently submitting the last
+  value that parsed. Apps that customized this validator keep their own version;
+  only newly scaffolded features change.
 - A scaffolded `date` field cast its column straight to `string` in the
   resource, and fed a full ISO timestamp to `<input type="date">`, which renders
   nothing for anything longer than `YYYY-MM-DD`. The resource now normalizes
@@ -55,3 +57,15 @@ Fixed alongside, all of which blocked the same scaffold from compiling:
   Postgres hands back a `Date`.
 - The scaffolded Edit page named its submit event `event`, shadowing the record
   prop for any entity whose variable name is also `event`.
+
+Two known limits, both deliberate:
+
+- Coerced types are rendered narrower than Zod would actually accept.
+  `z.coerce.number()` also takes a `boolean` and `z.coerce.boolean()` takes
+  anything at all, but a generated `body` is a type callers must *satisfy*, so
+  it stays JSON-native and usable — a bare `boolean` is what drives a
+  checkbox's `checked`. Widen the schema if a route really means "anything".
+- `RouteBody<>` returns `Record<string, unknown>` for a registry entry with no
+  `body`, including a malformed one. Constraining the registry is not an option:
+  a generated `interface` can never satisfy an index signature, which is the
+  bug being fixed here.
