@@ -2,7 +2,11 @@
 
 **Author:** Urata Daiki
 **Date:** 2026-07-30
-**Status:** Draft
+**Status:** Accepted (2026-07-31) — the standard two-week discussion window
+was intentionally shortened by the author, who is also the project's
+deciding maintainer. The design was validated ahead of acceptance by a
+working prototype and by the implementation itself (#229), which shipped
+against this document with the amendments recorded in place below.
 
 ## Problem
 
@@ -164,8 +168,13 @@ export function buildDocsGraph(
 Inputs are the existing `scanDocs()` and `runDocsCheck()` outputs; the
 builder is a pure join of the two, unit-testable without a filesystem.
 Derivation edges come from `SPEC_VIEWS` (`packages/cli/src/spec-generate.ts`);
-each `SpecViewDescriptor` gains a human-readable `sourceLabels: string[]`
-alongside its `sources` regexes so the graph and the drift gate share one
+each `SpecViewDescriptor` gains a human-readable ~~`sourceLabels: string[]`
+alongside its `sources` regexes~~ **Amended in implementation:** label —
+`sources` became `Array<{ pattern: RegExp; label: string }>`. Two
+parallel arrays drifted before the first release (a pattern added
+without its label), so the pairing is enforced by the type instead of by
+adjacency — which is the property this sentence wanted: the graph and
+the drift gate share one
 list and cannot drift apart. Living in `@guren/cli`, the builder is also
 trivially exposable as `guren docs:graph --json` for agents and CI later,
 though that command is not part of this RFC.
@@ -185,7 +194,10 @@ Mermaid is the one heavyweight: diagrams are central to the spec views,
 but bundling mermaid (~1 MB minified) into a published `@guren/*` package
 taxes every install for a dev-only screen. Instead:
 
-- the scaffold adds `mermaid` to new apps' `devDependencies`;
+- the scaffold adds `mermaid` to ~~new apps'~~ `devDependencies` —
+  **Amended in implementation:** to the `default` blueprint only. The
+  `api` blueprint has no frontend, so it relies on the degradation path
+  below instead of carrying a browser diagram library;
 - `/_guren/docs/assets/mermaid.js` serves the file resolved from the
   *app's* `node_modules` (via `import.meta.resolve`, no path input);
 - when mermaid is not installed, diagram fences degrade to plain code
@@ -259,6 +271,9 @@ harness rule text. Nothing changes for apps that ignore the feature.
    dependency-free; SSE is nicer but adds a watcher to the dev server's
    lifecycle (teardown on `bun --hot` reloads needs care — see the timer
    teardown work in #169).
+   **Resolved in implementation:** ETag polling shipped, with the
+   server-side payload cache's TTL held above the poll interval so a
+   visible tab does not trigger rebuilds. SSE stays deferred.
 2. **Large bundles.** At what node count does the flat graph stop being
    readable, and is the answer clustering (collapse `docs/adr/` into an
    expandable group node), a module-level zoom, or search-first
@@ -271,6 +286,8 @@ harness rule text. Nothing changes for apps that ignore the feature.
 4. **Static export.** `guren docs:export` writing a self-contained HTML
    file (for PR artifacts, sharing a snapshot with a reviewer) — same
    builder, same asset, no server. Worth shipping in v1 or after?
+   **Resolved in implementation:** after. Not part of the initial
+   implementation.
 5. **OKF `index.md` generation.** OKF §8 lets producers generate
    directory listings for progressive disclosure. The viewer makes them
    redundant locally, but generated `index.md` would serve GitHub
