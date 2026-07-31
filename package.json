@@ -32,6 +32,7 @@
     "audit:bundle-budgets": "bun run ./scripts/smoke/build-budget.ts --max-kb 600",
     "audit:starter-template": "bun run ./scripts/smoke/starter-template-audit.ts",
     "audit:docs": "bun run ./scripts/smoke/docs-audit.ts",
+    "audit:deps": "bun run ./scripts/smoke/dependency-audit.ts",
     "smoke:starter": "bun run ./scripts/smoke/fresh-app.ts",
     "smoke:starter:api": "GUREN_SMOKE_BLUEPRINT=api bun run ./scripts/smoke/fresh-app.ts",
     "smoke:starter:blog": "GUREN_SMOKE_BLUEPRINT=blog bun run ./scripts/smoke/fresh-app.ts",
@@ -68,21 +69,26 @@
     "web"
   ],
   "devDependencies": {
-    "@changesets/cli": "^2.29.7",
-    "bun-types": "^1.3.1",
-    "typescript": "^5.5.4",
-    "vitest": "^3.2.6",
-    "vite": "^8.0.0",
-    "zod": "^4.1.5"
+    "@changesets/cli": "^2.31.1",
+    "bun-types": "^1.3.14",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7",
+    "vite": "^8.2.0",
+    "zod": "^4.4.3"
   },
   "overrides": {
     "qs": "^6.15.2",
-    "hono": "^4.12.18",
-    "@hono/node-server": "^1.19.14",
+    "hono": "^4.12.29",
+    "@hono/node-server": "^2.0.5",
     "axios": "^1.17.0",
     "follow-redirects": "^1.16.0",
     "lodash-es": "^4.18.1",
-    "postcss": "^8.5.10",
-    "ip-address": "^10.2.0"
+    "postcss": "^8.5.18",
+    "ip-address": "^10.2.0",
+    "fast-uri": "^3.1.3",
+    "path-to-regexp": "^8.4.0",
+    "body-parser": "^2.3.0",
+    "ws": "^8.20.1",
+    "form-data": "^4.0.6"
   }
 }

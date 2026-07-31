@@ -25,12 +25,17 @@ export const posts = pgTable('posts', {
   body: text('body').notNull(),
   status: text('status').notNull().default('draft'),
   metadata: jsonb('metadata'),
-  publishedAt: timestamp('published_at'),
-  deletedAt: timestamp('deleted_at'),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
+  publishedAt: timestamp('published_at', { withTimezone: true }),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 })
 ```
+
+PostgreSQL では、タイムスタンプ列に必ず `{ withTimezone: true }` を付けてください。
+`timestamp without time zone` はオフセットを持たない壁時計を保存するため、
+`defaultNow()` はデータベースセッションのタイムゾーンで書き込む一方でアプリは
+UTC として読み戻し、アプリ以外のクライアントは異なる instant を見ることになります。
 
 テーブルは `defineModel()` でモデルに公開するのが推奨です。
 

@@ -3,19 +3,21 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createTempWorkspace, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, type TempWorkspace } from './helpers'
 import { listBlueprints, runBlueprint } from '../src/blueprints'
 
-/** The directories and route file the resource blueprint expects to patch. */
-async function seedResourceWorkspace(schema: string): Promise<void> {
-  await mkdir('resources/js/pages', { recursive: true })
-  await mkdir('routes', { recursive: true })
-  await mkdir('db', { recursive: true })
-  await writeFile('routes/web.ts', `import { Router } from '@guren/core'
+const ROUTES_FIXTURE = `import { Router } from '@guren/core'
 
 export function registerWebRoutes(router: Router): void {
   router.get('/', () => 'home')
 }
 
 export default registerWebRoutes
-`)
+`
+
+/** Minimum project shape the resource blueprint patches into. */
+async function seedResourceWorkspace(schema: string): Promise<void> {
+  await mkdir('resources/js/pages', { recursive: true })
+  await mkdir('routes', { recursive: true })
+  await mkdir('db', { recursive: true })
+  await writeFile('routes/web.ts', ROUTES_FIXTURE)
   await writeFile('db/schema.ts', schema)
 }
 
@@ -104,6 +106,86 @@ describe('blueprints', () => {
     await expect(runBlueprint('unknown')).rejects.toThrow('Unknown blueprint')
   })
 
+  // Every field type has to map to a column in every dialect. A missing case
+  // silently falls through to the text/varchar default, which then rejects the
+  // value the generated validator produces (a `date` field is the example: a
+  // bare text column cannot take the `Date` from `z.coerce.date()`).
+  //
+  // The sqlite and postgres golden-path smokes typecheck a real app scaffolded
+  // with all of these; this covers the mysql mapper the same way at the unit
+  // level so it cannot drift while its smoke is unavailable.
+  const ALL_FIELDS = 'name:string,body:text,count:number,active:boolean,publishedAt:date,meta:json'
+
+  const COLUMN_CASES = [
+    {
+      dialect: 'sqlite',
+      schema: `import { sqliteTable, integer, text } from '@guren/orm/drizzle'
+
+export const users = sqliteTable('users', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+})
+`,
+      columns: [
+        "name: text('name').notNull()",
+        "body: text('body').notNull()",
+        "count: integer('count').notNull()",
+        "active: integer('active', { mode: 'boolean' }).notNull()",
+        "publishedAt: integer('published_at', { mode: 'timestamp' }).notNull()",
+        "meta: text('meta', { mode: 'json' }).notNull()",
+      ],
+    },
+    {
+      dialect: 'mysql',
+      schema: `import { mysqlTable, int, varchar } from '@guren/orm/drizzle'
+
+export const users = mysqlTable('users', {
+  id: int('id').primaryKey().autoincrement(),
+  name: varchar('name', { length: 255 }).notNull(),
+})
+`,
+      columns: [
+        "name: varchar('name', { length: 255 }).notNull()",
+        "body: varchar('body', { length: 255 }).notNull()",
+        "count: int('count').notNull()",
+        "active: boolean('active').notNull()",
+        "publishedAt: timestamp('published_at').notNull()",
+        "meta: json('meta').notNull()",
+      ],
+    },
+    {
+      dialect: 'postgres',
+      schema: `import { pgTable, serial, text } from '@guren/orm/drizzle'
+
+export const users = pgTable('users', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+})
+`,
+      columns: [
+        "name: text('name').notNull()",
+        "body: text('body').notNull()",
+        "count: integer('count').notNull()",
+        "active: boolean('active').notNull()",
+        "publishedAt: timestamp('published_at', { withTimezone: true }).notNull()",
+        "meta: jsonb('meta').notNull()",
+      ],
+    },
+  ] as const
+
+  for (const { dialect, schema: fixture, columns } of COLUMN_CASES) {
+    it(`maps every field type to a ${dialect} column`, async () => {
+      await seedResourceWorkspace(fixture)
+
+      await runBlueprint('resource', { name: 'Entry', fields: ALL_FIELDS })
+
+      const schema = await readFile('db/schema.ts', 'utf8')
+      for (const column of columns) {
+        expect(schema).toContain(column)
+      }
+    })
+  }
+
   it('runs the infrastructure blueprints', async () => {
     await mkdir('src', { recursive: true })
     await mkdir('routes', { recursive: true })
@@ -116,14 +198,7 @@ const app = createApp({
 
 export default app
 `)
-    await writeFile('routes/web.ts', `import { Router } from '@guren/core'
-
-export function registerWebRoutes(router: Router): void {
-  router.get('/', () => 'home')
-}
-
-export default registerWebRoutes
-`)
+    await writeFile('routes/web.ts', ROUTES_FIXTURE)
 
     const adminFiles = await runBlueprint('admin')
     const queueFiles = await runBlueprint('queue')

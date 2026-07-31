@@ -201,7 +201,10 @@ fi
 # ---------------------------------------------------------------------------
 step 9 "Add resource scaffold (comments)"
 
-(cd "$APP_DIR" && bun "$CLI_BIN" add resource comments --fields "body:text,postId:number")
+# The field list covers every branch of the dialect column mappers
+# (text/number/boolean/date/json) so the typecheck below is what catches
+# generated code that only compiles for the simplest column types.
+(cd "$APP_DIR" && bun "$CLI_BIN" add resource comments --fields "body:text,postId:number,published:boolean,publishedAt:date,meta:json")
 
 # ---------------------------------------------------------------------------
 # Step 10: Add infrastructure add-on — queue
@@ -362,8 +365,28 @@ if (Number(tracker[0].c) < 1) {
   console.error('drizzle.__drizzle_migrations is empty after db:migrate')
   process.exit(1)
 }
+
+// Every timestamp a scaffold emits must carry a time zone. An offset-less
+// column stores a bare wall clock and leaves its meaning to the reader: the
+// app itself stays self-consistent (drizzle parses the column as UTC), which
+// is why no HTTP round trip below can catch this, but every other reader sees
+// a different instant and a `defaultNow()` column records the DB session's
+// local wall clock. Asked as "which columns are wrong" rather than against a
+// list of names, so a scaffold that grows a new timestamp is covered too.
+const offsetlessColumns = await sql`
+  SELECT table_name, column_name, data_type FROM information_schema.columns
+  WHERE table_schema = 'public'
+    AND data_type LIKE 'timestamp%'
+    AND data_type <> 'timestamp with time zone'
+`
+if (offsetlessColumns.length > 0) {
+  const named = offsetlessColumns.map((c) => c.table_name + '.' + c.column_name + ' (' + c.data_type + ')')
+  console.error('Expected every timestamp column to be timestamptz, but found: ' + named.join(', '))
+  process.exit(1)
+}
+
 await sql.end()
-console.log('DB tables OK (postgres): ' + tables.join(', '))
+console.log('DB tables OK (postgres): ' + tables.join(', ') + ' — timestamp columns are timestamptz')
 DBCHECK
   (cd "$APP_DIR" && bun "$TEMP_DIR/dbcheck.ts")
 elif [ "$SMOKE_DB" = "mysql" ]; then
@@ -478,6 +501,42 @@ if ! printf '%s' "$POSTS_BODY" | grep -q "Golden path runtime"; then
   exit 1
 fi
 echo "  OK: GET /posts contains created post"
+
+# The token rotates on each accepted request, so re-read it from the jar the
+# previous POST just rewrote.
+XSRF=$(awk '$6 == "XSRF-TOKEN" { print $7 }' "$COOKIES")
+
+# The comments resource carries every column type. Typechecking the generated
+# code does not prove a `Date` or a JSON object survives the round trip through
+# the dialect's timestamp/json columns — this write does.
+http_expect "POST /comments (date + json payload)" 303 \
+  -b "$COOKIES" -c "$COOKIES" -X POST "$RUNTIME_URL/comments" \
+  -H "Content-Type: application/json" -H "X-XSRF-TOKEN: $XSRF" \
+  -d '{"body":"typed columns","postId":1,"published":true,"publishedAt":"2026-02-03T00:00:00.000Z","meta":{"origin":"golden-path-json"}}'
+
+COMMENTS_BODY=$(curl -s -b "$COOKIES" "$RUNTIME_URL/comments")
+if ! printf '%s' "$COMMENTS_BODY" | grep -q "typed columns"; then
+  echo "ERROR: GET /comments does not contain the created comment"
+  exit 1
+fi
+# The json column must come back as an object, not as the string "[object
+# Object]" a text column would have stored.
+if ! printf '%s' "$COMMENTS_BODY" | grep -q "golden-path-json"; then
+  echo "ERROR: GET /comments did not round-trip the json column"
+  printf '%s\n' "$COMMENTS_BODY" | head -40
+  exit 1
+fi
+# The resource serializes date columns as ISO strings. This checks that a
+# `Date` went in and a `Date` came back — it deliberately does not police the
+# time zone, because the app's own reads round-trip on either column type
+# (drizzle parses an offset-less postgres timestamp as UTC). The column type
+# itself is asserted in the db check above, which is what catches a regression.
+if ! printf '%s' "$COMMENTS_BODY" | grep -qF '2026-02-03T00:00:00.000Z'; then
+  echo "ERROR: GET /comments did not round-trip the date column"
+  printf '%s\n' "$COMMENTS_BODY" | head -40
+  exit 1
+fi
+echo "  OK: GET /comments round-tripped date and json columns"
 
 # Security defaults
 http_expect "POST /posts (no CSRF token)" 403 \
