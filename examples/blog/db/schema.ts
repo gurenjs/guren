@@ -8,7 +8,7 @@ export const users = pgTable(
     email: text('email').notNull(),
     passwordHash: text('password_hash').notNull(),
     rememberToken: text('remember_token'),
-    emailVerifiedAt: timestamp('email_verified_at', { withTimezone: false }),
+    emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
     githubId: text('github_id').unique(),
     googleId: text('google_id').unique(),
   },

@@ -322,7 +322,7 @@ export const users = pgTable(
 
       const schema = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
       expect(schema.match(/export const users = pgTable\(/g)).toHaveLength(1)
-      expect(schema).toContain("emailVerifiedAt: timestamp('email_verified_at', { withTimezone: false }),")
+      expect(schema).toContain("emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),")
       expect(schema).toContain('uniqueIndex')
       expect(schema).toContain("(table) => [uniqueIndex('users_email_unique').on(table.email)]")
     } finally {
@@ -450,8 +450,8 @@ export const users = pgTable('users', {
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
   rememberToken: text('remember_token'),
-  createdAt: timestamp('created_at', { withTimezone: false }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: false }).defaultNow().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 })
 `,
         'utf8',
@@ -560,8 +560,8 @@ export const users = pgTable('users', {
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
   rememberToken: text('remember_token'),
-  createdAt: timestamp('created_at', { withTimezone: false }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: false }).defaultNow().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 })
 `,
         'utf8',

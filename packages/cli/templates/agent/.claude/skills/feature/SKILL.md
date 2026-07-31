@@ -195,7 +195,12 @@ export const posts = pgTable('posts', {
   id: serial('id').primaryKey(),
   title: varchar('title', { length: 255 }).notNull(),
   content: text('content'),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 })
 ```
+
+On PostgreSQL, always give timestamp columns `{ withTimezone: true }`. A
+`timestamp without time zone` stores a bare wall clock, so `defaultNow()`
+records it in the database session's zone while the app reads it back as UTC,
+and any client other than the app sees a different instant.

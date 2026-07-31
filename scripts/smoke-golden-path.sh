@@ -365,8 +365,28 @@ if (Number(tracker[0].c) < 1) {
   console.error('drizzle.__drizzle_migrations is empty after db:migrate')
   process.exit(1)
 }
+
+// Every timestamp a scaffold emits must carry a time zone. An offset-less
+// column stores a bare wall clock and leaves its meaning to the reader: the
+// app itself stays self-consistent (drizzle parses the column as UTC), which
+// is why no HTTP round trip below can catch this, but every other reader sees
+// a different instant and a `defaultNow()` column records the DB session's
+// local wall clock. Asked as "which columns are wrong" rather than against a
+// list of names, so a scaffold that grows a new timestamp is covered too.
+const offsetlessColumns = await sql`
+  SELECT table_name, column_name, data_type FROM information_schema.columns
+  WHERE table_schema = 'public'
+    AND data_type LIKE 'timestamp%'
+    AND data_type <> 'timestamp with time zone'
+`
+if (offsetlessColumns.length > 0) {
+  const named = offsetlessColumns.map((c) => c.table_name + '.' + c.column_name + ' (' + c.data_type + ')')
+  console.error('Expected every timestamp column to be timestamptz, but found: ' + named.join(', '))
+  process.exit(1)
+}
+
 await sql.end()
-console.log('DB tables OK (postgres): ' + tables.join(', '))
+console.log('DB tables OK (postgres): ' + tables.join(', ') + ' — timestamp columns are timestamptz')
 DBCHECK
   (cd "$APP_DIR" && bun "$TEMP_DIR/dbcheck.ts")
 elif [ "$SMOKE_DB" = "mysql" ]; then
@@ -506,12 +526,12 @@ if ! printf '%s' "$COMMENTS_BODY" | grep -q "golden-path-json"; then
   printf '%s\n' "$COMMENTS_BODY" | head -40
   exit 1
 fi
-# The resource serializes date columns as ISO strings. sqlite's timestamp-mode
-# integer round-trips the instant exactly, but postgres `timestamp without time
-# zone` and MySQL `timestamp` both shift it by the server/session's UTC
-# offset, so the day is asserted loosely — what this checks is that a Date
-# went in and a Date came back, not that every dialect agrees on the instant.
-if ! printf '%s' "$COMMENTS_BODY" | grep -qE '2026-02-0[23]T[0-9]{2}:[0-9]{2}:[0-9]{2}'; then
+# The resource serializes date columns as ISO strings. This checks that a
+# `Date` went in and a `Date` came back — it deliberately does not police the
+# time zone, because the app's own reads round-trip on either column type
+# (drizzle parses an offset-less postgres timestamp as UTC). The column type
+# itself is asserted in the db check above, which is what catches a regression.
+if ! printf '%s' "$COMMENTS_BODY" | grep -qF '2026-02-03T00:00:00.000Z'; then
   echo "ERROR: GET /comments did not round-trip the date column"
   printf '%s\n' "$COMMENTS_BODY" | head -40
   exit 1

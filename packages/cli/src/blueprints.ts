@@ -719,7 +719,14 @@ const PG_COLUMNS: ColumnMapping = {
   text: (name, notNull) => ({ code: `text('${name}')${notNull}`, imports: ['text'] }),
   number: (name, notNull) => ({ code: `integer('${name}')${notNull}`, imports: ['integer'] }),
   boolean: (name, notNull) => ({ code: `boolean('${name}')${notNull}`, imports: ['boolean'] }),
-  date: (name, notNull) => ({ code: `timestamp('${name}', { withTimezone: false })${notNull}`, imports: ['timestamp'] }),
+  // `timestamptz`, not `timestamp`. A `date` field holds an instant: drizzle
+  // writes `Date.toISOString()`, so `timestamp without time zone` keeps the UTC
+  // wall clock but drops the offset, and what that wall clock means is then up
+  // to the reader. Drizzle parses it back as UTC, so the app stays
+  // self-consistent — but a raw `postgres` query, psql, or any other client
+  // reads it as local time and sees a different instant. `timestamptz` stores
+  // the instant itself, so every reader agrees.
+  date: (name, notNull) => ({ code: `timestamp('${name}', { withTimezone: true })${notNull}`, imports: ['timestamp'] }),
   json: (name, notNull) => ({ code: `jsonb('${name}')${notNull}`, imports: ['jsonb'] }),
 }
 
@@ -728,6 +735,9 @@ const MYSQL_COLUMNS: ColumnMapping = {
   text: (name, notNull) => ({ code: `varchar('${name}', { length: 255 })${notNull}`, imports: ['varchar'] }),
   number: (name, notNull) => ({ code: `int('${name}')${notNull}`, imports: ['int'] }),
   boolean: (name, notNull) => ({ code: `boolean('${name}')${notNull}`, imports: ['boolean'] }),
+  // Bare `timestamp` on purpose — MySQL has no `timestamptz`, and its TIMESTAMP
+  // is already stored as UTC and converted per session, so it round-trips the
+  // instant. `datetime` is the one that would drop the offset here.
   date: (name, notNull) => ({ code: `timestamp('${name}')${notNull}`, imports: ['timestamp'] }),
   json: (name, notNull) => ({ code: `json('${name}')${notNull}`, imports: ['json'] }),
 }
@@ -784,7 +794,7 @@ async function updateResourceSchema(collection: string, routeName: string, field
     content = ensureDrizzleImports(content, imports)
 
     const fieldLines = fields.map((field, index) => `  ${field.name}: ${columns[index].code},`).join('\n')
-    const schemaBlock = `\nexport const ${schemaIdentifier} = pgTable('${tableName}', {\n  id: serial('id').primaryKey(),\n${fieldLines}\n  createdAt: timestamp('created_at', { withTimezone: false }).defaultNow().notNull(),\n})\n`
+    const schemaBlock = `\nexport const ${schemaIdentifier} = pgTable('${tableName}', {\n  id: serial('id').primaryKey(),\n${fieldLines}\n  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),\n})\n`
 
     content = `${content.trimEnd()}\n${schemaBlock}`
   }
