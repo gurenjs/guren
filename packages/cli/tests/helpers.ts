@@ -79,11 +79,16 @@ export const users = pgTable('users', {
 })
 `
 
-/** The dialect every `create-guren-app` blueprint defaults to. */
-export const SQLITE_SCHEMA_FIXTURE = `import { sqliteTable, integer, text } from 'drizzle-orm/sqlite-core'
+/**
+ * The dialect every `create-guren-app` blueprint defaults to. `id` is spelled
+ * with `text` rather than `integer` so a test can tell whether a run actually
+ * patched `integer` into the import — a real scaffold's `integer` id would
+ * satisfy that assertion no matter what the run did.
+ */
+export const SQLITE_SCHEMA_FIXTURE = `import { sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
 export const users = sqliteTable('users', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+  id: text('id').primaryKey(),
   name: text('name').notNull(),
   email: text('email').notNull(),
 })

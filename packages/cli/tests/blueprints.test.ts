@@ -95,6 +95,9 @@ describe('blueprints', () => {
     expect(schema).not.toContain("publishedAt: text('published_at')")
     expect(schema).toContain("published: integer('published', { mode: 'boolean' }).notNull()")
     expect(schema).toContain("meta: text('meta', { mode: 'json' }).notNull()")
+    // The fixture imports no `integer`, so this only passes if the run
+    // patched in the builder the new date and boolean columns need.
+    expect(schema).toMatch(/import\s*\{[^}]*\binteger\b[^}]*\}\s*from\s*'drizzle-orm\/sqlite-core'/)
   })
 
   it('adds resource tables to a mysql schema without borrowing another dialect', async () => {

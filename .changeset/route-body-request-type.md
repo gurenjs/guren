@@ -66,6 +66,12 @@ Fixed alongside, all of which blocked the same scaffold from compiling:
   matching what Postgres and MySQL already did. The three dialect column
   builders are keyed by field type rather than falling through a `default:`
   arm, so a new field type cannot go missing from one dialect again.
+
+  Upgrading does not touch a schema already generated. If you scaffolded a
+  date field on SQLite, change the column in `db/schema.ts` to
+  `integer('<column>', { mode: 'timestamp' })`, generate a migration, and
+  apply it — the values already written are gone, so backfill them if you
+  have another source.
 - A field name that is not a valid identifier (`my-name:string`) generated a
   page that could not be parsed. `make:feature` now rejects it with a message
   instead.
