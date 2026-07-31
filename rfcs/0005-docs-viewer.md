@@ -176,8 +176,14 @@ without its label), so the pairing is enforced by the type instead of by
 adjacency — which is the property this sentence wanted: the graph and
 the drift gate share one
 list and cannot drift apart. Living in `@guren/cli`, the builder is also
-trivially exposable as `guren docs:graph --json` for agents and CI later,
-though that command is not part of this RFC.
+trivially exposable as ~~`guren docs:graph --json` for agents and CI
+later, though that command is not part of this RFC~~ **Amended in
+implementation:** shipped separately as `guren docs:graph` plus a
+`guren_docs_graph` MCP tool (#238), narrowed to one node's neighborhood
+via `--entity`/`--path` — path narrowing resolves through the same
+`SPEC_VIEWS` patterns and reuses the `matchesGlob()` helper `check
+--docs` validates `related` globs with, so the CLI/MCP surface and the
+viewer's graph cannot disagree about what a path reaches.
 
 ### Markdown rendering
 
