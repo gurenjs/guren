@@ -4,6 +4,26 @@ import { ScryptHasher } from '../password/ScryptHasher'
 import type { AuthCredentials, Authenticatable } from '../types'
 import { BaseUserProvider } from './UserProvider'
 
+interface CredentialColumnSource {
+  resolvePasswordHashField(): string
+  resolveRememberTokenField(): string
+}
+
+/**
+ * Capability check, not `instanceof AuthenticatableModel`: a nominal check
+ * silently fails when two copies of @guren/server are loaded (src and dist
+ * coexist through workspace symlinks), which would ignore a renamed
+ * passwordHashField without any signal. Same duck-typing idiom as
+ * BaseUserProvider's remember-token support.
+ */
+function credentialColumnSource(model: typeof Model): CredentialColumnSource | null {
+  const candidate = model as Partial<CredentialColumnSource>
+  return typeof candidate.resolvePasswordHashField === 'function' &&
+    typeof candidate.resolveRememberTokenField === 'function'
+    ? (candidate as CredentialColumnSource)
+    : null
+}
+
 export interface ModelUserProviderOptions {
   idColumn?: string
   usernameColumn?: string
@@ -27,10 +47,15 @@ export class ModelUserProvider<User extends Authenticatable = Authenticatable> e
 
   constructor(private readonly model: typeof Model, options: ModelUserProviderOptions = {}) {
     super()
+    // The model contract is the single source of truth for credential
+    // columns: an AuthenticatableModel that renames passwordHashField or
+    // rememberTokenField is picked up here without repeating the name.
+    // Explicit options remain as overrides for non-authenticatable targets.
+    const authModel = credentialColumnSource(model)
     this.idColumn = options.idColumn ?? 'id'
     this.usernameColumn = options.usernameColumn ?? 'email'
-    this.passwordColumn = options.passwordColumn ?? 'password'
-    this.rememberTokenColumn = options.rememberTokenColumn ?? 'remember_token'
+    this.passwordColumn = options.passwordColumn ?? authModel?.resolvePasswordHashField() ?? 'passwordHash'
+    this.rememberTokenColumn = options.rememberTokenColumn ?? authModel?.resolveRememberTokenField() ?? 'rememberToken'
     this.hasher = options.hasher ?? new ScryptHasher()
     this.credentialsPasswordField = options.credentialsPasswordField ?? 'password'
   }
@@ -92,9 +117,15 @@ export class ModelUserProvider<User extends Authenticatable = Authenticatable> e
    * never affects login — only what `auth.user()` exposes.
    */
   sanitize(user: User): User {
+    // Block both the option-selected columns and the model's own resolved
+    // credential columns: with an explicit passwordColumn override pointing
+    // elsewhere, the model-owned hash column would otherwise leak through
+    // auth.user() unless the app also listed it in hidden.
+    const authModel = credentialColumnSource(this.model)
     const blocked = new Set<string>([
       this.passwordColumn,
       this.rememberTokenColumn,
+      ...(authModel ? [authModel.resolvePasswordHashField(), authModel.resolveRememberTokenField()] : []),
       ...(((this.model as typeof Model).hidden as string[] | undefined) ?? []),
     ])
 

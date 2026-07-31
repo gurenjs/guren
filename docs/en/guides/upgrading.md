@@ -25,13 +25,36 @@ bun run test
 
 ## Migration Notes
 
+### 1.x → 2.0.0
+
+#### Structural mass assignment
+
+- **What changed**: `static guarded` and `static strictFillable` are removed. `fillable` is always strict; the primary key (`id`) is always silently stripped. On `AuthenticatableModel` subclasses, the password-hash and remember-token columns can never be mass-assigned — a request body carrying them throws a `MassAssignmentException`, whatever `fillable` says.
+- **Who is affected**: Models declaring `guarded` or `strictFillable` (now flagged as errors by `guren check`), and code that mass-assigns a precomputed hash or remember token through `create()`/`update()`.
+- **How to migrate**: Delete `guarded`/`strictFillable` declarations — `bunx guren upgrade --check-only` lists the affected files. **If a `guarded` list carried app-specific fields beyond `id` and the credential columns (e.g. `tenantId`, `isAdmin`), deleting the line makes them mass-assignable**: declare `static fillable = [...]` without those fields to keep them protected. Where a model relied on `strictFillable = false`, each new throw names a field that was being silently dropped: add it to `fillable` or remove it from the payload. Replace `create({ ..., passwordHash })` with `create({ ..., password })` and let the model hash it, or `forceCreate({ ..., passwordHash: 'oauth:...' })` for trusted server-side values — never with request input.
+
+```ts
+// Before
+export class User extends defineModel(users, { base: AuthenticatableModel }) {
+  static fillable = ['name', 'email', 'password']
+  static guarded = ['id', 'passwordHash', 'rememberToken']  // now a check error
+}
+
+// After — the framework denies the credential columns itself
+export class User extends defineModel(users, { base: AuthenticatableModel }) {
+  static fillable = ['name', 'email', 'password']
+}
+```
+
+`ModelUserProvider` now reads credential column names from the model (`passwordHashField` / the new `rememberTokenField`), so a renamed column needs no matching provider option; explicit `passwordColumn`/`rememberTokenColumn` options still win. The deprecated `createType` option of `defineModel()` is removed — use `optionalOnCreate`/`requireOnCreate`.
+
 ### rc → 1.0.0
 
 #### Strict mass assignment
 
 - **What changed**: Models that define `fillable` now throw a `MassAssignmentException` when `create()` / `update()` receives a field outside the allowlist. Previously, extra fields were silently discarded.
 - **Who is affected**: Any code that passes unfiltered objects (spread request bodies, merged defaults) to `create()` / `update()`.
-- **How to migrate**: Pass only allowlisted fields, or use `forceCreate()` / `forceUpdate()` for trusted server-side data such as seeders and system records. To restore the old discard behavior on a specific model, set `static strictFillable = false`.
+- **How to migrate**: Pass only allowlisted fields, or use `forceCreate()` / `forceUpdate()` for trusted server-side data such as seeders and system records.
 
 ```ts
 // Before: authorId silently dropped when not in fillable

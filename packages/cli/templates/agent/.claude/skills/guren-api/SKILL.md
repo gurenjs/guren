@@ -89,17 +89,16 @@ export class User extends defineModel(users, {
   optionalOnCreate: ['passwordHash'],
   requireOnCreate: ['password'],
 }) {
-  // Whitelist for mass assignment
+  // Whitelist for mass assignment (credential columns are denied by the base class)
   static fillable = ['name', 'email', 'password']
-  // Blacklist: these fields are always stripped (ignored when fillable is set)
-  static guarded = ['id', 'passwordHash', 'rememberToken']
 }
 ```
 
-- `fillable` (whitelist) — only listed fields pass through to `create()` / `update()`; unlisted input keys **throw `MassAssignmentException`** (set `static strictFillable = false` for silent discarding). Use `forceCreate()` / `forceUpdate()` for trusted server-side data.
-- `guarded` (blacklist, default: `['id']`) — listed fields are silently stripped; ignored when `fillable` is set
-- Both are enforced by `Model.filterFillable()`, called automatically before persistence
+- `fillable` (whitelist) — only listed fields pass through to `create()` / `update()`; unlisted input keys **throw `MassAssignmentException`**. The primary key (`id`) is always silently stripped.
+- Credential columns (`passwordHash`, `rememberToken`) **always throw** on authenticatable models — the framework denies them; listing them in `fillable` does not open them
+- Enforced by `Model.filterFillable()`, called automatically before persistence
 - Always define `fillable` on models that accept user input — this is the second defense layer after Zod validation
+- `forceCreate()` / `forceUpdate()` bypass filtering for trusted server-side values (e.g. `passwordHash: 'oauth:...'`). **Never call them with request input**
 
 **Relationships** — declare once, eager-load anywhere:
 

@@ -11,7 +11,6 @@ export class User extends defineModel(users, {
   requireOnCreate: ['password'],
 }) {
   static fillable = ['name', 'email', 'password', 'emailVerifiedAt', 'githubId', 'googleId']
-  static guarded = ['id', 'passwordHash', 'rememberToken']
   static override hidden = ['passwordHash', 'rememberToken']
   static override relationTypes: { posts: HasManyRecord<PostRecord> } = {
     posts: [],

@@ -11,7 +11,6 @@ export class User extends defineModel(users, {
   requireOnCreate: ['password'],
 }) {
   static fillable = ['name', 'email', 'password']
-  static guarded = ['id', 'passwordHash', 'createdAt', 'updatedAt']
   static override hidden = ['passwordHash']
   static override relationTypes: { tasks: HasManyRecord<TaskRecord> } = {
     tasks: [],

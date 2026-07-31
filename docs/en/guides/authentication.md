@@ -299,7 +299,7 @@ export class User extends defineModel(users, {
 
 Pass `AuthenticatableModel` as the `base` and reshape the create payload in the same call. The type `defineModel()` infers from the table requires every non-defaulted column, which is the wrong shape here: callers pass a plain `password` the model hashes for them, not a `passwordHash`. `optionalOnCreate` makes the column optional and `requireOnCreate` makes the virtual field required, both at the type level with no cast and no redeclared markers.
 
-Optional means optional: a caller may still pass `passwordHash` and it will type-check. Mass assignment is what keeps a request body from setting its own hash — leave the column out of `fillable`, or list it in `guarded` on models that set no `fillable`.
+Optional means optional: a caller may still pass `passwordHash` and it will type-check. At runtime, `AuthenticatableModel` denies the hash column (and the remember token) from mass assignment entirely — a request body carrying it throws a `MassAssignmentException`, whatever the model's `fillable` says. Use `forceCreate()` / `forceUpdate()` for trusted server-side values such as `passwordHash: 'oauth:...'`.
 
 Leave `requireOnCreate` off when accounts can also arrive without a password — an OAuth-only sign-up, for instance — so `password` stays optional.
 

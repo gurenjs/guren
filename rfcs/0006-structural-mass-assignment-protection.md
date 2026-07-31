@@ -236,11 +236,14 @@ explicit options remain as overrides for non-`AuthenticatableModel` targets.
 - **`createType` omits denied columns.** `defineModel(users, { base: AuthenticatableModel })`
   already lets apps shape the create payload with `optionalOnCreate`/`requireOnCreate`
   (#232); the scaffold currently writes `optionalOnCreate: ['passwordHash']`. With the
-  runtime rule in place, the scaffold and docs move to omitting the hash from `createType`
+  runtime rule in place, the scaffold and docs ~~move to omitting the hash from `createType`
   entirely (`forceCreate` accepts the full insert type), so the compiler and the runtime
-  tell the same story. The ORM type fixture
-  (`packages/orm/tests/model.query.types.ts:234,245`), which documents
-  `create({ passwordHash: 'precomputed' })` as valid, is updated accordingly.
+  tell the same story~~ **Amended in implementation:** keep `optionalOnCreate` —
+  `forceCreate()` is typed by the same `createType` marker, so omitting the hash there
+  would also remove it from the sanctioned `forceCreate({ passwordHash: 'oauth:...' })`
+  path, and a separate force-payload type marker is more machinery than the type/runtime
+  mismatch justifies. The runtime deny is authoritative; the type fixture and docs note
+  the mismatch explicitly.
 - **Bundled type cleanups, same major:** remove the deprecated `createType` option from
   `defineModel()` (`Model.ts:2604`); drop the `PlainObject &` widening from
   `AuthenticatableModel.createType`, letting the `NamedKeys<T>` helper (`Model.ts:2540`)
@@ -288,7 +291,7 @@ credentials always throw, `force*` is the trusted hatch).
 | Surface | Today | Under this RFC |
 |---|---|---|
 | `guren audit` (`audit.ts:637-651`) | one regex: passes if `static fillable\|guarded` present, else warns | two-tier: `AuthenticatableModel` subclasses pass structurally (note, not warn — the warn would be a false positive); plain models keep the `fillable` hygiene warn, with `guarded` dropped from regex and remediation text |
-| `guren check` | no mass-assignment rules | new static rule: `fillable` ∩ denied fields is a definition error (Open Question 3's home — plus a runtime twin in `bootModels()`); statically feasible because the denied set's *inputs* are parseable statics (`passwordHashField`, `rememberTokenField`, base-class identity — same AST technique `audit` already uses for serialization info) |
+| `guren check` | no mass-assignment rules | new static rule: `fillable` ∩ denied fields is a definition error (Open Question 3's home — ~~plus a runtime twin in `bootModels()`~~ **Amended in implementation:** no boot twin; the write-time denied throw already covers runtime with a clearer message, so a boot assertion adds a failure mode without adding protection); statically feasible because the denied set's *inputs* are parseable statics (`passwordHashField`, `rememberTokenField`, base-class identity) |
 | `guren upgrade --check-only` (`deprecations.ts`) | — | `detect()` entries for `static guarded` / `static strictFillable` / hash-field writes: a mechanical, agent-consumable migration worklist |
 | harness rules (`templates/agent/.claude/rules/orm-models.md`) | documents the six-cell matrix incl. `strictFillable = false` | rewritten to the three-line model above |
 | skills (`feature`, `guren-api`, root and template copies) | show `static guarded = ['id', 'passwordHash', 'rememberToken']` | drop the line; show `fillable` only |
@@ -327,13 +330,16 @@ descending order of likelihood:
    `isAdmin`, or `balance` and **no `fillable`** exposes those columns exactly as today
    (the no-`fillable` default admits every non-denied column). The existing audit warn
    on missing `fillable` is the current mitigation, but it is a hygiene nudge, not a
-   gate. Two strengthenings in scope: extend the audit to cross-reference schema columns
-   against a privilege-column pattern (the existing `SENSITIVE_COLUMN_PATTERN`,
-   `audit.ts:581`, covers credential *names* only and is used solely for serialization
-   checks — a sibling pattern for `role|admin|balance|verified`-class columns that are
-   mass-assignable escalates the finding from warn to fail), and resolve Open Question 4
-   toward exposing `deniedFields()` so apps — and the agents writing them — have a
-   blessed place to register such columns.
+   gate. Two strengthenings in scope: ~~extend the audit to cross-reference schema columns
+   against a privilege-column pattern (a sibling of `SENSITIVE_COLUMN_PATTERN`,
+   `audit.ts:581`, for `role|admin|balance|verified`-class columns)~~
+   **Amended in implementation:** deferred — validated against the real apps, the obvious
+   pattern false-positives immediately (`examples/blog` legitimately lists
+   `emailVerifiedAt` in `fillable`; a `verified` match would flag it), and a pattern
+   narrow enough to avoid that catches little. Needs a design that distinguishes
+   privilege flags from verification timestamps before it ships. And resolve Open
+   Question 4 toward exposing `deniedFields()` so apps — and the agents writing them —
+   have a blessed place to register such columns.
 3. **Legacy patterns from training data compile silently.** After `guarded` and
    `strictFillable` are deleted, a freshly generated `static guarded = [...]` is not an
    error — it is an inert property TypeScript happily accepts (no `override` involved).

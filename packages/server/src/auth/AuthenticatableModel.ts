@@ -3,23 +3,45 @@ import type { PasswordHasher } from './password/PasswordHasher'
 import { ScryptHasher } from './password/ScryptHasher'
 
 export abstract class AuthenticatableModel<TRecord extends PlainObject = PlainObject> extends Model<TRecord> {
-  static override readonly createType: PlainObject & {
+  static override readonly createType: {
     password?: string
     plainPassword?: string
-  } = undefined as unknown as PlainObject & {
+  } = undefined as unknown as {
     password?: string
     plainPassword?: string
   }
   protected static passwordField = 'password'
   protected static passwordHashField = 'passwordHash'
+  protected static rememberTokenField = 'rememberToken'
   protected static passwordHasher: PasswordHasher | null = null
 
   protected static resolvePasswordField(): string {
     return (this.passwordField ?? 'password') as string
   }
 
-  protected static resolvePasswordHashField(): string {
+  static resolvePasswordHashField(): string {
     return (this.passwordHashField ?? 'passwordHash') as string
+  }
+
+  static resolveRememberTokenField(): string {
+    return (this.rememberTokenField ?? 'rememberToken') as string
+  }
+
+  /**
+   * Credential columns can never be mass-assigned: the resolved password-hash
+   * column (unless the model hashes in place into the password field itself)
+   * and the remember-token column. Resolved at call time so a renamed column
+   * stays covered. Use `forceCreate()`/`forceUpdate()` for trusted
+   * server-side values such as `passwordHash: 'oauth:...'`.
+   */
+  protected static override deniedFields(): string[] {
+    const denied = [...super.deniedFields()]
+    const hashField = this.resolvePasswordHashField()
+    if (hashField !== this.resolvePasswordField()) {
+      denied.push(hashField)
+    }
+    denied.push(this.resolveRememberTokenField())
+    return denied
   }
 
   protected static resolvePasswordHasher(): PasswordHasher {

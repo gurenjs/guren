@@ -186,7 +186,7 @@ void _requiredBelongsTo
 // import (that would invert the package dependency) — examples/blog and
 // examples/api typecheck the same options against the real class.
 abstract class PasswordHashingModel<TRecord extends PlainObject = PlainObject> extends Model<TRecord> {
-  declare static readonly createType: PlainObject & {
+  declare static readonly createType: {
     password?: string
     plainPassword?: string
   }
@@ -218,6 +218,8 @@ void _reshapedCreatePayload
 
 // requireOnCreate in isolation: no column is made optional here, so the only
 // thing missing from the call below is the base's virtual `password`.
+// (Type-level only: on the real AuthenticatableModel, deniedFields() rejects a
+// mass-assigned passwordHash at runtime — forceCreate is the sanctioned path.)
 class RequirePasswordAccount extends defineModel(accounts, {
   base: PasswordHashingModel,
   requireOnCreate: ['password'],
@@ -263,21 +265,6 @@ class _BadRequire extends defineModel(accounts, {
   requireOnCreate: ['passwrod'],
 }) {}
 void _BadRequire
-
-// The pre-existing explicit-type-argument spelling still resolves to the type
-// it names, so adding the two option parameters after TCreate is not a break.
-type LegacyCreate = { name: string; email: string; password: string }
-class LegacyAccount extends defineModel<typeof accounts, typeof PasswordHashingModel, LegacyCreate>(accounts, {
-  base: PasswordHashingModel,
-  createType: {} as LegacyCreate,
-}) {}
-async function _explicitTypeArgumentsStillGovern() {
-  await LegacyAccount.create({ name: 'Ada', email: 'ada@example.com', password: 'secret' })
-
-  // @ts-expect-error the explicitly named create type still applies
-  await LegacyAccount.create({ name: 'Ada' })
-}
-void _explicitTypeArgumentsStillGovern
 
 // Without options the create payload still requires every non-defaulted column.
 class PlainAccount extends defineModel(accounts) {}

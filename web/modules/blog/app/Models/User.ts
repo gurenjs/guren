@@ -12,6 +12,5 @@ export class User extends defineModel(users, {
   optionalOnCreate: ['passwordHash'],
 }) {
   static fillable = ['name', 'email', 'githubId']
-  static guarded = ['id', 'passwordHash', 'rememberToken']
   static override hidden = ['passwordHash', 'rememberToken']
 }

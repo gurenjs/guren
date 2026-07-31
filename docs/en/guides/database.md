@@ -113,7 +113,7 @@ export class User extends defineModel(users, {
 
 `optionalOnCreate` makes columns optional — they keep their type, callers just need not supply them. `requireOnCreate` goes the other way, and accepts both table columns (Drizzle marks defaulted ones optional) and fields contributed by `base`. Both are type-level only and are checked against the real keys, so a typo fails to compile.
 
-Neither closes the payload: a create type always admits unknown keys as `unknown`, so `fillable`/`guarded` remain what reject an unwanted field at runtime.
+Neither closes the payload: a create type always admits unknown keys as `unknown`, so `fillable` remains what rejects an unwanted field at runtime.
 
 ## Querying Data
 
@@ -260,24 +260,13 @@ await User.forceUpdate({ id: user.id }, { emailVerifiedAt: new Date() })
 > [!WARNING]
 > `forceCreate()` / `forceUpdate()` skip mass-assignment protection entirely. Never pass raw request input to them.
 
-To restore the previous behavior of silently dropping non-fillable fields, opt out per model:
+Two protections apply regardless of `fillable`:
 
-```ts
-  static fillable = ['title', 'body', 'status']
-  static strictFillable = false
-```
-
-Or use `guarded` to block specific fields:
-
-```ts
-  // Denylist — everything except these is assignable
-  static guarded = ['id', 'createdAt', 'updatedAt']
-```
-
-Guarded fields are always silently stripped — the strict throwing behavior applies only to models that declare `fillable`.
+- The primary key (`id`) is always silently stripped from mass-assignment input — a form that round-trips it cannot retarget the write.
+- On models extending `AuthenticatableModel`, credential columns (the password hash and remember token) always throw. Listing them in `fillable` does not open them; pass a plain `password` and let the model hash it, or use `forceCreate()`/`forceUpdate()` for trusted server-side values.
 
 > [!NOTE]
-> Use `fillable` or `guarded`, not both. If neither is set, all fields are assignable.
+> If `fillable` is not set, all columns except `id` and the denied credential columns are assignable — declare it on any model that accepts user input.
 
 ## Relationships
 
