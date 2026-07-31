@@ -2,6 +2,7 @@ import { describe, expect, it, mock } from 'bun:test'
 import { readFile, access, mkdir, writeFile } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
+import { DATABASE_DRIVERS } from '../src/blueprints'
 import { createTempWorkspace } from './helpers'
 
 let capturedCommand: any
@@ -122,6 +123,98 @@ describe('create-guren-app CLI', () => {
 
       expect(infoMock.mock.calls.some((call) => call.join(' ').includes('Optional deploy path:'))).toBe(true)
       expect(logMock.mock.calls.some((call) => call.join(' ').includes('bunx guren plugin @guren/plugin-vercel'))).toBe(true)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('scaffolds the blog blueprint on top of the default template', async () => {
+    const workspace = await createTempWorkspace('guren-create-app-cli-blog-')
+    try {
+      await capturedCommand.run({
+        args: {
+          target: 'blog-app',
+          force: false,
+          mode: 'ssr',
+          auth: false,
+          blueprint: 'blog',
+          db: 'sqlite',
+          install: false,
+        },
+      })
+
+      const appRoot = join(workspace.dir, 'blog-app')
+
+      // The overlay copies last, so its files must win over the base template's.
+      const home = await readFile(join(appRoot, 'resources/js/pages/Home.tsx'), 'utf8')
+      expect(home).toContain('Latest posts')
+
+      // Tokens are replaced in the overlay's own files, not just the base's.
+      const layout = await readFile(join(appRoot, 'resources/js/components/Layout.tsx'), 'utf8')
+      expect(layout).toContain('Blog App')
+      expect(layout).not.toContain('__APP_TITLE__')
+
+      // ...without dropping the SSR layer the base blueprint contributes.
+      await access(join(appRoot, 'resources/js/ssr.tsx'))
+
+      await access(join(appRoot, 'app/Http/Controllers/PostController.ts'))
+      await access(join(appRoot, 'app/Policies/PostPolicy.ts'))
+      await access(join(appRoot, 'db/seeders/002_posts.ts'))
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('keeps only the selected driver schema and never the generic one', async () => {
+    const workspace = await createTempWorkspace('guren-create-app-cli-blog-schema-')
+    try {
+      await capturedCommand.run({
+        args: {
+          target: 'pg-blog',
+          force: false,
+          mode: 'spa',
+          auth: false,
+          blueprint: 'blog',
+          db: 'postgres',
+          install: false,
+        },
+      })
+
+      const appRoot = join(workspace.dir, 'pg-blog')
+      const schema = await readFile(join(appRoot, 'db/schema.ts'), 'utf8')
+
+      expect(schema).toContain('pgTable')
+      // The generic schema has no posts table — writing it over a template that
+      // ships its own is what broke the blueprint this one replaces.
+      expect(schema).toContain('export const posts')
+
+      for (const driver of DATABASE_DRIVERS) {
+        await expect(access(join(appRoot, `db/schema.${driver}.ts`))).rejects.toThrow()
+      }
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('ignores --auth for a blueprint that already ships it', async () => {
+    const workspace = await createTempWorkspace('guren-create-app-cli-blog-auth-')
+    try {
+      infoMock.mockClear()
+      await capturedCommand.run({
+        args: {
+          target: 'auth-blog',
+          force: false,
+          mode: 'spa',
+          auth: true,
+          blueprint: 'blog',
+          db: 'sqlite',
+          install: false,
+        },
+      })
+
+      // `guren add auth --force` would overwrite the template's own controllers,
+      // routes, and User model with the generic ones.
+      expect(infoMock.mock.calls.some((call) => call.join(' ').includes('already ships authentication'))).toBe(true)
     } finally {
       await workspace.cleanup()
     }

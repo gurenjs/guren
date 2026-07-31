@@ -280,7 +280,10 @@ const command = defineCommand({
       await updateSsrPackageJson(targetDir)
     }
 
-    const includeAuth = Boolean(args.auth)
+    if (args.auth && blueprint.includesAuth) {
+      consola.info(`The ${blueprint.name} blueprint already ships authentication — ignoring --auth.`)
+    }
+    const includeAuth = Boolean(args.auth) && !blueprint.includesAuth
 
     const shouldInstall = args.install !== false
     let installed = false
@@ -334,7 +337,9 @@ const command = defineCommand({
     }
     consola.log('')
     consola.info('Add features:')
-    consola.log('  bunx guren add auth')
+    if (!blueprint.includesAuth) {
+      consola.log('  bunx guren add auth')
+    }
     consola.log('  bunx guren add resource posts --fields "title:string,body:text"')
     consola.log('')
     consola.info('Generate types and set up database:')

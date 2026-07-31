@@ -28,19 +28,21 @@ step() {
 CLI_BIN="$REPO_ROOT/packages/cli/src/bin.ts"
 CREATE_APP_BIN="$REPO_ROOT/packages/create-app/src/cli.ts"
 
-# Database driver for the scaffolded app. "postgres" expects a reachable
-# server (default: the repo docker-compose instance on port 54322 — run
-# `bun run db:up` locally; CI maps its service container to the same port).
-#
-# There is no "mysql" variant: db:reset followed by db:seed replays migrations
-# against existing tables on MySQL, so the runtime steps below cannot pass yet.
-# `mysqlColumn()` is covered by unit tests in packages/cli/tests instead.
+# Database driver for the scaffolded app. "postgres" and "mysql" expect a
+# reachable server (default: the repo compose instances on ports 54322 and
+# 33306 — run `bun run db:up` / `bun run db:up:mysql` locally; CI maps its
+# service containers to the same ports).
 SMOKE_DB="${GUREN_SMOKE_DB:-sqlite}"
 
 if [ "$SMOKE_DB" = "postgres" ]; then
   # Use a dedicated database so db:reset never touches a developer's data
   # on the shared compose instance. CI maps its service to the same port.
   export DATABASE_URL="${GUREN_SMOKE_DATABASE_URL:-postgres://guren:guren@localhost:54322/guren_smoke}"
+elif [ "$SMOKE_DB" = "mysql" ]; then
+  # Same reasoning as postgres. The unprivileged `guren` user only owns the
+  # `guren` database in both compose and CI, so creating the dedicated one
+  # needs root.
+  export DATABASE_URL="${GUREN_SMOKE_DATABASE_URL:-mysql://root:guren@localhost:33306/guren_smoke}"
 fi
 
 PACKAGES="cli core inertia-client orm server"
@@ -278,9 +280,14 @@ cleanup() {
 
 (cd "$APP_DIR" && bun run db:make)
 
-if [ "$SMOKE_DB" = "postgres" ]; then
-  # Create the smoke database if missing (CREATE DATABASE has no IF NOT EXISTS).
-  cat > "$TEMP_DIR/ensure-db.ts" <<'ENSUREDB'
+if [ "$SMOKE_DB" = "sqlite" ]; then
+  (cd "$APP_DIR" && bun run db:migrate)
+else
+  # Server-backed drivers get a dedicated database, created here if missing.
+  case "$SMOKE_DB" in
+    postgres)
+      # CREATE DATABASE has no IF NOT EXISTS on pg.
+      cat > "$TEMP_DIR/ensure-db.ts" <<'ENSUREDB'
 import postgres from 'postgres'
 
 const target = new URL(process.env.DATABASE_URL ?? '')
@@ -298,16 +305,35 @@ if (exists.length === 0) {
 }
 await sql.end()
 ENSUREDB
+      ;;
+    mysql)
+      cat > "$TEMP_DIR/ensure-db.ts" <<'ENSUREDB'
+import { createConnection } from 'mysql2/promise'
+
+const target = new URL(process.env.DATABASE_URL ?? '')
+const dbName = decodeURIComponent(target.pathname.slice(1))
+const admin = new URL(target.toString())
+admin.pathname = '/'
+
+const connection = await createConnection(admin.toString())
+await connection.query(`CREATE DATABASE IF NOT EXISTS \`${dbName.replaceAll('`', '``')}\``)
+await connection.end()
+console.log(`Database ${dbName} ready`)
+ENSUREDB
+      ;;
+    *)
+      echo "ERROR: unknown GUREN_SMOKE_DB '$SMOKE_DB' (expected sqlite, postgres, or mysql)"
+      exit 1
+      ;;
+  esac
   (cd "$APP_DIR" && bun "$TEMP_DIR/ensure-db.ts")
 
-  # Drop leftovers from previous runs and exercise resetDatabase() on pg.
+  # Drop leftovers from previous runs and exercise resetDatabase().
   (cd "$APP_DIR" && bun "$CLI_BIN" db:reset --force)
-else
-  (cd "$APP_DIR" && bun run db:migrate)
 fi
 (cd "$APP_DIR" && bun run db:seed)
 
-# db:status must see every migration as applied on both drivers.
+# db:status must see every migration as applied on every driver.
 STATUS_OUTPUT=$(cd "$APP_DIR" && bun "$CLI_BIN" db:status 2>&1)
 printf '%s\n' "$STATUS_OUTPUT"
 if printf '%s' "$STATUS_OUTPUT" | grep -q "pending"; then
@@ -341,6 +367,32 @@ if (Number(tracker[0].c) < 1) {
 }
 await sql.end()
 console.log('DB tables OK (postgres): ' + tables.join(', '))
+DBCHECK
+  (cd "$APP_DIR" && bun "$TEMP_DIR/dbcheck.ts")
+elif [ "$SMOKE_DB" = "mysql" ]; then
+  cat > "$TEMP_DIR/dbcheck.ts" <<'DBCHECK'
+import { createConnection } from 'mysql2/promise'
+
+const connection = await createConnection(process.env.DATABASE_URL ?? '')
+const [rows] = await connection.query(
+  'SELECT table_name AS name FROM information_schema.tables WHERE table_schema = DATABASE()',
+)
+const tables = (rows as Array<{ name: string }>).map((row) => row.name)
+for (const required of ['users', 'posts', 'comments']) {
+  if (!tables.includes(required)) {
+    console.error('Missing table after db:migrate: ' + required + ' (found: ' + tables.join(', ') + ')')
+    process.exit(1)
+  }
+}
+// The tracker table lives in the app database on MySQL, so the count below
+// doubles as its existence check — the query fails if it was never created.
+const [tracker] = await connection.query('SELECT count(*) AS c FROM __drizzle_migrations')
+if (Number((tracker as Array<{ c: number }>)[0].c) < 1) {
+  console.error('__drizzle_migrations is empty after db:migrate')
+  process.exit(1)
+}
+await connection.end()
+console.log('DB tables OK (mysql): ' + tables.join(', '))
 DBCHECK
   (cd "$APP_DIR" && bun "$TEMP_DIR/dbcheck.ts")
 else
@@ -456,9 +508,9 @@ if ! printf '%s' "$COMMENTS_BODY" | grep -q "golden-path-json"; then
 fi
 # The resource serializes date columns as ISO strings. sqlite's timestamp-mode
 # integer round-trips the instant exactly, but postgres `timestamp without time
-# zone` shifts it by the server's UTC offset, so the day is asserted loosely —
-# what this checks is that a Date went in and a Date came back, not that the
-# two dialects agree on the instant.
+# zone` and MySQL `timestamp` both shift it by the server/session's UTC
+# offset, so the day is asserted loosely — what this checks is that a Date
+# went in and a Date came back, not that every dialect agrees on the instant.
 if ! printf '%s' "$COMMENTS_BODY" | grep -qE '2026-02-0[23]T[0-9]{2}:[0-9]{2}:[0-9]{2}'; then
   echo "ERROR: GET /comments did not round-trip the date column"
   printf '%s\n' "$COMMENTS_BODY" | head -40

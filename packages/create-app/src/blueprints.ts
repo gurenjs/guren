@@ -1,11 +1,11 @@
 import { randomBytes } from 'node:crypto'
-import { cp, readFile, rename, writeFile } from 'node:fs/promises'
+import { cp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
-import { directoryExists, toPackageName, toTitleCase } from './utils'
+import { directoryExists, fileExists, toPackageName, toTitleCase } from './utils'
 
-export const APP_BLUEPRINTS = ['default', 'api', 'worker'] as const
+export const APP_BLUEPRINTS = ['default', 'api', 'blog', 'worker'] as const
 export type AppBlueprintName = (typeof APP_BLUEPRINTS)[number]
 export type RenderingMode = 'spa' | 'ssr'
 
@@ -24,7 +24,7 @@ export type DatabaseDriver = (typeof DATABASE_DRIVERS)[number]
  */
 export const TEMPLATES_ROOT = fileURLToPath(new URL('../templates', import.meta.url))
 
-type TemplateName = 'default' | 'default-ssr' | 'api-only'
+type TemplateName = 'default' | 'default-ssr' | 'api-only' | 'blog'
 
 export function templateDir(name: TemplateName): string {
   return join(TEMPLATES_ROOT, name)
@@ -45,6 +45,12 @@ export interface AppBlueprint {
   baseTemplate: TemplateName
   overlayTemplates: Partial<Record<RenderingMode, TemplateName[]>>
   transformFiles: string[]
+  /**
+   * Set when the template already ships the authentication stack. `--auth` runs
+   * `guren add auth --force` afterwards, which would overwrite the template's
+   * own controllers, routes, and User model with the generic ones.
+   */
+  includesAuth?: boolean
   postScaffold?: (context: BlueprintContext) => Promise<void>
 }
 
@@ -70,6 +76,15 @@ const API_TRANSFORM_FILES = [
   'bin/serve.ts',
 ]
 
+// Transforms run once, after every layer has landed, and each path is read
+// unconditionally — so this lists every tokenised file in the scaffolded tree,
+// base template and overlay alike, not just what the overlay ships.
+const BLOG_TRANSFORM_FILES = [
+  ...DEFAULT_TRANSFORM_FILES,
+  'resources/js/components/Layout.tsx',
+  'db/seeders/001_users.ts',
+]
+
 const blueprintRegistry: Record<AppBlueprintName, AppBlueprint> = {
   default: {
     name: 'default',
@@ -86,6 +101,20 @@ const blueprintRegistry: Record<AppBlueprintName, AppBlueprint> = {
     baseTemplate: 'api-only',
     overlayTemplates: {},
     transformFiles: API_TRANSFORM_FILES,
+  },
+  blog: {
+    name: 'blog',
+    description: 'Blog starter — posts CRUD, session auth, and a seeded demo account.',
+    baseTemplate: 'default',
+    // The overlay lands last in both modes so its pages and controllers win, and
+    // SSR still gets `default-ssr` — the blueprint this replaces overlaid only
+    // itself in SSR mode and shipped an app with no ssr.tsx entry.
+    overlayTemplates: {
+      spa: ['blog'],
+      ssr: ['default-ssr', 'blog'],
+    },
+    transformFiles: BLOG_TRANSFORM_FILES,
+    includesAuth: true,
   },
   worker: {
     name: 'worker',
@@ -259,7 +288,12 @@ export const users = pgTable('users', {
   }
 
   if (driver === 'mysql') {
-    return `import { mysqlTable, int, varchar, timestamp } from '@guren/orm/drizzle'
+    // MySQL uses drizzle-orm directly — @guren/orm/drizzle re-exports the
+    // PostgreSQL builders under the plain names (`timestamp`, `text`), so a
+    // MySQL table imported from there is built out of pg column builders.
+    // This is also the module `guren add auth` / `add resource` merge their
+    // new columns into.
+    return `import { mysqlTable, int, varchar, timestamp } from 'drizzle-orm/mysql-core'
 
 export const users = mysqlTable('users', {
   id: int('id').primaryKey().autoincrement(),
@@ -280,6 +314,45 @@ export const users = sqliteTable('users', {
   createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
 })
 `
+}
+
+/**
+ * Templates whose app code needs more than the single `users` table above ship
+ * their own schema, one file per driver, as `db/schema.<driver>.ts`. The variant
+ * for the selected driver becomes `db/schema.ts` and the rest are deleted.
+ *
+ * The indirection exists because `applyDatabaseConfig` has to overwrite
+ * `db/schema.ts` — a template carrying a plain `db/schema.ts` written for one
+ * driver would otherwise be handed to users who picked another. The blueprint
+ * this replaced worked around that by regenerating its schema from a copy kept
+ * in this file, which then drifted from the columns its own controllers read.
+ *
+ * A template that ships some variants but not the selected one is a packaging
+ * bug, not a reason to fall back to the generic schema: the fallback would
+ * scaffold an app whose models reference tables that do not exist.
+ */
+function schemaVariantPath(destination: string, driver: DatabaseDriver): string {
+  return join(destination, `db/schema.${driver}.ts`)
+}
+
+async function resolveSchema(destination: string, driver: DatabaseDriver): Promise<string> {
+  const shipped = (await Promise.all(
+    DATABASE_DRIVERS.map(async (name) => (await fileExists(schemaVariantPath(destination, name)) ? name : null)),
+  )).filter((name) => name !== null)
+
+  if (shipped.length === 0) {
+    return generateSchema(driver)
+  }
+
+  if (!shipped.includes(driver)) {
+    throw new Error(
+      `This template ships a database schema for ${shipped.join(', ')} but not for ${driver}. ` +
+      'This build of create-guren-app is incomplete — please report it at ' +
+      'https://github.com/gurenjs/guren/issues.',
+    )
+  }
+
+  return readFile(schemaVariantPath(destination, driver), 'utf8')
 }
 
 function generateDrizzleConfig(driver: DatabaseDriver): string {
@@ -352,12 +425,19 @@ async function applyDatabaseConfig(destination: string, driver: DatabaseDriver):
   const { url, dep } = DATABASE_DEFAULTS[driver]
   const dockerCompose = generateDockerCompose(driver)
 
+  // Resolved before the writes below so a template missing the selected driver's
+  // schema fails while `db/schema.ts` still holds whatever the copy left there.
+  const schema = await resolveSchema(destination, driver)
+
   // Write all DB-variant files in parallel — including SQLite, since an overlay
   // template may ship a schema written for one driver that has to be replaced
   // with the driver the user actually selected.
   await Promise.all([
     writeFile(join(destination, 'config/database.ts'), generateDatabaseConfig(driver), 'utf8'),
-    writeFile(join(destination, 'db/schema.ts'), generateSchema(driver), 'utf8'),
+    writeFile(join(destination, 'db/schema.ts'), schema, 'utf8'),
+    // Independent of the write above: the selected variant's contents are
+    // already in `schema`, and no variant shares a path with db/schema.ts.
+    ...DATABASE_DRIVERS.map((name) => rm(schemaVariantPath(destination, name), { force: true })),
     writeFile(join(destination, 'drizzle.config.ts'), generateDrizzleConfig(driver), 'utf8'),
     dockerCompose ? writeFile(join(destination, 'docker-compose.yml'), dockerCompose, 'utf8') : Promise.resolve(),
     // Update .env and .env.example with the correct DATABASE_URL

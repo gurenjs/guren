@@ -97,6 +97,9 @@ jobs:
       - name: Docs audit
         run: bun run audit:docs
 
+      - name: Dependency audit
+        run: bun run audit:deps
+
       - name: Security audit (blog example)
         run: cd examples/blog && bun ../../packages/cli/src/bin.ts audit
 
@@ -124,6 +127,9 @@ jobs:
       - name: Fresh app smoke (api)
         run: bun run smoke:starter:api
 
+      - name: Fresh app smoke (blog)
+        run: bun run smoke:starter:blog
+
       - name: Fresh app smoke (worker)
         run: bun run smoke:starter:worker
 
@@ -140,6 +146,10 @@ jobs:
 
       - name: Golden path smoke test (postgres)
         run: bun run smoke:golden-path:postgres
+
+      # The only place a --db mysql scaffold is typechecked and migrated.
+      - name: Golden path smoke test (mysql)
+        run: bun run smoke:golden-path:mysql
 
       - name: Run tests
         run: bun run test

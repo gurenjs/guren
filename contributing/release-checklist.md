@@ -8,8 +8,13 @@
 - [ ] `bun run test` succeeds (all packages + examples)
 - [ ] All audit scripts pass (`audit:core-first`, `audit:contracts`, `audit:feature-runtime`, `audit:starter-template`, `audit:docs`, `audit:bundle-budgets`)
 - [ ] Smoke tests pass (`smoke:starter`, `smoke:starter:packed`, `smoke:upgrade-existing-app`, `smoke:golden-path`)
+- [ ] Per-driver golden paths pass (`smoke:golden-path:postgres`, `smoke:golden-path:mysql`)
 - [ ] E2E tests pass
 - [ ] Nightly canary has been green for 3+ days
+
+The release workflow has no MySQL service, so `smoke:golden-path:mysql` runs
+only on the PR's CI and here. Start the databases first: `bun run db:up` and
+`bun run db:up:mysql`.
 
 ## Version Bump
 

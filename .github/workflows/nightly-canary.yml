@@ -80,6 +80,11 @@ jobs:
       - name: Docs audit
         run: bun run audit:docs
 
+      # Advisories appear without any code change, so the nightly run is the
+      # one that catches them between PRs.
+      - name: Dependency audit
+        run: bun run audit:deps
+
       # -- Example app builds (matching CI) --
 
       - name: Build example apps

@@ -83,6 +83,9 @@ jobs:
       - name: Docs audit
         run: bun run audit:docs
 
+      - name: Dependency audit
+        run: bun run audit:deps
+
       - name: Build example apps
         run: |
           bun run --cwd examples/blog build
