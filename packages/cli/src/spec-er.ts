@@ -1,6 +1,6 @@
 import { discoverParsedModels, type DiscoveredModel, type ModelRelationship } from './model-parser'
 import { parseSchemaTables, type SchemaTable } from './schema-parser'
-import { SPEC_BANNER, specFrontmatter, compareStrings, mermaidToken, type SpecArtifact } from './spec-artifact'
+import { specHeader, compareStrings, mermaidToken, type SpecArtifact } from './spec-artifact'
 
 interface ErEdge {
   from: string
@@ -89,13 +89,7 @@ export async function generateErSpec(cwd: string): Promise<SpecArtifact> {
     }
   }
 
-  const lines: string[] = [
-    ...specFrontmatter('ER Diagram', 'Entities, attributes, and relationship edges derived from the schema and models.'),
-    SPEC_BANNER,
-    '',
-    '# ER Diagram',
-    '',
-  ]
+  const lines: string[] = specHeader('ER Diagram', 'Entities, attributes, and relationship edges derived from the schema and models.')
   lines.push(
     'Entities and attributes are derived from `db/schema.ts` (and every module schema); edges from model relationship declarations and explicit `.references()` foreign keys.',
     '',

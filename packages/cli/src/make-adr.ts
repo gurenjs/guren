@@ -1,7 +1,5 @@
-import { execFile } from 'node:child_process'
 import { readdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { promisify } from 'node:util'
 
 import { consola } from 'consola'
 
@@ -16,6 +14,7 @@ import {
   moduleNameFromRelPath,
 } from './discovery'
 import { discoverParsedModels } from './model-parser'
+import { runGit } from './changed-files'
 
 const ADR_DIR = 'docs/adr'
 
@@ -122,25 +121,17 @@ async function resolveAdrPrefill(entity: string, moduleName?: string): Promise<A
   return { entities: [match.className], related }
 }
 
-const execFileAsync = promisify(execFile)
-
 /**
- * Actors are interpolated into YAML frontmatter unquoted, so the character
- * set is restricted the same way entity names are — anything that could
- * open a YAML construct (`{`, `}`, `#`, quotes, newlines) is rejected.
- * Spaces are allowed: git author names commonly contain them.
+ * Actor shape per OKF §7. Quotes and newlines are excluded so the value
+ * cannot break out of the quoted scalar the template writes it into.
  */
 const ACTOR_RE = /^[A-Za-z][\w.:@/ -]*$/
 
 /** The git author as an OKF `human:<id>` actor, or null when unavailable. */
 async function gitAuthorActor(): Promise<string | null> {
-  try {
-    const { stdout } = await execFileAsync('git', ['config', 'user.name'])
-    const name = stdout.trim()
-    return name !== '' && ACTOR_RE.test(`human:${name}`) ? `human:${name}` : null
-  } catch {
-    return null
-  }
+  const [name] = (await runGit(process.cwd(), ['config', 'user.name'])) ?? []
+  if (name === undefined) return null
+  return ACTOR_RE.test(`human:${name}`) ? `human:${name}` : null
 }
 
 async function resolveActor(by?: string): Promise<string | null> {

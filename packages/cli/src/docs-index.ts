@@ -178,7 +178,7 @@ function parseInlineMapping(value: string): DocMapping | null {
 }
 
 /** A frontmatter value: scalar, list, or (for `generated`/`verified`) a mapping. */
-export type DocFrontmatterValue = string | string[] | DocMapping | DocMapping[] | Array<string | DocMapping>
+export type DocFrontmatterValue = string | DocMapping | Array<string | DocMapping>
 
 /** A `{ by, at }`-shaped mapping, however it was written. */
 export type DocMapping = Record<string, string>
@@ -190,9 +190,7 @@ function parseInlineValue(value: string): DocFrontmatterValue {
   const mapping = parseInlineMapping(value)
   if (mapping) return mapping
   if (value.startsWith('[') && value.endsWith(']')) {
-    const entries = splitInlineArray(value.slice(1, -1))
-    const mapped = entries.map((entry) => parseInlineMapping(entry) ?? entry)
-    return mapped as DocFrontmatterValue
+    return splitInlineArray(value.slice(1, -1)).map((entry) => parseInlineMapping(entry) ?? entry)
   }
   return unquote(value)
 }
@@ -213,12 +211,11 @@ export function parseDocFrontmatter(
 
   const data: Record<string, DocFrontmatterValue> = {}
 
-  // The top-level key whose indented body is being collected, and where
-  // the collected entries go. A key can turn out to hold a list or a
+  // The top-level key whose indented body is being collected, with the
+  // entries gathered so far. A key can turn out to hold a list or a
   // mapping; whichever appears first wins.
-  let openKey: string | null = null
-  let openList: Array<string | DocMapping> | null = null
-  let openMapping: DocMapping | null = null
+  let open: { key: string; list: Array<string | DocMapping>; mapping: DocMapping | null } | null =
+    null
   // The mapping started by the most recent `- key: value` item, so its
   // sibling lines (`  at: …`) join it rather than starting a new entry.
   let itemMapping: DocMapping | null = null
@@ -226,10 +223,8 @@ export function parseDocFrontmatter(
   let pendingItem = false
 
   const closeBlock = (): void => {
-    if (openKey !== null && openMapping !== null) data[openKey] = openMapping
-    openKey = null
-    openList = null
-    openMapping = null
+    if (open?.mapping) data[open.key] = open.mapping
+    open = null
     itemMapping = null
     pendingItem = false
   }
@@ -239,7 +234,7 @@ export function parseDocFrontmatter(
     if (!rawLine.trim() || /^\s*#/.test(rawLine)) continue
 
     const item = /^(\s*)-\s*(.*)$/.exec(rawLine)
-    if (item && openList) {
+    if (item && open) {
       const entry = stripInlineComment(item[2].trim())
       if (!entry) {
         // `-` alone opens an entry whose body is on the following
@@ -252,7 +247,7 @@ export function parseDocFrontmatter(
       pendingItem = false
       const inline = parseInlineMapping(entry)
       if (inline) {
-        openList.push(inline)
+        open.list.push(inline)
         itemMapping = null
         continue
       }
@@ -261,10 +256,10 @@ export function parseDocFrontmatter(
       const kv = KEY_VALUE_RE.exec(entry)
       if (kv && kv[2] !== '') {
         itemMapping = { [kv[1]]: unquote(kv[2].trim()) }
-        openList.push(itemMapping)
+        open.list.push(itemMapping)
         continue
       }
-      openList.push(unquote(entry))
+      open.list.push(unquote(entry))
       itemMapping = null
       continue
     }
@@ -279,11 +274,11 @@ export function parseDocFrontmatter(
     const key = kv[1]
     const value = stripInlineComment(kv[2].trim())
 
-    if (indented && openKey !== null) {
+    if (indented && open) {
       // The first entry under a dash-only item starts that item's mapping.
-      if (pendingItem && openList !== null) {
+      if (pendingItem) {
         itemMapping = { [key]: unquote(value) }
-        openList.push(itemMapping)
+        open.list.push(itemMapping)
         pendingItem = false
         continue
       }
@@ -293,9 +288,9 @@ export function parseDocFrontmatter(
         continue
       }
       // …otherwise a block-mapping entry under the open key.
-      if (openList !== null && openList.length === 0) {
-        openMapping ??= {}
-        openMapping[key] = unquote(value)
+      if (open.list.length === 0) {
+        open.mapping ??= {}
+        open.mapping[key] = unquote(value)
         continue
       }
     }
@@ -306,8 +301,7 @@ export function parseDocFrontmatter(
       // Could still become a list or a mapping; the next line decides.
       const list: Array<string | DocMapping> = []
       data[key] = list
-      openKey = key
-      openList = list
+      open = { key, list, mapping: null }
     } else {
       data[key] = parseInlineValue(value)
     }
@@ -321,8 +315,7 @@ function toStringList(value: DocFrontmatterValue | undefined): string[] {
   if (value === undefined) return []
   if (typeof value === 'string') return [value]
   if (!Array.isArray(value)) return []
-  const entries: Array<string | DocMapping> = value
-  return entries.filter((entry): entry is string => typeof entry === 'string')
+  return value.filter((entry): entry is string => typeof entry === 'string')
 }
 
 function toScalar(value: DocFrontmatterValue | undefined): string | undefined {
@@ -331,10 +324,12 @@ function toScalar(value: DocFrontmatterValue | undefined): string | undefined {
 
 
 function toActorEvent(value: DocFrontmatterValue | undefined): DocActorEvent | undefined {
-  if (value === undefined || Array.isArray(value)) return undefined
-  const mapping = typeof value === 'string' ? parseInlineMapping(value) : value
-  if (!mapping) return undefined
-  return { by: mapping.by, at: mapping.at }
+  // Mapping recognition belongs to the parser: by the time a value gets
+  // here every `{ … }` is already a DocMapping, so a string is one the
+  // parser judged a plain scalar (a quoted one, say) and re-parsing it
+  // would override that.
+  if (value === undefined || typeof value === 'string' || Array.isArray(value)) return undefined
+  return { by: value.by, at: value.at }
 }
 
 /**
@@ -345,8 +340,7 @@ function toActorEvent(value: DocFrontmatterValue | undefined): DocActorEvent | u
  */
 function toActorEvents(value: DocFrontmatterValue | undefined): DocActorEvent[] {
   if (value === undefined) return []
-  const entries: Array<DocFrontmatterValue> = Array.isArray(value) ? value : [value]
-  return entries
+  return (Array.isArray(value) ? value : [value])
     .map((entry) => toActorEvent(entry))
     .filter((event): event is DocActorEvent => event !== undefined)
 }
@@ -366,9 +360,8 @@ const ESCAPABLE = /^[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]$/
  * The destination of a markdown link starting at `open` (the index of
  * `(`), honoring balanced parentheses so `./use-(legacy)-api.md` survives.
  * Returns null when the link is unterminated or contains whitespace.
- *
- * Exported so anything that renders these links resolves exactly the
- * same target this extraction produced.
+ * Exported for the renderer, so a rendered link and the graph edge
+ * derived from it always name the same target.
  */
 export function readLinkDestination(
   text: string,

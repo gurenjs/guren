@@ -16,7 +16,7 @@ import {
   listInertiaPageIds,
   type InertiaPageDescription,
 } from './inertia-pages'
-import { SPEC_BANNER, specFrontmatter, compareStrings, type SpecArtifact } from './spec-artifact'
+import { specHeader, compareStrings, type SpecArtifact } from './spec-artifact'
 
 const PAGES_DIR = 'resources/js/pages'
 
@@ -218,13 +218,7 @@ export async function generateScreensSpec(cwd: string, routesFile?: string): Pro
 
   const unrouted = pageIdsOnDisk.filter((id) => !routesByPage.has(id))
 
-  const lines: string[] = [
-    ...specFrontmatter('Screens', 'Routes, controllers, and the Inertia pages they render.'),
-    SPEC_BANNER,
-    '',
-    '# Screens',
-    '',
-  ]
+  const lines: string[] = specHeader('Screens', 'Routes, controllers, and the Inertia pages they render.')
   lines.push(
     `Derived from \`${relRoutesFile}\`, controller \`this.inertia(...)\` calls, `
     + `and page components under \`${PAGES_DIR}/\` — those files are the source of truth, not this document.`,

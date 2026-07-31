@@ -27,15 +27,24 @@ function hasGlobChars(entry: string): boolean {
 }
 
 /**
+ * Backslashes count as separators, and a drive letter is absolute: on
+ * Windows `path.resolve` treats them that way, so a `..\..\outside.md`
+ * examined with `/` rules alone would slip past containment and resolve
+ * outside the app root. Both containment checks below start here so
+ * they cannot disagree about what a separator is.
+ */
+function normalizeTarget(target: string): { path: string; absolute: boolean } {
+  const path = target.replace(/\\/g, '/')
+  return { path, absolute: path.startsWith('/') || /^[A-Za-z]:/.test(path) }
+}
+
+/**
  * Doc links are app-root-relative by convention; absolute paths and `..`
- * segments would validate files outside the project. Backslashes count
- * as separators: on Windows `path.resolve` treats them as such, so a
- * `..\..\outside.md` that only split on `/` would slip past this and
- * resolve outside the app root.
+ * segments would validate files outside the project.
  */
 function isAppRootRelative(entry: string): boolean {
-  if (entry.startsWith('/') || entry.startsWith('\\') || /^[A-Za-z]:/.test(entry)) return false
-  return !entry.split(/[/\\]/).includes('..')
+  const { path, absolute } = normalizeTarget(entry)
+  return !absolute && !path.split('/').includes('..')
 }
 
 /**
@@ -84,14 +93,15 @@ const MODEL_FILE_PATTERN = /(?:^|\/)app\/Models\/[^/]+\.(?:ts|mts|js|mjs)$/
  * the app root.
  */
 export function resolveDocLink(docPath: string, target: string): string | null {
-  // Backslashes are separators on Windows; normalize before resolving so
-  // traversal cannot hide behind them (see isAppRootRelative).
-  const normalized = target.replace(/\\/g, '/')
-  if (/^[A-Za-z]:/.test(normalized)) return null
+  const { path } = normalizeTarget(target)
+  if (/^[A-Za-z]:/.test(path)) return null
 
-  const fromBundleRoot = normalized.startsWith('/')
+  // A leading `/` is bundle-relative, so it is resolved rather than
+  // rejected — the one place the two containment checks legitimately
+  // differ.
+  const fromBundleRoot = path.startsWith('/')
   const base = fromBundleRoot ? bundleRoot(docPath) : posix.dirname(docPath)
-  const joined = posix.join(base, fromBundleRoot ? normalized.slice(1) : normalized)
+  const joined = posix.join(base, fromBundleRoot ? path.slice(1) : path)
   return joined === '..' || joined.startsWith('../') ? null : joined
 }
 
@@ -137,10 +147,22 @@ export async function runDocsCheck(options: DocsCheckOptions): Promise<CheckResu
     return (await projectFilesPromise).some((file) => matchesGlob(file, glob))
   }
 
+  // Docs cross-link the same hub pages, so the same path is probed many
+  // times per run; the promise is cached so each becomes one access().
+  const existsCache = new Map<string, Promise<boolean>>()
+  const exists = (path: string): Promise<boolean> => {
+    let hit = existsCache.get(path)
+    if (!hit) {
+      // `fileExists` is access()-based, so it accepts directories too.
+      hit = fileExists(cwd, path)
+      existsCache.set(path, hit)
+    }
+    return hit
+  }
+
   const entryResolves = async (entry: string): Promise<boolean> => {
     if (!isAppRootRelative(entry)) return false
-    // `fileExists` is access()-based, so it accepts directories too.
-    return hasGlobChars(entry) ? globMatchesSomething(entry) : fileExists(cwd, entry)
+    return hasGlobChars(entry) ? globMatchesSomething(entry) : exists(entry)
   }
 
   // --changed scoping. Entity names are derived from changed *paths* (not
@@ -161,8 +183,9 @@ export async function runDocsCheck(options: DocsCheckOptions): Promise<CheckResu
     if (ref.entities.some((entity) => changedModelNames!.has(entity.toLowerCase()))) return true
     const targetChanged = (path: string): boolean => {
       const normalized = path.replace(/\/$/, '')
+      if (changedFiles!.has(normalized)) return true
       // A directory target is in scope when anything beneath it changed.
-      return changedList.some((file) => file === normalized || file.startsWith(`${normalized}/`))
+      return changedList.some((file) => file.startsWith(`${normalized}/`))
     }
     if (
       ref.related.some((entry) =>
@@ -199,24 +222,28 @@ export async function runDocsCheck(options: DocsCheckOptions): Promise<CheckResu
     }
 
     const relatedChecks = await Promise.all(
-      ref.related.map(async (entry) => ({ entry, ok: await entryResolves(entry) })),
+      ref.related.map(async (entry) => ({
+        entry,
+        rooted: isAppRootRelative(entry),
+        ok: await entryResolves(entry),
+      })),
     )
-    const brokenRelated = relatedChecks.filter((result) => !result.ok).map((result) => result.entry)
+    const brokenRelated = relatedChecks.filter((result) => !result.ok)
     const brokenEntities = ref.entities.filter((entity) => !modelNames.has(entity.toLowerCase()))
 
     const linkChecks = await Promise.all(
       ref.links.map(async (target) => {
         const resolved = resolveDocLink(ref.path, target)
-        return { target, ok: resolved !== null && (await fileExists(cwd, resolved)) }
+        return { target, resolved, ok: resolved !== null && (await exists(resolved)) }
       }),
     )
-    const brokenLinks = linkChecks.filter((result) => !result.ok).map((result) => result.target)
+    const brokenLinks = linkChecks.filter((result) => !result.ok)
 
     // A missing target is a warn, not a fail: OKF §6.1 treats a broken
     // link as possibly not-yet-written knowledge, not as malformed. A
     // link that escapes the app root is malformed and fails.
-    for (const target of brokenLinks) {
-      const escapes = resolveDocLink(ref.path, target) === null
+    for (const { target, resolved } of brokenLinks) {
+      const escapes = resolved === null
       results.push(
         check(
           `docs-link:${ref.path}:${target}`,
@@ -231,8 +258,8 @@ export async function runDocsCheck(options: DocsCheckOptions): Promise<CheckResu
       )
     }
 
-    for (const entry of brokenRelated) {
-      const escapes = !isAppRootRelative(entry)
+    for (const { entry, rooted } of brokenRelated) {
+      const escapes = !rooted
       results.push(
         check(
           `docs-related:${ref.path}:${entry}`,
@@ -382,7 +409,7 @@ export async function runDocsCheck(options: DocsCheckOptions): Promise<CheckResu
     for (const tag of extractDocsTags(source)) {
       const key = `docs-tag:${relPath}:${tag}`
       const title = `${relPath} @docs`
-      if (isAppRootRelative(tag) && (await fileExists(cwd, tag))) {
+      if (isAppRootRelative(tag) && (await exists(tag))) {
         results.push(check(key, title, 'pass', `@docs ${tag} resolves.`, undefined, relPath))
       } else {
         results.push(
