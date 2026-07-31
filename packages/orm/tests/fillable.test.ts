@@ -13,20 +13,25 @@ class FillableModel extends Model<PlainObject> {
   static fillable = ['title', 'body']
 }
 
-class GuardedModel extends Model<PlainObject> {
+class DeniedModel extends Model<PlainObject> {
   static override table = {} as unknown
-  static guarded = ['id', 'createdAt', 'passwordHash']
+  protected static override deniedFields(): string[] {
+    return ['passwordHash']
+  }
 }
 
-class FillableAndGuardedModel extends Model<PlainObject> {
+class DeniedWithFillableModel extends Model<PlainObject> {
   static override table = {} as unknown
-  static fillable = ['name', 'email']
-  static guarded = ['id'] // should be ignored when fillable is set
+  // Listing a denied field in fillable does not open it — denied wins.
+  static fillable = ['name', 'passwordHash']
+  protected static override deniedFields(): string[] {
+    return ['passwordHash']
+  }
 }
 
 describe('Model.filterFillable', () => {
-  describe('default (no fillable or guarded)', () => {
-    it('should strip id by default', () => {
+  describe('default (no fillable)', () => {
+    it('should strip id', () => {
       const result = DefaultModel.filterFillable({ id: 1, name: 'Alice' })
       expect(result).toEqual({ name: 'Alice' })
     })
@@ -36,9 +41,15 @@ describe('Model.filterFillable', () => {
       const result = DefaultModel.filterFillable(data)
       expect(result).toEqual(data)
     })
+
+    it('should not mutate the input when stripping id', () => {
+      const data = { id: 1, name: 'Alice' }
+      DefaultModel.filterFillable(data)
+      expect(data).toEqual({ id: 1, name: 'Alice' })
+    })
   })
 
-  describe('with fillable (strict by default)', () => {
+  describe('with fillable (always strict)', () => {
     it('should throw MassAssignmentException for fields outside the allowlist', () => {
       expect(() =>
         FillableModel.filterFillable({
@@ -54,6 +65,7 @@ describe('Model.filterFillable', () => {
       } catch (error) {
         expect(error).toBeInstanceOf(MassAssignmentException)
         expect((error as MassAssignmentException).fields).toEqual(['isAdmin'])
+        expect((error as MassAssignmentException).reason).toBe('not-fillable')
         expect((error as MassAssignmentException).message).toContain('forceCreate')
       }
     })
@@ -67,63 +79,62 @@ describe('Model.filterFillable', () => {
       const result = FillableModel.filterFillable({ title: 'Hello' })
       expect(result).toEqual({ title: 'Hello' })
     })
-  })
 
-  describe('with fillable and strictFillable = false', () => {
-    class LenientModel extends Model<PlainObject> {
-      static override table = {} as unknown
-      static fillable = ['title', 'body']
-      static strictFillable = false
-    }
-
-    it('should silently discard fields outside the allowlist', () => {
-      const result = LenientModel.filterFillable({
-        title: 'Hello',
-        body: 'World',
-        isAdmin: true,
-      })
-      expect(result).toEqual({ title: 'Hello', body: 'World' })
-    })
-
-    it('should return empty object when no fillable fields match', () => {
-      const result = LenientModel.filterFillable({ isAdmin: true, role: 'superuser' })
-      expect(result).toEqual({})
+    it('should strip id silently instead of counting it as blocked', () => {
+      const result = FillableModel.filterFillable({ id: 7, title: 'Hello' })
+      expect(result).toEqual({ title: 'Hello' })
     })
   })
 
-  describe('with guarded', () => {
-    it('should strip guarded fields', () => {
-      const result = GuardedModel.filterFillable({
-        id: 1,
-        name: 'Alice',
-        createdAt: '2024-01-01',
-        passwordHash: '$2b$...',
-      })
-      expect(result).toEqual({ name: 'Alice' })
+  describe('with deniedFields()', () => {
+    it('should throw with reason "denied" when a denied field is present', () => {
+      expect(() => DeniedModel.filterFillable({ name: 'A', passwordHash: 'evil' })).toThrow(
+        MassAssignmentException,
+      )
+
+      try {
+        DeniedModel.filterFillable({ passwordHash: 'evil' })
+      } catch (error) {
+        expect(error).toBeInstanceOf(MassAssignmentException)
+        expect((error as MassAssignmentException).fields).toEqual(['passwordHash'])
+        expect((error as MassAssignmentException).reason).toBe('denied')
+        expect((error as MassAssignmentException).message).toContain('never be mass-assigned')
+      }
     })
 
-    it('should pass through non-guarded fields', () => {
-      const result = GuardedModel.filterFillable({ name: 'Alice', email: 'alice@test.com' })
-      expect(result).toEqual({ name: 'Alice', email: 'alice@test.com' })
+    it('should pass through input without denied fields', () => {
+      const result = DeniedModel.filterFillable({ name: 'A' })
+      expect(result).toEqual({ name: 'A' })
     })
-  })
 
-  describe('fillable takes precedence over guarded', () => {
-    it('should use the fillable allowlist and ignore guarded', () => {
+    it('should throw even when the denied field is listed in fillable', () => {
       expect(() =>
-        FillableAndGuardedModel.filterFillable({
-          id: 1,
-          name: 'Alice',
-          email: 'alice@test.com',
-          isAdmin: true,
-        }),
+        DeniedWithFillableModel.filterFillable({ name: 'A', passwordHash: 'evil' }),
       ).toThrow(MassAssignmentException)
 
-      const result = FillableAndGuardedModel.filterFillable({
-        name: 'Alice',
-        email: 'alice@test.com',
-      })
-      expect(result).toEqual({ name: 'Alice', email: 'alice@test.com' })
+      try {
+        DeniedWithFillableModel.filterFillable({ name: 'A', passwordHash: 'evil' })
+      } catch (error) {
+        expect((error as MassAssignmentException).reason).toBe('denied')
+      }
+    })
+
+    it('should check the raw input before the allowlist so the denied reason wins', () => {
+      // passwordHash is both denied and outside fillable on this model —
+      // the caller must see the credential-specific error, not the generic one.
+      class BothModel extends Model<PlainObject> {
+        static override table = {} as unknown
+        static fillable = ['name']
+        protected static override deniedFields(): string[] {
+          return ['passwordHash']
+        }
+      }
+      try {
+        BothModel.filterFillable({ passwordHash: 'evil' })
+        expect.unreachable()
+      } catch (error) {
+        expect((error as MassAssignmentException).reason).toBe('denied')
+      }
     })
   })
 
@@ -160,6 +171,22 @@ describe('Model.filterFillable', () => {
       const record = await StrictUser.forceCreate({ name: 'A', email: 'a@x.com', passwordHash: 'oauth:x' })
       expect(record).toEqual({ name: 'A', email: 'a@x.com', passwordHash: 'oauth:x' })
       expect(calls.create).toHaveLength(1)
+    })
+
+    it('forceCreate() bypasses deniedFields()', async () => {
+      class DeniedUser extends Model<PlainObject> {
+        static override table = 'users'
+        protected static override deniedFields(): string[] {
+          return ['passwordHash']
+        }
+      }
+      const { adapter, calls } = createRecordingAdapter()
+      DeniedUser.useAdapter(adapter)
+
+      await expect(DeniedUser.create({ passwordHash: 'evil' })).rejects.toThrow(MassAssignmentException)
+
+      await DeniedUser.forceCreate({ passwordHash: 'oauth:x' })
+      expect(calls.create).toEqual([{ passwordHash: 'oauth:x' }])
     })
 
     it('forceUpdate() bypasses the allowlist', async () => {
@@ -206,6 +233,22 @@ describe('Model.filterFillable', () => {
       ).rejects.toThrow(MassAssignmentException)
     })
 
+    it('applies deniedFields() on the fluent builder', async () => {
+      class DeniedPost extends Model<PlainObject> {
+        static override table = 'posts'
+        protected static override deniedFields(): string[] {
+          return ['passwordHash']
+        }
+      }
+      const { adapter, calls } = createBuilderAdapter()
+      DeniedPost.useAdapter(adapter)
+
+      await expect(
+        DeniedPost.where({ id: 1 }).update({ passwordHash: 'evil' }),
+      ).rejects.toThrow(MassAssignmentException)
+      expect(calls).toEqual([])
+    })
+
     it('forceUpdate on the builder bypasses the allowlist', async () => {
       class StrictPost extends Model<PlainObject> {
         static override table = 'posts'
@@ -218,7 +261,7 @@ describe('Model.filterFillable', () => {
       expect(calls).toEqual([{ authorId: 99 }])
     })
 
-    it('models without fillable keep guarded stripping on the builder', async () => {
+    it('models without fillable keep id stripping on the builder', async () => {
       class LoosePost extends Model<PlainObject> {
         static override table = 'posts'
       }

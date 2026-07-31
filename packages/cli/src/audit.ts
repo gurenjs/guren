@@ -86,6 +86,7 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
   const controllerMethods = await parseControllerMethods(cwd, findings)
 
   const routesAnalyzed = await auditRoutes(cwd, options.routesFile, controllerMethods, findings)
+  auditForceWrites(controllerMethods, findings)
   await auditSourceFiles(cwd, findings)
   await auditModels(cwd, findings)
 
@@ -297,6 +298,35 @@ async function parseControllerMethods(cwd: string, findings: AuditFinding[]): Pr
   }
 
   return methods
+}
+
+/**
+ * Heuristic: a controller method that both validates a request body and
+ * calls forceCreate/forceUpdate is likely feeding request-derived data past
+ * mass-assignment protection — the predictable "fix" for a
+ * MassAssignmentException that silently reopens the hole. force* is for
+ * trusted server-side values only. Static analysis cannot prove data flow,
+ * so this is a review prompt (warn), never a fail.
+ */
+function auditForceWrites(controllerMethods: Map<string, ControllerMethodInfo>, findings: AuditFinding[]): void {
+  for (const [methodKey, info] of controllerMethods) {
+    const usesForceWrite = /\bforce(Create|Update)\s*\(/.test(info.body)
+    if (!usesForceWrite) continue
+    if (!/\bvalidateBody\s*\(/.test(info.body)) continue
+
+    findings.push(
+      finding(
+        `force-write-request-data:${methodKey}`,
+        `${methodKey} force write`,
+        'warn',
+        `${methodKey} validates a request body and calls forceCreate/forceUpdate in the same method — `
+        + `if the validated input reaches the force* call, mass-assignment protection is bypassed with request data.`,
+        `Pass request-derived data through create()/update() (protected), and reserve forceCreate/forceUpdate `
+        + `for trusted server-side values assembled without request input.`,
+        info.filePath,
+      ),
+    )
+  }
 }
 
 async function auditRoutes(
@@ -634,17 +664,24 @@ async function auditModels(cwd: string, findings: AuditFinding[]): Promise<void>
     const name = classNameFromPath(filePath)
     const source = await readFile(filePath, 'utf-8')
 
-    const hasMassAssignmentConfig = /\bstatic\s+(override\s+)?(fillable|guarded)\b/.test(source)
+    const hasFillable = /\bstatic\s+(override\s+)?fillable\b/.test(source)
+    const isAuthenticatable = /\bAuthenticatableModel\b/.test(source)
 
+    // Authenticatable models are structurally protected: their credential
+    // columns are denied from mass assignment by the framework, so a missing
+    // fillable is not the exposure it is on a plain model. Warning here
+    // would be a false positive; note the structural cover instead.
     findings.push(
       finding(
         `mass-assignment:${name}`,
         `${name} mass assignment`,
-        hasMassAssignmentConfig ? 'pass' : 'warn',
-        hasMassAssignmentConfig
-          ? `${name} declares fillable/guarded.`
-          : `${name} declares neither fillable nor guarded — all columns except 'id' are mass-assignable.`,
-        hasMassAssignmentConfig
+        hasFillable || isAuthenticatable ? 'pass' : 'warn',
+        hasFillable
+          ? `${name} declares fillable.`
+          : isAuthenticatable
+            ? `${name} extends AuthenticatableModel — credential columns are denied structurally; add fillable to also allowlist the rest.`
+            : `${name} declares no fillable — all columns except 'id' are mass-assignable.`,
+        hasFillable || isAuthenticatable
           ? undefined
           : `Add 'static fillable = [...]' to ${relPath} to whitelist assignable columns.`,
         relPath,

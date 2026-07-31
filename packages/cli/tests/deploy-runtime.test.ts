@@ -100,7 +100,6 @@ export default class LoginController extends Controller {
  */
 const OAUTH_ONLY_AUTH = `import { AuthenticatableModel, ServiceProvider } from '@guren/core'
 export class User extends AuthenticatableModel {
-  static guarded = ['id', 'passwordHash', 'rememberToken']
 }
 export default class AuthProvider extends ServiceProvider {
   register() {

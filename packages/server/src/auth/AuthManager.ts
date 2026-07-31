@@ -129,10 +129,11 @@ export class AuthManager implements AuthManagerContract {
     providerName = 'users',
     guardName = 'web',
   ): void {
+    // Credential columns are not defaulted here: ModelUserProvider reads
+    // them from the model contract (resolvePasswordHashField /
+    // resolveRememberTokenField) so a renamed column needs no repeating.
     const defaultOptions: ModelUserProviderOptions = {
       usernameColumn: 'email',
-      passwordColumn: 'passwordHash',
-      rememberTokenColumn: 'rememberToken',
       credentialsPasswordField: 'password',
       hasher: new ScryptHasher(),
       ...options,

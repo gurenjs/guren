@@ -1,8 +1,13 @@
 import type { Model, PlainObject } from '@guren/orm'
+import { AuthenticatableModel } from '../AuthenticatableModel'
 import type { PasswordHasher } from '../password/PasswordHasher'
 import { ScryptHasher } from '../password/ScryptHasher'
 import type { AuthCredentials, Authenticatable } from '../types'
 import { BaseUserProvider } from './UserProvider'
+
+function isAuthenticatableModel(model: typeof Model): model is typeof AuthenticatableModel {
+  return model.prototype instanceof AuthenticatableModel
+}
 
 export interface ModelUserProviderOptions {
   idColumn?: string
@@ -27,10 +32,15 @@ export class ModelUserProvider<User extends Authenticatable = Authenticatable> e
 
   constructor(private readonly model: typeof Model, options: ModelUserProviderOptions = {}) {
     super()
+    // The model contract is the single source of truth for credential
+    // columns: an AuthenticatableModel that renames passwordHashField or
+    // rememberTokenField is picked up here without repeating the name.
+    // Explicit options remain as overrides for non-authenticatable targets.
+    const authModel = isAuthenticatableModel(model) ? model : null
     this.idColumn = options.idColumn ?? 'id'
     this.usernameColumn = options.usernameColumn ?? 'email'
-    this.passwordColumn = options.passwordColumn ?? 'password'
-    this.rememberTokenColumn = options.rememberTokenColumn ?? 'remember_token'
+    this.passwordColumn = options.passwordColumn ?? authModel?.resolvePasswordHashField() ?? 'passwordHash'
+    this.rememberTokenColumn = options.rememberTokenColumn ?? authModel?.resolveRememberTokenField() ?? 'rememberToken'
     this.hasher = options.hasher ?? new ScryptHasher()
     this.credentialsPasswordField = options.credentialsPasswordField ?? 'password'
   }

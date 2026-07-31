@@ -297,7 +297,7 @@ export class User extends defineModel(users, {
 
 `AuthenticatableModel` を `base` に渡し、同じ呼び出しで create のペイロードを整えます。`defineModel()` がテーブルから推論する型はデフォルト値のない全カラムを必須にしますが、ここではそれが正しい形ではありません。呼び出し側が渡すのは平文の `password` であって `passwordHash` ではないからです。`optionalOnCreate` がカラムを任意にし、`requireOnCreate` が仮想フィールドを必須にします。どちらも型レベルの指定で、キャストも型マーカーの再宣言も不要です。
 
-任意にするだけなので、呼び出し側が `passwordHash` を渡しても型としては通ります。リクエストボディが自前のハッシュを設定するのを防ぐのはマスアサインメント側です。`fillable` にこのカラムを入れない、あるいは `fillable` を設定しないモデルでは `guarded` に列挙してください。
+任意にするだけなので、呼び出し側が `passwordHash` を渡しても型としては通ります。ランタイムでは `AuthenticatableModel` がハッシュカラム（とリメンバートークン）を一括代入から常に拒否します。リクエストボディにこれらが含まれると、モデルの `fillable` の内容に関わらず `MassAssignmentException` がスローされます。`passwordHash: 'oauth:...'` のような信頼できるサーバーサイドの値には `forceCreate()` / `forceUpdate()` を使ってください。
 
 OAuth 専用のサインアップなどパスワードなしでアカウントが作られる場合は `requireOnCreate` を付けず、`password` を任意のままにします。
 

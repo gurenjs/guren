@@ -554,9 +554,9 @@ export const posts = pgTable('posts', {
       expect(model).toContain('base: AuthenticatableModel')
       expect(model).toContain("optionalOnCreate: ['passwordHash']")
       expect(model).toContain("requireOnCreate: ['password']")
-      // The create type still admits passwordHash, so the guard against a
-      // request body setting its own hash has to be a runtime one.
-      expect(model).toContain("static guarded = ['id', 'passwordHash', 'rememberToken']")
+      // Credential columns are denied structurally by AuthenticatableModel's
+      // deniedFields() — the scaffold must not re-declare them via guarded.
+      expect(model).not.toContain('static guarded')
     } finally {
       await passwordOnly.cleanup()
     }

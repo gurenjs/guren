@@ -20,20 +20,46 @@ export interface Deprecation {
   detect(cwd: string): Promise<string[]>
 }
 
+async function detectModelStatic(cwd: string, property: string): Promise<string[]> {
+  const { discoverModelFiles } = await import('./discovery')
+  const { readFile } = await import('node:fs/promises')
+  const { relative } = await import('node:path')
+  const pattern = new RegExp(`\\bstatic\\s+(override\\s+)?(readonly\\s+)?${property}\\b`)
+
+  const affected: string[] = []
+  for (const filePath of await discoverModelFiles(cwd)) {
+    const source = await readFile(filePath, 'utf-8')
+    if (pattern.test(source)) {
+      affected.push(relative(cwd, filePath))
+    }
+  }
+  return affected
+}
+
 /**
  * Registry of all known deprecations.
  */
 export const deprecations: Deprecation[] = [
-  // Deprecations will be added as APIs are deprecated.
-  // Example:
-  // {
-  //   id: 'static-route-class',
-  //   what: 'Static Route class (Route.get(), Route.post())',
-  //   since: '0.2.0',
-  //   removedIn: '1.0.0',
-  //   replacement: 'Use router instance methods: router.get(), router.post()',
-  //   async detect(cwd) { return [] },
-  // },
+  {
+    id: 'model-guarded',
+    what: "Model 'static guarded' blacklist",
+    since: '1.6.0',
+    removedIn: '2.0.0',
+    replacement:
+      "Delete the declaration. The primary key is always stripped from mass assignment and credential columns "
+      + "are denied by AuthenticatableModel; use 'static fillable = [...]' to allowlist the rest.",
+    detect: (cwd) => detectModelStatic(cwd, 'guarded'),
+  },
+  {
+    id: 'model-strict-fillable',
+    what: "Model 'static strictFillable' flag",
+    since: '1.6.0',
+    removedIn: '2.0.0',
+    replacement:
+      'Delete the declaration — fillable is always strict. Each new throw is a field the model was silently '
+      + 'dropping: add it to fillable or remove it from the payload.',
+    detect: (cwd) => detectModelStatic(cwd, 'strictFillable'),
+  },
 ]
 
 /**

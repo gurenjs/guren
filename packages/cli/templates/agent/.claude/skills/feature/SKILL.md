@@ -152,7 +152,8 @@ export class <Name> extends defineModel(<names>) {
 }
 ```
 
-For User models, also define `guarded` to explicitly protect sensitive fields:
+For User models, credential columns (`passwordHash`, `rememberToken`) are denied from
+mass assignment by `AuthenticatableModel` itself — never list them in `fillable`:
 
 ```typescript
 export class User extends defineModel(users, {
@@ -161,7 +162,6 @@ export class User extends defineModel(users, {
   requireOnCreate: ['password'],
 }) {
   static fillable = ['name', 'email', 'password']
-  static guarded = ['id', 'passwordHash', 'rememberToken']
 }
 ```
 

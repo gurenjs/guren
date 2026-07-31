@@ -60,7 +60,7 @@ export class User extends defineModel(users, {
 
 `optionalOnCreate` はカラムを任意にします（型はそのままで、渡さなくてよくなります）。`requireOnCreate` は逆にフィールドを必須にし、テーブルのカラム（Drizzle はデフォルト値付きを任意にします）と `base` が提供するフィールドの両方を受け付けます。どちらも型レベルのみの指定で、実際のキーと照合されるためタイポはコンパイルエラーになります。
 
-どちらもペイロードを閉じるわけではありません。create の型は未知のキーを `unknown` として受け入れるため、意図しないフィールドを実行時に弾くのは引き続き `fillable` / `guarded` です。
+どちらもペイロードを閉じるわけではありません。create の型は未知のキーを `unknown` として受け入れるため、意図しないフィールドを実行時に弾くのは引き続き `fillable` です。
 
 ## SQLite サポート
 
@@ -659,7 +659,7 @@ const json = User.serializeMany(users)
 
 ## マスアサインメント保護
 
-`fillable` または `guarded` で、`create()` や `update()` で設定可能なフィールドを制御できます。
+`fillable` で、`create()` や `update()` で設定可能なフィールドを制御できます。
 
 ```ts
 export class Post extends defineModel(posts) {
@@ -690,25 +690,12 @@ await User.forceUpdate({ id: user.id }, { emailVerifiedAt: new Date() })
 > [!WARNING]
 > `forceCreate()` / `forceUpdate()` はマスアサインメント保護を完全にスキップします。リクエスト入力をそのまま渡さないでください。
 
-以前の「許可リスト外のフィールドを黙って破棄する」挙動に戻したい場合は、モデルごとにオプトアウトできます。
+`fillable` の設定に関係なく、次の2つの保護が常に適用されます。
 
-```ts
-  static fillable = ['title', 'body', 'status']
-  static strictFillable = false
-```
+- 主キー（`id`）は一括代入の入力から常に黙って除外されます。フォームが `id` をラウンドトリップしても書き込み先は変わりません。
+- `AuthenticatableModel` を継承するモデルでは、認証情報のカラム（パスワードハッシュとリメンバートークン）は常に例外をスローします。`fillable` に列挙しても許可されません。平文の `password` を渡してモデルにハッシュ化させるか、信頼できるサーバーサイドの値には `forceCreate()` / `forceUpdate()` を使ってください。
 
-あるいは、`guarded` で特定のフィールドをブロックし、それ以外をすべて許可することもできます。
-
-```ts
-export class Post extends defineModel(posts) {
-  // これらのフィールドは一括代入から保護される
-  static guarded = ['id', 'createdAt', 'updatedAt']
-}
-```
-
-`guarded` のフィールドは従来どおり黙って除外されます。例外をスローする厳格な挙動は、`fillable` を宣言したモデルにのみ適用されます。
-
-`fillable` と `guarded` はどちらか一方を使ってください。`fillable` は許可リスト、`guarded` は拒否リストです。どちらも設定されていない場合は、すべてのフィールドが代入可能になります。
+`fillable` が未設定の場合、`id` と拒否された認証情報カラムを除くすべてのカラムが代入可能になります。ユーザー入力を受け取るモデルには必ず宣言してください。
 
 ## リレーションの定義
 
@@ -925,7 +912,7 @@ await db.transaction(async (tx) => {
 - 可変データにはシーダーを使い、マイグレーションは追記専用として扱いましょう。
 - カラムやテーブルをリネームする場合は、データ移行用のマイグレーションを明示的に用意し、情報の損失を防ぎましょう。
 - スコープを使ってよく使うクエリパターンをカプセル化し、コントローラーをクリーンに保ちましょう。
-- マスアサインメントの脆弱性を防ぐため、`fillable` か `guarded` を選択しましょう。
+- マスアサインメントの脆弱性を防ぐため、ユーザー入力を受け取るモデルには `fillable` を宣言しましょう。
 - ユーザー向けコンテンツには、復元の可能性を考慮してソフトデリートの利用を検討しましょう。
 
 スキーマ・マイグレーション・シーダーが揃えば、コードとともにデータベースを安全に進化させるための確かな基盤が整います。

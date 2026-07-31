@@ -308,8 +308,11 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    * containing any other key throws a MassAssignmentException so bugs
    * (and injection attempts) surface immediately instead of being
    * silently discarded. Use `forceCreate()` / `forceUpdate()` for
-   * trusted server-side data, or set `strictFillable = false` to
-   * restore silent discarding.
+   * trusted server-side data.
+   *
+   * The primary key (`id`) is always silently stripped from mass-assignment
+   * input, and fields returned by `deniedFields()` always throw — neither
+   * depends on `fillable`.
    *
    * @example
    * class User extends Model<UserRecord> {
@@ -319,22 +322,16 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   static fillable?: string[]
 
   /**
-   * When `fillable` is set, controls what happens to input fields outside
-   * the allowlist: `true` (default) throws a MassAssignmentException,
-   * `false` silently discards them (pre-1.0 behavior).
+   * Fields that can never be mass-assigned, resolved at call time so
+   * subclasses can derive them from their own configuration (e.g.
+   * `AuthenticatableModel` contributes its resolved password-hash and
+   * remember-token columns). Input containing any of these throws a
+   * MassAssignmentException regardless of `fillable` — use
+   * `forceCreate()` / `forceUpdate()` for trusted server-side values.
    */
-  static strictFillable?: boolean
-
-  /**
-   * Blacklist of fields excluded from mass assignment.
-   * Defaults to `['id']`. Ignored if `fillable` is set.
-   *
-   * @example
-   * class Post extends Model<PostRecord> {
-   *   static guarded = ['id', 'createdAt']
-   * }
-   */
-  static guarded?: string[]
+  protected static deniedFields(): string[] {
+    return []
+  }
 
   /**
    * Accessor functions for computed/virtual attributes.
@@ -662,39 +659,42 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   /**
    * Filter input data based on mass assignment protection rules.
    *
-   * If `fillable` is defined, only fields listed in `fillable` are kept.
-   * Otherwise, fields listed in `guarded` (default: `['id']`) are removed.
+   * Applied in order: fields returned by `deniedFields()` throw a
+   * MassAssignmentException (checked on the raw input, so no other rule
+   * can silently swallow them); the primary key (`id`) is silently
+   * stripped; when `fillable` is defined, any remaining field outside it
+   * throws and only listed fields are kept.
    *
    * @param data - The input data to filter
    * @returns Filtered data safe for mass assignment
    */
   static filterFillable(data: PlainObject): PlainObject {
+    const denied = this.deniedFields().filter((field) => field in data)
+    if (denied.length > 0) {
+      throw new MassAssignmentException(this.name, denied, { reason: 'denied' })
+    }
+
+    let candidate = data
+    if ('id' in candidate) {
+      const { id: _id, ...rest } = candidate
+      candidate = rest
+    }
+
     const fillableFields = this.fillable
-    if (fillableFields) {
-      if (this.strictFillable !== false) {
-        const blocked = Object.keys(data).filter((key) => !fillableFields.includes(key))
-        if (blocked.length > 0) {
-          throw new MassAssignmentException(this.name, blocked)
-        }
-      }
-
-      const filtered: PlainObject = {}
-      for (const key of fillableFields) {
-        if (key in data) {
-          filtered[key] = data[key]
-        }
-      }
-      return filtered
+    if (!fillableFields) {
+      return candidate
     }
 
-    const guardedFields = this.guarded ?? ['id']
-    const hasGuardedKey = guardedFields.some((key) => key in data)
-    if (!hasGuardedKey) {
-      return data
+    const blocked = Object.keys(candidate).filter((key) => !fillableFields.includes(key))
+    if (blocked.length > 0) {
+      throw new MassAssignmentException(this.name, blocked)
     }
-    const filtered: PlainObject = { ...data }
-    for (const key of guardedFields) {
-      delete filtered[key]
+
+    const filtered: PlainObject = {}
+    for (const key of fillableFields) {
+      if (key in candidate) {
+        filtered[key] = candidate[key]
+      }
     }
     return filtered
   }
@@ -2537,19 +2537,10 @@ type ModelClassWithTable<TTable extends TableShape, TBase extends typeof Model, 
   readonly createType: TCreate
 }
 
-/**
- * Keys of `T` excluding its string/number index signature, so that a base
- * class whose `createType` widens to `PlainObject` still contributes its
- * named fields (and only those) to `requireOnCreate`.
- */
-type NamedKeys<T> = keyof {
-  [K in keyof T as string extends K ? never : number extends K ? never : K]: never
-}
-
 /** A key that can appear in a model's create payload: a table column, or a named field its base contributes. */
 type CreateKey<TTable extends TableShape, TBase extends typeof Model> =
   | keyof InferModelInsert<TTable>
-  | NamedKeys<TCreateFor<TBase>>
+  | keyof TCreateFor<TBase>
 
 type CreateShape<
   TTable extends TableShape,
@@ -2583,11 +2574,6 @@ type CreateShape<
 export function defineModel<
   TTable extends TableShape,
   TBase extends typeof Model = typeof Model,
-  // Stays third so the pre-existing `defineModel<TTable, TBase, TCreate>()`
-  // spelling keeps working; the two option-driven parameters go after it and
-  // the create shape is resolved in the return type instead of as a default,
-  // which may only reference parameters declared before it.
-  TCreate extends PlainObject | undefined = undefined,
   const TOptional extends keyof InferModelInsert<TTable> = never,
   const TRequire extends CreateKey<TTable, TBase> = never,
 >(
@@ -2606,15 +2592,9 @@ export function defineModel<
      * Type-level only.
      */
     requireOnCreate?: readonly TRequire[]
-    /** @deprecated Prefer `optionalOnCreate`/`requireOnCreate`, which need no value to infer from. */
-    createType?: TCreate
   } = {},
-): ModelClassWithTable<
-  TTable,
-  TBase,
-  TCreate extends PlainObject ? TCreate : CreateShape<TTable, TBase, TOptional, TRequire>
-> {
-  type ResolvedCreate = TCreate extends PlainObject ? TCreate : CreateShape<TTable, TBase, TOptional, TRequire>
+): ModelClassWithTable<TTable, TBase, CreateShape<TTable, TBase, TOptional, TRequire>> {
+  type ResolvedCreate = CreateShape<TTable, TBase, TOptional, TRequire>
 
   const BaseClass = (options.base ?? Model) as typeof Model
 
@@ -2623,8 +2603,7 @@ export function defineModel<
   ;(DefinedModel as typeof Model & { table: TTable }).table = table
   ;(DefinedModel as typeof Model & { recordType: InferModelRecord<TTable> }).recordType =
     {} as InferModelRecord<TTable>
-  ;(DefinedModel as typeof Model & { createType: ResolvedCreate }).createType =
-    (options.createType ?? {}) as ResolvedCreate
+  ;(DefinedModel as typeof Model & { createType: ResolvedCreate }).createType = {} as ResolvedCreate
 
   return DefinedModel as ModelClassWithTable<TTable, TBase, ResolvedCreate>
 }

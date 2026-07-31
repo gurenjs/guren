@@ -25,13 +25,36 @@ bun run test
 
 ## 移行メモ
 
+### 1.x → 2.0.0
+
+#### 構造的マスアサインメント保護
+
+- **何が変わったか**: `static guarded` と `static strictFillable` は削除されました。`fillable` は常に厳格で、主キー（`id`）は常に黙って除外されます。`AuthenticatableModel` のサブクラスでは、パスワードハッシュとリメンバートークンのカラムは一括代入できません。リクエストボディにこれらが含まれると、`fillable` の内容に関わらず `MassAssignmentException` がスローされます。
+- **誰に影響するか**: `guarded` や `strictFillable` を宣言しているモデル（`guren check` がエラーとして検出します）、および `create()` / `update()` で計算済みハッシュやリメンバートークンを一括代入しているコード。
+- **移行方法**: `guarded` / `strictFillable` の宣言を削除してください（`bunx guren upgrade --check-only` が対象ファイルを一覧します）。`strictFillable = false` に依存していたモデルでは、新たにスローされる例外が「黙って破棄されていたフィールド」を示します。`fillable` に追加するかペイロードから除いてください。`create({ ..., passwordHash })` は `create({ ..., password })` に置き換えてモデルにハッシュ化させるか、信頼できるサーバーサイドの値には `forceCreate({ ..., passwordHash: 'oauth:...' })` を使ってください（リクエスト入力には決して使わないこと）。
+
+```ts
+// Before
+export class User extends defineModel(users, { base: AuthenticatableModel }) {
+  static fillable = ['name', 'email', 'password']
+  static guarded = ['id', 'passwordHash', 'rememberToken']  // check がエラーにする
+}
+
+// After — 認証情報カラムはフレームワークが拒否する
+export class User extends defineModel(users, { base: AuthenticatableModel }) {
+  static fillable = ['name', 'email', 'password']
+}
+```
+
+`ModelUserProvider` は認証情報カラム名をモデル（`passwordHashField` / 新設の `rememberTokenField`）から読み取るため、カラムをリネームしてもプロバイダー側の設定は不要です（明示的な `passwordColumn` / `rememberTokenColumn` オプションは引き続き優先されます）。`defineModel()` の非推奨だった `createType` オプションは削除されました。`optionalOnCreate` / `requireOnCreate` を使ってください。
+
 ### rc → 1.0.0
 
 #### 厳格なマスアサインメント
 
 - **何が変わったか**: `fillable` を定義したモデルで、許可リスト外のフィールドを `create()` / `update()` に渡すと `MassAssignmentException` がスローされるようになりました。以前は余分なフィールドは黙って破棄されていました。
 - **誰に影響するか**: フィルタリングしていないオブジェクト（スプレッドしたリクエストボディ、マージしたデフォルト値など）を `create()` / `update()` に渡しているコード。
-- **移行方法**: 許可リスト内のフィールドだけを渡すか、シーダーやシステムレコードなど信頼できるサーバーサイドのデータには `forceCreate()` / `forceUpdate()` を使用してください。特定のモデルで以前の破棄挙動に戻したい場合は `static strictFillable = false` を設定します。
+- **移行方法**: 許可リスト内のフィールドだけを渡すか、シーダーやシステムレコードなど信頼できるサーバーサイドのデータには `forceCreate()` / `forceUpdate()` を使用してください。
 
 ```ts
 // Before: authorId silently dropped when not in fillable

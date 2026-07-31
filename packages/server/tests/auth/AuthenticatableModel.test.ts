@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'bun:test'
-import { defineModel } from '@guren/orm'
-import type { FindManyOptions, ORMAdapter, PlainObject, WhereClause } from '@guren/orm'
+import { MassAssignmentException, defineModel } from '@guren/orm'
+import type { FindManyOptions, Model, ORMAdapter, PlainObject, WhereClause } from '@guren/orm'
 import { AuthenticatableModel } from '../../src/auth/AuthenticatableModel'
+import { ModelUserProvider } from '../../src/auth/providers/ModelUserProvider'
 
 function createAdapter(store: PlainObject[] = []): ORMAdapter {
   return {
@@ -38,6 +39,9 @@ describe('AuthenticatableModel', () => {
 
     class User extends AuthenticatableModel<UserRecord> {
       static override table = 'users'
+      // Direct extension (no defineModel): the base's createType no longer
+      // widens to PlainObject, so declare the payload this model accepts.
+      declare static readonly createType: Partial<UserRecord> & { password?: string }
     }
 
     const captured: PlainObject[] = []
@@ -60,7 +64,6 @@ describe('AuthenticatableModel', () => {
 
     class User extends AuthenticatableModel<UserRecord> {
       static override table = 'users'
-      static override guarded = ['id']
     }
 
     const captured: PlainObject[] = []
@@ -133,6 +136,7 @@ describe('passwordless accounts (OAuth)', () => {
 
     class User extends AuthenticatableModel<UserRecord> {
       static override table = 'users'
+      declare static readonly createType: Partial<UserRecord> & { password?: string }
     }
 
     const captured: PlainObject[] = []
@@ -142,5 +146,138 @@ describe('passwordless accounts (OAuth)', () => {
 
     expect(captured[0]).not.toHaveProperty('passwordHash')
     expect(captured[0]).not.toHaveProperty('password')
+  })
+})
+
+describe('credential columns are denied from mass assignment', () => {
+  type UserRecord = { id?: number; email?: string; passwordHash?: string; rememberToken?: string }
+
+  it('rejects a mass-assigned password hash on create, update, and bulk update', async () => {
+    class User extends AuthenticatableModel<UserRecord> {
+      static override table = 'users'
+    }
+    const captured: PlainObject[] = []
+    User.useAdapter(createAdapter(captured))
+
+    await expect(User.create({ email: 'a@x.com', passwordHash: 'attacker' } as never)).rejects.toThrow(
+      MassAssignmentException,
+    )
+    await expect(User.update({ id: 1 }, { passwordHash: 'attacker' } as never)).rejects.toThrow(
+      MassAssignmentException,
+    )
+    await expect(User.where('id', 1).update({ passwordHash: 'attacker' })).rejects.toThrow(
+      MassAssignmentException,
+    )
+    expect(captured).toHaveLength(0)
+  })
+
+  it('rejects the hash even when the model lists it in fillable', async () => {
+    class User extends AuthenticatableModel<UserRecord> {
+      static override table = 'users'
+      static override fillable = ['email', 'passwordHash']
+    }
+    User.useAdapter(createAdapter([]))
+
+    try {
+      await User.create({ email: 'a@x.com', passwordHash: 'precomputed' } as never)
+      expect.unreachable()
+    } catch (error) {
+      expect(error).toBeInstanceOf(MassAssignmentException)
+      expect((error as MassAssignmentException).reason).toBe('denied')
+    }
+  })
+
+  it('rejects a mass-assigned remember token', async () => {
+    class User extends AuthenticatableModel<UserRecord> {
+      static override table = 'users'
+    }
+    User.useAdapter(createAdapter([]))
+
+    await expect(User.create({ email: 'a@x.com', rememberToken: 'forged' } as never)).rejects.toThrow(
+      MassAssignmentException,
+    )
+  })
+
+  it('follows renamed hash and remember-token columns', async () => {
+    class Member extends AuthenticatableModel<PlainObject> {
+      static override table = 'members'
+      static override passwordHashField = 'passwordDigest'
+      static override rememberTokenField = 'sessionToken'
+    }
+    Member.useAdapter(createAdapter([]))
+
+    await expect(Member.create({ passwordDigest: 'attacker' } as never)).rejects.toThrow(MassAssignmentException)
+    await expect(Member.create({ sessionToken: 'forged' } as never)).rejects.toThrow(MassAssignmentException)
+  })
+
+  it('still hashes plaintext when password and hash share one column', async () => {
+    // passwordField === passwordHashField is a supported configuration:
+    // the plaintext arrives under the hash column's name and is hashed in
+    // place, so that column must not be denied.
+    class InPlace extends AuthenticatableModel<PlainObject> {
+      static override table = 'users'
+      static override passwordField = 'passwordHash'
+    }
+    const captured: PlainObject[] = []
+    InPlace.useAdapter(createAdapter(captured))
+
+    await InPlace.create({ email: 'a@x.com', passwordHash: 'plaintext' } as never)
+
+    const persisted = captured[0]
+    expect(typeof persisted.passwordHash).toBe('string')
+    expect(persisted.passwordHash).not.toBe('plaintext')
+  })
+
+  it('forceCreate and forceUpdate remain the trusted hatch for precomputed values', async () => {
+    class User extends AuthenticatableModel<UserRecord> {
+      static override table = 'users'
+    }
+    const captured: PlainObject[] = []
+    User.useAdapter(createAdapter(captured))
+
+    await User.forceCreate({ email: 'a@x.com', passwordHash: 'oauth:github' } as never)
+    await User.forceUpdate({ id: 1 }, { rememberToken: 'rotated' } as never)
+
+    expect(captured[0]).toMatchObject({ email: 'a@x.com', passwordHash: 'oauth:github' })
+    expect(captured[1]).toMatchObject({ rememberToken: 'rotated' })
+  })
+})
+
+describe('ModelUserProvider reads credential columns from the model contract', () => {
+  it('resolves renamed columns without repeating them in provider options', async () => {
+    class Member extends AuthenticatableModel<PlainObject> {
+      static override table = 'members'
+      static override passwordHashField = 'passwordDigest'
+      static override rememberTokenField = 'sessionToken'
+    }
+    Member.useAdapter({
+      async findMany<T extends PlainObject = PlainObject>(): Promise<T[]> {
+        return [{ id: 1, email: 'a@x.com', sessionToken: 'tok' }] as unknown as T[]
+      },
+      async findUnique<T extends PlainObject = PlainObject>(): Promise<T | null> {
+        return null
+      },
+    } as unknown as ORMAdapter)
+
+    const provider = new ModelUserProvider(Member as unknown as typeof Model)
+
+    // Remember-token lookup goes through the model's renamed column.
+    const byToken = await provider.retrieveByCredentials({ rememberToken: 'tok' })
+    expect(byToken).not.toBeNull()
+
+    // sanitize() strips the renamed credential columns.
+    const clean = provider.sanitize({ id: 1, passwordDigest: 'h', sessionToken: 't', email: 'a@x.com' } as never)
+    expect(clean).toEqual({ id: 1, email: 'a@x.com' } as never)
+  })
+
+  it('keeps explicit options as overrides', () => {
+    class Plain extends AuthenticatableModel<PlainObject> {
+      static override table = 'users'
+    }
+    const provider = new ModelUserProvider(Plain as unknown as typeof Model, { passwordColumn: 'pw' })
+    const clean = provider.sanitize({ pw: 'h', passwordHash: 'kept', rememberToken: 'x', id: 1 } as never)
+    // Explicit option wins for the password column; remember token still
+    // comes from the model contract.
+    expect(clean).toEqual({ passwordHash: 'kept', id: 1 } as never)
   })
 })

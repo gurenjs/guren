@@ -32,14 +32,14 @@ export class User extends defineModel(users, {
   optionalOnCreate: ['passwordHash'],
   requireOnCreate: ['password'],
 }) {
-  static guarded = ['id', 'passwordHash', 'rememberToken']
   static override hidden = ['passwordHash', 'rememberToken']
 }
 ```
 
 Drop `requireOnCreate` when accounts can also be created without a password (OAuth-only sign-up).
-Optional means optional — passing `passwordHash` still type-checks. Mass assignment is the guard:
-keep it out of `fillable`, or in `guarded` on models that set no `fillable`.
+Optional means optional — passing `passwordHash` still type-checks. At runtime the base class
+denies the hash and remember-token columns from mass assignment entirely; `forceCreate()`/
+`forceUpdate()` is the path for trusted server-side values.
 
 ## Statics
 
@@ -154,6 +154,9 @@ For concurrency safety add a unique index and catch the constraint error, or wra
 ## Mass assignment
 
 - With `static fillable = [...]` set, `create()`/`update()` **throw `MassAssignmentException`**
-  on any unlisted input key (`static strictFillable = false` restores silent discarding)
-- Without `fillable`, keys in `static guarded` (default `['id']`) are silently stripped
-- `forceCreate()` / `forceUpdate()` bypass filtering — trusted server-side data only
+  on any unlisted input key; the primary key (`id`) is always silently stripped
+- Credential columns (`passwordHash`, `rememberToken`) **always throw** on authenticatable
+  models — the framework denies them, listing them in `fillable` does not open them
+- `forceCreate()` / `forceUpdate()` bypass filtering — trusted server-side values only.
+  **Never call them with request input**; a `MassAssignmentException` is never fixed by
+  switching the same payload to `force*`

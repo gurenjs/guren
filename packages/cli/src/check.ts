@@ -140,6 +140,8 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     for (const filePath of modelFiles) {
       const relPath = relative(cwd, filePath)
       const name = classNameFromPath(filePath)
+      const modelSource = await readFile(filePath, 'utf-8')
+      checks.push(...checkMassAssignmentConfig(name, modelSource, relPath))
       const moduleName = moduleNameFor(cwd, filePath)
       const schemaPath = moduleName ? `modules/${moduleName}/db/schema.ts` : 'db/schema.ts'
       const hasSchema = await fileExists(cwd, schemaPath)
@@ -257,6 +259,69 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   }
 
   return report
+}
+
+/**
+ * Mass-assignment definition checks.
+ *
+ * `guarded` and `strictFillable` no longer exist as Model API — a model
+ * declaring them ships dead-looking protection that TypeScript accepts
+ * silently (agents reproducing older patterns are the likely authors), so
+ * the declaration itself is an error, not a warning.
+ *
+ * A fillable list naming a denied credential column is a contradiction that
+ * otherwise only surfaces at the first write: the field throws regardless.
+ * The denied set's inputs are parseable statics (passwordHashField /
+ * rememberTokenField, defaulting to passwordHash / rememberToken), so it is
+ * resolved here the same way the model resolves it at runtime.
+ */
+function checkMassAssignmentConfig(name: string, source: string, relPath: string): CheckResult[] {
+  const results: CheckResult[] = []
+
+  const legacy = ['guarded', 'strictFillable'].filter((property) =>
+    new RegExp(`\\bstatic\\s+(override\\s+)?(readonly\\s+)?${property}\\b`).test(source),
+  )
+  if (legacy.length > 0) {
+    results.push(
+      check(
+        `mass-assignment-legacy:${name}`,
+        `${name} legacy mass-assignment config`,
+        'fail',
+        `${name} declares ${legacy.join(' and ')}, which no longer exist as Model API — the declaration is inert.`,
+        `Delete the ${legacy.join('/')} declaration. Use 'static fillable = [...]' to allowlist columns; `
+        + `the primary key and credential columns are protected by the framework.`,
+        relPath,
+      ),
+    )
+  }
+
+  if (/\bAuthenticatableModel\b/.test(source)) {
+    const fillableMatch = source.match(/\bstatic\s+(?:override\s+)?fillable\s*(?::[^=]+)?=\s*\[([^\]]*)\]/)
+    if (fillableMatch) {
+      const fillable = [...fillableMatch[1].matchAll(/['"]([^'"]+)['"]/g)].map((m) => m[1])
+      const passwordField = source.match(/\bstatic\s+(?:override\s+)?passwordField\s*=\s*['"]([^'"]+)['"]/)?.[1] ?? 'password'
+      const hashField = source.match(/\bstatic\s+(?:override\s+)?passwordHashField\s*=\s*['"]([^'"]+)['"]/)?.[1] ?? 'passwordHash'
+      const rememberField = source.match(/\bstatic\s+(?:override\s+)?rememberTokenField\s*=\s*['"]([^'"]+)['"]/)?.[1] ?? 'rememberToken'
+      const denied = [...(hashField !== passwordField ? [hashField] : []), rememberField]
+      const contradictions = fillable.filter((field) => denied.includes(field))
+      if (contradictions.length > 0) {
+        results.push(
+          check(
+            `mass-assignment-denied:${name}`,
+            `${name} fillable lists denied columns`,
+            'fail',
+            `${name} lists ${contradictions.map((f) => `'${f}'`).join(', ')} in fillable, but credential columns `
+            + `can never be mass-assigned — every create()/update() carrying them will throw.`,
+            `Remove ${contradictions.map((f) => `'${f}'`).join(', ')} from fillable. Pass a plain password and let `
+            + `the model hash it, or use forceCreate()/forceUpdate() for trusted server-side values.`,
+            relPath,
+          ),
+        )
+      }
+    }
+  }
+
+  return results
 }
 
 async function checkEmptyMethods(cache: ParseCache, filePath: string, relPath: string): Promise<CheckResult[]> {
