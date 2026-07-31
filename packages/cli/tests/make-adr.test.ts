@@ -62,6 +62,18 @@ describe('makeAdr', () => {
     }
   })
 
+  it('accepts non-ASCII actors - git authors are not ASCII', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-adr-unicode-')
+    try {
+      const file = await makeAdr('Unicode actor', { by: 'human:\u5c71\u7530\u592a\u90ce' })
+      const parsed = parseDocFrontmatter(readFileSync(file, 'utf8'))
+
+      expect((parsed!.data.generated as Record<string, string>).by).toBe('human:\u5c71\u7530\u592a\u90ce')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   // A git author like "Ada: Admin" produces an actor containing ': ',
   // which an unquoted YAML flow mapping cannot carry.
   it('quotes the actor so names containing colons stay parseable', async () => {

@@ -61,6 +61,14 @@ function bundleRoot(docPath: string): string {
 const DOC_STATUSES = new Set(['draft', 'stable', 'deprecated'])
 
 /**
+ * OKF §7 actor forms: `human:<id>`, `process:<id>`, or
+ * `<producer>/<version>` for agents and tools.
+ */
+function isOkfActor(actor: string): boolean {
+  return /^(?:human:|process:).+/.test(actor) || /^[^/]+\/.+/.test(actor)
+}
+
+/**
  * A real `YYYY-MM-DD` calendar date. `Date.parse` alone would accept
  * `2026-02-30` (rolled forward to March 2) and reject nothing loudly,
  * so the round-trip check rejects out-of-range days.
@@ -285,6 +293,45 @@ export async function runDocsCheck(options: DocsCheckOptions): Promise<CheckResu
           ref.path,
         ),
       )
+    }
+
+    // Provenance is only as trustable as its actors: consumers derive
+    // the trust tier from the `human:` prefix (§5.3), so an actor
+    // written outside the §7 convention silently reads as a machine.
+    const actorEvents = [
+      ...(ref.generated ? [{ field: 'generated', event: ref.generated }] : []),
+      ...ref.verified.map((event, index) => ({
+        field: ref.verified.length === 1 ? 'verified' : `verified[${index}]`,
+        event,
+      })),
+    ]
+    for (const { field, event } of actorEvents) {
+      if (event.by === undefined || !isOkfActor(event.by)) {
+        results.push(
+          check(
+            `docs-actor:${ref.path}:${field}.by`,
+            `${ref.path} ${field}.by`,
+            'warn',
+            event.by === undefined
+              ? `${field} has no 'by' — OKF records who acted on every ${field} entry.`
+              : `${field}.by '${event.by}' is not an OKF actor (human:<id>, process:<id>, or <producer>/<version>), so trust tiers keyed off the 'human:' prefix cannot recognize a person written this way.`,
+            `Write the actor in ${ref.path} using one of the OKF §7 forms.`,
+            ref.path,
+          ),
+        )
+      }
+      if (event.at !== undefined && Number.isNaN(Date.parse(event.at))) {
+        results.push(
+          check(
+            `docs-actor:${ref.path}:${field}.at`,
+            `${ref.path} ${field}.at`,
+            'warn',
+            `${field}.at '${event.at}' is not a parseable timestamp, so freshness comparisons skip it.`,
+            `Write ${field}.at in ${ref.path} as an ISO 8601 date or datetime.`,
+            ref.path,
+          ),
+        )
+      }
     }
 
     if (ref.status !== undefined && !DOC_STATUSES.has(ref.status)) {

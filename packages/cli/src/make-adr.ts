@@ -122,10 +122,12 @@ async function resolveAdrPrefill(entity: string, moduleName?: string): Promise<A
 }
 
 /**
- * Actor shape per OKF §7. Quotes and newlines are excluded so the value
- * cannot break out of the quoted scalar the template writes it into.
+ * The actor is written into a double-quoted YAML scalar, so only what
+ * could break that scalar is rejected — quotes, backslashes, newlines.
+ * Shape questions (OKF §7) are `guren check --docs`'s to warn about,
+ * and git author names are not ASCII, so no character allowlist here.
  */
-const ACTOR_RE = /^[A-Za-z][\w.:@/ -]*$/
+const ACTOR_RE = /^[^"\\\r\n]+$/
 
 /** The git author as an OKF `human:<id>` actor, or null when unavailable. */
 async function gitAuthorActor(): Promise<string | null> {
@@ -138,7 +140,7 @@ async function resolveActor(by?: string): Promise<string | null> {
   if (by !== undefined) {
     if (!ACTOR_RE.test(by)) {
       throw new Error(
-        `Invalid actor "${by}" — it is written into YAML frontmatter, so it must stay within letters, digits, and [_.:@/ -] (e.g. human:ada, my-agent/1.0).`,
+        `Invalid actor "${by}" — it is written into a quoted YAML scalar, so it cannot contain quotes, backslashes, or newlines.`,
       )
     }
     return by

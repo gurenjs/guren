@@ -175,6 +175,68 @@ entities: [Post]
     expect(broken?.status).toBe('fail')
   })
 
+  it('warns on actors outside the OKF convention and unparseable timestamps', async () => {
+    const scoped = await createTempWorkspace('guren-cli-docs-actors-')
+    try {
+      await mkdir(join(scoped.dir, 'docs'), { recursive: true })
+      await writeFile(join(scoped.dir, 'package.json'), '{}', 'utf8')
+      await writeFile(
+        join(scoped.dir, 'docs/provenance.md'),
+        `---
+type: context
+generated: { by: not-an-actor, at: nonsense }
+verified:
+  - { by: ada, at: 2026-07-25T09:00:00Z }
+  - { by: human:\u5c71\u7530\u592a\u90ce, at: 2026-07-26T09:00:00Z }
+  - { at: 2026-07-27T09:00:00Z }
+---
+# Provenance
+`,
+        'utf8',
+      )
+
+      const results = await runDocsCheck({ cwd: scoped.dir })
+      const key = (suffix: string) => `docs-actor:docs/provenance.md:${suffix}`
+
+      // A bare name silently reads as machine-confirmed, which is why it warns.
+      expect(results.find((r) => r.key === key('generated.by'))?.status).toBe('warn')
+      expect(results.find((r) => r.key === key('generated.at'))?.status).toBe('warn')
+      expect(results.find((r) => r.key === key('verified[0].by'))?.status).toBe('warn')
+      expect(results.find((r) => r.key === key('verified[2].by'))?.status).toBe('warn')
+      // Non-ASCII human actors are valid.
+      expect(results.find((r) => r.key === key('verified[1].by'))).toBeUndefined()
+    } finally {
+      await scoped.cleanup()
+    }
+  })
+
+  it('accepts every OKF actor form without warning', async () => {
+    const scoped = await createTempWorkspace('guren-cli-docs-actors-ok-')
+    try {
+      await mkdir(join(scoped.dir, 'docs'), { recursive: true })
+      await writeFile(join(scoped.dir, 'package.json'), '{}', 'utf8')
+      await writeFile(
+        join(scoped.dir, 'docs/ok.md'),
+        `---
+type: context
+generated: { by: reference_agent/gemini-2.5-pro, at: 2026-06-20T22:53:05Z }
+verified:
+  - { by: human:ahormati, at: 2026-06-25T09:00:00Z }
+  - { by: process:finance-nightly, at: 2026-06-26T02:00:00Z }
+---
+# All forms
+`,
+        'utf8',
+      )
+
+      const results = await runDocsCheck({ cwd: scoped.dir })
+
+      expect(results.some((r) => r.key.startsWith('docs-actor:'))).toBe(false)
+    } finally {
+      await scoped.cleanup()
+    }
+  })
+
   it('warns when a doc declares itself stale via stale_after', async () => {
     const results = await runDocsCheck({ cwd: workspace.dir })
 
