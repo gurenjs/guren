@@ -2,7 +2,8 @@
 
 **Author:** Urata Daiki
 **Date:** 2026-07-31
-**Status:** Draft
+**Status:** Accepted (2026-07-31 — maintainer decision; the standard two-week discussion
+window was waived by the project maintainer)
 
 > Scope note: this RFC started as a narrow fix — "make `AuthenticatableModel` strip its
 > own hash column" — and was deliberately widened after concluding that the narrow fix
