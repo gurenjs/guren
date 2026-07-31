@@ -4,9 +4,13 @@ import { makeModel } from './make-model'
 import { makePolicy } from './make-policy'
 import { makeTest } from './make-test'
 
+export type FieldType = 'string' | 'number' | 'boolean' | 'text' | 'date' | 'json'
+
+export const FIELD_TYPES: readonly FieldType[] = ['string', 'number', 'boolean', 'text', 'date', 'json']
+
 export interface FieldDefinition {
   name: string
-  type: 'string' | 'number' | 'boolean' | 'text' | 'date' | 'json'
+  type: FieldType
   nullable?: boolean
 }
 
@@ -39,12 +43,11 @@ export function parseFieldsString(fieldsStr: string): FieldDefinition[] {
 
     if (!name) throw new Error(`Invalid field definition: "${field}"`)
 
-    const validTypes = ['string', 'number', 'boolean', 'text', 'date', 'json']
-    if (!validTypes.includes(type)) {
-      throw new Error(`Invalid field type "${type}" for field "${name}". Valid: ${validTypes.join(', ')}`)
+    if (!FIELD_TYPES.includes(type as FieldType)) {
+      throw new Error(`Invalid field type "${type}" for field "${name}". Valid: ${FIELD_TYPES.join(', ')}`)
     }
 
-    return { name, type: type as FieldDefinition['type'], nullable }
+    return { name, type: type as FieldType, nullable }
   })
 }
 
@@ -177,22 +180,10 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
 
 // --- Template generators ---
 
-function drizzleColumnType(field: FieldDefinition): string {
-  const map: Record<string, string> = {
-    string: 'text',
-    text: 'text',
-    number: 'integer',
-    boolean: 'boolean',
-    date: 'timestamp',
-    json: 'jsonb',
-  }
-  const col = map[field.type] ?? 'text'
-  const nullable = field.nullable ? '' : '.notNull()'
-  return `${field.name}: ${col}('${field.name}')${nullable}`
-}
-
+// Keyed by `FieldType` rather than `string`, so adding a field type fails to
+// compile here instead of silently falling through to a string default.
 function zodFieldType(field: FieldDefinition): string {
-  const map: Record<string, string> = {
+  const map: Record<FieldType, string> = {
     string: 'z.string().trim().min(1)',
     text: 'z.string().trim().min(1)',
     number: 'z.coerce.number()',
@@ -203,13 +194,12 @@ function zodFieldType(field: FieldDefinition): string {
     // `unknown` — narrow this to the object's real shape once you know it.
     json: 'z.record(z.string(), z.any())',
   }
-  let schema = map[field.type] ?? 'z.string()'
-  if (field.nullable) schema += '.nullable().optional()'
-  return schema
+  const schema = map[field.type]
+  return field.nullable ? `${schema}.nullable().optional()` : schema
 }
 
 function tsFieldType(field: FieldDefinition): string {
-  const map: Record<string, string> = {
+  const map: Record<FieldType, string> = {
     string: 'string',
     text: 'string',
     number: 'number',
@@ -217,22 +207,23 @@ function tsFieldType(field: FieldDefinition): string {
     date: 'string',
     json: 'Record<string, unknown>',
   }
-  const base = map[field.type] ?? 'string'
+  const base = map[field.type]
   return field.nullable ? `${base} | null` : base
 }
 
 /**
  * How a resource reads one column off its record.
  *
- * A `date` column is a `Date` on the record but serializes to an ISO string,
- * which is what `tsFieldType` declares — so it is converted rather than cast.
+ * A `date` column serializes to the ISO string `tsFieldType` declares, so it is
+ * converted rather than cast. It goes through `new Date()` because the driver
+ * decides what it hands back: Postgres `timestamp` yields a `Date`, but SQLite
+ * — the default scaffold — stores dates in a `text` column and yields a string.
  */
 function resourceFieldExpression(field: FieldDefinition): string {
   const access = `this.resource.${field.name}`
   if (field.type === 'date') {
-    return field.nullable
-      ? `(${access} as Date | null)?.toISOString() ?? null`
-      : `(${access} as Date).toISOString()`
+    const iso = `new Date(${access} as string | number | Date).toISOString()`
+    return field.nullable ? `${access} == null ? null : ${iso}` : iso
   }
   return field.nullable
     ? `(${access} as ${tsFieldType(field)}) ?? null`
@@ -245,6 +236,16 @@ function emptyFormValue(field: FieldDefinition): string {
   if (field.type === 'number') return '0'
   if (field.type === 'json') return '{}'
   return "''"
+}
+
+/**
+ * Reading a field out of form state. Nullable columns are typed
+ * `T | null | undefined`, which no controlled input accepts, so they coalesce
+ * to the same empty value the form was seeded with.
+ */
+function formValue(field: FieldDefinition, formVar: string): string {
+  const access = `${formVar}.data.${field.name}`
+  return field.nullable ? `${access} ?? ${emptyFormValue(field)}` : access
 }
 
 function generateValidator(singular: string, collection: string, fields: FieldDefinition[]): string {
@@ -401,8 +402,11 @@ function generateIndexPage(
   fields: FieldDefinition[],
   appPrefix: string,
 ): string {
-  const titleField = fields[0]?.name ?? 'id'
-  const summaryField = fields.length > 1 ? fields[1]?.name : null
+  // A json column is an object, which React cannot render as a child — and it
+  // would make a poor list heading anyway. Skip to the next usable field.
+  const displayFields = fields.filter((f) => f.type !== 'json')
+  const titleField = displayFields[0]?.name ?? 'id'
+  const summaryField = displayFields.length > 1 ? displayFields[1]?.name : null
 
   return `import { Link } from '@inertiajs/react'
 import type { PaginatedPageProps } from '@guren/core'
@@ -498,8 +502,9 @@ function generateNewPage(
   const defaults = fields.map((f) => `${f.name}: ${emptyFormValue(f)}`).join(', ')
 
   const formFields = fields.map((f) => generateFormField(f, 'form')).join('\n')
+  const fieldState = generateFormFieldState(fields)
 
-  return `import { useForm } from '@inertiajs/react'
+  return `${reactImport(fieldState)}import { useForm } from '@inertiajs/react'
 import type { ApiRoutes } from '@/.guren/api-client.gen'
 import type { RouteBody } from '@guren/inertia-client/typed-forms'
 import { route } from '@/.guren/routes.gen'
@@ -508,7 +513,7 @@ type ${singular}FormData = RouteBody<ApiRoutes, '${routeName}.store'>
 
 export default function New${singular}() {
   const form = useForm<${singular}FormData>({ ${defaults} })
-  return (
+${fieldState ? `${fieldState}\n` : ''}  return (
     <main className="mx-auto max-w-3xl px-6 py-12">
       <form className="space-y-4" onSubmit={(submitEvent) => { submitEvent.preventDefault(); form.post(route('${routeName}.store')) }}>
 ${formFields}
@@ -532,8 +537,9 @@ function generateEditPage(
   }).join(', ')
 
   const formFields = fields.map((f) => generateFormField(f, 'form')).join('\n')
+  const fieldState = generateFormFieldState(fields)
 
-  return `import { useForm } from '@inertiajs/react'
+  return `${reactImport(fieldState)}import { useForm } from '@inertiajs/react'
 import type { ApiRoutes } from '@/.guren/api-client.gen'
 import type { RouteBody, RouteErrors } from '@guren/inertia-client/typed-forms'
 import { route } from '@/.guren/routes.gen'
@@ -547,7 +553,7 @@ interface Props {
 
 export default function Edit${singular}({ ${variableName} }: Props) {
   const form = useForm<${singular}FormData>({ ${defaults} })
-  return (
+${fieldState ? `${fieldState}\n` : ''}  return (
     <main className="mx-auto max-w-3xl px-6 py-12">
       <form className="space-y-4" onSubmit={(submitEvent) => { submitEvent.preventDefault(); form.put(route('${routeName}.update', { id: ${variableName}.id })) }}>
 ${formFields}
@@ -560,46 +566,61 @@ ${formFields}
 }
 
 function generateFormField(field: FieldDefinition, formVar: string): string {
-  // Nullable fields are typed `T | null | undefined` — coalesce for controlled inputs.
-  const stringValue = field.nullable ? `${formVar}.data.${field.name} ?? ''` : `${formVar}.data.${field.name}`
+  const value = formValue(field, formVar)
   if (field.type === 'boolean') {
-    const checkedValue = field.nullable ? `${formVar}.data.${field.name} ?? false` : `${formVar}.data.${field.name}`
     return `        <label className="flex items-center gap-2">
-          <input type="checkbox" checked={${checkedValue}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.checked)} />
+          <input type="checkbox" checked={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.checked)} />
           ${field.name}
         </label>`
   }
   if (field.type === 'text') {
-    return `        <textarea value={${stringValue}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} placeholder="${field.name}" className="w-full rounded border px-3 py-2" />`
+    return `        <textarea value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} placeholder="${field.name}" className="w-full rounded border px-3 py-2" />`
   }
   if (field.type === 'number') {
-    const numberValue = field.nullable ? `${formVar}.data.${field.name} ?? 0` : `${formVar}.data.${field.name}`
-    return `        <input type="number" value={${numberValue}} onChange={(event) => ${formVar}.setData('${field.name}', Number(event.target.value))} placeholder="${field.name}" className="w-full rounded border px-3 py-2" />`
+    return `        <input type="number" value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', Number(event.target.value))} placeholder="${field.name}" className="w-full rounded border px-3 py-2" />`
   }
   if (field.type === 'date') {
     // The value arrives as an ISO timestamp but `type="date"` only renders a
     // bare `YYYY-MM-DD`, and shows nothing at all for anything longer.
-    const dateValue = field.nullable ? `(${stringValue})` : stringValue
+    const dateValue = field.nullable ? `(${value})` : value
     return `        <input type="date" value={${dateValue}.slice(0, 10)} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} className="w-full rounded border px-3 py-2" />`
   }
   if (field.type === 'json') {
     // Uncontrolled: a controlled textarea driven by the parsed object would
-    // reject every keystroke that leaves the JSON temporarily invalid.
-    const jsonValue = field.nullable ? `${formVar}.data.${field.name} ?? {}` : `${formVar}.data.${field.name}`
+    // reject every keystroke that leaves the JSON temporarily invalid. The
+    // flag is what keeps that from being silent — without it, submitting
+    // half-typed JSON would quietly send the last value that parsed.
     return `        <textarea
-          defaultValue={JSON.stringify(${jsonValue}, null, 2)}
+          defaultValue={JSON.stringify(${value}, null, 2)}
           onChange={(event) => {
             try {
               ${formVar}.setData('${field.name}', JSON.parse(event.target.value))
+              set${pascalCase(field.name)}Invalid(false)
             } catch {
-              // Mid-edit JSON is expected; keep the last value that parsed.
+              set${pascalCase(field.name)}Invalid(true)
             }
           }}
           placeholder="${field.name}"
           className="w-full rounded border px-3 py-2 font-mono text-sm"
-        />`
+        />
+        {${field.name}Invalid && (
+          <p className="text-sm text-red-600">${field.name} is not valid JSON — fix it or the last valid value is submitted.</p>
+        )}`
   }
-  return `        <input value={${stringValue}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} placeholder="${field.name}" className="w-full rounded border px-3 py-2" />`
+  return `        <input value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} placeholder="${field.name}" className="w-full rounded border px-3 py-2" />`
+}
+
+/** Only pages carrying field state import React. */
+function reactImport(fieldState: string): string {
+  return fieldState ? "import { useState } from 'react'\n" : ''
+}
+
+/** The `useState` lines the JSON fields' validity flags need, if any. */
+function generateFormFieldState(fields: FieldDefinition[]): string {
+  return fields
+    .filter((f) => f.type === 'json')
+    .map((f) => `  const [${f.name}Invalid, set${pascalCase(f.name)}Invalid] = useState(false)`)
+    .join('\n')
 }
 
 function pluralize(name: string): string {

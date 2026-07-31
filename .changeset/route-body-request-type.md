@@ -20,6 +20,10 @@ A `.pipe()` now resolves both sides independently; `.transform()` continues to
 report its input type, since a transform's output is a function with no
 recoverable type.
 
+Field *presence* follows the same split, which it previously did not: a
+`.default()` or `.catch()` field may be omitted from a request but is always
+there once parsed, so it is optional in `body` and required in `response`.
+
 **Regenerating may surface new type errors in app code**, and they are pointing
 at something real. A form field previously typed `Date` was already sending a
 string over the wire; one typed `number` may receive `"3"` from an input. Widen
@@ -29,6 +33,8 @@ Fixed alongside, all of which blocked the same scaffold from compiling:
 
 - `z.array()` threw on Zod 4 and took `guren codegen` down with it, for any
   route whose body or output schema contained an array.
+- Zod 3's `ZodPipeline` was not recognized at all, so `z.string().pipe(...)`
+  rendered as `unknown` on apps still pinned to Zod 3.
 - `RouteBody<>` constrained its registry to a type with an index signature,
   which the generated `ApiRoutes` interface can never satisfy — the type could
   not be used with the one registry it exists for. The constraint is gone, and
@@ -37,11 +43,15 @@ Fixed alongside, all of which blocked the same scaffold from compiling:
 - A scaffolded `json` field validated with `z.record(z.unknown())`, which needs
   an explicit key type on Zod 4 and produces a value Inertia's `FormDataType`
   rejects. It is now `z.record(z.string(), z.any())`, edited through a textarea
-  that tolerates mid-edit JSON, and rendered with `JSON.stringify` instead of
-  being passed to React as an object. Apps that customized this validator keep
-  their own version; only newly scaffolded features change.
-- A scaffolded `date` field cast a `Date` column straight to `string` in its
+  that tolerates mid-edit JSON while flagging it, and rendered with
+  `JSON.stringify` instead of being passed to React as an object. A json column
+  is also no longer used as the Index page's heading, where React refused to
+  render it. Apps that customized this validator keep their own version; only
+  newly scaffolded features change.
+- A scaffolded `date` field cast its column straight to `string` in the
   resource, and fed a full ISO timestamp to `<input type="date">`, which renders
-  nothing for anything longer than `YYYY-MM-DD`.
+  nothing for anything longer than `YYYY-MM-DD`. The resource now normalizes
+  through `new Date(...)`, so it survives SQLite handing back a string where
+  Postgres hands back a `Date`.
 - The scaffolded Edit page named its submit event `event`, shadowing the record
   prop for any entity whose variable name is also `event`.

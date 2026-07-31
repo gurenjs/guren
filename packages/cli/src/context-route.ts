@@ -7,6 +7,9 @@ import { schemaToTypeString } from './schema-type-extractor'
  * Serializable route view shared by the whole-project context and the
  * entity bundle: `RouteDefinition` with its live Zod schema objects
  * replaced by rendered type strings, so `--json` output stays clean.
+ *
+ * `body` renders the request side of its schema; `params`, `query` and
+ * `output` render the parsed side. See the call site for why.
  */
 export interface ContextRoute {
   method: string
@@ -36,12 +39,13 @@ export function routeDefinitionToContextRoute(def: RouteDefinition): ContextRout
     bindings: def.bindings,
     middleware: def.middlewareNames?.length ? def.middlewareNames : undefined,
     hasInlineMiddleware: def.hasInlineMiddleware || undefined,
-    params: schemaToTypeString(def.schemas?.params),
-    query: schemaToTypeString(def.schemas?.query),
-    // The body is documented as something to send, so it renders the schema's
-    // input side — a coerced date reads as the ISO string a caller writes.
+    // `params` and `query` document what the controller ends up with — a
+    // coerced `:id` is more useful read as `number` than as the URL's string.
+    // `body` is the one an agent has to *write*, so it renders the wire side.
+    params: schemaToTypeString(def.schemas?.params, { io: 'output' }),
+    query: schemaToTypeString(def.schemas?.query, { io: 'output' }),
     body: schemaToTypeString(def.schemas?.body, { io: 'input' }),
-    output: schemaToTypeString(def.schemas?.output),
+    output: schemaToTypeString(def.schemas?.output, { io: 'output' }),
     summary: def.summary,
     description: def.description,
     tags: def.tags,

@@ -162,8 +162,12 @@ describe('makeFeature', () => {
         'utf8',
       )
       expect(resource).toContain('startsAt: string')
-      // Casting the Date straight to string is what TypeScript rejects.
-      expect(resource).toContain('startsAt: (this.resource.startsAt as Date).toISOString()')
+      // Casting the column straight to string is what TypeScript rejects, and
+      // calling .toISOString() on it breaks under SQLite, where the driver
+      // hands back a string rather than a Date.
+      expect(resource).toContain(
+        'startsAt: new Date(this.resource.startsAt as string | number | Date).toISOString()',
+      )
 
       const newPage = await readFile(join(workspace.dir, 'resources/js/pages/events/New.tsx'), 'utf8')
       // `type="date"` renders nothing for a full ISO timestamp.
@@ -196,9 +200,47 @@ describe('makeFeature', () => {
       expect(newPage).toContain("setData('meta', JSON.parse(event.target.value))")
       expect(newPage).toContain('meta: {}')
 
+      // Without the flag, submitting half-typed JSON silently sends the last
+      // value that parsed, with the textarea still showing the newer text.
+      expect(newPage).toContain("import { useState } from 'react'")
+      expect(newPage).toContain('const [metaInvalid, setMetaInvalid] = useState(false)')
+      expect(newPage).toContain('setMetaInvalid(true)')
+      expect(newPage).toContain('{metaInvalid && (')
+
       const showPage = await readFile(join(workspace.dir, 'resources/js/pages/events/Show.tsx'), 'utf8')
       // An object is not a valid React child.
       expect(showPage).toContain('{JSON.stringify(event.meta)}')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('does not headline the Index page with a json field', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-index-json-')
+
+    try {
+      // json first, so the naive "first field is the title" pick would land on
+      // it and render an object as a React child.
+      await makeFeature('Event', { fields: 'meta:json,title:string,note:text' })
+
+      const indexPage = await readFile(join(workspace.dir, 'resources/js/pages/events/Index.tsx'), 'utf8')
+
+      expect(indexPage).not.toContain('{event.meta}')
+      expect(indexPage).toContain('{event.title}')
+      expect(indexPage).toContain('{event.note ?? \'\'}')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('only imports useState on pages that need field state', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-no-state-')
+
+    try {
+      await makeFeature('Post', { fields: 'title:string,body:text' })
+
+      const newPage = await readFile(join(workspace.dir, 'resources/js/pages/posts/New.tsx'), 'utf8')
+      expect(newPage).not.toContain('useState')
     } finally {
       await workspace.cleanup()
     }

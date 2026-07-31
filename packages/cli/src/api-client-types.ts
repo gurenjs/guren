@@ -60,10 +60,8 @@ export function buildApiClientContent(definitions: RouteDefinitionLike[]): strin
       const paramsType = params.length > 0
         ? `{ ${params.map((p) => `${p}: string | number`).join('; ')} }`
         : 'Record<string, never>'
-      // `body` is what a caller has to send, so it renders the schema's input
-      // side; `output` describes a parsed response and keeps the output side.
       const bodyType = d.schemas?.body ? schemaToTypeString(d.schemas.body, { io: 'input' }) : undefined
-      const responseType = d.schemas?.output ? schemaToTypeString(d.schemas.output) : undefined
+      const responseType = d.schemas?.output ? schemaToTypeString(d.schemas.output, { io: 'output' }) : undefined
       let entry = `  '${escapeSingleQuotes(d.name)}': {
     method: '${d.method}'
     path: '${escapeSingleQuotes(d.path)}'
