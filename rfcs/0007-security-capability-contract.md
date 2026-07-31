@@ -4,19 +4,22 @@
 **Date:** 2026-08-01
 **Status:** Draft
 
-> Scope note: this RFC specifies the *mechanism* — how the framework states, in
-> machine-readable form, which security protections apply to which routes — and
-> the two consumers that read it (`guren audit` and a new behavioral test kit).
-> Companion work that rides on the mechanism but adds no new design questions
-> (OWASP/CWE tagging of audit findings, dependency scanning for apps, a CI
-> workflow scaffold for new apps) is listed under "Staging" and intentionally
-> not re-litigated here.
+> Scope note: an earlier draft of this RFC specified a considerably larger
+> system — a public capability API for user middleware, an application-level
+> middleware registry with per-route effective-chain computation, declared
+> route security contracts, and a behavioral security test kit
+> (`@guren/testing/security`). It was descoped before discussion: the concrete
+> defect motivating the RFC is fixable with a fraction of that surface, no
+> user demand exists yet for the rest, and every deferred piece adds permanent
+> public API and a routing-semantics mirror that can drift. The deferred
+> design is preserved in **Future Work** with explicit resumption triggers,
+> so this document remains the place to pick it back up.
 
 ## Problem
 
-Guren already ships a static security audit (`guren audit`) that checks, among
-other things, whether mutating routes are protected by authentication. That
-check is a heuristic over middleware *names*:
+Guren ships a static security audit (`guren audit`) that checks, among other
+things, whether mutating routes are protected by authentication. That check is
+a heuristic over middleware *names*:
 
 ```typescript
 // packages/cli/src/audit.ts:64
@@ -37,233 +40,111 @@ sit in its blind spot:
 - **False positives on names.** Any alias matching `/auth/i` counts as
   protection (`auth-metrics` would pass), and an alias that doesn't
   (`secure`, `member`) doesn't.
-- **Global protections are invisible.** Session, CSRF, and security-headers
-  middleware are mounted on the Hono instance
-  (`Application.mountSecurityDefaults()`, `packages/server/src/http/Application.ts:361`;
-  `AuthServiceProvider.register()`, `packages/server/src/providers/AuthServiceProvider.ts:17`),
-  not on routes. `Router.definitions()` (`packages/server/src/mvc/Router.ts:487`)
-  cannot see them at all, so no tool can answer "is this specific route
-  CSRF-protected?" — only "does a CSRF middleware exist somewhere?".
 
-The consequence is that Guren's security checking is capped at
-Brakeman-quality: pattern matching over source artifacts. That is the ceiling
-for Rails because routes and middleware are resolved at runtime; it should not
-be the ceiling for Guren, where routes are data (`RouteDefinition[]`) and the
-CLI already loads the real route module (`packages/cli/src/load-routes.ts`
-performs an actual `import()` and registers into a real `Router`, so middleware
-*function objects* are available to static tooling).
+Beyond the accuracy defect, three cheap, high-leverage gaps keep the audit
+story below what comparable frameworks now ship (Rails 7.2 bundles Brakeman
+and a security-scanning CI workflow into every new app):
 
-The same gap blocks behavioral verification. A test kit that wants to assert
-"every mutating route rejects a tokenless POST" needs to know, per route, which
-protections are *supposed* to apply — otherwise it either probes blindly
-(executing handlers whose protection is missing, i.e. causing the very side
-effects it exists to prevent) or maintains a hand-written route list that
-drifts from the app.
+- Audit findings carry no standard classification, so agents and reporting
+  tools cannot group or prioritize them (and "OWASP" claims stay prose).
+- `guren audit` never looks at dependencies — a known-vulnerable package in an
+  app's lockfile is invisible to it.
+- New apps are scaffolded with no CI at all: the integrity and security gates
+  Guren already has (`check`, `audit`, tests) run only if the user hand-writes
+  a workflow.
 
 ## Proposed Solution
 
-One mechanism, three layers, two consumers.
+Four additive pieces. None introduces a new public API beyond one CLI flag and
+new optional fields in the audit's JSON output.
 
-### 1. Capability stamps on middleware handlers
+### 1. Internal capability marker; audit drops the name heuristic
 
-Middleware factories mark the handlers they return with a well-known symbol.
-The property is non-enumerable, and the key is registered via `Symbol.for()` so
-identity survives duplicated `@guren/server` copies in a dependency tree (any
-same-realm lookup resolves to the same symbol):
+The built-in auth middleware factories mark the handlers they return with a
+well-known symbol. `Symbol.for()` keeps identity stable across duplicated
+`@guren/server` copies in one process:
 
 ```typescript
-// packages/server/src/http/middleware/capabilities.ts (new)
+// packages/server/src/http/middleware/capabilities.ts (new, internal)
+/** @internal — not exported from the package root; the shape may change. */
 export const CAPABILITIES = Symbol.for('guren.capabilities')
 
-/** Structured, not string[] — consumers need the configuration, not a label. */
-export interface SecurityCapabilities {
+export interface MiddlewareCapabilities {
   authentication?: { mode: 'required' | 'guest-only' }
-  csrf?: { methods: string[]; exclude: string[] }
-  session?: { cookieName: string }
-  securityHeaders?: Record<string, string | false>
-  // extensible; unknown keys are preserved and reported verbatim
-  [key: string]: unknown
 }
-
-export function stampCapabilities<H extends MiddlewareHandler>(
-  handler: H,
-  capabilities: SecurityCapabilities,
-): H
 ```
 
-The built-in factories stamp themselves: `requireAuthenticated` /
-`requireGuest` (`authentication`), `createCsrfMiddleware` (`csrf`, including
-its resolved `exclude` list and protected methods), `createSessionMiddleware`
-(`session`), `createSecurityHeaders` (`securityHeaders`). This is what makes
-the `guren add auth` scaffold legible with **zero changes to generated app
-code** — the inline `requireAuthenticated(...)` call already returns a stamped
-handler.
-
-User and plugin middleware opt in through `defineMiddleware`, which grows an
-optional second argument (backward compatible):
-
-```typescript
-export const requireSubscription = defineMiddleware(
-  async (c, next) => { /* ... */ },
-  { capabilities: { authentication: { mode: 'required' } } },
-)
-```
-
-### 2. Introspection: route-level and application-level
-
-**Route level.** `RouteDefinition` gains an aggregated, group-expanded view of
-the capabilities present on its middleware chain (named aliases, group
-middleware, and inline handlers alike):
+`requireAuthenticated()` and `requireGuest()` stamp their returned handlers
+(non-enumerable property). `Router`'s internal registry already holds the real
+middleware function objects for both aliased and inline registrations, and
+`RouteDefinition` grows an aggregated, group-expanded view:
 
 ```typescript
 export interface RouteDefinition {
   // ...existing fields...
-  capabilities?: SecurityCapabilities
+  capabilities?: MiddlewareCapabilities
 }
 ```
 
-**Application level.** Route middleware is not enough: CSRF and session are
-`hono.use('*')` registrations that `Router` never sees. `Application` therefore
-records every global registration it makes (and those made through
-`app.use()`) with its mount scope and order, and exposes:
+`guren audit` loads routes by importing the real module
+(`packages/cli/src/load-routes.ts`), so the stamps are present on the actual
+functions — no AST guessing. The audit replaces the `/auth/i` test with a
+capability lookup: inline `requireAuthenticated` now counts as protection,
+`auth-metrics` no longer does.
+
+The marker is deliberately **not** part of the public API in this RFC: it is
+not exported from `@guren/core`, `defineMiddleware` does not accept it, and
+docs do not mention it. Making it public is Future Work item 1.
+
+### 2. Classification taxonomy on audit findings
+
+Findings gain versioned standard references — versioned because OWASP Top 10
+2021 and 2025 number categories differently, so a bare `A03` is ambiguous:
 
 ```typescript
-interface GlobalMiddlewareRecord {
-  scope: string                      // the hono.use() path pattern
-  order: number                      // registration index
-  capabilities?: SecurityCapabilities
+export interface AuditFinding {
+  // ...existing fields...
+  classifications?: Array<{
+    standard: 'OWASP Top 10' | 'OWASP API Security' | 'CWE'
+    version?: string          // '2021', '2023'; absent for CWE
+    id: string                // 'A01', 'API3', 'CWE-352'
+    name?: string             // 'Broken Access Control'
+  }>
 }
-
-class Application {
-  securityPolicy(): {
-    global: GlobalMiddlewareRecord[]
-    routes: RouteDefinition[]
-    /** Which capability-bearing middleware run before this route's handler. */
-    effectiveChain(method: string, path: string): SecurityCapabilities[]
-  }
-}
 ```
 
-`effectiveChain()` is the load-bearing API. "CSRF middleware is mounted" is a
-global boolean; "a tokenless POST to `/posts` is rejected before the handler
-runs" requires knowing that the CSRF middleware's scope covers the path, that
-it was registered before the route, that POST is a protected method, and that
-the path is not in its `exclude` list. Consumers must ask the per-route
-question, not the global one.
+Initial mapping over the existing rules: missing auth on mutating routes →
+A01:2021; missing validation and raw SQL → A03:2021; hardcoded secrets →
+A02:2021; disabled security defaults → A05:2021; mass assignment → A01:2021 +
+API3:2023. Console output prefixes the primary id (`[A01] ...`); the JSON
+report carries the full array. Purely additive.
 
-### 3. Declared security contracts (optional override)
+### 3. Dependency scanning in `guren audit`
 
-Inference covers the common case; declarations cover intent that cannot be
-inferred. Route options accept an explicit contract:
+`guren audit` runs `bun audit --json` for the app and converts advisories into
+findings (classification A06:2021), reusing the parsing rules proven by the
+monorepo's own gate (`scripts/smoke/dependency-audit.ts`): exit codes 0/1
+carry valid JSON, anything else is a scan failure; the report shape is
+validated before iterating; advisories are keyed by GHSA id.
 
-```typescript
-router.post('/webhooks/stripe', [WebhookController, 'store'], {
-  security: {
-    csrf: { mode: 'not-applicable', reason: 'Stripe signature verification' },
-  },
-})
-```
+"Could not scan" is reported as its own finding axis, never as a pass — an
+offline machine must not look identical to a clean one. `--no-deps` opts out
+(offline development); scan metadata (`status`, tool version) is included in
+the JSON report so CI can require a completed scan.
 
-Two rules make declarations trustworthy rather than a bypass valve:
+### 4. CI workflow scaffold + `check --ci`
 
-- **`not-applicable` always requires a `reason`.** In particular, CSRF
-  applicability is *never* inferred from "no session middleware" — CSRF is
-  about ambient browser credentials generally (any cookie, Basic auth, client
-  certificates), not sessions specifically. An API-only app declares
-  `not-applicable` with its reason (e.g. bearer-only auth) once, at the app or
-  route level.
-- **Stale declarations fail.** A declaration that no longer corresponds to a
-  real route, or a skip entry no checker consumes, is an error — the same
-  contract the audit's ignore config and the monorepo's dependency gate
-  already enforce.
+`create-app` templates gain `.github/workflows/ci.yml` running install →
+`guren check --ci` → `guren audit --json` → `bun test`. Two enablers:
 
-This is the spec-anchored split (RFC 0004): capabilities are **derived**,
-contracts are **declared**, and both consumers below are the **checked** layer.
+- **`check --ci`**: plain `guren check` has never set an exit code (a stable
+  v1.0 contract this RFC does not change). The new flag gates on any failing
+  check, giving scaffolded CI a real gate without a breaking change.
+- **Template dotfile handling**: templates ship `_github/` and the scaffolder
+  renames it, extending the existing `_gitignore` mechanism
+  (`packages/create-app/src/blueprints.ts`) to directories.
 
-### Consumer 1: `guren audit` drops the name heuristic
-
-`AUTH_MIDDLEWARE_PATTERN` and the `middlewareNames.some(...)` test are replaced
-by capability lookup over the loaded route definitions. Because
-`loadRouteDefinitions()` imports the real module, the stamps are present on the
-actual function objects; no AST guessing is involved. The audit gains accuracy
-in both directions: inline `requireAuthenticated` now counts, `auth-metrics`
-no longer does.
-
-### Consumer 2: `@guren/testing/security` — behavioral verification
-
-A runner-agnostic core with thin adapters, so the testing package keeps its
-current runner neutrality:
-
-```typescript
-// @guren/testing/security
-export function runSecurityChecks(
-  app: TestApp,
-  options?: {
-    skip?: Array<{ method: string; path: string; check: string; reason: string }>
-  },
-): Promise<SecurityReport>
-
-// @guren/testing/security/bun  and  .../security/vitest
-export function securitySuite(app: TestApp, options?): void  // registers describe/test
-```
-
-`TestApp.create()` snapshots `securityPolicy()` at boot and propagates it
-through `withHeaders()` / `actingAs()` / `withCsrf()` clones.
-`TestApp.fromFetch()` / `fromWorkers()` cannot reconstruct routes and are
-rejected at the type level.
-
-Checks, derived from the policy rather than a hand-written list:
-
-| Check | Setup | Expectation |
-|---|---|---|
-| CSRF enforcement | authenticated if the route requires it; token absent/invalid | the middleware's configured rejection, *before* the handler |
-| Authentication | guest, **valid** CSRF token (`withCsrf()`) | 401 or the configured redirect |
-| Security headers | one side-effect-free probe request | configured header values present |
-| Cookie flags | session-mutating probe | `HttpOnly`/`SameSite`; `Secure` under production boot |
-
-The CSRF/auth matrix ordering matters because the default chain is
-session → CSRF → auth context: an unauthenticated tokenless POST is rejected
-by CSRF, so the auth check must present a valid token to observe the auth
-rejection at all.
-
-**Probe safety protocol.** A probe that reaches a handler is a bug in the app
-*and* a side effect the kit caused. Three guards:
-
-1. `runSecurityChecks` refuses to run unless `NODE_ENV === 'test'`, and its
-   documentation requires isolated stores (the blueprint test config already
-   switches to a separate SQLite database).
-2. A route is live-probed **only when `effectiveChain()` proves the rejection
-   happens before the handler**. Routes the static pass finds unprotected are
-   reported as failures *without sending a request*.
-3. Routes excluded by the CSRF middleware's own `exclude` config are skipped by
-   reading that config — the kit never maintains a second exclusion list to
-   drift from the first. User-supplied `skip` entries require a `reason` and
-   fail when stale.
-
-The residual risk — a handler executing because a protection the static pass
-attested to is broken in a way only the probe can see — is precisely the class
-of bug the kit exists to find, and it is bounded to one request per route
-under a test-only environment.
-
-### Staging
-
-Implementation lands as independently shippable stages; only the middle two
-are governed by this RFC's design:
-
-1. **Finding taxonomy** (`@guren/cli`): audit findings gain
-   `classifications: Array<{ standard, version, id, name }>` plus CWE ids —
-   versioned because OWASP Top 10 2021 and 2025 number differently. Additive.
-2. **Capability mechanism + introspection** (this RFC, `@guren/server` +
-   `@guren/cli`): sections 1–2 and consumer 1.
-3. **Behavioral test kit** (this RFC, `@guren/testing` + `@guren/server`):
-   section 3 and consumer 2.
-4. **Application dependency scanning** (`@guren/cli`): `bun audit` integration
-   for apps, mirroring the monorepo's own gate.
-5. **CI scaffold** (`create-app` + `@guren/cli`): generated workflow running
-   check/audit/tests. Requires a `check --ci` aggregate exit-code flag (the
-   plain `check` exit contract is stable since v1.0 and unchanged) and a
-   template mechanism for shipping `.github/` (today only `_gitignore` is
-   renamed).
+The API-only blueprint gets a variant without browser-specific steps.
 
 ## Alternatives Considered
 
@@ -271,49 +152,68 @@ are governed by this RFC's design:
   auth scaffold. Rejected on the evidence above.
 - **Metadata on `aliasMiddleware()` only.** Covers named aliases but not inline
   middleware — the exact case the scaffolds generate. Rejected as incomplete.
-- **Mandatory route-level security contracts.** Declaring every route's
-  requirements by hand is Laravel-grade double bookkeeping and a drift factory.
-  Inference-first with optional declarations keeps the default zero-config.
 - **A `WeakMap<handler, capabilities>` registry instead of a symbol property.**
   A WeakMap lives in one module instance; a dependency tree with two
   `@guren/server` copies gets two registries that cannot see each other's
   handlers. `Symbol.for()` is process-global by construction.
-- **External SAST (CodeQL/Semgrep) for apps.** Valuable, and the monorepo now
-  runs CodeQL on framework code, but generic engines cannot know that
-  `requireAuthenticated()` is load-bearing for A01 — the framework can state
-  it. The approaches compose rather than compete.
-- **DAST (OWASP ZAP) instead of the test kit.** Slow, noisy, and blind to the
-  route metadata the framework already has. The kit covers the same surface
-  in-process, deterministically, per PR.
+- **The full mechanism from the original draft** (public capability API,
+  global-middleware registry, `effectiveChain()`, declared contracts,
+  behavioral test kit). Deferred, not rejected — see Future Work. The
+  determining arguments: (a) the accuracy defect needs none of it; (b) the
+  behavioral kit's marginal catch — bugs missed by both the improved static
+  audit *and* the framework's own secure-defaults regression suite
+  (`packages/server/tests/security-posture.test.ts`) — is a thin slice of
+  real-world failures, while its safety machinery (probe protocols, snapshot
+  propagation, runner adapters) is permanent complexity; (c) `effectiveChain()`
+  must mirror Hono's dispatch semantics, and an introspection layer that can
+  drift from real routing gives *false* assurance, the one failure mode a
+  security tool must not have.
+- **External SAST (CodeQL/Semgrep) for apps.** Generic engines cannot know
+  that `requireAuthenticated()` is load-bearing for A01 — the framework can
+  state it. Complements rather than replaces this proposal.
 
 ## Migration Path
 
-Additive for applications: no generated code changes, `defineMiddleware`'s new
-argument is optional, `RouteDefinition.capabilities` is a new optional field.
-Ships in a minor release of `@guren/server` / `@guren/cli` / `@guren/testing`.
+Additive throughout; ships in minor releases of `@guren/server` and
+`@guren/cli`, plus a `create-app` template update. No generated or user code
+changes.
 
 One observable behavior change: `guren audit` results become more accurate.
-Routes previously *passing* only because an alias name matched `/auth/i` will
-start warning (correctly); routes previously *warning* despite inline
+Routes previously passing only because an alias name matched `/auth/i` will
+start warning (correctly); routes previously warning despite inline
 `requireAuthenticated` will pass. The audit is informational by default, so
-this cannot break CI that doesn't opt into exit codes; the changelog must call
-it out regardless.
+this cannot break CI that doesn't opt into exit codes; the changelog must
+call it out regardless.
+
+## Future Work (deferred with resumption triggers)
+
+Preserved from the original draft; each item lists what would justify picking
+it up. The design discussions behind them (probe-safety protocol, CSRF
+applicability rules, TestApp snapshot propagation) are recorded in this
+document's git history.
+
+1. **Public capability API** — `defineMiddleware(fn, { capabilities })` so
+   user and plugin middleware participate in audit detection.
+   *Trigger:* users report audit false negatives on their own auth middleware.
+2. **Application-level middleware introspection** (`securityPolicy()`,
+   per-route effective chains). *Trigger:* item 3 is picked up, or agent
+   tooling (`guren context`) needs per-route security answers.
+3. **Behavioral security test kit** (`@guren/testing/security`,
+   runner-agnostic `runSecurityChecks`). *Trigger:* a real-world report of an
+   app whose audit passes while a runtime protection is broken — the class of
+   bug only behavioral checks catch. Design constraints already settled:
+   CSRF applicability must be declared (never inferred from session absence),
+   probes only where rejection provably precedes the handler, exclusions read
+   from middleware config rather than duplicated.
+4. **Declared route security contracts** (`security:` route options with
+   reason-required `not-applicable`). *Trigger:* item 3, which consumes them.
 
 ## Open Questions
 
-1. **Plugin capability namespacing.** Should third-party plugins stamp under
-   their own keys (`'plugin-stripe:webhook-signature'`) with a naming
-   convention, or is the open `[key: string]` record enough?
-2. **Authorization capability.** `requireAuthenticated` says nothing about
-   *authorization* (policies/Gate). Should policy enforcement get a capability
-   so the audit can distinguish authenticated from authorized mutations? Ties
-   into the Gate wiring left open by the secure-by-default roadmap.
-3. **Rate limiting.** Same question for the rate limiter — a capability plus a
-   posture check ("login route has a limiter") is cheap once the mechanism
-   exists.
-4. **Report schema for N/A.** How `SecurityReport` distinguishes
-   pass / fail / not-applicable-by-declaration / skipped-with-reason, and
-   whether `guren audit --json` should embed the same shape for tooling.
-5. **Header value checks.** The kit asserts configured values, but should it
-   also warn on *absent* protections that are opt-in today (CSP, host
-   authorization) — posture advice rather than regression detection?
+1. Should the taxonomy also tag `doctor` findings (e.g. the APP_KEY checks),
+   or stay audit-only until someone needs the union?
+2. Should `check --ci` also require a *completed* dependency scan (fail on
+   `--no-deps`), or leave that policy to the generated workflow?
+3. For the scaffolded workflow: pin the Bun version from the template's
+   `packageManager`, or float on latest and let the nightly-style breakage
+   surface in user CI?
