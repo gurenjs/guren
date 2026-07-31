@@ -2,6 +2,8 @@ import { cp, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/pr
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import process from 'node:process'
+import { DATABASE_DRIVERS } from '../../packages/create-app/src/blueprints'
+import { fileExists } from '../../packages/create-app/src/utils'
 import { auditBlueprintTemplates, auditConsoleWiring, auditStarterTemplate } from './starter-template-audit'
 
 type PackageName =
@@ -336,6 +338,75 @@ async function assertCanonicalScaffolds(appDir: string): Promise<void> {
   assert(layout.includes('as="button"'), 'Auth layout logout Link must render as a button.')
 }
 
+/**
+ * The blog template ships its app code instead of generating it, so nothing
+ * else in CI reads these files. Typecheck and build cover whether they compile;
+ * these assertions cover the wiring that compiles either way — an unregistered
+ * policy, a mass-assignable `authorId`, or a leftover per-driver schema variant
+ * all typecheck fine and all produce a broken or unsafe app.
+ */
+async function assertBlogScaffold(appDir: string): Promise<void> {
+  for (const driver of DATABASE_DRIVERS) {
+    assert(
+      !await fileExists(join(appDir, `db/schema.${driver}.ts`)),
+      `Blog blueprint left db/schema.${driver}.ts behind in the scaffolded app.`,
+    )
+  }
+
+  const schema = await readFile(join(appDir, 'db/schema.ts'), 'utf8')
+  assert(schema.includes('export const posts'), 'Blog blueprint must ship a posts table.')
+  assert(schema.includes('author_id'), 'Blog posts must carry their author.')
+
+  const appBootstrap = await readFile(join(appDir, 'src/app.ts'), 'utf8')
+  assert(appBootstrap.includes('AuthProvider'), 'Blog blueprint must register AuthProvider.')
+  assert(appBootstrap.includes('AuthorizationProvider'), 'Blog blueprint must register AuthorizationProvider.')
+
+  // getGate() throws until the framework's own provider has registered, so the
+  // policy has to be bound from a provider's boot(), not at module scope.
+  const authorizationProvider = await readFile(join(appDir, 'app/Providers/AuthorizationProvider.ts'), 'utf8')
+  assert(
+    /boot\(\)[^{]*\{[^}]*getGate\(\)\.policy\(Post,\s*PostPolicy\)/su.test(authorizationProvider),
+    'Blog blueprint must bind PostPolicy to the Post model from boot(), not at module scope.',
+  )
+
+  // Nothing shares the signed-in user with Inertia by default, and Layout.tsx
+  // gates every authenticated control on it — without this the nav renders as a
+  // guest for a signed-in user and the Log out button is unreachable.
+  const authProvider = await readFile(join(appDir, 'app/Providers/AuthProvider.ts'), 'utf8')
+  assert(authProvider.includes('shareInertiaProps('), 'Blog blueprint must share the signed-in user with Inertia.')
+
+  // A native form POST carries neither the X-XSRF-TOKEN header nor a _token
+  // field, so CSRF protection rejects it — the click silently does nothing.
+  const layout = await readFile(join(appDir, 'resources/js/components/Layout.tsx'), 'utf8')
+  assert(!/<form[^>]*method="post"/iu.test(layout), 'Blog blueprint must not post from a native form — CSRF rejects it.')
+  assert(/<Link[^>]*method="post"/su.test(layout), 'Blog blueprint must log out through an Inertia Link.')
+
+  const post = await readFile(join(appDir, 'app/Models/Post.ts'), 'utf8')
+  assert(post.includes('static fillable'), 'Blog Post model must declare fillable fields.')
+  assert(!/fillable\s*=\s*\[[^\]]*authorId/su.test(post), 'Blog Post model must not accept authorId as mass-assignable input.')
+
+  const postController = await readFile(join(appDir, 'app/Http/Controllers/PostController.ts'), 'utf8')
+  for (const ability of ["'create'", "'update'", "'delete'"]) {
+    assert(postController.includes(`this.authorize(${ability}`), `Blog PostController must authorize ${ability}.`)
+  }
+  assert(postController.includes('authorId: author.id'), 'Blog PostController must set the author from the signed-in user.')
+
+  const webRoutes = await readFile(join(appDir, 'routes/web.ts'), 'utf8')
+  assert(webRoutes.includes('registerAuthRoutes(router)'), 'Blog blueprint must register its auth routes.')
+  // Named, because `guren audit` cannot inspect a middleware passed inline as a
+  // call result and downgrades those routes to an unverifiable warning.
+  assert(webRoutes.includes("aliasMiddleware('auth'"), 'Blog blueprint must alias its auth middleware.')
+  assert(webRoutes.includes("posts.middleware('auth').group("), 'Blog blueprint must guard mutating post routes with the named auth middleware.')
+
+  // The seeders are the only way a fresh blog app has anything to show, and
+  // nothing else in CI loads them.
+  for (const seeder of ['db/seeders/001_users.ts', 'db/seeders/002_posts.ts']) {
+    const source = await readFile(join(appDir, seeder), 'utf8')
+    assert(source.includes('defineSeeder'), `${seeder} must export a seeder.`)
+    assert(!source.includes('onConflictDoNothing'), `${seeder} must stay portable across the drivers this blueprint supports.`)
+  }
+}
+
 async function assertFeatureScaffolds(appDir: string): Promise<void> {
   const appBootstrap = await readFile(join(appDir, 'src/app.ts'), 'utf8')
   for (const providerName of [
@@ -495,6 +566,12 @@ async function main(): Promise<void> {
       assert(routesFile.includes('/health'), 'API blueprint must include a /health endpoint.')
       assert(routesFile.includes('/api/v1'), 'API blueprint must include /api/v1 prefix.')
       await assertCoreFirstStarter(appDir, { checkDependencies: false })
+    } else if (blueprint === 'blog') {
+      // No codegen before the typecheck below: the template ships .guren/*.gen.ts,
+      // and running codegen first would regenerate them, hiding stubs that have
+      // fallen behind the pages and routes the template actually ships.
+      await assertCoreFirstStarter(appDir, { checkDependencies: false })
+      await assertBlogScaffold(appDir)
     } else if (blueprint === 'worker') {
       // Worker blueprint: postScaffold adds queue/events/cache/schedule
       await assertCoreFirstStarter(appDir, { checkDependencies: false })
