@@ -6,9 +6,10 @@
  * advisory is acceptable and what unblocks its removal. A stale entry (one
  * that no longer matches anything) also fails, so the list cannot rot.
  *
- * Exit codes: 0 clean (ignores may apply), 1 active advisories or stale
- * ignores, 2 scan unavailable (network/registry failure) — CI treats an
- * unavailable scan as a failure rather than a silent pass.
+ * Exit codes: 0 clean (ignores may apply), 1 active advisories, stale
+ * ignores, or an invalid ignore list, 2 scan unavailable (registry
+ * failure or unrecognized `bun audit` output) — CI treats an unavailable
+ * scan as a failure rather than a silent pass.
  */
 
 interface Advisory {
@@ -34,34 +35,61 @@ const IGNORED_ADVISORIES: IgnoredAdvisory[] = [
   },
 ]
 
-const ghsaPattern = /GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}/i
+const ignoredIds = new Set<string>()
+for (const entry of IGNORED_ADVISORIES) {
+  const id = entry.id.toUpperCase()
+  if (!/^GHSA-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(id) || !entry.reason.trim()) {
+    console.error(`invalid ignore entry '${entry.id}': needs a GHSA id and a non-empty reason.`)
+    process.exit(1)
+  }
+  if (ignoredIds.has(id)) {
+    console.error(`duplicate ignore entry '${entry.id}'.`)
+    process.exit(1)
+  }
+  ignoredIds.add(id)
+}
 
 const proc = Bun.spawn([process.execPath, 'audit', '--json'], {
   stdout: 'pipe',
   stderr: 'pipe',
 })
-const [stdout, stderr] = await Promise.all([
+const [stdout, stderr, exitCode] = await Promise.all([
   new Response(proc.stdout).text(),
   new Response(proc.stderr).text(),
+  proc.exited,
 ])
-await proc.exited
+
+function scanUnavailable(why: string): never {
+  console.error(`dependency audit: could not scan (${why}).`)
+  const details = stderr.trim()
+  if (details) console.error(details)
+  process.exit(2)
+}
+
+// `bun audit` exits 0 (clean) or 1 (advisories found), valid JSON either
+// way; anything else is an execution/registry failure. A proxy can also
+// answer with JSON that merely *parses* — an error object instead of the
+// package→advisories map — so the shape is validated, not assumed.
+if (exitCode > 1) scanUnavailable(`bun audit exited with code ${exitCode}`)
 
 let report: Record<string, Advisory[]>
 try {
   report = JSON.parse(stdout) as Record<string, Advisory[]>
 } catch {
-  console.error('dependency audit: could not scan (no JSON from `bun audit`).')
-  if (stderr.trim()) console.error(stderr.trim())
-  process.exit(2)
+  scanUnavailable('no JSON from bun audit')
+}
+if (typeof report !== 'object' || report === null || Array.isArray(report)) {
+  scanUnavailable('unrecognized bun audit output shape')
 }
 
-const ignoredIds = new Set(IGNORED_ADVISORIES.map((entry) => entry.id.toUpperCase()))
 const matchedIgnores = new Set<string>()
 const active: Array<{ pkg: string; advisory: Advisory }> = []
 
 for (const [pkg, advisories] of Object.entries(report)) {
+  if (!Array.isArray(advisories)) scanUnavailable('unrecognized bun audit output shape')
   for (const advisory of advisories) {
-    const ghsa = advisory.url.match(ghsaPattern)?.[0]?.toUpperCase()
+    if (typeof advisory?.url !== 'string') scanUnavailable('unrecognized bun audit output shape')
+    const ghsa = advisory.url.match(/GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}/i)?.[0].toUpperCase()
     if (ghsa && ignoredIds.has(ghsa)) {
       matchedIgnores.add(ghsa)
     } else {
@@ -70,13 +98,14 @@ for (const [pkg, advisories] of Object.entries(report)) {
   }
 }
 
+const stale: IgnoredAdvisory[] = []
 for (const entry of IGNORED_ADVISORIES) {
   if (matchedIgnores.has(entry.id.toUpperCase())) {
     console.log(`[ignored] ${entry.id}: ${entry.reason}`)
+  } else {
+    stale.push(entry)
   }
 }
-
-const stale = IGNORED_ADVISORIES.filter((entry) => !matchedIgnores.has(entry.id.toUpperCase()))
 for (const entry of stale) {
   console.error(
     `[stale ignore] ${entry.id} no longer matches any installed package — remove it from ${import.meta.path}.`,
