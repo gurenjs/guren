@@ -63,6 +63,10 @@ export interface ApiRoutes {
 
 Only **named** routes are emitted. `output:` schemas add a `response:` field.
 Consume with `createApiClient<ApiRoutes>({ baseUrl })` → `client.request('posts.store', { body })`.
+Mutating requests copy the `XSRF-TOKEN` cookie into the `X-XSRF-TOKEN` header, so a
+same-origin client passes CSRF protection without extra wiring. The token is never
+copied to a `baseUrl` on another origin — that client passes its own `X-XSRF-TOKEN`
+header (and `credentials: 'include'` plus CORS if it needs the session cookie sent).
 
 ## Which Zod constructs survive type extraction
 
