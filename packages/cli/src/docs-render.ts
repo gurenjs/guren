@@ -12,7 +12,7 @@
  * to render client-side; local link targets are surfaced via
  * `data-target` so the viewer can wire graph navigation onto them.
  */
-import { readLinkDestination } from './docs-index'
+import { readLinkDestination } from './docs-links'
 
 /** `[label]: ./target.md "Title"` — metadata, never rendered. */
 const LINK_DEFINITION_LINE = /^ {0,3}\[[^\]]+\]:\s*\S+/
