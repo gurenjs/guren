@@ -10,6 +10,10 @@
  * ignores, or an invalid ignore list, 2 scan unavailable (registry
  * failure or unrecognized `bun audit` output) — CI treats an unavailable
  * scan as a failure rather than a silent pass.
+ *
+ * `guren audit`'s app-facing scan (packages/cli/src/audit-deps.ts)
+ * implements the same `bun audit` contract with its own policy; a change
+ * to the output shape needs both updated.
  */
 
 interface Advisory {

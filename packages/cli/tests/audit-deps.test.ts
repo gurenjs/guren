@@ -110,3 +110,23 @@ describe('dependencyFindingsFromScan partial failures', () => {
     expect(findings.map((f) => f.key)).toEqual(['deps:scan'])
   })
 })
+
+describe('dependencyFindingsFromScan exit-code contract', () => {
+  it('treats exit 1 with an empty report as scan-unavailable, not a clean pass', () => {
+    // Exit 1 is bun audit's "vulnerabilities found" contract — an exit-1
+    // run reporting none is contradicting itself (truncated output, a
+    // broken wrapper) and must not produce deps:none.
+    const findings: AuditFinding[] = []
+    const scan = dependencyFindingsFromScan('{}', 1, findings)
+
+    expect(scan.status).toBe('unavailable')
+    expect(findings.map((f) => f.key)).toEqual(['deps:scan'])
+  })
+
+  it('surfaces stderr detail on scan failures', () => {
+    const findings: AuditFinding[] = []
+    dependencyFindingsFromScan('', 7, findings, 'error: registry unreachable\n')
+
+    expect(findings[0]!.message).toContain('registry unreachable')
+  })
+})

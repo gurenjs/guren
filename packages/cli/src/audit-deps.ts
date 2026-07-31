@@ -11,6 +11,11 @@ import type { AuditFinding } from './audit'
  * validated, not assumed. "Could not scan" is reported as its own finding
  * and status, never as a pass: an offline machine must not look identical
  * to a clean one.
+ *
+ * The monorepo's own supply-chain gate (scripts/smoke/dependency-audit.ts)
+ * implements the same contract with its own policy (reasoned ignore list,
+ * stale detection); a change to `bun audit`'s output shape needs both
+ * updated.
  */
 
 export interface DependencyScan {
@@ -26,6 +31,7 @@ interface BunAuditAdvisory {
 }
 
 const GHSA_PATTERN = /GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}/i
+const BAD_SHAPE = 'unrecognized bun audit output shape'
 
 function scanFailure(findings: AuditFinding[], why: string, detail?: string): DependencyScan {
   findings.push({
@@ -41,25 +47,28 @@ function scanFailure(findings: AuditFinding[], why: string, detail?: string): De
 
 /**
  * Pure conversion from a finished `bun audit --json` invocation. Exported
- * for tests; `auditDependencies` supplies the real subprocess output.
+ * for tests; `startDependencyScan` supplies the real subprocess output.
  */
 export function dependencyFindingsFromScan(
   stdout: string,
   exitCode: number,
   findings: AuditFinding[],
+  stderr = '',
 ): DependencyScan {
+  const detail = stderr.trim() || undefined
+
   if (exitCode > 1) {
-    return scanFailure(findings, `bun audit exited with code ${exitCode}`)
+    return scanFailure(findings, `bun audit exited with code ${exitCode}`, detail)
   }
 
   let report: unknown
   try {
     report = JSON.parse(stdout)
   } catch {
-    return scanFailure(findings, 'bun audit produced no JSON')
+    return scanFailure(findings, 'bun audit produced no JSON', detail)
   }
   if (typeof report !== 'object' || report === null || Array.isArray(report)) {
-    return scanFailure(findings, 'unrecognized bun audit output shape')
+    return scanFailure(findings, BAD_SHAPE, detail)
   }
 
   // Collected locally and committed only on success: a shape failure halfway
@@ -70,11 +79,11 @@ export function dependencyFindingsFromScan(
 
   for (const [pkg, advisories] of Object.entries(report as Record<string, unknown>)) {
     if (!Array.isArray(advisories)) {
-      return scanFailure(findings, 'unrecognized bun audit output shape')
+      return scanFailure(findings, BAD_SHAPE, detail)
     }
     for (const advisory of advisories as BunAuditAdvisory[]) {
       if (typeof advisory?.url !== 'string' || typeof advisory?.severity !== 'string') {
-        return scanFailure(findings, 'unrecognized bun audit output shape')
+        return scanFailure(findings, BAD_SHAPE, detail)
       }
 
       // The same advisory appears once per affected version range; one
@@ -95,6 +104,13 @@ export function dependencyFindingsFromScan(
     }
   }
 
+  // Exit 1 is bun audit's "vulnerabilities found" contract: an exit-1 run
+  // whose report contains none is contradicting itself (truncated output,
+  // a broken wrapper), and must not read as a clean pass.
+  if (exitCode === 1 && parsed.length === 0) {
+    return scanFailure(findings, 'bun audit exited 1 but reported no advisories', detail)
+  }
+
   if (parsed.length === 0) {
     parsed.push({
       key: 'deps:none',
@@ -108,7 +124,18 @@ export function dependencyFindingsFromScan(
   return { status: 'complete', tool: 'bun audit' }
 }
 
-export async function auditDependencies(cwd: string, findings: AuditFinding[]): Promise<DependencyScan> {
+export interface DependencyScanOutput {
+  stdout: string
+  stderr: string
+  exitCode: number
+}
+
+/**
+ * Kick off `bun audit --json` without awaiting it, so the registry
+ * round-trip can overlap the local file scanning. `null` means the process
+ * could not even start.
+ */
+export function startDependencyScan(cwd: string): Promise<DependencyScanOutput | null> {
   let proc: ReturnType<typeof Bun.spawn>
   try {
     proc = Bun.spawn([process.execPath, 'audit', '--json'], {
@@ -117,14 +144,23 @@ export async function auditDependencies(cwd: string, findings: AuditFinding[]): 
       stderr: 'pipe',
       timeout: 60_000,
     })
-  } catch (error) {
-    return scanFailure(findings, 'bun audit could not be started', error instanceof Error ? error.message : undefined)
+  } catch {
+    return Promise.resolve(null)
   }
 
-  const [stdout, exitCode] = await Promise.all([
+  return Promise.all([
     new Response(proc.stdout as ReadableStream).text(),
+    new Response(proc.stderr as ReadableStream).text(),
     proc.exited,
-  ])
+  ]).then(([stdout, stderr, exitCode]) => ({ stdout, stderr, exitCode }))
+}
 
-  return dependencyFindingsFromScan(stdout, exitCode, findings)
+export function dependencyFindingsFromOutput(
+  output: DependencyScanOutput | null,
+  findings: AuditFinding[],
+): DependencyScan {
+  if (output === null) {
+    return scanFailure(findings, 'bun audit could not be started')
+  }
+  return dependencyFindingsFromScan(output.stdout, output.exitCode, findings, output.stderr)
 }

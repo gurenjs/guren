@@ -15,7 +15,7 @@ import {
   primaryClassificationId,
   type AuditClassification,
 } from './audit-taxonomy'
-import { auditDependencies, type DependencyScan } from './audit-deps'
+import { dependencyFindingsFromOutput, startDependencyScan, type DependencyScan } from './audit-deps'
 import {
   classUsesAuthenticatableBase,
   extractClassDeclaration,
@@ -137,6 +137,11 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
   const cwd = resolve(options.cwd ?? process.cwd())
   const findings: AuditFinding[] = []
 
+  // Kicked off first so the registry round-trip overlaps the local
+  // parsing below; the result is folded in (in stable finding order)
+  // once the local scans are done.
+  const dependencyScanOutput = options.deps ? startDependencyScan(cwd) : null
+
   const controllerMethods = await parseControllerMethods(cwd, findings)
 
   const routesAnalyzed = await auditRoutes(cwd, options.routesFile, controllerMethods, findings)
@@ -144,8 +149,8 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
   await auditSourceFiles(cwd, findings)
   await auditModels(cwd, findings)
 
-  const dependencyScan: DependencyScan = options.deps
-    ? await auditDependencies(cwd, findings)
+  const dependencyScan: DependencyScan = dependencyScanOutput
+    ? dependencyFindingsFromOutput(await dependencyScanOutput, findings)
     : { status: 'skipped', tool: 'bun audit' }
 
   for (const entry of findings) {
