@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
-import { cp, readFile, writeFile } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { cp, readFile, rename, writeFile } from 'node:fs/promises'
+import { basename, dirname, join, relative } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { directoryExists, toPackageName, toTitleCase } from './utils'
@@ -124,8 +124,37 @@ function replaceTokens(content: string, tokens: Map<string, string>): string {
   return updated
 }
 
+// npm strips files literally named `.gitignore` from published tarballs, so
+// templates carry them undotted; see packages/create-app/CLAUDE.md.
+const TEMPLATE_DOTFILES = new Map<string, string>([['_gitignore', '.gitignore']])
+
 async function copyLayer(layer: TemplateName, destination: string): Promise<void> {
-  await cp(templateDir(layer), destination, { recursive: true, force: true })
+  // Collected from the copy itself rather than by walking the destination:
+  // `--force` scaffolds into a directory that may already hold files this
+  // layer never wrote, and those are none of our business to rename. A Set
+  // because neither Node nor Bun documents `filter` as running exactly once
+  // per entry, and a repeat would make the second rename fail on ENOENT.
+  const dotfiles = new Set<string>()
+  const source = templateDir(layer)
+
+  await cp(source, destination, {
+    recursive: true,
+    force: true,
+    filter: (sourcePath) => {
+      if (TEMPLATE_DOTFILES.has(basename(sourcePath))) {
+        dotfiles.add(relative(source, sourcePath))
+      }
+      return true
+    },
+  })
+
+  // Per layer, not once after every layer has copied: an overlay shipping its
+  // own ignore file has to win over the base template's, and a single restore
+  // at the end would rename the base's leftover on top of it.
+  for (const path of dotfiles) {
+    const dotted = TEMPLATE_DOTFILES.get(basename(path)) as string
+    await rename(join(destination, path), join(destination, dirname(path), dotted))
+  }
 }
 
 async function applyTokenTransforms(destination: string, files: string[], tokens: Map<string, string>): Promise<void> {

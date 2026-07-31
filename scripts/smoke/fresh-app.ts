@@ -238,6 +238,16 @@ async function assertPackedArtifacts(packageTarballs: Map<string, string>, packR
       }
 
       if (packageName === 'create-guren-app') {
+        // The only check that sees what npm actually publishes: a template
+        // reverted to a literal `.gitignore` is stripped from the tarball, so
+        // this entry disappears rather than merely changing name.
+        for (const template of ['default', 'api-only']) {
+          assert(
+            entries.includes(`package/templates/${template}/_gitignore`),
+            `create-guren-app tarball is missing templates/${template}/_gitignore — npm strips files named .gitignore, so scaffolded apps would ship without one`,
+          )
+        }
+
         await auditStarterTemplate(join(extractDir, 'package/templates/default'))
         await auditConsoleWiring(join(extractDir, 'package/templates/api-only'))
         await auditBlueprintTemplates(join(extractDir, 'package'))

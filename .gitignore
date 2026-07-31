@@ -15,6 +15,14 @@ node_modules/
 
 .agents
 
+# Artifacts from running a scaffolding template in place. The templates carry
+# their own rules as `_gitignore` (npm strips files named `.gitignore` from
+# published tarballs), so those no longer apply to this repo.
+packages/create-app/templates/*/data/
+packages/create-app/templates/*/public/assets/
+packages/create-app/templates/*/.guren/ssr/
+packages/create-app/templates/*/types/generated/routes.d.ts
+
 # Benchmark outputs
 benchmarks.json
 benchmark-history.json

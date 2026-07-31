@@ -80,6 +80,10 @@ export function createNewCommand(runCreateApp: CommandRunner = runBunCommand) {
         type: 'boolean',
         description: 'Install dependencies after scaffolding (default: true)',
       },
+      git: {
+        type: 'boolean',
+        description: 'Initialize a git repository and create an initial commit (prompted when interactive, off otherwise)',
+      },
     },
     async run(ctx) {
       await runCreateApp(['x', 'create-guren-app', ...ctx.rawArgs])
