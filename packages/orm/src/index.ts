@@ -63,7 +63,14 @@ export type { D1DatabaseHandle, D1DatabaseOptions } from './d1'
 export { createAwsDataApiDatabase } from './aws-data-api'
 export type { AwsDataApiDatabase, AwsDataApiDatabaseOptions } from './aws-data-api'
 export { runSeeders, defineSeeder, loadSeeders } from './seeder'
-export type { SeederContext, SeederHandler } from './seeder'
+export type {
+  SeederContext,
+  SeederHandler,
+  PostgresSeederContext,
+  MySqlSeederContext,
+  SqliteSeederContext,
+  AwsDataApiSeederContext,
+} from './seeder'
 
 // Accessors & Mutators
 export { applyAccessors, applyMutators } from './attributes'

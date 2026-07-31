@@ -1,5 +1,6 @@
 import { defineSeeder } from '@guren/core'
 import { eq } from 'drizzle-orm'
+import type { AppSeederContext } from '../../config/database.js'
 import { posts, users } from '../schema.js'
 import { DEMO_EMAIL } from './001_users.js'
 
@@ -16,7 +17,7 @@ const SAMPLE_POSTS = [
   },
 ]
 
-export default defineSeeder(async ({ db }) => {
+export default defineSeeder(async ({ db }: AppSeederContext) => {
   const [author] = await db.select().from(users).where(eq(users.email, DEMO_EMAIL)).limit(1)
   if (!author) {
     return

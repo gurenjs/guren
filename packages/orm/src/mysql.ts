@@ -197,7 +197,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
 
     const db = await getDatabase()
     try {
-      await runSeeders(db as unknown as Parameters<typeof runSeeders>[0], resolvedSeedersFolder)
+      await runSeeders(db, resolvedSeedersFolder)
     } catch (error) {
       throw seedFailure(error, describeConnectionEndpoint(resolveConnectionString()))
     }

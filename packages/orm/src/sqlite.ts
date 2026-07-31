@@ -201,10 +201,7 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
       const database = await ensureDatabase()
       try {
         // No endpoint: a SQLite file has no host, so only the cause chain adds signal.
-        await runSeeders(
-          database as Parameters<typeof runSeeders>[0],
-          resolvedSeedersFolder,
-        )
+        await runSeeders(database, resolvedSeedersFolder)
       } catch (error) {
         throw seedFailure(error)
       }

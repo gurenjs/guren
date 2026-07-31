@@ -193,6 +193,30 @@ export async function run() {
 bun run db:seed
 ```
 
+### Drizzle を直接使うシーダー
+
+`defineSeeder()` はシーダーに Drizzle のデータベースそのものを渡します。モデル層を介さない一括 INSERT や UPSERT に便利です。この `db` の型はダイアレクトごとに異なるため、コンテキストには `AppSeederContext` を注釈してください。アプリが設定しているデータベースに対応する別名を `config/database.ts` がエクスポートしています。
+
+```ts
+// db/seeders/PostsSeeder.ts
+import { defineSeeder } from '@guren/core'
+import type { AppSeederContext } from '../../config/database.js'
+import { posts } from '../schema.js'
+
+export default defineSeeder(async ({ db }: AppSeederContext) => {
+  await db.insert(posts).values({ title: 'Hello', body: 'Welcome to Guren!' })
+})
+```
+
+型引数なしの `SeederContext` は PostgreSQL を意味するため、MySQL や SQLite では自分のスキーマが型エラーになります。`AppSeederContext` は、このリリース以降にスキャフォールドしたアプリの `config/database.ts` がエクスポートします。それ以前に作成したアプリでは、ダイアレクトの別名（`PostgresSeederContext` / `MySqlSeederContext` / `SqliteSeederContext` / `AwsDataApiSeederContext`）を `@guren/core` から直接インポートしてください。
+
+```ts
+import { defineSeeder, type MySqlSeederContext } from '@guren/core'
+```
+
+> [!NOTE]
+> D1 にはシーダーコンテキストがありません。`seedDatabase()` はシーダーを実行しないため、D1 のシードは `wrangler d1 execute <database> --file <seed.sql>` で行ってください。
+
 開発・テスト・デモ環境のフィクスチャ投入にシーダーを活用してください。
 
 > [!CAUTION]

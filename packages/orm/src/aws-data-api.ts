@@ -211,7 +211,7 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
     }
 
     const db = await getDatabase()
-    await runSeeders(db as unknown as Parameters<typeof runSeeders>[0], resolvedSeedersFolder)
+    await runSeeders(db, resolvedSeedersFolder)
   }
 
   async function withAdminDb<T>(callback: (db: AwsDataApiPgDatabase) => Promise<T>): Promise<T> {

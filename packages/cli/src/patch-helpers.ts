@@ -424,6 +424,17 @@ export function detectSchemaDialect(content: string): SchemaDialect {
 }
 
 /**
+ * The `@guren/core` seeder context type each dialect's seeders must be
+ * annotated with. `SeederContext` alone is PostgreSQL-shaped, so an
+ * unannotated seeder in a MySQL or SQLite app rejects its own schema.
+ */
+export const seederContextTypes = {
+  sqlite: 'SqliteSeederContext',
+  pg: 'PostgresSeederContext',
+  mysql: 'MySqlSeederContext',
+} as const satisfies Record<SchemaDialect, string>
+
+/**
  * The dialect of the app's `db/schema.ts`. An app that has none yet reads as
  * PostgreSQL, the same default an empty schema yields.
  */

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { consola } from 'consola'
-import { createTempWorkspace, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE } from './helpers'
+import { createTempWorkspace, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, SQLITE_SCHEMA_FIXTURE } from './helpers'
 import { makeAuth } from '../src/make-auth'
 
 describe('makeAuth', () => {
@@ -508,16 +508,25 @@ export const users = mysqlTable('users', {
       schema: MYSQL_SCHEMA_FIXTURE,
       expected: ".onDuplicateKeyUpdate({ set: { name: 'Demo User' } })",
       forbidden: 'onConflictDoNothing',
+      context: 'MySqlSeederContext',
     },
     {
       dialect: 'pg',
       schema: PG_SCHEMA_FIXTURE,
       expected: '.onConflictDoNothing({ target: users.email })',
       forbidden: 'onDuplicateKeyUpdate',
+      context: 'PostgresSeederContext',
+    },
+    {
+      dialect: 'sqlite',
+      schema: SQLITE_SCHEMA_FIXTURE,
+      expected: '.onConflictDoNothing({ target: users.email })',
+      forbidden: 'onDuplicateKeyUpdate',
+      context: 'SqliteSeederContext',
     },
   ]
 
-  for (const { dialect, schema, expected, forbidden } of seederUpserts) {
+  for (const { dialect, schema, expected, forbidden, context } of seederUpserts) {
     it(`seeds the demo user with the ${dialect} upsert`, async () => {
       const workspace = await createTempWorkspace(`guren-cli-make-auth-seeder-${dialect}-`)
       try {
@@ -529,6 +538,10 @@ export const users = mysqlTable('users', {
         const seeder = await readFile(join(workspace.dir, 'db/seeders/UsersSeeder.ts'), 'utf8')
         expect(seeder).toContain(expected)
         expect(seeder).not.toContain(forbidden)
+        // Without the dialect's own context the seeder is typed against
+        // PostgreSQL and rejects the schema it inserts into.
+        expect(seeder).toContain(`import { defineSeeder, ScryptHasher, type ${context} } from '@guren/core'`)
+        expect(seeder).toContain(`async ({ db }: ${context}) => {`)
       } finally {
         await workspace.cleanup()
       }

@@ -191,9 +191,33 @@ describe('CLI make:* commands', () => {
     it('generates correct seeder template', async () => {
       const result = await makeSeeder('User')
       const content = fs.readFileSync(result, 'utf-8')
-      expect(content).toContain("import { defineSeeder } from '@guren/core'")
-      expect(content).toContain('export default defineSeeder(async () => {')
+      expect(content).toContain("import { defineSeeder, type PostgresSeederContext } from '@guren/core'")
+      expect(content).toContain('export default defineSeeder(async ({ db }: PostgresSeederContext) => {')
       expect(content).toContain("console.info('Ran UserSeeder.')")
+    })
+
+    // The context carries the dialect's drizzle database: annotating every
+    // seeder with the PostgreSQL one leaves a MySQL/SQLite app unable to insert
+    // into its own schema.
+    it('types the context for the schema dialect', async () => {
+      fs.mkdirSync(path.join(TEST_DIR, 'db'), { recursive: true })
+      fs.writeFileSync(
+        path.join(TEST_DIR, 'db/schema.ts'),
+        "import { sqliteTable } from 'drizzle-orm/sqlite-core'\n",
+      )
+
+      const sqlite = fs.readFileSync(await makeSeeder('User'), 'utf-8')
+      expect(sqlite).toContain("import { defineSeeder, type SqliteSeederContext } from '@guren/core'")
+      expect(sqlite).toContain('async ({ db }: SqliteSeederContext) => {')
+
+      fs.writeFileSync(
+        path.join(TEST_DIR, 'db/schema.ts'),
+        "import { mysqlTable } from 'drizzle-orm/mysql-core'\n",
+      )
+
+      const mysql = fs.readFileSync(await makeSeeder('Post'), 'utf-8')
+      expect(mysql).toContain("import { defineSeeder, type MySqlSeederContext } from '@guren/core'")
+      expect(mysql).toContain('async ({ db }: MySqlSeederContext) => {')
     })
   })
 
