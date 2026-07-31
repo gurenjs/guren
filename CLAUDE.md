@@ -364,7 +364,9 @@ export const handler = createLambdaHandler(app)
 | `packages/cli/src/bin.ts` | CLI entry point |
 | `packages/cli/src/context.ts` | AI agent: project context map generation |
 | `packages/cli/src/entity-context.ts` | AI agent: entity-centric context bundles (`guren context <Entity>`, RFC 0004) |
-| `packages/cli/src/docs-index.ts` | AI agent: docs/ frontmatter scanning + `@docs` tag extraction |
+| `packages/cli/src/docs-index.ts` | AI agent: docs/ scanning (DocRef, entity index, `@docs` tags); facade over the parsers below |
+| `packages/cli/src/docs-frontmatter.ts` | AI agent: the YAML-subset frontmatter parser (OKF fields) |
+| `packages/cli/src/docs-links.ts` | AI agent: markdown link scanning shared by check, graph, and renderer |
 | `packages/cli/src/docs-check.ts` | AI agent: doc-link validation (`guren check --docs`) |
 | `packages/cli/src/make-adr.ts` | AI agent: numbered ADR scaffolding (`make:adr`) |
 | `packages/cli/src/spec-generate.ts` | AI agent: spec view orchestration (`spec:generate`, RFC 0004) |
