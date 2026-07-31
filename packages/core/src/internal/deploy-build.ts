@@ -20,6 +20,15 @@
  * Lambda hands source to its bundler plugin), whether a missing `build` script
  * is fatal, and how an SSR bundle's renderer export is verified are all
  * per-plugin by design.
+ *
+ * One rule holds across the helpers here: a helper that *relates* two paths —
+ * a containment test, a relative specifier — canonicalizes both first, because
+ * whatever consumes the answer resolves links too. A helper that merely reads
+ * or writes one path passes it through, since the OS follows the links itself.
+ * That is why `resolveSsrEntryFile` compares raw strings (both operands derive
+ * from one `ssrDir`, so no link can come between them) and why the plugins'
+ * own `relative(root, out)` for `wrangler.jsonc` must stay lexical: that path
+ * is read by wrangler, not by a bundler resolving a module from its real path.
  */
 import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path'
@@ -79,8 +88,9 @@ function manifestPaths(dir: string): [string, string] {
  * kept as a copy because this module must not import beyond node builtins and
  * cli cannot be imported from core. Only ENOENT walks up, matching the twin:
  * any other failure (an unreadable or non-directory ancestor) is surfaced
- * rather than silently treated as nonexistent — this feeds a deletion guard,
- * which must not compare a path it could not actually resolve.
+ * rather than silently treated as nonexistent — both callers relate two paths
+ * (a deletion guard, an import specifier) and neither may answer from a path
+ * it could not actually resolve.
  */
 function realpathOfNearestExisting(path: string): string {
   try {
@@ -103,10 +113,9 @@ function realpathOfNearestExisting(path: string): string {
  * Throw unless `out` is safe to delete: it must be neither the app root nor a
  * directory containing it.
  *
- * Both paths are resolved through their symlinks first, because the delete
- * that follows does too. Comparing lexically accepts `outputDir` values that
- * reach the app root the long way — on macOS `/tmp` is itself a symlink to
- * `/private/tmp`, so this is not a contrived case.
+ * Relates two paths, so it canonicalizes both: comparing lexically would
+ * accept `outputDir` values that reach the app root the long way, and the
+ * delete that follows resolves the links regardless.
  *
  * Containment is then decided with `relative` rather than a string prefix
  * because `out + sep` is `//` at the filesystem root, which no absolute path
@@ -155,10 +164,14 @@ export function resetOutputDir(out: string, root: string, label: string): void {
  * Relative specifier for importing `target` from a module written into
  * `fromDir`, in POSIX form so the emitted source is platform-agnostic.
  *
+ * Relates two paths, so it canonicalizes both: the bundler resolves the
+ * emitted module from its real path, and a link that changes depth would
+ * otherwise leave the specifier short a `..` segment.
+ *
  * @param label Platform name for the error message, e.g. `'Lambda build'`.
  */
 export function importSpecifier(fromDir: string, target: string, label: string): string {
-  const rel = relative(fromDir, target)
+  const rel = relative(realpathOfNearestExisting(fromDir), realpathOfNearestExisting(target))
   if (isAbsolute(rel)) {
     throw new Error(
       `${label}: ${target} cannot be imported relative to ${fromDir} (different drive or root?). Keep the app, SSR output, and outputDir on the same volume.`,

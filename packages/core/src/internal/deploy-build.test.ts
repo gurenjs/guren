@@ -97,6 +97,24 @@ describe('importSpecifier', () => {
   test('should prefix a same-directory target with ./', () => {
     expect(importSpecifier('/app/out', '/app/out/handler.js', 'Test build')).toBe('./handler.js')
   })
+
+  test('should count .. segments from the real path when a symlink changes depth', () => {
+    // The bundler resolves the emitted import from the module's real path, so
+    // a specifier computed from the link path is short a `..` whenever the link
+    // and its target sit at different depths — what macOS does with /tmp ->
+    // /private/tmp and os.tmpdir() under /var -> /private/var.
+    const base = realpathSync(mkdtempSync(join(tmpdir(), 'guren-symlink-')))
+    try {
+      mkdirSync(join(base, 'nested/out'), { recursive: true })
+      symlinkSync(join(base, 'nested/out'), join(base, 'out'))
+
+      expect(importSpecifier(join(base, 'out'), join(base, 'app/lambda.ts'), 'Test build')).toBe(
+        '../../app/lambda.ts',
+      )
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('readManifest', () => {
