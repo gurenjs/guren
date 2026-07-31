@@ -444,15 +444,29 @@ function readAfterDestination(
  * convention quote example links), external URLs and bare `#anchor` links
  * are skipped, and fragments are dropped from what remains.
  */
+/**
+ * The bundle-local path a markdown link target names, or null when it
+ * points outside the bundle — an external URL, a protocol-relative
+ * `//host/path`, or a bare `#anchor`. Fragments are dropped.
+ *
+ * Exported because anything that renders these links has to reach the
+ * same answer this extraction did: the graph keys its nodes on the
+ * result, so a renderer computing it differently would emit targets
+ * that match no node.
+ */
+export function localLinkTarget(target: string): string | null {
+  if (URL_SCHEME_REGEX.test(target) || target.startsWith('#') || target.startsWith('//')) return null
+  const withoutFragment = target.split('#')[0]
+  return withoutFragment === '' ? null : withoutFragment
+}
+
 export function extractMarkdownLinks(body: string): string[] {
   const withoutCode = body.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '')
   const targets = new Set<string>()
 
   const add = (target: string): void => {
-    // `//host/path` is a protocol-relative URL, not a bundle path.
-    if (URL_SCHEME_REGEX.test(target) || target.startsWith('#') || target.startsWith('//')) return
-    const withoutFragment = target.split('#')[0]
-    if (withoutFragment !== '') targets.add(withoutFragment)
+    const local = localLinkTarget(target)
+    if (local !== null) targets.add(local)
   }
 
   for (const line of withoutCode.split(/\r?\n/)) {

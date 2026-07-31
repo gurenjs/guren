@@ -20,14 +20,31 @@ export interface SpecGenerateOptions {
  * regenerates only the views whose sources changed — the single list that
  * keeps the gate and the generators from drifting apart.
  */
+/**
+ * One input to a spec view: the pattern `check --spec --changed` matches
+ * changed files against, and the name the docs viewer draws as the
+ * derivation edge. Pairing them in one entry is what keeps the gate and
+ * the graph on the same list — two parallel arrays drift the moment a
+ * pattern is added without its label.
+ */
+export interface SpecViewSource {
+  pattern: RegExp
+  label: string
+}
+
 export interface SpecViewDescriptor {
   fileName: string
-  sources: RegExp[]
+  sources: SpecViewSource[]
   generate: (cwd: string, routesFile?: string) => Promise<SpecArtifact>
 }
 
-const SCHEMA_SOURCES = [/^db\/schema\.ts$/, /^modules\/[^/]+\/db\/schema\.ts$/]
-const MODEL_SOURCES = [/(^|\/)app\/Models\//]
+const SCHEMA_SOURCES: SpecViewSource[] = [
+  { pattern: /^db\/schema\.ts$/, label: 'db/schema.ts' },
+  { pattern: /^modules\/[^/]+\/db\/schema\.ts$/, label: 'db/schema.ts' },
+]
+const MODEL_SOURCES: SpecViewSource[] = [
+  { pattern: /(^|\/)app\/Models\//, label: 'app/Models/' },
+]
 
 export const SPEC_VIEWS: SpecViewDescriptor[] = [
   {
@@ -42,14 +59,19 @@ export const SPEC_VIEWS: SpecViewDescriptor[] = [
   },
   {
     fileName: 'screens.md',
-    sources: [/^routes\//, /^modules\/[^/]+\/(routes|index)\.ts$/, /(^|\/)app\/Http\/Controllers\//, /^resources\/js\/pages\//],
+    sources: [
+      { pattern: /^routes\//, label: 'routes/' },
+      { pattern: /^modules\/[^/]+\/(routes|index)\.ts$/, label: 'modules/*/routes.ts' },
+      { pattern: /(^|\/)app\/Http\/Controllers\//, label: 'app/Http/Controllers/' },
+      { pattern: /^resources\/js\/pages\//, label: 'resources/js/pages/' },
+    ],
     generate: (cwd, routesFile) => generateScreensSpec(cwd, routesFile),
   },
   {
     // The module map scans static imports across the whole project, so
     // any importable source file is honestly one of its inputs.
     fileName: 'modules.md',
-    sources: [/\.(ts|tsx|mts|js|jsx|mjs)$/],
+    sources: [{ pattern: /\.(ts|tsx|mts|js|jsx|mjs)$/, label: '(all source files)' }],
     generate: (cwd) => generateModulesSpec(cwd),
   },
 ]

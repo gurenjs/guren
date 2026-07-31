@@ -26,7 +26,10 @@ function selectViews(
   const changed = [...changedFiles]
 
   return SPEC_VIEWS.filter((view) => {
-    const sources = [...view.sources, new RegExp(`^${escapeRegExp(`${SPEC_DIR}/${view.fileName}`)}$`)]
+    const sources = [
+      ...view.sources.map((source) => source.pattern),
+      new RegExp(`^${escapeRegExp(`${SPEC_DIR}/${view.fileName}`)}$`),
+    ]
     if (view.fileName === 'screens.md' && routesFile) {
       sources.push(new RegExp(`^${escapeRegExp(routesFile)}$`))
     }
