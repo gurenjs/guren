@@ -12,17 +12,21 @@ import { createApp, createSessionMiddleware, createCsrfMiddleware } from '@guren
 
 const app = createApp()
 
-// Session middleware is required for CSRF
+// Optional — the token binds to a persisted session
 app.use('*', createSessionMiddleware())
 app.use('*', createCsrfMiddleware())
 ```
 
 The middleware automatically:
-- Generates a unique token per session
+- Generates a token per session, or a stateless double-submit token for guests
 - Validates tokens on state-changing requests (POST, PUT, PATCH, DELETE)
 - Allows safe methods (GET, HEAD, OPTIONS) without validation
 
 ## Including the Token in Forms
+
+A native `<form method="post">` must carry the token as a `_token` field, or Guren
+rejects it with a 403. In an Inertia app, `useForm()` and `<Link method="post">`
+send it for you — see [Inertia.js Integration](#inertiajs-integration).
 
 Use the `csrfField()` helper to generate a hidden input field:
 
@@ -46,7 +50,7 @@ In your frontend form (React example):
 function CreateForm({ csrfToken }: { csrfToken: string }) {
   return (
     <form method="POST" action="/posts">
-      <input type="hidden" name="_csrf" value={csrfToken} />
+      <input type="hidden" name="_token" value={csrfToken} />
       {/* form fields */}
       <button type="submit">Create</button>
     </form>
@@ -58,7 +62,7 @@ Or generate the hidden field directly:
 
 ```ts
 const hiddenField = csrfField(ctx)
-// Returns: <input type="hidden" name="_csrf" value="..." />
+// Returns: <input type="hidden" name="_token" value="..." />
 ```
 
 ## AJAX Requests
@@ -66,31 +70,39 @@ const hiddenField = csrfField(ctx)
 For JavaScript/AJAX requests, include the token in a header:
 
 ```ts
-// Get token from meta tag or cookie
-const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content
+// The middleware sets a JavaScript-readable XSRF-TOKEN cookie
+const csrfToken = decodeURIComponent(
+  document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]*)/)?.[1] ?? '',
+)
 
 fetch('/api/posts', {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',
-    'X-CSRF-Token': csrfToken,
+    'X-XSRF-TOKEN': csrfToken,
   },
   body: JSON.stringify({ title: 'Hello' }),
 })
 ```
 
-The middleware checks both the `_csrf` form field and `X-CSRF-Token` header.
+Axios — and therefore Inertia.js — does this for you, so you only need the code
+above for plain `fetch`.
+
+The middleware accepts the token from three places, in this order:
+
+1. The `X-CSRF-TOKEN` header
+2. The `X-XSRF-TOKEN` header, read from the `XSRF-TOKEN` cookie
+3. The `_token` field in an urlencoded, multipart, or JSON request body
+
+These names are not configurable. If you turn the cookie off (`cookie: false`
+below), pass the token to the page yourself with `getCsrfToken(ctx)` and send it
+as `X-CSRF-TOKEN` — do this only for session-authenticated flows, because guest
+tokens verify against the cookie and cannot work without it.
 
 ## Configuration Options
 
 ```ts
 createCsrfMiddleware({
-  // Custom form field name (default: '_csrf')
-  fieldName: '_token',
-
-  // Custom header name (default: 'X-CSRF-Token')
-  headerName: 'X-XSRF-Token',
-
   // Routes to exclude from CSRF validation
   exclude: ['/api/webhooks/*', '/api/public/*'],
 
@@ -100,6 +112,14 @@ createCsrfMiddleware({
   },
 })
 ```
+
+The remaining options rarely need changing:
+
+| Option | Default | Purpose |
+|--------|---------|---------|
+| `methods` | `['POST', 'PUT', 'PATCH', 'DELETE']` | Which HTTP methods require a token |
+| `cookie` | `true` | Issue the `XSRF-TOKEN` cookie on safe requests and successful mutations |
+| `cookieOptions` | `{ path: '/', sameSite: 'Lax' }` | Cookie attributes; `secure` is on when `NODE_ENV` is `production`, and in runtimes without `process` |
 
 ## Excluding Routes
 
@@ -138,9 +158,11 @@ export function registerWebRoutes(router: Router): void {
 
 ## Token Regeneration
 
-Tokens are tied to the session and regenerate when:
-- A new session is created
+A session-bound token follows the session id, so it changes when:
+- The session is first persisted (a brand-new session does not yet anchor a token)
 - `session.regenerate()` is called (recommended after login)
+
+Guest tokens carry no session id and are reused until a session exists.
 
 ```ts
 // After successful login
@@ -154,7 +176,7 @@ await session.regenerate()
 1. **Always use HTTPS** - Tokens can be intercepted over HTTP
 2. **Regenerate after login** - Prevents session fixation attacks
 3. **Don't expose tokens in URLs** - Use POST bodies or headers
-4. **Set secure cookie flags** - The session middleware handles this automatically
+4. **Set secure cookie flags** - The session middleware handles the session cookie; the `XSRF-TOKEN` cookie follows `cookieOptions`
 
 ## Inertia.js Integration
 
@@ -166,3 +188,29 @@ axios.defaults.withCredentials = true
 ```
 
 Inertia automatically reads the `XSRF-TOKEN` cookie and includes it in requests.
+
+### Submit through Inertia, not a native form
+
+That only covers requests Inertia sends through Axios. A native
+`<form method="post">` submits as a full browser navigation, which carries no
+`X-XSRF-TOKEN` header — so Guren rejects it with a 403 unless the form itself
+carries a `_token` hidden field.
+
+In an Inertia page, prefer `useForm()`:
+
+```tsx
+import { useForm } from '@inertiajs/react'
+
+function LogoutButton() {
+  const { post, processing } = useForm()
+
+  return (
+    <button type="button" onClick={() => post('/logout')} disabled={processing}>
+      Log out
+    </button>
+  )
+}
+```
+
+`<Link href="/logout" method="post" as="button">` works too, for a plain action
+link. Reach for a native form only when you deliberately want a full page submit.
