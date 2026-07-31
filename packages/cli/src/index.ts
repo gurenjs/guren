@@ -53,6 +53,18 @@ export {
   type DocActorEvent,
 } from './docs-index'
 export { runDocsCheck } from './docs-check'
+// The docs relation graph, exposed for `guren docs:graph` and the MCP
+// tool of the same shape.
+export {
+  buildDocsGraphReport,
+  renderDocsGraphMarkdown,
+  type DocsGraphReport,
+  type DocsGraphReportOptions,
+  type DocsGraphQuery,
+  type DocsGraph,
+  type DocsGraphNode,
+  type DocsGraphEdge,
+} from './docs-graph'
 // The docs viewer's server-side half calls exactly these two (see
 // DocsViewerCliApi); the graph builder and renderer behind them stay
 // package-internal.

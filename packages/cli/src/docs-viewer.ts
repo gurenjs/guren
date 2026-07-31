@@ -12,9 +12,9 @@ import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 import { parseDocFrontmatter } from './docs-frontmatter'
 import { localLinkTarget } from './docs-links'
-import { scanDocs, type DocActorEvent, type DocRef } from './docs-index'
-import { runDocsCheck, resolveDocLink } from './docs-check'
-import { buildDocsGraph, type DocsGraphEdge, type DocsGraphNode } from './docs-graph'
+import type { DocActorEvent, DocRef } from './docs-index'
+import { resolveDocLink } from './docs-check'
+import { loadDocsGraph, type DocsGraphEdge, type DocsGraphNode } from './docs-graph'
 import { renderDocHtml } from './docs-render'
 
 export type DocTrustTier = 'unverified' | 'machine-confirmed' | 'human-reviewed'
@@ -72,9 +72,11 @@ function resolveViewerLink(docPath: string, target: string): string {
 }
 
 export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> {
-  const refs = await scanDocs(cwd)
-  const checks = await runDocsCheck({ cwd })
-  const { nodes, edges } = buildDocsGraph(refs, checks)
+  const {
+    refs,
+    checks,
+    graph: { nodes, edges },
+  } = await loadDocsGraph(cwd)
   const staleDocs = new Set(
     checks.filter((check) => check.key.startsWith('docs-stale:')).map((check) => check.filePath),
   )

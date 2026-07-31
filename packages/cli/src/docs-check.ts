@@ -20,6 +20,8 @@ export interface DocsCheckOptions {
   changedFiles?: Set<string> | null
   /** Reuses sources already read by the surrounding `runCheck`, when present. */
   cache?: ParseCache
+  /** Reuses an existing `scanDocs` result instead of re-scanning the bundle. */
+  refs?: DocRef[]
 }
 
 function hasGlobChars(entry: string): boolean {
@@ -127,7 +129,7 @@ export async function runDocsCheck(options: DocsCheckOptions): Promise<CheckResu
   const { cwd, changedFiles, cache } = options
 
   const [refs, modelFiles, controllerFiles] = await Promise.all([
-    scanDocs(cwd),
+    options.refs ?? scanDocs(cwd),
     discoverModelFiles(cwd),
     discoverControllerFiles(cwd),
   ])

@@ -5,12 +5,15 @@
  * nodes, their declared relations (`entities`, `related`, body markdown
  * links) become verdict-colored edges, and generated spec views gain
  * derivation edges from the code sources they regenerate from
- * (`SPEC_VIEWS[].sources` — the same descriptor the drift gate
- * uses). Consumed by the docs viewer endpoint; no filesystem access.
+ * (`SPEC_VIEWS[].sources` — the same descriptor the drift gate uses).
+ * `buildDocsGraph` itself does no filesystem access; `loadDocsGraph`
+ * is the one filesystem pass shared by every consumer (the docs viewer
+ * endpoint, `guren docs:graph`, and the MCP tool).
  */
 import { posix } from 'node:path'
-import type { DocRef } from './docs-index'
-import { resolveDocLink } from './docs-check'
+import { scanDocs, type DocRef } from './docs-index'
+import { resolveDocLink, runDocsCheck } from './docs-check'
+import { matchesGlob } from './glob-match'
 import type { CheckResult, CheckStatus } from './check-result'
 import { SPEC_VIEWS } from './spec-generate'
 import { SPEC_DIR } from './spec-artifact'
@@ -130,4 +133,170 @@ export function buildDocsGraph(refs: DocRef[], checks: CheckResult[]): DocsGraph
   }
 
   return { nodes, edges }
+}
+
+export interface LoadedDocsGraph {
+  refs: DocRef[]
+  checks: CheckResult[]
+  graph: DocsGraph
+}
+
+/**
+ * One filesystem pass behind every graph consumer: scan the bundle
+ * once, feed the same refs to the checker, join.
+ */
+export async function loadDocsGraph(cwd: string): Promise<LoadedDocsGraph> {
+  const refs = await scanDocs(cwd)
+  const checks = await runDocsCheck({ cwd, refs })
+  return { refs, checks, graph: buildDocsGraph(refs, checks) }
+}
+
+export interface DocsGraphReportOptions {
+  cwd?: string
+  /** Narrow to the neighborhood of one model entity (case-insensitive). */
+  entity?: string
+  /** Narrow to the neighborhood of one app-root-relative path. */
+  path?: string
+}
+
+export interface DocsGraphQuery {
+  entity?: string
+  path?: string
+}
+
+export interface DocsGraphReport extends DocsGraph {
+  /** Echo of the narrowing request; absent when the whole graph was asked for. */
+  query?: DocsGraphQuery
+  /** The node ids the query matched, empty when nothing did (or no query). */
+  focus: string[]
+}
+
+/**
+ * Whether a query path names this node. Exact ids and directory nodes
+ * match literally; glob nodes (`related` entries like `modules/billing/**`)
+ * go through the same matcher `check --docs` resolves them with; and
+ * derivation-source nodes match when any `SPEC_VIEWS` pattern that
+ * carries the node's label accepts the path — the label alone can't say
+ * which files feed a view (module schemas collapse to `db/schema.ts`,
+ * and the module map's `(all source files)` is not a path at all), so
+ * the patterns the drift gate matches changed files against decide.
+ */
+function nodeMatchesPath(
+  node: DocsGraphNode,
+  path: string,
+  derivedLabels: ReadonlySet<string>,
+): boolean {
+  if (node.id === path || node.id === `${path}/`) return true
+  if (derivedLabels.has(node.id)) return true
+  if (node.id.includes('*')) return matchesGlob(path, node.id)
+  return path.startsWith(node.id.endsWith('/') ? node.id : `${node.id}/`)
+}
+
+/**
+ * The docs relation graph, optionally narrowed to one node's
+ * neighborhood — the agent-facing entry behind `guren docs:graph` and
+ * the MCP tool. Narrowing answers the impact question directly: which
+ * documents govern this path or entity, and which spec views regenerate
+ * from it, before a rename or edit rather than after `check` fails.
+ */
+export async function buildDocsGraphReport(
+  options: DocsGraphReportOptions = {},
+): Promise<DocsGraphReport> {
+  const cwd = options.cwd ?? process.cwd()
+  const entity = options.entity?.trim() || undefined
+  const path = options.path?.trim() || undefined
+  if (entity !== undefined && path !== undefined) {
+    throw new Error('Narrow by either entity or path, not both.')
+  }
+
+  const { graph } = await loadDocsGraph(cwd)
+  const { nodes, edges } = graph
+  if (entity === undefined && path === undefined) {
+    return { focus: [], nodes, edges }
+  }
+
+  const focusIds = new Set<string>()
+  if (entity !== undefined) {
+    const wanted = entity.toLowerCase()
+    for (const node of nodes) {
+      if (node.kind === 'entity' && node.label.toLowerCase() === wanted) focusIds.add(node.id)
+    }
+  } else if (path !== undefined) {
+    const target = posix.normalize(path.replace(/\\/g, '/'))
+    const derivedLabels = new Set(
+      SPEC_VIEWS.flatMap((view) => view.sources)
+        .filter((source) => source.pattern.test(target))
+        .map((source) => source.label),
+    )
+    for (const node of nodes) {
+      if (node.kind !== 'entity' && nodeMatchesPath(node, target, derivedLabels)) {
+        focusIds.add(node.id)
+      }
+    }
+  }
+
+  const query = entity !== undefined ? { entity } : { path }
+  if (focusIds.size === 0) {
+    return { query, focus: [], nodes: [], edges: [] }
+  }
+  const keptEdges = edges.filter((edge) => focusIds.has(edge.from) || focusIds.has(edge.to))
+  const keptIds = new Set(focusIds)
+  for (const edge of keptEdges) {
+    keptIds.add(edge.from)
+    keptIds.add(edge.to)
+  }
+
+  return {
+    query,
+    focus: [...focusIds],
+    nodes: nodes.filter((node) => keptIds.has(node.id)),
+    edges: keptEdges,
+  }
+}
+
+const VERDICT_GLYPH: Record<Exclude<CheckStatus, 'pass'>, string> = { warn: 'warn', fail: 'FAIL' }
+
+const KIND_TITLES: Array<[DocsGraphNode['kind'], string]> = [
+  ['doc', 'Documents'],
+  ['entity', 'Entities'],
+  ['code', 'Code'],
+]
+
+/** Human-readable rendering, mirroring `guren context`'s markdown style. */
+export function renderDocsGraphMarkdown(report: DocsGraphReport): string {
+  const lines: string[] = ['# Docs Graph', '']
+  const requested = report.query?.entity ?? report.query?.path
+
+  if (report.focus.length > 0) {
+    lines.push(`Neighborhood of: ${report.focus.join(', ')}`, '')
+  }
+  if (report.nodes.length === 0) {
+    lines.push(
+      requested === undefined
+        ? 'No OKF documents found under docs/.'
+        : `Nothing in the docs graph references "${requested}".`,
+      '',
+    )
+    return lines.join('\n')
+  }
+
+  for (const [kind, title] of KIND_TITLES) {
+    const nodes = report.nodes.filter((node) => node.kind === kind)
+    if (nodes.length === 0) continue
+    lines.push(`## ${title} (${nodes.length})`)
+    for (const node of nodes) {
+      const type = node.docType ? ` (${node.docType})` : ''
+      lines.push(`- ${node.id}${node.kind === 'doc' && node.label !== node.id ? ` — ${node.label}` : ''}${type}`)
+    }
+    lines.push('')
+  }
+
+  lines.push(`## Relations (${report.edges.length})`)
+  for (const edge of report.edges) {
+    const verdict = edge.verdict === 'pass' ? '' : ` [${VERDICT_GLYPH[edge.verdict]}]`
+    lines.push(`- ${edge.from} —${edge.relation}→ ${edge.to}${verdict}`)
+  }
+  lines.push('')
+
+  return lines.join('\n')
 }
