@@ -270,14 +270,15 @@ describe('ModelUserProvider reads credential columns from the model contract', (
     expect(clean).toEqual({ id: 1, email: 'a@x.com' } as never)
   })
 
-  it('keeps explicit options as overrides', () => {
+  it('keeps explicit options as overrides while still blocking model columns in sanitize', () => {
     class Plain extends AuthenticatableModel<PlainObject> {
       static override table = 'users'
     }
     const provider = new ModelUserProvider(Plain as unknown as typeof Model, { passwordColumn: 'pw' })
-    const clean = provider.sanitize({ pw: 'h', passwordHash: 'kept', rememberToken: 'x', id: 1 } as never)
-    // Explicit option wins for the password column; remember token still
-    // comes from the model contract.
-    expect(clean).toEqual({ passwordHash: 'kept', id: 1 } as never)
+    const clean = provider.sanitize({ pw: 'h', passwordHash: 'secret', rememberToken: 'x', id: 1 } as never)
+    // The override column is blocked AND the model's own resolved credential
+    // columns stay blocked — an override must not reopen a leak through
+    // auth.user().
+    expect(clean).toEqual({ id: 1 } as never)
   })
 })

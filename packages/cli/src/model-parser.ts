@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import type { Statement, Expression, ClassDeclaration, ClassBody, Node, ObjectProperty } from '@babel/types'
+import type { Statement, Expression, ClassDeclaration, ClassBody, ClassProperty, Node, ObjectProperty } from '@babel/types'
 import { extractDocsTags } from './docs-index'
 import { discoverModelFiles, toPosixRelative, moduleNameFromRelPath } from './discovery'
 import { parseSourceFile } from './parse-cache'
@@ -153,36 +153,72 @@ export function extractTableIdentifier(classDecl: ClassDeclaration): string | un
   return tableName
 }
 
+/**
+ * Whether the class is authenticatable: it extends `AuthenticatableModel`
+ * directly or receives it via `defineModel`'s `base` option. AST-based, so a
+ * comment or import merely mentioning the name does not count.
+ */
+export function classUsesAuthenticatableBase(classDecl: ClassDeclaration): boolean {
+  const superClass = classDecl.superClass
+  if (!superClass) return false
+
+  // defineModel(users, { base: AuthenticatableModel }) — the auth base
+  // arrives as an option rather than as the superclass itself.
+  if (superClass.type === 'CallExpression') {
+    const callee = superClass.callee
+    if (callee.type === 'Identifier' && callee.name === 'defineModel') {
+      const options = superClass.arguments[1]
+      if (options?.type === 'ObjectExpression') {
+        const viaBase = options.properties.some(
+          (property) =>
+            property.type === 'ObjectProperty' &&
+            propertyKeyName(property) === 'base' &&
+            isAuthenticatableBase(property.value),
+        )
+        if (viaBase) return true
+      }
+    }
+  }
+  // AuthenticatableModel pattern
+  return isAuthenticatableBase(superClass)
+}
+
+/** The named static class property node, if the class declares one. */
+export function findStaticClassProperty(classDecl: ClassDeclaration, name: string): ClassProperty | null {
+  for (const member of classDecl.body.body) {
+    if (member.type === 'ClassProperty' && member.static && member.key.type === 'Identifier' && member.key.name === name) {
+      return member
+    }
+  }
+  return null
+}
+
+/** Value of `static <name> = '<literal>'`, or undefined when absent or not a string literal. */
+export function staticStringProperty(classDecl: ClassDeclaration, name: string): string | undefined {
+  const property = findStaticClassProperty(classDecl, name)
+  return property?.value?.type === 'StringLiteral' ? property.value.value : undefined
+}
+
+/** Entries of `static <name> = ['a', 'b']`, or undefined when absent or not an array literal. */
+export function staticStringArrayProperty(classDecl: ClassDeclaration, name: string): string[] | undefined {
+  const property = findStaticClassProperty(classDecl, name)
+  if (property?.value?.type !== 'ArrayExpression') return undefined
+  const entries: string[] = []
+  for (const element of property.value.elements) {
+    if (element?.type === 'StringLiteral') entries.push(element.value)
+  }
+  return entries
+}
+
 function analyzeClassHeader(
   classDecl: ClassDeclaration,
   source: string,
 ): { tableName?: string; usesAuth: boolean; hasSoftDeletes: boolean } {
-  let usesAuth = false
-  const hasSoftDeletes = source.includes('SoftDeletes')
-
-  const superClass = classDecl.superClass
-  if (superClass) {
-    // defineModel(users, { base: AuthenticatableModel }) — the auth base
-    // arrives as an option rather than as the superclass itself.
-    if (superClass.type === 'CallExpression') {
-      const callee = superClass.callee
-      if (callee.type === 'Identifier' && callee.name === 'defineModel') {
-        const options = superClass.arguments[1]
-        if (options?.type === 'ObjectExpression') {
-          usesAuth ||= options.properties.some(
-            (property) =>
-              property.type === 'ObjectProperty' &&
-              propertyKeyName(property) === 'base' &&
-              isAuthenticatableBase(property.value),
-          )
-        }
-      }
-    }
-    // AuthenticatableModel pattern
-    usesAuth ||= isAuthenticatableBase(superClass)
+  return {
+    tableName: extractTableIdentifier(classDecl),
+    usesAuth: classUsesAuthenticatableBase(classDecl),
+    hasSoftDeletes: source.includes('SoftDeletes'),
   }
-
-  return { tableName: extractTableIdentifier(classDecl), usesAuth, hasSoftDeletes }
 }
 
 /**

@@ -9,7 +9,12 @@ import {
   listModuleNames,
 } from './discovery'
 import { loadRouteDefinitions } from './load-routes'
-import { extractClassDeclaration, extractTableIdentifier } from './model-parser'
+import {
+  classUsesAuthenticatableBase,
+  extractClassDeclaration,
+  extractTableIdentifier,
+  findStaticClassProperty,
+} from './model-parser'
 import { parseSourceFile } from './parse-cache'
 import { parseSchemaTableColumns } from './schema-parser'
 import { loadAuditConfig, type AuditIgnoreEntry } from './audit-config'
@@ -308,11 +313,15 @@ async function parseControllerMethods(cwd: string, findings: AuditFinding[]): Pr
  * trusted server-side values only. Static analysis cannot prove data flow,
  * so this is a review prompt (warn), never a fail.
  */
+const FORCE_WRITE_PATTERN = /\bforce(Create|Update)\s*\(/
+
 function auditForceWrites(controllerMethods: Map<string, ControllerMethodInfo>, findings: AuditFinding[]): void {
   for (const [methodKey, info] of controllerMethods) {
-    const usesForceWrite = /\bforce(Create|Update)\s*\(/.test(info.body)
-    if (!usesForceWrite) continue
-    if (!/\bvalidateBody\s*\(/.test(info.body)) continue
+    if (!FORCE_WRITE_PATTERN.test(info.body)) continue
+    // Same predicate the route-validation check uses, so the two findings
+    // cannot disagree about whether a method validates its body — it also
+    // covers validateBodySafe and generic validateBody<T>() calls.
+    if (!VALIDATE_BODY_PATTERN.test(info.body)) continue
 
     findings.push(
       finding(
@@ -664,8 +673,17 @@ async function auditModels(cwd: string, findings: AuditFinding[]): Promise<void>
     const name = classNameFromPath(filePath)
     const source = await readFile(filePath, 'utf-8')
 
-    const hasFillable = /\bstatic\s+(override\s+)?fillable\b/.test(source)
-    const isAuthenticatable = /\bAuthenticatableModel\b/.test(source)
+    // AST classification, not source-text matching — a comment mentioning
+    // AuthenticatableModel must not flip this model to structurally
+    // protected, and a modifier-prefixed fillable must still count.
+    const ast = parseSourceFile(source, filePath)
+    let classDecl: ReturnType<typeof extractClassDeclaration> = null
+    for (const node of ast?.program.body ?? []) {
+      classDecl = extractClassDeclaration(node)
+      if (classDecl) break
+    }
+    const hasFillable = classDecl ? findStaticClassProperty(classDecl, 'fillable') !== null : false
+    const isAuthenticatable = classDecl ? classUsesAuthenticatableBase(classDecl) : false
 
     // Authenticatable models are structurally protected: their credential
     // columns are denied from mass assignment by the framework, so a missing

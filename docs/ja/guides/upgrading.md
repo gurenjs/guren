@@ -31,7 +31,7 @@ bun run test
 
 - **何が変わったか**: `static guarded` と `static strictFillable` は削除されました。`fillable` は常に厳格で、主キー（`id`）は常に黙って除外されます。`AuthenticatableModel` のサブクラスでは、パスワードハッシュとリメンバートークンのカラムは一括代入できません。リクエストボディにこれらが含まれると、`fillable` の内容に関わらず `MassAssignmentException` がスローされます。
 - **誰に影響するか**: `guarded` や `strictFillable` を宣言しているモデル（`guren check` がエラーとして検出します）、および `create()` / `update()` で計算済みハッシュやリメンバートークンを一括代入しているコード。
-- **移行方法**: `guarded` / `strictFillable` の宣言を削除してください（`bunx guren upgrade --check-only` が対象ファイルを一覧します）。`strictFillable = false` に依存していたモデルでは、新たにスローされる例外が「黙って破棄されていたフィールド」を示します。`fillable` に追加するかペイロードから除いてください。`create({ ..., passwordHash })` は `create({ ..., password })` に置き換えてモデルにハッシュ化させるか、信頼できるサーバーサイドの値には `forceCreate({ ..., passwordHash: 'oauth:...' })` を使ってください（リクエスト入力には決して使わないこと）。
+- **移行方法**: `guarded` / `strictFillable` の宣言を削除してください（`bunx guren upgrade --check-only` が対象ファイルを一覧します）。**`guarded` が `id` と認証情報カラム以外のアプリ固有フィールド（`tenantId` や `isAdmin` など）を含んでいた場合、行の削除によりそれらは一括代入可能になります**。それらを含まない `static fillable = [...]` を宣言して保護を維持してください。`strictFillable = false` に依存していたモデルでは、新たにスローされる例外が「黙って破棄されていたフィールド」を示します。`fillable` に追加するかペイロードから除いてください。`create({ ..., passwordHash })` は `create({ ..., password })` に置き換えてモデルにハッシュ化させるか、信頼できるサーバーサイドの値には `forceCreate({ ..., passwordHash: 'oauth:...' })` を使ってください（リクエスト入力には決して使わないこと）。
 
 ```ts
 // Before

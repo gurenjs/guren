@@ -23,11 +23,13 @@ export class MassAssignmentException extends Error {
         ? `These are protected columns (e.g. credential fields) and can never be mass-assigned — ` +
           `not even via ${model}.fillable. Pass the plain input field (e.g. \`password\`) and let ` +
           `the model derive them, or use ${model}.forceCreate()/forceUpdate() for trusted ` +
-          `server-side values such as \`passwordHash: 'oauth:...'\`. Never call forceCreate/` +
-          `forceUpdate with request input.`
+          `server-side values such as \`passwordHash: 'oauth:...'\`.`
         : `Add them to fillable, or use ${model}.forceCreate()/forceUpdate() for trusted ` +
-          `server-side data. Never call forceCreate/forceUpdate with request input.`
-    super(`${model}: mass assignment blocked for field(s) ${list}. ${remediation}`)
+          `server-side data.`
+    super(
+      `${model}: mass assignment blocked for field(s) ${list}. ${remediation} ` +
+        `Never call forceCreate/forceUpdate with request input.`,
+    )
     this.name = 'MassAssignmentException'
     this.model = model
     this.fields = fields

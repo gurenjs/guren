@@ -4,6 +4,11 @@
  * Each deprecation targets a specific API, config, or pattern that will
  * be removed in a future version.
  */
+import { readFile } from 'node:fs/promises'
+import { relative } from 'node:path'
+import { discoverModelFiles } from './discovery'
+import { extractClassDeclaration, findStaticClassProperty } from './model-parser'
+import { parseSourceFile } from './parse-cache'
 
 export interface Deprecation {
   /** Unique identifier */
@@ -21,19 +26,24 @@ export interface Deprecation {
 }
 
 async function detectModelStatic(cwd: string, property: string): Promise<string[]> {
-  const { discoverModelFiles } = await import('./discovery')
-  const { readFile } = await import('node:fs/promises')
-  const { relative } = await import('node:path')
-  const pattern = new RegExp(`\\bstatic\\s+(override\\s+)?(readonly\\s+)?${property}\\b`)
-
-  const affected: string[] = []
-  for (const filePath of await discoverModelFiles(cwd)) {
-    const source = await readFile(filePath, 'utf-8')
-    if (pattern.test(source)) {
-      affected.push(relative(cwd, filePath))
-    }
-  }
-  return affected
+  const files = await discoverModelFiles(cwd)
+  const affected = await Promise.all(
+    files.map(async (filePath) => {
+      const source = await readFile(filePath, 'utf-8')
+      // Same AST predicate `guren check`'s legacy rule uses, so the two
+      // commands cannot drift on what counts as a declaration (and comments
+      // or access modifiers neither fake nor hide one).
+      const ast = parseSourceFile(source, filePath)
+      for (const node of ast?.program.body ?? []) {
+        const classDecl = extractClassDeclaration(node)
+        if (classDecl && findStaticClassProperty(classDecl, property)) {
+          return relative(cwd, filePath)
+        }
+      }
+      return null
+    }),
+  )
+  return affected.filter((file): file is string => file !== null)
 }
 
 /**

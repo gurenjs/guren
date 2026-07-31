@@ -13,20 +13,20 @@ class FillableModel extends Model<PlainObject> {
   static fillable = ['title', 'body']
 }
 
-class DeniedModel extends Model<PlainObject> {
-  static override table = {} as unknown
+abstract class DeniesPasswordHash extends Model<PlainObject> {
   protected static override deniedFields(): string[] {
     return ['passwordHash']
   }
 }
 
-class DeniedWithFillableModel extends Model<PlainObject> {
+class DeniedModel extends DeniesPasswordHash {
+  static override table = {} as unknown
+}
+
+class DeniedWithFillableModel extends DeniesPasswordHash {
   static override table = {} as unknown
   // Listing a denied field in fillable does not open it — denied wins.
   static fillable = ['name', 'passwordHash']
-  protected static override deniedFields(): string[] {
-    return ['passwordHash']
-  }
 }
 
 describe('Model.filterFillable', () => {
@@ -122,12 +122,9 @@ describe('Model.filterFillable', () => {
     it('should check the raw input before the allowlist so the denied reason wins', () => {
       // passwordHash is both denied and outside fillable on this model —
       // the caller must see the credential-specific error, not the generic one.
-      class BothModel extends Model<PlainObject> {
+      class BothModel extends DeniesPasswordHash {
         static override table = {} as unknown
         static fillable = ['name']
-        protected static override deniedFields(): string[] {
-          return ['passwordHash']
-        }
       }
       try {
         BothModel.filterFillable({ passwordHash: 'evil' })
@@ -174,11 +171,8 @@ describe('Model.filterFillable', () => {
     })
 
     it('forceCreate() bypasses deniedFields()', async () => {
-      class DeniedUser extends Model<PlainObject> {
+      class DeniedUser extends DeniesPasswordHash {
         static override table = 'users'
-        protected static override deniedFields(): string[] {
-          return ['passwordHash']
-        }
       }
       const { adapter, calls } = createRecordingAdapter()
       DeniedUser.useAdapter(adapter)
@@ -234,11 +228,8 @@ describe('Model.filterFillable', () => {
     })
 
     it('applies deniedFields() on the fluent builder', async () => {
-      class DeniedPost extends Model<PlainObject> {
+      class DeniedPost extends DeniesPasswordHash {
         static override table = 'posts'
-        protected static override deniedFields(): string[] {
-          return ['passwordHash']
-        }
       }
       const { adapter, calls } = createBuilderAdapter()
       DeniedPost.useAdapter(adapter)

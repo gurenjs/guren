@@ -13,7 +13,13 @@ import {
   moduleNameFor,
   formatTruncatedList,
 } from './discovery'
-import { extractClassDeclaration } from './model-parser'
+import {
+  classUsesAuthenticatableBase,
+  extractClassDeclaration,
+  findStaticClassProperty,
+  staticStringArrayProperty,
+  staticStringProperty,
+} from './model-parser'
 import { checkConsoleCommandRegistration } from './console-check'
 import { ParseCache } from './parse-cache'
 import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath } from './inertia-pages'
@@ -140,8 +146,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     for (const filePath of modelFiles) {
       const relPath = relative(cwd, filePath)
       const name = classNameFromPath(filePath)
-      const modelSource = await readFile(filePath, 'utf-8')
-      checks.push(...checkMassAssignmentConfig(name, modelSource, relPath))
+      checks.push(...(await checkMassAssignmentConfig(cache, filePath, name, relPath)))
       const moduleName = moduleNameFor(cwd, filePath)
       const schemaPath = moduleName ? `modules/${moduleName}/db/schema.ts` : 'db/schema.ts'
       const hasSchema = await fileExists(cwd, schemaPath)
@@ -262,7 +267,9 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
 }
 
 /**
- * Mass-assignment definition checks.
+ * Mass-assignment definition checks (AST-based via the shared ParseCache, so
+ * comments, access modifiers, and type annotations neither hide a declaration
+ * nor fake one).
  *
  * `guarded` and `strictFillable` no longer exist as Model API — a model
  * declaring them ships dead-looking protection that TypeScript accepts
@@ -275,12 +282,24 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
  * rememberTokenField, defaulting to passwordHash / rememberToken), so it is
  * resolved here the same way the model resolves it at runtime.
  */
-function checkMassAssignmentConfig(name: string, source: string, relPath: string): CheckResult[] {
+async function checkMassAssignmentConfig(
+  cache: ParseCache,
+  filePath: string,
+  name: string,
+  relPath: string,
+): Promise<CheckResult[]> {
   const results: CheckResult[] = []
+  const parsed = await cache.get(filePath)
+  if (!parsed) return results
 
-  const legacy = ['guarded', 'strictFillable'].filter((property) =>
-    new RegExp(`\\bstatic\\s+(override\\s+)?(readonly\\s+)?${property}\\b`).test(source),
-  )
+  let classDecl = null
+  for (const node of parsed.ast.program.body) {
+    classDecl = extractClassDeclaration(node)
+    if (classDecl) break
+  }
+  if (!classDecl) return results
+
+  const legacy = ['guarded', 'strictFillable'].filter((property) => findStaticClassProperty(classDecl!, property))
   if (legacy.length > 0) {
     results.push(
       check(
@@ -288,20 +307,20 @@ function checkMassAssignmentConfig(name: string, source: string, relPath: string
         `${name} legacy mass-assignment config`,
         'fail',
         `${name} declares ${legacy.join(' and ')}, which no longer exist as Model API — the declaration is inert.`,
-        `Delete the ${legacy.join('/')} declaration. Use 'static fillable = [...]' to allowlist columns; `
-        + `the primary key and credential columns are protected by the framework.`,
+        `Delete the ${legacy.join('/')} declaration. The primary key and credential columns are protected by `
+        + `the framework; any OTHER field the old guarded list carried (e.g. tenantId, isAdmin) is now `
+        + `mass-assignable — declare 'static fillable = [...]' without those fields to keep them protected.`,
         relPath,
       ),
     )
   }
 
-  if (/\bAuthenticatableModel\b/.test(source)) {
-    const fillableMatch = source.match(/\bstatic\s+(?:override\s+)?fillable\s*(?::[^=]+)?=\s*\[([^\]]*)\]/)
-    if (fillableMatch) {
-      const fillable = [...fillableMatch[1].matchAll(/['"]([^'"]+)['"]/g)].map((m) => m[1])
-      const passwordField = source.match(/\bstatic\s+(?:override\s+)?passwordField\s*=\s*['"]([^'"]+)['"]/)?.[1] ?? 'password'
-      const hashField = source.match(/\bstatic\s+(?:override\s+)?passwordHashField\s*=\s*['"]([^'"]+)['"]/)?.[1] ?? 'passwordHash'
-      const rememberField = source.match(/\bstatic\s+(?:override\s+)?rememberTokenField\s*=\s*['"]([^'"]+)['"]/)?.[1] ?? 'rememberToken'
+  if (classUsesAuthenticatableBase(classDecl)) {
+    const fillable = staticStringArrayProperty(classDecl, 'fillable')
+    if (fillable) {
+      const passwordField = staticStringProperty(classDecl, 'passwordField') ?? 'password'
+      const hashField = staticStringProperty(classDecl, 'passwordHashField') ?? 'passwordHash'
+      const rememberField = staticStringProperty(classDecl, 'rememberTokenField') ?? 'rememberToken'
       const denied = [...(hashField !== passwordField ? [hashField] : []), rememberField]
       const contradictions = fillable.filter((field) => denied.includes(field))
       if (contradictions.length > 0) {
