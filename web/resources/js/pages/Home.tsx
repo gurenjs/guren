@@ -199,7 +199,8 @@ export default function Home({ codeExamples }: Props) {
             <p className="mt-6 max-w-2xl text-lg leading-relaxed text-white/70 md:text-xl">
               Guren is a fullstack framework for Bun where your AI agent works from the same
               map you do. Laravel-style conventions, type safety from the route definition to
-              the React component, and mechanical checks that verify the work — human or agent.
+              the React component, and mechanical checks that verify the work. Secure by
+              default, agent-ready by default.
             </p>
             <div className="mt-10 flex flex-wrap items-center gap-4">
               <Link

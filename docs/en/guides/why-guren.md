@@ -12,7 +12,7 @@ Guren also invests heavily in one thing most frameworks do not: making your proj
 
 ## Built for AI Coding Agents
 
-Most frameworks were designed for humans reading documentation. Guren is additionally designed for agents working inside your repository — three properties make the difference:
+Most frameworks were designed for humans reading documentation. Guren is additionally designed for agents working inside your repository — and every scaffolded app ships that way out of the box: agent-ready by default, in the same spirit as secure by default. Three properties make the difference:
 
 **Agents can discover the project cheaply.** `bunx guren context` emits a compact map of your routes, models, controllers, and pages (add `--json` for machine-readable output). An agent gets accurate project understanding from one command instead of crawling the tree, which keeps its context window small and its assumptions correct. `bunx guren model:list` does the same for the data model.
 
