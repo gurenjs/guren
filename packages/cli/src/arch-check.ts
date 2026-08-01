@@ -44,8 +44,18 @@ export async function runArchCheck(options: RunArchCheckOptions): Promise<CheckR
     ]
   }
 
-  const derivedResults = await evaluateDerivedModuleRules(cwd, cache, changedFiles)
-  const explicitResults = loaded.config ? await evaluateArchRules(cwd, cache, loaded.config, changedFiles) : []
+  // Both evaluators scan the same set — every importable file in the project —
+  // so the walk is shared. Lazy because a project with neither `modules/` nor
+  // a guren.arch.ts reaches neither scan, and must not pay for a walk nothing
+  // reads. `readonly` because the two now share one array instance.
+  let importableFilesPromise: Promise<readonly string[]> | null = null
+  const importableFiles = (): Promise<readonly string[]> =>
+    (importableFilesPromise ??= collectFiles(cwd, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES))
+
+  const derivedResults = await evaluateDerivedModuleRules(cwd, cache, changedFiles, importableFiles)
+  const explicitResults = loaded.config
+    ? await evaluateArchRules(cwd, cache, loaded.config, changedFiles, importableFiles)
+    : []
 
   return [...derivedResults, ...explicitResults]
 }
@@ -73,12 +83,13 @@ async function evaluateDerivedModuleRules(
   cwd: string,
   cache: ParseCache,
   changedFiles: Set<string> | null | undefined,
+  importableFiles: () => Promise<readonly string[]>,
 ): Promise<CheckResult[]> {
   const moduleNames = await listModuleNames(cwd)
   if (moduleNames.length === 0) return []
 
   const results: CheckResult[] = []
-  const files = await collectFiles(cwd, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES)
+  const files = await importableFiles()
   let filesChecked = 0
 
   for (const absPath of files) {
@@ -140,12 +151,13 @@ async function evaluateArchRules(
   cache: ParseCache,
   config: ArchRuleSet,
   changedFiles: Set<string> | null | undefined,
+  importableFiles: () => Promise<readonly string[]>,
 ): Promise<CheckResult[]> {
   const layers = config.layers ?? {}
   const rules = config.rules
   const results: CheckResult[] = []
 
-  const files = await collectFiles(cwd, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES)
+  const files = await importableFiles()
   let filesChecked = 0
 
   for (const absPath of files) {

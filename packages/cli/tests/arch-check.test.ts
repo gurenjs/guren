@@ -510,4 +510,64 @@ describe('runArchCheck derived module rules (RFC 0002, zero-config)', () => {
       await workspace.cleanup()
     }
   })
+
+  // Pins that both evaluators agree on which files they scan. It deliberately
+  // does NOT claim to prove the project is walked only once: two identical
+  // walks yield identical lists, so reverting to a walk per evaluator still
+  // passes here. What it catches is one evaluator being narrowed to a subtree
+  // — scanning only `modules/` for the derived rules, say — which is the
+  // plausible way the shared walk gets undone.
+  //
+  // The counts are files *checked*, not files walked: `filesChecked` only
+  // counts files with at least one import specifier, past each evaluator's own
+  // filtering. So the fixture's guren.arch.ts has to stay import-free, or the
+  // derived count moves for a reason unrelated to what is under test.
+  it('scans the same file set in both evaluators', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-shared-walk-')
+    try {
+      await writeFile(
+        join(workspace.dir, 'guren.arch.ts'),
+        `export default {
+  layers: { domain: 'app/Domain/**' },
+  rules: [{ from: 'domain', disallow: ['app/Forbidden/**'] }],
+}
+`,
+        'utf8',
+      )
+
+      // Two importing files at the project root, one inside a module. No
+      // violations anywhere, so both evaluators fall through to their summary.
+      await mkdir(join(workspace.dir, 'app/Domain'), { recursive: true })
+      await writeFile(join(workspace.dir, 'app/Domain/Helper.ts'), 'export const helper = 1', 'utf8')
+      await writeFile(
+        join(workspace.dir, 'app/Domain/OrderService.ts'),
+        `import { helper } from './Helper'\nexport class OrderService {}`,
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'modules/billing'), { recursive: true })
+      await writeFile(join(workspace.dir, 'modules/billing/index.ts'), 'export const billing = 1', 'utf8')
+      await mkdir(join(workspace.dir, 'modules/inventory'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'modules/inventory/index.ts'),
+        `import { billing } from '../billing'\nexport const inventory = {}`,
+        'utf8',
+      )
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+
+      // Derived rules reach both importers — the project-root one and the one
+      // inside a module — which is what a modules-only walk would miss.
+      const moduleSummary = results.find((r) => r.key === 'arch:module-summary')
+      expect(moduleSummary?.status).toBe('pass')
+      expect(moduleSummary?.message).toContain('Checked 2 file(s)')
+
+      // Explicit rules start from that same list and narrow to the `domain`
+      // layer: Helper.ts is in the layer but imports nothing, so it drops out.
+      const archSummary = results.find((r) => r.key === 'arch:summary')
+      expect(archSummary?.status).toBe('pass')
+      expect(archSummary?.message).toContain('Checked 1 file(s)')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
 })
