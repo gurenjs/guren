@@ -1106,7 +1106,7 @@ function isRouteContractOptions(value: unknown): value is RouteContractOptions<S
 function joinPaths(prefixStack: string[], path: string): string {
   const segments = [...prefixStack, path]
     .filter(Boolean)
-    .map((segment) => trimSlashes(segment))
+    .map(trimSlashes)
     .filter(Boolean)
 
   if (segments.length === 0) {

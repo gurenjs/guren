@@ -1,4 +1,4 @@
-import { access, mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, relative, resolve } from 'node:path'
 import type { Application, RouteDefinition } from '@guren/core'
 
@@ -123,21 +123,24 @@ export function generateOpenApiDocument(
   options: OpenApiDocumentOptions,
 ): GenerateOpenApiDocumentResult {
   const warnings: string[] = []
-  const pathEntries = new Map<string, Map<string, OpenApiOperationObject>>()
+  // Route-derived path keys go through a Map so a literal `__proto__` route
+  // cannot pollute Object.prototype; method keys are fixed HTTP verbs.
+  const pathEntries = new Map<string, Record<string, OpenApiOperationObject>>()
 
   for (const definition of definitions) {
     const pathKey = toOpenApiPath(definition.path)
     const methodKey = definition.method.toLowerCase()
     const operation = buildOperation(definition, warnings)
 
-    const operations = pathEntries.get(pathKey) ?? new Map<string, OpenApiOperationObject>()
-    operations.set(methodKey, operation)
-    pathEntries.set(pathKey, operations)
+    const operations = pathEntries.get(pathKey)
+    if (operations) {
+      operations[methodKey] = operation
+    } else {
+      pathEntries.set(pathKey, { [methodKey]: operation })
+    }
   }
 
-  const paths: OpenApiDocument['paths'] = Object.fromEntries(
-    Array.from(pathEntries, ([pathKey, operations]) => [pathKey, Object.fromEntries(operations)]),
-  )
+  const paths: OpenApiDocument['paths'] = Object.fromEntries(pathEntries)
 
   return {
     document: {
@@ -756,18 +759,16 @@ function isRequestBodyRequired(schema: unknown): boolean {
 async function writeFileSafe(relativePath: string, contents: string, options: WriterOptions = {}): Promise<string> {
   const fullPath = resolve(process.cwd(), relativePath)
 
-  if (!options.force) {
-    try {
-      await access(fullPath)
-      throw new Error(`${relativePath} already exists. Use --force to overwrite.`)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        throw error
-      }
-    }
-  }
-
   await mkdir(dirname(fullPath), { recursive: true })
-  await writeFile(fullPath, contents, 'utf8')
+  try {
+    // `wx` makes the exists-check and the write one atomic operation
+    // (mirrors the writer in @guren/cli's utils).
+    await writeFile(fullPath, contents, { encoding: 'utf8', flag: options.force ? 'w' : 'wx' })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      throw new Error(`${relativePath} already exists. Use --force to overwrite.`)
+    }
+    throw error
+  }
   return fullPath
 }

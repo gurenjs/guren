@@ -12,6 +12,24 @@ const DEFAULT_PREFIX = '/resources/js'
 const DEFAULT_VENDOR_PATH = '/vendor/inertia-client.tsx'
 const DEFAULT_JSX_RUNTIME = 'https://esm.sh/react@19.0.0/jsx-dev-runtime?dev'
 
+/**
+ * Derive the mount point for the vendored Inertia client from its public
+ * path: the containing directory (always slash-terminated), the Hono route
+ * pattern for it, and the file's path relative to that base.
+ */
+export function resolveInertiaClientRoute(inertiaClientPath: string): {
+  base: string
+  pattern: string
+  requestPath: string
+} {
+  const base = inertiaClientPath.slice(0, inertiaClientPath.lastIndexOf('/') + 1) || '/'
+  return {
+    base,
+    pattern: `${base}*`,
+    requestPath: inertiaClientPath.slice(base.length),
+  }
+}
+
 export interface DevAssetsOptions {
   /** Absolute path to the resources directory (e.g. `/app/resources`). */
   resourcesDir?: string
@@ -109,9 +127,11 @@ export function registerDevAssets(app: Application, options: DevAssetsOptions): 
 
   if (options.inertiaClient !== false) {
     const inertiaClientDir = dirname(inertiaClientSource)
-    const inertiaClientBase = inertiaClientPath.slice(0, inertiaClientPath.lastIndexOf('/') + 1) || '/'
-    const inertiaClientPattern = `${inertiaClientBase.endsWith('/') ? inertiaClientBase : `${inertiaClientBase}/`}*`
-    const inertiaClientRequestPath = inertiaClientPath.slice(inertiaClientBase.length)
+    const {
+      base: inertiaClientBase,
+      pattern: inertiaClientPattern,
+      requestPath: inertiaClientRequestPath,
+    } = resolveInertiaClientRoute(inertiaClientPath)
 
     app.hono.get(inertiaClientPattern, (ctx) => {
       const relativeRequest = ctx.req.path.slice(inertiaClientBase.length) || inertiaClientRequestPath

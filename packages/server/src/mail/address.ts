@@ -11,7 +11,10 @@ export function parseMailAddress(input: string | MailAddress): MailAddress {
     return input
   }
 
-  if (input.endsWith('>')) {
+  // Line breaks disqualify the Name <email> form (as `.` did in the regex
+  // this replaces) — a parsed display name must never carry header-injection
+  // characters into mail transports.
+  if (input.endsWith('>') && !/[\r\n\u2028\u2029]/u.test(input)) {
     const open = input.lastIndexOf('<')
     if (open > 0 && open < input.length - 2) {
       return {

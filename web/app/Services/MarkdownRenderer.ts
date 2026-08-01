@@ -158,6 +158,29 @@ ${content}
   return typeof rendered === 'string' ? rendered : ''
 }
 
+/**
+ * One pass of `/<[^>]*>/g` as a linear scan — the regex itself is quadratic
+ * on `<`-heavy input with no closing bracket. Unclosed `<` tails are kept
+ * verbatim, matching the regex (which requires a closing `>`).
+ */
+function stripHtmlTagsOnce(html: string): string {
+  let out = ''
+  let i = 0
+  while (i < html.length) {
+    const open = html.indexOf('<', i)
+    if (open === -1) {
+      return out + html.slice(i)
+    }
+    const close = html.indexOf('>', open + 1)
+    if (close === -1) {
+      return out + html.slice(i)
+    }
+    out += html.slice(i, open)
+    i = close + 1
+  }
+  return out
+}
+
 function slugifyHeading(text: string, seenSlugs: Map<string, number>): string {
   // Repeat until stable: a single pass can splice a new tag together
   // (e.g. `<scr<x>ipt>` becomes `<script>` after one removal).
@@ -165,7 +188,7 @@ function slugifyHeading(text: string, seenSlugs: Map<string, number>): string {
   let previous: string
   do {
     previous = stripped
-    stripped = stripped.replace(/<[^>]*>/g, '')
+    stripped = stripHtmlTagsOnce(stripped)
   } while (stripped !== previous)
   let slug = stripped
     .toLowerCase()

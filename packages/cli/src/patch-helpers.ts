@@ -112,7 +112,7 @@ function appendArrayEntry(arrayInterior: string, valueSource: string): string {
   // Length of the interior up to its last code character: everything after it
   // is whitespace or a trailing comment, and the new entry has to go before
   // that or it lands inside the comment.
-  const codeLength = maskNonCode(arrayInterior).replace(/\s+$/u, '').length
+  const codeLength = maskNonCode(arrayInterior).trimEnd().length
   const code = arrayInterior.slice(0, codeLength)
   const trailing = arrayInterior.slice(codeLength)
 

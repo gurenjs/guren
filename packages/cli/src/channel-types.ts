@@ -2,7 +2,12 @@ import { readdir, readFile } from 'node:fs/promises'
 import { relative, resolve } from 'node:path'
 import { walk, type BabelNode } from './ast-walk'
 import { parseSourceFile } from './parse-cache'
-import { writeGeneratedFile, type WriterOptions } from './utils'
+import {
+  escapeSingleQuoted as esc,
+  escapeTemplateLiteral as escapeTemplatePart,
+  writeGeneratedFile,
+  type WriterOptions,
+} from './utils'
 
 export interface GenerateChannelTypesOptions extends WriterOptions {
   appRoot?: string
@@ -372,10 +377,3 @@ function renderObjectKey(value: unknown): string | null {
   return null
 }
 
-function escapeTemplatePart(value: string): string {
-  return value.replace(/\\/gu, '\\\\').replace(/`/gu, '\\`').replace(/\$/gu, '\\$')
-}
-
-function esc(value: string): string {
-  return value.replace(/\\/gu, '\\\\').replace(/'/gu, "\\'")
-}

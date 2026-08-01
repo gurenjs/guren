@@ -200,8 +200,9 @@ export function parseDocFrontmatter(
       // `- by: human:ada` opens a mapping the following indented
       // siblings extend.
       const kv = KEY_VALUE_RE.exec(entry)
-      if (kv && kv[2].trim() !== '') {
-        itemMapping = { [kv[1]]: unquote(kv[2].trim()) }
+      const kvValue = kv ? kv[2].trim() : ''
+      if (kv && kvValue !== '') {
+        itemMapping = { [kv[1]]: unquote(kvValue) }
         open.list.push(itemMapping)
         continue
       }

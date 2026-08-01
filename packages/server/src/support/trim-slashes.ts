@@ -2,6 +2,10 @@
  * Slash-trimming without regex: patterns like `/\/+$/` backtrack
  * quadratically on adversarial input (long slash runs mid-string), and
  * several call sites here feed request-derived paths.
+ *
+ * A twin of `trimSlashes` lives in `@guren/cli` (`src/utils.ts`); the
+ * packages share no dependency edge, so the six lines are duplicated by
+ * convention.
  */
 
 export function trimTrailingSlashes(value: string): string {

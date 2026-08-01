@@ -307,11 +307,6 @@ function renderWorkerModule(input: {
 
 function scaffoldWranglerConfig(root: string, out: string, packageName: string | undefined): void {
   const configPath = resolve(root, 'wrangler.jsonc')
-  if (existsSync(configPath)) {
-    warnMissingBuildOwnedKeys(configPath, relative(root, out).split(sep).join('/'))
-    return
-  }
-
   const appName = (packageName ?? 'guren-app').replace(/^@[^/]+\//, '')
   const outRelative = relative(root, out).split(sep).join('/')
 
@@ -349,8 +344,8 @@ function scaffoldWranglerConfig(root: string, out: string, packageName: string |
   }
 
   try {
-    // `wx` re-checks existence atomically at write time: the `existsSync`
-    // above can go stale if a config appears between the check and the write.
+    // `wx` is the exists-check and the write in one atomic operation; an
+    // existing config is never overwritten.
     writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, { flag: 'wx' })
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') {

@@ -1,13 +1,13 @@
 import { consola } from 'consola'
 import { resolve, join } from 'node:path'
-import { existsSync, mkdirSync, writeFileSync, readdirSync, readFileSync, copyFileSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync, readdirSync, readFileSync, copyFileSync, constants as fsConstants } from 'node:fs'
 
 /**
  * Write JSON, refusing to overwrite unless forced. The `wx` flag makes the
  * exists-check and the write one atomic operation — a separate `existsSync`
  * guard leaves a race window. Returns false when the file already existed.
  */
-function writeJsonUnlessPresent(filePath: string, content: unknown, force: boolean): boolean {
+function writeJsonUnlessPresent(filePath: string, content: unknown, force = false): boolean {
   try {
     writeFileSync(filePath, JSON.stringify(content, null, 2) + '\n', { flag: force ? 'w' : 'wx' })
     return true
@@ -153,7 +153,7 @@ export function publishLanguageFiles(options: LangPublishOptions = {}): string[]
   for (const [filename, content] of Object.entries(files)) {
     const filePath = join(enPath, filename)
 
-    if (!writeJsonUnlessPresent(filePath, content, options.force ?? false)) {
+    if (!writeJsonUnlessPresent(filePath, content, options.force)) {
       consola.warn(`File already exists: ${filePath} (use --force to overwrite)`)
       continue
     }
@@ -210,12 +210,15 @@ export function makeLanguage(locale: string, options: MakeLangOptions = {}): str
       const sourcePath = join(fromPath, file)
       const targetPath = join(localePath, file)
 
-      if (existsSync(targetPath) && !options.force) {
-        consola.warn(`File already exists: ${targetPath} (use --force to overwrite)`)
-        continue
+      try {
+        copyFileSync(sourcePath, targetPath, options.force ? 0 : fsConstants.COPYFILE_EXCL)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+          consola.warn(`File already exists: ${targetPath} (use --force to overwrite)`)
+          continue
+        }
+        throw error
       }
-
-      copyFileSync(sourcePath, targetPath)
       createdFiles.push(targetPath)
       consola.success(`Created: ${targetPath}`)
     }
@@ -248,7 +251,7 @@ export function makeLanguage(locale: string, options: MakeLangOptions = {}): str
     for (const [filename, content] of Object.entries(emptyFiles)) {
       const filePath = join(localePath, filename)
 
-      if (!writeJsonUnlessPresent(filePath, content, options.force ?? false)) {
+      if (!writeJsonUnlessPresent(filePath, content, options.force)) {
         consola.warn(`File already exists: ${filePath} (use --force to overwrite)`)
         continue
       }

@@ -3,7 +3,7 @@ import { dirname, resolve, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
 import type { Application } from './Application'
-import { createStaticRewrite, registerDevAssets, type DevAssetsOptions } from './dev-assets'
+import { createStaticRewrite, registerDevAssets, resolveInertiaClientRoute, type DevAssetsOptions } from './dev-assets'
 import { registerRootPublicAssets } from './public-assets'
 import { parseImportMap } from '../support/import-map'
 import { trimTrailingSlashes } from '../support/trim-slashes'
@@ -112,9 +112,11 @@ export function configureInertiaAssets(app: Application, options: InertiaAssetsO
 
       const inertiaClientDir = dirname(inertiaClientEntry)
       const inertiaClientPath = options.inertiaClientPath ?? DEFAULT_VENDOR_CLIENT_PATH
-      const inertiaClientBase = inertiaClientPath.slice(0, inertiaClientPath.lastIndexOf('/') + 1) || '/'
-      const inertiaClientPattern = `${inertiaClientBase.endsWith('/') ? inertiaClientBase : `${inertiaClientBase}/`}*`
-      const inertiaClientRequestPath = inertiaClientPath.slice(inertiaClientBase.length)
+      const {
+        base: inertiaClientBase,
+        pattern: inertiaClientPattern,
+        requestPath: inertiaClientRequestPath,
+      } = resolveInertiaClientRoute(inertiaClientPath)
 
       app.hono.get(inertiaClientPattern, async (ctx) => {
         const relativeRequest = ctx.req.path.slice(inertiaClientBase.length) || inertiaClientRequestPath

@@ -19,7 +19,7 @@ export async function writeKeyToEnv(cwd: string, key: string): Promise<void> {
   const line = `APP_KEY=${key}`
   const next = /^APP_KEY=.*$/mu.test(content)
     ? content.replace(/^APP_KEY=.*$/mu, line)
-    : `${content.replace(/\s*$/u, '')}${content.trim() ? '\n' : ''}${line}\n`
+    : `${content.trimEnd()}${content.trim() ? '\n' : ''}${line}\n`
 
   await writeFile(path, next, 'utf8')
 }

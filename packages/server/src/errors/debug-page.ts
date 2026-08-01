@@ -180,8 +180,8 @@ function parseStackTrace(stack: string): StackFrame[] {
   return lines
     .map((line): StackFrame | null => {
       const trimmed = line.trim()
-      if (!trimmed.startsWith('at ')) return null
-      const rest = trimmed.slice(3).trim()
+      if (!/^at\s/u.test(trimmed)) return null
+      const rest = trimmed.slice(2).trim()
 
       // Format: at functionName (file:line:col)
       if (rest.endsWith(')')) {

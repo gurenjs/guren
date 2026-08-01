@@ -20,11 +20,18 @@ const CHARSETS = {
  * skews toward the front of the set whenever 256 is not a multiple of it).
  */
 function unbiasedRandomChars(length: number, chars: string): string {
+  if (!Number.isInteger(length) || length < 0) {
+    throw new RangeError(`Random string length must be a non-negative integer, received ${length}.`)
+  }
+
   const limit = 256 - (256 % chars.length)
   let result = ''
 
   while (result.length < length) {
-    const bytes = randomBytes(length - result.length)
+    // Over-draw for the expected rejection rate so a second randomBytes
+    // call stays rare even for charsets with high discard ratios.
+    const remaining = length - result.length
+    const bytes = randomBytes(Math.ceil((remaining * 256) / limit) + 8)
     for (const byte of bytes) {
       if (byte < limit) {
         result += chars[byte % chars.length]

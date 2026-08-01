@@ -1,5 +1,10 @@
 import { relative, resolve } from 'node:path'
-import { writeGeneratedFile, type WriterOptions } from './utils'
+import {
+  escapeSingleQuoted as escapeSingleQuotes,
+  escapeTemplateLiteral as escapeTemplateSegment,
+  writeGeneratedFile,
+  type WriterOptions,
+} from './utils'
 import { loadRouteDefinitions } from './load-routes'
 import {
   DECLARATION_MODULE_AUGMENTATION,
@@ -149,17 +154,6 @@ export function toTypeLiteral(path: string): string {
   const normalized = rendered.startsWith('/') ? rendered : `/${rendered}`
 
   return `\`${normalized}\``
-}
-
-function escapeSingleQuotes(value: string): string {
-  return value.replace(/\\/gu, '\\\\').replace(/'/gu, "\\'")
-}
-
-function escapeTemplateSegment(value: string): string {
-  return value
-    .replace(/\\/gu, '\\\\')
-    .replace(/`/gu, '\\`')
-    .replace(/\$\{/gu, '\\${')
 }
 
 type HelperTreeNode = {

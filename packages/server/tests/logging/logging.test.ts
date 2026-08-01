@@ -484,10 +484,6 @@ describe('LogManager', () => {
     const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guren-logmanager-test-'))
     const testFile = `${testDir}/test.log`
 
-    if (fs.existsSync(testDir)) {
-      fs.rmSync(testDir, { recursive: true })
-    }
-
     const manager = new LogManager({
       default: 'console',
       channels: {
