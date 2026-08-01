@@ -1,13 +1,17 @@
 import { copyFile, readFile, writeFile } from 'node:fs/promises'
-import { resolve, relative } from 'node:path'
+import { resolve, relative, basename } from 'node:path'
 import { consola } from 'consola'
 import {
+  collectFiles,
+  dbArtifactPattern,
+  DB_ARTIFACT_DIRS,
   discoverControllerFiles,
   discoverModelFiles,
   discoverTestFiles,
   fileExists,
   hasControllerTest,
   describeControllerTestMiss,
+  listAppRoots,
   readIfExists,
   classNameFromPath,
   toPosixRelative,
@@ -1385,25 +1389,30 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
 
   try {
     const modelFiles = await discoverModelFiles(cwd)
+    // Listed once for every model rather than probed per model: the factory
+    // file name is the user's choice (`make:factory` suffixes whatever they
+    // typed), so recognising it takes `dbArtifactPattern` over the directory's
+    // real contents — the same rule `guren context <Entity>` reports factories
+    // by. Probing exact singular paths here is what let doctor tell a user with
+    // `CategoriesFactory.ts` to scaffold a second one.
+    const roots = await listAppRoots(cwd)
+    const factoryGroups = await Promise.all(
+      roots.map((root) => collectFiles(resolve(root.dir, DB_ARTIFACT_DIRS.Factory))),
+    )
+    const factoryNames = factoryGroups.flat().map((file) => basename(file))
+
     for (const filePath of modelFiles) {
       const name = classNameFromPath(filePath)
-      const factoryCandidates = [
-        `database/factories/${name}Factory.ts`,
-        `db/factories/${name}Factory.ts`,
-      ]
-      let hasFactory = false
-      for (const candidate of factoryCandidates) {
-        if (await fileExists(cwd, candidate)) {
-          hasFactory = true
-          break
-        }
-      }
+      const factoryPattern = dbArtifactPattern(name, 'Factory')
+      const hasFactory = factoryNames.some((factoryName) => factoryPattern.test(factoryName))
       if (!hasFactory) {
+        const moduleName = moduleNameFromRelPath(toPosixRelative(cwd, filePath))
+        const moduleFlag = moduleName ? ` --module ${moduleName}` : ''
         steps.push({
           priority: priority++,
           title: `Add factory for ${name}`,
           description: 'No factory file found for testing and seeding.',
-          command: `bunx guren make:factory ${name}`,
+          command: `bunx guren make:factory ${name}${moduleFlag}`,
         })
       }
     }

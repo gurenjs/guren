@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { consola } from 'consola'
 import { getDoctorRuleEvaluations, runDoctor, buildJsonOutput, suggestNextSteps, renderDoctorReport } from '../src/doctor'
@@ -1245,6 +1245,77 @@ describe('suggestNextSteps', () => {
     } finally {
       await workspace.cleanup()
     }
+  })
+
+  // `make:factory` appends its suffix to whatever the user typed, so the
+  // factory of a `Category` model is just as likely to be named
+  // `CategoriesFactory`. Doctor used to probe the singular path only and told
+  // the user to scaffold a duplicate of a factory `guren context Category`
+  // was already listing.
+  async function factoryWorkspaceSteps(
+    prefix: string,
+    files: Record<string, string>,
+  ): Promise<Awaited<ReturnType<typeof suggestNextSteps>>> {
+    const workspace = await createTempWorkspace(prefix)
+
+    try {
+      for (const [relPath, contents] of Object.entries(files)) {
+        await mkdir(join(workspace.dir, dirname(relPath)), { recursive: true })
+        await writeFile(join(workspace.dir, relPath), contents, 'utf8')
+      }
+
+      return await suggestNextSteps({ cwd: workspace.dir })
+    } finally {
+      await workspace.cleanup()
+    }
+  }
+
+  const MODEL_SOURCE = (name: string) => `export class ${name} {}\n`
+  const FACTORY_SOURCE = (name: string) => `export default class ${name} {}\n`
+
+  it('does not suggest a factory for a model whose factory is named in the plural', async () => {
+    const steps = await factoryWorkspaceSteps('guren-cli-doctor-factory-plural-', {
+      'app/Models/Category.ts': MODEL_SOURCE('Category'),
+      'db/factories/CategoriesFactory.ts': FACTORY_SOURCE('CategoriesFactory'),
+    })
+
+    expect(steps.some((step) => step.title === 'Add factory for Category')).toBe(false)
+  })
+
+  it('does not suggest a factory for a model whose factory is named in the singular', async () => {
+    const steps = await factoryWorkspaceSteps('guren-cli-doctor-factory-singular-', {
+      'app/Models/Post.ts': MODEL_SOURCE('Post'),
+      'db/factories/PostFactory.ts': FACTORY_SOURCE('PostFactory'),
+    })
+
+    expect(steps.some((step) => step.title === 'Add factory for Post')).toBe(false)
+  })
+
+  // Without this the check could be stuck-on-true and both suppression tests
+  // above would still pass.
+  it('suggests a factory for a model that has none', async () => {
+    const steps = await factoryWorkspaceSteps('guren-cli-doctor-factory-missing-', {
+      'app/Models/Category.ts': MODEL_SOURCE('Category'),
+      'db/factories/PostFactory.ts': FACTORY_SOURCE('PostFactory'),
+    })
+
+    const step = steps.find((s) => s.title === 'Add factory for Category')
+    expect(step).toBeDefined()
+    expect(step!.command).toBe('bunx guren make:factory Category')
+  })
+
+  it('matches a module model against its own module factories', async () => {
+    const steps = await factoryWorkspaceSteps('guren-cli-doctor-factory-module-', {
+      'modules/billing/app/Models/Invoice.ts': MODEL_SOURCE('Invoice'),
+      'modules/billing/db/factories/InvoicesFactory.ts': FACTORY_SOURCE('InvoicesFactory'),
+      'modules/billing/app/Models/Plan.ts': MODEL_SOURCE('Plan'),
+    })
+
+    expect(steps.some((step) => step.title === 'Add factory for Invoice')).toBe(false)
+
+    const planStep = steps.find((step) => step.title === 'Add factory for Plan')
+    expect(planStep).toBeDefined()
+    expect(planStep!.command).toBe('bunx guren make:factory Plan --module billing')
   })
 })
 
