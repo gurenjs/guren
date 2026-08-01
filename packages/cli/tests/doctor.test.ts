@@ -525,6 +525,52 @@ describe('runDoctor', () => {
     }
   })
 
+  it('does not warn about pages.gen.ts for an API-only app with no Inertia pages', async () => {
+    const workspace = await createTempWorkspace('guren-cli-doctor-api-only-pages-')
+
+    try {
+      await mkdir(join(workspace.dir, '.guren'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'package.json'),
+        JSON.stringify({ name: 'doctor-api-only-pages' }, null, 2),
+        'utf8',
+      )
+
+      const report = await runDoctor({ cwd: workspace.dir, json: true })
+      const pageContractsCheck = report.checks.find((check) => check.key === 'page-contracts')
+      const pagesManifestCheck = report.checks.find((check) => check.key === 'generated:.guren/pages.gen.ts')
+
+      expect(pageContractsCheck?.status).toBe('pass')
+      expect(pagesManifestCheck?.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('still warns about pages.gen.ts when Inertia pages exist but the manifest is missing', async () => {
+    const workspace = await createTempWorkspace('guren-cli-doctor-pages-warn-')
+
+    try {
+      await mkdir(join(workspace.dir, '.guren'), { recursive: true })
+      await mkdir(join(workspace.dir, 'resources/js/pages'), { recursive: true })
+      await writeFile(join(workspace.dir, 'resources/js/pages/Home.tsx'), 'export default function Home() { return null }\n', 'utf8')
+      await writeFile(
+        join(workspace.dir, 'package.json'),
+        JSON.stringify({ name: 'doctor-pages-warn' }, null, 2),
+        'utf8',
+      )
+
+      const report = await runDoctor({ cwd: workspace.dir, json: true })
+      const pageContractsCheck = report.checks.find((check) => check.key === 'page-contracts')
+      const pagesManifestCheck = report.checks.find((check) => check.key === 'generated:.guren/pages.gen.ts')
+
+      expect(pageContractsCheck?.status).toBe('warn')
+      expect(pagesManifestCheck?.status).toBe('warn')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('warns when the @/* alias maps to the app directory instead of the project root', async () => {
     const workspace = await createTempWorkspace('guren-cli-doctor-alias-')
 
@@ -1160,6 +1206,42 @@ describe('suggestNextSteps', () => {
       // half free to drift away from `guren check`.
       expect(oauthStep!.description).toContain('filename-only detection')
       expect(oauthStep!.description).toContain('already covered under another name')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('does not suggest codegen for a missing pages.gen.ts in an API-only app', async () => {
+    const workspace = await createTempWorkspace('guren-cli-doctor-next-steps-api-only-')
+
+    try {
+      await mkdir(join(workspace.dir, '.guren'), { recursive: true })
+      await writeFile(join(workspace.dir, '.guren/routes.gen.ts'), 'export const routeManifest = {} as const\n', 'utf8')
+      await writeFile(join(workspace.dir, '.guren/data.gen.ts'), 'export namespace Data {}\n', 'utf8')
+      await writeFile(join(workspace.dir, '.guren/api-client.gen.ts'), 'export type ApiRoutes = {}\n', 'utf8')
+
+      const steps = await suggestNextSteps({ cwd: workspace.dir })
+
+      expect(steps.some((step) => step.title === 'Run codegen')).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('suggests codegen for a missing pages.gen.ts when Inertia pages exist', async () => {
+    const workspace = await createTempWorkspace('guren-cli-doctor-next-steps-pages-')
+
+    try {
+      await mkdir(join(workspace.dir, '.guren'), { recursive: true })
+      await mkdir(join(workspace.dir, 'resources/js/pages'), { recursive: true })
+      await writeFile(join(workspace.dir, 'resources/js/pages/Home.tsx'), 'export default function Home() { return null }\n', 'utf8')
+      await writeFile(join(workspace.dir, '.guren/routes.gen.ts'), 'export const routeManifest = {} as const\n', 'utf8')
+      await writeFile(join(workspace.dir, '.guren/data.gen.ts'), 'export namespace Data {}\n', 'utf8')
+      await writeFile(join(workspace.dir, '.guren/api-client.gen.ts'), 'export type ApiRoutes = {}\n', 'utf8')
+
+      const steps = await suggestNextSteps({ cwd: workspace.dir })
+
+      expect(steps.some((step) => step.title === 'Run codegen')).toBe(true)
     } finally {
       await workspace.cleanup()
     }
