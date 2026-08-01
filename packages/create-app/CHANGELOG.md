@@ -1,5 +1,304 @@
 # create-guren-app
 
+## 1.5.0
+
+### Minor Changes
+
+- b73c455: Re-add the `blog` blueprint as a template that ships
+
+  `--blueprint blog` is back, this time as a curated template under `templates/`
+  instead of an overlay of the `examples/blog` workspace, which no published
+  tarball contains. It layers posts CRUD, session authentication, an ownership
+  policy, and a seeded demo account over the default template, and it applies
+  `default-ssr` in SSR mode — the blueprint it replaces skipped that layer and
+  scaffolded an SSR app with no `ssr.tsx` entry.
+
+  The schema comes from the template rather than a generator in `blueprints.ts`.
+  A template can now ship `db/schema.<driver>.ts` per driver; the scaffolder keeps
+  the one matching the selected database, renames it to `db/schema.ts`, and
+  deletes the rest. A template that ships some drivers but not the selected one is
+  reported as an incomplete build instead of silently falling back to the generic
+  single-table schema, which would scaffold models pointing at tables that do not
+  exist. This is what the old blueprint's hand-maintained schema copy existed to
+  work around, and what let it drift from the columns its own controllers read.
+
+  `--auth` is ignored for blueprints that already ship authentication, with a note
+  saying so: it runs `guren add auth --force`, which would overwrite the
+  template's own controllers, routes, and `User` model with the generic ones. The
+  "add features" next steps no longer suggest adding auth to an app that has it.
+
+  Two things the template does that `guren add auth`'s output does not, both
+  found by driving the scaffolded app in a browser: it shares the signed-in user
+  with Inertia from `AuthProvider.boot()`, without which every page renders as a
+  guest and the authenticated nav never appears, and it logs out through an
+  Inertia `Link` rather than a native `<form method="post">`, which carries no
+  CSRF token and is rejected with a 403.
+
+  `smoke:starter:blog` scaffolds, typechecks, and builds the blueprint in CI
+  alongside the existing `api` and `worker` smokes. Like every other starter
+  smoke it covers SQLite only; the PostgreSQL and MySQL schemas this blueprint
+  ships were typechecked and run through `drizzle-kit generate` by hand.
+
+  The `User` model follows RFC 0006's structural mass-assignment model
+  (`defineModel(users, { base: AuthenticatableModel, ... })`, no `guarded`) —
+  `passwordHash` and `rememberToken` are denied by `AuthenticatableModel` itself,
+  and `Post.fillable` never lists `authorId`, which is set from the session via
+  `forceCreate()` in `PostController.store()`.
+
+- 22f2526: Remove the `blog` blueprint and guard against unpublishable template layers
+
+  `--blueprint blog` never worked from a published `create-guren-app`. Its overlay
+  layer resolved to `examples/blog`, which lives outside the package and is not
+  covered by the `files` field, so from npm the command failed with a raw ENOENT
+  inside `cp` after already copying the base template — leaving a half-scaffolded
+  directory behind. `--help` advertised the blueprint the whole time.
+
+  The blueprint was also broken independently of packaging: its hand-maintained
+  copy of the blog schema had drifted from the columns its controllers used, and
+  it pinned `@inertiajs/core` to a major version behind the `@inertiajs/react` the
+  template installs, so a generated app did not typecheck even inside the
+  monorepo. Restoring it means shipping a curated template under `templates/` with
+  smoke coverage, which is tracked separately; advertising it meanwhile was worse
+  than removing it. `--blueprint blog` now reports the blueprints that do exist.
+
+  Template layers are now named rather than pathed, so a layer outside the
+  published `templates/` directory is a type error instead of something a test has
+  to catch. `scaffoldAppBlueprint()` also verifies each template exists before it
+  copies anything, so a corrupted install reports which blueprint and directory are
+  missing instead of an ENOENT, rather than failing part-way through the copy.
+
+- f5911d4: Ship a `.gitignore` with scaffolded apps and offer an initial commit.
+
+  npm strips files literally named `.gitignore` from published tarballs, so every
+  app scaffolded from the registry came out without one — `git init` immediately
+  staged `node_modules/`, build output, and the generated `.env`. Templates now
+  carry the file as `_gitignore` and the scaffolder restores the dot after each
+  template layer copies — collected from the copy itself, so a `--force` scaffold
+  never renames files it did not write. The default list also covers
+  `public/assets/`, `.guren/ssr/`, and `.DS_Store`.
+
+  `create-guren-app` (and `guren new`) gained a `--git` / `--no-git` flag that
+  initializes a repository and creates an initial commit once the harness and
+  optional auth scaffolding are in place. It is prompted in an interactive
+  terminal, off in non-interactive ones, and skipped when the target directory is
+  already inside a git repository or already contained files — an initial commit
+  must never sweep up anything the scaffolder did not write.
+
+- ec0233d: Scaffold Postgres timestamp columns as `timestamptz`
+
+  Every timestamp a Guren scaffold emitted for Postgres was `timestamp without
+time zone`: `add resource`'s `date` fields, the `createdAt` it appends, the
+  `createdAt`/`updatedAt`/`emailVerifiedAt` on `make:auth`'s users table, and the
+  `users` table `create-guren-app --db postgres` writes. All of them hold an
+  instant, so all of them are now `timestamp(name, { withTimezone: true })`.
+
+  A column without a time zone stores a bare wall clock, and who reads it decides
+  what that clock meant:
+
+  - `defaultNow()` records the wall clock of the **database session's** time zone,
+    while the app reads the column back as if it were UTC. Whenever the database
+    session is not on UTC, a `createdAt` is silently off by that offset — the
+    wrong instant is written, not merely displayed.
+  - Values the app writes itself are UTC wall clock, so anything that is not
+    Drizzle — `psql`, a raw `postgres` query, a report, another service — reads
+    them as local time and sees a different instant.
+
+  Drizzle parses the offset-less column as UTC, so an app that only ever reads
+  through its own models stays self-consistent; `timestamptz` is what makes the
+  column mean the same instant to everyone else.
+
+  This changes generated code only — existing schemas are untouched. To adopt it
+  in an app that has already migrated, change the column in `db/schema.ts` and
+  generate a migration, then fix up the `USING` clause. Drizzle emits a bare
+  `::timestamp with time zone` cast, which reinterprets stored values against
+  whatever the session's time zone happens to be; name the zone the values were
+  actually written in instead:
+
+  ```sql
+  ALTER TABLE "posts"
+    ALTER COLUMN "published_at" SET DATA TYPE timestamp with time zone
+    USING "published_at" AT TIME ZONE 'UTC';
+  ```
+
+  `'UTC'` is right for values the app wrote. If the column also carries
+  `defaultNow()` rows, they were written in the database session's zone — check
+  it with `SHOW TimeZone` before converting, and split the conversion if the two
+  sets of rows disagree.
+
+### Patch Changes
+
+- 55d6a28: Make the generated API client CSRF-safe by default. `createApiClient()` now
+  copies the `XSRF-TOKEN` cookie into the `X-XSRF-TOKEN` header on
+  state-changing requests, so `client.request('posts.store', { body })` no
+  longer gets a 403 from the CSRF middleware that ships enabled by default.
+
+  The copy happens only when the request targets the page's own origin — the
+  cookie belongs to that origin, and sending it to a third-party `baseUrl`
+  would disclose the page's CSRF token. A cross-origin client, or one talking
+  to a server configured with `csrf({ cookie: false })`, supplies its own
+  `X-XSRF-TOKEN` header; caller-supplied `X-XSRF-TOKEN` / `X-CSRF-TOKEN`
+  headers are left untouched whatever their casing. The cookie is read through
+  `globalThis`, so the generated module stays import-safe during SSR.
+
+  Requests also carry an explicit `credentials: 'same-origin'` — the fetch
+  default, now overridable through the new `credentials` option.
+
+- e2c82da: Type the seeder context against the app's own database dialect
+
+  `SeederContext.db` was hard-typed as `PostgresJsDatabase`, so every seeder was
+  typed against PostgreSQL no matter which database the app configured. On MySQL
+  and SQLite that made the seeder reject its own `db/schema.ts` — `db.insert()`
+  does not accept a `mysqlTable`/`sqliteTable`, and `.onDuplicateKeyUpdate()` is
+  not a method on the PostgreSQL insert builder at all. The runtime was always
+  fine: the callback receives the real database.
+
+  It was invisible in the default scaffold because `db/` was outside the app's
+  `tsconfig.json` `include`, but not everywhere — the API-only template already
+  typechecks `db/`, so `guren add auth` on a `--db mysql` API app failed
+  `bun run typecheck` on the seeder it had just generated.
+
+  `SeederContext` and `SeederHandler` are now generic over the database, with the
+  same `PostgresJsDatabase` default as before, so existing seeders keep compiling.
+  `PostgresSeederContext`, `MySqlSeederContext`, `SqliteSeederContext`, and
+  `AwsDataApiSeederContext` are exported for the other drivers that seed (D1 does
+  not — its `seedDatabase()` throws), and scaffolded apps re-export the one they
+  configured from `config/database.ts` as `AppSeederContext`:
+
+  ```ts
+  import { defineSeeder } from "@guren/core";
+  import type { AppSeederContext } from "../../config/database.js";
+
+  export default defineSeeder(async ({ db }: AppSeederContext) => {
+    /* ... */
+  });
+  ```
+
+  `guren add auth` and `make:seeder` now annotate what they generate, and `db/`
+  joined the default template's `tsconfig.json` `include` so the generated
+  seeders and schema are actually typechecked. `runSeeders()` and `loadSeeders()`
+  accept any dialect's database, which drops the casts the MySQL, SQLite, and
+  Aurora Data API drivers needed.
+
+- 02eb9cd: Keep `--db mysql` scaffolds on the MySQL dialect end to end
+
+  `create-guren-app --db mysql` generated a `db/schema.ts` that imported
+  `mysqlTable, int, varchar, timestamp` from `@guren/orm/drizzle`. That subpath
+  re-exports the PostgreSQL column builders under the unqualified names, so the
+  MySQL `users` table was built out of a pg `timestamp`. Nothing reported it:
+  drizzle-kit still emitted the same MySQL DDL and the app still typechecked.
+
+  It did leak further, though. `guren add auth` and `add resource` merge new
+  columns into the schema's `drizzle-orm/mysql-core` import and skip any name
+  already visible in some import line — so with a pg `timestamp` in scope, every
+  later date column silently stayed on the wrong dialect too. The scaffold now
+  imports from `drizzle-orm/mysql-core`, matching what the patchers emit and what
+  the SQLite scaffold already did.
+
+  The demo-user seeder `guren add auth` writes is now dialect-aware. It used
+  `.onConflictDoNothing()` unconditionally, which does not exist on MySQL's query
+  builder — `db:seed` threw `onConflictDoNothing is not a function` on every MySQL
+  app. MySQL now gets the equivalent `.onDuplicateKeyUpdate()` form.
+
+- 559cc79: Render route `body` types as the request shape, not the parsed one
+
+  `ApiRoutes[...]['body']` is consumed as the wire type — generated pages hand it
+  to `useForm`, and `createApiClient()` callers build request payloads from it —
+  but codegen emitted the schema's post-parse type. Those differ for every
+  coercing schema, and `z.coerce.date()` made the difference fatal: the body was
+  typed `Date` while a browser can only send an ISO string, so a `make:feature`
+  scaffold with a date field did not type-check at all.
+
+  `body` now renders the input side, where a coerced date is a `string` and a
+  coerced number is `number | string`. `response` still renders the parsed side,
+  and `guren context` keeps showing params/query as the controller receives them.
+  A `.pipe()` now resolves both sides independently; `.transform()` continues to
+  report its input type, since a transform's output is a function with no
+  recoverable type.
+
+  Field _presence_ follows the same split, which it previously did not: a
+  `.default()`, `.prefault()` or `.catch()` field may be omitted from a request
+  but is always there once parsed, so it is optional in `body` and required in
+  `response`. `.readonly()`, `.brand()` and `.nonoptional()` are now understood
+  too — the first two previously made an optional field look required.
+
+  **Regenerating may surface new type errors in app code**, and they are pointing
+  at something real. A form field previously typed `Date` was already sending a
+  string over the wire; one typed `number` may receive `"3"` from an input. Widen
+  the local type, or narrow the schema if the route genuinely does not coerce.
+
+  Fixed alongside, all of which blocked the same scaffold from compiling:
+
+  - `z.array()` threw on Zod 4 and took `guren codegen` down with it, for any
+    route whose body or output schema contained an array.
+  - Zod 3's `ZodPipeline` was not recognized at all, so `z.string().pipe(...)`
+    rendered as `unknown` on apps still pinned to Zod 3.
+  - `RouteBody<>` constrained its registry to a type with an index signature,
+    which the generated `ApiRoutes` interface can never satisfy — the type could
+    not be used with the one registry it exists for. The constraint is gone, and
+    generated form pages now use `RouteBody<ApiRoutes, 'posts.store'>` in place of
+    indexing `ApiRoutes` directly.
+  - A scaffolded `json` field validated with `z.record(z.unknown())`, which needs
+    an explicit key type on Zod 4 and produces a value Inertia's `FormDataType`
+    rejects. It is now `z.record(z.string(), z.any())`, edited through a textarea
+    that tolerates mid-edit JSON while flagging it, and rendered with
+    `JSON.stringify` instead of being passed to React as an object. A json column
+    is also no longer used as the Index page's heading, where React refused to
+    render it. Scaffolding a json field now emits a `useState` flag on the form
+    pages, so a parse failure is visible rather than silently submitting the last
+    value that parsed. Apps that customized this validator keep their own version;
+    only newly scaffolded features change.
+  - A scaffolded `date` field cast its column straight to `string` in the
+    resource, and fed a full ISO timestamp to `<input type="date">`, which renders
+    nothing for anything longer than `YYYY-MM-DD`. The resource now normalizes
+    through `new Date(...)`, so it survives SQLite handing back a string where
+    Postgres hands back a `Date`.
+  - The scaffolded Edit page named its submit event `event`, shadowing the record
+    prop for any entity whose variable name is also `event`.
+
+  Two known limits, both deliberate:
+
+  - Coerced types are rendered narrower than Zod would actually accept.
+    `z.coerce.number()` also takes a `boolean` and `z.coerce.boolean()` takes
+    anything at all, but a generated `body` is a type callers must _satisfy_, so
+    it stays JSON-native and usable — a bare `boolean` is what drives a
+    checkbox's `checked`. Widen the schema if a route really means "anything".
+  - `RouteBody<>` returns `Record<string, unknown>` for a registry entry with no
+    `body`, including a malformed one. Constraining the registry is not an option:
+    a generated `interface` can never satisfy an index signature, which is the
+    bug being fixed here.
+
+- 468b898: Point the templates' `@guren/*` ranges at the versions they are published with
+
+  Every template declared `"@guren/orm": "^1.0.0"` and friends, unchanged since
+  1.0. A template's `package.json` is the one file in the repository that resolves
+  against **npm** rather than the workspace, so those ranges decided what a
+  scaffolded app actually installed — 1.3.0 for an ORM the templates had long
+  since outgrown. `bun run typecheck` in a fresh app failed on
+  `config/database.ts`, which imports the dialect-aware `SqliteSeederContext` that
+  only exists in this repository so far.
+
+  Releasing does not fix that on its own: the pending changesets take
+  `@guren/orm` to 2.0.0, and a caret range cannot cross a major. `@guren/core` is
+  on a minor line, so the same app would have installed core 1.5.0 — which depends
+  on orm 2.0.0 — next to orm 1.3.0, putting two copies of the ORM in one process.
+
+  `scripts/sync-template-deps.ts` now writes the ranges from the workspace
+  versions, `version-packages` runs it immediately after `changeset version`
+  (the first moment the new numbers exist), and the new `audit:template-deps`
+  gate asserts they agree, so a range that falls behind fails CI on the PR that
+  caused it. Because a rewritten template only reaches users inside a new
+  `create-guren-app` tarball — and `create-guren-app` declares no `@guren/*`
+  dependency for changesets to follow — the release path also fails if the
+  templates changed without `create-guren-app` being bumped.
+
+  None of the existing smokes could see any of this: `smoke:starter` and
+  `smoke:starter:packed` both rewrite the scaffolded app's `@guren/*` dependencies
+  to builds of the local checkout. The new `smoke:starter:npm` mode leaves the
+  template's declared ranges alone and installs from the registry, and runs on a
+  scheduled `Published Package Drift` workflow rather than in CI — it is correctly
+  red between a template-facing change and the release that publishes what the
+  template needs.
+
 ## 1.4.0
 
 ### Minor Changes

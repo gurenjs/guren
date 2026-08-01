@@ -1,5 +1,173 @@
 # @guren/core
 
+## 1.5.0
+
+### Minor Changes
+
+- e2c82da: Type the seeder context against the app's own database dialect
+
+  `SeederContext.db` was hard-typed as `PostgresJsDatabase`, so every seeder was
+  typed against PostgreSQL no matter which database the app configured. On MySQL
+  and SQLite that made the seeder reject its own `db/schema.ts` — `db.insert()`
+  does not accept a `mysqlTable`/`sqliteTable`, and `.onDuplicateKeyUpdate()` is
+  not a method on the PostgreSQL insert builder at all. The runtime was always
+  fine: the callback receives the real database.
+
+  It was invisible in the default scaffold because `db/` was outside the app's
+  `tsconfig.json` `include`, but not everywhere — the API-only template already
+  typechecks `db/`, so `guren add auth` on a `--db mysql` API app failed
+  `bun run typecheck` on the seeder it had just generated.
+
+  `SeederContext` and `SeederHandler` are now generic over the database, with the
+  same `PostgresJsDatabase` default as before, so existing seeders keep compiling.
+  `PostgresSeederContext`, `MySqlSeederContext`, `SqliteSeederContext`, and
+  `AwsDataApiSeederContext` are exported for the other drivers that seed (D1 does
+  not — its `seedDatabase()` throws), and scaffolded apps re-export the one they
+  configured from `config/database.ts` as `AppSeederContext`:
+
+  ```ts
+  import { defineSeeder } from "@guren/core";
+  import type { AppSeederContext } from "../../config/database.js";
+
+  export default defineSeeder(async ({ db }: AppSeederContext) => {
+    /* ... */
+  });
+  ```
+
+  `guren add auth` and `make:seeder` now annotate what they generate, and `db/`
+  joined the default template's `tsconfig.json` `include` so the generated
+  seeders and schema are actually typechecked. `runSeeders()` and `loadSeeders()`
+  accept any dialect's database, which drops the casts the MySQL, SQLite, and
+  Aurora Data API drivers needed.
+
+- 1bccf80: feat: the schema walkers read the zod 4 API only, and refuse zod 3 loudly
+
+  The TypeScript-type renderer (`guren codegen`, `guren context`) and the OpenAPI
+  generator previously walked both Zod majors. The two dialects disagree about
+  the meaning of `_def.type` — v3 stores a nested schema there, v4 the type
+  name — and that ambiguity is what produced the walker bugs that had to be
+  fixed twice. Since every Guren scaffold has always pinned zod 4, the walkers
+  now read the v4 layout exclusively.
+
+  A schema authored with the zod v3 API — whether from the old `zod@3` package
+  or the `zod/v3` subpath that zod 4 itself ships — is detected (only v3 sets
+  `_def.typeName`) and refused with an explicit message instead of being
+  rendered wrong or silently dropped: the CLI warns once per process, the
+  OpenAPI document records a warning naming the schema's location. The message
+  lives in `@guren/core/internal/zod-compat` as `ZOD3_UNSUPPORTED_MESSAGE`, so
+  the two surfaces cannot drift apart. Detection runs on every node, not just
+  at the walk's entry — a v3 node nested inside a v4 object (which nothing but
+  the type system prevents) is refused too, and the OpenAPI request-body
+  `required` probe survives the `safeParse` throw such a hybrid produces in
+  zod 4 rather than crashing document generation.
+
+  Dropping the v3 dialect also deletes code that was unreachable under v4:
+  the `pipeline`, `discriminatedunion`, and `nativeenum` case labels (v4 names
+  them `pipe`, `union`, and `enum`), the `effects` and `branded` wrapper names
+  (v4 has no such nodes — `.brand()` adds nothing at runtime), and the
+  function-shaped `_def.shape` read.
+
+  Two behavior improvements ride along, both in enum handling (`z.nativeEnum`
+  produces the same node as `z.enum` in zod 4). Documented values are now read
+  from zod's own computed set (`_zod.values`) instead of re-derived from the
+  entries object, so what the document lists is what zod parses by
+  construction: reverse mappings of a numeric TypeScript enum (`{ A: 0,
+'0': 'A' }`) no longer leak into the OpenAPI `enum` list, and the derivation
+  has no false positives — a hand-rolled reverse-mapping filter would wrongly
+  drop a member whose string value collides with another key (`{ A: 'B',
+B: 1 }`). A mixed string/number enum also documents as
+  `type: ['string', 'number']` rather than `number`. The `zod/v3` subpath was
+  never used by any Guren template, example, or generated app.
+
+### Patch Changes
+
+- fe0c13d: Add a README. `@guren/core` is the package every Guren app imports from, yet
+  its npm page was blank. The README covers install, a minimal controller and
+  route example, the package's entry points (`/runtime`, `/vite`, `/lambda`,
+  `/redis`), and links to the docs site.
+- fe0c13d: fix: compute deploy-bundle import specifiers from real paths
+
+  `buildLambdaOutput({ outputDir })` failed with `Bundle failed` whenever the
+  output directory was reached through a symlink that changes path depth — on
+  macOS `/tmp` is a link to `/private/tmp` and `os.tmpdir()` lives under
+  `/var/folders`, a link into `/private/var`, so pointing a build script or CI
+  harness at a temp directory hit this immediately.
+
+  The generated `handler.ts` imports the app entrypoint through a relative
+  specifier, and `importSpecifier()` computed it from the paths as given while
+  the bundler resolves the emitted file from its real path. A depth-changing
+  link left the specifier one `..` short. Both arguments now resolve through
+  `realpathOfNearestExisting()` first — the same normalization the module's
+  deletion guard already applies.
+
+  The default `<root>/.lambda` output and the `lambda:build` command were never
+  affected; only programmatic calls passing an explicit `outputDir` were.
+
+- 460e0e2: refactor: share the Zod v3/v4 compatibility primitives between the two schema walkers
+
+  `@guren/cli`'s TypeScript-type renderer and `@guren/openapi`'s schema-object
+  renderer each carried their own copy of the knowledge needed to read a Zod
+  schema without caring which major produced it: type-name lookup, the `Zod`
+  prefix normalization, wrapper unwrapping, pipe-side selection, object-shape
+  reading, and enum/literal value extraction. Knowledge added to one never
+  reached the other — a Zod 4 array keeps its element in `_def.element` while
+  `_def.type` holds the string `'array'`, and reading them in the wrong order
+  silently dropped the element type. That single bug had to be found and fixed
+  twice, months apart, once per package.
+
+  Those primitives now live in `@guren/core/internal/zod-compat`, a deep-import
+  internal module in the same vein as `internal/deploy-build`. Both walkers read
+  from it, so a version quirk learned once is known in both places.
+
+  The set of type names that carry exactly one nested schema moves too, as
+  `SINGLE_CHILD_WRAPPERS` plus the two partitions each walker needs. The walkers
+  had looked like they disagreed here — one held a five-name set, the other a
+  twelve-name one — but the CLI simply handled the other seven as explicit
+  `switch` cases. They differ in how they partition the vocabulary, not in what
+  is in it, so the membership is now stated once.
+
+  The type switches themselves stay where they are: one produces TypeScript type
+  strings, the other OpenAPI schema objects. Their leaf vocabularies have
+  legitimately diverged (the CLI renders `void`/`any`/`never`, which OpenAPI
+  cannot express), and that is a rendering decision rather than version
+  knowledge.
+
+  Both `isOptional`s also stay with their callers, but not because each is right
+  for its own purpose — the CLI reads one side of a `.pipe()` and the OpenAPI
+  walker requires both, and each can be fooled by a pipeline the other handles.
+  Deciding omissibility correctly means simulating a parse, which is a separate
+  piece of work; the two approximations are now labelled as such where they live.
+
+  Three incidental hardenings come along for the ride. The CLI's inner-schema
+  lookup now skips non-object candidates instead of taking the first non-nullish
+  one; a nested node with no readable type name renders as `unknown` rather than
+  throwing; and two degenerate schemas that used to emit invalid TypeScript now
+  render correctly — an empty `z.enum([])` as `never` instead of an empty string,
+  and `z.literal(undefined)` as `undefined` rather than being dropped by
+  `JSON.stringify`.
+
+- Updated dependencies [55d6a28]
+- Updated dependencies [2c944f0]
+- Updated dependencies [5c91e8e]
+- Updated dependencies [63fd323]
+- Updated dependencies [e2c82da]
+- Updated dependencies [22f2526]
+- Updated dependencies [d7e80fe]
+- Updated dependencies
+- Updated dependencies [02eb9cd]
+- Updated dependencies [396194d]
+- Updated dependencies [df90e04]
+- Updated dependencies [559cc79]
+- Updated dependencies [f5911d4]
+- Updated dependencies [ec0233d]
+- Updated dependencies [460e0e2]
+- Updated dependencies [cda337b]
+- Updated dependencies [d9165df]
+- Updated dependencies [1bccf80]
+  - @guren/cli@2.0.0
+  - @guren/orm@2.0.0
+  - @guren/server@2.0.0
+
 ## 1.4.0
 
 ### Minor Changes

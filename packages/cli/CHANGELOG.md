@@ -1,5 +1,561 @@
 # @guren/cli
 
+## 2.0.0
+
+### Major Changes
+
+- cda337b: Structural mass-assignment protection (RFC 0006).
+
+  BREAKING CHANGE: `Model.guarded` and `Model.strictFillable` are removed.
+  `fillable` is the single allowlist and is always strict; the primary key
+  (`id`) is always silently stripped from mass-assignment input. Models can
+  contribute always-denied fields via the new `deniedFields()` hook —
+  `AuthenticatableModel` denies its resolved password-hash and remember-token
+  columns (new `rememberTokenField` static), so a request body carrying them
+  throws a `MassAssignmentException` (new `reason: 'denied' | 'not-fillable'`
+  property) regardless of `fillable`. Use `forceCreate()`/`forceUpdate()` for
+  trusted server-side values such as `passwordHash: 'oauth:...'`.
+
+  `ModelUserProvider` now reads credential column names from the model contract
+  (`resolvePasswordHashField()`/`resolveRememberTokenField()`, now public) when
+  the target extends `AuthenticatableModel`; explicit options remain as
+  overrides. `AuthManager.useModel()` no longer hardcodes them.
+
+  `defineModel()` drops the deprecated `createType` option (use
+  `optionalOnCreate`/`requireOnCreate`), and `AuthenticatableModel.createType`
+  no longer widens to `PlainObject` — models extending it directly should
+  declare their own `createType`; `defineModel()`-based models are unaffected.
+
+  CLI: `make:auth` stops emitting the now-redundant `guarded` line;
+  `guren check` fails on models declaring `guarded`/`strictFillable` and on
+  `fillable` listing a denied credential column; `guren audit` recognizes
+  structurally protected auth models and warns when a controller method mixes
+  `validateBody` with `forceCreate`/`forceUpdate`; `guren upgrade --check-only`
+  detects the removed statics.
+
+### Minor Changes
+
+- 2c944f0: Flag Postgres timestamp columns declared without a time zone in `guren check`
+
+  Every Guren scaffold now emits `timestamp(name, { withTimezone: true })` for
+  Postgres, but nothing caught an offset-less column in a schema written by hand
+  or by an AI agent reproducing an older pattern. `guren check` now warns on one.
+
+  `timestamp without time zone` stores a bare wall clock, and who reads it decides
+  what that clock meant: `defaultNow()` records the wall clock of the _database
+  session's_ zone while the app reads the column back as UTC — so on a non-UTC
+  session the stored instant is simply wrong — and any non-Drizzle reader (psql, a
+  report, another service) sees a different instant than the app does for values
+  the app wrote itself.
+
+  ```
+  [warn] posts.createdAt time zone: Postgres column 'created_at' is 'timestamp
+         without time zone', which stores a bare wall clock: ...
+       → In db/schema.ts, declare it as timestamp('created_at', { withTimezone: true })
+         and generate a migration. ...
+  ```
+
+  Postgres only, decided per table by the factory that declared it (`pgTable`),
+  not per file — so a schema mixing dialects is judged a table at a time. MySQL
+  has no `timestamptz` and its `TIMESTAMP` is already UTC-normalized, so its bare
+  `timestamp('created_at')` is correct and stays silent even though it is spelled
+  identically; sqlite stores epoch integers via `integer(..., { mode })`.
+
+  The result is a `warn` in the core suite, which means it is **informational**:
+  plain `guren check` has never set an exit code, and only `--arch` / `--docs` /
+  `--spec` gate CI. This will not fail a build — fixing an existing column
+  requires a migration whose `USING` clause needs a human decision about which
+  zone the stored rows were written in.
+
+  Silence is not proof. The schema is read statically and nothing resolves an
+  identifier back to what it names, so several legal spellings are skipped rather
+  than misjudged: columns introduced by a spread (`...timestamps`, the
+  shared-column idiom), builders reached through an alias (`timestamp as ts`) or a
+  namespace (`p.timestamp(...)`), options passed as an expression
+  (`timestamp('created_at', SHARED_OPTIONS)`), and tables declared in a file the
+  schema merely re-exports. Reporting a column that is actually fine would cost
+  more than missing one — the fix this suggests is a migration.
+
+  `parseSchemaTables` grew the facts the rule needed: `SchemaTable.dialect`, plus
+  `SchemaColumn.withTimezone` (as written — `true`, `false`, or absent),
+  `SchemaColumn.columnName` (the database name, so the suggestion quotes the
+  column rather than the object key it is declared under), and
+  `SchemaColumn.opaqueOptions` (set when the options were not an inline object, so
+  an absent one reads as "not visible" rather than "not set").
+
+- 63fd323: Let `defineModel()` reshape the inferred create payload without a cast.
+
+  `defineModel(table)` infers `createType` from the table, which requires every
+  non-defaulted column — the wrong shape for a model that fills a column in
+  itself. `AuthenticatableModel` is the standing example: it hashes a plain
+  `password` into `passwordHash`, so callers pass the former and not the latter,
+  and until now the only way to say so was to skip `defineModel()` entirely and
+  redeclare the type markers by hand.
+
+  Two type-level options replace that:
+
+  ```ts
+  export class User extends defineModel(users, {
+    base: AuthenticatableModel,
+    optionalOnCreate: ["passwordHash"],
+    requireOnCreate: ["password"],
+  }) {
+    static guarded = ["id", "passwordHash", "rememberToken"];
+    static override hidden = ["passwordHash", "rememberToken"];
+  }
+  ```
+
+  `optionalOnCreate` makes columns optional — they keep their type, callers just
+  need not supply them. `requireOnCreate` goes the other way, accepting both
+  table columns (Drizzle marks defaulted ones optional) and named fields
+  contributed by `base`. Both are checked against the real keys, so a typo fails
+  to compile, and neither has a runtime effect. Neither closes the payload
+  either: a create type always admits unknown keys as `unknown`, so
+  `fillable`/`guarded` remain what reject an unwanted field at runtime.
+
+  `make:auth` now generates this shape — with `requireOnCreate` only when
+  password sign-up is the sole way in, since OAuth accounts are created without
+  one — and guards `passwordHash` against mass assignment, which the scaffolded
+  model previously left on its default.
+
+  The `createType` option is deprecated in favour of these: it needs a value to
+  infer from, which is exactly the cast this removes. It still works, and
+  `defineModel<TTable, TBase, TCreate>()` still means what it did — the two new
+  type parameters go after `TCreate`, not before it.
+
+  Also fixes `guren audit`: its sensitive-column check resolved a model's table
+  only from `static table = users`, so it silently skipped any model written as
+  `defineModel(users, …)` — including every model this release migrates.
+
+- f5911d4: Ship a `.gitignore` with scaffolded apps and offer an initial commit.
+
+  npm strips files literally named `.gitignore` from published tarballs, so every
+  app scaffolded from the registry came out without one — `git init` immediately
+  staged `node_modules/`, build output, and the generated `.env`. Templates now
+  carry the file as `_gitignore` and the scaffolder restores the dot after each
+  template layer copies — collected from the copy itself, so a `--force` scaffold
+  never renames files it did not write. The default list also covers
+  `public/assets/`, `.guren/ssr/`, and `.DS_Store`.
+
+  `create-guren-app` (and `guren new`) gained a `--git` / `--no-git` flag that
+  initializes a repository and creates an initial commit once the harness and
+  optional auth scaffolding are in place. It is prompted in an interactive
+  terminal, off in non-interactive ones, and skipped when the target directory is
+  already inside a git repository or already contained files — an initial commit
+  must never sweep up anything the scaffolder did not write.
+
+- ec0233d: Scaffold Postgres timestamp columns as `timestamptz`
+
+  Every timestamp a Guren scaffold emitted for Postgres was `timestamp without
+time zone`: `add resource`'s `date` fields, the `createdAt` it appends, the
+  `createdAt`/`updatedAt`/`emailVerifiedAt` on `make:auth`'s users table, and the
+  `users` table `create-guren-app --db postgres` writes. All of them hold an
+  instant, so all of them are now `timestamp(name, { withTimezone: true })`.
+
+  A column without a time zone stores a bare wall clock, and who reads it decides
+  what that clock meant:
+
+  - `defaultNow()` records the wall clock of the **database session's** time zone,
+    while the app reads the column back as if it were UTC. Whenever the database
+    session is not on UTC, a `createdAt` is silently off by that offset — the
+    wrong instant is written, not merely displayed.
+  - Values the app writes itself are UTC wall clock, so anything that is not
+    Drizzle — `psql`, a raw `postgres` query, a report, another service — reads
+    them as local time and sees a different instant.
+
+  Drizzle parses the offset-less column as UTC, so an app that only ever reads
+  through its own models stays self-consistent; `timestamptz` is what makes the
+  column mean the same instant to everyone else.
+
+  This changes generated code only — existing schemas are untouched. To adopt it
+  in an app that has already migrated, change the column in `db/schema.ts` and
+  generate a migration, then fix up the `USING` clause. Drizzle emits a bare
+  `::timestamp with time zone` cast, which reinterprets stored values against
+  whatever the session's time zone happens to be; name the zone the values were
+  actually written in instead:
+
+  ```sql
+  ALTER TABLE "posts"
+    ALTER COLUMN "published_at" SET DATA TYPE timestamp with time zone
+    USING "published_at" AT TIME ZONE 'UTC';
+  ```
+
+  `'UTC'` is right for values the app wrote. If the column also carries
+  `defaultNow()` rows, they were written in the database session's zone — check
+  it with `SHOW TimeZone` before converting, and split the conversion if the two
+  sets of rows disagree.
+
+- 1bccf80: feat: the schema walkers read the zod 4 API only, and refuse zod 3 loudly
+
+  The TypeScript-type renderer (`guren codegen`, `guren context`) and the OpenAPI
+  generator previously walked both Zod majors. The two dialects disagree about
+  the meaning of `_def.type` — v3 stores a nested schema there, v4 the type
+  name — and that ambiguity is what produced the walker bugs that had to be
+  fixed twice. Since every Guren scaffold has always pinned zod 4, the walkers
+  now read the v4 layout exclusively.
+
+  A schema authored with the zod v3 API — whether from the old `zod@3` package
+  or the `zod/v3` subpath that zod 4 itself ships — is detected (only v3 sets
+  `_def.typeName`) and refused with an explicit message instead of being
+  rendered wrong or silently dropped: the CLI warns once per process, the
+  OpenAPI document records a warning naming the schema's location. The message
+  lives in `@guren/core/internal/zod-compat` as `ZOD3_UNSUPPORTED_MESSAGE`, so
+  the two surfaces cannot drift apart. Detection runs on every node, not just
+  at the walk's entry — a v3 node nested inside a v4 object (which nothing but
+  the type system prevents) is refused too, and the OpenAPI request-body
+  `required` probe survives the `safeParse` throw such a hybrid produces in
+  zod 4 rather than crashing document generation.
+
+  Dropping the v3 dialect also deletes code that was unreachable under v4:
+  the `pipeline`, `discriminatedunion`, and `nativeenum` case labels (v4 names
+  them `pipe`, `union`, and `enum`), the `effects` and `branded` wrapper names
+  (v4 has no such nodes — `.brand()` adds nothing at runtime), and the
+  function-shaped `_def.shape` read.
+
+  Two behavior improvements ride along, both in enum handling (`z.nativeEnum`
+  produces the same node as `z.enum` in zod 4). Documented values are now read
+  from zod's own computed set (`_zod.values`) instead of re-derived from the
+  entries object, so what the document lists is what zod parses by
+  construction: reverse mappings of a numeric TypeScript enum (`{ A: 0,
+'0': 'A' }`) no longer leak into the OpenAPI `enum` list, and the derivation
+  has no false positives — a hand-rolled reverse-mapping filter would wrongly
+  drop a member whose string value collides with another key (`{ A: 'B',
+B: 1 }`). A mixed string/number enum also documents as
+  `type: ['string', 'number']` rather than `number`. The `zod/v3` subpath was
+  never used by any Guren template, example, or generated app.
+
+### Patch Changes
+
+- 55d6a28: Make the generated API client CSRF-safe by default. `createApiClient()` now
+  copies the `XSRF-TOKEN` cookie into the `X-XSRF-TOKEN` header on
+  state-changing requests, so `client.request('posts.store', { body })` no
+  longer gets a 403 from the CSRF middleware that ships enabled by default.
+
+  The copy happens only when the request targets the page's own origin — the
+  cookie belongs to that origin, and sending it to a third-party `baseUrl`
+  would disclose the page's CSRF token. A cross-origin client, or one talking
+  to a server configured with `csrf({ cookie: false })`, supplies its own
+  `X-XSRF-TOKEN` header; caller-supplied `X-XSRF-TOKEN` / `X-CSRF-TOKEN`
+  headers are left untouched whatever their casing. The cookie is read through
+  `globalThis`, so the generated module stays import-safe during SSR.
+
+  Requests also carry an explicit `credentials: 'same-origin'` — the fetch
+  default, now overridable through the new `credentials` option.
+
+- 5c91e8e: Append a compact Guren API signature digest to the `guren context` project map
+  so coding agents see the exact ORM, controller, and testing signatures at
+  session start — before their first edit attaches the glob-scoped rule files.
+  The digest rides on every markdown rendering of the map: the agent harness's
+  SessionStart hook and the markdown format of the `guren_get_context` MCP tool.
+  Installed apps pick it up with a CLI upgrade alone.
+- e2c82da: Type the seeder context against the app's own database dialect
+
+  `SeederContext.db` was hard-typed as `PostgresJsDatabase`, so every seeder was
+  typed against PostgreSQL no matter which database the app configured. On MySQL
+  and SQLite that made the seeder reject its own `db/schema.ts` — `db.insert()`
+  does not accept a `mysqlTable`/`sqliteTable`, and `.onDuplicateKeyUpdate()` is
+  not a method on the PostgreSQL insert builder at all. The runtime was always
+  fine: the callback receives the real database.
+
+  It was invisible in the default scaffold because `db/` was outside the app's
+  `tsconfig.json` `include`, but not everywhere — the API-only template already
+  typechecks `db/`, so `guren add auth` on a `--db mysql` API app failed
+  `bun run typecheck` on the seeder it had just generated.
+
+  `SeederContext` and `SeederHandler` are now generic over the database, with the
+  same `PostgresJsDatabase` default as before, so existing seeders keep compiling.
+  `PostgresSeederContext`, `MySqlSeederContext`, `SqliteSeederContext`, and
+  `AwsDataApiSeederContext` are exported for the other drivers that seed (D1 does
+  not — its `seedDatabase()` throws), and scaffolded apps re-export the one they
+  configured from `config/database.ts` as `AppSeederContext`:
+
+  ```ts
+  import { defineSeeder } from "@guren/core";
+  import type { AppSeederContext } from "../../config/database.js";
+
+  export default defineSeeder(async ({ db }: AppSeederContext) => {
+    /* ... */
+  });
+  ```
+
+  `guren add auth` and `make:seeder` now annotate what they generate, and `db/`
+  joined the default template's `tsconfig.json` `include` so the generated
+  seeders and schema are actually typechecked. `runSeeders()` and `loadSeeders()`
+  accept any dialect's database, which drops the casts the MySQL, SQLite, and
+  Aurora Data API drivers needed.
+
+- 22f2526: Remove the `blog` blueprint and guard against unpublishable template layers
+
+  `--blueprint blog` never worked from a published `create-guren-app`. Its overlay
+  layer resolved to `examples/blog`, which lives outside the package and is not
+  covered by the `files` field, so from npm the command failed with a raw ENOENT
+  inside `cp` after already copying the base template — leaving a half-scaffolded
+  directory behind. `--help` advertised the blueprint the whole time.
+
+  The blueprint was also broken independently of packaging: its hand-maintained
+  copy of the blog schema had drifted from the columns its controllers used, and
+  it pinned `@inertiajs/core` to a major version behind the `@inertiajs/react` the
+  template installs, so a generated app did not typecheck even inside the
+  monorepo. Restoring it means shipping a curated template under `templates/` with
+  smoke coverage, which is tracked separately; advertising it meanwhile was worse
+  than removing it. `--blueprint blog` now reports the blueprints that do exist.
+
+  Template layers are now named rather than pathed, so a layer outside the
+  published `templates/` directory is a type error instead of something a test has
+  to catch. `scaffoldAppBlueprint()` also verifies each template exists before it
+  copies anything, so a corrupted install reports which blueprint and directory are
+  missing instead of an ENOENT, rather than failing part-way through the copy.
+
+- Check the table a model actually binds, not one guessed from its class name
+
+  `guren check`'s model-schema result derived a table name from the model class
+  (`Post` → `posts`) and asserted that string appeared somewhere in the schema
+  file's raw text. That reported two kinds of nonsense: a model binding the
+  wrong identifier passed as long as the guessed name occurred anywhere in the
+  schema — a column name or a comment was enough — and any model not named
+  after its table (`Post` bound to `blog_posts`, `User` bound to `accounts`)
+  warned even though it was correct.
+
+  The check now resolves the identifier the model actually binds —
+  `defineModel(x)`, `static table = x`, or either reached through a mixin like
+  `SoftDeletes(defineModel(x))` — and matches it against the tables the
+  project's schema declares, following an aliased import
+  (`import { posts as postTable }`) back to the schema's exported name first.
+  This is the same model-to-table join `guren context <Entity>` and `guren
+audit` already use.
+
+  A model whose binding cannot be read, or a schema that declares no readable
+  tables, is skipped rather than warned on — neither is evidence of a problem.
+
+  Still informational: this result is a `warn` in the core suite and does not
+  set the exit code.
+
+- 02eb9cd: Keep `--db mysql` scaffolds on the MySQL dialect end to end
+
+  `create-guren-app --db mysql` generated a `db/schema.ts` that imported
+  `mysqlTable, int, varchar, timestamp` from `@guren/orm/drizzle`. That subpath
+  re-exports the PostgreSQL column builders under the unqualified names, so the
+  MySQL `users` table was built out of a pg `timestamp`. Nothing reported it:
+  drizzle-kit still emitted the same MySQL DDL and the app still typechecked.
+
+  It did leak further, though. `guren add auth` and `add resource` merge new
+  columns into the schema's `drizzle-orm/mysql-core` import and skip any name
+  already visible in some import line — so with a pg `timestamp` in scope, every
+  later date column silently stayed on the wrong dialect too. The scaffold now
+  imports from `drizzle-orm/mysql-core`, matching what the patchers emit and what
+  the SQLite scaffold already did.
+
+  The demo-user seeder `guren add auth` writes is now dialect-aware. It used
+  `.onConflictDoNothing()` unconditionally, which does not exist on MySQL's query
+  builder — `db:seed` threw `onConflictDoNothing is not a function` on every MySQL
+  app. MySQL now gets the equivalent `.onDuplicateKeyUpdate()` form.
+
+- 396194d: Use one pluralization rule across scaffolding and `guren check`
+
+  `guren add resource Category` wrote `export const categories` into
+  `db/schema.ts` but generated `import { categorys } from '../../db/schema.js'`
+  in `app/Models/Category.ts` — the model did not compile. `guren check` then
+  looked for a table named `categorys` and warned that the table it had just
+  written was missing. Any entity ending in consonant + `y`, or in
+  `s`/`x`/`z`/`ch`/`sh`, hit this: `Category`, `Box`, `Match`, `Dish`.
+
+  The three sites derived the name independently. `make:feature` and the
+  `resource` blueprint carried byte-identical copies of one rule (`-ies` / `-es` /
+  `-s`); `make:model` and `check` used a separate `+ 's'`. They now share
+  `collectionName()` in `packages/cli/src/inflect.ts`, and the schema writer and
+  `check` share one `tableNameFor()` so the table name has a single derivation
+  rather than two that happen to agree.
+
+  `check`'s lookup was also wrong for every multi-word model regardless of
+  plural form — `UserProfile` resolved to `userprofiles` while the table is
+  `user_profiles`, so it warned on models that were fine.
+
+  `make:route` was a fourth rule again — it stripped one trailing `s` unless the
+  name ended in `ss`, so `make:route categories` scaffolded a `CategorieController`
+  that `make:feature Category` never generates. It now singularizes the same way.
+
+  Names that reach a database identifier tolerate already-plural input, so
+  `make:model News` keeps importing `news` rather than `newses`. Route paths,
+  page directories, and generated type names pluralize directly and are
+  unchanged — a lone trailing `s` cannot be read reliably (`News` and `Status`
+  are structurally identical), so only the names that have to agree across files
+  pay for that tolerance.
+
+  `guren check`'s model-schema result stays informational (a `warn`, and it does
+  not set the exit code). It still infers the table name rather than reading what
+  the model binds, so an app whose table does not follow the scaffolder's
+  convention can see this warning either way — the name in the message is now the
+  one the scaffolder would have written.
+
+- 559cc79: Render route `body` types as the request shape, not the parsed one
+
+  `ApiRoutes[...]['body']` is consumed as the wire type — generated pages hand it
+  to `useForm`, and `createApiClient()` callers build request payloads from it —
+  but codegen emitted the schema's post-parse type. Those differ for every
+  coercing schema, and `z.coerce.date()` made the difference fatal: the body was
+  typed `Date` while a browser can only send an ISO string, so a `make:feature`
+  scaffold with a date field did not type-check at all.
+
+  `body` now renders the input side, where a coerced date is a `string` and a
+  coerced number is `number | string`. `response` still renders the parsed side,
+  and `guren context` keeps showing params/query as the controller receives them.
+  A `.pipe()` now resolves both sides independently; `.transform()` continues to
+  report its input type, since a transform's output is a function with no
+  recoverable type.
+
+  Field _presence_ follows the same split, which it previously did not: a
+  `.default()`, `.prefault()` or `.catch()` field may be omitted from a request
+  but is always there once parsed, so it is optional in `body` and required in
+  `response`. `.readonly()`, `.brand()` and `.nonoptional()` are now understood
+  too — the first two previously made an optional field look required.
+
+  **Regenerating may surface new type errors in app code**, and they are pointing
+  at something real. A form field previously typed `Date` was already sending a
+  string over the wire; one typed `number` may receive `"3"` from an input. Widen
+  the local type, or narrow the schema if the route genuinely does not coerce.
+
+  Fixed alongside, all of which blocked the same scaffold from compiling:
+
+  - `z.array()` threw on Zod 4 and took `guren codegen` down with it, for any
+    route whose body or output schema contained an array.
+  - Zod 3's `ZodPipeline` was not recognized at all, so `z.string().pipe(...)`
+    rendered as `unknown` on apps still pinned to Zod 3.
+  - `RouteBody<>` constrained its registry to a type with an index signature,
+    which the generated `ApiRoutes` interface can never satisfy — the type could
+    not be used with the one registry it exists for. The constraint is gone, and
+    generated form pages now use `RouteBody<ApiRoutes, 'posts.store'>` in place of
+    indexing `ApiRoutes` directly.
+  - A scaffolded `json` field validated with `z.record(z.unknown())`, which needs
+    an explicit key type on Zod 4 and produces a value Inertia's `FormDataType`
+    rejects. It is now `z.record(z.string(), z.any())`, edited through a textarea
+    that tolerates mid-edit JSON while flagging it, and rendered with
+    `JSON.stringify` instead of being passed to React as an object. A json column
+    is also no longer used as the Index page's heading, where React refused to
+    render it. Scaffolding a json field now emits a `useState` flag on the form
+    pages, so a parse failure is visible rather than silently submitting the last
+    value that parsed. Apps that customized this validator keep their own version;
+    only newly scaffolded features change.
+  - A scaffolded `date` field cast its column straight to `string` in the
+    resource, and fed a full ISO timestamp to `<input type="date">`, which renders
+    nothing for anything longer than `YYYY-MM-DD`. The resource now normalizes
+    through `new Date(...)`, so it survives SQLite handing back a string where
+    Postgres hands back a `Date`.
+  - The scaffolded Edit page named its submit event `event`, shadowing the record
+    prop for any entity whose variable name is also `event`.
+
+  Two known limits, both deliberate:
+
+  - Coerced types are rendered narrower than Zod would actually accept.
+    `z.coerce.number()` also takes a `boolean` and `z.coerce.boolean()` takes
+    anything at all, but a generated `body` is a type callers must _satisfy_, so
+    it stays JSON-native and usable — a bare `boolean` is what drives a
+    checkbox's `checked`. Widen the schema if a route really means "anything".
+  - `RouteBody<>` returns `Record<string, unknown>` for a registry entry with no
+    `body`, including a malformed one. Constraining the registry is not an option:
+    a generated `interface` can never satisfy an index signature, which is the
+    bug being fixed here.
+
+- 460e0e2: refactor: share the Zod v3/v4 compatibility primitives between the two schema walkers
+
+  `@guren/cli`'s TypeScript-type renderer and `@guren/openapi`'s schema-object
+  renderer each carried their own copy of the knowledge needed to read a Zod
+  schema without caring which major produced it: type-name lookup, the `Zod`
+  prefix normalization, wrapper unwrapping, pipe-side selection, object-shape
+  reading, and enum/literal value extraction. Knowledge added to one never
+  reached the other — a Zod 4 array keeps its element in `_def.element` while
+  `_def.type` holds the string `'array'`, and reading them in the wrong order
+  silently dropped the element type. That single bug had to be found and fixed
+  twice, months apart, once per package.
+
+  Those primitives now live in `@guren/core/internal/zod-compat`, a deep-import
+  internal module in the same vein as `internal/deploy-build`. Both walkers read
+  from it, so a version quirk learned once is known in both places.
+
+  The set of type names that carry exactly one nested schema moves too, as
+  `SINGLE_CHILD_WRAPPERS` plus the two partitions each walker needs. The walkers
+  had looked like they disagreed here — one held a five-name set, the other a
+  twelve-name one — but the CLI simply handled the other seven as explicit
+  `switch` cases. They differ in how they partition the vocabulary, not in what
+  is in it, so the membership is now stated once.
+
+  The type switches themselves stay where they are: one produces TypeScript type
+  strings, the other OpenAPI schema objects. Their leaf vocabularies have
+  legitimately diverged (the CLI renders `void`/`any`/`never`, which OpenAPI
+  cannot express), and that is a rendering decision rather than version
+  knowledge.
+
+  Both `isOptional`s also stay with their callers, but not because each is right
+  for its own purpose — the CLI reads one side of a `.pipe()` and the OpenAPI
+  walker requires both, and each can be fooled by a pipeline the other handles.
+  Deciding omissibility correctly means simulating a parse, which is a separate
+  piece of work; the two approximations are now labelled as such where they live.
+
+  Three incidental hardenings come along for the ride. The CLI's inner-schema
+  lookup now skips non-object candidates instead of taking the first non-nullish
+  one; a nested node with no readable type name renders as `unknown` rather than
+  throwing; and two degenerate schemas that used to emit invalid TypeScript now
+  render correctly — an empty `z.enum([])` as `never` instead of an empty string,
+  and `z.literal(undefined)` as `undefined` rather than being dropped by
+  `JSON.stringify`.
+
+- d9165df: Generate the templates' drizzle pins from `packages/orm`, by the rule `guren upgrade` already owns
+
+  `scripts/sync-template-deps.ts` kept the templates' `@guren/*` ranges pointed at
+  the workspace versions, but it filtered on `@guren/`, so `drizzle-orm` and
+  `drizzle-kit` in `packages/create-app/templates/*/package.json` were still
+  matched to `packages/orm/package.json` by hand. That pairing is exactly what the
+  `@guren/*` sync exists to prevent: `@guren/orm` names an _exact_ `drizzle-orm`
+  version under `dependencies`, so a template pinning a different one scaffolds an
+  app with a second nested copy — the app builds its table descriptors against one
+  copy while the adapter runs on the other.
+
+  The rule now lives in one place, `packages/cli/src/drizzle-pins.ts`, and takes a
+  manifest plus `@guren/orm`'s own manifest. `guren upgrade` passes the published
+  one for the tag it is upgrading to, exactly as before; the sync passes
+  `packages/orm/package.json` and applies the result to every template. Nothing
+  about the upgrade path changes — the planner returns the rewrites instead of
+  performing them, so `--check` can report the same verdict it would write.
+
+  Refusals are part of that verdict, not narration. Everything the rule declines to
+  rewrite comes back with a reason, because a caller reading only the changes would
+  take "there is drift here I will not touch" for "aligned" — which is how a
+  template pinned at `workspace:*` used to leave the CI gate reporting a match.
+  `guren upgrade` prints all of them and moves on, since the app manifest is the
+  user's to edit; the sync fails on the two a maintainer can fix in this repository
+  (a specifier naming a location, and a `packages/orm` that stopped pinning one
+  exact version), and tolerates the two about npm rather than this checkout.
+
+  `drizzle-kit` stays the one version a human still picks when the pair diverges:
+  it is not a dependency of `@guren/orm`, only of apps and templates, and the two
+  packages have never shared numbers on their stable lines. Both callers check the
+  companion release exists before writing it, and say what they left alone when it
+  does not:
+
+  ```
+  packages/create-app/templates/default/package.json: drizzle-kit@1.0.0-rc.4-de6c356
+  does not exist on npm — leaving devDependencies.drizzle-kit at "1.0.0-rc.4". Pick
+  the drizzle-kit release matching drizzle-orm 1.0.0-rc.4-de6c356 yourself.
+  ```
+
+  `audit:template-deps` and `sync:template-deps` share that lookup, so anything the
+  CI gate reports as drift the sync can actually fix. An aligned manifest
+  short-circuits before any request, which is the steady state CI runs in — the
+  gate stays offline until a pin actually moves. When it does move and npm cannot
+  answer, that is a refusal too, not a crash: an npm outage says so and leaves the
+  companion alone rather than failing a PR that touched nothing related.
+
+- Updated dependencies [fe0c13d]
+- Updated dependencies [63fd323]
+- Updated dependencies [fe0c13d]
+- Updated dependencies [e2c82da]
+- Updated dependencies [d7e80fe]
+- Updated dependencies [df90e04]
+- Updated dependencies [460e0e2]
+- Updated dependencies [cda337b]
+- Updated dependencies [1bccf80]
+  - @guren/core@1.5.0
+  - @guren/orm@2.0.0
+
 ## 1.6.0
 
 ### Minor Changes
