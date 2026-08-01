@@ -60,7 +60,7 @@ export interface MySqlDatabase {
   closeDatabase(): Promise<void>
   configureOrm(): Promise<void>
   seedDatabase(): Promise<void>
-  /** Drops every table (including the drizzle migration tracker) so migrations can be re-applied from scratch. */
+  /** Drops every table and view (including the drizzle migration tracker) so migrations can be re-applied from scratch. */
   resetDatabase(): Promise<void>
   /** Per-migration applied state derived from the drizzle-kit journal and the __drizzle_migrations table. */
   migrationStatus(): Promise<MigrationStatusEntry[]>
@@ -223,14 +223,23 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
     const { sql } = await import('drizzle-orm')
 
     await withAdminDb(async (adminDb) => {
+      // table_type is selected because information_schema.tables lists views
+      // alongside base tables, and MySQL answers DROP TABLE on a view with a
+      // warning rather than an error — so dropping every row as a table
+      // silently leaves views standing behind a successful-looking reset.
       const [rows] = (await adminDb.execute(
-        sql.raw('SELECT table_name AS name FROM information_schema.tables WHERE table_schema = DATABASE()'),
-      )) as unknown as [Array<{ name: string }>]
+        sql.raw(
+          'SELECT table_name AS name, table_type AS type FROM information_schema.tables WHERE table_schema = DATABASE()',
+        ),
+      )) as unknown as [Array<{ name: string; type: string }>]
 
       await adminDb.execute(sql.raw('SET FOREIGN_KEY_CHECKS = 0'))
       try {
-        for (const { name } of rows) {
-          await adminDb.execute(sql.raw(`DROP TABLE IF EXISTS \`${name.replaceAll('`', '``')}\``))
+        for (const { name, type } of rows) {
+          const identifier = sql.identifier(name)
+          await adminDb.execute(
+            type === 'VIEW' ? sql`DROP VIEW IF EXISTS ${identifier}` : sql`DROP TABLE IF EXISTS ${identifier}`,
+          )
         }
       } finally {
         await adminDb.execute(sql.raw('SET FOREIGN_KEY_CHECKS = 1'))

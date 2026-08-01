@@ -284,8 +284,8 @@ import { pgTable, text, timestamp } from 'drizzle-orm/pg-core'
 export const passwordResets = pgTable('password_resets', {
   tokenHash: text('token_hash').primaryKey(),
   email: text('email').notNull(),
-  expiresAt: timestamp('expires_at').notNull(),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 ```
 

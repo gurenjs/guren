@@ -689,55 +689,61 @@ export default scheduleTasksKernel
   },
 }
 
-type Column = { code: string; imports: string[] }
+interface ColumnCode {
+  code: string
+  imports: string[]
+}
 
 /**
- * Keyed by `FieldType` rather than switched with a `default:` arm, so a new
- * field type fails to compile in every dialect. A `default:` here is how
- * `date` went missing from SQLite: dates fell through to a `text` column, and
- * the `Date` the validator produces binds to that as `null` — every date
- * silently written away on the default database.
+ * Per-dialect column builders, keyed by field type.
+ *
+ * The `Record<FieldType, …>` is load-bearing: these used to be switches with a
+ * `default:` arm, which is how sqlite shipped without a `date` case and quietly
+ * emitted a text column for it. A missing key now fails to compile.
  */
-function sqliteColumn(field: FieldDefinition): Column {
-  const name = snakeCase(field.name)
-  const notNull = field.nullable ? '' : '.notNull()'
-  const columns: Record<FieldType, Column> = {
-    string: { code: `text('${name}')${notNull}`, imports: ['text'] },
-    text: { code: `text('${name}')${notNull}`, imports: ['text'] },
-    number: { code: `integer('${name}')${notNull}`, imports: ['integer'] },
-    boolean: { code: `integer('${name}', { mode: 'boolean' })${notNull}`, imports: ['integer'] },
-    date: { code: `integer('${name}', { mode: 'timestamp' })${notNull}`, imports: ['integer'] },
-    json: { code: `text('${name}', { mode: 'json' })${notNull}`, imports: ['text'] },
-  }
-  return columns[field.type]
+type ColumnMapping = Record<FieldType, (name: string, notNull: string) => ColumnCode>
+
+const SQLITE_COLUMNS: ColumnMapping = {
+  string: (name, notNull) => ({ code: `text('${name}')${notNull}`, imports: ['text'] }),
+  text: (name, notNull) => ({ code: `text('${name}')${notNull}`, imports: ['text'] }),
+  number: (name, notNull) => ({ code: `integer('${name}')${notNull}`, imports: ['integer'] }),
+  boolean: (name, notNull) => ({ code: `integer('${name}', { mode: 'boolean' })${notNull}`, imports: ['integer'] }),
+  // Timestamp mode keeps the record type a `Date`, matching pg/mysql — a bare
+  // text column would reject the `Date` that `z.coerce.date()` produces.
+  date: (name, notNull) => ({ code: `integer('${name}', { mode: 'timestamp' })${notNull}`, imports: ['integer'] }),
+  json: (name, notNull) => ({ code: `text('${name}', { mode: 'json' })${notNull}`, imports: ['text'] }),
 }
 
-function pgColumn(field: FieldDefinition): Column {
-  const name = snakeCase(field.name)
-  const notNull = field.nullable ? '' : '.notNull()'
-  const columns: Record<FieldType, Column> = {
-    string: { code: `text('${name}')${notNull}`, imports: ['text'] },
-    text: { code: `text('${name}')${notNull}`, imports: ['text'] },
-    number: { code: `integer('${name}')${notNull}`, imports: ['integer'] },
-    boolean: { code: `boolean('${name}')${notNull}`, imports: ['boolean'] },
-    date: { code: `timestamp('${name}', { withTimezone: false })${notNull}`, imports: ['timestamp'] },
-    json: { code: `jsonb('${name}')${notNull}`, imports: ['jsonb'] },
-  }
-  return columns[field.type]
+const PG_COLUMNS: ColumnMapping = {
+  string: (name, notNull) => ({ code: `text('${name}')${notNull}`, imports: ['text'] }),
+  text: (name, notNull) => ({ code: `text('${name}')${notNull}`, imports: ['text'] }),
+  number: (name, notNull) => ({ code: `integer('${name}')${notNull}`, imports: ['integer'] }),
+  boolean: (name, notNull) => ({ code: `boolean('${name}')${notNull}`, imports: ['boolean'] }),
+  // `timestamptz`, not `timestamp`. A `date` field holds an instant: drizzle
+  // writes `Date.toISOString()`, so `timestamp without time zone` keeps the UTC
+  // wall clock but drops the offset, and what that wall clock means is then up
+  // to the reader. Drizzle parses it back as UTC, so the app stays
+  // self-consistent — but a raw `postgres` query, psql, or any other client
+  // reads it as local time and sees a different instant. `timestamptz` stores
+  // the instant itself, so every reader agrees.
+  date: (name, notNull) => ({ code: `timestamp('${name}', { withTimezone: true })${notNull}`, imports: ['timestamp'] }),
+  json: (name, notNull) => ({ code: `jsonb('${name}')${notNull}`, imports: ['jsonb'] }),
 }
 
-function mysqlColumn(field: FieldDefinition): Column {
-  const name = snakeCase(field.name)
-  const notNull = field.nullable ? '' : '.notNull()'
-  const columns: Record<FieldType, Column> = {
-    string: { code: `varchar('${name}', { length: 255 })${notNull}`, imports: ['varchar'] },
-    text: { code: `varchar('${name}', { length: 255 })${notNull}`, imports: ['varchar'] },
-    number: { code: `int('${name}')${notNull}`, imports: ['int'] },
-    boolean: { code: `boolean('${name}')${notNull}`, imports: ['boolean'] },
-    date: { code: `timestamp('${name}')${notNull}`, imports: ['timestamp'] },
-    json: { code: `json('${name}')${notNull}`, imports: ['json'] },
-  }
-  return columns[field.type]
+const MYSQL_COLUMNS: ColumnMapping = {
+  string: (name, notNull) => ({ code: `varchar('${name}', { length: 255 })${notNull}`, imports: ['varchar'] }),
+  text: (name, notNull) => ({ code: `varchar('${name}', { length: 255 })${notNull}`, imports: ['varchar'] }),
+  number: (name, notNull) => ({ code: `int('${name}')${notNull}`, imports: ['int'] }),
+  boolean: (name, notNull) => ({ code: `boolean('${name}')${notNull}`, imports: ['boolean'] }),
+  // Bare `timestamp` on purpose — MySQL has no `timestamptz`, and its TIMESTAMP
+  // is already stored as UTC and converted per session, so it round-trips the
+  // instant. `datetime` is the one that would drop the offset here.
+  date: (name, notNull) => ({ code: `timestamp('${name}')${notNull}`, imports: ['timestamp'] }),
+  json: (name, notNull) => ({ code: `json('${name}')${notNull}`, imports: ['json'] }),
+}
+
+function buildColumn(mapping: ColumnMapping, field: FieldDefinition): ColumnCode {
+  return mapping[field.type](snakeCase(field.name), field.nullable ? '' : '.notNull()')
 }
 
 function snakeCase(value: string): string {
@@ -757,7 +763,7 @@ async function updateResourceSchema(collection: string, routeName: string, field
       return
     }
 
-    const columns = fields.map((field) => sqliteColumn(field))
+    const columns = fields.map((field) => buildColumn(SQLITE_COLUMNS, field))
     const imports = [...new Set(['sqliteTable', 'integer', 'text', ...columns.flatMap((c) => c.imports)])]
     content = ensureSqliteImports(content, imports)
 
@@ -770,7 +776,7 @@ async function updateResourceSchema(collection: string, routeName: string, field
       return
     }
 
-    const columns = fields.map((field) => mysqlColumn(field))
+    const columns = fields.map((field) => buildColumn(MYSQL_COLUMNS, field))
     const imports = [...new Set(['mysqlTable', 'int', 'timestamp', ...columns.flatMap((c) => c.imports)])]
     content = ensureMysqlImports(content, imports)
 
@@ -783,12 +789,12 @@ async function updateResourceSchema(collection: string, routeName: string, field
       return
     }
 
-    const columns = fields.map((field) => pgColumn(field))
+    const columns = fields.map((field) => buildColumn(PG_COLUMNS, field))
     const imports = [...new Set(['pgTable', 'serial', 'text', 'timestamp', ...columns.flatMap((c) => c.imports)])]
     content = ensureDrizzleImports(content, imports)
 
     const fieldLines = fields.map((field, index) => `  ${field.name}: ${columns[index].code},`).join('\n')
-    const schemaBlock = `\nexport const ${schemaIdentifier} = pgTable('${tableName}', {\n  id: serial('id').primaryKey(),\n${fieldLines}\n  createdAt: timestamp('created_at', { withTimezone: false }).defaultNow().notNull(),\n})\n`
+    const schemaBlock = `\nexport const ${schemaIdentifier} = pgTable('${tableName}', {\n  id: serial('id').primaryKey(),\n${fieldLines}\n  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),\n})\n`
 
     content = `${content.trimEnd()}\n${schemaBlock}`
   }

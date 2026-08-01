@@ -92,4 +92,19 @@ describeMySql('createMySqlDatabase against a real MySQL server (requires MYSQL_U
     const status = await database.migrationStatus()
     expect(status[0]).toMatchObject({ applied: false })
   })
+
+  it('drops views on reset, not just base tables', async () => {
+    // The preceding test leaves the database empty, so re-create `widgets`
+    // for the view to select from.
+    await database.migrateDatabase()
+    const db = await database.getDatabase()
+    await db.execute(sql`CREATE OR REPLACE VIEW \`widget_names\` AS SELECT \`name\` FROM \`widgets\``)
+
+    await database.resetDatabase()
+
+    const [remaining] = (await db.execute(
+      sql`SELECT table_name AS name FROM information_schema.tables WHERE table_schema = DATABASE()`,
+    )) as unknown as [Array<{ name: string }>]
+    expect(remaining.map((row) => row.name)).toEqual([])
+  })
 })

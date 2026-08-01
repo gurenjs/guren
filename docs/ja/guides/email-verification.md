@@ -308,15 +308,15 @@ import { pgTable, text, timestamp } from 'drizzle-orm/pg-core'
 export const emailVerifications = pgTable('email_verifications', {
   hashedToken: text('hashed_token').primaryKey(),
   email: text('email').notNull(),
-  expiresAt: timestamp('expires_at').notNull(),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
 // usersテーブルにはemailVerifiedAtを含める
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),
   email: text('email').notNull().unique(),
-  emailVerifiedAt: timestamp('email_verified_at'),
+  emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
   // ... その他のフィールド
 })
 ```

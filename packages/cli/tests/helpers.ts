@@ -75,22 +75,7 @@ export const users = pgTable('users', {
   id: serial('id').primaryKey(),
   name: text('name').notNull(),
   email: text('email').notNull(),
-  createdAt: timestamp('created_at', { withTimezone: false }).defaultNow().notNull(),
-})
-`
-
-/**
- * The dialect every `create-guren-app` blueprint defaults to. `id` is spelled
- * with `text` rather than `integer` so a test can tell whether a run actually
- * patched `integer` into the import — a real scaffold's `integer` id would
- * satisfy that assertion no matter what the run did.
- */
-export const SQLITE_SCHEMA_FIXTURE = `import { sqliteTable, text } from 'drizzle-orm/sqlite-core'
-
-export const users = sqliteTable('users', {
-  id: text('id').primaryKey(),
-  name: text('name').notNull(),
-  email: text('email').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })
 `
 
@@ -101,6 +86,16 @@ export const users = mysqlTable('users', {
   name: varchar('name', { length: 255 }).notNull(),
   email: varchar('email', { length: 255 }).notNull(),
   createdAt: timestamp('created_at').notNull().defaultNow(),
+})
+`
+
+export const SQLITE_SCHEMA_FIXTURE = `import { sqliteTable, integer, text } from '@guren/orm/drizzle'
+
+export const users = sqliteTable('users', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  email: text('email').notNull(),
+  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
 })
 `
 

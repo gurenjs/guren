@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { consola } from 'consola'
-import { createTempWorkspace, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE } from './helpers'
+import { createTempWorkspace, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, SQLITE_SCHEMA_FIXTURE } from './helpers'
 import { makeAuth } from '../src/make-auth'
 
 describe('makeAuth', () => {
@@ -322,7 +322,7 @@ export const users = pgTable(
 
       const schema = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
       expect(schema.match(/export const users = pgTable\(/g)).toHaveLength(1)
-      expect(schema).toContain("emailVerifiedAt: timestamp('email_verified_at', { withTimezone: false }),")
+      expect(schema).toContain("emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),")
       expect(schema).toContain('uniqueIndex')
       expect(schema).toContain("(table) => [uniqueIndex('users_email_unique').on(table.email)]")
     } finally {
@@ -450,8 +450,8 @@ export const users = pgTable('users', {
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
   rememberToken: text('remember_token'),
-  createdAt: timestamp('created_at', { withTimezone: false }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: false }).defaultNow().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 })
 `,
         'utf8',
@@ -515,6 +515,12 @@ export const users = mysqlTable('users', {
       expected: '.onConflictDoNothing({ target: users.email })',
       forbidden: 'onDuplicateKeyUpdate',
     },
+    {
+      dialect: 'sqlite',
+      schema: SQLITE_SCHEMA_FIXTURE,
+      expected: '.onConflictDoNothing({ target: users.email })',
+      forbidden: 'onDuplicateKeyUpdate',
+    },
   ]
 
   for (const { dialect, schema, expected, forbidden } of seederUpserts) {
@@ -554,8 +560,8 @@ export const users = pgTable('users', {
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
   rememberToken: text('remember_token'),
-  createdAt: timestamp('created_at', { withTimezone: false }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: false }).defaultNow().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 })
 `,
         'utf8',

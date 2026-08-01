@@ -1747,6 +1747,10 @@ export default defineSeeder(async ({ db }) => {
 `
 }
 
+// The timestamps in these blocks — and in `emailVerifiedAtField` below — all
+// hold instants, so pg gets `timestamptz`. An offset-less column stores a bare
+// wall clock whose meaning is left to the reader, and `defaultNow()` writes it
+// in the database session's zone while the app reads it back as UTC.
 const usersTableBlocks: Record<SchemaDialect, string> = {
   sqlite: `export const users = sqliteTable('users', {
   id: integer('id').primaryKey({ autoIncrement: true }),
@@ -1764,8 +1768,8 @@ const usersTableBlocks: Record<SchemaDialect, string> = {
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
   rememberToken: text('remember_token'),
-  createdAt: timestamp('created_at', { withTimezone: false }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: false }).defaultNow().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 })
 `,
   mysql: `export const users = mysqlTable('users', {
@@ -1782,7 +1786,7 @@ const usersTableBlocks: Record<SchemaDialect, string> = {
 
 const emailVerifiedAtField: Record<SchemaDialect, string> = {
   sqlite: `emailVerifiedAt: integer('email_verified_at', { mode: 'timestamp' }),`,
-  pg: `emailVerifiedAt: timestamp('email_verified_at', { withTimezone: false }),`,
+  pg: `emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),`,
   mysql: `emailVerifiedAt: timestamp('email_verified_at'),`,
 }
 
@@ -2167,7 +2171,8 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
       { path: 'app/Http/Validators/LoginValidator.ts', contents: loginValidatorTemplate },
       // The demo user only exists to be signed in as with a password. Without
       // password login it is an unreachable row — and seeding it would hash a
-      // password with scrypt, the exact cost --oauth-only avoids.
+      // password with scrypt, the exact cost --oauth-only avoids. The seeder is
+      // the only dialect-sensitive file here, so the schema is read only now.
       { path: 'db/seeders/UsersSeeder.ts', contents: buildSeederTemplate(await readSchemaDialect()) },
     )
   }
