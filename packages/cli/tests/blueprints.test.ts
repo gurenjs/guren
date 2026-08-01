@@ -150,6 +150,19 @@ describe('blueprints', () => {
     expect(schemaCheck?.message).toContain("No table 'user_profiles' found")
   })
 
+  // Guards the split between snakeCase() and tableNameFor() — see blueprints.ts.
+  // `publishedAt` is the contrast: the rule still splits camel humps, it just
+  // does not collapse underscore runs the way the kebab-based rule would.
+  it('preserves underscore runs in column names', async () => {
+    await seedResourceWorkspace(PG_SCHEMA_FIXTURE)
+
+    await runBlueprint('resource', { name: 'Post', fields: '__dunder__:string,publishedAt:date' })
+
+    const schema = await readFile('db/schema.ts', 'utf8')
+    expect(schema).toContain("__dunder__: text('__dunder__')")
+    expect(schema).toContain("publishedAt: timestamp('published_at', { withTimezone: true })")
+  })
+
   it('rejects unknown blueprints', async () => {
     await expect(runBlueprint('unknown')).rejects.toThrow('Unknown blueprint')
   })

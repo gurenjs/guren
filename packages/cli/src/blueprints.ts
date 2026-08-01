@@ -718,6 +718,17 @@ function buildColumn(mapping: ColumnMapping, field: FieldDefinition): ColumnCode
   return mapping[field.type](snakeCase(field.name), field.nullable ? '' : '.notNull()')
 }
 
+/**
+ * Column name for a field. Deliberately separate from `tableNameFor()`, which
+ * derives the *table* name in the same emitted statement.
+ *
+ * A field name is a validated JavaScript identifier taken verbatim from the
+ * user, and its underscore runs carry meaning: `__dunder__` must stay
+ * `__dunder__`. `tableNameFor()` goes through `kebabCase()`, which collapses
+ * `[_\s]+` to one separator — fine for a name that has to round-trip through a
+ * slug, wrong for one that has to survive intact. Unifying the two would trade
+ * a column the user asked for against a coupling nobody wants.
+ */
 function snakeCase(value: string): string {
   return value.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()
 }
