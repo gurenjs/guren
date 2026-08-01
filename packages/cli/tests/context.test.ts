@@ -1,6 +1,7 @@
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
+import { GUREN_API_DIGEST } from '../src/api-digest'
 import { generateContext, renderContextMarkdown } from '../src/context'
 import { createTempWorkspace } from './helpers'
 
@@ -127,35 +128,43 @@ describe('renderContextMarkdown', () => {
     expect(md).toContain('- posts/Index')
     expect(md).toContain('- PostController')
     expect(md).toContain('## Console Commands (1)')
+    // Delivered at session start via the harness SessionStart hook
+    expect(md).toContain(GUREN_API_DIGEST)
   })
+})
 
-  it('appends the API signature digest so agents get signatures before their first edit', () => {
-    const md = renderContextMarkdown({
-      framework: { name: 'Guren', version: '1.0.0' },
-      models: [],
-      routes: [],
-      pages: [],
-      controllers: [],
-      resources: [],
-      events: [],
-      jobs: [],
-      middleware: [],
-      listeners: [],
-      validators: [],
-      policies: [],
-      commands: [],
+describe('GUREN_API_DIGEST', () => {
+  // The rule files are the source of truth; the digest is a hand-written
+  // summary of them. Each token must appear in BOTH, so a one-sided edit
+  // — fixing a rule file without the digest, or vice versa — fails here.
+  const tokensByRuleFile: Record<string, string[]> = {
+    'orm-models.md': [
+      '`=` `!=` `>` `<` `>=` `<=` `like` `in` `not in` `is null` `is not null`',
+      "belongsToMany(name, related, pivotTable, foreignPivotKey, relatedPivotKey, parentKey = 'id', relatedKey = 'id')",
+      "hasManyThrough(name, related, through, firstKey, secondKey, localKey = 'id', secondLocalKey = 'id')",
+      'paginate(result, { path?, query?, fragment? })',
+      'PaginatorOptions',
+      'withPaginate',
+    ],
+    'controllers-http.md': [
+      'validateBody',
+      'userOrFail',
+      'bind: { id: Post }',
+      "await this.authorize('update', [Post, post])",
+    ],
+    'testing.md': ['actingAs', 'withCsrf', 'assertUnprocessable', 'assertInertia'],
+  }
+
+  for (const [ruleFile, tokens] of Object.entries(tokensByRuleFile)) {
+    it(`stays in sync with the ${ruleFile} rule file`, async () => {
+      const ruleText = await readFile(
+        new URL(`../templates/agent/.claude/rules/${ruleFile}`, import.meta.url),
+        'utf8',
+      )
+      for (const token of tokens) {
+        expect(GUREN_API_DIGEST).toContain(token)
+        expect(ruleText).toContain(token)
+      }
     })
-
-    expect(md).toContain('## Guren API Signatures (digest)')
-    // The signatures agents were observed grepping node_modules for
-    expect(md).toContain('`paginate(result, { path, query?, fragment? })`')
-    expect(md).toContain('PaginatorOptions')
-    expect(md).toContain(
-      '`belongsToMany(name, related, pivotTable, foreignPivotKey, relatedPivotKey, parentKey = \'id\', relatedKey = \'id\')`',
-    )
-    expect(md).toContain('`withPaginate(\'tags\', { page })`')
-    expect(md).toContain('`in` `not in` `is null` `is not null`')
-    // It must route agents to the rule files, not node_modules
-    expect(md).toContain('.claude/rules/orm-models.md')
-  })
+  }
 })

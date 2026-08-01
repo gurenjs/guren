@@ -25,7 +25,7 @@ Verified quick reference — trust this and \`.claude/rules/*.md\` over grepping
   terminate with \`get() / first() / firstOrFail() / count() / paginate(page?, perPage?) / update(data) / delete()\`
 - Pagination: \`Model.paginate({ page?, perPage?, where?, orderBy? })\` →
   \`{ data, meta: { total, perPage, currentPage, totalPages, hasMore, from, to } }\`.
-  HTTP/Inertia links: \`paginate(result, { path, query?, fragment? })\` from \`@guren/core\`
+  HTTP/Inertia links: \`paginate(result, { path?, query?, fragment? })\` from \`@guren/core\`
   (those three fields are \`PaginatorOptions\`)
 - Relations (declaration): \`hasOne/hasMany(name, related, foreignKey, localKey)\` ·
   \`belongsTo(name, related, foreignKey, ownerKey)\` ·
@@ -39,8 +39,9 @@ Verified quick reference — trust this and \`.claude/rules/*.md\` over grepping
 ### Controllers (@guren/core)
 - \`await this.validateBody(schema)\` (throws → 422) · \`this.validateQuery(schema)\` · \`this.validateParams(schema)\` — any Zod-like schema
 - \`this.inertia(pages.posts.Show, props)\` · \`this.redirect(url)\` (302 GET, 303 non-GET) · \`this.json(data)\`
-- \`await this.auth.userOrFail<UserRecord>()\` (throws → 401; pass \`<T>\` — the default type has no \`.id\`) ·
-  \`this.auth.user<T>() / check() / login(user) / attempt(credentials) / logout()\`
+- \`this.auth\` — every method is async, always \`await\`: \`userOrFail<UserRecord>()\` (throws → 401;
+  pass \`<T>\` — the default type has no \`.id\`) · \`user<T>()\` · \`check()\` · \`guest()\` ·
+  \`login(user, remember?)\` · \`attempt(credentials, remember?)\` · \`logout()\`
 - Route model binding: route option \`bind: { id: Post }\` + \`this.model(Post)\` (already resolved, 404 on miss)
 - \`await this.authorize('update', [Post, post])\` (throws → 403)
 

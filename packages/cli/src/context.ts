@@ -197,9 +197,6 @@ export function renderContextMarkdown(ctx: ProjectContext): string {
     }
   }
 
-  // The digest rides along on every markdown rendering (session-start hook,
-  // MCP guren_get_context, ad-hoc CLI runs) so agents see the signatures
-  // before their first edit attaches the glob-scoped rule files.
   lines.push(GUREN_API_DIGEST)
   lines.push('')
 
