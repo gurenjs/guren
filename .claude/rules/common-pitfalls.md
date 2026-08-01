@@ -22,6 +22,14 @@ Lessons learned from code review cycles. Check these before submitting changes.
 - **E2E webServer in CI uses `bun run e2e:server`** — not `bun run dev` (triggers codegen) and not `bun run dev:server` (runs under `bun --hot`, so the server would reload mid-test if anything touched a watched file).
 - **`bun run --cwd` with `bunx` can resolve from npm instead of local.** Use `cd dir && bun ...` or direct paths.
 
+## Templates vs. Published Packages
+
+- **A template can use an API that does not exist yet for its users.** `packages/create-app/templates/**` is application code that resolves `@guren/*` from **npm**, not from this checkout. Adding an export in `packages/orm` and using it from a template in the same PR ships templates that only build after the next release.
+- **Nothing in the normal gate can see this.** Root `typecheck` skips templates (`packages/create-app/tsconfig.json` excludes `templates`), and the generated files are worse — `config/database.ts` is emitted as a *string* from `packages/create-app/src/blueprints.ts`, so no tsconfig anywhere covers it. `smoke:starter` and `smoke:starter:packed` both rewrite the app's `@guren/*` deps to local builds, so they typecheck against unreleased code too. The create-app tests assert the generated text, not that the symbols exist.
+- **`bun run smoke:starter:npm` is the one check that installs from the registry.** It is on the scheduled `Published Package Drift` workflow rather than in CI, because it is *correctly* red between a template-facing change and the release that publishes what the template needs. Cutting that release is the fix — not editing the template back to an older API.
+- **A caret range does not follow a major, so "just release it" is not automatic.** A template stranded on an older major keeps installing that line forever, while any `@guren/*` package still on a minor line *is* followed — which is how one app ends up with two copies of the ORM, a runtime `database has not been configured` rather than a type error.
+- **Template `@guren/*` ranges are generated, never hand-edited.** `bun run sync:template-deps` writes them from the workspace versions and `version-packages` runs it right after `changeset version`, the first moment the new numbers exist. `audit:template-deps` asserts the same invariant in CI. Any release that moves a `@guren/*` version must also bump `create-guren-app`, or `changeset publish` ships no tarball carrying the new ranges — the sync script fails the release if that happens.
+
 ## Security Defaults
 
 - **`X-Testing-User` header is gated behind `GUREN_TESTING` env var.** TestApp sets this automatically. Never trust this header in production.

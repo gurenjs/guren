@@ -12,6 +12,8 @@ const packagesDir = join(repoRoot, 'packages')
 
 export interface WorkspacePackage {
   name: string
+  version?: string
+  private?: boolean
   dir: string
   dirName: string
   /** Path relative to the repo root, e.g. `packages/server`. */
@@ -65,6 +67,8 @@ export async function collectPackages(): Promise<WorkspacePackage[]> {
 
     let manifest: {
       name?: string
+      version?: string
+      private?: boolean
       scripts?: Record<string, string>
       dependencies?: Record<string, string>
       peerDependencies?: Record<string, string>
@@ -79,6 +83,8 @@ export async function collectPackages(): Promise<WorkspacePackage[]> {
 
     packages.push({
       name: manifest.name,
+      version: manifest.version,
+      private: manifest.private,
       dir,
       dirName: entry.name,
       relativeDir: `packages/${entry.name}`,

@@ -24,7 +24,14 @@ interface PublishedArtifact {
   sourceDir: string
 }
 
-type InstallMode = 'vendored' | 'packed'
+// `vendored` and `packed` both point the scaffolded app at builds of this
+// checkout; `npm` leaves the template's own ranges alone and installs from the
+// registry, so it is the only mode that sees the templates drift ahead of the
+// published packages.
+const INSTALL_MODES = ['vendored', 'packed', 'npm'] as const
+type InstallMode = (typeof INSTALL_MODES)[number]
+
+const DEPENDENCY_GROUPS = ['dependencies', 'devDependencies', 'peerDependencies'] as const
 
 const repoRoot = resolve(import.meta.dir, '../..')
 const localPackages: LocalPackage[] = [
@@ -119,7 +126,7 @@ async function rewritePackageDependencies(packageJsonPath: string, replacements:
     peerDependencies?: Record<string, string>
   }
 
-  for (const field of ['dependencies', 'devDependencies', 'peerDependencies'] as const) {
+  for (const field of DEPENDENCY_GROUPS) {
     const group = pkg[field]
     if (!group) {
       continue
@@ -483,18 +490,89 @@ async function assertFeatureScaffolds(appDir: string): Promise<void> {
   assert(scheduleKernel.includes("name('app-heartbeat')"), 'Schedule blueprint must register the sample heartbeat task.')
 }
 
+/**
+ * Install the scaffolded app from the registry and typecheck it.
+ *
+ * Resolving the template's own ranges is the whole point, so this fails
+ * whenever a template has started using an API that exists only in this
+ * repository — invisible to the other install modes and to the root
+ * `typecheck`, which excludes `templates` and never sees `config/database.ts`
+ * at all (it is emitted as a string from `blueprints.ts`).
+ */
+async function runPublishedDependencyDrift(
+  appDir: string,
+  blueprint: string,
+  runtimeEnv: Record<string, string>,
+): Promise<void> {
+  const packageJson = JSON.parse(await readFile(join(appDir, 'package.json'), 'utf8')) as
+    Partial<Record<(typeof DEPENDENCY_GROUPS)[number], Record<string, string>>>
+  const declared = Object.assign({}, ...DEPENDENCY_GROUPS.map((group) => packageJson[group])) as Record<string, string>
+  const gurenDependencies = Object.entries(declared).filter(([name]) => name.startsWith('@guren/'))
+
+  assert(gurenDependencies.length > 0, 'Scaffolded app declares no @guren/* dependencies to resolve from npm.')
+  for (const [name, range] of gurenDependencies) {
+    // If this mode ever degraded into the vendored one it would keep passing
+    // while checking nothing, so the local-path specs are asserted away rather
+    // than assumed absent.
+    assert(
+      !range.startsWith('file:') && !range.startsWith('link:') && !range.startsWith('workspace:'),
+      `npm install mode requires ${name} to keep its published range, got "${range}".`,
+    )
+  }
+
+  // The scaffolder already installed, but it only warns on failure — this is
+  // the install whose exit code can fail the job.
+  await run(['bun', 'install'], appDir, runtimeEnv)
+
+  const resolved: string[] = []
+  for (const [name, range] of gurenDependencies) {
+    const installed = JSON.parse(
+      await readFile(join(appDir, 'node_modules', name, 'package.json'), 'utf8'),
+    ) as { version: string }
+    resolved.push(`${name}@${installed.version} (declared ${range})`)
+  }
+  console.log(`\nResolved from npm:\n  ${resolved.join('\n  ')}`)
+
+  try {
+    // Skipped for blog for the reason spelled out in its vendored branch below.
+    if (blueprint !== 'blog') {
+      await run(['bun', 'run', 'codegen'], appDir, runtimeEnv)
+    }
+    await run(['bun', 'run', 'typecheck'], appDir, runtimeEnv)
+  } catch (error) {
+    console.error('\nThe scaffolded app does not build against the published packages listed above.')
+    throw error
+  }
+
+  console.log(`\nPublished dependency drift check passed (${blueprint}): ${appDir}`)
+}
+
+function resolveInstallMode(): InstallMode {
+  const requested = process.env.GUREN_SMOKE_INSTALL_MODE
+  if (!requested) {
+    return 'vendored'
+  }
+  if (!INSTALL_MODES.includes(requested as InstallMode)) {
+    throw new Error(`Unknown GUREN_SMOKE_INSTALL_MODE "${requested}". Supported values: ${INSTALL_MODES.join(', ')}.`)
+  }
+  return requested as InstallMode
+}
+
 async function main(): Promise<void> {
-  await ensureBuiltPackages()
+  const installMode = resolveInstallMode()
+
+  // npm mode deliberately touches no build output of this checkout — the app
+  // it scaffolds is meant to be the one a user gets from the registry.
+  if (installMode !== 'npm') {
+    await ensureBuiltPackages()
+  }
 
   const blueprint = process.env.GUREN_SMOKE_BLUEPRINT ?? 'default'
   const tempRoot = await mkdtemp(join(tmpdir(), `guren-fresh-app-${blueprint}-`))
   const appDir = join(tempRoot, 'app')
-  const vendorDir = join(appDir, '.guren-vendor')
-  const packDir = join(appDir, '.guren-packed')
   const runtimeTempDir = join(tempRoot, '.tmp')
   const bunInstallCacheDir = join(tempRoot, '.bun-install-cache')
   const keepTemp = process.env.GUREN_KEEP_SMOKE_DIR === '1'
-  const installMode = (process.env.GUREN_SMOKE_INSTALL_MODE === 'packed' ? 'packed' : 'vendored') satisfies InstallMode
   const runtimeEnv = {
     TMPDIR: runtimeTempDir,
     BUN_INSTALL_CACHE_DIR: bunInstallCacheDir,
@@ -511,9 +589,17 @@ async function main(): Promise<void> {
     }
     // All blueprints require a mode flag to avoid interactive prompt
     createArgs.push('--mode', blueprint === 'api' ? 'spa' : 'ssr')
-    await run(createArgs, repoRoot)
+    await run(createArgs, repoRoot, runtimeEnv)
 
     await assertCoreFirstStarter(appDir)
+
+    if (installMode === 'npm') {
+      await runPublishedDependencyDrift(appDir, blueprint, runtimeEnv)
+      return
+    }
+
+    const vendorDir = join(appDir, '.guren-vendor')
+    const packDir = join(appDir, '.guren-packed')
     const dependencyRoots = installMode === 'packed'
       ? await packPackages(packDir)
       : await vendorPackages(vendorDir)

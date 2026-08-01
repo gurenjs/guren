@@ -94,6 +94,11 @@ jobs:
       - name: Starter template audit
         run: bun run audit:starter-template
 
+      # Template @guren/* ranges resolve from npm, so a stale one only surfaces
+      # in a real scaffold. This compares them to the workspace versions instead.
+      - name: Template dependency audit
+        run: bun run audit:template-deps
+
       - name: Docs audit
         run: bun run audit:docs
 
