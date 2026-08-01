@@ -25,6 +25,10 @@ export function singularize(name: string): string {
  * `Status` are structurally identical — which is why only the names inside the
  * triangle route through here. Route slugs and generated type names in
  * `make:feature` pluralize directly, so `Status` still yields `/statuses`.
+ *
+ * The one caller outside the triangle is `dbArtifactPattern()`, which does not
+ * derive a name from this: it accepts the result as one spelling among several
+ * when matching user-chosen file names, so a wrong plural costs it nothing.
  */
 export function collectionName(name: string): string {
   return pluralize(singularize(name))
