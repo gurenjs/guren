@@ -173,79 +173,62 @@ describe('upgradeCanary', () => {
     })
   })
 
-  // Every path that declines to write, with the entry that must survive and the
-  // warning the user gets. Adding a case is a row, not another copied block.
-  const ORM_PINS_RC4 = { version: '1.2.0', dependencies: { 'drizzle-orm': '1.0.0-rc.4' } }
-  const declines = [
-    {
-      label: 'a specifier that names a location',
-      manifest: { dependencies: { '@guren/orm': '^1.0.0', 'drizzle-orm': 'workspace:*' } },
-      manifestResolver: async () => ORM_PINS_RC4,
-      survives: ['dependencies', 'drizzle-orm', 'workspace:*'],
-      warning: 'names a location rather than a release',
-    },
-    {
-      label: 'a published peer range',
-      manifest: { dependencies: { '@guren/orm': '^1.0.0' }, peerDependencies: { 'drizzle-orm': '^1' } },
-      manifestResolver: async () => ORM_PINS_RC4,
-      survives: ['peerDependencies', 'drizzle-orm', '^1'],
-      warning: null,
-    },
-    {
-      label: 'a drizzle-kit version that was never published',
-      manifest: {
+  // The rule's own refusals are covered in drizzle-pins.test.ts. What only this
+  // layer can show is that one reaches the user, prefixed, instead of being
+  // swallowed between the planner and the console.
+  it('reports a pin it declined to move', async () => {
+    await writeFile(
+      packageJsonPath,
+      JSON.stringify({
+        name: 'decline',
         dependencies: { '@guren/orm': '^1.0.0' },
         devDependencies: { 'drizzle-kit': '0.31.0' },
+      }, null, 2),
+      'utf8',
+    )
+    const warnings: string[] = []
+    const warnSpy = spyOn(console, 'warn').mockImplementation(((message: unknown) => {
+      warnings.push(String(message))
+    }) as never)
+
+    try {
+      await upgradeCanary({
+        cwd: workspace.dir,
+        versionResolver: async () => '1.2.0',
+        manifestResolver: async (name) =>
+          name === '@guren/orm' ? { version: '1.2.0', dependencies: { 'drizzle-orm': '1.0.0-rc.4' } } : null,
+      })
+    } finally {
+      warnSpy.mockRestore()
+    }
+
+    const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as Record<
+      string,
+      Record<string, string>
+    >
+    expect(packageJson.devDependencies?.['drizzle-kit']).toBe('0.31.0')
+    expect(warnings.join('\n')).toContain('[guren upgrade] drizzle-kit@1.0.0-rc.4 does not exist on npm')
+  })
+
+  it('leaves the ORM manifest unread when the app pins no drizzle package', async () => {
+    await writeFile(
+      packageJsonPath,
+      JSON.stringify({ name: 'no-drizzle', dependencies: { '@guren/orm': '^1.0.0' } }, null, 2),
+      'utf8',
+    )
+
+    let looked = false
+    await upgradeCanary({
+      cwd: workspace.dir,
+      versionResolver: async () => '1.2.0',
+      manifestResolver: async () => {
+        looked = true
+        return null
       },
-      manifestResolver: async (name: string) => (name === '@guren/orm' ? ORM_PINS_RC4 : null),
-      survives: ['devDependencies', 'drizzle-kit', '0.31.0'],
-      warning: 'does not exist on npm',
-    },
-    {
-      label: 'an ORM that depends on a range rather than one version',
-      manifest: { dependencies: { '@guren/orm': '^1.0.0', 'drizzle-orm': '1.0.0-rc.1' } },
-      manifestResolver: async () => ({ version: '1.2.0', dependencies: { 'drizzle-orm': '^1.0.0' } }),
-      survives: ['dependencies', 'drizzle-orm', '1.0.0-rc.1'],
-      warning: 'not a single exact version',
-    },
-    {
-      label: 'an app that does not use @guren/orm',
-      manifest: { dependencies: { '@guren/core': '^1.0.0', 'drizzle-orm': '1.0.0-rc.1' } },
-      manifestResolver: async () => ORM_PINS_RC4,
-      survives: ['dependencies', 'drizzle-orm', '1.0.0-rc.1'],
-      warning: null,
-    },
-  ] as const
-
-  for (const { label, manifest, manifestResolver, survives, warning } of declines) {
-    it(`leaves drizzle alone for ${label}`, async () => {
-      await writeFile(packageJsonPath, JSON.stringify({ name: 'decline', ...manifest }, null, 2), 'utf8')
-      const warnings: string[] = []
-      const warnSpy = spyOn(console, 'warn').mockImplementation(((message: unknown) => {
-        warnings.push(String(message))
-      }) as never)
-
-      try {
-        await upgradeCanary({
-          cwd: workspace.dir,
-          versionResolver: async () => '1.2.0',
-          manifestResolver,
-        })
-      } finally {
-        warnSpy.mockRestore()
-      }
-
-      const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as Record<
-        string,
-        Record<string, string>
-      >
-      const [field, name, value] = survives
-      expect(packageJson[field]?.[name]).toBe(value)
-      if (warning) {
-        expect(warnings.join('\n')).toContain(warning)
-      }
     })
-  }
+
+    expect(looked).toBe(false)
+  })
 
   it('makes no registry call for drizzle under the canary tag', async () => {
     await writeFile(
