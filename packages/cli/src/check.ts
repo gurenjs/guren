@@ -1,7 +1,7 @@
 import { resolve, relative } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { consola } from 'consola'
-import type { ClassDeclaration } from '@babel/types'
+import type { Statement } from '@babel/types'
 import {
   discoverControllerFiles,
   discoverModelFiles,
@@ -19,6 +19,7 @@ import {
   extractClassDeclaration,
   extractTableIdentifier,
   findStaticClassProperty,
+  firstClassDeclaration,
   staticStringArrayProperty,
   staticStringProperty,
 } from './model-parser'
@@ -145,12 +146,12 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       checks.push(...results)
     }
 
+    // The schema every check below reads, parsed once per run rather than per
+    // model (checks 3 and 8 both consume it).
+    const schemaTables = await parseSchemaTables(cwd)
+
     // 3. Check each model binds a table its schema declares
     const modelFiles = filterChanged(await discoverModelFiles(cwd))
-    // Parsed once for every model rather than per model, and only when there
-    // is a model to check — under `--changed`, a run that touched no model
-    // pays nothing for the schema.
-    const schemaTables = modelFiles.length > 0 ? await parseSchemaTables(cwd) : []
     for (const filePath of modelFiles) {
       const relPath = relative(cwd, filePath)
       const name = classNameFromPath(filePath)
@@ -208,7 +209,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // nothing. Not changed-filtered, like checks 6-7 — the schema is a handful
     // of files, so narrowing would hide a column an unrelated edit never
     // touched.
-    const schemaTimestampResults = await checkSchemaTimestamps(cwd)
+    const schemaTimestampResults = checkSchemaTimestamps(schemaTables)
     checks.push(...schemaTimestampResults)
   }
 
@@ -265,25 +266,33 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   return report
 }
 
-async function firstClassDeclaration(cache: ParseCache, filePath: string): Promise<ClassDeclaration | null> {
-  const parsed = await cache.get(filePath)
-  if (!parsed) return null
-
-  for (const node of parsed.ast.program.body) {
-    const classDecl = extractClassDeclaration(node)
-    if (classDecl) return classDecl
+/**
+ * The name a local binding was imported under, for `import { posts as
+ * postTable }`. A model may refer to its table by any local name, so the
+ * schema's exported identifier has to be recovered before comparing the two.
+ */
+function importedNameOf(body: Statement[], local: string): string | undefined {
+  for (const node of body) {
+    if (node.type !== 'ImportDeclaration') continue
+    for (const specifier of node.specifiers) {
+      if (specifier.type !== 'ImportSpecifier' || specifier.local.name !== local) continue
+      if (specifier.imported.type === 'Identifier') return specifier.imported.name
+    }
   }
-  return null
+  return undefined
 }
 
 /**
  * Checks the model against what it actually binds — the identifier passed to
  * `defineModel(x)` or assigned to `static table` — rather than a table name
- * guessed from the class name. Guessing reported two kinds of nonsense: a
- * model binding the wrong identifier passed as long as the guessed name
- * appeared anywhere in the schema text (a column name or a comment would do),
- * and any model not named after its table (`Post` on `blog_posts`, `User` on
- * `accounts`) warned even though it was correct.
+ * guessed from the class name, which reported both false alarms (any model not
+ * named after its table) and false clears (the guessed name matched a column
+ * name or a comment).
+ *
+ * The two names being compared are written in different files, so an aliased
+ * import is resolved back to the name the schema exports before matching —
+ * otherwise every `import { posts as postTable }` would read as a missing
+ * table.
  *
  * Two arms skip rather than warn, because neither one is evidence of a
  * problem: a model whose binding cannot be read (no supported spelling, or an
@@ -305,7 +314,10 @@ async function checkModelTableBinding(
   relPath: string,
   schemaTables: SchemaTable[],
 ): Promise<CheckResult[]> {
-  const classDecl = await firstClassDeclaration(cache, filePath)
+  const parsed = await cache.get(filePath)
+  if (!parsed) return []
+
+  const classDecl = firstClassDeclaration(parsed.ast.program.body)
   if (!classDecl) return []
 
   const identifier = extractTableIdentifier(classDecl)
@@ -318,7 +330,12 @@ async function checkModelTableBinding(
   if (tables.length === 0) return []
 
   const schemaPath = schemaPathFor(moduleName)
-  const bound = tables.find((table) => table.identifier === identifier)
+  // The model's own name for the table, and the schema's, which differ under
+  // an aliased import.
+  const exported = importedNameOf(parsed.ast.program.body, identifier) ?? identifier
+  const bound = tables.find((table) => table.identifier === exported)
+  const declaredAs = bound?.tableName ? ` as table '${bound.tableName}'` : ''
+  const declared = formatTruncatedList(tables.map((table) => table.identifier))
 
   return [
     check(
@@ -326,12 +343,11 @@ async function checkModelTableBinding(
       `${name} schema`,
       bound ? 'pass' : 'warn',
       bound
-        ? `${name} binds '${identifier}', declared in ${schemaPath}${bound.tableName ? ` as table '${bound.tableName}'` : ''}.`
+        ? `${name} binds '${identifier}', declared in ${schemaPath}${declaredAs}.`
         : `${name} binds '${identifier}', but ${schemaPath} declares no such table.`,
       bound
         ? undefined
-        : `Export a table named '${identifier}' from ${schemaPath}, or point ${name} at one it declares `
-          + `(${formatTruncatedList(tables.map((table) => table.identifier))}).`,
+        : `Export a table named '${exported}' from ${schemaPath}, or point ${name} at one it declares (${declared}).`,
       relPath,
     ),
   ]
@@ -360,7 +376,10 @@ async function checkMassAssignmentConfig(
   relPath: string,
 ): Promise<CheckResult[]> {
   const results: CheckResult[] = []
-  const classDecl = await firstClassDeclaration(cache, filePath)
+  const parsed = await cache.get(filePath)
+  if (!parsed) return results
+
+  const classDecl = firstClassDeclaration(parsed.ast.program.body)
   if (!classDecl) return results
 
   const legacy = ['guarded', 'strictFillable'].filter((property) => findStaticClassProperty(classDecl, property))

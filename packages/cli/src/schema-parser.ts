@@ -344,6 +344,10 @@ export function schemaPathFor(module: string | null | undefined): string {
  * Table identifier → column names, or null when no tables were found.
  * The narrow view the audit's sensitive-column check and the entity
  * context's column listing consume.
+ *
+ * Every app root is flattened into one map, so two modules declaring the same
+ * identifier collide, last one winning. Callers that need the declaring module
+ * (`guren check`'s model-table binding does) read `parseSchemaTables` instead.
  */
 export async function parseSchemaTableColumns(cwd: string): Promise<Map<string, string[]> | null> {
   const tables = await parseSchemaTables(cwd)

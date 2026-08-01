@@ -1,4 +1,4 @@
-import { parseSchemaTables, schemaPathFor } from './schema-parser'
+import { schemaPathFor, type SchemaTable } from './schema-parser'
 import { check, type CheckResult } from './check-result'
 
 /**
@@ -23,6 +23,9 @@ const TIMESTAMP_BUILDER = 'timestamp'
  * Both are matched by the declaring table's factory, not by the file, so a
  * schema mixing dialects is judged a table at a time.
  *
+ * Judges tables the caller already parsed, so a run reads `db/schema.ts` once
+ * however many checks consume it.
+ *
  * Silence is not proof: a column the parser cannot read statically is skipped
  * rather than guessed at, and `schema-parser.ts` documents the spellings it
  * does not resolve. Reporting a column that is actually fine costs more here
@@ -32,10 +35,10 @@ const TIMESTAMP_BUILDER = 'timestamp'
  * the shape the per-file checks in `check.ts` use, since a pass per column
  * would bury everything else in the report.
  */
-export async function checkSchemaTimestamps(cwd: string): Promise<CheckResult[]> {
+export function checkSchemaTimestamps(tables: SchemaTable[]): CheckResult[] {
   const results: CheckResult[] = []
 
-  for (const table of await parseSchemaTables(cwd)) {
+  for (const table of tables) {
     if (table.dialect !== 'pg') continue
 
     const schemaPath = schemaPathFor(table.module)
