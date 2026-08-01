@@ -22,6 +22,8 @@ import {
 } from './model-parser'
 import { checkConsoleCommandRegistration } from './console-check'
 import { tableNameFor } from './inflect'
+import { checkSchemaTimestamps } from './schema-check'
+import { schemaPathFor } from './schema-parser'
 import { ParseCache } from './parse-cache'
 import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath } from './inertia-pages'
 import { runArchCheck } from './arch-check'
@@ -149,7 +151,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       const name = classNameFromPath(filePath)
       checks.push(...(await checkMassAssignmentConfig(cache, filePath, name, relPath)))
       const moduleName = moduleNameFor(cwd, filePath)
-      const schemaPath = moduleName ? `modules/${moduleName}/db/schema.ts` : 'db/schema.ts'
+      const schemaPath = schemaPathFor(moduleName)
       const hasSchema = await fileExists(cwd, schemaPath)
       if (hasSchema) {
         const schemaContent = await readFile(resolve(cwd, schemaPath), 'utf-8')
@@ -212,9 +214,17 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // contribute nothing here.
     const commandRegistrationResults = await checkConsoleCommandRegistration(cwd, cache)
     checks.push(...commandRegistrationResults)
+
+    // 8. Check Postgres timestamp columns carry a time zone. Content-activated
+    // and dialect-gated: apps with no schema, or a non-Postgres one, contribute
+    // nothing. Not changed-filtered, like checks 6-7 — the schema is a handful
+    // of files, so narrowing would hide a column an unrelated edit never
+    // touched.
+    const schemaTimestampResults = await checkSchemaTimestamps(cwd)
+    checks.push(...schemaTimestampResults)
   }
 
-  // 8. Doc-link checks (docs/ frontmatter + @docs tags, RFC 0004). Runs in
+  // 9. Doc-link checks (docs/ frontmatter + @docs tags, RFC 0004). Runs in
   // plain mode and under --docs; content-activated, so apps without the
   // docs convention contribute zero results here.
   if (runs('docs')) {
@@ -222,7 +232,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     checks.push(...docsResults)
   }
 
-  // 9. Spec drift checks (docs/spec/ vs regenerated views, RFC 0004).
+  // 10. Spec drift checks (docs/spec/ vs regenerated views, RFC 0004).
   // Content-activated like docs; under --changed it only regenerates when
   // a spec-relevant file changed.
   if (runs('spec')) {
@@ -230,7 +240,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     checks.push(...specResults)
   }
 
-  // 10. Check architecture boundaries (guren.arch.ts + derived module rules)
+  // 11. Check architecture boundaries (guren.arch.ts + derived module rules)
   if (runs('arch')) {
     const archResults = await runArchCheck({ cwd, cache, changedFiles })
     checks.push(...archResults)

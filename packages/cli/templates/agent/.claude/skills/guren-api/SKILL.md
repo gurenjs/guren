@@ -150,7 +150,7 @@ export function registerWebRoutes(router: Router): void {
 **Route contract options** — attach `body`, `params`, `query` schemas to routes:
 - Schemas are metadata for codegen (not double-validated for Controller actions)
 - `bunx guren codegen` extracts schemas → generates typed `ApiRoutes` interface
-- Frontend derives form types via `ApiRoutes['route.name']['body']`
+- Frontend derives form types via `RouteBody<ApiRoutes, 'route.name'>`
 
 ### End-to-End Type Safety
 Source: `packages/cli/src/api-client-types.ts`, `packages/inertia-client/src/typed-forms.ts`
@@ -161,6 +161,11 @@ Guren provides bidirectional type safety between frontend forms and backend vali
 Zod schema (Validator) → Route body option → codegen → ApiRoutes → Frontend form type
                        → Controller.validateBody() → Runtime validation (422 on failure)
 ```
+
+`ApiRoutes[...]['body']` is the **request** shape — what the browser sends, before
+validation. A coercing schema is rendered as it travels: `z.coerce.date()` is a
+`string` in the form and a `Date` in the controller. `['response']` is the other
+side, the parsed shape a client gets back.
 
 **1. Define schema once** (Validator file):
 ```typescript
@@ -175,10 +180,10 @@ router.post('/posts', { name: 'posts.store', body: PostPayloadSchema }, [PostCon
 **3. Frontend derives types** (after `bunx guren codegen`):
 ```typescript
 import type { ApiRoutes } from '@/.guren/api-client.gen'
-import type { RouteErrors } from '@guren/inertia-client/typed-forms'
+import type { RouteBody, RouteErrors } from '@guren/inertia-client/typed-forms'
 import { route } from '@/.guren/routes.gen'
 
-type PostFormData = ApiRoutes['posts.store']['body']    // { title: string; body: string }
+type PostFormData = RouteBody<ApiRoutes, 'posts.store'>  // { title: string; body: string }
 type PostErrors = RouteErrors<PostFormData>              // Partial<Record<'title' | 'body', string | string[]>>
 
 // Typed form submission

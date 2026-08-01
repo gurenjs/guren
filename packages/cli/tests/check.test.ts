@@ -1,8 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
-import { runCheck } from '../src/check'
-import { createTempWorkspace } from './helpers'
+import { runCheck, type CheckReport, type RunCheckOptions } from '../src/check'
+import { createTempWorkspace, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE } from './helpers'
 
 describe('runCheck', () => {
   it('detects empty controller methods', async () => {
@@ -610,5 +610,182 @@ test('lists tasks', async () => {
     } finally {
       await workspace.cleanup()
     }
+  })
+
+  describe('Postgres timestamp time zones', () => {
+    async function withSchema(
+      files: Record<string, string>,
+      options: Partial<RunCheckOptions> = {},
+    ): Promise<CheckReport> {
+      const workspace = await createTempWorkspace('guren-cli-check-timestamptz-')
+      try {
+        for (const [relPath, content] of Object.entries(files)) {
+          await mkdir(join(workspace.dir, dirname(relPath)), { recursive: true })
+          await writeFile(join(workspace.dir, relPath), content, 'utf8')
+        }
+        return await runCheck({ cwd: workspace.dir, ...options })
+      } finally {
+        await workspace.cleanup()
+      }
+    }
+
+    const timestamptzFindings = (report: CheckReport) =>
+      report.checks.filter((c) => c.key.startsWith('schema-timestamptz:'))
+
+    it('flags Postgres timestamp columns declared without withTimezone', async () => {
+      const report = await withSchema({
+        'db/schema.ts': `import { pgTable, serial, timestamp } from 'drizzle-orm/pg-core'
+
+export const posts = pgTable('posts', {
+  id: serial('id').primaryKey(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  publishedAt: timestamp('published_at', { withTimezone: true }),
+  slots: timestamp('slots').array(),
+  windows: timestamp('windows', { withTimezone: true }).array(),
+})
+`,
+      })
+
+      const findings = timestamptzFindings(report)
+      // An exact list, so the tz'd columns above assert silence as strongly as
+      // the bare ones assert detection — including through `.array()`, whose
+      // `[]` suffix must neither hide a bare column nor surface a tz'd one.
+      expect(findings.map((c) => c.key)).toEqual([
+        'schema-timestamptz:posts.createdAt',
+        'schema-timestamptz:posts.slots',
+      ])
+      expect(findings[0].status).toBe('warn')
+      // The suggestion names the database column, not the object key.
+      expect(findings[0].suggestion).toContain("timestamp('created_at', { withTimezone: true })")
+      expect(findings[0].filePath).toBe('db/schema.ts')
+      // Informational: the core suite never gates on exit code (see
+      // check-exit-code.test.ts for that contract end to end).
+      expect(report.failCount).toBe(0)
+    })
+
+    it('stays silent on the Postgres schema a fresh app is scaffolded with', async () => {
+      const report = await withSchema({ 'db/schema.ts': PG_SCHEMA_FIXTURE })
+
+      expect(timestamptzFindings(report)).toHaveLength(0)
+    })
+
+    // `{ withTimezone: false }` and omitting the option emit identical DDL, so
+    // the explicit form is not a suppression mechanism.
+    it('flags an explicit withTimezone: false the same as an omission', async () => {
+      const report = await withSchema({
+        'db/schema.ts': `import { pgTable, timestamp } from 'drizzle-orm/pg-core'
+
+export const posts = pgTable('posts', {
+  createdAt: timestamp('created_at', { withTimezone: false }),
+})
+`,
+      })
+
+      expect(timestamptzFindings(report).map((c) => c.key)).toEqual(['schema-timestamptz:posts.createdAt'])
+    })
+
+    // MySQL's bare timestamp is correct (no timestamptz exists, and its
+    // TIMESTAMP is already UTC-normalized) and is spelled identically to the
+    // Postgres one — which is why the rule gates on the declaring table's
+    // factory rather than the builder name. The fixture is the schema
+    // `create-guren-app --db mysql` actually writes.
+    it('ignores a MySQL schema, whose bare timestamp is spelled the same', async () => {
+      const report = await withSchema({ 'db/schema.ts': MYSQL_SCHEMA_FIXTURE })
+
+      expect(timestamptzFindings(report)).toHaveLength(0)
+    })
+
+    // One file can legally mix factories, so the verdict is per table.
+    it('flags only the Postgres table in a mixed schema', async () => {
+      const report = await withSchema({
+        'db/schema.ts': `import { pgTable, timestamp } from 'drizzle-orm/pg-core'
+import { mysqlTable, timestamp as mysqlTimestamp } from 'drizzle-orm/mysql-core'
+import { sqliteTable, integer } from 'drizzle-orm/sqlite-core'
+
+export const logs = mysqlTable('logs', { createdAt: mysqlTimestamp('created_at') })
+export const notes = sqliteTable('notes', { createdAt: integer('created_at', { mode: 'timestamp' }) })
+export const posts = pgTable('posts', { createdAt: timestamp('created_at') })
+`,
+      })
+
+      expect(timestamptzFindings(report).map((c) => c.key)).toEqual(['schema-timestamptz:posts.createdAt'])
+    })
+
+    // Options the parser cannot read are not evidence of anything. Warning
+    // here would be a false alarm whose suggested fix is a migration.
+    it('stays silent when the options are not statically readable', async () => {
+      const report = await withSchema({
+        'db/schema.ts': `import { pgTable, timestamp } from 'drizzle-orm/pg-core'
+
+const INSTANT = { withTimezone: true } as const
+
+export const posts = pgTable('posts', {
+  viaConstant: timestamp('via_constant', INSTANT),
+  viaAssertion: timestamp('via_assertion', { withTimezone: true as const }),
+})
+`,
+      })
+
+      expect(timestamptzFindings(report)).toHaveLength(0)
+    })
+
+    it('reports the module schema path for a module-declared table', async () => {
+      const report = await withSchema({
+        'modules/billing/db/schema.ts': `import { pgTable, timestamp } from 'drizzle-orm/pg-core'
+
+export const invoices = pgTable('invoices', { issuedAt: timestamp('issued_at') })
+`,
+      })
+
+      const findings = timestamptzFindings(report)
+      expect(findings).toHaveLength(1)
+      expect(findings[0].filePath).toBe('modules/billing/db/schema.ts')
+      expect(findings[0].suggestion).toContain('modules/billing/db/schema.ts')
+    })
+
+    // Under drizzle's name-less form the database name comes from a casing
+    // config this parser does not read, so the SQL hint is dropped rather than
+    // quoting the object key, which would not resolve.
+    it('omits the USING hint when the column has no explicit database name', async () => {
+      const report = await withSchema({
+        'db/schema.ts': `import { pgTable, timestamp } from 'drizzle-orm/pg-core'
+
+export const posts = pgTable('posts', { createdAt: timestamp() })
+`,
+      })
+
+      const [finding] = timestamptzFindings(report)
+      expect(finding.suggestion).toContain('timestamp({ withTimezone: true })')
+      expect(finding.suggestion).not.toContain('AT TIME ZONE')
+    })
+
+    // The suggestion must not tell the user to replace an options object that
+    // carries settings the rule knows nothing about.
+    it('does not suggest dropping options the column already carries', async () => {
+      const report = await withSchema({
+        'db/schema.ts': `import { pgTable, timestamp } from 'drizzle-orm/pg-core'
+
+export const posts = pgTable('posts', {
+  createdAt: timestamp('created_at', { mode: 'string', precision: 3 }),
+})
+`,
+      })
+
+      const [finding] = timestamptzFindings(report)
+      expect(finding.suggestion).toContain('keeping any other options it already carries')
+    })
+
+    it('is skipped under --arch', async () => {
+      const report = await withSchema(
+        {
+          'db/schema.ts': `import { pgTable, timestamp } from 'drizzle-orm/pg-core'
+export const posts = pgTable('posts', { createdAt: timestamp('created_at') })
+`,
+        },
+        { arch: true },
+      )
+
+      expect(timestamptzFindings(report)).toHaveLength(0)
+    })
   })
 })

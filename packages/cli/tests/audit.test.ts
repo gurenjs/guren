@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
-import { runAudit } from '../src/audit'
+import { authMiddlewareVerdict, runAudit } from '../src/audit'
 import { createTempWorkspace } from './helpers'
 
 async function writeRoutes(dir: string, contents: string): Promise<void> {
@@ -267,7 +267,10 @@ export default function registerRoutes(router: any) {
     }
   })
 
-  it('passes authz when auth middleware protects the route', async () => {
+  it('warns when middleware is only named like an auth guard (unverifiable)', async () => {
+    // Pre-capability audits passed any middleware whose *name* matched
+    // /auth/i. The name alone proves nothing — this alias is never even
+    // registered — so with capability-aware servers this is now a warn.
     const workspace = await createTempWorkspace('guren-cli-audit-authz-mw-')
 
     try {
@@ -282,7 +285,62 @@ export default function registerRoutes(router: any) {
 
       const authz = report.findings.find(f => f.key === 'authz:DELETE /posts/:id')
       expect(authz).toBeDefined()
-      expect(authz!.status).toBe('pass')
+      expect(authz!.status).toBe('warn')
+      expect(authz!.message).toContain('not one the framework recognizes')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('passes authz for stamped guards, inline or aliased under any name', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-authz-capability-')
+
+    try {
+      await writeRoutes(
+        workspace.dir,
+        `const guard = async (c: any, next: any) => next()
+Object.defineProperty(guard, Symbol.for('guren.capabilities'), {
+  value: { authentication: { mode: 'required' } },
+})
+export default function registerRoutes(router: any) {
+  router.aliasMiddleware('member', guard)
+  router.delete('/posts/:id', (c: any) => null, guard)
+  router.put('/posts/:id', (c: any) => null).middleware('member')
+}`,
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const inline = report.findings.find(f => f.key === 'authz:DELETE /posts/:id')
+      expect(inline!.status).toBe('pass')
+      expect(inline!.message).toContain('verified via middleware capabilities')
+
+      const aliased = report.findings.find(f => f.key === 'authz:PUT /posts/:id')
+      expect(aliased!.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('does not count guest-only guards as protection', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-authz-guest-')
+
+    try {
+      await writeRoutes(
+        workspace.dir,
+        `const guard = async (c: any, next: any) => next()
+Object.defineProperty(guard, Symbol.for('guren.capabilities'), {
+  value: { authentication: { mode: 'guest-only' } },
+})
+export default function registerRoutes(router: any) {
+  router.delete('/posts/:id', (c: any) => null, guard)
+}`,
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const authz = report.findings.find(f => f.key === 'authz:DELETE /posts/:id')
+      expect(authz!.status).toBe('warn')
     } finally {
       await workspace.cleanup()
     }
@@ -1309,5 +1367,101 @@ export default class TaskController extends Controller {
 `
     expect(/\bauth\s*\.\s*userOrFail\s*(?:<[^>]*>)?\s*\(/.test(source)).toBe(true)
     expect(/\bvalidateBody(Safe)?\s*(?:<[^>]*>)?\s*\(/.test(source)).toBe(true)
+  })
+})
+
+describe('finding classifications', () => {
+  it('tags rule findings with versioned standards and leaves infra findings untagged', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-taxonomy-')
+
+    try {
+      await writeController(
+        workspace.dir,
+        'PostController',
+        `export default class PostController {
+  async store() {
+    const data = await this.request.json()
+    return null
+  }
+}`,
+      )
+      await writeRoutes(
+        workspace.dir,
+        `class PostController {
+  async store() { return null }
+}
+export default function registerRoutes(router: any) {
+  router.post('/posts', [PostController, 'store'])
+}`,
+      )
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'src/leak.ts'),
+        `export const apiKey = 'sk-live-abcdef1234567890'\n`,
+        'utf8',
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const validation = report.findings.find(f => f.key === 'validation:POST /posts')
+      expect(validation!.classifications).toEqual([
+        { standard: 'OWASP Top 10', version: '2021', id: 'A03', name: 'Injection' },
+        { standard: 'CWE', id: 'CWE-20', name: 'Improper Input Validation' },
+      ])
+
+      const authz = report.findings.find(f => f.key === 'authz:POST /posts')
+      expect(authz!.classifications?.[0]).toEqual({
+        standard: 'OWASP Top 10',
+        version: '2021',
+        id: 'A01',
+        name: 'Broken Access Control',
+      })
+
+      const secret = report.findings.find(f => f.key.startsWith('secret:src/leak.ts'))
+      expect(secret).toBeDefined()
+      expect(secret!.classifications?.map(c => c.id)).toEqual(['A07', 'CWE-798'])
+
+      // Passing findings carry the rule's classification too — the taxonomy
+      // describes the check, not the failure.
+      const massAssignmentPass = report.findings.find(f => f.key === 'raw-sql:none')
+      expect(massAssignmentPass!.classifications?.[0]?.id).toBe('A03')
+
+      // Infrastructure findings (config load, module load) are not security
+      // rules and stay untagged.
+      const infra = report.findings.filter(f => f.key.startsWith('routes:') || f.key.startsWith('audit-config:'))
+      for (const entry of infra) {
+        expect(entry.classifications).toBeUndefined()
+      }
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+
+describe('authMiddlewareVerdict', () => {
+  const required = { authentication: { mode: 'required' } } as const
+
+  it('verifies capability-carrying routes regardless of names', () => {
+    expect(authMiddlewareVerdict({ middlewareNames: [], capabilities: required })).toBe('verified')
+    expect(authMiddlewareVerdict({ middlewareNames: ['member'], capabilities: required })).toBe('verified')
+  })
+
+  it('falls back to the name heuristic only for pre-capability servers', () => {
+    // Old server: no capabilities field at all — the name keeps counting so
+    // a newer CLI does not flood a not-yet-upgraded app with false warns.
+    expect(authMiddlewareVerdict({ middlewareNames: ['auth'] })).toBe('legacy-name-match')
+    expect(authMiddlewareVerdict({ middlewareNames: ['member'] })).toBe('none')
+    // New server: empty capabilities means "checked, nothing recognized".
+    expect(authMiddlewareVerdict({ middlewareNames: ['auth'], capabilities: {} })).toBe('unverified-auth-name')
+    expect(authMiddlewareVerdict({ middlewareNames: ['member'], capabilities: {} })).toBe('none')
+  })
+
+  it('treats guest-only as unprotected', () => {
+    expect(
+      authMiddlewareVerdict({
+        middlewareNames: [],
+        capabilities: { authentication: { mode: 'guest-only' } },
+      }),
+    ).toBe('none')
   })
 })

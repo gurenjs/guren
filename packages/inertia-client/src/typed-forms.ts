@@ -16,10 +16,8 @@
  * type PostFormData = RouteBody<ApiRoutes, 'posts.store'>
  * ```
  */
-export type RouteBody<
-  TRoutes extends Record<string, { body?: unknown }>,
-  TName extends keyof TRoutes,
-> = TRoutes[TName] extends { body: infer B } ? B : Record<string, unknown>
+export type RouteBody<TRoutes, TName extends keyof TRoutes> =
+  TRoutes[TName] extends { body: infer B } ? B : Record<string, unknown>
 
 /**
  * Typed validation errors keyed by field names from a route's body schema.

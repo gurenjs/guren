@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { z } from 'zod'
+import * as z3 from 'zod/v3'
 import { createApp, type RouteDefinition } from '@guren/core'
 import {
   generateOpenApiDocument,
@@ -134,6 +135,174 @@ describe('@guren/openapi', () => {
     })
 
     expect(document.paths['/posts/{id}']?.patch?.requestBody?.required).toBe(false)
+  })
+
+  // Apps pin their own Zod, so both majors have to be walked. v4 keeps an
+  // array's element in `_def.element` and the literal string `'array'` in
+  // `_def.type`; v3 has only `_def.type`. Reading them in the wrong order
+  // still produces a document, just one with the element type missing.
+  describe('schema walking', () => {
+    // `.pipe()` statically requires the target to accept the source's output,
+    // but the walker reads whatever schema object it is handed at runtime.
+    const pipeTo = (from: unknown, to: unknown) => (from as { pipe(target: unknown): unknown }).pipe(to)
+
+    const operationFor = (schemas: Record<string, unknown>) => {
+      const { document, warnings } = generateOpenApiDocument(
+        [{ method: 'POST', path: '/posts', schemas }] as RouteDefinition[],
+        { title: 'Blog API', version: '1.0.0' },
+      )
+      return { operation: document.paths['/posts']?.post, warnings }
+    }
+
+    const bodyDocument = (body: unknown) => {
+      const { operation, warnings } = operationFor({ body })
+      return { schema: operation?.requestBody?.content['application/json']?.schema, warnings }
+    }
+
+    const responseDocument = (output: unknown) => {
+      const { operation, warnings } = operationFor({ output })
+      return { schema: operation?.responses['201']?.content?.['application/json']?.schema, warnings }
+    }
+
+    const queryParameters = (query: unknown) => {
+      const { operation, warnings } = operationFor({ query })
+      return { parameters: operation?.parameters, warnings }
+    }
+
+    it('keeps the element type of a zod 4 array', () => {
+      const { schema, warnings } = bodyDocument(z.object({ tags: z.array(z.string()) }))
+
+      expect(schema?.properties?.tags).toEqual({ type: 'array', items: { type: 'string' } })
+      expect(warnings).toEqual([])
+    })
+
+    it('keeps the element type of a zod 3 array', () => {
+      const { schema, warnings } = bodyDocument(z3.object({ tags: z3.array(z3.string()) }))
+
+      expect(schema?.properties?.tags).toEqual({ type: 'array', items: { type: 'string' } })
+      expect(warnings).toEqual([])
+    })
+
+    // v3 names this `ZodPipeline`, not `pipe` — unhandled, the property is
+    // dropped from the document entirely rather than merely mis-typed.
+    it('documents a zod 3 pipeline instead of dropping it', () => {
+      const { schema, warnings } = bodyDocument(z3.object({ page: z3.string().pipe(z3.number()) }))
+
+      expect(schema?.properties?.page).toEqual({ type: 'string' })
+      expect(warnings).toEqual([])
+    })
+
+    // A pipe carries two types: `_def.in` is what a caller sends, `_def.out`
+    // what the controller returns. Requests and responses need opposite sides.
+    it('reports each side of a pipe to the message that carries it', () => {
+      expect(bodyDocument(z.object({ page: z.string().pipe(z.coerce.number()) })).schema?.properties?.page)
+        .toEqual({ type: 'string' })
+      expect(responseDocument(z.object({ page: z.string().pipe(z.coerce.number()) })).schema?.properties?.page)
+        .toEqual({ type: 'number' })
+    })
+
+    // `.transform()` is a pipe whose out side is an opaque function, so there
+    // is no parsed type to recover — the in side stays the best answer.
+    it('falls back to the in side of a transform', () => {
+      const { schema } = responseDocument(z.object({ title: z.string() }).transform((value) => value.title))
+
+      expect(schema).toEqual({ type: 'object', properties: { title: { type: 'string' } }, required: ['title'] })
+    })
+
+    // A default is filled in when the field is missing, so a caller may omit
+    // it but a response always carries it. `prefault` behaves the same way.
+    it('requires a filled-in field in a response but not in a request', () => {
+      for (const schema of [
+        () => z.object({ body: z.string().default('') }),
+        () => z.object({ body: z.string().prefault('') }),
+      ]) {
+        expect(bodyDocument(schema()).schema?.required).toBeUndefined()
+        expect(responseDocument(schema()).schema?.required).toEqual(['body'])
+      }
+    })
+
+    it('requires a non-optional field in both directions', () => {
+      const schema = () => z.object({ body: z.string().optional().nonoptional() })
+
+      expect(bodyDocument(schema()).schema?.required).toEqual(['body'])
+      expect(responseDocument(schema()).schema?.required).toEqual(['body'])
+    })
+
+    // The type and the presence of a property are read by separate walks over
+    // separate wrapper lists, so a wrapper added to one and not the other
+    // quietly makes an optional property required.
+    it('looks through the same wrappers when deciding presence as when reading the type', () => {
+      for (const schema of [
+        z.object({ a: z.string().optional().readonly() }),
+        z.object({ a: z.string().optional().nullable() }),
+        z3.object({ a: z3.string().optional().brand<'Tagged'>() }),
+        z3.object({ a: z3.string().optional().refine(() => true) }),
+      ]) {
+        const { schema: document, warnings } = bodyDocument(schema)
+
+        expect(document?.properties?.a).toBeDefined()
+        expect(document?.required).toBeUndefined()
+        expect(warnings).toEqual([])
+      }
+    })
+
+    // `.catch()` substitutes its fallback for any failure, a missing value
+    // included, so an empty payload parses and the caller owes nothing.
+    it('never requires a caught field of a request', () => {
+      const schema = () => z.object({ mode: z.string().catch('safe') })
+
+      expect(schema().safeParse({}).success).toBe(true)
+      expect(bodyDocument(schema()).schema?.required).toBeUndefined()
+      expect(responseDocument(schema()).schema?.required).toEqual(['mode'])
+    })
+
+    // A pipeline runs both stages, so reading only the side being rendered
+    // documents an omission the other stage rejects.
+    it('requires a piped field unless both stages accept a missing value', () => {
+      for (const schema of [
+        z.object({ a: z.string().optional().pipe(z.string()) }),
+        z3.object({ a: z3.string().optional().pipe(z3.string()) }),
+      ]) {
+        expect(schema.safeParse({}).success).toBe(false)
+        expect(bodyDocument(schema).schema?.required).toEqual(['a'])
+      }
+
+      const output = z.object({ a: pipeTo(z.string(), z.string().optional()) })
+      expect(output.safeParse({}).success).toBe(false)
+      expect(responseDocument(output).schema?.required).toEqual(['a'])
+    })
+
+    // `z.lazy()` keeps its schema behind a getter this walker does not call.
+    // The property is unavoidably absent; what it must not be is silent.
+    it('warns rather than quietly dropping a schema it cannot read', () => {
+      for (const schema of [
+        z.object({ a: z.lazy(() => z.string()) }),
+        z3.object({ a: z3.lazy(() => z3.string()) }),
+      ]) {
+        const { schema: document, warnings } = bodyDocument(schema)
+
+        expect(document?.properties?.a).toBeUndefined()
+        expect(warnings).toEqual(['POST /posts body.a: the contents of a "lazy" schema could not be read, so it is omitted.'])
+      }
+    })
+
+    // Finding the object behind a parameter schema is a third walk over the
+    // same wrappers, and one that reports nothing when it gives up: a wrapper
+    // it fails to look through drops every parameter from the document.
+    it('expands parameters through a wrapped query schema', () => {
+      for (const query of [
+        z.object({ page: z.number() }).default({ page: 1 }),
+        z.object({ page: z.number() }).optional(),
+        z.object({ page: z.number() }).nullable(),
+        z.object({ page: z.number() }).readonly(),
+        z3.object({ page: z3.number() }).optional(),
+      ]) {
+        const { parameters, warnings } = queryParameters(query)
+
+        expect(parameters).toEqual([{ name: 'page', in: 'query', required: true, schema: { type: 'number' } }])
+        expect(warnings).toEqual([])
+      }
+    })
   })
 
   it('writes the generated document to disk', async () => {

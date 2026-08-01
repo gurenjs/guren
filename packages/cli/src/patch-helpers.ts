@@ -405,13 +405,19 @@ export async function hasAuthProvider(filePath: string): Promise<boolean> {
   }
 }
 
-export type SchemaDialect = 'sqlite' | 'pg' | 'mysql'
+import type { SchemaDialect } from './schema-parser'
+export type { SchemaDialect }
 
 /**
  * The drizzle dialect an app's `db/schema.ts` is written in. Every patcher
  * that appends columns or tables has to agree on this — `add auth` and
  * `add resource` writing different dialects into one schema is silent, since
  * drizzle's table builders accept a foreign dialect's column builders.
+ *
+ * Deliberately a whole-file content sniff, not the parser's per-table
+ * resolution: patchers call this with content they hold mid-write, and the
+ * case that matters most is a schema with no tables yet — hence the `pg`
+ * fallback below, which a parse-based answer could not produce.
  */
 export function detectSchemaDialect(content: string): SchemaDialect {
   if (content.includes('sqliteTable') || content.includes('drizzle-orm/sqlite-core')) {
@@ -443,81 +449,59 @@ export async function readSchemaDialect(cwd: string = process.cwd()): Promise<Sc
 }
 
 /**
- * Ensures that a set of named Drizzle imports are present in file content.
- * Merges into an existing `@guren/orm/drizzle` import or prepends a new one.
- * Returns the (possibly updated) content string.
+ * Ensures that a set of named imports from `specifier` are present in file
+ * content. Merges into the first `import { ... } from '<specifier>'` or
+ * prepends a new one. Returns the (possibly updated) content string.
+ *
+ * Three limits are inherited from the dialect-specific patchers this
+ * generalizes, and callers have to know them:
+ *
+ * - The "already imported?" check is **not** module-scoped. A name in scope
+ *   from any module counts as present, so nothing is added — see the mixed
+ *   dialect case in `patch-helpers.test.ts`.
+ * - Only the plain named form is merged. `import type`, default, and
+ *   namespace imports of the same specifier do not match, so a second import
+ *   line gets prepended alongside them.
+ * - `needed` must be plain identifiers; they go into a `\b...\b` pattern
+ *   unescaped.
  */
-export function ensureDrizzleImports(content: string, needed: string[]): string {
+export function ensureNamedImports(content: string, specifier: string, needed: string[]): string {
   // Check only import lines for existing identifiers, not the entire file content
-  const importLines = content.split('\n').filter((line) => line.trimStart().startsWith('import '))
-  const importContent = importLines.join('\n')
+  const importContent = content
+    .split('\n')
+    .filter((line) => line.trimStart().startsWith('import '))
+    .join('\n')
 
-  const missing = needed.filter(
-    (name) => !new RegExp(`\\b${name}\\b`).test(importContent),
-  )
+  const missing = needed.filter((name) => !new RegExp(`\\b${name}\\b`).test(importContent))
 
   if (missing.length === 0) {
     return content
   }
 
-  const existingDrizzleImport = /import\s*\{([^}]+)\}\s*from\s*['"]@guren\/orm\/drizzle['"]/
-  const match = content.match(existingDrizzleImport)
+  const existingImport = new RegExp(
+    `import\\s*\\{([^}]+)\\}\\s*from\\s*['"]${escapeRegExp(specifier)}['"]`,
+  )
+  const match = content.match(existingImport)
+  const existingNames = match ? match[1].split(',').map((s) => s.trim()).filter(Boolean) : []
+  const names = [...new Set([...existingNames, ...missing])].sort()
+  const importLine = `import { ${names.join(', ')} } from '${specifier}'`
 
-  if (match) {
-    const existingNames = match[1].split(',').map((s) => s.trim()).filter(Boolean)
-    const allNames = [...new Set([...existingNames, ...missing])].sort()
-    return content.replace(existingDrizzleImport, `import { ${allNames.join(', ')} } from '@guren/orm/drizzle'`)
-  }
+  // A function replacer, not a replacement string: `specifier` and the merged
+  // names are parameters now, and `$&`/`$1` in a replacement string would be
+  // expanded instead of inserted literally.
+  return match ? content.replace(existingImport, () => importLine) : `${importLine}\n${content}`
+}
 
-  return `import { ${missing.sort().join(', ')} } from '@guren/orm/drizzle'\n${content}`
+export function ensureDrizzleImports(content: string, needed: string[]): string {
+  return ensureNamedImports(content, '@guren/orm/drizzle', needed)
 }
 
 export function ensureSqliteImports(content: string, needed: string[]): string {
-  const importLines = content.split('\n').filter((line) => line.trimStart().startsWith('import '))
-  const importContent = importLines.join('\n')
-
-  const missing = needed.filter(
-    (name) => !new RegExp(`\\b${name}\\b`).test(importContent),
-  )
-
-  if (missing.length === 0) {
-    return content
-  }
-
-  const existingSqliteImport = /import\s*\{([^}]+)\}\s*from\s*['"]drizzle-orm\/sqlite-core['"]/
-  const match = content.match(existingSqliteImport)
-
-  if (match) {
-    const existingNames = match[1].split(',').map((s) => s.trim()).filter(Boolean)
-    const allNames = [...new Set([...existingNames, ...missing])].sort()
-    return content.replace(existingSqliteImport, `import { ${allNames.join(', ')} } from 'drizzle-orm/sqlite-core'`)
-  }
-
-  return `import { ${missing.sort().join(', ')} } from 'drizzle-orm/sqlite-core'\n${content}`
+  return ensureNamedImports(content, 'drizzle-orm/sqlite-core', needed)
 }
 
 export function ensureMysqlImports(content: string, needed: string[]): string {
-  const importLines = content.split('\n').filter((line) => line.trimStart().startsWith('import '))
-  const importContent = importLines.join('\n')
-
-  const missing = needed.filter(
-    (name) => !new RegExp(`\\b${name}\\b`).test(importContent),
-  )
-
-  if (missing.length === 0) {
-    return content
-  }
-
-  const existingMysqlImport = /import\s*\{([^}]+)\}\s*from\s*['"]drizzle-orm\/mysql-core['"]/
-  const match = content.match(existingMysqlImport)
-
-  if (match) {
-    const existingNames = match[1].split(',').map((s) => s.trim()).filter(Boolean)
-    const allNames = [...new Set([...existingNames, ...missing])].sort()
-    return content.replace(existingMysqlImport, `import { ${allNames.join(', ')} } from 'drizzle-orm/mysql-core'`)
-  }
-
-  return `import { ${missing.sort().join(', ')} } from 'drizzle-orm/mysql-core'\n${content}`
+  return ensureNamedImports(content, 'drizzle-orm/mysql-core', needed)
 }
 
 /**

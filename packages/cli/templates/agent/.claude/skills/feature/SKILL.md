@@ -111,10 +111,10 @@ Generated views follow these patterns for end-to-end type safety:
 
 ```typescript
 import type { ApiRoutes } from '@/.guren/api-client.gen'
-import type { RouteErrors } from '@guren/inertia-client/typed-forms'
+import type { RouteBody, RouteErrors } from '@guren/inertia-client/typed-forms'
 import { route } from '@/.guren/routes.gen'
 
-type <Name>FormData = ApiRoutes['<names>.store']['body']
+type <Name>FormData = RouteBody<ApiRoutes, '<names>.store'>
 
 // Form submission uses route() helper
 form.post(route('<names>.store'))

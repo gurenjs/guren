@@ -102,7 +102,7 @@ bunx guren model:list           # List models with relationships
 bunx guren model:list --format json  # Models as JSON
 
 # Integrity checking
-bunx guren check                # Validate route↔controller↔page consistency, console command registration, architecture boundaries, and doc links (informational; only --arch/--docs set the exit code)
+bunx guren check                # Validate route↔controller↔page consistency, console command registration, Postgres timestamp time zones, architecture boundaries, and doc links (informational; only --arch/--docs/--spec set the exit code)
 bunx guren check --json         # Check results as JSON
 bunx guren check --arch         # Architecture boundary checks only (guren.arch.ts) — fast path for edit hooks
 bunx guren check --docs         # Doc-link checks only: OKF frontmatter (type/entities/related) + body markdown links + @docs tags (exits non-zero on failures)
@@ -370,10 +370,11 @@ export const handler = createLambdaHandler(app)
 | `packages/cli/src/make-adr.ts` | AI agent: numbered ADR scaffolding (`make:adr`) |
 | `packages/cli/src/spec-generate.ts` | AI agent: spec view orchestration (`spec:generate`, RFC 0004) |
 | `packages/cli/src/spec-check.ts` | AI agent: spec drift gate (`guren check --spec`) |
-| `packages/cli/src/schema-parser.ts` | Shared Drizzle schema AST parser (tables, columns, FKs) |
+| `packages/cli/src/schema-parser.ts` | Shared Drizzle schema AST parser (tables, columns, FKs, dialect, column options) |
 | `packages/cli/src/inflect.ts` | The one pluralization rule: collection, route slug, schema identifier, and table name for an entity. Every scaffolder and `guren check` derive names through it — a second rule is how the model's import and the schema's export drift apart |
 | `packages/cli/src/check.ts` | AI agent: integrity checking |
 | `packages/cli/src/console-check.ts` | AI agent: console command registration checks (part of `guren check`) |
+| `packages/cli/src/schema-check.ts` | AI agent: Postgres `timestamptz` schema checks (part of `guren check`) |
 | `packages/cli/src/arch-check.ts` | AI agent: architecture boundary checking (`guren.arch.ts`, see RFC 0002) |
 | `packages/cli/src/arch/index.ts` | `defineArchRules()` + types, published as the `@guren/cli/arch` subpath |
 | `packages/cli/src/changed-files.ts` | Git-diff-based file filtering shared by `check --changed` |

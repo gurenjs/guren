@@ -39,6 +39,14 @@ describe('parseFieldsString', () => {
     expect(() => parseFieldsString(':string')).toThrow('Invalid field definition')
   })
 
+  // The name lands in an object key and a property access, so a non-identifier
+  // silently produced a page that could not be parsed.
+  it('throws for a field name that is not an identifier', () => {
+    expect(() => parseFieldsString('my-name:string')).toThrow('Invalid field name')
+    expect(() => parseFieldsString('2fa:boolean')).toThrow('Invalid field name')
+    expect(() => parseFieldsString('_meta:json')).not.toThrow()
+  })
+
   it('handles whitespace', () => {
     const fields = parseFieldsString(' title : string , body : text ')
     expect(fields).toHaveLength(2)
@@ -148,50 +156,123 @@ describe('makeFeature', () => {
     }
   })
 
-  // A `date` column is a `Date` on the record but an ISO string over the wire,
-  // and a `json` column cannot back a controlled input or be rendered as a
-  // ReactNode. The golden-path smokes typecheck a real app scaffolded with
-  // these; the assertions below pin the specific conversions down.
-  it('converts date and json fields at every boundary', async () => {
-    const workspace = await createTempWorkspace('guren-cli-feature-date-json-')
+  // A date column is a `Date` in the database, an ISO string on the wire, and a
+  // bare `YYYY-MM-DD` in a date input. Each layer has to name its own shape or
+  // the scaffold does not type-check — see the RouteBody note below.
+  it('keeps a date field a string all the way through the form', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-date-')
 
     try {
-      await makeFeature('Entry', { fields: 'publishedAt:date,meta:json' })
+      await makeFeature('Event', { fields: 'startsAt:date' })
 
-      const validator = await readFile(join(workspace.dir, 'app/Http/Validators/EntryValidator.ts'), 'utf8')
-      // zod v4 requires the key schema — `z.record(z.unknown())` is a type error.
-      expect(validator).toContain('meta: z.record(z.string(), z.unknown())')
+      const resource = await readFile(
+        join(workspace.dir, 'app/Http/Resources/EventResource.ts'),
+        'utf8',
+      )
+      expect(resource).toContain('startsAt: string')
+      expect(resource).toContain(
+        'startsAt: new Date(this.resource.startsAt as string | number | Date).toISOString()',
+      )
 
-      const resource = await readFile(join(workspace.dir, 'app/Http/Resources/EntryResource.ts'), 'utf8')
-      expect(resource).toContain('publishedAt: string')
-      expect(resource).toContain('publishedAt: new Date(this.resource.publishedAt as string | number | Date).toISOString()')
+      const newPage = await readFile(join(workspace.dir, 'resources/js/pages/events/New.tsx'), 'utf8')
+      // `type="date"` renders nothing for a full ISO timestamp.
+      expect(newPage).toContain('value={form.data.startsAt.slice(0, 10)}')
+      expect(newPage).toContain("setData('startsAt', event.target.value)")
+      expect(newPage).toContain("startsAt: ''")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
 
-      const showPage = await readFile(join(workspace.dir, 'resources/js/pages/entries/Show.tsx'), 'utf8')
-      expect(showPage).toContain('{JSON.stringify(entry.meta)}')
+  it('edits a json field as text without letting mid-edit JSON clear it', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-json-')
 
-      for (const page of ['New', 'Edit']) {
-        const source = await readFile(join(workspace.dir, `resources/js/pages/entries/${page}.tsx`), 'utf8')
-        // json fields are edited as raw text: an object value fails Inertia's
-        // FormDataType constraint, so the form holds the source and parses on submit.
-        expect(source).toContain("type EntryFormData = Omit<ApiRoutes['entries.store']['body'], 'meta'> & { meta: string }")
-        // A typo in the JSON textarea must surface as a form error, not throw
-        // out of the submit handler.
-        expect(source).toContain('meta = JSON.parse(form.data.meta)')
-        expect(source).toContain("form.setError('meta', 'Enter valid JSON.')")
-        expect(source).toContain('form.transform((data) => ({ ...data, meta }))')
-        expect(source).toContain('value={toDateInputValue(form.data.publishedAt)}')
-        expect(source).toContain("form.setData('publishedAt', new Date(event.target.value))")
-        // Clearing a required date would otherwise submit an invalid Date,
-        // which `z.coerce.date()` reads as the epoch.
-        expect(source).toContain('<input type="date" required')
+    try {
+      await makeFeature('Event', { fields: 'meta:json' })
+
+      const validator = await readFile(
+        join(workspace.dir, 'app/Http/Validators/EventValidator.ts'),
+        'utf8',
+      )
+      // Zod 4 requires the key type; `any` keeps the value assignable to
+      // Inertia's FormDataType, which rejects `unknown`.
+      expect(validator).toContain('meta: z.record(z.string(), z.any())')
+
+      const newPage = await readFile(join(workspace.dir, 'resources/js/pages/events/New.tsx'), 'utf8')
+      // Uncontrolled: a controlled textarea would reject every keystroke that
+      // leaves the JSON temporarily unparseable.
+      expect(newPage).toContain('defaultValue={jsonText.meta}')
+      expect(newPage).toContain("setData('meta', JSON.parse(event.target.value))")
+      expect(newPage).toContain('meta: {}')
+
+      // Without the flag, submitting half-typed JSON silently sends the last
+      // value that parsed, with the textarea still showing the newer text.
+      expect(newPage).toContain("import { useState } from 'react'")
+      expect(newPage).toContain('const [jsonErrors, setJsonErrors] = useState<Record<string, boolean>>({})')
+      expect(newPage).toContain('setJsonErrors((prev) => ({ ...prev, meta: true }))')
+      expect(newPage).toContain('{jsonErrors.meta && (')
+
+      const showPage = await readFile(join(workspace.dir, 'resources/js/pages/events/Show.tsx'), 'utf8')
+      // An object is not a valid React child.
+      expect(showPage).toContain('{JSON.stringify(event.meta)}')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('does not headline the Index page with a json field', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-index-json-')
+
+    try {
+      // json first, so the naive "first field is the title" pick would land on
+      // it and render an object as a React child.
+      await makeFeature('Event', { fields: 'meta:json,title:string,note:text' })
+
+      const indexPage = await readFile(join(workspace.dir, 'resources/js/pages/events/Index.tsx'), 'utf8')
+
+      expect(indexPage).not.toContain('{event.meta}')
+      expect(indexPage).toContain('{event.title}')
+      expect(indexPage).toContain('{event.note ?? \'\'}')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // Two fields differing only in punctuation used to generate one identifier —
+  // `_meta` and `meta` both became `setMetaInvalid`, a duplicate declaration.
+  it('keeps two similarly named json fields apart', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-json-names-')
+
+    try {
+      await makeFeature('Thing', { fields: '_meta:json,meta:json' })
+
+      const newPage = await readFile(join(workspace.dir, 'resources/js/pages/things/New.tsx'), 'utf8')
+
+      expect(newPage).toContain('{jsonErrors._meta && (')
+      expect(newPage).toContain('{jsonErrors.meta && (')
+      // One hook pair for the page, not one per field.
+      expect(newPage.match(/useState/g)).toHaveLength(3)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('derives form types through RouteBody rather than indexing ApiRoutes', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-routebody-')
+
+    try {
+      await makeFeature('Post', { fields: 'title:string' })
+
+      for (const page of ['New.tsx', 'Edit.tsx']) {
+        const source = await readFile(join(workspace.dir, 'resources/js/pages/posts', page), 'utf8')
+        expect(source).toContain("type PostFormData = RouteBody<ApiRoutes, 'posts.store'>")
+        expect(source).toContain("from '@guren/inertia-client/typed-forms'")
+        // The record is named `post` here, but an entity whose variable name is
+        // `event` would collide with a submit handler that also took `event`.
+        expect(source).toContain('onSubmit={(submitEvent) =>')
+        // No json field, so nothing on the page needs state.
+        expect(source).not.toContain('useState')
       }
-
-      // Edit receives what the controller actually sends — the resource — not
-      // the request body type, which diverges from it for date fields.
-      const editPage = await readFile(join(workspace.dir, 'resources/js/pages/entries/Edit.tsx'), 'utf8')
-      expect(editPage).toContain('entry: EntryResourceData')
-      expect(editPage).toContain('publishedAt: new Date(entry.publishedAt)')
-      expect(editPage).toContain('meta: JSON.stringify(entry.meta)')
     } finally {
       await workspace.cleanup()
     }

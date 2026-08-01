@@ -89,6 +89,7 @@ describe('Router route contract metadata', () => {
         },
         middlewareNames: [],
         hasInlineMiddleware: false,
+        capabilities: {},
         controller: undefined,
         summary: 'Create post',
         description: 'Creates a post resource.',
@@ -119,6 +120,7 @@ describe('Router route contract metadata', () => {
         },
         middlewareNames: [],
         hasInlineMiddleware: false,
+        capabilities: {},
         controller: undefined,
         summary: 'Health check',
         description: undefined,
@@ -322,5 +324,73 @@ describe('route contract array query params (#12)', () => {
 
     const bad = await app.request('/posts?tag=a')
     expect(bad.status).toBe(422)
+  })
+})
+
+describe('Router capability aggregation', () => {
+  const noop: MiddlewareHandler = async (_ctx, next) => { await next() }
+
+  function stamped(mode: 'required' | 'guest-only'): MiddlewareHandler {
+    const handler: MiddlewareHandler = async (_ctx, next) => { await next() }
+    Object.defineProperty(handler, Symbol.for('guren.capabilities'), {
+      value: { authentication: { mode } },
+      enumerable: false,
+    })
+    return handler
+  }
+
+  it('always emits capabilities, empty when nothing is recognized', () => {
+    const router = new Router()
+    router.get('/plain', () => 'ok')
+    router.post('/inline', () => 'ok', noop)
+
+    const defs = router.definitions()
+    expect(defs[0]!.capabilities).toEqual({})
+    expect(defs[1]!.capabilities).toEqual({})
+  })
+
+  it('reads stamps from inline middleware', () => {
+    const router = new Router()
+    router.post('/posts', () => 'ok', stamped('required'))
+
+    expect(router.definitions()[0]!.capabilities).toEqual({
+      authentication: { mode: 'required' },
+    })
+  })
+
+  it('reads stamps through aliases and groups', () => {
+    const router = new Router<'member' | 'web'>()
+    router.aliasMiddleware('member', stamped('required'))
+    router.groupMiddleware('web', ['member'])
+    router.post('/direct', () => 'ok').middleware('member')
+    router.post('/grouped', () => 'ok').middleware('web')
+
+    const defs = router.definitions()
+    expect(defs[0]!.capabilities?.authentication?.mode).toBe('required')
+    expect(defs[1]!.capabilities?.authentication?.mode).toBe('required')
+  })
+
+  it('skips unregistered middleware names instead of throwing', () => {
+    // Declared but never aliased: the name typechecks while staying
+    // unregistered at runtime, which is the case under test.
+    const router = new Router<'auth'>()
+    router.post('/posts', () => 'ok').middleware('auth')
+
+    expect(router.definitions()[0]!.capabilities).toEqual({})
+  })
+
+  it('lets required win over guest-only', () => {
+    const router = new Router()
+    router.post('/odd', () => 'ok', stamped('guest-only'), stamped('required'))
+
+    expect(router.definitions()[0]!.capabilities?.authentication?.mode).toBe('required')
+  })
+
+  it('requireAuthenticated and requireGuest carry their stamps', async () => {
+    const { requireAuthenticated, requireGuest } = await import('../../src/http/middleware/auth')
+    const { capabilitiesOf } = await import('../../src/http/middleware/capabilities')
+
+    expect(capabilitiesOf(requireAuthenticated())).toEqual({ authentication: { mode: 'required' } })
+    expect(capabilitiesOf(requireGuest())).toEqual({ authentication: { mode: 'guest-only' } })
   })
 })
