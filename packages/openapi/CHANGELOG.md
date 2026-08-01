@@ -1,5 +1,148 @@
 # @guren/openapi
 
+## 1.1.0
+
+### Minor Changes
+
+- 1bccf80: feat: the schema walkers read the zod 4 API only, and refuse zod 3 loudly
+
+  The TypeScript-type renderer (`guren codegen`, `guren context`) and the OpenAPI
+  generator previously walked both Zod majors. The two dialects disagree about
+  the meaning of `_def.type` — v3 stores a nested schema there, v4 the type
+  name — and that ambiguity is what produced the walker bugs that had to be
+  fixed twice. Since every Guren scaffold has always pinned zod 4, the walkers
+  now read the v4 layout exclusively.
+
+  A schema authored with the zod v3 API — whether from the old `zod@3` package
+  or the `zod/v3` subpath that zod 4 itself ships — is detected (only v3 sets
+  `_def.typeName`) and refused with an explicit message instead of being
+  rendered wrong or silently dropped: the CLI warns once per process, the
+  OpenAPI document records a warning naming the schema's location. The message
+  lives in `@guren/core/internal/zod-compat` as `ZOD3_UNSUPPORTED_MESSAGE`, so
+  the two surfaces cannot drift apart. Detection runs on every node, not just
+  at the walk's entry — a v3 node nested inside a v4 object (which nothing but
+  the type system prevents) is refused too, and the OpenAPI request-body
+  `required` probe survives the `safeParse` throw such a hybrid produces in
+  zod 4 rather than crashing document generation.
+
+  Dropping the v3 dialect also deletes code that was unreachable under v4:
+  the `pipeline`, `discriminatedunion`, and `nativeenum` case labels (v4 names
+  them `pipe`, `union`, and `enum`), the `effects` and `branded` wrapper names
+  (v4 has no such nodes — `.brand()` adds nothing at runtime), and the
+  function-shaped `_def.shape` read.
+
+  Two behavior improvements ride along, both in enum handling (`z.nativeEnum`
+  produces the same node as `z.enum` in zod 4). Documented values are now read
+  from zod's own computed set (`_zod.values`) instead of re-derived from the
+  entries object, so what the document lists is what zod parses by
+  construction: reverse mappings of a numeric TypeScript enum (`{ A: 0,
+'0': 'A' }`) no longer leak into the OpenAPI `enum` list, and the derivation
+  has no false positives — a hand-rolled reverse-mapping filter would wrongly
+  drop a member whose string value collides with another key (`{ A: 'B',
+B: 1 }`). A mixed string/number enum also documents as
+  `type: ['string', 'number']` rather than `number`. The `zod/v3` subpath was
+  never used by any Guren template, example, or generated app.
+
+### Patch Changes
+
+- 8567233: Keep array element types, Zod 3 pipelines, and response-side types in the
+  generated OpenAPI document.
+
+  Every array rendered as `items: {}`. Zod 4 keeps an array's element in
+  `_def.element` and puts the literal string `'array'` in `_def.type`, and the
+  walker read `_def.type` first — so it handed that string back to itself,
+  failed to recognize it as a schema, and fell back to an empty item schema.
+  Zod 3 stores the element in `_def.type`, so both orderings have to be tried,
+  with `element` first.
+
+  Zod 3 names a pipe `ZodPipeline`, which the walker did not recognize at all:
+  a `.pipe()`ed property was dropped from the document rather than mis-typed.
+  Zod 4's `prefault()` and `nonoptional()` were dropped the same way, as was a
+  Zod 3 `.brand()`, which keeps its inner schema under a key the walker read as
+  a type name.
+
+  Request and response schemas are now walked in their own direction. A pipe
+  carries a separate type per side, so a `z.string().pipe(z.coerce.number())`
+  response documented the string a caller sends instead of the number it
+  receives; a `.transform()` has no readable output type, so its input side
+  stays the answer for both. A `.default()`ed field is likewise omittable from
+  a request but always present in a response, and now appears in the response's
+  `required` list.
+
+  A `query` or `params` schema wrapped in `.default()`, `.optional()`,
+  `.catch()` or `.nullable()` lost every one of its parameters, because the walk
+  that finds the object behind a parameter schema looked through a shorter list
+  of wrappers than the two walks that render types and decide presence. All
+  three now read one shared set, so a wrapper cannot reach one walk and miss
+  another.
+
+  Two more properties were described as required when they are not, and one
+  the reverse. A `.catch()`ed field substitutes its fallback for any failure, a
+  missing value included, so a request never has to carry it. A `.pipe()`d field
+  runs both stages, so it may be omitted only when neither stage rejects a
+  missing value — reading just the side being documented promised an omission
+  the other stage refuses.
+
+  A `z.lazy()` schema keeps its contents behind a getter this walker does not
+  call, so the property cannot be documented. It is now reported as a warning
+  instead of vanishing, along with any other wrapper whose contents cannot be
+  read — a silently missing property reads as a schema that never declared one.
+
+  Coercion is deliberately not widened: OpenAPI describes JSON in both
+  directions, so `z.coerce.date()` already documents as the ISO string a caller
+  sends, and widening `z.coerce.number()` to accept a string would cost callers
+  precision in exchange for nothing the schema requires.
+
+- 460e0e2: refactor: share the Zod v3/v4 compatibility primitives between the two schema walkers
+
+  `@guren/cli`'s TypeScript-type renderer and `@guren/openapi`'s schema-object
+  renderer each carried their own copy of the knowledge needed to read a Zod
+  schema without caring which major produced it: type-name lookup, the `Zod`
+  prefix normalization, wrapper unwrapping, pipe-side selection, object-shape
+  reading, and enum/literal value extraction. Knowledge added to one never
+  reached the other — a Zod 4 array keeps its element in `_def.element` while
+  `_def.type` holds the string `'array'`, and reading them in the wrong order
+  silently dropped the element type. That single bug had to be found and fixed
+  twice, months apart, once per package.
+
+  Those primitives now live in `@guren/core/internal/zod-compat`, a deep-import
+  internal module in the same vein as `internal/deploy-build`. Both walkers read
+  from it, so a version quirk learned once is known in both places.
+
+  The set of type names that carry exactly one nested schema moves too, as
+  `SINGLE_CHILD_WRAPPERS` plus the two partitions each walker needs. The walkers
+  had looked like they disagreed here — one held a five-name set, the other a
+  twelve-name one — but the CLI simply handled the other seven as explicit
+  `switch` cases. They differ in how they partition the vocabulary, not in what
+  is in it, so the membership is now stated once.
+
+  The type switches themselves stay where they are: one produces TypeScript type
+  strings, the other OpenAPI schema objects. Their leaf vocabularies have
+  legitimately diverged (the CLI renders `void`/`any`/`never`, which OpenAPI
+  cannot express), and that is a rendering decision rather than version
+  knowledge.
+
+  Both `isOptional`s also stay with their callers, but not because each is right
+  for its own purpose — the CLI reads one side of a `.pipe()` and the OpenAPI
+  walker requires both, and each can be fooled by a pipeline the other handles.
+  Deciding omissibility correctly means simulating a parse, which is a separate
+  piece of work; the two approximations are now labelled as such where they live.
+
+  Three incidental hardenings come along for the ride. The CLI's inner-schema
+  lookup now skips non-object candidates instead of taking the first non-nullish
+  one; a nested node with no readable type name renders as `unknown` rather than
+  throwing; and two degenerate schemas that used to emit invalid TypeScript now
+  render correctly — an empty `z.enum([])` as `never` instead of an empty string,
+  and `z.literal(undefined)` as `undefined` rather than being dropped by
+  `JSON.stringify`.
+
+- Updated dependencies [fe0c13d]
+- Updated dependencies [fe0c13d]
+- Updated dependencies [e2c82da]
+- Updated dependencies [460e0e2]
+- Updated dependencies [1bccf80]
+  - @guren/core@1.5.0
+
 ## 1.0.0
 
 ### Major Changes
