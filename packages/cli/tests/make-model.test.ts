@@ -64,7 +64,7 @@ describe('makeModel', () => {
     const result = await makeModel('News')
 
     const content = await readFile(result, 'utf8')
-    // 'news' already ends with 's', so it should stay 'news'
+    // Singularized to 'new' before pluralizing, so it stays 'news'.
     expect(content).toContain('import { news }')
   })
 

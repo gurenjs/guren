@@ -21,6 +21,7 @@ import {
   staticStringProperty,
 } from './model-parser'
 import { checkConsoleCommandRegistration } from './console-check'
+import { tableNameFor } from './inflect'
 import { checkSchemaTimestamps } from './schema-check'
 import { schemaPathFor } from './schema-parser'
 import { ParseCache } from './parse-cache'
@@ -154,14 +155,14 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       const hasSchema = await fileExists(cwd, schemaPath)
       if (hasSchema) {
         const schemaContent = await readFile(resolve(cwd, schemaPath), 'utf-8')
-        const tableLower = name.toLowerCase() + 's'
-        const hasTable = schemaContent.includes(`'${tableLower}'`) || schemaContent.includes(`"${tableLower}"`)
+        const tableName = tableNameFor(name)
+        const hasTable = schemaContent.includes(`'${tableName}'`) || schemaContent.includes(`"${tableName}"`)
         checks.push(
           check(
             `model-schema:${name}`,
             `${name} schema`,
             hasTable ? 'pass' : 'warn',
-            hasTable ? `Table definition found for ${name}.` : `No table '${tableLower}' found in ${schemaPath}.`,
+            hasTable ? `Table definition found for ${name}.` : `No table '${tableName}' found in ${schemaPath}.`,
             hasTable ? undefined : `Add table definition to ${schemaPath} for ${name}.`,
             relPath,
           ),
