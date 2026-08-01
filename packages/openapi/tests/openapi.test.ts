@@ -228,6 +228,23 @@ describe('@guren/openapi', () => {
       expect(responseDocument(schema()).schema?.required).toEqual(['body'])
     })
 
+    // `nullable` is the one single-child wrapper the type walk must NOT look
+    // through: it renders as a union with null rather than passing its inner
+    // schema out unchanged. It shares a membership list with the wrappers that
+    // are looked through, so the exception has to be asserted separately —
+    // otherwise dropping it just silently emits the unwrapped schema.
+    it('renders a nullable property as a union with null rather than unwrapping it', () => {
+      for (const schema of [
+        z.object({ a: z.string().nullable() }),
+        z3.object({ a: z3.string().nullable() }),
+      ]) {
+        const { schema: document, warnings } = bodyDocument(schema)
+
+        expect(document?.properties?.a).toEqual({ anyOf: [{ type: 'string' }, { type: 'null' }] })
+        expect(warnings).toEqual([])
+      }
+    })
+
     // The type and the presence of a property are read by separate walks over
     // separate wrapper lists, so a wrapper added to one and not the other
     // quietly makes an optional property required.
