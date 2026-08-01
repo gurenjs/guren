@@ -57,6 +57,16 @@ describe('describeCallerFile', () => {
     expect(describeCallerFile(bare)).toBe('/app (old)/routes/api.ts')
   })
 
+  test('should key a path that contains an unmatched closing parenthesis', () => {
+    // Nothing in the frame closes it, so counting depth alone runs off the front
+    // and the frame is skipped — the walk then keys the owner on whichever
+    // caller sits above it, collapsing every owner built through that caller
+    // into one slot. The leftmost `(` is the reading that keeps the path whole.
+    const stack = 'Error\n    at f (/app/dist/index.js:1:1)\n    at g (/app/name).ts:31:26)'
+
+    expect(describeCallerFile(stack)).toBe('/app/name).ts')
+  })
+
   test('should read past a function name that contains parentheses', () => {
     // Bun emits this for a method whose key carries parentheses:
     //   ({ 'weird (name)'() {} })['weird (name)']()

@@ -82,6 +82,14 @@ function isHotReloadRuntime(): boolean {
 const WHITESPACE = /\s/
 const LINE_TERMINATOR = /[\n\r\u2028\u2029]/
 
+const OPEN_PAREN = 0x28
+const CLOSE_PAREN = 0x29
+
+/** The characters a stack frame can never span, so a scan stops at them. */
+function isLineTerminator(code: number): boolean {
+  return code === 0x0a || code === 0x0d || code === 0x2028 || code === 0x2029
+}
+
 function isDigitAt(text: string, index: number): boolean {
   const code = text.charCodeAt(index)
   return code >= 48 && code <= 57
@@ -119,8 +127,9 @@ function pathBefore(frame: string, from: number, splits: number[]): string | und
 }
 
 /**
- * The index of the `(` that closes a frame's final `)`, found by scanning
- * backward and counting nesting depth, or `undefined` when it never balances.
+ * The index of the `(` that matches the `)` at `closeIndex`, or `undefined`
+ * when the frame carries no usable `(` at all. `closeIndex` must point at the
+ * frame's final `)`; anything else is rejected.
  *
  * Neither the leftmost nor the rightmost `(` is right in general. A path may
  * contain one — `at fn (/app (old)/x.ts:1:2)` needs the outer, *leftmost*
@@ -128,28 +137,46 @@ function pathBefore(frame: string, from: number, splits: number[]): string | und
  * (/app/x.ts:1:2)` needs the outer, *rightmost* pair. Depth is what actually
  * tells the two apart; a fixed "first" or "last" gets one of them wrong.
  *
- * Bails if the scan crosses a line terminator before depth returns to zero: a
- * path could never span one, so an unbalanced `(` on the far side of a line
- * break was never part of this frame's location.
+ * Depth alone would reject a frame whose location holds an *unmatched* `)`, as
+ * `/app/name).ts` or a URL ending `?label=)` does — the scan runs off the front
+ * still owing a paren. So the leftmost `(` it passed is kept as a fallback for
+ * exactly that case. Only frames the depth rule rejects outright can reach it.
+ *
+ * The scan stops at a line terminator: a path could never span one, so neither
+ * a balanced `(` nor the fallback may come from the far side of a break.
+ * Characters are compared by code rather than tested against `LINE_TERMINATOR`
+ * because this loop runs over every character of every frame.
+ *
+ * Its twin is `packages/server/src/support/stack-frames.ts`. The body there is
+ * identical character for character on purpose; only this prose differs. Keep
+ * the two in step.
  */
 function matchingOpenParen(frame: string, closeIndex: number): number | undefined {
+  if (frame.charCodeAt(closeIndex) !== CLOSE_PAREN) {
+    return undefined
+  }
+
   let depth = 0
+  let leftmostOpen: number | undefined
 
   for (let index = closeIndex; index >= 0; index--) {
-    const character = frame[index]
+    const code = frame.charCodeAt(index)
 
-    if (LINE_TERMINATOR.test(character)) {
-      return undefined
+    if (isLineTerminator(code)) {
+      break
     }
 
-    if (character === ')') {
+    if (code === CLOSE_PAREN) {
       depth++
-    } else if (character === '(' && --depth === 0) {
-      return index
+    } else if (code === OPEN_PAREN) {
+      if (--depth === 0) {
+        return index
+      }
+      leftmostOpen = index
     }
   }
 
-  return undefined
+  return leftmostOpen
 }
 
 /**
