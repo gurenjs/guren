@@ -324,3 +324,164 @@ describe('route contract array query params (#12)', () => {
     expect(bad.status).toBe(422)
   })
 })
+
+describe('route contract output validation for Response-returning handlers', () => {
+  /** Emits `{"id":1}` with a Content-Length and ETag that describe exactly those bytes. */
+  const staleHeaderController = () => class StaleHeaderController extends Controller {
+    async index() {
+      const body = JSON.stringify({ id: 1 })
+      return new Response(body, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': String(body.length),
+          ETag: 'W/"original"',
+        },
+      })
+    }
+  }
+
+  it('applies schema defaults to the body of a controller action response', async () => {
+    class EchoController extends Controller {
+      async index() {
+        return new Response(JSON.stringify({}), { headers: { 'Content-Type': 'application/json' } })
+      }
+    }
+
+    const router = new Router()
+    router.get('/echo', {
+      output: z.object({ body: z.string().default('') }),
+    }, [EchoController, 'index'])
+
+    const app = new Hono()
+    router.mount(app)
+
+    const response = await app.request('/echo')
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ body: '' })
+  })
+
+  it('preserves status and custom headers when rebuilding a controller action response', async () => {
+    class CreatedController extends Controller {
+      async store() {
+        return new Response(JSON.stringify({ id: 1 }), {
+          status: 201,
+          headers: { 'Content-Type': 'application/json', 'X-Custom': 'value' },
+        })
+      }
+    }
+
+    const router = new Router()
+    router.post('/created', {
+      output: z.object({ id: z.number() }),
+    }, [CreatedController, 'store'])
+
+    const app = new Hono()
+    router.mount(app)
+
+    const response = await app.request('/created', { method: 'POST' })
+
+    expect(response.status).toBe(201)
+    expect(response.headers.get('X-Custom')).toBe('value')
+    expect(response.headers.get('Content-Type')).toBe('application/json')
+  })
+
+  // Headers describing the replaced body must not survive the rebuild. Hono's `c.res`
+  // setter re-copies headers off the response it replaces, so dropping them before
+  // the assignment is not enough.
+  it('drops Content-Length and ETag that no longer describe the rebuilt body', async () => {
+    const router = new Router()
+    router.get('/stale', {
+      output: z.object({ id: z.number(), padding: z.string().default('xxxxxxxxxxxxxxxxxxxx') }),
+    }, [staleHeaderController(), 'index'])
+
+    const app = new Hono()
+    router.mount(app)
+
+    const response = await app.request('/stale')
+    const text = await response.text()
+
+    expect(text).toBe(JSON.stringify({ id: 1, padding: 'xxxxxxxxxxxxxxxxxxxx' }))
+    expect(response.headers.get('Content-Length')).toBeNull()
+    expect(response.headers.get('ETag')).toBeNull()
+  })
+
+  it('passes the response through untouched when parsing changes nothing', async () => {
+    const router = new Router()
+    router.get('/stale', {
+      output: z.object({ id: z.number() }),
+    }, [staleHeaderController(), 'index'])
+
+    const app = new Hono()
+    router.mount(app)
+
+    const response = await app.request('/stale')
+
+    // No rebuild, so the handler's own Content-Length and ETag still describe the body.
+    expect(await response.text()).toBe(JSON.stringify({ id: 1 }))
+    expect(response.headers.get('Content-Length')).toBe('8')
+    expect(response.headers.get('ETag')).toBe('W/"original"')
+  })
+
+  it('skips validation for non-JSON controller action responses', async () => {
+    class PlainController extends Controller {
+      async index() {
+        return new Response('plain text')
+      }
+    }
+
+    const router = new Router()
+    router.get('/plain', {
+      output: z.object({ body: z.string() }),
+    }, [PlainController, 'index'])
+
+    const app = new Hono()
+    router.mount(app)
+
+    const response = await app.request('/plain')
+
+    expect(response.status).toBe(200)
+    expect(await response.text()).toBe('plain text')
+  })
+
+  it('rejects a controller action response that fails output validation', async () => {
+    class InvalidController extends Controller {
+      async index() {
+        return new Response(JSON.stringify({ id: 'not-a-number' }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+    }
+
+    const router = new Router()
+    router.get('/invalid', {
+      output: z.object({ id: z.number() }),
+    }, [InvalidController, 'index'])
+
+    const app = new Hono()
+    router.mount(app)
+
+    const response = await app.request('/invalid')
+
+    expect(response.status).toBe(500)
+    const json = await response.json() as { message: string }
+    expect(json.message).toBe('Response validation failed')
+  })
+
+  // The typed handler signature forbids returning a Response when `output` is set,
+  // so this branch is only reachable from untyped (JS) callers.
+  it('applies schema defaults when an untyped inline handler returns a Response', async () => {
+    const router = new Router()
+    router.get('/inline', {
+      output: z.object({ body: z.string().default('') }),
+    }, (async () => new Response(JSON.stringify({}))) as never)
+
+    const app = new Hono()
+    router.mount(app)
+
+    const response = await app.request('/inline')
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ body: '' })
+  })
+})
