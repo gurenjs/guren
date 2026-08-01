@@ -11,7 +11,7 @@ export const SITE_TITLE =
 
 export const SITE_DESCRIPTION = {
   en: 'Guren is a fullstack TypeScript framework built for AI-agent-driven development: Laravel-style conventions, end-to-end type safety from route to React component, and mechanical verification your agent runs itself — Bun-native, deployable anywhere.',
-  ja: 'Guren は Bun ネイティブのフルスタック TypeScript フレームワーク。Laravel 流の MVC コントローラ、Drizzle ORM モデル、Inertia + React ページ、ルートからコンポーネントまでの型安全性を備えています。',
+  ja: 'Guren は AI エージェント時代のためのフルスタック TypeScript フレームワーク。人間とエージェントが同じ地図で開発できるよう、Laravel 流の規約、ルートから React コンポーネントまでの型安全、エージェント自身が実行できる機械検証を備えます。Bun ネイティブで、デプロイ先は自由です。',
 } as const
 
 /** Cache policy for machine-facing endpoints (sitemap, llms.txt, RSS, raw Markdown). */
