@@ -1,24 +1,23 @@
 /**
  * Extracts TypeScript type literals from Zod schema objects at runtime.
- * Supports both Zod v3 (`_def.typeName`) and Zod v4 (`_def.type` / `.type`).
+ * Every read of a Zod-version-specific `_def` shape goes through
+ * `@guren/core/internal/zod-compat`; only rendering decisions live here.
  */
 
-interface ZodAnyLike {
-  _def?: Record<string, unknown>
-  type?: string
-  shape?: Record<string, ZodAnyLike>
-}
-
-/**
- * Which side of a schema to render.
- *
- * - `output` — the parsed value, i.e. what a controller receives after
- *   validation. This is what a response body looks like.
- * - `input` — the value a client has to send over the wire. Coercing schemas
- *   differ here: `z.coerce.date()` parses to a `Date`, but JSON carries it as
- *   an ISO string, so only `string` is actually sendable.
- */
-export type SchemaIo = 'input' | 'output'
+import {
+  arrayElement,
+  enumValues,
+  getTypeName,
+  innerSchema,
+  literalValues,
+  objectShape,
+  pipeSide,
+  schemaAt,
+  type SchemaIo,
+  TRANSPARENT_WRAPPERS,
+  typeOf,
+  type ZodSchemaLike,
+} from '@guren/core/internal/zod-compat'
 
 interface SchemaTypeOptions {
   /**
@@ -42,48 +41,19 @@ const COERCED_INPUT_TYPES: Record<string, string> = {
 }
 
 /**
- * Wrappers that neither add to a type nor decide presence — whatever they wrap
- * answers both questions. `zodToType` and `isOptional` walk separately, so this
- * is the one list keeping them from disagreeing about what to look through.
- */
-const TRANSPARENT_WRAPPERS = new Set(['catch', 'readonly', 'branded', 'lazy', 'effects'])
-
-function getTypeName(z: ZodAnyLike): string | undefined {
-  // v3: _def.typeName = "ZodString" etc.
-  // v4: _def.type = "string" etc. or top-level .type
-  return (z._def?.typeName as string) ?? (z._def?.type as string) ?? z.type
-}
-
-/** Normalize v3's `"ZodString"` and v4's `"string"` to one lowercase name. */
-function normalizeTypeName(typeName: string): string {
-  return typeName.startsWith('Zod') ? typeName.slice(3).toLowerCase() : typeName.toLowerCase()
-}
-
-/**
- * Whether this node is a `.transform()`'s output half — a wrapped function with
- * no type to read, as opposed to a schema that genuinely parses to `unknown`.
- */
-function isTransform(z: ZodAnyLike): boolean {
-  const tn = getTypeName(z)
-  return tn ? normalizeTypeName(tn) === 'transform' : false
-}
-
-/**
  * Convert a Zod schema object to a TypeScript type string.
  * Returns `undefined` if the schema structure is unrecognizable.
  */
 export function schemaToTypeString(schema: unknown, options: SchemaTypeOptions): string | undefined {
   if (!schema || typeof schema !== 'object') return undefined
-  const z = schema as ZodAnyLike
+  const z = schema as ZodSchemaLike
   if (!getTypeName(z)) return undefined
   return zodToType(z, options.io)
 }
 
-function zodToType(z: ZodAnyLike, io: SchemaIo): string {
-  const tn = getTypeName(z)!
+function zodToType(z: ZodSchemaLike, io: SchemaIo): string {
   const def = z._def ?? {}
-
-  const t = normalizeTypeName(tn)
+  const t = typeOf(z)
 
   // `.coerce` is recorded on the schema itself in both v3 and v4, so this has
   // to be checked before the plain type mapping below claims the parsed type.
@@ -92,7 +62,8 @@ function zodToType(z: ZodAnyLike, io: SchemaIo): string {
   }
 
   if (TRANSPARENT_WRAPPERS.has(t)) {
-    return inner(def) ? zodToType(inner(def)!, io) : 'unknown'
+    const wrapped = innerSchema(def)
+    return wrapped ? zodToType(wrapped, io) : 'unknown'
   }
 
   switch (t) {
@@ -109,27 +80,19 @@ function zodToType(z: ZodAnyLike, io: SchemaIo): string {
     case 'never': return 'never'
 
     case 'literal': {
-      // v3: _def.value, v4: _def.values[]
-      if ('value' in def) return JSON.stringify(def.value)
-      const vals = def.values as unknown[]
-      if (vals) return vals.map((v) => JSON.stringify(v)).join(' | ')
+      const vals = literalValues(def)
+      if (vals.length > 0) return vals.map(literalType).join(' | ')
       return 'unknown'
     }
 
     case 'array': {
-      // v4 holds the element in `_def.element` and puts the literal string
-      // `'array'` in `_def.type` — so `element` has to be tried first, or v4
-      // arrays hand that string back to `zodToType`. v3 has only `_def.type`.
-      const el = (def.element ?? def.type) as ZodAnyLike | undefined
+      const el = arrayElement(def)
       if (el) return `${wrapComplex(zodToType(el, io))}[]`
       return 'unknown[]'
     }
 
     case 'object': {
-      // v3: _def.shape() is a function, v4: _def.shape is an object
-      const shape = typeof def.shape === 'function'
-        ? (def.shape as () => Record<string, ZodAnyLike>)()
-        : (def.shape ?? z.shape) as Record<string, ZodAnyLike> | undefined
+      const shape = objectShape(z)
       if (!shape) return 'Record<string, unknown>'
       const entries = Object.entries(shape)
       if (entries.length === 0) return '{}'
@@ -141,7 +104,7 @@ function zodToType(z: ZodAnyLike, io: SchemaIo): string {
     }
 
     case 'nullable': {
-      const i = inner(def)
+      const i = innerSchema(def)
       return i ? `${zodToType(i, io)} | null` : 'unknown | null'
     }
 
@@ -151,19 +114,15 @@ function zodToType(z: ZodAnyLike, io: SchemaIo): string {
     case 'optional':
     case 'default':
     case 'prefault':
-    case 'nonoptional':
-      return inner(def) ? zodToType(inner(def)!, io) : 'unknown'
+    case 'nonoptional': {
+      const wrapped = innerSchema(def)
+      return wrapped ? zodToType(wrapped, io) : 'unknown'
+    }
 
     case 'pipe':
     case 'pipeline': {
-      // v3 names this `ZodPipeline`; v4 uses one pipe for both `.pipe()` and
-      // `.transform()`. `_def.in` is what a client sends, `_def.out` what the
-      // controller receives — except for a transform, whose out side is the
-      // function itself, leaving the in side as the best available answer.
-      const from = def.in as ZodAnyLike | undefined
-      const to = def.out as ZodAnyLike | undefined
-      if (io === 'output' && to && !isTransform(to)) return zodToType(to, io)
-      return from ? zodToType(from, io) : 'unknown'
+      const side = pipeSide(def, io)
+      return side ? zodToType(side, io) : 'unknown'
     }
 
     case 'transform':
@@ -171,29 +130,28 @@ function zodToType(z: ZodAnyLike, io: SchemaIo): string {
 
     case 'union':
     case 'discriminatedunion': {
-      const opts = def.options as ZodAnyLike[] | undefined
+      const opts = def.options as ZodSchemaLike[] | undefined
       if (opts) return opts.map((o) => zodToType(o, io)).join(' | ')
       return 'unknown'
     }
 
     case 'intersection': {
-      const l = def.left as ZodAnyLike | undefined
-      const r = def.right as ZodAnyLike | undefined
+      const l = def.left as ZodSchemaLike | undefined
+      const r = def.right as ZodSchemaLike | undefined
       return `${l ? zodToType(l, io) : 'unknown'} & ${r ? zodToType(r, io) : 'unknown'}`
     }
 
     case 'record': {
-      const vt = (def.valueType ?? def.type) as ZodAnyLike | undefined
+      const vt = schemaAt(def, 'valueType')
       return vt ? `Record<string, ${zodToType(vt, io)}>` : 'Record<string, unknown>'
     }
 
     case 'enum': {
-      // v3: _def.values[], v4: _def.entries {}
-      const vals = def.values as string[] | undefined
-      if (vals) return vals.map((v) => JSON.stringify(v)).join(' | ')
-      const entries = def.entries as Record<string, string> | undefined
-      if (entries) return Object.values(entries).map((v) => JSON.stringify(v)).join(' | ')
-      return 'string'
+      // An enum with no members accepts nothing, so `never` is its type. The
+      // empty-array case used to fall through to `[].join()` and emit an empty
+      // string, which is not valid TypeScript in the position this lands in.
+      const vals = enumValues(def)
+      return vals.length > 0 ? vals.map(literalType).join(' | ') : 'never'
     }
 
     case 'nativeenum':
@@ -203,7 +161,7 @@ function zodToType(z: ZodAnyLike, io: SchemaIo): string {
       return 'unknown[]'
 
     case 'promise': {
-      const i = inner(def) ?? (def.type as ZodAnyLike | undefined)
+      const i = innerSchema(def)
       return i ? `Promise<${zodToType(i, io)}>` : 'Promise<unknown>'
     }
 
@@ -212,29 +170,20 @@ function zodToType(z: ZodAnyLike, io: SchemaIo): string {
   }
 }
 
-function inner(def: Record<string, unknown>): ZodAnyLike | undefined {
-  // v3: innerType or schema; v3's `.brand()` uses `type`, which in v4 holds the
-  // type *name* instead — so it only counts when it is actually a schema.
-  const candidate = def.innerType ?? def.schema ?? def.type
-  return candidate && typeof candidate === 'object' ? (candidate as ZodAnyLike) : undefined
-}
-
 /**
  * Whether a field may be omitted — the presence half of the input/output split
  * that `zodToType` handles for types.
  */
-function isOptional(z: ZodAnyLike, io: SchemaIo): boolean {
-  const tn = getTypeName(z)
-  if (!tn) return false
-  const t = normalizeTypeName(tn)
+function isOptional(z: ZodSchemaLike, io: SchemaIo): boolean {
+  const t = typeOf(z)
   const def = z._def ?? {}
-  const look = (s: unknown): boolean => (s ? isOptional(s as ZodAnyLike, io) : false)
+  const look = (s: unknown): boolean => (s ? isOptional(s as ZodSchemaLike, io) : false)
 
   if (TRANSPARENT_WRAPPERS.has(t)) {
     // `.catch()` swallows any failure, so an omitted key is never rejected;
     // on the way out it is absent only if what it wraps could be.
     if (t === 'catch' && io === 'input') return true
-    return look(inner(def))
+    return look(innerSchema(def))
   }
 
   switch (t) {
@@ -248,15 +197,15 @@ function isOptional(z: ZodAnyLike, io: SchemaIo): boolean {
     case 'nonoptional':
       return false
     case 'nullable':
-      return look(inner(def))
+      return look(innerSchema(def))
+    // Read the side being rendered, so presence matches the type `zodToType`
+    // reports for this node. An approximation: a pipeline runs both stages, so
+    // `z.string().optional().pipe(z.string())` is reported omissible even
+    // though the second stage rejects a missing value. Deciding that properly
+    // means simulating a parse, not reading a `_def`.
     case 'pipe':
-    case 'pipeline': {
-      // Read the side being rendered — and when the out side is a transform,
-      // read the in side, matching what `zodToType` reports for that node.
-      const to = def.out as ZodAnyLike | undefined
-      if (io === 'output' && to && !isTransform(to)) return look(to)
-      return look(def.in)
-    }
+    case 'pipeline':
+      return look(pipeSide(def, io))
     default:
       return false
   }
@@ -264,4 +213,13 @@ function isOptional(z: ZodAnyLike, io: SchemaIo): boolean {
 
 function wrapComplex(type: string): string {
   return type.includes('|') || type.includes('&') ? `(${type})` : type
+}
+
+/**
+ * A single literal value as a TypeScript type. `JSON.stringify` cannot render
+ * `undefined` — it returns `undefined` rather than a string — so a
+ * `z.literal(undefined)` would otherwise reach the output as an empty string.
+ */
+function literalType(value: unknown): string {
+  return value === undefined ? 'undefined' : JSON.stringify(value)
 }

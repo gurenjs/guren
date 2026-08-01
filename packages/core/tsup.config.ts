@@ -9,6 +9,7 @@ export default defineConfig({
     'src/lambda.ts',
     'src/redis.ts',
     'src/internal/deploy-build.ts',
+    'src/internal/zod-compat.ts',
   ],
   format: ['esm'],
   dts: true,

@@ -167,3 +167,25 @@ describe('schemaToTypeString', () => {
     })
   })
 })
+
+describe('degenerate schemas', () => {
+  // An enum with no members accepts nothing. This used to render as an empty
+  // string, which is not valid TypeScript wherever the result is spliced in.
+  it('renders an empty enum as never', () => {
+    expect(schemaToTypeString(z.enum([]), { io: 'output' })).toBe('never')
+    expect(schemaToTypeString(z3.enum([] as unknown as [string]), { io: 'output' })).toBe('never')
+  })
+
+  // `JSON.stringify(undefined)` returns undefined rather than a string, so
+  // rendering literal values through it alone dropped this to an empty string.
+  it('renders a literal undefined as the undefined type', () => {
+    expect(schemaToTypeString(z3.literal(undefined), { io: 'output' })).toBe('undefined')
+  })
+
+  it('still renders a record value type on both majors', () => {
+    expect(schemaToTypeString(z.record(z.string(), z.number()), { io: 'output' }))
+      .toBe('Record<string, number>')
+    expect(schemaToTypeString(z3.record(z3.number()), { io: 'output' }))
+      .toBe('Record<string, number>')
+  })
+})
