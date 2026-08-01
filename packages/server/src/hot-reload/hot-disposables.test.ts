@@ -117,6 +117,27 @@ describe('describeCallerFile', () => {
     expect(describeCallerFile(stack)).toBe('/app/routes/api.ts')
   })
 
+  test('should step over a group that leaves no path in front of the location', () => {
+    // Degenerate — no engine emits these — but the twin in `@guren/orm` still
+    // reads the first two as the path `:1`, because it keeps whatever its own
+    // earlier pattern returned for a malformed frame. It can afford that: it
+    // reads one frame and stops. This walks until a frame names a file, so any
+    // non-empty string would end the walk and become a key, and a key two
+    // unrelated files both land on is one where the second owner stops the
+    // first's live timer. Pinned so that carrying the twin's parse across
+    // wholesale — rather than by result — cannot quietly introduce it.
+    const stepsOver = (frame: string) =>
+      describeCallerFile(
+        ['Error', '    at new Base (/app/dist/index.js:120:15)', frame, '    at /app/routes/api.ts:31:26'].join('\n'),
+      )
+
+    expect(stepsOver('    at fn (:1:2)')).toBe('/app/routes/api.ts')
+    expect(stepsOver('    at fn ((:1:2)')).toBe('/app/routes/api.ts')
+    expect(stepsOver('    at fn ()')).toBe('/app/routes/api.ts')
+    // Ends in `)` while opening no group at all, so nothing bounds a path.
+    expect(stepsOver('    at /app/x.ts:1:2)')).toBe('/app/routes/api.ts')
+  })
+
   test('should ignore a frame that names a function but no location', () => {
     const stack = ['Error', '    at new Base (/app/dist/index.js:120:15)', '    at Object.<anonymous>'].join('\n')
 
@@ -136,10 +157,15 @@ describe('describeCallerFile', () => {
     // quadratically before the frame was finally rejected. The padding sits
     // *after* a non-space character on purpose: a frame that is only `at` plus
     // spaces matches on the first try and never reaches the slow path.
-    const stack = `Error\n    at new Base (/app/dist/index.js:1:1)\n    at a${' '.repeat(100_000)}a`
+    const padded = (last: string) => describeCallerFile(`Error\n    at new Base (/app/dist/index.js:1:1)\n${last}`)
     const started = performance.now()
 
-    expect(describeCallerFile(stack)).toBeUndefined()
+    expect(padded(`    at a${' '.repeat(100_000)}a`)).toBeUndefined()
+    // The depth scan needs its own padding: the frame above does not end in `)`,
+    // so it is rejected before reaching it. A run of unmatched `(` is what the
+    // lazy match this replaced retried the whole suffix at, once per paren.
+    expect(padded(`    at f (${'('.repeat(100_000)}x)`)).toBeUndefined()
+
     expect(performance.now() - started).toBeLessThan(1_000)
   })
 
@@ -238,6 +264,29 @@ describe('claimHotDisposable', () => {
 
       claim('replace', () => stopped.push('first'))
       claim('replace', () => stopped.push('second'))
+
+      expect(stopped).toEqual(['first'])
+    })
+  })
+
+  test('should reclaim an owner built under a directory whose name contains parens', () => {
+    // The symptom rather than the parse behind it: while a named frame under
+    // `Projects (old)` could not be read, this call no-opped and the previous
+    // evaluation's interval went on firing — one leaked timer per reload for
+    // anyone whose checkout sits in such a directory. The two claims use
+    // different line numbers because a reload rarely leaves the call where it
+    // was, and the key has to survive that.
+    withHotRuntime(() => {
+      const stopped: string[] = []
+      const reloadAt = (line: number) =>
+        [
+          'Error',
+          '    at new BaseMemoryStore (/app/dist/index.js:120:15)',
+          `    at makeStore (/Users/me/Projects (old)/app/config/cache.ts:${line}:18)`,
+        ].join('\n')
+
+      claimHotDisposable('cache-store', reloadAt(3), 'store', () => stopped.push('first'))
+      claimHotDisposable('cache-store', reloadAt(9), 'store', () => stopped.push('second'))
 
       expect(stopped).toEqual(['first'])
     })
