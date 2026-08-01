@@ -1439,7 +1439,7 @@ export default function registerRoutes(router: any) {
 })
 
 describe('authMiddlewareVerdict', () => {
-  const required = { authentication: { mode: 'required' } }
+  const required = { authentication: { mode: 'required' } } as const
 
   it('verifies capability-carrying routes regardless of names', () => {
     expect(authMiddlewareVerdict({ middlewareNames: [], capabilities: required })).toBe('verified')

@@ -359,7 +359,7 @@ describe('Router capability aggregation', () => {
   })
 
   it('reads stamps through aliases and groups', () => {
-    const router = new Router()
+    const router = new Router<'member' | 'web'>()
     router.aliasMiddleware('member', stamped('required'))
     router.groupMiddleware('web', ['member'])
     router.post('/direct', () => 'ok').middleware('member')
@@ -371,7 +371,9 @@ describe('Router capability aggregation', () => {
   })
 
   it('skips unregistered middleware names instead of throwing', () => {
-    const router = new Router()
+    // Declared but never aliased: the name typechecks while staying
+    // unregistered at runtime, which is the case under test.
+    const router = new Router<'auth'>()
     router.post('/posts', () => 'ok').middleware('auth')
 
     expect(router.definitions()[0]!.capabilities).toEqual({})
