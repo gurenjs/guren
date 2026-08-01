@@ -204,6 +204,19 @@ type ObjectSchemaDetails = {
   required: Set<string>
 }
 
+/**
+ * Which side of a schema a document is describing.
+ *
+ * - `input` — what a caller has to send: request bodies and parameters.
+ * - `output` — what a caller receives: response bodies.
+ *
+ * Most schemas render identically both ways, since OpenAPI describes JSON in
+ * either direction. Pipes and defaults do not: a pipe holds a separate type per
+ * side, and a defaulted field may be omitted from a request but is always
+ * present in a response.
+ */
+type SchemaIo = 'input' | 'output'
+
 function isApplicationLike(target: Application | HonoLike): target is Application & { hono: HonoLike; router: { definitions(): RouteDefinition[] } } {
   return typeof target === 'object'
     && target !== null
@@ -250,7 +263,7 @@ function buildOperation(definition: RouteDefinition, warnings: string[]): OpenAp
 function buildParameters(definition: RouteDefinition, warnings: string[]): OpenApiParameterObject[] {
   const parameters: OpenApiParameterObject[] = []
   const pathParamNames = extractPathParamNames(definition.path)
-  const paramsDetails = readObjectSchema(definition.schemas?.params, warnings, `${definition.method} ${definition.path} params`)
+  const paramsDetails = readObjectSchema(definition.schemas?.params, warnings, `${definition.method} ${definition.path} params`, 'input')
 
   for (const name of pathParamNames) {
     parameters.push({
@@ -261,7 +274,7 @@ function buildParameters(definition: RouteDefinition, warnings: string[]): OpenA
     })
   }
 
-  const queryDetails = readObjectSchema(definition.schemas?.query, warnings, `${definition.method} ${definition.path} query`)
+  const queryDetails = readObjectSchema(definition.schemas?.query, warnings, `${definition.method} ${definition.path} query`, 'input')
   if (queryDetails) {
     for (const [name, schema] of Object.entries(queryDetails.properties)) {
       parameters.push({
@@ -282,7 +295,7 @@ function buildRequestBody(definition: RouteDefinition, warnings: string[]): Open
     return undefined
   }
 
-  const bodySchema = toOpenApiSchema(schema, warnings, `${definition.method} ${definition.path} body`)
+  const bodySchema = toOpenApiSchema(schema, warnings, `${definition.method} ${definition.path} body`, 'input')
   if (!bodySchema) {
     return undefined
   }
@@ -299,7 +312,7 @@ function buildResponses(definition: RouteDefinition, warnings: string[]): Record
   const responses: Record<string, OpenApiResponseObject> = {}
   const successStatus = definition.method === 'POST' ? '201' : '200'
   const successSchema = definition.schemas?.output
-    ? toOpenApiSchema(definition.schemas.output, warnings, `${definition.method} ${definition.path} response`)
+    ? toOpenApiSchema(definition.schemas.output, warnings, `${definition.method} ${definition.path} response`, 'output')
     : undefined
 
   responses[successStatus] = {
@@ -323,7 +336,7 @@ function buildResponses(definition: RouteDefinition, warnings: string[]): Record
   return responses
 }
 
-function readObjectSchema(schema: unknown, warnings: string[], label: string): ObjectSchemaDetails | undefined {
+function readObjectSchema(schema: unknown, warnings: string[], label: string, io: SchemaIo): ObjectSchemaDetails | undefined {
   if (!schema) {
     return undefined
   }
@@ -333,21 +346,17 @@ function readObjectSchema(schema: unknown, warnings: string[], label: string): O
     return undefined
   }
 
-  const details = readObjectSchemaDetails(schema, warnings, label)
+  const details = readObjectSchemaDetails(schema, warnings, label, io)
   if (!details) {
     warnings.push(`${label}: expected an object schema for parameter expansion.`)
   }
   return details
 }
 
-function readObjectSchemaDetails(schema: ZodLike, warnings: string[], label: string): ObjectSchemaDetails | undefined {
-  const normalized = normalizeTypeName(getTypeName(schema))
-  if (normalized !== 'object') {
-    if ((normalized === 'effects' || normalized === 'pipe' || normalized === 'readonly' || normalized === 'branded' || normalized === 'lazy')
-      && inner(schema._def ?? {})) {
-      return readObjectSchemaDetails(inner(schema._def ?? {})!, warnings, label)
-    }
-    return undefined
+function readObjectSchemaDetails(schema: ZodLike, warnings: string[], label: string, io: SchemaIo): ObjectSchemaDetails | undefined {
+  if (typeOf(schema) !== 'object') {
+    const nested = unwrap(schema, io)
+    return nested ? readObjectSchemaDetails(nested, warnings, label, io) : undefined
   }
 
   const shape = getObjectShape(schema)
@@ -360,13 +369,13 @@ function readObjectSchemaDetails(schema: ZodLike, warnings: string[], label: str
   const required = new Set<string>()
 
   for (const [key, value] of Object.entries(shape)) {
-    const propertySchema = toOpenApiSchema(value, warnings, `${label}.${key}`)
+    const propertySchema = toOpenApiSchema(value, warnings, `${label}.${key}`, io)
     if (!propertySchema) {
       continue
     }
 
     properties[key] = propertySchema
-    if (!isOptional(value)) {
+    if (!isOptional(value, io)) {
       required.add(key)
     }
   }
@@ -374,14 +383,30 @@ function readObjectSchemaDetails(schema: ZodLike, warnings: string[], label: str
   return { properties, required }
 }
 
-function toOpenApiSchema(schema: unknown, warnings: string[], label: string): OpenApiSchemaObject | undefined {
+function toOpenApiSchema(schema: unknown, warnings: string[], label: string, io: SchemaIo): OpenApiSchemaObject | undefined {
   if (!isZodSchema(schema)) {
     warnings.push(`${label}: skipped because schema is not a supported Zod schema.`)
     return undefined
   }
 
-  const typeName = normalizeTypeName(getTypeName(schema))
+  const typeName = typeOf(schema)
   const def = schema._def ?? {}
+
+  // Wrappers add nothing to the rendered type, so they are looked through
+  // uniformly. `nullable` is the exception — it renders as a union with null —
+  // and so keeps its own case below.
+  if (typeName !== 'nullable' && WRAPPER_TYPES.has(typeName)) {
+    const nested = unwrap(schema, io)
+    if (!nested) {
+      // Reaching a wrapper whose contents cannot be read drops the property,
+      // so say so — `z.lazy()` hides its schema behind a getter this walker
+      // does not call, and a silently missing property reads as a schema that
+      // never declared one.
+      warnings.push(`${label}: the contents of a "${typeName}" schema could not be read, so it is omitted.`)
+      return undefined
+    }
+    return toOpenApiSchema(nested, warnings, label, io)
+  }
 
   switch (typeName) {
     case 'string':
@@ -401,11 +426,12 @@ function toOpenApiSchema(schema: unknown, warnings: string[], label: string): Op
     case 'literal':
       return literalSchema(def)
     case 'array': {
-      const item = (def.type ?? def.element) as unknown
-      return { type: 'array', items: toOpenApiSchema(item, warnings, `${label}[]`) ?? {} }
+      // v4 holds the element in `_def.element`, v3 in `_def.type`.
+      const item = schemaAt(def, 'element', 'type')
+      return { type: 'array', items: toOpenApiSchema(item, warnings, `${label}[]`, io) ?? {} }
     }
     case 'object': {
-      const details = readObjectSchemaDetails(schema, warnings, label)
+      const details = readObjectSchemaDetails(schema, warnings, label, io)
       if (!details) {
         return { type: 'object' }
       }
@@ -415,23 +441,9 @@ function toOpenApiSchema(schema: unknown, warnings: string[], label: string): Op
         required: details.required.size > 0 ? Array.from(details.required) : undefined,
       }
     }
-    case 'optional':
-    case 'default':
-    case 'catch':
-    case 'readonly':
-    case 'branded':
-    case 'lazy':
-    case 'effects': {
-      const nested = inner(def)
-      return nested ? toOpenApiSchema(nested, warnings, label) : undefined
-    }
-    case 'pipe': {
-      const nested = (def.in as unknown) ?? inner(def)
-      return nested ? toOpenApiSchema(nested, warnings, label) : undefined
-    }
     case 'nullable': {
-      const nested = inner(def)
-      const nestedSchema = nested ? toOpenApiSchema(nested, warnings, label) : undefined
+      const nested = unwrap(schema, io)
+      const nestedSchema = nested ? toOpenApiSchema(nested, warnings, label, io) : undefined
       return nestedSchema ? { anyOf: [nestedSchema, { type: 'null' }] } : { type: ['null'] }
     }
     case 'transform':
@@ -441,21 +453,21 @@ function toOpenApiSchema(schema: unknown, warnings: string[], label: string): Op
     case 'discriminatedunion': {
       const options = (def.options as unknown[]) ?? []
       const oneOf = options
-        .map((option, index) => toOpenApiSchema(option, warnings, `${label}.option${index}`))
+        .map((option, index) => toOpenApiSchema(option, warnings, `${label}.option${index}`, io))
         .filter((option): option is OpenApiSchemaObject => Boolean(option))
       return oneOf.length > 0 ? { oneOf } : undefined
     }
     case 'intersection': {
-      const left = toOpenApiSchema(def.left, warnings, `${label}.left`)
-      const right = toOpenApiSchema(def.right, warnings, `${label}.right`)
+      const left = toOpenApiSchema(def.left, warnings, `${label}.left`, io)
+      const right = toOpenApiSchema(def.right, warnings, `${label}.right`, io)
       const allOf = [left, right].filter((value): value is OpenApiSchemaObject => Boolean(value))
       return allOf.length > 0 ? { allOf } : undefined
     }
     case 'record': {
-      const valueType = (def.valueType ?? def.type) as unknown
+      const valueType = schemaAt(def, 'valueType')
       return {
         type: 'object',
-        additionalProperties: toOpenApiSchema(valueType, warnings, `${label}.value`) ?? true,
+        additionalProperties: toOpenApiSchema(valueType, warnings, `${label}.value`, io) ?? true,
       }
     }
     case 'enum': {
@@ -470,7 +482,7 @@ function toOpenApiSchema(schema: unknown, warnings: string[], label: string): Op
     }
     case 'tuple': {
       const items = ((def.items as unknown[]) ?? [])
-        .map((item, index) => toOpenApiSchema(item, warnings, `${label}[${index}]`))
+        .map((item, index) => toOpenApiSchema(item, warnings, `${label}[${index}]`, io))
         .filter((item): item is OpenApiSchemaObject => Boolean(item))
       return {
         type: 'array',
@@ -480,8 +492,8 @@ function toOpenApiSchema(schema: unknown, warnings: string[], label: string): Op
       }
     }
     case 'promise': {
-      const nested = inner(def) ?? (def.type as unknown)
-      return nested ? toOpenApiSchema(nested, warnings, label) : undefined
+      const nested = schemaAt(def, 'innerType', 'schema', 'type')
+      return nested ? toOpenApiSchema(nested, warnings, label, io) : undefined
     }
     default:
       warnings.push(`${label}: unsupported Zod type "${typeName}".`)
@@ -590,8 +602,64 @@ function normalizeTypeName(typeName: string | undefined): string {
   return typeName.startsWith('Zod') ? typeName.slice(3).toLowerCase() : typeName.toLowerCase()
 }
 
-function inner(def: Record<string, unknown>): ZodLike | undefined {
-  return (def.innerType ?? def.schema) as ZodLike | undefined
+function typeOf(schema: ZodLike): string {
+  return normalizeTypeName(getTypeName(schema))
+}
+
+/**
+ * The first of `keys` that actually holds a schema. `_def.type` is the one key
+ * whose meaning differs between the majors — v3 stores a schema there (an
+ * array's element, a `.brand()`'s inner type), v4 the type *name* — so a key
+ * can only be taken once it is known to be an object. Reading it by
+ * precedence alone is what let a v4 array document its element as `{}`.
+ */
+function schemaAt(def: Record<string, unknown>, ...keys: string[]): ZodLike | undefined {
+  for (const key of keys) {
+    const candidate = def[key]
+    if (candidate && typeof candidate === 'object') {
+      return candidate as ZodLike
+    }
+  }
+
+  return undefined
+}
+
+/**
+ * Type names that carry exactly one nested schema and no shape of their own.
+ *
+ * Three walks look through them for different reasons — finding the object
+ * behind a parameter schema, rendering a type, deciding whether a property may
+ * be omitted — so the set is stated once here. Each walk layers its own
+ * handling on top (`nullable` renders as a union; `optional` and friends decide
+ * presence), but none of them may disagree about what is a wrapper: a name
+ * reaching one walk and not another silently changes the document.
+ */
+const WRAPPER_TYPES = new Set([
+  'optional', 'default', 'prefault', 'nonoptional', 'catch', 'nullable',
+  'readonly', 'branded', 'lazy', 'effects', 'pipe', 'pipeline',
+])
+
+/**
+ * The schema a wrapper wraps, in the direction being documented. A pipe (v3
+ * names it `ZodPipeline`) holds one per side: `_def.in` is what a caller sends,
+ * `_def.out` what a controller returns. A `.transform()`'s out side is the
+ * transform function rather than a schema, so there is no parsed type to read
+ * and the in side remains the best available answer.
+ */
+function unwrap(schema: ZodLike, io: SchemaIo): ZodLike | undefined {
+  const def = schema._def ?? {}
+  const typeName = typeOf(schema)
+
+  if (typeName === 'pipe' || typeName === 'pipeline') {
+    const to = schemaAt(def, 'out')
+    return io === 'output' && to && typeOf(to) !== 'transform' ? to : schemaAt(def, 'in')
+  }
+
+  if (!WRAPPER_TYPES.has(typeName)) {
+    return undefined
+  }
+
+  return schemaAt(def, 'innerType', 'schema', 'type')
 }
 
 function getObjectShape(schema: ZodLike): Record<string, ZodLike> | undefined {
@@ -603,23 +671,44 @@ function getObjectShape(schema: ZodLike): Record<string, ZodLike> | undefined {
   return (def.shape ?? schema.shape) as Record<string, ZodLike> | undefined
 }
 
-function isOptional(schema: ZodLike): boolean {
-  const typeName = normalizeTypeName(getTypeName(schema))
-  if (typeName === 'optional' || typeName === 'default') {
-    return true
+function isOptional(schema: ZodLike, io: SchemaIo): boolean {
+  switch (typeOf(schema)) {
+    case 'optional':
+      return true
+    // Both fill a missing value in, so the field may be left out of a request
+    // but is always present in a response.
+    case 'default':
+    case 'prefault':
+      return io === 'input'
+    // Swallows any failure, a missing value included, and substitutes its
+    // fallback — so nothing is required of a caller, and a response always
+    // carries the field.
+    case 'catch':
+      return io === 'input'
+    // Re-requires a field an inner wrapper made optional, so the walk stops
+    // here rather than reading what it wraps.
+    case 'nonoptional':
+      return false
+    // A pipeline runs both stages, so a field may be omitted only if neither
+    // stage rejects a missing value. Reading just the side being rendered
+    // would document an omission the other stage refuses.
+    case 'pipe':
+    case 'pipeline': {
+      const def = schema._def ?? {}
+      const from = schemaAt(def, 'in')
+      const to = schemaAt(def, 'out')
+      if (!from) {
+        return false
+      }
+      return to && typeOf(to) !== 'transform'
+        ? isOptional(from, io) && isOptional(to, io)
+        : isOptional(from, io)
+    }
+    default: {
+      const nested = unwrap(schema, io)
+      return nested ? isOptional(nested, io) : false
+    }
   }
-
-  const def = schema._def ?? {}
-  const nested = inner(def)
-  if ((typeName === 'effects' || typeName === 'nullable' || typeName === 'readonly' || typeName === 'branded' || typeName === 'lazy') && nested) {
-    return isOptional(nested)
-  }
-
-  if (typeName === 'pipe' && def.in) {
-    return isOptional(def.in as ZodLike)
-  }
-
-  return false
 }
 
 function enumValues(def: Record<string, unknown>): string[] {
