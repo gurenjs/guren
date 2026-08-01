@@ -46,6 +46,50 @@ describe('describeCallerFile', () => {
     expect(describeCallerFile(bare)).toBe('/Users/me/My Projects/app/api.ts')
   })
 
+  test('should keep a path that contains parentheses intact', () => {
+    // Also ordinary on macOS — a checkout under `~/Projects (2024)`. The path is
+    // bounded by the `(` that matches the frame's final `)`, not by the first one
+    // the path happens to contain.
+    const parenthesized = 'Error\n    at f (/app/dist/index.js:1:1)\n    at g (/app (old)/routes/api.ts:31:26)'
+    const bare = 'Error\n    at f (/app/dist/index.js:1:1)\n    at /app (old)/routes/api.ts:31:26'
+
+    expect(describeCallerFile(parenthesized)).toBe('/app (old)/routes/api.ts')
+    expect(describeCallerFile(bare)).toBe('/app (old)/routes/api.ts')
+  })
+
+  test('should read past a function name that contains parentheses', () => {
+    // Bun emits this for a method whose key carries parentheses:
+    //   ({ 'weird (name)'() {} })['weird (name)']()
+    // Taking the leftmost `(` yields `name) (/app/routes/api.ts`, which is not a
+    // path but is stable enough to key an owner on.
+    const stack = 'Error\n    at f (/app/dist/index.js:1:1)\n    at weird (name) (/app/routes/api.ts:31:26)'
+
+    expect(describeCallerFile(stack)).toBe('/app/routes/api.ts')
+  })
+
+  test('should still see a synthetic frame through a parenthesized function name', () => {
+    // The combination of the two cases above, and the reason the leftmost `(` is
+    // not merely imprecise: `unknown` has to survive parsing intact or the filter
+    // below never fires, and every such owner in the process shares one slot.
+    const stack = [
+      'Error',
+      '    at new Base (/app/dist/index.js:120:15)',
+      '    at new Derived (wrapped) (unknown:1:28)',
+      '    at /app/routes/api.ts:31:26',
+    ].join('\n')
+
+    expect(describeCallerFile(stack)).toBe('/app/routes/api.ts')
+  })
+
+  test('should reject an eval frame rather than key an owner on it', () => {
+    // V8 nests the real location inside the group. The text before `:1:1` is not
+    // a path, and carries the outer line number, so it would drift on any edit.
+    const stack =
+      'Error\n    at f (/app/dist/index.js:1:1)\n    at eval (eval at <anonymous> (/app/x.ts:1:2), <anonymous>:1:1)'
+
+    expect(describeCallerFile(stack)).toBeUndefined()
+  })
+
   test('should step over the synthetic frame of an implicit constructor', () => {
     // A subclass with no constructor of its own gets an implicit one, which JSC
     // reports with no source location. Taking that frame keys every such owner

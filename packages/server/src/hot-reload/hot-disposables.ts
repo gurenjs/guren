@@ -22,9 +22,10 @@
  * package for ~60 lines or a dependency `@guren/orm` is not allowed to take, and
  * would buy machinery neither side needs in the same shape.
  *
- * Its twin is `packages/orm/src/active-connections.ts`. The two derive an
- * owner's identity the same way, so a fix to the stack parsing in one is worth
- * carrying to the other.
+ * Its twin is `packages/orm/src/active-connections.ts`. `parseFrameLocation` and
+ * the scan under it are the same rule in both, deliberately — a fix to one is
+ * worth carrying to the other. `describeCallerFile` differs on purpose: the
+ * owners here are constructed, so this side walks past synthetic frames.
  *
  * An owner is identified by the file that built it plus a discriminator, so it
  * is replaced only by a later evaluation of that same file. Keying on the exact
@@ -119,20 +120,69 @@ function parseBareFrame(frame: string): string | undefined {
 }
 
 /**
- * The `file:line:column` a single stack frame points at, minus line and column.
+ * The text inside the parentheses that close a frame, or `undefined` when the
+ * frame does not end in one.
  *
- * Frames come in two shapes — `at fn (/path/file.ts:1:2)` and a bare
- * `at /path/file.ts:1:2` — and the parenthesized form is checked first because a
- * path may contain spaces, which is ordinary on macOS. Splitting on whitespace
- * instead would silently truncate `/Users/me/My Projects/app.ts` to `Projects/app.ts`.
+ * Scanned backwards from the final `)` counting depth, rather than matched.
+ * Both the path and the function name may contain parentheses — `at fn (/app
+ * (old)/x.ts:1:2)` and `at weird (name) (/app/x.ts:1:2)` are each ordinary — and
+ * no single pattern separates them, because the first needs the leftmost `(`
+ * and the second the rightmost. Depth is what actually distinguishes them.
  *
- * The line number is what proves this is a location at all rather than a bare
- * function name, so a frame without one yields nothing.
+ * A scan is also the only form that stays linear. Lazily matching from the
+ * leftmost `(` retries the whole suffix at every parenthesis, which is
+ * quadratic on a frame carrying many unmatched ones.
+ *
+ * Bails if the scan crosses a line terminator before depth returns to zero: a
+ * path could never span one, so an unbalanced `(` on the far side of a line
+ * break was never part of this frame's location.
+ */
+function parenthesizedLocation(frame: string): string | undefined {
+  const trimmed = frame.trimEnd()
+
+  if (!trimmed.endsWith(')')) {
+    return undefined
+  }
+
+  let depth = 0
+
+  for (let index = trimmed.length - 1; index >= 0; index--) {
+    const character = trimmed[index]
+
+    if (LINE_TERMINATOR.test(character)) {
+      return undefined
+    }
+
+    if (character === ')') {
+      depth++
+    } else if (character === '(' && --depth === 0) {
+      return trimmed.slice(index + 1, -1)
+    }
+  }
+
+  return undefined
+}
+
+/**
+ * The path a single stack frame points at, without its line and column.
+ *
+ * The parenthesized shape is read first because its parentheses bound the path;
+ * the bare `at /path/file.ts:1:2` can only be bounded by whitespace, which would
+ * truncate `/Users/me/My Projects/app.ts` to `Projects/app.ts`. Nothing
+ * constrains what the path may contain — spaces and parentheses are both
+ * ordinary in a macOS directory name.
+ *
+ * The trailing `:line` is what proves this is a location at all rather than a
+ * bare function name, so `at native` and `at <anonymous>` yield nothing. An
+ * `eval` group is rejected outright: V8 nests the real location inside
+ * `eval at fn (/app/x.ts:1:2), <anonymous>:1:1`, and keying an owner on text
+ * that is not a path is worse than not keying it — an owner with no key is left
+ * alone, which is the safe failure.
  */
 function parseFrameLocation(frame: string): string | undefined {
-  const location = frame.match(/\(([^()]*)\)\s*$/)?.[1] ?? parseBareFrame(frame)
+  const location = parenthesizedLocation(frame) ?? parseBareFrame(frame)
 
-  if (!location || !LOCATION_SUFFIX.test(location)) {
+  if (!location || location.startsWith('eval at ') || !LOCATION_SUFFIX.test(location)) {
     return undefined
   }
 
