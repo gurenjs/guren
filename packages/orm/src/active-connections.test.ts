@@ -75,6 +75,20 @@ describe('describeCallerFile', () => {
     expect(describeCallerFile(named)).toBe('/app (old)/config/database.ts')
   })
 
+  test('should key a path that contains an unmatched closing parenthesis', () => {
+    // Nothing in the frame closes it, so counting depth alone runs off the front
+    // and the frame is skipped — the walk then keys the connection on whichever
+    // caller sits above it, collapsing every handle built through that caller
+    // into one slot. The leftmost `(` is the reading that keeps the path whole.
+    const stack = [
+      'Error',
+      '    at createPostgresDatabase (/app/dist/index.js:1:1)',
+      '    at makeDatabase (/app/name).ts:3:18)',
+    ].join('\n')
+
+    expect(describeCallerFile(stack)).toBe('/app/name).ts')
+  })
+
   test('should read past a function name that contains parentheses', () => {
     // Bun emits this for a method whose key carries parentheses. Taking the
     // leftmost `(` yields `name) (/app/config/database.ts` — not a path, but

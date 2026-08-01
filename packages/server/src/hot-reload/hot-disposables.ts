@@ -22,14 +22,20 @@
  * the same shape.
  *
  * Its twin is `packages/orm/src/active-connections.ts`. `parseFrameLocation` and
- * the scan under it follow the same rule in both, and `describeCallerFile`'s
- * walk past a synthetic frame is identical too — a fix to either has to be
- * carried to the other by hand. That has already failed once: this walk
- * predates the ORM's, and the ORM kept keying handles to `unknown` in the
- * meantime. Nothing forces the duplication — `@guren/server` already depends on
- * `@guren/orm`, so this layer could live there and be imported here — it is
- * only that the shared part is small next to the two packages' very different
- * teardown semantics (see above). Extract it if it drifts a third time.
+ * `describeCallerFile`'s walk past a synthetic frame follow the same rule in
+ * both — a fix to either has to be carried to the other by hand. That has
+ * already failed once: this walk predates the ORM's, and the ORM kept keying
+ * handles to `unknown` in the meantime. Nothing forces the duplication —
+ * `@guren/server` already depends on `@guren/orm`, so this layer could live
+ * there and be imported here — it is only that the shared part is small next to
+ * the two packages' very different teardown semantics (see above). Extract the
+ * rest if it drifts again.
+ *
+ * One piece already went that way, for a reason worth recording: the debug error
+ * page turned out to read frames too, and had written its own, wrong version of
+ * the paren rule. That scan now lives in `../support/stack-frames`, imported by
+ * both readers in this package — the ORM's copy of it is still hand-synced like
+ * everything else here.
  *
  * An owner is identified by the file that built it plus a discriminator, so it
  * is replaced only by a later evaluation of that same file. Keying on the exact
@@ -38,6 +44,8 @@
  * timer it was holding, during the very workflow this exists to fix. The file is
  * stable across every edit that isn't a rename.
  */
+
+import { matchingOpenParen } from '../support/stack-frames'
 
 type Dispose = () => void
 
@@ -128,19 +136,9 @@ function parseBareFrame(frame: string): string | undefined {
  * The text inside the parentheses that close a frame, or `undefined` when the
  * frame does not end in one.
  *
- * Scanned backwards from the final `)` counting depth, rather than matched.
- * Both the path and the function name may contain parentheses — `at fn (/app
- * (old)/x.ts:1:2)` and `at weird (name) (/app/x.ts:1:2)` are each ordinary — and
- * no single pattern separates them, because the first needs the leftmost `(`
- * and the second the rightmost. Depth is what actually distinguishes them.
- *
- * A scan is also the only form that stays linear. Lazily matching from the
- * leftmost `(` retries the whole suffix at every parenthesis, which is
- * quadratic on a frame carrying many unmatched ones.
- *
- * Bails if the scan crosses a line terminator before depth returns to zero: a
- * path could never span one, so an unbalanced `(` on the far side of a line
- * break was never part of this frame's location.
+ * Which `(` opens them is `matchingOpenParen`'s problem — both the path and the
+ * function name in front of it may contain parentheses, and neither end of the
+ * frame is the right place to look in general.
  */
 function parenthesizedLocation(frame: string): string | undefined {
   const trimmed = frame.trimEnd()
@@ -149,23 +147,9 @@ function parenthesizedLocation(frame: string): string | undefined {
     return undefined
   }
 
-  let depth = 0
+  const open = matchingOpenParen(trimmed, trimmed.length - 1)
 
-  for (let index = trimmed.length - 1; index >= 0; index--) {
-    const character = trimmed[index]
-
-    if (LINE_TERMINATOR.test(character)) {
-      return undefined
-    }
-
-    if (character === ')') {
-      depth++
-    } else if (character === '(' && --depth === 0) {
-      return trimmed.slice(index + 1, -1)
-    }
-  }
-
-  return undefined
+  return open === undefined ? undefined : trimmed.slice(open + 1, -1)
 }
 
 /**

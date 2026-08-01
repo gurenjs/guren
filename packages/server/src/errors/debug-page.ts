@@ -1,4 +1,5 @@
 import type { MiddlewareHandler } from 'hono'
+import { matchingOpenParen } from '../support/stack-frames'
 
 /**
  * Render a rich HTML debug error page for development mode.
@@ -175,6 +176,10 @@ function splitLocation(location: string): { file: string; line: string; col: str
 // Parsed with string operations instead of `/\s+at\s+(.+?)\s+\((.+?):…/`,
 // whose lazy groups backtrack polynomially — error stacks can embed
 // request-derived messages.
+//
+// The parenthesized shape is read first because its parentheses bound the path;
+// only the bare shape has to fall back to whitespace, which truncates a path
+// that contains any.
 function parseStackTrace(stack: string): StackFrame[] {
   const lines = stack.split('\n').slice(1)
   return lines
@@ -185,8 +190,10 @@ function parseStackTrace(stack: string): StackFrame[] {
 
       // Format: at functionName (file:line:col)
       if (rest.endsWith(')')) {
-        const open = rest.lastIndexOf('(')
-        if (open > 0) {
+        const open = matchingOpenParen(rest, rest.length - 1)
+        // `open === 0` leaves no room for a function name in front of the
+        // group, so that frame is read as the bare shape below instead.
+        if (open !== undefined && open > 0) {
           const location = splitLocation(rest.slice(open + 1, -1))
           if (location) {
             return { func: rest.slice(0, open).trim(), ...location }
