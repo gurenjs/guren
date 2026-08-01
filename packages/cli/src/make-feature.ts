@@ -1,5 +1,6 @@
 import { consola } from 'consola'
-import { writeFilesSafe, type WriterOptions, pascalCase, kebabCase, pagesAccessor, safeModuleName } from './utils'
+import { writeFilesSafe, type WriterOptions, pascalCase, camelCase, kebabCase, pagesAccessor, safeModuleName } from './utils'
+import { pluralize } from './inflect'
 import { makeModel } from './make-model'
 import { makePolicy } from './make-policy'
 import { makeTest } from './make-test'
@@ -64,7 +65,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   const singular = pascalCase(name)
   const collection = pluralize(singular)
   const routeName = kebabCase(collection)
-  const routeVar = routeName.replace(/-([a-z])/g, (_, char: string) => char.toUpperCase())
+  const routeVar = camelCase(routeName)
   const variableName = singular.charAt(0).toLowerCase() + singular.slice(1)
   const withAuth = !options.publicAccess
   const withPolicy = Boolean(options.withPolicy)
@@ -641,10 +642,4 @@ function generateFormState(fields: FieldDefinition[], formVar: string): { import
     hooks: `  const [jsonText] = useState(() => ({ ${initial} }))\n`
       + '  const [jsonErrors, setJsonErrors] = useState<Record<string, boolean>>({})\n',
   }
-}
-
-function pluralize(name: string): string {
-  if (/[^aeiou]y$/iu.test(name)) return `${name.slice(0, -1)}ies`
-  if (/(s|x|z|ch|sh)$/iu.test(name)) return `${name}es`
-  return `${name}s`
 }

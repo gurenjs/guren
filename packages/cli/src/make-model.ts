@@ -1,17 +1,11 @@
 import type { WriterOptions } from './utils'
-import { camelCase, scaffoldFile } from './utils'
-
-function pluralizeIdentifier(name: string): string {
-  if (name.endsWith('s')) {
-    return name
-  }
-  return `${name}s`
-}
+import { scaffoldFile } from './utils'
+import { schemaIdentifierFor } from './inflect'
 
 const MODELS_DIR = 'app/Models'
 
 function modelTemplate(className: string): string {
-  const schemaIdentifier = pluralizeIdentifier(camelCase(className))
+  const schemaIdentifier = schemaIdentifierFor(className)
 
   return `import { defineModel } from '@guren/core'
 import { ${schemaIdentifier} } from '../../db/schema.js'

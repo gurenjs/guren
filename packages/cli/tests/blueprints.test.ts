@@ -2,6 +2,7 @@ import { beforeEach, afterEach, describe, expect, it } from 'bun:test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createTempWorkspace, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, type TempWorkspace } from './helpers'
 import { listBlueprints, runBlueprint } from '../src/blueprints'
+import { runCheck } from '../src/check'
 
 const ROUTES_FIXTURE = `import { Router } from '@guren/core'
 
@@ -100,6 +101,54 @@ describe('blueprints', () => {
       (match) => match[1],
     )
     expect([...new Set(importedModules)]).toEqual(['drizzle-orm/mysql-core'])
+  })
+
+  // The schema export, the model's import of it, and `guren check`'s table
+  // lookup are three separate derivations. They used to disagree: `Category`
+  // got `export const categories` but `import { categorys }`, so the generated
+  // model did not compile and check warned about the table it had just written.
+  it.each([
+    // name, model class, schema identifier, table name
+    ['Category', 'Category', 'categories', 'categories'],
+    ['Box', 'Box', 'boxes', 'boxes'],
+    ['Address', 'Address', 'addresses', 'addresses'],
+    ['UserProfile', 'UserProfile', 'userProfiles', 'user_profiles'],
+    // Already plural: the blueprint singularizes the name before scaffolding,
+    // so the class is `New` and the collection must not become `newses`.
+    ['News', 'New', 'news', 'news'],
+  ])('keeps schema, model, and check in agreement for %s', async (name, className, identifier, tableName) => {
+    await seedResourceWorkspace(PG_SCHEMA_FIXTURE)
+
+    await runBlueprint('resource', { name, fields: 'title:string' })
+
+    const schema = await readFile('db/schema.ts', 'utf8')
+    expect(schema).toContain(`export const ${identifier} = pgTable('${tableName}'`)
+
+    const model = await readFile(`app/Models/${className}.ts`, 'utf8')
+    expect(model).toContain(`import { ${identifier} } from '../../db/schema.js'`)
+
+    const report = await runCheck({ cwd: workspace.dir })
+    // Pin this model's own result: the fixture ships a `users` table, so a
+    // lookup that resolved every model to `users` would pass a generic
+    // "nothing failed" assertion.
+    const schemaCheck = report.checks.find((result) => result.key === `model-schema:${className}`)
+    expect(schemaCheck?.status).toBe('pass')
+  })
+
+  // The check resolves the identifier the scaffolded model actually imports
+  // (`userProfiles`), not a name guessed from the class — so overwriting the
+  // schema out from under it reports the binding that is actually missing,
+  // not a table name nobody ever declared.
+  it('reports the bound identifier when its table is missing', async () => {
+    await seedResourceWorkspace(PG_SCHEMA_FIXTURE)
+    await runBlueprint('resource', { name: 'UserProfile', fields: 'title:string' })
+    await writeFile('db/schema.ts', PG_SCHEMA_FIXTURE)
+
+    const report = await runCheck({ cwd: workspace.dir })
+    const schemaCheck = report.checks.find((result) => result.key === 'model-schema:UserProfile')
+
+    expect(schemaCheck?.status).toBe('warn')
+    expect(schemaCheck?.message).toContain("binds 'userProfiles'")
   })
 
   it('rejects unknown blueprints', async () => {

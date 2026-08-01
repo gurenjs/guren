@@ -1769,8 +1769,20 @@ const checkCommand = defineCommand({
       type: 'boolean',
       description: 'Restrict file-scanning checks to files changed vs. the merge base with main.',
     },
+    ci: {
+      type: 'boolean',
+      description: 'Exit non-zero when any check fails or warns (runs the full suite; for CI gates).',
+    },
   },
   async run({ args }) {
+    // --ci promises a full-suite gate; letting a suite flag narrow the run
+    // underneath it would report success while docs/spec/core went unchecked.
+    if (args.ci && (args.arch || args.docs || args.spec)) {
+      consola.error('check --ci runs the full suite — drop --arch/--docs/--spec (they gate on their own).')
+      process.exitCode = 1
+      return
+    }
+
     const report = await runCheck({
       cwd: args.app,
       json: Boolean(args.json),
@@ -1787,13 +1799,21 @@ const checkCommand = defineCommand({
       renderCheckReport(report)
     }
 
-    // Only the suite flags (`--arch`/`--docs`/`--spec`) gate on exit code.
-    // Plain `guren check` has never set one (it's a v1.0-stable command;
-    // changing that default is a breaking change reserved for a major
-    // release). The fast-path flags are new, with no prior contract to
-    // preserve, so they can gate CI from day one — that's the intended way
-    // to enforce boundaries, doc links, and spec freshness in CI.
+    // Only the suite flags (`--arch`/`--docs`/`--spec`) and the opt-in
+    // `--ci` gate on exit code. Plain `guren check` has never set one (it's
+    // a v1.0-stable command; changing that default is a breaking change
+    // reserved for a major release). These flags are newer, with no prior
+    // contract to preserve, so they can gate CI from day one — that's the
+    // intended way to enforce checks in CI without breaking the default.
     if ((args.arch || args.docs || args.spec) && report.failCount > 0) {
+      process.exitCode = 1
+    }
+    // --ci also gates on warns: most integrity problems (a missing codegen
+    // manifest, an unregistered console command) report as 'warn', so a
+    // fail-only gate would wave nearly everything through. Advisory checks
+    // (test-coverage nudges) are exempt — the flag lives on the result, so
+    // JSON consumers see the same rule this gate applies.
+    if (args.ci && report.checks.some((c) => !c.advisory && c.status !== 'pass')) {
       process.exitCode = 1
     }
   },
@@ -1802,7 +1822,7 @@ const checkCommand = defineCommand({
 const auditCommand = defineCommand({
   meta: {
     name: 'audit',
-    description: 'Run a security audit: validation, authentication, raw SQL, secrets, mass assignment.',
+    description: 'Run a security audit: validation, authentication, raw SQL, secrets, mass assignment, dependency vulnerabilities.',
   },
   args: {
     json: {
@@ -1821,12 +1841,18 @@ const auditCommand = defineCommand({
       type: 'string',
       description: 'Path to the ignore config (defaults to config/audit.{ts,js,mjs}).',
     },
+    deps: {
+      type: 'boolean',
+      default: true,
+      description: 'Scan dependencies via bun audit (requires registry access). Disable with --no-deps.',
+    },
   },
   async run({ args }) {
     const report = await runAudit({
       cwd: args.app,
       routesFile: args.routes,
       auditConfigFile: args.auditConfig,
+      deps: args.deps,
     })
 
     if (args.json) {
