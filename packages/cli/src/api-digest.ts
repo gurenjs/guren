@@ -19,14 +19,16 @@ Verified quick reference — trust this and \`.claude/rules/*.md\` over grepping
   \`all()\` · \`create(data)\` · \`update(where, data)\` · \`delete(where)\` · \`paginate(options?)\` ·
   \`transaction(async (trx) => ...)\` · \`forceCreate/forceUpdate\` (bypass fillable — never pass request input)
 - Where: \`where({ a: 1, ids: [1, 2] })\` (object = AND, array value = IN) or \`where(field, op, value)\` —
-  operators (exact set): \`=\` \`!=\` \`>\` \`<\` \`>=\` \`<=\` \`like\` \`in\` \`not in\` \`is null\` \`is not null\`
+  operators (exact set): \`=\` \`!=\` \`>\` \`<\` \`>=\` \`<=\` \`like\` \`in\` \`not in\` \`is null\` \`is not null\`.
+  An empty \`in\` array compiles to SQL \`false\` — matches nothing, never throws
 - QueryBuilder chain: \`where / orWhere / whereNull / whereNotNull / whereIn / whereNotIn /
   orderBy(field, 'asc' | 'desc') / limit(n) / offset(n) / with(...relations) / scope(name)\` →
   terminate with \`get() / first() / firstOrFail() / count() / paginate(page?, perPage?) / update(data) / delete()\`
 - Pagination: \`Model.paginate({ page?, perPage?, where?, orderBy? })\` →
-  \`{ data, meta: { total, perPage, currentPage, totalPages, hasMore, from, to } }\`.
+  \`{ data, meta: { total, perPage, currentPage, totalPages, hasMore, from, to } }\` — no \`links\`.
   HTTP/Inertia links: \`paginate(result, { path?, query?, fragment? })\` from \`@guren/core\`
-  (those three fields are \`PaginatorOptions\`)
+  (those three fields are \`PaginatorOptions\`); it serializes as \`{ data, meta, links }\`.
+  In tests assert the shape the route actually returns, e.g. \`assertJsonPath('meta.total', 3)\`
 - Relations (declaration): \`hasOne/hasMany(name, related, foreignKey, localKey)\` ·
   \`belongsTo(name, related, foreignKey, ownerKey)\` ·
   \`belongsToMany(name, related, pivotTable, foreignPivotKey, relatedPivotKey, parentKey = 'id', relatedKey = 'id')\`

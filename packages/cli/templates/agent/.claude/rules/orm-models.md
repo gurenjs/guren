@@ -58,6 +58,9 @@ await Post.where('views', '>', 100).orWhere('featured', true).get()
 
 Operators (exact set): `=` `!=` `>` `<` `>=` `<=` `like` `in` `not in` `is null` `is not null`
 
+An empty `in` array compiles to SQL `false` — the query matches nothing and never throws,
+so guarding `if (ids.length === 0)` before a `where in` is optional, not required.
+
 ## QueryBuilder chain
 
 `Post.where(...)` returns a `QueryBuilder`. Chainable:
@@ -80,6 +83,9 @@ const result = await Post.paginate({ page: 1, perPage: 15, where: {...}, orderBy
 
 For Inertia/HTTP pagination links wrap it with `paginate` from `@guren/core`:
 `paginate(result, { path?, query?, fragment? })` — those three fields are `PaginatorOptions`.
+The wrapped paginator serializes as `{ data, meta, links }`; the raw `PaginatedResult`
+has no `links`. In tests, assert against the shape the route actually returns
+(e.g. `assertJsonPath('meta.total', 3)`, `assertJsonCount(2, 'data')`).
 
 ## Relations — declaration signatures
 
