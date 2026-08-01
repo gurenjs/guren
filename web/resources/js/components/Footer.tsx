@@ -51,7 +51,7 @@ export function Footer({ variant }: FooterProps) {
             <span className="text-lg font-bold text-white">Guren</span>
           </div>
           <p className="text-sm leading-relaxed text-white/50">
-            Laravel-inspired fullstack TypeScript framework built on Bun.
+            The fullstack TypeScript framework for the AI-agent era, built on Bun.
           </p>
         </div>
         <div>

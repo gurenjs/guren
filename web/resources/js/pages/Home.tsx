@@ -49,7 +49,7 @@ const features = [
   },
   {
     icon: <TerminalIcon className="size-5" />,
-    title: 'Built for AI agents too',
+    title: 'Agents are first-class users',
     body: 'guren context maps your app, guren check verifies route–controller–page wiring, guren audit gates security. Your agent reads the same docs you do — every page is served as Markdown.',
   },
 ]
@@ -121,12 +121,6 @@ const deployTargets = [
   },
 ]
 
-const agentCostSteps = [
-  { name: 'Bare repo', cost: 5.54, display: '$5.54', accent: false },
-  { name: 'Big CLAUDE.md', cost: 4.51, display: '$4.51', accent: false },
-  { name: 'Shipped guidance', cost: 3.35, display: '$3.35', accent: true },
-]
-
 const TAB_KEYS = ['Routes', 'Controller', 'Model'] as const
 type TabKey = (typeof TAB_KEYS)[number]
 
@@ -196,17 +190,16 @@ export default function Home({ codeExamples }: Props) {
               crimson lotus
             </p>
             <h1 className="mt-5 text-4xl font-extrabold leading-[1.1] tracking-tight text-white sm:text-5xl md:text-6xl">
-              The{' '}
+              The fullstack TypeScript framework for the{' '}
               <span className="bg-gradient-to-r from-crimson-400 to-crimson-600 bg-clip-text text-transparent">
-                Laravel feeling
+                AI-agent era
               </span>
-              , at Bun speed.
+              .
             </h1>
             <p className="mt-6 max-w-2xl text-lg leading-relaxed text-white/70 md:text-xl">
-              Guren is a fullstack framework for Bun. Controllers, models, queues, mail — the
-              conventions you know from Laravel, with type safety that runs from the route
-              definition to the React component. And your AI agent gets the same map you do,
-              shipped with every new app.
+              Guren is a fullstack framework for Bun where your AI agent works from the same
+              map you do. Laravel-style conventions, type safety from the route definition to
+              the React component, and mechanical checks that verify the work — human or agent.
             </p>
             <div className="mt-10 flex flex-wrap items-center gap-4">
               <Link
@@ -267,23 +260,6 @@ export default function Home({ codeExamples }: Props) {
           </div>
         </section>
 
-        {/* Feature Grid */}
-        <section className="px-6 py-20">
-          <div className="mx-auto max-w-5xl">
-            <div className="mb-12 text-center">
-              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-crimson-400">Why Guren</p>
-              <h2 className="mt-3 text-3xl font-bold text-white md:text-4xl">
-                Conventions you know. Types you didn&apos;t have.
-              </h2>
-            </div>
-            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-              {features.map((f) => (
-                <FeatureCard key={f.title} icon={f.icon} title={f.title} body={f.body} />
-              ))}
-            </div>
-          </div>
-        </section>
-
         {/* Agent Evaluation */}
         <section className="border-t border-white/10 px-6 py-20">
           <div className="mx-auto grid max-w-5xl items-start gap-12 lg:grid-cols-2">
@@ -296,13 +272,11 @@ export default function Home({ codeExamples }: Props) {
                 derived where possible · declared where not · checked always
               </p>
               <p className="mt-4 text-base leading-relaxed text-white/60">
-                One command hands an agent everything your project knows about an entity — or the
-                whole map. The spec keeps itself honest: ER, domain, and screen views regenerate
-                from code, decision records link to the models they govern, and the check suite's
-                CI gates catch broken links and drift.
-                Mechanical gates catch mistakes before you read the diff, and every new app ships
-                a full agent harness whose effect is measured in a public, reproducible
-                evaluation: a 40% cut in agent cost over an undocumented baseline.
+                One command hands an agent everything your project knows about an entity — or
+                the whole map, verified API signatures included. The spec keeps itself honest:
+                ER, domain, and screen views regenerate from code, decision records link to the
+                models they govern, and CI gates catch broken links and drift. Mechanical gates
+                catch mistakes before you read the diff.
               </p>
               <CodeBlock
                 lines={[
@@ -314,34 +288,25 @@ export default function Home({ codeExamples }: Props) {
                 title="Terminal"
               />
               <p className="mt-4 text-sm leading-relaxed text-white/50">
-                Every Guren trial in the evaluation shipped a working feature — scored blind by
-                typecheck, tests, and a hidden HTTP smoke the agent never saw.
+                None of this is aspirational: the whole loop is exercised in a public,
+                reproducible agent evaluation — and the rounds that did not help are published
+                right next to the ones that did.
               </p>
             </div>
             <div className="rounded-xl border border-white/10 bg-white/[0.03] p-6">
               <p className="text-sm font-semibold text-white">
-                Agent cost for the same feature
+                Agents ship on Guren — measured, not promised
               </p>
-              <p className="mt-1 text-xs text-white/50">
-                Median USD per trial — Claude Code building a full tagging feature on Guren
+              <p className="mt-6 bg-gradient-to-r from-crimson-300 to-crimson-500 bg-clip-text text-center text-6xl font-extrabold text-transparent">
+                39/39
               </p>
-              <div className="mt-6 space-y-4">
-                {agentCostSteps.map((step) => (
-                  <div key={step.name} title={`${step.name}: ${step.display}`}>
-                    <p className="text-[11px] font-medium text-white/60">{step.name}</p>
-                    <div className="mt-1 flex items-center gap-2">
-                      <div
-                        className={`h-3 shrink-0 rounded-r ${step.accent ? 'bg-crimson-500' : 'bg-[#6b6363]'}`}
-                        style={{ width: `calc((100% - 48px) * ${(step.cost / 5.54).toFixed(4)})` }}
-                      />
-                      <span className="shrink-0 text-[11px] text-white/70">{step.display}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <p className="mt-2 text-center text-sm font-semibold text-white">
+                agent trials shipped a working feature
+              </p>
               <p className="mt-5 text-xs leading-relaxed text-white/50">
-                The guidance in the last bar — a lean auto-loaded CLAUDE.md plus path-scoped rules —
-                is exactly what <code className="text-white/70">create-guren-app</code> ships today.
+                Every trial across five evaluation rounds — Claude Code building a complete
+                feature on the app the scaffold ships — passed typecheck, the full test suite,
+                and a hidden HTTP smoke the agent never saw, scored blind on a clean checkout.
               </p>
               <a
                 href="https://github.com/gurenjs/framework-comparison/tree/main/agent-eval"
@@ -352,6 +317,23 @@ export default function Home({ codeExamples }: Props) {
                 Evaluation harness &amp; raw data
                 <ArrowRightIcon className="size-3.5" />
               </a>
+            </div>
+          </div>
+        </section>
+
+        {/* Feature Grid */}
+        <section className="border-t border-white/10 px-6 py-20">
+          <div className="mx-auto max-w-5xl">
+            <div className="mb-12 text-center">
+              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-crimson-400">Why Guren</p>
+              <h2 className="mt-3 text-3xl font-bold text-white md:text-4xl">
+                Conventions you know. Types you didn&apos;t have.
+              </h2>
+            </div>
+            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+              {features.map((f) => (
+                <FeatureCard key={f.title} icon={f.icon} title={f.title} body={f.body} />
+              ))}
             </div>
           </div>
         </section>
