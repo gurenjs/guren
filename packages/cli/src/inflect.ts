@@ -1,6 +1,6 @@
 import { camelCase, kebabCase } from './utils'
 
-function pluralize(name: string): string {
+export function pluralize(name: string): string {
   if (/[^aeiou]y$/iu.test(name)) return `${name.slice(0, -1)}ies`
   if (/(s|x|z|ch|sh)$/iu.test(name)) return `${name}es`
   return `${name}s`
@@ -20,10 +20,11 @@ export function singularize(name: string): string {
  * import of it, and `guren check`'s lookup are three independent derivations
  * that only agree if they share one rule.
  *
- * A lone trailing `s` is read as plural, so `Status` collapses to `Status`
- * rather than `Statuses`. English cannot resolve that without a dictionary —
- * `News` and `Status` are structurally identical — and a name that is merely
- * unidiomatic beats one that disagrees with itself across three files.
+ * A lone trailing `s` is read as plural, so a singular `Status` becomes
+ * `Statu`. English cannot resolve that without a dictionary — `News` and
+ * `Status` are structurally identical — which is why only the names inside the
+ * triangle route through here. Route slugs and generated type names in
+ * `make:feature` pluralize directly, so `Status` still yields `/statuses`.
  */
 export function collectionName(name: string): string {
   return pluralize(singularize(name))

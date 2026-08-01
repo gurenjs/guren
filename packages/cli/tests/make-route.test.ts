@@ -20,4 +20,21 @@ describe('makeRoute', () => {
       await workspace.cleanup()
     }
   })
+
+  // The controller name has to be the one make:feature generates. Stripping a
+  // lone trailing `s` gave `CategorieController` for `categories`, so the route
+  // pointed at a controller no other generator ever writes.
+  it.each([
+    ['categories', 'CategoryController'],
+    ['boxes', 'BoxController'],
+    ['news', 'NewController'],
+  ])('names the controller for %s the way make:feature does', async (name, controller) => {
+    const workspace = await createTempWorkspace('guren-cli-route-plural-')
+    try {
+      const content = await readFile(await makeRoute(name), 'utf8')
+      expect(content).toContain(controller)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
 })

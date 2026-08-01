@@ -26,17 +26,12 @@ plural form — `UserProfile` resolved to `userprofiles` while the table is
 name ended in `ss`, so `make:route categories` scaffolded a `CategorieController`
 that `make:feature Category` never generates. It now singularizes the same way.
 
-`make:feature` names change where the entity ends in `s`, because its collection
-is now singularized before being pluralized, the way `guren add resource`
-already did. `make:feature Posts` yields the `posts` collection rather than
-`postses`, and — the cost of the same rule — `make:feature Status` yields
-`status` rather than `statuses`. A lone trailing `s` cannot be read reliably:
-`News` and `Status` are structurally identical, and English needs a dictionary
-to tell them apart. The collection also names the route path and page
-directory, so those move with it (`/status`, `resources/js/pages/status/`). The
-model class is untouched — `make:feature Status` still scaffolds
-`StatusController`. `guren add resource` is unaffected; it already singularized
-its input.
+Names that reach a database identifier tolerate already-plural input, so
+`make:model News` keeps importing `news` rather than `newses`. Route paths,
+page directories, and generated type names pluralize directly and are
+unchanged — a lone trailing `s` cannot be read reliably (`News` and `Status`
+are structurally identical), so only the names that have to agree across files
+pay for that tolerance.
 
 `guren check`'s model-schema result stays informational (a `warn`, and it does
 not set the exit code). It still infers the table name rather than reading what

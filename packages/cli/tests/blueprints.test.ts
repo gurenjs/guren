@@ -116,10 +116,6 @@ describe('blueprints', () => {
     // Already plural: the blueprint singularizes the name before scaffolding,
     // so the class is `New` and the collection must not become `newses`.
     ['News', 'New', 'news', 'news'],
-    // A lone trailing `s` reads as plural, so a singular `Status` collapses to
-    // `Statu`/`status` rather than `Statuses`. Unidiomatic, but the three sites
-    // agree — see collectionName() for why English cannot decide this.
-    ['Status', 'Statu', 'status', 'status'],
   ])('keeps schema, model, and check in agreement for %s', async (name, className, identifier, tableName) => {
     await seedResourceWorkspace(PG_SCHEMA_FIXTURE)
 

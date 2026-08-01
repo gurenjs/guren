@@ -1,6 +1,6 @@
 import { consola } from 'consola'
-import { writeFilesSafe, type WriterOptions, pascalCase, camelCase, pagesAccessor, safeModuleName } from './utils'
-import { collectionName, collectionSlug } from './inflect'
+import { writeFilesSafe, type WriterOptions, pascalCase, camelCase, kebabCase, pagesAccessor, safeModuleName } from './utils'
+import { pluralize } from './inflect'
 import { makeModel } from './make-model'
 import { makePolicy } from './make-policy'
 import { makeTest } from './make-test'
@@ -62,8 +62,8 @@ export function parseFieldsString(fieldsStr: string): FieldDefinition[] {
 export async function makeFeature(name: string, options: MakeFeatureOptions = {}): Promise<string[]> {
   const fields = parseFieldsString(options.fields ?? '')
   const singular = pascalCase(name)
-  const collection = collectionName(singular)
-  const routeName = collectionSlug(singular)
+  const collection = pluralize(singular)
+  const routeName = kebabCase(collection)
   const routeVar = camelCase(routeName)
   const variableName = singular.charAt(0).toLowerCase() + singular.slice(1)
   const withAuth = !options.publicAccess
