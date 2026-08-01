@@ -91,6 +91,30 @@ describe('describeCallerFile', () => {
     expect(describeCallerFile('Error\n    at createPostgresDatabase (/app/dist/index.js:120:15)')).toBeUndefined()
   })
 
+  test('should split a path that itself ends in numbers at the leftmost location', () => {
+    // `/app/v2:9` is a legal path followed by a line number, so `:1:2` has to
+    // be read as line and column rather than the path keeping `:1` and the
+    // column standing alone. Anything else keys two reloads of one file apart.
+    const frame = (last: string) => describeCallerFile(`Error\n    at factory (/app/dist/index.js:1:1)\n${last}`)
+
+    expect(frame('    at /app/v2:1:2')).toBe('/app/v2')
+    expect(frame('    at a:1:2:3')).toBe('a:1')
+    expect(frame('    at factory (/app/v2:1:2)')).toBe('/app/v2')
+  })
+
+  test('should not take time superlinear in the length of a frame', () => {
+    // Both shapes previously backtracked polynomially, so a frame padded with
+    // whitespace or opening parens cost quadratic time. Nothing here is
+    // request-derived, but a stack embeds whatever a message put in it.
+    const padded = (last: string) => describeCallerFile(`Error\n    at factory (/app/dist/index.js:1:1)\n${last}`)
+    const started = performance.now()
+
+    expect(padded(`    at ${' '.repeat(100_000)}x`)).toBeUndefined()
+    expect(padded(`    ${'('.repeat(100_000)}x`)).toBeUndefined()
+
+    expect(performance.now() - started).toBeLessThan(1_000)
+  })
+
   test('should stay identical when the call moves to another line', () => {
     // The whole point of dropping line and column: adding an import above the
     // factory must not orphan the entry holding the previous connection.

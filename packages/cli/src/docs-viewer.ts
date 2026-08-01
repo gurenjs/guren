@@ -58,7 +58,66 @@ export interface DocsViewerData {
   docs: DocsViewerDoc[]
 }
 
-const LEADING_H1 = /^\s*(?:<!--[\s\S]*?-->\s*)?#\s+.*$/m
+/** Both match one character, so neither can backtrack the way a quantifier can. */
+const WHITESPACE = /\s/
+const LINE_TERMINATOR = /[\n\r\u2028\u2029]/
+
+function skipWhitespace(body: string, from: number): number {
+  let cursor = from
+  while (cursor < body.length && WHITESPACE.test(body[cursor])) cursor += 1
+  return cursor
+}
+
+/** Where the `#` heading starting at `at` ends, or -1 when there is none. */
+function headingEnd(body: string, at: number): number {
+  if (body[at] !== '#') return -1
+
+  const text = skipWhitespace(body, at + 1)
+  if (text === at + 1) return -1
+
+  let cursor = text
+  while (cursor < body.length && !LINE_TERMINATOR.test(body[cursor])) cursor += 1
+  return cursor
+}
+
+/**
+ * The body without its first H1, and without the HTML comment that may precede
+ * it — the panel header carries the title, so the body H1 would repeat it.
+ *
+ * Scanned rather than matched with `/^\s*(?:<!--[\s\S]*?-->\s*)?#\s+.*$/m`,
+ * whose lazy comment body was re-scanned from every line start: a doc holding
+ * many `<!--` took time quadratic in its length. Every `-->` is classified once
+ * here instead, which is enough, because whether a heading may follow a comment
+ * turns only on where that comment ends and never on where it opened.
+ */
+function stripLeadingH1(body: string): string {
+  const closers: Array<{ at: number; end: number }> = []
+  for (let found = body.indexOf('-->'); found !== -1; found = body.indexOf('-->', found + 3)) {
+    const end = headingEnd(body, skipWhitespace(body, found + 3))
+    if (end !== -1) closers.push({ at: found, end })
+  }
+
+  let next = 0
+  let lineStart = 0
+  for (;;) {
+    const from = skipWhitespace(body, lineStart)
+
+    if (body.startsWith('<!--', from)) {
+      while (next < closers.length && closers[next].at < from + 4) next += 1
+      if (next < closers.length) return body.slice(0, lineStart) + body.slice(closers[next].end)
+    }
+
+    const end = headingEnd(body, from)
+    if (end !== -1) return body.slice(0, lineStart) + body.slice(end)
+
+    // A multiline `^` anchors after every line terminator, `\r` included.
+    let cursor = lineStart
+    while (cursor < body.length && !LINE_TERMINATOR.test(body[cursor])) cursor += 1
+    if (cursor === body.length) return body
+    lineStart = cursor + 1
+  }
+}
+
 /**
  * The graph node id a body link points at. `localLinkTarget` is the
  * same filter `scanDocs` ran to derive the edge, so the rendered target
@@ -84,8 +143,7 @@ export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> 
   const docs = await Promise.all(
     refs.map(async (ref): Promise<DocsViewerDoc> => {
       const source = await readFile(resolve(cwd, ref.path), 'utf-8').catch(() => '')
-      // The panel header carries the title, so the body H1 would repeat it.
-      const body = (parseDocFrontmatter(source)?.body ?? source).replace(LEADING_H1, '')
+      const body = stripLeadingH1(parseDocFrontmatter(source)?.body ?? source)
       return {
         path: ref.path,
         module: ref.module,
