@@ -1,6 +1,6 @@
 /**
- * Zod v3/v4 compatibility primitives shared by the CLI's TypeScript-type
- * renderer (`@guren/cli/schema-type-extractor`) and the OpenAPI schema-object
+ * Zod v3/v4 compatibility primitives shared by `@guren/cli`'s TypeScript-type
+ * renderer (`src/schema-type-extractor.ts`) and the OpenAPI schema-object
  * renderer (`@guren/openapi`).
  *
  * Internal by the rules in `contributing/api-stability.md`: reachable only
@@ -9,16 +9,20 @@
  *
  * Zod v3 tags every node with `_def.typeName` (`"ZodString"`); v4 uses
  * `_def.type` (`"string"`) or a top-level `.type`. Everything here exists to
- * read a node's shape without caring which major produced it. What does NOT
- * belong here: the two type switches that turn a node into an output
- * (a TypeScript type string vs. an OpenAPI schema object) — those produce
- * genuinely different results and stay in their own packages. `isOptional`
- * also stays out: the CLI reads only the rendered side of a `.pipe()` (input
- * or output, matching what `zodToType` returns for that side), while the
- * OpenAPI walker requires *both* sides to allow omission, since a pipeline
- * runs both stages against a real request. That is a real behavioral
- * difference, not incidental drift — merging it would change one of the two
- * outputs.
+ * read a node's shape without caring which major produced it.
+ *
+ * What does NOT belong here: the two type switches that turn a node into an
+ * output (a TypeScript type string vs. an OpenAPI schema object). Their leaf
+ * vocabularies have legitimately diverged — the CLI renders `void`/`any`/
+ * `never`, which OpenAPI has no way to express — and that is a rendering
+ * decision, not version knowledge.
+ *
+ * Neither walker's `isOptional` belongs here either, but for a weaker reason
+ * than "they are both right": the CLI reads only the side of a `.pipe()` it
+ * renders, the OpenAPI walker requires both sides to permit omission, and
+ * *both* are approximations that a sufficiently odd pipeline can fool. Fixing
+ * them properly means simulating a parse, which is well beyond reading a
+ * `_def`. They stay with their callers until someone does that.
  */
 
 export interface ZodSchemaLike {
@@ -82,14 +86,46 @@ export function innerSchema(def: Record<string, unknown>): ZodSchemaLike | undef
 
 /**
  * An array's element schema. v4 holds it in `_def.element` and puts the string
- * `'array'` in `_def.type`; v3 has no `element` and holds the schema in
- * `_def.type`. This is the read that broke twice, once per package, and it is
- * `schemaAt`'s object check rather than the key order that fixes it — the
- * order here is the redundant second guard, not the load-bearing one.
+ * `'array'` in `_def.type`; v3 has no `element` at all. `schemaAt`'s object
+ * check is what makes this safe — the key order is a redundant second guard.
  */
 export function arrayElement(def: Record<string, unknown>): ZodSchemaLike | undefined {
   return schemaAt(def, 'element', 'type')
 }
+
+/**
+ * Wrappers that neither add to a rendered type nor decide whether a field may
+ * be omitted — whatever they wrap answers both questions.
+ */
+export const TRANSPARENT_WRAPPERS: ReadonlySet<string> = new Set([
+  'catch', 'readonly', 'branded', 'lazy', 'effects',
+])
+
+/**
+ * Wrappers that pass their type through but *do* decide presence: each makes a
+ * field omissible, or (in `nonoptional`'s case) re-requires one.
+ */
+export const PRESENCE_WRAPPERS: ReadonlySet<string> = new Set([
+  'optional', 'default', 'prefault', 'nonoptional',
+])
+
+/**
+ * Every type name that carries exactly one nested schema and no shape of its
+ * own — the union of the two sets above plus the three that render specially
+ * (`nullable` becomes a union with null; a pipe holds one schema per side).
+ *
+ * This is the vocabulary, not a policy: callers partition it however their
+ * rendering needs (the CLI splits transparent from presence-deciding because
+ * it walks types and presence separately; the OpenAPI walker looks through all
+ * of them uniformly). What none of them may do is disagree about *membership*
+ * — a name known to one walker and not the other silently changes an output,
+ * which is why the list lives here rather than once per package.
+ */
+export const SINGLE_CHILD_WRAPPERS: ReadonlySet<string> = new Set([
+  ...TRANSPARENT_WRAPPERS,
+  ...PRESENCE_WRAPPERS,
+  'nullable', 'pipe', 'pipeline',
+])
 
 /**
  * Whether this node is a `.transform()`'s output half — a wrapped function
@@ -101,18 +137,26 @@ export function isTransform(schema: ZodSchemaLike): boolean {
 }
 
 /**
- * Which side of a `.pipe()`/`.pipeline()` to read for a given `io` direction.
+ * Both halves of a `.pipe()`/`.pipeline()`.
  *
  * v3 names this node `ZodPipeline`; v4 uses one `pipe` for both `.pipe()` and
  * `.transform()`. `_def.in` is what a caller sends, `_def.out` what a
  * controller receives — except for a transform, whose out side is the
- * transform function itself, leaving the in side as the best available
- * answer.
+ * transform function itself and so has no type to read. `to` is therefore
+ * absent for a transform, leaving `from` as the only readable answer.
  */
-export function pipeSide(def: Record<string, unknown>, io: SchemaIo): ZodSchemaLike | undefined {
+export function pipeSides(def: Record<string, unknown>): {
+  from: ZodSchemaLike | undefined
+  to: ZodSchemaLike | undefined
+} {
   const to = schemaAt(def, 'out')
-  if (io === 'output' && to && !isTransform(to)) return to
-  return schemaAt(def, 'in')
+  return { from: schemaAt(def, 'in'), to: to && !isTransform(to) ? to : undefined }
+}
+
+/** The one side of a `.pipe()` that describes the `io` direction being rendered. */
+export function pipeSide(def: Record<string, unknown>, io: SchemaIo): ZodSchemaLike | undefined {
+  const { from, to } = pipeSides(def)
+  return io === 'output' && to ? to : from
 }
 
 /** v3: `_def.shape()` is a function. v4: `_def.shape` (or the schema's own `.shape`) is a plain object. */

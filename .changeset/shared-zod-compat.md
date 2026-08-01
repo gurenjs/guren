@@ -20,17 +20,29 @@ Those primitives now live in `@guren/core/internal/zod-compat`, a deep-import
 internal module in the same vein as `internal/deploy-build`. Both walkers read
 from it, so a version quirk learned once is known in both places.
 
-The type switches stay where they are — one produces TypeScript type strings,
-the other OpenAPI schema objects, and they are not the same walk. `isOptional`
-also stays split on purpose: the CLI reads only the side of a `.pipe()` it is
-rendering, while the OpenAPI walker requires both sides to permit omission.
+The set of type names that carry exactly one nested schema moves too, as
+`SINGLE_CHILD_WRAPPERS` plus the two partitions each walker needs. The walkers
+had looked like they disagreed here — one held a five-name set, the other a
+twelve-name one — but the CLI simply handled the other seven as explicit
+`switch` cases. They differ in how they partition the vocabulary, not in what
+is in it, so the membership is now stated once.
 
-Two incidental hardenings come along for the ride. The CLI's inner-schema
+The type switches themselves stay where they are: one produces TypeScript type
+strings, the other OpenAPI schema objects. Their leaf vocabularies have
+legitimately diverged (the CLI renders `void`/`any`/`never`, which OpenAPI
+cannot express), and that is a rendering decision rather than version
+knowledge.
+
+Both `isOptional`s also stay with their callers, but not because each is right
+for its own purpose — the CLI reads one side of a `.pipe()` and the OpenAPI
+walker requires both, and each can be fooled by a pipeline the other handles.
+Deciding omissibility correctly means simulating a parse, which is a separate
+piece of work; the two approximations are now labelled as such where they live.
+
+Three incidental hardenings come along for the ride. The CLI's inner-schema
 lookup now skips non-object candidates instead of taking the first non-nullish
-one, and a nested node with no readable type name renders as `unknown` rather
-than throwing.
-
-One drift surface stays open on purpose: the Zod type-name vocabulary itself
-(`prefault` and `nonoptional` from v4, `effects` from v3) is still spelled out
-in both switches and both wrapper sets, because the two sets genuinely differ
-in membership.
+one; a nested node with no readable type name renders as `unknown` rather than
+throwing; and two degenerate schemas that used to emit invalid TypeScript now
+render correctly — an empty `z.enum([])` as `never` instead of an empty string,
+and `z.literal(undefined)` as `undefined` rather than being dropped by
+`JSON.stringify`.

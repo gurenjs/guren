@@ -3,14 +3,16 @@ import { dirname, relative, resolve } from 'node:path'
 import type { Application, RouteDefinition } from '@guren/core'
 import {
   arrayElement,
-  enumValues as sharedEnumValues,
+  enumValues,
   getTypeName,
-  isTransform,
+  innerSchema,
   literalValues,
   objectShape,
   pipeSide,
+  pipeSides,
   schemaAt,
   type SchemaIo,
+  SINGLE_CHILD_WRAPPERS,
   typeOf,
   type ZodSchemaLike,
 } from '@guren/core/internal/zod-compat'
@@ -392,7 +394,7 @@ function toOpenApiSchema(schema: unknown, warnings: string[], label: string, io:
   // Wrappers add nothing to the rendered type, so they are looked through
   // uniformly. `nullable` is the exception — it renders as a union with null —
   // and so keeps its own case below.
-  if (typeName !== 'nullable' && WRAPPER_TYPES.has(typeName)) {
+  if (typeName !== 'nullable' && SINGLE_CHILD_WRAPPERS.has(typeName)) {
     const nested = unwrap(schema, io)
     if (!nested) {
       // Reaching a wrapper whose contents cannot be read drops the property,
@@ -467,7 +469,7 @@ function toOpenApiSchema(schema: unknown, warnings: string[], label: string, io:
       }
     }
     case 'enum': {
-      const values = sharedEnumValues(def)
+      const values = enumValues(def)
       return values.length > 0 ? { type: 'string', enum: values } : { type: 'string' }
     }
     case 'nativeenum': {
@@ -488,7 +490,7 @@ function toOpenApiSchema(schema: unknown, warnings: string[], label: string, io:
       }
     }
     case 'promise': {
-      const nested = schemaAt(def, 'innerType', 'schema', 'type')
+      const nested = innerSchema(def)
       return nested ? toOpenApiSchema(nested, warnings, label, io) : undefined
     }
     default:
@@ -585,26 +587,14 @@ function isZodSchema(schema: unknown): schema is ZodLike {
 }
 
 /**
- * Type names that carry exactly one nested schema and no shape of their own.
- *
- * Three walks look through them for different reasons — finding the object
- * behind a parameter schema, rendering a type, deciding whether a property may
- * be omitted — so the set is stated once here. Each walk layers its own
- * handling on top (`nullable` renders as a union; `optional` and friends decide
- * presence), but none of them may disagree about what is a wrapper: a name
- * reaching one walk and not another silently changes the document.
- */
-const WRAPPER_TYPES = new Set([
-  'optional', 'default', 'prefault', 'nonoptional', 'catch', 'nullable',
-  'readonly', 'branded', 'lazy', 'effects', 'pipe', 'pipeline',
-])
-
-/**
- * The schema a wrapper wraps, in the direction being documented. A pipe (v3
- * names it `ZodPipeline`) holds one per side: `_def.in` is what a caller sends,
- * `_def.out` what a controller returns. A `.transform()`'s out side is the
- * transform function rather than a schema, so there is no parsed type to read
- * and the in side remains the best available answer.
+ * The schema a wrapper wraps, in the direction being documented. Three walks
+ * look through wrappers for different reasons — finding the object behind a
+ * parameter schema, rendering a type, deciding whether a property may be
+ * omitted — and each layers its own handling on top (`nullable` renders as a
+ * union; `optional` and friends decide presence). What none of them may do is
+ * disagree about which names *are* wrappers, which is why the membership comes
+ * from `SINGLE_CHILD_WRAPPERS` rather than a local list. See `pipeSides` for
+ * why a pipe resolves per direction.
  */
 function unwrap(schema: ZodLike, io: SchemaIo): ZodLike | undefined {
   const def = schema._def ?? {}
@@ -614,11 +604,7 @@ function unwrap(schema: ZodLike, io: SchemaIo): ZodLike | undefined {
     return pipeSide(def, io)
   }
 
-  if (!WRAPPER_TYPES.has(typeName)) {
-    return undefined
-  }
-
-  return schemaAt(def, 'innerType', 'schema', 'type')
+  return SINGLE_CHILD_WRAPPERS.has(typeName) ? innerSchema(def) : undefined
 }
 
 function isOptional(schema: ZodLike, io: SchemaIo): boolean {
@@ -641,18 +627,16 @@ function isOptional(schema: ZodLike, io: SchemaIo): boolean {
       return false
     // A pipeline runs both stages, so a field may be omitted only if neither
     // stage rejects a missing value. Reading just the side being rendered
-    // would document an omission the other stage refuses.
+    // would document an omission the other stage refuses. Still an
+    // approximation in the other direction: a transforming stage can supply a
+    // value the next stage accepts, which this reports as required.
     case 'pipe':
     case 'pipeline': {
-      const def = schema._def ?? {}
-      const from = schemaAt(def, 'in')
-      const to = schemaAt(def, 'out')
+      const { from, to } = pipeSides(schema._def ?? {})
       if (!from) {
         return false
       }
-      return to && !isTransform(to)
-        ? isOptional(from, io) && isOptional(to, io)
-        : isOptional(from, io)
+      return to ? isOptional(from, io) && isOptional(to, io) : isOptional(from, io)
     }
     default: {
       const nested = unwrap(schema, io)
