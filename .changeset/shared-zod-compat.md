@@ -29,3 +29,8 @@ Two incidental hardenings come along for the ride. The CLI's inner-schema
 lookup now skips non-object candidates instead of taking the first non-nullish
 one, and a nested node with no readable type name renders as `unknown` rather
 than throwing.
+
+One drift surface stays open on purpose: the Zod type-name vocabulary itself
+(`prefault` and `nonoptional` from v4, `effects` from v3) is still spelled out
+in both switches and both wrapper sets, because the two sets genuinely differ
+in membership.

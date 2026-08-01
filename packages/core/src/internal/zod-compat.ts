@@ -135,6 +135,5 @@ export function enumValues(def: Record<string, unknown>): string[] {
 /** v3: `_def.value` holds a literal's single value. v4: `_def.values` is an array (Zod 4 literals can hold more than one). */
 export function literalValues(def: Record<string, unknown>): unknown[] {
   if ('value' in def) return [def.value]
-  const values = def.values as unknown[] | undefined
-  return values ?? []
+  return Array.isArray(def.values) ? def.values : []
 }

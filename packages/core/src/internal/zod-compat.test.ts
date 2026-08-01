@@ -4,7 +4,6 @@ import * as z3 from 'zod/v3'
 import {
   arrayElement,
   enumValues,
-  getTypeName,
   isTransform,
   literalValues,
   normalizeTypeName,
@@ -43,12 +42,16 @@ describe('normalizeTypeName', () => {
 })
 
 describe('arrayElement', () => {
-  test('reads the element off a Zod v4 array (regression: _def.element before _def.type)', () => {
+  // v4 puts the string 'array' in `_def.type` alongside the real element in
+  // `_def.element`. Taking `_def.type` yields that string, which every caller
+  // then renders as an empty/unknown element — the bug fixed once per package.
+  test('reads the element off a Zod v4 array, not the type-name string in _def.type', () => {
     const arraySchema = z.array(z.string())
     const def = (arraySchema as never as { _def: Record<string, unknown> })._def
+    expect(def.type).toBe('array')
     const element = arrayElement(def)
     expect(element).toBeDefined()
-    expect(getTypeName(element!)).toBeDefined()
+    expect(typeOf(element!)).toBe('string')
   })
 
   test('reads the element off a Zod v3 array', () => {

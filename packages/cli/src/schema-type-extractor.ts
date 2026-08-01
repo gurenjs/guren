@@ -9,10 +9,10 @@ import {
   getTypeName,
   innerSchema,
   literalValues,
-  normalizeTypeName,
   objectShape,
   pipeSide,
   type SchemaIo,
+  typeOf,
   type ZodSchemaLike,
 } from '@guren/core/internal/zod-compat'
 
@@ -60,10 +60,8 @@ export function schemaToTypeString(schema: unknown, options: SchemaTypeOptions):
 }
 
 function zodToType(z: ZodAnyLike, io: SchemaIo): string {
-  const tn = getTypeName(z)!
   const def = z._def ?? {}
-
-  const t = normalizeTypeName(tn)
+  const t = typeOf(z)
 
   // `.coerce` is recorded on the schema itself in both v3 and v4, so this has
   // to be checked before the plain type mapping below claims the parsed type.
@@ -182,9 +180,7 @@ function zodToType(z: ZodAnyLike, io: SchemaIo): string {
  * that `zodToType` handles for types.
  */
 function isOptional(z: ZodAnyLike, io: SchemaIo): boolean {
-  const tn = getTypeName(z)
-  if (!tn) return false
-  const t = normalizeTypeName(tn)
+  const t = typeOf(z)
   const def = z._def ?? {}
   const look = (s: unknown): boolean => (s ? isOptional(s as ZodAnyLike, io) : false)
 
