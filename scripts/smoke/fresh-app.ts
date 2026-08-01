@@ -601,6 +601,23 @@ async function main(): Promise<void> {
       await run(['bun', resolve(repoRoot, 'scripts/smoke/build-budget.ts'), '--max-kb', '600', appDir], repoRoot, runtimeEnv)
     }
 
+    // Templates advertise a starter test suite and a CI workflow gating on
+    // `check --ci` and `guren audit`; exercise all three here so they cannot
+    // drift from the framework. Worker is excluded like typecheck above
+    // (same export mismatch). The api blueprint needs its codegen manifests
+    // first — the generated workflow runs codegen before the gates too.
+    // --no-deps keeps the audit off the network; releases of the CLI without
+    // the flag ignore it harmlessly.
+    if (blueprint !== 'worker') {
+      if (blueprint === 'api') {
+        await run(['bun', 'run', 'codegen'], appDir, runtimeEnv)
+      }
+      const routesArgs = blueprint === 'api' ? ['--routes', 'routes/api.ts'] : []
+      await run(['bun', 'test'], appDir, runtimeEnv)
+      await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'check', '--ci', ...routesArgs], appDir, runtimeEnv)
+      await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'audit', '--no-deps', ...routesArgs], appDir, runtimeEnv)
+    }
+
     console.log(`\nFresh app smoke passed (${blueprint}, ${installMode}): ${appDir}`)
   } finally {
     if (keepTemp) {

@@ -44,11 +44,28 @@ if (targets.length === 0) {
   process.exit(1)
 }
 
+// A single root-cwd run ignores per-package bunfig.toml, so each package's
+// `[test] root` (create-app uses it to keep the *.test.ts files its
+// templates ship for scaffolded apps out of the monorepo suite) is resolved
+// here and passed as the package's path filter instead. One invocation, so
+// forwarded flags like `-t <pattern>` keep matching across packages rather
+// than failing in every package the pattern misses.
+async function testPathFor(pkg: { dir: string; relativeDir: string }): Promise<string> {
+  try {
+    const bunfig = await Bun.file(`${pkg.dir}/bunfig.toml`).text()
+    const root = bunfig.match(/^\s*root\s*=\s*"([^"]+)"/m)?.[1]
+    if (root) return `${pkg.relativeDir}/${root}`
+  } catch {
+    // no bunfig — the package directory itself is the test root
+  }
+  return pkg.relativeDir
+}
+
 const testArgs = [
   'test',
   '--isolate',
   ...forwarded,
-  ...targets.map((pkg) => pkg.relativeDir),
+  ...(await Promise.all(targets.map(testPathFor))),
 ]
 
 console.log(`[test] ${targets.map((pkg) => pkg.name).join(', ')}`)

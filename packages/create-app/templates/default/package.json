@@ -9,6 +9,7 @@
     "dev:server": "bun --hot bin/serve.ts",
     "console": "bun bin/console.ts",
     "typecheck": "tsc --noEmit",
+    "test": "bun test",
     "build": "bun run codegen && bunx vite build",
     "preview": "NODE_ENV=production bun bin/serve.ts",
     "db:make": "bunx guren make:migration",
