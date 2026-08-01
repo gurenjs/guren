@@ -128,4 +128,34 @@ describe('renderContextMarkdown', () => {
     expect(md).toContain('- PostController')
     expect(md).toContain('## Console Commands (1)')
   })
+
+  it('appends the API signature digest so agents get signatures before their first edit', () => {
+    const md = renderContextMarkdown({
+      framework: { name: 'Guren', version: '1.0.0' },
+      models: [],
+      routes: [],
+      pages: [],
+      controllers: [],
+      resources: [],
+      events: [],
+      jobs: [],
+      middleware: [],
+      listeners: [],
+      validators: [],
+      policies: [],
+      commands: [],
+    })
+
+    expect(md).toContain('## Guren API Signatures (digest)')
+    // The signatures agents were observed grepping node_modules for
+    expect(md).toContain('`paginate(result, { path, query?, fragment? })`')
+    expect(md).toContain('PaginatorOptions')
+    expect(md).toContain(
+      '`belongsToMany(name, related, pivotTable, foreignPivotKey, relatedPivotKey, parentKey = \'id\', relatedKey = \'id\')`',
+    )
+    expect(md).toContain('`withPaginate(\'tags\', { page })`')
+    expect(md).toContain('`in` `not in` `is null` `is not null`')
+    // It must route agents to the rule files, not node_modules
+    expect(md).toContain('.claude/rules/orm-models.md')
+  })
 })

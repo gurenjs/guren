@@ -16,6 +16,7 @@ import {
   readIfExists,
   excludeBarrelFiles,
 } from './discovery'
+import { GUREN_API_DIGEST } from './api-digest'
 import { parseModelFile, type ModelInfo } from './model-parser'
 import { loadContextRoutes, escapeMarkdownTableCell, type ContextRoute } from './context-route'
 import { listInertiaPageIds } from './inertia-pages'
@@ -195,6 +196,12 @@ export function renderContextMarkdown(ctx: ProjectContext): string {
       lines.push('')
     }
   }
+
+  // The digest rides along on every markdown rendering (session-start hook,
+  // MCP guren_get_context, ad-hoc CLI runs) so agents see the signatures
+  // before their first edit attaches the glob-scoped rule files.
+  lines.push(GUREN_API_DIGEST)
+  lines.push('')
 
   return lines.join('\n')
 }

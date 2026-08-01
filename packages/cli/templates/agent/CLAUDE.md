@@ -19,7 +19,9 @@ bunx guren make:adr "..."  # record an architecture decision under docs/adr/ (--
 ```
 
 This project ships with an agent harness wired into `.claude/settings.json`:
-a `SessionStart` hook injects the `guren context` project map, and a
+a `SessionStart` hook injects the `guren context` project map — **including a
+"Guren API Signatures" digest of the ORM, controller, and testing APIs, so the
+exact signatures are already in your context before you write any code** — and a
 `PostToolUse` hook (`.claude/hooks/check-after-edit.ts`) re-runs `guren check`
 after edits to routes, controllers, models, schema, or pages and reports
 failures back immediately. Framework-managed files (`.claude/rules`, `skills`,
@@ -30,8 +32,8 @@ based on the files you are editing (glob-scoped): `orm-models.md` (models, queri
 relations), `controllers-http.md` (validation, Inertia, auth), `routes-codegen.md`
 (route options, schema binding, codegen), `testing.md` (TestApp assertions),
 `docs-and-spec.md` (linked ADRs/docs, generated spec views).
-Read the matching rule file before reading `node_modules/@guren/*` — it covers the
-exact signatures.
+Never grep `node_modules/@guren/*` for signatures — the session-start digest
+plus the matching rule file cover them, verified against this framework version.
 
 ## Project Structure
 
