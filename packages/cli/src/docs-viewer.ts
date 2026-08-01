@@ -68,16 +68,30 @@ function skipWhitespace(body: string, from: number): number {
   return cursor
 }
 
-/** Where the `#` heading starting at `at` ends, or -1 when there is none. */
+/** Whether a `#` heading opens at `at`: a `#` with whitespace behind it. */
+function opensHeading(body: string, at: number): boolean {
+  return body[at] === '#' && at + 1 < body.length && WHITESPACE.test(body[at + 1])
+}
+
+/** Where the heading opening at `at` ends. Only meaningful once it opens one. */
 function headingEnd(body: string, at: number): number {
-  if (body[at] !== '#') return -1
-
-  const text = skipWhitespace(body, at + 1)
-  if (text === at + 1) return -1
-
-  let cursor = text
+  let cursor = skipWhitespace(body, at + 1)
   while (cursor < body.length && !LINE_TERMINATOR.test(body[cursor])) cursor += 1
   return cursor
+}
+
+/**
+ * Where the first heading standing behind a comment closed at or after `from`
+ * ends, or -1 when no `-->` from there on has one behind it. Which `<!--`
+ * opened the comment never changes the answer, so the search need not know.
+ */
+function headingBehindComment(body: string, from: number): number {
+  for (let closer = body.indexOf('-->', from); closer !== -1; closer = body.indexOf('-->', closer + 3)) {
+    const heading = skipWhitespace(body, closer + 3)
+    if (opensHeading(body, heading)) return headingEnd(body, heading)
+  }
+
+  return -1
 }
 
 /**
@@ -89,29 +103,38 @@ function headingEnd(body: string, at: number): number {
  * many `<!--` took time quadratic in its length. Every `-->` is classified once
  * here instead, which is enough, because whether a heading may follow a comment
  * turns only on where that comment ends and never on where it opened.
+ *
+ * Two things keep this to a bounded number of visits per character, and both
+ * are easy to lose:
+ *
+ *  - `headingBehindComment` asks where the heading *ends* only for the closer
+ *    it settles on. Resolving that for every `-->` up front re-walked the rest
+ *    of the line once each, so one long line of them cost quadratic time —
+ *    worse than the pattern this replaced. It also runs at most twice: once
+ *    that finds a heading and returns, or once that finds none, after which no
+ *    later `<!--` can reach what this search has already ruled out.
+ *  - the line loop resumes at `from` rather than at `lineStart`. Every line
+ *    start between the two sits inside the whitespace just skipped and lands
+ *    on the same `from`, so re-testing them repeats a failure already known,
+ *    once per blank line.
  */
 function stripLeadingH1(body: string): string {
-  const closers: Array<{ at: number; end: number }> = []
-  for (let found = body.indexOf('-->'); found !== -1; found = body.indexOf('-->', found + 3)) {
-    const end = headingEnd(body, skipWhitespace(body, found + 3))
-    if (end !== -1) closers.push({ at: found, end })
-  }
-
-  let next = 0
+  let noHeadingBehindComments = false
   let lineStart = 0
+
   for (;;) {
     const from = skipWhitespace(body, lineStart)
 
-    if (body.startsWith('<!--', from)) {
-      while (next < closers.length && closers[next].at < from + 4) next += 1
-      if (next < closers.length) return body.slice(0, lineStart) + body.slice(closers[next].end)
+    if (!noHeadingBehindComments && body.startsWith('<!--', from)) {
+      const end = headingBehindComment(body, from + 4)
+      if (end !== -1) return body.slice(0, lineStart) + body.slice(end)
+      noHeadingBehindComments = true
     }
 
-    const end = headingEnd(body, from)
-    if (end !== -1) return body.slice(0, lineStart) + body.slice(end)
+    if (opensHeading(body, from)) return body.slice(0, lineStart) + body.slice(headingEnd(body, from))
 
     // A multiline `^` anchors after every line terminator, `\r` included.
-    let cursor = lineStart
+    let cursor = from
     while (cursor < body.length && !LINE_TERMINATOR.test(body[cursor])) cursor += 1
     if (cursor === body.length) return body
     lineStart = cursor + 1

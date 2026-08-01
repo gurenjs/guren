@@ -97,6 +97,32 @@ Everyone can read.
     }
   })
 
+  it('stays linear on a body that is one long line of comment closers', async () => {
+    const workspace = await createTempWorkspace('guren-cli-docs-viewer-closers-')
+    try {
+      const dir = workspace.dir
+      await mkdir(join(dir, 'docs/adr'), { recursive: true })
+      await writeFile(join(dir, 'package.json'), '{}', 'utf8')
+      // Every `-->` here has a `#` behind it, and none of them ends a line.
+      // Resolving where each one's heading ends re-walks the rest of the line,
+      // so doing that per closer is quadratic — 13 seconds at this size, well
+      // past the pattern this replaced. The heading is on the same line as the
+      // closers, so nothing is dropped and only the cost is under test.
+      await writeFile(
+        join(dir, 'docs/adr/0001-posts.md'),
+        `---\ntype: adr\nstatus: stable\n---\n\n${'--> # '.repeat(16_000)}\n`,
+        'utf8',
+      )
+
+      const started = performance.now()
+      await buildDocsViewerData(dir)
+
+      expect(performance.now() - started).toBeLessThan(2_000)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('leaves a body that opens comments it never closes untouched', async () => {
     const workspace = await createTempWorkspace('guren-cli-docs-viewer-unclosed-')
     try {

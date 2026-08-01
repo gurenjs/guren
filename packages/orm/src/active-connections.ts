@@ -87,12 +87,6 @@ function isDigitAt(text: string, index: number): boolean {
   return code >= 48 && code <= 57
 }
 
-function trimmedEnd(text: string): number {
-  let cursor = text.length
-  while (cursor > 0 && WHITESPACE.test(text[cursor - 1])) cursor -= 1
-  return cursor
-}
-
 /**
  * Where a frame's trailing `:line[:column]` may begin, in the order the lazy
  * `(.+?):\d+(?::\d+)?` these replace settled on them: the `:line:column` split
@@ -156,7 +150,9 @@ function afterLastTerminator(frame: string, before: number): number {
 function parseFrameLocation(frame: string | undefined): string | undefined {
   if (frame === undefined) return undefined
 
-  const end = trimmedEnd(frame)
+  // `trimEnd` drops exactly the characters `\s` matches, so this is where the
+  // patterns' trailing `\s*$` would have started.
+  const end = frame.trimEnd().length
 
   // `at fn (/path/file.ts:1:2)`. The opening paren is the frame's *leftmost*
   // usable one, not the one nearest the location: `(` is ordinary in a
@@ -164,16 +160,15 @@ function parseFrameLocation(frame: string | undefined): string | undefined {
   // whole. Usable means the path it opens reaches the location without
   // crossing a line break, which is why a split can fall to a later paren.
   if (end > 0 && frame[end - 1] === ')') {
-    let best: { open: number; split: number } | undefined
+    const splits = locationSplits(frame, end - 1)
 
-    for (const split of locationSplits(frame, end - 1)) {
-      const open = frame.indexOf('(', Math.max(afterLastTerminator(frame, split) - 1, 0))
-      if (open !== -1 && open + 1 < split && (best === undefined || open < best.open)) {
-        best = { open, split }
-      }
-    }
+    // Both splits sit inside one `:line:column` run, which is colons and
+    // digits, so no line break can fall between them — the earliest paren a
+    // path may open at is therefore the same whichever split is taken.
+    const open = splits.length === 0 ? -1 : frame.indexOf('(', afterLastTerminator(frame, splits[0]))
+    const path = open === -1 ? undefined : pathBefore(frame, open + 1, splits)
 
-    if (best !== undefined) return frame.slice(best.open + 1, best.split)
+    if (path !== undefined) return path
   }
 
   // `at /path/file.ts:1:2`, where only the trailing location bounds the path.

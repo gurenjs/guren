@@ -91,10 +91,16 @@ const LINE_TERMINATOR = /[\n\r\u2028\u2029]/
  * Scanned rather than captured with `/^\s*at\s+(.+?)\s*$/`, whose lazy body and
  * greedy tail both laid claim to the same spaces: a frame padded with a run of
  * them took time cubic in the run's length before concluding it did not match.
+ *
+ * One case is read differently on purpose. Where the frame is `at` and nothing
+ * but whitespace, the pattern handed back a single space as the body; this
+ * rejects it. The two agree at the only boundary that matters, because a body
+ * carrying no `:line` is discarded by the caller either way.
  */
 function parseBareFrame(frame: string): string | undefined {
-  let end = frame.length
-  while (end > 0 && WHITESPACE.test(frame[end - 1])) end -= 1
+  // `trimEnd` drops exactly the characters `\s` matches, so this is where the
+  // pattern's trailing `\s*$` would have started.
+  const end = frame.trimEnd().length
 
   let cursor = 0
   while (cursor < end && WHITESPACE.test(frame[cursor])) cursor += 1
@@ -104,11 +110,6 @@ function parseBareFrame(frame: string): string | undefined {
   let start = afterAt
   while (start < end && WHITESPACE.test(frame[start])) start += 1
   if (start === afterAt) return undefined
-
-  // `at` is followed by a greedy run of whitespace, which gives back the one
-  // character the frame body needs of its own.
-  start = Math.min(start, end - 1)
-  if (start <= afterAt) return undefined
 
   // A frame body never matched across a line break, so one spanning it is no
   // body at all. Nothing can start it later, so there is no second chance.

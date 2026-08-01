@@ -102,6 +102,22 @@ describe('describeCallerFile', () => {
     expect(frame('    at factory (/app/v2:1:2)')).toBe('/app/v2')
   })
 
+  test('should read a malformed frame exactly as the engine-driven parse did', () => {
+    // These are degenerate frames no runtime emits, pinned because the parse is
+    // deliberately bug-for-bug with the pattern it replaced and nothing else
+    // holds it there: each of these is the only witness that separates the
+    // real rule from a plausible simplification of it. Their values are not
+    // interesting in themselves — that they do not drift is.
+    const frame = (last: string) => describeCallerFile(`Error\n    at factory (/app/dist/index.js:1:1)\n${last}`)
+
+    // A path may be the whitespace the run after `at` gives back...
+    expect(frame('at  :1')).toBe(' ')
+    // ...but only where there is a spare character to give.
+    expect(frame('at :1')).toBeUndefined()
+    // Line and column are split off together, leaving `:1` as the path.
+    expect(frame('at   :1:1')).toBe(':1')
+  })
+
   test('should not take time superlinear in the length of a frame', () => {
     // Both shapes previously backtracked polynomially, so a frame padded with
     // whitespace or opening parens cost quadratic time. Nothing here is
