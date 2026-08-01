@@ -18,7 +18,10 @@ import { listPublishedPosts, type PublishedPost } from '../../../modules/blog/in
  * value is being machine-parseable.
  */
 function mdInline(value: string): string {
-  return value.replace(/\s+/gu, ' ').replace(/([\[\]])/gu, '\\$1').trim()
+  return value
+    .replace(/\s+/gu, ' ')
+    .replace(/[\\\[\]]/gu, '\\$&')
+    .trim()
 }
 
 function sitemapEntry(path: string, alternates?: { en: string; ja: string }): string {

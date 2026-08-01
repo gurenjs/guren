@@ -6,7 +6,7 @@
  * separate frontend applications.
  */
 import { relative, resolve } from 'node:path'
-import { writeGeneratedFile, type WriterOptions } from './utils'
+import { escapeSingleQuoted as escapeSingleQuotes, writeGeneratedFile, type WriterOptions } from './utils'
 import { schemaToTypeString } from './schema-type-extractor'
 
 export interface RouteDefinitionLike {
@@ -237,6 +237,3 @@ function extractParams(path: string): string[] {
   return matches ? matches.map((m) => m.slice(1)) : []
 }
 
-function escapeSingleQuotes(value: string): string {
-  return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
-}

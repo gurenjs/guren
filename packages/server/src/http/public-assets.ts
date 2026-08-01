@@ -1,5 +1,6 @@
 import { extname, resolve, sep } from 'node:path'
 import type { Application } from './Application'
+import { trimTrailingSlashes } from '../support/trim-slashes'
 
 declare const Bun: any
 
@@ -53,7 +54,7 @@ export function registerRootPublicAssets(app: Application, publicDir: string, co
   }
 
   const { extensions, cacheControlHeader, routePrefix, contentTypeMap } = normalized
-  const normalizedPrefix = routePrefix ? routePrefix.replace(/\/+$/u, '') || '/' : undefined
+  const normalizedPrefix = routePrefix ? trimTrailingSlashes(routePrefix) || '/' : undefined
 
   app.hono.use(async (ctx, next) => {
     const path = ctx.req.path

@@ -178,12 +178,29 @@ export function email(): ValidationRule {
     if (typeof value !== 'string') {
       return 'The :attribute must be a valid email address.'
     }
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    if (!emailRegex.test(value)) {
+    if (!isPlausibleEmail(value)) {
       return 'The :attribute must be a valid email address.'
     }
     return true
   }
+}
+
+/**
+ * Same accept set as `/^[^\s@]+@[^\s@]+\.[^\s@]+$/` — non-empty local part,
+ * exactly one `@`, no whitespace, and a dot inside the domain with at least
+ * one character on each side — but scanned linearly. That regex backtracks
+ * quadratically on request-derived input (e.g. `"a@" + ".".repeat(n) + " "`).
+ */
+function isPlausibleEmail(value: string): boolean {
+  const at = value.indexOf('@')
+  if (at <= 0 || value.indexOf('@', at + 1) !== -1) {
+    return false
+  }
+  if (/\s/u.test(value)) {
+    return false
+  }
+  const domain = value.slice(at + 1)
+  return domain.slice(1, -1).includes('.')
 }
 
 /**

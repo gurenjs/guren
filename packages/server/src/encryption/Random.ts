@@ -14,6 +14,36 @@ const CHARSETS = {
 } as const
 
 /**
+ * Map random bytes onto a character set without modulo bias: bytes that fall
+ * into the truncated remainder of the 0-255 range are discarded and redrawn,
+ * so every character stays equally likely (a plain `byte % chars.length`
+ * skews toward the front of the set whenever 256 is not a multiple of it).
+ */
+function unbiasedRandomChars(length: number, chars: string): string {
+  if (!Number.isInteger(length) || length < 0) {
+    throw new RangeError(`Random string length must be a non-negative integer, received ${length}.`)
+  }
+
+  const limit = 256 - (256 % chars.length)
+  let result = ''
+
+  while (result.length < length) {
+    // Over-draw for the expected rejection rate so a second randomBytes
+    // call stays rare even for charsets with high discard ratios.
+    const remaining = length - result.length
+    const bytes = randomBytes(Math.ceil((remaining * 256) / limit) + 8)
+    for (const byte of bytes) {
+      if (byte < limit) {
+        result += chars[byte % chars.length]
+        if (result.length === length) break
+      }
+    }
+  }
+
+  return result
+}
+
+/**
  * Generate a cryptographically secure random string.
  *
  * @example
@@ -28,15 +58,7 @@ export function randomString(
   options: RandomStringOptions = {}
 ): string {
   const { charset = 'alphanumeric' } = options
-  const chars = CHARSETS[charset]
-  const bytes = randomBytes(length)
-  let result = ''
-
-  for (let i = 0; i < length; i++) {
-    result += chars[bytes[i] % chars.length]
-  }
-
-  return result
+  return unbiasedRandomChars(length, CHARSETS[charset])
 }
 
 /**
@@ -146,14 +168,7 @@ export function generatePassword(
     chars = CHARSETS.alphanumeric
   }
 
-  const bytes = randomBytes(length)
-  let result = ''
-
-  for (let i = 0; i < length; i++) {
-    result += chars[bytes[i] % chars.length]
-  }
-
-  return result
+  return unbiasedRandomChars(length, chars)
 }
 
 /**

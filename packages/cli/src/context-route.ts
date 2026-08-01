@@ -57,7 +57,17 @@ export function routeDefinitionToContextRoute(def: RouteDefinition): ContextRout
  * table structure unescaped.
  */
 export function escapeMarkdownTableCell(value: string): string {
-  return value.replace(/\|/g, '\\|').replace(/\s*\r?\n\s*/g, ' ')
+  const escaped = value.replace(/\\/g, '\\\\').replace(/\|/g, '\\|')
+  if (!escaped.includes('\n')) {
+    return escaped
+  }
+  // Collapse newlines with their surrounding whitespace via split/join —
+  // regex forms of this (`\s*\r?\n\s*`) backtrack quadratically.
+  return escaped
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(' ')
 }
 
 /**

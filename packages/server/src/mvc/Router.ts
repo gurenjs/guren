@@ -6,6 +6,7 @@ import { flattenRequestQueries, formatValidationErrors, parseRequestPayload, typ
 import { ValidationException } from '../errors/exceptions/ValidationException'
 import type { ValidationSchema } from '../http/middleware/validation'
 import { capabilitiesOf, type MiddlewareCapabilities } from '../http/middleware/capabilities'
+import { trimSlashes } from '../support/trim-slashes'
 
 /**
  * Constructor type for Controller classes.
@@ -1105,7 +1106,7 @@ function isRouteContractOptions(value: unknown): value is RouteContractOptions<S
 function joinPaths(prefixStack: string[], path: string): string {
   const segments = [...prefixStack, path]
     .filter(Boolean)
-    .map((segment) => segment.replace(/\/*$/u, '').replace(/^\/*/u, ''))
+    .map(trimSlashes)
     .filter(Boolean)
 
   if (segments.length === 0) {

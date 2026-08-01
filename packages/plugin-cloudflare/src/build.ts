@@ -307,11 +307,6 @@ function renderWorkerModule(input: {
 
 function scaffoldWranglerConfig(root: string, out: string, packageName: string | undefined): void {
   const configPath = resolve(root, 'wrangler.jsonc')
-  if (existsSync(configPath)) {
-    warnMissingBuildOwnedKeys(configPath, relative(root, out).split(sep).join('/'))
-    return
-  }
-
   const appName = (packageName ?? 'guren-app').replace(/^@[^/]+\//, '')
   const outRelative = relative(root, out).split(sep).join('/')
 
@@ -348,7 +343,17 @@ function scaffoldWranglerConfig(root: string, out: string, packageName: string |
     vars: { NODE_ENV: 'production' },
   }
 
-  writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`)
+  try {
+    // `wx` is the exists-check and the write in one atomic operation; an
+    // existing config is never overwritten.
+    writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, { flag: 'wx' })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      warnMissingBuildOwnedKeys(configPath, outRelative)
+      return
+    }
+    throw error
+  }
   console.log(`Cloudflare build: scaffolded ${configPath} — fill in d1_databases[0].database_id before deploying.`)
 }
 

@@ -1,4 +1,4 @@
-import { resourceName, writeFileSafe, ensureSuffix, safeModuleName } from './utils'
+import { resourceName, trimSlashes, writeFileSafe, ensureSuffix, safeModuleName } from './utils'
 import type { WriterOptions } from './utils'
 import { fileExists, readIfExists } from './discovery'
 
@@ -78,7 +78,7 @@ export async function makeTest(name: string, options: MakeTestOptions = {}): Pro
 
   const runner = options.runner ?? (await detectRunner())
 
-  const normalizedPath = trimmed.replace(/^\/+/gu, '').replace(/\/+$/gu, '')
+  const normalizedPath = trimSlashes(trimmed)
   if (!normalizedPath) {
     throw new Error('Test name cannot be empty.')
   }

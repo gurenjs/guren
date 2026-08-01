@@ -1,5 +1,5 @@
 import type { WriterOptions } from './utils'
-import { pascalCase, writeFileSafe } from './utils'
+import { pascalCase, trimSlashes, writeFileSafe } from './utils'
 
 const VIEW_ROOT = 'resources/js/pages'
 
@@ -24,7 +24,7 @@ export default ${componentName}
 }
 
 export async function makeView(name: string, options: WriterOptions = {}): Promise<string> {
-  const normalized = name.replace(/^\/+|\/+$/gu, '')
+  const normalized = trimSlashes(name)
   const componentName = pascalCase(normalized.split('/').pop() ?? normalized)
   const filePath = `${VIEW_ROOT}/${normalized}.tsx`
   return writeFileSafe(filePath, viewTemplate(componentName), options)

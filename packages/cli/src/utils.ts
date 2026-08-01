@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, relative, resolve, sep as pathSep } from 'node:path'
 
 export interface WriterOptions {
@@ -62,19 +62,18 @@ export async function runCommand(
 export async function writeFileSafe(relativePath: string, contents: string, options: WriterOptions = {}): Promise<string> {
   const fullPath = resolve(process.cwd(), relativePath)
 
-  if (!options.force) {
-    try {
-      await access(fullPath)
-      throw new Error(`${relativePath} already exists. Use --force to overwrite.`)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        throw error
-      }
-    }
-  }
-
   await mkdir(dirname(fullPath), { recursive: true })
-  await writeFile(fullPath, contents, 'utf8')
+  try {
+    // `wx` makes the exists-check and the write one atomic operation; a
+    // separate access() probe leaves a window where a concurrent writer's
+    // file gets clobbered.
+    await writeFile(fullPath, contents, { encoding: 'utf8', flag: options.force ? 'w' : 'wx' })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      throw new Error(`${relativePath} already exists. Use --force to overwrite.`)
+    }
+    throw error
+  }
   return fullPath
 }
 
@@ -138,8 +137,42 @@ export async function scaffoldFile(name: string, config: ScaffoldConfig, options
 
 export function pascalCase(value: string): string {
   return value
-    .replace(/(?:^|[-_\s]+)([a-zA-Z])/gu, (_, char: string) => char.toUpperCase())
+    .split(/[-_\s]/u)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join('')
     .replace(/[^a-zA-Z0-9]/gu, '')
+}
+
+/**
+ * Strip leading and trailing slashes without regex backtracking
+ * (`/\/+$/` is quadratic on adversarial input). A twin lives in
+ * `@guren/server` (`src/support/trim-slashes.ts`); the packages share no
+ * dependency edge, so the six lines are duplicated by convention.
+ */
+export function trimSlashes(value: string): string {
+  let start = 0
+  let end = value.length
+  while (start < end && value[start] === '/') start++
+  while (end > start && value[end - 1] === '/') end--
+  return value.slice(start, end)
+}
+
+/**
+ * Escape a value for interpolation inside generated single-quoted strings.
+ * Shared by the codegen emitters (routes, channels, API client) so escaping
+ * fixes land once.
+ */
+export function escapeSingleQuoted(value: string): string {
+  return value.replace(/\\/gu, '\\\\').replace(/'/gu, "\\'")
+}
+
+/**
+ * Escape a value for interpolation inside generated template literals.
+ * Backslashes must go first — escaping them after the backtick pass would
+ * double-escape the `\` it just inserted.
+ */
+export function escapeTemplateLiteral(value: string): string {
+  return value.replace(/\\/gu, '\\\\').replace(/`/gu, '\\`').replace(/\$/gu, '\\$')
 }
 
 export function camelCase(value: string): string {

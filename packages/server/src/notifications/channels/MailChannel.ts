@@ -2,22 +2,14 @@ import type { NotificationChannel, Notifiable } from '../types'
 import type { Notification } from '../Notification'
 import type { MailManager } from '../../mail/MailManager'
 import type { MailAddress } from '../../mail/types'
+import { parseMailAddress } from '../../mail/address'
 
 function parseAddress(input?: string | MailAddress): MailAddress | undefined {
   if (!input) {
     return undefined
   }
 
-  if (typeof input !== 'string') {
-    return input
-  }
-
-  const match = input.match(/^(.+)\s*<(.+)>$/)
-  if (match) {
-    return { name: match[1].trim(), email: match[2].trim() }
-  }
-
-  return { email: input }
+  return parseMailAddress(input)
 }
 
 function parseAddressList(
