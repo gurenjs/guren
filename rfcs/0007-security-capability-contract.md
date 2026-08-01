@@ -2,7 +2,11 @@
 
 **Author:** Urata Daiki
 **Date:** 2026-08-01
-**Status:** Draft
+**Status:** Accepted (2026-08-01 — maintainer decision; the standard two-week discussion
+window was waived by the project maintainer). Unlike RFC 0004, acceptance follows
+implementation: the descoped proposal below shipped as four PRs before this status
+change, so the design was validated against working code rather than ahead of it.
+The Future Work items remain unimplemented by design.
 
 > Scope note: an earlier draft of this RFC specified a considerably larger
 > system — a public capability API for user middleware, an application-level
@@ -138,8 +142,19 @@ the JSON report so CI can require a completed scan.
 `guren check --ci` → `guren audit --json` → `bun test`. Two enablers:
 
 - **`check --ci`**: plain `guren check` has never set an exit code (a stable
-  v1.0 contract this RFC does not change). The new flag gates on any failing
-  check, giving scaffolded CI a real gate without a breaking change.
+  v1.0 contract this RFC does not change). The new flag gates on ~~any failing
+  check~~ **every non-passing check**, giving scaffolded CI a real gate without
+  a breaking change.
+  **Amended in implementation:** gating on failures alone would have waved
+  nearly everything through — most integrity problems (a missing codegen
+  manifest, an unregistered console command) report as `warn`, and a fresh
+  scaffold has zero of either. Warnings therefore gate too, except checks
+  marked `advisory` on `CheckResult` (test-coverage nudges: scaffolding a
+  controller must not turn CI red until a test exists). The flag lives on the
+  result rather than being derived from key prefixes in the CLI, so
+  `check --json` consumers see the same rule the gate applies. `--ci` also
+  refuses to combine with `--arch`/`--docs`/`--spec`, since a narrowed run
+  must not pose as the full-suite gate.
 - **Template dotfile handling**: ~~templates ship `_github/` and the scaffolder
   renames it, extending the existing `_gitignore` mechanism
   (`packages/create-app/src/blueprints.ts`) to directories.~~
@@ -150,6 +165,14 @@ the JSON report so CI can require a completed scan.
   an npm behavior change cannot regress this silently.
 
 The API-only blueprint gets a variant without browser-specific steps.
+
+**Added in implementation:** making a generated workflow gate on `check` also
+surfaced a pre-existing false positive that would have failed every API-only
+app's CI — `check` demanded `.guren/pages.gen.ts` unconditionally, but codegen
+never emits it for an app with no page components. The expectation now asks
+codegen's own rule (`appEmitsPageManifest`, a predicate over the same
+`collectPageDefinitions` scan), so the two cannot drift. `doctor` carries the
+same false positive and is tracked separately.
 
 ## Alternatives Considered
 
@@ -215,10 +238,25 @@ document's git history.
 
 ## Open Questions
 
-1. Should the taxonomy also tag `doctor` findings (e.g. the APP_KEY checks),
-   or stay audit-only until someone needs the union?
-2. Should `check --ci` also require a *completed* dependency scan (fail on
-   `--no-deps`), or leave that policy to the generated workflow?
-3. For the scaffolded workflow: pin the Bun version from the template's
+Resolved at acceptance; the decisions below are what shipped.
+
+1. ~~Should the taxonomy also tag `doctor` findings (e.g. the APP_KEY checks),
+   or stay audit-only until someone needs the union?~~
+   **Audit-only.** `doctor` answers "is this environment set up correctly",
+   which is a different axis from "does this code have a security weakness" —
+   an unset `APP_KEY` is a broken app before it is a vulnerability. Revisit if
+   a consumer needs one merged, classified stream.
+2. ~~Should `check --ci` also require a *completed* dependency scan (fail on
+   `--no-deps`), or leave that policy to the generated workflow?~~
+   **Left to the workflow.** `check` and `audit` stay separate commands with
+   separate exit codes; making one gate the other's flags would couple them for
+   no gain. The generated workflow runs `guren audit` without `--no-deps`, so
+   the scan is required by default there, and an offline runner opts out
+   explicitly in its own workflow file.
+3. ~~For the scaffolded workflow: pin the Bun version from the template's
    `packageManager`, or float on latest and let the nightly-style breakage
-   surface in user CI?
+   surface in user CI?~~
+   **Float on latest** (`oven-sh/setup-bun@v2` with no `bun-version`). A
+   scaffolded app's CI should track the runtime its developers install; a pin
+   copied at scaffold time goes stale silently and is the harder failure to
+   diagnose. Users who need reproducibility add the pin themselves.
