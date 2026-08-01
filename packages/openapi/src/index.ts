@@ -1,15 +1,25 @@
 import { access, mkdir, writeFile } from 'node:fs/promises'
 import { dirname, relative, resolve } from 'node:path'
 import type { Application, RouteDefinition } from '@guren/core'
+import {
+  arrayElement,
+  enumValues as sharedEnumValues,
+  getTypeName,
+  isTransform,
+  literalValues,
+  objectShape,
+  pipeSide,
+  schemaAt,
+  type SchemaIo,
+  typeOf,
+  type ZodSchemaLike,
+} from '@guren/core/internal/zod-compat'
 
 type WriterOptions = {
   force?: boolean
 }
 
-type ZodLike = {
-  _def?: Record<string, unknown>
-  type?: string
-  shape?: Record<string, ZodLike>
+type ZodLike = ZodSchemaLike & {
   safeParse?: (data: unknown) => { success: boolean }
 }
 
@@ -204,19 +214,6 @@ type ObjectSchemaDetails = {
   required: Set<string>
 }
 
-/**
- * Which side of a schema a document is describing.
- *
- * - `input` — what a caller has to send: request bodies and parameters.
- * - `output` — what a caller receives: response bodies.
- *
- * Most schemas render identically both ways, since OpenAPI describes JSON in
- * either direction. Pipes and defaults do not: a pipe holds a separate type per
- * side, and a defaulted field may be omitted from a request but is always
- * present in a response.
- */
-type SchemaIo = 'input' | 'output'
-
 function isApplicationLike(target: Application | HonoLike): target is Application & { hono: HonoLike; router: { definitions(): RouteDefinition[] } } {
   return typeof target === 'object'
     && target !== null
@@ -359,7 +356,7 @@ function readObjectSchemaDetails(schema: ZodLike, warnings: string[], label: str
     return nested ? readObjectSchemaDetails(nested, warnings, label, io) : undefined
   }
 
-  const shape = getObjectShape(schema)
+  const shape = objectShape(schema)
   if (!shape) {
     warnings.push(`${label}: object schema shape could not be read.`)
     return undefined
@@ -426,8 +423,7 @@ function toOpenApiSchema(schema: unknown, warnings: string[], label: string, io:
     case 'literal':
       return literalSchema(def)
     case 'array': {
-      // v4 holds the element in `_def.element`, v3 in `_def.type`.
-      const item = schemaAt(def, 'element', 'type')
+      const item = arrayElement(def)
       return { type: 'array', items: toOpenApiSchema(item, warnings, `${label}[]`, io) ?? {} }
     }
     case 'object': {
@@ -471,7 +467,7 @@ function toOpenApiSchema(schema: unknown, warnings: string[], label: string, io:
       }
     }
     case 'enum': {
-      const values = enumValues(def)
+      const values = sharedEnumValues(def)
       return values.length > 0 ? { type: 'string', enum: values } : { type: 'string' }
     }
     case 'nativeenum': {
@@ -588,42 +584,6 @@ function isZodSchema(schema: unknown): schema is ZodLike {
   return Boolean(getTypeName(schema as ZodLike))
 }
 
-function getTypeName(schema: ZodLike): string | undefined {
-  return (schema._def?.typeName as string | undefined)
-    ?? (schema._def?.type as string | undefined)
-    ?? schema.type
-}
-
-function normalizeTypeName(typeName: string | undefined): string {
-  if (!typeName) {
-    return 'unknown'
-  }
-
-  return typeName.startsWith('Zod') ? typeName.slice(3).toLowerCase() : typeName.toLowerCase()
-}
-
-function typeOf(schema: ZodLike): string {
-  return normalizeTypeName(getTypeName(schema))
-}
-
-/**
- * The first of `keys` that actually holds a schema. `_def.type` is the one key
- * whose meaning differs between the majors — v3 stores a schema there (an
- * array's element, a `.brand()`'s inner type), v4 the type *name* — so a key
- * can only be taken once it is known to be an object. Reading it by
- * precedence alone is what let a v4 array document its element as `{}`.
- */
-function schemaAt(def: Record<string, unknown>, ...keys: string[]): ZodLike | undefined {
-  for (const key of keys) {
-    const candidate = def[key]
-    if (candidate && typeof candidate === 'object') {
-      return candidate as ZodLike
-    }
-  }
-
-  return undefined
-}
-
 /**
  * Type names that carry exactly one nested schema and no shape of their own.
  *
@@ -651,8 +611,7 @@ function unwrap(schema: ZodLike, io: SchemaIo): ZodLike | undefined {
   const typeName = typeOf(schema)
 
   if (typeName === 'pipe' || typeName === 'pipeline') {
-    const to = schemaAt(def, 'out')
-    return io === 'output' && to && typeOf(to) !== 'transform' ? to : schemaAt(def, 'in')
+    return pipeSide(def, io)
   }
 
   if (!WRAPPER_TYPES.has(typeName)) {
@@ -660,15 +619,6 @@ function unwrap(schema: ZodLike, io: SchemaIo): ZodLike | undefined {
   }
 
   return schemaAt(def, 'innerType', 'schema', 'type')
-}
-
-function getObjectShape(schema: ZodLike): Record<string, ZodLike> | undefined {
-  const def = schema._def ?? {}
-  if (typeof def.shape === 'function') {
-    return (def.shape as () => Record<string, ZodLike>)()
-  }
-
-  return (def.shape ?? schema.shape) as Record<string, ZodLike> | undefined
 }
 
 function isOptional(schema: ZodLike, io: SchemaIo): boolean {
@@ -700,7 +650,7 @@ function isOptional(schema: ZodLike, io: SchemaIo): boolean {
       if (!from) {
         return false
       }
-      return to && typeOf(to) !== 'transform'
+      return to && !isTransform(to)
         ? isOptional(from, io) && isOptional(to, io)
         : isOptional(from, io)
     }
@@ -711,18 +661,10 @@ function isOptional(schema: ZodLike, io: SchemaIo): boolean {
   }
 }
 
-function enumValues(def: Record<string, unknown>): string[] {
-  const values = def.values as string[] | undefined
-  if (values) {
-    return values
-  }
-
-  const entries = def.entries as Record<string, string> | undefined
-  return entries ? Object.values(entries) : []
-}
-
 function literalSchema(def: Record<string, unknown>): OpenApiSchemaObject {
-  const value = 'value' in def ? def.value : Array.isArray(def.values) ? def.values[0] : undefined
+  // v4 literals can hold more than one value; only the first is documented
+  // here (unlike the CLI's type renderer, which unions all of them).
+  const value = literalValues(def)[0]
 
   if (typeof value === 'string') {
     return { type: 'string', const: value }
