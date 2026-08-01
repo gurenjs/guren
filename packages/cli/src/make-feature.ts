@@ -3,6 +3,7 @@ import { writeFilesSafe, type WriterOptions, pascalCase, kebabCase, pagesAccesso
 import { makeModel } from './make-model'
 import { makePolicy } from './make-policy'
 import { makeTest } from './make-test'
+import { schemaPathFor } from './schema-parser'
 
 export const FIELD_TYPES = ['string', 'number', 'boolean', 'text', 'date', 'json'] as const
 
@@ -138,7 +139,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   }
 
   const authSuffix = withAuth ? `.middleware('auth')` : ''
-  const schemaPath = moduleName ? `modules/${moduleName}/db/schema.ts` : 'db/schema.ts'
+  const schemaPath = schemaPathFor(moduleName)
   const routesPath = moduleName ? `modules/${moduleName}/routes.ts` : 'routes/web.ts'
   const controllerImportPath = moduleName ? './app/Http/Controllers' : '../app/Http/Controllers'
   const validatorImportPath = moduleName ? './app/Http/Validators' : '../app/Http/Validators'
