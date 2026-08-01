@@ -155,6 +155,69 @@ describe('createSqliteDatabase outside a hot-reloading runtime', () => {
   })
 })
 
+describe('createSqliteDatabase resetDatabase', () => {
+  test('should drop views as well as base tables', async () => {
+    // sqlite_master lists views under their own type, so a reset that selects
+    // only `type = 'table'` leaves them standing while still reporting success.
+    // The next migration run then dies on `CREATE VIEW ... table v already
+    // exists` — a reset that did not reset.
+    const database = createSqliteDatabase({
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: join(workDir, 'app.db'),
+    })
+
+    const db = (await database.getDatabase()) as RunnableDatabase & { all(query: unknown): unknown[] }
+    db.run(sql`CREATE TABLE t (id integer primary key, name text)`)
+    db.run(sql`CREATE VIEW v AS SELECT id FROM t`)
+
+    await database.resetDatabase()
+
+    const remaining = db.all(sql`SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'`) as Array<{
+      name: string
+    }>
+    expect(remaining.map((row) => row.name)).toEqual([])
+
+    await database.closeDatabase()
+  })
+
+  test('should drop a user table whose name only looks internal', async () => {
+    // `_` is a LIKE wildcard, so an unescaped `sqlite_%` filter also matches
+    // names like `sqliteXtable` and mistakes them for SQLite's own tables.
+    const database = createSqliteDatabase({
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: join(workDir, 'app.db'),
+    })
+
+    const db = (await database.getDatabase()) as RunnableDatabase & { all(query: unknown): unknown[] }
+    db.run(sql`CREATE TABLE sqliteXtable (id integer primary key)`)
+
+    await database.resetDatabase()
+
+    expect(db.all(sql`SELECT name FROM main.sqlite_master`)).toEqual([])
+
+    await database.closeDatabase()
+  })
+
+  test('should drop the migrated table when a temp table shares its name', async () => {
+    // An unqualified DROP resolves against `temp` before `main`, so the temp
+    // object absorbs the drop and the table migrations own survives the reset.
+    const database = createSqliteDatabase({
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: join(workDir, 'app.db'),
+    })
+
+    const db = (await database.getDatabase()) as RunnableDatabase & { all(query: unknown): unknown[] }
+    db.run(sql`CREATE TABLE t (id integer primary key)`)
+    db.run(sql`CREATE TEMP TABLE t (id integer primary key)`)
+
+    await database.resetDatabase()
+
+    expect(db.all(sql`SELECT name FROM main.sqlite_master`)).toEqual([])
+
+    await database.closeDatabase()
+  })
+})
+
 describe('createSqliteDatabase closeDatabase', () => {
   test('should close the underlying handle', async () => {
     const database = createSqliteDatabase({

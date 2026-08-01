@@ -26,7 +26,7 @@ export interface SqliteDatabase {
   closeDatabase(): Promise<void>
   configureOrm(): Promise<void>
   seedDatabase(): Promise<void>
-  /** Drops every table (including the drizzle migration tracker) so migrations can be re-applied from scratch. */
+  /** Drops every table and view (including the drizzle migration tracker) so migrations can be re-applied from scratch. */
   resetDatabase(): Promise<void>
   /** Per-migration applied state derived from the drizzle-kit journal and the __drizzle_migrations table. */
   migrationStatus(): Promise<MigrationStatusEntry[]>
@@ -153,14 +153,23 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
       await ensureDatabase()
       if (!sqliteClient) return
 
-      const tables = sqliteClient
-        .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
-        .all() as Array<{ name: string }>
+      // Anything left behind fails the next migration run, and three things
+      // stand between this loop and that: SQLite refuses DROP TABLE on a view,
+      // `_` is a LIKE wildcard so the internal-name filter needs ESCAPE, and an
+      // unqualified drop resolves against `temp` before `main`. Each has a
+      // regression test alongside. Indexes and triggers stay out of the
+      // selection; they go with their table.
+      const objects = sqliteClient
+        .query(
+          "SELECT name, type FROM main.sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'",
+        )
+        .all() as Array<{ name: string; type: string }>
 
       sqliteClient.exec('PRAGMA foreign_keys = OFF;')
       try {
-        for (const { name } of tables) {
-          sqliteClient.exec(`DROP TABLE IF EXISTS "${name.replaceAll('"', '""')}"`)
+        for (const { name, type } of objects) {
+          const quoted = `main."${name.replaceAll('"', '""')}"`
+          sqliteClient.exec(type === 'view' ? `DROP VIEW IF EXISTS ${quoted}` : `DROP TABLE IF EXISTS ${quoted}`)
         }
       } finally {
         sqliteClient.exec('PRAGMA foreign_keys = ON;')
