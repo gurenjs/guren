@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { addImport, addProvider, hasImport, hasAuthProvider, ensureDrizzleImports, ensureMysqlImports, ensureSqliteImports } from './patch-helpers'
+import { addImport, addProvider, hasImport, hasAuthProvider, ensureDrizzleImports, ensureMysqlImports, ensureNamedImports, ensureSqliteImports } from './patch-helpers'
 
 describe('patch-helpers', () => {
   let tempDir: string
@@ -349,6 +349,18 @@ const app = new Application()`
       const result = ensureMysqlImports(mixed, ['mysqlTable', 'int', 'varchar', 'timestamp'])
 
       expect(result).toBe(mixed)
+    })
+  })
+
+  describe('ensureNamedImports', () => {
+    // The three dialect wrappers pass fixed, `$`-free specifiers, so only a
+    // direct caller can hit this. `$&` is special inside a replacement
+    // string — merging must insert the specifier literally instead.
+    it('should insert a specifier containing replacement patterns literally', () => {
+      const content = `import { a } from '$&/pkg'\n\nconst x = 1\n`
+      const result = ensureNamedImports(content, '$&/pkg', ['a', 'b'])
+
+      expect(result).toBe(`import { a, b } from '$&/pkg'\n\nconst x = 1\n`)
     })
   })
 })
