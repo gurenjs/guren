@@ -21,6 +21,7 @@ import {
   extractClassDeclaration,
   extractTableIdentifier,
   findStaticClassProperty,
+  firstClassDeclaration,
 } from './model-parser'
 import { parseSourceFile } from './parse-cache'
 import { parseSchemaTableColumns } from './schema-parser'
@@ -758,11 +759,7 @@ async function auditModels(cwd: string, findings: AuditFinding[]): Promise<void>
     // AuthenticatableModel must not flip this model to structurally
     // protected, and a modifier-prefixed fillable must still count.
     const ast = parseSourceFile(source, filePath)
-    let classDecl: ReturnType<typeof extractClassDeclaration> = null
-    for (const node of ast?.program.body ?? []) {
-      classDecl = extractClassDeclaration(node)
-      if (classDecl) break
-    }
+    const classDecl = ast ? firstClassDeclaration(ast.program.body) : null
     const hasFillable = classDecl ? findStaticClassProperty(classDecl, 'fillable') !== null : false
     const isAuthenticatable = classDecl ? classUsesAuthenticatableBase(classDecl) : false
 

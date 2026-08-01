@@ -53,13 +53,7 @@ export function parseModelSource(source: string, filePath: string): ModelInfo | 
   const ast = parseSourceFile(source, filePath)
   if (!ast) return null
 
-  let classDecl: ClassDeclaration | null = null
-
-  for (const node of ast.program.body) {
-    classDecl = extractClassDeclaration(node)
-    if (classDecl) break
-  }
-
+  const classDecl = firstClassDeclaration(ast.program.body)
   if (!classDecl?.id) return null
 
   const className = classDecl.id.name
@@ -98,6 +92,24 @@ export function extractClassDeclaration(node: Statement): ClassDeclaration | nul
 }
 
 /**
+ * The first class declared in a file — the convention every model, controller,
+ * and command file follows, so callers that want "this file's class" ask for
+ * it here rather than each walking `program.body` themselves.
+ *
+ * First, not exported-first: a bare class still counts, since a file that
+ * declares one is describing that class whatever it does with it. Callers
+ * needing the exported one specifically (the entity context, the screens spec)
+ * resolve it by name instead.
+ */
+export function firstClassDeclaration(body: Statement[]): ClassDeclaration | null {
+  for (const node of body) {
+    const classDecl = extractClassDeclaration(node)
+    if (classDecl) return classDecl
+  }
+  return null
+}
+
+/**
  * Whether an expression names `AuthenticatableModel`, as a bare identifier or
  * with type arguments (`AuthenticatableModel<UserRecord>`). Both the superclass
  * and `defineModel`'s `base` option accept either spelling, so both go through
@@ -117,24 +129,38 @@ function propertyKeyName(property: ObjectProperty): string | undefined {
 }
 
 /**
+ * The table `defineModel(users, …)` binds, reached through any mixin wrapping
+ * it — `SoftDeletes(defineModel(posts))` is the documented spelling, and a
+ * model written that way must not read as bindless.
+ */
+function defineModelTableArgument(node: Node): string | undefined {
+  if (node.type !== 'CallExpression') return undefined
+
+  const callee = node.callee
+  if (callee.type === 'Identifier' && callee.name === 'defineModel') {
+    const firstArg = node.arguments[0]
+    return firstArg?.type === 'Identifier' ? firstArg.name : undefined
+  }
+
+  for (const argument of node.arguments) {
+    const nested = defineModelTableArgument(argument)
+    if (nested) return nested
+  }
+  return undefined
+}
+
+/**
  * The identifier a model binds its table to, from either supported spelling:
  * `defineModel(users, …)` or `static table = users`. Callers that only look
  * for the latter silently stop covering every model written the modern way,
  * so anything resolving a model's table goes through here.
+ *
+ * The identifier is the model file's local name for the table. A caller
+ * comparing it against a schema's exported names has to account for an
+ * aliased import (`import { posts as postTable }`) itself.
  */
 export function extractTableIdentifier(classDecl: ClassDeclaration): string | undefined {
-  let tableName: string | undefined
-
-  const superClass = classDecl.superClass
-  if (superClass?.type === 'CallExpression') {
-    const callee = superClass.callee
-    if (callee.type === 'Identifier' && callee.name === 'defineModel') {
-      const firstArg = superClass.arguments[0]
-      if (firstArg?.type === 'Identifier') {
-        tableName = firstArg.name
-      }
-    }
-  }
+  let tableName = classDecl.superClass ? defineModelTableArgument(classDecl.superClass) : undefined
 
   // An explicit `static table` wins: a class may extend defineModel(x) and
   // still repoint the table.

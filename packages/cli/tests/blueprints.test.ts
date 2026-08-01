@@ -135,10 +135,11 @@ describe('blueprints', () => {
     expect(schemaCheck?.status).toBe('pass')
   })
 
-  // The name check looks for has to be the scaffolder's, not the class name
-  // lowercased — otherwise the miss it reports sends the reader after a table
-  // that was never supposed to exist.
-  it('reports the scaffolded table name when the table is missing', async () => {
+  // The check resolves the identifier the scaffolded model actually imports
+  // (`userProfiles`), not a name guessed from the class — so overwriting the
+  // schema out from under it reports the binding that is actually missing,
+  // not a table name nobody ever declared.
+  it('reports the bound identifier when its table is missing', async () => {
     await seedResourceWorkspace(PG_SCHEMA_FIXTURE)
     await runBlueprint('resource', { name: 'UserProfile', fields: 'title:string' })
     await writeFile('db/schema.ts', PG_SCHEMA_FIXTURE)
@@ -147,7 +148,7 @@ describe('blueprints', () => {
     const schemaCheck = report.checks.find((result) => result.key === 'model-schema:UserProfile')
 
     expect(schemaCheck?.status).toBe('warn')
-    expect(schemaCheck?.message).toContain("No table 'user_profiles' found")
+    expect(schemaCheck?.message).toContain("binds 'userProfiles'")
   })
 
   it('rejects unknown blueprints', async () => {

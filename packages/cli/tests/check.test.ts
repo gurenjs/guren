@@ -4,6 +4,23 @@ import { describe, expect, it } from 'bun:test'
 import { runCheck, type CheckReport, type RunCheckOptions } from '../src/check'
 import { createTempWorkspace, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE } from './helpers'
 
+/** Run a check over a throwaway workspace built from path → content. */
+async function withWorkspace(
+  files: Record<string, string>,
+  options: Partial<RunCheckOptions> = {},
+): Promise<CheckReport> {
+  const workspace = await createTempWorkspace('guren-cli-check-')
+  try {
+    for (const [relPath, content] of Object.entries(files)) {
+      await mkdir(join(workspace.dir, dirname(relPath)), { recursive: true })
+      await writeFile(join(workspace.dir, relPath), content, 'utf8')
+    }
+    return await runCheck({ cwd: workspace.dir, ...options })
+  } finally {
+    await workspace.cleanup()
+  }
+}
+
 describe('runCheck', () => {
   it('detects empty controller methods', async () => {
     const workspace = await createTempWorkspace('guren-cli-check-empty-')
@@ -450,30 +467,129 @@ test('lists tasks', async () => {
   })
 
   it('checks a module model against the module\'s own db/schema.ts', async () => {
-    const workspace = await createTempWorkspace('guren-cli-check-module-schema-')
-
-    try {
-      await mkdir(join(workspace.dir, 'modules/billing/app/Models'), { recursive: true })
-      await writeFile(join(workspace.dir, 'modules/billing/app/Models/Invoice.ts'), 'export class Invoice {}', 'utf8')
-      await mkdir(join(workspace.dir, 'modules/billing/db'), { recursive: true })
-      await writeFile(
-        join(workspace.dir, 'modules/billing/db/schema.ts'),
-        `export const invoices = sqliteTable('invoices', {})`,
-        'utf8',
-      )
-      // A top-level db/schema.ts that does NOT mention 'invoices' — proves the
+    const report = await withWorkspace({
+      'modules/billing/app/Models/Invoice.ts': `import { defineModel } from '@guren/core'
+import { invoices } from '../../db/schema'
+export class Invoice extends defineModel(invoices) {}`,
+      'modules/billing/db/schema.ts': `export const invoices = sqliteTable('invoices', {})`,
+      // A top-level db/schema.ts that does NOT declare 'invoices' — proves the
       // check looks at the module's own schema file, not the root one.
-      await mkdir(join(workspace.dir, 'db'), { recursive: true })
-      await writeFile(join(workspace.dir, 'db/schema.ts'), `export const users = sqliteTable('users', {})`, 'utf8')
+      'db/schema.ts': `export const users = sqliteTable('users', {})`,
+    })
 
-      const report = await runCheck({ cwd: workspace.dir })
+    const schemaCheck = report.checks.find(c => c.key === 'model-schema:Invoice')
+    expect(schemaCheck).toBeDefined()
+    expect(schemaCheck!.status).toBe('pass')
+  })
 
-      const schemaCheck = report.checks.find(c => c.key === 'model-schema:Invoice')
-      expect(schemaCheck).toBeDefined()
-      expect(schemaCheck!.status).toBe('pass')
-    } finally {
-      await workspace.cleanup()
-    }
+  // The check resolves the table the model binds, so a model whose class name
+  // says nothing about its table is checked on what it actually declares.
+  it('passes a model bound to a table not named after the class', async () => {
+    const report = await withWorkspace({
+      'app/Models/Post.ts': `import { defineModel } from '@guren/core'
+import { blogPosts } from '@/db/schema'
+export class Post extends defineModel(blogPosts) {}`,
+      'db/schema.ts': `export const blogPosts = sqliteTable('blog_posts', {})`,
+    })
+
+    const schemaCheck = report.checks.find(c => c.key === 'model-schema:Post')
+    expect(schemaCheck).toBeDefined()
+    expect(schemaCheck!.status).toBe('pass')
+    expect(schemaCheck!.message).toContain('blog_posts')
+  })
+
+  it('passes a model that reaches its table through a mixin', async () => {
+    const report = await withWorkspace({
+      'app/Models/Post.ts': `import { defineModel, SoftDeletes } from '@guren/core'
+import { posts } from '@/db/schema'
+export class Post extends SoftDeletes(defineModel(posts)) {}`,
+      'db/schema.ts': `export const posts = sqliteTable('posts', {})`,
+    })
+
+    expect(report.checks.find(c => c.key === 'model-schema:Post')?.status).toBe('pass')
+  })
+
+  // The model's local name for the table and the schema's exported name are
+  // written in different files and need not agree.
+  it('passes a model that imports its table under an alias', async () => {
+    const report = await withWorkspace({
+      'app/Models/Post.ts': `import { defineModel } from '@guren/core'
+import { posts as postTable } from '@/db/schema'
+export class Post extends defineModel(postTable) {}`,
+      'db/schema.ts': `export const posts = sqliteTable('posts', {})`,
+    })
+
+    expect(report.checks.find(c => c.key === 'model-schema:Post')?.status).toBe('pass')
+  })
+
+  it('warns when a module model binds a table only the root schema declares', async () => {
+    const report = await withWorkspace({
+      'modules/billing/app/Models/Invoice.ts': `import { defineModel } from '@guren/core'
+import { invoices } from '@/db/schema'
+export class Invoice extends defineModel(invoices) {}`,
+      'modules/billing/db/schema.ts': `export const payments = sqliteTable('payments', {})`,
+      'db/schema.ts': `export const invoices = sqliteTable('invoices', {})`,
+    })
+
+    const schemaCheck = report.checks.find(c => c.key === 'model-schema:Invoice')
+    expect(schemaCheck!.status).toBe('warn')
+    expect(schemaCheck!.suggestion).toContain('modules/billing/db/schema.ts')
+  })
+
+  it('passes a model that binds its table via static table', async () => {
+    const report = await withWorkspace({
+      'app/Models/Account.ts': `import { Model } from '@guren/orm'
+import { accounts } from '@/db/schema'
+export class Account extends Model {
+  static table = accounts
+}`,
+      'db/schema.ts': `export const accounts = sqliteTable('accounts', {})`,
+    })
+
+    expect(report.checks.find(c => c.key === 'model-schema:Account')?.status).toBe('pass')
+  })
+
+  // The old check matched the guessed name as a substring of the schema
+  // source, so a column named `posts` (or a comment mentioning it) counted as
+  // a table definition.
+  it('warns when the model binds a table the schema does not declare, even if the guessed name appears in it', async () => {
+    const report = await withWorkspace({
+      'app/Models/Post.ts': `import { defineModel } from '@guren/core'
+import { articles } from '@/db/schema'
+export class Post extends defineModel(articles) {}`,
+      'db/schema.ts': `// the 'posts' table lives elsewhere
+export const users = sqliteTable('users', {
+  posts: integer('posts'),
+})`,
+    })
+
+    const schemaCheck = report.checks.find(c => c.key === 'model-schema:Post')
+    expect(schemaCheck).toBeDefined()
+    expect(schemaCheck!.status).toBe('warn')
+    expect(schemaCheck!.message).toContain("'articles'")
+    expect(schemaCheck!.suggestion).toContain('users')
+  })
+
+  it('skips the model-schema check when the model binds no readable table', async () => {
+    const report = await withWorkspace({
+      'app/Models/Post.ts': 'export class Post {}',
+      'db/schema.ts': `export const posts = sqliteTable('posts', {})`,
+    })
+
+    expect(report.checks.some(c => c.key.startsWith('model-schema:'))).toBe(false)
+  })
+
+  // parseSchemaTables reports nothing for a missing or unparsable schema, and
+  // "no tables to compare against" is not evidence the model is wrong.
+  it('skips the model-schema check when the schema declares no readable tables', async () => {
+    const report = await withWorkspace({
+      'app/Models/Post.ts': `import { defineModel } from '@guren/core'
+import { posts } from '@/db/schema'
+export class Post extends defineModel(posts) {}`,
+      'db/schema.ts': 'export const posts = sqliteTable(',
+    })
+
+    expect(report.checks.some(c => c.key.startsWith('model-schema:'))).toBe(false)
   })
 
   it('passes the module schema-aggregation check when db/schema.ts re-exports the module', async () => {
@@ -613,27 +729,11 @@ test('lists tasks', async () => {
   })
 
   describe('Postgres timestamp time zones', () => {
-    async function withSchema(
-      files: Record<string, string>,
-      options: Partial<RunCheckOptions> = {},
-    ): Promise<CheckReport> {
-      const workspace = await createTempWorkspace('guren-cli-check-timestamptz-')
-      try {
-        for (const [relPath, content] of Object.entries(files)) {
-          await mkdir(join(workspace.dir, dirname(relPath)), { recursive: true })
-          await writeFile(join(workspace.dir, relPath), content, 'utf8')
-        }
-        return await runCheck({ cwd: workspace.dir, ...options })
-      } finally {
-        await workspace.cleanup()
-      }
-    }
-
     const timestamptzFindings = (report: CheckReport) =>
       report.checks.filter((c) => c.key.startsWith('schema-timestamptz:'))
 
     it('flags Postgres timestamp columns declared without withTimezone', async () => {
-      const report = await withSchema({
+      const report = await withWorkspace({
         'db/schema.ts': `import { pgTable, serial, timestamp } from 'drizzle-orm/pg-core'
 
 export const posts = pgTable('posts', {
@@ -664,7 +764,7 @@ export const posts = pgTable('posts', {
     })
 
     it('stays silent on the Postgres schema a fresh app is scaffolded with', async () => {
-      const report = await withSchema({ 'db/schema.ts': PG_SCHEMA_FIXTURE })
+      const report = await withWorkspace({ 'db/schema.ts': PG_SCHEMA_FIXTURE })
 
       expect(timestamptzFindings(report)).toHaveLength(0)
     })
@@ -672,7 +772,7 @@ export const posts = pgTable('posts', {
     // `{ withTimezone: false }` and omitting the option emit identical DDL, so
     // the explicit form is not a suppression mechanism.
     it('flags an explicit withTimezone: false the same as an omission', async () => {
-      const report = await withSchema({
+      const report = await withWorkspace({
         'db/schema.ts': `import { pgTable, timestamp } from 'drizzle-orm/pg-core'
 
 export const posts = pgTable('posts', {
@@ -690,14 +790,14 @@ export const posts = pgTable('posts', {
     // factory rather than the builder name. The fixture is the schema
     // `create-guren-app --db mysql` actually writes.
     it('ignores a MySQL schema, whose bare timestamp is spelled the same', async () => {
-      const report = await withSchema({ 'db/schema.ts': MYSQL_SCHEMA_FIXTURE })
+      const report = await withWorkspace({ 'db/schema.ts': MYSQL_SCHEMA_FIXTURE })
 
       expect(timestamptzFindings(report)).toHaveLength(0)
     })
 
     // One file can legally mix factories, so the verdict is per table.
     it('flags only the Postgres table in a mixed schema', async () => {
-      const report = await withSchema({
+      const report = await withWorkspace({
         'db/schema.ts': `import { pgTable, timestamp } from 'drizzle-orm/pg-core'
 import { mysqlTable, timestamp as mysqlTimestamp } from 'drizzle-orm/mysql-core'
 import { sqliteTable, integer } from 'drizzle-orm/sqlite-core'
@@ -714,7 +814,7 @@ export const posts = pgTable('posts', { createdAt: timestamp('created_at') })
     // Options the parser cannot read are not evidence of anything. Warning
     // here would be a false alarm whose suggested fix is a migration.
     it('stays silent when the options are not statically readable', async () => {
-      const report = await withSchema({
+      const report = await withWorkspace({
         'db/schema.ts': `import { pgTable, timestamp } from 'drizzle-orm/pg-core'
 
 const INSTANT = { withTimezone: true } as const
@@ -730,7 +830,7 @@ export const posts = pgTable('posts', {
     })
 
     it('reports the module schema path for a module-declared table', async () => {
-      const report = await withSchema({
+      const report = await withWorkspace({
         'modules/billing/db/schema.ts': `import { pgTable, timestamp } from 'drizzle-orm/pg-core'
 
 export const invoices = pgTable('invoices', { issuedAt: timestamp('issued_at') })
@@ -747,7 +847,7 @@ export const invoices = pgTable('invoices', { issuedAt: timestamp('issued_at') }
     // config this parser does not read, so the SQL hint is dropped rather than
     // quoting the object key, which would not resolve.
     it('omits the USING hint when the column has no explicit database name', async () => {
-      const report = await withSchema({
+      const report = await withWorkspace({
         'db/schema.ts': `import { pgTable, timestamp } from 'drizzle-orm/pg-core'
 
 export const posts = pgTable('posts', { createdAt: timestamp() })
@@ -762,7 +862,7 @@ export const posts = pgTable('posts', { createdAt: timestamp() })
     // The suggestion must not tell the user to replace an options object that
     // carries settings the rule knows nothing about.
     it('does not suggest dropping options the column already carries', async () => {
-      const report = await withSchema({
+      const report = await withWorkspace({
         'db/schema.ts': `import { pgTable, timestamp } from 'drizzle-orm/pg-core'
 
 export const posts = pgTable('posts', {
@@ -776,7 +876,7 @@ export const posts = pgTable('posts', {
     })
 
     it('is skipped under --arch', async () => {
-      const report = await withSchema(
+      const report = await withWorkspace(
         {
           'db/schema.ts': `import { pgTable, timestamp } from 'drizzle-orm/pg-core'
 export const posts = pgTable('posts', { createdAt: timestamp('created_at') })
