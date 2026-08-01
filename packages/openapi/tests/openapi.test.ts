@@ -137,10 +137,10 @@ describe('@guren/openapi', () => {
     expect(document.paths['/posts/{id}']?.patch?.requestBody?.required).toBe(false)
   })
 
-  // Apps pin their own Zod, so both majors have to be walked. v4 keeps an
-  // array's element in `_def.element` and the literal string `'array'` in
-  // `_def.type`; v3 has only `_def.type`. Reading them in the wrong order
-  // still produces a document, just one with the element type missing.
+  // zod 4 keeps an array's element in `_def.element` and the literal string
+  // `'array'` in `_def.type` — reading the wrong key still produces a
+  // document, just one with the element type missing. The zod 3 API, whose
+  // `_def.type` holds a schema instead, is refused up front.
   describe('schema walking', () => {
     // `.pipe()` statically requires the target to accept the source's output,
     // but the walker reads whatever schema object it is handed at runtime.
@@ -176,20 +176,19 @@ describe('@guren/openapi', () => {
       expect(warnings).toEqual([])
     })
 
-    it('keeps the element type of a zod 3 array', () => {
-      const { schema, warnings } = bodyDocument(z3.object({ tags: z3.array(z3.string()) }))
+    // The zod 3 API is refused with a warning, not walked: on a v3 node
+    // `_def.type` holds a nested schema where v4 keeps the type name, so
+    // rendering it with v4 reads produces silently wrong output. `zod/v3`
+    // ships inside zod 4 itself, so this arrives from apps declaring zod 4.
+    it('refuses a zod 3 schema with a warning naming the zod v3 API', () => {
+      const asBody = bodyDocument(z3.object({ tags: z3.array(z3.string()) }))
+      expect(asBody.schema).toBeUndefined()
+      expect(asBody.warnings).toHaveLength(1)
+      expect(asBody.warnings[0]).toContain('zod v3 API')
 
-      expect(schema?.properties?.tags).toEqual({ type: 'array', items: { type: 'string' } })
-      expect(warnings).toEqual([])
-    })
-
-    // v3 names this `ZodPipeline`, not `pipe` — unhandled, the property is
-    // dropped from the document entirely rather than merely mis-typed.
-    it('documents a zod 3 pipeline instead of dropping it', () => {
-      const { schema, warnings } = bodyDocument(z3.object({ page: z3.string().pipe(z3.number()) }))
-
-      expect(schema?.properties?.page).toEqual({ type: 'string' })
-      expect(warnings).toEqual([])
+      const asQuery = queryParameters(z3.object({ page: z3.number() }))
+      expect(asQuery.parameters).toBeUndefined()
+      expect(asQuery.warnings.some((w) => w.includes('zod v3 API'))).toBe(true)
     })
 
     // A pipe carries two types: `_def.in` is what a caller sends, `_def.out`
@@ -236,7 +235,6 @@ describe('@guren/openapi', () => {
     it('renders a nullable property as a union with null rather than unwrapping it', () => {
       for (const schema of [
         z.object({ a: z.string().nullable() }),
-        z3.object({ a: z3.string().nullable() }),
       ]) {
         const { schema: document, warnings } = bodyDocument(schema)
 
@@ -252,8 +250,8 @@ describe('@guren/openapi', () => {
       for (const schema of [
         z.object({ a: z.string().optional().readonly() }),
         z.object({ a: z.string().optional().nullable() }),
-        z3.object({ a: z3.string().optional().brand<'Tagged'>() }),
-        z3.object({ a: z3.string().optional().refine(() => true) }),
+        z.object({ a: z.string().optional().brand<'Tagged'>() }),
+        z.object({ a: z.string().optional().catch('x') }),
       ]) {
         const { schema: document, warnings } = bodyDocument(schema)
 
@@ -278,7 +276,6 @@ describe('@guren/openapi', () => {
     it('requires a piped field unless both stages accept a missing value', () => {
       for (const schema of [
         z.object({ a: z.string().optional().pipe(z.string()) }),
-        z3.object({ a: z3.string().optional().pipe(z3.string()) }),
       ]) {
         expect(schema.safeParse({}).success).toBe(false)
         expect(bodyDocument(schema).schema?.required).toEqual(['a'])
@@ -294,7 +291,6 @@ describe('@guren/openapi', () => {
     it('warns rather than quietly dropping a schema it cannot read', () => {
       for (const schema of [
         z.object({ a: z.lazy(() => z.string()) }),
-        z3.object({ a: z3.lazy(() => z3.string()) }),
       ]) {
         const { schema: document, warnings } = bodyDocument(schema)
 
@@ -312,7 +308,6 @@ describe('@guren/openapi', () => {
         z.object({ page: z.number() }).optional(),
         z.object({ page: z.number() }).nullable(),
         z.object({ page: z.number() }).readonly(),
-        z3.object({ page: z3.number() }).optional(),
       ]) {
         const { parameters, warnings } = queryParameters(query)
 

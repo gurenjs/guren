@@ -1,7 +1,7 @@
 /**
- * Extracts TypeScript type literals from Zod schema objects at runtime.
- * Every read of a Zod-version-specific `_def` shape goes through
- * `@guren/core/internal/zod-compat`; only rendering decisions live here.
+ * Extracts TypeScript type literals from Zod 4 schema objects at runtime.
+ * Every read of a `_def` shape goes through `@guren/core/internal/zod-compat`;
+ * only rendering decisions live here.
  */
 
 import {
@@ -9,6 +9,7 @@ import {
   enumValues,
   getTypeName,
   innerSchema,
+  isZod3Schema,
   literalValues,
   objectShape,
   pipeSide,
@@ -16,6 +17,7 @@ import {
   type SchemaIo,
   TRANSPARENT_WRAPPERS,
   typeOf,
+  ZOD3_UNSUPPORTED_MESSAGE,
   type ZodSchemaLike,
 } from '@guren/core/internal/zod-compat'
 
@@ -40,13 +42,24 @@ const COERCED_INPUT_TYPES: Record<string, string> = {
   date: 'string',
 }
 
+/** Warn once per process, not once per route×field — repetition adds nothing. */
+let warnedAboutZod3 = false
+
 /**
- * Convert a Zod schema object to a TypeScript type string.
- * Returns `undefined` if the schema structure is unrecognizable.
+ * Convert a Zod 4 schema object to a TypeScript type string.
+ * Returns `undefined` if the schema structure is unrecognizable — including a
+ * zod v3 schema, which is refused loudly rather than rendered wrong.
  */
 export function schemaToTypeString(schema: unknown, options: SchemaTypeOptions): string | undefined {
   if (!schema || typeof schema !== 'object') return undefined
   const z = schema as ZodSchemaLike
+  if (isZod3Schema(z)) {
+    if (!warnedAboutZod3) {
+      warnedAboutZod3 = true
+      console.warn(`[warn] A route schema was skipped: ${ZOD3_UNSUPPORTED_MESSAGE}`)
+    }
+    return undefined
+  }
   if (!getTypeName(z)) return undefined
   return zodToType(z, options.io)
 }
@@ -55,8 +68,8 @@ function zodToType(z: ZodSchemaLike, io: SchemaIo): string {
   const def = z._def ?? {}
   const t = typeOf(z)
 
-  // `.coerce` is recorded on the schema itself in both v3 and v4, so this has
-  // to be checked before the plain type mapping below claims the parsed type.
+  // `.coerce` is recorded on the schema node itself, so this has to be
+  // checked before the plain type mapping below claims the parsed type.
   if (io === 'input' && def.coerce === true && t in COERCED_INPUT_TYPES) {
     return COERCED_INPUT_TYPES[t]
   }
@@ -109,8 +122,6 @@ function zodToType(z: ZodSchemaLike, io: SchemaIo): string {
     }
 
     // Presence-deciding wrappers (see `isOptional`) that pass the type through.
-    // `effects` is v3's `.transform()`/`.refine()`; a transform's output has no
-    // readable type, so the wrapped input type is the best available answer.
     case 'optional':
     case 'default':
     case 'prefault':
@@ -119,8 +130,7 @@ function zodToType(z: ZodSchemaLike, io: SchemaIo): string {
       return wrapped ? zodToType(wrapped, io) : 'unknown'
     }
 
-    case 'pipe':
-    case 'pipeline': {
+    case 'pipe': {
       const side = pipeSide(def, io)
       return side ? zodToType(side, io) : 'unknown'
     }
@@ -128,8 +138,8 @@ function zodToType(z: ZodSchemaLike, io: SchemaIo): string {
     case 'transform':
       return 'unknown'
 
-    case 'union':
-    case 'discriminatedunion': {
+    // `z.discriminatedUnion()` produces this same node.
+    case 'union': {
       const opts = def.options as ZodSchemaLike[] | undefined
       if (opts) return opts.map((o) => zodToType(o, io)).join(' | ')
       return 'unknown'
@@ -153,9 +163,6 @@ function zodToType(z: ZodSchemaLike, io: SchemaIo): string {
       const vals = enumValues(def)
       return vals.length > 0 ? vals.map(literalType).join(' | ') : 'never'
     }
-
-    case 'nativeenum':
-      return 'string | number'
 
     case 'tuple':
       return 'unknown[]'
@@ -204,7 +211,6 @@ function isOptional(z: ZodSchemaLike, io: SchemaIo): boolean {
     // though the second stage rejects a missing value. Deciding that properly
     // means simulating a parse, not reading a `_def`.
     case 'pipe':
-    case 'pipeline':
       return look(pipeSide(def, io))
     default:
       return false

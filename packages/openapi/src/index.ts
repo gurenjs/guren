@@ -6,6 +6,7 @@ import {
   enumValues,
   getTypeName,
   innerSchema,
+  isZod3Schema,
   literalValues,
   objectShape,
   pipeSide,
@@ -14,6 +15,7 @@ import {
   type SchemaIo,
   SINGLE_CHILD_WRAPPERS,
   typeOf,
+  ZOD3_UNSUPPORTED_MESSAGE,
   type ZodSchemaLike,
 } from '@guren/core/internal/zod-compat'
 
@@ -348,6 +350,11 @@ function readObjectSchema(schema: unknown, warnings: string[], label: string, io
     return undefined
   }
 
+  if (isZod3Schema(schema as ZodLike)) {
+    warnings.push(`${label}: skipped — ${ZOD3_UNSUPPORTED_MESSAGE}`)
+    return undefined
+  }
+
   if (!isZodSchema(schema)) {
     warnings.push(`${label}: skipped because schema is not a supported Zod schema.`)
     return undefined
@@ -391,6 +398,11 @@ function readObjectSchemaDetails(schema: ZodLike, warnings: string[], label: str
 }
 
 function toOpenApiSchema(schema: unknown, warnings: string[], label: string, io: SchemaIo): OpenApiSchemaObject | undefined {
+  if (schema && typeof schema === 'object' && isZod3Schema(schema as ZodLike)) {
+    warnings.push(`${label}: skipped — ${ZOD3_UNSUPPORTED_MESSAGE}`)
+    return undefined
+  }
+
   if (!isZodSchema(schema)) {
     warnings.push(`${label}: skipped because schema is not a supported Zod schema.`)
     return undefined
@@ -455,8 +467,8 @@ function toOpenApiSchema(schema: unknown, warnings: string[], label: string, io:
     case 'transform':
       warnings.push(`${label}: transform schemas are documented as generic objects.`)
       return { type: 'object' }
-    case 'union':
-    case 'discriminatedunion': {
+    // `z.discriminatedUnion()` produces this same node.
+    case 'union': {
       const options = (def.options as unknown[]) ?? []
       const oneOf = options
         .map((option, index) => toOpenApiSchema(option, warnings, `${label}.option${index}`, io))
@@ -476,15 +488,13 @@ function toOpenApiSchema(schema: unknown, warnings: string[], label: string, io:
         additionalProperties: toOpenApiSchema(valueType, warnings, `${label}.value`, io) ?? true,
       }
     }
+    // `z.nativeEnum()` produces this same node, so the values may be numbers.
     case 'enum': {
       const values = enumValues(def)
-      return values.length > 0 ? { type: 'string', enum: values } : { type: 'string' }
-    }
-    case 'nativeenum': {
-      const enumObject = def.values as Record<string, string | number> | undefined
-      const values = enumObject ? Array.from(new Set(Object.values(enumObject).filter((value) => typeof value === 'string' || typeof value === 'number'))) : []
-      const primitiveType = values.some((value) => typeof value === 'number') ? 'number' : 'string'
-      return values.length > 0 ? { type: primitiveType, enum: values } : { type: primitiveType }
+      const hasNumber = values.some((value) => typeof value === 'number')
+      const hasString = values.some((value) => typeof value === 'string')
+      const type = hasNumber ? (hasString ? (['string', 'number'] as OpenApiPrimitiveType[]) : 'number' as const) : 'string' as const
+      return values.length > 0 ? { type, enum: values } : { type: 'string' }
     }
     case 'tuple': {
       const items = ((def.items as unknown[]) ?? [])
@@ -608,7 +618,7 @@ function unwrap(schema: ZodLike, io: SchemaIo): ZodLike | undefined {
   const def = schema._def ?? {}
   const typeName = typeOf(schema)
 
-  if (typeName === 'pipe' || typeName === 'pipeline') {
+  if (typeName === 'pipe') {
     return pipeSide(def, io)
   }
 
@@ -638,8 +648,7 @@ function isOptional(schema: ZodLike, io: SchemaIo): boolean {
     // would document an omission the other stage refuses. Still an
     // approximation in the other direction: a transforming stage can supply a
     // value the next stage accepts, which this reports as required.
-    case 'pipe':
-    case 'pipeline': {
+    case 'pipe': {
       const { from, to } = pipeSides(schema._def ?? {})
       if (!from) {
         return false
