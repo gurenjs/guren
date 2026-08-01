@@ -4,6 +4,10 @@
 /**
  * Typed API route registry.
  * Use with `createApiClient<ApiRoutes>()` for end-to-end type safety.
+ *
+ * `body` is the *request* shape — what you send. Coercing schemas are rendered
+ * as they travel: `z.coerce.date()` is a `string` here, not the `Date` the
+ * controller ends up with. `response` is the parsed shape you get back.
  */
 export interface ApiRoutes {
   'dashboard': {

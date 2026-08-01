@@ -56,12 +56,20 @@ export interface ApiRoutes {
     method: 'POST'
     path: '/posts'
     params: Record<string, never>          // path params come from ':id' segments, typed string | number
-    body: { title: string; body: string; published?: boolean; tagIds?: number[] }
+    body: { title: string; body: string; published?: boolean; tagIds?: (number | string)[] }
   }
 }
 ```
 
-Only **named** routes are emitted. `output:` schemas add a `response:` field.
+`body` is the **request** side of the schema — what a caller has to send, before
+validation runs. That is why `tagIds` accepts a string above: `z.coerce.number()`
+exists precisely so a form can send `"3"`. The controller still receives a
+`number` from `validateBody()`. The most visible case is dates:
+`z.coerce.date()` is a `string` in `body` (JSON has no date type) and a `Date`
+once parsed.
+
+Only **named** routes are emitted. `output:` schemas add a `response:` field,
+which — describing a parsed response — uses the output side instead.
 Consume with `createApiClient<ApiRoutes>({ baseUrl })` → `client.request('posts.store', { body })`.
 Mutating requests copy the `XSRF-TOKEN` cookie into the `X-XSRF-TOKEN` header, so a
 same-origin client passes CSRF protection without extra wiring. The token is never
@@ -78,9 +86,12 @@ Codegen walks schemas at runtime (Zod v3 and v4):
 - **Unwrapped transparently**: `.optional()` and `.default()` (field becomes `key?:`),
   `.catch()`, `.readonly()`, `.brand()`, `.lazy()`
 - **Validation checks don't change the type**: `.min()`, `.max()`, `.trim()`, `.email()`,
-  regex etc. stay `string`; `z.coerce.number()` is `number`
-- **Input side only**: `.transform()` / `.refine()` chains extract the schema's *input*
-  type — transform output types are NOT reflected
+  regex etc. stay `string`
+- **Coercion follows the side being rendered**: `z.coerce.number()` is `number | string`
+  in `body` and `number` in `response`; `z.coerce.date()` is `string` then `Date`
+- **`.transform()` extracts the input type**: the output of a transform function is a
+  runtime value with no type to read, so it is NOT reflected on either side.
+  `z.string().pipe(z.number())` — a real pipe, not a transform — does resolve both sides
 - **Degrades**: `tuple` → `unknown[]`, `z.nativeEnum()` → `string | number`,
   unrecognized constructs → `unknown`
 

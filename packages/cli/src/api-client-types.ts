@@ -60,8 +60,8 @@ export function buildApiClientContent(definitions: RouteDefinitionLike[]): strin
       const paramsType = params.length > 0
         ? `{ ${params.map((p) => `${p}: string | number`).join('; ')} }`
         : 'Record<string, never>'
-      const bodyType = d.schemas?.body ? schemaToTypeString(d.schemas.body) : undefined
-      const responseType = d.schemas?.output ? schemaToTypeString(d.schemas.output) : undefined
+      const bodyType = d.schemas?.body ? schemaToTypeString(d.schemas.body, { io: 'input' }) : undefined
+      const responseType = d.schemas?.output ? schemaToTypeString(d.schemas.output, { io: 'output' }) : undefined
       let entry = `  '${escapeSingleQuotes(d.name)}': {
     method: '${d.method}'
     path: '${escapeSingleQuotes(d.path)}'
@@ -79,6 +79,10 @@ export function buildApiClientContent(definitions: RouteDefinitionLike[]): strin
 /**
  * Typed API route registry.
  * Use with \`createApiClient<ApiRoutes>()\` for end-to-end type safety.
+ *
+ * \`body\` is the *request* shape — what you send. Coercing schemas are rendered
+ * as they travel: \`z.coerce.date()\` is a \`string\` here, not the \`Date\` the
+ * controller ends up with. \`response\` is the parsed shape you get back.
  */
 export interface ApiRoutes {
 ${routeEntries || '  // No named routes found'}
