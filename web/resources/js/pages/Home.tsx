@@ -121,6 +121,11 @@ const deployTargets = [
   },
 ]
 
+const agentArms = [
+  { name: 'With the shipped agent harness', pass: '3/3 pass', cost: '$4.90 median', accent: true },
+  { name: 'Same app, guidance stripped', pass: '1/3 pass', cost: '$6.94 median', accent: false },
+]
+
 const TAB_KEYS = ['Routes', 'Controller', 'Model'] as const
 type TabKey = (typeof TAB_KEYS)[number]
 
@@ -296,18 +301,32 @@ export default function Home({ codeExamples }: Props) {
             </div>
             <div className="rounded-xl border border-white/10 bg-white/[0.03] p-6">
               <p className="text-sm font-semibold text-white">
-                Agents ship on Guren — measured, not promised
+                Measured on a day-old major release
               </p>
-              <p className="mt-6 bg-gradient-to-r from-crimson-300 to-crimson-500 bg-clip-text text-center text-6xl font-extrabold text-transparent">
-                39/39
+              <p className="mt-1 text-xs text-white/50">
+                Guren v2.0.0 shipped hours before these trials — the model has no training
+                data for its new APIs. Guidance has to carry what memory cannot.
               </p>
-              <p className="mt-2 text-center text-sm font-semibold text-white">
-                agent trials shipped a working feature
-              </p>
+              <div className="mt-6 space-y-4">
+                {agentArms.map((arm) => (
+                  <div
+                    key={arm.name}
+                    className={`rounded-lg border p-4 ${arm.accent ? 'border-crimson-400/40 bg-crimson-500/10' : 'border-white/10'}`}
+                  >
+                    <p className="text-xs font-medium text-white/60">{arm.name}</p>
+                    <div className="mt-1 flex items-baseline justify-between">
+                      <span className={`text-2xl font-extrabold ${arm.accent ? 'text-crimson-300' : 'text-white/70'}`}>
+                        {arm.pass}
+                      </span>
+                      <span className="text-sm text-white/60">{arm.cost}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
               <p className="mt-5 text-xs leading-relaxed text-white/50">
-                Every trial across five evaluation rounds — Claude Code building a complete
-                feature on the app the scaffold ships — passed typecheck, the full test suite,
-                and a hidden HTTP smoke the agent never saw, scored blind on a clean checkout.
+                Scored blind on a clean checkout: typecheck, the full test suite, and a hidden
+                HTTP smoke the agent never saw. Lifetime: 43 of 45 trials shipped a working
+                feature — the only failures are the stripped-guidance baseline above.
               </p>
               <a
                 href="https://github.com/gurenjs/framework-comparison/tree/main/agent-eval"
