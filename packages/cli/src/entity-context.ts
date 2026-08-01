@@ -9,11 +9,10 @@ import {
   discoverTestFiles,
   listAppRoots,
   classNameFromPath,
-  collectFiles,
+  discoverDbArtifactFiles,
   toPosixRelative,
   moduleNameFromRelPath,
   dbArtifactPattern,
-  DB_ARTIFACT_DIRS,
   type DbArtifactKind,
 } from './discovery'
 import {
@@ -223,11 +222,7 @@ export async function generateEntityContext(
     if (duplicated) roots = roots.filter((root) => root.module === match.module)
 
     const filePattern = dbArtifactPattern(entity, kind)
-    const groups = await Promise.all(
-      roots.map((root) => collectFiles(resolve(root.dir, DB_ARTIFACT_DIRS[kind]))),
-    )
-    return groups
-      .flat()
+    return (await discoverDbArtifactFiles(cwd, kind, roots))
       .filter((file) => filePattern.test(basename(file)))
       .map((file) => toPosixRelative(cwd, file))
       .sort()

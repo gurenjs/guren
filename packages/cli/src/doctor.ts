@@ -2,20 +2,18 @@ import { copyFile, readFile, writeFile } from 'node:fs/promises'
 import { resolve, relative, basename } from 'node:path'
 import { consola } from 'consola'
 import {
-  collectFiles,
   dbArtifactPattern,
-  DB_ARTIFACT_DIRS,
   discoverControllerFiles,
+  discoverDbArtifactFiles,
   discoverModelFiles,
   discoverTestFiles,
   fileExists,
   hasControllerTest,
   describeControllerTestMiss,
-  listAppRoots,
+  moduleFlagFor,
+  moduleNameFor,
   readIfExists,
   classNameFromPath,
-  toPosixRelative,
-  moduleNameFromRelPath,
 } from './discovery'
 import { checkPluginCompatibility, readCoreVersion, readInstalledPluginManifests } from './plugin-manifest'
 import { compareVersions } from './codemods'
@@ -1370,8 +1368,7 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
     for (const filePath of controllerFiles) {
       const name = classNameFromPath(filePath)
       if (!(await hasControllerTest(cwd, filePath))) {
-        const moduleName = moduleNameFromRelPath(toPosixRelative(cwd, filePath))
-        const moduleFlag = moduleName ? ` --module ${moduleName}` : ''
+        const moduleFlag = moduleFlagFor(cwd, filePath)
         steps.push({
           priority: priority++,
           // Titled as a question, not an action: detection is by filename, so a
@@ -1389,30 +1386,29 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
 
   try {
     const modelFiles = await discoverModelFiles(cwd)
-    // Listed once for every model rather than probed per model: the factory
-    // file name is the user's choice (`make:factory` suffixes whatever they
-    // typed), so recognising it takes `dbArtifactPattern` over the directory's
-    // real contents — the same rule `guren context <Entity>` reports factories
-    // by. Probing exact singular paths here is what let doctor tell a user with
-    // `CategoriesFactory.ts` to scaffold a second one.
-    const roots = await listAppRoots(cwd)
-    const factoryGroups = await Promise.all(
-      roots.map((root) => collectFiles(resolve(root.dir, DB_ARTIFACT_DIRS.Factory))),
-    )
-    const factoryNames = factoryGroups.flat().map((file) => basename(file))
+    // Listed once up front rather than probed per model, and matched by
+    // `dbArtifactPattern` rather than by an exact path: `make:factory` appends
+    // its suffix to whatever the user typed, so probing `<Name>Factory.ts` is
+    // what let doctor tell a user who already had `CategoriesFactory.ts` to
+    // scaffold a second one. Grouped by app root because a module's models are
+    // paired with that module's factories — the same scoping `guren context
+    // <Entity>` applies.
+    const factoryNamesByModule = new Map<string | null, string[]>()
+    for (const file of await discoverDbArtifactFiles(cwd, 'Factory')) {
+      const key = moduleNameFor(cwd, file)
+      factoryNamesByModule.set(key, [...(factoryNamesByModule.get(key) ?? []), basename(file)])
+    }
 
     for (const filePath of modelFiles) {
       const name = classNameFromPath(filePath)
       const factoryPattern = dbArtifactPattern(name, 'Factory')
-      const hasFactory = factoryNames.some((factoryName) => factoryPattern.test(factoryName))
-      if (!hasFactory) {
-        const moduleName = moduleNameFromRelPath(toPosixRelative(cwd, filePath))
-        const moduleFlag = moduleName ? ` --module ${moduleName}` : ''
+      const factoryNames = factoryNamesByModule.get(moduleNameFor(cwd, filePath)) ?? []
+      if (!factoryNames.some((factoryName) => factoryPattern.test(factoryName))) {
         steps.push({
           priority: priority++,
           title: `Add factory for ${name}`,
           description: 'No factory file found for testing and seeding.',
-          command: `bunx guren make:factory ${name}${moduleFlag}`,
+          command: `bunx guren make:factory ${name}${moduleFlagFor(cwd, filePath)}`,
         })
       }
     }

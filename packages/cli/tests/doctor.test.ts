@@ -1,10 +1,10 @@
 import { mkdir, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { consola } from 'consola'
 import { getDoctorRuleEvaluations, runDoctor, buildJsonOutput, suggestNextSteps, renderDoctorReport } from '../src/doctor'
 import type { DoctorCheck, DoctorJsonOutput } from '../src/doctor'
-import { createTempWorkspace, writeInstalledPackage } from './helpers'
+import { createTempWorkspace, writeInstalledPackage, writeWorkspaceFiles } from './helpers'
 
 let consoleLogSpy: ReturnType<typeof spyOn>
 const VALID_APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
@@ -1247,45 +1247,38 @@ describe('suggestNextSteps', () => {
     }
   })
 
-  // `make:factory` appends its suffix to whatever the user typed, so the
-  // factory of a `Category` model is just as likely to be named
-  // `CategoriesFactory`. Doctor used to probe the singular path only and told
-  // the user to scaffold a duplicate of a factory `guren context Category`
-  // was already listing.
-  async function factoryWorkspaceSteps(
-    prefix: string,
+  /** Run `suggestNextSteps` over a throwaway workspace built from path → content. */
+  async function stepsFor(
     files: Record<string, string>,
   ): Promise<Awaited<ReturnType<typeof suggestNextSteps>>> {
-    const workspace = await createTempWorkspace(prefix)
+    const workspace = await createTempWorkspace('guren-cli-doctor-factory-')
 
     try {
-      for (const [relPath, contents] of Object.entries(files)) {
-        await mkdir(join(workspace.dir, dirname(relPath)), { recursive: true })
-        await writeFile(join(workspace.dir, relPath), contents, 'utf8')
-      }
-
+      await writeWorkspaceFiles(workspace.dir, files)
       return await suggestNextSteps({ cwd: workspace.dir })
     } finally {
       await workspace.cleanup()
     }
   }
 
-  const MODEL_SOURCE = (name: string) => `export class ${name} {}\n`
-  const FACTORY_SOURCE = (name: string) => `export default class ${name} {}\n`
+  // Neither file's contents reach an assertion — models are discovered by
+  // path and factories are matched by basename — so one fixture body serves
+  // both.
+  const SOURCE = 'export default class Fixture {}\n'
 
   it('does not suggest a factory for a model whose factory is named in the plural', async () => {
-    const steps = await factoryWorkspaceSteps('guren-cli-doctor-factory-plural-', {
-      'app/Models/Category.ts': MODEL_SOURCE('Category'),
-      'db/factories/CategoriesFactory.ts': FACTORY_SOURCE('CategoriesFactory'),
+    const steps = await stepsFor({
+      'app/Models/Category.ts': SOURCE,
+      'db/factories/CategoriesFactory.ts': SOURCE,
     })
 
     expect(steps.some((step) => step.title === 'Add factory for Category')).toBe(false)
   })
 
   it('does not suggest a factory for a model whose factory is named in the singular', async () => {
-    const steps = await factoryWorkspaceSteps('guren-cli-doctor-factory-singular-', {
-      'app/Models/Post.ts': MODEL_SOURCE('Post'),
-      'db/factories/PostFactory.ts': FACTORY_SOURCE('PostFactory'),
+    const steps = await stepsFor({
+      'app/Models/Post.ts': SOURCE,
+      'db/factories/PostFactory.ts': SOURCE,
     })
 
     expect(steps.some((step) => step.title === 'Add factory for Post')).toBe(false)
@@ -1294,9 +1287,9 @@ describe('suggestNextSteps', () => {
   // Without this the check could be stuck-on-true and both suppression tests
   // above would still pass.
   it('suggests a factory for a model that has none', async () => {
-    const steps = await factoryWorkspaceSteps('guren-cli-doctor-factory-missing-', {
-      'app/Models/Category.ts': MODEL_SOURCE('Category'),
-      'db/factories/PostFactory.ts': FACTORY_SOURCE('PostFactory'),
+    const steps = await stepsFor({
+      'app/Models/Category.ts': SOURCE,
+      'db/factories/PostFactory.ts': SOURCE,
     })
 
     const step = steps.find((s) => s.title === 'Add factory for Category')
@@ -1304,11 +1297,23 @@ describe('suggestNextSteps', () => {
     expect(step!.command).toBe('bunx guren make:factory Category')
   })
 
+  // A factory's own test is not a factory. Matching basenames rather than
+  // exact paths puts `PostFactory.test.ts` within reach of the pattern, and
+  // suppressing the step on it would hide a genuinely missing factory.
+  it('does not treat a factory test file as the factory itself', async () => {
+    const steps = await stepsFor({
+      'app/Models/Post.ts': SOURCE,
+      'db/factories/PostFactory.test.ts': SOURCE,
+    })
+
+    expect(steps.some((step) => step.title === 'Add factory for Post')).toBe(true)
+  })
+
   it('matches a module model against its own module factories', async () => {
-    const steps = await factoryWorkspaceSteps('guren-cli-doctor-factory-module-', {
-      'modules/billing/app/Models/Invoice.ts': MODEL_SOURCE('Invoice'),
-      'modules/billing/db/factories/InvoicesFactory.ts': FACTORY_SOURCE('InvoicesFactory'),
-      'modules/billing/app/Models/Plan.ts': MODEL_SOURCE('Plan'),
+    const steps = await stepsFor({
+      'modules/billing/app/Models/Invoice.ts': SOURCE,
+      'modules/billing/db/factories/InvoicesFactory.ts': SOURCE,
+      'modules/billing/app/Models/Plan.ts': SOURCE,
     })
 
     expect(steps.some((step) => step.title === 'Add factory for Invoice')).toBe(false)
@@ -1316,6 +1321,21 @@ describe('suggestNextSteps', () => {
     const planStep = steps.find((step) => step.title === 'Add factory for Plan')
     expect(planStep).toBeDefined()
     expect(planStep!.command).toBe('bunx guren make:factory Plan --module billing')
+  })
+
+  // Same class name in two app roots: the root factory belongs to the root
+  // model only. Pooling every root's factories together would leave the
+  // module's own missing factory unreported.
+  it('does not let a root factory satisfy a same-named model in a module', async () => {
+    const steps = await stepsFor({
+      'app/Models/Post.ts': SOURCE,
+      'db/factories/PostFactory.ts': SOURCE,
+      'modules/blog/app/Models/Post.ts': SOURCE,
+    })
+
+    const postSteps = steps.filter((step) => step.title === 'Add factory for Post')
+    expect(postSteps).toHaveLength(1)
+    expect(postSteps[0]!.command).toBe('bunx guren make:factory Post --module blog')
   })
 })
 

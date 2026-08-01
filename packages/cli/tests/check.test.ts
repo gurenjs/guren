@@ -1,8 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import { runCheck, type CheckReport, type RunCheckOptions } from '../src/check'
-import { createTempWorkspace, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE } from './helpers'
+import { createTempWorkspace, writeWorkspaceFiles, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE } from './helpers'
 
 /** Run a check over a throwaway workspace built from path → content. */
 async function withWorkspace(
@@ -11,10 +11,7 @@ async function withWorkspace(
 ): Promise<CheckReport> {
   const workspace = await createTempWorkspace('guren-cli-check-')
   try {
-    for (const [relPath, content] of Object.entries(files)) {
-      await mkdir(join(workspace.dir, dirname(relPath)), { recursive: true })
-      await writeFile(join(workspace.dir, relPath), content, 'utf8')
-    }
+    await writeWorkspaceFiles(workspace.dir, files)
     return await runCheck({ cwd: workspace.dir, ...options })
   } finally {
     await workspace.cleanup()
