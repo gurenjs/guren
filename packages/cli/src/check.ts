@@ -21,6 +21,7 @@ import {
   staticStringProperty,
 } from './model-parser'
 import { checkConsoleCommandRegistration } from './console-check'
+import { tableNameFor } from './inflect'
 import { ParseCache } from './parse-cache'
 import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath } from './inertia-pages'
 import { runArchCheck } from './arch-check'
@@ -152,7 +153,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       const hasSchema = await fileExists(cwd, schemaPath)
       if (hasSchema) {
         const schemaContent = await readFile(resolve(cwd, schemaPath), 'utf-8')
-        const tableLower = name.toLowerCase() + 's'
+        const tableLower = tableNameFor(name)
         const hasTable = schemaContent.includes(`'${tableLower}'`) || schemaContent.includes(`"${tableLower}"`)
         checks.push(
           check(

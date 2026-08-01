@@ -1,5 +1,6 @@
 import { consola } from 'consola'
 import { writeFilesSafe, type WriterOptions, pascalCase, kebabCase, pagesAccessor, safeModuleName } from './utils'
+import { collectionName } from './inflect'
 import { makeModel } from './make-model'
 import { makePolicy } from './make-policy'
 import { makeTest } from './make-test'
@@ -61,7 +62,7 @@ export function parseFieldsString(fieldsStr: string): FieldDefinition[] {
 export async function makeFeature(name: string, options: MakeFeatureOptions = {}): Promise<string[]> {
   const fields = parseFieldsString(options.fields ?? '')
   const singular = pascalCase(name)
-  const collection = pluralize(singular)
+  const collection = collectionName(singular)
   const routeName = kebabCase(collection)
   const routeVar = routeName.replace(/-([a-z])/g, (_, char: string) => char.toUpperCase())
   const variableName = singular.charAt(0).toLowerCase() + singular.slice(1)
@@ -696,10 +697,4 @@ function generateFormField(field: FieldDefinition, formVar: string): string {
     return `        <textarea value={${stringValue}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} placeholder="${field.name} (JSON)" className="w-full rounded border px-3 py-2 font-mono text-sm" />`
   }
   return `        <input value={${stringValue}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} placeholder="${field.name}" className="w-full rounded border px-3 py-2" />`
-}
-
-function pluralize(name: string): string {
-  if (/[^aeiou]y$/iu.test(name)) return `${name.slice(0, -1)}ies`
-  if (/(s|x|z|ch|sh)$/iu.test(name)) return `${name}es`
-  return `${name}s`
 }

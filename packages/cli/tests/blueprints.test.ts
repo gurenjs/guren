@@ -2,6 +2,7 @@ import { beforeEach, afterEach, describe, expect, it } from 'bun:test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createTempWorkspace, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, type TempWorkspace } from './helpers'
 import { listBlueprints, runBlueprint } from '../src/blueprints'
+import { runCheck } from '../src/check'
 
 const ROUTES_FIXTURE = `import { Router } from '@guren/core'
 
@@ -100,6 +101,35 @@ describe('blueprints', () => {
       (match) => match[1],
     )
     expect([...new Set(importedModules)]).toEqual(['drizzle-orm/mysql-core'])
+  })
+
+  // The schema export, the model's import of it, and `guren check`'s table
+  // lookup are three separate derivations. They used to disagree: `Category`
+  // got `export const categories` but `import { categorys }`, so the generated
+  // model did not compile and check warned about the table it had just written.
+  it.each([
+    ['Category', 'categories', 'categories'],
+    ['Box', 'boxes', 'boxes'],
+    ['UserProfile', 'userProfiles', 'user_profiles'],
+    // Already plural: the blueprint singularizes first, so this must not
+    // round-trip into `newses`.
+    ['News', 'news', 'news'],
+  ])('keeps schema, model, and check in agreement for %s', async (name, identifier, tableName) => {
+    await seedResourceWorkspace(PG_SCHEMA_FIXTURE)
+
+    const files = await runBlueprint('resource', { name, fields: 'title:string' })
+
+    const schema = await readFile('db/schema.ts', 'utf8')
+    expect(schema).toContain(`export const ${identifier} = pgTable('${tableName}'`)
+
+    const modelPath = files.find((file) => file.includes('app/Models/'))
+    const model = await readFile(modelPath!, 'utf8')
+    expect(model).toContain(`import { ${identifier} } from '../../db/schema.js'`)
+
+    const report = await runCheck({ cwd: workspace.dir })
+    const schemaChecks = report.checks.filter((result) => result.key.startsWith('model-schema:'))
+    expect(schemaChecks).not.toHaveLength(0)
+    expect(schemaChecks.filter((result) => result.status !== 'pass')).toEqual([])
   })
 
   it('rejects unknown blueprints', async () => {
