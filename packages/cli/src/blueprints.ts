@@ -1,6 +1,7 @@
 import { makeAuth } from './make-auth'
 import { makeChannel } from './make-channel'
 import { makeFeature, parseFieldsString, type FieldDefinition, type FieldType } from './make-feature'
+import { collectionSlug, schemaIdentifierFor, singularize, tableNameFor } from './inflect'
 import { makeController } from './make-controller'
 import { makeEvent } from './make-event'
 import { makeJob } from './make-job'
@@ -11,7 +12,7 @@ import { makeNotification } from './make-notification'
 import { makeRoute } from './make-route'
 import { makeView } from './make-view'
 import { addImport, addProvider, detectSchemaDialect, ensureDrizzleImports, ensureMysqlImports, ensureSqliteImports, findClosingDelimiter } from './patch-helpers'
-import { camelCase, kebabCase, pascalCase, writeFilesSafe, type WriterOptions } from './utils'
+import { camelCase, pascalCase, writeFilesSafe, type WriterOptions } from './utils'
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
@@ -26,34 +27,6 @@ export interface RunBlueprintOptions extends WriterOptions {
 export interface BlueprintDefinition {
   description: string
   run: (options: RunBlueprintOptions) => Promise<string[]>
-}
-
-function pluralizeResourceName(name: string): string {
-  if (/[^aeiou]y$/iu.test(name)) {
-    return `${name.slice(0, -1)}ies`
-  }
-
-  if (/(s|x|z|ch|sh)$/iu.test(name)) {
-    return `${name}es`
-  }
-
-  return `${name}s`
-}
-
-function singularizeResourceName(name: string): string {
-  if (/ies$/iu.test(name)) {
-    return `${name.slice(0, -3)}y`
-  }
-
-  if (/(ches|shes|sses|xes|zes)$/iu.test(name)) {
-    return name.slice(0, -2)
-  }
-
-  if (/s$/iu.test(name) && !/ss$/iu.test(name)) {
-    return name.slice(0, -1)
-  }
-
-  return name
 }
 
 async function installCoreProvider(importName: string, providerName: string): Promise<void> {
@@ -633,10 +606,9 @@ export default class BroadcastProvider extends ServiceProvider {
         throw new Error('The resource blueprint requires a resource name.')
       }
 
-      const singular = singularizeResourceName(pascalCase(options.name.trim()))
-      const collection = pluralizeResourceName(singular)
-      const routeName = kebabCase(collection)
-      const routeVar = routeName.replace(/-([a-z])/g, (_, char: string) => char.toUpperCase())
+      const singular = singularize(pascalCase(options.name.trim()))
+      const routeName = collectionSlug(singular)
+      const routeVar = camelCase(routeName)
       const fields = parseFieldsString(options.fields ?? '')
 
       const created = await makeFeature(singular, {
@@ -646,7 +618,7 @@ export default class BroadcastProvider extends ServiceProvider {
         announce: false,
       })
 
-      await updateResourceSchema(collection, routeName, fields)
+      await updateResourceSchema(singular, fields)
       await updateResourceRoutes(singular, routeName, routeVar)
 
       return created
@@ -750,11 +722,11 @@ function snakeCase(value: string): string {
   return value.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()
 }
 
-async function updateResourceSchema(collection: string, routeName: string, fields: FieldDefinition[]): Promise<void> {
+async function updateResourceSchema(singular: string, fields: FieldDefinition[]): Promise<void> {
   const schemaPath = resolve(process.cwd(), 'db/schema.ts')
   let content = await readFile(schemaPath, 'utf8')
-  const schemaIdentifier = camelCase(collection)
-  const tableName = routeName.replaceAll('-', '_')
+  const schemaIdentifier = schemaIdentifierFor(singular)
+  const tableName = tableNameFor(singular)
 
   const dialect = detectSchemaDialect(content)
 

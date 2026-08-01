@@ -100,8 +100,11 @@ jobs:
       - name: Dependency audit
         run: bun run audit:deps
 
+      # --no-deps: the app-level scan would resolve the monorepo's root
+      # lockfile and hit the registry on every PR; the root dependency gate
+      # (audit:deps) already covers exactly that surface hermetically.
       - name: Security audit (blog example)
-        run: cd examples/blog && bun ../../packages/cli/src/bin.ts audit
+        run: cd examples/blog && bun ../../packages/cli/src/bin.ts audit --no-deps
 
       # Also the only cross-machine exercise of the spec views' determinism
       # contract: committed-on-macOS vs regenerated-on-ubuntu.

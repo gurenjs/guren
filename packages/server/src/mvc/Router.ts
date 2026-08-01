@@ -5,6 +5,7 @@ import { mountRoute } from './mount-route'
 import { flattenRequestQueries, formatValidationErrors, parseRequestPayload, type ValidationErrorLike } from '../http/request'
 import { ValidationException } from '../errors/exceptions/ValidationException'
 import type { ValidationSchema } from '../http/middleware/validation'
+import { capabilitiesOf, type MiddlewareCapabilities } from '../http/middleware/capabilities'
 
 /**
  * Constructor type for Controller classes.
@@ -151,6 +152,15 @@ export interface RouteDefinition {
   middlewareNames?: string[]
   /** Whether inline (unnamed) middleware handlers are attached */
   hasInlineMiddleware?: boolean
+  /**
+   * Security capabilities aggregated from the route's middleware chain
+   * (named aliases, groups, and inline handlers). Always present on routers
+   * from this release — an empty object means "no recognized capability" —
+   * so consumers can distinguish that from definitions produced by older
+   * servers, where the field is absent. The value shape is internal and may
+   * change (RFC 0007).
+   */
+  capabilities?: MiddlewareCapabilities
   /** Controller binding when the handler is a [Controller, 'method'] tuple */
   controller?: {
     name: string
@@ -492,6 +502,7 @@ export class Router<M extends string = never> {
       schemas,
       middlewareNames: [...routeMiddlewareNames],
       hasInlineMiddleware: middlewares.length > 0,
+      capabilities: this.aggregateCapabilities(routeMiddlewareNames, middlewares),
       controller: isControllerAction(handler)
         ? { name: handler[0].name, action: String(handler[1]) }
         : undefined,
@@ -562,6 +573,50 @@ export class Router<M extends string = never> {
 
     this.registry.push(route)
     return createRouteBuilder(route, this.namedRoutes)
+  }
+
+  /**
+   * Security capabilities present on a route's middleware chain, aggregated
+   * across named aliases (group-expanded) and inline handlers. Unlike
+   * `resolveMiddlewareNames`, unregistered names are skipped rather than
+   * thrown: `definitions()` must stay side-effect-free for introspection of
+   * routers that never mount (audit, codegen), and an unresolvable alias
+   * simply contributes no capabilities.
+   */
+  private aggregateCapabilities(
+    names: string[],
+    inline: MiddlewareHandler[],
+    seen?: Set<string>,
+  ): MiddlewareCapabilities {
+    const aggregated: MiddlewareCapabilities = {}
+    const visited = seen ?? new Set<string>()
+
+    const absorb = (capabilities: MiddlewareCapabilities | undefined): void => {
+      const auth = capabilities?.authentication
+      if (!auth) return
+      // 'required' wins: a route that both requires auth and (oddly)
+      // requires guest is reported as requiring auth.
+      if (!aggregated.authentication || auth.mode === 'required') {
+        aggregated.authentication = auth
+      }
+    }
+
+    for (const name of names) {
+      if (visited.has(name)) continue
+      visited.add(name)
+
+      const groupNames = this.middlewareGroups.get(name)
+      if (groupNames) {
+        absorb(this.aggregateCapabilities(groupNames, [], visited))
+        continue
+      }
+
+      absorb(capabilitiesOf(this.middlewareAliases.get(name)))
+    }
+
+    for (const handler of inline) absorb(capabilitiesOf(handler))
+
+    return aggregated
   }
 
   private resolveMiddlewareNames(names: string[], seen?: Set<string>): MiddlewareHandler[] {

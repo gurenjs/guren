@@ -1,0 +1,6 @@
+# Templates now ship *.test.ts files for scaffolded apps; without a test
+# root, `bun test` discovers and runs them here, where their imports
+# (@guren/testing, ../app/...) cannot resolve. The package's own tests all
+# live under tests/.
+[test]
+root = "tests"

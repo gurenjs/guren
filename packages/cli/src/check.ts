@@ -21,10 +21,12 @@ import {
   staticStringProperty,
 } from './model-parser'
 import { checkConsoleCommandRegistration } from './console-check'
+import { tableNameFor } from './inflect'
 import { checkSchemaTimestamps } from './schema-check'
 import { schemaPathFor } from './schema-parser'
 import { ParseCache } from './parse-cache'
 import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath } from './inertia-pages'
+import { appEmitsPageManifest } from './pages-types'
 import { runArchCheck } from './arch-check'
 import { runDocsCheck } from './docs-check'
 import { runSpecCheck } from './spec-check'
@@ -154,14 +156,14 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       const hasSchema = await fileExists(cwd, schemaPath)
       if (hasSchema) {
         const schemaContent = await readFile(resolve(cwd, schemaPath), 'utf-8')
-        const tableLower = name.toLowerCase() + 's'
-        const hasTable = schemaContent.includes(`'${tableLower}'`) || schemaContent.includes(`"${tableLower}"`)
+        const tableName = tableNameFor(name)
+        const hasTable = schemaContent.includes(`'${tableName}'`) || schemaContent.includes(`"${tableName}"`)
         checks.push(
           check(
             `model-schema:${name}`,
             `${name} schema`,
             hasTable ? 'pass' : 'warn',
-            hasTable ? `Table definition found for ${name}.` : `No table '${tableLower}' found in ${schemaPath}.`,
+            hasTable ? `Table definition found for ${name}.` : `No table '${tableName}' found in ${schemaPath}.`,
             hasTable ? undefined : `Add table definition to ${schemaPath} for ${name}.`,
             relPath,
           ),
@@ -181,11 +183,20 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       const suggestion = hasTest
         ? undefined
         : `If these routes are not already covered, run: bunx guren make:test ${name.replace('Controller', '')} --controller${moduleFlag}`
-      checks.push(check(`test:${name}`, `${name} tests`, hasTest ? 'pass' : 'warn', message, suggestion))
+      // Advisory: a missing test is advice, not an integrity failure, so
+      // exit-code gates (check --ci) must not fail on it.
+      checks.push({ ...check(`test:${name}`, `${name} tests`, hasTest ? 'pass' : 'warn', message, suggestion), advisory: true })
     }
 
-    // 5. Check generated manifests are present
-    const manifests = ['.guren/routes.gen.ts', '.guren/pages.gen.ts', '.guren/data.gen.ts']
+    // 5. Check generated manifests are present. The pages manifest only
+    // exists for apps with Inertia pages — codegen never emits it in an
+    // API-only app, so demanding it there is a false positive.
+    const hasPages = await appEmitsPageManifest(cwd)
+    const manifests = [
+      '.guren/routes.gen.ts',
+      ...(hasPages ? ['.guren/pages.gen.ts'] : []),
+      '.guren/data.gen.ts',
+    ]
     for (const manifest of manifests) {
       const exists = await fileExists(cwd, manifest)
       checks.push(

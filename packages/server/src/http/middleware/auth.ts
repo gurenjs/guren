@@ -1,6 +1,7 @@
 import type { Context, MiddlewareHandler } from 'hono'
 import type { Authenticatable, AuthContext } from '../../auth/types'
 import { jsonResponse } from './index'
+import { stampCapabilities } from './capabilities'
 export type { AuthContext } from '../../auth/types'
 
 export interface RequireAuthOptions {
@@ -76,7 +77,7 @@ function resolveAuth(ctx: { get: (key: string) => unknown }): AuthContext | unde
 export function requireAuthenticated(options: RequireAuthOptions = {}): MiddlewareHandler {
   const { redirectTo, status = 401, responseFactory } = options
 
-  return async (ctx, next) => {
+  return stampCapabilities(async (ctx, next) => {
     const auth = resolveAuth(ctx)
 
     if (!auth) {
@@ -96,13 +97,13 @@ export function requireAuthenticated(options: RequireAuthOptions = {}): Middlewa
     }
 
     await next()
-  }
+  }, { authentication: { mode: 'required' } })
 }
 
 export function requireGuest(options: RequireAuthOptions = {}): MiddlewareHandler {
   const { redirectTo, status = 403, responseFactory } = options
 
-  return async (ctx, next) => {
+  return stampCapabilities(async (ctx, next) => {
     const auth = resolveAuth(ctx)
 
     if (!auth) {
@@ -122,7 +123,7 @@ export function requireGuest(options: RequireAuthOptions = {}): MiddlewareHandle
     }
 
     await next()
-  }
+  }, { authentication: { mode: 'guest-only' } })
 }
 
 export { AUTH_CONTEXT_KEY }

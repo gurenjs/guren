@@ -15,6 +15,7 @@ import {
 } from './discovery'
 import { checkPluginCompatibility, readCoreVersion, readInstalledPluginManifests } from './plugin-manifest'
 import { compareVersions } from './codemods'
+import { appEmitsPageManifest } from './pages-types'
 import { extractClassDeclaration } from './model-parser'
 import { parseSourceFile } from './parse-cache'
 import {
@@ -104,6 +105,10 @@ export interface DoctorJsonOutput {
 
 interface DoctorRuleContext {
   cwd: string
+  // Shared so every rule that checks for Inertia pages sees the same
+  // snapshot of the filesystem — computing it per-rule would let concurrent
+  // rules disagree if a page file were added or removed mid-run.
+  pagesExpected: Promise<boolean>
 }
 
 interface DoctorRule {
@@ -292,35 +297,58 @@ async function detectRoutes(context: DoctorRuleContext): Promise<DoctorCheck> {
 
 async function detectPageContracts(context: DoctorRuleContext): Promise<DoctorCheck> {
   const pageContracts = await findFirstExisting(context.cwd, PAGE_CONTRACT_CANDIDATES)
-  if (!pageContracts) {
+  if (pageContracts) {
+    return createCheck('page-contracts', 'Page Types', 'pass', `Found ${pageContracts}.`)
+  }
+
+  // An API-only app never gets a manifest out of codegen, so warning there is a false positive.
+  if (!(await context.pagesExpected)) {
     return createCheck(
       'page-contracts',
       'Page Types',
-      'warn',
-      'No .guren/pages.gen.ts file was found.',
-      {
-        fix: 'Run `bunx guren codegen --force` to generate page type definitions.',
-        manualFix: 'Run `bunx guren codegen --force` to regenerate .guren/pages.gen.ts.',
-      },
+      'pass',
+      'No Inertia pages detected; page type generation is not applicable.',
     )
   }
 
-  return createCheck('page-contracts', 'Page Types', 'pass', `Found ${pageContracts}.`)
+  return createCheck(
+    'page-contracts',
+    'Page Types',
+    'warn',
+    'No .guren/pages.gen.ts file was found.',
+    {
+      fix: 'Run `bunx guren codegen --force` to generate page type definitions.',
+      manualFix: 'Run `bunx guren codegen --force` to regenerate .guren/pages.gen.ts.',
+    },
+  )
 }
 
 function createGeneratedManifestRule(generatedFile: string): DoctorRule {
+  const key = `generated:${generatedFile}`
+
   return {
-    key: `generated:${generatedFile}`,
+    key,
     title: generatedFile,
     async detect(context) {
-      const present = await fileExists(context.cwd, generatedFile)
+      if (await fileExists(context.cwd, generatedFile)) {
+        return createCheck(key, generatedFile, 'pass', `Generated manifest present at ${generatedFile}.`)
+      }
+
+      // An API-only app never gets a pages manifest out of codegen, so warning there is a false positive.
+      if (generatedFile === '.guren/pages.gen.ts' && !(await context.pagesExpected)) {
+        return createCheck(
+          key,
+          generatedFile,
+          'pass',
+          `No Inertia pages detected; ${generatedFile} is not applicable.`,
+        )
+      }
+
       return createCheck(
-        `generated:${generatedFile}`,
+        key,
         generatedFile,
-        present ? 'pass' : 'warn',
-        present
-          ? `Generated manifest present at ${generatedFile}.`
-          : `Missing generated manifest ${generatedFile}.`,
+        'warn',
+        `Missing generated manifest ${generatedFile}.`,
         {
           fix: `Run \`guren codegen --force\` to regenerate ${generatedFile}.`,
           manualFix: `Run \`guren codegen --force\` to regenerate ${generatedFile}.`,
@@ -1194,7 +1222,7 @@ export async function getDoctorRuleEvaluations(options: { cwd?: string } = {}): 
   evaluations: DoctorRuleEvaluation[]
 }> {
   const cwd = resolve(options.cwd ?? process.cwd())
-  const context: DoctorRuleContext = { cwd }
+  const context: DoctorRuleContext = { cwd, pagesExpected: appEmitsPageManifest(cwd) }
 
   // The deploy-runtime checks share one filesystem scan, computed once here
   // rather than through the DoctorRule interface (they need no autofix and no
@@ -1383,8 +1411,15 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
     // Ignore
   }
 
+  const hasPages = await appEmitsPageManifest(cwd)
+  const requiredManifests = [
+    '.guren/routes.gen.ts',
+    ...(hasPages ? ['.guren/pages.gen.ts'] : []),
+    '.guren/data.gen.ts',
+    '.guren/api-client.gen.ts',
+  ]
   let missingManifests = false
-  for (const manifest of ['.guren/routes.gen.ts', '.guren/pages.gen.ts', '.guren/data.gen.ts', '.guren/api-client.gen.ts']) {
+  for (const manifest of requiredManifests) {
     if (!(await fileExists(cwd, manifest))) {
       missingManifests = true
       break

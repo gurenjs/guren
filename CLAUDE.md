@@ -371,6 +371,7 @@ export const handler = createLambdaHandler(app)
 | `packages/cli/src/spec-generate.ts` | AI agent: spec view orchestration (`spec:generate`, RFC 0004) |
 | `packages/cli/src/spec-check.ts` | AI agent: spec drift gate (`guren check --spec`) |
 | `packages/cli/src/schema-parser.ts` | Shared Drizzle schema AST parser (tables, columns, FKs, dialect, column options) |
+| `packages/cli/src/inflect.ts` | The one pluralization rule: collection, route slug, schema identifier, and table name for an entity. Every scaffolder and `guren check` derive names through it — a second rule is how the model's import and the schema's export drift apart |
 | `packages/cli/src/check.ts` | AI agent: integrity checking |
 | `packages/cli/src/console-check.ts` | AI agent: console command registration checks (part of `guren check`) |
 | `packages/cli/src/schema-check.ts` | AI agent: Postgres `timestamptz` schema checks (part of `guren check`) |

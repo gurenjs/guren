@@ -9,11 +9,13 @@ import {
   listModuleNames,
 } from './discovery'
 import { loadRouteDefinitions } from './load-routes'
+import type { RouteDefinition } from '@guren/core'
 import {
   classifyFindingKey,
   primaryClassificationId,
   type AuditClassification,
 } from './audit-taxonomy'
+import { dependencyFindingsFromOutput, startDependencyScan, type DependencyScan } from './audit-deps'
 import {
   classUsesAuthenticatableBase,
   extractClassDeclaration,
@@ -48,6 +50,8 @@ export interface AuditReport {
   failCount: number
   ignoredCount: number
   routesAnalyzed: boolean
+  /** Present when the dependency scan ran (or was skipped via options). */
+  dependencyScan?: DependencyScan
 }
 
 export interface RunAuditOptions {
@@ -55,6 +59,12 @@ export interface RunAuditOptions {
   routesFile?: string
   /** Explicit path to the ignore config (relative to cwd). Defaults to config/audit.{ts,js,mjs}. */
   auditConfigFile?: string
+  /**
+   * Scan installed dependencies via `bun audit` (requires registry access).
+   * Defaults to false here so embedded callers stay hermetic; the `guren
+   * audit` command enables it unless invoked with --no-deps.
+   */
+  deps?: boolean
 }
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
@@ -69,6 +79,38 @@ const GUEST_PATH_PATTERN = /(login|logout|register|signup|sign-up|password|forgo
 const WEBHOOK_PATH_PATTERN = /(webhook|callback)/i
 
 const AUTH_MIDDLEWARE_PATTERN = /auth/i
+
+const UNRECOGNIZED_GUARD_SUGGESTION =
+  'Use requireAuthenticated() from @guren/core (recognized inline or aliased), or suppress via config/audit.ts if this middleware really enforces authentication.'
+
+export type AuthMiddlewareVerdict =
+  /** A middleware in the chain carries the framework's authentication capability. */
+  | 'verified'
+  /** Old server without capability support; a middleware *name* matched /auth/i. */
+  | 'legacy-name-match'
+  /** Capabilities are supported, no guard found, but a name looks auth-like. */
+  | 'unverified-auth-name'
+  /** No authentication middleware detected by any signal. */
+  | 'none'
+
+/**
+ * Exported for tests. `route` is the shape `Router.definitions()` returns:
+ * `capabilities` is always present (possibly empty) on servers with
+ * capability support, and absent entirely on older servers. Typed against
+ * the server's own RouteDefinition so a capability-shape change over there
+ * breaks this compile instead of silently mis-detecting.
+ */
+export function authMiddlewareVerdict(
+  route: Pick<RouteDefinition, 'middlewareNames' | 'capabilities'>,
+): AuthMiddlewareVerdict {
+  if (route.capabilities?.authentication?.mode === 'required') return 'verified'
+
+  const nameMatches = (route.middlewareNames ?? []).some((name) => AUTH_MIDDLEWARE_PATTERN.test(name))
+  if (route.capabilities === undefined) {
+    return nameMatches ? 'legacy-name-match' : 'none'
+  }
+  return nameMatches ? 'unverified-auth-name' : 'none'
+}
 
 /**
  * Calls that actually reject unauthenticated requests. Optional reads like
@@ -95,12 +137,21 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
   const cwd = resolve(options.cwd ?? process.cwd())
   const findings: AuditFinding[] = []
 
+  // Kicked off first so the registry round-trip overlaps the local
+  // parsing below; the result is folded in (in stable finding order)
+  // once the local scans are done.
+  const dependencyScanOutput = options.deps ? startDependencyScan(cwd) : null
+
   const controllerMethods = await parseControllerMethods(cwd, findings)
 
   const routesAnalyzed = await auditRoutes(cwd, options.routesFile, controllerMethods, findings)
   auditForceWrites(controllerMethods, findings)
   await auditSourceFiles(cwd, findings)
   await auditModels(cwd, findings)
+
+  const dependencyScan: DependencyScan = dependencyScanOutput
+    ? dependencyFindingsFromOutput(await dependencyScanOutput, findings)
+    : { status: 'skipped', tool: 'bun audit' }
 
   for (const entry of findings) {
     entry.classifications ??= classifyFindingKey(entry.key)
@@ -116,6 +167,7 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
     failCount: findings.filter((f) => f.status === 'fail').length,
     ignoredCount: findings.filter((f) => f.status === 'ignored').length,
     routesAnalyzed,
+    dependencyScan,
   }
 }
 
@@ -464,7 +516,13 @@ async function auditRoutes(
     if (GUEST_PATH_PATTERN.test(route.path)) continue
 
     const middlewareNames = route.middlewareNames ?? []
-    const hasAuthMiddleware = middlewareNames.some((name) => AUTH_MIDDLEWARE_PATTERN.test(name))
+    // Capability verdict (RFC 0007): the server stamps its auth guards
+    // (requireAuthenticated/requireGuest) and definitions() aggregates the
+    // stamps across aliases, groups, and inline handlers. An older server
+    // emits no `capabilities` field at all — only then fall back to the
+    // pre-capability name heuristic so mixed-version apps don't regress.
+    const verdict = authMiddlewareVerdict(route)
+    const hasAuthMiddleware = verdict === 'verified' || verdict === 'legacy-name-match'
     const hasControllerAuth = methodInfo ? AUTH_CALL_PATTERN.test(methodInfo.body) : false
 
     if (hasAuthMiddleware || hasControllerAuth) {
@@ -473,9 +531,21 @@ async function auditRoutes(
           `authz:${routeLabel}`,
           routeLabel,
           'pass',
-          hasAuthMiddleware
-            ? `Protected by middleware: ${middlewareNames.join(', ')}.`
-            : `Controller checks authentication in ${controllerKey}.`,
+          verdict === 'verified'
+            ? 'Protected by an authentication guard (verified via middleware capabilities).'
+            : verdict === 'legacy-name-match'
+              ? `Protected by middleware: ${middlewareNames.join(', ')}.`
+              : `Controller checks authentication in ${controllerKey}.`,
+        ),
+      )
+    } else if (verdict === 'unverified-auth-name') {
+      findings.push(
+        finding(
+          `authz:${routeLabel}`,
+          routeLabel,
+          'warn',
+          `Middleware (${middlewareNames.join(', ')}) is named like an auth guard but is not one the framework recognizes.`,
+          UNRECOGNIZED_GUARD_SUGGESTION,
         ),
       )
     } else if (route.hasInlineMiddleware) {
@@ -484,8 +554,8 @@ async function auditRoutes(
           `authz:${routeLabel}`,
           routeLabel,
           'warn',
-          'Inline middleware is attached but cannot be inspected — verify it enforces authentication.',
-          'Prefer named middleware via router.aliasMiddleware() so audits can verify protection.',
+          'Inline middleware is attached but is not a recognized authentication guard.',
+          UNRECOGNIZED_GUARD_SUGGESTION,
         ),
       )
     } else if (WEBHOOK_PATH_PATTERN.test(route.path)) {
@@ -759,6 +829,9 @@ export function renderAuditReport(report: AuditReport): void {
 
   if (!report.routesAnalyzed) {
     consola.warn('Route-level checks were skipped (routes could not be loaded).')
+  }
+  if (report.dependencyScan?.status === 'skipped') {
+    consola.info('Dependency scan skipped (--no-deps).')
   }
 
   for (const f of report.findings) {
