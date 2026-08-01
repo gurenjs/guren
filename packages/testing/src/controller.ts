@@ -790,15 +790,20 @@ export async function readInertiaResponse(response: Response): Promise<{
 
   // Inertia v3: the payload lives in a JSON script element. Scan open tags
   // and check attributes with `includes` — chaining several `[^>]*` groups in
-  // one regex backtracks polynomially on large HTML bodies.
+  // one regex backtracks polynomially on large HTML bodies. Tag names are
+  // case-insensitive in HTML, so both patterns and the attribute comparison
+  // are too.
   let scriptPayload: string | undefined
-  const openTagPattern = /<script\b[^>]*>/g
+  const openTagPattern = /<script\b[^>]*>/gi
   let openTag: RegExpExecArray | null
   while ((openTag = openTagPattern.exec(body)) !== null) {
-    if (openTag[0].includes('data-page="app"') && openTag[0].includes('type="application/json"')) {
-      const end = body.indexOf('</script>', openTagPattern.lastIndex)
-      if (end !== -1) {
-        scriptPayload = body.slice(openTagPattern.lastIndex, end)
+    const tag = openTag[0].toLowerCase()
+    if (tag.includes('data-page="app"') && tag.includes('type="application/json"')) {
+      const closeTagPattern = /<\/script\s*>/gi
+      closeTagPattern.lastIndex = openTagPattern.lastIndex
+      const closeTag = closeTagPattern.exec(body)
+      if (closeTag) {
+        scriptPayload = body.slice(openTagPattern.lastIndex, closeTag.index)
       }
       break
     }
