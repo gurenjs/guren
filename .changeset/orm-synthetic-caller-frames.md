@@ -26,7 +26,5 @@ which Bun emits for a callback a built-in invoked (`at replace (unknown)`). Thos
 previously stopped the read at frame 2 and produced no key, so such a handle was
 never reclaimed across a reload; it now resolves to the file that opened it.
 
-The equivalent registry for hot-reloaded timer owners already guarded this. The
-two now pick the same frame out of a stack; how each parses the frame it picked
-still differs, which their comments record so the next reader does not take the
-agreement for more than it is.
+The equivalent registry for hot-reloaded timer owners already guarded this; the
+ORM's registry now does too.

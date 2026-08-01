@@ -21,15 +21,15 @@
  * and be done. Sharing the registries would buy machinery neither side needs in
  * the same shape.
  *
- * Its twin is `packages/orm/src/active-connections.ts`. The two pick the same
- * frame out of a stack — the same two frame shapes, the same walk past frames
- * the engine synthesized — so a fix to that choice in one has to be carried to
- * the other by hand, which has already failed once: the walk below predates the
- * ORM's, and the ORM keyed handles to `unknown` in the meantime. Nothing forces
- * the duplication — `@guren/server` already depends on `@guren/orm`, so this
- * layer could live there and be imported here — it is only that the shared part
- * is a three-element set and a six-line loop, atop parsers that genuinely differ
- * (see `parseFrameLocation`). Extract it if it drifts again.
+ * Its twin is `packages/orm/src/active-connections.ts`. `parseFrameLocation` and
+ * the scan under it follow the same rule in both, and `describeCallerFile`'s
+ * walk past a synthetic frame is identical too — a fix to either has to be
+ * carried to the other by hand. That has already failed once: this walk
+ * predates the ORM's, and the ORM kept keying handles to `unknown` in the
+ * meantime. Nothing forces the duplication — `@guren/server` already depends on
+ * `@guren/orm`, so this layer could live there and be imported here — it is
+ * only that the shared part is small next to the two packages' very different
+ * teardown semantics (see above). Extract it if it drifts a third time.
  *
  * An owner is identified by the file that built it plus a discriminator, so it
  * is replaced only by a later evaluation of that same file. Keying on the exact
@@ -125,29 +125,69 @@ function parseBareFrame(frame: string): string | undefined {
 }
 
 /**
- * The `file:line:column` a single stack frame points at, minus line and column.
+ * The text inside the parentheses that close a frame, or `undefined` when the
+ * frame does not end in one.
  *
- * Frames come in two shapes — `at fn (/path/file.ts:1:2)` and a bare
- * `at /path/file.ts:1:2` — and the parenthesized form is checked first because a
- * path may contain spaces, which is ordinary on macOS. Splitting on whitespace
- * instead would silently truncate `/Users/me/My Projects/app.ts` to `Projects/app.ts`.
+ * Scanned backwards from the final `)` counting depth, rather than matched.
+ * Both the path and the function name may contain parentheses — `at fn (/app
+ * (old)/x.ts:1:2)` and `at weird (name) (/app/x.ts:1:2)` are each ordinary — and
+ * no single pattern separates them, because the first needs the leftmost `(`
+ * and the second the rightmost. Depth is what actually distinguishes them.
  *
- * The line number is what proves this is a location at all rather than a bare
- * function name, so a frame without one yields nothing.
+ * A scan is also the only form that stays linear. Lazily matching from the
+ * leftmost `(` retries the whole suffix at every parenthesis, which is
+ * quadratic on a frame carrying many unmatched ones.
  *
- * `[^()]*` also means a *named* frame whose path itself contains parentheses —
- * `at build (/app (old)/config.ts:3:18)` — matches neither shape and yields
- * nothing, where the twin's hand-rolled scan reads it. That is a real gap, not a
- * preference: a project living under `/Users/me/Projects (old)` loses every
- * named caller frame, so its timers go unclaimed and leak on each reload. Bare
- * frames still resolve, which is why it has gone unnoticed. Both parsers are
- * linear, so speed is not what separates them — closing the gap means adopting
- * the twin's scan wholesale, which is more than a comment can carry.
+ * Bails if the scan crosses a line terminator before depth returns to zero: a
+ * path could never span one, so an unbalanced `(` on the far side of a line
+ * break was never part of this frame's location.
+ */
+function parenthesizedLocation(frame: string): string | undefined {
+  const trimmed = frame.trimEnd()
+
+  if (!trimmed.endsWith(')')) {
+    return undefined
+  }
+
+  let depth = 0
+
+  for (let index = trimmed.length - 1; index >= 0; index--) {
+    const character = trimmed[index]
+
+    if (LINE_TERMINATOR.test(character)) {
+      return undefined
+    }
+
+    if (character === ')') {
+      depth++
+    } else if (character === '(' && --depth === 0) {
+      return trimmed.slice(index + 1, -1)
+    }
+  }
+
+  return undefined
+}
+
+/**
+ * The path a single stack frame points at, without its line and column.
+ *
+ * The parenthesized shape is read first because its parentheses bound the path;
+ * the bare `at /path/file.ts:1:2` can only be bounded by whitespace, which would
+ * truncate `/Users/me/My Projects/app.ts` to `Projects/app.ts`. Nothing
+ * constrains what the path may contain — spaces and parentheses are both
+ * ordinary in a macOS directory name.
+ *
+ * The trailing `:line` is what proves this is a location at all rather than a
+ * bare function name, so `at native` and `at <anonymous>` yield nothing. An
+ * `eval` group is rejected outright: V8 nests the real location inside
+ * `eval at fn (/app/x.ts:1:2), <anonymous>:1:1`, and keying an owner on text
+ * that is not a path is worse than not keying it — an owner with no key is left
+ * alone, which is the safe failure.
  */
 function parseFrameLocation(frame: string): string | undefined {
-  const location = frame.match(/\(([^()]*)\)\s*$/)?.[1] ?? parseBareFrame(frame)
+  const location = parenthesizedLocation(frame) ?? parseBareFrame(frame)
 
-  if (!location || !LOCATION_SUFFIX.test(location)) {
+  if (!location || location.startsWith('eval at ') || !LOCATION_SUFFIX.test(location)) {
     return undefined
   }
 

@@ -119,16 +119,37 @@ function pathBefore(frame: string, from: number, splits: number[]): string | und
 }
 
 /**
- * Where the last line terminator before `before` ends, or 0 when there is none.
+ * The index of the `(` that closes a frame's final `)`, found by scanning
+ * backward and counting nesting depth, or `undefined` when it never balances.
  *
- * A path could never span one — the patterns spelled it `.`, which stops at
- * every line break — so this is the earliest a path ending at `before` may
- * start.
+ * Neither the leftmost nor the rightmost `(` is right in general. A path may
+ * contain one — `at fn (/app (old)/x.ts:1:2)` needs the outer, *leftmost*
+ * pair — and so may the function name in front of it — `at weird (name)
+ * (/app/x.ts:1:2)` needs the outer, *rightmost* pair. Depth is what actually
+ * tells the two apart; a fixed "first" or "last" gets one of them wrong.
+ *
+ * Bails if the scan crosses a line terminator before depth returns to zero: a
+ * path could never span one, so an unbalanced `(` on the far side of a line
+ * break was never part of this frame's location.
  */
-function afterLastTerminator(frame: string, before: number): number {
-  let cursor = before
-  while (cursor > 0 && !LINE_TERMINATOR.test(frame[cursor - 1])) cursor -= 1
-  return cursor
+function matchingOpenParen(frame: string, closeIndex: number): number | undefined {
+  let depth = 0
+
+  for (let index = closeIndex; index >= 0; index--) {
+    const character = frame[index]
+
+    if (LINE_TERMINATOR.test(character)) {
+      return undefined
+    }
+
+    if (character === ')') {
+      depth++
+    } else if (character === '(' && --depth === 0) {
+      return index
+    }
+  }
+
+  return undefined
 }
 
 /**
@@ -143,32 +164,31 @@ function afterLastTerminator(frame: string, before: number): number {
  * are both ordinary in a macOS directory name, and excluding either is how the
  * truncation happened in the first place.
  *
+ * Neither the leftmost nor the rightmost `(` bounds the opening paren in
+ * general — see `matchingOpenParen` — so the two shapes below no longer search
+ * for one at a fixed end.
+ *
  * Both shapes require a trailing `:line`, so frames that name no location at
  * all — `at native`, `at <anonymous>` — are rejected instead of being read as a
  * path. That is a check on the frame's shape, not on what it points at: the
  * engine also emits those same names *with* a location, and rejecting those is
- * `SYNTHETIC_FRAME_PATHS`' job rather than this function's.
+ * `SYNTHETIC_FRAME_PATHS`'s job below, not this function's. An `eval` group is
+ * rejected outright here, though: V8 nests the real location inside
+ * `eval at fn (/app/x.ts:1:2), <anonymous>:1:1`, and keying a connection on
+ * text that is not a path is worse than not keying it — a handle with no key
+ * is left alone, which is the safe failure.
  */
 function parseFrameLocation(frame: string): string | undefined {
   // `trimEnd` drops exactly the characters `\s` matches, so this is where the
   // patterns' trailing `\s*$` would have started.
   const end = frame.trimEnd().length
 
-  // `at fn (/path/file.ts:1:2)`. The opening paren is the frame's *leftmost*
-  // usable one, not the one nearest the location: `(` is ordinary in a
-  // directory name, and matching leftmost is what keeps `/app (old)/config`
-  // whole. Usable means the path it opens reaches the location without
-  // crossing a line break, which is why a split can fall to a later paren.
   if (end > 0 && frame[end - 1] === ')') {
     const splits = locationSplits(frame, end - 1)
+    const open = splits.length === 0 ? undefined : matchingOpenParen(frame, end - 1)
+    const path = open === undefined ? undefined : pathBefore(frame, open + 1, splits)
 
-    // Both splits sit inside one `:line:column` run, which is colons and
-    // digits, so no line break can fall between them — the earliest paren a
-    // path may open at is therefore the same whichever split is taken.
-    const open = splits.length === 0 ? -1 : frame.indexOf('(', afterLastTerminator(frame, splits[0]))
-    const path = open === -1 ? undefined : pathBefore(frame, open + 1, splits)
-
-    if (path !== undefined) return path
+    if (path !== undefined && !path.startsWith('eval at ')) return path
   }
 
   // `at /path/file.ts:1:2`, where only the trailing location bounds the path.

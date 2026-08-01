@@ -75,6 +75,31 @@ describe('describeCallerFile', () => {
     expect(describeCallerFile(named)).toBe('/app (old)/config/database.ts')
   })
 
+  test('should read past a function name that contains parentheses', () => {
+    // Bun emits this for a method whose key carries parentheses. Taking the
+    // leftmost `(` yields `name) (/app/config/database.ts` — not a path, but
+    // stable enough to key a connection on, which is the worse failure.
+    const stack = [
+      'Error',
+      '    at createPostgresDatabase (/app/dist/index.js:1:1)',
+      '    at weird (name) (/app/config/database.ts:3:18)',
+    ].join('\n')
+
+    expect(describeCallerFile(stack)).toBe('/app/config/database.ts')
+  })
+
+  test('should reject an eval frame rather than key a connection on it', () => {
+    // V8 nests the real location inside the group. The text before `:1:1` is not
+    // a path, and carries the outer line number, so it would drift on any edit.
+    const stack = [
+      'Error',
+      '    at createPostgresDatabase (/app/dist/index.js:1:1)',
+      '    at eval (eval at <anonymous> (/app/config/database.ts:3:18), <anonymous>:1:1)',
+    ].join('\n')
+
+    expect(describeCallerFile(stack)).toBeUndefined()
+  })
+
   test('should reject a frame that names no location', () => {
     // Rejecting is the safe failure: no key means the handle is left alone, and
     // a leaked connection beats closing a live one that belongs to someone else.
