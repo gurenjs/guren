@@ -15,6 +15,7 @@ import {
   primaryClassificationId,
   type AuditClassification,
 } from './audit-taxonomy'
+import { dependencyFindingsFromOutput, startDependencyScan, type DependencyScan } from './audit-deps'
 import {
   classUsesAuthenticatableBase,
   extractClassDeclaration,
@@ -49,6 +50,8 @@ export interface AuditReport {
   failCount: number
   ignoredCount: number
   routesAnalyzed: boolean
+  /** Present when the dependency scan ran (or was skipped via options). */
+  dependencyScan?: DependencyScan
 }
 
 export interface RunAuditOptions {
@@ -56,6 +59,12 @@ export interface RunAuditOptions {
   routesFile?: string
   /** Explicit path to the ignore config (relative to cwd). Defaults to config/audit.{ts,js,mjs}. */
   auditConfigFile?: string
+  /**
+   * Scan installed dependencies via `bun audit` (requires registry access).
+   * Defaults to false here so embedded callers stay hermetic; the `guren
+   * audit` command enables it unless invoked with --no-deps.
+   */
+  deps?: boolean
 }
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
@@ -128,12 +137,21 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
   const cwd = resolve(options.cwd ?? process.cwd())
   const findings: AuditFinding[] = []
 
+  // Kicked off first so the registry round-trip overlaps the local
+  // parsing below; the result is folded in (in stable finding order)
+  // once the local scans are done.
+  const dependencyScanOutput = options.deps ? startDependencyScan(cwd) : null
+
   const controllerMethods = await parseControllerMethods(cwd, findings)
 
   const routesAnalyzed = await auditRoutes(cwd, options.routesFile, controllerMethods, findings)
   auditForceWrites(controllerMethods, findings)
   await auditSourceFiles(cwd, findings)
   await auditModels(cwd, findings)
+
+  const dependencyScan: DependencyScan = dependencyScanOutput
+    ? dependencyFindingsFromOutput(await dependencyScanOutput, findings)
+    : { status: 'skipped', tool: 'bun audit' }
 
   for (const entry of findings) {
     entry.classifications ??= classifyFindingKey(entry.key)
@@ -149,6 +167,7 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
     failCount: findings.filter((f) => f.status === 'fail').length,
     ignoredCount: findings.filter((f) => f.status === 'ignored').length,
     routesAnalyzed,
+    dependencyScan,
   }
 }
 
@@ -810,6 +829,9 @@ export function renderAuditReport(report: AuditReport): void {
 
   if (!report.routesAnalyzed) {
     consola.warn('Route-level checks were skipped (routes could not be loaded).')
+  }
+  if (report.dependencyScan?.status === 'skipped') {
+    consola.info('Dependency scan skipped (--no-deps).')
   }
 
   for (const f of report.findings) {

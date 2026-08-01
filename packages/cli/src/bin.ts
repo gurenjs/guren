@@ -1802,7 +1802,7 @@ const checkCommand = defineCommand({
 const auditCommand = defineCommand({
   meta: {
     name: 'audit',
-    description: 'Run a security audit: validation, authentication, raw SQL, secrets, mass assignment.',
+    description: 'Run a security audit: validation, authentication, raw SQL, secrets, mass assignment, dependency vulnerabilities.',
   },
   args: {
     json: {
@@ -1821,12 +1821,18 @@ const auditCommand = defineCommand({
       type: 'string',
       description: 'Path to the ignore config (defaults to config/audit.{ts,js,mjs}).',
     },
+    deps: {
+      type: 'boolean',
+      default: true,
+      description: 'Scan dependencies via bun audit (requires registry access). Disable with --no-deps.',
+    },
   },
   async run({ args }) {
     const report = await runAudit({
       cwd: args.app,
       routesFile: args.routes,
       auditConfigFile: args.auditConfig,
+      deps: args.deps,
     })
 
     if (args.json) {
