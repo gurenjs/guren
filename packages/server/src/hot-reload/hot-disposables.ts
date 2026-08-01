@@ -18,13 +18,18 @@
  * what forces that module's serialized claims and teardown timeout. Every
  * teardown here is synchronous — `clearInterval`, and the `destroy()`/`stop()`
  * methods wrapping it — so a claim can simply run the previous teardown inline
- * and be done. Sharing a helper across the two packages would mean either a new
- * package for ~60 lines or a dependency `@guren/orm` is not allowed to take, and
- * would buy machinery neither side needs in the same shape.
+ * and be done. Sharing the registries would buy machinery neither side needs in
+ * the same shape.
  *
- * Its twin is `packages/orm/src/active-connections.ts`. The two derive an
- * owner's identity the same way, so a fix to the stack parsing in one is worth
- * carrying to the other.
+ * Its twin is `packages/orm/src/active-connections.ts`. The two pick the same
+ * frame out of a stack — the same two frame shapes, the same walk past frames
+ * the engine synthesized — so a fix to that choice in one has to be carried to
+ * the other by hand, which has already failed once: the walk below predates the
+ * ORM's, and the ORM keyed handles to `unknown` in the meantime. Nothing forces
+ * the duplication — `@guren/server` already depends on `@guren/orm`, so this
+ * layer could live there and be imported here — it is only that the shared part
+ * is a three-element set and a six-line loop, atop parsers that genuinely differ
+ * (see `parseFrameLocation`). Extract it if it drifts again.
  *
  * An owner is identified by the file that built it plus a discriminator, so it
  * is replaced only by a later evaluation of that same file. Keying on the exact
@@ -70,12 +75,13 @@ export function isHotReloadRuntime(): boolean {
 /**
  * Paths the engine reports for code that has no source location.
  *
- * A class that extends another without declaring a constructor gets an implicit
- * one, and JSC reports it as `at new Subclass (unknown:1:28)` — a frame sitting
- * between the base constructor and the code that actually wrote `new`. Taking it
- * would key every such owner in the process to the string `unknown`, collapsing
- * owners built in different files into one slot where each new one stops the
- * last. `native` shows up the same way for built-ins (`at map (native:1:11)`).
+ * A class that runs code without declaring a constructor — a subclass, or any
+ * class carrying a field initializer — gets an implicit one, and JSC reports it
+ * as `at new Owner (unknown:1:28)`: a frame sitting between the code that ran
+ * and the code that actually wrote `new`. Taking it would key every such owner
+ * in the process to the string `unknown`, collapsing owners built in different
+ * files into one slot where each new one stops the last. `native` shows up the
+ * same way for built-ins (`at map (native:1:11)`).
  */
 const SYNTHETIC_FRAME_PATHS = new Set(['unknown', 'native', '<anonymous>'])
 
@@ -128,6 +134,15 @@ function parseBareFrame(frame: string): string | undefined {
  *
  * The line number is what proves this is a location at all rather than a bare
  * function name, so a frame without one yields nothing.
+ *
+ * `[^()]*` also means a *named* frame whose path itself contains parentheses —
+ * `at build (/app (old)/config.ts:3:18)` — matches neither shape and yields
+ * nothing, where the twin's hand-rolled scan reads it. That is a real gap, not a
+ * preference: a project living under `/Users/me/Projects (old)` loses every
+ * named caller frame, so its timers go unclaimed and leak on each reload. Bare
+ * frames still resolve, which is why it has gone unnoticed. Both parsers are
+ * linear, so speed is not what separates them — closing the gap means adopting
+ * the twin's scan wholesale, which is more than a comment can carry.
  */
 function parseFrameLocation(frame: string): string | undefined {
   const location = frame.match(/\(([^()]*)\)\s*$/)?.[1] ?? parseBareFrame(frame)
