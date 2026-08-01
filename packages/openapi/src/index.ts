@@ -6,14 +6,16 @@ import {
   enumValues,
   getTypeName,
   innerSchema,
+  isZod3Schema,
   literalValues,
   objectShape,
   pipeSide,
   pipeSides,
-  schemaAt,
+  recordValueType,
   type SchemaIo,
   SINGLE_CHILD_WRAPPERS,
   typeOf,
+  ZOD3_UNSUPPORTED_MESSAGE,
   type ZodSchemaLike,
 } from '@guren/core/internal/zod-compat'
 
@@ -343,8 +345,26 @@ function buildResponses(definition: RouteDefinition, warnings: string[]): Record
   return responses
 }
 
+/**
+ * Push the v3 refusal warning and report whether it fired. One helper so the
+ * composed message cannot drift between the entry points, and so the recursive
+ * walks re-check nested nodes — a v3 schema can sit inside a v4 object, and an
+ * ungated recursion would document it wrong instead of refusing it.
+ */
+function warnIfZod3(schema: unknown, warnings: string[], label: string): boolean {
+  if (schema && typeof schema === 'object' && isZod3Schema(schema as ZodLike)) {
+    warnings.push(`${label}: skipped — ${ZOD3_UNSUPPORTED_MESSAGE}`)
+    return true
+  }
+  return false
+}
+
 function readObjectSchema(schema: unknown, warnings: string[], label: string, io: SchemaIo): ObjectSchemaDetails | undefined {
   if (!schema) {
+    return undefined
+  }
+
+  if (warnIfZod3(schema, warnings, label)) {
     return undefined
   }
 
@@ -361,6 +381,12 @@ function readObjectSchema(schema: unknown, warnings: string[], label: string, io
 }
 
 function readObjectSchemaDetails(schema: ZodLike, warnings: string[], label: string, io: SchemaIo): ObjectSchemaDetails | undefined {
+  // Recursion can surface a v3 node a wrapper was hiding (`z.optional(v3Obj)`
+  // passes the entry gate — the wrapper is v4).
+  if (warnIfZod3(schema, warnings, label)) {
+    return undefined
+  }
+
   if (typeOf(schema) !== 'object') {
     const nested = unwrap(schema, io)
     return nested ? readObjectSchemaDetails(nested, warnings, label, io) : undefined
@@ -391,6 +417,10 @@ function readObjectSchemaDetails(schema: ZodLike, warnings: string[], label: str
 }
 
 function toOpenApiSchema(schema: unknown, warnings: string[], label: string, io: SchemaIo): OpenApiSchemaObject | undefined {
+  if (warnIfZod3(schema, warnings, label)) {
+    return undefined
+  }
+
   if (!isZodSchema(schema)) {
     warnings.push(`${label}: skipped because schema is not a supported Zod schema.`)
     return undefined
@@ -455,8 +485,8 @@ function toOpenApiSchema(schema: unknown, warnings: string[], label: string, io:
     case 'transform':
       warnings.push(`${label}: transform schemas are documented as generic objects.`)
       return { type: 'object' }
-    case 'union':
-    case 'discriminatedunion': {
+    // `z.discriminatedUnion()` produces this same node.
+    case 'union': {
       const options = (def.options as unknown[]) ?? []
       const oneOf = options
         .map((option, index) => toOpenApiSchema(option, warnings, `${label}.option${index}`, io))
@@ -470,21 +500,26 @@ function toOpenApiSchema(schema: unknown, warnings: string[], label: string, io:
       return allOf.length > 0 ? { allOf } : undefined
     }
     case 'record': {
-      const valueType = schemaAt(def, 'valueType')
+      const valueType = recordValueType(def)
       return {
         type: 'object',
         additionalProperties: toOpenApiSchema(valueType, warnings, `${label}.value`, io) ?? true,
       }
     }
+    // `z.nativeEnum()` produces this same node, so the values may be numbers.
     case 'enum': {
-      const values = enumValues(def)
-      return values.length > 0 ? { type: 'string', enum: values } : { type: 'string' }
-    }
-    case 'nativeenum': {
-      const enumObject = def.values as Record<string, string | number> | undefined
-      const values = enumObject ? Array.from(new Set(Object.values(enumObject).filter((value) => typeof value === 'string' || typeof value === 'number'))) : []
-      const primitiveType = values.some((value) => typeof value === 'number') ? 'number' : 'string'
-      return values.length > 0 ? { type: primitiveType, enum: values } : { type: primitiveType }
+      const values = enumValues(schema)
+      if (values.length === 0) {
+        // An empty enum accepts nothing; OpenAPI has no `never`, so a bare
+        // string is the least-wrong fallback (the CLI renders `never`).
+        return { type: 'string' }
+      }
+      const hasNumber = values.some((value) => typeof value === 'number')
+      const hasString = values.some((value) => typeof value === 'string')
+      if (hasNumber && hasString) {
+        return { type: ['string', 'number'], enum: values }
+      }
+      return { type: hasNumber ? 'number' : 'string', enum: values }
     }
     case 'tuple': {
       const items = ((def.items as unknown[]) ?? [])
@@ -608,7 +643,7 @@ function unwrap(schema: ZodLike, io: SchemaIo): ZodLike | undefined {
   const def = schema._def ?? {}
   const typeName = typeOf(schema)
 
-  if (typeName === 'pipe' || typeName === 'pipeline') {
+  if (typeName === 'pipe') {
     return pipeSide(def, io)
   }
 
@@ -638,8 +673,7 @@ function isOptional(schema: ZodLike, io: SchemaIo): boolean {
     // would document an omission the other stage refuses. Still an
     // approximation in the other direction: a transforming stage can supply a
     // value the next stage accepts, which this reports as required.
-    case 'pipe':
-    case 'pipeline': {
+    case 'pipe': {
       const { from, to } = pipeSides(schema._def ?? {})
       if (!from) {
         return false
@@ -679,7 +713,15 @@ function isRequestBodyRequired(schema: unknown): boolean {
     return true
   }
 
-  return !schema.safeParse!({}).success
+  // `safeParse` is supposed to return failures, but a malformed schema can
+  // still throw — zod 4 throws outright when an object's property is not a
+  // schema it recognizes (a nested v3 node, for one). A body whose schema
+  // cannot even run against `{}` is best documented as required.
+  try {
+    return !schema.safeParse!({}).success
+  } catch {
+    return true
+  }
 }
 
 async function writeFileSafe(relativePath: string, contents: string, options: WriterOptions = {}): Promise<string> {

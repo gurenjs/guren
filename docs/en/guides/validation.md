@@ -2,6 +2,8 @@
 
 Guren's primary validation path is schema-first. Use Zod-compatible schemas in controllers, route definitions, or middleware so request parsing and type inference stay in one place. A legacy `FormRequest` compatibility layer still exists for migrations.
 
+> **Supported Zod version:** the zod 4 API only. Runtime validation duck-types any schema with `safeParse`, but the tools that read schemas structurally — `guren codegen`, OpenAPI generation, `guren context` — refuse schemas authored with the zod v3 API (the old `zod@3` package or the `zod/v3` subpath) and say so with a warning. Author schemas with `import { z } from 'zod'`.
+
 ## Quick Start
 
 Use controller validation helpers for the mainline path:

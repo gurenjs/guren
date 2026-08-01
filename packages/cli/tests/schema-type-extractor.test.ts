@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, spyOn } from 'bun:test'
 import { z } from 'zod'
 import * as z3 from 'zod/v3'
 import { schemaToTypeString } from '../src/schema-type-extractor'
@@ -123,11 +123,13 @@ describe('schemaToTypeString', () => {
 
     // `zodToType` and `isOptional` walk separately, so a wrapper added to one
     // unwrap list and not the other silently makes an optional field required.
+    // (zod 4's `.brand()` adds no runtime node, so it is transparent by
+    // construction rather than by membership.)
     it('looks through the same wrappers when deciding presence as when reading the type', () => {
       for (const schema of [
         z.object({ a: z.string().optional().readonly() }),
         z.object({ a: z.string().optional().catch('x') }),
-        z3.object({ a: z3.string().optional().brand<'Tagged'>() }),
+        z.object({ a: z.string().optional().brand<'Tagged'>() }),
       ]) {
         expect(input(schema)).toBe('{ a?: string }')
         expect(output(schema)).toBe('{ a?: string }')
@@ -144,26 +146,31 @@ describe('schemaToTypeString', () => {
     })
   })
 
-  // Apps pin their own Zod, so both majors have to be walked. v3 names things
-  // differently in ways that are easy to miss — `ZodPipeline` normalizes to
-  // `pipeline`, not `pipe`, and an array's element lives in `_def.type`.
-  describe('zod 3', () => {
-    it('renders both sides of a pipeline', () => {
-      const schema = z3.string().pipe(z3.number())
+  // The zod 3 API is refused, not mis-rendered: on a v3 node `_def.type`
+  // holds a nested schema where v4 keeps the type name, so walking it with
+  // v4 reads produces silently wrong output. `zod/v3` ships inside zod 4
+  // itself, so this arrives from apps that declare only zod 4.
+  describe('zod 3 refusal', () => {
+    // One test, deliberately: the warning fires once per process, so split
+    // tests would be coupled by execution order. The nested case runs first
+    // because it is the one that regresses silently — a v3 node inside a v4
+    // object passes the entry gate, and before the recursion re-checked it
+    // rendered as `unknown` with no warning at all.
+    it('refuses v3 at entry and nested, warning once per process', () => {
+      const warn = spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const rendered = input(z.object({ legacy: z3.string() as never, ok: z.number() }))
+        expect(rendered).toBe('{ legacy: unknown; ok: number }')
+        expect(warn).toHaveBeenCalledTimes(1)
+        expect(warn.mock.calls[0]?.[0]).toContain('zod v3 API')
 
-      expect(input(schema)).toBe('string')
-      expect(output(schema)).toBe('number')
-    })
-
-    it('renders arrays, coercion and optionality', () => {
-      const schema = z3.object({
-        tags: z3.array(z3.string()),
-        publishedAt: z3.coerce.date(),
-        page: z3.coerce.number().default(1),
-      })
-
-      expect(input(schema)).toBe('{ tags: string[]; publishedAt: string; page?: number | string }')
-      expect(output(schema)).toBe('{ tags: string[]; publishedAt: Date; page: number }')
+        expect(input(z3.string().pipe(z3.number()))).toBeUndefined()
+        expect(output(z3.object({ tags: z3.array(z3.string()) }))).toBeUndefined()
+        expect(input(z3.coerce.number().default(1))).toBeUndefined()
+        expect(warn).toHaveBeenCalledTimes(1)
+      } finally {
+        warn.mockRestore()
+      }
     })
   })
 })
@@ -173,19 +180,16 @@ describe('degenerate schemas', () => {
   // string, which is not valid TypeScript wherever the result is spliced in.
   it('renders an empty enum as never', () => {
     expect(schemaToTypeString(z.enum([]), { io: 'output' })).toBe('never')
-    expect(schemaToTypeString(z3.enum([] as unknown as [string]), { io: 'output' })).toBe('never')
   })
 
   // `JSON.stringify(undefined)` returns undefined rather than a string, so
   // rendering literal values through it alone dropped this to an empty string.
   it('renders a literal undefined as the undefined type', () => {
-    expect(schemaToTypeString(z3.literal(undefined), { io: 'output' })).toBe('undefined')
+    expect(schemaToTypeString(z.literal(undefined), { io: 'output' })).toBe('undefined')
   })
 
-  it('still renders a record value type on both majors', () => {
+  it('renders a record value type', () => {
     expect(schemaToTypeString(z.record(z.string(), z.number()), { io: 'output' }))
-      .toBe('Record<string, number>')
-    expect(schemaToTypeString(z3.record(z3.number()), { io: 'output' }))
       .toBe('Record<string, number>')
   })
 })

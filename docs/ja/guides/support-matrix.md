@@ -17,6 +17,12 @@
 | MySQL      | 8.x       | サポート（`createMySqlDatabase` 経由） |
 | Aurora Serverless v2（Data API） | PostgreSQL 14+ | サポート（`createAwsDataApiDatabase` 経由） |
 
+## ライブラリ
+
+| ライブラリ | バージョン | ステータス |
+|-----------|-----------|-----------|
+| Zod       | 4.x(zod 4 API) | サポート。zod v3 API(`zod@3` または `zod/v3` サブパス)で書かれたスキーマは、codegen・OpenAPI 生成・`guren context` が警告付きで拒否します — [バリデーション](./validation.md) を参照 |
+
 ## オプションサービス
 
 | サービス | バージョン | 必須 | 用途 |

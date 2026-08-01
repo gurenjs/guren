@@ -2,6 +2,8 @@
 
 Guren のバリデーションは schema-first が基本です。Zod 互換スキーマをコントローラー、ルートコントラクト、ミドルウェアで使い回し、必要な場合だけ legacy な `FormRequest` 互換レイヤーを使います。
 
+> **サポートする Zod バージョン:** zod 4 API のみです。ランタイムのバリデーション自体は `safeParse` を持つ任意のスキーマを受け付けますが、スキーマを構造的に読むツール — `guren codegen`、OpenAPI 生成、`guren context` — は zod v3 API(旧 `zod@3` パッケージおよび `zod/v3` サブパス)で書かれたスキーマを警告付きで拒否します。スキーマは `import { z } from 'zod'` で書いてください。
+
 ## クイックスタート
 
 推奨パターンはコントローラーの validation helper を使う方法です。

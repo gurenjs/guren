@@ -217,7 +217,7 @@ const userId = this.ctx.req.param('userId')
 
 ## Route Contracts
 
-Pass an options object as the second argument to attach Zod schemas and metadata to a route. The framework uses these schemas for request validation, codegen, and OpenAPI document generation.
+Pass an options object as the second argument to attach Zod schemas and metadata to a route. The framework uses these schemas for request validation, codegen, and OpenAPI document generation. Write them with the zod 4 API (`import { z } from 'zod'`) — schemas authored with the zod v3 API are refused by the structural tools with a warning (see [Validation](./validation.md)).
 
 ```ts
 import { z } from 'zod'

@@ -17,6 +17,12 @@
 | MySQL      | 8.x      | Supported (via `createMySqlDatabase`) |
 | Aurora Serverless v2 (Data API) | PostgreSQL 14+ | Supported (via `createAwsDataApiDatabase`) |
 
+## Libraries
+
+| Library | Versions | Status |
+|---------|----------|--------|
+| Zod     | 4.x (zod 4 API) | Supported. Schemas written with the zod v3 API (`zod@3` or the `zod/v3` subpath) are refused with a warning by codegen, OpenAPI generation, and `guren context` — see [Validation](./validation.md) |
+
 ## Optional Services
 
 | Service | Versions | Required | Purpose |
