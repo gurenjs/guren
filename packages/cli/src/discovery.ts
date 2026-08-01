@@ -137,9 +137,12 @@ export async function listModuleNames(appRoot: string): Promise<string[]> {
  * the `discover*Files` functions below, `scanDocs`, and the entity
  * context's db-artifact scans.
  */
-export async function listAppRoots(
-  appRoot: string,
-): Promise<Array<{ module: string | null; dir: string }>> {
+export interface AppRoot {
+  module: string | null
+  dir: string
+}
+
+export async function listAppRoots(appRoot: string): Promise<AppRoot[]> {
   const names = await listModuleNames(appRoot)
   return [
     { module: null, dir: appRoot },
@@ -156,10 +159,13 @@ export async function listAppRoots(
  * Test files are excluded: components are frequently tested by a co-located
  * `<Name>.test.ts` sibling, and those files are tests, not components of the
  * kind each `discover*Files` function reports.
+ *
+ * `roots` overrides the fan-out for callers that have already narrowed it to
+ * one app root.
  */
-async function discoverDir(appRoot: string, subDir: string): Promise<string[]> {
-  const roots = await listAppRoots(appRoot)
-  const groups = await Promise.all(roots.map((root) => collectFiles(resolve(root.dir, subDir))))
+async function discoverDir(appRoot: string, subDir: string, roots?: AppRoot[]): Promise<string[]> {
+  const scanned = roots ?? (await listAppRoots(appRoot))
+  const groups = await Promise.all(scanned.map((root) => collectFiles(resolve(root.dir, subDir))))
   return groups.flat().filter((file) => !TEST_FILE_PATTERN.test(file))
 }
 
@@ -327,6 +333,34 @@ export type DbArtifactKind = keyof typeof DB_ARTIFACT_DIRS
 export function dbArtifactPattern(entity: string, kind: DbArtifactKind): RegExp {
   const forms = [...new Set([entity, `${entity}s`, collectionName(entity)])]
   return new RegExp(`(?:^|_)(?:${forms.map(escapeRegExp).join('|')})${kind}\\.`, 'i')
+}
+
+/**
+ * Every factory (or seeder) file in the project, from the app root and each
+ * module — the listing half of "which artifacts belong to this entity?",
+ * with {@link dbArtifactPattern} as the matching half. Shared so that
+ * `guren context <Entity>` and `guren doctor --next` cannot drift into
+ * disagreeing about whether an entity already has one.
+ *
+ * `roots` narrows the fan-out for a caller that has already picked one.
+ */
+export function discoverDbArtifactFiles(
+  appRoot: string,
+  kind: DbArtifactKind,
+  roots?: AppRoot[],
+): Promise<string[]> {
+  return discoverDir(appRoot, DB_ARTIFACT_DIRS[kind], roots)
+}
+
+/**
+ * The ` --module <name>` suffix a suggested `make:*` command needs so that it
+ * scaffolds beside `filePath` rather than at the project root — empty for a
+ * root-level file. One home for the leading space, which is load-bearing at
+ * every call site and invisible at all of them.
+ */
+export function moduleFlagFor(cwd: string, filePath: string): string {
+  const moduleName = moduleNameFor(cwd, filePath)
+  return moduleName ? ` --module ${moduleName}` : ''
 }
 
 /**

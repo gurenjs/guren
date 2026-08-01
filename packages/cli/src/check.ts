@@ -11,6 +11,7 @@ import {
   classNameFromPath,
   toPosixRelative,
   listModuleNames,
+  moduleFlagFor,
   moduleNameFor,
   formatTruncatedList,
 } from './discovery'
@@ -163,9 +164,8 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // 4. Check missing test files for controllers
     for (const filePath of controllerFiles) {
       const name = classNameFromPath(filePath)
-      const moduleName = moduleNameFor(cwd, filePath)
       const hasTest = await hasControllerTest(cwd, filePath)
-      const moduleFlag = moduleName ? ` --module ${moduleName}` : ''
+      const moduleFlag = moduleFlagFor(cwd, filePath)
       const message = hasTest
         ? `Test file found for ${name}.`
         : describeControllerTestMiss(cwd, filePath)

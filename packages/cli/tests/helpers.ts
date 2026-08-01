@@ -99,6 +99,18 @@ export const users = sqliteTable('users', {
 })
 `
 
+/** Materialize a fixture tree from `relative path → contents` under `dir`. */
+export async function writeWorkspaceFiles(
+  dir: string,
+  files: Record<string, string>,
+): Promise<void> {
+  for (const [relPath, contents] of Object.entries(files)) {
+    const filePath = join(dir, relPath)
+    await mkdir(dirname(filePath), { recursive: true })
+    await writeFile(filePath, contents, 'utf8')
+  }
+}
+
 export async function createTempWorkspace(prefix: string): Promise<TempWorkspace> {
   const dir = await mkdtemp(join(tmpdir(), prefix))
   const originalCwd = process.cwd()
