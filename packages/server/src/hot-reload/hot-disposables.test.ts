@@ -46,6 +46,53 @@ describe('describeCallerFile', () => {
     expect(describeCallerFile(bare)).toBe('/Users/me/My Projects/app/api.ts')
   })
 
+  test('should keep a path that contains parentheses intact', () => {
+    // Same failure as the spaces above, and ordinary on macOS too — "app (old)",
+    // "Projects (2)". A named frame is bounded by its own trailing `)`, not by
+    // the first one it happens to contain: reading it the other way left every
+    // owner under such a directory unidentified, so its timer was never
+    // reclaimed and one leaked per reload.
+    const bare = 'Error\n    at f (/app/dist/index.js:1:1)\n    at /Users/me/Projects (old)/app/config/cache.ts:3:18'
+    const named =
+      'Error\n    at f (/app/dist/index.js:1:1)\n    at makeStore (/Users/me/Projects (old)/app/config/cache.ts:3:18)'
+
+    expect(describeCallerFile(bare)).toBe('/Users/me/Projects (old)/app/config/cache.ts')
+    expect(describeCallerFile(named)).toBe('/Users/me/Projects (old)/app/config/cache.ts')
+  })
+
+  test('should keep a path whose function name contains parentheses intact', () => {
+    // The other half of the ambiguity, and not hypothetical: a computed method
+    // name puts parens in the *name* field, and both JSC and V8 emit it as
+    // `at foo(bar) (/app/x.ts:1:2)` — the exact shapes below came from running
+    // `({ ['foo(bar)']: () => new Error().stack })['foo(bar)']()`. Reading the
+    // leftmost paren as the path's would key this owner to `bar) (/app/…`.
+    const method = 'Error\n    at f (/app/dist/index.js:1:1)\n    at foo(bar) (/app/config/cache.ts:2:33)'
+    const staticMethod = 'Error\n    at f (/app/dist/index.js:1:1)\n    at make(x) (/app/config/cache.ts:6:47)'
+
+    expect(describeCallerFile(method)).toBe('/app/config/cache.ts')
+    expect(describeCallerFile(staticMethod)).toBe('/app/config/cache.ts')
+  })
+
+  test('should step over a frame whose location leaves no path in front of it', () => {
+    // Degenerate — no engine emits these — but a parse that hands back anything
+    // non-empty for them ends this search and becomes a key, and two unrelated
+    // files landing on one key means the second owner stops the first's live
+    // timer. The twin in `@guren/orm` can afford that (it reads one frame and
+    // stops); this walks, so each must be stepped over rather than merely
+    // rejected. Pinned so that carrying the twin's scan over cannot quietly
+    // reintroduce it.
+    const stepsOver = (frame: string) =>
+      describeCallerFile(
+        ['Error', '    at new Base (/app/dist/index.js:120:15)', frame, '    at /app/routes/api.ts:31:26'].join('\n'),
+      )
+
+    expect(stepsOver('    at fn (:1:2)')).toBe('/app/routes/api.ts')
+    expect(stepsOver('    at fn ((:1:2)')).toBe('/app/routes/api.ts')
+    expect(stepsOver('    at fn ()')).toBe('/app/routes/api.ts')
+    // Ends in `)` while opening no group at all, so nothing bounds a path.
+    expect(stepsOver('    at /app/x.ts:1:2)')).toBe('/app/routes/api.ts')
+  })
+
   test('should step over the synthetic frame of an implicit constructor', () => {
     // A subclass with no constructor of its own gets an implicit one, which JSC
     // reports with no source location. Taking that frame keys every such owner
@@ -92,10 +139,14 @@ describe('describeCallerFile', () => {
     // quadratically before the frame was finally rejected. The padding sits
     // *after* a non-space character on purpose: a frame that is only `at` plus
     // spaces matches on the first try and never reaches the slow path.
-    const stack = `Error\n    at new Base (/app/dist/index.js:1:1)\n    at a${' '.repeat(100_000)}a`
+    const padded = (last: string) => describeCallerFile(`Error\n    at new Base (/app/dist/index.js:1:1)\n${last}`)
     const started = performance.now()
 
-    expect(describeCallerFile(stack)).toBeUndefined()
+    expect(padded(`    at a${' '.repeat(100_000)}a`)).toBeUndefined()
+    // The parenthesized shape needs its own padding: the frame above never
+    // reaches it, since it does not end in `)`.
+    expect(padded(`    at f (${'('.repeat(100_000)}x)`)).toBeUndefined()
+
     expect(performance.now() - started).toBeLessThan(1_000)
   })
 
@@ -194,6 +245,28 @@ describe('claimHotDisposable', () => {
 
       claim('replace', () => stopped.push('first'))
       claim('replace', () => stopped.push('second'))
+
+      expect(stopped).toEqual(['first'])
+    })
+  })
+
+  test('should reclaim an owner built under a directory whose name contains parens', () => {
+    // The symptom as reported, rather than the parse behind it: a named frame
+    // under `Projects (old)` left the owner unidentified, so this call no-opped
+    // and the previous evaluation's interval went on firing. The two claims use
+    // different line numbers because a reload rarely leaves the call where it
+    // was, and the key must survive that.
+    withHotRuntime(() => {
+      const stopped: string[] = []
+      const reloadAt = (line: number) =>
+        [
+          'Error',
+          '    at new BaseMemoryStore (/app/dist/index.js:120:15)',
+          `    at makeStore (/Users/me/Projects (old)/app/config/cache.ts:${line}:18)`,
+        ].join('\n')
+
+      claimHotDisposable('cache-store', reloadAt(3), 'store', () => stopped.push('first'))
+      claimHotDisposable('cache-store', reloadAt(9), 'store', () => stopped.push('second'))
 
       expect(stopped).toEqual(['first'])
     })

@@ -22,9 +22,19 @@
  * package for ~60 lines or a dependency `@guren/orm` is not allowed to take, and
  * would buy machinery neither side needs in the same shape.
  *
- * Its twin is `packages/orm/src/active-connections.ts`. The two derive an
- * owner's identity the same way, so a fix to the stack parsing in one is worth
- * carrying to the other.
+ * Its twin is `packages/orm/src/active-connections.ts`, and a fix to the stack
+ * parsing in one is worth carrying to the other — as this one has not been yet,
+ * so on a frame whose *function name* carries a paren the twin still returns the
+ * truncation described below while this returns the path. Carry it far enough to
+ * cover the frames an engine really emits, and no further. On malformed ones the
+ * twin deliberately keeps whatever its own earlier pattern returned, some of
+ * which are a path in name only. It can afford that: it reads
+ * one frame and stops. This walks the stack until a frame names a file, so any
+ * non-empty string ends the search and becomes a key — and a key two unrelated
+ * files both land on is one where the second owner stops the first's live timer,
+ * which is worse than the leak this exists to prevent. Carry the parsing across
+ * by result, not by transplant; the frames that separate the two are pinned in
+ * `should step over a frame whose location leaves no path in front of it`.
  *
  * An owner is identified by the file that built it plus a discriminator, so it
  * is replaced only by a later evaluation of that same file. Keying on the exact
@@ -119,6 +129,48 @@ function parseBareFrame(frame: string): string | undefined {
 }
 
 /**
+ * What a `at fn (…)` frame carries between its parentheses.
+ *
+ * `at <name> (<path>:1:2)` is an ambiguous grammar once you admit that both
+ * fields may contain a paren, and both do in practice: a directory named
+ * `app (old)` is ordinary on macOS, and a computed method name gives
+ * `at foo(bar) (/app/x.ts:1:2)` on JSC and V8 alike. No single opening paren is
+ * right for both, so the two are tried in the order that costs nothing.
+ *
+ * The rightmost group holding no paren at all comes first, because that is what
+ * `/\(([^()]*)\)\s*$/` — the pattern this replaces — accepted, and it is right
+ * whenever the path is paren-free. Only a frame it rejects falls through to the
+ * leftmost paren, which is the reading that keeps `/app (old)/config` whole. So
+ * the fallback can only turn a frame that named no file into one that does, and
+ * every frame the pattern already read keeps the answer it had.
+ *
+ * A frame carrying parens in *both* fields — `at f(g) (/app (old)/x.ts:1:2)` —
+ * stays ambiguous and is read wrongly. Nothing downstream catches it either,
+ * since what comes back still looks like a path; it is simply rarer than the two
+ * cases above, and no worse than the `undefined` the pattern gave it. Closing it
+ * needs the caller to require that a path name a file before it may end the
+ * walk, which is a wider change than this one.
+ */
+function parseParenthesizedFrame(frame: string): string | undefined {
+  const trimmed = frame.trimEnd()
+  if (!trimmed.endsWith(')')) return undefined
+
+  const inner = trimmed.slice(0, -1)
+
+  const paired = inner.lastIndexOf('(')
+  if (paired !== -1 && !inner.includes(')', paired + 1)) {
+    return inner.slice(paired + 1)
+  }
+
+  // A frame can end in `)` while opening no group at all — `at /app/x.ts:1:2)`.
+  // Reading the whole frame as the location would hand back `    at /app/x.ts`,
+  // a path with a stack frame's own prefix still on it.
+  const opening = inner.indexOf('(')
+
+  return opening === -1 ? undefined : inner.slice(opening + 1)
+}
+
+/**
  * The `file:line:column` a single stack frame points at, minus line and column.
  *
  * Frames come in two shapes — `at fn (/path/file.ts:1:2)` and a bare
@@ -130,7 +182,7 @@ function parseBareFrame(frame: string): string | undefined {
  * function name, so a frame without one yields nothing.
  */
 function parseFrameLocation(frame: string): string | undefined {
-  const location = frame.match(/\(([^()]*)\)\s*$/)?.[1] ?? parseBareFrame(frame)
+  const location = parseParenthesizedFrame(frame) ?? parseBareFrame(frame)
 
   if (!location || !LOCATION_SUFFIX.test(location)) {
     return undefined
