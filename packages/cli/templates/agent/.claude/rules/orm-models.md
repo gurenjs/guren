@@ -79,7 +79,7 @@ const result = await Post.paginate({ page: 1, perPage: 15, where: {...}, orderBy
 ```
 
 For Inertia/HTTP pagination links wrap it with `paginate` from `@guren/core`:
-`paginate(result, { path, query?, fragment? })` — those three fields are `PaginatorOptions`.
+`paginate(result, { path?, query?, fragment? })` — those three fields are `PaginatorOptions`.
 
 ## Relations — declaration signatures
 

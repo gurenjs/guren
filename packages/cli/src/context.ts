@@ -16,6 +16,7 @@ import {
   readIfExists,
   excludeBarrelFiles,
 } from './discovery'
+import { GUREN_API_DIGEST } from './api-digest'
 import { parseModelFile, type ModelInfo } from './model-parser'
 import { loadContextRoutes, escapeMarkdownTableCell, type ContextRoute } from './context-route'
 import { listInertiaPageIds } from './inertia-pages'
@@ -195,6 +196,9 @@ export function renderContextMarkdown(ctx: ProjectContext): string {
       lines.push('')
     }
   }
+
+  lines.push(GUREN_API_DIGEST)
+  lines.push('')
 
   return lines.join('\n')
 }
