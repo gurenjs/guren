@@ -25,6 +25,9 @@ On PostgreSQL, give every timestamp column `{ withTimezone: true }`. A
 `timestamp without time zone` stores a bare wall clock with no offset, so
 `defaultNow()` records it in the database session's zone while your app reads
 it back as UTC, and any client other than your app sees a different instant.
+Scaffolds already emit it, and `bunx guren check` warns about a column
+declared without it. That warning reads the schema statically, so it reports
+what it can see — treat silence as "nothing found", not as a guarantee.
 
 ```ts
 // config/database.ts

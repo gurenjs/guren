@@ -405,13 +405,19 @@ export async function hasAuthProvider(filePath: string): Promise<boolean> {
   }
 }
 
-export type SchemaDialect = 'sqlite' | 'pg' | 'mysql'
+import type { SchemaDialect } from './schema-parser'
+export type { SchemaDialect }
 
 /**
  * The drizzle dialect an app's `db/schema.ts` is written in. Every patcher
  * that appends columns or tables has to agree on this — `add auth` and
  * `add resource` writing different dialects into one schema is silent, since
  * drizzle's table builders accept a foreign dialect's column builders.
+ *
+ * Deliberately a whole-file content sniff, not the parser's per-table
+ * resolution: patchers call this with content they hold mid-write, and the
+ * case that matters most is a schema with no tables yet — hence the `pg`
+ * fallback below, which a parse-based answer could not produce.
  */
 export function detectSchemaDialect(content: string): SchemaDialect {
   if (content.includes('sqliteTable') || content.includes('drizzle-orm/sqlite-core')) {

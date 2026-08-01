@@ -46,6 +46,26 @@ describe('guren check exit code', () => {
     }
   })
 
+  // The timestamptz rule is a core-suite warning by design: fixing an existing
+  // column needs a migration whose USING clause is a human decision, so it
+  // informs rather than gates.
+  it('plain `check` exits 0 on an offset-less Postgres timestamp column', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-exitcode-timestamptz-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'db/schema.ts'),
+        `import { pgTable, timestamp } from 'drizzle-orm/pg-core'\nexport const posts = pgTable('posts', { createdAt: timestamp('created_at') })\n`,
+        'utf8',
+      )
+
+      const { exitCode } = await runCli(['check', '--app', workspace.dir], workspace.dir)
+      expect(exitCode).toBe(0)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('`check --arch` exits 1 when arch violations are present', async () => {
     const workspace = await createTempWorkspace('guren-cli-check-exitcode-arch-')
     try {

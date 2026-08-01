@@ -1,41 +1,61 @@
 import { resolve } from 'node:path'
 import { readFile } from 'node:fs/promises'
-import type { Expression, CallExpression, ObjectExpression, Statement } from '@babel/types'
+import type {
+  Expression,
+  CallExpression,
+  ObjectExpression,
+  ObjectProperty,
+  Statement,
+} from '@babel/types'
 import { listAppRoots } from './discovery'
 import { parseSourceFile } from './parse-cache'
 
-const TABLE_FACTORIES = new Set(['pgTable', 'sqliteTable', 'mysqlTable'])
+/**
+ * The drizzle dialect a table (or an app's `db/schema.ts`) is written in.
+ * Lives here, with the parser that resolves it per table from the declaring
+ * factory; `patch-helpers.ts` re-exports it for the writers, which answer the
+ * same question by sniffing file content instead.
+ */
+export type SchemaDialect = 'sqlite' | 'pg' | 'mysql'
+
+// A Map rather than a Record so a miss types as undefined —
+// `noUncheckedIndexedAccess` is off, and every lookup here is a miss away.
+const TABLE_FACTORIES = new Map<string, SchemaDialect>([
+  ['pgTable', 'pg'],
+  ['sqliteTable', 'sqlite'],
+  ['mysqlTable', 'mysql'],
+])
 
 /**
- * Local names the table factories are imported under — covers
- * `import { pgTable as table }` aliases. Namespace-qualified calls
- * (`p.pgTable(...)`) are matched by property name instead.
+ * Local names the table factories are imported under, mapped to the dialect
+ * each one declares — covers `import { pgTable as table }` aliases.
+ * Namespace-qualified calls (`p.pgTable(...)`) are matched by property name
+ * instead.
  */
-function collectFactoryAliases(body: Statement[]): Set<string> {
-  const aliases = new Set(TABLE_FACTORIES)
+function collectFactoryAliases(body: Statement[]): Map<string, SchemaDialect> {
+  const aliases = new Map<string, SchemaDialect>(TABLE_FACTORIES)
   for (const node of body) {
     if (node.type !== 'ImportDeclaration') continue
     for (const specifier of node.specifiers) {
-      if (
-        specifier.type === 'ImportSpecifier'
-        && specifier.imported.type === 'Identifier'
-        && TABLE_FACTORIES.has(specifier.imported.name)
-      ) {
-        aliases.add(specifier.local.name)
-      }
+      if (specifier.type !== 'ImportSpecifier' || specifier.imported.type !== 'Identifier') continue
+      const dialect = TABLE_FACTORIES.get(specifier.imported.name)
+      if (dialect) aliases.set(specifier.local.name, dialect)
     }
   }
   return aliases
 }
 
-function isTableFactoryCall(call: CallExpression, aliases: Set<string>): boolean {
+/** The dialect a table factory call declares, or undefined if it isn't one. */
+function tableFactoryDialect(
+  call: CallExpression,
+  aliases: Map<string, SchemaDialect>,
+): SchemaDialect | undefined {
   const callee = call.callee
-  if (callee.type === 'Identifier') return aliases.has(callee.name)
-  return (
-    callee.type === 'MemberExpression'
-    && callee.property.type === 'Identifier'
-    && TABLE_FACTORIES.has(callee.property.name)
-  )
+  if (callee.type === 'Identifier') return aliases.get(callee.name)
+  if (callee.type === 'MemberExpression' && callee.property.type === 'Identifier') {
+    return TABLE_FACTORIES.get(callee.property.name)
+  }
+  return undefined
 }
 
 export interface SchemaColumnReference {
@@ -46,11 +66,30 @@ export interface SchemaColumnReference {
 
 export interface SchemaColumn {
   name: string
+  /**
+   * Database column name (the builder's string argument), when present.
+   * Absent for drizzle's name-less form, where it is derived from `name`.
+   */
+  columnName?: string
   /** Drizzle column builder name, e.g. `serial`, `text`, `varchar`. */
   type?: string
   notNull: boolean
   primaryKey: boolean
   references?: SchemaColumnReference
+  /**
+   * The builder's `withTimezone` option as written: `true`, `false`, or
+   * undefined when it was omitted (or written as something other than a
+   * boolean literal). Reported as-is — deciding what an omission means is
+   * the caller's job.
+   */
+  withTimezone?: boolean
+  /**
+   * Set when the builder's options were passed as an expression rather than
+   * an inline object (`timestamp('created_at', SHARED_OPTIONS)`). None of the
+   * option fields above can be read in that case, so an absent one means
+   * "not visible", not "not set".
+   */
+  opaqueOptions?: true
 }
 
 export interface SchemaTable {
@@ -61,23 +100,30 @@ export interface SchemaTable {
   columns: SchemaColumn[]
   /** Module whose `db/schema.ts` declares the table, or null for the root schema. */
   module: string | null
+  /**
+   * Which factory declared the table. Per-table rather than per-file because
+   * drizzle's table builders accept a foreign dialect's column builders, so
+   * one `db/schema.ts` can legally mix them.
+   */
+  dialect: SchemaDialect
 }
 
 /**
  * Unwraps a column builder chain like
  * `text('title').notNull().references(() => users.id)` into the innermost
- * builder name plus the chained method calls.
+ * builder name, that builder's own call (which carries its options), and
+ * the chained method calls.
  */
 function unwrapColumnChain(
   expression: Expression,
-): { type?: string; methods: Map<string, CallExpression> } {
+): { type?: string; builder?: CallExpression; methods: Map<string, CallExpression> } {
   const methods = new Map<string, CallExpression>()
   let current: Expression = expression
 
   while (current.type === 'CallExpression') {
     const callee = current.callee
     if (callee.type === 'Identifier') {
-      return { type: callee.name, methods }
+      return { type: callee.name, builder: current, methods }
     }
     if (callee.type !== 'MemberExpression' || callee.property.type !== 'Identifier') {
       break
@@ -88,6 +134,61 @@ function unwrapColumnChain(
   }
 
   return { type: undefined, methods }
+}
+
+/** The name of an object property key, for both `{ k: v }` and `{ 'k': v }`. */
+function propertyKeyName(property: ObjectProperty): string | undefined {
+  if (property.computed) return undefined
+  if (property.key.type === 'Identifier') return property.key.name
+  if (property.key.type === 'StringLiteral') return property.key.value
+  return undefined
+}
+
+/**
+ * The first object-literal argument of a call — a table factory's column map,
+ * or a column builder's options. Found by scanning rather than indexing,
+ * since drizzle accepts both `timestamp('created_at', { … })` and the
+ * name-less `timestamp({ … })`.
+ */
+function firstObjectArgument(call: CallExpression | undefined): ObjectExpression | undefined {
+  return call?.arguments.find((arg): arg is ObjectExpression => arg.type === 'ObjectExpression')
+}
+
+/**
+ * Whether a builder's options were passed as anything other than an inline
+ * object literal — `timestamp('created_at', SHARED_OPTIONS)`. Nothing about
+ * such a call can be read statically, so an option that looks absent may
+ * simply be invisible. Callers that would otherwise conclude "not set" have
+ * to treat this as "unknown" instead.
+ */
+function hasOpaqueOptions(call: CallExpression | undefined): boolean {
+  if (!call) return false
+  return call.arguments.some(
+    (arg) => arg.type !== 'ObjectExpression' && arg.type !== 'StringLiteral',
+  )
+}
+
+/**
+ * A boolean option off the builder's own options object, e.g. the
+ * `withTimezone` in `timestamp('created_at', { withTimezone: true })`.
+ * Undefined when absent or not written as a boolean literal. A `satisfies`
+ * or `as const` wrapper is unwrapped first — `withTimezone: true as const`
+ * is the same `true` to Postgres, and reading it as "unset" would be a
+ * false alarm.
+ */
+function booleanOption(builder: CallExpression | undefined, option: string): boolean | undefined {
+  const options = firstObjectArgument(builder)
+  if (!options) return undefined
+
+  for (const prop of options.properties) {
+    if (prop.type !== 'ObjectProperty' || propertyKeyName(prop) !== option) continue
+    let value = prop.value
+    while (value.type === 'TSAsExpression' || value.type === 'TSSatisfiesExpression') {
+      value = value.expression
+    }
+    return value.type === 'BooleanLiteral' ? value.value : undefined
+  }
+  return undefined
 }
 
 /**
@@ -129,9 +230,7 @@ function columnsFromObject(columnsArg: ObjectExpression): SchemaColumn[] {
   for (const prop of columnsArg.properties) {
     if (prop.type !== 'ObjectProperty') continue
 
-    let name: string | undefined
-    if (prop.key.type === 'Identifier') name = prop.key.name
-    else if (prop.key.type === 'StringLiteral') name = prop.key.value
+    const name = propertyKeyName(prop)
     if (!name) continue
 
     if (prop.value.type !== 'CallExpression') {
@@ -139,13 +238,17 @@ function columnsFromObject(columnsArg: ObjectExpression): SchemaColumn[] {
       continue
     }
 
-    const { type, methods } = unwrapColumnChain(prop.value)
+    const { type, builder, methods } = unwrapColumnChain(prop.value)
+    const nameArg = builder?.arguments[0]
     columns.push({
       name,
+      columnName: nameArg?.type === 'StringLiteral' ? nameArg.value : undefined,
       type: type && methods.has('array') ? `${type}[]` : type,
       notNull: methods.has('notNull'),
       primaryKey: methods.has('primaryKey'),
       references: extractReference(methods.get('references')),
+      withTimezone: booleanOption(builder, 'withTimezone'),
+      ...(hasOpaqueOptions(builder) ? { opaqueOptions: true as const } : {}),
     })
   }
   return columns
@@ -155,6 +258,15 @@ function columnsFromObject(columnsArg: ObjectExpression): SchemaColumn[] {
  * Known limitation: the table factory's third argument (composite primary
  * keys / foreign keys declared via `(table) => [...]`) is not parsed —
  * only column-level `.primaryKey()` and `.references()` chains surface.
+ *
+ * Known limitation: nothing here resolves an identifier back to what it
+ * names, so several legal spellings go unreported rather than misreported —
+ * columns introduced by a spread (`...timestamps`, the shared-column idiom),
+ * column builders reached through an alias (`timestamp as ts`) or a namespace
+ * (`p.timestamp(...)`), and tables declared in a file the schema merely
+ * re-exports. Every consumer treats an absent column as one with nothing to
+ * say, which is indistinguishable from a clean one — a schema written any of
+ * those ways is under-reported, not verified.
  */
 async function parseSchemaFile(schemaPath: string, module: string | null): Promise<SchemaTable[]> {
   let source: string
@@ -182,14 +294,13 @@ async function parseSchemaFile(schemaPath: string, module: string | null): Promi
     for (const declarator of declaration.declarations) {
       if (declarator.id.type !== 'Identifier') continue
       if (declarator.init?.type !== 'CallExpression') continue
-      if (!isTableFactoryCall(declarator.init, aliases)) continue
+      const dialect = tableFactoryDialect(declarator.init, aliases)
+      if (!dialect) continue
 
       const nameArg = declarator.init.arguments[0]
       const tableName = nameArg?.type === 'StringLiteral' ? nameArg.value : undefined
 
-      const columnsArg = declarator.init.arguments.find(
-        (arg): arg is ObjectExpression => arg.type === 'ObjectExpression',
-      )
+      const columnsArg = firstObjectArgument(declarator.init)
       if (!columnsArg) continue
 
       tables.push({
@@ -197,6 +308,7 @@ async function parseSchemaFile(schemaPath: string, module: string | null): Promi
         tableName,
         columns: columnsFromObject(columnsArg),
         module,
+        dialect,
       })
     }
   }
@@ -216,6 +328,16 @@ export async function parseSchemaTables(cwd: string): Promise<SchemaTable[]> {
     roots.map((root) => parseSchemaFile(resolve(root.dir, 'db/schema.ts'), root.module)),
   )
   return groups.flat()
+}
+
+/**
+ * The project-relative `db/schema.ts` a module's tables are declared in, or
+ * the root schema for `null`. The path every consumer reports back to the
+ * user, kept next to `parseSchemaTables` — which is what decides that a
+ * module's tables live under `modules/<name>/`.
+ */
+export function schemaPathFor(module: string | null | undefined): string {
+  return module ? `modules/${module}/db/schema.ts` : 'db/schema.ts'
 }
 
 /**
