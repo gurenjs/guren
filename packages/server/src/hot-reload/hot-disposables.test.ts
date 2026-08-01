@@ -85,6 +85,20 @@ describe('describeCallerFile', () => {
     expect(describeCallerFile('Error\n    at new BaseMemoryStore (/app/dist/index.js:120:15)')).toBeUndefined()
   })
 
+  test('should not take time superlinear in the length of a frame', () => {
+    // The bare shape previously let a lazy body and a greedy whitespace tail
+    // claim the same spaces. A run of them followed by anything that is not a
+    // location made the two re-divide the run at every offset, so the cost grew
+    // quadratically before the frame was finally rejected. The padding sits
+    // *after* a non-space character on purpose: a frame that is only `at` plus
+    // spaces matches on the first try and never reaches the slow path.
+    const stack = `Error\n    at new Base (/app/dist/index.js:1:1)\n    at a${' '.repeat(100_000)}a`
+    const started = performance.now()
+
+    expect(describeCallerFile(stack)).toBeUndefined()
+    expect(performance.now() - started).toBeLessThan(1_000)
+  })
+
   test('should parse a stack this runtime actually produced', () => {
     // The fixtures above are hand-written, so they would keep passing if the
     // engine changed its stack format and every real key silently became

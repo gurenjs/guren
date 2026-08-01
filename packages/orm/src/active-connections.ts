@@ -78,26 +78,123 @@ function isHotReloadRuntime(): boolean {
   return typeof process !== 'undefined' && Array.isArray(process.execArgv) && process.execArgv.includes('--hot')
 }
 
+/** Both match one character, so neither can backtrack the way `\s*` in a pattern can. */
+const WHITESPACE = /\s/
+const LINE_TERMINATOR = /[\n\r\u2028\u2029]/
+
+function isDigitAt(text: string, index: number): boolean {
+  const code = text.charCodeAt(index)
+  return code >= 48 && code <= 57
+}
+
+/**
+ * Where a frame's trailing `:line[:column]` may begin, in the order the lazy
+ * `(.+?):\d+(?::\d+)?` these replace settled on them: the `:line:column` split
+ * first, because a lazy path stops at the earliest suffix that satisfies the
+ * rest, then the `:column`-only split it backtracked to when the shorter path
+ * came out empty.
+ *
+ * Walking the digits back from `end` finds both in one pass. The pattern
+ * instead re-tested the suffix at every prefix length, which is what made it
+ * quadratic in the length of a frame.
+ */
+function locationSplits(frame: string, end: number): number[] {
+  let cursor = end
+  while (cursor > 0 && isDigitAt(frame, cursor - 1)) cursor -= 1
+  if (cursor === end || cursor === 0 || frame[cursor - 1] !== ':') return []
+
+  const lastColon = cursor - 1
+  cursor = lastColon
+  while (cursor > 0 && isDigitAt(frame, cursor - 1)) cursor -= 1
+
+  return cursor < lastColon && cursor > 0 && frame[cursor - 1] === ':' ? [cursor - 1, lastColon] : [lastColon]
+}
+
+/** The path a split leaves in front of it, or undefined when it leaves none. */
+function pathBefore(frame: string, from: number, splits: number[]): string | undefined {
+  for (const split of splits) {
+    if (split > from) return frame.slice(from, split)
+  }
+  return undefined
+}
+
+/**
+ * Where the last line terminator before `before` ends, or 0 when there is none.
+ *
+ * A path could never span one — the patterns spelled it `.`, which stops at
+ * every line break — so this is the earliest a path ending at `before` may
+ * start.
+ */
+function afterLastTerminator(frame: string, before: number): number {
+  let cursor = before
+  while (cursor > 0 && !LINE_TERMINATOR.test(frame[cursor - 1])) cursor -= 1
+  return cursor
+}
+
 /**
  * The path a single stack frame points at, without its line and column.
  *
- * The two shapes a frame comes in are matched separately rather than by one
- * pattern loose enough to cover both. `at fn (/path/file.ts:1:2)` is tried
- * first, because its parentheses bound the path; a pattern that also had to
- * accept the bare `at /path/file.ts:1:2` could only bound it by whitespace, and
- * would truncate `/Users/me/My Projects/app/config` to `Projects/app/config`.
+ * The two shapes a frame comes in are read separately rather than by one rule
+ * loose enough to cover both. `at fn (/path/file.ts:1:2)` is tried first,
+ * because its parentheses bound the path; a rule that also had to accept the
+ * bare `at /path/file.ts:1:2` could only bound it by whitespace, and would
+ * truncate `/Users/me/My Projects/app/config` to `Projects/app/config`.
  * Nothing constrains what the path itself may contain — spaces and parentheses
  * are both ordinary in a macOS directory name, and excluding either is how the
  * truncation happened in the first place.
  *
  * Both shapes require a trailing `:line`, so frames that name no location at
  * all — `at native`, `at <anonymous>` — are rejected instead of being read as a
- * path. Both path groups are lazy for the same reason both are anchored: a
- * greedy one would swallow the line number and leave the column to satisfy
- * `:\d+`, returning `/path/file.ts:1`.
+ * path.
  */
 function parseFrameLocation(frame: string | undefined): string | undefined {
-  return frame?.match(/\((.+?):\d+(?::\d+)?\)\s*$/)?.[1] ?? frame?.match(/^\s*at\s+(.+?):\d+(?::\d+)?\s*$/)?.[1]
+  if (frame === undefined) return undefined
+
+  // `trimEnd` drops exactly the characters `\s` matches, so this is where the
+  // patterns' trailing `\s*$` would have started.
+  const end = frame.trimEnd().length
+
+  // `at fn (/path/file.ts:1:2)`. The opening paren is the frame's *leftmost*
+  // usable one, not the one nearest the location: `(` is ordinary in a
+  // directory name, and matching leftmost is what keeps `/app (old)/config`
+  // whole. Usable means the path it opens reaches the location without
+  // crossing a line break, which is why a split can fall to a later paren.
+  if (end > 0 && frame[end - 1] === ')') {
+    const splits = locationSplits(frame, end - 1)
+
+    // Both splits sit inside one `:line:column` run, which is colons and
+    // digits, so no line break can fall between them — the earliest paren a
+    // path may open at is therefore the same whichever split is taken.
+    const open = splits.length === 0 ? -1 : frame.indexOf('(', afterLastTerminator(frame, splits[0]))
+    const path = open === -1 ? undefined : pathBefore(frame, open + 1, splits)
+
+    if (path !== undefined) return path
+  }
+
+  // `at /path/file.ts:1:2`, where only the trailing location bounds the path.
+  let cursor = 0
+  while (cursor < end && WHITESPACE.test(frame[cursor])) cursor += 1
+  if (!frame.startsWith('at', cursor)) return undefined
+
+  const afterAt = cursor + 2
+  let pathStart = afterAt
+  while (pathStart < end && WHITESPACE.test(frame[pathStart])) pathStart += 1
+  if (pathStart === afterAt) return undefined
+
+  const splits = locationSplits(frame, end)
+  if (splits.length === 0) return undefined
+
+  // `at` is followed by a greedy run of whitespace, so the path starts as late
+  // as that run allows while still leaving itself a character to match.
+  pathStart = Math.min(pathStart, splits[splits.length - 1] - 1)
+  if (pathStart <= afterAt) return undefined
+
+  // Nothing here can start the path any later, so a line break inside it means
+  // there was never a match — unlike the parenthesized shape, whose opening
+  // paren can move.
+  const path = pathBefore(frame, pathStart, splits)
+
+  return path !== undefined && !LINE_TERMINATOR.test(path) ? path : undefined
 }
 
 /**

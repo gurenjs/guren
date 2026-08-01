@@ -71,6 +71,82 @@ Everyone can read.
       await workspace.cleanup()
     }
   })
+
+  it('drops an HTML comment standing in front of the H1, however many precede it', async () => {
+    const workspace = await createTempWorkspace('guren-cli-docs-viewer-comment-')
+    try {
+      const dir = workspace.dir
+      await mkdir(join(dir, 'docs/adr'), { recursive: true })
+      await writeFile(join(dir, 'package.json'), '{}', 'utf8')
+      await writeFile(
+        join(dir, 'docs/adr/0001-posts.md'),
+        `---\ntype: adr\nstatus: stable\n---\n\n<!-- one --> <!-- two -->\n# Posts are public\n\nEveryone can read.\n`,
+        'utf8',
+      )
+
+      const data = await buildDocsViewerData(dir)
+
+      // The H1 stands behind two comments, so it is reachable only through the
+      // optional comment prefix — and only by looking past the first `-->`,
+      // which is the step that decides where the dropped span ends.
+      const [doc] = data.docs
+      expect(doc.html).not.toContain('Posts are public')
+      expect(doc.html).toContain('Everyone can read.')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('stays linear on a body that is one long line of comment closers', async () => {
+    const workspace = await createTempWorkspace('guren-cli-docs-viewer-closers-')
+    try {
+      const dir = workspace.dir
+      await mkdir(join(dir, 'docs/adr'), { recursive: true })
+      await writeFile(join(dir, 'package.json'), '{}', 'utf8')
+      // Every `-->` here has a `#` behind it, and none of them ends a line.
+      // Resolving where each one's heading ends re-walks the rest of the line,
+      // so doing that per closer is quadratic — 13 seconds at this size, well
+      // past the pattern this replaced. The heading is on the same line as the
+      // closers, so nothing is dropped and only the cost is under test.
+      await writeFile(
+        join(dir, 'docs/adr/0001-posts.md'),
+        `---\ntype: adr\nstatus: stable\n---\n\n${'--> # '.repeat(16_000)}\n`,
+        'utf8',
+      )
+
+      const started = performance.now()
+      await buildDocsViewerData(dir)
+
+      expect(performance.now() - started).toBeLessThan(2_000)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('leaves a body that opens comments it never closes untouched', async () => {
+    const workspace = await createTempWorkspace('guren-cli-docs-viewer-unclosed-')
+    try {
+      const dir = workspace.dir
+      await mkdir(join(dir, 'docs/adr'), { recursive: true })
+      await writeFile(join(dir, 'package.json'), '{}', 'utf8')
+      // Every one of these line starts used to re-scan the rest of the file
+      // looking for a `-->` that is not there, which is the quadratic case.
+      const noise = '<!-- generated, do not edit\n'.repeat(4_000)
+      await writeFile(
+        join(dir, 'docs/adr/0001-posts.md'),
+        `---\ntype: adr\nstatus: stable\n---\n\n${noise}\nEveryone can read.\n`,
+        'utf8',
+      )
+
+      const data = await buildDocsViewerData(dir)
+
+      // Nothing to drop: no heading is reachable behind those openers, so the
+      // prose after them has to survive rather than be swallowed as a heading.
+      expect(data.docs[0].html).toContain('Everyone can read.')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
 })
 
 describe('buildDocsViewerData link resolution', () => {

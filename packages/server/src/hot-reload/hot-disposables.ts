@@ -81,6 +81,43 @@ const SYNTHETIC_FRAME_PATHS = new Set(['unknown', 'native', '<anonymous>'])
 
 const LOCATION_SUFFIX = /:\d+(?::\d+)?$/
 
+/** Both match one character, so neither can backtrack the way `\s*` in a pattern can. */
+const WHITESPACE = /\s/
+const LINE_TERMINATOR = /[\n\r\u2028\u2029]/
+
+/**
+ * What a bare `at …` frame carries, with surrounding whitespace dropped.
+ *
+ * Scanned rather than captured with `/^\s*at\s+(.+?)\s*$/`, whose lazy body and
+ * greedy tail both laid claim to the same spaces: a frame padded with a run of
+ * them took time cubic in the run's length before concluding it did not match.
+ *
+ * One case is read differently on purpose. Where the frame is `at` and nothing
+ * but whitespace, the pattern handed back a single space as the body; this
+ * rejects it. The two agree at the only boundary that matters, because a body
+ * carrying no `:line` is discarded by the caller either way.
+ */
+function parseBareFrame(frame: string): string | undefined {
+  // `trimEnd` drops exactly the characters `\s` matches, so this is where the
+  // pattern's trailing `\s*$` would have started.
+  const end = frame.trimEnd().length
+
+  let cursor = 0
+  while (cursor < end && WHITESPACE.test(frame[cursor])) cursor += 1
+  if (!frame.startsWith('at', cursor)) return undefined
+
+  const afterAt = cursor + 2
+  let start = afterAt
+  while (start < end && WHITESPACE.test(frame[start])) start += 1
+  if (start === afterAt) return undefined
+
+  // A frame body never matched across a line break, so one spanning it is no
+  // body at all. Nothing can start it later, so there is no second chance.
+  const body = frame.slice(start, end)
+
+  return LINE_TERMINATOR.test(body) ? undefined : body
+}
+
 /**
  * The `file:line:column` a single stack frame points at, minus line and column.
  *
@@ -93,7 +130,7 @@ const LOCATION_SUFFIX = /:\d+(?::\d+)?$/
  * function name, so a frame without one yields nothing.
  */
 function parseFrameLocation(frame: string): string | undefined {
-  const location = frame.match(/\(([^()]*)\)\s*$/)?.[1] ?? frame.match(/^\s*at\s+(.+?)\s*$/)?.[1]
+  const location = frame.match(/\(([^()]*)\)\s*$/)?.[1] ?? parseBareFrame(frame)
 
   if (!location || !LOCATION_SUFFIX.test(location)) {
     return undefined
