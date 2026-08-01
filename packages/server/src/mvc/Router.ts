@@ -815,34 +815,57 @@ function createContractHandler<
       return result as RouteResult
     }
 
-    // If the handler returned a Response, validate the JSON body — not the Response object
+    // A Response result carries its value as a JSON body; validate that, not the Response object.
+    let outputValue: unknown = result
+    let sourceBody: string | undefined
     if (result instanceof Response) {
       try {
-        const cloned = result.clone()
-        const body = await cloned.json()
-        const output = options.output.safeParse(body)
-        if (!output.success) {
-          throw new Error(
-            `Route output validation failed for ${options.name ?? path}: ${JSON.stringify(formatValidationErrors(output.error))}`,
-          )
-        }
-      } catch (err) {
-        if (err instanceof Error && err.message.includes('output validation failed')) throw err
+        sourceBody = await result.clone().text()
+        outputValue = JSON.parse(sourceBody)
+      } catch {
         // Non-JSON response — skip output validation
+        return result as RouteResult
       }
-      return result as RouteResult
     }
 
-    // Plain object return — validate directly
-    const output = options.output.safeParse(result)
-    if (output.success) {
+    const output = options.output.safeParse(outputValue)
+    if (!output.success) {
+      throw new Error(
+        `Route output validation failed for ${options.name ?? path}: ${JSON.stringify(formatValidationErrors(output.error))}`,
+      )
+    }
+
+    // Return the parsed data so schema defaults/transforms/coercions reach the client.
+    if (!(result instanceof Response)) {
       return output.data as RouteResult
     }
 
-    throw new Error(
-      `Route output validation failed for ${options.name ?? path}: ${JSON.stringify(formatValidationErrors(output.error))}`,
-    )
+    return (rebuildJsonResponse(result, sourceBody as string, output.data) ?? result) as RouteResult
   }
+}
+
+/**
+ * Re-serialize a JSON response from schema-parsed data, or `null` when parsing was a
+ * no-op and the original response can be sent untouched.
+ *
+ * Headers describing the *previous* body are dropped: the parsed payload may differ
+ * in byte length (schema defaults) and in content (transforms), so a copied
+ * `Content-Length` or `ETag` would misdescribe what is actually sent.
+ */
+function rebuildJsonResponse(source: Response, sourceBody: string, data: unknown): Response | null {
+  const body = JSON.stringify(data)
+  if (body === sourceBody) {
+    return null
+  }
+
+  const headers = new Headers(source.headers)
+  dropStaleBodyHeaders(headers)
+  return new Response(body, { status: source.status, headers })
+}
+
+function dropStaleBodyHeaders(headers: Headers): void {
+  headers.delete('content-length')
+  headers.delete('etag')
 }
 
 function parseRouteSegment<T>(
@@ -906,18 +929,33 @@ function createContractValidationMiddleware(route: RegisteredRoute): MiddlewareH
 
     // Validate output schema against the response body
     if (schemas.output && c.res) {
+      let sourceBody: string
+      let parsedBody: unknown
       try {
-        const cloned = c.res.clone()
-        const body = await cloned.json()
-        const parsed = schemas.output.safeParse(body)
-        if (!parsed.success) {
-          const errors = 'flatten' in parsed.error && typeof (parsed.error as any).flatten === 'function'
-            ? (parsed.error as any).flatten()
-            : parsed.error
-          c.res = c.json({ message: 'Response validation failed', errors }, 500)
-        }
+        sourceBody = await c.res.clone().text()
+        parsedBody = JSON.parse(sourceBody)
       } catch {
         // Non-JSON response or parse error — skip output validation
+        return
+      }
+
+      const parsed = schemas.output.safeParse(parsedBody)
+      if (!parsed.success) {
+        const errors = 'flatten' in parsed.error && typeof (parsed.error as any).flatten === 'function'
+          ? (parsed.error as any).flatten()
+          : parsed.error
+        c.res = c.json({ message: 'Response validation failed', errors }, 500)
+        return
+      }
+
+      // Rebuild the response from the parsed data so defaults/transforms/coercions
+      // applied by the schema reach the client.
+      const rebuilt = rebuildJsonResponse(c.res, sourceBody, parsed.data)
+      if (rebuilt) {
+        c.res = rebuilt
+        // Hono's `c.res` setter copies every header off the replaced response, which
+        // restores the ones rebuildJsonResponse just dropped — drop them again.
+        dropStaleBodyHeaders(c.res.headers)
       }
     }
   }
