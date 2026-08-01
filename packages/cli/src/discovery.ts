@@ -307,7 +307,14 @@ export async function hasControllerTest(cwd: string, controllerPath: string): Pr
   return false
 }
 
-/** Where `make:factory` and `make:seeder` write, keyed by the suffix they append. */
+/**
+ * Where `make:factory` and `make:seeder` write, keyed by the suffix they
+ * append. Those two scaffolders import this rather than declaring the path
+ * themselves, which is what makes it safe for the readers below — and for
+ * `guren doctor --next`, which suggests running `make:factory` when a scan
+ * finds nothing — to treat a miss here as "no such artifact exists" rather
+ * than "it was written somewhere this constant does not know about".
+ */
 export const DB_ARTIFACT_DIRS = {
   Factory: 'db/factories',
   Seeder: 'db/seeders',

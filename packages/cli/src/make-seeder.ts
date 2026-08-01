@@ -1,8 +1,7 @@
+import { DB_ARTIFACT_DIRS } from './discovery'
 import { readSchemaDialect, seederContextTypes } from './patch-helpers'
 import type { WriterOptions } from './utils'
 import { scaffoldFile } from './utils'
-
-const SEEDERS_DIR = 'db/seeders'
 
 function seederTemplate(className: string, context: string): string {
   return `import { defineSeeder, type ${context} } from '@guren/core'
@@ -18,7 +17,7 @@ export async function makeSeeder(name: string, options: WriterOptions = {}): Pro
   const context = seederContextTypes[await readSchemaDialect()]
 
   return scaffoldFile(name, {
-    dir: SEEDERS_DIR,
+    dir: DB_ARTIFACT_DIRS.Seeder,
     suffix: 'Seeder',
     template: ({ normalizedName }) => seederTemplate(normalizedName, context),
   }, options)
