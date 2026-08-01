@@ -4,6 +4,16 @@ import { describe, expect, it } from 'bun:test'
 import { runCheck, type CheckReport, type RunCheckOptions } from '../src/check'
 import { createTempWorkspace, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE } from './helpers'
 
+async function writeModel(dir: string, fileName: string, source: string): Promise<void> {
+  await mkdir(join(dir, 'app/Models'), { recursive: true })
+  await writeFile(join(dir, 'app/Models', fileName), source, 'utf8')
+}
+
+async function writeSchema(dir: string, source: string): Promise<void> {
+  await mkdir(join(dir, 'db'), { recursive: true })
+  await writeFile(join(dir, 'db/schema.ts'), source, 'utf8')
+}
+
 describe('runCheck', () => {
   it('detects empty controller methods', async () => {
     const workspace = await createTempWorkspace('guren-cli-check-empty-')
@@ -454,7 +464,13 @@ test('lists tasks', async () => {
 
     try {
       await mkdir(join(workspace.dir, 'modules/billing/app/Models'), { recursive: true })
-      await writeFile(join(workspace.dir, 'modules/billing/app/Models/Invoice.ts'), 'export class Invoice {}', 'utf8')
+      await writeFile(
+        join(workspace.dir, 'modules/billing/app/Models/Invoice.ts'),
+        `import { defineModel } from '@guren/core'
+import { invoices } from '../../db/schema'
+export class Invoice extends defineModel(invoices) {}`,
+        'utf8',
+      )
       await mkdir(join(workspace.dir, 'modules/billing/db'), { recursive: true })
       await writeFile(
         join(workspace.dir, 'modules/billing/db/schema.ts'),
@@ -471,6 +487,127 @@ test('lists tasks', async () => {
       const schemaCheck = report.checks.find(c => c.key === 'model-schema:Invoice')
       expect(schemaCheck).toBeDefined()
       expect(schemaCheck!.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // The check resolves the table the model binds, so a model whose class name
+  // says nothing about its table is checked on what it actually declares.
+  it('passes a model bound to a table not named after the class', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-model-renamed-table-')
+
+    try {
+      await writeModel(
+        workspace.dir,
+        'Post.ts',
+        `import { defineModel } from '@guren/core'
+import { blogPosts } from '@/db/schema'
+export class Post extends defineModel(blogPosts) {}`,
+      )
+      await writeSchema(workspace.dir, `export const blogPosts = sqliteTable('blog_posts', {})`)
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      const schemaCheck = report.checks.find(c => c.key === 'model-schema:Post')
+      expect(schemaCheck).toBeDefined()
+      expect(schemaCheck!.status).toBe('pass')
+      expect(schemaCheck!.message).toContain('blog_posts')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('passes a model that binds its table via static table', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-model-static-table-')
+
+    try {
+      await writeModel(
+        workspace.dir,
+        'Account.ts',
+        `import { Model } from '@guren/orm'
+import { accounts } from '@/db/schema'
+export class Account extends Model {
+  static table = accounts
+}`,
+      )
+      await writeSchema(workspace.dir, `export const accounts = sqliteTable('accounts', {})`)
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      expect(report.checks.find(c => c.key === 'model-schema:Account')?.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // The old check matched the guessed name as a substring of the schema
+  // source, so a column named `posts` (or a comment mentioning it) counted as
+  // a table definition.
+  it('warns when the model binds a table the schema does not declare, even if the guessed name appears in it', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-model-missing-table-')
+
+    try {
+      await writeModel(
+        workspace.dir,
+        'Post.ts',
+        `import { defineModel } from '@guren/core'
+import { articles } from '@/db/schema'
+export class Post extends defineModel(articles) {}`,
+      )
+      await writeSchema(
+        workspace.dir,
+        `// the 'posts' table lives elsewhere
+export const users = sqliteTable('users', {
+  posts: integer('posts'),
+})`,
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      const schemaCheck = report.checks.find(c => c.key === 'model-schema:Post')
+      expect(schemaCheck).toBeDefined()
+      expect(schemaCheck!.status).toBe('warn')
+      expect(schemaCheck!.message).toContain("'articles'")
+      expect(schemaCheck!.suggestion).toContain('users')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('skips the model-schema check when the model binds no readable table', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-model-no-binding-')
+
+    try {
+      await writeModel(workspace.dir, 'Post.ts', 'export class Post {}')
+      await writeSchema(workspace.dir, `export const posts = sqliteTable('posts', {})`)
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      expect(report.checks.some(c => c.key.startsWith('model-schema:'))).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // parseSchemaTables reports nothing for a missing or unparsable schema, and
+  // "no tables to compare against" is not evidence the model is wrong.
+  it('skips the model-schema check when the schema declares no readable tables', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-model-unreadable-schema-')
+
+    try {
+      await writeModel(
+        workspace.dir,
+        'Post.ts',
+        `import { defineModel } from '@guren/core'
+import { posts } from '@/db/schema'
+export class Post extends defineModel(posts) {}`,
+      )
+      await writeSchema(workspace.dir, 'export const posts = sqliteTable(')
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      expect(report.checks.some(c => c.key.startsWith('model-schema:'))).toBe(false)
     } finally {
       await workspace.cleanup()
     }

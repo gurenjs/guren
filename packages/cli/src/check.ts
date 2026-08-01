@@ -1,6 +1,7 @@
 import { resolve, relative } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { consola } from 'consola'
+import type { ClassDeclaration } from '@babel/types'
 import {
   discoverControllerFiles,
   discoverModelFiles,
@@ -16,13 +17,14 @@ import {
 import {
   classUsesAuthenticatableBase,
   extractClassDeclaration,
+  extractTableIdentifier,
   findStaticClassProperty,
   staticStringArrayProperty,
   staticStringProperty,
 } from './model-parser'
 import { checkConsoleCommandRegistration } from './console-check'
 import { checkSchemaTimestamps } from './schema-check'
-import { schemaPathFor } from './schema-parser'
+import { parseSchemaTables, schemaPathFor, type SchemaTable } from './schema-parser'
 import { ParseCache } from './parse-cache'
 import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath } from './inertia-pages'
 import { runArchCheck } from './arch-check'
@@ -143,30 +145,17 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       checks.push(...results)
     }
 
-    // 3. Check models have migrations
+    // 3. Check each model binds a table its schema declares
     const modelFiles = filterChanged(await discoverModelFiles(cwd))
+    // Parsed once for every model rather than per model, and only when there
+    // is a model to check — under `--changed`, a run that touched no model
+    // pays nothing for the schema.
+    const schemaTables = modelFiles.length > 0 ? await parseSchemaTables(cwd) : []
     for (const filePath of modelFiles) {
       const relPath = relative(cwd, filePath)
       const name = classNameFromPath(filePath)
       checks.push(...(await checkMassAssignmentConfig(cache, filePath, name, relPath)))
-      const moduleName = moduleNameFor(cwd, filePath)
-      const schemaPath = schemaPathFor(moduleName)
-      const hasSchema = await fileExists(cwd, schemaPath)
-      if (hasSchema) {
-        const schemaContent = await readFile(resolve(cwd, schemaPath), 'utf-8')
-        const tableLower = name.toLowerCase() + 's'
-        const hasTable = schemaContent.includes(`'${tableLower}'`) || schemaContent.includes(`"${tableLower}"`)
-        checks.push(
-          check(
-            `model-schema:${name}`,
-            `${name} schema`,
-            hasTable ? 'pass' : 'warn',
-            hasTable ? `Table definition found for ${name}.` : `No table '${tableLower}' found in ${schemaPath}.`,
-            hasTable ? undefined : `Add table definition to ${schemaPath} for ${name}.`,
-            relPath,
-          ),
-        )
-      }
+      checks.push(...(await checkModelTableBinding(cache, cwd, filePath, name, relPath, schemaTables)))
     }
 
     // 4. Check missing test files for controllers
@@ -276,6 +265,78 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   return report
 }
 
+async function firstClassDeclaration(cache: ParseCache, filePath: string): Promise<ClassDeclaration | null> {
+  const parsed = await cache.get(filePath)
+  if (!parsed) return null
+
+  for (const node of parsed.ast.program.body) {
+    const classDecl = extractClassDeclaration(node)
+    if (classDecl) return classDecl
+  }
+  return null
+}
+
+/**
+ * Checks the model against what it actually binds — the identifier passed to
+ * `defineModel(x)` or assigned to `static table` — rather than a table name
+ * guessed from the class name. Guessing reported two kinds of nonsense: a
+ * model binding the wrong identifier passed as long as the guessed name
+ * appeared anywhere in the schema text (a column name or a comment would do),
+ * and any model not named after its table (`Post` on `blog_posts`, `User` on
+ * `accounts`) warned even though it was correct.
+ *
+ * Two arms skip rather than warn, because neither one is evidence of a
+ * problem: a model whose binding cannot be read (no supported spelling, or an
+ * unparseable file), and a schema that declared no tables — missing,
+ * unparsable, or written in one of the forms `parseSchemaTables` documents as
+ * invisible. Note that the schema is parsed outside the `ParseCache`, so an
+ * unparsable one is not reported by the `scan-coverage` check either; it is
+ * silent here exactly as it already is for `checkSchemaTimestamps`.
+ *
+ * That skip is all-or-nothing, so a schema that declares some tables inline
+ * and re-exports the rest (`export * from './posts'`) still warns on a model
+ * bound to a re-exported one — the same blind spot the substring match had.
+ */
+async function checkModelTableBinding(
+  cache: ParseCache,
+  cwd: string,
+  filePath: string,
+  name: string,
+  relPath: string,
+  schemaTables: SchemaTable[],
+): Promise<CheckResult[]> {
+  const classDecl = await firstClassDeclaration(cache, filePath)
+  if (!classDecl) return []
+
+  const identifier = extractTableIdentifier(classDecl)
+  if (!identifier) return []
+
+  // Scoped to the model's own app root: a module's models are checked against
+  // `modules/<name>/db/schema.ts`, root models against the root schema.
+  const moduleName = moduleNameFor(cwd, filePath)
+  const tables = schemaTables.filter((table) => table.module === moduleName)
+  if (tables.length === 0) return []
+
+  const schemaPath = schemaPathFor(moduleName)
+  const bound = tables.find((table) => table.identifier === identifier)
+
+  return [
+    check(
+      `model-schema:${name}`,
+      `${name} schema`,
+      bound ? 'pass' : 'warn',
+      bound
+        ? `${name} binds '${identifier}', declared in ${schemaPath}${bound.tableName ? ` as table '${bound.tableName}'` : ''}.`
+        : `${name} binds '${identifier}', but ${schemaPath} declares no such table.`,
+      bound
+        ? undefined
+        : `Export a table named '${identifier}' from ${schemaPath}, or point ${name} at one it declares `
+          + `(${formatTruncatedList(tables.map((table) => table.identifier))}).`,
+      relPath,
+    ),
+  ]
+}
+
 /**
  * Mass-assignment definition checks (AST-based via the shared ParseCache, so
  * comments, access modifiers, and type annotations neither hide a declaration
@@ -299,17 +360,10 @@ async function checkMassAssignmentConfig(
   relPath: string,
 ): Promise<CheckResult[]> {
   const results: CheckResult[] = []
-  const parsed = await cache.get(filePath)
-  if (!parsed) return results
-
-  let classDecl = null
-  for (const node of parsed.ast.program.body) {
-    classDecl = extractClassDeclaration(node)
-    if (classDecl) break
-  }
+  const classDecl = await firstClassDeclaration(cache, filePath)
   if (!classDecl) return results
 
-  const legacy = ['guarded', 'strictFillable'].filter((property) => findStaticClassProperty(classDecl!, property))
+  const legacy = ['guarded', 'strictFillable'].filter((property) => findStaticClassProperty(classDecl, property))
   if (legacy.length > 0) {
     results.push(
       check(
