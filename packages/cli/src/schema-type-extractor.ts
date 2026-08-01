@@ -1,7 +1,8 @@
 /**
  * Extracts TypeScript type literals from Zod 4 schema objects at runtime.
- * Every read of a `_def` shape goes through `@guren/core/internal/zod-compat`;
- * only rendering decisions live here.
+ * Every `_def` read the OpenAPI walker also performs goes through
+ * `@guren/core/internal/zod-compat`, so the two cannot disagree about zod's
+ * layout; rendering decisions live here.
  */
 
 import {
@@ -13,7 +14,7 @@ import {
   literalValues,
   objectShape,
   pipeSide,
-  schemaAt,
+  recordValueType,
   type SchemaIo,
   TRANSPARENT_WRAPPERS,
   typeOf,
@@ -45,6 +46,12 @@ const COERCED_INPUT_TYPES: Record<string, string> = {
 /** Warn once per process, not once per route×field — repetition adds nothing. */
 let warnedAboutZod3 = false
 
+function refuseZod3(): void {
+  if (warnedAboutZod3) return
+  warnedAboutZod3 = true
+  console.warn(`[warn] A route schema was skipped: ${ZOD3_UNSUPPORTED_MESSAGE}`)
+}
+
 /**
  * Convert a Zod 4 schema object to a TypeScript type string.
  * Returns `undefined` if the schema structure is unrecognizable — including a
@@ -54,10 +61,7 @@ export function schemaToTypeString(schema: unknown, options: SchemaTypeOptions):
   if (!schema || typeof schema !== 'object') return undefined
   const z = schema as ZodSchemaLike
   if (isZod3Schema(z)) {
-    if (!warnedAboutZod3) {
-      warnedAboutZod3 = true
-      console.warn(`[warn] A route schema was skipped: ${ZOD3_UNSUPPORTED_MESSAGE}`)
-    }
+    refuseZod3()
     return undefined
   }
   if (!getTypeName(z)) return undefined
@@ -65,6 +69,14 @@ export function schemaToTypeString(schema: unknown, options: SchemaTypeOptions):
 }
 
 function zodToType(z: ZodSchemaLike, io: SchemaIo): string {
+  // Re-checked on every node, not just at entry: a v3 schema can sit *inside*
+  // a v4 object (nothing but the type system prevents it), and without this
+  // gate it would render as a silent `unknown` instead of being refused.
+  if (isZod3Schema(z)) {
+    refuseZod3()
+    return 'unknown'
+  }
+
   const def = z._def ?? {}
   const t = typeOf(z)
 
@@ -152,7 +164,7 @@ function zodToType(z: ZodSchemaLike, io: SchemaIo): string {
     }
 
     case 'record': {
-      const vt = schemaAt(def, 'valueType')
+      const vt = recordValueType(def)
       return vt ? `Record<string, ${zodToType(vt, io)}>` : 'Record<string, unknown>'
     }
 
@@ -160,7 +172,7 @@ function zodToType(z: ZodSchemaLike, io: SchemaIo): string {
       // An enum with no members accepts nothing, so `never` is its type. The
       // empty-array case used to fall through to `[].join()` and emit an empty
       // string, which is not valid TypeScript in the position this lands in.
-      const vals = enumValues(def)
+      const vals = enumValues(z)
       return vals.length > 0 ? vals.map(literalType).join(' | ') : 'never'
     }
 

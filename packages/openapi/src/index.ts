@@ -11,7 +11,7 @@ import {
   objectShape,
   pipeSide,
   pipeSides,
-  schemaAt,
+  recordValueType,
   type SchemaIo,
   SINGLE_CHILD_WRAPPERS,
   typeOf,
@@ -345,13 +345,26 @@ function buildResponses(definition: RouteDefinition, warnings: string[]): Record
   return responses
 }
 
+/**
+ * Push the v3 refusal warning and report whether it fired. One helper so the
+ * composed message cannot drift between the entry points, and so the recursive
+ * walks re-check nested nodes — a v3 schema can sit inside a v4 object, and an
+ * ungated recursion would document it wrong instead of refusing it.
+ */
+function warnIfZod3(schema: unknown, warnings: string[], label: string): boolean {
+  if (schema && typeof schema === 'object' && isZod3Schema(schema as ZodLike)) {
+    warnings.push(`${label}: skipped — ${ZOD3_UNSUPPORTED_MESSAGE}`)
+    return true
+  }
+  return false
+}
+
 function readObjectSchema(schema: unknown, warnings: string[], label: string, io: SchemaIo): ObjectSchemaDetails | undefined {
   if (!schema) {
     return undefined
   }
 
-  if (isZod3Schema(schema as ZodLike)) {
-    warnings.push(`${label}: skipped — ${ZOD3_UNSUPPORTED_MESSAGE}`)
+  if (warnIfZod3(schema, warnings, label)) {
     return undefined
   }
 
@@ -368,6 +381,12 @@ function readObjectSchema(schema: unknown, warnings: string[], label: string, io
 }
 
 function readObjectSchemaDetails(schema: ZodLike, warnings: string[], label: string, io: SchemaIo): ObjectSchemaDetails | undefined {
+  // Recursion can surface a v3 node a wrapper was hiding (`z.optional(v3Obj)`
+  // passes the entry gate — the wrapper is v4).
+  if (warnIfZod3(schema, warnings, label)) {
+    return undefined
+  }
+
   if (typeOf(schema) !== 'object') {
     const nested = unwrap(schema, io)
     return nested ? readObjectSchemaDetails(nested, warnings, label, io) : undefined
@@ -398,8 +417,7 @@ function readObjectSchemaDetails(schema: ZodLike, warnings: string[], label: str
 }
 
 function toOpenApiSchema(schema: unknown, warnings: string[], label: string, io: SchemaIo): OpenApiSchemaObject | undefined {
-  if (schema && typeof schema === 'object' && isZod3Schema(schema as ZodLike)) {
-    warnings.push(`${label}: skipped — ${ZOD3_UNSUPPORTED_MESSAGE}`)
+  if (warnIfZod3(schema, warnings, label)) {
     return undefined
   }
 
@@ -482,7 +500,7 @@ function toOpenApiSchema(schema: unknown, warnings: string[], label: string, io:
       return allOf.length > 0 ? { allOf } : undefined
     }
     case 'record': {
-      const valueType = schemaAt(def, 'valueType')
+      const valueType = recordValueType(def)
       return {
         type: 'object',
         additionalProperties: toOpenApiSchema(valueType, warnings, `${label}.value`, io) ?? true,
@@ -490,11 +508,18 @@ function toOpenApiSchema(schema: unknown, warnings: string[], label: string, io:
     }
     // `z.nativeEnum()` produces this same node, so the values may be numbers.
     case 'enum': {
-      const values = enumValues(def)
+      const values = enumValues(schema)
+      if (values.length === 0) {
+        // An empty enum accepts nothing; OpenAPI has no `never`, so a bare
+        // string is the least-wrong fallback (the CLI renders `never`).
+        return { type: 'string' }
+      }
       const hasNumber = values.some((value) => typeof value === 'number')
       const hasString = values.some((value) => typeof value === 'string')
-      const type = hasNumber ? (hasString ? (['string', 'number'] as OpenApiPrimitiveType[]) : 'number' as const) : 'string' as const
-      return values.length > 0 ? { type, enum: values } : { type: 'string' }
+      if (hasNumber && hasString) {
+        return { type: ['string', 'number'], enum: values }
+      }
+      return { type: hasNumber ? 'number' : 'string', enum: values }
     }
     case 'tuple': {
       const items = ((def.items as unknown[]) ?? [])
@@ -688,7 +713,15 @@ function isRequestBodyRequired(schema: unknown): boolean {
     return true
   }
 
-  return !schema.safeParse!({}).success
+  // `safeParse` is supposed to return failures, but a malformed schema can
+  // still throw — zod 4 throws outright when an object's property is not a
+  // schema it recognizes (a nested v3 node, for one). A body whose schema
+  // cannot even run against `{}` is best documented as required.
+  try {
+    return !schema.safeParse!({}).success
+  } catch {
+    return true
+  }
 }
 
 async function writeFileSafe(relativePath: string, contents: string, options: WriterOptions = {}): Promise<string> {

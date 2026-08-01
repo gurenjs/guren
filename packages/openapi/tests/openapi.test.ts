@@ -191,6 +191,30 @@ describe('@guren/openapi', () => {
       expect(asQuery.warnings.some((w) => w.includes('zod v3 API'))).toBe(true)
     })
 
+    // A v3 node inside a v4 object passes the entry gate (the object is v4).
+    // Two things must hold: the walk refuses the nested node with the v3
+    // warning, and the document still generates — `safeParse` on such an
+    // object THROWS in zod 4 rather than returning a failure, so the
+    // request-body required probe has to survive it.
+    it('survives a v3 node nested inside a v4 body and names it in a warning', () => {
+      const body = z.object({ legacy: z3.string() as never, ok: z.number() })
+      const { operation, warnings } = operationFor({ body })
+
+      const schema = operation?.requestBody?.content['application/json']?.schema
+      expect(schema?.properties?.ok).toEqual({ type: 'number' })
+      expect(schema?.properties?.legacy).toBeUndefined()
+      expect(warnings.some((w) => w.includes('body.legacy') && w.includes('zod v3 API'))).toBe(true)
+    })
+
+    // A v4 wrapper around a v3 object also passes the entry gate; the
+    // recursive unwrap has to re-check, or the only diagnostic is the generic
+    // "expected an object schema".
+    it('names the zod v3 API when a wrapped query schema hides a v3 object', () => {
+      const { warnings } = queryParameters(z.optional(z3.object({ page: z3.number() }) as never))
+
+      expect(warnings.some((w) => w.includes('zod v3 API'))).toBe(true)
+    })
+
     // A pipe carries two types: `_def.in` is what a caller sends, `_def.out`
     // what the controller returns. Requests and responses need opposite sides.
     it('reports each side of a pipe to the message that carries it', () => {
@@ -233,14 +257,10 @@ describe('@guren/openapi', () => {
     // are looked through, so the exception has to be asserted separately —
     // otherwise dropping it just silently emits the unwrapped schema.
     it('renders a nullable property as a union with null rather than unwrapping it', () => {
-      for (const schema of [
-        z.object({ a: z.string().nullable() }),
-      ]) {
-        const { schema: document, warnings } = bodyDocument(schema)
+      const { schema: document, warnings } = bodyDocument(z.object({ a: z.string().nullable() }))
 
-        expect(document?.properties?.a).toEqual({ anyOf: [{ type: 'string' }, { type: 'null' }] })
-        expect(warnings).toEqual([])
-      }
+      expect(document?.properties?.a).toEqual({ anyOf: [{ type: 'string' }, { type: 'null' }] })
+      expect(warnings).toEqual([])
     })
 
     // The type and the presence of a property are read by separate walks over
@@ -274,12 +294,9 @@ describe('@guren/openapi', () => {
     // A pipeline runs both stages, so reading only the side being rendered
     // documents an omission the other stage rejects.
     it('requires a piped field unless both stages accept a missing value', () => {
-      for (const schema of [
-        z.object({ a: z.string().optional().pipe(z.string()) }),
-      ]) {
-        expect(schema.safeParse({}).success).toBe(false)
-        expect(bodyDocument(schema).schema?.required).toEqual(['a'])
-      }
+      const piped = z.object({ a: z.string().optional().pipe(z.string()) })
+      expect(piped.safeParse({}).success).toBe(false)
+      expect(bodyDocument(piped).schema?.required).toEqual(['a'])
 
       const output = z.object({ a: pipeTo(z.string(), z.string().optional()) })
       expect(output.safeParse({}).success).toBe(false)
@@ -289,14 +306,10 @@ describe('@guren/openapi', () => {
     // `z.lazy()` keeps its schema behind a getter this walker does not call.
     // The property is unavoidably absent; what it must not be is silent.
     it('warns rather than quietly dropping a schema it cannot read', () => {
-      for (const schema of [
-        z.object({ a: z.lazy(() => z.string()) }),
-      ]) {
-        const { schema: document, warnings } = bodyDocument(schema)
+      const { schema: document, warnings } = bodyDocument(z.object({ a: z.lazy(() => z.string()) }))
 
-        expect(document?.properties?.a).toBeUndefined()
-        expect(warnings).toEqual(['POST /posts body.a: the contents of a "lazy" schema could not be read, so it is omitted.'])
-      }
+      expect(document?.properties?.a).toBeUndefined()
+      expect(warnings).toEqual(['POST /posts body.a: the contents of a "lazy" schema could not be read, so it is omitted.'])
     })
 
     // Finding the object behind a parameter schema is a third walk over the

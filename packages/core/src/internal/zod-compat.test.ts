@@ -108,22 +108,33 @@ describe('isTransform', () => {
 })
 
 describe('enumValues', () => {
-  test('reads a zod 4 enum (entries object)', () => {
-    expect(enumValues(defOf(z.enum(['a', 'b'])))).toEqual(['a', 'b'])
+  test('reads a zod 4 enum', () => {
+    expect(enumValues(z.enum(['a', 'b']) as never)).toEqual(['a', 'b'])
   })
 
   test('z.nativeEnum produces the same enum node', () => {
     enum Color { Red = 'red', Blue = 'blue' }
-    const def = defOf(z.nativeEnum(Color))
     expect(typeOf(z.nativeEnum(Color) as never)).toBe('enum')
-    expect(enumValues(def)).toEqual(['red', 'blue'])
+    expect(enumValues(z.nativeEnum(Color) as never)).toEqual(['red', 'blue'])
   })
 
-  test('filters the reverse mappings of a numeric TypeScript enum', () => {
+  test('excludes the reverse mappings of a numeric TypeScript enum', () => {
     enum Level { Low, High }
     // The runtime object is { Low: 0, High: 1, '0': 'Low', '1': 'High' } —
     // only the forward direction may reach a rendered document.
-    expect(enumValues(defOf(z.nativeEnum(Level)))).toEqual([0, 1])
+    expect(enumValues(z.nativeEnum(Level) as never)).toEqual([0, 1])
+  })
+
+  test('keeps a member whose value collides with another key', () => {
+    // The trap that killed the hand-rolled reverse-mapping filter: `A` maps
+    // to the *string* 'B' while `B` is a key holding a number, so any
+    // "does my value point at a number?" heuristic wrongly discards A. zod's
+    // own computed set gets it right, which is why this reads `_zod.values`.
+    enum Tricky { A = 'B', B = 1 }
+    const schema = z.nativeEnum(Tricky)
+    expect(schema.safeParse('B').success).toBe(true)
+    expect(schema.safeParse(1).success).toBe(true)
+    expect(new Set(enumValues(schema as never))).toEqual(new Set(['B', 1]))
   })
 })
 
@@ -150,18 +161,15 @@ describe('wrapper vocabulary', () => {
     ])
   })
 
-  test('the partitions are disjoint and both contained in the whole', () => {
+  // Containment in the whole is true by construction (`SINGLE_CHILD_WRAPPERS`
+  // is built as the union), so only disjointness has failure power.
+  test('the two partitions are disjoint', () => {
     for (const name of TRANSPARENT_WRAPPERS) {
       expect(PRESENCE_WRAPPERS.has(name)).toBe(false)
-      expect(SINGLE_CHILD_WRAPPERS.has(name)).toBe(true)
-    }
-    for (const name of PRESENCE_WRAPPERS) {
-      expect(SINGLE_CHILD_WRAPPERS.has(name)).toBe(true)
     }
   })
 
   test('every wrapper in the vocabulary really is a single-child node in zod 4', () => {
-    // Built per name so a stale entry fails loudly rather than by omission.
     const build: Record<string, () => unknown> = {
       catch: () => z.string().catch('x'),
       readonly: () => z.string().readonly(),
@@ -173,10 +181,11 @@ describe('wrapper vocabulary', () => {
       nullable: () => z.string().nullable(),
       pipe: () => z.string().pipe(z.coerce.number()),
     }
-    for (const name of SINGLE_CHILD_WRAPPERS) {
-      const schema = build[name]
-      expect(schema, `no builder for wrapper "${name}"`).toBeDefined()
-      expect(typeOf(schema!() as never)).toBe(name)
+    // Key equality both ways: a wrapper without a builder AND a stale builder
+    // for a name no longer in the set fail here, before the loop runs.
+    expect(Object.keys(build).sort()).toEqual([...SINGLE_CHILD_WRAPPERS].sort())
+    for (const [name, make] of Object.entries(build)) {
+      expect(typeOf(make() as never)).toBe(name)
     }
   })
 })

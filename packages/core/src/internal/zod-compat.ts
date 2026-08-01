@@ -31,6 +31,8 @@
 
 export interface ZodSchemaLike {
   _def?: Record<string, unknown>
+  /** zod 4's internal container; `values` is its own computed set of accepted literals. */
+  _zod?: { values?: Set<unknown> }
   type?: string
   shape?: Record<string, ZodSchemaLike>
 }
@@ -74,18 +76,15 @@ export function typeOf(schema: ZodSchemaLike): string {
 }
 
 /**
- * The first of `keys` that actually holds a nested schema object. The object
- * check is load-bearing: `_def` is untyped data from someone else's package,
- * and a key holding a string or function must read as absent, not as a schema.
+ * The schema at `def[key]`, if it actually holds one. The object check is
+ * load-bearing: `_def` is untyped data from someone else's package, and a key
+ * holding a string or function must read as absent, not as a schema. (The
+ * v3-era version of this helper took a key *list* and returned the first
+ * match; with one dialect there is no precedence left to encode.)
  */
-export function schemaAt(def: Record<string, unknown>, ...keys: string[]): ZodSchemaLike | undefined {
-  for (const key of keys) {
-    const candidate = def[key]
-    if (candidate && typeof candidate === 'object') {
-      return candidate as ZodSchemaLike
-    }
-  }
-  return undefined
+export function schemaAt(def: Record<string, unknown>, key: string): ZodSchemaLike | undefined {
+  const candidate = def[key]
+  return candidate && typeof candidate === 'object' ? (candidate as ZodSchemaLike) : undefined
 }
 
 /** The schema wrapped by a single-child wrapper (`.optional()`, `.readonly()`, `.catch()`, …) — always `_def.innerType` in zod 4. */
@@ -96,6 +95,11 @@ export function innerSchema(def: Record<string, unknown>): ZodSchemaLike | undef
 /** An array's element schema — `_def.element`, never `_def.type`, which holds the string `'array'`. */
 export function arrayElement(def: Record<string, unknown>): ZodSchemaLike | undefined {
   return schemaAt(def, 'element')
+}
+
+/** A record's value schema — `_def.valueType`. */
+export function recordValueType(def: Record<string, unknown>): ZodSchemaLike | undefined {
+  return schemaAt(def, 'valueType')
 }
 
 /**
@@ -135,19 +139,25 @@ export function objectShape(schema: ZodSchemaLike): Record<string, ZodSchemaLike
 }
 
 /**
- * An enum's values. Zod 4 stores them as the `_def.entries` object, and
- * `z.nativeEnum` produces the same node — which means `entries` can be a real
- * TypeScript numeric enum, whose runtime object also carries the reverse
- * mappings (`{ A: 0, '0': 'A' }`). A key whose own value maps back to a number
- * is such a reverse entry and is filtered out, the same rule zod itself uses
- * to decide what parses.
+ * An enum's accepted values, read from zod's own computed set at
+ * `_zod.values` rather than re-derived from `_def.entries`. The distinction
+ * matters because `z.nativeEnum` produces the same node and a real TypeScript
+ * numeric enum's runtime object carries reverse mappings (`{ A: 0, '0': 'A' }`)
+ * — and any hand-rolled filter for those has a false positive: in
+ * `{ A: 'B', B: 1 }`, the key `A` *looks* like a reverse entry (`entries['B']`
+ * is a number) but zod accepts `'B'`. Reading zod's set makes what we document
+ * what zod parses, by construction. The `entries` fallback (values unfiltered)
+ * only runs if a future zod 4.x stops exposing the set.
  */
-export function enumValues(def: Record<string, unknown>): Array<string | number> {
-  const entries = def.entries as Record<string, string | number> | undefined
-  if (!entries) return []
-  return Object.keys(entries)
-    .filter((key) => typeof entries[entries[key] as never] !== 'number')
-    .map((key) => entries[key])
+export function enumValues(schema: ZodSchemaLike): Array<string | number> {
+  const values = schema._zod?.values
+  if (values) {
+    return [...values].filter(
+      (value): value is string | number => typeof value === 'string' || typeof value === 'number',
+    )
+  }
+  const entries = schema._def?.entries as Record<string, string | number> | undefined
+  return entries ? Object.values(entries) : []
 }
 
 /** A literal's values — always the `_def.values` array in zod 4, which may hold more than one. */

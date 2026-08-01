@@ -151,15 +151,23 @@ describe('schemaToTypeString', () => {
   // v4 reads produces silently wrong output. `zod/v3` ships inside zod 4
   // itself, so this arrives from apps that declare only zod 4.
   describe('zod 3 refusal', () => {
-    it('returns undefined for v3 schemas and warns once, not per schema', () => {
+    // One test, deliberately: the warning fires once per process, so split
+    // tests would be coupled by execution order. The nested case runs first
+    // because it is the one that regresses silently — a v3 node inside a v4
+    // object passes the entry gate, and before the recursion re-checked it
+    // rendered as `unknown` with no warning at all.
+    it('refuses v3 at entry and nested, warning once per process', () => {
       const warn = spyOn(console, 'warn').mockImplementation(() => {})
       try {
+        const rendered = input(z.object({ legacy: z3.string() as never, ok: z.number() }))
+        expect(rendered).toBe('{ legacy: unknown; ok: number }')
+        expect(warn).toHaveBeenCalledTimes(1)
+        expect(warn.mock.calls[0]?.[0]).toContain('zod v3 API')
+
         expect(input(z3.string().pipe(z3.number()))).toBeUndefined()
         expect(output(z3.object({ tags: z3.array(z3.string()) }))).toBeUndefined()
         expect(input(z3.coerce.number().default(1))).toBeUndefined()
-
         expect(warn).toHaveBeenCalledTimes(1)
-        expect(warn.mock.calls[0]?.[0]).toContain('zod v3 API')
       } finally {
         warn.mockRestore()
       }
