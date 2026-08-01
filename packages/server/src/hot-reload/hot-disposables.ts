@@ -18,14 +18,18 @@
  * what forces that module's serialized claims and teardown timeout. Every
  * teardown here is synchronous — `clearInterval`, and the `destroy()`/`stop()`
  * methods wrapping it — so a claim can simply run the previous teardown inline
- * and be done. Sharing a helper across the two packages would mean either a new
- * package for ~60 lines or a dependency `@guren/orm` is not allowed to take, and
- * would buy machinery neither side needs in the same shape.
+ * and be done. Sharing the registries would buy machinery neither side needs in
+ * the same shape.
  *
  * Its twin is `packages/orm/src/active-connections.ts`. `parseFrameLocation` and
- * the scan under it are the same rule in both, deliberately — a fix to one is
- * worth carrying to the other. `describeCallerFile` differs on purpose: the
- * owners here are constructed, so this side walks past synthetic frames.
+ * the scan under it follow the same rule in both, and `describeCallerFile`'s
+ * walk past a synthetic frame is identical too — a fix to either has to be
+ * carried to the other by hand. That has already failed once: this walk
+ * predates the ORM's, and the ORM kept keying handles to `unknown` in the
+ * meantime. Nothing forces the duplication — `@guren/server` already depends on
+ * `@guren/orm`, so this layer could live there and be imported here — it is
+ * only that the shared part is small next to the two packages' very different
+ * teardown semantics (see above). Extract it if it drifts a third time.
  *
  * An owner is identified by the file that built it plus a discriminator, so it
  * is replaced only by a later evaluation of that same file. Keying on the exact
@@ -71,12 +75,13 @@ export function isHotReloadRuntime(): boolean {
 /**
  * Paths the engine reports for code that has no source location.
  *
- * A class that extends another without declaring a constructor gets an implicit
- * one, and JSC reports it as `at new Subclass (unknown:1:28)` — a frame sitting
- * between the base constructor and the code that actually wrote `new`. Taking it
- * would key every such owner in the process to the string `unknown`, collapsing
- * owners built in different files into one slot where each new one stops the
- * last. `native` shows up the same way for built-ins (`at map (native:1:11)`).
+ * A class that runs code without declaring a constructor — a subclass, or any
+ * class carrying a field initializer — gets an implicit one, and JSC reports it
+ * as `at new Owner (unknown:1:28)`: a frame sitting between the code that ran
+ * and the code that actually wrote `new`. Taking it would key every such owner
+ * in the process to the string `unknown`, collapsing owners built in different
+ * files into one slot where each new one stops the last. `native` shows up the
+ * same way for built-ins (`at map (native:1:11)`).
  */
 const SYNTHETIC_FRAME_PATHS = new Set(['unknown', 'native', '<anonymous>'])
 

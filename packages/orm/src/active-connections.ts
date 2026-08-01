@@ -170,14 +170,15 @@ function matchingOpenParen(frame: string, closeIndex: number): number | undefine
  *
  * Both shapes require a trailing `:line`, so frames that name no location at
  * all — `at native`, `at <anonymous>` — are rejected instead of being read as a
- * path. An `eval` group is also rejected: V8 nests the real location inside
+ * path. That is a check on the frame's shape, not on what it points at: the
+ * engine also emits those same names *with* a location, and rejecting those is
+ * `SYNTHETIC_FRAME_PATHS`'s job below, not this function's. An `eval` group is
+ * rejected outright here, though: V8 nests the real location inside
  * `eval at fn (/app/x.ts:1:2), <anonymous>:1:1`, and keying a connection on
  * text that is not a path is worse than not keying it — a handle with no key
  * is left alone, which is the safe failure.
  */
-function parseFrameLocation(frame: string | undefined): string | undefined {
-  if (frame === undefined) return undefined
-
+function parseFrameLocation(frame: string): string | undefined {
   // `trimEnd` drops exactly the characters `\s` matches, so this is where the
   // patterns' trailing `\s*$` would have started.
   const end = frame.trimEnd().length
@@ -217,15 +218,48 @@ function parseFrameLocation(frame: string | undefined): string | undefined {
 }
 
 /**
+ * Paths the engine reports for code that has no source location.
+ *
+ * A class field initializer, or a subclass that declares no constructor of its
+ * own, runs inside a function nobody wrote, and JSC reports it as
+ * `at new Owner (unknown:1:17)`; a built-in doing the calling reports
+ * `at map (native:1:11)`. Both carry a `:line`, so they parse as ordinary paths
+ * and only this set rejects them.
+ *
+ * Why taking one is worse than taking nothing is spelled out beside the twin's
+ * copy in `packages/server/src/hot-reload/hot-disposables.ts` — keep the two in
+ * step.
+ */
+const SYNTHETIC_FRAME_PATHS = new Set(['unknown', 'native', '<anonymous>'])
+
+/**
  * The file that called a `create*Database()` factory.
  *
  * `stack` must come from an `Error` constructed inside the factory itself, so
- * frame 0 is `Error`, frame 1 is the factory, and frame 2 is the caller. Only
- * the path is kept: a reload re-runs the same file, but not necessarily at the
- * same line.
+ * frame 0 is `Error`, frame 1 is the factory, and frame 2 is the caller — or the
+ * first frame after it that names a real file, since the engine may have
+ * synthesized the frames in between. Only the path is kept: a reload re-runs the
+ * same file, but not necessarily at the same line.
+ *
+ * The frame taken may sit further out than the call — a shared bootstrap, say —
+ * widening the file-level collision the header describes; the target in the key
+ * is what keeps those apart.
+ *
+ * One case the header's escape hatch does not reach: a field initializer leaves
+ * no frame of its own, so the file the class is declared in never appears in the
+ * stack, and giving that class its own module changes nothing. Such a handle is
+ * keyed to wherever `new` was written instead.
  */
 export function describeCallerFile(stack: string | undefined): string | undefined {
-  return parseFrameLocation(stack?.split('\n')[2])
+  for (const frame of stack?.split('\n').slice(2) ?? []) {
+    const path = parseFrameLocation(frame)
+
+    if (path && !SYNTHETIC_FRAME_PATHS.has(path)) {
+      return path
+    }
+  }
+
+  return undefined
 }
 
 /**
