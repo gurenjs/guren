@@ -7,11 +7,11 @@ export const GITHUB_URL = 'https://github.com/gurenjs/guren'
 export const OG_IMAGE_PATH = '/og.png'
 
 export const SITE_TITLE =
-  'Guren — The Laravel feeling, at Bun speed. Fullstack TypeScript framework.'
+  'Guren — The fullstack TypeScript framework for the AI-agent era.'
 
 export const SITE_DESCRIPTION = {
-  en: 'Guren is a Bun-native fullstack TypeScript framework with Laravel-style ergonomics: MVC controllers, Drizzle ORM models, Inertia + React pages, and end-to-end type safety from route to component.',
-  ja: 'Guren は Bun ネイティブのフルスタック TypeScript フレームワーク。Laravel 流の MVC コントローラ、Drizzle ORM モデル、Inertia + React ページ、ルートからコンポーネントまでの型安全性を備えています。',
+  en: 'Guren is a fullstack TypeScript framework built for AI-agent-driven development: Laravel-style conventions, end-to-end type safety from route to React component, and mechanical verification your agent runs itself — Bun-native, deployable anywhere.',
+  ja: 'Guren は AI エージェント時代のためのフルスタック TypeScript フレームワーク。人間とエージェントが同じ地図で開発できるよう、Laravel 流の規約、ルートから React コンポーネントまでの型安全、エージェント自身が実行できる機械検証を備えます。Bun ネイティブで、デプロイ先は自由です。',
 } as const
 
 /** Cache policy for machine-facing endpoints (sitemap, llms.txt, RSS, raw Markdown). */

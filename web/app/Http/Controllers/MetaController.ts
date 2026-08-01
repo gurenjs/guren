@@ -162,7 +162,7 @@ function renderLlms(docsSections: string, posts: PublishedPost[]): string {
     '',
     `> ${SITE_DESCRIPTION.en}`,
     '',
-    'Guren pairs Laravel-style conventions (controllers, models, middleware, validation) with the TypeScript ecosystem: Bun runtime, Hono HTTP, Drizzle ORM, and Inertia.js + React. Codegen keeps routes, page props, and API clients typed end to end.',
+    'Guren is built for AI-agent-driven development: `guren context` hands an agent the project map with API signatures, and `guren check` / `guren audit` verify its work mechanically. It pairs Laravel-style conventions (controllers, models, middleware, validation) with the TypeScript ecosystem: Bun runtime, Hono HTTP, Drizzle ORM, and Inertia.js + React. Codegen keeps routes, page props, and API clients typed end to end.',
     '',
     'Every documentation page is also available as raw Markdown: append `.md` to its URL.',
     '',

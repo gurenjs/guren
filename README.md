@@ -5,9 +5,9 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/7nohe?logo=githubsponsors)](https://github.com/sponsors/7nohe)
 
-**A Laravel-inspired fullstack TypeScript framework, built for Bun.**
+**The fullstack TypeScript framework for the AI-agent era.**
 
-Routing, controllers, ORM, authentication, and Inertia.js + React frontend integration — all in one cohesive developer experience.
+Laravel-style conventions, end-to-end type safety, and built-in agent introspection and verification — routing, controllers, ORM, authentication, and Inertia.js + React in one cohesive experience that humans and AI coding agents navigate from the same map.
 
 > **v1.0** — Stable. Breaking changes only in major releases, per the [release policy](docs/en/guides/release-policy.md).
 
@@ -51,6 +51,7 @@ Run `bun run codegen` after adding features to regenerate types. When you are re
 
 ## What you get
 
+- **Agent-ready by default** — `guren context` hands an agent the project map with API signatures, `guren check` and `guren audit` verify its work mechanically, and every new app ships an agent harness. In a [public, blind-scored evaluation](https://github.com/gurenjs/framework-comparison/tree/main/agent-eval), every agent trial shipped a working feature
 - **Laravel-style MVC** — routes, controllers, and an Eloquent-inspired Model API
 - **Inertia.js + React** — SPA-like UX without a separate frontend app
 - **Drizzle ORM** — swap database backends through an adapter (PostgreSQL / SQLite)

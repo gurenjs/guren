@@ -10,6 +10,30 @@ An honest look at where Guren fits — compared with Hono, Next.js, AdonisJS, an
 
 Guren also invests heavily in one thing most frameworks do not: making your project easy for **AI coding agents** to understand, extend, and verify. More on that below.
 
+## Built for AI Coding Agents
+
+Most frameworks were designed for humans reading documentation. Guren is additionally designed for agents working inside your repository — and every scaffolded app ships that way out of the box: agent-ready by default, in the same spirit as secure by default. Three properties make the difference:
+
+**Agents can discover the project cheaply.** `bunx guren context` emits a compact map of your routes, models, controllers, and pages (add `--json` for machine-readable output). An agent gets accurate project understanding from one command instead of crawling the tree, which keeps its context window small and its assumptions correct. `bunx guren model:list` does the same for the data model.
+
+**Conventions shrink the decision space.** Controllers live in `app/Http/Controllers`, models in `app/Models`, pages in `resources/js/pages` — and `bunx guren make:feature Post --fields "title:string,body:text"` scaffolds a complete, consistent CRUD slice. When there is one obvious place and one obvious shape for everything, generated code lands right the first time far more often.
+
+**Mistakes are caught mechanically, not by review alone.** Three independent gates verify agent-written code:
+
+```bash
+bunx guren check    # routes ↔ controllers ↔ pages stay consistent
+bunx guren audit    # missing validation/auth on mutating routes, raw SQL, secrets
+bun run typecheck   # typed page props and route contracts fail the build on drift
+```
+
+Because page props, route params, and request bodies are all typed contracts, an agent that hallucinates a prop name or forgets a validation schema gets a compile error or a failing check — before you read a single line of the diff.
+
+The result: less context to load, fewer degrees of freedom to get wrong, and mechanical verification of what was produced. That loop — discover, generate, verify — is what makes agent-driven development on Guren dependable rather than hopeful.
+
+**And the specification keeps itself honest.** Guren treats project knowledge by one principle: *derived where possible, declared where not, checked always*. ER diagrams, the domain model, and the screen inventory are generated from code (`bunx guren spec:generate`) and drift-gated in CI; decisions that code can't express live as ADRs whose frontmatter links them to the models they govern, validated on every change; and `bunx guren context Invoice` hands anyone — human or agent — everything the project knows about one entity, including the documents linked to it, with the checker vouching that the links are intact and the derived views current. See [Spec-Anchored Development](./spec-anchored.md) for the full loop.
+
+**And it is measured, not aspirational.** In a [reproducible agent evaluation](https://github.com/gurenjs/framework-comparison/tree/main/agent-eval) — the same feature task, scored blind by typecheck, tests, and a hidden HTTP smoke the agent never saw — agents shipped a working feature on Guren in all 39 trials across five rounds. The same study measures, round by round, how the shipped agent guidance changes agent cost — including the rounds that did not help — and its findings feed straight back into the framework. The harness, raw data, and honest limitations are all public.
+
 ## Compared with Hono
 
 Guren's HTTP layer *is* Hono. Every request goes through Hono's router, so you stay in the same performance class — Guren adds a thin MVC layer on top, not a new server.
@@ -55,30 +79,6 @@ If you come from Laravel or Rails, Guren will feel like home: controllers, model
 - **One language end to end.** No PHP-to-JavaScript context switch between backend and frontend. Your validation schemas, models, and page props are all TypeScript.
 - **Types cross the wire.** Laravel's DX with static guarantees: the compiler checks that the props a controller sends match what the React page declares.
 - **A modern runtime.** Bun executes TypeScript natively — no transpile step in development, fast startup, and a built-in test runner.
-
-## Built for AI Coding Agents
-
-Most frameworks were designed for humans reading documentation. Guren is additionally designed for agents working inside your repository — three properties make the difference:
-
-**Agents can discover the project cheaply.** `bunx guren context` emits a compact map of your routes, models, controllers, and pages (add `--json` for machine-readable output). An agent gets accurate project understanding from one command instead of crawling the tree, which keeps its context window small and its assumptions correct. `bunx guren model:list` does the same for the data model.
-
-**Conventions shrink the decision space.** Controllers live in `app/Http/Controllers`, models in `app/Models`, pages in `resources/js/pages` — and `bunx guren make:feature Post --fields "title:string,body:text"` scaffolds a complete, consistent CRUD slice. When there is one obvious place and one obvious shape for everything, generated code lands right the first time far more often.
-
-**Mistakes are caught mechanically, not by review alone.** Three independent gates verify agent-written code:
-
-```bash
-bunx guren check    # routes ↔ controllers ↔ pages stay consistent
-bunx guren audit    # missing validation/auth on mutating routes, raw SQL, secrets
-bun run typecheck   # typed page props and route contracts fail the build on drift
-```
-
-Because page props, route params, and request bodies are all typed contracts, an agent that hallucinates a prop name or forgets a validation schema gets a compile error or a failing check — before you read a single line of the diff.
-
-The result: less context to load, fewer degrees of freedom to get wrong, and mechanical verification of what was produced. That loop — discover, generate, verify — is what makes agent-driven development on Guren dependable rather than hopeful.
-
-**And the specification keeps itself honest.** Guren treats project knowledge by one principle: *derived where possible, declared where not, checked always*. ER diagrams, the domain model, and the screen inventory are generated from code (`bunx guren spec:generate`) and drift-gated in CI; decisions that code can't express live as ADRs whose frontmatter links them to the models they govern, validated on every change; and `bunx guren context Invoice` hands anyone — human or agent — everything the project knows about one entity, including the documents linked to it, with the checker vouching that the links are intact and the derived views current. See [Spec-Anchored Development](./spec-anchored.md) for the full loop.
-
-**And it is measured, not aspirational.** In a [reproducible agent evaluation](https://github.com/gurenjs/framework-comparison/tree/main/agent-eval) — the same feature task run against six frameworks, scored blind by typecheck, tests, and a hidden HTTP smoke — agents shipped a working feature on Guren in every trial. The same study showed that the agent guidance every new Guren project ships (an auto-loaded `CLAUDE.md` plus path-scoped rules carrying exact, source-verified API signatures) cuts agent cost by 40% against an undocumented baseline. The harness, raw data, and honest limitations are all public.
 
 ## When Not to Choose Guren
 
