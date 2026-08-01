@@ -420,3 +420,82 @@ describe('entity context (duplicated entity across locations)', () => {
     expect(ctx.seeders).toEqual(['db/seeders/001_PostsSeeder.ts'])
   })
 })
+
+// `make:factory Categories` writes `CategoriesFactory.ts` — the command
+// appends its suffix without inflecting — so discovery has to accept the
+// inflected plural, not just a trailing `s`.
+describe('entity context (irregular plural db artifacts)', () => {
+  let workspace: TempWorkspace
+
+  beforeAll(async () => {
+    workspace = await createTempWorkspace('guren-cli-entity-plural-')
+    const dir = workspace.dir
+
+    await mkdir(join(dir, 'app/Models'), { recursive: true })
+    await mkdir(join(dir, 'db/factories'), { recursive: true })
+    await mkdir(join(dir, 'db/seeders'), { recursive: true })
+    await writeFile(join(dir, 'package.json'), '{}', 'utf8')
+
+    await writeFile(join(dir, 'app/Models/Category.ts'), 'export class Category {}\n', 'utf8')
+    await writeFile(join(dir, 'app/Models/Box.ts'), 'export class Box {}\n', 'utf8')
+    // `$` is legal in an identifier and an anchor in a regex.
+    await writeFile(join(dir, 'app/Models/$Ledger.ts'), 'export class $Ledger {}\n', 'utf8')
+
+    await writeFile(
+      join(dir, 'db/factories/CategoriesFactory.ts'),
+      'export default class CategoriesFactory {}\n',
+      'utf8',
+    )
+    await writeFile(
+      join(dir, 'db/seeders/003_CategoriesSeeder.ts'),
+      'export async function seed() {}\n',
+      'utf8',
+    )
+    // The naive `+s` plural a user may have typed into `make:factory`. Matched
+    // before the inflection rule existed, so it must keep matching.
+    await writeFile(
+      join(dir, 'db/factories/CategorysFactory.ts'),
+      'export default class CategorysFactory {}\n',
+      'utf8',
+    )
+    // Singular naming must keep working alongside all of it.
+    await writeFile(
+      join(dir, 'db/factories/BoxFactory.ts'),
+      'export default class BoxFactory {}\n',
+      'utf8',
+    )
+    await writeFile(
+      join(dir, 'db/factories/$LedgerFactory.ts'),
+      'export default class $LedgerFactory {}\n',
+      'utf8',
+    )
+  })
+
+  afterAll(async () => {
+    await workspace.cleanup()
+  })
+
+  it('finds factories and seeders named with the inflected plural', async () => {
+    const ctx = await generateEntityContext('Category', { cwd: workspace.dir })
+
+    expect(ctx.factories).toEqual([
+      'db/factories/CategoriesFactory.ts',
+      'db/factories/CategorysFactory.ts',
+    ])
+    expect(ctx.seeders).toEqual(['db/seeders/003_CategoriesSeeder.ts'])
+  })
+
+  it('still finds artifacts named with the singular', async () => {
+    const ctx = await generateEntityContext('Box', { cwd: workspace.dir })
+
+    expect(ctx.factories).toEqual(['db/factories/BoxFactory.ts'])
+    // No seeder is named after Box, so another entity's must not stand in.
+    expect(ctx.seeders).toEqual([])
+  })
+
+  it('treats regex metacharacters in the entity name as literals', async () => {
+    const ctx = await generateEntityContext('$Ledger', { cwd: workspace.dir })
+
+    expect(ctx.factories).toEqual(['db/factories/$LedgerFactory.ts'])
+  })
+})

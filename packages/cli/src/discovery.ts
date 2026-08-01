@@ -1,5 +1,7 @@
 import { readdir, access, readFile, stat } from 'node:fs/promises'
 import { resolve, join, extname, relative, sep, posix } from 'node:path'
+import { collectionName } from './inflect'
+import { escapeRegExp } from './utils'
 
 const SOURCE_EXTENSIONS = new Set(['.ts', '.mts', '.js', '.mjs'])
 const TEST_FILE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.js', '.jsx', '.mjs'])
@@ -297,6 +299,34 @@ export async function hasControllerTest(cwd: string, controllerPath: string): Pr
     if (await fileExists(cwd, candidate)) return true
   }
   return false
+}
+
+/** Where `make:factory` and `make:seeder` write, keyed by the suffix they append. */
+export const DB_ARTIFACT_DIRS = {
+  Factory: 'db/factories',
+  Seeder: 'db/seeders',
+} as const
+
+export type DbArtifactKind = keyof typeof DB_ARTIFACT_DIRS
+
+/**
+ * Matches the factory or seeder file names that belong to an entity.
+ *
+ * Tolerance, not derivation. `make:factory` and `make:seeder` append their
+ * suffix to whatever the user typed without inflecting it, so the file name is
+ * the user's choice and every plausible spelling of it has to be accepted: the
+ * singular, the inflected plural (`Category` → `CategoriesFactory`), and the
+ * naive `+s` plural a user may well have typed. `(?:^|_)` lets a numbered
+ * seeder such as `002_PostsSeeder` match.
+ *
+ * The cost of over-tolerance is a stray file listed against an entity; the cost
+ * of under-tolerance is an existing one silently missing. Prefer the former.
+ * Contrast {@link controllerTestCandidates}, which probes exact paths, and
+ * `inflect.ts`, which must produce exactly one name and so declines to guess.
+ */
+export function dbArtifactPattern(entity: string, kind: DbArtifactKind): RegExp {
+  const forms = [...new Set([entity, `${entity}s`, collectionName(entity)])]
+  return new RegExp(`(?:^|_)(?:${forms.map(escapeRegExp).join('|')})${kind}\\.`, 'i')
 }
 
 /**

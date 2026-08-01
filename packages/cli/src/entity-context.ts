@@ -12,6 +12,9 @@ import {
   collectFiles,
   toPosixRelative,
   moduleNameFromRelPath,
+  dbArtifactPattern,
+  DB_ARTIFACT_DIRS,
+  type DbArtifactKind,
 } from './discovery'
 import {
   extractClassDeclaration,
@@ -215,11 +218,14 @@ export async function generateEntityContext(
     return file ? toPosixRelative(cwd, file) : undefined
   }
 
-  const findDbArtifacts = async (subDir: string, filePattern: RegExp): Promise<string[]> => {
+  const findDbArtifacts = async (kind: DbArtifactKind): Promise<string[]> => {
     let roots = await listAppRoots(cwd)
     if (duplicated) roots = roots.filter((root) => root.module === match.module)
 
-    const groups = await Promise.all(roots.map((root) => collectFiles(resolve(root.dir, subDir))))
+    const filePattern = dbArtifactPattern(entity, kind)
+    const groups = await Promise.all(
+      roots.map((root) => collectFiles(resolve(root.dir, DB_ARTIFACT_DIRS[kind]))),
+    )
     return groups
       .flat()
       .filter((file) => filePattern.test(basename(file)))
@@ -291,8 +297,8 @@ export async function generateEntityContext(
       loadControllerBundle(),
       findComponent(discoverResourceFiles, `${entity}Resource`),
       findComponent(discoverPolicyFiles, `${entity}Policy`),
-      findDbArtifacts('db/factories', new RegExp(`(?:^|_)${entity}s?Factory\\.`, 'i')),
-      findDbArtifacts('db/seeders', new RegExp(`(?:^|_)${entity}s?Seeder\\.`, 'i')),
+      findDbArtifacts('Factory'),
+      findDbArtifacts('Seeder'),
       discoverTestFiles(cwd),
       scanDocs(cwd),
     ])
