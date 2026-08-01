@@ -89,7 +89,7 @@ export const users = mysqlTable('users', {
 })
 `
 
-export const SQLITE_SCHEMA_FIXTURE = `import { sqliteTable, integer, text } from '@guren/orm/drizzle'
+export const SQLITE_SCHEMA_FIXTURE = `import { sqliteTable, integer, text } from 'drizzle-orm/sqlite-core'
 
 export const users = sqliteTable('users', {
   id: integer('id').primaryKey({ autoIncrement: true }),

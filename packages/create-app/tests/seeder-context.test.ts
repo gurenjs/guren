@@ -1,0 +1,65 @@
+import { describe, expect, it } from 'bun:test'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { DATABASE_DRIVERS, scaffoldAppBlueprint, type DatabaseDriver } from '../src/blueprints'
+import { createTempWorkspace } from './helpers'
+
+/**
+ * A seeder receives the drizzle database the app configured, and the bare
+ * `SeederContext` is PostgreSQL-shaped — a MySQL or SQLite seeder typed with it
+ * cannot insert into its own schema, and dialect-specific builders are missing
+ * outright. Every scaffold therefore re-exports its own dialect's context as
+ * `AppSeederContext`, which is what keeps the shipped seeders portable.
+ */
+const EXPECTED_CONTEXT = {
+  postgres: 'PostgresSeederContext',
+  mysql: 'MySqlSeederContext',
+  sqlite: 'SqliteSeederContext',
+} as const satisfies Record<DatabaseDriver, string>
+
+describe('generated config/database.ts seeder context', () => {
+  for (const driver of DATABASE_DRIVERS) {
+    it(`re-exports ${EXPECTED_CONTEXT[driver]} as AppSeederContext for --db ${driver}`, async () => {
+      const workspace = await createTempWorkspace(`guren-seeder-context-${driver}-`)
+
+      try {
+        const dest = join(workspace.dir, 'test-app')
+        await scaffoldAppBlueprint({ destination: dest, renderingMode: 'spa', database: driver })
+
+        const config = await readFile(join(dest, 'config/database.ts'), 'utf8')
+
+        expect(config).toContain(`type ${EXPECTED_CONTEXT[driver]} } from '@guren/orm'`)
+        expect(config).toContain(`export type AppSeederContext = ${EXPECTED_CONTEXT[driver]}`)
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+  }
+})
+
+// One driver is enough here: the blog seeders are static template files, and
+// `AppSeederContext` is the indirection that lets them stay that way. Which
+// alias the app ends up with is the describe above.
+describe('blog blueprint seeders', () => {
+  it('annotates its seeders with AppSeederContext', async () => {
+    const workspace = await createTempWorkspace('guren-blog-seeder-context-')
+
+    try {
+      const dest = join(workspace.dir, 'test-app')
+      await scaffoldAppBlueprint({
+        blueprint: 'blog',
+        destination: dest,
+        renderingMode: 'ssr',
+        database: 'sqlite',
+      })
+
+      for (const seeder of ['db/seeders/001_users.ts', 'db/seeders/002_posts.ts']) {
+        const source = await readFile(join(dest, seeder), 'utf8')
+        expect(source).toContain("import type { AppSeederContext } from '../../config/database.js'")
+        expect(source).toContain('async ({ db }: AppSeederContext) => {')
+      }
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})

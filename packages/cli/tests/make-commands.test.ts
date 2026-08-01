@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import * as fs from 'node:fs'
+import * as os from 'node:os'
 import * as path from 'node:path'
 import { makeChannel } from '../src/make-channel'
 import { makeCommand } from '../src/make-command'
@@ -16,15 +17,15 @@ import { makeProvider } from '../src/make-provider'
 import { makeResource } from '../src/make-resource'
 import { makeSeeder } from '../src/make-seeder'
 
-const TEST_DIR = '/tmp/guren-cli-test'
+// A fixed, predictable path under the shared OS temp dir let another process
+// pre-plant a symlink there before a test wrote through it. mkdtempSync's
+// random suffix is what makes the directory this test writes into
+// unguessable, so it has to be created fresh per test rather than reused.
+let TEST_DIR: string
 
 describe('CLI make:* commands', () => {
   beforeEach(() => {
-    // Change working directory to test directory
-    if (fs.existsSync(TEST_DIR)) {
-      fs.rmSync(TEST_DIR, { recursive: true })
-    }
-    fs.mkdirSync(TEST_DIR, { recursive: true })
+    TEST_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'guren-cli-test-'))
     process.chdir(TEST_DIR)
   })
 
@@ -191,9 +192,33 @@ describe('CLI make:* commands', () => {
     it('generates correct seeder template', async () => {
       const result = await makeSeeder('User')
       const content = fs.readFileSync(result, 'utf-8')
-      expect(content).toContain("import { defineSeeder } from '@guren/core'")
-      expect(content).toContain('export default defineSeeder(async () => {')
+      expect(content).toContain("import { defineSeeder, type PostgresSeederContext } from '@guren/core'")
+      expect(content).toContain('export default defineSeeder(async ({ db }: PostgresSeederContext) => {')
       expect(content).toContain("console.info('Ran UserSeeder.')")
+    })
+
+    // The context carries the dialect's drizzle database: annotating every
+    // seeder with the PostgreSQL one leaves a MySQL/SQLite app unable to insert
+    // into its own schema.
+    it('types the context for the schema dialect', async () => {
+      fs.mkdirSync(path.join(TEST_DIR, 'db'), { recursive: true })
+      fs.writeFileSync(
+        path.join(TEST_DIR, 'db/schema.ts'),
+        "import { sqliteTable } from 'drizzle-orm/sqlite-core'\n",
+      )
+
+      const sqlite = fs.readFileSync(await makeSeeder('User'), 'utf-8')
+      expect(sqlite).toContain("import { defineSeeder, type SqliteSeederContext } from '@guren/core'")
+      expect(sqlite).toContain('async ({ db }: SqliteSeederContext) => {')
+
+      fs.writeFileSync(
+        path.join(TEST_DIR, 'db/schema.ts'),
+        "import { mysqlTable } from 'drizzle-orm/mysql-core'\n",
+      )
+
+      const mysql = fs.readFileSync(await makeSeeder('Post'), 'utf-8')
+      expect(mysql).toContain("import { defineSeeder, type MySqlSeederContext } from '@guren/core'")
+      expect(mysql).toContain('async ({ db }: MySqlSeederContext) => {')
     })
   })
 

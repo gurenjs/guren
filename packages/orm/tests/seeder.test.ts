@@ -182,7 +182,7 @@ describe('runSeeders', () => {
     )
 
     const mockDb: { results?: number[] } = {}
-    await runSeeders(mockDb as never, tempDir)
+    await runSeeders(mockDb, tempDir)
 
     expect(mockDb.results).toEqual([1, 2])
   })
@@ -197,7 +197,7 @@ describe('runSeeders', () => {
     )
 
     const mockDb: { asyncDone?: boolean } = {}
-    await runSeeders(mockDb as never, tempDir)
+    await runSeeders(mockDb, tempDir)
 
     expect(mockDb.asyncDone).toBe(true)
   })

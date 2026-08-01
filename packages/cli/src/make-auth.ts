@@ -11,6 +11,7 @@ import {
   ensureMysqlImports,
   ensureSqliteImports,
   readSchemaDialect,
+  seederContextTypes,
   type SchemaDialect,
 } from './patch-helpers'
 import { readIfExists } from './discovery'
@@ -1726,10 +1727,12 @@ function buildSeederTemplate(dialect: SchemaDialect): string {
       ? `.onDuplicateKeyUpdate({ set: { name: 'Demo User' } })`
       : `.onConflictDoNothing({ target: users.email })`
 
-  return `import { defineSeeder, ScryptHasher } from '@guren/core'
+  const context = seederContextTypes[dialect]
+
+  return `import { defineSeeder, ScryptHasher, type ${context} } from '@guren/core'
 import { users } from '../schema.js'
 
-export default defineSeeder(async ({ db }) => {
+export default defineSeeder(async ({ db }: ${context}) => {
   const hasher = new ScryptHasher()
   const passwordHash = await hasher.hash('secret')
 

@@ -768,3 +768,36 @@ export async function run() {
 ```bash
 bun run db:seed
 ```
+
+### Seeding through Drizzle
+
+`defineSeeder()` hands the seeder the Drizzle database itself, which is useful
+for bulk inserts and upserts that bypass the model layer. Its type depends on
+the dialect, so annotate the context with `AppSeederContext` — the alias
+`config/database.ts` exports for whichever database the app is configured with:
+
+```ts
+// db/seeders/PostsSeeder.ts
+import { defineSeeder } from '@guren/core'
+import type { AppSeederContext } from '../../config/database.js'
+import { posts } from '../schema.js'
+
+export default defineSeeder(async ({ db }: AppSeederContext) => {
+  await db.insert(posts).values({ title: 'Hello', body: 'Welcome to Guren!' })
+})
+```
+
+`SeederContext` without a type argument means PostgreSQL, so on MySQL or SQLite
+it rejects the app's own schema. `AppSeederContext` is exported by
+`config/database.ts` in apps scaffolded from this release onwards; an older app
+imports its dialect's alias from `@guren/core` directly instead —
+`PostgresSeederContext`, `MySqlSeederContext`, `SqliteSeederContext`, or
+`AwsDataApiSeederContext`:
+
+```ts
+import { defineSeeder, type MySqlSeederContext } from '@guren/core'
+```
+
+> [!NOTE]
+> D1 has no seeder context: its `seedDatabase()` does not run seeders. Seed a D1
+> database with `wrangler d1 execute <database> --file <seed.sql>` instead.
