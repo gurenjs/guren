@@ -403,8 +403,11 @@ export const handler = createLambdaHandler(app)
    change that reads as harmless (an added env var in a `dev` script) fails CI
    while `build`/`typecheck`/`test` stay green. The smokes scaffold a real app
    and take several minutes — judge them by exit code, not by wall time.
-7. Review `.claude/rules/common-pitfalls.md` - check for known gotchas
-8. Follow commit message convention
+7. **If a template started using a framework API added in the same PR:** run
+   `bun run smoke:starter:npm` — it installs `@guren/*` from the registry, and
+   is expected to be red until the release ships that API.
+8. Review `.claude/rules/common-pitfalls.md` - check for known gotchas
+9. Follow commit message convention
 
 ## Claude Code Agents
 
