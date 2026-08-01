@@ -348,7 +348,17 @@ function scaffoldWranglerConfig(root: string, out: string, packageName: string |
     vars: { NODE_ENV: 'production' },
   }
 
-  writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`)
+  try {
+    // `wx` re-checks existence atomically at write time: the `existsSync`
+    // above can go stale if a config appears between the check and the write.
+    writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, { flag: 'wx' })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      warnMissingBuildOwnedKeys(configPath, outRelative)
+      return
+    }
+    throw error
+  }
   console.log(`Cloudflare build: scaffolded ${configPath} — fill in d1_databases[0].database_id before deploying.`)
 }
 

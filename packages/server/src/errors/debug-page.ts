@@ -155,19 +155,49 @@ interface StackFrame {
   col: string
 }
 
+/**
+ * Split a `file:line:col` suffix off a location string, scanning from the
+ * right so drive letters and URLs with colons stay part of the file path.
+ */
+function splitLocation(location: string): { file: string; line: string; col: string } | null {
+  const lastColon = location.lastIndexOf(':')
+  if (lastColon <= 0) return null
+  const prevColon = location.lastIndexOf(':', lastColon - 1)
+  if (prevColon <= 0) return null
+
+  const line = location.slice(prevColon + 1, lastColon)
+  const col = location.slice(lastColon + 1)
+  if (!/^\d+$/.test(line) || !/^\d+$/.test(col)) return null
+
+  return { file: location.slice(0, prevColon), line, col }
+}
+
+// Parsed with string operations instead of `/\s+at\s+(.+?)\s+\((.+?):…/`,
+// whose lazy groups backtrack polynomially — error stacks can embed
+// request-derived messages.
 function parseStackTrace(stack: string): StackFrame[] {
   const lines = stack.split('\n').slice(1)
   return lines
-    .map((line) => {
-      // Match: at functionName (file:line:col)
-      const match = line.match(/\s+at\s+(.+?)\s+\((.+?):(\d+):(\d+)\)/)
-      if (match) {
-        return { func: match[1], file: match[2], line: match[3], col: match[4] }
+    .map((line): StackFrame | null => {
+      const trimmed = line.trim()
+      if (!trimmed.startsWith('at ')) return null
+      const rest = trimmed.slice(3).trim()
+
+      // Format: at functionName (file:line:col)
+      if (rest.endsWith(')')) {
+        const open = rest.lastIndexOf('(')
+        if (open > 0) {
+          const location = splitLocation(rest.slice(open + 1, -1))
+          if (location) {
+            return { func: rest.slice(0, open).trim(), ...location }
+          }
+        }
       }
-      // Match: at file:line:col
-      const match2 = line.match(/\s+at\s+(.+?):(\d+):(\d+)/)
-      if (match2) {
-        return { func: '<anonymous>', file: match2[1], line: match2[2], col: match2[3] }
+
+      // Format: at file:line:col
+      const location = splitLocation(rest)
+      if (location) {
+        return { func: '<anonymous>', ...location }
       }
       return null
     })

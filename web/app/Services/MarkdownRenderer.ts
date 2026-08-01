@@ -159,7 +159,14 @@ ${content}
 }
 
 function slugifyHeading(text: string, seenSlugs: Map<string, number>): string {
-  const stripped = text.replace(/<[^>]*>/g, '')
+  // Repeat until stable: a single pass can splice a new tag together
+  // (e.g. `<scr<x>ipt>` becomes `<script>` after one removal).
+  let stripped = text
+  let previous: string
+  do {
+    previous = stripped
+    stripped = stripped.replace(/<[^>]*>/g, '')
+  } while (stripped !== previous)
   let slug = stripped
     .toLowerCase()
     .trim()

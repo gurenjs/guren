@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest'
 import * as fs from 'node:fs'
+import * as os from 'node:os'
 import * as path from 'node:path'
 import {
   Logger,
@@ -152,7 +153,7 @@ describe('ConsoleChannel', () => {
 })
 
 describe('FileChannel', () => {
-  const testDir = '/tmp/guren-logging-test'
+  const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guren-logging-test-'))
   const testFile = `${testDir}/test.log`
 
   beforeEach(() => {
@@ -245,7 +246,7 @@ describe('FileChannel', () => {
 })
 
 describe('DailyFileChannel', () => {
-  const testDir = '/tmp/guren-daily-logging-test'
+  const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guren-daily-logging-test-'))
   const testFile = `${testDir}/app.log`
 
   beforeEach(() => {
@@ -480,7 +481,7 @@ describe('LogManager', () => {
   })
 
   it('switches channels', () => {
-    const testDir = '/tmp/guren-logmanager-test'
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guren-logmanager-test-'))
     const testFile = `${testDir}/test.log`
 
     if (fs.existsSync(testDir)) {

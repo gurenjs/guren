@@ -109,9 +109,14 @@ async function main() {
 
   // Append to history
   const historyFile = resolve(ROOT, 'benchmark-history.json')
-  const history: BenchmarkResults[] = existsSync(historyFile)
-    ? JSON.parse(readFileSync(historyFile, 'utf-8'))
-    : []
+  let history: BenchmarkResults[] = []
+  try {
+    history = JSON.parse(readFileSync(historyFile, 'utf-8'))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error
+    }
+  }
   history.push(results)
   writeFileSync(historyFile, JSON.stringify(history, null, 2))
 

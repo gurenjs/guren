@@ -2,6 +2,23 @@ import { consola } from 'consola'
 import { resolve, join } from 'node:path'
 import { existsSync, mkdirSync, writeFileSync, readdirSync, readFileSync, copyFileSync } from 'node:fs'
 
+/**
+ * Write JSON, refusing to overwrite unless forced. The `wx` flag makes the
+ * exists-check and the write one atomic operation — a separate `existsSync`
+ * guard leaves a race window. Returns false when the file already existed.
+ */
+function writeJsonUnlessPresent(filePath: string, content: unknown, force: boolean): boolean {
+  try {
+    writeFileSync(filePath, JSON.stringify(content, null, 2) + '\n', { flag: force ? 'w' : 'wx' })
+    return true
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      return false
+    }
+    throw error
+  }
+}
+
 export interface LangPublishOptions {
   /**
    * Application root directory.
@@ -136,12 +153,11 @@ export function publishLanguageFiles(options: LangPublishOptions = {}): string[]
   for (const [filename, content] of Object.entries(files)) {
     const filePath = join(enPath, filename)
 
-    if (existsSync(filePath) && !options.force) {
+    if (!writeJsonUnlessPresent(filePath, content, options.force ?? false)) {
       consola.warn(`File already exists: ${filePath} (use --force to overwrite)`)
       continue
     }
 
-    writeFileSync(filePath, JSON.stringify(content, null, 2) + '\n')
     createdFiles.push(filePath)
     consola.success(`Created: ${filePath}`)
   }
@@ -232,12 +248,11 @@ export function makeLanguage(locale: string, options: MakeLangOptions = {}): str
     for (const [filename, content] of Object.entries(emptyFiles)) {
       const filePath = join(localePath, filename)
 
-      if (existsSync(filePath) && !options.force) {
+      if (!writeJsonUnlessPresent(filePath, content, options.force ?? false)) {
         consola.warn(`File already exists: ${filePath} (use --force to overwrite)`)
         continue
       }
 
-      writeFileSync(filePath, JSON.stringify(content, null, 2) + '\n')
       createdFiles.push(filePath)
       consola.success(`Created: ${filePath}`)
     }

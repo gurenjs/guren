@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { defineSeeder, loadSeeders, runSeeders, type SeederContext } from '../src/seeder'
@@ -20,8 +20,7 @@ describe('loadSeeders', () => {
   let tempDir: string
 
   beforeEach(async () => {
-    tempDir = join(tmpdir(), `seeder-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)
-    await mkdir(tempDir, { recursive: true })
+    tempDir = await mkdtemp(join(tmpdir(), 'seeder-test-'))
   })
 
   afterEach(async () => {
@@ -161,8 +160,7 @@ describe('runSeeders', () => {
   let tempDir: string
 
   beforeEach(async () => {
-    tempDir = join(tmpdir(), `seeder-run-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)
-    await mkdir(tempDir, { recursive: true })
+    tempDir = await mkdtemp(join(tmpdir(), 'seeder-run-test-'))
   })
 
   afterEach(async () => {

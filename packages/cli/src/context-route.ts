@@ -57,7 +57,10 @@ export function routeDefinitionToContextRoute(def: RouteDefinition): ContextRout
  * table structure unescaped.
  */
 export function escapeMarkdownTableCell(value: string): string {
-  return value.replace(/\|/g, '\\|').replace(/\s*\r?\n\s*/g, ' ')
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/\|/g, '\\|')
+    .replace(/[ \t]*\r?\n\s*/g, ' ')
 }
 
 /**

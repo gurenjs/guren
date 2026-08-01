@@ -109,7 +109,7 @@ export function registerDevAssets(app: Application, options: DevAssetsOptions): 
 
   if (options.inertiaClient !== false) {
     const inertiaClientDir = dirname(inertiaClientSource)
-    const inertiaClientBase = inertiaClientPath.replace(/[^/]*$/u, '') || '/'
+    const inertiaClientBase = inertiaClientPath.slice(0, inertiaClientPath.lastIndexOf('/') + 1) || '/'
     const inertiaClientPattern = `${inertiaClientBase.endsWith('/') ? inertiaClientBase : `${inertiaClientBase}/`}*`
     const inertiaClientRequestPath = inertiaClientPath.slice(inertiaClientBase.length)
 

@@ -6,21 +6,7 @@ import type {
 } from './types'
 import type { MailManager } from './MailManager'
 import { Job, getQueueDriver, registerJob } from '../queue'
-
-/**
- * Parse an email address string or object into MailAddress.
- */
-function parseAddress(input: string | MailAddress): MailAddress {
-  if (typeof input === 'string') {
-    // Try to parse "Name <email>" format
-    const match = input.match(/^(.+)\s*<(.+)>$/)
-    if (match) {
-      return { name: match[1].trim(), email: match[2].trim() }
-    }
-    return { email: input }
-  }
-  return input
-}
+import { parseMailAddress as parseAddress } from './address'
 
 /**
  * Fluent mail builder for composing and sending emails.

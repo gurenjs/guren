@@ -1,4 +1,5 @@
 import type { StorageDriver, MemoryDriverOptions, PutOptions, FileMetadata } from '../types'
+import { trimSlashes } from '../../support/trim-slashes'
 
 /**
  * Stored file in memory.
@@ -34,7 +35,7 @@ export class MemoryDriver implements StorageDriver {
    * Normalize path (remove leading/trailing slashes).
    */
   private normalizePath(path: string): string {
-    return path.replace(/^\/+|\/+$/g, '')
+    return trimSlashes(path)
   }
 
   /**

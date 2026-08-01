@@ -788,14 +788,25 @@ export async function readInertiaResponse(response: Response): Promise<{
 
   const body = await response.text()
 
-  // Inertia v3: the payload lives in a JSON script element.
-  const scriptMatch = body.match(
-    /<script[^>]*data-page="app"[^>]*type="application\/json"[^>]*>([\s\S]*?)<\/script>/,
-  )
+  // Inertia v3: the payload lives in a JSON script element. Scan open tags
+  // and check attributes with `includes` — chaining several `[^>]*` groups in
+  // one regex backtracks polynomially on large HTML bodies.
+  let scriptPayload: string | undefined
+  const openTagPattern = /<script\b[^>]*>/g
+  let openTag: RegExpExecArray | null
+  while ((openTag = openTagPattern.exec(body)) !== null) {
+    if (openTag[0].includes('data-page="app"') && openTag[0].includes('type="application/json"')) {
+      const end = body.indexOf('</script>', openTagPattern.lastIndex)
+      if (end !== -1) {
+        scriptPayload = body.slice(openTagPattern.lastIndex, end)
+      }
+      break
+    }
+  }
 
   let payload: InertiaPayload
-  if (scriptMatch?.[1]) {
-    payload = JSON.parse(scriptMatch[1]) as InertiaPayload
+  if (scriptPayload) {
+    payload = JSON.parse(scriptPayload) as InertiaPayload
   } else {
     // Legacy (pre-v3): payload in the container's data-page attribute.
     const match = body.match(/data-page="([^"]+)"/)

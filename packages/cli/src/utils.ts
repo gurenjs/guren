@@ -138,8 +138,22 @@ export async function scaffoldFile(name: string, config: ScaffoldConfig, options
 
 export function pascalCase(value: string): string {
   return value
-    .replace(/(?:^|[-_\s]+)([a-zA-Z])/gu, (_, char: string) => char.toUpperCase())
+    .split(/[-_\s]/u)
+    .map((word) => (word ? word.charAt(0).toUpperCase() + word.slice(1) : word))
+    .join('')
     .replace(/[^a-zA-Z0-9]/gu, '')
+}
+
+/**
+ * Strip leading and trailing slashes without regex backtracking
+ * (`/\/+$/` is quadratic on adversarial input).
+ */
+export function trimSlashes(value: string): string {
+  let start = 0
+  let end = value.length
+  while (start < end && value[start] === '/') start++
+  while (end > start && value[end - 1] === '/') end--
+  return value.slice(start, end)
 }
 
 export function camelCase(value: string): string {

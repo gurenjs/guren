@@ -1,4 +1,4 @@
-import { access, readFile, writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 import { kebabCase, writeFilesSafe, type WriterOptions } from './utils'
 
@@ -29,7 +29,6 @@ async function inferAppName(): Promise<string> {
   const packagePath = resolve(process.cwd(), 'package.json')
 
   try {
-    await access(packagePath)
     const packageJson = JSON.parse(await readFile(packagePath, 'utf8')) as { name?: string }
     if (packageJson.name?.trim()) {
       return sanitizeFlyAppName(packageJson.name)

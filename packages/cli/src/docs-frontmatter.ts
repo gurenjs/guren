@@ -127,7 +127,9 @@ export type DocFrontmatterValue = string | DocMapping | Array<string | DocMappin
 /** A `{ by, at }`-shaped mapping, however it was written. */
 export type DocMapping = Record<string, string>
 
-const KEY_VALUE_RE = /^([A-Za-z_][\w-]*):\s*(.*)$/
+// Value is captured raw (callers trim); a `\s*` between `:` and `(.*)`
+// would overlap with `.` and give the regex polynomial backtracking.
+const KEY_VALUE_RE = /^([A-Za-z_][\w-]*):(.*)$/
 
 /** Whatever an inline scalar position holds: a mapping, a list, or a string. */
 function parseInlineValue(value: string): DocFrontmatterValue {
@@ -177,9 +179,9 @@ export function parseDocFrontmatter(
     // Blank lines and whole-line comments never change structure.
     if (!rawLine.trim() || /^\s*#/.test(rawLine)) continue
 
-    const item = /^(\s*)-\s*(.*)$/.exec(rawLine)
+    const item = /^[ \t]*-(.*)$/.exec(rawLine)
     if (item && open) {
-      const entry = stripInlineComment(item[2].trim())
+      const entry = stripInlineComment(item[1].trim())
       if (!entry) {
         // `-` alone opens an entry whose body is on the following
         // indented lines; the mapping is created when the first one
@@ -198,7 +200,7 @@ export function parseDocFrontmatter(
       // `- by: human:ada` opens a mapping the following indented
       // siblings extend.
       const kv = KEY_VALUE_RE.exec(entry)
-      if (kv && kv[2] !== '') {
+      if (kv && kv[2].trim() !== '') {
         itemMapping = { [kv[1]]: unquote(kv[2].trim()) }
         open.list.push(itemMapping)
         continue

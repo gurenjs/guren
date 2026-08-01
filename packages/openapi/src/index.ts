@@ -123,16 +123,21 @@ export function generateOpenApiDocument(
   options: OpenApiDocumentOptions,
 ): GenerateOpenApiDocumentResult {
   const warnings: string[] = []
-  const paths: OpenApiDocument['paths'] = {}
+  const pathEntries = new Map<string, Map<string, OpenApiOperationObject>>()
 
   for (const definition of definitions) {
     const pathKey = toOpenApiPath(definition.path)
     const methodKey = definition.method.toLowerCase()
     const operation = buildOperation(definition, warnings)
 
-    paths[pathKey] ??= {}
-    paths[pathKey][methodKey] = operation
+    const operations = pathEntries.get(pathKey) ?? new Map<string, OpenApiOperationObject>()
+    operations.set(methodKey, operation)
+    pathEntries.set(pathKey, operations)
   }
+
+  const paths: OpenApiDocument['paths'] = Object.fromEntries(
+    Array.from(pathEntries, ([pathKey, operations]) => [pathKey, Object.fromEntries(operations)]),
+  )
 
   return {
     document: {

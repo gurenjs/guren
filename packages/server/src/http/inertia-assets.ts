@@ -6,6 +6,7 @@ import type { Application } from './Application'
 import { createStaticRewrite, registerDevAssets, type DevAssetsOptions } from './dev-assets'
 import { registerRootPublicAssets } from './public-assets'
 import { parseImportMap } from '../support/import-map'
+import { trimTrailingSlashes } from '../support/trim-slashes'
 import { hash } from '../encryption/Hash'
 
 export interface InertiaAssetsOptions extends DevAssetsOptions {
@@ -111,7 +112,7 @@ export function configureInertiaAssets(app: Application, options: InertiaAssetsO
 
       const inertiaClientDir = dirname(inertiaClientEntry)
       const inertiaClientPath = options.inertiaClientPath ?? DEFAULT_VENDOR_CLIENT_PATH
-      const inertiaClientBase = inertiaClientPath.replace(/[^/]*$/u, '') || '/'
+      const inertiaClientBase = inertiaClientPath.slice(0, inertiaClientPath.lastIndexOf('/') + 1) || '/'
       const inertiaClientPattern = `${inertiaClientBase.endsWith('/') ? inertiaClientBase : `${inertiaClientBase}/`}*`
       const inertiaClientRequestPath = inertiaClientPath.slice(inertiaClientBase.length)
 
@@ -327,7 +328,7 @@ function normalizeDevServerUrl(value: string): string {
     return trimmed
   }
 
-  const stripped = trimmed.replace(/\/+$/u, '')
+  const stripped = trimTrailingSlashes(trimmed)
   return stripped.length > 0 ? stripped : '/'
 }
 

@@ -156,7 +156,10 @@ function escapeSingleQuotes(value: string): string {
 }
 
 function escapeTemplateSegment(value: string): string {
-  return value.replace(/`/gu, '\\`').replace(/\\/gu, '\\\\')
+  return value
+    .replace(/\\/gu, '\\\\')
+    .replace(/`/gu, '\\`')
+    .replace(/\$\{/gu, '\\${')
 }
 
 type HelperTreeNode = {
