@@ -119,16 +119,37 @@ function pathBefore(frame: string, from: number, splits: number[]): string | und
 }
 
 /**
- * Where the last line terminator before `before` ends, or 0 when there is none.
+ * The index of the `(` that closes a frame's final `)`, found by scanning
+ * backward and counting nesting depth, or `undefined` when it never balances.
  *
- * A path could never span one — the patterns spelled it `.`, which stops at
- * every line break — so this is the earliest a path ending at `before` may
- * start.
+ * Neither the leftmost nor the rightmost `(` is right in general. A path may
+ * contain one — `at fn (/app (old)/x.ts:1:2)` needs the outer, *leftmost*
+ * pair — and so may the function name in front of it — `at weird (name)
+ * (/app/x.ts:1:2)` needs the outer, *rightmost* pair. Depth is what actually
+ * tells the two apart; a fixed "first" or "last" gets one of them wrong.
+ *
+ * Bails if the scan crosses a line terminator before depth returns to zero: a
+ * path could never span one, so an unbalanced `(` on the far side of a line
+ * break was never part of this frame's location.
  */
-function afterLastTerminator(frame: string, before: number): number {
-  let cursor = before
-  while (cursor > 0 && !LINE_TERMINATOR.test(frame[cursor - 1])) cursor -= 1
-  return cursor
+function matchingOpenParen(frame: string, closeIndex: number): number | undefined {
+  let depth = 0
+
+  for (let index = closeIndex; index >= 0; index--) {
+    const character = frame[index]
+
+    if (LINE_TERMINATOR.test(character)) {
+      return undefined
+    }
+
+    if (character === ')') {
+      depth++
+    } else if (character === '(' && --depth === 0) {
+      return index
+    }
+  }
+
+  return undefined
 }
 
 /**
@@ -143,32 +164,31 @@ function afterLastTerminator(frame: string, before: number): number {
  * are both ordinary in a macOS directory name, and excluding either is how the
  * truncation happened in the first place.
  *
+ * Neither the leftmost nor the rightmost `(` bounds the opening paren in
+ * general — see `matchingOpenParen` — so the two shapes below no longer search
+ * for one at a fixed end.
+ *
  * Both shapes require a trailing `:line`, so frames that name no location at
  * all — `at native`, `at <anonymous>` — are rejected instead of being read as a
- * path.
+ * path. That is a check on the frame's shape, not on what it points at: the
+ * engine also emits those same names *with* a location, and rejecting those is
+ * `SYNTHETIC_FRAME_PATHS`'s job below, not this function's. An `eval` group is
+ * rejected outright here, though: V8 nests the real location inside
+ * `eval at fn (/app/x.ts:1:2), <anonymous>:1:1`, and keying a connection on
+ * text that is not a path is worse than not keying it — a handle with no key
+ * is left alone, which is the safe failure.
  */
-function parseFrameLocation(frame: string | undefined): string | undefined {
-  if (frame === undefined) return undefined
-
+function parseFrameLocation(frame: string): string | undefined {
   // `trimEnd` drops exactly the characters `\s` matches, so this is where the
   // patterns' trailing `\s*$` would have started.
   const end = frame.trimEnd().length
 
-  // `at fn (/path/file.ts:1:2)`. The opening paren is the frame's *leftmost*
-  // usable one, not the one nearest the location: `(` is ordinary in a
-  // directory name, and matching leftmost is what keeps `/app (old)/config`
-  // whole. Usable means the path it opens reaches the location without
-  // crossing a line break, which is why a split can fall to a later paren.
   if (end > 0 && frame[end - 1] === ')') {
     const splits = locationSplits(frame, end - 1)
+    const open = splits.length === 0 ? undefined : matchingOpenParen(frame, end - 1)
+    const path = open === undefined ? undefined : pathBefore(frame, open + 1, splits)
 
-    // Both splits sit inside one `:line:column` run, which is colons and
-    // digits, so no line break can fall between them — the earliest paren a
-    // path may open at is therefore the same whichever split is taken.
-    const open = splits.length === 0 ? -1 : frame.indexOf('(', afterLastTerminator(frame, splits[0]))
-    const path = open === -1 ? undefined : pathBefore(frame, open + 1, splits)
-
-    if (path !== undefined) return path
+    if (path !== undefined && !path.startsWith('eval at ')) return path
   }
 
   // `at /path/file.ts:1:2`, where only the trailing location bounds the path.
@@ -198,15 +218,48 @@ function parseFrameLocation(frame: string | undefined): string | undefined {
 }
 
 /**
+ * Paths the engine reports for code that has no source location.
+ *
+ * A class field initializer, or a subclass that declares no constructor of its
+ * own, runs inside a function nobody wrote, and JSC reports it as
+ * `at new Owner (unknown:1:17)`; a built-in doing the calling reports
+ * `at map (native:1:11)`. Both carry a `:line`, so they parse as ordinary paths
+ * and only this set rejects them.
+ *
+ * Why taking one is worse than taking nothing is spelled out beside the twin's
+ * copy in `packages/server/src/hot-reload/hot-disposables.ts` — keep the two in
+ * step.
+ */
+const SYNTHETIC_FRAME_PATHS = new Set(['unknown', 'native', '<anonymous>'])
+
+/**
  * The file that called a `create*Database()` factory.
  *
  * `stack` must come from an `Error` constructed inside the factory itself, so
- * frame 0 is `Error`, frame 1 is the factory, and frame 2 is the caller. Only
- * the path is kept: a reload re-runs the same file, but not necessarily at the
- * same line.
+ * frame 0 is `Error`, frame 1 is the factory, and frame 2 is the caller — or the
+ * first frame after it that names a real file, since the engine may have
+ * synthesized the frames in between. Only the path is kept: a reload re-runs the
+ * same file, but not necessarily at the same line.
+ *
+ * The frame taken may sit further out than the call — a shared bootstrap, say —
+ * widening the file-level collision the header describes; the target in the key
+ * is what keeps those apart.
+ *
+ * One case the header's escape hatch does not reach: a field initializer leaves
+ * no frame of its own, so the file the class is declared in never appears in the
+ * stack, and giving that class its own module changes nothing. Such a handle is
+ * keyed to wherever `new` was written instead.
  */
 export function describeCallerFile(stack: string | undefined): string | undefined {
-  return parseFrameLocation(stack?.split('\n')[2])
+  for (const frame of stack?.split('\n').slice(2) ?? []) {
+    const path = parseFrameLocation(frame)
+
+    if (path && !SYNTHETIC_FRAME_PATHS.has(path)) {
+      return path
+    }
+  }
+
+  return undefined
 }
 
 /**

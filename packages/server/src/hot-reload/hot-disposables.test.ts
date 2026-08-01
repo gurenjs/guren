@@ -47,50 +47,47 @@ describe('describeCallerFile', () => {
   })
 
   test('should keep a path that contains parentheses intact', () => {
-    // Same failure as the spaces above, and ordinary on macOS too — "app (old)",
-    // "Projects (2)". A named frame is bounded by its own trailing `)`, not by
-    // the first one it happens to contain: reading it the other way left every
-    // owner under such a directory unidentified, so its timer was never
-    // reclaimed and one leaked per reload.
-    const bare = 'Error\n    at f (/app/dist/index.js:1:1)\n    at /Users/me/Projects (old)/app/config/cache.ts:3:18'
-    const named =
-      'Error\n    at f (/app/dist/index.js:1:1)\n    at makeStore (/Users/me/Projects (old)/app/config/cache.ts:3:18)'
+    // Also ordinary on macOS — a checkout under `~/Projects (2024)`. The path is
+    // bounded by the `(` that matches the frame's final `)`, not by the first one
+    // the path happens to contain.
+    const parenthesized = 'Error\n    at f (/app/dist/index.js:1:1)\n    at g (/app (old)/routes/api.ts:31:26)'
+    const bare = 'Error\n    at f (/app/dist/index.js:1:1)\n    at /app (old)/routes/api.ts:31:26'
 
-    expect(describeCallerFile(bare)).toBe('/Users/me/Projects (old)/app/config/cache.ts')
-    expect(describeCallerFile(named)).toBe('/Users/me/Projects (old)/app/config/cache.ts')
+    expect(describeCallerFile(parenthesized)).toBe('/app (old)/routes/api.ts')
+    expect(describeCallerFile(bare)).toBe('/app (old)/routes/api.ts')
   })
 
-  test('should keep a path whose function name contains parentheses intact', () => {
-    // The other half of the ambiguity, and not hypothetical: a computed method
-    // name puts parens in the *name* field, and both JSC and V8 emit it as
-    // `at foo(bar) (/app/x.ts:1:2)` — the exact shapes below came from running
-    // `({ ['foo(bar)']: () => new Error().stack })['foo(bar)']()`. Reading the
-    // leftmost paren as the path's would key this owner to `bar) (/app/…`.
-    const method = 'Error\n    at f (/app/dist/index.js:1:1)\n    at foo(bar) (/app/config/cache.ts:2:33)'
-    const staticMethod = 'Error\n    at f (/app/dist/index.js:1:1)\n    at make(x) (/app/config/cache.ts:6:47)'
+  test('should read past a function name that contains parentheses', () => {
+    // Bun emits this for a method whose key carries parentheses:
+    //   ({ 'weird (name)'() {} })['weird (name)']()
+    // Taking the leftmost `(` yields `name) (/app/routes/api.ts`, which is not a
+    // path but is stable enough to key an owner on.
+    const stack = 'Error\n    at f (/app/dist/index.js:1:1)\n    at weird (name) (/app/routes/api.ts:31:26)'
 
-    expect(describeCallerFile(method)).toBe('/app/config/cache.ts')
-    expect(describeCallerFile(staticMethod)).toBe('/app/config/cache.ts')
+    expect(describeCallerFile(stack)).toBe('/app/routes/api.ts')
   })
 
-  test('should step over a frame whose location leaves no path in front of it', () => {
-    // Degenerate — no engine emits these — but a parse that hands back anything
-    // non-empty for them ends this search and becomes a key, and two unrelated
-    // files landing on one key means the second owner stops the first's live
-    // timer. The twin in `@guren/orm` can afford that (it reads one frame and
-    // stops); this walks, so each must be stepped over rather than merely
-    // rejected. Pinned so that carrying the twin's scan over cannot quietly
-    // reintroduce it.
-    const stepsOver = (frame: string) =>
-      describeCallerFile(
-        ['Error', '    at new Base (/app/dist/index.js:120:15)', frame, '    at /app/routes/api.ts:31:26'].join('\n'),
-      )
+  test('should still see a synthetic frame through a parenthesized function name', () => {
+    // The combination of the two cases above, and the reason the leftmost `(` is
+    // not merely imprecise: `unknown` has to survive parsing intact or the filter
+    // below never fires, and every such owner in the process shares one slot.
+    const stack = [
+      'Error',
+      '    at new Base (/app/dist/index.js:120:15)',
+      '    at new Derived (wrapped) (unknown:1:28)',
+      '    at /app/routes/api.ts:31:26',
+    ].join('\n')
 
-    expect(stepsOver('    at fn (:1:2)')).toBe('/app/routes/api.ts')
-    expect(stepsOver('    at fn ((:1:2)')).toBe('/app/routes/api.ts')
-    expect(stepsOver('    at fn ()')).toBe('/app/routes/api.ts')
-    // Ends in `)` while opening no group at all, so nothing bounds a path.
-    expect(stepsOver('    at /app/x.ts:1:2)')).toBe('/app/routes/api.ts')
+    expect(describeCallerFile(stack)).toBe('/app/routes/api.ts')
+  })
+
+  test('should reject an eval frame rather than key an owner on it', () => {
+    // V8 nests the real location inside the group. The text before `:1:1` is not
+    // a path, and carries the outer line number, so it would drift on any edit.
+    const stack =
+      'Error\n    at f (/app/dist/index.js:1:1)\n    at eval (eval at <anonymous> (/app/x.ts:1:2), <anonymous>:1:1)'
+
+    expect(describeCallerFile(stack)).toBeUndefined()
   })
 
   test('should step over the synthetic frame of an implicit constructor', () => {
@@ -120,6 +117,27 @@ describe('describeCallerFile', () => {
     expect(describeCallerFile(stack)).toBe('/app/routes/api.ts')
   })
 
+  test('should step over a group that leaves no path in front of the location', () => {
+    // Degenerate — no engine emits these — but the twin in `@guren/orm` still
+    // reads the first two as the path `:1`, because it keeps whatever its own
+    // earlier pattern returned for a malformed frame. It can afford that: it
+    // reads one frame and stops. This walks until a frame names a file, so any
+    // non-empty string would end the walk and become a key, and a key two
+    // unrelated files both land on is one where the second owner stops the
+    // first's live timer. Pinned so that carrying the twin's parse across
+    // wholesale — rather than by result — cannot quietly introduce it.
+    const stepsOver = (frame: string) =>
+      describeCallerFile(
+        ['Error', '    at new Base (/app/dist/index.js:120:15)', frame, '    at /app/routes/api.ts:31:26'].join('\n'),
+      )
+
+    expect(stepsOver('    at fn (:1:2)')).toBe('/app/routes/api.ts')
+    expect(stepsOver('    at fn ((:1:2)')).toBe('/app/routes/api.ts')
+    expect(stepsOver('    at fn ()')).toBe('/app/routes/api.ts')
+    // Ends in `)` while opening no group at all, so nothing bounds a path.
+    expect(stepsOver('    at /app/x.ts:1:2)')).toBe('/app/routes/api.ts')
+  })
+
   test('should ignore a frame that names a function but no location', () => {
     const stack = ['Error', '    at new Base (/app/dist/index.js:120:15)', '    at Object.<anonymous>'].join('\n')
 
@@ -143,8 +161,9 @@ describe('describeCallerFile', () => {
     const started = performance.now()
 
     expect(padded(`    at a${' '.repeat(100_000)}a`)).toBeUndefined()
-    // The parenthesized shape needs its own padding: the frame above never
-    // reaches it, since it does not end in `)`.
+    // The depth scan needs its own padding: the frame above does not end in `)`,
+    // so it is rejected before reaching it. A run of unmatched `(` is what the
+    // lazy match this replaced retried the whole suffix at, once per paren.
     expect(padded(`    at f (${'('.repeat(100_000)}x)`)).toBeUndefined()
 
     expect(performance.now() - started).toBeLessThan(1_000)
@@ -251,11 +270,12 @@ describe('claimHotDisposable', () => {
   })
 
   test('should reclaim an owner built under a directory whose name contains parens', () => {
-    // The symptom as reported, rather than the parse behind it: a named frame
-    // under `Projects (old)` left the owner unidentified, so this call no-opped
-    // and the previous evaluation's interval went on firing. The two claims use
+    // The symptom rather than the parse behind it: while a named frame under
+    // `Projects (old)` could not be read, this call no-opped and the previous
+    // evaluation's interval went on firing — one leaked timer per reload for
+    // anyone whose checkout sits in such a directory. The two claims use
     // different line numbers because a reload rarely leaves the call where it
-    // was, and the key must survive that.
+    // was, and the key has to survive that.
     withHotRuntime(() => {
       const stopped: string[] = []
       const reloadAt = (line: number) =>

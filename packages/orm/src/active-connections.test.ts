@@ -75,6 +75,31 @@ describe('describeCallerFile', () => {
     expect(describeCallerFile(named)).toBe('/app (old)/config/database.ts')
   })
 
+  test('should read past a function name that contains parentheses', () => {
+    // Bun emits this for a method whose key carries parentheses. Taking the
+    // leftmost `(` yields `name) (/app/config/database.ts` — not a path, but
+    // stable enough to key a connection on, which is the worse failure.
+    const stack = [
+      'Error',
+      '    at createPostgresDatabase (/app/dist/index.js:1:1)',
+      '    at weird (name) (/app/config/database.ts:3:18)',
+    ].join('\n')
+
+    expect(describeCallerFile(stack)).toBe('/app/config/database.ts')
+  })
+
+  test('should reject an eval frame rather than key a connection on it', () => {
+    // V8 nests the real location inside the group. The text before `:1:1` is not
+    // a path, and carries the outer line number, so it would drift on any edit.
+    const stack = [
+      'Error',
+      '    at createPostgresDatabase (/app/dist/index.js:1:1)',
+      '    at eval (eval at <anonymous> (/app/config/database.ts:3:18), <anonymous>:1:1)',
+    ].join('\n')
+
+    expect(describeCallerFile(stack)).toBeUndefined()
+  })
+
   test('should reject a frame that names no location', () => {
     // Rejecting is the safe failure: no key means the handle is left alone, and
     // a leaked connection beats closing a live one that belongs to someone else.
@@ -131,6 +156,31 @@ describe('describeCallerFile', () => {
     expect(performance.now() - started).toBeLessThan(1_000)
   })
 
+  test('should stay linear in the number of frames as well as their length', () => {
+    // The two fixtures above put the adversarial frame last, so the walk exits
+    // after one of them however slow that one is. Cost has to track the total
+    // size of the stack, not the product of frame count and frame length — the
+    // walk visits every frame, and each carries the shapes that used to
+    // backtrack.
+    const stack = (count: number, width: number) =>
+      ['Error', '    at factory (/app/dist/index.js:1:1)', ...Array(count).fill(`    at ${' '.repeat(width)}x`)].join(
+        '\n',
+      )
+    const time = (input: string) => {
+      const started = performance.now()
+      expect(describeCallerFile(input)).toBeUndefined()
+      return performance.now() - started
+    }
+
+    // Same total bytes, opposite split between count and width. Quadratic in
+    // either dimension would separate these two by orders of magnitude.
+    const many = time(stack(100, 10_000))
+    const long = time(stack(10, 100_000))
+
+    expect(many).toBeLessThan(1_000)
+    expect(long).toBeLessThan(1_000)
+  })
+
   test('should stay identical when the call moves to another line', () => {
     // The whole point of dropping line and column: adding an import above the
     // factory must not orphan the entry holding the previous connection.
@@ -144,14 +194,70 @@ describe('describeCallerFile', () => {
   test('should parse a stack this runtime actually produced', () => {
     // The fixtures above are hand-written, so they would keep passing if the
     // engine changed its stack format and every real key silently became
-    // undefined — leaking again, quietly. This asserts against the real thing.
+    // undefined — leaking again, quietly. This asserts against the real thing,
+    // including through an implicit constructor: a field initializer needs no
+    // explicit constructor and no subclass, so `class Database { db = create() }`
+    // is enough for JSC to put an `unknown` frame where the caller belongs.
     const factory = () => describeCallerFile(new Error().stack)
 
+    class BaseDb {
+      caller = factory()
+    }
+    class AppDb extends BaseDb {}
+
     const here = factory()
-    expect(here).toBeDefined()
     expect(here).toEndWith('active-connections.test.ts')
-    // A call from a different line of this same file must produce the same key.
+    // A call from a different line of this same file must produce the same key,
+    // and so must one the engine reports two synthesized frames behind.
     expect(factory()).toBe(here)
+    expect(new AppDb().caller).toBe(here)
+  })
+
+  test('should walk past a synthetic frame that carries a location', () => {
+    // `unknown` and `native` parse as perfectly good paths — they carry a
+    // `:line:column` like any other frame — so the location check above cannot
+    // reject them. Reading one as the caller keys every handle behind an
+    // implicit constructor to the literal string `unknown`, which is worse than
+    // no key at all: unrelated files collapse into one slot, and under `--hot`
+    // each new handle closes a live connection belonging to someone else.
+    const frame = (...synthetic: string[]) =>
+      describeCallerFile(
+        ['Error', '    at factory (/app/dist/index.js:1:1)', ...synthetic, '    at /app/config/database.ts:3:18'].join(
+          '\n',
+        ),
+      )
+
+    expect(frame('    at new Sub (unknown:1:28)')).toBe('/app/config/database.ts')
+    expect(frame('    at map (native:1:11)')).toBe('/app/config/database.ts')
+    expect(frame('    at <anonymous>:1:1')).toBe('/app/config/database.ts')
+
+    // Consecutive ones, which is what a base class holding a field initializer
+    // plus a subclass of it produces — the shape the live test below builds.
+    // Skipping a single frame would hand back `unknown` here.
+    expect(frame('    at new BaseDb (unknown:1:17)', '    at new AppDb (unknown:1:28)')).toBe('/app/config/database.ts')
+  })
+
+  test('should return undefined when every frame is synthetic', () => {
+    // Falling back to the safe failure rather than to the last synthetic path:
+    // no key means the handle is left alone.
+    expect(
+      describeCallerFile(['Error', '    at factory (/app/dist/index.js:1:1)', '    at new Sub (unknown:1:28)'].join('\n')),
+    ).toBeUndefined()
+  })
+
+  test('should walk past a host frame that names no location at all', () => {
+    // `at replace (unknown)` — no `:line`, so the shape check rejects it rather
+    // than the synthetic-path set. It is still a host frame, and the real caller
+    // sits behind it: Bun emits exactly this for a callback a built-in invoked
+    // (`'x'.replace(/x/, fn)`). Stopping here instead of stepping over would
+    // read two callers in *different* files as one absent caller and leak both.
+    const frame = (last: string) =>
+      describeCallerFile(
+        ['Error', '    at factory (/app/dist/index.js:1:1)', '    at replace (unknown)', last].join('\n'),
+      )
+
+    expect(frame('    at openA (/app/db/a.ts:3:48)')).toBe('/app/db/a.ts')
+    expect(frame('    at openB (/app/db/b.ts:3:48)')).toBe('/app/db/b.ts')
   })
 })
 
