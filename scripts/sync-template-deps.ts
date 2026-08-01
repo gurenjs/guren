@@ -1,22 +1,38 @@
 /**
- * Keep the scaffold templates' `@guren/*` ranges pointed at the versions this
- * repository publishes.
+ * Keep the scaffold templates' dependency versions pointed at what this
+ * repository publishes and depends on.
  *
  * A template's `package.json` is the one manifest in the monorepo that resolves
- * against **npm** rather than the workspace, and nothing kept its ranges moving.
- * `changeset version` is what decides the new numbers, so the write mode runs
- * right after it (see the `version-packages` script). `--check` asserts the
- * same thing without writing and backs `audit:template-deps`, so a range that
- * falls behind fails CI on the PR that introduces it rather than on a user's
- * first `bunx create-guren-app`.
+ * against **npm** rather than the workspace, and nothing kept its versions
+ * moving. Two rules apply to it:
+ *
+ * - every `@guren/*` range follows the workspace version. `changeset version`
+ *   is what decides the new numbers, so the write mode runs right after it (see
+ *   the `version-packages` script).
+ * - `drizzle-orm` and `drizzle-kit` follow the exact pin `packages/orm` depends
+ *   on, by the same rule `guren upgrade` applies to an installed app — see
+ *   `packages/cli/src/drizzle-pins.ts` for why a second copy is the hazard.
+ *
+ * `--check` asserts both without writing and backs `audit:template-deps`, so a
+ * version that falls behind fails CI on the PR that introduces it rather than on
+ * a user's first `bunx create-guren-app`.
  */
 import { readFile, readdir, writeFile } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import process from 'node:process'
 import { TEMPLATES_ROOT } from '../packages/create-app/src/blueprints'
+import {
+  PIN_SOURCE,
+  planDrizzlePins,
+  type DependencyManifest,
+  type DrizzlePinDeclineReason,
+  type OrmManifest,
+} from '../packages/cli/src/drizzle-pins'
 import { collectPackages, repoRoot } from './workspace-packages'
 
 const DEPENDENCY_GROUPS = ['dependencies', 'devDependencies', 'peerDependencies'] as const
+
+const ORM_MANIFEST = 'packages/orm/package.json'
 
 interface Mismatch {
   /** Repo-relative path of the template manifest. */
@@ -24,8 +40,10 @@ interface Mismatch {
   group: (typeof DEPENDENCY_GROUPS)[number]
   dependency: string
   declared: string
-  /** The range to write, or `null` when this workspace publishes no such package. */
+  /** The version to write, or `null` when this workspace publishes no such package. */
   expected: string | null
+  /** Where `expected` comes from, so the drift report says which rule was broken. */
+  because: string
 }
 
 /** Map every publishable `@guren/*` package to the range a template should declare. */
@@ -59,19 +77,77 @@ async function templateManifests(): Promise<string[]> {
   return paths
 }
 
+/** `packages/orm`'s own manifest — the pin the templates' drizzle versions follow. */
+async function ormManifest(): Promise<OrmManifest> {
+  const path = join(repoRoot, ORM_MANIFEST)
+  // Unlike an unreachable registry, a missing ORM manifest is not a condition to
+  // work around: it means this is not the repository this script belongs to.
+  const raw = await readFile(path, 'utf8').catch((cause: unknown) => {
+    throw new Error(`Could not read ${ORM_MANIFEST}, which is where the templates' drizzle pins come from.`, { cause })
+  })
+  return JSON.parse(raw) as OrmManifest
+}
+
+/**
+ * Does `<name>@<version>` exist on npm? Asked only about `drizzle-kit`, and only
+ * when its pin has to move — the two drizzle packages have never shared numbers
+ * on their stable lines, so the companion release cannot be assumed to exist.
+ *
+ * A 404 is an answer (leave the pin alone, say so); anything else is not, and
+ * throwing says so — the planner turns that into a `companion-unverifiable`
+ * decline rather than a crash, so an npm outage neither fails an unrelated PR
+ * nor reads as "no drift".
+ *
+ * Memoized across *templates*: the pin comes from one ORM manifest, so both of
+ * them ask about the same release. The planner dedupes within one manifest.
+ */
+const published = new Map<string, Promise<boolean>>()
+function companionPublished(name: string, version: string): Promise<boolean> {
+  const key = `${name}@${version}`
+  let pending = published.get(key)
+  if (!pending) {
+    pending = fetch(`https://registry.npmjs.org/${name}/${version}`).then((response) => {
+      if (response.status === 404) {
+        return false
+      }
+      if (!response.ok) {
+        throw new Error(`npm returned ${response.status} for ${key}; cannot tell whether that release exists.`)
+      }
+      return true
+    })
+    published.set(key, pending)
+  }
+  return pending
+}
+
 interface TemplateManifest {
   path: string
   manifest: Record<string, unknown>
   mismatches: Mismatch[]
 }
 
-/** Read every template manifest and diff its `@guren/*` ranges against the workspace. */
+/**
+ * Drizzle refusals a maintainer can resolve in this repository, and which
+ * therefore have to fail rather than pass with a warning — a template cannot
+ * ship a specifier that names a location, and the whole rule stops enforcing
+ * anything once `packages/orm` no longer names one exact version to follow.
+ *
+ * The other two refusals are about npm, not about this checkout: `drizzle-kit`
+ * releases the ORM's pin ahead of, and a registry that will not answer. Failing
+ * on those would leave the gate red with nothing to fix.
+ */
+const BLOCKING_DECLINES = new Set<DrizzlePinDeclineReason>(['location-specifier', 'no-exact-pin'])
+
+/** Read every template manifest and diff its versions against this workspace. */
 async function collectMismatches(): Promise<TemplateManifest[]> {
   const ranges = await workspaceRanges()
+  const orm = await ormManifest()
   const templates: TemplateManifest[] = []
+  const blocked: string[] = []
 
   for (const path of await templateManifests()) {
     const manifest = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>
+    const file = relative(repoRoot, path)
     const mismatches: Mismatch[] = []
 
     for (const group of DEPENDENCY_GROUPS) {
@@ -86,35 +162,79 @@ async function collectMismatches(): Promise<TemplateManifest[]> {
         }
         const expected = ranges.get(dependency) ?? null
         if (declared !== expected) {
-          mismatches.push({ file: relative(repoRoot, path), group, dependency, declared, expected })
+          mismatches.push({
+            file,
+            group,
+            dependency,
+            declared,
+            expected,
+            because: expected
+              ? `workspace publishes ${expected}`
+              : 'this workspace publishes no such package',
+          })
         }
       }
     }
 
+    // The same rule `guren upgrade` runs against an installed app, with the
+    // workspace's ORM manifest standing in for the published one.
+    const drizzle = await planDrizzlePins(manifest as DependencyManifest, orm, {
+      companionPublished,
+      onDecline: ({ reason, message }) => {
+        console.warn(`${file}: ${message}`)
+        if (BLOCKING_DECLINES.has(reason)) {
+          blocked.push(`  ${file}: ${message}`)
+        }
+      },
+    })
+    mismatches.push(
+      ...drizzle.map((change) => ({
+        file,
+        group: change.field,
+        dependency: change.name,
+        declared: change.previousVersion,
+        expected: change.nextVersion,
+        because: `${ORM_MANIFEST} pins ${PIN_SOURCE} ${change.nextVersion}`,
+      })),
+    )
+
     templates.push({ path, manifest, mismatches })
+  }
+
+  // Thrown from here so neither mode can proceed: a refusal this script cannot
+  // rewrite is drift it must not report as a match, and half-syncing a template
+  // whose pins it could not read is worse than syncing none.
+  if (blocked.length > 0) {
+    throw new Error(
+      'Template drizzle pins this script will not rewrite:\n' +
+      `${blocked.join('\n')}\n` +
+      'Fix them by hand. Templates are installed from npm, so a specifier naming a\n' +
+      `location can never ship, and ${ORM_MANIFEST} must name one exact ${PIN_SOURCE}\n` +
+      'version for the templates to have something to follow.',
+    )
   }
 
   return templates
 }
 
 function describe(mismatch: Mismatch): string {
-  const expected = mismatch.expected ?? 'nothing — this workspace publishes no such package'
-  return `  ${mismatch.file}: ${mismatch.dependency} declares ${mismatch.declared}, workspace publishes ${expected}`
+  return `  ${mismatch.file}: ${mismatch.dependency} declares ${mismatch.declared}, ${mismatch.because}`
 }
 
 async function check(): Promise<void> {
   const mismatches = (await collectMismatches()).flatMap((template) => template.mismatches)
   if (mismatches.length === 0) {
-    console.log('Template dependency ranges match the workspace versions.')
+    console.log('Template dependency versions match the workspace.')
     return
   }
 
   throw new Error(
-    'Template dependency ranges have drifted from the versions this workspace publishes.\n' +
+    'Template dependency versions have drifted from this workspace.\n' +
     `${mismatches.map(describe).join('\n')}\n` +
-    'Run `bun run sync:template-deps`. These ranges resolve from npm, not from the\n' +
-    'workspace, so a stale one scaffolds apps against a package line the templates\n' +
-    'were never written for.',
+    'Run `bun run sync:template-deps`. These versions resolve from npm, not from the\n' +
+    'workspace, so a stale @guren/* range scaffolds apps against a package line the\n' +
+    'templates were never written for, and a stale drizzle pin installs a second copy\n' +
+    'of the ORM beside the one @guren/orm brings.',
   )
 }
 
@@ -126,9 +246,11 @@ async function check(): Promise<void> {
  * changeset would rewrite the templates here and then publish nothing carrying
  * them, silently restoring the drift this script exists to prevent.
  *
- * Only checked under `--release`: outside `changeset version` there is no bump
- * to expect, and a maintainer repairing a hand-edited range would be told to
- * cut a release for nothing.
+ * Only an *error* under `--release`: outside `changeset version` there is no
+ * bump to compare against, so a maintainer repairing a hand-edited version — or
+ * following an ORM drizzle pin that moved in an ordinary PR — would be failed
+ * for a release that is not theirs to cut. The same fact is printed as a
+ * reminder on that path instead.
  */
 async function assertCreateAppRepublishes(): Promise<void> {
   const manifestPath = 'packages/create-app/package.json'
@@ -166,7 +288,7 @@ async function write(options: { release: boolean }): Promise<void> {
 
   const changed = templates.filter((template) => template.mismatches.length > 0)
   if (changed.length === 0) {
-    console.log('Template dependency ranges already match the workspace versions.')
+    console.log('Template dependency versions already match the workspace.')
     return
   }
 
@@ -183,7 +305,16 @@ async function write(options: { release: boolean }): Promise<void> {
 
   if (options.release) {
     await assertCreateAppRepublishes()
+    return
   }
+
+  // Outside `changeset version` there is no bump to assert against, but the same
+  // fact still holds: a drizzle pin that moves in an ordinary PR reaches users
+  // only inside a new create-guren-app tarball.
+  console.log(
+    '\nThese templates ship inside create-guren-app. Add a create-guren-app bump to\n' +
+    'your changeset, or the rewritten versions will not reach the registry.',
+  )
 }
 
 if (import.meta.path === Bun.main) {
