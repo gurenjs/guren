@@ -26,7 +26,7 @@ export interface SqliteDatabase {
   closeDatabase(): Promise<void>
   configureOrm(): Promise<void>
   seedDatabase(): Promise<void>
-  /** Drops every table (including the drizzle migration tracker) so migrations can be re-applied from scratch. */
+  /** Drops every table and view (including the drizzle migration tracker) so migrations can be re-applied from scratch. */
   resetDatabase(): Promise<void>
   /** Per-migration applied state derived from the drizzle-kit journal and the __drizzle_migrations table. */
   migrationStatus(): Promise<MigrationStatusEntry[]>
