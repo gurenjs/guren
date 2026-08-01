@@ -22,10 +22,24 @@ rather than two that happen to agree.
 plural form — `UserProfile` resolved to `userprofiles` while the table is
 `user_profiles`, so it warned on models that were fine.
 
-Input that is already plural is now singularized before pluralizing, so
-`make:feature Posts` produces the `posts` collection rather than `postses`, and
-`make:model News` keeps importing `news`. The collection also names the route
-path and page directory, so re-running `make:feature Posts` after upgrading
-scaffolds `/posts` and `resources/js/pages/posts/` where it previously produced
-`/postses`. `guren add resource` is unaffected — it already singularized its
-input.
+`make:route` was a fourth rule again — it stripped one trailing `s` unless the
+name ended in `ss`, so `make:route categories` scaffolded a `CategorieController`
+that `make:feature Category` never generates. It now singularizes the same way.
+
+`make:feature` names change where the entity ends in `s`, because its collection
+is now singularized before being pluralized, the way `guren add resource`
+already did. `make:feature Posts` yields the `posts` collection rather than
+`postses`, and — the cost of the same rule — `make:feature Status` yields
+`status` rather than `statuses`. A lone trailing `s` cannot be read reliably:
+`News` and `Status` are structurally identical, and English needs a dictionary
+to tell them apart. The collection also names the route path and page
+directory, so those move with it (`/status`, `resources/js/pages/status/`). The
+model class is untouched — `make:feature Status` still scaffolds
+`StatusController`. `guren add resource` is unaffected; it already singularized
+its input.
+
+`guren check`'s model-schema result stays informational (a `warn`, and it does
+not set the exit code). It still infers the table name rather than reading what
+the model binds, so an app whose table does not follow the scaffolder's
+convention can see this warning either way — the name in the message is now the
+one the scaffolder would have written.

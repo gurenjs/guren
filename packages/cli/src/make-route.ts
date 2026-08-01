@@ -1,5 +1,6 @@
 import type { WriterOptions } from './utils'
 import { kebabCase, scaffoldFile } from './utils'
+import { singularize } from './inflect'
 
 const ROUTES_DIR = 'routes'
 
@@ -20,9 +21,7 @@ export async function makeRoute(name: string, options: WriterOptions = {}): Prom
     dir: ROUTES_DIR,
     fileName: ({ fileName }) => fileName,
     template: ({ className, rawName }) => {
-      const baseName = className.endsWith('s') && !className.endsWith('ss')
-        ? className.slice(0, -1)
-        : className
+      const baseName = singularize(className)
       const controller = baseName.endsWith('Controller') ? baseName : `${baseName}Controller`
       const prefix = `/${kebabCase(rawName)}`
       return routeTemplate(prefix, controller)

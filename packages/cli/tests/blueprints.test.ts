@@ -108,28 +108,50 @@ describe('blueprints', () => {
   // got `export const categories` but `import { categorys }`, so the generated
   // model did not compile and check warned about the table it had just written.
   it.each([
-    ['Category', 'categories', 'categories'],
-    ['Box', 'boxes', 'boxes'],
-    ['UserProfile', 'userProfiles', 'user_profiles'],
-    // Already plural: the blueprint singularizes first, so this must not
-    // round-trip into `newses`.
-    ['News', 'news', 'news'],
-  ])('keeps schema, model, and check in agreement for %s', async (name, identifier, tableName) => {
+    // name, model class, schema identifier, table name
+    ['Category', 'Category', 'categories', 'categories'],
+    ['Box', 'Box', 'boxes', 'boxes'],
+    ['Address', 'Address', 'addresses', 'addresses'],
+    ['UserProfile', 'UserProfile', 'userProfiles', 'user_profiles'],
+    // Already plural: the blueprint singularizes the name before scaffolding,
+    // so the class is `New` and the collection must not become `newses`.
+    ['News', 'New', 'news', 'news'],
+    // A lone trailing `s` reads as plural, so a singular `Status` collapses to
+    // `Statu`/`status` rather than `Statuses`. Unidiomatic, but the three sites
+    // agree — see collectionName() for why English cannot decide this.
+    ['Status', 'Statu', 'status', 'status'],
+  ])('keeps schema, model, and check in agreement for %s', async (name, className, identifier, tableName) => {
     await seedResourceWorkspace(PG_SCHEMA_FIXTURE)
 
-    const files = await runBlueprint('resource', { name, fields: 'title:string' })
+    await runBlueprint('resource', { name, fields: 'title:string' })
 
     const schema = await readFile('db/schema.ts', 'utf8')
     expect(schema).toContain(`export const ${identifier} = pgTable('${tableName}'`)
 
-    const modelPath = files.find((file) => file.includes('app/Models/'))
-    const model = await readFile(modelPath!, 'utf8')
+    const model = await readFile(`app/Models/${className}.ts`, 'utf8')
     expect(model).toContain(`import { ${identifier} } from '../../db/schema.js'`)
 
     const report = await runCheck({ cwd: workspace.dir })
-    const schemaChecks = report.checks.filter((result) => result.key.startsWith('model-schema:'))
-    expect(schemaChecks).not.toHaveLength(0)
-    expect(schemaChecks.filter((result) => result.status !== 'pass')).toEqual([])
+    // Pin this model's own result: the fixture ships a `users` table, so a
+    // lookup that resolved every model to `users` would pass a generic
+    // "nothing failed" assertion.
+    const schemaCheck = report.checks.find((result) => result.key === `model-schema:${className}`)
+    expect(schemaCheck?.status).toBe('pass')
+  })
+
+  // The name check looks for has to be the scaffolder's, not the class name
+  // lowercased — otherwise the miss it reports sends the reader after a table
+  // that was never supposed to exist.
+  it('reports the scaffolded table name when the table is missing', async () => {
+    await seedResourceWorkspace(PG_SCHEMA_FIXTURE)
+    await runBlueprint('resource', { name: 'UserProfile', fields: 'title:string' })
+    await writeFile('db/schema.ts', PG_SCHEMA_FIXTURE)
+
+    const report = await runCheck({ cwd: workspace.dir })
+    const schemaCheck = report.checks.find((result) => result.key === 'model-schema:UserProfile')
+
+    expect(schemaCheck?.status).toBe('warn')
+    expect(schemaCheck?.message).toContain("No table 'user_profiles' found")
   })
 
   it('rejects unknown blueprints', async () => {

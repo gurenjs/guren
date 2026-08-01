@@ -1,6 +1,6 @@
 import { consola } from 'consola'
-import { writeFilesSafe, type WriterOptions, pascalCase, kebabCase, pagesAccessor, safeModuleName } from './utils'
-import { collectionName } from './inflect'
+import { writeFilesSafe, type WriterOptions, pascalCase, camelCase, pagesAccessor, safeModuleName } from './utils'
+import { collectionName, collectionSlug } from './inflect'
 import { makeModel } from './make-model'
 import { makePolicy } from './make-policy'
 import { makeTest } from './make-test'
@@ -63,8 +63,8 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   const fields = parseFieldsString(options.fields ?? '')
   const singular = pascalCase(name)
   const collection = collectionName(singular)
-  const routeName = kebabCase(collection)
-  const routeVar = routeName.replace(/-([a-z])/g, (_, char: string) => char.toUpperCase())
+  const routeName = collectionSlug(singular)
+  const routeVar = camelCase(routeName)
   const variableName = singular.charAt(0).toLowerCase() + singular.slice(1)
   const withAuth = !options.publicAccess
   const withPolicy = Boolean(options.withPolicy)

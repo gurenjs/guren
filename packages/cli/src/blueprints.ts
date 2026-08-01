@@ -1,7 +1,7 @@
 import { makeAuth } from './make-auth'
 import { makeChannel } from './make-channel'
 import { makeFeature, parseFieldsString, type FieldDefinition, type FieldType } from './make-feature'
-import { collectionName, schemaIdentifierFor, singularize, tableNameFor } from './inflect'
+import { collectionSlug, schemaIdentifierFor, singularize, tableNameFor } from './inflect'
 import { makeController } from './make-controller'
 import { makeEvent } from './make-event'
 import { makeJob } from './make-job'
@@ -12,7 +12,7 @@ import { makeNotification } from './make-notification'
 import { makeRoute } from './make-route'
 import { makeView } from './make-view'
 import { addImport, addProvider, detectSchemaDialect, ensureDrizzleImports, ensureMysqlImports, ensureSqliteImports, findClosingDelimiter } from './patch-helpers'
-import { kebabCase, pascalCase, writeFilesSafe, type WriterOptions } from './utils'
+import { camelCase, pascalCase, writeFilesSafe, type WriterOptions } from './utils'
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
@@ -607,9 +607,8 @@ export default class BroadcastProvider extends ServiceProvider {
       }
 
       const singular = singularize(pascalCase(options.name.trim()))
-      const collection = collectionName(singular)
-      const routeName = kebabCase(collection)
-      const routeVar = routeName.replace(/-([a-z])/g, (_, char: string) => char.toUpperCase())
+      const routeName = collectionSlug(singular)
+      const routeVar = camelCase(routeName)
       const fields = parseFieldsString(options.fields ?? '')
 
       const created = await makeFeature(singular, {
