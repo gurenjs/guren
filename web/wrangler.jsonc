@@ -40,6 +40,14 @@
   "assets": {
     "directory": ".cloudflare/assets"
   },
+  // Cookie-less first-party analytics (see app/Http/Middleware/site-analytics.ts).
+  // Free-plan quota: 100k data points written per day.
+  "analytics_engine_datasets": [
+    {
+      "binding": "SITE_ANALYTICS",
+      "dataset": "guren_dev_analytics"
+    }
+  ],
   "d1_databases": [
     {
       "binding": "DB",

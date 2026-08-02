@@ -5,6 +5,7 @@ import {
   setInertiaDocument,
 } from '@guren/core'
 import { redirectToCanonicalHost } from '../app/Http/Middleware/canonical-host.js'
+import { recordSiteAnalytics } from '../app/Http/Middleware/site-analytics.js'
 import DatabaseProvider from '../app/Providers/DatabaseProvider.js'
 import {
   COLOR_MODE_PREPAINT_SCRIPT,
@@ -51,5 +52,8 @@ const app = createApp({
 // Both hostnames are routed to this worker, so the redirect lives here
 // rather than in DNS.
 app.use('*', redirectToCanonicalHost)
+
+// After the canonical redirect, so www.-redirect responses are not counted.
+app.use('*', recordSiteAnalytics)
 
 export default app
