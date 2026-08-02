@@ -2,7 +2,8 @@
 // package plus GitHub repository traffic. GitHub's traffic API only retains
 // 14 days, so without a periodic snapshot the referrer data around a launch
 // is lost for good. Run by .github/workflows/metrics-snapshot.yml, which
-// commits the JSON to the `metrics` branch.
+// uploads the JSON to a private R2 bucket — the referrer list is admin-only
+// data on GitHub and must not land anywhere in this public repository.
 //
 // Usage: bun scripts/metrics-snapshot.ts [--out path.json]
 //   GITHUB_TOKEN   token with push access to the repo (traffic endpoints

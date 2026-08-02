@@ -1,11 +1,23 @@
-# Weekly adoption-metrics snapshot, committed to the `metrics` branch.
+# Weekly adoption-metrics snapshot, uploaded to a private R2 bucket.
 #
 # GitHub's traffic API retains only 14 days, so this must run on a schedule
-# or launch-week referrer data is unrecoverable. The traffic endpoints need
-# push access, which the default GITHUB_TOKEN does not carry (they map to the
-# repo Administration permission) — set a `METRICS_TOKEN` repo secret (a
-# fine-grained PAT with Administration: read on this repo) to include them.
-# Without it the snapshot still records npm downloads and star counts.
+# or launch-week referrer data is unrecoverable. The snapshots include the
+# repo's referrer list — data GitHub itself restricts to admins (a private
+# hostname can appear there, e.g. a company wiki linking to the repo), so it
+# goes to private storage rather than anywhere in this public repository.
+# R2's free tier (10 GB) dwarfs a ~5 KB weekly JSON.
+#
+# Setup:
+# - One-time: `bunx wrangler r2 bucket create guren-metrics`
+# - Repo secrets: CLOUDFLARE_ACCOUNT_ID, and CLOUDFLARE_API_TOKEN with the
+#   "Workers R2 Storage: Edit" permission.
+# - Optional repo secret METRICS_TOKEN: the traffic endpoints map to the repo
+#   Administration permission, which the default GITHUB_TOKEN cannot carry —
+#   set a fine-grained PAT (Administration: read on this repo) to include
+#   them. Without it the snapshot still records npm downloads and stars.
+#
+# Reading a snapshot back:
+#   bunx wrangler r2 object get guren-metrics/snapshots/<date>.json --pipe
 name: Metrics Snapshot
 
 on:
@@ -13,22 +25,20 @@ on:
     - cron: '0 0 * * 1' # Mondays 00:00 UTC
   workflow_dispatch:
 
-# A manual dispatch overlapping the scheduled run would race on the push to
-# the metrics branch; queue instead.
+# A manual dispatch overlapping the scheduled run would race on the upload;
+# queue instead. Same-key uploads are last-write-wins either way.
 concurrency:
   group: metrics-snapshot
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   snapshot:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -39,24 +49,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.METRICS_TOKEN || github.token }}
         run: bun scripts/metrics-snapshot.ts --out "$RUNNER_TEMP/snapshot.json"
 
-      - name: Commit to metrics branch
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git ls-remote --exit-code origin metrics >/dev/null 2>&1; then
-            git checkout -B metrics origin/metrics
-          else
-            git checkout --orphan metrics
-            git rm -rf --quiet .
-          fi
-          mkdir -p snapshots
-          cp "$RUNNER_TEMP/snapshot.json" "snapshots/$(date -u +%F).json"
-          git add snapshots
-          # Only a verified-empty index is a no-op; any other commit failure
-          # must fail the run instead of being swallowed.
-          if git diff --cached --quiet; then
-            echo "nothing new to commit"
-          else
-            git commit -m "metrics: snapshot $(date -u +%F)"
-            git push origin metrics
-          fi
+      - name: Upload to R2
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: >
+          bunx wrangler@4.118.0 r2 object put
+          "guren-metrics/snapshots/$(date -u +%F).json"
+          --file "$RUNNER_TEMP/snapshot.json" --remote
