@@ -1,6 +1,6 @@
 ---
 name: guren-api
-description: Guren framework API documentation, code patterns, and examples. Covers all subsystems — Controllers, Models, Routes, Middleware, Authentication, Authorization, Events, Jobs, Queue, Mail, Cache, Validation, Broadcasting, Notifications, Storage, Scheduling, I18n, Encryption, Health Checks, Error Handling, Container/ServiceProvider, Console Commands, and API Resources. Use when user asks "how to", "how does", "example of", "what is", or needs help understanding any Guren API — and proactively during implementation whenever you encounter an unfamiliar @guren/* API surface; check this before grepping node_modules dist files.
+description: Human-browsable Guren API reference — code patterns and examples for every subsystem (Controllers, Models, Routes, Middleware, Authentication, Authorization, Events, Jobs, Queue, Mail, Cache, Validation, Broadcasting, Notifications, Storage, Scheduling, I18n, Encryption, Health Checks, Error Handling, Container/ServiceProvider, Console Commands, API Resources). Use when the user asks "how to", "how does", "example of", or "what is" about a Guren API. Agent-critical signatures are already pushed into context via the guren context digest and .claude/rules/ — consult those first during implementation.
 ---
 
 # Guren API Documentation Skill
