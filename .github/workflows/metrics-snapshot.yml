@@ -1,0 +1,50 @@
+# Weekly adoption-metrics snapshot, committed to the `metrics` branch.
+#
+# GitHub's traffic API retains only 14 days, so this must run on a schedule
+# or launch-week referrer data is unrecoverable. The traffic endpoints need
+# push access, which the default GITHUB_TOKEN does not carry (they map to the
+# repo Administration permission) — set a `METRICS_TOKEN` repo secret (a
+# fine-grained PAT with Administration: read on this repo) to include them.
+# Without it the snapshot still records npm downloads and star counts.
+name: Metrics Snapshot
+
+on:
+  schedule:
+    - cron: '0 0 * * 1' # Mondays 00:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Collect snapshot
+        env:
+          GITHUB_TOKEN: ${{ secrets.METRICS_TOKEN || github.token }}
+        run: bun scripts/metrics-snapshot.ts --out "$RUNNER_TEMP/snapshot.json"
+
+      - name: Commit to metrics branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code origin metrics >/dev/null 2>&1; then
+            git checkout -B metrics origin/metrics
+          else
+            git checkout --orphan metrics
+            git rm -rf --quiet .
+          fi
+          mkdir -p snapshots
+          cp "$RUNNER_TEMP/snapshot.json" "snapshots/$(date -u +%F).json"
+          git add snapshots
+          git commit -m "metrics: snapshot $(date -u +%F)" || echo "nothing new to commit"
+          git push origin metrics
