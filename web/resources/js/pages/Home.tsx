@@ -222,7 +222,7 @@ export default function Home({ codeExamples }: Props) {
 
         {/* Code Showcase */}
         <section className="px-6 py-20">
-          <div className="mx-auto grid max-w-5xl items-start gap-12 lg:grid-cols-2">
+          <div className="mx-auto grid max-w-5xl grid-cols-1 items-start gap-12 lg:grid-cols-2">
             <div>
               <p className="text-sm font-semibold uppercase tracking-[0.3em] text-crimson-400">The shape of a Guren app</p>
               <h2 className="mt-3 text-3xl font-bold text-white md:text-4xl">
@@ -268,7 +268,7 @@ export default function Home({ codeExamples }: Props) {
 
         {/* Agent Evaluation */}
         <section className="border-t border-white/10 px-6 py-20">
-          <div className="mx-auto grid max-w-5xl items-start gap-12 lg:grid-cols-2">
+          <div className="mx-auto grid max-w-5xl grid-cols-1 items-start gap-12 lg:grid-cols-2">
             <div>
               <p className="text-sm font-semibold uppercase tracking-[0.3em] text-crimson-400">Agent-native</p>
               <h2 className="mt-3 text-3xl font-bold text-white md:text-4xl">
