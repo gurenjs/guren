@@ -7,8 +7,8 @@ import { HOME_CODE_EXAMPLES, HOME_SHIKI_THEME } from './home-code-examples.js'
 
 export async function highlightCodeExamples(): Promise<Record<string, string>> {
   const entries = await Promise.all(
-    Object.entries(HOME_CODE_EXAMPLES).map(async ([key, code]) => {
-      const html = await codeToHtml(code, { lang: 'typescript', theme: HOME_SHIKI_THEME })
+    Object.entries(HOME_CODE_EXAMPLES).map(async ([key, { code, lang }]) => {
+      const html = await codeToHtml(code, { lang, theme: HOME_SHIKI_THEME })
       return [key, html] as const
     }),
   )

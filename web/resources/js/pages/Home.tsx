@@ -121,12 +121,13 @@ const deployTargets = [
   },
 ]
 
-const agentArms = [
-  { name: 'With the shipped agent harness', pass: '3/3 pass', cost: '$4.90 median', accent: true },
-  { name: 'Same app, guidance stripped', pass: '1/3 pass', cost: '$6.94 median', accent: false },
+const agentEvalArms = [
+  { name: 'Shipped harness', passed: 3, total: 3, cost: 4.9, costDisplay: '$4.90', accent: true },
+  { name: 'Harness stripped', passed: 1, total: 3, cost: 6.94, costDisplay: '$6.94', accent: false },
 ]
+const agentEvalMaxCost = Math.max(...agentEvalArms.map((arm) => arm.cost))
 
-const TAB_KEYS = ['Routes', 'Controller', 'Model'] as const
+const TAB_KEYS = ['Routes', 'Controller', 'Model', 'View'] as const
 type TabKey = (typeof TAB_KEYS)[number]
 
 function CopyCommand({ command }: { command: string }) {
@@ -226,12 +227,12 @@ export default function Home({ codeExamples }: Props) {
             <div>
               <p className="text-sm font-semibold uppercase tracking-[0.3em] text-crimson-400">The shape of a Guren app</p>
               <h2 className="mt-3 text-3xl font-bold text-white md:text-4xl">
-                Three files, <br className="hidden sm:block" />one feature
+                Route to React, <br className="hidden sm:block" />one loop
               </h2>
               <p className="mt-4 text-base leading-relaxed text-white/60">
                 A route points at a controller. The controller validates input, queries a model,
-                and returns a typed Inertia page. That&apos;s the whole loop — no serializers, no
-                resolvers, no hand-written API client.
+                and returns an Inertia page — and the React component receives those exact props,
+                type-checked. No serializers, no resolvers, no hand-written API client.
               </p>
               <CodeBlock
                 lines={[
@@ -243,13 +244,13 @@ export default function Home({ codeExamples }: Props) {
               />
             </div>
             <div className="rounded-xl border border-white/10 bg-[#1a1212]">
-              <div className="flex border-b border-white/10">
+              <div className="flex overflow-x-auto border-b border-white/10">
                 {TAB_KEYS.map((tab) => (
                   <button
                     key={tab}
                     type="button"
                     onClick={() => setActiveTab(tab)}
-                    className={`px-5 py-3 text-sm font-medium transition ${
+                    className={`shrink-0 px-4 py-3 text-sm font-medium transition sm:px-5 ${
                       activeTab === tab
                         ? 'border-b-2 border-crimson-500 text-crimson-300'
                         : 'text-white/50 hover:text-white/80'
@@ -301,32 +302,70 @@ export default function Home({ codeExamples }: Props) {
             </div>
             <div className="rounded-xl border border-white/10 bg-white/[0.03] p-6">
               <p className="text-sm font-semibold text-white">
-                Measured on a day-old major release
+                Same task, same model — only the harness differs
               </p>
               <p className="mt-1 text-xs text-white/50">
-                Guren v2.0.0 shipped hours before these trials — the model has no training
-                data for its new APIs. Guidance has to carry what memory cannot.
+                Claude Code builds the same feature on Guren v2.0.0, hours after its release,
+                so the new APIs are in no model&apos;s training data. Three trials per arm.
               </p>
-              <div className="mt-6 space-y-4">
-                {agentArms.map((arm) => (
-                  <div
-                    key={arm.name}
-                    className={`rounded-lg border p-4 ${arm.accent ? 'border-crimson-400/40 bg-crimson-500/10' : 'border-white/10'}`}
-                  >
-                    <p className="text-xs font-medium text-white/60">{arm.name}</p>
-                    <div className="mt-1 flex items-baseline justify-between">
-                      <span className={`text-2xl font-extrabold ${arm.accent ? 'text-crimson-300' : 'text-white/70'}`}>
-                        {arm.pass}
+              <div className="mt-6">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-white/40">
+                  Trials that shipped a working feature
+                </p>
+                <div className="mt-3 space-y-3">
+                  {agentEvalArms.map((arm) => (
+                    <div key={arm.name} className="flex items-center justify-between gap-3">
+                      <span className="text-xs text-white/70">{arm.name}</span>
+                      <span className="flex items-center gap-1.5">
+                        {Array.from({ length: arm.total }, (_, i) => (
+                          <span
+                            key={i}
+                            className={`size-2.5 rounded-full ${
+                              i < arm.passed
+                                ? arm.accent
+                                  ? 'bg-crimson-400'
+                                  : 'bg-white/60'
+                                : 'border border-white/25'
+                            }`}
+                          />
+                        ))}
+                        <span
+                          className={`ml-1.5 text-sm font-bold ${arm.accent ? 'text-crimson-300' : 'text-white/70'}`}
+                        >
+                          {arm.passed}/{arm.total}
+                        </span>
                       </span>
-                      <span className="text-sm text-white/60">{arm.cost}</span>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
+              </div>
+              <div className="mt-6">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-white/40">
+                  Median cost per feature
+                </p>
+                <div className="mt-3 space-y-3">
+                  {agentEvalArms.map((arm) => (
+                    <div key={arm.name}>
+                      <div className="flex items-baseline justify-between text-xs">
+                        <span className="text-white/70">{arm.name}</span>
+                        <span className={arm.accent ? 'font-bold text-crimson-300' : 'font-semibold text-white/70'}>
+                          {arm.costDisplay}
+                        </span>
+                      </div>
+                      <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-white/10">
+                        <div
+                          className={`h-full rounded-full ${arm.accent ? 'bg-crimson-500' : 'bg-[#6b6363]'}`}
+                          style={{ width: `${((arm.cost / agentEvalMaxCost) * 100).toFixed(1)}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
               <p className="mt-5 text-xs leading-relaxed text-white/50">
                 Scored blind on a clean checkout: typecheck, the full test suite, and a hidden
                 HTTP smoke the agent never saw. Lifetime: 43 of 45 trials shipped a working
-                feature — the only failures are the stripped-guidance baseline above.
+                feature — the only failures are the stripped-harness arm above.
               </p>
               <a
                 href="https://github.com/gurenjs/framework-comparison/tree/main/agent-eval"
