@@ -18,13 +18,14 @@ if (!accountId || !apiToken) {
 
 const daysFlag = process.argv.indexOf('--days')
 const days = daysFlag === -1 ? 7 : Number(process.argv[daysFlag + 1] ?? 7)
-if (!Number.isFinite(days) || days <= 0) {
-  console.error('--days must be a positive number')
+// Analytics Engine retains roughly three months, so cap the window there.
+if (!Number.isSafeInteger(days) || days < 1 || days > 90) {
+  console.error('--days must be an integer between 1 and 90')
   process.exit(1)
 }
 
 // Data point layout: see web/app/Http/Middleware/site-analytics.ts.
-const WINDOW = `timestamp > NOW() - INTERVAL '${Math.floor(days)}' DAY`
+const WINDOW = `timestamp > NOW() - INTERVAL '${days}' DAY`
 
 const queries: Array<{ title: string; sql: string }> = [
   {
@@ -81,7 +82,7 @@ async function runQuery(sql: string): Promise<Array<Record<string, unknown>>> {
   return payload.data ?? []
 }
 
-console.log(`# guren.dev analytics — last ${Math.floor(days)} day(s)\n`)
+console.log(`# guren.dev analytics — last ${days} day(s)\n`)
 for (const { title, sql } of queries) {
   console.log(`## ${title}`)
   const rows = await runQuery(sql)

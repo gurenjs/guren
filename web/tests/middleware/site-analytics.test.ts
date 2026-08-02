@@ -150,6 +150,13 @@ describe('createSiteAnalyticsMiddleware', () => {
     expect(agent?.blobs?.[1]).toBe('markdown')
   })
 
+  it('should cap oversized paths so the data point stays writable', async () => {
+    const [point] = await record(`https://guren.dev/${'a'.repeat(20_000)}`, {
+      headers: { 'user-agent': 'Mozilla/5.0' },
+    })
+    expect(point?.blobs?.[0]?.length).toBeLessThanOrEqual(512)
+  })
+
   it('should still record when the downstream handler throws', async () => {
     const points: DataPoint[] = []
     const middleware = createSiteAnalyticsMiddleware(() => ({

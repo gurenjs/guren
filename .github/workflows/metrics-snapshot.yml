@@ -13,6 +13,12 @@ on:
     - cron: '0 0 * * 1' # Mondays 00:00 UTC
   workflow_dispatch:
 
+# A manual dispatch overlapping the scheduled run would race on the push to
+# the metrics branch; queue instead.
+concurrency:
+  group: metrics-snapshot
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -26,7 +32,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: '1.3.14'
 
       - name: Collect snapshot
         env:
@@ -46,5 +52,11 @@ jobs:
           mkdir -p snapshots
           cp "$RUNNER_TEMP/snapshot.json" "snapshots/$(date -u +%F).json"
           git add snapshots
-          git commit -m "metrics: snapshot $(date -u +%F)" || echo "nothing new to commit"
-          git push origin metrics
+          # Only a verified-empty index is a no-op; any other commit failure
+          # must fail the run instead of being swallowed.
+          if git diff --cached --quiet; then
+            echo "nothing new to commit"
+          else
+            git commit -m "metrics: snapshot $(date -u +%F)"
+            git push origin metrics
+          fi

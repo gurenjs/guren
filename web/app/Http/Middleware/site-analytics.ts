@@ -7,8 +7,9 @@ import { getWorkersEnv } from '@guren/plugin-cloudflare'
  * Server-side measurement is the only kind this site's audience does not
  * defeat: developers run ad blockers that drop client-side beacons, and AI
  * agents fetching the Markdown mirrors never execute JavaScript at all.
- * Nothing user-identifying is stored — no cookies, no IPs, no full referrer
- * URLs — so no consent banner is needed.
+ * No cookies, no IP addresses, and no full referrer URLs are stored — only
+ * the request path (length-capped) and the referrer's hostname — so no
+ * consent banner is needed.
  *
  * Data point layout (query these positions via the SQL API):
  *   index1: user-agent class (human / ai-agent / bot / unknown)
@@ -59,11 +60,18 @@ export function classifyContent(pathname: string): string {
   return 'other'
 }
 
+// Analytics Engine rejects a whole data point when its blobs exceed the size
+// limit, and request URLs can be as long as Cloudflare accepts (~16 KB). Real
+// paths on this site are short; anything longer is scanner noise, so truncate
+// rather than lose the data point.
+const MAX_PATH_LENGTH = 512
+const MAX_HOST_LENGTH = 256
+
 export function referrerHost(referrer: string | undefined, ownHost: string): string {
   if (!referrer) return ''
   try {
     const host = new URL(referrer).hostname
-    return host === ownHost ? '' : host
+    return host === ownHost ? '' : host.slice(0, MAX_HOST_LENGTH)
   } catch {
     return ''
   }
@@ -104,7 +112,7 @@ export function createSiteAnalyticsMiddleware(
           dataset.writeDataPoint({
             indexes: [uaClass],
             blobs: [
-              url.pathname,
+              url.pathname.slice(0, MAX_PATH_LENGTH),
               classifyContent(url.pathname),
               uaClass,
               referrerHost(c.req.header('referer'), url.hostname),
