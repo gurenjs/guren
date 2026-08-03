@@ -134,6 +134,12 @@ test('lists posts', async () => {
 
 See the [Testing Guide](./testing.md) for fluent assertions, `actingAs`, and database helpers.
 
+## 8. Project knowledge
+
+The request path explains what the application does; project knowledge records why it works that way and keeps the overview current. `bunx guren spec:generate` derives ER, domain, screen, and module views from the code. ADRs created with `bunx guren make:adr` declare the entities and paths they govern, while `bunx guren check --docs` validates those relations.
+
+With `bun run dev` running, open [http://localhost:3333/_guren/docs](http://localhost:3333/_guren/docs) to browse those documents, entities, and code paths as one interactive Docs Graph. The graph surrounds the request path above with its rationale and generated views; it does not replace the route-to-page flow. See [Spec-Anchored Development](./spec-anchored.md) for the full workflow.
+
 ## The mental model
 
 Every feature in a Guren app follows this same path:
@@ -144,6 +150,8 @@ Every feature in a Guren app follows this same path:
 - **resources** shape outputs
 - **pages** define props
 - **controllers** compose it all
+
+Around that runtime path, **project knowledge** connects generated specs and human decisions back to the code they describe, then checks that the connections remain valid.
 
 To add a feature, scaffold the whole path at once and refresh the manifests:
 
