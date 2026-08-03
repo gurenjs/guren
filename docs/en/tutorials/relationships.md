@@ -8,6 +8,7 @@ Your blog has posts and authors from [Part 2](./authentication.md). In this fina
 - How to declare `hasMany` and `belongsTo` relationships with typed results
 - How to eager-load relations with `findWithOrFail` and query-builder `.with()`
 - How to post a nested resource (`POST /posts/:id/comments`) from an Inertia form
+- How to connect generated specs and an architecture decision to the finished code in the Docs Graph
 
 ## 1. Define the comments table
 
@@ -304,6 +305,59 @@ Notes:
 3. Write a real comment — the page reloads with your comment on top, attributed to "Demo User".
 
 That's the full mini blog: public reading, authenticated writing, related data across three tables.
+
+## 7. Map what you built in the Docs Graph
+
+The running application proves **what** the comment flow does. Now generate the views that summarize its structure and record **why** comment authorship works this way.
+
+First, derive the ER, domain, screen, and module views from the code:
+
+```bash
+bunx guren spec:generate
+```
+
+The generated Markdown files live under `docs/spec/`. In particular, `er.md` shows the three tables and their foreign keys, while `domain.md` shows the model relationships you declared.
+
+Next, create an architecture decision linked to the `Comment` entity:
+
+```bash
+bunx guren make:adr "Comments require authenticated authors" --entity Comment
+```
+
+Open the path printed by the command (in a fresh app it starts with `docs/adr/0002-`) and replace the three placeholder sections with:
+
+```md
+## Context
+
+Comments are public to read, but anonymous writes would leave no reliable identity for moderation or attribution.
+
+## Decision
+
+Creating a comment requires an authenticated session. The controller stores the authenticated user's ID as `authorId`; the browser never chooses the author.
+
+## Consequences
+
+Every comment has an accountable author. Signed-out readers can still view comments, but they must sign in before posting one.
+```
+
+Check both kinds of project knowledge before relying on them:
+
+```bash
+bunx guren check --docs
+bunx guren check --spec
+```
+
+`check --docs` verifies that the ADR still names a real `Comment` model and related code paths. `check --spec` verifies that the committed generated views still match the code.
+
+Ask for the `Comment` neighborhood in the terminal:
+
+```bash
+bunx guren docs:graph --entity Comment
+```
+
+Finally, keep `bun run dev` running and open [http://localhost:3333/_guren/docs](http://localhost:3333/_guren/docs). Find the new ADR and `Comment` entity, follow the edge to the related controller, then open the generated ER and domain views. You are reading the same verified relations through a visual surface instead of the CLI.
+
+The viewer is local, read-only, and development-only. The [Spec-Anchored Development guide](../guides/spec-anchored.md) covers the document format, trust metadata, drift checks, and agent-facing workflows in depth.
 
 ## Common problems
 

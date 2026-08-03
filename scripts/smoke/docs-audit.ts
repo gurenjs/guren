@@ -25,6 +25,12 @@ async function auditEnglishDocs(root: string): Promise<void> {
   assert(firstSteps.includes('new PostResource(post).toJSON()'), 'First Steps must show explicit resource serialization.')
   assert(firstSteps.includes('pages.posts.Index'), 'First Steps must use typed page definitions.')
   assert(firstSteps.includes('validateQuery'), 'First Steps must show schema-based request validation.')
+  assert(firstSteps.includes('bunx guren spec:generate'), 'First Steps must connect the request flow to generated project knowledge.')
+  assert(firstSteps.includes('http://localhost:3333/_guren/docs'), 'First Steps must link to the Docs Graph viewer.')
+
+  const gettingStarted = await read(root, 'docs/en/guides/getting-started.md')
+  assert(gettingStarted.includes('http://localhost:3333/_guren/docs'), 'Getting Started must open the Docs Graph during quickstart.')
+  assert(gettingStarted.includes('GUREN_DOCS=1'), 'Getting Started must explain how the Docs Graph is enabled.')
 
   const cli = await read(root, 'docs/en/guides/cli.md')
   assert(cli.includes('bunx guren add notifications'), 'CLI guide must document the notifications scaffold path.')
@@ -58,6 +64,7 @@ async function auditEnglishDocs(root: string): Promise<void> {
   assert(overview.includes('pages.tasks.Index'), 'Overview must show typed page definitions instead of string page names.')
   assert(!overview.includes("this.inertia('Tasks/Index'"), 'Overview must not use string-based page names in the controller example.')
   assert(!overview.includes('await this.only('), 'Overview must not use legacy this.only() input handling.')
+  assert(overview.includes('[Spec-Anchored Development](./spec-anchored.md)'), 'Overview must surface the Docs Graph workflow.')
 
   const routing = await read(root, 'docs/en/guides/routing.md')
   assert(routing.includes("import { Router } from '@guren/core'"), 'Routing guide must use Router from @guren/core.')
@@ -96,6 +103,15 @@ async function auditEnglishDocs(root: string): Promise<void> {
   assert(relationships.includes('pages.posts.Show'), 'Relationships tutorial must use typed page definitions.')
   assert(relationships.includes("hasMany('comments'"), 'Relationships tutorial must declare the hasMany relation.')
   assert(relationships.includes(".with('author')"), 'Relationships tutorial must demonstrate eager loading.')
+  assert(relationships.includes('bunx guren spec:generate'), 'Relationships tutorial must generate spec views for the completed app.')
+  assert(relationships.includes('bunx guren make:adr "Comments require authenticated authors" --entity Comment'), 'Relationships tutorial must create a Comment-linked ADR.')
+  assert(relationships.includes('bunx guren check --docs'), 'Relationships tutorial must validate declared doc relations.')
+  assert(relationships.includes('bunx guren check --spec'), 'Relationships tutorial must validate generated spec freshness.')
+  assert(relationships.includes('bunx guren docs:graph --entity Comment'), 'Relationships tutorial must inspect the Comment graph neighborhood.')
+  assert(relationships.includes('http://localhost:3333/_guren/docs'), 'Relationships tutorial must open the visual Docs Graph.')
+
+  const tutorialOverview = await read(root, 'docs/en/tutorials/overview.md')
+  assert(tutorialOverview.includes('Docs Graph'), 'Tutorial overview must include the Docs Graph in its learning outcome.')
 
   const frontend = await read(root, 'docs/en/guides/frontend.md')
   assert(frontend.includes('interface Props'), 'Frontend guide must show Props interface pattern.')
@@ -167,6 +183,12 @@ async function auditJapaneseDocs(root: string): Promise<void> {
   assert(firstSteps.includes('new PostResource(post).toJSON()'), 'Japanese First Steps must show explicit resource serialization.')
   assert(firstSteps.includes('pages.posts.Index'), 'Japanese First Steps must use typed page definitions.')
   assert(firstSteps.includes('validateQuery'), 'Japanese First Steps must show schema-based request validation.')
+  assert(firstSteps.includes('bunx guren spec:generate'), 'Japanese First Steps must connect the request flow to generated project knowledge.')
+  assert(firstSteps.includes('http://localhost:3333/_guren/docs'), 'Japanese First Steps must link to the Docs Graph viewer.')
+
+  const gettingStarted = await read(root, 'docs/ja/guides/getting-started.md')
+  assert(gettingStarted.includes('http://localhost:3333/_guren/docs'), 'Japanese Getting Started must open the Docs Graph during quickstart.')
+  assert(gettingStarted.includes('GUREN_DOCS=1'), 'Japanese Getting Started must explain how the Docs Graph is enabled.')
 
   const overview = await read(root, 'docs/ja/guides/overview.md')
   assert(overview.includes("import { Controller, paginate, type PaginatedPageProps } from '@guren/core'"), 'Japanese overview must show the canonical controller import path.')
@@ -174,6 +196,7 @@ async function auditJapaneseDocs(root: string): Promise<void> {
   assert(overview.includes('pages.tasks.Index'), 'Japanese overview must show typed page definitions instead of string page names.')
   assert(!overview.includes("this.inertia('Tasks/Index'"), 'Japanese overview must not use string-based page names in the controller example.')
   assert(!overview.includes('await this.only('), 'Japanese overview must not use legacy this.only() input handling.')
+  assert(overview.includes('[スペックアンカード開発](./spec-anchored.md)'), 'Japanese overview must surface the Docs Graph workflow.')
 
   const consoleGuide = await read(root, 'docs/ja/guides/console.md')
   assert(consoleGuide.includes('bunx guren make:command'), 'Japanese console guide must document the make:command scaffold.')
@@ -224,6 +247,15 @@ async function auditJapaneseDocs(root: string): Promise<void> {
   assert(relationships.includes('pages.posts.Show'), 'Japanese relationships tutorial must use typed page definitions.')
   assert(relationships.includes("hasMany('comments'"), 'Japanese relationships tutorial must declare the hasMany relation.')
   assert(relationships.includes(".with('author')"), 'Japanese relationships tutorial must demonstrate eager loading.')
+  assert(relationships.includes('bunx guren spec:generate'), 'Japanese relationships tutorial must generate spec views for the completed app.')
+  assert(relationships.includes('bunx guren make:adr "Comments require authenticated authors" --entity Comment'), 'Japanese relationships tutorial must create a Comment-linked ADR.')
+  assert(relationships.includes('bunx guren check --docs'), 'Japanese relationships tutorial must validate declared doc relations.')
+  assert(relationships.includes('bunx guren check --spec'), 'Japanese relationships tutorial must validate generated spec freshness.')
+  assert(relationships.includes('bunx guren docs:graph --entity Comment'), 'Japanese relationships tutorial must inspect the Comment graph neighborhood.')
+  assert(relationships.includes('http://localhost:3333/_guren/docs'), 'Japanese relationships tutorial must open the visual Docs Graph.')
+
+  const tutorialOverview = await read(root, 'docs/ja/tutorials/overview.md')
+  assert(tutorialOverview.includes('Docs Graph'), 'Japanese tutorial overview must include the Docs Graph in its learning outcome.')
 
   const frontend = await read(root, 'docs/ja/guides/frontend.md')
   assert(frontend.includes('PageProps<typeof pages.posts.Index>'), 'Japanese frontend guide must show page-contract-based props.')

@@ -96,6 +96,8 @@ await app.actingAs(user).get('/dashboard').assertOk()
 
 **End-to-end type safety.** Your Drizzle schema types flow into your Model, through your Controller, and into your React page props. Change a column name and TypeScript catches every place that needs updating — from database to browser.
 
+**Project knowledge that stays connected to code.** Guren links architecture decisions and generated spec views to the entities and paths they govern, validates those relations, and renders the whole corpus as an interactive Docs Graph during development. See [Spec-Anchored Development](./spec-anchored.md) for the complete workflow.
+
 **Batteries included, not forced.** Authentication, validation, caching, queues, mail, events, broadcasting, scheduling — they are all there when you need them. Each subsystem is opt-in through ServiceProviders, so you only load what you use.
 
 **Convention over configuration.** Generate a full feature with `bunx guren add auth` or `bunx guren add resource posts`. The CLI scaffolds the files in the right place with the right structure so you spend time building features, not debating folder layout.
@@ -129,6 +131,7 @@ Follow this path, in order:
    - [Database](./database.md) — Drizzle schemas, migrations, QueryBuilder, and relationships.
    - [Frontend](./frontend.md) — Inertia-powered React pages and SSR.
    - [Testing](./testing.md) — TestApp, fluent assertions, and test utilities.
+   - [Spec-Anchored Development](./spec-anchored.md) — generated diagrams, architecture decisions, verified links, and the Docs Graph.
 
 Prefer a quick guided tour before the tutorial? [First Steps](./first-steps.md) traces one request through every layer in ten minutes.
 
