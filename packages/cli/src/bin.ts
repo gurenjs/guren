@@ -30,6 +30,7 @@ import { buildDocsGraphReport, renderDocsGraphMarkdown } from './docs-graph'
 import { makeResource } from './make-resource'
 import { makeRoute } from './make-route'
 import { makeSeeder } from './make-seeder'
+import { makeValidator } from './make-validator'
 import { makeTest, type TestRunner } from './make-test'
 import { makeView } from './make-view'
 import { runDatabaseMigrations, runDatabaseSeeders, resetDatabase } from './db-migrate'
@@ -61,7 +62,8 @@ import { runCheck, renderCheckReport } from './check'
 import { runAudit, renderAuditReport } from './audit'
 import { generateGuidelines } from './guidelines'
 import { installAgentHarness, type AgentHarnessResult } from './agent-harness'
-import { makeFeature, parseFieldsString } from './make-feature'
+import { makeFeature } from './make-feature'
+import { parseFieldsString } from './fields'
 import { generateKeyValue, writeKeyToEnv } from './key-generate'
 
 type ForceableArgs = { force?: boolean; module?: string }
@@ -77,6 +79,16 @@ const MODULE_ARG = {
   type: 'string' as const,
   description: 'Scaffold inside modules/<name>/ instead of the project root.',
   alias: 'M',
+}
+
+// One definition for every command that takes `--fields`. The syntax is parsed
+// in exactly one place (`parseFieldsString`), so it should be described in one
+// place too — three hand-written copies had already drifted into three
+// wordings and an alias that existed on only one of them.
+const FIELDS_ARG = {
+  type: 'string' as const,
+  alias: 'F',
+  description: 'Comma-separated fields, e.g. "title:string,body:text,published:boolean" (append ? for nullable).',
 }
 
 function createMakeCommand(
@@ -205,6 +217,29 @@ const makeAdrCommand = defineCommand({
       by: args.by,
     })
     consola.success(`ADR created at ${file}`)
+  },
+})
+
+// make:validator takes an extra --fields flag beyond the shared writer options,
+// so it gets its own command instead of a makeCommandSpecs entry.
+const makeValidatorCommand = defineCommand({
+  meta: {
+    name: 'make:validator',
+    description: 'Generate Zod validation schemas (route params, list query, payload) for an entity.',
+  },
+  args: {
+    name: { type: 'positional', required: true, description: 'Entity or validator class name' },
+    fields: FIELDS_ARG,
+    force: { type: 'boolean', description: 'Overwrite existing files', alias: 'f' },
+    module: MODULE_ARG,
+  },
+  async run({ args }) {
+    // Parsed here rather than inside makeValidator so an omitted --fields means
+    // "empty payload schema" for this command without changing what an omitted
+    // --fields means for make:feature (see DEFAULT_FIELDS in fields.ts).
+    const fields = args.fields ? parseFieldsString(args.fields) : undefined
+    const file = await makeValidator(args.name, { ...toWriterOptions(args), fields })
+    consola.success(`Validator created at ${file}`)
   },
 })
 
@@ -1969,11 +2004,7 @@ const makeFeatureCommand = defineCommand({
       required: true,
       description: 'Feature name (singular, e.g., Product).',
     },
-    fields: {
-      type: 'string',
-      alias: 'F',
-      description: 'Field definitions (name:type,...). e.g., title:string,body:text,published:boolean',
-    },
+    fields: FIELDS_ARG,
     force: {
       type: 'boolean',
       alias: 'f',
@@ -2039,10 +2070,7 @@ const addResourceCommand = defineCommand({
       required: true,
       description: 'Resource name (singular)',
     },
-    fields: {
-      type: 'string',
-      description: 'Comma-separated fields, e.g. "title:string,body:text,published:boolean" (append ? for nullable)',
-    },
+    fields: FIELDS_ARG,
     public: {
       type: 'boolean',
       description: 'Skip authentication checks in store/update/destroy actions',
@@ -2396,6 +2424,7 @@ const deployCommand = defineCommand({
 const builtinSubCommands = {
   ...makeCommands,
   'make:adr': makeAdrCommand,
+  'make:validator': makeValidatorCommand,
   'spec:generate': specGenerateCommand,
   'docs:graph': docsGraphCommand,
   'make:auth': makeAuthCommand,

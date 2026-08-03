@@ -4,17 +4,9 @@ import { pluralize } from './inflect'
 import { makeModel } from './make-model'
 import { makePolicy } from './make-policy'
 import { makeTest } from './make-test'
+import { makeValidator } from './make-validator'
+import { parseFieldsString, type FieldDefinition, type FieldType } from './fields'
 import { schemaPathFor } from './schema-parser'
-
-export const FIELD_TYPES = ['string', 'number', 'boolean', 'text', 'date', 'json'] as const
-
-export type FieldType = (typeof FIELD_TYPES)[number]
-
-export interface FieldDefinition {
-  name: string
-  type: FieldType
-  nullable?: boolean
-}
 
 export interface MakeFeatureOptions extends WriterOptions {
   fields?: string
@@ -26,38 +18,6 @@ export interface MakeFeatureOptions extends WriterOptions {
   withPolicy?: boolean
   /** Print created files and next steps (default: true). Callers that wire routes/schema themselves pass false. */
   announce?: boolean
-}
-
-const DEFAULT_FIELDS: FieldDefinition[] = [
-  { name: 'title', type: 'string' },
-  { name: 'body', type: 'text', nullable: true },
-]
-
-export function parseFieldsString(fieldsStr: string): FieldDefinition[] {
-  if (!fieldsStr.trim()) return DEFAULT_FIELDS
-
-  return fieldsStr.split(',').map((field) => {
-    const parts = field.trim().split(':')
-    const name = parts[0]?.trim()
-    const rawType = parts[1]?.trim() ?? 'string'
-    const nullable = rawType.endsWith('?')
-    const type = nullable ? rawType.slice(0, -1) : rawType
-
-    if (!name) throw new Error(`Invalid field definition: "${field}"`)
-
-    // The name becomes an object key, a property access and a state key in the
-    // generated code, so anything that is not an identifier produces a file
-    // that cannot be parsed — better to say so than to emit it.
-    if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)) {
-      throw new Error(`Invalid field name "${name}". Use a valid identifier, e.g. "publishedAt".`)
-    }
-
-    if (!FIELD_TYPES.includes(type as FieldType)) {
-      throw new Error(`Invalid field type "${type}" for field "${name}". Valid: ${FIELD_TYPES.join(', ')}`)
-    }
-
-    return { name, type: type as FieldType, nullable }
-  })
 }
 
 export async function makeFeature(name: string, options: MakeFeatureOptions = {}): Promise<string[]> {
@@ -80,11 +40,12 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   const appPrefix = moduleName ? `modules/${moduleName}/` : ''
   const pagePrefix = moduleName ? `${moduleName}/` : ''
 
+  // Composed rather than emitted inline — the same way makeModel/makePolicy/
+  // makeTest are below — so the schema names the generated controller imports
+  // and the ones `make:validator` writes cannot drift apart.
+  const validatorPath = await makeValidator(singular, { ...writerOptions, fields })
+
   const created = await writeFilesSafe([
-    {
-      path: `${appPrefix}app/Http/Validators/${singular}Validator.ts`,
-      contents: generateValidator(singular, collection, fields),
-    },
     {
       path: `${appPrefix}app/Http/Resources/${singular}Resource.ts`,
       contents: generateResource(singular, fields),
@@ -110,6 +71,8 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
       contents: generateEditPage(singular, routeName, variableName, fields),
     },
   ], writerOptions)
+
+  created.unshift(validatorPath)
 
   // Create model
   const modelPath = await makeModel(singular, writerOptions)
@@ -191,22 +154,6 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
 
 // Keyed by `FieldType` rather than `string`, so adding a field type fails to
 // compile here instead of silently falling through to a string default.
-function zodFieldType(field: FieldDefinition): string {
-  const map: Record<FieldType, string> = {
-    string: 'z.string().trim().min(1)',
-    text: 'z.string().trim().min(1)',
-    number: 'z.coerce.number()',
-    boolean: 'z.boolean()',
-    date: 'z.coerce.date()',
-    // Zod 4 requires an explicit key type for records. The value is `any`
-    // rather than `unknown` because Inertia's `useForm` refuses to hold an
-    // `unknown` — narrow this to the object's real shape once you know it.
-    json: 'z.record(z.string(), z.any())',
-  }
-  const schema = map[field.type]
-  return field.nullable ? `${schema}.nullable().optional()` : schema
-}
-
 function tsFieldType(field: FieldDefinition): string {
   const map: Record<FieldType, string> = {
     string: 'string',
@@ -259,26 +206,6 @@ function withEmptyFallback(field: FieldDefinition, access: string): string {
 
 function formValue(field: FieldDefinition, formVar: string): string {
   return withEmptyFallback(field, `${formVar}.data.${field.name}`)
-}
-
-function generateValidator(singular: string, collection: string, fields: FieldDefinition[]): string {
-  const fieldSchemas = fields.map((f) => `  ${f.name}: ${zodFieldType(f)},`).join('\n')
-  return `import { z } from 'zod'
-
-export const ${singular}IdParamSchema = z.object({
-  id: z.coerce.number().int().positive(),
-})
-
-export const List${collection}QuerySchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
-})
-
-export const ${singular}PayloadSchema = z.object({
-${fieldSchemas}
-})
-
-export type ${singular}Payload = z.infer<typeof ${singular}PayloadSchema>
-`
 }
 
 function generateResource(singular: string, fields: FieldDefinition[]): string {

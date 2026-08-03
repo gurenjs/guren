@@ -16,6 +16,9 @@ import { makePolicy } from '../src/make-policy'
 import { makeProvider } from '../src/make-provider'
 import { makeResource } from '../src/make-resource'
 import { makeSeeder } from '../src/make-seeder'
+import { makeValidator } from '../src/make-validator'
+import { makeFeature } from '../src/make-feature'
+import { parseFieldsString } from '../src/fields'
 
 // A fixed, predictable path under the shared OS temp dir let another process
 // pre-plant a symlink there before a test wrote through it. mkdtempSync's
@@ -219,6 +222,74 @@ describe('CLI make:* commands', () => {
       const mysql = fs.readFileSync(await makeSeeder('Post'), 'utf-8')
       expect(mysql).toContain("import { defineSeeder, type MySqlSeederContext } from '@guren/core'")
       expect(mysql).toContain('async ({ db }: MySqlSeederContext) => {')
+    })
+  })
+
+  describe('makeValidator', () => {
+    it('generates the three schemas a resource controller validates against', async () => {
+      const result = await makeValidator('Post')
+      expect(result).toContain('app/Http/Validators/PostValidator.ts')
+      const content = fs.readFileSync(result, 'utf-8')
+      expect(content).toContain("import { z } from 'zod'")
+      expect(content).toContain('export const PostIdParamSchema = z.object({')
+      expect(content).toContain('export const ListPostsQuerySchema = z.object({')
+      expect(content).toContain('export const PostPayloadSchema = z.object({')
+      expect(content).toContain('export type PostPayload = z.infer<typeof PostPayloadSchema>')
+    })
+
+    it('maps each field definition to its zod schema', async () => {
+      const result = await makeValidator('Post', {
+        fields: parseFieldsString('title:string,views:number,publishedAt:date?'),
+      })
+      const content = fs.readFileSync(result, 'utf-8')
+      expect(content).toContain('title: z.string().trim().min(1),')
+      expect(content).toContain('views: z.coerce.number(),')
+      expect(content).toContain('publishedAt: z.coerce.date().nullable().optional(),')
+    })
+
+    // make:feature invents title/body so its model, controller, and pages agree
+    // with each other. A standalone validator has no siblings to agree with, so
+    // inheriting that default would be two fields the caller has to delete.
+    it('leaves the payload empty rather than inheriting make:feature defaults', async () => {
+      const content = fs.readFileSync(await makeValidator('Invoice'), 'utf-8')
+      const payload = content.split('export const InvoicePayloadSchema = z.object({\n')[1]?.split('\n})')[0]
+      expect(payload).toBe('  // Add one entry per column, e.g. title: z.string().trim().min(1),')
+    })
+
+    it('pluralizes the list query schema name', async () => {
+      const content = fs.readFileSync(await makeValidator('Category'), 'utf-8')
+      expect(content).toContain('export const ListCategoriesQuerySchema')
+    })
+
+    it('preserves Validator suffix without duplicating it in schema names', async () => {
+      const result = await makeValidator('PostValidator')
+      expect(result).toContain('app/Http/Validators/PostValidator.ts')
+      expect(result).not.toContain('PostValidatorValidator.ts')
+      const content = fs.readFileSync(result, 'utf-8')
+      expect(content).toContain('export const PostPayloadSchema')
+      expect(content).not.toContain('PostValidatorPayloadSchema')
+    })
+
+    it('scaffolds inside a module with the root option', async () => {
+      const result = await makeValidator('Invoice', { root: 'Billing' })
+      expect(result).toContain('modules/billing/app/Http/Validators/InvoiceValidator.ts')
+      expect(fs.existsSync(result)).toBe(true)
+    })
+
+    // The controller make:feature generates imports these three schema names by
+    // hand, so the two commands producing different files is a broken build.
+    // Comparing the bytes is what makes that failure reachable — asserting
+    // substrings on makeValidator alone would stay green through any drift.
+    it('produces byte-identical output to the validator make:feature scaffolds', async () => {
+      const fields = 'title:string,views:number,publishedAt:date?'
+
+      await makeFeature('Post', { fields, announce: false })
+      const fromFeature = fs.readFileSync(path.join(TEST_DIR, 'app/Http/Validators/PostValidator.ts'), 'utf-8')
+
+      fs.rmSync(path.join(TEST_DIR, 'app/Http/Validators/PostValidator.ts'))
+      const fromValidator = fs.readFileSync(await makeValidator('Post', { fields: parseFieldsString(fields) }), 'utf-8')
+
+      expect(fromValidator).toBe(fromFeature)
     })
   })
 

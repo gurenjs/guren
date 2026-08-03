@@ -25,6 +25,7 @@ bunx guren make:listener <Name> --event=<EventName>
 bunx guren make:mail <Name>
 bunx guren make:test <Name> --runner=bun|vitest
 bunx guren make:resource <Name> --model=<Model>
+bunx guren make:validator <Name> [--fields "<field:type,...>"]
 bunx guren make:factory <Name> --model=<Model>
 bunx guren make:seeder <Name>
 bunx guren make:provider <Name>

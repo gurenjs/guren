@@ -1,6 +1,7 @@
 import { makeAuth } from './make-auth'
 import { makeChannel } from './make-channel'
-import { makeFeature, parseFieldsString, type FieldDefinition, type FieldType } from './make-feature'
+import { makeFeature } from './make-feature'
+import { parseFieldsString, type FieldDefinition, type FieldType } from './fields'
 import { collectionSlug, schemaIdentifierFor, singularize, tableNameFor } from './inflect'
 import { makeController } from './make-controller'
 import { makeEvent } from './make-event'

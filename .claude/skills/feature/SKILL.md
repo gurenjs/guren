@@ -52,27 +52,12 @@ bunx guren make:test controllers/<Name>Controller --runner=vitest
 bunx guren make:factory <Name> --model=<Name>
 bunx guren make:seeder <Name>
 bunx guren make:resource <Name> --model=<Name>
+bunx guren make:validator <Name> --fields "<name:type,...>"
 ```
 
-When using individual commands, you must also create a Validator file manually at `app/Http/Validators/<Name>Validator.ts`:
+Don't hand-write the Validator — `make:validator` emits the same file `make:feature` does, so the schema names stay in sync with what the generated controller imports. Pass the same `--fields` you would pass `make:feature`; omit it to get an empty payload schema to fill in.
 
-```typescript
-import { z } from 'zod'
-
-export const <Name>PayloadSchema = z.object({
-  // Define fields matching your schema
-  title: z.string().trim().min(1),
-  body: z.string().trim().min(1),
-})
-
-export type <Name>Payload = z.infer<typeof <Name>PayloadSchema>
-
-export const <Name>IdParamSchema = z.object({
-  id: z.coerce.number().int().positive(),
-})
-```
-
-This Validator is needed for both controller validation and route body schema binding.
+The Validator is needed for both controller validation and route body schema binding.
 
 ### 2. Register routes with body schemas
 
