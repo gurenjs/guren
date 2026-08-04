@@ -1,9 +1,18 @@
 import { describe, expect, it } from 'bun:test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { consola } from 'consola'
 import { createTempWorkspace, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, SQLITE_SCHEMA_FIXTURE } from './helpers'
 import { makeAuth } from '../src/make-auth'
+
+// Shared with packages/create-app/templates/blog/app/Providers/AuthProvider.ts,
+// which ports this same boot() so the blog blueprint's Layout.tsx nav (also
+// reading `props.auth.user`) doesn't render as a guest while signed in. Pinning
+// both copies to this snippet is how the two are kept from silently drifting.
+const SHARE_INERTIA_AUTH_PROPS_SNIPPET = `shareInertiaProps(async (ctx) => {
+      const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
+      return { auth: { user: await auth?.user() } }
+    })`
 
 describe('makeAuth', () => {
   it('scaffolds auth resources and installs providers', async () => {
@@ -80,6 +89,15 @@ export function registerWebRoutes(router: Router): void {
 
       const schema = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
       expect(schema).toContain('passwordHash')
+
+      const authProviderContent = await readFile(join(workspace.dir, 'app/Providers/AuthProvider.ts'), 'utf8')
+      expect(authProviderContent).toContain(SHARE_INERTIA_AUTH_PROPS_SNIPPET)
+
+      const blogAuthProvider = await readFile(
+        resolve(import.meta.dir, '../../create-app/templates/blog/app/Providers/AuthProvider.ts'),
+        'utf8',
+      )
+      expect(blogAuthProvider).toContain(SHARE_INERTIA_AUTH_PROPS_SNIPPET)
 
       const appContent = await readFile(join(workspace.dir, 'src/app.ts'), 'utf8')
       expect(appContent).toContain('AuthProvider')
