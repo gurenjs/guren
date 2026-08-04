@@ -23,10 +23,11 @@ Create a new project and answer the prompts:
 bunx create-guren-app my-blog
 ```
 
-The CLI asks two questions:
+The CLI asks a few questions:
 
 - **Rendering mode** — keep the default (**SSR**).
 - **Database driver** — keep the default (**SQLite**, "zero-config, recommended for getting started").
+- **Git repository initialization** — if asked, either answer is fine (this tutorial doesn't use it).
 
 The scaffolder copies the template, writes a ready-to-use `.env` (with a generated `APP_KEY` and `DATABASE_URL=./data/guren.db`), and installs dependencies. Start the dev server:
 

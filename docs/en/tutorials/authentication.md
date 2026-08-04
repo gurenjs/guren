@@ -50,11 +50,43 @@ bun run codegen
 
 `bun run codegen` folds the scaffolding's new pages and routes into the type manifests (if `bun run dev` is running, the watcher already did this, so it's effectively a no-op). For how the generated auth stack works — guards, providers, safe handling of user records — see the [Authentication guide](../guides/authentication.md).
 
+### Share the sign-in state with your pages
+
+The generated shared layout (`resources/js/components/Layout.tsx`) reads `auth.user` from the shared props to toggle between **Sign in** and **Log out** — but nothing shares that prop yet. Wire it up by adding a `boot()` to `app/Providers/AuthProvider.ts`:
+
+```ts
+import { ServiceProvider, shareInertiaProps, AUTH_CONTEXT_KEY } from '@guren/core'
+import type { AuthContext, AuthManager } from '@guren/core'
+import { User } from '../Models/User.js'
+
+export default class AuthProvider extends ServiceProvider {
+  register(): void {
+    // Keep the generated useModel configuration as is
+    const auth = this.container.make<AuthManager>('auth')
+    auth.useModel(User, {
+      usernameColumn: 'email',
+      passwordColumn: 'passwordHash',
+      rememberTokenColumn: 'rememberToken',
+      credentialsPasswordField: 'password',
+    })
+  }
+
+  boot(): void {
+    shareInertiaProps(async (ctx) => {
+      const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
+      return { auth: { user: await auth?.user() } }
+    })
+  }
+}
+```
+
+`shareInertiaProps` merges this value into the props of every Inertia response. What `auth.user()` returns is the **sanitized** user — `passwordHash` and `rememberToken` are stripped at runtime, so sharing it wholesale never ships credentials to the browser. Part 3's comment form relies on this wiring too.
+
 ## 2. Checkpoint: sign in
 
 With the dev server running (`bun run dev` if you stopped it), open [http://localhost:3333/login](http://localhost:3333/login).
 
-1. Sign in as **demo@example.com** / **secret** — you land on `/dashboard` with a personalized greeting.
+1. Sign in as **demo@example.com** / **secret** — you land on `/dashboard` with a personalized greeting, and the header navigation flips from **Sign in** to **Log out** (the shared props you just wired).
 2. Try a wrong password — the form shows "Invalid credentials."
 3. Open `/dashboard` in a private browsing window — you're redirected to `/login`. Protected routes are actually protected.
 
@@ -99,7 +131,7 @@ The mechanism has three tiers:
 
 - `aliasMiddleware` names the middleware once so routes can refer to it as `'auth'` (the alias is recorded in the return type, which is why the sample captures it: `const router = baseRouter.aliasMiddleware(...)`).
 - Standalone routes chain `.middleware('auth').get(...)` directly.
-- Routes you want to protect together go inside `.middleware('auth').group((authed) => ...)`. Groups nest, so you can layer authentication inside the `/posts` prefix — here the three routes carrying `body` schemas take this form.
+- Routes you want to protect together go inside `.middleware('auth').group((authed) => ...)`. Groups nest, so you can layer authentication inside the `/posts` prefix — here the three option-carrying routes (store / update / destroy) take this form.
 
 Listing and reading posts stay public; creating, editing, and deleting now redirect signed-out visitors to `/login`. Middleware and groups are covered in full in the [Routing guide](../guides/routing.md).
 
@@ -111,10 +143,10 @@ Next, add a second line of defense inside the controller. Add one line at the to
     // ...
 ```
 
-`this.auth.userOrFail()` returns the signed-in user or responds with 401. This is exactly the line the generator would have emitted if you hadn't passed `--public` in Part 1 — and it keeps the guard in place even if a refactor later strips the route middleware. In `store`, this line becomes the typed `userOrFail<UserRecord>()` when step 5 sets the author.
+`this.auth.userOrFail()` returns the signed-in user or responds with 401. This is exactly the line the generator would have emitted if you hadn't passed `--public` in Part 1 — and it keeps the guard in place even if a refactor later strips the route middleware. In `store`, this line becomes the typed `userOrFail<Sanitized<UserRecord>>()` when step 5 sets the author.
 
 > [!NOTE]
-> What you guarded here is only "is someone signed in" (authentication). As it stands, any signed-in user can edit or delete **anyone's** post. "Only the author can edit" is the job of authorization, which Guren implements as policies — `bunx guren make:policy Post` scaffolds one, and passing `--policy` to `add resource` builds it in from the start. It's out of scope for this series, but the [Authorization guide](../guides/authorization.md) walks through it with this same blog example.
+> What you guarded here is only "is someone signed in" (authentication). As it stands, any signed-in user can edit or delete **anyone's** post. "Only the author can edit" is the job of authorization, which Guren implements as policies — `bunx guren make:policy Post` scaffolds one, and if you generate with `bunx guren make:feature`, passing `--policy` builds the `authorize()` calls in from the start. It's out of scope for this series, but the [Authorization guide](../guides/authorization.md) walks through it with this same blog example.
 
 ## 4. Confirm with audit
 
@@ -224,6 +256,7 @@ This is a load-bearing design point: the loaded author row contains `passwordHas
 Update two actions in `app/Http/Controllers/PostController.ts`:
 
 ```ts
+import { Controller, paginate, type PaginatedPageProps, type Sanitized } from '@guren/core'
 import type { UserRecord } from '../../Models/User.js'
 
 // inside PostController:
@@ -238,7 +271,7 @@ import type { UserRecord } from '../../Models/User.js'
   }
 
   async store(): Promise<Response> {
-    const user = await this.auth.userOrFail<UserRecord>()
+    const user = await this.auth.userOrFail<Sanitized<UserRecord>>()
     const data = await this.validateBody(PostPayloadSchema)
     const post = await Post.create({ ...data, authorId: user.id })
     return this.redirect('/posts/' + post?.id)
@@ -246,7 +279,7 @@ import type { UserRecord } from '../../Models/User.js'
 ```
 
 - `findWithOrFail(id, 'author')` eager-loads the relation in the same call that returns a 404 when the post is missing.
-- `store` derives `authorId` from `userOrFail<UserRecord>()`. The browser never picks the author, which structurally prevents impersonation.
+- `store` derives `authorId` from `userOrFail<Sanitized<UserRecord>>()`. The browser never picks the author, which structurally prevents impersonation. The `Sanitized<UserRecord>` wrapper (rather than bare `UserRecord`) removes from the type the credential columns the runtime strips (see the [Authentication guide](../guides/authentication.md)).
 
 ### Show the author
 
@@ -271,7 +304,7 @@ ERROR [fail] docs/spec/er.md: docs/spec/er.md is out of date with the code.
        → Run: bunx guren spec:generate
 ```
 
-Stale views get named as `[fail]`. Do what it says: regenerate, and `er.md` gains the `authorId FK` on `posts`, `domain.md` gains the `author` relation, and the gate goes green again.
+Stale views get named as `[fail]` — not just `er.md`: expect `screens.md` and friends alongside it, reflecting the pages and routes authentication added. Do what it says: regenerate, and `er.md` gains the `authorId FK` on `posts`, `domain.md` gains the `author` relation, and the gate goes green again.
 
 ```bash
 bunx guren spec:generate

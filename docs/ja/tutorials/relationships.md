@@ -154,7 +154,7 @@ Part 2 の `PostResource` と同じパターンです: 著者からは `name` �
 `make:controller` の生成したプレースホルダーを、コメント作成のアクションに置き換えます（`app/Http/Controllers/CommentController.ts`）。
 
 ```ts
-import { Controller } from '@guren/core'
+import { Controller, type Sanitized } from '@guren/core'
 import { Comment } from '../../Models/Comment.js'
 import { Post } from '../../Models/Post.js'
 import type { UserRecord } from '../../Models/User.js'
@@ -166,7 +166,7 @@ export default class CommentController extends Controller {
     const { id } = this.validateParams(PostIdParamSchema)
     const post = await Post.findOrFail(id)
     const data = await this.validateBody(CommentPayloadSchema)
-    const user = await this.auth.userOrFail<UserRecord>()
+    const user = await this.auth.userOrFail<Sanitized<UserRecord>>()
 
     await Comment.create({
       postId: post.id,
@@ -323,7 +323,7 @@ export default function PostShow({ post, comments }: Props) {
 
 ポイント:
 
-- `usePage().props.auth?.user` は、Part 2 の認証雛形がすべてのページに公開する共有 auth props を読み取ります — ページはこれを見て、フォームとサインインの案内のどちらを表示するか決めています。
+- `usePage().props.auth?.user` は、Part 2 で `AuthProvider` の `boot()` に配線した共有 auth props を読み取ります — ページはこれを見て、フォームとサインインの案内のどちらを表示するか決めています。
 - 成功するとリダイレクトによってページが最新のコメント付きで再描画され、`form.reset()` がテキストエリアをクリアします。
 
 いつものループで締めます: `bun run codegen`（`bun run dev` 中なら自動）で `comments.store` ルートと新しい `Props` をマニフェストに反映し、`bunx guren check` で配線を検証します（`CommentController` のテスト未作成警告が増えているはずです — `check` はちゃんと見ています）。
@@ -388,7 +388,7 @@ bunx guren context Comment
 
 `docs:graph` はドキュメント側から見た近傍（この ADR が `Comment` を統べる、という関係）を、`context Comment` はコード側から見たエンティティの全体像 — モデルのカラムとリレーション、ルート、コントローラー、リソース、そしてリンクされた ADR — を 1 画面にまとめます。あなた（や AI エージェント）が半年後にこの機能へ戻ってきたとき、最初に打つコマンドです。
 
-最後に、Part 1 から見てきた [http://localhost:3333/_guren/docs](http://localhost:3333/_guren/docs) をもう一度開きます。これまではコードから導出されたスペックビューだけでしたが、今度はあなたが **宣言した** 知識 — 新しい ADR と、それが統べる `Comment` エンティティ — がグラフに加わっています。エッジを辿って関連コントローラーを確認し、更新された ER ビューとドメインビューも開いてください。CLI と同じ検証済みの関係を、視覚的な画面から読んでいます。
+最後に、Part 1 から見てきた [http://localhost:3333/_guren/docs](http://localhost:3333/_guren/docs) をもう一度開きます。これまではコードから導出されたビューと雛形付属の ADR だけでしたが、今度はあなたが **宣言した** 知識 — 新しい ADR と、それが統べる `Comment` エンティティ — がグラフに加わっています。エッジを辿って関連コントローラーを確認し、更新された ER ビューとドメインビューも開いてください。CLI と同じ検証済みの関係を、視覚的な画面から読んでいます。
 
 文書形式、trust metadata、ドリフト検証、エージェント向けワークフローの詳細は [スペックアンカード開発](../guides/spec-anchored.md) を参照してください。
 

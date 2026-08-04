@@ -50,11 +50,43 @@ bun run codegen
 
 `bun run codegen` は、雛形が追加した新しいページとルートを型マニフェストに反映します（`bun run dev` が動いていれば監視が自動で実行するので、実質不要です）。生成された認証スタックの仕組み — ガード、プロバイダー、ユーザーレコードの安全な取り扱い — は[認証ガイド](../guides/authentication.md)が詳しく解説しています。
 
+### サインイン状態をページに共有する
+
+生成された共有レイアウト（`resources/js/components/Layout.tsx`）は、共有 props の `auth.user` を読んで **Sign in** と **Log out** を出し分けます — が、デフォルトではこの prop を共有する配線がまだありません。`app/Providers/AuthProvider.ts` に `boot()` を追加して配線します。
+
+```ts
+import { ServiceProvider, shareInertiaProps, AUTH_CONTEXT_KEY } from '@guren/core'
+import type { AuthContext, AuthManager } from '@guren/core'
+import { User } from '../Models/User.js'
+
+export default class AuthProvider extends ServiceProvider {
+  register(): void {
+    // 生成されたままの useModel 設定はそのまま残します
+    const auth = this.container.make<AuthManager>('auth')
+    auth.useModel(User, {
+      usernameColumn: 'email',
+      passwordColumn: 'passwordHash',
+      rememberTokenColumn: 'rememberToken',
+      credentialsPasswordField: 'password',
+    })
+  }
+
+  boot(): void {
+    shareInertiaProps(async (ctx) => {
+      const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
+      return { auth: { user: await auth?.user() } }
+    })
+  }
+}
+```
+
+`shareInertiaProps` は、すべての Inertia レスポンスの props にこの値をマージします。`auth.user()` が返すのは **サニタイズ済み** のユーザーです — `passwordHash` や `rememberToken` はランタイムで除去済みなので、丸ごと共有しても資格情報はブラウザに届きません。この配線は Part 3 のコメントフォームでも使います。
+
 ## 2. チェックポイント: サインインする
 
 開発サーバーが動いている状態で（止めていたら `bun run dev`）、[http://localhost:3333/login](http://localhost:3333/login) を開きます。
 
-1. **demo@example.com** / **secret** でサインインします — `/dashboard` に着地し、名前入りの挨拶が表示されます。
+1. **demo@example.com** / **secret** でサインインします — `/dashboard` に着地し、名前入りの挨拶が表示されます。ヘッダーのナビゲーションも **Sign in** から **Log out** に切り替わっています（先ほど配線した共有 props の効果です）。
 2. 間違ったパスワードを試します — フォームに "Invalid credentials." が表示されます。
 3. プライベートブラウジングのウィンドウで `/dashboard` を開きます — `/login` にリダイレクトされます。保護されたルートは本当に保護されています。
 
@@ -99,7 +131,7 @@ export function registerWebRoutes(baseRouter: Router): void {
 
 - `aliasMiddleware` はミドルウェアに一度だけ名前を付け、ルートからは `'auth'` として参照できるようにします（エイリアスは戻り値の型に記録されるので、`const router = baseRouter.aliasMiddleware(...)` と受けています）。
 - 単独のルートには `.middleware('auth').get(...)` を直接チェーンします。
-- まとめて保護したいルートは `.middleware('auth').group((authed) => ...)` に入れます。グループはネストできるので、`/posts` プレフィックスの内側でさらに認証だけを重ねられます。ここでは `body` スキーマ付きの 3 ルートをこの形にしています。
+- まとめて保護したいルートは `.middleware('auth').group((authed) => ...)` に入れます。グループはネストできるので、`/posts` プレフィックスの内側でさらに認証だけを重ねられます。ここではルートオプション付きの 3 ルート（store / update / destroy）をこの形にしています。
 
 投稿の一覧と閲覧は公開のまま、作成・編集・削除は未ログインの訪問者を `/login` へリダイレクトするようになりました。ミドルウェアとグループの全体像は[ルーティングガイド](../guides/routing.md)を参照してください。
 
@@ -111,10 +143,10 @@ export function registerWebRoutes(baseRouter: Router): void {
     // ...
 ```
 
-`this.auth.userOrFail()` はサインイン中のユーザーを返すか、401 で応答します。これは Part 1 で `--public` を外していれば、ジェネレーターが最初から入れていた行そのものです — ルートミドルウェアを剥がす改修が入っても、コントローラー単体で守りが残ります。`store` のこの行は、ステップ 5 で著者を設定するときに型引数付きの `userOrFail<UserRecord>()` へ置き換わります。
+`this.auth.userOrFail()` はサインイン中のユーザーを返すか、401 で応答します。これは Part 1 で `--public` を外していれば、ジェネレーターが最初から入れていた行そのものです — ルートミドルウェアを剥がす改修が入っても、コントローラー単体で守りが残ります。`store` のこの行は、ステップ 5 で著者を設定するときに型引数付きの `userOrFail<Sanitized<UserRecord>>()` へ置き換わります。
 
 > [!NOTE]
-> ここで守ったのは「サインインしているか」（認証）だけです。今の実装では、サインイン済みユーザーなら **誰の** 投稿でも編集・削除できます。「著者本人だけが編集できる」は認可（authorization）の仕事で、Guren ではポリシーとして実装します — `bunx guren make:policy Post` で雛形が手に入り、`add resource` に `--policy` を付ければ最初から組み込まれます。このシリーズでは範囲外としますが、[認可ガイド](../guides/authorization.md) が同じブログ例で解説しています。
+> ここで守ったのは「サインインしているか」（認証）だけです。今の実装では、サインイン済みユーザーなら **誰の** 投稿でも編集・削除できます。「著者本人だけが編集できる」は認可（authorization）の仕事で、Guren ではポリシーとして実装します — `bunx guren make:policy Post` で雛形が手に入り、`bunx guren make:feature` で生成する場合は `--policy` を付ければ `authorize()` の呼び出しまで組み込まれます。このシリーズでは範囲外としますが、[認可ガイド](../guides/authorization.md) が同じブログ例で解説しています。
 
 ## 4. audit で守りを確認する
 
@@ -224,6 +256,7 @@ export class PostResource extends Resource<PostWithAuthor> {
 `app/Http/Controllers/PostController.ts` の 2 つのアクションを更新します。
 
 ```ts
+import { Controller, paginate, type PaginatedPageProps, type Sanitized } from '@guren/core'
 import type { UserRecord } from '../../Models/User.js'
 
 // inside PostController:
@@ -238,7 +271,7 @@ import type { UserRecord } from '../../Models/User.js'
   }
 
   async store(): Promise<Response> {
-    const user = await this.auth.userOrFail<UserRecord>()
+    const user = await this.auth.userOrFail<Sanitized<UserRecord>>()
     const data = await this.validateBody(PostPayloadSchema)
     const post = await Post.create({ ...data, authorId: user.id })
     return this.redirect('/posts/' + post?.id)
@@ -246,7 +279,7 @@ import type { UserRecord } from '../../Models/User.js'
 ```
 
 - `findWithOrFail(id, 'author')` は、投稿が見つからなければ 404 を返すその同じ呼び出しの中で、リレーションを eager load します。
-- `store` は `userOrFail<UserRecord>()` の戻り値から `authorId` を設定します。ブラウザに著者を選ばせないことで、なりすましを構造的に防ぎます。
+- `store` は `userOrFail<Sanitized<UserRecord>>()` の戻り値から `authorId` を設定します。ブラウザに著者を選ばせないことで、なりすましを構造的に防ぎます。型引数を `UserRecord` そのままにせず `Sanitized<UserRecord>` で包むのは、ランタイムが除去する資格情報カラムを型からも消すためです（[認証ガイド](../guides/authentication.md)参照）。
 
 ### 著者を表示する
 
@@ -271,7 +304,7 @@ ERROR [fail] docs/spec/er.md: docs/spec/er.md is out of date with the code.
        → Run: bunx guren spec:generate
 ```
 
-古くなったビューが `[fail]` として名指しされます。言われたとおり再生成すると、`er.md` の `posts` に `authorId FK` が、`domain.md` に `author` リレーションが現れ、ゲートは緑に戻ります。
+古くなったビューが `[fail]` として名指しされます — `er.md` だけでなく、認証で増えたページ・ルートを反映して `screens.md` なども並ぶはずです。言われたとおり再生成すると、`er.md` の `posts` に `authorId FK` が、`domain.md` に `author` リレーションが現れ、ゲートは緑に戻ります。
 
 ```bash
 bunx guren spec:generate

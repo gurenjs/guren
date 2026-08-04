@@ -154,7 +154,7 @@ Same pattern as `PostResource` in Part 2: only `name` is copied from the author,
 Replace the placeholder `make:controller` generated with the comment-creation action (`app/Http/Controllers/CommentController.ts`):
 
 ```ts
-import { Controller } from '@guren/core'
+import { Controller, type Sanitized } from '@guren/core'
 import { Comment } from '../../Models/Comment.js'
 import { Post } from '../../Models/Post.js'
 import type { UserRecord } from '../../Models/User.js'
@@ -166,7 +166,7 @@ export default class CommentController extends Controller {
     const { id } = this.validateParams(PostIdParamSchema)
     const post = await Post.findOrFail(id)
     const data = await this.validateBody(CommentPayloadSchema)
-    const user = await this.auth.userOrFail<UserRecord>()
+    const user = await this.auth.userOrFail<Sanitized<UserRecord>>()
 
     await Comment.create({
       postId: post.id,
@@ -323,7 +323,7 @@ export default function PostShow({ post, comments }: Props) {
 
 Highlights:
 
-- `usePage().props.auth?.user` reads the shared auth props that Part 2's scaffolding exposes to every page — that's how the page decides between the form and the sign-in hint.
+- `usePage().props.auth?.user` reads the shared auth props you wired into `AuthProvider`'s `boot()` in Part 2 — that's how the page decides between the form and the sign-in hint.
 - On success, the redirect re-renders the page with fresh comments, and `form.reset()` clears the textarea.
 
 Close the loop as usual: `bun run codegen` (automatic under `bun run dev`) picks up the `comments.store` route and the new `Props`, and `bunx guren check` verifies the wiring (you'll see one more missing-test warning — for `CommentController` — proof that `check` is paying attention).
@@ -388,7 +388,7 @@ bunx guren context Comment
 
 `docs:graph` shows the documentation-side neighborhood (this ADR *governs* `Comment`), while `context Comment` assembles the code-side picture of the entity — its model columns and relations, routes, controller, resource, and the linked ADR — on one screen. It's the first command you (or an AI agent) will run when returning to this feature six months from now.
 
-Finally, revisit [http://localhost:3333/_guren/docs](http://localhost:3333/_guren/docs), the viewer you've been checking since Part 1. Until now it held only the spec views derived from your code; this time the knowledge you **declared** joins the graph — the new ADR and the `Comment` entity it governs. Follow the edges to the related controller, and open the refreshed ER and domain views. You're reading the same verified relationships the CLI reported, now as a visual surface.
+Finally, revisit [http://localhost:3333/_guren/docs](http://localhost:3333/_guren/docs), the viewer you've been checking since Part 1. Until now it held the views derived from your code plus the scaffold's own ADR; this time the knowledge you **declared** joins the graph — the new ADR and the `Comment` entity it governs. Follow the edges to the related controller, and open the refreshed ER and domain views. You're reading the same verified relationships the CLI reported, now as a visual surface.
 
 For the document format, trust metadata, drift verification, and agent workflows, see [Spec-Anchored Development](../guides/spec-anchored.md).
 
