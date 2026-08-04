@@ -134,19 +134,8 @@ function propertyKeyName(property: ObjectProperty): string | undefined {
  * model written that way must not read as bindless.
  */
 function defineModelTableArgument(node: Node): string | undefined {
-  if (node.type !== 'CallExpression') return undefined
-
-  const callee = node.callee
-  if (callee.type === 'Identifier' && callee.name === 'defineModel') {
-    const firstArg = node.arguments[0]
-    return firstArg?.type === 'Identifier' ? firstArg.name : undefined
-  }
-
-  for (const argument of node.arguments) {
-    const nested = defineModelTableArgument(argument)
-    if (nested) return nested
-  }
-  return undefined
+  const firstArg = findDefineModelCall(node)?.arguments[0]
+  return firstArg?.type === 'Identifier' ? firstArg.name : undefined
 }
 
 /**
@@ -189,22 +178,12 @@ export function classUsesAuthenticatableBase(classDecl: ClassDeclaration): boole
   if (!superClass) return false
 
   // defineModel(users, { base: AuthenticatableModel }) — the auth base
-  // arrives as an option rather than as the superclass itself.
-  if (superClass.type === 'CallExpression') {
-    const callee = superClass.callee
-    if (callee.type === 'Identifier' && callee.name === 'defineModel') {
-      const options = superClass.arguments[1]
-      if (options?.type === 'ObjectExpression') {
-        const viaBase = options.properties.some(
-          (property) =>
-            property.type === 'ObjectProperty' &&
-            propertyKeyName(property) === 'base' &&
-            isAuthenticatableBase(property.value),
-        )
-        if (viaBase) return true
-      }
-    }
-  }
+  // arrives as an option rather than as the superclass itself. Resolved
+  // through findDefineModelOption so mixin wrapping is covered the same way
+  // it is for the table and the allowlist options.
+  const baseOption = findDefineModelOption(classDecl, 'base')
+  if (baseOption && isAuthenticatableBase(baseOption.value)) return true
+
   // AuthenticatableModel pattern
   return isAuthenticatableBase(superClass)
 }
@@ -236,7 +215,7 @@ function stringArrayEntries(node: Node | null | undefined): string[] | undefined
 }
 
 /** Entries of `static <name> = ['a', 'b']`, or undefined when absent or not an array literal. */
-export function staticStringArrayProperty(classDecl: ClassDeclaration, name: string): string[] | undefined {
+function staticStringArrayProperty(classDecl: ClassDeclaration, name: string): string[] | undefined {
   return stringArrayEntries(findStaticClassProperty(classDecl, name)?.value)
 }
 
@@ -268,7 +247,7 @@ export function findDefineModelOption(classDecl: ClassDeclaration, name: string)
 }
 
 /** Entries of a string-array defineModel option (e.g. `fillable: ['a', 'b']`). */
-export function defineModelStringArrayOption(classDecl: ClassDeclaration, name: string): string[] | undefined {
+function defineModelStringArrayOption(classDecl: ClassDeclaration, name: string): string[] | undefined {
   return stringArrayEntries(findDefineModelOption(classDecl, name)?.value)
 }
 
@@ -281,6 +260,16 @@ export function defineModelStringArrayOption(classDecl: ClassDeclaration, name: 
  */
 export function resolveModelStringArrayConfig(classDecl: ClassDeclaration, name: string): string[] | undefined {
   return staticStringArrayProperty(classDecl, name) ?? defineModelStringArrayOption(classDecl, name)
+}
+
+/**
+ * Whether the model declares the named config in either spelling — a static
+ * class property or a defineModel option — regardless of whether its value
+ * is a parseable array literal. The presence twin of
+ * `resolveModelStringArrayConfig`; keep the two composition rules together.
+ */
+export function hasModelConfig(classDecl: ClassDeclaration, name: string): boolean {
+  return findStaticClassProperty(classDecl, name) !== null || findDefineModelOption(classDecl, name) !== null
 }
 
 function analyzeClassHeader(

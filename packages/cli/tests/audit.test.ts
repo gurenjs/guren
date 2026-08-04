@@ -588,6 +588,33 @@ export default function registerRoutes(router: any) {
     }
   })
 
+  it('detects an authenticatable base through a mixin wrapper', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-mass-mixin-')
+
+    try {
+      await mkdir(join(workspace.dir, 'app/Models'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Models/User.ts'),
+        `import { AuthenticatableModel, defineModel, SoftDeletes } from '@guren/core'
+import { users } from '../../db/schema.js'
+
+export class User extends SoftDeletes(defineModel(users, {
+  base: AuthenticatableModel,
+})) {}`,
+        'utf8',
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const user = report.findings.find(f => f.key === 'mass-assignment:User')
+      expect(user).toBeDefined()
+      expect(user!.status).toBe('pass')
+      expect(user!.message).toContain('AuthenticatableModel')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('counts a fillable passed as a defineModel option', async () => {
     const workspace = await createTempWorkspace('guren-cli-audit-mass-option-')
 

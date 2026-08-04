@@ -20,9 +20,8 @@ import {
   classUsesAuthenticatableBase,
   extractClassDeclaration,
   extractTableIdentifier,
-  findDefineModelOption,
-  findStaticClassProperty,
   firstClassDeclaration,
+  hasModelConfig,
   resolveModelStringArrayConfig,
 } from './model-parser'
 import { parseSourceFile } from './parse-cache'
@@ -752,10 +751,7 @@ async function auditModels(cwd: string, findings: AuditFinding[]): Promise<void>
     // protected, and a modifier-prefixed fillable must still count.
     const ast = parseSourceFile(source, filePath)
     const classDecl = ast ? firstClassDeclaration(ast.program.body) : null
-    const hasFillable = classDecl
-      ? findStaticClassProperty(classDecl, 'fillable') !== null ||
-        findDefineModelOption(classDecl, 'fillable') !== null
-      : false
+    const hasFillable = classDecl ? hasModelConfig(classDecl, 'fillable') : false
     const isAuthenticatable = classDecl ? classUsesAuthenticatableBase(classDecl) : false
 
     // Authenticatable models are structurally protected: their credential
