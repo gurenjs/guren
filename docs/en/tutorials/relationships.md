@@ -388,9 +388,9 @@ bunx guren context Comment
 
 `docs:graph` shows the documentation-side neighborhood (this ADR *governs* `Comment`), while `context Comment` assembles the code-side picture of the entity — its model columns and relations, routes, controller, resource, and the linked ADR — on one screen. It's the first command you (or an AI agent) will run when returning to this feature six months from now.
 
-Finally, with `bun run dev` still running, open [http://localhost:3333/_guren/docs](http://localhost:3333/_guren/docs). Find your new ADR and the `Comment` entity, follow the edges to the related controller, and open the derived ER and domain views. You're reading the same verified relationships the CLI reported, now as a visual surface.
+Finally, revisit [http://localhost:3333/_guren/docs](http://localhost:3333/_guren/docs), the viewer you've been checking since Part 1. Until now it held only the spec views derived from your code; this time the knowledge you **declared** joins the graph — the new ADR and the `Comment` entity it governs. Follow the edges to the related controller, and open the refreshed ER and domain views. You're reading the same verified relationships the CLI reported, now as a visual surface.
 
-The viewer is local-only, read-only, and dev-only. For the document format, trust metadata, drift verification, and agent workflows, see [Spec-Anchored Development](../guides/spec-anchored.md).
+For the document format, trust metadata, drift verification, and agent workflows, see [Spec-Anchored Development](../guides/spec-anchored.md).
 
 ## Common trip-ups
 

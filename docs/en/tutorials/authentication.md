@@ -276,6 +276,8 @@ bunx guren check --spec
 
 "We changed the implementation but forgot to update the spec" is the fate of every hand-maintained document. Guren prevents it with a mechanical gate rather than discipline — put `check --spec` in CI and a stale view simply cannot merge.
 
+**Checkpoint:** reload [http://localhost:3333/_guren/docs](http://localhost:3333/_guren/docs) — the ER diagram's `posts` now carries the `authorId` foreign key, and the domain view shows the `author` relationship. The viewer always reads the latest views from disk.
+
 ## 6. Checkpoint: post as the demo user
 
 1. Signed out, click **New Post** on `/posts` — you're redirected to `/login`.

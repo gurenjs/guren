@@ -130,6 +130,8 @@ bunx guren spec:generate
 
 This generates `er.md` (tables and foreign keys), `domain.md` (models and relationships), `screens.md` (pages mapped to routes), and `modules.md`. These are **specs derived from the code**, and they're artifacts you commit. When the code changes, the views go stale — and the gate that refuses to let that slide silently is `guren check --spec` (you'll watch it trip in Part 2). Guren manages project knowledge not by hand-maintained documents but in three layers: derived, declared, and checked. See [Spec-Anchored Development](../guides/spec-anchored.md) for the full picture.
 
+**Checkpoint:** the generated views are readable from the browser too. With `bun run dev` still running, open [http://localhost:3333/_guren/docs](http://localhost:3333/_guren/docs). The four spec views and the ADR the scaffold ships with (`0001-record-architecture-decisions`) appear in the listing, and opening `er.md` renders the ER diagram for `users` and `posts`. Each view carries edges showing what code it was derived from (`db/schema.ts` → `er.md`, and so on). The viewer is local-only, read-only, and dev-only.
+
 ## 7. Read the generated code
 
 The generator's output is not a sealed black box — it's a starting point written to be read. Follow a request through the layers.
