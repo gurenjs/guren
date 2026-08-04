@@ -75,13 +75,14 @@ function buildRegisterControllerTemplate(includeVerify: boolean): string {
   const verifyImports = includeVerify
     ? `
 import { emailVerificationStore } from '../../../Auth/EmailVerificationStore.js'
+import { appUrl } from '../../../Auth/AppUrl.js'
 import { sendEmailVerificationMail } from '../../../Mail/EmailVerificationMail.js'`
     : ''
 
   const sendVerification = includeVerify
     ? `
     const { token } = await createEmailVerificationToken(user.email, emailVerificationStore)
-    const verifyUrl = buildVerificationUrl(\`\${new URL(this.request.url).origin}/verify-email/confirm\`, token, user.email)
+    const verifyUrl = buildVerificationUrl(\`\${appUrl(this.request)}/verify-email/confirm\`, token, user.email)
     await sendEmailVerificationMail(this.make('mail'), user.email, verifyUrl)
 `
     : ''
@@ -123,6 +124,7 @@ const forgotPasswordControllerTemplate = `import { Controller, createPasswordRes
 import { ForgotPasswordSchema } from '../../Validators/ForgotPasswordValidator.js'
 import { User } from '../../../Models/User.js'
 import { passwordResetStore } from '../../../Auth/PasswordResetStore.js'
+import { appUrl } from '../../../Auth/AppUrl.js'
 import { sendPasswordResetMail } from '../../../Mail/PasswordResetMail.js'
 import { pages } from '@/.guren/pages.gen'
 
@@ -136,6 +138,11 @@ export default class ForgotPasswordController extends Controller {
   async store(): Promise<Response> {
     const { email } = await this.validateBody(ForgotPasswordSchema)
 
+    // Resolved before the lookup on purpose: a misconfigured APP_URL throws,
+    // and throwing only for addresses that turned out to exist would answer
+    // the question the generic status message below refuses to.
+    const resetBaseUrl = \`\${appUrl(this.request)}/reset-password\`
+
     // Always respond with the same status message whether or not the
     // account exists, to avoid leaking which emails are registered. The
     // mail send is deliberately not awaited: the transport round-trip only
@@ -144,7 +151,7 @@ export default class ForgotPasswordController extends Controller {
     const [user] = await User.where({ email })
     if (user) {
       const { token } = await createPasswordResetToken(email, passwordResetStore)
-      const resetUrl = buildPasswordResetUrl(\`\${new URL(this.request.url).origin}/reset-password\`, token, email)
+      const resetUrl = buildPasswordResetUrl(resetBaseUrl, token, email)
       void sendPasswordResetMail(this.make('mail'), email, resetUrl).catch((error) => {
         console.error('Failed to send password reset email:', error)
       })
@@ -202,6 +209,7 @@ export default class ResetPasswordController extends Controller {
 const verifyEmailControllerTemplate = `import { Controller, createEmailVerificationToken, completeEmailVerification, buildVerificationUrl } from '@guren/core'
 import { User, type UserRecord } from '../../../Models/User.js'
 import { emailVerificationStore } from '../../../Auth/EmailVerificationStore.js'
+import { appUrl } from '../../../Auth/AppUrl.js'
 import { sendEmailVerificationMail } from '../../../Mail/EmailVerificationMail.js'
 import { pages } from '@/.guren/pages.gen'
 
@@ -222,7 +230,7 @@ export default class VerifyEmailController extends Controller {
 
     if (!user.emailVerifiedAt) {
       const { token } = await createEmailVerificationToken(user.email, emailVerificationStore)
-      const verifyUrl = buildVerificationUrl(\`\${new URL(this.request.url).origin}/verify-email/confirm\`, token, user.email)
+      const verifyUrl = buildVerificationUrl(\`\${appUrl(this.request)}/verify-email/confirm\`, token, user.email)
       await sendEmailVerificationMail(this.make('mail'), user.email, verifyUrl)
     }
 
@@ -491,6 +499,7 @@ function buildProfileControllerTemplate({ includeVerify, includePassword, provid
   const verifyImports = includeVerify
     ? `
 import { emailVerificationStore } from '../../Auth/EmailVerificationStore.js'
+import { appUrl } from '../../Auth/AppUrl.js'
 import { sendEmailVerificationMail } from '../../Mail/EmailVerificationMail.js'`
     : ''
 
@@ -506,7 +515,7 @@ import { sendEmailVerificationMail } from '../../Mail/EmailVerificationMail.js'`
     ? `
     if (emailChanged) {
       const { token } = await createEmailVerificationToken(email, emailVerificationStore)
-      const verifyUrl = buildVerificationUrl(\`\${new URL(this.request.url).origin}/verify-email/confirm\`, token, email)
+      const verifyUrl = buildVerificationUrl(\`\${appUrl(this.request)}/verify-email/confirm\`, token, email)
       await sendEmailVerificationMail(this.make('mail'), email, verifyUrl)
     }
 `
@@ -657,6 +666,39 @@ export default class MailProvider extends ServiceProvider {
   register(): void {
     this.container.singleton('mail', () => createMailManager(mailConfig))
   }
+}
+`
+
+const appUrlTemplate = `/**
+ * Absolute base URL for links that leave the app (password reset, email
+ * verification).
+ *
+ * Deliberately not derived from the request in production. A request URL is
+ * reconstructed from the \`Host\` header, which any client can forge, so a
+ * forged host would make the app mail a genuine single-use token to a link
+ * pointing at the attacker's own server. \`APP_URL\` is the only trustworthy
+ * source, and production fails closed rather than falling back to the request.
+ */
+export function appUrl(request: { url: string }): string {
+  const configured = process.env.APP_URL?.trim()
+
+  if (configured) {
+    // Parsed rather than concatenated: a malformed APP_URL has to fail here,
+    // where every caller hits it, not later inside one particular link build.
+    // Dropping any query/fragment and the trailing slash keeps the result
+    // safe to append a path to.
+    const parsed = new URL(configured)
+    return \`\${parsed.origin}\${parsed.pathname.replace(/\\/+$/, '')}\`
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'APP_URL is not set. Set it to the public base URL of this app (for example ' +
+        'https://example.com): links sent by email must not be derived from the request host.',
+    )
+  }
+
+  return new URL(request.url).origin
 }
 `
 
@@ -2008,6 +2050,7 @@ const PASSWORD_SCAFFOLD_PATHS = [
   'resources/js/pages/auth/ForgotPassword.tsx',
   'resources/js/pages/auth/ResetPassword.tsx',
   'resources/js/pages/auth/VerifyEmail.tsx',
+  'app/Auth/AppUrl.ts',
   'app/Auth/PasswordResetStore.ts',
   'app/Auth/EmailVerificationStore.ts',
   'app/Mail/PasswordResetMail.ts',
@@ -2182,6 +2225,9 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
 
   if (includeExtras) {
     files.push(
+      // Every flow that mails an absolute link routes through this, so that
+      // none of them build one from the request host.
+      { path: 'app/Auth/AppUrl.ts', contents: appUrlTemplate },
       { path: 'app/Http/Controllers/Auth/RegisterController.ts', contents: buildRegisterControllerTemplate(includeVerify) },
       { path: 'app/Http/Validators/RegisterValidator.ts', contents: registerValidatorTemplate },
       { path: 'resources/js/pages/auth/Register.tsx', contents: buildRegisterViewTemplate(oauthProviders) },
@@ -2232,6 +2278,7 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
     consola.info('  • Import registerAuthRoutes from routes/auth.ts and call it from your routes/web.ts registrar')
     if (includeExtras) {
       consola.info('  • Register MailProvider in src/app.ts providers array (used to send password reset emails)')
+      consola.info('  • Set APP_URL in your .env to the public base URL of this app — emailed links are built from it, and production refuses to send without it')
     }
     if (!migrationGenerated) {
       consola.info('  • Run `bun run db:make` to generate the users migration')

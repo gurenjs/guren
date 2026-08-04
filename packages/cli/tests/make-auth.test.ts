@@ -56,8 +56,9 @@ export function registerWebRoutes(router: Router): void {
 
       const created = await makeAuth({ install: true, force: true })
 
-      expect(created).toHaveLength(26)
+      expect(created).toHaveLength(27)
       expect(created).toEqual(expect.arrayContaining([
+        expect.stringContaining('AppUrl.ts'),
         expect.stringContaining('LoginController.ts'),
         expect.stringContaining('routes/auth.ts'),
         expect.stringContaining('ProfileController.ts'),
@@ -104,6 +105,26 @@ export function registerWebRoutes(router: Router): void {
       expect(authRoutes).toContain("router.post('/forgot-password'")
       expect(authRoutes).toContain("router.get('/reset-password'")
       expect(authRoutes).toContain("router.post('/reset-password'")
+
+      // Emailed links must never be built from the request URL: it is
+      // reconstructed from the `Host` header, so a forged host would mail the
+      // victim a genuine reset token pointing at the attacker's server.
+      const forgotPasswordController = await readFile(
+        join(workspace.dir, 'app/Http/Controllers/Auth/ForgotPasswordController.ts'),
+        'utf8',
+      )
+      expect(forgotPasswordController).not.toContain('new URL(this.request.url).origin')
+      expect(forgotPasswordController).toContain('const resetBaseUrl = `${appUrl(this.request)}/reset-password`')
+      // Resolved before the account lookup: a misconfigured APP_URL throws, and
+      // throwing only for addresses that exist would leak which ones do.
+      expect(forgotPasswordController.indexOf('appUrl(this.request)')).toBeLessThan(
+        forgotPasswordController.indexOf('await User.where({ email })'),
+      )
+
+      // ...and the helper they route through reads APP_URL and fails closed in
+      // production rather than falling back to the request.
+      const appUrlHelper = await readFile(join(workspace.dir, 'app/Auth/AppUrl.ts'), 'utf8')
+      expect(appUrlHelper).toMatch(/process\.env\.APP_URL[\s\S]*NODE_ENV === 'production'[\s\S]*throw new Error\(/)
 
       const loginPage = await readFile(join(workspace.dir, 'resources/js/pages/auth/Login.tsx'), 'utf8')
       expect(loginPage).toContain('interface Props')

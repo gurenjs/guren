@@ -2,6 +2,7 @@ import { Controller, ValidationException, createEmailVerificationToken, buildVer
 import { RegisterSchema } from '../../Validators/RegisterValidator.js'
 import { User } from '../../../Models/User.js'
 import { emailVerificationStore } from '../../../Auth/EmailVerificationStore.js'
+import { appUrl } from '../../../Auth/AppUrl.js'
 import { sendEmailVerificationMail } from '../../../Mail/EmailVerificationMail.js'
 import { SendWelcomeEmailJob } from '../../../Jobs/SendWelcomeEmailJob.js'
 import { pages } from '@/.guren/pages.gen'
@@ -26,7 +27,7 @@ export default class RegisterController extends Controller {
     await SendWelcomeEmailJob.dispatch({ userId: user.id })
 
     const { token } = await createEmailVerificationToken(user.email, emailVerificationStore)
-    const verifyUrl = buildVerificationUrl(`${new URL(this.request.url).origin}/verify-email/confirm`, token, user.email)
+    const verifyUrl = buildVerificationUrl(`${appUrl(this.request)}/verify-email/confirm`, token, user.email)
     await sendEmailVerificationMail(this.make('mail'), user.email, verifyUrl)
 
     this.auth.session()?.regenerate()

@@ -1,6 +1,7 @@
 import { Controller, createEmailVerificationToken, completeEmailVerification, buildVerificationUrl } from '@guren/core'
 import { User, type UserRecord } from '../../../Models/User.js'
 import { emailVerificationStore } from '../../../Auth/EmailVerificationStore.js'
+import { appUrl } from '../../../Auth/AppUrl.js'
 import { sendEmailVerificationMail } from '../../../Mail/EmailVerificationMail.js'
 import { pages } from '@/.guren/pages.gen'
 
@@ -21,7 +22,7 @@ export default class VerifyEmailController extends Controller {
 
     if (!user.emailVerifiedAt) {
       const { token } = await createEmailVerificationToken(user.email, emailVerificationStore)
-      const verifyUrl = buildVerificationUrl(`${new URL(this.request.url).origin}/verify-email/confirm`, token, user.email)
+      const verifyUrl = buildVerificationUrl(`${appUrl(this.request)}/verify-email/confirm`, token, user.email)
       await sendEmailVerificationMail(this.make('mail'), user.email, verifyUrl)
     }
 

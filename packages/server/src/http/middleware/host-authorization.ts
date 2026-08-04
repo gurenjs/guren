@@ -28,7 +28,9 @@ export function createHostAuthorizationMiddleware(options: HostAuthorizationOpti
   const matchers = allowedHosts.map(compileHostMatcher)
 
   return async (ctx, next) => {
-    const path = new URL(ctx.req.url).pathname
+    // Hono already parsed and cached this; re-parsing the whole URL here costs
+    // more than the rest of the check put together, on every request.
+    const path = ctx.req.path
 
     if (isExcluded(path, exclude)) {
       await next()
@@ -81,7 +83,11 @@ function compileHostMatcher(pattern: string): HostMatcher {
     const hostname = pattern.slice(0, -2).toLowerCase()
     return (host) => {
       const h = host.toLowerCase()
-      return h === hostname || h.startsWith(hostname + ':')
+      if (h === hostname) return true
+      if (!h.startsWith(hostname + ':')) return false
+      // The wildcard stands for a port, so only a port may follow. Accepting
+      // anything made `example.com:attacker.tld` match `example.com:*`.
+      return /^\d+$/.test(h.slice(hostname.length + 1))
     }
   }
 
