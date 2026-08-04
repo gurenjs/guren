@@ -330,7 +330,7 @@ bunx guren check --spec
 `aliasMiddleware` の戻り値を捨てています。エイリアスは戻り値の型に記録されるので、`const router = baseRouter.aliasMiddleware('auth', ...)` と受けて、以降はその `router` を使ってください。
 
 **`.middleware('auth').post('/', { name: ..., body: ... }, [Controller, 'store'])` が型エラーになる。**
-ルートオプション付きのルートは、ステップ 3 のように `.middleware('auth').group((authed) => ...)` の中で登録してください。
+古いリリースのフレームワークでは、ルートオプション+コントローラー指定の組み合わせをミドルウェアチェーン上で受け付けませんでした。アップグレードするか、ステップ 3 のように `.middleware('auth').group((authed) => ...)` の中で登録してください（グループ形はどのバージョンでも動きます）。
 
 **`add_author_to_posts` マイグレーションが失敗する（`NOT NULL constraint` / カラムを追加できない）。**
 `posts` の既存行が新しい `NOT NULL` カラムを満たせません。`bun run db:reset --seed` で開発用データベースを作り直してください。

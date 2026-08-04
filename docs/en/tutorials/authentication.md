@@ -330,7 +330,7 @@ The seeder never ran and the `users` table is empty. Run `bun run db:seed`.
 You discarded the return value of `aliasMiddleware`. The alias is recorded in the return type, so capture it — `const router = baseRouter.aliasMiddleware('auth', ...)` — and use that `router` afterwards.
 
 **Type error on `.middleware('auth').post('/', { name: ..., body: ... }, [Controller, 'store'])`.**
-Register routes that carry route options inside `.middleware('auth').group((authed) => ...)` as shown in step 3.
+Older framework releases didn't accept the route-options + controller combination on a middleware chain. Upgrade, or register such routes inside `.middleware('auth').group((authed) => ...)` as shown in step 3 (the group form works on every version).
 
 **The `add_author_to_posts` migration fails (`NOT NULL constraint` / cannot add column).**
 Existing `posts` rows can't satisfy the new `NOT NULL` column. Rebuild the development database with `bun run db:reset --seed`.
