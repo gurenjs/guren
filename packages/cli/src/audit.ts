@@ -597,6 +597,84 @@ const SECRET_ALLOWLIST = /(process\.env|import\.meta\.env|\bz\.|example|placehol
 const RAW_SQL_PATTERN = /\bsql\.raw\s*\(\s*`[^`]*\$\{/
 const UNSAFE_SQL_PATTERN = /\.unsafe\s*\(\s*`[^`]*\$\{/
 
+/**
+ * Absolute links that leave the app — password reset, email verification —
+ * must not be derived from the request. A request URL is reconstructed from
+ * the `Host` header, which any client can forge, so an unauthenticated
+ * attacker can make the app mail a victim a genuine single-use token whose
+ * link points at the attacker's own server.
+ *
+ * The origin anchor deliberately does *not* require a `.origin`/`.host` read.
+ * Requiring one missed the two most idiomatic spellings of the same bug —
+ * `const url = new URL(req.url)` and `const { origin } = new URL(req.url)`,
+ * both used a line or more later. Middleware that parses the request URL only
+ * to reach its path is already excluded by the builder gate below, so the
+ * accessor requirement bought no protection those files did not already have;
+ * only the path-ish accessors stay excluded, for a same-line read inside a
+ * file that does build links.
+ *
+ * The `[^)]` runs are bounded rather than `*`. Unbounded, a line of the shape
+ * `new URL(` + whitespace + `request.url` + filler took 15s to reject here —
+ * the audit reads whatever source the app happens to contain, so a generated
+ * or vendored long line is enough to hang it. Measured on that input: 15,111ms
+ * unbounded, 0.02ms bounded, with no change on any real match. Dropping the
+ * redundant `\s*` after `\(` (it overlapped `[^)]*`) is the other half; alone
+ * it still left 4-5s cases, so both are load-bearing.
+ */
+const REQUEST_ORIGIN_PATTERN =
+  /new\s+URL\s*\([^)]{0,200}\b(?:req|request)\s*\.\s*url\b[^)]{0,200}\)(?!\s*\.\s*(?:pathname|searchParams|search|hash)\b)/
+
+/** `.header('host')`, `.get('host')`, `.headers.host` — and the forwarded/HTTP2 spellings. */
+const HOST_HEADER_READ_PATTERN =
+  /\.\s*(?:header|get)\s*\(\s*['"`](?:host|x-forwarded-host|:authority)['"`]\s*\)|\.\s*headers\s*\??\s*\.\s*host\b/i
+
+/**
+ * Pairs with the above so `response.headers.get('host')` — reading a host back
+ * off something the app itself produced — stays clean.
+ */
+const REQUEST_RECEIVER_PATTERN = /\b(?:req|request)\b/i
+
+/**
+ * The framework's own outbound-link builders. Their presence anywhere in the
+ * file is what promotes a request-derived origin from "reads its own host" to
+ * "mails its own host to someone else" — and it is the whole reason the
+ * generated `app/Auth/AppUrl.ts` stays clean, since its non-production
+ * fallback returns a request origin but builds no link. Exempting that helper
+ * by path instead would break the moment a user renames it.
+ *
+ * `buildTokenUrl` is the implementation; `buildPasswordResetUrl`,
+ * `buildVerificationUrl`, and `buildOAuthRedirectUrl` are literal aliases of
+ * it, and the latter three are what `@guren/core` actually exports. Matching
+ * the bare name rather than a call also covers an aliased import
+ * (`buildVerificationUrl as makeUrl`), which would otherwise skip the file
+ * silently. `buildOAuthAuthorizeUrl` is deliberately absent: it builds the
+ * *provider's* authorize URL, so a request-derived `redirect_uri` there is a
+ * real risk but a different one, and this finding's wording would misdescribe
+ * it. An audit test enumerates `@guren/core`'s `build*Url` exports against
+ * this list so a fifth builder cannot land here as a silent pass.
+ *
+ * The boundary this draws: a controller that mails a link assembled by hand,
+ * without going through these builders, is invisible here. Widening the gate
+ * to guessed-at mail helper names would trade a real false-positive cost for
+ * speculative coverage — the gate is a *requirement*, so loosening it makes
+ * every unrelated request-origin read in a mailing file a finding.
+ */
+const LINK_BUILDER_NAMES = 'TokenUrl|PasswordResetUrl|VerificationUrl|OAuthRedirectUrl'
+
+export const LINK_BUILDER_PATTERN = new RegExp(`\\bbuild(?:${LINK_BUILDER_NAMES})\\b`)
+
+/**
+ * A builder handed the request URL directly. Kept as its own anchor rather
+ * than folded into `LINK_BUILDER_PATTERN.test(line) && /req\.url/.test(line)`:
+ * `[^)]*` cannot cross the inner `)`, which is exactly what keeps the
+ * *sanctioned* one-liner `buildVerificationUrl(`${appUrl(this.request)}/x`, …)`
+ * — what the scaffold generates today — from matching. Both patterns are built
+ * from one name list so a new builder cannot reach only one of them.
+ */
+const LINK_BUILDER_FROM_REQUEST_PATTERN = new RegExp(
+  `\\bbuild(?:${LINK_BUILDER_NAMES})\\s*\\([^)]{0,200}\\b(?:req|request)\\s*\\.\\s*url\\b`,
+)
+
 async function auditSourceFiles(cwd: string, findings: AuditFinding[]): Promise<void> {
   const files: string[] = []
   for (const dir of SCAN_DIRECTORIES) {
@@ -612,6 +690,7 @@ async function auditSourceFiles(cwd: string, findings: AuditFinding[]): Promise<
   let secretCount = 0
   let rawSqlCount = 0
   let toggleCount = 0
+  let requestHostUrlCount = 0
 
   for (const filePath of files) {
     if (filePath.endsWith('.test.ts') || filePath.endsWith('.test.js')) continue
@@ -619,6 +698,10 @@ async function auditSourceFiles(cwd: string, findings: AuditFinding[]): Promise<
     const relPath = relative(cwd, filePath)
     const source = await readFile(filePath, 'utf-8')
     const lines = source.split('\n')
+
+    // File-level gate for the request-host rule below: the origin only
+    // becomes a finding once the same file also builds a link out of it.
+    const buildsOutboundLink = LINK_BUILDER_PATTERN.test(source)
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i]!
@@ -681,6 +764,32 @@ async function auditSourceFiles(cwd: string, findings: AuditFinding[]): Promise<
           ),
         )
       }
+
+      // Outbound links built from the client-controlled request host.
+      // Phrased conditionally, like the force-write rule: co-occurrence in one
+      // file is not proof the host reaches the link, and static analysis here
+      // cannot establish that it does.
+      if (
+        buildsOutboundLink &&
+        (REQUEST_ORIGIN_PATTERN.test(line) ||
+          (REQUEST_RECEIVER_PATTERN.test(line) && HOST_HEADER_READ_PATTERN.test(line)) ||
+          LINK_BUILDER_FROM_REQUEST_PATTERN.test(line))
+      ) {
+        requestHostUrlCount++
+        findings.push(
+          finding(
+            `request-host-url:${relPath}:${lineNumber}`,
+            `${relPath}:${lineNumber}`,
+            'warn',
+            "Request-derived host in a file that builds outbound links — if it reaches the link, a forged "
+            + "Host header points a genuine single-use token at the attacker's server.",
+            'Build the base URL from process.env.APP_URL and fail closed when it is unset — a request-host '
+            + 'fallback is still forgeable. `guren add auth` scaffolds app/Auth/AppUrl.ts for this.',
+            relPath,
+            lineNumber,
+          ),
+        )
+      }
     }
   }
 
@@ -692,6 +801,9 @@ async function auditSourceFiles(cwd: string, findings: AuditFinding[]): Promise<
   }
   if (toggleCount === 0) {
     findings.push(finding('security-toggle:none', 'Security defaults', 'pass', 'No disabled security defaults detected.'))
+  }
+  if (requestHostUrlCount === 0) {
+    findings.push(finding('request-host-url:none', 'Request-derived link URLs', 'pass', 'No outbound links built from the request host.'))
   }
 }
 
