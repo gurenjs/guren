@@ -1,5 +1,175 @@
 # @guren/cli
 
+## 2.1.0
+
+### Minor Changes
+
+- fe70ee7: Add typed allowlist options to `defineModel`: `fillable`, `hidden`, `visible`, `accessors`, and `appends` can now be passed as options, checked at compile time against the table's columns (and, for `fillable`, fields contributed by the `base` such as `AuthenticatableModel`'s virtual `password`). Accessor functions receive the table's inferred record, and `appends` may only name declared accessors. `static` declarations keep working and shadow the options. `guren audit` and `guren check` recognize the option form with the same shadowing order.
+
+### Patch Changes
+
+- 3ab375c: `guren audit` flags outbound links built from the request host
+
+  The auth scaffold used to build password-reset links from the request:
+
+  ```js
+  buildPasswordResetUrl(
+    `${new URL(this.request.url).origin}/reset-password`,
+    token,
+    email
+  );
+  ```
+
+  A request URL is reconstructed from the `Host` header, which any client can
+  forge, so an unauthenticated attacker could `POST /forgot-password` with a
+  victim's address and `Host: attacker.tld` and have the app mail that victim a
+  genuine single-use reset token pointing at the attacker's server.
+
+  Routing scaffolded links through `app/Auth/AppUrl.ts` fixed the _generated_
+  output, which does nothing for the two populations that still have the bug:
+  apps scaffolded before that release — told to hand-patch or re-run
+  `guren add auth --force` — and anyone who wrote the controller themselves.
+  `guren audit` ships with the CLI those users already run, so it is the one
+  mechanism that reaches them. It returned green on the exact code the fix calls
+  exploitable; it now warns:
+
+  ```
+  [warn] [A07] app/Http/Controllers/Auth/ForgotPasswordController.ts:26: Absolute
+  link built from the request host — the Host header is client-controlled, so a
+  forged host makes the app send a genuine single-use token pointing at the
+  attacker's server.
+       → Build the base URL from process.env.APP_URL instead of the request
+  ```
+
+  The rule fires on a request-derived origin (`new URL(req.url)`), on a
+  `host`/`x-forwarded-host` header read off the request, and on a request URL
+  handed straight to a link builder — but only in a file that also names one of
+  the framework's outbound-link builders (`buildTokenUrl` and its
+  `buildPasswordResetUrl`, `buildVerificationUrl`, and `buildOAuthRedirectUrl`
+  aliases). That second half is what keeps the generated `app/Auth/AppUrl.ts`
+  clean: its non-production fallback returns a request origin on purpose, and it
+  builds no link. Gating on behaviour rather than exempting the helper by path
+  means the exemption survives a rename. Middleware that parses the request URL
+  only to reach its path never matches. Use `// guren-audit-ignore` for a link
+  that never leaves the app.
+
+  Because that gate is a hand-maintained name list, a builder added to
+  `@guren/core` would otherwise reach users as an affirmative _pass_. An audit
+  test enumerates `@guren/core`'s `build*Url` exports against the list, with
+  `buildOAuthAuthorizeUrl` as a documented exclusion — it builds the provider's
+  authorize URL, a real but different risk this finding's wording would
+  misdescribe.
+
+  The boundary, stated so a green audit doesn't imply more than it checks: a
+  controller that mails a link assembled by hand, without going through those
+  builders, is not covered. Widening the gate to guessed-at mail helper names
+  would trade a real false-positive cost for speculative coverage. The finding is
+  worded conditionally for the same reason — co-occurrence in one file is not
+  proof the host reaches the link.
+
+  Note the rule also fires on `process.env.APP_URL ?? new URL(req.url).origin`.
+  That is deliberate rather than a false positive — the fallback is fail-open, so
+  a forged host still works whenever `APP_URL` is unset, which is exactly the
+  production misconfiguration the scaffolded helper throws on instead.
+
+  Findings are classified A07 / CWE-640, so `--json` consumers and the console
+  prefix stay consistent with the other rules.
+
+- 6feada3: Build emailed auth links from `APP_URL` instead of the request host
+
+  The password reset flow scaffolded by `guren add auth` (and by
+  `create-guren-app --auth`) built its link from the request:
+
+  ```js
+  buildPasswordResetUrl(
+    `${new URL(this.request.url).origin}/reset-password`,
+    token,
+    email
+  );
+  ```
+
+  A server request's URL is reconstructed from the `Host` header, which any
+  client can forge — the framework's own host-authorization middleware says so,
+  reading `ctx.req.header('host') ?? new URL(ctx.req.url).host` as one value. So
+  an unauthenticated attacker could `POST /forgot-password` with someone else's
+  address in the body and `Host: attacker.tld`, and the app would mail _that
+  person_ a genuine, single-use reset link pointing at the attacker's server. The
+  victim sees a legitimate mail from the real service; one click — or one
+  link-prefetching mail scanner — hands over the token, and `ResetPasswordController`
+  accepts it with no session binding or second factor.
+
+  Scaffolds now route every emailed link through a generated `app/Auth/AppUrl.ts`,
+  which reads `APP_URL` and **fails closed in production** rather than falling back
+  to the request. Development keeps working with no configuration. The three email
+  verification sites got the same treatment: they mail the requester's own address,
+  so they were not exploitable, but they were the same pattern.
+
+  Templates also stop disabling host authorization in production. It was
+  `process.env.NODE_ENV === 'production' ? false : { ... }`, which removed the
+  middleware in exactly the environment that needed it; the production branch now
+  derives its allowlist from `APP_URL`'s hostname, and health-check paths stay
+  excluded so load balancers reaching the app by IP are unaffected. When `APP_URL`
+  is not readable at module scope the template warns and leaves the check off
+  rather than throwing — the Cloudflare worker imports the app before wrangler
+  `vars` reach `process.env`, and a throw there would stop the app booting at all.
+  `guren audit` now also flags `hostAuthorization: false`, which it previously
+  walked past while the templates themselves shipped it.
+
+  In `@guren/server`, a `host:*` allowlist entry now means "this host on any
+  **port**". `compileHostMatcher` accepted anything after the colon, so
+  `example.com:*` also matched a `Host` of `example.com:attacker.tld`. The same
+  middleware stops re-parsing the whole request URL to read its path on every
+  request, which it now does in production rather than only in development.
+
+  **Action required for new apps:** `APP_URL` must be set in production. It is
+  already present in the scaffolded `.env.example`. Existing apps are unchanged —
+  if yours has a `ForgotPasswordController` generated before this release, apply
+  the same change by hand, or re-run `guren add auth --force`.
+
+- b27a6cd: Accept controller actions alongside route contract options inside `router.middleware(...)` chains
+
+  `router.middleware('auth').post('/posts', { name: 'posts.store', body: Schema }, [PostController, 'store'])`
+  raised TS2769 even though it worked at runtime: the middleware-scoped builder carried only
+  two overloads per HTTP verb, missing the contract-options + `[Controller, 'method']` variant
+  the router itself has. All five verbs now expose it, so the direct chain no longer needs a
+  `.group()` wrapper to compile.
+
+  Route docs and the `make:feature` next-steps hint now capture the `aliasMiddleware()` return
+  value, which later `.middleware()` calls require — a bare call registers the handler at runtime
+  but leaves the alias name invisible to the type system.
+
+- 5944166: Share the signed-in user with Inertia pages from `guren add auth`'s AuthProvider
+
+  The `AuthProvider` scaffolded by `guren add auth` configured the auth manager
+  but never registered a shared Inertia prop resolver, so `props.auth.user` was
+  always `undefined` on every page. The `Layout.tsx` generated by the same command
+  reads exactly that prop to choose between "Sign in" and "Log out" — so a
+  freshly scaffolded app rendered the guest navigation even while signed in, and
+  the only way out was to hand-wire `shareInertiaProps` yourself.
+
+  The generated provider now has a `boot()` that shares the (already sanitized)
+  user, matching the `blog` blueprint's provider, which got the same treatment
+  earlier. Both copies are now pinned to the same snippet in the CLI's test suite
+  so they cannot silently drift apart again.
+
+  Existing apps are unaffected — re-run `guren add auth --force`, or add the
+  `boot()` by hand:
+
+  ```ts
+  import { shareInertiaProps, AUTH_CONTEXT_KEY } from '@guren/core'
+  import type { AuthContext } from '@guren/core'
+
+  boot(): void {
+    shareInertiaProps(async (ctx) => {
+      const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
+      return { auth: { user: await auth?.user() } }
+    })
+  }
+  ```
+
+- Updated dependencies [fe70ee7]
+  - @guren/orm@2.1.0
+
 ## 2.0.0
 
 ### Major Changes

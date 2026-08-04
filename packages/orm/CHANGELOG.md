@@ -1,5 +1,11 @@
 # @guren/orm
 
+## 2.1.0
+
+### Minor Changes
+
+- fe70ee7: Add typed allowlist options to `defineModel`: `fillable`, `hidden`, `visible`, `accessors`, and `appends` can now be passed as options, checked at compile time against the table's columns (and, for `fillable`, fields contributed by the `base` such as `AuthenticatableModel`'s virtual `password`). Accessor functions receive the table's inferred record, and `appends` may only name declared accessors. `static` declarations keep working and shadow the options. `guren audit` and `guren check` recognize the option form with the same shadowing order.
+
 ## 2.0.0
 
 ### Major Changes
