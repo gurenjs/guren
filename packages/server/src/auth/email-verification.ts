@@ -356,7 +356,7 @@ export function isEmailVerified(user: { emailVerifiedAt?: Date | null } | null):
  */
 export function requireVerifiedEmail(options: {
   redirectTo?: string
-  getUser?: (ctx: unknown) => Promise<{ emailVerifiedAt?: Date | null } | null>
+  getUser?: (ctx: { get: (key: string) => unknown }) => Promise<{ emailVerifiedAt?: Date | null } | null>
 } = {}) {
   const { redirectTo = '/verify-email' } = options
 

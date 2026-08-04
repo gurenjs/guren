@@ -227,6 +227,187 @@ describe('Router definition introspection', () => {
     const [def] = router.definitions()
     expect(def!.hasInlineMiddleware).toBe(true)
   })
+
+  it('keeps handlers passed to middleware() out of middlewareNames', () => {
+    const router = new Router<'auth'>()
+    router.aliasMiddleware('auth', async (_c, next) => { await next() })
+    router.middleware('auth', async (_c, next) => { await next() }).group((scoped) => {
+      scoped.post('/posts', [StubController, 'store']).middleware(async (_c, next) => { await next() })
+    })
+
+    const [def] = router.definitions()
+    expect(def!.middlewareNames).toEqual(['auth'])
+    expect(def!.hasInlineMiddleware).toBe(true)
+  })
+
+  it('does not report a group-scoped handler as inline middleware on its routes', () => {
+    const router = new Router()
+    router.middleware(async (_c, next) => { await next() }).group((scoped) => {
+      scoped.post('/posts', [StubController, 'store'])
+    })
+
+    // `guren audit` warns per route on this flag, so a handler the route never
+    // attached must not set it.
+    const [def] = router.definitions()
+    expect(def!.hasInlineMiddleware).toBe(false)
+  })
+
+  it('aggregates capabilities from a group-scoped handler', async () => {
+    const { requireAuthenticated } = await import('../../src/http/middleware/auth')
+
+    const router = new Router()
+    router.middleware(requireAuthenticated()).group((scoped) => {
+      scoped.post('/posts', [StubController, 'store'])
+    })
+
+    const [def] = router.definitions()
+    expect(def!.capabilities?.authentication).toEqual({ mode: 'required' })
+  })
+})
+
+describe('Router inline middleware via middleware()', () => {
+  const tap = (calls: string[], label: string): MiddlewareHandler => async (_c, next) => {
+    calls.push(label)
+    await next()
+  }
+
+  it('runs a handler passed to the route builder', async () => {
+    const calls: string[] = []
+    const router = new Router()
+    router.get('/limited', () => 'ok').middleware(tap(calls, 'inline'))
+
+    const app = new Hono()
+    router.mount(app)
+
+    const response = await app.request('/limited')
+    expect(response.status).toBe(200)
+    expect(calls).toEqual(['inline'])
+  })
+
+  it('runs a handler scoped to a group across every route in it', async () => {
+    const calls: string[] = []
+    const router = new Router()
+    router.middleware(tap(calls, 'scoped')).group((scoped) => {
+      scoped.get('/a', () => 'a')
+      scoped.get('/b', () => 'b')
+    })
+    router.get('/outside', () => 'outside')
+
+    const app = new Hono()
+    router.mount(app)
+
+    await app.request('/a')
+    await app.request('/b')
+    await app.request('/outside')
+    expect(calls).toEqual(['scoped', 'scoped'])
+  })
+
+  it('nests group scopes outer-to-inner', async () => {
+    const calls: string[] = []
+    const router = new Router()
+    router.middleware(tap(calls, 'outer')).group((outer) => {
+      outer.middleware(tap(calls, 'inner')).group((inner) => {
+        inner.get('/nested', () => 'ok')
+      })
+      outer.get('/outer-only', () => 'ok')
+    })
+
+    const app = new Hono()
+    router.mount(app)
+
+    await app.request('/nested')
+    expect(calls).toEqual(['outer', 'inner'])
+
+    calls.length = 0
+    await app.request('/outer-only')
+    expect(calls).toEqual(['outer'])
+  })
+
+  it('composes group-scoped handlers before route-level ones', async () => {
+    const calls: string[] = []
+    const router = new Router()
+    router.middleware(tap(calls, 'group')).group((scoped) => {
+      scoped.get('/nested', () => 'ok').middleware(tap(calls, 'route'))
+    })
+
+    const app = new Hono()
+    router.mount(app)
+
+    await app.request('/nested')
+    expect(calls).toEqual(['group', 'route'])
+  })
+
+  it('runs named middleware before inline handlers in a mixed call', async () => {
+    const calls: string[] = []
+    const router = new Router<'auth'>()
+    router.aliasMiddleware('auth', tap(calls, 'auth'))
+    router.middleware('auth', tap(calls, 'inline')).group((scoped) => {
+      scoped.get('/mixed', () => 'ok')
+    })
+
+    const app = new Hono()
+    router.mount(app)
+
+    await app.request('/mixed')
+    expect(calls).toEqual(['auth', 'inline'])
+  })
+
+  it('does not leak inline scope between routers after clear()', async () => {
+    const calls: string[] = []
+    const router = new Router()
+    router.middleware(tap(calls, 'scoped')).group((scoped) => {
+      scoped.get('/first', () => 'first')
+    })
+
+    router.clear()
+    router.get('/second', () => 'second')
+
+    const app = new Hono()
+    router.mount(app)
+
+    await app.request('/second')
+    expect(calls).toEqual([])
+  })
+
+  it('aggregates capabilities from a handler passed to middleware()', async () => {
+    const { requireAuthenticated } = await import('../../src/http/middleware/auth')
+
+    const router = new Router()
+    router.post('/posts', [StubController, 'store']).middleware(requireAuthenticated())
+
+    const [def] = router.definitions()
+    expect(def!.capabilities?.authentication).toEqual({ mode: 'required' })
+  })
+})
+
+describe('Router group callbacks must be synchronous', () => {
+  // Scopes unwind synchronously, so an async callback registers its routes
+  // after the pop — silently dropping the guard the group was opened with.
+  it('rejects an async middleware group callback', () => {
+    const router = new Router()
+    expect(() =>
+      router.middleware(async (_c, next) => { await next() }).group((async (scoped: Router) => {
+        scoped.post('/admin', [StubController, 'store'])
+      }) as unknown as (r: Router) => void),
+    ).toThrow(/applied synchronously/)
+  })
+
+  it('rejects an async prefix group callback', () => {
+    const router = new Router()
+    expect(() =>
+      router.group('/api', (async (scoped: Router) => {
+        scoped.post('/admin', [StubController, 'store'])
+      }) as unknown as (r: Router) => void),
+    ).toThrow(/applied synchronously/)
+  })
+
+  it('unwinds the prefix scope when the callback throws', () => {
+    const router = new Router()
+    expect(() => router.group('/api', () => { throw new Error('boom') })).toThrow('boom')
+
+    router.get('/outside', () => 'ok')
+    expect(router.definitions()[0]!.path).toBe('/outside')
+  })
 })
 
 describe('Router middleware as terminal handler', () => {

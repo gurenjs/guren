@@ -12,6 +12,7 @@ export type {
   RouteBuilder,
   RouteContractOptions,
   RouteDefinition,
+  RouteMiddlewareInput,
   RouteOpenApiMetadata,
   ResourceAction as RouteResourceAction,
   ResourceRouteOptions,

@@ -37,6 +37,10 @@ export function registerWebRoutes(router: Router): void {
 
 Route middleware only applies to the specific endpoint (or every endpoint nested in a group).
 
+`.middleware()` accepts handler functions, registered alias names, or a mix of both. They are resolved by kind rather than by position: every name in a route's chain runs before every handler, across groups as well as within one call. So an inline handler on an outer group runs *after* a named one on an inner group — the reverse of how they read. Use aliases throughout when relative order matters.
+
+Aliases are also the only form that `guren audit` can report by name. Guards the framework recognizes — `requireAuthenticated()` and `requireGuest()` — are detected either way, but any other middleware is invisible to the audit unless it is registered under an alias.
+
 ## Middleware Aliases
 
 Register short string names for middleware functions so you can reference them throughout your route files without importing the actual function each time:

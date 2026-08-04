@@ -213,7 +213,7 @@ router.get('/profile', [ProfileController, 'show']).middleware(
   requireVerifiedEmail({
     redirectTo: '/verify-email',
     getUser: async (ctx) => {
-      return ctx.get('user')
+      return ctx.get('user') as { emailVerifiedAt?: Date | null } | null
     },
   })
 )
