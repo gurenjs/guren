@@ -40,7 +40,7 @@ bunx guren add auth
 > [!WARNING]
 > `add auth` は `db/schema.ts` の `users` テーブル定義を書き換えます。`users` にカスタムカラムを追加していた場合は、コマンド実行後に再追加してください。
 
-users のマイグレーションは生成済みなので、適用してデモアカウントをシードし、生成済みの型を更新します（雛形が新しいページとルートを追加したためです）。
+users のマイグレーションは生成済みなので、適用してデモアカウントをシードします。
 
 ```bash
 bun run db:migrate
@@ -48,9 +48,11 @@ bun run db:seed
 bun run codegen
 ```
 
+`bun run codegen` は、雛形が追加した新しいページとルートを型マニフェストに反映します（`bun run dev` が動いていれば監視が自動で実行するので、実質不要です）。生成された認証スタックの仕組み — ガード、プロバイダー、ユーザーレコードの安全な取り扱い — は[認証ガイド](../guides/authentication.md)が詳しく解説しています。
+
 ## 2. チェックポイント: サインインする
 
-開発サーバーを起動し（`bun run dev`）、[http://localhost:3333/login](http://localhost:3333/login) を開きます。
+開発サーバーが動いている状態で（止めていたら `bun run dev`）、[http://localhost:3333/login](http://localhost:3333/login) を開きます。
 
 1. **demo@example.com** / **secret** でサインインします — `/dashboard` に着地し、名前入りの挨拶が表示されます。
 2. 間違ったパスワードを試します — フォームに "Invalid credentials." が表示されます。
@@ -93,13 +95,13 @@ export function registerWebRoutes(baseRouter: Router): void {
 }
 ```
 
-3 つのポイントがあります。
+仕組みは 3 段構えです。
 
-- `aliasMiddleware` はミドルウェアに一度だけ名前を付け、ルートからは `'auth'` として参照できるようにします。**戻り値を受け取るのを忘れないでください** — エイリアス名は型レベルでも登録されるため、`const router = baseRouter.aliasMiddleware(...)` と受けないと、後続の `.middleware('auth')` が型エラーになります。
-- フォームページのような単独の GET ルートには `.middleware('auth').get(...)` を直接チェーンできます。
-- `body` スキーマなどのルートオプションを持つルートは、`.middleware('auth').group((authed) => ...)` でまとめて保護します。グループはネストできるので、`/posts` プレフィックスの内側でさらに認証だけを重ねられます。
+- `aliasMiddleware` はミドルウェアに一度だけ名前を付け、ルートからは `'auth'` として参照できるようにします（エイリアスは戻り値の型に記録されるので、`const router = baseRouter.aliasMiddleware(...)` と受けています）。
+- 単独のルートには `.middleware('auth').get(...)` を直接チェーンします。
+- まとめて保護したいルートは `.middleware('auth').group((authed) => ...)` に入れます。グループはネストできるので、`/posts` プレフィックスの内側でさらに認証だけを重ねられます。ここでは `body` スキーマ付きの 3 ルートをこの形にしています。
 
-投稿の一覧と閲覧は公開のまま、作成・編集・削除は未ログインの訪問者を `/login` へリダイレクトするようになりました。
+投稿の一覧と閲覧は公開のまま、作成・編集・削除は未ログインの訪問者を `/login` へリダイレクトするようになりました。ミドルウェアとグループの全体像は[ルーティングガイド](../guides/routing.md)を参照してください。
 
 次に、第 2 の防衛線としてコントローラー側にもガードを入れます。`app/Http/Controllers/PostController.ts` の store / update / destroy の先頭に 1 行追加してください。
 
@@ -109,7 +111,7 @@ export function registerWebRoutes(baseRouter: Router): void {
     // ...
 ```
 
-`this.auth.userOrFail()` はサインイン中のユーザーを返すか、401 で応答します。これは Part 1 で `--public` を外していれば、ジェネレーターが最初から入れていた行そのものです — ルートミドルウェアを剥がす改修が入っても、コントローラー単体で守りが残ります。
+`this.auth.userOrFail()` はサインイン中のユーザーを返すか、401 で応答します。これは Part 1 で `--public` を外していれば、ジェネレーターが最初から入れていた行そのものです — ルートミドルウェアを剥がす改修が入っても、コントローラー単体で守りが残ります。`store` のこの行は、ステップ 5 で著者を設定するときに型引数付きの `userOrFail<UserRecord>()` へ置き換わります。
 
 > [!NOTE]
 > ここで守ったのは「サインインしているか」（認証）だけです。今の実装では、サインイン済みユーザーなら **誰の** 投稿でも編集・削除できます。「著者本人だけが編集できる」は認可（authorization）の仕事で、Guren ではポリシーとして実装します — `bunx guren make:policy Post` で雛形が手に入り、`add resource` に `--policy` を付ければ最初から組み込まれます。このシリーズでは範囲外としますが、[認可ガイド](../guides/authorization.md) が同じブログ例で解説しています。
@@ -146,7 +148,7 @@ bun run db:reset --seed
 ```
 
 > [!WARNING]
-> SQLite では、すでに行が入っているテーブルに、デフォルト値のない `NOT NULL` カラムを追加できません — Part 1 で作った投稿がマイグレーションを妨げてしまいます。`db:reset --seed` はすべてのテーブルを削除し、全マイグレーションを最初から再実行して、デモユーザーを再シードします。開発データは使い捨てで構いませんが、本番データベースに対しては絶対に `db:reset` を実行しないでください。
+> SQLite では、すでに行が入っているテーブルに、デフォルト値のない `NOT NULL` カラムを追加できません — Part 1 で作った投稿がマイグレーションを妨げてしまいます。`db:reset --seed` はすべてのテーブルを削除し、全マイグレーションを最初から再実行して、デモユーザーを再シードします。開発データは使い捨てで構いませんが、本番データベースに対しては絶対に `db:reset` を実行しないでください。実データが相手なら、カラムを NULL 許容で追加 → 値をバックフィル → 後続のマイグレーションで NOT NULL に締める、という手順を踏みます。
 
 ### リレーションシップを宣言する
 
@@ -177,6 +179,8 @@ Post.belongsTo('author', () => import('./User.js').then((m) => m.User), 'authorI
 - `Post.belongsTo('author', ...)` がリレーションを登録します: `posts.authorId` をたどって `users.id` に到達する、という意味です。遅延 `import()` により、`Post` と `User` の循環インポートを回避しています。
 - `relationTypes` は、eager load されたデータの形を TypeScript に伝えます — `post.author` は `PostAuthor | null` と型付けされます。
 - `authorId` を `fillable` に加えることで、`Post.create()` がこのフィールドを設定できるようになります。
+
+リレーションシップ API の全体像は[データベースガイド](../guides/database.md)を参照してください。
 
 ### リソースに著者を追加する
 
@@ -274,7 +278,7 @@ bunx guren spec:generate
 bunx guren check --spec
 ```
 
-「実装は変えたが仕様書の更新を忘れた」というドキュメントの宿命を、Guren は手癖ではなく機械的なゲートで防ぎます。CI に `check --spec` を置けば、古いビューはマージ自体ができません。
+「実装は変えたが仕様書の更新を忘れた」というドキュメントの宿命を、Guren は手癖ではなく機械的なゲートで防ぎます。CI に `check --spec` を置けば、古いビューはマージ自体ができません（[スペックアンカード開発](../guides/spec-anchored.md)参照）。
 
 **チェックポイント:** [http://localhost:3333/_guren/docs](http://localhost:3333/_guren/docs) を開き直すと、ER 図の `posts` に `authorId` の外部キーが、ドメインビューに `author` リレーションシップが増えています — ビューアーは常にディスク上の最新ビューを表示します。
 
@@ -309,4 +313,4 @@ codegen が新しいページをまだ認識していません。`bun run codege
 
 ## 次へ
 
-投稿に著者が付き、`audit` も静かになりました — 次は読者に声を届けてもらいましょう。[Part 3: リレーションシップ: コメント](./relationships.md) に進んでください。
+投稿に著者が付き、`audit` も静かになりました — 次は読者に声を届けてもらいましょう。[Part 3: リレーションシップ: コメント](./relationships.md) に進んでください。認証そのものを深めたい場合（ガードの種類、remember token、ユーザーレコードのサニタイズ）は[認証ガイド](../guides/authentication.md)へ。

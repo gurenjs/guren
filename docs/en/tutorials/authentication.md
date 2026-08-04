@@ -40,7 +40,7 @@ It also **edits existing files**:
 > [!WARNING]
 > `add auth` rewrites the `users` table definition in `db/schema.ts`. If you added custom columns to `users`, re-add them after running the command.
 
-The users migration is already generated, so apply it, seed the demo account, and refresh the generated types (the scaffolding added new pages and routes):
+The users migration is already generated, so apply it and seed the demo account:
 
 ```bash
 bun run db:migrate
@@ -48,9 +48,11 @@ bun run db:seed
 bun run codegen
 ```
 
+`bun run codegen` folds the scaffolding's new pages and routes into the type manifests (if `bun run dev` is running, the watcher already did this, so it's effectively a no-op). For how the generated auth stack works — guards, providers, safe handling of user records — see the [Authentication guide](../guides/authentication.md).
+
 ## 2. Checkpoint: sign in
 
-Start the dev server (`bun run dev`) and open [http://localhost:3333/login](http://localhost:3333/login).
+With the dev server running (`bun run dev` if you stopped it), open [http://localhost:3333/login](http://localhost:3333/login).
 
 1. Sign in as **demo@example.com** / **secret** — you land on `/dashboard` with a personalized greeting.
 2. Try a wrong password — the form shows "Invalid credentials."
@@ -93,13 +95,13 @@ export function registerWebRoutes(baseRouter: Router): void {
 }
 ```
 
-Three things to note:
+The mechanism has three tiers:
 
-- `aliasMiddleware` names the middleware once so routes can refer to it as `'auth'`. **Don't discard the return value** — the alias is also registered at the type level, so unless you capture it (`const router = baseRouter.aliasMiddleware(...)`), later `.middleware('auth')` calls fail to typecheck.
-- Standalone GET routes like the form pages can chain `.middleware('auth').get(...)` directly.
-- Routes that carry route options such as a `body` schema go inside `.middleware('auth').group((authed) => ...)`. Groups nest, so you can layer authentication inside the `/posts` prefix.
+- `aliasMiddleware` names the middleware once so routes can refer to it as `'auth'` (the alias is recorded in the return type, which is why the sample captures it: `const router = baseRouter.aliasMiddleware(...)`).
+- Standalone routes chain `.middleware('auth').get(...)` directly.
+- Routes you want to protect together go inside `.middleware('auth').group((authed) => ...)`. Groups nest, so you can layer authentication inside the `/posts` prefix — here the three routes carrying `body` schemas take this form.
 
-Listing and reading posts stay public; creating, editing, and deleting now redirect signed-out visitors to `/login`.
+Listing and reading posts stay public; creating, editing, and deleting now redirect signed-out visitors to `/login`. Middleware and groups are covered in full in the [Routing guide](../guides/routing.md).
 
 Next, add a second line of defense inside the controller. Add one line at the top of store / update / destroy in `app/Http/Controllers/PostController.ts`:
 
@@ -109,7 +111,7 @@ Next, add a second line of defense inside the controller. Add one line at the to
     // ...
 ```
 
-`this.auth.userOrFail()` returns the signed-in user or responds with 401. This is exactly the line the generator would have emitted if you hadn't passed `--public` in Part 1 — and it keeps the guard in place even if a refactor later strips the route middleware.
+`this.auth.userOrFail()` returns the signed-in user or responds with 401. This is exactly the line the generator would have emitted if you hadn't passed `--public` in Part 1 — and it keeps the guard in place even if a refactor later strips the route middleware. In `store`, this line becomes the typed `userOrFail<UserRecord>()` when step 5 sets the author.
 
 > [!NOTE]
 > What you guarded here is only "is someone signed in" (authentication). As it stands, any signed-in user can edit or delete **anyone's** post. "Only the author can edit" is the job of authorization, which Guren implements as policies — `bunx guren make:policy Post` scaffolds one, and passing `--policy` to `add resource` builds it in from the start. It's out of scope for this series, but the [Authorization guide](../guides/authorization.md) walks through it with this same blog example.
@@ -146,7 +148,7 @@ bun run db:reset --seed
 ```
 
 > [!WARNING]
-> SQLite cannot add a `NOT NULL` column without a default to a table that already has rows — the posts you created in Part 1 would block the migration. `db:reset --seed` drops every table, re-runs all migrations from scratch, and re-seeds the demo user. Development data is disposable; never run `db:reset` against a production database.
+> SQLite cannot add a `NOT NULL` column without a default to a table that already has rows — the posts you created in Part 1 would block the migration. `db:reset --seed` drops every table, re-runs all migrations from scratch, and re-seeds the demo user. Development data is disposable; never run `db:reset` against a production database. Against real data you'd add the column as nullable, backfill it, then tighten it to `NOT NULL` in a follow-up migration — in development, resetting is simply faster.
 
 ### Declare the relationship
 
@@ -177,6 +179,8 @@ Three pieces work together here:
 - `Post.belongsTo('author', ...)` registers the relation: follow `posts.authorId` to reach `users.id`. The lazy `import()` avoids a circular import between `Post` and `User`.
 - `relationTypes` tells TypeScript the shape of eager-loaded data — `post.author` is typed `PostAuthor | null`.
 - Adding `authorId` to `fillable` lets `Post.create()` set the field.
+
+The full relationship API is covered in the [Database guide](../guides/database.md).
 
 ### Add the author to the resource
 
@@ -274,7 +278,7 @@ bunx guren spec:generate
 bunx guren check --spec
 ```
 
-"We changed the implementation but forgot to update the spec" is the fate of every hand-maintained document. Guren prevents it with a mechanical gate rather than discipline — put `check --spec` in CI and a stale view simply cannot merge.
+"We changed the implementation but forgot to update the spec" is the fate of every hand-maintained document. Guren prevents it with a mechanical gate rather than discipline — put `check --spec` in CI and a stale view simply cannot merge (see [Spec-Anchored Development](../guides/spec-anchored.md)).
 
 **Checkpoint:** reload [http://localhost:3333/_guren/docs](http://localhost:3333/_guren/docs) — the ER diagram's `posts` now carries the `authorId` foreign key, and the domain view shows the `author` relationship. The viewer always reads the latest views from disk.
 
@@ -309,4 +313,4 @@ You updated the schema but not the model: add `authorId` to `fillable` and make 
 
 ## Next
 
-Posts have authors, and `audit` is quiet — now let's give readers a voice. Continue to [Part 3: Relationships: Comments](./relationships.md).
+Posts have authors, and `audit` is quiet — now let's give readers a voice. Continue to [Part 3: Relationships: Comments](./relationships.md). To go deeper on authentication itself (guard variants, remember tokens, sanitized user records), see the [Authentication guide](../guides/authentication.md).

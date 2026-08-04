@@ -76,7 +76,7 @@ Comment.belongsTo('post', () => import('./Post.js').then((m) => m.Post), 'postId
 Comment.belongsTo('author', () => import('./User.js').then((m) => m.User), 'authorId', 'id')
 ```
 
-Then declare the inverse side. Update `app/Models/Post.ts` so a post has many comments:
+Then declare the inverse side. Update `app/Models/Post.ts` so a post has many comments (three spots change: two imports, `comments` in `relationTypes`, and the trailing `hasMany` line):
 
 ```ts
 import { defineModel, type BelongsToRecord, type HasManyRecord } from '@guren/core'
@@ -104,7 +104,7 @@ Post.belongsTo('author', () => import('./User.js').then((m) => m.User), 'authorI
 Post.hasMany('comments', () => import('./Comment.js').then((m) => m.Comment), 'postId', 'id')
 ```
 
-`hasMany('comments', ..., 'postId', 'id')` reads as "the comments whose `postId` matches this post's `id`". With `relationTypes` declared, eager-loaded `post.comments` is typed `CommentRecord[]`.
+`hasMany('comments', ..., 'postId', 'id')` reads as "the comments whose `postId` matches this post's `id`". With `relationTypes` declared, eager-loaded `post.comments` is typed `CommentRecord[]`. The full relationship API is covered in the [Database guide](../guides/database.md).
 
 ## 4. Finish the validator and the resource
 
@@ -216,7 +216,7 @@ import { CommentResource } from '../Resources/CommentResource.js'
   }
 ```
 
-`Comment.where(...)` returns a query builder, so you can chain `.with('author')` (which eager-loads every comment's author in a single query rather than one query per comment) and the ordering. Each comment passes through `CommentResource` on its way to the page.
+`Comment.where(...)` returns a query builder, so you can chain `.with('author')` (which eager-loads every comment's author in a single query rather than one query per comment) and the ordering. Each comment passes through `CommentResource` on its way to the page. Note that `Show.tsx`'s `Props` doesn't accept `comments` yet, so your editor flags a type error until the next step — that's expected.
 
 ## 7. Add the comment section to the page
 

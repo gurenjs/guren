@@ -1,6 +1,6 @@
 # Part 1: ブログ投稿アプリを作る
 
-このパートではブログの心臓部 — 投稿の作成・一覧・編集・削除 — を作ります。ただし、ファイルを 1 つずつ手書きすることはしません。Guren 流の開発フローは **ジェネレーターで生成し、生成されたコードを読んで理解し、機械的なチェックで検証する** です。コマンド 1 つで CRUD の縦一列（スキーマ → モデル → バリデーター → リソース → コントローラー → ルート → ページ）を生成し、そのあとレイヤーごとにコードを読み解き、最後に `guren check` と `guren audit` でアプリの整合性と守りを検証します。
+このパートではブログの心臓部 — 投稿の作成・一覧・編集・削除 — を作ります。ただし、ファイルを 1 つずつ手書きすることはしません。Guren 流の開発フローは **ジェネレーターで生成し、生成されたコードを読んで理解し、機械的なチェックで検証する** です。CRUD の縦一列（スキーマ → モデル → バリデーター → リソース → コントローラー → ルート → ページ）を、コマンド 1 つで生成するところから始めます。
 
 **このパートで学ぶこと:**
 
@@ -8,7 +8,7 @@
 - `bunx guren add resource` が生成する CRUD 一式と、自動配線されるもの
 - Guren の開発ループ: **生成 → マイグレーション → codegen → check → ブラウザで確認**
 - `guren context` とスペックビューで、プロジェクト知識をコードから導出する方法
-- 生成コードの読み方: 各パーツのつながり（スキーマ → モデル → バリデーター → リソース → コントローラー → ルート → Inertia ページ）
+- 生成コードの読み方と、各パーツのつながり
 - 生成物を磨く方法: バリデーションメッセージ、エラー表示、`fillable`
 - `guren audit` がセキュリティの穴をどう指摘してくれるか
 
@@ -28,7 +28,7 @@ CLI は 2 つの質問をします。
 - **レンダリングモード** — デフォルト（**SSR**）のままにします。
 - **データベースドライバー** — デフォルト（**SQLite**、"zero-config, recommended for getting started"）のままにします。
 
-スキャフォールダーがテンプレートをコピーし、すぐ使える `.env`（生成済みの `APP_KEY` と `DATABASE_URL=./data/guren.db` 入り）を書き出し、依存関係のインストールまで済ませてくれます。続けて開発サーバーを起動します。
+雛形ジェネレーターがテンプレートをコピーし、すぐ使える `.env`（生成済みの `APP_KEY` と `DATABASE_URL=./data/guren.db` 入り）を書き出し、依存関係のインストールまで済ませてくれます。続けて開発サーバーを起動します。
 
 ```bash
 cd my-blog
@@ -48,7 +48,7 @@ bunx guren add resource posts --fields "title:string,body:text" --public
 ```
 
 - `--fields` はカラム定義です。`名前:型` をカンマで並べ、型は `string` / `text` / `number` / `boolean` / `date` / `json` から選びます（`published:boolean?` のように `?` を付けると NULL 許容）。この 1 つの定義から、スキーマのカラム、Zod スキーマ、リソースの型、フォームの入力欄まで一貫して生成されます。
-- `--public` は一時的なオプトアウトです。Guren のジェネレーターは **デフォルトで store / update / destroy にサインイン必須のガードを入れます**（セキュア・バイ・デフォルト）。このアプリにはまだ認証がないので今回だけ外し、[Part 2](./authentication.md) で守りを戻します。
+- `--public` は一時的なオプトアウトです。Guren のジェネレーターは **デフォルトで store / update / destroy にサインイン必須のガードを入れます**（セキュア・バイ・デフォルト）。本来のゴールデンパスは `add auth` → `add resource` の順で、その順なら守りは最初から組み込まれます。このシリーズはあえて逆順にして、`audit` が穴を指摘し、それを意図的に塞ぐ過程を [Part 2](./authentication.md) で見せます。
 
 コマンドは次のファイルを生成します。
 
@@ -82,7 +82,7 @@ bun run codegen
 - `db:migrate` はそれを SQLite データベースに適用します。
 - `codegen` はルートとページをスキャンして、型付きマニフェストを `.guren/` に書き出します — `pages.gen.ts`（ページ名と、各コンポーネントから抽出した `Props`。`this.inertia()` が使用）と `routes.gen.ts`（ルート名とパラメータの補完が効く `route()` ヘルパー）です。これがあるからこそ、ページ名のタイポや props の渡し忘れが、実行時の事故ではなく **コンパイル時** のエラーになります。
 
-**codegen の再実行タイミング:** ルートやページを追加・リネーム・削除したとき、またはページの `Props` を変更したときです。実際に手動で実行することはほとんどありません — `bun run dev` が起動時に codegen を実行し、開発サーバーが `routes/web.ts` と `resources/js/pages/` を監視して変更のたびに再生成するからです。エディターに古い型が表示されたときだけ、明示的にコマンドを実行してください。
+**codegen の再実行タイミング:** ルートやページを追加・リネーム・削除したとき、またはページの `Props` を変更したときです。実際に手動で実行することはほとんどありません — `bun run dev` が起動時に codegen を実行し、開発サーバーが `routes/web.ts`、`resources/js/pages/`、`app/Http/Resources/` を監視して変更のたびに再生成するからです。エディターに古い型が表示されたときだけ、明示的にコマンドを実行してください。codegen パイプラインの全体像は[フロントエンドガイド](../guides/frontend.md)を参照してください。
 
 ## 4. 整合性をチェックする
 
@@ -208,7 +208,7 @@ export class PostResource extends Resource<PostRecord> {
 }
 ```
 
-リソースは「ブラウザに送るフィールドを明示的に選ぶ」ための層です。モデルのレコードをそのまま `this.inertia()` に渡さず、必ずここを通すのが Guren 流です。今は列が 3 つだけなので冗長に見えますが、[Part 2](./authentication.md) でユーザー情報を扱い始めると、この層が `passwordHash` の流出を防ぐ最後の砦になります。
+リソースは「ブラウザに送るフィールドを明示的に選ぶ」ための層です。モデルのレコードをそのまま `this.inertia()` に渡さず、必ずここを通すのが Guren 流です。今は列が 3 つだけなので冗長に見えますが、[Part 2](./authentication.md) でユーザー情報を扱い始めると、この層が `passwordHash` の流出を防ぐ最後の砦になります。条件付きフィールドやコレクションなど、この層の全機能は [API リソースガイド](../guides/api-resources.md)にあります。
 
 ### コントローラー — `app/Http/Controllers/PostController.ts`
 
@@ -250,7 +250,7 @@ type PostsIndexProps = PaginatedPageProps<PostResourceData>
 - **`index`** は `validateQuery` で `?page=` をバリデーションし、投稿を 1 ページ分取得して、結果を `paginate` ヘルパーで包みます。このヘルパーが、React コンポーネントで描画するページリンクを組み立てます。
 - **`show`** はルートパラメータ `:id` をバリデーションし、`findOrFail` を使います。投稿が存在しなければ自動的に 404 を返すので、手動の null チェックは不要です。
 - **`store`** は `validateBody` でリクエストボディをバリデーションします。失敗すると `ValidationException` が投げられ、Inertia がフィールド単位のメッセージを `form.errors` としてフォームに戻してくれます — このためのエラー処理コードを書く必要はありません。
-- **`pages.posts.Index`** は `.guren/pages.gen.ts` 由来です。ページ名と props の型を結びつける生成マニフェストで、codegen 前はエディターがエラーを出しますが、それで正常です。
+- **`pages.posts.Index`** はステップ 3 で見た生成マニフェスト由来です。codegen 前はエディターがエラーを出しますが、それで正常です。
 
 ### ルート — `routes/web.ts`
 
@@ -268,7 +268,7 @@ type PostsIndexProps = PaginatedPageProps<PostResourceData>
 
 - すべてのルートに `.name()`（または `name` オプション）が付いています。これにより、ページ側で URL をハードコードする代わりに、型付きの `route()` ヘルパーでリンクできます。
 - `body: PostPayloadSchema` オプションは Zod スキーマをルートコントラクトに紐づけます。これで codegen がフロントエンド向けに型付きのリクエストボディを生成できます。
-- `/create` は `/:id` より **先に** 登録されています。ルートは上から順にマッチするため、`/:id` が先にあると `/posts/create` は `"create"` を id として解釈しようとしてしまいます。ジェネレーターはこの順序を守って配線します。
+- `/create` は `/:id` より **先に** 登録されています。ルートは上から順にマッチするため、`/:id` が先にあると `/posts/create` は `"create"` を id として解釈しようとしてしまいます。ジェネレーターはこの順序を守って配線します。グループ・名前付きルート・モデルバインディングの全体像は[ルーティングガイド](../guides/routing.md)を参照してください。
 
 ### ページ — `resources/js/pages/posts/New.tsx`
 
@@ -300,7 +300,7 @@ export default function NewPost() {
 
 ## 8. 生成物を磨く: エラーメッセージを表示する
 
-ジェネレーターの出力は出発点です。ここから自分のアプリに合わせて磨きます。今のフォームは、バリデーションに失敗しても何も表示しません — エラーは `form.errors` に届いているのに、描画していないからです。
+今のフォームは、バリデーションに失敗しても何も表示しません — エラーは `form.errors` に届いているのに、描画していないからです。
 
 まず `app/Http/Validators/PostValidator.ts` のメッセージを人間向けにします。
 
@@ -320,7 +320,9 @@ export const PostPayloadSchema = z.object({
         {form.errors.body && <p className="text-sm text-red-600">{form.errors.body}</p>}
 ```
 
-**チェックポイント:** `/posts/create` で両方のフィールドを **空のまま** 送信します — ページは遷移せず、入力欄の下に "Title is required." が表示されます。これはあなたの Zod スキーマの声です。サーバーでのバリデーション失敗が `form.errors` まで往復してきました。`Edit.tsx` にも同じ 2 行を足しておきましょう。
+`Edit.tsx` にも同じ 2 行を足してください。この 422 → `form.errors` の往復の仕組みは[バリデーションガイド](../guides/validation.md)が仕様として定義しています。
+
+**チェックポイント:** `/posts/create` で両方のフィールドを **空のまま** 送信します — ページは遷移せず、入力欄の下に "Title is required." が表示されます。これはあなたの Zod スキーマの声です。サーバーでのバリデーション失敗が `form.errors` まで往復してきました。
 
 ## 9. セキュリティ監査を実行する
 
@@ -361,10 +363,10 @@ export class Post extends defineModel(posts) {
 マイグレーションが生成されていないか、適用されていません。`bun run db:make create_posts_table` に続けて `bun run db:migrate` を実行してください。
 
 **`bun run db:migrate` が "cannot connect to the database" で失敗する。**
-スキャフォールド時に SQLite ではなく PostgreSQL / MySQL を選んでいます。先に `bun run db:up` でコンテナを起動してください。詳しくは[トラブルシューティング](../guides/troubleshoot.md)を参照してください。
+雛形生成のときに SQLite ではなく PostgreSQL / MySQL を選んでいます。先に `bun run db:up` でコンテナを起動してください。詳しくは[トラブルシューティング](../guides/troubleshoot.md)を参照してください。
 
 **フォームを送信すると 401 が返る、またはリダイレクトされて何も起きない。**
-`add resource` に `--public` を付け忘れています。生成された store / update / destroy には `this.auth.userOrFail()` のガードが入っており、認証を導入するまでは常に失敗します。ガード行を手で削除するか、`--force` を付けて `--public` で生成し直してください（手を入れたファイルは上書きされる点に注意）。
+`--public` を省略して生成しています。その場合の store / update / destroy には `this.auth.userOrFail()` のガードが入っており、認証を導入するまでは常に失敗します。まだファイルに手を入れていなければ `--force --public` で生成し直すのが確実です（編集済みなら、認証を入れる Part 2 までガード行を一時的に外す手もあります）。
 
 **フォームを送信しても何も起きない（エラーも出ない）。**
 バリデーションで拒否されています。ステップ 8 のエラー表示（`form.errors.title` / `form.errors.body`）を追加したか確認してください — メッセージは届いているのに、表示していないだけです。

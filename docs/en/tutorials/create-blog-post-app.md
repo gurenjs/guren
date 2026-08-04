@@ -1,6 +1,6 @@
 # Part 1: Create a Blog Post App
 
-In this part you build the heart of the blog — creating, listing, editing, and deleting posts. But you will not write the files one by one. The Guren way of working is: **generate with the CLI, read the generated code to understand it, and verify with mechanical checks**. One command generates the full vertical slice (schema → model → validator → resource → controller → routes → pages); then you read each layer, and finally you let `guren check` and `guren audit` verify the app's wiring and its defenses.
+In this part you build the heart of the blog — creating, listing, editing, and deleting posts. But you will not write the files one by one. The Guren way of working is: **generate with the CLI, read the generated code to understand it, and verify with mechanical checks**. You start by generating the full vertical slice (schema → model → validator → resource → controller → routes → pages) with a single command.
 
 **What you'll learn:**
 
@@ -8,7 +8,7 @@ In this part you build the heart of the blog — creating, listing, editing, and
 - What `bunx guren add resource` generates, and what it wires up automatically
 - The Guren development loop: **generate → migrate → codegen → check → verify in the browser**
 - How to derive project knowledge from the code with `guren context` and spec views
-- How to read the generated code: how the pieces connect (schema → model → validator → resource → controller → routes → Inertia pages)
+- How to read the generated code and how the pieces connect
 - How to refine generated output: validation messages, error display, `fillable`
 - How `guren audit` points out security gaps for you
 
@@ -48,7 +48,7 @@ bunx guren add resource posts --fields "title:string,body:text" --public
 ```
 
 - `--fields` defines the columns. List `name:type` pairs separated by commas; types are `string` / `text` / `number` / `boolean` / `date` / `json` (append `?` for nullable, e.g. `published:boolean?`). This single definition drives the schema columns, the Zod schemas, the resource types, and the form fields — consistently.
-- `--public` is a temporary opt-out. Guren's generators put a **sign-in guard into store / update / destroy by default** (secure by default). This app has no authentication yet, so we opt out for now and restore the guard in [Part 2](./authentication.md).
+- `--public` is a temporary opt-out. Guren's generators put a **sign-in guard into store / update / destroy by default** (secure by default). The golden path is actually `add auth` first, then `add resource` — in that order the guards ship built-in. This series deliberately inverts it so you can watch `audit` flag the gap and close it on purpose in [Part 2](./authentication.md).
 
 The command creates these files:
 
@@ -82,7 +82,7 @@ bun run codegen
 - `db:migrate` applies it to the SQLite database.
 - `codegen` scans your routes and pages and writes typed manifests into `.guren/` — `pages.gen.ts` (page names plus the `Props` extracted from each component, used by `this.inertia()`) and `routes.gen.ts` (a `route()` helper with autocomplete for route names and params). This is why a typo in a page name or a missing prop becomes a **compile-time** error instead of a runtime incident.
 
-**When to re-run codegen:** whenever you add, rename, or delete routes or pages, or change a page's `Props`. In practice you rarely run it by hand — `bun run dev` runs codegen at startup, and the dev server watches `routes/web.ts` and `resources/js/pages/` to regenerate on every change. Reach for the explicit command only when your editor shows stale types.
+**When to re-run codegen:** whenever you add, rename, or delete routes or pages, or change a page's `Props`. In practice you rarely run it by hand — `bun run dev` runs codegen at startup, and the dev server watches `routes/web.ts`, `resources/js/pages/`, and `app/Http/Resources/` to regenerate on every change. Reach for the explicit command only when your editor shows stale types. The full codegen pipeline is described in the [Frontend guide](../guides/frontend.md).
 
 ## 4. Check the wiring
 
@@ -208,7 +208,7 @@ export class PostResource extends Resource<PostRecord> {
 }
 ```
 
-The resource layer exists to **explicitly choose which fields reach the browser**. The Guren way is to never pass raw model records to `this.inertia()` — always route them through here. With only three columns it looks redundant; once you start handling user data in [Part 2](./authentication.md), this layer is the last line of defense against leaking `passwordHash`.
+The resource layer exists to **explicitly choose which fields reach the browser**. The Guren way is to never pass raw model records to `this.inertia()` — always route them through here. With only three columns it looks redundant; once you start handling user data in [Part 2](./authentication.md), this layer is the last line of defense against leaking `passwordHash`. Conditional fields, collections, and the rest of this layer live in the [API Resources guide](../guides/api-resources.md).
 
 ### Controller — `app/Http/Controllers/PostController.ts`
 
@@ -250,7 +250,7 @@ type PostsIndexProps = PaginatedPageProps<PostResourceData>
 - **`index`** validates `?page=` with `validateQuery`, fetches one page of posts, and wraps the result with the `paginate` helper, which builds the page links your React component renders.
 - **`show`** validates the `:id` route param and uses `findOrFail` — a missing post automatically becomes a 404, no manual null check.
 - **`store`** validates the request body with `validateBody`. On failure it throws a `ValidationException`, and Inertia delivers the field-level messages back to the form as `form.errors` — you never write that error-handling code.
-- **`pages.posts.Index`** comes from `.guren/pages.gen.ts`, the generated manifest binding page names to prop types. Your editor will complain until codegen runs — that's expected.
+- **`pages.posts.Index`** comes from the generated manifest you met in step 3. Your editor will complain until codegen runs — that's expected.
 
 ### Routes — `routes/web.ts`
 
@@ -268,7 +268,7 @@ type PostsIndexProps = PaginatedPageProps<PostResourceData>
 
 - Every route carries `.name()` (or a `name` option), so pages can link with the typed `route()` helper instead of hardcoding URLs.
 - The `body: PostPayloadSchema` option binds the Zod schema to the route contract, which lets codegen produce typed request bodies for the frontend.
-- `/create` is registered **before** `/:id`. Routes match top to bottom, so with `/:id` first, `/posts/create` would try to parse `"create"` as an id. The generator wires this ordering for you.
+- `/create` is registered **before** `/:id`. Routes match top to bottom, so with `/:id` first, `/posts/create` would try to parse `"create"` as an id. The generator wires this ordering for you. Groups, named routes, and model binding are covered in full in the [Routing guide](../guides/routing.md).
 
 ### Page — `resources/js/pages/posts/New.tsx`
 
@@ -300,7 +300,7 @@ export default function NewPost() {
 
 ## 8. Refine the output: show the error messages
 
-Generator output is a starting point. Right now the form shows nothing when validation fails — the errors arrive in `form.errors`, but nothing renders them.
+Right now the form shows nothing when validation fails — the errors arrive in `form.errors`, but nothing renders them.
 
 First give `app/Http/Validators/PostValidator.ts` human-friendly messages:
 
@@ -320,7 +320,9 @@ Then add error display under each input in `resources/js/pages/posts/New.tsx`:
         {form.errors.body && <p className="text-sm text-red-600">{form.errors.body}</p>}
 ```
 
-**Checkpoint:** on `/posts/create`, submit the form with **both fields empty** — the page doesn't navigate, and "Title is required." appears under the input. That's your Zod schema speaking: a server-side validation failure made the round trip into `form.errors`. Add the same two lines to `Edit.tsx` while you're at it.
+Add the same two lines to `Edit.tsx`. The mechanics of this 422 → `form.errors` round trip are specified in the [Validation guide](../guides/validation.md).
+
+**Checkpoint:** on `/posts/create`, submit the form with **both fields empty** — the page doesn't navigate, and "Title is required." appears under the input. That's your Zod schema speaking: a server-side validation failure made the round trip into `form.errors`.
 
 ## 9. Run the security audit
 
@@ -364,7 +366,7 @@ The migration was never generated or applied. Run `bun run db:make create_posts_
 You picked PostgreSQL / MySQL instead of SQLite when scaffolding. Start the container first with `bun run db:up`. See [Troubleshooting](../guides/troubleshoot.md).
 
 **Submitting the form returns a 401, or redirects and nothing happens.**
-You forgot `--public` on `add resource`. The generated store / update / destroy carry a `this.auth.userOrFail()` guard, which always fails until authentication is installed. Remove the guard lines by hand, or regenerate with `--force` and `--public` (careful: files you've edited will be overwritten).
+You generated without `--public`. In that case store / update / destroy carry a `this.auth.userOrFail()` guard, which always fails until authentication is installed. If you haven't edited the files yet, the clean fix is regenerating with `--force --public`; if you have, temporarily remove the guard lines until Part 2 adds authentication.
 
 **Submitting the form does nothing (no errors either).**
 Validation rejected it. Make sure you added the error display from step 8 (`form.errors.title` / `form.errors.body`) — the messages are arriving; they're just not rendered.

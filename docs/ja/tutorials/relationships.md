@@ -76,7 +76,7 @@ Comment.belongsTo('post', () => import('./Post.js').then((m) => m.Post), 'postId
 Comment.belongsTo('author', () => import('./User.js').then((m) => m.User), 'authorId', 'id')
 ```
 
-次に逆側を宣言します。`app/Models/Post.ts` を更新して、投稿が多数のコメントを持つようにします。
+次に逆側を宣言します。`app/Models/Post.ts` を更新して、投稿が多数のコメントを持つようにします（変わるのは import 2 行、`relationTypes` の `comments`、末尾の `hasMany` の 3 箇所です）。
 
 ```ts
 import { defineModel, type BelongsToRecord, type HasManyRecord } from '@guren/core'
@@ -104,7 +104,7 @@ Post.belongsTo('author', () => import('./User.js').then((m) => m.User), 'authorI
 Post.hasMany('comments', () => import('./Comment.js').then((m) => m.Comment), 'postId', 'id')
 ```
 
-`hasMany('comments', ..., 'postId', 'id')` は「`postId` がこの投稿の `id` に一致するコメントたち」と読めます。`relationTypes` を宣言しておくと、eager load 時の `post.comments` は `CommentRecord[]` と型付けされます。
+`hasMany('comments', ..., 'postId', 'id')` は「`postId` がこの投稿の `id` に一致するコメントたち」と読めます。`relationTypes` を宣言しておくと、eager load 時の `post.comments` は `CommentRecord[]` と型付けされます。リレーションシップ API の全体像は[データベースガイド](../guides/database.md)を参照してください。
 
 ## 4. バリデーターとリソースを仕上げる
 
@@ -216,7 +216,7 @@ import { CommentResource } from '../Resources/CommentResource.js'
   }
 ```
 
-`Comment.where(...)` はクエリビルダーを返すので、`.with('author')`（各コメントの著者を、コメントごとに 1 クエリ発行するのではなく、まとめて 1 回で eager load します）と並び替えをチェーンできます。ページに渡す直前で、各コメントを `CommentResource` に通しています。
+`Comment.where(...)` はクエリビルダーを返すので、`.with('author')`（各コメントの著者を、コメントごとに 1 クエリ発行するのではなく、まとめて 1 回で eager load します）と並び替えをチェーンできます。ページに渡す直前で、各コメントを `CommentResource` に通しています。なお、`Show.tsx` の `Props` はまだ `comments` を受け取らないので、次のステップまでエディターが型エラーを出します — それで正常です。
 
 ## 7. ページにコメントセクションを追加する
 
