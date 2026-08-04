@@ -204,12 +204,19 @@ export function staticStringProperty(classDecl: ClassDeclaration, name: string):
   return property?.value?.type === 'StringLiteral' ? property.value.value : undefined
 }
 
-/** String-literal entries of an array-literal node, or undefined for any other node. */
+/**
+ * String-literal entries of an array-literal node, or undefined for any
+ * other node — including an array with a spread or computed element. A
+ * partial read is worse than none for the allowlist checks: `visible:
+ * ['id', ...EXPOSED]` read as `['id']` reports columns hidden that the
+ * runtime exposes.
+ */
 function stringArrayEntries(node: Node | null | undefined): string[] | undefined {
   if (node?.type !== 'ArrayExpression') return undefined
   const entries: string[] = []
   for (const element of node.elements) {
-    if (element?.type === 'StringLiteral') entries.push(element.value)
+    if (element?.type !== 'StringLiteral') return undefined
+    entries.push(element.value)
   }
   return entries
 }
@@ -234,14 +241,21 @@ function findDefineModelCall(node: Node): CallExpression | null {
   return null
 }
 
-/** The named property of the class's `defineModel(table, { ... })` options object, if present. */
+/**
+ * The named property of the class's `defineModel(table, { ... })` options
+ * object, if present. A literal `name: undefined` counts as absent — the
+ * runtime skips the assignment, so the model is configured by neither
+ * spelling.
+ */
 export function findDefineModelOption(classDecl: ClassDeclaration, name: string): ObjectProperty | null {
   if (!classDecl.superClass) return null
   const call = findDefineModelCall(classDecl.superClass)
   const options = call?.arguments[1]
   if (options?.type !== 'ObjectExpression') return null
   for (const property of options.properties) {
-    if (property.type === 'ObjectProperty' && propertyKeyName(property) === name) return property
+    if (property.type !== 'ObjectProperty' || propertyKeyName(property) !== name) continue
+    if (property.value.type === 'Identifier' && property.value.name === 'undefined') return null
+    return property
   }
   return null
 }
@@ -259,7 +273,13 @@ function defineModelStringArrayOption(classDecl: ClassDeclaration, name: string)
  * anything resolving these allowlists goes through here.
  */
 export function resolveModelStringArrayConfig(classDecl: ClassDeclaration, name: string): string[] | undefined {
-  return staticStringArrayProperty(classDecl, name) ?? defineModelStringArrayOption(classDecl, name)
+  // Precedence follows declaration presence, not parseability: a static
+  // whose value we cannot read (`static hidden = HIDDEN`) still shadows the
+  // option at runtime, so falling back to the option would report a list the
+  // runtime does not use. Unreadable resolves to undefined and the checks
+  // stay conservative.
+  if (findStaticClassProperty(classDecl, name)) return staticStringArrayProperty(classDecl, name)
+  return defineModelStringArrayOption(classDecl, name)
 }
 
 /**

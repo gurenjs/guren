@@ -102,6 +102,12 @@ export class AppendsTypo extends defineModel(users, {
   appends: ['displayNam'],
 }) {}
 
+export class AccessorsNotObject extends defineModel(users, {
+  // @ts-expect-error accessors must be a map of functions — with no keys to
+  // infer, the mapped type alone would collapse to `{}` and admit anything
+  accessors: () => 1,
+}) {}
+
 export class AppendsWithoutAccessors extends defineModel(users, {
   // @ts-expect-error appends may only reference declared accessors
   appends: ['displayName'],

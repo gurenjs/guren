@@ -2650,8 +2650,11 @@ export function defineModel<
     /**
      * Typed form of `static accessors`: each function receives the table's
      * inferred record. Names declared here are what `appends` may reference.
+     * The Record intersection rejects non-object values — with no keys to
+     * infer, the mapped type alone collapses to `{}`, which admits anything.
      */
-    accessors?: AccessorsShape<TTable, TAccessorKey>
+    accessors?: AccessorsShape<TTable, TAccessorKey> &
+      Record<string, (record: InferModelRecord<TTable>) => unknown>
     /**
      * Typed form of `static appends`: virtual attributes to serialize,
      * checked against the names declared in `accessors`.
