@@ -57,10 +57,11 @@ export const mixedNamedAndInline = new Router()
   })
 
 /**
- * Transcribed from the email-verification guide, whose `getUser` reads `ctx` —
- * impossible against the option's previous `(ctx: unknown)` signature, a second
- * reason that documented snippet did not compile. The cast mirrors the guide:
- * `get()` returns `unknown` by design, so the caller names the type.
+ * Transcribed verbatim from the email-verification guide. `getUser` reads
+ * `ctx` — impossible against the option's previous `(ctx: unknown)` signature,
+ * a second reason that documented snippet did not compile. `ctx.get` is
+ * generic (Hono's context idiom), so the type argument is inferred from the
+ * expected return and the guide needs no cast.
  */
 export const verifiedEmailGuard = new Router()
   .get('/profile', [DemoController, 'index'])
@@ -68,7 +69,7 @@ export const verifiedEmailGuard = new Router()
     requireVerifiedEmail({
       redirectTo: '/verify-email',
       getUser: async (ctx) => {
-        return ctx.get('user') as { emailVerifiedAt?: Date | null } | null
+        return ctx.get('user')
       },
     }),
   )

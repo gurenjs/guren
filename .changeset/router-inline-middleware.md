@@ -26,5 +26,8 @@ including auth guards. This was already the behavior for alias names; the fix
 covers both.
 
 `requireVerifiedEmail`'s `getUser` option typed its argument as `unknown`, so a
-callback could not read the context at all. It now takes the same
-`{ get(key) }` shape the factory's own default handler is annotated with.
+callback could not read the context at all. It now receives `{ get<T>(key) }` —
+Hono's context idiom — with the type argument inferred from the expected
+return, so the documented `getUser: async (ctx) => ctx.get('user')` compiles
+without a cast. Callbacks written against the old `unknown` signature remain
+assignable.
