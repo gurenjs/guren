@@ -2,6 +2,7 @@ import { Controller, ValidationException, createEmailVerificationToken, buildVer
 import { ProfileUpdateSchema } from '../Validators/ProfileValidator.js'
 import { User, type UserRecord } from '../../Models/User.js'
 import { emailVerificationStore } from '../../Auth/EmailVerificationStore.js'
+import { appUrl } from '../../Auth/AppUrl.js'
 import { sendEmailVerificationMail } from '../../Mail/EmailVerificationMail.js'
 import { pages } from '@/.guren/pages.gen'
 
@@ -66,7 +67,7 @@ export default class ProfileController extends Controller {
 
     if (emailChanged) {
       const { token } = await createEmailVerificationToken(email, emailVerificationStore)
-      const verifyUrl = buildVerificationUrl(`${new URL(this.request.url).origin}/verify-email/confirm`, token, email)
+      const verifyUrl = buildVerificationUrl(`${appUrl(this.request)}/verify-email/confirm`, token, email)
       await sendEmailVerificationMail(this.make('mail'), email, verifyUrl)
     }
 

@@ -2,6 +2,7 @@ import { Controller, createPasswordResetToken, buildPasswordResetUrl } from '@gu
 import { ForgotPasswordSchema } from '../../Validators/ForgotPasswordValidator.js'
 import { User } from '../../../Models/User.js'
 import { passwordResetStore } from '../../../Auth/PasswordResetStore.js'
+import { appUrl } from '../../../Auth/AppUrl.js'
 import { SendPasswordResetEmailJob } from '../../../Jobs/SendPasswordResetEmailJob.js'
 import { pages } from '@/.guren/pages.gen'
 
@@ -23,7 +24,7 @@ export default class ForgotPasswordController extends Controller {
     const [user] = await User.where({ email })
     if (user) {
       const { token } = await createPasswordResetToken(email, passwordResetStore)
-      const resetUrl = buildPasswordResetUrl(`${new URL(this.request.url).origin}/reset-password`, token, email)
+      const resetUrl = buildPasswordResetUrl(`${appUrl(this.request)}/reset-password`, token, email)
       await SendPasswordResetEmailJob.dispatch({ email, resetUrl })
     }
 

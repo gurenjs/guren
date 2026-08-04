@@ -56,8 +56,9 @@ export function registerWebRoutes(router: Router): void {
 
       const created = await makeAuth({ install: true, force: true })
 
-      expect(created).toHaveLength(26)
+      expect(created).toHaveLength(27)
       expect(created).toEqual(expect.arrayContaining([
+        expect.stringContaining('AppUrl.ts'),
         expect.stringContaining('LoginController.ts'),
         expect.stringContaining('routes/auth.ts'),
         expect.stringContaining('ProfileController.ts'),
@@ -104,6 +105,24 @@ export function registerWebRoutes(router: Router): void {
       expect(authRoutes).toContain("router.post('/forgot-password'")
       expect(authRoutes).toContain("router.get('/reset-password'")
       expect(authRoutes).toContain("router.post('/reset-password'")
+
+      // Emailed links must never be built from the request URL: it is
+      // reconstructed from the `Host` header, so a forged host would mail the
+      // victim a genuine reset token pointing at the attacker's server.
+      const forgotPasswordController = await readFile(
+        join(workspace.dir, 'app/Http/Controllers/Auth/ForgotPasswordController.ts'),
+        'utf8',
+      )
+      expect(forgotPasswordController).not.toContain('new URL(this.request.url).origin')
+      expect(forgotPasswordController).toContain("import { appUrl } from '../../../Auth/AppUrl.js'")
+      expect(forgotPasswordController).toContain('buildPasswordResetUrl(`${appUrl(this.request)}/reset-password`')
+
+      // ...and the helper they route through has to fail closed in production
+      // rather than falling back to the request.
+      const appUrlHelper = await readFile(join(workspace.dir, 'app/Auth/AppUrl.ts'), 'utf8')
+      expect(appUrlHelper).toContain('process.env.APP_URL')
+      expect(appUrlHelper).toContain("process.env.NODE_ENV === 'production'")
+      expect(appUrlHelper).toContain('throw new Error(')
 
       const loginPage = await readFile(join(workspace.dir, 'resources/js/pages/auth/Login.tsx'), 'utf8')
       expect(loginPage).toContain('interface Props')
