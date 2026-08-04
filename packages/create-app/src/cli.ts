@@ -5,6 +5,7 @@ import { consola } from 'consola'
 import { defineCommand, runMain } from 'citty'
 import { DATABASE_DRIVERS, getAppBlueprint, listAppBlueprints, scaffoldAppBlueprint, usesDatabaseContainer, type DatabaseDriver, type RenderingMode } from './blueprints'
 import { directoryExists, isDirectoryEmpty } from './utils'
+import { initGitRepository, isInsideGitWorkTree } from './git'
 
 const RENDERING_MODES = ['spa', 'ssr'] as const
 const RENDERING_MODE_SET = new Set<RenderingMode>(RENDERING_MODES)
@@ -134,7 +135,7 @@ async function resolveGitInit(flagValue: unknown, target: { dir: string; wasEmpt
 
   // A nested repository inside an existing checkout is never what the user
   // wanted, so this wins even over an explicit --git.
-  if (await isInsideGitWorkTree(target.dir)) {
+  if (isInsideGitWorkTree(target.dir)) {
     return declined('the target directory is already inside a git repository.')
   }
 
@@ -150,39 +151,23 @@ async function resolveGitInit(flagValue: unknown, target: { dir: string; wasEmpt
   return result === true
 }
 
-async function isInsideGitWorkTree(cwd: string): Promise<boolean> {
-  const { spawnSync } = await import('node:child_process')
-  const result = spawnSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd, stdio: 'pipe', env: process.env })
-  // `status === 0` first: a missing git binary leaves stdout null, and the
-  // short-circuit is what keeps this a graceful "not a repo" rather than a throw.
-  return result.status === 0 && result.stdout.toString().trim() === 'true'
-}
-
-async function initGitRepository(cwd: string): Promise<void> {
-  const { spawnSync } = await import('node:child_process')
-  // Plain `git init` so the user's own init.defaultBranch decides the branch name.
-  // `env` is passed explicitly (not omitted) so a caller that sets
-  // GIT_AUTHOR_*/GIT_COMMITTER_* on process.env just before this runs — the
-  // test suite does, to give the commit an identity in CI — is guaranteed to
-  // reach the child process.
-  const run = (args: string[]) => spawnSync('git', args, { cwd, stdio: 'pipe', env: process.env })
-
+function reportGitInit(cwd: string): void {
   consola.start('Initializing git repository...')
 
-  for (const args of [['init'], ['add', '-A']]) {
-    if (run(args).status !== 0) {
-      consola.warn(`Failed to run \`git ${args.join(' ')}\`. Initialize the repository manually.`)
-      return
-    }
+  const result = initGitRepository(cwd)
+  if (result.ok) {
+    consola.success('Initialized a git repository with an initial commit')
+    return
   }
 
-  if (run(['commit', '-m', 'chore: initial commit']).status !== 0) {
+  if (result.failedStep === 'commit') {
     consola.warn('Created a git repository, but the initial commit failed (git identity may be unset).')
     consola.warn('Set `git config user.name` and `git config user.email`, then run `git commit -m "chore: initial commit"`.')
     return
   }
 
-  consola.success('Initialized a git repository with an initial commit')
+  const args = result.failedStep === 'init' ? 'init' : 'add -A'
+  consola.warn(`Failed to run \`git ${args}\`. Initialize the repository manually.`)
 }
 
 async function installDependencies(cwd: string): Promise<boolean> {
@@ -319,7 +304,7 @@ const command = defineCommand({
 
     // Last, so the harness and auth scaffolding land in the initial commit.
     if (shouldInitGit) {
-      await initGitRepository(targetDir)
+      reportGitInit(targetDir)
     }
 
     const relativeTarget = relative(process.cwd(), targetDir) || '.'
