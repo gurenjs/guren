@@ -61,6 +61,7 @@ These commands patch `src/app.ts`, create the matching provider/runtime files, a
 | `make:auth` | Scaffolds login/logout, registration, and password reset controllers, providers, views, migration, seeder, and routes (`--minimal` skips registration and password reset, `--verify` also scaffolds email verification, `--oauth <providers>` also scaffolds OAuth login buttons for the given comma-separated providers, `--oauth-only` drops password login entirely and makes those providers the only way in) | `bunx guren make:auth --oauth github,google` |
 | `make:middleware <Name>` | Generates a middleware file in `app/Http/Middleware` | `bunx guren make:middleware Auth` |
 | `make:policy <Name>` | Generates an authorization policy in `app/Policies` with owner-based defaults | `bunx guren make:policy Post` |
+| `make:validator <Name>` | Generates Zod validation schemas (route params, list query, payload) in `app/Http/Validators`; `--fields` uses the same syntax as `make:feature` | `bunx guren make:validator Post --fields "title:string,body:text"` |
 | `make:adr "<Title>"` | Records an architecture decision as a numbered file under `docs/adr/` with linkable frontmatter; `--entity <Model>` prefills the `entities:`/`related:` links | `bunx guren make:adr "Billing cycle is end-of-month" --entity Invoice` |
 | `make:seeder <Name>` | Generates a database seeder file | `bunx guren make:seeder UserSeeder` |
 | `make:job <Name>` | Generates a queueable job class | `bunx guren make:job SendEmail` |

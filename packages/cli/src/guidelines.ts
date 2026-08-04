@@ -140,7 +140,7 @@ export async function generateGuidelines(options: GuidelinesOptions = {}): Promi
   lines.push('1. Create model in `app/Models/`')
   lines.push('2. Create controller in `app/Http/Controllers/`')
   lines.push('3. Create views in `resources/js/pages/{Feature}/`')
-  lines.push('4. Create validator in `app/Http/Validators/`')
+  lines.push('4. Create validator in `app/Http/Validators/` (`bunx guren make:validator <Name> --fields "..."`)')
   lines.push('5. Create resource in `app/Http/Resources/`')
   lines.push('6. Register routes in `routes/web.ts`')
   lines.push('7. Run `bunx guren codegen` after adding routes')

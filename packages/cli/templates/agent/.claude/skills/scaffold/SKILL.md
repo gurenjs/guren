@@ -1,6 +1,6 @@
 ---
 name: scaffold
-description: Generate individual Guren framework components using bunx guren make:* CLI commands. Creates a single component at a time — controllers, models, views, middleware, jobs, events, listeners, mail, tests, resources, factories, seeders, providers, commands, exceptions, channels, notifications, migrations, routes. Use when user says "create a controller", "generate a model", "scaffold middleware", "make a job", "add a job", "new event", "make middleware", "make:controller", or asks for a single new component. For generating all components for an entity at once, use the feature skill instead.
+description: Generate individual Guren framework components using bunx guren make:* CLI commands. Creates a single component at a time — controllers, models, views, middleware, jobs, events, listeners, mail, tests, resources, validators, factories, seeders, providers, commands, exceptions, channels, notifications, migrations, routes. Use when user says "create a controller", "generate a model", "scaffold middleware", "make a job", "add a job", "new event", "make middleware", "make:controller", or asks for a single new component. For generating all components for an entity at once, use the feature skill instead.
 ---
 
 # Scaffold Skill
@@ -26,6 +26,7 @@ bunx guren make:listener <Name> --event=<EventName>
 bunx guren make:mail <Name>
 bunx guren make:test <Name> --runner=bun|vitest
 bunx guren make:resource <Name> --model=<Model>
+bunx guren make:validator <Name> [--fields "<field:type,...>"]
 bunx guren make:factory <Name> --model=<Model>
 bunx guren make:seeder <Name>
 bunx guren make:provider <Name>
@@ -66,6 +67,7 @@ If the project has a `modules/` directory, check whether the component belongs i
 | Mail | `app/Mail/{Name}Mail.ts` |
 | Test | `tests/{path}/{Name}.test.ts` |
 | Resource | `app/Http/Resources/{Name}Resource.ts` |
+| Validator | `app/Http/Validators/{Name}Validator.ts` |
 | Factory | `db/factories/{Name}Factory.ts` |
 | Seeder | `db/seeders/{Name}Seeder.ts` |
 | Provider | `app/Providers/{Name}Provider.ts` |

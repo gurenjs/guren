@@ -1,7 +1,8 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
-import { makeFeature, parseFieldsString } from '../src/make-feature'
+import { makeFeature } from '../src/make-feature'
+import { parseFieldsString } from '../src/fields'
 import { createTempWorkspace } from './helpers'
 
 describe('parseFieldsString', () => {
