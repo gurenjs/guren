@@ -230,8 +230,10 @@ const all = await Post.where('published', true).get()
 ```typescript
 import { Router, requireAuthenticated } from '@guren/core'
 
-export function registerWebRoutes(router: Router): void {
-  router.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
+export function registerWebRoutes(baseRouter: Router): void {
+  // aliasMiddleware() returns a Router carrying the alias name in its type —
+  // capture it, or a later .middleware('auth') will not compile.
+  const router = baseRouter.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
 
   router.get('/posts', [PostController, 'index'])
   router.post('/posts', [PostController, 'store'])

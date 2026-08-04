@@ -76,10 +76,10 @@ import HomeController from '../app/Http/Controllers/HomeController.js'
 import PostController from '../app/Http/Controllers/PostController.js'
 import { PostPayloadSchema } from '../app/Http/Validators/PostValidator.js'
 
-export function registerWebRoutes(router: Router): void {
-  registerAuthRoutes(router)
+export function registerWebRoutes(baseRouter: Router): void {
+  const router = baseRouter.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
 
-  router.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
+  registerAuthRoutes(router)
 
   router.get('/', [HomeController, 'index'])
 
@@ -95,7 +95,7 @@ export function registerWebRoutes(router: Router): void {
 }
 ```
 
-`aliasMiddleware` names a middleware once so routes can reference it as `'auth'`. Reading and viewing posts stays public; `/posts/create` and the `POST /posts` submission now redirect guests to `/login`. If you have several protected routes, wrap them in a group instead of tagging each one:
+`aliasMiddleware` names a middleware once so routes can reference it as `'auth'`. It returns a new `Router` carrying that name in its type, so capture it with `const router = baseRouter.aliasMiddleware(...)` — drop the return value and the later `.middleware('auth')` will not compile. Reading and viewing posts stays public; `/posts/create` and the `POST /posts` submission now redirect guests to `/login`. If you have several protected routes, wrap them in a group instead of tagging each one:
 
 ```ts
 posts.middleware('auth').group((authed) => {

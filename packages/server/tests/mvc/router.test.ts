@@ -132,6 +132,64 @@ describe('Router route contract metadata', () => {
   })
 })
 
+// `RouterMiddlewareGroupBuilder` mirrors `Router`'s per-verb overloads by hand,
+// and drifting out of sync is exactly the bug these tests were added for. This
+// assignment fails to compile the moment the builder stops accepting everything
+// `Router` does — including overloads added long after this was written, which a
+// per-call test can never anticipate. Root `tsc --noEmit` covers this directory.
+const _verbParityGuard: Pick<Router<'auth'>, 'get' | 'post' | 'put' | 'patch' | 'delete'> =
+  new Router<'auth'>().aliasMiddleware('auth', async (_c, next) => { await next() }).middleware('auth')
+void _verbParityGuard
+
+describe('Router middleware group builder with contract options', () => {
+  const body = z.object({ title: z.string().min(1) })
+
+  it('accepts a controller action alongside contract options on every verb', () => {
+    // The alias name is inferred from the captured aliasMiddleware() return —
+    // the form the routing docs teach — rather than declared as `new Router<'auth'>()`.
+    const router = new Router().aliasMiddleware('auth', async (_c, next) => { await next() })
+
+    const scoped = router.middleware('auth')
+    scoped.get('/posts/:id/edit', { name: 'posts.edit' }, [StubController, 'edit'])
+    scoped.post('/posts', { name: 'posts.store', body }, [StubController, 'store'])
+    scoped.put('/posts/:id', { name: 'posts.update', body }, [StubController, 'update'])
+    scoped.patch('/posts/:id', { name: 'posts.patch', body }, [StubController, 'update'])
+    scoped.delete('/posts/:id', { name: 'posts.destroy' }, [StubController, 'destroy'])
+
+    expect(router.definitions().map((d) => `${d.method} ${d.path}`)).toEqual([
+      'GET /posts/:id/edit',
+      'POST /posts',
+      'PUT /posts/:id',
+      'PATCH /posts/:id',
+      'DELETE /posts/:id',
+    ])
+
+    const post = router.definitions()[1]
+    expect(post!.name).toBe('posts.store')
+    expect(post!.middlewareNames).toEqual(['auth'])
+    expect(post!.schemas?.body).toBe(body)
+    expect(post!.controller).toEqual({ name: 'StubController', action: 'store' })
+  })
+
+  it('routes the request through the aliased middleware', async () => {
+    const router = new Router<'auth'>()
+    const seen: string[] = []
+    router.aliasMiddleware('auth', async (_c, next) => { seen.push('auth'); await next() })
+    router.middleware('auth').post('/posts', { name: 'posts.store', body }, [StubController, 'store'])
+
+    const app = new Hono()
+    router.mount(app)
+    const response = await app.request('/posts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Hello' }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(seen).toEqual(['auth'])
+  })
+})
+
 describe('Router definition introspection', () => {
   it('exposes controller binding for controller action routes', () => {
     const router = new Router()

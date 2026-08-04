@@ -363,9 +363,10 @@ import { Router, requireAuthenticated, requireGuest } from '@guren/core'
 import LoginController from '@/app/Http/Controllers/Auth/LoginController'
 import DashboardController from '@/app/Http/Controllers/DashboardController'
 
-export function registerWebRoutes(router: Router): void {
-  router.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
-  router.aliasMiddleware('guest', requireGuest({ redirectTo: '/dashboard' }))
+export function registerWebRoutes(baseRouter: Router): void {
+  const router = baseRouter
+    .aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
+    .aliasMiddleware('guest', requireGuest({ redirectTo: '/dashboard' }))
 
   router.middleware('guest').group((guest) => {
     guest.get('/login', [LoginController, 'show'])

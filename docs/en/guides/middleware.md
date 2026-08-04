@@ -46,12 +46,16 @@ import { Router, requireAuthenticated } from '@guren/core'
 import { requireAdmin } from '@/app/Http/middleware/admin'
 import { csrfProtection } from '@/app/Http/middleware/csrf'
 
-export function registerWebRoutes(router: Router): void {
-  router.aliasMiddleware('auth', requireAuthenticated())
-  router.aliasMiddleware('admin', requireAdmin())
-  router.aliasMiddleware('csrf', csrfProtection())
+export function registerWebRoutes(baseRouter: Router): void {
+  const router = baseRouter
+    .aliasMiddleware('auth', requireAuthenticated())
+    .aliasMiddleware('admin', requireAdmin())
+    .aliasMiddleware('csrf', csrfProtection())
 }
 ```
+
+> [!IMPORTANT]
+> `aliasMiddleware()` returns a **new `Router` type** carrying the alias name it just registered. Call it without capturing the result and the name never reaches the type, so a later `.middleware('auth')` fails to compile. Always chain and assign, as above.
 
 Once registered, use the alias string anywhere middleware is accepted:
 
@@ -62,11 +66,16 @@ router.post('/settings', [SettingsController, 'update']).middleware('auth', 'csr
 
 ## Middleware Groups
 
-Bundle multiple middleware aliases under a single group name. This is useful for stacks that commonly run together:
+Bundle multiple middleware aliases under a single group name. This is useful for stacks that commonly run together. Every member of a group must already be a registered alias:
 
 ```ts
-router.groupMiddleware('web', ['session', 'csrf'])
-router.groupMiddleware('api', ['throttle:60'])
+const router = new Router()
+  .aliasMiddleware('auth', requireAuthenticated())
+  .aliasMiddleware('session', createSessionMiddleware())
+  .aliasMiddleware('csrf', createCsrfMiddleware())
+  .aliasMiddleware('throttle', createRateLimitMiddleware({ limit: 60, windowMs: 60_000 }))
+  .groupMiddleware('web', ['session', 'csrf'])
+  .groupMiddleware('api', ['throttle'])
 ```
 
 Apply a group to a route group using `router.middleware()`:
@@ -119,8 +128,9 @@ import { attachAuthContext, requireAuthenticated } from '@guren/core'
 app.use('*', attachAuthContext(() => authManager.createGuard('web')))
 
 // Using middleware alias (recommended)
-router.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
-router.aliasMiddleware('guest', requireGuest({ redirectTo: '/dashboard' }))
+const router = new Router()
+  .aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
+  .aliasMiddleware('guest', requireGuest({ redirectTo: '/dashboard' }))
 
 router.middleware('auth').group((auth) => {
   auth.get('/settings', [SettingsController, 'index'])
@@ -133,7 +143,7 @@ router.middleware('auth').group((auth) => {
 The CSRF middleware validates tokens on state-changing requests (POST, PUT, PATCH, DELETE):
 
 ```ts
-router.aliasMiddleware('csrf', csrfProtection())
+const router = new Router().aliasMiddleware('csrf', createCsrfMiddleware())
 
 router.middleware('csrf').group((csrf) => {
   csrf.post('/posts', [PostsController, 'store'])
@@ -145,9 +155,9 @@ router.middleware('csrf').group((csrf) => {
 Apply rate limiting to routes or groups:
 
 ```ts
-import { rateLimit } from '@guren/core'
+import { createRateLimitMiddleware } from '@guren/core'
 
-router.aliasMiddleware('throttle', rateLimit({ max: 60, windowMs: 60_000 }))
+const router = new Router().aliasMiddleware('throttle', createRateLimitMiddleware({ limit: 60, windowMs: 60_000 }))
 
 router.middleware('throttle').group((throttle) => {
   throttle.post('/api/login', [AuthController, 'login'])
@@ -175,7 +185,9 @@ export const requireSubscription = defineMiddleware(async (ctx, next) => {
 Register it as an alias for convenient use:
 
 ```ts
-router.aliasMiddleware('subscribed', requireSubscription)
+const router = new Router()
+  .aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
+  .aliasMiddleware('subscribed', requireSubscription)
 
 router.middleware('auth', 'subscribed').group((group) => {
   group.get('/premium', [PremiumController, 'index'])

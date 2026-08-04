@@ -76,10 +76,10 @@ import HomeController from '../app/Http/Controllers/HomeController.js'
 import PostController from '../app/Http/Controllers/PostController.js'
 import { PostPayloadSchema } from '../app/Http/Validators/PostValidator.js'
 
-export function registerWebRoutes(router: Router): void {
-  registerAuthRoutes(router)
+export function registerWebRoutes(baseRouter: Router): void {
+  const router = baseRouter.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
 
-  router.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
+  registerAuthRoutes(router)
 
   router.get('/', [HomeController, 'index'])
 
@@ -95,7 +95,7 @@ export function registerWebRoutes(router: Router): void {
 }
 ```
 
-`aliasMiddleware` はミドルウェアに一度だけ名前を付け、ルートからは `'auth'` として参照できるようにします。投稿の一覧と閲覧は公開のまま、`/posts/create` と `POST /posts` の送信は、未ログインの訪問者を `/login` にリダイレクトするようになりました。保護したいルートが複数あるなら、1 つずつタグ付けする代わりにグループでまとめられます。
+`aliasMiddleware` はミドルウェアに一度だけ名前を付け、ルートからは `'auth'` として参照できるようにします。戻り値はエイリアス名を型に載せた新しい `Router` なので、`const router = baseRouter.aliasMiddleware(...)` のように必ず受け取ってください（受け取らないと後続の `.middleware('auth')` が型エラーになります）。投稿の一覧と閲覧は公開のまま、`/posts/create` と `POST /posts` の送信は、未ログインの訪問者を `/login` にリダイレクトするようになりました。保護したいルートが複数あるなら、1 つずつタグ付けする代わりにグループでまとめられます。
 
 ```ts
 posts.middleware('auth').group((authed) => {

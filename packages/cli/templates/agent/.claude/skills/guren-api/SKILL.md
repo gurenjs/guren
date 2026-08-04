@@ -133,8 +133,10 @@ Source: `packages/server/src/mvc/Router.ts`
 import { Router, requireAuthenticated } from '@guren/core'
 import { PostPayloadSchema } from '../app/Http/Validators/PostValidator.js'
 
-export function registerWebRoutes(router: Router): void {
-  router.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
+export function registerWebRoutes(baseRouter: Router): void {
+  // aliasMiddleware() returns a Router carrying the alias name in its type —
+  // capture it, or a later .middleware('auth') will not compile.
+  const router = baseRouter.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
 
   router.get('/posts', [PostController, 'index']).name('posts.index')
   // Attach body schema to mutation routes for codegen type extraction

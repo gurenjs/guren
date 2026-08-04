@@ -13,13 +13,9 @@ import { ForgotPasswordSchema } from '../app/Http/Validators/ForgotPasswordValid
 import { ResetPasswordSchema } from '../app/Http/Validators/ResetPasswordValidator.js'
 import { ProfileUpdateSchema } from '../app/Http/Validators/ProfileValidator.js'
 
-// Relies on the 'auth'/'guest' aliases the caller (routes/web.ts) has
-// already registered on this router via aliasMiddleware() — reusing them
-// (via .group(), not direct .middleware(name).post() chaining, since the
-// latter's RouterMiddlewareGroupBuilder doesn't support the
-// [Controller, 'method'] tuple + typed body-schema combination) keeps this
-// middleware visible to `guren audit`'s static route inspection, unlike
-// passing requireAuthenticated()/requireGuest() call results inline.
+// Relies on the 'auth'/'guest' aliases the caller (routes/web.ts) registered
+// via aliasMiddleware(), which is why the parameter is typed Router<'auth' | 'guest'>
+// rather than Router — the alias names have to be in the type to be referenced here.
 export function registerAuthRoutes(router: Router<'auth' | 'guest'>): void {
   router.middleware('guest').group((guest) => {
     guest.get('/login', { name: 'login' }, [LoginController, 'show'])

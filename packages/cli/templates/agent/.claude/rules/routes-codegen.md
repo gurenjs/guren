@@ -12,11 +12,14 @@ globs:
 ```typescript
 import { Router, requireAuthenticated } from '@guren/core'
 
-export function registerWebRoutes(router: Router): void {
+export function registerWebRoutes(baseRouter: Router): void {
+  // aliasMiddleware() returns a Router carrying the alias name in its type —
+  // capture it, or a later .middleware('auth') will not compile.
+  const router = baseRouter.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
+
   router.get('/posts', [PostController, 'index']).name('posts.index')
   router.post('/posts', { name: 'posts.store', body: CreatePostSchema }, [PostController, 'store'])
 
-  router.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
   router.middleware('auth').group((group) => {
     group.get('/dashboard', [DashboardController, 'index'])
   })

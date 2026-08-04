@@ -102,7 +102,6 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     consola.success(`Created ${file}`)
   }
 
-  const authSuffix = withAuth ? `.middleware('auth')` : ''
   const schemaPath = schemaPathFor(moduleName)
   const routesPath = moduleName ? `modules/${moduleName}/routes.ts` : 'routes/web.ts'
   const controllerImportPath = moduleName ? './app/Http/Controllers' : '../app/Http/Controllers'
@@ -113,18 +112,9 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   consola.info(`  2. Register routes in ${routesPath} with body schemas:`)
   consola.info(`     import ${singular}Controller from '${controllerImportPath}/${singular}Controller.js'`)
   consola.info(`     import { ${singular}PayloadSchema } from '${validatorImportPath}/${singular}Validator.js'`)
-  if (withAuth) {
-    consola.info(`     router.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))`)
+  for (const line of buildRouteRegistrationHint({ singular, routeName, routeVar, withAuth })) {
+    consola.info(`     ${line}`)
   }
-  consola.info(`     router.group('/${routeName}', (${routeVar}) => {`)
-  consola.info(`       ${routeVar}.get('/', [${singular}Controller, 'index']).name('${routeName}.index')`)
-  consola.info(`       ${routeVar}.get('/create', [${singular}Controller, 'create']).name('${routeName}.create')`)
-  consola.info(`       ${routeVar}.get('/:id', [${singular}Controller, 'show']).name('${routeName}.show')`)
-  consola.info(`       ${routeVar}.get('/:id/edit', [${singular}Controller, 'edit']).name('${routeName}.edit')`)
-  consola.info(`       ${routeVar}.post('/', { name: '${routeName}.store', body: ${singular}PayloadSchema }, [${singular}Controller, 'store'])${authSuffix}`)
-  consola.info(`       ${routeVar}.put('/:id', { name: '${routeName}.update', body: ${singular}PayloadSchema }, [${singular}Controller, 'update'])${authSuffix}`)
-  consola.info(`       ${routeVar}.delete('/:id', { name: '${routeName}.destroy' }, [${singular}Controller, 'destroy'])${authSuffix}`)
-  consola.info(`     })`)
   consola.info(`  3. Run: bunx guren db:migrate`)
   consola.info(`  4. Run: bunx guren codegen`)
   if (withPolicy) {
@@ -148,6 +138,41 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   }
 
   return created
+}
+
+/**
+ * The route-registration block `make:feature` prints for the developer to paste
+ * into their registrar. It has to compile verbatim inside
+ * `export function register*Routes(router: Router)` — the shape both the default
+ * app template and `make:module` scaffold — so the auth alias binds a *new* name
+ * instead of assuming a differently-named parameter or shadowing `router`.
+ * Capturing that return value is what puts `'auth'` into the router's type;
+ * discard it and every `.middleware('auth')` below stops compiling.
+ */
+export function buildRouteRegistrationHint(options: {
+  singular: string
+  routeName: string
+  routeVar: string
+  withAuth: boolean
+}): string[] {
+  const { singular, routeName, routeVar, withAuth } = options
+  const authSuffix = withAuth ? `.middleware('auth')` : ''
+  const groupRouter = withAuth ? 'authRouter' : 'router'
+
+  return [
+    ...(withAuth
+      ? [`const ${groupRouter} = router.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))`]
+      : []),
+    `${groupRouter}.group('/${routeName}', (${routeVar}) => {`,
+    `  ${routeVar}.get('/', [${singular}Controller, 'index']).name('${routeName}.index')`,
+    `  ${routeVar}.get('/create', [${singular}Controller, 'create']).name('${routeName}.create')`,
+    `  ${routeVar}.get('/:id', [${singular}Controller, 'show']).name('${routeName}.show')`,
+    `  ${routeVar}.get('/:id/edit', [${singular}Controller, 'edit']).name('${routeName}.edit')`,
+    `  ${routeVar}.post('/', { name: '${routeName}.store', body: ${singular}PayloadSchema }, [${singular}Controller, 'store'])${authSuffix}`,
+    `  ${routeVar}.put('/:id', { name: '${routeName}.update', body: ${singular}PayloadSchema }, [${singular}Controller, 'update'])${authSuffix}`,
+    `  ${routeVar}.delete('/:id', { name: '${routeName}.destroy' }, [${singular}Controller, 'destroy'])${authSuffix}`,
+    `})`,
+  ]
 }
 
 // --- Template generators ---
