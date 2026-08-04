@@ -1,8 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
-import { authMiddlewareVerdict, runAudit } from '../src/audit'
-import { createTempWorkspace } from './helpers'
+import { authMiddlewareVerdict, runAudit, LINK_BUILDER_PATTERN, type AuditReport } from '../src/audit'
+import { createTempWorkspace, writeWorkspaceFiles } from './helpers'
 
 async function writeRoutes(dir: string, contents: string): Promise<void> {
   await mkdir(join(dir, 'routes'), { recursive: true })
@@ -551,6 +551,244 @@ export default function registerRoutes(router: any) {
     } finally {
       await workspace.cleanup()
     }
+  })
+
+  describe('request-derived link URLs', () => {
+    /** Findings this rule raised against fixture files (not the `:none` pass row). */
+    function hostFindings(report: AuditReport) {
+      return report.findings.filter(f => f.key.startsWith('request-host-url:app/'))
+    }
+
+    /** Audit a throwaway workspace built from path → content, cleaning up after. */
+    async function withWorkspace(files: Record<string, string>): Promise<AuditReport> {
+      const workspace = await createTempWorkspace('guren-cli-audit-request-host-')
+      try {
+        await writeWorkspaceFiles(workspace.dir, files)
+        return await runAudit({ cwd: workspace.dir })
+      } finally {
+        await workspace.cleanup()
+      }
+    }
+
+    const CONTROLLER = 'app/Http/Controllers/Auth/ForgotPasswordController.ts'
+
+    // The pre-fix ForgotPasswordController body, verbatim: an unauthenticated
+    // attacker POSTing with a forged Host had the app mail the victim a real
+    // single-use token pointing at the attacker's server.
+    const vulnerableController = [
+      `import { Controller, createPasswordResetToken, buildPasswordResetUrl } from '@guren/core'`,
+      ``,
+      `export default class ForgotPasswordController extends Controller {`,
+      `  async store(): Promise<Response> {`,
+      `    const { email } = await this.validateBody(ForgotPasswordSchema)`,
+      `    const { token } = await createPasswordResetToken(email, passwordResetStore)`,
+      `    const resetUrl = buildPasswordResetUrl(\`\${new URL(this.request.url).origin}/reset-password\`, token, email)`,
+      `    await SendPasswordResetEmailJob.dispatch({ email, resetUrl })`,
+      `  }`,
+      `}`,
+    ].join('\n') + '\n'
+
+    it('warns when a reset link is built from the request host', async () => {
+      const report = await withWorkspace({ [CONTROLLER]: vulnerableController })
+
+      const found = hostFindings(report)
+      expect(found).toHaveLength(1)
+      expect(found[0]!.status).toBe('warn')
+      expect(found[0]!.line).toBe(7)
+      expect(found[0]!.suggestion).toContain('APP_URL')
+      // Classified so --json consumers and the console prefix stay stable.
+      expect(found[0]!.classifications?.map(c => c.id).sort()).toEqual(['A07', 'CWE-640'])
+      // The rule fires once per line, not once per matching pattern.
+      expect(report.findings.find(f => f.key === 'request-host-url:none')).toBeUndefined()
+    })
+
+    // buildOAuthRedirectUrl is a literal alias of buildTokenUrl and is exported
+    // from @guren/core; missing it made the audit report an affirmative pass on
+    // the exact exploit. See the drift test at the end of this block.
+    it('warns when an OAuth redirect link is built from the request host', async () => {
+      const report = await withWorkspace({
+        [CONTROLLER]: [
+          `import { buildOAuthRedirectUrl } from '@guren/core'`,
+          `const link = buildOAuthRedirectUrl(\`\${new URL(this.request.url).origin}/oauth/finish\`, token, email)`,
+        ].join('\n') + '\n',
+      })
+
+      expect(hostFindings(report)).toHaveLength(1)
+    })
+
+    it('warns when the request host header feeds a link builder', async () => {
+      const report = await withWorkspace({
+        [CONTROLLER]: [
+          `import { buildVerificationUrl } from '@guren/core'`,
+          `export default class C extends Controller {`,
+          `  async store() {`,
+          `    const host = this.request.header('host')`,
+          `    return buildVerificationUrl(\`https://\${host}/verify-email\`, token, email)`,
+          `  }`,
+          `}`,
+        ].join('\n') + '\n',
+      })
+
+      const found = hostFindings(report)
+      expect(found).toHaveLength(1)
+      expect(found[0]!.line).toBe(4)
+    })
+
+    // A host read off something the app produced is not the request host.
+    it('does not flag a host header read from a response', async () => {
+      const report = await withWorkspace({
+        [CONTROLLER]: [
+          `import { buildVerificationUrl } from '@guren/core'`,
+          `const upstreamHost = response.headers.get('host')`,
+          `const link = buildVerificationUrl(process.env.APP_URL + '/verify', token, email)`,
+        ].join('\n') + '\n',
+      })
+
+      expect(hostFindings(report)).toHaveLength(0)
+    })
+
+    it('warns when the request URL is passed straight to a link builder', async () => {
+      const report = await withWorkspace({
+        [CONTROLLER]: [
+          `import { buildVerificationUrl } from '@guren/core'`,
+          `const link = buildVerificationUrl(this.request.url, token, email)`,
+        ].join('\n') + '\n',
+      })
+
+      const found = hostFindings(report)
+      expect(found).toHaveLength(1)
+      expect(found[0]!.line).toBe(2)
+    })
+
+    // The two spellings an accessor requirement used to miss: the origin is
+    // read a line or more after the URL is parsed.
+    it.each([
+      ['a hoisted URL object', `    const url = new URL(this.request.url)`],
+      ['a destructured origin', `    const { origin } = new URL(this.request.url)`],
+    ])('warns when the origin is taken from %s', async (_label, parseLine) => {
+      const report = await withWorkspace({
+        [CONTROLLER]: [
+          `import { buildPasswordResetUrl } from '@guren/core'`,
+          `export default class C extends Controller {`,
+          `  async store() {`,
+          parseLine,
+          `    return buildPasswordResetUrl(\`\${origin}/reset-password\`, token, email)`,
+          `  }`,
+          `}`,
+        ].join('\n') + '\n',
+      })
+
+      const found = hostFindings(report)
+      expect(found).toHaveLength(1)
+      expect(found[0]!.line).toBe(4)
+    })
+
+    // The exact one-liner the scaffold generates today. `[^)]*` in the
+    // direct-pass anchor cannot cross the inner `)` of `appUrl(this.request)`,
+    // which is the only thing keeping the sanctioned fix from matching — so
+    // this asserts that property rather than leaving it incidental.
+    it('does not flag the scaffolded appUrl() one-liner', async () => {
+      const report = await withWorkspace({
+        [CONTROLLER]: [
+          `import { buildVerificationUrl } from '@guren/core'`,
+          `import { appUrl } from '../../../Auth/AppUrl.js'`,
+          `const verifyUrl = buildVerificationUrl(\`\${appUrl(this.request)}/verify-email/confirm\`, token, user.email)`,
+        ].join('\n') + '\n',
+      })
+
+      expect(hostFindings(report)).toHaveLength(0)
+    })
+
+    // The sanctioned helper `guren add auth` generates. Its non-production
+    // fallback returns a request-derived origin on purpose — it is the fix,
+    // not the bug, and must stay clean without being exempted by path.
+    it('does not flag the AppUrl helper that builds no links', async () => {
+      const report = await withWorkspace({
+        'app/Auth/AppUrl.ts': [
+          `export function appUrl(request: { url: string }): string {`,
+          `  const configured = process.env.APP_URL?.trim()`,
+          `  if (configured) {`,
+          `    const parsed = new URL(configured)`,
+          `    return \`\${parsed.origin}\${parsed.pathname.replace(/\\/+$/, '')}\``,
+          `  }`,
+          `  if (process.env.NODE_ENV === 'production') {`,
+          `    throw new Error('APP_URL is not set.')`,
+          `  }`,
+          `  return new URL(request.url).origin`,
+          `}`,
+        ].join('\n') + '\n',
+      })
+
+      expect(hostFindings(report)).toHaveLength(0)
+      expect(report.findings.find(f => f.key === 'request-host-url:none')?.status).toBe('pass')
+    })
+
+    // Reading the path off the request URL is not taking its host. The fixture
+    // calls a builder on purpose, so the gate passes and only the anchor can
+    // decide — without it this would prove nothing about the anchor at all.
+    it('does not flag a request URL parsed for its path inside a builder file', async () => {
+      const report = await withWorkspace({
+        'app/Http/Middleware/canonical-host.ts': [
+          `import { buildVerificationUrl } from '@guren/core'`,
+          `export const middleware = defineMiddleware(async (c, next) => {`,
+          `  const path = new URL(c.req.url).pathname`,
+          `  if (path === '/verify') return c.redirect(buildVerificationUrl(process.env.APP_URL + '/v', t))`,
+          `  return next()`,
+          `})`,
+        ].join('\n') + '\n',
+      })
+
+      expect(hostFindings(report)).toHaveLength(0)
+    })
+
+    it('suppresses the finding with guren-audit-ignore', async () => {
+      const report = await withWorkspace({
+        [CONTROLLER]: vulnerableController.replace(
+          '    const resetUrl =',
+          '    // guren-audit-ignore -- internal admin link, never emailed\n    const resetUrl =',
+        ),
+      })
+
+      expect(hostFindings(report)).toHaveLength(0)
+    })
+
+    // The audit reads whatever source the app contains, and CI runs it over
+    // examples/blog on fork pull requests — so one crafted line must not hang
+    // it. Many `new URL(req.url` runs with no `)` between them is the shape
+    // that blows up; it also carries a builder call, so the gate lets it
+    // through. Measured on this exact input: 6918ms with `[^)]*`, 5ms with
+    // `[^)]{0,200}`. The threshold sits between the two, so dropping the
+    // bounds fails this test rather than merely slowing it down.
+    it('rejects a pathological line without catastrophic backtracking', async () => {
+      const pathological = 'const x = new URL(' + 'new URL(req.url '.repeat(1200) + '\n'
+
+      const started = Bun.nanoseconds()
+      const report = await withWorkspace({
+        [CONTROLLER]: `import { buildPasswordResetUrl } from '@guren/core'\n${pathological}`,
+      })
+      const elapsedMs = (Bun.nanoseconds() - started) / 1e6
+
+      expect(elapsedMs).toBeLessThan(1500)
+      expect(hostFindings(report)).toHaveLength(0)
+    })
+
+    // The gate is a hand-maintained name list, so a builder added to
+    // @guren/core reaches users as an affirmative `pass` — which is how
+    // buildOAuthRedirectUrl was missed. This fails when a fifth one lands.
+    it('covers every build*Url that @guren/core exports', async () => {
+      const core = await import('@guren/core')
+      const exported = Object.keys(core).filter(name => /^build[A-Za-z]*Url$/.test(name))
+
+      // Builds the *provider's* authorize URL, not a link the app mails to a
+      // user. A request-derived redirect_uri there is a real risk but a
+      // different one, and this rule's wording would misdescribe it.
+      const excluded = new Set(['buildOAuthAuthorizeUrl'])
+
+      expect(exported.length).toBeGreaterThan(0)
+      for (const name of exported) {
+        expect(LINK_BUILDER_PATTERN.test(name) || excluded.has(name)).toBe(true)
+      }
+    })
   })
 
   it('warns about models without fillable or guarded', async () => {

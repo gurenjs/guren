@@ -43,6 +43,10 @@ const RULE_CLASSIFICATIONS: Record<string, AuditClassification[]> = {
     cwe('CWE-798', 'Use of Hard-coded Credentials'),
   ],
   'raw-sql': [owasp('A03', 'Injection'), cwe('CWE-89', 'SQL Injection')],
+  'request-host-url': [
+    owasp('A07', 'Identification and Authentication Failures'),
+    cwe('CWE-640', 'Weak Password Recovery Mechanism for Forgotten Password'),
+  ],
   'security-toggle': [
     owasp('A05', 'Security Misconfiguration'),
     cwe('CWE-693', 'Protection Mechanism Failure'),
