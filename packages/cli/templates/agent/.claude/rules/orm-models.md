@@ -15,8 +15,11 @@ import { posts } from '../../db/schema.js'
 
 export type PostRecord = typeof posts.$inferSelect
 
-export class Post extends defineModel(posts) {
-  static fillable = ['title', 'body', 'authorId']
+export class Post extends defineModel(posts, {
+  // Typed against the table's columns — a typo is a compile error.
+  // (`static fillable = [...]` on the class also works and shadows the option.)
+  fillable: ['title', 'body', 'authorId'],
+}) {
   static override relationTypes: { author: BelongsToRecord<UserRecord> } = { author: null }
 }
 Post.belongsTo('author', () => import('./User.js').then((m) => m.User), 'authorId', 'id')
@@ -159,8 +162,11 @@ For concurrency safety add a unique index and catch the constraint error, or wra
 
 ## Mass assignment
 
-- With `static fillable = [...]` set, `create()`/`update()` **throw `MassAssignmentException`**
-  on any unlisted input key; the primary key (`id`) is always silently stripped
+- With a fillable allowlist set — the typed `defineModel(table, { fillable: [...] })` option
+  (preferred) or `static fillable = [...]` — `create()`/`update()` **throw
+  `MassAssignmentException`** on any unlisted input key; the primary key (`id`) is always
+  silently stripped. The same typed options exist for `hidden`, `visible`, `accessors`,
+  and `appends`
 - Credential columns (`passwordHash`, `rememberToken`) **always throw** on authenticatable
   models — the framework denies them, listing them in `fillable` does not open them
 - `forceCreate()` / `forceUpdate()` bypass filtering — trusted server-side values only.

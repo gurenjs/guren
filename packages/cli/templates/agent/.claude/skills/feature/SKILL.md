@@ -132,10 +132,12 @@ interface Props {
 Always add `fillable` to generated models. This is the second defense layer after Zod validation — it prevents unintended fields from reaching the database even if the controller validation is bypassed or misconfigured:
 
 ```typescript
-export class <Name> extends defineModel(<names>) {
-  static fillable = ['title', 'body', 'authorId']  // only these fields pass to create()/update()
-}
+export class <Name> extends defineModel(<names>, {
+  fillable: ['title', 'body', 'authorId'],  // only these fields pass to create()/update()
+}) {}
 ```
+
+Prefer the `defineModel` option over `static fillable = [...]` — the option is typed against the table's columns, so a typo is a compile error (a `static` declaration still works and shadows the option).
 
 For User models, credential columns (`passwordHash`, `rememberToken`) are denied from
 mass assignment by `AuthenticatableModel` itself — never list them in `fillable`:
@@ -145,9 +147,8 @@ export class User extends defineModel(users, {
   base: AuthenticatableModel,
   optionalOnCreate: ['passwordHash'],
   requireOnCreate: ['password'],
-}) {
-  static fillable = ['name', 'email', 'password']
-}
+  fillable: ['name', 'email', 'password'],
+}) {}
 ```
 
 ## Generated Structure

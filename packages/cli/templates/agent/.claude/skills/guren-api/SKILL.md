@@ -78,23 +78,23 @@ await Post.create({ title: 'Hello' })
 **Mass assignment protection** — prevent injection of unintended fields via `create()` / `update()`:
 
 ```typescript
-export class Post extends defineModel(posts) {
-  // Whitelist: only these fields are accepted (recommended)
-  static fillable = ['title', 'excerpt', 'body', 'authorId']
-}
+export class Post extends defineModel(posts, {
+  // Whitelist: only these fields are accepted (recommended).
+  // Typed against the table's columns — a typo is a compile error.
+  fillable: ['title', 'excerpt', 'body', 'authorId'],
+}) {}
 
 export class User extends defineModel(users, {
   base: AuthenticatableModel,
   // The model hashes a plain `password` into `passwordHash`
   optionalOnCreate: ['passwordHash'],
   requireOnCreate: ['password'],
-}) {
   // Whitelist for mass assignment (credential columns are denied by the base class)
-  static fillable = ['name', 'email', 'password']
-}
+  fillable: ['name', 'email', 'password'],
+}) {}
 ```
 
-- `fillable` (whitelist) — only listed fields pass through to `create()` / `update()`; unlisted input keys **throw `MassAssignmentException`**. The primary key (`id`) is always silently stripped.
+- `fillable` (whitelist) — only listed fields pass through to `create()` / `update()`; unlisted input keys **throw `MassAssignmentException`**. The primary key (`id`) is always silently stripped. `static fillable = [...]` on the class also works (untyped) and shadows the option; `hidden`, `visible`, `accessors`, and `appends` have the same typed option forms.
 - Credential columns (`passwordHash`, `rememberToken`) **always throw** on authenticatable models — the framework denies them; listing them in `fillable` does not open them
 - Enforced by `Model.filterFillable()`, called automatically before persistence
 - Always define `fillable` on models that accept user input — this is the second defense layer after Zod validation

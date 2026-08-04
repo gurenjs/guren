@@ -2542,6 +2542,34 @@ type CreateKey<TTable extends TableShape, TBase extends typeof Model> =
   | keyof InferModelInsert<TTable>
   | keyof TCreateFor<TBase>
 
+/**
+ * Named fields a base class contributes to the create payload, such as
+ * `AuthenticatableModel`'s virtual `password`. A plain `Model` base has no
+ * declared createType, so its keys collapse to `string` — guard against that
+ * collapse, or every misspelling would pass the allowlist checks below.
+ */
+type BaseContributedKey<TBase extends typeof Model> =
+  string extends keyof TCreateFor<TBase> & string ? never : keyof TCreateFor<TBase> & string
+
+/** A key valid in a `fillable` allowlist: an insertable column, or a base-contributed field. */
+type FillableKey<TTable extends TableShape, TBase extends typeof Model> =
+  | (keyof InferModelInsert<TTable> & string)
+  | BaseContributedKey<TBase>
+
+/** A key of the record read back from the table. */
+type RecordKey<TTable extends TableShape> = keyof InferModelRecord<TTable> & string
+
+/**
+ * Accessor map keyed by TKey whose functions receive the table's inferred
+ * record. A homomorphic mapped type so TypeScript infers the key union from
+ * the object literal's keys — a plain `Record<string, fn>` constraint fails
+ * here: the accessor functions are context-sensitive, which defers inference
+ * past the point where the key type parameter falls back to its default.
+ */
+type AccessorsShape<TTable extends TableShape, TKey extends string> = {
+  [K in TKey]: (record: InferModelRecord<TTable>) => unknown
+}
+
 type CreateShape<
   TTable extends TableShape,
   TBase extends typeof Model,
@@ -2562,13 +2590,24 @@ type CreateShape<
  * virtual field required. `optionalOnCreate` and `requireOnCreate` reshape the
  * inferred type without any cast.
  *
+ * The allowlist statics (`fillable`, `hidden`, `visible`, `accessors`,
+ * `appends`) can be passed here instead of declared on the subclass: the
+ * option form checks every name against the table's columns (plus fields the
+ * `base` contributes), so a typo is a compile error instead of a silently
+ * ineffective entry. A `static` declaration on the subclass still works and
+ * shadows the option, matching normal class semantics.
+ *
  * @example
- * export class Post extends defineModel(posts) {}
+ * export class Post extends defineModel(posts, {
+ *   fillable: ['title', 'body'],
+ * }) {}
  *
  * export class User extends defineModel(users, {
  *   base: AuthenticatableModel,
  *   optionalOnCreate: ['passwordHash'],
  *   requireOnCreate: ['password'],
+ *   fillable: ['name', 'email', 'password'],
+ *   hidden: ['passwordHash', 'rememberToken'],
  * }) {}
  */
 export function defineModel<
@@ -2576,6 +2615,7 @@ export function defineModel<
   TBase extends typeof Model = typeof Model,
   const TOptional extends keyof InferModelInsert<TTable> = never,
   const TRequire extends CreateKey<TTable, TBase> = never,
+  TAccessorKey extends string = never,
 >(
   table: TTable,
   options: {
@@ -2592,6 +2632,31 @@ export function defineModel<
      * Type-level only.
      */
     requireOnCreate?: readonly TRequire[]
+    /**
+     * Typed form of `static fillable`: mass-assignment allowlist checked
+     * against insertable columns and base-contributed fields.
+     */
+    fillable?: readonly FillableKey<TTable, TBase>[]
+    /**
+     * Typed form of `static hidden`: fields excluded from serialization,
+     * checked against record columns and declared accessors.
+     */
+    hidden?: readonly (RecordKey<TTable> | NoInfer<TAccessorKey>)[]
+    /**
+     * Typed form of `static visible`: serialization allowlist, checked
+     * against record columns and declared accessors.
+     */
+    visible?: readonly (RecordKey<TTable> | NoInfer<TAccessorKey>)[]
+    /**
+     * Typed form of `static accessors`: each function receives the table's
+     * inferred record. Names declared here are what `appends` may reference.
+     */
+    accessors?: AccessorsShape<TTable, TAccessorKey>
+    /**
+     * Typed form of `static appends`: virtual attributes to serialize,
+     * checked against the names declared in `accessors`.
+     */
+    appends?: readonly NoInfer<TAccessorKey>[]
   } = {},
 ): ModelClassWithTable<TTable, TBase, CreateShape<TTable, TBase, TOptional, TRequire>> {
   type ResolvedCreate = CreateShape<TTable, TBase, TOptional, TRequire>
@@ -2604,6 +2669,12 @@ export function defineModel<
   ;(DefinedModel as typeof Model & { recordType: InferModelRecord<TTable> }).recordType =
     {} as InferModelRecord<TTable>
   ;(DefinedModel as typeof Model & { createType: ResolvedCreate }).createType = {} as ResolvedCreate
+
+  if (options.fillable) DefinedModel.fillable = [...options.fillable]
+  if (options.hidden) DefinedModel.hidden = [...options.hidden]
+  if (options.visible) DefinedModel.visible = [...options.visible]
+  if (options.accessors) DefinedModel.accessors = options.accessors as unknown as AccessorDefinitions
+  if (options.appends) DefinedModel.appends = [...options.appends]
 
   return DefinedModel as ModelClassWithTable<TTable, TBase, ResolvedCreate>
 }

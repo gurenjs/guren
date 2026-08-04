@@ -588,6 +588,88 @@ export default function registerRoutes(router: any) {
     }
   })
 
+  it('counts a fillable passed as a defineModel option', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-mass-option-')
+
+    try {
+      await mkdir(join(workspace.dir, 'app/Models'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Models/Post.ts'),
+        `import { defineModel } from '@guren/core'
+import { posts } from '../../db/schema.js'
+
+export class Post extends defineModel(posts, {
+  fillable: ['title', 'body'],
+}) {}`,
+        'utf8',
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const post = report.findings.find(f => f.key === 'mass-assignment:Post')
+      expect(post).toBeDefined()
+      expect(post!.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('counts hidden passed as a defineModel option, with static shadowing it', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-hidden-option-')
+
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'db/schema.ts'),
+        `import { pgTable, text } from 'drizzle-orm/pg-core'
+export const users = pgTable('users', {
+  id: text('id').primaryKey(),
+  email: text('email').notNull(),
+  passwordHash: text('password_hash').notNull(),
+})`,
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'app/Models'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Models/User.ts'),
+        `import { defineModel } from '@guren/core'
+import { users } from '../../db/schema.js'
+
+export class User extends defineModel(users, {
+  hidden: ['passwordHash'],
+}) {}`,
+        'utf8',
+      )
+      // Same option, but a static declaration shadows it — the runtime
+      // serializes with the static list, so the audit must too.
+      await writeFile(
+        join(workspace.dir, 'app/Models/Shadowed.ts'),
+        `import { defineModel } from '@guren/core'
+import { users } from '../../db/schema.js'
+
+export class Shadowed extends defineModel(users, {
+  hidden: ['passwordHash'],
+}) {
+  static override hidden = ['email']
+}`,
+        'utf8',
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const viaOption = report.findings.find(f => f.key === 'hidden-columns:User')
+      expect(viaOption).toBeDefined()
+      expect(viaOption!.status).toBe('pass')
+
+      const shadowed = report.findings.find(f => f.key === 'hidden-columns:Shadowed')
+      expect(shadowed).toBeDefined()
+      expect(shadowed!.status).toBe('warn')
+      expect(shadowed!.message).toContain('passwordHash')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('resolves the table from defineModel, not just from `static table`', async () => {
     // A model that binds its table through defineModel() used to fall out of
     // this check entirely — the table never resolved, so no column was ever
@@ -814,7 +896,7 @@ export const invoices = pgTable('invoices', {
       const hidden = report.findings.find(f => f.key === 'hidden-columns:User')
       expect(hidden).toBeDefined()
       expect(hidden!.status).toBe('warn')
-      expect(hidden!.suggestion).toContain('static visible')
+      expect(hidden!.suggestion).toContain('visible allowlist overrides hidden')
     } finally {
       await workspace.cleanup()
     }

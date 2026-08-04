@@ -240,13 +240,14 @@ await Post.transaction(async (_trx, txPost) => {
 Control which fields can be set through `create()` and `update()`:
 
 ```ts
-export class Post extends defineModel(posts) {
-  // Allowlist — only these fields are assignable
-  static fillable = ['title', 'body', 'status']
-}
+export class Post extends defineModel(posts, {
+  // Allowlist — only these fields are assignable.
+  // Checked against the table's columns: a typo is a compile error.
+  fillable: ['title', 'body', 'status'],
+}) {}
 ```
 
-When `fillable` is set, passing any field outside the allowlist to `create()` or `update()` throws a `MassAssignmentException` (exported from `@guren/core`). The message names the blocked fields, so a typo or an injection attempt fails loudly at the call site instead of being silently discarded and resurfacing later as a confusing NOT NULL violation:
+The same allowlist can be declared as `static fillable = ['title', 'body', 'status']` on the class instead; the option form is preferred because TypeScript verifies every name against the table (a `static` declaration on the subclass shadows the option). When `fillable` is set, passing any field outside the allowlist to `create()` or `update()` throws a `MassAssignmentException` (exported from `@guren/core`). The message names the blocked fields, so a typo or an injection attempt fails loudly at the call site instead of being silently discarded and resurfacing later as a confusing NOT NULL violation:
 
 ```ts
 await Post.create({ title: 'Hello', body: '...', status: 'draft', authorId: 1 })
@@ -592,13 +593,16 @@ Accessors compute virtual attributes when reading records. Mutators transform va
 Define computed properties that are automatically applied when records are fetched:
 
 ```ts
-export class User extends defineModel(users) {
-  static accessors = {
+export class User extends defineModel(users, {
+  accessors: {
+    // `record` is typed as the table's record — field typos are compile errors
     fullName: (record) => `${record.firstName} ${record.lastName}`,
     isAdmin: (record) => record.role === 'admin',
-  }
-}
+  },
+}) {}
 ```
+
+(`static accessors = { ... }` on the class works too, without the typed `record` parameter.)
 
 ```ts
 const user = await User.find(1)
@@ -637,10 +641,12 @@ Control how model records appear in API responses and Inertia props.
 Exclude sensitive fields from serialized output:
 
 ```ts
-export class User extends defineModel(users) {
-  static hidden = ['passwordHash', 'rememberToken']
-}
+export class User extends defineModel(users, {
+  hidden: ['passwordHash', 'rememberToken'],
+}) {}
 ```
+
+Like `fillable`, the option is checked against the table's columns; `static hidden = [...]` also works.
 
 ```ts
 const user = await User.find(1)
@@ -656,9 +662,9 @@ Fields listed in `hidden` are also stripped from the record returned by `auth.us
 Use a whitelist instead of a blacklist:
 
 ```ts
-export class User extends defineModel(users) {
-  static visible = ['id', 'name', 'email']
-}
+export class User extends defineModel(users, {
+  visible: ['id', 'name', 'email'],
+}) {}
 ```
 
 When `visible` is set, only those fields appear. `visible` takes precedence over `hidden`.
@@ -668,14 +674,16 @@ When `visible` is set, only those fields appear. `visible` takes precedence over
 Include accessor-computed values in serialized output:
 
 ```ts
-export class User extends defineModel(users) {
-  static accessors = {
+export class User extends defineModel(users, {
+  accessors: {
     fullName: (record) => `${record.firstName} ${record.lastName}`,
-  }
-  static appends = ['fullName']
-  static hidden = ['firstName', 'lastName']
-}
+  },
+  appends: ['fullName'],
+  hidden: ['firstName', 'lastName'],
+}) {}
 ```
+
+`appends` may only name accessors declared in the same options object — an undeclared name is a compile error.
 
 ```ts
 const json = User.serialize(user)

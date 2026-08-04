@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import type { Statement, Expression, ClassDeclaration, ClassBody, ClassProperty, Node, ObjectProperty } from '@babel/types'
+import type { Statement, Expression, ClassDeclaration, ClassBody, ClassProperty, CallExpression, Node, ObjectProperty } from '@babel/types'
 import { extractDocsTags } from './docs-index'
 import { discoverModelFiles, toPosixRelative, moduleNameFromRelPath } from './discovery'
 import { parseSourceFile } from './parse-cache'
@@ -225,15 +225,62 @@ export function staticStringProperty(classDecl: ClassDeclaration, name: string):
   return property?.value?.type === 'StringLiteral' ? property.value.value : undefined
 }
 
-/** Entries of `static <name> = ['a', 'b']`, or undefined when absent or not an array literal. */
-export function staticStringArrayProperty(classDecl: ClassDeclaration, name: string): string[] | undefined {
-  const property = findStaticClassProperty(classDecl, name)
-  if (property?.value?.type !== 'ArrayExpression') return undefined
+/** String-literal entries of an array-literal node, or undefined for any other node. */
+function stringArrayEntries(node: Node | null | undefined): string[] | undefined {
+  if (node?.type !== 'ArrayExpression') return undefined
   const entries: string[] = []
-  for (const element of property.value.elements) {
+  for (const element of node.elements) {
     if (element?.type === 'StringLiteral') entries.push(element.value)
   }
   return entries
+}
+
+/** Entries of `static <name> = ['a', 'b']`, or undefined when absent or not an array literal. */
+export function staticStringArrayProperty(classDecl: ClassDeclaration, name: string): string[] | undefined {
+  return stringArrayEntries(findStaticClassProperty(classDecl, name)?.value)
+}
+
+/**
+ * The `defineModel(...)` call in an extends clause, however wrapped —
+ * `defineModel(posts)` directly or through a mixin such as
+ * `SoftDeletes(defineModel(posts))`.
+ */
+function findDefineModelCall(node: Node): CallExpression | null {
+  if (node.type !== 'CallExpression') return null
+  if (node.callee.type === 'Identifier' && node.callee.name === 'defineModel') return node
+  for (const argument of node.arguments) {
+    const nested = findDefineModelCall(argument)
+    if (nested) return nested
+  }
+  return null
+}
+
+/** The named property of the class's `defineModel(table, { ... })` options object, if present. */
+export function findDefineModelOption(classDecl: ClassDeclaration, name: string): ObjectProperty | null {
+  if (!classDecl.superClass) return null
+  const call = findDefineModelCall(classDecl.superClass)
+  const options = call?.arguments[1]
+  if (options?.type !== 'ObjectExpression') return null
+  for (const property of options.properties) {
+    if (property.type === 'ObjectProperty' && propertyKeyName(property) === name) return property
+  }
+  return null
+}
+
+/** Entries of a string-array defineModel option (e.g. `fillable: ['a', 'b']`). */
+export function defineModelStringArrayOption(classDecl: ClassDeclaration, name: string): string[] | undefined {
+  return stringArrayEntries(findDefineModelOption(classDecl, name)?.value)
+}
+
+/**
+ * Resolve a string-array model config (`fillable`, `hidden`, `visible`, …)
+ * the way the runtime does: a `static` declaration on the subclass shadows
+ * the same-named defineModel option. Callers that read only the static
+ * spelling silently stop covering models written the option way, so
+ * anything resolving these allowlists goes through here.
+ */
+export function resolveModelStringArrayConfig(classDecl: ClassDeclaration, name: string): string[] | undefined {
+  return staticStringArrayProperty(classDecl, name) ?? defineModelStringArrayOption(classDecl, name)
 }
 
 function analyzeClassHeader(
