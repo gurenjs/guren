@@ -167,7 +167,9 @@ export class Post extends defineModel(posts) {
 - Attaching a Zod schema to a route both validates the request automatically and
   feeds `bunx guren codegen` typed manifests. Details in `.claude/rules/routes-codegen.md`.
 - Middleware: `defineMiddleware(async (c, next) => { ... })` from `@guren/core`;
-  register aliases via `router.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))`.
+  register aliases via `const router = baseRouter.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))`
+  — the return value carries the alias name in the router's type, so dropping it makes
+  a later `.middleware('auth')` fail to compile.
 
 ## Testing
 

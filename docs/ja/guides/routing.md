@@ -43,9 +43,10 @@ router.group('/posts', (posts) => {
 import { Router, requireAuthenticated } from '@guren/core'
 import { requireAdmin } from '@/app/Http/middleware/admin'
 
-export function registerWebRoutes(router: Router): void {
-  router.aliasMiddleware('auth', requireAuthenticated())
-  router.aliasMiddleware('admin', requireAdmin())
+export function registerWebRoutes(baseRouter: Router): void {
+  const router = baseRouter
+    .aliasMiddleware('auth', requireAuthenticated())
+    .aliasMiddleware('admin', requireAdmin())
 
   router.get('/admin', [AdminController, 'index']).middleware('auth', 'admin')
 }
@@ -59,11 +60,15 @@ export function registerWebRoutes(router: Router): void {
 import { Router, requireAuthenticated } from '@guren/core'
 import { requireAdmin } from '@/app/Http/middleware/admin'
 
-export function registerWebRoutes(router: Router): void {
-  router.aliasMiddleware('auth', requireAuthenticated())
-  router.aliasMiddleware('admin', requireAdmin())
+export function registerWebRoutes(baseRouter: Router): void {
+  const router = baseRouter
+    .aliasMiddleware('auth', requireAuthenticated())
+    .aliasMiddleware('admin', requireAdmin())
 }
 ```
+
+> [!IMPORTANT]
+> `aliasMiddleware()` は登録済みのエイリアス名を型に載せた**新しい `Router` 型**を返します。戻り値を受け取らずに呼び出すと登録名が型に伝わらず、後続の `.middleware('auth')` が型エラーになります。上記のように必ずチェーンして受け取ってください。
 
 エイリアスを登録すれば、ミドルウェアが受け入れられる場所ならどこでも文字列名で使えます。
 
@@ -74,11 +79,17 @@ router.get('/admin', [AdminController, 'index']).middleware('auth', 'admin')
 
 ### ミドルウェアグループ
 
-よく使うミドルウェアの組み合わせを一つの名前にまとめられます。
+よく使うミドルウェアの組み合わせを一つの名前にまとめられます。グループのメンバーは、先にエイリアス登録済みの名前でなければなりません。
 
 ```ts
-router.groupMiddleware('web', ['session', 'csrf'])
-router.groupMiddleware('api', ['throttle:60'])
+const router = new Router()
+  .aliasMiddleware('auth', requireAuthenticated())
+  .aliasMiddleware('admin', requireAdmin())
+  .aliasMiddleware('session', createSessionMiddleware())
+  .aliasMiddleware('csrf', createCsrfMiddleware())
+  .aliasMiddleware('throttle', createRateLimitMiddleware({ limit: 60, windowMs: 60_000 }))
+  .groupMiddleware('web', ['session', 'csrf'])
+  .groupMiddleware('api', ['throttle'])
 ```
 
 ミドルウェアグループをルートグループに適用します。

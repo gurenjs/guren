@@ -131,8 +131,8 @@ export default class AppServiceProvider extends ServiceProvider {
 import { Router, requireAuthenticated } from '@guren/core'
 import PostController from '@/app/Http/Controllers/PostController'
 
-export function registerWebRoutes(router: Router): void {
-  router.aliasMiddleware('auth', requireAuthenticated())
+export function registerWebRoutes(baseRouter: Router): void {
+  const router = baseRouter.aliasMiddleware('auth', requireAuthenticated())
   router.bind('post', Post)
 
   router.get('/', [PostController, 'index'])

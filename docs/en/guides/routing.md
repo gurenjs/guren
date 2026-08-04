@@ -87,19 +87,29 @@ Give middleware functions short names so you can reference them as strings:
 import { Router, requireAuthenticated } from '@guren/core'
 import { requireAdmin } from '@/app/Http/middleware/admin'
 
-export function registerWebRoutes(router: Router): void {
-  router.aliasMiddleware('auth', requireAuthenticated())
-  router.aliasMiddleware('admin', requireAdmin())
+export function registerWebRoutes(baseRouter: Router): void {
+  const router = baseRouter
+    .aliasMiddleware('auth', requireAuthenticated())
+    .aliasMiddleware('admin', requireAdmin())
 }
 ```
 
+> [!IMPORTANT]
+> `aliasMiddleware()` returns a **new `Router` type** carrying the alias name it just registered. Call it without capturing the result and the name never reaches the type, so a later `.middleware('auth')` fails to compile. Always chain and assign, as above.
+
 ### Middleware Groups
 
-Bundle related middleware under a single name:
+Bundle related middleware under a single name. Group members must already be registered aliases:
 
 ```ts
-router.groupMiddleware('web', ['session', 'csrf'])
-router.groupMiddleware('api', ['throttle'])
+const router = new Router()
+  .aliasMiddleware('auth', requireAuthenticated())
+  .aliasMiddleware('admin', requireAdmin())
+  .aliasMiddleware('session', createSessionMiddleware())
+  .aliasMiddleware('csrf', createCsrfMiddleware())
+  .aliasMiddleware('throttle', createRateLimitMiddleware({ limit: 60, windowMs: 60_000 }))
+  .groupMiddleware('web', ['session', 'csrf'])
+  .groupMiddleware('api', ['throttle'])
 ```
 
 ### Applying Middleware

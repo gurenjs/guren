@@ -79,7 +79,7 @@ async function auditEnglishDocs(root: string): Promise<void> {
 
   const middleware = await read(root, 'docs/en/guides/middleware.md')
   assert(middleware.includes("import { Router } from '@guren/core'"), 'Middleware guide must use Router from @guren/core.')
-  assert(middleware.includes('router.aliasMiddleware('), 'Middleware guide must use router.aliasMiddleware().')
+  assert(middleware.includes('.aliasMiddleware('), 'Middleware guide must register aliases through the chained .aliasMiddleware() form.')
   assert(!middleware.includes('Route.aliasMiddleware('), 'Middleware guide must not use legacy Route.aliasMiddleware().')
 
   const validation = await read(root, 'docs/en/guides/validation.md')
@@ -321,7 +321,29 @@ async function auditJapaneseDocs(root: string): Promise<void> {
 // are leftovers from the old `@/*` -> `./app/*` mapping and no longer resolve.
 const STALE_APP_ALIAS_PATTERN = /['"]@\/(?:Http|Models|Policies|Events|Jobs|Listeners|Mail|Notifications|Providers|Services|Validators|Console|Exceptions|utils)\//u
 
-async function auditAliasConvention(root: string): Promise<void> {
+// `aliasMiddleware()` returns a *new* Router type carrying the alias name, so a
+// call whose value is thrown away registers the handler at runtime while leaving
+// the name invisible to the type system — every later `.middleware('auth')` then
+// fails to compile. Match a statement that opens with a plain or member
+// expression and drops the result; `const router = base.aliasMiddleware(...)`,
+// chain continuations opening with `.`, and same-line chains ending in another
+// call are all correct and must not match.
+const DISCARDED_ALIAS_MIDDLEWARE_PATTERN = /^[\w$]+(?:\.[\w$]+)*\.aliasMiddleware\((?!.*\)\s*\.\w)/u
+
+const DOC_LINE_RULES: { pattern: RegExp; describe: (location: string) => string }[] = [
+  {
+    pattern: STALE_APP_ALIAS_PATTERN,
+    describe: (location) =>
+      `${location} uses an app-relative alias import (e.g. \`@/Http/...\`); the \`@/\` alias resolves from the project root, so write \`@/app/...\` instead.`,
+  },
+  {
+    pattern: DISCARDED_ALIAS_MIDDLEWARE_PATTERN,
+    describe: (location) =>
+      `${location} discards the aliasMiddleware() return value, so the alias name never reaches the router's type and a later \`.middleware('auth')\` will not compile. Write \`const router = baseRouter.aliasMiddleware(...)\`, or declare the names up front with \`new Router<'auth'>()\`.`,
+  },
+]
+
+async function auditDocLineRules(root: string): Promise<void> {
   const docsDir = join(root, 'docs')
   const entries = await readdir(docsDir, { recursive: true, withFileTypes: true })
 
@@ -332,11 +354,11 @@ async function auditAliasConvention(root: string): Promise<void> {
 
     const filePath = join(entry.parentPath, entry.name)
     const lines = (await readFile(filePath, 'utf8')).split('\n')
-    const hit = lines.findIndex((line) => STALE_APP_ALIAS_PATTERN.test(line))
-    assert(
-      hit === -1,
-      `${relative(root, filePath)}:${hit + 1} uses an app-relative alias import (e.g. \`@/Http/...\`); the \`@/\` alias resolves from the project root, so write \`@/app/...\` instead.`,
-    )
+
+    for (const { pattern, describe } of DOC_LINE_RULES) {
+      const hit = lines.findIndex((line) => pattern.test(line.trim()))
+      assert(hit === -1, describe(`${relative(root, filePath)}:${hit + 1}`))
+    }
   }
 }
 
@@ -344,7 +366,7 @@ async function main(): Promise<void> {
   const root = resolve(process.argv[2] ?? '.')
   await auditEnglishDocs(root)
   await auditJapaneseDocs(root)
-  await auditAliasConvention(root)
+  await auditDocLineRules(root)
   console.log(`Docs audit passed for ${root}`)
 }
 

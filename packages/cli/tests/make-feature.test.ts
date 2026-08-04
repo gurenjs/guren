@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
-import { makeFeature } from '../src/make-feature'
+import { makeFeature, buildRouteRegistrationHint } from '../src/make-feature'
 import { parseFieldsString } from '../src/fields'
 import { createTempWorkspace } from './helpers'
 
@@ -337,5 +337,48 @@ describe('makeFeature', () => {
     } finally {
       await workspace.cleanup()
     }
+  })
+})
+
+describe('buildRouteRegistrationHint', () => {
+  // Scaffolded registrars — the default app template and every `make:module`
+  // module — name their parameter `router`. The printed block is meant to be
+  // pasted in as-is, so it may only reference `router` and names it binds itself.
+  const REGISTRAR_PARAM = 'router'
+
+  it('only references identifiers a scaffolded registrar actually has', () => {
+    const lines = buildRouteRegistrationHint({
+      singular: 'Post', routeName: 'posts', routeVar: 'posts', withAuth: true,
+    })
+
+    const bound = new Set([REGISTRAR_PARAM, 'posts'])
+    for (const declaration of lines.join('\n').matchAll(/\bconst (\w+) =/gu)) {
+      bound.add(declaration[1] as string)
+    }
+
+    for (const receiver of lines.join('\n').matchAll(/^\s*(\w+)\./gmu)) {
+      expect(bound).toContain(receiver[1] as string)
+    }
+  })
+
+  it('binds a fresh name from the registrar parameter instead of shadowing it', () => {
+    const [aliasLine] = buildRouteRegistrationHint({
+      singular: 'Post', routeName: 'posts', routeVar: 'posts', withAuth: true,
+    })
+
+    // Capturing the return value is what puts 'auth' in the router's type; a bare
+    // `router.aliasMiddleware(...)` leaves every `.middleware('auth')` below broken.
+    expect(aliasLine).toMatch(/^const (\w+) = router\.aliasMiddleware\('auth', /u)
+    expect(aliasLine).not.toContain(`const ${REGISTRAR_PARAM} =`)
+  })
+
+  it('omits the alias registration and middleware suffixes when --public', () => {
+    const lines = buildRouteRegistrationHint({
+      singular: 'Post', routeName: 'posts', routeVar: 'posts', withAuth: false,
+    })
+
+    expect(lines.join('\n')).not.toContain('aliasMiddleware')
+    expect(lines.join('\n')).not.toContain(".middleware('auth')")
+    expect(lines[0]).toBe(`${REGISTRAR_PARAM}.group('/posts', (posts) => {`)
   })
 })
