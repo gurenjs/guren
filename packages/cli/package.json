@@ -1,6 +1,6 @@
 {
   "name": "@guren/cli",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -51,7 +51,7 @@
   "dependencies": {
     "@babel/parser": "^7.24.7",
     "@guren/core": "^1.5.0",
-    "@guren/orm": "^2.0.0",
+    "@guren/orm": "^2.1.0",
     "citty": "^0.1.6",
     "consola": "^3.4.2"
   },

@@ -1,5 +1,107 @@
 # @guren/server
 
+## 2.1.0
+
+### Minor Changes
+
+- ee6f1bd: Accept middleware handler functions in `Router.middleware()` and
+  `RouteBuilder.middleware()`, alongside the registered alias names they already
+  took. Four guides across both doc languages — rate limiting, middleware, API
+  tokens, email verification — documented `router.post(path, action).middleware(
+createRateLimitMiddleware())` and `router.middleware(handler).group(...)`, and
+  every one of those snippets failed to compile with `Argument of type
+'MiddlewareHandler' is not assignable to parameter of type 'never'`.
+
+  Both call sites now take alias names, handlers, or a mix. They resolve by kind
+  rather than by position: every name in a route's chain runs before every
+  handler, across groups as well as within one call — so an inline handler on an
+  outer group runs after a named one on an inner group. Use aliases throughout
+  when relative order matters. Aliases are also the only form `guren audit` can
+  report by name; the guards it recognizes (`requireAuthenticated`,
+  `requireGuest`) are detected either way.
+
+  `Router.group()` and `middleware(...).group()` now throw when handed an `async`
+  callback, and `Router.group()` unwinds its prefix if the callback throws. Group
+  scopes are popped synchronously, so a callback that awaited before registering
+  its routes silently lost the prefix or middleware the group was opened with —
+  including auth guards. This was already the behavior for alias names; the fix
+  covers both.
+
+  `requireVerifiedEmail`'s `getUser` option typed its argument as `unknown`, so a
+  callback could not read the context at all. It now receives `{ get<T>(key) }` —
+  Hono's context idiom — with the type argument inferred from the expected
+  return, so the documented `getUser: async (ctx) => ctx.get('user')` compiles
+  without a cast. Callbacks written against the old `unknown` signature remain
+  assignable.
+
+### Patch Changes
+
+- 6feada3: Build emailed auth links from `APP_URL` instead of the request host
+
+  The password reset flow scaffolded by `guren add auth` (and by
+  `create-guren-app --auth`) built its link from the request:
+
+  ```js
+  buildPasswordResetUrl(
+    `${new URL(this.request.url).origin}/reset-password`,
+    token,
+    email
+  );
+  ```
+
+  A server request's URL is reconstructed from the `Host` header, which any
+  client can forge — the framework's own host-authorization middleware says so,
+  reading `ctx.req.header('host') ?? new URL(ctx.req.url).host` as one value. So
+  an unauthenticated attacker could `POST /forgot-password` with someone else's
+  address in the body and `Host: attacker.tld`, and the app would mail _that
+  person_ a genuine, single-use reset link pointing at the attacker's server. The
+  victim sees a legitimate mail from the real service; one click — or one
+  link-prefetching mail scanner — hands over the token, and `ResetPasswordController`
+  accepts it with no session binding or second factor.
+
+  Scaffolds now route every emailed link through a generated `app/Auth/AppUrl.ts`,
+  which reads `APP_URL` and **fails closed in production** rather than falling back
+  to the request. Development keeps working with no configuration. The three email
+  verification sites got the same treatment: they mail the requester's own address,
+  so they were not exploitable, but they were the same pattern.
+
+  Templates also stop disabling host authorization in production. It was
+  `process.env.NODE_ENV === 'production' ? false : { ... }`, which removed the
+  middleware in exactly the environment that needed it; the production branch now
+  derives its allowlist from `APP_URL`'s hostname, and health-check paths stay
+  excluded so load balancers reaching the app by IP are unaffected. When `APP_URL`
+  is not readable at module scope the template warns and leaves the check off
+  rather than throwing — the Cloudflare worker imports the app before wrangler
+  `vars` reach `process.env`, and a throw there would stop the app booting at all.
+  `guren audit` now also flags `hostAuthorization: false`, which it previously
+  walked past while the templates themselves shipped it.
+
+  In `@guren/server`, a `host:*` allowlist entry now means "this host on any
+  **port**". `compileHostMatcher` accepted anything after the colon, so
+  `example.com:*` also matched a `Host` of `example.com:attacker.tld`. The same
+  middleware stops re-parsing the whole request URL to read its path on every
+  request, which it now does in production rather than only in development.
+
+  **Action required for new apps:** `APP_URL` must be set in production. It is
+  already present in the scaffolded `.env.example`. Existing apps are unchanged —
+  if yours has a `ForgotPasswordController` generated before this release, apply
+  the same change by hand, or re-run `guren add auth --force`.
+
+- b27a6cd: Accept controller actions alongside route contract options inside `router.middleware(...)` chains
+
+  `router.middleware('auth').post('/posts', { name: 'posts.store', body: Schema }, [PostController, 'store'])`
+  raised TS2769 even though it worked at runtime: the middleware-scoped builder carried only
+  two overloads per HTTP verb, missing the contract-options + `[Controller, 'method']` variant
+  the router itself has. All five verbs now expose it, so the direct chain no longer needs a
+  `.group()` wrapper to compile.
+
+  Route docs and the `make:feature` next-steps hint now capture the `aliasMiddleware()` return
+  value, which later `.middleware()` calls require — a bare call registers the handler at runtime
+  but leaves the alias name invisible to the type system.
+
+- Updated dependencies [fe70ee7]
+  - @guren/orm@2.1.0
+
 ## 2.0.0
 
 ### Major Changes
