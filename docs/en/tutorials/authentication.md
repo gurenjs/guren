@@ -1,6 +1,6 @@
 # Part 2: Add Authentication
 
-Your blog from [Part 1](./create-blog-post-app.md) lets anyone publish posts. In this part you add user accounts with one command, put post creation behind a login wall, and attach an author to every post.
+As `guren audit` pointed out at the end of [Part 1](./create-blog-post-app.md), anyone can create, edit, and delete posts on your blog right now. In this part you add a full authentication stack with one command, put post mutations behind a login wall, and attach an author to every post. To finish, you run `audit` again and let the machine confirm the warnings are gone.
 
 **What you'll learn:**
 
@@ -8,43 +8,38 @@ Your blog from [Part 1](./create-blog-post-app.md) lets anyone publish posts. In
 - How to protect routes with a middleware alias and route groups
 - How to read the signed-in user in a controller with `this.auth.userOrFail()`
 - How to declare a `belongsTo` relationship and eager-load it with `findWithOrFail`
+- How to extend a resource to ship related data while never leaking `passwordHash`
 
-## 1. Install the auth scaffold
+## 1. Install the authentication scaffolding
 
-From the project root:
+From the project root, run:
 
 ```bash
 bunx guren add auth
 ```
 
-This one command creates a complete session-based login stack:
+This one command generates a complete session-based authentication stack. Grouped by role:
 
-| File | Purpose |
+| Group | Files |
 |------|---------|
-| `app/Http/Controllers/Auth/LoginController.ts` | Login form, sign in (`auth.attempt`), logout |
-| `app/Http/Controllers/DashboardController.ts` | Example protected page |
-| `app/Http/Controllers/ProfileController.ts` | Edit name / email / password |
-| `app/Models/User.ts` | `User` model extending `AuthenticatableModel` |
-| `app/Providers/AuthProvider.ts` | Tells the auth manager to authenticate against `User` |
-| `app/Http/Validators/LoginValidator.ts` | Zod schema for the login form |
-| `app/Http/Validators/ProfileValidator.ts` | Zod schema for profile updates |
-| `resources/js/components/Layout.tsx` | Shared layout with sign-in / log-out navigation |
-| `resources/js/pages/auth/Login.tsx` | Login page |
-| `resources/js/pages/dashboard/Index.tsx` | Dashboard page |
-| `resources/js/pages/profile/Edit.tsx` | Profile page |
-| `routes/auth.ts` | `registerAuthRoutes()` — `/login`, `/logout`, `/dashboard`, `/profile` |
-| `db/seeders/UsersSeeder.ts` | Seeds a demo user (`demo@example.com` / `secret`) |
+| Login / logout | `app/Http/Controllers/Auth/LoginController.ts`, `resources/js/pages/auth/Login.tsx`, `app/Http/Validators/LoginValidator.ts` |
+| Registration | `app/Http/Controllers/Auth/RegisterController.ts`, `resources/js/pages/auth/Register.tsx`, `app/Http/Validators/RegisterValidator.ts` |
+| Password reset | `ForgotPasswordController` / `ResetPasswordController` with pages and validators, `app/Mail/PasswordResetMail.ts`, `app/Providers/MailProvider.ts`, `config/mail.ts` |
+| Example protected pages | `app/Http/Controllers/DashboardController.ts`, `ProfileController.ts` and their pages |
+| Model and provider | `app/Models/User.ts` (extends `AuthenticatableModel`), `app/Providers/AuthProvider.ts` |
+| Routes and layout | `routes/auth.ts` (`/login`, `/register`, `/forgot-password`, `/dashboard`, `/profile`, …), `resources/js/components/Layout.tsx` |
+| Seeder | `db/seeders/UsersSeeder.ts` — a demo user (`demo@example.com` / `secret`) |
 
 It also **edits existing files**:
 
-- `db/schema.ts` — replaces the starter `users` table with one that has `passwordHash` and `rememberToken` columns (still SQLite), and generates the matching migration.
-- `src/app.ts` — registers `AuthProvider` and adds `auth: {}` to `createApp()`, which turns on session and CSRF middleware.
-- `routes/web.ts` — imports and calls `registerAuthRoutes(router)` at the top of your route registrar.
+- `db/schema.ts` — rewrites the starter `users` table into a definition with `passwordHash` and `rememberToken` columns, and generates the matching migration.
+- `src/app.ts` — registers `AuthProvider` and the mail providers, and adds `auth: {}` to `createApp()`, which enables the session and CSRF middleware.
+- `routes/web.ts` — imports and calls `registerAuthRoutes(router)` at the top of the route registrar.
 
 > [!WARNING]
 > `add auth` rewrites the `users` table definition in `db/schema.ts`. If you added custom columns to `users`, re-add them after running the command.
 
-Now apply the users migration, seed the demo account, and refresh the generated types (the scaffold added new pages and routes):
+The users migration is already generated, so apply it, seed the demo account, and refresh the generated types (the scaffolding added new pages and routes):
 
 ```bash
 bun run db:migrate
@@ -56,31 +51,28 @@ bun run codegen
 
 Start the dev server (`bun run dev`) and open [http://localhost:3333/login](http://localhost:3333/login).
 
-1. Sign in with **demo@example.com** / **secret** — you land on `/dashboard`, which greets you by name.
+1. Sign in as **demo@example.com** / **secret** — you land on `/dashboard` with a personalized greeting.
 2. Try a wrong password — the form shows "Invalid credentials."
-3. Open `/dashboard` in a private browser window — you are redirected to `/login`. Protected routes really are protected.
+3. Open `/dashboard` in a private browsing window — you're redirected to `/login`. Protected routes are actually protected.
 
 > [!NOTE]
-> The scaffold ships a login flow, not public self-registration. To add more users during development, add entries to `db/seeders/UsersSeeder.ts` and re-run `bun run db:seed`.
+> The scaffolding also includes self-registration (`/register`) and email-based password reset. This tutorial continues with the seeded demo user, but feel free to create a fresh account through `/register`.
 
-## 3. Protect post creation
+## 3. Protect post mutations
 
-Register an `auth` middleware alias, then attach it to the two routes that mutate posts.
-
-Edit `routes/web.ts`:
+Register an `auth` middleware alias and attach it to the routes that change posts. Edit `routes/web.ts`:
 
 ```ts
 import { Router, requireAuthenticated } from '@guren/core'
-import { registerAuthRoutes } from './auth.js'
 import HomeController from '../app/Http/Controllers/HomeController.js'
 import PostController from '../app/Http/Controllers/PostController.js'
 import { PostPayloadSchema } from '../app/Http/Validators/PostValidator.js'
+import { registerAuthRoutes } from './auth.js'
 
 export function registerWebRoutes(baseRouter: Router): void {
   const router = baseRouter.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
 
   registerAuthRoutes(router)
-
   router.get('/', [HomeController, 'index'])
 
   // Health check endpoint for load balancers and uptime monitors
@@ -90,21 +82,43 @@ export function registerWebRoutes(baseRouter: Router): void {
     posts.get('/', [PostController, 'index']).name('posts.index')
     posts.middleware('auth').get('/create', [PostController, 'create']).name('posts.create')
     posts.get('/:id', [PostController, 'show']).name('posts.show')
-    posts.middleware('auth').post('/', { name: 'posts.store', body: PostPayloadSchema }, [PostController, 'store'])
+    posts.middleware('auth').get('/:id/edit', [PostController, 'edit']).name('posts.edit')
+    posts.middleware('auth').group((authed) => {
+      authed.post('/', { name: 'posts.store', body: PostPayloadSchema }, [PostController, 'store'])
+      authed.put('/:id', { name: 'posts.update', body: PostPayloadSchema }, [PostController, 'update'])
+      authed.delete('/:id', { name: 'posts.destroy' }, [PostController, 'destroy'])
+    })
   })
 }
 ```
 
-`aliasMiddleware` names a middleware once so routes can reference it as `'auth'`. It returns a new `Router` carrying that name in its type, so capture it with `const router = baseRouter.aliasMiddleware(...)` — drop the return value and the later `.middleware('auth')` will not compile. Reading and viewing posts stays public; `/posts/create` and the `POST /posts` submission now redirect guests to `/login`. If you have several protected routes, wrap them in a group instead of tagging each one:
+Three things to note:
+
+- `aliasMiddleware` names the middleware once so routes can refer to it as `'auth'`. **Don't discard the return value** — the alias is also registered at the type level, so unless you capture it (`const router = baseRouter.aliasMiddleware(...)`), later `.middleware('auth')` calls fail to typecheck.
+- Standalone GET routes like the form pages can chain `.middleware('auth').get(...)` directly.
+- Routes that carry route options such as a `body` schema go inside `.middleware('auth').group((authed) => ...)`. Groups nest, so you can layer authentication inside the `/posts` prefix.
+
+Listing and reading posts stay public; creating, editing, and deleting now redirect signed-out visitors to `/login`.
+
+Next, add a second line of defense inside the controller. Add one line at the top of store / update / destroy in `app/Http/Controllers/PostController.ts`:
 
 ```ts
-posts.middleware('auth').group((authed) => {
-  authed.get('/create', [PostController, 'create']).name('posts.create')
-  authed.post('/', { name: 'posts.store', body: PostPayloadSchema }, [PostController, 'store'])
-})
+  async store(): Promise<Response> {
+    await this.auth.userOrFail()
+    // ...
 ```
 
-## 4. Give every post an author
+`this.auth.userOrFail()` returns the signed-in user or responds with 401. This is exactly the line the generator would have emitted if you hadn't passed `--public` in Part 1 — and it keeps the guard in place even if a refactor later strips the route middleware.
+
+## 4. Confirm with audit
+
+```bash
+bunx guren audit
+```
+
+The three A01 warnings from Part 1 (Mutating route has no authentication check) should be gone. `audit` recognizes both route middleware and in-controller `userOrFail` calls, so either one counts as a guard — but having both gives you defense in depth.
+
+## 5. Give every post an author
 
 ### Add the column
 
@@ -120,7 +134,7 @@ export const posts = sqliteTable('posts', {
 })
 ```
 
-Generate the migration, then rebuild the dev database:
+Generate the migration and rebuild your development database:
 
 ```bash
 bun run db:make add_author_to_posts
@@ -128,7 +142,7 @@ bun run db:reset --seed
 ```
 
 > [!WARNING]
-> SQLite cannot add a `NOT NULL` column without a default to a table that already contains rows — the posts you created in Part 1 would block the migration. `db:reset --seed` drops all tables, re-runs every migration from scratch, and re-seeds the demo user. Development data is disposable; never run `db:reset` against a production database.
+> SQLite cannot add a `NOT NULL` column without a default to a table that already has rows — the posts you created in Part 1 would block the migration. `db:reset --seed` drops every table, re-runs all migrations from scratch, and re-seeds the demo user. Development data is disposable; never run `db:reset` against a production database.
 
 ### Declare the relationship
 
@@ -156,13 +170,50 @@ Post.belongsTo('author', () => import('./User.js').then((m) => m.User), 'authorI
 
 Three pieces work together here:
 
-- `Post.belongsTo('author', ...)` registers the relation: follow `posts.authorId` to `users.id`. The lazy `import()` avoids a circular import between `Post` and `User`.
-- `relationTypes` tells TypeScript what eager-loaded data looks like — `post.author` is typed as `PostAuthor | null`.
-- `authorId` joins `fillable` so `Post.create()` may set it.
+- `Post.belongsTo('author', ...)` registers the relation: follow `posts.authorId` to reach `users.id`. The lazy `import()` avoids a circular import between `Post` and `User`.
+- `relationTypes` tells TypeScript the shape of eager-loaded data — `post.author` is typed `PostAuthor | null`.
+- Adding `authorId` to `fillable` lets `Post.create()` set the field.
+
+### Add the author to the resource
+
+As you read in Part 1, `PostResource` decides what reaches the browser. Update `app/Http/Resources/PostResource.ts` to include the author:
+
+```ts
+import { Resource } from '@guren/core'
+import type { PostAuthor, PostRecord } from '../../Models/Post.js'
+
+type PostWithAuthor = PostRecord & { author?: PostAuthor | null }
+
+export interface PostResourceData extends Record<string, unknown> {
+  id: number
+  title: string
+  body: string
+  author: { id: number; name: string } | null
+}
+
+export class PostResource extends Resource<PostWithAuthor> {
+  toArray(): PostResourceData {
+    return {
+      id: this.resource.id as number,
+      title: this.resource.title as string,
+      body: this.resource.body as string,
+      author: this.resource.author
+        ? { id: this.resource.author.id, name: this.resource.author.name }
+        : null,
+    }
+  }
+
+  override toJSON(): PostResourceData {
+    return super.toJSON() as PostResourceData
+  }
+}
+```
+
+This is a load-bearing design point: the loaded author row contains `passwordHash`, and everything you hand to `this.inertia()` is serialized to the page. The resource copies only `id` and `name`, so **the rest of the user record never gets shipped to the browser.** For calls that didn't load the author (like the index), it's simply `null`.
 
 ### Set the author in `store`, load it in `show`
 
-Update the two actions in `app/Http/Controllers/PostController.ts`:
+Update two actions in `app/Http/Controllers/PostController.ts`:
 
 ```ts
 import type { UserRecord } from '../../Models/User.js'
@@ -174,76 +225,60 @@ import type { UserRecord } from '../../Models/User.js'
     const post = await Post.findWithOrFail(id, 'author')
 
     return this.inertia(pages.posts.Show, {
-      post: {
-        id: post.id,
-        title: post.title,
-        body: post.body,
-        createdAt: post.createdAt,
-        author: post.author ? { id: post.author.id, name: post.author.name } : null,
-      },
+      post: new PostResource(post).toJSON(),
     })
   }
 
   async store(): Promise<Response> {
-    const data = await this.validateBody(PostPayloadSchema)
     const user = await this.auth.userOrFail<UserRecord>()
+    const data = await this.validateBody(PostPayloadSchema)
     const post = await Post.create({ ...data, authorId: user.id })
-
-    return this.redirect(post ? `/posts/${post.id}` : '/posts')
+    return this.redirect('/posts/' + post?.id)
   }
 ```
 
-- `this.auth.userOrFail()` returns the signed-in user or responds 401 — a second line of defense behind the route middleware.
-- `findWithOrFail(id, 'author')` eager-loads the relation in the same call that 404s on missing posts.
-- The `show` action builds an explicit payload instead of passing the raw record. This matters: the loaded author row includes `passwordHash`, and everything you pass to `this.inertia()` is serialized into the page. **Pick the fields you send; never forward a whole user record to the browser.**
+- `findWithOrFail(id, 'author')` eager-loads the relation in the same call that returns a 404 when the post is missing.
+- `store` derives `authorId` from `userOrFail<UserRecord>()`. The browser never picks the author, which structurally prevents impersonation.
 
-### Display the author
+### Show the author
 
-Update the `Props` and header in `resources/js/pages/posts/Show.tsx`:
-
-```tsx
-interface Props {
-  post: {
-    id: number
-    title: string
-    body: string
-    createdAt: string
-    author: { id: number; name: string } | null
-  }
-}
-```
+Add an author line to `resources/js/pages/posts/Show.tsx`. `Props` references `PostResourceData`, so the type change follows automatically:
 
 ```tsx
-      <p className="text-sm text-zinc-500">
-        {new Date(post.createdAt).toLocaleDateString()} · {post.author?.name ?? 'Unknown author'}
-      </p>
+      <p className="text-sm text-zinc-500">by {post.author?.name ?? 'Unknown author'}</p>
 ```
 
-The `Props` shape changed, so refresh the manifest: `bun run codegen` (automatic if `bun run dev` is watching).
+`PostResourceData` changed shape, so refresh the manifests: `bun run codegen` (automatic while `bun run dev` is watching).
 
-## 5. Checkpoint: write a post as the demo user
+## 6. Checkpoint: post as the demo user
 
-1. Signed out, click **New post** on `/posts` — you are redirected to `/login`.
-2. Sign in as **demo@example.com** / **secret**, then create a post.
+1. Signed out, click **New Post** on `/posts` — you're redirected to `/login`.
+2. Sign in as **demo@example.com** / **secret** and create a post.
 3. Open the post — the byline shows "Demo User".
 
-## Common problems
+## Common trip-ups
 
-**"Invalid credentials." with the demo account.**
-The seeder never ran, so the `users` table is empty. Run `bun run db:seed`.
+**"Invalid credentials." for the demo account.**
+The seeder never ran and the `users` table is empty. Run `bun run db:seed`.
 
-**`add_author_to_posts` migration fails (`NOT NULL constraint` / cannot add column).**
-Existing rows in `posts` can't satisfy the new `NOT NULL` column. Run `bun run db:reset --seed` to rebuild the dev database.
+**Type error on `'auth'` in `.middleware('auth')` (`not assignable to parameter of type 'never'`).**
+You discarded the return value of `aliasMiddleware`. The alias is recorded in the return type, so capture it — `const router = baseRouter.aliasMiddleware('auth', ...)` — and use that `router` afterwards.
+
+**Type error on `.middleware('auth').post('/', { name: ..., body: ... }, [Controller, 'store'])`.**
+Register routes that carry route options inside `.middleware('auth').group((authed) => ...)` as shown in step 3.
+
+**The `add_author_to_posts` migration fails (`NOT NULL constraint` / cannot add column).**
+Existing `posts` rows can't satisfy the new `NOT NULL` column. Rebuild the development database with `bun run db:reset --seed`.
 
 **`pages.auth.Login` or `pages.dashboard.Index` missing after `add auth`.**
 Codegen hasn't seen the new pages. Run `bun run codegen` or restart `bun run dev`.
 
-**Every visit to `/posts/create` bounces to `/login`, even after signing in.**
-Check that `src/app.ts` gained `auth: {}` in `createApp()` and `AuthProvider` in `providers` — `add auth` patches this automatically, but verify if you had customized the file.
+**Signed in, but `/posts/create` keeps bouncing to `/login`.**
+Check that `createApp()` in `src/app.ts` received `auth: {}` and that `AuthProvider` is in `providers` — `add auth` patches this automatically, but verify if you had customized the file.
 
-**TypeScript says `authorId` is missing when calling `Post.create`.**
-You updated the schema but not the model: add `authorId` to `fillable` and re-check the `store` action passes it.
+**TypeScript complains about a missing `authorId` in the `Post.create` call.**
+You updated the schema but not the model: add `authorId` to `fillable` and make sure the `store` action passes it.
 
 ## Next
 
-Posts have authors — now let readers talk back. Continue with [Part 3: Relationships: Comments](./relationships.md).
+Posts have authors, and `audit` is quiet — now let's give readers a voice. Continue to [Part 3: Relationships: Comments](./relationships.md).

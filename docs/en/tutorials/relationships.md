@@ -2,17 +2,20 @@
 
 Your blog has posts and authors from [Part 2](./authentication.md). In this final part, readers get a voice: you add a `comments` table that belongs to both a post and a user, wire up the model relationships, and build a comment form on the post page.
 
+Part 1's `add resource` generated a whole CRUD in one go, but a feature that hangs off posts — like comments — doesn't need standalone pages. For cases like this, the Guren way is to **scaffold the skeleton with the single-purpose `make:*` generators and write the domain shape yourself**. To finish, you derive spec views from the completed code, record the architectural decision, and connect everything in the Docs Graph.
+
 **What you'll learn:**
 
 - How to model a table that references two parents (`postId`, `authorId`)
+- How to scaffold with `make:model` / `make:validator` / `make:resource` / `make:controller` and flesh out the results
 - How to declare `hasMany` and `belongsTo` relationships with typed results
 - How to eager-load relations with `findWithOrFail` and query-builder `.with()`
 - How to post a nested resource (`POST /posts/:id/comments`) from an Inertia form
-- How to connect generated specs and an architecture decision to the finished code in the Docs Graph
+- How to connect generated specs and architecture decisions to the finished code with the Docs Graph
 
 ## 1. Define the comments table
 
-Add the table to `db/schema.ts`, below `posts`:
+The data shape is not a generator's job — you declare it in the schema, and everything else derives from there. Add a table below `posts` in `db/schema.ts`:
 
 ```ts
 export const comments = sqliteTable('comments', {
@@ -24,16 +27,29 @@ export const comments = sqliteTable('comments', {
 })
 ```
 
-`onDelete: 'cascade'` means deleting a post removes its comments too. Since this is a brand-new table, a plain migration works — no reset needed this time:
+`onDelete: 'cascade'` means deleting a post deletes its comments with it. This is a brand-new table, so a normal migration is enough — no reset needed:
 
 ```bash
 bun run db:make create_comments_table
 bun run db:migrate
 ```
 
-## 2. Create the Comment model
+## 2. Scaffold the skeleton
 
-Create `app/Models/Comment.ts`:
+Generate the four layers the comment feature needs with single-purpose generators:
+
+```bash
+bunx guren make:model Comment
+bunx guren make:validator Comment --fields "body:text"
+bunx guren make:resource Comment
+bunx guren make:controller Comment
+```
+
+Each lands in the right place with the project's conventions: `app/Models/Comment.ts`, `app/Http/Validators/CommentValidator.ts`, `app/Http/Resources/CommentResource.ts`, and `app/Http/Controllers/CommentController.ts`. Now flesh each file out with the comment-specific domain knowledge.
+
+## 3. Finish the model: relationships
+
+Add the mass-assignment allowlist and two `belongsTo` relations to the generated `app/Models/Comment.ts`:
 
 ```ts
 import { defineModel, type BelongsToRecord } from '@guren/core'
@@ -42,13 +58,14 @@ import type { PostRecord } from './Post.js'
 import type { UserRecord } from './User.js'
 
 export type CommentRecord = typeof comments.$inferSelect
+export type CommentAuthor = Pick<UserRecord, 'id' | 'name'>
 
 export class Comment extends defineModel(comments) {
   static fillable = ['postId', 'authorId', 'body']
 
   static override relationTypes: {
     post: BelongsToRecord<PostRecord>
-    author: BelongsToRecord<Pick<UserRecord, 'id' | 'name'>>
+    author: BelongsToRecord<CommentAuthor>
   } = {
     post: null,
     author: null,
@@ -87,73 +104,66 @@ Post.belongsTo('author', () => import('./User.js').then((m) => m.User), 'authorI
 Post.hasMany('comments', () => import('./Comment.js').then((m) => m.Comment), 'postId', 'id')
 ```
 
-`hasMany('comments', ..., 'postId', 'id')` reads as: comments whose `postId` matches this post's `id`. With `relationTypes` declared, `post.comments` is typed as `CommentRecord[]` when eager-loaded.
+`hasMany('comments', ..., 'postId', 'id')` reads as "the comments whose `postId` matches this post's `id`". With `relationTypes` declared, eager-loaded `post.comments` is typed `CommentRecord[]`.
 
-## 3. Load comments in the controller
+## 4. Finish the validator and the resource
 
-Update `show` in `app/Http/Controllers/PostController.ts` and add a validator import:
-
-```ts
-import { Comment } from '../../Models/Comment.js'
-
-// inside PostController:
-
-  async show(): Promise<Response> {
-    const { id } = this.validateParams(PostIdParamSchema)
-    const post = await Post.findWithOrFail(id, 'author')
-    const comments = await Comment.where('postId', id)
-      .with('author')
-      .orderBy('createdAt', 'desc')
-      .get()
-
-    return this.inertia(pages.posts.Show, {
-      post: {
-        id: post.id,
-        title: post.title,
-        body: post.body,
-        createdAt: post.createdAt,
-        author: post.author ? { id: post.author.id, name: post.author.name } : null,
-      },
-      comments: comments.map((comment) => ({
-        id: comment.id,
-        body: comment.body,
-        createdAt: comment.createdAt,
-        author: comment.author ? { name: comment.author.name } : null,
-      })),
-    })
-  }
-```
-
-`Comment.where(...)` returns a query builder, so you can chain `.with('author')` (eager-load each comment's author in a batched lookup, not one query per comment) with ordering. As in Part 2, map the records to an explicit payload so no `passwordHash` ever reaches the browser.
-
-## 4. Accept new comments
-
-Create `app/Http/Validators/CommentValidator.ts`:
+`make:validator` generated three schemas (payload, ID param, list query). For now you only need `CommentPayloadSchema` — the others wait for the day comments get pages of their own. Give the message a human touch in `app/Http/Validators/CommentValidator.ts`:
 
 ```ts
-import { z } from 'zod'
-
 export const CommentPayloadSchema = z.object({
   body: z.string().trim().min(1, 'Comment is required.'),
 })
-
-export const CommentPostParamSchema = z.object({
-  id: z.coerce.number().int().positive(),
-})
 ```
 
-Create `app/Http/Controllers/CommentController.ts`:
+The `make:resource` skeleton contains a comment telling you to map the remaining columns. Finish `app/Http/Resources/CommentResource.ts` into the shape of a comment with its author:
+
+```ts
+import { Resource } from '@guren/core'
+import type { CommentAuthor, CommentRecord } from '../../Models/Comment.js'
+
+type CommentWithAuthor = CommentRecord & { author?: CommentAuthor | null }
+
+export interface CommentResourceData extends Record<string, unknown> {
+  id: number
+  body: string
+  createdAt: string
+  author: { name: string } | null
+}
+
+export class CommentResource extends Resource<CommentWithAuthor> {
+  toArray(): CommentResourceData {
+    return {
+      id: this.resource.id as number,
+      body: this.resource.body as string,
+      createdAt: this.resource.createdAt as string,
+      author: this.resource.author ? { name: this.resource.author.name } : null,
+    }
+  }
+
+  override toJSON(): CommentResourceData {
+    return super.toJSON() as CommentResourceData
+  }
+}
+```
+
+Same pattern as `PostResource` in Part 2: only `name` is copied from the author, so `passwordHash` never reaches the browser.
+
+## 5. Implement the controller and register the route
+
+Replace the placeholder `make:controller` generated with the comment-creation action (`app/Http/Controllers/CommentController.ts`):
 
 ```ts
 import { Controller } from '@guren/core'
 import { Comment } from '../../Models/Comment.js'
 import { Post } from '../../Models/Post.js'
 import type { UserRecord } from '../../Models/User.js'
-import { CommentPayloadSchema, CommentPostParamSchema } from '../Validators/CommentValidator.js'
+import { CommentPayloadSchema } from '../Validators/CommentValidator.js'
+import { PostIdParamSchema } from '../Validators/PostValidator.js'
 
 export default class CommentController extends Controller {
   async store(): Promise<Response> {
-    const { id } = this.validateParams(CommentPostParamSchema)
+    const { id } = this.validateParams(PostIdParamSchema)
     const post = await Post.findOrFail(id)
     const data = await this.validateBody(CommentPayloadSchema)
     const user = await this.auth.userOrFail<UserRecord>()
@@ -169,62 +179,82 @@ export default class CommentController extends Controller {
 }
 ```
 
-`Post.findOrFail(id)` guards against commenting on a post that doesn't exist, and `userOrFail` guarantees an author.
+The route's `:id` is the post's ID, so we reuse `PostIdParamSchema` from `PostValidator`. `Post.findOrFail(id)` prevents comments on posts that don't exist, and `userOrFail` guarantees an author.
 
-Register the route inside the existing `/posts` group in `routes/web.ts`:
+Register the route inside the auth group in `routes/web.ts` (the `authed` group from Part 2 — routes with a `body` schema live there):
 
 ```ts
 import CommentController from '../app/Http/Controllers/CommentController.js'
 import { CommentPayloadSchema } from '../app/Http/Validators/CommentValidator.js'
 
-  // inside router.group('/posts', (posts) => { ... }):
-    posts.middleware('auth').post('/:id/comments', { name: 'comments.store', body: CommentPayloadSchema }, [CommentController, 'store'])
+    // inside posts.middleware('auth').group((authed) => { ... }):
+      authed.post('/:id/comments', { name: 'comments.store', body: CommentPayloadSchema }, [CommentController, 'store'])
 ```
 
-## 5. Add the comment section to the page
+## 6. Load comments in the controller
+
+Update `show` in `app/Http/Controllers/PostController.ts`:
+
+```ts
+import { Comment } from '../../Models/Comment.js'
+import { CommentResource } from '../Resources/CommentResource.js'
+
+// inside PostController:
+
+  async show(): Promise<Response> {
+    const { id } = this.validateParams(PostIdParamSchema)
+    const post = await Post.findWithOrFail(id, 'author')
+    const comments = await Comment.where('postId', id)
+      .with('author')
+      .orderBy('createdAt', 'desc')
+      .get()
+
+    return this.inertia(pages.posts.Show, {
+      post: new PostResource(post).toJSON(),
+      comments: comments.map((comment) => new CommentResource(comment).toJSON()),
+    })
+  }
+```
+
+`Comment.where(...)` returns a query builder, so you can chain `.with('author')` (which eager-loads every comment's author in a single query rather than one query per comment) and the ordering. Each comment passes through `CommentResource` on its way to the page.
+
+## 7. Add the comment section to the page
 
 Replace `resources/js/pages/posts/Show.tsx` with a version that lists comments and shows a form to signed-in users:
 
 ```tsx
 import { Link, useForm, usePage } from '@inertiajs/react'
+import type { CommentResourceData } from '@/app/Http/Resources/CommentResource'
+import type { PostResourceData } from '@/app/Http/Resources/PostResource'
 import { route } from '@/.guren/routes.gen'
 
-interface CommentData {
-  id: number
-  body: string
-  createdAt: string
-  author: { name: string } | null
-}
-
 interface Props {
-  post: {
-    id: number
-    title: string
-    body: string
-    createdAt: string
-    author: { id: number; name: string } | null
-  }
-  comments: CommentData[]
+  post: PostResourceData
+  comments: CommentResourceData[]
 }
 
-export default function PostsShow({ post, comments }: Props) {
+export default function PostShow({ post, comments }: Props) {
   const { props } = usePage<{ auth?: { user?: { name?: string } | null } }>()
   const isAuthenticated = Boolean(props.auth?.user)
   const form = useForm({ body: '' })
 
   return (
     <main className="mx-auto max-w-3xl space-y-6 px-6 py-12">
-      <Link href={route('posts.index')} className="text-sm text-zinc-500 hover:underline">
-        &larr; Back to posts
-      </Link>
+      <Link href={route('posts.index')}>Back</Link>
       <h1 className="text-3xl font-semibold">{post.title}</h1>
-      <p className="text-sm text-zinc-500">
-        {new Date(post.createdAt).toLocaleDateString()} · {post.author?.name ?? 'Unknown author'}
-      </p>
-      <div className="space-y-4 leading-relaxed">
-        {post.body.split('\n').map((paragraph, index) => (
-          <p key={index}>{paragraph}</p>
-        ))}
+      <p className="text-sm text-zinc-500">by {post.author?.name ?? 'Unknown author'}</p>
+      <p>{post.body}</p>
+      <div className="flex gap-4">
+        <Link href={route('posts.edit', { id: post.id })}>Edit</Link>
+        <Link
+          href={route('posts.destroy', { id: post.id })}
+          method="delete"
+          as="button"
+          onBefore={() => window.confirm('Delete this post?')}
+          className="text-red-600"
+        >
+          Delete
+        </Link>
       </div>
 
       <section className="border-t pt-6">
@@ -291,24 +321,24 @@ export default function PostsShow({ post, comments }: Props) {
 }
 ```
 
-Notes:
+Highlights:
 
-- `usePage().props.auth?.user` reads the shared auth props that the auth scaffold from Part 2 exposes to every page — that's how the page decides between the form and the sign-in prompt.
-- On success the redirect re-renders the page with fresh comments, and `form.reset()` clears the textarea.
+- `usePage().props.auth?.user` reads the shared auth props that Part 2's scaffolding exposes to every page — that's how the page decides between the form and the sign-in hint.
+- On success, the redirect re-renders the page with fresh comments, and `form.reset()` clears the textarea.
 
-`Props` changed and a route was added, so refresh the manifests: `bun run codegen` (automatic under `bun run dev`).
+Close the loop as usual: `bun run codegen` (automatic under `bun run dev`) picks up the `comments.store` route and the new `Props`, and `bunx guren check` verifies the wiring (you'll see one more missing-test warning — for `CommentController` — proof that `check` is paying attention).
 
-## 6. Checkpoint: leave a comment
+## 8. Checkpoint: leave a comment
 
-1. Open a post while signed out — you see the comment list and a "Sign in to leave a comment" prompt.
-2. Sign in (**demo@example.com** / **secret**), open the post, submit an empty comment — "Comment is required." appears.
-3. Write a real comment — the page reloads with your comment on top, attributed to "Demo User".
+1. Signed out, open a post — you see the comment list and a "Sign in to leave a comment" hint.
+2. Sign in (**demo@example.com** / **secret**), open a post, submit an empty comment — "Comment is required." appears.
+3. Write a real comment — the page reloads and your comment shows at the top, attributed to "Demo User".
 
-That's the full mini blog: public reading, authenticated writing, related data across three tables.
+Your mini blog is complete: public reading, authenticated writing, and related data across three tables.
 
-## 7. Map what you built in the Docs Graph
+## 9. Connect what you built in the Docs Graph
 
-The running application proves **what** the comment flow does. Now generate the views that summarize its structure and record **why** comment authorship works this way.
+The running app proves what the comment flow *does*. Now generate the views that summarize its structure, and record *why* comment authorship works this way.
 
 First, derive the ER, domain, screen, and module views from the code:
 
@@ -316,20 +346,20 @@ First, derive the ER, domain, screen, and module views from the code:
 bunx guren spec:generate
 ```
 
-The generated Markdown files live under `docs/spec/`. In particular, `er.md` shows the three tables and their foreign keys, while `domain.md` shows the model relationships you declared.
+The generated Markdown lands under `docs/spec/`. In particular `er.md` shows your three tables and their foreign keys, and `domain.md` shows the model relationships you declared here.
 
-Next, create an architecture decision linked to the `Comment` entity:
+Next, create an architecture decision tied to the `Comment` entity:
 
 ```bash
 bunx guren make:adr "Comments require authenticated authors" --entity Comment
 ```
 
-Open the path printed by the command (in a fresh app it starts with `docs/adr/0002-`) and replace the three placeholder sections with:
+Open the path the command printed (it starts with `docs/adr/0002-` in a fresh app) and replace the three placeholders:
 
 ```md
 ## Context
 
-Comments are public to read, but anonymous writes would leave no reliable identity for moderation or attribution.
+Comments are publicly readable, but allowing anonymous writes would leave no trusted identity for moderation and attribution.
 
 ## Decision
 
@@ -337,51 +367,55 @@ Creating a comment requires an authenticated session. The controller stores the 
 
 ## Consequences
 
-Every comment has an accountable author. Signed-out readers can still view comments, but they must sign in before posting one.
+Every comment has an accountable author. Signed-out readers can still read comments but must sign in to post one.
 ```
 
-Check both kinds of project knowledge before relying on them:
+Validate both the declarations and the derived views before trusting the project knowledge:
 
 ```bash
 bunx guren check --docs
 bunx guren check --spec
 ```
 
-`check --docs` verifies that the ADR still names a real `Comment` model and related code paths. `check --spec` verifies that the committed generated views still match the code.
+`check --docs` verifies the ADR points at a real `Comment` model and code paths. `check --spec` verifies the committed views still match the code.
 
-Ask for the `Comment` neighborhood in the terminal:
+Query the neighborhood of `Comment` from the terminal — there are two lenses:
 
 ```bash
 bunx guren docs:graph --entity Comment
+bunx guren context Comment
 ```
 
-Finally, keep `bun run dev` running and open [http://localhost:3333/_guren/docs](http://localhost:3333/_guren/docs). Find the new ADR and `Comment` entity, follow the edge to the related controller, then open the generated ER and domain views. You are reading the same verified relations through a visual surface instead of the CLI.
+`docs:graph` shows the documentation-side neighborhood (this ADR *governs* `Comment`), while `context Comment` assembles the code-side picture of the entity — its model columns and relations, routes, controller, resource, and the linked ADR — on one screen. It's the first command you (or an AI agent) will run when returning to this feature six months from now.
 
-The viewer is local, read-only, and development-only. The [Spec-Anchored Development guide](../guides/spec-anchored.md) covers the document format, trust metadata, drift checks, and agent-facing workflows in depth.
+Finally, with `bun run dev` still running, open [http://localhost:3333/_guren/docs](http://localhost:3333/_guren/docs). Find your new ADR and the `Comment` entity, follow the edges to the related controller, and open the derived ER and domain views. You're reading the same verified relationships the CLI reported, now as a visual surface.
 
-## Common problems
+The viewer is local-only, read-only, and dev-only. For the document format, trust metadata, drift verification, and agent workflows, see [Spec-Anchored Development](../guides/spec-anchored.md).
 
-**Comments render with "Unknown" authors.**
-The `.with('author')` call is missing in `PostController.show`, or `Comment.belongsTo('author', ...)` was never registered (it must run at module load, after the class definition).
+## Common trip-ups
+
+**Comment authors show as "Unknown".**
+The `.with('author')` call is missing in `PostController.show`, or `Comment.belongsTo('author', ...)` isn't registered (it must run at module load, after the class definition).
 
 **Submitting a comment redirects to `/login` even though you're signed in.**
-Sessions were reset (with the in-memory session driver, either a dev server restart or a hot reload from editing backend code) — sign in again. If it persists, confirm the route has `.middleware('auth')` and not a typo'd alias name.
+Your session reset (in-memory session driver plus a dev-server restart, or a hot reload triggered by backend edits) — sign in again. If it persists, confirm the route sits inside the `authed` group and the alias name has no typo.
 
 **`no such table: comments`.**
-The migration wasn't applied. Run `bun run db:make create_comments_table` then `bun run db:migrate`.
+The migration didn't run. `bun run db:make create_comments_table`, then `bun run db:migrate`.
 
 **`FOREIGN KEY constraint failed` when creating a comment.**
 The `postId` or `authorId` doesn't exist — usually stale dev data after a partial reset. Run `bun run db:reset --seed` and recreate a post.
 
-**`route('comments.store', ...)` is a type error.**
+**Type error on `route('comments.store', ...)`.**
 The route manifest predates the new route. Run `bun run codegen`.
 
 ## Where to go next
 
-You've touched every layer of a Guren app. Deepen each one:
+You've now touched every layer of a Guren app. Go deeper on each:
 
 - [Routing](../guides/routing.md) — route groups, model binding, named routes, middleware
 - [Controllers](../guides/controllers.md) — responses, validation helpers, dependency resolution
 - [Database & ORM](../guides/database.md) — scopes, relation counts, transactions, polymorphic relations
 - [Authorization](../guides/authorization.md) — policies and gates for "only the author can edit"
-- [Testing](../guides/testing.md) — lock in everything you built with controller and HTTP tests
+- [Testing](../guides/testing.md) — close the test gaps `guren check` keeps pointing out, with controller and HTTP tests
+- [CLI reference](../guides/cli.md) — the full picture of the `add` / `make:*` / `check` / `audit` commands you used in this series
