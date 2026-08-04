@@ -105,7 +105,7 @@ export async function generateGuidelines(options: GuidelinesOptions = {}): Promi
   lines.push("- Protect mutating routes: wrap in `router.middleware('auth').group(...)` or call `this.auth.userOrFail()` (optional reads like `auth.user()` do not enforce)")
   lines.push('- Never interpolate values into raw SQL (`sql.raw`) — drizzle `sql` templates bind values safely')
   lines.push('- Never hardcode credentials — read secrets via `process.env`')
-  lines.push('- Declare `static fillable` on models to whitelist mass-assignable columns')
+  lines.push('- Whitelist mass-assignable columns on every model — prefer the typed `defineModel(table, { fillable: [...] })` option (column typos become compile errors); `static fillable = [...]` also works')
   lines.push('')
 
   // Resources

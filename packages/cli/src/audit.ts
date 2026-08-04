@@ -20,8 +20,9 @@ import {
   classUsesAuthenticatableBase,
   extractClassDeclaration,
   extractTableIdentifier,
-  findStaticClassProperty,
   firstClassDeclaration,
+  hasModelConfig,
+  resolveModelStringArrayConfig,
 } from './model-parser'
 import { parseSourceFile } from './parse-cache'
 import { parseSchemaTableColumns } from './schema-parser'
@@ -730,20 +731,10 @@ function parseModelSerializationInfo(source: string, filePath: string): ModelSer
 
     info.tableIdentifier = extractTableIdentifier(classDecl) ?? info.tableIdentifier
 
-    for (const member of classDecl.body.body) {
-      if (member.type !== 'ClassProperty' || !member.static || member.key.type !== 'Identifier') continue
-
-      if (
-        (member.key.name === 'hidden' || member.key.name === 'visible') &&
-        member.value?.type === 'ArrayExpression'
-      ) {
-        const entries: string[] = []
-        for (const element of member.value.elements) {
-          if (element?.type === 'StringLiteral') entries.push(element.value)
-        }
-        info[member.key.name] = entries
-      }
-    }
+    // Static declaration or defineModel option — resolved with the runtime's
+    // shadowing order (static wins).
+    info.hidden = resolveModelStringArrayConfig(classDecl, 'hidden') ?? info.hidden
+    info.visible = resolveModelStringArrayConfig(classDecl, 'visible') ?? info.visible
   }
 
   return info
@@ -763,7 +754,7 @@ async function auditModels(cwd: string, findings: AuditFinding[]): Promise<void>
     // protected, and a modifier-prefixed fillable must still count.
     const ast = parseSourceFile(source, filePath)
     const classDecl = ast ? firstClassDeclaration(ast.program.body) : null
-    const hasFillable = classDecl ? findStaticClassProperty(classDecl, 'fillable') !== null : false
+    const hasFillable = classDecl ? hasModelConfig(classDecl, 'fillable') : false
     const isAuthenticatable = classDecl ? classUsesAuthenticatableBase(classDecl) : false
 
     // Authenticatable models are structurally protected: their credential
@@ -782,7 +773,7 @@ async function auditModels(cwd: string, findings: AuditFinding[]): Promise<void>
             : `${name} declares no fillable — all columns except 'id' are mass-assignable.`,
         hasFillable || isAuthenticatable
           ? undefined
-          : `Add 'static fillable = [...]' to ${relPath} to whitelist assignable columns.`,
+          : `Add a fillable allowlist to ${relPath} — the typed 'defineModel(table, { fillable: [...] })' option or 'static fillable = [...]'.`,
         relPath,
       ),
     )
@@ -814,8 +805,8 @@ async function auditModels(cwd: string, findings: AuditFinding[]): Promise<void>
         exposed.length === 0
           ? undefined
           : visibleActive
-            ? `Remove ${exposed.map((c) => `'${c}'`).join(', ')} from 'static visible' in ${relPath} (a non-empty visible allowlist overrides hidden).`
-            : `Add ${exposed.map((c) => `'${c}'`).join(', ')} to 'static hidden = [...]' in ${relPath}.`,
+            ? `Remove ${exposed.map((c) => `'${c}'`).join(', ')} from the visible allowlist in ${relPath} (a non-empty visible allowlist overrides hidden).`
+            : `Add ${exposed.map((c) => `'${c}'`).join(', ')} to the hidden list in ${relPath} — the typed 'defineModel(table, { hidden: [...] })' option or 'static hidden = [...]'.`,
         relPath,
       ),
     )

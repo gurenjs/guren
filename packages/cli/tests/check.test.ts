@@ -886,3 +886,39 @@ export const posts = pgTable('posts', { createdAt: timestamp('created_at') })
     })
   })
 })
+
+describe('mass-assignment config via defineModel options', () => {
+  it('flags a denied credential column listed in the fillable option', async () => {
+    const report = await withWorkspace({
+      'app/Models/User.ts': `import { AuthenticatableModel, defineModel } from '@guren/core'
+import { users } from '../../db/schema.js'
+
+export class User extends defineModel(users, {
+  base: AuthenticatableModel,
+  fillable: ['name', 'email', 'passwordHash'],
+}) {}`,
+    })
+
+    const denied = report.checks.find(c => c.key === 'mass-assignment-denied:User')
+    expect(denied).toBeDefined()
+    expect(denied!.status).toBe('fail')
+    expect(denied!.message).toContain('passwordHash')
+  })
+
+  it('lets a static fillable shadow the option, matching the runtime', async () => {
+    const report = await withWorkspace({
+      'app/Models/User.ts': `import { AuthenticatableModel, defineModel } from '@guren/core'
+import { users } from '../../db/schema.js'
+
+export class User extends defineModel(users, {
+  base: AuthenticatableModel,
+  fillable: ['name', 'passwordHash'],
+}) {
+  static override fillable = ['name', 'email']
+}`,
+    })
+
+    const denied = report.checks.find(c => c.key === 'mass-assignment-denied:User')
+    expect(denied).toBeUndefined()
+  })
+})

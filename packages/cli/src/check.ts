@@ -21,7 +21,7 @@ import {
   extractTableIdentifier,
   findStaticClassProperty,
   firstClassDeclaration,
-  staticStringArrayProperty,
+  resolveModelStringArrayConfig,
   staticStringProperty,
 } from './model-parser'
 import { checkConsoleCommandRegistration } from './console-check'
@@ -409,7 +409,7 @@ async function checkMassAssignmentConfig(
   }
 
   if (classUsesAuthenticatableBase(classDecl)) {
-    const fillable = staticStringArrayProperty(classDecl, 'fillable')
+    const fillable = resolveModelStringArrayConfig(classDecl, 'fillable')
     if (fillable) {
       const passwordField = staticStringProperty(classDecl, 'passwordField') ?? 'password'
       const hashField = staticStringProperty(classDecl, 'passwordHashField') ?? 'passwordHash'

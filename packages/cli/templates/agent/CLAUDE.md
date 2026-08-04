@@ -157,9 +157,9 @@ export class PostController extends Controller {
 }
 
 // app/Models/Post.ts
-export class Post extends defineModel(posts) {
-  static fillable = ['title', 'body', 'authorId']
-}
+export class Post extends defineModel(posts, {
+  fillable: ['title', 'body', 'authorId'],  // typed against the table's columns
+}) {}
 ```
 
 - Models: `await Post.findOrFail(id)` throws a 404; `Post.where(...)` starts a query

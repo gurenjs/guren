@@ -590,13 +590,16 @@ export class Post extends defineModel(posts) {
 レコード取得時に自動的に適用される計算プロパティを定義します。
 
 ```ts
-export class User extends defineModel(users) {
-  static accessors = {
+export class User extends defineModel(users, {
+  accessors: {
+    // `record` はテーブルのレコード型 — フィールド名のタイプミスはコンパイルエラー
     fullName: (record) => `${record.firstName} ${record.lastName}`,
     isAdmin: (record) => record.role === 'admin',
-  }
-}
+  },
+}) {}
 ```
+
+（クラス側の `static accessors = { ... }` も使えますが、`record` 引数には型が付きません。）
 
 ```ts
 const user = await User.find(1)
@@ -634,10 +637,12 @@ API レスポンスや Inertia プロップスでモデルレコードの表示�
 機密フィールドをシリアライズ出力から除外します。
 
 ```ts
-export class User extends defineModel(users) {
-  static hidden = ['passwordHash', 'rememberToken']
-}
+export class User extends defineModel(users, {
+  hidden: ['passwordHash', 'rememberToken'],
+}) {}
 ```
+
+`fillable` と同じく、オプションはテーブルのカラム名に対して型チェックされます。`static hidden = [...]` も引き続き使えます。
 
 ```ts
 const user = await User.find(1)
@@ -653,9 +658,9 @@ const json = User.serialize(user)
 ブラックリストの代わりにホワイトリストを使用することもできます。
 
 ```ts
-export class User extends defineModel(users) {
-  static visible = ['id', 'name', 'email']
-}
+export class User extends defineModel(users, {
+  visible: ['id', 'name', 'email'],
+}) {}
 ```
 
 `visible` が設定されている場合、そのフィールドのみが表示されます。`visible` は `hidden` より優先されます。
@@ -665,14 +670,16 @@ export class User extends defineModel(users) {
 アクセサで計算された値をシリアライズ出力に含めます。
 
 ```ts
-export class User extends defineModel(users) {
-  static accessors = {
+export class User extends defineModel(users, {
+  accessors: {
     fullName: (record) => `${record.firstName} ${record.lastName}`,
-  }
-  static appends = ['fullName']
-  static hidden = ['firstName', 'lastName']
-}
+  },
+  appends: ['fullName'],
+  hidden: ['firstName', 'lastName'],
+}) {}
 ```
+
+`appends` に書けるのは同じオプションの `accessors` で宣言した名前だけです — 未宣言の名前はコンパイルエラーになります。
 
 ```ts
 const json = User.serialize(user)
@@ -694,13 +701,14 @@ const json = User.serializeMany(users)
 `fillable` で、`create()` や `update()` で設定可能なフィールドを制御できます。
 
 ```ts
-export class Post extends defineModel(posts) {
-  // これらのフィールドのみ一括代入可能
-  static fillable = ['title', 'body', 'status']
-}
+export class Post extends defineModel(posts, {
+  // これらのフィールドのみ一括代入可能。
+  // テーブルのカラム名に対して型チェックされ、タイプミスはコンパイルエラーになる
+  fillable: ['title', 'body', 'status'],
+}) {}
 ```
 
-`fillable` を設定すると、許可リスト外のフィールドを `create()` や `update()` に渡した場合、`MassAssignmentException`（`@guren/core` からエクスポート）がスローされます。エラーメッセージにはブロックされたフィールド名が含まれるため、タイプミスやインジェクションの試みが黙って破棄されて後から NOT NULL 違反として現れるのではなく、呼び出し箇所でその場で検出できます。
+クラス側に `static fillable = ['title', 'body', 'status']` と宣言しても同じ許可リストになります。オプション形は TypeScript が全フィールド名をテーブルと照合するため推奨です（サブクラスの `static` 宣言はオプションを上書きします）。`fillable` を設定すると、許可リスト外のフィールドを `create()` や `update()` に渡した場合、`MassAssignmentException`（`@guren/core` からエクスポート）がスローされます。エラーメッセージにはブロックされたフィールド名が含まれるため、タイプミスやインジェクションの試みが黙って破棄されて後から NOT NULL 違反として現れるのではなく、呼び出し箇所でその場で検出できます。
 
 ```ts
 await Post.create({ title: 'Hello', body: '...', status: 'draft', authorId: 1 })

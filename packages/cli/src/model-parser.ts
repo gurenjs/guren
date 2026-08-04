@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import type { Statement, Expression, ClassDeclaration, ClassBody, ClassProperty, Node, ObjectProperty } from '@babel/types'
+import type { Statement, Expression, ClassDeclaration, ClassBody, ClassProperty, CallExpression, Node, ObjectProperty } from '@babel/types'
 import { extractDocsTags } from './docs-index'
 import { discoverModelFiles, toPosixRelative, moduleNameFromRelPath } from './discovery'
 import { parseSourceFile } from './parse-cache'
@@ -134,19 +134,8 @@ function propertyKeyName(property: ObjectProperty): string | undefined {
  * model written that way must not read as bindless.
  */
 function defineModelTableArgument(node: Node): string | undefined {
-  if (node.type !== 'CallExpression') return undefined
-
-  const callee = node.callee
-  if (callee.type === 'Identifier' && callee.name === 'defineModel') {
-    const firstArg = node.arguments[0]
-    return firstArg?.type === 'Identifier' ? firstArg.name : undefined
-  }
-
-  for (const argument of node.arguments) {
-    const nested = defineModelTableArgument(argument)
-    if (nested) return nested
-  }
-  return undefined
+  const firstArg = findDefineModelCall(node)?.arguments[0]
+  return firstArg?.type === 'Identifier' ? firstArg.name : undefined
 }
 
 /**
@@ -189,22 +178,12 @@ export function classUsesAuthenticatableBase(classDecl: ClassDeclaration): boole
   if (!superClass) return false
 
   // defineModel(users, { base: AuthenticatableModel }) — the auth base
-  // arrives as an option rather than as the superclass itself.
-  if (superClass.type === 'CallExpression') {
-    const callee = superClass.callee
-    if (callee.type === 'Identifier' && callee.name === 'defineModel') {
-      const options = superClass.arguments[1]
-      if (options?.type === 'ObjectExpression') {
-        const viaBase = options.properties.some(
-          (property) =>
-            property.type === 'ObjectProperty' &&
-            propertyKeyName(property) === 'base' &&
-            isAuthenticatableBase(property.value),
-        )
-        if (viaBase) return true
-      }
-    }
-  }
+  // arrives as an option rather than as the superclass itself. Resolved
+  // through findDefineModelOption so mixin wrapping is covered the same way
+  // it is for the table and the allowlist options.
+  const baseOption = findDefineModelOption(classDecl, 'base')
+  if (baseOption && isAuthenticatableBase(baseOption.value)) return true
+
   // AuthenticatableModel pattern
   return isAuthenticatableBase(superClass)
 }
@@ -225,15 +204,92 @@ export function staticStringProperty(classDecl: ClassDeclaration, name: string):
   return property?.value?.type === 'StringLiteral' ? property.value.value : undefined
 }
 
-/** Entries of `static <name> = ['a', 'b']`, or undefined when absent or not an array literal. */
-export function staticStringArrayProperty(classDecl: ClassDeclaration, name: string): string[] | undefined {
-  const property = findStaticClassProperty(classDecl, name)
-  if (property?.value?.type !== 'ArrayExpression') return undefined
+/**
+ * String-literal entries of an array-literal node, or undefined for any
+ * other node — including an array with a spread or computed element. A
+ * partial read is worse than none for the allowlist checks: `visible:
+ * ['id', ...EXPOSED]` read as `['id']` reports columns hidden that the
+ * runtime exposes.
+ */
+function stringArrayEntries(node: Node | null | undefined): string[] | undefined {
+  if (node?.type !== 'ArrayExpression') return undefined
   const entries: string[] = []
-  for (const element of property.value.elements) {
-    if (element?.type === 'StringLiteral') entries.push(element.value)
+  for (const element of node.elements) {
+    if (element?.type !== 'StringLiteral') return undefined
+    entries.push(element.value)
   }
   return entries
+}
+
+/** Entries of `static <name> = ['a', 'b']`, or undefined when absent or not an array literal. */
+function staticStringArrayProperty(classDecl: ClassDeclaration, name: string): string[] | undefined {
+  return stringArrayEntries(findStaticClassProperty(classDecl, name)?.value)
+}
+
+/**
+ * The `defineModel(...)` call in an extends clause, however wrapped —
+ * `defineModel(posts)` directly or through a mixin such as
+ * `SoftDeletes(defineModel(posts))`.
+ */
+function findDefineModelCall(node: Node): CallExpression | null {
+  if (node.type !== 'CallExpression') return null
+  if (node.callee.type === 'Identifier' && node.callee.name === 'defineModel') return node
+  for (const argument of node.arguments) {
+    const nested = findDefineModelCall(argument)
+    if (nested) return nested
+  }
+  return null
+}
+
+/**
+ * The named property of the class's `defineModel(table, { ... })` options
+ * object, if present. A literal `name: undefined` counts as absent — the
+ * runtime skips the assignment, so the model is configured by neither
+ * spelling.
+ */
+export function findDefineModelOption(classDecl: ClassDeclaration, name: string): ObjectProperty | null {
+  if (!classDecl.superClass) return null
+  const call = findDefineModelCall(classDecl.superClass)
+  const options = call?.arguments[1]
+  if (options?.type !== 'ObjectExpression') return null
+  for (const property of options.properties) {
+    if (property.type !== 'ObjectProperty' || propertyKeyName(property) !== name) continue
+    if (property.value.type === 'Identifier' && property.value.name === 'undefined') return null
+    return property
+  }
+  return null
+}
+
+/** Entries of a string-array defineModel option (e.g. `fillable: ['a', 'b']`). */
+function defineModelStringArrayOption(classDecl: ClassDeclaration, name: string): string[] | undefined {
+  return stringArrayEntries(findDefineModelOption(classDecl, name)?.value)
+}
+
+/**
+ * Resolve a string-array model config (`fillable`, `hidden`, `visible`, …)
+ * the way the runtime does: a `static` declaration on the subclass shadows
+ * the same-named defineModel option. Callers that read only the static
+ * spelling silently stop covering models written the option way, so
+ * anything resolving these allowlists goes through here.
+ */
+export function resolveModelStringArrayConfig(classDecl: ClassDeclaration, name: string): string[] | undefined {
+  // Precedence follows declaration presence, not parseability: a static
+  // whose value we cannot read (`static hidden = HIDDEN`) still shadows the
+  // option at runtime, so falling back to the option would report a list the
+  // runtime does not use. Unreadable resolves to undefined and the checks
+  // stay conservative.
+  if (findStaticClassProperty(classDecl, name)) return staticStringArrayProperty(classDecl, name)
+  return defineModelStringArrayOption(classDecl, name)
+}
+
+/**
+ * Whether the model declares the named config in either spelling — a static
+ * class property or a defineModel option — regardless of whether its value
+ * is a parseable array literal. The presence twin of
+ * `resolveModelStringArrayConfig`; keep the two composition rules together.
+ */
+export function hasModelConfig(classDecl: ClassDeclaration, name: string): boolean {
+  return findStaticClassProperty(classDecl, name) !== null || findDefineModelOption(classDecl, name) !== null
 }
 
 function analyzeClassHeader(
