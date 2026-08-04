@@ -356,13 +356,15 @@ export function isEmailVerified(user: { emailVerifiedAt?: Date | null } | null):
  */
 export function requireVerifiedEmail(options: {
   redirectTo?: string
-  getUser?: (ctx: unknown) => Promise<{ emailVerifiedAt?: Date | null } | null>
+  // `get` mirrors Hono's own context idiom: the type argument is inferred from
+  // the expected return, so `return ctx.get('user')` type-checks without a cast.
+  getUser?: (ctx: { get: <T = unknown>(key: string) => T }) => Promise<{ emailVerifiedAt?: Date | null } | null>
 } = {}) {
   const { redirectTo = '/verify-email' } = options
 
-  return async (ctx: { get: (key: string) => unknown; redirect: (url: string) => Response }, next: () => Promise<void>) => {
-    const getUser = options.getUser ?? (async (c: { get: (key: string) => unknown }) => {
-      const auth = c.get('guren:auth') as { user?: () => Promise<{ emailVerifiedAt?: Date | null } | null> } | undefined
+  return async (ctx: { get: <T = unknown>(key: string) => T; redirect: (url: string) => Response }, next: () => Promise<void>) => {
+    const getUser = options.getUser ?? (async (c: { get: <T = unknown>(key: string) => T }) => {
+      const auth = c.get<{ user?: () => Promise<{ emailVerifiedAt?: Date | null } | null> } | undefined>('guren:auth')
       return auth?.user?.() ?? null
     })
 

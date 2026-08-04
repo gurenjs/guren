@@ -119,7 +119,10 @@ interface RegisteredRoute {
   method: string
   path: string
   handler: AnyRouteHandler
+  /** Handlers attached at this route's own registration. */
   middlewares: MiddlewareHandler[]
+  /** Handlers inherited from the enclosing `middleware(handler).group(...)` scopes. */
+  scopedMiddlewares: MiddlewareHandler[]
   name?: string
   routeMiddlewareNames: string[]
   schemas?: {
@@ -183,8 +186,57 @@ export interface RouteDefinition {
 export interface RouteBuilder<M extends string = never> {
   /** Set the route name for URL generation. */
   name(routeName: string): RouteBuilder<M>
-  /** Attach named middleware to this specific route. */
-  middleware(...names: M[]): RouteBuilder<M>
+  /** Attach middleware to this specific route. See {@link RouteMiddlewareInput}. */
+  middleware(...items: RouteMiddlewareInput<M>[]): RouteBuilder<M>
+}
+
+/**
+ * Accepted by `.middleware()`: a registered alias name or a handler function.
+ *
+ * Resolution is by kind, not by position: every name in a route's chain runs
+ * before every handler, across scopes as well as within one call. So an inline
+ * handler on an outer group runs *after* a named one on an inner group, the
+ * reverse of how they read. Use aliases throughout when relative order matters.
+ *
+ * Aliases are also the only form that lands in `RouteDefinition.middlewareNames`,
+ * which is how `guren audit` reports middleware it cannot otherwise identify.
+ * Guards the framework stamps with a capability (`requireAuthenticated`,
+ * `requireGuest`) are recognized either way.
+ */
+export type RouteMiddlewareInput<M extends string = never> = M | MiddlewareHandler
+
+/** Storage form of {@link RouteMiddlewareInput}, unparameterized by alias union. */
+type MiddlewareScopeEntry = string | MiddlewareHandler
+
+/**
+ * Group scopes are unwound synchronously, so an `async` callback registers its
+ * routes after the scope has already been popped — silently dropping the
+ * prefix or middleware the group was opened with. The callback type says
+ * `=> void`, which TypeScript happily accepts an `async` function for, so this
+ * has to be caught at runtime.
+ */
+function assertSyncGroupCallback(result: unknown, method: string): void {
+  if (typeof (result as PromiseLike<unknown> | undefined)?.then !== 'function') return
+
+  throw new Error(
+    `Router.${method}() callback returned a promise. Group scopes are applied synchronously, `
+    + 'so routes registered after an await would silently lose the group\'s prefix and middleware. '
+    + 'Register the routes synchronously, and await anything they depend on before opening the group.',
+  )
+}
+
+function partitionMiddleware(
+  items: readonly MiddlewareScopeEntry[],
+): { names: string[]; handlers: MiddlewareHandler[] } {
+  const names: string[] = []
+  const handlers: MiddlewareHandler[] = []
+
+  for (const item of items) {
+    if (typeof item === 'string') names.push(item)
+    else handlers.push(item)
+  }
+
+  return { names, handlers }
 }
 
 export interface RouterMountOptions {
@@ -224,7 +276,7 @@ export class Router<M extends string = never> {
   private readonly registry: RegisteredRoute[] = []
   private readonly prefixStack: string[] = []
   private readonly namedRoutes: Map<string, RegisteredRoute> = new Map()
-  private readonly middlewareStack: string[][] = []
+  private readonly middlewareStack: MiddlewareScopeEntry[][] = []
   private readonly middlewareAliases: Map<string, MiddlewareHandler> = new Map()
   private readonly middlewareGroups: Map<string, string[]> = new Map()
   private readonly modelBindings: Map<string, ModelBindingResolver> = new Map()
@@ -241,8 +293,12 @@ export class Router<M extends string = never> {
     return this as Router<M | N>
   }
 
-  middleware(...names: M[]): RouterMiddlewareGroupBuilder<M> {
-    return new RouterMiddlewareGroupBuilder(this, names)
+  /**
+   * Open a middleware scope for the routes registered through the returned
+   * builder. See {@link RouteMiddlewareInput}.
+   */
+  middleware(...items: RouteMiddlewareInput<M>[]): RouterMiddlewareGroupBuilder<M> {
+    return new RouterMiddlewareGroupBuilder(this, items)
   }
 
   bind(param: string, modelOrResolver: BindableModel | ModelBindingResolver): this {
@@ -427,8 +483,11 @@ export class Router<M extends string = never> {
 
   group(prefix: string, callback: (router: Router<M>) => void): this {
     this.prefixStack.push(prefix)
-    callback(this)
-    this.prefixStack.pop()
+    try {
+      assertSyncGroupCallback(callback(this), 'group')
+    } finally {
+      this.prefixStack.pop()
+    }
     return this
   }
 
@@ -474,9 +533,10 @@ export class Router<M extends string = never> {
       const resolvedMiddlewares = this.resolveMiddlewareNames(route.routeMiddlewareNames)
       const handler = resolveHandler(route.handler, this.modelBindings, options.container, route.bindings, route.path)
       const contractMiddleware = createContractValidationMiddleware(route)
+      const inlineMiddlewares = [...route.scopedMiddlewares, ...route.middlewares]
       const allMiddlewares = contractMiddleware
-        ? [...resolvedMiddlewares, ...route.middlewares, contractMiddleware, handler]
-        : [...resolvedMiddlewares, ...route.middlewares, handler]
+        ? [...resolvedMiddlewares, ...inlineMiddlewares, contractMiddleware, handler]
+        : [...resolvedMiddlewares, ...inlineMiddlewares, handler]
       mountRoute(app, route.method, route.path, ...allMiddlewares)
     }
   }
@@ -496,14 +556,17 @@ export class Router<M extends string = never> {
   }
 
   definitions(): RouteDefinition[] {
-    return this.registry.map(({ method, path, name, schemas, openapi, routeMiddlewareNames, middlewares, handler, bindings }) => ({
+    return this.registry.map(({ method, path, name, schemas, openapi, routeMiddlewareNames, middlewares, scopedMiddlewares, handler, bindings }) => ({
       method,
       path,
       name,
       schemas,
       middlewareNames: [...routeMiddlewareNames],
+      // Route-local only, so a group-scoped handler does not make every route
+      // in the group report middleware it never attached (`guren audit` warns
+      // per route on this flag). Capabilities still see the whole chain.
       hasInlineMiddleware: middlewares.length > 0,
-      capabilities: this.aggregateCapabilities(routeMiddlewareNames, middlewares),
+      capabilities: this.aggregateCapabilities(routeMiddlewareNames, [...scopedMiddlewares, ...middlewares]),
       controller: isControllerAction(handler)
         ? { name: handler[0].name, action: String(handler[1]) }
         : undefined,
@@ -512,8 +575,8 @@ export class Router<M extends string = never> {
     }))
   }
 
-  applyMiddlewareScope<T>(names: string[], callback: () => T): T {
-    this.middlewareStack.push(names)
+  applyMiddlewareScope<T>(items: readonly MiddlewareScopeEntry[], callback: () => T): T {
+    this.middlewareStack.push([...items])
     try {
       return callback()
     } finally {
@@ -563,13 +626,16 @@ export class Router<M extends string = never> {
 
   private add(method: string, path: string, handler: AnyRouteHandler, middlewares: MiddlewareHandler[] = []): RouteBuilder<M> {
     const fullPath = joinPaths(this.prefixStack, path)
-    const stackMiddleware = this.middlewareStack.flat()
+    const scope = partitionMiddleware(this.middlewareStack.flat())
     const route: RegisteredRoute = {
       method,
       path: fullPath,
       handler,
-      middlewares,
-      routeMiddlewareNames: [...stackMiddleware],
+      // Copied, never aliased: `RouteBuilder.middleware()` pushes here, and the
+      // caller's `options.middlewares` array may be shared across routes.
+      middlewares: [...middlewares],
+      scopedMiddlewares: scope.handlers,
+      routeMiddlewareNames: scope.names,
     }
 
     this.registry.push(route)
@@ -667,12 +733,12 @@ function applyRouteContract(route: RegisteredRoute, options: RouteContractOption
 class RouterMiddlewareGroupBuilder<M extends string = never> {
   constructor(
     private readonly router: Router<M>,
-    private readonly names: string[],
+    private readonly items: readonly MiddlewareScopeEntry[],
   ) {}
 
   group(callback: (router: Router<M>) => void): Router<M> {
-    return this.router.applyMiddlewareScope(this.names, () => {
-      callback(this.router)
+    return this.router.applyMiddlewareScope(this.items, () => {
+      assertSyncGroupCallback(callback(this.router), 'middleware(...).group')
       return this.router
     })
   }
@@ -700,7 +766,7 @@ class RouterMiddlewareGroupBuilder<M extends string = never> {
     handler: ControllerAction<C>,
   ): RouteBuilder<M>
   get(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
-    return this.router.applyMiddlewareScope(this.names, () => this.router.get(path, handlerOrOptions as never, ...(rest as never[])))
+    return this.router.applyMiddlewareScope(this.items, () => this.router.get(path, handlerOrOptions as never, ...(rest as never[])))
   }
 
   post<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder<M>
@@ -726,7 +792,7 @@ class RouterMiddlewareGroupBuilder<M extends string = never> {
     handler: ControllerAction<C>,
   ): RouteBuilder<M>
   post(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
-    return this.router.applyMiddlewareScope(this.names, () => this.router.post(path, handlerOrOptions as never, ...(rest as never[])))
+    return this.router.applyMiddlewareScope(this.items, () => this.router.post(path, handlerOrOptions as never, ...(rest as never[])))
   }
 
   put<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder<M>
@@ -752,7 +818,7 @@ class RouterMiddlewareGroupBuilder<M extends string = never> {
     handler: ControllerAction<C>,
   ): RouteBuilder<M>
   put(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
-    return this.router.applyMiddlewareScope(this.names, () => this.router.put(path, handlerOrOptions as never, ...(rest as never[])))
+    return this.router.applyMiddlewareScope(this.items, () => this.router.put(path, handlerOrOptions as never, ...(rest as never[])))
   }
 
   patch<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder<M>
@@ -778,7 +844,7 @@ class RouterMiddlewareGroupBuilder<M extends string = never> {
     handler: ControllerAction<C>,
   ): RouteBuilder<M>
   patch(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
-    return this.router.applyMiddlewareScope(this.names, () => this.router.patch(path, handlerOrOptions as never, ...(rest as never[])))
+    return this.router.applyMiddlewareScope(this.items, () => this.router.patch(path, handlerOrOptions as never, ...(rest as never[])))
   }
 
   delete<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder<M>
@@ -804,7 +870,7 @@ class RouterMiddlewareGroupBuilder<M extends string = never> {
     handler: ControllerAction<C>,
   ): RouteBuilder<M>
   delete(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
-    return this.router.applyMiddlewareScope(this.names, () => this.router.delete(path, handlerOrOptions as never, ...(rest as never[])))
+    return this.router.applyMiddlewareScope(this.items, () => this.router.delete(path, handlerOrOptions as never, ...(rest as never[])))
   }
 }
 
@@ -815,8 +881,10 @@ function createRouteBuilder<M extends string = never>(route: RegisteredRoute, na
       namedRoutes.set(routeName, route)
       return this
     },
-    middleware(...names: M[]): RouteBuilder<M> {
+    middleware(...items: RouteMiddlewareInput<M>[]): RouteBuilder<M> {
+      const { names, handlers } = partitionMiddleware(items)
       route.routeMiddlewareNames.push(...names)
+      route.middlewares.push(...handlers)
       return this
     },
   }
