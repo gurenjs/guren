@@ -9,32 +9,36 @@ setInertiaDocument({
   head: '<link rel="icon" type="image/svg+xml" href="/favicon.svg" />',
 })
 
-// The Host header is client-controlled, so production answers only to the host
-// this app is actually deployed as. APP_URL carries that host and is required
-// in production — anything derived from an unchecked Host (absolute links in
-// emails, cached responses) would otherwise point wherever a caller asked.
-function allowedHosts(): string[] {
+// The Host header is client-controlled, so production should answer only to the
+// host this app is deployed as, which APP_URL carries.
+//
+// Read at module scope, where not every platform has populated process.env yet
+// (the Cloudflare worker imports this module before wrangler `vars` land). A
+// missing value therefore warns and leaves the check off, rather than throwing
+// and stopping the app from booting at all. Emailed links do not depend on this
+// — app/Auth/AppUrl.ts resolves those per request and fails closed there.
+function hostAuthorization() {
+  const exclude = ['/healthcheck', '/up']
+
   if (process.env.NODE_ENV !== 'production') {
-    return ['localhost:*', '127.0.0.1:*']
+    return { allowedHosts: ['localhost:*', '127.0.0.1:*'], exclude }
   }
 
   const appUrl = process.env.APP_URL?.trim()
   if (!appUrl) {
-    throw new Error('APP_URL must be set in production: it defines the host this app answers to.')
+    console.warn('[app] APP_URL is not set — host authorization is disabled. Set it to the public base URL of this app.')
+    return false
   }
 
   // `hostname:*` rather than the bare host: the hostname is the security
   // boundary, and a proxy may or may not include the default port in `Host`.
-  return [`${new URL(appUrl).hostname}:*`]
+  return { allowedHosts: [`${new URL(appUrl).hostname}:*`], exclude }
 }
 
 const app = createApp({
   routes: registerWebRoutes,
   providers: [DatabaseProvider],
-  hostAuthorization: {
-    allowedHosts: allowedHosts(),
-    exclude: ['/healthcheck', '/up'],
-  },
+  hostAuthorization: hostAuthorization(),
 })
 
 export default app

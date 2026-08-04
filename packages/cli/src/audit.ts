@@ -663,7 +663,10 @@ async function auditSourceFiles(cwd: string, findings: AuditFinding[]): Promise<
       }
 
       // Disabled security defaults
-      const toggleMatch = /\b(autoCsrf|securityHeaders|csrf)\s*:\s*false\b/.exec(line)
+      // `hostAuthorization` belongs here for the same reason as the rest: the
+      // templates themselves shipped `hostAuthorization: ... ? false : {...}`,
+      // which turned the check off in production and audited clean.
+      const toggleMatch = /\b(autoCsrf|securityHeaders|csrf|hostAuthorization)\s*:\s*false\b/.exec(line)
       if (toggleMatch) {
         toggleCount++
         findings.push(

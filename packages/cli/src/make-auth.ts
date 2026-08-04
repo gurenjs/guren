@@ -138,6 +138,11 @@ export default class ForgotPasswordController extends Controller {
   async store(): Promise<Response> {
     const { email } = await this.validateBody(ForgotPasswordSchema)
 
+    // Resolved before the lookup on purpose: a misconfigured APP_URL throws,
+    // and throwing only for addresses that turned out to exist would answer
+    // the question the generic status message below refuses to.
+    const resetBaseUrl = \`\${appUrl(this.request)}/reset-password\`
+
     // Always respond with the same status message whether or not the
     // account exists, to avoid leaking which emails are registered. The
     // mail send is deliberately not awaited: the transport round-trip only
@@ -146,7 +151,7 @@ export default class ForgotPasswordController extends Controller {
     const [user] = await User.where({ email })
     if (user) {
       const { token } = await createPasswordResetToken(email, passwordResetStore)
-      const resetUrl = buildPasswordResetUrl(\`\${appUrl(this.request)}/reset-password\`, token, email)
+      const resetUrl = buildPasswordResetUrl(resetBaseUrl, token, email)
       void sendPasswordResetMail(this.make('mail'), email, resetUrl).catch((error) => {
         console.error('Failed to send password reset email:', error)
       })
@@ -678,7 +683,12 @@ export function appUrl(request: { url: string }): string {
   const configured = process.env.APP_URL?.trim()
 
   if (configured) {
-    return configured.endsWith('/') ? configured.slice(0, -1) : configured
+    // Parsed rather than concatenated: a malformed APP_URL has to fail here,
+    // where every caller hits it, not later inside one particular link build.
+    // Dropping any query/fragment and the trailing slash keeps the result
+    // safe to append a path to.
+    const parsed = new URL(configured)
+    return \`\${parsed.origin}\${parsed.pathname.replace(/\\/+$/, '')}\`
   }
 
   if (process.env.NODE_ENV === 'production') {
@@ -2213,14 +2223,11 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
     )
   }
 
-  // Both the reset and the verification flow mail absolute links, and both
-  // must build them from APP_URL rather than the request host.
-  if (includeExtras || includeVerify) {
-    files.push({ path: 'app/Auth/AppUrl.ts', contents: appUrlTemplate })
-  }
-
   if (includeExtras) {
     files.push(
+      // Every flow that mails an absolute link routes through this, so that
+      // none of them build one from the request host.
+      { path: 'app/Auth/AppUrl.ts', contents: appUrlTemplate },
       { path: 'app/Http/Controllers/Auth/RegisterController.ts', contents: buildRegisterControllerTemplate(includeVerify) },
       { path: 'app/Http/Validators/RegisterValidator.ts', contents: registerValidatorTemplate },
       { path: 'resources/js/pages/auth/Register.tsx', contents: buildRegisterViewTemplate(oauthProviders) },
@@ -2271,9 +2278,7 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
     consola.info('  • Import registerAuthRoutes from routes/auth.ts and call it from your routes/web.ts registrar')
     if (includeExtras) {
       consola.info('  • Register MailProvider in src/app.ts providers array (used to send password reset emails)')
-    }
-    if (includeExtras || includeVerify) {
-      consola.info('  • Set APP_URL in your .env to this app\'s public base URL — emailed links are built from it, and production refuses to start a mail send without it')
+      consola.info('  • Set APP_URL in your .env to the public base URL of this app — emailed links are built from it, and production refuses to send without it')
     }
     if (!migrationGenerated) {
       consola.info('  • Run `bun run db:make` to generate the users migration')

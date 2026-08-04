@@ -49,7 +49,9 @@ new GurenLambdaApp(stack, 'App', {
     resourceArn: process.env.DATABASE_RESOURCE_ARN!,
     secretArn: process.env.DATABASE_SECRET_ARN!,
   },
-  environment: { APP_KEY: process.env.APP_KEY! },
+  // APP_URL is the app's public base URL. Emailed links (password reset,
+  // email verification) are built from it rather than the request host.
+  environment: { APP_KEY: process.env.APP_KEY!, APP_URL: process.env.APP_URL! },
 })
 ```
 

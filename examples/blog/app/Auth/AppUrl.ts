@@ -12,7 +12,12 @@ export function appUrl(request: { url: string }): string {
   const configured = process.env.APP_URL?.trim()
 
   if (configured) {
-    return configured.endsWith('/') ? configured.slice(0, -1) : configured
+    // Parsed rather than concatenated: a malformed APP_URL has to fail here,
+    // where every caller hits it, not later inside one particular link build.
+    // Dropping any query/fragment and the trailing slash keeps the result
+    // safe to append a path to.
+    const parsed = new URL(configured)
+    return `${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}`
   }
 
   if (process.env.NODE_ENV === 'production') {

@@ -1,5 +1,6 @@
 ---
 "@guren/cli": patch
+"@guren/server": patch
 "create-guren-app": minor
 ---
 
@@ -32,7 +33,18 @@ Templates also stop disabling host authorization in production. It was
 `process.env.NODE_ENV === 'production' ? false : { ... }`, which removed the
 middleware in exactly the environment that needed it; the production branch now
 derives its allowlist from `APP_URL`'s hostname, and health-check paths stay
-excluded so load balancers reaching the app by IP are unaffected.
+excluded so load balancers reaching the app by IP are unaffected. When `APP_URL`
+is not readable at module scope the template warns and leaves the check off
+rather than throwing — the Cloudflare worker imports the app before wrangler
+`vars` reach `process.env`, and a throw there would stop the app booting at all.
+`guren audit` now also flags `hostAuthorization: false`, which it previously
+walked past while the templates themselves shipped it.
+
+In `@guren/server`, a `host:*` allowlist entry now means "this host on any
+**port**". `compileHostMatcher` accepted anything after the colon, so
+`example.com:*` also matched a `Host` of `example.com:attacker.tld`. The same
+middleware stops re-parsing the whole request URL to read its path on every
+request, which it now does in production rather than only in development.
 
 **Action required for new apps:** `APP_URL` must be set in production. It is
 already present in the scaffolded `.env.example`. Existing apps are unchanged —

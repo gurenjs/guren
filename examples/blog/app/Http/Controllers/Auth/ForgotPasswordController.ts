@@ -16,6 +16,11 @@ export default class ForgotPasswordController extends Controller {
   async store(): Promise<Response> {
     const { email } = await this.validateBody(ForgotPasswordSchema)
 
+    // Resolved before the lookup on purpose: a misconfigured APP_URL throws,
+    // and throwing only for addresses that turned out to exist would answer
+    // the question the generic status message below refuses to.
+    const resetBaseUrl = `${appUrl(this.request)}/reset-password`
+
     // Always respond with the same status message whether or not the
     // account exists, to avoid leaking which emails are registered. The
     // email itself is dispatched to a queue rather than awaited inline, so
@@ -24,7 +29,7 @@ export default class ForgotPasswordController extends Controller {
     const [user] = await User.where({ email })
     if (user) {
       const { token } = await createPasswordResetToken(email, passwordResetStore)
-      const resetUrl = buildPasswordResetUrl(`${appUrl(this.request)}/reset-password`, token, email)
+      const resetUrl = buildPasswordResetUrl(resetBaseUrl, token, email)
       await SendPasswordResetEmailJob.dispatch({ email, resetUrl })
     }
 

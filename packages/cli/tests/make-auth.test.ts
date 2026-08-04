@@ -114,15 +114,17 @@ export function registerWebRoutes(router: Router): void {
         'utf8',
       )
       expect(forgotPasswordController).not.toContain('new URL(this.request.url).origin')
-      expect(forgotPasswordController).toContain("import { appUrl } from '../../../Auth/AppUrl.js'")
-      expect(forgotPasswordController).toContain('buildPasswordResetUrl(`${appUrl(this.request)}/reset-password`')
+      expect(forgotPasswordController).toContain('const resetBaseUrl = `${appUrl(this.request)}/reset-password`')
+      // Resolved before the account lookup: a misconfigured APP_URL throws, and
+      // throwing only for addresses that exist would leak which ones do.
+      expect(forgotPasswordController.indexOf('appUrl(this.request)')).toBeLessThan(
+        forgotPasswordController.indexOf('await User.where({ email })'),
+      )
 
-      // ...and the helper they route through has to fail closed in production
-      // rather than falling back to the request.
+      // ...and the helper they route through reads APP_URL and fails closed in
+      // production rather than falling back to the request.
       const appUrlHelper = await readFile(join(workspace.dir, 'app/Auth/AppUrl.ts'), 'utf8')
-      expect(appUrlHelper).toContain('process.env.APP_URL')
-      expect(appUrlHelper).toContain("process.env.NODE_ENV === 'production'")
-      expect(appUrlHelper).toContain('throw new Error(')
+      expect(appUrlHelper).toMatch(/process\.env\.APP_URL[\s\S]*NODE_ENV === 'production'[\s\S]*throw new Error\(/)
 
       const loginPage = await readFile(join(workspace.dir, 'resources/js/pages/auth/Login.tsx'), 'utf8')
       expect(loginPage).toContain('interface Props')
