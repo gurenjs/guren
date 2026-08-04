@@ -9,6 +9,7 @@ As `guren audit` pointed out at the end of [Part 1](./create-blog-post-app.md), 
 - How to read the signed-in user in a controller with `this.auth.userOrFail()`
 - How to declare a `belongsTo` relationship and eager-load it with `findWithOrFail`
 - How to extend a resource to ship related data while never leaking `passwordHash`
+- How to bring the spec views back in sync with the `check --spec` drift gate after a schema change
 
 ## 1. Install the authentication scaffolding
 
@@ -109,6 +110,9 @@ Next, add a second line of defense inside the controller. Add one line at the to
 ```
 
 `this.auth.userOrFail()` returns the signed-in user or responds with 401. This is exactly the line the generator would have emitted if you hadn't passed `--public` in Part 1 — and it keeps the guard in place even if a refactor later strips the route middleware.
+
+> [!NOTE]
+> What you guarded here is only "is someone signed in" (authentication). As it stands, any signed-in user can edit or delete **anyone's** post. "Only the author can edit" is the job of authorization, which Guren implements as policies — `bunx guren make:policy Post` scaffolds one, and passing `--policy` to `add resource` builds it in from the start. It's out of scope for this series, but the [Authorization guide](../guides/authorization.md) walks through it with this same blog example.
 
 ## 4. Confirm with audit
 
@@ -249,6 +253,28 @@ Add an author line to `resources/js/pages/posts/Show.tsx`. `Props` references `P
 ```
 
 `PostResourceData` changed shape, so refresh the manifests: `bun run codegen` (automatic while `bun run dev` is watching).
+
+### Bring the specs back in sync
+
+The schema and the model relationships changed, so the `docs/spec/` views you generated in Part 1 are now behind the code. Ask the drift gate:
+
+```bash
+bunx guren check --spec
+```
+
+```
+ERROR [fail] docs/spec/er.md: docs/spec/er.md is out of date with the code.
+       → Run: bunx guren spec:generate
+```
+
+Stale views get named as `[fail]`. Do what it says: regenerate, and `er.md` gains the `authorId FK` on `posts`, `domain.md` gains the `author` relation, and the gate goes green again.
+
+```bash
+bunx guren spec:generate
+bunx guren check --spec
+```
+
+"We changed the implementation but forgot to update the spec" is the fate of every hand-maintained document. Guren prevents it with a mechanical gate rather than discipline — put `check --spec` in CI and a stale view simply cannot merge.
 
 ## 6. Checkpoint: post as the demo user
 

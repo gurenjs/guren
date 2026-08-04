@@ -340,13 +340,13 @@ Your mini blog is complete: public reading, authenticated writing, and related d
 
 The running app proves what the comment flow *does*. Now generate the views that summarize its structure, and record *why* comment authorship works this way.
 
-First, derive the ER, domain, screen, and module views from the code:
+First, bring the spec views up to date. The `comments` table and its relationships are new, so — just like in Part 2 — `bunx guren check --spec` will flag the views as stale. Regenerate to catch up:
 
 ```bash
 bunx guren spec:generate
 ```
 
-The generated Markdown lands under `docs/spec/`. In particular `er.md` shows your three tables and their foreign keys, and `domain.md` shows the model relationships you declared here.
+The refreshed `docs/spec/er.md` shows your three tables and their foreign keys, and `domain.md` shows the model relationships you declared here.
 
 Next, create an architecture decision tied to the `Comment` entity:
 

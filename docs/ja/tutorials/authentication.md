@@ -9,6 +9,7 @@
 - コントローラー内で `this.auth.userOrFail()` を使ってサインイン中のユーザーを取得する方法
 - `belongsTo` リレーションシップを宣言し、`findWithOrFail` で eager load する方法
 - リソースを拡張して関連データを送りつつ、`passwordHash` を決して漏らさない方法
+- スキーマ変更後に `check --spec` のドリフトゲートでスペックビューを追随させる方法
 
 ## 1. 認証の雛形をインストールする
 
@@ -109,6 +110,9 @@ export function registerWebRoutes(baseRouter: Router): void {
 ```
 
 `this.auth.userOrFail()` はサインイン中のユーザーを返すか、401 で応答します。これは Part 1 で `--public` を外していれば、ジェネレーターが最初から入れていた行そのものです — ルートミドルウェアを剥がす改修が入っても、コントローラー単体で守りが残ります。
+
+> [!NOTE]
+> ここで守ったのは「サインインしているか」（認証）だけです。今の実装では、サインイン済みユーザーなら **誰の** 投稿でも編集・削除できます。「著者本人だけが編集できる」は認可（authorization）の仕事で、Guren ではポリシーとして実装します — `bunx guren make:policy Post` で雛形が手に入り、`add resource` に `--policy` を付ければ最初から組み込まれます。このシリーズでは範囲外としますが、[認可ガイド](../guides/authorization.md) が同じブログ例で解説しています。
 
 ## 4. audit で守りを確認する
 
@@ -249,6 +253,28 @@ import type { UserRecord } from '../../Models/User.js'
 ```
 
 `PostResourceData` の形が変わったので、マニフェストを更新します: `bun run codegen`（`bun run dev` が監視中なら自動で実行されます）。
+
+### スペックを追随させる
+
+スキーマとモデルのリレーションシップが変わったので、Part 1 で生成した `docs/spec/` のビューは現実より古くなりました。ドリフトゲートに聞いてみましょう。
+
+```bash
+bunx guren check --spec
+```
+
+```
+ERROR [fail] docs/spec/er.md: docs/spec/er.md is out of date with the code.
+       → Run: bunx guren spec:generate
+```
+
+古くなったビューが `[fail]` として名指しされます。言われたとおり再生成すると、`er.md` の `posts` に `authorId FK` が、`domain.md` に `author` リレーションが現れ、ゲートは緑に戻ります。
+
+```bash
+bunx guren spec:generate
+bunx guren check --spec
+```
+
+「実装は変えたが仕様書の更新を忘れた」というドキュメントの宿命を、Guren は手癖ではなく機械的なゲートで防ぎます。CI に `check --spec` を置けば、古いビューはマージ自体ができません。
 
 ## 6. チェックポイント: デモユーザーとして投稿する
 

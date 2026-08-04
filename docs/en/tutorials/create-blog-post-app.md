@@ -7,6 +7,7 @@ In this part you build the heart of the blog — creating, listing, editing, and
 - How to scaffold a fresh Guren app on SQLite (zero configuration)
 - What `bunx guren add resource` generates, and what it wires up automatically
 - The Guren development loop: **generate → migrate → codegen → check → verify in the browser**
+- How to derive project knowledge from the code with `guren context` and spec views
 - How to read the generated code: how the pieces connect (schema → model → validator → resource → controller → routes → Inertia pages)
 - How to refine generated output: validation messages, error display, `fillable`
 - How `guren audit` points out security gaps for you
@@ -111,7 +112,25 @@ With the dev server running (`bun run dev` if you stopped it):
 
 Without writing a line of code, you have a CRUD with validation, pagination, and typed routing. Now let's read what it's made of.
 
-## 6. Read the generated code
+## 6. Derive the big picture: context and spec
+
+Before opening files one by one, survey the vertical slice you just generated:
+
+```bash
+bunx guren context Post
+```
+
+The model's columns, the seven routes (with typed bodies), the controller actions, the four pages with their `Props`, and the resource — everything about the `Post` entity on one screen. This is not a saved document: it's derived from the code on every run, so it can never rot.
+
+Next, write the project-wide summary views into `docs/spec/`:
+
+```bash
+bunx guren spec:generate
+```
+
+This generates `er.md` (tables and foreign keys), `domain.md` (models and relationships), `screens.md` (pages mapped to routes), and `modules.md`. These are **specs derived from the code**, and they're artifacts you commit. When the code changes, the views go stale — and the gate that refuses to let that slide silently is `guren check --spec` (you'll watch it trip in Part 2). Guren manages project knowledge not by hand-maintained documents but in three layers: derived, declared, and checked. See [Spec-Anchored Development](../guides/spec-anchored.md) for the full picture.
+
+## 7. Read the generated code
 
 The generator's output is not a sealed black box — it's a starting point written to be read. Follow a request through the layers.
 
@@ -277,7 +296,7 @@ export default function NewPost() {
 - Note `RouteBody<ApiRoutes, 'posts.store'>`: the form's data type is **derived from the Zod schema bound to the route**, not hand-written. Add a field to `PostPayloadSchema` on the server and the form's type follows.
 - `useForm` handles the whole submission lifecycle: `form.post()` sends the data, and when the server rejects it in validation, the messages land in `form.errors`.
 
-## 7. Refine the output: show the error messages
+## 8. Refine the output: show the error messages
 
 Generator output is a starting point. Right now the form shows nothing when validation fails — the errors arrive in `form.errors`, but nothing renders them.
 
@@ -301,7 +320,7 @@ Then add error display under each input in `resources/js/pages/posts/New.tsx`:
 
 **Checkpoint:** on `/posts/create`, submit the form with **both fields empty** — the page doesn't navigate, and "Title is required." appears under the input. That's your Zod schema speaking: a server-side validation failure made the round trip into `form.errors`. Add the same two lines to `Edit.tsx` while you're at it.
 
-## 8. Run the security audit
+## 9. Run the security audit
 
 Finally, let Guren inspect the app's defenses:
 
@@ -329,7 +348,7 @@ export class Post extends defineModel(posts) {
 
 With `fillable` set, passing a field outside the allowlist to `Post.create()` or `Post.update()` throws a `MassAssignmentException`, so bugs and injection attempts surface immediately instead of being silently dropped. Run `bunx guren audit` again — the API3 warning is gone. See the [Database guide](../guides/database.md) for details.
 
-That's the whole Guren development loop: **generate → migrate → codegen → check → verify → audit**. The rest of the series keeps turning the same loop.
+That's the whole Guren development loop: **generate → migrate → codegen → check → verify → audit**. When the schema changes, `spec:generate` keeps the spec views in tow (and `check --spec` stops you if you skip it — you'll see that in Part 2). The rest of the series keeps turning the same loop.
 
 ## Common trip-ups
 
@@ -346,7 +365,7 @@ You picked PostgreSQL / MySQL instead of SQLite when scaffolding. Start the cont
 You forgot `--public` on `add resource`. The generated store / update / destroy carry a `this.auth.userOrFail()` guard, which always fails until authentication is installed. Remove the guard lines by hand, or regenerate with `--force` and `--public` (careful: files you've edited will be overwritten).
 
 **Submitting the form does nothing (no errors either).**
-Validation rejected it. Make sure you added the error display from step 7 (`form.errors.title` / `form.errors.body`) — the messages are arriving; they're just not rendered.
+Validation rejected it. Make sure you added the error display from step 8 (`form.errors.title` / `form.errors.body`) — the messages are arriving; they're just not rendered.
 
 **Type error at `this.inertia(pages.posts.Index, ...)` after changing props.**
 The page manifest is stale. Re-run `bun run codegen` so the extracted `Props` match what the controller sends.
