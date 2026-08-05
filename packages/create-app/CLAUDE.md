@@ -7,6 +7,7 @@ Scaffolding CLI that copies templates from `templates/default` and replaces toke
 - `src/cli.ts`: Citty command definition
 - `src/blueprints.ts`: blueprint registry, template layering, database-variant files
 - `src/utils.ts`: filesystem helpers (`directoryExists`, `isDirectoryEmpty`, etc.)
+- `src/git.ts`: the `--git` subprocess calls, each bounded by a timeout
 - `templates/default`: Bun project template; token map lives in `cli.ts`
 - `templates/blog`: curated blog starter, overlaid on `templates/default`
 

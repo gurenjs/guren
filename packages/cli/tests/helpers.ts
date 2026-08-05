@@ -111,6 +111,15 @@ export async function writeWorkspaceFiles(
   }
 }
 
+/**
+ * Known hazard, deliberately left in place: the `process.chdir()` below is
+ * global state in Bun's shared test process, so a test that overruns can
+ * chdir and `rm -rf` out from under whichever test started meanwhile. See
+ * packages/create-app/tests/helpers.ts, where the same helper dropped it.
+ * Untangling it here is a real refactor rather than a test-side edit — most
+ * of this package's commands resolve paths against `process.cwd()`, and
+ * several test files chdir directly instead of going through this helper.
+ */
 export async function createTempWorkspace(prefix: string): Promise<TempWorkspace> {
   const dir = await mkdtemp(join(tmpdir(), prefix))
   const originalCwd = process.cwd()

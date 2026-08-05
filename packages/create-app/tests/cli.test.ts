@@ -3,7 +3,8 @@ import { readFile, access, mkdir, writeFile } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { DATABASE_DRIVERS } from '../src/blueprints'
-import { createTempWorkspace } from './helpers'
+import { GIT_TIMEOUT_MS } from '../src/git'
+import { createTempWorkspace, useGitIdentity } from './helpers'
 
 let capturedCommand: any
 const successMock = mock(() => {})
@@ -47,6 +48,15 @@ await mock.module('consola', () => ({
 
 await import('../src/cli')
 
+useGitIdentity()
+
+// Derived, not a second literal: staying above the scaffolder's own budget for
+// the whole git sequence is what makes a wedged `git` surface as its
+// "initialize the repository manually" warning — an assertion failure naming
+// the real problem — instead of a bare timeout, whose leftover blocking time
+// Bun charges to the *next* test.
+const GIT_TEST_TIMEOUT_MS = GIT_TIMEOUT_MS * 2
+
 describe('create-guren-app CLI', () => {
   it('scaffolds a SPA project and replaces tokens', async () => {
     const workspace = await createTempWorkspace('guren-create-app-cli-')
@@ -54,7 +64,7 @@ describe('create-guren-app CLI', () => {
       warnMock.mockClear()
       await capturedCommand.run({
         args: {
-          target: 'my-app',
+          target: join(workspace.dir, 'my-app'),
           force: false,
           mode: 'spa',
           auth: false,
@@ -104,7 +114,7 @@ describe('create-guren-app CLI', () => {
       logMock.mockClear()
       await capturedCommand.run({
         args: {
-          target: 'ssr-app',
+          target: join(workspace.dir, 'ssr-app'),
           force: false,
           mode: 'ssr',
           auth: false,
@@ -133,7 +143,7 @@ describe('create-guren-app CLI', () => {
     try {
       await capturedCommand.run({
         args: {
-          target: 'blog-app',
+          target: join(workspace.dir, 'blog-app'),
           force: false,
           mode: 'ssr',
           auth: false,
@@ -170,7 +180,7 @@ describe('create-guren-app CLI', () => {
     try {
       await capturedCommand.run({
         args: {
-          target: 'pg-blog',
+          target: join(workspace.dir, 'pg-blog'),
           force: false,
           mode: 'spa',
           auth: false,
@@ -202,7 +212,7 @@ describe('create-guren-app CLI', () => {
       infoMock.mockClear()
       await capturedCommand.run({
         args: {
-          target: 'auth-blog',
+          target: join(workspace.dir, 'auth-blog'),
           force: false,
           mode: 'spa',
           auth: true,
@@ -226,7 +236,7 @@ describe('create-guren-app CLI', () => {
       await expect(
         capturedCommand.run({
           args: {
-            target: 'bad-app',
+            target: join(workspace.dir, 'bad-app'),
             force: false,
             mode: 'invalid',
             auth: false,
@@ -244,7 +254,7 @@ describe('create-guren-app CLI', () => {
       await expect(
         capturedCommand.run({
           args: {
-            target: 'bad-app',
+            target: join(workspace.dir, 'bad-app'),
             force: false,
             mode: 'spa',
             auth: false,
@@ -262,7 +272,7 @@ describe('create-guren-app CLI', () => {
     try {
       await capturedCommand.run({
         args: {
-          target: 'pg-app',
+          target: join(workspace.dir, 'pg-app'),
           force: false,
           mode: 'spa',
           auth: false,
@@ -298,7 +308,7 @@ describe('create-guren-app CLI', () => {
     try {
       await capturedCommand.run({
         args: {
-          target: 'ignored-app',
+          target: join(workspace.dir, 'ignored-app'),
           force: false,
           mode: 'spa',
           auth: false,
@@ -334,7 +344,7 @@ describe('create-guren-app CLI', () => {
     try {
       await capturedCommand.run({
         args: {
-          target: 'ssr-ignored',
+          target: join(workspace.dir, 'ssr-ignored'),
           force: false,
           mode: 'ssr',
           auth: false,
@@ -353,21 +363,10 @@ describe('create-guren-app CLI', () => {
 
   it('initializes a git repository without committing the generated .env', async () => {
     const workspace = await createTempWorkspace('guren-create-app-cli-git-')
-    // `git commit` needs an identity, and CI runners don't configure one
-    // globally (unlike most developer machines, which is why this only
-    // surfaced in CI). initGitRepository() intentionally leaves that to the
-    // user's own `git config` — scope it here instead so the test observes
-    // the commit succeeding rather than the graceful "identity unset" warning.
-    const gitEnvKeys = ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL'] as const
-    const previousGitEnv = Object.fromEntries(gitEnvKeys.map((key) => [key, process.env[key]]))
-    process.env.GIT_AUTHOR_NAME = 'Guren Test'
-    process.env.GIT_AUTHOR_EMAIL = 'guren-test@example.com'
-    process.env.GIT_COMMITTER_NAME = 'Guren Test'
-    process.env.GIT_COMMITTER_EMAIL = 'guren-test@example.com'
     try {
       await capturedCommand.run({
         args: {
-          target: 'git-app',
+          target: join(workspace.dir, 'git-app'),
           force: false,
           mode: 'spa',
           auth: false,
@@ -395,16 +394,9 @@ describe('create-guren-app CLI', () => {
       expect(files).toContain('.gitignore')
       expect(files).toContain('package.json')
     } finally {
-      for (const key of gitEnvKeys) {
-        if (previousGitEnv[key] === undefined) {
-          delete process.env[key]
-        } else {
-          process.env[key] = previousGitEnv[key]
-        }
-      }
       await workspace.cleanup()
     }
-  })
+  }, GIT_TEST_TIMEOUT_MS)
 
   it('does not commit pre-existing files when --force scaffolds into a used directory', async () => {
     const workspace = await createTempWorkspace('guren-create-app-cli-git-force-')
@@ -416,7 +408,7 @@ describe('create-guren-app CLI', () => {
 
       await capturedCommand.run({
         args: {
-          target: 'used-app',
+          target: join(workspace.dir, 'used-app'),
           force: true,
           mode: 'spa',
           auth: false,
@@ -445,7 +437,7 @@ describe('create-guren-app CLI', () => {
 
       await capturedCommand.run({
         args: {
-          target: 'forced-app',
+          target: join(workspace.dir, 'forced-app'),
           force: true,
           mode: 'spa',
           auth: false,
@@ -471,7 +463,7 @@ describe('create-guren-app CLI', () => {
 
       await capturedCommand.run({
         args: {
-          target: 'nested-app',
+          target: join(workspace.dir, 'nested-app'),
           force: false,
           mode: 'spa',
           auth: false,
@@ -486,14 +478,14 @@ describe('create-guren-app CLI', () => {
     } finally {
       await workspace.cleanup()
     }
-  })
+  }, GIT_TEST_TIMEOUT_MS)
 
   it('leaves SQLite projects without container scripts or driver packages', async () => {
     const workspace = await createTempWorkspace('guren-create-app-cli-sqlite-db-')
     try {
       await capturedCommand.run({
         args: {
-          target: 'lite-app',
+          target: join(workspace.dir, 'lite-app'),
           force: false,
           mode: 'spa',
           auth: false,
