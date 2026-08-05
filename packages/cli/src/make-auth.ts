@@ -1,7 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, relative, resolve, sep as pathSep } from 'node:path'
 import { consola } from 'consola'
-import { writeFilesSafe, type WriterOptions } from './utils'
+import { writeScaffoldFiles, type WriterOptions } from './utils'
 import {
   addImport,
   addProvider,
@@ -2273,7 +2273,7 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
     )
   }
 
-  const created = await writeFilesSafe(files, options)
+  const created = await writeScaffoldFiles(files, options)
 
   await updateSchema(features)
   await updatePageContracts()

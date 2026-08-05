@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { consola } from 'consola'
 
 import type { WriterOptions } from './utils'
-import { safeModuleName, slugifyProse, writeFileSafe } from './utils'
+import { safeModuleName, slugifyProse, writeScaffoldFile } from './utils'
 import {
   discoverControllerFiles,
   discoverResourceFiles,
@@ -217,7 +217,7 @@ export async function makeAdr(title: string, options: MakeAdrOptions = {}): Prom
   ])
   const sequence = await nextSequenceNumber(dir)
 
-  return writeFileSafe(
+  return writeScaffoldFile(
     `${dir}/${sequence}-${adrSlug(title)}.md`,
     adrTemplate(title.trim(), actor, new Date().toISOString(), prefill),
     options,

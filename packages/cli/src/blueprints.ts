@@ -13,7 +13,7 @@ import { makeNotification } from './make-notification'
 import { makeRoute } from './make-route'
 import { makeView } from './make-view'
 import { addImport, addProvider, detectSchemaDialect, ensureDrizzleImports, ensureMysqlImports, ensureSqliteImports, findClosingDelimiter } from './patch-helpers'
-import { camelCase, pascalCase, writeFilesSafe, type WriterOptions } from './utils'
+import { camelCase, pascalCase, writeScaffoldFiles, type WriterOptions } from './utils'
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
@@ -39,7 +39,7 @@ async function scaffoldFeatureFiles(
   files: Array<{ path: string; contents: string }>,
   options: WriterOptions,
 ): Promise<string[]> {
-  return writeFilesSafe(files, options)
+  return writeScaffoldFiles(files, options)
 }
 
 const blueprintRegistry: Record<string, BlueprintDefinition> = {

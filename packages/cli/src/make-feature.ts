@@ -1,5 +1,5 @@
 import { consola } from 'consola'
-import { writeFilesSafe, type WriterOptions, pascalCase, camelCase, kebabCase, pagesAccessor, safeModuleName } from './utils'
+import { writeScaffoldFiles, type WriterOptions, pascalCase, camelCase, kebabCase, pagesAccessor, safeModuleName } from './utils'
 import { pluralize } from './inflect'
 import { makeModel } from './make-model'
 import { makePolicy } from './make-policy'
@@ -45,7 +45,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   // and the ones `make:validator` writes cannot drift apart.
   const validatorPath = await makeValidator(singular, { ...writerOptions, fields })
 
-  const created = await writeFilesSafe([
+  const created = await writeScaffoldFiles([
     {
       path: `${appPrefix}app/Http/Resources/${singular}Resource.ts`,
       contents: generateResource(singular, fields),

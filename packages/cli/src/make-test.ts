@@ -1,4 +1,4 @@
-import { resourceName, trimSlashes, writeFileSafe, ensureSuffix, safeModuleName } from './utils'
+import { resourceName, safePathSegments, writeScaffoldFile, ensureSuffix, safeModuleName } from './utils'
 import type { WriterOptions } from './utils'
 import { fileExists, readIfExists } from './discovery'
 
@@ -76,15 +76,12 @@ export async function makeTest(name: string, options: MakeTestOptions = {}): Pro
     throw new Error('Test name is required.')
   }
 
+  // Validate before `detectRunner()` — it stats up to seven files, and every
+  // one of them is wasted when the name turns out to be a traversal.
+  const segments = safePathSegments(trimmed, 'test name')
   const runner = options.runner ?? (await detectRunner())
 
-  const normalizedPath = trimSlashes(trimmed)
-  if (!normalizedPath) {
-    throw new Error('Test name cannot be empty.')
-  }
-
-  const segments = normalizedPath.split('/').filter(Boolean)
-  const baseSegment = segments.pop() ?? 'Example'
+  const baseSegment = segments.pop()!
   const baseName = baseSegment.replace(/\.(test\.)?(t|j)sx?$/giu, '')
   const { className: baseClassName } = resourceName(baseName)
   const className = options.controller ? ensureSuffix(baseClassName, 'Controller') : baseClassName
@@ -95,5 +92,5 @@ export async function makeTest(name: string, options: MakeTestOptions = {}): Pro
     : `${testRoot}/${[...segments, fileName].join('/')}`
 
   const { runner: _runner, controller: _controller, ...writer } = options
-  return writeFileSafe(filePath, testTemplate(className, runner), writer)
+  return writeScaffoldFile(filePath, testTemplate(className, runner), writer)
 }
