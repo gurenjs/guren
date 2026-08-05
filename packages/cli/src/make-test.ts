@@ -79,7 +79,8 @@ export async function makeTest(name: string, options: MakeTestOptions = {}): Pro
   // Validate before `detectRunner()` — it stats up to seven files, and every
   // one of them is wasted when the name turns out to be a traversal.
   const segments = safePathSegments(trimmed, 'test name')
-  const runner = options.runner ?? (await detectRunner())
+  // Detected in the project being scaffolded into, not the process directory.
+  const runner = options.runner ?? (await detectRunner(options.cwd))
 
   const baseSegment = segments.pop()!
   const baseName = baseSegment.replace(/\.(test\.)?(t|j)sx?$/giu, '')

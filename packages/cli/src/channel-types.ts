@@ -2,12 +2,7 @@ import { readdir, readFile } from 'node:fs/promises'
 import { relative, resolve } from 'node:path'
 import { walk, type BabelNode } from './ast-walk'
 import { parseSourceFile } from './parse-cache'
-import {
-  escapeSingleQuoted as esc,
-  escapeTemplateLiteral as escapeTemplatePart,
-  writeGeneratedFile,
-  type WriterOptions,
-} from './utils'
+import { escapeSingleQuoted as esc, escapeTemplateLiteral as escapeTemplatePart, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 
 export interface GenerateChannelTypesOptions extends WriterOptions {
   appRoot?: string
@@ -35,7 +30,7 @@ const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx'])
 export async function generateChannelTypes(
   options: GenerateChannelTypesOptions = {},
 ): Promise<{ outputPath: string; channels: string[] }> {
-  const appRoot = options.appRoot ? resolve(options.appRoot) : process.cwd()
+  const appRoot = resolveAppRoot(options)
   const sourceDir = resolve(appRoot, options.sourceDir ?? DEFAULT_SOURCE_DIR)
   const outputFile = resolve(appRoot, options.outputFile ?? DEFAULT_OUTPUT_FILE)
 
@@ -45,8 +40,7 @@ export async function generateChannelTypes(
     source: relative(appRoot, sourceDir) || DEFAULT_SOURCE_DIR,
   })
 
-  const relativeTarget = relative(process.cwd(), outputFile) || outputFile
-  const outputPath = await writeGeneratedFile(relativeTarget, module, { force: options.force })
+  const outputPath = await writeGeneratedFileIn(appRoot, outputFile, module, { force: options.force })
 
   return { outputPath, channels }
 }

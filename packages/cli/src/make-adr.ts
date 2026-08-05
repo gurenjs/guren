@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { consola } from 'consola'
 
 import type { WriterOptions } from './utils'
-import { safeModuleName, slugifyProse, writeScaffoldFile } from './utils'
+import { assertCwdUnsupported, safeModuleName, slugifyProse, writeScaffoldFile } from './utils'
 import {
   discoverControllerFiles,
   discoverResourceFiles,
@@ -209,6 +209,7 @@ async function nextSequenceNumber(dir: string): Promise<string> {
 }
 
 export async function makeAdr(title: string, options: MakeAdrOptions = {}): Promise<string> {
+  assertCwdUnsupported(options, 'make:adr')
   const moduleName = options.root ? safeModuleName(options.root) : undefined
   const dir = moduleName ? `modules/${moduleName}/${ADR_DIR}` : ADR_DIR
   const [prefill, actor] = await Promise.all([

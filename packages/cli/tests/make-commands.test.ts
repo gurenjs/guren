@@ -2,23 +2,24 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { makeChannel } from '../src/make-channel'
-import { makeCommand } from '../src/make-command'
-import { makeEvent } from '../src/make-event'
-import { makeException } from '../src/make-exception'
-import { makeFactory } from '../src/make-factory'
-import { makeJob } from '../src/make-job'
-import { makeListener } from '../src/make-listener'
-import { makeMail } from '../src/make-mail'
-import { makeMiddleware } from '../src/make-middleware'
-import { makeNotification } from '../src/make-notification'
-import { makePolicy } from '../src/make-policy'
-import { makeProvider } from '../src/make-provider'
-import { makeResource } from '../src/make-resource'
-import { makeSeeder } from '../src/make-seeder'
-import { makeValidator } from '../src/make-validator'
-import { makeFeature } from '../src/make-feature'
+import { makeChannel as scaffoldChannel } from '../src/make-channel'
+import { makeCommand as scaffoldCommand } from '../src/make-command'
+import { makeEvent as scaffoldEvent } from '../src/make-event'
+import { makeException as scaffoldException } from '../src/make-exception'
+import { makeFactory as scaffoldFactory } from '../src/make-factory'
+import { makeJob as scaffoldJob } from '../src/make-job'
+import { makeListener as scaffoldListener } from '../src/make-listener'
+import { makeMail as scaffoldMail } from '../src/make-mail'
+import { makeMiddleware as scaffoldMiddleware } from '../src/make-middleware'
+import { makeNotification as scaffoldNotification } from '../src/make-notification'
+import { makePolicy as scaffoldPolicy } from '../src/make-policy'
+import { makeProvider as scaffoldProvider } from '../src/make-provider'
+import { makeResource as scaffoldResource } from '../src/make-resource'
+import { makeSeeder as scaffoldSeeder } from '../src/make-seeder'
+import { makeValidator as scaffoldValidator } from '../src/make-validator'
+import { makeFeature as scaffoldFeature } from '../src/make-feature'
 import { parseFieldsString } from '../src/fields'
+import type { WriterOptions } from '../src/utils'
 
 // A fixed, predictable path under the shared OS temp dir let another process
 // pre-plant a symlink there before a test wrote through it. mkdtempSync's
@@ -26,15 +27,58 @@ import { parseFieldsString } from '../src/fields'
 // unguessable, so it has to be created fresh per test rather than reused.
 let TEST_DIR: string
 
+/**
+ * Binds a generator to the per-test workspace, so no test has to chdir() the
+ * shared process, and fails if the generator ignores the directory it was
+ * given.
+ *
+ * The check is what makes the assertions below mean anything. They match on
+ * the returned path (`toContain('app/Jobs/SendEmailJob.ts')`) and on the file
+ * existing — both of which still hold when `cwd` is dropped, because the
+ * generator really did write that file, just into the checkout instead. Only
+ * comparing against the workspace root can tell the two apart.
+ */
+function inWorkspace<O extends WriterOptions, R>(
+  scaffold: (name: string, options?: O) => Promise<R>,
+): (name: string, options?: O) => Promise<R> {
+  return async (name, options) => {
+    const result = await scaffold(name, { ...options, cwd: TEST_DIR } as O)
+
+    for (const written of [result].flat()) {
+      if (typeof written === 'string' && !written.startsWith(TEST_DIR + path.sep)) {
+        throw new Error(
+          `generator ignored cwd and wrote outside the workspace: ${written} (expected under ${TEST_DIR})`,
+        )
+      }
+    }
+
+    return result
+  }
+}
+
+const makeChannel = inWorkspace(scaffoldChannel)
+const makeCommand = inWorkspace(scaffoldCommand)
+const makeEvent = inWorkspace(scaffoldEvent)
+const makeException = inWorkspace(scaffoldException)
+const makeFactory = inWorkspace(scaffoldFactory)
+const makeJob = inWorkspace(scaffoldJob)
+const makeListener = inWorkspace(scaffoldListener)
+const makeMail = inWorkspace(scaffoldMail)
+const makeMiddleware = inWorkspace(scaffoldMiddleware)
+const makeNotification = inWorkspace(scaffoldNotification)
+const makePolicy = inWorkspace(scaffoldPolicy)
+const makeProvider = inWorkspace(scaffoldProvider)
+const makeResource = inWorkspace(scaffoldResource)
+const makeSeeder = inWorkspace(scaffoldSeeder)
+const makeValidator = inWorkspace(scaffoldValidator)
+const makeFeature = inWorkspace(scaffoldFeature)
+
 describe('CLI make:* commands', () => {
   beforeEach(() => {
     TEST_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'guren-cli-test-'))
-    process.chdir(TEST_DIR)
   })
 
   afterEach(() => {
-    // Restore working directory
-    process.chdir('/')
     if (fs.existsSync(TEST_DIR)) {
       fs.rmSync(TEST_DIR, { recursive: true })
     }

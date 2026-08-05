@@ -1,10 +1,5 @@
 import { relative, resolve } from 'node:path'
-import {
-  escapeSingleQuoted as escapeSingleQuotes,
-  escapeTemplateLiteral as escapeTemplateSegment,
-  writeGeneratedFile,
-  type WriterOptions,
-} from './utils'
+import { escapeSingleQuoted as escapeSingleQuotes, escapeTemplateLiteral as escapeTemplateSegment, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 import { loadRouteDefinitions } from './load-routes'
 import {
   DECLARATION_MODULE_AUGMENTATION,
@@ -33,7 +28,7 @@ const DEFAULT_RUNTIME_OUTPUT_FILE = '.guren/routes.gen.ts'
 export async function generateRouteTypes(
   options: GenerateRouteTypesOptions = {},
 ): Promise<{ outputPath: string; runtimeOutputPath: string; definitions: RouteDefinition[] }> {
-  const appRoot = options.appRoot ? resolve(options.appRoot) : process.cwd()
+  const appRoot = resolveAppRoot(options)
   const routesFile = resolve(appRoot, options.routesFile ?? DEFAULT_ROUTES_FILE)
   const outputFile = resolve(appRoot, options.outputFile ?? DEFAULT_OUTPUT_FILE)
   const runtimeOutputFile = resolve(appRoot, options.runtimeOutputFile ?? DEFAULT_RUNTIME_OUTPUT_FILE)
@@ -50,10 +45,8 @@ export async function generateRouteTypes(
     source: relative(appRoot, routesFile) || DEFAULT_ROUTES_FILE,
   })
 
-  const relativeTarget = relative(process.cwd(), outputFile) || outputFile
-  const relativeRuntimeTarget = relative(process.cwd(), runtimeOutputFile) || runtimeOutputFile
-  const outputPath = await writeGeneratedFile(relativeTarget, declaration, { force: options.force })
-  const runtimeOutputPath = await writeGeneratedFile(relativeRuntimeTarget, runtimeModule, { force: options.force })
+  const outputPath = await writeGeneratedFileIn(appRoot, outputFile, declaration, { force: options.force })
+  const runtimeOutputPath = await writeGeneratedFileIn(appRoot, runtimeOutputFile, runtimeModule, { force: options.force })
 
   return {
     outputPath,

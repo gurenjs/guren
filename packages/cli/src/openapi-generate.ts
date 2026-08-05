@@ -1,7 +1,7 @@
 import { resolve } from 'node:path'
 import { loadRouteDefinitions } from './load-routes'
 import { readIfExists } from './discovery'
-import type { WriterOptions } from './utils'
+import { resolveAppRoot, type WriterOptions } from './utils'
 
 export interface GenerateOpenApiSpecOptions extends WriterOptions {
   routesFile?: string
@@ -47,7 +47,7 @@ export async function generateOpenApiSpec(
     importer?: () => Promise<OpenApiModule>
   } = {},
 ): Promise<GenerateOpenApiSpecResult> {
-  const appRoot = options.appRoot ? resolve(options.appRoot) : process.cwd()
+  const appRoot = resolveAppRoot(options)
   const routesFile = resolve(appRoot, options.routesFile ?? DEFAULT_ROUTES_FILE)
   const definitions = await loadRouteDefinitions(routesFile, appRoot)
 

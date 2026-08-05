@@ -1,6 +1,6 @@
 import { readdir } from 'node:fs/promises'
 import { dirname, extname, relative, resolve } from 'node:path'
-import { writeGeneratedFile, type WriterOptions } from './utils'
+import { resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 import { extractPageProps, type ExtractedPageProps } from './page-props-extractor'
 
 export type PageDefinition = {
@@ -35,7 +35,7 @@ export async function appEmitsPageManifest(appRoot: string, pagesDir?: string): 
 export async function generatePageTypes(
   options: GeneratePageTypesOptions = {},
 ): Promise<{ outputPath: string; definitions: PageDefinition[] }> {
-  const appRoot = options.appRoot ? resolve(options.appRoot) : process.cwd()
+  const appRoot = resolveAppRoot(options)
   const pagesDir = resolve(appRoot, options.pagesDir ?? DEFAULT_PAGES_DIR)
   const outputFile = resolve(appRoot, options.outputFile ?? DEFAULT_OUTPUT_FILE)
   const definitions = await collectPageDefinitions(pagesDir)
@@ -68,8 +68,7 @@ export async function generatePageTypes(
     propsMap,
   })
 
-  const relativeTarget = relative(process.cwd(), outputFile) || outputFile
-  const outputPath = await writeGeneratedFile(relativeTarget, module, { force: options.force })
+  const outputPath = await writeGeneratedFileIn(appRoot, outputFile, module, { force: options.force })
 
   return { outputPath, definitions }
 }

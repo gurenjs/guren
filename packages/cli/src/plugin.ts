@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import type { WriterOptions } from './utils'
-import { runCommand } from './utils'
+import { assertCwdUnsupported, runCommand } from './utils'
 import { addImport, addProvider } from './patch-helpers'
 import {
   applyEnvEntries,
@@ -109,6 +109,7 @@ async function hasDependency(packageName: string): Promise<boolean> {
 }
 
 export async function installPlugin(options: InstallPluginOptions): Promise<PluginInstallMessage[]> {
+  assertCwdUnsupported(options, 'guren plugin')
   const packageName = options.packageName.trim()
   if (!packageName) {
     throw new Error('Plugin package name is required.')

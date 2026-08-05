@@ -5,6 +5,17 @@ import { dirname, relative, resolve, sep as pathSep } from 'node:path'
 export interface WriterOptions {
   force?: boolean
   /**
+   * Project root a generator's relative output path resolves against.
+   * Defaults to `process.cwd()`, which is what the one-shot CLI wants.
+   *
+   * Callers that are not a one-shot process name the directory instead of
+   * steering into it: `process.cwd()` is per-process state, so `chdir` is
+   * never a local choice. `guren mcp` serves a workspace from a long-lived
+   * server where it would race concurrent requests, and Bun runs every test
+   * file in one process where it relocates all the others.
+   */
+  cwd?: string
+  /**
    * When set (via `--module <name>`), prefixes a generator's output
    * directory with `modules/<kebab-case root>/` instead of writing to the
    * project root — e.g. `app/Http/Controllers` becomes
@@ -73,9 +84,15 @@ export async function runCommand(
  * out. Codegen is the reason the check cannot simply live in `writeFileSafe`:
  * `guren codegen --out` takes a caller-supplied directory that may
  * legitimately sit outside `process.cwd()`.
+ *
+ * `cwd` has to be the same root the write itself resolves against — both are
+ * taken from one `WriterOptions` in `writeScaffoldFile`. Checking containment
+ * against one directory while writing relative to another is not a weaker
+ * guard, it is no guard at all: every path sits inside a root that nothing is
+ * ever written to.
  */
-export function assertScaffoldPath(relativePath: string): void {
-  const root = process.cwd()
+export function assertScaffoldPath(relativePath: string, cwd: string = process.cwd()): void {
+  const root = resolve(cwd)
   const fullPath = resolve(root, relativePath)
 
   if (fullPath !== root && !fullPath.startsWith(root + pathSep)) {
@@ -85,18 +102,31 @@ export function assertScaffoldPath(relativePath: string): void {
   }
 }
 
+/**
+ * Resolves the root a writer works against, once.
+ *
+ * Callers must pin this before checking a path and reuse the result for the
+ * write, rather than reading `options.cwd` twice: with `cwd` omitted or
+ * relative, the second read can land on a different directory than the one
+ * that was checked, and the containment check then guarantees nothing.
+ */
+function writeRoot(options: WriterOptions): string {
+  return resolve(options.cwd ?? process.cwd())
+}
+
 /** `writeFileSafe` for generated scaffolds: containment-checked. */
 export async function writeScaffoldFile(
   relativePath: string,
   contents: string,
   options: WriterOptions = {},
 ): Promise<string> {
-  assertScaffoldPath(relativePath)
-  return writeFileSafe(relativePath, contents, options)
+  const cwd = writeRoot(options)
+  assertScaffoldPath(relativePath, cwd)
+  return writeFileSafe(relativePath, contents, { ...options, cwd })
 }
 
 export async function writeFileSafe(relativePath: string, contents: string, options: WriterOptions = {}): Promise<string> {
-  const fullPath = resolve(process.cwd(), relativePath)
+  const fullPath = resolve(options.cwd ?? process.cwd(), relativePath)
 
   await mkdir(dirname(fullPath), { recursive: true })
   try {
@@ -132,7 +162,7 @@ export async function writeGeneratedFile(
   contents: string,
   options: WriterOptions = {},
 ): Promise<string> {
-  const fullPath = resolve(process.cwd(), relativePath)
+  const fullPath = resolve(options.cwd ?? process.cwd(), relativePath)
 
   try {
     if ((await readFile(fullPath, 'utf8')) === contents) {
@@ -147,19 +177,78 @@ export async function writeGeneratedFile(
   return writeFileSafe(relativePath, contents, options)
 }
 
+/**
+ * `writeGeneratedFile` for an artifact whose absolute path was already built
+ * from `appRoot`. Keeps the "already exists" message project-relative while
+ * pinning the write to the same root the path came from.
+ */
+export async function writeGeneratedFileIn(
+  appRoot: string,
+  outputFile: string,
+  contents: string,
+  options: WriterOptions = {},
+): Promise<string> {
+  const root = resolve(appRoot)
+  return writeGeneratedFile(relative(root, outputFile) || outputFile, contents, {
+    ...options,
+    cwd: root,
+  })
+}
+
+/**
+ * The project root a command works in: an explicit `appRoot`, else the `cwd`
+ * every `WriterOptions` carries, else the process directory.
+ */
+export function resolveAppRoot(options: { appRoot?: string } & WriterOptions): string {
+  return resolve(options.appRoot ?? options.cwd ?? process.cwd())
+}
+
+/**
+ * Copies the whole of `WriterOptions` across when a command builds a fresh
+ * options bag for a generator it composes.
+ *
+ * Rebuilding the bag field by field is how `cwd` gets silently dropped and the
+ * generator writes to the process directory instead of the requested one; this
+ * keeps the field list in one place so a new option reaches every caller.
+ */
+export function writerOptionsFrom(options: WriterOptions): WriterOptions {
+  return { force: Boolean(options.force), root: options.root, cwd: options.cwd }
+}
+
+/**
+ * Refuses an explicit `cwd` on a command that cannot honour it yet.
+ *
+ * `cwd` rides on the shared `WriterOptions`, so commands inherit the field
+ * long before they thread it through every path they touch. Those commands
+ * write some files relative to `cwd` and others relative to the process
+ * directory, which splits one scaffold across two projects. Until each is
+ * migrated, passing `cwd` fails loudly rather than half-working. Omitting it
+ * is unaffected, so no existing caller changes behaviour.
+ */
+export function assertCwdUnsupported(options: WriterOptions, command: string): void {
+  if (options.cwd === undefined) return
+  throw new Error(
+    `${command} does not support an explicit cwd yet — it still resolves part of its work against `
+    + `the process directory, so honouring cwd here would scaffold into two projects at once. `
+    + `Run it with the process working directory set to the target project instead.`,
+  )
+}
+
 /** `writeScaffoldFile` over a batch — every path is checked before any write. */
 export async function writeScaffoldFiles(
   entries: Array<{ path: string; contents: string }>,
   options: WriterOptions = {},
 ): Promise<string[]> {
+  const cwd = writeRoot(options)
+
   for (const entry of entries) {
-    assertScaffoldPath(entry.path)
+    assertScaffoldPath(entry.path, cwd)
   }
 
   const created: string[] = []
 
   for (const entry of entries) {
-    created.push(await writeFileSafe(entry.path, entry.contents, options))
+    created.push(await writeFileSafe(entry.path, entry.contents, { ...options, cwd }))
   }
 
   return created

@@ -59,11 +59,16 @@ function commandSpecifier(fromFile: string, file: string): string {
  * whenever the target file is missing or shaped in a way the patch can't
  * edit — never failing the scaffold itself over it. `guren check` reports
  * whatever stays unregistered.
+ *
+ * Takes only `root`, not the full `MakeCommandOptions`: the patching goes
+ * through `patch-helpers`, which still resolves against `process.cwd()`, so
+ * the signature does not advertise a `cwd` it would ignore. Follow
+ * `readSchemaDialect(cwd = process.cwd())` in that file when threading it.
  */
 export async function registerScaffoldedCommand(
   name: string,
   file: string,
-  options: MakeCommandOptions = {},
+  options: Pick<MakeCommandOptions, 'root'> = {},
 ): Promise<void> {
   const className = ensureSuffix(resourceName(name).className, 'Command')
 
