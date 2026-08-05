@@ -1,5 +1,5 @@
 import { consola } from 'consola'
-import { camelCase, pascalCase, relativeImportPath, safeModuleName, writeFilesSafe, type WriterOptions } from './utils'
+import { camelCase, pascalCase, relativeImportPath, safeModuleName, writeScaffoldFiles, type WriterOptions } from './utils'
 import { addImport, addToArrayOption } from './patch-helpers'
 import { fileExists } from './discovery'
 
@@ -46,7 +46,7 @@ export function register${pascalName}Routes(router: Router): void {
 // Re-exported into the project's db/schema.ts by \`guren make:module\`.
 `
 
-  const filesCreated = await writeFilesSafe(
+  const filesCreated = await writeScaffoldFiles(
     [
       { path: `${moduleDir}/index.ts`, contents: indexContents },
       { path: `${moduleDir}/routes.ts`, contents: routesContents },

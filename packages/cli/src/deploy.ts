@@ -1,6 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
-import { kebabCase, writeFilesSafe, type WriterOptions } from './utils'
+import { kebabCase, writeScaffoldFiles, type WriterOptions } from './utils'
 
 export type DeployTarget = 'docker' | 'fly' | 'railway' | 'all'
 
@@ -160,5 +160,5 @@ export async function scaffoldDeploy(options: DeployOptions = {}): Promise<strin
   const port = normalizePort(options.port)
   const appName = sanitizeFlyAppName(options.appName ?? await inferAppName())
   const files = filesForTarget(target, appName, port)
-  return writeFilesSafe(files, { force: Boolean(options.force) })
+  return writeScaffoldFiles(files, { force: Boolean(options.force) })
 }

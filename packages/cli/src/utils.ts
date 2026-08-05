@@ -59,6 +59,42 @@ export async function runCommand(
   })
 }
 
+/**
+ * Throws unless `relativePath` stays under the project root.
+ *
+ * Scaffolders build their output path out of a name they were handed, and
+ * those names are not all developer-typed: `guren mcp` exposes them as a
+ * request field. `..` survives both `trimSlashes()` and `kebabCase()`, so
+ * without this a name like `../../../../tmp/evil` writes outside the project.
+ *
+ * Reach for it through `writeScaffoldFile`/`writeScaffoldFiles` rather than
+ * calling it directly — a generator that picks the right writer gets
+ * containment for free, and one that picks `writeFileSafe` is visibly opting
+ * out. Codegen is the reason the check cannot simply live in `writeFileSafe`:
+ * `guren codegen --out` takes a caller-supplied directory that may
+ * legitimately sit outside `process.cwd()`.
+ */
+export function assertScaffoldPath(relativePath: string): void {
+  const root = process.cwd()
+  const fullPath = resolve(root, relativePath)
+
+  if (fullPath !== root && !fullPath.startsWith(root + pathSep)) {
+    throw new Error(
+      `Refusing to write "${relativePath}" — it resolves outside the project root (${fullPath}).`,
+    )
+  }
+}
+
+/** `writeFileSafe` for generated scaffolds: containment-checked. */
+export async function writeScaffoldFile(
+  relativePath: string,
+  contents: string,
+  options: WriterOptions = {},
+): Promise<string> {
+  assertScaffoldPath(relativePath)
+  return writeFileSafe(relativePath, contents, options)
+}
+
 export async function writeFileSafe(relativePath: string, contents: string, options: WriterOptions = {}): Promise<string> {
   const fullPath = resolve(process.cwd(), relativePath)
 
@@ -111,10 +147,15 @@ export async function writeGeneratedFile(
   return writeFileSafe(relativePath, contents, options)
 }
 
-export async function writeFilesSafe(
+/** `writeScaffoldFile` over a batch — every path is checked before any write. */
+export async function writeScaffoldFiles(
   entries: Array<{ path: string; contents: string }>,
   options: WriterOptions = {},
 ): Promise<string[]> {
+  for (const entry of entries) {
+    assertScaffoldPath(entry.path)
+  }
+
   const created: string[] = []
 
   for (const entry of entries) {
@@ -132,7 +173,7 @@ export async function scaffoldFile(name: string, config: ScaffoldConfig, options
   const dir = options.root ? `modules/${safeModuleName(options.root)}/${config.dir}` : config.dir
   const filePath = extension ? `${dir}/${baseName}.${extension}` : `${dir}/${baseName}`
   const contents = config.template({ rawName: name, className, fileName, normalizedName })
-  return writeFileSafe(filePath, contents, options)
+  return writeScaffoldFile(filePath, contents, options)
 }
 
 export function pascalCase(value: string): string {
@@ -242,6 +283,45 @@ export function safeModuleName(value: string): string {
     )
   }
   return name
+}
+
+/** A backslash is a separator on Windows; NUL truncates the path syscall-side. */
+const PATH_SEGMENT_SEPARATOR_RE = /[\\\u0000]/u
+
+/**
+ * Splits a nested generator name (`make:view posts/Index`,
+ * `make:test auth/Login`) into path segments, rejecting any segment that is a
+ * directory traversal rather than a name.
+ *
+ * `trimSlashes()` only touches the edges, so `..` survives
+ * `split('/').filter(Boolean)` — it is non-empty — and walks out of the
+ * generator's output directory once interpolated into the path. Segments are
+ * rejected rather than stripped because nesting is the documented feature
+ * here: silently rewriting the path would put the file somewhere the caller
+ * did not ask for.
+ *
+ * Only traversal is rejected, not unusual characters. `pascalCase()` already
+ * accepts space-separated words, so narrowing to an identifier charset here
+ * would break `make:test "admin/my page"` — which the filesystem, and every
+ * release before this check, accepted.
+ */
+export function safePathSegments(value: string, label: string): string[] {
+  const segments = trimSlashes(value).split('/').filter(Boolean)
+
+  if (segments.length === 0) {
+    throw new Error(`A ${label} is required.`)
+  }
+
+  for (const segment of segments) {
+    if (segment === '.' || segment === '..' || PATH_SEGMENT_SEPARATOR_RE.test(segment)) {
+      throw new Error(
+        `Invalid ${label} "${value}" — "${segment}" is a path traversal, not a name. `
+        + `Use plain nested names such as "posts/Index".`,
+      )
+    }
+  }
+
+  return segments
 }
 
 export function resourceName(value: string): { className: string; fileName: string } {

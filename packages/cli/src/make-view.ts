@@ -1,5 +1,5 @@
 import type { WriterOptions } from './utils'
-import { pascalCase, trimSlashes, writeFileSafe } from './utils'
+import { pascalCase, safePathSegments, writeScaffoldFile } from './utils'
 
 const VIEW_ROOT = 'resources/js/pages'
 
@@ -24,8 +24,8 @@ export default ${componentName}
 }
 
 export async function makeView(name: string, options: WriterOptions = {}): Promise<string> {
-  const normalized = trimSlashes(name)
-  const componentName = pascalCase(normalized.split('/').pop() ?? normalized)
-  const filePath = `${VIEW_ROOT}/${normalized}.tsx`
-  return writeFileSafe(filePath, viewTemplate(componentName), options)
+  const segments = safePathSegments(name, 'view name')
+  const componentName = pascalCase(segments[segments.length - 1]!)
+  const filePath = `${VIEW_ROOT}/${segments.join('/')}.tsx`
+  return writeScaffoldFile(filePath, viewTemplate(componentName), options)
 }

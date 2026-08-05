@@ -19,6 +19,31 @@ describe('makeTest', () => {
     }
   })
 
+  it('keeps accepting a name with a space, the way pascalCase always has', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-test-space-')
+    try {
+      const result = await makeTest('admin/my page', { runner: 'bun' })
+
+      expect(result).toContain('tests/admin/MyPage.test.ts')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('rejects directory segments that escape the test root', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-test-traversal-')
+    try {
+      await expect(makeTest('../../../../tmp/evil/x', { runner: 'bun', force: true })).rejects.toThrow(
+        'is a path traversal',
+      )
+      await expect(makeTest('auth/../../../tmp/evil/x', { runner: 'bun', force: true })).rejects.toThrow(
+        'is a path traversal',
+      )
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('throws when the test name is empty', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-test-empty-')
     try {

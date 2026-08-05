@@ -23,14 +23,22 @@ export function generateId(): string {
 
 /**
  * Securely compare two hex strings using timing-safe comparison.
+ *
+ * Input that is not strict, even-length hex is rejected rather than compared:
+ * `Buffer.from(value, 'hex')` stops at the first invalid pair, so 'zzzz' and
+ * 'yyyy' both decode to nothing — and 'abcz' and 'abdz' both decode to the
+ * one byte they share — and would compare equal. A short decode is how the
+ * decoder reports that, which beats restating its grammar in a regex here.
+ * Use `secureStringCompare` for values that are not hex.
  */
 export function secureCompare(a: string, b: string): boolean {
   if (a.length !== b.length) return false
-  try {
-    return timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'))
-  } catch {
-    return false
-  }
+
+  const bufA = Buffer.from(a, 'hex')
+  const bufB = Buffer.from(b, 'hex')
+  if (bufA.length !== a.length / 2 || bufB.length !== b.length / 2) return false
+
+  return timingSafeEqual(bufA, bufB)
 }
 
 /**

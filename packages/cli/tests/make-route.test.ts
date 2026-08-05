@@ -21,6 +21,20 @@ describe('makeRoute', () => {
     }
   })
 
+  // `make:route` keeps the kebab-cased name as the file name, and `kebabCase()`
+  // preserves `/` and `.` — so the containment check in the scaffold writer is
+  // the only thing between the raw name and a write outside the project.
+  it('refuses a name whose file name escapes the output directory', async () => {
+    const workspace = await createTempWorkspace('guren-cli-route-escape-')
+    try {
+      await expect(makeRoute('../../../../tmp/evil', { force: true })).rejects.toThrow(
+        'resolves outside the project root',
+      )
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   // The controller name has to be the one make:feature generates. Stripping a
   // lone trailing `s` gave `CategorieController` for `categories`, so the route
   // pointed at a controller no other generator ever writes.
