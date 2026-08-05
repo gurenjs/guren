@@ -9,7 +9,7 @@
 
 Laravel-style conventions, end-to-end type safety, and built-in agent introspection and verification — routing, controllers, ORM, authentication, and Inertia.js + React in one cohesive experience that humans and AI coding agents navigate from the same map.
 
-> **v1.0** — Stable. Breaking changes only in major releases, per the [release policy](docs/en/guides/release-policy.md).
+> **v2** — Stable. Breaking changes only in major releases, per the [release policy](docs/en/guides/release-policy.md).
 
 ---
 
@@ -54,7 +54,7 @@ Run `bun run codegen` after adding features to regenerate types. When you are re
 - **Agent-ready by default** — `guren context` hands an agent the project map with API signatures, `guren check` and `guren audit` verify its work mechanically, and every new app ships an agent harness. In a [public, blind-scored evaluation](https://github.com/gurenjs/framework-comparison/tree/main/agent-eval), every agent trial shipped a working feature
 - **Laravel-style MVC** — routes, controllers, and an Eloquent-inspired Model API
 - **Inertia.js + React** — SPA-like UX without a separate frontend app
-- **Drizzle ORM** — swap database backends through an adapter (PostgreSQL / SQLite)
+- **Drizzle ORM** — swap database backends through an adapter (PostgreSQL / MySQL / SQLite)
 - **End-to-end type safety** — `bunx guren codegen` generates types from schema to frontend props
 - **Batteries included** — auth, queues, mail, cache, notifications, storage, broadcasting, scheduling
 - **Bun-first, deploy anywhere** — develop on the Bun toolchain, then self-host on a Bun server or ship to AWS Lambda, Vercel, or Cloudflare Workers with first-party plugins
