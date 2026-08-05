@@ -5,8 +5,8 @@
  * a fully typed client interface for consuming Guren APIs from
  * separate frontend applications.
  */
-import { relative, resolve } from 'node:path'
-import { escapeSingleQuoted as escapeSingleQuotes, writeGeneratedFile, type WriterOptions } from './utils'
+import { resolve } from 'node:path'
+import { escapeSingleQuoted as escapeSingleQuotes, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 import { schemaToTypeString } from './schema-type-extractor'
 
 export interface RouteDefinitionLike {
@@ -38,13 +38,12 @@ export async function generateApiClientTypes(
   definitions: RouteDefinitionLike[],
   options: GenerateApiClientOptions = {},
 ): Promise<{ outputPath: string }> {
-  const appRoot = options.appRoot ? resolve(options.appRoot) : process.cwd()
+  const appRoot = resolveAppRoot(options)
   const outputFile = resolve(appRoot, options.outputFile ?? DEFAULT_OUTPUT_FILE)
 
   const module = buildApiClientContent(definitions)
 
-  const relativeTarget = relative(process.cwd(), outputFile) || outputFile
-  const outputPath = await writeGeneratedFile(relativeTarget, module, { force: options.force })
+  const outputPath = await writeGeneratedFileIn(appRoot, outputFile, module, { force: options.force })
 
   return { outputPath }
 }

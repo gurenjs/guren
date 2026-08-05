@@ -1,0 +1,6 @@
+# `bun test` run from this directory (the package's own `test` script) does not
+# inherit the root bunfig, and `scripts/test-packages.ts` only passes --preload
+# on the monorepo-wide run. Without this, the package-local path — the one that
+# exercises the make:* generators most heavily — runs unguarded.
+[test]
+preload = ["../../scripts/test-cwd-guard.ts"]

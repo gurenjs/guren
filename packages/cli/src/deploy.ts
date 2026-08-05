@@ -1,6 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
-import { kebabCase, writeScaffoldFiles, type WriterOptions } from './utils'
+import { assertCwdUnsupported, kebabCase, writeScaffoldFiles, type WriterOptions } from './utils'
 
 export type DeployTarget = 'docker' | 'fly' | 'railway' | 'all'
 
@@ -156,6 +156,7 @@ function filesForTarget(target: DeployTarget, appName: string, port: number): De
 }
 
 export async function scaffoldDeploy(options: DeployOptions = {}): Promise<string[]> {
+  assertCwdUnsupported(options, 'guren deploy')
   const target = options.target ?? 'docker'
   const port = normalizePort(options.port)
   const appName = sanitizeFlyAppName(options.appName ?? await inferAppName())

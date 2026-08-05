@@ -2,14 +2,23 @@ import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mc
 import { z } from 'zod'
 
 /**
- * Options the `.guren/*.gen.ts` generators are called with. Only `force`
- * reaches them — they resolve every path against the process cwd, which the
- * codegen tool sets before calling. `cwd` rides along to name the project the
- * call is for.
+ * Options the `.guren/*.gen.ts` generators are called with. `cwd` is the
+ * project they resolve every output path against; nothing here changes
+ * `process.cwd()`, which is process-wide and shared by concurrent requests.
  */
 export interface CodegenOptions {
   cwd: string
   force?: boolean
+}
+
+/**
+ * What every scaffolder takes. `cwd` names the project the scaffold belongs
+ * to, for the same reason: this server handles requests for a workspace
+ * without a per-request `process.cwd()` to fall back on.
+ */
+export interface ScaffoldOptions {
+  force?: boolean
+  cwd?: string
 }
 
 /**
@@ -71,13 +80,13 @@ export interface GurenCliApi {
   suggestNextSteps(opts: { cwd: string }): Promise<unknown>
   makeFeature(
     name: string,
-    opts: { fields?: string; withTest?: boolean; force?: boolean },
+    opts: ScaffoldOptions & { fields?: string; withTest?: boolean },
   ): Promise<string[]>
-  makeController(name: string, opts: { force?: boolean }): Promise<string | string[]>
-  makeModel(name: string, opts: { force?: boolean }): Promise<string | string[]>
-  makeView(name: string, opts: { force?: boolean }): Promise<string | string[]>
-  makeTest(name: string, opts: { force?: boolean }): Promise<string | string[]>
-  makeRoute(name: string, opts: { force?: boolean }): Promise<string | string[]>
+  makeController(name: string, opts: ScaffoldOptions): Promise<string | string[]>
+  makeModel(name: string, opts: ScaffoldOptions): Promise<string | string[]>
+  makeView(name: string, opts: ScaffoldOptions): Promise<string | string[]>
+  makeTest(name: string, opts: ScaffoldOptions): Promise<string | string[]>
+  makeRoute(name: string, opts: ScaffoldOptions): Promise<string | string[]>
   generateRouteTypes(opts: CodegenOptions): Promise<CodegenResult | void>
   generatePageTypes(opts: CodegenOptions): Promise<CodegenResult | void>
   generateDataTypes(opts: CodegenOptions): Promise<CodegenResult | void>
@@ -257,15 +266,9 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
       force: z.boolean().default(false).describe('Overwrite existing files'),
     },
     async ({ name, fields, withTest, force }) => {
-      const originalCwd = process.cwd()
-      try {
-        process.chdir(cwd)
-        const createdFiles = await cli.makeFeature(name, { fields, withTest, force })
-        return {
-          content: [{ type: 'text', text: JSON.stringify({ created: createdFiles }, null, 2) }],
-        }
-      } finally {
-        process.chdir(originalCwd)
+      const createdFiles = await cli.makeFeature(name, { fields, withTest, force, cwd })
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ created: createdFiles }, null, 2) }],
       }
     },
   )
@@ -299,40 +302,34 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
       force: z.boolean().default(false).describe('Overwrite existing files'),
     },
     async ({ type, name, force }) => {
-      const originalCwd = process.cwd()
-      try {
-        process.chdir(cwd)
-        const makers: Record<
-          string,
-          ((name: string, opts: { force?: boolean }) => Promise<string | string[]>) | undefined
-        > = {
-          controller: cli.makeController,
-          model: cli.makeModel,
-          view: cli.makeView,
-          test: cli.makeTest,
-          route: cli.makeRoute,
-        }
+      const makers: Record<
+        string,
+        ((name: string, opts: ScaffoldOptions) => Promise<string | string[]>) | undefined
+      > = {
+        controller: cli.makeController,
+        model: cli.makeModel,
+        view: cli.makeView,
+        test: cli.makeTest,
+        route: cli.makeRoute,
+      }
 
-        const maker = makers[type]
-        if (!maker) {
-          return {
-            content: [
-              {
-                type: 'text' as const,
-                text: `Component type "${type}" is not yet supported via MCP. Use the CLI: bunx guren make:${type} ${name}`,
-              },
-            ],
-            isError: true,
-          }
-        }
-
-        const result = await maker(name, { force })
-        const created = Array.isArray(result) ? result : [result]
+      const maker = makers[type]
+      if (!maker) {
         return {
-          content: [{ type: 'text', text: JSON.stringify({ created }, null, 2) }],
+          content: [
+            {
+              type: 'text' as const,
+              text: `Component type "${type}" is not yet supported via MCP. Use the CLI: bunx guren make:${type} ${name}`,
+            },
+          ],
+          isError: true,
         }
-      } finally {
-        process.chdir(originalCwd)
+      }
+
+      const result = await maker(name, { force, cwd })
+      const created = Array.isArray(result) ? result : [result]
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ created }, null, 2) }],
       }
     },
   )
@@ -342,74 +339,67 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
     'Generate the type-safe route, page, data, and channel manifests plus the API client (.guren/ and types/generated/).',
     {},
     async () => {
-      const originalCwd = process.cwd()
-      try {
-        process.chdir(cwd)
+      // `force` matches what `guren codegen` passes: every artifact below is
+      // generated output, so overwriting it is the whole point — without it
+      // the writer rejects each one as "already exists" from the second run
+      // onwards.
+      const options: CodegenOptions = { cwd, force: true }
 
-        // `force` matches what `guren codegen` passes: every artifact below is
-        // generated output, so overwriting it is the whole point — without it
-        // the writer rejects each one as "already exists" from the second run
-        // onwards.
-        const options: CodegenOptions = { cwd, force: true }
+      const generated: string[] = []
+      const skipped: Array<{ artifacts: string[]; reason: string }> = []
+      let failed = false
 
-        const generated: string[] = []
-        const skipped: Array<{ artifacts: string[]; reason: string }> = []
-        let failed = false
-
-        /**
-         * Runs one generator and files its artifacts under `generated` or
-         * `skipped`. A generator that returns an empty `outputPath` had
-         * nothing to describe, which is a normal shape for a project rather
-         * than a failure; a throw is the opposite, and is what `isError`
-         * reports on.
-         */
-        const run = async (
-          artifacts: string[],
-          generate: () => Promise<CodegenResult | void>,
-        ): Promise<CodegenResult | void> => {
-          try {
-            const result = await generate()
-            if (result?.outputPath === '') {
-              skipped.push({ artifacts, reason: 'nothing to generate' })
-            } else {
-              generated.push(...artifacts)
-            }
-            return result
-          } catch (error) {
-            failed = true
-            skipped.push({
-              artifacts,
-              reason: error instanceof Error ? error.message : String(error),
-            })
+      /**
+       * Runs one generator and files its artifacts under `generated` or
+       * `skipped`. A generator that returns an empty `outputPath` had
+       * nothing to describe, which is a normal shape for a project rather
+       * than a failure; a throw is the opposite, and is what `isError`
+       * reports on.
+       */
+      const run = async (
+        artifacts: string[],
+        generate: () => Promise<CodegenResult | void>,
+      ): Promise<CodegenResult | void> => {
+        try {
+          const result = await generate()
+          if (result?.outputPath === '') {
+            skipped.push({ artifacts, reason: 'nothing to generate' })
+          } else {
+            generated.push(...artifacts)
           }
+          return result
+        } catch (error) {
+          failed = true
+          skipped.push({
+            artifacts,
+            reason: error instanceof Error ? error.message : String(error),
+          })
         }
+      }
 
-        // Ordered as `guren codegen` orders it, and for the same reason at the
-        // end: the API client is built from the route manifest, so it can only
-        // run once routes has produced one.
-        const routes = await run(
-          ['.guren/routes.gen.ts', 'types/generated/routes.d.ts'],
-          () => cli.generateRouteTypes(options),
-        )
-        await run(['.guren/pages.gen.ts'], () => cli.generatePageTypes(options))
-        await run(['.guren/data.gen.ts'], () => cli.generateDataTypes(options))
-        await run(['.guren/channels.gen.ts'], () => cli.generateChannelTypes(options))
-        await run(['.guren/api-client.gen.ts'], () => {
-          if (!routes?.definitions) {
-            throw new Error('route generation produced no manifest to build a client from')
-          }
-          return cli.generateApiClientTypes(routes.definitions, options)
-        })
-
-        return {
-          content: [{ type: 'text', text: JSON.stringify({ generated, skipped }, null, 2) }],
-          // A generator that found nothing to describe is not a failure — an
-          // app with no page components is a normal shape — so only a thrown
-          // one makes the run an error, even when other artifacts landed.
-          isError: failed,
+      // Ordered as `guren codegen` orders it, and for the same reason at the
+      // end: the API client is built from the route manifest, so it can only
+      // run once routes has produced one.
+      const routes = await run(
+        ['.guren/routes.gen.ts', 'types/generated/routes.d.ts'],
+        () => cli.generateRouteTypes(options),
+      )
+      await run(['.guren/pages.gen.ts'], () => cli.generatePageTypes(options))
+      await run(['.guren/data.gen.ts'], () => cli.generateDataTypes(options))
+      await run(['.guren/channels.gen.ts'], () => cli.generateChannelTypes(options))
+      await run(['.guren/api-client.gen.ts'], () => {
+        if (!routes?.definitions) {
+          throw new Error('route generation produced no manifest to build a client from')
         }
-      } finally {
-        process.chdir(originalCwd)
+        return cli.generateApiClientTypes(routes.definitions, options)
+      })
+
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ generated, skipped }, null, 2) }],
+        // A generator that found nothing to describe is not a failure — an
+        // app with no page components is a normal shape — so only a thrown
+        // one makes the run an error, even when other artifacts landed.
+        isError: failed,
       }
     },
   )

@@ -16,6 +16,8 @@
 // Positional arguments select packages by directory name or package name.
 // Everything after a bare `--` is forwarded to `bun test` verbatim.
 
+import { join } from 'node:path'
+
 import { collectPackages, parseArgs, repoRoot, selectPackages } from './workspace-packages.ts'
 
 // Packages on a runner other than Bun's own (@guren/testing uses vitest) keep
@@ -61,11 +63,24 @@ async function testPathFor(pkg: { dir: string; relativeDir: string }): Promise<s
   return pkg.relativeDir
 }
 
+// Fails any test that leaves process.cwd() somewhere unexpected, or scaffolds
+// into the checkout. Absolute, because a relative preload path stops resolving
+// the moment cwd moves.
+const cwdGuard = join(import.meta.dir, 'test-cwd-guard.ts')
+
+// The guard's own predicates live outside packages/, so a package sweep would
+// never run them — and a detector that silently stops detecting is worth
+// nothing. Included only on an unfiltered run, so `test:bun cli` stays narrow.
+const guardTests = selectors.length === 0 ? ['scripts/test-cwd-guard.test.ts'] : []
+
 const testArgs = [
   'test',
   '--isolate',
+  '--preload',
+  cwdGuard,
   ...forwarded,
   ...(await Promise.all(targets.map(testPathFor))),
+  ...guardTests,
 ]
 
 console.log(`[test] ${targets.map((pkg) => pkg.name).join(', ')}`)

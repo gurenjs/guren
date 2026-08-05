@@ -1,5 +1,5 @@
 import { consola } from 'consola'
-import { camelCase, pascalCase, relativeImportPath, safeModuleName, writeScaffoldFiles, type WriterOptions } from './utils'
+import { assertCwdUnsupported, camelCase, pascalCase, relativeImportPath, safeModuleName, writeScaffoldFiles, type WriterOptions } from './utils'
 import { addImport, addToArrayOption } from './patch-helpers'
 import { fileExists } from './discovery'
 
@@ -20,6 +20,7 @@ export interface MakeModuleResult {
  * hand-edited app.ts.
  */
 export async function makeModule(name: string, options: WriterOptions = {}): Promise<MakeModuleResult> {
+  assertCwdUnsupported(options, 'make:module')
   const moduleName = safeModuleName(name)
   const pascalName = pascalCase(name)
   const camelName = camelCase(name)

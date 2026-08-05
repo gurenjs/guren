@@ -1,5 +1,5 @@
 import { consola } from 'consola'
-import { writeScaffoldFiles, type WriterOptions, pascalCase, camelCase, kebabCase, pagesAccessor, safeModuleName } from './utils'
+import { camelCase, kebabCase, pagesAccessor, pascalCase, safeModuleName, writeScaffoldFiles, writerOptionsFrom, type WriterOptions } from './utils'
 import { pluralize } from './inflect'
 import { makeModel } from './make-model'
 import { makePolicy } from './make-policy'
@@ -29,7 +29,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   const variableName = singular.charAt(0).toLowerCase() + singular.slice(1)
   const withAuth = !options.publicAccess
   const withPolicy = Boolean(options.withPolicy)
-  const writerOptions: WriterOptions = { force: Boolean(options.force), root: options.root }
+  const writerOptions: WriterOptions = writerOptionsFrom(options)
 
   // `--module <name>` moves app/ output under modules/<name>/ (handled by
   // scaffoldFile for makeModel/makePolicy/makeTest below), but pages are

@@ -7,7 +7,7 @@
  */
 import { readdir, readFile } from 'node:fs/promises'
 import { dirname, extname, relative, resolve } from 'node:path'
-import { writeGeneratedFile, type WriterOptions } from './utils'
+import { resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 import { parseSourceFile } from './parse-cache'
 
 export interface ResourceDefinition {
@@ -33,7 +33,7 @@ const DEFAULT_OUTPUT_FILE = '.guren/data.gen.ts'
 export async function generateDataTypes(
   options: GenerateDataTypesOptions = {},
 ): Promise<{ outputPath: string; definitions: ResourceDefinition[] }> {
-  const appRoot = options.appRoot ? resolve(options.appRoot) : process.cwd()
+  const appRoot = resolveAppRoot(options)
   const resourcesDir = resolve(appRoot, options.resourcesDir ?? DEFAULT_RESOURCES_DIR)
   const outputFile = resolve(appRoot, options.outputFile ?? DEFAULT_OUTPUT_FILE)
   const outputDirectory = dirname(outputFile)
@@ -49,8 +49,7 @@ export async function generateDataTypes(
     source: relative(appRoot, resourcesDir) || DEFAULT_RESOURCES_DIR,
   })
 
-  const relativeTarget = relative(process.cwd(), outputFile) || outputFile
-  const outputPath = await writeGeneratedFile(relativeTarget, module, { force: options.force })
+  const outputPath = await writeGeneratedFileIn(appRoot, outputFile, module, { force: options.force })
 
   return { outputPath, definitions }
 }

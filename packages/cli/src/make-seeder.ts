@@ -14,7 +14,7 @@ export default defineSeeder(async ({ db }: ${context}) => {
 }
 
 export async function makeSeeder(name: string, options: WriterOptions = {}): Promise<string> {
-  const context = seederContextTypes[await readSchemaDialect()]
+  const context = seederContextTypes[await readSchemaDialect(options.cwd)]
 
   return scaffoldFile(name, {
     dir: DB_ARTIFACT_DIRS.Seeder,

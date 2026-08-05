@@ -1,7 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, relative, resolve, sep as pathSep } from 'node:path'
 import { consola } from 'consola'
-import { writeScaffoldFiles, type WriterOptions } from './utils'
+import { assertCwdUnsupported, writeScaffoldFiles, type WriterOptions } from './utils'
 import {
   addImport,
   addProvider,
@@ -2202,6 +2202,7 @@ function resolveAuthFeatures(options: MakeAuthOptions): AuthFeatures {
 }
 
 export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]> {
+  assertCwdUnsupported(options, 'make:auth')
   const features = resolveAuthFeatures(options)
   const { includeExtras, includeVerify, includePassword, passwordOnlySignUp, oauthProviders } = features
   const includeOAuth = oauthProviders.length > 0

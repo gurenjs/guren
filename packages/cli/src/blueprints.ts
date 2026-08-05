@@ -13,7 +13,7 @@ import { makeNotification } from './make-notification'
 import { makeRoute } from './make-route'
 import { makeView } from './make-view'
 import { addImport, addProvider, detectSchemaDialect, ensureDrizzleImports, ensureMysqlImports, ensureSqliteImports, findClosingDelimiter } from './patch-helpers'
-import { camelCase, pascalCase, writeScaffoldFiles, type WriterOptions } from './utils'
+import { assertCwdUnsupported, camelCase, pascalCase, writeScaffoldFiles, type WriterOptions } from './utils'
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
@@ -845,5 +845,6 @@ export function getBlueprint(name: string): BlueprintDefinition {
 }
 
 export async function runBlueprint(name: string, options: RunBlueprintOptions = {}): Promise<string[]> {
+  assertCwdUnsupported(options, 'guren new --blueprint')
   return getBlueprint(name).run(options)
 }
