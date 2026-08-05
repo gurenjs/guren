@@ -323,7 +323,7 @@ export default function PostShow({ post, comments }: Props) {
 
 ポイント:
 
-- `usePage().props.auth?.user` は、Part 2 で `AuthProvider` の `boot()` に配線した共有 auth props を読み取ります — ページはこれを見て、フォームとサインインの案内のどちらを表示するか決めています。
+- `usePage().props.auth?.user` は、Part 2 で見た `AuthProvider` の `boot()` が共有している auth props を読み取ります — ページはこれを見て、フォームとサインインの案内のどちらを表示するか決めています。
 - 成功するとリダイレクトによってページが最新のコメント付きで再描画され、`form.reset()` がテキストエリアをクリアします。
 
 いつものループで締めます: `bun run codegen`（`bun run dev` 中なら自動）で `comments.store` ルートと新しい `Props` をマニフェストに反映し、`bunx guren check` で配線を検証します（`CommentController` のテスト未作成警告が増えているはずです — `check` はちゃんと見ています）。

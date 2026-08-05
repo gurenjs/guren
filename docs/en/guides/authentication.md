@@ -329,32 +329,40 @@ export default class DashboardController extends Controller {
 
 Use `this.validateBody()` / `this.validateQuery()` / `this.validateParams()` with Zod schemas for typed validation. Reserve `FormRequest` for compatibility code.
 
-To surface the logged-in user on every Inertia page without repeating controller code, register shared props during app boot:
+Surfacing the logged-in user on every Inertia page is already wired for you. The `app/Providers/AuthProvider.ts` that `bunx guren add auth` (equivalently `bunx guren make:auth --install`) generates registers it in `boot()`, so `auth.user` is readable from every page's props right after scaffolding — it is what the generated layout reads to toggle between **Sign in** and **Log out**.
 
 ```ts
-// config/inertia.ts
-import { setInertiaSharedProps, AUTH_CONTEXT_KEY, type AuthContext } from '@guren/core'
+// app/Providers/AuthProvider.ts (generated; register()'s useModel setup elided)
+import { ServiceProvider, shareInertiaProps, AUTH_CONTEXT_KEY } from '@guren/core'
+import type { AuthContext } from '@guren/core'
 
-setInertiaSharedProps(async (ctx) => {
-  const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
-  return { auth: { user: await auth?.user() } }
-})
+export default class AuthProvider extends ServiceProvider {
+  boot(): void {
+    shareInertiaProps(async (ctx) => {
+      const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
+      return { auth: { user: await auth?.user() } }
+    })
+  }
+}
 ```
+
+If you assembled authentication by hand, make the same call from your own service provider's `boot()`.
 
 Sharing `auth.user()` this way is safe by default: the record is sanitized before it leaves the auth layer, so the password hash never reaches the browser (see [Sanitized User Records](#sanitized-user-records)).
 
 Augment `InertiaSharedProps` (see the Controllers guide) to type this `auth` payload for React pages.
 
-> `setInertiaSharedProps` replaces the whole resolver. When several parts of
-> your app contribute shared props (auth, i18n, flash, …), use
-> `shareInertiaProps` instead — it merges its props over whatever was
-> registered before:
+> `shareInertiaProps` merges its props over whatever was registered before, so
+> several parts of your app (auth, i18n, flash, …) can each contribute without
+> clobbering one another:
 >
 > ```ts
-> import { shareInertiaProps } from '@guren/core'
->
 > shareInertiaProps((ctx) => ({ i18n: { locale: detectLocale(ctx) } }))
 > ```
+>
+> `setInertiaSharedProps` replaces the resolver rather than merging, dropping
+> whatever is registered at the moment it runs. Reach for it only when you mean
+> to replace the whole thing.
 
 Route middleware makes protecting endpoints straightforward:
 

@@ -50,18 +50,18 @@ bun run codegen
 
 `bun run codegen` は、雛形が追加した新しいページとルートを型マニフェストに反映します（`bun run dev` が動いていれば監視が自動で実行するので、実質不要です）。生成された認証スタックの仕組み — ガード、プロバイダー、ユーザーレコードの安全な取り扱い — は[認証ガイド](../guides/authentication.md)が詳しく解説しています。
 
-### サインイン状態をページに共有する
+### サインイン状態がページに届く仕組み
 
-生成された共有レイアウト（`resources/js/components/Layout.tsx`）は、共有 props の `auth.user` を読んで **Sign in** と **Log out** を出し分けます — が、デフォルトではこの prop を共有する配線がまだありません。`app/Providers/AuthProvider.ts` に `boot()` を追加して配線します。
+生成された共有レイアウト（`resources/js/components/Layout.tsx`）は、共有 props の `auth.user` を読んで **Sign in** と **Log out** を出し分けます。この prop を共有する配線も生成済みです — `app/Providers/AuthProvider.ts` を開くと `boot()` に入っています。手を加える必要はありませんが、この後の Part で使うので中身を見ておきます。
 
 ```ts
+// app/Providers/AuthProvider.ts（生成済み）
 import { ServiceProvider, shareInertiaProps, AUTH_CONTEXT_KEY } from '@guren/core'
 import type { AuthContext, AuthManager } from '@guren/core'
 import { User } from '../Models/User.js'
 
 export default class AuthProvider extends ServiceProvider {
   register(): void {
-    // 生成されたままの useModel 設定はそのまま残します
     const auth = this.container.make<AuthManager>('auth')
     auth.useModel(User, {
       usernameColumn: 'email',
@@ -86,7 +86,7 @@ export default class AuthProvider extends ServiceProvider {
 
 開発サーバーが動いている状態で（止めていたら `bun run dev`）、[http://localhost:3333/login](http://localhost:3333/login) を開きます。
 
-1. **demo@example.com** / **secret** でサインインします — `/dashboard` に着地し、名前入りの挨拶が表示されます。ヘッダーのナビゲーションも **Sign in** から **Log out** に切り替わっています（先ほど配線した共有 props の効果です）。
+1. **demo@example.com** / **secret** でサインインします — `/dashboard` に着地し、名前入りの挨拶が表示されます。ヘッダーのナビゲーションも **Sign in** から **Log out** に切り替わっています（`AuthProvider` が共有している props の効果です）。
 2. 間違ったパスワードを試します — フォームに "Invalid credentials." が表示されます。
 3. プライベートブラウジングのウィンドウで `/dashboard` を開きます — `/login` にリダイレクトされます。保護されたルートは本当に保護されています。
 
