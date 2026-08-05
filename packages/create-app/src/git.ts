@@ -1,57 +1,69 @@
-import { spawnSync } from 'node:child_process'
+import { spawnSync, type SpawnSyncReturns } from 'node:child_process'
 
 /**
  * How long the scaffolder waits on `git` before giving up.
  *
- * The child gets no terminal, so anything that decides to prompt — a signing
- * passphrase, a credential helper, a stalled name lookup while git guesses the
- * committer identity — would block forever with the app already written to
- * disk. Bounding it turns that into the caller's manual-recovery warning.
- * Generous enough that an ordinary commit on a loaded machine never trips it.
+ * The bound is tied to how these children are run, not applied to every child
+ * the scaffolder spawns. `bun install` and the app's own CLI inherit the
+ * terminal: they can answer a prompt, they show progress, and a long one is
+ * visibly working. These run with `stdio: 'pipe'` and no terminal, where a
+ * signing passphrase prompt, a credential helper, or a stalled name lookup
+ * while git guesses the committer identity waits on input that can never
+ * arrive — silently, with the app already written to disk. Generous enough
+ * that an ordinary commit on a loaded machine never trips it.
  */
 export const GIT_TIMEOUT_MS = 30_000
 
 export interface GitCommandOptions {
-  /** Budget for the whole call, not per subprocess; only overridden by tests. */
+  /**
+   * Budget for the whole call rather than for each subprocess. Exists so the
+   * deadline can be exercised without waiting out the full budget.
+   */
   timeoutMs?: number
 }
 
-/** Which step failed, so the caller can explain what to finish by hand. */
-export type GitInitFailure = 'init' | 'add' | 'commit'
+type GitStep = 'init' | 'add' | 'commit'
 
-export type GitInitResult = { ok: true } | { ok: false; failedStep: GitInitFailure }
+export type GitInitResult =
+  | { ok: true }
+  /** `command` so the caller can name the step without restating its arguments. */
+  | { ok: false; failedStep: GitStep; command: string }
 
-function runGit(cwd: string, args: string[], timeoutMs: number): boolean {
-  const result = spawnSync('git', args, {
+function runGit(cwd: string, args: string[], timeoutMs = GIT_TIMEOUT_MS): SpawnSyncReturns<Buffer> {
+  return spawnSync('git', args, {
     cwd,
     stdio: 'pipe',
-    // `env` is passed explicitly (not omitted) so a caller that sets
-    // GIT_AUTHOR_*/GIT_COMMITTER_* on process.env just before this runs is
-    // guaranteed to reach the child process. GIT_TERMINAL_PROMPT keeps git
-    // from waiting on a terminal this child does not have.
+    // Read at call time rather than hoisted: a caller that sets
+    // GIT_AUTHOR_*/GIT_COMMITTER_* just before this runs has to reach the
+    // child. GIT_TERMINAL_PROMPT keeps git from waiting on a terminal it does
+    // not have.
     env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-    // Never zero or negative: spawnSync treats that as "no timeout".
+    // spawnSync reads a non-positive timeout as "no timeout".
     timeout: Math.max(1, timeoutMs),
     // SIGTERM leaves a git blocked in a syscall alive, and spawnSync would go
     // on blocking with it.
     killSignal: 'SIGKILL',
   })
+}
 
-  // A timed-out child reports `status: null`, so this covers both a git that
-  // failed and a git that had to be killed.
-  return result.status === 0
+function wasKilledByTimeout(result: SpawnSyncReturns<Buffer>): boolean {
+  return (result.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT'
 }
 
 export function isInsideGitWorkTree(cwd: string, options: GitCommandOptions = {}): boolean {
-  const result = spawnSync('git', ['rev-parse', '--is-inside-work-tree'], {
-    cwd,
-    stdio: 'pipe',
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-    timeout: Math.max(1, options.timeoutMs ?? GIT_TIMEOUT_MS),
-    killSignal: 'SIGKILL',
-  })
+  const result = runGit(cwd, ['rev-parse', '--is-inside-work-tree'], options.timeoutMs)
+
+  // A probe that had to be killed answers "yes". The caller uses this to
+  // *decline* `git init`, so an unreadable answer should decline too — the
+  // alternative is nesting a repository inside the user's checkout, which is
+  // the outcome the caller calls never what they wanted.
+  if (wasKilledByTimeout(result)) {
+    return true
+  }
+
   // `status === 0` first: a missing git binary leaves stdout null, and the
-  // short-circuit is what keeps this a graceful "not a repo" rather than a throw.
+  // short-circuit is what keeps that a graceful "not a repo" rather than a
+  // throw — `git init` then fails with its own warning.
   return result.status === 0 && result.stdout.toString().trim() === 'true'
 }
 
@@ -61,18 +73,20 @@ export function initGitRepository(cwd: string, options: GitCommandOptions = {}):
   // times the wait it thinks it agreed to.
   const deadline = Date.now() + (options.timeoutMs ?? GIT_TIMEOUT_MS)
 
-  // Plain `git init` so the user's own init.defaultBranch decides the branch name.
-  const steps: Array<{ step: GitInitFailure; args: string[] }> = [
-    { step: 'init', args: ['init'] },
-    { step: 'add', args: ['add', '-A'] },
-    { step: 'commit', args: ['commit', '-m', 'chore: initial commit'] },
-  ]
-
-  for (const { step, args } of steps) {
-    if (!runGit(cwd, args, deadline - Date.now())) {
-      return { ok: false, failedStep: step }
-    }
+  const run = (failedStep: GitStep, args: string[]): GitInitResult => {
+    const remaining = deadline - Date.now()
+    // Spending an exhausted budget on one more child would leave the call
+    // unbounded in exactly the case the bound exists for.
+    const ok = remaining > 0 && runGit(cwd, args, remaining).status === 0
+    return ok ? { ok: true } : { ok: false, failedStep, command: `git ${args.join(' ')}` }
   }
 
-  return { ok: true }
+  // Plain `git init` so the user's own init.defaultBranch decides the branch name.
+  const init = run('init', ['init'])
+  if (!init.ok) return init
+
+  const add = run('add', ['add', '-A'])
+  if (!add.ok) return add
+
+  return run('commit', ['commit', '-m', 'chore: initial commit'])
 }

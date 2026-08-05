@@ -1,9 +1,10 @@
-import { afterAll, beforeAll, describe, expect, it, mock } from 'bun:test'
+import { describe, expect, it, mock } from 'bun:test'
 import { readFile, access, mkdir, writeFile } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { DATABASE_DRIVERS } from '../src/blueprints'
-import { createTempWorkspace } from './helpers'
+import { GIT_TIMEOUT_MS } from '../src/git'
+import { createTempWorkspace, useGitIdentity } from './helpers'
 
 let capturedCommand: any
 const successMock = mock(() => {})
@@ -47,41 +48,16 @@ await mock.module('consola', () => ({
 
 await import('../src/cli')
 
-// `git commit` needs an identity, and CI runners don't configure one globally
-// the way most developer machines do. initGitRepository() intentionally leaves
-// that to the user's own `git config`, so supply one here — file-wide rather
-// than around a single test, because a per-test restore in a `finally` runs
-// late when that test overruns, leaving the variables set for whatever ran in
-// the meantime.
-const GIT_IDENTITY = {
-  GIT_AUTHOR_NAME: 'Guren Test',
-  GIT_AUTHOR_EMAIL: 'guren-test@example.com',
-  GIT_COMMITTER_NAME: 'Guren Test',
-  GIT_COMMITTER_EMAIL: 'guren-test@example.com',
-} as const
+useGitIdentity()
 
-const previousGitIdentity = Object.fromEntries(
-  Object.keys(GIT_IDENTITY).map((key) => [key, process.env[key]]),
-)
-
-// Must stay above GIT_TIMEOUT_MS, the scaffolder's budget for the whole git
-// sequence: a wedged `git` then surfaces as its "initialize the repository
-// manually" warning — an assertion failure naming the real problem — instead of
-// a bare timeout, whose leftover blocking time Bun charges to the *next* test.
-const GIT_TEST_TIMEOUT_MS = 60_000
+// Derived, not a second literal: staying above the scaffolder's own budget for
+// the whole git sequence is what makes a wedged `git` surface as its
+// "initialize the repository manually" warning — an assertion failure naming
+// the real problem — instead of a bare timeout, whose leftover blocking time
+// Bun charges to the *next* test.
+const GIT_TEST_TIMEOUT_MS = GIT_TIMEOUT_MS * 2
 
 describe('create-guren-app CLI', () => {
-  beforeAll(() => {
-    Object.assign(process.env, GIT_IDENTITY)
-  })
-
-  afterAll(() => {
-    for (const [key, value] of Object.entries(previousGitIdentity)) {
-      if (value === undefined) delete process.env[key]
-      else process.env[key] = value
-    }
-  })
-
   it('scaffolds a SPA project and replaces tokens', async () => {
     const workspace = await createTempWorkspace('guren-create-app-cli-')
     try {
@@ -420,9 +396,6 @@ describe('create-guren-app CLI', () => {
     } finally {
       await workspace.cleanup()
     }
-    // Five `git` subprocesses on a contended runner have no business fitting in
-    // the 5s default: overrunning it charged the leftover blocking time to the
-    // *next* test, which then timed out too.
   }, GIT_TEST_TIMEOUT_MS)
 
   it('does not commit pre-existing files when --force scaffolds into a used directory', async () => {

@@ -27,8 +27,22 @@ Set `git config user.name` and `git config user.email`, then run `git commit -m 
 ```
 
 The children also get `GIT_TERMINAL_PROMPT=0`, so git fails fast rather than
-waiting on a terminal it does not have. Nothing changes for a scaffold where
-git behaves: the budget is far above what `git init`/`add`/`commit` take on a
-fresh app, and the repository is still created with the user's own
-`init.defaultBranch`, identity, and signing configuration rather than
-overrides forced by the scaffolder.
+waiting on a terminal it does not have. The probe that decides whether the
+target already sits inside a repository answers "yes" when it has to be killed:
+the scaffolder uses that answer to *decline* `git init`, and declining on an
+unreadable answer beats nesting a repository inside the user's checkout. A
+missing git still answers "no", so a machine without git stays on the
+"initialize the repository manually" path rather than silently skipping the
+step.
+
+The bound is deliberately tied to how these particular children run rather than
+applied to every subprocess the scaffolder starts. `bun install` and the app's
+own CLI inherit the terminal — they can answer a prompt, they show progress,
+and a long one is visibly working, so a deadline there would kill a slow but
+healthy install. Only the git calls run silently with no terminal, where
+"stalled" and "working" look identical from the user's seat.
+
+Nothing changes for a scaffold where git behaves: the budget is far above what
+`git init`/`add`/`commit` take on a fresh app, and the repository is still
+created with the user's own `init.defaultBranch`, identity, and signing
+configuration rather than overrides forced by the scaffolder.

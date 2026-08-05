@@ -166,8 +166,7 @@ function reportGitInit(cwd: string): void {
     return
   }
 
-  const args = result.failedStep === 'init' ? 'init' : 'add -A'
-  consola.warn(`Failed to run \`git ${args}\`. Initialize the repository manually.`)
+  consola.warn(`Failed to run \`${result.command}\`. Initialize the repository manually.`)
 }
 
 async function installDependencies(cwd: string): Promise<boolean> {
