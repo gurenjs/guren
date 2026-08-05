@@ -50,18 +50,18 @@ bun run codegen
 
 `bun run codegen` folds the scaffolding's new pages and routes into the type manifests (if `bun run dev` is running, the watcher already did this, so it's effectively a no-op). For how the generated auth stack works — guards, providers, safe handling of user records — see the [Authentication guide](../guides/authentication.md).
 
-### Share the sign-in state with your pages
+### How the sign-in state reaches your pages
 
-The generated shared layout (`resources/js/components/Layout.tsx`) reads `auth.user` from the shared props to toggle between **Sign in** and **Log out** — but nothing shares that prop yet. Wire it up by adding a `boot()` to `app/Providers/AuthProvider.ts`:
+The generated shared layout (`resources/js/components/Layout.tsx`) reads `auth.user` from the shared props to toggle between **Sign in** and **Log out**. The wiring that shares that prop is generated too — open `app/Providers/AuthProvider.ts` and you'll find it in `boot()`. There's nothing to change here, but it's worth reading, because later parts build on it:
 
 ```ts
+// app/Providers/AuthProvider.ts (generated)
 import { ServiceProvider, shareInertiaProps, AUTH_CONTEXT_KEY } from '@guren/core'
 import type { AuthContext, AuthManager } from '@guren/core'
 import { User } from '../Models/User.js'
 
 export default class AuthProvider extends ServiceProvider {
   register(): void {
-    // Keep the generated useModel configuration as is
     const auth = this.container.make<AuthManager>('auth')
     auth.useModel(User, {
       usernameColumn: 'email',
@@ -86,7 +86,7 @@ export default class AuthProvider extends ServiceProvider {
 
 With the dev server running (`bun run dev` if you stopped it), open [http://localhost:3333/login](http://localhost:3333/login).
 
-1. Sign in as **demo@example.com** / **secret** — you land on `/dashboard` with a personalized greeting, and the header navigation flips from **Sign in** to **Log out** (the shared props you just wired).
+1. Sign in as **demo@example.com** / **secret** — you land on `/dashboard` with a personalized greeting, and the header navigation flips from **Sign in** to **Log out** (the shared props from `AuthProvider` at work).
 2. Try a wrong password — the form shows "Invalid credentials."
 3. Open `/dashboard` in a private browsing window — you're redirected to `/login`. Protected routes are actually protected.
 

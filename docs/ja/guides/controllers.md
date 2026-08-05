@@ -258,17 +258,25 @@ FormRequest クラスとバリデーションルールの定義については�
 コントローラーはリクエストごとにインスタンス化されるため、あるメソッドでインスタンスフィールドを設定して、ヘルパーメソッドで再利用できます。全ページ共通のデータ（例: ユーザー情報）については、Inertia の共有プロパティやミドルウェアの利用を検討してください。
 
 ## Inertia 共有プロパティ
-`setInertiaSharedProps()` を使って、すべての Inertia レスポンスにアプリケーション全体のデータ（認証ユーザーなど）を注入できます。
+`shareInertiaProps()` を使って、すべての Inertia レスポンスにアプリケーション全体のデータを注入できます。サービスプロバイダー（`bunx guren make:provider` で生成）の `boot()` から呼ぶのが定位置です。
 
 ```ts
-// config/inertia.ts
-import { setInertiaSharedProps, AUTH_CONTEXT_KEY, type AuthContext } from '@guren/core'
+// app/Providers/LocaleProvider.ts
+import { ServiceProvider, shareInertiaProps } from '@guren/core'
 
-setInertiaSharedProps(async (ctx) => {
-  const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
-  return { auth: { user: await auth?.user() } }
-})
+export default class LocaleProvider extends ServiceProvider {
+  boot(): void {
+    shareInertiaProps((ctx) => ({
+      i18n: { locale: ctx.req.header('accept-language')?.split(',')[0] ?? 'en' },
+    }))
+  }
+}
 ```
+
+先に登録されたリゾルバーの props にマージされるので、複数のプロバイダーがそれぞれ共有 props を足しても互いを壊しません。
+
+> [!NOTE]
+> 認証ユーザー（`auth.user`）の共有は `bunx guren add auth` が生成する `AuthProvider` が既に登録済みです。自分で登録し直す必要はありません — 詳細は[認証ガイド](./authentication.md)を参照してください。
 
 エクスポートされた `InertiaSharedProps` インターフェースを拡張して、コントローラーと React ページ全体でプロパティの型を維持しましょう。
 

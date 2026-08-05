@@ -327,31 +327,39 @@ export default class DashboardController extends Controller {
 
 バリデーションには `this.validateBody()` / `this.validateQuery()` / `this.validateParams()` を Zod スキーマと共に使います。`FormRequest` は互換用途に限定してください。
 
-Inertia の全ページでログインユーザーを共有したい場合は、アプリ起動時に共有 props を登録します。
+Inertia の全ページでログインユーザーを共有する配線は、スキャフォルドが済ませています。`bunx guren add auth`（= `bunx guren make:auth --install`）が生成する `app/Providers/AuthProvider.ts` の `boot()` に次の登録が入っているため、生成直後から全ページの props で `auth.user` を読めます。生成されるレイアウトが **Sign in** と **Log out** を出し分けているのもこの props です。
 
 ```ts
-// config/inertia.ts
-import { setInertiaSharedProps, AUTH_CONTEXT_KEY, type AuthContext } from '@guren/core'
+// app/Providers/AuthProvider.ts（生成済み。register() の useModel 設定は省略）
+import { ServiceProvider, shareInertiaProps, AUTH_CONTEXT_KEY } from '@guren/core'
+import type { AuthContext } from '@guren/core'
 
-setInertiaSharedProps(async (ctx) => {
-  const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
-  return { auth: { user: await auth?.user() } }
-})
+export default class AuthProvider extends ServiceProvider {
+  boot(): void {
+    shareInertiaProps(async (ctx) => {
+      const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
+      return { auth: { user: await auth?.user() } }
+    })
+  }
+}
 ```
+
+認証を手動で組み立てた場合は、自分のサービスプロバイダーの `boot()` で同じ呼び出しを行ってください。
 
 このように `auth.user()` を共有する方法はデフォルトで安全です。レコードは認証レイヤーを出る前にサニタイズされるため、パスワードハッシュがブラウザに届くことはありません（後述の「サニタイズされたユーザーレコード」を参照）。
 
 `InertiaSharedProps` を拡張し、React 側でも型付けしてください（詳細はコントローラーガイドを参照）。
 
-> `setInertiaSharedProps` はリゾルバー全体を置き換えます。auth・i18n・flash
-> など複数箇所から共有 props を提供する場合は、既存の props にマージする
-> `shareInertiaProps` を使ってください:
+> `shareInertiaProps` は先に登録されたリゾルバーの props にマージするため、
+> auth・i18n・flash など複数箇所から共有 props を提供しても互いを壊しません:
 >
 > ```ts
-> import { shareInertiaProps } from '@guren/core'
->
 > shareInertiaProps((ctx) => ({ i18n: { locale: detectLocale(ctx) } }))
 > ```
+>
+> `setInertiaSharedProps` はマージせずリゾルバーを置き換えるため、実行時点で
+> 登録済みのものを丸ごと捨てます。意図的に全部を差し替えたいときだけ使って
+> ください。
 
 ルートミドルウェアを使うと保護が簡単です。
 

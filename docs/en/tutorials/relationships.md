@@ -323,7 +323,7 @@ export default function PostShow({ post, comments }: Props) {
 
 Highlights:
 
-- `usePage().props.auth?.user` reads the shared auth props you wired into `AuthProvider`'s `boot()` in Part 2 — that's how the page decides between the form and the sign-in hint.
+- `usePage().props.auth?.user` reads the shared auth props that `AuthProvider`'s `boot()` registers, which you saw in Part 2 — that's how the page decides between the form and the sign-in hint.
 - On success, the redirect re-renders the page with fresh comments, and `form.reset()` clears the textarea.
 
 Close the loop as usual: `bun run codegen` (automatic under `bun run dev`) picks up the `comments.store` route and the new `Props`, and `bunx guren check` verifies the wiring (you'll see one more missing-test warning — for `CommentController` — proof that `check` is paying attention).

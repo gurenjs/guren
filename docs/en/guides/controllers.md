@@ -236,6 +236,47 @@ Only methods that exist on your controller are registered. Limit the routes with
 router.resource('/posts', PostsController, { only: ['index', 'show'] })
 ```
 
+## Sharing Data Between Methods
+
+Controllers are instantiated per request, so one method can set an instance field for a helper method to reuse. For data every page needs (the signed-in user, for example), reach for Inertia shared props or middleware instead.
+
+## Inertia Shared Props
+
+Use `shareInertiaProps()` to inject application-wide data into every Inertia response. The natural home for the call is a service provider's `boot()` (generate one with `bunx guren make:provider`).
+
+```ts
+// app/Providers/LocaleProvider.ts
+import { ServiceProvider, shareInertiaProps } from '@guren/core'
+
+export default class LocaleProvider extends ServiceProvider {
+  boot(): void {
+    shareInertiaProps((ctx) => ({
+      i18n: { locale: ctx.req.header('accept-language')?.split(',')[0] ?? 'en' },
+    }))
+  }
+}
+```
+
+It merges its props over whatever resolver was registered before, so several providers can each contribute shared props without clobbering one another.
+
+> [!NOTE]
+> Sharing the signed-in user (`auth.user`) is already registered for you by the `AuthProvider` that `bunx guren add auth` generates — there's no need to register it again. See the [Authentication guide](./authentication.md) for details.
+
+Augment the exported `InertiaSharedProps` interface to keep these props typed across controllers and React pages:
+
+```ts
+// types/inertia.d.ts
+import type { UserRecord } from '@/app/Models/User'
+
+declare module '@guren/core' {
+  interface InertiaSharedProps {
+    auth: { user: UserRecord | null }
+  }
+}
+```
+
+When you need the component's prop type, `InferInertiaProps<ReturnType<Controller['action']>>` gives you both the action props and the shared props.
+
 ## Testing Controllers
 
 `TestApp` boots a lightweight instance of your app for expressive HTTP testing:
