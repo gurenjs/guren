@@ -218,12 +218,16 @@ export class BroadcastManager {
       return !(channelName.startsWith('private-') || channelName.startsWith('presence-'))
     }
 
+    // Callers read anything that is not `false`/`null` as authorized, so
+    // normalize here: an authorizer with an implicit-`undefined` return path
+    // must deny rather than grant.
     if (registration.type === 'presence') {
       const presenceAuth = registration.authorizer as PresenceChannelAuthorizer
-      return await presenceAuth(channelName, user)
+      const member = await presenceAuth(channelName, user)
+      return typeof member === 'object' && member !== null ? member : false
     }
 
-    return await (registration.authorizer as ChannelAuthorizer)(channelName, user)
+    return await (registration.authorizer as ChannelAuthorizer)(channelName, user) === true
   }
 
   /**

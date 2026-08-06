@@ -603,6 +603,22 @@ describe('BroadcastManager', () => {
       const result = await manager.authorize('unregistered', null)
       expect(result).toBe(true)
     })
+
+    it('should deny when an authorizer falls off the end without returning', async () => {
+      // Callers read anything that is not false/null as authorized, so an
+      // implicit undefined must not read as a grant.
+      manager.privateChannel('orders.{id}', (() => undefined) as unknown as () => boolean)
+
+      const result = await manager.authorize('private-orders.123', { id: 1 })
+      expect(result).toBe(false)
+    })
+
+    it('should deny a presence channel whose authorizer returns undefined', async () => {
+      manager.presenceChannel('chat.{id}', (() => undefined) as unknown as () => null)
+
+      const result = await manager.authorize('presence-chat.1', { id: 1 })
+      expect(result).toBe(false)
+    })
   })
 
   describe('broadcast', () => {
