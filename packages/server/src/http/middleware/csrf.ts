@@ -81,12 +81,25 @@ function randomNonce(): string {
 }
 
 /**
- * A session with a stable, already-persisted id is bind-able. A brand-new
- * (isNew) session has no stable id yet — under the write-reduction rules it
- * may not even be persisted — so it must not anchor a token.
+ * A session that outlives this response under its current id is bind-able.
+ * An empty brand-new session is not: under the write-reduction rules it is
+ * never persisted, so there is no id for a later request to match.
+ *
+ * `!isNew` is not the test. A session created during *this* request stays
+ * `isNew` for its whole lifetime, so a login response would mint a guest
+ * (stateless) token even though the session it just wrote is what the next
+ * request authenticates with — and that token would then be rejected by
+ * `verifyCsrfToken`'s mode rule. `willPersist()` answers the actual
+ * question; the `!isNew` fallback keeps custom `Session` implementations
+ * that predate it working as before.
  */
 function bindableSessionId(session: Session | undefined): string | undefined {
-  return session && !session.isNew ? session.id : undefined
+  if (!session) {
+    return undefined
+  }
+
+  const persists = session.willPersist ? session.willPersist() : !session.isNew
+  return persists ? session.id : undefined
 }
 
 /**
@@ -155,6 +168,14 @@ export function getCsrfToken(ctx: Context): string {
     return pending
   }
 
+  return issueCsrfToken(ctx)
+}
+
+/**
+ * Mint (or reuse the cookie's token) against the session state as it stands
+ * right now, caching the result on the context.
+ */
+function issueCsrfToken(ctx: Context): string {
   const boundId = bindableSessionId(getSessionFromContext(ctx))
 
   const cookieToken = getCookie(ctx, XSRF_COOKIE_NAME)
@@ -172,6 +193,29 @@ export function getCsrfToken(ctx: Context): string {
 }
 
 /**
+ * The token to write to the response cookie, re-checked against the session
+ * as the handler left it.
+ *
+ * A token chosen before the handler ran can be the wrong mode by the time
+ * the response is written — a login turns a guest request into a session-
+ * bearing one — and a stale stateless token would be rejected on the next
+ * mutation now that verification enforces the mode rule.
+ */
+function refreshCsrfToken(ctx: Context): string {
+  const pending = ctx.get(CSRF_CONTEXT_KEY) as string | undefined
+  if (pending) {
+    const boundId = bindableSessionId(getSessionFromContext(ctx))
+    const claims = verifiedClaims(pending)
+    if (claims && claimsUsableFor(claims, boundId)) {
+      return pending
+    }
+  }
+
+  ctx.set(CSRF_CONTEXT_KEY, undefined)
+  return issueCsrfToken(ctx)
+}
+
+/**
  * Generate an HTML hidden input field containing the CSRF token.
  */
 export function csrfField(ctx: Context): string {
@@ -183,11 +227,13 @@ export function csrfField(ctx: Context): string {
  * Verify a request token.
  *
  * The token must first carry a valid app-key signature (proving this server
- * minted it). Then, by mode:
- * - **Session-bound** (token carries a `sid`): the id must match the live
- *   session. This is immune to cookie injection — a sibling-subdomain
- *   attacker can plant a cookie but cannot know the victim's session id.
- * - **Stateless** (guest, no `sid`): the token must match the `XSRF-TOKEN`
+ * minted it). The mode is then fixed by the request — whether it carries a
+ * bindable session — and the token has to be in that mode:
+ * - **Session-bound** (request has a session; token must carry a matching
+ *   `sid`): immune to cookie injection — a sibling-subdomain attacker can
+ *   plant a cookie but cannot know the victim's session id. A stateless
+ *   token is rejected here, which is the point: anyone can mint one.
+ * - **Stateless** (request has no session, so no `sid`): the token must match the `XSRF-TOKEN`
  *   cookie (double-submit). Guests hold no authenticated state to protect.
  *
  * Legacy fallback: tokens stored in sessions by earlier releases keep
@@ -201,12 +247,20 @@ export function verifyCsrfToken(ctx: Context, token: string | undefined): boolea
 
   const claims = verifiedClaims(token)
   if (claims) {
+    // The mode is chosen by the *request*, not by the token: a request that
+    // carries a bindable session must clear the session-bound check, and a
+    // stateless token is only ever accepted where there is no session to
+    // bind to. Reading the mode off the token instead would let a guest
+    // token — which anyone can mint by visiting the site — authorize a
+    // mutation for a logged-in user, so long as it matched the `XSRF-TOKEN`
+    // cookie, and that cookie is writable by any sibling subdomain.
+    const boundId = bindableSessionId(getSessionFromContext(ctx))
+
     if (claims.sid !== undefined) {
-      const boundId = bindableSessionId(getSessionFromContext(ctx))
       if (boundId !== undefined && secureCompare(claims.sid, boundId)) {
         return true
       }
-    } else {
+    } else if (boundId === undefined) {
       const cookieToken = getCookie(ctx, XSRF_COOKIE_NAME)
       if (cookieToken && secureCompare(token, cookieToken)) {
         return true
@@ -315,12 +369,15 @@ export function createCsrfMiddleware(options: CsrfOptions = {}): MiddlewareHandl
     const method = ctx.req.method.toUpperCase()
     const path = new URL(ctx.req.url).pathname
 
-    // For safe methods, just ensure token exists and set cookie
+    // For safe methods, just ensure a token is available to the handler and
+    // set the cookie. The cookie value is settled *after* the handler, since
+    // a handler that establishes a session changes which mode the token has
+    // to be in.
     if (!protectedMethods.has(method)) {
-      const token = getCsrfToken(ctx)
+      getCsrfToken(ctx)
       await next()
       if (enableCookie) {
-        setXsrfCookie(ctx, token, cookieOptions)
+        setXsrfCookie(ctx, refreshCsrfToken(ctx), cookieOptions)
       }
       return
     }
@@ -345,9 +402,10 @@ export function createCsrfMiddleware(options: CsrfOptions = {}): MiddlewareHandl
 
     await next()
 
-    // Refresh the cookie after successful mutation
+    // Refresh the cookie after successful mutation. A login POST lands here
+    // having verified a guest token, and must leave with a session-bound one.
     if (enableCookie) {
-      setXsrfCookie(ctx, getCsrfToken(ctx), cookieOptions)
+      setXsrfCookie(ctx, refreshCsrfToken(ctx), cookieOptions)
     }
   }
 }

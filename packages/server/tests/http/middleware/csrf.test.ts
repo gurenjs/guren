@@ -30,6 +30,18 @@ afterEach(() => {
   process.env = { ...originalEnv }
 })
 
+/**
+ * A single `name=value` pair from the response, or ''. Needed wherever a test
+ * must control which XSRF cookie the server sees: `extractCookie` joins every
+ * Set-Cookie, so carrying a logged-in response wholesale also carries that
+ * session's own XSRF token, which then shadows any planted one.
+ */
+function pickCookie(res: Response, name: string): string {
+  const cookies = res.headers.getSetCookie?.() ?? []
+  const match = cookies.find((cookie) => cookie.startsWith(`${name}=`))
+  return match ? match.split(';')[0] : ''
+}
+
 function extractCookie(res: Response): string {
   // When multiple Set-Cookie headers exist (session + XSRF-TOKEN),
   // collect all cookies and join them so the session is preserved.
@@ -694,6 +706,102 @@ describe('session-bound tokens (cookie-injection immunity)', () => {
     const post = await app.request('/submit', {
       method: 'POST',
       headers: { Cookie: session, [CSRF_HEADER_NAME]: token },
+    })
+
+    expect(post.status).toBe(200)
+  })
+})
+
+describe('mode enforcement between minting and verification', () => {
+  function createApp() {
+    const store = new MemorySessionStore()
+    const app = new Hono()
+    app.use(createSessionMiddleware({ store }))
+    app.use(createCsrfMiddleware())
+    app.get('/guest', (c) => c.json({ token: getCsrfToken(c) }))
+    app.get('/login', (c) => {
+      getSessionFromContext(c)?.set('userId', 1)
+      return c.text('ok')
+    })
+    app.post('/login', (c) => {
+      getSessionFromContext(c)?.set('userId', 1)
+      return c.text('ok')
+    })
+    app.get('/form', (c) => c.json({ token: getCsrfToken(c) }))
+    app.post('/submit', (c) => c.text('ok'))
+    return app
+  }
+
+  it('rejects a guest token on a request that carries a session', async () => {
+    const app = createApp()
+
+    // Anyone can mint a validly-signed guest token just by visiting.
+    const guestRes = await app.request('/guest')
+    const { token: guestToken } = (await guestRes.json()) as { token: string }
+    const guestXsrf = pickCookie(guestRes, 'XSRF-TOKEN')
+
+    // A logged-in victim. Only their session cookie is carried over — the
+    // XSRF cookie is the attacker's guest one, which is the whole point of
+    // planting it. Sending the victim's own XSRF cookie too would make the
+    // request fail on the cookie mismatch instead of on the mode rule.
+    const victimSession = pickCookie(await app.request('/login'), 'guren.session')
+    expect(victimSession).not.toBe('')
+
+    // Double-submit is satisfied (header value === cookie value), but the
+    // request has a session to bind to, so the stateless path must be closed.
+    const post = await app.request('/submit', {
+      method: 'POST',
+      headers: {
+        Cookie: [victimSession, guestXsrf].join('; '),
+        [CSRF_HEADER_NAME]: guestToken,
+      },
+    })
+
+    expect(post.status).toBe(403)
+  })
+
+  it('issues a session-bound token on the response that establishes the session', async () => {
+    const app = createApp()
+
+    // The login response has to hand back a token for the session it just
+    // created, not the guest token the request came in with.
+    const guestRes = await app.request('/guest')
+    const { token: guestToken } = (await guestRes.json()) as { token: string }
+    const guestCookies = extractCookie(guestRes)
+
+    const loginRes = await app.request('/login', {
+      method: 'POST',
+      headers: { Cookie: guestCookies, [CSRF_HEADER_NAME]: guestToken },
+    })
+    expect(loginRes.status).toBe(200)
+
+    const loggedIn = extractCookie(loginRes)
+    expect(loggedIn).toContain('guren.session=')
+    expect(loggedIn).toContain('XSRF-TOKEN=')
+
+    // The token issued by that same response must work on the next mutation.
+    const issued = decodeURIComponent(
+      loggedIn.split('; ').find((c) => c.startsWith('XSRF-TOKEN='))!.slice('XSRF-TOKEN='.length),
+    )
+    expect(issued).not.toBe(guestToken)
+
+    const post = await app.request('/submit', {
+      method: 'POST',
+      headers: { Cookie: loggedIn, [CSRF_HEADER_NAME]: issued },
+    })
+
+    expect(post.status).toBe(200)
+  })
+
+  it('still accepts a guest token when the request has no session', async () => {
+    const app = createApp()
+
+    const guestRes = await app.request('/guest')
+    const { token } = (await guestRes.json()) as { token: string }
+
+    const post = await app.request('/submit', {
+      method: 'POST',
+      headers: { Cookie: extractCookie(guestRes), [CSRF_HEADER_NAME]: token },
     })
 
     expect(post.status).toBe(200)
