@@ -1,7 +1,7 @@
 process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 
 import { afterEach, describe, expect, it } from 'bun:test'
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { MCP_ENDPOINT_PATH } from '../../../src/mcp/endpoint'
 import {
   createCsrfMiddleware,
@@ -713,23 +713,48 @@ describe('session-bound tokens (cookie-injection immunity)', () => {
 })
 
 describe('mode enforcement between minting and verification', () => {
-  function createApp() {
+  // Mirrors what SessionGuard.login() does: rotate the id, then store the
+  // user. Testing with a bare set() would miss the regenerate path entirely.
+  function logIn(c: Context) {
+    const session = getSessionFromContext(c)
+    session?.regenerate()
+    session?.set('userId', 1)
+  }
+
+  function createApp(csrfOptions?: Parameters<typeof createCsrfMiddleware>[0]) {
     const store = new MemorySessionStore()
     const app = new Hono()
     app.use(createSessionMiddleware({ store }))
-    app.use(createCsrfMiddleware())
+    app.use(createCsrfMiddleware(csrfOptions))
     app.get('/guest', (c) => c.json({ token: getCsrfToken(c) }))
-    app.get('/login', (c) => {
-      getSessionFromContext(c)?.set('userId', 1)
+    app.on(['GET', 'POST'], '/login', (c) => {
+      logIn(c)
       return c.text('ok')
     })
-    app.post('/login', (c) => {
-      getSessionFromContext(c)?.set('userId', 1)
+    // Reads the token, establishes the session, then reads it again to
+    // render — shared props or a layout touching the token before the
+    // controller logs the user in. The second read has to reflect the
+    // session that now exists, not the guest answer cached by the first.
+    app.get('/login-and-render', (c) => {
+      const before = getCsrfToken(c)
+      logIn(c)
+      return c.json({ before, token: getCsrfToken(c) })
+    })
+    app.post('/logout', (c) => {
+      getSessionFromContext(c)?.invalidate()
       return c.text('ok')
     })
-    app.get('/form', (c) => c.json({ token: getCsrfToken(c) }))
+    app.post('/exempt-login', (c) => {
+      logIn(c)
+      return c.text('ok')
+    })
     app.post('/submit', (c) => c.text('ok'))
     return app
+  }
+
+  function xsrfFrom(res: Response): string {
+    const pair = pickCookie(res, 'XSRF-TOKEN')
+    return pair ? decodeURIComponent(pair.slice('XSRF-TOKEN='.length)) : ''
   }
 
   it('rejects a guest token on a request that carries a session', async () => {
@@ -739,6 +764,11 @@ describe('mode enforcement between minting and verification', () => {
     const guestRes = await app.request('/guest')
     const { token: guestToken } = (await guestRes.json()) as { token: string }
     const guestXsrf = pickCookie(guestRes, 'XSRF-TOKEN')
+
+    // Without these the test could pass for the wrong reason: no planted
+    // cookie at all would fail double-submit rather than the mode rule.
+    expect(guestXsrf).not.toBe('')
+    expect(xsrfFrom(guestRes)).toBe(guestToken)
 
     // A logged-in victim. Only their session cookie is carried over — the
     // XSRF cookie is the attacker's guest one, which is the whole point of
@@ -780,9 +810,7 @@ describe('mode enforcement between minting and verification', () => {
     expect(loggedIn).toContain('XSRF-TOKEN=')
 
     // The token issued by that same response must work on the next mutation.
-    const issued = decodeURIComponent(
-      loggedIn.split('; ').find((c) => c.startsWith('XSRF-TOKEN='))!.slice('XSRF-TOKEN='.length),
-    )
+    const issued = xsrfFrom(loginRes)
     expect(issued).not.toBe(guestToken)
 
     const post = await app.request('/submit', {
@@ -793,15 +821,72 @@ describe('mode enforcement between minting and verification', () => {
     expect(post.status).toBe(200)
   })
 
-  it('still accepts a guest token when the request has no session', async () => {
+  it('hands the handler the same token it writes to the cookie', async () => {
     const app = createApp()
 
-    const guestRes = await app.request('/guest')
-    const { token } = (await guestRes.json()) as { token: string }
+    // A handler that logs the user in and then renders the token — a form's
+    // hidden `_token`, or Inertia shared props. If it were handed the token
+    // computed before the session existed, the rendered form would carry a
+    // guest token while the cookie carried a bound one, and submitting that
+    // form would 403.
+    const res = await app.request('/login-and-render')
+    const { before, token: rendered } = (await res.json()) as { before: string; token: string }
+
+    // The pre-login read is the guest answer; re-reading after the login has
+    // to move on from it, and land on what the cookie gets.
+    expect(rendered).not.toBe(before)
+    expect(rendered).toBe(xsrfFrom(res))
 
     const post = await app.request('/submit', {
       method: 'POST',
-      headers: { Cookie: extractCookie(guestRes), [CSRF_HEADER_NAME]: token },
+      headers: { Cookie: extractCookie(res), [CSRF_HEADER_NAME]: rendered },
+    })
+
+    expect(post.status).toBe(200)
+  })
+
+  it('refreshes the token on an excluded path that establishes a session', async () => {
+    // Exempt endpoints skip verification, but an OAuth callback still logs
+    // the user in — so it has to leave with a bound token like any other
+    // response, or the user's next mutation is rejected.
+    const app = createApp({ exclude: ['/exempt-login'] })
+
+    const res = await app.request('/exempt-login', { method: 'POST' })
+    expect(res.status).toBe(200)
+    expect(pickCookie(res, 'guren.session')).not.toBe('')
+
+    const issued = xsrfFrom(res)
+    expect(issued).not.toBe('')
+
+    const post = await app.request('/submit', {
+      method: 'POST',
+      headers: { Cookie: extractCookie(res), [CSRF_HEADER_NAME]: issued },
+    })
+
+    expect(post.status).toBe(200)
+  })
+
+  it('returns the user to guest mode after the session is invalidated', async () => {
+    const app = createApp()
+
+    const loginRes = await app.request('/login')
+    const logoutRes = await app.request('/logout', {
+      method: 'POST',
+      headers: { Cookie: extractCookie(loginRes), [CSRF_HEADER_NAME]: xsrfFrom(loginRes) },
+    })
+    expect(logoutRes.status).toBe(200)
+
+    // The session is gone, so the response must hand back a stateless token
+    // that the now-sessionless client can actually use.
+    const issued = xsrfFrom(logoutRes)
+    expect(issued).not.toBe('')
+
+    const post = await app.request('/submit', {
+      method: 'POST',
+      headers: {
+        Cookie: `XSRF-TOKEN=${encodeURIComponent(issued)}`,
+        [CSRF_HEADER_NAME]: issued,
+      },
     })
 
     expect(post.status).toBe(200)

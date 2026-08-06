@@ -115,8 +115,10 @@ export interface Session {
    * CSRF token binding — has to ask this rather than `!isNew`, or it
    * anchors to nothing across the login response.
    *
-   * Optional so that a custom `Session` implementation predating this
-   * method still type-checks; callers fall back to `!isNew`.
+   * Optional only so a custom `Session` predating it still type-checks.
+   * Callers fall back to `!isNew`, which for that implementation reproduces
+   * the bug this method exists to prevent — a login response anchors to
+   * nothing, and the next mutation is rejected. Implement it.
    */
   willPersist?(): boolean
   flash(key: string, value: unknown): void

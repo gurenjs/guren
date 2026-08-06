@@ -21,7 +21,24 @@ session — and requires the token to be in that mode.
 Issuing had to move with it. A session created during the current request stays
 `isNew` for its whole lifetime, so the response that logs a user in was minting a
 guest token for a session that later requests authenticate with; under the new
-rule that token would be rejected on the next mutation. `Session` gains an
-optional `willPersist()` reporting whether the session survives the response
-under its current id, and the CSRF cookie is now settled after the handler runs
-rather than before, so a login response hands back a session-bound token.
+rule that token would be rejected on the next mutation. Three changes keep
+issuing in step:
+
+- `Session` gains an optional `willPersist()` reporting whether the session
+  survives the response under its current id. `bindableSessionId` asks that
+  instead of `!isNew`.
+- `getCsrfToken()` now tracks the session as it stands at the moment of the
+  call, re-issuing when a handler changes it. Previously the first call in a
+  request fixed the answer, so a handler that logged a user in and then
+  rendered the token put a guest token in the response body while the cookie
+  carried a session-bound one — and submitting that form was rejected.
+- Excluded paths (and the dev MCP endpoint) skip verification but no longer
+  skip issuance, so an exempt endpoint that establishes a session — an OAuth
+  callback — still hands back a bound token.
+
+`createCsrfMiddleware` settles the response cookie after the handler returns, so
+it must be mounted directly inside the session middleware. Middleware layered
+between the two that rotates or invalidates the session after its own
+`await next()` moves the id after CSRF has committed to a token. The automatic
+registration in `AuthServiceProvider` already mounts them adjacently; the
+requirement is now documented for hand-composed chains.
