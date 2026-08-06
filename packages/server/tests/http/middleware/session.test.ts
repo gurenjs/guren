@@ -4,6 +4,7 @@ import {
   createSessionMiddleware,
   getSessionFromContext,
   MemorySessionStore,
+  type Session,
   type SessionStore,
 } from '../../../src/http/middleware/session'
 
@@ -663,5 +664,73 @@ describe('getSessionFromContext', () => {
     const res = await app.request('/test')
     const body = await res.json()
     expect(body).toEqual({ hasSession: false })
+  })
+})
+
+describe('willPersist agrees with what the next request finds', () => {
+  // willPersist() restates the finalizer's survival decision so that callers
+  // anchoring a value to the session id (CSRF token binding) can ask for it
+  // up front. Nothing in the type system keeps the two in step, so pin every
+  // lifecycle branch here: if the finalizer's write-reduction rules change
+  // and willPersist() is not updated with them, a token gets bound to an id
+  // no later request can match, and the symptom surfaces as a CSRF 403 far
+  // from the edit.
+  const paths: Array<{ name: string; act: (session: Session) => void }> = [
+    { name: 'untouched brand-new session', act: () => {} },
+    { name: 'new session that stores data', act: (s) => s.set('userId', 1) },
+    { name: 'new session with only flash', act: (s) => s.flash('notice', 'hi') },
+    { name: 'new session regenerated then written', act: (s) => { s.regenerate(); s.set('userId', 1) } },
+    { name: 'invalidated session', act: (s) => { s.set('userId', 1); s.invalidate() } },
+  ]
+
+  for (const { name, act } of paths) {
+    it(name, async () => {
+      const store = new MemorySessionStore()
+      const app = new Hono()
+      app.use(createSessionMiddleware({ store }))
+
+      let claimed: boolean | undefined
+      let claimedId: string | undefined
+      app.get('/act', (c) => {
+        const session = getSessionFromContext(c)!
+        act(session)
+        claimed = session.willPersist!()
+        claimedId = session.id
+        return c.text('ok')
+      })
+
+      await app.request('/act')
+
+      // The claim made mid-request must match what the store actually holds
+      // once the response is finalized.
+      const stored = await store.read(claimedId!)
+      expect(claimed).toBe(stored !== undefined)
+    })
+  }
+
+  it('an established session survives an untouched request (rolling expiry)', async () => {
+    const store = new MemorySessionStore()
+    const app = new Hono()
+    app.use(createSessionMiddleware({ store }))
+
+    let claimed: boolean | undefined
+    let claimedId: string | undefined
+    app.get('/login', (c) => {
+      getSessionFromContext(c)!.set('userId', 1)
+      return c.text('ok')
+    })
+    app.get('/idle', (c) => {
+      const session = getSessionFromContext(c)!
+      claimed = session.willPersist!()
+      claimedId = session.id
+      return c.text('ok')
+    })
+
+    const login = await app.request('/login')
+    const cookie = login.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ')
+    await app.request('/idle', { headers: { Cookie: cookie } })
+
+    expect(claimed).toBe(true)
+    expect(await store.read(claimedId!)).toBeDefined()
   })
 })

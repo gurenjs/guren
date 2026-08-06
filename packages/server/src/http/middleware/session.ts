@@ -105,6 +105,22 @@ export interface Session {
    */
   regenerate(): void
   invalidate(): void
+  /**
+   * Whether this session survives the current response under `id`.
+   *
+   * `isNew` alone cannot answer this: a session created *during* this
+   * request stays `isNew` for its whole lifetime, yet once a handler
+   * writes to it (logging a user in) it is persisted under `id` and every
+   * later request finds it. Anything anchoring a value to the session id —
+   * CSRF token binding — has to ask this rather than `!isNew`, or it
+   * anchors to nothing across the login response.
+   *
+   * Optional only so a custom `Session` predating it still type-checks.
+   * Callers fall back to `!isNew`, which for that implementation reproduces
+   * the bug this method exists to prevent — a login response anchors to
+   * nothing, and the next mutation is rejected. Implement it.
+   */
+  willPersist?(): boolean
   flash(key: string, value: unknown): void
   getFlash<T = unknown>(key: string): T | undefined
   reflash(): void
@@ -243,6 +259,18 @@ class SessionImpl implements Session {
     // Empty brand-new sessions are not persisted: an anonymous request that
     // never stores anything must not cost a database write (or a cookie).
     return this.dirty || (this.isNew && this.hasContent())
+  }
+
+  willPersist(): boolean {
+    if (this.destroyed) {
+      return false
+    }
+
+    // An established session survives even when untouched (rolling expiry
+    // refreshes its TTL). A brand-new one only survives once something has
+    // written to it — which is also the moment its id becomes worth binding
+    // to, since that is the id the middleware is about to write.
+    return !this.isNew || this.shouldPersist()
   }
 
   private hasContent(): boolean {
