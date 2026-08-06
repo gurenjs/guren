@@ -481,13 +481,44 @@ if [ -z "$XSRF" ]; then
 fi
 echo "  OK: XSRF-TOKEN cookie present"
 
-# Login with the seeded demo user
+# Login with the seeded demo user. This token was minted while the client was
+# a guest, which is exactly what it is valid for.
+PRE_LOGIN_XSRF="$XSRF"
 http_expect "POST /login (valid credentials + CSRF)" 303 \
   -b "$COOKIES" -c "$COOKIES" -X POST "$RUNTIME_URL/login" \
   -H "Content-Type: application/json" -H "X-XSRF-TOKEN: $XSRF" \
   -d '{"email":"demo@example.com","password":"secret","remember":false}'
 
 http_expect "GET /dashboard (authenticated)" 200 -b "$COOKIES" "$RUNTIME_URL/dashboard"
+
+# Establishing the session re-issues the token bound to it, so the login
+# response rewrote the jar. Re-read it — a browser client does this implicitly
+# by reading the XSRF-TOKEN cookie on every request.
+XSRF=$(awk '$6 == "XSRF-TOKEN" { print $7 }' "$COOKIES")
+if [ "$XSRF" = "$PRE_LOGIN_XSRF" ]; then
+  echo "ERROR: XSRF-TOKEN was not re-issued when the session was established"
+  exit 1
+fi
+echo "  OK: XSRF-TOKEN re-issued on login"
+
+# A guest token is minted by anyone who can reach the site, so it must not
+# authorize a mutation once the request carries a session. The XSRF-TOKEN
+# cookie carries no Domain restriction and no __Host- prefix, so any sibling
+# subdomain can write it — meaning double-submit alone (cookie and header
+# agreeing on a guest token) has to be rejected here, or that subdomain could
+# ride a logged-in session. Both are planted, so this fails on the mode rule
+# rather than on a cookie mismatch, which is what makes it worth asserting.
+SESSION_COOKIE=$(awk '$6 == "guren.session" { print $7 }' "$COOKIES")
+if [ -z "$SESSION_COOKIE" ]; then
+  echo "ERROR: no guren.session cookie after login"
+  exit 1
+fi
+http_expect "POST /posts (session + planted guest token)" 403 \
+  -X POST "$RUNTIME_URL/posts" \
+  -H "Content-Type: application/json" \
+  -H "Cookie: guren.session=$SESSION_COOKIE; XSRF-TOKEN=$PRE_LOGIN_XSRF" \
+  -H "X-XSRF-TOKEN: $PRE_LOGIN_XSRF" \
+  -d '{"title":"planted guest token","body":"must be rejected"}'
 
 # CRUD create + read
 http_expect "POST /posts (authenticated)" 303 \
