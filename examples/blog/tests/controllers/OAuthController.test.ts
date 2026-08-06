@@ -37,11 +37,22 @@ function createOAuthStub() {
   }
 }
 
-function createController() {
+/** Enough of a Session for the controller's state binding to round-trip. */
+function createSessionStub() {
+  const data = new Map<string, unknown>()
+  return {
+    regenerate: vi.fn(),
+    set: vi.fn((key: string, value: unknown) => { data.set(key, value) }),
+    get: vi.fn((key: string) => data.get(key)),
+    forget: vi.fn((key: string) => { data.delete(key) }),
+  }
+}
+
+function createController(session = createSessionStub()) {
   const controller = new OAuthController()
   Object.defineProperty(controller, 'auth', {
     value: {
-      session: vi.fn().mockReturnValue({ regenerate: vi.fn() }),
+      session: vi.fn().mockReturnValue(session),
       login: vi.fn().mockResolvedValue(undefined),
     },
     configurable: true,
@@ -60,9 +71,30 @@ describe('OAuthController', () => {
 
       const response = await controller.redirectToProvider()
 
-      expect(oauth.authorize).toHaveBeenCalledWith('github', { redirectTo: undefined })
+      // `bindTo` ties the flow to this browser: without it an attacker can
+      // authorize their own account, hold the `code`, and walk a visitor
+      // through the callback to log them into the attacker's account.
+      expect(oauth.authorize).toHaveBeenCalledWith('github', {
+        redirectTo: undefined,
+        bindTo: expect.any(String),
+      })
       expect(response.status).toBe(302)
       expect(response.headers.get('Location')).toBe('https://github.com/login/oauth/authorize?client_id=abc')
+    })
+
+    it('hands the callback the same binding it stored in the session', async () => {
+      const oauth = createOAuthStub()
+      const session = createSessionStub()
+      const controller = createController(session)
+      const ctx = createControllerContext('http://blog.test/auth/github', {}, { oauth }) as unknown as Context
+      controller.setContext(ctx)
+      ;(ctx as unknown as { req: { param: () => Record<string, string> } }).req.param = () => ({ provider: 'github' })
+
+      await controller.redirectToProvider()
+
+      const { bindTo } = (oauth.authorize as unknown as { mock: { calls: Array<[string, { bindTo: string }]> } }).mock.calls[0][1]
+      expect(session.set).toHaveBeenCalledWith('oauth.binding', bindTo)
+      expect(session.get('oauth.binding')).toBe(bindTo)
     })
   })
 

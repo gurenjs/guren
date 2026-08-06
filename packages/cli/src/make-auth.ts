@@ -336,6 +336,13 @@ ${identityEntries}
   return identities[provider]
 }
 
+// Where the per-browser binding for the OAuth \`state\` is kept. Without it,
+// \`state\` is unguessable and single-use but transferable: an attacker can
+// authorize their own account, keep the \`code\` unconsumed, and walk a
+// visitor's browser through the callback — logging that visitor into the
+// attacker's account.
+const OAUTH_BINDING_KEY = 'oauth.binding'
+
 export default class OAuthController extends Controller {
   private oauth(): OAuthManager {
     return this.make<OAuthManager>('oauth')
@@ -346,8 +353,14 @@ export default class OAuthController extends Controller {
   async redirectToProvider(): Promise<Response> {
     const { provider } = this.validateParams(ProviderParamSchema)
 
+    // Writing to the session is also what makes a visitor's brand-new session
+    // persist, so the callback request arrives carrying the same one.
+    const binding = crypto.randomUUID()
+    this.auth.session()?.set(OAUTH_BINDING_KEY, binding)
+
     const { url } = await this.oauth().authorize(provider, {
       redirectTo: this.request.query('redirectTo') ?? undefined,
+      bindTo: binding,
     })
 
     return this.redirect(url)
@@ -357,7 +370,11 @@ export default class OAuthController extends Controller {
     const { provider } = this.validateParams(ProviderParamSchema)
     const { code, state } = this.validateQuery(CallbackQuerySchema)
 
-    const { profile, redirectTo } = await this.oauth().handleCallback(provider, { code, state })
+    const session = this.auth.session()
+    const binding = session?.get<string>(OAUTH_BINDING_KEY)
+    session?.forget(OAUTH_BINDING_KEY)
+
+    const { profile, redirectTo } = await this.oauth().handleCallback(provider, { code, state, bindTo: binding })
 
     // Lowercased to match how registration stores emails; provider casing
     // isn't guaranteed to be stable across logins.

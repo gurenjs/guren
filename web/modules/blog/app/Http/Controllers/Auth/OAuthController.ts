@@ -8,6 +8,8 @@ const CallbackQuerySchema = z.object({
   state: z.string(),
 })
 
+const OAUTH_BINDING_KEY = 'oauth.binding'
+
 export default class OAuthController extends Controller {
   private oauth(): OAuthManager {
     return this.make<OAuthManager>('oauth')
@@ -16,8 +18,16 @@ export default class OAuthController extends Controller {
   // Note: not named `redirect` — that would shadow the base
   // Controller.redirect() helper used below.
   async redirectToProvider(): Promise<Response> {
+    // Ties `state` to this browser. Without it an attacker can authorize their
+    // own account, keep the `code` unconsumed, and walk a visitor's browser
+    // through the callback. Writing to the session is also what makes a
+    // visitor's brand-new session persist across the provider round trip.
+    const binding = crypto.randomUUID()
+    this.auth.session()?.set(OAUTH_BINDING_KEY, binding)
+
     const { url } = await this.oauth().authorize('github', {
       redirectTo: this.request.query('redirectTo') ?? undefined,
+      bindTo: binding,
     })
 
     return this.redirect(url)
@@ -26,7 +36,11 @@ export default class OAuthController extends Controller {
   async callback(): Promise<Response> {
     const { code, state } = this.validateQuery(CallbackQuerySchema)
 
-    const { profile, redirectTo } = await this.oauth().handleCallback('github', { code, state })
+    const session = this.auth.session()
+    const binding = session?.get<string>(OAUTH_BINDING_KEY)
+    session?.forget(OAUTH_BINDING_KEY)
+
+    const { profile, redirectTo } = await this.oauth().handleCallback('github', { code, state, bindTo: binding })
 
     // Enforced before any account lookup or creation: this is a single-admin
     // blog, so arbitrary GitHub users must never get accounts.

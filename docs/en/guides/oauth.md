@@ -41,17 +41,29 @@ const CallbackQuerySchema = z.object({
   state: z.string(),
 })
 
+const OAUTH_BINDING_KEY = 'oauth.binding'
+
 export default class GitHubOAuthController extends Controller {
   async start() {
+    // Ties the flow to this browser — see "Binding state to the browser" below.
+    const binding = crypto.randomUUID()
+    this.auth.session()?.set(OAUTH_BINDING_KEY, binding)
+
     const { url } = await oauth.authorize('github', {
       redirectTo: this.query('redirect_to'),
+      bindTo: binding,
     })
     return this.redirect(url)
   }
 
   async callback() {
     const { code, state } = this.validateQuery(CallbackQuerySchema)
-    const { profile, redirectTo } = await oauth.handleCallback('github', { code, state })
+
+    const session = this.auth.session()
+    const binding = session?.get<string>(OAUTH_BINDING_KEY)
+    session?.forget(OAUTH_BINDING_KEY)
+
+    const { profile, redirectTo } = await oauth.handleCallback('github', { code, state, bindTo: binding })
 
     let user = await User.where('githubId', profile.id).first()
     if (!user) {
@@ -75,6 +87,50 @@ export function registerWebRoutes(router: Router): void {
   router.get('/auth/github/callback', [GitHubOAuthController, 'callback'])
 }
 ```
+
+## Binding State to the Browser
+
+`state` is unguessable and single-use, but on its own it is also *transferable*.
+An attacker can start a flow on your app, authorize their own provider account,
+keep the resulting `code` unconsumed, and then get a visitor to open
+
+```
+https://your.app/auth/github/callback?code=<attacker's>&state=<attacker's>
+```
+
+Nothing in the pair identifies whose browser began the flow, so the callback
+succeeds and logs that visitor into the **attacker's** account. Everything the
+visitor writes afterwards — posts, uploads, a saved payment method — lands in an
+account the attacker can also read.
+
+Pass `bindTo` to close it:
+
+```ts
+// starting the flow
+const binding = crypto.randomUUID()
+this.auth.session()?.set('oauth.binding', binding)
+const { url } = await oauth.authorize('github', { bindTo: binding })
+
+// in the callback
+const session = this.auth.session()
+const binding = session?.get<string>('oauth.binding')
+session?.forget('oauth.binding')
+await oauth.handleCallback('github', { code, state, bindTo: binding })
+```
+
+Only a hash of the value reaches the state store, and `handleCallback` refuses a
+state whose binding it cannot match. Writing to the session is also what makes a
+first-time visitor's session persist across the round trip to the provider, so
+the callback request carries the same one.
+
+A session id works as `bindTo` too, but only where a session already exists —
+the value above is generated for the purpose and works for logged-out visitors.
+
+> [!WARNING]
+> `authorize()` without `bindTo` still works, so apps written against the earlier
+> API keep running, and it logs a warning once per process. Those apps remain
+> open to the attack above until they adopt it. `make:auth` and the `oauth`
+> blueprint generate the bound version.
 
 ## Redirect After Login
 
@@ -278,7 +334,7 @@ describe('GitHub OAuth', () => {
 
 ## Best Practices
 
-1. **Never skip state verification**: `handleCallback` verifies and consumes the state automatically — don't build a custom callback path that trusts `code` alone.
+1. **Never skip state verification**: `handleCallback` verifies and consumes the state automatically — don't build a custom callback path that trusts `code` alone. Always pass `bindTo` as well; state verification on its own does not tell you the flow started in the same browser (see [Binding State to the Browser](#binding-state-to-the-browser)).
 
 2. **Set `allowedRedirectHosts` explicitly**: without it, only app-relative `redirectTo` paths are honored, which is the safest default. Add hosts only if you redirect to a separate domain after login.
 
