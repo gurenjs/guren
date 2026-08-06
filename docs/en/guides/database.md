@@ -457,7 +457,12 @@ User.addGlobalScope('tenant', (q) => q.where('tenantId', currentTenantId()))
 User.addGlobalScope('active', (q) => q.where('active', true))
 ```
 
-Every query through `all()`, `find()`, `where()`, and `newQuery()` now applies both scopes automatically.
+Every query entry point applies both scopes automatically — `all()`, `find()`,
+`first()`, `where()` and its `whereIn`/`whereNull`/`select` siblings, `scope()`,
+`orderBy()`, `paginate()` (the count as well as the rows), `newQuery()`, and the
+queries that eager-load a relation, which apply the *related* model's scopes.
+
+The only way past them is to ask explicitly, below.
 
 ### Bypassing Global Scopes
 
