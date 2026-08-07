@@ -220,9 +220,15 @@ export default class OAuthController extends Controller {
     const provider = this.validateProvider(this.request.param('provider'))
 
     // Writing to the session is also what makes a visitor's brand-new session
-    // persist, so the callback request arrives carrying the same one.
-    const binding = crypto.randomUUID()
-    this.auth.session()?.set(OAUTH_BINDING_KEY, binding)
+    // persist, so the callback request arrives carrying the same one. Bound
+    // only when there is a session to hold the value: sending \`bindTo\` with
+    // nowhere to keep it would make the callback reject its own flow.
+    const session = this.auth.session()
+    let binding: string | undefined
+    if (session) {
+      binding = crypto.randomUUID()
+      session.set(OAUTH_BINDING_KEY, binding)
+    }
 
     // \`?redirectTo=\` is user input — the manager only keeps app-relative
     // paths (or hosts allowlisted via stateConfig.allowedRedirectHosts).

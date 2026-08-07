@@ -22,8 +22,14 @@ export default class OAuthController extends Controller {
     // own account, keep the `code` unconsumed, and walk a visitor's browser
     // through the callback. Writing to the session is also what makes a
     // visitor's brand-new session persist across the provider round trip.
-    const binding = crypto.randomUUID()
-    this.auth.session()?.set(OAUTH_BINDING_KEY, binding)
+    // Bound only when there is a session to hold the value: sending `bindTo`
+    // with nowhere to keep it would make the callback reject its own flow.
+    const session = this.auth.session()
+    let binding: string | undefined
+    if (session) {
+      binding = crypto.randomUUID()
+      session.set(OAUTH_BINDING_KEY, binding)
+    }
 
     const { url } = await this.oauth().authorize('github', {
       redirectTo: this.request.query('redirectTo') ?? undefined,

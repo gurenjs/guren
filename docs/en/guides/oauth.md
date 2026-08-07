@@ -46,8 +46,12 @@ const OAUTH_BINDING_KEY = 'oauth.binding'
 export default class GitHubOAuthController extends Controller {
   async start() {
     // Ties the flow to this browser — see "Binding state to the browser" below.
-    const binding = crypto.randomUUID()
-    this.auth.session()?.set(OAUTH_BINDING_KEY, binding)
+    const session = this.auth.session()
+    let binding: string | undefined
+    if (session) {
+      binding = crypto.randomUUID()
+      session.set(OAUTH_BINDING_KEY, binding)
+    }
 
     const { url } = await oauth.authorize('github', {
       redirectTo: this.query('redirect_to'),
@@ -125,6 +129,11 @@ the callback request carries the same one.
 
 A session id works as `bindTo` too, but only where a session already exists —
 the value above is generated for the purpose and works for logged-out visitors.
+
+Bind only when there is somewhere to keep the value. Sending `bindTo` from an
+app with no session middleware records a binding the callback can never present,
+and every login then fails with `Invalid or expired OAuth state` — pointing at
+the wrong cause. The scaffolds guard on `this.auth.session()` for that reason.
 
 > [!WARNING]
 > `authorize()` without `bindTo` still works, so apps written against the earlier

@@ -96,6 +96,22 @@ describe('OAuthController', () => {
       expect(session.set).toHaveBeenCalledWith('oauth.binding', bindTo)
       expect(session.get('oauth.binding')).toBe(bindTo)
     })
+
+    // Sending a binding the callback can never present would make every login
+    // fail with "Invalid or expired OAuth state" — pointing at the wrong cause.
+    it('sends no binding when there is no session to hold it', async () => {
+      const oauth = createOAuthStub()
+      // `null`, not `undefined` — the default parameter would substitute a stub.
+      const controller = createController(null as unknown as ReturnType<typeof createSessionStub>)
+      const ctx = createControllerContext('http://blog.test/auth/github', {}, { oauth }) as unknown as Context
+      controller.setContext(ctx)
+      ;(ctx as unknown as { req: { param: () => Record<string, string> } }).req.param = () => ({ provider: 'github' })
+
+      const response = await controller.redirectToProvider()
+
+      expect(oauth.authorize).toHaveBeenCalledWith('github', { redirectTo: undefined, bindTo: undefined })
+      expect(response.status).toBe(302)
+    })
   })
 
   describe('callback()', () => {

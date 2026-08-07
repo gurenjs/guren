@@ -441,8 +441,12 @@ export const posts = pgTable('posts', {
       // binding is what makes the state useless in any other browser.
       expect(controller).toContain('bindTo: binding')
       expect(controller).toContain('{ code, state, bindTo: binding }')
-      expect(controller).toContain('this.auth.session()?.set(OAUTH_BINDING_KEY, binding)')
+      expect(controller).toContain('session.set(OAUTH_BINDING_KEY, binding)')
       expect(controller).toContain('session?.forget(OAUTH_BINDING_KEY)')
+      // Guarded on a session existing: a binding the callback can never
+      // present would fail every login with "Invalid or expired OAuth state".
+      expect(controller).toContain('const session = this.auth.session()')
+      expect(controller).toContain('if (session) {')
       expect(controller).toContain('already exists. Sign in with the method you originally used.')
 
       // Returning an email is not a claim that the provider checked it, so the
