@@ -23,8 +23,3 @@ All of these now route through the scope-applying builder. `newQuery()` with no
 scopes registered constructs exactly what the bare builder did, so an app that
 uses no global scopes is unaffected. `withoutGlobalScope(s)` remains the way out.
 
-`QueryBuilder` also stops silently dropping conditions it cannot express. On an
-adapter that implements neither `findManyAdvanced` nor `countAdvanced`, a query
-using `not in` or `is not null` fell back to `where: undefined` — discarding
-every condition, global scopes included, and returning the whole table. It now
-throws. The shipped Drizzle adapter implements both and never reaches this path.

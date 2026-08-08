@@ -172,6 +172,25 @@ function warnOnceAboutUnboundState(): void {
   )
 }
 
+let warnedAboutDroppedBinding = false
+
+/**
+ * The flow was bound at authorize time but the state came back without one,
+ * so the configured `OAuthStateStore` is not persisting `binding` — which
+ * silently reverts the protection to the transferable state it replaced.
+ */
+function warnOnceAboutDroppedBinding(): void {
+  if (warnedAboutDroppedBinding) return
+  warnedAboutDroppedBinding = true
+  console.warn(
+    '[guren] An OAuth state was created with `bindTo` but came back from the state store '
+    + 'without its binding, so the callback could not be tied to the browser that started the '
+    + 'flow. The configured OAuthStateStore is dropping `OAuthStatePayload.binding` — for '
+    + 'DatabaseOAuthStateStore this usually means the `oauth_states` table has no `binding` '
+    + 'column. See: https://guren.dev/docs/guides/oauth',
+  )
+}
+
 const DEFAULT_STATE_EXPIRES_IN = 10 * 60 * 1000
 const DEFAULT_STATE_LENGTH = 24
 const DEFAULT_STATE_HASH_ALGORITHM: NonNullable<OAuthStateConfig['hashAlgorithm']> = 'sha256'
@@ -381,7 +400,15 @@ function bindingMatches(
   presented: string | undefined,
   hashAlgorithm: 'sha256' | 'sha512',
 ): boolean {
-  if (!stored) return true
+  if (!stored) {
+    // The caller bound this flow, so a payload coming back without one means
+    // the store dropped the field rather than that the state was never bound.
+    // Verification cannot tell the two apart, so it stays permissive — but a
+    // store that silently discards the binding turns the protection off, and
+    // nothing else would say so.
+    if (presented) warnOnceAboutDroppedBinding()
+    return true
+  }
   if (!presented) return false
   // Both sides are hex digests, so this takes the hex-decoding comparator —
   // the same one the API-token store uses for stored-hash checks.

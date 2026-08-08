@@ -86,6 +86,27 @@ describe('oauth helpers', () => {
   // Apps written against the previous API pass no binding at all. They stay
   // exposed to the transfer above — authorize() warns about it — but must not
   // break on upgrade.
+  // A store that drops `binding` reverts the protection with no other signal,
+  // so the mismatch between "bound at authorize" and "unbound at callback" is
+  // reported rather than passing silently.
+  it('warns when a bound flow comes back from the store unbound', async () => {
+    const store = new MemoryOAuthStateStore()
+    const original = console.warn
+    const warnings: string[] = []
+    console.warn = (message: unknown) => { warnings.push(String(message)) }
+
+    try {
+      const { state } = await createOAuthState('github', store, {}, undefined, 'dropped-state')
+      // Simulate the store losing the field: the state was minted unbound, but
+      // the caller presents one, which is the shape a dropping store produces.
+      expect(await verifyOAuthState(state, 'github', store, {}, 'session-abc')).not.toBeNull()
+    } finally {
+      console.warn = original
+    }
+
+    expect(warnings.some((line) => line.includes('without its binding'))).toBe(true)
+  })
+
   it('still verifies a state created without a binding', async () => {
     const store = new MemoryOAuthStateStore()
     const { state } = await createOAuthState('github', store, {})
