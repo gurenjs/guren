@@ -18,7 +18,7 @@ await mock.module('vite', () => ({
   },
 }))
 
-const { startViteDevServer } = await import('../../src/http/vite-dev-server')
+const { startViteDevServer, resolveViteDevServerConfig } = await import('../../src/http/vite-dev-server')
 
 describe('startViteDevServer', () => {
   beforeEach(() => {
@@ -40,5 +40,31 @@ describe('startViteDevServer', () => {
       expect(result.localUrl).toBe('http://localhost:4321')
       expect(result.networkUrls).toEqual(['http://192.168.0.10:4321'])
     }
+  })
+})
+
+describe('resolveViteDevServerConfig', () => {
+  it('does not bind the dev server to every interface by default', () => {
+    // The dev server serves every file under the project root — application
+    // source and the default SQLite database — with no authentication. Setting
+    // `host` here would override Vite's localhost-only default and hand that to
+    // anyone on the same network, so it must stay unset.
+    const config = resolveViteDevServerConfig({ root: '/tmp/app' })
+
+    expect(config.server?.host).toBeUndefined()
+  })
+
+  it('passes an explicit host through', () => {
+    expect(resolveViteDevServerConfig({ host: true }).server?.host).toBe(true)
+    expect(resolveViteDevServerConfig({ host: '0.0.0.0' }).server?.host).toBe('0.0.0.0')
+  })
+
+  it("lets the project's own vite config win over the caller's host", () => {
+    const config = resolveViteDevServerConfig({
+      host: true,
+      config: { server: { host: '127.0.0.1' } },
+    })
+
+    expect(config.server?.host).toBe('127.0.0.1')
   })
 })

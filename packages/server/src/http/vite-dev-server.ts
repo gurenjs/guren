@@ -3,6 +3,12 @@ import type { InlineConfig, ViteDevServer } from 'vite'
 export interface StartViteDevServerOptions {
   root?: string
   config?: InlineConfig
+  /**
+   * What the dev server binds to. Left unset it follows Vite's own
+   * localhost-only default, which is the safe choice: the dev server serves
+   * every file under the project root, including the default SQLite database,
+   * with no authentication. Pass `true` to expose it on the network.
+   */
   host?: boolean | string
   port?: number
 }
@@ -13,13 +19,19 @@ export interface StartedViteDevServer {
   networkUrls: string[]
 }
 
-export async function startViteDevServer(
+/**
+ * Build the inline config the managed dev server starts with.
+ *
+ * `server.host` is only set when the caller asked for one. Left undefined it
+ * is dropped during Vite's config merge, so the project's own `vite.config.ts`
+ * decides, falling back to Vite's localhost-only default.
+ */
+export function resolveViteDevServerConfig(
   options: StartViteDevServerOptions = {},
-): Promise<StartedViteDevServer> {
-  const { root = process.cwd(), config = {}, host = true, port } = options
-  const { createServer } = await import('vite')
+): InlineConfig {
+  const { root = process.cwd(), config = {}, host, port } = options
 
-  const mergedConfig: InlineConfig = {
+  return {
     clearScreen: false,
     ...config,
     root: config.root ?? root,
@@ -29,8 +41,15 @@ export async function startViteDevServer(
       ...(config.server ?? {}),
     },
   }
+}
 
-  const server = await createServer(mergedConfig)
+export async function startViteDevServer(
+  options: StartViteDevServerOptions = {},
+): Promise<StartedViteDevServer> {
+  const { host, port } = options
+  const { createServer } = await import('vite')
+
+  const server = await createServer(resolveViteDevServerConfig(options))
   await server.listen()
 
   const resolved = server.resolvedUrls
