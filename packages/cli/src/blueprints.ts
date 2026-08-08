@@ -582,8 +582,11 @@ export default class BroadcastProvider extends ServiceProvider {
     const orders = new OrdersChannel(broadcast)
     const userFeed = new UserFeedChannel(broadcast)
 
+    // A public channel is open by definition. A private one is not: register
+    // the channel's own authorize() so the check in UserFeedChannel is the
+    // check that runs.
     broadcast.channel(orders.getChannelName(), () => true)
-    broadcast.privateChannel(userFeed.getBaseName(), () => true)
+    broadcast.privateChannel(userFeed.getBaseName(), (channelName, user) => userFeed.authorize(channelName, user))
   }
 }
 `,
