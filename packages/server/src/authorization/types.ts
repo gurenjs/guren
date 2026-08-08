@@ -37,13 +37,22 @@ export interface GateDefinition {
 }
 
 /**
+ * What a policy ability or gate callback may answer.
+ *
+ * `Response.deny()` and friends return an object, so it must be part of the
+ * type — a signature of just `boolean` is what let a denial object be read
+ * as an approval.
+ */
+export type PolicyResult = boolean | AuthorizationResponse
+
+/**
  * Policy method type.
  */
 export type PolicyMethod<T = unknown> = (
   user: AuthUser | null,
   model?: T,
   ...args: unknown[]
-) => boolean | Promise<boolean>
+) => PolicyResult | Promise<PolicyResult>
 
 /**
  * Policy class interface.

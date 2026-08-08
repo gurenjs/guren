@@ -10,7 +10,7 @@ import type {
   AuthorizationResponse,
   ResponseBuilder,
 } from './types'
-import { AuthorizationException } from '../errors'
+import { AuthorizationException, HttpException } from '../errors'
 
 /**
  * Response builder for authorization checks.
@@ -31,6 +31,49 @@ export const Response: ResponseBuilder = {
   denyAsNotFound(message?: string): AuthorizationResponse & { status: 404 } {
     return { allowed: false, message: message ?? 'Not found.', status: 404 }
   },
+}
+
+/**
+ * Narrow a policy/gate return value to an `AuthorizationResponse`.
+ *
+ * Policies may return either a boolean or one of the `Response` objects
+ * produced by `allow()`/`deny()`/`denyWithStatus()`/`denyAsNotFound()`.
+ */
+export function isAuthorizationResponse(value: unknown): value is AuthorizationResponse {
+  return (
+    typeof value === 'object'
+    && value !== null
+    && typeof (value as AuthorizationResponse).allowed === 'boolean'
+  )
+}
+
+/**
+ * Normalize whatever a policy or gate callback returned into a response.
+ *
+ * A `{ allowed: false }` object is truthy, so anything that decides access
+ * from the raw return value fails open. Every path in this class routes
+ * through here, and unknown shapes deny.
+ */
+function toAuthorizationResponse(value: unknown): AuthorizationResponse {
+  if (isAuthorizationResponse(value)) {
+    return value
+  }
+  return value === true ? Response.allow() : Response.deny()
+}
+
+/**
+ * Build the exception for a denial, honouring `denyWithStatus()` /
+ * `denyAsNotFound()` so a policy can hide a record as a 404.
+ */
+function denialToException(response: AuthorizationResponse): Error {
+  const message = response.message ?? 'This action is unauthorized.'
+  const status = (response as AuthorizationResponse & { status?: number }).status
+
+  if (typeof status === 'number' && status !== 403) {
+    return new HttpException(status, message)
+  }
+
+  return new AuthorizationException(message)
 }
 
 /**
@@ -208,10 +251,10 @@ export class Gate {
    * Authorize the ability or throw an exception.
    */
   async authorize(ability: string, ...args: unknown[]): Promise<void> {
-    const allowed = await this.allows(ability, ...args)
+    const response = await this.checkResponse(ability, this.currentUser, ...args)
 
-    if (!allowed) {
-      throw new AuthorizationException(`This action is unauthorized.`)
+    if (!response.allowed) {
+      throw denialToException(response)
     }
   }
 
@@ -219,20 +262,34 @@ export class Gate {
    * Get the authorization response.
    */
   async inspect(ability: string, ...args: unknown[]): Promise<AuthorizationResponse> {
-    const allowed = await this.check(ability, this.currentUser, ...args)
-    return allowed ? Response.allow() : Response.deny()
+    return this.checkResponse(ability, this.currentUser, ...args)
   }
 
   /**
    * Check the ability with a specific user.
    */
   async check(ability: string, user: AuthUser | null, ...args: unknown[]): Promise<boolean> {
+    const response = await this.checkResponse(ability, user, ...args)
+    return response.allowed
+  }
+
+  /**
+   * Check the ability with a specific user and keep the full response.
+   *
+   * Policies may answer with a boolean or with a `Response` object. Both
+   * shapes are normalized here so no caller has to truthy-test a
+   * `{ allowed: false }` object.
+   */
+  async checkResponse(
+    ability: string,
+    user: AuthUser | null,
+    ...args: unknown[]
+  ): Promise<AuthorizationResponse> {
     // Run before callbacks
     for (const beforeCallback of this.beforeCallbacks) {
       const result = await beforeCallback(user, ability, ...args)
       if (typeof result === 'boolean') {
-        await this.runAfterCallbacks(user, ability, result, args)
-        return result
+        return this.settle(user, ability, Response[result ? 'allow' : 'deny'](), args)
       }
     }
 
@@ -241,8 +298,7 @@ export class Gate {
     if (model !== undefined && model !== null) {
       const policyResult = await this.checkPolicy(ability, user, model, args.slice(1))
       if (policyResult !== undefined) {
-        await this.runAfterCallbacks(user, ability, policyResult, args)
-        return policyResult
+        return this.settle(user, ability, toAuthorizationResponse(policyResult), args)
       }
     }
 
@@ -250,13 +306,24 @@ export class Gate {
     const gate = this.gates.get(ability)
     if (gate) {
       const result = await gate.callback(user, ...args)
-      await this.runAfterCallbacks(user, ability, result, args)
-      return result
+      return this.settle(user, ability, toAuthorizationResponse(result), args)
     }
 
     // No gate or policy found
-    await this.runAfterCallbacks(user, ability, false, args)
-    return false
+    return this.settle(user, ability, Response.deny(), args)
+  }
+
+  /**
+   * Run after callbacks with the normalized result and return the response.
+   */
+  protected async settle(
+    user: AuthUser | null,
+    ability: string,
+    response: AuthorizationResponse,
+    args: unknown[]
+  ): Promise<AuthorizationResponse> {
+    await this.runAfterCallbacks(user, ability, response.allowed, args)
+    return response
   }
 
   /**
@@ -272,7 +339,7 @@ export class Gate {
     user: AuthUser | null,
     model: unknown,
     additionalArgs: unknown[]
-  ): Promise<boolean | undefined> {
+  ): Promise<boolean | AuthorizationResponse | undefined> {
     let policyKey: unknown
     let subject: unknown = model
     let hasSubject = true

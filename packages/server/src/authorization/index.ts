@@ -3,6 +3,7 @@ export type {
   GateCallback,
   GateDefinition,
   PolicyMethod,
+  PolicyResult,
   Policy as PolicyInterface,
   PolicyClass,
   AuthorizationResponse,
@@ -16,6 +17,7 @@ export type {
 export {
   Gate,
   Response,
+  isAuthorizationResponse,
   createGate,
   setGate,
   getGate,
