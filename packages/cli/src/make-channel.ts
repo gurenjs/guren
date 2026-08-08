@@ -1,35 +1,40 @@
 import type { WriterOptions } from './utils'
-import { kebabCase, scaffoldFile } from './utils'
+import { escapeTemplateLiteral, kebabCase, scaffoldFile } from './utils'
 
 const CHANNELS_DIR = 'app/Broadcasting'
 
 /**
- * The body of a generated `authorize()`.
+ * The generated `authorize()` method, signature and body together.
  *
- * A pattern carrying an `{id}` placeholder is per-user by convention, so the
- * default check ties the subscription to that user. Anything else can only
- * default to "any authenticated user" plus a TODO — the scaffolder cannot know
- * the ownership rule, and a check that silently allows everyone is the thing
- * this is meant to avoid.
+ * A single placeholder is per-user by convention, so the default check ties
+ * the subscription to that user. Anything else can only default to "any
+ * authenticated user" plus a TODO — the scaffolder cannot know the ownership
+ * rule, and a check that silently allows everyone is what this exists to
+ * avoid. Returned as one string so the parameter name cannot drift out of
+ * step with whether the body uses it.
  */
-function privateAuthorize(channelName: string): { param: string; body: string } {
-  if (channelName.includes('{id}')) {
-    const ownerPattern = channelName.replace('{id}', '${(user as { id: string | number }).id}')
+function privateAuthorizeMethod(channelName: string): string {
+  const placeholders = channelName.match(/\{[^}]+\}/gu) ?? []
 
-    return {
-      param: 'channelName',
-      body: `    if (!user) return false
+  const signature = (param: string) =>
+    `  async authorize(${param}: string, user: unknown): Promise<boolean> {`
+
+  if (placeholders.length !== 1) {
+    return `${signature('_channelName')}
+    // TODO: narrow this. Every authenticated user can subscribe as written.
+    return user != null
+  }`
+  }
+
+  const owner = escapeTemplateLiteral(channelName)
+    .replace(escapeTemplateLiteral(placeholders[0]), '${(user as { id: string | number }).id}')
+
+  return `${signature('channelName')}
+    if (!user) return false
 
     // \`${channelName}\` is per-user: only the owner may subscribe.
-    return channelName === \`private-${ownerPattern}\``,
-    }
-  }
-
-  return {
-    param: '_channelName',
-    body: `    // TODO: narrow this. Every authenticated user can subscribe as written.
-    return user != null`,
-  }
+    return channelName === \`private-${owner}\`
+  }`
 }
 
 function channelTemplate(className: string, channelName: string, isPrivate: boolean, isPresence: boolean): string {
@@ -64,8 +69,6 @@ export default class ${className} extends PresenceChannel {
   }
 
   if (isPrivate) {
-    const { param, body } = privateAuthorize(channelName)
-
     return `import { PrivateChannel, type BroadcastManager } from '@guren/core'
 
 export default class ${className} extends PrivateChannel {
@@ -77,9 +80,7 @@ export default class ${className} extends PrivateChannel {
    * Decide who may subscribe. Register it so it runs:
    *   broadcast.privateChannel(channel.getBaseName(), (name, user) => channel.authorize(name, user))
    */
-  async authorize(${param}: string, user: unknown): Promise<boolean> {
-${body}
-  }
+${privateAuthorizeMethod(channelName)}
 }
 `
   }

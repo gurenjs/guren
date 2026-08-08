@@ -65,7 +65,7 @@ function toAuthorizationResponse(value: unknown): AuthorizationResponse {
  * Build the exception for a denial, honouring `denyWithStatus()` /
  * `denyAsNotFound()` so a policy can hide a record as a 404.
  */
-function denialToException(response: AuthorizationResponse): Error {
+export function denialToException(response: AuthorizationResponse): Error {
   const message = response.message ?? 'This action is unauthorized.'
   const status = (response as AuthorizationResponse & { status?: number }).status
 
@@ -285,11 +285,13 @@ export class Gate {
     user: AuthUser | null,
     ...args: unknown[]
   ): Promise<AuthorizationResponse> {
-    // Run before callbacks
+    // Run before callbacks. Only `undefined` means "keep checking" — anything
+    // else is an answer, and a `Response.deny()` object read as "not a boolean,
+    // so continue" would drop the denial on the floor.
     for (const beforeCallback of this.beforeCallbacks) {
       const result = await beforeCallback(user, ability, ...args)
-      if (typeof result === 'boolean') {
-        return this.settle(user, ability, Response[result ? 'allow' : 'deny'](), args)
+      if (result !== undefined) {
+        return this.settle(user, ability, toAuthorizationResponse(result), args)
       }
     }
 
@@ -313,9 +315,6 @@ export class Gate {
     return this.settle(user, ability, Response.deny(), args)
   }
 
-  /**
-   * Run after callbacks with the normalized result and return the response.
-   */
   protected async settle(
     user: AuthUser | null,
     ability: string,
@@ -370,10 +369,11 @@ export class Gate {
 
     const policy = this.getPolicyInstance(policyClass)
 
-    // Check before method
+    // Check before method — same rule as the gate-level before callbacks:
+    // only `undefined` continues to the ability method.
     if (policy.before) {
       const beforeResult = await policy.before(user, ability)
-      if (typeof beforeResult === 'boolean') {
+      if (beforeResult !== undefined) {
         return beforeResult
       }
     }

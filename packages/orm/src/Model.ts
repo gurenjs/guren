@@ -780,8 +780,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    * const users = await User.all()
    */
   static async all<T extends typeof Model>(this: T, queryOptions?: ModelQueryOptions): Promise<Array<TRecordFor<T>>> {
-    const hasGlobalScopes = this.globalScopeRegistry && this.globalScopeRegistry.size > 0
-    if (this.defaultScope || hasGlobalScopes) {
+    if (this.hasScopes()) {
       return this.newQuery(queryOptions).get()
     }
     const table = this.resolveTable()
@@ -809,7 +808,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     key: keyof TRecordFor<T> & string = 'id' as keyof TRecordFor<T> & string,
     queryOptions?: ModelQueryOptions,
   ): Promise<TRecordFor<T> | null> {
-    if (this.defaultScope || (this.globalScopeRegistry && this.globalScopeRegistry.size > 0)) {
+    if (this.hasScopes()) {
       return this.newQuery(queryOptions).where(key, id as TRecordFor<T>[typeof key]).first()
     }
     const table = this.resolveTable()
@@ -940,7 +939,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     where?: WhereClauseFor<T>,
     queryOptions?: ModelQueryOptions,
   ): Promise<TRecordFor<T> | null> {
-    if (this.defaultScope || (this.globalScopeRegistry && this.globalScopeRegistry.size > 0)) {
+    if (this.hasScopes()) {
       const builder = this.newQuery(queryOptions).limit(1)
       if (where) {
         builder.where(where as Partial<Record<string, unknown>>)
@@ -1078,17 +1077,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    *   .limit(10)
    *   .get()
    */
-  /**
-   * Whether this model carries a filter that every query must apply.
-   *
-   * The entry points that talk to the adapter directly check this to decide
-   * whether they can take the fast path; anything that returns a QueryBuilder
-   * goes through `newQuery()` unconditionally.
-   */
-  protected static hasScopes(): boolean {
-    return Boolean(this.defaultScope) || Boolean(this.globalScopeRegistry && this.globalScopeRegistry.size > 0)
-  }
-
   static newQuery<T extends typeof Model>(this: T, queryOptions?: ModelQueryOptions): QueryBuilder<TRecordFor<T>> {
     const builder = new QueryBuilder<TRecordFor<T>>(this, queryOptions)
     if (this.defaultScope) {
@@ -1110,6 +1098,17 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    */
   static newQueryWithoutScopes<T extends typeof Model>(this: T, queryOptions?: ModelQueryOptions): QueryBuilder<TRecordFor<T>> {
     return new QueryBuilder<TRecordFor<T>>(this, queryOptions)
+  }
+
+  /**
+   * Whether this model carries a filter that every query must apply.
+   *
+   * The entry points that talk to the adapter directly check this to decide
+   * whether they can take the fast path; anything that returns a QueryBuilder
+   * goes through `newQuery()` unconditionally.
+   */
+  protected static hasScopes(): boolean {
+    return Boolean(this.defaultScope) || Boolean(this.globalScopeRegistry && this.globalScopeRegistry.size > 0)
   }
 
   /**

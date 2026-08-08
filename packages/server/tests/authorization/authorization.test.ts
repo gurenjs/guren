@@ -430,13 +430,13 @@ describe('Policy returning an AuthorizationResponse', () => {
   test('authorize throws for a denial response and keeps the message', async () => {
     const stranger = gate.forUser({ id: 2, role: 'user' } as TestUser)
 
-    expect(stranger.authorize('update', post)).rejects.toThrow('You do not own this post.')
+    await expect(stranger.authorize('update', post)).rejects.toThrow('You do not own this post.')
   })
 
   test('authorize does not throw for an allow response', async () => {
     const owner = gate.forUser({ id: 1, role: 'user' } as TestUser)
 
-    expect(owner.authorize('update', post)).resolves.toBeUndefined()
+    await expect(owner.authorize('update', post)).resolves.toBeUndefined()
   })
 
   test('inspect reports the denial with its message', async () => {
@@ -456,6 +456,42 @@ describe('Policy returning an AuthorizationResponse', () => {
     const paymentRequired = await stranger.authorize('publish', post).catch((error: unknown) => error)
     expect((paymentRequired as { statusCode: number }).statusCode).toBe(402)
     expect((paymentRequired as Error).message).toBe('Upgrade required.')
+  })
+
+  // `before` used to keep checking on anything that was not a boolean, so a
+  // denial object fell through and a permissive ability method then allowed it.
+  test('honours a denial response from a gate before callback', async () => {
+    gate.before(() => Response.deny('banned'))
+    gate.define('view', () => true)
+
+    const userGate = gate.forUser({ id: 2, role: 'user' } as TestUser)
+
+    expect(await userGate.allows('view')).toBe(false)
+    expect((await userGate.inspect('view')).message).toBe('banned')
+  })
+
+  test('honours a denial response from a policy before method', async () => {
+    class BeforePolicy extends Policy {
+      before() {
+        return this.deny('suspended')
+      }
+
+      update() {
+        return true
+      }
+    }
+
+    const policyGate = new Gate()
+    policyGate.policy(Post, BeforePolicy)
+
+    expect(await policyGate.forUser({ id: 1, role: 'user' } as TestUser).allows('update', post)).toBe(false)
+  })
+
+  test('still continues to the ability method when before returns undefined', async () => {
+    gate.before(() => undefined)
+    gate.define('view', () => true)
+
+    expect(await gate.forUser({ id: 2, role: 'user' } as TestUser).allows('view')).toBe(true)
   })
 
   test('reports the denial to after callbacks as a boolean', async () => {

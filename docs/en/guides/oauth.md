@@ -277,8 +277,14 @@ export const oauthStates = sqliteTable('oauth_states', {
   provider: text('provider').notNull(),
   redirectTo: text('redirect_to'),
   expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+  binding: text('binding'),
 })
 ```
+
+The `binding` column holds the hashed browser binding from
+[Binding State to the Browser](#binding-state-to-the-browser). Without it the
+store cannot persist a binding, and every bound state comes back unbound — which
+silently reverts the protection. Add the column before enabling `bindTo`.
 
 Expired state rows are removed as they are encountered; call `store.deleteExpired()` from a scheduled job for bulk cleanup. Redis remains available for apps that already run it:
 

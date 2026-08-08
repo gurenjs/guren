@@ -4,7 +4,7 @@ import {
   isAppRelativePath,
   normalizeRedirectTarget,
 } from '../../support/redirect-target'
-import { buildTokenUrl, generateToken, hashToken, parseTokenUrl, secureStringCompare } from '../utils'
+import { buildTokenUrl, generateToken, hashToken, parseTokenUrl, secureCompare } from '../utils'
 
 export interface OAuthProviderConfig {
   clientId: string
@@ -383,7 +383,9 @@ function bindingMatches(
 ): boolean {
   if (!stored) return true
   if (!presented) return false
-  return secureStringCompare(stored, hashToken(presented, hashAlgorithm))
+  // Both sides are hex digests, so this takes the hex-decoding comparator —
+  // the same one the API-token store uses for stored-hash checks.
+  return secureCompare(stored, hashToken(presented, hashAlgorithm))
 }
 
 // Fallback for stores without consume(): two concurrent callbacks can both

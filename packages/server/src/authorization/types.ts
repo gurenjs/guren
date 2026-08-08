@@ -14,7 +14,7 @@ export type GateCallback<Args extends unknown[] = unknown[]> = {
   bivarianceHack(
     user: AuthUser | null,
     ...args: Args
-  ): boolean | Promise<boolean>
+  ): PolicyResult | Promise<PolicyResult>
 }['bivarianceHack']
 
 /**
@@ -26,7 +26,7 @@ export type GateBeforeCallback<Args extends unknown[] = unknown[]> = {
     user: AuthUser | null,
     ability: string,
     ...args: Args
-  ): boolean | undefined | Promise<boolean | undefined>
+  ): PolicyResult | undefined | Promise<PolicyResult | undefined>
 }['bivarianceHack']
 
 /**
@@ -62,7 +62,7 @@ export interface Policy {
    * Run before all other authorization checks.
    * Return true to allow, false to deny, undefined to continue to specific check.
    */
-  before?(user: AuthUser | null, ability: string): boolean | undefined | Promise<boolean | undefined>
+  before?(user: AuthUser | null, ability: string): PolicyResult | undefined | Promise<PolicyResult | undefined>
 }
 
 /**

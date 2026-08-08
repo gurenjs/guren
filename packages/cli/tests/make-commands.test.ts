@@ -478,6 +478,15 @@ describe('CLI make:* commands', () => {
       expect(content).toContain('return channelName === `private-users.${(user as { id: string | number }).id}.feed`')
     })
 
+    // Any single placeholder means per-user, not just the literal `{id}` —
+    // otherwise `orders.{orderId}` silently got the allow-any-user fallback.
+    it('ties a per-user private channel named with any placeholder', async () => {
+      const result = await makeChannel('Orders', { private: true, channel: 'orders.{orderId}.items' })
+      const content = fs.readFileSync(result, 'utf-8')
+      expect(content).toContain('async authorize(channelName: string, user: unknown)')
+      expect(content).toContain('return channelName === `private-orders.${(user as { id: string | number }).id}.items`')
+    })
+
     it('generates presence channel template', async () => {
       const result = await makeChannel('Room', { presence: true })
       const content = fs.readFileSync(result, 'utf-8')

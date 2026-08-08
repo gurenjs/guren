@@ -1,7 +1,7 @@
 import type { Context } from '../http/Application'
 import type { Middleware } from '../http/middleware'
 import type { AuthUser, AuthorizeOptions } from './types'
-import { Gate, getGate } from './Gate'
+import { Gate, getGate, denialToException } from './Gate'
 import { AuthorizationException } from '../errors'
 
 /**
@@ -32,20 +32,18 @@ export function authorizeMiddleware(
     const abilities = Array.isArray(ability) ? ability : [ability]
     const model = modelResolver ? await modelResolver(ctx) : undefined
 
-    let authorized = false
-
     if (Array.isArray(ability)) {
-      // Check if user has any of the abilities
-      authorized = await gateForUser.any(abilities, model)
+      // Any-of has no single response to carry, so a denial can only be generic.
+      if (!(await gateForUser.any(abilities, model))) {
+        throw new AuthorizationException(options.message ?? 'This action is unauthorized.')
+      }
     } else {
-      // Check single ability
-      authorized = await gateForUser.allows(ability, model)
-    }
-
-    if (!authorized) {
-      throw new AuthorizationException(
-        options.message ?? 'This action is unauthorized.'
-      )
+      // Single ability: keep the policy's own message and status, so the same
+      // denial reads the same here as through `Controller.authorize()`.
+      const response = await gateForUser.checkResponse(ability, user, model)
+      if (!response.allowed) {
+        throw denialToException(options.message ? { ...response, message: options.message } : response)
+      }
     }
 
     await next()
@@ -122,12 +120,10 @@ export function authorizeResourceMiddleware(
     const gateForUser = gate.forUser(user)
 
     const model = await modelResolver(ctx)
-    const authorized = await gateForUser.allows(ability, model)
+    const response = await gateForUser.checkResponse(ability, user, model)
 
-    if (!authorized) {
-      throw new AuthorizationException(
-        options.message ?? 'This action is unauthorized.'
-      )
+    if (!response.allowed) {
+      throw denialToException(options.message ? { ...response, message: options.message } : response)
     }
 
     await next()

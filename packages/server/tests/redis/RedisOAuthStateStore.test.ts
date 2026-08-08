@@ -57,6 +57,20 @@ describe('RedisOAuthStateStore', () => {
     expect(await store.find('hash-1')).toBeNull()
   })
 
+  // A store that drops the binding hands back an unbound state, which then
+  // verifies for any browser — silently undoing the login-CSRF fix.
+  it('round-trips the browser binding', async () => {
+    const store = createStore()
+    await store.store('hash-bound', {
+      provider: 'github',
+      expiresAt: new Date(Date.now() + 60_000),
+      binding: 'hashed-binding',
+    })
+
+    expect((await store.find('hash-bound'))!.binding).toBe('hashed-binding')
+    expect((await store.consume('hash-bound'))!.binding).toBe('hashed-binding')
+  })
+
   it('consume returns null for an unknown state hash', async () => {
     const store = createStore()
     expect(await store.consume('missing')).toBeNull()

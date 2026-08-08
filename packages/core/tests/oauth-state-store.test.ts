@@ -10,6 +10,7 @@ const oauthStates = sqliteTable('oauth_states', {
   provider: text('provider').notNull(),
   redirectTo: text('redirect_to'),
   expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+  binding: text('binding'),
 })
 
 describe('DatabaseOAuthStateStore', () => {
@@ -23,7 +24,8 @@ describe('DatabaseOAuthStateStore', () => {
         state_hash text primary key,
         provider text not null,
         redirect_to text,
-        expires_at integer not null
+        expires_at integer not null,
+        binding text
       );
     `)
     DrizzleAdapter.configure(drizzle({ client: sqlite }) as never)
@@ -49,6 +51,28 @@ describe('DatabaseOAuthStateStore', () => {
     expect(result!.redirectTo).toBe('/dashboard')
     expect(result!.expiresAt).toBeInstanceOf(Date)
     expect(result!.expiresAt.getTime()).toBe(expiresAt.getTime())
+  })
+
+  // A store that drops the binding hands back an unbound state, which then
+  // verifies for any browser — silently undoing the login-CSRF fix.
+  test('round-trips the browser binding', async () => {
+    await store.store('hash-bound', {
+      provider: 'github',
+      expiresAt: new Date(Date.now() + 60_000),
+      binding: 'hashed-binding',
+    })
+
+    expect((await store.find('hash-bound'))!.binding).toBe('hashed-binding')
+    expect((await store.consume('hash-bound'))!.binding).toBe('hashed-binding')
+  })
+
+  test('leaves binding undefined when the state was not bound', async () => {
+    await store.store('hash-unbound', {
+      provider: 'github',
+      expiresAt: new Date(Date.now() + 60_000),
+    })
+
+    expect((await store.find('hash-unbound'))!.binding).toBeUndefined()
   })
 
   test('returns null for an unknown state hash', async () => {

@@ -42,7 +42,7 @@ export abstract class Policy implements PolicyInterface {
    * Perform pre-authorization checks.
    * Return true to allow, false to deny, undefined to continue to specific check.
    */
-  before?(user: AuthUser | null, ability: string): boolean | undefined | Promise<boolean | undefined>
+  before?(user: AuthUser | null, ability: string): PolicyResult | undefined | Promise<PolicyResult | undefined>
 
   /**
    * Allow the action.
@@ -78,7 +78,7 @@ export abstract class Policy implements PolicyInterface {
  */
 export function definePolicy<T>(
   definition: {
-    before?: (user: AuthUser | null, ability: string) => boolean | undefined | Promise<boolean | undefined>
+    before?: (user: AuthUser | null, ability: string) => PolicyResult | undefined | Promise<PolicyResult | undefined>
     viewAny?: (user: AuthUser | null) => PolicyResult | Promise<PolicyResult>
     view?: (user: AuthUser | null, model: T) => PolicyResult | Promise<PolicyResult>
     create?: (user: AuthUser | null) => PolicyResult | Promise<PolicyResult>

@@ -22,11 +22,6 @@ function identityWhere(provider: OAuthProvider, profileId: string): Partial<User
   return identities[provider]
 }
 
-// Where the per-browser binding for the OAuth `state` is kept. Without it,
-// `state` is unguessable and single-use but transferable: an attacker can
-// authorize their own account, keep the `code` unconsumed, and walk a
-// visitor's browser through the callback — logging that visitor into the
-// attacker's account.
 const OAUTH_BINDING_KEY = 'oauth.binding'
 
 export default class OAuthController extends Controller {
@@ -39,10 +34,12 @@ export default class OAuthController extends Controller {
   async redirectToProvider(): Promise<Response> {
     const { provider } = this.validateParams(ProviderParamSchema)
 
-    // Writing to the session is also what makes a visitor's brand-new session
-    // persist, so the callback request arrives carrying the same one. Bound
-    // only when there is a session to hold the value: sending `bindTo` with
-    // nowhere to keep it would make the callback reject its own flow.
+    // Ties `state` to this browser: without it an attacker can authorize their
+    // own account, hold the `code`, and walk a visitor through the callback to
+    // log them into the attacker's account. Writing to the session also makes a
+    // visitor's brand-new session persist across the provider round trip. Bound
+    // only when a session exists to hold it — otherwise the callback has
+    // nothing to present and rejects its own flow.
     const session = this.auth.session()
     let binding: string | undefined
     if (session) {

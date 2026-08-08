@@ -546,6 +546,21 @@ describe('global scopes apply on every query entry point', () => {
     expect(names(await User.where({ active: true }).get())).toEqual(['Ours'])
   })
 
+  // A flat where-object holds one value per field, so a caller's condition on
+  // the scoped column used to overwrite the scope's — handing them another
+  // tenant's rows through the very filter meant to stop that.
+  it('refuses when a condition would overwrite the scope on the same field', async () => {
+    const User = tenantScopedUser()
+
+    expect(User.where('tenantId', 2).get()).rejects.toThrow('return unfiltered rows')
+  })
+
+  it('still collapses a condition that repeats the scope value', async () => {
+    const User = tenantScopedUser()
+
+    expect(names(await User.where('tenantId', 1).get())).toEqual(['Ours'])
+  })
+
   it('applies the scope to whereIn()', async () => {
     const User = tenantScopedUser()
     expect(names(await User.whereIn('id', [1, 2, 3]).get())).toEqual(['Ours'])
