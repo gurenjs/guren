@@ -545,12 +545,33 @@ export class QueryBuilder<
 
     // Fallback: convert to simple where clause if possible
     const simpleWhere = this.toSimpleWhereClause()
+    this.assertConditionsExpressible(simpleWhere)
     return this.adapter.findMany<TResult>(this.table, {
       where: (simpleWhere ?? undefined) as FindManyOptions<TResult>['where'],
       orderBy: this.options.orderBy.length > 0 ? (this.options.orderBy as OrderByClause) : undefined,
       limit: this.options.limitValue,
       offset: this.options.offsetValue,
     }, { trx: this.options.trx })
+  }
+
+  /**
+   * Refuse to run a query whose conditions the adapter cannot express.
+   *
+   * `toSimpleWhereClause()` returns null for anything it cannot represent, and
+   * passing that on as `where: undefined` drops every condition — including a
+   * global scope carrying the tenant or soft-delete filter — and returns the
+   * whole table. Failing is the only safe answer.
+   */
+  private assertConditionsExpressible(simpleWhere: Record<string, unknown> | null): void {
+    if (this.conditions.length === 0 || simpleWhere !== null) {
+      return
+    }
+
+    throw new Error(
+      `${this.modelClass.name}: this query uses conditions the configured adapter cannot express `
+      + `(it implements neither findManyAdvanced nor countAdvanced). Running it would drop every `
+      + `condition, including any global scope, and return unfiltered rows.`,
+    )
   }
 
   /**
