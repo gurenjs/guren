@@ -202,6 +202,13 @@ type SupportedProvider = 'github' | 'google' | 'discord'
 
 const SUPPORTED_PROVIDERS = new Set<SupportedProvider>(['github', 'google', 'discord'])
 
+// Where the per-browser binding for the OAuth \`state\` is kept. Without it,
+// \`state\` is unguessable and single-use but transferable: an attacker can
+// authorize their own account, keep the \`code\` unconsumed, and walk a
+// visitor's browser through the callback — logging that visitor into the
+// attacker's account.
+const OAUTH_BINDING_KEY = 'oauth.binding'
+
 export default class OAuthController extends Controller {
   private oauth(): OAuthManager {
     return this.make<OAuthManager>('oauth')
@@ -211,10 +218,23 @@ export default class OAuthController extends Controller {
   // Controller.redirect() helper used below.
   async redirectToProvider(): Promise<Response> {
     const provider = this.validateProvider(this.request.param('provider'))
+
+    // Writing to the session is also what makes a visitor's brand-new session
+    // persist, so the callback request arrives carrying the same one. Bound
+    // only when there is a session to hold the value: sending \`bindTo\` with
+    // nowhere to keep it would make the callback reject its own flow.
+    const session = this.auth.session()
+    let binding: string | undefined
+    if (session) {
+      binding = crypto.randomUUID()
+      session.set(OAUTH_BINDING_KEY, binding)
+    }
+
     // \`?redirectTo=\` is user input — the manager only keeps app-relative
     // paths (or hosts allowlisted via stateConfig.allowedRedirectHosts).
     const { url } = await this.oauth().authorize(provider, {
       redirectTo: this.request.query('redirectTo'),
+      bindTo: binding,
     })
     return this.redirect(url)
   }
@@ -228,13 +248,17 @@ export default class OAuthController extends Controller {
       return this.json({ error: 'Missing OAuth callback parameters.' }, { status: 400 })
     }
 
+    const session = this.auth.session()
+    const binding = session?.get<string>(OAUTH_BINDING_KEY)
+    session?.forget(OAUTH_BINDING_KEY)
+
     // Replace this with your own account linking: look the user up by
     // profile.email, create one when missing, then \`await this.auth.login(user)\`
     // and finish with \`return this.redirect(redirectTo ?? '/')\` —
     // \`redirectTo\` is already sanitized against open redirects. Refuse to
     // create an account when \`profile.emailVerified === false\`: the provider
     // is saying it never checked that the address belongs to this user.
-    const { profile, redirectTo } = await this.oauth().handleCallback(provider, { code, state })
+    const { profile, redirectTo } = await this.oauth().handleCallback(provider, { code, state, bindTo: binding })
     return this.json({ provider, profile, redirectTo }, { status: 200 })
   }
 

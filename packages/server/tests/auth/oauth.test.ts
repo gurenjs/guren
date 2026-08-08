@@ -46,6 +46,53 @@ describe('oauth helpers', () => {
     expect(secondUse).toBeNull()
   })
 
+  // Without a binding, `state` is unguessable and single-use but transferable:
+  // the attacker starts a flow, keeps their own `code` unconsumed, and walks
+  // the victim's browser through the callback — logging the victim into the
+  // attacker's account.
+  it('rejects a state bound to another browser', async () => {
+    const store = new MemoryOAuthStateStore()
+    const { state } = await createOAuthState('github', store, {}, '/dashboard', undefined, 'attacker-session')
+
+    expect(await verifyOAuthState(state, 'github', store, {}, 'victim-session')).toBeNull()
+  })
+
+  it('rejects a bound state presented with no binding at all', async () => {
+    const store = new MemoryOAuthStateStore()
+    const { state } = await createOAuthState('github', store, {}, undefined, undefined, 'starting-session')
+
+    expect(await verifyOAuthState(state, 'github', store, {})).toBeNull()
+  })
+
+  it('accepts the browser that started the flow', async () => {
+    const store = new MemoryOAuthStateStore()
+    const { state } = await createOAuthState('github', store, {}, '/dashboard', undefined, 'starting-session')
+
+    const payload = await verifyOAuthState(state, 'github', store, {}, 'starting-session')
+    expect(payload?.provider).toBe('github')
+    expect(payload?.redirectTo).toBe('/dashboard')
+  })
+
+  it('stores only the hash of the binding', async () => {
+    const store = new MemoryOAuthStateStore()
+    const { state } = await createOAuthState('github', store, {}, undefined, 'fixed-state', 'session-abc')
+
+    const stored = await store.find(hashToken('fixed-state'))
+    expect(stored?.binding).toBe(hashToken('session-abc'))
+    expect(stored?.binding).not.toBe('session-abc')
+    expect(state).toBe('fixed-state')
+  })
+
+  // Apps written against the previous API pass no binding at all. They stay
+  // exposed to the transfer above — authorize() warns about it — but must not
+  // break on upgrade.
+  it('still verifies a state created without a binding', async () => {
+    const store = new MemoryOAuthStateStore()
+    const { state } = await createOAuthState('github', store, {})
+
+    expect(await verifyOAuthState(state, 'github', store, {})).not.toBeNull()
+  })
+
   it('drops unsafe redirectTo values when creating state', async () => {
     const store = new MemoryOAuthStateStore()
     const { state } = await createOAuthState('github', store, {}, 'https://evil.example.com/phish')

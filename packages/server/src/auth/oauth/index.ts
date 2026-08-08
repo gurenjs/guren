@@ -4,7 +4,7 @@ import {
   isAppRelativePath,
   normalizeRedirectTarget,
 } from '../../support/redirect-target'
-import { buildTokenUrl, generateToken, hashToken, parseTokenUrl } from '../utils'
+import { buildTokenUrl, generateToken, hashToken, parseTokenUrl, secureStringCompare } from '../utils'
 
 export interface OAuthProviderConfig {
   clientId: string
@@ -80,6 +80,16 @@ export interface OAuthStatePayload {
   provider: string
   redirectTo?: string
   expiresAt: Date
+  /**
+   * Hash of the value tying this state to the browser that started the flow.
+   *
+   * Without it `state` is unguessable and single-use but *transferable*: an
+   * attacker can start a flow, capture their own `code`, and walk a victim's
+   * browser through the callback, logging the victim into the attacker's
+   * account. RFC 6749 §10.12 requires the binding; storing only the provider
+   * name does not provide it.
+   */
+  binding?: string
 }
 
 export interface OAuthStateStore {
@@ -116,16 +126,50 @@ export interface OAuthAuthorizeOptions {
   redirectTo?: string
   state?: string
   extraParams?: Record<string, string>
+  /**
+   * Bind the flow to the browser that started it.
+   *
+   * Pass a value only this browser can present back — a session id, or the
+   * `binding` this call returns once you store it in the session. Whatever it
+   * is, only its hash reaches the state store, and `handleCallback()` then
+   * requires the same value.
+   */
+  bindTo?: string
 }
 
 export interface OAuthCallbackPayload {
   code: string
   state: string
+  /**
+   * The value handed to `authorize({ bindTo })`, read back from wherever the
+   * app kept it. Required when the state was created with a binding.
+   */
+  bindTo?: string
 }
 
 export interface OAuthManagerOptions {
   stateStore?: OAuthStateStore
   stateConfig?: OAuthStateConfig
+}
+
+let warnedAboutUnboundState = false
+
+/**
+ * An unbound `state` is transferable between browsers, which is exactly the
+ * attack `state` exists to stop. Verification stays permissive so apps written
+ * against the previous API keep working, so this is the only thing that tells
+ * them they are exposed.
+ */
+function warnOnceAboutUnboundState(): void {
+  if (warnedAboutUnboundState) return
+  warnedAboutUnboundState = true
+  console.warn(
+    '[guren] OAuth authorize() was called without `bindTo`, so `state` is not tied to the '
+    + 'browser that started the flow. An attacker can then complete their own authorization in '
+    + "a victim's browser and log the victim into the attacker's account. Pass a per-browser "
+    + 'value (a session id, or a random value you store in the session) as `bindTo`, and hand '
+    + 'the same value back to handleCallback(). See: https://guren.dev/docs/guides/oauth',
+  )
 }
 
 const DEFAULT_STATE_EXPIRES_IN = 10 * 60 * 1000
@@ -227,12 +271,17 @@ export class OAuthManager {
 
   async authorize(providerName: string, options: OAuthAuthorizeOptions = {}): Promise<{ url: string; state: string; expiresAt: Date }> {
     const provider = this.getProvider(providerName)
+    if (!options.bindTo) {
+      warnOnceAboutUnboundState()
+    }
+
     const { state, expiresAt } = await createOAuthState(
       providerName,
       this.stateStore,
       this.stateConfig,
       options.redirectTo,
       options.state,
+      options.bindTo,
     )
     const scope = options.scope ?? provider.scopes
     const url = buildOAuthAuthorizeUrl(provider, state, { scope, extraParams: options.extraParams })
@@ -255,7 +304,13 @@ export class OAuthManager {
     payload: OAuthCallbackPayload,
   ): Promise<{ profile: OAuthUserProfile; redirectTo?: string }> {
     const provider = this.getProvider(providerName)
-    const verified = await verifyOAuthState(payload.state, providerName, this.stateStore, this.stateConfig)
+    const verified = await verifyOAuthState(
+      payload.state,
+      providerName,
+      this.stateStore,
+      this.stateConfig,
+      payload.bindTo,
+    )
     if (!verified) {
       throw new AuthenticationException('Invalid or expired OAuth state.')
     }
@@ -276,6 +331,7 @@ export async function createOAuthState(
   config: OAuthStateConfig = {},
   redirectTo?: string,
   fixedState?: string,
+  bindTo?: string,
 ): Promise<{ state: string; expiresAt: Date }> {
   const state = fixedState ?? generateToken(config.stateLength ?? DEFAULT_STATE_LENGTH)
   const hashAlgorithm = config.hashAlgorithm ?? DEFAULT_STATE_HASH_ALGORITHM
@@ -285,6 +341,9 @@ export async function createOAuthState(
     provider,
     redirectTo: sanitizeOAuthRedirect(redirectTo, config.allowedRedirectHosts),
     expiresAt,
+    // Only the hash is stored, so a leaked state store does not hand out
+    // session ids.
+    binding: bindTo ? hashToken(bindTo, hashAlgorithm) : undefined,
   })
   return { state, expiresAt }
 }
@@ -294,6 +353,7 @@ export async function verifyOAuthState(
   provider: string,
   store: OAuthStateStore,
   config: OAuthStateConfig = {},
+  bindTo?: string,
 ): Promise<OAuthStatePayload | null> {
   const hashAlgorithm = config.hashAlgorithm ?? DEFAULT_STATE_HASH_ALGORITHM
   const stateHash = hashToken(state, hashAlgorithm)
@@ -302,9 +362,28 @@ export async function verifyOAuthState(
     : await findAndDeleteState(store, stateHash)
   if (!payload) return null
   if (payload.provider !== provider) return null
+  if (!bindingMatches(payload.binding, bindTo, hashAlgorithm)) return null
   // Re-sanitize on the way out so custom stores and states persisted before
   // an allowlist change cannot smuggle an unsafe target through.
   return { ...payload, redirectTo: sanitizeOAuthRedirect(payload.redirectTo, config.allowedRedirectHosts) }
+}
+
+/**
+ * Whether the presented value matches the binding recorded at authorize time.
+ *
+ * A state created without a binding still verifies, so an app that has not
+ * adopted `bindTo` keeps working. A state created *with* one is useless to a
+ * browser that cannot present it, which is the whole point — so a missing or
+ * wrong value fails.
+ */
+function bindingMatches(
+  stored: string | undefined,
+  presented: string | undefined,
+  hashAlgorithm: 'sha256' | 'sha512',
+): boolean {
+  if (!stored) return true
+  if (!presented) return false
+  return secureStringCompare(stored, hashToken(presented, hashAlgorithm))
 }
 
 // Fallback for stores without consume(): two concurrent callbacks can both
