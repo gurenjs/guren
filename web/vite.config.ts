@@ -6,5 +6,13 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   publicDir: false,
-  plugins: [routeTypesPlugin(), guren(), react(), tailwindcss()],
+  plugins: [
+    // web's codegen script runs a prerender:stub pre-step the plugin's default
+    // command has no equivalent for — reuse the script so watcher-triggered
+    // regeneration matches `bun run codegen` exactly.
+    routeTypesPlugin({ args: ['run', 'codegen'] }),
+    guren(),
+    react(),
+    tailwindcss(),
+  ],
 })

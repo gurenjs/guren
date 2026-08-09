@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { HmrContext, Logger, Plugin, ResolvedConfig, ViteDevServer } from 'vite'
 
 export interface RouteTypesPluginOptions {
@@ -9,14 +11,18 @@ export interface RouteTypesPluginOptions {
   appRoot?: string
   /**
    * Relative path (from the app root) to watch for changes. Defaults to `routes/web.ts`.
+   * Forwarded to the spawned codegen as `--routes`.
    */
   watchFile?: string
   /**
    * Relative path (from the app root) to the frontend pages directory. Defaults to `resources/js/pages`.
+   * Forwarded to the spawned codegen as `--pages`.
    */
   pagesDir?: string
   /**
    * Relative path (from the app root) to the Resources directory. Defaults to `app/Http/Resources`.
+   * Watch-only: codegen (like make:resource and check) always scans the conventional
+   * directory, so this option cannot relocate it.
    */
   resourcesDir?: string
   /**
@@ -24,7 +30,11 @@ export interface RouteTypesPluginOptions {
    */
   executable?: string
   /**
-   * Arguments passed to the executable. Defaults to `['x', '--bun', 'guren', 'codegen', '--force']`.
+   * Arguments passed to the executable, replacing the generated command entirely.
+   * By default the plugin invokes the `@guren/cli` codegen entry directly, passing
+   * `watchFile`/`pagesDir` as `--routes`/`--pages`. Pass `args: ['run', 'codegen']`
+   * when your app's codegen npm script carries extra flags or a pre-step, so
+   * watcher-triggered regeneration matches that script exactly.
    */
   args?: string[]
   /**
@@ -34,12 +44,54 @@ export interface RouteTypesPluginOptions {
 }
 
 const DEFAULT_EXECUTABLE = 'bun'
-const DEFAULT_ARGS = ['x', '--bun', 'guren', 'codegen', '--force']
+const FALLBACK_ARGS = ['x', '--bun', 'guren', 'codegen', '--force']
 const DEFAULT_WATCH_FILE = 'routes/web.ts'
 const DEFAULT_PAGES_DIR = 'resources/js/pages'
 const DEFAULT_RESOURCES_DIR = 'app/Http/Resources'
 // Fixed by convention across codegen and check (see cli/src/i18n-types.ts).
 const DEFAULT_LANG_DIR = 'lang'
+
+/**
+ * The one place plugin path options are defaulted: `shouldRegenerate` (what to
+ * watch) and `resolveCodegenCommand` (what to scan) both read from here, so the
+ * watched and scanned locations cannot drift apart.
+ */
+function resolvePathOptions(options: RouteTypesPluginOptions) {
+  return {
+    watchFile: options.watchFile ?? DEFAULT_WATCH_FILE,
+    pagesDir: options.pagesDir ?? DEFAULT_PAGES_DIR,
+    resourcesDir: options.resourcesDir ?? DEFAULT_RESOURCES_DIR,
+  }
+}
+
+/**
+ * The `guren` bin name only resolves in apps whose install links a bin shim;
+ * workspaces that symlink @guren/cli without one make `bun x` fall through to
+ * the npm registry, where `guren` is unpublished, and 404. The CLI entry always
+ * ships alongside this module (dist/bin.js next to the bundled chunk, src/bin.ts
+ * when running from source), so prefer resolving it directly.
+ */
+function resolveCliEntry(): string | undefined {
+  for (const candidate of ['./bin.js', './bin.ts', '../bin.js', '../bin.ts']) {
+    const path = fileURLToPath(new URL(candidate, import.meta.url))
+    if (existsSync(path)) return path
+  }
+  return undefined
+}
+
+export function resolveCodegenCommand(options: RouteTypesPluginOptions): {
+  executable: string
+  args: string[]
+} {
+  const executable = options.executable ?? DEFAULT_EXECUTABLE
+  if (options.args) {
+    return { executable, args: options.args }
+  }
+  const { watchFile, pagesDir } = resolvePathOptions(options)
+  const cliEntry = resolveCliEntry()
+  const base = cliEntry ? [cliEntry, 'codegen', '--force'] : [...FALLBACK_ARGS]
+  return { executable, args: [...base, '--routes', watchFile, '--pages', pagesDir] }
+}
 
 export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin {
   let appRoot = options.appRoot
@@ -58,8 +110,7 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
 
   function spawnGenerator(root: string): Promise<void> {
     return new Promise((resolvePromise, rejectPromise) => {
-      const executable = options.executable ?? DEFAULT_EXECUTABLE
-      const args = options.args ?? DEFAULT_ARGS
+      const { executable, args } = resolveCodegenCommand(options)
       const child = spawn(executable, args, {
         cwd: root,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -107,9 +158,10 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
   }
 
   function shouldRegenerate(root: string, file: string): boolean {
-    const watchFile = resolve(root, options.watchFile ?? DEFAULT_WATCH_FILE)
-    const pagesDir = resolve(root, options.pagesDir ?? DEFAULT_PAGES_DIR)
-    const resourcesDir = resolve(root, options.resourcesDir ?? DEFAULT_RESOURCES_DIR)
+    const paths = resolvePathOptions(options)
+    const watchFile = resolve(root, paths.watchFile)
+    const pagesDir = resolve(root, paths.pagesDir)
+    const resourcesDir = resolve(root, paths.resourcesDir)
     const langDir = resolve(root, DEFAULT_LANG_DIR)
     const changedFile = resolve(file)
 
