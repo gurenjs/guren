@@ -135,6 +135,60 @@ jobs:
       - name: Bundle budget audit
         run: bun run audit:bundle-budgets
 
+      - name: Run tests
+        run: bun run test
+
+      - name: Testing package tests (vitest)
+        run: bun run test:testing
+
+  # Scaffolding smokes, split from build-and-test so the unit-test critical
+  # path doesn't wait ~2 minutes for them. They rebuild the packages
+  # themselves and run in parallel with everything else.
+  starter-smokes:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: guren
+          POSTGRES_PASSWORD: guren
+          POSTGRES_DB: guren
+        ports:
+          - 54322:5432
+        options: >-
+          --health-cmd "pg_isready -U guren"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: guren
+          MYSQL_USER: guren
+          MYSQL_PASSWORD: guren
+          MYSQL_DATABASE: guren
+        ports:
+          - 33306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h127.0.0.1 -uguren -pguren"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.14'
+
+      - run: bun install --frozen-lockfile
+
+      - name: Build packages
+        run: bun run build
+
       - name: Fresh app smoke (default)
         run: bun run smoke:starter
 
@@ -165,15 +219,11 @@ jobs:
       - name: Golden path smoke test (mysql)
         run: bun run smoke:golden-path:mysql
 
-      - name: Run tests
-        run: bun run test
-
-      - name: Testing package tests (vitest)
-        run: bun run test:testing
-
   sqlite-smoke:
     runs-on: ubuntu-latest
-    # No redis service — verifies all tests gracefully skip when Redis is unavailable
+    # No redis service — verifies all tests gracefully skip when Redis is
+    # unavailable. Typecheck is deliberately absent: it is environment-
+    # independent and already covered by build-and-test.
     env:
       APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
     steps:
@@ -185,7 +235,6 @@ jobs:
       - run: bun run build
       - name: Generate route types
         run: bun run build:routes
-      - run: bun run typecheck
       - name: Run tests (no Redis)
         run: bun run test:bun
 
