@@ -1,4 +1,4 @@
-import { describe, expect, it, mock } from 'bun:test'
+import { beforeEach, describe, expect, it, mock } from 'bun:test'
 import React from 'react'
 import type { Page } from '@inertiajs/core'
 import * as realInertiaReact from '@inertiajs/react'
@@ -27,6 +27,10 @@ await mock.module('@inertiajs/react', () => ({
 }))
 
 const { renderInertiaServer } = await import('../src/server')
+
+beforeEach(() => {
+  createInertiaAppMock.mockClear()
+})
 
 describe('renderInertiaServer', () => {
   it('returns head and body from the Inertia renderer', async () => {

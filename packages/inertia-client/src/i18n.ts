@@ -12,6 +12,11 @@ import { usePage } from '@inertiajs/react'
  * controller agree on every input. The parity suite in
  * `tests/i18n.test.ts` runs both implementations against shared fixtures —
  * extend it when touching anything here.
+ *
+ * Parity covers the default configuration: server-only Translator options
+ * (custom `pluralizationRules`, `onMissingKey`) are functions and cannot
+ * travel in the serialized `_i18n` payload, so they have no client-side
+ * counterpart.
  */
 
 export type TranslationMessages = {
@@ -127,13 +132,17 @@ function getRawTranslation(
 
 // Interpolation patterns are deterministic per replacement key, so compile
 // them once (bounded by the app's distinct placeholder names). A `g`-flagged
-// regex used with String#replace carries no state between calls.
+// regex used with String#replace carries no state between calls. Keys are
+// escaped so regex metacharacters match literally, mirroring the server.
 const replacementPatterns = new Map<string, [RegExp, RegExp]>()
+
+const REGEXP_SPECIALS = /[.*+?^${}()|[\]\\]/g
 
 function patternsFor(key: string): [RegExp, RegExp] {
   let patterns = replacementPatterns.get(key)
   if (!patterns) {
-    patterns = [new RegExp(`:${key}`, 'g'), new RegExp(`\\{${key}\\}`, 'g')]
+    const escaped = key.replace(REGEXP_SPECIALS, '\\$&')
+    patterns = [new RegExp(`:${escaped}`, 'g'), new RegExp(`\\{${escaped}\\}`, 'g')]
     replacementPatterns.set(key, patterns)
   }
   return patterns
@@ -145,7 +154,8 @@ function applyReplacements(translation: string, replacements?: ReplacementValues
   let result = translation
   for (const [key, value] of Object.entries(replacements)) {
     const [colon, braced] = patternsFor(key)
-    const replacement = String(value)
+    // Callback replacement so `$` sequences in the value stay literal.
+    const replacement = (): string => String(value)
     result = result.replace(colon, replacement).replace(braced, replacement)
   }
   return result
@@ -171,7 +181,9 @@ export function createTranslator(props: I18nPageProps): Translation {
     },
     tc(key, count, replacements) {
       const translation = raw(key)
-      if (translation === undefined) return key
+      // Falsy (not just undefined): the server treats an empty translation
+      // as missing in tc() while t() returns it as-is.
+      if (!translation) return key
 
       const forms = translation.split('|')
       const pluralized = forms[pluralRule(Math.abs(count))] ?? forms[forms.length - 1]!
@@ -190,6 +202,26 @@ const identityTranslation: Translation = {
 }
 
 /**
+ * The non-React half of {@link useTranslation}: identity translation (plus a
+ * one-time warning) when the `_i18n` prop is absent, a translator otherwise.
+ * @internal exported for tests
+ */
+export function resolveTranslation(i18n: I18nPageProps | undefined): Translation {
+  if (!i18n) {
+    if (!warnedMissingProps) {
+      warnedMissingProps = true
+      console.warn(
+        '[guren] useTranslation(): no _i18n page prop found. ' +
+          'Configure createApp({ i18n }) on the server (and keep i18n.share enabled).',
+      )
+    }
+    return identityTranslation
+  }
+
+  return createTranslator(i18n)
+}
+
+/**
  * Translate with the locale and messages the server shared for this request.
  *
  * ```tsx
@@ -205,18 +237,5 @@ const identityTranslation: Translation = {
 export function useTranslation(): Translation {
   const i18n = usePage().props._i18n as I18nPageProps | undefined
 
-  return useMemo(() => {
-    if (!i18n) {
-      if (!warnedMissingProps) {
-        warnedMissingProps = true
-        console.warn(
-          '[guren] useTranslation(): no _i18n page prop found. ' +
-            'Configure createApp({ i18n }) on the server (and keep i18n.share enabled).',
-        )
-      }
-      return identityTranslation
-    }
-
-    return createTranslator(i18n)
-  }, [i18n])
+  return useMemo(() => resolveTranslation(i18n), [i18n])
 }

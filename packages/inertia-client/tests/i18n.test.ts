@@ -1,5 +1,5 @@
-import { describe, test, expect } from 'bun:test'
-import { createTranslator, type I18nPageProps, type Translation } from '../src/i18n'
+import { describe, test, expect, spyOn } from 'bun:test'
+import { createTranslator, resolveTranslation, type I18nPageProps, type Translation } from '../src/i18n'
 // Parity oracle: the server-side Translator this module mirrors. Test-only
 // import — the shipped bundle must stay free of server code.
 import { Translator, pluralizationRules } from '../../server/src/i18n'
@@ -21,6 +21,10 @@ const MESSAGES = {
       items: 'One item|:count items',
       enOnly: 'English only',
       nested: { deep: { key: 'Deep value' } },
+      empty: '',
+      special: 'Total: :price[0] / {price[0]}',
+      overlap: ':name / :nameLong',
+      twoForms: 'one|other',
     },
   },
   ja: {
@@ -77,6 +81,41 @@ describe('createTranslator', () => {
   test('exposes the resolved locale', () => {
     expect(translator('ja').locale).toBe('ja')
   })
+
+  test('tc treats an empty translation as missing while t returns it', () => {
+    expect(translator('en').t('messages.empty')).toBe('')
+    expect(translator('en').tc('messages.empty', 2)).toBe('messages.empty')
+  })
+
+  test('keeps $ sequences in replacement values literal', () => {
+    expect(translator('en').t('messages.welcome', { name: '$& $1 $$' })).toBe('Welcome, $& $1 $$!')
+  })
+
+  test('treats regex metacharacters in replacement keys literally', () => {
+    expect(translator('en').t('messages.special', { 'price[0]': 42 })).toBe('Total: 42 / 42')
+  })
+})
+
+describe('resolveTranslation', () => {
+  test('builds a translator when the _i18n prop is present', () => {
+    const translation = resolveTranslation({ locale: 'ja', fallbackLocale: 'en', messages: MESSAGES })
+    expect(translation.t('messages.hello')).toBe('こんにちは')
+  })
+
+  test('echoes keys and warns once when the _i18n prop is absent', () => {
+    const warn = spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const translation = resolveTranslation(undefined)
+      expect(translation.t('messages.hello')).toBe('messages.hello')
+      expect(translation.tc('messages.items', 3)).toBe('messages.items')
+      expect(translation.locale).toBe('')
+
+      resolveTranslation(undefined)
+      expect(warn).toHaveBeenCalledTimes(1)
+    } finally {
+      warn.mockRestore()
+    }
+  })
 })
 
 describe('parity with the server Translator', () => {
@@ -90,6 +129,15 @@ describe('parity with the server Translator', () => {
     ['ja', 'messages.enOnly', undefined],
     ['ja', 'messages.missing.entirely', undefined],
     ['ru', 'messages.enOnly', undefined],
+    // Interpolation edge cases: $ sequences in values stay literal, regex
+    // metacharacters in keys match literally, overlapping placeholder names.
+    ['en', 'messages.welcome', { name: '$& $1 $$' }],
+    ['en', 'messages.special', { 'price[0]': 42 }],
+    ['en', 'messages.overlap', { name: 'a', nameLong: 'b' }],
+    ['en', 'messages.overlap', { nameLong: 'b', name: 'a' }],
+    // Empty translation: t() returns it as-is.
+    ['en', 'messages.empty', undefined],
+    ['ja', 'messages.empty', undefined],
   ]
 
   const TC_CASES: Array<[string, string, number]> = [
@@ -110,6 +158,11 @@ describe('parity with the server Translator', () => {
     // the plural rule from the locale.
     ['de', 'messages.items', 1],
     ['fr', 'messages.items', 0],
+    // Empty translation: tc() treats it as missing (unlike t()).
+    ['en', 'messages.empty', 2],
+    ['ja', 'messages.empty', 2],
+    // Fewer forms than the rule's index: last form wins.
+    ['ru', 'messages.twoForms', 5],
   ]
 
   function serverTranslator(locale: string): Translator {
