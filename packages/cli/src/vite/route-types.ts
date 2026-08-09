@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { HmrContext, Logger, Plugin, ResolvedConfig, ViteDevServer } from 'vite'
 
 export interface RouteTypesPluginOptions {
@@ -24,7 +25,8 @@ export interface RouteTypesPluginOptions {
    */
   executable?: string
   /**
-   * Arguments passed to the executable. Defaults to `['x', '--bun', 'guren', 'codegen', '--force']`.
+   * Arguments passed to the executable. Defaults to running this package's own
+   * `guren` bin entry with `['codegen', '--force']`.
    */
   args?: string[]
   /**
@@ -34,12 +36,23 @@ export interface RouteTypesPluginOptions {
 }
 
 const DEFAULT_EXECUTABLE = 'bun'
-const DEFAULT_ARGS = ['x', '--bun', 'guren', 'codegen', '--force']
 const DEFAULT_WATCH_FILE = 'routes/web.ts'
 const DEFAULT_PAGES_DIR = 'resources/js/pages'
 const DEFAULT_RESOURCES_DIR = 'app/Http/Resources'
 // Fixed by convention across codegen and check (see cli/src/i18n-types.ts).
 const DEFAULT_LANG_DIR = 'lang'
+
+let cachedDefaultArgs: string[] | undefined
+
+// Self-referencing this package's name needs no linked `.bin/guren` (`bun x
+// guren` consults the npm registry, where the package does not exist) and
+// works for workspace links and npm installs alike. Lazy so consumers who
+// override `args` never resolve, and a failure surfaces through the
+// generation error path instead of breaking the module import.
+function defaultArgs(): string[] {
+  cachedDefaultArgs ??= [fileURLToPath(import.meta.resolve('@guren/cli/bin')), 'codegen', '--force']
+  return cachedDefaultArgs
+}
 
 export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin {
   let appRoot = options.appRoot
@@ -59,7 +72,7 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
   function spawnGenerator(root: string): Promise<void> {
     return new Promise((resolvePromise, rejectPromise) => {
       const executable = options.executable ?? DEFAULT_EXECUTABLE
-      const args = options.args ?? DEFAULT_ARGS
+      const args = options.args ?? defaultArgs()
       const child = spawn(executable, args, {
         cwd: root,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -96,6 +109,10 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
   }
 
   function enqueueGeneration(root: string): Promise<void> {
+    // CI runs codegen as its own build step; regenerating there — including
+    // from watcher or HMR events mid-E2E — would only add nondeterminism.
+    if (process.env.CI) return queue
+
     queue = queue
       .then(() => spawnGenerator(root))
       .catch((error) => {
@@ -128,8 +145,6 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
     async configResolved(config: ResolvedConfig) {
       appRoot = resolve(config.root, options.appRoot ?? '.')
       logger = config.logger
-      // Skip route type generation in CI (codegen runs as a separate build step)
-      if (process.env.CI) return
       await enqueueGeneration(appRoot)
     },
     configureServer(server: ViteDevServer) {
@@ -137,7 +152,6 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
       // page, resource, or translation file must regenerate too.
       const root = () => appRoot ?? server.config.root
       const onFileEvent = (file: string) => {
-        if (process.env.CI) return
         if (shouldRegenerate(root(), file)) {
           void enqueueGeneration(root())
         }
