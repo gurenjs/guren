@@ -197,6 +197,8 @@ export {
   // Locale detection
   detectLocaleMiddleware,
   LOCALE_CONTEXT_KEY,
+  getRequestLocale,
+  getRequestTranslator,
 }
   from './http/middleware'
 export { AUTH_CONTEXT_KEY } from './http/middleware/auth'
@@ -232,6 +234,7 @@ export type {
   // Locale detection types
   DetectLocaleOptions,
   DetectLocaleVariables,
+  TranslatorBinding,
   LocaleSource,
 }  from './http/middleware'
 // Validation (advanced)
@@ -480,6 +483,7 @@ export {
   createI18n,
   setI18n,
   getI18n,
+  tryGetI18n,
   t,
   tc,
 } from './i18n'

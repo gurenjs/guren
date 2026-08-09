@@ -1,0 +1,6 @@
+{
+  "hello": "Hello",
+  "welcome": "Welcome, :name!",
+  "items": "One item|:count items",
+  "enOnly": "English only"
+}

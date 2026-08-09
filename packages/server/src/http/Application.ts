@@ -13,7 +13,7 @@ import { attachAuthContext } from './middleware/auth'
 import { SessionGuard } from '../auth/SessionGuard'
 import type { CreateSessionMiddlewareOptions } from './middleware/session'
 import type { DetectLocaleOptions } from './middleware/detect-locale'
-import type { TranslationLoader, TranslationMessages } from '../i18n'
+import type { TranslationLoader } from '../i18n'
 import { createSecurityHeaders, type SecurityHeadersOptions } from './middleware/security-headers'
 import { createHostAuthorizationMiddleware, type HostAuthorizationOptions } from './middleware/host-authorization'
 import { isMcpEndpointEnabled } from '../mcp/endpoint'
@@ -184,21 +184,16 @@ export interface I18nPluginOptions {
    */
   readonly path?: string
   /**
-   * Custom translation loader (e.g. `MemoryLoader` on serverless targets
-   * without a filesystem). Takes precedence over `path`.
+   * Custom translation loader (e.g. `MemoryLoader` for bundled messages on
+   * serverless targets without a filesystem). Takes precedence over `path`.
    */
   readonly loader?: TranslationLoader
   /**
-   * Preloaded messages. Locales given here count as loaded and are not
-   * fetched from the loader.
-   */
-  readonly messages?: Record<string, TranslationMessages>
-  /**
    * Locale detection middleware options. `detectLocaleMiddleware` is mounted
-   * automatically with the `supported` locales above; pass `false` to mount
-   * (or skip) it yourself.
+   * automatically with the `supported` locales and `fallback` above; pass
+   * `false` to mount (or skip) it yourself.
    */
-  readonly detect?: Omit<DetectLocaleOptions, 'supported' | 'i18n'> | false
+  readonly detect?: Omit<DetectLocaleOptions, 'supported' | 'fallback' | 'i18n'> | false
   /**
    * Share the request locale and its messages with Inertia pages as the
    * `_i18n` prop. Defaults to `true`.
@@ -301,13 +296,14 @@ export class Application {
       ...moduleProviders,
     ]
 
+    // A user-supplied subclass of a default provider takes ownership of that
+    // subsystem's wiring, so the default registration below is skipped.
+    const hasUserProviderOf = (base: ServiceProviderConstructor): boolean =>
+      userProviders.some((provider) => provider === base || provider.prototype instanceof base)
+
     // I18n (translator binding + locale detection + Inertia shared props) is
-    // registered when options.i18n is set — unless the app supplies its own
-    // I18nServiceProvider subclass, which then owns the wiring.
-    const hasUserI18nProvider = userProviders.some(
-      (provider) => provider === I18nServiceProvider || provider.prototype instanceof I18nServiceProvider,
-    )
-    if (this.options.i18n && !hasUserI18nProvider) {
+    // registered when options.i18n is set.
+    if (this.options.i18n && !hasUserProviderOf(I18nServiceProvider)) {
       this.providerManager.register(I18nServiceProvider)
     }
 
@@ -315,10 +311,7 @@ export class Application {
     // status codes (404/422/403) instead of opaque 500s. Registered before
     // user providers so a custom ErrorServiceProvider subclass wins via
     // its later hono.onError() call.
-    const hasUserErrorProvider = userProviders.some(
-      (provider) => provider === ErrorServiceProvider || provider.prototype instanceof ErrorServiceProvider,
-    )
-    if (!hasUserErrorProvider) {
+    if (!hasUserProviderOf(ErrorServiceProvider)) {
       this.providerManager.register(ErrorServiceProvider)
     }
 
@@ -333,10 +326,7 @@ export class Application {
     // providers: the first matching exception renderer wins, so a custom
     // ValidationException renderer registered by a user provider keeps
     // taking precedence over this default.
-    const hasUserInertiaProvider = userProviders.some(
-      (provider) => provider === InertiaServiceProvider || provider.prototype instanceof InertiaServiceProvider,
-    )
-    if (!hasUserInertiaProvider) {
+    if (!hasUserProviderOf(InertiaServiceProvider)) {
       this.providerManager.register(InertiaServiceProvider)
     }
   }

@@ -175,13 +175,23 @@ export class I18nManager {
     return new Translator({
       locale,
       fallbackLocale: this.config.fallbackLocale,
-      messages: {
-        [locale]: this.translator.getMessages(locale),
-        ...(this.config.fallbackLocale
-          ? { [this.config.fallbackLocale]: this.translator.getMessages(this.config.fallbackLocale) }
-          : {}),
-      },
+      messages: this.messagesForLocale(locale),
     })
+  }
+
+  /**
+   * The message catalogs that accompany a locale: the fallback locale's
+   * (when it differs) plus the locale's own, in that order — so consumers
+   * that flatten the record let the active locale win on key collisions.
+   */
+  messagesForLocale(locale: string): Record<string, TranslationMessages> {
+    const fallback = this.config.fallbackLocale
+    const messages: Record<string, TranslationMessages> = {}
+    if (fallback && fallback !== locale) {
+      messages[fallback] = this.translator.getMessages(fallback)
+    }
+    messages[locale] = this.translator.getMessages(locale)
+    return messages
   }
 }
 
@@ -210,6 +220,13 @@ export function getI18n(): I18nManager {
     throw new Error('I18n manager not initialized. Call setI18n() first.')
   }
   return globalI18n
+}
+
+/**
+ * Get the global I18n manager, or `undefined` when none was registered.
+ */
+export function tryGetI18n(): I18nManager | undefined {
+  return globalI18n ?? undefined
 }
 
 /**

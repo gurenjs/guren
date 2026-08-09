@@ -2,8 +2,8 @@ import type { Context } from 'hono'
 import { inertia, type InertiaOptions } from './inertia/InertiaEngine'
 import { resolveSharedInertiaProps, type ResolvedSharedInertiaProps } from './inertia/shared'
 import { AUTH_CONTEXT_KEY } from '../http/middleware/auth'
-import { LOCALE_CONTEXT_KEY } from '../http/middleware/detect-locale'
-import { getI18n, type I18nManager, type ReplacementValues } from '../i18n'
+import { getRequestLocale, getRequestTranslator, type TranslatorBinding } from '../http/middleware/detect-locale'
+import { tryGetI18n, type I18nManager, type ReplacementValues } from '../i18n'
 import { flattenRequestQueries, parseRequestPayload } from '../http/request'
 import type { AuthContext } from '../auth/types'
 import type { ServiceBindings } from '../container/bindings'
@@ -34,12 +34,6 @@ interface ZodLikeSchema<T> {
 export type SafeValidationResult<T> =
   | { success: true; data: T }
   | { success: false; errors: Record<string, string> }
-
-/** Minimal translator surface shared by I18nManager, Translator, and the middleware bindings. */
-type RequestTranslator = {
-  t(key: string, replacements?: ReplacementValues): string
-  tc(key: string, count: number, replacements?: ReplacementValues): string
-}
 
 type DefaultInertiaProps = Record<string, unknown>
 
@@ -329,7 +323,9 @@ export class Controller {
 
     const response = await inertia(component, propsWithShared as Record<string, unknown>, {
       ...rest,
-      lang: rest.lang ?? this.#defaultInertiaLang(),
+      // No 'en' fallback here (unlike the locale getter): unconfigured apps
+      // keep the Inertia engine's own default lang.
+      lang: rest.lang ?? this.#resolveLocale(),
       url,
       request: ctx.req.raw,
     })
@@ -340,15 +336,6 @@ export class Controller {
     }
 
     return response as InertiaResponse<Component, typeof propsWithShared>
-  }
-
-  /**
-   * Default `<html lang>` for Inertia responses when `options.lang` is not
-   * provided — same resolution as the `locale` getter, but without its
-   * `'en'` fallback so unconfigured apps keep emitting no lang attribute.
-   */
-  #defaultInertiaLang(): string | undefined {
-    return this.#resolveLocale()
   }
 
   /**
@@ -387,19 +374,10 @@ export class Controller {
     return this.#requestTranslator().tc(key, count, replacements)
   }
 
-  #translator?: RequestTranslator
-
-  #requestTranslator(): RequestTranslator {
-    if (this.#translator) {
-      return this.#translator
-    }
-
-    const vars = this.ctx.var as Record<string, unknown> | undefined
-    const t = vars?.['t']
-    const tc = vars?.['tc']
-    if (typeof t === 'function' && typeof tc === 'function') {
-      this.#translator = { t, tc } as RequestTranslator
-      return this.#translator
+  #requestTranslator(): TranslatorBinding {
+    const bound = getRequestTranslator(this.ctx)
+    if (bound) {
+      return bound
     }
 
     const i18n = this.#resolveI18n()
@@ -409,16 +387,13 @@ export class Controller {
       )
     }
 
-    const locale = this.#resolveLocale()
-    this.#translator = locale && locale !== i18n.getLocale() ? i18n.forLocale(locale) : i18n
-    return this.#translator
+    const locale = getRequestLocale(this.ctx)
+    return locale && locale !== i18n.getLocale() ? i18n.forLocale(locale) : i18n
   }
 
   #resolveLocale(): string | undefined {
-    const vars = this.ctx.var as Record<string, unknown> | undefined
-
-    const requestLocale = vars?.[LOCALE_CONTEXT_KEY]
-    if (typeof requestLocale === 'string' && requestLocale.length > 0) {
+    const requestLocale = getRequestLocale(this.ctx)
+    if (requestLocale) {
       return requestLocale
     }
 
@@ -431,11 +406,7 @@ export class Controller {
       return this._container.make('i18n') as I18nManager
     }
 
-    try {
-      return getI18n()
-    } catch {
-      return undefined
-    }
+    return tryGetI18n()
   }
 
   protected json<T>(data: T, init: ResponseInit = {}): Response {

@@ -51,13 +51,13 @@ function makeApp(overrides: Partial<I18nPluginOptions> = {}) {
   return app
 }
 
-async function greet(app: Awaited<ReturnType<typeof makeApp>>, path = '/greet', headers: Record<string, string> = {}) {
+async function greet(app: ReturnType<typeof makeApp>, path = '/greet', headers: Record<string, string> = {}) {
   const response = await app.fetch(new Request(`http://example.com${path}`, { headers }))
   expect(response.status).toBe(200)
   return response.json() as Promise<Record<string, string>>
 }
 
-async function inertiaPageProps(app: Awaited<ReturnType<typeof makeApp>>, path = '/page'): Promise<Record<string, any>> {
+async function inertiaPageProps(app: ReturnType<typeof makeApp>, path = '/page'): Promise<Record<string, any>> {
   const response = await app.fetch(
     new Request(`http://example.com${path}`, {
       headers: { 'X-Inertia': 'true', 'X-Inertia-Version': '1' },
@@ -192,14 +192,15 @@ describe('createApp({ i18n })', () => {
     expect(body.hello).toBe('Hello')
   })
 
-  test('preloaded messages work without a loader', async () => {
+  test('loads lang/<locale>/*.json fixtures through the default JsonLoader path', async () => {
     const app = createApp({
-      i18n: { supported: ['en', 'ja'], messages: structuredClone(MESSAGES), path: undefined },
+      i18n: { supported: ['en', 'ja'], path: new URL('./fixtures/lang', import.meta.url).pathname },
     })
     app.router.get('/greet', [GreetingController, 'show'])
     await app.boot()
 
     const body = await greet(app, '/greet?locale=ja')
     expect(body.hello).toBe('こんにちは')
+    expect(body.fallback).toBe('English only')
   })
 })

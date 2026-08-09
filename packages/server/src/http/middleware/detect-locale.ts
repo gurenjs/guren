@@ -1,10 +1,36 @@
+import type { Context } from 'hono'
 import { createMiddleware } from 'hono/factory'
 import { getCookie } from 'hono/cookie'
 import { parseAccept } from 'hono/utils/accept'
-import { getI18n, type I18nManager, type Translator } from '../../i18n'
+import { tryGetI18n, type I18nManager, type Translator } from '../../i18n'
 
 /** Context key for the resolved request locale (read by Inertia for `<html lang>`). */
 export const LOCALE_CONTEXT_KEY = 'locale'
+
+/** Request-scoped translator surface bound by {@link detectLocaleMiddleware}. */
+export type TranslatorBinding = { t: Translator['t']; tc: Translator['tc'] }
+
+/**
+ * Read the request locale resolved by {@link detectLocaleMiddleware} (or any
+ * middleware that sets the `locale` context variable).
+ */
+export function getRequestLocale(c: Context): string | undefined {
+  const locale = (c.var as Record<string, unknown> | undefined)?.[LOCALE_CONTEXT_KEY]
+  return typeof locale === 'string' && locale.length > 0 ? locale : undefined
+}
+
+/**
+ * Read the request-scoped `t`/`tc` translator bound by
+ * {@link detectLocaleMiddleware}, when present.
+ */
+export function getRequestTranslator(c: Context): TranslatorBinding | undefined {
+  const vars = c.var as Record<string, unknown> | undefined
+  const t = vars?.['t']
+  const tc = vars?.['tc']
+  return typeof t === 'function' && typeof tc === 'function'
+    ? ({ t, tc } as TranslatorBinding)
+    : undefined
+}
 
 export type LocaleSource = 'query' | 'cookie' | 'header'
 
@@ -36,8 +62,6 @@ export interface DetectLocaleOptions {
 }
 
 const DEFAULT_SOURCES: readonly LocaleSource[] = ['query', 'cookie', 'header']
-
-type TranslatorBinding = { t: Translator['t']; tc: Translator['tc'] }
 
 /**
  * Middleware that resolves the request locale from the query string, a cookie,
@@ -112,7 +136,7 @@ export function detectLocaleMiddleware(options: DetectLocaleOptions) {
       return cached
     }
 
-    const i18n = options.i18n ?? tryGlobalI18n()
+    const i18n = options.i18n ?? tryGetI18n()
     if (!i18n) {
       return undefined
     }
@@ -153,12 +177,4 @@ export function detectLocaleMiddleware(options: DetectLocaleOptions) {
 
     await next()
   })
-}
-
-function tryGlobalI18n(): I18nManager | undefined {
-  try {
-    return getI18n()
-  } catch {
-    return undefined
-  }
 }

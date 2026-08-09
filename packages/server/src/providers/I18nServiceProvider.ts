@@ -1,7 +1,7 @@
 import type { Context } from 'hono'
 import { ServiceProvider } from '../container/ServiceProvider'
 import { createI18n, type I18nManager, type TranslationMessages } from '../i18n'
-import { detectLocaleMiddleware, LOCALE_CONTEXT_KEY } from '../http/middleware/detect-locale'
+import { detectLocaleMiddleware, getRequestLocale } from '../http/middleware/detect-locale'
 import { shareInertiaProps } from '../mvc/inertia/shared'
 import type { Application, I18nPluginOptions } from '../http/Application'
 
@@ -39,22 +39,22 @@ export class I18nServiceProvider extends ServiceProvider {
         return createI18n({ locale: 'en' })
       }
 
-      const fallback = resolveFallback(options)
+      const fallback = options.fallback ?? options.supported[0]!
       return createI18n({
         locale: fallback,
         fallbackLocale: fallback,
         path: options.loader ? undefined : options.path ?? 'lang',
         loader: options.loader,
-        messages: options.messages,
       })
     })
 
     if (app && options && options.detect !== false) {
+      const manager = this.container.make<I18nManager>('i18n')
       app.use('*', detectLocaleMiddleware({
-        fallback: resolveFallback(options),
         ...options.detect,
         supported: options.supported,
-        i18n: this.container.make<I18nManager>('i18n'),
+        fallback: manager.getLocale(),
+        i18n: manager,
       }))
     }
   }
@@ -67,22 +67,31 @@ export class I18nServiceProvider extends ServiceProvider {
     await manager.loadLocales([...options.supported])
 
     if (options.share !== false) {
-      const fallback = resolveFallback(options)
+      const fallback = manager.getFallbackLocale() ?? manager.getLocale()
+      const supported = new Set(options.supported)
+
+      // Props are built once per supported locale; messages added to the
+      // manager after a locale is cached are not picked up — same load-once
+      // lifecycle as the locale middleware's translators. Locales outside
+      // `supported` (a custom middleware setting an unvalidated `locale`
+      // context variable) are served uncached so the map stays bounded.
+      const propsByLocale = new Map<string, InertiaI18nProps>()
 
       shareInertiaProps((ctx: Context) => {
-        const requestLocale = (ctx.var as Record<string, unknown> | undefined)?.[LOCALE_CONTEXT_KEY]
-        const locale =
-          typeof requestLocale === 'string' && requestLocale.length > 0 ? requestLocale : fallback
+        const locale = getRequestLocale(ctx) ?? fallback
 
-        // Insertion order matters to the client: fallback first so the
-        // active locale's messages win on key collisions when flattened.
-        const messages: Record<string, TranslationMessages> = {}
-        if (fallback !== locale) {
-          messages[fallback] = manager.getMessages(fallback)
+        let i18nProps = propsByLocale.get(locale)
+        if (!i18nProps) {
+          i18nProps = {
+            locale,
+            fallbackLocale: fallback,
+            messages: manager.messagesForLocale(locale),
+          }
+          if (supported.has(locale)) {
+            propsByLocale.set(locale, i18nProps)
+          }
         }
-        messages[locale] = manager.getMessages(locale)
 
-        const i18nProps: InertiaI18nProps = { locale, fallbackLocale: fallback, messages }
         return { _i18n: i18nProps }
       })
     }
@@ -92,8 +101,4 @@ export class I18nServiceProvider extends ServiceProvider {
   private application(): Application | undefined {
     return this.container.has('app') ? this.container.make<Application>('app') : undefined
   }
-}
-
-function resolveFallback(options: I18nPluginOptions): string {
-  return options.fallback ?? options.supported[0]!
 }
