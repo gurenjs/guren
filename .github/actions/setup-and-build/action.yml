@@ -1,0 +1,50 @@
+name: Set up Bun and build packages
+description: >-
+  setup-bun, restore packages/*/dist from an exact-match cache, install
+  dependencies, and run the package build only on a cache miss. Owning the
+  whole coupled unit here keeps the cache key — the correctness mechanism —
+  in exactly one place, and keeps the Bun version in the toolchain and in the
+  key from ever drifting apart.
+
+inputs:
+  bun-version:
+    description: Bun version to install; also part of the dist cache key.
+    required: false
+    default: '1.3.14'
+
+outputs:
+  cache-hit:
+    description: Whether dist/ was restored from an exact cache match.
+    value: ${{ steps.dist-cache.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: ${{ inputs.bun-version }}
+
+    # Exact-match only (no restore-keys): a partial hit would restore a stale
+    # dist/, this repo's best-documented footgun. The key covers every build
+    # input — package sources and configs, the root package.json defining the
+    # build command, the lockfile, the root tsconfig the packages extend, the
+    # build scripts (build order affects DTS output), and the Bun version —
+    # so a hit means dist/ is byte-for-byte what a fresh build would produce.
+    # The negations drop files verified NOT to feed tsup (tests, templates
+    # read at runtime, changelogs, a stray tarball), so test-only or
+    # template-only changes keep hitting the cache.
+    - name: Restore built packages
+      id: dist-cache
+      uses: actions/cache@v4
+      with:
+        path: packages/*/dist
+        key: dist-${{ runner.os }}-bun${{ inputs.bun-version }}-${{ hashFiles('packages/**', '!packages/**/*.test.ts', '!packages/*/templates/**', '!packages/*/tests/**', '!packages/**/CHANGELOG.md', '!packages/**/*.tgz', 'package.json', 'bun.lock', 'tsconfig.json', 'scripts/build-packages.ts', 'scripts/workspace-packages.ts') }}
+
+    - name: Install dependencies
+      shell: bash
+      run: bun install --frozen-lockfile
+
+    - name: Build packages
+      if: steps.dist-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: bun run build

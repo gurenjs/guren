@@ -72,28 +72,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
+      # setup-bun + exact-match dist cache + install + build-on-miss.
+      # The cache key and its stale-dist rationale live in the action.
+      - name: Set up Bun and build packages
+        uses: ./.github/actions/setup-and-build
         with:
           bun-version: ${{ matrix.bun-version }}
-
-      # Exact-match only (no restore-keys): a partial hit would restore a
-      # stale dist/, this repo's best-documented footgun. The key covers every
-      # build input — package sources and configs, the lockfile, the root
-      # tsconfig the packages extend, the build scripts, and the Bun version —
-      # so a hit means dist/ is byte-for-byte what a fresh build would produce.
-      - name: Restore built packages
-        id: dist-cache
-        uses: actions/cache@v4
-        with:
-          path: packages/*/dist
-          key: dist-${{ runner.os }}-bun${{ matrix.bun-version }}-${{ hashFiles('packages/**', 'bun.lock', 'tsconfig.json', 'scripts/build-packages.ts', 'scripts/workspace-packages.ts') }}
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-      - name: Build packages
-        if: steps.dist-cache.outputs.cache-hit != 'true'
-        run: bun run build
 
       - name: Generate route types
         run: bun run build:routes
@@ -199,23 +183,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: '1.3.14'
-
-      # Same exact-match dist cache as build-and-test — see the comment there.
-      - name: Restore built packages
-        id: dist-cache
-        uses: actions/cache@v4
-        with:
-          path: packages/*/dist
-          key: dist-${{ runner.os }}-bun1.3.14-${{ hashFiles('packages/**', 'bun.lock', 'tsconfig.json', 'scripts/build-packages.ts', 'scripts/workspace-packages.ts') }}
-
-      - run: bun install --frozen-lockfile
-
-      - name: Build packages
-        if: steps.dist-cache.outputs.cache-hit != 'true'
-        run: bun run build
+      - name: Set up Bun and build packages
+        uses: ./.github/actions/setup-and-build
 
       - name: Fresh app smoke (default)
         run: bun run smoke:starter
@@ -256,20 +225,8 @@ jobs:
       APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
     steps:
       - uses: actions/checkout@v6
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: '1.3.14'
-      # Same exact-match dist cache as build-and-test — see the comment there.
-      - name: Restore built packages
-        id: dist-cache
-        uses: actions/cache@v4
-        with:
-          path: packages/*/dist
-          key: dist-${{ runner.os }}-bun1.3.14-${{ hashFiles('packages/**', 'bun.lock', 'tsconfig.json', 'scripts/build-packages.ts', 'scripts/workspace-packages.ts') }}
-      - run: bun install --frozen-lockfile
-      - name: Build packages
-        if: steps.dist-cache.outputs.cache-hit != 'true'
-        run: bun run build
+      - name: Set up Bun and build packages
+        uses: ./.github/actions/setup-and-build
       - name: Generate route types
         run: bun run build:routes
       - name: Run tests (no Redis)
@@ -302,23 +259,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: '1.3.14'
-
-      # Same exact-match dist cache as build-and-test — see the comment there.
-      - name: Restore built packages
-        id: dist-cache
-        uses: actions/cache@v4
-        with:
-          path: packages/*/dist
-          key: dist-${{ runner.os }}-bun1.3.14-${{ hashFiles('packages/**', 'bun.lock', 'tsconfig.json', 'scripts/build-packages.ts', 'scripts/workspace-packages.ts') }}
-
-      - run: bun install --frozen-lockfile
-
-      - name: Build packages
-        if: steps.dist-cache.outputs.cache-hit != 'true'
-        run: bun run build
+      - name: Set up Bun and build packages
+        uses: ./.github/actions/setup-and-build
 
       - name: Generate route types
         run: bun run build:routes
@@ -326,16 +268,30 @@ jobs:
       - name: Build blog frontend
         run: bun run --cwd examples/blog build
 
-      # With a cache hit playwright skips the browser download and only
-      # installs system deps, so the install step stays unconditional.
+      # Keyed on the resolved Playwright version, not a hashed manifest: the
+      # caret range in examples/blog/package.json means a lockfile-only bump
+      # must invalidate this cache, and an unrelated dependency bump must not.
+      - name: Resolve Playwright version
+        id: playwright-version
+        run: echo "version=$(cd examples/blog && bunx playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+
       - name: Restore Playwright browsers
+        id: playwright-cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('examples/blog/package.json') }}
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
 
       - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: cd examples/blog && bunx playwright install --with-deps chromium
+
+      # On a hit the browsers are already in place and the runner image ships
+      # Chromium's system libraries; a plain install is a fast no-op safety
+      # net that skips the ~30s apt work --with-deps would repeat.
+      - name: Install Playwright browsers (cached)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: cd examples/blog && bunx playwright install chromium
 
       - name: Set up blog .env
         run: |
@@ -369,25 +325,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.3.14"
-
-      # Same exact-match dist cache as build-and-test — see the comment there.
-      - name: Restore built packages
-        id: dist-cache
-        uses: actions/cache@v4
-        with:
-          path: packages/*/dist
-          key: dist-${{ runner.os }}-bun1.3.14-${{ hashFiles('packages/**', 'bun.lock', 'tsconfig.json', 'scripts/build-packages.ts', 'scripts/workspace-packages.ts') }}
-
-      - name: Install workspace dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Build packages
-        if: steps.dist-cache.outputs.cache-hit != 'true'
-        run: bun run build
+      - name: Set up Bun and build packages
+        uses: ./.github/actions/setup-and-build
 
       - name: Generate route types
         run: |
