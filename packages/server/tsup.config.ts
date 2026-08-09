@@ -42,7 +42,7 @@ export default defineConfig({
   // is invisible through another (e.g. registerJob via the root entry +
   // Worker via ./queue never saw each other's registry).
   splitting: true,
-  dts: { only: false },
+  dts: false,
   outDir: 'dist',
   clean: true,
   tsconfig: 'tsconfig.json',
