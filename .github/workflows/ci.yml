@@ -6,6 +6,12 @@ on:
       - main
   pull_request:
 
+# Superseded runs of the same PR are cancelled; pushes to main always run to
+# completion (each gets its own group via the commit SHA).
+concurrency:
+  group: ci-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
