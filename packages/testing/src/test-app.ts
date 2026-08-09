@@ -35,8 +35,9 @@ export interface TestAppOptions {
   /**
    * Mirrors `createApp({ i18n })`: required when controllers under test use
    * `this.t()`/`this.tc()`. Ignored by the Hono fallback. Alternatively, boot
-   * the real app and wrap it with `TestApp.fromFetch(app.fetch)` so tests
-   * share its full configuration.
+   * the real app and wrap it with
+   * `TestApp.fromFetch((request) => app.fetch(request))` so tests share its
+   * full configuration.
    */
   readonly i18n?: Record<string, unknown>
 }
@@ -495,7 +496,7 @@ export class TestApp {
    * PUT, PATCH, and DELETE pass the CSRF middleware like a real browser.
    *
    * @example
-   * const http = (await TestApp.fromFetch(app.fetch)).actingAs(user)
+   * const http = TestApp.fromFetch((request) => app.fetch(request)).actingAs(user)
    * const csrf = await http.withCsrf()
    * await csrf.post('/tasks', { title: 'hello' }) // no more 403
    */
