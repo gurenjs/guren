@@ -69,6 +69,12 @@ const app = createApp({
     EventServiceProvider,
     SchedulingProvider,
   ],
+  i18n: {
+    supported: ['en', 'ja'],
+    // Anchor to this file rather than cwd so dev server, tests, and E2E all
+    // resolve the same directory.
+    path: new URL('../lang', import.meta.url).pathname,
+  },
   auth: {
     autoSession: true,
     sessionOptions: {
