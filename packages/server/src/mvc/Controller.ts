@@ -383,7 +383,7 @@ export class Controller {
     const i18n = this.#resolveI18n()
     if (!i18n) {
       throw new Error(
-        'Controller.t() requires i18n to be configured. Pass createApp({ i18n }) or register an I18nManager.',
+        'Controller i18n helpers require i18n to be configured. Pass createApp({ i18n }) or register an I18nManager.',
       )
     }
 

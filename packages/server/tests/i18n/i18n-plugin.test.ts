@@ -192,6 +192,35 @@ describe('createApp({ i18n })', () => {
     expect(body.hello).toBe('Hello')
   })
 
+  test('a downstream locale override is honored by t/tc, locale, and _i18n alike', async () => {
+    // Simulates middleware running after locale detection that replaces the
+    // request locale (e.g. a per-user preference read from the session).
+    const app = createApp({
+      i18n: { supported: ['en', 'ja'], loader: new MemoryLoader(structuredClone(MESSAGES)) },
+      boot: (hono) => {
+        hono.use('*', async (c, next) => {
+          c.set('locale' as never, 'ja' as never)
+          await next()
+        })
+      },
+    })
+    app.router.get('/greet', [GreetingController, 'show'])
+    app.router.get('/page', [PageController, 'show'])
+    await app.boot()
+
+    const body = await greet(app)
+    expect(body.locale).toBe('ja')
+    expect(body.hello).toBe('こんにちは')
+
+    const props = await inertiaPageProps(app)
+    expect(props._i18n.locale).toBe('ja')
+  })
+
+  test('rejects a fallback that is not in supported', async () => {
+    const app = makeApp({ fallback: 'fr' })
+    await expect(app.boot()).rejects.toThrow('fallback')
+  })
+
   test('loads lang/<locale>/*.json fixtures through the default JsonLoader path', async () => {
     const app = createApp({
       i18n: { supported: ['en', 'ja'], path: new URL('./fixtures/lang', import.meta.url).pathname },

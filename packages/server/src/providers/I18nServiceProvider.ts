@@ -30,8 +30,15 @@ export class I18nServiceProvider extends ServiceProvider {
     const app = this.application()
     const options = app?.i18nOptions
 
-    if (options && options.supported.length === 0) {
-      throw new Error('createApp({ i18n }) requires at least one supported locale.')
+    if (options) {
+      if (options.supported.length === 0) {
+        throw new Error('createApp({ i18n }) requires at least one supported locale.')
+      }
+      if (options.fallback && !options.supported.includes(options.fallback)) {
+        throw new Error(
+          `createApp({ i18n }): fallback locale '${options.fallback}' must be one of the supported locales (${options.supported.join(', ')}).`,
+        )
+      }
     }
 
     this.container.singleton('i18n', () => {
@@ -65,6 +72,18 @@ export class I18nServiceProvider extends ServiceProvider {
 
     const manager = this.container.make<I18nManager>('i18n')
     await manager.loadLocales([...options.supported])
+
+    // A missing lang directory or unparseable file surfaces as an empty
+    // catalog rather than a boot failure (JsonLoader tolerates both) — warn
+    // so a broken path is visible instead of silently untranslated.
+    for (const locale of options.supported) {
+      if (Object.keys(manager.getMessages(locale)).length === 0) {
+        console.warn(
+          `[guren] i18n: no translations loaded for locale '${locale}'` +
+          (options.loader ? '.' : ` — expected ${options.path ?? 'lang'}/${locale}/*.json.`),
+        )
+      }
+    }
 
     if (options.share !== false) {
       const fallback = manager.getFallbackLocale() ?? manager.getLocale()
