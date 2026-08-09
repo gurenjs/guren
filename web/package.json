@@ -14,9 +14,9 @@
     "test": "bun run prerender:stub && bunx vitest run",
     "build": "bun run codegen && bun run prerender && bunx vite build && bunx vite build --ssr",
     "preview": "NODE_ENV=production bun bin/serve.ts",
-    "db:make": "bunx guren make:migration",
-    "db:migrate": "bunx guren db:migrate",
-    "db:seed": "bunx guren db:seed",
+    "db:make": "bun ../packages/cli/src/bin.ts make:migration",
+    "db:migrate": "bun ../packages/cli/src/bin.ts db:migrate",
+    "db:seed": "bun ../packages/cli/src/bin.ts db:seed",
     "cloudflare:build": "bun run build && bun scripts/cloudflare-build.ts",
     "deploy:cloudflare": "bun run cloudflare:build && bunx wrangler deploy"
   },
