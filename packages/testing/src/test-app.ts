@@ -15,6 +15,7 @@ type ApplicationConstructor = new (options: {
   providers?: ProviderConstructor[]
   routes?: RouteRegistration
   auth?: Record<string, unknown>
+  i18n?: Record<string, unknown>
 }) => ApplicationLike
 
 /**
@@ -31,6 +32,13 @@ export interface TestAppOptions {
    * `@guren/server` is not installed.
    */
   readonly auth?: Record<string, unknown>
+  /**
+   * Mirrors `createApp({ i18n })`: required when controllers under test use
+   * `this.t()`/`this.tc()`. Ignored by the Hono fallback. Alternatively, boot
+   * the real app and wrap it with `TestApp.fromFetch(app.fetch)` so tests
+   * share its full configuration.
+   */
+  readonly i18n?: Record<string, unknown>
 }
 
 /**
@@ -411,6 +419,7 @@ export class TestApp {
       providers: options.providers,
       routes: options.routes,
       auth: options.auth,
+      i18n: options.i18n,
     })
     await application.boot()
 
