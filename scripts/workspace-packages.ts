@@ -106,17 +106,50 @@ const ignoredEdges: Array<[dependent: string, dependency: string]> = [
   ['@guren/core', '@guren/cli'],
 ]
 
+export interface DependencySchedule {
+  /** Count of unsatisfied in-workspace dependencies per package name. */
+  remainingDeps: Map<string, number>
+  /** Packages waiting on each package name. */
+  dependents: Map<string, WorkspacePackage[]>
+}
+
 /**
- * In-workspace dependencies per package name, with `ignoredEdges` removed.
- * Only packages present in `packages` appear as keys or as dependencies, so a
- * subset selection treats its outside dependencies as already satisfied.
+ * The Kahn bookkeeping shared by the topological sort and the parallel build
+ * scheduler: in-workspace dependency counts and the reverse index, with
+ * `ignoredEdges` removed. Only packages present in `packages` count as
+ * dependencies, so a subset selection treats its outside dependencies as
+ * already satisfied. Returns fresh maps — callers mutate `remainingDeps` as
+ * packages complete.
  */
-export function dependencyGraph(
+export function dependencySchedule(
   packages: WorkspacePackage[],
-): Map<string, string[]> {
+): DependencySchedule {
   const byName = new Map(packages.map((pkg) => [pkg.name, pkg]))
   const ignored = new Set(ignoredEdges.map(([from, to]) => `${from} ${to}`))
 
+  const remainingDeps = new Map<string, number>()
+  const dependents = new Map<string, WorkspacePackage[]>()
+
+  for (const pkg of packages) {
+    const deps = pkg.dependencies.filter(
+      (dep) => byName.has(dep) && !ignored.has(`${pkg.name} ${dep}`),
+    )
+    remainingDeps.set(pkg.name, deps.length)
+    for (const dep of deps) {
+      if (!dependents.has(dep)) dependents.set(dep, [])
+      dependents.get(dep)!.push(pkg)
+    }
+  }
+
+  return { remainingDeps, dependents }
+}
+
+export function sortByDependencies(
+  packages: WorkspacePackage[],
+): WorkspacePackage[] {
+  // The stale check lives here rather than in dependencySchedule so it prints
+  // once per run — every build/test entry point sorts before scheduling.
+  const byName = new Map(packages.map((pkg) => [pkg.name, pkg]))
   for (const [from, to] of ignoredEdges) {
     const dependent = byName.get(from)
     if (dependent && !dependent.dependencies.includes(to)) {
@@ -126,37 +159,7 @@ export function dependencyGraph(
     }
   }
 
-  const graph = new Map<string, string[]>()
-  for (const pkg of packages) {
-    graph.set(
-      pkg.name,
-      pkg.dependencies.filter(
-        (dep) => byName.has(dep) && !ignored.has(`${pkg.name} ${dep}`),
-      ),
-    )
-  }
-  return graph
-}
-
-export function sortByDependencies(
-  packages: WorkspacePackage[],
-): WorkspacePackage[] {
-  const graph = dependencyGraph(packages)
-
-  // Kahn's algorithm: track each package's remaining dependency count and the
-  // set of packages waiting on it, so finishing one package only touches its
-  // actual dependents instead of rescanning every still-pending package.
-  const remainingDeps = new Map<string, number>()
-  const dependents = new Map<string, WorkspacePackage[]>()
-
-  for (const pkg of packages) {
-    const deps = graph.get(pkg.name)!
-    remainingDeps.set(pkg.name, deps.length)
-    for (const dep of deps) {
-      if (!dependents.has(dep)) dependents.set(dep, [])
-      dependents.get(dep)!.push(pkg)
-    }
-  }
+  const { remainingDeps, dependents } = dependencySchedule(packages)
 
   const queue = packages.filter((pkg) => remainingDeps.get(pkg.name) === 0)
   const ordered: WorkspacePackage[] = []

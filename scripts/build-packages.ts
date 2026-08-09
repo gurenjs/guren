@@ -20,7 +20,7 @@ import { join } from 'node:path'
 
 import {
   collectPackages,
-  dependencyGraph,
+  dependencySchedule,
   parseArgs,
   selectPackages,
   sortByDependencies,
@@ -65,18 +65,7 @@ async function buildAll(
   targets: WorkspacePackage[],
   limit: number,
 ): Promise<number> {
-  const graph = dependencyGraph(targets)
-
-  const remainingDeps = new Map<string, number>()
-  const dependents = new Map<string, WorkspacePackage[]>()
-  for (const pkg of targets) {
-    const deps = graph.get(pkg.name)!
-    remainingDeps.set(pkg.name, deps.length)
-    for (const dep of deps) {
-      if (!dependents.has(dep)) dependents.set(dep, [])
-      dependents.get(dep)!.push(pkg)
-    }
-  }
+  const { remainingDeps, dependents } = dependencySchedule(targets)
 
   // `targets` is already dependency-sorted, so the ready queue starts (and
   // stays) in a deterministic order.
@@ -136,9 +125,11 @@ if (listOnly) {
 }
 
 if (clean) {
-  for (const pkg of targets) {
-    await rm(join(pkg.dir, 'dist'), { recursive: true, force: true })
-  }
+  await Promise.all(
+    targets.map((pkg) =>
+      rm(join(pkg.dir, 'dist'), { recursive: true, force: true }),
+    ),
+  )
   console.log(`[build] removed dist/ from ${targets.length} package(s)`)
 }
 
