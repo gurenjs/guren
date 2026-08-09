@@ -116,25 +116,49 @@ export interface DependencySchedule {
 /**
  * The Kahn bookkeeping shared by the topological sort and the parallel build
  * scheduler: in-workspace dependency counts and the reverse index, with
- * `ignoredEdges` removed. Only packages present in `packages` count as
- * dependencies, so a subset selection treats its outside dependencies as
- * already satisfied. Returns fresh maps — callers mutate `remainingDeps` as
- * packages complete.
+ * `ignoredEdges` removed. Returns fresh maps — callers mutate `remainingDeps`
+ * as packages complete.
+ *
+ * When `closureThrough` is wider than `packages` (a subset selection), edges
+ * are followed through the unselected packages, so `server` still orders
+ * before `openapi` when `core` sits between them but is not selected.
+ * Dependencies outside `closureThrough` entirely are treated as satisfied.
  */
 export function dependencySchedule(
   packages: WorkspacePackage[],
+  closureThrough: WorkspacePackage[] = packages,
 ): DependencySchedule {
-  const byName = new Map(packages.map((pkg) => [pkg.name, pkg]))
+  const selected = new Set(packages.map((pkg) => pkg.name))
+  const byName = new Map(closureThrough.map((pkg) => [pkg.name, pkg]))
   const ignored = new Set(ignoredEdges.map(([from, to]) => `${from} ${to}`))
+
+  const directDeps = (pkg: WorkspacePackage): string[] =>
+    pkg.dependencies.filter(
+      (dep) => byName.has(dep) && !ignored.has(`${pkg.name} ${dep}`),
+    )
 
   const remainingDeps = new Map<string, number>()
   const dependents = new Map<string, WorkspacePackage[]>()
 
   for (const pkg of packages) {
-    const deps = pkg.dependencies.filter(
-      (dep) => byName.has(dep) && !ignored.has(`${pkg.name} ${dep}`),
-    )
-    remainingDeps.set(pkg.name, deps.length)
+    // BFS that stops at selected packages and traverses through unselected
+    // ones. With closureThrough === packages every dependency is selected, so
+    // this degenerates to the direct-edge case the sorter uses.
+    const deps = new Set<string>()
+    const visited = new Set<string>()
+    const queue = directDeps(pkg)
+    while (queue.length > 0) {
+      const name = queue.shift()!
+      if (visited.has(name)) continue
+      visited.add(name)
+      if (selected.has(name)) {
+        deps.add(name)
+        continue
+      }
+      queue.push(...directDeps(byName.get(name)!))
+    }
+
+    remainingDeps.set(pkg.name, deps.size)
     for (const dep of deps) {
       if (!dependents.has(dep)) dependents.set(dep, [])
       dependents.get(dep)!.push(pkg)

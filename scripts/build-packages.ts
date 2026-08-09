@@ -27,25 +27,43 @@ import {
   type WorkspacePackage,
 } from './workspace-packages.ts'
 
-/** Returns the child's exit code; a non-zero code means the caller should stop and propagate it. */
-async function build(pkg: WorkspacePackage): Promise<number> {
+/**
+ * Returns the child's exit code; a non-zero code means the caller should stop
+ * and propagate it. Never rejects — the scheduler's bookkeeping depends on
+ * every build settling with a code.
+ */
+async function build(pkg: WorkspacePackage, stream: boolean): Promise<number> {
   const started = Date.now()
-  // Output is buffered and replayed on completion so concurrent builds don't
-  // interleave their lines.
-  const proc = Bun.spawn([process.execPath, 'run', 'build'], {
-    cwd: pkg.dir,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
-
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ])
-
-  if (stdout) process.stdout.write(stdout)
-  if (stderr) process.stderr.write(stderr)
+  let exitCode: number
+  try {
+    if (stream) {
+      const proc = Bun.spawn([process.execPath, 'run', 'build'], {
+        cwd: pkg.dir,
+        stdout: 'inherit',
+        stderr: 'inherit',
+      })
+      exitCode = await proc.exited
+    } else {
+      // Output is buffered and replayed on completion so concurrent builds
+      // don't interleave their lines.
+      const proc = Bun.spawn([process.execPath, 'run', 'build'], {
+        cwd: pkg.dir,
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+      const [stdout, stderr, code] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ])
+      if (stdout) process.stdout.write(stdout)
+      if (stderr) process.stderr.write(stderr)
+      exitCode = code
+    }
+  } catch (error) {
+    console.error(`[build] ${pkg.name} did not run:`, error)
+    return 1
+  }
 
   if (exitCode !== 0) {
     console.error(`[build] ${pkg.name} failed with exit code ${exitCode}`)
@@ -64,8 +82,12 @@ async function build(pkg: WorkspacePackage): Promise<number> {
 async function buildAll(
   targets: WorkspacePackage[],
   limit: number,
+  allPackages: WorkspacePackage[],
 ): Promise<number> {
-  const { remainingDeps, dependents } = dependencySchedule(targets)
+  // The closure over the full workspace keeps transitive order for subset
+  // selections: `build server openapi` still runs server before openapi even
+  // though the core package between them is not selected.
+  const { remainingDeps, dependents } = dependencySchedule(targets, allPackages)
 
   // `targets` is already dependency-sorted, so the ready queue starts (and
   // stays) in a deterministic order.
@@ -78,7 +100,7 @@ async function buildAll(
       while (exitCode === 0 && running < limit && ready.length > 0) {
         const pkg = ready.shift()!
         running += 1
-        void build(pkg).then((code) => {
+        void build(pkg, limit === 1).then((code) => {
           running -= 1
           if (code !== 0) {
             if (exitCode === 0) exitCode = code
@@ -112,9 +134,8 @@ const listOnly = flags.list
 // — before filtering, so a buildable package that transitively depends on a
 // non-buildable one keeps its correct relative order. This also rejects any
 // undeclared dependency cycle before the scheduler runs.
-const buildable = sortByDependencies(await collectPackages()).filter(
-  (pkg) => pkg.scripts.build,
-)
+const allPackages = sortByDependencies(await collectPackages())
+const buildable = allPackages.filter((pkg) => pkg.scripts.build)
 const targets = selectPackages(buildable, selectors)
 
 if (listOnly) {
@@ -140,5 +161,5 @@ const limit = flags.sequential
 console.log(`[build] ${targets.map((pkg) => pkg.name).join(' → ')}`)
 if (limit > 1) console.log(`[build] up to ${limit} packages in parallel`)
 
-const exitCode = await buildAll(targets, limit)
+const exitCode = await buildAll(targets, limit, allPackages)
 if (exitCode !== 0) process.exit(exitCode)
