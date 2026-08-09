@@ -281,6 +281,15 @@ export default app
     expect(notificationFiles.some((file) => file.endsWith('app/Providers/NotificationProvider.ts'))).toBe(true)
     expect(storageFiles.some((file) => file.endsWith('app/Providers/StorageProvider.ts'))).toBe(true)
     expect(broadcastingFiles.some((file) => file.endsWith('app/Providers/BroadcastProvider.ts'))).toBe(true)
+
+    // The private channel must be registered with the channel's own check, not
+    // an allow-all — otherwise UserFeedChannel.authorize() never runs and any
+    // caller can subscribe to another user's feed.
+    const broadcastProviderSource = await readFile('app/Providers/BroadcastProvider.ts', 'utf8')
+    expect(broadcastProviderSource).toContain(
+      'broadcast.privateChannel(userFeed.getBaseName(), (channelName, user) => userFeed.authorize(channelName, user))',
+    )
+    expect(broadcastProviderSource).not.toContain('broadcast.privateChannel(userFeed.getBaseName(), () => true)')
     expect(oauthFiles.some((file) => file.endsWith('app/Providers/OAuthProvider.ts'))).toBe(true)
     expect(oauthFiles.some((file) => file.endsWith('app/Http/Controllers/Auth/OAuthController.ts'))).toBe(true)
 

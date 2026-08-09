@@ -181,7 +181,12 @@ broadcast.removeWebSocketClient(clientId)
 ```ts
 // app/Providers/BroadcastProvider.ts
 broadcast.channel('announcements', () => true)
-broadcast.privateChannel('posts.{id}', () => true)
+// private チャンネルには実際のチェックが必要です。`() => true` だと
+// 誰でも他人のチャンネルを購読できてしまいます。
+broadcast.privateChannel('posts.{id}', async (channel, user) => {
+  const post = await Post.find(channel.replace('private-posts.', ''))
+  return post?.authorId === user?.id
+})
 broadcast.broadcast('announcements', 'NewPost', { id: 1 })
 ```
 

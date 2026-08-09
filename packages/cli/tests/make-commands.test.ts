@@ -464,14 +464,37 @@ describe('CLI make:* commands', () => {
       const result = await makeChannel('Notifications', { private: true })
       const content = fs.readFileSync(result, 'utf-8')
       expect(content).toContain('extends PrivateChannel')
-      expect(content).toContain('authorize(ctx: Context)')
+      // The signature has to match ChannelAuthorizer, or the method cannot be
+      // registered and silently never runs.
+      expect(content).toContain('async authorize(_channelName: string, user: unknown): Promise<boolean>')
+      expect(content).toContain('broadcast.privateChannel(')
+    })
+
+    it('ties a per-user private channel to the subscriber', async () => {
+      const result = await makeChannel('UserFeed', { private: true, channel: 'users.{id}.feed' })
+      const content = fs.readFileSync(result, 'utf-8')
+      expect(content).toContain('async authorize(channelName: string, user: unknown): Promise<boolean>')
+      expect(content).toContain('if (!user) return false')
+      expect(content).toContain('return channelName === `private-users.${(user as { id: string | number }).id}.feed`')
+    })
+
+    // Any single placeholder means per-user, not just the literal `{id}` —
+    // otherwise `orders.{orderId}` silently got the allow-any-user fallback.
+    it('ties a per-user private channel named with any placeholder', async () => {
+      const result = await makeChannel('Orders', { private: true, channel: 'orders.{orderId}.items' })
+      const content = fs.readFileSync(result, 'utf-8')
+      expect(content).toContain('async authorize(channelName: string, user: unknown)')
+      expect(content).toContain('return channelName === `private-orders.${(user as { id: string | number }).id}.items`')
     })
 
     it('generates presence channel template', async () => {
       const result = await makeChannel('Room', { presence: true })
       const content = fs.readFileSync(result, 'utf-8')
       expect(content).toContain('extends PresenceChannel')
-      expect(content).toContain('join(ctx: Context)')
+      // Not `join`: the base class already has `join(member)`, and overriding
+      // it with an incompatible signature is how the previous template ended up
+      // never adding a member.
+      expect(content).toContain('async authorizeJoin(_channelName: string, user: unknown): Promise<PresenceMember | null>')
     })
 
     it('uses custom channel name', async () => {

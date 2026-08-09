@@ -14,8 +14,9 @@ describe('gurenVitePlugin', () => {
         expect.objectContaining({ find: '@resources' }),
       ]),
     )
-    expect(config.server.host).toBe(true)
+    expect(config.server.host).toBeUndefined()
     expect(config.server.port).toBe(5173)
+    expect(config.preview.host).toBe(true)
     expect(config.preview.port).toBe(4173)
     expect(config.build.outDir).toBe('public/assets')
     expect(config.build.manifest).toBe(true)
@@ -24,6 +25,15 @@ describe('gurenVitePlugin', () => {
     expect(config.publicDir).toBe(false)
     expect(typeof config.build.rollupOptions.output.manualChunks).toBe('function')
     expect(config.base).toBe('/public/assets/')
+  })
+
+  it('leaves an explicit server.host alone', () => {
+    const plugin = gurenVitePlugin()
+    const config: Record<string, any> = { server: { host: true } }
+
+    plugin.config?.(config, { command: 'serve' })
+
+    expect(config.server.host).toBe(true)
   })
 
   it('applies SSR build defaults', () => {

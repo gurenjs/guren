@@ -191,7 +191,12 @@ These APIs provide the server-side foundation so a Bun WebSocket upgrade route c
 ```ts
 // app/Providers/BroadcastProvider.ts
 broadcast.channel('announcements', () => true)
-broadcast.privateChannel('posts.{id}', () => true)
+// A private channel needs a real check — `() => true` would let any
+// caller subscribe to another user's channel.
+broadcast.privateChannel('posts.{id}', async (channel, user) => {
+  const post = await Post.find(channel.replace('private-posts.', ''))
+  return post?.authorId === user?.id
+})
 broadcast.broadcast('announcements', 'NewPost', { id: 1 })
 ```
 

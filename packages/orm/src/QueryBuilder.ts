@@ -543,8 +543,17 @@ export class QueryBuilder<
       }, { trx: this.options.trx })
     }
 
-    // Fallback: convert to simple where clause if possible
+    // Fallback: convert to simple where clause if possible. Passing a null
+    // conversion on as `where: undefined` would drop every condition — global
+    // scopes included — and return the whole table, so refuse instead.
     const simpleWhere = this.toSimpleWhereClause()
+    if (simpleWhere === null && this.conditions.length > 0) {
+      throw new Error(
+        `${this.modelClass.name}: this query uses conditions the configured adapter cannot express `
+        + `(it implements neither findManyAdvanced nor countAdvanced). Running it would drop every `
+        + `condition, including any global scope, and return unfiltered rows.`,
+      )
+    }
     return this.adapter.findMany<TResult>(this.table, {
       where: (simpleWhere ?? undefined) as FindManyOptions<TResult>['where'],
       orderBy: this.options.orderBy.length > 0 ? (this.options.orderBy as OrderByClause) : undefined,
@@ -570,15 +579,26 @@ export class QueryBuilder<
         return null // Cannot convert OR groups to simple where
       }
 
-      if (condition.operator === '=') {
-        result[condition.field] = condition.value
-      } else if (condition.operator === 'in') {
-        result[condition.field] = condition.value
+      let value: unknown
+      if (condition.operator === '=' || condition.operator === 'in') {
+        value = condition.value
       } else if (condition.operator === 'is null') {
-        result[condition.field] = null
+        value = null
       } else {
         return null // Cannot convert comparison operators to simple where
       }
+
+      // A flat object holds one value per field, so a second condition on the
+      // same field would overwrite the first. AND-ing two constraints is not
+      // the same as keeping only the later one: a global scope pinning
+      // `tenantId` would be replaced by a caller's own `where('tenantId', …)`,
+      // handing them another tenant's rows. Only a repeat of the same value is
+      // safe to collapse.
+      if (condition.field in result && !Object.is(result[condition.field], value)) {
+        return null
+      }
+
+      result[condition.field] = value
     }
 
     return result

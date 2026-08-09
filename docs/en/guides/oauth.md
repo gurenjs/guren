@@ -43,15 +43,23 @@ const CallbackQuerySchema = z.object({
 
 export default class GitHubOAuthController extends Controller {
   async start() {
+    // Passing the session ties the flow to this browser — see
+    // "Binding State to the Browser" below.
     const { url } = await oauth.authorize('github', {
       redirectTo: this.query('redirect_to'),
+      session: this.auth.session(),
     })
     return this.redirect(url)
   }
 
   async callback() {
     const { code, state } = this.validateQuery(CallbackQuerySchema)
-    const { profile, redirectTo } = await oauth.handleCallback('github', { code, state })
+
+    const { profile, redirectTo } = await oauth.handleCallback('github', {
+      code,
+      state,
+      session: this.auth.session(),
+    })
 
     let user = await User.where('githubId', profile.id).first()
     if (!user) {
@@ -76,14 +84,65 @@ export function registerWebRoutes(router: Router): void {
 }
 ```
 
+## Binding State to the Browser
+
+`state` is unguessable and single-use, but on its own it is also *transferable*.
+An attacker can start a flow on your app, authorize their own provider account,
+keep the resulting `code` unconsumed, and then get a visitor to open
+
+```
+https://your.app/auth/github/callback?code=<attacker's>&state=<attacker's>
+```
+
+Nothing in the pair identifies whose browser began the flow, so the callback
+succeeds and logs that visitor into the **attacker's** account. Everything the
+visitor writes afterwards — posts, uploads, a saved payment method — lands in an
+account the attacker can also read.
+
+Pass the session to both legs of the flow to close it:
+
+```ts
+// starting the flow
+const { url } = await oauth.authorize('github', { session: this.auth.session() })
+
+// in the callback
+await oauth.handleCallback('github', { code, state, session: this.auth.session() })
+```
+
+`authorize()` mints a fresh per-flow value, keeps it in the session, and stores
+only its hash with the state; `handleCallback()` reads the value back (removing
+it in the same step) and refuses a state whose binding it cannot match. Writing
+to the session is also what makes a first-time visitor's session persist across
+the round trip to the provider, so the callback request carries the same one.
+When `this.auth.session()` returns `undefined` — no session middleware — the
+state is simply left unbound, so nothing breaks; it just stays unprotected.
+
+If the binding must live somewhere other than the session (an encrypted cookie,
+a native app's secure storage), manage the value yourself with `bindTo`: pass a
+value only this browser can present back to `authorize()`, and hand the same
+value to `handleCallback()`. `bindTo` wins when both options are given.
+
+> [!WARNING]
+> `authorize()` without `session` or `bindTo` still works, so apps written
+> against the earlier API keep running, and it logs a warning once per process.
+> Those apps remain open to the attack above until they adopt it. `make:auth`
+> and the `oauth` blueprint generate the bound version.
+
 ## Redirect After Login
 
 Pass a `redirectTo` when starting the flow (e.g. the page the user was on) — it survives the round trip to the provider and comes back from `handleCallback`:
 
 ```ts
-const { url } = await oauth.authorize('github', { redirectTo: '/settings/billing' })
+const { url } = await oauth.authorize('github', {
+  redirectTo: '/settings/billing',
+  session: this.auth.session(),
+})
 // ...later, in the callback:
-const { redirectTo } = await oauth.handleCallback('github', { code, state })
+const { redirectTo } = await oauth.handleCallback('github', {
+  code,
+  state,
+  session: this.auth.session(),
+})
 return this.redirect(redirectTo ?? '/dashboard')
 ```
 
@@ -212,8 +271,15 @@ export const oauthStates = sqliteTable('oauth_states', {
   provider: text('provider').notNull(),
   redirectTo: text('redirect_to'),
   expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+  binding: text('binding'),
 })
 ```
+
+The `binding` column holds the hashed browser binding from
+[Binding State to the Browser](#binding-state-to-the-browser). Without it the
+store cannot persist a binding, and every bound state comes back unbound — which
+silently reverts the protection. Add the column before binding flows via
+`session` or `bindTo`.
 
 Expired state rows are removed as they are encountered; call `store.deleteExpired()` from a scheduled job for bulk cleanup. Redis remains available for apps that already run it:
 
@@ -278,7 +344,7 @@ describe('GitHub OAuth', () => {
 
 ## Best Practices
 
-1. **Never skip state verification**: `handleCallback` verifies and consumes the state automatically — don't build a custom callback path that trusts `code` alone.
+1. **Never skip state verification**: `handleCallback` verifies and consumes the state automatically — don't build a custom callback path that trusts `code` alone. Always pass `session` (or `bindTo`) as well; state verification on its own does not tell you the flow started in the same browser (see [Binding State to the Browser](#binding-state-to-the-browser)).
 
 2. **Set `allowedRedirectHosts` explicitly**: without it, only app-relative `redirectTo` paths are honored, which is the safest default. Add hosts only if you redirect to a separate domain after login.
 

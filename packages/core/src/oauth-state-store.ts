@@ -13,7 +13,7 @@ import { isExpired, toDate } from './store-utils.js'
  *
  * Pass the Drizzle table for your `oauth_states` schema. Column property
  * names must match `stateHash` (text primary key), `provider`,
- * `redirectTo`, and `expiresAt`:
+ * `redirectTo`, `expiresAt`, and `binding`:
  *
  * ```ts
  * export const oauthStates = sqliteTable('oauth_states', {
@@ -21,8 +21,13 @@ import { isExpired, toDate } from './store-utils.js'
  *   provider: text('provider').notNull(),
  *   redirectTo: text('redirect_to'),
  *   expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+ *   binding: text('binding'),
  * })
  * ```
+ *
+ * `binding` is required for `authorize({ bindTo })` to survive the round trip
+ * to the provider. Without the column the store cannot persist it, and every
+ * bound state comes back unbound.
  *
  * @example
  * ```ts
@@ -49,6 +54,8 @@ export class DatabaseOAuthStateStore implements OAuthStateStore {
       provider: payload.provider,
       redirectTo: payload.redirectTo ?? null,
       expiresAt: payload.expiresAt,
+      // Persisted, not derived: an unbound state verifies for any browser.
+      binding: payload.binding ?? null,
     })
   }
 
@@ -145,6 +152,7 @@ function mapRecordToPayload(record: Record<string, unknown>): OAuthStatePayload 
     redirectTo: record.redirectTo == null ? undefined : String(record.redirectTo),
     // fetchLive's isExpired check guarantees this parses.
     expiresAt: toDate(record.expiresAt) as Date,
+    binding: record.binding == null ? undefined : String(record.binding),
   }
 }
 

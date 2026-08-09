@@ -37,11 +37,22 @@ function createOAuthStub() {
   }
 }
 
-function createController() {
+/** Enough of a Session for the controller's state binding to round-trip. */
+function createSessionStub() {
+  const data = new Map<string, unknown>()
+  return {
+    regenerate: vi.fn(),
+    set: vi.fn((key: string, value: unknown) => { data.set(key, value) }),
+    get: vi.fn((key: string) => data.get(key)),
+    forget: vi.fn((key: string) => { data.delete(key) }),
+  }
+}
+
+function createController(session = createSessionStub()) {
   const controller = new OAuthController()
   Object.defineProperty(controller, 'auth', {
     value: {
-      session: vi.fn().mockReturnValue({ regenerate: vi.fn() }),
+      session: vi.fn().mockReturnValue(session),
       login: vi.fn().mockResolvedValue(undefined),
     },
     configurable: true,
@@ -53,16 +64,40 @@ describe('OAuthController', () => {
   describe('redirectToProvider()', () => {
     it('redirects to the provider authorization URL', async () => {
       const oauth = createOAuthStub()
-      const controller = createController()
+      const session = createSessionStub()
+      const controller = createController(session)
       const ctx = createControllerContext('http://blog.test/auth/github', {}, { oauth }) as unknown as Context
       controller.setContext(ctx)
       ;(ctx as unknown as { req: { param: () => Record<string, string> } }).req.param = () => ({ provider: 'github' })
 
       const response = await controller.redirectToProvider()
 
-      expect(oauth.authorize).toHaveBeenCalledWith('github', { redirectTo: undefined })
+      // Passing the session lets the manager bind `state` to this browser:
+      // without it an attacker can authorize their own account, hold the
+      // `code`, and walk a visitor through the callback to log them into the
+      // attacker's account.
+      expect(oauth.authorize).toHaveBeenCalledWith('github', {
+        redirectTo: undefined,
+        session,
+      })
       expect(response.status).toBe(302)
       expect(response.headers.get('Location')).toBe('https://github.com/login/oauth/authorize?client_id=abc')
+    })
+
+    // The manager treats a missing session as an unbound flow; forwarding it
+    // untouched is what keeps a session-less setup working.
+    it('passes the missing session through so the flow stays unbound', async () => {
+      const oauth = createOAuthStub()
+      // `null`, not `undefined` — the default parameter would substitute a stub.
+      const controller = createController(null as unknown as ReturnType<typeof createSessionStub>)
+      const ctx = createControllerContext('http://blog.test/auth/github', {}, { oauth }) as unknown as Context
+      controller.setContext(ctx)
+      ;(ctx as unknown as { req: { param: () => Record<string, string> } }).req.param = () => ({ provider: 'github' })
+
+      const response = await controller.redirectToProvider()
+
+      expect(oauth.authorize).toHaveBeenCalledWith('github', { redirectTo: undefined, session: null })
+      expect(response.status).toBe(302)
     })
   })
 
@@ -75,13 +110,17 @@ describe('OAuthController', () => {
       })
       mockUserWhere.mockResolvedValue([{ id: 1, email: 'ada@example.com', githubId: 'gh-1' }])
 
-      const controller = createController()
+      const session = createSessionStub()
+      const controller = createController(session)
       const ctx = createControllerContext('http://blog.test/auth/github/callback?code=abc&state=xyz', {}, { oauth }) as unknown as Context
       controller.setContext(ctx)
       ;(ctx as unknown as { req: { param: () => Record<string, string> } }).req.param = () => ({ provider: 'github' })
 
       const response = await controller.callback()
 
+      // The manager reads the binding back from the same session that
+      // authorize() stored it in.
+      expect(oauth.handleCallback).toHaveBeenCalledWith('github', { code: 'abc', state: 'xyz', session })
       expect(mockUserCreate).not.toHaveBeenCalled()
       expect(response.status).toBe(302)
       expect(response.headers.get('Location')).toBe('/dashboard')

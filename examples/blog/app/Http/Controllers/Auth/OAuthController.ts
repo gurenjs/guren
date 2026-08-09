@@ -32,8 +32,13 @@ export default class OAuthController extends Controller {
   async redirectToProvider(): Promise<Response> {
     const { provider } = this.validateParams(ProviderParamSchema)
 
+    // Passing the session ties `state` to this browser: the manager keeps a
+    // binding in it that the callback must present back. Without it an
+    // attacker could authorize their own account, hold the `code`, and walk a
+    // visitor through the callback to log them into the attacker's account.
     const { url } = await this.oauth().authorize(provider, {
       redirectTo: this.request.query('redirectTo') ?? undefined,
+      session: this.auth.session(),
     })
 
     return this.redirect(url)
@@ -43,7 +48,11 @@ export default class OAuthController extends Controller {
     const { provider } = this.validateParams(ProviderParamSchema)
     const { code, state } = this.validateQuery(CallbackQuerySchema)
 
-    const { profile, redirectTo } = await this.oauth().handleCallback(provider, { code, state })
+    const { profile, redirectTo } = await this.oauth().handleCallback(provider, {
+      code,
+      state,
+      session: this.auth.session(),
+    })
 
     // GitHub accounts with a private email are handled upstream:
     // createGitHubOAuthProviderConfig falls back to /user/emails, so

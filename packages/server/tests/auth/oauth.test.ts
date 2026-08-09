@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, mock } from 'bun:test'
 import {
   OAuthManager,
   MemoryOAuthStateStore,
+  OAUTH_SESSION_BINDING_KEY,
   buildOAuthAuthorizeUrl,
   createDiscordOAuthProviderConfig,
   createGitHubOAuthProviderConfig,
@@ -9,6 +10,7 @@ import {
   createOAuthState,
   verifyOAuthState,
   sanitizeOAuthRedirect,
+  type OAuthBindingSession,
   type OAuthProviderConfig,
 } from '../../src/auth/oauth'
 import { hashToken } from '../../src/auth/utils'
@@ -44,6 +46,74 @@ describe('oauth helpers', () => {
 
     const secondUse = await verifyOAuthState(state, 'github', store, {})
     expect(secondUse).toBeNull()
+  })
+
+  // Without a binding, `state` is unguessable and single-use but transferable:
+  // the attacker starts a flow, keeps their own `code` unconsumed, and walks
+  // the victim's browser through the callback — logging the victim into the
+  // attacker's account.
+  it('rejects a state bound to another browser', async () => {
+    const store = new MemoryOAuthStateStore()
+    const { state } = await createOAuthState('github', store, {}, '/dashboard', undefined, 'attacker-session')
+
+    expect(await verifyOAuthState(state, 'github', store, {}, 'victim-session')).toBeNull()
+  })
+
+  it('rejects a bound state presented with no binding at all', async () => {
+    const store = new MemoryOAuthStateStore()
+    const { state } = await createOAuthState('github', store, {}, undefined, undefined, 'starting-session')
+
+    expect(await verifyOAuthState(state, 'github', store, {})).toBeNull()
+  })
+
+  it('accepts the browser that started the flow', async () => {
+    const store = new MemoryOAuthStateStore()
+    const { state } = await createOAuthState('github', store, {}, '/dashboard', undefined, 'starting-session')
+
+    const payload = await verifyOAuthState(state, 'github', store, {}, 'starting-session')
+    expect(payload?.provider).toBe('github')
+    expect(payload?.redirectTo).toBe('/dashboard')
+  })
+
+  it('stores only the hash of the binding', async () => {
+    const store = new MemoryOAuthStateStore()
+    const { state } = await createOAuthState('github', store, {}, undefined, 'fixed-state', 'session-abc')
+
+    const stored = await store.find(hashToken('fixed-state'))
+    expect(stored?.binding).toBe(hashToken('session-abc'))
+    expect(stored?.binding).not.toBe('session-abc')
+    expect(state).toBe('fixed-state')
+  })
+
+  // Apps written against the previous API pass no binding at all. They stay
+  // exposed to the transfer above — authorize() warns about it — but must not
+  // break on upgrade.
+  // A store that drops `binding` reverts the protection with no other signal,
+  // so the mismatch between "bound at authorize" and "unbound at callback" is
+  // reported rather than passing silently.
+  it('warns when a bound flow comes back from the store unbound', async () => {
+    const store = new MemoryOAuthStateStore()
+    const original = console.warn
+    const warnings: string[] = []
+    console.warn = (message: unknown) => { warnings.push(String(message)) }
+
+    try {
+      const { state } = await createOAuthState('github', store, {}, undefined, 'dropped-state')
+      // Simulate the store losing the field: the state was minted unbound, but
+      // the caller presents one, which is the shape a dropping store produces.
+      expect(await verifyOAuthState(state, 'github', store, {}, 'session-abc')).not.toBeNull()
+    } finally {
+      console.warn = original
+    }
+
+    expect(warnings.some((line) => line.includes('without its binding'))).toBe(true)
+  })
+
+  it('still verifies a state created without a binding', async () => {
+    const store = new MemoryOAuthStateStore()
+    const { state } = await createOAuthState('github', store, {})
+
+    expect(await verifyOAuthState(state, 'github', store, {})).not.toBeNull()
   })
 
   it('drops unsafe redirectTo values when creating state', async () => {
@@ -295,6 +365,125 @@ describe('OAuthManager', () => {
 
     const allowlisted = await roundTrip('https://trusted.example.com/welcome')
     expect(allowlisted.redirectTo).toBe('https://trusted.example.com/welcome')
+  })
+
+  describe('session-bound flows', () => {
+    const createSessionStub = (): OAuthBindingSession & { data: Map<string, unknown> } => {
+      const data = new Map<string, unknown>()
+      return {
+        data,
+        get: <T,>(key: string) => data.get(key) as T | undefined,
+        set: (key: string, value: unknown) => { data.set(key, value) },
+        forget: (key: string) => { data.delete(key) },
+      }
+    }
+
+    const createManager = () => {
+      const manager = new OAuthManager({ stateStore: new MemoryOAuthStateStore() })
+      manager.registerProvider('github', githubConfig)
+      return manager
+    }
+
+    it('mints a binding into the session and accepts the callback carrying it', async () => {
+      const manager = createManager()
+      installOAuthFetchMock({ access_token: 'token-123' }, { id: 42 })
+
+      const session = createSessionStub()
+      const { state } = await manager.authorize('github', { session })
+      // Filed under the state it belongs to, so concurrent flows coexist.
+      expect(session.get<unknown[]>(OAUTH_SESSION_BINDING_KEY)).toHaveLength(1)
+
+      const { profile } = await manager.handleCallback('github', { code: 'auth-code', state, session })
+      expect(profile.id).toBe('42')
+    })
+
+    it('rejects the callback when a different session presents the state', async () => {
+      const manager = createManager()
+      installOAuthFetchMock({ access_token: 'token-123' }, { id: 42 })
+
+      const startingSession = createSessionStub()
+      const { state } = await manager.authorize('github', { session: startingSession })
+
+      // The victim's browser has its own session, which never saw authorize().
+      const otherSession = createSessionStub()
+      await expect(
+        manager.handleCallback('github', { code: 'auth-code', state, session: otherSession }),
+      ).rejects.toThrow('Invalid or expired OAuth state.')
+    })
+
+    // Bindings are filed under the state they belong to, so a callback
+    // carrying a state this browser never started cannot strip the binding of
+    // the flow it did start. Otherwise anyone could navigate a visitor to
+    // `/callback?code=x&state=x` mid-login and lock them out of their own.
+    it('leaves an unrelated flow untouched when a forged callback arrives', async () => {
+      const manager = createManager()
+      installOAuthFetchMock({ access_token: 'token-123' }, { id: 42 })
+
+      const session = createSessionStub()
+      const { state } = await manager.authorize('github', { session })
+
+      await expect(
+        manager.handleCallback('github', { code: 'auth-code', state: 'forged-state', session }),
+      ).rejects.toThrow('Invalid or expired OAuth state.')
+
+      const { profile } = await manager.handleCallback('github', { code: 'auth-code', state, session })
+      expect(profile.id).toBe('42')
+    })
+
+    // One slot per browser meant the second authorize() overwrote the first,
+    // so two tabs — or a visitor who picks a different provider — could not
+    // both finish. Callback order must not matter either.
+    it('keeps concurrent flows in the same browser independent', async () => {
+      const manager = createManager()
+      installOAuthFetchMock({ access_token: 'token-123' }, { id: 42 })
+
+      const session = createSessionStub()
+      const first = await manager.authorize('github', { session })
+      const second = await manager.authorize('github', { session, redirectTo: '/second' })
+
+      // Oldest first: the order that used to fail both.
+      const firstResult = await manager.handleCallback('github', { code: 'auth-code', state: first.state, session })
+      const secondResult = await manager.handleCallback('github', { code: 'auth-code', state: second.state, session })
+
+      expect(firstResult.profile.id).toBe('42')
+      expect(secondResult.profile.id).toBe('42')
+    })
+
+    it('drops the binding once its flow completes', async () => {
+      const manager = createManager()
+      installOAuthFetchMock({ access_token: 'token-123' }, { id: 42 })
+
+      const session = createSessionStub()
+      const { state } = await manager.authorize('github', { session })
+      await manager.handleCallback('github', { code: 'auth-code', state, session })
+
+      expect(session.get<unknown[]>(OAUTH_SESSION_BINDING_KEY)).toEqual([])
+    })
+
+    it('bounds how many unfinished flows a browser accumulates', async () => {
+      const manager = createManager()
+      installOAuthFetchMock({ access_token: 'token-123' }, { id: 42 })
+
+      const session = createSessionStub()
+      for (let i = 0; i < 8; i++) {
+        await manager.authorize('github', { session })
+      }
+
+      expect(session.get<unknown[]>(OAUTH_SESSION_BINDING_KEY)).toHaveLength(5)
+    })
+
+    it('prefers an explicit bindTo over the session', async () => {
+      const manager = createManager()
+      installOAuthFetchMock({ access_token: 'token-123' }, { id: 42 })
+
+      const session = createSessionStub()
+      const { state } = await manager.authorize('github', { bindTo: 'external-value', session })
+      // The session was not written to — the caller owns the binding.
+      expect(session.data.size).toBe(0)
+
+      const { profile } = await manager.handleCallback('github', { code: 'auth-code', state, bindTo: 'external-value' })
+      expect(profile.id).toBe('42')
+    })
   })
 
   it('reports the provider verification signal from the configured key', async () => {

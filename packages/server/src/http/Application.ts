@@ -504,7 +504,7 @@ export class Application {
         const { server, localUrl } = await startViteDevServer({
           root: viteOptions?.root ?? process.cwd(),
           config: viteOptions?.config,
-          host: viteOptions?.host ?? true,
+          host: viteOptions?.host,
           port: viteOptions?.port,
         })
         this.viteDevServer = server

@@ -4,7 +4,7 @@ import {
   isAppRelativePath,
   normalizeRedirectTarget,
 } from '../../support/redirect-target'
-import { buildTokenUrl, generateToken, hashToken, parseTokenUrl } from '../utils'
+import { buildTokenUrl, generateToken, hashToken, parseTokenUrl, secureCompare } from '../utils'
 
 export interface OAuthProviderConfig {
   clientId: string
@@ -80,6 +80,16 @@ export interface OAuthStatePayload {
   provider: string
   redirectTo?: string
   expiresAt: Date
+  /**
+   * Hash of the value tying this state to the browser that started the flow.
+   *
+   * Without it `state` is unguessable and single-use but *transferable*: an
+   * attacker can start a flow, capture their own `code`, and walk a victim's
+   * browser through the callback, logging the victim into the attacker's
+   * account. RFC 6749 §10.12 requires the binding; storing only the provider
+   * name does not provide it.
+   */
+  binding?: string
 }
 
 export interface OAuthStateStore {
@@ -111,21 +121,193 @@ export interface OAuthStateConfig {
   allowedRedirectHosts?: string[]
 }
 
+/**
+ * The slice of a session the manager needs to bind an OAuth flow to a
+ * browser. The framework `Session` satisfies it structurally, so controllers
+ * pass `this.auth.session()` straight through; anything else with these three
+ * methods (a cookie jar wrapper, a test double) works too.
+ */
+export interface OAuthBindingSession {
+  get<T = unknown>(key: string): T | undefined
+  set<T = unknown>(key: string, value: T): void
+  forget(key: string): void
+}
+
+/** Session key holding the per-browser bindings between authorize and callback. */
+export const OAUTH_SESSION_BINDING_KEY = 'guren:oauth.bindings'
+
+/**
+ * How many unfinished flows one browser may have bindings for.
+ *
+ * Every `authorize()` parks one entry, and an abandoned flow leaves it behind
+ * until it expires, so the list is capped. Beyond the cap the oldest entry is
+ * dropped — that flow's callback then fails, which is the same outcome it had
+ * before any of this existed.
+ */
+const MAX_PENDING_SESSION_BINDINGS = 5
+
 export interface OAuthAuthorizeOptions {
   scope?: string[]
   redirectTo?: string
   state?: string
   extraParams?: Record<string, string>
+  /**
+   * Session of the browser starting the flow — pass `this.auth.session()`.
+   *
+   * The manager mints a per-browser binding, keeps it in the session, and
+   * hashes it into the state; `handleCallback({ session })` presents it back.
+   * Writing to the session is also what makes a visitor's brand-new session
+   * persist across the provider round trip. `undefined` (no session
+   * middleware, or none established yet) leaves the state unbound — the flow
+   * still works, and `authorize()` warns once about the exposure.
+   */
+  session?: OAuthBindingSession
+  /**
+   * Bind the flow to the browser that started it, keeping the value yourself.
+   *
+   * Prefer `session` — it does the storing and consuming for you. Use this
+   * when the binding lives somewhere else (an encrypted cookie, a test): pass
+   * a value only this browser can present back. Only its hash reaches the
+   * state store, and `handleCallback()` then requires the same value. Takes
+   * precedence over `session` when both are given.
+   */
+  bindTo?: string
 }
 
 export interface OAuthCallbackPayload {
   code: string
   state: string
+  /**
+   * The same session handed to `authorize({ session })`. The binding is read
+   * from it and removed in one step, so a replayed callback finds nothing.
+   */
+  session?: OAuthBindingSession
+  /**
+   * The value handed to `authorize({ bindTo })`, read back from wherever the
+   * app kept it. Required when the state was created with a binding. Takes
+   * precedence over `session` when both are given.
+   */
+  bindTo?: string
 }
 
 export interface OAuthManagerOptions {
   stateStore?: OAuthStateStore
   stateConfig?: OAuthStateConfig
+}
+
+let warnedAboutUnboundState = false
+
+/**
+ * An unbound `state` is transferable between browsers, which is exactly the
+ * attack `state` exists to stop. Verification stays permissive so apps written
+ * against the previous API keep working, so this is the only thing that tells
+ * them they are exposed.
+ */
+function warnOnceAboutUnboundState(): void {
+  if (warnedAboutUnboundState) return
+  warnedAboutUnboundState = true
+  console.warn(
+    '[guren] OAuth authorize() was called without `session` or `bindTo`, so `state` is not tied '
+    + 'to the browser that started the flow. An attacker can then complete their own authorization '
+    + "in a victim's browser and log the victim into the attacker's account. Pass the current "
+    + 'session (`this.auth.session()`) as `session` to both authorize() and handleCallback(), or '
+    + 'manage a per-browser value yourself via `bindTo`. See: https://guren.dev/docs/guides/oauth',
+  )
+}
+
+let warnedAboutDroppedBinding = false
+
+/**
+ * The flow was bound at authorize time but the state came back without one,
+ * so the configured `OAuthStateStore` is not persisting `binding` — which
+ * silently reverts the protection to the transferable state it replaced.
+ */
+function warnOnceAboutDroppedBinding(): void {
+  if (warnedAboutDroppedBinding) return
+  warnedAboutDroppedBinding = true
+  console.warn(
+    '[guren] An OAuth state was created with `bindTo` but came back from the state store '
+    + 'without its binding, so the callback could not be tied to the browser that started the '
+    + 'flow. The configured OAuthStateStore is dropping `OAuthStatePayload.binding` — for '
+    + 'DatabaseOAuthStateStore this usually means the `oauth_states` table has no `binding` '
+    + 'column. See: https://guren.dev/docs/guides/oauth',
+  )
+}
+
+/**
+ * Mint a fresh binding and park it in the session for the callback. A new
+ * value per flow (rather than the session id) keeps session identifiers out
+ * of the state store's inputs entirely and survives a login-triggered
+ * session-id rotation happening mid-flow.
+ */
+interface PendingSessionBinding {
+  /** Hash of the `state` this binding belongs to. */
+  stateHash: string
+  binding: string
+  expiresAt: number
+}
+
+function readPendingBindings(session: OAuthBindingSession): PendingSessionBinding[] {
+  const stored = session.get<unknown>(OAUTH_SESSION_BINDING_KEY)
+  if (!Array.isArray(stored)) return []
+
+  const now = Date.now()
+  return stored.filter((entry): entry is PendingSessionBinding =>
+    typeof entry === 'object'
+    && entry !== null
+    && typeof (entry as PendingSessionBinding).stateHash === 'string'
+    && typeof (entry as PendingSessionBinding).binding === 'string'
+    && typeof (entry as PendingSessionBinding).expiresAt === 'number'
+    && (entry as PendingSessionBinding).expiresAt > now,
+  )
+}
+
+function issueSessionBinding(session: OAuthBindingSession | undefined): string | undefined {
+  if (!session) return undefined
+  return generateToken(DEFAULT_STATE_LENGTH)
+}
+
+/**
+ * Park a minted binding against the state it belongs to.
+ *
+ * Keyed by state rather than kept in one slot, so a browser can have several
+ * flows in flight — two tabs, or a visitor who picks a different provider —
+ * without each `authorize()` invalidating the one before it.
+ */
+function rememberSessionBinding(
+  session: OAuthBindingSession,
+  stateHash: string,
+  binding: string,
+  expiresAt: Date,
+): void {
+  const pending = readPendingBindings(session)
+  pending.push({ stateHash, binding, expiresAt: expiresAt.getTime() })
+  session.set(
+    OAUTH_SESSION_BINDING_KEY,
+    pending.slice(Math.max(0, pending.length - MAX_PENDING_SESSION_BINDINGS)),
+  )
+}
+
+/**
+ * Take the binding belonging to this callback's state, leaving the rest.
+ *
+ * Only the matching entry is removed: a forged callback carrying an unknown
+ * state must not be able to strip a real flow's binding and lock the visitor
+ * out of the login they actually started.
+ */
+function consumeSessionBinding(
+  session: OAuthBindingSession | undefined,
+  stateHash: string,
+): string | undefined {
+  if (!session) return undefined
+
+  const pending = readPendingBindings(session)
+  if (pending.length === 0) return undefined
+
+  const match = pending.find((entry) => entry.stateHash === stateHash)
+  // Written back either way, so expired entries are pruned on the way past.
+  session.set(OAUTH_SESSION_BINDING_KEY, pending.filter((entry) => entry.stateHash !== stateHash))
+  return match?.binding
 }
 
 const DEFAULT_STATE_EXPIRES_IN = 10 * 60 * 1000
@@ -227,13 +409,34 @@ export class OAuthManager {
 
   async authorize(providerName: string, options: OAuthAuthorizeOptions = {}): Promise<{ url: string; state: string; expiresAt: Date }> {
     const provider = this.getProvider(providerName)
+    // `bindTo` wins, and then the session is not touched at all — the caller
+    // is keeping the value themselves.
+    const sessionBinding = options.bindTo ? undefined : issueSessionBinding(options.session)
+    const bindTo = options.bindTo ?? sessionBinding
+    if (!bindTo) {
+      warnOnceAboutUnboundState()
+    }
+
     const { state, expiresAt } = await createOAuthState(
       providerName,
       this.stateStore,
       this.stateConfig,
       options.redirectTo,
       options.state,
+      bindTo,
     )
+
+    // Parked only once the state exists, so it can be filed under it — and
+    // only once the store accepted the state, so a failed authorize leaves
+    // nothing behind.
+    if (sessionBinding && options.session) {
+      rememberSessionBinding(
+        options.session,
+        hashToken(state, this.stateConfig.hashAlgorithm),
+        sessionBinding,
+        expiresAt,
+      )
+    }
     const scope = options.scope ?? provider.scopes
     const url = buildOAuthAuthorizeUrl(provider, state, { scope, extraParams: options.extraParams })
     return { url, state, expiresAt }
@@ -255,7 +458,17 @@ export class OAuthManager {
     payload: OAuthCallbackPayload,
   ): Promise<{ profile: OAuthUserProfile; redirectTo?: string }> {
     const provider = this.getProvider(providerName)
-    const verified = await verifyOAuthState(payload.state, providerName, this.stateStore, this.stateConfig)
+    const verified = await verifyOAuthState(
+      payload.state,
+      providerName,
+      this.stateStore,
+      this.stateConfig,
+      payload.bindTo
+        ?? consumeSessionBinding(
+          payload.session,
+          hashToken(payload.state, this.stateConfig.hashAlgorithm),
+        ),
+    )
     if (!verified) {
       throw new AuthenticationException('Invalid or expired OAuth state.')
     }
@@ -276,6 +489,7 @@ export async function createOAuthState(
   config: OAuthStateConfig = {},
   redirectTo?: string,
   fixedState?: string,
+  bindTo?: string,
 ): Promise<{ state: string; expiresAt: Date }> {
   const state = fixedState ?? generateToken(config.stateLength ?? DEFAULT_STATE_LENGTH)
   const hashAlgorithm = config.hashAlgorithm ?? DEFAULT_STATE_HASH_ALGORITHM
@@ -285,6 +499,9 @@ export async function createOAuthState(
     provider,
     redirectTo: sanitizeOAuthRedirect(redirectTo, config.allowedRedirectHosts),
     expiresAt,
+    // Only the hash is stored, so a leaked state store does not hand out
+    // session ids.
+    binding: bindTo ? hashToken(bindTo, hashAlgorithm) : undefined,
   })
   return { state, expiresAt }
 }
@@ -294,6 +511,7 @@ export async function verifyOAuthState(
   provider: string,
   store: OAuthStateStore,
   config: OAuthStateConfig = {},
+  bindTo?: string,
 ): Promise<OAuthStatePayload | null> {
   const hashAlgorithm = config.hashAlgorithm ?? DEFAULT_STATE_HASH_ALGORITHM
   const stateHash = hashToken(state, hashAlgorithm)
@@ -302,9 +520,38 @@ export async function verifyOAuthState(
     : await findAndDeleteState(store, stateHash)
   if (!payload) return null
   if (payload.provider !== provider) return null
+  if (!bindingMatches(payload.binding, bindTo, hashAlgorithm)) return null
   // Re-sanitize on the way out so custom stores and states persisted before
   // an allowlist change cannot smuggle an unsafe target through.
   return { ...payload, redirectTo: sanitizeOAuthRedirect(payload.redirectTo, config.allowedRedirectHosts) }
+}
+
+/**
+ * Whether the presented value matches the binding recorded at authorize time.
+ *
+ * A state created without a binding still verifies, so an app that has not
+ * adopted `bindTo` keeps working. A state created *with* one is useless to a
+ * browser that cannot present it, which is the whole point — so a missing or
+ * wrong value fails.
+ */
+function bindingMatches(
+  stored: string | undefined,
+  presented: string | undefined,
+  hashAlgorithm: 'sha256' | 'sha512',
+): boolean {
+  if (!stored) {
+    // The caller bound this flow, so a payload coming back without one means
+    // the store dropped the field rather than that the state was never bound.
+    // Verification cannot tell the two apart, so it stays permissive — but a
+    // store that silently discards the binding turns the protection off, and
+    // nothing else would say so.
+    if (presented) warnOnceAboutDroppedBinding()
+    return true
+  }
+  if (!presented) return false
+  // Both sides are hex digests, so this takes the hex-decoding comparator —
+  // the same one the API-token store uses for stored-hash checks.
+  return secureCompare(stored, hashToken(presented, hashAlgorithm))
 }
 
 // Fallback for stores without consume(): two concurrent callbacks can both

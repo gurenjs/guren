@@ -25,6 +25,9 @@ export const oauthStates = sqliteTable('oauth_states', {
   provider: text('provider').notNull(),
   redirectTo: text('redirect_to'),
   expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+  // Hash of the value tying a state to the browser that started the flow.
+  // Nullable: states minted before this column existed carry none.
+  binding: text('binding'),
 })
 
 export const posts = sqliteTable('posts', {

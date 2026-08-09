@@ -1,4 +1,4 @@
-import type { AuthUser, Policy as PolicyInterface, AuthorizationResponse } from './types'
+import type { AuthUser, Policy as PolicyInterface, AuthorizationResponse, PolicyResult } from './types'
 import { Response } from './Gate'
 
 /**
@@ -42,7 +42,7 @@ export abstract class Policy implements PolicyInterface {
    * Perform pre-authorization checks.
    * Return true to allow, false to deny, undefined to continue to specific check.
    */
-  before?(user: AuthUser | null, ability: string): boolean | undefined | Promise<boolean | undefined>
+  before?(user: AuthUser | null, ability: string): PolicyResult | undefined | Promise<PolicyResult | undefined>
 
   /**
    * Allow the action.
@@ -78,47 +78,47 @@ export abstract class Policy implements PolicyInterface {
  */
 export function definePolicy<T>(
   definition: {
-    before?: (user: AuthUser | null, ability: string) => boolean | undefined | Promise<boolean | undefined>
-    viewAny?: (user: AuthUser | null) => boolean | Promise<boolean>
-    view?: (user: AuthUser | null, model: T) => boolean | Promise<boolean>
-    create?: (user: AuthUser | null) => boolean | Promise<boolean>
-    update?: (user: AuthUser | null, model: T) => boolean | Promise<boolean>
-    delete?: (user: AuthUser | null, model: T) => boolean | Promise<boolean>
-    restore?: (user: AuthUser | null, model: T) => boolean | Promise<boolean>
-    forceDelete?: (user: AuthUser | null, model: T) => boolean | Promise<boolean>
+    before?: (user: AuthUser | null, ability: string) => PolicyResult | undefined | Promise<PolicyResult | undefined>
+    viewAny?: (user: AuthUser | null) => PolicyResult | Promise<PolicyResult>
+    view?: (user: AuthUser | null, model: T) => PolicyResult | Promise<PolicyResult>
+    create?: (user: AuthUser | null) => PolicyResult | Promise<PolicyResult>
+    update?: (user: AuthUser | null, model: T) => PolicyResult | Promise<PolicyResult>
+    delete?: (user: AuthUser | null, model: T) => PolicyResult | Promise<PolicyResult>
+    restore?: (user: AuthUser | null, model: T) => PolicyResult | Promise<PolicyResult>
+    forceDelete?: (user: AuthUser | null, model: T) => PolicyResult | Promise<PolicyResult>
   } & Record<
     string,
-    ((user: AuthUser | null, ...args: any[]) => boolean | undefined | Promise<boolean | undefined>) | undefined
+    ((user: AuthUser | null, ...args: any[]) => PolicyResult | undefined | Promise<PolicyResult | undefined>) | undefined
   >
 ): new () => Policy {
   return class extends Policy {
     before = definition.before
 
-    viewAny(user: AuthUser | null): boolean | Promise<boolean> {
+    viewAny(user: AuthUser | null): PolicyResult | Promise<PolicyResult> {
       return definition.viewAny?.(user) ?? false
     }
 
-    view(user: AuthUser | null, model: T): boolean | Promise<boolean> {
+    view(user: AuthUser | null, model: T): PolicyResult | Promise<PolicyResult> {
       return definition.view?.(user, model) ?? false
     }
 
-    create(user: AuthUser | null): boolean | Promise<boolean> {
+    create(user: AuthUser | null): PolicyResult | Promise<PolicyResult> {
       return definition.create?.(user) ?? false
     }
 
-    update(user: AuthUser | null, model: T): boolean | Promise<boolean> {
+    update(user: AuthUser | null, model: T): PolicyResult | Promise<PolicyResult> {
       return definition.update?.(user, model) ?? false
     }
 
-    delete(user: AuthUser | null, model: T): boolean | Promise<boolean> {
+    delete(user: AuthUser | null, model: T): PolicyResult | Promise<PolicyResult> {
       return definition.delete?.(user, model) ?? false
     }
 
-    restore(user: AuthUser | null, model: T): boolean | Promise<boolean> {
+    restore(user: AuthUser | null, model: T): PolicyResult | Promise<PolicyResult> {
       return definition.restore?.(user, model) ?? false
     }
 
-    forceDelete(user: AuthUser | null, model: T): boolean | Promise<boolean> {
+    forceDelete(user: AuthUser | null, model: T): PolicyResult | Promise<PolicyResult> {
       return definition.forceDelete?.(user, model) ?? false
     }
   } as unknown as new () => Policy

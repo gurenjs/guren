@@ -100,6 +100,7 @@ export {
   createOAuthState,
   verifyOAuthState,
   sanitizeOAuthRedirect,
+  OAUTH_SESSION_BINDING_KEY,
   buildOAuthAuthorizeUrl,
   exchangeOAuthCode,
   fetchOAuthUserProfile,
@@ -147,6 +148,7 @@ export type {
   OAuthCallbackPayload,
   OAuthManagerOptions,
   OAuthProviderFactoryInput,
+  OAuthBindingSession,
 } from './auth'
 export {
   defineMiddleware,

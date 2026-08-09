@@ -385,6 +385,128 @@ describe('Policy', () => {
 })
 
 // ===================
+// AuthorizationResponse Tests
+// ===================
+
+describe('Policy returning an AuthorizationResponse', () => {
+  class ResponsePolicy extends Policy {
+    update(user: TestUser | null, post: Post) {
+      return user?.id === post.authorId ? this.allow() : this.deny('You do not own this post.')
+    }
+
+    delete(user: TestUser | null, post: Post) {
+      return user?.id === post.authorId ? true : this.denyAsNotFound()
+    }
+
+    publish(user: TestUser | null, _post: Post) {
+      return user?.id === 1 ? true : this.denyWithStatus(402, 'Upgrade required.')
+    }
+  }
+
+  const post = new Post(1, 1)
+  let gate: Gate
+
+  beforeEach(() => {
+    gate = new Gate()
+    gate.policy(Post, ResponsePolicy)
+  })
+
+  test('treats a denial response as denied, not allowed', async () => {
+    const stranger = gate.forUser({ id: 2, role: 'user' } as TestUser)
+
+    expect(await stranger.allows('update', post)).toBe(false)
+    expect(await stranger.denies('update', post)).toBe(true)
+    expect(await stranger.any(['update'], post)).toBe(false)
+    expect(await stranger.all(['update'], post)).toBe(false)
+  })
+
+  test('treats an allow response as allowed', async () => {
+    const owner = gate.forUser({ id: 1, role: 'user' } as TestUser)
+
+    expect(await owner.allows('update', post)).toBe(true)
+    expect(await owner.denies('update', post)).toBe(false)
+  })
+
+  test('authorize throws for a denial response and keeps the message', async () => {
+    const stranger = gate.forUser({ id: 2, role: 'user' } as TestUser)
+
+    await expect(stranger.authorize('update', post)).rejects.toThrow('You do not own this post.')
+  })
+
+  test('authorize does not throw for an allow response', async () => {
+    const owner = gate.forUser({ id: 1, role: 'user' } as TestUser)
+
+    await expect(owner.authorize('update', post)).resolves.toBeUndefined()
+  })
+
+  test('inspect reports the denial with its message', async () => {
+    const stranger = gate.forUser({ id: 2, role: 'user' } as TestUser)
+    const response = await stranger.inspect('update', post)
+
+    expect(response.allowed).toBe(false)
+    expect(response.message).toBe('You do not own this post.')
+  })
+
+  test('propagates the response status to the thrown exception', async () => {
+    const stranger = gate.forUser({ id: 2, role: 'user' } as TestUser)
+
+    const notFound = await stranger.authorize('delete', post).catch((error: unknown) => error)
+    expect((notFound as { statusCode: number }).statusCode).toBe(404)
+
+    const paymentRequired = await stranger.authorize('publish', post).catch((error: unknown) => error)
+    expect((paymentRequired as { statusCode: number }).statusCode).toBe(402)
+    expect((paymentRequired as Error).message).toBe('Upgrade required.')
+  })
+
+  // `before` used to keep checking on anything that was not a boolean, so a
+  // denial object fell through and a permissive ability method then allowed it.
+  test('honours a denial response from a gate before callback', async () => {
+    gate.before(() => Response.deny('banned'))
+    gate.define('view', () => true)
+
+    const userGate = gate.forUser({ id: 2, role: 'user' } as TestUser)
+
+    expect(await userGate.allows('view')).toBe(false)
+    expect((await userGate.inspect('view')).message).toBe('banned')
+  })
+
+  test('honours a denial response from a policy before method', async () => {
+    class BeforePolicy extends Policy {
+      before() {
+        return this.deny('suspended')
+      }
+
+      update() {
+        return true
+      }
+    }
+
+    const policyGate = new Gate()
+    policyGate.policy(Post, BeforePolicy)
+
+    expect(await policyGate.forUser({ id: 1, role: 'user' } as TestUser).allows('update', post)).toBe(false)
+  })
+
+  test('still continues to the ability method when before returns undefined', async () => {
+    gate.before(() => undefined)
+    gate.define('view', () => true)
+
+    expect(await gate.forUser({ id: 2, role: 'user' } as TestUser).allows('view')).toBe(true)
+  })
+
+  test('reports the denial to after callbacks as a boolean', async () => {
+    const seen: unknown[] = []
+    gate.after((_user, _ability, result) => {
+      seen.push(result)
+    })
+
+    await gate.forUser({ id: 2, role: 'user' } as TestUser).allows('update', post)
+
+    expect(seen).toEqual([false])
+  })
+})
+
+// ===================
 // definePolicy Tests
 // ===================
 

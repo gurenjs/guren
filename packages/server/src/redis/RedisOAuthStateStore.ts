@@ -60,6 +60,8 @@ export class RedisOAuthStateStore implements OAuthStateStore {
       provider: payload.provider,
       redirectTo: payload.redirectTo,
       expiresAt: payload.expiresAt.toISOString(),
+      // Persisted, not derived: an unbound state verifies for any browser.
+      binding: payload.binding,
     })
 
     await this.redis.psetex(`${this.prefix}${stateHash}`, ttlMs, data)
@@ -101,11 +103,17 @@ export class RedisOAuthStateStore implements OAuthStateStore {
 
   private parsePayload(data: string): OAuthStatePayload | null {
     try {
-      const parsed = JSON.parse(data) as { provider: string; redirectTo?: string; expiresAt: string }
+      const parsed = JSON.parse(data) as {
+        provider: string
+        redirectTo?: string
+        expiresAt: string
+        binding?: string
+      }
       return {
         provider: parsed.provider,
         redirectTo: parsed.redirectTo,
         expiresAt: new Date(parsed.expiresAt),
+        binding: parsed.binding,
       }
     } catch {
       return null

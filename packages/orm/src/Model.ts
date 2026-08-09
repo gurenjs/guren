@@ -780,8 +780,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    * const users = await User.all()
    */
   static async all<T extends typeof Model>(this: T, queryOptions?: ModelQueryOptions): Promise<Array<TRecordFor<T>>> {
-    const hasGlobalScopes = this.globalScopeRegistry && this.globalScopeRegistry.size > 0
-    if (this.defaultScope || hasGlobalScopes) {
+    if (this.hasScopes()) {
       return this.newQuery(queryOptions).get()
     }
     const table = this.resolveTable()
@@ -809,7 +808,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     key: keyof TRecordFor<T> & string = 'id' as keyof TRecordFor<T> & string,
     queryOptions?: ModelQueryOptions,
   ): Promise<TRecordFor<T> | null> {
-    if (this.defaultScope || (this.globalScopeRegistry && this.globalScopeRegistry.size > 0)) {
+    if (this.hasScopes()) {
       return this.newQuery(queryOptions).where(key, id as TRecordFor<T>[typeof key]).first()
     }
     const table = this.resolveTable()
@@ -940,7 +939,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     where?: WhereClauseFor<T>,
     queryOptions?: ModelQueryOptions,
   ): Promise<TRecordFor<T> | null> {
-    if (this.defaultScope || (this.globalScopeRegistry && this.globalScopeRegistry.size > 0)) {
+    if (this.hasScopes()) {
       const builder = this.newQuery(queryOptions).limit(1)
       if (where) {
         builder.where(where as Partial<Record<string, unknown>>)
@@ -988,7 +987,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     operatorOrValue?: unknown,
     value?: unknown,
   ): QueryBuilder<TRecordFor<T>> {
-    const builder = new QueryBuilder<TRecordFor<T>>(this)
+    const builder = this.newQuery()
 
     if (typeof fieldOrConditions === 'object' && fieldOrConditions !== null) {
       return builder.where(fieldOrConditions as Partial<Record<keyof TRecordFor<T> & string, unknown>>)
@@ -1012,7 +1011,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     this: T,
     field: keyof TRecordFor<T> & string,
   ): QueryBuilder<TRecordFor<T>> {
-    return new QueryBuilder<TRecordFor<T>>(this).whereNull(field)
+    return this.newQuery().whereNull(field)
   }
 
   /**
@@ -1023,7 +1022,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     this: T,
     field: keyof TRecordFor<T> & string,
   ): QueryBuilder<TRecordFor<T>> {
-    return new QueryBuilder<TRecordFor<T>>(this).whereNotNull(field)
+    return this.newQuery().whereNotNull(field)
   }
 
   /**
@@ -1036,7 +1035,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     field: keyof TRecordFor<T> & string,
     values: readonly TRecordFor<T>[keyof TRecordFor<T> & string][],
   ): QueryBuilder<TRecordFor<T>> {
-    return new QueryBuilder<TRecordFor<T>>(this).whereIn(field, values)
+    return this.newQuery().whereIn(field, values)
   }
 
   /**
@@ -1049,7 +1048,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     field: keyof TRecordFor<T> & string,
     values: readonly TRecordFor<T>[keyof TRecordFor<T> & string][],
   ): QueryBuilder<TRecordFor<T>> {
-    return new QueryBuilder<TRecordFor<T>>(this).whereNotIn(field, values)
+    return this.newQuery().whereNotIn(field, values)
   }
 
   /**
@@ -1063,7 +1062,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     this: T,
     ...fields: readonly Keys[]
   ): QueryBuilder<TRecordFor<T>, Pick<TRecordFor<T>, Keys>> {
-    return new QueryBuilder<TRecordFor<T>>(this).select(...fields)
+    return this.newQuery().select(...fields)
   }
 
   /**
@@ -1102,6 +1101,17 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   /**
+   * Whether this model carries a filter that every query must apply.
+   *
+   * The entry points that talk to the adapter directly check this to decide
+   * whether they can take the fast path; anything that returns a QueryBuilder
+   * goes through `newQuery()` unconditionally.
+   */
+  protected static hasScopes(): boolean {
+    return Boolean(this.defaultScope) || Boolean(this.globalScopeRegistry && this.globalScopeRegistry.size > 0)
+  }
+
+  /**
    * Apply a named query scope.
    *
    * @param name - The scope name defined in `static scopes`
@@ -1116,7 +1126,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     if (!scopes || typeof scopes[name] !== 'function') {
       throw new Error(`${this.name}: unknown scope "${name}".`)
     }
-    const builder = new QueryBuilder<TRecordFor<T>>(this)
+    const builder = this.newQuery()
     return scopes[name](builder) as QueryBuilder<TRecordFor<T>>
   }
 
@@ -1420,8 +1430,20 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     where?: WhereClauseFor<T>,
     queryOptions?: ModelQueryOptions,
   ): Promise<TRecordFor<T>[]> {
-    const table = this.resolveTable()
     const orderBy = normalizeOrderBy(order)
+
+    if (this.hasScopes()) {
+      const builder = this.newQuery(queryOptions)
+      if (where && Object.keys(where).length > 0) {
+        builder.where(where as Partial<Record<string, unknown>>)
+      }
+      for (const clause of orderBy) {
+        builder.orderBy(clause.column as keyof TRecordFor<T> & string, clause.direction)
+      }
+      return builder.get()
+    }
+
+    const table = this.resolveTable()
     const options: FindManyOptions<TRecordFor<T>> = { orderBy }
 
     if (where && Object.keys(where).length > 0) {
@@ -1456,6 +1478,21 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     options: PaginateOptions<TRecordFor<T>> = {},
     queryOptions?: ModelQueryOptions,
   ): Promise<PaginatedResult<TRecordFor<T>>> {
+    // The count matters as much as the rows: an unscoped `meta.total` reports
+    // how many records the filter was meant to hide.
+    if (this.hasScopes()) {
+      const builder = this.newQuery(queryOptions)
+      if (options.where && Object.keys(options.where).length > 0) {
+        builder.where(options.where as Partial<Record<string, unknown>>)
+      }
+      if (options.orderBy) {
+        for (const clause of normalizeOrderBy(options.orderBy)) {
+          builder.orderBy(clause.column as keyof TRecordFor<T> & string, clause.direction)
+        }
+      }
+      return builder.paginate({ page: options.page, perPage: options.perPage })
+    }
+
     const table = this.resolveTable()
     const adapter = this.getAdapter()
 

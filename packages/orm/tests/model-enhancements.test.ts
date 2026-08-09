@@ -509,3 +509,160 @@ describe('Phase 5: Global Scopes', () => {
     User.defaultScope = undefined
   })
 })
+
+// =============================================================================
+// Global scopes on every query entry point
+// =============================================================================
+
+describe('global scopes apply on every query entry point', () => {
+  // The docs recommend global scopes for multi-tenancy ("any filter that should
+  // always be active"), so an entry point that drops the scope is a tenant
+  // isolation hole, not just a missing filter.
+  function tenantScopedUser() {
+    class User extends Model<UserRecord> {
+      static table = 'users'
+      static scopes = {
+        named: (q: any) => q.where('active', true),
+      }
+    }
+
+    User.useAdapter(createAdapter([
+      { id: 1, name: 'Ours', tenantId: 1, active: true, deletedAt: null },
+      { id: 2, name: 'Theirs', tenantId: 2, active: true, deletedAt: null },
+      { id: 3, name: 'Theirs too', tenantId: 2, active: false, deletedAt: null },
+    ]))
+    User.addGlobalScope('tenant', (q) => q.where('tenantId', 1))
+
+    return User
+  }
+
+  function names(records: PlainObject[]): string[] {
+    return records.map((record) => String(record.name))
+  }
+
+  it('applies the scope to where()', async () => {
+    const User = tenantScopedUser()
+    expect(names(await User.where('active', true).get())).toEqual(['Ours'])
+    expect(names(await User.where({ active: true }).get())).toEqual(['Ours'])
+  })
+
+  // A flat where-object holds one value per field, so a caller's condition on
+  // the scoped column used to overwrite the scope's — handing them another
+  // tenant's rows through the very filter meant to stop that.
+  it('refuses when a condition would overwrite the scope on the same field', async () => {
+    const User = tenantScopedUser()
+
+    expect(User.where('tenantId', 2).get()).rejects.toThrow('return unfiltered rows')
+  })
+
+  it('still collapses a condition that repeats the scope value', async () => {
+    const User = tenantScopedUser()
+
+    expect(names(await User.where('tenantId', 1).get())).toEqual(['Ours'])
+  })
+
+  it('applies the scope to whereIn()', async () => {
+    const User = tenantScopedUser()
+    expect(names(await User.whereIn('id', [1, 2, 3]).get())).toEqual(['Ours'])
+  })
+
+  it('applies the scope to whereNull()', async () => {
+    const User = tenantScopedUser()
+    expect(names(await User.whereNull('deletedAt').get())).toEqual(['Ours'])
+  })
+
+  // `not in` / `is not null` have no simple-where representation. On a basic
+  // adapter the builder used to fall back to `where: undefined`, dropping the
+  // tenant scope along with the condition and returning every row. Refusing is
+  // the only safe answer; the shipped Drizzle adapter implements
+  // findManyAdvanced and never reaches this path.
+  it('refuses rather than dropping conditions a basic adapter cannot express', async () => {
+    const User = tenantScopedUser()
+
+    expect(User.whereNotIn('id', [99]).get()).rejects.toThrow('return unfiltered rows')
+    expect(User.whereNotNull('name').get()).rejects.toThrow('return unfiltered rows')
+  })
+
+  it('applies the scope to select()', async () => {
+    const User = tenantScopedUser()
+    expect(await User.select('id', 'name').get()).toHaveLength(1)
+  })
+
+  it('applies the scope to a named scope()', async () => {
+    const User = tenantScopedUser()
+    expect(names(await User.scope('named').get())).toEqual(['Ours'])
+  })
+
+  it('applies the scope to orderBy()', async () => {
+    const User = tenantScopedUser()
+    expect(names(await User.orderBy('id'))).toEqual(['Ours'])
+  })
+
+  it('applies the scope to paginate(), including the count', async () => {
+    const User = tenantScopedUser()
+    const result = await User.paginate({ page: 1, perPage: 10 })
+
+    expect(names(result.data)).toEqual(['Ours'])
+    // An unscoped count leaks how many rows the other tenants hold.
+    expect(result.meta.total).toBe(1)
+  })
+
+  it('still lets withoutGlobalScopes() opt out', async () => {
+    const User = tenantScopedUser()
+    expect(await User.withoutGlobalScopes().get()).toHaveLength(3)
+    expect(await User.withoutGlobalScope('tenant').get()).toHaveLength(3)
+  })
+
+  it("applies the related model's scope when eager loading", async () => {
+    type PostRecord = { id: number; title: string; authorId: number; deletedAt?: string | null }
+
+    class User extends Model<UserRecord> {
+      static table = 'users'
+    }
+
+    class Post extends Model<PostRecord> {
+      static table = 'posts'
+    }
+
+    const stores = {
+      users: [{ id: 1, name: 'Alice' }] as UserRecord[],
+      posts: [
+        { id: 10, title: 'Live', authorId: 1, deletedAt: null },
+        { id: 11, title: 'Retracted', authorId: 1, deletedAt: '2026-01-01' },
+      ] as PostRecord[],
+    }
+
+    const adapter: ORMAdapter = {
+      async findMany<T extends PlainObject>(table: unknown, options?: FindManyOptions<T>): Promise<T[]> {
+        const store = (table === 'users' ? stores.users : stores.posts) as PlainObject[]
+        const { where } = options ?? {}
+        const results = where
+          ? store.filter((r) =>
+              Object.entries(where as PlainObject).every(([k, v]) => {
+                if (Array.isArray(v)) return v.includes(r[k])
+                if (v === null) return r[k] == null
+                return r[k] === v
+              }),
+            )
+          : [...store]
+        return results.map((r) => ({ ...r })) as unknown as T[]
+      },
+      async findUnique(): Promise<null> { return null },
+      async create<T extends PlainObject>(): Promise<T> { throw new Error('unused') },
+      async update<T extends PlainObject>(): Promise<T> { throw new Error('unused') },
+      async delete(): Promise<number> { return 0 },
+    }
+
+    User.useAdapter(adapter)
+    Post.useAdapter(adapter)
+    User.hasMany('posts', Post, 'authorId', 'id')
+    Post.addGlobalScope('notRetracted', (q) => q.whereNull('deletedAt'))
+
+    const [user] = await User.with('posts')
+    const posts = (user as unknown as { posts: PostRecord[] }).posts
+
+    expect(posts.map((post) => post.title)).toEqual(['Live'])
+
+    Post.removeGlobalScope('notRetracted')
+  })
+})
