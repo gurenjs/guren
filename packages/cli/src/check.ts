@@ -248,10 +248,16 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   }
 
   // 10.5. Translation catalog checks (lang/<locale>/*.json). Content-
-  // activated like docs: apps without lang/ contribute zero results.
+  // activated like docs: apps without lang/ contribute zero results. Parity
+  // is inherently whole-catalog, so --changed gates the suite as a unit:
+  // skip when no lang/ file changed, run fully otherwise.
   if (runs('i18n')) {
-    const i18nResults = await runI18nCheck({ cwd })
-    checks.push(...i18nResults)
+    const langChanged =
+      !changedFiles || [...changedFiles].some((file) => file === 'lang' || file.startsWith('lang/'))
+    if (langChanged) {
+      const i18nResults = await runI18nCheck({ cwd })
+      checks.push(...i18nResults)
+    }
   }
 
   // 11. Check architecture boundaries (guren.arch.ts + derived module rules)

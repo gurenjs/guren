@@ -15,17 +15,20 @@
  * companion that reports keys missing from individual locales.
  */
 import { readdir, readFile } from 'node:fs/promises'
-import { dirname, extname, relative, resolve } from 'node:path'
-import { resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
+import { extname, relative, resolve } from 'node:path'
+import { escapeSingleQuoted, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 
 export interface GenerateTranslationTypesOptions extends WriterOptions {
   appRoot?: string
-  /** Translation directory (defaults to `lang`). */
-  langDir?: string
-  outputFile?: string
 }
 
-const DEFAULT_LANG_DIR = 'lang'
+/**
+ * The conventional translation directory all framework tooling assumes
+ * (codegen, `check --i18n`, the Vite watch). Apps relocating catalogs via
+ * `createApp({ i18n: { path } })` opt out of that tooling.
+ */
+export const DEFAULT_LANG_DIR = 'lang'
+
 const DEFAULT_OUTPUT_FILE = '.guren/translations.gen.ts'
 
 export interface TranslationCatalog {
@@ -107,8 +110,7 @@ export async function generateTranslationTypes(
   options: GenerateTranslationTypesOptions = {},
 ): Promise<{ outputPath: string | null; keyCount: number }> {
   const appRoot = resolveAppRoot(options)
-  const langDir = options.langDir ?? DEFAULT_LANG_DIR
-  const catalogs = await readTranslationCatalogs(appRoot, langDir)
+  const catalogs = await readTranslationCatalogs(appRoot)
 
   // No lang/ directory (or no locale subdirectories): the app does not use
   // file-based translations — emit nothing so keys stay `string`.
@@ -118,9 +120,9 @@ export async function generateTranslationTypes(
 
   const keys = Array.from(new Set(catalogs.flatMap((catalog) => [...catalog.entries.keys()]))).sort()
 
-  const outputFile = resolve(appRoot, options.outputFile ?? DEFAULT_OUTPUT_FILE)
+  const outputFile = resolve(appRoot, DEFAULT_OUTPUT_FILE)
   const content = buildTranslationTypesContent(keys, {
-    source: relative(appRoot, resolve(appRoot, langDir)) || langDir,
+    source: DEFAULT_LANG_DIR,
     locales: catalogs.map((catalog) => catalog.locale),
   })
 
@@ -137,7 +139,7 @@ export function buildTranslationTypesContent(
 ): string {
   const union =
     keys.length > 0
-      ? keys.map((key) => `  | '${key.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`).join('\n')
+      ? keys.map((key) => `  | '${escapeSingleQuoted(key)}'`).join('\n')
       : '  | never'
 
   return `// Generated from ${context.source}/ (locales: ${context.locales.join(', ')}) — DO NOT EDIT

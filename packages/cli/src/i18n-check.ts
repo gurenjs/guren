@@ -20,18 +20,16 @@
  * heuristic.
  */
 import { formatTruncatedList } from './discovery'
-import { readTranslationCatalogs, type TranslationCatalog } from './i18n-types'
+import { DEFAULT_LANG_DIR, readTranslationCatalogs, type TranslationCatalog } from './i18n-types'
 import { check, type CheckResult } from './check-result'
 
 export interface RunI18nCheckOptions {
   cwd: string
-  /** Translation directory (defaults to `lang`). */
-  langDir?: string
 }
 
 export async function runI18nCheck(options: RunI18nCheckOptions): Promise<CheckResult[]> {
-  const langDir = options.langDir ?? 'lang'
-  const catalogs = await readTranslationCatalogs(options.cwd, langDir)
+  const langDir = DEFAULT_LANG_DIR
+  const catalogs = await readTranslationCatalogs(options.cwd)
   if (catalogs.length === 0) {
     return []
   }
@@ -43,7 +41,7 @@ export async function runI18nCheck(options: RunI18nCheckOptions): Promise<CheckR
       results.push(
         check(
           `i18n-json:${file}`,
-          `${file}`,
+          file,
           'fail',
           `${file} is not valid JSON — the loader skips it, so all of its keys silently fall back at runtime.`,
           'Fix the JSON syntax, then rerun `guren codegen`.',
@@ -57,6 +55,7 @@ export async function runI18nCheck(options: RunI18nCheckOptions): Promise<CheckR
 
   for (const catalog of catalogs) {
     const missing = [...allKeys].filter((key) => !catalog.entries.has(key)).sort()
+
     results.push(
       check(
         `i18n-parity:${catalog.locale}`,
@@ -72,7 +71,7 @@ export async function runI18nCheck(options: RunI18nCheckOptions): Promise<CheckR
     )
   }
 
-  results.push(...checkPlaceholderParity(catalogs, langDir))
+  results.push(...checkPlaceholderParity(catalogs, allKeys, langDir))
 
   return results
 }
@@ -93,9 +92,12 @@ export function extractPlaceholders(message: string): Set<string> {
   return placeholders
 }
 
-function checkPlaceholderParity(catalogs: TranslationCatalog[], langDir: string): CheckResult[] {
+function checkPlaceholderParity(
+  catalogs: TranslationCatalog[],
+  allKeys: Set<string>,
+  langDir: string,
+): CheckResult[] {
   const results: CheckResult[] = []
-  const allKeys = new Set(catalogs.flatMap((catalog) => [...catalog.entries.keys()]))
 
   for (const key of [...allKeys].sort()) {
     const holders = catalogs

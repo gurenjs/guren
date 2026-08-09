@@ -187,7 +187,10 @@ export class Translator {
     for (const [key, value] of Object.entries(replacements)) {
       // Support both :key and {key} formats. The key is escaped so regex
       // metacharacters match literally, and the value goes through a
-      // callback so `$` sequences in it are not expanded.
+      // callback so `$` sequences in it are not expanded. This grammar is
+      // also encoded in @guren/inertia-client's applyReplacements (parity-
+      // tested) and the CLI's extractPlaceholders (guren check --i18n) —
+      // keep the three in sync.
       const escaped = key.replace(REGEXP_SPECIALS, '\\$&')
       const replacement = (): string => String(value)
       result = result

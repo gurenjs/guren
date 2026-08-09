@@ -181,6 +181,10 @@ export interface I18nPluginOptions {
    * Directory containing `<path>/<locale>/*.json` translation files, loaded
    * with {@link JsonLoader}. Defaults to `'lang'`. Ignored when `loader` is
    * set.
+   *
+   * Framework tooling (typed keys from `guren codegen`, `guren check
+   * --i18n`, the Vite watch) assumes the default `lang/` location — a
+   * custom path or loader opts out of those.
    */
   readonly path?: string
   /**
