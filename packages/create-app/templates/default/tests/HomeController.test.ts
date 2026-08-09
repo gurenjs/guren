@@ -13,7 +13,11 @@ describe('app', () => {
   })
 
   it('serves the home page', async () => {
-    await http.get('/').assertOk()
+    const response = await http.get('/')
+    response.assertOk()
+    // The message comes from lang/en/messages.json via this.t() — this
+    // catches a broken catalog or interpolation, not just a 200.
+    await response.assertBodyContains('Welcome to')
   })
 
   it('answers the health check', async () => {

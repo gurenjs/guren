@@ -1,5 +1,5 @@
 import type { Hono } from 'hono'
-import type { Router } from '@guren/server'
+import type { I18nPluginOptions, Router } from '@guren/server'
 import { TestResponse } from './http'
 
 type BootCallback = (app: Hono) => void | Promise<void>
@@ -15,7 +15,7 @@ type ApplicationConstructor = new (options: {
   providers?: ProviderConstructor[]
   routes?: RouteRegistration
   auth?: Record<string, unknown>
-  i18n?: Record<string, unknown>
+  i18n?: I18nPluginOptions
 }) => ApplicationLike
 
 /**
@@ -39,7 +39,7 @@ export interface TestAppOptions {
    * `TestApp.fromFetch((request) => app.fetch(request))` so tests share its
    * full configuration.
    */
-  readonly i18n?: Record<string, unknown>
+  readonly i18n?: I18nPluginOptions
 }
 
 /**
