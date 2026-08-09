@@ -14,7 +14,7 @@
  * which locale the app configured as fallback); `guren check --i18n` is the
  * companion that reports keys missing from individual locales.
  */
-import { readdir, readFile } from 'node:fs/promises'
+import { readdir, readFile, rm } from 'node:fs/promises'
 import { extname, relative, resolve } from 'node:path'
 import { escapeSingleQuoted, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 
@@ -37,6 +37,13 @@ export interface TranslationCatalog {
   entries: Map<string, string>
   /** Files that failed to parse, relative to the app root. */
   invalidFiles: string[]
+  /**
+   * Keys the runtime can never resolve: a JSON property name or catalog
+   * file name contains a literal dot, which the Translator always treats as
+   * a path separator. Excluded from `entries` (and thus the generated key
+   * union) and reported by `guren check --i18n`.
+   */
+  unreachableKeys: string[]
 }
 
 /**
@@ -62,8 +69,12 @@ export async function readTranslationCatalogs(
     if (!entry.isDirectory()) continue
     const locale = entry.name
     const localePath = resolve(base, locale)
-    const entries = new Map<string, string>()
-    const invalidFiles: string[] = []
+    const catalog: TranslationCatalog = {
+      locale,
+      entries: new Map(),
+      invalidFiles: [],
+      unreachableKeys: [],
+    }
 
     let files: string[]
     try {
@@ -81,27 +92,38 @@ export async function readTranslationCatalogs(
       try {
         parsed = JSON.parse(await readFile(filePath, 'utf-8'))
       } catch {
-        invalidFiles.push(relative(appRoot, filePath))
+        catalog.invalidFiles.push(relative(appRoot, filePath))
         continue
       }
 
-      collectEntries(parsed, namespace, entries)
+      collectEntries(parsed, namespace, catalog, namespace.includes('.'))
     }
 
-    catalogs.push({ locale, entries, invalidFiles })
+    catalogs.push(catalog)
   }
 
   return catalogs.sort((a, b) => a.locale.localeCompare(b.locale))
 }
 
-function collectEntries(value: unknown, prefix: string, entries: Map<string, string>): void {
+function collectEntries(
+  value: unknown,
+  prefix: string,
+  catalog: TranslationCatalog,
+  unreachable: boolean,
+): void {
   if (typeof value === 'string') {
-    entries.set(prefix, value)
+    if (unreachable) {
+      catalog.unreachableKeys.push(prefix)
+    } else {
+      catalog.entries.set(prefix, value)
+    }
     return
   }
-  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+  // Arrays index like objects at runtime (`items.0`), so Object.entries
+  // covers both.
+  if (value !== null && typeof value === 'object') {
     for (const [child, childValue] of Object.entries(value)) {
-      collectEntries(childValue, `${prefix}.${child}`, entries)
+      collectEntries(childValue, `${prefix}.${child}`, catalog, unreachable || child.includes('.'))
     }
   }
 }
@@ -111,19 +133,24 @@ export async function generateTranslationTypes(
 ): Promise<{ outputPath: string | null; keyCount: number }> {
   const appRoot = resolveAppRoot(options)
   const catalogs = await readTranslationCatalogs(appRoot)
+  const outputFile = resolve(appRoot, DEFAULT_OUTPUT_FILE)
 
   // No lang/ directory (or no locale subdirectories): the app does not use
-  // file-based translations — emit nothing so keys stay `string`.
+  // file-based translations. Remove a previously generated file so its
+  // stale augmentation stops applying and keys return to plain strings.
   if (catalogs.length === 0) {
+    await rm(outputFile, { force: true })
     return { outputPath: null, keyCount: 0 }
   }
 
   const keys = Array.from(new Set(catalogs.flatMap((catalog) => [...catalog.entries.keys()]))).sort()
 
-  const outputFile = resolve(appRoot, DEFAULT_OUTPUT_FILE)
   const content = buildTranslationTypesContent(keys, {
-    source: DEFAULT_LANG_DIR,
     locales: catalogs.map((catalog) => catalog.locale),
+    // The client augmentation must only be emitted when the module is
+    // resolvable: TypeScript rejects augmenting an uninstalled module
+    // (TS2664), which would break API-only apps.
+    augmentInertiaClient: await appUsesInertiaClient(appRoot),
   })
 
   const outputPath = await writeGeneratedFileIn(appRoot, outputFile, content, {
@@ -133,16 +160,46 @@ export async function generateTranslationTypes(
   return { outputPath, keyCount: keys.length }
 }
 
+async function appUsesInertiaClient(appRoot: string): Promise<boolean> {
+  try {
+    const packageJson = JSON.parse(await readFile(resolve(appRoot, 'package.json'), 'utf-8')) as {
+      dependencies?: Record<string, string>
+      devDependencies?: Record<string, string>
+    }
+    return Boolean(
+      packageJson.dependencies?.['@guren/inertia-client'] ??
+      packageJson.devDependencies?.['@guren/inertia-client'],
+    )
+  } catch {
+    return false
+  }
+}
+
+/** Keep interpolated names from breaking out of the generated header comment. */
+function sanitizeForComment(value: string): string {
+  return value.replace(/[\r\n\u2028\u2029]/gu, ' ')
+}
+
 export function buildTranslationTypesContent(
   keys: string[],
-  context: { source: string; locales: string[] },
+  context: { locales: string[]; augmentInertiaClient: boolean },
 ): string {
   const union =
     keys.length > 0
       ? keys.map((key) => `  | '${escapeSingleQuoted(key)}'`).join('\n')
       : '  | never'
 
-  return `// Generated from ${context.source}/ (locales: ${context.locales.join(', ')}) — DO NOT EDIT
+  const clientAugmentation = context.augmentInertiaClient
+    ? `
+
+declare module '@guren/inertia-client' {
+  interface GurenTranslationKeys {
+    keys: TranslationKey
+  }
+}`
+    : ''
+
+  return `// Generated from ${DEFAULT_LANG_DIR}/ (locales: ${sanitizeForComment(context.locales.join(', '))}) — DO NOT EDIT
 // Run \`guren codegen\` to regenerate.
 
 /**
@@ -160,12 +217,6 @@ declare module '@guren/core' {
   interface GurenTranslationKeys {
     keys: TranslationKey
   }
-}
-
-declare module '@guren/inertia-client' {
-  interface GurenTranslationKeys {
-    keys: TranslationKey
-  }
-}
+}${clientAugmentation}
 `
 }

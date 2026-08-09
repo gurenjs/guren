@@ -293,7 +293,13 @@ export function trimSlashes(value: string): string {
  * fixes land once.
  */
 export function escapeSingleQuoted(value: string): string {
-  return value.replace(/\\/gu, '\\\\').replace(/'/gu, "\\'")
+  return value
+    .replace(/\\/gu, '\\\\')
+    .replace(/'/gu, "\\'")
+    .replace(/\n/gu, '\\n')
+    .replace(/\r/gu, '\\r')
+    .replace(/\u2028/gu, '\\u2028')
+    .replace(/\u2029/gu, '\\u2029')
 }
 
 /**

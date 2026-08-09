@@ -1,5 +1,6 @@
 import { describe, test, expect, afterEach } from 'bun:test'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
+// (rm is reused by the stale-file test)
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { writeWorkspaceFiles } from './helpers'
@@ -49,9 +50,15 @@ describe('readTranslationCatalogs', () => {
   })
 })
 
+const INERTIA_PACKAGE_JSON = JSON.stringify({
+  name: 'app',
+  dependencies: { '@guren/inertia-client': '^2.0.0' },
+})
+
 describe('generateTranslationTypes', () => {
   test('emits a sorted key union covering every locale plus both augmentations', async () => {
     const dir = await makeApp({
+      'package.json': INERTIA_PACKAGE_JSON,
       'lang/en/nav.json': EN_NAV,
       'lang/ja/nav.json': JSON.stringify({ posts: '記事一覧', jaOnly: 'のみ' }),
     })
@@ -67,11 +74,65 @@ describe('generateTranslationTypes', () => {
     expect(content).toContain('interface GurenTranslationKeys')
   })
 
+  test('omits the client augmentation when @guren/inertia-client is not a dependency', async () => {
+    const dir = await makeApp({
+      'package.json': JSON.stringify({ name: 'api-app', dependencies: { '@guren/core': '^2.0.0' } }),
+      'lang/en/nav.json': EN_NAV,
+    })
+
+    const { outputPath } = await generateTranslationTypes({ appRoot: dir })
+    const content = await readFile(outputPath!, 'utf-8')
+    expect(content).toContain("declare module '@guren/core'")
+    expect(content).not.toContain('@guren/inertia-client')
+  })
+
   test('emits nothing without a lang/ directory', async () => {
     const dir = await makeApp({})
     const { outputPath, keyCount } = await generateTranslationTypes({ appRoot: dir })
     expect(outputPath).toBeNull()
     expect(keyCount).toBe(0)
+  })
+
+  test('removes a stale generated file once lang/ disappears', async () => {
+    const dir = await makeApp({
+      'package.json': INERTIA_PACKAGE_JSON,
+      'lang/en/nav.json': EN_NAV,
+    })
+
+    const { outputPath } = await generateTranslationTypes({ appRoot: dir })
+    expect(outputPath).not.toBeNull()
+
+    await rm(join(dir, 'lang'), { recursive: true })
+    const rerun = await generateTranslationTypes({ appRoot: dir })
+    expect(rerun.outputPath).toBeNull()
+    await expect(readFile(join(dir, '.guren/translations.gen.ts'), 'utf-8')).rejects.toThrow()
+  })
+
+  test('collects array entries as index keys, matching runtime lookup', async () => {
+    const dir = await makeApp({
+      'package.json': INERTIA_PACKAGE_JSON,
+      'lang/en/messages.json': JSON.stringify({ steps: ['First', 'Second'] }),
+    })
+
+    const { outputPath } = await generateTranslationTypes({ appRoot: dir })
+    const content = await readFile(outputPath!, 'utf-8')
+    expect(content).toContain("'messages.steps.0'")
+    expect(content).toContain("'messages.steps.1'")
+  })
+
+  test('excludes runtime-unreachable dotted keys from the union', async () => {
+    const dir = await makeApp({
+      'package.json': INERTIA_PACKAGE_JSON,
+      'lang/en/messages.json': JSON.stringify({ 'a.b': 'literal dot', ok: 'fine' }),
+      'lang/en/dotted.name.json': JSON.stringify({ key: 'unreachable namespace' }),
+    })
+
+    const { outputPath, keyCount } = await generateTranslationTypes({ appRoot: dir })
+    const content = await readFile(outputPath!, 'utf-8')
+    expect(keyCount).toBe(1)
+    expect(content).toContain("'messages.ok'")
+    expect(content).not.toContain('a.b')
+    expect(content).not.toContain('dotted')
   })
 })
 
@@ -140,6 +201,42 @@ describe('runI18nCheck', () => {
 
     const results = await runI18nCheck({ cwd: dir })
     expect(results.find((result) => result.key.startsWith('i18n-placeholders:'))).toBeUndefined()
+  })
+
+  test('fails runtime-unreachable dotted keys', async () => {
+    const dir = await makeApp({
+      'lang/en/messages.json': JSON.stringify({ 'a.b': 'dot', ok: 'fine' }),
+      'lang/ja/messages.json': JSON.stringify({ ok: '大丈夫' }),
+    })
+
+    const results = await runI18nCheck({ cwd: dir })
+    const unreachable = results.find((result) => result.key === 'i18n-unreachable:messages.a.b')
+    expect(unreachable?.status).toBe('fail')
+    expect(unreachable?.message).toContain('en')
+  })
+
+  test('warns when locale directories hold no resolvable keys', async () => {
+    const dir = await makeApp({
+      'lang/en/messages.json': JSON.stringify({}),
+      'lang/ja/messages.json': JSON.stringify({}),
+    })
+
+    const results = await runI18nCheck({ cwd: dir })
+    expect(results).toHaveLength(1)
+    expect(results[0]!.key).toBe('i18n-empty')
+    expect(results[0]!.status).toBe('warn')
+  })
+
+  test('compares unicode and dashed placeholders across locales', async () => {
+    const dir = await makeApp({
+      'lang/en/messages.json': JSON.stringify({ hello: 'Hi {user-name}, {名前}' }),
+      'lang/ja/messages.json': JSON.stringify({ hello: '{user-name}さん' }),
+    })
+
+    const results = await runI18nCheck({ cwd: dir })
+    const mismatch = results.find((result) => result.key === 'i18n-placeholders:messages.hello')
+    expect(mismatch?.status).toBe('warn')
+    expect(mismatch?.message).toContain('ja lacks :名前')
   })
 })
 

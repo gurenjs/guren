@@ -15,6 +15,6 @@
       "@/*": ["./*"]
     }
   },
-  "include": ["src/**/*", "app/**/*", "routes/**/*", "config/**/*", "db/**/*", "bin/**/*"],
+  "include": [".guren/**/*", "src/**/*", "app/**/*", "routes/**/*", "config/**/*", "db/**/*", "bin/**/*"],
   "exclude": ["node_modules"]
 }

@@ -51,7 +51,42 @@ export async function runI18nCheck(options: RunI18nCheckOptions): Promise<CheckR
     }
   }
 
+  // Keys with a literal dot in a JSON property or file name can never be
+  // resolved by t()/tc() — dots are always path separators at runtime.
+  const unreachable = new Map<string, string[]>()
+  for (const catalog of catalogs) {
+    for (const key of catalog.unreachableKeys) {
+      const locales = unreachable.get(key) ?? []
+      locales.push(catalog.locale)
+      unreachable.set(key, locales)
+    }
+  }
+  for (const [key, locales] of [...unreachable.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    results.push(
+      check(
+        `i18n-unreachable:${key}`,
+        `${key} reachability`,
+        'fail',
+        `'${key}' contains a literal dot in a JSON property or file name (${locales.join(', ')}) — dots are path separators, so t() can never resolve it.`,
+        'Nest objects instead of dotted property names, and keep dots out of catalog file names.',
+      ),
+    )
+  }
+
   const allKeys = new Set(catalogs.flatMap((catalog) => [...catalog.entries.keys()]))
+
+  if (allKeys.size === 0) {
+    results.push(
+      check(
+        'i18n-empty',
+        `${langDir}/ catalogs`,
+        'warn',
+        `${langDir}/ has locale directories but no resolvable translation keys.`,
+        `Add <namespace>.json files with string values under ${langDir}/<locale>/.`,
+      ),
+    )
+    return results
+  }
 
   for (const catalog of catalogs) {
     const missing = [...allKeys].filter((key) => !catalog.entries.has(key)).sort()
@@ -77,16 +112,22 @@ export async function runI18nCheck(options: RunI18nCheckOptions): Promise<CheckR
 }
 
 /**
- * Placeholders a message interpolates: `:name` and `{name}` forms. Requires
- * an identifier-style leading character so times (`9:00`) and ratios don't
- * read as placeholders.
+ * Placeholders a message interpolates: `:name` and `{name}` forms. The
+ * runtime accepts any replacement key, so this is deliberately narrower.
+ * The colon form matches ASCII identifiers only — it has no closing
+ * delimiter, so a wider class would swallow adjoining CJK text
+ * (`:count個` must read as `count`), and times (`9:00`) must not read as
+ * placeholders at all. The brace form is delimited and therefore accepts
+ * Unicode names, dots, and dashes (`{名前}`, `{user.name}`). Grammar
+ * shared with Translator.applyReplacements (server) and the client
+ * mirror; keep in sync.
  */
 export function extractPlaceholders(message: string): Set<string> {
   const placeholders = new Set<string>()
-  for (const match of message.matchAll(/:([A-Za-z_][A-Za-z0-9_]*)/g)) {
+  for (const match of message.matchAll(/:([A-Za-z_][A-Za-z0-9_-]*)/g)) {
     placeholders.add(match[1]!)
   }
-  for (const match of message.matchAll(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g)) {
+  for (const match of message.matchAll(/\{([\p{L}_][\p{L}\p{N}_.-]*)\}/gu)) {
     placeholders.add(match[1]!)
   }
   return placeholders
