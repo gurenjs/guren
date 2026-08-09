@@ -19,10 +19,39 @@ import { dirname, join, resolve } from 'node:path'
 const repoRoot = resolve(import.meta.dir, '../..')
 
 // `bunx guren`, `bunx --bun guren`, `bun x guren`, `npx guren`, `pnpm dlx
-// guren`, `guren@…` — the registry-resolving spellings of the CLI. The
-// trailing lookahead keeps distinct packages (`guren-cli`, `guren/foo`) out.
-const REGISTRY_GUREN =
-  /\b(?:bunx|bun\s+x|npx|npm\s+exec|pnpm\s+(?:dlx|exec)|yarn\s+(?:dlx|exec))\s+(?:--?\S+\s+)*guren(?=\s|$|@)/
+// guren`, `guren@…` — the registry-resolving spellings of the CLI, as token
+// sequences rather than a regex: a run of `--flag`/`-f` tokens between the
+// runner and `guren` is unbounded and package-manager flags are unbounded
+// too, and a regex expressing "skip N flag tokens" backtracks exponentially
+// on pathological input (CodeQL flagged exactly this). A token scan is
+// linear by construction.
+const RUNNER_TOKEN_SEQUENCES: readonly (readonly string[])[] = [
+  ['bunx'],
+  ['bun', 'x'],
+  ['npx'],
+  ['npm', 'exec'],
+  ['pnpm', 'dlx'],
+  ['pnpm', 'exec'],
+  ['yarn', 'dlx'],
+  ['yarn', 'exec'],
+]
+
+function isGurenTarget(token: string): boolean {
+  return token === 'guren' || token.startsWith('guren@')
+}
+
+function invokesRegistryGuren(command: string): boolean {
+  const tokens = command.split(/\s+/).filter(Boolean)
+  for (let i = 0; i < tokens.length; i++) {
+    for (const sequence of RUNNER_TOKEN_SEQUENCES) {
+      if (!sequence.every((expected, offset) => tokens[i + offset] === expected)) continue
+      let next = i + sequence.length
+      while (next < tokens.length && tokens[next].startsWith('-')) next++
+      if (next < tokens.length && isGurenTarget(tokens[next])) return true
+    }
+  }
+  return false
+}
 
 // The sanctioned replacement, when spelled dot-relative. Cwd-shifting forms
 // (`cd .. && bun packages/cli/src/bin.ts …`) can't be resolved statically and
@@ -43,7 +72,7 @@ interface Violation {
 function collectViolations(manifestPath: string, manifest: Manifest): Violation[] {
   const violations: Violation[] = []
   for (const [script, command] of Object.entries(manifest.scripts ?? {})) {
-    if (REGISTRY_GUREN.test(command)) {
+    if (invokesRegistryGuren(command)) {
       violations.push({
         manifest: manifestPath,
         script,
