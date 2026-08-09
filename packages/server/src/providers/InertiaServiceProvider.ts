@@ -2,7 +2,7 @@ import { ServiceProvider } from '../container/ServiceProvider'
 import { inertia } from '../mvc/inertia/InertiaEngine'
 import { ViewEngine } from '../mvc/ViewEngine'
 import { ValidationException } from '../errors/exceptions/ValidationException'
-import { getInertiaSharedPropsResolver, setInertiaSharedProps } from '../mvc/inertia/shared'
+import { shareInertiaProps } from '../mvc/inertia/shared'
 import { getSessionFromContext } from '../http/middleware/session'
 import type { ExceptionHandler } from '../errors/ExceptionHandler'
 import type { Context } from 'hono'
@@ -68,19 +68,15 @@ export class InertiaServiceProvider extends ServiceProvider {
   }
 
   /**
-   * Wrap existing shared props resolver to auto-inject flashed `errors`.
+   * Auto-inject flashed `errors` into shared props. Scoped to this app's
+   * container so a second Application booted in the same process keeps its
+   * own registrations.
    */
   private registerSharedErrors(): void {
-    const previous = getInertiaSharedPropsResolver()
-
-    setInertiaSharedProps(async (ctx: Context) => {
-      const prev = previous ? await previous(ctx) : {}
+    shareInertiaProps(async (ctx: Context) => {
       const session = getSessionFromContext(ctx)
       const errors = session?.getFlash<Record<string, string>>('errors')
-      return {
-        ...prev,
-        ...(errors && Object.keys(errors).length > 0 ? { errors } : {}),
-      }
-    })
+      return errors && Object.keys(errors).length > 0 ? { errors } : {}
+    }, this.container)
   }
 }

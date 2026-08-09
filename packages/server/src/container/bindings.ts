@@ -17,6 +17,7 @@ import type { HealthManager } from '../health'
 import type { Scheduler } from '../scheduling'
 import type { Gate } from '../authorization/Gate'
 import type { ExceptionHandler } from '../errors'
+import type { SharedInertiaPropsRegistry } from '../mvc/inertia/shared'
 
 /**
  * Type-safe service binding map.
@@ -49,5 +50,7 @@ export interface ServiceBindings {
   health: HealthManager
   scheduler: Scheduler
   gate: Gate
+  /** Bound lazily on the first `shareInertiaProps(fn, container)` call. */
+  'inertia.sharedProps': SharedInertiaPropsRegistry
   'exception.handler': ExceptionHandler
 }

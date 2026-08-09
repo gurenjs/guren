@@ -339,7 +339,7 @@ export default class AuthProvider extends ServiceProvider {
     shareInertiaProps(async (ctx) => {
       const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
       return { auth: { user: await auth?.user() } }
-    })
+    }, this.container)
   }
 }
 ```
@@ -354,12 +354,16 @@ export default class AuthProvider extends ServiceProvider {
 > auth・i18n・flash など複数箇所から共有 props を提供しても互いを壊しません:
 >
 > ```ts
-> shareInertiaProps((ctx) => ({ i18n: { locale: detectLocale(ctx) } }))
+> shareInertiaProps((ctx) => ({ i18n: { locale: detectLocale(ctx) } }), this.container)
 > ```
 >
-> `setInertiaSharedProps` はマージせずリゾルバーを置き換えるため、実行時点で
-> 登録済みのものを丸ごと捨てます。意図的に全部を差し替えたいときだけ使って
-> ください。
+> `this.container` を渡すとその props は1つのアプリケーションに閉じます。渡さ
+> ない場合はプロセス全体で共有され、同時に起動した別のアプリケーションにも
+> 漏れます。
+>
+> `setInertiaSharedProps` はマージせずプロセス全体のリゾルバーを置き換えるため、
+> 実行時点で登録済みのものを丸ごと捨てます。意図的に全部を差し替えたいときだけ
+> 使ってください。
 
 ルートミドルウェアを使うと保護が簡単です。
 

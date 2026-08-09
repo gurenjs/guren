@@ -341,7 +341,7 @@ export default class AuthProvider extends ServiceProvider {
     shareInertiaProps(async (ctx) => {
       const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
       return { auth: { user: await auth?.user() } }
-    })
+    }, this.container)
   }
 }
 ```
@@ -357,12 +357,15 @@ Augment `InertiaSharedProps` (see the Controllers guide) to type this `auth` pay
 > clobbering one another:
 >
 > ```ts
-> shareInertiaProps((ctx) => ({ i18n: { locale: detectLocale(ctx) } }))
+> shareInertiaProps((ctx) => ({ i18n: { locale: detectLocale(ctx) } }), this.container)
 > ```
 >
-> `setInertiaSharedProps` replaces the resolver rather than merging, dropping
-> whatever is registered at the moment it runs. Reach for it only when you mean
-> to replace the whole thing.
+> Pass `this.container` to scope the props to one application; without it they
+> are process-wide and leak into a second application booted alongside.
+>
+> `setInertiaSharedProps` replaces the process-wide resolver rather than
+> merging, dropping whatever is registered at the moment it runs. Reach for it
+> only when you mean to replace the whole thing.
 
 Route middleware makes protecting endpoints straightforward:
 

@@ -112,7 +112,7 @@ export class I18nServiceProvider extends ServiceProvider {
         }
 
         return { _i18n: i18nProps }
-      })
+      }, this.container)
     }
   }
 

@@ -1,6 +1,14 @@
-import { describe, test, expect, afterEach } from 'bun:test'
-import { Controller, createApp, MemoryLoader, I18nServiceProvider, type I18nManager, type I18nPluginOptions } from '../../src'
-import { setInertiaSharedProps } from '../../src/mvc/inertia/shared'
+import { describe, test, expect } from 'bun:test'
+import {
+  Controller,
+  createApp,
+  MemoryLoader,
+  I18nServiceProvider,
+  ServiceProvider,
+  shareInertiaProps,
+  type I18nManager,
+  type I18nPluginOptions,
+} from '../../src'
 
 const MESSAGES = {
   en: {
@@ -67,12 +75,6 @@ async function inertiaPageProps(app: ReturnType<typeof makeApp>, path = '/page')
   const page = (await response.json()) as { props: Record<string, any> }
   return page.props
 }
-
-afterEach(() => {
-  // The Inertia shared-props resolver is module-global state; each booted
-  // app's I18nServiceProvider appends to it.
-  setInertiaSharedProps(null)
-})
 
 describe('createApp({ i18n })', () => {
   test('preloads every supported locale during boot', async () => {
@@ -159,6 +161,51 @@ describe('createApp({ i18n })', () => {
 
     const props = await inertiaPageProps(app)
     expect(props._i18n).toBeUndefined()
+  })
+
+  test('two booted apps keep their shared props isolated', async () => {
+    // Shared props are registered on each app's container, not module-global
+    // state — a second Application booted in the same process (test suites,
+    // serverless warm reuse) must not see the first app's resolvers.
+    const sharing = makeApp({ fallback: 'ja' })
+    const silent = makeApp({ share: false })
+    await sharing.boot()
+    await silent.boot()
+
+    const sharingProps = await inertiaPageProps(sharing)
+    expect(sharingProps._i18n.locale).toBe('ja')
+
+    const silentProps = await inertiaPageProps(silent)
+    expect(silentProps._i18n).toBeUndefined()
+  })
+
+  test('app providers passing their container stay isolated too', async () => {
+    // The path scaffolded providers take: shareInertiaProps(fn, this.container).
+    abstract class OwnerProvider extends ServiceProvider {
+      protected abstract readonly owner: string
+
+      register(): void { }
+
+      override boot(): void {
+        shareInertiaProps(() => ({ owner: this.owner }), this.container)
+      }
+    }
+    class OwnerAProvider extends OwnerProvider {
+      protected readonly owner = 'A'
+    }
+    class OwnerBProvider extends OwnerProvider {
+      protected readonly owner = 'B'
+    }
+
+    const appA = makeApp()
+    const appB = makeApp()
+    appA.register(OwnerAProvider)
+    appB.register(OwnerBProvider)
+    await appA.boot()
+    await appB.boot()
+
+    expect((await inertiaPageProps(appA)).owner).toBe('A')
+    expect((await inertiaPageProps(appB)).owner).toBe('B')
   })
 
   test('fallback option overrides the first supported locale', async () => {

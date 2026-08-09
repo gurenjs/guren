@@ -75,12 +75,12 @@ export default class AuthProvider extends ServiceProvider {
     shareInertiaProps(async (ctx) => {
       const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
       return { auth: { user: await auth?.user() } }
-    })
+    }, this.container)
   }
 }
 ```
 
-`shareInertiaProps` merges this value into the props of every Inertia response. What `auth.user()` returns is the **sanitized** user — `passwordHash` and `rememberToken` are stripped at runtime, so sharing it wholesale never ships credentials to the browser. Part 3's comment form relies on this wiring too.
+`shareInertiaProps` merges this value into the props of every Inertia response, and `this.container` keeps it scoped to this application. What `auth.user()` returns is the **sanitized** user — `passwordHash` and `rememberToken` are stripped at runtime, so sharing it wholesale never ships credentials to the browser. Part 3's comment form relies on this wiring too.
 
 ## 2. Checkpoint: sign in
 

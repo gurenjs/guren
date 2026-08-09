@@ -20,9 +20,10 @@ export default class AuthProvider extends ServiceProvider {
     //
     // shareInertiaProps merges over resolvers registered earlier instead of
     // replacing them, so the framework's flashed `errors` still come through.
+    // Passing this.container scopes the props to this app.
     shareInertiaProps(async (ctx) => {
       const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
       return { auth: { user: await auth?.user() } }
-    })
+    }, this.container)
   }
 }

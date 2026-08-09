@@ -34,6 +34,7 @@ export type {
   SharedInertiaPropsResolver,
   InertiaSharedProps,
   ResolvedSharedInertiaProps,
+  SharedPropsContainer,
 } from './mvc/inertia/shared'
 // Service Providers
 export {

@@ -1,6 +1,6 @@
 process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 
-import { describe, expect, it, beforeEach } from 'bun:test'
+import { describe, expect, it, beforeEach, afterEach } from 'bun:test'
 import { Hono } from 'hono'
 import { Container } from '../../src/container'
 import { InertiaServiceProvider } from '../../src/providers/InertiaServiceProvider'
@@ -18,10 +18,14 @@ describe('InertiaServiceProvider validation handling', () => {
   let container: Container
   let store: MemorySessionStore
 
-  beforeEach(() => {
-    // Reset shared props
+  // The provider registers shared props on the container, so a fresh container
+  // per test isolates it; only the one test using the module-global registry
+  // needs this reset.
+  afterEach(() => {
     setInertiaSharedProps(null)
+  })
 
+  beforeEach(() => {
     container = new Container()
     app = new Hono()
     store = new MemorySessionStore()
@@ -149,19 +153,15 @@ describe('InertiaServiceProvider validation handling', () => {
     expect(body3.errors).toBeNull()
   })
 
-  it('injects errors into shared props resolver', async () => {
-    // Set a base shared props resolver
+  it('merges flashed errors over module-global shared props', async () => {
+    // A bare-Hono style global resolver stays underneath the provider's
+    // container-scoped errors resolver.
     setInertiaSharedProps(async () => ({ appName: 'Test' }))
-
-    // Re-boot InertiaServiceProvider to wrap the new resolver
-    const inertiaProvider = new InertiaServiceProvider(container)
-    inertiaProvider.register()
-    inertiaProvider.boot()
 
     // Route that returns resolved shared props
     app.get('/shared', async (ctx) => {
       const { resolveSharedInertiaProps } = await import('../../src/mvc/inertia/shared')
-      const shared = await resolveSharedInertiaProps(ctx)
+      const shared = await resolveSharedInertiaProps(ctx, container)
       return ctx.json(shared)
     })
 
