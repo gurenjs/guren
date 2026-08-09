@@ -3,7 +3,7 @@ import { inertia, type InertiaOptions } from './inertia/InertiaEngine'
 import { resolveSharedInertiaProps, type ResolvedSharedInertiaProps } from './inertia/shared'
 import { AUTH_CONTEXT_KEY } from '../http/middleware/auth'
 import { LOCALE_CONTEXT_KEY } from '../http/middleware/detect-locale'
-import { getI18n } from '../i18n'
+import { getI18n, type I18nManager, type ReplacementValues } from '../i18n'
 import { flattenRequestQueries, parseRequestPayload } from '../http/request'
 import type { AuthContext } from '../auth/types'
 import type { ServiceBindings } from '../container/bindings'
@@ -34,6 +34,12 @@ interface ZodLikeSchema<T> {
 export type SafeValidationResult<T> =
   | { success: true; data: T }
   | { success: false; errors: Record<string, string> }
+
+/** Minimal translator surface shared by I18nManager, Translator, and the middleware bindings. */
+type RequestTranslator = {
+  t(key: string, replacements?: ReplacementValues): string
+  tc(key: string, count: number, replacements?: ReplacementValues): string
+}
 
 type DefaultInertiaProps = Record<string, unknown>
 
@@ -338,11 +344,77 @@ export class Controller {
 
   /**
    * Default `<html lang>` for Inertia responses when `options.lang` is not
-   * provided: the request-scoped `locale` context variable (set by locale
-   * middleware) wins over the app-wide i18n locale (the router-injected
-   * container binding, then the `setI18n()` global).
+   * provided — same resolution as the `locale` getter, but without its
+   * `'en'` fallback so unconfigured apps keep emitting no lang attribute.
    */
   #defaultInertiaLang(): string | undefined {
+    return this.#resolveLocale()
+  }
+
+  /**
+   * Locale resolved for the current request: the request-scoped `locale`
+   * context variable (set by locale middleware) wins over the app-wide i18n
+   * locale (the router-injected container binding, then the `setI18n()`
+   * global). Falls back to `'en'` when no i18n is configured.
+   */
+  protected get locale(): string {
+    return this.#resolveLocale() ?? 'en'
+  }
+
+  /**
+   * Translate a key for the current request locale.
+   *
+   * Uses the request-scoped translator bound by the locale detection
+   * middleware when present, falling back to a translator scoped to
+   * `this.locale` from the container's `i18n` binding (then the `setI18n()`
+   * global).
+   *
+   * @example
+   * ```typescript
+   * this.t('posts.created')
+   * this.t('posts.greeting', { name: user.name })
+   * ```
+   */
+  protected t(key: string, replacements?: ReplacementValues): string {
+    return this.#requestTranslator().t(key, replacements)
+  }
+
+  /**
+   * Translate a key with a count for pluralization, using the same locale
+   * resolution as {@link Controller.t}.
+   */
+  protected tc(key: string, count: number, replacements?: ReplacementValues): string {
+    return this.#requestTranslator().tc(key, count, replacements)
+  }
+
+  #translator?: RequestTranslator
+
+  #requestTranslator(): RequestTranslator {
+    if (this.#translator) {
+      return this.#translator
+    }
+
+    const vars = this.ctx.var as Record<string, unknown> | undefined
+    const t = vars?.['t']
+    const tc = vars?.['tc']
+    if (typeof t === 'function' && typeof tc === 'function') {
+      this.#translator = { t, tc } as RequestTranslator
+      return this.#translator
+    }
+
+    const i18n = this.#resolveI18n()
+    if (!i18n) {
+      throw new Error(
+        'Controller.t() requires i18n to be configured. Pass createApp({ i18n }) or register an I18nManager.',
+      )
+    }
+
+    const locale = this.#resolveLocale()
+    this.#translator = locale && locale !== i18n.getLocale() ? i18n.forLocale(locale) : i18n
+    return this.#translator
+  }
+
+  #resolveLocale(): string | undefined {
     const vars = this.ctx.var as Record<string, unknown> | undefined
 
     const requestLocale = vars?.[LOCALE_CONTEXT_KEY]
@@ -350,20 +422,20 @@ export class Controller {
       return requestLocale
     }
 
-    let i18n: { getLocale?: () => string } | undefined
+    const locale = this.#resolveI18n()?.getLocale()
+    return typeof locale === 'string' && locale.length > 0 ? locale : undefined
+  }
 
+  #resolveI18n(): I18nManager | undefined {
     if (this._container?.has?.('i18n')) {
-      i18n = this._container.make('i18n') as { getLocale?: () => string }
-    } else {
-      try {
-        i18n = getI18n()
-      } catch {
-        i18n = undefined
-      }
+      return this._container.make('i18n') as I18nManager
     }
 
-    const locale = i18n?.getLocale?.()
-    return typeof locale === 'string' && locale.length > 0 ? locale : undefined
+    try {
+      return getI18n()
+    } catch {
+      return undefined
+    }
   }
 
   protected json<T>(data: T, init: ResponseInit = {}): Response {
