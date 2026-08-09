@@ -41,6 +41,11 @@ export interface RouteTypesPluginOptions {
    * Additional environment variables passed to the spawned process.
    */
   env?: NodeJS.ProcessEnv
+  /**
+   * Whether the plugin regenerates types at all. Defaults to `!process.env.CI`
+   * (codegen runs as a separate build step in CI).
+   */
+  enabled?: boolean
 }
 
 const DEFAULT_EXECUTABLE = 'bun'
@@ -88,9 +93,11 @@ export function resolveCodegenCommand(options: RouteTypesPluginOptions): {
 }
 
 export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin {
+  const enabled = options.enabled ?? !process.env.CI
   let appRoot = options.appRoot
   let logger: Logger | undefined
-  let queue: Promise<void> = Promise.resolve()
+  let running: Promise<void> | null = null
+  let queued = false
 
   function logLines(message: string, level: 'info' | 'error' = 'info'): void {
     const target = level === 'error' ? logger?.error : logger?.info
@@ -140,19 +147,33 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
     })
   }
 
-  function enqueueGeneration(root: string): Promise<void> {
-    // CI runs codegen as its own build step; regenerating there — including
-    // from watcher or HMR events mid-E2E — would only add nondeterminism.
-    if (process.env.CI) return queue
+  function runGeneration(root: string): Promise<void> {
+    return spawnGenerator(root).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error)
+      logLines(message, 'error')
+    })
+  }
 
-    queue = queue
-      .then(() => spawnGenerator(root))
-      .catch((error) => {
-        const message = error instanceof Error ? error.message : String(error)
-        logLines(message, 'error')
-      })
+  function scheduleGeneration(root: string): Promise<void> {
+    if (!enabled) return Promise.resolve()
 
-    return queue
+    // Events arriving while a run is in flight collapse into a single
+    // follow-up run that picks up all of their changes at once.
+    if (running) {
+      queued = true
+      return running
+    }
+
+    running = (async () => {
+      do {
+        queued = false
+        await runGeneration(root)
+      } while (queued)
+    })().finally(() => {
+      running = null
+    })
+
+    return running
   }
 
   function shouldRegenerate(root: string, file: string): boolean {
@@ -178,7 +199,7 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
     async configResolved(config: ResolvedConfig) {
       appRoot = resolve(config.root, options.appRoot ?? '.')
       logger = config.logger
-      await enqueueGeneration(appRoot)
+      await scheduleGeneration(appRoot)
     },
     configureServer(server: ViteDevServer) {
       // handleHotUpdate only fires for updates; creating or deleting a
@@ -186,7 +207,7 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
       const root = () => appRoot ?? server.config.root
       const onFileEvent = (file: string) => {
         if (shouldRegenerate(root(), file)) {
-          void enqueueGeneration(root())
+          void scheduleGeneration(root())
         }
       }
       server.watcher.on('add', onFileEvent)
@@ -196,7 +217,7 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
       const root = appRoot ?? ctx.server.config.root
 
       if (shouldRegenerate(root, ctx.file)) {
-        await enqueueGeneration(root)
+        await scheduleGeneration(root)
       }
 
       return ctx.modules
