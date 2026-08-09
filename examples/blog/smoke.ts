@@ -1,41 +1,41 @@
+import { createTestClient, PendingTestResponse } from '@guren/testing'
 import app, { ready } from './src/main.ts'
+
+// A missing database is the one boot failure worth skipping: contributors run
+// this without postgres up. Anything else is a regression the smoke must fail.
+const CONNECTIVITY_ERROR =
+  /ECONNREFUSED|ECONNRESET|ENOTFOUND|ETIMEDOUT|EHOSTUNREACH|cannot connect to the database/i
 
 async function main() {
   try {
     await ready
   } catch (error) {
-    console.warn('Skipping smoke test: database is not reachable.', error)
-    return
+    if (CONNECTIVITY_ERROR.test(String(error))) {
+      console.warn('Skipping smoke test: database is not reachable.', error)
+      return
+    }
+    throw error
   }
 
-  const root = await app.fetch(new Request('http://example.local/'))
-  if (root.status !== 200) {
-    throw new Error(`Unexpected status for /: ${root.status}`)
-  }
+  // createTestClient's default base URL is http://localhost, which src/app.ts
+  // host authorization admits outside production.
+  const client = createTestClient((request) => app.fetch(request))
 
-  const rootHtml = await root.text()
-  if (!rootHtml.includes('Latest Posts')) {
-    throw new Error('SSR markup missing expected content for posts index')
-  }
+  // data-server-rendered is Inertia's SSR marker; the client-side fallback
+  // shell ships an empty <div id="app"></div> without it.
+  const root = await client.get('/').send()
+  root.assertStatus(200)
+  await root.assertBodyContains('data-server-rendered="true"')
 
-  const posts = await app.fetch(
-    new Request('http://example.local/posts', {
-      headers: {
-        'X-Inertia': 'true',
-        Accept: 'application/json',
-      },
-    }),
-  )
-  if (posts.status !== 200) {
-    throw new Error(`Unexpected status for /posts: ${posts.status}`)
-  }
-
-  const payload = await posts.json()
-  if (payload.component !== 'posts/Index') {
-    throw new Error('Inertia component mismatch for posts index')
-  }
+  await new PendingTestResponse(client.get('/posts').asInertia().acceptJson().send())
+    .assertOk()
+    .assertInertia('posts/Index')
 
   console.log('Smoke test passed: SSR HTML and JSON endpoints responded successfully')
 }
 
 await main()
+
+// The booted app holds live handles (DB pool, scheduler), so the process
+// never exits on its own. Failures above still exit non-zero via the throw.
+process.exit(0)
