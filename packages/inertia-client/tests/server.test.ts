@@ -1,6 +1,7 @@
-import { describe, expect, it, mock } from 'bun:test'
+import { beforeEach, describe, expect, it, mock } from 'bun:test'
 import React from 'react'
 import type { Page } from '@inertiajs/core'
+import * as realInertiaReact from '@inertiajs/react'
 
 const createInertiaAppMock = mock(async (options: {
   page: unknown
@@ -18,11 +19,18 @@ const createInertiaAppMock = mock(async (options: {
   return { head: ['<title>Test</title>'], body }
 })
 
+// Spread the real module and override only what this file stubs (see the
+// matching comment in app.test.ts).
 await mock.module('@inertiajs/react', () => ({
+  ...realInertiaReact,
   createInertiaApp: createInertiaAppMock,
 }))
 
 const { renderInertiaServer } = await import('../src/server')
+
+beforeEach(() => {
+  createInertiaAppMock.mockClear()
+})
 
 describe('renderInertiaServer', () => {
   it('returns head and body from the Inertia renderer', async () => {

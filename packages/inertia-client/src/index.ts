@@ -23,6 +23,13 @@ export {
   createTypedLink,
   createTypedForm,
 } from './components'
+export { useTranslation, createTranslator } from './i18n'
+export type {
+  Translation,
+  I18nPageProps,
+  TranslationMessages,
+  ReplacementValues,
+} from './i18n'
 export { ErrorBoundary } from './ErrorBoundary'
 export type {
   RouteManifestLike,

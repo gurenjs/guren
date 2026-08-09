@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import {
   createApp,
   ErrorServiceProvider,
@@ -69,6 +70,13 @@ const app = createApp({
     EventServiceProvider,
     SchedulingProvider,
   ],
+  i18n: {
+    supported: ['en', 'ja'],
+    // Monorepo artifact: tests can boot this app with cwd = repo root, so
+    // anchor to this file instead of relying on the cwd-relative 'lang'
+    // default. A scaffolded app (cwd = app root) does not need this.
+    path: fileURLToPath(new URL('../lang', import.meta.url)),
+  },
   auth: {
     autoSession: true,
     sessionOptions: {
