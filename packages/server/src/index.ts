@@ -197,6 +197,8 @@ export {
   // Locale detection
   detectLocaleMiddleware,
   LOCALE_CONTEXT_KEY,
+  getRequestLocale,
+  getRequestTranslator,
 }
   from './http/middleware'
 export { AUTH_CONTEXT_KEY } from './http/middleware/auth'
@@ -232,6 +234,7 @@ export type {
   // Locale detection types
   DetectLocaleOptions,
   DetectLocaleVariables,
+  TranslatorBinding,
   LocaleSource,
 }  from './http/middleware'
 // Validation (advanced)
@@ -480,6 +483,7 @@ export {
   createI18n,
   setI18n,
   getI18n,
+  tryGetI18n,
   t,
   tc,
 } from './i18n'
@@ -817,7 +821,8 @@ export { renderErrorPage } from './errors/error-page'
 export { NodeHasher } from './auth/password/NodeHasher'
 // Hash: convenience alias for ScryptHasher (used as default in docs)
 export { DefaultHasher, DefaultHasher as Hash } from './auth/password/DefaultHasher'
-export type { ApplicationOptions, AuthPluginOptions } from './http/Application'
+export type { ApplicationOptions, AuthPluginOptions, I18nPluginOptions } from './http/Application'
+export type { InertiaI18nProps } from './providers/I18nServiceProvider'
 // Queue: SQS adapter
 export { SqsDriver, createSqsAdapter } from './queue/drivers/SqsDriver'
 // Broadcasting: typed broadcaster

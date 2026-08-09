@@ -6,6 +6,8 @@ import type {
 } from './types'
 import { getPluralizationRule, selectPluralForm } from './pluralization'
 
+const REGEXP_SPECIALS = /[.*+?^${}()|[\]\\]/g
+
 /**
  * Translator class for handling translations.
  */
@@ -183,10 +185,14 @@ export class Translator {
     let result = translation
 
     for (const [key, value] of Object.entries(replacements)) {
-      // Support both :key and {key} formats
+      // Support both :key and {key} formats. The key is escaped so regex
+      // metacharacters match literally, and the value goes through a
+      // callback so `$` sequences in it are not expanded.
+      const escaped = key.replace(REGEXP_SPECIALS, '\\$&')
+      const replacement = (): string => String(value)
       result = result
-        .replace(new RegExp(`:${key}`, 'g'), String(value))
-        .replace(new RegExp(`\\{${key}\\}`, 'g'), String(value))
+        .replace(new RegExp(`:${escaped}`, 'g'), replacement)
+        .replace(new RegExp(`\\{${escaped}\\}`, 'g'), replacement)
     }
 
     return result

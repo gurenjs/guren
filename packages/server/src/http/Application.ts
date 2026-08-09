@@ -7,10 +7,13 @@ import { AuthManager } from '../auth/AuthManager'
 import { AuthServiceProvider } from '../providers/AuthServiceProvider'
 import { AuthorizationServiceProvider } from '../providers/AuthorizationServiceProvider'
 import { ErrorServiceProvider } from '../providers/ErrorServiceProvider'
+import { I18nServiceProvider } from '../providers/I18nServiceProvider'
 import { InertiaServiceProvider } from '../providers/InertiaServiceProvider'
 import { attachAuthContext } from './middleware/auth'
 import { SessionGuard } from '../auth/SessionGuard'
 import type { CreateSessionMiddlewareOptions } from './middleware/session'
+import type { DetectLocaleOptions } from './middleware/detect-locale'
+import type { TranslationLoader } from '../i18n'
 import { createSecurityHeaders, type SecurityHeadersOptions } from './middleware/security-headers'
 import { createHostAuthorizationMiddleware, type HostAuthorizationOptions } from './middleware/host-authorization'
 import { isMcpEndpointEnabled } from '../mcp/endpoint'
@@ -135,6 +138,12 @@ export interface ApplicationOptions {
   readonly boot?: BootCallback
   readonly providers?: Array<ServiceProviderConstructor>
   readonly auth?: AuthPluginOptions
+  /**
+   * Configure internationalization: translation loading, locale detection,
+   * and Inertia `_i18n` shared props. When set, {@link I18nServiceProvider}
+   * is registered automatically.
+   */
+  readonly i18n?: I18nPluginOptions
   readonly discover?: boolean
   readonly routes?: RouteRegistration
   /**
@@ -156,6 +165,40 @@ export interface ApplicationOptions {
    * The `create-app` template includes a default localhost configuration.
    */
   readonly hostAuthorization?: HostAuthorizationOptions | false
+}
+
+export interface I18nPluginOptions {
+  /**
+   * Locales the app supports. Locale detection only ever resolves to one of
+   * these, and all of them are preloaded during `boot()`.
+   */
+  readonly supported: readonly string[]
+  /**
+   * Fallback (and default) locale. Defaults to the first supported locale.
+   */
+  readonly fallback?: string
+  /**
+   * Directory containing `<path>/<locale>/*.json` translation files, loaded
+   * with {@link JsonLoader}. Defaults to `'lang'`. Ignored when `loader` is
+   * set.
+   */
+  readonly path?: string
+  /**
+   * Custom translation loader (e.g. `MemoryLoader` for bundled messages on
+   * serverless targets without a filesystem). Takes precedence over `path`.
+   */
+  readonly loader?: TranslationLoader
+  /**
+   * Locale detection middleware options. `detectLocaleMiddleware` is mounted
+   * automatically with the `supported` locales and `fallback` above; pass
+   * `false` to mount (or skip) it yourself.
+   */
+  readonly detect?: Omit<DetectLocaleOptions, 'supported' | 'fallback' | 'i18n'> | false
+  /**
+   * Share the request locale and its messages with Inertia pages as the
+   * `_i18n` prop. Defaults to `true`.
+   */
+  readonly share?: boolean
 }
 
 export interface AuthPluginOptions {
@@ -253,14 +296,22 @@ export class Application {
       ...moduleProviders,
     ]
 
+    // A user-supplied subclass of a default provider takes ownership of that
+    // subsystem's wiring, so the default registration below is skipped.
+    const hasUserProviderOf = (base: ServiceProviderConstructor): boolean =>
+      userProviders.some((provider) => provider === base || provider.prototype instanceof base)
+
+    // I18n (translator binding + locale detection + Inertia shared props) is
+    // registered when options.i18n is set.
+    if (this.options.i18n && !hasUserProviderOf(I18nServiceProvider)) {
+      this.providerManager.register(I18nServiceProvider)
+    }
+
     // Exception rendering is on by default so HttpExceptions map to their
     // status codes (404/422/403) instead of opaque 500s. Registered before
     // user providers so a custom ErrorServiceProvider subclass wins via
     // its later hono.onError() call.
-    const hasUserErrorProvider = userProviders.some(
-      (provider) => provider === ErrorServiceProvider || provider.prototype instanceof ErrorServiceProvider,
-    )
-    if (!hasUserErrorProvider) {
+    if (!hasUserProviderOf(ErrorServiceProvider)) {
       this.providerManager.register(ErrorServiceProvider)
     }
 
@@ -275,10 +326,7 @@ export class Application {
     // providers: the first matching exception renderer wins, so a custom
     // ValidationException renderer registered by a user provider keeps
     // taking precedence over this default.
-    const hasUserInertiaProvider = userProviders.some(
-      (provider) => provider === InertiaServiceProvider || provider.prototype instanceof InertiaServiceProvider,
-    )
-    if (!hasUserInertiaProvider) {
+    if (!hasUserProviderOf(InertiaServiceProvider)) {
       this.providerManager.register(InertiaServiceProvider)
     }
   }
@@ -289,6 +337,10 @@ export class Application {
 
   get authOptions(): AuthPluginOptions | undefined {
     return this.options.auth
+  }
+
+  get i18nOptions(): I18nPluginOptions | undefined {
+    return this.options.i18n
   }
 
   markAutoSessionAttached(): void {

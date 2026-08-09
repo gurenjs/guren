@@ -1,0 +1,5 @@
+{
+  "hello": "こんにちは",
+  "welcome": "ようこそ、:nameさん！",
+  "items": ":count個"
+}

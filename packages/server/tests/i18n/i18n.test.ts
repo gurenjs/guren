@@ -148,6 +148,20 @@ describe('Translator', () => {
       translator.addMessages('en', { format: 'Hello, {name}!' })
       expect(translator.t('format', { name: 'World' })).toBe('Hello, World!')
     })
+
+    it('keeps $ sequences in replacement values literal', () => {
+      expect(translator.t('welcome', { name: '$& $1 $$' })).toBe('Welcome, $& $1 $$!')
+    })
+
+    it('treats regex metacharacters in replacement keys literally', () => {
+      translator.addMessages('en', { special: 'Total: :price[0] / {price[0]}' })
+      expect(translator.t('special', { 'price[0]': '42' })).toBe('Total: 42 / 42')
+    })
+
+    it('returns an empty translation as-is', () => {
+      translator.addMessages('en', { empty: '' })
+      expect(translator.t('empty')).toBe('')
+    })
   })
 
   describe('tc()', () => {
@@ -164,6 +178,11 @@ describe('Translator', () => {
       translator.addMessages('en', { message: ':count :type|:count :types' })
       expect(translator.tc('message', 1, { type: 'apple', types: 'apples' })).toBe('1 apple')
       expect(translator.tc('message', 3, { type: 'apple', types: 'apples' })).toBe('3 apples')
+    })
+
+    it('treats an empty translation as missing', () => {
+      translator.addMessages('en', { empty: '' })
+      expect(translator.tc('empty', 2)).toBe('empty')
     })
   })
 

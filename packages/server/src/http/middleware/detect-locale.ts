@@ -1,10 +1,36 @@
+import type { Context } from 'hono'
 import { createMiddleware } from 'hono/factory'
 import { getCookie } from 'hono/cookie'
 import { parseAccept } from 'hono/utils/accept'
-import { getI18n, type I18nManager, type Translator } from '../../i18n'
+import { tryGetI18n, type I18nManager, type Translator } from '../../i18n'
 
 /** Context key for the resolved request locale (read by Inertia for `<html lang>`). */
 export const LOCALE_CONTEXT_KEY = 'locale'
+
+/** Request-scoped translator surface bound by {@link detectLocaleMiddleware}. */
+export type TranslatorBinding = { t: Translator['t']; tc: Translator['tc'] }
+
+/**
+ * Read the request locale resolved by {@link detectLocaleMiddleware} (or any
+ * middleware that sets the `locale` context variable).
+ */
+export function getRequestLocale(c: Context): string | undefined {
+  const locale = (c.var as Record<string, unknown> | undefined)?.[LOCALE_CONTEXT_KEY]
+  return typeof locale === 'string' && locale.length > 0 ? locale : undefined
+}
+
+/**
+ * Read the request-scoped `t`/`tc` translator bound by
+ * {@link detectLocaleMiddleware}, when present.
+ */
+export function getRequestTranslator(c: Context): TranslatorBinding | undefined {
+  const vars = c.var as Record<string, unknown> | undefined
+  const t = vars?.['t']
+  const tc = vars?.['tc']
+  return typeof t === 'function' && typeof tc === 'function'
+    ? ({ t, tc } as TranslatorBinding)
+    : undefined
+}
 
 export type LocaleSource = 'query' | 'cookie' | 'header'
 
@@ -36,8 +62,6 @@ export interface DetectLocaleOptions {
 }
 
 const DEFAULT_SOURCES: readonly LocaleSource[] = ['query', 'cookie', 'header']
-
-type TranslatorBinding = { t: Translator['t']; tc: Translator['tc'] }
 
 /**
  * Middleware that resolves the request locale from the query string, a cookie,
@@ -97,33 +121,29 @@ export function detectLocaleMiddleware(options: DetectLocaleOptions) {
     return undefined
   }
 
-  // Bound t/tc helpers, created once per locale (the set is bounded by
-  // `supported`). Messages added to the manager after a locale is cached are
-  // not picked up — acceptable for the load-once translation lifecycle.
+  // Bound t/tc helpers, cached per locale. Only supported, already-loaded
+  // locales are cached: the bound-on-uncached-locale case rebuilds per call
+  // (and self-heals once the locale loads), and an unvalidated override from
+  // downstream middleware cannot grow the map without bound. Messages added
+  // to the manager after a locale is cached are not picked up — acceptable
+  // for the load-once translation lifecycle.
   const translators = new Map<string, TranslatorBinding>()
+  const supportedSet = new Set(supported)
 
-  const resolveTranslator = async (locale: string): Promise<TranslatorBinding | undefined> => {
-    if (options.i18n === false) {
-      return undefined
-    }
-
+  const bindingFor = (locale: string, i18n: I18nManager): TranslatorBinding => {
     const cached = translators.get(locale)
     if (cached) {
       return cached
     }
 
-    const i18n = options.i18n ?? tryGlobalI18n()
-    if (!i18n) {
-      return undefined
-    }
-
-    await i18n.loadLocale(locale).catch(() => {})
     const translator = i18n.forLocale(locale)
     const binding: TranslatorBinding = {
       t: translator.t.bind(translator),
       tc: translator.tc.bind(translator),
     }
-    translators.set(locale, binding)
+    if (supportedSet.has(locale) && i18n.isLocaleLoaded(locale)) {
+      translators.set(locale, binding)
+    }
     return binding
   }
 
@@ -145,20 +165,18 @@ export function detectLocaleMiddleware(options: DetectLocaleOptions) {
 
     c.set(LOCALE_CONTEXT_KEY, resolved)
 
-    const binding = await resolveTranslator(resolved)
-    if (binding) {
-      c.set('t', binding.t)
-      c.set('tc', binding.tc)
+    const i18n = options.i18n === false ? undefined : options.i18n ?? tryGetI18n()
+    if (i18n) {
+      await i18n.loadLocale(resolved).catch(() => {})
+
+      // Resolve the translator per call, not per request: middleware running
+      // after detection may override the `locale` context variable (e.g. a
+      // per-user preference from the session), and t/tc must follow it.
+      const current = () => bindingFor(getRequestLocale(c) ?? resolved, i18n)
+      c.set('t', (key, replacements) => current().t(key, replacements))
+      c.set('tc', (key, count, replacements) => current().tc(key, count, replacements))
     }
 
     await next()
   })
-}
-
-function tryGlobalI18n(): I18nManager | undefined {
-  try {
-    return getI18n()
-  } catch {
-    return undefined
-  }
 }

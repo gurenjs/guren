@@ -89,6 +89,9 @@ export { requestLoggingMiddleware } from './request-logging'
 export {
   detectLocaleMiddleware,
   LOCALE_CONTEXT_KEY,
+  getRequestLocale,
+  getRequestTranslator,
+  type TranslatorBinding,
   type DetectLocaleOptions,
   type DetectLocaleVariables,
   type LocaleSource,
