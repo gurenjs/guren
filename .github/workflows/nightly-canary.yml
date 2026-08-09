@@ -43,6 +43,9 @@ jobs:
       # canary-specific checks (e.g. extended smoke tests, upgrade
       # scenarios) are appended after the CI-equivalent steps.
       # When adding a new step to ci.yml, mirror it here as well.
+      # Exception: CI's dist-cache/build-skip steps are deliberately NOT
+      # mirrored — the canary always builds from scratch, so it stays the
+      # ground truth that would catch a poisoned or stale cache.
       # ----------------------------------------------------------------
 
       - uses: actions/checkout@v6
