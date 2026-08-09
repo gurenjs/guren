@@ -7,10 +7,10 @@
     "dev": "bun --hot bin/serve.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "openapi:generate": "bunx guren openapi:generate --routes routes/api.ts --title \"Guren Example API\" --version \"0.1.0\" --description \"Example API for authentication, tokens, and task management.\" --out .guren/openapi.gen.json",
-    "db:make": "bunx guren make:migration",
-    "db:migrate": "bunx guren db:migrate",
-    "db:seed": "bunx guren db:seed"
+    "openapi:generate": "bun ../../packages/cli/src/bin.ts openapi:generate --routes routes/api.ts --title \"Guren Example API\" --version \"0.1.0\" --description \"Example API for authentication, tokens, and task management.\" --out .guren/openapi.gen.json",
+    "db:make": "bun ../../packages/cli/src/bin.ts make:migration",
+    "db:migrate": "bun ../../packages/cli/src/bin.ts db:migrate",
+    "db:seed": "bun ../../packages/cli/src/bin.ts db:seed"
   },
   "dependencies": {
     "@guren/cli": "workspace:*",
