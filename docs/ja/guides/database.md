@@ -417,7 +417,12 @@ User.addGlobalScope('tenant', (q) => q.where('tenantId', currentTenantId()))
 User.addGlobalScope('active', (q) => q.where('active', true))
 ```
 
-`all()`、`find()`、`where()`、`newQuery()` のすべてのクエリに自動適用されます。
+すべてのクエリ入口に自動適用されます — `all()`、`find()`、`first()`、`where()` と
+その `whereIn` / `whereNull` / `select` 系、`scope()`、`orderBy()`、`paginate()`
+（行だけでなく件数にも）、`newQuery()`、そしてリレーションを eager load するクエリ
+（この場合は*関連先*モデルのスコープが適用されます）。
+
+これを回避する唯一の方法は、下記のとおり明示的に指定することです。
 
 ### グローバルスコープの一時除外
 
