@@ -22,8 +22,6 @@ function identityWhere(provider: OAuthProvider, profileId: string): Partial<User
   return identities[provider]
 }
 
-const OAUTH_BINDING_KEY = 'oauth.binding'
-
 export default class OAuthController extends Controller {
   private oauth(): OAuthManager {
     return this.make<OAuthManager>('oauth')
@@ -34,22 +32,13 @@ export default class OAuthController extends Controller {
   async redirectToProvider(): Promise<Response> {
     const { provider } = this.validateParams(ProviderParamSchema)
 
-    // Ties `state` to this browser: without it an attacker can authorize their
-    // own account, hold the `code`, and walk a visitor through the callback to
-    // log them into the attacker's account. Writing to the session also makes a
-    // visitor's brand-new session persist across the provider round trip. Bound
-    // only when a session exists to hold it — otherwise the callback has
-    // nothing to present and rejects its own flow.
-    const session = this.auth.session()
-    let binding: string | undefined
-    if (session) {
-      binding = randomUUID()
-      session.set(OAUTH_BINDING_KEY, binding)
-    }
-
+    // Passing the session ties `state` to this browser: the manager keeps a
+    // binding in it that the callback must present back. Without it an
+    // attacker could authorize their own account, hold the `code`, and walk a
+    // visitor through the callback to log them into the attacker's account.
     const { url } = await this.oauth().authorize(provider, {
       redirectTo: this.request.query('redirectTo') ?? undefined,
-      bindTo: binding,
+      session: this.auth.session(),
     })
 
     return this.redirect(url)
@@ -59,11 +48,11 @@ export default class OAuthController extends Controller {
     const { provider } = this.validateParams(ProviderParamSchema)
     const { code, state } = this.validateQuery(CallbackQuerySchema)
 
-    const session = this.auth.session()
-    const binding = session?.get<string>(OAUTH_BINDING_KEY)
-    session?.forget(OAUTH_BINDING_KEY)
-
-    const { profile, redirectTo } = await this.oauth().handleCallback(provider, { code, state, bindTo: binding })
+    const { profile, redirectTo } = await this.oauth().handleCallback(provider, {
+      code,
+      state,
+      session: this.auth.session(),
+    })
 
     // GitHub accounts with a private email are handled upstream:
     // createGitHubOAuthProviderConfig falls back to /user/emails, so

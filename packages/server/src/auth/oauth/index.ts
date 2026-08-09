@@ -121,18 +121,45 @@ export interface OAuthStateConfig {
   allowedRedirectHosts?: string[]
 }
 
+/**
+ * The slice of a session the manager needs to bind an OAuth flow to a
+ * browser. The framework `Session` satisfies it structurally, so controllers
+ * pass `this.auth.session()` straight through; anything else with these three
+ * methods (a cookie jar wrapper, a test double) works too.
+ */
+export interface OAuthBindingSession {
+  get<T = unknown>(key: string): T | undefined
+  set<T = unknown>(key: string, value: T): void
+  forget(key: string): void
+}
+
+/** Session key holding the per-browser binding between authorize and callback. */
+export const OAUTH_SESSION_BINDING_KEY = 'guren:oauth.binding'
+
 export interface OAuthAuthorizeOptions {
   scope?: string[]
   redirectTo?: string
   state?: string
   extraParams?: Record<string, string>
   /**
-   * Bind the flow to the browser that started it.
+   * Session of the browser starting the flow — pass `this.auth.session()`.
    *
-   * Pass a value only this browser can present back — a session id, or the
-   * `binding` this call returns once you store it in the session. Whatever it
-   * is, only its hash reaches the state store, and `handleCallback()` then
-   * requires the same value.
+   * The manager mints a per-browser binding, keeps it in the session, and
+   * hashes it into the state; `handleCallback({ session })` presents it back.
+   * Writing to the session is also what makes a visitor's brand-new session
+   * persist across the provider round trip. `undefined` (no session
+   * middleware, or none established yet) leaves the state unbound — the flow
+   * still works, and `authorize()` warns once about the exposure.
+   */
+  session?: OAuthBindingSession
+  /**
+   * Bind the flow to the browser that started it, keeping the value yourself.
+   *
+   * Prefer `session` — it does the storing and consuming for you. Use this
+   * when the binding lives somewhere else (an encrypted cookie, a test): pass
+   * a value only this browser can present back. Only its hash reaches the
+   * state store, and `handleCallback()` then requires the same value. Takes
+   * precedence over `session` when both are given.
    */
   bindTo?: string
 }
@@ -141,8 +168,14 @@ export interface OAuthCallbackPayload {
   code: string
   state: string
   /**
+   * The same session handed to `authorize({ session })`. The binding is read
+   * from it and removed in one step, so a replayed callback finds nothing.
+   */
+  session?: OAuthBindingSession
+  /**
    * The value handed to `authorize({ bindTo })`, read back from wherever the
-   * app kept it. Required when the state was created with a binding.
+   * app kept it. Required when the state was created with a binding. Takes
+   * precedence over `session` when both are given.
    */
   bindTo?: string
 }
@@ -164,11 +197,11 @@ function warnOnceAboutUnboundState(): void {
   if (warnedAboutUnboundState) return
   warnedAboutUnboundState = true
   console.warn(
-    '[guren] OAuth authorize() was called without `bindTo`, so `state` is not tied to the '
-    + 'browser that started the flow. An attacker can then complete their own authorization in '
-    + "a victim's browser and log the victim into the attacker's account. Pass a per-browser "
-    + 'value (a session id, or a random value you store in the session) as `bindTo`, and hand '
-    + 'the same value back to handleCallback(). See: https://guren.dev/docs/guides/oauth',
+    '[guren] OAuth authorize() was called without `session` or `bindTo`, so `state` is not tied '
+    + 'to the browser that started the flow. An attacker can then complete their own authorization '
+    + "in a victim's browser and log the victim into the attacker's account. Pass the current "
+    + 'session (`this.auth.session()`) as `session` to both authorize() and handleCallback(), or '
+    + 'manage a per-browser value yourself via `bindTo`. See: https://guren.dev/docs/guides/oauth',
   )
 }
 
@@ -189,6 +222,26 @@ function warnOnceAboutDroppedBinding(): void {
     + 'DatabaseOAuthStateStore this usually means the `oauth_states` table has no `binding` '
     + 'column. See: https://guren.dev/docs/guides/oauth',
   )
+}
+
+/**
+ * Mint a fresh binding and park it in the session for the callback. A new
+ * value per flow (rather than the session id) keeps session identifiers out
+ * of the state store's inputs entirely and survives a login-triggered
+ * session-id rotation happening mid-flow.
+ */
+function issueSessionBinding(session: OAuthBindingSession | undefined): string | undefined {
+  if (!session) return undefined
+  const binding = generateToken(DEFAULT_STATE_LENGTH)
+  session.set(OAUTH_SESSION_BINDING_KEY, binding)
+  return binding
+}
+
+function consumeSessionBinding(session: OAuthBindingSession | undefined): string | undefined {
+  if (!session) return undefined
+  const binding = session.get<unknown>(OAUTH_SESSION_BINDING_KEY)
+  session.forget(OAUTH_SESSION_BINDING_KEY)
+  return typeof binding === 'string' ? binding : undefined
 }
 
 const DEFAULT_STATE_EXPIRES_IN = 10 * 60 * 1000
@@ -290,7 +343,8 @@ export class OAuthManager {
 
   async authorize(providerName: string, options: OAuthAuthorizeOptions = {}): Promise<{ url: string; state: string; expiresAt: Date }> {
     const provider = this.getProvider(providerName)
-    if (!options.bindTo) {
+    const bindTo = options.bindTo ?? issueSessionBinding(options.session)
+    if (!bindTo) {
       warnOnceAboutUnboundState()
     }
 
@@ -300,7 +354,7 @@ export class OAuthManager {
       this.stateConfig,
       options.redirectTo,
       options.state,
-      options.bindTo,
+      bindTo,
     )
     const scope = options.scope ?? provider.scopes
     const url = buildOAuthAuthorizeUrl(provider, state, { scope, extraParams: options.extraParams })
@@ -328,7 +382,7 @@ export class OAuthManager {
       providerName,
       this.stateStore,
       this.stateConfig,
-      payload.bindTo,
+      payload.bindTo ?? consumeSessionBinding(payload.session),
     )
     if (!verified) {
       throw new AuthenticationException('Invalid or expired OAuth state.')

@@ -336,13 +336,6 @@ ${identityEntries}
   return identities[provider]
 }
 
-// Where the per-browser binding for the OAuth \`state\` is kept. Without it,
-// \`state\` is unguessable and single-use but transferable: an attacker can
-// authorize their own account, keep the \`code\` unconsumed, and walk a
-// visitor's browser through the callback — logging that visitor into the
-// attacker's account.
-const OAUTH_BINDING_KEY = 'oauth.binding'
-
 export default class OAuthController extends Controller {
   private oauth(): OAuthManager {
     return this.make<OAuthManager>('oauth')
@@ -353,20 +346,14 @@ export default class OAuthController extends Controller {
   async redirectToProvider(): Promise<Response> {
     const { provider } = this.validateParams(ProviderParamSchema)
 
-    // Writing to the session is also what makes a visitor's brand-new session
-    // persist, so the callback request arrives carrying the same one. Bound
-    // only when there is a session to hold the value: sending \`bindTo\` with
-    // nowhere to keep it would make the callback reject its own flow.
-    const session = this.auth.session()
-    let binding: string | undefined
-    if (session) {
-      binding = crypto.randomUUID()
-      session.set(OAUTH_BINDING_KEY, binding)
-    }
-
+    // Passing the session ties \`state\` to this browser: the manager keeps a
+    // binding in it that the callback must present back. Without it an
+    // attacker could authorize their own account, keep the \`code\` unconsumed,
+    // and walk a visitor through the callback — logging that visitor into the
+    // attacker's account.
     const { url } = await this.oauth().authorize(provider, {
       redirectTo: this.request.query('redirectTo') ?? undefined,
-      bindTo: binding,
+      session: this.auth.session(),
     })
 
     return this.redirect(url)
@@ -376,11 +363,11 @@ export default class OAuthController extends Controller {
     const { provider } = this.validateParams(ProviderParamSchema)
     const { code, state } = this.validateQuery(CallbackQuerySchema)
 
-    const session = this.auth.session()
-    const binding = session?.get<string>(OAUTH_BINDING_KEY)
-    session?.forget(OAUTH_BINDING_KEY)
-
-    const { profile, redirectTo } = await this.oauth().handleCallback(provider, { code, state, bindTo: binding })
+    const { profile, redirectTo } = await this.oauth().handleCallback(provider, {
+      code,
+      state,
+      session: this.auth.session(),
+    })
 
     // Lowercased to match how registration stores emails; provider casing
     // isn't guaranteed to be stable across logins.

@@ -41,21 +41,13 @@ const CallbackQuerySchema = z.object({
   state: z.string(),
 })
 
-const OAUTH_BINDING_KEY = 'oauth.binding'
-
 export default class GitHubOAuthController extends Controller {
   async start() {
-    // Ties the flow to this browser — see "Binding state to the browser" below.
-    const session = this.auth.session()
-    let binding: string | undefined
-    if (session) {
-      binding = crypto.randomUUID()
-      session.set(OAUTH_BINDING_KEY, binding)
-    }
-
+    // Passing the session ties the flow to this browser — see
+    // "Binding State to the Browser" below.
     const { url } = await oauth.authorize('github', {
       redirectTo: this.query('redirect_to'),
-      bindTo: binding,
+      session: this.auth.session(),
     })
     return this.redirect(url)
   }
@@ -63,11 +55,11 @@ export default class GitHubOAuthController extends Controller {
   async callback() {
     const { code, state } = this.validateQuery(CallbackQuerySchema)
 
-    const session = this.auth.session()
-    const binding = session?.get<string>(OAUTH_BINDING_KEY)
-    session?.forget(OAUTH_BINDING_KEY)
-
-    const { profile, redirectTo } = await oauth.handleCallback('github', { code, state, bindTo: binding })
+    const { profile, redirectTo } = await oauth.handleCallback('github', {
+      code,
+      state,
+      session: this.auth.session(),
+    })
 
     let user = await User.where('githubId', profile.id).first()
     if (!user) {
@@ -107,39 +99,34 @@ succeeds and logs that visitor into the **attacker's** account. Everything the
 visitor writes afterwards — posts, uploads, a saved payment method — lands in an
 account the attacker can also read.
 
-Pass `bindTo` to close it:
+Pass the session to both legs of the flow to close it:
 
 ```ts
 // starting the flow
-const binding = crypto.randomUUID()
-this.auth.session()?.set('oauth.binding', binding)
-const { url } = await oauth.authorize('github', { bindTo: binding })
+const { url } = await oauth.authorize('github', { session: this.auth.session() })
 
 // in the callback
-const session = this.auth.session()
-const binding = session?.get<string>('oauth.binding')
-session?.forget('oauth.binding')
-await oauth.handleCallback('github', { code, state, bindTo: binding })
+await oauth.handleCallback('github', { code, state, session: this.auth.session() })
 ```
 
-Only a hash of the value reaches the state store, and `handleCallback` refuses a
-state whose binding it cannot match. Writing to the session is also what makes a
-first-time visitor's session persist across the round trip to the provider, so
-the callback request carries the same one.
+`authorize()` mints a fresh per-flow value, keeps it in the session, and stores
+only its hash with the state; `handleCallback()` reads the value back (removing
+it in the same step) and refuses a state whose binding it cannot match. Writing
+to the session is also what makes a first-time visitor's session persist across
+the round trip to the provider, so the callback request carries the same one.
+When `this.auth.session()` returns `undefined` — no session middleware — the
+state is simply left unbound, so nothing breaks; it just stays unprotected.
 
-A session id works as `bindTo` too, but only where a session already exists —
-the value above is generated for the purpose and works for logged-out visitors.
-
-Bind only when there is somewhere to keep the value. Sending `bindTo` from an
-app with no session middleware records a binding the callback can never present,
-and every login then fails with `Invalid or expired OAuth state` — pointing at
-the wrong cause. The scaffolds guard on `this.auth.session()` for that reason.
+If the binding must live somewhere other than the session (an encrypted cookie,
+a native app's secure storage), manage the value yourself with `bindTo`: pass a
+value only this browser can present back to `authorize()`, and hand the same
+value to `handleCallback()`. `bindTo` wins when both options are given.
 
 > [!WARNING]
-> `authorize()` without `bindTo` still works, so apps written against the earlier
-> API keep running, and it logs a warning once per process. Those apps remain
-> open to the attack above until they adopt it. `make:auth` and the `oauth`
-> blueprint generate the bound version.
+> `authorize()` without `session` or `bindTo` still works, so apps written
+> against the earlier API keep running, and it logs a warning once per process.
+> Those apps remain open to the attack above until they adopt it. `make:auth`
+> and the `oauth` blueprint generate the bound version.
 
 ## Redirect After Login
 
@@ -284,7 +271,8 @@ export const oauthStates = sqliteTable('oauth_states', {
 The `binding` column holds the hashed browser binding from
 [Binding State to the Browser](#binding-state-to-the-browser). Without it the
 store cannot persist a binding, and every bound state comes back unbound — which
-silently reverts the protection. Add the column before enabling `bindTo`.
+silently reverts the protection. Add the column before binding flows via
+`session` or `bindTo`.
 
 Expired state rows are removed as they are encountered; call `store.deleteExpired()` from a scheduled job for bulk cleanup. Redis remains available for apps that already run it:
 
@@ -349,7 +337,7 @@ describe('GitHub OAuth', () => {
 
 ## Best Practices
 
-1. **Never skip state verification**: `handleCallback` verifies and consumes the state automatically — don't build a custom callback path that trusts `code` alone. Always pass `bindTo` as well; state verification on its own does not tell you the flow started in the same browser (see [Binding State to the Browser](#binding-state-to-the-browser)).
+1. **Never skip state verification**: `handleCallback` verifies and consumes the state automatically — don't build a custom callback path that trusts `code` alone. Always pass `session` (or `bindTo`) as well; state verification on its own does not tell you the flow started in the same browser (see [Binding State to the Browser](#binding-state-to-the-browser)).
 
 2. **Set `allowedRedirectHosts` explicitly**: without it, only app-relative `redirectTo` paths are honored, which is the safest default. Add hosts only if you redirect to a separate domain after login.
 

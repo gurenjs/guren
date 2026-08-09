@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, mock } from 'bun:test'
 import {
   OAuthManager,
   MemoryOAuthStateStore,
+  OAUTH_SESSION_BINDING_KEY,
   buildOAuthAuthorizeUrl,
   createDiscordOAuthProviderConfig,
   createGitHubOAuthProviderConfig,
@@ -9,6 +10,7 @@ import {
   createOAuthState,
   verifyOAuthState,
   sanitizeOAuthRedirect,
+  type OAuthBindingSession,
   type OAuthProviderConfig,
 } from '../../src/auth/oauth'
 import { hashToken } from '../../src/auth/utils'
@@ -363,6 +365,76 @@ describe('OAuthManager', () => {
 
     const allowlisted = await roundTrip('https://trusted.example.com/welcome')
     expect(allowlisted.redirectTo).toBe('https://trusted.example.com/welcome')
+  })
+
+  describe('session-bound flows', () => {
+    const createSessionStub = (): OAuthBindingSession & { data: Map<string, unknown> } => {
+      const data = new Map<string, unknown>()
+      return {
+        data,
+        get: <T,>(key: string) => data.get(key) as T | undefined,
+        set: (key: string, value: unknown) => { data.set(key, value) },
+        forget: (key: string) => { data.delete(key) },
+      }
+    }
+
+    const createManager = () => {
+      const manager = new OAuthManager({ stateStore: new MemoryOAuthStateStore() })
+      manager.registerProvider('github', githubConfig)
+      return manager
+    }
+
+    it('mints a binding into the session and accepts the callback carrying it', async () => {
+      const manager = createManager()
+      installOAuthFetchMock({ access_token: 'token-123' }, { id: 42 })
+
+      const session = createSessionStub()
+      const { state } = await manager.authorize('github', { session })
+      expect(session.get(OAUTH_SESSION_BINDING_KEY)).toBeString()
+
+      const { profile } = await manager.handleCallback('github', { code: 'auth-code', state, session })
+      expect(profile.id).toBe('42')
+    })
+
+    it('rejects the callback when a different session presents the state', async () => {
+      const manager = createManager()
+      installOAuthFetchMock({ access_token: 'token-123' }, { id: 42 })
+
+      const startingSession = createSessionStub()
+      const { state } = await manager.authorize('github', { session: startingSession })
+
+      // The victim's browser has its own session, which never saw authorize().
+      const otherSession = createSessionStub()
+      await expect(
+        manager.handleCallback('github', { code: 'auth-code', state, session: otherSession }),
+      ).rejects.toThrow('Invalid or expired OAuth state.')
+    })
+
+    it('consumes the session binding even when verification fails', async () => {
+      const manager = createManager()
+      installOAuthFetchMock({ access_token: 'token-123' }, { id: 42 })
+
+      const session = createSessionStub()
+      await manager.authorize('github', { session })
+
+      await expect(
+        manager.handleCallback('github', { code: 'auth-code', state: 'forged-state', session }),
+      ).rejects.toThrow()
+      expect(session.get(OAUTH_SESSION_BINDING_KEY)).toBeUndefined()
+    })
+
+    it('prefers an explicit bindTo over the session', async () => {
+      const manager = createManager()
+      installOAuthFetchMock({ access_token: 'token-123' }, { id: 42 })
+
+      const session = createSessionStub()
+      const { state } = await manager.authorize('github', { bindTo: 'external-value', session })
+      // The session was not written to — the caller owns the binding.
+      expect(session.data.size).toBe(0)
+
+      const { profile } = await manager.handleCallback('github', { code: 'auth-code', state, bindTo: 'external-value' })
+      expect(profile.id).toBe('42')
+    })
   })
 
   it('reports the provider verification signal from the configured key', async () => {

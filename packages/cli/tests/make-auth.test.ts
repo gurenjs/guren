@@ -431,22 +431,18 @@ export const posts = pgTable('posts', {
       expect(controller).toContain('this.oauth().authorize(provider')
       expect(controller).toContain('this.oauth().handleCallback(provider')
       // OAuth accounts are passwordless — no synthetic password is generated
-      // or hashed. (`randomUUID` still appears, for the state binding below.)
+      // or hashed.
       expect(controller).not.toContain('password:')
       expect(controller).not.toContain('password: randomUUID')
 
       // `state` alone is transferable between browsers: an attacker can
       // authorize their own account, hold the `code`, and walk a visitor
-      // through the callback to log them into the attacker's account. The
-      // binding is what makes the state useless in any other browser.
-      expect(controller).toContain('bindTo: binding')
-      expect(controller).toContain('{ code, state, bindTo: binding }')
-      expect(controller).toContain('session.set(OAUTH_BINDING_KEY, binding)')
-      expect(controller).toContain('session?.forget(OAUTH_BINDING_KEY)')
-      // Guarded on a session existing: a binding the callback can never
-      // present would fail every login with "Invalid or expired OAuth state".
-      expect(controller).toContain('const session = this.auth.session()')
-      expect(controller).toContain('if (session) {')
+      // through the callback to log them into the attacker's account. Handing
+      // the session to the manager is what binds the state to this browser.
+      expect(controller).toContain('session: this.auth.session()')
+      // Both legs must present the same session — authorize() stores the
+      // binding in it, handleCallback() reads it back.
+      expect((controller.match(/session: this\.auth\.session\(\)/g) ?? []).length).toBe(2)
       expect(controller).toContain('already exists. Sign in with the method you originally used.')
 
       // Returning an email is not a claim that the provider checked it, so the

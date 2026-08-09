@@ -64,42 +64,29 @@ describe('OAuthController', () => {
   describe('redirectToProvider()', () => {
     it('redirects to the provider authorization URL', async () => {
       const oauth = createOAuthStub()
-      const controller = createController()
-      const ctx = createControllerContext('http://blog.test/auth/github', {}, { oauth }) as unknown as Context
-      controller.setContext(ctx)
-      ;(ctx as unknown as { req: { param: () => Record<string, string> } }).req.param = () => ({ provider: 'github' })
-
-      const response = await controller.redirectToProvider()
-
-      // `bindTo` ties the flow to this browser: without it an attacker can
-      // authorize their own account, hold the `code`, and walk a visitor
-      // through the callback to log them into the attacker's account.
-      expect(oauth.authorize).toHaveBeenCalledWith('github', {
-        redirectTo: undefined,
-        bindTo: expect.any(String),
-      })
-      expect(response.status).toBe(302)
-      expect(response.headers.get('Location')).toBe('https://github.com/login/oauth/authorize?client_id=abc')
-    })
-
-    it('hands the callback the same binding it stored in the session', async () => {
-      const oauth = createOAuthStub()
       const session = createSessionStub()
       const controller = createController(session)
       const ctx = createControllerContext('http://blog.test/auth/github', {}, { oauth }) as unknown as Context
       controller.setContext(ctx)
       ;(ctx as unknown as { req: { param: () => Record<string, string> } }).req.param = () => ({ provider: 'github' })
 
-      await controller.redirectToProvider()
+      const response = await controller.redirectToProvider()
 
-      const { bindTo } = (oauth.authorize as unknown as { mock: { calls: Array<[string, { bindTo: string }]> } }).mock.calls[0][1]
-      expect(session.set).toHaveBeenCalledWith('oauth.binding', bindTo)
-      expect(session.get('oauth.binding')).toBe(bindTo)
+      // Passing the session lets the manager bind `state` to this browser:
+      // without it an attacker can authorize their own account, hold the
+      // `code`, and walk a visitor through the callback to log them into the
+      // attacker's account.
+      expect(oauth.authorize).toHaveBeenCalledWith('github', {
+        redirectTo: undefined,
+        session,
+      })
+      expect(response.status).toBe(302)
+      expect(response.headers.get('Location')).toBe('https://github.com/login/oauth/authorize?client_id=abc')
     })
 
-    // Sending a binding the callback can never present would make every login
-    // fail with "Invalid or expired OAuth state" — pointing at the wrong cause.
-    it('sends no binding when there is no session to hold it', async () => {
+    // The manager treats a missing session as an unbound flow; forwarding it
+    // untouched is what keeps a session-less setup working.
+    it('passes the missing session through so the flow stays unbound', async () => {
       const oauth = createOAuthStub()
       // `null`, not `undefined` — the default parameter would substitute a stub.
       const controller = createController(null as unknown as ReturnType<typeof createSessionStub>)
@@ -109,7 +96,7 @@ describe('OAuthController', () => {
 
       const response = await controller.redirectToProvider()
 
-      expect(oauth.authorize).toHaveBeenCalledWith('github', { redirectTo: undefined, bindTo: undefined })
+      expect(oauth.authorize).toHaveBeenCalledWith('github', { redirectTo: undefined, session: null })
       expect(response.status).toBe(302)
     })
   })
@@ -123,13 +110,17 @@ describe('OAuthController', () => {
       })
       mockUserWhere.mockResolvedValue([{ id: 1, email: 'ada@example.com', githubId: 'gh-1' }])
 
-      const controller = createController()
+      const session = createSessionStub()
+      const controller = createController(session)
       const ctx = createControllerContext('http://blog.test/auth/github/callback?code=abc&state=xyz', {}, { oauth }) as unknown as Context
       controller.setContext(ctx)
       ;(ctx as unknown as { req: { param: () => Record<string, string> } }).req.param = () => ({ provider: 'github' })
 
       const response = await controller.callback()
 
+      // The manager reads the binding back from the same session that
+      // authorize() stored it in.
+      expect(oauth.handleCallback).toHaveBeenCalledWith('github', { code: 'abc', state: 'xyz', session })
       expect(mockUserCreate).not.toHaveBeenCalled()
       expect(response.status).toBe(302)
       expect(response.headers.get('Location')).toBe('/dashboard')
