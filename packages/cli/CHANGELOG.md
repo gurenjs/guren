@@ -1,5 +1,121 @@
 # @guren/cli
 
+## 2.2.0
+
+### Minor Changes
+
+- 89adb3f: Typed translation keys and translation catalog checks
+
+  `guren codegen` now emits `.guren/translations.gen.ts` for apps with a
+  `lang/` directory: a `TranslationKey` union built from every
+  `lang/<locale>/*.json` catalog (namespace = file name, nested keys
+  flattened to dot notation), plus declaration-merging augmentations that
+  register it with the server and client. `this.t()` / `this.tc()` in
+  controllers and `useTranslation()` in pages then autocomplete keys and
+  reject unknown ones at compile time. Apps without `lang/` (or without the
+  generated file) keep plain `string` keys — the new `GurenTranslationKeys`
+  registry defaults to empty. The Vite route-types plugin watches `lang/`
+  and regenerates on change.
+
+  `guren check` gains translation catalog checks, content-activated like
+  `--docs`: unparseable catalog JSON (fail — the loader silently skips such
+  files), keys missing from individual locales (fail — they render in the
+  fallback language), and interpolation placeholders that differ between
+  locales for the same key (warn). `guren check --i18n` runs them alone and
+  exits non-zero on failures.
+
+### Patch Changes
+
+- 80ef7b1: Make the generated private-channel check the check that actually runs
+
+  `make:channel --private` generated a `PrivateChannel` subclass with an
+  `authorize(ctx)` method, and `make:channel --presence` a `join(ctx)`. Neither
+  ever ran. `BroadcastManager.authorize()` resolves a channel only through the
+  callbacks registered with `channel()` / `privateChannel()` / `presenceChannel()`
+  and never calls a method on a channel instance, so both were dead code — with no
+  TODO or comment to say so. The presence one could not have worked in any case:
+  its signature contradicted the inherited `join(member)`, which is what adds an
+  already-authorized member.
+
+  Meanwhile the `broadcasting` blueprint registered the callback that _did_ run:
+
+  ```ts
+  broadcast.privateChannel(userFeed.getBaseName(), () => true);
+  ```
+
+  Allow-all, on `users.{id}.feed`, next to a generated file that reads as though it
+  authorizes. That registration also defeats the manager's own fail-closed default,
+  which denies unregistered `private-`/`presence-` names.
+
+  The generated methods now take the `ChannelAuthorizer` signature
+  (`channelName, user`) so they can be registered, the presence hook is
+  `authorizeJoin()` to stop colliding with `join(member)`, and a pattern carrying
+  `{id}` gets an ownership check rather than a bare "is logged in". The blueprint
+  registers the channel's own method.
+
+  `BroadcastManager.authorize()` also normalizes its result. Callers read anything
+  that is not `false`/`null` as authorized, so an authorizer with an
+  implicit-`undefined` return path used to grant access; it now denies.
+
+- 80ef7b1: Let the OAuth manager keep the browser binding in the session itself
+
+  Binding a flow via `bindTo` worked but pushed four steps into every
+  controller: mint a random value, store it in the session, read it back in the
+  callback, forget it — guarded on the session existing, twice. Every scaffold
+  and example carried the same twelve lines.
+
+  `authorize()` and `handleCallback()` now also accept a `session`. Hand them
+  `this.auth.session()` and the manager mints the per-flow binding, parks it in
+  the session under `OAUTH_SESSION_BINDING_KEY`, and consumes it during callback
+  verification — reading and removing it in one step, so a replayed callback
+  finds nothing. A missing session (no session middleware) flows through as an
+  unbound state exactly as before, warning included. The parameter is typed as
+  `OAuthBindingSession` — the three session methods the manager needs — so the
+  framework session satisfies it structurally and tests can pass a plain stub.
+
+  `bindTo` remains for bindings kept elsewhere (an encrypted cookie, secure
+  storage) and takes precedence when both are given. `make:auth`, the `oauth`
+  blueprint, the docs, and the blog example now pass `session` instead of
+  hand-rolling the plumbing.
+
+- 80ef7b1: Let OAuth `state` be bound to the browser that started the flow
+
+  `createOAuthState` stored `{ provider, redirectTo, expiresAt }` and
+  `verifyOAuthState` checked only that the provider matched. Nothing tied the
+  state to a browser, and the manager is a process-wide singleton, so a state
+  minted for one browser was consumable by any other. `state` was unguessable and
+  single-use, but _transferable_ — which is the one property it exists to prevent
+  (RFC 6749 §10.12).
+
+  That is login CSRF. An attacker requests `/auth/github` on the target app and
+  captures the `state` from the redirect, separately authorizes the app against
+  their own provider account and captures the `code` without letting their browser
+  reach the callback, then induces a visitor into a top-level navigation to
+  `/auth/github/callback?code=…&state=…`. The state verifies, the code exchanges
+  for the attacker's profile, and the visitor's session is logged into the
+  attacker's account. The visitor keeps using the app believing it is theirs, so
+  whatever they write next — posts, uploads, a connected payment method — lands in
+  an account the attacker can read. It could not be fixed from application code:
+  `handleCallback()` verified state internally and accepted no session-bound value.
+
+  `authorize()` now takes `bindTo` and `handleCallback()` takes it back. Only a
+  hash of the value reaches the state store, and comparison is timing-safe. Pass a
+  value only that browser can present — a session id, or a random value stored in
+  the session, which also makes a logged-out visitor's session persist across the
+  round trip.
+
+  A state created without a binding still verifies, so apps written against the
+  earlier API keep working; `authorize()` warns once per process when called
+  without `bindTo`, and those apps stay exposed until they adopt it. `make:auth`,
+  the `oauth` blueprint, the docs, and the blog example all pass it now.
+
+- Updated dependencies [80ef7b1]
+- Updated dependencies [80ef7b1]
+- Updated dependencies [80ef7b1]
+- Updated dependencies [80ef7b1]
+  - @guren/core@1.5.1
+  - @guren/orm@2.2.0
+
 ## 2.1.1
 
 ### Patch Changes

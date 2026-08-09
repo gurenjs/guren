@@ -1,5 +1,59 @@
 # @guren/orm
 
+## 2.2.0
+
+### Minor Changes
+
+- 80ef7b1: Refuse, rather than silently drop, conditions the adapter cannot express
+
+  On an adapter implementing neither `findManyAdvanced` nor `countAdvanced`,
+  `QueryBuilder` flattened its conditions into a simple where-object and passed
+  `where: undefined` whenever that conversion failed — discarding every condition,
+  global scopes included, and returning the whole table. It now throws.
+
+  This is a **runtime behavior change beyond the global-scope fix it came from**,
+  which is why it is a minor rather than a patch. The conversion fails for more
+  than the exotic cases: every comparison operator (`>`, `<`, `>=`, `<=`, `!=`,
+  `like`), `not in`, `is not null`, and any `orWhere` group. So on such an adapter
+  `Post.where('views', '>', 100).get()` now throws where it previously returned
+  rows — rows that were unfiltered, and therefore wrong, but returned.
+
+  The shipped `DrizzleAdapter` implements both methods and never reaches this
+  path. Custom adapters and hand-rolled test doubles are what this affects; the
+  fix is to implement `findManyAdvanced`/`countAdvanced`.
+
+### Patch Changes
+
+- 80ef7b1: Apply global scopes on every query entry point, not just four of them
+
+  `defaultScope` and the `addGlobalScope()` registry were applied by `newQuery()`,
+  and by `all()` / `find()` / `first()` which branch into it. Every other entry
+  point skipped them: `where()` and its `whereNull` / `whereNotNull` / `whereIn` /
+  `whereNotIn` / `select` / `scope` siblings constructed a bare `QueryBuilder`, and
+  `orderBy()` / `paginate()` called the adapter directly. The relation loaders go
+  through `where()`, so eager loading dropped the _related_ model's scopes too.
+
+  The docs present global scopes as a filter that always applies, name
+  multi-tenancy as the first use case, and state that `where()` is covered — so an
+  app following the documented pattern got no tenant isolation on the most common
+  entry point. `SoftDeletes` is implemented as a global scope and inherited every
+  hole, which is how a scaffolded `index()` — `make:feature` generates it as
+  `Model.paginate(...)` on a route with no auth — served soft-deleted rows.
+  `paginate()` leaked the unscoped row count through `meta.total` as well.
+
+  All of these now route through the scope-applying builder. `newQuery()` with no
+  scopes registered constructs exactly what the bare builder did, so an app that
+  uses no global scopes is unaffected. `withoutGlobalScope(s)` remains the way out.
+
+- 80ef7b1: Refuse a query whose conditions collide on a scoped column
+
+  On an adapter without `findManyAdvanced`/`countAdvanced`, conditions are
+  flattened into one where-object, so a second condition on a field overwrote the
+  first. A global scope pinning `tenantId` was therefore replaced by a caller's own
+  `where('tenantId', …)` — the filter meant to enforce isolation handed back
+  another tenant's rows. Only a repeat of the same value collapses now; a genuine
+  conflict throws, like the operators that already cannot be flattened.
+
 ## 2.1.0
 
 ### Minor Changes

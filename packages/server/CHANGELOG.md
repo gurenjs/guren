@@ -1,5 +1,317 @@
 # @guren/server
 
+## 2.2.0
+
+### Minor Changes
+
+- ee5a918: Wire i18n into the application: `createApp({ i18n })`, controller translation helpers, and Inertia `_i18n` shared props
+
+  The i18n subsystem (I18nManager, Translator, pluralization, loaders) existed
+  but had no path from an app's configuration into a request. `createApp` now
+  accepts an `i18n` option:
+
+  ```ts
+  createApp({
+    i18n: {
+      supported: ["en", "ja"], // first entry is the default fallback
+      path: "lang", // lang/<locale>/*.json via JsonLoader (default)
+      // loader: new MemoryLoader(...)  // e.g. bundled messages on serverless
+    },
+  });
+  ```
+
+  When set, `I18nServiceProvider` builds the `i18n` container binding from the
+  options, preloads every supported locale during `boot()`, and mounts
+  `detectLocaleMiddleware` (query → cookie → `Accept-Language`, opt out with
+  `detect: false`). Apps that register their own `I18nServiceProvider` subclass
+  keep ownership of the wiring.
+
+  Controllers gain request-locale sugar: `this.t(key, replacements?)`,
+  `this.tc(key, count, replacements?)`, and `this.locale`. They use the
+  request-scoped translator bound by the locale middleware when present, and
+  fall back to a translator scoped to the resolved locale from the container's
+  `i18n` binding (then the `setI18n()` global) — the same resolution order the
+  Inertia `<html lang>` default already used.
+
+  Inertia responses share the resolved locale and its messages as the `_i18n`
+  prop (`{ locale, fallbackLocale, messages }`, active locale plus fallback
+  only; disable with `share: false`), laying the groundwork for a client-side
+  `useTranslation()` hook.
+
+- 89adb3f: Typed translation keys and translation catalog checks
+
+  `guren codegen` now emits `.guren/translations.gen.ts` for apps with a
+  `lang/` directory: a `TranslationKey` union built from every
+  `lang/<locale>/*.json` catalog (namespace = file name, nested keys
+  flattened to dot notation), plus declaration-merging augmentations that
+  register it with the server and client. `this.t()` / `this.tc()` in
+  controllers and `useTranslation()` in pages then autocomplete keys and
+  reject unknown ones at compile time. Apps without `lang/` (or without the
+  generated file) keep plain `string` keys — the new `GurenTranslationKeys`
+  registry defaults to empty. The Vite route-types plugin watches `lang/`
+  and regenerates on change.
+
+  `guren check` gains translation catalog checks, content-activated like
+  `--docs`: unparseable catalog JSON (fail — the loader silently skips such
+  files), keys missing from individual locales (fail — they render in the
+  fallback language), and interpolation placeholders that differ between
+  locales for the same key (warn). `guren check --i18n` runs them alone and
+  exits non-zero on failures.
+
+- 80ef7b1: Let the OAuth manager keep the browser binding in the session itself
+
+  Binding a flow via `bindTo` worked but pushed four steps into every
+  controller: mint a random value, store it in the session, read it back in the
+  callback, forget it — guarded on the session existing, twice. Every scaffold
+  and example carried the same twelve lines.
+
+  `authorize()` and `handleCallback()` now also accept a `session`. Hand them
+  `this.auth.session()` and the manager mints the per-flow binding, parks it in
+  the session under `OAUTH_SESSION_BINDING_KEY`, and consumes it during callback
+  verification — reading and removing it in one step, so a replayed callback
+  finds nothing. A missing session (no session middleware) flows through as an
+  unbound state exactly as before, warning included. The parameter is typed as
+  `OAuthBindingSession` — the three session methods the manager needs — so the
+  framework session satisfies it structurally and tests can pass a plain stub.
+
+  `bindTo` remains for bindings kept elsewhere (an encrypted cookie, secure
+  storage) and takes precedence when both are given. `make:auth`, the `oauth`
+  blueprint, the docs, and the blog example now pass `session` instead of
+  hand-rolling the plumbing.
+
+### Patch Changes
+
+- 80ef7b1: Carry the policy's own denial through the authorization middleware
+
+  `authorizeMiddleware` and `authorizeResourceMiddleware` called `allows()`,
+  discarded the response, and threw a generic 403 — so a policy answering with
+  `denyAsNotFound()` produced a 404 through `Controller.authorize()` and a 403
+  through the middleware. Both now go through the same response, keeping the
+  policy's message and status; `options.message` still overrides. Multi-ability
+  (`any`) checks have no single response to carry and stay generic.
+
+  Gate and policy `before` hooks are normalized too: previously anything that was
+  not a boolean was read as "keep checking", so a `Response.deny()` returned from
+  `before` was dropped and a permissive ability method then allowed the action.
+  Only `undefined` continues. `GateCallback`, `GateBeforeCallback`, `Policy.before`
+  and `definePolicy`'s `before` accept `PolicyResult` to match.
+
+- 80ef7b1: Make the generated private-channel check the check that actually runs
+
+  `make:channel --private` generated a `PrivateChannel` subclass with an
+  `authorize(ctx)` method, and `make:channel --presence` a `join(ctx)`. Neither
+  ever ran. `BroadcastManager.authorize()` resolves a channel only through the
+  callbacks registered with `channel()` / `privateChannel()` / `presenceChannel()`
+  and never calls a method on a channel instance, so both were dead code — with no
+  TODO or comment to say so. The presence one could not have worked in any case:
+  its signature contradicted the inherited `join(member)`, which is what adds an
+  already-authorized member.
+
+  Meanwhile the `broadcasting` blueprint registered the callback that _did_ run:
+
+  ```ts
+  broadcast.privateChannel(userFeed.getBaseName(), () => true);
+  ```
+
+  Allow-all, on `users.{id}.feed`, next to a generated file that reads as though it
+  authorizes. That registration also defeats the manager's own fail-closed default,
+  which denies unregistered `private-`/`presence-` names.
+
+  The generated methods now take the `ChannelAuthorizer` signature
+  (`channelName, user`) so they can be registered, the presence hook is
+  `authorizeJoin()` to stop colliding with `join(member)`, and a pattern carrying
+  `{id}` gets an ownership check rather than a bare "is logged in". The blueprint
+  registers the channel's own method.
+
+  `BroadcastManager.authorize()` also normalizes its result. Callers read anything
+  that is not `false`/`null` as authorized, so an authorizer with an
+  implicit-`undefined` return path used to grant access; it now denies.
+
+- 05f6353: Fix CSRF verification accepting a guest token on a request that carries a session
+
+  `verifyCsrfToken` picked its validation mode from the submitted token alone: a
+  token without a `sid` claim took the stateless double-submit path, which only
+  compares the token against the `XSRF-TOKEN` cookie. Because that check ran even
+  when the request carried a session, a guest-mode token — which anyone can mint
+  by visiting the site — could authorize a state-changing request for a logged-in
+  user, provided the attacker also controlled the `XSRF-TOKEN` cookie. That cookie
+  carries no `Domain` restriction and no `__Host-` prefix, so any sibling
+  subdomain of the same site can set it, and a same-site request still sends the
+  `SameSite=Lax` session cookie. The token-minting path already enforced this rule;
+  only verification was missing it.
+
+  Verification now fixes the mode from the request — whether it carries a bindable
+  session — and requires the token to be in that mode.
+
+  Issuing had to move with it. A session created during the current request stays
+  `isNew` for its whole lifetime, so the response that logs a user in was minting a
+  guest token for a session that later requests authenticate with; under the new
+  rule that token would be rejected on the next mutation. Three changes keep
+  issuing in step:
+
+  - `Session` gains an optional `willPersist()` reporting whether the session
+    survives the response under its current id. `bindableSessionId` asks that
+    instead of `!isNew`.
+  - `getCsrfToken()` now tracks the session as it stands at the moment of the
+    call, re-issuing when a handler changes it. Previously the first call in a
+    request fixed the answer, so a handler that logged a user in and then
+    rendered the token put a guest token in the response body while the cookie
+    carried a session-bound one — and submitting that form was rejected.
+  - Excluded paths (and the dev MCP endpoint) skip verification but no longer
+    skip issuance, so an exempt endpoint that establishes a session — an OAuth
+    callback — still hands back a bound token.
+
+  `createCsrfMiddleware` settles the response cookie after the handler returns, so
+  it must be mounted directly inside the session middleware. Middleware layered
+  between the two that rotates or invalidates the session after its own
+  `await next()` moves the id after CSRF has committed to a token. The automatic
+  registration in `AuthServiceProvider` already mounts them adjacently; the
+  requirement is now documented for hand-composed chains.
+
+- 80ef7b1: Fix a policy denial being read as an approval
+
+  `Policy` ships `deny()`, `denyWithStatus()` and `denyAsNotFound()`, which return
+  an `AuthorizationResponse` object rather than `false`. `Gate.check()` returned
+  the policy method's value unchanged, so every consumer truthy-tested that object
+  and read the denial as an approval: `authorize()` did not throw, `allows()` and
+  `Controller.can()` returned truthy, `denies()` returned `false`, `inspect()`
+  reported `allowed: true`, and `authorizeMiddleware`'s `if (!authorized)` guard
+  passed. A policy written as
+
+  ```typescript
+  update(user: AuthUser | null, post: Post) {
+    return user?.id === post.authorId ? true : this.deny('You do not own this post.')
+  }
+  ```
+
+  therefore let any user through the exact check meant to stop them. Nothing
+  flagged it: the helpers are `protected`, so a policy ability method is their only
+  possible call site, and `PolicyMethod` was exported but never applied to policy
+  classes, so the method's return type was inferred from its body with nothing to
+  check it against.
+
+  `Gate` now normalizes every policy and gate return value through one path. An
+  `AuthorizationResponse` is honoured as written, `true` allows, and anything else
+  denies — unknown shapes fail closed rather than open. A new `checkResponse()`
+  keeps the full response so `inspect()` reports the policy's own message, and
+  `authorize()` propagates `denyWithStatus()` / `denyAsNotFound()` into the thrown
+  exception's status instead of flattening every denial to 403.
+
+  `PolicyMethod` and `definePolicy()` now accept `PolicyResult`
+  (`boolean | AuthorizationResponse`), so the type matches what `Policy` has always
+  offered. `PolicyResult` and the `isAuthorizationResponse()` guard are exported.
+
+- ee5a918: Make translation interpolation literal-safe
+
+  `Translator.applyReplacements` built its `:key`/`{key}` patterns from the
+  raw replacement key and passed the value straight to `String#replace`, so a
+  key containing regex metacharacters could throw or match the wrong text,
+  and a value containing `$` sequences (e.g. user input with `$&`) was
+  expanded instead of inserted literally. Keys are now regex-escaped and
+  values replaced via a callback, keeping both fully literal.
+
+- 80ef7b1: Key the OAuth session binding by state, not by one shared slot
+
+  `authorize({ session })` parked its binding under a single session key and
+  `handleCallback({ session })` deleted that key regardless of which state the
+  callback carried. Two consequences, both measured:
+
+  - A browser could only have one flow in flight. Open two tabs, or start over
+    with a different provider, and the second `authorize()` overwrote the first's
+    binding — so at least one login failed. Completing the older flow first failed
+    _both_, because it consumed the newer flow's binding on its way out.
+  - A callback carrying a state the browser never started still stripped the
+    binding. Anyone could navigate a visitor to `/callback?code=x&state=x`
+    mid-login and lock them out of the login they had actually begun.
+
+  Bindings are now filed under the hash of the state they belong to, and a
+  callback takes only its own. Concurrent flows are independent, and a forged
+  callback finds nothing to remove. The list is capped at five pending flows per
+  browser and prunes expired entries as it goes.
+
+  `OAUTH_SESSION_BINDING_KEY` and `OAuthBindingSession` are also exported from
+  `@guren/server` and `@guren/core`, which the previous change documented as
+  public API but left reachable only through the deep module path.
+
+- 80ef7b1: Let OAuth `state` be bound to the browser that started the flow
+
+  `createOAuthState` stored `{ provider, redirectTo, expiresAt }` and
+  `verifyOAuthState` checked only that the provider matched. Nothing tied the
+  state to a browser, and the manager is a process-wide singleton, so a state
+  minted for one browser was consumable by any other. `state` was unguessable and
+  single-use, but _transferable_ — which is the one property it exists to prevent
+  (RFC 6749 §10.12).
+
+  That is login CSRF. An attacker requests `/auth/github` on the target app and
+  captures the `state` from the redirect, separately authorizes the app against
+  their own provider account and captures the `code` without letting their browser
+  reach the callback, then induces a visitor into a top-level navigation to
+  `/auth/github/callback?code=…&state=…`. The state verifies, the code exchanges
+  for the attacker's profile, and the visitor's session is logged into the
+  attacker's account. The visitor keeps using the app believing it is theirs, so
+  whatever they write next — posts, uploads, a connected payment method — lands in
+  an account the attacker can read. It could not be fixed from application code:
+  `handleCallback()` verified state internally and accepted no session-bound value.
+
+  `authorize()` now takes `bindTo` and `handleCallback()` takes it back. Only a
+  hash of the value reaches the state store, and comparison is timing-safe. Pass a
+  value only that browser can present — a session id, or a random value stored in
+  the session, which also makes a logged-out visitor's session persist across the
+  round trip.
+
+  A state created without a binding still verifies, so apps written against the
+  earlier API keep working; `authorize()` warns once per process when called
+  without `bindTo`, and those apps stay exposed until they adopt it. `make:auth`,
+  the `oauth` blueprint, the docs, and the blog example all pass it now.
+
+- 80ef7b1: Persist the OAuth state binding in the shared state stores
+
+  `createOAuthState` recorded the browser binding in the payload, but
+  `DatabaseOAuthStateStore` and `RedisOAuthStateStore` neither wrote nor restored
+  it. Every bound state came back unbound, and `verifyOAuthState` then accepted
+  any browser — so `authorize({ bindTo })` was inert on both shared stores,
+  including the database store the docs recommend for production. Only the
+  in-process memory store, which the docs tell you not to deploy, carried it.
+
+  Both stores now round-trip `binding`. The database store needs a nullable
+  `binding` column on the `oauth_states` table; without it the state cannot be
+  persisted at all.
+
+  `bindingMatches` also moves to `secureCompare`, the hex-decoding comparator, to
+  match the other stored-hash comparison in the package.
+
+- 80ef7b1: Stop binding the managed Vite dev server to every interface
+
+  `Application.listen()` starts a Vite dev server on every non-production boot,
+  and both the launcher and `gurenVitePlugin` replaced Vite's localhost-only
+  default with `host: true`. Vite serves any file under its root — transformed
+  source for `.ts`/`.tsx`, raw bytes for everything else — with no
+  authentication, no origin check and no loopback gate. Anyone on the same
+  network could read a developer's application source, and the scaffold's default
+  `DATABASE_URL=./data/guren.db` puts the SQLite database inside that root and
+  outside Vite's `server.fs.deny`, so `GET http://<dev-machine>:5173/data/guren.db`
+  returned the users table — password hashes included — to any LAN peer.
+
+  The framework already treats LAN reachability as in scope: `/_guren/mcp` and
+  `/_guren/docs` are gated on a loopback socket peer precisely because templates
+  bind `0.0.0.0`. The dev server it starts itself had no equivalent gate.
+
+  `host` is now left unset, so Vite's own default applies and the project's
+  `vite.config.ts` decides. Exposing the dev server on the network is an explicit
+  opt-in — `--host`, `server.host` in `vite.config.ts`, or
+  `app.listen({ vite: { host: true } })`.
+
+  `preview.host` is unchanged: `vite preview` serves only `build.outDir`, never
+  the project root, so it carries none of this.
+
+  `resolveViteDevServerConfig()` is exported for callers that need the inline
+  config the managed dev server would start with.
+
+- Updated dependencies [80ef7b1]
+- Updated dependencies [80ef7b1]
+- Updated dependencies [80ef7b1]
+  - @guren/orm@2.2.0
+
 ## 2.1.1
 
 ### Patch Changes

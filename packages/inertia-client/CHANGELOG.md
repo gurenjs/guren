@@ -1,5 +1,51 @@
 # @guren/inertia-client
 
+## 1.1.0
+
+### Minor Changes
+
+- 89adb3f: Typed translation keys and translation catalog checks
+
+  `guren codegen` now emits `.guren/translations.gen.ts` for apps with a
+  `lang/` directory: a `TranslationKey` union built from every
+  `lang/<locale>/*.json` catalog (namespace = file name, nested keys
+  flattened to dot notation), plus declaration-merging augmentations that
+  register it with the server and client. `this.t()` / `this.tc()` in
+  controllers and `useTranslation()` in pages then autocomplete keys and
+  reject unknown ones at compile time. Apps without `lang/` (or without the
+  generated file) keep plain `string` keys — the new `GurenTranslationKeys`
+  registry defaults to empty. The Vite route-types plugin watches `lang/`
+  and regenerates on change.
+
+  `guren check` gains translation catalog checks, content-activated like
+  `--docs`: unparseable catalog JSON (fail — the loader silently skips such
+  files), keys missing from individual locales (fail — they render in the
+  fallback language), and interpolation placeholders that differ between
+  locales for the same key (warn). `guren check --i18n` runs them alone and
+  exits non-zero on failures.
+
+- 3c6fd6f: Add `useTranslation()` for the `_i18n` shared prop
+
+  Pages rendered by a server configured with `createApp({ i18n })` can now
+  translate on the client:
+
+  ```tsx
+  import { useTranslation } from "@guren/inertia-client";
+
+  const { t, tc, locale } = useTranslation();
+  t("messages.welcome", { name: user.name });
+  tc("messages.items", items.length);
+  ```
+
+  The hook reads the `_i18n` page prop (locale, fallback locale, and their
+  message catalogs) shared by the server. Translation semantics —
+  dot-notation keys, `:name`/`{name}` interpolation, `|`-separated plural
+  forms with per-locale rules, fallback-locale lookup, missing keys echoing
+  the key — mirror the server's Translator, held in sync by a parity test
+  that runs both implementations against shared fixtures. The pure
+  `createTranslator()` is exported for use outside components. When the
+  `_i18n` prop is absent the hook returns keys untranslated and warns once.
+
 ## 1.0.2
 
 ### Patch Changes

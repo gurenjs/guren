@@ -1,5 +1,44 @@
 # @guren/core
 
+## 1.5.1
+
+### Patch Changes
+
+- 80ef7b1: Persist the OAuth state binding in the shared state stores
+
+  `createOAuthState` recorded the browser binding in the payload, but
+  `DatabaseOAuthStateStore` and `RedisOAuthStateStore` neither wrote nor restored
+  it. Every bound state came back unbound, and `verifyOAuthState` then accepted
+  any browser — so `authorize({ bindTo })` was inert on both shared stores,
+  including the database store the docs recommend for production. Only the
+  in-process memory store, which the docs tell you not to deploy, carried it.
+
+  Both stores now round-trip `binding`. The database store needs a nullable
+  `binding` column on the `oauth_states` table; without it the state cannot be
+  persisted at all.
+
+  `bindingMatches` also moves to `secureCompare`, the hex-decoding comparator, to
+  match the other stored-hash comparison in the package.
+
+- Updated dependencies [80ef7b1]
+- Updated dependencies [80ef7b1]
+- Updated dependencies [05f6353]
+- Updated dependencies [80ef7b1]
+- Updated dependencies [ee5a918]
+- Updated dependencies [ee5a918]
+- Updated dependencies [89adb3f]
+- Updated dependencies [80ef7b1]
+- Updated dependencies [80ef7b1]
+- Updated dependencies [80ef7b1]
+- Updated dependencies [80ef7b1]
+- Updated dependencies [80ef7b1]
+- Updated dependencies [80ef7b1]
+- Updated dependencies [80ef7b1]
+- Updated dependencies [80ef7b1]
+  - @guren/server@2.2.0
+  - @guren/cli@2.2.0
+  - @guren/orm@2.2.0
+
 ## 1.5.0
 
 ### Minor Changes
