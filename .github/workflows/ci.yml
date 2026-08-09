@@ -85,6 +85,12 @@ jobs:
       - name: Core-first audit
         run: bun run audit:core-first
 
+      # `guren` is not on npm: `bunx guren` in a workspace manifest 404s
+      # whenever the local .bin link is missing. Template trees are exempt —
+      # scaffolded apps install @guren/cli from npm and get a real bin.
+      - name: Workspace scripts audit
+        run: bun run audit:workspace-scripts
+
       - name: Contract audit
         run: bun run audit:contracts
 

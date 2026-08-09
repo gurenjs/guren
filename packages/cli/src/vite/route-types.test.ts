@@ -4,11 +4,13 @@ import { resolveCodegenCommand } from './route-types'
 const CODEGEN_TAIL = ['codegen', '--force']
 
 describe('resolveCodegenCommand', () => {
-  test('should invoke the sibling CLI entry with default paths', () => {
+  test('should invoke the package bin entry with default paths', () => {
     const { executable, args } = resolveCodegenCommand({})
 
     expect(executable).toBe('bun')
-    // Running from source resolves src/bin.ts; a built package resolves dist/bin.js.
+    // Resolves via `@guren/cli`'s own package export — `dist/bin.js` in a built
+    // package, or `src/bin.ts` when tsconfig path mapping favors source (as in
+    // this monorepo's own test run).
     expect(args[0]).toMatch(/bin\.(ts|js)$/)
     expect(args.slice(1)).toEqual([
       ...CODEGEN_TAIL,

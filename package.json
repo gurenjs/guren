@@ -27,6 +27,7 @@
     "build:create-app": "bun run --cwd packages/create-app build",
     "build:inertia": "bun run --cwd packages/inertia-client build",
     "audit:core-first": "bun run ./scripts/smoke/core-first-audit.ts",
+    "audit:workspace-scripts": "bun run ./scripts/smoke/workspace-scripts-audit.ts",
     "audit:contracts": "bun run ./scripts/smoke/contract-audit.ts",
     "audit:feature-runtime": "bun run ./scripts/smoke/feature-runtime-audit.ts",
     "audit:bundle-budgets": "bun run ./scripts/smoke/build-budget.ts --max-kb 600",

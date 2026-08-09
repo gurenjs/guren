@@ -5,6 +5,8 @@ node_modules/
 **/*.log
 # Ignore TypeScript incremental build info files
 *.tsbuildinfo
+# npm pack / bun pm pack artifacts (smoke scripts pack into temp dirs outside the repo)
+*.tgz
 
 ### Wrangler ###
 .wrangler/

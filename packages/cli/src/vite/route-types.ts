@@ -1,5 +1,4 @@
 import { spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { HmrContext, Logger, Plugin, ResolvedConfig, ViteDevServer } from 'vite'
@@ -31,10 +30,11 @@ export interface RouteTypesPluginOptions {
   executable?: string
   /**
    * Arguments passed to the executable, replacing the generated command entirely.
-   * By default the plugin invokes the `@guren/cli` codegen entry directly, passing
-   * `watchFile`/`pagesDir` as `--routes`/`--pages`. Pass `args: ['run', 'codegen']`
-   * when your app's codegen npm script carries extra flags or a pre-step, so
-   * watcher-triggered regeneration matches that script exactly.
+   * By default the plugin invokes this package's own `guren` bin entry with
+   * `['codegen', '--force']`, passing `watchFile`/`pagesDir` as `--routes`/`--pages`.
+   * Pass `args: ['run', 'codegen']` when your app's codegen npm script carries
+   * extra flags or a pre-step, so watcher-triggered regeneration matches that
+   * script exactly.
    */
   args?: string[]
   /**
@@ -44,7 +44,6 @@ export interface RouteTypesPluginOptions {
 }
 
 const DEFAULT_EXECUTABLE = 'bun'
-const FALLBACK_ARGS = ['x', '--bun', 'guren', 'codegen', '--force']
 const DEFAULT_WATCH_FILE = 'routes/web.ts'
 const DEFAULT_PAGES_DIR = 'resources/js/pages'
 const DEFAULT_RESOURCES_DIR = 'app/Http/Resources'
@@ -64,19 +63,16 @@ function resolvePathOptions(options: RouteTypesPluginOptions) {
   }
 }
 
-/**
- * The `guren` bin name only resolves in apps whose install links a bin shim;
- * workspaces that symlink @guren/cli without one make `bun x` fall through to
- * the npm registry, where `guren` is unpublished, and 404. The CLI entry always
- * ships alongside this module (dist/bin.js next to the bundled chunk, src/bin.ts
- * when running from source), so prefer resolving it directly.
- */
-function resolveCliEntry(): string | undefined {
-  for (const candidate of ['./bin.js', './bin.ts', '../bin.js', '../bin.ts']) {
-    const path = fileURLToPath(new URL(candidate, import.meta.url))
-    if (existsSync(path)) return path
-  }
-  return undefined
+let cachedCliEntry: string | undefined
+
+// Self-referencing this package's name needs no linked `.bin/guren` (`bun x
+// guren` consults the npm registry, where the package does not exist) and
+// works for workspace links and npm installs alike. Lazy so consumers who
+// override `args` never resolve, and a failure surfaces through the
+// generation error path instead of breaking the module import.
+function cliEntry(): string {
+  cachedCliEntry ??= fileURLToPath(import.meta.resolve('@guren/cli/bin'))
+  return cachedCliEntry
 }
 
 export function resolveCodegenCommand(options: RouteTypesPluginOptions): {
@@ -88,9 +84,7 @@ export function resolveCodegenCommand(options: RouteTypesPluginOptions): {
     return { executable, args: options.args }
   }
   const { watchFile, pagesDir } = resolvePathOptions(options)
-  const cliEntry = resolveCliEntry()
-  const base = cliEntry ? [cliEntry, 'codegen', '--force'] : [...FALLBACK_ARGS]
-  return { executable, args: [...base, '--routes', watchFile, '--pages', pagesDir] }
+  return { executable, args: [cliEntry(), 'codegen', '--force', '--routes', watchFile, '--pages', pagesDir] }
 }
 
 export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin {
@@ -147,6 +141,10 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
   }
 
   function enqueueGeneration(root: string): Promise<void> {
+    // CI runs codegen as its own build step; regenerating there — including
+    // from watcher or HMR events mid-E2E — would only add nondeterminism.
+    if (process.env.CI) return queue
+
     queue = queue
       .then(() => spawnGenerator(root))
       .catch((error) => {
@@ -180,8 +178,6 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
     async configResolved(config: ResolvedConfig) {
       appRoot = resolve(config.root, options.appRoot ?? '.')
       logger = config.logger
-      // Skip route type generation in CI (codegen runs as a separate build step)
-      if (process.env.CI) return
       await enqueueGeneration(appRoot)
     },
     configureServer(server: ViteDevServer) {
@@ -189,7 +185,6 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
       // page, resource, or translation file must regenerate too.
       const root = () => appRoot ?? server.config.root
       const onFileEvent = (file: string) => {
-        if (process.env.CI) return
         if (shouldRegenerate(root(), file)) {
           void enqueueGeneration(root())
         }
