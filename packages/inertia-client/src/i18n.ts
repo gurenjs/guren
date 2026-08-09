@@ -9,9 +9,9 @@ import { usePage } from '@inertiajs/react'
  * interpolation, `|`-separated plural forms, fallback-locale lookup,
  * missing keys echoing the key) intentionally mirror the server's
  * Translator so `useTranslation().t(...)` and `this.t(...)` in a
- * controller agree on every input. A parity test in
- * `tests/i18n-parity.test.ts` runs both implementations against shared
- * fixtures — extend it when touching anything here.
+ * controller agree on every input. The parity suite in
+ * `tests/i18n.test.ts` runs both implementations against shared fixtures —
+ * extend it when touching anything here.
  */
 
 export type TranslationMessages = {
@@ -108,11 +108,9 @@ function getPluralizationRule(locale: string): PluralizationRule {
 
 function getRawTranslation(
   messages: Record<string, TranslationMessages>,
-  locale: string | undefined,
+  locale: string,
   key: string,
 ): string | undefined {
-  if (!locale) return undefined
-
   const catalog = messages[locale]
   if (!catalog) return undefined
 
@@ -127,14 +125,28 @@ function getRawTranslation(
   return typeof result === 'string' ? result : undefined
 }
 
+// Interpolation patterns are deterministic per replacement key, so compile
+// them once (bounded by the app's distinct placeholder names). A `g`-flagged
+// regex used with String#replace carries no state between calls.
+const replacementPatterns = new Map<string, [RegExp, RegExp]>()
+
+function patternsFor(key: string): [RegExp, RegExp] {
+  let patterns = replacementPatterns.get(key)
+  if (!patterns) {
+    patterns = [new RegExp(`:${key}`, 'g'), new RegExp(`\\{${key}\\}`, 'g')]
+    replacementPatterns.set(key, patterns)
+  }
+  return patterns
+}
+
 function applyReplacements(translation: string, replacements?: ReplacementValues): string {
   if (!replacements) return translation
 
   let result = translation
   for (const [key, value] of Object.entries(replacements)) {
-    result = result
-      .replace(new RegExp(`:${key}`, 'g'), String(value))
-      .replace(new RegExp(`\\{${key}\\}`, 'g'), String(value))
+    const [colon, braced] = patternsFor(key)
+    const replacement = String(value)
+    result = result.replace(colon, replacement).replace(braced, replacement)
   }
   return result
 }
@@ -145,10 +157,10 @@ function applyReplacements(translation: string, replacements?: ReplacementValues
  */
 export function createTranslator(props: I18nPageProps): Translation {
   const { locale, fallbackLocale, messages } = props
+  const pluralRule = getPluralizationRule(locale)
 
   const raw = (key: string): string | undefined =>
-    getRawTranslation(messages, locale, key) ??
-    (fallbackLocale !== locale ? getRawTranslation(messages, fallbackLocale, key) : undefined)
+    getRawTranslation(messages, locale, key) ?? getRawTranslation(messages, fallbackLocale, key)
 
   return {
     locale,
@@ -162,8 +174,7 @@ export function createTranslator(props: I18nPageProps): Translation {
       if (translation === undefined) return key
 
       const forms = translation.split('|')
-      const index = getPluralizationRule(locale)(Math.abs(count))
-      const pluralized = forms[index] ?? forms[forms.length - 1]!
+      const pluralized = forms[pluralRule(Math.abs(count))] ?? forms[forms.length - 1]!
 
       return applyReplacements(pluralized, { count, ...replacements })
     },

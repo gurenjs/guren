@@ -1,8 +1,16 @@
 import { describe, test, expect } from 'bun:test'
-import { createTranslator, type I18nPageProps } from '../src/i18n'
+import { createTranslator, type I18nPageProps, type Translation } from '../src/i18n'
 // Parity oracle: the server-side Translator this module mirrors. Test-only
 // import — the shipped bundle must stay free of server code.
-import { Translator } from '../../server/src/i18n'
+import { Translator, pluralizationRules } from '../../server/src/i18n'
+import type { InertiaI18nProps } from '../../server/src/providers/I18nServiceProvider'
+
+// Type-level parity: the `_i18n` prop shape must stay mutually assignable
+// with the server's InertiaI18nProps, or useTranslation silently degrades.
+const _serverToClient: I18nPageProps = {} as InertiaI18nProps
+const _clientToServer: InertiaI18nProps = {} as I18nPageProps
+void _serverToClient
+void _clientToServer
 
 const MESSAGES = {
   en: {
@@ -29,7 +37,7 @@ const MESSAGES = {
   },
 }
 
-function translator(locale: string, fallbackLocale = 'en'): ReturnType<typeof createTranslator> {
+function translator(locale: string, fallbackLocale = 'en'): Translation {
   const props: I18nPageProps = { locale, fallbackLocale, messages: MESSAGES }
   return createTranslator(props)
 }
@@ -115,4 +123,32 @@ describe('parity with the server Translator', () => {
   test.each(TC_CASES)('tc parity: %s %s ×%d', (locale, key, count) => {
     expect(translator(locale).tc(key, count)).toBe(serverTranslator(locale).tc(key, count))
   })
+
+  // Sweep every locale the server's pluralization table knows (plus variants
+  // exercising the primary-subtag and default paths) across a count range
+  // covering the mod-10/mod-100 branches. Deriving the list from the server
+  // export means a locale added on either side alone fails here.
+  const PLURAL_SWEEP_MESSAGES = {
+    en: { forms: '0|1|2|3|4|5' },
+  }
+
+  test.each([...Object.keys(pluralizationRules), 'en-US', 'ja-JP', 'unknown-locale'])(
+    'plural rule parity across counts: %s',
+    (locale) => {
+      const client = createTranslator({
+        locale,
+        fallbackLocale: 'en',
+        messages: PLURAL_SWEEP_MESSAGES,
+      })
+      const server = new Translator({
+        locale,
+        fallbackLocale: 'en',
+        messages: PLURAL_SWEEP_MESSAGES,
+      })
+
+      for (let count = 0; count <= 120; count++) {
+        expect(client.tc('forms', count)).toBe(server.tc('forms', count))
+      }
+    },
+  )
 })
