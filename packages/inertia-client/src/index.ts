@@ -29,6 +29,8 @@ export type {
   I18nPageProps,
   TranslationMessages,
   ReplacementValues,
+  GurenTranslationKeys,
+  RegisteredTranslationKey,
 } from './i18n'
 export { ErrorBoundary } from './ErrorBoundary'
 export type {

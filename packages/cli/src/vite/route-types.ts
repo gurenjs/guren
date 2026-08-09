@@ -20,6 +20,10 @@ export interface RouteTypesPluginOptions {
    */
   resourcesDir?: string
   /**
+   * Relative path (from the app root) to the translation directory. Defaults to `lang`.
+   */
+  langDir?: string
+  /**
    * Override the executable launched to regenerate route types. Defaults to `bun`.
    */
   executable?: string
@@ -38,6 +42,7 @@ const DEFAULT_ARGS = ['x', '--bun', 'guren', 'codegen', '--force']
 const DEFAULT_WATCH_FILE = 'routes/web.ts'
 const DEFAULT_PAGES_DIR = 'resources/js/pages'
 const DEFAULT_RESOURCES_DIR = 'app/Http/Resources'
+const DEFAULT_LANG_DIR = 'lang'
 
 export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin {
   let appRoot = options.appRoot
@@ -118,12 +123,14 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
       const watchFile = resolve(root, options.watchFile ?? DEFAULT_WATCH_FILE)
       const pagesDir = resolve(root, options.pagesDir ?? DEFAULT_PAGES_DIR)
       const resourcesDir = resolve(root, options.resourcesDir ?? DEFAULT_RESOURCES_DIR)
+      const langDir = resolve(root, options.langDir ?? DEFAULT_LANG_DIR)
       const changedFile = resolve(ctx.file)
 
       if (
         changedFile === watchFile ||
         changedFile.startsWith(`${pagesDir}/`) || changedFile === pagesDir ||
-        changedFile.startsWith(`${resourcesDir}/`) || changedFile === resourcesDir
+        changedFile.startsWith(`${resourcesDir}/`) || changedFile === resourcesDir ||
+        changedFile.startsWith(`${langDir}/`) || changedFile === langDir
       ) {
         await enqueueGeneration(root)
       }

@@ -25,6 +25,19 @@ export type TranslationMessages = {
 
 export type ReplacementValues = Record<string, string | number>
 
+/**
+ * Registry for the app's generated translation keys. `guren codegen` emits
+ * `.guren/translations.gen.ts`, which augments this interface with a `keys`
+ * union derived from `lang/<locale>/*.json`. Left empty, translation
+ * helpers accept any string.
+ */
+export interface GurenTranslationKeys {}
+
+/** The app's translation-key union when codegen registered one, else `string`. */
+export type RegisteredTranslationKey = GurenTranslationKeys extends { keys: infer K extends string }
+  ? K
+  : string
+
 /** Shape of the `_i18n` Inertia shared prop (see the server's InertiaI18nProps). */
 export interface I18nPageProps {
   locale: string
@@ -36,9 +49,9 @@ export interface Translation {
   /** The locale resolved for the current request. */
   locale: string
   /** Translate a key, with optional `:name`/`{name}` interpolation. */
-  t: (key: string, replacements?: ReplacementValues) => string
+  t: (key: RegisteredTranslationKey, replacements?: ReplacementValues) => string
   /** Translate a key with a count for pluralization (`one|other` forms). */
-  tc: (key: string, count: number, replacements?: ReplacementValues) => string
+  tc: (key: RegisteredTranslationKey, count: number, replacements?: ReplacementValues) => string
 }
 
 type PluralizationRule = (count: number) => number

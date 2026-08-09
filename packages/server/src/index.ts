@@ -495,6 +495,8 @@ export type {
   TranslatorOptions,
   I18nConfig,
   TranslationLoaderFactory,
+  GurenTranslationKeys,
+  RegisteredTranslationKey,
 } from './i18n'
 // Database (Seeder & Factory)
 export {

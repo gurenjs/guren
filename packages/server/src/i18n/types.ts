@@ -6,6 +6,23 @@ export type TranslationMessages = {
 }
 
 /**
+ * Registry for the app's generated translation keys. `guren codegen` emits
+ * `.guren/translations.gen.ts`, which augments this interface (declaration
+ * merging) with a `keys` union derived from `lang/<locale>/*.json`. Apps
+ * without the generated file leave it empty and translation helpers accept
+ * any string.
+ */
+export interface GurenTranslationKeys {}
+
+/**
+ * The app's translation-key union when codegen registered one, else `string`.
+ * Used by `Controller.t()`/`Controller.tc()` for compile-time key checking.
+ */
+export type RegisteredTranslationKey = GurenTranslationKeys extends { keys: infer K extends string }
+  ? K
+  : string
+
+/**
  * Replacement values for interpolation.
  */
 export type ReplacementValues = Record<string, string | number>
