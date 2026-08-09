@@ -14,10 +14,12 @@ import type { CacheStore, MemoryStoreOptions, CachedItem } from '../types'
 export class MemoryStore implements CacheStore {
   private readonly cache: Map<string, CachedItem> = new Map()
   private readonly maxSize: number
+  private readonly now: () => number
   private checkInterval: ReturnType<typeof setInterval> | null = null
 
   constructor(options: MemoryStoreOptions = {}) {
     this.maxSize = options.maxSize ?? Infinity
+    this.now = options.now ?? Date.now
 
     const checkPeriod = options.checkPeriod ?? 60000
     if (checkPeriod > 0) {
@@ -36,7 +38,7 @@ export class MemoryStore implements CacheStore {
    * Remove expired items from the cache.
    */
   private removeExpired(): void {
-    const now = Date.now()
+    const now = this.now()
     for (const [key, item] of this.cache) {
       if (item.expiresAt !== null && item.expiresAt <= now) {
         this.cache.delete(key)
@@ -48,7 +50,7 @@ export class MemoryStore implements CacheStore {
    * Check if an item is expired.
    */
   private isExpired(item: CachedItem): boolean {
-    return item.expiresAt !== null && item.expiresAt <= Date.now()
+    return item.expiresAt !== null && item.expiresAt <= this.now()
   }
 
   /**
@@ -82,7 +84,7 @@ export class MemoryStore implements CacheStore {
   async set<T>(key: string, value: T, ttl?: number): Promise<void> {
     this.evictIfNeeded()
 
-    const expiresAt = ttl ? Date.now() + ttl * 1000 : null
+    const expiresAt = ttl ? this.now() + ttl * 1000 : null
 
     this.cache.set(key, {
       value,
@@ -120,7 +122,7 @@ export class MemoryStore implements CacheStore {
     // Preserve TTL if item exists
     const item = this.cache.get(key)
     const ttl = item?.expiresAt
-      ? Math.max(0, Math.ceil((item.expiresAt - Date.now()) / 1000))
+      ? Math.max(0, Math.ceil((item.expiresAt - this.now()) / 1000))
       : undefined
 
     await this.set(key, newValue, ttl)
@@ -199,7 +201,7 @@ export class MemoryStore implements CacheStore {
       return -1
     }
 
-    return Math.max(0, Math.ceil((item.expiresAt - Date.now()) / 1000))
+    return Math.max(0, Math.ceil((item.expiresAt - this.now()) / 1000))
   }
 
   /**

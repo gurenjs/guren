@@ -18,10 +18,12 @@ import type { CacheStore, FileStoreOptions, CachedItem } from '../types'
 export class FileStore implements CacheStore {
   private readonly basePath: string
   private readonly extension: string
+  private readonly now: () => number
 
   constructor(options: FileStoreOptions) {
     this.basePath = options.path
     this.extension = options.extension ?? '.cache'
+    this.now = options.now ?? Date.now
   }
 
   /**
@@ -80,7 +82,7 @@ export class FileStore implements CacheStore {
    * Check if a cached item is expired.
    */
   private isExpired(item: CachedItem): boolean {
-    return item.expiresAt !== null && item.expiresAt <= Date.now()
+    return item.expiresAt !== null && item.expiresAt <= this.now()
   }
 
   async get<T>(key: string): Promise<T | null> {
@@ -101,7 +103,7 @@ export class FileStore implements CacheStore {
 
   async set<T>(key: string, value: T, ttl?: number): Promise<void> {
     const filePath = this.getFilePath(key)
-    const expiresAt = ttl ? Date.now() + ttl * 1000 : null
+    const expiresAt = ttl ? this.now() + ttl * 1000 : null
 
     await this.writeCacheFile(filePath, {
       value,
@@ -136,7 +138,7 @@ export class FileStore implements CacheStore {
     const filePath = this.getFilePath(key)
     const item = await this.readCacheFile<number>(filePath)
     const ttl = item?.expiresAt
-      ? Math.max(0, Math.ceil((item.expiresAt - Date.now()) / 1000))
+      ? Math.max(0, Math.ceil((item.expiresAt - this.now()) / 1000))
       : undefined
 
     await this.set(key, newValue, ttl)
@@ -220,7 +222,7 @@ export class FileStore implements CacheStore {
       return -1
     }
 
-    return Math.max(0, Math.ceil((item.expiresAt - Date.now()) / 1000))
+    return Math.max(0, Math.ceil((item.expiresAt - this.now()) / 1000))
   }
 
   /**

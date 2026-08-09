@@ -144,6 +144,7 @@ await cache.store('file').set('persistent', 'data')
 |--------|---------|-------------|
 | `maxSize` | `Infinity` | Maximum number of items |
 | `checkPeriod` | `60000` | Cleanup interval for expired items (ms) |
+| `now` | `Date.now` | Clock for TTL calculations (epoch ms); injectable for tests |
 
 **Redis Store:**
 | Option | Default | Description |
@@ -156,6 +157,7 @@ await cache.store('file').set('persistent', 'data')
 |--------|---------|-------------|
 | `path` | required | Directory path for cache files |
 | `extension` | `'.cache'` | File extension for cache files |
+| `now` | `Date.now` | Clock for TTL calculations (epoch ms); injectable for tests |
 
 ## Tagged Cache
 
