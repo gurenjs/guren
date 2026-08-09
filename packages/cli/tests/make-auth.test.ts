@@ -12,7 +12,7 @@ import { makeAuth } from '../src/make-auth'
 const SHARE_INERTIA_AUTH_PROPS_SNIPPET = `shareInertiaProps(async (ctx) => {
       const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
       return { auth: { user: await auth?.user() } }
-    })`
+    }, this.container)`
 
 describe('makeAuth', () => {
   it('scaffolds auth resources and installs providers', async () => {

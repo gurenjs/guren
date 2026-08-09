@@ -252,12 +252,14 @@ export default class LocaleProvider extends ServiceProvider {
   boot(): void {
     shareInertiaProps((ctx) => ({
       i18n: { locale: ctx.req.header('accept-language')?.split(',')[0] ?? 'en' },
-    }))
+    }), this.container)
   }
 }
 ```
 
 It merges its props over whatever resolver was registered before, so several providers can each contribute shared props without clobbering one another.
+
+Passing `this.container` scopes the props to that one application. Omit it and the props are process-wide, so a second application booted in the same process (a test suite, a warm serverless instance) receives them too.
 
 > [!NOTE]
 > Sharing the signed-in user (`auth.user`) is already registered for you by the `AuthProvider` that `bunx guren add auth` generates — there's no need to register it again. See the [Authentication guide](./authentication.md) for details.

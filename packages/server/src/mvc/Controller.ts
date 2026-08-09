@@ -7,16 +7,11 @@ import { tryGetI18n, type I18nManager, type RegisteredTranslationKey, type Repla
 import { flattenRequestQueries, parseRequestPayload } from '../http/request'
 import type { AuthContext } from '../auth/types'
 import type { ServiceBindings } from '../container/bindings'
+import type { ContainerLike } from '../container/types'
 import { ValidationException } from '../errors/exceptions/ValidationException'
 import { getApiTokenOrFail } from '../auth/api-token'
 import { getGate } from '../authorization/Gate'
 import type { AuthUser } from '../authorization/types'
-
-/** Structural type for DI containers, avoiding a hard dependency on Container. */
-interface ContainerLike {
-  make(key: string): unknown
-  has?(key: string): boolean
-}
 
 /**
  * Duck-type interface for Zod-like schemas.
@@ -318,7 +313,7 @@ export class Controller {
         ? componentOrPage
         : componentOrPage.component ?? componentOrPage.id
 
-    const sharedProps = await resolveSharedInertiaProps(ctx)
+    const sharedProps = await resolveSharedInertiaProps(ctx, this._container)
     const propsWithShared = { ...sharedProps, ...props } as Props & ResolvedSharedInertiaProps
 
     const response = await inertia(component, propsWithShared as Record<string, unknown>, {

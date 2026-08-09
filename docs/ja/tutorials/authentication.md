@@ -75,12 +75,12 @@ export default class AuthProvider extends ServiceProvider {
     shareInertiaProps(async (ctx) => {
       const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
       return { auth: { user: await auth?.user() } }
-    })
+    }, this.container)
   }
 }
 ```
 
-`shareInertiaProps` は、すべての Inertia レスポンスの props にこの値をマージします。`auth.user()` が返すのは **サニタイズ済み** のユーザーです — `passwordHash` や `rememberToken` はランタイムで除去済みなので、丸ごと共有しても資格情報はブラウザに届きません。この配線は Part 3 のコメントフォームでも使います。
+`shareInertiaProps` は、すべての Inertia レスポンスの props にこの値をマージします。`this.container` を渡すことで、この props はこのアプリケーションだけに閉じます。`auth.user()` が返すのは **サニタイズ済み** のユーザーです — `passwordHash` や `rememberToken` はランタイムで除去済みなので、丸ごと共有しても資格情報はブラウザに届きません。この配線は Part 3 のコメントフォームでも使います。
 
 ## 2. チェックポイント: サインインする
 

@@ -1,6 +1,15 @@
 import type { Container } from './Container'
 
 /**
+ * Structural type for DI containers, avoiding a hard dependency on Container
+ * where only resolution is needed (controllers, Inertia shared props).
+ */
+export interface ContainerLike {
+  make(key: string): unknown
+  has?(key: string): boolean
+}
+
+/**
  * Service factory function.
  */
 export type ServiceFactory<T> = (container: Container) => T

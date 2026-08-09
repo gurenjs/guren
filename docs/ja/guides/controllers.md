@@ -268,12 +268,14 @@ export default class LocaleProvider extends ServiceProvider {
   boot(): void {
     shareInertiaProps((ctx) => ({
       i18n: { locale: ctx.req.header('accept-language')?.split(',')[0] ?? 'en' },
-    }))
+    }), this.container)
   }
 }
 ```
 
 先に登録されたリゾルバーの props にマージされるので、複数のプロバイダーがそれぞれ共有 props を足しても互いを壊しません。
+
+`this.container` を渡すと、その props はそのアプリケーションだけに閉じます。省略するとプロセス全体で共有されるため、同一プロセスで起動した2つ目のアプリケーション（テストスイートや暖機済みのサーバーレス環境）にも渡ってしまいます。
 
 > [!NOTE]
 > 認証ユーザー（`auth.user`）の共有は `bunx guren add auth` が生成する `AuthProvider` が既に登録済みです。自分で登録し直す必要はありません — 詳細は[認証ガイド](./authentication.md)を参照してください。
