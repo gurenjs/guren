@@ -1,5 +1,23 @@
 # web
 
+## 0.1.12
+
+### Patch Changes
+
+- Updated dependencies [80ef7b1]
+- Updated dependencies [89adb3f]
+- Updated dependencies [3c6fd6f]
+- Updated dependencies [80ef7b1]
+- Updated dependencies [80ef7b1]
+- Updated dependencies [80ef7b1]
+- Updated dependencies [80ef7b1]
+- Updated dependencies [80ef7b1]
+- Updated dependencies [80ef7b1]
+  - @guren/cli@2.2.0
+  - @guren/inertia-client@1.1.0
+  - @guren/core@1.5.1
+  - @guren/orm@2.2.0
+
 ## 0.1.11
 
 ### Patch Changes

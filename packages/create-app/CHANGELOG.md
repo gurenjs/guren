@@ -1,5 +1,17 @@
 # create-guren-app
 
+## 1.6.2
+
+### Patch Changes
+
+- Include `.guren/**/*` in the API-only template's tsconfig
+
+  Generated artifacts — including the typed translation keys `guren codegen`
+  emits from `lang/` — were invisible to typechecking in API-only apps
+  because the template's `include` list omitted `.guren`. The default
+  template already included it. Also republishes the templates with the
+  current `@guren/*` dependency ranges.
+
 ## 1.6.1
 
 ### Patch Changes
