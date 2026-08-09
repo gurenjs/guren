@@ -64,6 +64,7 @@ describeRedis('Redis Stores (requires REDIS_URL)', () => {
     })
 
     it('respects TTL', async () => {
+      // TTL is enforced server-side by Redis (SETEX), so a client clock cannot fake it
       await store.write('session-1', { user: 'john' }, 1) // 1 second TTL
       await new Promise((r) => setTimeout(r, 1500))
       const data = await store.read('session-1')

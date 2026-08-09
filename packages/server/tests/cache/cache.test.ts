@@ -12,9 +12,11 @@ import {
 
 describe('MemoryStore', () => {
   let store: MemoryStore
+  let currentTime: number
 
   beforeEach(() => {
-    store = new MemoryStore({ checkPeriod: 0 })
+    currentTime = 1_000_000
+    store = new MemoryStore({ checkPeriod: 0, now: () => currentTime })
   })
 
   afterEach(() => {
@@ -49,15 +51,13 @@ describe('MemoryStore', () => {
       await store.set('key', 'value', 1)
       expect(await store.get('key')).toBe('value')
 
-      await new Promise((resolve) => setTimeout(resolve, 1100))
+      currentTime += 1100
       expect(await store.get('key')).toBeNull()
     })
 
     it('returns correct TTL', async () => {
       await store.set('key', 'value', 10)
-      const ttl = await store.ttl('key')
-      expect(ttl).toBeGreaterThan(8)
-      expect(ttl).toBeLessThanOrEqual(10)
+      expect(await store.ttl('key')).toBe(10)
     })
 
     it('returns -1 for items without TTL', async () => {
@@ -82,7 +82,8 @@ describe('MemoryStore', () => {
 
     it('returns false for expired key', async () => {
       await store.set('key', 'value', 1)
-      await new Promise((resolve) => setTimeout(resolve, 1100))
+      expect(await store.has('key')).toBe(true)
+      currentTime += 1100
       expect(await store.has('key')).toBe(false)
     })
   })
@@ -129,9 +130,7 @@ describe('MemoryStore', () => {
     it('preserves TTL on increment', async () => {
       await store.set('counter', 5, 10)
       await store.increment('counter')
-      const ttl = await store.ttl('counter')
-      expect(ttl).toBeGreaterThan(0)
-      expect(ttl).toBeLessThanOrEqual(10)
+      expect(await store.ttl('counter')).toBe(10)
     })
   })
 
@@ -229,10 +228,12 @@ describe('MemoryStore', () => {
 describe('FileStore', () => {
   let store: FileStore
   let tmpDir: string
+  let currentTime: number
 
   beforeEach(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'guren-cache-'))
-    store = new FileStore({ path: tmpDir })
+    currentTime = 1_000_000
+    store = new FileStore({ path: tmpDir, now: () => currentTime })
   })
 
   afterEach(async () => {
@@ -268,7 +269,7 @@ describe('FileStore', () => {
       await store.set('key', 'value', 1)
       expect(await store.get('key')).toBe('value')
 
-      await new Promise((resolve) => setTimeout(resolve, 1100))
+      currentTime += 1100
       expect(await store.get('key')).toBeNull()
     })
   })
@@ -296,10 +297,12 @@ describe('FileStore', () => {
       await store.set('key1', 'value1', 1)
       await store.set('key2', 'value2')
 
-      await new Promise((resolve) => setTimeout(resolve, 1100))
+      currentTime += 1100
 
       const cleaned = await store.cleanup()
       expect(cleaned).toBe(1)
+      // A second pass finds nothing — the expired file was actually deleted
+      expect(await store.cleanup()).toBe(0)
       expect(await store.get('key2')).toBe('value2')
     })
   })

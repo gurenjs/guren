@@ -144,6 +144,7 @@ await cache.store('file').set('persistent', 'data')
 |-----------|-----------|------|
 | `maxSize` | `Infinity` | 最大アイテム数 |
 | `checkPeriod` | `60000` | 期限切れアイテムのクリーンアップ間隔（ms） |
+| `now` | `Date.now` | TTL計算に使う時計（エポックms）。テストで注入可能 |
 
 **Redis Store:**
 | オプション | デフォルト | 説明 |
@@ -156,6 +157,7 @@ await cache.store('file').set('persistent', 'data')
 |-----------|-----------|------|
 | `path` | 必須 | キャッシュファイルのディレクトリパス |
 | `extension` | `'.cache'` | キャッシュファイルの拡張子 |
+| `now` | `Date.now` | TTL計算に使う時計（エポックms）。テストで注入可能 |
 
 ## タグ付きキャッシュ
 

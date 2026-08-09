@@ -128,6 +128,15 @@ export interface MemoryStoreOptions {
    * @default 60000 (1 minute)
    */
   checkPeriod?: number
+
+  /**
+   * Clock used for TTL calculations. Must return a Unix timestamp in
+   * milliseconds (compatible with `Date.now()`) — persisted `expiresAt`
+   * values are read by other instances using the default clock.
+   * Injectable for tests.
+   * @default Date.now
+   */
+  now?: () => number
 }
 
 /**
@@ -160,6 +169,15 @@ export interface FileStoreOptions {
    * @default '.cache'
    */
   extension?: string
+
+  /**
+   * Clock used for TTL calculations. Must return a Unix timestamp in
+   * milliseconds (compatible with `Date.now()`) — persisted `expiresAt`
+   * values are read by other instances using the default clock.
+   * Injectable for tests.
+   * @default Date.now
+   */
+  now?: () => number
 }
 
 /**
