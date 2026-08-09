@@ -55,7 +55,8 @@ bun run db:seed       # Run seeders
 
 `bun run build` runs `scripts/build-packages.ts`, which discovers every package
 under `packages/` that has a `build` script, topologically sorts them by their
-`dependencies`/`peerDependencies`, and builds them sequentially. **New packages
+`dependencies`/`peerDependencies`, and builds them in dependency order —
+independent packages run in parallel (`--sequential` opts out). **New packages
 (plugins included) need no script wiring** — they are picked up automatically.
 
 ```bash
