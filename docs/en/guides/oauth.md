@@ -133,9 +133,16 @@ value to `handleCallback()`. `bindTo` wins when both options are given.
 Pass a `redirectTo` when starting the flow (e.g. the page the user was on) — it survives the round trip to the provider and comes back from `handleCallback`:
 
 ```ts
-const { url } = await oauth.authorize('github', { redirectTo: '/settings/billing' })
+const { url } = await oauth.authorize('github', {
+  redirectTo: '/settings/billing',
+  session: this.auth.session(),
+})
 // ...later, in the callback:
-const { redirectTo } = await oauth.handleCallback('github', { code, state })
+const { redirectTo } = await oauth.handleCallback('github', {
+  code,
+  state,
+  session: this.auth.session(),
+})
 return this.redirect(redirectTo ?? '/dashboard')
 ```
 

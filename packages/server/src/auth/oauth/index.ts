@@ -133,8 +133,18 @@ export interface OAuthBindingSession {
   forget(key: string): void
 }
 
-/** Session key holding the per-browser binding between authorize and callback. */
-export const OAUTH_SESSION_BINDING_KEY = 'guren:oauth.binding'
+/** Session key holding the per-browser bindings between authorize and callback. */
+export const OAUTH_SESSION_BINDING_KEY = 'guren:oauth.bindings'
+
+/**
+ * How many unfinished flows one browser may have bindings for.
+ *
+ * Every `authorize()` parks one entry, and an abandoned flow leaves it behind
+ * until it expires, so the list is capped. Beyond the cap the oldest entry is
+ * dropped — that flow's callback then fails, which is the same outcome it had
+ * before any of this existed.
+ */
+const MAX_PENDING_SESSION_BINDINGS = 5
 
 export interface OAuthAuthorizeOptions {
   scope?: string[]
@@ -230,18 +240,74 @@ function warnOnceAboutDroppedBinding(): void {
  * of the state store's inputs entirely and survives a login-triggered
  * session-id rotation happening mid-flow.
  */
-function issueSessionBinding(session: OAuthBindingSession | undefined): string | undefined {
-  if (!session) return undefined
-  const binding = generateToken(DEFAULT_STATE_LENGTH)
-  session.set(OAUTH_SESSION_BINDING_KEY, binding)
-  return binding
+interface PendingSessionBinding {
+  /** Hash of the `state` this binding belongs to. */
+  stateHash: string
+  binding: string
+  expiresAt: number
 }
 
-function consumeSessionBinding(session: OAuthBindingSession | undefined): string | undefined {
+function readPendingBindings(session: OAuthBindingSession): PendingSessionBinding[] {
+  const stored = session.get<unknown>(OAUTH_SESSION_BINDING_KEY)
+  if (!Array.isArray(stored)) return []
+
+  const now = Date.now()
+  return stored.filter((entry): entry is PendingSessionBinding =>
+    typeof entry === 'object'
+    && entry !== null
+    && typeof (entry as PendingSessionBinding).stateHash === 'string'
+    && typeof (entry as PendingSessionBinding).binding === 'string'
+    && typeof (entry as PendingSessionBinding).expiresAt === 'number'
+    && (entry as PendingSessionBinding).expiresAt > now,
+  )
+}
+
+function issueSessionBinding(session: OAuthBindingSession | undefined): string | undefined {
   if (!session) return undefined
-  const binding = session.get<unknown>(OAUTH_SESSION_BINDING_KEY)
-  session.forget(OAUTH_SESSION_BINDING_KEY)
-  return typeof binding === 'string' ? binding : undefined
+  return generateToken(DEFAULT_STATE_LENGTH)
+}
+
+/**
+ * Park a minted binding against the state it belongs to.
+ *
+ * Keyed by state rather than kept in one slot, so a browser can have several
+ * flows in flight — two tabs, or a visitor who picks a different provider —
+ * without each `authorize()` invalidating the one before it.
+ */
+function rememberSessionBinding(
+  session: OAuthBindingSession,
+  stateHash: string,
+  binding: string,
+  expiresAt: Date,
+): void {
+  const pending = readPendingBindings(session)
+  pending.push({ stateHash, binding, expiresAt: expiresAt.getTime() })
+  session.set(
+    OAUTH_SESSION_BINDING_KEY,
+    pending.slice(Math.max(0, pending.length - MAX_PENDING_SESSION_BINDINGS)),
+  )
+}
+
+/**
+ * Take the binding belonging to this callback's state, leaving the rest.
+ *
+ * Only the matching entry is removed: a forged callback carrying an unknown
+ * state must not be able to strip a real flow's binding and lock the visitor
+ * out of the login they actually started.
+ */
+function consumeSessionBinding(
+  session: OAuthBindingSession | undefined,
+  stateHash: string,
+): string | undefined {
+  if (!session) return undefined
+
+  const pending = readPendingBindings(session)
+  if (pending.length === 0) return undefined
+
+  const match = pending.find((entry) => entry.stateHash === stateHash)
+  // Written back either way, so expired entries are pruned on the way past.
+  session.set(OAUTH_SESSION_BINDING_KEY, pending.filter((entry) => entry.stateHash !== stateHash))
+  return match?.binding
 }
 
 const DEFAULT_STATE_EXPIRES_IN = 10 * 60 * 1000
@@ -343,7 +409,10 @@ export class OAuthManager {
 
   async authorize(providerName: string, options: OAuthAuthorizeOptions = {}): Promise<{ url: string; state: string; expiresAt: Date }> {
     const provider = this.getProvider(providerName)
-    const bindTo = options.bindTo ?? issueSessionBinding(options.session)
+    // `bindTo` wins, and then the session is not touched at all — the caller
+    // is keeping the value themselves.
+    const sessionBinding = options.bindTo ? undefined : issueSessionBinding(options.session)
+    const bindTo = options.bindTo ?? sessionBinding
     if (!bindTo) {
       warnOnceAboutUnboundState()
     }
@@ -356,6 +425,18 @@ export class OAuthManager {
       options.state,
       bindTo,
     )
+
+    // Parked only once the state exists, so it can be filed under it — and
+    // only once the store accepted the state, so a failed authorize leaves
+    // nothing behind.
+    if (sessionBinding && options.session) {
+      rememberSessionBinding(
+        options.session,
+        hashToken(state, this.stateConfig.hashAlgorithm),
+        sessionBinding,
+        expiresAt,
+      )
+    }
     const scope = options.scope ?? provider.scopes
     const url = buildOAuthAuthorizeUrl(provider, state, { scope, extraParams: options.extraParams })
     return { url, state, expiresAt }
@@ -382,7 +463,11 @@ export class OAuthManager {
       providerName,
       this.stateStore,
       this.stateConfig,
-      payload.bindTo ?? consumeSessionBinding(payload.session),
+      payload.bindTo
+        ?? consumeSessionBinding(
+          payload.session,
+          hashToken(payload.state, this.stateConfig.hashAlgorithm),
+        ),
     )
     if (!verified) {
       throw new AuthenticationException('Invalid or expired OAuth state.')

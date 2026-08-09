@@ -66,6 +66,7 @@ export {
   buildOAuthRedirectUrl,
   parseOAuthRedirectUrl,
   sanitizeOAuthRedirect,
+  OAUTH_SESSION_BINDING_KEY,
 } from './oauth'
 export type {
   ApiToken,
@@ -86,6 +87,7 @@ export type {
   OAuthCallbackPayload,
   OAuthManagerOptions,
   OAuthProviderFactoryInput,
+  OAuthBindingSession,
 } from './oauth'
 export type {
   AuthContext,

@@ -43,15 +43,22 @@ const CallbackQuerySchema = z.object({
 
 export default class GitHubOAuthController extends Controller {
   async start() {
+    // セッションを渡すとフローがこのブラウザに束縛されます。
+    // 詳細は下の「stateをブラウザに束縛する」を参照してください。
     const { url } = await oauth.authorize('github', {
       redirectTo: this.query('redirect_to'),
+      session: this.auth.session(),
     })
     return this.redirect(url)
   }
 
   async callback() {
     const { code, state } = this.validateQuery(CallbackQuerySchema)
-    const { profile, redirectTo } = await oauth.handleCallback('github', { code, state })
+    const { profile, redirectTo } = await oauth.handleCallback('github', {
+      code,
+      state,
+      session: this.auth.session(),
+    })
 
     let user = await User.where('githubId', profile.id).first()
     if (!user) {
@@ -76,14 +83,52 @@ export function registerWebRoutes(router: Router): void {
 }
 ```
 
+## stateをブラウザに束縛する
+
+`state` は推測不能かつ一度きりですが、それだけでは**別のブラウザに移し替えられます**。攻撃者はあなたのアプリでフローを開始し、自分のプロバイダーアカウントで認可を済ませ、受け取った `code` を未消費のまま持っておいて、訪問者に次を開かせることができます。
+
+```
+https://your.app/auth/github/callback?code=<攻撃者のもの>&state=<攻撃者のもの>
+```
+
+この組み合わせには「どのブラウザが開始したか」を示すものが何もないため、コールバックは成功し、訪問者は**攻撃者のアカウント**にログインさせられます。その後に訪問者が書いたもの — 投稿、アップロード、登録した決済手段 — はすべて攻撃者が読めるアカウントに入ります。
+
+両方の脚にセッションを渡すと塞げます。
+
+```ts
+// フロー開始時
+const { url } = await oauth.authorize('github', { session: this.auth.session() })
+
+// コールバック時
+await oauth.handleCallback('github', { code, state, session: this.auth.session() })
+```
+
+`authorize()` はフローごとに新しい値を発行してセッションに保持し、そのハッシュだけを state と一緒に保存します。`handleCallback()` は値を読み戻し（同時に削除し）、束縛が一致しない state を拒否します。セッションへの書き込みは、初回訪問者のセッションをプロバイダーとの往復をまたいで永続化させる役割も果たすため、コールバックのリクエストが同じセッションを持って戻ってきます。
+
+束縛は state 単位で保持されるので、同じブラウザで複数のフローを並行させても（タブを2つ開く、プロバイダーを選び直す）互いに無効化しません。
+
+`this.auth.session()` が `undefined` を返す場合（セッションミドルウェアが無い等）は、単に未束縛のまま通ります。壊れはしませんが、保護もされません。
+
+束縛をセッション以外の場所に置く必要がある場合（暗号化Cookie、ネイティブアプリのセキュアストレージ）は、`bindTo` で自分で管理します。そのブラウザだけが提示できる値を `authorize()` に渡し、同じ値を `handleCallback()` に渡してください。両方指定した場合は `bindTo` が優先されます。
+
+> [!WARNING]
+> `session` も `bindTo` も渡さない `authorize()` は従来どおり動作するため、以前のAPIで書かれたアプリは壊れません。ただしプロセスごとに一度警告を出し、採用するまで上記の攻撃に晒されたままです。`make:auth` と `oauth` ブループリントは束縛版を生成します。
+
 ## ログイン後のリダイレクト
 
 フロー開始時に `redirectTo`（ユーザーが元々いたページなど）を渡すと、プロバイダーとの往復を経ても保持され、`handleCallback` から返ってきます。
 
 ```ts
-const { url } = await oauth.authorize('github', { redirectTo: '/settings/billing' })
+const { url } = await oauth.authorize('github', {
+  redirectTo: '/settings/billing',
+  session: this.auth.session(),
+})
 // ...後で、コールバック内で:
-const { redirectTo } = await oauth.handleCallback('github', { code, state })
+const { redirectTo } = await oauth.handleCallback('github', {
+  code,
+  state,
+  session: this.auth.session(),
+})
 return this.redirect(redirectTo ?? '/dashboard')
 ```
 
@@ -212,8 +257,11 @@ export const oauthStates = sqliteTable('oauth_states', {
   provider: text('provider').notNull(),
   redirectTo: text('redirect_to'),
   expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+  binding: text('binding'),
 })
 ```
+
+`binding` 列は[stateをブラウザに束縛する](#stateをブラウザに束縛する)で使うハッシュを保持します。この列が無いとストアは束縛を永続化できず、束縛済みのstateがすべて未束縛で戻ってくるため、保護が黙って無効化されます。`session` / `bindTo` を使う前に列を追加してください。
 
 期限切れのstate行は参照時に削除されます。まとめて掃除する場合はスケジュールジョブから `store.deleteExpired()` を呼んでください。既にRedisを運用しているアプリではRedisも引き続き使えます:
 

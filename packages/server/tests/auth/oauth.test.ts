@@ -390,7 +390,8 @@ describe('OAuthManager', () => {
 
       const session = createSessionStub()
       const { state } = await manager.authorize('github', { session })
-      expect(session.get(OAUTH_SESSION_BINDING_KEY)).toBeString()
+      // Filed under the state it belongs to, so concurrent flows coexist.
+      expect(session.get<unknown[]>(OAUTH_SESSION_BINDING_KEY)).toHaveLength(1)
 
       const { profile } = await manager.handleCallback('github', { code: 'auth-code', state, session })
       expect(profile.id).toBe('42')
@@ -410,17 +411,65 @@ describe('OAuthManager', () => {
       ).rejects.toThrow('Invalid or expired OAuth state.')
     })
 
-    it('consumes the session binding even when verification fails', async () => {
+    // Bindings are filed under the state they belong to, so a callback
+    // carrying a state this browser never started cannot strip the binding of
+    // the flow it did start. Otherwise anyone could navigate a visitor to
+    // `/callback?code=x&state=x` mid-login and lock them out of their own.
+    it('leaves an unrelated flow untouched when a forged callback arrives', async () => {
       const manager = createManager()
       installOAuthFetchMock({ access_token: 'token-123' }, { id: 42 })
 
       const session = createSessionStub()
-      await manager.authorize('github', { session })
+      const { state } = await manager.authorize('github', { session })
 
       await expect(
         manager.handleCallback('github', { code: 'auth-code', state: 'forged-state', session }),
-      ).rejects.toThrow()
-      expect(session.get(OAUTH_SESSION_BINDING_KEY)).toBeUndefined()
+      ).rejects.toThrow('Invalid or expired OAuth state.')
+
+      const { profile } = await manager.handleCallback('github', { code: 'auth-code', state, session })
+      expect(profile.id).toBe('42')
+    })
+
+    // One slot per browser meant the second authorize() overwrote the first,
+    // so two tabs — or a visitor who picks a different provider — could not
+    // both finish. Callback order must not matter either.
+    it('keeps concurrent flows in the same browser independent', async () => {
+      const manager = createManager()
+      installOAuthFetchMock({ access_token: 'token-123' }, { id: 42 })
+
+      const session = createSessionStub()
+      const first = await manager.authorize('github', { session })
+      const second = await manager.authorize('github', { session, redirectTo: '/second' })
+
+      // Oldest first: the order that used to fail both.
+      const firstResult = await manager.handleCallback('github', { code: 'auth-code', state: first.state, session })
+      const secondResult = await manager.handleCallback('github', { code: 'auth-code', state: second.state, session })
+
+      expect(firstResult.profile.id).toBe('42')
+      expect(secondResult.profile.id).toBe('42')
+    })
+
+    it('drops the binding once its flow completes', async () => {
+      const manager = createManager()
+      installOAuthFetchMock({ access_token: 'token-123' }, { id: 42 })
+
+      const session = createSessionStub()
+      const { state } = await manager.authorize('github', { session })
+      await manager.handleCallback('github', { code: 'auth-code', state, session })
+
+      expect(session.get<unknown[]>(OAUTH_SESSION_BINDING_KEY)).toEqual([])
+    })
+
+    it('bounds how many unfinished flows a browser accumulates', async () => {
+      const manager = createManager()
+      installOAuthFetchMock({ access_token: 'token-123' }, { id: 42 })
+
+      const session = createSessionStub()
+      for (let i = 0; i < 8; i++) {
+        await manager.authorize('github', { session })
+      }
+
+      expect(session.get<unknown[]>(OAUTH_SESSION_BINDING_KEY)).toHaveLength(5)
     })
 
     it('prefers an explicit bindTo over the session', async () => {

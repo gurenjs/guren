@@ -132,12 +132,17 @@ Pass `redirectTo` when starting the flow and read it back — sanitized — afte
 async redirectToProvider(): Promise<Response> {
   const { url } = await this.oauth().authorize('github', {
     redirectTo: this.request.query('redirectTo'),
+    session: this.auth.session(),
   })
   return this.redirect(url)
 }
 
 async callback(): Promise<Response> {
-  const { profile, redirectTo } = await this.oauth().handleCallback('github', { code, state })
+  const { profile, redirectTo } = await this.oauth().handleCallback('github', {
+    code,
+    state,
+    session: this.auth.session(),
+  })
   // ...log the user in...
   return this.redirect(redirectTo ?? '/')
 }
