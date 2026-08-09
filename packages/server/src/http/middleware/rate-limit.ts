@@ -44,7 +44,10 @@ abstract class BaseMemoryStore implements RateLimitStore {
    */
   private readonly hotReloadClaim: HotDisposableClaim | undefined
 
-  constructor(cleanupIntervalMs = 60000) {
+  constructor(
+    cleanupIntervalMs = 60000,
+    protected readonly now: () => number = () => Date.now(),
+  ) {
     if (cleanupIntervalMs <= 0) {
       return
     }
@@ -93,7 +96,7 @@ export class MemoryRateLimitStore extends BaseMemoryStore {
   async get(key: string): Promise<RateLimitEntry | null> {
     const entry = this.entries.get(key)
     if (!entry) return null
-    if (Date.now() >= entry.resetAt) {
+    if (this.now() >= entry.resetAt) {
       this.entries.delete(key)
       return null
     }
@@ -101,7 +104,7 @@ export class MemoryRateLimitStore extends BaseMemoryStore {
   }
 
   async increment(key: string, windowMs: number): Promise<RateLimitEntry> {
-    const now = Date.now()
+    const now = this.now()
     const existing = this.entries.get(key)
 
     if (existing && now < existing.resetAt) {
@@ -119,7 +122,7 @@ export class MemoryRateLimitStore extends BaseMemoryStore {
   }
 
   cleanup(): void {
-    const now = Date.now()
+    const now = this.now()
     for (const [key, entry] of this.entries.entries()) {
       if (now >= entry.resetAt) {
         this.entries.delete(key)
@@ -197,6 +200,16 @@ export interface RateLimitOptions {
    * @default 'rl:'
    */
   keyPrefix?: string
+
+  /**
+   * Clock returning the current time in epoch milliseconds. Injectable so
+   * tests can advance time synchronously instead of sleeping. Drives the
+   * middleware's own calculations (Retry-After) and, when no `store` is
+   * supplied, the store created for this middleware. A custom store keeps
+   * its own clock — construct it with the same `now` to stay coherent.
+   * @default () => Date.now()
+   */
+  now?: () => number
 
   /**
    * Trust reverse-proxy headers for client IP resolution, checked in order:
@@ -340,13 +353,19 @@ export function createRateLimitMiddleware(options: RateLimitOptions = {}): Middl
     windowMs = 60000,
     trustProxy = false,
     keyGenerator = trustProxy ? proxyAwareKeyGenerator : defaultKeyGenerator,
-    store = getDefaultStore(),
+    // An injected clock must drive the default store too, or expiry would run
+    // on real time while Retry-After runs on the fake clock. The shared default
+    // store stays on real time, so build a dedicated store instead — without
+    // auto-cleanup, since a real-time sweep is meaningless on a fake clock and
+    // its interval would outlive tests.
+    store = options.now ? new MemoryRateLimitStore(0, options.now) : getDefaultStore(),
     skip,
     onRateLimited,
     headers = true,
     message = 'Too many requests, please try again later.',
     statusCode = 429,
     keyPrefix = 'rl:',
+    now = () => Date.now(),
   } = options
 
   return async (ctx, next) => {
@@ -362,7 +381,7 @@ export function createRateLimitMiddleware(options: RateLimitOptions = {}): Middl
     // Get or create rate limit entry
     const entry = await store.increment(key, windowMs)
     const remaining = Math.max(0, limit - entry.count)
-    const resetSeconds = Math.ceil((entry.resetAt - Date.now()) / 1000)
+    const resetSeconds = Math.max(0, Math.ceil((entry.resetAt - now()) / 1000))
 
     // Add rate limit headers
     if (headers) {
@@ -464,7 +483,7 @@ export class SlidingWindowRateLimitStore extends BaseMemoryStore {
     const entry = this.requests.get(key)
     if (!entry || entry.timestamps.length === 0) return null
 
-    const now = Date.now()
+    const now = this.now()
     const windowStart = now - entry.windowMs
     const timestamps = entry.timestamps.filter((t) => t > windowStart)
 
@@ -481,7 +500,7 @@ export class SlidingWindowRateLimitStore extends BaseMemoryStore {
   }
 
   async increment(key: string, windowMs: number): Promise<RateLimitEntry> {
-    const now = Date.now()
+    const now = this.now()
     const windowStart = now - windowMs
     const entry = this.requests.get(key)
     let timestamps = entry ? entry.timestamps.filter((t) => t > windowStart) : []
@@ -495,7 +514,7 @@ export class SlidingWindowRateLimitStore extends BaseMemoryStore {
   }
 
   cleanup(): void {
-    const now = Date.now()
+    const now = this.now()
     for (const [key, entry] of this.requests.entries()) {
       const windowStart = now - entry.windowMs
       const valid = entry.timestamps.filter((t) => t > windowStart)

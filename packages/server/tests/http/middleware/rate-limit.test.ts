@@ -8,11 +8,17 @@ import {
   SlidingWindowRateLimitStore,
 } from '../../../src/http/middleware/rate-limit'
 
+// Far-future epoch (~2096): a store method that leaks Date.now() reads it as
+// the past, so entries the tests expect to expire stay live and the test fails.
+const FAKE_EPOCH = 4_000_000_000_000
+
 describe('MemoryRateLimitStore', () => {
   let store: MemoryRateLimitStore
+  let currentTime: number
 
   beforeEach(() => {
-    store = new MemoryRateLimitStore(0) // Disable auto cleanup for tests
+    currentTime = FAKE_EPOCH
+    store = new MemoryRateLimitStore(0, () => currentTime) // Disable auto cleanup for tests
   })
 
   afterEach(() => {
@@ -28,7 +34,7 @@ describe('MemoryRateLimitStore', () => {
     const entry = await store.increment('key', 60000)
 
     expect(entry.count).toBe(1)
-    expect(entry.resetAt).toBeGreaterThan(Date.now())
+    expect(entry.resetAt).toBe(currentTime + 60000)
   })
 
   it('increments existing entry', async () => {
@@ -41,10 +47,17 @@ describe('MemoryRateLimitStore', () => {
 
   it('resets entry after window expires', async () => {
     await store.increment('key', 100) // 100ms window
-    await new Promise((r) => setTimeout(r, 150))
+    currentTime += 150
 
     const entry = await store.increment('key', 100)
     expect(entry.count).toBe(1) // Reset to 1
+  })
+
+  it('returns null from get after window expires', async () => {
+    await store.increment('key', 100) // 100ms window
+    currentTime += 150
+
+    expect(await store.get('key')).toBeNull()
   })
 
   it('resets a key', async () => {
@@ -58,7 +71,7 @@ describe('MemoryRateLimitStore', () => {
   it('cleans up expired entries', async () => {
     await store.increment('expired', 1) // 1ms window
     await store.increment('valid', 60000) // 60s window
-    await new Promise((r) => setTimeout(r, 10))
+    currentTime += 10
 
     store.cleanup()
 
@@ -88,9 +101,11 @@ describe('MemoryRateLimitStore', () => {
 
 describe('SlidingWindowRateLimitStore', () => {
   let store: SlidingWindowRateLimitStore
+  let currentTime: number
 
   beforeEach(() => {
-    store = new SlidingWindowRateLimitStore(0)
+    currentTime = FAKE_EPOCH
+    store = new SlidingWindowRateLimitStore(0, () => currentTime)
   })
 
   afterEach(() => {
@@ -107,7 +122,7 @@ describe('SlidingWindowRateLimitStore', () => {
 
   it('removes old requests from window', async () => {
     await store.increment('key', 100) // 100ms window
-    await new Promise((r) => setTimeout(r, 150))
+    currentTime += 150
 
     const entry = await store.increment('key', 100)
     expect(entry.count).toBe(1) // Old request removed
@@ -115,7 +130,7 @@ describe('SlidingWindowRateLimitStore', () => {
 
   it('returns null when window has expired', async () => {
     await store.increment('key', 100) // 100ms window
-    await new Promise((r) => setTimeout(r, 150))
+    currentTime += 150
 
     const entry = await store.get('key')
     expect(entry).toBeNull()
@@ -138,9 +153,11 @@ describe('SlidingWindowRateLimitStore', () => {
 describe('createRateLimitMiddleware', () => {
   let store: MemoryRateLimitStore
   let app: Hono
+  let currentTime: number
 
   beforeEach(() => {
-    store = new MemoryRateLimitStore(0)
+    currentTime = FAKE_EPOCH
+    store = new MemoryRateLimitStore(0, () => currentTime)
     app = new Hono()
   })
 
@@ -216,17 +233,19 @@ describe('createRateLimitMiddleware', () => {
 
     expect(res.headers.get('X-RateLimit-Limit')).toBe('10')
     expect(res.headers.get('X-RateLimit-Remaining')).toBe('9')
-    expect(res.headers.get('X-RateLimit-Reset')).toBeDefined()
+    expect(res.headers.get('X-RateLimit-Reset')).toBe(
+      Math.ceil((currentTime + 60000) / 1000).toString()
+    )
   })
 
   it('returns Retry-After header when limited', async () => {
-    app.use('*', createRateLimitMiddleware({ limit: 1, store }))
+    app.use('*', createRateLimitMiddleware({ limit: 1, store, now: () => currentTime }))
     app.get('/', (c) => c.text('OK'))
 
     await app.request('/')
     const res = await app.request('/')
 
-    expect(res.headers.get('Retry-After')).toBeDefined()
+    expect(res.headers.get('Retry-After')).toBe('60')
   })
 
   it('skips requests when skip returns true', async () => {
@@ -365,6 +384,7 @@ describe('createRateLimitMiddleware', () => {
         limit: 1,
         windowMs: 100,
         store,
+        now: () => currentTime,
       })
     )
     app.get('/', (c) => c.text('OK'))
@@ -373,10 +393,44 @@ describe('createRateLimitMiddleware', () => {
     let res = await app.request('/')
     expect(res.status).toBe(429)
 
-    await new Promise((r) => setTimeout(r, 150))
+    currentTime += 150
 
     res = await app.request('/')
     expect(res.status).toBe(200)
+  })
+
+  it('drives the default store with the injected clock', async () => {
+    app.use('*', createRateLimitMiddleware({ limit: 1, windowMs: 100, now: () => currentTime }))
+    app.get('/', (c) => c.text('OK'))
+
+    await app.request('/')
+    let res = await app.request('/')
+    expect(res.status).toBe(429)
+    expect(res.headers.get('Retry-After')).toBe('1')
+
+    currentTime += 150
+
+    res = await app.request('/')
+    expect(res.status).toBe(200)
+  })
+
+  it('clamps Retry-After at zero when the clock is past the window reset', async () => {
+    app.use(
+      '*',
+      createRateLimitMiddleware({
+        limit: 1,
+        windowMs: 1000,
+        store,
+        now: () => currentTime + 5000,
+      })
+    )
+    app.get('/', (c) => c.text('OK'))
+
+    await app.request('/')
+    const res = await app.request('/')
+
+    expect(res.status).toBe(429)
+    expect(res.headers.get('Retry-After')).toBe('0')
   })
 })
 
