@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { resolve } from 'node:path'
-import type { HmrContext, Logger, Plugin, ResolvedConfig } from 'vite'
+import type { HmrContext, Logger, Plugin, ResolvedConfig, ViteDevServer } from 'vite'
 
 export interface RouteTypesPluginOptions {
   /**
@@ -38,6 +38,8 @@ const DEFAULT_ARGS = ['x', '--bun', 'guren', 'codegen', '--force']
 const DEFAULT_WATCH_FILE = 'routes/web.ts'
 const DEFAULT_PAGES_DIR = 'resources/js/pages'
 const DEFAULT_RESOURCES_DIR = 'app/Http/Resources'
+// Fixed by convention across codegen and check (see cli/src/i18n-types.ts).
+const DEFAULT_LANG_DIR = 'lang'
 
 export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin {
   let appRoot = options.appRoot
@@ -104,6 +106,23 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
     return queue
   }
 
+  function shouldRegenerate(root: string, file: string): boolean {
+    const watchFile = resolve(root, options.watchFile ?? DEFAULT_WATCH_FILE)
+    const pagesDir = resolve(root, options.pagesDir ?? DEFAULT_PAGES_DIR)
+    const resourcesDir = resolve(root, options.resourcesDir ?? DEFAULT_RESOURCES_DIR)
+    const langDir = resolve(root, DEFAULT_LANG_DIR)
+    const changedFile = resolve(file)
+
+    return (
+      changedFile === watchFile ||
+      changedFile.startsWith(`${pagesDir}/`) || changedFile === pagesDir ||
+      changedFile.startsWith(`${resourcesDir}/`) || changedFile === resourcesDir ||
+      // Codegen only reads lang/<locale>/*.json — other files under lang/
+      // (notes, fixtures) never affect the generated union.
+      (changedFile.startsWith(`${langDir}/`) && changedFile.endsWith('.json'))
+    )
+  }
+
   return {
     name: 'guren-route-types',
     async configResolved(config: ResolvedConfig) {
@@ -113,18 +132,23 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
       if (process.env.CI) return
       await enqueueGeneration(appRoot)
     },
+    configureServer(server: ViteDevServer) {
+      // handleHotUpdate only fires for updates; creating or deleting a
+      // page, resource, or translation file must regenerate too.
+      const root = () => appRoot ?? server.config.root
+      const onFileEvent = (file: string) => {
+        if (process.env.CI) return
+        if (shouldRegenerate(root(), file)) {
+          void enqueueGeneration(root())
+        }
+      }
+      server.watcher.on('add', onFileEvent)
+      server.watcher.on('unlink', onFileEvent)
+    },
     async handleHotUpdate(ctx: HmrContext) {
       const root = appRoot ?? ctx.server.config.root
-      const watchFile = resolve(root, options.watchFile ?? DEFAULT_WATCH_FILE)
-      const pagesDir = resolve(root, options.pagesDir ?? DEFAULT_PAGES_DIR)
-      const resourcesDir = resolve(root, options.resourcesDir ?? DEFAULT_RESOURCES_DIR)
-      const changedFile = resolve(ctx.file)
 
-      if (
-        changedFile === watchFile ||
-        changedFile.startsWith(`${pagesDir}/`) || changedFile === pagesDir ||
-        changedFile.startsWith(`${resourcesDir}/`) || changedFile === resourcesDir
-      ) {
+      if (shouldRegenerate(root, ctx.file)) {
         await enqueueGeneration(root)
       }
 

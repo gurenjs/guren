@@ -1,6 +1,8 @@
 export type {
   TranslationMessages,
   ReplacementValues,
+  GurenTranslationKeys,
+  RegisteredTranslationKey,
   PluralizationRule,
   TranslationLoader,
   TranslatorOptions,

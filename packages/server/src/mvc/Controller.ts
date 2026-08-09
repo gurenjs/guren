@@ -3,7 +3,7 @@ import { inertia, type InertiaOptions } from './inertia/InertiaEngine'
 import { resolveSharedInertiaProps, type ResolvedSharedInertiaProps } from './inertia/shared'
 import { AUTH_CONTEXT_KEY } from '../http/middleware/auth'
 import { getRequestLocale, getRequestTranslator, type TranslatorBinding } from '../http/middleware/detect-locale'
-import { tryGetI18n, type I18nManager, type ReplacementValues } from '../i18n'
+import { tryGetI18n, type I18nManager, type RegisteredTranslationKey, type ReplacementValues } from '../i18n'
 import { flattenRequestQueries, parseRequestPayload } from '../http/request'
 import type { AuthContext } from '../auth/types'
 import type { ServiceBindings } from '../container/bindings'
@@ -362,7 +362,7 @@ export class Controller {
    * this.t('posts.greeting', { name: user.name })
    * ```
    */
-  protected t(key: string, replacements?: ReplacementValues): string {
+  protected t(key: RegisteredTranslationKey, replacements?: ReplacementValues): string {
     return this.#requestTranslator().t(key, replacements)
   }
 
@@ -370,7 +370,7 @@ export class Controller {
    * Translate a key with a count for pluralization, using the same locale
    * resolution as {@link Controller.t}.
    */
-  protected tc(key: string, count: number, replacements?: ReplacementValues): string {
+  protected tc(key: RegisteredTranslationKey, count: number, replacements?: ReplacementValues): string {
     return this.#requestTranslator().tc(key, count, replacements)
   }
 

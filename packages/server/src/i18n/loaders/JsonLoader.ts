@@ -13,6 +13,12 @@ import type { TranslationLoader, TranslationMessages } from '../types'
  *   ja/
  *     messages.json
  *     validation.json
+ *
+ * This layout (locale subdirectories, namespace = file name) is a contract
+ * shared with the CLI: `guren codegen` (packages/cli/src/i18n-types.ts) and
+ * `guren check --i18n` (packages/cli/src/i18n-check.ts) re-implement the
+ * same walk statically. Changing the layout or parse tolerance here strands
+ * them on the old contract — update both together.
  */
 export class JsonLoader implements TranslationLoader {
   private basePath: string

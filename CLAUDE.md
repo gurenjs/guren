@@ -107,6 +107,7 @@ bunx guren check --json         # Check results as JSON
 bunx guren check --arch         # Architecture boundary checks only (guren.arch.ts) — fast path for edit hooks
 bunx guren check --docs         # Doc-link checks only: OKF frontmatter (type/entities/related) + body markdown links + @docs tags (exits non-zero on failures)
 bunx guren check --spec         # Spec drift checks only: docs/spec/ vs regenerated views (exits non-zero on failures)
+bunx guren check --i18n         # Translation catalog checks only: lang/<locale> key parity + interpolation placeholders (exits non-zero on failures)
 bunx guren spec:generate        # Generate spec views (er/domain/screens/modules) into docs/spec/ — deterministic, committed, drift-gated
 bunx guren check --changed      # Restrict file-scanning checks to files changed vs. the merge base with main
 bunx guren audit                # Security audit: validation/auth on mutating routes, raw SQL, secrets, mass assignment
@@ -370,6 +371,8 @@ export const handler = createLambdaHandler(app)
 | `packages/cli/src/docs-frontmatter.ts` | AI agent: the YAML-subset frontmatter parser (OKF fields) |
 | `packages/cli/src/docs-links.ts` | AI agent: markdown link scanning shared by check, graph, and renderer |
 | `packages/cli/src/docs-check.ts` | AI agent: doc-link validation (`guren check --docs`) |
+| `packages/cli/src/i18n-types.ts` | AI agent: typed translation keys (`.guren/translations.gen.ts` from `lang/`) |
+| `packages/cli/src/i18n-check.ts` | AI agent: translation catalog checks (`guren check --i18n`) |
 | `packages/cli/src/make-adr.ts` | AI agent: numbered ADR scaffolding (`make:adr`) |
 | `packages/cli/src/spec-generate.ts` | AI agent: spec view orchestration (`spec:generate`, RFC 0004) |
 | `packages/cli/src/spec-check.ts` | AI agent: spec drift gate (`guren check --spec`) |

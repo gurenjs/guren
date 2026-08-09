@@ -32,6 +32,7 @@ import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath
 import { appEmitsPageManifest } from './pages-types'
 import { runArchCheck } from './arch-check'
 import { runDocsCheck } from './docs-check'
+import { runI18nCheck } from './i18n-check'
 import { runSpecCheck } from './spec-check'
 import { getChangedFiles } from './changed-files'
 import { check, type CheckResult, type CheckReport, type CheckStatus } from './check-result'
@@ -62,6 +63,12 @@ export interface RunCheckOptions {
   docs?: boolean
   /** Run spec drift checks only (docs/spec/ vs regenerated views). */
   spec?: boolean
+  /**
+   * Run translation catalog checks only (lang/<locale>/*.json key and
+   * placeholder parity). Content-activated: apps without lang/ contribute
+   * zero results.
+   */
+  i18n?: boolean
 }
 
 /**
@@ -124,12 +131,13 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
 
   // `--arch` / `--docs` / `--spec` select suites; combining them runs the
   // union (never silently nothing). No flag = every suite.
-  const selected = new Set<'arch' | 'docs' | 'spec'>([
+  const selected = new Set<'arch' | 'docs' | 'spec' | 'i18n'>([
     ...(options.arch ? (['arch'] as const) : []),
     ...(options.docs ? (['docs'] as const) : []),
     ...(options.spec ? (['spec'] as const) : []),
+    ...(options.i18n ? (['i18n'] as const) : []),
   ])
-  const runs = (suite: 'core' | 'arch' | 'docs' | 'spec'): boolean =>
+  const runs = (suite: 'core' | 'arch' | 'docs' | 'spec' | 'i18n'): boolean =>
     selected.size === 0 || (suite !== 'core' && selected.has(suite))
 
   if (runs('core')) {
@@ -237,6 +245,19 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   if (runs('spec')) {
     const specResults = await runSpecCheck({ cwd, routesFile: options.routesFile, changedFiles })
     checks.push(...specResults)
+  }
+
+  // 10.5. Translation catalog checks (lang/<locale>/*.json). Content-
+  // activated like docs: apps without lang/ contribute zero results. Parity
+  // is inherently whole-catalog, so --changed gates the suite as a unit:
+  // skip when no lang/ file changed, run fully otherwise.
+  if (runs('i18n')) {
+    const langChanged =
+      !changedFiles || [...changedFiles].some((file) => file === 'lang' || file.startsWith('lang/'))
+    if (langChanged) {
+      const i18nResults = await runI18nCheck({ cwd })
+      checks.push(...i18nResults)
+    }
   }
 
   // 11. Check architecture boundaries (guren.arch.ts + derived module rules)

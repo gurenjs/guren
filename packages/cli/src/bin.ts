@@ -38,6 +38,7 @@ import { showMigrationStatus } from './db-status'
 import type { WriterOptions } from './utils'
 import { generateRouteTypes } from './routes-types'
 import { generatePageTypes } from './pages-types'
+import { generateTranslationTypes } from './i18n-types'
 import { generateDataTypes } from './data-types'
 import { generateApiClientTypes } from './api-client-types'
 import { generateOpenApiSpec } from './openapi-generate'
@@ -894,6 +895,16 @@ const codegenCommand = defineCommand({
       ...writerOptions,
     })
     if (pagesOutputPath) consola.success(`Page helpers generated at ${pagesOutputPath}`)
+
+    // Translation keys only exist for apps with a lang/ directory; the
+    // generator emits nothing otherwise, keeping t() keys plain strings.
+    const { outputPath: translationsOutputPath, keyCount } = await generateTranslationTypes({
+      appRoot: args.app,
+      ...writerOptions,
+    })
+    if (translationsOutputPath) {
+      consola.success(`Translation keys generated at ${translationsOutputPath} (${keyCount} keys)`)
+    }
 
     // Route/API artifacts default to routes/web.ts; skip only when no routes file exists.
     const { existsSync } = await import('node:fs')
@@ -1800,6 +1811,10 @@ const checkCommand = defineCommand({
       type: 'boolean',
       description: 'Run only spec drift checks (docs/spec/ vs regenerated views).',
     },
+    i18n: {
+      type: 'boolean',
+      description: 'Run only translation catalog checks (lang/<locale> key and placeholder parity).',
+    },
     changed: {
       type: 'boolean',
       description: 'Restrict file-scanning checks to files changed vs. the merge base with main.',
@@ -1812,8 +1827,8 @@ const checkCommand = defineCommand({
   async run({ args }) {
     // --ci promises a full-suite gate; letting a suite flag narrow the run
     // underneath it would report success while docs/spec/core went unchecked.
-    if (args.ci && (args.arch || args.docs || args.spec)) {
-      consola.error('check --ci runs the full suite — drop --arch/--docs/--spec (they gate on their own).')
+    if (args.ci && (args.arch || args.docs || args.spec || args.i18n)) {
+      consola.error('check --ci runs the full suite — drop --arch/--docs/--spec/--i18n (they gate on their own).')
       process.exitCode = 1
       return
     }
@@ -1825,6 +1840,7 @@ const checkCommand = defineCommand({
       arch: Boolean(args.arch),
       docs: Boolean(args.docs),
       spec: Boolean(args.spec),
+      i18n: Boolean(args.i18n),
       changed: Boolean(args.changed),
     })
 
@@ -1840,7 +1856,7 @@ const checkCommand = defineCommand({
     // reserved for a major release). These flags are newer, with no prior
     // contract to preserve, so they can gate CI from day one — that's the
     // intended way to enforce checks in CI without breaking the default.
-    if ((args.arch || args.docs || args.spec) && report.failCount > 0) {
+    if ((args.arch || args.docs || args.spec || args.i18n) && report.failCount > 0) {
       process.exitCode = 1
     }
     // --ci also gates on warns: most integrity problems (a missing codegen
