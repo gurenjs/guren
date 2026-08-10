@@ -75,25 +75,9 @@ describe('createWorkersHandler', () => {
   })
 
   // The two ways a first boot can fail. `WorkersAppLike` requires only a
-  // `boot(): Promise<void>`, so a conforming app need not be `async` and can
-  // throw before it ever returns a promise — parameterized rather than copied
-  // so the async/sync axis stays visible instead of living in one keyword.
-  const failingBoots: Array<[string, (failFirst: () => void) => WorkersAppLike['boot']]> = [
-    // `async`, so the throw surfaces as a rejected promise.
-    ['rejecting', (failFirst) => async () => failFirst()],
-    // Not `async`, so the throw escapes before any promise exists.
-    [
-      'throwing synchronously',
-      (failFirst) => () => {
-        failFirst()
-        return Promise.resolve()
-      },
-    ],
-  ]
-
-  test.each(failingBoots)(
-    'should clear boot promise and env holder on a first boot %s, then retry cleanly',
-    async (_label, makeBoot) => {
+  // `boot(): Promise<void>`, so a conforming app need not be `async`.
+  for (const mode of ['rejects', 'throws synchronously'] as const) {
+    test(`should clear boot promise and env holder on a first boot that ${mode}, then retry cleanly`, async () => {
       let bootCalls = 0
       const failFirst = () => {
         bootCalls += 1
@@ -102,11 +86,22 @@ describe('createWorkersHandler', () => {
         }
       }
       const app: WorkersAppLike = {
-        boot: makeBoot(failFirst),
+        boot:
+          mode === 'rejects'
+            ? async () => failFirst()
+            : () => {
+                failFirst()
+                return Promise.resolve()
+              },
         fetch() {
           return new Response('ok')
         },
       }
+      // Pins the axis rather than trusting it to a keyword: making the second
+      // boot `async` would turn its throw into a rejection, and the case would
+      // silently become a copy of the first.
+      expect(app.boot.constructor.name).toBe(mode === 'rejects' ? 'AsyncFunction' : 'Function')
+
       const handler = createWorkersHandler(app)
       const ctx = createExecutionContext()
       const firstEnv = { DB: 'first-db' }
@@ -121,8 +116,8 @@ describe('createWorkersHandler', () => {
       expect(bootCalls).toBe(2)
       expect(await response.text()).toBe('ok')
       expect(getWorkersEnv<TestEnv>()).toBe(secondEnv)
-    },
-  )
+    })
+  }
 
   test('should reject every concurrent request sharing a failed boot, then recover on retry', async () => {
     let bootCalls = 0
