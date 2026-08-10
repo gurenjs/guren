@@ -20,7 +20,7 @@ bunx wrangler deploy
 
 ## API
 
-- **`createWorkersHandler(app)`** — wraps a Guren `Application` in a Workers module handler. Boot is lazy and deduplicated on the first request, because bindings only arrive with `fetch` and cannot be read at module scope.
+- **`createWorkersHandler(app)`** — wraps a Guren `Application` in a Workers module handler. Boot is lazy and deduplicated on the first request, because bindings only arrive with `fetch` and cannot be read at module scope. The handler does that deduplication itself, so boot-once holds for anything matching `WorkersAppLike` — not only for Guren's `Application`, whose `boot()` also memoizes on its own.
 - **`getWorkersEnv<Env>()`** — exposes the first request's bindings to boot-time config through a write-once holder. Use it to hand a D1 binding to the ORM:
 
   ```typescript
