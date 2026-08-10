@@ -1,7 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises'
+import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
-import { runCheck, type CheckReport, type RunCheckOptions } from '../src/check'
+import { runCheck, type CheckReport, type CheckResult, type RunCheckOptions } from '../src/check'
 import { createTempWorkspace, writeWorkspaceFiles, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE } from './helpers'
 
 /** Run a check over a throwaway workspace built from path → content. */
@@ -920,5 +921,463 @@ export class User extends defineModel(users, {
 
     const denied = report.checks.find(c => c.key === 'mass-assignment-denied:User')
     expect(denied).toBeUndefined()
+  })
+})
+describe('route registrar wiring', () => {
+  /** Every `route-registrar:` finding, keyed by the file it names. */
+  function wiring(report: CheckReport): Map<string, CheckResult> {
+    return new Map(
+      report.checks
+        .filter((c) => c.key.startsWith('route-registrar:'))
+        .map((c) => [c.key.replace('route-registrar:', ''), c]),
+    )
+  }
+
+  const statusOf = (report: CheckReport, relPath: string): string | undefined =>
+    wiring(report).get(relPath)?.status
+
+  /** An entry registrar that mounts nothing but itself. */
+  const PLAIN_ENTRY = `import { Router } from '@guren/core'
+
+export function registerWebRoutes(baseRouter: Router): void {
+  baseRouter.get('/', [HomeController, 'index'])
+}
+`
+
+  const API_ENTRY = `import { Router } from '@guren/core'
+
+export function registerApiRoutes(baseRouter: Router): void {
+  baseRouter.get('/api/posts', [PostController, 'index'])
+}
+`
+
+  const ROUTES_ENTRY = `import { Router } from '@guren/core'
+import { registerAdminRoutes } from './admin.js'
+
+export function registerWebRoutes(baseRouter: Router): void {
+  registerAdminRoutes(baseRouter)
+}
+`
+
+  const ADMIN_ROUTES = `import { Router } from '@guren/core'
+
+export function registerAdminRoutes(router: Router): void {
+  router.get('/admin', [AdminController, 'index'])
+}
+
+export default registerAdminRoutes
+`
+
+  // The specifier a Node-ESM app actually writes: `./admin.js` for a file
+  // that is `admin.ts` on disk. Nothing else in this suite would notice a
+  // resolver that only tried the specifier as written — it would report
+  // every real app's routes files as unmounted.
+  it('resolves a .js specifier back to the .ts file it names', async () => {
+    const report = await withWorkspace({ 'routes/web.ts': ROUTES_ENTRY, 'routes/admin.ts': ADMIN_ROUTES })
+
+    expect(statusOf(report, 'routes/admin.ts')).toBe('pass')
+  })
+
+  it('warns about a routes file the entry never imports', async () => {
+    const report = await withWorkspace({ 'routes/web.ts': PLAIN_ENTRY, 'routes/admin.ts': ADMIN_ROUTES })
+
+    const finding = wiring(report).get('routes/admin.ts')
+    expect(finding?.status).toBe('warn')
+    expect(finding!.message).toContain('404')
+    expect(finding!.suggestion).toContain("import { registerAdminRoutes } from './admin.js'")
+  })
+
+  // The state the scaffolders' own patch is careful never to produce, and the
+  // reason detection looks outside the imports rather than at them.
+  it('warns when the entry imports the registrar but never calls it', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': `import { Router } from '@guren/core'
+import { registerAdminRoutes } from './admin.js'
+
+export function registerWebRoutes(baseRouter: Router): void {
+  baseRouter.get('/', [HomeController, 'index'])
+}
+`,
+      'routes/admin.ts': ADMIN_ROUTES,
+    })
+
+    expect(statusOf(report, 'routes/admin.ts')).toBe('warn')
+  })
+
+  // Crediting the whole file for any binding would pass this: the entry uses
+  // admin.ts, but only for a constant — the registrar beside it is dead.
+  it('does not credit a file whose non-registrar export is the one imported', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': `import { Router } from '@guren/core'
+import { ADMIN_PREFIX } from './admin.js'
+
+export function registerWebRoutes(baseRouter: Router): void {
+  baseRouter.group(ADMIN_PREFIX, (group) => group.get('/health', [HealthController, 'index']))
+}
+`,
+      'routes/admin.ts': `import { Router } from '@guren/core'
+
+export const ADMIN_PREFIX = '/admin'
+
+export function registerAdminRoutes(router: Router): void {
+  router.get('/users', [AdminController, 'index'])
+}
+`,
+    })
+
+    expect(statusOf(report, 'routes/admin.ts')).toBe('warn')
+  })
+
+  it('follows a nested registrar called from another routes file', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': ROUTES_ENTRY,
+      'routes/admin.ts': `import { Router } from '@guren/core'
+import { registerAdminUserRoutes } from './admin-users.js'
+
+export function registerAdminRoutes(router: Router): void {
+  registerAdminUserRoutes(router)
+}
+`,
+      'routes/admin-users.ts': `import { Router } from '@guren/core'
+
+export function registerAdminUserRoutes(router: Router): void {
+  router.get('/admin/users', [UserController, 'index'])
+}
+`,
+    })
+
+    expect(statusOf(report, 'routes/admin.ts')).toBe('pass')
+    expect(statusOf(report, 'routes/admin-users.ts')).toBe('pass')
+  })
+
+  // Mounting spreads from the entry, not over everything parsed: group.ts is
+  // reachable (the entry re-exports it under a non-registrar name) but nobody
+  // calls it, so the registrar it calls in turn is dead too.
+  it('does not let an unmounted intermediate mount its descendants', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': `import { Router } from '@guren/core'
+
+export { registerGroupRoutes as GROUP_REGISTRAR } from './group.js'
+
+export function registerWebRoutes(baseRouter: Router): void {
+  baseRouter.get('/', [HomeController, 'index'])
+}
+`,
+      'routes/group.ts': `import { Router } from '@guren/core'
+import { registerAdminRoutes } from './admin.js'
+
+export function registerGroupRoutes(router: Router): void {
+  registerAdminRoutes(router)
+}
+`,
+      'routes/admin.ts': ADMIN_ROUTES,
+    })
+
+    expect(statusOf(report, 'routes/group.ts')).toBe('warn')
+    expect(statusOf(report, 'routes/admin.ts')).toBe('warn')
+  })
+
+  // The barrel forwards the name; only `admin.ts` declares it, so credit has
+  // to travel back along the `export ... from` edge.
+  it('credits a registrar reached through a re-export barrel', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': `import { Router } from '@guren/core'
+import { registerAdminRoutes } from './index.js'
+
+export function registerWebRoutes(baseRouter: Router): void {
+  registerAdminRoutes(baseRouter)
+}
+`,
+      'routes/index.ts': `export { registerAdminRoutes } from './admin.js'
+`,
+      'routes/admin.ts': ADMIN_ROUTES,
+    })
+
+    expect(statusOf(report, 'routes/admin.ts')).toBe('pass')
+    // The barrel declares no registrar of its own, so it is not a candidate.
+    expect(wiring(report).has('routes/index.ts')).toBe(false)
+  })
+
+  // ES semantics: the explicit re-export wins, so the same name coming through
+  // `export *` is shadowed and its file is never called.
+  it('does not credit an export * shadowed by an explicit re-export', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': `import { Router } from '@guren/core'
+import { registerAdminRoutes } from './index.js'
+
+export function registerWebRoutes(baseRouter: Router): void {
+  registerAdminRoutes(baseRouter)
+}
+`,
+      'routes/index.ts': `export * from './legacy-admin.js'
+export { registerAdminRoutes } from './admin.js'
+`,
+      'routes/admin.ts': ADMIN_ROUTES,
+      'routes/legacy-admin.ts': `import { Router } from '@guren/core'
+
+export function registerAdminRoutes(router: Router): void {
+  router.get('/legacy-admin', [LegacyAdminController, 'index'])
+}
+`,
+    })
+
+    expect(statusOf(report, 'routes/admin.ts')).toBe('pass')
+    expect(statusOf(report, 'routes/legacy-admin.ts')).toBe('warn')
+  })
+
+  // The loader resolves the registrar off the entry's exports, so one the
+  // entry only forwards is called exactly as surely as one it declares.
+  it('credits a registrar the entry re-exports rather than calls', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': `export * from './admin.js'
+`,
+      'routes/admin.ts': ADMIN_ROUTES,
+    })
+
+    expect(statusOf(report, 'routes/admin.ts')).toBe('pass')
+  })
+
+  it('credits a registrar called through a namespace import', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': `import { Router } from '@guren/core'
+import * as admin from './admin.js'
+
+export function registerWebRoutes(baseRouter: Router): void {
+  admin.registerAdminRoutes(baseRouter)
+}
+`,
+      'routes/admin.ts': ADMIN_ROUTES,
+    })
+
+    expect(statusOf(report, 'routes/admin.ts')).toBe('pass')
+  })
+
+  // The runtime awaits an async registrar, so this really does mount — and a
+  // dynamic import binds its names by destructuring, with no static local for
+  // the reference test to find.
+  it('credits a registrar reached by a dynamic import', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': `import { Router } from '@guren/core'
+
+export async function registerWebRoutes(baseRouter: Router): Promise<void> {
+  const { registerAdminRoutes } = await import('./admin.js')
+  registerAdminRoutes(baseRouter)
+}
+`,
+      'routes/admin.ts': ADMIN_ROUTES,
+    })
+
+    expect(statusOf(report, 'routes/admin.ts')).toBe('pass')
+  })
+
+  it('ignores a routes file that exports no registrar', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': PLAIN_ENTRY,
+      'routes/prefixes.ts': `export const ADMIN_PREFIX = '/admin'
+`,
+    })
+
+    expect(wiring(report).has('routes/prefixes.ts')).toBe(false)
+  })
+
+  // The loader takes a default export only when it is a function, so a routes
+  // file defaulting to a config object is not an unmounted registrar.
+  it('ignores a file whose default export is not a function', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': PLAIN_ENTRY,
+      'routes/prefixes.ts': `export default { admin: '/admin', api: '/api' }
+`,
+    })
+
+    expect(wiring(report).has('routes/prefixes.ts')).toBe(false)
+  })
+
+  // An in-place TypeScript build drops `admin.js` beside `admin.ts`. The pair
+  // is one routes file; counting the artifact separately would turn a working
+  // routes/ into a failing check.
+  it('ignores an emitted .js file sitting beside its .ts source', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': ROUTES_ENTRY,
+      'routes/web.js': ROUTES_ENTRY,
+      'routes/admin.ts': ADMIN_ROUTES,
+      'routes/admin.js': ADMIN_ROUTES,
+    })
+
+    expect([...wiring(report).keys()]).toEqual(['routes/admin.ts'])
+    expect(statusOf(report, 'routes/admin.ts')).toBe('pass')
+  })
+
+  it('contributes nothing when routes/ holds only the entry file', async () => {
+    const report = await withWorkspace({ 'routes/web.ts': PLAIN_ENTRY })
+
+    expect(wiring(report).size).toBe(0)
+  })
+
+  // `--routes` may point anywhere, so the entry is excluded by resolved path,
+  // not by matching the conventional name.
+  it('treats routes/web.ts as a candidate under a custom --routes entry', async () => {
+    const report = await withWorkspace(
+      { 'routes/api.ts': API_ENTRY, 'routes/web.ts': PLAIN_ENTRY },
+      { routesFile: 'routes/api.ts' },
+    )
+
+    expect(statusOf(report, 'routes/web.ts')).toBe('warn')
+    expect(wiring(report).has('routes/api.ts')).toBe(false)
+  })
+
+  // A module mounts its routes through `defineModule({ routes })`, which never
+  // touches the app's entry registrar — flagging it would be a false alarm.
+  it('leaves a module routes file alone', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': ROUTES_ENTRY,
+      'routes/admin.ts': ADMIN_ROUTES,
+      'modules/billing/routes.ts': `import { Router } from '@guren/core'
+
+export function registerBillingRoutes(router: Router): void {
+  router.get('/billing', [BillingController, 'index'])
+}
+`,
+      'modules/billing/index.ts': `import { defineModule } from '@guren/core'
+import { registerBillingRoutes } from './routes.js'
+
+export const billingModule = defineModule({ name: 'billing', routes: registerBillingRoutes, providers: [] })
+`,
+    })
+
+    expect(statusOf(report, 'routes/admin.ts')).toBe('pass')
+    expect([...wiring(report).keys()].some((key) => key.startsWith('modules/'))).toBe(false)
+  })
+
+  it('reports a missing entry file once, not once per routes file', async () => {
+    const report = await withWorkspace({
+      'routes/admin.ts': ADMIN_ROUTES,
+      'routes/oauth.ts': `import { Router } from '@guren/core'
+
+export function registerOAuthRoutes(router: Router): void {
+  router.get('/auth/github', [OAuthController, 'redirect'])
+}
+`,
+    })
+
+    expect(wiring(report).size).toBe(0)
+    const entry = report.checks.filter((c) => c.key === 'route-entry:routes/web.ts')
+    expect(entry).toHaveLength(1)
+    expect(entry[0].status).toBe('warn')
+    expect(entry[0].message).toContain('routes/admin.ts')
+  })
+
+  it('reports an unparseable entry file once, without judging the candidates', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': `export function registerWebRoutes(router {{{`,
+      'routes/admin.ts': ADMIN_ROUTES,
+    })
+
+    expect(wiring(report).size).toBe(0)
+    const entry = report.checks.find((c) => c.key === 'route-entry:routes/web.ts')
+    expect(entry?.status).toBe('warn')
+    expect(entry?.message).toContain('could not be parsed')
+  })
+
+  // Two `make:route` outputs both export `registerRoutes`, so the obvious
+  // import line would not compile once the first one is wired.
+  it('flags the name collision two make:route files produce', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': `import { Router } from '@guren/core'
+import { registerRoutes } from './reports.js'
+
+export function registerWebRoutes(baseRouter: Router): void {
+  registerRoutes(baseRouter)
+}
+`,
+      'routes/reports.ts': `import { Router } from '@guren/core'
+
+export function registerRoutes(router: Router): void {
+  router.get('/reports', [ReportController, 'index'])
+}
+`,
+      'routes/invoices.ts': `import { Router } from '@guren/core'
+
+export function registerRoutes(router: Router): void {
+  router.get('/invoices', [InvoiceController, 'index'])
+}
+`,
+    })
+
+    expect(statusOf(report, 'routes/reports.ts')).toBe('pass')
+    expect(statusOf(report, 'routes/invoices.ts')).toBe('warn')
+    expect(wiring(report).get('routes/invoices.ts')!.suggestion).toContain('under an alias')
+  })
+
+  // The API-only template ships `routes/api.ts` and no `routes/web.ts`, and
+  // wires `--routes routes/api.ts` into its own codegen script — a bare
+  // `guren check` there must not report the app as having no entry at all.
+  it('falls back to routes/api.ts when there is no routes/web.ts', async () => {
+    const report = await withWorkspace({ 'routes/api.ts': API_ENTRY })
+
+    expect(wiring(report).size).toBe(0)
+    expect(report.checks.some((c) => c.key.startsWith('route-entry:'))).toBe(false)
+  })
+
+  it('judges candidates against routes/api.ts when that is the only entry', async () => {
+    const report = await withWorkspace({ 'routes/api.ts': API_ENTRY, 'routes/admin.ts': ADMIN_ROUTES })
+
+    const finding = wiring(report).get('routes/admin.ts')
+    expect(finding?.status).toBe('warn')
+    expect(finding!.message).toContain('routes/api.ts')
+    expect(finding!.suggestion).toContain('Add to routes/api.ts')
+  })
+
+  // The edit hook runs `runCheck({ changed: true })` on every save of a
+  // controller, model, or page — none of which can move this answer, and all
+  // of which would otherwise re-parse routes/ to re-derive it.
+  it('is skipped under --changed when nothing under routes/ changed', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-routes-changed-')
+
+    try {
+      await writeWorkspaceFiles(workspace.dir, {
+        'routes/web.ts': PLAIN_ENTRY,
+        'routes/admin.ts': ADMIN_ROUTES,
+        'app/Http/Controllers/PostController.ts': 'export default class PostController {}\n',
+      })
+      const git = (...args: string[]): void => {
+        spawnSync('git', args, { cwd: workspace.dir, stdio: 'ignore' })
+      }
+      git('init', '-b', 'main')
+      git('config', 'user.email', 'test@example.com')
+      git('config', 'user.name', 'Test')
+      git('add', '.')
+      git('commit', '-m', 'initial')
+
+      // An unrelated edit must not wake it.
+      await writeFile(
+        join(workspace.dir, 'app/Http/Controllers/PostController.ts'),
+        'export default class PostController { async index() {} }\n',
+        'utf8',
+      )
+      expect(wiring(await runCheck({ cwd: workspace.dir, changed: true })).size).toBe(0)
+
+      // A brand-new, never-committed routes file does — this is how
+      // `make:route` output reaches the check, and the gate only sees it
+      // because getChangedFiles unions `ls-files --others`.
+      await writeFile(join(workspace.dir, 'routes/orphan.ts'), ADMIN_ROUTES, 'utf8')
+      expect(statusOf(await runCheck({ cwd: workspace.dir, changed: true }), 'routes/orphan.ts')).toBe('warn')
+
+      // Editing the entry — the change that actually breaks wiring — does.
+      await writeFile(join(workspace.dir, 'routes/web.ts'), `${PLAIN_ENTRY}\n`, 'utf8')
+      expect(statusOf(await runCheck({ cwd: workspace.dir, changed: true }), 'routes/admin.ts')).toBe('warn')
+    } finally {
+      await workspace.cleanup()
+    }
+    // Spawns git and runs the suite twice; the default 5s budget is tight
+    // enough that an unrelated slow machine turns this red.
+  }, 30_000)
+
+  it('does not run under --arch', async () => {
+    const report = await withWorkspace(
+      { 'routes/web.ts': ROUTES_ENTRY, 'routes/admin.ts': ADMIN_ROUTES },
+      { arch: true },
+    )
+
+    expect(wiring(report).size).toBe(0)
   })
 })

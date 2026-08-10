@@ -25,6 +25,7 @@ import {
   staticStringProperty,
 } from './model-parser'
 import { checkConsoleCommandRegistration } from './console-check'
+import { checkRouteRegistrarWiring, ROUTES_DIR } from './routes-check'
 import { checkSchemaTimestamps } from './schema-check'
 import { parseSchemaTables, schemaPathFor, type SchemaTable } from './schema-parser'
 import { ParseCache } from './parse-cache'
@@ -53,6 +54,10 @@ export interface RunCheckOptions {
    * Restrict file-scanning checks (empty methods, arch boundaries) to files
    * changed vs. the merge base with main, plus uncommitted/untracked files.
    * Falls back to checking everything when not in a git repo.
+   *
+   * Two checks answer a whole-directory question rather than a per-file one
+   * — translation parity and route registrar wiring — so `--changed` gates
+   * each as a unit on its own directory instead of filtering its inputs.
    */
   changed?: boolean
   /**
@@ -221,6 +226,25 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // contribute nothing here.
     const commandRegistrationResults = await checkConsoleCommandRegistration(cwd, cache)
     checks.push(...commandRegistrationResults)
+
+    // 7.5. Check every routes file's registrar is reached from the app's entry
+    // registrar (the wiring `guren add admin|oauth|auth` performs
+    // automatically — this catches routes files written, moved, or unhooked by
+    // hand, whose only other symptom is a 404). Not an architecture boundary
+    // rule, so it stays out of `--arch`'s fast path alongside checks 6-8.
+    //
+    // Gated as a unit under --changed, the way check 10.5 gates i18n — see
+    // checkRouteRegistrarWiring for why filtering by changed *candidate*
+    // would miss the edit that usually breaks the wiring.
+    const routesChanged =
+      !changedFiles
+      || [...changedFiles].some(
+        (file) => file === ROUTES_DIR || file.startsWith(`${ROUTES_DIR}/`) || file === options.routesFile,
+      )
+    if (routesChanged) {
+      const routeWiringResults = await checkRouteRegistrarWiring({ cwd, cache, routesFile: options.routesFile })
+      checks.push(...routeWiringResults)
+    }
 
     // 8. Check Postgres timestamp columns carry a time zone. Content-activated
     // and dialect-gated: apps with no schema, or a non-Postgres one, contribute

@@ -8,6 +8,7 @@ import {
   discoverModelFiles,
   discoverTestFiles,
   fileExists,
+  findFirstExisting,
   hasControllerTest,
   describeControllerTestMiss,
   moduleFlagFor,
@@ -20,6 +21,7 @@ import { compareVersions } from './codemods'
 import { appEmitsPageManifest } from './pages-types'
 import { extractClassDeclaration } from './model-parser'
 import { parseSourceFile } from './parse-cache'
+import { ROUTES_ENTRY_CANDIDATES } from './route-registrar'
 import {
   analyzeDeployRuntime,
   bunlessTargets,
@@ -126,7 +128,6 @@ type JsonReadResult<T> =
   | { exists: true; raw: string; value: null; parseError: Error }
 
 const APP_ENTRY_CANDIDATES = ['src/main.ts', 'src/main.mts', 'src/main.js', 'src/main.mjs']
-const ROUTE_CANDIDATES = ['routes/web.ts', 'routes/web.js', 'routes/api.ts', 'routes/api.js']
 const PAGE_CONTRACT_CANDIDATES = ['.guren/pages.gen.ts']
 const GENERATED_FILES = ['.guren/routes.gen.ts', '.guren/pages.gen.ts', '.guren/data.gen.ts', '.guren/api-client.gen.ts', '.guren/channels.gen.ts']
 
@@ -162,12 +163,6 @@ type TsconfigShape = {
     baseUrl?: string
     paths?: Record<string, string[]>
   }
-}
-
-async function findFirstExisting(cwd: string, candidates: readonly string[]): Promise<string | null> {
-  const results = await Promise.all(candidates.map((c) => fileExists(cwd, c)))
-  const index = results.indexOf(true)
-  return index === -1 ? null : candidates[index]
 }
 
 async function readJsonIfExists<T>(cwd: string, relativePath: string): Promise<JsonReadResult<T>> {
@@ -280,7 +275,7 @@ async function detectAppEntry(context: DoctorRuleContext): Promise<DoctorCheck> 
 }
 
 async function detectRoutes(context: DoctorRuleContext): Promise<DoctorCheck> {
-  const routesFile = await findFirstExisting(context.cwd, ROUTE_CANDIDATES)
+  const routesFile = await findFirstExisting(context.cwd, ROUTES_ENTRY_CANDIDATES)
   if (!routesFile) {
     return createCheck(
       'routes',
@@ -739,7 +734,7 @@ async function detectConfigDrift(context: DoctorRuleContext): Promise<DoctorChec
     combinedSource.includes('routes:') ||
     combinedSource.includes('routes,')
   )
-  const routeFileExists = await findFirstExisting(context.cwd, ROUTE_CANDIDATES)
+  const routeFileExists = await findFirstExisting(context.cwd, ROUTES_ENTRY_CANDIDATES)
 
   if (routeFileExists && !hasRoutesImport) {
     issues.push('Route file exists but may not be wired into createApp()')

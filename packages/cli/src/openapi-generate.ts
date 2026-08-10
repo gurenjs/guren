@@ -1,5 +1,5 @@
 import { resolve } from 'node:path'
-import { loadRouteDefinitions } from './load-routes'
+import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
 import { readIfExists } from './discovery'
 import { resolveAppRoot, type WriterOptions } from './utils'
 
@@ -39,7 +39,6 @@ type PackageMetadata = {
   description?: string
 }
 
-const DEFAULT_ROUTES_FILE = 'routes/web.ts'
 
 export async function generateOpenApiSpec(
   options: GenerateOpenApiSpecOptions = {},
