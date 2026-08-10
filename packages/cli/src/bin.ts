@@ -138,13 +138,13 @@ const makeCommandSpecs: MakeCommandSpec[] = [
     argDescription: 'Route group name',
     makeFn: makeRoute,
     resourceName: 'Route',
-    // Deliberately says nothing about `guren check` reporting it: that check
-    // scopes to the project's own `routes/`, and `--module` sends this file to
-    // `modules/<name>/routes/` instead, where nothing reports the gap. The
-    // imperative half is true in both places.
+    // "your route registrar" rather than `routes/web.ts`, because `--module`
+    // sends this file to `modules/<name>/routes/`, where the registrar that
+    // mounts it is the module's own `routes.ts`. `guren check` reports the gap
+    // in both places, so the reminder can name it.
     nextStep:
-      'Nothing mounts it yet — import its registerRoutes from your route registrar and call it, '
-      + "passing that registrar's router.",
+      'Nothing mounts it yet (guren check reports this) — import its registerRoutes from your route '
+      + "registrar and call it, passing that registrar's router.",
   },
   { name: 'make:job', description: 'Generate a new job class.', argDescription: 'Job class name', makeFn: makeJob, resourceName: 'Job' },
   { name: 'make:event', description: 'Generate a new event class.', argDescription: 'Event class name', makeFn: makeEvent, resourceName: 'Event' },
