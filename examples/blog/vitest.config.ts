@@ -63,6 +63,14 @@ export default defineConfig({
         find: /^@guren\/server$/,
         replacement: resolve(rootDir, '../../packages/server/src/index.ts'),
       },
+      // Exact match must precede the prefix rule below, which consumes the
+      // separator without restoring it and would yield 'srcsupport/expiry'
+      // (resolve() normalizes the replacement's trailing slash away). Same
+      // reason the orm's drizzle subpath is listed explicitly.
+      {
+        find: /^@guren\/server\/support\/expiry$/,
+        replacement: resolve(rootDir, '../../packages/server/src/support/expiry.ts'),
+      },
       {
         find: /^@guren\/server\//,
         replacement: resolve(rootDir, '../../packages/server/src/'),
