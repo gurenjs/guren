@@ -104,6 +104,38 @@ export async function readIfExists(cwd: string, relativePath: string): Promise<s
   return readFile(resolve(cwd, relativePath), 'utf8')
 }
 
+/**
+ * Whether the app's `package.json` declares `packageName`, as a dependency or
+ * a devDependency — `null` when the manifest cannot be read or parsed.
+ *
+ * Three-valued on purpose. "The app does not depend on this" and "there is no
+ * manifest to ask" are different answers, and which one is safe depends
+ * entirely on what the caller does with it: skipping optional output on a
+ * guess is harmless, refusing a command on the same guess is not. Callers pick
+ * their own default for `null`; this must never pick one for them.
+ *
+ * Every failure mode collapses to `null`, including the ones `readIfExists`
+ * rethrows. A caller that wanted "unknown" to be survivable would otherwise get
+ * an `EACCES` propagated out of a question it was prepared to answer either way
+ * — a raw filesystem error from `guren add admin`, or an aborted `guren
+ * codegen` where the old hand-rolled probe simply skipped its optional output.
+ */
+export async function appDependsOn(cwd: string, packageName: string): Promise<boolean | null> {
+  let parsed: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> }
+
+  try {
+    const manifest = await readIfExists(cwd, 'package.json')
+    if (manifest === null) {
+      return null
+    }
+    parsed = JSON.parse(manifest)
+  } catch {
+    return null
+  }
+
+  return Boolean(parsed.dependencies?.[packageName] ?? parsed.devDependencies?.[packageName])
+}
+
 export async function directoryExists(dirPath: string): Promise<boolean> {
   try {
     const s = await stat(dirPath)

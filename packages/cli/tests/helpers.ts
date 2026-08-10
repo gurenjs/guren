@@ -117,6 +117,28 @@ export function registerWebRoutes(router: Router): void {
 export default registerWebRoutes
 `
 
+/**
+ * Whether `chmod 0o000` actually denies this process a read.
+ *
+ * It does not for uid 0, so a test that makes a file unreadable and asserts the
+ * graceful path would simply take the readable path and pass having proved
+ * nothing. CI runs unprivileged, but a root container (a local `docker run`) is
+ * one command away — better an explicit skip there than a vacuous green.
+ */
+export const CAN_DENY_FILE_READS = process.getuid === undefined || process.getuid() !== 0
+
+/**
+ * The api-only starter's entry file: `routes/api.ts`, and no `routes/web.ts`
+ * anywhere. Scaffolders that emit Inertia pages have nothing to write into an
+ * app shaped like this.
+ */
+export const API_ROUTES_FIXTURE = `import { Router } from '@guren/core'
+
+export function registerApiRoutes(router: Router): void {
+  router.get('/health', (c) => c.json({ status: 'ok' }))
+}
+`
+
 export const BLOG_ROUTES_FIXTURE = `import { Router, requireAuthenticated } from '@guren/core'
 
 export function registerWebRoutes(baseRouter: Router): void {

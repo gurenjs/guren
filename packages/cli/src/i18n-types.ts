@@ -16,6 +16,7 @@
  */
 import { readdir, readFile, rm } from 'node:fs/promises'
 import { extname, relative, resolve } from 'node:path'
+import { appDependsOn } from './discovery'
 import { escapeSingleQuoted, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 
 export interface GenerateTranslationTypesOptions extends WriterOptions {
@@ -160,19 +161,9 @@ export async function generateTranslationTypes(
   return { outputPath, keyCount: keys.length }
 }
 
+/** `=== true` because an unreadable manifest should skip optional output, not break the build. */
 async function appUsesInertiaClient(appRoot: string): Promise<boolean> {
-  try {
-    const packageJson = JSON.parse(await readFile(resolve(appRoot, 'package.json'), 'utf-8')) as {
-      dependencies?: Record<string, string>
-      devDependencies?: Record<string, string>
-    }
-    return Boolean(
-      packageJson.dependencies?.['@guren/inertia-client'] ??
-      packageJson.devDependencies?.['@guren/inertia-client'],
-    )
-  } catch {
-    return false
-  }
+  return (await appDependsOn(appRoot, '@guren/inertia-client')) === true
 }
 
 /** Keep interpolated names from breaking out of the generated header comment. */

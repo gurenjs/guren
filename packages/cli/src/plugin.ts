@@ -1,7 +1,6 @@
-import { readFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
 import type { WriterOptions } from './utils'
 import { assertCwdUnsupported, runCommand } from './utils'
+import { appDependsOn } from './discovery'
 import { addImport, addProvider } from './patch-helpers'
 import {
   applyEnvEntries,
@@ -87,25 +86,9 @@ function providerIdentifierForPackage(packageName: string): string {
   return `${parts.map(part => part[0].toUpperCase() + part.slice(1)).join('')}Provider`
 }
 
+/** `=== true` because a manifest this cannot read is a reason to try installing, not to abort. */
 async function hasDependency(packageName: string): Promise<boolean> {
-  const packageJsonPath = resolve(process.cwd(), 'package.json')
-  let packageJsonRaw: string
-
-  try {
-    packageJsonRaw = await readFile(packageJsonPath, 'utf8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return false
-    }
-    throw error
-  }
-
-  const packageJson = JSON.parse(packageJsonRaw) as {
-    dependencies?: Record<string, string>
-    devDependencies?: Record<string, string>
-  }
-
-  return Boolean(packageJson.dependencies?.[packageName] ?? packageJson.devDependencies?.[packageName])
+  return (await appDependsOn(process.cwd(), packageName)) === true
 }
 
 export async function installPlugin(options: InstallPluginOptions): Promise<PluginInstallMessage[]> {
