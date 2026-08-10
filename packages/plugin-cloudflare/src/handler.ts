@@ -31,9 +31,10 @@ export function createWorkersHandler(app: WorkersAppLike): WorkersHandler {
     async fetch(request: Request, env: unknown, ctx: WorkersExecutionContext): Promise<Response> {
       captureWorkersEnv(env)
 
-      bootPromise ??= app.boot()
-
       try {
+        // Inside the try: a conforming non-async boot() can throw
+        // synchronously, and that throw has to reach the cleanup too.
+        bootPromise ??= app.boot()
         await bootPromise
       } catch (error) {
         bootPromise = undefined

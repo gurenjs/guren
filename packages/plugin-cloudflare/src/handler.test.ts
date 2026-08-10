@@ -74,34 +74,50 @@ describe('createWorkersHandler', () => {
     expect(await secondResponse.text()).toBe('ok:/second')
   })
 
-  test('should clear boot promise and env holder on boot failure, then retry cleanly', async () => {
-    let bootCalls = 0
-    const app: WorkersAppLike = {
-      async boot() {
+  // The two ways a first boot can fail. `WorkersAppLike` requires only a
+  // `boot(): Promise<void>`, so a conforming app need not be `async`.
+  for (const mode of ['rejects', 'throws synchronously'] as const) {
+    test(`should clear boot promise and env holder on a first boot that ${mode}, then retry cleanly`, async () => {
+      let bootCalls = 0
+      const failFirst = () => {
         bootCalls += 1
         if (bootCalls === 1) {
           throw new Error('boot failed')
         }
-      },
-      fetch() {
-        return new Response('ok')
-      },
-    }
-    const handler = createWorkersHandler(app)
-    const ctx = createExecutionContext()
-    const firstEnv = { DB: 'first-db' }
-    const secondEnv = { DB: 'second-db' }
+      }
+      const app: WorkersAppLike = {
+        boot:
+          mode === 'rejects'
+            ? async () => failFirst()
+            : () => {
+                failFirst()
+                return Promise.resolve()
+              },
+        fetch() {
+          return new Response('ok')
+        },
+      }
+      // Pins the axis rather than trusting it to a keyword: making the second
+      // boot `async` would turn its throw into a rejection, and the case would
+      // silently become a copy of the first.
+      expect(app.boot.constructor.name).toBe(mode === 'rejects' ? 'AsyncFunction' : 'Function')
 
-    await expect(
-      handler.fetch(new Request('https://example.com/one'), firstEnv, ctx),
-    ).rejects.toThrow('boot failed')
+      const handler = createWorkersHandler(app)
+      const ctx = createExecutionContext()
+      const firstEnv = { DB: 'first-db' }
+      const secondEnv = { DB: 'second-db' }
 
-    const response = await handler.fetch(new Request('https://example.com/two'), secondEnv, ctx)
+      await expect(
+        handler.fetch(new Request('https://example.com/one'), firstEnv, ctx),
+      ).rejects.toThrow('boot failed')
 
-    expect(bootCalls).toBe(2)
-    expect(await response.text()).toBe('ok')
-    expect(getWorkersEnv<TestEnv>()).toBe(secondEnv)
-  })
+      const response = await handler.fetch(new Request('https://example.com/two'), secondEnv, ctx)
+
+      expect(bootCalls).toBe(2)
+      expect(await response.text()).toBe('ok')
+      expect(getWorkersEnv<TestEnv>()).toBe(secondEnv)
+    })
+  }
 
   test('should reject every concurrent request sharing a failed boot, then recover on retry', async () => {
     let bootCalls = 0
