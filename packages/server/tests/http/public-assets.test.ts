@@ -1,44 +1,25 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
-import { mkdir } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
-import { tmpdir } from 'node:os'
+import { beforeEach, describe, expect, it } from 'bun:test'
 import { Application } from '../../src'
 import { registerRootPublicAssets } from '../../src/http/public-assets'
+import { useAssetFixture } from './asset-fixture'
 
 // These fixtures are real files rather than a stubbed `Bun.file`: containment is
 // a property of the filesystem, so a mocked reader would report every one of
 // these cases as a pass regardless of what the middleware does.
 describe('registerRootPublicAssets', () => {
-  let tmpRoot: string
-  let publicDir: string
+  const fixture = useAssetFixture('guren-public-assets-')
   let app: Application
 
-  const createFile = async (relative: string, contents: string) => {
-    const target = join(tmpRoot, relative)
-    await mkdir(dirname(target), { recursive: true })
-    await Bun.write(target, contents)
-    return target
-  }
-
   beforeEach(async () => {
-    // Canonicalized: `os.tmpdir()` is behind a symlink on macOS.
-    tmpRoot = realpathSync(mkdtempSync(join(tmpdir(), 'guren-public-assets-')))
-    publicDir = join(tmpRoot, 'public')
+    await fixture.write('public/readme.txt', 'public readme\n')
+    await fixture.write('public/nested/notes.txt', 'nested notes\n')
+    await fixture.write('outside/secret.txt', 'secret\n')
 
-    await createFile('public/readme.txt', 'public readme\n')
-    await createFile('public/nested/notes.txt', 'nested notes\n')
-    await createFile('outside/secret.txt', 'secret\n')
-
-    symlinkSync(join(tmpRoot, 'outside'), join(publicDir, 'leak'))
-    symlinkSync(join(tmpRoot, 'outside', 'secret.txt'), join(publicDir, 'linked.txt'))
+    fixture.symlink('outside', 'public/leak')
+    fixture.symlink('outside/secret.txt', 'public/linked.txt')
 
     app = new Application()
-    registerRootPublicAssets(app, publicDir, { extensions: ['txt'] })
-  })
-
-  afterEach(() => {
-    rmSync(tmpRoot, { recursive: true, force: true })
+    registerRootPublicAssets(app, fixture.path('public'), { extensions: ['txt'] })
   })
 
   it('serves matching assets from the public directory', async () => {
@@ -64,7 +45,7 @@ describe('registerRootPublicAssets', () => {
   })
 
   it('falls through for requests escaping the public directory', async () => {
-    const response = await app.fetch(new Request(`http://example.com/${tmpRoot}/outside/secret.txt`))
+    const response = await app.fetch(new Request(`http://example.com/${fixture.root}/outside/secret.txt`))
 
     expect(response.status).toBe(404)
   })
@@ -83,21 +64,14 @@ describe('registerRootPublicAssets', () => {
 })
 
 describe('registerRootPublicAssets with a route prefix', () => {
-  let tmpRoot: string
+  const fixture = useAssetFixture('guren-public-assets-prefix-')
   let app: Application
 
   beforeEach(async () => {
-    tmpRoot = realpathSync(mkdtempSync(join(tmpdir(), 'guren-public-assets-prefix-')))
-
-    await mkdir(join(tmpRoot, 'public', 'assets'), { recursive: true })
-    await Bun.write(join(tmpRoot, 'public', 'assets', 'readme.txt'), 'prefixed readme\n')
+    await fixture.write('public/assets/readme.txt', 'prefixed readme\n')
 
     app = new Application()
-    registerRootPublicAssets(app, join(tmpRoot, 'public'), { extensions: ['txt'], routePrefix: '/assets' })
-  })
-
-  afterEach(() => {
-    rmSync(tmpRoot, { recursive: true, force: true })
+    registerRootPublicAssets(app, fixture.path('public'), { extensions: ['txt'], routePrefix: '/assets' })
   })
 
   it('serves assets under the configured prefix', async () => {
@@ -115,22 +89,15 @@ describe('registerRootPublicAssets with a route prefix', () => {
 })
 
 describe('registerRootPublicAssets with a public directory reached through a symlink', () => {
-  let tmpRoot: string
+  const fixture = useAssetFixture('guren-public-assets-linked-')
   let app: Application
 
   beforeEach(async () => {
-    tmpRoot = realpathSync(mkdtempSync(join(tmpdir(), 'guren-public-assets-linked-')))
-
-    await mkdir(join(tmpRoot, 'real', 'public'), { recursive: true })
-    await Bun.write(join(tmpRoot, 'real', 'public', 'readme.txt'), 'linked readme\n')
-    symlinkSync(join(tmpRoot, 'real', 'public'), join(tmpRoot, 'public-link'))
+    await fixture.write('real/public/readme.txt', 'linked readme\n')
+    fixture.symlink('real/public', 'public-link')
 
     app = new Application()
-    registerRootPublicAssets(app, join(tmpRoot, 'public-link'), { extensions: ['txt'] })
-  })
-
-  afterEach(() => {
-    rmSync(tmpRoot, { recursive: true, force: true })
+    registerRootPublicAssets(app, fixture.path('public-link'), { extensions: ['txt'] })
   })
 
   it('serves assets through the symlinked public directory', async () => {

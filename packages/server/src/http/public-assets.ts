@@ -92,8 +92,7 @@ export function registerRootPublicAssets(app: Application, publicDir: string, co
       return next()
     }
 
-    // Only now that the path exists can it be canonicalized: `resolve()` above
-    // collapsed `..` but did not follow symlinks, and `new Response(file)` will.
+    // Canonicalized only now: `realpath` needs a path that exists.
     if (!(await isRealPathWithin(publicDir, candidatePath))) {
       return next()
     }

@@ -1,33 +1,18 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
-import { mkdir } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
-import { tmpdir } from 'node:os'
+import { beforeEach, describe, expect, it } from 'bun:test'
 import { Application } from '../../src'
 import { registerDevAssets } from '../../src/runtime'
+import { useAssetFixture } from './asset-fixture'
 
 describe('registerDevAssets inertia client chunk handling', () => {
-  let tmpRoot: string
+  const fixture = useAssetFixture('guren-dev-assets-')
   let app: Application
 
-  const createFile = async (relative: string, contents: string) => {
-    const target = join(tmpRoot, relative)
-    await mkdir(dirname(target), { recursive: true })
-    await Bun.write(target, contents)
-    return target
-  }
-
   beforeEach(async () => {
-    // Canonicalized because `os.tmpdir()` is reached through a symlink on macOS
-    // (`/var` → `/private/var`); leaving it raw would make containment failures
-    // fixture artifacts rather than findings.
-    tmpRoot = realpathSync(mkdtempSync(join(tmpdir(), 'guren-dev-assets-')))
-
     // minimal resources directory so the helper can mount the transpiler route
-    await createFile('resources/js/app.tsx', "export const noop = () => 'noop'\n")
-    await createFile('resources/css/app.css', 'body { background: red; }\n')
+    await fixture.write('resources/js/app.tsx', "export const noop = () => 'noop'\n")
+    await fixture.write('resources/css/app.css', 'body { background: red; }\n')
 
-    const inertiaEntry = await createFile(
+    const inertiaEntry = await fixture.write(
       'inertia/inertia-client.tsx',
       [
         "export const startInertiaClient = () => 'booted'\n",
@@ -35,31 +20,26 @@ describe('registerDevAssets inertia client chunk handling', () => {
       ].join(''),
     )
 
-    await createFile('inertia/chunk-helper.ts', "export const chunkValue = 42\n")
+    await fixture.write('inertia/chunk-helper.ts', "export const chunkValue = 42\n")
 
     // Sibling directory whose name extends the inertia client's own.
-    await createFile('inertia-secrets/secret.ts', "export const secret = 'leaked'\n")
+    await fixture.write('inertia-secrets/secret.ts', "export const secret = 'leaked'\n")
 
-    // A directory outside both served roots, linked into each of them. The link
-    // is what a lexical containment check cannot see: `resolve()` leaves the
-    // path under the root, and only the reader follows it out.
-    await createFile('outside/secret.ts', "export const secret = 'leaked'\n")
-    await createFile('outside/secret.txt', 'leaked\n')
-    symlinkSync(join(tmpRoot, 'outside'), join(tmpRoot, 'inertia', 'leak'))
-    symlinkSync(join(tmpRoot, 'outside'), join(tmpRoot, 'resources', 'js', 'leak'))
+    // A directory outside both served roots, linked into each of them: `resolve()`
+    // leaves the request path under the root, and only the reader follows it out.
+    await fixture.write('outside/secret.ts', "export const secret = 'leaked'\n")
+    await fixture.write('outside/secret.txt', 'leaked\n')
+    fixture.symlink('outside', 'inertia/leak')
+    fixture.symlink('outside', 'resources/js/leak')
 
     app = new Application()
     registerDevAssets(app, {
-      resourcesDir: join(tmpRoot, 'resources'),
+      resourcesDir: fixture.path('resources'),
       inertiaClientSource: inertiaEntry,
       inertiaClientPath: '/vendor/inertia-client.tsx',
       inertiaClient: true,
       publicPath: false,
     })
-  })
-
-  afterEach(() => {
-    rmSync(tmpRoot, { recursive: true, force: true })
   })
 
   it('serves the configured inertia client entry file', async () => {
@@ -91,7 +71,7 @@ describe('registerDevAssets inertia client chunk handling', () => {
     // survives `resolve()` untouched and lands next to — not inside — the
     // inertia client directory.
     const response = await app.fetch(
-      new Request(`http://example.com/vendor/${tmpRoot}/inertia-secrets/secret.ts`),
+      new Request(`http://example.com/vendor/${fixture.root}/inertia-secrets/secret.ts`),
     )
 
     expect(response.status).toBe(404)
@@ -111,7 +91,7 @@ describe('registerDevAssets inertia client chunk handling', () => {
   })
 
   it('returns 404 for requests escaping the resources directory', async () => {
-    const response = await app.fetch(new Request(`http://example.com/resources/js/${tmpRoot}/outside/secret.ts`))
+    const response = await app.fetch(new Request(`http://example.com/resources/js/${fixture.root}/outside/secret.ts`))
 
     expect(response.status).toBe(404)
   })
@@ -148,41 +128,28 @@ describe('registerDevAssets inertia client chunk handling', () => {
 })
 
 describe('registerDevAssets with roots reached through symlinks', () => {
-  let tmpRoot: string
+  const fixture = useAssetFixture('guren-dev-assets-linked-')
   let app: Application
 
-  const createFile = async (relative: string, contents: string) => {
-    const target = join(tmpRoot, relative)
-    await mkdir(dirname(target), { recursive: true })
-    await Bun.write(target, contents)
-    return target
-  }
-
   beforeEach(async () => {
-    tmpRoot = realpathSync(mkdtempSync(join(tmpdir(), 'guren-dev-assets-linked-')))
-
-    await createFile('real/resources/js/app.tsx', "export const noop = () => 'noop'\n")
-    await createFile('real/inertia/inertia-client.tsx', "export { chunkValue } from './chunk-helper.ts'\n")
-    await createFile('real/inertia/chunk-helper.ts', 'export const chunkValue = 42\n')
+    await fixture.write('real/resources/js/app.tsx', "export const noop = () => 'noop'\n")
+    await fixture.write('real/inertia/inertia-client.tsx', "export { chunkValue } from './chunk-helper.ts'\n")
+    await fixture.write('real/inertia/chunk-helper.ts', 'export const chunkValue = 42\n')
 
     // Both roots are handed to the app through a symlink — the shape a workspace,
     // pnpm, or container layout produces. Canonicalizing the candidate without
     // also canonicalizing the root would 404 every request below.
-    symlinkSync(join(tmpRoot, 'real', 'resources'), join(tmpRoot, 'resources-link'))
-    symlinkSync(join(tmpRoot, 'real', 'inertia'), join(tmpRoot, 'inertia-link'))
+    fixture.symlink('real/resources', 'resources-link')
+    fixture.symlink('real/inertia', 'inertia-link')
 
     app = new Application()
     registerDevAssets(app, {
-      resourcesDir: join(tmpRoot, 'resources-link'),
-      inertiaClientSource: join(tmpRoot, 'inertia-link', 'inertia-client.tsx'),
+      resourcesDir: fixture.path('resources-link'),
+      inertiaClientSource: fixture.path('inertia-link', 'inertia-client.tsx'),
       inertiaClientPath: '/vendor/inertia-client.tsx',
       inertiaClient: true,
       publicPath: false,
     })
-  })
-
-  afterEach(() => {
-    rmSync(tmpRoot, { recursive: true, force: true })
   })
 
   it('transpiles resources reached through the symlinked root', async () => {

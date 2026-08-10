@@ -145,9 +145,9 @@ export function registerBuiltInertiaClient(
     const relativeRequest = ctx.req.path.slice(inertiaClientBase.length) || inertiaClientRequestPath
 
     let targetPath: string
-    // Left undefined for the entry: it is derived from configuration rather
-    // than from the request, and a package layout may well have it symlinked
-    // out of `inertiaClientDir`.
+    // Stays undefined for the entry: it is configuration-derived rather than
+    // request-derived, and a package layout may well have it symlinked out of
+    // `inertiaClientDir`.
     let containmentRoot: string | undefined
 
     if (relativeRequest === inertiaClientRequestPath) {
@@ -167,8 +167,7 @@ export function registerBuiltInertiaClient(
       return ctx.notFound()
     }
 
-    // Canonicalized only now that the path exists: `resolve()` above collapsed
-    // `..` without following symlinks, and `new Response(file)` follows them.
+    // Canonicalized only now: `realpath` needs a path that exists.
     if (containmentRoot && !(await isRealPathWithin(containmentRoot, targetPath))) {
       return ctx.notFound()
     }
