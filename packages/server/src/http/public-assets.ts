@@ -1,6 +1,7 @@
-import { extname, resolve, sep } from 'node:path'
+import { extname, resolve } from 'node:path'
 import type { Application } from './Application'
 import { trimTrailingSlashes } from '../support/trim-slashes'
+import { isPathWithin, isRealPathWithin } from '../support/contained-path'
 
 declare const Bun: any
 
@@ -81,15 +82,18 @@ export function registerRootPublicAssets(app: Application, publicDir: string, co
 
     const candidatePath = resolve(publicDir, relativePath)
 
-    // Use publicDir + separator to prevent sibling-directory traversal
-    // (e.g., /tmp/public vs /tmp/publicity)
-    if (!candidatePath.startsWith(publicDir + sep) && candidatePath !== publicDir) {
+    if (!isPathWithin(publicDir, candidatePath) && candidatePath !== publicDir) {
       return next()
     }
 
     const file = Bun.file(candidatePath)
 
     if (!(await file.exists())) {
+      return next()
+    }
+
+    // Canonicalized only now: `realpath` needs a path that exists.
+    if (!(await isRealPathWithin(publicDir, candidatePath))) {
       return next()
     }
 

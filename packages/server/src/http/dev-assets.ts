@@ -1,16 +1,27 @@
 import type { Context } from 'hono'
 import { serveStatic } from 'hono/bun'
-import { dirname, extname, resolve, sep } from 'node:path'
+import { dirname, extname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import type { Application } from './Application'
 import { registerRootPublicAssets, type RootPublicAssetsConfig } from './public-assets'
+import { isPathWithin, isRealPathWithin } from '../support/contained-path'
 
 declare const Bun: any
 
 const DEFAULT_PREFIX = '/resources/js'
 const DEFAULT_VENDOR_PATH = '/vendor/inertia-client.tsx'
 const DEFAULT_JSX_RUNTIME = 'https://esm.sh/react@19.0.0/jsx-dev-runtime?dev'
+const REACT_IMPORT_PATTERN = /from\s+['"]react['"]/u
+
+/** What {@link transpileFile} needs beyond the path it is asked to serve. */
+interface TranspileContext {
+  // Keyed by loader name, so the key that selects a transpiler is the same
+  // expression passed as `transformSync`'s `loader`.
+  tsx: any
+  ts: any
+  jsxRuntimeUrl: string
+}
 
 /**
  * Derive the mount point for the vendored Inertia client from its public
@@ -97,7 +108,6 @@ export function registerDevAssets(app: Application, options: DevAssetsOptions): 
   const jsxRuntimeUrl = options.jsxRuntimeUrl ?? DEFAULT_JSX_RUNTIME
 
   const resourcesJsDir = resolve(resourcesDir, 'js')
-  const reactImportPattern = /from\s+['"]react['"]/u
 
   const transpilerOptions = {
     target: 'browser' as const,
@@ -109,10 +119,13 @@ export function registerDevAssets(app: Application, options: DevAssetsOptions): 
     },
   }
 
-  const tsxTranspiler = new Bun.Transpiler({ loader: 'tsx', ...transpilerOptions })
-  const tsTranspiler = new Bun.Transpiler({ loader: 'ts', ...transpilerOptions })
+  const transpile: TranspileContext = {
+    tsx: new Bun.Transpiler({ loader: 'tsx', ...transpilerOptions }),
+    ts: new Bun.Transpiler({ loader: 'ts', ...transpilerOptions }),
+    jsxRuntimeUrl,
+  }
 
-  app.hono.get(`${prefix}/*`, (ctx) => handleTranspileRequest(ctx, resourcesJsDir, prefix, reactImportPattern, tsxTranspiler, tsTranspiler, jsxRuntimeUrl))
+  app.hono.get(`${prefix}/*`, (ctx) => handleTranspileRequest(ctx, resourcesJsDir, prefix, transpile))
 
   if (cssDir) {
     const cssRewrite = createStaticRewrite(cssRoute)
@@ -136,21 +149,20 @@ export function registerDevAssets(app: Application, options: DevAssetsOptions): 
     app.hono.get(inertiaClientPattern, (ctx) => {
       const relativeRequest = ctx.req.path.slice(inertiaClientBase.length) || inertiaClientRequestPath
 
+      // The configured entry is not request-derived, so it is served without a
+      // containment check: it may legitimately sit outside `inertiaClientDir`
+      // when the resolved module is itself a symlink into another tree.
       if (relativeRequest === inertiaClientRequestPath) {
-        return transpileFile(inertiaClientSource, reactImportPattern, tsxTranspiler, tsTranspiler, jsxRuntimeUrl)
+        return transpileFile(inertiaClientSource, transpile)
       }
 
       const candidatePath = resolve(inertiaClientDir, relativeRequest)
 
-      // A doubled slash in the request path leaves `relativeRequest` absolute,
-      // which `resolve` returns verbatim — so the separator is what keeps a
-      // sibling directory whose name merely extends this one (`…/inertia` vs
-      // `…/inertia-secrets`) out.
-      if (!candidatePath.startsWith(inertiaClientDir + sep)) {
+      if (!isPathWithin(inertiaClientDir, candidatePath)) {
         return ctx.notFound()
       }
 
-      return transpileFile(candidatePath, reactImportPattern, tsxTranspiler, tsTranspiler, jsxRuntimeUrl)
+      return transpileFile(candidatePath, transpile, inertiaClientDir)
     })
   }
 
@@ -206,46 +218,36 @@ export function createStaticRewrite(route: string): (path: string) => string {
  * @param ctx The request context.
  * @param resourcesJsDir The directory containing the resource files.
  * @param prefix The URL prefix for the request.
- * @param reactImportPattern The regex pattern for detecting React imports.
- * @param tsxTranspiler The transpiler for TSX files.
- * @param tsTranspiler The transpiler for TS files.
- * @param jsxRuntimeUrl The URL for the JSX runtime.
+ * @param transpile The transpilers and JSX runtime to use.
  * @returns A Promise that resolves to a Response object.
  */
 async function handleTranspileRequest(
   ctx: Context,
   resourcesJsDir: string,
   prefix: string,
-  reactImportPattern: RegExp,
-  tsxTranspiler: any,
-  tsTranspiler: any,
-  jsxRuntimeUrl: string,
+  transpile: TranspileContext,
 ): Promise<Response> {
   const relative = ctx.req.path.slice(prefix.length + 1)
   const fsPath = resolve(resourcesJsDir, relative)
 
-  if (!fsPath.startsWith(resourcesJsDir + sep)) {
+  if (!isPathWithin(resourcesJsDir, fsPath)) {
     return ctx.notFound()
   }
 
-  return transpileFile(fsPath, reactImportPattern, tsxTranspiler, tsTranspiler, jsxRuntimeUrl)
+  return transpileFile(fsPath, transpile, resourcesJsDir)
 }
 
 /**
  * Transpiles a file if it's a TSX or TS file, otherwise serves it as a static asset.
  * @param fsPath The file system path to the file.
- * @param reactImportPattern The regex pattern for detecting React imports.
- * @param tsxTranspiler The transpiler for TSX files.
- * @param tsTranspiler The transpiler for TS files.
- * @param jsxRuntimeUrl The URL for the JSX runtime.
+ * @param transpile The transpilers and JSX runtime to use.
+ * @param containmentRoot Directory the resolved file must really live under. Omit for configured (non request-derived) paths.
  * @returns A Promise that resolves to a Response object.
  */
 async function transpileFile(
   fsPath: string,
-  reactImportPattern: RegExp,
-  tsxTranspiler: any,
-  tsTranspiler: any,
-  jsxRuntimeUrl: string,
+  transpile: TranspileContext,
+  containmentRoot?: string,
 ): Promise<Response> {
   const candidates = buildCandidatePaths(fsPath)
   let filePath: string | undefined
@@ -265,29 +267,30 @@ async function transpileFile(
     return new Response('Not Found', { status: 404 })
   }
 
+  // Judged here rather than at the call site because the extension probing above
+  // is what settles which file gets read — and `filePath` is now known to exist,
+  // the precondition for canonicalizing it.
+  if (containmentRoot && !(await isRealPathWithin(containmentRoot, filePath))) {
+    return new Response('Not Found', { status: 404 })
+  }
+
   const ext = extname(filePath)
   let source = await file.text()
 
-  if (ext === '.tsx' && !reactImportPattern.test(source)) {
+  if (ext === '.tsx' && !REACT_IMPORT_PATTERN.test(source)) {
     source = "import React from 'react'\n" + source
   }
 
   if (ext === '.tsx' || ext === '.ts') {
-    const transpiled =
-      ext === '.tsx'
-        ? tsxTranspiler.transformSync(source, {
-          loader: 'tsx',
-          sourceMap: isDev() ? 'inline' : false,
-          filename: filePath,
-        })
-        : tsTranspiler.transformSync(source, {
-          loader: 'ts',
-          sourceMap: isDev() ? 'inline' : false,
-          filename: filePath,
-        })
+    const loader = ext === '.tsx' ? 'tsx' : 'ts'
+    const transpiled = transpile[loader].transformSync(source, {
+      loader,
+      sourceMap: isDev() ? 'inline' : false,
+      filename: filePath,
+    })
 
     const helpers = collectJsxHelpers(transpiled)
-    const runtimeShim = helpers.size ? createJsxRuntimeShim(helpers, jsxRuntimeUrl) : ''
+    const runtimeShim = helpers.size ? createJsxRuntimeShim(helpers, transpile.jsxRuntimeUrl) : ''
 
     return new Response(runtimeShim + transpiled, {
       headers: {
