@@ -64,6 +64,12 @@ to `/login`, a route that only exists once you run `bunx guren add auth`. Add
 authentication first if you want a usable dashboard, or pass `--public` and add
 your own check later.
 
+`add admin` needs a fullstack app. The dashboard is an Inertia page, so on an app
+scaffolded from the `api` blueprint — no `@guren/inertia-client` dependency and no
+`routes/web.ts` — the command refuses and writes nothing rather than scaffolding a
+controller that does not typecheck and a routes file nothing mounts. Add an admin
+endpoint to `routes/api.ts` by hand instead.
+
 `add auth` needs a fullstack app for the same reason, and refuses on the same two
 signals — as does `make:auth`, which reaches the same scaffold. Auth also patches
 `db/schema.ts` and generates a migration, so the refusal comes before all of that,
