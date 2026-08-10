@@ -68,6 +68,14 @@ bunx guren add admin --public
 ファイルを書く代わりに、コマンドが理由を示して中断し何も生成しません。管理用の
 エンドポイントは `routes/api.ts` に手動で追加してください。
 
+`add auth` も同じ理由でフルスタックアプリ専用で、同じ2つのシグナルを見て中断します。
+同じスキャフォールドを生成する `make:auth` も同様です。auth は `db/schema.ts` への
+パッチとマイグレーション生成も行うため、中断は最初のファイル書き込みだけでなく
+それらすべてより前に起こり、アプリは元のまま残ります。トークンベースのAPIに
+するには、`@guren/core` の `createBearerTokenMiddleware` で `routes/api.ts` を
+保護し、`createApiToken` でトークンを発行してください
+（[APIトークンガイド](./api-tokens.md)参照）。
+
 ## 主要コマンド
 
 | コマンド | 説明 | 例 |

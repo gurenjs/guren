@@ -12,6 +12,7 @@ import {
   REGISTRAR_LESS_ROUTES_FIXTURE,
   captureWarnings,
   createTempWorkspace,
+  seedApiOnlyApp,
   type TempWorkspace,
 } from './helpers'
 import { listBlueprints, runBlueprint } from '../src/blueprints'
@@ -515,17 +516,8 @@ describe('admin blueprint on an API-only app', () => {
     await workspace.cleanup()
   })
 
-  async function seedApiOnlyWorkspace(): Promise<void> {
-    await mkdir('routes', { recursive: true })
-    await writeFile('routes/api.ts', API_ROUTES_FIXTURE)
-    await writeFile('package.json', JSON.stringify({
-      name: 'api-app',
-      dependencies: { '@guren/cli': '^2.2.0', '@guren/core': '^1.5.1', '@guren/orm': '^2.2.0' },
-    }))
-  }
-
   it('refuses, naming the two signals it read', async () => {
-    await seedApiOnlyWorkspace()
+    await seedApiOnlyApp(workspace.dir)
 
     await expect(runBlueprint('admin')).rejects.toThrow(
       /no @guren\/inertia-client dependency and no routes\/web\.ts/,
@@ -535,7 +527,7 @@ describe('admin blueprint on an API-only app', () => {
   // The half that matters: refusing after the first write would leave exactly
   // the mess the refusal exists to prevent.
   it('writes nothing at all', async () => {
-    await seedApiOnlyWorkspace()
+    await seedApiOnlyApp(workspace.dir)
 
     await expect(runBlueprint('admin')).rejects.toThrow()
 
@@ -626,6 +618,30 @@ describe('admin blueprint on an API-only app', () => {
     } finally {
       await chmod('package.json', 0o644)
     }
+  })
+})
+
+describe('auth blueprint on an API-only app', () => {
+  let workspace: TempWorkspace
+
+  beforeEach(async () => {
+    workspace = await createTempWorkspace('guren-cli-auth-api-only-')
+  })
+
+  afterEach(async () => {
+    await workspace.cleanup()
+  })
+
+  // One test, because this blueprint is pure delegation to makeAuth() — the
+  // only thing it can get wrong is failing to reach the guard at all. What the
+  // guard then does, and every branch of the shared predicate behind it, is
+  // pinned in make-auth.test.ts and in the admin block above.
+  it('reaches the refusal inside makeAuth', async () => {
+    await seedApiOnlyApp(workspace.dir)
+
+    await expect(runBlueprint('auth')).rejects.toThrow(
+      /no @guren\/inertia-client dependency and no routes\/web\.ts/,
+    )
   })
 })
 

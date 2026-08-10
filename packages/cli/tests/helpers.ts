@@ -139,6 +139,27 @@ export function registerApiRoutes(router: Router): void {
 }
 `
 
+/**
+ * The one spelling of "an app `isConfirmedApiOnlyApp` recognizes", for every
+ * test that asks a scaffolder to refuse one.
+ *
+ * Each caller used to seed its own, and the copies had already drifted in which
+ * dependencies they declared — so a change to what the predicate reads would
+ * have had to be re-verified against three subtly different apps. `db/schema.ts`
+ * is here because a scaffolder that got past the refusal would patch it, and a
+ * test cannot assert it was left alone unless it exists.
+ */
+export async function seedApiOnlyApp(dir: string): Promise<void> {
+  await writeWorkspaceFiles(dir, {
+    'routes/api.ts': API_ROUTES_FIXTURE,
+    'db/schema.ts': PG_SCHEMA_FIXTURE,
+    'package.json': JSON.stringify({
+      name: 'api-app',
+      dependencies: { '@guren/cli': '^2.2.0', '@guren/core': '^1.5.1', '@guren/orm': '^2.2.0' },
+    }),
+  })
+}
+
 export const BLOG_ROUTES_FIXTURE = `import { Router, requireAuthenticated } from '@guren/core'
 
 export function registerWebRoutes(baseRouter: Router): void {

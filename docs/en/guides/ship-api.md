@@ -180,21 +180,31 @@ curl -X DELETE http://localhost:3333/api/tasks/1
 
 ## 9. Add API Token Authentication
 
-For routes that require authentication, add token-based auth:
-
-```bash
-bunx guren add auth --api
-```
-
-Then protect routes with the `auth:api` middleware:
+For routes that require authentication, wire up API tokens. There is no scaffold
+for this — `guren add auth` generates an Inertia sign-in experience and refuses to
+run on an API-only app, so build the middleware yourself:
 
 ```typescript
-router.middleware('auth:api').group((auth) => {
+import { createBearerTokenMiddleware, DatabaseApiTokenStore } from '@guren/core'
+import { apiTokens } from '@/db/schema'
+
+const store = new DatabaseApiTokenStore(apiTokens)
+
+export const requireApiToken = createBearerTokenMiddleware({ store })
+```
+
+Then protect the mutating routes with it:
+
+```typescript
+router.middleware(requireApiToken).group((auth) => {
   auth.post('/api/tasks', [TaskController, 'store']).name('tasks.store')
   auth.put('/api/tasks/:id', [TaskController, 'update']).name('tasks.update')
   auth.delete('/api/tasks/:id', [TaskController, 'destroy']).name('tasks.destroy')
 })
 ```
+
+See the [API tokens guide](./api-tokens.md) for the `api_tokens` table, issuing
+tokens with `createApiToken`, and scoping them with abilities.
 
 Clients include the token in the `Authorization` header:
 
