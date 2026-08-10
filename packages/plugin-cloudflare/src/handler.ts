@@ -32,9 +32,8 @@ export function createWorkersHandler(app: WorkersAppLike): WorkersHandler {
       captureWorkersEnv(env)
 
       try {
-        // Called inside the try because `WorkersAppLike` only requires a
-        // `boot()` returning a promise — a non-async implementation can throw
-        // synchronously, and that error has to reach the cleanup too.
+        // Inside the try: a conforming non-async boot() can throw
+        // synchronously, and that throw has to reach the cleanup too.
         bootPromise ??= app.boot()
         await bootPromise
       } catch (error) {
