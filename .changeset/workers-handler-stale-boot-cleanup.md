@@ -9,6 +9,9 @@ catch block, and each one dropped the boot promise and the write-once env
 holder unconditionally. That is only correct for the waiter whose attempt is
 still the current one.
 
+This is a long-standing race in the boot-failure cleanup, not a regression from
+the synchronous-throw fix released alongside it.
+
 A retry can start *between* two waiters' catches: the app may attach its own
 rejection reaction to the promise `boot()` returned, and reactions run in
 registration order, so the reaction can sit between waiter one and waiter two.
