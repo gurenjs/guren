@@ -244,6 +244,7 @@ export class Application {
   private bunTeardownRegistered = false
   private autoSessionAttached = false
   private routesRegistered = false
+  private hasBooted = false
 
   constructor(private readonly options: ApplicationOptions = {}) {
     this.hono = new Hono()
@@ -383,6 +384,14 @@ export class Application {
   }
 
   /**
+   * Whether `boot()` has completed. `TestApp.fromApp()` reads this to avoid
+   * booting twice — a second boot would mount routes and middleware again.
+   */
+  get booted(): boolean {
+    return this.hasBooted
+  }
+
+  /**
    * Executes provider registration, boot callback, mounts routes, and boots providers.
    */
   async boot(): Promise<void> {
@@ -409,6 +418,7 @@ export class Application {
       'GUREN_DOCS=1 but the docs viewer could not load — is @guren/cli resolvable from this app?',
     )
     await this.providerManager.bootAll()
+    this.hasBooted = true
   }
 
   /**
