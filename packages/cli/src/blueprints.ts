@@ -1,4 +1,4 @@
-import { isConfirmedApiOnlyApp } from './app-surface'
+import { assertNotApiOnly } from './app-surface'
 import { makeAuth } from './make-auth'
 import { makeChannel } from './make-channel'
 import { buildRouteRegistrationHint, makeFeature } from './make-feature'
@@ -56,13 +56,10 @@ const blueprintRegistry: Record<string, BlueprintDefinition> = {
     run: async (options) => {
       // Before the first write: every file below is Inertia-shaped, so a
       // partial scaffold here is only harder to clean up than none.
-      if (await isConfirmedApiOnlyApp(process.cwd())) {
-        throw new Error(
-          'guren add admin scaffolds an Inertia dashboard, but this app has no @guren/inertia-client '
-          + 'dependency and no routes/web.ts. Add an admin endpoint to routes/api.ts by hand, '
-          + 'or scaffold a fullstack app.',
-        )
-      }
+      await assertNotApiOnly(process.cwd(), {
+        does: 'guren add admin scaffolds an Inertia dashboard',
+        instead: 'Add an admin endpoint to routes/api.ts by hand',
+      })
 
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
       // Same default as `make:feature`: guarded unless the caller opts out.
@@ -158,6 +155,10 @@ export default registerAdminRoutes
   },
   auth: {
     description: 'Install the default authentication stack for the current app.',
+    // The API-only refusal lives inside makeAuth() rather than here, unlike the
+    // admin blueprint's: `guren make:auth` reaches the same scaffold without
+    // passing through this registry, so a guard placed here would leave that
+    // door open.
     run: async (options) => makeAuth({ force: Boolean(options.force), install: true }),
   },
   oauth: {

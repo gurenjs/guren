@@ -45,3 +45,27 @@ export async function isConfirmedApiOnlyApp(cwd: string): Promise<boolean> {
   const webRoutes = await Promise.all(WEB_ROUTES_CANDIDATES.map((file) => fileExists(cwd, file)))
   return !webRoutes.includes(true)
 }
+
+/**
+ * Refuses an API-only app on a scaffolder's behalf, before its first write.
+ *
+ * The middle of the message — which signals were read — belongs to the
+ * predicate above, not to each caller. Callers supplied it themselves until
+ * there were two of them saying it in two places, and a signal added or dropped
+ * here would have left both descriptions stale independently.
+ *
+ * `does` completes "guren add x scaffolds …" and `instead` is the whole
+ * alternative sentence, because what an app should do without this scaffold
+ * differs per command in a way no template can derive.
+ */
+export async function assertNotApiOnly(
+  cwd: string,
+  { does, instead }: { does: string; instead: string },
+): Promise<void> {
+  if (!(await isConfirmedApiOnlyApp(cwd))) return
+
+  throw new Error(
+    `${does}, but this app has no @guren/inertia-client dependency and no ${DEFAULT_ROUTES_FILE}. `
+    + `${instead}, or scaffold a fullstack app.`,
+  )
+}

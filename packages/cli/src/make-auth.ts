@@ -2,6 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, relative, resolve, sep as pathSep } from 'node:path'
 import { consola } from 'consola'
 import { assertCwdUnsupported, writeScaffoldFiles, type WriterOptions } from './utils'
+import { assertNotApiOnly } from './app-surface'
 import {
   addImport,
   addProvider,
@@ -2215,6 +2216,16 @@ function resolveAuthFeatures(options: MakeAuthOptions): AuthFeatures {
 
 export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]> {
   assertCwdUnsupported(options, 'make:auth')
+
+  // Every variant of this scaffold is Inertia-shaped, and the refusal has to
+  // precede the schema patch and the migration as well as the first write — a
+  // run stopped halfway through those is harder to undo than one that never
+  // started.
+  await assertNotApiOnly(process.cwd(), {
+    does: 'The auth scaffold renders Inertia sign-in pages',
+    instead: 'Guard routes/api.ts with createBearerTokenMiddleware from @guren/core instead',
+  })
+
   const features = resolveAuthFeatures(options)
   const { includeExtras, includeVerify, includePassword, passwordOnlySignUp, oauthProviders } = features
   const includeOAuth = oauthProviders.length > 0

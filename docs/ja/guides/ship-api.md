@@ -180,21 +180,31 @@ curl -X DELETE http://localhost:3333/api/tasks/1
 
 ## 9. API トークン認証を追加する
 
-認証が必要なルートにはトークンベースの認証を追加します:
-
-```bash
-bunx guren add auth --api
-```
-
-`auth:api` ミドルウェアでルートを保護します:
+認証が必要なルートにはAPIトークンを配線します。これにスキャフォールドはありません
+— `guren add auth` は Inertia のサインイン画面を生成するため、API 専用アプリでは
+実行を拒否します。ミドルウェアは自分で用意してください:
 
 ```typescript
-router.middleware('auth:api').group((auth) => {
+import { createBearerTokenMiddleware, DatabaseApiTokenStore } from '@guren/core'
+import { apiTokens } from '@/db/schema'
+
+const store = new DatabaseApiTokenStore(apiTokens)
+
+export const requireApiToken = createBearerTokenMiddleware({ store })
+```
+
+これで変更系のルートを保護します:
+
+```typescript
+router.middleware(requireApiToken).group((auth) => {
   auth.post('/api/tasks', [TaskController, 'store']).name('tasks.store')
   auth.put('/api/tasks/:id', [TaskController, 'update']).name('tasks.update')
   auth.delete('/api/tasks/:id', [TaskController, 'destroy']).name('tasks.destroy')
 })
 ```
+
+`api_tokens` テーブル、`createApiToken` でのトークン発行、abilities によるスコープ
+制限については[APIトークンガイド](./api-tokens.md)を参照してください。
 
 クライアントは `Authorization` ヘッダーにトークンを含めます:
 

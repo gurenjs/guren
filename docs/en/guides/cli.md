@@ -70,6 +70,14 @@ scaffolded from the `api` blueprint — no `@guren/inertia-client` dependency an
 controller that does not typecheck and a routes file nothing mounts. Add an admin
 endpoint to `routes/api.ts` by hand instead.
 
+`add auth` needs a fullstack app for the same reason, and refuses on the same two
+signals — as does `make:auth`, which reaches the same scaffold. Auth also patches
+`db/schema.ts` and generates a migration, so the refusal comes before all of that,
+not just before the first file: the app is left exactly as it was. For a
+token-based API, guard `routes/api.ts` with `createBearerTokenMiddleware` from
+`@guren/core` and issue tokens with `createApiToken` — see the
+[API tokens guide](./api-tokens.md).
+
 ## Core Commands
 
 | Command | Description | Example |
