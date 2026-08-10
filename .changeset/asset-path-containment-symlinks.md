@@ -33,9 +33,15 @@ deliberately symlinked out of `public/` is no longer served through the
 root-level public asset route. Copy the file into the tree instead.
 
 The scope is the framework's own handlers. `/public/*` and `/resources/css/*`
-are delegated to Hono's `serveStatic`, which follows symlinks out of its root
-by design, as nginx and `express.static` do — it normalizes `..` and absolute
-remainders, so lexical traversal is still refused there, but a symlink is not.
-So the same linked file that the root-level route now refuses still serves
-under `/public/*`. `tests/http/serve-static-symlinks.test.ts` asserts both
-halves, so that boundary is machine-checked rather than described.
+are delegated to Hono's `serveStatic`, whose path handling leaves no lexical
+escape but which follows symlinks out of its root by design, as nginx and
+`express.static` do. So the same linked file that the root-level public asset
+route now refuses still serves under `/public/*`. Guren does not enforce
+symlink containment on the delegated routes; a deployment that must not follow
+symlinks out of `public/` should not rely on `/public/*` for that.
+
+Hono's `onFound` hook cannot close this — it runs after the content has been
+read and cannot reject — so guarding the delegated routes would mean either
+mirroring Hono's own path resolution in a second place or reimplementing static
+serving. Both were judged worse than the gap, and the gap is left explicit
+rather than papered over.

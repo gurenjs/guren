@@ -32,9 +32,8 @@ describe('isRealPathWithin', () => {
   let root: string
 
   beforeEach(async () => {
-    // Canonicalized up front: on macOS `os.tmpdir()` sits under `/var`, itself a
-    // symlink to `/private/var`, so a raw path here would fail containment for
-    // reasons that have nothing to do with what these tests assert.
+    // Canonicalized up front: `os.tmpdir()` is itself reached through a symlink
+    // on macOS (`/var` → `/private/var`).
     tmpRoot = realpathSync(mkdtempSync(join(tmpdir(), 'guren-contained-path-')))
     root = join(tmpRoot, 'root')
 
@@ -43,6 +42,11 @@ describe('isRealPathWithin', () => {
 
     await mkdir(join(tmpRoot, 'outside'), { recursive: true })
     await writeFile(join(tmpRoot, 'outside', 'secret.txt'), 'secret')
+
+    // Sibling whose name extends the root's own — the target that distinguishes
+    // a separator-anchored comparison from a bare prefix one.
+    await mkdir(join(tmpRoot, 'root-secrets'), { recursive: true })
+    await writeFile(join(tmpRoot, 'root-secrets', 'secret.txt'), 'secret')
   })
 
   afterEach(() => {
@@ -57,6 +61,19 @@ describe('isRealPathWithin', () => {
     symlinkSync(join(tmpRoot, 'outside'), join(root, 'link'))
 
     // Lexically this is inside `root` — only canonicalization reveals otherwise.
+    expect(isPathWithin(root, join(root, 'link', 'secret.txt'))).toBe(true)
+    expect(await isRealPathWithin(root, join(root, 'link', 'secret.txt'))).toBe(false)
+  })
+
+  it('rejects a symlink to a sibling whose name extends the canonical root', async () => {
+    // The separator has to anchor the comparison on *both* sides. Every other
+    // escape here links to a directory named `outside`, which a bare
+    // `realCandidate.startsWith(realRoot)` also rejects — and the lexical
+    // sibling-prefix cases never reach canonicalization, because the cheap
+    // pre-check refuses them first. Without this fixture, dropping the
+    // separator after canonicalization passes the whole suite.
+    symlinkSync(join(tmpRoot, 'root-secrets'), join(root, 'link'))
+
     expect(isPathWithin(root, join(root, 'link', 'secret.txt'))).toBe(true)
     expect(await isRealPathWithin(root, join(root, 'link', 'secret.txt'))).toBe(false)
   })
