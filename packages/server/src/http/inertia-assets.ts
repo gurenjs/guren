@@ -1,10 +1,11 @@
 import { serveStatic } from 'hono/bun'
-import { dirname, resolve, join, sep } from 'node:path'
+import { dirname, resolve, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
 import type { Application } from './Application'
 import { createStaticRewrite, registerDevAssets, resolveInertiaClientRoute, type DevAssetsOptions } from './dev-assets'
 import { registerRootPublicAssets } from './public-assets'
+import { isPathWithin, isRealPathWithin } from '../support/contained-path'
 import { parseImportMap } from '../support/import-map'
 import { trimTrailingSlashes } from '../support/trim-slashes'
 import { hash } from '../encryption/Hash'
@@ -110,48 +111,77 @@ export function configureInertiaAssets(app: Application, options: InertiaAssetsO
         throw new Error('Unable to resolve @guren/inertia-client entry')
       }
 
-      const inertiaClientDir = dirname(inertiaClientEntry)
-      const inertiaClientPath = options.inertiaClientPath ?? DEFAULT_VENDOR_CLIENT_PATH
-      const {
-        base: inertiaClientBase,
-        pattern: inertiaClientPattern,
-        requestPath: inertiaClientRequestPath,
-      } = resolveInertiaClientRoute(inertiaClientPath)
-
-      app.hono.get(inertiaClientPattern, async (ctx) => {
-        const relativeRequest = ctx.req.path.slice(inertiaClientBase.length) || inertiaClientRequestPath
-
-        let targetPath: string
-
-        if (relativeRequest === inertiaClientRequestPath) {
-          targetPath = join(inertiaClientDir, 'app.js')
-        } else {
-          targetPath = resolve(inertiaClientDir, relativeRequest)
-
-          if (!targetPath.startsWith(inertiaClientDir + sep)) {
-            return ctx.notFound()
-          }
-        }
-
-        const file = Bun.file(targetPath)
-
-        if (!(await file.exists())) {
-          return ctx.notFound()
-        }
-
-        const contentType = file.type || 'application/javascript; charset=utf-8'
-
-        return new Response(file, {
-          headers: {
-            'Content-Type': contentType,
-            'Cache-Control': 'public, max-age=31536000',
-          },
-        })
-      })
+      registerBuiltInertiaClient(
+        app,
+        dirname(inertiaClientEntry),
+        options.inertiaClientPath ?? DEFAULT_VENDOR_CLIENT_PATH,
+      )
     } catch (error) {
       console.warn('Unable to resolve @guren/inertia-client/app for production serving.', error)
     }
   }
+}
+
+/**
+ * Serves the built Inertia client and the chunks it imports out of the
+ * resolved package directory.
+ *
+ * Split out of {@link configureInertiaAssets} so it can be pointed at a
+ * directory: the caller derives `inertiaClientDir` from `import.meta.resolve`,
+ * which no test can redirect at a fixture.
+ */
+export function registerBuiltInertiaClient(
+  app: Application,
+  inertiaClientDir: string,
+  inertiaClientPath: string,
+): void {
+  const {
+    base: inertiaClientBase,
+    pattern: inertiaClientPattern,
+    requestPath: inertiaClientRequestPath,
+  } = resolveInertiaClientRoute(inertiaClientPath)
+
+  app.hono.get(inertiaClientPattern, async (ctx) => {
+    const relativeRequest = ctx.req.path.slice(inertiaClientBase.length) || inertiaClientRequestPath
+
+    let targetPath: string
+    // Left undefined for the entry: it is derived from configuration rather
+    // than from the request, and a package layout may well have it symlinked
+    // out of `inertiaClientDir`.
+    let containmentRoot: string | undefined
+
+    if (relativeRequest === inertiaClientRequestPath) {
+      targetPath = join(inertiaClientDir, 'app.js')
+    } else {
+      targetPath = resolve(inertiaClientDir, relativeRequest)
+      containmentRoot = inertiaClientDir
+
+      if (!isPathWithin(containmentRoot, targetPath)) {
+        return ctx.notFound()
+      }
+    }
+
+    const file = Bun.file(targetPath)
+
+    if (!(await file.exists())) {
+      return ctx.notFound()
+    }
+
+    // Canonicalized only now that the path exists: `resolve()` above collapsed
+    // `..` without following symlinks, and `new Response(file)` follows them.
+    if (containmentRoot && !(await isRealPathWithin(containmentRoot, targetPath))) {
+      return ctx.notFound()
+    }
+
+    const contentType = file.type || 'application/javascript; charset=utf-8'
+
+    return new Response(file, {
+      headers: {
+        'Content-Type': contentType,
+        'Cache-Control': 'public, max-age=31536000',
+      },
+    })
+  })
 }
 
 export function autoConfigureInertiaAssets(app: Application, options: AutoConfigureInertiaOptions): void {

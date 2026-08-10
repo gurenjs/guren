@@ -1,10 +1,11 @@
 import type { Context } from 'hono'
 import { serveStatic } from 'hono/bun'
-import { dirname, extname, resolve, sep } from 'node:path'
+import { dirname, extname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import type { Application } from './Application'
 import { registerRootPublicAssets, type RootPublicAssetsConfig } from './public-assets'
+import { isPathWithin, isRealPathWithin } from '../support/contained-path'
 
 declare const Bun: any
 
@@ -136,21 +137,27 @@ export function registerDevAssets(app: Application, options: DevAssetsOptions): 
     app.hono.get(inertiaClientPattern, (ctx) => {
       const relativeRequest = ctx.req.path.slice(inertiaClientBase.length) || inertiaClientRequestPath
 
+      // The configured entry is not request-derived, so it is served without a
+      // containment check: it may legitimately sit outside `inertiaClientDir`
+      // when the resolved module is itself a symlink into another tree.
       if (relativeRequest === inertiaClientRequestPath) {
         return transpileFile(inertiaClientSource, reactImportPattern, tsxTranspiler, tsTranspiler, jsxRuntimeUrl)
       }
 
       const candidatePath = resolve(inertiaClientDir, relativeRequest)
 
-      // A doubled slash in the request path leaves `relativeRequest` absolute,
-      // which `resolve` returns verbatim — so the separator is what keeps a
-      // sibling directory whose name merely extends this one (`…/inertia` vs
-      // `…/inertia-secrets`) out.
-      if (!candidatePath.startsWith(inertiaClientDir + sep)) {
+      if (!isPathWithin(inertiaClientDir, candidatePath)) {
         return ctx.notFound()
       }
 
-      return transpileFile(candidatePath, reactImportPattern, tsxTranspiler, tsTranspiler, jsxRuntimeUrl)
+      return transpileFile(
+        candidatePath,
+        reactImportPattern,
+        tsxTranspiler,
+        tsTranspiler,
+        jsxRuntimeUrl,
+        inertiaClientDir,
+      )
     })
   }
 
@@ -224,11 +231,11 @@ async function handleTranspileRequest(
   const relative = ctx.req.path.slice(prefix.length + 1)
   const fsPath = resolve(resourcesJsDir, relative)
 
-  if (!fsPath.startsWith(resourcesJsDir + sep)) {
+  if (!isPathWithin(resourcesJsDir, fsPath)) {
     return ctx.notFound()
   }
 
-  return transpileFile(fsPath, reactImportPattern, tsxTranspiler, tsTranspiler, jsxRuntimeUrl)
+  return transpileFile(fsPath, reactImportPattern, tsxTranspiler, tsTranspiler, jsxRuntimeUrl, resourcesJsDir)
 }
 
 /**
@@ -238,6 +245,7 @@ async function handleTranspileRequest(
  * @param tsxTranspiler The transpiler for TSX files.
  * @param tsTranspiler The transpiler for TS files.
  * @param jsxRuntimeUrl The URL for the JSX runtime.
+ * @param containmentRoot Directory the resolved file must really live under. Omit for configured (non request-derived) paths.
  * @returns A Promise that resolves to a Response object.
  */
 async function transpileFile(
@@ -246,6 +254,7 @@ async function transpileFile(
   tsxTranspiler: any,
   tsTranspiler: any,
   jsxRuntimeUrl: string,
+  containmentRoot?: string,
 ): Promise<Response> {
   const candidates = buildCandidatePaths(fsPath)
   let filePath: string | undefined
@@ -262,6 +271,14 @@ async function transpileFile(
   }
 
   if (!file || !filePath) {
+    return new Response('Not Found', { status: 404 })
+  }
+
+  // Re-checked here rather than at the call site because the extension probing
+  // above is what settles which file gets read, and because `filePath` is now
+  // known to exist — the precondition for canonicalizing it. Same 404 as a
+  // missing file, so an escape attempt learns nothing from the response.
+  if (containmentRoot && !(await isRealPathWithin(containmentRoot, filePath))) {
     return new Response('Not Found', { status: 404 })
   }
 
