@@ -21,7 +21,7 @@ bunx wrangler deploy
 ## API
 
 - **`createWorkersHandler(app)`** — wraps a Guren `Application` in a Workers module handler. Boot is lazy and deduplicated on the first request, because `boot()` performs I/O that workerd forbids in global scope. The handler deduplicates boot itself, so boot-once holds for anything matching `WorkersAppLike`, not only Guren's `Application`.
-- **`getWorkersEnv<Env>()`** — exposes the first request's bindings to boot-time config through a write-once holder. Use it to hand a D1 binding to the ORM:
+- **`getWorkersEnv<Env>()`** — exposes the first request's bindings to boot-time config through a write-once holder. workerd can also expose bindings at module scope via `cloudflare:workers`, but importing that from shared config would break every other runtime (Bun, Lambda, Vercel) — the holder keeps `config/*.ts` portable. Use it to hand a D1 binding to the ORM:
 
   ```typescript
   import { createD1Database } from '@guren/core'
