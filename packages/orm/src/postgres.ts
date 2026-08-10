@@ -6,6 +6,7 @@ import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from '
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isConnectionFailure, migrationFailure, seedFailure, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders } from './seeder'
+import { singleFlight } from './single-flight'
 
 type ConnectionResolver = string | (() => string | undefined)
 type PostgresJsDrizzle = typeof import('drizzle-orm/postgres-js')
@@ -66,8 +67,6 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
   const resolvedSeedersFolder =
     seedersFolder == null ? undefined : seedersFolder instanceof URL ? fileURLToPath(seedersFolder) : resolve(String(seedersFolder))
 
-  let migrationsPromise: Promise<void> | undefined
-  let databasePromise: Promise<PostgresJsDatabase> | undefined
   let client: ReturnType<typeof postgres> | undefined
   let activeKey: string | undefined
   // Captured here, not in getDatabase(), so the caller of this factory is the
@@ -85,17 +84,16 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
     return resolved
   }
 
-  async function migrateOnce(): Promise<void> {
-    if (migrationsPromise) {
-      return migrationsPromise
-    }
+  // Resolved inside the factory below: resolveConnectionString() throws when no
+  // connection string is configured, so it must not run before the
+  // no-migrations early return. The error mapper needs it afterwards, and each
+  // attempt clears it so a retry never reports a previous attempt's endpoint.
+  let endpoint: string | undefined
 
-    // Resolved inside the IIFE below: resolveConnectionString() throws when no
-    // connection string is configured, so it must not run before the
-    // no-migrations early return. The catch handler needs it afterwards.
-    let endpoint: string | undefined
+  const migrations = singleFlight(
+    async (): Promise<void> => {
+      endpoint = undefined
 
-    const promise = (async (): Promise<void> => {
       if (!hasDrizzleMigrations(resolvedMigrationsFolder)) {
         warnIgnoredFlatSqlMigrations(resolvedMigrationsFolder)
         return
@@ -115,50 +113,39 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
       } finally {
         await migrationClient.end({ timeout: 0 })
       }
-    })()
+    },
+    (error) => migrationFailure(error, endpoint),
+  )
 
-    migrationsPromise = promise.catch((error) => {
-      migrationsPromise = undefined
-      throw migrationFailure(error, endpoint)
-    })
-
-    await migrationsPromise
+  async function migrateOnce(): Promise<void> {
+    await migrations.get()
   }
 
-  async function getDatabase(): Promise<PostgresJsDatabase> {
-    if (databasePromise) {
-      return databasePromise
+  const database = singleFlight(async (): Promise<PostgresJsDatabase> => {
+    await migrateOnce()
+    const { drizzle, postgres: postgresFactory } = await loadPostgresModules()
+    const url = resolveConnectionString()
+    // Held locally as well as in closure state: a newer evaluation may close
+    // this client while the await below is suspended, which clears `client`.
+    const activeClient = postgresFactory(url, {
+      max: 1,
+      ...clientOptions,
+    })
+    client = activeClient
+
+    activeKey = hotReloadKey('postgres', callSite, url)
+    if (activeKey) {
+      await replaceActiveConnection(activeKey, closeDatabase)
     }
 
-    const promise = (async (): Promise<PostgresJsDatabase> => {
-      await migrateOnce()
-      const { drizzle, postgres: postgresFactory } = await loadPostgresModules()
-      const url = resolveConnectionString()
-      // Held locally as well as in closure state: a newer evaluation may close
-      // this client while the await below is suspended, which clears `client`.
-      const activeClient = postgresFactory(url, {
-        max: 1,
-        ...clientOptions,
-      })
-      client = activeClient
+    return drizzle({
+      client: activeClient,
+      ...(relations ? { relations } : {}),
+    } as DrizzleConfig) as unknown as PostgresJsDatabase
+  })
 
-      activeKey = hotReloadKey('postgres', callSite, url)
-      if (activeKey) {
-        await replaceActiveConnection(activeKey, closeDatabase)
-      }
-
-      return drizzle({
-        client: activeClient,
-        ...(relations ? { relations } : {}),
-      } as DrizzleConfig) as unknown as PostgresJsDatabase
-    })()
-
-    databasePromise = promise.catch((error) => {
-      databasePromise = undefined
-      throw error
-    })
-
-    return databasePromise
+  function getDatabase(): Promise<PostgresJsDatabase> {
+    return database.get()
   }
 
   async function closeDatabase(): Promise<void> {
@@ -173,7 +160,7 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
       await client.end({ timeout: 0 })
     } finally {
       client = undefined
-      databasePromise = undefined
+      database.reset()
       if (key) {
         releaseActiveConnection(key, closeDatabase)
       }
@@ -224,7 +211,7 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
     })
 
     // Allow migrateDatabase() to re-apply everything from scratch.
-    migrationsPromise = undefined
+    migrations.reset()
   }
 
   async function migrationStatus(): Promise<MigrationStatusEntry[]> {

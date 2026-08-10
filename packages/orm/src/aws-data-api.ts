@@ -5,6 +5,7 @@ import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from '
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { buildMigrationStatus, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders } from './seeder'
+import { singleFlight } from './single-flight'
 
 type ConnectionResolver = string | (() => string | undefined)
 type AwsDataApiDrizzle = typeof import('drizzle-orm/aws-data-api/pg')
@@ -86,8 +87,6 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
   const resolvedSeedersFolder =
     seedersFolder == null ? undefined : seedersFolder instanceof URL ? fileURLToPath(seedersFolder) : resolve(String(seedersFolder))
 
-  let migrationsPromise: Promise<void> | undefined
-  let databasePromise: Promise<AwsDataApiPgDatabase> | undefined
   let client: { destroy?: () => void } | undefined
   let activeKey: string | undefined
   // Captured here, not in getDatabase(), so the caller of this factory is the
@@ -127,12 +126,8 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
     } as DrizzleConfig
   }
 
-  async function migrateOnce(): Promise<void> {
-    if (migrationsPromise) {
-      return migrationsPromise
-    }
-
-    const promise = (async (): Promise<void> => {
+  const migrations = singleFlight(
+    async (): Promise<void> => {
       if (!hasDrizzleMigrations(resolvedMigrationsFolder)) {
         warnIgnoredFlatSqlMigrations(resolvedMigrationsFolder)
         return
@@ -140,45 +135,36 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
 
       const { migrate } = await loadAwsDataApiModules()
       await withAdminDb((db) => migrate(db, { migrationsFolder: resolvedMigrationsFolder }))
-    })()
-
-    migrationsPromise = promise.catch((error) => {
-      migrationsPromise = undefined
+    },
+    (error) => {
       const reason = error instanceof Error ? error.message : String(error)
-      throw new Error(`Failed to run database migrations: ${reason}`)
-    })
+      return new Error(`Failed to run database migrations: ${reason}`)
+    },
+  )
 
-    await migrationsPromise
+  async function migrateOnce(): Promise<void> {
+    await migrations.get()
   }
 
-  async function getDatabase(): Promise<AwsDataApiPgDatabase> {
-    if (databasePromise) {
-      return databasePromise
+  const databaseHandle = singleFlight(async (): Promise<AwsDataApiPgDatabase> => {
+    if (migrateOnStart) {
+      await migrateOnce()
+    }
+    const { drizzle } = await loadAwsDataApiModules()
+    const connection = resolveConnection()
+    const db = drizzle(buildDrizzleConfig(connection)) as unknown as AwsDataApiPgDatabase
+    client = (db as { $client?: { destroy?: () => void } }).$client
+
+    activeKey = hotReloadKey('aws-data-api', callSite, `${connection.resourceArn}/${connection.database}`)
+    if (activeKey) {
+      await replaceActiveConnection(activeKey, closeDatabase)
     }
 
-    const promise = (async (): Promise<AwsDataApiPgDatabase> => {
-      if (migrateOnStart) {
-        await migrateOnce()
-      }
-      const { drizzle } = await loadAwsDataApiModules()
-      const connection = resolveConnection()
-      const db = drizzle(buildDrizzleConfig(connection)) as unknown as AwsDataApiPgDatabase
-      client = (db as { $client?: { destroy?: () => void } }).$client
+    return db
+  })
 
-      activeKey = hotReloadKey('aws-data-api', callSite, `${connection.resourceArn}/${connection.database}`)
-      if (activeKey) {
-        await replaceActiveConnection(activeKey, closeDatabase)
-      }
-
-      return db
-    })()
-
-    databasePromise = promise.catch((error) => {
-      databasePromise = undefined
-      throw error
-    })
-
-    return databasePromise
+  function getDatabase(): Promise<AwsDataApiPgDatabase> {
+    return databaseHandle.get()
   }
 
   async function closeDatabase(): Promise<void> {
@@ -193,7 +179,7 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
       client.destroy?.()
     } finally {
       client = undefined
-      databasePromise = undefined
+      databaseHandle.reset()
       if (key) {
         releaseActiveConnection(key, closeDatabase)
       }
@@ -239,7 +225,7 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
     })
 
     // Allow migrateDatabase() to re-apply everything from scratch.
-    migrationsPromise = undefined
+    migrations.reset()
   }
 
   async function migrationStatus(): Promise<MigrationStatusEntry[]> {
