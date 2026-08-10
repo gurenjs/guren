@@ -154,6 +154,55 @@ describe('createWorkersHandler', () => {
     expect(getWorkersEnv<TestEnv>()).toBe(retryEnv)
   })
 
+  test('should leave a retry that started mid-failure alone when a stale waiter gives up', async () => {
+    let bootCalls = 0
+    const bootDeferred = deferred<void>()
+    const app: WorkersAppLike = {
+      boot() {
+        bootCalls += 1
+        return bootCalls === 1 ? bootDeferred.promise : Promise.resolve()
+      },
+      fetch() {
+        return new Response('ok')
+      },
+    }
+    const handler = createWorkersHandler(app)
+    const ctx = createExecutionContext()
+    const failedEnv = { DB: 'failed-db' }
+    const retryEnv = { DB: 'retry-db' }
+    let retryResponse: Response | undefined
+
+    // Registration order is the test. Rejection reactions run in the order
+    // they were attached, so the retry is queued between the two waiters and
+    // runs between their catches — and an app may legitimately attach one,
+    // since this is the very promise its `boot()` returned. `fetch` installs
+    // the new boot promise and captures the new env before its first `await`,
+    // so the retry is already live when the second waiter gives up. Reorder
+    // these three statements and the race stops being reproduced.
+    const first = handler.fetch(new Request('https://example.com/one'), failedEnv, ctx)
+    const retried = bootDeferred.promise.catch(async () => {
+      retryResponse = await handler.fetch(new Request('https://example.com/retry'), retryEnv, ctx)
+    })
+    const second = handler.fetch(new Request('https://example.com/two'), failedEnv, ctx)
+
+    bootDeferred.reject(new Error('boot failed'))
+    const settled = await Promise.allSettled([first, second])
+    await retried
+
+    expect(settled[0].status).toBe('rejected')
+    expect(settled[1].status).toBe('rejected')
+    expect(bootCalls).toBe(2)
+    expect(await retryResponse?.text()).toBe('ok')
+    // The stale waiter must not have cleared the retry's env out from under it.
+    expect(getWorkersEnv<TestEnv>()).toBe(retryEnv)
+
+    // ...nor its boot promise: a later request must reuse the retry's boot
+    // rather than start a third one.
+    await handler.fetch(new Request('https://example.com/three'), retryEnv, ctx)
+
+    expect(bootCalls).toBe(2)
+  })
+
   test('should pass each request its own env and ctx through to app.fetch', async () => {
     const app: WorkersAppLike = {
       async boot() {},

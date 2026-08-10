@@ -31,14 +31,35 @@ export function createWorkersHandler(app: WorkersAppLike): WorkersHandler {
     async fetch(request: Request, env: unknown, ctx: WorkersExecutionContext): Promise<Response> {
       captureWorkersEnv(env)
 
+      let attempt: Promise<void> | undefined
+
       try {
         // Inside the try: a conforming non-async boot() can throw
         // synchronously, and that throw has to reach the cleanup too.
-        bootPromise ??= app.boot()
-        await bootPromise
+        attempt = bootPromise ??= app.boot()
+        await attempt
       } catch (error) {
-        bootPromise = undefined
-        resetWorkersEnv()
+        // Every waiter on a failed boot reaches here, but only the one whose
+        // attempt is still installed may clear: a retry can start between two
+        // waiters' catches — the app can register a rejection reaction on the
+        // very promise `boot()` returned — and `fetch` installs the new boot
+        // promise and captures the new env before its first `await`, so a
+        // stale waiter clearing unconditionally wipes a live retry.
+        //
+        // The same token settles the env holder, which is first-call-wins and
+        // is reset nowhere else in production — so still owning the boot
+        // promise means the holder still holds what this request captured.
+        // That equivalence holds for the one-handler-per-module topology
+        // `buildCloudflareOutput` generates: the holder is module-global while
+        // this slot is per-handler, so a second handler in the same module
+        // shares the former without sharing the latter, and neither can guard
+        // the other. A synchronous throw leaves both sides `undefined` and
+        // nothing can interleave before the catch, so that path clears its own
+        // capture.
+        if (bootPromise === attempt) {
+          bootPromise = undefined
+          resetWorkersEnv()
+        }
         throw error
       }
 
