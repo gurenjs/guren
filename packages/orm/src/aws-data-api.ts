@@ -89,8 +89,8 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
 
   let client: { destroy?: () => void } | undefined
   let activeKey: string | undefined
-  // Captured here, not in getDatabase(), so the caller of this factory is the
-  // frame that identifies the handle across hot reloads.
+  // Captured here, not in the connection factory, so the caller of this factory
+  // is the frame that identifies the handle across hot reloads.
   const callSite = new Error().stack
 
   function resolveConnection(): ResolvedConnection {
@@ -141,13 +141,9 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
     }
   })
 
-  async function migrateOnce(): Promise<void> {
-    await migrations.get()
-  }
-
   const databaseHandle = singleFlight(async (): Promise<AwsDataApiPgDatabase> => {
     if (migrateOnStart) {
-      await migrateOnce()
+      await migrations.get()
     }
     const { drizzle } = await loadAwsDataApiModules()
     const connection = resolveConnection()
@@ -161,10 +157,6 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
 
     return db
   })
-
-  function getDatabase(): Promise<AwsDataApiPgDatabase> {
-    return databaseHandle.get()
-  }
 
   async function closeDatabase(): Promise<void> {
     if (!client) {
@@ -186,7 +178,7 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
   }
 
   async function configureOrm(): Promise<void> {
-    const db = await getDatabase()
+    const db = await databaseHandle.get()
     DrizzleAdapter.configure(db as unknown as Parameters<typeof DrizzleAdapter.configure>[0])
   }
 
@@ -195,7 +187,7 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
       throw new Error('No seeders folder configured. Provide "seedersFolder" when calling createAwsDataApiDatabase().')
     }
 
-    const db = await getDatabase()
+    const db = await databaseHandle.get()
     await runSeeders(db, resolvedSeedersFolder)
   }
 
@@ -254,8 +246,8 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
   }
 
   return {
-    getDatabase,
-    migrateDatabase: migrateOnce,
+    getDatabase: databaseHandle.get,
+    migrateDatabase: migrations.get,
     closeDatabase,
     configureOrm,
     seedDatabase,

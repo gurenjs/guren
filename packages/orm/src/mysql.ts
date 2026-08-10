@@ -77,8 +77,8 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
 
   let client: MySqlPool | undefined
   let activeKey: string | undefined
-  // Captured here, not in getDatabase(), so the caller of this factory is the
-  // frame that identifies the handle across hot reloads.
+  // Captured here, not in the connection factory, so the caller of this factory
+  // is the frame that identifies the handle across hot reloads.
   const callSite = new Error().stack
 
   function resolveConnectionString(): string {
@@ -124,12 +124,8 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
     }
   })
 
-  async function migrateOnce(): Promise<void> {
-    await migrations.get()
-  }
-
   const database = singleFlight(async (): Promise<MySql2Database> => {
-    await migrateOnce()
+    await migrations.get()
     const { drizzle, createPool } = await loadMySqlModules()
     const url = resolveConnectionString()
     // Held locally as well as in closure state: a newer evaluation may close
@@ -147,10 +143,6 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
       ...(relations ? { relations } : {}),
     } as DrizzleConfig) as unknown as MySql2Database
   })
-
-  function getDatabase(): Promise<MySql2Database> {
-    return database.get()
-  }
 
   async function closeDatabase(): Promise<void> {
     if (!client) {
@@ -172,7 +164,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
   }
 
   async function configureOrm(): Promise<void> {
-    const db = await getDatabase()
+    const db = await database.get()
     DrizzleAdapter.configure(db as unknown as Parameters<typeof DrizzleAdapter.configure>[0])
   }
 
@@ -181,7 +173,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
       throw new Error('No seeders folder configured. Provide "seedersFolder" when calling createMySqlDatabase().')
     }
 
-    const db = await getDatabase()
+    const db = await database.get()
     try {
       await runSeeders(db, resolvedSeedersFolder)
     } catch (error) {
@@ -261,8 +253,8 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
   }
 
   return {
-    getDatabase,
-    migrateDatabase: migrateOnce,
+    getDatabase: database.get,
+    migrateDatabase: migrations.get,
     closeDatabase,
     configureOrm,
     seedDatabase,

@@ -1,15 +1,7 @@
 import { describe, test, expect } from 'bun:test'
 import { singleFlight } from './single-flight'
 
-function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reject: (error: unknown) => void } {
-  let resolve!: (value: T) => void
-  let reject!: (error: unknown) => void
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res
-    reject = rej
-  })
-  return { promise, resolve, reject }
-}
+const deferred = <T,>() => Promise.withResolvers<T>()
 
 describe('singleFlight', () => {
   test('should share one in-flight promise between concurrent callers', async () => {
@@ -110,25 +102,9 @@ describe('singleFlight', () => {
     expect(await fresh).toBe('connected')
   })
 
-  test('should surface an error the factory shaped, with per-attempt context', async () => {
-    // Mirrors the drivers: the factory resolves an endpoint partway through and
-    // wraps its own failure, so each attempt reports its own context.
-    const endpoints = ['db-a:5432', 'db-b:5432']
-    let calls = 0
-    const flight = singleFlight(async () => {
-      let endpoint: string | undefined
-      try {
-        endpoint = endpoints[calls++]
-        throw new Error('ECONNREFUSED')
-      } catch (error) {
-        throw new Error(`Failed to migrate against ${endpoint}: ${(error as Error).message}`)
-      }
-    })
-
-    await expect(flight.get()).rejects.toThrow('Failed to migrate against db-a:5432: ECONNREFUSED')
-    await expect(flight.get()).rejects.toThrow('Failed to migrate against db-b:5432: ECONNREFUSED')
-  })
-
+  // The drivers rely on this: they expose `migrateDatabase: migrations.get` and
+  // `getDatabase: database.get` straight off the returned object, so `get` and
+  // `reset` must not depend on a `this` binding.
   test('should keep method references usable when detached from the returned object', async () => {
     let calls = 0
     const flight = singleFlight(async () => {

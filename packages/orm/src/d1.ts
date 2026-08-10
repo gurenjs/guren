@@ -56,7 +56,7 @@ export function createD1Database(options: D1DatabaseOptions): D1DatabaseHandle {
         ? relative(process.cwd(), fileURLToPath(migrationsFolder))
         : migrationsFolder
 
-  const database = singleFlight(async (): Promise<unknown> => {
+  const databaseHandle = singleFlight(async (): Promise<unknown> => {
     const client = binding()
     if (client == null) {
       throw new Error(
@@ -74,12 +74,8 @@ export function createD1Database(options: D1DatabaseOptions): D1DatabaseHandle {
     return drizzle(client as D1Client, relations ? ({ relations } as D1Config) : undefined)
   })
 
-  function ensureDatabase(): Promise<unknown> {
-    return database.get()
-  }
-
   return {
-    getDatabase: ensureDatabase,
+    getDatabase: databaseHandle.get,
 
     async migrateDatabase() {
       // The drizzle-kit SQL ↔ wrangler format contract is covered by the
@@ -95,11 +91,11 @@ export function createD1Database(options: D1DatabaseOptions): D1DatabaseHandle {
     async closeDatabase() {
       // D1 sessions have no connection to close; just drop the cached instance
       // (mirrors the sqlite factory).
-      database.reset()
+      databaseHandle.reset()
     },
 
     async configureOrm() {
-      const database = await ensureDatabase()
+      const database = await databaseHandle.get()
       DrizzleAdapter.configure(database as Parameters<typeof DrizzleAdapter.configure>[0])
     },
 

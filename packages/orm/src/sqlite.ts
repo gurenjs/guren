@@ -132,17 +132,13 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
     }
   })
 
-  async function migrateOnce(): Promise<void> {
-    await migrations.get()
-  }
-
   return {
     async getDatabase() {
-      await migrateOnce()
+      await migrations.get()
       return ensureDatabase()
     },
 
-    migrateDatabase: migrateOnce,
+    migrateDatabase: migrations.get,
 
     closeDatabase,
 
@@ -196,7 +192,7 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
 
     async configureOrm() {
       const database = await ensureDatabase()
-      await migrateOnce()
+      await migrations.get()
       DrizzleAdapter.configure(database as Parameters<typeof DrizzleAdapter.configure>[0])
     },
 

@@ -69,8 +69,8 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
 
   let client: ReturnType<typeof postgres> | undefined
   let activeKey: string | undefined
-  // Captured here, not in getDatabase(), so the caller of this factory is the
-  // frame that identifies the handle across hot reloads.
+  // Captured here, not in the connection factory, so the caller of this factory
+  // is the frame that identifies the handle across hot reloads.
   const callSite = new Error().stack
 
   function resolveConnectionString(): string {
@@ -116,12 +116,8 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
     }
   })
 
-  async function migrateOnce(): Promise<void> {
-    await migrations.get()
-  }
-
   const database = singleFlight(async (): Promise<PostgresJsDatabase> => {
-    await migrateOnce()
+    await migrations.get()
     const { drizzle, postgres: postgresFactory } = await loadPostgresModules()
     const url = resolveConnectionString()
     // Held locally as well as in closure state: a newer evaluation may close
@@ -143,10 +139,6 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
     } as DrizzleConfig) as unknown as PostgresJsDatabase
   })
 
-  function getDatabase(): Promise<PostgresJsDatabase> {
-    return database.get()
-  }
-
   async function closeDatabase(): Promise<void> {
     if (!client) {
       return
@@ -167,7 +159,7 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
   }
 
   async function configureOrm(): Promise<void> {
-    const db = await getDatabase()
+    const db = await database.get()
     DrizzleAdapter.configure(db as unknown as Parameters<typeof DrizzleAdapter.configure>[0])
   }
 
@@ -176,7 +168,7 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
       throw new Error('No seeders folder configured. Provide "seedersFolder" when calling createPostgresDatabase().')
     }
 
-    const db = await getDatabase()
+    const db = await database.get()
     try {
       await runSeeders(db, resolvedSeedersFolder)
     } catch (error) {
@@ -238,8 +230,8 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
   }
 
   return {
-    getDatabase,
-    migrateDatabase: migrateOnce,
+    getDatabase: database.get,
+    migrateDatabase: migrations.get,
     closeDatabase,
     configureOrm,
     seedDatabase,
