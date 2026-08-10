@@ -1225,27 +1225,248 @@ export async function registerWebRoutes(baseRouter: Router): Promise<void> {
     expect(wiring(report).has('routes/api.ts')).toBe(false)
   })
 
-  // A module mounts its routes through `defineModule({ routes })`, which never
-  // touches the app's entry registrar — flagging it would be a false alarm.
-  it('leaves a module routes file alone', async () => {
-    const report = await withWorkspace({
-      'routes/web.ts': ROUTES_ENTRY,
-      'routes/admin.ts': ADMIN_ROUTES,
-      'modules/billing/routes.ts': `import { Router } from '@guren/core'
+  /** A module registrar `defineModule({ routes })` names, mounting nothing. */
+  const BILLING_ENTRY = `import { Router } from '@guren/core'
 
 export function registerBillingRoutes(router: Router): void {
   router.get('/billing', [BillingController, 'index'])
 }
-`,
-      'modules/billing/index.ts': `import { defineModule } from '@guren/core'
+`
+
+  const BILLING_MODULE = `import { defineModule } from '@guren/core'
 import { registerBillingRoutes } from './routes.js'
 
 export const billingModule = defineModule({ name: 'billing', routes: registerBillingRoutes, providers: [] })
-`,
+`
+
+  /** {@link BILLING_ENTRY}, wired: it mounts `routes/invoice.ts`. */
+  const BILLING_ENTRY_WIRED = `import { Router } from '@guren/core'
+import { registerRoutes } from './routes/invoice.js'
+
+export function registerBillingRoutes(router: Router): void {
+  registerRoutes(router)
+}
+`
+
+  /** `make:route Invoice --module billing` output, wired to nothing. */
+  const MODULE_ROUTE = `import { Router } from '@guren/core'
+import InvoiceController from '../app/Http/Controllers/InvoiceController.js'
+
+export function registerRoutes(router: Router): void {
+  router.group('/invoice', (group) => {
+    group.get('/', [InvoiceController, 'index'])
+  })
+}
+`
+
+  // A module mounts its routes through `defineModule({ routes })`, which names
+  // one file — so a module whose whole surface is that file has nothing this
+  // check asks about. The scope is content-activated on `modules/*/routes/`,
+  // which is what keeps a real modular app (web/modules/blog) quiet.
+  it('leaves a module with no routes/ directory alone', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': ROUTES_ENTRY,
+      'routes/admin.ts': ADMIN_ROUTES,
+      'modules/billing/routes.ts': BILLING_ENTRY,
+      'modules/billing/index.ts': BILLING_MODULE,
     })
 
     expect(statusOf(report, 'routes/admin.ts')).toBe('pass')
     expect([...wiring(report).keys()].some((key) => key.startsWith('modules/'))).toBe(false)
+  })
+
+  // Where `make:route --module billing` writes. Nothing mounted it, and the
+  // module's own registrar — not the app's — is the file that has to.
+  it('warns about a module routes file the module registrar never calls', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': PLAIN_ENTRY,
+      'modules/billing/routes.ts': BILLING_ENTRY,
+      'modules/billing/index.ts': BILLING_MODULE,
+      'modules/billing/routes/invoice.ts': MODULE_ROUTE,
+    })
+
+    const finding = wiring(report).get('modules/billing/routes/invoice.ts')
+    expect(finding?.status).toBe('warn')
+    expect(finding!.message).toContain('modules/billing/routes.ts')
+    expect(finding!.message).toContain('404')
+    // Printed relative to the module's entry, with the runtime extension.
+    expect(finding!.suggestion).toContain("import { registerRoutes } from './routes/invoice.js'")
+  })
+
+  it('credits a module routes file its module registrar calls', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': PLAIN_ENTRY,
+      'modules/billing/routes.ts': BILLING_ENTRY_WIRED,
+      'modules/billing/index.ts': BILLING_MODULE,
+      'modules/billing/routes/invoice.ts': MODULE_ROUTE,
+    })
+
+    expect(statusOf(report, 'modules/billing/routes/invoice.ts')).toBe('pass')
+  })
+
+  // The entry is the file `defineModule({ routes })` names, not a
+  // conventionally named one: here a stale `routes.ts` sits beside the real
+  // registrar at `routes/index.ts`, and judging against the convention would
+  // report the whole directory unmounted. The entry is also one of the very
+  // files the directory scan turns up, so it has to be excluded by resolved
+  // path rather than reported against itself.
+  it('follows defineModule({ routes }) to a registrar at routes/index.ts', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': PLAIN_ENTRY,
+      'modules/billing/routes.ts': BILLING_ENTRY,
+      'modules/billing/index.ts': `import { defineModule } from '@guren/core'
+import { registerBillingRoutes } from './routes/index.js'
+
+export const billingModule = defineModule({ name: 'billing', routes: registerBillingRoutes })
+`,
+      'modules/billing/routes/index.ts': `import { Router } from '@guren/core'
+import { registerRoutes } from './invoice.js'
+
+export function registerBillingRoutes(router: Router): void {
+  registerRoutes(router)
+}
+`,
+      'modules/billing/routes/invoice.ts': MODULE_ROUTE,
+    })
+
+    expect(statusOf(report, 'modules/billing/routes/invoice.ts')).toBe('pass')
+    expect(wiring(report).has('modules/billing/routes/index.ts')).toBe(false)
+  })
+
+  // The runtime mounts only what `defineModule({ routes })` names — a
+  // descriptor without `routes` mounts nothing, however well-wired the
+  // conventional `routes.ts` is internally. Judging against that file would
+  // report a pass while every module route 404s.
+  it('warns when defineModule names no routes registrar, however wired routes.ts is', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': PLAIN_ENTRY,
+      'modules/billing/routes.ts': BILLING_ENTRY_WIRED,
+      'modules/billing/index.ts': `import { defineModule } from '@guren/core'
+
+export const billingModule = defineModule({ name: 'billing' })
+`,
+      'modules/billing/routes/invoice.ts': MODULE_ROUTE,
+    })
+
+    // One warning at the descriptor, no per-file verdicts: the only fix is
+    // in defineModule(), not in any routes file.
+    expect(wiring(report).size).toBe(0)
+    const entry = report.checks.filter((c) => c.key === 'route-entry:modules/billing/index.ts')
+    expect(entry).toHaveLength(1)
+    expect(entry[0].status).toBe('warn')
+    expect(entry[0].message).toContain('modules/billing/routes/invoice.ts')
+    expect(entry[0].message).toContain('defineModule')
+    expect(entry[0].suggestion).toContain('routes: registerBillingRoutes')
+  })
+
+  // No descriptor at all: the conventional entry stands in, so the warning
+  // can name the file to create rather than describe its absence.
+  it('reports a module with no descriptor and no routes entry once', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': PLAIN_ENTRY,
+      'modules/billing/routes/invoice.ts': MODULE_ROUTE,
+      'modules/billing/routes/credit-note.ts': MODULE_ROUTE,
+    })
+
+    expect(wiring(report).size).toBe(0)
+    const entry = report.checks.filter((c) => c.key === 'route-entry:modules/billing/routes.ts')
+    expect(entry).toHaveLength(1)
+    expect(entry[0].status).toBe('warn')
+    expect(entry[0].message).toContain('modules/billing/routes/invoice.ts')
+    // Creating the file alone leaves the routes unmounted, so both hops.
+    expect(entry[0].suggestion).toContain('defineModule({ routes })')
+  })
+
+  // An inline registrar makes the descriptor itself the entry — its imports
+  // are the wiring.
+  it('credits a routes file mounted by an inline defineModule registrar', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': PLAIN_ENTRY,
+      'modules/billing/index.ts': `import { defineModule } from '@guren/core'
+import { registerRoutes } from './routes/invoice.js'
+
+export const billingModule = defineModule({
+  name: 'billing',
+  routes: (router) => {
+    registerRoutes(router)
+  },
+})
+`,
+      'modules/billing/routes/invoice.ts': MODULE_ROUTE,
+    })
+
+    expect(statusOf(report, 'modules/billing/routes/invoice.ts')).toBe('pass')
+  })
+
+  // A `routes` value the check cannot trace to a file must skip the module,
+  // not judge it against a guessed entry — the looseness runs one way.
+  it('skips a module whose routes value cannot be traced', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': PLAIN_ENTRY,
+      'modules/billing/index.ts': `import { defineModule } from '@guren/core'
+import { buildRegistrar } from './support/build-registrar.js'
+
+export const billingModule = defineModule({ name: 'billing', routes: buildRegistrar() })
+`,
+      'modules/billing/routes/invoice.ts': MODULE_ROUTE,
+    })
+
+    expect(wiring(report).size).toBe(0)
+    expect(report.checks.some((c) => c.key.startsWith('route-entry:modules/'))).toBe(false)
+  })
+
+  // Each module is judged against its own entry. Anything hoisted out of the
+  // per-scope state — the candidate list, the parsed facts — would let one
+  // module's registrar credit another's identically-named `registerRoutes`.
+  it('judges each module against its own registrar', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': PLAIN_ENTRY,
+      'modules/billing/routes.ts': BILLING_ENTRY_WIRED,
+      'modules/billing/routes/invoice.ts': MODULE_ROUTE,
+      // The registrar's exported name does not matter to the scope split.
+      'modules/shipping/routes.ts': BILLING_ENTRY,
+      'modules/shipping/routes/label.ts': MODULE_ROUTE,
+    })
+
+    expect(statusOf(report, 'modules/billing/routes/invoice.ts')).toBe('pass')
+    const orphan = wiring(report).get('modules/shipping/routes/label.ts')
+    expect(orphan?.status).toBe('warn')
+    expect(orphan!.message).toContain('modules/shipping/routes.ts')
+  })
+
+  // The app's entry registrar is not the module's. Calling a module's routes
+  // file from `routes/web.ts` crosses the module boundary the arch rules draw
+  // — it does not make the module mount it.
+  it('does not credit a module routes file mounted from the project entry', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': `import { Router } from '@guren/core'
+import { registerRoutes } from '../modules/billing/routes/invoice.js'
+
+export function registerWebRoutes(baseRouter: Router): void {
+  registerRoutes(baseRouter)
+}
+`,
+      'modules/billing/routes.ts': BILLING_ENTRY,
+      'modules/billing/index.ts': BILLING_MODULE,
+      'modules/billing/routes/invoice.ts': MODULE_ROUTE,
+    })
+
+    expect(statusOf(report, 'modules/billing/routes/invoice.ts')).toBe('warn')
+  })
+
+  // `--routes` picks the *project's* entry; a module's is its own file.
+  it('keeps a module scope on its own entry under a custom --routes', async () => {
+    const report = await withWorkspace(
+      {
+        'routes/api.ts': API_ENTRY,
+        'modules/billing/routes.ts': BILLING_ENTRY,
+        'modules/billing/routes/invoice.ts': MODULE_ROUTE,
+      },
+      { routesFile: 'routes/api.ts' },
+    )
+
+    expect(wiring(report).get('modules/billing/routes/invoice.ts')!.message)
+      .toContain('modules/billing/routes.ts')
   })
 
   it('reports a missing entry file once, not once per routes file', async () => {
@@ -1327,6 +1548,22 @@ export function registerRoutes(router: Router): void {
     expect(finding!.suggestion).toContain('Add to routes/api.ts')
   })
 
+  /**
+   * Init a repo at `dir` with everything committed, so `getChangedFiles`
+   * starts from a clean baseline; returns a runner for further git commands.
+   */
+  function initGitRepo(dir: string): (...args: string[]) => void {
+    const git = (...args: string[]): void => {
+      spawnSync('git', args, { cwd: dir, stdio: 'ignore' })
+    }
+    git('init', '-b', 'main')
+    git('config', 'user.email', 'test@example.com')
+    git('config', 'user.name', 'Test')
+    git('add', '.')
+    git('commit', '-m', 'initial')
+    return git
+  }
+
   // The edit hook runs `runCheck({ changed: true })` on every save of a
   // controller, model, or page — none of which can move this answer, and all
   // of which would otherwise re-parse routes/ to re-derive it.
@@ -1339,14 +1576,7 @@ export function registerRoutes(router: Router): void {
         'routes/admin.ts': ADMIN_ROUTES,
         'app/Http/Controllers/PostController.ts': 'export default class PostController {}\n',
       })
-      const git = (...args: string[]): void => {
-        spawnSync('git', args, { cwd: workspace.dir, stdio: 'ignore' })
-      }
-      git('init', '-b', 'main')
-      git('config', 'user.email', 'test@example.com')
-      git('config', 'user.name', 'Test')
-      git('add', '.')
-      git('commit', '-m', 'initial')
+      initGitRepo(workspace.dir)
 
       // An unrelated edit must not wake it.
       await writeFile(
@@ -1370,6 +1600,54 @@ export function registerRoutes(router: Router): void {
     }
     // Spawns git and runs the suite twice; the default 5s budget is tight
     // enough that an unrelated slow machine turns this red.
+  }, 30_000)
+
+  // `make:route --module billing` writes under `modules/`, not `routes/`, so
+  // the changed-file gate has to know that path too. Nothing under `routes/`
+  // is touched here on purpose: with only the project directory in the gate,
+  // this check would never run in the edit hook — the one path that passes
+  // --changed — and the module half would be dead on arrival.
+  it('wakes under --changed for a module routes file alone', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-module-routes-changed-')
+
+    try {
+      await writeWorkspaceFiles(workspace.dir, {
+        'routes/web.ts': PLAIN_ENTRY,
+        'modules/billing/routes.ts': BILLING_ENTRY,
+        'modules/billing/index.ts': BILLING_MODULE,
+      })
+      const git = initGitRepo(workspace.dir)
+
+      // Committed state: nothing changed, so the check stays asleep.
+      expect(wiring(await runCheck({ cwd: workspace.dir, changed: true })).size).toBe(0)
+
+      await mkdir(join(workspace.dir, 'modules/billing/routes'), { recursive: true })
+      await writeFile(join(workspace.dir, 'modules/billing/routes/invoice.ts'), MODULE_ROUTE, 'utf8')
+
+      expect(
+        statusOf(await runCheck({ cwd: workspace.dir, changed: true }), 'modules/billing/routes/invoice.ts'),
+      ).toBe('warn')
+
+      // A descriptor-only edit — deleting `routes:` from defineModule() —
+      // must wake it too: that one line severs every module route, and the
+      // only changed path is modules/billing/index.ts.
+      git('add', '.')
+      git('commit', '-m', 'add invoice routes')
+      await writeFile(
+        join(workspace.dir, 'modules/billing/index.ts'),
+        `import { defineModule } from '@guren/core'
+
+export const billingModule = defineModule({ name: 'billing' })
+`,
+        'utf8',
+      )
+      const severed = await runCheck({ cwd: workspace.dir, changed: true })
+      expect(severed.checks.some((c) => c.key === 'route-entry:modules/billing/index.ts' && c.status === 'warn'))
+        .toBe(true)
+    } finally {
+      await workspace.cleanup()
+    }
+    // Spawns git and runs the suite three times, like the sibling gate test.
   }, 30_000)
 
   it('does not run under --arch', async () => {

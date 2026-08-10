@@ -2,14 +2,52 @@ import { stat } from 'node:fs/promises'
 import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import type { Statement } from '@babel/types'
 import { walk } from './ast-walk'
-import { discoverRoutesFiles, fileExists, findFirstExisting, formatTruncatedList, toPosixRelative } from './discovery'
+import {
+  discoverModuleRoutesFiles,
+  discoverRoutesFiles,
+  fileExists,
+  findFirstExisting,
+  formatTruncatedList,
+  toPosixRelative,
+} from './discovery'
 import type { ParseCache } from './parse-cache'
 import { DEFAULT_ROUTES_FILE, isRegistrarExportName, ROUTES_ENTRY_CANDIDATES, specifierName } from './route-registrar'
-import { referencesIdentifier, relativeImportPath } from './utils'
+import { pascalCase, referencesIdentifier, relativeImportPath } from './utils'
 import { check, type CheckResult } from './check-result'
 
-/** The directory whose files this check asks about. */
-export const ROUTES_DIR = 'routes'
+/** The directory whose files this check asks about, per scope. */
+const ROUTES_DIR = 'routes'
+
+/**
+ * A path that can move a module scope's answer: the module's descriptor
+ * (`modules/billing/index.ts`, where `defineModule({ routes })` names the
+ * registrar), its routes entry (`modules/billing/routes.ts`), or anything
+ * under its routes directory (`modules/billing/routes/foo.ts`).
+ */
+const MODULE_WIRING_PATTERN = /^modules\/[^/]+\/(?:index\.|routes[/.])/u
+
+/**
+ * Whether a changed path — POSIX-relative, as `getChangedFiles` reports —
+ * could move this check's answer, and so must wake it under `--changed`.
+ *
+ * The whole check is gated as a unit on this rather than filtered by changed
+ * candidate, for the reason {@link checkRouteRegistrarWiring} documents: the
+ * edit that unmounts `routes/admin.ts` is usually to `routes/web.ts`. Both
+ * halves of each scope count, and the module half is not covered by the
+ * project one — `modules/billing/routes/foo.ts` does not start with `routes/`,
+ * so a gate that only knew the project directory would leave every module
+ * unchecked in exactly the edit-hook path that runs on every save. The
+ * descriptor counts too: deleting `routes:` from `defineModule()` is an edit
+ * to `modules/billing/index.ts` alone, and it 404s every module route.
+ */
+export function affectsRouteWiring(file: string, routesFile?: string): boolean {
+  return (
+    file === ROUTES_DIR
+    || file.startsWith(`${ROUTES_DIR}/`)
+    || file === routesFile
+    || MODULE_WIRING_PATTERN.test(file)
+  )
+}
 
 /**
  * Stands in for "every export", for `import * as routes` and
@@ -217,7 +255,7 @@ async function readFacts(
   cwd: string,
   cache: ParseCache,
   filePath: string,
-  routesDir: string,
+  boundary: string,
 ): Promise<RoutesFileFacts | null> {
   const parsed = await cache.get(filePath)
   if (!parsed) return null
@@ -225,11 +263,12 @@ async function readFacts(
   const facts: RoutesFileFacts = { registrarExports: [], imports: [], reexports: [], dynamicImports: [], body: '' }
   const bodyNodes: Statement[] = []
 
-  // Only an edge landing inside `routes/` can change an answer, so everything
-  // else is ruled out by string comparison before any filesystem probe.
+  // Only an edge landing inside the scope's boundary can change an answer, so
+  // everything else is ruled out by string comparison before any filesystem
+  // probe.
   const resolveEdge = async (specifier: string): Promise<string | null> => {
     const base = specifierBase(cwd, filePath, specifier)
-    return base !== null && isInside(routesDir, base) ? resolveSpecifier(base) : null
+    return base !== null && isInside(boundary, base) ? resolveSpecifier(base) : null
   }
 
   for (const node of parsed.ast.program.body) {
@@ -295,16 +334,193 @@ export interface RoutesCheckOptions {
   /**
    * `--routes <file>`, project-relative. Omitted, the entry is probed from
    * {@link ROUTES_ENTRY_CANDIDATES} rather than assumed.
+   *
+   * The project scope only. A module's entry is its own file, so a `--routes`
+   * pointing at the project's API entry must not move it.
    */
   routesFile?: string
 }
 
 /**
- * Verifies every registrar under `routes/` is reached from the app's entry
- * registrar — the wiring `guren add admin|oauth|resource|auth` performs
- * automatically, so a warning here means a routes file was written, moved, or
- * unhooked by hand (`make:route`, notably, writes its file and leaves the
- * wiring to you).
+ * One "which registrar mounts these?" question, and everything answering it
+ * needs. The project asks one; each module with a `routes/` directory asks
+ * another, about its own files and against its own entry.
+ *
+ * Kept whole rather than threaded as parameters because nothing here may leak
+ * across scopes: one shared candidate list, or one shared `facts` map, would
+ * let a file credit another module's registrar and report it as mounted.
+ */
+interface WiringScope {
+  /** Module name, or `null` for the project itself — wording only. */
+  module: string | null
+  /** Project-relative entry file whose registrar mounts this scope. */
+  entryFile: string
+  /**
+   * Absolute `routes/` directory bounding graph traversal — the project's, or
+   * the module's own.
+   *
+   * What it bounds is the *target* of an import, not the importing file: a
+   * module's entry sits beside this directory rather than inside it, and its
+   * `./routes/invoice.js` edge is followed all the same. Every candidate is
+   * inside, which is what makes the bound safe to apply before touching disk.
+   */
+  boundary: string
+  /** Absolute paths of every routes file this scope asks about. */
+  files: string[]
+}
+
+/**
+ * Entry files to look for in a module *when its descriptor could not be
+ * read*, in order: the shape `make:module` scaffolds, then the barrel layout
+ * a hand-built module may use. {@link resolveModuleEntry} is the real rule —
+ * the entry is whatever file `defineModule({ routes })` names — and this list
+ * only stands in when there is no descriptor to resolve from.
+ */
+function moduleEntryCandidates(moduleDir: string): string[] {
+  return [`${moduleDir}/routes.ts`, `${moduleDir}/routes.js`, `${moduleDir}/routes/index.ts`, `${moduleDir}/routes/index.js`]
+}
+
+/** How a module names its routes registrar, read from its descriptor. */
+type ModuleEntryResolution =
+  /** `defineModule({ routes })` traced to a file — the scope's entry. */
+  | { kind: 'entry'; entryPath: string }
+  /** The descriptor's `defineModule()` positively names no `routes`. */
+  | { kind: 'unwired'; descriptor: string }
+  /** `routes` is set but not traceable to a file; judging would be a guess. */
+  | { kind: 'opaque' }
+  /** No parseable descriptor — fall back to the conventional entry files. */
+  | { kind: 'fallback' }
+
+/**
+ * Resolves the file a module's `defineModule({ routes })` takes its registrar
+ * from — the same link the runtime follows, which is what makes it the scope
+ * entry rather than any conventionally named file. Judging against a guessed
+ * `routes.ts` gets both directions wrong: a descriptor with no `routes` at
+ * all mounts nothing however well-wired `routes.ts` is internally, and a
+ * descriptor naming `routes/index.ts` mounts that file even when a stale
+ * `routes.ts` sits beside it.
+ *
+ * The looseness runs the check's usual way — miss, never invent. A `routes`
+ * value this cannot trace (a member expression, a call, an import from a
+ * package) yields `opaque`, which skips the module rather than judging it
+ * against the wrong entry; a spread in the descriptor object means an absent
+ * `routes` property proves nothing, so that is `opaque` too, not `unwired`.
+ */
+async function resolveModuleEntry(
+  cwd: string,
+  cache: ParseCache,
+  moduleDir: string,
+): Promise<ModuleEntryResolution> {
+  const relDir = toPosixRelative(cwd, moduleDir)
+  const descriptor = await findFirstExisting(cwd, [`${relDir}/index.ts`, `${relDir}/index.js`])
+  if (descriptor === null) return { kind: 'fallback' }
+
+  const descriptorPath = resolve(cwd, descriptor)
+  const parsed = await cache.get(descriptorPath)
+  if (!parsed) return { kind: 'fallback' }
+
+  // Local name → import specifier, for tracing `routes: registerBillingRoutes`
+  // back to the file that declared it.
+  const importSources = new Map<string, string>()
+  for (const node of parsed.ast.program.body) {
+    if (node.type !== 'ImportDeclaration' || node.importKind === 'type') continue
+    for (const specifier of node.specifiers) {
+      importSources.set(specifier.local.name, node.source.value)
+    }
+  }
+
+  let sawDefineModule = false
+  let hasSpread = false
+  let routesValue: { type?: string; name?: string } | null = null
+
+  walk(parsed.ast.program, (node) => {
+    if (sawDefineModule || node.type !== 'CallExpression') return
+    const callee = node.callee as { type?: string; name?: string } | undefined
+    if (callee?.type !== 'Identifier' || callee.name !== 'defineModule') return
+    const [argument] = (node.arguments ?? []) as Array<{
+      type?: string
+      properties?: Array<{
+        type?: string
+        computed?: boolean
+        key?: { type?: string; name?: string; value?: unknown }
+        value?: { type?: string; name?: string }
+      }>
+    }>
+    if (argument?.type !== 'ObjectExpression') return
+    sawDefineModule = true
+
+    for (const property of argument.properties ?? []) {
+      if (property.type === 'SpreadElement') {
+        hasSpread = true
+        continue
+      }
+      if (property.computed) continue
+      const key = property.key
+      const name = key?.type === 'Identifier' ? key.name : key?.type === 'StringLiteral' ? String(key.value) : undefined
+      if (name !== 'routes') continue
+      // A method shorthand (`routes(router) {...}`) is an inline registrar,
+      // same as an arrow value.
+      routesValue = property.type === 'ObjectMethod' ? { type: 'FunctionExpression' } : (property.value ?? null)
+    }
+  })
+
+  if (!sawDefineModule) return { kind: 'fallback' }
+  if (routesValue === null) return hasSpread ? { kind: 'opaque' } : { kind: 'unwired', descriptor }
+
+  const value = routesValue as { type?: string; name?: string }
+  // An inline registrar makes the descriptor itself the entry: its own
+  // imports are the wiring.
+  if (value.type === 'ArrowFunctionExpression' || value.type === 'FunctionExpression') {
+    return { kind: 'entry', entryPath: descriptorPath }
+  }
+  if (value.type !== 'Identifier' || !value.name) return { kind: 'opaque' }
+
+  const source = importSources.get(value.name)
+  // Not imported — declared in the descriptor itself.
+  if (source === undefined) return { kind: 'entry', entryPath: descriptorPath }
+
+  const base = specifierBase(cwd, descriptorPath, source)
+  if (base === null) return { kind: 'opaque' }
+  const resolved = await resolveSpecifier(base)
+  return resolved === null ? { kind: 'opaque' } : { kind: 'entry', entryPath: resolved }
+}
+
+/**
+ * The one warning an unwired module gets: its `routes/` files exist, but the
+ * descriptor names no registrar, so nothing in the module — however
+ * well-wired internally — is ever mounted. One result rather than one per
+ * file, because the only fix is in the descriptor.
+ */
+function unwiredModuleResult(cwd: string, module: string, descriptor: string, files: string[]): CheckResult {
+  const shown = withoutEmittedTwins(files).map((file) => toPosixRelative(cwd, file))
+  const registrar = `register${pascalCase(module)}Routes`
+
+  return check(
+    `route-entry:${descriptor}`,
+    `${module} route registrar entrypoint`,
+    'warn',
+    `${formatTruncatedList(shown)} ${shown.length === 1 ? 'exists' : 'exist'} but ${descriptor} names no routes `
+    + `registrar in defineModule(), so nothing mounts ${shown.length === 1 ? 'it' : 'them'} and every request to `
+    + `${shown.length === 1 ? 'its' : 'their'} routes 404s.`,
+    `Add routes: ${registrar} to defineModule() in ${descriptor} (create modules/${module}/routes.ts exporting it `
+    + `if needed), then call each routes file's registrar from it.`,
+  )
+}
+
+/**
+ * Verifies every registrar under a `routes/` directory is reached from the
+ * entry registrar that would mount it — the wiring `guren add
+ * admin|oauth|resource|auth` performs automatically, so a warning here means a
+ * routes file was written, moved, or unhooked by hand (`make:route`, notably,
+ * writes its file and leaves the wiring to you).
+ *
+ * Asked once per {@link WiringScope}, because "the entry registrar" is not one
+ * file: the project's `routes/*.ts` are mounted from `routes/web.ts`, while a
+ * module's `routes/*.ts` are mounted from whatever file its
+ * `defineModule({ routes })` names (see {@link resolveModuleEntry}) — and
+ * `make:route --module billing` writes into the second. The scopes share no
+ * state; crossing them would report a file as mounted because a *different*
+ * module's registrar calls something of that name.
  *
  * Nothing else reports this. A routes file nobody imports still compiles,
  * still type-checks, and still looks wired from the inside — the only symptom
@@ -328,38 +544,76 @@ export interface RoutesCheckOptions {
  * `warn` rather than `fail` for the same reason.
  *
  * Two wirings it cannot see, both reported as unmounted: a chain that leaves
- * `routes/` (`web.ts` → `app/routing.ts` → `routes/admin.ts`), since
- * following it means parsing the project to answer a question about a handful
- * of files; and a registrar reached by anything less direct than an import or
- * `await import()` of its file.
+ * the scope's boundary (`web.ts` → `app/routing.ts` → `routes/admin.ts`),
+ * since following it means parsing the project to answer a question about a
+ * handful of files; and a registrar reached by anything less direct than an
+ * import or `await import()` of its file.
  *
  * Not filtered by changed *candidates*, unlike `runCheck`'s file-scanning
  * checks: the edit that breaks the wiring is to `routes/web.ts`, not to
- * `routes/admin.ts`. `runCheck` instead gates the whole check on `routes/`
- * having changed, which covers both. Content-activated — an app whose
- * `routes/` holds nothing but the entry file contributes zero results.
+ * `routes/admin.ts`. `runCheck` instead gates the whole check on
+ * {@link affectsRouteWiring}, which covers both. Content-activated — an app
+ * whose `routes/` holds nothing but the entry file, or whose modules have no
+ * `routes/` directory at all, contributes zero results.
  */
 export async function checkRouteRegistrarWiring(options: RoutesCheckOptions): Promise<CheckResult[]> {
   const { cwd, cache } = options
-  const routesDir = resolve(cwd, ROUTES_DIR)
 
   // An explicit `--routes` is honoured as given, including when it names a
   // file that doesn't exist — reporting that is the point. Otherwise probe,
   // for the reason ROUTES_ENTRY_CANDIDATES documents.
   const entryFile = options.routesFile ?? (await findFirstExisting(cwd, ROUTES_ENTRY_CANDIDATES)) ?? DEFAULT_ROUTES_FILE
+
+  const results = await checkScope(cwd, cache, {
+    module: null,
+    entryFile,
+    boundary: resolve(cwd, ROUTES_DIR),
+    files: await discoverRoutesFiles(cwd),
+  })
+
+  for (const { module, dir, files } of await discoverModuleRoutesFiles(cwd)) {
+    const resolution = await resolveModuleEntry(cwd, cache, dir)
+    if (resolution.kind === 'opaque') continue
+    if (resolution.kind === 'unwired') {
+      results.push(unwiredModuleResult(cwd, module, resolution.descriptor, files))
+      continue
+    }
+
+    const entries = moduleEntryCandidates(toPosixRelative(cwd, dir))
+    const scopeResults = await checkScope(cwd, cache, {
+      module,
+      entryFile:
+        resolution.kind === 'entry'
+          ? toPosixRelative(cwd, resolution.entryPath)
+          // Fallback: the conventional name stands in when none exists, so the
+          // warning below names the file to create rather than its absence.
+          : ((await findFirstExisting(cwd, entries)) ?? entries[0]),
+      boundary: resolve(dir, ROUTES_DIR),
+      files,
+    })
+    results.push(...scopeResults)
+  }
+
+  return results
+}
+
+/** {@link checkRouteRegistrarWiring} for one scope — see {@link WiringScope}. */
+async function checkScope(cwd: string, cache: ParseCache, scope: WiringScope): Promise<CheckResult[]> {
+  const { entryFile, module } = scope
   const entryPath = resolve(cwd, entryFile)
 
-  const routesFiles = await discoverRoutesFiles(cwd)
-  const candidates = withoutEmittedTwins(routesFiles)
-    // By resolved path, not by name: `--routes` may point anywhere, and under
-    // a custom entry `routes/web.ts` is an ordinary candidate.
+  const candidates = withoutEmittedTwins(scope.files)
+    // By resolved path, not by name: `--routes` may point anywhere, under a
+    // custom entry `routes/web.ts` is an ordinary candidate, and a module
+    // keeping its registrar at `routes/index.ts` has its entry sitting among
+    // the very files it mounts.
     .filter((filePath) => filePath !== entryPath)
     .sort()
 
   if (candidates.length === 0) return []
 
   const entryKey = `route-entry:${entryFile}`
-  const entryTitle = 'Route registrar entrypoint'
+  const entryTitle = module ? `${module} route registrar entrypoint` : 'Route registrar entrypoint'
   const describeCandidates = (): string => formatTruncatedList(candidates.map((file) => toPosixRelative(cwd, file)))
 
   // Probed separately because `readFacts` returns null for a missing file and
@@ -372,14 +626,17 @@ export async function checkRouteRegistrarWiring(options: RoutesCheckOptions): Pr
         'warn',
         `${describeCandidates()} ${candidates.length === 1 ? 'exists' : 'exist'} but there is no ${entryFile} to `
         + `mount ${candidates.length === 1 ? 'it' : 'them'} from.`,
-        `Create ${entryFile} exporting a register*Routes function, then call each routes file's registrar from it.`,
+        `Create ${entryFile} exporting a register*Routes function, then call each routes file's registrar from it.`
+        // Both hops, since a module registrar the module never declares mounts
+        // nothing either.
+        + (module ? ` Name it in ${module}'s defineModule({ routes }).` : ''),
       ),
     ]
   }
 
   const facts = new Map<string, RoutesFileFacts>()
   for (const filePath of [entryPath, ...candidates]) {
-    const read = await readFacts(cwd, cache, filePath, routesDir)
+    const read = await readFacts(cwd, cache, filePath, scope.boundary)
     if (read) facts.set(filePath, read)
   }
 
