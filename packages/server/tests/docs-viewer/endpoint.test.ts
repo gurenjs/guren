@@ -1,5 +1,5 @@
 import { describe, test, expect, afterEach } from 'bun:test'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Hono } from 'hono'
@@ -43,6 +43,20 @@ describe('isDocsViewerEnabled', () => {
     process.env.GUREN_DOCS = '1'
     expect(isDocsViewerEnabled()).toBe(false)
   })
+
+  test('reads the environment in the form the deploy bundlers substitute', async () => {
+    // See the matching test in tests/mcp/endpoint.test.ts: the deploy plugins'
+    // `--define 'process.env.NODE_ENV="production"'` matches that exact
+    // expression, and `process.env?.NODE_ENV` is not it. Nothing at runtime
+    // can tell the two apart, so the source is the only place to pin it.
+    const source = await readFile(
+      join(import.meta.dir, '../../src/docs-viewer/endpoint.ts'),
+      'utf8',
+    )
+
+    expect(source).toContain('process.env.NODE_ENV')
+    expect(source).not.toContain('process.env?.')
+  })
 })
 
 describe('createDocsViewerAccessGuard', () => {
@@ -53,26 +67,63 @@ describe('createDocsViewerAccessGuard', () => {
     return app
   }
 
-  test('allows requests without an Origin header', async () => {
-    const response = await guardedApp().request('/')
+  /** Stands in for the `{ server }` env Bun.serve passes through Hono. */
+  function bunEnv(address: string) {
+    return { server: { requestIP: () => ({ address }) } }
+  }
+
+  test('allows a request from a loopback peer with no Origin header', async () => {
+    const response = await guardedApp().request('/', {}, bunEnv('127.0.0.1'))
     expect(response.status).toBe(200)
   })
 
   test('allows loopback origins and rejects everything else', async () => {
     const app = guardedApp()
 
-    const local = await app.request('/', { headers: { origin: 'http://localhost:3333' } })
+    const local = await app.request(
+      '/',
+      { headers: { origin: 'http://localhost:3333' } },
+      bunEnv('127.0.0.1'),
+    )
     expect(local.status).toBe(200)
 
-    const remote = await app.request('/', { headers: { origin: 'https://evil.example' } })
+    const remote = await app.request(
+      '/',
+      { headers: { origin: 'https://evil.example' } },
+      bunEnv('127.0.0.1'),
+    )
     expect(remote.status).toBe(403)
     expect((await remote.json()).message).toContain('the docs viewer')
+  })
+
+  test('rejects a request whose peer the runtime cannot report', async () => {
+    delete process.env.GUREN_ALLOW_UNVERIFIED_PEER
+
+    const response = await guardedApp().request('/')
+
+    expect(response.status).toBe(403)
+    const { message } = await response.json()
+    expect(message).toContain('the docs viewer')
+    expect(message).toContain('GUREN_ALLOW_UNVERIFIED_PEER=1')
+  })
+
+  test('serves a peer-less request once the operator opts out', async () => {
+    process.env.GUREN_ALLOW_UNVERIFIED_PEER = '1'
+
+    const response = await guardedApp().request('/')
+    expect(response.status).toBe(200)
   })
 })
 
 describe('docs viewer integration', () => {
   const originalCwd = process.cwd()
   let dir: string | null = null
+
+  // `Application.listen()` hands `{ server }` to Bun.serve and threads it into
+  // every request, so a real `bun run dev` always has a peer address. These
+  // in-process `app.fetch()` calls have to supply it themselves — the guard
+  // treats a missing peer as unverified and denies.
+  const loopbackEnv = { server: { requestIP: () => ({ address: '127.0.0.1' }) } }
 
   afterEach(async () => {
     process.chdir(originalCwd)
@@ -103,11 +154,14 @@ describe('docs viewer integration', () => {
     process.env.GUREN_DOCS = '1'
     const app = await bootWorkspaceApp()
 
-    const page = await app.fetch(new Request(`http://localhost${DOCS_VIEWER_PATH}`))
+    const page = await app.fetch(new Request(`http://localhost${DOCS_VIEWER_PATH}`), loopbackEnv)
     expect(page.status).toBe(200)
     expect(await page.text()).toContain('docs graph')
 
-    const data = await app.fetch(new Request(`http://localhost${DOCS_VIEWER_PATH}/data.json`))
+    const data = await app.fetch(
+      new Request(`http://localhost${DOCS_VIEWER_PATH}/data.json`),
+      loopbackEnv,
+    )
     expect(data.status).toBe(200)
     const payload = await data.json()
     expect(payload.docs).toHaveLength(1)
@@ -121,6 +175,7 @@ describe('docs viewer integration', () => {
       new Request(`http://localhost${DOCS_VIEWER_PATH}/data.json`, {
         headers: { 'if-none-match': etag! },
       }),
+      loopbackEnv,
     )
     expect(conditional.status).toBe(304)
   })
@@ -134,8 +189,25 @@ describe('docs viewer integration', () => {
       new Request(`http://localhost${DOCS_VIEWER_PATH}/data.json`, {
         headers: { origin: 'https://evil.example' },
       }),
+      loopbackEnv,
     )
     expect(response.status).toBe(403)
+  })
+
+  test('rejects a mounted-endpoint request the runtime cannot place', async () => {
+    process.env.NODE_ENV = 'development'
+    process.env.GUREN_DOCS = '1'
+    delete process.env.GUREN_ALLOW_UNVERIFIED_PEER
+    const app = await bootWorkspaceApp()
+
+    // No env, so no peer address — the shape a host that calls `app.fetch()`
+    // itself produces, and the shape a remote `curl` produces there.
+    const response = await app.fetch(
+      new Request(`http://localhost${DOCS_VIEWER_PATH}/data.json`),
+    )
+
+    expect(response.status).toBe(403)
+    expect((await response.json()).message).toContain('GUREN_ALLOW_UNVERIFIED_PEER=1')
   })
 
   test('does not mount without the opt-in flag', async () => {

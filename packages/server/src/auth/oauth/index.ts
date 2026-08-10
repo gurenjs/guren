@@ -5,6 +5,7 @@ import {
   normalizeRedirectTarget,
 } from '../../support/redirect-target'
 import { buildTokenUrl, generateToken, hashToken, parseTokenUrl, secureCompare } from '../utils'
+import { isExpired } from '../../support/expiry'
 
 export interface OAuthProviderConfig {
   clientId: string
@@ -341,7 +342,7 @@ export class MemoryOAuthStateStore implements OAuthStateStore {
   private sweepExpired(): void {
     const now = Date.now()
     for (const [hash, payload] of this.states) {
-      if (payload.expiresAt.getTime() <= now) {
+      if (isExpired(payload.expiresAt, now)) {
         this.states.delete(hash)
       }
     }
@@ -350,7 +351,7 @@ export class MemoryOAuthStateStore implements OAuthStateStore {
   async find(stateHash: string): Promise<OAuthStatePayload | null> {
     const payload = this.states.get(stateHash)
     if (!payload) return null
-    if (payload.expiresAt.getTime() <= Date.now()) {
+    if (isExpired(payload.expiresAt)) {
       this.states.delete(stateHash)
       return null
     }
@@ -367,7 +368,7 @@ export class MemoryOAuthStateStore implements OAuthStateStore {
     const payload = this.states.get(stateHash)
     if (!payload) return null
     this.states.delete(stateHash)
-    if (payload.expiresAt.getTime() <= Date.now()) return null
+    if (isExpired(payload.expiresAt)) return null
     return payload
   }
 

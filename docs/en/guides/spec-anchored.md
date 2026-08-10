@@ -114,6 +114,23 @@ edges — and clicking a node opens the document with its frontmatter,
 trust tier, and link verdicts. Diagrams render when `mermaid` is in
 your `devDependencies` (new apps ship with it).
 
+"Only reachable from your own machine" is enforced rather than assumed:
+a request is served only once the runtime confirms the connection came
+from a loopback address, and a request it cannot place is refused with
+`403` instead of allowed. `bun run dev` supplies that information, so the
+normal workflow needs nothing extra. If you serve the app another way and
+the runtime cannot report the peer, the refusal names
+`GUREN_ALLOW_UNVERIFIED_PEER=1` — set it only on a host that is not
+reachable from your network. The MCP endpoint at `/_guren/mcp` is guarded
+the same way.
+
+What the guard checks is the connection, not the caller: anything that
+terminates the connection locally and forwards to the dev server — a
+reverse proxy, a container port publish, a tunnel like ngrok — presents a
+loopback peer, so the traffic behind it is accepted. Do not put a tunnel
+in front of a dev server running with `GUREN_MCP=1`; the MCP endpoint can
+write files into your project.
+
 ## Checked: the gates
 
 `bunx guren check` reports broken doc links (a renamed `related` path,

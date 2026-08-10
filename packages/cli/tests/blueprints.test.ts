@@ -451,6 +451,51 @@ export default app
   })
 })
 
+// `guren add admin` runs against apps that may never have run `guren add auth`,
+// so the guard has to be one that holds without an app-wide 'auth' alias: the
+// route carries `requireAuthenticated` inline and the controller re-checks. The
+// default is what matters here — a blueprint whose zeros get replaced with real
+// queries must not leave the dashboard open.
+describe('admin blueprint authentication', () => {
+  let workspace: TempWorkspace
+
+  beforeEach(async () => {
+    workspace = await createTempWorkspace('guren-cli-admin-blueprint-')
+  })
+
+  afterEach(async () => {
+    await workspace.cleanup()
+  })
+
+  it('guards the dashboard route and controller by default', async () => {
+    await runBlueprint('admin')
+
+    const routes = await readFile('routes/admin.ts', 'utf8')
+    expect(routes).toContain("import { Router, requireAuthenticated } from '@guren/core'")
+    expect(routes).toContain(
+      "router.get('/admin', [AdminDashboardController, 'index'], requireAuthenticated({ redirectTo: '/login' })).name('admin.dashboard')",
+    )
+    // No `aliasMiddleware('auth', ...)`: it writes into the router shared with
+    // routes/web.ts, replacing whatever alias the app registered there.
+    expect(routes).not.toContain('aliasMiddleware')
+
+    const controller = await readFile('app/Http/Controllers/Admin/AdminDashboardController.ts', 'utf8')
+    expect(controller).toContain('await this.auth.userOrFail()')
+  })
+
+  it('scaffolds an open dashboard with --public', async () => {
+    await runBlueprint('admin', { publicAccess: true })
+
+    const routes = await readFile('routes/admin.ts', 'utf8')
+    expect(routes).toContain("import { Router } from '@guren/core'")
+    expect(routes).toContain("router.get('/admin', [AdminDashboardController, 'index']).name('admin.dashboard')")
+    expect(routes).not.toContain('requireAuthenticated')
+
+    const controller = await readFile('app/Http/Controllers/Admin/AdminDashboardController.ts', 'utf8')
+    expect(controller).not.toContain('userOrFail')
+  })
+})
+
 describe('oauth blueprint output', () => {
   let workspace: TempWorkspace
 

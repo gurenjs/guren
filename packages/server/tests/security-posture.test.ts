@@ -94,6 +94,47 @@ describe('security posture: default response headers', () => {
   })
 })
 
+describe('security posture: middleware registered before the app can get in front of it', () => {
+  /**
+   * Hono composes the handlers it matched in registration order, so anything
+   * registered before `boot()` used to run ahead of the security middleware
+   * and answer without it. Real apps do exactly that: the scaffolded
+   * templates call `autoConfigureInertiaAssets()` at module scope, which
+   * registers `/resources/js/*` handlers before `bootstrap()` awaits
+   * `boot()`. These two cases go through the real router on that same path.
+   */
+  async function bootAppWithPreBootAssetRoutes(): Promise<Application> {
+    const app = new Application({ hostAuthorization: { allowedHosts: ['localhost:*'] } })
+    // Both registered directly on Hono before boot(), the way the asset
+    // pipeline does. The JS route returns a raw Response like the real
+    // transpiler does; the CSS route answers through the context.
+    app.hono.get('/resources/js/app.js', () => new Response('console.log(1)'))
+    app.hono.get('/resources/css/app.css', (ctx) => ctx.text('body{}'))
+    await app.boot()
+    return app
+  }
+
+  it('rejects a forged Host on a route registered before boot()', async () => {
+    const app = await bootAppWithPreBootAssetRoutes()
+
+    const response = await app.fetch(
+      new Request('http://evil.com/resources/js/app.js', { headers: { Host: 'evil.com' } }),
+    )
+
+    expect(response.status).toBe(403)
+  })
+
+  it('sends the hardening headers on a route registered before boot()', async () => {
+    const app = await bootAppWithPreBootAssetRoutes()
+
+    const response = await app.fetch(new Request('http://localhost:3000/resources/css/app.css'))
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff')
+    expect(response.headers.get('X-Frame-Options')).toBe('SAMEORIGIN')
+  })
+})
+
 describe('security posture: session and CSRF defaults for auth apps', () => {
   async function bootAuthApp(): Promise<{ app: Application; mutated: () => boolean }> {
     let handlerRan = false

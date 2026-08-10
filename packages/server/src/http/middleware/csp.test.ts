@@ -112,3 +112,34 @@ describe('createCspMiddleware', () => {
     expect(res.headers.get('Content-Security-Policy')).toBeNull()
   })
 })
+
+/**
+ * The header has to land on the response however the handler produced it.
+ * Setting it with `ctx.header()` before `next()` only reaches responses the
+ * handler built through the context — a raw `new Response(...)` replaces
+ * `ctx.res` and drops it, which is exactly what the framework's own asset
+ * handlers return.
+ */
+describe('createCspMiddleware response shapes', () => {
+  test('should set CSP header when the handler returns a raw Response', async () => {
+    const app = new Hono()
+    app.use('*', createCspMiddleware({ directives: { defaultSrc: ["'self'"] } }))
+    app.get('/raw', () => new Response('raw body'))
+
+    const res = await app.request('/raw')
+
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe('raw body')
+    expect(res.headers.get('Content-Security-Policy')).toContain("default-src 'self'")
+  })
+
+  test('should still set CSP header when the handler answers through the context', async () => {
+    // Regression guard: this is the shape that already worked.
+    const app = createApp({ directives: { defaultSrc: ["'self'"] } })
+
+    const res = await app.request('/')
+
+    expect(await res.text()).toBe('ok')
+    expect(res.headers.get('Content-Security-Policy')).toContain("default-src 'self'")
+  })
+})

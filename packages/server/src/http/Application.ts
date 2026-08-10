@@ -253,6 +253,15 @@ export class Application {
     this.authManager = new AuthManager()
     this.providerManager = new ProviderManager(this.container)
 
+    // Security defaults are mounted here rather than in boot() on purpose.
+    // Hono composes the handlers it matched in registration order, so a route
+    // or middleware the app registers before boot() would otherwise run ahead
+    // of these and answer the request without them — which is exactly what the
+    // scaffolded templates do, calling autoConfigureInertiaAssets() at module
+    // scope to register the asset routes before bootstrap() awaits boot().
+    // Registering first here is the only ordering an app cannot get in front of.
+    this.mountSecurityDefaults()
+
     // Bind core instances
     this.container.instance('app', this as Application)
     this.container.instance('hono', this.hono)
@@ -386,11 +395,12 @@ export class Application {
   /**
    * Executes provider registration, boot callback, mounts routes, and boots providers.
    *
-   * Booting twice is a no-op: the first call's promise is reused, so security
-   * middleware and routes are never mounted a second time — including when two
-   * callers boot concurrently, before the first has finished. A boot that
-   * throws is not remembered, so a later call attempts boot again (it resumes
-   * on a partially mounted app rather than starting clean).
+   * Booting twice is a no-op: the first call's promise is reused, so providers
+   * and routes are never mounted a second time — including when two callers
+   * boot concurrently, before the first has finished. A boot that throws is not
+   * remembered, so a later call attempts boot again (it resumes on a partially
+   * mounted app rather than starting clean). The security defaults are mounted
+   * by the constructor and so are outside this entirely.
    */
   async boot(): Promise<void> {
     this.bootPromise ??= this.bootOnce()
@@ -404,7 +414,6 @@ export class Application {
   }
 
   private async bootOnce(): Promise<void> {
-    this.mountSecurityDefaults()
     await this.providerManager.registerAll()
 
     // Note: for apps without options.auth, the auth context fallback is
@@ -431,6 +440,9 @@ export class Application {
 
   /**
    * Registers default security middleware (headers + host authorization).
+   *
+   * Called once, from the constructor — see the note there for why it does
+   * not belong in boot().
    */
   private mountSecurityDefaults(): void {
     // Security headers (default: enabled)

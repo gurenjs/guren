@@ -11,6 +11,10 @@ export function registerWebRoutes(baseRouter: Router): void {
 
   router.get('/', [PostController, 'index']).name('home')
 
+  // Health check endpoint for load balancers and uptime monitors, matching the
+  // path the generated deploy configs probe and the host-authorization exclude.
+  router.get('/health', (c) => c.json({ status: 'ok' })).name('health')
+
   registerAuthRoutes(router)
 
   router.group('/posts', (posts) => {

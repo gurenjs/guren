@@ -151,6 +151,49 @@ describe('oauth helpers', () => {
     expect(await store.find('hash-expired')).toBeNull()
   })
 
+  // `new Date('not-a-date')` is an Invalid Date, and `NaN <= Date.now()` is
+  // false, so a naive `expiresAt.getTime() <= Date.now()` check reads a
+  // corrupt expiry as "not past" and hands the state back forever.
+  it('find does not return a state with an unparseable (Invalid Date) expiry', async () => {
+    const store = new MemoryOAuthStateStore()
+    await store.store('hash-corrupt-find', {
+      provider: 'github',
+      expiresAt: new Date('not-a-date'),
+    })
+
+    expect(await store.find('hash-corrupt-find')).toBeNull()
+  })
+
+  it('consume does not return a state with an unparseable (Invalid Date) expiry', async () => {
+    const store = new MemoryOAuthStateStore()
+    await store.store('hash-corrupt-consume', {
+      provider: 'github',
+      expiresAt: new Date('not-a-date'),
+    })
+
+    expect(await store.consume('hash-corrupt-consume')).toBeNull()
+  })
+
+  // Guard in the other direction: the corruption check must not swallow a
+  // perfectly good, still-live state.
+  it('find and consume still return a state with a valid future expiry', async () => {
+    const findStore = new MemoryOAuthStateStore()
+    await findStore.store('hash-valid-find', {
+      provider: 'github',
+      redirectTo: '/dashboard',
+      expiresAt: new Date(Date.now() + 60_000),
+    })
+    expect((await findStore.find('hash-valid-find'))?.redirectTo).toBe('/dashboard')
+
+    const consumeStore = new MemoryOAuthStateStore()
+    await consumeStore.store('hash-valid-consume', {
+      provider: 'github',
+      redirectTo: '/dashboard',
+      expiresAt: new Date(Date.now() + 60_000),
+    })
+    expect((await consumeStore.consume('hash-valid-consume'))?.redirectTo).toBe('/dashboard')
+  })
+
   it('only one concurrent verifyOAuthState call succeeds for the same state', async () => {
     const store = new MemoryOAuthStateStore()
     const { state } = await createOAuthState('github', store, { expiresIn: 60_000 }, '/dashboard')

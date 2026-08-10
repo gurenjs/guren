@@ -14,6 +14,7 @@ declare namespace Guren {
     | `/auth/${string}/callback`
     | '/dashboard'
     | '/forgot-password'
+    | '/health'
     | '/login'
     | '/logout'
     | '/posts'

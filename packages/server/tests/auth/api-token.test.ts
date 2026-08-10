@@ -284,6 +284,51 @@ describe('verifyApiToken', () => {
     expect(result).toBeNull()
   })
 
+  it('returns null when the stored expiry is unparseable', async () => {
+    // Not reachable through a store's deserialization guards: this is a record
+    // already in memory, which is what every custom or Memory-backed store
+    // hands verifyApiToken. Comparing the Date directly would read an Invalid
+    // Date as "not past" and authenticate the token forever.
+    const { plainTextToken, token } = await createApiToken(store, {
+      name: 'Test Token',
+      userId: 1,
+    })
+
+    const stored = await store.findByHashedToken(token.hashedToken)
+    stored!.expiresAt = new Date('not-a-date')
+    expect(Number.isNaN(stored!.expiresAt.getTime())).toBe(true)
+
+    const result = await verifyApiToken(plainTextToken, store)
+    expect(result).toBeNull()
+  })
+
+  it('returns null when a non-finite expiresIn produced an invalid expiry', async () => {
+    // createApiToken computes `new Date(now + expiresIn)`, so a non-finite
+    // value mints an Invalid Date without any store being involved.
+    const { plainTextToken, token } = await createApiToken(store, {
+      name: 'Test Token',
+      userId: 1,
+      expiresIn: Number.POSITIVE_INFINITY,
+    })
+
+    expect(Number.isNaN(token.expiresAt!.getTime())).toBe(true)
+
+    const result = await verifyApiToken(plainTextToken, store)
+    expect(result).toBeNull()
+  })
+
+  it('still verifies a token created without an expiry', async () => {
+    // Guards the other direction: null means "never expires" and must not be
+    // swept up by the unparseable-expiry rule.
+    const { plainTextToken, token } = await createApiToken(store, {
+      name: 'Test Token',
+      userId: 1,
+    })
+
+    expect(token.expiresAt).toBeNull()
+    expect(await verifyApiToken(plainTextToken, store)).not.toBeNull()
+  })
+
   it('updates lastUsedAt by default', async () => {
     const { plainTextToken, token } = await createApiToken(store, {
       name: 'Test Token',

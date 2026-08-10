@@ -19,7 +19,7 @@ setInertiaDocument({
 // and stopping the app from booting at all. Emailed links do not depend on this
 // — app/Auth/AppUrl.ts resolves those per request and fails closed there.
 function hostAuthorization() {
-  const exclude = ['/healthcheck', '/up']
+  const exclude = ['/health']
 
   if (process.env.NODE_ENV !== 'production') {
     return { allowedHosts: ['localhost:*', '127.0.0.1:*'], exclude }

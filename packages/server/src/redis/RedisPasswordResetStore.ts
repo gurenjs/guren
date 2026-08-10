@@ -1,6 +1,7 @@
 import type { Redis } from 'ioredis'
 import type { PasswordResetTokenStore } from '../auth/password-reset'
 import { scanKeys } from './scan-keys'
+import { toDate } from '../support/expiry'
 
 /**
  * Options for RedisPasswordResetStore.
@@ -74,9 +75,15 @@ export class RedisPasswordResetStore implements PasswordResetTokenStore {
 
     try {
       const parsed = JSON.parse(data) as { email: string; expiresAt: string }
+      // A corrupt expiry must not reach callers as an Invalid Date: every
+      // comparison against one is false, so it would read as never expiring.
+      const expiresAt = toDate(parsed.expiresAt)
+      if (expiresAt === null) {
+        return null
+      }
       return {
         email: parsed.email,
-        expiresAt: new Date(parsed.expiresAt),
+        expiresAt,
       }
     } catch {
       return null

@@ -1,5 +1,6 @@
 import type { MiddlewareHandler, Context } from 'hono'
 import { hashToken, generateToken, generateId, secureCompare } from './utils'
+import { isOptionalExpiryPast } from '../support/expiry'
 import { AuthenticationException } from '../errors/exceptions/AuthenticationException'
 
 /**
@@ -267,8 +268,12 @@ export async function verifyApiToken(
   // Verify the ID matches (prevents using hash from one token with ID of another)
   if (token.id !== parsed.id) return null
 
-  // Check expiration
-  if (token.expiresAt && new Date() > token.expiresAt) {
+  // Check expiration. This is the authoritative check — every store hands its
+  // records here, including Memory and app-supplied ones that never run the
+  // deserialization guards, and `createApiToken` itself can mint an Invalid
+  // Date from a non-finite `expiresIn`. Comparing the Date directly would read
+  // any of those as "not past", so the predicate treats unparseable as expired.
+  if (isOptionalExpiryPast(token.expiresAt)) {
     return null
   }
 

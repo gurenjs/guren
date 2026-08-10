@@ -1,5 +1,5 @@
 import { serveStatic } from 'hono/bun'
-import { dirname, resolve, join } from 'node:path'
+import { dirname, resolve, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
 import type { Application } from './Application'
@@ -128,7 +128,7 @@ export function configureInertiaAssets(app: Application, options: InertiaAssetsO
         } else {
           targetPath = resolve(inertiaClientDir, relativeRequest)
 
-          if (!targetPath.startsWith(inertiaClientDir)) {
+          if (!targetPath.startsWith(inertiaClientDir + sep)) {
             return ctx.notFound()
           }
         }
