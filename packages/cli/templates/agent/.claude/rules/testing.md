@@ -13,10 +13,27 @@ Requests run in-process through `app.fetch()` — no server, no port.
 ```typescript
 import { TestApp } from '@guren/testing'
 
-const app = await TestApp.create()             // boots the real Application
+const app = await TestApp.create()             // boots a fresh Application
 const app = await TestApp.create({ boot, providers, routes })  // all optional
-const app = TestApp.fromFetch(app.fetch)       // wrap an existing fetch fn (not async)
+const app = TestApp.fromFetch((req) => app.fetch(req))  // wrap an existing fetch fn (not async)
 ```
+
+**Prefer wrapping the real app.** Scaffolded apps export the configured
+application from `src/app.ts` — boot it and wrap it so tests exercise the
+app's actual configuration (providers, auth, i18n, security defaults)
+instead of reconstructing a subset that silently drifts:
+
+```typescript
+import app from '../src/app.js'
+
+await app.boot()
+const http = TestApp.fromFetch((request) => app.fetch(request))
+```
+
+Keep `TestApp.create({ ... })` for isolated slices (a single route or
+middleware under test). Pass `app.fetch` through an arrow — the method
+reads instance state, so handing the unbound reference over throws at the
+first request.
 
 Both set `GUREN_TESTING=1` so `actingAs()` header auth is accepted.
 

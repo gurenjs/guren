@@ -357,6 +357,14 @@ Source: `packages/server/src/i18n/`
 
 Loaders: `JsonLoader.ts`, `MemoryLoader.ts`
 
+App wiring: `createApp({ i18n: { supported: ['en', 'ja'] } })` loads
+`lang/<locale>/*.json`, mounts locale detection (query → cookie →
+Accept-Language), and shares the `_i18n` prop with Inertia pages.
+Translate with `this.t()` / `this.tc()` / `this.locale` in controllers and
+`useTranslation()` from `@guren/inertia-client` in pages. `guren codegen`
+emits typed keys (`.guren/translations.gen.ts`); `guren check --i18n`
+validates catalog parity and placeholders.
+
 ### Encryption
 Source: `packages/server/src/encryption/`
 

@@ -1,24 +1,22 @@
-import { describe, it } from 'bun:test'
+import { beforeAll, describe, it } from 'bun:test'
 import { TestApp } from '@guren/testing'
-import DatabaseProvider from '../app/Providers/DatabaseProvider.js'
-import { registerWebRoutes } from '../routes/web.js'
+import app from '../src/app.js'
 
+// Boots the real src/app.ts so tests share its configuration.
 describe('app', () => {
-  it('serves the home page', async () => {
-    const app = await TestApp.create({
-      routes: registerWebRoutes,
-      providers: [DatabaseProvider],
-    })
+  let http: TestApp
 
-    await app.get('/').assertOk()
+  beforeAll(async () => {
+    await app.boot()
+    http = TestApp.fromFetch((request) => app.fetch(request))
+  })
+
+  it('serves the translated home page', async () => {
+    const response = await http.get('/').assertOk()
+    await response.assertBodyContains('Welcome to')
   })
 
   it('answers the health check', async () => {
-    const app = await TestApp.create({
-      routes: registerWebRoutes,
-      providers: [DatabaseProvider],
-    })
-
-    await app.get('/health').assertOk()
+    await http.get('/health').assertOk()
   })
 })

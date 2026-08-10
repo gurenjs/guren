@@ -40,6 +40,10 @@ const app = createApp({
   auth: {},
   routes: registerWebRoutes,
   providers: [DatabaseProvider, AuthProvider, AuthorizationProvider],
+  // Translations live in lang/<locale>/*.json. Add locales to `supported`
+  // and the request locale is detected from ?locale=, a locale cookie, or
+  // Accept-Language. `guren codegen` types the keys for t()/useTranslation().
+  i18n: { supported: ['en'] },
   hostAuthorization: hostAuthorization(),
 })
 

@@ -4,7 +4,8 @@ import { pages } from '@/.guren/pages.gen'
 export default class HomeController extends Controller {
   async index(): Promise<Response> {
     const props = {
-      message: 'Welcome to __APP_TITLE__!',
+      // Message text lives in lang/en/messages.json (key typed by codegen).
+      message: this.t('messages.welcome', { name: '__APP_TITLE__' }),
     }
 
     return this.inertia(pages.Home, props, { url: this.request.path, title: '__APP_TITLE__' })

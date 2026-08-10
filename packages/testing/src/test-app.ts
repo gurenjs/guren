@@ -1,5 +1,5 @@
 import type { Hono } from 'hono'
-import type { Router } from '@guren/server'
+import type { I18nPluginOptions, Router } from '@guren/server'
 import { TestResponse } from './http'
 
 type BootCallback = (app: Hono) => void | Promise<void>
@@ -15,6 +15,7 @@ type ApplicationConstructor = new (options: {
   providers?: ProviderConstructor[]
   routes?: RouteRegistration
   auth?: Record<string, unknown>
+  i18n?: I18nPluginOptions
 }) => ApplicationLike
 
 /**
@@ -31,6 +32,11 @@ export interface TestAppOptions {
    * `@guren/server` is not installed.
    */
   readonly auth?: Record<string, unknown>
+  /**
+   * Mirrors `createApp({ i18n })`: required when controllers under test use
+   * `this.t()`/`this.tc()`. Ignored by the Hono fallback.
+   */
+  readonly i18n?: I18nPluginOptions
 }
 
 /**
@@ -411,6 +417,7 @@ export class TestApp {
       providers: options.providers,
       routes: options.routes,
       auth: options.auth,
+      i18n: options.i18n,
     })
     await application.boot()
 
@@ -512,7 +519,7 @@ export class TestApp {
    * PUT, PATCH, and DELETE pass the CSRF middleware like a real browser.
    *
    * @example
-   * const http = (await TestApp.fromFetch(app.fetch)).actingAs(user)
+   * const http = TestApp.fromFetch((request) => app.fetch(request)).actingAs(user)
    * const csrf = await http.withCsrf()
    * await csrf.post('/tasks', { title: 'hello' }) // no more 403
    */
