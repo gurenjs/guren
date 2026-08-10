@@ -49,13 +49,12 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
         ? fileURLToPath(seedersFolder)
         : resolve(String(seedersFolder))
 
-  let db: unknown
   let sqliteClient:
     | { query(sql: string): { all(): unknown[] }; exec(sql: string): void; close(): void }
     | undefined
   let activeKey: string | undefined
-  // Captured here, not in ensureDatabase(), so the caller of this factory is
-  // the frame that identifies the handle across hot reloads.
+  // Captured here, not in the connection factory, so the caller of this factory
+  // is the frame that identifies the handle across hot reloads.
   const callSite = new Error().stack
 
   function resolveFilename(): string {
@@ -63,9 +62,11 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
     return value ?? process.env.DATABASE_URL ?? './data/guren.db'
   }
 
-  async function ensureDatabase(): Promise<unknown> {
-    if (db) return db
-
+  // Unlike the other drivers, this flight must not open with
+  // `await migrations.get()`: sqlite migrates over this very handle, so the
+  // migration flight awaits `database.get()` and the two would deadlock.
+  // `getDatabase()` sequences them from outside instead.
+  const database = singleFlight(async (): Promise<unknown> => {
     const dbPath = resolveFilename()
 
     // Ensure the directory exists
@@ -77,17 +78,25 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
       // directory may already exist
     }
 
+    // Both driver modules are resolved before any client exists. An attempt
+    // that rejects with the client already open strands it — the memo is
+    // dropped, so the retry opens a second one and overwrites `sqliteClient` —
+    // and a missing `drizzle-orm/bun-sqlite` is the likeliest way to reject
+    // here. Keeping the two loads above `new Database()` also leaves
+    // `replaceActiveConnection` as the only await the attempt takes once the
+    // client is live.
     const { Database } = await import('bun:sqlite')
+    const { drizzle } = await import('drizzle-orm/bun-sqlite')
+    type DrizzleConfig = NonNullable<Exclude<Parameters<typeof drizzle>[0], string>>
+
     const sqlite = new Database(dbPath)
     sqlite.exec('PRAGMA journal_mode = WAL;')
     sqliteClient = sqlite
-
-    const { drizzle } = await import('drizzle-orm/bun-sqlite')
-    type DrizzleConfig = NonNullable<Exclude<Parameters<typeof drizzle>[0], string>>
-    // Held locally as well as in closure state: a newer evaluation may close
-    // this handle while the await below is suspended, which clears `db`.
-    const database = drizzle({ client: sqlite, ...(relations ? { relations } : {}) } as DrizzleConfig)
-    db = database
+    // Returned from this local, not from closure state: a newer evaluation may
+    // close this handle while the await below is suspended, clearing
+    // `sqliteClient` and dropping the memo this attempt is filling. The attempt
+    // still owes its own callers the handle it built.
+    const handle = drizzle({ client: sqlite, ...(relations ? { relations } : {}) } as DrizzleConfig)
 
     // In-memory databases share no underlying file, so two of them are distinct
     // handles even when every option matches — there is nothing to key them on.
@@ -96,20 +105,20 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
       await replaceActiveConnection(activeKey, closeDatabase)
     }
 
-    return database
-  }
+    return handle
+  })
 
   async function closeDatabase(): Promise<void> {
-    if (!db) return
+    if (!sqliteClient) return
 
     const key = activeKey
     activeKey = undefined
 
     try {
-      sqliteClient?.close()
+      sqliteClient.close()
     } finally {
-      db = undefined
       sqliteClient = undefined
+      database.reset()
       if (key) {
         releaseActiveConnection(key, closeDatabase)
       }
@@ -123,9 +132,9 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
         return
       }
 
-      const database = await ensureDatabase()
+      const db = await database.get()
       const { migrate } = await import('drizzle-orm/bun-sqlite/migrator')
-      await migrate(database as any, { migrationsFolder: resolvedMigrationsFolder }) // eslint-disable-line @typescript-eslint/no-explicit-any
+      await migrate(db as any, { migrationsFolder: resolvedMigrationsFolder }) // eslint-disable-line @typescript-eslint/no-explicit-any
     } catch (error) {
       // No endpoint: a SQLite file has no host, so only the cause chain adds signal.
       throw migrationFailure(error)
@@ -135,7 +144,7 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
   return {
     async getDatabase() {
       await migrations.get()
-      return ensureDatabase()
+      return database.get()
     },
 
     migrateDatabase: migrations.get,
@@ -143,7 +152,7 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
     closeDatabase,
 
     async resetDatabase() {
-      await ensureDatabase()
+      await database.get()
       if (!sqliteClient) return
 
       // Anything left behind fails the next migration run, and three things
@@ -176,7 +185,7 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
       const localMigrations = listLocalMigrations(resolvedMigrationsFolder)
       if (localMigrations.length === 0) return []
 
-      await ensureDatabase()
+      await database.get()
       let appliedRows: Array<{ name: string | null; appliedAt: string | null }> = []
       try {
         const rows = sqliteClient
@@ -191,19 +200,19 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
     },
 
     async configureOrm() {
-      const database = await ensureDatabase()
+      const db = await database.get()
       await migrations.get()
-      DrizzleAdapter.configure(database as Parameters<typeof DrizzleAdapter.configure>[0])
+      DrizzleAdapter.configure(db as Parameters<typeof DrizzleAdapter.configure>[0])
     },
 
     async seedDatabase() {
       if (!resolvedSeedersFolder) {
         throw new Error('No seeders folder configured. Provide "seedersFolder" when calling createSqliteDatabase().')
       }
-      const database = await ensureDatabase()
+      const db = await database.get()
       try {
         // No endpoint: a SQLite file has no host, so only the cause chain adds signal.
-        await runSeeders(database, resolvedSeedersFolder)
+        await runSeeders(db, resolvedSeedersFolder)
       } catch (error) {
         throw seedFailure(error)
       }

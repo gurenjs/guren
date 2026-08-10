@@ -218,6 +218,49 @@ describe('createSqliteDatabase resetDatabase', () => {
   })
 })
 
+describe('createSqliteDatabase concurrent getDatabase', () => {
+  test('should open one handle when two callers race', async () => {
+    // `getDatabase()` awaits the migration run before the connection, and with
+    // no migrations to apply that await still yields — so both callers reach the
+    // connection with nothing opened yet. Anything short of sharing one
+    // in-flight promise opens a second client here, and `closeDatabase()` only
+    // ever closes the latest one.
+    const database = createSqliteDatabase({
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: join(workDir, 'app.db'),
+    })
+
+    const [first, second] = await Promise.all([database.getDatabase(), database.getDatabase()])
+    expect(first).toBe(second)
+    expect(isOpen(first)).toBe(true)
+
+    // One close has to reach every client that was opened. It only can if there
+    // was one: a second client is unreachable from here, and the factory holds
+    // no reference that could close it either.
+    await database.closeDatabase()
+    expect(isOpen(first)).toBe(false)
+  })
+
+  test('should open one handle when two callers race a reopen', async () => {
+    // The shared promise has to be dropped on close and only on close: keep it
+    // and the reopen hands back the handle that was just closed, drop it too
+    // eagerly and the two callers race their way to a second client again.
+    const database = createSqliteDatabase({
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: join(workDir, 'app.db'),
+    })
+
+    await database.getDatabase()
+    await database.closeDatabase()
+
+    const [first, second] = await Promise.all([database.getDatabase(), database.getDatabase()])
+    expect(first).toBe(second)
+    expect(isOpen(first)).toBe(true)
+
+    await database.closeDatabase()
+  })
+})
+
 describe('createSqliteDatabase closeDatabase', () => {
   test('should close the underlying handle', async () => {
     const database = createSqliteDatabase({
