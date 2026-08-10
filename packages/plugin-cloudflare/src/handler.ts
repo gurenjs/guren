@@ -31,14 +31,28 @@ export function createWorkersHandler(app: WorkersAppLike): WorkersHandler {
     async fetch(request: Request, env: unknown, ctx: WorkersExecutionContext): Promise<Response> {
       captureWorkersEnv(env)
 
+      // The boot attempt this request waited on. Every waiter on a shared
+      // failed boot reaches the catch, but only the one that still owns the
+      // state may clear it: a retry can start between two waiters' catches
+      // (the app can register a rejection reaction on the very promise
+      // `boot()` returned), and `fetch` installs the new boot promise and
+      // captures the new env before its first `await` — so a stale waiter
+      // clearing unconditionally wipes a live retry.
+      let attempt: Promise<void> | undefined
+
       try {
         // Inside the try: a conforming non-async boot() can throw
         // synchronously, and that throw has to reach the cleanup too.
-        bootPromise ??= app.boot()
-        await bootPromise
+        attempt = bootPromise ??= app.boot()
+        await attempt
       } catch (error) {
-        bootPromise = undefined
-        resetWorkersEnv()
+        // A synchronous throw leaves both sides `undefined` — no promise was
+        // ever installed, and nothing can interleave before the catch, so the
+        // env captured above is still this request's to clear.
+        if (bootPromise === attempt) {
+          bootPromise = undefined
+          resetWorkersEnv()
+        }
         throw error
       }
 
