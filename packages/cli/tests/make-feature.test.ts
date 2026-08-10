@@ -1,9 +1,10 @@
+import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import { makeFeature, buildRouteRegistrationHint } from '../src/make-feature'
 import { parseFieldsString } from '../src/fields'
-import { createTempWorkspace } from './helpers'
+import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, createTempWorkspace, seedApiOnlyApp } from './helpers'
 
 describe('parseFieldsString', () => {
   it('parses simple fields', () => {
@@ -380,5 +381,34 @@ describe('buildRouteRegistrationHint', () => {
     expect(lines.join('\n')).not.toContain('aliasMiddleware')
     expect(lines.join('\n')).not.toContain(".middleware('auth')")
     expect(lines[0]).toBe(`${REGISTRAR_PARAM}.group('/posts', (posts) => {`)
+  })
+})
+
+// `guren make:feature` reaches this scaffold without passing through the
+// blueprint registry, so the refusal has to live here too — the resource
+// blueprint's own guard cannot cover the direct command. The predicate's
+// branches are pinned in the admin block of blueprints.test.ts; this only has
+// to prove makeFeature() refuses before its first write.
+describe('makeFeature on an API-only app', () => {
+  it('refuses, naming the two signals, and writes nothing', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-api-only-')
+    try {
+      await seedApiOnlyApp(workspace.dir)
+
+      await expect(makeFeature('Post', { fields: 'title:string' })).rejects.toThrow(API_ONLY_REFUSAL)
+
+      for (const path of [
+        'app/Models/Post.ts',
+        'app/Http/Controllers/PostController.ts',
+        'app/Http/Resources/PostResource.ts',
+        'app/Http/Validators/PostValidator.ts',
+        'resources/js/pages/posts/Index.tsx',
+      ]) {
+        expect(existsSync(join(workspace.dir, path))).toBe(false)
+      }
+      expect(await readFile(join(workspace.dir, 'routes/api.ts'), 'utf8')).toBe(API_ROUTES_FIXTURE)
+    } finally {
+      await workspace.cleanup()
+    }
   })
 })

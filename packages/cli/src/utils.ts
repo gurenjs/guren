@@ -110,7 +110,7 @@ export function assertScaffoldPath(relativePath: string, cwd: string = process.c
  * relative, the second read can land on a different directory than the one
  * that was checked, and the containment check then guarantees nothing.
  */
-function writeRoot(options: WriterOptions): string {
+export function writeRoot(options: WriterOptions): string {
   return resolve(options.cwd ?? process.cwd())
 }
 

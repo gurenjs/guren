@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { consola } from 'consola'
-import { API_ROUTES_FIXTURE, BLOG_ROUTES_FIXTURE, createTempWorkspace, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, seedApiOnlyApp, SQLITE_SCHEMA_FIXTURE } from './helpers'
+import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, BLOG_ROUTES_FIXTURE, createTempWorkspace, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, seedApiOnlyApp, SQLITE_SCHEMA_FIXTURE } from './helpers'
 import { makeAuth } from '../src/make-auth'
 
 // Shared with packages/create-app/templates/blog/app/Providers/AuthProvider.ts,
@@ -1207,9 +1207,7 @@ export function registerWebRoutes(router: Router): void {
       try {
         await seedApiOnlyApp(workspace.dir)
 
-        await expect(makeAuth({ force: true })).rejects.toThrow(
-          /no @guren\/inertia-client dependency and no routes\/web\.ts/,
-        )
+        await expect(makeAuth({ force: true })).rejects.toThrow(API_ONLY_REFUSAL)
       } finally {
         await workspace.cleanup()
       }
