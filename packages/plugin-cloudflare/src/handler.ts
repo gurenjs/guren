@@ -31,13 +31,6 @@ export function createWorkersHandler(app: WorkersAppLike): WorkersHandler {
     async fetch(request: Request, env: unknown, ctx: WorkersExecutionContext): Promise<Response> {
       captureWorkersEnv(env)
 
-      // The boot attempt this request waited on. Every waiter on a shared
-      // failed boot reaches the catch, but only the one that still owns the
-      // state may clear it: a retry can start between two waiters' catches
-      // (the app can register a rejection reaction on the very promise
-      // `boot()` returned), and `fetch` installs the new boot promise and
-      // captures the new env before its first `await` — so a stale waiter
-      // clearing unconditionally wipes a live retry.
       let attempt: Promise<void> | undefined
 
       try {
@@ -46,9 +39,19 @@ export function createWorkersHandler(app: WorkersAppLike): WorkersHandler {
         attempt = bootPromise ??= app.boot()
         await attempt
       } catch (error) {
-        // A synchronous throw leaves both sides `undefined` — no promise was
-        // ever installed, and nothing can interleave before the catch, so the
-        // env captured above is still this request's to clear.
+        // Every waiter on a failed boot reaches here, but only the one whose
+        // attempt is still installed may clear: a retry can start between two
+        // waiters' catches — the app can register a rejection reaction on the
+        // very promise `boot()` returned — and `fetch` installs the new boot
+        // promise and captures the new env before its first `await`, so a
+        // stale waiter clearing unconditionally wipes a live retry.
+        //
+        // The same token settles the env holder, which is module-global: it is
+        // first-call-wins and this is its only production reset, so still
+        // owning the boot promise means the holder still holds what this
+        // request captured. A synchronous throw leaves both sides `undefined`
+        // and nothing can interleave before the catch, so that path clears its
+        // own capture.
         if (bootPromise === attempt) {
           bootPromise = undefined
           resetWorkersEnv()

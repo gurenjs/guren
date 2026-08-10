@@ -195,6 +195,12 @@ describe('createWorkersHandler', () => {
     expect(await retryResponse?.text()).toBe('ok')
     // The stale waiter must not have cleared the retry's env out from under it.
     expect(getWorkersEnv<TestEnv>()).toBe(retryEnv)
+
+    // ...nor its boot promise: a later request must reuse the retry's boot
+    // rather than start a third one.
+    await handler.fetch(new Request('https://example.com/three'), retryEnv, ctx)
+
+    expect(bootCalls).toBe(2)
   })
 
   test('should pass each request its own env and ctx through to app.fetch', async () => {
