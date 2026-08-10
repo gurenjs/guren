@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { consola } from 'consola'
-import { createTempWorkspace, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, SQLITE_SCHEMA_FIXTURE } from './helpers'
+import { BLOG_ROUTES_FIXTURE, createTempWorkspace, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, SQLITE_SCHEMA_FIXTURE } from './helpers'
 import { makeAuth } from '../src/make-auth'
 
 // Shared with packages/create-app/templates/blog/app/Providers/AuthProvider.ts,
@@ -240,6 +240,49 @@ export function registerWebRoutes(router: Router): void {
       expect(loginPage).not.toContain('href="/register"')
       expect(loginPage).not.toContain('href="/forgot-password"')
       expect(loginPage).toContain('Contact your administrator.')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // A blog-shaped registrar takes `baseRouter` and rebinds it to `router`
+  // inside the body. Wiring keyed on the literal name `router` matched no
+  // registrar at all here, so the auth routes were scaffolded and never
+  // mounted; passing `router` instead of the parameter would be worse still,
+  // since that `const` is declared below the call.
+  it('calls the auth registrar with the parameter its registrar declares', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-auth-base-router-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await mkdir(join(workspace.dir, 'routes'), { recursive: true })
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      await writeFile(join(workspace.dir, 'db/schema.ts'), `export const posts = 'posts'\n`, 'utf8')
+      await writeFile(
+        join(workspace.dir, 'src/app.ts'),
+        `import { createApp } from '@guren/core'
+import registerWebRoutes from '../routes/web.js'
+
+const app = createApp({
+  routes: registerWebRoutes,
+  providers: [],
+})
+
+export default app
+`,
+        'utf8',
+      )
+      await writeFile(join(workspace.dir, 'routes/web.ts'), BLOG_ROUTES_FIXTURE, 'utf8')
+
+      await makeAuth({ force: true, install: true })
+      // Re-running must not append a second call just because the argument in
+      // the file is not the one this run would have written.
+      await makeAuth({ force: true, install: true })
+
+      const routesContent = await readFile(join(workspace.dir, 'routes/web.ts'), 'utf8')
+      expect(routesContent).toContain("import { registerAuthRoutes } from './auth.js'")
+      expect(routesContent).toContain('registerAuthRoutes(baseRouter)')
+      expect(routesContent).not.toContain('registerAuthRoutes(router)')
+      expect(routesContent.match(/registerAuthRoutes\(/g)).toHaveLength(1)
     } finally {
       await workspace.cleanup()
     }

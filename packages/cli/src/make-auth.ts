@@ -15,6 +15,7 @@ import {
   type SchemaDialect,
 } from './patch-helpers'
 import { readIfExists } from './discovery'
+import { wireRouteRegistrar } from './route-registrar'
 import { makeMigration } from './make-migration'
 
 // Passwordless apps keep show() (the OAuth button page) and destroy()
@@ -2422,35 +2423,7 @@ async function installAuth(
     consola.info('Add `auth: {}` to your createApp() options to enable sessions and CSRF.')
   }
 
-  // Add auth routes import to routes/web.ts
-  const webRoutesPath = 'routes/web.ts'
-  try {
-    const absoluteWebRoutesPath = resolve(process.cwd(), webRoutesPath)
-    let routesContent = await readFile(absoluteWebRoutesPath, 'utf8')
-    const routesImport = "import { registerAuthRoutes } from './auth.js'"
-    const routesImportResult = await addImport(webRoutesPath, routesImport)
-
-    if (routesImportResult.modified) {
-      consola.success(`Added auth route registrar import to ${webRoutesPath}`)
-    } else if (routesImportResult.reason === 'Import already exists') {
-      consola.info(`Auth route registrar import already exists in ${webRoutesPath}`)
-    }
-
-    routesContent = await readFile(absoluteWebRoutesPath, 'utf8')
-
-    if (!routesContent.includes('registerAuthRoutes(router)')) {
-      const registrarPattern = /(export function [^(]+\(\s*router\s*:\s*Router\s*\)\s*(?::\s*[^{]+)?\{\n)/u
-      if (registrarPattern.test(routesContent)) {
-        routesContent = routesContent.replace(registrarPattern, `$1  registerAuthRoutes(router)\n`)
-        await writeFile(absoluteWebRoutesPath, routesContent, 'utf8')
-        consola.success(`Registered auth routes inside ${webRoutesPath}`)
-      } else {
-        consola.warn(`Could not locate a route registrar in ${webRoutesPath} - add registerAuthRoutes(router) manually`)
-      }
-    }
-  } catch {
-    consola.warn(`Could not find ${webRoutesPath} - you may need to manually import and call registerAuthRoutes(router)`)
-  }
+  await wireRouteRegistrar('registerAuthRoutes', "import { registerAuthRoutes } from './auth.js'")
 
   consola.success('Authentication configuration installed!')
   consola.info('Session middleware is auto-configured via AuthServiceProvider (autoSession: true)')

@@ -99,6 +99,64 @@ export const users = sqliteTable('users', {
 })
 `
 
+/**
+ * The `routes/web.ts` the two app templates scaffold.
+ *
+ * The blog one is the shape that broke every route-wiring patch: it names the
+ * registrar's parameter `baseRouter` and rebinds it to `router` inside the
+ * body, because `aliasMiddleware()` has to be captured for the return type
+ * that carries the alias names. Kept here so the parser, the blueprints, and
+ * `make:auth` are all tested against one copy of what users have on disk.
+ */
+export const DEFAULT_ROUTES_FIXTURE = `import { Router } from '@guren/core'
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/', () => 'home')
+}
+
+export default registerWebRoutes
+`
+
+export const BLOG_ROUTES_FIXTURE = `import { Router, requireAuthenticated } from '@guren/core'
+
+export function registerWebRoutes(baseRouter: Router): void {
+  const router = baseRouter.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
+
+  router.get('/', () => 'home')
+}
+
+export default registerWebRoutes
+`
+
+/** A routes file with no registrar to patch — the loud-failure path. */
+export const REGISTRAR_LESS_ROUTES_FIXTURE = `import { Router } from '@guren/core'
+
+const router = new Router()
+router.get('/', () => 'home')
+
+export default router
+`
+
+/**
+ * Runs `task` with `consola.warn` collecting into an array instead of
+ * printing. Scoped to the call and restored in a `finally`, unlike
+ * `createConsolaStub`, which is for the process-wide `mock.module('consola')`
+ * path and cannot observe a module that imported consola directly.
+ */
+export async function captureWarnings<T>(task: () => Promise<T>): Promise<{ result: T; warnings: string[] }> {
+  const warnings: string[] = []
+  const original = realConsola.warn
+  realConsola.warn = ((...args: unknown[]) => {
+    warnings.push(args.map(String).join(' '))
+  }) as typeof realConsola.warn
+
+  try {
+    return { result: await task(), warnings }
+  } finally {
+    realConsola.warn = original
+  }
+}
+
 /** Materialize a fixture tree from `relative path → contents` under `dir`. */
 export async function writeWorkspaceFiles(
   dir: string,

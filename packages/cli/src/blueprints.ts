@@ -1,6 +1,6 @@
 import { makeAuth } from './make-auth'
 import { makeChannel } from './make-channel'
-import { makeFeature } from './make-feature'
+import { buildRouteRegistrationHint, makeFeature } from './make-feature'
 import { parseFieldsString, type FieldDefinition, type FieldType } from './fields'
 import { collectionSlug, schemaIdentifierFor, singularize, tableNameFor } from './inflect'
 import { makeController } from './make-controller'
@@ -12,7 +12,8 @@ import { makeModel } from './make-model'
 import { makeNotification } from './make-notification'
 import { makeRoute } from './make-route'
 import { makeView } from './make-view'
-import { addImport, addProvider, detectSchemaDialect, ensureDrizzleImports, ensureMysqlImports, ensureSqliteImports, findClosingDelimiter } from './patch-helpers'
+import { addImport, addProvider, detectSchemaDialect, ensureDrizzleImports, ensureMysqlImports, ensureSqliteImports, insertImport } from './patch-helpers'
+import { findRouteRegistrar, wireRouteRegistrar } from './route-registrar'
 import { assertCwdUnsupported, camelCase, pascalCase, writeScaffoldFiles, type WriterOptions } from './utils'
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -120,23 +121,7 @@ export default registerAdminRoutes
         },
       ], writerOptions)
 
-      try {
-        const webRoutesPath = 'routes/web.ts'
-        const absoluteWebRoutesPath = resolve(process.cwd(), webRoutesPath)
-        const adminImport = "import registerAdminRoutes from './admin.js'"
-        await addImport(webRoutesPath, adminImport)
-
-        let routesContent = await readFile(absoluteWebRoutesPath, 'utf8')
-        if (!routesContent.includes('registerAdminRoutes(router)')) {
-          const registrarPattern = /(export function [^(]+\(\s*router\s*:\s*Router\s*\)\s*(?::\s*[^{]+)?\{\n)/u
-          if (registrarPattern.test(routesContent)) {
-            routesContent = routesContent.replace(registrarPattern, `$1  registerAdminRoutes(router)\n`)
-            await writeFile(absoluteWebRoutesPath, routesContent, 'utf8')
-          }
-        }
-      } catch {
-        // skip route auto-wiring when routes/web.ts doesn't exist yet
-      }
+      await wireRouteRegistrar('registerAdminRoutes', "import registerAdminRoutes from './admin.js'")
 
       return created
     },
@@ -280,23 +265,7 @@ export default registerOAuthRoutes
       await addImport('src/app.ts', "import OAuthProvider from '../app/Providers/OAuthProvider.js'")
       await addProvider('src/app.ts', 'OAuthProvider')
 
-      try {
-        const webRoutesPath = 'routes/web.ts'
-        const absoluteWebRoutesPath = resolve(process.cwd(), webRoutesPath)
-        const oauthImport = "import registerOAuthRoutes from './oauth.js'"
-        await addImport(webRoutesPath, oauthImport)
-
-        let routesContent = await readFile(absoluteWebRoutesPath, 'utf8')
-        if (!routesContent.includes('registerOAuthRoutes(router)')) {
-          const registrarPattern = /(export function [^(]+\(\s*router\s*:\s*Router\s*\)\s*(?::\s*[^{]+)?\{\n)/u
-          if (registrarPattern.test(routesContent)) {
-            routesContent = routesContent.replace(registrarPattern, `$1  registerOAuthRoutes(router)\n`)
-            await writeFile(absoluteWebRoutesPath, routesContent, 'utf8')
-          }
-        }
-      } catch {
-        // skip route auto-wiring when routes/web.ts doesn't exist yet
-      }
+      await wireRouteRegistrar('registerOAuthRoutes', "import registerOAuthRoutes from './oauth.js'")
 
       return created
     },
@@ -801,46 +770,41 @@ async function updateResourceSchema(singular: string, fields: FieldDefinition[])
 }
 
 async function updateResourceRoutes(singular: string, routeName: string, routeVar: string): Promise<void> {
-  const controllerName = `${singular}Controller`
   const routesPath = resolve(process.cwd(), 'routes/web.ts')
   let content = await readFile(routesPath, 'utf8')
-  const controllerImport = `import ${controllerName} from '../app/Http/Controllers/${controllerName}.js'`
-  const validatorImport = `import { ${singular}PayloadSchema } from '../app/Http/Validators/${singular}Validator.js'`
-
-  if (!content.includes(controllerImport)) {
-    content = content.replace(
-      /(import[^\n]+\n)(\n)?export function/u,
-      `$1${controllerImport}\n\nexport function`,
-    )
-  }
-
-  if (!content.includes(validatorImport)) {
-    content = content.replace(
-      /(import[^\n]+\n)(\n)?export function/u,
-      `$1${validatorImport}\n\nexport function`,
-    )
-  }
 
   if (!content.includes(`'${routeName}.index'`) && !content.includes(`/${routeName}'`)) {
-    const groupBlock = `\n  router.group('/${routeName}', (${routeVar}) => {\n    ${routeVar}.get('/', [${controllerName}, 'index']).name('${routeName}.index')\n    ${routeVar}.get('/create', [${controllerName}, 'create']).name('${routeName}.create')\n    ${routeVar}.get('/:id', [${controllerName}, 'show']).name('${routeName}.show')\n    ${routeVar}.get('/:id/edit', [${controllerName}, 'edit']).name('${routeName}.edit')\n    ${routeVar}.post('/', { name: '${routeName}.store', body: ${singular}PayloadSchema }, [${controllerName}, 'store'])\n    ${routeVar}.put('/:id', { name: '${routeName}.update', body: ${singular}PayloadSchema }, [${controllerName}, 'update'])\n    ${routeVar}.delete('/:id', { name: '${routeName}.destroy' }, [${controllerName}, 'destroy'])\n  })\n`
+    const registrar = findRouteRegistrar(content)
 
-    // Insert before the closing brace of the route registrar function.
-    const registrarMatch = content.match(/export function [^(]*\(\s*router\s*:\s*Router\s*\)[^{]*\{/u)
-    let inserted = false
-    if (registrarMatch && registrarMatch.index !== undefined) {
-      const openIndex = registrarMatch.index + registrarMatch[0].length - 1
-      const closeIndex = findClosingDelimiter(content, openIndex, '{', '}')
-      if (closeIndex !== -1) {
-        content = content.slice(0, closeIndex) + groupBlock + content.slice(closeIndex)
-        inserted = true
-      }
-    }
-
-    if (!inserted) {
+    // Located before anything is written: an app whose routes file cannot be
+    // patched keeps the file it had, rather than two imports for routes that
+    // were never registered.
+    if (!registrar) {
       throw new Error(
         `Could not find a route registrar in routes/web.ts. Register the /${routeName} routes manually.`,
       )
     }
+
+    // The same CRUD block `make:feature` prints for hand-wiring, hung off the
+    // registrar's own parameter — whatever it is named.
+    const group = buildRouteRegistrationHint({
+      singular,
+      routeName,
+      routeVar,
+      withAuth: false,
+      receiver: registrar.parameterName,
+    })
+
+    // Insert before the closing brace of the route registrar function.
+    const groupBlock = `\n${group.map((line) => `  ${line}`).join('\n')}\n`
+    content = content.slice(0, registrar.bodyEnd) + groupBlock + content.slice(registrar.bodyEnd)
+  }
+
+  for (const statement of [
+    `import ${singular}Controller from '../app/Http/Controllers/${singular}Controller.js'`,
+    `import { ${singular}PayloadSchema } from '../app/Http/Validators/${singular}Validator.js'`,
+  ]) {
+    content = insertImport(content, statement) ?? content
   }
 
   await writeFile(routesPath, content, 'utf8')

@@ -1,24 +1,25 @@
 import { beforeEach, afterEach, describe, expect, it } from 'bun:test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { createTempWorkspace, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, type TempWorkspace } from './helpers'
+import { resolve } from 'node:path'
+import {
+  BLOG_ROUTES_FIXTURE,
+  DEFAULT_ROUTES_FIXTURE,
+  MYSQL_SCHEMA_FIXTURE,
+  PG_SCHEMA_FIXTURE,
+  REGISTRAR_LESS_ROUTES_FIXTURE,
+  captureWarnings,
+  createTempWorkspace,
+  type TempWorkspace,
+} from './helpers'
 import { listBlueprints, runBlueprint } from '../src/blueprints'
 import { runCheck } from '../src/check'
-
-const ROUTES_FIXTURE = `import { Router } from '@guren/core'
-
-export function registerWebRoutes(router: Router): void {
-  router.get('/', () => 'home')
-}
-
-export default registerWebRoutes
-`
 
 /** Minimum project shape the resource blueprint patches into. */
 async function seedResourceWorkspace(schema: string): Promise<void> {
   await mkdir('resources/js/pages', { recursive: true })
   await mkdir('routes', { recursive: true })
   await mkdir('db', { recursive: true })
-  await writeFile('routes/web.ts', ROUTES_FIXTURE)
+  await writeFile('routes/web.ts', DEFAULT_ROUTES_FIXTURE)
   await writeFile('db/schema.ts', schema)
 }
 
@@ -168,6 +169,135 @@ describe('blueprints', () => {
     await expect(runBlueprint('unknown')).rejects.toThrow('Unknown blueprint')
   })
 
+  // An app scaffolded from the blog template names the registrar's parameter
+  // `baseRouter`. The wiring used to match the literal name `router`, so the
+  // blueprint wrote routes/admin.ts, registered nothing, added no import, and
+  // — inside a try/catch — said nothing about any of it.
+  describe('route wiring for a registrar not named `router`', () => {
+    beforeEach(async () => {
+      await mkdir('routes', { recursive: true })
+      await writeFile('routes/web.ts', BLOG_ROUTES_FIXTURE)
+    })
+
+    it('imports and calls the admin registrar with the parameter that exists', async () => {
+      await runBlueprint('admin')
+
+      const routes = await readFile('routes/web.ts', 'utf8')
+      expect(routes).toContain("import registerAdminRoutes from './admin.js'")
+      expect(routes).toContain('registerAdminRoutes(baseRouter)')
+      // `router` is declared below the call site: passing it would read a
+      // `const` before its initialization.
+      expect(routes).not.toContain('registerAdminRoutes(router)')
+      // The existing import block stays intact, and the call goes inside the
+      // registrar rather than above it.
+      expect(routes).toContain(`export function registerWebRoutes(baseRouter: Router): void {
+  registerAdminRoutes(baseRouter)
+
+  const router = baseRouter.aliasMiddleware(`)
+    })
+
+    it('wires each blueprint once, however the argument is spelled', async () => {
+      await runBlueprint('admin')
+      await runBlueprint('admin', { force: true })
+      await runBlueprint('oauth')
+      await runBlueprint('oauth', { force: true })
+
+      const routes = await readFile('routes/web.ts', 'utf8')
+      expect(routes.match(/registerAdminRoutes\(/g)).toHaveLength(1)
+      expect(routes.match(/registerOAuthRoutes\(/g)).toHaveLength(1)
+      expect(routes.match(/import registerAdminRoutes from/g)).toHaveLength(1)
+    })
+
+    it('hangs the resource group off the registrar parameter', async () => {
+      await mkdir('resources/js/pages', { recursive: true })
+      await mkdir('db', { recursive: true })
+      await writeFile('db/schema.ts', PG_SCHEMA_FIXTURE)
+
+      await runBlueprint('resource', { name: 'Post' })
+
+      const routes = await readFile('routes/web.ts', 'utf8')
+      expect(routes).toContain("baseRouter.group('/posts'")
+      expect(routes).not.toContain("  router.group('/posts'")
+    })
+
+    // The imports used to be anchored on the literal text `export function`,
+    // so a registrar exported any other way got the route group and neither
+    // import — routes referencing identifiers the file never imported.
+    it('imports the controller and validator whatever the registrar exports', async () => {
+      await mkdir('resources/js/pages', { recursive: true })
+      await mkdir('db', { recursive: true })
+      await writeFile('db/schema.ts', PG_SCHEMA_FIXTURE)
+      await writeFile('routes/web.ts', `import { Router } from '@guren/core'
+
+export default function registerWebRoutes(appRouter: Router): void {
+  appRouter.get('/', () => 'home')
+}
+`)
+
+      await runBlueprint('resource', { name: 'Post' })
+
+      const routes = await readFile('routes/web.ts', 'utf8')
+      expect(routes).toContain("import PostController from '../app/Http/Controllers/PostController.js'")
+      expect(routes).toContain("import { PostPayloadSchema } from '../app/Http/Validators/PostValidator.js'")
+      expect(routes).toContain("appRouter.group('/posts'")
+    })
+  })
+
+  // The template is what `create-guren-app` actually ships, so it is the one
+  // input the wiring has to survive verbatim — the fixtures above are its
+  // reduction, not a substitute for it.
+  it('wires into the blog template routes file as shipped', async () => {
+    await mkdir('resources/js/pages', { recursive: true })
+    await mkdir('routes', { recursive: true })
+    await mkdir('db', { recursive: true })
+    await writeFile('db/schema.ts', PG_SCHEMA_FIXTURE)
+    await writeFile(
+      'routes/web.ts',
+      await readFile(resolve(import.meta.dir, '../../create-app/templates/blog/routes/web.ts'), 'utf8'),
+    )
+
+    await runBlueprint('admin')
+    await runBlueprint('resource', { name: 'Comment' })
+
+    const routes = await readFile('routes/web.ts', 'utf8')
+    expect(routes).toContain("import registerAdminRoutes from './admin.js'")
+    expect(routes).toContain('registerAdminRoutes(baseRouter)')
+    expect(routes).toContain("import CommentController from '../app/Http/Controllers/CommentController.js'")
+    expect(routes).toContain("baseRouter.group('/comments'")
+    // The template's own wiring survives untouched.
+    expect(routes).toContain('registerAuthRoutes(router)')
+    expect(routes.match(/registerAuthRoutes\(/g)).toHaveLength(1)
+  })
+
+  // Silence is the failure mode being fixed: a routes file with no registrar
+  // to patch has to be reported, not swallowed.
+  describe('route wiring failures', () => {
+    beforeEach(async () => {
+      await mkdir('routes', { recursive: true })
+      await writeFile('routes/web.ts', REGISTRAR_LESS_ROUTES_FIXTURE)
+    })
+
+    it('warns instead of writing an unreachable admin routes file', async () => {
+      const { result: created, warnings } = await captureWarnings(() => runBlueprint('admin'))
+
+      expect(created.some((file) => file.endsWith('routes/admin.ts'))).toBe(true)
+      expect(warnings.join('\n')).toContain('Could not wire registerAdminRoutes()')
+      // Not even the import: a registrar nobody calls is an unused binding, and
+      // the app it was scaffolded into stops compiling under noUnusedLocals.
+      expect(await readFile('routes/web.ts', 'utf8')).toBe(REGISTRAR_LESS_ROUTES_FIXTURE)
+    })
+
+    it('fails the resource blueprint rather than dropping its routes', async () => {
+      await mkdir('resources/js/pages', { recursive: true })
+      await mkdir('db', { recursive: true })
+      await writeFile('db/schema.ts', PG_SCHEMA_FIXTURE)
+
+      await expect(runBlueprint('resource', { name: 'Post' })).rejects.toThrow(
+        'Could not find a route registrar',
+      )
+    })
+  })
+
   // Every field type has to map to a column in every dialect. A missing case
   // silently falls through to the text/varchar default, which then rejects the
   // value the generated validator produces (a `date` field is the example: a
@@ -260,7 +390,7 @@ const app = createApp({
 
 export default app
 `)
-    await writeFile('routes/web.ts', ROUTES_FIXTURE)
+    await writeFile('routes/web.ts', DEFAULT_ROUTES_FIXTURE)
 
     const adminFiles = await runBlueprint('admin')
     const queueFiles = await runBlueprint('queue')

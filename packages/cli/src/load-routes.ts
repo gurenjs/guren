@@ -3,24 +3,17 @@ import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
 import { Router, mountModuleRoutes, type GurenModule, type RouteDefinition } from '@guren/core'
 import { listModuleNames } from './discovery'
+import { REGISTRAR_EXPORT_NAMES, REGISTRAR_PATTERN } from './route-registrar'
 
 type RouteRegistrar = (router: Router) => void | Promise<void>
 
-/** Conventional routes entry file, shared by every command that loads routes. */
-export const DEFAULT_ROUTES_FILE = 'routes/web.ts'
-
-const REGISTRAR_EXPORTS = [
-  'registerRoutes',
-  'registerWebRoutes',
-  'registerApiRoutes',
-  'registerAuthRoutes',
-  'default',
-] as const
-
-const REGISTRAR_PATTERN = /^register\w*Routes$/u
+// Re-exported so the many commands that resolve the routes entry file keep
+// importing it from here; the constant lives beside the registrar name
+// contract, which the scaffolders need without pulling in `@guren/core`.
+export { DEFAULT_ROUTES_FILE } from './route-registrar'
 
 function resolveRegistrar(moduleExports: Record<string, unknown>): RouteRegistrar | undefined {
-  for (const name of REGISTRAR_EXPORTS) {
+  for (const name of REGISTRAR_EXPORT_NAMES) {
     const candidate = moduleExports[name]
     if (typeof candidate === 'function') {
       return candidate as RouteRegistrar

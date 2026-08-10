@@ -141,27 +141,39 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
 }
 
 /**
- * The route-registration block `make:feature` prints for the developer to paste
- * into their registrar. It has to compile verbatim inside
- * `export function register*Routes(router: Router)` — the shape both the default
- * app template and `make:module` scaffold — so the auth alias binds a *new* name
- * instead of assuming a differently-named parameter or shadowing `router`.
- * Capturing that return value is what puts `'auth'` into the router's type;
- * discard it and every `.middleware('auth')` below stops compiling.
+ * The route-registration block for a resource: what `make:feature` prints for
+ * the developer to paste into their registrar, and what `guren add resource`
+ * writes into `routes/web.ts` directly. One builder for both, so the CRUD set
+ * cannot drift between the routes an app is told to register and the ones the
+ * blueprint registers for it.
+ *
+ * It has to compile verbatim inside `export function register*Routes(router:
+ * Router)` — the shape both the default app template and `make:module`
+ * scaffold — so the auth alias binds a *new* name instead of assuming a
+ * differently-named parameter or shadowing `router`. Capturing that return
+ * value is what puts `'auth'` into the router's type; discard it and every
+ * `.middleware('auth')` below stops compiling.
+ *
+ * `receiver` is the router the group hangs off when there is no auth alias to
+ * bind. The blueprint passes the registrar's own parameter, which is the only
+ * name guaranteed to be in scope — a registrar that rebinds it (the blog
+ * template's `const router = baseRouter.aliasMiddleware(...)`) does so partway
+ * down the body.
  */
 export function buildRouteRegistrationHint(options: {
   singular: string
   routeName: string
   routeVar: string
   withAuth: boolean
+  receiver?: string
 }): string[] {
-  const { singular, routeName, routeVar, withAuth } = options
+  const { singular, routeName, routeVar, withAuth, receiver = 'router' } = options
   const authSuffix = withAuth ? `.middleware('auth')` : ''
-  const groupRouter = withAuth ? 'authRouter' : 'router'
+  const groupRouter = withAuth ? 'authRouter' : receiver
 
   return [
     ...(withAuth
-      ? [`const ${groupRouter} = router.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))`]
+      ? [`const ${groupRouter} = ${receiver}.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))`]
       : []),
     `${groupRouter}.group('/${routeName}', (${routeVar}) => {`,
     `  ${routeVar}.get('/', [${singular}Controller, 'index']).name('${routeName}.index')`,
