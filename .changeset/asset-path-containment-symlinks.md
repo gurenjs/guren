@@ -30,5 +30,12 @@ legitimately have the resolved module symlinked out of its own directory.
 Closing this needs local write access inside the project, so it is defense in
 depth rather than a live hole. It is a behavior change all the same: an asset
 deliberately symlinked out of `public/` is no longer served through the
-root-level public asset route. Serve it through `/public/*` (Hono's
-`serveStatic`, unaffected) or copy the file into the tree.
+root-level public asset route. Copy the file into the tree instead.
+
+The scope is the framework's own handlers. `/public/*` and `/resources/css/*`
+are delegated to Hono's `serveStatic`, which follows symlinks out of its root
+by design, as nginx and `express.static` do — it normalizes `..` and absolute
+remainders, so lexical traversal is still refused there, but a symlink is not.
+So the same linked file that the root-level route now refuses still serves
+under `/public/*`. `tests/http/serve-static-symlinks.test.ts` asserts both
+halves, so that boundary is machine-checked rather than described.
