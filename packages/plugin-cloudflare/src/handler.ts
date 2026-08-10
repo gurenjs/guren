@@ -46,12 +46,16 @@ export function createWorkersHandler(app: WorkersAppLike): WorkersHandler {
         // promise and captures the new env before its first `await`, so a
         // stale waiter clearing unconditionally wipes a live retry.
         //
-        // The same token settles the env holder, which is module-global: it is
-        // first-call-wins and this is its only production reset, so still
-        // owning the boot promise means the holder still holds what this
-        // request captured. A synchronous throw leaves both sides `undefined`
-        // and nothing can interleave before the catch, so that path clears its
-        // own capture.
+        // The same token settles the env holder, which is first-call-wins and
+        // is reset nowhere else in production — so still owning the boot
+        // promise means the holder still holds what this request captured.
+        // That equivalence holds for the one-handler-per-module topology
+        // `buildCloudflareOutput` generates: the holder is module-global while
+        // this slot is per-handler, so a second handler in the same module
+        // shares the former without sharing the latter, and neither can guard
+        // the other. A synchronous throw leaves both sides `undefined` and
+        // nothing can interleave before the catch, so that path clears its own
+        // capture.
         if (bootPromise === attempt) {
           bootPromise = undefined
           resetWorkersEnv()

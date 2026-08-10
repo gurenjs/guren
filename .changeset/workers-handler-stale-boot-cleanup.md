@@ -23,7 +23,12 @@ empty holder: `getWorkersEnv()` then threw for every subsequent request, and
 the next request booted a second time.
 
 The cleanup is now guarded by the identity of the attempt the request actually
-waited on, so only its owner clears state. A synchronous throw from `boot()`
+waited on, so only its owner clears state. That ownership is per-handler, which
+matches what the generated worker builds: one `createWorkersHandler` call per
+module. Two handlers constructed in the same module still share the env holder
+without sharing a boot promise, so a boot failure in one can clear the holder
+the other captured — unchanged by this release, and out of reach of the
+generated topology. A synchronous throw from `boot()`
 leaves both the captured attempt and the boot promise `undefined` — nothing can
 interleave before that catch runs, so the guard holds and the env captured by
 that same request is still cleared.
