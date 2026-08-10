@@ -1,6 +1,6 @@
 import { resourceName, safePathSegments, writeScaffoldFile, ensureSuffix, safeModuleName } from './utils'
 import type { WriterOptions } from './utils'
-import { fileExists, readIfExists } from './discovery'
+import { appDependsOn, fileExists } from './discovery'
 
 const TEST_ROOT = 'tests'
 
@@ -20,11 +20,6 @@ const VITEST_CONFIG_CANDIDATES = [
   'vitest.config.cjs',
 ]
 
-interface PackageJsonShape {
-  dependencies?: Record<string, string>
-  devDependencies?: Record<string, string>
-}
-
 /**
  * Detect which test runner the target project (cwd) is set up for.
  * Looks for a vitest config file, then for a `vitest` dependency in
@@ -37,16 +32,10 @@ export async function detectRunner(cwd: string = process.cwd()): Promise<TestRun
     }
   }
 
-  const pkgRaw = await readIfExists(cwd, 'package.json')
-  if (pkgRaw) {
-    try {
-      const pkg = JSON.parse(pkgRaw) as PackageJsonShape
-      if (pkg.dependencies?.vitest || pkg.devDependencies?.vitest) {
-        return 'vitest'
-      }
-    } catch {
-      // Malformed package.json — fall through to the default runner.
-    }
+  // A manifest this cannot read answers `null`, which falls through to the
+  // default runner exactly as a malformed one always did.
+  if (await appDependsOn(cwd, 'vitest')) {
+    return 'vitest'
   }
 
   return FALLBACK_RUNNER

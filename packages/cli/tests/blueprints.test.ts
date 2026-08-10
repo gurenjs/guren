@@ -1,8 +1,11 @@
 import { beforeEach, afterEach, describe, expect, it } from 'bun:test'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import {
+  API_ROUTES_FIXTURE,
   BLOG_ROUTES_FIXTURE,
+  CAN_DENY_FILE_READS,
   DEFAULT_ROUTES_FIXTURE,
   MYSQL_SCHEMA_FIXTURE,
   PG_SCHEMA_FIXTURE,
@@ -493,6 +496,136 @@ describe('admin blueprint authentication', () => {
 
     const controller = await readFile('app/Http/Controllers/Admin/AdminDashboardController.ts', 'utf8')
     expect(controller).not.toContain('userOrFail')
+  })
+})
+
+// Every file the admin blueprint writes is Inertia-shaped, so on the api-only
+// starter none of them works: the controller does not typecheck against a
+// `@guren/inertia-client` that is not installed, and `routes/admin.ts` reaches
+// no registrar, so `/admin` 404s while the CLI reported success. The blueprint
+// refuses instead of scaffolding it.
+describe('admin blueprint on an API-only app', () => {
+  let workspace: TempWorkspace
+
+  beforeEach(async () => {
+    workspace = await createTempWorkspace('guren-cli-admin-api-only-')
+  })
+
+  afterEach(async () => {
+    await workspace.cleanup()
+  })
+
+  async function seedApiOnlyWorkspace(): Promise<void> {
+    await mkdir('routes', { recursive: true })
+    await writeFile('routes/api.ts', API_ROUTES_FIXTURE)
+    await writeFile('package.json', JSON.stringify({
+      name: 'api-app',
+      dependencies: { '@guren/cli': '^2.2.0', '@guren/core': '^1.5.1', '@guren/orm': '^2.2.0' },
+    }))
+  }
+
+  it('refuses, naming the two signals it read', async () => {
+    await seedApiOnlyWorkspace()
+
+    await expect(runBlueprint('admin')).rejects.toThrow(
+      /no @guren\/inertia-client dependency and no routes\/web\.ts/,
+    )
+  })
+
+  // The half that matters: refusing after the first write would leave exactly
+  // the mess the refusal exists to prevent.
+  it('writes nothing at all', async () => {
+    await seedApiOnlyWorkspace()
+
+    await expect(runBlueprint('admin')).rejects.toThrow()
+
+    // `existsSync` rather than the `fileExists` the predicate itself calls: a
+    // bug in that helper must not be able to make this assertion pass.
+    for (const path of [
+      'routes/admin.ts',
+      'app/Http/Controllers/Admin/AdminDashboardController.ts',
+      'resources/js/pages/admin/Dashboard.tsx',
+    ]) {
+      expect(existsSync(resolve(workspace.dir, path))).toBe(false)
+    }
+    // And the app's own routes file is untouched.
+    expect(await readFile('routes/api.ts', 'utf8')).toBe(API_ROUTES_FIXTURE)
+  })
+
+  // The template is what `create-guren-app` ships; the fixture above is its
+  // reduction, not a substitute for it.
+  it('refuses the api-only template as shipped', async () => {
+    const templateDir = resolve(import.meta.dir, '../../create-app/templates/api-only')
+    await mkdir('routes', { recursive: true })
+    await writeFile('routes/api.ts', await readFile(resolve(templateDir, 'routes/api.ts'), 'utf8'))
+    await writeFile('package.json', await readFile(resolve(templateDir, 'package.json'), 'utf8'))
+
+    await expect(runBlueprint('admin')).rejects.toThrow('guren add admin scaffolds an Inertia dashboard')
+  })
+
+  // Positive evidence only: no manifest is an unknown app, not an API-only one.
+  it('still scaffolds when there is no package.json to judge by', async () => {
+    await mkdir('routes', { recursive: true })
+    await writeFile('routes/api.ts', API_ROUTES_FIXTURE)
+
+    const created = await runBlueprint('admin')
+
+    expect(created.some((file) => file.endsWith('routes/admin.ts'))).toBe(true)
+  })
+
+  // Both signals are required, so each of the next three isolates one of them:
+  // any single rescuing signal has to be enough on its own.
+  it('scaffolds when routes/web.ts exists but the manifest does not name the client', async () => {
+    await mkdir('routes', { recursive: true })
+    await writeFile('routes/web.ts', DEFAULT_ROUTES_FIXTURE)
+    // A fullstack app in a workspace whose deps are hoisted to the root.
+    await writeFile('package.json', JSON.stringify({ name: 'workspace-member' }))
+
+    const created = await runBlueprint('admin')
+
+    expect(created.some((file) => file.endsWith('routes/admin.ts'))).toBe(true)
+    expect(await readFile('routes/web.ts', 'utf8')).toContain('registerAdminRoutes(router)')
+  })
+
+  it('scaffolds when the manifest names the client but there is no routes/web.ts', async () => {
+    await mkdir('routes', { recursive: true })
+    await writeFile('routes/api.ts', API_ROUTES_FIXTURE)
+    await writeFile('package.json', JSON.stringify({
+      name: 'web-app',
+      dependencies: { '@guren/inertia-client': '^1.1.0' },
+    }))
+
+    const created = await runBlueprint('admin')
+
+    expect(created.some((file) => file.endsWith('resources/js/pages/admin/Dashboard.tsx'))).toBe(true)
+  })
+
+  // `routes/web.js` is a route entry `doctor` accepts, so a fullstack app can
+  // have one — and only the .ts name used to count as "has a web entry".
+  it('scaffolds a JavaScript app whose route entry is routes/web.js', async () => {
+    await mkdir('routes', { recursive: true })
+    await writeFile('routes/web.js', DEFAULT_ROUTES_FIXTURE)
+    await writeFile('package.json', JSON.stringify({ name: 'js-app' }))
+
+    const created = await runBlueprint('admin')
+
+    expect(created.some((file) => file.endsWith('routes/admin.ts'))).toBe(true)
+  })
+
+  // An unreadable manifest is another "cannot tell", and it must not surface as
+  // a raw filesystem error from a command that was prepared to proceed.
+  it.skipIf(!CAN_DENY_FILE_READS)('scaffolds when package.json cannot be read', async () => {
+    await mkdir('routes', { recursive: true })
+    await writeFile('routes/api.ts', API_ROUTES_FIXTURE)
+    await writeFile('package.json', JSON.stringify({ name: 'locked-down' }))
+    await chmod('package.json', 0o000)
+
+    try {
+      const created = await runBlueprint('admin')
+      expect(created.some((file) => file.endsWith('routes/admin.ts'))).toBe(true)
+    } finally {
+      await chmod('package.json', 0o644)
+    }
   })
 })
 

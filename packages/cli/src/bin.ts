@@ -2102,8 +2102,10 @@ const addAdminCommand = defineCommand({
     }
 
     if (!args.public) {
+      // Describes routes/admin.ts, not runtime behaviour — the wiring step
+      // above may have reported it could not reach a registrar.
       consola.info(
-        `  /admin requires a signed-in user and redirects to /login (created by \`bunx guren add auth\`) — pass --public to opt out.`,
+        `  routes/admin.ts guards /admin and redirects to /login — that sign-in page comes from \`bunx guren add auth\`. Pass --public to opt out.`,
       )
     }
   },

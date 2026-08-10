@@ -1,3 +1,4 @@
+import { isConfirmedApiOnlyApp } from './app-surface'
 import { makeAuth } from './make-auth'
 import { makeChannel } from './make-channel'
 import { buildRouteRegistrationHint, makeFeature } from './make-feature'
@@ -53,6 +54,16 @@ const blueprintRegistry: Record<string, BlueprintDefinition> = {
   admin: {
     description: 'Install a starter admin dashboard with dedicated routes and controller.',
     run: async (options) => {
+      // Before the first write: every file below is Inertia-shaped, so a
+      // partial scaffold here is only harder to clean up than none.
+      if (await isConfirmedApiOnlyApp(process.cwd())) {
+        throw new Error(
+          'guren add admin scaffolds an Inertia dashboard, but this app has no @guren/inertia-client '
+          + 'dependency and no routes/web.ts. Add an admin endpoint to routes/api.ts by hand, '
+          + 'or scaffold a fullstack app.',
+        )
+      }
+
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
       // Same default as `make:feature`: guarded unless the caller opts out.
       const withAuth = !options.publicAccess

@@ -381,6 +381,7 @@ export const handler = createLambdaHandler(app)
 | `packages/cli/src/inflect.ts` | The one pluralization rule: collection, route slug, schema identifier, and table name for an entity. Every scaffolder and `guren check` derive names through it — a second rule is how the model's import and the schema's export drift apart |
 | `packages/cli/src/drizzle-pins.ts` | The one rule keeping `drizzle-orm`/`drizzle-kit` on the copy `@guren/orm` installs. `guren upgrade` applies it to an installed app, `scripts/sync-template-deps.ts` to the scaffold templates — a second rule is how a scaffolded app ends up with two ORM copies in one process |
 | `packages/cli/src/route-registrar.ts` | The one rule for what counts as an app's route registrar, and the patch that wires a scaffolded routes file into it. `load-routes.ts` resolves the same export names at runtime — a scaffolder that picked its own target patches a function the framework never calls, and the routes look wired while mounting nothing |
+| `packages/cli/src/app-surface.ts` | The one rule for "this app cannot render an Inertia page". Scaffolders that emit a page component or wire into `routes/web.ts` refuse an API-only app through it. Positive evidence only — a scaffolder that guesses blocks commands that would have worked |
 | `packages/cli/src/check.ts` | AI agent: integrity checking |
 | `packages/cli/src/console-check.ts` | AI agent: console command registration checks (part of `guren check`) |
 | `packages/cli/src/schema-check.ts` | AI agent: Postgres `timestamptz` schema checks (part of `guren check`) |

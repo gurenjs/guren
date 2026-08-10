@@ -1,7 +1,7 @@
 import { beforeEach, afterEach, describe, expect, it } from 'bun:test'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { createTempWorkspace, writeInstalledPackage, type TempWorkspace } from './helpers'
+import { CAN_DENY_FILE_READS, createTempWorkspace, writeInstalledPackage, type TempWorkspace } from './helpers'
 import { installPlugin, type PluginInstallMessage } from '../src/plugin'
 
 function textsOf(messages: PluginInstallMessage[], kind: PluginInstallMessage['kind']): string[] {
@@ -51,6 +51,24 @@ export default app
     const app = await readFile('src/app.ts', 'utf8')
     expect(app).toContain("import { AcmeGurenPluginAuditProvider } from '@acme/guren-plugin-audit'")
     expect(app).toContain('providers: [AcmeGurenPluginAuditProvider]')
+  })
+
+  // The dependency probe used to rethrow anything that was not ENOENT, so an
+  // unreadable manifest aborted the whole command before src/app.ts was
+  // touched. Registering the provider is the useful half and does not depend on
+  // knowing whether the package is already installed — only the install hint
+  // does, and over-offering it is harmless.
+  it.skipIf(!CAN_DENY_FILE_READS)('registers the provider when package.json cannot be read', async () => {
+    await chmod('package.json', 0o000)
+
+    try {
+      const messages = await installPlugin({ packageName: '@acme/guren-plugin-audit' })
+
+      expect(textsOf(messages, 'updated')).toContain('src/app.ts')
+      expect(await readFile('src/app.ts', 'utf8')).toContain('providers: [AcmeGurenPluginAuditProvider]')
+    } finally {
+      await chmod('package.json', 0o644)
+    }
   })
 
   it('is idempotent when plugin provider already exists', async () => {

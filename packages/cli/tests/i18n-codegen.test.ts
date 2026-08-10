@@ -1,9 +1,9 @@
 import { describe, test, expect, afterEach } from 'bun:test'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, rm } from 'node:fs/promises'
 // (rm is reused by the stale-file test)
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { writeWorkspaceFiles } from './helpers'
+import { CAN_DENY_FILE_READS, writeWorkspaceFiles } from './helpers'
 import { generateTranslationTypes, readTranslationCatalogs } from '../src/i18n-types'
 import { runI18nCheck, extractPlaceholders } from '../src/i18n-check'
 
@@ -84,6 +84,26 @@ describe('generateTranslationTypes', () => {
     const content = await readFile(outputPath!, 'utf-8')
     expect(content).toContain("declare module '@guren/core'")
     expect(content).not.toContain('@guren/inertia-client')
+  })
+
+  // The augmentation is optional output, so a manifest codegen cannot read has
+  // to degrade to plain string keys — never abort the run. An earlier refactor
+  // onto the shared dependency probe let an EACCES propagate out of here.
+  test.skipIf(!CAN_DENY_FILE_READS)('still emits keys when package.json cannot be read', async () => {
+    const dir = await makeApp({
+      'package.json': INERTIA_PACKAGE_JSON,
+      'lang/en/nav.json': EN_NAV,
+    })
+    await chmod(join(dir, 'package.json'), 0o000)
+
+    try {
+      const { outputPath } = await generateTranslationTypes({ appRoot: dir })
+      const content = await readFile(outputPath!, 'utf-8')
+      expect(content).toContain("declare module '@guren/core'")
+      expect(content).not.toContain("declare module '@guren/inertia-client'")
+    } finally {
+      await chmod(join(dir, 'package.json'), 0o644)
+    }
   })
 
   test('emits nothing without a lang/ directory', async () => {
