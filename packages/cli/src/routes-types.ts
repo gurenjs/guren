@@ -1,6 +1,6 @@
 import { relative, resolve } from 'node:path'
 import { escapeSingleQuoted as escapeSingleQuotes, escapeTemplateLiteral as escapeTemplateSegment, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
-import { loadRouteDefinitions } from './load-routes'
+import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
 import {
   DECLARATION_MODULE_AUGMENTATION,
   RUNTIME_TYPE_DEFINITIONS,
@@ -21,7 +21,6 @@ export interface GenerateRouteTypesOptions extends WriterOptions {
   appRoot?: string
 }
 
-const DEFAULT_ROUTES_FILE = 'routes/web.ts'
 const DEFAULT_OUTPUT_FILE = 'types/generated/routes.d.ts'
 const DEFAULT_RUNTIME_OUTPUT_FILE = '.guren/routes.gen.ts'
 

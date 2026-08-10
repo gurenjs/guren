@@ -7,7 +7,7 @@ import {
   toPosixRelative,
   moduleNameFor,
 } from './discovery'
-import { camelCase, escapeRegExp } from './utils'
+import { camelCase, escapeRegExp, referencesIdentifier } from './utils'
 import { ParseCache } from './parse-cache'
 import { check, type CheckResult } from './check-result'
 
@@ -64,14 +64,9 @@ function bindingsFromModule(entry: EntrySource, moduleName: string): string[] {
     .flatMap((imported) => imported.names)
 }
 
-/** Whether `body` uses `name` as an identifier. */
-function referencesName(body: string, name: string): boolean {
-  return new RegExp(`\\b${escapeRegExp(name)}\\b`, 'u').test(body)
-}
-
 /**
  * Whether `entry` imports `name` from inside `modules/<moduleName>/`. Pairing
- * this with {@link referencesName} is what stops one module's registration
+ * this with {@link referencesIdentifier} is what stops one module's registration
  * from covering another's identically-named command — two modules may each
  * ship an `InvoiceCommand`, and the bare name cannot tell them apart.
  */
@@ -83,7 +78,7 @@ function importsNameFromModule(entry: EntrySource, moduleName: string, name: str
 
 /** Whether `entry` registers `name`, having imported it from that module. */
 function registersModuleCommand(entry: EntrySource | null, moduleName: string, name: string): boolean {
-  return entry !== null && importsNameFromModule(entry, moduleName, name) && referencesName(entry.body, name)
+  return entry !== null && importsNameFromModule(entry, moduleName, name) && referencesIdentifier(entry.body, name)
 }
 
 /**
@@ -199,7 +194,7 @@ export async function checkConsoleCommandRegistration(cwd: string, cache: ParseC
       // it through a barrel (`export * from './commands.js'`) that never spells
       // the class name out.
       const registered
-        = referencesName(entrySource.body, name)
+        = referencesIdentifier(entrySource.body, name)
         || (moduleName !== null && registersModuleCommand(consoleEntry ?? null, moduleName, name))
       const suggestion = moduleName
         ? `Import ${name} in ${entry} and add it to defineModule({ commands: [...] }).`

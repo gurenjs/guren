@@ -92,13 +92,8 @@ const FIELDS_ARG = {
   description: 'Comma-separated fields, e.g. "title:string,body:text,published:boolean" (append ? for nullable).',
 }
 
-function createMakeCommand(
-  commandName: string,
-  description: string,
-  argDescription: string,
-  makeFn: (name: string, options: WriterOptions) => Promise<string>,
-  resourceName: string,
-) {
+function createMakeCommand(spec: MakeCommandSpec) {
+  const { name: commandName, description, argDescription, makeFn, resourceName, nextStep } = spec
   return defineCommand({
     meta: { name: commandName, description },
     args: {
@@ -109,6 +104,7 @@ function createMakeCommand(
     async run({ args }) {
       const file = await makeFn(args.name, toWriterOptions(args))
       consola.success(`${resourceName} created at ${file}`)
+      if (nextStep) consola.info(nextStep)
     },
   })
 }
@@ -119,13 +115,37 @@ type MakeCommandSpec = {
   argDescription: string
   makeFn: (name: string, options: WriterOptions) => Promise<string>
   resourceName: string
+  /**
+   * Printed after the success line, for a generator whose output does not
+   * work until the user does something else.
+   *
+   * Only `make:route` needs one: every other generator here writes something
+   * the framework discovers, while a routes file does nothing until its
+   * registrar is called. `guren check` now reports that gap and the
+   * scaffolded CI workflow gates on it, so a generator that stayed silent
+   * would hand the user a red build to diagnose later.
+   */
+  nextStep?: string
 }
 
 const makeCommandSpecs: MakeCommandSpec[] = [
   { name: 'make:controller', description: 'Generate a new controller file.', argDescription: 'Controller class name', makeFn: makeController, resourceName: 'Controller' },
   { name: 'make:model', description: 'Generate a new model file.', argDescription: 'Model class name', makeFn: makeModel, resourceName: 'Model' },
   { name: 'make:view', description: 'Generate a new view component.', argDescription: 'View component path', makeFn: makeView, resourceName: 'View' },
-  { name: 'make:route', description: 'Generate a new route group.', argDescription: 'Route group name', makeFn: makeRoute, resourceName: 'Route' },
+  {
+    name: 'make:route',
+    description: 'Generate a new route group.',
+    argDescription: 'Route group name',
+    makeFn: makeRoute,
+    resourceName: 'Route',
+    // Deliberately says nothing about `guren check` reporting it: that check
+    // scopes to the project's own `routes/`, and `--module` sends this file to
+    // `modules/<name>/routes/` instead, where nothing reports the gap. The
+    // imperative half is true in both places.
+    nextStep:
+      'Nothing mounts it yet — import its registerRoutes from your route registrar and call it, '
+      + "passing that registrar's router.",
+  },
   { name: 'make:job', description: 'Generate a new job class.', argDescription: 'Job class name', makeFn: makeJob, resourceName: 'Job' },
   { name: 'make:event', description: 'Generate a new event class.', argDescription: 'Event class name', makeFn: makeEvent, resourceName: 'Event' },
   { name: 'make:mail', description: 'Generate a new mailable class.', argDescription: 'Mail class name', makeFn: makeMail, resourceName: 'Mail' },
@@ -247,7 +267,7 @@ const makeValidatorCommand = defineCommand({
 const makeCommands = Object.fromEntries(
   makeCommandSpecs.map((spec) => [
     spec.name,
-    createMakeCommand(spec.name, spec.description, spec.argDescription, spec.makeFn, spec.resourceName),
+    createMakeCommand(spec),
   ]),
 )
 

@@ -92,7 +92,7 @@ bunx guren add admin --public
 
 | コマンド | 説明 | 例 |
 |---------|------|-----|
-| `check` | ルート・コントローラ・ページ・モデル間の整合性に加え、docリンク・スペックビューの鮮度・アーキテクチャ境界を検証 | `bunx guren check --json` |
+| `check` | ルート・コントローラ・ページ・モデル間の整合性（`routes/` 配下の各ファイルがエントリのレジストラから実際に呼ばれているかを含む）に加え、docリンク・スペックビューの鮮度・アーキテクチャ境界を検証 | `bunx guren check --json` |
 | `audit` | セキュリティ監査: 変更系ルートのバリデーション/認証の欠如、文字列補間付き生SQL、ハードコードされた認証情報、無効化されたセキュリティ既定値、mass assignment 設定、`static hidden` 未登録の機微カラム、リクエストのホストから組み立てられたメール内リンクを検査 | `bunx guren audit --json` |
 | `doctor` | プロジェクトの健全性レポート(環境変数・設定・生成ファイル)と次のアクション | `bunx guren doctor --next` |
 | `context [Entity]` | プロジェクトコンテキストマップ。エンティティ名を渡すと1モデルのすべて — テーブル・リレーション・スキーマ付きルート・Props付きページ・Resource・Policy・紐付きdocs — を出力(同名モデルは `--module` で解決、`"app"` はプロジェクトルート) | `bunx guren context User --json` |

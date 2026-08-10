@@ -27,8 +27,41 @@ export const REGISTRAR_EXPORT_NAMES = [
 
 export const REGISTRAR_PATTERN = /^register\w*Routes$/u
 
+/**
+ * The name an import/export specifier node refers to — `export { x as "y" }`
+ * is legal, so the exported name is not always an identifier.
+ */
+export function specifierName(node: { type: string; name?: string; value?: string }): string {
+  return node.type === 'Identifier' ? (node.name ?? '') : (node.value ?? '')
+}
+
+/**
+ * Whether an export named `name` is one the route loader would accept as a
+ * registrar — the same question `resolveRegistrar()` asks, minus the
+ * preference order it needs to pick *one* of several.
+ *
+ * Every entry in {@link REGISTRAR_EXPORT_NAMES} other than `default` already
+ * matches {@link REGISTRAR_PATTERN}, so the two clauses below cover the list
+ * without repeating it; a name added there that did not match the pattern
+ * would have to be added here too.
+ */
+export function isRegistrarExportName(name: string): boolean {
+  return name === 'default' || REGISTRAR_PATTERN.test(name)
+}
+
 /** Conventional routes entry file, shared by every command that loads routes. */
 export const DEFAULT_ROUTES_FILE = 'routes/web.ts'
+
+/**
+ * Entry files to look for, in order, when a caller was given no `--routes`.
+ *
+ * {@link DEFAULT_ROUTES_FILE} is only the *first* of these: the API-only
+ * template ships `routes/api.ts` and no `routes/web.ts`, wiring `--routes
+ * routes/api.ts` into its own `codegen` script — so a command that assumes
+ * the default without probing reports a freshly scaffolded API app as having
+ * no routes at all. Shared with `doctor`, which has always probed this list.
+ */
+export const ROUTES_ENTRY_CANDIDATES = [DEFAULT_ROUTES_FILE, 'routes/web.js', 'routes/api.ts', 'routes/api.js']
 
 export interface RouteRegistrar {
   /**
@@ -133,8 +166,7 @@ function registrarCandidates(body: Statement[]): RegistrarFunction[] {
     // — the exported name is what the loader sees.
     for (const specifier of statement.specifiers) {
       if (specifier.type !== 'ExportSpecifier') continue
-      const exported = specifier.exported.type === 'Identifier' ? specifier.exported.name : specifier.exported.value
-      if (exported === 'default' || REGISTRAR_PATTERN.test(exported)) {
+      if (isRegistrarExportName(specifierName(specifier.exported))) {
         add(declarations.get(specifier.local.name))
       }
     }

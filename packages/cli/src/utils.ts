@@ -357,6 +357,27 @@ export function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+/**
+ * Whether `body` — source text with its `import` declarations already removed
+ * — uses `name` as an identifier.
+ *
+ * Shared by the registration checks (console commands, route registrars),
+ * which all ask the same question of an entrypoint: does it *use* this name,
+ * having imported it? A word-boundary match over source rather than an AST
+ * identifier walk, because "use" is deliberately broader than "call" — a
+ * registrar handed to `defineModule({ routes: registerBlogRoutes })`, a
+ * command pushed through `[SendDigestCommand].forEach(...)`, and a plain
+ * `registerAuthRoutes(router)` all count, and only the last is a call
+ * expression.
+ *
+ * The looseness cuts one way on purpose: it can call a name used in a comment
+ * or a string registered, never the reverse. These checks warn rather than
+ * fail, so a missed alarm is the cheaper error.
+ */
+export function referencesIdentifier(body: string, name: string): boolean {
+  return new RegExp(`\\b${escapeRegExp(name)}\\b`, 'u').test(body)
+}
+
 const SAFE_MODULE_NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/u
 
 /**

@@ -96,6 +96,21 @@ export async function fileExists(cwd: string, relativePath: string): Promise<boo
   }
 }
 
+/**
+ * The first of `candidates` (project-relative, in preference order) that
+ * exists under `cwd`, or `null`.
+ *
+ * One probe for every caller that has to *find* a conventional file rather
+ * than assume one — `doctor` locating the app's routes entry, `guren check`
+ * doing the same. Two copies could disagree about preference order, which
+ * decides which file the whole command then reads.
+ */
+export async function findFirstExisting(cwd: string, candidates: readonly string[]): Promise<string | null> {
+  const results = await Promise.all(candidates.map((candidate) => fileExists(cwd, candidate)))
+  const index = results.indexOf(true)
+  return index === -1 ? null : candidates[index]
+}
+
 export async function readIfExists(cwd: string, relativePath: string): Promise<string | null> {
   if (!(await fileExists(cwd, relativePath))) {
     return null
@@ -241,6 +256,20 @@ export function discoverPolicyFiles(appRoot: string): Promise<string[]> {
  * for tooling only: `guren context` lists them, and `guren check` warns about
  * any that no console entrypoint references.
  */
+/**
+ * Route files under the project's own `routes/`, tests excluded.
+ *
+ * Scoped to the application root on purpose, unlike the `discover*Files`
+ * siblings that fan out over `listAppRoots()`: a module mounts its routes
+ * through `defineModule({ routes })` rather than through the project's entry
+ * registrar, so the two are not the same question.
+ */
+export function discoverRoutesFiles(appRoot: string): Promise<string[]> {
+  return collectFiles(resolve(appRoot, 'routes'), IMPORTABLE_EXTENSIONS).then((files) =>
+    files.filter((file) => !TEST_FILE_PATTERN.test(file)),
+  )
+}
+
 export function discoverCommandFiles(appRoot: string): Promise<string[]> {
   return discoverDir(appRoot, 'app/Console/Commands')
 }
