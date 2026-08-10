@@ -51,6 +51,91 @@ export default function registerRoutes(router: any) {
     }
   })
 
+  it.each([
+    ['input', `const title = await this.input<string>('title')`],
+    ['input with a nested type argument', `const meta = await this.input<Record<string, unknown>>('meta')`],
+    ['only', `const data = await this.only('title', 'body')`],
+    ['except', `const data = await this.except('id')`],
+    // file()/files() are req.parseBody() underneath, which this rule has
+    // always flagged when called directly.
+    ['file', `const avatar = await this.file('avatar')`],
+    ['files', `const attachments = await this.files('attachments')`],
+  ])('fails when the body is read through this.%s() without validation', async (_accessor, read) => {
+    const workspace = await createTempWorkspace('guren-cli-audit-accessor-')
+
+    try {
+      await writeController(
+        workspace.dir,
+        'PostController',
+        `export default class PostController extends Controller {
+  async store() {
+    ${read}
+    return null
+  }
+}`,
+      )
+      await writeRoutes(
+        workspace.dir,
+        `class PostController {
+  async store() { return null }
+}
+export default function registerRoutes(router: any) {
+  router.post('/posts', [PostController, 'store'])
+}`,
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const validation = report.findings.find(f => f.key === 'validation:POST /posts')
+      expect(validation).toBeDefined()
+      expect(validation!.status).toBe('fail')
+      expect(validation!.suggestion).toContain('validateBody')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('passes validation when the controller only checks the body for a key', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-has-')
+
+    try {
+      await writeController(
+        workspace.dir,
+        'PostController',
+        `export default class PostController extends Controller {
+  async store() {
+    if (await this.has('draft')) {
+      return this.redirect('/drafts')
+    }
+    return this.redirect('/posts')
+  }
+}`,
+      )
+      await writeRoutes(
+        workspace.dir,
+        `class PostController {
+  async store() { return null }
+}
+export default function registerRoutes(router: any) {
+  router.post('/posts', [PostController, 'store'])
+}`,
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const validation = report.findings.find(f => f.key === 'validation:POST /posts')
+      expect(validation).toBeDefined()
+      // has() consumes the body but yields only a boolean, so no unvalidated
+      // value reaches the app and validateBody() would be the wrong advice.
+      expect(validation!.status).toBe('pass')
+      // ...but the action does read the body, so the report must not claim otherwise.
+      expect(validation!.message).not.toContain('does not consume')
+      expect(validation!.message).toContain('only tests the request body for a key')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('passes validation when the controller does not consume the body', async () => {
     const workspace = await createTempWorkspace('guren-cli-audit-nobody-')
 

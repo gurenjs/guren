@@ -120,8 +120,119 @@ export function authMiddlewareVerdict(
  * their own, so they intentionally do not count as protection.
  */
 const AUTH_CALL_PATTERN = /\bauth\s*\.\s*userOrFail\s*(?:<[^>]*>)?\s*\(|\bthis\s*\.\s*apiToken(?:UserId)?\s*(?:<[^>]*>)?\s*\(/
-const VALIDATE_BODY_PATTERN = /\bvalidateBody(Safe)?\s*(?:<[^>]*>)?\s*\(/
-const BODY_ACCESS_PATTERN = /\b(req|request)\s*\.\s*(json|formData|parseBody|text|body|raw)\b|\bparseRequestPayload\s*\(/
+
+/**
+ * What request data each member of `Controller` hands an action.
+ *
+ * The keys are the full public/protected method-and-getter surface of
+ * `packages/server/src/mvc/Controller.ts` — the only members app code can
+ * reach — and `controller-surface.test.ts` re-parses that file and fails when
+ * the two lists diverge. That test is the point of enumerating members this
+ * rule doesn't care about: a new accessor cannot be added over there and
+ * quietly default to "harmless" here, which is exactly how `input()` came to
+ * be missed. Which bucket a member belongs in is a semantic judgement about
+ * its body, so it stays a deliberate classification rather than something
+ * inferred from the name.
+ *
+ * Classifying a member is not the same as wiring it up: the patterns below are
+ * derived from these names but still assume call syntax, so a body-reading
+ * *getter* would need the pattern touched too, not just an entry here.
+ */
+export type ControllerMemberKind =
+  /**
+   * Hands back request-body content nothing has validated. `file()`/`files()`
+   * belong here because they are `req.parseBody()` under the hood
+   * (Controller.ts) — the raw call this rule has always flagged — and a helper
+   * cannot be a clean pass while the call it delegates to is a failure.
+   */
+  | 'body-payload'
+  /**
+   * Reads the body but yields nothing a schema would have caught: `has()`
+   * answers only whether a key is present. Not flagged, but not "does not
+   * consume the request body" either — see the finding below.
+   */
+  | 'body-incidental'
+  /** Reads the body in order to validate it — the remedy, not the problem. */
+  | 'body-validation'
+  /** Never touches the request body. */
+  | 'non-body'
+
+export const CONTROLLER_MEMBER_KINDS: Readonly<Record<string, ControllerMemberKind>> = {
+  input: 'body-payload',
+  only: 'body-payload',
+  except: 'body-payload',
+  file: 'body-payload',
+  files: 'body-payload',
+
+  has: 'body-incidental',
+
+  validateBody: 'body-validation',
+  validateBodySafe: 'body-validation',
+
+  setContext: 'non-body',
+  setContainer: 'non-body',
+  setResolvedModel: 'non-body',
+  model: 'non-body',
+  ctx: 'non-body',
+  /** Reached by name through RAW_BODY_READ_PATTERN, not as `this.request(`. */
+  request: 'non-body',
+  auth: 'non-body',
+  make: 'non-body',
+  apiToken: 'non-body',
+  apiTokenUserId: 'non-body',
+  authorize: 'non-body',
+  can: 'non-body',
+  inertia: 'non-body',
+  locale: 'non-body',
+  t: 'non-body',
+  tc: 'non-body',
+  json: 'non-body',
+  text: 'non-body',
+  redirect: 'non-body',
+  noContent: 'non-body',
+  created: 'non-body',
+  accepted: 'non-body',
+  query: 'non-body',
+  validateQuery: 'non-body',
+  validateParams: 'non-body',
+  validateQuerySafe: 'non-body',
+  validateParamsSafe: 'non-body',
+}
+
+function controllerMembers(kind: ControllerMemberKind): string[] {
+  return Object.entries(CONTROLLER_MEMBER_KINDS)
+    .filter(([, memberKind]) => memberKind === kind)
+    .map(([name]) => name)
+}
+
+/**
+ * `name(`, plus the generic forms these helpers are declared with. `[^()]*`
+ * rather than `[^>]*` so a nested type argument (`this.input<Array<string>>()`)
+ * still reaches the closing `(` — stopping at the first `>` silently skipped
+ * those calls. Longest name first so `validateBody` cannot shadow
+ * `validateBodySafe`.
+ */
+function accessorCallPattern(names: readonly string[]): string {
+  const alternation = [...names].sort((a, b) => b.length - a.length).join('|')
+  return `\\b(?:${alternation})\\s*(?:<[^()]*>)?\\s*\\(`
+}
+
+const VALIDATE_BODY_PATTERN = new RegExp(accessorCallPattern(controllerMembers('body-validation')))
+
+/** Reading the body without going through the controller's helpers at all. */
+const RAW_BODY_READ_PATTERN = /\b(req|request)\s*\.\s*(json|formData|parseBody|text|body|raw)\b|\bparseRequestPayload\s*\(/
+
+/**
+ * `this.` is required on the controller-accessor half: the members are
+ * `protected`, so a call through anything else is a different API.
+ */
+const BODY_ACCESS_PATTERN = new RegExp(
+  `${RAW_BODY_READ_PATTERN.source}|\\bthis\\s*\\.\\s*${accessorCallPattern(controllerMembers('body-payload'))}`,
+)
+
+const BODY_INCIDENTAL_PATTERN = new RegExp(
+  `\\bthis\\s*\\.\\s*${accessorCallPattern(controllerMembers('body-incidental'))}`,
+)
 
 function finding(
   key: string,
@@ -476,12 +587,17 @@ async function auditRoutes(
           ),
         )
       } else if (methodInfo && !readsBody) {
+        // A body-incidental read is still a read, so claiming the action never
+        // touches the body would be false — say what it actually took instead.
+        const incidental = BODY_INCIDENTAL_PATTERN.test(methodInfo.body)
         findings.push(
           finding(
             `validation:${routeLabel}`,
             routeLabel,
             'pass',
-            `${controllerKey} does not consume the request body.`,
+            incidental
+              ? `${controllerKey} only tests the request body for a key, so no unvalidated value reaches the app.`
+              : `${controllerKey} does not consume the request body.`,
           ),
         )
       } else if (methodInfo) {
