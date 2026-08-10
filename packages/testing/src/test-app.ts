@@ -9,8 +9,6 @@ type RouteRegistration = (router: Router) => void | Promise<void>
 type ApplicationLike = {
   boot(): Promise<void>
   fetch(request: Request): Response | Promise<Response>
-  /** Reported by @guren/server's Application; `fromApp()` skips boot when true. */
-  readonly booted?: boolean
 }
 type ApplicationConstructor = new (options: {
   boot?: BootCallback
@@ -421,18 +419,16 @@ export class TestApp {
   }
 
   /**
-   * Create a TestApp from an existing Application instance (typically the one
-   * exported by `src/app.ts`), booting it first if it has not booted yet.
+   * Create a TestApp from an existing Application instance — typically the one
+   * exported by `src/app.ts` — booting it if it has not booted yet.
    *
    * `fetch` is bound to the instance internally, so there is no need for the
-   * `TestApp.fromFetch((request) => app.fetch(request))` arrow wrapper — an
+   * `TestApp.fromFetch((request) => app.fetch(request))` arrow wrapper: an
    * unbound `app.fetch` reference throws because it reads instance state.
    *
-   * Boot-once semantics: when the app reports its boot state (a `booted`
-   * property, as @guren/server's Application does), it is trusted — apps
-   * booted elsewhere are not booted again. Without that property, `fromApp()`
-   * still boots each instance at most once across calls, but cannot detect a
-   * boot performed outside this helper.
+   * Booting is left to the app, whose `boot()` is expected to be idempotent
+   * (@guren/server's Application reuses its first boot), so several test files
+   * may call this on the same instance.
    *
    * @example
    * import app from '../src/app'
@@ -440,23 +436,12 @@ export class TestApp {
    * const http = await TestApp.fromApp(app)
    * await http.get('/').assertOk()
    */
-  static async fromApp(
-    app: ApplicationLike,
-    baseUrl = 'http://localhost',
-  ): Promise<TestApp> {
+  static async fromApp(app: ApplicationLike, baseUrl = 'http://localhost'): Promise<TestApp> {
+    // Set before boot() so boot-time code sees test mode; fromFetch repeats it.
     process.env.GUREN_TESTING = '1'
+    await app.boot()
 
-    const alreadyBooted =
-      typeof app.booted === 'boolean' ? app.booted : appsBootedByFromApp.has(app)
-    if (!alreadyBooted) {
-      await app.boot()
-      appsBootedByFromApp.add(app)
-    }
-
-    return new TestApp(
-      (request) => Promise.resolve(app.fetch(request)),
-      baseUrl,
-    )
+    return TestApp.fromFetch((request) => app.fetch(request), baseUrl)
   }
 
   /**
@@ -699,12 +684,6 @@ export async function factory<T>(
 }
 
 // --- Internal helpers ---
-
-// Instances fromApp() has booted itself, for apps that do not report a
-// `booted` property. Test files share one process, so the same module-scoped
-// app instance can reach fromApp() many times — booting it again would mount
-// routes and middleware twice.
-const appsBootedByFromApp = new WeakSet<ApplicationLike>()
 
 function getNestedValue(obj: unknown, path: string): unknown {
   const parts = path.split('.')

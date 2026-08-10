@@ -4,24 +4,24 @@ import { TestApp } from './test-app'
 /**
  * Minimal ApplicationLike whose fetch reads instance state, mirroring
  * @guren/server's Application — an unbound `app.fetch` reference throws.
+ * Its `boot()` is idempotent for the same reason the real one is.
  */
 class FakeApplication {
   bootCalls = 0
-  booted?: boolean
+  failNextBoot = false
+  private booted = false
   private response = 'not booted'
 
-  constructor(withBootedFlag: boolean) {
-    if (withBootedFlag) {
-      this.booted = false
-    }
-  }
-
   async boot(): Promise<void> {
+    if (this.failNextBoot) {
+      this.failNextBoot = false
+      throw new Error('database unavailable')
+    }
+    if (this.booted) return
+
     this.bootCalls++
     this.response = 'ok'
-    if (this.booted !== undefined) {
-      this.booted = true
-    }
+    this.booted = true
   }
 
   fetch(request: Request): Response {
@@ -31,7 +31,7 @@ class FakeApplication {
 
 describe('TestApp.fromApp', () => {
   it('boots the app and binds fetch to the instance', async () => {
-    const app = new FakeApplication(true)
+    const app = new FakeApplication()
 
     const http = await TestApp.fromApp(app)
     const response = await http.get('/posts')
@@ -40,17 +40,8 @@ describe('TestApp.fromApp', () => {
     expect(await response.text()).toBe('ok /posts')
   })
 
-  it('does not boot again when the app reports booted: true', async () => {
-    const app = new FakeApplication(true)
-    await app.boot()
-
-    await TestApp.fromApp(app)
-
-    expect(app.bootCalls).toBe(1)
-  })
-
-  it('boots an app without a booted property at most once across calls', async () => {
-    const app = new FakeApplication(false)
+  it('leaves booting to the app, so repeated calls boot once', async () => {
+    const app = new FakeApplication()
 
     await TestApp.fromApp(app)
     await TestApp.fromApp(app)
@@ -58,27 +49,18 @@ describe('TestApp.fromApp', () => {
     expect(app.bootCalls).toBe(1)
   })
 
-  it('retries boot on a later call when the first boot throws', async () => {
-    const app = new FakeApplication(false)
-    let failFirstBoot = true
-    const originalBoot = app.boot.bind(app)
-    app.boot = async () => {
-      if (failFirstBoot) {
-        failFirstBoot = false
-        throw new Error('database unavailable')
-      }
-      await originalBoot()
-    }
+  it('propagates a boot failure instead of returning an unbooted TestApp', async () => {
+    const app = new FakeApplication()
+    app.failNextBoot = true
 
     await expect(TestApp.fromApp(app)).rejects.toThrow('database unavailable')
 
     const http = await TestApp.fromApp(app)
     await http.get('/').assertOk()
-    expect(app.bootCalls).toBe(1)
   })
 
   it('respects a custom base URL', async () => {
-    const app = new FakeApplication(true)
+    const app = new FakeApplication()
     let seenUrl: string | undefined
     app.fetch = (request: Request) => {
       seenUrl = request.url
@@ -91,11 +73,19 @@ describe('TestApp.fromApp', () => {
     expect(seenUrl).toBe('http://example.test/x')
   })
 
-  it('enables GUREN_TESTING so actingAs works against the app', async () => {
+  it('enables GUREN_TESTING before booting, so boot-time code sees test mode', async () => {
     delete process.env.GUREN_TESTING
+    let seenDuringBoot: string | undefined
 
-    await TestApp.fromApp(new FakeApplication(true))
+    const app = new FakeApplication()
+    const originalBoot = app.boot.bind(app)
+    app.boot = async () => {
+      seenDuringBoot = process.env.GUREN_TESTING
+      await originalBoot()
+    }
 
-    expect(process.env.GUREN_TESTING).toBe('1')
+    await TestApp.fromApp(app)
+
+    expect(seenDuringBoot).toBe('1')
   })
 })
