@@ -27,7 +27,7 @@ describe('createWorkersHandler', () => {
     resetWorkersEnv()
   })
 
-  test('should call app.boot exactly once across multiple sequential fetches', async () => {
+  test('should call app.boot exactly once across sequential fetches even when the app boot() is not idempotent', async () => {
     let bootCalls = 0
     const app: WorkersAppLike = {
       async boot() {
