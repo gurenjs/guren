@@ -83,6 +83,16 @@ scaffolds React page components and a controller that returns Inertia responses.
 Its refusal likewise comes before the table it would otherwise append to your
 `db/schema.ts`. Add a JSON controller wired into `routes/api.ts` by hand instead.
 
+`add resource` also needs the two files it patches to be there, whatever shape the
+rest of your app is: it appends its table to `db/schema.ts` and registers the CRUD
+routes in `routes/web.ts`, and unless those routes are registered already,
+`routes/web.ts` must export a route registrar it can patch. When one of those is
+missing, the command names it and writes nothing — rather than leaving a scaffold
+behind and a table appended for routes that were never registered. Use
+`bunx guren make:feature` instead if you want the files without the two patches;
+it prints the route block to paste and tells you which schema file to add the
+table to.
+
 ## Core Commands
 
 | Command | Description | Example |

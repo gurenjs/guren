@@ -1,9 +1,11 @@
 import { assertNotApiOnly } from './app-surface'
+import { fileExists, readIfExists } from './discovery'
 import { makeAuth } from './make-auth'
 import { makeChannel } from './make-channel'
 import { buildRouteRegistrationHint, makeFeature } from './make-feature'
 import { parseFieldsString, type FieldDefinition, type FieldType } from './fields'
 import { collectionSlug, schemaIdentifierFor, singularize, tableNameFor } from './inflect'
+import { schemaPathFor } from './schema-parser'
 import { makeController } from './make-controller'
 import { makeEvent } from './make-event'
 import { makeJob } from './make-job'
@@ -14,7 +16,7 @@ import { makeNotification } from './make-notification'
 import { makeRoute } from './make-route'
 import { makeView } from './make-view'
 import { addImport, addProvider, detectSchemaDialect, ensureDrizzleImports, ensureMysqlImports, ensureSqliteImports, insertImport } from './patch-helpers'
-import { findRouteRegistrar, wireRouteRegistrar } from './route-registrar'
+import { DEFAULT_ROUTES_FILE, findRouteRegistrar, wireRouteRegistrar } from './route-registrar'
 import { assertCwdUnsupported, camelCase, pascalCase, writeScaffoldFiles, type WriterOptions } from './utils'
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -637,6 +639,12 @@ export default class BroadcastProvider extends ServiceProvider {
         instead: 'Add a JSON controller to routes/api.ts by hand',
       })
 
+      // Second, so that an app the check above recognizes hears about its
+      // shape rather than about a missing file. What remains here is the app
+      // that shape check deliberately permits: one that declares the client,
+      // or that has no manifest to read, and still cannot be patched.
+      await assertResourceTargetsPatchable(routeName)
+
       const created = await makeFeature(singular, {
         force: Boolean(options.force),
         fields: options.fields,
@@ -760,7 +768,7 @@ function snakeCase(value: string): string {
 }
 
 async function updateResourceSchema(singular: string, fields: FieldDefinition[]): Promise<void> {
-  const schemaPath = resolve(process.cwd(), 'db/schema.ts')
+  const schemaPath = resolve(process.cwd(), schemaPathFor(null))
   let content = await readFile(schemaPath, 'utf8')
   const schemaIdentifier = schemaIdentifierFor(singular)
   const tableName = tableNameFor(singular)
@@ -811,23 +819,90 @@ async function updateResourceSchema(singular: string, fields: FieldDefinition[])
   await writeFile(schemaPath, content, 'utf8')
 }
 
+/**
+ * Whether an app's routes file already registers the resource's own routes.
+ *
+ * Both probes are anchored on the full literal the registration emits. Matching
+ * `/${routeName}'` unanchored made an unrelated `/admin/posts` read as "the
+ * posts routes are already registered", so the run reported success while
+ * registering nothing.
+ */
+function routesAlreadyRegister(content: string, routeName: string): boolean {
+  return content.includes(`'${routeName}.index'`) || content.includes(`'/${routeName}'`)
+}
+
+function missingRegistrarMessage(routeName: string): string {
+  return `Could not find a route registrar in ${DEFAULT_ROUTES_FILE}. Register the /${routeName} routes manually.`
+}
+
+/**
+ * Every reason the two app-owned files this blueprint patches cannot be
+ * patched, established before `makeFeature` writes its first file.
+ *
+ * The blueprint's own output can be deleted; the table appended to the app's
+ * `db/schema.ts` cannot be undone by deleting anything, and that patch runs
+ * first. Reordering the two patches only chooses which of the app's files is
+ * left half-edited for a resource that was never finished — so neither may
+ * start until both are known to be reachable.
+ *
+ * Runs after {@link assertNotApiOnly}, and covers what that check is documented
+ * to leave behind: an app declaring `@guren/inertia-client`, or one with no
+ * manifest to read, whose `routes/web.ts` is absent or unpatchable anyway. Both
+ * are permitted there on purpose — a shape check has to answer "cannot tell"
+ * with "proceed" — and both used to arrive here as a raw `ENOENT` seven
+ * `node:fs` frames deep, after the schema patch.
+ *
+ * Scoped to the two questions the patches themselves answer: is each file
+ * there, and does the routes file expose something to patch. It is not a
+ * promise that the patches will succeed — a target that exists but cannot be
+ * read or written still fails in the writer, as it did before.
+ */
+async function assertResourceTargetsPatchable(routeName: string): Promise<void> {
+  const cwd = process.cwd()
+  const schemaFile = schemaPathFor(null)
+
+  if (!(await fileExists(cwd, schemaFile))) {
+    throw new Error(
+      `guren add resource appends its table to ${schemaFile}, but this app has no ${schemaFile}. `
+      + 'Nothing was scaffolded.',
+    )
+  }
+
+  const routes = await readIfExists(cwd, DEFAULT_ROUTES_FILE)
+
+  if (routes === null) {
+    throw new Error(
+      `guren add resource registers the /${routeName} routes in ${DEFAULT_ROUTES_FILE}, but this app has no `
+      + `${DEFAULT_ROUTES_FILE}. Nothing was scaffolded. Add a web routes entry, or scaffold the resource with `
+      + '`guren make:feature` and wire it into the routes file you have.',
+    )
+  }
+
+  // Mirrors `updateResourceRoutes` — and must keep mirroring it. Waiving the
+  // registrar requirement is only safe because the writer applies this same
+  // predicate to the same content: nothing between here and there writes to
+  // this file, so whenever the preflight skips this check the writer skips the
+  // insert that would have needed one, and its own throw cannot fire.
+  // Tightening either site alone reintroduces the half-edited app this function
+  // exists to prevent.
+  if (!routesAlreadyRegister(routes, routeName) && !findRouteRegistrar(routes)) {
+    throw new Error(missingRegistrarMessage(routeName))
+  }
+}
+
 async function updateResourceRoutes(singular: string, routeName: string, routeVar: string): Promise<void> {
-  const routesPath = resolve(process.cwd(), 'routes/web.ts')
+  const routesPath = resolve(process.cwd(), DEFAULT_ROUTES_FILE)
   let content = await readFile(routesPath, 'utf8')
 
-  // Matching `/${routeName}'` unanchored made an unrelated `/admin/posts`
-  // read as "the posts routes are already registered", so the run reported
-  // success while registering nothing.
-  if (!content.includes(`'${routeName}.index'`) && !content.includes(`'/${routeName}'`)) {
+  if (!routesAlreadyRegister(content, routeName)) {
     const registrar = findRouteRegistrar(content)
 
-    // Located before anything is written: an app whose routes file cannot be
-    // patched keeps the file it had, rather than two imports for routes that
-    // were never registered.
+    // Unreachable via `runBlueprint`, which settles this in the preflight
+    // before anything is written — but it is also how the `null` is handled:
+    // the insertion below dereferences `registrar`, so dropping this buys
+    // nothing but a non-null assertion.
     if (!registrar) {
-      throw new Error(
-        `Could not find a route registrar in routes/web.ts. Register the /${routeName} routes manually.`,
-      )
+      throw new Error(missingRegistrarMessage(routeName))
     }
 
     // The same CRUD block `make:feature` prints for hand-wiring, hung off the
