@@ -26,13 +26,49 @@ async function seedAppFile(source: string): Promise<void> {
   await writeFile('src/app.ts', source)
 }
 
+/**
+ * A file from the api-only starter as `create-guren-app` ships it.
+ *
+ * Read rather than approximated: the reduced fixtures in `helpers.ts` are how
+ * these tests describe a *shape*, not a substitute for the template itself.
+ */
+async function readApiOnlyTemplateFile(relativePath: string): Promise<string> {
+  return readFile(resolve(import.meta.dir, '../../create-app/templates/api-only', relativePath), 'utf8')
+}
+
 /** Minimum project shape the resource blueprint patches into. */
-async function seedResourceWorkspace(schema: string): Promise<void> {
+async function seedResourceWorkspace(schema: string, routes = DEFAULT_ROUTES_FIXTURE): Promise<void> {
   await mkdir('resources/js/pages', { recursive: true })
   await mkdir('routes', { recursive: true })
   await mkdir('db', { recursive: true })
-  await writeFile('routes/web.ts', DEFAULT_ROUTES_FIXTURE)
+  await writeFile('routes/web.ts', routes)
   await writeFile('db/schema.ts', schema)
+}
+
+/**
+ * Every file `makeFeature` writes for a `Post` resource, none of it present.
+ *
+ * `existsSync` rather than the `fileExists` the checks themselves call: a bug in
+ * that helper must not be able to make these assertions pass. All eight rather
+ * than a sample, because which one lands first is an ordering detail inside
+ * `makeFeature` — the validator today, and it is written before the rest.
+ *
+ * Shared by both refusals, which is the point: whichever one fires, the app is
+ * owed the same "nothing was written".
+ */
+function expectNoResourceScaffold(dir: string): void {
+  for (const path of [
+    'app/Http/Validators/PostValidator.ts',
+    'app/Http/Resources/PostResource.ts',
+    'app/Http/Controllers/PostController.ts',
+    'app/Models/Post.ts',
+    'resources/js/pages/posts/Index.tsx',
+    'resources/js/pages/posts/Show.tsx',
+    'resources/js/pages/posts/New.tsx',
+    'resources/js/pages/posts/Edit.tsx',
+  ]) {
+    expect(existsSync(resolve(dir, path))).toBe(false)
+  }
 }
 
 describe('blueprints', () => {
@@ -177,6 +213,68 @@ describe('blueprints', () => {
     expect(schema).toContain("publishedAt: timestamp('published_at', { withTimezone: true })")
   })
 
+  // The suppression check used to match the collection slug as a quoted-path
+  // suffix, so an unrelated `/admin/posts` answered "the posts routes are
+  // already registered" for a `Post` resource: eight files scaffolded, the
+  // table added — and no route group.
+  it('registers the group when the slug only appears inside a longer path', async () => {
+    await seedResourceWorkspace(PG_SCHEMA_FIXTURE, `import { Router } from '@guren/core'
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/admin/posts', () => 'admin posts')
+}
+
+export default registerWebRoutes
+`)
+
+    await runBlueprint('resource', { name: 'Post' })
+
+    const routes = await readFile('routes/web.ts', 'utf8')
+    expect(routes).toContain("router.group('/posts'")
+    expect(routes).toContain("name('posts.index')")
+    // The imports the group needs are only sound because the group is there.
+    expect(routes).toContain("import PostController from '../app/Http/Controllers/PostController.js'")
+    // The route that triggered the false positive is left alone.
+    expect(routes).toContain("router.get('/admin/posts', () => 'admin posts')")
+  })
+
+  // The direction the anchoring could overshoot in. A hand-wired `/posts` has
+  // none of the generated `.name()` calls, so the path literal is the only
+  // thing left to recognise it by — anchor it any tighter (on `.group(`, say)
+  // and the blueprint registers a second, conflicting set of routes.
+  it('leaves hand-registered routes for the same collection alone', async () => {
+    await seedResourceWorkspace(PG_SCHEMA_FIXTURE, `import { Router } from '@guren/core'
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/posts', () => 'posts')
+}
+
+export default registerWebRoutes
+`)
+
+    await runBlueprint('resource', { name: 'Post' })
+
+    const routes = await readFile('routes/web.ts', 'utf8')
+    expect(routes).not.toContain("router.group('/posts'")
+    // A skipped registration must skip its imports too: appended anyway they
+    // are unused bindings, and the app stops compiling under noUnusedLocals.
+    expect(routes).not.toContain('import PostController')
+  })
+
+  // A second run is suppressed by both clauses of the guard — run 1 emits the
+  // path literal and the route names. This pins the run-twice contract itself,
+  // including the import dedupe, not either clause.
+  it('registers the resource group once when re-run', async () => {
+    await seedResourceWorkspace(PG_SCHEMA_FIXTURE)
+
+    await runBlueprint('resource', { name: 'Post' })
+    await runBlueprint('resource', { name: 'Post', force: true })
+
+    const routes = await readFile('routes/web.ts', 'utf8')
+    expect(routes.match(/\.group\('\/posts'/g)).toHaveLength(1)
+    expect(routes.match(/import PostController from/g)).toHaveLength(1)
+  })
+
   it('rejects unknown blueprints', async () => {
     await expect(runBlueprint('unknown')).rejects.toThrow('Unknown blueprint')
   })
@@ -307,6 +405,97 @@ export default function registerWebRoutes(appRouter: Router): void {
       await expect(runBlueprint('resource', { name: 'Post' })).rejects.toThrow(
         'Could not find a route registrar',
       )
+
+      // The refusal used to land after the schema patch and the scaffold, so
+      // the routes the app never got had eight files and a table waiting.
+      expectNoResourceScaffold(workspace.dir)
+      expect(await readFile('db/schema.ts', 'utf8')).toBe(PG_SCHEMA_FIXTURE)
+    })
+  })
+
+  // `resource` is the blueprint whose patches cannot be taken back: it appends
+  // a table to the app's `db/schema.ts`, then registers routes in
+  // `routes/web.ts`. `admin` and `oauth` patch the routes file too, but they
+  // wire in files they created, so deleting the scaffold undoes them; deleting
+  // it here leaves the table. So every reason those two patches can fail has to
+  // be settled before the first write — ordering them differently would only
+  // choose which of the app's files is left half-edited.
+  describe('resource blueprint preflight', () => {
+    it('refuses an app with no routes/web.ts, naming the file it wanted', async () => {
+      await mkdir('db', { recursive: true })
+      await writeFile('db/schema.ts', PG_SCHEMA_FIXTURE)
+
+      // Not `ENOENT: no such file or directory, open '.../routes/web.ts'`.
+      await expect(runBlueprint('resource', { name: 'Post' })).rejects.toThrow(
+        /registers the \/posts routes in routes\/web\.ts, but this app has no routes\/web\.ts/,
+      )
+
+      expectNoResourceScaffold(workspace.dir)
+      expect(await readFile('db/schema.ts', 'utf8')).toBe(PG_SCHEMA_FIXTURE)
+    })
+
+    it('refuses an app with no db/schema.ts, naming the file it wanted', async () => {
+      await mkdir('routes', { recursive: true })
+      await writeFile('routes/web.ts', DEFAULT_ROUTES_FIXTURE)
+
+      await expect(runBlueprint('resource', { name: 'Post' })).rejects.toThrow(
+        /appends its table to db\/schema\.ts, but this app has no db\/schema\.ts/,
+      )
+
+      expectNoResourceScaffold(workspace.dir)
+      expect(await readFile('routes/web.ts', 'utf8')).toBe(DEFAULT_ROUTES_FIXTURE)
+    })
+
+    // The api-only starter's files, minus the `package.json` that would let
+    // `assertNotApiOnly` recognize the shape. That is the case it is documented
+    // to permit — "cannot tell" must answer "proceed" — so this app reaches the
+    // preflight, which asks the one question it can answer from the filesystem
+    // alone and refuses on that instead of on a raw `ENOENT`.
+    it('refuses an app with no manifest to judge its shape by', async () => {
+      await mkdir('routes', { recursive: true })
+      await mkdir('db', { recursive: true })
+      await writeFile('routes/api.ts', await readApiOnlyTemplateFile('routes/api.ts'))
+      await writeFile('db/schema.ts', await readApiOnlyTemplateFile('db/schema.ts'))
+
+      await expect(runBlueprint('resource', { name: 'Post' })).rejects.toThrow(
+        'but this app has no routes/web.ts',
+      )
+
+      expectNoResourceScaffold(workspace.dir)
+    })
+
+    // The preflight demands a registrar only when the routes are not registered
+    // already — the same condition the writer applies. Demanding one
+    // unconditionally would newly refuse this app, whose routes file needs
+    // nothing done to it at all.
+    it('scaffolds against a routes file that registers the routes without a registrar function', async () => {
+      const handWired = REGISTRAR_LESS_ROUTES_FIXTURE.replace(
+        "router.get('/', () => 'home')",
+        "router.get('/', () => 'home')\nrouter.get('/posts', [PostController, 'index']).name('posts.index')",
+      )
+      await mkdir('resources/js/pages', { recursive: true })
+      await mkdir('routes', { recursive: true })
+      await mkdir('db', { recursive: true })
+      await writeFile('db/schema.ts', PG_SCHEMA_FIXTURE)
+      await writeFile('routes/web.ts', handWired)
+
+      const created = await runBlueprint('resource', { name: 'Post' })
+
+      expect(created.some((file) => file.endsWith('app/Models/Post.ts'))).toBe(true)
+      // Nothing to register and therefore nothing to import: the file is left
+      // exactly as the app wrote it.
+      expect(await readFile('routes/web.ts', 'utf8')).toBe(handWired)
+
+      const schema = await readFile('db/schema.ts', 'utf8')
+      expect(schema).toContain("export const posts = pgTable('posts'")
+
+      // And the same app on a `--force` re-run: both patches are no-ops the
+      // second time, so the preflight must not start refusing what it just let
+      // through — and must not let a second table through either.
+      await runBlueprint('resource', { name: 'Post', force: true })
+
+      expect(await readFile('db/schema.ts', 'utf8')).toBe(schema)
+      expect(await readFile('routes/web.ts', 'utf8')).toBe(handWired)
     })
   })
 
@@ -614,10 +803,9 @@ describe('admin blueprint on an API-only app', () => {
   // The template is what `create-guren-app` ships; the fixture above is its
   // reduction, not a substitute for it.
   it('refuses the api-only template as shipped', async () => {
-    const templateDir = resolve(import.meta.dir, '../../create-app/templates/api-only')
     await mkdir('routes', { recursive: true })
-    await writeFile('routes/api.ts', await readFile(resolve(templateDir, 'routes/api.ts'), 'utf8'))
-    await writeFile('package.json', await readFile(resolve(templateDir, 'package.json'), 'utf8'))
+    await writeFile('routes/api.ts', await readApiOnlyTemplateFile('routes/api.ts'))
+    await writeFile('package.json', await readApiOnlyTemplateFile('package.json'))
 
     await expect(runBlueprint('admin')).rejects.toThrow('guren add admin scaffolds an Inertia dashboard')
   })
@@ -709,6 +897,113 @@ describe('auth blueprint on an API-only app', () => {
     await expect(runBlueprint('auth')).rejects.toThrow(
       /no @guren\/inertia-client dependency and no routes\/web\.ts/,
     )
+  })
+})
+
+describe('resource blueprint on an API-only app', () => {
+  let workspace: TempWorkspace
+
+  beforeEach(async () => {
+    workspace = await createTempWorkspace('guren-cli-resource-api-only-')
+  })
+
+  afterEach(async () => {
+    await workspace.cleanup()
+  })
+
+  it('refuses, naming the two signals it read', async () => {
+    await seedApiOnlyApp(workspace.dir)
+
+    await expect(runBlueprint('resource', { name: 'Post' })).rejects.toThrow(
+      /no @guren\/inertia-client dependency and no routes\/web\.ts/,
+    )
+  })
+
+  // The half that matters. `updateResourceSchema` runs before the route wiring
+  // can fail, so the old run appended a table to a file the user wrote — the
+  // one casualty deleting a scaffold does not undo.
+  it('writes nothing at all, and leaves db/schema.ts byte-identical', async () => {
+    await seedApiOnlyApp(workspace.dir)
+
+    await expect(runBlueprint('resource', { name: 'Post' })).rejects.toThrow()
+
+    expectNoResourceScaffold(workspace.dir)
+    // No `posts` table appended, and the app's own routes file untouched.
+    expect(await readFile('db/schema.ts', 'utf8')).toBe(PG_SCHEMA_FIXTURE)
+    expect(await readFile('routes/api.ts', 'utf8')).toBe(API_ROUTES_FIXTURE)
+  })
+
+  // The template is what `create-guren-app` ships; the fixture above is its
+  // reduction, not a substitute for it.
+  it('refuses the api-only template as shipped', async () => {
+    await mkdir('routes', { recursive: true })
+    await mkdir('db', { recursive: true })
+    await writeFile('routes/api.ts', await readApiOnlyTemplateFile('routes/api.ts'))
+    await writeFile('db/schema.ts', await readApiOnlyTemplateFile('db/schema.ts'))
+    await writeFile('package.json', await readApiOnlyTemplateFile('package.json'))
+
+    await expect(runBlueprint('resource', { name: 'Post' })).rejects.toThrow(
+      'guren add resource scaffolds Inertia pages',
+    )
+  })
+
+  // A usage error must not be reported as an environment one, so the guard is
+  // the last check rather than the first: on an API-only app a bad invocation
+  // is still reported as a bad invocation.
+  it('still reports a missing resource name first', async () => {
+    await seedApiOnlyApp(workspace.dir)
+
+    await expect(runBlueprint('resource', {})).rejects.toThrow(
+      'The resource blueprint requires a resource name.',
+    )
+  })
+
+  it('still reports an invalid field type first', async () => {
+    await seedApiOnlyApp(workspace.dir)
+
+    await expect(runBlueprint('resource', { name: 'Post', fields: 'title:bogus' })).rejects.toThrow(
+      'Invalid field type "bogus"',
+    )
+  })
+
+  // The manifest signal alone is enough to permit: a fullstack app in a
+  // workspace whose deps are hoisted to the root has no client to find.
+  // (The other direction — an absent manifest — cannot be isolated here,
+  // because every scaffold that succeeds needs the `routes/web.ts` that
+  // rescues it anyway. It is pinned in the admin block above.)
+  it('scaffolds when routes/web.ts exists but the manifest does not name the client', async () => {
+    await seedResourceWorkspace(PG_SCHEMA_FIXTURE)
+    await writeFile('package.json', JSON.stringify({ name: 'workspace-member' }))
+
+    const created = await runBlueprint('resource', { name: 'Post' })
+
+    expect(created.some((file) => file.endsWith('resources/js/pages/posts/Index.tsx'))).toBe(true)
+    expect(await readFile('routes/web.ts', 'utf8')).toContain("router.group('/posts'")
+  })
+
+  // The other signal on its own: an app that declares the client is never
+  // refused as API-only. It still fails, but on the file it cannot patch
+  // rather than on its shape — and now with a named reason instead of the raw
+  // `ENOENT` this used to assert, from the preflight the shape check runs
+  // ahead of. Matched on the wording only that preflight produces: the shape
+  // refusal names `routes/web.ts` too, so that string alone would not tell the
+  // two apart.
+  it('does not refuse an app that declares the client', async () => {
+    await mkdir('resources/js/pages', { recursive: true })
+    await mkdir('routes', { recursive: true })
+    await mkdir('db', { recursive: true })
+    await writeFile('routes/api.ts', API_ROUTES_FIXTURE)
+    await writeFile('db/schema.ts', PG_SCHEMA_FIXTURE)
+    await writeFile('package.json', JSON.stringify({
+      name: 'web-app',
+      dependencies: { '@guren/inertia-client': '^1.1.0' },
+    }))
+
+    await expect(runBlueprint('resource', { name: 'Post' })).rejects.toThrow(
+      /registers the \/posts routes in routes\/web\.ts, but this app has no routes\/web\.ts/,
+    )
+    expectNoResourceScaffold(workspace.dir)
+    expect(await readFile('db/schema.ts', 'utf8')).toBe(PG_SCHEMA_FIXTURE)
   })
 })
 

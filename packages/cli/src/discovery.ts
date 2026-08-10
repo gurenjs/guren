@@ -282,19 +282,14 @@ export function discoverPolicyFiles(appRoot: string): Promise<string[]> {
 }
 
 /**
- * Console command classes (`make:command` output). Unlike controllers or
- * jobs, nothing loads these by scanning the directory at runtime —
- * registration with a `ConsoleKernel` is explicit — so this discovery exists
- * for tooling only: `guren context` lists them, and `guren check` warns about
- * any that no console entrypoint references.
- */
-/**
- * Route files under the project's own `routes/`, tests excluded.
+ * Route files under `<appRoot>/routes/`, tests excluded.
  *
- * Scoped to the application root on purpose, unlike the `discover*Files`
- * siblings that fan out over `listAppRoots()`: a module mounts its routes
- * through `defineModule({ routes })` rather than through the project's entry
- * registrar, so the two are not the same question.
+ * Scoped to the given root on purpose, unlike the `discover*Files` siblings
+ * that fan out over `listAppRoots()`: a module mounts its routes through
+ * `defineModule({ routes })` rather than through the project's entry
+ * registrar, so the two are not the same question. Modules are covered by
+ * {@link discoverModuleRoutesFiles}, which asks that other question — per
+ * module, by calling this with the module directory as the root.
  */
 export function discoverRoutesFiles(appRoot: string): Promise<string[]> {
   return collectFiles(resolve(appRoot, 'routes'), IMPORTABLE_EXTENSIONS).then((files) =>
@@ -302,6 +297,44 @@ export function discoverRoutesFiles(appRoot: string): Promise<string[]> {
   )
 }
 
+/** One module's `routes/` directory, for the wiring question scoped to it. */
+export interface ModuleRoutes {
+  /** Directory name under `modules/` — e.g. `'billing'`. */
+  module: string
+  /** Absolute path of `modules/<name>/`. */
+  dir: string
+  /** Route files under `modules/<name>/routes/`, tests excluded. */
+  files: string[]
+}
+
+/**
+ * Route files under each module's own `routes/` directory, grouped by module
+ * — where `make:route --module <name>` writes, and the module half of the
+ * registrar-wiring question.
+ *
+ * Modules with no such directory are dropped rather than reported empty: the
+ * shape `make:module` scaffolds is a single `modules/<name>/routes.ts`, so an
+ * app that never ran `make:route --module` has nothing here to ask about.
+ */
+export async function discoverModuleRoutesFiles(appRoot: string): Promise<ModuleRoutes[]> {
+  const modules = (await listAppRoots(appRoot)).filter(
+    (root): root is { module: string; dir: string } => root.module !== null,
+  )
+
+  const scanned = await Promise.all(
+    modules.map(async ({ module, dir }) => ({ module, dir, files: await discoverRoutesFiles(dir) })),
+  )
+
+  return scanned.filter((entry) => entry.files.length > 0)
+}
+
+/**
+ * Console command classes (`make:command` output). Unlike controllers or
+ * jobs, nothing loads these by scanning the directory at runtime —
+ * registration with a `ConsoleKernel` is explicit — so this discovery exists
+ * for tooling only: `guren context` lists them, and `guren check` warns about
+ * any that no console entrypoint references.
+ */
 export function discoverCommandFiles(appRoot: string): Promise<string[]> {
   return discoverDir(appRoot, 'app/Console/Commands')
 }

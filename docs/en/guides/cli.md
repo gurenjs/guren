@@ -78,6 +78,21 @@ token-based API, guard `routes/api.ts` with `createBearerTokenMiddleware` from
 `@guren/core` and issue tokens with `createApiToken` — see the
 [API tokens guide](./api-tokens.md).
 
+`add resource` refuses on those same two signals, and for the same reason: it
+scaffolds React page components and a controller that returns Inertia responses.
+Its refusal likewise comes before the table it would otherwise append to your
+`db/schema.ts`. Add a JSON controller wired into `routes/api.ts` by hand instead.
+
+`add resource` also needs the two files it patches to be there, whatever shape the
+rest of your app is: it appends its table to `db/schema.ts` and registers the CRUD
+routes in `routes/web.ts`, and unless those routes are registered already,
+`routes/web.ts` must export a route registrar it can patch. When one of those is
+missing, the command names it and writes nothing — rather than leaving a scaffold
+behind and a table appended for routes that were never registered. Use
+`bunx guren make:feature` instead if you want the files without the two patches;
+it prints the route block to paste and tells you which schema file to add the
+table to.
+
 ## Core Commands
 
 | Command | Description | Example |
@@ -108,7 +123,7 @@ Validate your app before shipping — these commands are also designed for AI co
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `check` | Validate integrity across routes, controllers, pages, and models — including whether every file in `routes/` is actually reached from your entry registrar — plus doc links, spec-view freshness, and architecture boundaries | `bunx guren check --json` |
+| `check` | Validate integrity across routes, controllers, pages, and models — including whether every file in `routes/` is actually reached from your entry registrar (and every file in a module's `routes/` from that module's own registrar) — plus doc links, spec-view freshness, and architecture boundaries | `bunx guren check --json` |
 | `audit` | Security audit: missing input validation or authentication on mutating routes, raw SQL with interpolation, hardcoded credentials, disabled security defaults, mass-assignment configuration, sensitive columns not listed in `static hidden`, emailed links built from the request host | `bunx guren audit --json` |
 | `doctor` | Project health report (env, config, generated files) with actionable next steps | `bunx guren doctor --next` |
 | `context [Entity]` | Project context map — or, with an entity name, everything about one model: table, relationships, routes with schemas, pages with Props, resource, policy, linked docs (`--module` disambiguates, `"app"` = project root) | `bunx guren context User --json` |
