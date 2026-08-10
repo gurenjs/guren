@@ -7,8 +7,8 @@ export interface WorkersExecutionContext {
 
 /**
  * The shape `createWorkersHandler` needs from an app. Structural rather than
- * `Application` itself, so `boot()` is not assumed to be idempotent — the
- * handler guarantees boot-once for anything conforming to this type.
+ * `Application` itself, so `boot()` is not assumed to be idempotent — each
+ * handler dedupes boot across its own requests for anything conforming here.
  */
 export interface WorkersAppLike {
   boot(): Promise<void>
@@ -20,11 +20,11 @@ export interface WorkersHandler {
 }
 
 export function createWorkersHandler(app: WorkersAppLike): WorkersHandler {
-  // Bindings only arrive with `fetch`, so boot is deferred to the first request
-  // and shared by everything that races it. `Application.boot()` memoizes the
-  // same way, but this is not redundant: `WorkersAppLike` is a published
-  // structural type, so the app here need not be a Guren `Application`. Drop
-  // this and the guarantee narrows to "whatever you passed already dedupes".
+  // Boot is deferred to the first request because it performs I/O (ORM setup
+  // against D1), which workerd forbids in global scope — not because bindings
+  // are unreachable there (RFC 0003). Deduped here rather than delegated to
+  // the app: conforming to `WorkersAppLike` does not imply an idempotent
+  // `boot()`.
   let bootPromise: Promise<void> | undefined
 
   return {
