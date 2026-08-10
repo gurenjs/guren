@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import { makeFeature, buildRouteRegistrationHint } from '../src/make-feature'
 import { parseFieldsString } from '../src/fields'
-import { API_ROUTES_FIXTURE, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, seedApiOnlyWorkspace } from './helpers'
+import { API_ROUTES_FIXTURE, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, seedApiOnlyApp } from './helpers'
 
 describe('parseFieldsString', () => {
   it('parses simple fields', () => {
@@ -341,18 +341,20 @@ describe('makeFeature', () => {
   })
 })
 
-// `make:feature` reaches the same page-emitting code `guren add resource` does,
-// and used to reach it without the refusal: on an API-only app it wrote four
-// React pages and a controller importing `@/.guren/pages.gen`, then exited 0.
+// The `resource` blueprint's refusal lives in `blueprints.ts`; these cover the
+// other doors to the same scaffold — `guren make:feature` and the MCP tool call
+// this function directly, and used to reach it without the refusal: on an
+// API-only app it wrote four React pages and a controller importing
+// `@/.guren/pages.gen`, then exited 0.
 describe('makeFeature on an API-only app', () => {
-  it('refuses under its own command name and writes nothing', async () => {
+  it('refuses, naming the two signals it read, and writes nothing', async () => {
     const workspace = await createTempWorkspace('guren-cli-feature-api-only-')
 
     try {
-      await seedApiOnlyWorkspace(workspace.dir)
+      await seedApiOnlyApp(workspace.dir)
 
       await expect(makeFeature('Post', { fields: 'title:string' })).rejects.toThrow(
-        /^guren make:feature scaffolds .*no @guren\/inertia-client dependency and no routes\/web\.ts/su,
+        /^The feature scaffold emits .*no @guren\/inertia-client dependency and no routes\/web\.ts/su,
       )
 
       // The validator is the first file `makeFeature` writes, before the pages
@@ -381,10 +383,10 @@ describe('makeFeature on an API-only app', () => {
       await mkdir(join(workspace.dir, 'routes'), { recursive: true })
       await writeFile(join(workspace.dir, 'routes/web.ts'), DEFAULT_ROUTES_FIXTURE, 'utf8')
       const target = join(workspace.dir, 'api-app')
-      await seedApiOnlyWorkspace(target)
+      await seedApiOnlyApp(target)
 
       await expect(makeFeature('Post', { fields: 'title:string', cwd: target })).rejects.toThrow(
-        'guren make:feature scaffolds',
+        'The feature scaffold emits',
       )
       expect(existsSync(join(target, 'resources/js/pages/posts/Index.tsx'))).toBe(false)
     } finally {

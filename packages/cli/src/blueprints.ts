@@ -1,4 +1,4 @@
-import { assertNotApiOnlyApp } from './app-surface'
+import { assertNotApiOnly } from './app-surface'
 import { makeAuth } from './make-auth'
 import { makeChannel } from './make-channel'
 import { buildRouteRegistrationHint, makeFeature } from './make-feature'
@@ -31,8 +31,6 @@ export interface RunBlueprintOptions extends WriterOptions {
    * dashboard route.
    */
   publicAccess?: boolean
-  /** Command name for refusals. `runBlueprint` derives `guren add <name>`. */
-  invokedAs?: string
 }
 
 export interface BlueprintDefinition {
@@ -58,10 +56,9 @@ const blueprintRegistry: Record<string, BlueprintDefinition> = {
     run: async (options) => {
       // Before the first write: every file below is Inertia-shaped, so a
       // partial scaffold here is only harder to clean up than none.
-      await assertNotApiOnlyApp(process.cwd(), {
-        command: options.invokedAs ?? 'guren add admin',
-        scaffolds: 'an Inertia dashboard',
-        remedy: 'Add an admin endpoint to routes/api.ts by hand',
+      await assertNotApiOnly(process.cwd(), {
+        does: 'guren add admin scaffolds an Inertia dashboard',
+        instead: 'Add an admin endpoint to routes/api.ts by hand',
       })
 
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
@@ -158,7 +155,11 @@ export default registerAdminRoutes
   },
   auth: {
     description: 'Install the default authentication stack for the current app.',
-    run: async (options) => makeAuth({ force: Boolean(options.force), install: true, invokedAs: options.invokedAs }),
+    // The API-only refusal lives inside makeAuth() rather than here, unlike the
+    // admin blueprint's: `guren make:auth` reaches the same scaffold without
+    // passing through this registry, so a guard placed here would leave that
+    // door open.
+    run: async (options) => makeAuth({ force: Boolean(options.force), install: true }),
   },
   oauth: {
     description: 'Install OAuth scaffolding with GitHub, Google, and Discord provider presets.',
@@ -623,19 +624,25 @@ export default class BroadcastProvider extends ServiceProvider {
       const singular = singularize(pascalCase(options.name.trim()))
       const routeName = collectionSlug(singular)
       const routeVar = camelCase(routeName)
+      const fields = parseFieldsString(options.fields ?? '')
+
+      // Last of the checks, and still before the first write: everything above
+      // is pure, so a usage error is reported as one rather than being masked
+      // by the app's shape. The page components and the Inertia-returning
+      // controller are unusable on an API-only app, and `updateResourceSchema`
+      // runs before the route wiring can fail — so reaching that failure
+      // appends a table to the app's own `db/schema.ts` as well.
+      await assertNotApiOnly(process.cwd(), {
+        does: 'guren add resource scaffolds Inertia pages and a controller that returns Inertia responses',
+        instead: 'Add a JSON controller to routes/api.ts by hand',
+      })
 
       const created = await makeFeature(singular, {
         force: Boolean(options.force),
         fields: options.fields,
         publicAccess: options.publicAccess,
         announce: false,
-        invokedAs: options.invokedAs,
       })
-
-      // After the delegation: `makeFeature` parses the same string, so on an
-      // API-only app the developer hears the refusal, not a fields complaint
-      // about a command that could not have run anyway.
-      const fields = parseFieldsString(options.fields ?? '')
 
       await updateResourceSchema(singular, fields)
       await updateResourceRoutes(singular, routeName, routeVar)
@@ -808,7 +815,10 @@ async function updateResourceRoutes(singular: string, routeName: string, routeVa
   const routesPath = resolve(process.cwd(), 'routes/web.ts')
   let content = await readFile(routesPath, 'utf8')
 
-  if (!content.includes(`'${routeName}.index'`) && !content.includes(`/${routeName}'`)) {
+  // Matching `/${routeName}'` unanchored made an unrelated `/admin/posts`
+  // read as "the posts routes are already registered", so the run reported
+  // success while registering nothing.
+  if (!content.includes(`'${routeName}.index'`) && !content.includes(`'/${routeName}'`)) {
     const registrar = findRouteRegistrar(content)
 
     // Located before anything is written: an app whose routes file cannot be
@@ -833,13 +843,17 @@ async function updateResourceRoutes(singular: string, routeName: string, routeVa
     // Insert before the closing brace of the route registrar function.
     const groupBlock = `\n${group.map((line) => `  ${line}`).join('\n')}\n`
     content = content.slice(0, registrar.bodyEnd) + groupBlock + content.slice(registrar.bodyEnd)
-  }
 
-  for (const statement of [
-    `import ${singular}Controller from '../app/Http/Controllers/${singular}Controller.js'`,
-    `import { ${singular}PayloadSchema } from '../app/Http/Validators/${singular}Validator.js'`,
-  ]) {
-    content = insertImport(content, statement) ?? content
+    // Inside the guard: these identifiers are only used by the group above,
+    // so a skipped registration must skip them too — appended unconditionally
+    // they are unused bindings, and the app stops compiling under
+    // noUnusedLocals.
+    for (const statement of [
+      `import ${singular}Controller from '../app/Http/Controllers/${singular}Controller.js'`,
+      `import { ${singular}PayloadSchema } from '../app/Http/Validators/${singular}Validator.js'`,
+    ]) {
+      content = insertImport(content, statement) ?? content
+    }
   }
 
   await writeFile(routesPath, content, 'utf8')
@@ -859,6 +873,5 @@ export function getBlueprint(name: string): BlueprintDefinition {
 
 export async function runBlueprint(name: string, options: RunBlueprintOptions = {}): Promise<string[]> {
   assertCwdUnsupported(options, 'guren new --blueprint')
-  // Derived, not hardcoded per blueprint: the invocation is the registry key.
-  return getBlueprint(name).run({ invokedAs: `guren add ${name}`, ...options })
+  return getBlueprint(name).run(options)
 }

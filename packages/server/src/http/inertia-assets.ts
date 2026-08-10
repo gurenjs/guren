@@ -3,7 +3,13 @@ import { dirname, resolve, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
 import type { Application } from './Application'
-import { createStaticRewrite, registerDevAssets, resolveInertiaClientRoute, type DevAssetsOptions } from './dev-assets'
+import {
+  createStaticRewrite,
+  registerDevAssets,
+  resolveInertiaClientDir,
+  resolveInertiaClientRoute,
+  type DevAssetsOptions,
+} from './dev-assets'
 import { registerRootPublicAssets } from './public-assets'
 import { isPathWithin, isRealPathWithin } from '../support/contained-path'
 import { parseImportMap } from '../support/import-map'
@@ -94,30 +100,15 @@ export function configureInertiaAssets(app: Application, options: InertiaAssetsO
 
   registerRootPublicAssets(app, publicDir, options.rootPublicAssets)
 
-  if (isProduction && options.inertiaClient !== false) {
+  if (options.inertiaClient !== false) {
     try {
-      let inertiaClientEntry: string | undefined
-
-      if (typeof (import.meta as any).resolve === 'function') {
-        try {
-          const resolved = (import.meta as any).resolve('@guren/inertia-client/app', import.meta.url)
-          inertiaClientEntry = fileURLToPath(new URL(resolved))
-        } catch {
-          inertiaClientEntry = undefined
-        }
-      }
-
-      if (!inertiaClientEntry) {
-        throw new Error('Unable to resolve @guren/inertia-client entry')
-      }
-
       registerBuiltInertiaClient(
         app,
-        dirname(inertiaClientEntry),
+        resolveInertiaClientDir(),
         options.inertiaClientPath ?? DEFAULT_VENDOR_CLIENT_PATH,
       )
     } catch (error) {
-      console.warn('Unable to resolve @guren/inertia-client/app for production serving.', error)
+      console.warn('Unable to resolve @guren/inertia-client for production serving.', error)
     }
   }
 }

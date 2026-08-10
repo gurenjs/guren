@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { consola } from 'consola'
-import { API_ROUTES_FIXTURE, BLOG_ROUTES_FIXTURE, createTempWorkspace, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, SQLITE_SCHEMA_FIXTURE, seedApiOnlyWorkspace } from './helpers'
+import { API_ROUTES_FIXTURE, BLOG_ROUTES_FIXTURE, createTempWorkspace, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, seedApiOnlyApp, SQLITE_SCHEMA_FIXTURE } from './helpers'
 import { makeAuth } from '../src/make-auth'
 
 // Shared with packages/create-app/templates/blog/app/Providers/AuthProvider.ts,
@@ -1179,80 +1179,6 @@ export function registerWebRoutes(router: Router): void {
     }
   })
 
-  // The sign-in experience is eight `.tsx` pages and six controllers importing
-  // `@/.guren/pages.gen`, so an API-only app can use none of it. `guren add
-  // auth` delegates here, so this one guard covers both commands.
-  describe('on an API-only app', () => {
-    it('refuses under its own command name, naming the two signals it read', async () => {
-      const workspace = await createTempWorkspace('guren-cli-make-auth-api-only-')
-      try {
-        await seedApiOnlyWorkspace(workspace.dir)
-
-        await expect(makeAuth()).rejects.toThrow(
-          /^guren make:auth scaffolds .*no @guren\/inertia-client dependency and no routes\/web\.ts/su,
-        )
-      } finally {
-        await workspace.cleanup()
-      }
-    })
-
-    it('writes nothing at all and leaves the app untouched', async () => {
-      const workspace = await createTempWorkspace('guren-cli-make-auth-api-only-clean-')
-      try {
-        await seedApiOnlyWorkspace(workspace.dir)
-        await mkdir(join(workspace.dir, 'db'), { recursive: true })
-        await writeFile(join(workspace.dir, 'db/schema.ts'), PG_SCHEMA_FIXTURE, 'utf8')
-
-        await expect(makeAuth({ install: true })).rejects.toThrow()
-
-        for (const path of [
-          'app/Http/Controllers/Auth/LoginController.ts',
-          'app/Providers/AuthProvider.ts',
-          'resources/js/pages/auth/Login.tsx',
-          'resources/js/components/Layout.tsx',
-          'routes/auth.ts',
-        ]) {
-          expect(existsSync(join(workspace.dir, path))).toBe(false)
-        }
-        // The users table is patched into the schema, and the api-only
-        // routes file is what `install: true` would have wired into.
-        expect(await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')).toBe(PG_SCHEMA_FIXTURE)
-        expect(await readFile(join(workspace.dir, 'routes/api.ts'), 'utf8')).toBe(API_ROUTES_FIXTURE)
-      } finally {
-        await workspace.cleanup()
-      }
-    })
-
-    // The refusal is about what the scaffold renders, which no flag changes —
-    // and it is reported ahead of flag validation, so the developer hears the
-    // reason the command cannot run here at all.
-    it('refuses before rejecting an unusable flag combination', async () => {
-      const workspace = await createTempWorkspace('guren-cli-make-auth-api-only-flags-')
-      try {
-        await seedApiOnlyWorkspace(workspace.dir)
-
-        await expect(makeAuth({ oauthOnly: true })).rejects.toThrow('guren make:auth scaffolds')
-      } finally {
-        await workspace.cleanup()
-      }
-    })
-
-    // Positive evidence only: no manifest is an unknown app, not an API-only one.
-    it('still scaffolds when there is no package.json to judge by', async () => {
-      const workspace = await createTempWorkspace('guren-cli-make-auth-unknown-app-')
-      try {
-        await mkdir(join(workspace.dir, 'routes'), { recursive: true })
-        await writeFile(join(workspace.dir, 'routes/api.ts'), API_ROUTES_FIXTURE, 'utf8')
-
-        const created = await makeAuth()
-
-        expect(created.some((file) => file.endsWith('resources/js/pages/auth/Login.tsx'))).toBe(true)
-      } finally {
-        await workspace.cleanup()
-      }
-    })
-  })
-
   it('keeps the profile email editable without --oauth', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-auth-profile-editable-')
     try {
@@ -1270,5 +1196,59 @@ export function registerWebRoutes(router: Router): void {
     } finally {
       await workspace.cleanup()
     }
+  })
+
+  // `guren add auth` reaches this same function through the blueprint registry,
+  // which is where the sibling `add admin` refusal lives. These cover the other
+  // door: `guren make:auth` calls makeAuth() directly.
+  describe('on an API-only app', () => {
+    it('refuses, naming the two signals it read', async () => {
+      const workspace = await createTempWorkspace('guren-cli-make-auth-api-only-')
+      try {
+        await seedApiOnlyApp(workspace.dir)
+
+        await expect(makeAuth({ force: true })).rejects.toThrow(
+          /no @guren\/inertia-client dependency and no routes\/web\.ts/,
+        )
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+
+    // The refusal has to land before the schema patch and the migration, not
+    // just before the first file write: `--force` reruns overwrite scaffolded
+    // files, but nothing undoes a patched db/schema.ts.
+    it('leaves the schema and the routes file untouched', async () => {
+      const workspace = await createTempWorkspace('guren-cli-make-auth-api-only-intact-')
+      try {
+        await seedApiOnlyApp(workspace.dir)
+
+        await expect(makeAuth({ force: true })).rejects.toThrow()
+
+        expect(await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')).toBe(PG_SCHEMA_FIXTURE)
+        expect(await readFile(join(workspace.dir, 'routes/api.ts'), 'utf8')).toBe(API_ROUTES_FIXTURE)
+        expect(existsSync(join(workspace.dir, 'app/Models/User.ts'))).toBe(false)
+        expect(existsSync(join(workspace.dir, 'resources/js/pages/auth/Login.tsx'))).toBe(false)
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+
+    // The app shape is reported ahead of the flag validation, which would
+    // otherwise reject this same call for `--oauth-only` without `--oauth`.
+    // Fixing the flags gets you no further here, so naming that first would
+    // send the caller down a path that ends in this error anyway.
+    it('reports the app shape ahead of an invalid flag combination', async () => {
+      const workspace = await createTempWorkspace('guren-cli-make-auth-api-only-oauth-')
+      try {
+        await seedApiOnlyApp(workspace.dir)
+
+        await expect(makeAuth({ force: true, oauthOnly: true })).rejects.toThrow(
+          'The auth scaffold renders Inertia sign-in pages',
+        )
+      } finally {
+        await workspace.cleanup()
+      }
+    })
   })
 })

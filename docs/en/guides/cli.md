@@ -64,20 +64,20 @@ to `/login`, a route that only exists once you run `bunx guren add auth`. Add
 authentication first if you want a usable dashboard, or pass `--public` and add
 your own check later.
 
-### Commands that need a fullstack app
+`add auth` needs a fullstack app for the same reason, and refuses on the same two
+signals — as does `make:auth`, which reaches the same scaffold. Auth also patches
+`db/schema.ts` and generates a migration, so the refusal comes before all of that,
+not just before the first file: the app is left exactly as it was. For a
+token-based API, guard `routes/api.ts` with `createBearerTokenMiddleware` from
+`@guren/core` and issue tokens with `createApiToken` — see the
+[API tokens guide](./api-tokens.md).
 
-`add admin`, `add resource`, `add auth`, `make:feature`, and `make:auth` all
-scaffold Inertia pages and the controllers that render them. On an app scaffolded
-from the `api` blueprint — no `@guren/inertia-client` dependency and no
-`routes/web.ts` (or `routes/web.js`) — each of them refuses and writes nothing
-rather than leaving behind controllers that do not typecheck, pages nothing
-renders, and a routes file nothing mounts. Add the endpoints to `routes/api.ts` by
-hand instead, or scaffold a fullstack app.
-
-Both signals are required, so a fullstack workspace member whose dependencies are
-hoisted to the root manifest is still scaffolded as usual — its `routes/web.ts`
-vouches for it — as is any app the CLI cannot read a `package.json` for.
-Single-file generators (`make:controller`, `make:view`) also emit Inertia-shaped
+`add resource` refuses on those same two signals, and for the same reason: it
+scaffolds React page components and a controller that returns Inertia responses.
+Its refusal likewise comes before the table it would otherwise append to your
+`db/schema.ts`. Add a JSON controller wired into `routes/api.ts` by hand instead.
+`make:feature` reaches the same scaffold and refuses the same way. The
+single-file generators (`make:controller`, `make:view`) also emit Inertia-shaped
 output but are not guarded: one stray file is a deletion, not a broken scaffold.
 
 ## Core Commands
@@ -110,7 +110,7 @@ Validate your app before shipping — these commands are also designed for AI co
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `check` | Validate integrity across routes, controllers, pages, and models — including whether every file in `routes/` is actually reached from your entry registrar — plus doc links, spec-view freshness, and architecture boundaries | `bunx guren check --json` |
+| `check` | Validate integrity across routes, controllers, pages, and models — including whether every file in `routes/` is actually reached from your entry registrar (and every file in a module's `routes/` from that module's own registrar) — plus doc links, spec-view freshness, and architecture boundaries | `bunx guren check --json` |
 | `audit` | Security audit: missing input validation or authentication on mutating routes, raw SQL with interpolation, hardcoded credentials, disabled security defaults, mass-assignment configuration, sensitive columns not listed in `static hidden`, emailed links built from the request host | `bunx guren audit --json` |
 | `doctor` | Project health report (env, config, generated files) with actionable next steps | `bunx guren doctor --next` |
 | `context [Entity]` | Project context map — or, with an entity name, everything about one model: table, relationships, routes with schemas, pages with Props, resource, policy, linked docs (`--module` disambiguates, `"app"` = project root) | `bunx guren context User --json` |

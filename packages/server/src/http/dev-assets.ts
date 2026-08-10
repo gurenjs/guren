@@ -1,6 +1,6 @@
 import type { Context } from 'hono'
 import { serveStatic } from 'hono/bun'
-import { dirname, extname, resolve } from 'node:path'
+import { dirname, extname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import type { Application } from './Application'
@@ -79,7 +79,24 @@ export interface DevAssetsOptions {
 // without it installed.
 const require = createRequire(import.meta.url)
 function resolveGurenInertiaClient(): string {
+  // Dev *wants* the `./app` specifier's answer, sources included: a tsconfig
+  // `paths` entry mapping the subpath at `src/` hands back `src/app.tsx`, and
+  // the transpile route serves that just fine.
   return require.resolve('@guren/inertia-client/app')
+}
+
+/**
+ * Absolute path to `@guren/inertia-client`'s build output, the directory
+ * production serves the vendored client and its chunks from.
+ *
+ * Unlike {@link resolveGurenInertiaClient}, this must not follow a tsconfig
+ * `paths` mapping to the package's TypeScript sources — production serves
+ * files, it cannot transpile them. So it anchors on `./package.json`, a
+ * subpath such a mapping misses (there is no `src/package.json`) and real
+ * package resolution answers with the package root.
+ */
+export function resolveInertiaClientDir(): string {
+  return join(dirname(require.resolve('@guren/inertia-client/package.json')), 'dist')
 }
 
 /**

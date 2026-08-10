@@ -1,5 +1,5 @@
 import { consola } from 'consola'
-import { assertNotApiOnlyApp } from './app-surface'
+import { assertNotApiOnly } from './app-surface'
 import { camelCase, kebabCase, pagesAccessor, pascalCase, safeModuleName, writeScaffoldFiles, writerOptionsFrom, type WriterOptions } from './utils'
 import { pluralize } from './inflect'
 import { makeModel } from './make-model'
@@ -19,18 +19,19 @@ export interface MakeFeatureOptions extends WriterOptions {
   withPolicy?: boolean
   /** Print created files and next steps (default: true). Callers that wire routes/schema themselves pass false. */
   announce?: boolean
-  /** Command name for refusals; defaults to this function's own. */
-  invokedAs?: string
 }
 
 export async function makeFeature(name: string, options: MakeFeatureOptions = {}): Promise<string[]> {
-  // Before the first write (`makeValidator` below is one). `options.cwd` rather
-  // than the process directory: `guren mcp` scaffolds into a workspace it
-  // names, and judging its own directory would answer about the wrong project.
-  await assertNotApiOnlyApp(options.cwd ?? process.cwd(), {
-    command: options.invokedAs ?? 'guren make:feature',
-    scaffolds: 'React pages and a controller that returns Inertia responses',
-    remedy: 'Add the JSON endpoints to routes/api.ts by hand',
+  // The `resource` blueprint carries its own copy of this refusal, but these
+  // are the other doors to the same scaffold: `guren make:feature` and the
+  // `guren_make_feature` MCP tool call this function directly. Before the
+  // first write (`makeValidator` below is one), and against `options.cwd`
+  // rather than the process directory — `guren mcp` scaffolds into a
+  // workspace it names, and judging its own directory would answer about the
+  // wrong project.
+  await assertNotApiOnly(options.cwd ?? process.cwd(), {
+    does: 'The feature scaffold emits React pages and a controller that returns Inertia responses',
+    instead: 'Add a JSON controller wired into routes/api.ts by hand',
   })
 
   const fields = parseFieldsString(options.fields ?? '')

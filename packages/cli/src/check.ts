@@ -25,7 +25,7 @@ import {
   staticStringProperty,
 } from './model-parser'
 import { checkConsoleCommandRegistration } from './console-check'
-import { checkRouteRegistrarWiring, ROUTES_DIR } from './routes-check'
+import { affectsRouteWiring, checkRouteRegistrarWiring } from './routes-check'
 import { checkSchemaTimestamps } from './schema-check'
 import { parseSchemaTables, schemaPathFor, type SchemaTable } from './schema-parser'
 import { ParseCache } from './parse-cache'
@@ -227,20 +227,18 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     const commandRegistrationResults = await checkConsoleCommandRegistration(cwd, cache)
     checks.push(...commandRegistrationResults)
 
-    // 7.5. Check every routes file's registrar is reached from the app's entry
-    // registrar (the wiring `guren add admin|oauth|auth` performs
-    // automatically — this catches routes files written, moved, or unhooked by
-    // hand, whose only other symptom is a 404). Not an architecture boundary
-    // rule, so it stays out of `--arch`'s fast path alongside checks 6-8.
+    // 7.5. Check every routes file's registrar is reached from the entry
+    // registrar that would mount it — the app's for `routes/`, the registrar
+    // `defineModule({ routes })` names for `modules/<name>/routes/`. This
+    // catches routes files written, moved, or unhooked by hand, whose only
+    // other symptom is a 404. Not an architecture boundary rule, so it stays
+    // out of `--arch`'s fast path alongside checks 6-8.
     //
     // Gated as a unit under --changed, the way check 10.5 gates i18n — see
     // checkRouteRegistrarWiring for why filtering by changed *candidate*
     // would miss the edit that usually breaks the wiring.
     const routesChanged =
-      !changedFiles
-      || [...changedFiles].some(
-        (file) => file === ROUTES_DIR || file.startsWith(`${ROUTES_DIR}/`) || file === options.routesFile,
-      )
+      !changedFiles || [...changedFiles].some((file) => affectsRouteWiring(file, options.routesFile))
     if (routesChanged) {
       const routeWiringResults = await checkRouteRegistrarWiring({ cwd, cache, routesFile: options.routesFile })
       checks.push(...routeWiringResults)

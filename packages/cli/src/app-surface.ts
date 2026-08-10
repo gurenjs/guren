@@ -47,34 +47,25 @@ export async function isConfirmedApiOnlyApp(cwd: string): Promise<boolean> {
 }
 
 /**
- * Refuses to scaffold Inertia-shaped output into a confirmed API-only app —
- * `isConfirmedApiOnlyApp` plus the refusal, one call, so the check and the
- * message naming its two signals cannot drift apart. Callers supply only what
- * their own command would have written and what to do instead.
+ * Refuses an API-only app on a scaffolder's behalf, before its first write.
  *
- * `command` is the whole invocation the developer typed, because one scaffolder
- * backs more than one of them — `makeFeature` is reached as both `guren add
- * resource` and `guren make:feature` — and a refusal naming the other sends
- * them to the wrong docs page.
+ * The middle of the message — which signals were read — belongs to the
+ * predicate above, not to each caller. Callers supplied it themselves until
+ * there were two of them saying it in two places, and a signal added or dropped
+ * here would have left both descriptions stale independently.
  *
- * Deliberately not called by the single-file generators (`make:controller`
- * emits an Inertia controller, `make:view` a page component): one file is a
- * deletion, not the multi-file mess this guard exists to prevent, and their
- * templates are the thing to make dialect-aware if that ever changes.
+ * `does` completes "guren add x scaffolds …" and `instead` is the whole
+ * alternative sentence, because what an app should do without this scaffold
+ * differs per command in a way no template can derive.
  */
-export async function assertNotApiOnlyApp(cwd: string, options: {
-  /** Full invocation, e.g. `guren add admin` or `guren make:feature`. */
-  command: string
-  /** What the command would have written, phrased as the object of "scaffolds". */
-  scaffolds: string
-  /** What to do instead of running it here — one clause, no trailing period. */
-  remedy: string
-}): Promise<void> {
+export async function assertNotApiOnly(
+  cwd: string,
+  { does, instead }: { does: string; instead: string },
+): Promise<void> {
   if (!(await isConfirmedApiOnlyApp(cwd))) return
 
-  const { command, scaffolds, remedy } = options
   throw new Error(
-    `${command} scaffolds ${scaffolds}, but this app has no @guren/inertia-client `
-    + `dependency and no routes/web.ts. ${remedy}, or scaffold a fullstack app.`,
+    `${does}, but this app has no @guren/inertia-client dependency and no ${DEFAULT_ROUTES_FILE}. `
+    + `${instead}, or scaffold a fullstack app.`,
   )
 }

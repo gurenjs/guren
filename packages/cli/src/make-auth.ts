@@ -1,8 +1,8 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, relative, resolve, sep as pathSep } from 'node:path'
 import { consola } from 'consola'
-import { assertNotApiOnlyApp } from './app-surface'
 import { assertCwdUnsupported, writeScaffoldFiles, type WriterOptions } from './utils'
+import { assertNotApiOnly } from './app-surface'
 import {
   addImport,
   addProvider,
@@ -2143,8 +2143,6 @@ export interface MakeAuthOptions extends WriterOptions {
   oauth?: string
   /** Scaffold OAuth as the only sign-in method: no password login, registration, or reset. Requires `oauth`. */
   oauthOnly?: boolean
-  /** Command name for refusals; defaults to this function's own. */
-  invokedAs?: string
 }
 
 /**
@@ -2219,14 +2217,13 @@ function resolveAuthFeatures(options: MakeAuthOptions): AuthFeatures {
 export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]> {
   assertCwdUnsupported(options, 'make:auth')
 
-  // Before flag validation: no flag combination changes what the scaffold
-  // renders, so the developer hears why the command cannot run here at all.
-  // The process directory is the project — `assertCwdUnsupported` just ruled
-  // out the alternative.
-  await assertNotApiOnlyApp(process.cwd(), {
-    command: options.invokedAs ?? 'guren make:auth',
-    scaffolds: 'Inertia sign-in pages and the controllers that render them',
-    remedy: 'Authenticate routes/api.ts requests by hand',
+  // Every variant of this scaffold is Inertia-shaped, and the refusal has to
+  // precede the schema patch and the migration as well as the first write — a
+  // run stopped halfway through those is harder to undo than one that never
+  // started.
+  await assertNotApiOnly(process.cwd(), {
+    does: 'The auth scaffold renders Inertia sign-in pages',
+    instead: 'Guard routes/api.ts with createBearerTokenMiddleware from @guren/core instead',
   })
 
   const features = resolveAuthFeatures(options)
