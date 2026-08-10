@@ -261,17 +261,20 @@ FormRequest クラスとバリデーションルールの定義については�
 `shareInertiaProps()` を使って、すべての Inertia レスポンスにアプリケーション全体のデータを注入できます。サービスプロバイダー（`bunx guren make:provider` で生成）の `boot()` から呼ぶのが定位置です。
 
 ```ts
-// app/Providers/LocaleProvider.ts
+// app/Providers/AppInfoProvider.ts
 import { ServiceProvider, shareInertiaProps } from '@guren/core'
 
-export default class LocaleProvider extends ServiceProvider {
+export default class AppInfoProvider extends ServiceProvider {
   boot(): void {
-    shareInertiaProps((ctx) => ({
-      i18n: { locale: ctx.req.header('accept-language')?.split(',')[0] ?? 'en' },
+    shareInertiaProps(() => ({
+      appVersion: process.env.APP_VERSION ?? 'dev',
     }), this.container)
   }
 }
 ```
+
+> [!NOTE]
+> リクエストのロケールと翻訳カタログは、`createApp({ i18n })` でアプリを作成していれば自動的に共有されます — [i18nガイド](./i18n.md)を参照してください。ここでロケール検出を手書きする必要はありません。
 
 先に登録されたリゾルバーの props にマージされるので、複数のプロバイダーがそれぞれ共有 props を足しても互いを壊しません。
 

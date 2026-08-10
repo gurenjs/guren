@@ -4,8 +4,7 @@ import { pages } from '@/.guren/pages.gen'
 export default class HomeController extends Controller {
   async index(): Promise<Response> {
     const props = {
-      // Message text lives in lang/en/messages.json; `guren codegen` keeps
-      // the key typed. Add lang/<locale>/ directories to translate the app.
+      // Message text lives in lang/en/messages.json (key typed by codegen).
       message: this.t('messages.welcome', { name: '__APP_TITLE__' }),
     }
 

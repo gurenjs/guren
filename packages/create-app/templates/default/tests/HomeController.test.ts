@@ -2,8 +2,7 @@ import { beforeAll, describe, it } from 'bun:test'
 import { TestApp } from '@guren/testing'
 import app from '../src/app.js'
 
-// Boot the real application so tests exercise the same configuration
-// (routes, providers, i18n, security defaults) the server runs with.
+// Boots the real src/app.ts so tests share its configuration.
 describe('app', () => {
   let http: TestApp
 
@@ -12,11 +11,8 @@ describe('app', () => {
     http = TestApp.fromFetch((request) => app.fetch(request))
   })
 
-  it('serves the home page', async () => {
-    const response = await http.get('/')
-    response.assertOk()
-    // The message comes from lang/en/messages.json via this.t() — this
-    // catches a broken catalog or interpolation, not just a 200.
+  it('serves the translated home page', async () => {
+    const response = await http.get('/').assertOk()
     await response.assertBodyContains('Welcome to')
   })
 

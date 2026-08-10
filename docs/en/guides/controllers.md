@@ -245,17 +245,20 @@ Controllers are instantiated per request, so one method can set an instance fiel
 Use `shareInertiaProps()` to inject application-wide data into every Inertia response. The natural home for the call is a service provider's `boot()` (generate one with `bunx guren make:provider`).
 
 ```ts
-// app/Providers/LocaleProvider.ts
+// app/Providers/AppInfoProvider.ts
 import { ServiceProvider, shareInertiaProps } from '@guren/core'
 
-export default class LocaleProvider extends ServiceProvider {
+export default class AppInfoProvider extends ServiceProvider {
   boot(): void {
-    shareInertiaProps((ctx) => ({
-      i18n: { locale: ctx.req.header('accept-language')?.split(',')[0] ?? 'en' },
+    shareInertiaProps(() => ({
+      appVersion: process.env.APP_VERSION ?? 'dev',
     }), this.container)
   }
 }
 ```
+
+> [!NOTE]
+> The request locale and translation catalogs are already shared for you when the app is created with `createApp({ i18n })` — see the [i18n guide](./i18n.md). There's no need to hand-roll locale detection here.
 
 It merges its props over whatever resolver was registered before, so several providers can each contribute shared props without clobbering one another.
 

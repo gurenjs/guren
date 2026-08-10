@@ -36,6 +36,37 @@ describe('Posts API', () => {
 })
 ```
 
+### 実アプリをラップする
+
+`TestApp.create({ ... })`は渡したパーツからアプリを組み立てます — 単体スライスのテストには便利ですが、その部分集合はサーバーが実際に動かす構成(プロバイダー、`auth`、`i18n`、セキュリティデフォルト)から静かにドリフトし得ます。実構成を検証したいテストでは、プロジェクトがエクスポートするアプリをbootしてfetchハンドラをラップします:
+
+```ts
+import { TestApp } from '@guren/testing'
+import app from '../src/app.js'
+
+let http: TestApp
+
+beforeAll(async () => {
+  await app.boot()
+  http = TestApp.fromFetch((request) => app.fetch(request))
+})
+
+test('ホームページを返す', async () => {
+  await http.get('/').assertOk()
+})
+```
+
+scaffoldされたアプリはこのパターンを同梱しています。`app.fetch`は必ずアロー関数経由で渡してください — メソッドはインスタンス状態を読むため、束縛せずに渡すと最初のリクエストで例外になります。
+
+パーツから組み立てる場合、`TestApp.create()`は`createApp`のオプションをミラーします: セッション+CSRFミドルウェアには`auth`を、テスト対象のコントローラーが`this.t()` / `this.tc()`を使うなら`i18n`を渡します:
+
+```ts
+const app = await TestApp.create({
+  routes: registerWebRoutes,
+  i18n: { supported: ['en'] },
+})
+```
+
 ### リクエストの送信
 
 TestApp は標準的な HTTP メソッドをすべてサポートしています。

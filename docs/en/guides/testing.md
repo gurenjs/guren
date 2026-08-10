@@ -44,6 +44,37 @@ await app.patch('/posts/1', body)
 await app.delete('/posts/1')
 ```
 
+### Wrapping the real application
+
+`TestApp.create({ ... })` assembles an app from the parts you pass — good for isolated slices, but the subset can silently drift from what the server actually runs (providers, `auth`, `i18n`, security defaults). For tests that should exercise the real configuration, boot the app your project exports and wrap its fetch handler:
+
+```ts
+import { TestApp } from '@guren/testing'
+import app from '../src/app.js'
+
+let http: TestApp
+
+beforeAll(async () => {
+  await app.boot()
+  http = TestApp.fromFetch((request) => app.fetch(request))
+})
+
+test('serves the home page', async () => {
+  await http.get('/').assertOk()
+})
+```
+
+This is the pattern scaffolded apps ship with. Pass `app.fetch` through an arrow function — the method reads instance state, so handing the unbound reference over throws on the first request.
+
+When you do assemble an app from parts, `TestApp.create()` mirrors `createApp`'s options: pass `auth` to mount session + CSRF middleware, and `i18n` when controllers under test use `this.t()` / `this.tc()`:
+
+```ts
+const app = await TestApp.create({
+  routes: registerWebRoutes,
+  i18n: { supported: ['en'] },
+})
+```
+
 ### Fluent Assertions
 
 Chain assertions directly on the response:

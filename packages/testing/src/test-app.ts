@@ -34,10 +34,7 @@ export interface TestAppOptions {
   readonly auth?: Record<string, unknown>
   /**
    * Mirrors `createApp({ i18n })`: required when controllers under test use
-   * `this.t()`/`this.tc()`. Ignored by the Hono fallback. Alternatively, boot
-   * the real app and wrap it with
-   * `TestApp.fromFetch((request) => app.fetch(request))` so tests share its
-   * full configuration.
+   * `this.t()`/`this.tc()`. Ignored by the Hono fallback.
    */
   readonly i18n?: I18nPluginOptions
 }
