@@ -103,6 +103,38 @@ describe('createWorkersHandler', () => {
     expect(getWorkersEnv<TestEnv>()).toBe(secondEnv)
   })
 
+  test('should clear the env holder when boot throws synchronously rather than rejecting', async () => {
+    let bootCalls = 0
+    const app: WorkersAppLike = {
+      // Not `async`: `WorkersAppLike` only requires a promise-returning
+      // `boot()`, so a conforming app can throw before returning one.
+      boot() {
+        bootCalls += 1
+        if (bootCalls === 1) {
+          throw new Error('boot failed')
+        }
+        return Promise.resolve()
+      },
+      fetch() {
+        return new Response('ok')
+      },
+    }
+    const handler = createWorkersHandler(app)
+    const ctx = createExecutionContext()
+    const firstEnv = { DB: 'first-db' }
+    const secondEnv = { DB: 'second-db' }
+
+    await expect(
+      handler.fetch(new Request('https://example.com/one'), firstEnv, ctx),
+    ).rejects.toThrow('boot failed')
+
+    const response = await handler.fetch(new Request('https://example.com/two'), secondEnv, ctx)
+
+    expect(bootCalls).toBe(2)
+    expect(await response.text()).toBe('ok')
+    expect(getWorkersEnv<TestEnv>()).toBe(secondEnv)
+  })
+
   test('should reject every concurrent request sharing a failed boot, then recover on retry', async () => {
     let bootCalls = 0
     const bootDeferred = deferred<void>()
