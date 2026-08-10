@@ -419,6 +419,32 @@ export class TestApp {
   }
 
   /**
+   * Create a TestApp from an existing Application instance — typically the one
+   * exported by `src/app.ts` — booting it if it has not booted yet.
+   *
+   * `fetch` is bound to the instance internally, so there is no need for the
+   * `TestApp.fromFetch((request) => app.fetch(request))` arrow wrapper: an
+   * unbound `app.fetch` reference throws because it reads instance state.
+   *
+   * Booting is left to the app, whose `boot()` is expected to be idempotent
+   * (@guren/server's Application reuses its first boot), so several test files
+   * may call this on the same instance.
+   *
+   * @example
+   * import app from '../src/app'
+   *
+   * const http = await TestApp.fromApp(app)
+   * await http.get('/').assertOk()
+   */
+  static async fromApp(app: ApplicationLike, baseUrl = 'http://localhost'): Promise<TestApp> {
+    // Set before boot() so boot-time code sees test mode; fromFetch repeats it.
+    process.env.GUREN_TESTING = '1'
+    await app.boot()
+
+    return TestApp.fromFetch((request) => app.fetch(request), baseUrl)
+  }
+
+  /**
    * Create a TestApp from an existing fetch function.
    * Useful when you already have a Hono app or Application instance.
    */

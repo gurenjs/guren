@@ -244,6 +244,7 @@ export class Application {
   private bunTeardownRegistered = false
   private autoSessionAttached = false
   private routesRegistered = false
+  private bootPromise?: Promise<void>
 
   constructor(private readonly options: ApplicationOptions = {}) {
     this.hono = new Hono()
@@ -384,8 +385,25 @@ export class Application {
 
   /**
    * Executes provider registration, boot callback, mounts routes, and boots providers.
+   *
+   * Booting twice is a no-op: the first call's promise is reused, so security
+   * middleware and routes are never mounted a second time — including when two
+   * callers boot concurrently, before the first has finished. A boot that
+   * throws is not remembered, so a later call attempts boot again (it resumes
+   * on a partially mounted app rather than starting clean).
    */
   async boot(): Promise<void> {
+    this.bootPromise ??= this.bootOnce()
+
+    try {
+      await this.bootPromise
+    } catch (error) {
+      this.bootPromise = undefined
+      throw error
+    }
+  }
+
+  private async bootOnce(): Promise<void> {
     this.mountSecurityDefaults()
     await this.providerManager.registerAll()
 
