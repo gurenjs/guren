@@ -76,6 +76,11 @@ bunx guren add admin --public
 保護し、`createApiToken` でトークンを発行してください
 （[APIトークンガイド](./api-tokens.md)参照）。
 
+`add resource` も同じ2つのシグナルを見て、同じ理由で中断します。React のページ
+コンポーネントと Inertia レスポンスを返すコントローラーを生成するためです。中断は
+同様に、`db/schema.ts` へ追記されるはずだったテーブルよりも前の時点で起こります。
+JSON を返すコントローラーは `routes/api.ts` に手動で結線してください。
+
 ## 主要コマンド
 
 | コマンド | 説明 | 例 |

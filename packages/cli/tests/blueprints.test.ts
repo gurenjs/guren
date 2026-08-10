@@ -645,6 +645,124 @@ describe('auth blueprint on an API-only app', () => {
   })
 })
 
+describe('resource blueprint on an API-only app', () => {
+  let workspace: TempWorkspace
+
+  beforeEach(async () => {
+    workspace = await createTempWorkspace('guren-cli-resource-api-only-')
+  })
+
+  afterEach(async () => {
+    await workspace.cleanup()
+  })
+
+  it('refuses, naming the two signals it read', async () => {
+    await seedApiOnlyApp(workspace.dir)
+
+    await expect(runBlueprint('resource', { name: 'Post' })).rejects.toThrow(
+      /no @guren\/inertia-client dependency and no routes\/web\.ts/,
+    )
+  })
+
+  // The half that matters. `updateResourceSchema` runs before the route wiring
+  // can fail, so the old run appended a table to a file the user wrote — the
+  // one casualty deleting a scaffold does not undo.
+  it('writes nothing at all, and leaves db/schema.ts byte-identical', async () => {
+    await seedApiOnlyApp(workspace.dir)
+
+    await expect(runBlueprint('resource', { name: 'Post' })).rejects.toThrow()
+
+    // `existsSync` rather than the `fileExists` the predicate itself calls: a
+    // bug in that helper must not be able to make this assertion pass.
+    for (const path of [
+      'app/Models/Post.ts',
+      'app/Http/Controllers/PostController.ts',
+      'app/Http/Resources/PostResource.ts',
+      'app/Http/Validators/PostValidator.ts',
+      'resources/js/pages/posts/Index.tsx',
+      'resources/js/pages/posts/Show.tsx',
+      'resources/js/pages/posts/New.tsx',
+      'resources/js/pages/posts/Edit.tsx',
+    ]) {
+      expect(existsSync(resolve(workspace.dir, path))).toBe(false)
+    }
+    // No `posts` table appended, and the app's own routes file untouched.
+    expect(await readFile('db/schema.ts', 'utf8')).toBe(PG_SCHEMA_FIXTURE)
+    expect(await readFile('routes/api.ts', 'utf8')).toBe(API_ROUTES_FIXTURE)
+  })
+
+  // The template is what `create-guren-app` ships; the fixture above is its
+  // reduction, not a substitute for it.
+  it('refuses the api-only template as shipped', async () => {
+    const templateDir = resolve(import.meta.dir, '../../create-app/templates/api-only')
+    await mkdir('routes', { recursive: true })
+    await mkdir('db', { recursive: true })
+    await writeFile('routes/api.ts', await readFile(resolve(templateDir, 'routes/api.ts'), 'utf8'))
+    await writeFile('db/schema.ts', await readFile(resolve(templateDir, 'db/schema.ts'), 'utf8'))
+    await writeFile('package.json', await readFile(resolve(templateDir, 'package.json'), 'utf8'))
+
+    await expect(runBlueprint('resource', { name: 'Post' })).rejects.toThrow(
+      'guren add resource scaffolds Inertia pages',
+    )
+  })
+
+  // A usage error must not be reported as an environment one, so the guard is
+  // the last check rather than the first: on an API-only app a bad invocation
+  // is still reported as a bad invocation.
+  it('still reports a missing resource name first', async () => {
+    await seedApiOnlyApp(workspace.dir)
+
+    await expect(runBlueprint('resource', {})).rejects.toThrow(
+      'The resource blueprint requires a resource name.',
+    )
+  })
+
+  it('still reports an invalid field type first', async () => {
+    await seedApiOnlyApp(workspace.dir)
+
+    await expect(runBlueprint('resource', { name: 'Post', fields: 'title:bogus' })).rejects.toThrow(
+      'Invalid field type "bogus"',
+    )
+  })
+
+  // The manifest signal alone is enough to permit: a fullstack app in a
+  // workspace whose deps are hoisted to the root has no client to find.
+  // (The other direction — an absent manifest — cannot be isolated here,
+  // because every scaffold that succeeds needs the `routes/web.ts` that
+  // rescues it anyway. It is pinned in the admin block above.)
+  it('scaffolds when routes/web.ts exists but the manifest does not name the client', async () => {
+    await seedResourceWorkspace(PG_SCHEMA_FIXTURE)
+    await writeFile('package.json', JSON.stringify({ name: 'workspace-member' }))
+
+    const created = await runBlueprint('resource', { name: 'Post' })
+
+    expect(created.some((file) => file.endsWith('resources/js/pages/posts/Index.tsx'))).toBe(true)
+    expect(await readFile('routes/web.ts', 'utf8')).toContain("router.group('/posts'")
+  })
+
+  // The other signal on its own: an app that declares the client is never
+  // refused as API-only. It still fails further in, because
+  // `updateResourceRoutes` reads `routes/web.ts` unconditionally — a
+  // pre-existing rough edge this guard does not address. Matched on `ENOENT`,
+  // which only the later failure can produce: the guard's own message names
+  // `routes/web.ts` too, so that string alone would not tell them apart.
+  it('does not refuse an app that declares the client', async () => {
+    await mkdir('resources/js/pages', { recursive: true })
+    await mkdir('routes', { recursive: true })
+    await mkdir('db', { recursive: true })
+    await writeFile('routes/api.ts', API_ROUTES_FIXTURE)
+    await writeFile('db/schema.ts', PG_SCHEMA_FIXTURE)
+    await writeFile('package.json', JSON.stringify({
+      name: 'web-app',
+      dependencies: { '@guren/inertia-client': '^1.1.0' },
+    }))
+
+    await expect(runBlueprint('resource', { name: 'Post' })).rejects.toThrow(
+      /ENOENT.*routes\/web\.ts/,
+    )
+  })
+})
+
 describe('oauth blueprint output', () => {
   let workspace: TempWorkspace
 

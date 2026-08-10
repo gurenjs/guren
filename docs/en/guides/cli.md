@@ -78,6 +78,11 @@ token-based API, guard `routes/api.ts` with `createBearerTokenMiddleware` from
 `@guren/core` and issue tokens with `createApiToken` — see the
 [API tokens guide](./api-tokens.md).
 
+`add resource` refuses on those same two signals, and for the same reason: it
+scaffolds React page components and a controller that returns Inertia responses.
+Its refusal likewise comes before the table it would otherwise append to your
+`db/schema.ts`. Add a JSON controller wired into `routes/api.ts` by hand instead.
+
 ## Core Commands
 
 | Command | Description | Example |

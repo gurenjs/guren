@@ -626,6 +626,17 @@ export default class BroadcastProvider extends ServiceProvider {
       const routeVar = camelCase(routeName)
       const fields = parseFieldsString(options.fields ?? '')
 
+      // Last of the checks, and still before the first write: everything above
+      // is pure, so a usage error is reported as one rather than being masked
+      // by the app's shape. The page components and the Inertia-returning
+      // controller are unusable on an API-only app, and `updateResourceSchema`
+      // runs before the route wiring can fail — so reaching that failure
+      // appends a table to the app's own `db/schema.ts` as well.
+      await assertNotApiOnly(process.cwd(), {
+        does: 'guren add resource scaffolds Inertia pages and a controller that returns Inertia responses',
+        instead: 'Add a JSON controller to routes/api.ts by hand',
+      })
+
       const created = await makeFeature(singular, {
         force: Boolean(options.force),
         fields: options.fields,
