@@ -64,11 +64,21 @@ to `/login`, a route that only exists once you run `bunx guren add auth`. Add
 authentication first if you want a usable dashboard, or pass `--public` and add
 your own check later.
 
-`add admin` needs a fullstack app. The dashboard is an Inertia page, so on an app
-scaffolded from the `api` blueprint — no `@guren/inertia-client` dependency and no
-`routes/web.ts` — the command refuses and writes nothing rather than scaffolding a
-controller that does not typecheck and a routes file nothing mounts. Add an admin
-endpoint to `routes/api.ts` by hand instead.
+### Commands that need a fullstack app
+
+`add admin`, `add resource`, `add auth`, `make:feature`, and `make:auth` all
+scaffold Inertia pages and the controllers that render them. On an app scaffolded
+from the `api` blueprint — no `@guren/inertia-client` dependency and no
+`routes/web.ts` (or `routes/web.js`) — each of them refuses and writes nothing
+rather than leaving behind controllers that do not typecheck, pages nothing
+renders, and a routes file nothing mounts. Add the endpoints to `routes/api.ts` by
+hand instead, or scaffold a fullstack app.
+
+Both signals are required, so a fullstack workspace member whose dependencies are
+hoisted to the root manifest is still scaffolded as usual — its `routes/web.ts`
+vouches for it — as is any app the CLI cannot read a `package.json` for.
+Single-file generators (`make:controller`, `make:view`) also emit Inertia-shaped
+output but are not guarded: one stray file is a deletion, not a broken scaffold.
 
 ## Core Commands
 

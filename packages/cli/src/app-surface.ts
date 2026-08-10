@@ -45,3 +45,36 @@ export async function isConfirmedApiOnlyApp(cwd: string): Promise<boolean> {
   const webRoutes = await Promise.all(WEB_ROUTES_CANDIDATES.map((file) => fileExists(cwd, file)))
   return !webRoutes.includes(true)
 }
+
+/**
+ * Refuses to scaffold Inertia-shaped output into a confirmed API-only app —
+ * `isConfirmedApiOnlyApp` plus the refusal, one call, so the check and the
+ * message naming its two signals cannot drift apart. Callers supply only what
+ * their own command would have written and what to do instead.
+ *
+ * `command` is the whole invocation the developer typed, because one scaffolder
+ * backs more than one of them — `makeFeature` is reached as both `guren add
+ * resource` and `guren make:feature` — and a refusal naming the other sends
+ * them to the wrong docs page.
+ *
+ * Deliberately not called by the single-file generators (`make:controller`
+ * emits an Inertia controller, `make:view` a page component): one file is a
+ * deletion, not the multi-file mess this guard exists to prevent, and their
+ * templates are the thing to make dialect-aware if that ever changes.
+ */
+export async function assertNotApiOnlyApp(cwd: string, options: {
+  /** Full invocation, e.g. `guren add admin` or `guren make:feature`. */
+  command: string
+  /** What the command would have written, phrased as the object of "scaffolds". */
+  scaffolds: string
+  /** What to do instead of running it here — one clause, no trailing period. */
+  remedy: string
+}): Promise<void> {
+  if (!(await isConfirmedApiOnlyApp(cwd))) return
+
+  const { command, scaffolds, remedy } = options
+  throw new Error(
+    `${command} scaffolds ${scaffolds}, but this app has no @guren/inertia-client `
+    + `dependency and no routes/web.ts. ${remedy}, or scaffold a fullstack app.`,
+  )
+}

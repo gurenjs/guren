@@ -80,7 +80,7 @@ export interface GurenCliApi {
   suggestNextSteps(opts: { cwd: string }): Promise<unknown>
   makeFeature(
     name: string,
-    opts: ScaffoldOptions & { fields?: string; withTest?: boolean },
+    opts: ScaffoldOptions & { fields?: string; withTest?: boolean; invokedAs?: string },
   ): Promise<string[]>
   makeController(name: string, opts: ScaffoldOptions): Promise<string | string[]>
   makeModel(name: string, opts: ScaffoldOptions): Promise<string | string[]>
@@ -266,7 +266,9 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
       force: z.boolean().default(false).describe('Overwrite existing files'),
     },
     async ({ name, fields, withTest, force }) => {
-      const createdFiles = await cli.makeFeature(name, { fields, withTest, force, cwd })
+      // Refusals name the tool the agent actually called, not the CLI command
+      // that backs it.
+      const createdFiles = await cli.makeFeature(name, { fields, withTest, force, cwd, invokedAs: 'guren_make_feature' })
       return {
         content: [{ type: 'text', text: JSON.stringify({ created: createdFiles }, null, 2) }],
       }

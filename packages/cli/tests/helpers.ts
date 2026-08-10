@@ -139,6 +139,23 @@ export function registerApiRoutes(router: Router): void {
 }
 `
 
+/**
+ * The api-only starter reduced to the two signals `isConfirmedApiOnlyApp`
+ * reads: a manifest that does not name `@guren/inertia-client`, and no
+ * `routes/web.ts`. One copy, so the dependency set the refusal tests pin
+ * cannot drift between files. `blueprints.test.ts` anchors this reduction to
+ * the real `create-app/templates/api-only` files.
+ */
+export async function seedApiOnlyWorkspace(dir: string): Promise<void> {
+  await writeWorkspaceFiles(dir, {
+    'routes/api.ts': API_ROUTES_FIXTURE,
+    'package.json': JSON.stringify({
+      name: 'api-app',
+      dependencies: { '@guren/cli': '^2.2.0', '@guren/core': '^1.5.1', '@guren/orm': '^2.2.0' },
+    }),
+  })
+}
+
 export const BLOG_ROUTES_FIXTURE = `import { Router, requireAuthenticated } from '@guren/core'
 
 export function registerWebRoutes(baseRouter: Router): void {

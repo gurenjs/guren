@@ -12,6 +12,7 @@ import {
   REGISTRAR_LESS_ROUTES_FIXTURE,
   captureWarnings,
   createTempWorkspace,
+  seedApiOnlyWorkspace,
   type TempWorkspace,
 } from './helpers'
 import { listBlueprints, runBlueprint } from '../src/blueprints'
@@ -515,17 +516,8 @@ describe('admin blueprint on an API-only app', () => {
     await workspace.cleanup()
   })
 
-  async function seedApiOnlyWorkspace(): Promise<void> {
-    await mkdir('routes', { recursive: true })
-    await writeFile('routes/api.ts', API_ROUTES_FIXTURE)
-    await writeFile('package.json', JSON.stringify({
-      name: 'api-app',
-      dependencies: { '@guren/cli': '^2.2.0', '@guren/core': '^1.5.1', '@guren/orm': '^2.2.0' },
-    }))
-  }
-
   it('refuses, naming the two signals it read', async () => {
-    await seedApiOnlyWorkspace()
+    await seedApiOnlyWorkspace(workspace.dir)
 
     await expect(runBlueprint('admin')).rejects.toThrow(
       /no @guren\/inertia-client dependency and no routes\/web\.ts/,
@@ -535,7 +527,7 @@ describe('admin blueprint on an API-only app', () => {
   // The half that matters: refusing after the first write would leave exactly
   // the mess the refusal exists to prevent.
   it('writes nothing at all', async () => {
-    await seedApiOnlyWorkspace()
+    await seedApiOnlyWorkspace(workspace.dir)
 
     await expect(runBlueprint('admin')).rejects.toThrow()
 
@@ -626,6 +618,62 @@ describe('admin blueprint on an API-only app', () => {
     } finally {
       await chmod('package.json', 0o644)
     }
+  })
+})
+
+// `resource` and `auth` write their Inertia files through `makeFeature` and
+// `makeAuth`, which carry the guard so `make:feature` and `make:auth` get it
+// too. What is left to check here is that each blueprint refuses, and names
+// the command the developer actually typed rather than the one it delegates to.
+describe('resource and auth blueprints on an API-only app', () => {
+  let workspace: TempWorkspace
+
+  beforeEach(async () => {
+    workspace = await createTempWorkspace('guren-cli-blueprint-api-only-')
+    await seedApiOnlyWorkspace(workspace.dir)
+  })
+
+  afterEach(async () => {
+    await workspace.cleanup()
+  })
+
+  it('refuses the resource blueprint under its own command name', async () => {
+    await expect(runBlueprint('resource', { name: 'Post' })).rejects.toThrow(
+      /^guren add resource scaffolds .*no @guren\/inertia-client dependency and no routes\/web\.ts/su,
+    )
+
+    for (const path of [
+      'app/Http/Validators/PostValidator.ts',
+      'app/Http/Controllers/PostController.ts',
+      'resources/js/pages/posts/Index.tsx',
+    ]) {
+      expect(existsSync(resolve(workspace.dir, path))).toBe(false)
+    }
+    expect(await readFile('routes/api.ts', 'utf8')).toBe(API_ROUTES_FIXTURE)
+  })
+
+  // The guard fires inside `makeFeature` before fields are parsed, and the
+  // blueprint's own parse sits after the delegation — malformed `--fields`
+  // must not outrank "this command cannot run here at all".
+  it('refuses before complaining about malformed --fields', async () => {
+    await expect(runBlueprint('resource', { name: 'Post', fields: 'name:invalid' })).rejects.toThrow(
+      'guren add resource scaffolds',
+    )
+  })
+
+  it('refuses the auth blueprint under its own command name', async () => {
+    await expect(runBlueprint('auth')).rejects.toThrow(
+      /^guren add auth scaffolds .*no @guren\/inertia-client dependency and no routes\/web\.ts/su,
+    )
+
+    for (const path of [
+      'app/Http/Controllers/Auth/LoginController.ts',
+      'resources/js/pages/auth/Login.tsx',
+      'routes/auth.ts',
+    ]) {
+      expect(existsSync(resolve(workspace.dir, path))).toBe(false)
+    }
+    expect(await readFile('routes/api.ts', 'utf8')).toBe(API_ROUTES_FIXTURE)
   })
 })
 

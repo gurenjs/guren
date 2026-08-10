@@ -1,4 +1,4 @@
-import { isConfirmedApiOnlyApp } from './app-surface'
+import { assertNotApiOnlyApp } from './app-surface'
 import { makeAuth } from './make-auth'
 import { makeChannel } from './make-channel'
 import { buildRouteRegistrationHint, makeFeature } from './make-feature'
@@ -31,6 +31,8 @@ export interface RunBlueprintOptions extends WriterOptions {
    * dashboard route.
    */
   publicAccess?: boolean
+  /** Command name for refusals. `runBlueprint` derives `guren add <name>`. */
+  invokedAs?: string
 }
 
 export interface BlueprintDefinition {
@@ -56,13 +58,11 @@ const blueprintRegistry: Record<string, BlueprintDefinition> = {
     run: async (options) => {
       // Before the first write: every file below is Inertia-shaped, so a
       // partial scaffold here is only harder to clean up than none.
-      if (await isConfirmedApiOnlyApp(process.cwd())) {
-        throw new Error(
-          'guren add admin scaffolds an Inertia dashboard, but this app has no @guren/inertia-client '
-          + 'dependency and no routes/web.ts. Add an admin endpoint to routes/api.ts by hand, '
-          + 'or scaffold a fullstack app.',
-        )
-      }
+      await assertNotApiOnlyApp(process.cwd(), {
+        command: options.invokedAs ?? 'guren add admin',
+        scaffolds: 'an Inertia dashboard',
+        remedy: 'Add an admin endpoint to routes/api.ts by hand',
+      })
 
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
       // Same default as `make:feature`: guarded unless the caller opts out.
@@ -158,7 +158,7 @@ export default registerAdminRoutes
   },
   auth: {
     description: 'Install the default authentication stack for the current app.',
-    run: async (options) => makeAuth({ force: Boolean(options.force), install: true }),
+    run: async (options) => makeAuth({ force: Boolean(options.force), install: true, invokedAs: options.invokedAs }),
   },
   oauth: {
     description: 'Install OAuth scaffolding with GitHub, Google, and Discord provider presets.',
@@ -623,14 +623,19 @@ export default class BroadcastProvider extends ServiceProvider {
       const singular = singularize(pascalCase(options.name.trim()))
       const routeName = collectionSlug(singular)
       const routeVar = camelCase(routeName)
-      const fields = parseFieldsString(options.fields ?? '')
 
       const created = await makeFeature(singular, {
         force: Boolean(options.force),
         fields: options.fields,
         publicAccess: options.publicAccess,
         announce: false,
+        invokedAs: options.invokedAs,
       })
+
+      // After the delegation: `makeFeature` parses the same string, so on an
+      // API-only app the developer hears the refusal, not a fields complaint
+      // about a command that could not have run anyway.
+      const fields = parseFieldsString(options.fields ?? '')
 
       await updateResourceSchema(singular, fields)
       await updateResourceRoutes(singular, routeName, routeVar)
@@ -854,5 +859,6 @@ export function getBlueprint(name: string): BlueprintDefinition {
 
 export async function runBlueprint(name: string, options: RunBlueprintOptions = {}): Promise<string[]> {
   assertCwdUnsupported(options, 'guren new --blueprint')
-  return getBlueprint(name).run(options)
+  // Derived, not hardcoded per blueprint: the invocation is the registry key.
+  return getBlueprint(name).run({ invokedAs: `guren add ${name}`, ...options })
 }

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'bun:test'
+import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { consola } from 'consola'
-import { BLOG_ROUTES_FIXTURE, createTempWorkspace, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, SQLITE_SCHEMA_FIXTURE } from './helpers'
+import { API_ROUTES_FIXTURE, BLOG_ROUTES_FIXTURE, createTempWorkspace, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, SQLITE_SCHEMA_FIXTURE, seedApiOnlyWorkspace } from './helpers'
 import { makeAuth } from '../src/make-auth'
 
 // Shared with packages/create-app/templates/blog/app/Providers/AuthProvider.ts,
@@ -1176,6 +1177,80 @@ export function registerWebRoutes(router: Router): void {
     } finally {
       await workspace.cleanup()
     }
+  })
+
+  // The sign-in experience is eight `.tsx` pages and six controllers importing
+  // `@/.guren/pages.gen`, so an API-only app can use none of it. `guren add
+  // auth` delegates here, so this one guard covers both commands.
+  describe('on an API-only app', () => {
+    it('refuses under its own command name, naming the two signals it read', async () => {
+      const workspace = await createTempWorkspace('guren-cli-make-auth-api-only-')
+      try {
+        await seedApiOnlyWorkspace(workspace.dir)
+
+        await expect(makeAuth()).rejects.toThrow(
+          /^guren make:auth scaffolds .*no @guren\/inertia-client dependency and no routes\/web\.ts/su,
+        )
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+
+    it('writes nothing at all and leaves the app untouched', async () => {
+      const workspace = await createTempWorkspace('guren-cli-make-auth-api-only-clean-')
+      try {
+        await seedApiOnlyWorkspace(workspace.dir)
+        await mkdir(join(workspace.dir, 'db'), { recursive: true })
+        await writeFile(join(workspace.dir, 'db/schema.ts'), PG_SCHEMA_FIXTURE, 'utf8')
+
+        await expect(makeAuth({ install: true })).rejects.toThrow()
+
+        for (const path of [
+          'app/Http/Controllers/Auth/LoginController.ts',
+          'app/Providers/AuthProvider.ts',
+          'resources/js/pages/auth/Login.tsx',
+          'resources/js/components/Layout.tsx',
+          'routes/auth.ts',
+        ]) {
+          expect(existsSync(join(workspace.dir, path))).toBe(false)
+        }
+        // The users table is patched into the schema, and the api-only
+        // routes file is what `install: true` would have wired into.
+        expect(await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')).toBe(PG_SCHEMA_FIXTURE)
+        expect(await readFile(join(workspace.dir, 'routes/api.ts'), 'utf8')).toBe(API_ROUTES_FIXTURE)
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+
+    // The refusal is about what the scaffold renders, which no flag changes —
+    // and it is reported ahead of flag validation, so the developer hears the
+    // reason the command cannot run here at all.
+    it('refuses before rejecting an unusable flag combination', async () => {
+      const workspace = await createTempWorkspace('guren-cli-make-auth-api-only-flags-')
+      try {
+        await seedApiOnlyWorkspace(workspace.dir)
+
+        await expect(makeAuth({ oauthOnly: true })).rejects.toThrow('guren make:auth scaffolds')
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+
+    // Positive evidence only: no manifest is an unknown app, not an API-only one.
+    it('still scaffolds when there is no package.json to judge by', async () => {
+      const workspace = await createTempWorkspace('guren-cli-make-auth-unknown-app-')
+      try {
+        await mkdir(join(workspace.dir, 'routes'), { recursive: true })
+        await writeFile(join(workspace.dir, 'routes/api.ts'), API_ROUTES_FIXTURE, 'utf8')
+
+        const created = await makeAuth()
+
+        expect(created.some((file) => file.endsWith('resources/js/pages/auth/Login.tsx'))).toBe(true)
+      } finally {
+        await workspace.cleanup()
+      }
+    })
   })
 
   it('keeps the profile email editable without --oauth', async () => {

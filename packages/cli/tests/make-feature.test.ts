@@ -1,9 +1,10 @@
-import { readFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import { makeFeature, buildRouteRegistrationHint } from '../src/make-feature'
 import { parseFieldsString } from '../src/fields'
-import { createTempWorkspace } from './helpers'
+import { API_ROUTES_FIXTURE, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, seedApiOnlyWorkspace } from './helpers'
 
 describe('parseFieldsString', () => {
   it('parses simple fields', () => {
@@ -334,6 +335,74 @@ describe('makeFeature', () => {
 
       const controllerContent = await readFile(controllerPath as string, 'utf8')
       expect(controllerContent).toContain("pages['billing-ops'].invoices.Index")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+
+// `make:feature` reaches the same page-emitting code `guren add resource` does,
+// and used to reach it without the refusal: on an API-only app it wrote four
+// React pages and a controller importing `@/.guren/pages.gen`, then exited 0.
+describe('makeFeature on an API-only app', () => {
+  it('refuses under its own command name and writes nothing', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-api-only-')
+
+    try {
+      await seedApiOnlyWorkspace(workspace.dir)
+
+      await expect(makeFeature('Post', { fields: 'title:string' })).rejects.toThrow(
+        /^guren make:feature scaffolds .*no @guren\/inertia-client dependency and no routes\/web\.ts/su,
+      )
+
+      // The validator is the first file `makeFeature` writes, before the pages
+      // — a guard placed after it refuses and still leaves a file behind.
+      for (const path of [
+        'app/Http/Validators/PostValidator.ts',
+        'app/Http/Controllers/PostController.ts',
+        'app/Models/Post.ts',
+        'resources/js/pages/posts/Index.tsx',
+      ]) {
+        expect(existsSync(join(workspace.dir, path))).toBe(false)
+      }
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // `guren mcp` names the workspace it scaffolds into rather than steering the
+  // server process into it, so reading the process directory here would judge
+  // a project the files are never written to.
+  it('judges the project named by cwd, not the process directory', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-api-only-cwd-')
+
+    try {
+      // The process directory is a fullstack app; the target is not.
+      await mkdir(join(workspace.dir, 'routes'), { recursive: true })
+      await writeFile(join(workspace.dir, 'routes/web.ts'), DEFAULT_ROUTES_FIXTURE, 'utf8')
+      const target = join(workspace.dir, 'api-app')
+      await seedApiOnlyWorkspace(target)
+
+      await expect(makeFeature('Post', { fields: 'title:string', cwd: target })).rejects.toThrow(
+        'guren make:feature scaffolds',
+      )
+      expect(existsSync(join(target, 'resources/js/pages/posts/Index.tsx'))).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // Positive evidence only: no manifest is an unknown app, not an API-only one.
+  it('still scaffolds when there is no package.json to judge by', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-unknown-app-')
+
+    try {
+      await mkdir(join(workspace.dir, 'routes'), { recursive: true })
+      await writeFile(join(workspace.dir, 'routes/api.ts'), API_ROUTES_FIXTURE, 'utf8')
+
+      const created = await makeFeature('Post', { fields: 'title:string', announce: false })
+
+      expect(created.some((file) => file.endsWith('resources/js/pages/posts/Index.tsx'))).toBe(true)
     } finally {
       await workspace.cleanup()
     }
