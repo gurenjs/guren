@@ -95,6 +95,22 @@ describe('RedisOAuthStateStore', () => {
     expect(await redis.get('oauthstate:hash-expired')).toBeNull()
   })
 
+  // `new Date('not-a-date')` is an Invalid Date, and `NaN <= Date.now()` is
+  // false — so a corrupt expiry would read as never expiring and hand back a
+  // live state. The database sibling fails closed here; so must this one.
+  it('treats an unparseable expiry as expired', async () => {
+    const redis = new FakeRedis()
+    const store = new RedisOAuthStateStore(redis as unknown as Redis)
+    const corrupt = JSON.stringify({ provider: 'github', expiresAt: 'not-a-date' })
+    await redis.psetex('oauthstate:hash-corrupt', 60_000, corrupt)
+
+    // Order matters: `find` does not delete, so `consume` still has data to
+    // read. Reversed, `consume` would delete the key and `find` would return
+    // null for the wrong reason.
+    expect(await store.find('hash-corrupt')).toBeNull()
+    expect(await store.consume('hash-corrupt')).toBeNull()
+  })
+
   it('concurrent consume hands the payload to exactly one caller', async () => {
     const store = createStore()
     await store.store('hash-race', {

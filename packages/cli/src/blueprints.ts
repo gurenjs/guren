@@ -21,7 +21,13 @@ export interface RunBlueprintOptions extends WriterOptions {
   name?: string
   /** Comma-separated field definitions for the resource blueprint, e.g. "title:string,body:text?". */
   fields?: string
-  /** Skip authentication checks in mutating actions (resource blueprint). */
+  /**
+   * Skip the scaffold's authentication checks. Defaults to false (auth required).
+   *
+   * Scope differs per blueprint: the resource blueprint guards its mutating
+   * actions (store/update/destroy), the admin blueprint guards the whole
+   * dashboard route.
+   */
   publicAccess?: boolean
 }
 
@@ -47,6 +53,19 @@ const blueprintRegistry: Record<string, BlueprintDefinition> = {
     description: 'Install a starter admin dashboard with dedicated routes and controller.',
     run: async (options) => {
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
+      // Same default as `make:feature`: guarded unless the caller opts out.
+      const withAuth = !options.publicAccess
+      // Guarded in the action as well as on the route, so re-registering the
+      // route without middleware cannot silently open the dashboard. Emitted
+      // bare, matching `make:feature`'s own guard — the rationale belongs here,
+      // not in the app author's file.
+      const controllerGuard = withAuth ? `    await this.auth.userOrFail()\n\n` : ''
+      // Attached inline — the shape `make:auth` writes into its own routes file
+      // — rather than through an 'auth' alias. This file lands in apps that may
+      // never have run `guren add auth`, and `aliasMiddleware('auth', ...)`
+      // writes into the router shared with routes/web.ts, so it would silently
+      // replace an alias the app configured with different options.
+      const routeGuard = withAuth ? `, requireAuthenticated({ redirectTo: '/login' })` : ''
       const created = await scaffoldFeatureFiles([
         {
           path: 'app/Http/Controllers/Admin/AdminDashboardController.ts',
@@ -55,7 +74,7 @@ import { pages } from '@/.guren/pages.gen'
 
 export default class AdminDashboardController extends Controller {
   async index(): Promise<Response> {
-    return this.inertia(pages.admin.Dashboard, {
+${controllerGuard}    return this.inertia(pages.admin.Dashboard, {
       stats: {
         users: 0,
         posts: 0,
@@ -108,11 +127,11 @@ export default function AdminDashboard({ stats }: Props) {
         },
         {
           path: 'routes/admin.ts',
-          contents: `import { Router } from '@guren/core'
+          contents: `import { Router${withAuth ? ', requireAuthenticated' : ''} } from '@guren/core'
 import AdminDashboardController from '../app/Http/Controllers/Admin/AdminDashboardController.js'
 
 export function registerAdminRoutes(router: Router): void {
-  router.get('/admin', [AdminDashboardController, 'index']).name('admin.dashboard')
+  router.get('/admin', [AdminDashboardController, 'index']${routeGuard}).name('admin.dashboard')
 }
 
 export default registerAdminRoutes

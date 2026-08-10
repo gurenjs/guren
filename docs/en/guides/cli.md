@@ -49,6 +49,21 @@ These commands patch `src/app.ts`, create the matching provider/runtime files, a
 - `resources/js/pages/admin/Dashboard.tsx`
 - `routes/admin.ts` (and auto-wires `routes/web.ts` when present)
 
+The dashboard is **authenticated by default**: `routes/admin.ts` attaches
+`requireAuthenticated({ redirectTo: '/login' })` to `/admin`, and the controller
+calls `this.auth.userOrFail()`. Unlike `make:feature --public`, which only
+affects mutating actions, `--public` here opens the whole dashboard:
+
+```bash
+bunx guren add admin --public
+```
+
+You can run `add admin` before `add auth`. The guard still holds — an app with no
+authentication configured has no signed-in user, so every request is redirected
+to `/login`, a route that only exists once you run `bunx guren add auth`. Add
+authentication first if you want a usable dashboard, or pass `--public` and add
+your own check later.
+
 ## Core Commands
 
 | Command | Description | Example |

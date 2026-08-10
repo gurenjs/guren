@@ -4,6 +4,7 @@ import type {
   EmailVerificationTokenStore,
   EmailVerificationToken,
 } from '../auth/email-verification'
+import { toDate } from '../support/expiry'
 
 /**
  * Options for RedisEmailVerificationStore.
@@ -87,11 +88,17 @@ export class RedisEmailVerificationStore implements EmailVerificationTokenStore 
         expiresAt: string
         createdAt: string
       }
+      // A corrupt expiry must not reach callers as an Invalid Date: every
+      // comparison against one is false, so it would read as never expiring.
+      const expiresAt = toDate(parsed.expiresAt)
+      if (expiresAt === null) {
+        return null
+      }
       return {
         tokenId: parsed.tokenId,
         email: parsed.email,
-        expiresAt: new Date(parsed.expiresAt),
-        createdAt: new Date(parsed.createdAt),
+        expiresAt,
+        createdAt: toDate(parsed.createdAt) ?? new Date(0),
       }
     } catch {
       return null

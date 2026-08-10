@@ -34,6 +34,9 @@ describe('registerDevAssets inertia client chunk handling', () => {
 
     await createFile('inertia/chunk-helper.ts', "export const chunkValue = 42\n")
 
+    // Sibling directory whose name extends the inertia client's own.
+    await createFile('inertia-secrets/secret.ts', "export const secret = 'leaked'\n")
+
     app = new Application()
     registerDevAssets(app, {
       resourcesDir: join(tmpRoot, 'resources'),
@@ -68,6 +71,17 @@ describe('registerDevAssets inertia client chunk handling', () => {
 
   it('returns 404 for requests escaping the inertia client directory', async () => {
     const response = await app.fetch(new Request('http://example.com/vendor/../inertia-client.tsx'))
+
+    expect(response.status).toBe(404)
+  })
+
+  it('returns 404 for a sibling directory whose name extends the inertia client directory', async () => {
+    // The doubled slash leaves the remainder after `/vendor/` absolute, so it
+    // survives `resolve()` untouched and lands next to — not inside — the
+    // inertia client directory.
+    const response = await app.fetch(
+      new Request(`http://example.com/vendor/${tmpRoot}/inertia-secrets/secret.ts`),
+    )
 
     expect(response.status).toBe(404)
   })

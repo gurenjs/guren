@@ -1,4 +1,5 @@
 import type { MiddlewareHandler } from 'hono'
+import { applyResponseHeaders } from './response-headers'
 
 export interface ForceHttpsOptions {
   /**
@@ -69,7 +70,13 @@ export function createForceHttpsMiddleware(options: ForceHttpsOptions = {}): Mid
       return ctx.redirect(url.toString(), 301)
     }
 
-    ctx.header('Strict-Transport-Security', hstsValue)
-    await next()
+    // After next(), not ctx.header() before it: a handler returning a raw
+    // Response drops Hono's prepared headers, which is every static asset the
+    // framework serves. See applyResponseHeaders.
+    try {
+      await next()
+    } finally {
+      applyResponseHeaders(ctx, [['Strict-Transport-Security', hstsValue]])
+    }
   }
 }

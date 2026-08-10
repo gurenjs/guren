@@ -1,6 +1,8 @@
 import type { Redis } from 'ioredis'
 import type { ApiToken, ApiTokenStore } from '../auth/api-token'
 import { scanKeys } from './scan-keys'
+import { decodeAbilities } from './redis-values'
+import { toDate, toOptionalExpiry } from '../support/expiry'
 
 /**
  * Options for RedisApiTokenStore.
@@ -183,10 +185,13 @@ export class RedisApiTokenStore implements ApiTokenStore {
       name: data.name,
       hashedToken: data.hashedToken,
       userId: data.userId,
-      abilities: JSON.parse(data.abilities) as string[],
-      lastUsedAt: data.lastUsedAt ? new Date(data.lastUsedAt) : null,
-      expiresAt: data.expiresAt ? new Date(data.expiresAt) : null,
-      createdAt: new Date(data.createdAt),
+      abilities: decodeAbilities(data.abilities),
+      lastUsedAt: toDate(data.lastUsedAt),
+      // Absent means "never expires"; present-but-unparseable means a corrupt
+      // record, which must not read as immortal — `verifyApiToken` skips its
+      // expiry check entirely when this is null.
+      expiresAt: toOptionalExpiry(data.expiresAt),
+      createdAt: toDate(data.createdAt) ?? new Date(0),
     }
   }
 

@@ -47,6 +47,21 @@ bunx guren plugin @acme/guren-plugin-audit
 - `resources/js/pages/admin/Dashboard.tsx`
 - `routes/admin.ts`（`routes/web.ts` がある場合は自動配線）
 
+ダッシュボードは**既定で認証必須**です。`routes/admin.ts` が `/admin` に
+`requireAuthenticated({ redirectTo: '/login' })` を付与し、コントローラーでも
+`this.auth.userOrFail()` を呼びます。`make:feature --public` が変更系アクション
+だけを対象にするのに対し、ここでの `--public` はダッシュボード全体を公開します:
+
+```bash
+bunx guren add admin --public
+```
+
+`add auth` より先に `add admin` を実行しても構いません。その場合もガードは有効で、
+認証が未設定のアプリにはサインイン済みユーザーが存在しないため、すべてのリクエストが
+`/login` にリダイレクトされます。`/login` は `bunx guren add auth` を実行して初めて
+存在するルートです。実際に使えるダッシュボードにするには先に認証を追加するか、
+`--public` を付けて後から独自のチェックを実装してください。
+
 ## 主要コマンド
 
 | コマンド | 説明 | 例 |

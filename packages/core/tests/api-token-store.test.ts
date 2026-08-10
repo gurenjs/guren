@@ -6,6 +6,7 @@ import {
   DatabaseApiTokenStore,
   DrizzleAdapter,
   createApiToken,
+  tokenCan,
   verifyApiToken,
 } from '../src/index'
 
@@ -98,6 +99,45 @@ describe('DatabaseApiTokenStore', () => {
     expect(await store.findByUserId('user-1')).toHaveLength(0)
   })
 
+  test('keeps a null expiry as "never expires"', async () => {
+    const { plainTextToken, token } = await createApiToken(store, {
+      name: 'Forever',
+      userId: 'user-1',
+    })
+
+    const stored = await store.findByHashedToken(token.hashedToken)
+
+    expect(stored!.expiresAt).toBeNull()
+    expect(await verifyApiToken(plainTextToken, store)).not.toBeNull()
+  })
+
+  test('does not authenticate a token whose stored expiry cannot be parsed', async () => {
+    const { plainTextToken, token } = await createApiToken(store, {
+      name: 'Corrupt Expiry',
+      userId: 'user-1',
+    })
+
+    // Corrupt the column the way a bad migration or a hand-edited row would.
+    // Drizzle's timestamp mapper wraps the text in `new Date(...)`, so the
+    // store reads an Invalid Date — which must not degrade to "no expiry",
+    // because `verifyApiToken` skips its expiry check entirely on null.
+    sqlite.exec(`UPDATE api_tokens SET expires_at = 'not-a-date' WHERE id = '${token.id}'`)
+
+    // Pin the premise: INTEGER affinity cannot convert this, so the driver
+    // hands the text straight back. If a future driver coerced it instead,
+    // the assertions below would pass for the wrong reason.
+    const raw = sqlite.query('SELECT expires_at FROM api_tokens WHERE id = ?').get(token.id) as {
+      expires_at: unknown
+    }
+    expect(raw.expires_at).toBe('not-a-date')
+
+    const stored = await store.findByHashedToken(token.hashedToken)
+    expect(stored!.expiresAt).not.toBeNull()
+    expect(stored!.expiresAt!.getTime()).toBe(0)
+
+    expect(await verifyApiToken(plainTextToken, store)).toBeNull()
+  })
+
   test('updates lastUsedAt on verification', async () => {
     const { plainTextToken, token } = await createApiToken(store, {
       name: 'App',
@@ -151,5 +191,20 @@ describe('DatabaseApiTokenStore', () => {
 
     expect(token).not.toBeNull()
     expect(token!.abilities).toEqual([])
+  })
+
+  test('degrades non-array abilities to an empty list instead of granting them', async () => {
+    const textStore = new DatabaseApiTokenStore(apiTokensText, { abilitiesMode: 'text' })
+    // Valid JSON, wrong shape: decoded as a bare string, `tokenCan` would run
+    // `String.prototype.includes` on it and read '"*"' as the wildcard.
+    sqlite.exec(
+      'INSERT INTO api_tokens_text (id, name, hashed_token, user_id, abilities, created_at) ' +
+        `VALUES ('t2', 'Wildcard String', 'hash-2', 'user-1', '"*"', ${Date.now()})`,
+    )
+
+    const token = await textStore.findByHashedToken('hash-2')
+
+    expect(token!.abilities).toEqual([])
+    expect(tokenCan(token!, 'posts:delete')).toBe(false)
   })
 })

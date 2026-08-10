@@ -1,4 +1,5 @@
 import type { Context, MiddlewareHandler } from 'hono'
+import { applyResponseHeaders } from './response-headers'
 
 export interface CspDirectives {
   defaultSrc?: string[]
@@ -88,11 +89,14 @@ export function createCspMiddleware(options: CspOptions = {}): MiddlewareHandler
 
     const headerValue = buildCspHeader(directives, nonce, reportUri)
 
-    if (headerValue) {
-      ctx.header(headerName, headerValue)
+    // After next(), not ctx.header() before it: a handler returning a raw
+    // Response drops Hono's prepared headers, which is every static asset the
+    // framework serves. See applyResponseHeaders.
+    try {
+      await next()
+    } finally {
+      if (headerValue) applyResponseHeaders(ctx, [[headerName, headerValue]])
     }
-
-    await next()
   }
 }
 

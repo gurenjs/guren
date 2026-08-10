@@ -1,6 +1,7 @@
 import type { Redis } from 'ioredis'
 import type { OAuthStatePayload, OAuthStateStore } from '../auth/oauth'
 import { scanKeys } from './scan-keys'
+import { toDate } from '../support/expiry'
 
 /**
  * Options for RedisOAuthStateStore.
@@ -109,10 +110,16 @@ export class RedisOAuthStateStore implements OAuthStateStore {
         expiresAt: string
         binding?: string
       }
+      // Fail closed on a corrupt expiry: an unparseable value must not reach
+      // the callers below, whose comparisons an Invalid Date always loses.
+      const expiresAt = toDate(parsed.expiresAt)
+      if (expiresAt === null) {
+        return null
+      }
       return {
         provider: parsed.provider,
         redirectTo: parsed.redirectTo,
-        expiresAt: new Date(parsed.expiresAt),
+        expiresAt,
         binding: parsed.binding,
       }
     } catch {

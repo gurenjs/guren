@@ -1,6 +1,6 @@
 import { Model, type PlainObject } from '@guren/orm'
 import type { ApiToken, ApiTokenStore } from '@guren/server'
-import { decodeJsonColumn, toDate } from './store-utils.js'
+import { decodeJsonColumn, toDate, toOptionalExpiry } from './store-utils.js'
 
 /**
  * Options for DatabaseApiTokenStore.
@@ -95,7 +95,7 @@ export class DatabaseApiTokenStore implements ApiTokenStore {
   // bypass model casts, and cast-based writes would fight drizzle column modes
   // (Date → ISO string breaks timestamp columns; json-stringify double-encodes jsonb).
   private deserialize(record: PlainObject): ApiToken {
-    const abilities = record.abilities
+    const abilities = decodeJsonColumn<unknown>(record.abilities, [])
     return {
       id: String(record.id),
       name: String(record.name),
@@ -103,10 +103,18 @@ export class DatabaseApiTokenStore implements ApiTokenStore {
       userId:
         typeof record.userId === 'bigint' ? record.userId.toString() : (record.userId as string | number),
       // Corrupt text degrades to no abilities (deny-by-default) instead of
-      // throwing on every verification of the affected token.
-      abilities: decodeJsonColumn<string[]>(abilities, []),
+      // throwing on every verification of the affected token. A value that
+      // decodes to something other than a list of strings degrades the same
+      // way: `tokenCan` would otherwise run `String.prototype.includes` on it,
+      // so a stored `'"*"'` would grant every ability.
+      abilities: Array.isArray(abilities)
+        ? abilities.filter((ability): ability is string => typeof ability === 'string')
+        : [],
       lastUsedAt: toDate(record.lastUsedAt),
-      expiresAt: toDate(record.expiresAt),
+      // Null means "never expires"; a present-but-unparseable value means a
+      // malformed row, which must not read as immortal (`verifyApiToken`
+      // skips its expiry check entirely when this is null).
+      expiresAt: toOptionalExpiry(record.expiresAt),
       createdAt: toDate(record.createdAt) ?? new Date(0),
     }
   }

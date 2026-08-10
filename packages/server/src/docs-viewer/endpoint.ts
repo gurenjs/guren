@@ -16,16 +16,29 @@ export const DOCS_VIEWER_PATH = '/_guren/docs'
  * Opt-in via `GUREN_DOCS=1` and never active in production: the viewer
  * renders the project's private knowledge bundle, so it must not be
  * reachable unless the developer asked for it.
+ *
+ * The environment reads use plain member access so that the deploy plugins'
+ * `--define 'process.env.NODE_ENV="production"'` settles the production
+ * branch at bundle time; an optional chain is a different expression and no
+ * define matches it. See `mcp/endpoint.ts` for the full reasoning — and do
+ * not add optional chaining back, a test reads this file for it.
  */
 export function isDocsViewerEnabled(): boolean {
-  return (
-    typeof process !== 'undefined' &&
-    process.env?.NODE_ENV !== 'production' &&
-    process.env?.GUREN_DOCS === '1'
-  )
+  if (typeof process === 'undefined') {
+    return false
+  }
+  if (process.env.NODE_ENV === 'production') {
+    return false
+  }
+
+  return process.env.GUREN_DOCS === '1'
 }
 
-/** Restricts the docs viewer to the developer's own machine. */
+/**
+ * Restricts the docs viewer to the developer's own machine: cross-origin
+ * browser requests are rejected, and so is any request whose socket peer
+ * is not loopback — including one whose peer the runtime cannot report.
+ */
 export function createDocsViewerAccessGuard(): MiddlewareHandler {
   return createLoopbackGuard('the docs viewer')
 }

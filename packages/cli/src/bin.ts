@@ -2075,6 +2075,40 @@ const addAuthCommand = defineCommand({
   },
 })
 
+const addAdminCommand = defineCommand({
+  meta: {
+    name: 'admin',
+    description: 'Install a starter admin dashboard scaffold with routes and page.',
+  },
+  args: {
+    public: {
+      type: 'boolean',
+      description: 'Skip the authentication check on the dashboard route (default: auth required)',
+    },
+    force: {
+      type: 'boolean',
+      description: 'Overwrite existing files',
+      alias: 'f',
+    },
+  },
+  async run({ args }) {
+    const createdFiles = await runBlueprint('admin', {
+      publicAccess: Boolean(args.public),
+      force: Boolean(args.force),
+    })
+
+    for (const file of createdFiles) {
+      consola.success(`Created ${file}`)
+    }
+
+    if (!args.public) {
+      consola.info(
+        `  /admin requires a signed-in user and redirects to /login (created by \`bunx guren add auth\`) — pass --public to opt out.`,
+      )
+    }
+  },
+})
+
 const addResourceCommand = defineCommand({
   meta: {
     name: 'resource',
@@ -2231,7 +2265,7 @@ const addCommand = defineCommand({
     },
   },
   subCommands: {
-    admin: createAddBlueprintCommand('admin', 'Install a starter admin dashboard scaffold with routes and page.'),
+    admin: addAdminCommand,
     auth: addAuthCommand,
     oauth: createAddBlueprintCommand('oauth', 'Install OAuth scaffolding with provider presets and callback routes.'),
     broadcasting: createAddBlueprintCommand('broadcasting', 'Install broadcasting scaffolding with sample public and private channels.'),

@@ -1,6 +1,6 @@
 import type { Context } from 'hono'
 import { serveStatic } from 'hono/bun'
-import { dirname, extname, resolve } from 'node:path'
+import { dirname, extname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import type { Application } from './Application'
@@ -142,7 +142,11 @@ export function registerDevAssets(app: Application, options: DevAssetsOptions): 
 
       const candidatePath = resolve(inertiaClientDir, relativeRequest)
 
-      if (!candidatePath.startsWith(inertiaClientDir)) {
+      // A doubled slash in the request path leaves `relativeRequest` absolute,
+      // which `resolve` returns verbatim — so the separator is what keeps a
+      // sibling directory whose name merely extends this one (`…/inertia` vs
+      // `…/inertia-secrets`) out.
+      if (!candidatePath.startsWith(inertiaClientDir + sep)) {
         return ctx.notFound()
       }
 
@@ -220,7 +224,7 @@ async function handleTranspileRequest(
   const relative = ctx.req.path.slice(prefix.length + 1)
   const fsPath = resolve(resourcesJsDir, relative)
 
-  if (!fsPath.startsWith(resourcesJsDir)) {
+  if (!fsPath.startsWith(resourcesJsDir + sep)) {
     return ctx.notFound()
   }
 
