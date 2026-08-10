@@ -112,6 +112,30 @@ export class Post extends defineModel(posts) {}
     expect(keys).not.toContain('spec-drift:screens.md')
   })
 
+  it('regenerates the screens view when a module routes-directory file changed', async () => {
+    // Where `make:route --module billing` writes: the file is reached
+    // transitively through the module registrar, so it can change screens.md
+    // without touching modules/billing/routes.ts itself.
+    const results = await runSpecCheck({
+      cwd: workspace.dir,
+      changedFiles: new Set(['modules/billing/routes/invoice.ts']),
+    })
+
+    expect(results.map((r) => r.key)).toContain('spec-drift:screens.md')
+  })
+
+  it('regenerates the screens view for a module file outside the scaffold conventions', async () => {
+    // A registrar may import a prefix constant or helper from anywhere in
+    // its module — the source set is the import closure of index.ts, not a
+    // list of conventional file names.
+    const results = await runSpecCheck({
+      cwd: workspace.dir,
+      changedFiles: new Set(['modules/billing/route-config.ts']),
+    })
+
+    expect(results.map((r) => r.key)).toContain('spec-drift:screens.md')
+  })
+
   it('re-verifies a view when its committed file itself changed', async () => {
     const results = await runSpecCheck({
       cwd: workspace.dir,
