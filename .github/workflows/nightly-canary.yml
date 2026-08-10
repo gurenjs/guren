@@ -83,6 +83,11 @@ jobs:
       - name: Template dependency audit
         run: bun run audit:template-deps
 
+      # Its whole verdict rests on Bun.semver range evaluation, so the canary
+      # run is where a Bun-side change to that would surface.
+      - name: Plugin compatibility audit
+        run: bun run audit:plugin-compat
+
       - name: Docs audit
         run: bun run audit:docs
 

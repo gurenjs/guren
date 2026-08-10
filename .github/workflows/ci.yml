@@ -108,6 +108,12 @@ jobs:
       - name: Template dependency audit
         run: bun run audit:template-deps
 
+      # `gurenPlugin.compatibility` has no writer — changesets does not know the
+      # field exists — so a published plugin can declare itself incompatible with
+      # the core it ships beside while the workspace symlink keeps CI green.
+      - name: Plugin compatibility audit
+        run: bun run audit:plugin-compat
+
       - name: Docs audit
         run: bun run audit:docs
 
