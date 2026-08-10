@@ -11,6 +11,10 @@
  * `reset()` covers the invalidation the drivers do from outside the failure
  * path: `closeDatabase()` drops the connection handle, `resetDatabase()` drops
  * the migration handle so migrations can be re-applied from scratch.
+ *
+ * Error shaping stays in the factory. The drivers that wrap a migration failure
+ * need per-attempt state to do it (the endpoint resolved partway through), and
+ * a mapper living out here would read whatever the *latest* attempt left behind.
  */
 export interface SingleFlight<T> {
   /** Runs the factory, or returns the promise an earlier call memoized. */
@@ -19,11 +23,7 @@ export interface SingleFlight<T> {
   reset(): void
 }
 
-export function singleFlight<T>(
-  factory: () => Promise<T>,
-  /** Maps a rejection to the error callers see. Defaults to rethrowing as-is. */
-  mapError?: (error: unknown) => unknown,
-): SingleFlight<T> {
+export function singleFlight<T>(factory: () => Promise<T>): SingleFlight<T> {
   // Closure state rather than instance fields: call sites hand these methods
   // out by reference (`migrateDatabase: migrations.get`), which would lose a
   // `this` binding.
@@ -41,7 +41,7 @@ export function singleFlight<T>(
       if (inFlight === attempt) {
         inFlight = undefined
       }
-      throw mapError ? mapError(error) : error
+      throw error
     })
 
     inFlight = attempt

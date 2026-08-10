@@ -92,16 +92,14 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
     return resolved
   }
 
-  // Resolved inside the factory below: resolveConnectionString() throws when no
-  // connection string is configured, so it must not run before the
-  // no-migrations early return. The error mapper needs it afterwards, and each
-  // attempt clears it so a retry never reports a previous attempt's endpoint.
-  let endpoint: string | undefined
+  const migrations = singleFlight(async (): Promise<void> => {
+    // Scoped to this attempt, and resolved below rather than up front:
+    // resolveConnectionString() throws when no connection string is configured,
+    // so it must not run before the no-migrations early return. The catch needs
+    // it afterwards.
+    let endpoint: string | undefined
 
-  const migrations = singleFlight(
-    async (): Promise<void> => {
-      endpoint = undefined
-
+    try {
       if (!hasDrizzleMigrations(resolvedMigrationsFolder)) {
         warnIgnoredFlatSqlMigrations(resolvedMigrationsFolder)
         return
@@ -121,9 +119,10 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
       } finally {
         await closePool(migrationClient)
       }
-    },
-    (error) => migrationFailure(error, endpoint),
-  )
+    } catch (error) {
+      throw migrationFailure(error, endpoint)
+    }
+  })
 
   async function migrateOnce(): Promise<void> {
     await migrations.get()

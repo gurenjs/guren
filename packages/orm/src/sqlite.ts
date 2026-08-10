@@ -116,8 +116,8 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
     }
   }
 
-  const migrations = singleFlight(
-    async (): Promise<void> => {
+  const migrations = singleFlight(async (): Promise<void> => {
+    try {
       if (!hasDrizzleMigrations(resolvedMigrationsFolder)) {
         warnIgnoredFlatSqlMigrations(resolvedMigrationsFolder)
         return
@@ -126,10 +126,11 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
       const database = await ensureDatabase()
       const { migrate } = await import('drizzle-orm/bun-sqlite/migrator')
       await migrate(database as any, { migrationsFolder: resolvedMigrationsFolder }) // eslint-disable-line @typescript-eslint/no-explicit-any
-    },
-    // No endpoint: a SQLite file has no host, so only the cause chain adds signal.
-    (error) => migrationFailure(error),
-  )
+    } catch (error) {
+      // No endpoint: a SQLite file has no host, so only the cause chain adds signal.
+      throw migrationFailure(error)
+    }
+  })
 
   async function migrateOnce(): Promise<void> {
     await migrations.get()

@@ -126,8 +126,8 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
     } as DrizzleConfig
   }
 
-  const migrations = singleFlight(
-    async (): Promise<void> => {
+  const migrations = singleFlight(async (): Promise<void> => {
+    try {
       if (!hasDrizzleMigrations(resolvedMigrationsFolder)) {
         warnIgnoredFlatSqlMigrations(resolvedMigrationsFolder)
         return
@@ -135,12 +135,11 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
 
       const { migrate } = await loadAwsDataApiModules()
       await withAdminDb((db) => migrate(db, { migrationsFolder: resolvedMigrationsFolder }))
-    },
-    (error) => {
+    } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
-      return new Error(`Failed to run database migrations: ${reason}`)
-    },
-  )
+      throw new Error(`Failed to run database migrations: ${reason}`)
+    }
+  })
 
   async function migrateOnce(): Promise<void> {
     await migrations.get()
