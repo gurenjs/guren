@@ -5,6 +5,7 @@ import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from '
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { buildMigrationStatus, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders } from './seeder'
+import { singleFlight } from './single-flight'
 
 type ConnectionResolver = string | (() => string | undefined)
 type AwsDataApiDrizzle = typeof import('drizzle-orm/aws-data-api/pg')
@@ -86,12 +87,10 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
   const resolvedSeedersFolder =
     seedersFolder == null ? undefined : seedersFolder instanceof URL ? fileURLToPath(seedersFolder) : resolve(String(seedersFolder))
 
-  let migrationsPromise: Promise<void> | undefined
-  let databasePromise: Promise<AwsDataApiPgDatabase> | undefined
   let client: { destroy?: () => void } | undefined
   let activeKey: string | undefined
-  // Captured here, not in getDatabase(), so the caller of this factory is the
-  // frame that identifies the handle across hot reloads.
+  // Captured here, not in the connection factory, so the caller of this factory
+  // is the frame that identifies the handle across hot reloads.
   const callSite = new Error().stack
 
   function resolveConnection(): ResolvedConnection {
@@ -127,12 +126,8 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
     } as DrizzleConfig
   }
 
-  async function migrateOnce(): Promise<void> {
-    if (migrationsPromise) {
-      return migrationsPromise
-    }
-
-    const promise = (async (): Promise<void> => {
+  const migrations = singleFlight(async (): Promise<void> => {
+    try {
       if (!hasDrizzleMigrations(resolvedMigrationsFolder)) {
         warnIgnoredFlatSqlMigrations(resolvedMigrationsFolder)
         return
@@ -140,46 +135,28 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
 
       const { migrate } = await loadAwsDataApiModules()
       await withAdminDb((db) => migrate(db, { migrationsFolder: resolvedMigrationsFolder }))
-    })()
-
-    migrationsPromise = promise.catch((error) => {
-      migrationsPromise = undefined
+    } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
       throw new Error(`Failed to run database migrations: ${reason}`)
-    })
+    }
+  })
 
-    await migrationsPromise
-  }
+  const databaseHandle = singleFlight(async (): Promise<AwsDataApiPgDatabase> => {
+    if (migrateOnStart) {
+      await migrations.get()
+    }
+    const { drizzle } = await loadAwsDataApiModules()
+    const connection = resolveConnection()
+    const db = drizzle(buildDrizzleConfig(connection)) as unknown as AwsDataApiPgDatabase
+    client = (db as { $client?: { destroy?: () => void } }).$client
 
-  async function getDatabase(): Promise<AwsDataApiPgDatabase> {
-    if (databasePromise) {
-      return databasePromise
+    activeKey = hotReloadKey('aws-data-api', callSite, `${connection.resourceArn}/${connection.database}`)
+    if (activeKey) {
+      await replaceActiveConnection(activeKey, closeDatabase)
     }
 
-    const promise = (async (): Promise<AwsDataApiPgDatabase> => {
-      if (migrateOnStart) {
-        await migrateOnce()
-      }
-      const { drizzle } = await loadAwsDataApiModules()
-      const connection = resolveConnection()
-      const db = drizzle(buildDrizzleConfig(connection)) as unknown as AwsDataApiPgDatabase
-      client = (db as { $client?: { destroy?: () => void } }).$client
-
-      activeKey = hotReloadKey('aws-data-api', callSite, `${connection.resourceArn}/${connection.database}`)
-      if (activeKey) {
-        await replaceActiveConnection(activeKey, closeDatabase)
-      }
-
-      return db
-    })()
-
-    databasePromise = promise.catch((error) => {
-      databasePromise = undefined
-      throw error
-    })
-
-    return databasePromise
-  }
+    return db
+  })
 
   async function closeDatabase(): Promise<void> {
     if (!client) {
@@ -193,7 +170,7 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
       client.destroy?.()
     } finally {
       client = undefined
-      databasePromise = undefined
+      databaseHandle.reset()
       if (key) {
         releaseActiveConnection(key, closeDatabase)
       }
@@ -201,7 +178,7 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
   }
 
   async function configureOrm(): Promise<void> {
-    const db = await getDatabase()
+    const db = await databaseHandle.get()
     DrizzleAdapter.configure(db as unknown as Parameters<typeof DrizzleAdapter.configure>[0])
   }
 
@@ -210,7 +187,7 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
       throw new Error('No seeders folder configured. Provide "seedersFolder" when calling createAwsDataApiDatabase().')
     }
 
-    const db = await getDatabase()
+    const db = await databaseHandle.get()
     await runSeeders(db, resolvedSeedersFolder)
   }
 
@@ -239,7 +216,7 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
     })
 
     // Allow migrateDatabase() to re-apply everything from scratch.
-    migrationsPromise = undefined
+    migrations.reset()
   }
 
   async function migrationStatus(): Promise<MigrationStatusEntry[]> {
@@ -269,8 +246,8 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
   }
 
   return {
-    getDatabase,
-    migrateDatabase: migrateOnce,
+    getDatabase: databaseHandle.get,
+    migrateDatabase: migrations.get,
     closeDatabase,
     configureOrm,
     seedDatabase,

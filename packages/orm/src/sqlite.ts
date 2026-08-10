@@ -4,6 +4,7 @@ import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from '
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { buildMigrationStatus, migrationFailure, seedFailure, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders } from './seeder'
+import { singleFlight } from './single-flight'
 
 type ConnectionResolver = string | (() => string | undefined)
 
@@ -52,7 +53,6 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
   let sqliteClient:
     | { query(sql: string): { all(): unknown[] }; exec(sql: string): void; close(): void }
     | undefined
-  let migrationsPromise: Promise<void> | undefined
   let activeKey: string | undefined
   // Captured here, not in ensureDatabase(), so the caller of this factory is
   // the frame that identifies the handle across hot reloads.
@@ -116,10 +116,8 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
     }
   }
 
-  async function migrateOnce(): Promise<void> {
-    if (migrationsPromise) return migrationsPromise
-
-    migrationsPromise = (async () => {
+  const migrations = singleFlight(async (): Promise<void> => {
+    try {
       if (!hasDrizzleMigrations(resolvedMigrationsFolder)) {
         warnIgnoredFlatSqlMigrations(resolvedMigrationsFolder)
         return
@@ -128,24 +126,19 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
       const database = await ensureDatabase()
       const { migrate } = await import('drizzle-orm/bun-sqlite/migrator')
       await migrate(database as any, { migrationsFolder: resolvedMigrationsFolder }) // eslint-disable-line @typescript-eslint/no-explicit-any
-    })()
-
-    migrationsPromise = migrationsPromise.catch((error) => {
-      migrationsPromise = undefined
+    } catch (error) {
       // No endpoint: a SQLite file has no host, so only the cause chain adds signal.
       throw migrationFailure(error)
-    })
-
-    await migrationsPromise
-  }
+    }
+  })
 
   return {
     async getDatabase() {
-      await migrateOnce()
+      await migrations.get()
       return ensureDatabase()
     },
 
-    migrateDatabase: migrateOnce,
+    migrateDatabase: migrations.get,
 
     closeDatabase,
 
@@ -176,7 +169,7 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
       }
 
       // Allow migrateDatabase() to re-apply everything from scratch.
-      migrationsPromise = undefined
+      migrations.reset()
     },
 
     async migrationStatus() {
@@ -199,7 +192,7 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
 
     async configureOrm() {
       const database = await ensureDatabase()
-      await migrateOnce()
+      await migrations.get()
       DrizzleAdapter.configure(database as Parameters<typeof DrizzleAdapter.configure>[0])
     },
 

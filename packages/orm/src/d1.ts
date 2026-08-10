@@ -1,6 +1,7 @@
 import { relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
+import { singleFlight } from './single-flight'
 
 export interface D1DatabaseOptions {
   /**
@@ -55,38 +56,26 @@ export function createD1Database(options: D1DatabaseOptions): D1DatabaseHandle {
         ? relative(process.cwd(), fileURLToPath(migrationsFolder))
         : migrationsFolder
 
-  let databasePromise: Promise<unknown> | undefined
+  const databaseHandle = singleFlight(async (): Promise<unknown> => {
+    const client = binding()
+    if (client == null) {
+      throw new Error(
+        'createD1Database: the "binding" resolver returned no D1 binding. ' +
+          'On Workers this usually means it ran before the first request — defer access ' +
+          '(e.g. binding: () => getWorkersEnv<Env>().DB) and check the d1_databases entry in wrangler.jsonc.',
+      )
+    }
 
-  function ensureDatabase(): Promise<unknown> {
-    if (databasePromise) return databasePromise
-
-    const promise = (async () => {
-      const client = binding()
-      if (client == null) {
-        throw new Error(
-          'createD1Database: the "binding" resolver returned no D1 binding. ' +
-            'On Workers this usually means it ran before the first request — defer access ' +
-            '(e.g. binding: () => getWorkersEnv<Env>().DB) and check the d1_databases entry in wrangler.jsonc.',
-        )
-      }
-
-      // drizzle-orm/d1 only accepts the positional (client, config) form —
-      // unlike bun-sqlite there is no `{ client }` object overload.
-      const { drizzle } = await import('drizzle-orm/d1')
-      type D1Client = Parameters<typeof drizzle>[0]
-      type D1Config = NonNullable<Parameters<typeof drizzle>[1]>
-      return drizzle(client as D1Client, relations ? ({ relations } as D1Config) : undefined)
-    })()
-
-    databasePromise = promise.catch((error) => {
-      databasePromise = undefined
-      throw error
-    })
-    return databasePromise
-  }
+    // drizzle-orm/d1 only accepts the positional (client, config) form —
+    // unlike bun-sqlite there is no `{ client }` object overload.
+    const { drizzle } = await import('drizzle-orm/d1')
+    type D1Client = Parameters<typeof drizzle>[0]
+    type D1Config = NonNullable<Parameters<typeof drizzle>[1]>
+    return drizzle(client as D1Client, relations ? ({ relations } as D1Config) : undefined)
+  })
 
   return {
-    getDatabase: ensureDatabase,
+    getDatabase: databaseHandle.get,
 
     async migrateDatabase() {
       // The drizzle-kit SQL ↔ wrangler format contract is covered by the
@@ -102,11 +91,11 @@ export function createD1Database(options: D1DatabaseOptions): D1DatabaseHandle {
     async closeDatabase() {
       // D1 sessions have no connection to close; just drop the cached instance
       // (mirrors the sqlite factory).
-      databasePromise = undefined
+      databaseHandle.reset()
     },
 
     async configureOrm() {
-      const database = await ensureDatabase()
+      const database = await databaseHandle.get()
       DrizzleAdapter.configure(database as Parameters<typeof DrizzleAdapter.configure>[0])
     },
 
