@@ -75,7 +75,7 @@ function matchInCode(content: string, pattern: RegExp): RegExpExecArray | null {
  * depth over the masked source, so nesting is respected and a bracket inside
  * a string or comment does not shift the result.
  */
-export function findClosingDelimiter(content: string, openIndex: number, open: string, close: string): number {
+function findClosingDelimiter(content: string, openIndex: number, open: string, close: string): number {
   const masked = maskNonCode(content)
   let depth = 0
 
@@ -121,26 +121,20 @@ function appendArrayEntry(arrayInterior: string, valueSource: string): string {
 }
 
 /**
- * Adds an import statement to a file if not already present.
- * Inserts the import at the top of the file, after any existing imports.
+ * `content` with `importStatement` inserted after the last existing import, or
+ * `null` when it is already there.
+ *
+ * Split out from `addImport` so a patch that also edits the body can apply both
+ * in one write: the alternative is a second file-level pass that can leave an
+ * import behind when the body edit is the one that failed.
  */
-export async function addImport(
-  filePath: string,
-  importStatement: string,
-): Promise<PatchResult> {
-  const absolutePath = resolve(process.cwd(), filePath)
-  const content = await readIfExists(process.cwd(), filePath)
-
-  if (content === null) {
-    return { modified: false, reason: 'File not found' }
-  }
-
+export function insertImport(content: string, importStatement: string): string | null {
   const normalizedImport = importStatement.trim()
   const importPattern = escapeRegExp(normalizedImport)
   const regex = new RegExp(`^\\s*${importPattern}\\s*$`, 'm')
 
   if (regex.test(content)) {
-    return { modified: false, reason: 'Import already exists' }
+    return null
   }
 
   const lines = content.split('\n')
@@ -177,7 +171,29 @@ export async function addImport(
   insertIndex = lastImportIndex >= 0 ? lastImportIndex + 1 : 0
 
   lines.splice(insertIndex, 0, normalizedImport)
-  const updatedContent = lines.join('\n')
+  return lines.join('\n')
+}
+
+/**
+ * Adds an import statement to a file if not already present.
+ * Inserts the import at the top of the file, after any existing imports.
+ */
+export async function addImport(
+  filePath: string,
+  importStatement: string,
+): Promise<PatchResult> {
+  const absolutePath = resolve(process.cwd(), filePath)
+  const content = await readIfExists(process.cwd(), filePath)
+
+  if (content === null) {
+    return { modified: false, reason: 'File not found' }
+  }
+
+  const updatedContent = insertImport(content, importStatement)
+
+  if (updatedContent === null) {
+    return { modified: false, reason: 'Import already exists' }
+  }
 
   await writeFile(absolutePath, updatedContent, 'utf8')
   return { modified: true }
