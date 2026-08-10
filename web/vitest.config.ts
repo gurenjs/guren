@@ -11,6 +11,12 @@ export default defineConfig({
       { find: /^@guren\/testing$/, replacement: resolveFromRoot('../packages/testing/src/index.ts') },
       { find: /^@guren\/testing\//, replacement: resolveFromRoot('../packages/testing/src/') },
       { find: /^@guren\/server$/, replacement: resolveFromRoot('../packages/server/src/index.ts') },
+      // Exact match must precede the prefix rule below, which consumes the
+      // separator without restoring it and would yield 'srcsupport/expiry'.
+      {
+        find: /^@guren\/server\/support\/expiry$/,
+        replacement: resolveFromRoot('../packages/server/src/support/expiry.ts'),
+      },
       { find: /^@guren\/server\//, replacement: resolveFromRoot('../packages/server/src/') },
       { find: /^@guren\/core$/, replacement: resolveFromRoot('../packages/core/src/index.ts') },
       { find: /^@guren\/core\//, replacement: resolveFromRoot('../packages/core/src/') },

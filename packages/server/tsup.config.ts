@@ -34,6 +34,9 @@ export default defineConfig({
     'src/vite/index.ts',
     'src/lambda/index.ts',
     'src/mcp/index.ts',
+    // Not public API: @guren/core's database stores re-export the expiry
+    // rules from here so the two packages cannot drift apart.
+    'src/support/expiry.ts',
   ],
   format: ['esm'],
   // Multiple entry points MUST share chunks: with splitting disabled each

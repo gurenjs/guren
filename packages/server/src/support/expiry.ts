@@ -2,11 +2,15 @@
  * Expiry coercion and the one predicate that decides whether a stored expiry
  * has passed.
  *
- * These mirror `toDate`/`isExpired`/`toOptionalExpiry` in
- * `packages/core/src/store-utils.ts` — deliberately, not accidentally.
- * `@guren/core` depends on `@guren/server` and not the other way around, so
- * core is unreachable from here without a dependency cycle. Keep the two in
- * step until the shared copy moves under this package and core re-exports it.
+ * This is the single copy. `packages/core/src/store-utils.ts` re-exports
+ * `toDate`/`isExpired`/`toOptionalExpiry` from here through the
+ * `@guren/server/support/expiry` subpath, so the database-backed stores and
+ * the Redis ones decide expiry with the same code. It lives in this package
+ * because `@guren/core` depends on `@guren/server` and not the other way
+ * around — core is unreachable from here without a dependency cycle.
+ *
+ * Not part of the public API: the subpath exists for that re-export, and
+ * neither package's index exposes these.
  */
 
 /**
