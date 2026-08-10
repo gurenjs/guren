@@ -815,7 +815,10 @@ async function updateResourceRoutes(singular: string, routeName: string, routeVa
   const routesPath = resolve(process.cwd(), 'routes/web.ts')
   let content = await readFile(routesPath, 'utf8')
 
-  if (!content.includes(`'${routeName}.index'`) && !content.includes(`/${routeName}'`)) {
+  // Matching `/${routeName}'` unanchored made an unrelated `/admin/posts`
+  // read as "the posts routes are already registered", so the run reported
+  // success while registering nothing.
+  if (!content.includes(`'${routeName}.index'`) && !content.includes(`'/${routeName}'`)) {
     const registrar = findRouteRegistrar(content)
 
     // Located before anything is written: an app whose routes file cannot be
@@ -840,13 +843,17 @@ async function updateResourceRoutes(singular: string, routeName: string, routeVa
     // Insert before the closing brace of the route registrar function.
     const groupBlock = `\n${group.map((line) => `  ${line}`).join('\n')}\n`
     content = content.slice(0, registrar.bodyEnd) + groupBlock + content.slice(registrar.bodyEnd)
-  }
 
-  for (const statement of [
-    `import ${singular}Controller from '../app/Http/Controllers/${singular}Controller.js'`,
-    `import { ${singular}PayloadSchema } from '../app/Http/Validators/${singular}Validator.js'`,
-  ]) {
-    content = insertImport(content, statement) ?? content
+    // Inside the guard: these identifiers are only used by the group above,
+    // so a skipped registration must skip them too — appended unconditionally
+    // they are unused bindings, and the app stops compiling under
+    // noUnusedLocals.
+    for (const statement of [
+      `import ${singular}Controller from '../app/Http/Controllers/${singular}Controller.js'`,
+      `import { ${singular}PayloadSchema } from '../app/Http/Validators/${singular}Validator.js'`,
+    ]) {
+      content = insertImport(content, statement) ?? content
+    }
   }
 
   await writeFile(routesPath, content, 'utf8')

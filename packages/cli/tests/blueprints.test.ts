@@ -19,11 +19,11 @@ import { listBlueprints, runBlueprint } from '../src/blueprints'
 import { runCheck } from '../src/check'
 
 /** Minimum project shape the resource blueprint patches into. */
-async function seedResourceWorkspace(schema: string): Promise<void> {
+async function seedResourceWorkspace(schema: string, routes = DEFAULT_ROUTES_FIXTURE): Promise<void> {
   await mkdir('resources/js/pages', { recursive: true })
   await mkdir('routes', { recursive: true })
   await mkdir('db', { recursive: true })
-  await writeFile('routes/web.ts', DEFAULT_ROUTES_FIXTURE)
+  await writeFile('routes/web.ts', routes)
   await writeFile('db/schema.ts', schema)
 }
 
@@ -167,6 +167,68 @@ describe('blueprints', () => {
     const schema = await readFile('db/schema.ts', 'utf8')
     expect(schema).toContain("__dunder__: text('__dunder__')")
     expect(schema).toContain("publishedAt: timestamp('published_at', { withTimezone: true })")
+  })
+
+  // The suppression check used to match the collection slug as a quoted-path
+  // suffix, so an unrelated `/admin/posts` answered "the posts routes are
+  // already registered" for a `Post` resource: eight files scaffolded, the
+  // table added — and no route group.
+  it('registers the group when the slug only appears inside a longer path', async () => {
+    await seedResourceWorkspace(PG_SCHEMA_FIXTURE, `import { Router } from '@guren/core'
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/admin/posts', () => 'admin posts')
+}
+
+export default registerWebRoutes
+`)
+
+    await runBlueprint('resource', { name: 'Post' })
+
+    const routes = await readFile('routes/web.ts', 'utf8')
+    expect(routes).toContain("router.group('/posts'")
+    expect(routes).toContain("name('posts.index')")
+    // The imports the group needs are only sound because the group is there.
+    expect(routes).toContain("import PostController from '../app/Http/Controllers/PostController.js'")
+    // The route that triggered the false positive is left alone.
+    expect(routes).toContain("router.get('/admin/posts', () => 'admin posts')")
+  })
+
+  // The direction the anchoring could overshoot in. A hand-wired `/posts` has
+  // none of the generated `.name()` calls, so the path literal is the only
+  // thing left to recognise it by — anchor it any tighter (on `.group(`, say)
+  // and the blueprint registers a second, conflicting set of routes.
+  it('leaves hand-registered routes for the same collection alone', async () => {
+    await seedResourceWorkspace(PG_SCHEMA_FIXTURE, `import { Router } from '@guren/core'
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/posts', () => 'posts')
+}
+
+export default registerWebRoutes
+`)
+
+    await runBlueprint('resource', { name: 'Post' })
+
+    const routes = await readFile('routes/web.ts', 'utf8')
+    expect(routes).not.toContain("router.group('/posts'")
+    // A skipped registration must skip its imports too: appended anyway they
+    // are unused bindings, and the app stops compiling under noUnusedLocals.
+    expect(routes).not.toContain('import PostController')
+  })
+
+  // A second run is suppressed by both clauses of the guard — run 1 emits the
+  // path literal and the route names. This pins the run-twice contract itself,
+  // including the import dedupe, not either clause.
+  it('registers the resource group once when re-run', async () => {
+    await seedResourceWorkspace(PG_SCHEMA_FIXTURE)
+
+    await runBlueprint('resource', { name: 'Post' })
+    await runBlueprint('resource', { name: 'Post', force: true })
+
+    const routes = await readFile('routes/web.ts', 'utf8')
+    expect(routes.match(/\.group\('\/posts'/g)).toHaveLength(1)
+    expect(routes.match(/import PostController from/g)).toHaveLength(1)
   })
 
   it('rejects unknown blueprints', async () => {
