@@ -29,5 +29,13 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    // Every test here runs in single-digit milliseconds except the two that
+    // reach live shiki — FsDocsStore.getRendered and HomeController.index,
+    // which take the live-highlighting path because shouldUsePrerendered() is
+    // false outside production. Loading the WASM regex engine, the themes and
+    // one grammar per fenced language costs ~1.2s on its own, ~2s under normal
+    // full-suite contention and ~4s on an otherwise loaded machine, so the 5s
+    // default sits just above a cold shiki start and flakes under load.
+    testTimeout: 30_000,
   },
 })
