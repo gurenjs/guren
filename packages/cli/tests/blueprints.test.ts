@@ -4,11 +4,13 @@ import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import {
   API_ROUTES_FIXTURE,
+  APP_FIXTURE,
   BLOG_ROUTES_FIXTURE,
   CAN_DENY_FILE_READS,
   DEFAULT_ROUTES_FIXTURE,
   MYSQL_SCHEMA_FIXTURE,
   PG_SCHEMA_FIXTURE,
+  PROVIDERLESS_APP_FIXTURE,
   REGISTRAR_LESS_ROUTES_FIXTURE,
   captureWarnings,
   createTempWorkspace,
@@ -17,6 +19,12 @@ import {
 } from './helpers'
 import { listBlueprints, runBlueprint } from '../src/blueprints'
 import { runCheck } from '../src/check'
+
+/** Materialize an app file for the provider-wiring patches to target. */
+async function seedAppFile(source: string): Promise<void> {
+  await mkdir('src', { recursive: true })
+  await writeFile('src/app.ts', source)
+}
 
 /** Minimum project shape the resource blueprint patches into. */
 async function seedResourceWorkspace(schema: string): Promise<void> {
@@ -383,17 +391,8 @@ export const users = pgTable('users', {
   }
 
   it('runs the infrastructure blueprints', async () => {
-    await mkdir('src', { recursive: true })
+    await seedAppFile(APP_FIXTURE)
     await mkdir('routes', { recursive: true })
-    await writeFile('src/app.ts', `import { createApp } from '@guren/core'
-
-const app = createApp({
-  routes: () => {},
-  providers: [],
-})
-
-export default app
-`)
     await writeFile('routes/web.ts', DEFAULT_ROUTES_FIXTURE)
 
     const adminFiles = await runBlueprint('admin')
@@ -452,6 +451,74 @@ export default app
     expect(adminFiles.some((file) => file.endsWith('routes/admin.ts'))).toBe(true)
     expect(routesSource).toContain("import registerAdminRoutes from './admin.js'")
     expect(routesSource).toContain('registerAdminRoutes(router)')
+  })
+
+  // Same failure mode as the route wiring above, on the other half of an
+  // install: `addImport`/`addProvider` report an unpatchable app entry by
+  // returning a reason, and the blueprints used to discard it — writing the
+  // provider file, registering nothing, and reporting success. The app then
+  // boots without the feature `guren add` just said it installed.
+  describe('provider wiring failures', () => {
+    it('warns when there is no app file to register the providers in', async () => {
+      const { result: created, warnings } = await captureWarnings(() => runBlueprint('cache'))
+      const warningText = warnings.join('\n')
+
+      expect(created.some((file) => file.endsWith('app/Providers/CacheProvider.ts'))).toBe(true)
+      // Both halves of the install are named: the core provider supplies the
+      // 'cache' binding, the app provider configures it, and an app missing
+      // either one is missing the feature.
+      expect(warningText).toContain('Could not find src/app.ts — CoreCacheServiceProvider was not registered.')
+      expect(warningText).toContain('Could not find src/app.ts — CacheProvider was not registered.')
+      expect(existsSync('src/app.ts')).toBe(false)
+    })
+
+    it('leaves an unpatchable app file untouched rather than importing into it', async () => {
+      await seedAppFile(PROVIDERLESS_APP_FIXTURE)
+
+      const { warnings } = await captureWarnings(() => runBlueprint('cache'))
+
+      expect(warnings.join('\n')).toContain(
+        'Could not register CoreCacheServiceProvider in src/app.ts: Could not find providers array.',
+      )
+      // Not even the import — see installProvider()'s ordering rationale.
+      expect(await readFile('src/app.ts', 'utf8')).toBe(PROVIDERLESS_APP_FIXTURE)
+    })
+
+    it('registers both providers without warning when the array is there', async () => {
+      await seedAppFile(APP_FIXTURE)
+
+      const { warnings } = await captureWarnings(() => runBlueprint('cache'))
+
+      expect(warnings).toEqual([])
+      const patched = await readFile('src/app.ts', 'utf8')
+      expect(patched).toContain("import { CacheServiceProvider as CoreCacheServiceProvider } from '@guren/core'")
+      expect(patched).toContain("import CacheProvider from '../app/Providers/CacheProvider.js'")
+      expect(patched).toContain('providers: [CoreCacheServiceProvider, CacheProvider]')
+    })
+
+    // The already-registered branch still installs the import: an app whose
+    // providers array names the provider but lost the import (or a re-run over
+    // a half-patched file) must end complete, not merely undisturbed.
+    it('backfills a missing import for an already-registered provider', async () => {
+      await seedAppFile(`import { createApp } from '@guren/core'
+
+const app = createApp({
+  routes: () => {},
+  providers: [CoreCacheServiceProvider, CacheProvider],
+})
+
+export default app
+`)
+
+      const { warnings } = await captureWarnings(() => runBlueprint('cache'))
+
+      expect(warnings).toEqual([])
+      const patched = await readFile('src/app.ts', 'utf8')
+      expect(patched).toContain("import { CacheServiceProvider as CoreCacheServiceProvider } from '@guren/core'")
+      expect(patched).toContain("import CacheProvider from '../app/Providers/CacheProvider.js'")
+      // Still exactly one registration of each.
+      expect(patched.match(/providers: \[CoreCacheServiceProvider, CacheProvider\]/g)).toHaveLength(1)
+    })
   })
 })
 

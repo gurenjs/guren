@@ -180,6 +180,30 @@ router.get('/', () => 'home')
 export default router
 `
 
+/** The `src/app.ts` shape the provider-wiring patches expect. */
+export const APP_FIXTURE = `import { createApp } from '@guren/core'
+
+const app = createApp({
+  routes: () => {},
+  providers: [],
+})
+
+export default app
+`
+
+/**
+ * An app file with no providers array to patch — the provider-wiring twin of
+ * `REGISTRAR_LESS_ROUTES_FIXTURE`.
+ */
+export const PROVIDERLESS_APP_FIXTURE = `import { createApp } from '@guren/core'
+
+const app = createApp({
+  routes: () => {},
+})
+
+export default app
+`
+
 /**
  * Runs `task` with `consola.warn` collecting into an array instead of
  * printing. Scoped to the call and restored in a `finally`, unlike

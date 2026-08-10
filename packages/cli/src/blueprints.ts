@@ -1,3 +1,4 @@
+import { consola } from 'consola'
 import { assertNotApiOnly } from './app-surface'
 import { makeAuth } from './make-auth'
 import { makeChannel } from './make-channel'
@@ -38,9 +39,42 @@ export interface BlueprintDefinition {
   run: (options: RunBlueprintOptions) => Promise<string[]>
 }
 
-async function installCoreProvider(importName: string, providerName: string): Promise<void> {
-  await addImport('src/app.ts', importName)
-  await addProvider('src/app.ts', providerName)
+/** The one file the infrastructure blueprints register their providers in. */
+const APP_FILE = 'src/app.ts'
+
+/**
+ * Registers a provider in the app file, reporting every outcome.
+ *
+ * Nothing here may be silent. `addImport`/`addProvider` return
+ * `{ modified: false, reason }` rather than throwing, and the results used to be
+ * discarded: an app with no `src/app.ts`, or one whose providers array the patch
+ * cannot find, got its provider file written, nothing registered, and a success
+ * report — and then booted without the feature the CLI just said it installed.
+ *
+ * Same rule as `wireRouteRegistrar()`, and for the same reason the scaffold is
+ * not refused here: every file these blueprints write is deletable, so an
+ * unpatchable app file earns a warning naming what to register by hand.
+ */
+async function installProvider(importStatement: string, providerName: string): Promise<void> {
+  // The array first: on a file whose providers array cannot be patched, the
+  // import would be a binding nothing uses, and the app it was scaffolded into
+  // stops compiling under noUnusedLocals over a feature it never received.
+  const registration = await addProvider(APP_FILE, providerName)
+
+  if (registration.modified || registration.reason === 'Provider already registered') {
+    const imported = await addImport(APP_FILE, importStatement)
+    if (!imported.modified && imported.reason !== 'Import already exists') {
+      consola.warn(`Could not add the ${providerName} import to ${APP_FILE}: ${imported.reason}. Add it by hand: ${importStatement}`)
+    }
+    return
+  }
+
+  if (registration.reason === 'File not found') {
+    consola.warn(`Could not find ${APP_FILE} — ${providerName} was not registered.`)
+  } else {
+    consola.warn(`Could not register ${providerName} in ${APP_FILE}: ${registration.reason}.`)
+  }
+  consola.info(`Add ${providerName} to your createApp() providers array by hand: ${importStatement}`)
 }
 
 async function scaffoldFeatureFiles(
@@ -289,12 +323,14 @@ export default registerOAuthRoutes
         },
       ], writerOptions)
 
-      await installCoreProvider(
+      await installProvider(
         "import { OAuthServiceProvider as CoreOAuthServiceProvider } from '@guren/core'",
         'CoreOAuthServiceProvider',
       )
-      await addImport('src/app.ts', "import OAuthProvider from '../app/Providers/OAuthProvider.js'")
-      await addProvider('src/app.ts', 'OAuthProvider')
+      await installProvider(
+        "import OAuthProvider from '../app/Providers/OAuthProvider.js'",
+        'OAuthProvider',
+      )
 
       await wireRouteRegistrar('registerOAuthRoutes', "import registerOAuthRoutes from './oauth.js'")
 
@@ -337,12 +373,14 @@ export class ApplicationCache {
         },
       ], writerOptions)
 
-      await installCoreProvider(
+      await installProvider(
         "import { CacheServiceProvider as CoreCacheServiceProvider } from '@guren/core'",
         'CoreCacheServiceProvider',
       )
-      await addImport('src/app.ts', "import CacheProvider from '../app/Providers/CacheProvider.js'")
-      await addProvider('src/app.ts', 'CacheProvider')
+      await installProvider(
+        "import CacheProvider from '../app/Providers/CacheProvider.js'",
+        'CacheProvider',
+      )
 
       return created
     },
@@ -376,12 +414,14 @@ export default class EventProvider extends ServiceProvider {
         },
       ], writerOptions)
 
-      await installCoreProvider(
+      await installProvider(
         "import { EventServiceProvider as CoreEventServiceProvider } from '@guren/core'",
         'CoreEventServiceProvider',
       )
-      await addImport('src/app.ts', "import EventProvider from '../app/Providers/EventProvider.js'")
-      await addProvider('src/app.ts', 'EventProvider')
+      await installProvider(
+        "import EventProvider from '../app/Providers/EventProvider.js'",
+        'EventProvider',
+      )
 
       return [eventPath, listenerPath, ...created]
     },
@@ -421,12 +461,14 @@ export default class MailProvider extends ServiceProvider {
         },
       ], writerOptions)
 
-      await installCoreProvider(
+      await installProvider(
         "import { MailServiceProvider as CoreMailServiceProvider } from '@guren/core'",
         'CoreMailServiceProvider',
       )
-      await addImport('src/app.ts', "import MailProvider from '../app/Providers/MailProvider.js'")
-      await addProvider('src/app.ts', 'MailProvider')
+      await installProvider(
+        "import MailProvider from '../app/Providers/MailProvider.js'",
+        'MailProvider',
+      )
 
       return [mailPath, ...created]
     },
@@ -468,12 +510,14 @@ export default class QueueProvider extends ServiceProvider {
         },
       ], writerOptions)
 
-      await installCoreProvider(
+      await installProvider(
         "import { QueueServiceProvider as CoreQueueServiceProvider } from '@guren/core'",
         'CoreQueueServiceProvider',
       )
-      await addImport('src/app.ts', "import QueueProvider from '../app/Providers/QueueProvider.js'")
-      await addProvider('src/app.ts', 'QueueProvider')
+      await installProvider(
+        "import QueueProvider from '../app/Providers/QueueProvider.js'",
+        'QueueProvider',
+      )
 
       return [jobPath, ...created]
     },
@@ -504,12 +548,14 @@ export default class NotificationProvider extends ServiceProvider {
         },
       ], writerOptions)
 
-      await installCoreProvider(
+      await installProvider(
         "import { NotificationServiceProvider as CoreNotificationServiceProvider } from '@guren/core'",
         'CoreNotificationServiceProvider',
       )
-      await addImport('src/app.ts', "import NotificationProvider from '../app/Providers/NotificationProvider.js'")
-      await addProvider('src/app.ts', 'NotificationProvider')
+      await installProvider(
+        "import NotificationProvider from '../app/Providers/NotificationProvider.js'",
+        'NotificationProvider',
+      )
 
       return [notificationPath, ...created]
     },
@@ -551,12 +597,14 @@ export class FileStorage {
         },
       ], writerOptions)
 
-      await installCoreProvider(
+      await installProvider(
         "import { StorageServiceProvider as CoreStorageServiceProvider } from '@guren/core'",
         'CoreStorageServiceProvider',
       )
-      await addImport('src/app.ts', "import StorageProvider from '../app/Providers/StorageProvider.js'")
-      await addProvider('src/app.ts', 'StorageProvider')
+      await installProvider(
+        "import StorageProvider from '../app/Providers/StorageProvider.js'",
+        'StorageProvider',
+      )
 
       return created
     },
@@ -604,12 +652,14 @@ export default class BroadcastProvider extends ServiceProvider {
         },
       ], writerOptions)
 
-      await installCoreProvider(
+      await installProvider(
         "import { BroadcastServiceProvider as CoreBroadcastServiceProvider } from '@guren/core'",
         'CoreBroadcastServiceProvider',
       )
-      await addImport('src/app.ts', "import BroadcastProvider from '../app/Providers/BroadcastProvider.js'")
-      await addProvider('src/app.ts', 'BroadcastProvider')
+      await installProvider(
+        "import BroadcastProvider from '../app/Providers/BroadcastProvider.js'",
+        'BroadcastProvider',
+      )
 
       return [publicChannelPath, privateChannelPath, ...created]
     },
@@ -666,7 +716,7 @@ export default scheduleTasksKernel
         },
       ], writerOptions)
 
-      await installCoreProvider(
+      await installProvider(
         "import { SchedulingServiceProvider as CoreSchedulingServiceProvider } from '@guren/core'",
         'CoreSchedulingServiceProvider',
       )
