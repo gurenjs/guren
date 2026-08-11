@@ -83,6 +83,9 @@ scaffolds React page components and a controller that returns Inertia responses.
 Its refusal likewise comes before the table it would otherwise append to your
 `db/schema.ts`. So does `make:feature`, which reaches the same scaffold
 directly. Add a JSON controller wired into `routes/api.ts` by hand instead.
+The single-file generators (`make:controller`, `make:view`) also emit
+Inertia-shaped output but are not guarded: one stray file is a deletion, not a
+broken scaffold.
 
 `add resource` also needs the two files it patches to be there, whatever shape the
 rest of your app is: it appends its table to `db/schema.ts` and registers the CRUD
