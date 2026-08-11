@@ -9,6 +9,18 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TEMP_DIR=""
 SERVER_PID=""
 
+# Every TypeScript payload this script runs against the scaffolded app lives
+# here as a real .ts file and is copied into place — none of them are heredocs
+# or `bun -e` strings. Files keep the payloads greppable and free of shell
+# quoting, and they sidestep a heredoc's one hard failure mode: bash writes a
+# heredoc under 64KB into a pipe, and it does that write *before* exec'ing the
+# reader, so the writer is its own reader and anything larger than the kernel's
+# pipe capacity deadlocks with no output. That capacity is not a constant — a
+# host under memory pressure can report a fraction of the usual value — so the
+# ceiling is not something this script can size a payload against. Add the next
+# payload as a file here too.
+FIXTURES_DIR="$REPO_ROOT/scripts/smoke/fixtures"
+
 # Redefined once the runtime smoke has a server to kill; until then there is
 # nothing to stop. Declared here so cleanup() can be written once — the same
 # handler ran before and after that point, and keeping one copy is what stops
@@ -256,49 +268,20 @@ stop_server() {
 if [ "$SMOKE_DB" = "sqlite" ]; then
   (cd "$APP_DIR" && bun run db:migrate)
 else
-  # Server-backed drivers get a dedicated database, created here if missing.
+  # The only gate on a non-sqlite $SMOKE_DB (sqlite is matched literally
+  # above). Driver-keyed fixture names are interpolated from this variable, so
+  # an unknown value has to die here rather than reach a `cp` as a missing
+  # filename.
   case "$SMOKE_DB" in
-    postgres)
-      # CREATE DATABASE has no IF NOT EXISTS on pg.
-      cat > "$TEMP_DIR/ensure-db.ts" <<'ENSUREDB'
-import postgres from 'postgres'
-
-const target = new URL(process.env.DATABASE_URL ?? '')
-const dbName = target.pathname.slice(1)
-const admin = new URL(target.toString())
-admin.pathname = '/postgres'
-
-const sql = postgres(admin.toString(), { max: 1 })
-const exists = await sql`SELECT 1 FROM pg_database WHERE datname = ${dbName}`
-if (exists.length === 0) {
-  await sql.unsafe(`CREATE DATABASE "${dbName.replaceAll('"', '""')}"`)
-  console.log(`Created database ${dbName}`)
-} else {
-  console.log(`Database ${dbName} already exists`)
-}
-await sql.end()
-ENSUREDB
-      ;;
-    mysql)
-      cat > "$TEMP_DIR/ensure-db.ts" <<'ENSUREDB'
-import { createConnection } from 'mysql2/promise'
-
-const target = new URL(process.env.DATABASE_URL ?? '')
-const dbName = decodeURIComponent(target.pathname.slice(1))
-const admin = new URL(target.toString())
-admin.pathname = '/'
-
-const connection = await createConnection(admin.toString())
-await connection.query(`CREATE DATABASE IF NOT EXISTS \`${dbName.replaceAll('`', '``')}\``)
-await connection.end()
-console.log(`Database ${dbName} ready`)
-ENSUREDB
-      ;;
+    postgres|mysql) ;;
     *)
       echo "ERROR: unknown GUREN_SMOKE_DB '$SMOKE_DB' (expected sqlite, postgres, or mysql)"
       exit 1
       ;;
   esac
+
+  # Server-backed drivers get a dedicated database, created here if missing.
+  cp "$FIXTURES_DIR/ensure-db.$SMOKE_DB.ts" "$TEMP_DIR/ensure-db.ts"
   (cd "$APP_DIR" && bun "$TEMP_DIR/ensure-db.ts")
 
   # Drop leftovers from previous runs and exercise resetDatabase().
@@ -328,91 +311,8 @@ fi
 
 # Assert migrations actually created tables — db:migrate used to report
 # success while silently executing nothing.
-if [ "$SMOKE_DB" = "postgres" ]; then
-  cat > "$TEMP_DIR/dbcheck.ts" <<'DBCHECK'
-import postgres from 'postgres'
-
-const sql = postgres(process.env.DATABASE_URL ?? 'postgres://guren:guren@localhost:54322/guren', { max: 1 })
-const rows = await sql`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`
-const tables = rows.map((row) => row.table_name as string)
-for (const required of ['users', 'posts', 'comments']) {
-  if (!tables.includes(required)) {
-    console.error('Missing table after db:migrate: ' + required + ' (found: ' + tables.join(', ') + ')')
-    process.exit(1)
-  }
-}
-const tracker = await sql`SELECT count(*)::int AS c FROM drizzle.__drizzle_migrations`
-if (Number(tracker[0].c) < 1) {
-  console.error('drizzle.__drizzle_migrations is empty after db:migrate')
-  process.exit(1)
-}
-
-// Every timestamp a scaffold emits must carry a time zone. An offset-less
-// column stores a bare wall clock and leaves its meaning to the reader: the
-// app itself stays self-consistent (drizzle parses the column as UTC), which
-// is why no HTTP round trip below can catch this, but every other reader sees
-// a different instant and a `defaultNow()` column records the DB session's
-// local wall clock. Asked as "which columns are wrong" rather than against a
-// list of names, so a scaffold that grows a new timestamp is covered too.
-const offsetlessColumns = await sql`
-  SELECT table_name, column_name, data_type FROM information_schema.columns
-  WHERE table_schema = 'public'
-    AND data_type LIKE 'timestamp%'
-    AND data_type <> 'timestamp with time zone'
-`
-if (offsetlessColumns.length > 0) {
-  const named = offsetlessColumns.map((c) => c.table_name + '.' + c.column_name + ' (' + c.data_type + ')')
-  console.error('Expected every timestamp column to be timestamptz, but found: ' + named.join(', '))
-  process.exit(1)
-}
-
-await sql.end()
-console.log('DB tables OK (postgres): ' + tables.join(', ') + ' — timestamp columns are timestamptz')
-DBCHECK
-  (cd "$APP_DIR" && bun "$TEMP_DIR/dbcheck.ts")
-elif [ "$SMOKE_DB" = "mysql" ]; then
-  cat > "$TEMP_DIR/dbcheck.ts" <<'DBCHECK'
-import { createConnection } from 'mysql2/promise'
-
-const connection = await createConnection(process.env.DATABASE_URL ?? '')
-const [rows] = await connection.query(
-  'SELECT table_name AS name FROM information_schema.tables WHERE table_schema = DATABASE()',
-)
-const tables = (rows as Array<{ name: string }>).map((row) => row.name)
-for (const required of ['users', 'posts', 'comments']) {
-  if (!tables.includes(required)) {
-    console.error('Missing table after db:migrate: ' + required + ' (found: ' + tables.join(', ') + ')')
-    process.exit(1)
-  }
-}
-// The tracker table lives in the app database on MySQL, so the count below
-// doubles as its existence check — the query fails if it was never created.
-const [tracker] = await connection.query('SELECT count(*) AS c FROM __drizzle_migrations')
-if (Number((tracker as Array<{ c: number }>)[0].c) < 1) {
-  console.error('__drizzle_migrations is empty after db:migrate')
-  process.exit(1)
-}
-await connection.end()
-console.log('DB tables OK (mysql): ' + tables.join(', '))
-DBCHECK
-  (cd "$APP_DIR" && bun "$TEMP_DIR/dbcheck.ts")
-else
-  (cd "$APP_DIR" && bun -e "
-import { Database } from 'bun:sqlite'
-const db = new Database('./data/guren.db')
-const tables = db.query(\"SELECT name FROM sqlite_master WHERE type='table'\").all().map((r) => r.name)
-for (const required of ['users', 'posts', 'comments', '__drizzle_migrations']) {
-  if (!tables.includes(required)) {
-    console.error('Missing table after db:migrate: ' + required + ' (found: ' + tables.join(', ') + ')')
-    // An empty table list here usually means db:migrate wrote somewhere else
-    // rather than that it silently executed nothing, so name both databases.
-    console.error('Checked sqlite file: ./data/guren.db (DATABASE_URL=' + (process.env.DATABASE_URL ?? '<unset>') + ')')
-    process.exit(1)
-  }
-}
-console.log('DB tables OK: ' + tables.join(', '))
-")
-fi
+cp "$FIXTURES_DIR/dbcheck.$SMOKE_DB.ts" "$TEMP_DIR/dbcheck.ts"
+(cd "$APP_DIR" && bun "$TEMP_DIR/dbcheck.ts")
 
 # One loopback address, used for both halves of the conversation: the app is
 # told to bind it and the assertions are addressed to it. `localhost` is not
@@ -709,57 +609,7 @@ stop_server
 # ---------------------------------------------------------------------------
 step 17 "Add-on runtime smoke (queue dispatch + mail send)"
 
-cat > "$APP_DIR/addons-check.ts" <<'ADDONS'
-import app, { ready } from './src/main.js'
-import { Job, registerJob } from '@guren/core'
-
-await ready
-
-// Queue: the scaffolded default is the sync driver — dispatch must execute
-// the handler inline, in this process, with no worker.
-let probeRan = false
-class SmokeProbeJob extends Job<Record<string, never>> {
-  async handle(): Promise<void> {
-    probeRan = true
-  }
-}
-registerJob(SmokeProbeJob)
-const jobId = await SmokeProbeJob.dispatch({})
-if (typeof jobId !== 'string' || jobId.length === 0) {
-  console.error('Job dispatch did not return a job id')
-  process.exit(1)
-}
-if (!probeRan) {
-  console.error('SyncDriver did not execute the dispatched job inline')
-  process.exit(1)
-}
-console.log('Queue OK: sync dispatch executed the job inline')
-
-// The scaffolded sample job must dispatch cleanly too.
-const { ProcessWelcomeSequenceJob } = await import('./app/Jobs/ProcessWelcomeSequenceJob.js')
-await ProcessWelcomeSequenceJob.dispatch({ source: 'smoke' })
-
-// Mail: the scaffolded default is the log transport — send() must succeed
-// and report the log response.
-const mailManager = app.container.make('mail') as never
-const { WelcomeEmailMail } = await import('./app/Mail/WelcomeEmailMail.js')
-const result = (await new WelcomeEmailMail(mailManager).to('smoke@example.com').send()) as {
-  success: boolean
-  response?: string
-  error?: string
-}
-if (!result.success) {
-  console.error('Mail send failed: ' + JSON.stringify(result))
-  process.exit(1)
-}
-if (result.response !== 'Message written to log') {
-  console.error('Expected the log transport to handle the message, got: ' + JSON.stringify(result))
-  process.exit(1)
-}
-console.log('Mail OK: ' + result.response)
-
-process.exit(0)
-ADDONS
+cp "$FIXTURES_DIR/addons-check.ts" "$APP_DIR/addons-check.ts"
 
 (cd "$APP_DIR" && bun addons-check.ts)
 rm -f "$APP_DIR/addons-check.ts"
