@@ -19,6 +19,20 @@ import type { Middleware } from '../http/middleware'
 import { parseRequestPayload } from '../http/request'
 
 /**
+ * Best-effort identity for the user behind a connection.
+ *
+ * `getUser` is application-supplied and returns `unknown`, so this reads the
+ * conventional `id` and gives up otherwise. Giving up yields `undefined`, which
+ * marks the stream unowned — the permissive direction, so a bespoke user shape
+ * degrades to today's behaviour rather than silently refusing every subscribe.
+ */
+function resolveClientUserId(user: unknown): string | number | undefined {
+  if (typeof user !== 'object' || user === null) return undefined
+  const id = (user as { id?: unknown }).id
+  return typeof id === 'string' || typeof id === 'number' ? id : undefined
+}
+
+/**
  * Broadcast manager for real-time event broadcasting.
  *
  * @example
@@ -323,7 +337,9 @@ export class BroadcastManager {
 
           client = {
             id: clientId,
-            userId: undefined,
+            // Recorded so `POST /broadcasting/auth` can refuse to attach
+            // channels to a stream belonging to someone else.
+            userId: resolveClientUserId(user),
             channels: new Set(),
             send: (event: string, data: unknown) => {
               const message = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
@@ -402,6 +418,17 @@ export class BroadcastManager {
       const clientId = typeof payload.clientId === 'string' ? payload.clientId : undefined
       const results: Record<string, unknown> = {}
 
+      // Authorization answers "may *this user* read the channel", which is not
+      // the same question as "may this user attach it to *that* stream". Without
+      // the second check, a request naming someone else's clientId pushes the
+      // caller's own authorized events into that person's stream. A stream
+      // opened before sign-in has no owner and stays attachable — its id is
+      // unguessable, and refusing would break authorizing after login.
+      const requesterId = resolveClientUserId(user)
+      const target = clientId ? this.sseClients.get(clientId) : undefined
+      const ownsTarget =
+        target !== undefined && (target.userId === undefined || target.userId === requesterId)
+
       for (const ch of channels) {
         const authResult = await this.authorize(ch, user)
 
@@ -410,7 +437,7 @@ export class BroadcastManager {
           continue
         }
 
-        const subscribed = clientId ? this.subscribeClient(clientId, ch) : false
+        const subscribed = ownsTarget ? this.subscribeClient(clientId!, ch) : false
         if (authResult === true) {
           results[ch] = { authorized: true, subscribed }
         } else {
@@ -572,9 +599,14 @@ export class BroadcastManager {
    * Generate a unique client ID.
    */
   protected generateClientId(prefix: 'sse' | 'ws' = 'sse'): string {
-    const timestamp = Date.now().toString(36)
-    const random = Math.random().toString(36).substring(2, 10)
-    return `${prefix}_${timestamp}${random}`
+    // Unguessable, not merely unique: `POST /broadcasting/auth` accepts a
+    // `clientId` from the request body, so anyone who can predict another
+    // connection's id can attach channels to that connection's stream. A
+    // `Math.random()` suffix beside a `Date.now()` prefix is reconstructable.
+    const random = new Uint8Array(16)
+    crypto.getRandomValues(random)
+    const suffix = Array.from(random, (byte) => byte.toString(16).padStart(2, '0')).join('')
+    return `${prefix}_${suffix}`
   }
 }
 

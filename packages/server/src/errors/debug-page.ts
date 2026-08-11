@@ -128,8 +128,16 @@ export function debugErrorMiddleware(): MiddlewareHandler {
     try {
       await next()
     } catch (err) {
+      // Written without optional chaining on purpose: the deploy plugins bundle
+      // with `--define 'process.env.NODE_ENV="production"'`, which substitutes
+      // that one exact expression. Inserting an optional chain after `env`
+      // makes it a different expression, turning this gate back into a runtime
+      // read — and on hosts where platform vars never reach the process
+      // environment, that read answers "not production" and serves the stack
+      // trace to the public. The `typeof process` check already covers
+      // runtimes with no `process` at all.
       const isProduction =
-        typeof process !== 'undefined' && process.env?.NODE_ENV === 'production'
+        typeof process !== 'undefined' && process.env.NODE_ENV === 'production'
 
       if (isProduction) {
         throw err
@@ -309,7 +317,7 @@ function renderRequestSection(request: Request): string {
 
 function renderEnvironmentSection(): string {
   const nodeEnv =
-    typeof process !== 'undefined' ? process.env?.NODE_ENV ?? 'undefined' : 'undefined'
+    typeof process !== 'undefined' ? process.env.NODE_ENV ?? 'undefined' : 'undefined'
   const bunVersion =
     typeof process !== 'undefined' ? process.versions?.bun ?? 'N/A' : 'N/A'
   const platform =

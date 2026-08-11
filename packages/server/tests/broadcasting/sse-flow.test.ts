@@ -131,4 +131,75 @@ describe('SSE subscription flow', () => {
 
     await reader.cancel().catch(() => {})
   })
+
+  // Authorization answers "may this user read the channel", not "may this user
+  // attach it to that stream". Without the ownership check, user 1 — genuinely
+  // authorized for their own channel — pushes their events into user 2's
+  // stream by naming user 2's clientId.
+  test('refuses to attach a channel to a stream owned by another user', async () => {
+    const manager = createManager()
+    manager.privateChannel('users.1.notifications', (_channel, user) => (user as { id: number } | null)?.id === 1)
+
+    const app = new Hono()
+    // The victim's stream: opened while signed in as user 2, so it has an owner.
+    app.get('/events', manager.sseMiddleware({ pingInterval: 60000, getUser: () => ({ id: 2 }) }) as never)
+    app.post('/auth', manager.authMiddleware({ getUser: () => ({ id: 1 }) }) as never)
+
+    const response = await app.request('/events')
+    const reader = response.body!.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let victimClientId = ''
+    while (!victimClientId) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const match = buffer.match(/event: connected\ndata: (.+)\n/)
+      if (match) {
+        victimClientId = (JSON.parse(match[1]) as { clientId: string }).clientId
+      }
+    }
+    expect(victimClientId).toMatch(/.+/)
+
+    const authResponse = await app.request('/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientId: victimClientId, channel: 'private-users.1.notifications' }),
+    })
+    const authJson = (await authResponse.json()) as Record<string, { authorized: boolean; subscribed: boolean }>
+
+    // User 1 really is authorized for their own channel — the attach is what
+    // must fail.
+    expect(authJson['private-users.1.notifications'].authorized).toBe(true)
+    expect(authJson['private-users.1.notifications'].subscribed).toBe(false)
+
+    await reader.cancel().catch(() => {})
+  })
+
+  test('client ids are unguessable rather than time-seeded', async () => {
+    const manager = createManager()
+    const app = new Hono()
+    app.get('/events', manager.sseMiddleware({ pingInterval: 60000 }) as never)
+
+    const ids = new Set<string>()
+    for (let i = 0; i < 3; i++) {
+      const response = await app.request('/events')
+      const reader = response.body!.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let id = ''
+      while (!id) {
+        const { value, done } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const match = buffer.match(/event: connected\ndata: (.+)\n/)
+        if (match) id = (JSON.parse(match[1]) as { clientId: string }).clientId
+      }
+      // 16 random bytes, hex-encoded — no Date.now() prefix to anchor a guess.
+      expect(id).toMatch(/^sse_[0-9a-f]{32}$/)
+      ids.add(id)
+      await reader.cancel().catch(() => {})
+    }
+    expect(ids.size).toBe(3)
+  })
 })

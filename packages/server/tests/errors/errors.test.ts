@@ -1,4 +1,6 @@
 import { describe, expect, it, beforeEach, mock } from 'bun:test'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import {
   HttpException,
   ExceptionHandler,
@@ -594,5 +596,23 @@ describe('createExceptionHandler', () => {
   it('should create handler with options', () => {
     const handler = createExceptionHandler({ debug: true })
     expect(handler.shouldShowDetails()).toBe(true)
+  })
+})
+
+describe('debugErrorMiddleware production gate', () => {
+  it('reads the environment in the form the deploy bundlers substitute', async () => {
+    // The debug page renders the stack trace, the request, and the process
+    // environment. Its only guard is this NODE_ENV read, and the deploy plugins
+    // settle it at bundle time with
+    // `--define 'process.env.NODE_ENV="production"'`, which substitutes that one
+    // exact expression. `process.env?.NODE_ENV` is a different expression, so an
+    // optional chain turns the guard back into a runtime read — and on hosts
+    // where platform vars never reach `process.env`, that read answers "not
+    // production" and serves the page publicly. Runtime behaviour is identical
+    // either way, so only the source can pin it.
+    const source = await readFile(join(import.meta.dir, '../../src/errors/debug-page.ts'), 'utf8')
+
+    expect(source).toContain('process.env.NODE_ENV')
+    expect(source).not.toContain('process.env?.')
   })
 })
