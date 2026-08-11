@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test'
+import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { createTempWorkspace } from './helpers'
+import { join } from 'node:path'
+import { API_ONLY_REFUSAL, createTempWorkspace, seedApiOnlyApp, seedShippedApiOnlyApp } from './helpers'
 import { makeView } from '../src/make-view'
 
 describe('makeView', () => {
@@ -25,6 +27,38 @@ describe('makeView', () => {
 
       expect(result).toContain('resources/js/pages/admin/my page.tsx')
       expect(await readFile(result, 'utf8')).toContain('const MyPage')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // Refuses before the write, like the multi-file scaffolds — see makeView's
+  // doc comment for why a page has no dialect to adapt to. The "cannot tell"
+  // direction is carried by the tests above, which run in a workspace with no
+  // manifest; the predicate's own branches are pinned in blueprints.test.ts.
+  it('refuses an API-only app, writing nothing', async () => {
+    const workspace = await createTempWorkspace('guren-cli-view-api-only-')
+    try {
+      await seedApiOnlyApp(workspace.dir)
+
+      await expect(makeView('posts/Index')).rejects.toThrow(API_ONLY_REFUSAL)
+
+      expect(existsSync(join(workspace.dir, 'resources/js/pages/posts/Index.tsx'))).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // The template is what `create-guren-app` ships; the fixture above is its
+  // reduction, not a substitute for it.
+  it('refuses the api-only template as shipped', async () => {
+    const workspace = await createTempWorkspace('guren-cli-view-api-only-shipped-')
+    try {
+      await seedShippedApiOnlyApp(workspace.dir)
+
+      await expect(makeView('posts/Index')).rejects.toThrow(
+        'guren make:view scaffolds a React page component',
+      )
     } finally {
       await workspace.cleanup()
     }

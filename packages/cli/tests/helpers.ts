@@ -1,7 +1,7 @@
 import { mock } from 'bun:test'
 import { consola as realConsola } from 'consola'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -181,6 +181,35 @@ export async function seedApiOnlyApp(dir: string): Promise<void> {
  * would have meant hunting every copy across three files.
  */
 export const API_ONLY_REFUSAL = /no @guren\/inertia-client dependency and no routes\/web\.ts/
+
+/**
+ * A file from the api-only starter as `create-guren-app` ships it.
+ *
+ * Read rather than approximated: the reduced fixtures above are how these tests
+ * describe a *shape*, not a substitute for the template itself.
+ */
+export async function readApiOnlyTemplateFile(relativePath: string): Promise<string> {
+  return readFile(join(import.meta.dir, '../../create-app/templates/api-only', relativePath), 'utf8')
+}
+
+/**
+ * The api-only starter as shipped, reduced to the two files
+ * `isConfirmedApiOnlyApp` reads — for tests that only need the predicate to
+ * recognize a real starter rather than the whole app on disk.
+ *
+ * `seedApiOnlyApp` above is a hand-written approximation, and an approximation
+ * cannot notice the template gaining an `@guren/inertia-client` dependency or a
+ * `routes/web.ts`: every synthetic test would stay green while real users
+ * stopped being recognized. Whichever behaviour hangs off the predicate — a
+ * refusal, or `make:controller` flipping its output dialect — wants one case
+ * seeded from the shipped files.
+ */
+export async function seedShippedApiOnlyApp(dir: string): Promise<void> {
+  await writeWorkspaceFiles(dir, {
+    'routes/api.ts': await readApiOnlyTemplateFile('routes/api.ts'),
+    'package.json': await readApiOnlyTemplateFile('package.json'),
+  })
+}
 
 export const BLOG_ROUTES_FIXTURE = `import { Router, requireAuthenticated } from '@guren/core'
 

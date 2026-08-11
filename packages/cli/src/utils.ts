@@ -109,9 +109,15 @@ export function assertScaffoldPath(relativePath: string, cwd: string = process.c
  * write, rather than reading `options.cwd` twice: with `cwd` omitted or
  * relative, the second read can land on a different directory than the one
  * that was checked, and the containment check then guarantees nothing.
+ *
+ * Exported because a generator that probes the app before writing
+ * (`make:feature`, `make:controller`, `make:view`) has to judge the same root
+ * the write will resolve to, and can only do that by asking this one. It
+ * delegates to `resolveAppRoot` rather than re-deriving the expression, so the
+ * probe and the write it decides are not two resolvers that merely agree today.
  */
 export function writeRoot(options: WriterOptions): string {
-  return resolve(options.cwd ?? process.cwd())
+  return resolveAppRoot(options)
 }
 
 /** `writeFileSafe` for generated scaffolds: containment-checked. */

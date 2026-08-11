@@ -94,7 +94,7 @@ const blueprintRegistry: Record<string, BlueprintDefinition> = {
       // partial scaffold here is only harder to clean up than none.
       await assertNotApiOnly(process.cwd(), {
         does: 'guren add admin scaffolds an Inertia dashboard',
-        instead: 'Add an admin endpoint to routes/api.ts by hand',
+        instead: 'Scaffold an admin endpoint with guren make:controller and register it in routes/api.ts',
       })
 
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
