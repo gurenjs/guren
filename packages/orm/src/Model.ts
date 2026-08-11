@@ -1740,7 +1740,15 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       }
     }
 
-    const result = await adapter.update(table, where, payload, writeOptions) as TRecordFor<T>
+    // Global scopes must reach writes, not just reads: a tenant scope that is
+    // applied to `find`/`all` but dropped here lets one tenant update another
+    // tenant's rows. Route through the scope-applying builder, but hand it the
+    // already-prepared payload so mutators/casts (and hooks above) run once.
+    const result = this.hasScopes()
+      ? await this.newQuery(writeOptions)
+          .where(where as Partial<Record<string, unknown>>)
+          .updateWithPreparedPayload(payload) as TRecordFor<T>
+      : await adapter.update(table, where, payload, writeOptions) as TRecordFor<T>
 
     if (hooks) {
       const resultData = result as unknown as Record<string, unknown>
@@ -1795,7 +1803,13 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       }
     }
 
-    const result = await adapter.delete(table, where, writeOptions)
+    // Same reasoning as runUpdate: a delete that skips the tenant scope lets
+    // one tenant delete another's rows even though reads are isolated.
+    const result = this.hasScopes()
+      ? await this.newQuery(writeOptions)
+          .where(where as Partial<Record<string, unknown>>)
+          .delete()
+      : await adapter.delete(table, where, writeOptions)
 
     if (hooks) {
       await executeHook(hooks, 'deleted', whereData)

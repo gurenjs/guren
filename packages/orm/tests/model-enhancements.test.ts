@@ -613,6 +613,60 @@ describe('global scopes apply on every query entry point', () => {
     expect(await User.withoutGlobalScope('tenant').get()).toHaveLength(3)
   })
 
+  // Writes are the sharp edge: reads that leak are a disclosure, but an
+  // update/delete that skips the tenant scope mutates another tenant's data.
+  it('applies the scope to update() — a write cannot cross the tenant boundary', async () => {
+    const User = tenantScopedUser()
+    // id 2 belongs to tenant 2; the tenant-1 scope must keep this write off it.
+    await User.update({ id: 2 }, { name: 'Hacked' } as any).catch(() => {})
+    const theirs = await User.withoutGlobalScopes().where('id', 2).first()
+    expect(theirs?.name).toBe('Theirs')
+  })
+
+  it('applies the scope to update() — a write still lands within the tenant', async () => {
+    const User = tenantScopedUser()
+    await User.update({ id: 1 }, { name: 'Renamed' } as any)
+    const ours = await User.withoutGlobalScopes().where('id', 1).first()
+    expect(ours?.name).toBe('Renamed')
+  })
+
+  it('applies the scope to delete() — a delete cannot cross the tenant boundary', async () => {
+    const User = tenantScopedUser()
+    await User.delete({ id: 2 }).catch(() => {})
+    const theirs = await User.withoutGlobalScopes().where('id', 2).first()
+    expect(theirs?.name).toBe('Theirs')
+  })
+
+  it('applies the scope to delete() — a delete still lands within the tenant', async () => {
+    const User = tenantScopedUser()
+    await User.delete({ id: 1 })
+    expect(await User.withoutGlobalScopes().where('id', 1).first()).toBeNull()
+  })
+
+  // The scoped write path borrows the builder's conditions but must reuse the
+  // payload runUpdate already prepared — re-preparing would run mutators twice
+  // (e.g. double-hash a hashed column).
+  it('runs mutators exactly once on a scoped update', async () => {
+    let calls = 0
+    class User extends Model<UserRecord> {
+      static table = 'users'
+      static mutators = {
+        name: (v: unknown) => {
+          calls++
+          return `[${String(v)}]`
+        },
+      }
+    }
+    User.useAdapter(createAdapter([{ id: 1, name: 'orig', tenantId: 1 }]))
+    User.addGlobalScope('tenant', (q) => q.where('tenantId', 1))
+
+    const updated = await User.update({ id: 1 }, { name: 'x' } as any)
+    expect(updated.name).toBe('[x]')
+    expect(calls).toBe(1)
+
+    User.removeGlobalScope('tenant')
+  })
+
   it("applies the related model's scope when eager loading", async () => {
     type PostRecord = { id: number; title: string; authorId: number; deletedAt?: string | null }
 

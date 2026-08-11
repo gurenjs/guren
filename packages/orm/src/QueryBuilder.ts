@@ -439,13 +439,26 @@ export class QueryBuilder<
   }
 
   private async runBulkUpdate(data: PlainObject, applyFillable: boolean): Promise<TRecord> {
-    if (!this.adapter.update) {
-      throw new Error('Configured adapter does not support update operations.')
-    }
-
     const model = this.modelClass as typeof Model
     const filtered = applyFillable ? model.filterFillable(data) : { ...data }
     const payload = await model.prepareBulkPersistencePayload(filtered)
+    return this.updateWithPreparedPayload(payload)
+  }
+
+  /**
+   * Bulk update using a payload the caller has already run through
+   * mass-assignment filtering and persistence preparation. This exists so the
+   * static `Model.update()`/`Model.delete()` write paths can borrow the
+   * builder's global-scope-carrying `conditions` without re-preparing the
+   * payload — running mutators twice would, for example, double-hash a hashed
+   * column.
+   *
+   * @internal
+   */
+  async updateWithPreparedPayload(payload: PlainObject): Promise<TRecord> {
+    if (!this.adapter.update) {
+      throw new Error('Configured adapter does not support update operations.')
+    }
 
     const advancedAdapter = this.adapter as ORMAdapterAdvanced
     if (typeof advancedAdapter.updateAdvanced === 'function') {
