@@ -1,24 +1,19 @@
-import { cp, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join, relative, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import process from 'node:process'
 import { DATABASE_DRIVERS } from '../../packages/create-app/src/blueprints'
 import { fileExists } from '../../packages/create-app/src/utils'
 import { auditBlueprintTemplates, auditConsoleWiring, auditStarterTemplate } from './starter-template-audit'
-
-type PackageName =
-  | '@guren/cli'
-  | '@guren/core'
-  | '@guren/inertia-client'
-  | '@guren/orm'
-  | '@guren/server'
-  | '@guren/testing'
-
-interface LocalPackage {
-  name: PackageName
-  sourceDir: string
-  vendorDir: string
-}
+import {
+  collectLocalPackages,
+  declaredDependencies,
+  ensureBuiltPackages,
+  isLocalSpecifier,
+  rewriteAppDependencies,
+  vendorLocalPackages,
+  type DependencyManifest,
+} from './local-packages'
 
 interface PublishedArtifact {
   name: string
@@ -32,25 +27,7 @@ interface PublishedArtifact {
 const INSTALL_MODES = ['vendored', 'packed', 'npm'] as const
 type InstallMode = (typeof INSTALL_MODES)[number]
 
-const DEPENDENCY_GROUPS = ['dependencies', 'devDependencies', 'peerDependencies'] as const
-
 const repoRoot = resolve(import.meta.dir, '../..')
-const localPackages: LocalPackage[] = [
-  { name: '@guren/cli', sourceDir: resolve(repoRoot, 'packages/cli'), vendorDir: 'cli' },
-  { name: '@guren/core', sourceDir: resolve(repoRoot, 'packages/core'), vendorDir: 'core' },
-  { name: '@guren/inertia-client', sourceDir: resolve(repoRoot, 'packages/inertia-client'), vendorDir: 'inertia-client' },
-  { name: '@guren/orm', sourceDir: resolve(repoRoot, 'packages/orm'), vendorDir: 'orm' },
-  { name: '@guren/server', sourceDir: resolve(repoRoot, 'packages/server'), vendorDir: 'server' },
-  { name: '@guren/testing', sourceDir: resolve(repoRoot, 'packages/testing'), vendorDir: 'testing' },
-]
-const publishedArtifacts: PublishedArtifact[] = [
-  ...localPackages,
-  { name: 'create-guren-app', sourceDir: resolve(repoRoot, 'packages/create-app') },
-]
-
-function toPosixPath(value: string): string {
-  return value.replaceAll('\\', '/')
-}
 
 async function run(cmd: string[], cwd: string, envOverrides?: Record<string, string>): Promise<void> {
   console.log(`\n$ (${cwd}) ${cmd.join(' ')}`)
@@ -96,79 +73,6 @@ function assert(condition: unknown, message: string): asserts condition {
   }
 }
 
-async function ensureBuiltPackages(): Promise<void> {
-  for (const pkg of localPackages) {
-    const packageJson = JSON.parse(await readFile(join(pkg.sourceDir, 'package.json'), 'utf8')) as { exports?: Record<string, unknown> }
-    const distDir = join(pkg.sourceDir, 'dist')
-    try {
-      await readFile(join(distDir, 'index.js'), 'utf8')
-    } catch {
-      throw new Error(`Missing build output for ${pkg.name}. Run bun run build first.`)
-    }
-    if (pkg.name === '@guren/core' && !packageJson.exports?.['./runtime']) {
-      throw new Error(`${pkg.name} is missing the ./runtime export in package.json.`)
-    }
-    if (pkg.name === '@guren/core' && !packageJson.exports?.['./vite']) {
-      throw new Error(`${pkg.name} is missing the ./vite export in package.json.`)
-    }
-  }
-}
-
-async function copyPackage(sourceDir: string, destinationDir: string): Promise<void> {
-  await mkdir(destinationDir, { recursive: true })
-  await cp(join(sourceDir, 'dist'), join(destinationDir, 'dist'), { recursive: true, force: true })
-  await cp(join(sourceDir, 'package.json'), join(destinationDir, 'package.json'), { force: true })
-}
-
-async function rewritePackageDependencies(packageJsonPath: string, replacements: Map<PackageName, string>): Promise<void> {
-  const raw = await readFile(packageJsonPath, 'utf8')
-  const pkg = JSON.parse(raw) as {
-    dependencies?: Record<string, string>
-    devDependencies?: Record<string, string>
-    peerDependencies?: Record<string, string>
-  }
-
-  for (const field of DEPENDENCY_GROUPS) {
-    const group = pkg[field]
-    if (!group) {
-      continue
-    }
-
-    for (const [dependency, replacement] of replacements) {
-      if (group[dependency]) {
-        group[dependency] = replacement
-      }
-    }
-  }
-
-  await writeFile(packageJsonPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8')
-}
-
-async function vendorPackages(vendorRoot: string): Promise<Map<PackageName, string>> {
-  await mkdir(vendorRoot, { recursive: true })
-  const packageRoots = new Map<PackageName, string>()
-
-  for (const pkg of localPackages) {
-    const destination = join(vendorRoot, pkg.vendorDir)
-    await copyPackage(pkg.sourceDir, destination)
-    packageRoots.set(pkg.name, destination)
-  }
-
-  for (const pkg of localPackages) {
-    const packageJsonPath = join(packageRoots.get(pkg.name)!, 'package.json')
-    const packageDir = dirname(packageJsonPath)
-    const replacements = new Map<PackageName, string>()
-    for (const target of localPackages) {
-      const targetDir = packageRoots.get(target.name)!
-      const relativePath = toPosixPath(relative(packageDir, targetDir))
-      replacements.set(target.name, `file:${relativePath || '.'}`)
-    }
-    await rewritePackageDependencies(packageJsonPath, replacements)
-  }
-
-  return packageRoots
-}
-
 async function tarballFileName(pkg: PublishedArtifact): Promise<string> {
   const packageJson = JSON.parse(await readFile(join(pkg.sourceDir, 'package.json'), 'utf8')) as {
     version: string
@@ -181,6 +85,15 @@ async function packPackages(packRoot: string): Promise<Map<string, string>> {
   const npmCacheDir = join(packRoot, '.npm-cache')
   await mkdir(npmCacheDir, { recursive: true })
   const tarballs = new Map<string, string>()
+
+  // What a scaffolded app installs, as npm would ship it: the vendored set plus
+  // the scaffolder that produced the app. Not every publishable package —
+  // `@guren/openapi` and the deploy plugins are opt-in, so no app resolves them
+  // and packing them here would audit tarballs this smoke never installs.
+  const publishedArtifacts: PublishedArtifact[] = [
+    ...await collectLocalPackages(),
+    { name: 'create-guren-app', sourceDir: resolve(repoRoot, 'packages/create-app') },
+  ]
 
   for (const pkg of publishedArtifacts) {
     await runCapture(
@@ -265,30 +178,6 @@ async function assertPackedArtifacts(packageTarballs: Map<string, string>, packR
       }
     }
   }
-}
-
-async function rewriteAppDependencies(appDir: string, vendorRoots: Map<PackageName, string>): Promise<void> {
-  const packageJsonPath = join(appDir, 'package.json')
-  const appPackageDir = dirname(packageJsonPath)
-  const raw = await readFile(packageJsonPath, 'utf8')
-  const pkg = JSON.parse(raw) as Partial<Record<(typeof DEPENDENCY_GROUPS)[number], Record<string, string>>>
-
-  for (const [name, packageDir] of vendorRoots) {
-    const specifier = `file:${toPosixPath(relative(appPackageDir, packageDir))}`
-    // Rewrite the entry where the template already declares it — `@guren/testing`
-    // is a devDependency. Adding it to `dependencies` instead would leave the
-    // template's own range in `devDependencies`, and bun still resolves that
-    // range against the registry, where an unreleased version does not exist.
-    const group = DEPENDENCY_GROUPS.find((field) => pkg[field]?.[name])
-    if (group) {
-      pkg[group]![name] = specifier
-      continue
-    }
-    pkg.dependencies ??= {}
-    pkg.dependencies[name] = specifier
-  }
-
-  await writeFile(packageJsonPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8')
 }
 
 async function assertCoreFirstStarter(
@@ -513,18 +402,18 @@ async function runPublishedDependencyDrift(
   blueprint: string,
   runtimeEnv: Record<string, string>,
 ): Promise<void> {
-  const packageJson = JSON.parse(await readFile(join(appDir, 'package.json'), 'utf8')) as
-    Partial<Record<(typeof DEPENDENCY_GROUPS)[number], Record<string, string>>>
-  const declared = Object.assign({}, ...DEPENDENCY_GROUPS.map((group) => packageJson[group])) as Record<string, string>
-  const gurenDependencies = Object.entries(declared).filter(([name]) => name.startsWith('@guren/'))
+  const packageJson = JSON.parse(await readFile(join(appDir, 'package.json'), 'utf8')) as DependencyManifest
+  const gurenDependencies = Object.entries(declaredDependencies(packageJson))
+    .filter(([name]) => name.startsWith('@guren/'))
 
   assert(gurenDependencies.length > 0, 'Scaffolded app declares no @guren/* dependencies to resolve from npm.')
   for (const [name, range] of gurenDependencies) {
-    // If this mode ever degraded into the vendored one it would keep passing
-    // while checking nothing, so the local-path specs are asserted away rather
-    // than assumed absent.
+    // The mirror of what the vendored modes assert, through the same predicate:
+    // if this mode ever degraded into one of them it would keep passing while
+    // checking nothing, so the local specs are asserted away rather than
+    // assumed absent.
     assert(
-      !range.startsWith('file:') && !range.startsWith('link:') && !range.startsWith('workspace:'),
+      !isLocalSpecifier(range),
       `npm install mode requires ${name} to keep its published range, got "${range}".`,
     )
   }
@@ -611,21 +500,20 @@ async function main(): Promise<void> {
     const packDir = join(appDir, '.guren-packed')
     const dependencyRoots = installMode === 'packed'
       ? await packPackages(packDir)
-      : await vendorPackages(vendorDir)
+      : await vendorLocalPackages(vendorDir)
     if (installMode === 'packed') {
       await assertPackedArtifacts(dependencyRoots, packDir)
     }
-    await rewriteAppDependencies(appDir, dependencyRoots)
+    await rewriteAppDependencies(appDir, dependencyRoots, `The ${installMode} app`)
     if (installMode === 'packed') {
-      const packageJson = JSON.parse(await readFile(join(appDir, 'package.json'), 'utf8')) as Partial<
-        Record<(typeof DEPENDENCY_GROUPS)[number], Record<string, string>>
-      >
-      for (const pkg of localPackages) {
-        // Search every group: the rewrite leaves each dependency where the
-        // template declared it, and `@guren/testing` is a devDependency.
-        const dependencyValue = DEPENDENCY_GROUPS.map((field) => packageJson[field]?.[pkg.name]).find(
-          (value) => value !== undefined,
-        )
+      // rewriteAppDependencies() has already asserted every @guren/* resolves
+      // locally; a tarball is the narrower claim only this mode can make, and
+      // the only thing that catches it silently degrading into the vendored one.
+      const declared = declaredDependencies(
+        JSON.parse(await readFile(join(appDir, 'package.json'), 'utf8')) as DependencyManifest,
+      )
+      for (const pkg of await collectLocalPackages()) {
+        const dependencyValue = declared[pkg.name]
         assert(
           typeof dependencyValue === 'string' && dependencyValue.endsWith('.tgz'),
           `Fresh app did not rewrite ${pkg.name} to a local tarball dependency.`,

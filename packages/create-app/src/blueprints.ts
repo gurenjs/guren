@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { cp, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { cp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
@@ -28,6 +28,30 @@ type TemplateName = 'default' | 'default-ssr' | 'api-only' | 'blog'
 
 export function templateDir(name: TemplateName): string {
   return join(TEMPLATES_ROOT, name)
+}
+
+/**
+ * Every template that ships a manifest — `blog` and `default-ssr` overlay one
+ * instead. Exported because a template's `package.json` is the one manifest in
+ * this repository that resolves against npm, so more than one gate has to read
+ * exactly this set: `scripts/sync-template-deps.ts` keeps their versions
+ * following the workspace, and `scripts/smoke/local-packages.ts` derives from
+ * their dependencies which packages a smoke must resolve from the checkout.
+ */
+export async function templateManifests(): Promise<string[]> {
+  const paths: string[] = []
+
+  for (const entry of await readdir(TEMPLATES_ROOT, { withFileTypes: true })) {
+    if (!entry.isDirectory()) {
+      continue
+    }
+    const path = join(TEMPLATES_ROOT, entry.name, 'package.json')
+    if (await fileExists(path)) {
+      paths.push(path)
+    }
+  }
+
+  return paths
 }
 
 interface BlueprintContext {
