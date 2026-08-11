@@ -632,7 +632,7 @@ export class Application {
     const shouldStartVite =
       vite !== false &&
       typeof process !== 'undefined' &&
-      process.env?.NODE_ENV !== 'production' &&
+      process.env.NODE_ENV !== 'production' &&
       !resolvedAssetsUrl &&
       process.env?.GUREN_DEV_VITE !== '0'
 
@@ -735,7 +735,7 @@ export class Application {
 
     const shouldLogBanner =
       typeof process === 'undefined' ||
-      (process.env?.NODE_ENV !== 'production' && process.env?.GUREN_DEV_BANNER !== '0')
+      (process.env.NODE_ENV !== 'production' && process.env?.GUREN_DEV_BANNER !== '0')
 
     if (shouldLogBanner) {
       this.logDevServerBanner({

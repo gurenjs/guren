@@ -135,18 +135,18 @@ export class Encrypter {
    * Decrypt using AES-256-GCM.
    */
   protected decryptGcm(payload: EncryptedPayload): string {
-    // Checked once, outside the key loop: a short tag is a property of the
-    // payload, not of the key being tried, so retrying it per key would only
-    // hide why it failed.
+    // Decoded once, outside the key loop: all three are properties of the
+    // payload, not of the key being tried. The tag's length check belongs here
+    // for the same reason — retrying a short tag per key would only hide why
+    // it failed.
+    const iv = Buffer.from(payload.iv, 'base64')
+    const encrypted = Buffer.from(payload.value, 'base64')
     const tag = Buffer.from(payload.tag!, 'base64')
     if (tag.length !== GCM_TAG_BYTES) {
       throw new Error('Invalid authentication tag length.')
     }
 
     return this.tryDecryptWithKeys((key) => {
-      const iv = Buffer.from(payload.iv, 'base64')
-      const encrypted = Buffer.from(payload.value, 'base64')
-
       const decipher = createDecipheriv('aes-256-gcm', key, iv, { authTagLength: GCM_TAG_BYTES })
       decipher.setAuthTag(tag)
 

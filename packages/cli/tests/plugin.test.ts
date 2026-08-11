@@ -42,6 +42,26 @@ export default app
     await workspace.cleanup()
   })
 
+  // The refusal has to land before src/app.ts is patched: throwing once the
+  // provider is wired would leave a manifest we refused to honour half-installed.
+  it('refuses a manifest with a reserved env key without touching the app', async () => {
+    await writeInstalledPackage('@acme/guren-plugin-audit', {
+      gurenPlugin: {
+        provider: 'AuditProvider',
+        env: [{ key: 'GUREN_TESTING', value: '1' }],
+      },
+    })
+
+    await expect(
+      installPlugin({ packageName: '@acme/guren-plugin-audit' }),
+    ).rejects.toThrow('reserved by the framework')
+
+    const app = await readFile('src/app.ts', 'utf8')
+    expect(app).not.toContain('@acme/guren-plugin-audit')
+    expect(app).toContain('providers: []')
+    expect(await readFile('.env.example', 'utf8').catch(() => null)).toBeNull()
+  })
+
   it('registers provider import and provider entry', async () => {
     const messages = await installPlugin({ packageName: '@acme/guren-plugin-audit' })
 

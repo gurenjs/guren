@@ -8,7 +8,7 @@ import type { ModelHooks } from './hooks'
 import { executeObservers } from './ModelObserver'
 import type { ModelObserver, ModelObserverConstructor } from './ModelObserver'
 import { ModelNotFoundException } from './ModelNotFoundException'
-import { QueryBuilder } from './QueryBuilder'
+import { QueryBuilder, PREPARED_UPDATE } from './QueryBuilder'
 import type { WhereOperator } from './QueryBuilder'
 import { serializeRecord, serializeRecords } from './serialization'
 import { MassAssignmentException } from './MassAssignmentException'
@@ -1747,7 +1747,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     const result = this.hasScopes()
       ? await this.newQuery(writeOptions)
           .where(where as Partial<Record<string, unknown>>)
-          .updateWithPreparedPayload(payload) as TRecordFor<T>
+          [PREPARED_UPDATE](payload) as TRecordFor<T>
       : await adapter.update(table, where, payload, writeOptions) as TRecordFor<T>
 
     if (hooks) {

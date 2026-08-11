@@ -13,9 +13,12 @@ isolated reads still let one tenant update or delete another tenant's row — th
 row was hidden from `find()` yet writable by id.
 
 These three now add the model's scopes to the write, the same way reads do. The
-already-prepared payload is threaded through a new internal builder terminal so
+already-prepared payload is threaded through a symbol-keyed builder terminal so
 mutators and casts still run exactly once (routing it through the fluent
-`update()` would have re-run them, e.g. double-hashing a hashed column).
+`update()` would have re-run them, e.g. double-hashing a hashed column). The
+symbol is not re-exported from the package entry point: a named public method
+there would have been a supported way to write arbitrary columns, since it
+skips both mass-assignment filtering and payload preparation.
 `withoutGlobalScope()` / `withoutGlobalScopes()` remain the explicit opt-out.
 
 The fluent form (`Post.where({ id }).update(data)`) was already scoped and is

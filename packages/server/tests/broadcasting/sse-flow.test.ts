@@ -47,6 +47,25 @@ async function readEvents(
   return events
 }
 
+/**
+ * Read the `connected` frame's clientId, leaving the reader open.
+ *
+ * `readEvents` above cancels its reader before returning, and cancelling runs
+ * the stream's cleanup, which drops the client from `sseClients` — so a test
+ * that goes on to POST /auth against that client has to keep the stream alive.
+ */
+async function readClientId(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<string> {
+  const decoder = new TextDecoder()
+  let buffer = ''
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) return ''
+    buffer += decoder.decode(value, { stream: true })
+    const match = buffer.match(/event: connected\ndata: (.+)\n/)
+    if (match) return (JSON.parse(match[1]) as { clientId: string }).clientId
+  }
+}
+
 describe('SSE subscription flow', () => {
   test('should announce the client id and deliver events for query-subscribed public channels', async () => {
     const manager = createManager()
@@ -106,18 +125,7 @@ describe('SSE subscription flow', () => {
 
     const response = await app.request('/events')
     const reader = response.body!.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-    let clientId = ''
-    while (!clientId) {
-      const { value, done } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const match = buffer.match(/event: connected\ndata: (.+)\n/)
-      if (match) {
-        clientId = (JSON.parse(match[1]) as { clientId: string }).clientId
-      }
-    }
+    const clientId = await readClientId(reader)
     expect(clientId).toMatch(/.+/)
 
     const authResponse = await app.request('/auth', {
@@ -147,18 +155,7 @@ describe('SSE subscription flow', () => {
 
     const response = await app.request('/events')
     const reader = response.body!.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-    let victimClientId = ''
-    while (!victimClientId) {
-      const { value, done } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const match = buffer.match(/event: connected\ndata: (.+)\n/)
-      if (match) {
-        victimClientId = (JSON.parse(match[1]) as { clientId: string }).clientId
-      }
-    }
+    const victimClientId = await readClientId(reader)
     expect(victimClientId).toMatch(/.+/)
 
     const authResponse = await app.request('/auth', {
@@ -185,16 +182,7 @@ describe('SSE subscription flow', () => {
     for (let i = 0; i < 3; i++) {
       const response = await app.request('/events')
       const reader = response.body!.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let id = ''
-      while (!id) {
-        const { value, done } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const match = buffer.match(/event: connected\ndata: (.+)\n/)
-        if (match) id = (JSON.parse(match[1]) as { clientId: string }).clientId
-      }
+      const id = await readClientId(reader)
       // 16 random bytes, hex-encoded — no Date.now() prefix to anchor a guess.
       expect(id).toMatch(/^sse_[0-9a-f]{32}$/)
       ids.add(id)

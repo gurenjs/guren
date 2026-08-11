@@ -26,7 +26,15 @@ confirmed exploit on a shipped code path; each removes a way one could open.
 - **SSE client ids are unguessable, and a stream now records its owner.**
   `POST /broadcasting/auth` takes a `clientId` from the request body, so
   authorizing a channel attached it to whatever stream that id named. Ids were
-  `Date.now()` plus a `Math.random()` suffix; they are now 16 random bytes, and
-  the endpoint refuses to attach a channel to a stream owned by a different
-  user. A stream opened before sign-in has no owner and stays attachable, so
-  authorizing after login still works.
+  `Date.now()` plus a `Math.random()` suffix; they are now 16 random bytes from
+  `randomHex`, which is the control that actually stops an attach against
+  someone else's stream.
+
+  The ownership check is defence in depth on top of that: the endpoint refuses
+  to attach a channel to a stream whose recorded owner differs from the caller.
+  Ownership is read from the conventional `id`/`sub`/`userId` field of whatever
+  `getUser` returns, and a stream stays attachable when no owner could be
+  resolved — both because a stream opened before sign-in has to stay attachable
+  for authorize-after-login, and because the two cases are indistinguishable.
+  An app whose user objects carry none of those fields gets the unguessable id
+  and no second layer.
