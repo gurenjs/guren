@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import { makeModule } from '../src/make-module'
-import { createTempWorkspace } from './helpers'
+import { captureWarnings, createTempWorkspace } from './helpers'
 
 describe('makeModule', () => {
   it('scaffolds index.ts, routes.ts, and db/schema.ts', async () => {
@@ -135,6 +135,30 @@ export default app
 
       const appContent = await readFile(join(workspace.dir, 'src/app.ts'), 'utf8')
       expect(appContent).toContain('modules: [inventoryModule, billingModule]')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // Same invariant `addProviderRegistration` enforces for providers: an import
+  // of a binding nothing references is an unused local, and the app it was
+  // written into stops compiling under noUnusedLocals.
+  it('withholds the module import when the app entry cannot be patched', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-module-unpatchable-')
+    try {
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      const appSource = `import { Application } from '@guren/core'
+
+const app = new Application()
+
+export default app
+`
+      await writeFile(join(workspace.dir, 'src/app.ts'), appSource, 'utf8')
+
+      const { warnings } = await captureWarnings(() => makeModule('billing'))
+
+      expect(warnings.join('\n')).toContain('Could not register the module automatically')
+      expect(await readFile(join(workspace.dir, 'src/app.ts'), 'utf8')).toBe(appSource)
     } finally {
       await workspace.cleanup()
     }

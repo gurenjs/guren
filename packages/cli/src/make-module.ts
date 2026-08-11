@@ -1,7 +1,8 @@
 import { consola } from 'consola'
 import { assertCwdUnsupported, camelCase, pascalCase, relativeImportPath, safeModuleName, writeScaffoldFiles, type WriterOptions } from './utils'
-import { addImport, addToArrayOption } from './patch-helpers'
+import { addImport, addToArrayOption, PATCH_REASONS } from './patch-helpers'
 import { fileExists } from './discovery'
+import { APP_ENTRY_CANDIDATES, resolveAppEntry } from './provider-registrar'
 
 export interface MakeModuleResult {
   moduleDir: string
@@ -77,7 +78,7 @@ async function patchRootSchema(moduleDir: string): Promise<void> {
 
   if (result.modified) {
     consola.success(`Added schema re-export to ${rootSchemaPath}`)
-  } else if (result.reason === 'Import already exists') {
+  } else if (result.reason === PATCH_REASONS.importAlreadyExists) {
     consola.info(`Schema re-export already present in ${rootSchemaPath}`)
   } else {
     consola.warn(`Could not add the schema re-export automatically: ${result.reason}`)
@@ -86,20 +87,11 @@ async function patchRootSchema(moduleDir: string): Promise<void> {
 }
 
 async function patchAppEntry(moduleDir: string, camelName: string): Promise<void> {
-  const appPaths = ['src/app.ts', 'app.ts']
-  let appPath: string | undefined
-
-  for (const candidate of appPaths) {
-    if (await fileExists(process.cwd(), candidate)) {
-      appPath = candidate
-      break
-    }
-  }
-
+  const appPath = await resolveAppEntry()
   const moduleBinding = `${camelName}Module`
 
   if (!appPath) {
-    consola.warn('Could not find src/app.ts or app.ts — skipping auto-registration.')
+    consola.warn(`Could not find ${APP_ENTRY_CANDIDATES.join(' or ')} — skipping auto-registration.`)
     consola.info(`Import ${moduleBinding} from './${moduleDir}' and add it to createApp({ modules: [...] }) manually.`)
     return
   }
@@ -107,20 +99,25 @@ async function patchAppEntry(moduleDir: string, camelName: string): Promise<void
   const importPath = relativeImportPath(appPath, moduleDir)
   const moduleImport = `import { ${moduleBinding} } from '${importPath}'`
 
-  const importResult = await addImport(appPath, moduleImport)
-  if (importResult.modified) {
-    consola.success(`Added ${moduleBinding} import to ${appPath}`)
-  } else if (importResult.reason === 'Import already exists') {
-    consola.info(`${moduleBinding} import already exists in ${appPath}`)
-  }
-
+  // Registration first, import only once it lands — the same ordering
+  // `addProviderRegistration` enforces, and for the same reason: an import of
+  // a binding nothing references is an unused local, which stops the app
+  // compiling under `noUnusedLocals`.
   const modulesResult = await addToArrayOption(appPath, 'modules', moduleBinding)
   if (modulesResult.modified) {
     consola.success(`Registered ${moduleBinding} in ${appPath}`)
-  } else if (modulesResult.reason === 'Already present') {
+  } else if (modulesResult.reason === PATCH_REASONS.alreadyPresent) {
     consola.info(`${moduleBinding} already registered in ${appPath}`)
   } else {
     consola.warn(`Could not register the module automatically: ${modulesResult.reason}`)
     consola.info(`Add \`modules: [${moduleBinding}]\` to your createApp() options.`)
+    return
+  }
+
+  const importResult = await addImport(appPath, moduleImport)
+  if (importResult.modified) {
+    consola.success(`Added ${moduleBinding} import to ${appPath}`)
+  } else if (importResult.reason === PATCH_REASONS.importAlreadyExists) {
+    consola.info(`${moduleBinding} import already exists in ${appPath}`)
   }
 }

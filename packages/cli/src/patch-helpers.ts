@@ -9,6 +9,20 @@ export interface PatchResult {
 }
 
 /**
+ * The reason vocabulary the patchers below return. Consumers branch on these
+ * to tell "already done" from "could not do it" — defined once so a reworded
+ * reason cannot silently turn a consumer's no-op path into its failure path.
+ */
+export const PATCH_REASONS = {
+  fileNotFound: 'File not found',
+  importAlreadyExists: 'Import already exists',
+  providersArrayNotFound: 'Could not find providers array',
+  providerAlreadyRegistered: 'Provider already registered',
+  alreadyPresent: 'Already present',
+  optionAlreadySet: 'Option already set',
+} as const
+
+/**
  * A copy of `source` with the contents of comments and string literals
  * blanked out, character for character, so every index still lines up with
  * the original.
@@ -186,13 +200,13 @@ export async function addImport(
   const content = await readIfExists(process.cwd(), filePath)
 
   if (content === null) {
-    return { modified: false, reason: 'File not found' }
+    return { modified: false, reason: PATCH_REASONS.fileNotFound }
   }
 
   const updatedContent = insertImport(content, importStatement)
 
   if (updatedContent === null) {
-    return { modified: false, reason: 'Import already exists' }
+    return { modified: false, reason: PATCH_REASONS.importAlreadyExists }
   }
 
   await writeFile(absolutePath, updatedContent, 'utf8')
@@ -200,10 +214,28 @@ export async function addImport(
 }
 
 /**
- * Adds a provider to the providers array in Application initialization.
+ * Either the patched content or the reason it could not be produced. The
+ * in-memory counterpart of `PatchResult`, for patches whose "nothing to do"
+ * and "cannot do it" outcomes are more than one bit — `insertImport` gets away
+ * with `string | null` because it has only one.
  */
-export async function addProvider(
-  filePath: string,
+export type InsertResult = { content: string; reason?: undefined } | { content?: undefined; reason: string }
+
+/**
+ * `content` with `providerName` appended to its `providers: [ ... ]` array.
+ *
+ * Pure, and split out for the same reason as `insertImport`: a caller that
+ * also has to add the provider's import applies both here and writes once, so
+ * a failure cannot leave one half of the pair on disk. Composed with
+ * `insertImport` by `addProviderRegistration`.
+ *
+ * The array is re-joined from its parsed entries rather than appended to in
+ * place (what `appendArrayEntry` does), so a multi-line `providers` array is
+ * collapsed onto one line. That is long-standing output every provider-wiring
+ * test pins; it is preserved deliberately.
+ */
+export function insertProvider(
+  content: string,
   providerName: string,
   /**
    * Custom "already registered" check over the existing array entries.
@@ -212,40 +244,52 @@ export async function addProvider(
    * counts as registered.
    */
   isRegistered?: (entries: string[]) => boolean,
-): Promise<PatchResult> {
-  const absolutePath = resolve(process.cwd(), filePath)
-  const content = await readIfExists(process.cwd(), filePath)
-
-  if (content === null) {
-    return { modified: false, reason: 'File not found' }
-  }
-
-  // Find the providers array and add the provider
+): InsertResult {
   const providersArrayPattern = /providers:\s*\[([\s\S]*?)\]/
   const match = content.match(providersArrayPattern)
 
   if (!match) {
-    return { modified: false, reason: 'Could not find providers array' }
+    return { reason: PATCH_REASONS.providersArrayNotFound }
   }
 
-  const providersContent = match[1]
-  const providers = parseArrayEntries(providersContent)
+  const providers = parseArrayEntries(match[1])
 
   const alreadyRegistered = isRegistered
     ? isRegistered(providers)
     : providers.some(p => p === providerName)
   if (alreadyRegistered) {
-    return { modified: false, reason: 'Provider already registered' }
+    return { reason: PATCH_REASONS.providerAlreadyRegistered }
   }
 
   providers.push(providerName)
-  const newProvidersContent = providers.join(', ')
-  const updatedContent = content.replace(
-    providersArrayPattern,
-    `providers: [${newProvidersContent}]`,
-  )
 
-  await writeFile(absolutePath, updatedContent, 'utf8')
+  return {
+    content: content.replace(providersArrayPattern, `providers: [${providers.join(', ')}]`),
+  }
+}
+
+/**
+ * Adds a provider to the providers array in Application initialization.
+ */
+export async function addProvider(
+  filePath: string,
+  providerName: string,
+  isRegistered?: (entries: string[]) => boolean,
+): Promise<PatchResult> {
+  const absolutePath = resolve(process.cwd(), filePath)
+  const content = await readIfExists(process.cwd(), filePath)
+
+  if (content === null) {
+    return { modified: false, reason: PATCH_REASONS.fileNotFound }
+  }
+
+  const inserted = insertProvider(content, providerName, isRegistered)
+
+  if (inserted.content === undefined) {
+    return { modified: false, reason: inserted.reason }
+  }
+
+  await writeFile(absolutePath, inserted.content, 'utf8')
   return { modified: true }
 }
 
@@ -299,7 +343,7 @@ export async function addToArrayOption(
   const content = await readIfExists(process.cwd(), filePath)
 
   if (content === null) {
-    return { modified: false, reason: 'File not found' }
+    return { modified: false, reason: PATCH_REASONS.fileNotFound }
   }
 
   const span = findCallOptionsSpan(content, callName)
@@ -325,7 +369,7 @@ export async function addToArrayOption(
   const interior = content.slice(open + 1, close)
 
   if (parseArrayEntries(interior).some((entry) => entry === valueSource)) {
-    return { modified: false, reason: 'Already present' }
+    return { modified: false, reason: PATCH_REASONS.alreadyPresent }
   }
 
   const updatedContent
@@ -355,7 +399,7 @@ export async function addToArrayArgument(
   const content = await readIfExists(process.cwd(), filePath)
 
   if (content === null) {
-    return { modified: false, reason: 'File not found' }
+    return { modified: false, reason: PATCH_REASONS.fileNotFound }
   }
 
   // The leading lookbehind is what keeps `unregisterMany([])` from matching
@@ -379,7 +423,7 @@ export async function addToArrayArgument(
   const interior = content.slice(open + 1, close)
 
   if (parseArrayEntries(interior).some((entry) => entry === valueSource)) {
-    return { modified: false, reason: 'Already present' }
+    return { modified: false, reason: PATCH_REASONS.alreadyPresent }
   }
 
   const updatedContent
@@ -538,7 +582,7 @@ export async function addCreateAppOption(
   const content = await readIfExists(process.cwd(), filePath)
 
   if (content === null) {
-    return { modified: false, reason: 'File not found' }
+    return { modified: false, reason: PATCH_REASONS.fileNotFound }
   }
 
   const span = findCallOptionsSpan(content, callName)
@@ -551,7 +595,7 @@ export async function addCreateAppOption(
   const optionsSource = content.slice(openBraceIndex, closeBraceIndex + 1)
   const keyPattern = new RegExp(`(^|[{,]\\s*)${escapeRegExp(key)}\\s*:`, 'm')
   if (keyPattern.test(optionsSource)) {
-    return { modified: false, reason: 'Option already set' }
+    return { modified: false, reason: PATCH_REASONS.optionAlreadySet }
   }
 
   const insertion = `\n  ${key}: ${valueSource},`

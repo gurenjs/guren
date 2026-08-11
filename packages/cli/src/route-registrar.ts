@@ -5,7 +5,7 @@ import type { ArrowFunctionExpression, File, FunctionDeclaration, FunctionExpres
 import { walk } from './ast-walk'
 import { readIfExists } from './discovery'
 import { parseSourceFile } from './parse-cache'
-import { insertImport, type PatchResult } from './patch-helpers'
+import { insertImport, PATCH_REASONS, type PatchResult } from './patch-helpers'
 
 /**
  * The export names `@guren/core`'s route loader looks for, in the order it
@@ -255,7 +255,7 @@ export async function addRouteRegistrarCall(
   const content = await readIfExists(process.cwd(), filePath)
 
   if (content === null) {
-    return { modified: false, reason: 'File not found' }
+    return { modified: false, reason: PATCH_REASONS.fileNotFound }
   }
 
   const ast = parseSourceFile(content, filePath)
@@ -315,7 +315,7 @@ export async function wireRouteRegistrar(functionName: string, importStatement: 
     return
   }
 
-  if (result.reason === 'File not found') {
+  if (result.reason === PATCH_REASONS.fileNotFound) {
     consola.warn(`Could not find ${DEFAULT_ROUTES_FILE} — import ${functionName} and call it from your route registrar once you add one.`)
     return
   }

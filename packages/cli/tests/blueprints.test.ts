@@ -649,9 +649,26 @@ export const users = pgTable('users', {
       // Both halves of the install are named: the core provider supplies the
       // 'cache' binding, the app provider configures it, and an app missing
       // either one is missing the feature.
-      expect(warningText).toContain('Could not find src/app.ts — CoreCacheServiceProvider was not registered.')
-      expect(warningText).toContain('Could not find src/app.ts — CacheProvider was not registered.')
+      expect(warningText).toContain('Could not find src/app.ts or app.ts — CoreCacheServiceProvider was not registered.')
+      expect(warningText).toContain('Could not find src/app.ts or app.ts — CacheProvider was not registered.')
       expect(existsSync('src/app.ts')).toBe(false)
+      expect(existsSync('app.ts')).toBe(false)
+    })
+
+    // A flattened app keeps its entry at the root. `guren add auth` and
+    // `guren make:module` already found it there; the blueprints probed only
+    // `src/app.ts` and reported an app that has an entry as having none.
+    it('registers into a root app.ts when src/app.ts is absent', async () => {
+      await writeFile('app.ts', APP_FIXTURE)
+
+      const { warnings } = await captureWarnings(() => runBlueprint('cache'))
+
+      expect(warnings).toEqual([])
+      const patched = await readFile('app.ts', 'utf8')
+      expect(patched).toContain("import { CacheServiceProvider as CoreCacheServiceProvider } from '@guren/core'")
+      // Relative to the entry that was actually found, not to src/app.ts.
+      expect(patched).toContain("import CacheProvider from './app/Providers/CacheProvider.js'")
+      expect(patched).toContain('providers: [CoreCacheServiceProvider, CacheProvider]')
     })
 
     it('leaves an unpatchable app file untouched rather than importing into it', async () => {

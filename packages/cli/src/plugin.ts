@@ -1,7 +1,8 @@
 import type { WriterOptions } from './utils'
 import { assertCwdUnsupported, runCommand } from './utils'
 import { appDependsOn } from './discovery'
-import { addImport, addProvider } from './patch-helpers'
+import { PATCH_REASONS } from './patch-helpers'
+import { addProviderRegistration, APP_ENTRY_CANDIDATES, resolveAppEntry } from './provider-registrar'
 import {
   applyEnvEntries,
   applyPublishes,
@@ -149,27 +150,30 @@ export async function installPlugin(options: InstallPluginOptions): Promise<Plug
     const providerExpression = factoryName ? `${factoryName}()` : providerName
     const providerImport = `import { ${providerName} } from '${packageName}'`
 
-    const appPath = 'src/app.ts'
-    const imported = await addImport(appPath, providerImport)
+    const appPath = await resolveAppEntry()
+
+    if (!appPath) {
+      throw new Error(`Could not find ${APP_ENTRY_CANDIDATES.join(' or ')}. Run this command inside a Guren app.`)
+    }
+
     // A user may already have a configured call (e.g. `vercelPlugin({ ... })`)
     // registered; any entry invoking the factory counts as registered.
-    const registered = await addProvider(
+    const wiring = await addProviderRegistration(
       appPath,
       providerExpression,
+      providerImport,
       factoryName ? (entries) => entries.some((entry) => entry.startsWith(`${factoryName}(`)) : undefined,
     )
 
-    if (imported.reason === 'File not found' || registered.reason === 'File not found') {
-      throw new Error('src/app.ts was not found. Run this command inside a Guren app.')
+    if (!wiring.registered) {
+      throw wiring.provider.reason === PATCH_REASONS.providersArrayNotFound
+        ? new Error(`Could not find providers array in ${appPath}. Please register the provider manually.`)
+        : new Error(`Could not register ${providerName} in ${appPath}: ${wiring.provider.reason}`)
     }
 
-    if (!registered.modified && registered.reason === 'Could not find providers array') {
-      throw new Error('Could not find providers array in src/app.ts. Please register the provider manually.')
-    }
-
-    if (imported.modified || registered.modified) {
+    if (wiring.provider.modified || wiring.import.modified) {
       messages.push({ kind: 'updated', text: appPath })
-    } else if (imported.reason === 'Import already exists' && registered.reason === 'Provider already registered') {
+    } else {
       messages.push({ kind: 'checked', text: `${appPath} (already registered)` })
     }
   }

@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it } from 'bun:test'
-import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { CAN_DENY_FILE_READS, createTempWorkspace, writeInstalledPackage, type TempWorkspace } from './helpers'
 import { installPlugin, type PluginInstallMessage } from '../src/plugin'
@@ -322,6 +322,49 @@ export default app
       expect(textsOf(messages, 'skipped')).toContain('config/audit.ts (already exists, use --force to overwrite)')
       expect(await readFile('config/audit.ts', 'utf8')).toBe('export const custom = true\n')
     })
+  })
+
+  // The refusal is the whole point here: this command throws where the
+  // scaffolders warn, so an import written before the array patch is one the
+  // user is left to clean up by hand — and under noUnusedLocals it stops the
+  // app compiling.
+  it('leaves the app entry untouched when the providers array cannot be found', async () => {
+    const providerless = `import { createApp } from '@guren/core'
+
+const app = createApp({
+  routes: () => {},
+})
+
+export default app
+`
+    await writeFile('src/app.ts', providerless)
+
+    await expect(installPlugin({ packageName: '@acme/guren-plugin-audit' })).rejects.toThrow(
+      'Could not find providers array in src/app.ts',
+    )
+
+    expect(await readFile('src/app.ts', 'utf8')).toBe(providerless)
+  })
+
+  it('registers into a root app.ts when src/app.ts is absent', async () => {
+    await rm('src/app.ts')
+    await writeFile('app.ts', `import { createApp } from '@guren/core'
+
+const app = createApp({
+  routes: () => {},
+  providers: [],
+})
+
+export default app
+`)
+
+    const messages = await installPlugin({ packageName: '@acme/guren-plugin-audit' })
+
+    expect(textsOf(messages, 'updated')).toContain('app.ts')
+
+    const app = await readFile('app.ts', 'utf8')
+    expect(app).toContain("import { AcmeGurenPluginAuditProvider } from '@acme/guren-plugin-audit'")
+    expect(app).toContain('providers: [AcmeGurenPluginAuditProvider]')
   })
 
   it('rejects the official Vercel plugin for non-SSR apps', async () => {
