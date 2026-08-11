@@ -65,6 +65,7 @@ For reliability, wrap this command with a process manager (e.g. `systemd`, `pm2`
 
 - The startup banner only renders in non-production environments by default. If you want to show it (or disable it explicitly) set `GUREN_DEV_BANNER=1` or `GUREN_DEV_BANNER=0`.
 - The framework skips launching the Vite dev server when `NODE_ENV=production`. If you’re running a custom dev workflow in production-like environments, toggle it with `GUREN_DEV_VITE=1` (on) or `GUREN_DEV_VITE=0` (off).
+- Outside production, a busy port makes the server try the next one so `bun run dev` keeps working. Set `GUREN_STRICT_PORT=1` to bind the requested port or fail with `EADDRINUSE` instead. Use it anywhere a run has to know it reached the app it started — smoke scripts, E2E runners, CI — because walking to another port otherwise lets the run pass against whatever was already listening.
 
 ```ini
 [Unit]

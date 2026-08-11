@@ -30,15 +30,31 @@ export interface DevBannerOptions {
   assetsUrl?: string
 }
 
+/**
+ * A wildcard bind answers on every interface but is not itself dialable on
+ * every platform.
+ *
+ * Lives here rather than beside its other caller because the banner and
+ * `Application.listen()`'s returned address are two renderings of one fact,
+ * and a platform caveat added to only one of them is the drift this replaces.
+ */
+export function isWildcardHost(hostname: string): boolean {
+  return hostname === '0.0.0.0' || hostname === '::'
+}
+
+/** `host:port`, bracketing an IPv6 literal so the result is dialable. */
+export function formatHostPort(hostname: string, port: number): string {
+  return `${hostname.includes(':') ? `[${hostname}]` : hostname}:${port}`
+}
+
 export function logDevServerBanner({
   hostname,
   port,
   assetsUrl = 'http://localhost:5173',
 }: DevBannerOptions): void {
   const localUrl = `http://localhost:${port}`
-  const boundUrl = `http://${hostname}:${port}`
-  const boundLabel =
-    hostname === '0.0.0.0' || hostname === '::' ? ' (all interfaces)' : ''
+  const boundUrl = `http://${formatHostPort(hostname, port)}`
+  const boundLabel = isWildcardHost(hostname) ? ' (all interfaces)' : ''
 
   const header = [
     GUREN_ASCII_ART,

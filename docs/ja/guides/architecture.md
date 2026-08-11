@@ -143,7 +143,14 @@ const { Cache, Events, Log, Mail, Queue } = createFacades(app.container)
 1. `routes/web.ts` から registrar を export する。
 2. `const app = createApp({ routes: registerWebRoutes, providers: [DatabaseProvider, ...] })` のように生成し、サービスを早期登録。
 3. `await app.boot()` でルートをマウントし、プロバイダーのブートフックを実行し、ミドルウェアを準備。
-4. `await app.listen()`（または Bun では `app.listen()`）で HTTP サーバーを開始。
+4. `await app.listen()`（または Bun では `app.listen()`）で HTTP サーバーを開始。戻り値は実際にバインドしたアドレス `{ port, hostname, url }` です。`port: 0` を指定すると OS が空きポートを選び、本番以外ではポートが使用中の場合に次のポートへ移動するため、要求したポートと一致するとは限りません。ポート番号は要求値ではなく戻り値から読み取ってください。
+
+   ```ts
+   const { url, port } = await app.listen({ port: 3333 })
+   console.log(`listening on ${url}`) // 実際にバインドされたポート
+   ```
+
+   ポート移動をやめて `EADDRINUSE` で即座に失敗させたい場合は `portFallback: false` を渡すか、`GUREN_STRICT_PORT=1` を設定します。
 
 この流れは Bun のネイティブモジュールで動作し、`bun run dev` で起動されます。
 

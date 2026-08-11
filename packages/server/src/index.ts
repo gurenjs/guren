@@ -3,7 +3,12 @@ import { ensureErrorStackTracePolyfill } from './support/error-polyfill'
 ensureErrorStackTracePolyfill()
 
 export { Application, createApp } from './http/Application'
-export type { Context, ApplicationListenOptions, ServiceProviderConstructor } from './http/Application'
+export type {
+  Context,
+  ApplicationListenOptions,
+  ListenAddress,
+  ServiceProviderConstructor,
+} from './http/Application'
 export { parseRequestPayload, formatValidationErrors } from './http/request'
 export { Controller } from './mvc/Controller'
 export type { InertiaResponse, InferInertiaProps, ControllerInertiaProps, AuthPayload } from './mvc/Controller'

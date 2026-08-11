@@ -7,30 +7,13 @@ try {
   process.exit(1)
 }
 
-const requestedPort = Number.parseInt(process.env.PORT ?? '', 10) || 3333
+// `PORT=0` means "any free port", so this tests for a number, not truthiness.
+const parsedPort = Number.parseInt(process.env.PORT ?? '', 10)
+const port = Number.isInteger(parsedPort) ? parsedPort : 3333
 const hostname = process.env.HOST ?? '0.0.0.0'
-const isDevelopment = process.env.NODE_ENV !== 'production'
 
-for (let offset = 0; offset < 20; offset += 1) {
-  const port = requestedPort + offset
-
-  try {
-    await app.listen({ port, hostname })
-    break
-  } catch (error) {
-    if (!isDevelopment || !isAddressInUse(error) || offset === 19) {
-      throw error
-    }
-
-    console.warn(`Port ${port} is in use, trying ${port + 1}...`)
-  }
-}
-
-function isAddressInUse(error: unknown): boolean {
-  return Boolean(
-    error &&
-      typeof error === 'object' &&
-      'code' in error &&
-      (error as { code?: unknown }).code === 'EADDRINUSE',
-  )
-}
+// The walk past a busy port lives in listen() now, which is also the only
+// place that can report which port it ended up on. Set GUREN_STRICT_PORT=1 to
+// fail fast instead — what an automated consumer wants when it has to know
+// the app under test is the one answering.
+await app.listen({ port, hostname })
