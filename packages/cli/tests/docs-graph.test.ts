@@ -261,6 +261,25 @@ related: [app/Http/Controllers/PostController.ts]
     }
   })
 
+  it('reaches the screens view from a module routes-directory path', async () => {
+    const workspace = await createTempWorkspace('guren-cli-docs-graph-module-routes-')
+    try {
+      const dir = workspace.dir
+      await mkdir(join(dir, 'docs/spec'), { recursive: true })
+      await writeFile(join(dir, 'package.json'), '{}', 'utf8')
+      await writeFile(join(dir, 'docs/spec/screens.md'), '---\ntype: spec\n---\n# Screens\n', 'utf8')
+
+      // Where `make:route --module` writes; the module source node covers
+      // the whole module tree because the route graph is a runtime import.
+      const report = await buildDocsGraphReport({ cwd: dir, path: 'modules/billing/routes/invoice.ts' })
+
+      expect(report.focus).toContain('modules/')
+      expect(report.nodes.some((n) => n.id === 'docs/spec/screens.md')).toBe(true)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('matches glob-form related entries and normalizes the query path', async () => {
     const workspace = await createTempWorkspace('guren-cli-docs-graph-glob-')
     try {

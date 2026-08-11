@@ -290,3 +290,83 @@ export const renderMissing = function (this: any) {
     expect(content).not.toContain('## Unrouted pages')
   })
 })
+
+describe('screens spec (module routes directory)', () => {
+  let workspace: TempWorkspace
+
+  beforeAll(async () => {
+    workspace = await createTempWorkspace('guren-cli-spec-screens-module-routes-dir-')
+    const dir = workspace.dir
+    await writeScreensFixture(dir, { routes: true })
+
+    // The shape `make:route Invoice --module billing` scaffolds: the route
+    // definitions live under modules/billing/routes/, reached only through
+    // the module's registrar entry.
+    await mkdir(join(dir, 'modules/billing/routes'), { recursive: true })
+    await mkdir(join(dir, 'modules/billing/app/Http/Controllers'), { recursive: true })
+
+    await writeFile(
+      join(dir, 'modules/billing/index.ts'),
+      `import { registerBillingRoutes } from './routes'
+
+export default {
+  name: 'billing',
+  providers: [],
+  routes: registerBillingRoutes,
+}
+`,
+      'utf8',
+    )
+    await writeFile(
+      join(dir, 'modules/billing/routes.ts'),
+      `import type { Router } from '@guren/core'
+import { registerInvoiceRoutes } from './routes/invoice'
+
+export function registerBillingRoutes(router: Router): void {
+  registerInvoiceRoutes(router)
+}
+`,
+      'utf8',
+    )
+    await writeFile(
+      join(dir, 'modules/billing/routes/invoice.ts'),
+      `import type { Router } from '@guren/core'
+
+class InvoiceController {
+  index() {}
+}
+
+export function registerInvoiceRoutes(router: Router): void {
+  router.get('/billing/invoices', [InvoiceController, 'index'] as any).name('billing.invoices.index')
+}
+`,
+      'utf8',
+    )
+    await writeFile(
+      join(dir, 'modules/billing/app/Http/Controllers/InvoiceController.ts'),
+      `export class InvoiceController {
+  async index() {
+    return this.inertia('billing/Invoices', { invoices: [] })
+  }
+}
+`,
+      'utf8',
+    )
+  })
+
+  afterAll(async () => {
+    await workspace.cleanup()
+  })
+
+  it('derives routes from files under modules/*/routes/, so those files are a screens.md source', async () => {
+    const { content } = await generateScreensSpec(workspace.dir)
+
+    // The route reaching the document exists only in
+    // modules/billing/routes/invoice.ts — proof that a change to a module
+    // routes-directory file can change screens.md, which is what the
+    // matching source pattern in SPEC_VIEWS promises `check --spec --changed`.
+    const row = content.split('\n').find((line) => line.startsWith('| billing/Invoices '))
+    expect(row).toBeDefined()
+    expect(row).toContain('GET /billing/invoices → InvoiceController.index')
+  })
+})

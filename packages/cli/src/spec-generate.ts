@@ -61,7 +61,17 @@ export const SPEC_VIEWS: SpecViewDescriptor[] = [
     fileName: 'screens.md',
     sources: [
       { pattern: /^routes\//, label: 'routes/' },
-      { pattern: /^modules\/[^/]+\/(routes|index)\.ts$/, label: 'modules/*/routes.ts' },
+      // A module feeds the route graph through a runtime import:
+      // `loadRouteDefinitions` evaluates `modules/<name>/index.ts` and
+      // whatever the registrar it names reaches from there — `routes.ts`,
+      // files under `routes/` (where `make:route --module` writes), or any
+      // other module file holding a prefix constant or helper. Like the
+      // modules view's any-source rule, the pattern matches that honest
+      // input set rather than an allow-list of conventional names — an
+      // allow-list of `routes.ts`/`index.ts` is how a stale screens.md
+      // once slipped through `--changed`, and over-selection only costs a
+      // regeneration.
+      { pattern: /^modules\/[^/]+\//, label: 'modules/' },
       { pattern: /(^|\/)app\/Http\/Controllers\//, label: 'app/Http/Controllers/' },
       { pattern: /^resources\/js\/pages\//, label: 'resources/js/pages/' },
     ],
