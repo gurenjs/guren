@@ -1,19 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
-import { createTempWorkspace } from './helpers'
-
-const CLI_BIN_PATH = resolve(import.meta.dir, '../src/bin.ts')
-
-async function runCli(args: string[], cwd: string): Promise<{ exitCode: number }> {
-  const proc = Bun.spawn(['bun', CLI_BIN_PATH, ...args], {
-    cwd,
-    stdout: 'ignore',
-    stderr: 'ignore',
-  })
-  const exitCode = await proc.exited
-  return { exitCode }
-}
+import { createTempWorkspace, runCliBin } from './helpers'
 
 async function writeArchViolation(dir: string): Promise<void> {
   await writeFile(
@@ -39,8 +27,7 @@ describe('guren check exit code', () => {
     const workspace = await createTempWorkspace('guren-cli-check-exitcode-default-')
     try {
       await writeArchViolation(workspace.dir)
-      const { exitCode } = await runCli(['check', '--app', workspace.dir], workspace.dir)
-      expect(exitCode).toBe(0)
+      expect(await runCliBin(['check', '--app', workspace.dir], workspace.dir)).toBe(0)
     } finally {
       await workspace.cleanup()
     }
@@ -59,8 +46,7 @@ describe('guren check exit code', () => {
         'utf8',
       )
 
-      const { exitCode } = await runCli(['check', '--app', workspace.dir], workspace.dir)
-      expect(exitCode).toBe(0)
+      expect(await runCliBin(['check', '--app', workspace.dir], workspace.dir)).toBe(0)
     } finally {
       await workspace.cleanup()
     }
@@ -70,8 +56,7 @@ describe('guren check exit code', () => {
     const workspace = await createTempWorkspace('guren-cli-check-exitcode-arch-')
     try {
       await writeArchViolation(workspace.dir)
-      const { exitCode } = await runCli(['check', '--arch', '--app', workspace.dir], workspace.dir)
-      expect(exitCode).toBe(1)
+      expect(await runCliBin(['check', '--arch', '--app', workspace.dir], workspace.dir)).toBe(1)
     } finally {
       await workspace.cleanup()
     }
@@ -88,8 +73,7 @@ describe('guren check exit code', () => {
       await mkdir(join(workspace.dir, 'app/Domain'), { recursive: true })
       await writeFile(join(workspace.dir, 'app/Domain/OrderService.ts'), `export class OrderService {}`, 'utf8')
 
-      const { exitCode } = await runCli(['check', '--arch', '--app', workspace.dir], workspace.dir)
-      expect(exitCode).toBe(0)
+      expect(await runCliBin(['check', '--arch', '--app', workspace.dir], workspace.dir)).toBe(0)
     } finally {
       await workspace.cleanup()
     }

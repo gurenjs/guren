@@ -1,11 +1,10 @@
-import { resolve } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import { stripAnsi } from 'consola/utils'
-import { createTempWorkspace } from './helpers'
-
-const CLI_BIN_PATH = resolve(import.meta.dir, '../src/bin.ts')
+import { CLI_BIN_PATH, SERVER_DIST_ENTRY, assertWorkspaceBuilt, createTempWorkspace } from './helpers'
 
 async function runBin(args: string[], cwd: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  assertWorkspaceBuilt([SERVER_DIST_ENTRY])
+
   // `bun test` sets NODE_ENV=test, which drops consola to the warn level and
   // hides the usage output these assertions inspect. Real invocations do not.
   const { NODE_ENV: _testEnv, ...env } = process.env

@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'bun:test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
-import { createTempWorkspace } from './helpers'
+import { join } from 'node:path'
+import { CLI_BIN_PATH, SERVER_DIST_ENTRY, assertWorkspaceBuilt, createTempWorkspace } from './helpers'
 import { buildPageModuleContent, generatePageTypes, type PageDefinition } from '../src/pages-types'
-
-const CLI_BIN_PATH = resolve(import.meta.dir, '../src/bin.ts')
 
 describe('buildPageModuleContent', () => {
   it('generates a runtime manifest and nested page contracts', () => {
@@ -94,6 +92,8 @@ describe('generatePageTypes overwrite behavior', () => {
         'export default function Home() { return null }\n',
         'utf8',
       )
+
+      assertWorkspaceBuilt([SERVER_DIST_ENTRY])
 
       const runCodegen = () =>
         Bun.spawn(['bun', CLI_BIN_PATH, 'codegen', '--app', workspace.dir], {
