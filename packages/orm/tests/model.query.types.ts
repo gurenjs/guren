@@ -284,3 +284,16 @@ async function _softDeletesPreservesInference() {
   }
 }
 void _softDeletesPreservesInference
+
+// The mixin registers its filter as a *named* global scope only: a second
+// registration as `defaultScope` would make it unremovable, because
+// `withoutGlobalScope()` re-applies `defaultScope` whatever it was asked to
+// drop. This pins the type half — the property survives only as `Model`'s
+// optional declaration, so calling it unguarded is an error, and putting it back
+// on `SoftDeletesStatic` makes this directive unused. The runtime half is pinned
+// behaviorally in tests/soft-deletes.test.ts.
+function _softDeleteScopeIsNotADefaultScope() {
+  // @ts-expect-error defaultScope is not registered by the SoftDeletes mixin
+  SoftAccount.defaultScope({} as never)
+}
+void _softDeleteScopeIsNotADefaultScope

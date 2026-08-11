@@ -489,7 +489,7 @@ User.removeGlobalScope('active')
 ```
 
 > [!TIP]
-> The `SoftDeletes` mixin registers a global scope named `'softDelete'`. You can bypass it with `withoutGlobalScope('softDelete')` instead of `withTrashed()` if you prefer.
+> The `SoftDeletes` mixin registers a global scope named `'softDelete'`. `withTrashed()` *is* `withoutGlobalScope('softDelete')` — either spelling reaches trashed rows while every other global scope stays applied, so a `tenant` scope keeps isolating them. `withoutGlobalScopes()` is the one that drops those too.
 
 ## Model Hooks
 
@@ -567,13 +567,21 @@ export class Post extends SoftDeletes(defineModel(posts)) {}
 ```
 
 ```ts
-await Post.delete({ id: 1 })                // Sets deletedAt (row remains)
+await Post.delete({ id: 1 })                // Sets deletedAt on a live row (the row remains)
 const active = await Post.all()              // Excludes soft-deleted
 const all = await Post.withTrashed().get()   // Includes soft-deleted
 const trashed = await Post.onlyTrashed().get()
 await Post.restore({ id: 1 })               // Clears deletedAt
 await Post.forceDelete({ id: 1 })           // Permanent removal
 ```
+
+Every one of these honors the model's *other* global scopes. `delete()` marks
+only a live row the current scopes can see — on an already-trashed row it
+matches nothing and leaves the original `deletedAt` alone. `restore()` and
+`forceDelete()` drop
+the `softDelete` filter so they reach trashed rows, and keep the rest — a
+`tenant` scope still stops a force delete, which cannot be undone, from reaching
+another tenant's row.
 
 > [!TIP]
 > Your schema must include a `deletedAt` timestamp column for soft deletes to work.
