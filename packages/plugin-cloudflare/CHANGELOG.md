@@ -1,5 +1,67 @@
 # @guren/plugin-cloudflare
 
+## 0.2.2
+
+### Patch Changes
+
+- b8a9805: Stop a stale boot waiter in `createWorkersHandler` from clearing a live retry
+
+  When the first boot fails, every request awaiting that shared promise runs the
+  catch block, and each one dropped the boot promise and the write-once env
+  holder unconditionally. That is only correct for the waiter whose attempt is
+  still the current one.
+
+  This is a long-standing race in the boot-failure cleanup, not a regression from
+  the synchronous-throw fix released alongside it.
+
+  A retry can start _between_ two waiters' catches: the app may attach its own
+  rejection reaction to the promise `boot()` returned, and reactions run in
+  registration order, so the reaction can sit between waiter one and waiter two.
+  `handler.fetch` captures the env and installs the new boot promise
+  synchronously, before its first `await` — so by the time the second, now-stale
+  waiter reaches its catch, the retry is already live. Clearing there wiped the
+  retry's boot promise and its env, leaving a successfully booted app with an
+  empty holder: `getWorkersEnv()` then threw for every subsequent request, and
+  the next request booted a second time.
+
+  The cleanup is now guarded by the identity of the attempt the request actually
+  waited on, so only its owner clears state. That ownership is per-handler, which
+  matches what the generated worker builds: one `createWorkersHandler` call per
+  module. Two handlers constructed in the same module still share the env holder
+  without sharing a boot promise, so a boot failure in one can clear the holder
+  the other captured — unchanged by this release, and out of reach of the
+  generated topology. A synchronous throw from `boot()`
+  leaves both the captured attempt and the boot promise `undefined` — nothing can
+  interleave before that catch runs, so the guard holds and the env captured by
+  that same request is still cleared.
+
+- eb7728c: Clear the captured Workers env when `boot()` throws synchronously
+
+  `createWorkersHandler` boots on the first request and, when that boot fails,
+  drops both the shared boot promise and the write-once env holder so the retry
+  starts from the new request's bindings. The `app.boot()` call sat one line
+  above the `try`, so only a _rejected promise_ reached that cleanup. An
+  implementation that throws before returning a promise skipped it, leaving the
+  holder populated with the failed request's `env` — and since the holder is
+  first-call-wins, every later request would then boot against those stale
+  bindings, which is the exact failure the catch exists to prevent.
+
+  `Application.boot()` is `async` and so cannot reach this, but the handler
+  publishes `WorkersAppLike`, a structural type requiring only
+  `boot(): Promise<void>`; a conforming non-async implementation can throw
+  synchronously. The call now happens inside the `try`. On a synchronous throw
+  the assignment never runs, so the promise is already `undefined` and the
+  existing reset stays a no-op.
+
+  `@guren/plugin-vercel`'s `createVercelHandler` is not affected on either count:
+  it is an `async` function, which converts a synchronous throw into a rejection,
+  and it keeps no module-scope env holder to leave stale.
+
+- Updated dependencies [72bd945]
+- Updated dependencies [72bd945]
+- Updated dependencies [b210a53]
+  - @guren/core@1.5.2
+
 ## 0.2.1
 
 ### Patch Changes

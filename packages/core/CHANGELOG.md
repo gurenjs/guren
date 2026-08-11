@@ -1,5 +1,105 @@
 # @guren/core
 
+## 1.5.2
+
+### Patch Changes
+
+- 72bd945: Degrade a corrupt ability list to no abilities instead of every ability
+
+  `DatabaseApiTokenStore` decoded `abilities` with
+  `decodeJsonColumn<string[]>(value, [])`, which returns whatever the JSON
+  decodes to. A stored `'"*"'` decodes to the _string_ `"*"`, and `tokenCan` then
+  runs `String.prototype.includes` on it, so `"*".includes("*")` is true and the
+  token is granted every ability — the exact opposite of the deny-by-default the
+  file's own comment claimed. `RedisApiTokenStore` had the same collapse, and its
+  `JSON.parse` was unguarded besides, so one corrupt record threw on every
+  verification of that token rather than degrading.
+
+  Both stores now require an array and keep only its string members. A value that
+  is not a list of strings yields no abilities.
+
+- 72bd945: Treat an unparseable expiry as expired, at the point the decision is made
+
+  `new Date(garbage)` is an Invalid Date, and every comparison against one is
+  false. So `new Date() > token.expiresAt` and `payload.expiresAt.getTime() <= now`
+  both read a corrupt expiry as _not past_, and the record never expired.
+
+  The authoritative checks are `verifyApiToken` and the OAuth state store's expiry
+  tests, not any one store's deserialization — a token reaches `verifyApiToken`
+  from `MemoryApiTokenStore`, from the database and Redis stores, and from
+  application-supplied stores the framework never sees. `createApiToken` could also
+  mint an Invalid Date on its own from a non-finite `expiresIn`, with no store
+  involved at all. Both now go through a shared predicate in
+  `@guren/server/support/expiry`, so the rule holds for every implementation
+  including ones written by users.
+
+  Store-level coercion is kept as defense in depth and is now consistent. `toDate`
+  promised in its docstring that unparseable values return `null` but passed
+  `Date` instances wrapping garbage straight through, which is why `isExpired`
+  carried a second NaN check of its own; it now normalizes through one path and
+  handles the `bigint` a BIGINT column returns. `toOptionalExpiry` keeps absent
+  (`null`, "never expires") and present-but-unparseable distinct, degrading the
+  latter to a long-past date rather than to `null`. `RedisApiTokenStore`,
+  `RedisOAuthStateStore`, `RedisPasswordResetStore` and
+  `RedisEmailVerificationStore` all read their expiry through the same helper —
+  the last two still had the original unguarded `new Date(parsed.expiresAt)`.
+
+- b210a53: Collapse the duplicated store expiry rules into a single implementation
+
+  `toDate`, `isExpired` and `toOptionalExpiry` existed twice: once in
+  `packages/server/src/support/expiry.ts` for the Redis-backed stores and the
+  authoritative `verifyApiToken` / OAuth checks, and once in
+  `packages/core/src/store-utils.ts` for the database-backed stores. The copies
+  were identical and deliberate — `@guren/core` depends on `@guren/server` and
+  not the other way around, so core was unreachable from the server package —
+  but two copies of an expiry rule is how the next boundary-case fix lands in
+  one backend and silently misses its sibling. That is the failure mode the
+  Redis and database stores have already hit once.
+
+  `@guren/server` now exposes the rules on a `@guren/server/support/expiry`
+  subpath and `packages/core/src/store-utils.ts` re-exports them, leaving one
+  implementation for both backends. The dependency direction already ran
+  core → server, so this adds no cycle.
+
+  No behavior change and no public API change: the two implementations were
+  byte-identical, and neither package's index exports these — `@guren/core`'s
+  index opens with `export * from '@guren/server'`, so a test now pins that they
+  stay off the public surface. `decodeJsonColumn` stays in core as a drizzle
+  column concern; the Redis stores decode their payloads through
+  `redis-values.ts`.
+
+- Updated dependencies [72bd945]
+- Updated dependencies [4b2b283]
+- Updated dependencies [72bd945]
+- Updated dependencies [72bd945]
+- Updated dependencies [eebd978]
+- Updated dependencies [2a6eef4]
+- Updated dependencies [72bd945]
+- Updated dependencies [72bd945]
+- Updated dependencies [f43684c]
+- Updated dependencies [72bd945]
+- Updated dependencies [078bc93]
+- Updated dependencies [eaafc8b]
+- Updated dependencies [e22b10f]
+- Updated dependencies [ae79279]
+- Updated dependencies [3453540]
+- Updated dependencies [e22b10f]
+- Updated dependencies [b590b24]
+- Updated dependencies [be4fa25]
+- Updated dependencies [d7f4cb5]
+- Updated dependencies [c84d760]
+- Updated dependencies [633c9bc]
+- Updated dependencies [72bd945]
+- Updated dependencies [2c5886e]
+- Updated dependencies [de3298b]
+- Updated dependencies [d3da91c]
+- Updated dependencies [19f7119]
+- Updated dependencies [b210a53]
+- Updated dependencies [e87d053]
+  - @guren/cli@2.3.0
+  - @guren/server@2.3.0
+  - @guren/orm@2.2.1
+
 ## 1.5.1
 
 ### Patch Changes

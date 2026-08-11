@@ -1,5 +1,40 @@
 # @guren/testing
 
+## 1.4.0
+
+### Minor Changes
+
+- 025fa34: Wire i18n into the starter templates
+
+  Apps scaffolded from the default and blog blueprints now ship a
+  `lang/en/messages.json` catalog and pass `i18n: { supported: ['en'] }` to
+  `createApp`; the default blueprint's home page message renders through
+  `this.t()`. Adding a locale directory is all it takes to translate the
+  app.
+
+  `TestApp.create()` additionally accepts an `i18n` option mirroring
+  `createApp({ i18n })`, for tests that assemble an app from parts and hit
+  controllers using `this.t()`.
+
+- e87d053: Add `TestApp.fromApp(app)` and make `Application.boot()` idempotent
+
+  Testing against the real application required
+  `await app.boot(); TestApp.fromFetch((request) => app.fetch(request))` — and
+  the arrow wrapper is load-bearing, because an unbound `app.fetch` reference
+  throws (`Application.fetch` reads instance state). `TestApp.fromApp(app)`
+  boots the app and binds fetch, removing both the boilerplate and the footgun.
+
+  `Application.boot()` now reuses its first call, so booting twice is a no-op
+  rather than mounting security middleware and routes a second time. This also
+  covers two callers booting concurrently, which the previous code could not:
+  each saw an unbooted app and mounted everything again. A boot that throws is
+  not remembered, so a later call attempts boot again — it resumes on a
+  partially mounted app rather than starting clean, which is how the Cloudflare
+  Workers handler has always treated it.
+
+  This is a behavior change to a public method: a second `boot()` used to
+  duplicate the middleware chain and now does nothing.
+
 ## 1.3.0
 
 ### Minor Changes

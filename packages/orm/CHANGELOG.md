@@ -1,5 +1,30 @@
 # @guren/orm
 
+## 2.2.1
+
+### Patch Changes
+
+- de3298b: Stop a superseded connection attempt from evicting a newer one
+
+  Every database factory memoizes its connection and migration handle in a
+  promise, clearing it on rejection so the next caller retries. The clear was
+  unconditional, so a rejection arriving after `closeDatabase()` (or
+  `resetDatabase()`) had already dropped the handle and a newer attempt had
+  replaced it would evict that newer attempt — a second connection where one was
+  expected. Clearing now happens only while the cell still holds the attempt that
+  failed. The five drivers share one internal `singleFlight()` helper instead of
+  hand-rolling the pattern eight times.
+
+- 19f7119: Stop concurrent callers from opening a second SQLite handle
+
+  `createSqliteDatabase()` was the one driver still memoizing its connection by
+  hand, and the check ran five awaits before the memo was written — so two callers
+  arriving together both opened a client, ran `PRAGMA journal_mode = WAL` on it,
+  and the second overwrote the first. `closeDatabase()` only ever closes the
+  client it can still see, leaving the first one open for the life of the process.
+  The connection now shares the `singleFlight()` helper the other four drivers
+  already use, so one attempt serves every caller that races it.
+
 ## 2.2.0
 
 ### Minor Changes

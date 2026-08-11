@@ -1,5 +1,433 @@
 # @guren/cli
 
+## 2.3.0
+
+### Minor Changes
+
+- 3453540: `guren check` now reports a `routes/*.ts` file whose registrar nothing reachable from the app's entry registrar calls.
+
+  Such a file compiles, type-checks, and reads as wired from the inside — its only symptom is a 404 in production. That is the state `guren add admin|oauth|resource|auth` left behind in any app scaffolded from the blog blueprint, because the wiring step matched only a registrar whose parameter was literally named `router`. Fixing the scaffolders does nothing for the apps already in that state; this reports them, and names the import-and-call line to add. It also covers the files nothing wires automatically — `make:route` writes its routes file and leaves mounting to you.
+
+  Mounting spreads outward from the entry file (`routes/web.ts`, or `--routes`) and is tracked per exported name: a file counts as mounted once some already-mounted file uses a binding that traces back to one of its registrar exports. So a nested registrar, a barrel re-export, a namespace import, an `await import()`, and a registrar the entry only re-exports all count — while an import with no call, an import of some _other_ export from the same file, and a registrar called only from a file that nothing calls in turn do not. A module's own `modules/<name>/routes.ts` is out of scope: `defineModule({ routes })` mounts it without going through the entry registrar. Content-activated — an app whose `routes/` holds nothing but the entry file contributes no results.
+
+  Two wirings it cannot see, both reported as unmounted: a chain that leaves `routes/` (`web.ts` → `app/routing.ts` → `routes/admin.ts`), and a registrar reached by anything less direct than importing its file.
+
+  Reported as a `warn`, like the console-command registration check, so plain `guren check` still exits zero. `guren check --ci` gates on non-advisory warns, so a project already using that flag will start failing on an unmounted routes file — which is the point, but it can surface on upgrade rather than on the commit that introduced it.
+
+  That gate is in the CI workflow both app templates scaffold, and `make:route` deliberately leaves mounting to you — so `make:route` now says so on the spot rather than letting the next push explain it.
+
+  Also fixes the entry file being _assumed_ to be `routes/web.ts` when no `--routes` was given: `guren check` and `guren doctor` now share one candidate list, so the API-only scaffold (`routes/api.ts`, no `routes/web.ts`) is read against its real entry.
+
+### Patch Changes
+
+- 72bd945: Guard the `add admin` dashboard by default, like `make:feature`
+
+  `guren add admin` emitted `router.get('/admin', [AdminDashboardController, 'index'])`
+  with no middleware and a controller with no auth call, and wired it into
+  `routes/web.ts`. Nothing was disclosed — the page renders three hardcoded zeros —
+  but it diverged from `make:feature`, which guards by default and offers
+  `--public` to opt out, and the guide did not mention that the route was open. The
+  first real query added to that dashboard made it an unauthenticated admin page.
+
+  The route now carries `requireAuthenticated({ redirectTo: '/login' })` and the
+  action calls `this.auth.userOrFail()`; `--public` restores the previous output.
+
+  The middleware is attached inline rather than through an `'auth'` alias. This
+  file lands in apps that may never have run `guren add auth`, and
+  `aliasMiddleware('auth', …)` writes into the router shared with `routes/web.ts`,
+  so registering it here would silently replace an alias the app configured with
+  different options. On an app without auth installed the request is redirected to
+  a `/login` that does not exist yet, rather than failing to boot.
+
+- 4b2b283: Refuse `add admin` on an API-only app instead of scaffolding an unusable dashboard
+
+  `guren add admin` scaffolds an Inertia dashboard, and on an app created from the
+  `api` blueprint every file it wrote was unusable. The controller imports
+  `@/.guren/pages.gen` and returns an Inertia response, so it did not typecheck
+  against a `@guren/inertia-client` the API starter never installs — and running
+  page codegen then added an import of that absent package. The route wiring
+  targets `routes/web.ts`, which the API starter does not have (it registers
+  `registerApiRoutes` from `routes/api.ts`), so `routes/admin.ts` was written but
+  mounted by nothing and `GET /admin` returned 404. The CLI then printed that
+  `/admin` requires a signed-in user and redirects to `/login`, which is not what
+  the resulting app did.
+
+  The blueprint now checks before its first write and fails with a message naming
+  what it looked at, leaving nothing behind. Rejecting rather than emitting a JSON
+  variant is deliberate: an admin endpoint worth generating needs a guard, and the
+  auth stack that guard points at (`guren add auth`) is itself Inertia-shaped, so
+  the API variant would either reference sign-in pages the CLI cannot install or
+  be an unguarded stub.
+
+  Detection requires positive evidence of the API-only shape — a readable
+  `package.json` that does not declare `@guren/inertia-client`, **and** no
+  `routes/web.ts` or `routes/web.js`. Either signal alone can be true of a working
+  fullstack app (deps hoisted to a workspace root; a differently named entry file,
+  which the route wiring already reports), and for a refusal the expensive mistake
+  is blocking a command that would have worked. Every "cannot tell" — including a
+  `package.json` that exists but cannot be read — permits the scaffold.
+
+  The shared dependency probe behind it (`appDependsOn`) also replaces three
+  hand-rolled copies of the same `package.json` read, in `guren plugin`,
+  `guren make:test`, and the i18n type codegen. The codegen copy swallowed read
+  errors and the new one has to as well: its augmentation is optional output, so
+  an unreadable manifest must leave the translation keys as plain strings rather
+  than abort the run.
+
+  The `--public` next step is also reworded to describe what `routes/admin.ts`
+  contains rather than how the running app behaves, so it can no longer contradict
+  the wiring step when that step reports it could not reach a registrar.
+
+- 2a6eef4: Refuse the auth scaffold on an API-only app instead of writing pages it cannot render
+
+  `guren add auth` and `guren make:auth` scaffold an Inertia sign-in experience, and
+  on an app created from the `api` blueprint none of it worked. The controllers
+  return Inertia responses and the pages they name (`resources/js/pages/auth/*.tsx`,
+  `resources/js/components/Layout.tsx`) are React components, so nothing typechecked
+  against a `@guren/inertia-client` the API starter never installs. The route wiring
+  targets `routes/web.ts`, which that starter does not have — it registers
+  `registerApiRoutes` from `routes/api.ts` — so `routes/auth.ts` was written and
+  mounted by nothing, and the CLI still printed that you could visit `/login`.
+
+  Auth also patches `db/schema.ts` and generates a users migration, so the check runs
+  before the first write rather than before the first file: a run stopped halfway
+  through those leaves changes no `--force` rerun undoes. It refuses with a message
+  naming both signals it read and leaves the app exactly as it was.
+
+  The refusal points at the token flow the framework already ships —
+  `createBearerTokenMiddleware` over a `DatabaseApiTokenStore` or
+  `RedisApiTokenStore` — rather than scaffolding it. Generating that variant is a
+  separate piece of work, not a smaller one: it needs a parallel set of controller
+  and route templates for each of the four sign-in shapes this command supports, an
+  `api_tokens` table and migration alongside the users one, a routes target other
+  than the hardcoded `routes/web.ts`, and an answer for the registration, password
+  reset, and email verification flows, which mail absolute links whose only landing
+  pages are the ones being refused.
+
+- 078bc93: Adapt `make:controller` and refuse `make:view` on an API-only app instead of writing Inertia files that cannot typecheck
+
+  On an app scaffolded from the `api` blueprint, the controller `guren
+make:controller` generated was the one file the app's own tsconfig would flag:
+  it imports `@/.guren/pages.gen`, which codegen never writes there, and returns
+  `this.inertia(...)` against a `@guren/inertia-client` that is not installed.
+  Unlike the multi-file scaffolds (`add auth`, `add admin`, `add resource`), which
+  refuse such an app, a lone controller has an obvious API dialect — so the
+  template now adapts: on an app the two signals those refusals already read
+  (no `@guren/inertia-client` dependency, no `routes/web.ts` or `routes/web.js`)
+  confirm as API-only, the generated controller returns `this.json(...)` and can
+  be wired into `routes/api.ts` as written. The refusals those scaffolds print
+  now point at this command rather than telling you to write the controller by
+  hand.
+
+  `make:view` refuses on the same signals, because a page has no JSON dialect to
+  adapt to — and the stray component would not stay harmless. The api starter's
+  tsconfig skips `resources/`, but its own `dev` script runs `guren codegen`,
+  which folds every page under `resources/js/pages` into `.guren/pages.gen.ts` —
+  a file that tsconfig does include, importing the `@guren/inertia-client` the
+  app never installs. One `make:view` flipped `typecheck` and `build` red two
+  commands later, far from the command that caused it.
+
+  The judgment stays positive-evidence only: whenever the signals cannot confirm
+  an API-only app — no manifest to read, a hoisted workspace dependency, a web
+  routes entry present — both commands behave exactly as before, and
+  installing `@guren/inertia-client` switches an app back to the Inertia
+  templates. Both commands judge the root the file is written into (resolved
+  once and reused for the write), not the process directory, so `cwd`-passing
+  callers such as the MCP server get the same answer the write acts on.
+
+- eaafc8b: Refuse `make:feature` on an API-only app, the same way `add resource` does
+
+  `guren make:feature` reaches the same Inertia-shaped scaffold as `guren add
+resource` without passing through the blueprint registry, so the refusal that
+  protects `add resource` did not cover it: on an API-only app it wrote the same
+  unusable pages, controller, resource, validator, and model. It now refuses with
+  the same message, after the same pure parsing — a usage error is still reported
+  as one — and before its first write.
+
+  Unlike the blueprints, which refuse an explicit `cwd` up front, `make:feature`
+  honours one, so its check judges the root it writes into rather than the
+  directory the process happens to sit in.
+
+- ae79279: fix(cli): detect controller body accessors in `guren audit`
+
+  The A03 body-validation rule only recognized raw request reads (`this.request.json()`, `req.parseBody()`, …), so an action that read the payload through the documented controller helpers was reported as a pass ("does not consume the request body"). `this.input()`, `this.only()`, `this.except()`, `this.file()` and `this.files()` are now detected, including their generic forms — nested type arguments such as `this.input<Record<string, unknown>>('meta')` included.
+
+  An action that only calls `this.has()` still passes, since a presence check yields no unvalidated value, but its finding no longer claims the body went unread.
+
+  The accessor list is derived from a classification of `Controller`'s full public/protected surface, pinned by a test that re-parses `Controller.ts` — a new accessor added there now fails that test instead of silently defaulting to undetected. The `validateBody`/`validateBodySafe` detection is derived from the same classification, so it can no longer drift out of step with it.
+
+- e22b10f: Stop codegen writing a pages manifest into an app that cannot compile one
+
+  `.guren/pages.gen.ts` imports `@guren/inertia-client`. An app scaffolded from the
+  `api` blueprint does not install that package, and its `tsconfig.json` includes
+  `.guren/**` (but not `resources/`), so a manifest generated there fails `tsc` on
+  its first line. Nothing prevented one: `generatePageTypes` wrote a manifest
+  whenever `resources/js/pages` contained a component, and that directory can fill
+  up without anyone asking for it — a hand-copied page, a checkout, a generator
+  written later — while the api starter's `dev` script runs codegen on every start.
+
+  `guren check` already claimed this could not happen ("codegen never emits it in an
+  API-only app"), and `guren doctor` leaned on the same claim silently. Neither
+  enforced it. Codegen now owns the rule: `planPageManifest` answers "does this app
+  get a pages manifest?" from the page components _and_ `isConfirmedApiOnlyApp`, and
+  check and doctor read that answer rather than restating it.
+
+  Withholding the file inverts the risk that predicate was written for — where a
+  wrong answer used to block a command loudly, it would now quietly deny a file
+  every controller imports — so the suppressed state is reported rather than
+  silent. `guren codegen` warns instead of printing a generated path, the MCP
+  codegen tool reports the reason rather than "nothing to generate", and check and
+  doctor both surface it, most sharply when a manifest generated before the app took
+  this shape is still on disk: that leftover is what fails the typecheck, and both
+  tools used to call it healthy on the strength of it merely existing. It outlives
+  the page components that produced it, so it is reported even once they are
+  deleted. Codegen does not delete it — if the rule is ever wrong about an app,
+  removing the manifest turns a type error into a mystery — so the report names the
+  file and both corrections: delete it, or declare the `@guren/inertia-client`
+  dependency and `routes/web.ts` that make this a fullstack app.
+
+  Severity follows the same rule: the leftover manifest really does fail `tsc`, so
+  `guren check --ci` gates on it, while page components an API-only app simply never
+  renders are advisory — failing a build over unused files would be its own bug.
+
+  `make:view`'s refusal stands, but its reason changes with this: a page component
+  in such an app is no longer a delayed `typecheck` failure, it is a screen nothing
+  can reach, and the refusal is about saying so at the command that caused it. Its
+  doc comment and the CLI guide now say that instead of restating a chain codegen
+  no longer lets happen.
+
+- b590b24: Wire providers into the app entry through one registrar that writes once
+
+  Three implementations of "register a provider in the app entry and report the
+  outcome" coexisted — the blueprints' `installProvider`, `make:auth`'s
+  `wireProvider`, and two inline copies inside `make:auth` for the framework's own
+  mail and OAuth service providers. They are now one shared helper, which closes
+  the gaps between them.
+
+  `guren add cache` — and every other infrastructure blueprint, and `guren plugin`
+  — probed only `src/app.ts`. An app that keeps its entry at the root (`app.ts`,
+  which `guren add auth` and `guren make:module` both already found) was reported
+  as having no app file at all. The entry now comes from one shared candidate
+  list, and the generated import is relative to whichever entry was found, so a
+  root `app.ts` gets `./app/Providers/CacheProvider.js` rather than a path that
+  climbs out of the project.
+
+  `guren add auth` still added each provider's import _before_ registering it, as
+  did `guren plugin`. On an app whose `providers: [ ... ]` array cannot be located
+  — a hand-edited entry, or one that never had the array — the run reported a
+  failure having already written an import nothing references, which stops the app
+  compiling under `noUnusedLocals`. `guren plugin` was the worst of the two: it
+  throws rather than warning, so it left the orphan import behind and refused to
+  finish.
+
+  Registering before importing, as the blueprints already did, is not the whole
+  fix. The two patches each read and rewrite the entry independently, so whichever
+  runs second can fail on its own — a permissions change, a full disk, an
+  interrupt — and the state that leaves, "registered but not imported", is worse
+  than the one being avoided: an unresolved identifier throws at runtime rather
+  than merely failing a lint. Both edits are now composed in memory, through a
+  pure `insertProvider` beside the existing `insertImport`, and applied in a
+  single write. An entry that cannot take one half receives neither. This is the
+  shape `addRouteRegistrarCall` already used for the same reason, and what
+  `insertImport`'s own documentation was written for.
+
+  `guren make:module` had the same import-first hazard against its
+  `modules: [ ... ]` patch, and is fixed the same way.
+
+  Reporting stays per command, because the three callers genuinely differ: the
+  blueprints warn and name what to register by hand, `guren add auth` narrates
+  each step, and `guren plugin` throws and collects structured messages rather
+  than touching the console. Only the entry resolution and the patch primitive are
+  shared. One nicety falls out of the consolidation — inside a single
+  `guren add auth` run, the framework's own service providers now report the way
+  the scaffolded ones always did, instead of staying silent when they were already
+  registered.
+
+- be4fa25: Refuse `add resource` before it patches anything, instead of failing halfway through
+
+  `guren add resource` edits two files the app owns: it appends a table to
+  `db/schema.ts` and registers the CRUD routes in `routes/web.ts`. Refusing the
+  API-only app took the common case out of that path, and named what it left
+  behind: an app that declares `@guren/inertia-client`, or that has no manifest to
+  read at all, is permitted on purpose — a shape check has to answer "cannot tell"
+  with "proceed" — and still walked into an unguarded `readFile`. That is what this
+  finishes.
+
+  Both reads were unguarded, so those apps failed with a raw `ENOENT: no such file
+or directory` and a seven-frame `node:fs` stack. Missing `db/schema.ts` failed
+  first and wrote nothing; missing `routes/web.ts` was the damaging one, because
+  that read runs _after_ the schema patch — by then eight scaffolded files were on
+  disk _and_ the app's own `db/schema.ts` carried a table for routes that were
+  never registered. Deleting the scaffold does not undo that.
+
+  The blueprint now settles both patches before its first write: the schema file
+  must exist, the routes file must exist, and — unless the routes are already
+  registered — the routes file must expose a registrar to patch. Each refusal names
+  the file it wanted and writes nothing. The last of the three replaces a throw
+  that already had this message but only reached it after the schema patch and the
+  scaffold.
+
+  The order of the two checks matters and is deliberate: the shape refusal runs
+  first, so an app it recognizes hears about being API-only rather than about a
+  missing file.
+
+  Scoped to those three questions on purpose. This is not a promise that the
+  patches will succeed: a target that exists but cannot be read or written still
+  fails in the writer, exactly as before. What it removes is the failure the
+  command could see coming.
+
+  Reordering the two patches was the other option and does not work: it only
+  chooses which of the app's files is left half-edited. Routes-first would patch
+  `routes/web.ts` with a controller and validator import for a table that does not
+  exist, which is the worse of the two, since that is the edit that stops the app
+  compiling.
+
+  `add admin` still warns rather than throwing in the comparable case, and that
+  asymmetry stays. Its output is self-contained — a controller, a page, and its own
+  `routes/admin.ts` — so a warning leaves a complete scaffold the developer can
+  wire by hand. `add resource` has no such fallback: its controller and validator
+  imports are dead without registration, and its patches target files it did not
+  create.
+
+- d7f4cb5: Refuse `add resource` on an API-only app instead of half-scaffolding and then crashing
+
+  `guren add resource` is Inertia-shaped end to end, and on an app created from the
+  `api` blueprint it wrote eight unusable files before failing. The four page
+  components under `resources/js/pages/<collection>/` are React, the controller
+  returns Inertia responses and imports `@/.guren/pages.gen`, and none of it
+  typechecks against a `@guren/inertia-client` the API starter never installs.
+
+  The failure then arrived from the wrong place. `updateResourceRoutes` opens
+  `routes/web.ts` unconditionally, and the API starter registers
+  `registerApiRoutes` from `routes/api.ts` instead, so the run ended in a raw
+  `ENOENT: no such file or directory, open '.../routes/web.ts'` with a stack trace
+  through `node:fs` — not a message about the app being the wrong shape for the
+  command. Everything already written stayed on disk.
+
+  That included one file the user wrote themselves: `updateResourceSchema` runs
+  before the route wiring, so a `posts` table was appended to `db/schema.ts`.
+  Deleting a scaffold does not undo that, which is what makes this worse than the
+  same bug in `add admin` — there, every casualty was a new file.
+
+  The blueprint now goes through `assertNotApiOnly()`, the same refusal the `admin`
+  and `auth` scaffolds use, and fails with a message naming the Inertia-shaped
+  output and the two signals it read, leaving nothing behind. The check runs after
+  the name and `--fields` parsing, which are pure, so a bad invocation on an
+  API-only app is still reported as a bad invocation rather than masked by the
+  app's shape.
+
+  An app that does declare the client but has no `routes/web.ts` is still
+  permitted, and still fails inside `updateResourceRoutes` — as does any app whose
+  routes file has no registrar, which has always thrown after the schema write.
+  That residue is untouched here and pinned by a test so the two failures cannot
+  be mistaken for each other.
+
+- c84d760: Stop `add resource` from reading an unrelated path as "these routes are already registered"
+
+  `guren add resource` skips its route registration when the app already has the
+  routes, and one of the two signals it looked for matched the collection slug as
+  a quoted-path suffix. An app with an unrelated `router.get('/admin/posts',
+...)` therefore answered yes for a `Post` resource: the run reported success,
+  `db/schema.ts` got the `posts` table, eight files were scaffolded, and the
+  controller and validator imports were appended to `routes/web.ts` — but no route
+  group was ever registered. The two imports are then bindings nothing uses, which
+  stops the app compiling under `noUnusedLocals`.
+
+  The path signal is now anchored on both sides, matching the full literal the
+  registration emits (`'/posts'`), the way the sibling `'posts.index'` signal
+  already was. The imports also moved inside the guard: they exist for the group,
+  so a run that (correctly) skips registration — an app that hand-wired `/posts`
+  itself — no longer appends imports nothing uses either.
+
+  Both signals are still needed and neither is redundant. An app that hand-wired
+  `/posts` has none of the generated `.name()` calls, so the path literal is the
+  only thing left to recognise it by — anchoring any tighter than the quoted path
+  would register a second, conflicting set of routes over it.
+
+  One behavior change beyond the fix: an app that registers the resource under a
+  prefix without the literal (`router.group('/blog/posts', ...)` with no `posts.*`
+  route names) now gets a `/posts` group inserted rather than being skipped. That
+  app genuinely has no `/posts` routes, so registering them is the correct reading
+  — but it is a change from what the previous match did. A nested prefix that does
+  contain the literal (`router.group('/admin', (admin) => admin.get('/posts', ...))`)
+  still suppresses registration; that is the honest boundary of matching source
+  text rather than resolving the route table.
+
+- 633c9bc: Extend `guren check`'s route registrar wiring to application modules
+
+  The wiring check flagged a `routes/*.ts` file whose registrar nothing reachable
+  from the app's entry registrar calls — but only under the project's own
+  `routes/`. `make:route Foo --module billing` writes to
+  `modules/billing/routes/Foo.ts`, where the file that has to mount it is not the
+  app's entry at all: a module mounts routes through `defineModule({ routes })`,
+  which names exactly one registrar, `modules/billing/routes.ts`. A file beside
+  it was mounted by nothing, and no check reported the gap.
+
+  The check now asks the same question once per scope: the project's `routes/`
+  against the app's entry, and each module's `routes/` against the registrar its
+  own `defineModule({ routes })` names — resolved from the descriptor, the same
+  link the runtime follows, rather than guessed from a conventional filename.
+  That resolution is what keeps both directions honest: a descriptor with no
+  `routes` property mounts nothing however well-wired `routes.ts` is internally
+  (reported as one warning at the descriptor, since that is where the fix is),
+  and a descriptor naming `routes/index.ts` mounts that file even when a stale
+  `routes.ts` sits beside it. A `routes` value the check cannot trace to a file
+  skips the module rather than judging it against the wrong entry — this check
+  misses orphans, it does not invent them. Scopes share no state, so one
+  module's registrar cannot credit another module's identically named
+  `registerRoutes`, and mounting a module's file from `routes/web.ts` does not
+  count — that import crosses the module boundary without making the module
+  mount anything. The `--changed` gate wakes for `modules/<name>/routes` and
+  `modules/<name>/index.ts` edits too — deleting `routes:` from `defineModule()`
+  severs every module route while changing only the descriptor. Modules without
+  a `routes/` directory — the shape `make:module` scaffolds — contribute
+  nothing, as before.
+
+  `make:route`'s next-step hint now says `guren check` reports the gap, which
+  used to be true only at the project root.
+
+- 2c5886e: Wire scaffolded route files into the registrar the framework actually calls
+
+  `guren add admin`, `guren add oauth`, `guren add resource`, and `guren add auth`
+  located the app's route registrar with a regex that only matched `export
+function register*Routes(router: Router)`. An app scaffolded from the blog
+  blueprint names that parameter `baseRouter`, so the routes file was written but
+  never imported or called — and because the wiring ran inside a `try {} catch {}`,
+  nothing was reported.
+
+  The registrar is now found by parsing `routes/web.ts` and selecting the export
+  the route loader itself resolves, so any parameter name, a multi-line signature,
+  an arrow-function or default-export registrar, and a `Router` imported under an
+  alias all wire correctly, while an unrelated exported helper that merely takes a
+  router does not. The generated call passes the registrar's own parameter, which
+  is the only name guaranteed to be in scope. The call and its import land in one
+  write, so a routes file that cannot be patched is left untouched instead of
+  gaining an import for routes nothing registers — and that outcome is now
+  reported rather than swallowed.
+
+- d3da91c: Wake the screens spec drift gate for module files under `--changed`
+
+  `guren check --spec --changed` decides which spec views to regenerate by
+  matching changed paths against each view's source patterns. The screens view
+  listed only `modules/*/routes.ts` and `modules/*/index.ts`, but the route
+  graph is a runtime import: `loadRouteDefinitions` evaluates
+  `modules/<name>/index.ts` and everything the module registrar reaches from
+  there — files under `modules/<name>/routes/` (where `make:route --module`
+  writes), a prefix constant, or any other module file. A change touching only
+  such a file reported `screens.md` as fresh while it was stale, and `--spec`
+  sets the exit code, so CI waved the drift through. The screens view's module
+  source now matches the whole `modules/<name>/` tree; over-selection only
+  costs a regeneration, and the modules view already matched any source file
+  for the same reason.
+
+- Updated dependencies [72bd945]
+- Updated dependencies [72bd945]
+- Updated dependencies [de3298b]
+- Updated dependencies [19f7119]
+- Updated dependencies [b210a53]
+  - @guren/core@1.5.2
+  - @guren/orm@2.2.1
+
 ## 2.2.0
 
 ### Minor Changes

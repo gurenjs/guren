@@ -1,5 +1,273 @@
 # @guren/server
 
+## 2.3.0
+
+### Minor Changes
+
+- e87d053: Add `TestApp.fromApp(app)` and make `Application.boot()` idempotent
+
+  Testing against the real application required
+  `await app.boot(); TestApp.fromFetch((request) => app.fetch(request))` — and
+  the arrow wrapper is load-bearing, because an unbound `app.fetch` reference
+  throws (`Application.fetch` reads instance state). `TestApp.fromApp(app)`
+  boots the app and binds fetch, removing both the boilerplate and the footgun.
+
+  `Application.boot()` now reuses its first call, so booting twice is a no-op
+  rather than mounting security middleware and routes a second time. This also
+  covers two callers booting concurrently, which the previous code could not:
+  each saw an unbooted app and mounted everything again. A boot that throws is
+  not remembered, so a later call attempts boot again — it resumes on a
+  partially mounted app rather than starting clean, which is how the Cloudflare
+  Workers handler has always treated it.
+
+  This is a behavior change to a public method: a second `boot()` used to
+  duplicate the middleware chain and now does nothing.
+
+### Patch Changes
+
+- 72bd945: Degrade a corrupt ability list to no abilities instead of every ability
+
+  `DatabaseApiTokenStore` decoded `abilities` with
+  `decodeJsonColumn<string[]>(value, [])`, which returns whatever the JSON
+  decodes to. A stored `'"*"'` decodes to the _string_ `"*"`, and `tokenCan` then
+  runs `String.prototype.includes` on it, so `"*".includes("*")` is true and the
+  token is granted every ability — the exact opposite of the deny-by-default the
+  file's own comment claimed. `RedisApiTokenStore` had the same collapse, and its
+  `JSON.parse` was unguarded besides, so one corrupt record threw on every
+  verification of that token rather than degrading.
+
+  Both stores now require an array and keep only its string members. A value that
+  is not a list of strings yields no abilities.
+
+- 72bd945: Anchor the asset path containment checks on a separator
+
+  The dev transpiler route, the Inertia client route, and the production Inertia
+  client handler resolved a request path and then checked containment with a bare
+  `startsWith(dir)`. A sibling directory whose name extends the base passes that —
+  `resources/js` against `resources/jsonfixtures`. All three now use
+  `startsWith(dir + sep)`, matching the check `public-assets.ts` already carried
+  for the same reason.
+
+  The check is reachable because the request remainder is taken with
+  `ctx.req.path.slice(base.length)`, so a doubled slash (`/vendor//var/...`) leaves
+  an absolute remainder that `resolve()` returns verbatim; `../` and `%2e%2e` are
+  normalized away by URL parsing before the handler runs. No default-scaffolded app
+  has a sibling directory that would escape, so this closes the check rather than a
+  live hole.
+
+- eebd978: Make asset path containment survive symlinks
+
+  `resolve()` collapses `..` but does not follow symlinks, while every reader
+  downstream of these checks does — `Bun.file().text()`, `.arrayBuffer()`, and
+  `new Response(file)`. So a request for `resources/js/link/secret.txt`, where
+  `link` points out of the tree, resolved to a path lexically under the root,
+  passed the containment check, and was served from wherever the link led. The
+  dev transpiler route, both Inertia client routes, and the root public asset
+  middleware were all affected.
+
+  Containment is now judged on canonicalized paths, once the target is known to
+  exist — the point at which it can be canonicalized, and, for the dev
+  transpiler, the point at which extension probing has settled which file is
+  actually read. Both sides are canonicalized, not just the candidate: a root
+  reached through a symlink is routine (workspace and pnpm layouts, containers,
+  macOS `/var`), and canonicalizing only the candidate would reject every asset
+  such an app serves.
+
+  The four call sites now share `isPathWithin` / `isRealPathWithin`, so this
+  decision lives in one place instead of four copies of a `startsWith`.
+
+  The configured entry points are deliberately exempt: they come from
+  configuration rather than from the request, and a package layout may
+  legitimately have the resolved module symlinked out of its own directory.
+
+  Closing this needs local write access inside the project, so it is defense in
+  depth rather than a live hole. It is a behavior change all the same: an asset
+  deliberately symlinked out of `public/` is no longer served through the
+  root-level public asset route. Copy the file into the tree instead.
+
+  The scope is the framework's own handlers. `/public/*` and `/resources/css/*`
+  are delegated to Hono's `serveStatic`, whose path handling leaves no lexical
+  escape but which follows symlinks out of its root by design, as nginx and
+  `express.static` do. So the same linked file that the root-level public asset
+  route now refuses still serves under `/public/*`. Guren does not enforce
+  symlink containment on the delegated routes; a deployment that must not follow
+  symlinks out of `public/` should not rely on `/public/*` for that.
+
+  Hono's `onFound` hook cannot close this — it runs after the content has been
+  read and cannot reject — so guarding the delegated routes would mean either
+  mirroring Hono's own path resolution in a second place or reimplementing static
+  serving. Both were judged worse than the gap, and the gap is left explicit
+  rather than papered over.
+
+- 72bd945: Write the dev-endpoint gates in the form the deploy bundlers substitute
+
+  `isMcpEndpointEnabled()` and `isDocsViewerEnabled()` read
+  `process.env?.NODE_ENV` and `process.env?.GUREN_*`. The deploy plugins settle
+  these branches at build time with `--define 'process.env.NODE_ENV="production"'`,
+  which targets `process.env.NODE_ENV` — the optional-chained form is a different
+  expression and was never substituted. `@guren/plugin-cloudflare`'s own comment
+  records why that matters: wrangler `vars` are not guaranteed to reach
+  `process.env` before the app's module graph evaluates, so a module-scope
+  `NODE_ENV` branch has to be settled by the bundler.
+
+  Both gates now use the plain form behind the existing `typeof process` guard,
+  with a comment recording why `?.` must not come back. Deployed apps were already
+  closed for other reasons — each plugin also sets `NODE_ENV=production` at
+  runtime, and nothing sets `GUREN_MCP`/`GUREN_DOCS` — but the mechanism the
+  plugins rely on now actually applies.
+
+- 72bd945: Treat an unparseable expiry as expired, at the point the decision is made
+
+  `new Date(garbage)` is an Invalid Date, and every comparison against one is
+  false. So `new Date() > token.expiresAt` and `payload.expiresAt.getTime() <= now`
+  both read a corrupt expiry as _not past_, and the record never expired.
+
+  The authoritative checks are `verifyApiToken` and the OAuth state store's expiry
+  tests, not any one store's deserialization — a token reaches `verifyApiToken`
+  from `MemoryApiTokenStore`, from the database and Redis stores, and from
+  application-supplied stores the framework never sees. `createApiToken` could also
+  mint an Invalid Date on its own from a non-finite `expiresIn`, with no store
+  involved at all. Both now go through a shared predicate in
+  `@guren/server/support/expiry`, so the rule holds for every implementation
+  including ones written by users.
+
+  Store-level coercion is kept as defense in depth and is now consistent. `toDate`
+  promised in its docstring that unparseable values return `null` but passed
+  `Date` instances wrapping garbage straight through, which is why `isExpired`
+  carried a second NaN check of its own; it now normalizes through one path and
+  handles the `bigint` a BIGINT column returns. `toOptionalExpiry` keeps absent
+  (`null`, "never expires") and present-but-unparseable distinct, degrading the
+  latter to a long-past date rather than to `null`. `RedisApiTokenStore`,
+  `RedisOAuthStateStore`, `RedisPasswordResetStore` and
+  `RedisEmailVerificationStore` all read their expiry through the same helper —
+  the last two still had the original unguarded `new Date(parsed.expiresAt)`.
+
+- f43684c: Serve the built Inertia client in production, not its TypeScript sources
+
+  `configureInertiaAssets()` located the vendored client by resolving
+  `@guren/inertia-client/app` and taking `dirname()` of whatever came back. That
+  subpath is not a stable anchor: a tsconfig `paths` entry mapping
+  `@guren/inertia-client/*` at the package's `src/` — which Bun applies to
+  runtime resolution, `import.meta.resolve` and `require.resolve` alike —
+  redirects it to `src/app.tsx`. The production route then looked for
+  `src/app.js`, which does not exist, and 404'd; every `chunk-*.js` the entry
+  imports resolved against `src/` too, so the fallback of "the entry at least
+  loads" was not available either.
+
+  Resolution is now anchored on `@guren/inertia-client/package.json` — a subpath
+  no `paths` entry shadows, since a mapping at `src/` misses and falls back to
+  real package resolution — and the client directory is that package root's
+  `dist/`. The path is derived from the package rather than from whichever file a
+  specifier happened to reach.
+
+  This bites wherever such a `paths` mapping is in scope, which is this
+  repository: the reference app, the smokes, and the E2E runs all serve
+  production assets through it. An app that installs `@guren/*` from npm has no
+  `@guren/*` mapping, so its resolution already landed on `dist/app.js` and its
+  behavior is unchanged.
+
+  The resolution is now `resolveInertiaClientDir()`, exported so it can be
+  asserted directly. Its previous form lived inline in `configureInertiaAssets()`,
+  where no test could observe which directory it had chosen.
+
+- 72bd945: Refuse requests the loopback guard cannot place, instead of allowing them
+
+  `createLoopbackGuard` protects `/_guren/mcp` and `/_guren/docs`, and it has to
+  stop two classes of caller: browser pages, rejected unless the `Origin` is
+  loopback, and non-browser clients, rejected unless the socket peer is. Both
+  checks were skip-on-absence — `clientAddress()` returned `undefined` when the
+  runtime exposes no `server.requestIP`, and each check only refused when its
+  signal was present. A client that sends no `Origin` (curl, any MCP client) on a
+  runtime that reports no peer therefore passed both. That degradation is real on
+  every non-Bun host and on `@guren/plugin-vercel`, which calls `app.fetch(request)`
+  with no environment even though Bun is present.
+
+  The peer check is now positive: a loopback peer allows, a peer that is present
+  and not loopback is refused as a remote request, and a peer the runtime never
+  reported is refused as one the guard cannot vouch for. The two denials say
+  different things on purpose. `bun run dev` is unaffected — `Application.listen()`
+  passes `{ server }` into `Bun.serve`, so the peer resolves on every request.
+
+  For a host that genuinely cannot report a peer, `GUREN_ALLOW_UNVERIFIED_PEER=1`
+  opts out, and the refusal names it.
+
+  A loopback `Origin` deliberately does not satisfy the peer check. `Origin` is a
+  negative filter — it attests that a _browser_ saw a cross-site request — and any
+  non-browser client sets it with one flag, so accepting it as proof of locality
+  would leave the hole open to `curl -H 'Origin: http://localhost'`.
+
+  What the guard checks is the connection, not the caller: a reverse proxy,
+  container port publish, or tunnel that terminates locally presents a loopback
+  peer, so traffic behind it is accepted. The guides now say so, and say not to put
+  a tunnel in front of a dev server running with `GUREN_MCP=1`.
+
+- e22b10f: Report why the MCP codegen tool skipped an artifact
+
+  `guren_codegen` filed every empty generator result under `"nothing to generate"`.
+  That is right for an app with no page components, and wrong for the one case where
+  a generator declines on purpose: the pages manifest is not written into an app that
+  cannot compile one. An agent that just wrote a page component and asked for codegen
+  was told there was nothing to describe. Generators can now carry a sentence with the
+  empty result, and the tool reports it in place of the generic reason.
+
+- 72bd945: Apply the security defaults to every response, including raw ones
+
+  Two independent gaps meant the framework's own asset responses carried neither
+  host authorization nor a single security header.
+
+  `Application.boot()` mounted the security defaults, but the scaffolded templates
+  call `autoConfigureInertiaAssets(app, …)` at module scope in `src/main.ts` —
+  before `bootstrap()` awaits `boot()`. Hono composes matched handlers in
+  registration order, so those asset routes ran ahead of the `use('*')` middleware
+  and answered without ever entering it. With the template's development host
+  authorization (`allowedHosts: ['localhost:*', '127.0.0.1:*']`) and `bin/serve.ts`
+  binding `0.0.0.0`, `GET /` from a LAN peer was refused with 403 while
+  `GET /resources/js/pages/Home.tsx` returned 200. The same ordering applied in
+  production to `/public/*` and the root asset catch-all.
+
+  `mountSecurityDefaults()` now runs in the `Application` constructor, which is the
+  one position an application cannot register in front of. A double `boot()` no
+  longer double-mounts the middleware either.
+
+  Separately, `createSecurityHeaders`, `createForceHttpsMiddleware` and
+  `createCspMiddleware` wrote their headers with `ctx.header(...)` before
+  `await next()`. Hono keeps those in prepared headers and merges them only when
+  the handler answers through the context; a handler returning a raw
+  `new Response(...)` replaces `ctx.res` outright and drops them — which is every
+  asset response the framework serves, and any application controller that returns
+  a `Response` directly. All three now apply their headers after the response
+  exists, through a shared `applyResponseHeaders`, which sets a header only when
+  the response does not already carry it. Precedence is unchanged: a handler's own
+  value, or an inner middleware's stronger `Strict-Transport-Security`, still wins.
+
+- b210a53: Collapse the duplicated store expiry rules into a single implementation
+
+  `toDate`, `isExpired` and `toOptionalExpiry` existed twice: once in
+  `packages/server/src/support/expiry.ts` for the Redis-backed stores and the
+  authoritative `verifyApiToken` / OAuth checks, and once in
+  `packages/core/src/store-utils.ts` for the database-backed stores. The copies
+  were identical and deliberate — `@guren/core` depends on `@guren/server` and
+  not the other way around, so core was unreachable from the server package —
+  but two copies of an expiry rule is how the next boundary-case fix lands in
+  one backend and silently misses its sibling. That is the failure mode the
+  Redis and database stores have already hit once.
+
+  `@guren/server` now exposes the rules on a `@guren/server/support/expiry`
+  subpath and `packages/core/src/store-utils.ts` re-exports them, leaving one
+  implementation for both backends. The dependency direction already ran
+  core → server, so this adds no cycle.
+
+  No behavior change and no public API change: the two implementations were
+  byte-identical, and neither package's index exports these — `@guren/core`'s
+  index opens with `export * from '@guren/server'`, so a test now pins that they
+  stay off the public surface. `decodeJsonColumn` stays in core as a drizzle
+  column concern; the Redis stores decode their payloads through
+  `redis-values.ts`.
+
+- Updated dependencies [de3298b]
+- Updated dependencies [19f7119]
+  - @guren/orm@2.2.1
+
 ## 2.2.0
 
 ### Minor Changes
