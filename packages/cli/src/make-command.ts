@@ -2,7 +2,7 @@ import { join } from 'node:path'
 import { consola } from 'consola'
 import type { WriterOptions } from './utils'
 import { camelCase, ensureSuffix, kebabCase, relativeImportPath, resourceName, safeModuleName, scaffoldFile } from './utils'
-import { addImport, addToArrayArgument, addToArrayOption } from './patch-helpers'
+import { addImport, addToArrayArgument, addToArrayOption, PATCH_REASONS } from './patch-helpers'
 import { fileExists, readIfExists } from './discovery'
 import { registersCommandsOf } from './console-check'
 
@@ -93,7 +93,7 @@ async function registerRootCommand(className: string, file: string): Promise<voi
   // an unused import behind.
   const registration = await addToArrayArgument(CONSOLE_ENTRY, 'registerMany', className)
 
-  if (!registration.modified && registration.reason !== 'Already present') {
+  if (!registration.modified && registration.reason !== PATCH_REASONS.alreadyPresent) {
     consola.warn(`Could not register ${className} automatically: ${registration.reason}`)
     printRootRegistrationGuidance(className, specifier)
     return
@@ -122,7 +122,7 @@ async function registerModuleCommand(className: string, file: string, moduleName
 
   const registration = await addToArrayOption(indexPath, 'commands', className, 'defineModule')
 
-  if (!registration.modified && registration.reason !== 'Already present') {
+  if (!registration.modified && registration.reason !== PATCH_REASONS.alreadyPresent) {
     consola.warn(`Could not register ${className} automatically: ${registration.reason}`)
     consola.info(`Add \`commands: [${className}]\` to defineModule() in ${indexPath}, importing it from '${specifier}'.`)
     return

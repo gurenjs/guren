@@ -1,21 +1,21 @@
-import { readFile, writeFile } from 'node:fs/promises'
-import { dirname, relative, resolve, sep as pathSep } from 'node:path'
+import { writeFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import { consola } from 'consola'
 import { assertCwdUnsupported, writeScaffoldFiles, type WriterOptions } from './utils'
 import { assertNotApiOnly } from './app-surface'
 import {
-  addImport,
-  addProvider,
   addCreateAppOption,
   detectSchemaDialect,
   ensureDrizzleImports,
   ensureMysqlImports,
   ensureSqliteImports,
+  PATCH_REASONS,
   readSchemaDialect,
   seederContextTypes,
   type SchemaDialect,
 } from './patch-helpers'
 import { readIfExists } from './discovery'
+import { APP_ENTRY_CANDIDATES, resolveAppEntry, wireAppProvider, wireProvider } from './provider-registrar'
 import { wireRouteRegistrar } from './route-registrar'
 import { makeMigration } from './make-migration'
 
@@ -2105,7 +2105,7 @@ async function warnAboutStalePasswordScaffold(): Promise<void> {
   }
   if (leftovers.some((path) => MAIL_SCAFFOLD_PATHS.includes(path))) {
     consola.warn(
-      'src/app.ts may still register MailProvider and CoreMailServiceProvider from that run — remove them too if nothing else sends mail.',
+      'Your app entry may still register MailProvider and CoreMailServiceProvider from that run — remove them too if nothing else sends mail.',
     )
   }
 }
@@ -2310,11 +2310,11 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
     await installAuth(features, migrationGenerated)
   } else {
     consola.info('Next steps:')
-    consola.info('  • Register AuthProvider in src/app.ts providers array')
+    consola.info('  • Register AuthProvider in your createApp() providers array')
     consola.info('  • Enable sessions and CSRF by adding `auth: {}` to your createApp() options')
     consola.info('  • Import registerAuthRoutes from routes/auth.ts and call it from your routes/web.ts registrar')
     if (includeExtras) {
-      consola.info('  • Register MailProvider in src/app.ts providers array (used to send password reset emails)')
+      consola.info('  • Register MailProvider in your createApp() providers array (used to send password reset emails)')
       consola.info('  • Set APP_URL in your .env to the public base URL of this app — emailed links are built from it, and production refuses to send without it')
     }
     if (!migrationGenerated) {
@@ -2323,7 +2323,7 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
     consola.info(includePassword ? '  • Run `bun run db:migrate` and `bun run db:seed`' : '  • Run `bun run db:migrate`')
     consola.info('  • Install zod if not already installed: `bun add zod`')
     if (includeOAuth) {
-      consola.info('  • Register CoreOAuthServiceProvider (from @guren/core) and OAuthProvider in src/app.ts providers array')
+      consola.info('  • Register CoreOAuthServiceProvider (from @guren/core) and OAuthProvider in your createApp() providers array')
       for (const provider of oauthProviders) {
         const upper = provider.toUpperCase()
         consola.info(`  • Set OAUTH_${upper}_CLIENT_ID / OAUTH_${upper}_CLIENT_SECRET / OAUTH_${upper}_REDIRECT_URI in your .env (see .env.example)`)
@@ -2334,58 +2334,23 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
   return created
 }
 
-async function wireProvider(appPath: string, providerName: string, providerRelativePath: string): Promise<void> {
-  const importPath = (() => {
-    const base = dirname(appPath)
-    const rel = relative(base, providerRelativePath) || providerRelativePath
-    const normalized = rel.split(pathSep).join('/').replace(/^\.$/, providerRelativePath)
-    return normalized.startsWith('.') ? normalized : `./${normalized}`
-  })()
-
-  const importResult = await addImport(appPath, `import ${providerName} from '${importPath}'`)
-  if (importResult.modified) {
-    consola.success(`Added ${providerName} import to ${appPath}`)
-  } else if (importResult.reason === 'Import already exists') {
-    consola.info(`${providerName} import already exists in ${appPath}`)
-  }
-
-  const providerResult = await addProvider(appPath, providerName)
-  if (providerResult.modified) {
-    consola.success(`Added ${providerName} to providers array in ${appPath}`)
-  } else if (providerResult.reason === 'Provider already registered') {
-    consola.info(`${providerName} already registered in ${appPath}`)
-  } else {
-    consola.warn(`Could not add ${providerName}: ${providerResult.reason}`)
-  }
-}
-
 async function installAuth(
   { includeExtras, includePassword, oauthProviders }: AuthFeatures,
   migrationGenerated: boolean,
 ): Promise<void> {
   consola.info('Installing authentication configuration...')
 
-  // Determine app file location (try src/app.ts first, then app.ts)
-  const appPaths = ['src/app.ts', 'app.ts']
-  let appPath: string | undefined
-
-  for (const path of appPaths) {
-    try {
-      await readFile(resolve(process.cwd(), path), 'utf8')
-      appPath = path
-      break
-    } catch {
-      // File doesn't exist, try next
-    }
-  }
+  const appPath = await resolveAppEntry()
 
   if (!appPath) {
-    consola.warn('Could not find src/app.ts or app.ts - skipping auto-configuration')
+    consola.warn(`Could not find ${APP_ENTRY_CANDIDATES.join(' or ')} - skipping auto-configuration`)
     consola.info('Please manually register AuthProvider in your Application providers')
     return
   }
 
-  await wireProvider(appPath, 'AuthProvider', 'app/Providers/AuthProvider.js')
+  const wiring = { appPath, verbose: true } as const
+
+  await wireAppProvider('AuthProvider', wiring)
 
   if (includeExtras) {
     // Wire CoreMailServiceProvider before our own MailProvider — matching
@@ -2393,33 +2358,21 @@ async function installAuth(
     // 'mail', ...)` resolves to our configured manager rather than Core's
     // empty-config default, regardless of whether `add mail` also runs
     // (before or after this) against the same app.
-    const coreMailImportResult = await addImport(appPath, "import { MailServiceProvider as CoreMailServiceProvider } from '@guren/core'")
-    if (coreMailImportResult.modified) {
-      consola.success(`Added CoreMailServiceProvider import to ${appPath}`)
-    }
-    const coreMailProviderResult = await addProvider(appPath, 'CoreMailServiceProvider')
-    if (coreMailProviderResult.modified) {
-      consola.success(`Added CoreMailServiceProvider to providers array in ${appPath}`)
-    } else if (coreMailProviderResult.reason !== 'Provider already registered') {
-      consola.warn(`Could not add CoreMailServiceProvider: ${coreMailProviderResult.reason}`)
-    }
-
-    await wireProvider(appPath, 'MailProvider', 'app/Providers/MailProvider.js')
+    await wireProvider(
+      'CoreMailServiceProvider',
+      "import { MailServiceProvider as CoreMailServiceProvider } from '@guren/core'",
+      wiring,
+    )
+    await wireAppProvider('MailProvider', wiring)
   }
 
   if (oauthProviders.length > 0) {
-    const coreImportResult = await addImport(appPath, "import { OAuthServiceProvider as CoreOAuthServiceProvider } from '@guren/core'")
-    if (coreImportResult.modified) {
-      consola.success(`Added CoreOAuthServiceProvider import to ${appPath}`)
-    }
-    const coreProviderResult = await addProvider(appPath, 'CoreOAuthServiceProvider')
-    if (coreProviderResult.modified) {
-      consola.success(`Added CoreOAuthServiceProvider to providers array in ${appPath}`)
-    } else if (coreProviderResult.reason !== 'Provider already registered') {
-      consola.warn(`Could not add CoreOAuthServiceProvider: ${coreProviderResult.reason}`)
-    }
-
-    await wireProvider(appPath, 'OAuthProvider', 'app/Providers/OAuthProvider.js')
+    await wireProvider(
+      'CoreOAuthServiceProvider',
+      "import { OAuthServiceProvider as CoreOAuthServiceProvider } from '@guren/core'",
+      wiring,
+    )
+    await wireAppProvider('OAuthProvider', wiring)
   }
 
   // Enable session + CSRF middleware: AuthServiceProvider is only registered
@@ -2427,7 +2380,7 @@ async function installAuth(
   const authOptionResult = await addCreateAppOption(appPath, 'auth', '{}')
   if (authOptionResult.modified) {
     consola.success(`Enabled sessions and CSRF via auth option in ${appPath}`)
-  } else if (authOptionResult.reason === 'Option already set') {
+  } else if (authOptionResult.reason === PATCH_REASONS.optionAlreadySet) {
     consola.info(`auth option already set in ${appPath}`)
   } else {
     consola.warn(`Could not set the auth option automatically: ${authOptionResult.reason}`)

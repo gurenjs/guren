@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { consola } from 'consola'
-import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, BLOG_ROUTES_FIXTURE, createTempWorkspace, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, seedApiOnlyApp, SQLITE_SCHEMA_FIXTURE } from './helpers'
+import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, BLOG_ROUTES_FIXTURE, captureWarnings, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, seedApiOnlyApp, SQLITE_SCHEMA_FIXTURE, writeWorkspaceFiles } from './helpers'
 import { makeAuth } from '../src/make-auth'
 
 // Shared with packages/create-app/templates/blog/app/Providers/AuthProvider.ts,
@@ -931,7 +931,7 @@ export const posts = pgTable('posts', {
       // table does not neutralize it.
       expect(report).toContain('still runs on `db:seed`')
       // Nothing rewrites the providers array, so the mail wiring survives too.
-      expect(report).toContain('src/app.ts may still register MailProvider')
+      expect(report).toContain('Your app entry may still register MailProvider')
     } finally {
       consola.warn = originalWarn
       await workspace.cleanup()
@@ -1096,6 +1096,88 @@ export function registerWebRoutes(router: Router): void {
       expect(appContent).toContain("import { OAuthServiceProvider as CoreOAuthServiceProvider } from '@guren/core'")
       expect(appContent).toContain("import OAuthProvider from '../app/Providers/OAuthProvider.js'")
       expect(appContent).toContain('providers: [DatabaseProvider, AuthProvider, CoreOAuthServiceProvider, OAuthProvider]')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  /** A project holding `appSource` at `entry`, plus the routes and schema makeAuth patches. */
+  async function seedAuthWorkspace(prefix: string, entry: string, appSource: string) {
+    const workspace = await createTempWorkspace(prefix)
+    await writeWorkspaceFiles(workspace.dir, {
+      [entry]: appSource,
+      'routes/web.ts': DEFAULT_ROUTES_FIXTURE,
+      'db/schema.ts': `export const posts = 'posts'\n`,
+      'resources/js/pages/Home.tsx': `interface Props { message: string }\nexport default function Home({ message }: Props) { return <h1>{message}</h1> }\n`,
+    })
+    return workspace
+  }
+
+  // Every provider makeAuth can wire, in one run: AuthProvider,
+  // CoreMailServiceProvider, MailProvider (both from includeExtras, which
+  // --minimal would switch off), CoreOAuthServiceProvider and OAuthProvider.
+  // A regression that restored import-first ordering at only one of those five
+  // call sites has to fail here.
+  it('withholds every provider import when the providers array cannot be found', async () => {
+    const workspace = await seedAuthWorkspace(
+      'guren-cli-make-auth-providerless-',
+      'src/app.ts',
+      `import { createApp } from '@guren/core'
+import registerWebRoutes from '../routes/web.js'
+
+const app = createApp({
+  routes: registerWebRoutes,
+})
+
+export default app
+`,
+    )
+
+    try {
+      const { warnings } = await captureWarnings(() =>
+        makeAuth({ install: true, force: true, oauth: 'github' }))
+
+      const reported = warnings.join('\n')
+      for (const provider of ['AuthProvider', 'CoreMailServiceProvider', 'MailProvider', 'CoreOAuthServiceProvider', 'OAuthProvider']) {
+        expect(reported).toContain(`Could not register ${provider} in src/app.ts: Could not find providers array.`)
+      }
+
+      // The failed array patch must not leave imports behind: an import whose
+      // registration never landed is an unused binding, and the app stops
+      // compiling under noUnusedLocals.
+      const appContent = await readFile(join(workspace.dir, 'src/app.ts'), 'utf8')
+      for (const provider of ['AuthProvider', 'MailServiceProvider', 'MailProvider', 'OAuthServiceProvider', 'OAuthProvider']) {
+        expect(appContent).not.toContain(provider)
+      }
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('installs auth into a root app.ts when src/app.ts is absent', async () => {
+    const workspace = await seedAuthWorkspace(
+      'guren-cli-make-auth-root-entry-',
+      'app.ts',
+      `import { createApp } from '@guren/core'
+import registerWebRoutes from './routes/web.js'
+
+const app = createApp({
+  routes: registerWebRoutes,
+  providers: [],
+})
+
+export default app
+`,
+    )
+
+    try {
+      await makeAuth({ install: true, force: true, minimal: true })
+
+      const appContent = await readFile(join(workspace.dir, 'app.ts'), 'utf8')
+      // Relative to the entry that was actually found, not to src/app.ts.
+      expect(appContent).toContain("import AuthProvider from './app/Providers/AuthProvider.js'")
+      expect(appContent).toContain('providers: [AuthProvider]')
+      expect(appContent).toContain('auth: {}')
     } finally {
       await workspace.cleanup()
     }
