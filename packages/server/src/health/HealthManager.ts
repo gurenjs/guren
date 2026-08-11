@@ -91,15 +91,21 @@ export class HealthManager {
             ? 200
             : 503
 
+      // Finalize the context by assigning `ctx.res`. `ctx.json()` only builds a
+      // Response; a handler that returns undefined without setting one makes the
+      // router synthesize an empty 204, dropping the report entirely.
       if (options.detailed === false) {
-        ctx.status(statusCode)
-        ctx.json({
-          status: report.status,
-          timestamp: report.timestamp.toISOString(),
-        })
-      } else {
-        ctx.status(statusCode)
-        ctx.json({
+        ctx.res = ctx.json(
+          {
+            status: report.status,
+            timestamp: report.timestamp.toISOString(),
+          },
+          statusCode,
+        )
+        return
+      }
+      ctx.res = ctx.json(
+        {
           status: report.status,
           timestamp: report.timestamp.toISOString(),
           checks: report.checks.map((check) => ({
@@ -109,8 +115,9 @@ export class HealthManager {
             duration: check.duration,
             meta: check.meta,
           })),
-        })
-      }
+        },
+        statusCode,
+      )
     }
   }
 

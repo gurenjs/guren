@@ -187,10 +187,12 @@ export class RedisApiTokenStore implements ApiTokenStore {
       userId: data.userId,
       abilities: decodeAbilities(data.abilities),
       lastUsedAt: toDate(data.lastUsedAt),
-      // Absent means "never expires"; present-but-unparseable means a corrupt
-      // record, which must not read as immortal — `verifyApiToken` skips its
-      // expiry check entirely when this is null.
-      expiresAt: toOptionalExpiry(data.expiresAt),
+      // A never-expiring token serializes `expiresAt` as '' (a Redis hash has no
+      // null), so an empty string is "absent" here, not a corrupt value. Map it
+      // to undefined before `toOptionalExpiry`, which would otherwise degrade ''
+      // to epoch and reject every non-expiring token. A genuinely unparseable
+      // value still degrades to epoch and reads as expired.
+      expiresAt: toOptionalExpiry(data.expiresAt === '' ? undefined : data.expiresAt),
       createdAt: toDate(data.createdAt) ?? new Date(0),
     }
   }

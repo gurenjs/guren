@@ -215,4 +215,17 @@ describe('RedisApiTokenStore', () => {
     expect(result).not.toBeNull()
     expect(result!.userId).toBe('42')
   })
+
+  // A never-expiring token serializes `expiresAt` as '' (a Redis hash has no
+  // null). That empty string must read as "no expiry", not degrade to epoch —
+  // otherwise every non-expiring token in Redis is rejected as expired.
+  it('authenticates a token with no expiry stored as an empty string', async () => {
+    const redis = new FakeRedis()
+    const store = new RedisApiTokenStore(redis as unknown as Redis)
+    const { plainTextToken } = await seedToken(redis, { expiresAt: '' })
+
+    const result = await verifyApiToken(plainTextToken, store)
+    expect(result).not.toBeNull()
+    expect(result!.token.expiresAt).toBeNull()
+  })
 })

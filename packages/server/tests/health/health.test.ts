@@ -300,69 +300,65 @@ describe('HealthManager', () => {
   })
 
   describe('middleware', () => {
+    // Mirror the parts of Hono's Context the middleware touches: `json(body,
+    // status)` builds a Response, and setting `res` finalizes the context. The
+    // middleware must assign `ctx.res` — a handler that returns undefined
+    // without finalizing makes the router synthesize an empty 204, dropping the
+    // report the docs promise.
+    function makeCtx() {
+      const ctx: any = {
+        _res: undefined as Response | undefined,
+        get res() {
+          return this._res
+        },
+        set res(r: Response | undefined) {
+          this._res = r
+        },
+        status: () => {},
+        json: (body: unknown, status?: number) =>
+          new Response(JSON.stringify(body), {
+            status: status ?? 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+      }
+      return ctx
+    }
+
     it('should create middleware that runs all checks', async () => {
       manager.register(new SimpleCheck('test', 'healthy'))
 
       const middleware = manager.middleware()
-
-      let responseStatus: number | undefined
-      let responseBody: unknown
-
-      const ctx = {
-        status: (code: number) => {
-          responseStatus = code
-        },
-        json: (body: unknown) => {
-          responseBody = body
-        },
-      }
+      const ctx = makeCtx()
 
       await middleware(ctx as any, async () => {})
 
-      expect(responseStatus).toBe(200)
-      expect((responseBody as any).status).toBe('healthy')
+      // The bug this guards: without finalization the response is an empty 204.
+      expect(ctx.res).toBeInstanceOf(Response)
+      expect(ctx.res.status).toBe(200)
+      expect((await ctx.res.clone().json()).status).toBe('healthy')
     })
 
     it('should return 503 for unhealthy', async () => {
       manager.register(new SimpleCheck('test', 'unhealthy'), { critical: true })
 
       const middleware = manager.middleware()
-
-      let responseStatus: number | undefined
-      let responseBody: unknown
-
-      const ctx = {
-        status: (code: number) => {
-          responseStatus = code
-        },
-        json: (body: unknown) => {
-          responseBody = body
-        },
-      }
+      const ctx = makeCtx()
 
       await middleware(ctx as any, async () => {})
 
-      expect(responseStatus).toBe(503)
-      expect((responseBody as any).status).toBe('unhealthy')
+      expect(ctx.res.status).toBe(503)
+      expect((await ctx.res.clone().json()).status).toBe('unhealthy')
     })
 
     it('should support detailed option', async () => {
       manager.register(new SimpleCheck('test'))
 
       const middleware = manager.middleware({ detailed: false })
-
-      let responseBody: unknown
-
-      const ctx = {
-        status: () => {},
-        json: (body: unknown) => {
-          responseBody = body
-        },
-      }
+      const ctx = makeCtx()
 
       await middleware(ctx as any, async () => {})
 
-      expect((responseBody as any).checks).toBeUndefined()
+      expect((await ctx.res.clone().json()).checks).toBeUndefined()
     })
 
     it('should support checks option', async () => {
@@ -370,20 +366,13 @@ describe('HealthManager', () => {
       manager.register(new SimpleCheck('check2'))
 
       const middleware = manager.middleware({ checks: ['check1'] })
-
-      let responseBody: unknown
-
-      const ctx = {
-        status: () => {},
-        json: (body: unknown) => {
-          responseBody = body
-        },
-      }
+      const ctx = makeCtx()
 
       await middleware(ctx as any, async () => {})
 
-      expect((responseBody as any).checks).toHaveLength(1)
-      expect((responseBody as any).checks[0].name).toBe('check1')
+      const body = await ctx.res.clone().json()
+      expect(body.checks).toHaveLength(1)
+      expect(body.checks[0].name).toBe('check1')
     })
   })
 })
