@@ -3,7 +3,7 @@ import { assertNotApiOnly } from './app-surface'
 import { fileExists, readIfExists } from './discovery'
 import { makeAuth } from './make-auth'
 import { makeChannel } from './make-channel'
-import { buildRouteRegistrationHint, makeFeature } from './make-feature'
+import { API_ONLY_FEATURE_ALTERNATIVE, buildRouteRegistrationHint, makeFeature } from './make-feature'
 import { parseFieldsString, type FieldDefinition, type FieldType } from './fields'
 import { collectionSlug, schemaIdentifierFor, singularize, tableNameFor } from './inflect'
 import { schemaPathFor } from './schema-parser'
@@ -199,6 +199,10 @@ export default registerAdminRoutes
   },
   oauth: {
     description: 'Install OAuth scaffolding with GitHub, Google, and Discord provider presets.',
+    // No API-only guard, on purpose: this is the one entry that touches
+    // routes/web.ts without needing it. The controller answers with
+    // `this.json(...)`, and `wireRouteRegistrar` warns instead of throwing when
+    // the file is absent — the scaffold genuinely works on an API-only app.
     run: async (options) => {
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
       const created = await scaffoldFeatureFiles([
@@ -686,7 +690,7 @@ export default class BroadcastProvider extends ServiceProvider {
       // appends a table to the app's own `db/schema.ts` as well.
       await assertNotApiOnly(process.cwd(), {
         does: 'guren add resource scaffolds Inertia pages and a controller that returns Inertia responses',
-        instead: 'Add a JSON controller to routes/api.ts by hand',
+        instead: API_ONLY_FEATURE_ALTERNATIVE,
       })
 
       // Second, so that an app the check above recognizes hears about its

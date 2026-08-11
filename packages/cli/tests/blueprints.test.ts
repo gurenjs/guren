@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs'
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import {
+  API_ONLY_REFUSAL,
   API_ROUTES_FIXTURE,
   APP_FIXTURE,
   BLOG_ROUTES_FIXTURE,
@@ -775,9 +776,7 @@ describe('admin blueprint on an API-only app', () => {
   it('refuses, naming the two signals it read', async () => {
     await seedApiOnlyApp(workspace.dir)
 
-    await expect(runBlueprint('admin')).rejects.toThrow(
-      /no @guren\/inertia-client dependency and no routes\/web\.ts/,
-    )
+    await expect(runBlueprint('admin')).rejects.toThrow(API_ONLY_REFUSAL)
   })
 
   // The half that matters: refusing after the first write would leave exactly
@@ -894,9 +893,7 @@ describe('auth blueprint on an API-only app', () => {
   it('reaches the refusal inside makeAuth', async () => {
     await seedApiOnlyApp(workspace.dir)
 
-    await expect(runBlueprint('auth')).rejects.toThrow(
-      /no @guren\/inertia-client dependency and no routes\/web\.ts/,
-    )
+    await expect(runBlueprint('auth')).rejects.toThrow(API_ONLY_REFUSAL)
   })
 })
 
@@ -914,9 +911,7 @@ describe('resource blueprint on an API-only app', () => {
   it('refuses, naming the two signals it read', async () => {
     await seedApiOnlyApp(workspace.dir)
 
-    await expect(runBlueprint('resource', { name: 'Post' })).rejects.toThrow(
-      /no @guren\/inertia-client dependency and no routes\/web\.ts/,
-    )
+    await expect(runBlueprint('resource', { name: 'Post' })).rejects.toThrow(API_ONLY_REFUSAL)
   })
 
   // The half that matters. `updateResourceSchema` runs before the route wiring

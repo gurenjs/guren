@@ -160,6 +160,14 @@ export async function seedApiOnlyApp(dir: string): Promise<void> {
   })
 }
 
+/**
+ * The middle sentence `assertNotApiOnly` writes into every refusal — the two
+ * signals it read. One spelling for the same reason `seedApiOnlyApp` is: the
+ * tests used to hand-copy this regex, and a wording change in app-surface.ts
+ * would have meant hunting every copy across three files.
+ */
+export const API_ONLY_REFUSAL = /no @guren\/inertia-client dependency and no routes\/web\.ts/
+
 export const BLOG_ROUTES_FIXTURE = `import { Router, requireAuthenticated } from '@guren/core'
 
 export function registerWebRoutes(baseRouter: Router): void {

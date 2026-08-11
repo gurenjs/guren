@@ -79,7 +79,8 @@ bunx guren add admin --public
 `add resource` も同じ2つのシグナルを見て、同じ理由で中断します。React のページ
 コンポーネントと Inertia レスポンスを返すコントローラーを生成するためです。中断は
 同様に、`db/schema.ts` へ追記されるはずだったテーブルよりも前の時点で起こります。
-JSON を返すコントローラーは `routes/api.ts` に手動で結線してください。
+同じスキャフォールドに直接到達する `make:feature` も同様に中断します。JSON を
+返すコントローラーは `routes/api.ts` に手動で結線してください。
 
 `add resource` は、アプリの形がどうであれ、パッチ対象の2つのファイルがそこにあることも
 必要とします。テーブル定義を `db/schema.ts` に追記し、CRUD ルートを `routes/web.ts` に
