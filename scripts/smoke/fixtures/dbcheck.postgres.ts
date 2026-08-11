@@ -1,19 +1,23 @@
 import postgres from 'postgres'
 
-const sql = postgres(process.env.DATABASE_URL ?? 'postgres://guren:guren@localhost:54322/guren', { max: 1 })
+import {
+  MIGRATION_TRACKER,
+  assertRequiredTables,
+  assertTrackerNonEmpty,
+  requireDatabaseUrl,
+} from './expected-tables.ts'
+
+const sql = postgres(requireDatabaseUrl(), { max: 1 })
 const rows = await sql`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`
 const tables = rows.map((row) => row.table_name as string)
-for (const required of ['users', 'posts', 'comments']) {
-  if (!tables.includes(required)) {
-    console.error('Missing table after db:migrate: ' + required + ' (found: ' + tables.join(', ') + ')')
-    process.exit(1)
-  }
-}
-const tracker = await sql`SELECT count(*)::int AS c FROM drizzle.__drizzle_migrations`
-if (Number(tracker[0].c) < 1) {
-  console.error('drizzle.__drizzle_migrations is empty after db:migrate')
-  process.exit(1)
-}
+assertRequiredTables(tables)
+
+// The tracker lives in its own `drizzle` schema on postgres, so it is absent
+// from the `public` list above and gets its own query. Built with `unsafe`
+// because the identifier helper would quote "drizzle.__drizzle_migrations" as a
+// single name; the interpolated value is a constant in this repo, not input.
+const tracker = await sql.unsafe(`SELECT count(*)::int AS c FROM drizzle."${MIGRATION_TRACKER}"`)
+assertTrackerNonEmpty(Number(tracker[0].c), `drizzle.${MIGRATION_TRACKER}`)
 
 // Every timestamp a scaffold emits must carry a time zone. An offset-less
 // column stores a bare wall clock and leaves its meaning to the reader: the

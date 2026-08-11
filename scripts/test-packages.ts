@@ -73,9 +73,24 @@ const cwdGuard = join(import.meta.dir, 'test-cwd-guard.ts')
 // nothing. The smoke package list is here for the same reason: the gates that
 // consume it take ten minutes each, so nothing else would notice it narrowing.
 // Included only on an unfiltered run, so `test:bun cli` stays narrow.
-const guardTests = selectors.length === 0
-  ? ['scripts/test-cwd-guard.test.ts', 'scripts/smoke/local-packages.test.ts']
-  : []
+//
+// Discovered rather than named, so the next scripts-level guard is covered by
+// existing — a hand-kept list is the shape local-packages.ts exists to end.
+// Globbed here rather than passed to `bun test` as a bare `scripts/` directory:
+// what reaches the command line stays a list of explicit file paths, which is
+// what it was before, so this cannot change how bun resolves its arguments.
+const guardTests = selectors.length === 0 ? await collectScriptTests() : []
+
+async function collectScriptTests(): Promise<string[]> {
+  const found: string[] = []
+  for await (const path of new Bun.Glob('scripts/**/*.test.ts').scan({ cwd: repoRoot })) {
+    found.push(path)
+  }
+  if (found.length === 0) {
+    throw new Error('No scripts-level guard tests found — the glob no longer matches this layout.')
+  }
+  return found.sort()
+}
 
 const testArgs = [
   'test',
