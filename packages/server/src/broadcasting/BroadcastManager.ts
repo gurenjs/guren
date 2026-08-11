@@ -17,6 +17,31 @@ import { claimHotDisposable, isHotReloadRuntime } from '../hot-reload/hot-dispos
 import type { Context } from '../http/Application'
 import type { Middleware } from '../http/middleware'
 import { parseRequestPayload } from '../http/request'
+import { randomHex } from '../encryption/Random'
+
+/**
+ * Best-effort identity for the user behind a connection.
+ *
+ * `getUser` is application-supplied and returns `unknown`, so this reads the
+ * conventional identity fields and gives up otherwise. Giving up yields
+ * `undefined`, which marks the stream unowned and therefore attachable — the
+ * permissive direction, chosen because a stream opened before sign-in has to
+ * stay attachable for authorize-after-login to work, and the two cases are
+ * indistinguishable from here.
+ *
+ * So the ownership check below is defence in depth, not the primary control:
+ * what actually stops an attach against someone else's stream is that client
+ * ids are unguessable. An app whose user objects carry none of these fields
+ * gets the unguessable id and no second layer.
+ */
+function resolveClientUserId(user: unknown): string | number | undefined {
+  if (typeof user !== 'object' || user === null) return undefined
+  const candidate = user as { id?: unknown; sub?: unknown; userId?: unknown }
+  for (const value of [candidate.id, candidate.sub, candidate.userId]) {
+    if (typeof value === 'string' || typeof value === 'number') return value
+  }
+  return undefined
+}
 
 /**
  * Broadcast manager for real-time event broadcasting.
@@ -287,6 +312,13 @@ export class BroadcastManager {
         }
       }
 
+      // Resolved out here, not inside the stream's `start()`. The client object
+      // outlives this handler — it is held in `sseClients` and its `send`/`close`
+      // close over this scope — so reading `user` from within `start()` would
+      // promote the whole user record into that retained scope and keep it alive
+      // for the life of the connection. Only the scalar is needed.
+      const clientUserId = resolveClientUserId(user)
+
       let controller: ReadableStreamDefaultController<Uint8Array> | null = null
       let client: SSEClient | null = null
       let pingTimer: ReturnType<typeof setInterval> | null = null
@@ -323,7 +355,9 @@ export class BroadcastManager {
 
           client = {
             id: clientId,
-            userId: undefined,
+            // Recorded so `POST /broadcasting/auth` can refuse to attach
+            // channels to a stream belonging to someone else.
+            userId: clientUserId,
             channels: new Set(),
             send: (event: string, data: unknown) => {
               const message = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
@@ -402,6 +436,17 @@ export class BroadcastManager {
       const clientId = typeof payload.clientId === 'string' ? payload.clientId : undefined
       const results: Record<string, unknown> = {}
 
+      // Authorization answers "may *this user* read the channel", which is not
+      // the same question as "may this user attach it to *that* stream". Without
+      // the second check, a request naming someone else's clientId pushes the
+      // caller's own authorized events into that person's stream. A stream
+      // opened before sign-in has no owner and stays attachable — its id is
+      // unguessable, and refusing would break authorizing after login.
+      const requesterId = resolveClientUserId(user)
+      const target = clientId ? this.sseClients.get(clientId) : undefined
+      const attachTo =
+        target && (target.userId === undefined || target.userId === requesterId) ? target : undefined
+
       for (const ch of channels) {
         const authResult = await this.authorize(ch, user)
 
@@ -410,7 +455,7 @@ export class BroadcastManager {
           continue
         }
 
-        const subscribed = clientId ? this.subscribeClient(clientId, ch) : false
+        const subscribed = attachTo ? this.subscribeClient(attachTo.id, ch) : false
         if (authResult === true) {
           results[ch] = { authorized: true, subscribed }
         } else {
@@ -572,9 +617,11 @@ export class BroadcastManager {
    * Generate a unique client ID.
    */
   protected generateClientId(prefix: 'sse' | 'ws' = 'sse'): string {
-    const timestamp = Date.now().toString(36)
-    const random = Math.random().toString(36).substring(2, 10)
-    return `${prefix}_${timestamp}${random}`
+    // Unguessable, not merely unique: `POST /broadcasting/auth` accepts a
+    // `clientId` from the request body, so anyone who can predict another
+    // connection's id can attach channels to that connection's stream. A
+    // `Math.random()` suffix beside a `Date.now()` prefix is reconstructable.
+    return `${prefix}_${randomHex(16)}`
   }
 }
 

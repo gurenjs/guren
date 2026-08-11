@@ -462,6 +462,10 @@ Every query entry point applies both scopes automatically — `all()`, `find()`,
 `orderBy()`, `paginate()` (the count as well as the rows), `newQuery()`, and the
 queries that eager-load a relation, which apply the *related* model's scopes.
 
+Writes honor them too: `update()`, `forceUpdate()`, and `delete()` add the same
+scopes to their `where`, so a `tenant` scope stops one tenant from updating or
+deleting another tenant's row — not just from reading it.
+
 The only way past them is to ask explicitly, below.
 
 ### Bypassing Global Scopes

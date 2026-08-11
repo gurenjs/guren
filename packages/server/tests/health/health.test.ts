@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test'
+import { Hono } from 'hono'
 import {
   HealthCheck,
   HealthManager,
@@ -300,90 +301,53 @@ describe('HealthManager', () => {
   })
 
   describe('middleware', () => {
+    // Driven through a real router rather than a hand-built Context double: the
+    // bug these guard is that a handler which returns undefined without
+    // finalizing yields an empty response, and only a real router exhibits that.
+    // A double mirroring the `res` setter would stay green even if the router
+    // stopped honouring it.
+    async function callHealth(middleware: ReturnType<HealthManager['middleware']>) {
+      const app = new Hono()
+      app.get('/health', middleware as never)
+      return app.request('/health')
+    }
+
     it('should create middleware that runs all checks', async () => {
       manager.register(new SimpleCheck('test', 'healthy'))
 
-      const middleware = manager.middleware()
+      const response = await callHealth(manager.middleware())
 
-      let responseStatus: number | undefined
-      let responseBody: unknown
-
-      const ctx = {
-        status: (code: number) => {
-          responseStatus = code
-        },
-        json: (body: unknown) => {
-          responseBody = body
-        },
-      }
-
-      await middleware(ctx as any, async () => {})
-
-      expect(responseStatus).toBe(200)
-      expect((responseBody as any).status).toBe('healthy')
+      // Without finalization this is an empty 204 with no body at all.
+      expect(response.status).toBe(200)
+      expect((await response.json()).status).toBe('healthy')
     })
 
     it('should return 503 for unhealthy', async () => {
       manager.register(new SimpleCheck('test', 'unhealthy'), { critical: true })
 
-      const middleware = manager.middleware()
+      const response = await callHealth(manager.middleware())
 
-      let responseStatus: number | undefined
-      let responseBody: unknown
-
-      const ctx = {
-        status: (code: number) => {
-          responseStatus = code
-        },
-        json: (body: unknown) => {
-          responseBody = body
-        },
-      }
-
-      await middleware(ctx as any, async () => {})
-
-      expect(responseStatus).toBe(503)
-      expect((responseBody as any).status).toBe('unhealthy')
+      expect(response.status).toBe(503)
+      expect((await response.json()).status).toBe('unhealthy')
     })
 
     it('should support detailed option', async () => {
       manager.register(new SimpleCheck('test'))
 
-      const middleware = manager.middleware({ detailed: false })
+      const response = await callHealth(manager.middleware({ detailed: false }))
 
-      let responseBody: unknown
-
-      const ctx = {
-        status: () => {},
-        json: (body: unknown) => {
-          responseBody = body
-        },
-      }
-
-      await middleware(ctx as any, async () => {})
-
-      expect((responseBody as any).checks).toBeUndefined()
+      expect((await response.json()).checks).toBeUndefined()
     })
 
     it('should support checks option', async () => {
       manager.register(new SimpleCheck('check1'))
       manager.register(new SimpleCheck('check2'))
 
-      const middleware = manager.middleware({ checks: ['check1'] })
+      const response = await callHealth(manager.middleware({ checks: ['check1'] }))
 
-      let responseBody: unknown
-
-      const ctx = {
-        status: () => {},
-        json: (body: unknown) => {
-          responseBody = body
-        },
-      }
-
-      await middleware(ctx as any, async () => {})
-
-      expect((responseBody as any).checks).toHaveLength(1)
-      expect((responseBody as any).checks[0].name).toBe('check1')
+      const body = await response.json()
+      expect(body.checks).toHaveLength(1)
+      expect(body.checks[0].name).toBe('check1')
     })
   })
 })

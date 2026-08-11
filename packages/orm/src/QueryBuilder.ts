@@ -14,6 +14,14 @@ import type {
 
 type FieldKey<TRecord extends PlainObject> = keyof TRecord & string
 
+/**
+ * Key for the prepared-payload update terminal.
+ *
+ * Exported for `Model` to call across the module boundary, but deliberately
+ * absent from the package entry point, so it is not part of the public API.
+ */
+export const PREPARED_UPDATE = Symbol('guren.orm.preparedUpdate')
+
 /** Comparison operators supported by the QueryBuilder. */
 export type WhereOperator = '=' | '!=' | '>' | '<' | '>=' | '<=' | 'like' | 'in' | 'not in' | 'is null' | 'is not null'
 
@@ -439,13 +447,29 @@ export class QueryBuilder<
   }
 
   private async runBulkUpdate(data: PlainObject, applyFillable: boolean): Promise<TRecord> {
-    if (!this.adapter.update) {
-      throw new Error('Configured adapter does not support update operations.')
-    }
-
     const model = this.modelClass as typeof Model
     const filtered = applyFillable ? model.filterFillable(data) : { ...data }
     const payload = await model.prepareBulkPersistencePayload(filtered)
+    return this[PREPARED_UPDATE](payload)
+  }
+
+  /**
+   * Bulk update using a payload the caller has already run through
+   * mass-assignment filtering and persistence preparation. This exists so the
+   * static `Model.update()` write path can borrow the builder's
+   * global-scope-carrying `conditions` without re-preparing the payload —
+   * running mutators twice would, for example, double-hash a hashed column.
+   *
+   * Keyed by a symbol that this package never re-exports, because a named
+   * public method here would be a supported way to write arbitrary columns:
+   * it skips both `filterFillable` and `prepareBulkPersistencePayload`, so
+   * `User.where(…)[name](requestBody)` would bypass mass-assignment protection
+   * entirely. `@internal` is only a doc tag — declarations still emit it.
+   */
+  async [PREPARED_UPDATE](payload: PlainObject): Promise<TRecord> {
+    if (!this.adapter.update) {
+      throw new Error('Configured adapter does not support update operations.')
+    }
 
     const advancedAdapter = this.adapter as ORMAdapterAdvanced
     if (typeof advancedAdapter.updateAdvanced === 'function') {

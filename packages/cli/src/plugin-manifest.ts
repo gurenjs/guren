@@ -41,6 +41,17 @@ export const PUBLISH_TARGET_ROOTS = ['config/', 'db/migrations/', 'resources/'] 
 
 const ENV_KEY_PATTERN = /^[A-Z][A-Z0-9_]*$/u
 
+/**
+ * Environment namespace the framework reserves for itself.
+ *
+ * `GUREN_TESTING`, `GUREN_MCP` and `GUREN_ALLOW_UNVERIFIED_PEER` are the whole
+ * of several security gates: `GUREN_TESTING` alone makes the server trust an
+ * `X-Testing-User` header. A plugin has no legitimate reason to set one, and a
+ * line appended to `.env.example` is committed and propagates to every clone —
+ * so this is refused loudly rather than filtered out in silence.
+ */
+const RESERVED_ENV_PREFIX = 'GUREN_'
+
 // Bun is only available at runtime. The declaration keeps TypeScript happy
 // while allowing the compatibility check to no-op on other runtimes.
 declare const Bun:
@@ -233,6 +244,38 @@ export function checkPluginCompatibility(
 }
 
 /**
+ * Reject env entries a plugin is not allowed to write.
+ *
+ * Call this *before* an install starts mutating the project. `applyEnvEntries`
+ * calls it too, but by then the provider has been wired into `src/app.ts` and
+ * publishes may already be on disk, so a throw there refuses the env write
+ * while leaving the rest of the install applied.
+ *
+ * Entries whose key is merely malformed are filtered out elsewhere and are not
+ * this function's concern — these two refusals are loud because a line that
+ * lands in the committed `.env.example` reaches every clone.
+ */
+export function assertEnvEntriesAllowed(entries: GurenPluginEnvEntry[]): void {
+  for (const entry of entries) {
+    if (entry.key?.startsWith(RESERVED_ENV_PREFIX)) {
+      throw new Error(
+        `Invalid env entry "${entry.key}": ${RESERVED_ENV_PREFIX}* is reserved by the framework and cannot be set by a plugin.`,
+      )
+    }
+
+    // A newline in either field ends the line the key opened and starts one the
+    // key never names, so `{ key: 'ACME_KEY', value: '\nGUREN_TESTING=1' }`
+    // reads as an innocuous entry while writing a second, reserved one.
+    for (const field of ['value', 'comment'] as const) {
+      const text = entry[field]
+      if (text !== undefined && /[\r\n]/.test(text)) {
+        throw new Error(`Invalid env entry "${entry.key}": ${field} cannot contain a line break.`)
+      }
+    }
+  }
+}
+
+/**
  * Append missing env keys to .env.example (created when absent) and .env
  * (only when it already exists). Returns the files that were modified.
  */
@@ -241,6 +284,7 @@ export async function applyEnvEntries(
   cwd: string = process.cwd(),
 ): Promise<string[]> {
   const validEntries = entries.filter((entry) => ENV_KEY_PATTERN.test(entry.key ?? ''))
+  assertEnvEntriesAllowed(validEntries)
   if (validEntries.length === 0) return []
 
   const modified: string[] = []

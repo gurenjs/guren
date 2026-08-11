@@ -143,6 +143,22 @@ describe('Encrypter', () => {
 
       expect(() => encrypter.decrypt(tampered)).toThrow()
     })
+
+    // Node and Bun accept 4-byte GCM tags and `setAuthTag()` adopts whatever
+    // length it is handed, so a payload rewritten with a truncated tag would
+    // drop forgery resistance from 2^128 to 2^32. Nothing this class writes
+    // has a short tag, so requiring the full 16 bytes rejects only rewrites.
+    test('refuses a payload whose authentication tag has been truncated', () => {
+      const encrypted = encrypter.encrypt('secret')
+      const payload = JSON.parse(Buffer.from(encrypted, 'base64').toString('utf8'))
+
+      expect(Buffer.from(payload.tag, 'base64').length).toBe(16)
+
+      payload.tag = Buffer.from(payload.tag, 'base64').subarray(0, 4).toString('base64')
+      const truncated = Buffer.from(JSON.stringify(payload)).toString('base64')
+
+      expect(() => encrypter.decrypt(truncated)).toThrow('Invalid authentication tag length.')
+    })
   })
 
   describe('encrypt/decrypt (CBC)', () => {

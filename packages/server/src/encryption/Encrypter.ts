@@ -3,6 +3,17 @@ import type { EncrypterConfig, EncryptOptions, DecryptOptions, EncryptedPayload 
 import { generateAppKey, normalizeAppKey } from './app-key'
 
 /**
+ * GCM authentication tag length, in bytes.
+ *
+ * Pinned on both sides. Node and Bun accept 4-, 8-, 12-, 13-, 14-, 15- and
+ * 16-byte GCM tags, and `setAuthTag()` adopts whatever length it is handed — so
+ * a payload rewritten with a 4-byte tag would be accepted, dropping forgery
+ * resistance from 2^128 to 2^32. Everything this class writes uses the full
+ * tag, so nothing legitimate is rejected by requiring it.
+ */
+const GCM_TAG_BYTES = 16
+
+/**
  * Encrypter for secure data encryption using AES.
  *
  * @example
@@ -102,7 +113,7 @@ export class Encrypter {
    */
   protected encryptGcm(data: string): string {
     const iv = randomBytes(12) // 96 bits for GCM
-    const cipher = createCipheriv('aes-256-gcm', this.key, iv)
+    const cipher = createCipheriv('aes-256-gcm', this.key, iv, { authTagLength: GCM_TAG_BYTES })
 
     const encrypted = Buffer.concat([
       cipher.update(data, 'utf8'),
@@ -124,12 +135,19 @@ export class Encrypter {
    * Decrypt using AES-256-GCM.
    */
   protected decryptGcm(payload: EncryptedPayload): string {
-    return this.tryDecryptWithKeys((key) => {
-      const iv = Buffer.from(payload.iv, 'base64')
-      const encrypted = Buffer.from(payload.value, 'base64')
-      const tag = Buffer.from(payload.tag!, 'base64')
+    // Decoded once, outside the key loop: all three are properties of the
+    // payload, not of the key being tried. The tag's length check belongs here
+    // for the same reason — retrying a short tag per key would only hide why
+    // it failed.
+    const iv = Buffer.from(payload.iv, 'base64')
+    const encrypted = Buffer.from(payload.value, 'base64')
+    const tag = Buffer.from(payload.tag!, 'base64')
+    if (tag.length !== GCM_TAG_BYTES) {
+      throw new Error('Invalid authentication tag length.')
+    }
 
-      const decipher = createDecipheriv('aes-256-gcm', key, iv)
+    return this.tryDecryptWithKeys((key) => {
+      const decipher = createDecipheriv('aes-256-gcm', key, iv, { authTagLength: GCM_TAG_BYTES })
       decipher.setAuthTag(tag)
 
       const decrypted = Buffer.concat([

@@ -5,6 +5,7 @@ import { PATCH_REASONS } from './patch-helpers'
 import { addProviderRegistration, APP_ENTRY_CANDIDATES, resolveAppEntry } from './provider-registrar'
 import {
   applyEnvEntries,
+  assertEnvEntriesAllowed,
   applyPublishes,
   checkPluginCompatibility,
   readCoreVersion,
@@ -112,6 +113,13 @@ export async function installPlugin(options: InstallPluginOptions): Promise<Plug
   }
 
   const manifest = await readPluginManifest(packageName)
+
+  // Validated here, before the provider is wired into src/app.ts and before any
+  // publish is written: `applyEnvEntries` re-checks, but a throw at that point
+  // would leave a manifest we refused to honour half-installed.
+  if (manifest?.env?.length) {
+    assertEnvEntriesAllowed(manifest.env)
+  }
 
   if (manifest) {
     const compatibility = checkPluginCompatibility(manifest, await readCoreVersion())
