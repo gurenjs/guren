@@ -12,6 +12,7 @@ type PackageName =
   | '@guren/inertia-client'
   | '@guren/orm'
   | '@guren/server'
+  | '@guren/testing'
 
 interface LocalPackage {
   name: PackageName
@@ -40,6 +41,7 @@ const localPackages: LocalPackage[] = [
   { name: '@guren/inertia-client', sourceDir: resolve(repoRoot, 'packages/inertia-client'), vendorDir: 'inertia-client' },
   { name: '@guren/orm', sourceDir: resolve(repoRoot, 'packages/orm'), vendorDir: 'orm' },
   { name: '@guren/server', sourceDir: resolve(repoRoot, 'packages/server'), vendorDir: 'server' },
+  { name: '@guren/testing', sourceDir: resolve(repoRoot, 'packages/testing'), vendorDir: 'testing' },
 ]
 const publishedArtifacts: PublishedArtifact[] = [
   ...localPackages,
@@ -269,14 +271,21 @@ async function rewriteAppDependencies(appDir: string, vendorRoots: Map<PackageNa
   const packageJsonPath = join(appDir, 'package.json')
   const appPackageDir = dirname(packageJsonPath)
   const raw = await readFile(packageJsonPath, 'utf8')
-  const pkg = JSON.parse(raw) as {
-    dependencies?: Record<string, string>
-  }
-
-  pkg.dependencies ??= {}
+  const pkg = JSON.parse(raw) as Partial<Record<(typeof DEPENDENCY_GROUPS)[number], Record<string, string>>>
 
   for (const [name, packageDir] of vendorRoots) {
-    pkg.dependencies[name] = `file:${toPosixPath(relative(appPackageDir, packageDir))}`
+    const specifier = `file:${toPosixPath(relative(appPackageDir, packageDir))}`
+    // Rewrite the entry where the template already declares it — `@guren/testing`
+    // is a devDependency. Adding it to `dependencies` instead would leave the
+    // template's own range in `devDependencies`, and bun still resolves that
+    // range against the registry, where an unreleased version does not exist.
+    const group = DEPENDENCY_GROUPS.find((field) => pkg[field]?.[name])
+    if (group) {
+      pkg[group]![name] = specifier
+      continue
+    }
+    pkg.dependencies ??= {}
+    pkg.dependencies[name] = specifier
   }
 
   await writeFile(packageJsonPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8')
@@ -608,11 +617,15 @@ async function main(): Promise<void> {
     }
     await rewriteAppDependencies(appDir, dependencyRoots)
     if (installMode === 'packed') {
-      const packageJson = JSON.parse(await readFile(join(appDir, 'package.json'), 'utf8')) as {
-        dependencies?: Record<string, string>
-      }
+      const packageJson = JSON.parse(await readFile(join(appDir, 'package.json'), 'utf8')) as Partial<
+        Record<(typeof DEPENDENCY_GROUPS)[number], Record<string, string>>
+      >
       for (const pkg of localPackages) {
-        const dependencyValue = packageJson.dependencies?.[pkg.name]
+        // Search every group: the rewrite leaves each dependency where the
+        // template declared it, and `@guren/testing` is a devDependency.
+        const dependencyValue = DEPENDENCY_GROUPS.map((field) => packageJson[field]?.[pkg.name]).find(
+          (value) => value !== undefined,
+        )
         assert(
           typeof dependencyValue === 'string' && dependencyValue.endsWith('.tgz'),
           `Fresh app did not rewrite ${pkg.name} to a local tarball dependency.`,
