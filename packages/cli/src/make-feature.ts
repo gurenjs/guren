@@ -1,6 +1,6 @@
 import { consola } from 'consola'
 import { assertNotApiOnly } from './app-surface'
-import { camelCase, kebabCase, pagesAccessor, pascalCase, safeModuleName, writeScaffoldFiles, writerOptionsFrom, type WriterOptions } from './utils'
+import { camelCase, kebabCase, pagesAccessor, pascalCase, safeModuleName, writeRoot, writeScaffoldFiles, writerOptionsFrom, type WriterOptions } from './utils'
 import { pluralize } from './inflect'
 import { makeModel } from './make-model'
 import { makePolicy } from './make-policy'
@@ -8,6 +8,13 @@ import { makeTest } from './make-test'
 import { makeValidator } from './make-validator'
 import { parseFieldsString, type FieldDefinition, type FieldType } from './fields'
 import { schemaPathFor } from './schema-parser'
+
+/**
+ * The alternative the API-only refusal names, shared with the resource
+ * blueprint: both doors lead to this one scaffold, so they point at the same
+ * way out.
+ */
+export const API_ONLY_FEATURE_ALTERNATIVE = 'Add a JSON controller to routes/api.ts by hand'
 
 export interface MakeFeatureOptions extends WriterOptions {
   fields?: string
@@ -22,18 +29,6 @@ export interface MakeFeatureOptions extends WriterOptions {
 }
 
 export async function makeFeature(name: string, options: MakeFeatureOptions = {}): Promise<string[]> {
-  // The `resource` blueprint carries its own copy of this refusal, but these
-  // are the other doors to the same scaffold: `guren make:feature` and the
-  // `guren_make_feature` MCP tool call this function directly. Before the
-  // first write (`makeValidator` below is one), and against `options.cwd`
-  // rather than the process directory — `guren mcp` scaffolds into a
-  // workspace it names, and judging its own directory would answer about the
-  // wrong project.
-  await assertNotApiOnly(options.cwd ?? process.cwd(), {
-    does: 'The feature scaffold emits React pages and a controller that returns Inertia responses',
-    instead: 'Add a JSON controller wired into routes/api.ts by hand',
-  })
-
   const fields = parseFieldsString(options.fields ?? '')
   const singular = pascalCase(name)
   const collection = pluralize(singular)
@@ -52,6 +47,17 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   const moduleName = options.root ? safeModuleName(options.root) : undefined
   const appPrefix = moduleName ? `modules/${moduleName}/` : ''
   const pagePrefix = moduleName ? `${moduleName}/` : ''
+
+  // Same ordering rule as the resource blueprint's guard: everything above is
+  // pure, so a usage error is reported as one, and the check still precedes
+  // the first write below. It lives here as well because `guren make:feature`
+  // reaches this scaffold without passing through the blueprint registry.
+  // Judged at `writeRoot()` — this command honours `options.cwd`, so the app
+  // judged must be the app written into.
+  await assertNotApiOnly(writeRoot(options), {
+    does: 'guren make:feature scaffolds Inertia pages and a controller that returns Inertia responses',
+    instead: API_ONLY_FEATURE_ALTERNATIVE,
+  })
 
   // Composed rather than emitted inline — the same way makeModel/makePolicy/
   // makeTest are below — so the schema names the generated controller imports
