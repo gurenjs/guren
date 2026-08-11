@@ -30,17 +30,16 @@ import type { AuthContext } from '../auth'
  *     }
  *   }
  *
- *   authorize() {
- *     return this.user() !== null
+ *   async authorize() {
+ *     return (await this.user()) !== null
  *   }
  * }
  *
  * // In controller:
- * const data = await this.validate(StorePostRequest)
+ * const data = await new StorePostRequest().handle(this.ctx)
  * // data is typed as StorePostData
  * ```
- */
-/**
+ *
  * @deprecated Legacy compatibility layer — prefer schema-first validation
  * via `this.validateBody()` / `validateQuery()` / `validateParams()`.
  */
@@ -79,15 +78,19 @@ export abstract class FormRequest<T = Record<string, unknown>> {
 
   /**
    * Get the authenticated user from the request context.
+   *
+   * Awaiting is load-bearing: `this.user() !== null` compiles and is always
+   * true, because an unawaited call is a pending promise.
    */
-  protected user(): unknown {
+  protected async user<TUser = unknown>(): Promise<TUser | null> {
     const auth = this.ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
-    return auth?.user?.() ?? null
+    return (await auth?.user<TUser>()) ?? null
   }
 
   /**
    * Handle the form request: authorize, parse body, validate, return typed data.
-   * @internal Called by Controller.validate()
+   * Call it from a controller with the request context:
+   * `const data = await new StorePostRequest().handle(this.ctx)`.
    */
   async handle(ctx: Context): Promise<T> {
     this.ctx = ctx
