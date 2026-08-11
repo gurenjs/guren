@@ -449,7 +449,7 @@ User.removeGlobalScope('active')
 ```
 
 > [!TIP]
-> `SoftDeletes` ミックスインは `'softDelete'` という名前のグローバルスコープを登録します。`withTrashed()` の代わりに `withoutGlobalScope('softDelete')` でも同じ結果が得られます。
+> `SoftDeletes` ミックスインは `'softDelete'` という名前のグローバルスコープを登録します。`withTrashed()` は `withoutGlobalScope('softDelete')` そのものであり、どちらの書き方でも削除済みレコードに到達しつつ、他のグローバルスコープはそのまま適用されます。つまり `tenant` スコープによる分離は維持されます。それも含めてすべて外すのは `withoutGlobalScopes()` だけです。
 
 ## モデルフック
 
@@ -546,7 +546,7 @@ export class Post extends SoftDeletes(defineModel(posts)) {}
 ### ソフトデリートの操作
 
 ```ts
-// ソフトデリート - deletedAt を設定し、行は削除しない
+// ソフトデリート - 未削除の行に deletedAt を設定する（行自体は削除しない）
 await Post.delete({ id: 1 })
 
 // 削除されていないレコードのみ取得（デフォルトの動作）
@@ -564,6 +564,13 @@ await Post.restore({ id: 1 })
 // 完全に削除（ソフトデリートをバイパス）
 await Post.forceDelete({ id: 1 })
 ```
+
+これらはいずれもモデルの「他の」グローバルスコープを尊重します。`delete()` が
+`deletedAt` を設定するのは、現在のスコープから見える未削除の行だけです。すでに削除済みの
+行に対しては何にもマッチせず、元の `deletedAt` はそのまま残ります。`restore()` と
+`forceDelete()` は削除済みレコードに到達するために `softDelete` フィルタだけを外し、
+残りのスコープは維持します。したがって `tenant` スコープがあれば、取り消しのきかない
+`forceDelete()` が別テナントの行に届くことはありません。
 
 ## 属性キャスト
 

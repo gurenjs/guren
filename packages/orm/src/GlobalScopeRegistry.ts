@@ -42,6 +42,22 @@ export class GlobalScopeRegistry {
     this.scopes.clear()
   }
 
+  /**
+   * Copy this registry's entries into a new one.
+   *
+   * A subclass that registers its own scope needs a registry of its own, but it
+   * must keep the ones it inherited: starting from empty is how a model that
+   * mixes in `SoftDeletes` and then adds a `tenant` scope silently loses the
+   * `softDelete` filter.
+   */
+  clone(): GlobalScopeRegistry {
+    const copy = new GlobalScopeRegistry()
+    for (const [name, fn] of this.scopes) {
+      copy.add(name, fn)
+    }
+    return copy
+  }
+
   get size(): number {
     return this.scopes.size
   }

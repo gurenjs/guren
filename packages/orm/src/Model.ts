@@ -502,9 +502,26 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   // ---------------------------------------------------------------------------
   // ---------------------------------------------------------------------------
 
+  /**
+   * The registry this class may mutate, creating it on first write.
+   *
+   * The new registry is seeded from the inherited one: the read paths
+   * (`newQuery()`, `hasScopes()`) resolve `globalScopeRegistry` through the
+   * prototype chain, so a subclass that started from an empty registry would
+   * shadow — and silently drop — every scope it inherited. That is exactly the
+   * `class Post extends SoftDeletes(Base)` then `Post.addGlobalScope('tenant')`
+   * case, which would otherwise lose the `softDelete` filter.
+   *
+   * The copy is a snapshot: scopes added to the parent *after* a subclass first
+   * registers or removes one do not reach that subclass. Nothing in the
+   * framework relies on later propagation — the `SoftDeletes` mixin registers
+   * `softDelete` synchronously while building the class, before any user code
+   * can touch it.
+   */
   protected static getGlobalScopes(): GlobalScopeRegistry {
     if (!Object.prototype.hasOwnProperty.call(this, 'globalScopeRegistry') || !this.globalScopeRegistry) {
-      this.globalScopeRegistry = new GlobalScopeRegistry()
+      const inherited = this.globalScopeRegistry
+      this.globalScopeRegistry = inherited ? inherited.clone() : new GlobalScopeRegistry()
     }
     return this.globalScopeRegistry
   }
@@ -526,6 +543,12 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
 
   /**
    * Start a query excluding specific global scope(s).
+   *
+   * Only *named* scopes can be excluded: `defaultScope` is re-applied here
+   * whatever this is asked to drop. A mixin whose filter users must be able to
+   * opt out of therefore has to register a named scope and nothing else —
+   * registering as both makes the filter unremovable, which is how `SoftDeletes`
+   * once made `withoutGlobalScope('softDelete')` a no-op.
    *
    * @example
    * const all = await User.withoutGlobalScope('active').get()
