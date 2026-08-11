@@ -99,6 +99,15 @@ afterAll(async () => {
   await rm(dir, { recursive: true, force: true })
 })
 
+// Each check() builds a full tsc program over the built .d.ts surface. On a
+// warm TypeScript cache that takes a few seconds, but in a fresh worktree
+// (cold node_modules, no incremental state) a single probe has been measured
+// at 10–25s normally and 70s right after a full monorepo build — far past
+// bun:test's 5s default, which made both tests time out rather than fail.
+// check() is synchronous, so a timeout cannot interrupt it anyway; the limit
+// only needs to sit above the slowest observed cold start, not near it.
+const COLD_TSC_TIMEOUT = 180_000
+
 function check(rootNames: string[]): string[] {
   const program = ts.createProgram(rootNames, compilerOptions)
   return ts.getPreEmitDiagnostics(program).map((diagnostic) => {
@@ -117,7 +126,7 @@ describe('generated translation key augmentation', () => {
     // bad-key probe errored (an accepted bad key surfaces as TS2578,
     // "unused @ts-expect-error").
     expect(check([generatedFile, serverProbeFile, clientProbeFile])).toEqual([])
-  })
+  }, COLD_TSC_TIMEOUT)
 
   test('without the generated file the same probes fail (the gate can catch a broken augmentation)', () => {
     const diagnostics = check([serverProbeFile, clientProbeFile])
@@ -128,5 +137,5 @@ describe('generated translation key augmentation', () => {
     }
     expect(diagnostics.filter((d) => d.startsWith('server-probe.ts'))).toHaveLength(2)
     expect(diagnostics.filter((d) => d.startsWith('client-probe.ts'))).toHaveLength(2)
-  })
+  }, COLD_TSC_TIMEOUT)
 })
