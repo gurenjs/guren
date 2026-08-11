@@ -10,6 +10,13 @@ TEMP_DIR=""
 
 cleanup() {
   if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ]; then
+    # Same opt-out as scripts/smoke/fresh-app.ts: a failure here is only
+    # diagnosable from the app it built.
+    if [ "${GUREN_KEEP_SMOKE_DIR:-}" = "1" ]; then
+      echo ""
+      echo "=== Keeping smoke workspace: $TEMP_DIR ==="
+      return
+    fi
     echo ""
     echo "=== Cleanup: removing $TEMP_DIR ==="
     rm -rf "$TEMP_DIR"
@@ -23,6 +30,23 @@ step() {
   shift
   echo ""
   echo "=== Step ${n}: $* ==="
+}
+
+# Substring test for a value already held in a variable.
+#
+# `printf '%s' "$body" | grep -q needle` cannot be used here: `grep -q` exits on
+# the first match, `printf` is killed by SIGPIPE (141), and `set -o pipefail`
+# reports the pipeline as failed even though the needle *was* found. Whether the
+# race is lost depends on how much printf has left to write when grep exits, so
+# the assertion reads as a content failure on one machine and passes on another
+# — it is reproducible on macOS and has been passing on CI's Linux runners.
+# Shell pattern matching has no pipe and no subprocess, so there is nothing to
+# race. The needle is quoted inside the pattern, making it a literal.
+contains() {
+  case "$1" in
+    *"$2"*) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 CLI_BIN="$REPO_ROOT/packages/cli/src/bin.ts"
@@ -45,7 +69,7 @@ elif [ "$SMOKE_DB" = "mysql" ]; then
   export DATABASE_URL="${GUREN_SMOKE_DATABASE_URL:-mysql://root:guren@localhost:33306/guren_smoke}"
 fi
 
-PACKAGES="cli core inertia-client orm server"
+PACKAGES="cli core inertia-client orm server testing"
 
 # ---------------------------------------------------------------------------
 # Pre-flight: ensure packages are built
@@ -99,7 +123,7 @@ import path from 'node:path';
 
 const appDir = '$APP_DIR';
 const vendorDir = '$VENDOR_DIR';
-const packages = 'cli core inertia-client orm server'.split(' ');
+const packages = 'cli core inertia-client orm server testing'.split(' ');
 
 function rewriteDeps(pkgJsonPath, resolver) {
   const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
@@ -118,13 +142,19 @@ function rewriteDeps(pkgJsonPath, resolver) {
 
 // Rewrite the app package.json AND ensure all vendored packages appear as
 // direct dependencies so bun hoists them into node_modules/@guren/*.
+// Replace the entry where the template already declares it — @guren/testing is
+// a devDependency, and writing it to dependencies instead would leave that
+// declaration behind for bun to resolve against the registry, where an
+// unreleased version does not exist. A devDependency of the app is a direct
+// dependency too, so it hoists the same way.
 const appPkgJsonPath = path.join(appDir, 'package.json');
 const appPkg = JSON.parse(fs.readFileSync(appPkgJsonPath, 'utf8'));
 appPkg.dependencies = appPkg.dependencies || {};
 for (const name of packages) {
   const fullName = '@guren/' + name;
   const rel = path.relative(appDir, path.join(vendorDir, name)).replace(/\\\\/g, '/');
-  appPkg.dependencies[fullName] = 'file:' + rel;
+  const field = ['dependencies', 'devDependencies', 'peerDependencies'].find((f) => appPkg[f] && appPkg[f][fullName]);
+  appPkg[field || 'dependencies'][fullName] = 'file:' + rel;
 }
 fs.writeFileSync(appPkgJsonPath, JSON.stringify(appPkg, null, 2) + '\n');
 
@@ -272,6 +302,11 @@ stop_server() {
 cleanup() {
   stop_server
   if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ]; then
+    if [ "${GUREN_KEEP_SMOKE_DIR:-}" = "1" ]; then
+      echo ""
+      echo "=== Keeping smoke workspace: $TEMP_DIR ==="
+      return
+    fi
     echo ""
     echo "=== Cleanup: removing $TEMP_DIR ==="
     rm -rf "$TEMP_DIR"
@@ -336,11 +371,11 @@ fi
 # db:status must see every migration as applied on every driver.
 STATUS_OUTPUT=$(cd "$APP_DIR" && bun "$CLI_BIN" db:status 2>&1)
 printf '%s\n' "$STATUS_OUTPUT"
-if printf '%s' "$STATUS_OUTPUT" | grep -q "pending"; then
+if contains "$STATUS_OUTPUT" "pending"; then
   echo "ERROR: db:status reports pending migrations after db:migrate"
   exit 1
 fi
-if ! printf '%s' "$STATUS_OUTPUT" | grep -q "applied"; then
+if ! contains "$STATUS_OUTPUT" "applied"; then
   echo "ERROR: db:status did not report any applied migrations"
   exit 1
 fi
@@ -527,8 +562,9 @@ http_expect "POST /posts (authenticated)" 303 \
   -d '{"title":"Golden path runtime","body":"created by smoke test"}'
 
 POSTS_BODY=$(curl -s -b "$COOKIES" "$RUNTIME_URL/posts")
-if ! printf '%s' "$POSTS_BODY" | grep -q "Golden path runtime"; then
+if ! contains "$POSTS_BODY" "Golden path runtime"; then
   echo "ERROR: GET /posts does not contain the created post title"
+  printf '%s\n' "$POSTS_BODY" | head -40
   exit 1
 fi
 echo "  OK: GET /posts contains created post"
@@ -546,13 +582,13 @@ http_expect "POST /comments (date + json payload)" 303 \
   -d '{"body":"typed columns","postId":1,"published":true,"publishedAt":"2026-02-03T00:00:00.000Z","meta":{"origin":"golden-path-json"}}'
 
 COMMENTS_BODY=$(curl -s -b "$COOKIES" "$RUNTIME_URL/comments")
-if ! printf '%s' "$COMMENTS_BODY" | grep -q "typed columns"; then
+if ! contains "$COMMENTS_BODY" "typed columns"; then
   echo "ERROR: GET /comments does not contain the created comment"
   exit 1
 fi
 # The json column must come back as an object, not as the string "[object
 # Object]" a text column would have stored.
-if ! printf '%s' "$COMMENTS_BODY" | grep -q "golden-path-json"; then
+if ! contains "$COMMENTS_BODY" "golden-path-json"; then
   echo "ERROR: GET /comments did not round-trip the json column"
   printf '%s\n' "$COMMENTS_BODY" | head -40
   exit 1
@@ -562,7 +598,7 @@ fi
 # time zone, because the app's own reads round-trip on either column type
 # (drizzle parses an offset-less postgres timestamp as UTC). The column type
 # itself is asserted in the db check above, which is what catches a regression.
-if ! printf '%s' "$COMMENTS_BODY" | grep -qF '2026-02-03T00:00:00.000Z'; then
+if ! contains "$COMMENTS_BODY" '2026-02-03T00:00:00.000Z'; then
   echo "ERROR: GET /comments did not round-trip the date column"
   printf '%s\n' "$COMMENTS_BODY" | head -40
   exit 1
