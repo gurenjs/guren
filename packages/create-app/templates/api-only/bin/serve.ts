@@ -7,18 +7,31 @@ try {
   process.exit(1)
 }
 
-const requestedPort = Number.parseInt(process.env.PORT ?? '', 10) || 3333
+// `PORT=0` means "any free port", so this tests for a number, not truthiness.
+const parsedPort = Number.parseInt(process.env.PORT ?? '', 10)
+const requestedPort = Number.isInteger(parsedPort) ? parsedPort : 3333
 const hostname = process.env.HOST ?? '0.0.0.0'
-const isDevelopment = process.env.NODE_ENV !== 'production'
 
-for (let offset = 0; offset < 20; offset += 1) {
+// In development a busy port moves to the next one. Set GUREN_STRICT_PORT=1 to
+// bind the requested port or fail — see the deployment guide.
+const isDevelopment = process.env.NODE_ENV !== 'production'
+const canWalkPorts =
+  isDevelopment && requestedPort !== 0 && process.env.GUREN_STRICT_PORT !== '1'
+const attempts = canWalkPorts ? 20 : 1
+
+// This file owns the retry, so the framework must not retry underneath it —
+// newer framework versions walk inside listen() themselves, and the two loops
+// would nest into a much wider search reported against the wrong ports.
+process.env.GUREN_STRICT_PORT = '1'
+
+for (let offset = 0; offset < attempts; offset += 1) {
   const port = requestedPort + offset
 
   try {
     await app.listen({ port, hostname })
     break
   } catch (error) {
-    if (!isDevelopment || !isAddressInUse(error) || offset === 19) {
+    if (!isAddressInUse(error) || offset === attempts - 1) {
       throw error
     }
 

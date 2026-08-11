@@ -1670,18 +1670,27 @@ const devCommand = defineCommand({
       return
     }
 
-    const port = Number.parseInt(process.env.PORT ?? '', 10) || 3333
+    // `PORT=0` means "any free port", so this tests for a number, not truthiness.
+    const parsedPort = Number.parseInt(process.env.PORT ?? '', 10)
+    const port = Number.isInteger(parsedPort) ? parsedPort : 3333
     const hostname = process.env.HOST ?? '0.0.0.0'
 
+    let address: { url?: string } | undefined
     try {
-      app.listen?.({ port, hostname })
+      address = (await app.listen?.({ port, hostname })) as { url?: string } | undefined
     } catch (error) {
       consola.error('Failed to start application listener:', error)
       process.exit(1)
       return
     }
 
-    consola.success(`Development server listening on http://${hostname}:${port}`)
+    // Report where it actually bound. The requested port is not it once the
+    // walk moves past a busy one, or when PORT=0 lets the OS choose. Apps on a
+    // `@guren/server` older than the bound-address return still report nothing,
+    // hence the fallback.
+    consola.success(
+      `Development server listening on ${address?.url ?? `http://${hostname}:${port}`}`,
+    )
   },
 })
 

@@ -12,7 +12,15 @@ const MAIN_ENTRY_CANDIDATES = [
 ]
 
 export type MaybeApplication = {
-  listen?: (options?: { port?: number; hostname?: string }) => unknown
+  /**
+   * Resolves to the bound address on a current `@guren/server`. The `unknown`
+   * arm is not defensive padding — `guren dev` imports the *user's* app, which
+   * may resolve a version whose `listen()` predates the return value.
+   */
+  listen?: (options?: {
+    port?: number
+    hostname?: string
+  }) => unknown | Promise<{ port: number; hostname: string; url: string } | undefined>
   boot?: () => Promise<void> | void
 }
 

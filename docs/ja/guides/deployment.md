@@ -65,6 +65,7 @@ NODE_ENV=production bun run bin/serve.ts
 
 - スタートアップバナーは本番では既定で非表示です。表示したい/明示的に消したい場合は `GUREN_DEV_BANNER=1` または `GUREN_DEV_BANNER=0` を設定。
 - `NODE_ENV=production` では Vite dev サーバーを起動しません。もし本番相当環境で起動したい/抑制したい場合は `GUREN_DEV_VITE=1`/`0` を切り替えてください。
+- 本番以外では、ポートが使用中の場合に次のポートへ移動して起動します（`bun run dev` の利便性のため）。`GUREN_STRICT_PORT=1` を設定すると、要求したポートにバインドできなければ `EADDRINUSE` で失敗します。smoke スクリプト・E2E ランナー・CI など「起動したアプリ自身に接続できたこと」を保証したい場面では必ず設定してください。ポートを移動してしまうと、既に待ち受けていた別のサーバーに対してテストが通ってしまいます。
 
 ```ini
 [Unit]

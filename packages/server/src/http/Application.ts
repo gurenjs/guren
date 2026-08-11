@@ -18,7 +18,12 @@ import { createSecurityHeaders, type SecurityHeadersOptions } from './middleware
 import { createHostAuthorizationMiddleware, type HostAuthorizationOptions } from './middleware/host-authorization'
 import { isMcpEndpointEnabled } from '../mcp/endpoint'
 import { isDocsViewerEnabled } from '../docs-viewer/endpoint'
-import { logDevServerBanner, type DevBannerOptions } from './dev-banner'
+import {
+  formatHostPort,
+  isWildcardHost,
+  logDevServerBanner,
+  type DevBannerOptions,
+} from './dev-banner'
 import { startViteDevServer, type StartViteDevServerOptions } from './vite-dev-server'
 
 // Bun is only available at runtime. The declaration keeps TypeScript happy while
@@ -36,10 +41,85 @@ declare const Bun:
 type BunServer = {
   stop?: (closeConnections?: boolean) => void | Promise<void>
   requestIP?: (request: Request) => { address?: string } | null
+  port?: number
+  hostname?: string
 }
 type ViteServer = Awaited<ReturnType<typeof startViteDevServer>>['server']
 const MANAGED_VITE_ENV_FLAG = 'GUREN_MANAGED_VITE_DEV_SERVER'
 const DEFAULT_DEV_ENTRY_PATH = '/resources/js/dev-entry.ts'
+
+/**
+ * Opt-in strict port binding.
+ *
+ * Pairs with the `portFallback` option exactly as `GUREN_DEV_VITE=0` pairs
+ * with `vite: false` a few lines below: the env var can only *subtract* the
+ * convenience, never switch it on, so an operator can pin a port from outside
+ * an app whose entrypoint they don't want to edit. That is the case the walk
+ * actively harms — a smoke script, a Playwright `webServer`, a CI job — while
+ * `bun run dev` keeps the convenience by default.
+ *
+ * Spelled `=== '1'` rather than following `GUREN_DEV_*`'s `!== '0'` because a
+ * harness reads more clearly as adding a guarantee than as removing a comfort.
+ * Deliberately not `GUREN_PORT_FALLBACK=0`: that would sit next to `PORT=0`
+ * with two unrelated meanings of zero.
+ */
+const STRICT_PORT_ENV_FLAG = 'GUREN_STRICT_PORT'
+
+/**
+ * Total bind attempts when the walk is enabled — the requested port plus 19
+ * more. Counts *attempts*, not offsets, so it matches the loop in the starter
+ * templates one-for-one; an off-by-one here means a scaffolded app and the
+ * framework give up on different ports.
+ */
+const DEFAULT_PORT_WALK_ATTEMPTS = 20
+
+function isAddressInUse(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      (error as { code?: unknown }).code === 'EADDRINUSE',
+  )
+}
+
+/**
+ * How many ports `listen()` may try in total, counting the requested one.
+ *
+ * `PORT=0` means "let the OS pick a free port", so there is no such thing as
+ * EADDRINUSE to recover from — and walking would march into 1, 2, 3, which are
+ * privileged. The walk is therefore skipped outright for 0 rather than merely
+ * being unreachable.
+ */
+function resolvePortAttempts(option: boolean | undefined, port: number): number {
+  if (port === 0) {
+    return 1
+  }
+
+  if (typeof process !== 'undefined' && process.env?.[STRICT_PORT_ENV_FLAG] === '1') {
+    return 1
+  }
+
+  if (typeof option === 'boolean') {
+    return option ? DEFAULT_PORT_WALK_ATTEMPTS : 1
+  }
+
+  // Unset: convenience while developing, fail fast in production.
+  return typeof process !== 'undefined' && process.env?.NODE_ENV === 'production'
+    ? 1
+    : DEFAULT_PORT_WALK_ATTEMPTS
+}
+
+/**
+ * A wildcard bind is reached through a loopback address of the same family.
+ *
+ * Deliberately not `localhost`: that name resolves to whichever family the
+ * host prefers, so an IPv4-only `0.0.0.0` bind can hand back a URL a client
+ * tries over `::1` and fails to reach.
+ */
+function toConnectableUrl(hostname: string, port: number): string {
+  const host = isWildcardHost(hostname) ? (hostname === '::' ? '::1' : '127.0.0.1') : hostname
+  return `http://${formatHostPort(host, port)}`
+}
 
 function clearManagedViteEnv(): void {
   if (typeof process === 'undefined') {
@@ -224,6 +304,37 @@ export interface ApplicationListenOptions {
   hostname?: string
   assetsUrl?: string
   vite?: StartViteDevServerOptions | false
+  /**
+   * What to do when the requested port is already taken.
+   *
+   * `true` walks forward through the next 20 ports; `false` fails fast with
+   * the original EADDRINUSE. Unset walks outside production, matching the loop
+   * this option replaces.
+   *
+   * `GUREN_STRICT_PORT=1` forces fail-fast regardless, and `port: 0` never
+   * walks — the OS is already picking a free port.
+   */
+  portFallback?: boolean
+}
+
+/**
+ * Where the server actually ended up listening.
+ *
+ * Returned by {@link Application.listen} so callers never have to infer the
+ * port from the port they asked for — with a port walk or `PORT=0` in play,
+ * those are different numbers, and scraping the human-readable dev banner is
+ * the only alternative.
+ */
+export interface ListenAddress {
+  /**
+   * The port the socket is bound to — what the runtime reports, falling back
+   * to the port the successful `Bun.serve` call was made with.
+   */
+  port: number
+  /** The hostname the socket is bound to. */
+  hostname: string
+  /** A URL that reaches the server, with a wildcard bind resolved to localhost. */
+  url: string
 }
 
 /**
@@ -503,7 +614,7 @@ export class Application {
   /**
    * Convenience helper to start a Bun server when available.
    */
-  async listen(options: ApplicationListenOptions = {}): Promise<void> {
+  async listen(options: ApplicationListenOptions = {}): Promise<ListenAddress> {
     if (!Bun) {
       throw new Error('Bun runtime is required to call Application.listen')
     }
@@ -511,7 +622,7 @@ export class Application {
     await stopActiveBunServer()
     await stopActiveViteDevServer()
 
-    const { port = 3000, hostname = '0.0.0.0', assetsUrl, vite } = options
+    const { port = 3000, hostname = '0.0.0.0', assetsUrl, vite, portFallback } = options
     const externalAssetsUrl =
       typeof process !== 'undefined' && process.env?.[MANAGED_VITE_ENV_FLAG] !== '1'
         ? process.env?.VITE_DEV_SERVER_URL
@@ -524,6 +635,9 @@ export class Application {
       process.env?.NODE_ENV !== 'production' &&
       !resolvedAssetsUrl &&
       process.env?.GUREN_DEV_VITE !== '0'
+
+    // Only this call's Vite server is ours to close if the bind fails below.
+    let startedViteHere = false
 
     if (shouldStartVite) {
       const viteOptions: StartViteDevServerOptions | undefined =
@@ -546,20 +660,75 @@ export class Application {
         }
         syncManagedInertiaDevEntry(resolvedAssetsUrl)
         this.registerViteTeardown()
+        startedViteHere = true
       } catch (error) {
         console.error('Failed to start Vite dev server:', error)
         process.exit(1)
       }
     }
 
-    const server = Bun.serve({
-      port,
-      hostname,
-      // `{ server }` is Bun's convention for reaching the live server from a
-      // handler; middleware reads `ctx.env.server.requestIP()` through it to
-      // learn the socket peer (the MCP access guard, the rate limiter).
-      fetch: (request: Request, server: BunServer) => this.fetch(request, { server }),
-    })
+    const attempts = resolvePortAttempts(portFallback, port)
+    let server: BunServer | undefined
+    let attemptPort = port
+
+    for (let offset = 0; offset < attempts; offset += 1) {
+      attemptPort = port + offset
+
+      try {
+        server = Bun.serve({
+          port: attemptPort,
+          hostname,
+          // `{ server }` is Bun's convention for reaching the live server from a
+          // handler; middleware reads `ctx.env.server.requestIP()` through it to
+          // learn the socket peer (the MCP access guard, the rate limiter).
+          fetch: (request: Request, server: BunServer) => this.fetch(request, { server }),
+        })
+        break
+      } catch (error) {
+        if (offset === attempts - 1 || !isAddressInUse(error)) {
+          // Vite was started above, before anything tried to bind. Letting the
+          // throw escape past it strands an asset server and its published env
+          // vars in a process that has no application server — visible to any
+          // caller that handles the rejection instead of exiting, which is
+          // exactly what `GUREN_STRICT_PORT=1` invites callers to do.
+          if (startedViteHere) {
+            await this.closeViteDevServer()
+          }
+
+          throw error
+        }
+
+        console.warn(`[guren] Port ${attemptPort} is in use, trying ${attemptPort + 1}...`)
+      }
+    }
+
+    if (!server) {
+      throw new Error('Bun.serve did not return a server instance')
+    }
+
+    // Prefer what the runtime reports; `attemptPort` is the honest fallback,
+    // because `Bun.serve` returned for exactly that port — unlike the
+    // *requested* port, which a walk has already made wrong.
+    //
+    // `port: 0` is the one case with no fallback: the OS chose, and a stub
+    // that reports nothing leaves the answer genuinely unknowable. Everything
+    // else degrades rather than turning a reporting gap into an outage, since
+    // the socket is already open by this point.
+    let boundPort = server.port
+    if (typeof boundPort !== 'number') {
+      if (port === 0) {
+        // Nothing has registered this socket's teardown yet, so close it here
+        // rather than leaking it for the process lifetime.
+        await server.stop?.(true)
+        throw new Error(
+          'Bun.serve did not report a bound port for `port: 0`. Application.listen cannot report the address it is serving on.',
+        )
+      }
+
+      boundPort = attemptPort
+    }
+
+    const boundHostname = server.hostname ?? hostname
     this.bunServer = server
     setActiveBunServer(server)
     this.registerBunTeardown()
@@ -570,10 +739,16 @@ export class Application {
 
     if (shouldLogBanner) {
       this.logDevServerBanner({
-        hostname,
-        port,
+        hostname: boundHostname,
+        port: boundPort,
         assetsUrl: resolvedAssetsUrl ?? 'http://localhost:5173',
       })
+    }
+
+    return {
+      port: boundPort,
+      hostname: boundHostname,
+      url: toConnectableUrl(boundHostname, boundPort),
     }
   }
 

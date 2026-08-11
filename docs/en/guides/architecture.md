@@ -229,7 +229,19 @@ export class Post extends defineModel(posts) {
    })
    ```
 3. `await app.boot()` to mount routes, run provider register/boot hooks, and prepare middleware.
-4. `await app.listen()` to start the HTTP server.
+4. `await app.listen()` to start the HTTP server. It resolves to the address it
+   actually bound — `{ port, hostname, url }` — which is not always the port you
+   asked for: `port: 0` lets the OS choose, and outside production a busy port
+   makes it try the next one. Read the port from the return value rather than
+   assuming the requested one:
+
+   ```ts
+   const { url, port } = await app.listen({ port: 3333 })
+   console.log(`listening on ${url}`) // the port that is actually bound
+   ```
+
+   Pass `portFallback: false` (or set `GUREN_STRICT_PORT=1`) to fail fast on
+   `EADDRINUSE` instead of moving to another port.
 
 This process runs under Bun as a native module and is triggered by `bun run dev`.
 
