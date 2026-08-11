@@ -170,9 +170,8 @@ The API-only blueprint gets a variant without browser-specific steps.
 surfaced a pre-existing false positive that would have failed every API-only
 app's CI — `check` demanded `.guren/pages.gen.ts` unconditionally, but codegen
 never emits it for an app with no page components. The expectation now asks
-codegen's own rule (`appEmitsPageManifest`, a predicate over the same
-`collectPageDefinitions` scan), so the two cannot drift. `doctor` carries the
-same false positive and is tracked separately.
+codegen's own rule (`planPageManifest`), so the two cannot drift. `doctor` reads
+the same rule.
 
 ## Alternatives Considered
 

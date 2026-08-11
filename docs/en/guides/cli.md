@@ -93,13 +93,14 @@ can be wired into `routes/api.ts` as-is. Whenever the signals cannot confirm an
 API-only app, you get the usual Inertia template — installing
 `@guren/inertia-client` is enough to switch back.
 
-`make:view` refuses on those signals like the scaffolds above, because a page
-has no JSON shape to adapt to — and a stray one would not stay harmless:
-`guren codegen` (which `bun run dev` runs for you) folds every component under
-`resources/js/pages` into `.guren/pages.gen.ts`, and that file imports the
-`@guren/inertia-client` an API-only app never installs, breaking `typecheck`
-two commands later. Install `@guren/inertia-client` first when taking an API
-app fullstack, and the command works again.
+`make:view` refuses on those signals like the scaffolds above, because a page has
+no JSON shape to adapt to and the app has no way to render one. `guren codegen`
+(which `bun run dev` runs for you) leaves such components out of
+`.guren/pages.gen.ts` rather than folding them in — that file imports the
+`@guren/inertia-client` an API-only app never installs — so the refusal is about
+saying so at the command that caused it, not about preventing a broken
+`typecheck`. Install `@guren/inertia-client` first when taking an API app
+fullstack, and the command works again.
 
 `add resource` also needs the two files it patches to be there, whatever shape the
 rest of your app is: it appends its table to `db/schema.ts` and registers the CRUD

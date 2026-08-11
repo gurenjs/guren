@@ -26,6 +26,11 @@ export interface ScaffoldOptions {
  * found nothing to describe and wrote no file (a project with no page
  * components, for instance).
  *
+ * `skipped` is an optional sentence explaining that empty `outputPath` when
+ * "nothing to describe" would be wrong — the pages generator declines to write
+ * a manifest into an app that cannot compile one, and an agent reading this
+ * result is exactly who needs to hear that a page it just wrote was ignored.
+ *
  * `definitions` is the route manifest `generateRouteTypes` builds. It stays
  * opaque here — this package only carries it from one CLI call to the next
  * (`generateApiClientTypes` consumes it) and never reads inside it, so
@@ -34,6 +39,7 @@ export interface ScaffoldOptions {
 export interface CodegenResult {
   outputPath?: string
   definitions?: unknown[]
+  skipped?: { message: string } | null
 }
 
 /**
@@ -363,7 +369,7 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
         try {
           const result = await generate()
           if (result?.outputPath === '') {
-            skipped.push({ artifacts, reason: 'nothing to generate' })
+            skipped.push({ artifacts, reason: result.skipped?.message ?? 'nothing to generate' })
           } else {
             generated.push(...artifacts)
           }

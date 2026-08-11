@@ -18,7 +18,12 @@ import {
 } from './discovery'
 import { checkPluginCompatibility, readCoreVersion, readInstalledPluginManifests } from './plugin-manifest'
 import { compareVersions } from './codemods'
-import { appEmitsPageManifest } from './pages-types'
+import {
+  describePageManifestSuppression,
+  PAGES_MANIFEST_FILE,
+  planPageManifest,
+  type PageManifestPlan,
+} from './pages-types'
 import { extractClassDeclaration } from './model-parser'
 import { parseSourceFile } from './parse-cache'
 import { ROUTES_ENTRY_CANDIDATES } from './route-registrar'
@@ -112,7 +117,7 @@ interface DoctorRuleContext {
   // Shared so every rule that checks for Inertia pages sees the same
   // snapshot of the filesystem — computing it per-rule would let concurrent
   // rules disagree if a page file were added or removed mid-run.
-  pagesExpected: Promise<boolean>
+  pageManifest: Promise<PageManifestPlan>
 }
 
 interface DoctorRule {
@@ -128,8 +133,8 @@ type JsonReadResult<T> =
   | { exists: true; raw: string; value: null; parseError: Error }
 
 const APP_ENTRY_CANDIDATES = ['src/main.ts', 'src/main.mts', 'src/main.js', 'src/main.mjs']
-const PAGE_CONTRACT_CANDIDATES = ['.guren/pages.gen.ts']
-const GENERATED_FILES = ['.guren/routes.gen.ts', '.guren/pages.gen.ts', '.guren/data.gen.ts', '.guren/api-client.gen.ts', '.guren/channels.gen.ts']
+const PAGE_CONTRACT_CANDIDATES = [PAGES_MANIFEST_FILE]
+const GENERATED_FILES = ['.guren/routes.gen.ts', PAGES_MANIFEST_FILE, '.guren/data.gen.ts', '.guren/api-client.gen.ts', '.guren/channels.gen.ts']
 
 export const DOCTOR_RECOMMENDED_COMMANDS = [
   'bunx guren codegen --force',
@@ -292,14 +297,37 @@ async function detectRoutes(context: DoctorRuleContext): Promise<DoctorCheck> {
   return createCheck('routes', 'Route Sources', 'pass', `Found ${routesFile}.`)
 }
 
+/**
+ * The two rules below both report on `.guren/pages.gen.ts`, and both used to
+ * answer "is it there?" first. That is the wrong order once codegen can decline
+ * to write the file: the state worth reporting is a manifest that is present
+ * *and* would not be regenerated, because it imports a package the app does not
+ * have and is what fails the typecheck. What to say about it belongs to codegen
+ * — see `describePageManifestSuppression` — so these rules choose only the key
+ * and the title.
+ */
+function createSuppressedPagesCheck(
+  key: string,
+  title: string,
+  suppressed: NonNullable<ReturnType<typeof describePageManifestSuppression>>,
+): DoctorCheck {
+  return createCheck(key, title, 'warn', suppressed.message, { manualFix: suppressed.fix })
+}
+
 async function detectPageContracts(context: DoctorRuleContext): Promise<DoctorCheck> {
+  const plan = await context.pageManifest
+  const suppressed = describePageManifestSuppression(plan)
+
+  if (suppressed) {
+    return createSuppressedPagesCheck('page-contracts', 'Page Types', suppressed)
+  }
+
   const pageContracts = await findFirstExisting(context.cwd, PAGE_CONTRACT_CANDIDATES)
   if (pageContracts) {
     return createCheck('page-contracts', 'Page Types', 'pass', `Found ${pageContracts}.`)
   }
 
-  // An API-only app never gets a manifest out of codegen, so warning there is a false positive.
-  if (!(await context.pagesExpected)) {
+  if (plan.reason !== 'pages') {
     return createCheck(
       'page-contracts',
       'Page Types',
@@ -327,12 +355,18 @@ function createGeneratedManifestRule(generatedFile: string): DoctorRule {
     key,
     title: generatedFile,
     async detect(context) {
+      const plan = generatedFile === PAGES_MANIFEST_FILE ? await context.pageManifest : null
+      const suppressed = plan ? describePageManifestSuppression(plan) : null
+
+      if (suppressed) {
+        return createSuppressedPagesCheck(key, generatedFile, suppressed)
+      }
+
       if (await fileExists(context.cwd, generatedFile)) {
         return createCheck(key, generatedFile, 'pass', `Generated manifest present at ${generatedFile}.`)
       }
 
-      // An API-only app never gets a pages manifest out of codegen, so warning there is a false positive.
-      if (generatedFile === '.guren/pages.gen.ts' && !(await context.pagesExpected)) {
+      if (plan && plan.reason !== 'pages') {
         return createCheck(
           key,
           generatedFile,
@@ -1219,7 +1253,7 @@ export async function getDoctorRuleEvaluations(options: { cwd?: string } = {}): 
   evaluations: DoctorRuleEvaluation[]
 }> {
   const cwd = resolve(options.cwd ?? process.cwd())
-  const context: DoctorRuleContext = { cwd, pagesExpected: appEmitsPageManifest(cwd) }
+  const context: DoctorRuleContext = { cwd, pageManifest: planPageManifest(cwd) }
 
   // The deploy-runtime checks share one filesystem scan, computed once here
   // rather than through the DoctorRule interface (they need no autofix and no
@@ -1411,10 +1445,10 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
     // Ignore
   }
 
-  const hasPages = await appEmitsPageManifest(cwd)
+  const pagesPlan = await planPageManifest(cwd)
   const requiredManifests = [
     '.guren/routes.gen.ts',
-    ...(hasPages ? ['.guren/pages.gen.ts'] : []),
+    ...(pagesPlan.reason === 'pages' ? [PAGES_MANIFEST_FILE] : []),
     '.guren/data.gen.ts',
     '.guren/api-client.gen.ts',
   ]

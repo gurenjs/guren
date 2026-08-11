@@ -92,12 +92,13 @@ JSON(`this.json(...)`)を返すため、そのまま型検査を通り、`routes
 元に戻ります。
 
 `make:view` は上記のスキャフォールドと同様、同じシグナルで中断します。ページには
-適応できる JSON 版が存在せず、置き去りのページは無害でもないためです。
-`guren codegen`(`bun run dev` が自動実行します)は `resources/js/pages` 配下の
-すべてのコンポーネントを `.guren/pages.gen.ts` に取り込み、このファイルは
-API専用アプリがインストールしない `@guren/inertia-client` を import するため、
-2コマンド後に `typecheck` が壊れます。API アプリをフルスタック化するときは、
-先に `@guren/inertia-client` をインストールすれば再び使えるようになります。
+適応できる JSON 版が存在せず、そのアプリにはページを描画する手段がないためです。
+`guren codegen`(`bun run dev` が自動実行します)はそうしたコンポーネントを
+`.guren/pages.gen.ts` に取り込まず除外します — このファイルは API専用アプリが
+インストールしない `@guren/inertia-client` を import するためです。つまり中断は
+`typecheck` の破壊を防ぐためではなく、原因となったコマンドの時点でそれを伝える
+ためのものです。API アプリをフルスタック化するときは、先に
+`@guren/inertia-client` をインストールすれば再び使えるようになります。
 
 `add resource` は、アプリの形がどうであれ、パッチ対象の2つのファイルがそこにあることも
 必要とします。テーブル定義を `db/schema.ts` に追記し、CRUD ルートを `routes/web.ts` に

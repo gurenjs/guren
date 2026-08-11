@@ -30,7 +30,7 @@ import { checkSchemaTimestamps } from './schema-check'
 import { parseSchemaTables, schemaPathFor, type SchemaTable } from './schema-parser'
 import { ParseCache } from './parse-cache'
 import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath } from './inertia-pages'
-import { appEmitsPageManifest } from './pages-types'
+import { describePageManifestSuppression, PAGES_MANIFEST_FILE, planPageManifest } from './pages-types'
 import { runArchCheck } from './arch-check'
 import { runDocsCheck } from './docs-check'
 import { runI18nCheck } from './i18n-check'
@@ -190,13 +190,25 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       checks.push({ ...check(`test:${name}`, `${name} tests`, hasTest ? 'pass' : 'warn', message, suggestion), advisory: true })
     }
 
-    // 5. Check generated manifests are present. The pages manifest only
-    // exists for apps with Inertia pages — codegen never emits it in an
-    // API-only app, so demanding it there is a false positive.
-    const hasPages = await appEmitsPageManifest(cwd)
+    // 5. Check generated manifests are present. Whether the pages manifest is
+    // one of them is codegen's call, not this file's — an app with no page
+    // components has none, and neither does an API-only app that somehow
+    // acquired some (see planPageManifest).
+    const pagesPlan = await planPageManifest(cwd)
+    // The suppressed manifest, reported rather than assumed. The manifest list
+    // below drops the file on this branch, so without this nothing would say a
+    // word about one left on disk importing a package the app does not have —
+    // which is the state that actually fails the typecheck.
+    const suppressed = describePageManifestSuppression(pagesPlan)
+    if (suppressed) {
+      checks.push({
+        ...check('pages-manifest', 'Pages manifest', 'warn', suppressed.message, suppressed.fix),
+        advisory: suppressed.advisory,
+      })
+    }
     const manifests = [
       '.guren/routes.gen.ts',
-      ...(hasPages ? ['.guren/pages.gen.ts'] : []),
+      ...(pagesPlan.reason === 'pages' ? [PAGES_MANIFEST_FILE] : []),
       '.guren/data.gen.ts',
     ]
     for (const manifest of manifests) {

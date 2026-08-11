@@ -3,7 +3,16 @@ import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import { runCheck, type CheckReport, type CheckResult, type RunCheckOptions } from '../src/check'
-import { createTempWorkspace, writeWorkspaceFiles, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE } from './helpers'
+import {
+  API_ONLY_APP_FILES,
+  API_ONLY_REFUSAL,
+  BLOG_ROUTES_FIXTURE,
+  createTempWorkspace,
+  PAGE_COMPONENT_FIXTURE,
+  writeWorkspaceFiles,
+  MYSQL_SCHEMA_FIXTURE,
+  PG_SCHEMA_FIXTURE,
+} from './helpers'
 
 /** Run a check over a throwaway workspace built from path → content. */
 async function withWorkspace(
@@ -885,6 +894,80 @@ export const posts = pgTable('posts', { createdAt: timestamp('created_at') })
 
       expect(timestamptzFindings(report)).toHaveLength(0)
     })
+  })
+})
+
+/**
+ * `.guren/pages.gen.ts` imports `@guren/inertia-client`, and the api blueprint's
+ * tsconfig type-checks `.guren/**` without installing that package — so codegen
+ * declines to write the manifest there, however many page components turn up.
+ * That decision is only safe if it is visible: an app misread as API-only loses
+ * a file its controllers import, and a manifest generated before the app took
+ * this shape stays on disk failing the typecheck. Both states are reported here.
+ */
+describe('pages manifest on an API-only app', () => {
+  const withPage = { ...API_ONLY_APP_FILES, 'resources/js/pages/Home.tsx': PAGE_COMPONENT_FIXTURE }
+  const STALE_MANIFEST = '// generated when this app still had a client\n'
+
+  it('warns that a manifest on disk is one codegen would not write', async () => {
+    const report = await withWorkspace({ ...withPage, '.guren/pages.gen.ts': STALE_MANIFEST })
+
+    const pagesCheck = report.checks.find((c) => c.key === 'pages-manifest')
+
+    expect(pagesCheck?.status).toBe('warn')
+    expect(pagesCheck?.message).toContain('1 page component under resources/js/pages')
+    expect(pagesCheck?.message).toMatch(API_ONLY_REFUSAL)
+    // Reported, never removed — codegen leaving it on disk is covered in
+    // pages-types.test.ts, and is deliberate: if the rule is ever wrong about
+    // an app, deleting the manifest turns a type error into a mystery.
+    expect(pagesCheck?.suggestion).toContain('Delete .guren/pages.gen.ts')
+    // This one really does fail `tsc`, so `check --ci` has to gate on it.
+    expect(pagesCheck?.advisory).toBe(false)
+  })
+
+  // The page components can be deleted again while the manifest they produced
+  // stays; nothing else in the run looks at a file codegen would not write.
+  it('warns about the leftover manifest even after the pages are gone', async () => {
+    const report = await withWorkspace({ ...API_ONLY_APP_FILES, '.guren/pages.gen.ts': STALE_MANIFEST })
+
+    const pagesCheck = report.checks.find((c) => c.key === 'pages-manifest')
+
+    expect(pagesCheck?.status).toBe('warn')
+    expect(pagesCheck?.message).toContain('.guren/pages.gen.ts is present but codegen would not write it')
+    expect(pagesCheck?.message).not.toContain('page component')
+    expect(pagesCheck?.advisory).toBe(false)
+  })
+
+  it('reports page components no manifest will describe, without failing CI over them', async () => {
+    const report = await withWorkspace(withPage)
+
+    const pagesCheck = report.checks.find((c) => c.key === 'pages-manifest')
+
+    expect(pagesCheck?.status).toBe('warn')
+    expect(pagesCheck?.suggestion).toContain('add its @guren/inertia-client dependency')
+    // Unused page components break nothing, so `check --ci` must not fail on
+    // them the way it does on the leftover manifest above.
+    expect(pagesCheck?.advisory).toBe(true)
+    // Nothing is missing here, so the manifest must stay out of the list of
+    // artifacts codegen is told to produce.
+    expect(report.checks.some((c) => c.key === 'manifest:.guren/pages.gen.ts')).toBe(false)
+  })
+
+  it('says nothing about a fullstack app, which is still told to generate one', async () => {
+    const report = await withWorkspace({
+      ...withPage,
+      'routes/web.ts': BLOG_ROUTES_FIXTURE,
+    })
+
+    expect(report.checks.some((c) => c.key === 'pages-manifest')).toBe(false)
+    expect(report.checks.find((c) => c.key === 'manifest:.guren/pages.gen.ts')?.status).toBe('warn')
+  })
+
+  it('says nothing about an API-only app with no page components', async () => {
+    const report = await withWorkspace(API_ONLY_APP_FILES)
+
+    expect(report.checks.some((c) => c.key === 'pages-manifest')).toBe(false)
+    expect(report.checks.some((c) => c.key === 'manifest:.guren/pages.gen.ts')).toBe(false)
   })
 })
 
