@@ -17,10 +17,10 @@
  * version that falls behind fails CI on the PR that introduces it rather than on
  * a user's first `bunx create-guren-app`.
  */
-import { readFile, readdir, writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import process from 'node:process'
-import { TEMPLATES_ROOT } from '../packages/create-app/src/blueprints'
+import { templateManifests } from '../packages/create-app/src/blueprints'
 import {
   PIN_SOURCE,
   planDrizzlePins,
@@ -58,23 +58,6 @@ async function workspaceRanges(): Promise<Map<string, string>> {
   }
 
   return ranges
-}
-
-/** Every template that ships a manifest — `blog` and `default-ssr` overlay one instead. */
-async function templateManifests(): Promise<string[]> {
-  const paths: string[] = []
-
-  for (const entry of await readdir(TEMPLATES_ROOT, { withFileTypes: true })) {
-    if (!entry.isDirectory()) {
-      continue
-    }
-    const path = join(TEMPLATES_ROOT, entry.name, 'package.json')
-    if (await Bun.file(path).exists()) {
-      paths.push(path)
-    }
-  }
-
-  return paths
 }
 
 /** `packages/orm`'s own manifest — the pin the templates' drizzle versions follow. */

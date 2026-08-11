@@ -2,22 +2,12 @@ import { cp, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import process from 'node:process'
 import { upgradeCanary } from '../../packages/cli/src/upgrade'
+import { assertLocalGurenDependencies, collectLocalPackages } from './local-packages'
 
 const repoRoot = resolve(import.meta.dir, '../..')
 const appFixture = resolve(repoRoot, 'examples/blog')
 const tempRootBase = resolve(repoRoot, '.upgrade-existing-smoke-')
 const FIXTURE_VERSION = '9.9.9'
-
-const localPackageDirs = {
-  '@guren/cli': resolve(repoRoot, 'packages/cli'),
-  '@guren/core': resolve(repoRoot, 'packages/core'),
-  '@guren/inertia-client': resolve(repoRoot, 'packages/inertia-client'),
-  '@guren/orm': resolve(repoRoot, 'packages/orm'),
-  '@guren/server': resolve(repoRoot, 'packages/server'),
-  '@guren/testing': resolve(repoRoot, 'packages/testing'),
-} as const
-
-type LocalPackageName = keyof typeof localPackageDirs
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -47,20 +37,27 @@ async function rewriteManifestToLocalFiles(appDir: string): Promise<void> {
     devDependencies?: Record<string, string>
   }
 
+  const localPackages = await collectLocalPackages()
+
   for (const field of ['dependencies', 'devDependencies'] as const) {
     const dependencies = manifest[field]
     if (!dependencies) {
       continue
     }
 
-    for (const [name, packageDir] of Object.entries(localPackageDirs) as Array<[LocalPackageName, string]>) {
-      if (dependencies[name]) {
-        dependencies[name] = `file:${relative(appDir, packageDir)}`
+    for (const pkg of localPackages) {
+      if (dependencies[pkg.name]) {
+        dependencies[pkg.name] = `file:${relative(appDir, pkg.sourceDir)}`
       }
     }
   }
 
   await writeFile(packageJsonPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
+
+  // `upgrade` has just rewritten every @guren/* range to the fixture version,
+  // which no registry has. Anything the vendor set does not cover would be
+  // installed from npm — so fail here, naming it, rather than at `bun install`.
+  await assertLocalGurenDependencies(appDir, 'The upgraded fixture app')
 }
 
 async function degradeFixtureApp(appDir: string): Promise<void> {

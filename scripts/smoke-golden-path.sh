@@ -7,8 +7,16 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TEMP_DIR=""
+SERVER_PID=""
+
+# Redefined once the runtime smoke has a server to kill; until then there is
+# nothing to stop. Declared here so cleanup() can be written once — the same
+# handler ran before and after that point, and keeping one copy is what stops
+# the two from drifting.
+stop_server() { :; }
 
 cleanup() {
+  stop_server
   if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ]; then
     # Same opt-out as scripts/smoke/fresh-app.ts: a failure here is only
     # diagnosable from the app it built.
@@ -79,21 +87,18 @@ elif [ "$SMOKE_DB" = "mysql" ]; then
   export DATABASE_URL="${GUREN_SMOKE_DATABASE_URL:-mysql://root:guren@localhost:33306/guren_smoke}"
 fi
 
-PACKAGES="cli core inertia-client orm server testing"
+# Which @guren/* packages this run resolves from the checkout is derived, not
+# listed here — see scripts/smoke/local-packages.ts. This file used to hold two
+# copies of that list, and @guren/testing was missing from both: every run
+# resolved it from the registry and gated a published copy.
+LOCAL_PACKAGES_BIN="$REPO_ROOT/scripts/smoke/local-packages.ts"
 
 # ---------------------------------------------------------------------------
 # Pre-flight: ensure packages are built
 # ---------------------------------------------------------------------------
 step 0 "Verify packages are built"
 
-for pkg in $PACKAGES; do
-  if [ ! -f "$REPO_ROOT/packages/$pkg/dist/index.js" ]; then
-    echo "ERROR: packages/$pkg/dist/index.js not found. Run 'bun run build' first."
-    exit 1
-  fi
-done
-
-echo "All packages have build output."
+bun "$LOCAL_PACKAGES_BIN" ensure-built
 
 # ---------------------------------------------------------------------------
 # Step 1: Create a fresh app in a temp directory
@@ -114,72 +119,13 @@ bun "$CREATE_APP_BIN" "$APP_DIR" --mode ssr --db "$SMOKE_DB"
 step 2 "Vendor local packages into the app"
 
 VENDOR_DIR="$APP_DIR/.guren-vendor"
-mkdir -p "$VENDOR_DIR"
 
-for pkg in $PACKAGES; do
-  src="$REPO_ROOT/packages/$pkg"
-  dst="$VENDOR_DIR/$pkg"
-  mkdir -p "$dst"
-  cp -R "$src/dist" "$dst/dist"
-  cp "$src/package.json" "$dst/package.json"
-  echo "  Vendored @guren/$pkg"
-done
-
-# Rewrite all dependency references to vendored file: paths using a single
-# bun script so we avoid fragile shell-interpolated node one-liners.
-bun -e "
-import fs from 'node:fs';
-import path from 'node:path';
-
-const appDir = '$APP_DIR';
-const vendorDir = '$VENDOR_DIR';
-const packages = 'cli core inertia-client orm server testing'.split(' ');
-
-function rewriteDeps(pkgJsonPath, resolver) {
-  const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
-  const dir = path.dirname(pkgJsonPath);
-  for (const field of ['dependencies', 'devDependencies', 'peerDependencies']) {
-    if (!pkg[field]) continue;
-    for (const name of packages) {
-      const fullName = '@guren/' + name;
-      if (pkg[field][fullName]) {
-        pkg[field][fullName] = resolver(dir, name);
-      }
-    }
-  }
-  fs.writeFileSync(pkgJsonPath, JSON.stringify(pkg, null, 2) + '\n');
-}
-
-// Rewrite the app package.json AND ensure all vendored packages appear as
-// direct dependencies so bun hoists them into node_modules/@guren/*.
-// Replace the entry where the template already declares it — @guren/testing is
-// a devDependency, and writing it to dependencies instead would leave that
-// declaration behind for bun to resolve against the registry, where an
-// unreleased version does not exist. A devDependency of the app is a direct
-// dependency too, so it hoists the same way.
-const appPkgJsonPath = path.join(appDir, 'package.json');
-const appPkg = JSON.parse(fs.readFileSync(appPkgJsonPath, 'utf8'));
-appPkg.dependencies = appPkg.dependencies || {};
-for (const name of packages) {
-  const fullName = '@guren/' + name;
-  const rel = path.relative(appDir, path.join(vendorDir, name)).replace(/\\\\/g, '/');
-  const field = ['dependencies', 'devDependencies', 'peerDependencies'].find((f) => appPkg[f] && appPkg[f][fullName]);
-  appPkg[field || 'dependencies'][fullName] = 'file:' + rel;
-}
-fs.writeFileSync(appPkgJsonPath, JSON.stringify(appPkg, null, 2) + '\n');
-
-// Rewrite each vendored package's cross-references
-for (const name of packages) {
-  const vendorPkgJson = path.join(vendorDir, name, 'package.json');
-  if (!fs.existsSync(vendorPkgJson)) continue;
-  rewriteDeps(vendorPkgJson, (dir, depName) => {
-    const rel = path.relative(dir, path.join(vendorDir, depName)).replace(/\\\\/g, '/') || '.';
-    return 'file:' + rel;
-  });
-}
-
-console.log('  Rewrote dependency references to vendored paths.');
-"
+# Copies each package's dist/ and manifest into the app, points their
+# cross-references at each other, and rewrites the app's own @guren/*
+# dependencies at the entry the template declares them in — a devDependency
+# rewritten into `dependencies` would leave the template's published range
+# behind for bun to resolve from the registry.
+bun "$LOCAL_PACKAGES_BIN" vendor "$APP_DIR" "$VENDOR_DIR"
 
 echo ""
 echo "  Running bun install..."
@@ -299,28 +245,13 @@ step 15 "Re-run build (post add-on composition)"
 # ---------------------------------------------------------------------------
 step 16 "Runtime HTTP smoke (login + CRUD + CSRF)"
 
-SERVER_PID=""
-
+# From here the trap has a server to stop; cleanup() already calls this.
 stop_server() {
   if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
     kill "$SERVER_PID" 2>/dev/null || true
     wait "$SERVER_PID" 2>/dev/null || true
   fi
   SERVER_PID=""
-}
-
-cleanup() {
-  stop_server
-  if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ]; then
-    if [ "${GUREN_KEEP_SMOKE_DIR:-}" = "1" ]; then
-      echo ""
-      echo "=== Keeping smoke workspace: $TEMP_DIR ==="
-      return
-    fi
-    echo ""
-    echo "=== Cleanup: removing $TEMP_DIR ==="
-    rm -rf "$TEMP_DIR"
-  fi
 }
 
 (cd "$APP_DIR" && bun run db:make)

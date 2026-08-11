@@ -68,10 +68,14 @@ async function testPathFor(pkg: { dir: string; relativeDir: string }): Promise<s
 // the moment cwd moves.
 const cwdGuard = join(import.meta.dir, 'test-cwd-guard.ts')
 
-// The guard's own predicates live outside packages/, so a package sweep would
+// Detectors whose own code lives outside packages/, so a package sweep would
 // never run them — and a detector that silently stops detecting is worth
-// nothing. Included only on an unfiltered run, so `test:bun cli` stays narrow.
-const guardTests = selectors.length === 0 ? ['scripts/test-cwd-guard.test.ts'] : []
+// nothing. The smoke package list is here for the same reason: the gates that
+// consume it take ten minutes each, so nothing else would notice it narrowing.
+// Included only on an unfiltered run, so `test:bun cli` stays narrow.
+const guardTests = selectors.length === 0
+  ? ['scripts/test-cwd-guard.test.ts', 'scripts/smoke/local-packages.test.ts']
+  : []
 
 const testArgs = [
   'test',
