@@ -13,29 +13,45 @@ Requests run in-process through `app.fetch()` — no server, no port.
 ```typescript
 import { TestApp } from '@guren/testing'
 
-const app = await TestApp.create()             // boots a fresh Application
-const app = await TestApp.create({ boot, providers, routes })  // all optional
-const app = TestApp.fromFetch((req) => app.fetch(req))  // wrap an existing fetch fn (not async)
+const http = await TestApp.create()             // boots a fresh Application
+const http = await TestApp.create({ boot, providers, routes })  // all optional
+const http = await TestApp.fromApp(app)         // wrap the app exported by src/app.ts
 ```
 
 **Prefer wrapping the real app.** Scaffolded apps export the configured
-application from `src/app.ts` — boot it and wrap it so tests exercise the
-app's actual configuration (providers, auth, i18n, security defaults)
-instead of reconstructing a subset that silently drifts:
+application from `src/app.ts` — wrap it so tests exercise the app's actual
+configuration (providers, auth, i18n, security defaults) instead of
+reconstructing a subset that silently drifts:
 
 ```typescript
 import app from '../src/app.js'
 
-await app.boot()
-const http = TestApp.fromFetch((request) => app.fetch(request))
+const http = await TestApp.fromApp(app)
 ```
 
-Keep `TestApp.create({ ... })` for isolated slices (a single route or
-middleware under test). Pass `app.fetch` through an arrow — the method
-reads instance state, so handing the unbound reference over throws at the
-first request.
+`fromApp()` boots the app for you and binds its `fetch` to the instance.
+It is `async` — `await` it. Calling it from several test files is fine:
+`Application.boot()` is idempotent and reuses the first boot.
 
-Both set `GUREN_TESTING=1` so `actingAs()` header auth is accepted.
+Keep `TestApp.create({ ... })` for isolated slices (a single route or
+middleware under test).
+
+`TestApp.fromFetch(fn)` — the only one of the three that is *not* async —
+wraps an arbitrary fetch function, e.g. a bare Hono app:
+
+```typescript
+const hono = new Hono()
+const http = TestApp.fromFetch((request) => hono.fetch(request))
+```
+
+Do not reach for it to wrap a Guren `Application`; use `fromApp()`. Hand-wiring
+one is where the footgun lives: `Application.fetch` reads instance state, so
+`fromFetch(app.fetch)` throws `undefined is not an object (evaluating
+'this.hono')` at the first request. It has to be an arrow —
+`fromFetch((request) => app.fetch(request))` — which is exactly what
+`fromApp()` does for you.
+
+All three set `GUREN_TESTING=1` so `actingAs()` header auth is accepted.
 
 **Session + CSRF in tests.** `TestApp.create()` accepts `auth` just like `createApp({ auth: {} })`. Without it, session + CSRF middleware are **not** mounted — JSON requests (`app.json().post(...)`) pass with no CSRF check at all, which is fine for quick validation/auth-guard checks but not representative of production. To exercise real CSRF behavior (and for `withCsrf()` to work — it throws `"did not set an XSRF-TOKEN cookie"` otherwise):
 

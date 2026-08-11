@@ -38,7 +38,7 @@ describe('Posts API', () => {
 
 ### 実アプリをラップする
 
-`TestApp.create({ ... })`は渡したパーツからアプリを組み立てます — 単体スライスのテストには便利ですが、その部分集合はサーバーが実際に動かす構成(プロバイダー、`auth`、`i18n`、セキュリティデフォルト)から静かにドリフトし得ます。実構成を検証したいテストでは、プロジェクトがエクスポートするアプリをbootしてfetchハンドラをラップします:
+`TestApp.create({ ... })`は渡したパーツからアプリを組み立てます — 単体スライスのテストには便利ですが、その部分集合はサーバーが実際に動かす構成(プロバイダー、`auth`、`i18n`、セキュリティデフォルト)から静かにドリフトし得ます。実構成を検証したいテストでは、プロジェクトがエクスポートするアプリをラップします:
 
 ```ts
 import { TestApp } from '@guren/testing'
@@ -47,8 +47,7 @@ import app from '../src/app.js'
 let http: TestApp
 
 beforeAll(async () => {
-  await app.boot()
-  http = TestApp.fromFetch((request) => app.fetch(request))
+  http = await TestApp.fromApp(app)
 })
 
 test('ホームページを返す', async () => {
@@ -56,7 +55,14 @@ test('ホームページを返す', async () => {
 })
 ```
 
-scaffoldされたアプリはこのパターンを同梱しています。`app.fetch`は必ずアロー関数経由で渡してください — メソッドはインスタンス状態を読むため、束縛せずに渡すと最初のリクエストで例外になります。
+`fromApp()`はアプリのbootとfetchハンドラの束縛を代わりに行います。同じインスタンスに対して複数のテストファイルから呼んで構いません — `boot()`は冪等で、最初のbootを再利用します。
+
+同じことを手作業で行う次の長い形も見かけるでしょう。アロー関数に注目してください — `fetch`はインスタンス状態を読むため、束縛していない`app.fetch`をそのまま`fromFetch`に渡すと最初のリクエストで例外になります。`fromApp()`はこの罠を取り除くために存在します。`fromFetch`は、Gurenアプリケーションではなく任意のfetch関数を持っている場合に使ってください。
+
+```ts
+await app.boot()
+http = TestApp.fromFetch((request) => app.fetch(request))
+```
 
 パーツから組み立てる場合、`TestApp.create()`は`createApp`のオプションをミラーします: セッション+CSRFミドルウェアには`auth`を、テスト対象のコントローラーが`this.t()` / `this.tc()`を使うなら`i18n`を渡します:
 
