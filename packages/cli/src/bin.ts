@@ -37,7 +37,7 @@ import { runDatabaseMigrations, runDatabaseSeeders, resetDatabase } from './db-m
 import { showMigrationStatus } from './db-status'
 import type { WriterOptions } from './utils'
 import { generateRouteTypes } from './routes-types'
-import { generatePageTypes } from './pages-types'
+import { describePageManifestSuppression, generatePageTypes, type PageManifestPlan } from './pages-types'
 import { generateTranslationTypes } from './i18n-types'
 import { generateDataTypes } from './data-types'
 import { generateApiClientTypes } from './api-client-types'
@@ -835,6 +835,20 @@ const freshCommand = defineCommand({
   },
 })
 
+/**
+ * Says out loud that page components were found and deliberately not compiled
+ * into a manifest. Silence here would be the whole hazard of the rule: a
+ * fullstack app misread as API-only loses `.guren/pages.gen.ts` with nothing on
+ * screen to explain it. `guren check` and `guren doctor` report the same state
+ * for the run where nobody was watching this line go by.
+ */
+function reportSuppressedPageManifest(plan: PageManifestPlan): void {
+  const suppressed = describePageManifestSuppression(plan)
+  if (!suppressed) return
+
+  consola.warn(`${suppressed.message} ${suppressed.fix}`)
+}
+
 const routeTypesCommand = defineCommand({
   meta: {
     name: 'routes:types',
@@ -874,7 +888,7 @@ const routeTypesCommand = defineCommand({
   },
   async run({ args }) {
     const writerOptions = toWriterOptions(args)
-    const { outputPath: pagesOutputPath } = await generatePageTypes({
+    const { outputPath: pagesOutputPath, plan: pagesPlan } = await generatePageTypes({
       appRoot: args.app,
       pagesDir: args.pages,
       outputFile: args.pagesOut,
@@ -886,7 +900,8 @@ const routeTypesCommand = defineCommand({
       appRoot: args.app,
       ...writerOptions,
     })
-    consola.success(`Page helpers generated at ${pagesOutputPath}`)
+    if (pagesOutputPath) consola.success(`Page helpers generated at ${pagesOutputPath}`)
+    reportSuppressedPageManifest(pagesPlan)
     consola.success(`Route types generated at ${outputPath}`)
     consola.success(`Route helpers generated at ${runtimeOutputPath}`)
     process.exit(0)
@@ -907,7 +922,7 @@ const codegenCommand = defineCommand({
     // to protect hand-maintained files). --force is still accepted for
     // backward compatibility but is a no-op.
     const writerOptions: WriterOptions = { ...toWriterOptions(args), force: true }
-    const { outputPath: pagesOutputPath } = await generatePageTypes({
+    const { outputPath: pagesOutputPath, plan: pagesPlan } = await generatePageTypes({
       appRoot: args.app,
       pagesDir: args.pages,
       outputFile: args.pagesOut,
@@ -915,6 +930,7 @@ const codegenCommand = defineCommand({
       ...writerOptions,
     })
     if (pagesOutputPath) consola.success(`Page helpers generated at ${pagesOutputPath}`)
+    reportSuppressedPageManifest(pagesPlan)
 
     // Translation keys only exist for apps with a lang/ directory; the
     // generator emits nothing otherwise, keeping t() keys plain strings.

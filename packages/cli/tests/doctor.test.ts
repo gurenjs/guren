@@ -4,7 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { consola } from 'consola'
 import { getDoctorRuleEvaluations, runDoctor, buildJsonOutput, suggestNextSteps, renderDoctorReport } from '../src/doctor'
 import type { DoctorCheck, DoctorJsonOutput } from '../src/doctor'
-import { createTempWorkspace, writeInstalledPackage, writeWorkspaceFiles } from './helpers'
+import {
+  API_ONLY_APP_FILES,
+  API_ONLY_REFUSAL,
+  BLOG_ROUTES_FIXTURE,
+  createTempWorkspace,
+  PAGE_COMPONENT_FIXTURE,
+  seedApiOnlyApp,
+  writeInstalledPackage,
+  writeWorkspaceFiles,
+} from './helpers'
 
 let consoleLogSpy: ReturnType<typeof spyOn>
 const VALID_APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
@@ -554,6 +563,11 @@ describe('runDoctor', () => {
       await mkdir(join(workspace.dir, '.guren'), { recursive: true })
       await mkdir(join(workspace.dir, 'resources/js/pages'), { recursive: true })
       await writeFile(join(workspace.dir, 'resources/js/pages/Home.tsx'), 'export default function Home() { return null }\n', 'utf8')
+      // routes/web.ts is what makes this a fullstack app rather than one
+      // codegen would decline to write a manifest for — without it the two
+      // checks below still warn, but about the suppressed manifest instead.
+      await mkdir(join(workspace.dir, 'routes'), { recursive: true })
+      await writeFile(join(workspace.dir, 'routes/web.ts'), BLOG_ROUTES_FIXTURE, 'utf8')
       await writeFile(
         join(workspace.dir, 'package.json'),
         JSON.stringify({ name: 'doctor-pages-warn' }, null, 2),
@@ -569,6 +583,72 @@ describe('runDoctor', () => {
     } finally {
       await workspace.cleanup()
     }
+  })
+
+  /**
+   * Both rules below used to answer "is the file there?" first, which is the
+   * wrong order once codegen can decline to write it: a manifest generated
+   * before the app took this shape sits there importing `@guren/inertia-client`,
+   * failing the typecheck, while doctor calls it healthy.
+   */
+  describe('a pages manifest codegen would not write', () => {
+    const apiOnlyAppWithPages = {
+      ...API_ONLY_APP_FILES,
+      'resources/js/pages/Home.tsx': PAGE_COMPONENT_FIXTURE,
+    }
+
+    async function checksFor(files: Record<string, string>): Promise<DoctorCheck[]> {
+      const workspace = await createTempWorkspace('guren-cli-doctor-suppressed-pages-')
+      try {
+        await writeWorkspaceFiles(workspace.dir, files)
+        return (await runDoctor({ cwd: workspace.dir, json: true })).checks
+      } finally {
+        await workspace.cleanup()
+      }
+    }
+
+    it('warns about the stale manifest instead of reporting it present', async () => {
+      const checks = await checksFor({
+        ...apiOnlyAppWithPages,
+        '.guren/pages.gen.ts': '// generated when this app still had a client\n',
+      })
+
+      for (const key of ['page-contracts', 'generated:.guren/pages.gen.ts']) {
+        const found = checks.find((check) => check.key === key)
+        expect(found?.status).toBe('warn')
+        expect(found?.message).toContain('present but codegen would not write it')
+        expect(found?.manualFix).toContain('Delete .guren/pages.gen.ts')
+      }
+    })
+
+    it('warns about the page components when no manifest was ever written', async () => {
+      const checks = await checksFor(apiOnlyAppWithPages)
+
+      for (const key of ['page-contracts', 'generated:.guren/pages.gen.ts']) {
+        const found = checks.find((check) => check.key === key)
+        expect(found?.status).toBe('warn')
+        expect(found?.message).toMatch(API_ONLY_REFUSAL)
+        expect(found?.manualFix).toContain('add its @guren/inertia-client dependency')
+      }
+    })
+
+    it('does not suggest codegen for the manifest it would decline to write', async () => {
+      const workspace = await createTempWorkspace('guren-cli-doctor-suppressed-next-steps-')
+      try {
+        await writeWorkspaceFiles(workspace.dir, {
+          ...apiOnlyAppWithPages,
+          '.guren/routes.gen.ts': 'export const routeManifest = {} as const\n',
+          '.guren/data.gen.ts': 'export namespace Data {}\n',
+          '.guren/api-client.gen.ts': 'export type ApiRoutes = {}\n',
+        })
+
+        const steps = await suggestNextSteps({ cwd: workspace.dir })
+
+        expect(steps.some((step) => step.title === 'Run codegen')).toBe(false)
+      } finally {
+        await workspace.cleanup()
+      }
+    })
   })
 
   it('warns when the @/* alias maps to the app directory instead of the project root', async () => {
@@ -1215,6 +1295,10 @@ describe('suggestNextSteps', () => {
     const workspace = await createTempWorkspace('guren-cli-doctor-next-steps-api-only-')
 
     try {
+      // A real API-only app, not merely one with no pages: without the
+      // package.json this fixture is an app the predicate cannot confirm, and
+      // the assertion below would hold with the whole rule removed.
+      await seedApiOnlyApp(workspace.dir)
       await mkdir(join(workspace.dir, '.guren'), { recursive: true })
       await writeFile(join(workspace.dir, '.guren/routes.gen.ts'), 'export const routeManifest = {} as const\n', 'utf8')
       await writeFile(join(workspace.dir, '.guren/data.gen.ts'), 'export namespace Data {}\n', 'utf8')

@@ -26,13 +26,11 @@ export default ${componentName}
 
 /**
  * Refuses a confirmed API-only app, like the multi-file scaffolds and unlike
- * `makeController`: a page has no JSON dialect to adapt to, and a stray one is
- * not inert either. The api starter's tsconfig skips `resources/`, but its own
- * `dev` script runs `guren codegen`, which folds every page under
- * `resources/js/pages` into `.guren/pages.gen.ts` — a file that tsconfig
- * *does* include, importing an `@guren/inertia-client` that is not installed.
- * One page flips `typecheck` red two commands later, far from the `make:view`
- * that caused it.
+ * `makeController`: a page has no JSON dialect to adapt to, and the app has no
+ * way to render one — codegen leaves it out of `.guren/pages.gen.ts`
+ * (`planPageManifest`), so the file would sit there describing a screen nothing
+ * can reach. Refusing says that at the command that caused it, rather than
+ * leaving the app to report an ignored component on its next `check`.
  */
 export async function makeView(name: string, options: WriterOptions = {}): Promise<string> {
   // Before the shape check, so a malformed name is reported as the usage

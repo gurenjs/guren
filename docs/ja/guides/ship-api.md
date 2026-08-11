@@ -147,6 +147,30 @@ export function registerApiRoutes(router: Router): void {
 bun run codegen
 ```
 
+ここでは `.guren/pages.gen.ts` は生成されません。このマニフェストは
+`@guren/inertia-client` を import しますが、API 専用アプリはそのパッケージを
+インストールしていない一方で、`tsconfig.json` は `.guren/` 配下をすべて型検査
+します。生成してしまうと `bun run typecheck` が 1 行目で落ちます。
+
+この判断はスキャフォルダーではなく codegen が持っています。`resources/js/pages`
+にページコンポーネントが現れたとき — 手でコピーした場合でも、チェックアウトで
+入ってきた場合でも — codegen はマニフェストを書かず、その理由を出力します:
+
+```
+[warn] 1 page component under resources/js/pages, but this app has no
+@guren/inertia-client dependency and no routes/web.ts, so codegen writes no
+.guren/pages.gen.ts
+```
+
+`guren check` と `guren doctor` も同じ状態を報告します。アプリがこの形になる前に
+生成された `.guren/pages.gen.ts` がディスクに残っている場合はより強く警告します。
+`tsc` を落とすのはこの残骸なので、原因となったページコンポーネントを削除した後でも
+報告され、`guren check --ci` はこの状態で失敗します（未使用のページコンポーネント
+だけでは CI は失敗しません）。codegen はそのファイルを削除しません。本当に必要な
+ファイルを消してしまうと、型エラーが原因不明の不具合に変わるからです。不要なら
+自分で削除し、Inertia のページを描画するアプリであれば `@guren/inertia-client` の
+依存と `routes/web.ts` を追加してください。
+
 ## 8. エンドポイントをテストする
 
 開発サーバーを起動します:

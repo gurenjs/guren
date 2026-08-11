@@ -397,6 +397,27 @@ describe('Guren MCP Server', () => {
     ])
   })
 
+  test('guren_codegen reports why a generator declined, not just that it wrote nothing', async () => {
+    const client = await createTestClient({
+      generatePageTypes: async () => ({
+        outputPath: '',
+        skipped: { message: 'this app has no @guren/inertia-client dependency and no routes/web.ts' },
+      }),
+    })
+    const result = await client.callTool({ name: 'guren_codegen', arguments: {} })
+    const data = JSON.parse((result.content as Array<{ type: string; text: string }>)[0].text)
+
+    // "nothing to generate" would be false here — page components were found
+    // and deliberately ignored, and the agent that just wrote one is exactly
+    // who has to hear that.
+    expect(data.skipped).toEqual([
+      {
+        artifacts: ['.guren/pages.gen.ts'],
+        reason: 'this app has no @guren/inertia-client dependency and no routes/web.ts',
+      },
+    ])
+  })
+
   test('guren_codegen is an error when nothing could be generated', async () => {
     const failing = async () => {
       throw new Error('routes/web.ts not found')

@@ -1,8 +1,27 @@
 import { describe, expect, it } from 'bun:test'
+import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { CLI_BIN_PATH, SERVER_DIST_ENTRY, assertWorkspaceBuilt, createTempWorkspace } from './helpers'
-import { buildPageModuleContent, generatePageTypes, type PageDefinition } from '../src/pages-types'
+import {
+  API_ONLY_REFUSAL,
+  assertWorkspaceBuilt,
+  BLOG_ROUTES_FIXTURE,
+  CLI_BIN_PATH,
+  createTempWorkspace,
+  PAGE_COMPONENT_FIXTURE as PAGE_FIXTURE,
+  seedApiOnlyApp,
+  SERVER_DIST_ENTRY,
+  writeWorkspaceFiles,
+} from './helpers'
+import {
+  buildPageModuleContent,
+  describePageManifestSuppression,
+  generatePageTypes,
+  planPageManifest,
+  type PageDefinition,
+} from '../src/pages-types'
+
+const DEFAULT_PATHS = { pagesDir: 'resources/js/pages', manifestPath: '.guren/pages.gen.ts' }
 
 describe('buildPageModuleContent', () => {
   it('generates a runtime manifest and nested page contracts', () => {
@@ -117,6 +136,178 @@ describe('generatePageTypes overwrite behavior', () => {
 
       const content = await readFile(join(workspace.dir, '.guren/pages.gen.ts'), 'utf8')
       expect(content).toContain("'Home': './pages/Home.tsx'")
+    } finally {
+      await workspace.cleanup()
+    }
+  }, 20000)
+})
+
+/**
+ * Page components can reach an API-only app by routes no scaffolder controls —
+ * a hand-copied file, a checkout, a generator written later — and the api
+ * blueprint's `dev` script runs codegen, so nobody has to ask for the manifest
+ * for it to appear. It would import `@guren/inertia-client`, which that app does
+ * not install, inside `.guren/**` that its tsconfig type-checks.
+ */
+describe('generatePageTypes on an API-only app', () => {
+  it('writes no manifest and says why', async () => {
+    const workspace = await createTempWorkspace('guren-cli-pages-api-only-')
+    try {
+      await seedApiOnlyApp(workspace.dir)
+      await writeWorkspaceFiles(workspace.dir, { 'resources/js/pages/Home.tsx': PAGE_FIXTURE })
+
+      const { outputPath, plan, skipped } = await generatePageTypes({
+        appRoot: workspace.dir,
+        extractProps: false,
+        force: true,
+      })
+
+      expect(outputPath).toBe('')
+      expect(plan).toEqual({ ...DEFAULT_PATHS, reason: 'api-only', pageCount: 1, staleManifest: false })
+      expect(existsSync(join(workspace.dir, '.guren/pages.gen.ts'))).toBe(false)
+      // Carried on the result so a caller that only sees the return value — the
+      // MCP codegen tool — can say more than "nothing to generate".
+      expect(skipped?.message).toMatch(API_ONLY_REFUSAL)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // Deliberate: if the rule is ever wrong about an app, deleting the manifest
+  // turns a type error into a mystery. `check` and `doctor` report the leftover.
+  it('leaves a manifest generated before the app took this shape on disk', async () => {
+    const workspace = await createTempWorkspace('guren-cli-pages-api-only-stale-')
+    try {
+      await seedApiOnlyApp(workspace.dir)
+      await writeWorkspaceFiles(workspace.dir, {
+        'resources/js/pages/Home.tsx': PAGE_FIXTURE,
+        '.guren/pages.gen.ts': '// generated when this app still had a client\n',
+      })
+
+      const { plan } = await generatePageTypes({ appRoot: workspace.dir, extractProps: false, force: true })
+
+      expect(plan.staleManifest).toBe(true)
+      const content = await readFile(join(workspace.dir, '.guren/pages.gen.ts'), 'utf8')
+      expect(content).toContain('generated when this app still had a client')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // The page components are what put the manifest there, but they are not what
+  // keeps failing the typecheck — deleting them again leaves the import behind.
+  it('still reports a leftover manifest once the page components are gone', async () => {
+    const workspace = await createTempWorkspace('guren-cli-pages-api-only-orphan-')
+    try {
+      await seedApiOnlyApp(workspace.dir)
+      await writeWorkspaceFiles(workspace.dir, { '.guren/pages.gen.ts': '// orphaned\n' })
+
+      const plan = await planPageManifest(workspace.dir)
+      const suppressed = describePageManifestSuppression(plan)
+
+      expect(plan).toEqual({ ...DEFAULT_PATHS, reason: 'api-only', pageCount: 0, staleManifest: true })
+      expect(suppressed?.message).toContain('.guren/pages.gen.ts is present but codegen would not write it')
+      expect(suppressed?.message).not.toContain('page component')
+      expect(suppressed?.advisory).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // The counter-case that keeps the skip from degenerating into "any app whose
+  // package.json does not name @guren/inertia-client": one web routes entry is
+  // enough evidence, which is `isConfirmedApiOnlyApp`'s own rule.
+  it('still writes the manifest once the app has a web routes entry', async () => {
+    const workspace = await createTempWorkspace('guren-cli-pages-fullstack-')
+    try {
+      await seedApiOnlyApp(workspace.dir)
+      await writeWorkspaceFiles(workspace.dir, {
+        'resources/js/pages/Home.tsx': PAGE_FIXTURE,
+        'routes/web.ts': BLOG_ROUTES_FIXTURE,
+      })
+
+      const { outputPath, plan, skipped } = await generatePageTypes({
+        appRoot: workspace.dir,
+        extractProps: false,
+        force: true,
+      })
+
+      expect(plan).toEqual({ ...DEFAULT_PATHS, reason: 'pages', pageCount: 1, staleManifest: false })
+      expect(skipped).toBeNull()
+      expect(outputPath).toBe(join(workspace.dir, '.guren/pages.gen.ts'))
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('reports the same plan through planPageManifest, which check and doctor read', async () => {
+    const workspace = await createTempWorkspace('guren-cli-pages-plan-')
+    try {
+      await seedApiOnlyApp(workspace.dir)
+
+      const empty = await planPageManifest(workspace.dir)
+      expect(empty).toEqual({ ...DEFAULT_PATHS, reason: 'no-pages', pageCount: 0, staleManifest: false })
+      expect(describePageManifestSuppression(empty)).toBeNull()
+
+      await writeWorkspaceFiles(workspace.dir, { 'resources/js/pages/Home.tsx': PAGE_FIXTURE })
+
+      expect(await planPageManifest(workspace.dir)).toEqual({
+        ...DEFAULT_PATHS,
+        reason: 'api-only',
+        pageCount: 1,
+        staleManifest: false,
+      })
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // --pages / --pages-out move both files, and a report naming the defaults
+  // would send the user looking in directories this run never touched.
+  it('names the directories the run actually used', async () => {
+    const workspace = await createTempWorkspace('guren-cli-pages-custom-paths-')
+    try {
+      await seedApiOnlyApp(workspace.dir)
+      await writeWorkspaceFiles(workspace.dir, { 'frontend/screens/Home.tsx': PAGE_FIXTURE })
+
+      const { plan } = await generatePageTypes({
+        appRoot: workspace.dir,
+        pagesDir: 'frontend/screens',
+        outputFile: 'generated/client-pages.ts',
+        extractProps: false,
+        force: true,
+      })
+
+      expect(describePageManifestSuppression(plan)?.message).toBe(
+        '1 page component under frontend/screens, but this app has no @guren/inertia-client dependency '
+        + 'and no routes/web.ts, so codegen writes no generated/client-pages.ts.',
+      )
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // The skip has to be audible. A user whose app was misread as API-only sees
+  // this line where a "Page helpers generated at …" used to be.
+  it('warns from the codegen command rather than skipping silently', async () => {
+    const workspace = await createTempWorkspace('guren-cli-pages-api-only-cli-')
+    try {
+      await seedApiOnlyApp(workspace.dir)
+      await writeWorkspaceFiles(workspace.dir, { 'resources/js/pages/Home.tsx': PAGE_FIXTURE })
+
+      assertWorkspaceBuilt([SERVER_DIST_ENTRY])
+
+      const proc = Bun.spawn(['bun', CLI_BIN_PATH, 'codegen', '--app', workspace.dir], {
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+      const exitCode = await proc.exited
+      const output = `${await new Response(proc.stdout).text()}${await new Response(proc.stderr).text()}`
+
+      expect(exitCode).toBe(0)
+      expect(output).toMatch(API_ONLY_REFUSAL)
+      expect(output).not.toContain('Page helpers generated at')
+      expect(existsSync(join(workspace.dir, '.guren/pages.gen.ts'))).toBe(false)
     } finally {
       await workspace.cleanup()
     }

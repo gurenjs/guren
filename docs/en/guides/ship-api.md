@@ -147,6 +147,30 @@ export function registerApiRoutes(router: Router): void {
 bun run codegen
 ```
 
+Codegen writes no `.guren/pages.gen.ts` here. That manifest imports
+`@guren/inertia-client`, which an API-only app does not install, while its
+`tsconfig.json` type-checks everything under `.guren/` — so generating one would
+break `bun run typecheck` on its first line.
+
+The rule is codegen's, not the scaffolders': if page components ever appear under
+`resources/js/pages` — copied in by hand, or arriving with a checkout — codegen
+still declines to write the manifest and says so:
+
+```
+[warn] 1 page component under resources/js/pages, but this app has no
+@guren/inertia-client dependency and no routes/web.ts, so codegen writes no
+.guren/pages.gen.ts
+```
+
+`guren check` and `guren doctor` report the same thing, and warn more sharply if
+a `.guren/pages.gen.ts` generated before the app took this shape is still on
+disk — that leftover is what fails `tsc`, so it is reported even after the page
+components that produced it are deleted, and `guren check --ci` fails on it
+(unused page components alone do not fail CI). Codegen never deletes it, because
+removing a file the app might genuinely need would turn a type error into a
+mystery. Delete it yourself, or, if the app does render Inertia pages, add its
+`@guren/inertia-client` dependency and `routes/web.ts`.
+
 ## 8. Test Your Endpoints
 
 Start the dev server:
