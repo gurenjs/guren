@@ -103,8 +103,10 @@ function resolvePortAttempts(option: boolean | undefined, port: number): number 
     return option ? DEFAULT_PORT_WALK_ATTEMPTS : 1
   }
 
-  // Unset: convenience while developing, fail fast in production.
-  return typeof process !== 'undefined' && process.env?.NODE_ENV === 'production'
+  // Unset: convenience while developing, fail fast in production. Read without
+  // an optional chain so the deploy plugins' `--define` can settle it at bundle
+  // time; the `typeof process` check already covers runtimes with no `process`.
+  return typeof process !== 'undefined' && process.env.NODE_ENV === 'production'
     ? 1
     : DEFAULT_PORT_WALK_ATTEMPTS
 }
