@@ -34,7 +34,17 @@ CREATE_APP_BIN="$REPO_ROOT/packages/create-app/src/cli.ts"
 # service containers to the same ports).
 SMOKE_DB="${GUREN_SMOKE_DB:-sqlite}"
 
-if [ "$SMOKE_DB" = "postgres" ]; then
+if [ "$SMOKE_DB" = "sqlite" ]; then
+  # The scaffolded app resolves its database as `process.env.DATABASE_URL ??
+  # <sqlite file>`, so an ambient DATABASE_URL silently redirects db:migrate
+  # at that server while the assertions below still read the sqlite file —
+  # migrations report success against one database and the check finds the
+  # other one empty. The script owns driver selection for the other two
+  # drivers; owning it here too is what makes that guarantee hold for every
+  # caller (a workflow with a job-level DATABASE_URL, or a developer who
+  # exports one in their shell).
+  unset DATABASE_URL
+elif [ "$SMOKE_DB" = "postgres" ]; then
   # Use a dedicated database so db:reset never touches a developer's data
   # on the shared compose instance. CI maps its service to the same port.
   export DATABASE_URL="${GUREN_SMOKE_DATABASE_URL:-postgres://guren:guren@localhost:54322/guren_smoke}"
@@ -423,6 +433,9 @@ const tables = db.query(\"SELECT name FROM sqlite_master WHERE type='table'\").a
 for (const required of ['users', 'posts', 'comments', '__drizzle_migrations']) {
   if (!tables.includes(required)) {
     console.error('Missing table after db:migrate: ' + required + ' (found: ' + tables.join(', ') + ')')
+    // An empty table list here usually means db:migrate wrote somewhere else
+    // rather than that it silently executed nothing, so name both databases.
+    console.error('Checked sqlite file: ./data/guren.db (DATABASE_URL=' + (process.env.DATABASE_URL ?? '<unset>') + ')')
     process.exit(1)
   }
 }
