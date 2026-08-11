@@ -15,7 +15,9 @@ import {
   REGISTRAR_LESS_ROUTES_FIXTURE,
   captureWarnings,
   createTempWorkspace,
+  readApiOnlyTemplateFile,
   seedApiOnlyApp,
+  seedShippedApiOnlyApp,
   type TempWorkspace,
 } from './helpers'
 import { listBlueprints, runBlueprint } from '../src/blueprints'
@@ -25,16 +27,6 @@ import { runCheck } from '../src/check'
 async function seedAppFile(source: string): Promise<void> {
   await mkdir('src', { recursive: true })
   await writeFile('src/app.ts', source)
-}
-
-/**
- * A file from the api-only starter as `create-guren-app` ships it.
- *
- * Read rather than approximated: the reduced fixtures in `helpers.ts` are how
- * these tests describe a *shape*, not a substitute for the template itself.
- */
-async function readApiOnlyTemplateFile(relativePath: string): Promise<string> {
-  return readFile(resolve(import.meta.dir, '../../create-app/templates/api-only', relativePath), 'utf8')
 }
 
 /** Minimum project shape the resource blueprint patches into. */
@@ -802,9 +794,7 @@ describe('admin blueprint on an API-only app', () => {
   // The template is what `create-guren-app` ships; the fixture above is its
   // reduction, not a substitute for it.
   it('refuses the api-only template as shipped', async () => {
-    await mkdir('routes', { recursive: true })
-    await writeFile('routes/api.ts', await readApiOnlyTemplateFile('routes/api.ts'))
-    await writeFile('package.json', await readApiOnlyTemplateFile('package.json'))
+    await seedShippedApiOnlyApp(workspace.dir)
 
     await expect(runBlueprint('admin')).rejects.toThrow('guren add admin scaffolds an Inertia dashboard')
   })
@@ -931,11 +921,11 @@ describe('resource blueprint on an API-only app', () => {
   // The template is what `create-guren-app` ships; the fixture above is its
   // reduction, not a substitute for it.
   it('refuses the api-only template as shipped', async () => {
-    await mkdir('routes', { recursive: true })
+    await seedShippedApiOnlyApp(workspace.dir)
+    // Beyond the two files the predicate reads: this blueprint would append a
+    // table to it, so the assertion below needs the real schema present.
     await mkdir('db', { recursive: true })
-    await writeFile('routes/api.ts', await readApiOnlyTemplateFile('routes/api.ts'))
     await writeFile('db/schema.ts', await readApiOnlyTemplateFile('db/schema.ts'))
-    await writeFile('package.json', await readApiOnlyTemplateFile('package.json'))
 
     await expect(runBlueprint('resource', { name: 'Post' })).rejects.toThrow(
       'guren add resource scaffolds Inertia pages',

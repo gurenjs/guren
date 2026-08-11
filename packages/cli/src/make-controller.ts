@@ -1,9 +1,10 @@
+import { isConfirmedApiOnlyApp } from './app-surface'
 import type { WriterOptions } from './utils'
-import { kebabCase, pagesAccessor, safeModuleName, scaffoldFile } from './utils'
+import { kebabCase, pagesAccessor, safeModuleName, scaffoldFile, writeRoot } from './utils'
 
 const CONTROLLERS_DIR = 'app/Http/Controllers'
 
-function controllerTemplate(className: string, resourcePath: string, moduleName: string | undefined): string {
+function inertiaControllerTemplate(className: string, resourcePath: string, moduleName: string | undefined): string {
   const pageVar = resourcePath.replace(/-([a-z])/g, (_, char: string) => char.toUpperCase())
   return `import { Controller } from '@guren/core'
 import { pages } from '@/.guren/pages.gen'
@@ -18,14 +19,43 @@ export default class ${className} extends Controller {
 `
 }
 
+/** The dialect for an app `isConfirmedApiOnlyApp` recognizes. */
+function jsonControllerTemplate(className: string): string {
+  return `import { Controller } from '@guren/core'
+
+export default class ${className} extends Controller {
+  async index(): Promise<Response> {
+    return this.json({
+      data: [],
+    })
+  }
+}
+`
+}
+
+/**
+ * Adapts rather than refuses on an API-only app, unlike the multi-file
+ * scaffolds: one controller has an obvious API dialect where a whole sign-in
+ * flow does not. The Inertia template is the one file such an app's own
+ * tsconfig flags — it imports a `@/.guren/pages.gen` codegen never writes
+ * there — so emitting JSON is what the app asked for, not a lesser fallback.
+ */
 export async function makeController(name: string, options: WriterOptions = {}): Promise<string> {
   const moduleName = options.root ? safeModuleName(options.root) : undefined
+  // Resolved once and handed to the write as well: a relative `cwd`
+  // re-resolved after the probe's awaits could name a different app than the
+  // one judged.
+  const appRoot = writeRoot(options)
+  const apiOnly = await isConfirmedApiOnlyApp(appRoot)
   return scaffoldFile(name, {
     dir: CONTROLLERS_DIR,
     suffix: 'Controller',
     template: ({ normalizedName }) => {
+      if (apiOnly) {
+        return jsonControllerTemplate(normalizedName)
+      }
       const resourcePath = kebabCase(normalizedName.replace(/Controller$/u, ''))
-      return controllerTemplate(normalizedName, resourcePath, moduleName)
+      return inertiaControllerTemplate(normalizedName, resourcePath, moduleName)
     },
-  }, options)
+  }, { ...options, cwd: appRoot })
 }

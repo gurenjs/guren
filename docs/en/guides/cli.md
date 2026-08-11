@@ -66,9 +66,10 @@ your own check later.
 
 `add admin` needs a fullstack app. The dashboard is an Inertia page, so on an app
 scaffolded from the `api` blueprint — no `@guren/inertia-client` dependency and no
-`routes/web.ts` — the command refuses and writes nothing rather than scaffolding a
-controller that does not typecheck and a routes file nothing mounts. Add an admin
-endpoint to `routes/api.ts` by hand instead.
+web routes entry (`routes/web.ts` or `routes/web.js`) — the command refuses and
+writes nothing rather than scaffolding a controller that does not typecheck and a
+routes file nothing mounts. Scaffold an admin endpoint with `make:controller`
+instead, and register it in `routes/api.ts`.
 
 `add auth` needs a fullstack app for the same reason, and refuses on the same two
 signals — as does `make:auth`, which reaches the same scaffold. Auth also patches
@@ -82,10 +83,23 @@ token-based API, guard `routes/api.ts` with `createBearerTokenMiddleware` from
 scaffolds React page components and a controller that returns Inertia responses.
 Its refusal likewise comes before the table it would otherwise append to your
 `db/schema.ts`. So does `make:feature`, which reaches the same scaffold
-directly. Add a JSON controller wired into `routes/api.ts` by hand instead.
-The single-file generators (`make:controller`, `make:view`) also emit
-Inertia-shaped output but are not guarded: one stray file is a deletion, not a
-broken scaffold.
+directly. Scaffold a JSON controller with `make:controller` instead, and wire it
+into `routes/api.ts`.
+
+`make:controller` reads the same two signals but adapts instead of refusing: on
+an app they identify as API-only, the generated controller returns JSON
+(`this.json(...)`) rather than an Inertia page, so it typechecks as written and
+can be wired into `routes/api.ts` as-is. Whenever the signals cannot confirm an
+API-only app, you get the usual Inertia template — installing
+`@guren/inertia-client` is enough to switch back.
+
+`make:view` refuses on those signals like the scaffolds above, because a page
+has no JSON shape to adapt to — and a stray one would not stay harmless:
+`guren codegen` (which `bun run dev` runs for you) folds every component under
+`resources/js/pages` into `.guren/pages.gen.ts`, and that file imports the
+`@guren/inertia-client` an API-only app never installs, breaking `typecheck`
+two commands later. Install `@guren/inertia-client` first when taking an API
+app fullstack, and the command works again.
 
 `add resource` also needs the two files it patches to be there, whatever shape the
 rest of your app is: it appends its table to `db/schema.ts` and registers the CRUD
@@ -103,9 +117,9 @@ table to.
 |---------|-------------|---------|
 | `key:generate` | Generate a new `APP_KEY` value. Use `--write` to save it to `.env` | `bunx guren key:generate --write` |
 | `deploy` | Generate deployment recipe files for Docker/Fly.io/Railway/Vercel | `bunx guren deploy --target all --app my-app --port 3333` |
-| `make:controller <Name>` | Generates a controller in `app/Http/Controllers` | `bunx guren make:controller PostController` |
+| `make:controller <Name>` | Generates a controller in `app/Http/Controllers` (returns JSON instead of an Inertia page on an API-only app) | `bunx guren make:controller PostController` |
 | `make:model <Name>` | Generates a minimal model class and type definition in `app/Models` (imports `camelCase(Name)s` from `db/schema`) | `bunx guren make:model Post` |
-| `make:view <path>` | Generates a React component in `resources/js/pages` | `bunx guren make:view posts/Index` |
+| `make:view <path>` | Generates a React component in `resources/js/pages` (refuses on an API-only app) | `bunx guren make:view posts/Index` |
 | `make:auth` | Scaffolds login/logout, registration, and password reset controllers, providers, views, migration, seeder, and routes (`--minimal` skips registration and password reset, `--verify` also scaffolds email verification, `--oauth <providers>` also scaffolds OAuth login buttons for the given comma-separated providers, `--oauth-only` drops password login entirely and makes those providers the only way in) | `bunx guren make:auth --oauth github,google` |
 | `make:middleware <Name>` | Generates a middleware file in `app/Http/Middleware` | `bunx guren make:middleware Auth` |
 | `make:policy <Name>` | Generates an authorization policy in `app/Policies` with owner-based defaults | `bunx guren make:policy Post` |

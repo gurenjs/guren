@@ -3,6 +3,7 @@ import { mkdtemp, rm, readFile, access } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { makeController } from '../src/make-controller'
+import { seedApiOnlyApp, seedShippedApiOnlyApp } from './helpers'
 
 describe('makeController', () => {
   let tempDir: string
@@ -133,5 +134,65 @@ describe('makeController', () => {
 
   it('rejects a --module value that would escape modules/ (path traversal)', async () => {
     await expect(makeController('Invoice', { root: '../../outside' })).rejects.toThrow(/Invalid module name/)
+  })
+
+  // Only the wiring is pinned here — see makeController's doc comment for why
+  // it adapts where the multi-file scaffolds refuse. "Cannot tell" keeps
+  // Inertia via the tests above, which run in a tempDir with no manifest, and
+  // the predicate's own branches are pinned in blueprints.test.ts.
+  describe('on an API-only app', () => {
+    it('emits a JSON controller instead of the Inertia template', async () => {
+      await seedApiOnlyApp(tempDir)
+
+      const result = await makeController('User')
+
+      const content = await readFile(result, 'utf8')
+      expect(content).toContain('return this.json(')
+      expect(content).toContain('class UserController extends Controller')
+      expect(content).not.toContain('pages.gen')
+      expect(content).not.toContain('this.inertia(')
+    })
+
+    // The predicate must judge the root the file is written into, not the
+    // process directory — an explicit cwd names a different app.
+    it('judges the app at an explicit cwd, not the process directory', async () => {
+      const apiAppDir = await mkdtemp(join(tmpdir(), 'guren-cli-controller-api-cwd-'))
+      try {
+        await seedApiOnlyApp(apiAppDir)
+
+        // process.cwd() is tempDir: no manifest at all, so judged there the
+        // template would stay Inertia.
+        const result = await makeController('User', { cwd: apiAppDir })
+
+        expect(result).toContain(join(apiAppDir, 'app/Http/Controllers/UserController.ts'))
+        expect(await readFile(result, 'utf8')).toContain('return this.json(')
+      } finally {
+        await rm(apiAppDir, { recursive: true, force: true })
+      }
+    })
+
+    // The template is what `create-guren-app` ships; the fixture above is its
+    // reduction, not a substitute for it. This command's *output* flips on the
+    // predicate, so a starter that quietly gained the client would hand users
+    // the Inertia template back with every synthetic test still green.
+    it('emits the JSON dialect for the api-only template as shipped', async () => {
+      await seedShippedApiOnlyApp(tempDir)
+
+      const result = await makeController('User')
+
+      expect(await readFile(result, 'utf8')).toContain('return this.json(')
+    })
+
+    // Judged at the app root even when the file lands under modules/ — a
+    // probe against modules/billing/ would find neither signal and answer
+    // "cannot tell" for an app that is confirmed API-only.
+    it('emits the JSON dialect under --module too, judging the app root', async () => {
+      await seedApiOnlyApp(tempDir)
+
+      const result = await makeController('Invoice', { root: 'billing' })
+
+      expect(result).toContain('modules/billing/app/Http/Controllers/InvoiceController.ts')
+      expect(await readFile(result, 'utf8')).toContain('return this.json(')
+    })
   })
 })

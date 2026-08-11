@@ -63,10 +63,11 @@ bunx guren add admin --public
 `--public` を付けて後から独自のチェックを実装してください。
 
 `add admin` はフルスタックアプリ専用です。ダッシュボードは Inertia ページなので、
-`api` ブループリントで生成したアプリ（`@guren/inertia-client` 依存も `routes/web.ts`
-も持たない）では、型検査を通らないコントローラーとどこにもマウントされないルート
-ファイルを書く代わりに、コマンドが理由を示して中断し何も生成しません。管理用の
-エンドポイントは `routes/api.ts` に手動で追加してください。
+`api` ブループリントで生成したアプリ（`@guren/inertia-client` 依存も、web ルート
+エントリ（`routes/web.ts` または `routes/web.js`）も持たない）では、型検査を通らない
+コントローラーとどこにもマウントされないルートファイルを書く代わりに、コマンドが
+理由を示して中断し何も生成しません。管理用のエンドポイントは `make:controller` で
+生成し、`routes/api.ts` に登録してください。
 
 `add auth` も同じ理由でフルスタックアプリ専用で、同じ2つのシグナルを見て中断します。
 同じスキャフォールドを生成する `make:auth` も同様です。auth は `db/schema.ts` への
@@ -80,10 +81,23 @@ bunx guren add admin --public
 コンポーネントと Inertia レスポンスを返すコントローラーを生成するためです。中断は
 同様に、`db/schema.ts` へ追記されるはずだったテーブルよりも前の時点で起こります。
 同じスキャフォールドに直接到達する `make:feature` も同様に中断します。JSON を
-返すコントローラーは `routes/api.ts` に手動で結線してください。単一ファイルを生成
-するコマンド（`make:controller`・`make:view`）も Inertia 形の出力を書きますが、
-ガードの対象外です — 1ファイルなら削除で済み、壊れたスキャフォールドにはならない
-ためです。
+返すコントローラーは `make:controller` で生成し、`routes/api.ts` に結線して
+ください。
+
+`make:controller` は同じ2つのシグナルを読みますが、中断ではなく適応します。
+API専用と判定されたアプリでは、生成されるコントローラーは Inertia ページではなく
+JSON(`this.json(...)`)を返すため、そのまま型検査を通り、`routes/api.ts` に
+そのまま結線できます。シグナルが API専用と確認できない場合は通常の Inertia
+テンプレートが生成されます — `@guren/inertia-client` をインストールすれば
+元に戻ります。
+
+`make:view` は上記のスキャフォールドと同様、同じシグナルで中断します。ページには
+適応できる JSON 版が存在せず、置き去りのページは無害でもないためです。
+`guren codegen`(`bun run dev` が自動実行します)は `resources/js/pages` 配下の
+すべてのコンポーネントを `.guren/pages.gen.ts` に取り込み、このファイルは
+API専用アプリがインストールしない `@guren/inertia-client` を import するため、
+2コマンド後に `typecheck` が壊れます。API アプリをフルスタック化するときは、
+先に `@guren/inertia-client` をインストールすれば再び使えるようになります。
 
 `add resource` は、アプリの形がどうであれ、パッチ対象の2つのファイルがそこにあることも
 必要とします。テーブル定義を `db/schema.ts` に追記し、CRUD ルートを `routes/web.ts` に
@@ -101,9 +115,9 @@ bunx guren add admin --public
 |----------|------|----|
 | `key:generate` | 新しい `APP_KEY` 値を生成。`--write` で `.env` に保存 | `bunx guren key:generate --write` |
 | `deploy` | Docker/Fly.io/Railway/Vercel 向けデプロイ設定ファイルを生成 | `bunx guren deploy --target all --app my-app --port 3333` |
-| `make:controller <Name>` | `app/Http/Controllers` にコントローラーを生成 | `bunx guren make:controller PostController` |
+| `make:controller <Name>` | `app/Http/Controllers` にコントローラーを生成(API専用アプリでは Inertia ページの代わりに JSON を返す) | `bunx guren make:controller PostController` |
 | `make:model <Name>` | 最小のモデルクラスと型定義を `app/Models` に生成（`db/schema` から `camelCase(Name)s` を import） | `bunx guren make:model Post` |
-| `make:view <path>` | `resources/js/pages` に React コンポーネントを生成 | `bunx guren make:view posts/Index` |
+| `make:view <path>` | `resources/js/pages` に React コンポーネントを生成(API専用アプリでは中断) | `bunx guren make:view posts/Index` |
 | `make:auth` | ログイン/ログアウト・新規登録・パスワードリセットのコントローラー、プロバイダー、ビュー、マイグレーション、シーダー、ルートをスキャフォールド（`--minimal` で登録・パスワードリセットを省略、`--verify` でメール確認も追加、`--oauth <providers>` でカンマ区切りのプロバイダー向け OAuth ログインボタンも追加、`--oauth-only` でパスワードログインを完全に外して OAuth のみにする） | `bunx guren make:auth --oauth github,google` |
 | `make:middleware <Name>` | `app/Http/Middleware` にミドルウェアを生成 | `bunx guren make:middleware Auth` |
 | `make:seeder <Name>` | データベースシーダーファイルを生成 | `bunx guren make:seeder UserSeeder` |

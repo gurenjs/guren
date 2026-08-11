@@ -13,8 +13,12 @@ import { schemaPathFor } from './schema-parser'
  * The alternative the API-only refusal names, shared with the resource
  * blueprint: both doors lead to this one scaffold, so they point at the same
  * way out.
+ *
+ * It names `make:controller` rather than telling the reader to write the file:
+ * on the app this refusal fires for, that command emits the JSON controller
+ * itself.
  */
-export const API_ONLY_FEATURE_ALTERNATIVE = 'Add a JSON controller to routes/api.ts by hand'
+export const API_ONLY_FEATURE_ALTERNATIVE = 'Scaffold a JSON controller with guren make:controller and register it in routes/api.ts'
 
 export interface MakeFeatureOptions extends WriterOptions {
   fields?: string

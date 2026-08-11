@@ -16,6 +16,9 @@ const WEB_ROUTES_CANDIDATES = [DEFAULT_ROUTES_FILE, 'routes/web.js'] as const
  * not typecheck against a missing `@guren/inertia-client`, and the routes file
  * is mounted by nothing.
  *
+ * Callers either refuse on a `true` (via `assertNotApiOnly` below) or, where
+ * their output has an API dialect, adapt what they emit instead.
+ *
  * Distinct from `appEmitsPageManifest` in `pages-types.ts`, which asks whether
  * codegen would write a pages manifest and answers from the page components on
  * disk. That signal cannot back a refusal — a fullstack app that has not
@@ -24,7 +27,8 @@ const WEB_ROUTES_CANDIDATES = [DEFAULT_ROUTES_FILE, 'routes/web.js'] as const
  * **Positive evidence only — every "cannot tell" answers `false`.** The cost of
  * the two mistakes is not symmetric: failing to recognize an API-only app
  * leaves the mess callers already handle today, while wrongly accusing one
- * blocks a command that would have worked. Both signals are therefore required,
+ * blocks a command that would have worked — or, for the adapting caller, hands
+ * a fullstack app the wrong dialect. Both signals are therefore required,
  * and each is individually ambiguous: `@guren/inertia-client` is the stronger
  * of the two but is read from a `package.json` that may be absent or hoisted to
  * a workspace root, and an app with no web routes entry may just be a fullstack
