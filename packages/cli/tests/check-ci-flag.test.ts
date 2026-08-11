@@ -1,19 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
-import { createTempWorkspace } from './helpers'
-
-const CLI_BIN_PATH = resolve(import.meta.dir, '../src/bin.ts')
-
-async function runBin(args: string[], cwd: string): Promise<number> {
-  const proc = Bun.spawn(['bun', CLI_BIN_PATH, ...args], {
-    cwd,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
-  await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
-  return proc.exited
-}
+import { createTempWorkspace, runCliBin as runBin } from './helpers'
 
 /**
  * In a real app `guren codegen` runs before `check --ci` (that is the

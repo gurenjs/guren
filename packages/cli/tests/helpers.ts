@@ -1,8 +1,22 @@
 import { mock } from 'bun:test'
 import { consola as realConsola } from 'consola'
+import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
+
+const repoRoot = resolve(import.meta.dir, '../../..')
+
+/** The CLI entry these tests spawn. */
+export const CLI_BIN_PATH = join(repoRoot, 'packages/cli/src/bin.ts')
+
+/**
+ * The built artifact this package's tests reach `@guren/server` through.
+ * `@guren/core` resolves to source, but its `export * from '@guren/server'`
+ * follows the workspace symlink to server's `exports`, which point at
+ * `dist/index.js` (see .claude/rules/common-pitfalls.md).
+ */
+export const SERVER_DIST_ENTRY = join(repoRoot, 'packages/server/dist/index.js')
 
 export interface TempWorkspace {
   dir: string
@@ -234,6 +248,42 @@ export async function createTempWorkspace(prefix: string): Promise<TempWorkspace
       await rm(dir, { recursive: true, force: true })
     },
   }
+}
+
+/**
+ * Throw unless every named build artifact exists.
+ *
+ * An unbuilt checkout does not fail as a wrong answer, it fails as no answer:
+ * a spawned CLI dies on module resolution and exits 1, which an exit-code
+ * assertion cannot tell apart from the command reporting a real failure — and
+ * a test that reads that as a verdict sends the next reader hunting a
+ * regression in product code that is fine. Checked as a precondition rather
+ * than sniffed from a crash so it also covers the tests that reach built code
+ * by importing a fixture, and so it never blames the build for a fixture's own
+ * unresolvable import.
+ */
+export function assertWorkspaceBuilt(artifacts: string[]): void {
+  const missing = artifacts.filter((artifact) => !existsSync(artifact))
+  if (missing.length === 0) return
+
+  throw new Error(
+    [
+      'the workspace has not been built — run `bun run build:clean` first:',
+      ...missing.map((artifact) => `  missing ${relative(repoRoot, artifact)}`),
+    ].join('\n'),
+  )
+}
+
+/** Spawn the CLI bin as a subprocess and return its exit code. */
+export async function runCliBin(args: string[], cwd: string): Promise<number> {
+  assertWorkspaceBuilt([SERVER_DIST_ENTRY])
+
+  const proc = Bun.spawn(['bun', CLI_BIN_PATH, ...args], {
+    cwd,
+    stdout: 'ignore',
+    stderr: 'ignore',
+  })
+  return proc.exited
 }
 
 /**

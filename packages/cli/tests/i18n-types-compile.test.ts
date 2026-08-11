@@ -1,9 +1,9 @@
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test'
-import { existsSync } from 'node:fs'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import ts from 'typescript'
+import { assertWorkspaceBuilt } from './helpers'
 import { buildTranslationTypesContent } from '../src/i18n-types'
 
 /**
@@ -73,11 +73,10 @@ let serverProbeFile: string
 let clientProbeFile: string
 
 beforeAll(async () => {
-  for (const file of [coreTypes, inertiaClientTypes]) {
-    if (!existsSync(file)) {
-      throw new Error(`${file} is missing — run \`bun run build\` first. This test type-checks probe code against the built .d.ts, the surface real apps import.`)
-    }
-  }
+  // This test type-checks probe code against the built .d.ts, the surface real
+  // apps import — so an unbuilt checkout has to fail as itself, not as a
+  // probe that mysteriously stopped narrowing.
+  assertWorkspaceBuilt([coreTypes, inertiaClientTypes])
 
   dir = await mkdtemp(join(tmpdir(), 'guren-i18n-compile-'))
   generatedFile = join(dir, 'translations.gen.ts')

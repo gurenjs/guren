@@ -1,7 +1,7 @@
-import { resolve } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import { runCommand } from 'citty'
 import { stripAnsi } from 'consola/utils'
+import { CLI_BIN_PATH, SERVER_DIST_ENTRY, assertWorkspaceBuilt } from './helpers'
 import { createNewCommand } from '../src/new-command'
 
 /**
@@ -112,8 +112,10 @@ describe('guren new', () => {
   // path that exercises the real wiring without spawning `create-guren-app`:
   // `runCli` renders usage and returns before `run()` is reached.
   it('is registered in the CLI, and its help lists the flags it forwards', async () => {
+    assertWorkspaceBuilt([SERVER_DIST_ENTRY])
+
     const { NODE_ENV: _testEnv, ...env } = process.env
-    const proc = Bun.spawn(['bun', resolve(import.meta.dir, '../src/bin.ts'), 'new', '--help'], {
+    const proc = Bun.spawn(['bun', CLI_BIN_PATH, 'new', '--help'], {
       env,
       stdout: 'pipe',
       stderr: 'pipe',
