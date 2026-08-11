@@ -121,12 +121,6 @@ const deployTargets = [
   },
 ]
 
-const agentEvalArms = [
-  { name: 'Shipped harness', passed: 3, total: 3, cost: 4.9, costDisplay: '$4.90', accent: true },
-  { name: 'Harness stripped', passed: 1, total: 3, cost: 6.94, costDisplay: '$6.94', accent: false },
-]
-const agentEvalMaxCost = Math.max(...agentEvalArms.map((arm) => arm.cost))
-
 const TAB_KEYS = ['Routes', 'Controller', 'Model', 'View'] as const
 type TabKey = (typeof TAB_KEYS)[number]
 
@@ -296,87 +290,44 @@ export default function Home({ codeExamples }: Props) {
               />
               <p className="mt-4 text-sm leading-relaxed text-white/50">
                 None of this is aspirational: the whole loop is exercised in a public,
-                reproducible agent evaluation — and the rounds that did not help are published
-                right next to the ones that did.
-              </p>
-            </div>
-            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-6">
-              <p className="text-sm font-semibold text-white">
-                Same task, same model — only the harness differs
-              </p>
-              <p className="mt-1 text-xs text-white/50">
-                Claude Code builds the same feature on Guren v2.0.0, hours after its release,
-                so the new APIs are in no model&apos;s training data. Three trials per arm.
-              </p>
-              <div className="mt-6">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-white/40">
-                  Trials that shipped a working feature
-                </p>
-                <div className="mt-3 space-y-3">
-                  {agentEvalArms.map((arm) => (
-                    <div key={arm.name} className="flex items-center justify-between gap-3">
-                      <span className="text-xs text-white/70">{arm.name}</span>
-                      <span className="flex items-center gap-1.5">
-                        {Array.from({ length: arm.total }, (_, i) => (
-                          <span
-                            key={i}
-                            className={`size-2.5 rounded-full ${
-                              i < arm.passed
-                                ? arm.accent
-                                  ? 'bg-crimson-400'
-                                  : 'bg-white/60'
-                                : 'border border-white/25'
-                            }`}
-                          />
-                        ))}
-                        <span
-                          className={`ml-1.5 text-sm font-bold ${arm.accent ? 'text-crimson-300' : 'text-white/70'}`}
-                        >
-                          {arm.passed}/{arm.total}
-                        </span>
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="mt-6">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-white/40">
-                  Median cost per feature
-                </p>
-                <div className="mt-3 space-y-3">
-                  {agentEvalArms.map((arm) => (
-                    <div key={arm.name}>
-                      <div className="flex items-baseline justify-between text-xs">
-                        <span className="text-white/70">{arm.name}</span>
-                        <span className={arm.accent ? 'font-bold text-crimson-300' : 'font-semibold text-white/70'}>
-                          {arm.costDisplay}
-                        </span>
-                      </div>
-                      <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-white/10">
-                        <div
-                          className={`h-full rounded-full ${arm.accent ? 'bg-crimson-500' : 'bg-[#6b6363]'}`}
-                          style={{ width: `${((arm.cost / agentEvalMaxCost) * 100).toFixed(1)}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <p className="mt-5 text-xs leading-relaxed text-white/50">
-                Scored blind on a clean checkout: typecheck, the full test suite, and a hidden
-                HTTP smoke the agent never saw. Lifetime: 43 of 45 trials shipped a working
-                feature — the only failures are the stripped-harness arm above.
+                reproducible agent evaluation — same task, same model, only the harness
+                differs — and the rounds that did not help are published right next to the
+                ones that did.
               </p>
               <a
                 href="https://github.com/gurenjs/framework-comparison/tree/main/agent-eval"
                 target="_blank"
                 rel="noreferrer"
-                className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-crimson-300 transition hover:text-crimson-200"
+                className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-crimson-300 transition hover:text-crimson-200"
               >
                 Evaluation harness &amp; raw data
                 <ArrowRightIcon className="size-3.5" />
               </a>
             </div>
+            <figure>
+              <a
+                href="/docs-graph.png"
+                target="_blank"
+                rel="noreferrer"
+                className="block overflow-hidden rounded-xl border border-white/10 bg-white/[0.03] p-2 transition hover:border-crimson-400/40"
+              >
+                <img
+                  src="/docs-graph.png"
+                  alt="The Guren docs viewer rendering a blog app's knowledge graph: decision records, generated spec views, model entities, and source files connected by verified links"
+                  width={1440}
+                  height={900}
+                  loading="lazy"
+                  className="w-full rounded-lg"
+                />
+              </a>
+              <figcaption className="mt-3 text-sm leading-relaxed text-white/50">
+                Your app&apos;s knowledge graph, drawn from the blog example&apos;s real docs —
+                plain markdown ADRs that declare the entities they govern and link to each
+                other with <code className="text-white/70">[[wiki-links]]</code>. Rendered live
+                at <code className="text-crimson-300/90">/_guren/docs</code>; broken links fail{' '}
+                <code className="text-white/70">guren check --docs</code> in CI.
+              </figcaption>
+            </figure>
           </div>
         </section>
 
