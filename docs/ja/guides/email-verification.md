@@ -413,12 +413,14 @@ describe('メール確認', () => {
 
 ```ts
 // UserController.ts
+const RegisterSchema = z.object({
+  name: z.string().min(2),
+  email: z.email(),
+  password: z.string().min(8),
+})
+
 async register() {
-  const { name, email, password } = await this.validate({
-    name: z.string().min(2),
-    email: z.email(),
-    password: z.string().min(8),
-  })
+  const { name, email, password } = await this.validateBody(RegisterSchema)
 
   // ユーザーを作成
   const user = await User.create({

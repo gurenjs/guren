@@ -330,7 +330,19 @@ const STALE_APP_ALIAS_PATTERN = /['"]@\/(?:Http|Models|Policies|Events|Jobs|List
 // call are all correct and must not match.
 const DISCARDED_ALIAS_MIDDLEWARE_PATTERN = /^[\w$]+(?:\.[\w$]+)*\.aliasMiddleware\((?!.*\)\s*\.\w)/u
 
+// `Controller.validate()` no longer exists. Samples calling it read as the
+// mainline validation path while naming a method the framework never had, so
+// nothing an author copies from them can run. Match the bare call only —
+// `validateBody` / `validateQuery` / `validateParams` are the real helpers, and
+// `FormRequest`'s own `validate` never lived on the controller.
+const PHANTOM_CONTROLLER_VALIDATE_PATTERN = /\bthis\.validate\(/u
+
 const DOC_LINE_RULES: { pattern: RegExp; describe: (location: string) => string }[] = [
+  {
+    pattern: PHANTOM_CONTROLLER_VALIDATE_PATTERN,
+    describe: (location) =>
+      `${location} calls \`this.validate(...)\`, which does not exist on Controller. Use \`this.validateBody(schema)\` / \`validateQuery\` / \`validateParams\`, or — for the legacy FormRequest compatibility layer — \`await new StorePostRequest().handle(this.ctx)\`.`,
+  },
   {
     pattern: STALE_APP_ALIAS_PATTERN,
     describe: (location) =>

@@ -164,14 +164,14 @@ if (await this.has('email')) {
 ```ts
 export default class PostsController extends Controller {
   async store() {
-    const data = await this.validate(StorePostRequest)
+    const data = await this.validateBody(StorePostSchema)
     const post = await Post.create(data)
     return this.created({ post })
   }
 
   async update() {
     const post = await Post.findOrFail(this.ctx.req.param('id'))
-    const data = await this.validate(UpdatePostRequest)
+    const data = await this.validateBody(StorePostSchema)
     await Post.update(post.id, data)
     return this.accepted({ post: { ...post, ...data } })
   }
@@ -243,7 +243,7 @@ export default class PostsController extends Controller {
 
 ```ts
 async store() {
-  const data = await this.validate(StorePostRequest)
+  const data = await new StorePostRequest().handle(this.ctx)
   // `data` は StorePostRequest に基づいて完全に型付けされています
   const post = await Post.create(data)
   return this.redirect('/posts')
