@@ -7,8 +7,7 @@ describe('app', () => {
   let http: TestApp
 
   beforeAll(async () => {
-    await app.boot()
-    http = TestApp.fromFetch((request) => app.fetch(request))
+    http = await TestApp.fromApp(app)
   })
 
   it('serves the translated home page', async () => {
