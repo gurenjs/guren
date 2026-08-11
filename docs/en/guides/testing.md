@@ -46,7 +46,7 @@ await app.delete('/posts/1')
 
 ### Wrapping the real application
 
-`TestApp.create({ ... })` assembles an app from the parts you pass — good for isolated slices, but the subset can silently drift from what the server actually runs (providers, `auth`, `i18n`, security defaults). For tests that should exercise the real configuration, boot the app your project exports and wrap its fetch handler:
+`TestApp.create({ ... })` assembles an app from the parts you pass — good for isolated slices, but the subset can silently drift from what the server actually runs (providers, `auth`, `i18n`, security defaults). For tests that should exercise the real configuration, wrap the app your project exports:
 
 ```ts
 import { TestApp } from '@guren/testing'
@@ -55,8 +55,7 @@ import app from '../src/app.js'
 let http: TestApp
 
 beforeAll(async () => {
-  await app.boot()
-  http = TestApp.fromFetch((request) => app.fetch(request))
+  http = await TestApp.fromApp(app)
 })
 
 test('serves the home page', async () => {
@@ -64,7 +63,14 @@ test('serves the home page', async () => {
 })
 ```
 
-This is the pattern scaffolded apps ship with. Pass `app.fetch` through an arrow function — the method reads instance state, so handing the unbound reference over throws on the first request.
+`fromApp()` boots the app and binds its fetch handler for you. Several test files may call it on the same instance — `boot()` is idempotent and reuses the first boot.
+
+You may also see the longer form below, which does the same thing by hand. Note the arrow function: `fetch` reads instance state, so handing the unbound `app.fetch` reference to `fromFetch` throws on the first request. `fromApp()` exists to remove that footgun; reach for `fromFetch` when you have an arbitrary fetch function rather than a Guren application.
+
+```ts
+await app.boot()
+http = TestApp.fromFetch((request) => app.fetch(request))
+```
 
 When you do assemble an app from parts, `TestApp.create()` mirrors `createApp`'s options: pass `auth` to mount session + CSRF middleware, and `i18n` when controllers under test use `this.t()` / `this.tc()`:
 
