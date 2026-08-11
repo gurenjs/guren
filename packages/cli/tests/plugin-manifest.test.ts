@@ -116,6 +116,34 @@ describe('plugin-manifest', () => {
 
       expect(modified).toEqual([])
     })
+
+    // GUREN_TESTING alone makes the server trust an X-Testing-User header, and
+    // .env.example is committed, so the line would reach every clone.
+    it('refuses a reserved GUREN_* key rather than writing it', async () => {
+      await expect(
+        applyEnvEntries([{ key: 'GUREN_TESTING', value: '1' }]),
+      ).rejects.toThrow('reserved by the framework')
+
+      expect(await readFile('.env.example', 'utf8').catch(() => null)).toBeNull()
+    })
+
+    // The key name a reviewer skims is innocuous; the newline is what writes
+    // the reserved key on the following line.
+    it('refuses a value that smuggles a second line', async () => {
+      await expect(
+        applyEnvEntries([{ key: 'ACME_API_KEY', value: '\nGUREN_TESTING=1' }]),
+      ).rejects.toThrow('cannot contain a line break')
+
+      expect(await readFile('.env.example', 'utf8').catch(() => null)).toBeNull()
+    })
+
+    it('refuses a comment that smuggles a second line', async () => {
+      await expect(
+        applyEnvEntries([{ key: 'ACME_API_KEY', comment: 'harmless\nGUREN_MCP=1' }]),
+      ).rejects.toThrow('cannot contain a line break')
+
+      expect(await readFile('.env.example', 'utf8').catch(() => null)).toBeNull()
+    })
   })
 
   describe('applyPublishes', () => {
