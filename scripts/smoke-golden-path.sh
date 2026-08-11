@@ -34,12 +34,9 @@ step() {
 
 # Substring test for a value already held in a variable.
 #
-# `printf '%s' "$body" | grep -q needle` cannot be used here: `grep -q` exits on
-# the first match, `printf` is killed by SIGPIPE (141), and `set -o pipefail`
-# reports the pipeline as failed even though the needle *was* found. Whether the
-# race is lost depends on how much printf has left to write when grep exits, so
-# the assertion reads as a content failure on one machine and passes on another
-# — it is reproducible on macOS and has been passing on CI's Linux runners.
+# Deliberately not `printf '%s' "$body" | grep -q needle`: `grep -q` exits on
+# the first match, `printf` is then killed by SIGPIPE (141), and `set -o
+# pipefail` reports the pipeline as failed even though the needle *was* found.
 # Shell pattern matching has no pipe and no subprocess, so there is nothing to
 # race. The needle is quoted inside the pattern, making it a literal.
 contains() {
@@ -378,9 +375,17 @@ ENSUREDB
 fi
 (cd "$APP_DIR" && bun run db:seed)
 
-# db:status must see every migration as applied on every driver.
-STATUS_OUTPUT=$(cd "$APP_DIR" && bun "$CLI_BIN" db:status 2>&1)
+# db:status must see every migration as applied on every driver. Captured with
+# `|| rc=$?` for the same reason the runtime helpers below do it: an unguarded
+# `$(...)` that fails takes errexit with it, and the output explaining why is
+# still sitting in the variable when the script dies.
+STATUS_RC=0
+STATUS_OUTPUT=$(cd "$APP_DIR" && bun "$CLI_BIN" db:status 2>&1) || STATUS_RC=$?
 printf '%s\n' "$STATUS_OUTPUT"
+if [ "$STATUS_RC" != "0" ]; then
+  echo "ERROR: db:status exited $STATUS_RC"
+  exit 1
+fi
 if contains "$STATUS_OUTPUT" "pending"; then
   echo "ERROR: db:status reports pending migrations after db:migrate"
   exit 1
@@ -478,45 +483,171 @@ console.log('DB tables OK: ' + tables.join(', '))
 ")
 fi
 
-RUNTIME_PORT="${GUREN_SMOKE_PORT:-3799}"
-RUNTIME_URL="http://localhost:$RUNTIME_PORT"
+# One loopback address, used for both halves of the conversation: the app is
+# told to bind it and the assertions are addressed to it. `localhost` is not
+# interchangeable with it — that name resolves to `::1` first on macOS, while a
+# `0.0.0.0` bind is IPv4 only, so the two can disagree about which listener a
+# request reaches. Pinning HOST also stops an ambient one from moving the bind
+# out from under the URL below.
+RUNTIME_HOST="127.0.0.1"
 COOKIES="$TEMP_DIR/cookies.txt"
 SERVER_LOG="$TEMP_DIR/server.log"
 
-(cd "$APP_DIR" && exec env PORT="$RUNTIME_PORT" NODE_ENV=development bun bin/serve.ts > "$SERVER_LOG" 2>&1) &
+# GUREN_DEV_BANNER=1 because the port is read back out of the startup banner
+# below, and the framework lets that banner be switched off.
+(cd "$APP_DIR" && exec env PORT="${GUREN_SMOKE_PORT:-3799}" HOST="$RUNTIME_HOST" \
+  NODE_ENV=development GUREN_DEV_BANNER=1 bun bin/serve.ts > "$SERVER_LOG" 2>&1) &
 SERVER_PID=$!
 
-echo "Waiting for server on $RUNTIME_URL ..."
-for i in $(seq 1 30); do
-  if curl -sf -o /dev/null "$RUNTIME_URL/health"; then
+# The port the app was handed is not necessarily the port it got: bin/serve.ts
+# walks it forward (dev mode, up to +19) when the requested one is busy, and
+# only warns on stderr — into $SERVER_LOG, a file this script prints just on
+# failure. So the run does not assume the port, it reads the one the app says it
+# bound. Assuming it is how a server leaked by an earlier run, or a second smoke
+# running beside this one, silently took every assertion below to a *different*
+# app while this run's own server sat one port up. CI never sees that (fresh
+# container, the three driver runs are sequential steps); a developer machine is
+# exactly where it happens.
+#
+# Reading the port rather than asserting it did not move also fails closed: an
+# unparseable banner stops the run, where a check for the *absence* of a warning
+# silently stops protecting the moment that warning is reworded.
+#
+# awk rather than `grep | head`: a pipeline whose reader exits first fails under
+# `set -o pipefail`, for the reason contains() above exists. Takes the last
+# `:<digits>` on the line, so an ANSI-coloured banner parses the same.
+bound_port() {
+  awk '
+    /Bound address/ {
+      rest = $0
+      port = ""
+      while (match(rest, /:[0-9]+/)) {
+        port = substr(rest, RSTART + 1, RLENGTH - 1)
+        rest = substr(rest, RSTART + RLENGTH)
+      }
+      if (port != "") { print port; exit }
+    }
+  ' "$SERVER_LOG" 2>/dev/null
+}
+
+echo "Waiting for the app to report the port it bound ..."
+RUNTIME_PORT=""
+for i in $(seq 1 60); do
+  RUNTIME_PORT="$(bound_port)"
+  if [ -n "$RUNTIME_PORT" ]; then
     break
   fi
   if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-    echo "ERROR: server process exited early. Log:"
+    echo "ERROR: the server exited before it reported a bound address. Log:"
     cat "$SERVER_LOG"
     exit 1
   fi
   sleep 1
-  if [ "$i" = "30" ]; then
-    echo "ERROR: server did not become ready within 30s. Log:"
+done
+
+if [ -z "$RUNTIME_PORT" ]; then
+  echo "ERROR: the app never reported a bound address within 60s."
+  echo "  This run addresses the app at the port that banner names, so it cannot"
+  echo "  proceed without it. If the app is stuck finding a free port, see what"
+  echo "  is holding them: lsof -nP -iTCP -sTCP:LISTEN"
+  echo "--- server log ---"
+  cat "$SERVER_LOG"
+  exit 1
+fi
+
+RUNTIME_URL="http://$RUNTIME_HOST:$RUNTIME_PORT"
+echo "  OK: app reports it is bound to $RUNTIME_URL"
+
+# The banner is printed once the socket is listening, so this normally passes
+# first try; it is here to prove the app answers, not to wait for the bind.
+for i in $(seq 1 15); do
+  if curl -sf --noproxy '*' --max-time 10 -o /dev/null "$RUNTIME_URL/health"; then
+    break
+  fi
+  if [ "$i" = "15" ]; then
+    echo "ERROR: $RUNTIME_URL/health did not answer within 15s of the app reporting that port."
     cat "$SERVER_LOG"
     exit 1
   fi
+  sleep 1
 done
+
+# `--noproxy '*'`: these are requests to a loopback address, but curl still
+# honours http_proxy/ALL_PROXY unless loopback is in no_proxy, and a developer
+# behind a corporate proxy would otherwise have this whole step answered by the
+# proxy. `--max-time`: a listener that accepts TCP and never replies would
+# otherwise hang the run with no output.
+CURL_OPTS=(--noproxy '*' --max-time 30)
+
+# Both helpers below report a request that never completed, which is a different
+# failure from the app answering wrongly — curl's exit code is the only place
+# that distinction exists.
+explain_transport_failure() {
+  case "$1" in
+    7) echo "  Nothing accepted the connection: the app died mid-run, or never reached this port." ;;
+    28) echo "  The request timed out. The app may be wedged, or the machine too loaded to answer." ;;
+    *) echo "  The request did not complete (curl exit $1); $RUNTIME_URL did not return a response." ;;
+  esac
+}
+
+fail_with_server_log() {
+  echo "--- server log tail ---"
+  tail -40 "$SERVER_LOG"
+  exit 1
+}
 
 http_expect() {
   local label="$1"
   local expected="$2"
   shift 2
-  local status
-  status=$(curl -s -o /dev/null -w "%{http_code}" "$@")
-  if [ "$status" != "$expected" ]; then
-    echo "ERROR: $label — expected HTTP $expected, got $status"
-    echo "--- server log tail ---"
-    tail -40 "$SERVER_LOG"
-    exit 1
+  local status=''
+  local rc=0
+  # `|| rc=$?` is load-bearing under `set -e`: a curl that cannot reach the
+  # server exits non-zero, and a failed command substitution in an assignment
+  # trips errexit — which killed this function before it could report anything,
+  # so the whole script died on a bare exit 7 with no message at all.
+  status=$(curl -s "${CURL_OPTS[@]}" -o /dev/null -w "%{http_code}" "$@") || rc=$?
+  if [ "$rc" != "0" ] || [ "$status" != "$expected" ]; then
+    echo "ERROR: $label — expected HTTP $expected, got ${status:-<none>}"
+    # curl prints 000 when it never got a response to read a status from, which
+    # always comes with a non-zero exit — so rc alone decides this branch.
+    if [ "$rc" != "0" ]; then
+      explain_transport_failure "$rc"
+    fi
+    fail_with_server_log
   fi
   echo "  OK: $label -> $status"
+}
+
+# Fetch a page whose *body* is about to be asserted on, and refuse to hand back
+# anything that is not a rendered 200. Left to `curl -s`, a 500 error page or a
+# redirect arrives as a body that merely lacks the needle, and the content
+# assertion then blames the app for a status it never looked at. (A request that
+# fails outright is worse than that: the command substitution returns non-zero,
+# errexit fires, and the script dies before any assertion runs.) Writes the body
+# to the file named by $3.
+fetch_page() {
+  local label="$1"
+  local url="$2"
+  local out="$3"
+  local status=''
+  local rc=0
+
+  status=$(curl -s "${CURL_OPTS[@]}" -o "$out" -w '%{http_code}' -b "$COOKIES" "$url") || rc=$?
+
+  if [ "$rc" != "0" ]; then
+    echo "ERROR: $label — the request to $url never completed (curl exit $rc)."
+    explain_transport_failure "$rc"
+    fail_with_server_log
+  fi
+
+  if [ "$status" != "200" ]; then
+    echo "ERROR: $label — expected HTTP 200, got $status from $url"
+    echo "  The page never rendered, so the assertion below could only ever fail."
+    echo "--- response body (first 40 lines) ---"
+    head -40 "$out"
+    fail_with_server_log
+  fi
 }
 
 # Unauthenticated pages
@@ -574,10 +705,11 @@ http_expect "POST /posts (authenticated)" 303 \
   -H "Content-Type: application/json" -H "X-XSRF-TOKEN: $XSRF" \
   -d '{"title":"Golden path runtime","body":"created by smoke test"}'
 
-POSTS_BODY=$(curl -s -b "$COOKIES" "$RUNTIME_URL/posts")
-if ! contains "$POSTS_BODY" "Golden path runtime"; then
-  echo "ERROR: GET /posts does not contain the created post title"
-  printf '%s\n' "$POSTS_BODY" | head -40
+POSTS_PAGE="$TEMP_DIR/posts.html"
+fetch_page "GET /posts" "$RUNTIME_URL/posts" "$POSTS_PAGE"
+if ! grep -qF -- "Golden path runtime" "$POSTS_PAGE"; then
+  echo "ERROR: GET /posts rendered a 200 that does not contain the created post title"
+  head -40 "$POSTS_PAGE"
   exit 1
 fi
 echo "  OK: GET /posts contains created post"
@@ -594,16 +726,18 @@ http_expect "POST /comments (date + json payload)" 303 \
   -H "Content-Type: application/json" -H "X-XSRF-TOKEN: $XSRF" \
   -d '{"body":"typed columns","postId":1,"published":true,"publishedAt":"2026-02-03T00:00:00.000Z","meta":{"origin":"golden-path-json"}}'
 
-COMMENTS_BODY=$(curl -s -b "$COOKIES" "$RUNTIME_URL/comments")
-if ! contains "$COMMENTS_BODY" "typed columns"; then
-  echo "ERROR: GET /comments does not contain the created comment"
+COMMENTS_PAGE="$TEMP_DIR/comments.html"
+fetch_page "GET /comments" "$RUNTIME_URL/comments" "$COMMENTS_PAGE"
+if ! grep -qF -- "typed columns" "$COMMENTS_PAGE"; then
+  echo "ERROR: GET /comments rendered a 200 that does not contain the created comment"
+  head -40 "$COMMENTS_PAGE"
   exit 1
 fi
 # The json column must come back as an object, not as the string "[object
 # Object]" a text column would have stored.
-if ! contains "$COMMENTS_BODY" "golden-path-json"; then
+if ! grep -qF -- "golden-path-json" "$COMMENTS_PAGE"; then
   echo "ERROR: GET /comments did not round-trip the json column"
-  printf '%s\n' "$COMMENTS_BODY" | head -40
+  head -40 "$COMMENTS_PAGE"
   exit 1
 fi
 # The resource serializes date columns as ISO strings. This checks that a
@@ -611,9 +745,9 @@ fi
 # time zone, because the app's own reads round-trip on either column type
 # (drizzle parses an offset-less postgres timestamp as UTC). The column type
 # itself is asserted in the db check above, which is what catches a regression.
-if ! contains "$COMMENTS_BODY" '2026-02-03T00:00:00.000Z'; then
+if ! grep -qF -- '2026-02-03T00:00:00.000Z' "$COMMENTS_PAGE"; then
   echo "ERROR: GET /comments did not round-trip the date column"
-  printf '%s\n' "$COMMENTS_BODY" | head -40
+  head -40 "$COMMENTS_PAGE"
   exit 1
 fi
 echo "  OK: GET /comments round-tripped date and json columns"
@@ -624,7 +758,10 @@ http_expect "POST /posts (no CSRF token)" 403 \
   -d '{"title":"x","body":"y"}'
 
 GUEST_COOKIES="$TEMP_DIR/guest-cookies.txt"
-curl -s -c "$GUEST_COOKIES" -o /dev/null "$RUNTIME_URL/login"
+if ! curl -s "${CURL_OPTS[@]}" -c "$GUEST_COOKIES" -o /dev/null "$RUNTIME_URL/login"; then
+  echo "ERROR: could not mint a guest cookie jar from $RUNTIME_URL/login"
+  fail_with_server_log
+fi
 GUEST_XSRF=$(awk '$6 == "XSRF-TOKEN" { print $7 }' "$GUEST_COOKIES")
 http_expect "POST /posts (guest with valid CSRF)" 401 \
   -b "$GUEST_COOKIES" -X POST "$RUNTIME_URL/posts" \
