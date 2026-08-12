@@ -364,3 +364,18 @@ mountOpenApiDocs(app, {
 ```
 
 When mounted on an `Application` instance, route definitions are read from the router automatically. For a plain Hono instance, pass `definitions` explicitly.
+
+The `servers` option accepts a function as well as a list. A mounted document is generated per request and the function is called each time, so it can advertise an address the process does not know when it mounts the docs. With `PORT=0` the operating system assigns the port, which therefore exists only once `listen()` has returned it — a fixed list would leave the document, and every client generated from it, pointing at an address nothing is listening on:
+
+```ts
+let serverUrl = 'http://localhost:3000'
+
+mountOpenApiDocs(app, {
+  title: 'Blog API',
+  version: '1.0.0',
+  servers: () => [serverUrl],
+})
+
+const address = await app.listen({ port: 0 })
+serverUrl = address.url
+```

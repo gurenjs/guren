@@ -115,6 +115,49 @@ describe('@guren/openapi', () => {
     expect(html).toContain('/openapi.json')
   })
 
+  // An app only learns the address it serves on after it binds, so a mounted
+  // document has to be able to pick the value up afterwards. Both fetches
+  // matter: one alone passes just as well against a list frozen at mount.
+  it('re-resolves a servers function on every mounted request', async () => {
+    let serverUrl = 'http://localhost:3334'
+    const app = createApp({
+      routes(router) {
+        router.get('/posts', { name: 'posts.index' }, async () => [])
+      },
+    })
+
+    mountOpenApiDocs(app, {
+      title: 'Blog API',
+      version: '1.0.0',
+      servers: () => [serverUrl],
+    })
+
+    await app.boot()
+
+    const readServers = async () => {
+      const response = await app.fetch(new Request('http://localhost/openapi.json'))
+      expect(response.status).toBe(200)
+      const document = await response.json() as { servers?: Array<{ url: string }> }
+      return document.servers ?? []
+    }
+
+    expect(await readServers()).toEqual([{ url: 'http://localhost:3334' }])
+
+    serverUrl = 'http://127.0.0.1:52341'
+
+    expect(await readServers()).toEqual([{ url: 'http://127.0.0.1:52341' }])
+  })
+
+  it('omits servers when a servers function resolves to an empty list', () => {
+    const { document } = generateOpenApiDocument([], {
+      title: 'Blog API',
+      version: '1.0.0',
+      servers: () => [],
+    })
+
+    expect(document.servers).toBeUndefined()
+  })
+
   it('marks request bodies optional when an empty payload passes validation', () => {
     const definitions: RouteDefinition[] = [
       {

@@ -38,7 +38,14 @@ export interface OpenApiDocumentOptions {
   title: string
   version: string
   description?: string
-  servers?: Array<string | OpenApiServer>
+  /**
+   * A function is resolved every time a document is generated — for
+   * `mountOpenApiDocs()`, on every request to the JSON endpoint. That is how an
+   * app advertises an address it does not know at mount time: the port it binds
+   * under `PORT=0` is assigned by the OS, so a fixed list written beside the
+   * mount would send clients to a port nothing is listening on.
+   */
+  servers?: Array<string | OpenApiServer> | (() => Array<string | OpenApiServer>)
 }
 
 export interface WriteOpenApiDocumentOptions extends OpenApiDocumentOptions, WriterOptions {
@@ -542,12 +549,13 @@ function toOpenApiSchema(schema: unknown, warnings: string[], label: string, io:
   }
 }
 
-function normalizeServers(servers?: Array<string | OpenApiServer>): OpenApiServer[] | undefined {
-  if (!servers || servers.length === 0) {
+function normalizeServers(servers?: OpenApiDocumentOptions['servers']): OpenApiServer[] | undefined {
+  const resolved = typeof servers === 'function' ? servers() : servers
+  if (!resolved || resolved.length === 0) {
     return undefined
   }
 
-  return servers.map((server) => typeof server === 'string' ? { url: server } : server)
+  return resolved.map((server) => typeof server === 'string' ? { url: server } : server)
 }
 
 function toOpenApiPath(path: string): string {
