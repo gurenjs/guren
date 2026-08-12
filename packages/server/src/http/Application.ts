@@ -130,6 +130,12 @@ function clearManagedViteEnv(): void {
 
   if (process.env[MANAGED_VITE_ENV_FLAG] === '1') {
     delete process.env.VITE_DEV_SERVER_URL
+    // Unpublish only the entry this module published. `syncManagedInertiaDevEntry`
+    // leaves an app's custom entry alone, so the same test has to gate the
+    // removal — otherwise stopping would delete a value nothing here set.
+    if (process.env.GUREN_INERTIA_ENTRY?.endsWith(DEFAULT_DEV_ENTRY_PATH)) {
+      delete process.env.GUREN_INERTIA_ENTRY
+    }
   }
 
   delete process.env[MANAGED_VITE_ENV_FLAG]
@@ -182,6 +188,30 @@ async function stopActiveBunServer(closeActiveConnections = false): Promise<void
 
 function setActiveBunServer(server?: BunServer): void {
   getGlobalState().__gurenActiveServer = server
+}
+
+/**
+ * Attaches one SIGINT/SIGTERM/exit trio and returns the disposer that detaches
+ * it again. Both teardown registrars go through here so neither can drift back
+ * to the shape this replaces: a registrar guarded by a boolean that a close
+ * merely flips back leaves its handlers attached, and the next `listen()` adds
+ * a second set on top.
+ *
+ * The count is the lesser half of that. `process.once` fires handlers in
+ * registration order, and a stale set's signal handler still runs its own
+ * `process.exit()` — so it can end the process ahead of the live set's
+ * shutdown, which is the one thing the teardown exists to complete.
+ */
+function registerProcessTeardown(onSignal: () => void, onExit: () => void): () => void {
+  process.once('SIGINT', onSignal)
+  process.once('SIGTERM', onSignal)
+  process.on('exit', onExit)
+
+  return () => {
+    process.off('SIGINT', onSignal)
+    process.off('SIGTERM', onSignal)
+    process.off('exit', onExit)
+  }
 }
 
 /**
@@ -427,8 +457,14 @@ export class Application {
   private viteDevServer?: ViteServer
   private bunServer?: BunServer
   private boundAddress?: ListenAddress
-  private viteTeardownRegistered = false
-  private bunTeardownRegistered = false
+  /**
+   * Detach the process teardown handlers each half registered, and double as
+   * the "are they attached?" memo. One field apiece rather than a separate
+   * boolean: a memo and an undo that can disagree is how handlers end up
+   * attached while a flag says otherwise — see {@link registerProcessTeardown}.
+   */
+  private disposeViteTeardown?: () => void
+  private disposeBunTeardown?: () => void
   private autoSessionAttached = false
   private routesRegistered = false
   private bootPromise?: Promise<void>
@@ -865,22 +901,76 @@ export class Application {
    * carries.
    *
    * Liveness is only as good as the signal available: a server stopped through
-   * the framework — a later `listen()`, the process-exit teardown — clears the
-   * slot this reads, but one stopped by calling `stop()` on the Bun server
-   * directly does not, and this keeps reporting its address. Treat it as
-   * "where `listen()` put this app", not as a health check.
+   * the framework — {@link Application.stop}, a later `listen()`, the
+   * process-exit teardown — clears what this reads, but one stopped by reaching
+   * past the framework to the Bun server's own `stop()` does not, and this keeps
+   * reporting its address. Treat it as "where `listen()` put this app", not as a
+   * health check.
    */
   get address(): ListenAddress | undefined {
     // The `bunServer` half is for the app that never listened: without it, two
-    // `undefined`s would compare equal. Past that, a server this instance
-    // started counts as ours only while it is still the active one, which is
-    // false after a teardown and after the next `listen()` — including when
-    // the rebind that follows it fails.
+    // `undefined`s would compare equal. It also covers `stop()`, which clears
+    // both instance fields. Past that, a server this instance started counts as
+    // ours only while it is still the active one, which is false after a
+    // teardown and after the next `listen()` — including when the rebind that
+    // follows it fails. Both halves earn their place: `stop()` reaches only the
+    // instance, and a supersede or an exit teardown reaches only the slot.
     if (!this.bunServer || getGlobalState().__gurenActiveServer !== this.bunServer) {
       return undefined
     }
 
     return this.boundAddress
+  }
+
+  /**
+   * Stops the server {@link listen} started, undoing that call.
+   *
+   * Safe to call when nothing is listening, and safe to call twice — both are
+   * no-ops. A later `listen()` starts cleanly, so an app may be stopped and
+   * restarted in one process.
+   *
+   * `closeActiveConnections` forces in-flight requests closed instead of
+   * waiting for them, matching Bun's own `stop()` parameter. It defaults to
+   * `false` (graceful) because a caller reaching for a public stop is usually
+   * shutting down deliberately; the hot-reload path inside `listen()` forces
+   * the close, since a reload must not wait on the server it is replacing.
+   *
+   * The managed Vite dev server is taken down too. `listen()` is what started
+   * it, and `listen()`'s own bind-failure path already closes the one it
+   * started — leaving it running here would strand an asset server, and its
+   * published env vars, in a process with no application server. That close is
+   * best-effort on the same terms as every other path: it is bounded by
+   * {@link viteCloseTimeoutMs}, and a Vite server that overruns the bound is
+   * warned about and abandoned rather than holding this call open.
+   */
+  async stop(closeActiveConnections = false): Promise<void> {
+    const server = this.bunServer
+
+    if (server) {
+      try {
+        await Promise.resolve(server.stop?.(closeActiveConnections))
+      } catch (error) {
+        console.warn('Failed to stop Bun server:', error)
+      } finally {
+        // Only clear the global slot if it still points at *our* server — a
+        // later `listen()`, on this instance or another, has already replaced
+        // it, and clearing then would drop a live server's teardown.
+        // `closeViteDevServer()` guards the Vite slot the same way.
+        if (getGlobalState().__gurenActiveServer === server) {
+          setActiveBunServer()
+        }
+        this.bunServer = undefined
+        this.boundAddress = undefined
+      }
+    }
+
+    // Detach the process handlers rather than just forgetting them: a later
+    // `listen()` re-attaches, and that is what keeps a restarted app reachable
+    // by SIGINT/SIGTERM.
+    this.disposeBunTeardown?.()
+    this.disposeBunTeardown = undefined
+
+    await this.closeViteDevServer()
   }
 
   /**
@@ -918,51 +1008,48 @@ export class Application {
         setActiveViteDevServer()
       }
       this.viteDevServer = undefined
-      this.viteTeardownRegistered = false
+      this.disposeViteTeardown?.()
+      this.disposeViteTeardown = undefined
       clearManagedViteEnv()
     }
   }
 
   private registerViteTeardown(): void {
-    if (this.viteTeardownRegistered || !this.viteDevServer || typeof process === 'undefined') {
+    if (this.disposeViteTeardown || !this.viteDevServer || typeof process === 'undefined') {
       return
     }
 
-    this.viteTeardownRegistered = true
-
-    const exitHandler = () => {
-      this.closeViteDevServer()
-        .then(() => process.exit(0))
-        .catch(() => process.exit(1))
-    }
-
-    process.once('SIGINT', exitHandler)
-    process.once('SIGTERM', exitHandler)
-    process.on('exit', () => {
-      if (this.viteDevServer) {
-        void this.viteDevServer.close()
-      }
-    })
+    this.disposeViteTeardown = registerProcessTeardown(
+      () => {
+        this.closeViteDevServer()
+          .then(() => process.exit(0))
+          .catch(() => process.exit(1))
+      },
+      () => {
+        if (this.viteDevServer) {
+          void this.viteDevServer.close()
+        }
+      },
+    )
   }
 
   private registerBunTeardown(): void {
-    if (this.bunTeardownRegistered || typeof process === 'undefined') {
+    if (this.disposeBunTeardown || typeof process === 'undefined') {
       return
     }
 
-    this.bunTeardownRegistered = true
-
-    const exitHandler = () => {
-      stopActiveBunServer()
-        .then(() => process.exit(0))
-        .catch(() => process.exit(1))
-    }
-
-    process.once('SIGINT', exitHandler)
-    process.once('SIGTERM', exitHandler)
-    process.on('exit', () => {
-      void stopActiveBunServer()
-    })
+    // Both handlers read the global slot rather than capturing `server`, so one
+    // registration keeps tearing down whatever the latest `listen()` bound.
+    this.disposeBunTeardown = registerProcessTeardown(
+      () => {
+        stopActiveBunServer()
+          .then(() => process.exit(0))
+          .catch(() => process.exit(1))
+      },
+      () => {
+        void stopActiveBunServer()
+      },
+    )
   }
 }
 

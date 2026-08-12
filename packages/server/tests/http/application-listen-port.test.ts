@@ -78,10 +78,10 @@ async function listen(
   options: Parameters<Application['listen']>[0],
 ): Promise<Awaited<ReturnType<Application['listen']>>> {
   const address = await app.listen(options)
-  const server = (app as unknown as { bunServer?: StoppableServer }).bunServer
-  if (server) {
-    openServers.push(server)
-  }
+  // `stop()` is the public undo for `listen()`, and an Application satisfies
+  // StoppableServer through it — so the shared `afterEach` drain closes apps and
+  // the raw Bun servers the helpers above bind through the same loop.
+  openServers.push(app)
   return address
 }
 
