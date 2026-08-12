@@ -4,8 +4,13 @@ import { ViewEngine } from '../mvc/ViewEngine'
 import { ValidationException } from '../errors/exceptions/ValidationException'
 import { shareInertiaProps } from '../mvc/inertia/shared'
 import { getSessionFromContext } from '../http/middleware/session'
+import {
+  createValidationErrorsCookieCleanup,
+  readValidationErrorsCookie,
+  validationErrorsSetCookie,
+} from '../http/middleware/validation-errors-cookie'
 import type { ExceptionHandler } from '../errors/ExceptionHandler'
-import type { Context } from 'hono'
+import type { Context, Hono } from 'hono'
 
 /**
  * Registers the Inertia view engine and wires up validation error handling
@@ -16,6 +21,20 @@ export class InertiaServiceProvider extends ServiceProvider {
     if (!ViewEngine.has('inertia')) {
       ViewEngine.register('inertia', inertia)
     }
+
+    // Sessionless apps flash validation errors through a cookie instead of
+    // the session (see the renderer below); this expires that cookie on the
+    // render that consumed it.
+    let hono: Hono
+    try {
+      hono = this.container.make<Hono>('hono')
+    } catch {
+      // Bare container without an HTTP app — the cookie then relies on its
+      // Max-Age alone.
+      return
+    }
+
+    hono.use('*', createValidationErrorsCookieCleanup())
   }
 
   boot(): void {
@@ -49,20 +68,29 @@ export class InertiaServiceProvider extends ServiceProvider {
         )
       }
 
-      // Inertia: flash errors to session and redirect back
-      const session = getSessionFromContext(ctx)
-      if (session) {
-        const flattened: Record<string, string> = {}
-        for (const [key, messages] of Object.entries(error.errors ?? {})) {
-          flattened[key] = messages[0] ?? ''
-        }
-        session.flash('errors', flattened)
+      // Inertia: flash errors and redirect back
+      const flattened: Record<string, string> = {}
+      for (const [key, messages] of Object.entries(error.errors ?? {})) {
+        flattened[key] = messages[0] ?? ''
       }
 
       const referer = ctx.req.header('Referer') ?? '/'
+      const headers: Record<string, string> = { Location: referer }
+
+      const session = getSessionFromContext(ctx)
+      if (session) {
+        session.flash('errors', flattened)
+      } else {
+        // Sessions only mount with `createApp({ auth })`, so a fresh scaffold
+        // has none — and errors dropped here would make every validation
+        // failure look like "the form did nothing". Flash them through a
+        // short-lived cookie instead.
+        headers['Set-Cookie'] = validationErrorsSetCookie(flattened)
+      }
+
       return new Response(null, {
         status: 303,
-        headers: { Location: referer },
+        headers,
       })
     })
   }
@@ -75,8 +103,13 @@ export class InertiaServiceProvider extends ServiceProvider {
   private registerSharedErrors(): void {
     shareInertiaProps(async (ctx: Context) => {
       const session = getSessionFromContext(ctx)
-      const errors = session?.getFlash<Record<string, string>>('errors')
-      return errors && Object.keys(errors).length > 0 ? { errors } : {}
+      if (session) {
+        const errors = session.getFlash<Record<string, string>>('errors')
+        return errors && Object.keys(errors).length > 0 ? { errors } : {}
+      }
+
+      const errors = readValidationErrorsCookie(ctx)
+      return errors ? { errors } : {}
     }, this.container)
   }
 }
