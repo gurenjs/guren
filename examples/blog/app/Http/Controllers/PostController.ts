@@ -33,7 +33,7 @@ export default class PostController extends Controller {
     const paginator = paginate(result, { path: this.request.path ?? '/' })
     const data = result.data.map((post) => new PostResource(post).toJSON())
     const pagination = { meta: paginator.meta(), links: paginator.links() }
-    return this.inertia(pages.posts.Index, { data, pagination }, { url: this.request.url ?? this.request.path, title: 'Posts | Guren Blog' })
+    return this.inertia(pages.posts.Index, { data, pagination }, { title: 'Posts | Guren Blog' })
   }
 
   async show(): Promise<InertiaResponse<'posts/Show', PostShowInertiaProps> | Response> {
