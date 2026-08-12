@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { inertia, setInertiaDocument, setInertiaSsrRenderer } from '../../src'
 
 describe('InertiaEngine SSR integration', () => {
@@ -353,5 +353,74 @@ describe('Inertia asset version mismatch', () => {
         process.env.GUREN_INERTIA_VERSION = original
       }
     }
+  })
+})
+
+describe('InertiaEngine dev stylesheet links', () => {
+  const ENV_KEYS = ['GUREN_INERTIA_ENTRY', 'GUREN_INERTIA_STYLES', 'NODE_ENV'] as const
+  let saved: Record<string, string | undefined>
+
+  beforeEach(() => {
+    saved = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]))
+  })
+
+  afterEach(() => {
+    for (const key of ENV_KEYS) {
+      if (saved[key] === undefined) {
+        delete process.env[key]
+      } else {
+        process.env[key] = saved[key]
+      }
+    }
+  })
+
+  it('drops the dev source stylesheet when a Vite dev server owns the entry', async () => {
+    // The raw `/resources/css/app.css` is the *source* file — with Tailwind
+    // in it, the browser 404s its bare `@import 'tailwindcss'` on every page
+    // while the compiled CSS already arrives through Vite's module graph.
+    process.env.NODE_ENV = 'development'
+    process.env.GUREN_INERTIA_ENTRY = 'http://localhost:5173/resources/js/dev-entry.ts'
+    process.env.GUREN_INERTIA_STYLES = '/resources/css/app.css'
+
+    const response = await inertia('Dashboard', {}, { url: '/dashboard' })
+    const body = await response.text()
+
+    expect(body).not.toContain('/resources/css/app.css')
+  })
+
+  it('keeps explicitly configured stylesheets under a Vite dev server entry', async () => {
+    process.env.NODE_ENV = 'development'
+    process.env.GUREN_INERTIA_ENTRY = 'http://localhost:5173/resources/js/dev-entry.ts'
+    process.env.GUREN_INERTIA_STYLES = '/public/custom.css,/resources/css/app.css'
+
+    const response = await inertia('Dashboard', {}, { url: '/dashboard' })
+    const body = await response.text()
+
+    expect(body).toContain('<link rel="stylesheet" href="/public/custom.css" />')
+    expect(body).not.toContain('/resources/css/app.css')
+  })
+
+  it('keeps the dev source stylesheet when the fallback pipeline serves the entry', async () => {
+    // No Vite: the entry is a same-origin path and the raw stylesheet link is
+    // the only styling the page gets.
+    process.env.NODE_ENV = 'development'
+    process.env.GUREN_INERTIA_ENTRY = '/resources/js/app.tsx'
+    process.env.GUREN_INERTIA_STYLES = '/resources/css/app.css'
+
+    const response = await inertia('Dashboard', {}, { url: '/dashboard' })
+    const body = await response.text()
+
+    expect(body).toContain('<link rel="stylesheet" href="/resources/css/app.css" />')
+  })
+
+  it('leaves production stylesheet links untouched', async () => {
+    process.env.NODE_ENV = 'production'
+    process.env.GUREN_INERTIA_ENTRY = '/public/assets/app-abc123.js'
+    process.env.GUREN_INERTIA_STYLES = '/public/assets/app-abc123.css'
+
+    const response = await inertia('Dashboard', {}, { url: '/dashboard' })
+    const body = await response.text()
+
+    expect(body).toContain('<link rel="stylesheet" href="/public/assets/app-abc123.css" />')
   })
 })
