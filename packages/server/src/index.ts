@@ -752,6 +752,7 @@ export type {
   AuthorizationResponse,
   GateOptions,
   AuthorizeOptions,
+  AuthorizeResourceOptions,
   PolicyRegistration,
   ResourceAction,
   ResponseBuilder,

@@ -10,7 +10,11 @@ import {
   authorize,
   Policy,
   definePolicy,
+  authorizeResourceMiddleware,
 } from '../../src/authorization'
+import type { AuthorizeResourceOptions } from '../../src/authorization'
+import { AuthorizationException } from '../../src/errors'
+import type { Context } from '../../src/http/Application'
 
 // Test models
 class Post {
@@ -694,5 +698,85 @@ describe('Authorization Integration', () => {
     expect(await user.allows('manage-users')).toBe(false)
     expect(await user.allows('update', post)).toBe(true) // Owner
     expect(await user.allows('view', post)).toBe(true) // Owner can view unpublished
+  })
+})
+
+// ===================
+// authorizeResourceMiddleware Tests
+// ===================
+
+describe('authorizeResourceMiddleware', () => {
+  let checkedAbilities: string[]
+
+  beforeEach(() => {
+    checkedAbilities = []
+    const gate = new Gate()
+    for (const ability of ['view', 'create', 'update', 'delete', 'purge']) {
+      gate.define(ability, () => {
+        checkedAbilities.push(ability)
+        return true
+      })
+    }
+    setGate(gate)
+  })
+
+  const run = async (method: string, options?: AuthorizeResourceOptions) => {
+    const middleware = authorizeResourceMiddleware(() => ({ id: 1 }), options)
+    const ctx = {
+      req: { method },
+      get: () => ({ id: 1 }),
+    } as unknown as Context
+    let nextCalled = false
+    await middleware(ctx, async () => {
+      nextCalled = true
+    })
+    return nextCalled
+  }
+
+  test('maps known methods to resource abilities', async () => {
+    const expected: Array<[string, string]> = [
+      ['GET', 'view'],
+      ['HEAD', 'view'],
+      ['QUERY', 'view'],
+      ['POST', 'create'],
+      ['PUT', 'update'],
+      ['PATCH', 'update'],
+      ['DELETE', 'delete'],
+    ]
+    for (const [method, ability] of expected) {
+      checkedAbilities = []
+      expect(await run(method)).toBe(true)
+      expect(checkedAbilities).toEqual([ability])
+    }
+  })
+
+  test('denies unknown methods without consulting the gate', async () => {
+    await expect(run('PURGE')).rejects.toThrow(AuthorizationException)
+    expect(checkedAbilities).toEqual([])
+  })
+
+  test('uses options.message when denying an unknown method', async () => {
+    await expect(run('PURGE', { message: 'Custom denial' })).rejects.toThrow('Custom denial')
+  })
+
+  test('abilityFor maps a custom method to an ability', async () => {
+    const abilityFor = (method: string) => (method === 'PURGE' ? 'purge' : undefined)
+    expect(await run('PURGE', { abilityFor })).toBe(true)
+    expect(checkedAbilities).toEqual(['purge'])
+  })
+
+  test('abilityFor returning undefined falls back to the default mapping', async () => {
+    const abilityFor = () => undefined
+    expect(await run('DELETE', { abilityFor })).toBe(true)
+    expect(checkedAbilities).toEqual(['delete'])
+    checkedAbilities = []
+    await expect(run('PURGE', { abilityFor })).rejects.toThrow(AuthorizationException)
+    expect(checkedAbilities).toEqual([])
+  })
+
+  test('abilityFor can override a built-in mapping', async () => {
+    const abilityFor = (method: string) => (method === 'POST' ? 'update' : undefined)
+    expect(await run('POST', { abilityFor })).toBe(true)
+    expect(checkedAbilities).toEqual(['update'])
   })
 })

@@ -107,6 +107,19 @@ export interface AuthorizeOptions {
 }
 
 /**
+ * Options for `authorizeResourceMiddleware`.
+ */
+export interface AuthorizeResourceOptions extends AuthorizeOptions {
+  /**
+   * Map an HTTP method (always uppercased) to a policy ability, overriding
+   * or extending the built-in mapping. Return `undefined` to fall back to
+   * the default mapping; a method with no ability from either source is
+   * denied with a 403.
+   */
+  abilityFor?: (method: string) => string | undefined
+}
+
+/**
  * Policy registration.
  */
 export interface PolicyRegistration {
