@@ -368,14 +368,17 @@ When mounted on an `Application` instance, route definitions are read from the r
 The `servers` option accepts a function as well as a list. A mounted document is generated per request and the function is called each time, so it can advertise an address the process does not know when it mounts the docs. With `PORT=0` the operating system assigns the port, which therefore exists only once `listen()` has returned it — a fixed list would leave the document, and every client generated from it, pointing at an address nothing is listening on:
 
 ```ts
-let serverUrl = 'http://localhost:3000'
-
 mountOpenApiDocs(app, {
   title: 'Blog API',
   version: '1.0.0',
-  servers: () => [serverUrl],
+  servers: () => [app.address?.url ?? 'http://localhost:3000'],
 })
 
-const address = await app.listen({ port: 0 })
-serverUrl = address.url
+await app.listen({ port: 0 })
 ```
+
+`app.address` is where `listen()` bound this app, and `undefined` until it has.
+Reading it inside the function is what keeps the entrypoint out of it — nothing
+has to carry the address back down into the app that produced it. Mounting
+against a plain Hono instance leaves you without an `Application` to ask, so
+supply the value the function returns however that app knows it.

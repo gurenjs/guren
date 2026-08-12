@@ -395,17 +395,21 @@ export interface ApplicationListenOptions {
  * port from the port they asked for — with a port walk or `PORT=0` in play,
  * those are different numbers, and scraping the human-readable dev banner is
  * the only alternative.
+ *
+ * Read-only because {@link Application.address} hands back the very object
+ * `listen()` returned: a caller that adjusted its own copy would change what
+ * every later reader sees.
  */
 export interface ListenAddress {
   /**
    * The port the socket is bound to — what the runtime reports, falling back
    * to the port the successful `Bun.serve` call was made with.
    */
-  port: number
+  readonly port: number
   /** The hostname the socket is bound to. */
-  hostname: string
+  readonly hostname: string
   /** A URL that reaches the server, with a wildcard bind resolved to localhost. */
-  url: string
+  readonly url: string
 }
 
 /**
@@ -422,6 +426,7 @@ export class Application {
   private readonly authManager: AuthManager
   private viteDevServer?: ViteServer
   private bunServer?: BunServer
+  private boundAddress?: ListenAddress
   private viteTeardownRegistered = false
   private bunTeardownRegistered = false
   private autoSessionAttached = false
@@ -821,7 +826,14 @@ export class Application {
     }
 
     const boundHostname = server.hostname ?? hostname
+    const address: ListenAddress = {
+      port: boundPort,
+      hostname: boundHostname,
+      url: toConnectableUrl(boundHostname, boundPort),
+    }
+
     this.bunServer = server
+    this.boundAddress = address
     setActiveBunServer(server)
     this.registerBunTeardown()
 
@@ -837,11 +849,38 @@ export class Application {
       })
     }
 
-    return {
-      port: boundPort,
-      hostname: boundHostname,
-      url: toConnectableUrl(boundHostname, boundPort),
+    return address
+  }
+
+  /**
+   * The address {@link Application.listen} bound, or `undefined` before it has
+   * been called and once this app's server has been superseded or torn down.
+   *
+   * The same object `listen()` returned, so callers that need the address
+   * later — an OpenAPI `servers` entry, an absolute URL, a health report —
+   * read it here instead of threading it out of the entrypoint.
+   *
+   * The stored value is preferred over re-reading the live server, because
+   * `listen()` resolves the port through a fallback the socket no longer
+   * carries.
+   *
+   * Liveness is only as good as the signal available: a server stopped through
+   * the framework — a later `listen()`, the process-exit teardown — clears the
+   * slot this reads, but one stopped by calling `stop()` on the Bun server
+   * directly does not, and this keeps reporting its address. Treat it as
+   * "where `listen()` put this app", not as a health check.
+   */
+  get address(): ListenAddress | undefined {
+    // The `bunServer` half is for the app that never listened: without it, two
+    // `undefined`s would compare equal. Past that, a server this instance
+    // started counts as ours only while it is still the active one, which is
+    // false after a teardown and after the next `listen()` — including when
+    // the rebind that follows it fails.
+    if (!this.bunServer || getGlobalState().__gurenActiveServer !== this.bunServer) {
+      return undefined
     }
+
+    return this.boundAddress
   }
 
   /**

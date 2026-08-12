@@ -16,28 +16,38 @@ await mock.module('../../src/http/vite-dev-server', () => ({
 
 const { Application } = await import('../../src/http/Application')
 
+const originalEnv = { ...process.env }
+const originalServe = Bun.serve
+
+beforeEach(() => {
+  process.env = { ...originalEnv }
+  process.env.NODE_ENV = 'development'
+  process.env.GUREN_DEV_BANNER = '0'
+  startViteDevServerMock.mockClear()
+  viteCloseMock.mockClear()
+})
+
+afterEach(() => {
+  process.env = { ...originalEnv }
+  Bun.serve = originalServe
+})
+
+/**
+ * Stubs a bind that succeeds while reporting no `port` and no `hostname`.
+ *
+ * Both omissions are load-bearing: `listen()` has to fall back to the port it
+ * bound and the hostname it was asked for, and a stub written before it read
+ * either field must keep working.
+ */
+function stubBunServe() {
+  const serveMock = mock(() => ({ stop: mock(async () => {}) }))
+  Bun.serve = serveMock as unknown as typeof Bun.serve
+  return serveMock
+}
+
 describe('Application.listen', () => {
-  const originalEnv = { ...process.env }
-  const originalServe = Bun.serve
-
-  beforeEach(() => {
-    process.env = { ...originalEnv }
-    process.env.NODE_ENV = 'development'
-    process.env.GUREN_DEV_BANNER = '0'
-    startViteDevServerMock.mockClear()
-    viteCloseMock.mockClear()
-  })
-
-  afterEach(() => {
-    process.env = { ...originalEnv }
-    Bun.serve = originalServe
-  })
-
   it('restarts the managed Vite dev server after a watch reload', async () => {
-    // Deliberately reports no `port`: a stub that predates the bound-address
-    // return must keep working, so listen() falls back to the port it bound.
-    const serveMock = mock(() => ({ stop: mock(async () => {}) }))
-    Bun.serve = serveMock as unknown as typeof Bun.serve
+    const serveMock = stubBunServe()
 
     process.env.VITE_DEV_SERVER_URL = 'http://localhost:5173'
     process.env.GUREN_MANAGED_VITE_DEV_SERVER = '1'
@@ -81,5 +91,59 @@ describe('Application.listen', () => {
     // teardown clears them.
     expect(process.env.VITE_DEV_SERVER_URL).toBeUndefined()
     expect(process.env.GUREN_MANAGED_VITE_DEV_SERVER).toBeUndefined()
+  })
+})
+
+describe('Application.address', () => {
+  it('is undefined before listen()', () => {
+    expect(new Application().address).toBeUndefined()
+  })
+
+  it('reports the address listen() resolved, not what the live server reports', async () => {
+    // Re-deriving the address from the server would lose the port fallback the
+    // stub forces here — and `port: 0` has no fallback at all, which is the
+    // case the accessor exists for.
+    stubBunServe()
+
+    const app = new Application()
+    const address = await app.listen({ port: 3333, hostname: '0.0.0.0', vite: false })
+
+    expect(app.address).toEqual(address)
+    expect(app.address?.port).toBe(3333)
+    // The wildcard bind is mapped once, in listen(), and the accessor hands
+    // back that same mapping rather than repeating it.
+    expect(app.address?.url).toBe('http://127.0.0.1:3333')
+  })
+
+  it('reverts to undefined when a rebind fails after the old server stopped', async () => {
+    // `listen()` stops the running server before it tries to bind again, so a
+    // failed rebind leaves the app serving nothing. Reporting the old address
+    // here would point callers at a socket that is already closed.
+    stubBunServe()
+
+    const app = new Application()
+    await app.listen({ port: 3333, hostname: '127.0.0.1', vite: false })
+    expect(app.address?.port).toBe(3333)
+
+    Bun.serve = mock(() => {
+      throw Object.assign(new Error('Failed to start server.'), { code: 'EADDRINUSE' })
+    }) as unknown as typeof Bun.serve
+
+    await expect(
+      app.listen({ port: 3333, hostname: '127.0.0.1', vite: false, portFallback: false }),
+    ).rejects.toMatchObject({ code: 'EADDRINUSE' })
+
+    expect(app.address).toBeUndefined()
+  })
+
+  it('follows the app to a new address across a restart', async () => {
+    stubBunServe()
+
+    const app = new Application()
+    await app.listen({ port: 3333, hostname: '127.0.0.1', vite: false })
+    await app.listen({ port: 4444, hostname: '127.0.0.1', vite: false })
+
+    expect(app.address?.port).toBe(4444)
+    expect(app.address?.url).toBe('http://127.0.0.1:4444')
   })
 })

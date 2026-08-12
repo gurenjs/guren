@@ -1,4 +1,4 @@
-import app, { ready, setOpenApiServerUrl } from '../src/main.js'
+import app, { ready } from '../src/main.js'
 
 try {
   await ready
@@ -16,11 +16,6 @@ const hostname = process.env.HOST ?? '0.0.0.0'
 // a busy port is a misconfiguration worth reporting, not something to paper
 // over by serving an API on a port nobody was told about.
 const address = await app.listen({ port, hostname, vite: false, portFallback: false })
-
-// The socket is already accepting by the time `listen()` resolves, so this
-// goes first: anything above it widens the window where the OpenAPI document
-// still names the placeholder address.
-setOpenApiServerUrl(address.url)
 
 // Printed from the address listen() returned, not from the port that was
 // requested — with a port walk or PORT=0 those are different numbers.

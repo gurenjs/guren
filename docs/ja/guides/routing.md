@@ -323,14 +323,13 @@ mountOpenApiDocs(app, {
 `servers` オプションには配列だけでなく関数も渡せます。マウントされたドキュメントはリクエストごとに生成され、関数もそのたびに呼ばれるため、マウント時点ではまだ分からないアドレスを載せられます。たとえば `PORT=0` の場合、ポートは OS が割り当てるため `listen()` が返るまで確定せず、固定の配列ではドキュメントも、そこから生成したクライアントも、何も待ち受けていないアドレスを指したままになります。
 
 ```ts
-let serverUrl = 'http://localhost:3000'
-
 mountOpenApiDocs(app, {
   title: 'Blog API',
   version: '1.0.0',
-  servers: () => [serverUrl],
+  servers: () => [app.address?.url ?? 'http://localhost:3000'],
 })
 
-const address = await app.listen({ port: 0 })
-serverUrl = address.url
+await app.listen({ port: 0 })
 ```
+
+`app.address` は `listen()` がこのアプリをバインドしたアドレスで、バインド前は `undefined` です。関数の中でこれを読むことで、エントリポイントを経由せずに済みます。アドレスを生み出したアプリへ、わざわざ外から渡し直す必要がありません。素の Hono インスタンスにマウントする場合は尋ねる先の `Application` がないため、そのアプリが知っている方法で関数の戻り値を組み立ててください。
