@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
-import { mkdtemp, rm, readFile, writeFile, access } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, readFile, writeFile, access } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { installAgentHarness } from '../src/agent-harness'
@@ -90,6 +90,87 @@ describe('installAgentHarness', () => {
     expect(result.written).toContain('CLAUDE.md')
     expect(result.written).toContain('.claude/settings.json')
     await access(join(tempDir, '.mcp.json'))
+  })
+
+  it('init --target codex writes the agents family without any claude files', async () => {
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'init', targets: ['codex'] })
+
+    expect(result.written).toContain('AGENTS.md')
+    expect(result.written).toContain('.agents/rules/orm-models.md')
+    expect(result.written).toContain('.agents/skills/dev-workflow/SKILL.md')
+    expect(result.written).toContain('.codex/config.toml')
+    expect(result.written).not.toContain('CLAUDE.md')
+    expect(result.written.some((path) => path.startsWith('.claude/'))).toBe(false)
+
+    const agentsMd = await readFile(join(tempDir, 'AGENTS.md'), 'utf8')
+    expect(agentsMd).toContain('# My App')
+    expect(agentsMd).toContain('.agents/rules/')
+
+    const skill = await readFile(join(tempDir, '.agents/skills/scaffold/SKILL.md'), 'utf8')
+    expect(skill).toContain('.agents/rules')
+    expect(skill).not.toContain('__RULES_DIR__')
+  })
+
+  it('init --target claude,codex writes both trees and the thin CLAUDE.md', async () => {
+    const result = await installAgentHarness({
+      cwd: tempDir,
+      mode: 'init',
+      targets: ['claude', 'codex'],
+    })
+
+    expect(result.written).toContain('CLAUDE.md')
+    expect(result.written).toContain('AGENTS.md')
+    expect(result.written).toContain('.claude/rules/orm-models.md')
+    expect(result.written).toContain('.agents/rules/orm-models.md')
+
+    const claudeMd = await readFile(join(tempDir, 'CLAUDE.md'), 'utf8')
+    expect(claudeMd).toContain('@AGENTS.md')
+    expect(claudeMd).toContain('# My App')
+
+    const claudeSkill = await readFile(join(tempDir, '.claude/skills/scaffold/SKILL.md'), 'utf8')
+    expect(claudeSkill).toContain('.claude/rules')
+    expect(claudeSkill).not.toContain('__RULES_DIR__')
+  })
+
+  it('init --target opencode leaves an existing opencode.json alone and reports the snippet', async () => {
+    await writeFile(join(tempDir, 'opencode.json'), '{"theme":"dark"}\n', 'utf8')
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'init', targets: ['opencode'] })
+
+    expect(result.skipped).toContain('opencode.json')
+    expect(await readFile(join(tempDir, 'opencode.json'), 'utf8')).toBe('{"theme":"dark"}\n')
+    expect(result.mcpMergeHints).toHaveLength(1)
+    expect(result.mcpMergeHints[0]?.path).toBe('opencode.json')
+    expect(result.mcpMergeHints[0]?.snippet).toContain('_guren/mcp')
+  })
+
+  it('stays quiet about an existing MCP config that already has the endpoint', async () => {
+    await mkdir(join(tempDir, '.codex'), { recursive: true })
+    await writeFile(
+      join(tempDir, '.codex/config.toml'),
+      '[mcp_servers.guren]\nurl = "http://localhost:3333/_guren/mcp"\n',
+      'utf8',
+    )
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'init', targets: ['codex'] })
+
+    expect(result.skipped).toContain('.codex/config.toml')
+    expect(result.mcpMergeHints).toEqual([])
+  })
+
+  it('sync refreshes the installed family without inventing the other one', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init', targets: ['codex'] })
+    await writeFile(join(tempDir, '.agents/rules/orm-models.md'), 'stale\n', 'utf8')
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'sync' })
+
+    expect(result.written).toContain('.agents/rules/orm-models.md')
+    expect(await readFile(join(tempDir, '.agents/rules/orm-models.md'), 'utf8')).not.toBe('stale\n')
+    expect(result.written.some((path) => path.startsWith('.claude/'))).toBe(false)
+    expect(result.written).not.toContain('CLAUDE.md')
+    // the user-owned MCP snippet is not re-planned by a detected sync,
+    // so a deleted .codex/config.toml stays deleted
+    expect(result.written).not.toContain('.codex/config.toml')
   })
 
   it('reports that .mcp.json is dead when no script enables the endpoint', async () => {

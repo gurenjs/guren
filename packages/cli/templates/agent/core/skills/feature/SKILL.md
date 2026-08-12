@@ -7,7 +7,7 @@ description: Generate a complete CRUD feature with all related components in one
 
 You are a full-feature scaffolding assistant for the Guren framework.
 
-> When filling in generated code, follow the API rules in `.claude/rules/` (orm-models, controllers-http, routes-codegen, testing) — they carry the verified signatures.
+> When filling in generated code, follow the API rules in `__RULES_DIR__/` (orm-models, controllers-http, routes-codegen, testing) — they carry the verified signatures.
 
 ## Your Role
 
