@@ -73,10 +73,34 @@ describe('@guren/orm/drizzle/sqlite', () => {
 })
 
 describe('@guren/orm/drizzle (mixed barrel, kept for compatibility)', () => {
-  test('varchar still resolves to the MySQL builder', async () => {
+  test('the MySQL exports still resolve to the MySQL builders', async () => {
     // Pinned so removing the MySQL exports (a breaking change) is a
     // deliberate major-release decision, not a drive-by edit.
     const mysqlCore = await import('drizzle-orm/mysql-core')
     expect(mixed.varchar).toBe(mysqlCore.varchar)
+    expect(mixed.mysqlTable).toBe(mysqlCore.mysqlTable)
+    expect(mixed.int).toBe(mysqlCore.int)
+    expect(mixed.datetime).toBe(mysqlCore.datetime)
+  })
+})
+
+describe('package exports map', () => {
+  // Self-referencing imports resolve through package.json `exports` into
+  // dist/, so these fail on a subpath mapping typo the source-relative
+  // imports above cannot see. They require a built dist/ (`bun run build`),
+  // like the CLI tests that load @guren/server through its dist.
+  test('each dialect subpath resolves to its dialect, not a colliding name', async () => {
+    const [pgDist, mysqlDist, pgCore, mysqlCore, sqliteDist, sqliteCore] = await Promise.all([
+      import('@guren/orm/drizzle/pg'),
+      import('@guren/orm/drizzle/mysql'),
+      import('drizzle-orm/pg-core'),
+      import('drizzle-orm/mysql-core'),
+      import('@guren/orm/drizzle/sqlite'),
+      import('drizzle-orm/sqlite-core'),
+    ])
+
+    expect(pgDist.varchar).toBe(pgCore.varchar)
+    expect(mysqlDist.varchar).toBe(mysqlCore.varchar)
+    expect(sqliteDist.sqliteTable).toBe(sqliteCore.sqliteTable)
   })
 })
