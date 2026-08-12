@@ -152,11 +152,22 @@ function syncManagedInertiaDevEntry(devServerUrl: string): void {
   }
 }
 
-type GurenGlobal = typeof globalThis & {
+/**
+ * The ambient slots `listen()` plants on `globalThis` so a `bun --hot` reload,
+ * which re-runs the entrypoint but keeps `globalThis`, can find what the
+ * previous run left running.
+ *
+ * Exported so the tests that plant stand-ins in these slots can name them
+ * against this declaration instead of restating it. Not part of the public
+ * API: `src/index.ts` re-exports by name and does not list it.
+ */
+export interface GurenGlobalSlots {
   __gurenActiveServer?: BunServer
   __gurenActiveViteDevServer?: ViteServer
   __gurenActiveViteDevServerUrl?: string
 }
+
+type GurenGlobal = typeof globalThis & GurenGlobalSlots
 
 function getGlobalState(): GurenGlobal {
   return globalThis as GurenGlobal

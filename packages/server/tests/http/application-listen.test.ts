@@ -1,18 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 
-const viteCloseMock = mock(async () => {})
+import { createViteDevServerMocks, resetGurenGlobals } from './vite-dev-server-fixture'
 
-const startViteDevServerMock = mock(async () => ({
-  server: {
-    close: viteCloseMock,
-  },
-  localUrl: 'http://localhost:5174',
-  networkUrls: [],
-}))
+const vite = createViteDevServerMocks()
 
-await mock.module('../../src/http/vite-dev-server', () => ({
-  startViteDevServer: startViteDevServerMock,
-}))
+await mock.module('../../src/http/vite-dev-server', vite.moduleFactory)
 
 const { Application } = await import('../../src/http/Application')
 
@@ -23,13 +15,19 @@ beforeEach(() => {
   process.env = { ...originalEnv }
   process.env.NODE_ENV = 'development'
   process.env.GUREN_DEV_BANNER = '0'
-  startViteDevServerMock.mockClear()
-  viteCloseMock.mockClear()
+  vite.clear()
+  // Each test here starts a server that `listen()` records on `globalThis`,
+  // and a still-listening record sends the next `listen()` down the hot-reload
+  // reuse path instead of the one under test. Bun shares a process across test
+  // files, so the leftover can arrive from a sibling file as easily as from
+  // the test above — hence a reset on both sides.
+  resetGurenGlobals()
 })
 
 afterEach(() => {
   process.env = { ...originalEnv }
   Bun.serve = originalServe
+  resetGurenGlobals()
 })
 
 /**
@@ -56,7 +54,7 @@ describe('Application.listen', () => {
     const app = new Application()
     await app.listen({ port: 3333, hostname: '127.0.0.1' })
 
-    expect(startViteDevServerMock).toHaveBeenCalledTimes(1)
+    expect(vite.startViteDevServer).toHaveBeenCalledTimes(1)
     expect(process.env.VITE_DEV_SERVER_URL).toBe('http://localhost:5174')
     expect(process.env.GUREN_MANAGED_VITE_DEV_SERVER).toBe('1')
     expect(process.env.GUREN_INERTIA_ENTRY).toBe('http://localhost:5174/resources/js/dev-entry.ts')
@@ -83,8 +81,8 @@ describe('Application.listen', () => {
       code: 'EADDRINUSE',
     })
 
-    expect(startViteDevServerMock).toHaveBeenCalledTimes(1)
-    expect(viteCloseMock).toHaveBeenCalled()
+    expect(vite.startViteDevServer).toHaveBeenCalledTimes(1)
+    expect(vite.viteClose).toHaveBeenCalled()
     // The discriminating assertions: `listen()` also closes a *previous*
     // server on the way in, so the call count alone proves nothing. These env
     // vars were published by this call's Vite start, and only this call's
