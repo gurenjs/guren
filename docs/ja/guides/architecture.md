@@ -154,6 +154,34 @@ const { Cache, Events, Log, Mail, Queue } = createFacades(app.container)
 
 この流れは Bun のネイティブモジュールで動作し、`bun run dev` で起動されます。
 
+### サーバーの停止
+
+`await app.stop()` は `listen()` を打ち消します。ソケットを閉じ、`listen()` が起動した管理下の Vite 開発サーバーを停止し、`listen()` が登録したシグナルハンドラーを解除します。
+
+```ts
+await app.listen({ port: 3333 })
+// ...
+await app.stop()
+```
+
+停止は処理中のリクエストの完了を待ちます。待たずに強制的に閉じたい場合は `true` を渡します。
+
+```ts
+await app.stop(true) // 処理中のリクエストを待たない
+```
+
+何も listen していない状態で `stop()` を呼んでも、2回続けて呼んでも、何も起こりません。その後の `listen()` はクリーンに開始するため、1つのプロセス内で停止と再起動ができます。
+
+```ts
+await app.listen({ port: 0 })
+await app.stop()
+await app.listen({ port: 0 }) // 新しいソケット
+```
+
+`app.address` は停止中は `undefined` になり、再起動後は新しいアドレスを返します。
+
+`stop()` が要るのは、サーバーの稼働時間をプロセスの寿命以外が決める場合です。たとえば、より大きなプログラムに組み込んだアプリ、リクエストを処理してから終了するスクリプト、実際のソケットを必要としてそれを解放しなければならないハーネスなどが該当します。通常のデプロイでは不要です。`listen()` は `SIGINT`、`SIGTERM`、プロセス終了時にすでにサーバーを片付けており、これらはプロセスマネージャーやコンテナランタイムが送るシグナルだからです。本番運用での位置づけは [デプロイ](./deployment.md) を参照してください。
+
 ## データベーススキーマ
 - Drizzle のスキーマ定義は `db/schema.ts` に配置。
 - `config/database.ts` がコンテナ起動時にテーブルを用意します。

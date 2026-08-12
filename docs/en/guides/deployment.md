@@ -66,6 +66,7 @@ For reliability, wrap this command with a process manager (e.g. `systemd`, `pm2`
 - The startup banner only renders in non-production environments by default. If you want to show it (or disable it explicitly) set `GUREN_DEV_BANNER=1` or `GUREN_DEV_BANNER=0`.
 - The framework skips launching the Vite dev server when `NODE_ENV=production`. If you’re running a custom dev workflow in production-like environments, toggle it with `GUREN_DEV_VITE=1` (on) or `GUREN_DEV_VITE=0` (off).
 - Outside production, a busy port makes the server try the next one so `bun run dev` keeps working. Set `GUREN_STRICT_PORT=1` to bind the requested port or fail with `EADDRINUSE` instead. Use it anywhere a run has to know it reached the app it started — smoke scripts, E2E runners, CI — because walking to another port otherwise lets the run pass against whatever was already listening.
+- The HTTP server's own teardown is already wired: `listen()` closes the socket on `SIGINT`, `SIGTERM`, and process exit, which is what a process manager or container runtime sends to stop the service. Anything else your app runs still needs its own shutdown handler — a scheduler, a queue worker, or a store holding timers, as [Scheduling](./scheduling.md), [Queue](./queue.md), and [Rate Limiting](./rate-limiting.md) show. Call [`app.stop()`](./architecture.md#stopping-the-server) when application code, rather than the process ending, decides when the server stops.
 
 ```ini
 [Unit]

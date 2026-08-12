@@ -245,6 +245,46 @@ export class Post extends defineModel(posts) {
 
 This process runs under Bun as a native module and is triggered by `bun run dev`.
 
+### Stopping the Server
+
+`await app.stop()` undoes `listen()`. It closes the socket, takes down the
+managed Vite dev server that `listen()` started, and detaches the signal
+handlers it registered:
+
+```ts
+await app.listen({ port: 3333 })
+// ...
+await app.stop()
+```
+
+Stopping waits for in-flight requests to finish. Pass `true` to force them
+closed instead:
+
+```ts
+await app.stop(true) // don't wait for in-flight requests
+```
+
+Calling `stop()` when nothing is listening, or calling it twice, does nothing.
+A later `listen()` starts cleanly, so you can stop and restart within a single
+process:
+
+```ts
+await app.listen({ port: 0 })
+await app.stop()
+await app.listen({ port: 0 }) // a fresh socket
+```
+
+`app.address` is `undefined` while stopped, and reports the new address again
+after a restart.
+
+Reach for `stop()` when something other than the process lifetime decides how
+long the server runs: an app embedded in a larger program, a script that serves
+and then exits, or a harness that needs a real socket and has to release it. An
+ordinary deployment does not need it, because `listen()` already tears the
+server down on `SIGINT`, `SIGTERM`, and process exit — the signals a process
+manager or container runtime sends. See [Deployment](./deployment.md) for how
+that fits a production run.
+
 ## Database Schema
 - Drizzle schema definitions live in `db/schema.ts`.
 - `config/database.ts` provisions tables when the container starts.
