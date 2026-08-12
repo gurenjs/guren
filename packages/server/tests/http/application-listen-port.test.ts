@@ -168,6 +168,11 @@ describe('Application.listen port binding', () => {
     expect(address.port).toBeGreaterThan(0)
     const response = await fetch(`${address.url}/__does-not-exist`)
     expect(response.status).toBe(404)
+
+    // The case the accessor exists for: with `port: 0` nothing outside the app
+    // knows the port, so a caller that did not receive the value above — an
+    // OpenAPI `servers` entry built inside the app — has no other source.
+    expect(app.address).toEqual(address)
   })
 
   it('fails fast with EADDRINUSE when GUREN_STRICT_PORT=1', async () => {

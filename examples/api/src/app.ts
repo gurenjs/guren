@@ -30,23 +30,17 @@ const app = createApp({
   ],
 })
 
-// The default for callers that never bind a socket (`app.fetch()`, tests).
-// `bin/serve.ts` replaces it with the address it really got: under `PORT=0` the
-// OS picks the port, so it does not exist until `listen()` returns.
-let openApiServerUrl = 'http://localhost:3334'
-
-export function setOpenApiServerUrl(url: string): void {
-  openApiServerUrl = url
-}
-
 mountOpenApiDocs(app, {
   title: 'Guren Example API',
   version: '0.1.0',
   description: 'Example API for authentication, tokens, and task management.',
   jsonPath: '/api/openapi.json',
   docsPath: '/api/docs',
-  // A function, not a list: read per request, so a later address still lands.
-  servers: () => [openApiServerUrl],
+  // A function, not a list: read per request, so the address the app bound
+  // still lands. Under `PORT=0` the OS picks the port, so it does not exist
+  // until `listen()` returns; the fallback covers callers that never bind a
+  // socket at all (`app.fetch()`, tests).
+  servers: () => [app.address?.url ?? 'http://localhost:3334'],
 })
 
 export default app

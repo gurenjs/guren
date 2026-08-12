@@ -148,6 +148,48 @@ describe('@guren/openapi', () => {
     expect(await readServers()).toEqual([{ url: 'http://127.0.0.1:52341' }])
   })
 
+  // The pattern the example API uses, end to end over a real socket: `port: 0`
+  // means nothing outside the app knows the port, so the document can only
+  // name it by reading the address back off the app that bound it.
+  it('names the address the app bound when servers reads app.address', async () => {
+    const unbound = 'http://localhost:3334'
+    const app = createApp({
+      routes(router) {
+        router.get('/posts', { name: 'posts.index' }, async () => [])
+      },
+    })
+
+    mountOpenApiDocs(app, {
+      title: 'Blog API',
+      version: '1.0.0',
+      servers: () => [app.address?.url ?? unbound],
+    })
+
+    await app.boot()
+
+    const originalEnv = { ...process.env }
+    process.env.GUREN_DEV_BANNER = '0'
+
+    try {
+      const address = await app.listen({ port: 0, hostname: '127.0.0.1', vite: false })
+
+      const response = await fetch(`${address.url}/openapi.json`)
+      expect(response.status).toBe(200)
+      const document = await response.json() as { servers?: Array<{ url: string }> }
+      expect(document.servers).toEqual([{ url: address.url }])
+      // Guards the assertion above against a document that happens to match
+      // because the app fell back to the placeholder.
+      expect(address.url).not.toBe(unbound)
+    } finally {
+      process.env = { ...originalEnv }
+      // `Application` has no public stop; the same reach-in appears in
+      // packages/server's own port-binding tests.
+      const server = (app as unknown as { bunServer?: { stop?: (close?: boolean) => unknown } })
+        .bunServer
+      await server?.stop?.(true)
+    }
+  })
+
   it('omits servers when a servers function resolves to an empty list', () => {
     const { document } = generateOpenApiDocument([], {
       title: 'Blog API',
