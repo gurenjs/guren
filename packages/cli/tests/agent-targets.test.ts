@@ -55,7 +55,6 @@ function fakeTemplates(): TemplateFiles {
     ['core/rules/testing.md', 'rule body'],
     ['core/skills/scaffold/SKILL.md', 'rules live in `__RULES_DIR__/`'],
     ['targets/claude/CLAUDE.md', '# __APP_TITLE__ (full)'],
-    ['targets/claude/CLAUDE.multi.md', 'see @AGENTS.md'],
     ['targets/claude/mcp.json', '{}'],
     ['targets/claude/settings.json', '{}'],
     ['targets/claude/agents/code-review.md', 'agent'],
@@ -80,11 +79,11 @@ describe('planComponents', () => {
     expect(byPath.has('.agents/rules/testing.md')).toBe(false)
   })
 
-  it('switches CLAUDE.md to the thin variant when the agents family is present', () => {
+  it('keeps the full CLAUDE.md next to AGENTS.md when both families are present', () => {
     const files = planComponents(['claude', 'agents'], fakeTemplates())
     const byPath = new Map(files.map((file) => [file.path, file]))
 
-    expect(byPath.get('CLAUDE.md')?.content).toBe('see @AGENTS.md')
+    expect(byPath.get('CLAUDE.md')?.content).toBe('# __APP_TITLE__ (full)')
     expect(byPath.get('AGENTS.md')?.managed).toBe(false)
     expect(byPath.get('.agents/skills/scaffold/SKILL.md')?.content).toBe(
       'rules live in `.agents/rules/`',

@@ -118,14 +118,10 @@ export function planComponents(
   const hasAgents = components.includes('agents')
 
   if (components.includes('claude')) {
-    // Claude Code does not read AGENTS.md; when the agents family is also
-    // installed, CLAUDE.md becomes a thin @AGENTS.md import instead of a
-    // second full copy of the guide.
-    add({
-      path: 'CLAUDE.md',
-      content: get(hasAgents ? 'targets/claude/CLAUDE.multi.md' : 'targets/claude/CLAUDE.md'),
-      managed: false,
-    })
+    // Claude Code does not read AGENTS.md, so it always gets the full
+    // CLAUDE.md — even next to an AGENTS.md for other agents. The two
+    // describe the same project; each tool reads only its own entry file.
+    add({ path: 'CLAUDE.md', content: get('targets/claude/CLAUDE.md'), managed: false })
     add({ path: '.mcp.json', content: get('targets/claude/mcp.json'), managed: false })
     add({
       path: '.claude/settings.json',

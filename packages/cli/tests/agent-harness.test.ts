@@ -111,7 +111,7 @@ describe('installAgentHarness', () => {
     expect(skill).not.toContain('__RULES_DIR__')
   })
 
-  it('init --target claude,codex writes both trees and the thin CLAUDE.md', async () => {
+  it('init --target claude,codex writes both trees, each with its full entry doc', async () => {
     const result = await installAgentHarness({
       cwd: tempDir,
       mode: 'init',
@@ -123,9 +123,11 @@ describe('installAgentHarness', () => {
     expect(result.written).toContain('.claude/rules/orm-models.md')
     expect(result.written).toContain('.agents/rules/orm-models.md')
 
+    // Claude Code does not read AGENTS.md, so CLAUDE.md stays the full guide
     const claudeMd = await readFile(join(tempDir, 'CLAUDE.md'), 'utf8')
-    expect(claudeMd).toContain('@AGENTS.md')
     expect(claudeMd).toContain('# My App')
+    expect(claudeMd).toContain('.claude/rules')
+    expect(claudeMd).not.toContain('@AGENTS.md')
 
     const claudeSkill = await readFile(join(tempDir, '.claude/skills/scaffold/SKILL.md'), 'utf8')
     expect(claudeSkill).toContain('.claude/rules')

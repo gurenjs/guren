@@ -142,11 +142,16 @@ this per tool (see Open Questions).
   `bunx guren context` at session start (or call the `guren_get_context` MCP
   tool), run `bunx guren check --changed` after editing routes, controllers,
   models, schema, or pages.
-- `claude` combined with others: `AGENTS.md` as above, plus a thin
+- `claude` combined with others: `AGENTS.md` as above, plus ~~a thin
   `CLAUDE.md` containing the Claude-specific harness description (hooks,
   settings, `.claude/rules` auto-attach) followed by an `@AGENTS.md` import —
   the officially documented bridge — with a note that the manual
-  session-workflow section is automated by hooks and can be ignored.
+  session-workflow section is automated by hooks and can be ignored~~
+  **Amended during Part 1 (2026-08-12, maintainer decision):** the same full
+  `CLAUDE.md` as a claude-only install. Claude Code never reads `AGENTS.md`,
+  so its entry document should stand on its own rather than route through an
+  import; the two files describe the same project and each tool reads only
+  its own.
 
 **MCP configs.** All user-owned, written only when absent:
 
