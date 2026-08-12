@@ -319,3 +319,18 @@ mountOpenApiDocs(app, {
 ```
 
 `Application` インスタンスにマウントする場合、ルート定義はルーターから自動的に読み取られます。素の Hono インスタンスの場合は `definitions` を明示的に渡してください。
+
+`servers` オプションには配列だけでなく関数も渡せます。マウントされたドキュメントはリクエストごとに生成され、関数もそのたびに呼ばれるため、マウント時点ではまだ分からないアドレスを載せられます。たとえば `PORT=0` の場合、ポートは OS が割り当てるため `listen()` が返るまで確定せず、固定の配列ではドキュメントも、そこから生成したクライアントも、何も待ち受けていないアドレスを指したままになります。
+
+```ts
+let serverUrl = 'http://localhost:3000'
+
+mountOpenApiDocs(app, {
+  title: 'Blog API',
+  version: '1.0.0',
+  servers: () => [serverUrl],
+})
+
+const address = await app.listen({ port: 0 })
+serverUrl = address.url
+```

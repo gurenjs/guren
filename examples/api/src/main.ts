@@ -1,5 +1,7 @@
 import app from './app.js'
 
+export { setOpenApiServerUrl } from './app.js'
+
 export async function bootstrap() {
   await app.boot()
   return app
