@@ -51,6 +51,10 @@ describe('InertiaServiceProvider validation handling without a session', () => {
       const shared = await resolveSharedInertiaProps(ctx, container)
       return ctx.json(shared)
     })
+
+    // A response that never resolves shared props — an intermediate redirect,
+    // a health check — must not burn the flash.
+    app.get('/passthrough', (ctx) => ctx.text('ok'))
   })
 
   function extractErrorsCookie(res: Response): string {
@@ -153,6 +157,62 @@ describe('InertiaServiceProvider validation handling without a session', () => {
 
     const body = (await res.json()) as { errors?: Record<string, string> }
     expect(body.errors).toBeUndefined()
+  })
+
+  it('keeps the flash alive across responses that never render it', async () => {
+    // Session flashes survive intermediate hops because they are consumed on
+    // read; the cookie flash must match. A trailing-slash redirect or an auth
+    // bounce between the 303 and the actual render must not burn the errors.
+    const res1 = await app.request('/submit', {
+      method: 'POST',
+      headers: {
+        'X-Inertia': 'true',
+        'Referer': 'http://localhost/form',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    })
+
+    const cookie = extractErrorsCookie(res1)
+    const passthrough = await app.request('/passthrough', { headers: { Cookie: cookie } })
+
+    const expired = passthrough.headers
+      .getSetCookie()
+      .find((value) => value.startsWith(`${VALIDATION_ERRORS_COOKIE}=`))
+    expect(expired).toBeUndefined()
+
+    const res2 = await app.request('/form', { headers: { Cookie: cookie } })
+    const body = (await res2.json()) as { errors?: Record<string, string> }
+    expect(body.errors).toEqual({
+      email: 'Email is required',
+      password: 'Password is too short',
+    })
+  })
+
+  it('keeps smaller fields when an oversized field is skipped', async () => {
+    // The oversized field is dropped individually; a `break` here would lose
+    // every error that follows it, sending an empty cookie instead.
+    app.post('/submit-lopsided', () => {
+      throw new ValidationException({
+        essay: ['x'.repeat(5000)],
+        email: ['Email is required'],
+      })
+    })
+
+    const res = await app.request('/submit-lopsided', {
+      method: 'POST',
+      headers: {
+        'X-Inertia': 'true',
+        'Referer': 'http://localhost/form',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    })
+
+    const cookie = extractErrorsCookie(res)
+    const res2 = await app.request('/form', { headers: { Cookie: cookie } })
+    const body = (await res2.json()) as { errors?: Record<string, string> }
+    expect(body.errors).toEqual({ email: 'Email is required' })
   })
 
   it('truncates oversized error sets by whole fields instead of losing the cookie', async () => {

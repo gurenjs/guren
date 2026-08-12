@@ -15,6 +15,9 @@ installed authentication.
 Without a session, the flattened errors now ride across the one redirect in a
 short-lived HttpOnly cookie (display-only data, no store required, works on
 every runtime), and the shared-props resolver reads them from there into the
-same `errors` prop. A cleanup middleware expires the cookie on the render that
-consumed it, restoring the show-once semantics a session flash has. Apps with
+same `errors` prop. Reading consumes the flash: a cleanup middleware expires
+the cookie on the render that consumed it — and only then, so intermediate
+hops (a trailing-slash redirect, an auth bounce) don't burn the errors before
+a page shows them, matching session-flash semantics. Fields too large for the
+~4KB cookie cap are skipped individually so the rest still arrive. Apps with
 a session keep the existing flash path unchanged.
