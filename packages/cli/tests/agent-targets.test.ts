@@ -34,9 +34,9 @@ describe('componentsForTargets', () => {
     expect(componentsForTargets(['claude'])).toEqual(['claude'])
   })
 
-  it('maps every non-claude target onto the shared agents family', () => {
-    expect(componentsForTargets(['cursor'])).toEqual(['agents'])
-    expect(componentsForTargets(['copilot'])).toEqual(['agents'])
+  it('maps every non-claude target onto the shared agents family plus its native extras', () => {
+    expect(componentsForTargets(['cursor'])).toEqual(['agents', 'cursor'])
+    expect(componentsForTargets(['copilot'])).toEqual(['agents', 'copilot'])
   })
 
   it('adds the per-tool components for codex and opencode', () => {
@@ -49,10 +49,23 @@ describe('componentsForTargets', () => {
   })
 })
 
+const FAKE_RULE = [
+  '---',
+  'description: Guren testing — TestApp client methods',
+  'globs:',
+  '  - "tests/**"',
+  '  - "app/**"',
+  '---',
+  '',
+  '# Testing',
+  'rule body',
+  '',
+].join('\n')
+
 function fakeTemplates(): TemplateFiles {
   return new Map([
     ['core/AGENTS.md', '# __APP_TITLE__ (agents)'],
-    ['core/rules/testing.md', 'rule body'],
+    ['core/rules/testing.md', FAKE_RULE],
     ['core/skills/scaffold/SKILL.md', 'rules live in `__RULES_DIR__/`'],
     ['targets/claude/CLAUDE.md', '# __APP_TITLE__ (full)'],
     ['targets/claude/mcp.json', '{}'],
@@ -61,6 +74,8 @@ function fakeTemplates(): TemplateFiles {
     ['targets/claude/hooks/check-after-edit.ts', 'hook'],
     ['targets/codex/config.toml', '[mcp_servers.guren]'],
     ['targets/codex/rules/guren.rules', 'prefix_rule(...)'],
+    ['targets/cursor/mcp.json', '{"mcpServers":{}}'],
+    ['targets/copilot/mcp.json', '{"servers":{}}'],
     ['targets/opencode/opencode.json', '{"mcp":{}}'],
   ])
 }
@@ -110,6 +125,39 @@ describe('planComponents', () => {
 
     expect(byPath.get('.codex/rules/guren.rules')).toMatchObject({ managed: false })
     expect(byPath.get('.codex/rules/guren.rules')?.mergeHint).toBeUndefined()
+  })
+
+  it('renders cursor rules as guren-prefixed .mdc with comma-joined globs', () => {
+    const files = planComponents(['agents', 'cursor'], fakeTemplates())
+    const byPath = new Map(files.map((file) => [file.path, file]))
+
+    const rule = byPath.get('.cursor/rules/guren-testing.mdc')
+    expect(rule?.managed).toBe(true)
+    expect(rule?.content).toContain('description: Guren testing — TestApp client methods')
+    expect(rule?.content).toContain('globs: tests/**,app/**')
+    expect(rule?.content).toContain('alwaysApply: false')
+    expect(rule?.content).toContain('# Testing')
+    expect(byPath.get('.cursor/mcp.json')).toMatchObject({ managed: false, mergeHint: true })
+  })
+
+  it('renders copilot rules as guren-prefixed .instructions.md with applyTo', () => {
+    const files = planComponents(['agents', 'copilot'], fakeTemplates())
+    const byPath = new Map(files.map((file) => [file.path, file]))
+
+    const rule = byPath.get('.github/instructions/guren-testing.instructions.md')
+    expect(rule?.managed).toBe(true)
+    expect(rule?.content).toContain('applyTo: "tests/**,app/**"')
+    expect(rule?.content).toContain('# Testing')
+    expect(rule?.content).not.toContain('alwaysApply')
+    expect(byPath.get('.vscode/mcp.json')).toMatchObject({ managed: false, mergeHint: true })
+  })
+
+  it('throws when a rule file has no parseable frontmatter instead of shipping an empty scope', () => {
+    const templates = fakeTemplates()
+    templates.set('core/rules/testing.md', '# No frontmatter\n')
+    expect(() => planComponents(['cursor'], templates)).toThrow(
+      'Agent harness rule testing.md is missing its frontmatter block',
+    )
   })
 
   it('throws when a canonical template file is missing', () => {

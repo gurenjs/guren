@@ -10,8 +10,11 @@
  * rule file ends up in two locations with drifting content.
  *
  * Targets collapse onto shared components: every non-Claude agent reads the
- * `AGENTS.md` + `.agents/` family natively, so codex/cursor/copilot/opencode
- * differ only in which user-owned MCP client config they add.
+ * `AGENTS.md` + `.agents/` family natively. On top of that, cursor and
+ * copilot get the canonical rules re-rendered into their native path-scoped
+ * formats (`.cursor/rules/*.mdc`, `.github/instructions/*.instructions.md`),
+ * and each tool gets its own user-owned extras (MCP client config; Codex
+ * also a command approval policy).
  */
 
 export const AGENT_TARGETS = ['claude', 'codex', 'cursor', 'copilot', 'opencode'] as const
@@ -24,7 +27,7 @@ export type AgentTarget = (typeof AGENT_TARGETS)[number]
  * files, and their tool-specific extras (MCP config, command approval
  * policy) are user-owned, so sync never needs to tell them apart.
  */
-export type HarnessComponent = 'claude' | 'agents' | 'codex' | 'opencode'
+export type HarnessComponent = 'claude' | 'agents' | 'cursor' | 'copilot' | 'codex' | 'opencode'
 
 export interface PlannedFile {
   /** App-relative POSIX path, e.g. `.agents/rules/testing.md`. */
@@ -82,6 +85,12 @@ export function componentsForTargets(targets: AgentTarget[]): HarnessComponent[]
   if (targets.some((target) => target !== 'claude')) {
     components.push('agents')
   }
+  if (targets.includes('cursor')) {
+    components.push('cursor')
+  }
+  if (targets.includes('copilot')) {
+    components.push('copilot')
+  }
   if (targets.includes('codex')) {
     components.push('codex')
   }
@@ -92,6 +101,56 @@ export function componentsForTargets(targets: AgentTarget[]): HarnessComponent[]
 }
 
 const RULES_DIR_TOKEN = '__RULES_DIR__'
+
+interface RuleDoc {
+  description: string
+  globs: string[]
+  /** Everything after the closing `---`, leading newline included. */
+  body: string
+}
+
+/**
+ * Parse a canonical rule file's frontmatter (`description` + `globs` list).
+ * The format is framework-authored, so this is strict on purpose: a rule the
+ * parser cannot read must fail the install (and the test suite) loudly, not
+ * ship to Cursor/Copilot with an empty scope.
+ */
+function parseRuleDoc(name: string, content: string): RuleDoc {
+  const match = content.match(/^---\n([\s\S]*?)\n---(\n[\s\S]*)$/u)
+  if (!match) {
+    throw new Error(`Agent harness rule ${name} is missing its frontmatter block`)
+  }
+  const [, header, body] = match
+  let description = ''
+  const globs: string[] = []
+  let inGlobs = false
+  for (const line of header!.split('\n')) {
+    if (line.startsWith('description:')) {
+      description = line.slice('description:'.length).trim()
+      inGlobs = false
+    } else if (line.trim() === 'globs:') {
+      inGlobs = true
+    } else if (inGlobs && line.trim().startsWith('- ')) {
+      globs.push(line.trim().slice(2).trim().replace(/^"(.*)"$/u, '$1'))
+    } else if (line.trim() !== '') {
+      inGlobs = false
+    }
+  }
+  if (!description || globs.length === 0) {
+    throw new Error(`Agent harness rule ${name} needs a description and at least one glob`)
+  }
+  return { description, globs, body: body! }
+}
+
+/** Cursor rule: `.mdc` frontmatter with a comma-joined glob string. */
+function renderCursorRule(doc: RuleDoc): string {
+  return `---\ndescription: ${doc.description}\nglobs: ${doc.globs.join(',')}\nalwaysApply: false\n---${doc.body}`
+}
+
+/** Copilot instructions: `applyTo` carries the comma-joined glob string. */
+function renderCopilotRule(doc: RuleDoc): string {
+  return `---\ndescription: ${doc.description}\napplyTo: "${doc.globs.join(',')}"\n---${doc.body}`
+}
 
 export function planComponents(
   components: HarnessComponent[],
@@ -158,6 +217,43 @@ export function planComponents(
         managed: true,
       })
     }
+  }
+
+  // Cursor and Copilot load path-scoped rules natively; re-render the
+  // canonical rules into their formats. Generated files in these shared
+  // directories carry a `guren-` prefix so framework ownership stays
+  // unambiguous next to user-authored rules.
+  if (components.includes('cursor')) {
+    for (const [rel, content] of under('core/rules/')) {
+      const doc = parseRuleDoc(rel, content)
+      add({
+        path: `.cursor/rules/guren-${rel.replace(/\.md$/u, '')}.mdc`,
+        content: renderCursorRule(doc),
+        managed: true,
+      })
+    }
+    add({
+      path: '.cursor/mcp.json',
+      content: get('targets/cursor/mcp.json'),
+      managed: false,
+      mergeHint: true,
+    })
+  }
+  if (components.includes('copilot')) {
+    for (const [rel, content] of under('core/rules/')) {
+      const doc = parseRuleDoc(rel, content)
+      add({
+        path: `.github/instructions/guren-${rel.replace(/\.md$/u, '')}.instructions.md`,
+        content: renderCopilotRule(doc),
+        managed: true,
+      })
+    }
+    add({
+      path: '.vscode/mcp.json',
+      content: get('targets/copilot/mcp.json'),
+      managed: false,
+      mergeHint: true,
+    })
   }
 
   if (components.includes('codex')) {

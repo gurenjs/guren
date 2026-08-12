@@ -135,6 +135,56 @@ describe('installAgentHarness', () => {
     expect(claudeSkill).not.toContain('__RULES_DIR__')
   })
 
+  it('init --target cursor renders native .mdc rules next to the agents family', async () => {
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'init', targets: ['cursor'] })
+
+    expect(result.written).toContain('AGENTS.md')
+    expect(result.written).toContain('.cursor/rules/guren-testing.mdc')
+    expect(result.written).toContain('.cursor/mcp.json')
+
+    const rule = await readFile(join(tempDir, '.cursor/rules/guren-testing.mdc'), 'utf8')
+    expect(rule).toContain('globs: tests/**')
+    expect(rule).toContain('alwaysApply: false')
+    expect(rule).toContain('TestApp')
+  })
+
+  it('init --target copilot renders native .instructions.md rules', async () => {
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'init', targets: ['copilot'] })
+
+    expect(result.written).toContain('.github/instructions/guren-orm-models.instructions.md')
+    expect(result.written).toContain('.vscode/mcp.json')
+
+    const rule = await readFile(
+      join(tempDir, '.github/instructions/guren-orm-models.instructions.md'),
+      'utf8',
+    )
+    expect(rule).toContain('applyTo: "app/Models/**,db/**"')
+    expect(rule).toContain('defineModel')
+  })
+
+  it('sync refreshes detected cursor rules without touching other families', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init', targets: ['cursor'] })
+    await writeFile(join(tempDir, '.cursor/rules/guren-testing.mdc'), 'stale\n', 'utf8')
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'sync' })
+
+    expect(result.written).toContain('.cursor/rules/guren-testing.mdc')
+    expect(await readFile(join(tempDir, '.cursor/rules/guren-testing.mdc'), 'utf8')).not.toBe('stale\n')
+    expect(result.written.some((path) => path.startsWith('.claude/'))).toBe(false)
+    expect(result.written.some((path) => path.startsWith('.github/'))).toBe(false)
+  })
+
+  it('sync does not mistake user-authored cursor rules for an installed harness', async () => {
+    await mkdir(join(tempDir, '.cursor/rules'), { recursive: true })
+    await writeFile(join(tempDir, '.cursor/rules/my-style.mdc'), 'user rule\n', 'utf8')
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'sync' })
+
+    // no guren-* evidence → falls back to the claude default, leaves .cursor alone
+    expect(result.written.some((path) => path.startsWith('.cursor/'))).toBe(false)
+    expect(result.written).toContain('.claude/rules/orm-models.md')
+  })
+
   it('init --target opencode leaves an existing opencode.json alone and reports the snippet', async () => {
     await writeFile(join(tempDir, 'opencode.json'), '{"theme":"dark"}\n', 'utf8')
 

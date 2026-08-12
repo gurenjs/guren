@@ -240,7 +240,11 @@ deterministic.
 
 ### Implementation plan
 
-Three parts, each its own PR referencing this RFC:
+Three parts, each its own PR referencing this RFC.
+*Amended during implementation (2026-08-12): Parts 1 and 2 shipped together
+in the initial PR — the cursor/copilot rule transforms turned out to be a
+thin rendering step over the Part 1 emitter split, not worth a PR boundary.
+Part 3 remains separate.*
 
 1. **Part 1 — emitter split + `--target` + `agents` family + `AGENTS.md`.**
    Restructure templates into `core/` + `targets/`, add `agent-targets.ts`,

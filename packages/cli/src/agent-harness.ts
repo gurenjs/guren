@@ -127,6 +127,15 @@ async function loadTemplates(): Promise<TemplateFiles> {
  * presence proves nothing). A bare app with no evidence gets the Claude
  * default, preserving the long-standing "sync acts as install" behavior.
  */
+async function dirHasGurenFiles(cwd: string, dir: string, suffix: string): Promise<boolean> {
+  try {
+    const names = await readdir(join(cwd, dir))
+    return names.some((name) => name.startsWith('guren-') && name.endsWith(suffix))
+  } catch {
+    return false
+  }
+}
+
 async function detectInstalledComponents(cwd: string): Promise<HarnessComponent[]> {
   const components: HarnessComponent[] = []
   if (await fileExists(cwd, '.claude/rules')) {
@@ -134,6 +143,12 @@ async function detectInstalledComponents(cwd: string): Promise<HarnessComponent[
   }
   if (await fileExists(cwd, '.agents/rules')) {
     components.push('agents')
+  }
+  if (await dirHasGurenFiles(cwd, '.cursor/rules', '.mdc')) {
+    components.push('cursor')
+  }
+  if (await dirHasGurenFiles(cwd, '.github/instructions', '.instructions.md')) {
+    components.push('copilot')
   }
   if (components.length === 0) {
     components.push('claude')
@@ -168,7 +183,9 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
     const overwrite = force || (mode === 'sync' && file.managed)
     if (exists && !overwrite) {
       skipped.push(file.path)
-      if (file.mergeHint) {
+      // onboarding guidance, not a recurring nag — sync stays quiet about
+      // configs the user has decided to keep without the Guren endpoint
+      if (file.mergeHint && mode === 'init') {
         const current = await readFile(destPath, 'utf8').catch(() => '')
         if (!current.includes('_guren/mcp')) {
           mcpMergeHints.push({ path: file.path, snippet: content })
