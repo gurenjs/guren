@@ -155,13 +155,14 @@ function syncManagedInertiaDevEntry(devServerUrl: string): void {
 type GurenGlobal = typeof globalThis & {
   __gurenActiveServer?: BunServer
   __gurenActiveViteDevServer?: ViteServer
+  __gurenActiveViteDevServerUrl?: string
 }
 
 function getGlobalState(): GurenGlobal {
   return globalThis as GurenGlobal
 }
 
-async function stopActiveBunServer(): Promise<void> {
+async function stopActiveBunServer(closeActiveConnections = false): Promise<void> {
   const state = getGlobalState()
   const previous = state.__gurenActiveServer
 
@@ -171,7 +172,7 @@ async function stopActiveBunServer(): Promise<void> {
   }
 
   try {
-    await Promise.resolve(previous.stop())
+    await Promise.resolve(previous.stop(closeActiveConnections))
   } catch (error) {
     console.warn('Failed to stop previous Bun server:', error)
   } finally {
@@ -183,28 +184,84 @@ function setActiveBunServer(server?: BunServer): void {
   getGlobalState().__gurenActiveServer = server
 }
 
+/**
+ * How long a Vite `close()` may take before shutdown abandons it. Vite waits
+ * for every open connection, and a browser tab holding its HMR socket can keep
+ * that wait alive indefinitely. An abandoned (still-listening) old asset
+ * server is recoverable noise; a `listen()` that never returns is not — the
+ * Bun server is already stopped by the time Vite is torn down, so hanging here
+ * leaves the process alive with no HTTP listener at all.
+ */
+function viteCloseTimeoutMs(): number {
+  const parsed =
+    typeof process !== 'undefined'
+      ? Number.parseInt(process.env.GUREN_VITE_CLOSE_TIMEOUT_MS ?? '', 10)
+      : Number.NaN
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 5000
+}
+
 async function stopActiveViteDevServer(): Promise<void> {
   const state = getGlobalState()
   const previous = state.__gurenActiveViteDevServer
 
   if (!previous) {
-    state.__gurenActiveViteDevServer = undefined
+    setActiveViteDevServer()
     clearManagedViteEnv()
     return
   }
 
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const close = previous.close().then(
+    () => 'closed' as const,
+    (error: unknown) => {
+      console.warn('Failed to stop previous Vite dev server:', error)
+      return 'failed' as const
+    },
+  )
+
   try {
-    await previous.close()
-  } catch (error) {
-    console.warn('Failed to stop previous Vite dev server:', error)
+    const timeoutMs = viteCloseTimeoutMs()
+    const outcome = await Promise.race([
+      close,
+      new Promise<'timeout'>((resolve) => {
+        timer = setTimeout(() => resolve('timeout'), timeoutMs)
+      }),
+    ])
+
+    if (outcome === 'timeout') {
+      console.warn(
+        `Previous Vite dev server did not close within ${timeoutMs}ms — abandoning it. A stale asset server may still hold its port.`,
+      )
+    }
   } finally {
-    state.__gurenActiveViteDevServer = undefined
+    clearTimeout(timer)
+    setActiveViteDevServer()
     clearManagedViteEnv()
   }
 }
 
-function setActiveViteDevServer(server?: ViteServer): void {
-  getGlobalState().__gurenActiveViteDevServer = server
+function setActiveViteDevServer(server?: ViteServer, localUrl?: string): void {
+  const state = getGlobalState()
+  state.__gurenActiveViteDevServer = server
+  state.__gurenActiveViteDevServerUrl = server ? localUrl : undefined
+}
+
+/**
+ * The managed Vite dev server a previous `listen()` left running in this same
+ * process — `bun --hot` re-runs the entrypoint but preserves `globalThis`.
+ * Reusing it keeps the browser's HMR socket connected and avoids the Vite
+ * `close()` wait described on {@link viteCloseTimeoutMs}.
+ */
+function reusableActiveViteDevServer(): { server: ViteServer; localUrl: string } | undefined {
+  const state = getGlobalState()
+  const server = state.__gurenActiveViteDevServer
+  const localUrl = state.__gurenActiveViteDevServerUrl
+
+  if (!server || !localUrl || !server.httpServer?.listening) {
+    return undefined
+  }
+
+  return { server, localUrl }
 }
 
 export type BootCallback = (app: Hono) => void | Promise<void>
@@ -621,8 +678,10 @@ export class Application {
       throw new Error('Bun runtime is required to call Application.listen')
     }
 
-    await stopActiveBunServer()
-    await stopActiveViteDevServer()
+    // Force-close: this path only runs when a previous `listen()` in the same
+    // process is being replaced (`bun --hot` re-running the entrypoint), and a
+    // dev reload must not wait on whatever requests the old server still holds.
+    await stopActiveBunServer(true)
 
     const { port = 3000, hostname = '0.0.0.0', assetsUrl, vite, portFallback } = options
     const externalAssetsUrl =
@@ -638,10 +697,31 @@ export class Application {
       !resolvedAssetsUrl &&
       process.env?.GUREN_DEV_VITE !== '0'
 
+    // On a hot reload, adopt the previous run's Vite dev server instead of
+    // restarting it: the browser keeps its HMR socket, and the reload skips
+    // the `close()` wait entirely. Explicit `vite` options opt out — the
+    // running server was built from the *previous* call's options, and this
+    // call's may differ.
+    const reusableVite =
+      shouldStartVite && typeof vite !== 'object' ? reusableActiveViteDevServer() : undefined
+
     // Only this call's Vite server is ours to close if the bind fails below.
     let startedViteHere = false
 
-    if (shouldStartVite) {
+    if (reusableVite) {
+      this.viteDevServer = reusableVite.server
+      resolvedAssetsUrl = reusableVite.localUrl
+      if (typeof process !== 'undefined') {
+        process.env.VITE_DEV_SERVER_URL = resolvedAssetsUrl
+        process.env[MANAGED_VITE_ENV_FLAG] = '1'
+      }
+      syncManagedInertiaDevEntry(resolvedAssetsUrl)
+      this.registerViteTeardown()
+    } else {
+      await stopActiveViteDevServer()
+    }
+
+    if (shouldStartVite && !reusableVite) {
       const viteOptions: StartViteDevServerOptions | undefined =
         typeof vite === 'object' ? vite : undefined
 
@@ -654,7 +734,7 @@ export class Application {
           port: viteOptions?.port,
         })
         this.viteDevServer = server
-        setActiveViteDevServer(server)
+        setActiveViteDevServer(server, localUrl)
         resolvedAssetsUrl = localUrl
         if (typeof process !== 'undefined') {
           process.env.VITE_DEV_SERVER_URL = resolvedAssetsUrl
