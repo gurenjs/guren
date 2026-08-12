@@ -9,16 +9,14 @@ export class User extends defineModel(users, {
   // Derived from the plain `password`, so callers never set it directly
   optionalOnCreate: ['passwordHash'],
   requireOnCreate: ['password'],
-}) {
   // passwordHash and rememberToken are denied from mass assignment by
   // AuthenticatableModel itself. `name` and `email` are the only remaining
   // columns, so this fillable list matches what would be mass-assignable
   // anyway — it stays explicit so a later column addition needs an opt-in.
-  static fillable = ['name', 'email', 'password']
-
+  fillable: ['name', 'email', 'password'],
   // Never serialized by Model.serialize() and stripped from auth.user()
-  static override hidden = ['passwordHash', 'rememberToken']
-
+  hidden: ['passwordHash', 'rememberToken'],
+}) {
   static override relationTypes: { posts: HasManyRecord<PostRecord> } = {
     posts: [],
   }

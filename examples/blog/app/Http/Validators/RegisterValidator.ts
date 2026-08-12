@@ -11,12 +11,12 @@ export const RegisterSchema = z
       .string({ error: 'Email is required.' })
       .trim()
       .min(1, 'Email is required.')
-      .email('The email address is badly formatted.')
       // Lowercased so it round-trips correctly through the password-reset
       // and email-verification token helpers (@guren/core), which both
       // normalize emails to lowercase internally before matching against
       // stored records.
-      .toLowerCase(),
+      .toLowerCase()
+      .pipe(z.email('The email address is badly formatted.')),
     password: z
       .string({ error: 'Password is required.' })
       .min(8, 'Password must be at least 8 characters.'),

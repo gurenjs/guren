@@ -10,8 +10,8 @@ export const ProfileUpdateSchema = z.object({
     .string()
     .trim()
     .min(1, 'Email is required.')
-    .email('Enter a valid email address.')
-    .toLowerCase(),
+    .toLowerCase()
+    .pipe(z.email('Enter a valid email address.')),
   password: z
     .string()
     .trim()

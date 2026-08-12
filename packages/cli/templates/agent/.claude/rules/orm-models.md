@@ -34,9 +34,8 @@ export class User extends defineModel(users, {
   base: AuthenticatableModel,
   optionalOnCreate: ['passwordHash'],
   requireOnCreate: ['password'],
-}) {
-  static override hidden = ['passwordHash', 'rememberToken']
-}
+  hidden: ['passwordHash', 'rememberToken'],
+}) {}
 ```
 
 Drop `requireOnCreate` when accounts can also be created without a password (OAuth-only sign-up).
