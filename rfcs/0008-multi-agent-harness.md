@@ -175,6 +175,15 @@ loopback-only guard. Cloud agents (Copilot coding agent on github.com) cannot
 reach `localhost` — the `.vscode/mcp.json` serves local VS Code/Copilot CLI
 sessions, and that limitation is documented rather than worked around.
 
+**Command approval policy (Codex).** *Added during Part 1 (2026-08-12):*
+Codex's project-layer `.codex/rules/*.rules` (Starlark `prefix_rule`, loaded
+in trusted projects only) is the analogue of `.claude/settings.json`'s
+`permissions.allow` — an approval policy for shell commands, not instruction
+rules. The codex target ships `.codex/rules/guren.rules` allowing the
+harness's own commands (`bunx guren …`, `bun run codegen`,
+`bun run typecheck`, `bun test`) to run without prompts. User-owned:
+`agent:sync` never widens an approval policy behind the user's back.
+
 **Hooks, settings, subagents.** Claude-only in this RFC: `settings.json`,
 `.claude/hooks/`, `.claude/agents/` ship exactly as today, only for the
 `claude` target. Cursor hooks (beta) and OpenCode JS plugins could port
@@ -309,6 +318,8 @@ exactly as today. New targets are opt-in per app. No codemod, no deprecation.
 - Codex skills / config / MCP: <https://developers.openai.com/codex/skills>,
   <https://developers.openai.com/codex/config-reference>,
   <https://developers.openai.com/codex/mcp>
+- Codex command approval rules (Starlark `prefix_rule`):
+  <https://learn.chatgpt.com/docs/agent-configuration/rules>
 - Cursor skills discovery (`.agents/skills/` + compat paths):
   <https://cursor.com/docs/skills>; rules format:
   <https://cursor.com/docs> (`.cursor/rules/*.mdc`)

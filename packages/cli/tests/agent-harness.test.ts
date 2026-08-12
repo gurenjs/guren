@@ -99,6 +99,7 @@ describe('installAgentHarness', () => {
     expect(result.written).toContain('.agents/rules/orm-models.md')
     expect(result.written).toContain('.agents/skills/dev-workflow/SKILL.md')
     expect(result.written).toContain('.codex/config.toml')
+    expect(result.written).toContain('.codex/rules/guren.rules')
     expect(result.written).not.toContain('CLAUDE.md')
     expect(result.written.some((path) => path.startsWith('.claude/'))).toBe(false)
 

@@ -21,10 +21,10 @@ export type AgentTarget = (typeof AGENT_TARGETS)[number]
 /**
  * The independently installable pieces of the harness. `agent:sync` detects
  * these on disk (not targets): codex and opencode produce identical managed
- * files, and their MCP configs are user-owned, so sync never needs to tell
- * them apart.
+ * files, and their tool-specific extras (MCP config, command approval
+ * policy) are user-owned, so sync never needs to tell them apart.
  */
-export type HarnessComponent = 'claude' | 'agents' | 'codex-mcp' | 'opencode-mcp'
+export type HarnessComponent = 'claude' | 'agents' | 'codex' | 'opencode'
 
 export interface PlannedFile {
   /** App-relative POSIX path, e.g. `.agents/rules/testing.md`. */
@@ -83,10 +83,10 @@ export function componentsForTargets(targets: AgentTarget[]): HarnessComponent[]
     components.push('agents')
   }
   if (targets.includes('codex')) {
-    components.push('codex-mcp')
+    components.push('codex')
   }
   if (targets.includes('opencode')) {
-    components.push('opencode-mcp')
+    components.push('opencode')
   }
   return components
 }
@@ -160,15 +160,23 @@ export function planComponents(
     }
   }
 
-  if (components.includes('codex-mcp')) {
+  if (components.includes('codex')) {
     add({
       path: '.codex/config.toml',
       content: get('targets/codex/config.toml'),
       managed: false,
       mergeHint: true,
     })
+    // Codex's analogue of the .claude/settings.json permission allowlist:
+    // Starlark approval rules for shell commands, not instruction rules.
+    // User-owned like settings.json — sync never widens a policy file.
+    add({
+      path: '.codex/rules/guren.rules',
+      content: get('targets/codex/rules/guren.rules'),
+      managed: false,
+    })
   }
-  if (components.includes('opencode-mcp')) {
+  if (components.includes('opencode')) {
     add({
       path: 'opencode.json',
       content: get('targets/opencode/opencode.json'),

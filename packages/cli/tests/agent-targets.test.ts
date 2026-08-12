@@ -39,13 +39,13 @@ describe('componentsForTargets', () => {
     expect(componentsForTargets(['copilot'])).toEqual(['agents'])
   })
 
-  it('adds the per-tool MCP components for codex and opencode', () => {
-    expect(componentsForTargets(['codex'])).toEqual(['agents', 'codex-mcp'])
-    expect(componentsForTargets(['opencode'])).toEqual(['agents', 'opencode-mcp'])
+  it('adds the per-tool components for codex and opencode', () => {
+    expect(componentsForTargets(['codex'])).toEqual(['agents', 'codex'])
+    expect(componentsForTargets(['opencode'])).toEqual(['agents', 'opencode'])
   })
 
   it('combines claude with the agents family', () => {
-    expect(componentsForTargets(['claude', 'codex'])).toEqual(['claude', 'agents', 'codex-mcp'])
+    expect(componentsForTargets(['claude', 'codex'])).toEqual(['claude', 'agents', 'codex'])
   })
 })
 
@@ -60,6 +60,7 @@ function fakeTemplates(): TemplateFiles {
     ['targets/claude/agents/code-review.md', 'agent'],
     ['targets/claude/hooks/check-after-edit.ts', 'hook'],
     ['targets/codex/config.toml', '[mcp_servers.guren]'],
+    ['targets/codex/rules/guren.rules', 'prefix_rule(...)'],
     ['targets/opencode/opencode.json', '{"mcp":{}}'],
   ])
 }
@@ -94,13 +95,21 @@ describe('planComponents', () => {
   })
 
   it('marks the codex and opencode MCP configs as user-owned merge-hint files', () => {
-    const files = planComponents(['agents', 'codex-mcp', 'opencode-mcp'], fakeTemplates())
+    const files = planComponents(['agents', 'codex', 'opencode'], fakeTemplates())
     const byPath = new Map(files.map((file) => [file.path, file]))
 
     expect(byPath.get('.codex/config.toml')).toMatchObject({ managed: false, mergeHint: true })
     expect(byPath.get('opencode.json')).toMatchObject({ managed: false, mergeHint: true })
     expect(byPath.has('CLAUDE.md')).toBe(false)
     expect(byPath.has('.claude/rules/testing.md')).toBe(false)
+  })
+
+  it('ships the codex command approval policy as plain user-owned (no merge hint)', () => {
+    const files = planComponents(['agents', 'codex'], fakeTemplates())
+    const byPath = new Map(files.map((file) => [file.path, file]))
+
+    expect(byPath.get('.codex/rules/guren.rules')).toMatchObject({ managed: false })
+    expect(byPath.get('.codex/rules/guren.rules')?.mergeHint).toBeUndefined()
   })
 
   it('throws when a canonical template file is missing', () => {
