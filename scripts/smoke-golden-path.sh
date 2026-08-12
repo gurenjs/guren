@@ -311,8 +311,13 @@ fi
 
 # Assert migrations actually created tables — db:migrate used to report
 # success while silently executing nothing.
-cp "$FIXTURES_DIR/dbcheck.$SMOKE_DB.ts" "$TEMP_DIR/dbcheck.ts"
-(cd "$APP_DIR" && bun "$TEMP_DIR/dbcheck.ts")
+#
+# Copied as a directory, keeping each fixture's own name, because the three
+# dbcheck bodies now share expected-tables.ts and a relative import only
+# resolves if the sibling travels with it. Naming a file list here instead is
+# how one of them would come to be left behind.
+cp -R "$FIXTURES_DIR" "$TEMP_DIR/fixtures"
+(cd "$APP_DIR" && bun "$TEMP_DIR/fixtures/dbcheck.$SMOKE_DB.ts")
 
 # One loopback address, used for both halves of the conversation: the app is
 # told to bind it and the assertions are addressed to it. `localhost` is not
