@@ -1,40 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 
+import {
+  activeViteDevServer,
+  createViteDevServerMocks,
+  resetGurenGlobals,
+  seedPreviousViteDevServer,
+  signalListenerCounts,
+} from './vite-dev-server-fixture'
+
 /**
  * `stop()`'s Vite half, kept apart from `application-stop.test.ts` because it
  * needs a stubbed `startViteDevServer` and that file binds real sockets.
- *
- * The real module is spread and only `startViteDevServer` overridden: replacing
- * the module wholesale would strip its other exports for every test that loads
- * it afterwards in the same process.
  */
-const viteCloseMock = mock(async () => {})
+const vite = createViteDevServerMocks()
 
-const startViteDevServerMock = mock(async () => ({
-  server: {
-    close: viteCloseMock,
-    httpServer: { listening: true },
-  },
-  localUrl: 'http://localhost:5174',
-  networkUrls: [],
-}))
-
-const realViteDevServer = await import('../../src/http/vite-dev-server')
-
-await mock.module('../../src/http/vite-dev-server', () => ({
-  ...realViteDevServer,
-  startViteDevServer: startViteDevServerMock,
-}))
+await mock.module('../../src/http/vite-dev-server', vite.moduleFactory)
 
 const { Application } = await import('../../src/http/Application')
-
-type GurenGlobal = typeof globalThis & {
-  __gurenActiveServer?: unknown
-  __gurenActiveViteDevServer?: unknown
-  __gurenActiveViteDevServerUrl?: string
-}
-
-const globalState = globalThis as GurenGlobal
 
 describe('Application.stop and the managed Vite dev server', () => {
   const originalEnv = { ...process.env }
@@ -47,20 +29,15 @@ describe('Application.stop and the managed Vite dev server', () => {
     delete process.env.VITE_DEV_SERVER_URL
     delete process.env.GUREN_MANAGED_VITE_DEV_SERVER
     delete process.env.GUREN_INERTIA_ENTRY
-    startViteDevServerMock.mockClear()
-    viteCloseMock.mockClear()
-    globalState.__gurenActiveServer = undefined
-    globalState.__gurenActiveViteDevServer = undefined
-    globalState.__gurenActiveViteDevServerUrl = undefined
+    vite.clear()
+    resetGurenGlobals()
     Bun.serve = mock(() => ({ stop: mock(async () => {}), port: 3400 })) as unknown as typeof Bun.serve
   })
 
   afterEach(() => {
     process.env = { ...originalEnv }
     Bun.serve = originalServe
-    globalState.__gurenActiveServer = undefined
-    globalState.__gurenActiveViteDevServer = undefined
-    globalState.__gurenActiveViteDevServerUrl = undefined
+    resetGurenGlobals()
   })
 
   it('closes the Vite dev server listen() started, and unpublishes its env vars', async () => {
@@ -69,15 +46,14 @@ describe('Application.stop and the managed Vite dev server', () => {
 
     // Guard the premise: without a managed server actually started, the
     // assertions below would pass against an app that never had one.
-    expect(startViteDevServerMock).toHaveBeenCalledTimes(1)
+    expect(vite.startViteDevServer).toHaveBeenCalledTimes(1)
     expect(process.env.VITE_DEV_SERVER_URL).toBe('http://localhost:5174')
-    expect(globalState.__gurenActiveViteDevServer).toBeDefined()
+    expect(activeViteDevServer()).toBeDefined()
 
     await app.stop(true)
 
-    expect(viteCloseMock).toHaveBeenCalledTimes(1)
-    expect(globalState.__gurenActiveViteDevServer).toBeUndefined()
-    expect(globalState.__gurenActiveViteDevServerUrl).toBeUndefined()
+    expect(vite.viteClose).toHaveBeenCalledTimes(1)
+    expect(activeViteDevServer()).toBeUndefined()
     // Leaving these set would point a later process at an asset server that is
     // no longer running.
     expect(process.env.VITE_DEV_SERVER_URL).toBeUndefined()
@@ -108,7 +84,7 @@ describe('Application.stop and the managed Vite dev server', () => {
     // so the restart must start one rather than adopt a closed server.
     await app.listen({ port: 3401, hostname: '127.0.0.1' })
 
-    expect(startViteDevServerMock).toHaveBeenCalledTimes(2)
+    expect(vite.startViteDevServer).toHaveBeenCalledTimes(2)
     expect(process.env.VITE_DEV_SERVER_URL).toBe('http://localhost:5174')
 
     await app.stop(true)
@@ -123,30 +99,24 @@ describe('Application.stop and the managed Vite dev server', () => {
    * the process before the live set has finished shutting down.
    */
   it('detaches the Vite teardown handlers too, across repeated cycles', async () => {
-    const counts = () => ({
-      exit: process.listenerCount('exit'),
-      sigint: process.listenerCount('SIGINT'),
-      sigterm: process.listenerCount('SIGTERM'),
-    })
-
     const app = new Application()
-    const before = counts()
+    const before = signalListenerCounts()
 
     await app.listen({ port: 3403, hostname: '127.0.0.1' })
-    const listening = counts()
+    const listening = signalListenerCounts()
     // Two sets while listening: the Bun half and the Vite half.
     expect(listening.exit).toBe(before.exit + 2)
     expect(listening.sigint).toBe(before.sigint + 2)
     expect(listening.sigterm).toBe(before.sigterm + 2)
 
     await app.stop(true)
-    expect(counts()).toEqual(before)
+    expect(signalListenerCounts()).toEqual(before)
 
     for (let cycle = 0; cycle < 3; cycle += 1) {
       await app.listen({ port: 3403, hostname: '127.0.0.1' })
-      expect(counts()).toEqual(listening)
+      expect(signalListenerCounts()).toEqual(listening)
       await app.stop(true)
-      expect(counts()).toEqual(before)
+      expect(signalListenerCounts()).toEqual(before)
     }
   })
 
@@ -157,13 +127,15 @@ describe('Application.stop and the managed Vite dev server', () => {
     // matters is that stop() adds no second close on top of it.
     const strayClose = mock(async () => {})
     process.env.VITE_DEV_SERVER_URL = 'http://localhost:6000'
-    globalState.__gurenActiveViteDevServer = { close: strayClose, httpServer: { listening: true } }
-    globalState.__gurenActiveViteDevServerUrl = 'http://localhost:6000'
+    seedPreviousViteDevServer(
+      { close: strayClose, httpServer: { listening: true } },
+      'http://localhost:6000',
+    )
 
     const app = new Application()
     await app.listen({ port: 3402, hostname: '127.0.0.1' })
 
-    expect(startViteDevServerMock).not.toHaveBeenCalled()
+    expect(vite.startViteDevServer).not.toHaveBeenCalled()
     const closesAfterListen = strayClose.mock.calls.length
 
     await app.stop(true)
