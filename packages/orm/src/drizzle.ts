@@ -49,7 +49,9 @@ export const varchar: typeof mysqlCoreVarchar = mysqlCoreVarchar
 /** @deprecated Import from `@guren/orm/drizzle/mysql` instead. */
 export const datetime: typeof mysqlCoreDatetime = mysqlCoreDatetime
 
-/** @deprecated Import from `@guren/orm/drizzle/mysql` instead. */
+// No @deprecated here: the dts rollup drops JSDoc on `export type { … } from`
+// statements, and re-declaring the aliases would mean copying their generic
+// signatures from a drizzle RC. The value exports above carry the marker.
 export type {
   MySqlTable,
   MySqlColumn,
