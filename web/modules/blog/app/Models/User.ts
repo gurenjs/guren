@@ -10,7 +10,6 @@ export type NewUserRecord = typeof users.$inferInsert
 export class User extends defineModel(users, {
   base: AuthenticatableModel,
   optionalOnCreate: ['passwordHash'],
-}) {
-  static fillable = ['name', 'email', 'githubId']
-  static override hidden = ['passwordHash', 'rememberToken']
-}
+  fillable: ['name', 'email', 'githubId'],
+  hidden: ['passwordHash', 'rememberToken'],
+}) {}

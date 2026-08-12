@@ -7,8 +7,8 @@ export const LoginSchema = z.object({
     .string()
     .trim()
     .min(1, 'Email is required.')
-    .email('The email address is badly formatted.')
-    .toLowerCase(),
+    .toLowerCase()
+    .pipe(z.email('The email address is badly formatted.')),
   password: z
     .string()
     .min(1, 'Password is required.'),

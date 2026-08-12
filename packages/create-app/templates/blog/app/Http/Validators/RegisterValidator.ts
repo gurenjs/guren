@@ -14,8 +14,8 @@ export const RegisterSchema = z
       .string()
       .trim()
       .min(1, 'Email is required.')
-      .email('The email address is badly formatted.')
-      .toLowerCase(),
+      .toLowerCase()
+      .pipe(z.email('The email address is badly formatted.')),
     password: z
       .string()
       .min(8, 'Password must be at least 8 characters.'),

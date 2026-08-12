@@ -608,12 +608,11 @@ export class User extends defineModel(users, {
   base: AuthenticatableModel,
   // Derived from the plain \`password\`, so callers never set it directly
   optionalOnCreate: ['passwordHash'],${requireOnCreate}
+  // Never serialized by Model.serialize() and stripped from auth.user()
+  hidden: ['passwordHash', 'rememberToken'],
 }) {
   // passwordHash and rememberToken are denied from mass assignment by
   // AuthenticatableModel itself — no per-model configuration needed.
-
-  // Never serialized by Model.serialize() and stripped from auth.user()
-  static override hidden = ['passwordHash', 'rememberToken']
 }
 `
 }
@@ -794,8 +793,8 @@ export const LoginSchema = z.object({
     .string()
     .trim()
     .min(1, 'Email is required.')
-    .email('The email address is badly formatted.')
-    .toLowerCase(),
+    .toLowerCase()
+    .pipe(z.email('The email address is badly formatted.')),
   password: z
     .string()
     .min(1, 'Password is required.'),
@@ -830,8 +829,8 @@ export const RegisterSchema = z
       .string()
       .trim()
       .min(1, 'Email is required.')
-      .email('The email address is badly formatted.')
-      .toLowerCase(),
+      .toLowerCase()
+      .pipe(z.email('The email address is badly formatted.')),
     password: z
       .string()
       .min(8, 'Password must be at least 8 characters.'),
@@ -856,8 +855,8 @@ export const ForgotPasswordSchema = z.object({
     .string()
     .trim()
     .min(1, 'Email is required.')
-    .email('The email address is badly formatted.')
-    .toLowerCase(),
+    .toLowerCase()
+    .pipe(z.email('The email address is badly formatted.')),
 })
 
 export type ForgotPasswordInput = z.infer<typeof ForgotPasswordSchema>
@@ -894,8 +893,8 @@ function buildProfileValidatorTemplate({ includePassword, providerOwnedEmail }: 
     .string()
     .trim()
     .min(1, 'Email is required.')
-    .email('Enter a valid email address.')
-    .toLowerCase(),`
+    .toLowerCase()
+    .pipe(z.email('Enter a valid email address.')),`
 
   const passwordField = includePassword
     ? `

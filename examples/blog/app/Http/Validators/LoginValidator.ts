@@ -5,12 +5,12 @@ export const LoginSchema = z.object({
     .string({ error: 'Email is required.' })
     .trim()
     .min(1, 'Email is required.')
-    .email('The email address is badly formatted.')
     // Registration stores emails lowercased, so normalize here too —
     // otherwise a user who registered as Ada@Example.com and logs in with
     // the same casing gets "Invalid credentials" from a case-sensitive
     // database lookup.
-    .toLowerCase(),
+    .toLowerCase()
+    .pipe(z.email('The email address is badly formatted.')),
   password: z
     .string({ error: 'Password is required.' })
     .min(1, 'Password is required.'),
