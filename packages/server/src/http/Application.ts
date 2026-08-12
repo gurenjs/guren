@@ -159,6 +159,29 @@ function syncManagedInertiaDevEntry(devServerUrl: string): void {
 }
 
 /**
+ * The one managed Vite dev server this process runs, and who owns it.
+ *
+ * The owner matters because a dev server outlives the `listen()` that started
+ * it: on a `bun --hot` reload the next `listen()` adopts the running server
+ * rather than restarting it, and both applications then hold the same object.
+ * Instance identity cannot tell those two apart — it is the same server — so
+ * "may I close this?" is answered here instead, by the slot naming exactly one
+ * owner at a time.
+ */
+export interface ActiveViteDevServer {
+  readonly server: ViteServer
+  readonly localUrl: string
+  readonly owner: Application
+  /**
+   * Detaches the owner's process teardown handlers. Whoever replaces this
+   * record calls it, because the outgoing owner is only reachable from here —
+   * and a set of handlers left attached would still close this server, and run
+   * its own `process.exit()`, on the next signal.
+   */
+  readonly disposeTeardown: () => void
+}
+
+/**
  * The ambient slots `listen()` plants on `globalThis` so a `bun --hot` reload,
  * which re-runs the entrypoint but keeps `globalThis`, can find what the
  * previous run left running.
@@ -169,14 +192,91 @@ function syncManagedInertiaDevEntry(devServerUrl: string): void {
  */
 export interface GurenGlobalSlots {
   __gurenActiveServer?: BunServer
-  __gurenActiveViteDevServer?: ViteServer
-  __gurenActiveViteDevServerUrl?: string
+  __gurenActiveViteDevServer?: ActiveViteDevServer
 }
 
 type GurenGlobal = typeof globalThis & GurenGlobalSlots
 
 function getGlobalState(): GurenGlobal {
   return globalThis as GurenGlobal
+}
+
+/**
+ * How long a server `stop()` may take before shutdown stops waiting on it.
+ * A graceful stop waits for every in-flight request, and one that never
+ * completes would otherwise hold a shutdown open forever. Abandoning the wait
+ * is safe in a way abandoning a Vite close is not: the socket has already
+ * stopped accepting connections by the time `stop()` returns its promise, so
+ * what is left running is a drain, not a listener.
+ */
+function bunStopTimeoutMs(): number {
+  return shutdownTimeoutMs('GUREN_BUN_STOP_TIMEOUT_MS')
+}
+
+/**
+ * A shutdown bound read from the environment: a positive integer number of
+ * milliseconds, or 5 seconds when the variable is unset or unparseable. One
+ * parse for both bounds, so the contract cannot drift between them.
+ */
+function shutdownTimeoutMs(envName: string): number {
+  const parsed =
+    typeof process !== 'undefined' ? Number.parseInt(process.env[envName] ?? '', 10) : Number.NaN
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 5000
+}
+
+/**
+ * Awaits `work`, giving up after `timeoutMs` and reporting through `onTimeout`.
+ * Resolves either way — every caller is a shutdown path, and a shutdown that
+ * hangs is worse than one that abandons what it was waiting for.
+ */
+async function awaitBounded(
+  work: Promise<unknown>,
+  timeoutMs: number,
+  onTimeout: (timeoutMs: number) => void,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  try {
+    const timedOut = await Promise.race([
+      work.then(() => false),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(true), timeoutMs)
+      }),
+    ])
+
+    if (timedOut) {
+      onTimeout(timeoutMs)
+    }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * `stop()` bounded by {@link bunStopTimeoutMs}, warning rather than throwing:
+ * a caller shutting down cannot do anything useful with the failure, and every
+ * caller here goes on to give up its handle on the server either way.
+ */
+async function stopBunServerBounded(
+  server: BunServer,
+  closeActiveConnections: boolean,
+): Promise<void> {
+  // An async IIFE rather than `Promise.resolve(server.stop(...)).catch(...)`:
+  // a `stop` that throws synchronously would otherwise escape the catch and
+  // reject the whole shutdown path instead of being warned about.
+  const stopped = (async () => {
+    try {
+      await server.stop?.(closeActiveConnections)
+    } catch (error) {
+      console.warn('Failed to stop Bun server:', error)
+    }
+  })()
+
+  await awaitBounded(stopped, bunStopTimeoutMs(), (timeoutMs) => {
+    console.warn(
+      `Bun server did not stop within ${timeoutMs}ms — no longer waiting on it. In-flight requests may still be draining.`,
+    )
+  })
 }
 
 async function stopActiveBunServer(closeActiveConnections = false): Promise<void> {
@@ -189,16 +289,26 @@ async function stopActiveBunServer(closeActiveConnections = false): Promise<void
   }
 
   try {
-    await Promise.resolve(previous.stop(closeActiveConnections))
-  } catch (error) {
-    console.warn('Failed to stop previous Bun server:', error)
+    await stopBunServerBounded(previous, closeActiveConnections)
   } finally {
-    state.__gurenActiveServer = undefined
+    releaseActiveBunServer(previous)
   }
 }
 
 function setActiveBunServer(server?: BunServer): void {
   getGlobalState().__gurenActiveServer = server
+}
+
+/**
+ * Give up the process-wide active-server slot, but only if it still holds
+ * `server`. A `listen()` that ran to completion inside the caller's await has
+ * already repointed the slot at a live server, and clearing then would strip
+ * that server of the SIGINT/SIGTERM/exit teardown that reads it.
+ */
+function releaseActiveBunServer(server: BunServer): void {
+  if (getGlobalState().__gurenActiveServer === server) {
+    setActiveBunServer()
+  }
 }
 
 /**
@@ -234,11 +344,7 @@ function registerProcessTeardown(onSignal: () => void, onExit: () => void): () =
  * leaves the process alive with no HTTP listener at all.
  */
 function viteCloseTimeoutMs(): number {
-  const parsed =
-    typeof process !== 'undefined'
-      ? Number.parseInt(process.env.GUREN_VITE_CLOSE_TIMEOUT_MS ?? '', 10)
-      : Number.NaN
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : 5000
+  return shutdownTimeoutMs('GUREN_VITE_CLOSE_TIMEOUT_MS')
 }
 
 /**
@@ -248,47 +354,72 @@ function viteCloseTimeoutMs(): number {
  * cleanup hang on a held HMR socket exactly like a hot reload does.
  */
 async function closeViteDevServerBounded(server: ViteServer): Promise<void> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const close = server.close().catch((error: unknown) => {
-    console.warn('Failed to stop Vite dev server:', error)
-  })
-
-  try {
-    const timeoutMs = viteCloseTimeoutMs()
-    const timedOut = await Promise.race([
-      close.then(() => false),
-      new Promise<boolean>((resolve) => {
-        timer = setTimeout(() => resolve(true), timeoutMs)
-      }),
-    ])
-
-    if (timedOut) {
-      console.warn(
-        `Vite dev server did not close within ${timeoutMs}ms — abandoning it. A stale asset server may still hold its port.`,
-      )
+  const close = (async () => {
+    try {
+      await server.close()
+    } catch (error) {
+      console.warn('Failed to stop Vite dev server:', error)
     }
-  } finally {
-    clearTimeout(timer)
-  }
+  })()
+
+  await awaitBounded(close, viteCloseTimeoutMs(), (timeoutMs) => {
+    console.warn(
+      `Vite dev server did not close within ${timeoutMs}ms — abandoning it. A stale asset server may still hold its port.`,
+    )
+  })
 }
 
+/**
+ * Closes whatever managed Vite dev server this process is running, whoever owns
+ * it. Only `listen()`'s restart path calls this — it is deciding to replace the
+ * running server outright, which is the one case where an owner's claim does
+ * not survive.
+ */
 async function stopActiveViteDevServer(): Promise<void> {
   const previous = getGlobalState().__gurenActiveViteDevServer
 
   try {
     if (previous) {
-      await closeViteDevServerBounded(previous)
+      await closeViteDevServerBounded(previous.server)
     }
   } finally {
-    setActiveViteDevServer()
-    clearManagedViteEnv()
+    previous?.disposeTeardown()
+    // Only give up the slot if it still holds the record this call retired: a
+    // `listen()` elsewhere can have installed a live record while the close
+    // above was awaited, and clearing then would unpublish its env vars too.
+    if (getGlobalState().__gurenActiveViteDevServer === previous) {
+      setActiveViteDevServer()
+    }
   }
 }
 
-function setActiveViteDevServer(server?: ViteServer, localUrl?: string): void {
-  const state = getGlobalState()
-  state.__gurenActiveViteDevServer = server
-  state.__gurenActiveViteDevServerUrl = server ? localUrl : undefined
+function publishManagedViteEnv(localUrl: string): void {
+  if (typeof process === 'undefined') {
+    return
+  }
+
+  process.env.VITE_DEV_SERVER_URL = localUrl
+  process.env[MANAGED_VITE_ENV_FLAG] = '1'
+  syncManagedInertiaDevEntry(localUrl)
+}
+
+/**
+ * The one write point for the active-record slot. The published env vars are
+ * the record's outward face — `VITE_DEV_SERVER_URL` and the managed flag are
+ * how the rest of the process learns which asset server is live — so they
+ * travel with the slot: setting a record publishes its URL, clearing the slot
+ * unpublishes. Keeping the two writes together is what stops a stale close
+ * from unpublishing an adopter's URL while its record stays live, or the
+ * reverse.
+ */
+function setActiveViteDevServer(active?: ActiveViteDevServer): void {
+  getGlobalState().__gurenActiveViteDevServer = active
+
+  if (active) {
+    publishManagedViteEnv(active.localUrl)
+  } else {
+    clearManagedViteEnv()
+  }
 }
 
 /**
@@ -301,20 +432,18 @@ function setActiveViteDevServer(server?: ViteServer, localUrl?: string): void {
  */
 function reusableActiveViteDevServer(
   viteOption: ApplicationListenOptions['vite'],
-): { server: ViteServer; localUrl: string } | undefined {
+): ActiveViteDevServer | undefined {
   if (typeof viteOption === 'object') {
     return undefined
   }
 
-  const state = getGlobalState()
-  const server = state.__gurenActiveViteDevServer
-  const localUrl = state.__gurenActiveViteDevServerUrl
+  const active = getGlobalState().__gurenActiveViteDevServer
 
-  if (!server || !localUrl || !server.httpServer?.listening) {
+  if (!active || !active.server.httpServer?.listening) {
     return undefined
   }
 
-  return { server, localUrl }
+  return active
 }
 
 export type BootCallback = (app: Hono) => void | Promise<void>
@@ -458,6 +587,11 @@ export interface ListenAddress {
  *
  * It embeds a DI Container as the backbone of the framework, binding core
  * services and managing providers through the container's ProviderManager.
+ *
+ * Lifecycle rule for `listen()`/`stop()` and their helpers: re-check ownership
+ * after every `await`. Any server or slot they remembered can have been
+ * superseded by a concurrent call while they waited, and only the current
+ * owner may clear shared state.
  */
 export class Application {
   readonly hono: Hono
@@ -465,16 +599,19 @@ export class Application {
   readonly router: Router
   private readonly providerManager: ProviderManager
   private readonly authManager: AuthManager
-  private viteDevServer?: ViteServer
   private bunServer?: BunServer
   private boundAddress?: ListenAddress
   /**
-   * Detach the process teardown handlers each half registered, and double as
-   * the "are they attached?" memo. One field apiece rather than a separate
-   * boolean: a memo and an undo that can disagree is how handlers end up
-   * attached while a flag says otherwise — see {@link registerProcessTeardown}.
+   * Detaches the Bun half's process teardown handlers, and doubles as the "are
+   * they attached?" memo. One field rather than a separate boolean: a memo and
+   * an undo that can disagree is how handlers end up attached while a flag says
+   * otherwise — see {@link registerProcessTeardown}.
+   *
+   * The Vite half's disposer lives in {@link ActiveViteDevServer} instead,
+   * because the application that detaches those handlers is not always the one
+   * that attached them: adoption moves the server to a new owner, and the
+   * outgoing owner is only reachable through the slot.
    */
-  private disposeViteTeardown?: () => void
   private disposeBunTeardown?: () => void
   private autoSessionAttached = false
   private routesRegistered = false
@@ -745,6 +882,9 @@ export class Application {
     // Force-close: this path only runs when a previous `listen()` in the same
     // process is being replaced (`bun --hot` re-running the entrypoint), and a
     // dev reload must not wait on whatever requests the old server still holds.
+    // The server it retires is remembered so the displaced-handle check below
+    // can tell "already stopped here" from "bound by a concurrent call".
+    const supersededServer = getGlobalState().__gurenActiveServer
     await stopActiveBunServer(true)
 
     const { port = 3000, hostname = '0.0.0.0', assetsUrl, vite, portFallback } = options
@@ -761,20 +901,35 @@ export class Application {
       !resolvedAssetsUrl &&
       process.env?.GUREN_DEV_VITE !== '0'
 
-    // Wires a managed Vite dev server into this listen() call — instance
-    // field, active-server global, published env vars, entry sync, teardown —
-    // identically for a freshly started server and one adopted from a
-    // previous hot-reload run.
+    // Wires a managed Vite dev server into this listen() call — ownership,
+    // instance field, published env vars, entry sync, teardown — identically
+    // for a freshly started server and one adopted from a previous hot-reload
+    // run.
+    //
+    // Taking ownership releases whoever held it before, so the server has
+    // exactly one owner at every moment. Without that, an adopted server has
+    // two applications believing they may close it, and the first of them to
+    // stop takes the asset server out from under the one still serving.
     const adoptViteDevServer = (viteServer: ViteServer, localUrl: string): void => {
-      this.viteDevServer = viteServer
-      setActiveViteDevServer(viteServer, localUrl)
-      resolvedAssetsUrl = localUrl
-      if (typeof process !== 'undefined') {
-        process.env.VITE_DEV_SERVER_URL = localUrl
-        process.env[MANAGED_VITE_ENV_FLAG] = '1'
+      const displaced = getGlobalState().__gurenActiveViteDevServer
+      displaced?.disposeTeardown()
+
+      // Adoption re-installs the record around the same server. Anything else
+      // in the slot is a fresh server a concurrent listen() started, and
+      // dropping its record without closing it would strand it on its port —
+      // best-effort and unawaited on the same terms as every other close.
+      if (displaced && displaced.server !== viteServer) {
+        void closeViteDevServerBounded(displaced.server)
       }
-      syncManagedInertiaDevEntry(localUrl)
-      this.registerViteTeardown()
+
+      setActiveViteDevServer({
+        server: viteServer,
+        localUrl,
+        owner: this,
+        disposeTeardown: this.registerViteTeardown(),
+      })
+
+      resolvedAssetsUrl = localUrl
     }
 
     // On a hot reload, adopt the previous run's Vite dev server instead of
@@ -796,7 +951,6 @@ export class Application {
         typeof vite === 'object' ? vite : undefined
 
       try {
-        await this.closeViteDevServer()
         const { server, localUrl } = await startViteDevServer({
           root: viteOptions?.root ?? process.cwd(),
           config: viteOptions?.config,
@@ -879,6 +1033,15 @@ export class Application {
       url: toConnectableUrl(boundHostname, boundPort),
     }
 
+    // A concurrent listen() on this instance may have bound a server of its
+    // own while this call was awaiting above. It is not the server this call
+    // force-stopped on entry, so nothing has closed it — and overwriting the
+    // handle below would leave that socket live with no way to reach it.
+    const displaced = this.bunServer
+    if (displaced && displaced !== server && displaced !== supersededServer) {
+      await stopBunServerBounded(displaced, true)
+    }
+
     this.bunServer = server
     this.boundAddress = address
     setActiveBunServer(server)
@@ -952,28 +1115,36 @@ export class Application {
    * published env vars, in a process with no application server. That close is
    * best-effort on the same terms as every other path: it is bounded by
    * {@link viteCloseTimeoutMs}, and a Vite server that overruns the bound is
-   * warned about and abandoned rather than holding this call open.
+   * warned about and abandoned rather than holding this call open. A dev server
+   * a later `listen()` has adopted is left alone — it belongs to that call now.
+   *
+   * The stop itself is bounded by {@link bunStopTimeoutMs}: a graceful stop
+   * waits on in-flight requests, and one that never finishes would otherwise
+   * hold this call open forever.
    */
   async stop(closeActiveConnections = false): Promise<void> {
     const server = this.bunServer
 
     if (server) {
       try {
-        await Promise.resolve(server.stop?.(closeActiveConnections))
-      } catch (error) {
-        console.warn('Failed to stop Bun server:', error)
+        await stopBunServerBounded(server, closeActiveConnections)
       } finally {
-        // Only clear the global slot if it still points at *our* server — a
-        // later `listen()`, on this instance or another, has already replaced
-        // it, and clearing then would drop a live server's teardown.
         // `closeViteDevServer()` guards the Vite slot the same way.
-        if (getGlobalState().__gurenActiveServer === server) {
-          setActiveBunServer()
-        }
-        this.bunServer = undefined
-        this.boundAddress = undefined
+        releaseActiveBunServer(server)
       }
     }
+
+    // A `listen()` that ran inside the await above has already bound a new
+    // socket and taken these fields over. Everything below would undo that
+    // call rather than this one: it would orphan the new server — live, with
+    // no handle to stop it and no signal handlers — and close the Vite dev
+    // server it just wired up.
+    if (this.bunServer !== server) {
+      return
+    }
+
+    this.bunServer = undefined
+    this.boundAddress = undefined
 
     // Detach the process handlers rather than just forgetting them: a later
     // `listen()` re-attaches, and that is what keeps a restarted app reachable
@@ -1007,38 +1178,60 @@ export class Application {
     logDevServerBanner(options)
   }
 
+  /**
+   * Closes the managed Vite dev server, but only while this application still
+   * owns it.
+   *
+   * Ownership is the whole check. A `listen()` elsewhere in the process may
+   * have adopted the running server — same object, new owner — and closing it
+   * then would take the asset server, and its published env vars, out from
+   * under an application that is actively serving from it. The record in the
+   * slot is the one place that distinction exists, so it is read here rather
+   * than mirrored on the instance.
+   */
   private async closeViteDevServer(): Promise<void> {
-    if (!this.viteDevServer) {
+    const active = getGlobalState().__gurenActiveViteDevServer
+
+    if (active?.owner !== this) {
       return
     }
 
     try {
-      await closeViteDevServerBounded(this.viteDevServer)
+      await closeViteDevServerBounded(active.server)
     } finally {
-      if (getGlobalState().__gurenActiveViteDevServer === this.viteDevServer) {
+      active.disposeTeardown()
+      // Skip the release if an adoption happened while the close above was
+      // awaited: the slot — and the published env vars that travel with it —
+      // describe the adopter's claim now, not this call's.
+      if (getGlobalState().__gurenActiveViteDevServer === active) {
         setActiveViteDevServer()
       }
-      this.viteDevServer = undefined
-      this.disposeViteTeardown?.()
-      this.disposeViteTeardown = undefined
-      clearManagedViteEnv()
     }
   }
 
-  private registerViteTeardown(): void {
-    if (this.disposeViteTeardown || !this.viteDevServer || typeof process === 'undefined') {
-      return
+  /**
+   * Attaches this application's Vite teardown handlers and returns the disposer
+   * that detaches them. The disposer is stored in the active-record slot rather
+   * than on this instance, because whoever takes ownership next is the one that
+   * has to call it — and a disposer another app could spend would leave this
+   * instance believing its handlers are attached when they are not.
+   */
+  private registerViteTeardown(): () => void {
+    if (typeof process === 'undefined') {
+      return () => {}
     }
 
-    this.disposeViteTeardown = registerProcessTeardown(
+    return registerProcessTeardown(
       () => {
         this.closeViteDevServer()
           .then(() => process.exit(0))
           .catch(() => process.exit(1))
       },
       () => {
-        if (this.viteDevServer) {
-          void this.viteDevServer.close()
+        const active = getGlobalState().__gurenActiveViteDevServer
+
+        if (active?.owner === this) {
+          void active.server.close()
         }
       },
     )

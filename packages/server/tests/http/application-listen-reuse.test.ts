@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 
-import { createViteDevServerMocks, gurenGlobals, resetGurenGlobals } from './vite-dev-server-fixture'
+import {
+  activeViteDevServer,
+  createViteDevServerMocks,
+  resetGurenGlobals,
+  seedPreviousViteDevServer,
+} from './vite-dev-server-fixture'
 
 const vite = createViteDevServerMocks()
 
@@ -54,11 +59,10 @@ describe('Application.listen Vite dev server reuse on hot reload', () => {
     // the Bun server was already stopped — leaving the process without any
     // HTTP listener. Reuse is the fix; this pins it.
     const previousClose = mock(async () => {})
-    gurenGlobals.__gurenActiveViteDevServer = {
-      close: previousClose,
-      httpServer: { listening: true },
-    }
-    gurenGlobals.__gurenActiveViteDevServerUrl = 'http://localhost:5175'
+    seedPreviousViteDevServer(
+      { close: previousClose, httpServer: { listening: true } },
+      'http://localhost:5175',
+    )
 
     Bun.serve = mock(() => ({ stop: mock(async () => {}) })) as unknown as typeof Bun.serve
 
@@ -73,16 +77,15 @@ describe('Application.listen Vite dev server reuse on hot reload', () => {
       'http://localhost:5175/resources/js/dev-entry.ts',
     )
     // The reused server stays recorded for the next reload.
-    expect(gurenGlobals.__gurenActiveViteDevServerUrl).toBe('http://localhost:5175')
+    expect(activeViteDevServer()?.localUrl).toBe('http://localhost:5175')
   })
 
   it('restarts Vite when the previous server is no longer listening', async () => {
     const previousClose = mock(async () => {})
-    gurenGlobals.__gurenActiveViteDevServer = {
-      close: previousClose,
-      httpServer: { listening: false },
-    }
-    gurenGlobals.__gurenActiveViteDevServerUrl = 'http://localhost:5175'
+    seedPreviousViteDevServer(
+      { close: previousClose, httpServer: { listening: false } },
+      'http://localhost:5175',
+    )
 
     Bun.serve = mock(() => ({ stop: mock(async () => {}) })) as unknown as typeof Bun.serve
 
@@ -98,11 +101,10 @@ describe('Application.listen Vite dev server reuse on hot reload', () => {
     // The running server was built from the previous call's options; explicit
     // options on this call may differ, so they force a restart.
     const previousClose = mock(async () => {})
-    gurenGlobals.__gurenActiveViteDevServer = {
-      close: previousClose,
-      httpServer: { listening: true },
-    }
-    gurenGlobals.__gurenActiveViteDevServerUrl = 'http://localhost:5175'
+    seedPreviousViteDevServer(
+      { close: previousClose, httpServer: { listening: true } },
+      'http://localhost:5175',
+    )
 
     Bun.serve = mock(() => ({ stop: mock(async () => {}) })) as unknown as typeof Bun.serve
 
@@ -118,11 +120,10 @@ describe('Application.listen Vite dev server reuse on hot reload', () => {
     // was stopped would leave the process alive with no listener at all.
     process.env.GUREN_VITE_CLOSE_TIMEOUT_MS = '50'
 
-    gurenGlobals.__gurenActiveViteDevServer = {
-      close: () => new Promise(() => {}),
-      httpServer: { listening: false },
-    }
-    gurenGlobals.__gurenActiveViteDevServerUrl = 'http://localhost:5175'
+    seedPreviousViteDevServer(
+      { close: () => new Promise(() => {}), httpServer: { listening: false } },
+      'http://localhost:5175',
+    )
 
     Bun.serve = mock(() => ({ stop: mock(async () => {}) })) as unknown as typeof Bun.serve
 
