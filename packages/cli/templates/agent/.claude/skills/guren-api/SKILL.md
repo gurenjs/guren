@@ -149,6 +149,11 @@ export function registerWebRoutes(baseRouter: Router): void {
 }
 ```
 
+**Verbs**: `get / post / put / patch / delete / query` share the same overloads;
+`router.on(method, path, ...)` covers anything else. `query()` registers HTTP QUERY
+(RFC 10008) — safe like GET but body-carrying; read-only handlers only (CSRF skips it),
+not expressible in OpenAPI 3.1, not sendable from Inertia forms (use the API client).
+
 **Route contract options** — attach `body`, `params`, `query` schemas to routes:
 - Schemas are metadata for codegen (not double-validated for Controller actions)
 - `bunx guren codegen` extracts schemas → generates typed `ApiRoutes` interface

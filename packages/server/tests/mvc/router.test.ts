@@ -137,7 +137,7 @@ describe('Router route contract metadata', () => {
 // assignment fails to compile the moment the builder stops accepting everything
 // `Router` does — including overloads added long after this was written, which a
 // per-call test can never anticipate. Root `tsc --noEmit` covers this directory.
-const _verbParityGuard: Pick<Router<'auth'>, 'get' | 'post' | 'put' | 'patch' | 'delete'> =
+const _verbParityGuard: Pick<Router<'auth'>, 'get' | 'post' | 'put' | 'patch' | 'delete' | 'query' | 'on'> =
   new Router<'auth'>().aliasMiddleware('auth', async (_c, next) => { await next() }).middleware('auth')
 void _verbParityGuard
 
@@ -792,5 +792,65 @@ describe('Router capability aggregation', () => {
 
     expect(capabilitiesOf(requireAuthenticated())).toEqual({ authentication: { mode: 'required' } })
     expect(capabilitiesOf(requireGuest())).toEqual({ authentication: { mode: 'guest-only' } })
+  })
+})
+
+describe('Router QUERY method (RFC 10008)', () => {
+  it('query() registers a QUERY route with contract metadata', () => {
+    const body = z.object({ q: z.string().min(1) })
+    const router = new Router()
+    router.query('/posts/search', { name: 'posts.search', body }, [StubController, 'index'])
+
+    const [def] = router.definitions()
+    expect(def!.method).toBe('QUERY')
+    expect(def!.path).toBe('/posts/search')
+    expect(def!.name).toBe('posts.search')
+    expect(def!.schemas?.body).toBe(body)
+    expect(def!.controller).toEqual({ name: 'StubController', action: 'index' })
+  })
+
+  it('dispatches QUERY requests with a validated body through mount()', async () => {
+    const router = new Router()
+    router.query('/search', {
+      body: z.object({ q: z.string(), limit: z.number().default(10) }),
+    }, async ({ body }) => ({ q: body.q, limit: body.limit }))
+
+    const app = new Hono()
+    router.mount(app)
+
+    const response = await app.request('/search', {
+      method: 'QUERY',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: 'hello' }),
+    })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ q: 'hello', limit: 10 })
+  })
+
+  it('middleware group builder supports query()', async () => {
+    const router = new Router<'auth'>()
+    const seen: string[] = []
+    router.aliasMiddleware('auth', async (_c, next) => { seen.push('auth'); await next() })
+    router.middleware('auth').query('/search', { name: 'search' }, async () => ({ ok: true }))
+
+    const [def] = router.definitions()
+    expect(def!.method).toBe('QUERY')
+    expect(def!.middlewareNames).toEqual(['auth'])
+
+    const app = new Hono()
+    router.mount(app)
+    const response = await app.request('/search', { method: 'QUERY' })
+    expect(response.status).toBe(200)
+    expect(seen).toEqual(['auth'])
+  })
+
+  it('middleware group builder supports on() for arbitrary methods', () => {
+    const router = new Router<'auth'>()
+    router.aliasMiddleware('auth', async (_c, next) => { await next() })
+    router.middleware('auth').on('QUERY', '/reports', { name: 'reports.query' }, async () => ({ ok: true }))
+
+    const [def] = router.definitions()
+    expect(def!.method).toBe('QUERY')
+    expect(def!.middlewareNames).toEqual(['auth'])
   })
 })

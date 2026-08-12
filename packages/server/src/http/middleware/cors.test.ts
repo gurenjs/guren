@@ -49,6 +49,28 @@ describe('createCorsMiddleware', () => {
     }).toThrow('credentials requires an explicit origin')
   })
 
+  // Passing `allowMethods: undefined` through to Hono spreads over its default
+  // and produces preflights with NO Access-Control-Allow-Methods, so Guren
+  // owns the default list. QUERY (RFC 10008) is part of it.
+  test('preflight without explicit allowMethods advertises the default methods', async () => {
+    const app = new Hono()
+    app.use('*', createCorsMiddleware({ origin: 'https://example.com' }))
+    app.on('QUERY', '/search', (c) => c.json({ ok: true }))
+
+    const res = await app.request('/search', {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://example.com',
+        'Access-Control-Request-Method': 'QUERY',
+      },
+    })
+
+    const allowMethods = res.headers.get('Access-Control-Allow-Methods')
+    expect(allowMethods).not.toBeNull()
+    expect(allowMethods).toContain('QUERY')
+    expect(allowMethods).toContain('GET')
+  })
+
   test('should handle preflight OPTIONS request', async () => {
     const app = new Hono()
     app.use('*', createCorsMiddleware({

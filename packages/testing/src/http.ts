@@ -479,6 +479,14 @@ export class TestClient {
   }
 
   /**
+   * Create a QUERY request (RFC 10008): safe and idempotent like GET, but
+   * carries a request body like POST.
+   */
+  query(path: string): TestRequestBuilder {
+    return this.request('QUERY', path)
+  }
+
+  /**
    * Create a request with any method.
    */
   request(method: string, path: string): TestRequestBuilder {

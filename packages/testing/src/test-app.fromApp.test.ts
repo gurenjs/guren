@@ -89,3 +89,27 @@ describe('TestApp.fromApp', () => {
     expect(seenDuringBoot).toBe('1')
   })
 })
+
+describe('TestApp.query', () => {
+  it('sends a QUERY request with a JSON body', async () => {
+    const app = {
+      async boot(): Promise<void> {},
+      async fetch(request: Request): Promise<Response> {
+        return Response.json({
+          method: request.method,
+          contentType: request.headers.get('content-type'),
+          body: await request.json(),
+        })
+      },
+    }
+
+    const http = await TestApp.fromApp(app)
+    const response = await http.query('/search', { q: 'hello', limit: 10 })
+
+    expect(await response.json()).toEqual({
+      method: 'QUERY',
+      contentType: 'application/json',
+      body: { q: 'hello', limit: 10 },
+    })
+  })
+})

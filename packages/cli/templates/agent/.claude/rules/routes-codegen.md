@@ -39,6 +39,13 @@ Schemas attached here do double duty: requests are **validated automatically**
 index/create/store/show/edit/update/destroy (GET/POST/PUT/DELETE, `:id` param) named `posts.index` etc.
 Model binding: `bind: { id: Post }` + `this.model(Post)` in the controller.
 
+Verbs: `get / post / put / patch / delete / query` (all with the same overloads), plus
+`router.on(method, path, ...)` for anything else. `query()` registers the HTTP QUERY
+method (RFC 10008): safe and idempotent like GET but carries a request body — use it
+for complex search/filter endpoints, never for mutations (CSRF skips it on that
+assumption). Not expressible in OpenAPI 3.1 output, and Inertia forms cannot send it —
+call it via `createApiClient` or `fetch`.
+
 ## Route Schema Binding: concrete input → output
 
 ```typescript

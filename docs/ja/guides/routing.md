@@ -19,7 +19,28 @@ export function registerWebRoutes(router: Router): void {
 - コントローラータプル `[ControllerClass, 'method']`
 - インラインハンドラー `(ctx) => new Response('...')`
 
-利用できるメソッドは `router.get`、`router.post`、`router.put`、`router.patch`、`router.delete`、そして汎用の `router.on(method, path, handler)` です。
+利用できるメソッドは `router.get`、`router.post`、`router.put`、`router.patch`、`router.delete`、`router.query`、そして汎用の `router.on(method, path, handler)` です。
+
+### QUERY メソッド
+
+`router.query()` は HTTP QUERY メソッド([RFC 10008](https://www.rfc-editor.org/info/rfc10008/))のルートを登録します。GET と同じく安全(safe)かつ冪等ですが、POST のようにリクエストボディを持てます。URL に収まらない複雑な検索・フィルタ条件を受け取るエンドポイントに使ってください。
+
+```ts
+import { z } from 'zod'
+
+router.query('/posts/search', {
+  name: 'posts.search',
+  body: z.object({ keywords: z.array(z.string()), limit: z.number().default(20) }),
+}, [PostsController, 'search'])
+```
+
+利用前に知っておくべきこと:
+
+- **ハンドラーで状態を変更してはいけません。** QUERY は安全なメソッドであり、Guren の CSRF 保護はその前提で QUERY をスキップします(ブラウザは CORS プリフライトなしに QUERY を送信できないため、ハンドラーが読み取り専用である限り CSRF の心配はありません)。それでも CSRF トークンを要求したい場合は、CSRF ミドルウェアの `methods` オプションに `'QUERY'` を追加してください。
+- **呼び出しは `fetch` か生成された API クライアント**(`client.request('posts.search', { body })`)で行います。HTML フォームや Inertia のフォームヘルパーは QUERY を送信できません。
+- **デプロイ経路を確認してください。** Guren の fetch ベースのアダプター(Bun、Cloudflare Workers / Vercel プラグイン)は QUERY をブロックしませんが、プラットフォーム側の入口が QUERY を受け付けるかは確認が必要です。旧来のメソッドセット以外を拒否するプロキシや CDN があり、特に Lambda プラグインのアセット配信で前段に入る CloudFront は QUERY を転送しません。また、中間キャッシュによる QUERY レスポンスのキャッシュもまだ広くは実装されていません。
+- **OpenAPI 3.1 は QUERY を表現できない**ため、`guren openapi:generate` は QUERY ルートを警告付きでスキップします。
+- クライアントに対応を広告するには、リソースの GET ハンドラーなどで `Accept-Query` レスポンスヘッダーを自分で設定してください(例: `ctx.header('Accept-Query', 'application/json')`)。
 
 ## ルートグループ
 `router.group(prefix, callback)` を使って、共通のパスプレフィックスとミドルウェアを適用できます。

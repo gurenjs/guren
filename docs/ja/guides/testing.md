@@ -83,6 +83,7 @@ await app.post('/posts', body)
 await app.put('/posts/1', body)
 await app.patch('/posts/1', body)
 await app.delete('/posts/1')
+await app.query('/posts/search', body) // HTTP QUERY (RFC 10008)
 ```
 
 ### Fluent アサーション

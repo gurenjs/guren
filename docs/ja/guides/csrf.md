@@ -20,7 +20,7 @@ app.use('*', createCsrfMiddleware())
 ミドルウェアは自動的に以下を行います。
 - セッションごとにトークンを生成（ゲストにはステートレスな double-submit トークン）
 - 状態を変更するリクエスト（POST、PUT、PATCH、DELETE）でトークンを検証
-- 安全なメソッド（GET、HEAD、OPTIONS）は検証なしで許可
+- 安全なメソッド（GET、HEAD、OPTIONS、QUERY）は検証なしで許可 — QUERY（RFC 10008）は仕様上安全なメソッドのため、QUERY ハンドラーは読み取り専用に保つこと。トークンを要求したい場合は `methods` オプションに `'QUERY'` を追加
 
 ## フォームにトークンを含める
 

@@ -20,7 +20,7 @@ app.use('*', createCsrfMiddleware())
 The middleware automatically:
 - Generates a token per session, or a stateless double-submit token for guests
 - Validates tokens on state-changing requests (POST, PUT, PATCH, DELETE)
-- Allows safe methods (GET, HEAD, OPTIONS) without validation
+- Allows safe methods (GET, HEAD, OPTIONS, QUERY) without validation — QUERY (RFC 10008) is safe by contract, so keep QUERY handlers read-only, or add `'QUERY'` to the `methods` option to require tokens anyway
 
 ## Including the Token in Forms
 
