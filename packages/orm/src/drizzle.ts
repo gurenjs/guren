@@ -1,8 +1,10 @@
-// PostgreSQL-first convenience re-exports: the unqualified column builders
-// below (`text`, `timestamp`, `boolean`, …) are the pg-core ones. MySQL and
-// SQLite schemas must import their builders from `drizzle-orm/mysql-core` /
-// `drizzle-orm/sqlite-core` — mixing dialects here is silent, because the
-// names collide and drizzle-kit still emits DDL for the wrong builder.
+// Mixed-dialect barrel, kept for compatibility. Prefer the per-dialect
+// subpaths — `@guren/orm/drizzle/pg`, `/mysql`, `/sqlite` — which re-export
+// their dialect wholesale so every builder is available and each name can
+// only mean one thing. Here the names collide: `varchar` resolves to the
+// MySQL builder, so a Postgres schema that reaches for it type-checks and
+// then throws at import time (#379). The unqualified column builders below
+// (`text`, `timestamp`, `boolean`, …) are the pg-core ones.
 export { sql } from 'drizzle-orm'
 export type { SQL } from 'drizzle-orm'
 
@@ -23,13 +25,31 @@ export type {
   PgColumn,
 } from 'drizzle-orm/pg-core'
 
-export {
-  mysqlTable,
-  int,
-  varchar,
-  datetime,
+// Re-exported as value declarations rather than `export { … } from` so the
+// @deprecated JSDoc survives the dts rollup and reaches editors.
+import {
+  mysqlTable as mysqlCoreMysqlTable,
+  int as mysqlCoreInt,
+  varchar as mysqlCoreVarchar,
+  datetime as mysqlCoreDatetime,
 } from 'drizzle-orm/mysql-core'
 
+/** @deprecated Import from `@guren/orm/drizzle/mysql` instead. */
+export const mysqlTable: typeof mysqlCoreMysqlTable = mysqlCoreMysqlTable
+/** @deprecated Import from `@guren/orm/drizzle/mysql` instead. */
+export const int: typeof mysqlCoreInt = mysqlCoreInt
+/**
+ * @deprecated Import from `@guren/orm/drizzle/mysql` instead — or from
+ * `@guren/orm/drizzle/pg` for the Postgres builder. This `varchar` is the
+ * MySQL one: in a Postgres schema it type-checks and then throws
+ * `TypeError: colBuilder.buildExtraConfigColumn is not a function` at
+ * import time.
+ */
+export const varchar: typeof mysqlCoreVarchar = mysqlCoreVarchar
+/** @deprecated Import from `@guren/orm/drizzle/mysql` instead. */
+export const datetime: typeof mysqlCoreDatetime = mysqlCoreDatetime
+
+/** @deprecated Import from `@guren/orm/drizzle/mysql` instead. */
 export type {
   MySqlTable,
   MySqlColumn,

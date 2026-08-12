@@ -28,6 +28,18 @@
     "./drizzle": {
       "types": "./dist/drizzle.d.ts",
       "default": "./dist/drizzle.js"
+    },
+    "./drizzle/pg": {
+      "types": "./dist/drizzle/pg.d.ts",
+      "default": "./dist/drizzle/pg.js"
+    },
+    "./drizzle/mysql": {
+      "types": "./dist/drizzle/mysql.d.ts",
+      "default": "./dist/drizzle/mysql.js"
+    },
+    "./drizzle/sqlite": {
+      "types": "./dist/drizzle/sqlite.d.ts",
+      "default": "./dist/drizzle/sqlite.js"
     }
   },
   "scripts": {
