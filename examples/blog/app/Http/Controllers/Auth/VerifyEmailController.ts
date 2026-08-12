@@ -40,9 +40,7 @@ export default class VerifyEmailController extends Controller {
     })
 
     if (!verifiedEmail) {
-      return this.inertia(pages.auth.VerifyEmail, { status: EXPIRED_MESSAGE }, {
-        title: 'Verify email | Guren Blog',
-      })
+      return this.inertia(pages.auth.VerifyEmail, { status: EXPIRED_MESSAGE }, { title: 'Verify email | Guren Blog' })
     }
 
     return this.redirect('/dashboard')

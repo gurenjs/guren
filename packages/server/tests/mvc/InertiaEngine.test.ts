@@ -277,6 +277,37 @@ describe('Inertia asset version mismatch', () => {
     expect(response.headers.get('X-Inertia-Location')).toBe('/dashboard')
   })
 
+  it('derives the page url from the request, keeping the query string', async () => {
+    const response = await inertia(
+      'Probe',
+      {},
+      {
+        request: new Request('http://example.com/probe?from=2026-07-01&to=2026-07-28', {
+          headers: { 'X-Inertia': 'true', Accept: 'application/json' },
+        }),
+      },
+    )
+    const payload = await response.json() as { url: string }
+
+    expect(payload.url).toBe('/probe?from=2026-07-01&to=2026-07-28')
+  })
+
+  it('options.url overrides the request-derived page url', async () => {
+    const response = await inertia(
+      'Probe',
+      {},
+      {
+        url: '/custom',
+        request: new Request('http://example.com/probe?x=1', {
+          headers: { 'X-Inertia': 'true', Accept: 'application/json' },
+        }),
+      },
+    )
+    const payload = await response.json() as { url: string }
+
+    expect(payload.url).toBe('/custom')
+  })
+
   it('falls back to request.url for X-Inertia-Location when options.url is absent', async () => {
     const response = await inertia(
       'Dashboard',

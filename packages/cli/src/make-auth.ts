@@ -159,9 +159,7 @@ export default class ForgotPasswordController extends Controller {
       })
     }
 
-    return this.inertia(pages.auth.ForgotPassword, { status: STATUS_MESSAGE }, {
-      title: 'Forgot password',
-    })
+    return this.inertia(pages.auth.ForgotPassword, { status: STATUS_MESSAGE }, { title: 'Forgot password' })
   }
 }
 `
@@ -178,9 +176,7 @@ export default class ResetPasswordController extends Controller {
   async show(): Promise<Response> {
     const token = this.request.query('token') ?? ''
     const email = this.request.query('email') ?? ''
-    return this.inertia(pages.auth.ResetPassword, { token, email }, {
-      title: 'Reset password',
-    })
+    return this.inertia(pages.auth.ResetPassword, { token, email }, { title: 'Reset password' })
   }
 
   async store(): Promise<Response> {
@@ -248,9 +244,7 @@ export default class VerifyEmailController extends Controller {
     })
 
     if (!verifiedEmail) {
-      return this.inertia(pages.auth.VerifyEmail, { status: EXPIRED_MESSAGE }, {
-        title: 'Verify email',
-      })
+      return this.inertia(pages.auth.VerifyEmail, { status: EXPIRED_MESSAGE }, { title: 'Verify email' })
     }
 
     return this.redirect('/dashboard')

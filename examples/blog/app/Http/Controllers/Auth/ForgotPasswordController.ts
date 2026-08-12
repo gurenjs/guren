@@ -33,8 +33,6 @@ export default class ForgotPasswordController extends Controller {
       await SendPasswordResetEmailJob.dispatch({ email, resetUrl })
     }
 
-    return this.inertia(pages.auth.ForgotPassword, { status: STATUS_MESSAGE }, {
-      title: 'Forgot password | Guren Blog',
-    })
+    return this.inertia(pages.auth.ForgotPassword, { status: STATUS_MESSAGE }, { title: 'Forgot password | Guren Blog' })
   }
 }

@@ -306,11 +306,6 @@ export class Controller {
     options: InertiaResponseOptions = {},
   ): Promise<InertiaResponse<Component, Props & ResolvedSharedInertiaProps>> {
     const ctx = this.ctx
-    const { url: overrideUrl, ...rest } = options
-    // The Inertia protocol's page `url` is the path plus the query string
-    // (e.g. "/posts?page=1"). ctx.req.path is the pathname only, so derive
-    // the default from the full request URL instead.
-    const url = overrideUrl ?? inertiaPageUrl(ctx.req.url) ?? ctx.req.path ?? ''
     const component =
       typeof componentOrPage === 'string'
         ? componentOrPage
@@ -319,12 +314,13 @@ export class Controller {
     const sharedProps = await resolveSharedInertiaProps(ctx, this._container)
     const propsWithShared = { ...sharedProps, ...props } as Props & ResolvedSharedInertiaProps
 
+    // The engine derives the page url (path + query string) from the request
+    // when options.url is absent.
     const response = await inertia(component, propsWithShared as Record<string, unknown>, {
-      ...rest,
+      ...options,
       // No 'en' fallback here (unlike the locale getter): unconfigured apps
       // keep the Inertia engine's own default lang.
-      lang: rest.lang ?? this.#resolveLocale(),
-      url,
+      lang: options.lang ?? this.#resolveLocale(),
       request: ctx.req.raw,
     })
 
@@ -659,17 +655,5 @@ export class Controller {
     }
 
     return this.parsedBody
-  }
-}
-
-function inertiaPageUrl(requestUrl: string | undefined): string | undefined {
-  if (requestUrl === undefined) {
-    return undefined
-  }
-  try {
-    const { pathname, search } = new URL(requestUrl)
-    return `${pathname}${search}`
-  } catch {
-    return undefined
   }
 }

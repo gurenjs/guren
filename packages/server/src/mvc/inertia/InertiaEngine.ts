@@ -170,7 +170,7 @@ export async function inertia(
   const page: InertiaPagePayload = {
     component,
     props,
-    url: options.url ?? "",
+    url: options.url ?? inertiaPageUrl(options.request) ?? "",
     version: resolvedVersion,
   };
 
@@ -224,6 +224,20 @@ export async function inertia(
       ...options.headers,
     },
   });
+}
+
+/**
+ * The Inertia protocol's page `url` is the request path including the query
+ * string (e.g. "/posts?page=1"), kept relative. Derive it from the request
+ * when the caller does not override it.
+ */
+function inertiaPageUrl(request: Request | undefined): string | undefined {
+  if (!request) {
+    return undefined;
+  }
+
+  const { pathname, search } = new URL(request.url);
+  return `${pathname}${search}`;
 }
 
 async function renderDocument(
