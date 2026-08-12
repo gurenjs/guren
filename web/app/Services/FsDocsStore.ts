@@ -108,7 +108,7 @@ export class FsDocsStore implements DocsStore {
       slug,
       title: extractDocTitle(markdown, slug),
       description: extractDocDescription(markdown),
-      html: await renderMarkdownToHtml(markdown),
+      html: await renderMarkdownToHtml(markdown, { locale, category }),
     }
   }
 
