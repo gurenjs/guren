@@ -141,6 +141,7 @@ function padMethod(method: string): string {
     PUT: '\x1b[34m',     // blue
     PATCH: '\x1b[36m',   // cyan
     DELETE: '\x1b[31m',  // red
+    QUERY: '\x1b[32m',   // green — safe like GET
     HEAD: '\x1b[35m',    // magenta
     OPTIONS: '\x1b[90m', // gray
   }

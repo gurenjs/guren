@@ -115,6 +115,62 @@ describe('@guren/openapi', () => {
     expect(html).toContain('/openapi.json')
   })
 
+  it('skips methods OpenAPI 3.1 cannot express and says so in a warning', () => {
+    const definitions: RouteDefinition[] = [
+      { method: 'GET', path: '/posts', name: 'posts.index' },
+      { method: 'QUERY', path: '/posts/search', name: 'posts.search' },
+      { method: 'PURGE', path: '/cache', name: 'cache.purge' },
+    ]
+
+    const { document, warnings } = generateOpenApiDocument(definitions, {
+      title: 'Blog API',
+      version: '1.0.0',
+    })
+
+    expect(document.paths['/posts']?.get).toBeDefined()
+    expect(document.paths['/posts/search']).toBeUndefined()
+    expect(document.paths['/cache']).toBeUndefined()
+    expect(warnings).toEqual([
+      'Skipped QUERY /posts/search: OpenAPI 3.1 cannot express the QUERY method.',
+      'Skipped PURGE /cache: OpenAPI 3.1 cannot express the PURGE method.',
+    ])
+  })
+
+  it('surfaces skip warnings once when the document is served mounted', async () => {
+    const app = createApp({
+      routes(router) {
+        router.get('/posts', { name: 'posts.index' }, async () => [])
+        router.query('/posts/search', { name: 'posts.search' }, async () => [])
+      },
+    })
+
+    mountOpenApiDocs(app, {
+      title: 'Blog API',
+      version: '1.0.0',
+    })
+
+    await app.boot()
+
+    const warned: string[] = []
+    const originalWarn = console.warn
+    console.warn = (...args: unknown[]) => { warned.push(args.join(' ')) }
+    try {
+      const first = await app.fetch(new Request('http://localhost/openapi.json'))
+      expect(first.status).toBe(200)
+      const document = await first.json() as { paths: Record<string, unknown> }
+      expect(document.paths['/posts/search']).toBeUndefined()
+
+      const second = await app.fetch(new Request('http://localhost/openapi.json'))
+      expect(second.status).toBe(200)
+    } finally {
+      console.warn = originalWarn
+    }
+
+    expect(warned).toEqual([
+      '[guren/openapi] Skipped QUERY /posts/search: OpenAPI 3.1 cannot express the QUERY method.',
+    ])
+  })
+
   // An app only learns the address it serves on after it binds, so a mounted
   // document has to be able to pick the value up afterwards. Both fetches
   // matter: one alone passes just as well against a list frozen at mount.

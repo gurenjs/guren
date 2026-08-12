@@ -106,6 +106,10 @@ export type ApiRequestOptions<T extends ApiRouteName> =
 // together.
 const XSRF_COOKIE_NAME = 'XSRF-TOKEN'
 const XSRF_HEADER_NAME = 'X-XSRF-TOKEN'
+// QUERY (RFC 10008) is deliberately NOT listed even though the server's CSRF
+// default skips it: the redundant token header is harmless there, and keeping
+// it is what makes a server that opts QUERY into protection (the middleware's
+// \`methods\` option) work with this client unchanged.
 const CSRF_SAFE_METHODS = ['GET', 'HEAD', 'OPTIONS']
 const CSRF_HEADER_NAMES = [XSRF_HEADER_NAME.toLowerCase(), 'x-csrf-token']
 

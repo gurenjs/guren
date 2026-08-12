@@ -622,6 +622,14 @@ export class TestApp {
   }
 
   /**
+   * Make a QUERY request (RFC 10008): safe and idempotent like GET, but
+   * carries a request body like POST.
+   */
+  query(path: string, body?: unknown): PendingTestResponse {
+    return this.request('QUERY', path, body)
+  }
+
+  /**
    * Make a request with any HTTP method.
    */
   private request(method: string, path: string, body?: unknown): PendingTestResponse {

@@ -97,6 +97,7 @@ name with `Controller` and writes to `tests/controllers/${ClassName}.test.ts`, m
 app.get(path)                 // → PendingTestResponse (awaitable AND chainable)
 app.post(path, body?)         // body auto-JSON-encoded unless FormData
 app.put(path, body?) / app.patch(path, body?) / app.delete(path, body?)
+app.query(path, body?)        // HTTP QUERY (RFC 10008) — safe method with a body
 
 app.actingAs(user)            // returns a NEW TestApp with the user injected
 app.json()                    // returns a NEW TestApp with Accept: application/json

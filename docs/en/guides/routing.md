@@ -23,7 +23,28 @@ export function registerWebRoutes(router: Router): void {
 }
 ```
 
-Available methods: `router.get`, `router.post`, `router.put`, `router.patch`, `router.delete`, and the generic `router.on(method, path, handler)`.
+Available methods: `router.get`, `router.post`, `router.put`, `router.patch`, `router.delete`, `router.query`, and the generic `router.on(method, path, handler)`.
+
+### The QUERY method
+
+`router.query()` registers a route for the HTTP QUERY method ([RFC 10008](https://www.rfc-editor.org/info/rfc10008/)): safe and idempotent like GET, but the request carries a body like POST. Use it for search and filter endpoints whose criteria are too complex for a URL:
+
+```ts
+import { z } from 'zod'
+
+router.query('/posts/search', {
+  name: 'posts.search',
+  body: z.object({ keywords: z.array(z.string()), limit: z.number().default(20) }),
+}, [PostsController, 'search'])
+```
+
+Things to know before reaching for it:
+
+- **Handlers must not mutate state.** QUERY is a safe method, and Guren's CSRF protection skips it on that assumption (browsers cannot send QUERY without a CORS preflight, so cross-site request forgery is not a concern — as long as the handler really is read-only). To force CSRF tokens anyway, add `'QUERY'` to the CSRF middleware's `methods` option.
+- **Call it with `fetch` or the generated API client** (`client.request('posts.search', { body })`). HTML forms and Inertia form helpers cannot send QUERY.
+- **Check your deployment path.** Guren's fetch-based adapters (Bun, the Cloudflare Workers and Vercel plugins) do not block QUERY, but verify that your platform's ingress accepts it — some proxies and CDNs reject methods outside the classic set. Notably CloudFront, which the Lambda plugin's asset distribution puts in front of your app, does not forward QUERY. Intermediary caching of QUERY responses is also not widely implemented yet.
+- **OpenAPI 3.1 cannot express QUERY**, so `guren openapi:generate` skips QUERY routes with a warning.
+- To advertise support to clients, set the `Accept-Query` response header yourself, e.g. `ctx.header('Accept-Query', 'application/json')` on the resource's GET handler.
 
 Pass the registrar to `createApp()` in `src/app.ts`:
 

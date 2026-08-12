@@ -292,6 +292,55 @@ describe('createCsrfMiddleware', () => {
     expect(deleteRes.status).toBe(403)
   })
 
+  it('allows QUERY requests without token by default (RFC 10008 safe method)', async () => {
+    const app = createTestApp()
+
+    app.on('QUERY', '/search', (c) => c.json({ ok: true }))
+
+    const res = await app.request('/search', {
+      method: 'QUERY',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: 'hello' }),
+    })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
+  })
+
+  it('protects QUERY when opted in via the methods option', async () => {
+    const app = createTestApp({
+      methods: ['POST', 'PUT', 'PATCH', 'DELETE', 'QUERY'],
+    })
+    let token: string | undefined
+
+    app.get('/api/token', (c) => {
+      token = getCsrfToken(c)
+      return c.json({ token })
+    })
+    app.on('QUERY', '/search', (c) => c.json({ ok: true }))
+
+    const tokenless = await app.request('/search', {
+      method: 'QUERY',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: 'hello' }),
+    })
+    expect(tokenless.status).toBe(403)
+
+    const getRes = await app.request('/api/token')
+    const cookie = extractCookie(getRes)
+
+    const withToken = await app.request('/search', {
+      method: 'QUERY',
+      headers: {
+        [CSRF_HEADER_NAME]: token!,
+        'Content-Type': 'application/json',
+        Cookie: cookie,
+      },
+      body: JSON.stringify({ q: 'hello' }),
+    })
+    expect(withToken.status).toBe(200)
+    expect(await withToken.json()).toEqual({ ok: true })
+  })
+
   it('excludes specified paths from protection', async () => {
     const app = createTestApp({
       exclude: ['/api/webhooks/*', '/health'],

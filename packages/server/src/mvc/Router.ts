@@ -139,7 +139,7 @@ interface RegisteredRoute {
  * Represents a registered route definition for introspection.
  */
 export interface RouteDefinition {
-  /** HTTP method (GET, POST, PUT, PATCH, DELETE) */
+  /** Uppercased HTTP method (GET, POST, PUT, PATCH, DELETE, QUERY, or any custom method registered via on()) */
   method: string
   /** URL path pattern (e.g., '/users/:id') */
   path: string
@@ -479,6 +479,38 @@ export class Router<M extends string = never> {
   ): RouteBuilder<M>
   delete(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.register('DELETE', path, handlerOrOptions, rest)
+  }
+
+  /**
+   * Registers a route for the HTTP QUERY method (RFC 10008): safe and
+   * idempotent like GET, but the request carries a body like POST. Handlers
+   * must not mutate state — CSRF protection deliberately skips QUERY on that
+   * assumption (see `createCsrfMiddleware`'s `methods` option to opt in).
+   */
+  query<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder<M>
+  query<
+    TParamsSchema extends SchemaLike<unknown>,
+    TQuerySchema extends SchemaLike<unknown>,
+    TBodySchema extends SchemaLike<unknown>,
+    TOutputSchema extends SchemaLike<unknown>,
+  >(
+    path: string,
+    options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
+    handler: TypedRouteHandler<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
+  ): RouteBuilder<M>
+  query<
+    C extends ControllerConstructor,
+    TParamsSchema extends SchemaLike<unknown>,
+    TQuerySchema extends SchemaLike<unknown>,
+    TBodySchema extends SchemaLike<unknown>,
+    TOutputSchema extends SchemaLike<unknown>,
+  >(
+    path: string,
+    options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
+    handler: ControllerAction<C>,
+  ): RouteBuilder<M>
+  query(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
+    return this.register('QUERY', path, handlerOrOptions, rest)
   }
 
   group(prefix: string, callback: (router: Router<M>) => void): this {
@@ -871,6 +903,60 @@ class RouterMiddlewareGroupBuilder<M extends string = never> {
   ): RouteBuilder<M>
   delete(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
     return this.router.applyMiddlewareScope(this.items, () => this.router.delete(path, handlerOrOptions as never, ...(rest as never[])))
+  }
+
+  query<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder<M>
+  query<
+    TParamsSchema extends SchemaLike<unknown>,
+    TQuerySchema extends SchemaLike<unknown>,
+    TBodySchema extends SchemaLike<unknown>,
+    TOutputSchema extends SchemaLike<unknown>,
+  >(
+    path: string,
+    options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
+    handler: TypedRouteHandler<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
+  ): RouteBuilder<M>
+  query<
+    C extends ControllerConstructor,
+    TParamsSchema extends SchemaLike<unknown>,
+    TQuerySchema extends SchemaLike<unknown>,
+    TBodySchema extends SchemaLike<unknown>,
+    TOutputSchema extends SchemaLike<unknown>,
+  >(
+    path: string,
+    options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
+    handler: ControllerAction<C>,
+  ): RouteBuilder<M>
+  query(path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
+    return this.router.applyMiddlewareScope(this.items, () => this.router.query(path, handlerOrOptions as never, ...(rest as never[])))
+  }
+
+  on<C extends ControllerConstructor>(method: string, path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder<M>
+  on<
+    TParamsSchema extends SchemaLike<unknown>,
+    TQuerySchema extends SchemaLike<unknown>,
+    TBodySchema extends SchemaLike<unknown>,
+    TOutputSchema extends SchemaLike<unknown>,
+  >(
+    method: string,
+    path: string,
+    options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
+    handler: TypedRouteHandler<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
+  ): RouteBuilder<M>
+  on<
+    C extends ControllerConstructor,
+    TParamsSchema extends SchemaLike<unknown>,
+    TQuerySchema extends SchemaLike<unknown>,
+    TBodySchema extends SchemaLike<unknown>,
+    TOutputSchema extends SchemaLike<unknown>,
+  >(
+    method: string,
+    path: string,
+    options: RouteContractOptions<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
+    handler: ControllerAction<C>,
+  ): RouteBuilder<M>
+  on(method: string, path: string, handlerOrOptions: unknown, ...rest: unknown[]): RouteBuilder<M> {
+    return this.router.applyMiddlewareScope(this.items, () => this.router.on(method, path, handlerOrOptions as never, ...(rest as never[])))
   }
 }
 

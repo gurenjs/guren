@@ -8,6 +8,7 @@ import { buildApiClientContent, type RouteDefinitionLike } from '../src/api-clie
 const definitions: RouteDefinitionLike[] = [
   { method: 'GET', path: '/posts', name: 'posts.index' },
   { method: 'POST', path: '/posts', name: 'posts.store' },
+  { method: 'QUERY', path: '/posts/search', name: 'posts.search' },
 ]
 
 describe('buildApiClientContent', () => {
@@ -118,6 +119,20 @@ describe('generated createApiClient', () => {
     await createApiClient({ baseUrl: PAGE_ORIGIN }).request('posts.index')
 
     expect(headersOf(calls[0]!.init)['X-XSRF-TOKEN']).toBeUndefined()
+  })
+
+  // QUERY is CSRF-exempt server-side by default, so the token is redundant —
+  // but an app can opt QUERY into protection via the middleware's `methods`
+  // option, and the client keeping the header is what makes that opt-in work.
+  it('sends the QUERY method with a body and the XSRF header', async () => {
+    const { calls } = stubFetch()
+    browsingAt(PAGE_ORIGIN, 'XSRF-TOKEN=abc')
+
+    await createApiClient({ baseUrl: PAGE_ORIGIN }).request('posts.search', { body: { q: 'hi' } })
+
+    expect(calls[0]!.init.method).toBe('QUERY')
+    expect(calls[0]!.init.body).toBe(JSON.stringify({ q: 'hi' }))
+    expect(headersOf(calls[0]!.init)['X-XSRF-TOKEN']).toBe('abc')
   })
 
   // The cookie belongs to the page's origin. Attaching it to a caller-supplied

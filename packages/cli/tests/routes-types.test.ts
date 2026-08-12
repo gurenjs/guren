@@ -68,6 +68,7 @@ describe('buildDeclarationContent', () => {
       { method: 'PUT', path: '/resource/:id' },
       { method: 'PATCH', path: '/resource/:id' },
       { method: 'DELETE', path: '/resource/:id' },
+      { method: 'QUERY', path: '/resource/search' },
     ]
 
     const content = buildDeclarationContent(definitions, { source: 'routes/web.ts' })
@@ -77,6 +78,7 @@ describe('buildDeclarationContent', () => {
     expect(content).toContain("'PUT'")
     expect(content).toContain("'PATCH'")
     expect(content).toContain("'DELETE'")
+    expect(content).toContain("'QUERY'")
   })
 
   it('generates template literals for dynamic routes', () => {

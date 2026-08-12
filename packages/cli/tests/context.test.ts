@@ -152,7 +152,7 @@ describe('GUREN_API_DIGEST', () => {
       'bind: { id: Post }',
       "await this.authorize('update', [Post, post])",
     ],
-    'testing.md': ['actingAs', 'withCsrf', 'assertUnprocessable', 'assertInertia'],
+    'testing.md': ['actingAs', 'withCsrf', 'assertUnprocessable', 'assertInertia', 'query(path, body?)'],
   }
 
   for (const [ruleFile, tokens] of Object.entries(tokensByRuleFile)) {

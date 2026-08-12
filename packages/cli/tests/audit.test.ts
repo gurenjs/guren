@@ -551,6 +551,47 @@ export default function registerRoutes(router: any) {
     }
   })
 
+  it.each([
+    ['reads the body raw', 'const criteria = await this.request.json()', 'fail'],
+    ['validates the body', 'const criteria = await this.validateBody(SearchSchema)', 'pass'],
+  ] as const)('checks QUERY body validation (%s) without demanding auth', async (_variant, read, expected) => {
+    const workspace = await createTempWorkspace('guren-cli-audit-query-')
+
+    try {
+      await writeController(
+        workspace.dir,
+        'SearchController',
+        `export default class SearchController {
+  async index() {
+    ${read}
+    return null
+  }
+}`,
+      )
+      await writeRoutes(
+        workspace.dir,
+        `class SearchController {
+  async index() { return null }
+}
+export default function registerRoutes(router: any) {
+  router.query('/posts/search', [SearchController, 'index'])
+}`,
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      expect(report.routesAnalyzed).toBe(true)
+      const validation = report.findings.find(f => f.key === 'validation:QUERY /posts/search')
+      expect(validation).toBeDefined()
+      expect(validation!.status).toBe(expected)
+      // QUERY is safe (RFC 10008), so no mutating-route auth finding at all.
+      const authz = report.findings.find(f => f.key === 'authz:QUERY /posts/search')
+      expect(authz).toBeUndefined()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('suppresses findings marked with guren-audit-ignore', async () => {
     const workspace = await createTempWorkspace('guren-cli-audit-ignore-')
 

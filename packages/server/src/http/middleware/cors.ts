@@ -9,7 +9,7 @@ export interface CorsOptions {
    * - A function: dynamic origin evaluation
    */
   origin?: string | string[] | ((origin: string, ctx: unknown) => string | undefined | null)
-  /** Allowed HTTP methods. Default: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE', 'PATCH'] */
+  /** Allowed HTTP methods. Default: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE', 'PATCH', 'QUERY'] */
   allowMethods?: string[]
   /** Allowed request headers. */
   allowHeaders?: string[]
@@ -20,6 +20,13 @@ export interface CorsOptions {
   /** Allow credentials (cookies, authorization headers). Default: false */
   credentials?: boolean
 }
+
+// Guren owns the method default instead of relying on Hono's: the supported
+// Hono range (^4.12.29) starts before Hono's own list gained QUERY, and Hono
+// spreads caller options over its defaults, so a key passed as `undefined`
+// would erase the default entirely (a preflight with no
+// Access-Control-Allow-Methods at all).
+const DEFAULT_ALLOW_METHODS = ['GET', 'HEAD', 'PUT', 'POST', 'DELETE', 'PATCH', 'QUERY']
 
 /**
  * CORS middleware powered by Hono's built-in CORS support.
@@ -54,12 +61,15 @@ export function createCorsMiddleware(options: CorsOptions = {}): MiddlewareHandl
   // This is safer than defaulting to '*' which would allow any origin.
   const origin = options.origin ?? (() => '')
 
+  // Omit unset keys rather than forwarding `undefined` — see the
+  // DEFAULT_ALLOW_METHODS note for why an explicit `undefined` is not
+  // equivalent to leaving a key out.
   return cors({
     origin,
-    allowMethods: options.allowMethods,
-    allowHeaders: options.allowHeaders,
-    exposeHeaders: options.exposeHeaders,
-    maxAge: options.maxAge,
-    credentials: options.credentials,
+    allowMethods: options.allowMethods ?? DEFAULT_ALLOW_METHODS,
+    ...(options.allowHeaders !== undefined && { allowHeaders: options.allowHeaders }),
+    ...(options.exposeHeaders !== undefined && { exposeHeaders: options.exposeHeaders }),
+    ...(options.maxAge !== undefined && { maxAge: options.maxAge }),
+    ...(options.credentials !== undefined && { credentials: options.credentials }),
   })
 }

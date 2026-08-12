@@ -69,8 +69,16 @@ export interface RunAuditOptions {
   deps?: boolean
 }
 
+// Two orthogonal axes drive the route loop below: unsafe methods get the auth
+// check, body-carrying methods get the validation check. QUERY (RFC 10008) is
+// safe like GET but body-carrying, so it appears only in BODY_METHODS.
+// Sibling classifications that must stay coherent with these (no shared
+// constant — @guren/cli declares no @guren/server dependency): the CSRF
+// middleware's DEFAULT_PROTECTED_METHODS in packages/server, and the
+// generated client's CSRF_SAFE_METHODS in api-client-types.ts.
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
-const BODY_METHODS = new Set(['POST', 'PUT', 'PATCH'])
+const BODY_METHODS = new Set(['POST', 'PUT', 'PATCH', 'QUERY'])
+const AUDITED_METHODS = new Set([...MUTATING_METHODS, ...BODY_METHODS])
 
 /**
  * Paths that are expected to be reachable without authentication
@@ -557,7 +565,7 @@ async function auditRoutes(
 
   for (const route of definitions) {
     const method = route.method.toUpperCase()
-    if (!MUTATING_METHODS.has(method)) continue
+    if (!AUDITED_METHODS.has(method)) continue
 
     const routeLabel = `${method} ${route.path}`
     const controllerKey = route.controller
@@ -630,7 +638,9 @@ async function auditRoutes(
       }
     }
 
-    // 2. Authentication on mutating routes
+    // 2. Authentication on mutating routes. Safe body-carrying methods
+    // (QUERY) are read routes, so they get the same treatment as GET here.
+    if (!MUTATING_METHODS.has(method)) continue
     if (GUEST_PATH_PATTERN.test(route.path)) continue
 
     const middlewareNames = route.middlewareNames ?? []

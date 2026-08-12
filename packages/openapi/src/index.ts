@@ -57,6 +57,12 @@ export interface MountOpenApiDocsOptions extends OpenApiDocumentOptions {
   jsonPath?: string
   docsPath?: string
   definitions?: RouteDefinition[] | (() => RouteDefinition[])
+  /**
+   * Sink for generation warnings (e.g. routes the document cannot express).
+   * Called once per distinct warning across the mount's lifetime.
+   * Defaults to `console.warn` with a `[guren/openapi]` prefix.
+   */
+  onWarning?: (warning: string) => void
 }
 
 export interface OpenApiInfoObject {
@@ -139,18 +145,31 @@ const DEFAULT_OUTPUT_FILE = '.guren/openapi.gen.json'
 const DEFAULT_JSON_PATH = '/openapi.json'
 const DEFAULT_DOCS_PATH = '/docs'
 
+// The only method keys an OpenAPI 3.1 Path Item may carry. Routes registered
+// with any other method (QUERY, or a custom verb via router.on()) would make
+// the emitted document invalid, so they are skipped with a warning instead.
+// OpenAPI 3.2 adds `query`/`additionalOperations`; revisit when the generator
+// targets it.
+const OPENAPI_31_METHOD_KEYS = new Set(['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'])
+
 export function generateOpenApiDocument(
   definitions: RouteDefinition[],
   options: OpenApiDocumentOptions,
 ): GenerateOpenApiDocumentResult {
   const warnings: string[] = []
   // Route-derived path keys go through a Map so a literal `__proto__` route
-  // cannot pollute Object.prototype; method keys are fixed HTTP verbs.
+  // cannot pollute Object.prototype; method keys are allowlisted below.
   const pathEntries = new Map<string, Record<string, OpenApiOperationObject>>()
 
   for (const definition of definitions) {
     const pathKey = toOpenApiPath(definition.path)
     const methodKey = definition.method.toLowerCase()
+    if (!OPENAPI_31_METHOD_KEYS.has(methodKey)) {
+      warnings.push(
+        `Skipped ${definition.method} ${definition.path}: OpenAPI 3.1 cannot express the ${definition.method} method.`,
+      )
+      continue
+    }
     const operation = buildOperation(definition, warnings)
 
     const operations = pathEntries.get(pathKey)
@@ -204,8 +223,19 @@ export function mountOpenApiDocs(
   const docsPath = options.docsPath ?? DEFAULT_DOCS_PATH
   const getDefinitions = resolveDefinitions(target, options.definitions)
 
+  // Serving silently would hide routes the generator had to skip (e.g. QUERY
+  // under OpenAPI 3.1). Definitions resolve lazily per request and can grow
+  // after mount, so dedupe per distinct warning — not once ever — or a route
+  // registered after the first fetch would be skipped without a trace.
+  const onWarning = options.onWarning ?? ((warning: string) => console.warn(`[guren/openapi] ${warning}`))
+  const emitted = new Set<string>()
   hono.get(jsonPath, (context: HonoLikeContext) => {
-    const { document } = generateOpenApiDocument(getDefinitions(), options)
+    const { document, warnings } = generateOpenApiDocument(getDefinitions(), options)
+    for (const warning of warnings) {
+      if (emitted.has(warning)) continue
+      emitted.add(warning)
+      onWarning(warning)
+    }
     return context.json(document)
   })
 
