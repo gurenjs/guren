@@ -5,7 +5,7 @@ import { pages } from '@/.guren/pages.gen'
 export default class LoginController extends Controller {
   async show(): Promise<Response> {
     const email = this.request.query('email') ?? ''
-    return this.inertia(pages.auth.Login, { email }, { url: this.request.path, title: 'Login' })
+    return this.inertia(pages.auth.Login, { email }, { title: 'Login' })
   }
 
   async store(): Promise<Response> {

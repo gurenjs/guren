@@ -142,6 +142,21 @@ describe('createGurenControllerModule', () => {
     expect(payload.url).toBe('/custom')
   })
 
+  it('Controller.inertia defaults the URL to the request path plus query string', async () => {
+    const { Controller } = createGurenControllerModule()
+    const ctx = createControllerContext('http://example.com/posts?page=2&sort=desc', {
+      headers: { 'X-Inertia': 'true' },
+    })
+
+    const controller = new Controller()
+    controller.setContext(ctx as unknown as ControllerContext)
+
+    const response = controller.inertia('Component', {})
+    const { payload } = await readInertiaResponse(response)
+
+    expect(payload.url).toBe('/posts?page=2&sort=desc')
+  })
+
   it('parseRequestPayload parses JSON body', async () => {
     const module = createGurenControllerModule()
     const ctx = createControllerContext('http://example.com/', {

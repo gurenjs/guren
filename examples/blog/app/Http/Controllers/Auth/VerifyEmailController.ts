@@ -14,7 +14,7 @@ export default class VerifyEmailController extends Controller {
       return this.redirect('/dashboard')
     }
 
-    return this.inertia(pages.auth.VerifyEmail, {}, { url: this.request.path, title: 'Verify email | Guren Blog' })
+    return this.inertia(pages.auth.VerifyEmail, {}, { title: 'Verify email | Guren Blog' })
   }
 
   async resend(): Promise<Response> {
@@ -28,7 +28,7 @@ export default class VerifyEmailController extends Controller {
 
     return this.inertia(pages.auth.VerifyEmail, {
       status: 'A new verification link has been sent to your email address.',
-    }, { url: this.request.path, title: 'Verify email | Guren Blog' })
+    }, { title: 'Verify email | Guren Blog' })
   }
 
   async confirm(): Promise<Response> {
@@ -40,10 +40,7 @@ export default class VerifyEmailController extends Controller {
     })
 
     if (!verifiedEmail) {
-      return this.inertia(pages.auth.VerifyEmail, { status: EXPIRED_MESSAGE }, {
-        url: this.request.path,
-        title: 'Verify email | Guren Blog',
-      })
+      return this.inertia(pages.auth.VerifyEmail, { status: EXPIRED_MESSAGE }, { title: 'Verify email | Guren Blog' })
     }
 
     return this.redirect('/dashboard')

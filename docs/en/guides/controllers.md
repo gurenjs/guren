@@ -101,6 +101,8 @@ export default class PostsController extends Controller {
 | `this.redirect(url)` | 302 | HTTP redirect |
 | `this.noContent()` | 204 | Empty response |
 
+`this.inertia()` sets the Inertia page `url` to the request path including the query string (e.g. `/posts?page=2`), which is what `usePage().url` returns on the client. Pass the `url` option only when you need to override it.
+
 ## Reading Input
 
 Controllers parse both JSON and form-encoded bodies automatically:

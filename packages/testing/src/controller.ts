@@ -131,10 +131,13 @@ export function createGurenControllerModule() {
         typeof componentOrPage === 'string'
           ? componentOrPage
           : componentOrPage.component ?? componentOrPage.id
-      const url =
-        (options.url as string | undefined) ??
-        ctx.req.path ??
-        new URL(request.url).pathname
+      // Mirrors the real inertia() engine: the page url defaults to the
+      // request's pathname plus query string, per the Inertia protocol.
+      let url = options.url as string | undefined
+      if (url === undefined) {
+        const { pathname, search } = new URL(request.url)
+        url = `${pathname}${search}`
+      }
       const status = (options.status as number | undefined) ?? 200
       const payload: InertiaPayload = {
         component,

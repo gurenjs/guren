@@ -229,7 +229,7 @@ describe('Inertia Response Format', () => {
     expect((payload.props.user as { name: string }).name).toBe('Test <User>')
   })
 
-  it('preserves URL path in payload', async () => {
+  it('preserves URL path and query in payload', async () => {
     const mockUser = { id: 1, name: 'Test User', email: 'test@example.com' }
     const auth = createAuthStub(mockUser)
     const ctx = createControllerContext('http://blog.test/dashboard?tab=settings', {
@@ -240,7 +240,7 @@ describe('Inertia Response Format', () => {
     const response = await controller.index()
     const { payload } = await readInertiaResponse(response)
 
-    expect(payload.url).toBe('/dashboard')
+    expect(payload.url).toBe('/dashboard?tab=settings')
   })
 })
 

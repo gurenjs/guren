@@ -12,6 +12,6 @@ export default class DashboardController extends Controller {
           email: currentUser.email,
         }
       : null
-    return this.inertia(pages.dashboard.Index, { user }, { url: this.request.path, title: 'Dashboard' })
+    return this.inertia(pages.dashboard.Index, { user }, { title: 'Dashboard' })
   }
 }

@@ -27,9 +27,6 @@ export default class HomeController extends Controller {
   async index(): Promise<Response> {
     const codeExamples = await getHighlightedExamples()
 
-    return this.inertia(pages.Home, { codeExamples }, {
-      url: this.request.path,
-      title: SITE_TITLE,
-    })
+    return this.inertia(pages.Home, { codeExamples }, { title: SITE_TITLE })
   }
 }

@@ -15,7 +15,7 @@ export default class ProfileController extends Controller {
         name: user.name,
         email: user.email,
       },
-    }, { url: this.request.path, title: 'Profile' })
+    }, { title: 'Profile' })
   }
 
   async update(): Promise<Response> {
@@ -49,6 +49,6 @@ export default class ProfileController extends Controller {
     return this.inertia(pages.profile.Edit, {
       profile: { name, email },
       status: 'Profile updated successfully.',
-    }, { url: this.request.path, title: 'Profile' })
+    }, { title: 'Profile' })
   }
 }

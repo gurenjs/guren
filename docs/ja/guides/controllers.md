@@ -159,6 +159,8 @@ if (await this.has('email')) {
 | `this.noContent()` | 空の 204 レスポンスを返します。 |
 | `this.redirect(url, status?)` | 別の場所にリダイレクトします（デフォルトステータス 302）。 |
 
+`this.inertia()` は Inertia ページの `url` にクエリ文字列を含むリクエストパス（例: `/posts?page=2`）を設定します。クライアント側の `usePage().url` はこの値を返します。上書きしたい場合のみ `url` オプションを渡してください。
+
 ### レスポンスヘルパーの例
 
 ```ts

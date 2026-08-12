@@ -306,8 +306,6 @@ export class Controller {
     options: InertiaResponseOptions = {},
   ): Promise<InertiaResponse<Component, Props & ResolvedSharedInertiaProps>> {
     const ctx = this.ctx
-    const { url: overrideUrl, ...rest } = options
-    const url = overrideUrl ?? ctx.req.path ?? ctx.req.url ?? ''
     const component =
       typeof componentOrPage === 'string'
         ? componentOrPage
@@ -316,12 +314,13 @@ export class Controller {
     const sharedProps = await resolveSharedInertiaProps(ctx, this._container)
     const propsWithShared = { ...sharedProps, ...props } as Props & ResolvedSharedInertiaProps
 
+    // The engine derives the page url (path + query string) from the request
+    // when options.url is absent.
     const response = await inertia(component, propsWithShared as Record<string, unknown>, {
-      ...rest,
+      ...options,
       // No 'en' fallback here (unlike the locale getter): unconfigured apps
       // keep the Inertia engine's own default lang.
-      lang: rest.lang ?? this.#resolveLocale(),
-      url,
+      lang: options.lang ?? this.#resolveLocale(),
       request: ctx.req.raw,
     })
 
