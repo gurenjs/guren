@@ -1,6 +1,6 @@
 import type { Context } from '../http/Application'
 import type { Middleware } from '../http/middleware'
-import type { AuthUser, AuthorizeOptions } from './types'
+import type { AuthUser, AuthorizeOptions, AuthorizeResourceOptions } from './types'
 import { Gate, getGate, denialToException } from './Gate'
 import { AuthorizationException } from '../errors'
 
@@ -76,43 +76,52 @@ export function authorizeAllMiddleware(
   }
 }
 
+// HTTP method → policy ability. QUERY (RFC 10008) is safe like GET, so it
+// reads as 'view' — the same classification the CSRF middleware and
+// `guren audit` apply. Uppercase keys cannot collide with Object.prototype
+// properties, so a plain lookup is safe for arbitrary request methods.
+const RESOURCE_ABILITY_BY_METHOD: Record<string, string> = {
+  GET: 'view',
+  HEAD: 'view',
+  QUERY: 'view',
+  POST: 'create',
+  PUT: 'update',
+  PATCH: 'update',
+  DELETE: 'delete',
+}
+
 /**
  * Middleware factory for resource authorization.
  * Automatically maps HTTP methods to policy abilities.
+ *
+ * Methods outside the built-in mapping (custom verbs registered via
+ * `router.on()`) are denied with a 403 rather than downgraded to a `view`
+ * check — the middleware cannot know whether an unknown verb mutates, so
+ * guessing would let a view-only user reach a mutating handler. Map custom
+ * verbs explicitly with `options.abilityFor`.
  *
  * @example
  * ```typescript
  * // Authorize resource actions based on HTTP method
  * app.use('/posts/:id', authorizeResourceMiddleware(getPost))
- * // GET -> view, POST -> create, PUT/PATCH -> update, DELETE -> delete
+ * // GET/HEAD/QUERY -> view, POST -> create, PUT/PATCH -> update, DELETE -> delete
+ *
+ * // Custom verbs must be mapped explicitly, or they are denied
+ * authorizeResourceMiddleware(getPost, {
+ *   abilityFor: (method) => (method === 'PURGE' ? 'delete' : undefined),
+ * })
  * ```
  */
 export function authorizeResourceMiddleware(
   modelResolver: (ctx: Context) => unknown | Promise<unknown>,
-  options: AuthorizeOptions = {}
+  options: AuthorizeResourceOptions = {}
 ): Middleware {
   return async (ctx, next) => {
     const method = ctx.req.method.toUpperCase()
+    const ability = options.abilityFor?.(method) ?? RESOURCE_ABILITY_BY_METHOD[method]
 
-    // Map HTTP methods to policy abilities
-    let ability: string
-    switch (method) {
-      case 'GET':
-      case 'HEAD':
-        ability = 'view'
-        break
-      case 'POST':
-        ability = 'create'
-        break
-      case 'PUT':
-      case 'PATCH':
-        ability = 'update'
-        break
-      case 'DELETE':
-        ability = 'delete'
-        break
-      default:
-        ability = 'view'
+    if (ability === undefined) {
+      throw new AuthorizationException(options.message ?? 'This action is unauthorized.')
     }
 
     const gate = getGate()
