@@ -320,7 +320,7 @@ import { pages } from '@/.guren/pages.gen'
 export default class DashboardController extends Controller {
   async index() {
     const user = await this.auth.user()       // returns user or null
-    return this.inertia(pages.dashboard.Index, { user }, { url: this.request.path })
+    return this.inertia(pages.dashboard.Index, { user })
   }
 
   async store() {

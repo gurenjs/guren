@@ -9,7 +9,7 @@ import { pages } from '@/.guren/pages.gen'
 
 export default class RegisterController extends Controller {
   async show(): Promise<Response> {
-    return this.inertia(pages.auth.Register, {}, { url: this.request.path, title: 'Register | Guren Blog' })
+    return this.inertia(pages.auth.Register, {}, { title: 'Register | Guren Blog' })
   }
 
   async store(): Promise<Response> {

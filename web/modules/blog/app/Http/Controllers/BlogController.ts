@@ -28,7 +28,7 @@ export default class BlogController extends Controller {
     return this.inertia(
       pages.blog.Index,
       { posts },
-      { url: this.request.path, title: pageTitle('Blog') },
+      { title: pageTitle('Blog') },
     )
   }
 
@@ -41,7 +41,7 @@ export default class BlogController extends Controller {
       return this.inertia(
         pages.blog.Show,
         { post: null },
-        { url: this.request.path, title: pageTitle('Post not found'), status: 404 },
+        { title: pageTitle('Post not found'), status: 404 },
       )
     }
 
@@ -53,7 +53,7 @@ export default class BlogController extends Controller {
           bodyHtml: record.bodyHtml,
         },
       },
-      { url: this.request.path, title: pageTitle(record.title) },
+      { title: pageTitle(record.title) },
     )
   }
 

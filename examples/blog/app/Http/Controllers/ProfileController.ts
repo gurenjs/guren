@@ -15,7 +15,7 @@ export default class ProfileController extends Controller {
 
     return this.inertia(pages.profile.Edit, {
       profile: { name: authed.name, email: authed.email },
-    }, { url: this.request.path, title: 'Edit Profile | Guren Blog' })
+    }, { title: 'Edit Profile | Guren Blog' })
   }
 
   async update(): Promise<Response> {
@@ -76,6 +76,6 @@ export default class ProfileController extends Controller {
       status: emailChanged
         ? 'Profile updated. Check your new email address for a verification link.'
         : 'Profile updated successfully.',
-    }, { url: this.request.path, title: 'Edit Profile | Guren Blog' })
+    }, { title: 'Edit Profile | Guren Blog' })
   }
 }

@@ -307,7 +307,10 @@ export class Controller {
   ): Promise<InertiaResponse<Component, Props & ResolvedSharedInertiaProps>> {
     const ctx = this.ctx
     const { url: overrideUrl, ...rest } = options
-    const url = overrideUrl ?? ctx.req.path ?? ctx.req.url ?? ''
+    // The Inertia protocol's page `url` is the path plus the query string
+    // (e.g. "/posts?page=1"). ctx.req.path is the pathname only, so derive
+    // the default from the full request URL instead.
+    const url = overrideUrl ?? inertiaPageUrl(ctx.req.url) ?? ctx.req.path ?? ''
     const component =
       typeof componentOrPage === 'string'
         ? componentOrPage
@@ -656,5 +659,17 @@ export class Controller {
     }
 
     return this.parsedBody
+  }
+}
+
+function inertiaPageUrl(requestUrl: string | undefined): string | undefined {
+  if (requestUrl === undefined) {
+    return undefined
+  }
+  try {
+    const { pathname, search } = new URL(requestUrl)
+    return `${pathname}${search}`
+  } catch {
+    return undefined
   }
 }

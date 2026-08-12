@@ -8,6 +8,6 @@ export default class HomeController extends Controller {
       message: this.t('messages.welcome', { name: '__APP_TITLE__' }),
     }
 
-    return this.inertia(pages.Home, props, { url: this.request.path, title: '__APP_TITLE__' })
+    return this.inertia(pages.Home, props, { title: '__APP_TITLE__' })
   }
 }

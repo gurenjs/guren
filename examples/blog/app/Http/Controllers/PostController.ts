@@ -49,11 +49,11 @@ export default class PostController extends Controller {
       notificationArtifactPath: resource.notificationArtifactPath,
       broadcastChannels: resource.broadcastChannels,
     }
-    return this.inertia(pages.posts.Show, { post: payload }, { url: this.request.path, title: `${post.title} | Guren Blog` })
+    return this.inertia(pages.posts.Show, { post: payload }, { title: `${post.title} | Guren Blog` })
   }
 
   async create(): Promise<Response> {
-    return this.inertia(pages.posts.New, {}, { url: this.request.path, title: 'New Post | Guren Blog' })
+    return this.inertia(pages.posts.New, {}, { title: 'New Post | Guren Blog' })
   }
 
   async store(): Promise<Response> {
@@ -76,7 +76,7 @@ export default class PostController extends Controller {
     const post = await Post.findOrFail(id) as BoundPost
     const formPost = PostFormSchema.parse(post)
 
-    return this.inertia(pages.posts.Edit, { post: formPost, postId: post.id }, { url: this.request.path, title: `Edit ${formPost.title} | Guren Blog` })
+    return this.inertia(pages.posts.Edit, { post: formPost, postId: post.id }, { title: `Edit ${formPost.title} | Guren Blog` })
   }
 
   async update(): Promise<Response> {

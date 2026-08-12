@@ -44,7 +44,7 @@ export default class PostsController extends Controller {
     return this.inertia(
       pages.admin.Posts,
       { posts },
-      { url: this.request.path, title: pageTitle('Admin') },
+      { title: pageTitle('Admin') },
     )
   }
 
@@ -52,7 +52,7 @@ export default class PostsController extends Controller {
     return this.inertia(
       pages.admin.PostForm,
       { post: null },
-      { url: this.request.path, title: pageTitle('New post') },
+      { title: pageTitle('New post') },
     )
   }
 
@@ -97,7 +97,7 @@ export default class PostsController extends Controller {
           bodyMarkdown: post.bodyMarkdown,
         },
       },
-      { url: this.request.path, title: pageTitle('Edit post') },
+      { title: pageTitle('Edit post') },
     )
   }
 

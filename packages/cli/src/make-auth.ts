@@ -31,8 +31,8 @@ function buildLoginControllerTemplate(includePassword: boolean): string {
 
   const showBody = includePassword
     ? `    const email = this.request.query('email') ?? ''
-    return this.inertia(pages.auth.Login, { email }, { url: this.request.path, title: 'Login' })`
-    : `    return this.inertia(pages.auth.Login, {}, { url: this.request.path, title: 'Login' })`
+    return this.inertia(pages.auth.Login, { email }, { title: 'Login' })`
+    : `    return this.inertia(pages.auth.Login, {}, { title: 'Login' })`
 
   const storeAction = includePassword
     ? `
@@ -98,7 +98,7 @@ import { pages } from '@/.guren/pages.gen'
 
 export default class RegisterController extends Controller {
   async show(): Promise<Response> {
-    return this.inertia(pages.auth.Register, {}, { url: this.request.path, title: 'Register' })
+    return this.inertia(pages.auth.Register, {}, { title: 'Register' })
   }
 
   async store(): Promise<Response> {
@@ -134,7 +134,7 @@ const STATUS_MESSAGE = "If an account exists for that email, we've sent a passwo
 
 export default class ForgotPasswordController extends Controller {
   async show(): Promise<Response> {
-    return this.inertia(pages.auth.ForgotPassword, {}, { url: this.request.path, title: 'Forgot password' })
+    return this.inertia(pages.auth.ForgotPassword, {}, { title: 'Forgot password' })
   }
 
   async store(): Promise<Response> {
@@ -160,7 +160,6 @@ export default class ForgotPasswordController extends Controller {
     }
 
     return this.inertia(pages.auth.ForgotPassword, { status: STATUS_MESSAGE }, {
-      url: this.request.path,
       title: 'Forgot password',
     })
   }
@@ -180,7 +179,6 @@ export default class ResetPasswordController extends Controller {
     const token = this.request.query('token') ?? ''
     const email = this.request.query('email') ?? ''
     return this.inertia(pages.auth.ResetPassword, { token, email }, {
-      url: this.request.path,
       title: 'Reset password',
     })
   }
@@ -224,7 +222,7 @@ export default class VerifyEmailController extends Controller {
       return this.redirect('/dashboard')
     }
 
-    return this.inertia(pages.auth.VerifyEmail, {}, { url: this.request.path, title: 'Verify email' })
+    return this.inertia(pages.auth.VerifyEmail, {}, { title: 'Verify email' })
   }
 
   async resend(): Promise<Response> {
@@ -238,7 +236,7 @@ export default class VerifyEmailController extends Controller {
 
     return this.inertia(pages.auth.VerifyEmail, {
       status: 'A new verification link has been sent to your email address.',
-    }, { url: this.request.path, title: 'Verify email' })
+    }, { title: 'Verify email' })
   }
 
   async confirm(): Promise<Response> {
@@ -251,7 +249,6 @@ export default class VerifyEmailController extends Controller {
 
     if (!verifiedEmail) {
       return this.inertia(pages.auth.VerifyEmail, { status: EXPIRED_MESSAGE }, {
-        url: this.request.path,
         title: 'Verify email',
       })
     }
@@ -437,7 +434,7 @@ export default class DashboardController extends Controller {
           email: currentUser.email,
         }
       : null
-    return this.inertia(pages.dashboard.Index, { user }, { url: this.request.path, title: 'Dashboard' })
+    return this.inertia(pages.dashboard.Index, { user }, { title: 'Dashboard' })
   }
 }
 `
@@ -471,7 +468,7 @@ export default class ProfileController extends Controller {
         name: user.name,
         email: user.email,
       },
-    }, { url: this.request.path, title: 'Profile' })
+    }, { title: 'Profile' })
   }
 
   async update(): Promise<Response> {
@@ -493,7 +490,7 @@ export default class ProfileController extends Controller {
     return this.inertia(pages.profile.Edit, {
       profile: { name, email: user.email },
       status: 'Profile updated successfully.',
-    }, { url: this.request.path, title: 'Profile' })
+    }, { title: 'Profile' })
   }
 }
 `
@@ -562,7 +559,7 @@ export default class ProfileController extends Controller {
         name: user.name,
         email: user.email,
       },
-    }, { url: this.request.path, title: 'Profile' })
+    }, { title: 'Profile' })
   }
 
   async update(): Promise<Response> {
@@ -595,7 +592,7 @@ ${verifyResend}
     return this.inertia(pages.profile.Edit, {
       profile: { name, email },
       status: ${statusMessage},
-    }, { url: this.request.path, title: 'Profile' })
+    }, { title: 'Profile' })
   }
 }
 `

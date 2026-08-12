@@ -66,7 +66,6 @@ export default class DocsController extends Controller {
       pages.Docs.Index,
       { categories, locale, locales, basePath },
       {
-        url: this.request.path,
         title: this.#titleForLocale(locale),
         lang: locale,
       },
@@ -102,7 +101,6 @@ export default class DocsController extends Controller {
       pages.Docs.Show,
       { categories, doc, active, locale, locales, basePath },
       {
-        url: this.request.path,
         title,
         status: doc ? 200 : 404,
         lang: locale,

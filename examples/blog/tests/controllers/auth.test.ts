@@ -81,7 +81,7 @@ describe('LoginController', () => {
       expect(format).toBe('json')
       expect(payload.component).toBe('auth/Login')
       expect(payload.props.email).toBe('jane@example.com')
-      expect(payload.url).toBe('/login')
+      expect(payload.url).toBe('/login?email=jane@example.com')
     })
 
     it('embeds Inertia page data in HTML for full page visits', async () => {

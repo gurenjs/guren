@@ -10,7 +10,7 @@ const STATUS_MESSAGE = "If an account exists for that email, we've sent a passwo
 
 export default class ForgotPasswordController extends Controller {
   async show(): Promise<Response> {
-    return this.inertia(pages.auth.ForgotPassword, {}, { url: this.request.path, title: 'Forgot password | Guren Blog' })
+    return this.inertia(pages.auth.ForgotPassword, {}, { title: 'Forgot password | Guren Blog' })
   }
 
   async store(): Promise<Response> {
@@ -34,7 +34,6 @@ export default class ForgotPasswordController extends Controller {
     }
 
     return this.inertia(pages.auth.ForgotPassword, { status: STATUS_MESSAGE }, {
-      url: this.request.path,
       title: 'Forgot password | Guren Blog',
     })
   }

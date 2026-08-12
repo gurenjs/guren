@@ -84,6 +84,24 @@ describe('Application routing integration', () => {
     })
   })
 
+  it('keeps the query string in the Inertia page url', async () => {
+    const app = new Application()
+    app.router.get('/dashboard', [InertiaController, 'index'])
+    await app.boot()
+
+    const response = await app.fetch(
+      new Request('http://example.com/dashboard?page=2&sort=desc', {
+        headers: {
+          'X-Inertia': 'true',
+          Accept: 'application/json',
+        },
+      }),
+    )
+
+    const payload = await response.json() as { url: string }
+    expect(payload.url).toBe('/dashboard?page=2&sort=desc')
+  })
+
   it('accepts page contract objects in controller inertia responses', async () => {
     const app = new Application()
     app.router.get('/dashboard', [ContractInertiaController, 'index'])

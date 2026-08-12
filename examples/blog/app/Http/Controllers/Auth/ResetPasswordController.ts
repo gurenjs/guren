@@ -11,7 +11,6 @@ export default class ResetPasswordController extends Controller {
     const token = this.request.query('token') ?? ''
     const email = this.request.query('email') ?? ''
     return this.inertia(pages.auth.ResetPassword, { token, email }, {
-      url: this.request.path,
       title: 'Reset password | Guren Blog',
     })
   }

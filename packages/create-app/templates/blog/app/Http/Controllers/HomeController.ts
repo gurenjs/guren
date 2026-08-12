@@ -16,7 +16,7 @@ export default class HomeController extends Controller {
     return this.inertia(
       pages.Home,
       { latest: latest.map((post) => new PostResource(post).toJSON()) },
-      { url: this.request.path, title: '__APP_TITLE__' },
+      { title: '__APP_TITLE__' },
     )
   }
 }
