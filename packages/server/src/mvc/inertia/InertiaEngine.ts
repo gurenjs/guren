@@ -2,6 +2,7 @@ import { isAbsolute, resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
 import { ensureErrorStackTracePolyfill } from "../../support/error-polyfill";
 import { parseImportMap } from "../../support/import-map";
+import { DEFAULT_DEV_STYLES_ENTRY } from "../../support/inertia-defaults";
 
 ensureErrorStackTracePolyfill();
 
@@ -233,12 +234,23 @@ async function renderDocument(
     process.env.GUREN_INERTIA_ENTRY ?? "/resources/js/app.tsx";
   const entry = options.entry ?? defaultEntry;
   const title = escapeHtml(options.title ?? DEFAULT_TITLE);
-  const styles =
+  const isProduction = process.env.NODE_ENV === "production";
+  const configuredStyles =
     options.styles ?? parseStylesEnv(process.env.GUREN_INERTIA_STYLES);
+  // The dev-default stylesheet path points at the *source* file, which only
+  // works when nothing has to compile it. With a Vite dev server on the
+  // entry, the compiled CSS already arrives through the module graph, and the
+  // raw file is broken besides: Tailwind's `@import 'tailwindcss'` is a bare
+  // specifier only a bundler resolves, so the browser 404s it on every page.
+  // A per-call `options.styles` is an explicit choice and is never filtered;
+  // only the ambient (env-derived) styles can carry the dev fallback.
+  const styles =
+    !isProduction && options.styles === undefined && isDevServerEntry(entry)
+      ? configuredStyles.filter((href) => href !== DEFAULT_DEV_STYLES_ENTRY)
+      : configuredStyles;
   const envImportMap = parseImportMap(process.env.GUREN_INERTIA_IMPORT_MAP, {
     context: "GUREN_INERTIA_IMPORT_MAP",
   });
-  const isProduction = process.env.NODE_ENV === "production";
   const importMapEntries = {
     ...(isProduction ? {} : DEV_FALLBACK_IMPORT_MAP),
     ...envImportMap,
@@ -417,6 +429,15 @@ function normalizeSsrSpecifier(specifier: string): string {
 
 function isUrlLike(specifier: string): boolean {
   return /^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(specifier);
+}
+
+/**
+ * An absolute http(s) entry means an asset dev server (Vite) is serving the
+ * module graph. A same-origin path means the fallback pipeline is serving
+ * source files directly — there the raw stylesheet link is the only styling.
+ */
+function isDevServerEntry(entry: string): boolean {
+  return /^https?:\/\//iu.test(entry);
 }
 
 function renderStyles(styles: string[]): string {
