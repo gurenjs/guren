@@ -13,6 +13,7 @@ import {
 import { registerRootPublicAssets } from './public-assets'
 import { isPathWithin, isRealPathWithin } from '../support/contained-path'
 import { parseImportMap } from '../support/import-map'
+import { DEFAULT_DEV_STYLES_ENTRY } from '../support/inertia-defaults'
 import { trimTrailingSlashes } from '../support/trim-slashes'
 import { hash } from '../encryption/Hash'
 
@@ -37,7 +38,6 @@ export interface AutoConfigureInertiaOptions extends InertiaAssetsOptions {
 }
 
 const DEFAULT_STYLES_ENTRY = '/public/assets/app.css'
-const DEFAULT_DEV_STYLES_ENTRY = '/resources/css/app.css'
 const DEFAULT_SCRIPT_ENTRY = '/assets/app.js'
 const DEFAULT_VENDOR_CLIENT_PATH = '/vendor/inertia-client.tsx'
 

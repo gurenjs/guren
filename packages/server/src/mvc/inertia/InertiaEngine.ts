@@ -2,6 +2,7 @@ import { isAbsolute, resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
 import { ensureErrorStackTracePolyfill } from "../../support/error-polyfill";
 import { parseImportMap } from "../../support/import-map";
+import { DEFAULT_DEV_STYLES_ENTRY } from "../../support/inertia-defaults";
 
 ensureErrorStackTracePolyfill();
 
@@ -241,9 +242,11 @@ async function renderDocument(
   // entry, the compiled CSS already arrives through the module graph, and the
   // raw file is broken besides: Tailwind's `@import 'tailwindcss'` is a bare
   // specifier only a bundler resolves, so the browser 404s it on every page.
+  // A per-call `options.styles` is an explicit choice and is never filtered;
+  // only the ambient (env-derived) styles can carry the dev fallback.
   const styles =
-    !isProduction && isDevServerEntry(entry)
-      ? configuredStyles.filter((href) => href !== DEV_STYLES_SOURCE_PATH)
+    !isProduction && options.styles === undefined && isDevServerEntry(entry)
+      ? configuredStyles.filter((href) => href !== DEFAULT_DEV_STYLES_ENTRY)
       : configuredStyles;
   const envImportMap = parseImportMap(process.env.GUREN_INERTIA_IMPORT_MAP, {
     context: "GUREN_INERTIA_IMPORT_MAP",
@@ -427,14 +430,6 @@ function normalizeSsrSpecifier(specifier: string): string {
 function isUrlLike(specifier: string): boolean {
   return /^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(specifier);
 }
-
-/**
- * The stylesheet source path the dev configuration falls back to. Kept in
- * sync with `DEFAULT_DEV_STYLES_ENTRY` in `http/inertia-assets.ts`; the
- * document renderer drops exactly this path when a dev server owns the entry
- * (see `renderDocument`), and leaves every explicitly configured href alone.
- */
-const DEV_STYLES_SOURCE_PATH = "/resources/css/app.css";
 
 /**
  * An absolute http(s) entry means an asset dev server (Vite) is serving the

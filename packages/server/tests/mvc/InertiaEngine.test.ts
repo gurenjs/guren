@@ -388,7 +388,7 @@ describe('InertiaEngine dev stylesheet links', () => {
     expect(body).not.toContain('/resources/css/app.css')
   })
 
-  it('keeps explicitly configured stylesheets under a Vite dev server entry', async () => {
+  it('keeps other env-configured stylesheets under a Vite dev server entry', async () => {
     process.env.NODE_ENV = 'development'
     process.env.GUREN_INERTIA_ENTRY = 'http://localhost:5173/resources/js/dev-entry.ts'
     process.env.GUREN_INERTIA_STYLES = '/public/custom.css,/resources/css/app.css'
@@ -398,6 +398,22 @@ describe('InertiaEngine dev stylesheet links', () => {
 
     expect(body).toContain('<link rel="stylesheet" href="/public/custom.css" />')
     expect(body).not.toContain('/resources/css/app.css')
+  })
+
+  it('never filters a per-call styles override', async () => {
+    // `options.styles` is an explicit choice; only the ambient env-derived
+    // styles can carry the dev fallback the filter targets.
+    process.env.NODE_ENV = 'development'
+    process.env.GUREN_INERTIA_ENTRY = 'http://localhost:5173/resources/js/dev-entry.ts'
+
+    const response = await inertia(
+      'Dashboard',
+      {},
+      { url: '/dashboard', styles: ['/resources/css/app.css'] },
+    )
+    const body = await response.text()
+
+    expect(body).toContain('<link rel="stylesheet" href="/resources/css/app.css" />')
   })
 
   it('keeps the dev source stylesheet when the fallback pipeline serves the entry', async () => {

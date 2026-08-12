@@ -12,7 +12,8 @@ page load. The link contributed nothing: the compiled CSS already arrives
 through Vite's module graph via the `app.tsx` import.
 
 The document renderer now drops exactly that dev-default path when the script
-entry is served from a dev server (an absolute http(s) URL). Explicitly
-configured stylesheet hrefs are left alone, fallback mode (no Vite; the entry
-served same-origin) keeps the link — there the raw file is the only styling —
-and production manifest-derived links are untouched.
+entry is served from a dev server (an absolute http(s) URL). A per-call
+`styles` option is an explicit choice and is never filtered; other
+env-configured hrefs are left alone; fallback mode (no Vite; the entry served
+same-origin) keeps the link — there the raw file is the only styling — and
+production manifest-derived links are untouched.
