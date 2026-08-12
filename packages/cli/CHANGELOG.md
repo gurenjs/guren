@@ -1,5 +1,92 @@
 # @guren/cli
 
+## 2.3.1
+
+### Patch Changes
+
+- c8cc7c4: Stop the agent testing rule from documenting a TestApp form that throws
+
+  The harness rule shipped `const app = TestApp.fromFetch((req) => app.fetch(req))`
+  as the way to wrap an existing app. The arrow is not the problem — the shadowing
+  is. Inside it, `app` resolves to the `const app` being declared on that same line,
+  which is the `TestApp`, and `TestApp` has no public `fetch`. An agent that copied
+  the line got `TypeError: app.fetch is not a function` at the first request, from
+  text that reads fine.
+
+  `TestApp.fromApp(app)` was added for this footgun and is now published, so the rule
+  documents it as the way to test against a real `Application`: it boots the app and
+  binds `fetch` itself. `fromFetch` stays for the case it actually models — an
+  arbitrary fetch function — with an example that does not shadow. The `(not async)`
+  note travels with `fromFetch`, since `fromApp` must be awaited.
+
+  Existing apps pick this up through `guren agent:sync`, which owns everything under
+  `.claude/rules/`.
+
+- e38ac75: Refuse plugin env entries that target the framework's own security gates
+
+  `guren plugin <pkg>` applies the `gurenPlugin.env` entries from the installed
+  package's manifest, and `applyEnvEntries` validated only the _shape_ of the key
+  (`/^[A-Z][A-Z0-9_]*$/`). Values and comments were interpolated raw, so a
+  manifest could append `GUREN_TESTING=1` — which alone makes the server trust an
+  `X-Testing-User` header — or smuggle the same line through a newline inside an
+  innocuous entry's value, where a reviewer skimming key names would not see it.
+  `.env.example` is committed, so either line propagates to every clone.
+
+  Two refusals, both throwing rather than filtering in silence: keys in the
+  reserved `GUREN_*` namespace, and values or comments containing a line break.
+  A plugin has no legitimate reason to do either, so failing the install is the
+  right outcome; malformed keys keep their existing silent-skip behaviour.
+
+  The check runs as soon as the manifest is read — before the provider is wired
+  into `src/app.ts` and before any publish is written — so a refused manifest
+  does not leave a half-activated install behind. `applyEnvEntries` re-checks,
+  which covers any other caller.
+
+  This is hardening, not a fix for a confirmed exploit — the same command already
+  writes a provider import into `src/app.ts`, so a hostile package that reaches
+  this code path has other paths too.
+
+- cb46086: Report the port `guren dev` actually bound, and stop swallowing `PORT=0`
+
+  `guren dev` carried its own copy of the entrypoint idiom this release removes
+  elsewhere: `Number.parseInt(process.env.PORT ?? '', 10) || 3333`, which turns
+  `PORT=0` into 3333 so "let the OS pick a free port" could not be expressed.
+
+  It also announced `http://${hostname}:${port}` from the values it _requested_,
+  without awaiting `listen()`. Those are not the bound values once the framework
+  walks past a busy port — so the one line telling you where to point your browser
+  was the line most likely to be wrong, and it printed the raw `0.0.0.0` wildcard
+  rather than something dialable. It now awaits `listen()` and reports the address
+  it returns, falling back to the requested values for an app whose installed
+  `@guren/server` predates that return value.
+
+- 8bc311d: Keep the query string in the default Inertia page url
+
+  `Controller.inertia()` resolved the page `url` from `ctx.req.path`, which is
+  the pathname only — so `usePage().url` never saw the current query
+  parameters. Anything deriving state from the query (pagination, filters,
+  sort order) silently lost it on every visit, and navigation components that
+  propagate the active query onto their links emitted bare paths. The Inertia
+  protocol expects `url` to include the query string (`"/posts?page=1"`).
+
+  The default now lives in the `inertia()` engine itself: when `options.url`
+  is absent, the page url is derived from `options.request` as the pathname
+  plus the query string, kept relative as the protocol expects. This covers
+  every caller that hands the engine a request — `Controller.inertia()` and
+  direct `inertia()` calls alike — and an explicit `options.url` still
+  overrides it. The `@guren/testing` controller mock mirrors the same
+  default. On a version-mismatch 409, `X-Inertia-Location` now falls back to
+  the absolute request URL when no `url` override is given, matching what the
+  client does with that header.
+
+  The `make:auth` scaffolds and the create-app templates no longer pass
+  `url: this.request.path` — they rely on the default, so generated apps get
+  the query-preserving value instead of re-introducing the lossy form.
+
+- Updated dependencies [e38ac75]
+- Updated dependencies [5e38d18]
+  - @guren/orm@2.2.2
+
 ## 2.3.0
 
 ### Minor Changes

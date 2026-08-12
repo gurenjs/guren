@@ -1,5 +1,67 @@
 # create-guren-app
 
+## 1.7.1
+
+### Patch Changes
+
+- 8bc311d: Keep the query string in the default Inertia page url
+
+  `Controller.inertia()` resolved the page `url` from `ctx.req.path`, which is
+  the pathname only — so `usePage().url` never saw the current query
+  parameters. Anything deriving state from the query (pagination, filters,
+  sort order) silently lost it on every visit, and navigation components that
+  propagate the active query onto their links emitted bare paths. The Inertia
+  protocol expects `url` to include the query string (`"/posts?page=1"`).
+
+  The default now lives in the `inertia()` engine itself: when `options.url`
+  is absent, the page url is derived from `options.request` as the pathname
+  plus the query string, kept relative as the protocol expects. This covers
+  every caller that hands the engine a request — `Controller.inertia()` and
+  direct `inertia()` calls alike — and an explicit `options.url` still
+  overrides it. The `@guren/testing` controller mock mirrors the same
+  default. On a version-mismatch 409, `X-Inertia-Location` now falls back to
+  the absolute request URL when no `url` override is given, matching what the
+  client does with that header.
+
+  The `make:auth` scaffolds and the create-app templates no longer pass
+  `url: this.request.path` — they rely on the default, so generated apps get
+  the query-preserving value instead of re-introducing the lossy form.
+
+- cb46086: Make the scaffolded `bin/serve.ts` honour `PORT=0` and `GUREN_STRICT_PORT=1`
+
+  `Number.parseInt(process.env.PORT ?? '', 10) || 3333` turned `PORT=0` into 3333,
+  so "let the OS pick a free port" — the natural way to run a scaffolded app
+  alongside others, or in parallel tests — could not be expressed. The parse now
+  tests for a number instead of for truthiness.
+
+  The entrypoint also walks to the next port when the requested one is busy, which
+  is a convenience for `bun run dev` and a hazard everywhere else: a smoke script,
+  an E2E runner, or a CI job that pins a port gets a server on a _different_ port
+  while it keeps testing the original one — so the run passes against whatever was
+  already listening there. `GUREN_STRICT_PORT=1` now binds the requested port or
+  fails with `EADDRINUSE`. The walk is also skipped for `PORT=0`, which has nothing
+  to recover from and would otherwise march into the privileged range.
+
+  The generated file keeps its own retry loop rather than delegating to the
+  framework: templates resolve `@guren/*` from npm, so they cannot use the new
+  `listen({ portFallback })` option until the release that ships it. Because the
+  loop stays, the entrypoint now also sets `GUREN_STRICT_PORT=1` for itself before
+  looping — the framework walks inside `listen()` in newer versions, and a caret
+  range floats a scaffolded app onto one of those without any template change.
+  Nesting the two loops would search far past the intended range and warn about
+  the wrong ports; this keeps the retry in exactly one place on every version.
+
+- 905062c: Scaffold starter tests with `TestApp.fromApp(app)`
+
+  The `default` and `blog` starter tests hand-wired what `fromApp()` does:
+  `await app.boot()` followed by `TestApp.fromFetch((request) => app.fetch(request))`.
+  Correct, but it is the first test a new app ever reads, and it teaches the arrow
+  wrapper as something the author has to remember — the arrow being load-bearing,
+  since `Application.fetch` reads instance state.
+
+  `@guren/testing@1.4.0` is published and the templates already admit it (`^1.4.0`),
+  so the scaffold now shows the short form.
+
 ## 1.7.0
 
 ### Minor Changes

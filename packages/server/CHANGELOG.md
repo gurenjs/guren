@@ -1,5 +1,262 @@
 # @guren/server
 
+## 2.4.0
+
+### Minor Changes
+
+- 0e072be: Expose the bound address on the application as `app.address`
+
+  `Application.listen()` returns `{ port, hostname, url }`, but the instance kept
+  only its private Bun server, so the address was available in exactly one place:
+  whatever received `listen()`'s return value. Anything else that needs it — an
+  OpenAPI `servers` entry, an absolute URL builder, a health report — had to have
+  it threaded in from the entrypoint. The example API did this with a module-local
+  variable and an exported setter re-exported through two files so that
+  `bin/serve.ts` could push the address back down into the app that had just
+  produced it. Every app mounting OpenAPI docs would have hand-rolled the same
+  wiring.
+
+  `app.address` now returns the same `ListenAddress` `listen()` returned, and
+  `undefined` before `listen()`. It reads a value stored at bind time rather than
+  re-deriving one from the live server, because `listen()` resolves the port
+  through a fallback the socket no longer carries; the wildcard-host mapping
+  (`0.0.0.0` → `127.0.0.1`, `::` → `::1`) stays in the single helper `listen()`
+  already uses. `ListenAddress`'s fields are now `readonly`, since the object
+  `listen()` hands back is the one every later reader sees.
+
+  It reverts to `undefined` when the server is superseded or torn down through
+  the framework — a later `listen()`, including one whose rebind fails, and the
+  process-exit teardown. A server stopped by calling `stop()` on the Bun server
+  directly leaves no signal behind, so the accessor keeps reporting its address:
+  it answers "where did `listen()` put this app", not "is this app healthy".
+
+  This does not replace passing a function to `@guren/openapi`'s `servers`
+  option. Late resolution is what lets the document name an address the app did
+  not have at mount time, and a function is the only form available when mounting
+  against a plain Hono instance rather than an `Application`.
+
+- cb46086: Return the bound address from `Application.listen()`, and move the busy-port walk into it
+
+  `listen()` called `Bun.serve({ port })` and discarded `server.port`, returning
+  `Promise<void>`. The framework knew the port it had bound and threw it away, so
+  the only way to find out was to scrape the dev banner — ANSI-coloured prose
+  written for humans. `listen()` now returns `{ port, hostname, url }`, read off
+  the running server rather than echoed back from the request.
+
+  That mattered because the port asked for and the port bound are routinely
+  different numbers. The walk past a busy port lived in four copies of
+  application code (`bin/serve.ts` in both starter templates, the blog example,
+  and the docs site), each wrapping the framework call that should have owned it.
+  Copies drift, and none of them could report where the app ended up. The walk now
+  lives in `listen()` behind `portFallback`: `true` walks the next 20 ports,
+  `false` fails fast. Left unset it walks outside production, which is what the
+  loops it replaces did. Moving the walk inside also makes it dramatically
+  cheaper — a retry used to re-enter `listen()` and restart the managed Vite dev
+  server (~600ms per busy port); it is now a bare re-bind.
+
+  A bind that gives up now shuts the managed Vite dev server down on its way out.
+  `listen()` starts Vite before anything tries to bind, so an exhausted walk — or
+  a strict-port failure, which is precisely the case automated callers _handle_
+  rather than exit on — used to leave an asset server and its published
+  environment variables running in a process with no application server.
+
+  `GUREN_STRICT_PORT=1` forces fail-fast from outside the app. This is the case the
+  walk actively harms: a smoke script, a Playwright `webServer`, or a CI job that
+  pins a port needs to know the app answering is the one it started. Walking past a
+  busy port makes that failure silent and inverted — the run goes green against
+  somebody else's server. `bun run dev` keeps the convenience by default.
+
+  `PORT=0` also works now. `Number.parseInt(process.env.PORT ?? '', 10) || 3333`
+  turned 0 into 3333, so "let the OS pick a free port and tell me which" could not
+  be expressed — and it is the natural way to run tests in parallel. The walk is
+  skipped for port 0, which has nothing to recover from and would otherwise march
+  into the privileged range.
+
+  The starter templates keep their own loop for now: they resolve `@guren/*` from
+  npm, so they cannot use a `listen()` option until the release that ships it.
+  They do honour `GUREN_STRICT_PORT` and parse `PORT=0` correctly, which needs no
+  new API.
+
+### Patch Changes
+
+- 730358f: Keep the dev server listening across `bun --hot` reloads by reusing the managed Vite dev server
+
+  Editing a backend file in a scaffolded app — or running `guren add resource` /
+  `guren add auth`, which edit several — killed the dev server silently. `bun
+--hot` re-runs the entrypoint, and the new `listen()` stopped the previous Bun
+  server first, then awaited the previous Vite dev server's `close()`. Vite
+  waits for every open connection, and a browser tab holding its HMR socket can
+  keep that wait alive indefinitely — so the process stayed up with no HTTP
+  listener at all, no error printed, and every checkpoint URL dead until a
+  manual restart.
+
+  `listen()` now adopts the still-listening Vite dev server a previous run left
+  on `globalThis` (which `bun --hot` preserves) instead of tearing it down. The
+  browser keeps its HMR socket, the reload skips the `close()` wait entirely,
+  and the Bun listener re-binds immediately. Explicit `vite` options still force
+  a restart — the running server was built from the previous call's options.
+
+  Two failure paths harden alongside: the previous Bun server is force-closed
+  (a dev reload must not wait on in-flight requests — an open SSE stream used to
+  be able to hang it the same way), and the paths that do close Vite abandon a
+  `close()` that has not resolved within `GUREN_VITE_CLOSE_TIMEOUT_MS` (default 5000) with a loud warning instead of hanging the process.
+
+- 10dddc8: Stop linking the raw dev stylesheet when a Vite dev server owns the entry
+
+  In development the Inertia document linked `/resources/css/app.css` — the
+  _source_ file, served raw by the app server. With Tailwind in it (every
+  scaffolded app), the browser then requests the bare `@import 'tailwindcss'`
+  specifier as a relative URL, 404s, and logs a MIME-type console error on every
+  page load. The link contributed nothing: the compiled CSS already arrives
+  through Vite's module graph via the `app.tsx` import.
+
+  The document renderer now drops exactly that dev-default path when the script
+  entry is served from a dev server (an absolute http(s) URL). A per-call
+  `styles` option is an explicit choice and is never filtered; other
+  env-configured hrefs are left alone; fallback mode (no Vite; the entry served
+  same-origin) keeps the link — there the raw file is the only styling — and
+  production manifest-derived links are untouched.
+
+- 5970497: Fix the `FormRequest` JSDoc example that documented a no-op authorization gate
+
+  `AuthContext.user()` is async, but `FormRequest`'s `protected user()` was
+  declared `(): unknown` and returned its result unawaited. The class JSDoc built
+  its `authorize()` example on that:
+
+  ```ts
+  authorize() {
+    return this.user() !== null   // a pending promise — always true
+  }
+  ```
+
+  An app that copied it authorized every request, including logged-out ones. The
+  precondition is an attached auth context, which is the normal case:
+  `Application` attaches a fallback one in its constructor even when the app
+  configures no `options.auth`. The `unknown` return type kept `tsc` quiet.
+
+  `user()` is now `protected async user<TUser>(): Promise<TUser | null>` and the
+  example awaits it. `authorize()` already accepted `boolean | Promise<boolean>`
+  and `handle()` already awaited it, so nothing else moves — for callers that
+  await, runtime behavior is identical before and after.
+
+  `handle()`'s JSDoc also claimed it was `@internal Called by
+Controller.validate()`. That method does not exist and nothing in the framework
+  calls `handle()`, so it now documents the real entry point:
+  `await new StorePostRequest().handle(this.ctx)`.
+
+  ### Note for subclasses that override `user()`
+
+  The new signature is source-incompatible for a subclass that **overrides** the
+  helper — `protected user(): unknown` no longer satisfies the base declaration.
+  It is `protected` on a deprecated class, so this is not public API surface, and
+  subclasses that only _call_ `user()` are unaffected.
+
+  Migration: change an override to `protected async user<TUser = unknown>():
+Promise<TUser | null>`. Separately, a subclass that copied the old
+  `this.user() !== null` line keeps compiling and keeps returning true — a
+  promise is still legally `!== null` — so rewrite it as
+  `(await this.user()) !== null`.
+
+- 8bc311d: Keep the query string in the default Inertia page url
+
+  `Controller.inertia()` resolved the page `url` from `ctx.req.path`, which is
+  the pathname only — so `usePage().url` never saw the current query
+  parameters. Anything deriving state from the query (pagination, filters,
+  sort order) silently lost it on every visit, and navigation components that
+  propagate the active query onto their links emitted bare paths. The Inertia
+  protocol expects `url` to include the query string (`"/posts?page=1"`).
+
+  The default now lives in the `inertia()` engine itself: when `options.url`
+  is absent, the page url is derived from `options.request` as the pathname
+  plus the query string, kept relative as the protocol expects. This covers
+  every caller that hands the engine a request — `Controller.inertia()` and
+  direct `inertia()` calls alike — and an explicit `options.url` still
+  overrides it. The `@guren/testing` controller mock mirrors the same
+  default. On a version-mismatch 409, `X-Inertia-Location` now falls back to
+  the absolute request URL when no `url` override is given, matching what the
+  client does with that header.
+
+  The `make:auth` scaffolds and the create-app templates no longer pass
+  `url: this.request.path` — they rely on the default, so generated apps get
+  the query-preserving value instead of re-introducing the lossy form.
+
+- e38ac75: Harden the GCM tag length, the debug-page production gate, and SSE client ids
+
+  Three defence-in-depth fixes from the framework security review. None closes a
+  confirmed exploit on a shipped code path; each removes a way one could open.
+
+  - **GCM authentication tags are pinned to 16 bytes.** `setAuthTag()` adopts
+    whatever length it is handed, and a truncated tag was measurably accepted: a
+    payload rewritten with the first 4 bytes of a real tag decrypted successfully,
+    dropping forgery resistance from 2^128 to 2^32. Both `createCipheriv` and
+    `createDecipheriv` now pass `authTagLength: 16`, and a short tag is rejected
+    before any key is tried. Everything the `Encrypter` writes already used the
+    full tag, so no existing payload is affected.
+
+  - **`debugErrorMiddleware`'s production gate no longer uses an optional chain.**
+    The page renders the stack trace, the request, and the process environment,
+    and this read is its only guard. The deploy plugins settle it at bundle time
+    with `--define 'process.env.NODE_ENV="production"'`, which substitutes one
+    exact expression — the optional chain was not it, so on hosts where platform
+    vars never reach the process environment the gate answered "not production".
+    A source-level test pins the form, matching the MCP and docs-viewer gates.
+
+  - **SSE client ids are unguessable, and a stream now records its owner.**
+    `POST /broadcasting/auth` takes a `clientId` from the request body, so
+    authorizing a channel attached it to whatever stream that id named. Ids were
+    `Date.now()` plus a `Math.random()` suffix; they are now 16 random bytes from
+    `randomHex`, which is the control that actually stops an attach against
+    someone else's stream.
+
+    The ownership check is defence in depth on top of that: the endpoint refuses
+    to attach a channel to a stream whose recorded owner differs from the caller.
+    Ownership is read from the conventional `id`/`sub`/`userId` field of whatever
+    `getUser` returns, and a stream stays attachable when no owner could be
+    resolved — both because a stream opened before sign-in has to stay attachable
+    for authorize-after-login, and because the two cases are indistinguishable.
+    An app whose user objects carry none of those fields gets the unguessable id
+    and no second layer.
+
+- e38ac75: Fix the health middleware returning an empty 204, and never-expiring Redis API tokens reading as expired
+
+  Two independent bugs, both fail-safe (a broken read, not an exposure):
+
+  - `HealthManager.middleware()` built its JSON response with `ctx.json(...)` but
+    never returned or assigned it, so the router saw an unfinalized context and
+    synthesized an empty `204` — the documented `router.get('/health',
+health.middleware())` returned no report at all. It now finalizes the context
+    by assigning `ctx.res`, preserving the `200`/`503` status.
+
+  - `RedisApiTokenStore` serializes a never-expiring token's `expiresAt` as `''`
+    (a Redis hash has no null). On read, `toOptionalExpiry('')` degraded the empty
+    string to the epoch rather than treating it as absent, so every non-expiring
+    token in Redis was rejected as expired. The empty string now maps to "no
+    expiry"; a genuinely unparseable value still degrades to expired.
+
+- dbbc0a2: Deliver Inertia validation errors on apps without a session
+
+  Sessions only mount when `createApp({ auth })` is configured, and the Inertia
+  validation renderer flashed errors to the session guarded by `if (session)` —
+  so on a fresh scaffold (no auth yet) every validation failure redirected back
+  with the errors silently dropped. The form appeared to do nothing: no
+  navigation, no messages, nothing in `form.errors`. The tutorial's Part 1
+  checkpoint ("Title is required." appears) was impossible to pass before Part 2
+  installed authentication.
+
+  Without a session, the flattened errors now ride across the one redirect in a
+  short-lived HttpOnly cookie (display-only data, no store required, works on
+  every runtime), and the shared-props resolver reads them from there into the
+  same `errors` prop. Reading consumes the flash: a cleanup middleware expires
+  the cookie on the render that consumed it — and only then, so intermediate
+  hops (a trailing-slash redirect, an auth bounce) don't burn the errors before
+  a page shows them, matching session-flash semantics. Fields too large for the
+  ~4KB cookie cap are skipped individually so the rest still arrive. Apps with
+  a session keep the existing flash path unchanged.
+
+- Updated dependencies [e38ac75]
+- Updated dependencies [5e38d18]
+  - @guren/orm@2.2.2
+
 ## 2.3.0
 
 ### Minor Changes
