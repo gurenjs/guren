@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rm, rmdir, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, readdir, rm, rmdir, writeFile } from 'node:fs/promises'
 import type { Dirent } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -67,8 +67,8 @@ export interface AgentHarnessResult {
    * the default is report-only.
    */
   stale: string[]
-  /** The subset of `stale` that `prune: true` deleted. */
-  pruned: string[]
+  /** True when `prune` deleted the files listed in `stale` (always false without it). */
+  pruned: boolean
   /**
    * True when the installed MCP client config points at an endpoint no script
    * in the app enables. The endpoint is opt-in via `GUREN_MCP=1`; apps
@@ -179,63 +179,58 @@ async function detectInstalledComponents(
 
 /**
  * Files inside the active components' managed namespaces that the current
- * plan does not write. Planned-but-user-owned files (none live in a
- * namespace today) are excluded via the full planned path set, so a future
- * planner change cannot turn its own output into a prune candidate.
+ * plan does not write. Planned files (managed or user-owned) are excluded
+ * via the full planned path set, so a future planner change cannot turn its
+ * own output into a prune candidate. The comparison is case-insensitive: on
+ * a case-preserving filesystem the write loop can refresh a planned file
+ * through a differently-cased directory entry, and an exact match would then
+ * classify the file it just wrote as stale.
  */
 async function findStaleManagedFiles(
   cwd: string,
   components: HarnessComponent[],
-  plannedPaths: ReadonlySet<string>,
+  plannedPathsLower: ReadonlySet<string>,
 ): Promise<string[]> {
   const stale: string[] = []
   for (const namespace of managedNamespaces(components)) {
+    const root = join(cwd, namespace.dir)
+    // never claim through a symlinked root: readdir and rm would follow it,
+    // and a claim is only safe over files that live inside the app
+    let rootInfo
+    try {
+      rootInfo = await lstat(root)
+    } catch {
+      continue // namespace directory does not exist — nothing to clean
+    }
+    if (!rootInfo.isDirectory()) {
+      continue
+    }
     let entries: Dirent[]
     try {
-      entries = await readdir(join(cwd, namespace.dir), {
-        recursive: namespace.recursive,
+      entries = await readdir(root, {
+        recursive: namespace.kind === 'tree',
         withFileTypes: true,
       })
     } catch {
-      continue // namespace directory does not exist — nothing to clean
+      continue
     }
     for (const entry of entries) {
       if (!entry.isFile()) {
         continue
       }
       if (
-        namespace.fileName &&
-        !(entry.name.startsWith(namespace.fileName.prefix) && entry.name.endsWith(namespace.fileName.suffix))
+        namespace.kind === 'pattern' &&
+        !(entry.name.startsWith(namespace.prefix) && entry.name.endsWith(namespace.suffix))
       ) {
         continue
       }
       const relPath = toPosixRelative(cwd, join(entry.parentPath, entry.name))
-      if (!plannedPaths.has(relPath)) {
+      if (!plannedPathsLower.has(relPath.toLowerCase())) {
         stale.push(relPath)
       }
     }
   }
   return stale.sort()
-}
-
-/** Depth-first removal of directories pruning emptied (rmdir refuses non-empty ones). */
-async function removeEmptiedDirs(dir: string): Promise<void> {
-  let entries: Dirent[]
-  try {
-    entries = await readdir(dir, { withFileTypes: true })
-  } catch {
-    return
-  }
-  for (const entry of entries) {
-    if (entry.isDirectory()) {
-      await removeEmptiedDirs(join(dir, entry.name))
-    }
-  }
-  try {
-    await rmdir(dir)
-  } catch {
-    // still holds files — keep it
-  }
 }
 
 export async function installAgentHarness(options: AgentHarnessOptions = {}): Promise<AgentHarnessResult> {
@@ -285,17 +280,27 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
   // written, so "not in the plan" carries no leftover signal there.
   const stale =
     mode === 'sync'
-      ? await findStaleManagedFiles(cwd, components, new Set(plan.map((file) => file.path)))
+      ? await findStaleManagedFiles(
+          cwd,
+          components,
+          new Set(plan.map((file) => file.path.toLowerCase())),
+        )
       : []
-  const pruned: string[] = []
-  if (options.prune && stale.length > 0) {
+  const pruned = Boolean(options.prune) && stale.length > 0
+  if (pruned) {
     for (const relPath of stale) {
       await rm(join(cwd, relPath), { force: true })
-      pruned.push(relPath)
     }
-    for (const namespace of managedNamespaces(components)) {
-      if (pruned.some((relPath) => relPath.startsWith(`${namespace.dir}/`))) {
-        await removeEmptiedDirs(join(cwd, namespace.dir))
+    // sweep only what the deletions emptied: from each removed file, walk up
+    // and rmdir until a directory refuses (still holds files) — pre-existing
+    // empty directories elsewhere in a namespace are none of our business
+    for (const startDir of new Set(stale.map((relPath) => dirname(relPath)))) {
+      for (let dir = startDir; dir !== '.' && dir !== ''; dir = dirname(dir)) {
+        try {
+          await rmdir(join(cwd, dir))
+        } catch {
+          break
+        }
       }
     }
   }

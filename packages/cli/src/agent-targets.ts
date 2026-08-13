@@ -54,46 +54,49 @@ export type DetectableComponent = (typeof DETECTABLE_COMPONENTS)[number]
 const MCP_ENDPOINT_MARKER = '_guren/mcp'
 
 /**
- * A directory (or a name pattern within one) whose matching files the planner
- * owns outright: anything there that the current plan does not write is a
- * leftover from an earlier harness version — a renamed or removed canonical
- * rule or skill — and `agent:sync` may report it and, with `--prune`, delete
- * it.
+ * A claim over files the planner owns outright: anything matching it that the
+ * current plan does not write is a leftover from an earlier harness version —
+ * a renamed or removed canonical rule or skill — and `agent:sync` may report
+ * it and, with `--prune`, delete it. Two shapes exist: a `tree` claims a
+ * whole canonical root recursively; a `pattern` claims only framework-named
+ * files at the top of a directory shared with user-authored files.
  */
-export interface ManagedNamespace {
-  /** App-relative POSIX directory the claim applies under. */
-  dir: string
-  /**
-   * File-name pattern marking a file as framework-owned inside a directory
-   * shared with user-authored files. Absent → every file under `dir` is
-   * claimed (the canonical rules/skills roots).
-   */
-  fileName?: { prefix: string; suffix: string }
-  /** Whether the claim extends into subdirectories. */
-  recursive: boolean
+export type ManagedNamespace =
+  | { kind: 'tree'; dir: string }
+  | { kind: 'pattern'; dir: string; prefix: string; suffix: string }
+
+type PatternNamespace = Extract<ManagedNamespace, { kind: 'pattern' }>
+
+/**
+ * The one spelling of a family root's canonical directories. `planComponents`
+ * builds every written path from it and `managedNamespaces` claims the same
+ * value, so a renamed root cannot leave the claim pointing at the old
+ * location (where prune would then eat the freshly written files).
+ */
+function canonicalDirs(root: '.claude' | '.agents'): { rules: string; skills: string } {
+  return { rules: `${root}/rules`, skills: `${root}/skills` }
 }
 
 /**
  * The native-rule namespaces double as the path rule `planComponents` writes
  * with, so the prune pattern and the written names cannot drift apart.
  */
-const CURSOR_RULES_NAMESPACE = {
+const CURSOR_RULES_NAMESPACE: PatternNamespace = {
+  kind: 'pattern',
   dir: '.cursor/rules',
-  fileName: { prefix: 'guren-', suffix: '.mdc' },
-  recursive: false,
-} satisfies ManagedNamespace
+  prefix: 'guren-',
+  suffix: '.mdc',
+}
 
-const COPILOT_RULES_NAMESPACE = {
+const COPILOT_RULES_NAMESPACE: PatternNamespace = {
+  kind: 'pattern',
   dir: '.github/instructions',
-  fileName: { prefix: 'guren-', suffix: '.instructions.md' },
-  recursive: false,
-} satisfies ManagedNamespace
+  prefix: 'guren-',
+  suffix: '.instructions.md',
+}
 
-function nativeRulePath(
-  namespace: typeof CURSOR_RULES_NAMESPACE | typeof COPILOT_RULES_NAMESPACE,
-  stem: string,
-): string {
-  return `${namespace.dir}/${namespace.fileName.prefix}${stem}${namespace.fileName.suffix}`
+function nativeRulePath(namespace: PatternNamespace, stem: string): string {
+  return `${namespace.dir}/${namespace.prefix}${stem}${namespace.suffix}`
 }
 
 /**
@@ -109,11 +112,15 @@ function nativeRulePath(
 export function managedNamespaces(components: Iterable<HarnessComponent>): ManagedNamespace[] {
   const active = new Set<HarnessComponent>(components)
   const namespaces: ManagedNamespace[] = []
+  const claimFamily = (root: '.claude' | '.agents'): void => {
+    const dirs = canonicalDirs(root)
+    namespaces.push({ kind: 'tree', dir: dirs.rules }, { kind: 'tree', dir: dirs.skills })
+  }
   if (active.has('claude')) {
-    namespaces.push({ dir: '.claude/rules', recursive: true }, { dir: '.claude/skills', recursive: true })
+    claimFamily('.claude')
   }
   if (active.has('agents')) {
-    namespaces.push({ dir: '.agents/rules', recursive: true }, { dir: '.agents/skills', recursive: true })
+    claimFamily('.agents')
   }
   if (active.has('cursor')) {
     namespaces.push(CURSOR_RULES_NAMESPACE)
@@ -313,11 +320,12 @@ export function planComponents(
 
   /** The canonical rules + skills trees, rendered for one root directory. */
   const addCanonical = (root: '.claude' | '.agents'): void => {
+    const dirs = canonicalDirs(root)
     for (const [rel, content] of under('core/rules/')) {
-      add({ path: `${root}/rules/${rel}`, content: render(content), managed: true })
+      add({ path: `${dirs.rules}/${rel}`, content: render(content), managed: true })
     }
     for (const [rel, content] of under('core/skills/')) {
-      add({ path: `${root}/skills/${rel}`, content: render(content, `${root}/rules`), managed: true })
+      add({ path: `${dirs.skills}/${rel}`, content: render(content, dirs.rules), managed: true })
     }
   }
 
@@ -327,7 +335,7 @@ export function planComponents(
     // body; only the workflow section differs (hooks vs. manual loop).
     add({
       path: 'CLAUDE.md',
-      content: entryDoc('targets/claude/workflow.md', '.claude/rules'),
+      content: entryDoc('targets/claude/workflow.md', canonicalDirs('.claude').rules),
       managed: false,
     })
     addMcpConfig('.mcp.json', 'targets/claude/mcp.json')
@@ -348,7 +356,7 @@ export function planComponents(
   if (components.includes('agents')) {
     add({
       path: 'AGENTS.md',
-      content: entryDoc('targets/agents/workflow.md', '.agents/rules'),
+      content: entryDoc('targets/agents/workflow.md', canonicalDirs('.agents').rules),
       managed: false,
     })
     addCanonical('.agents')

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
-import { mkdtemp, mkdir, rm, readFile, rename, writeFile, access } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, readFile, rename, symlink, writeFile, access } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { installAgentHarness } from '../src/agent-harness'
@@ -250,15 +250,29 @@ describe('installAgentHarness', () => {
     expect(result.written).not.toContain('.codex/config.toml')
   })
 
+  /**
+   * Simulate an install from an older release whose canonical rule carried a
+   * different name: rename the rule's copies in whichever managed roots the
+   * install produced.
+   */
+  const renameInstalledRule = async (from: string, to: string): Promise<void> => {
+    const spellings = [
+      [`.claude/rules/${from}.md`, `.claude/rules/${to}.md`],
+      [`.agents/rules/${from}.md`, `.agents/rules/${to}.md`],
+      [`.cursor/rules/guren-${from}.mdc`, `.cursor/rules/guren-${to}.mdc`],
+      [
+        `.github/instructions/guren-${from}.instructions.md`,
+        `.github/instructions/guren-${to}.instructions.md`,
+      ],
+    ]
+    for (const [oldPath, newPath] of spellings) {
+      await rename(join(tempDir, oldPath), join(tempDir, newPath)).catch(() => {})
+    }
+  }
+
   it('sync reports what a renamed canonical rule left behind without deleting it', async () => {
     await installAgentHarness({ cwd: tempDir, mode: 'init', targets: ['claude', 'cursor'] })
-    // simulate an install from an older release whose canonical rule carried the old name
-    await rename(join(tempDir, '.claude/rules/orm-models.md'), join(tempDir, '.claude/rules/models.md'))
-    await rename(join(tempDir, '.agents/rules/orm-models.md'), join(tempDir, '.agents/rules/models.md'))
-    await rename(
-      join(tempDir, '.cursor/rules/guren-orm-models.mdc'),
-      join(tempDir, '.cursor/rules/guren-models.mdc'),
-    )
+    await renameInstalledRule('orm-models', 'models')
 
     const result = await installAgentHarness({ cwd: tempDir, mode: 'sync' })
 
@@ -267,7 +281,7 @@ describe('installAgentHarness', () => {
       '.claude/rules/models.md',
       '.cursor/rules/guren-models.mdc',
     ])
-    expect(result.pruned).toEqual([])
+    expect(result.pruned).toBe(false)
     // the current name is restored, the old copies stay until an explicit --prune
     expect(result.written).toContain('.claude/rules/orm-models.md')
     await access(join(tempDir, '.claude/rules/models.md'))
@@ -276,21 +290,12 @@ describe('installAgentHarness', () => {
 
   it('sync --prune deletes the renamed rule leftovers in every root', async () => {
     await installAgentHarness({ cwd: tempDir, mode: 'init', targets: ['claude', 'cursor', 'copilot'] })
-    await rename(join(tempDir, '.claude/rules/orm-models.md'), join(tempDir, '.claude/rules/models.md'))
-    await rename(join(tempDir, '.agents/rules/orm-models.md'), join(tempDir, '.agents/rules/models.md'))
-    await rename(
-      join(tempDir, '.cursor/rules/guren-orm-models.mdc'),
-      join(tempDir, '.cursor/rules/guren-models.mdc'),
-    )
-    await rename(
-      join(tempDir, '.github/instructions/guren-orm-models.instructions.md'),
-      join(tempDir, '.github/instructions/guren-models.instructions.md'),
-    )
+    await renameInstalledRule('orm-models', 'models')
 
     const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true })
 
-    expect(result.pruned).toEqual(result.stale)
-    expect(result.pruned).toEqual([
+    expect(result.pruned).toBe(true)
+    expect(result.stale).toEqual([
       '.agents/rules/models.md',
       '.claude/rules/models.md',
       '.cursor/rules/guren-models.mdc',
@@ -311,7 +316,8 @@ describe('installAgentHarness', () => {
 
     const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true })
 
-    expect(result.pruned).toEqual(['.claude/skills/retired-skill/SKILL.md'])
+    expect(result.stale).toEqual(['.claude/skills/retired-skill/SKILL.md'])
+    expect(result.pruned).toBe(true)
     await expect(access(join(tempDir, '.claude/skills/retired-skill'))).rejects.toThrow()
     await access(join(tempDir, '.claude/skills/dev-workflow/SKILL.md'))
   })
@@ -337,8 +343,72 @@ describe('installAgentHarness', () => {
     const result = await installAgentHarness({ cwd: tempDir, mode: 'sync' })
 
     expect(result.stale).toEqual(['.claude/rules/team-conventions.md'])
-    expect(result.pruned).toEqual([])
+    expect(result.pruned).toBe(false)
     expect(await readFile(join(tempDir, '.claude/rules/team-conventions.md'), 'utf8')).toBe('user rule\n')
+  })
+
+  it('sync --prune deletes a colliding user file — why deletion is opt-in', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init' })
+    await writeFile(join(tempDir, '.claude/rules/team-conventions.md'), 'user rule\n', 'utf8')
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true })
+
+    expect(result.stale).toEqual(['.claude/rules/team-conventions.md'])
+    await expect(access(join(tempDir, '.claude/rules/team-conventions.md'))).rejects.toThrow()
+  })
+
+  it('sync --prune never touches .claude/agents or .claude/hooks', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init' })
+    await writeFile(join(tempDir, '.claude/agents/my-agent.md'), 'user agent\n', 'utf8')
+    await writeFile(join(tempDir, '.claude/hooks/retired-hook.ts'), 'old hook\n', 'utf8')
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true })
+
+    expect(result.stale).toEqual([])
+    expect(await readFile(join(tempDir, '.claude/agents/my-agent.md'), 'utf8')).toBe('user agent\n')
+    expect(await readFile(join(tempDir, '.claude/hooks/retired-hook.ts'), 'utf8')).toBe('old hook\n')
+  })
+
+  it('sync --prune leaves unrelated empty directories in a shared namespace alone', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init', targets: ['cursor'] })
+    await mkdir(join(tempDir, '.cursor/rules/drafts'), { recursive: true })
+    await writeFile(join(tempDir, '.cursor/rules/guren-retired.mdc'), 'stale\n', 'utf8')
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true })
+
+    expect(result.stale).toEqual(['.cursor/rules/guren-retired.mdc'])
+    // the sweep follows the deleted files upward; it never removes empty
+    // directories the pruning did not create
+    await access(join(tempDir, '.cursor/rules/drafts'))
+  })
+
+  it('sync never claims through a symlinked managed root', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init' })
+    // an external rules directory linked into the app: scanning (and prune)
+    // must not reach through the link
+    await rename(join(tempDir, '.claude/rules'), join(tempDir, 'shared-rules'))
+    await symlink(join(tempDir, 'shared-rules'), join(tempDir, '.claude/rules'))
+    await writeFile(join(tempDir, 'shared-rules/legacy.md'), 'external\n', 'utf8')
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true })
+
+    expect(result.stale).toEqual([])
+    expect(await readFile(join(tempDir, 'shared-rules/legacy.md'), 'utf8')).toBe('external\n')
+  })
+
+  it('sync --prune spares a planned file reached through a differently-cased entry', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init' })
+    // case-preserving filesystems keep this entry name while the write loop
+    // refreshes the planned lowercase path through it
+    await rename(
+      join(tempDir, '.claude/rules/orm-models.md'),
+      join(tempDir, '.claude/rules/ORM-MODELS.md'),
+    )
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true })
+
+    expect(result.stale).not.toContain('.claude/rules/ORM-MODELS.md')
+    expect(await readFile(join(tempDir, '.claude/rules/orm-models.md'), 'utf8')).toContain('defineModel')
   })
 
   it('sync --prune scans only the namespaces of the components being synced', async () => {
@@ -351,6 +421,7 @@ describe('installAgentHarness', () => {
     const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true })
 
     expect(result.stale).toEqual([])
+    expect(result.pruned).toBe(false)
     await access(join(tempDir, '.agents/rules/leftover.md'))
   })
 
@@ -360,7 +431,7 @@ describe('installAgentHarness', () => {
     const result = await installAgentHarness({ cwd: tempDir, mode: 'sync' })
 
     expect(result.stale).toEqual([])
-    expect(result.pruned).toEqual([])
+    expect(result.pruned).toBe(false)
   })
 
   it('init never reports or deletes stale candidates', async () => {
@@ -370,7 +441,7 @@ describe('installAgentHarness', () => {
     const result = await installAgentHarness({ cwd: tempDir, mode: 'init', prune: true })
 
     expect(result.stale).toEqual([])
-    expect(result.pruned).toEqual([])
+    expect(result.pruned).toBe(false)
     expect(await readFile(join(tempDir, '.claude/rules/extra.md'), 'utf8')).toBe('user rule\n')
   })
 

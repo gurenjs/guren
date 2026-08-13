@@ -2002,13 +2002,15 @@ function reportAgentHarnessResult(result: AgentHarnessResult): void {
   if (result.skipped.length > 0) {
     consola.info(`Skipped ${result.skipped.length} existing file(s): ${result.skipped.join(', ')}`)
   }
-  if (result.pruned.length > 0) {
-    consola.success(`Removed ${result.pruned.length} stale managed file(s): ${result.pruned.join(', ')}`)
-  } else if (result.stale.length > 0) {
-    consola.info(
-      `Found ${result.stale.length} file(s) in framework-managed directories that are not part of the current harness: ${result.stale.join(', ')}\n` +
-        'If they are leftovers from an earlier harness version, remove them with `bunx guren agent:sync --prune`. Files you authored yourself are safe to keep — sync never deletes without --prune.',
-    )
+  if (result.stale.length > 0) {
+    if (result.pruned) {
+      consola.success(`Removed ${result.stale.length} stale managed file(s): ${result.stale.join(', ')}`)
+    } else {
+      consola.info(
+        `Found ${result.stale.length} file(s) in framework-managed directories that are not part of the current harness: ${result.stale.join(', ')}\n` +
+          'If they are leftovers from an earlier harness version, remove them with `bunx guren agent:sync --prune`. Files you authored yourself are safe to keep — sync never deletes without --prune.',
+      )
+    }
   }
   for (const hint of result.mcpMergeHints) {
     consola.info(
@@ -2081,7 +2083,7 @@ const agentSyncCommand = defineCommand({
     prune: {
       type: 'boolean',
       description:
-        'Delete files in framework-managed directories (rules/skills roots, guren-* native rules) that are no longer part of the harness. Without this flag they are only reported.',
+        'Delete files in framework-managed directories that are no longer part of the harness. Without this flag they are only reported.',
     },
     app: {
       type: 'string',
