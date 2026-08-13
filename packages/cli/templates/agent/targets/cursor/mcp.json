@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "guren": {
+      "url": "http://localhost:3333/_guren/mcp"
+    }
+  }
+}

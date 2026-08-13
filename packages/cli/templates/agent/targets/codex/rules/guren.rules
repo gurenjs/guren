@@ -1,0 +1,33 @@
+# Command approval policy for Codex (Starlark prefix rules). Mirrors the
+# .claude/settings.json permission allowlist: the harness's own read/verify
+# commands run without approval prompts. Loaded only in trusted projects.
+
+prefix_rule(
+    pattern = ["bunx", "guren"],
+    decision = "allow",
+    justification = "Guren CLI: introspection, integrity checks, and scaffolding",
+    match = [
+        "bunx guren context",
+        "bunx guren check --json",
+        "bunx guren make:controller Post",
+    ],
+)
+
+prefix_rule(
+    pattern = ["bun", "run", "codegen"],
+    decision = "allow",
+    justification = "Regenerate the .guren/ typed manifests",
+)
+
+prefix_rule(
+    pattern = ["bun", "run", "typecheck"],
+    decision = "allow",
+    justification = "Type check the application",
+)
+
+prefix_rule(
+    pattern = ["bun", "test"],
+    decision = "allow",
+    justification = "Run the application's test suite",
+    match = ["bun test", "bun test tests/controllers/PostController.test.ts"],
+)
