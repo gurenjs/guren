@@ -45,6 +45,10 @@ export default defineConfig({
         replacement: resolveFromRoot('../../packages/orm/src/drizzle.ts'),
       },
       {
+        find: /^@guren\/orm\/drizzle\/(.+)$/,
+        replacement: resolveFromRoot('../../packages/orm/src/drizzle/$1.ts'),
+      },
+      {
         find: /^@guren\/orm\//,
         replacement: resolveFromRoot('../../packages/orm/src/'),
       },

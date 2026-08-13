@@ -137,10 +137,7 @@ function isSameOrigin(url: string): boolean {
  * Routes that bind a `body` schema type the `body` option with that schema's
  * request shape; routes without one accept `unknown`. Routes that bind an
  * `output` schema type the response: `json()` on the returned `Response`
- * resolves to that schema's parsed shape. A `resource` response hint types
- * `json()` the same way from the `Data` types extracted out of
- * app/Http/Resources — declared, not validated: the server never checks the
- * payload against it at runtime. Without either, `json()` resolves to
+ * resolves to that schema's parsed shape. Without one it resolves to
  * `unknown` — validate before trusting it. Either way the typed shape
  * describes the success body only: error statuses carry their own (a 422
  * from validation is `{ errors: ... }`), so check `ok` before reading it.
@@ -154,6 +151,25 @@ function isSameOrigin(url: string): boolean {
  * const post = await client.request('posts.show', { params: { id: 1 } })
  * ```
  */
+// Token-based substitution shared with the route manifest module: whole
+// `:param` tokens are replaced by key lookup, so a key the path lacks is a
+// true no-op — the property the union-name rule above relies on — and a
+// param name that prefixes another (`:id` vs `:identifier`) cannot corrupt
+// it the way a per-key `path.replace(':key', ...)` loop would.
+function substituteParams(path: string, params?: Record<string, string | number>): string {
+  if (!params) {
+    return path
+  }
+
+  return path.replace(/:([A-Za-z0-9_-]+)/gu, (match, key) => {
+    if (!Object.prototype.hasOwnProperty.call(params, key)) {
+      return match
+    }
+
+    return encodeURIComponent(String(params[key]))
+  })
+}
+
 // The mapped-object constraint (rather than `Record<...>`) is what lets the
 // generated `ApiRoutes` interface satisfy it — interfaces have no implicit
 // index signature, so `Record<string, ...>` would reject them.
@@ -168,13 +184,8 @@ export function createApiClient<TRoutes extends { [K in keyof TRoutes]: { method
       const route = (routes as Record<string, { method: string; path: string }>)[name]
       if (!route) throw new Error(`Route [${name}] not defined.`)
 
-      const opts = (args as unknown[])[0] as { params?: Record<string, unknown>; body?: unknown; query?: Record<string, unknown> } | undefined
-      let path = route.path
-      if (opts?.params) {
-        for (const [key, value] of Object.entries(opts.params)) {
-          path = path.replace(`:${key}`, encodeURIComponent(String(value)))
-        }
-      }
+      const opts = (args as unknown[])[0] as { params?: Record<string, string | number>; body?: unknown; query?: Record<string, unknown> } | undefined
+      const path = substituteParams(route.path, opts?.params)
 
       let url = `${config.baseUrl}${path}`
       if (opts?.query) {

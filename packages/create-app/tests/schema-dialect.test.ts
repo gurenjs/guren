@@ -11,13 +11,14 @@ import { createTempWorkspace } from './helpers'
  * still emits DDL and tsc still passes, so nothing downstream reports that a
  * MySQL table was built out of PostgreSQL columns.
  *
- * `@guren/orm/drizzle` re-exports the pg-core builders under those plain
- * names, which is why only the PostgreSQL scaffold may import from it.
+ * The `@guren/orm/drizzle/<dialect>` barrels re-export exactly one dialect's
+ * builders each, so importing from the matching barrel is what keeps every
+ * name dialect-pure.
  */
 const EXPECTED_SCHEMA_MODULE = {
-  postgres: '@guren/orm/drizzle',
-  mysql: 'drizzle-orm/mysql-core',
-  sqlite: 'drizzle-orm/sqlite-core',
+  postgres: '@guren/orm/drizzle/pg',
+  mysql: '@guren/orm/drizzle/mysql',
+  sqlite: '@guren/orm/drizzle/sqlite',
 } as const satisfies Record<DatabaseDriver, string>
 
 function importedModules(source: string): string[] {

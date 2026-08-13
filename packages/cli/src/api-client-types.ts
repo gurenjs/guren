@@ -8,7 +8,7 @@
 import { resolve } from 'node:path'
 import type { ResourceResponseShape } from '@guren/core'
 import { escapeSingleQuoted as escapeSingleQuotes, quoteObjectKey, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
-import { PATH_PARAM_TYPE_HELPERS } from './routes-types-fragments'
+import { PATH_PARAM_RUNTIME_HELPERS, PATH_PARAM_TYPE_HELPERS } from './routes-types-fragments'
 import { schemaToTypeString } from './schema-type-extractor'
 import type { ResourceDefinition } from './data-types'
 
@@ -302,6 +302,12 @@ function isSameOrigin(url: string): boolean {
  * const post = await client.request('posts.show', { params: { id: 1 } })
  * \`\`\`
  */
+// Token-based substitution shared with the route manifest module: whole
+// \`:param\` tokens are replaced by key lookup, so a key the path lacks is a
+// true no-op — the property the union-name rule above relies on — and a
+// param name that prefixes another (\`:id\` vs \`:identifier\`) cannot corrupt
+// it the way a per-key \`path.replace(':key', ...)\` loop would.
+${PATH_PARAM_RUNTIME_HELPERS}
 // The mapped-object constraint (rather than \`Record<...>\`) is what lets the
 // generated \`ApiRoutes\` interface satisfy it — interfaces have no implicit
 // index signature, so \`Record<string, ...>\` would reject them.
@@ -316,13 +322,8 @@ export function createApiClient<TRoutes extends { [K in keyof TRoutes]: { method
       const route = (routes as Record<string, { method: string; path: string }>)[name]
       if (!route) throw new Error(\`Route [\${name}] not defined.\`)
 
-      const opts = (args as unknown[])[0] as { params?: Record<string, unknown>; body?: unknown; query?: Record<string, unknown> } | undefined
-      let path = route.path
-      if (opts?.params) {
-        for (const [key, value] of Object.entries(opts.params)) {
-          path = path.replace(\`:$\{key}\`, encodeURIComponent(String(value)))
-        }
-      }
+      const opts = (args as unknown[])[0] as { params?: Record<string, string | number>; body?: unknown; query?: Record<string, unknown> } | undefined
+      const path = substituteParams(route.path, opts?.params)
 
       let url = \`$\{config.baseUrl}$\{path}\`
       if (opts?.query) {

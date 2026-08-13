@@ -9,6 +9,9 @@ import { checkTypes, COLD_TSC_TIMEOUT } from './helpers'
 import { buildApiClientContent, type RouteDefinitionLike } from '../src/api-client-types'
 
 const definitions: RouteDefinitionLike[] = [
+  // ':identifier' has ':id' as a prefix — the substitution suite below feeds
+  // both keys at once, the exact shape a union route name produces.
+  { method: 'GET', path: '/library/:identifier', name: 'library.show' },
   { method: 'GET', path: '/posts', name: 'posts.index' },
   { method: 'GET', path: '/posts/:id', name: 'posts.show' },
   { method: 'POST', path: '/posts', name: 'posts.store' },
@@ -240,7 +243,12 @@ describe('generated createApiClient', () => {
     baseUrl: string
     headers?: Record<string, string>
     credentials?: RequestCredentials
-  }) => { request: (name: string, options?: { body?: unknown }) => Promise<Response> }
+  }) => {
+    request: (
+      name: string,
+      options?: { params?: Record<string, string | number>; body?: unknown },
+    ) => Promise<Response>
+  }
 
   const PAGE_ORIGIN = 'http://localhost:3000'
   const originalFetch = globalThis.fetch
@@ -306,6 +314,20 @@ describe('generated createApiClient', () => {
     await createApiClient({ baseUrl: PAGE_ORIGIN }).request('posts.store', { body: {} })
 
     expect(headersOf(calls[0]!.init)['X-XSRF-TOKEN']).toBe('right')
+  })
+
+  // A union route name requires every member's params, so request() gets
+  // handed keys the selected path does not bind. Token-based substitution
+  // keeps those a no-op — a per-key replace loop would let the ':id' pass
+  // corrupt '/library/:identifier' into '/library/1entifier' before
+  // ':identifier' could ever match.
+  it('substitutes whole param tokens, so extra or prefix-colliding keys cannot corrupt the path', async () => {
+    const { calls } = stubFetch()
+    browsingAt(PAGE_ORIGIN, 'XSRF-TOKEN=abc')
+
+    await createApiClient({ baseUrl: PAGE_ORIGIN }).request('library.show', { params: { id: 1, identifier: 2 } })
+
+    expect(calls[0]!.url).toBe(`${PAGE_ORIGIN}/library/2`)
   })
 
   it('omits the header on safe methods', async () => {

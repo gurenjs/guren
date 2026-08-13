@@ -51,13 +51,22 @@ type PathParamsOf<TPath extends string> =
 
 // ─── Link component ──────────────────────────────────────────
 
+// Verbatim mirror of PATH_PARAM_RUNTIME_HELPERS, from the same fragment
+// module and under the same pin test as the type helpers above: token-based
+// substitution, so a param name that prefixes another cannot corrupt it and
+// keys the path lacks are no-ops.
 function substituteParams(path: string, params?: Record<string, string | number>): string {
-  if (!params) return path
-  let result = path
-  for (const [key, value] of Object.entries(params)) {
-    result = result.replace(`:${key}`, encodeURIComponent(String(value)))
+  if (!params) {
+    return path
   }
-  return result
+
+  return path.replace(/:([A-Za-z0-9_-]+)/gu, (match, key) => {
+    if (!Object.prototype.hasOwnProperty.call(params, key)) {
+      return match
+    }
+
+    return encodeURIComponent(String(params[key]))
+  })
 }
 
 type OmitHref<T> = Omit<T, 'href'>

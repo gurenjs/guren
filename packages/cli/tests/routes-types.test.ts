@@ -178,4 +178,57 @@ describe('buildRouteModuleContent', () => {
     expect(content).toContain("home: (query?: RouteQuery) => route('home', query)")
     expect(content).toContain("show: (params: RouteParams<'posts.show'>, query?: RouteQuery) => route('posts.show', params, query)")
   })
+
+  it('emits no @ts-nocheck when no routes are named', () => {
+    const content = buildRouteModuleContent([{ method: 'GET', path: '/' }], { source: 'routes/web.ts' })
+
+    expect(content).not.toContain('@ts-nocheck')
+  })
+
+  // The empty manifest used to ship under `@ts-nocheck`, which made the
+  // scaffolded app's typecheck skip this file entirely. Compiling both shapes
+  // is what keeps that suppression from coming back as a hidden type error.
+  it('type-checks under strict tsc with and without named routes', async () => {
+    const ts = (await import('typescript')).default
+    const dir = await mkdtemp(join(tmpdir(), 'guren-routes-types-'))
+    try {
+      const cases: Record<string, string> = {
+        'empty-manifest.ts': buildRouteModuleContent(
+          [{ method: 'GET', path: '/' }],
+          { source: 'routes/web.ts' },
+        ),
+        'named-manifest.ts': buildRouteModuleContent(
+          [
+            { method: 'GET', path: '/', name: 'home' },
+            { method: 'GET', path: '/posts/:id', name: 'posts.show' },
+          ],
+          { source: 'routes/web.ts' },
+        ),
+      }
+
+      const files: string[] = []
+      for (const [name, content] of Object.entries(cases)) {
+        const path = join(dir, name)
+        await writeFile(path, content, 'utf8')
+        files.push(path)
+      }
+
+      const program = ts.createProgram(files, {
+        strict: true,
+        noUnusedLocals: true,
+        noUnusedParameters: true,
+        target: ts.ScriptTarget.ES2022,
+        module: ts.ModuleKind.ESNext,
+        moduleResolution: ts.ModuleResolutionKind.Bundler,
+        noEmit: true,
+      })
+      const diagnostics = ts.getPreEmitDiagnostics(program)
+
+      expect(
+        diagnostics.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')),
+      ).toEqual([])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
 })

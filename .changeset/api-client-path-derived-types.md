@@ -1,5 +1,6 @@
 ---
 "@guren/cli": minor
+"@guren/inertia-client": patch
 "create-guren-app": patch
 ---
 
@@ -9,4 +10,6 @@ Route params are no longer stored on the generated `ApiRoutes` entries as a `par
 
 `request()` now returns `Promise<TypedResponse<...>>`: on routes that bind an `output` schema, `json()` resolves to that schema's parsed shape instead of `any`; without one it resolves to `unknown`, so asserting the shape at the call site stays explicit.
 
-The path predicate is deliberately not distributed over a union route name. Previously `'posts.index' | 'posts.show'` accepted `params: {}` and could send a path with `:id` unresolved; now a union name requires every member's params (substituting a param a member's path lacks is a runtime no-op), which forces the safe call in both directions.
+The path predicate is deliberately not distributed over a union route name. Previously `'posts.index' | 'posts.show'` accepted `params: {}` and could send a path with `:id` unresolved; now a union name requires every member's params, which forces the safe call in both directions.
+
+To make those extra params true runtime no-ops, the generated client's param substitution switched from a per-key `path.replace(':key', ...)` loop — which let a param whose name prefixes another (`:id` vs `:identifier`) corrupt the path — to the same token-based `substituteParams` the route manifest module already uses, now emitted from one shared fragment. `@guren/inertia-client`'s typed `<Link>`/`<Form>` components adopt the same substitution.

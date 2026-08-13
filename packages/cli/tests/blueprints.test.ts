@@ -137,12 +137,12 @@ describe('blueprints', () => {
     expect(schema).toContain("meta: json('meta').notNull()")
     expect(schema).toContain("published: boolean('published').notNull()")
     // Every builder — the scaffolded ones and the ones this run added — must
-    // come from mysql-core. `@guren/orm/drizzle` re-exports the pg builders
-    // under the same names, and mixing them is silent at build time.
+    // come from the MySQL dialect barrel. Builder names are shared across
+    // dialects, and mixing them is silent at build time.
     const importedModules = [...schema.matchAll(/import\s*\{[^}]*\}\s*from\s*['"]([^'"]+)['"]/g)].map(
       (match) => match[1],
     )
-    expect([...new Set(importedModules)]).toEqual(['drizzle-orm/mysql-core'])
+    expect([...new Set(importedModules)]).toEqual(['@guren/orm/drizzle/mysql'])
   })
 
   // The schema export, the model's import of it, and `guren check`'s table
@@ -505,7 +505,7 @@ export default function registerWebRoutes(appRouter: Router): void {
   const COLUMN_CASES = [
     {
       dialect: 'sqlite',
-      schema: `import { sqliteTable, integer, text } from '@guren/orm/drizzle'
+      schema: `import { sqliteTable, integer, text } from '@guren/orm/drizzle/sqlite'
 
 export const users = sqliteTable('users', {
   id: integer('id').primaryKey({ autoIncrement: true }),
@@ -523,7 +523,7 @@ export const users = sqliteTable('users', {
     },
     {
       dialect: 'mysql',
-      schema: `import { mysqlTable, int, varchar } from '@guren/orm/drizzle'
+      schema: `import { mysqlTable, int, varchar } from '@guren/orm/drizzle/mysql'
 
 export const users = mysqlTable('users', {
   id: int('id').primaryKey().autoincrement(),
@@ -541,7 +541,7 @@ export const users = mysqlTable('users', {
     },
     {
       dialect: 'postgres',
-      schema: `import { pgTable, serial, text } from '@guren/orm/drizzle'
+      schema: `import { pgTable, serial, text } from '@guren/orm/drizzle/pg'
 
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),
