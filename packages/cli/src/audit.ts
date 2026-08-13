@@ -1,6 +1,7 @@
 import { resolve, relative } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { consola } from 'consola'
+import type { File } from '@babel/types'
 import {
   collectFiles,
   discoverControllerFiles,
@@ -25,6 +26,7 @@ import {
   resolveModelStringArrayConfig,
 } from './model-parser'
 import { parseSourceFile } from './parse-cache'
+import { walk } from './ast-walk'
 import { parseSchemaTableColumns } from './schema-parser'
 import { loadAuditConfig, type AuditIgnoreEntry } from './audit-config'
 
@@ -454,6 +456,46 @@ interface ControllerMethodInfo {
 }
 
 /**
+ * Method bodies below are judged with regexes (VALIDATE_BODY_PATTERN,
+ * AUTH_CALL_PATTERN, BODY_ACCESS_PATTERN, FORCE_WRITE_PATTERN), which cannot
+ * tell live code from a commented-out line or a string that merely mentions an
+ * API. A commented `// await this.validateBody(...)` must not count as
+ * validation, and a `forceCreate` inside an error message must not warn.
+ * Blank comments, string/regex literal contents, and template quasis with
+ * spaces — offsets are preserved, so method-body slices taken from the result
+ * line up with the original AST positions. Template *expressions* are kept:
+ * they are live code.
+ */
+function blankCommentsAndStrings(source: string, ast: File): string {
+  const ranges: [number, number][] = []
+  for (const comment of ast.comments ?? []) {
+    if (typeof comment.start === 'number' && typeof comment.end === 'number') {
+      ranges.push([comment.start, comment.end])
+    }
+  }
+  walk(ast.program, (node) => {
+    const { type, start, end } = node
+    if (typeof start !== 'number' || typeof end !== 'number') return
+    if (type === 'StringLiteral' || type === 'DirectiveLiteral') {
+      ranges.push([start + 1, end - 1])
+    } else if (type === 'TemplateElement' || type === 'RegExpLiteral') {
+      ranges.push([start, end])
+    }
+  })
+  if (ranges.length === 0) return source
+
+  // split('') keeps UTF-16 code-unit indexing — Babel offsets are code units,
+  // and a code-point spread would shift everything after an astral character.
+  const chars = source.split('')
+  for (const [start, end] of ranges) {
+    for (let i = start; i < end && i < chars.length; i++) {
+      if (chars[i] !== '\n') chars[i] = ' '
+    }
+  }
+  return chars.join('')
+}
+
+/**
  * Map of `ClassName.method` → method body source, for every controller in
  * app/Http/Controllers (module-aware — see discoverControllerFiles).
  *
@@ -482,6 +524,7 @@ async function parseControllerMethods(cwd: string, findings: AuditFinding[]): Pr
 
     const ast = parseSourceFile(source, filePath)
     if (!ast) continue
+    const scrubbed = blankCommentsAndStrings(source, ast)
 
     for (const node of ast.program.body) {
       const classDecl = extractClassDeclaration(node)
@@ -509,7 +552,7 @@ async function parseControllerMethods(cwd: string, findings: AuditFinding[]): Pr
           const start = member.body.start ?? 0
           const end = member.body.end ?? 0
           methods.set(`${className}.${member.key.name}`, {
-            body: source.slice(start, end),
+            body: scrubbed.slice(start, end),
             filePath: relPath,
           })
         }

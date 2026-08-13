@@ -1632,6 +1632,102 @@ export const billingModule = {
   })
 })
 
+describe('runAudit comment/string blanking', () => {
+  const POST_ROUTE = `class PostController {
+  async store() { return null }
+}
+export default function registerRoutes(router: any) {
+  router.post('/posts', [PostController, 'store'])
+}`
+
+  it.each([
+    ['line comment', `// const data = await this.validateBody(schema)`],
+    ['block comment', `/* const data = await this.validateBody(schema) */`],
+    ['string literal', `const hint = 'call this.validateBody(schema) before reading the body'`],
+    ['template literal', 'const hint = `call this.validateBody(schema) first`'],
+  ])('does not count validateBody inside a %s as validation', async (_kind, decoy) => {
+    const workspace = await createTempWorkspace('guren-cli-audit-blanking-')
+
+    try {
+      await writeController(
+        workspace.dir,
+        'PostController',
+        `export default class PostController {
+  async store() {
+    ${decoy}
+    const data = await this.request.json()
+    return null
+  }
+}`,
+      )
+      await writeRoutes(workspace.dir, POST_ROUTE)
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      expect(report.routesAnalyzed).toBe(true)
+      const validation = report.findings.find(f => f.key === 'validation:POST /posts')
+      expect(validation).toBeDefined()
+      expect(validation!.status).toBe('fail')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('warns when a validated method really calls forceCreate', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-force-live-')
+
+    try {
+      await writeController(
+        workspace.dir,
+        'PostController',
+        `export default class PostController {
+  async store() {
+    const data = await this.validateBody(schema)
+    await Post.forceCreate(data)
+    return null
+  }
+}`,
+      )
+      await writeRoutes(workspace.dir, POST_ROUTE)
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const forceWrite = report.findings.find(f => f.key === 'force-write-request-data:PostController.store')
+      expect(forceWrite).toBeDefined()
+      expect(forceWrite!.status).toBe('warn')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('does not warn about a forceCreate that only appears in a comment', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-force-comment-')
+
+    try {
+      await writeController(
+        workspace.dir,
+        'PostController',
+        `export default class PostController {
+  async store() {
+    const data = await this.validateBody(schema)
+    // await Post.forceCreate(data)
+    await Post.create(data)
+    return null
+  }
+}`,
+      )
+      await writeRoutes(workspace.dir, POST_ROUTE)
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const forceWrite = report.findings.find(f => f.key === 'force-write-request-data:PostController.store')
+      expect(forceWrite).toBeUndefined()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+
 const WEBHOOK_ROUTE = `export default function registerRoutes(router: any) {
   router.post('/webhooks/stripe', (c: any) => null)
 }`
