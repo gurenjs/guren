@@ -7,6 +7,7 @@ import { buildApiClientContent, type RouteDefinitionLike } from '../src/api-clie
 
 const definitions: RouteDefinitionLike[] = [
   { method: 'GET', path: '/posts', name: 'posts.index' },
+  { method: 'GET', path: '/posts/:id', name: 'posts.show' },
   { method: 'POST', path: '/posts', name: 'posts.store' },
   { method: 'QUERY', path: '/posts/search', name: 'posts.search' },
 ]
@@ -23,6 +24,53 @@ describe('buildApiClientContent', () => {
     // template it lands in is excluded from every tsconfig.
     expect(content).toContain('(globalThis as { document?: { cookie?: string } }).document?.cookie')
   })
+})
+
+/**
+ * The generated module lands in app code no monorepo tsconfig covers, so its
+ * types have no other compile gate — which is how `createApiClient<ApiRoutes>`
+ * shipped rejecting its own documented usage twice (an interface never
+ * satisfies a `Record<...>` constraint, and param-less routes' `Record<string,
+ * never>` made `keyof ... extends never` demand params). Compile the emitted
+ * source against that usage; the `@ts-expect-error` lines keep the check able
+ * to fail in both directions.
+ */
+describe('generated api client types', () => {
+  it('compiles the documented usage against the emitted module', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'guren-cli-api-client-tsc-'))
+    try {
+      await writeFile(join(dir, 'api-client.gen.ts'), buildApiClientContent(definitions), 'utf8')
+      await writeFile(
+        join(dir, 'usage.ts'),
+        `import { createApiClient, type ApiRoutes } from './api-client.gen'
+
+const client = createApiClient<ApiRoutes>({ baseUrl: 'http://localhost:3000' })
+
+void client.request('posts.index')
+void client.request('posts.search', { body: { keywords: ['guren'] } })
+void client.request('posts.show', { params: { id: 1 } })
+
+// @ts-expect-error a route with path params requires them
+void client.request('posts.show')
+
+// @ts-expect-error unknown route names must not compile
+void client.request('posts.missing')
+`,
+        'utf8',
+      )
+
+      const tsc = Bun.resolveSync('typescript/bin/tsc', import.meta.dir)
+      const result = Bun.spawnSync(
+        ['bun', tsc, '--noEmit', '--strict', '--target', 'es2022', '--module', 'esnext',
+          '--moduleResolution', 'bundler', '--lib', 'es2022,dom', 'usage.ts'],
+        { cwd: dir },
+      )
+      const output = `${result.stdout}${result.stderr}`
+      expect(result.exitCode === 0 ? 'ok' : output).toBe('ok')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }, 30000)
 })
 
 /**

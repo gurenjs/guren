@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Generated from routes/web.ts — DO NOT EDIT
 // Run `guren codegen` to regenerate.
 
@@ -7,8 +8,8 @@ export const routeManifest = {
 
 export type RouteManifest = typeof routeManifest
 export type RouteName = keyof RouteManifest
-export type RouteMethod = RouteManifest[RouteName]['method']
-export type RoutePath = RouteManifest[RouteName]['path']
+export type RouteMethod = [RouteName] extends [never] ? string : RouteManifest[RouteName]['method']
+export type RoutePath = [RouteName] extends [never] ? string : RouteManifest[RouteName]['path']
 
 type PrimitiveQueryValue = string | number | boolean | null | undefined
 type QueryValue = PrimitiveQueryValue | readonly PrimitiveQueryValue[]

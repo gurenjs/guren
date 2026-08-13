@@ -93,8 +93,10 @@ export type ApiRouteMethod<T extends ApiRouteName> = ApiRoutes[T]['method']
 export type ApiRoutePath<T extends ApiRouteName> = ApiRoutes[T]['path']
 export type ApiRouteParams<T extends ApiRouteName> = ApiRoutes[T]['params']
 
+// Param-less routes are emitted as \`Record<string, never>\`, whose \`keyof\` is
+// \`string\` — so this must compare against that shape, not against \`never\`.
 type HasParams<T extends ApiRouteName> =
-  [keyof ApiRoutes[T]['params']] extends [never] ? false : true
+  ApiRoutes[T]['params'] extends Record<string, never> ? false : true
 
 export type ApiRequestOptions<T extends ApiRouteName> =
   HasParams<T> extends true
@@ -173,13 +175,18 @@ function isSameOrigin(url: string): boolean {
  * const post = await client.request('posts.show', { params: { id: 1 } })
  * \`\`\`
  */
-export function createApiClient<TRoutes extends Record<string, { method: string; path: string; params: unknown }>>(
+// The mapped-object constraint (rather than \`Record<...>\`) is what lets the
+// generated \`ApiRoutes\` interface satisfy it — interfaces have no implicit
+// index signature, so \`Record<string, ...>\` would reject them.
+export function createApiClient<TRoutes extends { [K in keyof TRoutes]: { method: string; path: string; params: unknown } }>(
   config: { baseUrl: string; headers?: Record<string, string>; credentials?: RequestInit['credentials'] },
 ) {
   return {
     async request<TName extends keyof TRoutes & string>(
       name: TName,
-      ...args: [keyof TRoutes[TName]['params']] extends [never]
+      // Param-less routes carry \`params: Record<string, never>\` — match that
+      // shape (its \`keyof\` is \`string\`, so \`extends [never]\` never fires).
+      ...args: TRoutes[TName]['params'] extends Record<string, never>
         ? [options?: { body?: unknown; query?: Record<string, unknown> }]
         : [options: { params: TRoutes[TName]['params']; body?: unknown; query?: Record<string, unknown> }]
     ): Promise<Response> {
