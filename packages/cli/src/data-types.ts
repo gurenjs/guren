@@ -253,35 +253,40 @@ async function extractResourceType(
   const masked = maskCommentsAndStrings(source)
 
   // Strategy 1: an interface named after the class, `interface PostResourceData { ... }`
-  const interfaceBody = readObjectTypeBody(source, masked, `${baseName}(?:Resource)?Data`)
-  if (interfaceBody) {
-    return { ...common, rawType: interfaceBody }
+  const named = readObjectType(source, masked, `${baseName}(?:Resource)?Data`)
+  if (named.kind === 'body') {
+    return { ...common, rawType: named.body }
   }
 
   // Strategy 2: Explicit return type on toArray(): `toArray(): SomeType {`
   const returnTypeMatch = masked.match(/toArray\s*\(\s*\)\s*:\s*(\w+(?:Data)?)\s*\{/)
   if (returnTypeMatch) {
     const typeName = returnTypeMatch[1]
-    const body = readObjectTypeBody(source, masked, typeName)
-    if (body) {
-      return { ...common, rawType: body }
+    const annotated = readObjectType(source, masked, typeName)
+    if (annotated.kind === 'body') {
+      return { ...common, rawType: annotated.body }
     }
 
     // The annotation names a type this file does not hand over. Which of the
     // two reasons it is decides what the author has to change, so say which:
     // a declaration that is simply elsewhere is a different fix from one that
     // is right here in a form that cannot be copied.
-    const declaredHere = new RegExp(`(?:interface|type)\\s+${typeName}\\b`, 'u').test(masked)
     warnings.push(
-      declaredHere
-        ? `Resource ${className} (${relPath}) annotates toArray(): ${typeName} and declares `
-          + `${typeName} in that file, but only a plain object type can be copied into `
-          + `data.gen.ts — omitted. Write ${typeName} as \`interface ${typeName} { … }\` or `
-          + `\`type ${typeName} = { … }\`, without type parameters.`
+      annotated.kind === 'unreadable'
+        ? `Resource ${className} (${relPath}) annotates toArray(): ${typeName} and `
+          + describeUnreadable(annotated)
         : `Resource ${className} (${relPath}) annotates toArray(): ${typeName}, but no `
           + `interface or type ${typeName} is declared in that file — omitted from data.gen.ts. `
           + "Only the resource's own source is read, so move the declaration into it.",
     )
+    return { ...common, rawType: null }
+  }
+
+  // An unannotated `toArray()` whose payload interface is right there but
+  // unreadable is a different sentence again, and the one Strategy 1 alone can
+  // reach.
+  if (named.kind === 'unreadable') {
+    warnings.push(`Resource ${className} (${relPath}) ${describeUnreadable(named)}`)
     return { ...common, rawType: null }
   }
 
@@ -314,8 +319,22 @@ async function extractResourceType(
 }
 
 /**
+ * What the file declares under `namePattern`: a copyable object body, nothing
+ * at all, or a declaration that exists but cannot be copied.
+ *
+ * The third case is why this is not just `string | null`. Every shape in it
+ * used to yield *some* brace body — the wrong one — which is worse than
+ * yielding none: the frontend gets a type that compiles and lies. Refusing
+ * costs one `Data` member; guessing costs the trust in all of them.
+ */
+type ObjectTypeRead =
+  | { kind: 'body'; body: string }
+  | { kind: 'none' }
+  | { kind: 'unreadable'; typeName: string; reason: string }
+
+/**
  * The body of `interface <name> { … }` / `type <name> = { … }`, declared
- * anywhere in `source`, or `null` when the file declares no such object type.
+ * anywhere in `source`.
  *
  * `masked` is {@link maskCommentsAndStrings} of the same string: everything is
  * *matched* against it and *sliced* from `source`, so offsets stay usable
@@ -328,21 +347,84 @@ async function extractResourceType(
  * searching forward for the next `{`: a `type PostData = string` followed by
  * the class declaration would otherwise hand back the class body.
  */
-function readObjectTypeBody(source: string, masked: string, namePattern: string): string | null {
+function readObjectType(source: string, masked: string, namePattern: string): ObjectTypeRead {
   const declaration = new RegExp(
     // `[^{;]*` for the heritage clause, so `extends Record<string, unknown>`
     // is stepped over; `;` bounds it so an aliasless declaration cannot run
     // into a later statement's brace.
-    `(?:export\\s+)?(?:interface|type)\\s+(?:${namePattern})\\s*(?:=\\s*|extends[^{;]*)?\\{`,
+    `(?:export\\s+)?(?:interface|type)\\s+(${namePattern})\\b\\s*(?:(=)\\s*|(extends[^{;]*))?\\{`,
     'u',
   )
   const match = declaration.exec(masked)
-  if (!match) return null
+  if (!match) {
+    // Declared, but not in a form with a body at all — `type X = string`, an
+    // intersection, a generic. Distinguishing this from "not declared here"
+    // is what lets the caller say which of the two it is.
+    const anyDeclaration = new RegExp(`(?:interface|type)\\s+(${namePattern})\\b`, 'u').exec(masked)
+    return anyDeclaration
+      ? { kind: 'unreadable', typeName: anyDeclaration[1], reason: 'is not a plain object type' }
+      : { kind: 'none' }
+  }
+
+  const [, typeName, isAlias, heritage] = match
+
+  // An `extends` clause holding an object type — `extends Record<string, { … }>`
+  // — puts a brace in front of the real one, and the heritage pattern stops at
+  // the first. Unbalanced angle brackets are what gives that away: the clause
+  // was cut mid-generic. `=>` is stripped so a function type's arrow does not
+  // read as a closing one.
+  if (heritage) {
+    const brackets = heritage.replace(/=>/gu, '')
+    if (countOccurrences(brackets, '<') !== countOccurrences(brackets, '>')) {
+      return {
+        kind: 'unreadable',
+        typeName,
+        reason: 'has an `extends` clause containing an object type, which cannot be told apart '
+          + 'from the body itself',
+      }
+    }
+  }
 
   const openIndex = match.index + match[0].length - 1
   const end = findBodyEnd(masked, openIndex)
+  if (end === null) return { kind: 'unreadable', typeName, reason: 'is not a plain object type' }
 
-  return end === null ? null : source.slice(openIndex, end)
+  // Declaration merging: TypeScript unions every block, this reads one.
+  const declarations = masked.match(new RegExp(`(?:interface|type)\\s+${typeName}\\b`, 'gu'))
+  if (declarations && declarations.length > 1) {
+    return {
+      kind: 'unreadable',
+      typeName,
+      reason: 'is declared more than once, and only one of the blocks would be copied',
+    }
+  }
+
+  // A type alias's right-hand side runs to the end of the statement, so a body
+  // followed by `&`, `|` or a conditional `extends` is only its first term. An
+  // interface always ends at its brace, so this cannot apply to one.
+  if (isAlias) {
+    const rest = masked.slice(end)
+    if (/^\s*[&|]/u.test(rest) || /^\s*extends\b/u.test(rest)) {
+      return {
+        kind: 'unreadable',
+        typeName,
+        reason: 'composes other types, and only its first object body would be copied',
+      }
+    }
+  }
+
+  return { kind: 'body', body: source.slice(openIndex, end) }
+}
+
+function countOccurrences(haystack: string, needle: string): number {
+  return haystack.split(needle).length - 1
+}
+
+/** The half of an unreadable-declaration warning that does not name the Resource. */
+function describeUnreadable(read: { typeName: string; reason: string }): string {
+  return `declares ${read.typeName} in that file, but it ${read.reason} — omitted from `
+    + `data.gen.ts. Write ${read.typeName} as a single \`interface ${read.typeName} { … }\` or `
+    + `\`type ${read.typeName} = { … }\` with its members inline.`
 }
 
 /**
