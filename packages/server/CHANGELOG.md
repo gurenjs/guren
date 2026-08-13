@@ -1,5 +1,162 @@
 # @guren/server
 
+## 2.5.0
+
+### Minor Changes
+
+- 684db66: Add a public `Application.stop()` to undo `listen()`
+
+  `listen()` had no counterpart. It bound a socket, took the process-wide active
+  server slot, started a managed Vite dev server, and registered SIGINT/SIGTERM/
+  exit teardown — and the only path back out was the module-private
+  `stopActiveBunServer()`, which an app could reach by signalling the process or
+  by calling `listen()` again to replace the server, but never to simply stop.
+  An app could be started programmatically but only stopped by ending the program.
+
+  `await app.stop()` now closes the socket, clears the instance's server and the
+  managed Vite dev server, and detaches the teardown handlers. It takes the same
+  `closeActiveConnections` flag Bun's own `stop()` does, defaulting to `false`:
+  a caller reaching for a public stop is usually shutting down deliberately,
+  whereas the hot-reload path inside `listen()` keeps forcing the close, since a
+  reload must not wait on the server it is replacing. Calling it when nothing is
+  listening, or calling it twice, is a no-op.
+
+  Vite goes down with it. `listen()` is what started the dev server, and
+  `listen()`'s own bind-failure path already closes the one it started; stopping
+  the application while leaving the asset server up would strand it, and its
+  published environment variables, in a process with no application server. That
+  close is best-effort on the same terms as every other shutdown path — bounded by
+  `GUREN_VITE_CLOSE_TIMEOUT_MS`, and a dev server that overruns the bound is warned
+  about and abandoned rather than holding `stop()` open. `GUREN_INERTIA_ENTRY` is
+  now unpublished alongside the other managed variables, but only when it still
+  holds the entry `listen()` published; an app that set its own is left alone.
+
+  The global active-server slot is cleared only when it still points at this
+  instance's server, mirroring the ownership check `closeViteDevServer()` already
+  makes. A second `listen()` anywhere in the process force-stops the previous
+  server and takes the slot over, so an app that stopped afterwards would
+  otherwise clear a live server's teardown out from under it.
+
+  `app.address` follows from that: it reports `undefined` once stopped, and the
+  new address after a restart. Its documentation already treated a stop the
+  framework can see as clearing the address, and `stop()` is now one of those —
+  what it still cannot see is a caller reaching past the framework to the Bun
+  server's own `stop()`.
+
+  The teardown handlers are detached rather than forgotten, on both halves.
+  Registration was guarded by a flag that only ever went `true`, so a close that
+  merely reset the flag left the handlers attached while claiming otherwise, and
+  the next `listen()` piled on another set. `stop()` now removes them and
+  `listen()` re-attaches exactly one set, which is what makes an app restartable
+  in a single process — a restarted app with no handlers is killed by SIGTERM's
+  default disposition instead of shutting down through its own teardown.
+
+  The Vite dev server's handlers had the same defect and are fixed with it, which
+  matters more than the count: a leaked set keeps its own signal handler, and
+  because handlers run in registration order a stale one could call `process.exit()`
+  ahead of the live server's shutdown. Those handlers also captured the
+  `Application`, so each leaked set pinned an entire app — container, routes and
+  providers included. Both registrars now share one helper that attaches the
+  SIGINT/SIGTERM/exit trio and returns the disposer for it, so neither can drift
+  back to a memo that disagrees with what is actually attached.
+
+  The starter templates are unchanged: they resolve `@guren/*` from npm and
+  cannot call this until the release that ships it.
+
+- dbd2e64: `authorizeResourceMiddleware` now fails closed on HTTP methods outside its built-in mapping
+
+  Previously an unknown verb (e.g. a custom `PURGE` route registered via `router.on()`) fell through to the `view` ability, so a user with only view permission passed the gate in front of a handler that may mutate state. Unknown methods are now denied with a 403 (`AuthorizationException`).
+
+  - The built-in mapping is now explicit: GET/HEAD/QUERY → `view` (QUERY is safe per RFC 10008, matching CSRF and `guren audit` classifications), POST → `create`, PUT/PATCH → `update`, DELETE → `delete`. Behavior for these methods is unchanged.
+  - Custom verbs can opt in via the new `abilityFor` option (`AuthorizeResourceOptions`): return an ability name for a method, or `undefined` to fall back to the built-in mapping.
+
+  ```ts
+  authorizeResourceMiddleware(getPost, {
+    abilityFor: (method) => (method === "PURGE" ? "delete" : undefined),
+  });
+  ```
+
+  If you relied on custom verbs passing as `view` checks, add an `abilityFor` mapping for them.
+
+- 0e615fc: First-class support for the HTTP QUERY method (RFC 10008)
+
+  QUERY is safe and idempotent like GET but carries a request body like POST — the right verb for search and filter endpoints whose criteria don't fit in a URL.
+
+  - `router.query(path, options, handler)` registers QUERY routes with the same overloads as the other verbs, on the router and inside `middleware(...)` group builders (which also gain the generic `on()` for arbitrary methods).
+
+  ```ts
+  router.query(
+    "/posts/search",
+    {
+      name: "posts.search",
+      body: z.object({ keywords: z.array(z.string()) }),
+    },
+    [PostsController, "search"]
+  );
+  ```
+
+  - `TestApp.query(path, body?)` drives QUERY routes in tests.
+  - Codegen picks QUERY routes up automatically; the generated API client sends them with a body (`client.request('posts.search', { body })`).
+  - CSRF protection deliberately skips QUERY by default: it is a safe method, and browsers cannot send it without a CORS preflight. Keep QUERY handlers read-only, or opt into protection via the middleware's `methods` option — the generated client keeps sending the XSRF header on same-origin browser requests, so that opt-in works there (cross-origin clients supply their own header, as with every method).
+  - `guren audit` checks body validation on QUERY routes without demanding auth middleware on them, matching GET.
+  - The OpenAPI generator now allowlists the methods OpenAPI 3.1 can express and skips others (QUERY included) with a warning — previously a QUERY route would silently produce an invalid document. Mounted docs surface those warnings once via `console.warn`.
+
+  Also fixed: `createCorsMiddleware` used to hand Hono an explicit `allowMethods: undefined`, which erased Hono's default and made every preflight answer without an `Access-Control-Allow-Methods` header. Guren now owns the default list (GET, HEAD, PUT, POST, DELETE, PATCH, QUERY).
+
+  Deployment note: Guren's fetch-based adapters (Bun, the Cloudflare Workers and Vercel plugins) do not block QUERY, but verify your platform's ingress accepts the method — CloudFront, which fronts the app in the Lambda plugin's asset setup, does not forward it.
+
+### Patch Changes
+
+- 9452c71: Fix `Application` lifecycle races that could kill a live server or orphan one
+
+  `listen()` and `stop()` tracked the running server across several independent
+  pieces of state, and neither checked whether that state still described the
+  server it was acting on by the time it resumed from an `await`. Three ways that
+  went wrong:
+
+  **A stopped app could close a Vite dev server a newer app adopted.** On a
+  `bun --hot` reload the next `listen()` reuses the dev server the previous run
+  left listening, so both applications held the same server object. `stop()` on
+  the earlier one saw its own reference set and closed it — taking the asset
+  server, its port, and its published `VITE_DEV_SERVER_URL` out from under the
+  app that was serving from it. Comparing references cannot catch this: it is the
+  same object. The active-server slot now names one owner at a time, adoption
+  transfers that ownership along with the process teardown handlers, and only the
+  owner may close.
+
+  **A `stop()` concurrent with a `listen()` could orphan the newly bound socket.**
+  A graceful `stop()` waits on in-flight requests; a `listen()` arriving in that
+  window force-stopped the old server, bound a new one, and reused the teardown
+  registration. The resuming `stop()` then cleared the instance's server handle
+  and detached the handlers — leaving the new socket live with no way to reach it
+  and no signal handling. `stop()` now returns without touching anything once it
+  sees a `listen()` has superseded it.
+
+  **A late cleanup could clear the process-wide slot out from under a live
+  server.** `listen()`'s force-stop of the previous server cleared the slot
+  unconditionally when it finished, even if another `listen()` had already pointed
+  it at a server of its own. That slot is what the SIGINT/SIGTERM/exit teardown
+  reads, so wiping it meant the surviving socket was never closed at shutdown. The
+  clear is now conditional on the slot still holding the server that was stopped —
+  and the Vite restart cleanup guards its slot, and the published env vars that
+  travel with it, the same way.
+
+  **Two `listen()` calls racing could strand what the loser started.** With
+  nothing bound yet, both calls pass the entry force-stop, both bind, and the
+  later assignment overwrote the instance handle — leaving the earlier socket live
+  with nothing left holding it. A displaced server is now stopped instead of
+  dropped, and a fresh Vite dev server displaced from the slot the same way is
+  closed instead of stranded on its port.
+
+  Also bounds the server `stop()` itself, mirroring the existing Vite close bound:
+  a graceful stop that never finishes draining no longer holds shutdown open
+  forever. The bound defaults to 5s and is configurable through
+  `GUREN_BUN_STOP_TIMEOUT_MS`. A `stop` or `close` that throws synchronously is
+  contained like one that rejects, instead of escaping the shutdown path.
+
+- Updated dependencies [dd9a5df]
+  - @guren/orm@2.3.0
+
 ## 2.4.0
 
 ### Minor Changes
