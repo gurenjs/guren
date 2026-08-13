@@ -357,13 +357,23 @@ function readObjectType(source: string, masked: string, namePattern: string): Ob
   )
   const match = declaration.exec(masked)
   if (!match) {
-    // Declared, but not in a form with a body at all — `type X = string`, an
-    // intersection, a generic. Distinguishing this from "not declared here"
+    // Declared, but not in a form with a body this can copy — `type X = string`,
+    // an intersection, a generic. Distinguishing this from "not declared here"
     // is what lets the caller say which of the two it is.
-    const anyDeclaration = new RegExp(`(?:interface|type)\\s+(${namePattern})\\b`, 'u').exec(masked)
-    return anyDeclaration
-      ? { kind: 'unreadable', typeName: anyDeclaration[1], reason: 'is not a plain object type' }
-      : { kind: 'none' }
+    const anyDeclaration = new RegExp(`(?:interface|type)\\s+(${namePattern})\\b(\\s*<)?`, 'u')
+      .exec(masked)
+    if (!anyDeclaration) return { kind: 'none' }
+
+    return {
+      kind: 'unreadable',
+      typeName: anyDeclaration[1],
+      // A generic *is* an object type, so saying it is not one sends the
+      // author to rewrite the shape rather than the one thing in the way.
+      // `{ id: T }` copied out of its declaration does not compile.
+      reason: anyDeclaration[2]
+        ? 'takes type parameters, which have no meaning once the body is copied out'
+        : 'is not a plain object type',
+    }
   }
 
   const [, typeName, isAlias, heritage] = match
@@ -423,8 +433,9 @@ function countOccurrences(haystack: string, needle: string): number {
 /** The half of an unreadable-declaration warning that does not name the Resource. */
 function describeUnreadable(read: { typeName: string; reason: string }): string {
   return `declares ${read.typeName} in that file, but it ${read.reason} — omitted from `
-    + `data.gen.ts. Write ${read.typeName} as a single \`interface ${read.typeName} { … }\` or `
-    + `\`type ${read.typeName} = { … }\` with its members inline.`
+    + `data.gen.ts. Write ${read.typeName} as a single non-generic `
+    + `\`interface ${read.typeName} { … }\` or \`type ${read.typeName} = { … }\` with its `
+    + 'members inline.'
 }
 
 /**

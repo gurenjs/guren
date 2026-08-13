@@ -10,4 +10,6 @@ Three shapes each yielded *some* brace body with no warning — the wrong one, w
 - Two `interface PostResourceData` blocks in one file emitted the first and dropped the second's members, though TypeScript merges them.
 - `type PostResourceData = { id: number } & { title: string }` emitted only the first term. An alias's right-hand side runs to the end of the statement, so a body followed by `&`, `|`, or a conditional `extends` is not the whole type.
 
+A generic declaration is refused too, as it always was, but now says so: `{ id: T }` copied out of `interface PostResourceData<T>` would not compile, and "not a plain object type" sent the author to rewrite a shape that was never the problem.
+
 Each is now named, with the reason and the shape to write instead. A `type X = { … }` whose body stands alone still reads exactly as before, and output for every shape that already worked is byte-identical.

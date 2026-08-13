@@ -447,6 +447,25 @@ describe('generateDataTypes reports Resource classes it could not extract', () =
     expect(warnings[0]).toContain('composes other types')
   })
 
+  it('names the type parameters rather than calling a generic a non-object', async () => {
+    await writeWorkspaceFiles(appRoot, {
+      // Refusing is right — `{ id: T }` copied out of its declaration does not
+      // compile — but "not a plain object type" sends the author to rewrite
+      // the shape instead of the one thing in the way.
+      'app/Http/Resources/PostResource.ts': postResourceFile(
+        'export interface PostResourceData<T = string> {\n  id: T\n}',
+        'PostResourceData',
+      ),
+    })
+
+    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(definitions.map((d) => d.rawType)).toEqual([null])
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('takes type parameters')
+    expect(warnings[0]).not.toContain('is not a plain object type')
+  })
+
   it('still reads an alias whose object body stands alone', async () => {
     await writeWorkspaceFiles(appRoot, {
       'app/Http/Resources/PostResource.ts': postResourceFile(
