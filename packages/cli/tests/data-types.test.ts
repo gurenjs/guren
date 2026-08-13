@@ -389,8 +389,148 @@ describe('generateDataTypes reports Resource classes it could not extract', () =
 
     expect(warnings).toHaveLength(1)
     expect(warnings[0]).toContain('declares PostPayload in that file')
-    expect(warnings[0]).toContain('only a plain object type can be copied')
+    expect(warnings[0]).toContain('is not a plain object type')
     expect(warnings[0]).not.toContain('move the declaration into it')
+  })
+
+  it('refuses a declaration whose extends clause holds an object type', async () => {
+    await writeWorkspaceFiles(appRoot, {
+      // `extends[^{;]*` stops at the generic argument's brace, so the type
+      // emitted was the argument — a payload the route never sends, with
+      // nothing said about it.
+      'app/Http/Resources/PostResource.ts': postResourceFile(
+        'export interface PostResourceData extends Record<string, { nested: true }> {\n'
+        + '  id: number\n}',
+        'PostResourceData',
+      ),
+    })
+
+    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(definitions.map((d) => d.rawType)).toEqual([null])
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('`extends` clause containing an object type')
+  })
+
+  it('refuses a type merged across two declarations', async () => {
+    await writeWorkspaceFiles(appRoot, {
+      'app/Http/Resources/PostResource.ts': postResourceFile(
+        'export interface PostResourceData {\n  id: number\n}\n\n'
+        + 'export interface PostResourceData {\n  title: string\n}',
+        'PostResourceData',
+      ),
+    })
+
+    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    // Emitting the first block alone drops `title` from a payload that
+    // carries it — a type that compiles and is wrong.
+    expect(definitions.map((d) => d.rawType)).toEqual([null])
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('declared more than once')
+  })
+
+  it('refuses an alias that composes its object body with another type', async () => {
+    await writeWorkspaceFiles(appRoot, {
+      // The shape the "write `type X = { … }`" advice sits next to, so
+      // getting it wrong silently is the likeliest way this misleads.
+      'app/Http/Resources/PostResource.ts': postResourceFile(
+        'export type PostResourceData = { id: number } & { title: string }',
+        'PostResourceData',
+      ),
+    })
+
+    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(definitions.map((d) => d.rawType)).toEqual([null])
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('one operand of a larger type')
+  })
+
+  it('refuses an alias that uses its body as an operand', async () => {
+    await writeWorkspaceFiles(appRoot, {
+      // `{ … }[]` is an array of the body and `{ … }['k']` is one member of
+      // it. Emitting the body itself describes neither.
+      'app/Http/Resources/PostResource.ts': postResourceFile(
+        'export type PostResourceData = { id: number }[]',
+        'PostResourceData',
+      ),
+    })
+
+    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(definitions.map((d) => d.rawType)).toEqual([null])
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('one operand of a larger type')
+  })
+
+  it('refuses an alias indexed into, rather than emitting what it indexes', async () => {
+    await writeWorkspaceFiles(appRoot, {
+      'app/Http/Resources/PostResource.ts': postResourceFile(
+        "export type PostResourceData = { payload: { id: number } }['payload']",
+        'PostResourceData',
+      ),
+    })
+
+    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    // The outer body is the *container*; emitting it types the route with a
+    // wrapper the server never sends.
+    expect(definitions.map((d) => d.rawType)).toEqual([null])
+    expect(warnings[0]).toContain('one operand of a larger type')
+  })
+
+  it('tells the author to close an unterminated body instead of rewriting it', async () => {
+    await writeWorkspaceFiles(appRoot, {
+      'app/Http/Resources/PostResource.ts':
+        "import { Resource } from '@guren/core'\n\n"
+        + 'export interface PostResourceData {\n  id: number\n\n'
+        + 'export class PostResource extends Resource<Record<string, unknown>> {\n'
+        + '  toArray(): PostResourceData {\n'
+        + '    return {} as never\n'
+        + '  }\n'
+        + '}\n',
+    })
+
+    const { warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('opens a body that is never closed')
+    expect(warnings[0]).toContain('Close it.')
+    expect(warnings[0]).not.toContain('with its members inline')
+  })
+
+  it('names the type parameters rather than calling a generic a non-object', async () => {
+    await writeWorkspaceFiles(appRoot, {
+      // Refusing is right — `{ id: T }` copied out of its declaration does not
+      // compile — but "not a plain object type" sends the author to rewrite
+      // the shape instead of the one thing in the way.
+      'app/Http/Resources/PostResource.ts': postResourceFile(
+        'export interface PostResourceData<T = string> {\n  id: T\n}',
+        'PostResourceData',
+      ),
+    })
+
+    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(definitions.map((d) => d.rawType)).toEqual([null])
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('takes type parameters')
+    expect(warnings[0]).not.toContain('is not a plain object type')
+  })
+
+  it('still reads an alias whose object body stands alone', async () => {
+    await writeWorkspaceFiles(appRoot, {
+      'app/Http/Resources/PostResource.ts': postResourceFile(
+        'export type PostResourceData = {\n  id: number\n}',
+        'PostResourceData',
+      ),
+    })
+
+    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(warnings).toEqual([])
+    expect(definitions.map((d) => d.rawType)).toEqual(['{\n  id: number\n}'])
   })
 
   it('quotes an annotation it does not read instead of calling it absent', async () => {
@@ -549,6 +689,46 @@ describe('generateDataTypes reads a type body by brace depth', () => {
     const { definitions } = await generateDataTypes({ appRoot, force: true })
 
     expect(definitions[0]?.rawType?.endsWith('  id: number\n}')).toBe(true)
+  })
+
+  it('ignores a same-named declaration nested in an inner scope', async () => {
+    // A type inside a function body is a different type that merely shares the
+    // name. Counting it as a second block costs the real one its `Data` member.
+    await writeResource(
+      'export interface PostResourceData { id: number }\n\n'
+      + 'function hidden() {\n'
+      + '  interface PostResourceData { hidden: string }\n'
+      + '  return null\n'
+      + '}',
+      'PostResourceData',
+    )
+
+    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(warnings).toEqual([])
+    expect(definitions.map((d) => d.rawType)).toEqual(['{ id: number }'])
+  })
+
+  it('does not take a namespaced declaration for the payload type', async () => {
+    // Nothing at the top level declares the payload, so the members of an
+    // unrelated scoped type must not be emitted as `Data.Post`.
+    await writeResource(
+      'namespace Hidden {\n  export interface PostResourceData { hidden: string }\n}',
+    )
+
+    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(definitions.map((d) => d.rawType)).toEqual([null])
+    expect(warnings).toHaveLength(1)
+  })
+
+  it('reads a declaration whose brace opens on the next line', async () => {
+    await writeResource('export interface PostResourceData\n{\n  id: number\n}', 'PostResourceData')
+
+    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(warnings).toEqual([])
+    expect(definitions.map((d) => d.rawType)).toEqual(['{\n  id: number\n}'])
   })
 
   it('ignores a same-named alias that declares no object type', async () => {
