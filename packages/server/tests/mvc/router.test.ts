@@ -168,6 +168,17 @@ describe('Router resource response hint', () => {
     expect(router.definitions()[0]?.resource).toEqual(['PostResource'])
   })
 
+  it('keeps a __proto__ envelope key as data instead of losing it to the prototype setter', () => {
+    const router = new Router()
+    router.get('/posts', {
+      name: 'posts.index',
+      resource: { ['__proto__']: PostResource },
+    }, [StubController, 'index'])
+
+    const serialized = router.definitions()[0]?.resource
+    expect(Object.entries(serialized as object)).toEqual([['__proto__', 'PostResource']])
+  })
+
   it('omits the whole hint when any class has no usable name', () => {
     const Anonymous = class extends Resource<{ id: number }> {
       toArray() { return { id: this.resource.id } }

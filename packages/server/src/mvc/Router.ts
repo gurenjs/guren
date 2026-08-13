@@ -639,7 +639,7 @@ export class Router<M extends string = never> {
       path,
       name,
       schemas,
-      resource: resource === undefined ? undefined : serializeResourceHint(resource),
+      resource: serializeResourceHint(resource),
       middlewareNames: [...routeMiddlewareNames],
       // Route-local only, so a group-scoped handler does not make every route
       // in the group report middleware it never attached (`guren audit` warns
@@ -1382,7 +1382,11 @@ function serializeBindings(
  * hint rather than narrowing it, because a response type missing one of its
  * keys describes a payload the server never sends.
  */
-function serializeResourceHint(hint: ResourceResponseHint): ResourceResponseShape | undefined {
+function serializeResourceHint(hint: ResourceResponseHint | undefined): ResourceResponseShape | undefined {
+  if (hint === undefined) {
+    return undefined
+  }
+
   if (typeof hint === 'function') {
     return hint.name || undefined
   }
@@ -1392,18 +1396,19 @@ function serializeResourceHint(hint: ResourceResponseHint): ResourceResponseShap
   // would fall through to the Object.entries path and serialize as
   // `{ '0': ... }`.
   if (Array.isArray(hint)) {
-    const [element] = hint as readonly ResourceResponseHint[]
-    const inner = element === undefined ? undefined : serializeResourceHint(element)
+    const inner = serializeResourceHint((hint as readonly ResourceResponseHint[])[0])
     return inner === undefined ? undefined : [inner]
   }
 
-  const shape: { [key: string]: ResourceResponseShape } = {}
+  const entries: Array<[string, ResourceResponseShape]> = []
   for (const [key, value] of Object.entries(hint)) {
     const serialized = serializeResourceHint(value as ResourceResponseHint)
     if (serialized === undefined) return undefined
-    shape[key] = serialized
+    entries.push([key, serialized])
   }
-  return shape
+  // Object.fromEntries defines own properties, so a `__proto__` envelope key
+  // lands as data instead of invoking the prototype setter and vanishing.
+  return Object.fromEntries(entries)
 }
 
 function isControllerAction(action: AnyRouteHandler): action is AnyControllerAction {

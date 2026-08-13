@@ -1,5 +1,5 @@
 import { relative, resolve } from 'node:path'
-import { escapeSingleQuoted as escapeSingleQuotes, escapeTemplateLiteral as escapeTemplateSegment, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
+import { escapeSingleQuoted as escapeSingleQuotes, escapeTemplateLiteral as escapeTemplateSegment, quoteObjectKey, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
 import {
   DECLARATION_MODULE_AUGMENTATION,
@@ -188,14 +188,8 @@ function renderHelperTree(node: HelperTreeNode, depth: number): string {
   return `{\n${entries.join(',\n')}\n${'  '.repeat(depth - 1)}}`
 }
 
-const VALID_JS_IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/u
-
-function quoteKey(segment: string): string {
-  return VALID_JS_IDENTIFIER.test(segment) ? segment : `'${escapeSingleQuotes(segment)}'`
-}
-
 function renderHelperNode(segment: string, node: HelperTreeNode, depth: number): string {
-  const key = quoteKey(segment)
+  const key = quoteObjectKey(segment)
 
   if (node.route && node.children.size === 0) {
     const params = extractParamNames(node.route.path)

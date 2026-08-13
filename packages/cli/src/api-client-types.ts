@@ -6,10 +6,11 @@
  * separate frontend applications.
  */
 import { resolve } from 'node:path'
-import { consola } from 'consola'
-import { escapeSingleQuoted as escapeSingleQuotes, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
+import type { ResourceResponseShape } from '@guren/core'
+import { escapeSingleQuoted as escapeSingleQuotes, quoteObjectKey, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 import { PATH_PARAM_TYPE_HELPERS } from './routes-types-fragments'
 import { schemaToTypeString } from './schema-type-extractor'
+import type { ResourceDefinition } from './data-types'
 
 export interface RouteDefinitionLike {
   method: string
@@ -24,20 +25,17 @@ export interface RouteDefinitionLike {
   /**
    * Serialized response hint from `RouteContractOptions.resource`: a Resource
    * class name, a single-element array (a collection), or an envelope object
-   * of either. Mirrors `ResourceResponseShape` from `@guren/core`.
+   * of either.
    */
-  resource?: ResourceShapeLike
+  resource?: ResourceResponseShape
 }
 
-export type ResourceShapeLike = string | [ResourceShapeLike] | { [key: string]: ResourceShapeLike }
-
-/** The subset of data-types' ResourceDefinition the client generator needs. */
-export interface ResourceTypeRef {
-  /** Resource class name, e.g. 'PostResource' */
-  className: string
-  /** Generated Data namespace member, e.g. 'Post' (→ `Data.Post`) */
-  dataName: string
-}
+/**
+ * The subset of data-types' ResourceDefinition the client generator needs:
+ * the class name a hint serializes to, and the `Data` namespace member it
+ * resolves to (e.g. 'PostResource' → `Data.Post`).
+ */
+export type ResourceTypeRef = Pick<ResourceDefinition, 'className' | 'dataName'>
 
 export interface GenerateApiClientOptions extends WriterOptions {
   appRoot?: string
@@ -61,17 +59,19 @@ export interface ApiRouteEntry {
 export async function generateApiClientTypes(
   definitions: RouteDefinitionLike[],
   options: GenerateApiClientOptions = {},
-): Promise<{ outputPath: string }> {
+): Promise<{ outputPath: string; warnings: string[] }> {
   const appRoot = resolveAppRoot(options)
   const outputFile = resolve(appRoot, options.outputFile ?? DEFAULT_OUTPUT_FILE)
 
+  // Returned rather than logged (same contract as generateOpenApiSpec), so
+  // programmatic callers — the MCP codegen tool above all — can surface them
+  // to whoever asked for the regeneration.
   const warnings: string[] = []
   const module = buildApiClientContent(definitions, { resources: options.resources, warnings })
-  for (const warning of warnings) consola.warn(warning)
 
   const outputPath = await writeGeneratedFileIn(appRoot, outputFile, module, { force: options.force })
 
-  return { outputPath }
+  return { outputPath, warnings }
 }
 
 export interface BuildApiClientOptions {
@@ -80,19 +80,13 @@ export interface BuildApiClientOptions {
   warnings?: string[]
 }
 
-const VALID_TYPE_KEY = /^[A-Za-z_$][A-Za-z0-9_$]*$/u
-
-function typeKey(key: string): string {
-  return VALID_TYPE_KEY.test(key) ? key : `'${escapeSingleQuotes(key)}'`
-}
-
 interface ResourceShapeContext {
   dataNames: Map<string, string>
   missing: Set<string>
   usedData: boolean
 }
 
-function resourceShapeToType(shape: ResourceShapeLike, context: ResourceShapeContext): string {
+function resourceShapeToType(shape: ResourceResponseShape, context: ResourceShapeContext): string {
   if (typeof shape === 'string') {
     const dataName = context.dataNames.get(shape)
     if (!dataName) {
@@ -108,7 +102,7 @@ function resourceShapeToType(shape: ResourceShapeLike, context: ResourceShapeCon
   }
 
   const entries = Object.entries(shape).map(
-    ([key, value]) => `${typeKey(key)}: ${resourceShapeToType(value, context)}`,
+    ([key, value]) => `${quoteObjectKey(key)}: ${resourceShapeToType(value, context)}`,
   )
   return entries.length > 0 ? `{ ${entries.join('; ')} }` : '{}'
 }

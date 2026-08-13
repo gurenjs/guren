@@ -307,6 +307,9 @@ The hint mirrors the JSON the controller builds: a bare class (`resource: PostRe
 
 `guren codegen` resolves each class against `app/Http/Resources` and types the generated API client's `json()` with the assembled shape (`{ data: Data.Post[] }` here). Unlike `output`, nothing runs at request time — the hint is a declaration, checked only in the sense that codegen warns and leaves the response untyped if it names a Resource class it cannot find. When a route sets both, `output` wins: it is the one actually enforced.
 
+> [!NOTE]
+> Every leaf of the hint must be a Resource class. An envelope that mixes Resources with plain typed objects — a paginated response's `meta` and `links`, for example — cannot be expressed yet; bind an `output` schema for those routes instead.
+
 ### OpenAPI Metadata
 
 Route contracts also accept lightweight OpenAPI annotations. These are stored on the route definition and used by the optional `@guren/openapi` plugin to generate an OpenAPI 3.1 document.

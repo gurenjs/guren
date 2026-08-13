@@ -966,10 +966,13 @@ const codegenCommand = defineCommand({
       appRoot: args.app,
       ...writerOptions,
     })
-    const { outputPath: apiClientOutputPath } = await generateApiClientTypes(
+    const { outputPath: apiClientOutputPath, warnings: apiClientWarnings } = await generateApiClientTypes(
       definitions,
       { appRoot: args.app, resources: resourceDefinitions, ...writerOptions },
     )
+    for (const warning of apiClientWarnings) {
+      consola.warn(warning)
+    }
     consola.success(`Route types generated at ${outputPath}`)
     consola.success(`Route helpers generated at ${runtimeOutputPath}`)
     consola.success(`Data types generated at ${dataOutputPath}`)

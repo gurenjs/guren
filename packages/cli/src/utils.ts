@@ -308,6 +308,18 @@ export function escapeSingleQuoted(value: string): string {
     .replace(/\u2029/gu, '\\u2029')
 }
 
+const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/u
+
+/**
+ * Renders a property key for a generated object or type literal: bare when it
+ * is a valid identifier, single-quoted otherwise. Shared by the codegen
+ * emitters for the same reason as {@link escapeSingleQuoted} \u2014 what counts as
+ * an emittable key should have one spelling.
+ */
+export function quoteObjectKey(key: string): string {
+  return IDENTIFIER_RE.test(key) ? key : `'${escapeSingleQuoted(key)}'`
+}
+
 /**
  * Escape a value for interpolation inside generated template literals.
  * Backslashes must go first — escaping them after the backtick pass would
@@ -455,8 +467,6 @@ export function resourceName(value: string): { className: string; fileName: stri
 export function ensureSuffix(name: string, suffix: string): string {
   return name.endsWith(suffix) ? name : `${name}${suffix}`
 }
-
-const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/u
 
 /**
  * Builds a `pages.foo.bar` accessor for a scaffolded controller, matching the
