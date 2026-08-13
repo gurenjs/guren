@@ -1,5 +1,52 @@
 # create-guren-app
 
+## 1.8.0
+
+### Minor Changes
+
+- 10366b3: The scaffolder now asks which AI coding agents to set up the agent harness for (Claude Code, Codex, Cursor, GitHub Copilot, OpenCode) and installs the matching files via `guren agent:init --target`. Answer non-interactively with `--agents codex,cursor`, or skip the harness entirely with `--agents none`; non-interactive environments keep the claude-only default.
+- b4295fc: Scaffold schemas from the dialect-specific `@guren/orm/drizzle/{pg,mysql,sqlite}` barrels
+
+  Follow-up to #379: generated `db/schema.ts` files now import every column
+  builder from the barrel matching the app's dialect, and `guren add auth` /
+  `guren add resource` merge new builders into that barrel instead of the mixed
+  `@guren/orm/drizzle` (PostgreSQL) or raw `drizzle-orm/*-core` (MySQL/SQLite)
+  specifiers. Apps scaffolded before the barrels keep working: builders already
+  in scope are left untouched, and only genuinely missing ones are imported via
+  the barrel, which requires `@guren/orm` >= 2.3.0.
+
+- 5e1bb0d: The generated API client now compiles against its own documented usage, and the blog starter puts it to work on an HTTP QUERY search endpoint.
+
+  `createApiClient<ApiRoutes>()` rejected every real call site: the `Record<...>` generic constraint turned away the generated `ApiRoutes` interface (interfaces carry no implicit index signature), and param-less routes — emitted as `params: Record<string, never>` — were misread as requiring a `params` argument because `keyof Record<string, never>` is `string`, not `never`. The constraint is now a mapped-object type and the param check matches the emitted shape, with a compile-level test that runs `tsc` over the generated module and its documented usage.
+
+  The blog blueprint gains `QUERY /posts/search` (RFC 10008): a route-bound Zod body schema, a read-only controller action, a starter test driving `TestApp.query()`, and a search box on the posts page calling the endpoint through the generated typed client — the first template consumer of `createApiClient`.
+
+### Patch Changes
+
+- 4bb4472: The generated API client derives params from path literals, types `json()` from bound output schemas, and closes a union-route-name type hole.
+
+  Route params are no longer stored on the generated `ApiRoutes` entries as a `params` field. Both `ApiRequestOptions` and `request()` now derive them from each entry's `path` literal — the same string the server routes on — through one shared emitted fragment (`PathParamKeys`, `HasPathParams`, `PathParamsOf`) that the route manifest module's `RouteParams`/`RouteArgs` are also expressed with, so a future change to the entry shape can never silently flip `request()`'s call arity and the rule has a single spelling across the generated modules. `ApiRouteParams<T>` remains exported with the same meaning, and `@guren/inertia-client`'s hand-mirrored copy of the rule is now pinned to the fragment's exact text by a test.
+
+  `request()` now returns `Promise<TypedResponse<...>>`: on routes that bind an `output` schema, `json()` resolves to that schema's parsed shape instead of `any`; without one it resolves to `unknown`, so asserting the shape at the call site stays explicit.
+
+  The path predicate is deliberately not distributed over a union route name. Previously `'posts.index' | 'posts.show'` accepted `params: {}` and could send a path with `:id` unresolved; now a union name requires every member's params, which forces the safe call in both directions.
+
+  To make those extra params true runtime no-ops, the generated client's param substitution switched from a per-key `path.replace(':key', ...)` loop — which let a param whose name prefixes another (`:id` vs `:identifier`) corrupt the path — to the same token-based `substituteParams` the route manifest module already uses, now emitted from one shared fragment. `@guren/inertia-client`'s typed `<Link>`/`<Form>` components adopt the same substitution.
+
+- 1f815fd: Routes can declare their response shape by naming the Resource that builds it, and the generated API client types `json()` from it.
+
+  `RouteContractOptions` gains a `resource` field: a Resource class, a one-element array (a collection), or a plain object of either (an envelope) — `resource: { data: [PostResource] }` mirrors `this.json({ data: PostResource.collection(posts) })`. Unlike `output`, nothing runs at request time; the hint is purely a type-level declaration, so the response shape lives in one place (the Resource's `toArray()` type) instead of being restated in Zod.
+
+  `definitions()` serializes the hint to class names (`RouteDefinition.resource`), and `guren codegen` resolves those against the Resource classes it already extracts into `.guren/data.gen.ts`, emitting the assembled shape (`{ data: Data.Post[] }`) as the route's `response` type — the same slot an `output` schema fills, and `output` still wins when both are declared. A hint naming a Resource class codegen cannot find warns and leaves that route's response untyped rather than claiming a shape the server does not send. `generateApiClientTypes` returns those warnings (`{ outputPath, warnings }`, the same contract as `generateOpenApiSpec`), and the MCP `guren_codegen` tool forwards them in its payload alongside `generated`/`skipped`.
+
+  The blog starter's `posts.search` route now declares `resource: { data: [PostResource] }`, so its search page reads `json()` typed instead of asserting the shape at the call site.
+
+- b7b2b09: `where(callback)` and `orWhere(callback)` compose parenthesized condition groups, Laravel's `where(fn ($q) => ...)`.
+
+  Until now `orWhere()` always pushed a top-level OR, so "(title LIKE ? OR excerpt LIKE ?) AND published = true" was inexpressible from application code — any AND filter next to an OR keyword chain (a published flag, tenancy, soft deletes) was silently OR'd away. The callback form collects conditions on a nested builder and folds them into a single group AND-ed with the rest of the query (`orWhere(callback)` ORs the whole group instead). Sequential semantics inside the callback match the top level: `.where(a).where(b).orWhere(c)` reads `(a AND b) OR c`, and callbacks nest. Groups render through the existing Drizzle condition tree, verified against the real sqlite driver alongside SoftDeletes and global scopes.
+
+  The blog starter's `posts.search` action now groups its keyword OR chain this way, so filters added after it apply to every match.
+
 ## 1.7.2
 
 ### Patch Changes

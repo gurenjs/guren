@@ -1,5 +1,121 @@
 # @guren/cli
 
+## 2.5.0
+
+### Minor Changes
+
+- e698600: `agent:sync` now reports files left behind in framework-managed directories when a canonical rule or skill is renamed or removed — including the stale `.cursor/rules/guren-*.mdc` and `.github/instructions/guren-*.instructions.md` copies Cursor and Copilot keep auto-loading — and `agent:sync --prune` deletes them. Without `--prune`, sync never deletes anything, so user files under colliding names stay safe by default.
+- 4bb4472: The generated API client derives params from path literals, types `json()` from bound output schemas, and closes a union-route-name type hole.
+
+  Route params are no longer stored on the generated `ApiRoutes` entries as a `params` field. Both `ApiRequestOptions` and `request()` now derive them from each entry's `path` literal — the same string the server routes on — through one shared emitted fragment (`PathParamKeys`, `HasPathParams`, `PathParamsOf`) that the route manifest module's `RouteParams`/`RouteArgs` are also expressed with, so a future change to the entry shape can never silently flip `request()`'s call arity and the rule has a single spelling across the generated modules. `ApiRouteParams<T>` remains exported with the same meaning, and `@guren/inertia-client`'s hand-mirrored copy of the rule is now pinned to the fragment's exact text by a test.
+
+  `request()` now returns `Promise<TypedResponse<...>>`: on routes that bind an `output` schema, `json()` resolves to that schema's parsed shape instead of `any`; without one it resolves to `unknown`, so asserting the shape at the call site stays explicit.
+
+  The path predicate is deliberately not distributed over a union route name. Previously `'posts.index' | 'posts.show'` accepted `params: {}` and could send a path with `:id` unresolved; now a union name requires every member's params, which forces the safe call in both directions.
+
+  To make those extra params true runtime no-ops, the generated client's param substitution switched from a per-key `path.replace(':key', ...)` loop — which let a param whose name prefixes another (`:id` vs `:identifier`) corrupt the path — to the same token-based `substituteParams` the route manifest module already uses, now emitted from one shared fragment. `@guren/inertia-client`'s typed `<Link>`/`<Form>` components adopt the same substitution.
+
+- e984c3d: `guren check` warns about route paths using `:name*`, which reads as a wildcard and is not one.
+
+  Hono takes everything between `:` and an optional `{constraint}` as the parameter name, with no special meaning for `*` — so `router.get('/files/:slug*', ...)` registers a single-segment parameter named literally `slug*`. `/files/a/b` 404s, and the controller's `req.param('slug')` is undefined. The syntax looks enough like a wildcard that Guren's own routing guide recommended it, so apps carry the mistake with nothing to tell them: the route registers, the app boots, and the only symptom is a 404 for every URL the author expected to match.
+
+  The check reads `routes/` and each module's routes files, including the single-file `modules/<name>/routes.ts` shape, and covers `get`/`post`/`put`/`patch`/`delete`/`query`, `on(method, path)`, `group(prefix)`, and `resource(path, controller)` — the last two spread one path over every route they cover. Constrained parameters are left alone, including `:path{.+}`, `:path{.*}` and nested-brace constraints, as is Hono's real `*` wildcard segment. Each finding names the parameter Hono actually binds and prints the corrected path (`:slug{.+}`) to match across segments.
+
+  The finding is a plain `warn`, so a plain `guren check` still exits 0, but `check --ci` gates on it the way it does on an unmounted route registrar — both are routes that 404 with nothing else to report them. An app upgrading with a `:slug*` route already in it will go red there until the path is fixed.
+
+- 44f96d8: `guren codegen` names the Resource classes it could not extract a `Data.*` type from, instead of dropping them in silence.
+
+  `generateDataTypes` recognises a documented subset of `toArray()` shapes. A Resource outside it type-checks, serves, and passes its own tests — the only symptom was a `Data` member that never appeared, under a run that reported success and, having matched the class pattern, then wrote `// No resources found`. Each miss now names the class, its file, and the shape to declare (`export interface PostResourceData { … }` plus `toArray(): PostResourceData`, what `make:resource` scaffolds). Two near misses get their own message, because the fix differs: an annotation naming a type declared in another file has to be moved rather than written, and an annotation in a shape codegen does not read (`Types.PostPayload`, `PostData<T>`) is quoted back rather than reported as no annotation at all. Warnings return from `generateDataTypes` the way `generateApiClientTypes` already returns its own, so `guren codegen` prints them and the MCP `guren_codegen` tool forwards them; the exit code is unchanged.
+
+  Four shapes are also read correctly now, all of which previously produced a wrong type or none:
+
+  - A type body was captured up to the first `\n}`, so a one-line `interface PostResourceData { id: number }` ran past its own closing brace and swallowed the class declaration below it, emitting a `data.gen.ts` that did not compile — costing the app every other resource's type as well.
+  - Locating that body required the declaration to carry `extends` or `=`, so a plain `interface PostPayload { … }` named by `toArray(): PostPayload` was dropped.
+  - A commented-out draft of the interface being looked for was matched ahead of the real declaration, describing a payload the app had stopped sending.
+  - A template literal type whose `${ … }` holds another template ended at the inner backtick, truncating the body mid-property.
+
+  Comments and string literals are now blanked (offsets preserved) before anything is matched, and bodies are read by counting brace depth. Output for shapes that already worked is byte-identical.
+
+- b4295fc: Scaffold schemas from the dialect-specific `@guren/orm/drizzle/{pg,mysql,sqlite}` barrels
+
+  Follow-up to #379: generated `db/schema.ts` files now import every column
+  builder from the barrel matching the app's dialect, and `guren add auth` /
+  `guren add resource` merge new builders into that barrel instead of the mixed
+  `@guren/orm/drizzle` (PostgreSQL) or raw `drizzle-orm/*-core` (MySQL/SQLite)
+  specifiers. Apps scaffolded before the barrels keep working: builders already
+  in scope are left untouched, and only genuinely missing ones are imported via
+  the barrel, which requires `@guren/orm` >= 2.3.0.
+
+- c9d7c38: `guren agent:init` now installs the agent harness for multiple agents via `--target` (claude, codex, cursor, copilot, opencode, or `all`). Non-Claude agents get `AGENTS.md` plus the shared `.agents/rules/` and `.agents/skills/` trees they read natively; Codex and OpenCode also get their MCP client config (`.codex/config.toml` / `opencode.json`), left untouched with a printed snippet when the file already exists. `guren agent:sync` refreshes every installed family it detects on disk.
+- 1f815fd: Routes can declare their response shape by naming the Resource that builds it, and the generated API client types `json()` from it.
+
+  `RouteContractOptions` gains a `resource` field: a Resource class, a one-element array (a collection), or a plain object of either (an envelope) — `resource: { data: [PostResource] }` mirrors `this.json({ data: PostResource.collection(posts) })`. Unlike `output`, nothing runs at request time; the hint is purely a type-level declaration, so the response shape lives in one place (the Resource's `toArray()` type) instead of being restated in Zod.
+
+  `definitions()` serializes the hint to class names (`RouteDefinition.resource`), and `guren codegen` resolves those against the Resource classes it already extracts into `.guren/data.gen.ts`, emitting the assembled shape (`{ data: Data.Post[] }`) as the route's `response` type — the same slot an `output` schema fills, and `output` still wins when both are declared. A hint naming a Resource class codegen cannot find warns and leaves that route's response untyped rather than claiming a shape the server does not send. `generateApiClientTypes` returns those warnings (`{ outputPath, warnings }`, the same contract as `generateOpenApiSpec`), and the MCP `guren_codegen` tool forwards them in its payload alongside `generated`/`skipped`.
+
+  The blog starter's `posts.search` route now declares `resource: { data: [PostResource] }`, so its search page reads `json()` typed instead of asserting the shape at the call site.
+
+### Patch Changes
+
+- 2291ac0: `guren codegen` refuses to emit a `Data.*` type it would have to guess at, and says which declaration it could not read.
+
+  Three shapes each yielded _some_ brace body with no warning — the wrong one, which is worse than none: the frontend gets a type that compiles and lies about the payload.
+
+  - `interface PostResourceData extends Record<string, { nested: true }> { … }` emitted the generic argument, not the body. Detected by the heritage clause's unbalanced angle brackets, which is what a clause cut off at the wrong brace looks like.
+  - Two `interface PostResourceData` blocks in one file emitted the first and dropped the second's members, though TypeScript merges them.
+  - `type PostResourceData = { id: number } & { title: string }` emitted only the first term. An alias's right-hand side runs to the end of the statement, so a body followed by `&`, `|`, or a conditional `extends` is not the whole type.
+
+  `type PostResourceData = { id: number }[]` and `= { … }['payload']` emitted the object operand as if it were the whole type; both are refused now too.
+
+  Declarations are matched at the top level only. A type of the same name inside a namespace, an ambient module, or a function body is a different type that merely shares it: its members were emitted as the Resource's payload when nothing at the top level declared one, and it counted as a second block against a top-level declaration that was in fact the only one.
+
+  A generic declaration is refused too, as it always was, but now says so: `{ id: T }` copied out of `interface PostResourceData<T>` would not compile, and "not a plain object type" sent the author to rewrite a shape that was never the problem.
+
+  Each is now named, with the reason and the shape to write instead. A `type X = { … }` whose body stands alone still reads exactly as before, and output for every shape that already worked is byte-identical.
+
+- 1379993: `make:module` and `--module` refuse a name starting with a digit.
+
+  A module name is not only a directory. Codegen PascalCases it to qualify the identifiers it emits for that module, so a Resource in `modules/billing/` is exported as `Data.BillingInvoice`. `modules/2fa/` yields `2faInvoice`, which is not a TypeScript identifier — the Data-type generator has to drop the definition and tell the author to rename the directory. The validator accepted the name, so the scaffolder created a module the generator would later refuse.
+
+  The one segment that reaches the front of an identifier is the first, so only its leading character is constrained: `s3` and `billing-2fa` are still accepted, `2fa` and `2FA` are not, and the error names the reason rather than leaving it to be discovered at codegen time.
+
+  This is deliberately a break for an app that already has a `modules/<digit…>/` directory: the directory keeps working everywhere it is discovered from disk (`check`, `context`, `codegen`), but `make:controller Invoice --module 2fa` and its siblings now refuse it. The name was never usable end to end — its generated Data types were already being dropped — so the refusal moves an existing failure to the point where it can still be fixed with a rename. The runtime check in the generator stays as a backstop, since a `modules/` directory can be created by hand.
+
+- 5e1bb0d: The generated API client now compiles against its own documented usage, and the blog starter puts it to work on an HTTP QUERY search endpoint.
+
+  `createApiClient<ApiRoutes>()` rejected every real call site: the `Record<...>` generic constraint turned away the generated `ApiRoutes` interface (interfaces carry no implicit index signature), and param-less routes — emitted as `params: Record<string, never>` — were misread as requiring a `params` argument because `keyof Record<string, never>` is `string`, not `never`. The constraint is now a mapped-object type and the param check matches the emitted shape, with a compile-level test that runs `tsc` over the generated module and its documented usage.
+
+  The blog blueprint gains `QUERY /posts/search` (RFC 10008): a route-bound Zod body schema, a read-only controller action, a starter test driving `TestApp.query()`, and a search box on the posts page calling the endpoint through the generated typed client — the first template consumer of `createApiClient`.
+
+- 7b34556: `resetDatabase()` now re-applies migrations after dropping, matching `guren db:reset`
+
+  The Postgres, MySQL, SQLite, and Aurora Data API factories dropped every table
+  and stopped there, so the next query failed with `relation "posts" does not
+exist` — far from the reset that caused it. `resetDatabase()` now migrates
+  afterwards and leaves a migrated database, the same end state the CLI's
+  `db:reset` produces.
+
+  Suites already following the documented reset-then-migrate pattern keep
+  working: the second `migrateDatabase()` call sees an up-to-date tracker and
+  no-ops. D1 is unchanged — its resets go through wrangler.
+
+- ca3c2a4: The `:name*` route path check reads paths through the shared path-param pattern.
+
+  The rule was written when no shared lexer existed, so it carried its own segment reading: split on `/`, take everything up to a `{`, strip a trailing `?`. `PATH_PARAM_PATTERN` now answers the same question — it anchors params at a segment boundary, consumes an attached constraint whole including one level of nesting, and keeps a trailing `*` as part of the label, which is the finding itself. Detection and the suggested rewrite are both driven by it, so the check and the code generators can no longer come to disagree about what a path binds.
+
+  No behaviour change for any path a scaffolder or guide produces; the shared pattern is stricter than the old reading only for a label with punctuation in it (`:name.:ext*`).
+
+- b7b2b09: `where(callback)` and `orWhere(callback)` compose parenthesized condition groups, Laravel's `where(fn ($q) => ...)`.
+
+  Until now `orWhere()` always pushed a top-level OR, so "(title LIKE ? OR excerpt LIKE ?) AND published = true" was inexpressible from application code — any AND filter next to an OR keyword chain (a published flag, tenancy, soft deletes) was silently OR'd away. The callback form collects conditions on a nested builder and folds them into a single group AND-ed with the rest of the query (`orWhere(callback)` ORs the whole group instead). Sequential semantics inside the callback match the top level: `.where(a).where(b).orWhere(c)` reads `(a AND b) OR c`, and callbacks nest. Groups render through the existing Drizzle condition tree, verified against the real sqlite driver alongside SoftDeletes and global scopes.
+
+  The blog starter's `posts.search` action now groups its keyword OR chain this way, so filters added after it apply to every match.
+
+- Updated dependencies [7b34556]
+- Updated dependencies [b7b2b09]
+  - @guren/orm@2.4.0
+  - @guren/core@1.6.1
+
 ## 2.4.0
 
 ### Minor Changes

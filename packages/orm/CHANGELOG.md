@@ -1,5 +1,27 @@
 # @guren/orm
 
+## 2.4.0
+
+### Minor Changes
+
+- 7b34556: `resetDatabase()` now re-applies migrations after dropping, matching `guren db:reset`
+
+  The Postgres, MySQL, SQLite, and Aurora Data API factories dropped every table
+  and stopped there, so the next query failed with `relation "posts" does not
+exist` — far from the reset that caused it. `resetDatabase()` now migrates
+  afterwards and leaves a migrated database, the same end state the CLI's
+  `db:reset` produces.
+
+  Suites already following the documented reset-then-migrate pattern keep
+  working: the second `migrateDatabase()` call sees an up-to-date tracker and
+  no-ops. D1 is unchanged — its resets go through wrangler.
+
+- b7b2b09: `where(callback)` and `orWhere(callback)` compose parenthesized condition groups, Laravel's `where(fn ($q) => ...)`.
+
+  Until now `orWhere()` always pushed a top-level OR, so "(title LIKE ? OR excerpt LIKE ?) AND published = true" was inexpressible from application code — any AND filter next to an OR keyword chain (a published flag, tenancy, soft deletes) was silently OR'd away. The callback form collects conditions on a nested builder and folds them into a single group AND-ed with the rest of the query (`orWhere(callback)` ORs the whole group instead). Sequential semantics inside the callback match the top level: `.where(a).where(b).orWhere(c)` reads `(a AND b) OR c`, and callbacks nest. Groups render through the existing Drizzle condition tree, verified against the real sqlite driver alongside SoftDeletes and global scopes.
+
+  The blog starter's `posts.search` action now groups its keyword OR chain this way, so filters added after it apply to every match.
+
 ## 2.3.0
 
 ### Minor Changes
