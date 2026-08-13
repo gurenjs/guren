@@ -106,10 +106,8 @@ export function buildRouteModuleContent(definitions: RouteDefinition[], context:
   const helperTree = buildHelperTree(namedDefinitions)
   const helperObject = renderHelperTree(helperTree, 1)
 
-  const tsNoCheck = namedDefinitions.length === 0 ? '// @ts-nocheck\n' : ''
-
   return `\
-${tsNoCheck}// Generated from ${context.source} — DO NOT EDIT
+// Generated from ${context.source} — DO NOT EDIT
 // Run \`guren codegen\` to regenerate.
 
 export const routeManifest = {
