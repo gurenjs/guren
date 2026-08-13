@@ -939,7 +939,7 @@ describe('Router route() with Hono path modifiers', () => {
     ['an optional regex-constrained param', '/tags/:code{[a-z]+}?', { code: 'abc' }, '/tags/abc'],
     ['a constraint containing a slash character class', '/docs/:path{[^/]+}/meta', { path: 'intro' }, '/docs/intro/meta'],
     ['a constraint with nested braces', '/at/:t{[0-9]{2}}', { t: 12 }, '/at/12'],
-    ['a trailing * with the token', '/files/:slug*', { slug: 'intro' }, '/files/intro'],
+    ['a trailing * as part of the key, as Hono reports it', '/files/:slug*', { 'slug*': 'intro' }, '/files/intro'],
     ['a hyphenated param label', '/inventory/:item-id', { 'item-id': 7 }, '/inventory/7'],
     ['params sharing a prefix, without clobbering', '/posts/:id/:idx', { id: 1, idx: 2 }, '/posts/1/2'],
   ] as const)('substitutes %s', (_case, path, params, expected) => {

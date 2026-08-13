@@ -593,6 +593,11 @@ function normalizeServers(servers?: OpenApiDocumentOptions['servers']): OpenApiS
 // last `}` before the next `/` (so `{[0-9]{2}}` stays whole), and a trailing
 // `?`/`*` modifier belongs to the token. The one pattern feeds the path
 // template, the parameter list, and the operation id below.
+// Unlike the TypeScript/runtime rule (which keeps a trailing `*`, because
+// Hono does — `/files/:slug*` arrives as the key `slug*`), a `*` is dropped
+// here on purpose: OpenAPI path templates are RFC 6570 URI templates, where
+// `{name*}` already means "explode". Emitting the literal asterisk would
+// silently claim a different thing than the param it names.
 const PATH_PARAM_PATTERN = /(^|\/):([A-Za-z0-9_-]+)(?:\{[^}]*\}(?:[^/]*\})*)?[?*]?/gu
 
 function toOpenApiPath(path: string): string {

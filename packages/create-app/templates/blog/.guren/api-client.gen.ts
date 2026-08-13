@@ -98,9 +98,7 @@ type SegmentParamKey<TSegment extends string> = TSegment extends `:${infer TPara
     ? TName
     : TParam extends `${infer TName}?`
       ? TName
-      : TParam extends `${infer TName}*`
-        ? TName
-        : TParam
+      : TParam
   : never
 type PathParamKeys<TPath extends string> = TPath extends `${infer THead}/${infer TRest}`
   ? SegmentParamKey<THead> | PathParamKeys<TRest>
@@ -242,7 +240,7 @@ function substituteParams(path: string, params?: Record<string, string | number>
     return path
   }
 
-  return path.replace(/(^|\/):([A-Za-z0-9_-]+)(?:\{[^}]*\}(?:[^/]*\})*)?[?*]?/gu, (match, prefix, key) => {
+  return path.replace(/(^|\/):([A-Za-z0-9_-]+\*?)(?:\{[^}]*\}(?:[^/]*\})*)?\??/gu, (match, prefix, key) => {
     if (!Object.prototype.hasOwnProperty.call(params, key)) {
       return match
     }

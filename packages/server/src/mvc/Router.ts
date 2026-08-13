@@ -1029,7 +1029,7 @@ function createRouteBuilder<M extends string = never>(route: RegisteredRoute, na
 // last `}` before the next `/` (so `{[0-9]{2}}` stays whole), and a trailing
 // `?`/`*` modifier belongs to the token. One pattern serves substitution and
 // both binding scanners below, so the lexing rule cannot drift between them.
-const PATH_PARAM_PATTERN = /(^|\/):([A-Za-z0-9_-]+)(?:\{[^}]*\}(?:[^/]*\})*)?[?*]?/gu
+const PATH_PARAM_PATTERN = /(^|\/):([A-Za-z0-9_-]+\*?)(?:\{[^}]*\}(?:[^/]*\})*)?\??/gu
 
 /** Param labels in path order, with constraints and modifiers dropped. */
 function extractPathParamNames(path: string): string[] {

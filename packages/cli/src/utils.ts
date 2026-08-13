@@ -328,7 +328,7 @@ export function quoteObjectKey(key: string): string {
  * to the token. Group 1 is the boundary, group 2 the param label. Shared by
  * every route generator so the lexing rule lands once.
  */
-export const PATH_PARAM_PATTERN = /(^|\/):([A-Za-z0-9_-]+)(?:\{[^}]*\}(?:[^/]*\})*)?[?*]?/gu
+export const PATH_PARAM_PATTERN = /(^|\/):([A-Za-z0-9_-]+\*?)(?:\{[^}]*\}(?:[^/]*\})*)?\??/gu
 
 /** Param labels in path order, with constraints and modifiers dropped. */
 export function extractPathParamNames(path: string): string[] {

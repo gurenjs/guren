@@ -30,7 +30,7 @@ describe('createTypedLink param substitution', () => {
     ['an optional regex-constrained param', Link({ route: 'tags.show', params: { code: 'abc' } }), '/tags/abc'],
     ['a constraint containing a slash character class', Link({ route: 'docs.meta', params: { path: 'intro' } }), '/docs/intro/meta'],
     ['a constraint with nested braces', Link({ route: 'at.show', params: { t: 12 } }), '/at/12'],
-    ['a trailing * with the token', Link({ route: 'files.show', params: { slug: 'intro' } }), '/files/intro'],
+    ['a trailing * as part of the key, as Hono reports it', Link({ route: 'files.show', params: { 'slug*': 'intro' } }), '/files/intro'],
     ['params sharing a prefix, without clobbering', Link({ route: 'posts.pair', params: { id: 1, idx: 2 } }), '/posts/1/2'],
     ['encoded values', Link({ route: 'archive.show', params: { slug: 'a b' } }), '/archive/a%20b'],
   ] as const)('substitutes %s', (_case, element, expected) => {

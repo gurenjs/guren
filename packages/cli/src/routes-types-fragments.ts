@@ -32,12 +32,20 @@ declare module '@inertiajs/core' {
  * keys a route path literal binds, whether it binds any, and the params
  * object they form.
  *
- * Mirrors Hono's own path lexing (verified against hono@4.13.1's
- * `getPattern`/`splitRoutingPath`): a param starts only at a segment
- * boundary (`/status/foo:bar` is a static literal, not a param named `bar`),
- * its key ends at the first `{` — a regex constraint may itself contain
- * nested braces (`:t{[0-9]{2}}` is a valid Hono route) but is never part of
- * the key — and a trailing `?`/`*` modifier is dropped from the key too.
+ * Mirrors Hono's own path lexing (verified against hono@4.13.1 by reading
+ * `c.req.param()` back): a param starts only at a segment boundary
+ * (`/status/foo:bar` is a static literal, not a param named `bar`), its key
+ * ends at the first `{` — a regex constraint may itself contain nested
+ * braces (`:t{[0-9]{2}}` is a valid Hono route) but is never part of the key
+ * — and a trailing `?` is dropped, because Hono strips it too
+ * (`/archive/:slug?` arrives as `slug`).
+ *
+ * A trailing `*` is deliberately **kept**: Hono does not strip it, so
+ * `/files/:slug*` arrives as the literal key `slug*`. Dropping it here would
+ * make the generated key disagree with `c.req.param()`, `validateParams()`,
+ * and route model binding for every inbound use. (`:slug*` is not wildcard
+ * syntax at all — `/files/x/y` 404s — which is why the routing guide tells
+ * you to write `:path{.+}` instead.)
  *
  * Emitted into every generated module that answers those questions — the
  * route manifest and the API client — so they all derive the answers from
@@ -55,9 +63,7 @@ type SegmentParamKey<TSegment extends string> = TSegment extends \`:\${infer TPa
     ? TName
     : TParam extends \`\${infer TName}?\`
       ? TName
-      : TParam extends \`\${infer TName}*\`
-        ? TName
-        : TParam
+      : TParam
   : never
 type PathParamKeys<TPath extends string> = TPath extends \`\${infer THead}/\${infer TRest}\`
   ? SegmentParamKey<THead> | PathParamKeys<TRest>
@@ -109,9 +115,11 @@ export function route<TName extends RouteName>(name: TName, ...args: RouteArgs<T
  * The runtime half of the path-param rule: how a bound key is substituted
  * into the path. Mirrors the same Hono lexing as PATH_PARAM_TYPE_HELPERS — a
  * param starts only at a segment boundary, an attached regex constraint runs
- * to the last `}` before the next `/` (so `{[0-9]{2}}` stays whole), and a
- * trailing `?`/`*` modifier is consumed with the token, never left behind in
- * the URL: `/items/:id{[0-9]+}` -> `/items/1`.
+ * to the last `}` before the next `/` (so `{[0-9]{2}}` stays whole), and the
+ * whole token is consumed so no modifier is left behind in the URL:
+ * `/items/:id{[0-9]+}` -> `/items/1`. A trailing `*` is part of the key
+ * itself (see PATH_PARAM_TYPE_HELPERS), so `/files/:slug*` is filled from
+ * `params['slug*']` — the same key the request arrives with.
  *
  * Whole tokens are replaced by key lookup, so a param whose name is a prefix
  * of another (`:id` vs `:identifier`) can never corrupt it, and a key the
@@ -128,7 +136,7 @@ function substituteParams(path: string, params?: Record<string, string | number>
     return path
   }
 
-  return path.replace(/(^|\\/):([A-Za-z0-9_-]+)(?:\\{[^}]*\\}(?:[^/]*\\})*)?[?*]?/gu, (match, prefix, key) => {
+  return path.replace(/(^|\\/):([A-Za-z0-9_-]+\\*?)(?:\\{[^}]*\\}(?:[^/]*\\})*)?\\??/gu, (match, prefix, key) => {
     if (!Object.prototype.hasOwnProperty.call(params, key)) {
       return match
     }

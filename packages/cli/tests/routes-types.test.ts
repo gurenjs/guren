@@ -304,7 +304,7 @@ describe('generated route() with Hono path modifiers', () => {
     ['an optional regex-constrained param', 'tags.show', { code: 'abc' }, '/tags/abc'],
     ['a constraint containing a slash character class', 'docs.meta', { path: 'intro' }, '/docs/intro/meta'],
     ['a constraint with nested braces', 'at.show', { t: 12 }, '/at/12'],
-    ['a trailing * with the token', 'files.show', { slug: 'intro' }, '/files/intro'],
+    ['a trailing * as part of the key, as Hono reports it', 'files.show', { 'slug*': 'intro' }, '/files/intro'],
     ['params sharing a prefix, without clobbering', 'posts.pair', { id: 1, idx: 2 }, '/posts/1/2'],
   ] as const)('substitutes %s', (_case, name, params, expected) => {
     expect(route(name, params)).toBe(expected)
@@ -338,7 +338,9 @@ void route('archive.show', { slug: 'news' })
 void route('tags.show', { code: 'abc' })
 void route('docs.meta', { path: 'intro' })
 void route('at.show', { t: 12 })
-void route('files.show', { slug: 'intro' })
+// Hono does not strip a trailing asterisk: the request arrives keyed
+// 'slug*', so that is the key the generated type has to ask for.
+void route('files.show', { 'slug*': 'intro' })
 // A mid-segment colon is a literal, not a param, so the route takes no params.
 void route('status.show')
 void routes.items.show({ id: 1 })
@@ -349,8 +351,8 @@ void route('items.show', { 'id{[0-9]+}': 1 })
 // @ts-expect-error the optional marker must not leak into the param key
 void route('archive.show', { 'slug?': 'news' })
 
-// @ts-expect-error the * marker must not leak into the param key
-void route('files.show', { 'slug*': 'intro' })
+// @ts-expect-error the bare label is not the key Hono routes on
+void route('files.show', { slug: 'intro' })
 
 // @ts-expect-error a route with path params requires them
 void route('items.show')
