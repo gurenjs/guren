@@ -24,6 +24,17 @@ the database container.
 - `/` — landing page with the latest posts
 - `/posts` — paginated post list, `/posts/:id` — a single post
 - `/posts/create`, `/posts/:id/edit` — write and edit, signed in only
+- `QUERY /posts/search` — JSON search endpoint using the HTTP QUERY method
+  ([RFC 10008](https://www.rfc-editor.org/info/rfc10008/)): safe like GET, but
+  the criteria travel in a JSON body. The posts page calls it through the
+  generated typed client (`.guren/api-client.gen.ts`), or try it directly:
+
+  ```bash
+  curl --request QUERY http://localhost:3333/posts/search \
+    --header 'content-type: application/json' \
+    --data '{"keywords":["guren"]}'
+  ```
+
 - `/login`, `/register`, `/dashboard`, `/profile` — session authentication
 
 Posts belong to their author. `app/Providers/AuthorizationProvider.ts` binds

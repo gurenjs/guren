@@ -3,13 +3,45 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import ts from 'typescript'
+import { z } from 'zod'
+import { checkTypes, COLD_TSC_TIMEOUT } from './helpers'
 import { buildApiClientContent, type RouteDefinitionLike } from '../src/api-client-types'
 
 const definitions: RouteDefinitionLike[] = [
   { method: 'GET', path: '/posts', name: 'posts.index' },
+  { method: 'GET', path: '/posts/:id', name: 'posts.show' },
   { method: 'POST', path: '/posts', name: 'posts.store' },
-  { method: 'QUERY', path: '/posts/search', name: 'posts.search' },
+  {
+    method: 'QUERY',
+    path: '/posts/search',
+    name: 'posts.search',
+    schemas: { body: z.object({ keywords: z.array(z.string()) }) },
+  },
 ]
+
+// One emitted module shared by every suite below: the compile gate reads the
+// .ts source next to its usage probe, the runtime suite imports the
+// transpiled .mjs.
+let dir: string
+let usageFile: string
+let modulePath: string
+
+beforeAll(async () => {
+  dir = await mkdtemp(join(tmpdir(), 'guren-cli-api-client-'))
+  usageFile = join(dir, 'usage.ts')
+  modulePath = join(dir, 'api-client.gen.mjs')
+  const source = buildApiClientContent(definitions)
+  await Promise.all([
+    writeFile(join(dir, 'api-client.gen.ts'), source, 'utf8'),
+    writeFile(usageFile, USAGE_PROBE, 'utf8'),
+    writeFile(modulePath, new Bun.Transpiler({ loader: 'ts' }).transformSync(source), 'utf8'),
+  ])
+})
+
+afterAll(async () => {
+  await rm(dir, { recursive: true, force: true })
+})
 
 describe('buildApiClientContent', () => {
   it('emits the cookie-to-header names the CSRF middleware expects', () => {
@@ -23,6 +55,62 @@ describe('buildApiClientContent', () => {
     // template it lands in is excluded from every tsconfig.
     expect(content).toContain('(globalThis as { document?: { cookie?: string } }).document?.cookie')
   })
+})
+
+const USAGE_PROBE = `import { createApiClient, type ApiRoutes, type ApiRequestOptions } from './api-client.gen'
+
+const client = createApiClient<ApiRoutes>({ baseUrl: 'http://localhost:3000' })
+
+void client.request('posts.index')
+void client.request('posts.show', { params: { id: 1 } })
+void client.request('posts.search', { body: { keywords: ['guren'] } })
+
+// @ts-expect-error a route with path params requires them
+void client.request('posts.show')
+
+// @ts-expect-error unknown route names must not compile
+void client.request('posts.missing')
+
+// @ts-expect-error a bound body schema types the payload
+void client.request('posts.search', { body: { keywords: 'guren' } })
+
+export const indexOptions: ApiRequestOptions<'posts.index'> = {}
+export const showOptions: ApiRequestOptions<'posts.show'> = { params: { id: 1 } }
+
+// @ts-expect-error param-less routes reject a params member
+export const paramsRejected: ApiRequestOptions<'posts.index'> = { params: {} }
+
+// @ts-expect-error a route with path params requires them here too
+export const paramsRequired: ApiRequestOptions<'posts.show'> = {}
+`
+
+const compilerOptions: ts.CompilerOptions = {
+  strict: true,
+  noEmit: true,
+  skipLibCheck: true,
+  target: ts.ScriptTarget.ES2022,
+  module: ts.ModuleKind.ESNext,
+  moduleResolution: ts.ModuleResolutionKind.Bundler,
+  lib: ['lib.es2022.d.ts', 'lib.dom.d.ts'],
+  // No @types scan: the default type-root walk climbs ancestor directories,
+  // so a TMPDIR inside a workspace would silently pull in — and type-check —
+  // every @types package it finds there.
+  types: [],
+}
+
+/**
+ * The emitted module's types are only exercised where a call site exists —
+ * scaffolds compile the file, but with no consumer that proved nothing, which
+ * is how `createApiClient<ApiRoutes>` shipped rejecting its own documented
+ * usage twice (an interface never satisfies a `Record<...>` constraint, and
+ * param-less routes' `Record<string, never>` made the params check demand
+ * params). This gate is that call site: the `@ts-expect-error` probes keep it
+ * able to fail in both directions (an accepted probe surfaces as TS2578).
+ */
+describe('generated api client types', () => {
+  it('compiles the documented usage against the emitted module', () => {
+    expect(checkTypes([usageFile], compilerOptions)).toEqual([])
+  }, COLD_TSC_TIMEOUT)
 })
 
 /**
@@ -42,19 +130,10 @@ describe('generated createApiClient', () => {
   const originalGlobals = globalThis as { document?: unknown; location?: unknown }
   const restore = { document: originalGlobals.document, location: originalGlobals.location }
 
-  let dir: string
   let createApiClient: CreateApiClient
 
   beforeAll(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'guren-cli-api-client-'))
-    const source = buildApiClientContent(definitions)
-    const modulePath = join(dir, 'api-client.gen.mjs')
-    await writeFile(modulePath, new Bun.Transpiler({ loader: 'ts' }).transformSync(source), 'utf8')
     createApiClient = (await import(pathToFileURL(modulePath).href)).createApiClient
-  })
-
-  afterAll(async () => {
-    await rm(dir, { recursive: true, force: true })
   })
 
   afterEach(() => {

@@ -93,13 +93,20 @@ export type ApiRouteMethod<T extends ApiRouteName> = ApiRoutes[T]['method']
 export type ApiRoutePath<T extends ApiRouteName> = ApiRoutes[T]['path']
 export type ApiRouteParams<T extends ApiRouteName> = ApiRoutes[T]['params']
 
-type HasParams<T extends ApiRouteName> =
-  [keyof ApiRoutes[T]['params']] extends [never] ? false : true
+// Param-less routes are emitted as \`params: Record<string, never>\`, whose
+// \`keyof\` is \`string\` — so this compares against that shape, not against
+// \`never\`. The one predicate serves both \`ApiRequestOptions\` and \`request()\`
+// below; keep them on it, or a fix lands in one spelling and not the other.
+type HasBoundParams<TParams> = TParams extends Record<string, never> ? false : true
+
+// The request body type a route declares through its bound schema — \`unknown\`
+// for routes without one.
+type BodyOf<TRoute> = TRoute extends { body: infer TBody } ? TBody : unknown
 
 export type ApiRequestOptions<T extends ApiRouteName> =
-  HasParams<T> extends true
-    ? { params: ApiRouteParams<T>; body?: unknown; query?: Record<string, unknown> }
-    : { params?: never; body?: unknown; query?: Record<string, unknown> }
+  HasBoundParams<ApiRouteParams<T>> extends false
+    ? { params?: never; body?: BodyOf<ApiRoutes[T]>; query?: Record<string, unknown> }
+    : { params: ApiRouteParams<T>; body?: BodyOf<ApiRoutes[T]>; query?: Record<string, unknown> }
 
 // The wire contract these mirror is owned by Guren's CSRF middleware: it
 // writes the XSRF-TOKEN cookie and reads either header name. Change them
@@ -164,6 +171,9 @@ function isSameOrigin(url: string): boolean {
  * Cookies follow the \`credentials\` option (\`'same-origin'\` by default; use
  * \`'include'\` cross-origin, with a CORS setup that allows it).
  *
+ * Routes that bind a \`body\` schema type the \`body\` option with that schema's
+ * request shape; routes without one accept \`unknown\`.
+ *
  * @example
  * \`\`\`typescript
  * import type { ApiRoutes } from '@/.guren/api-client.gen'
@@ -173,15 +183,18 @@ function isSameOrigin(url: string): boolean {
  * const post = await client.request('posts.show', { params: { id: 1 } })
  * \`\`\`
  */
-export function createApiClient<TRoutes extends Record<string, { method: string; path: string; params: unknown }>>(
+// The mapped-object constraint (rather than \`Record<...>\`) is what lets the
+// generated \`ApiRoutes\` interface satisfy it — interfaces have no implicit
+// index signature, so \`Record<string, ...>\` would reject them.
+export function createApiClient<TRoutes extends { [K in keyof TRoutes]: { method: string; path: string; params: unknown } }>(
   config: { baseUrl: string; headers?: Record<string, string>; credentials?: RequestInit['credentials'] },
 ) {
   return {
     async request<TName extends keyof TRoutes & string>(
       name: TName,
-      ...args: [keyof TRoutes[TName]['params']] extends [never]
-        ? [options?: { body?: unknown; query?: Record<string, unknown> }]
-        : [options: { params: TRoutes[TName]['params']; body?: unknown; query?: Record<string, unknown> }]
+      ...args: HasBoundParams<TRoutes[TName]['params']> extends false
+        ? [options?: { params?: never; body?: BodyOf<TRoutes[TName]>; query?: Record<string, unknown> }]
+        : [options: { params: TRoutes[TName]['params']; body?: BodyOf<TRoutes[TName]>; query?: Record<string, unknown> }]
     ): Promise<Response> {
       const route = (routes as Record<string, { method: string; path: string }>)[name]
       if (!route) throw new Error(\`Route [\${name}] not defined.\`)
