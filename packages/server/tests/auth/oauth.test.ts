@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, mock } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import {
   OAuthManager,
   MemoryOAuthStateStore,
@@ -14,6 +14,19 @@ import {
   type OAuthProviderConfig,
 } from '../../src/auth/oauth'
 import { hashToken } from '../../src/auth/utils'
+
+// The OAuth cases below drive the manager by replacing `globalThis.fetch`
+// outright — `mock.restore()` only unwinds spies, so nothing here puts the real
+// one back. Bun runs every test file in one process, and whether a file's
+// globals reach the next one is a runtime detail rather than a promise: under
+// Bun 1.3.11 they do, so the replacement outlived this file and answered 200 to
+// the port tests' `fetch(...)` against their own freshly bound servers, whose
+// whole point is a 404.
+const realFetch = globalThis.fetch
+
+afterEach(() => {
+  globalThis.fetch = realFetch
+})
 
 describe('oauth helpers', () => {
   it('builds authorize URL with required params and scopes', () => {
