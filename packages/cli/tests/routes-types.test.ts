@@ -270,6 +270,7 @@ describe('generated route() with Hono path modifiers', () => {
     { method: 'GET', path: '/tags/:code{[a-z]+}?', name: 'tags.show' },
     { method: 'GET', path: '/docs/:path{[^/]+}/meta', name: 'docs.meta' },
     { method: 'GET', path: '/at/:t{[0-9]{2}}', name: 'at.show' },
+    { method: 'GET', path: '/c/:p{[^/]{2}}', name: 'combo.show' },
     { method: 'GET', path: '/files/:slug*', name: 'files.show' },
     { method: 'GET', path: '/posts/:id/:idx', name: 'posts.pair' },
     { method: 'GET', path: '/status/foo:bar', name: 'status.show' },
@@ -304,6 +305,7 @@ describe('generated route() with Hono path modifiers', () => {
     ['an optional regex-constrained param', 'tags.show', { code: 'abc' }, '/tags/abc'],
     ['a constraint containing a slash character class', 'docs.meta', { path: 'intro' }, '/docs/intro/meta'],
     ['a constraint with nested braces', 'at.show', { t: 12 }, '/at/12'],
+    ['a constraint with both a slash and nested braces', 'combo.show', { p: 'ab' }, '/c/ab'],
     ['a trailing * as part of the key, as Hono reports it', 'files.show', { 'slug*': 'intro' }, '/files/intro'],
     ['params sharing a prefix, without clobbering', 'posts.pair', { id: 1, idx: 2 }, '/posts/1/2'],
   ] as const)('substitutes %s', (_case, name, params, expected) => {

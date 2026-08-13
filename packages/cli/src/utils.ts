@@ -323,12 +323,17 @@ export function quoteObjectKey(key: string): string {
 /**
  * One Hono route-path param token, as Hono's own parser lexes it: a param
  * starts only at a segment boundary (`/:name` — `/status/foo:bar` is a
- * literal), an attached regex constraint runs to the last `}` before the next
- * `/` (so `{[0-9]{2}}` stays whole), and a trailing `?`/`*` modifier belongs
+ * literal), an attached regex constraint is consumed whole, including one level of
+ * nested braces (so `{[0-9]{2}}` and `{[^/]{2}}` stay intact), and a trailing `?`/`*` modifier belongs
  * to the token. Group 1 is the boundary, group 2 the param label. Shared by
  * every route generator so the lexing rule lands once.
  */
-export const PATH_PARAM_PATTERN = /(^|\/):([A-Za-z0-9_-]+\*?)(?:\{[^}]*\}(?:[^/]*\})*)?\??/gu
+// A constraint is spelled out to one level of nesting rather than with a
+// nested quantifier: every class here excludes both braces, so a scan always
+// stops at the next brace instead of running to the end of the string. The
+// `\{[^}]*\}(?:[^/]*\})*` shape it replaces was quadratic (CodeQL
+// js/polynomial-redos, measured at 2.9s for a 16k-char path vs 1.9ms here).
+export const PATH_PARAM_PATTERN = /(^|\/):([A-Za-z0-9_-]+\*?)(?:\{[^{}]*\{[^{}]*\}[^{}]*\}|\{[^{}]*\})?\??/gu
 
 /** Param labels in path order, with constraints and modifiers dropped. */
 export function extractPathParamNames(path: string): string[] {

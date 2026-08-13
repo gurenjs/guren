@@ -114,8 +114,8 @@ export function route<TName extends RouteName>(name: TName, ...args: RouteArgs<T
 /**
  * The runtime half of the path-param rule: how a bound key is substituted
  * into the path. Mirrors the same Hono lexing as PATH_PARAM_TYPE_HELPERS — a
- * param starts only at a segment boundary, an attached regex constraint runs
- * to the last `}` before the next `/` (so `{[0-9]{2}}` stays whole), and the
+ * param starts only at a segment boundary, an attached regex constraint is consumed
+ * whole, including one level of nested braces (so `{[0-9]{2}}` stays intact), and the
  * whole token is consumed so no modifier is left behind in the URL:
  * `/items/:id{[0-9]+}` -> `/items/1`. A trailing `*` is part of the key
  * itself (see PATH_PARAM_TYPE_HELPERS), so `/files/:slug*` is filled from
@@ -136,7 +136,7 @@ function substituteParams(path: string, params?: Record<string, string | number>
     return path
   }
 
-  return path.replace(/(^|\\/):([A-Za-z0-9_-]+\\*?)(?:\\{[^}]*\\}(?:[^/]*\\})*)?\\??/gu, (match, prefix, key) => {
+  return path.replace(/(^|\\/):([A-Za-z0-9_-]+\\*?)(?:\\{[^{}]*\\{[^{}]*\\}[^{}]*\\}|\\{[^{}]*\\})?\\??/gu, (match, prefix, key) => {
     if (!Object.prototype.hasOwnProperty.call(params, key)) {
       return match
     }

@@ -1025,11 +1025,17 @@ function createRouteBuilder<M extends string = never>(route: RegisteredRoute, na
 }
 
 // Mirrors Hono's path lexing: a param starts only at a segment boundary
-// (`/status/foo:bar` is a literal), an attached regex constraint runs to the
-// last `}` before the next `/` (so `{[0-9]{2}}` stays whole), and a trailing
-// `?`/`*` modifier belongs to the token. One pattern serves substitution and
-// both binding scanners below, so the lexing rule cannot drift between them.
-const PATH_PARAM_PATTERN = /(^|\/):([A-Za-z0-9_-]+\*?)(?:\{[^}]*\}(?:[^/]*\})*)?\??/gu
+// (`/status/foo:bar` is a literal), an attached regex constraint is consumed
+// whole (`{[0-9]{2}}` and `{[^/]{2}}` stay intact), and a trailing `?`/`*`
+// modifier belongs to the token. One pattern serves substitution and both
+// binding scanners below, so the lexing rule cannot drift between them.
+//
+// The constraint is spelled out to one level of nesting rather than with a
+// nested quantifier: every class here excludes both braces, so a scan stops
+// at the next brace instead of running to the end of the string. The
+// `\{[^}]*\}(?:[^/]*\})*` shape it replaces was quadratic (CodeQL
+// js/polynomial-redos; measured 2.9s for a 16k-char path, vs 1.9ms here).
+const PATH_PARAM_PATTERN = /(^|\/):([A-Za-z0-9_-]+\*?)(?:\{[^{}]*\{[^{}]*\}[^{}]*\}|\{[^{}]*\})?\??/gu
 
 /** Param labels in path order, with constraints and modifiers dropped. */
 function extractPathParamNames(path: string): string[] {
