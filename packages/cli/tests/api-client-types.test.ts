@@ -9,6 +9,9 @@ import { checkTypes, COLD_TSC_TIMEOUT, GENERATED_MODULE_COMPILER_OPTIONS } from 
 import { buildApiClientContent, type RouteDefinitionLike } from '../src/api-client-types'
 
 const definitions: RouteDefinitionLike[] = [
+  // ':identifier' has ':id' as a prefix — the substitution suite below feeds
+  // both keys at once, the exact shape a union route name produces.
+  { method: 'GET', path: '/library/:identifier', name: 'library.show' },
   { method: 'GET', path: '/posts', name: 'posts.index' },
   { method: 'GET', path: '/posts/:id', name: 'posts.show' },
   { method: 'GET', path: '/items/:id{[0-9]+}', name: 'items.show' },
@@ -18,7 +21,10 @@ const definitions: RouteDefinitionLike[] = [
     method: 'QUERY',
     path: '/posts/search',
     name: 'posts.search',
-    schemas: { body: z.object({ keywords: z.array(z.string()) }) },
+    schemas: {
+      body: z.object({ keywords: z.array(z.string()) }),
+      output: z.object({ data: z.array(z.object({ id: z.number(), title: z.string() })) }),
+    },
   },
 ]
 
@@ -81,14 +87,42 @@ void client.request('posts.missing')
 // @ts-expect-error a bound body schema types the payload
 void client.request('posts.search', { body: { keywords: 'guren' } })
 
+// A bound output schema types json(); without one it stays unknown.
+export const searchResults: { data: Array<{ id: number; title: string }> } =
+  await (await client.request('posts.search', { body: { keywords: ['guren'] } })).json()
+
+// @ts-expect-error routes without an output schema parse to unknown
+export const untypedResults: { data: unknown[] } = await (await client.request('posts.index')).json()
+
+// The assignability probe above would also pass if json() regressed to \`any\`
+// (or \`never\`) — this one would not: both make the directive unused (TS2578).
+// @ts-expect-error the typed json() rejects a mismatched shape
+export const mismatchedResults: { data: Array<{ id: string }> } =
+  await (await client.request('posts.search', { body: { keywords: ['guren'] } })).json()
+
+// A union route name must stay callable in the way that is safe for every
+// member: params are required whenever any member's path has them.
+declare const eitherRoute: 'posts.index' | 'posts.show'
+void client.request(eitherRoute, { params: { id: 1 } })
+
+// @ts-expect-error a union name requires the params its members need
+void client.request(eitherRoute)
+
+// @ts-expect-error empty params must not satisfy a union name either
+void client.request(eitherRoute, { params: {} })
+
 export const indexOptions: ApiRequestOptions<'posts.index'> = {}
 export const showOptions: ApiRequestOptions<'posts.show'> = { params: { id: 1 } }
+export const unionOptions: ApiRequestOptions<'posts.index' | 'posts.show'> = { params: { id: 1 } }
 
 // @ts-expect-error param-less routes reject a params member
 export const paramsRejected: ApiRequestOptions<'posts.index'> = { params: {} }
 
 // @ts-expect-error a route with path params requires them here too
 export const paramsRequired: ApiRequestOptions<'posts.show'> = {}
+
+// @ts-expect-error the union options type requires every member's params
+export const unionParamsRequired: ApiRequestOptions<'posts.index' | 'posts.show'> = {}
 `
 
 const compilerOptions: ts.CompilerOptions = GENERATED_MODULE_COMPILER_OPTIONS
@@ -118,7 +152,12 @@ describe('generated createApiClient', () => {
     baseUrl: string
     headers?: Record<string, string>
     credentials?: RequestCredentials
-  }) => { request: (name: string, options?: { params?: Record<string, unknown>; body?: unknown }) => Promise<Response> }
+  }) => {
+    request: (
+      name: string,
+      options?: { params?: Record<string, string | number>; body?: unknown },
+    ) => Promise<Response>
+  }
 
   const PAGE_ORIGIN = 'http://localhost:3000'
   const originalFetch = globalThis.fetch
@@ -158,6 +197,22 @@ describe('generated createApiClient', () => {
     return init.headers as Record<string, string>
   }
 
+  it('substitutes params through Hono modifiers in the URL', async () => {
+    const { calls } = stubFetch()
+
+    await createApiClient({ baseUrl: 'http://api.example.com' }).request('items.show', { params: { id: 7 } })
+
+    expect(calls[0]!.url).toBe('http://api.example.com/items/7')
+  })
+
+  it('substitutes hyphenated param labels, matching the emitted params type', async () => {
+    const { calls } = stubFetch()
+
+    await createApiClient({ baseUrl: 'http://api.example.com' }).request('inventory.show', { params: { 'item-id': 7 } })
+
+    expect(calls[0]!.url).toBe('http://api.example.com/inventory/7')
+  })
+
   it('sends the decoded cookie value as X-XSRF-TOKEN on mutating requests', async () => {
     const { calls } = stubFetch()
     browsingAt(PAGE_ORIGIN, 'other=1; XSRF-TOKEN=token%2Fwith%2Fslashes; another=2')
@@ -186,20 +241,18 @@ describe('generated createApiClient', () => {
     expect(headersOf(calls[0]!.init)['X-XSRF-TOKEN']).toBe('right')
   })
 
-  it('substitutes params through Hono modifiers in the URL', async () => {
+  // A union route name requires every member's params, so request() gets
+  // handed keys the selected path does not bind. Token-based substitution
+  // keeps those a no-op — a per-key replace loop would let the ':id' pass
+  // corrupt '/library/:identifier' into '/library/1entifier' before
+  // ':identifier' could ever match.
+  it('substitutes whole param tokens, so extra or prefix-colliding keys cannot corrupt the path', async () => {
     const { calls } = stubFetch()
+    browsingAt(PAGE_ORIGIN, 'XSRF-TOKEN=abc')
 
-    await createApiClient({ baseUrl: 'http://api.example.com' }).request('items.show', { params: { id: 7 } })
+    await createApiClient({ baseUrl: PAGE_ORIGIN }).request('library.show', { params: { id: 1, identifier: 2 } })
 
-    expect(calls[0]!.url).toBe('http://api.example.com/items/7')
-  })
-
-  it('substitutes hyphenated param labels, matching the emitted params type', async () => {
-    const { calls } = stubFetch()
-
-    await createApiClient({ baseUrl: 'http://api.example.com' }).request('inventory.show', { params: { 'item-id': 7 } })
-
-    expect(calls[0]!.url).toBe('http://api.example.com/inventory/7')
+    expect(calls[0]!.url).toBe(`${PAGE_ORIGIN}/library/2`)
   })
 
   it('omits the header on safe methods', async () => {

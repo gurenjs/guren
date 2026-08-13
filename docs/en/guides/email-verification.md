@@ -303,7 +303,7 @@ export class DatabaseEmailVerificationStore implements EmailVerificationTokenSto
 
 ```ts
 // db/schema.ts
-import { pgTable, text, timestamp } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp } from '@guren/orm/drizzle/pg'
 
 export const emailVerifications = pgTable('email_verifications', {
   hashedToken: text('hashed_token').primaryKey(),

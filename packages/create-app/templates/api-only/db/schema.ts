@@ -1,3 +1,3 @@
-import { sqliteTable, integer, text } from 'drizzle-orm/sqlite-core'
+import { sqliteTable, integer, text } from '@guren/orm/drizzle/sqlite'
 
 export const schema = {}

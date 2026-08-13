@@ -1,8 +1,4 @@
-// Imported from drizzle-orm/mysql-core rather than @guren/orm/drizzle, which
-// re-exports `text` and `timestamp` from pg-core only — taking them from there
-// would build a MySQL table out of PostgreSQL column builders. Drizzle happens
-// to emit the same DDL either way today; this does not rely on that.
-import { mysqlTable, int, varchar, text, timestamp } from 'drizzle-orm/mysql-core'
+import { mysqlTable, int, varchar, text, timestamp } from '@guren/orm/drizzle/mysql'
 
 export const users = mysqlTable('users', {
   id: int('id').primaryKey().autoincrement(),

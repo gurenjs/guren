@@ -33,14 +33,9 @@ export interface RouteManifestLike {
   [name: string]: { method: string; path: string }
 }
 
-// The blocks below are hand-mirrors of `@guren/cli`'s generated fragments
-// (routes-types-fragments.ts) — this package has no guren dependencies, so it
-// cannot import them. A sync test in packages/cli/tests asserts each mirror
-// matches its fragment character for character; edit them there first.
-
-// Mirrors Hono's path lexing: a param starts only at a segment boundary, its
-// key ends at the first `{` (regex constraints, which may nest braces, are
-// never part of it), and a trailing `?`/`*` modifier is dropped.
+// Verbatim mirror of PATH_PARAM_TYPE_HELPERS in @guren/cli's
+// routes-types-fragments.ts (its JSDoc has the why); pinned character for
+// character by routes-types-fragments.test.ts there.
 type SegmentParamKey<TSegment extends string> = TSegment extends `:${infer TParam}`
   ? TParam extends `${infer TName}{${string}`
     ? TName
@@ -53,13 +48,18 @@ type SegmentParamKey<TSegment extends string> = TSegment extends `:${infer TPara
 type PathParamKeys<TPath extends string> = TPath extends `${infer THead}/${infer TRest}`
   ? SegmentParamKey<THead> | PathParamKeys<TRest>
   : SegmentParamKey<TPath>
+type HasPathParams<TPath extends string> = [PathParamKeys<TPath>] extends [never] ? false : true
+type PathParamsOf<TPath extends string> =
+  HasPathParams<TPath> extends false
+    ? Record<string, never>
+    : { [TKey in PathParamKeys<TPath>]: string | number }
 
-type ExtractParams<TPath extends string> = PathParamKeys<TPath>
+// ─── Link component ──────────────────────────────────────────
 
-// Mirrors Hono's path lexing: a param starts only at a segment boundary, an
-// attached regex constraint runs to the last `}` before the next `/` (so
-// `{[0-9]{2}}` stays whole), and a trailing `?`/`*` modifier is consumed
-// with the token: `/items/:id{[0-9]+}` -> `/items/1`.
+// Verbatim mirror of PATH_PARAM_RUNTIME_HELPERS, from the same fragment
+// module and under the same pin test as the type helpers above: token-based
+// substitution, so a param name that prefixes another cannot corrupt it and
+// keys the path lacks are no-ops.
 function substituteParams(path: string, params?: Record<string, string | number>): string {
   if (!params) {
     return path
@@ -74,16 +74,6 @@ function substituteParams(path: string, params?: Record<string, string | number>
   })
 }
 
-type RouteParamsFor<TPath extends string> =
-  [ExtractParams<TPath>] extends [never]
-    ? Record<string, never>
-    : { [K in ExtractParams<TPath>]: string | number }
-
-type HasParams<TPath extends string> =
-  [ExtractParams<TPath>] extends [never] ? false : true
-
-// ─── Link component ──────────────────────────────────────────
-
 type OmitHref<T> = Omit<T, 'href'>
 
 export type TypedLinkProps<
@@ -92,8 +82,8 @@ export type TypedLinkProps<
 > = OmitHref<InertiaLinkProps> & {
   route: TName
 } & (
-  HasParams<TManifest[TName]['path']> extends true
-    ? { params: RouteParamsFor<TManifest[TName]['path']> }
+  HasPathParams<TManifest[TName]['path']> extends true
+    ? { params: PathParamsOf<TManifest[TName]['path']> }
     : { params?: never }
 )
 
@@ -135,8 +125,8 @@ export type TypedFormProps<
   route: TName
   method?: 'get' | 'post' | 'put' | 'patch' | 'delete'
 } & (
-  HasParams<TManifest[TName]['path']> extends true
-    ? { params: RouteParamsFor<TManifest[TName]['path']> }
+  HasPathParams<TManifest[TName]['path']> extends true
+    ? { params: PathParamsOf<TManifest[TName]['path']> }
     : { params?: never }
 )
 

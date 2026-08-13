@@ -27,20 +27,29 @@ declare module '@inertiajs/core' {
 }
 `
 
-/** Type definitions emitted after the route manifest object. */
-export const RUNTIME_TYPE_DEFINITIONS = `\
-export type RouteManifest = typeof routeManifest
-export type RouteName = keyof RouteManifest
-export type RouteMethod = [RouteName] extends [never] ? string : RouteManifest[RouteName]['method']
-export type RoutePath = [RouteName] extends [never] ? string : RouteManifest[RouteName]['path']
-
-type PrimitiveQueryValue = string | number | boolean | null | undefined
-type QueryValue = PrimitiveQueryValue | readonly PrimitiveQueryValue[]
-export type RouteQuery = Record<string, QueryValue>
-
-// Mirrors Hono's path lexing: a param starts only at a segment boundary, its
-// key ends at the first \`{\` (regex constraints, which may nest braces, are
-// never part of it), and a trailing \`?\`/\`*\` modifier is dropped.
+/**
+ * The path-param rule, from key extraction down to the derived shapes: which
+ * keys a route path literal binds, whether it binds any, and the params
+ * object they form.
+ *
+ * Mirrors Hono's own path lexing (verified against hono@4.13.1's
+ * `getPattern`/`splitRoutingPath`): a param starts only at a segment
+ * boundary (`/status/foo:bar` is a static literal, not a param named `bar`),
+ * its key ends at the first `{` — a regex constraint may itself contain
+ * nested braces (`:t{[0-9]{2}}` is a valid Hono route) but is never part of
+ * the key — and a trailing `?`/`*` modifier is dropped from the key too.
+ *
+ * Emitted into every generated module that answers those questions — the
+ * route manifest and the API client — so they all derive the answers from
+ * the path string the server routes on, not from whatever shape their
+ * generator happens to emit alongside it.
+ *
+ * @guren/inertia-client's components.tsx carries the same rule for library
+ * code that cannot embed an emitted fragment; routes-types-fragments.test.ts
+ * asserts it contains this fragment verbatim, so a change here fails there
+ * until both move.
+ */
+export const PATH_PARAM_TYPE_HELPERS = `\
 type SegmentParamKey<TSegment extends string> = TSegment extends \`:\${infer TParam}\`
   ? TParam extends \`\${infer TName}{\${string}\`
     ? TName
@@ -53,14 +62,29 @@ type SegmentParamKey<TSegment extends string> = TSegment extends \`:\${infer TPa
 type PathParamKeys<TPath extends string> = TPath extends \`\${infer THead}/\${infer TRest}\`
   ? SegmentParamKey<THead> | PathParamKeys<TRest>
   : SegmentParamKey<TPath>
-
-export type RouteParams<TName extends RouteName> =
-  [PathParamKeys<RouteManifest[TName]['path']>] extends [never]
+type HasPathParams<TPath extends string> = [PathParamKeys<TPath>] extends [never] ? false : true
+type PathParamsOf<TPath extends string> =
+  HasPathParams<TPath> extends false
     ? Record<string, never>
-    : { [TKey in PathParamKeys<RouteManifest[TName]['path']>]: string | number }
+    : { [TKey in PathParamKeys<TPath>]: string | number }
+`
+
+/** Type definitions emitted after the route manifest object. */
+export const RUNTIME_TYPE_DEFINITIONS = `\
+export type RouteManifest = typeof routeManifest
+export type RouteName = keyof RouteManifest
+export type RouteMethod = [RouteName] extends [never] ? string : RouteManifest[RouteName]['method']
+export type RoutePath = [RouteName] extends [never] ? string : RouteManifest[RouteName]['path']
+
+type PrimitiveQueryValue = string | number | boolean | null | undefined
+type QueryValue = PrimitiveQueryValue | readonly PrimitiveQueryValue[]
+export type RouteQuery = Record<string, QueryValue>
+
+${PATH_PARAM_TYPE_HELPERS}
+export type RouteParams<TName extends RouteName> = PathParamsOf<RouteManifest[TName]['path']>
 
 type RouteArgs<TName extends RouteName> =
-  [PathParamKeys<RouteManifest[TName]['path']>] extends [never]
+  HasPathParams<RouteManifest[TName]['path']> extends false
     ? [query?: RouteQuery]
     : [params: RouteParams<TName>, query?: RouteQuery]
 `
@@ -68,7 +92,7 @@ type RouteArgs<TName extends RouteName> =
 /** The `route()` function emitted into the runtime module. */
 export const RUNTIME_ROUTE_FUNCTION = `\
 export function route<TName extends RouteName>(name: TName, ...args: RouteArgs<TName>): string {
-  const definition = routeManifest[name]
+  const definition: { method: RouteMethod; path: RoutePath } | undefined = routeManifest[name]
   if (!definition) {
     throw new Error(\`Route [\${String(name)}] not defined.\`)
   }
@@ -82,16 +106,23 @@ export function route<TName extends RouteName>(name: TName, ...args: RouteArgs<T
 `
 
 /**
- * The `substituteParams()` emitted into every generated module that builds
- * URLs (the route helpers and the API client), and hand-mirrored in
- * `@guren/inertia-client`'s components (a dependency-free package). A sync
- * test asserts the mirror matches this constant character for character.
+ * The runtime half of the path-param rule: how a bound key is substituted
+ * into the path. Mirrors the same Hono lexing as PATH_PARAM_TYPE_HELPERS — a
+ * param starts only at a segment boundary, an attached regex constraint runs
+ * to the last `}` before the next `/` (so `{[0-9]{2}}` stays whole), and a
+ * trailing `?`/`*` modifier is consumed with the token, never left behind in
+ * the URL: `/items/:id{[0-9]+}` -> `/items/1`.
+ *
+ * Whole tokens are replaced by key lookup, so a param whose name is a prefix
+ * of another (`:id` vs `:identifier`) can never corrupt it, and a key the
+ * path lacks really is a no-op. A per-key `path.replace(':key', ...)` loop
+ * has neither property; that spelling is what this fragment exists to keep
+ * out of the generators.
+ *
+ * Mirrored verbatim in @guren/inertia-client's components.tsx alongside
+ * PATH_PARAM_TYPE_HELPERS, under the same pin test.
  */
-export const RUNTIME_SUBSTITUTE_PARAMS_FUNCTION = `\
-// Mirrors Hono's path lexing: a param starts only at a segment boundary, an
-// attached regex constraint runs to the last \`}\` before the next \`/\` (so
-// \`{[0-9]{2}}\` stays whole), and a trailing \`?\`/\`*\` modifier is consumed
-// with the token: \`/items/:id{[0-9]+}\` -> \`/items/1\`.
+export const PATH_PARAM_RUNTIME_HELPERS = `\
 function substituteParams(path: string, params?: Record<string, string | number>): string {
   if (!params) {
     return path
@@ -113,7 +144,7 @@ function hasPathParams(path: string): boolean {
   return /(?:^|\\/):[A-Za-z0-9_-]/u.test(path)
 }
 
-${RUNTIME_SUBSTITUTE_PARAMS_FUNCTION}
+${PATH_PARAM_RUNTIME_HELPERS}
 function appendQueryString(path: string, query?: RouteQuery): string {
   if (!query) {
     return path

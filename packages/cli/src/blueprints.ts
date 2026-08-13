@@ -15,7 +15,7 @@ import { makeModel } from './make-model'
 import { makeNotification } from './make-notification'
 import { makeRoute } from './make-route'
 import { makeView } from './make-view'
-import { detectSchemaDialect, ensureDrizzleImports, ensureMysqlImports, ensureSqliteImports, insertImport } from './patch-helpers'
+import { detectSchemaDialect, ensureMysqlImports, ensurePgImports, ensureSqliteImports, insertImport } from './patch-helpers'
 import { wireProviders } from './provider-registrar'
 import { DEFAULT_ROUTES_FILE, findRouteRegistrar, wireRouteRegistrar } from './route-registrar'
 import { assertCwdUnsupported, camelCase, pascalCase, writeScaffoldFiles, type WriterOptions } from './utils'
@@ -789,7 +789,7 @@ async function updateResourceSchema(singular: string, fields: FieldDefinition[])
 
     const columns = fields.map((field) => buildColumn(PG_COLUMNS, field))
     const imports = [...new Set(['pgTable', 'serial', 'text', 'timestamp', ...columns.flatMap((c) => c.imports)])]
-    content = ensureDrizzleImports(content, imports)
+    content = ensurePgImports(content, imports)
 
     const fieldLines = fields.map((field, index) => `  ${field.name}: ${columns[index].code},`).join('\n')
     const schemaBlock = `\nexport const ${schemaIdentifier} = pgTable('${tableName}', {\n  id: serial('id').primaryKey(),\n${fieldLines}\n  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),\n})\n`

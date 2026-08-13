@@ -193,6 +193,94 @@ describe('QueryBuilder', () => {
     })
   })
 
+  describe('callback condition groups', () => {
+    it('should AND a grouped OR with surrounding conditions', async () => {
+      const results = await qb()
+        .where((q) => q.where('name', 'Alice').orWhere('name', 'Bob'))
+        .where('role', 'admin')
+        .get()
+      // (name = Alice OR name = Bob) AND role = admin — Bob is a user
+      expect(results).toHaveLength(1)
+      expect(results[0].name).toBe('Alice')
+    })
+
+    it('should keep a preceding where out of the group OR', async () => {
+      const results = await qb()
+        .where('role', 'user')
+        .where((q) => q.where('score', '>', 85).orWhere('name', 'Bob'))
+        .get()
+      // role = user AND (score > 85 OR name = Bob) — Eve and Bob
+      expect(results).toHaveLength(2)
+      expect(results.map((r) => r.name).sort()).toEqual(['Bob', 'Eve'])
+    })
+
+    it('should preserve sequential orWhere semantics inside a callback', async () => {
+      const results = await qb()
+        .where((q) => q.where('role', 'admin').where('score', '>', 90).orWhere('name', 'Eve'))
+        .whereNotNull('email')
+        .get()
+      // ((admin AND score > 90) OR Eve) AND email NOT NULL — Eve has no email
+      expect(results).toHaveLength(1)
+      expect(results[0].name).toBe('Alice')
+    })
+
+    it('should group a callback made only of orWhere calls', async () => {
+      const results = await qb()
+        .where((q) => q.orWhere('name', 'Alice').orWhere('name', 'Bob'))
+        .where('role', 'admin')
+        .get()
+      expect(results).toHaveLength(1)
+      expect(results[0].name).toBe('Alice')
+    })
+
+    it('should OR a whole callback group with orWhere', async () => {
+      const results = await qb()
+        .where('role', 'admin')
+        .orWhere((q) => q.where('role', 'user').where('score', '>=', 90))
+        .get()
+      // role = admin OR (role = user AND score >= 90) — Alice, Diana, Eve
+      expect(results).toHaveLength(3)
+      expect(results.map((r) => r.name).sort()).toEqual(['Alice', 'Diana', 'Eve'])
+    })
+
+    it('should support nesting callbacks inside callbacks', async () => {
+      const results = await qb()
+        .where((q) => {
+          q.where('role', 'user')
+          q.where((inner) => inner.where('score', '>=', 90).orWhere('name', 'Bob'))
+        })
+        .get()
+      // role = user AND (score >= 90 OR name = Bob)
+      expect(results).toHaveLength(2)
+      expect(results.map((r) => r.name).sort()).toEqual(['Bob', 'Eve'])
+    })
+
+    it('should treat an empty callback as a no-op', async () => {
+      const results = await qb().where(() => {}).orWhere(() => {}).get()
+      expect(results).toHaveLength(5)
+    })
+
+    it('should count with grouped conditions', async () => {
+      const count = await qb()
+        .where((q) => q.where('name', 'Alice').orWhere('name', 'Bob'))
+        .where('role', 'admin')
+        .count()
+      expect(count).toBe(1)
+    })
+
+    it('should not fold a preceding where into the group when the callback starts with orWhere', () => {
+      // Regression pin: the outer builder's conditions must never leak into
+      // the nested normalization.
+      const builder = qb()
+        .where('role', 'admin')
+        .where((q) => q.orWhere('name', 'Alice'))
+      const conditions = builder.getConditions()
+      expect(conditions).toHaveLength(2)
+      expect(conditions[0]).toEqual({ type: 'simple', field: 'role', operator: '=', value: 'admin' })
+      expect(conditions[1]).toEqual({ type: 'simple', field: 'name', operator: '=', value: 'Alice' })
+    })
+  })
+
   describe('whereNull / whereNotNull', () => {
     it('should filter null values', async () => {
       const results = await qb().whereNull('email').get()

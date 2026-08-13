@@ -56,6 +56,13 @@ denies the hash and remember-token columns from mass assignment entirely; `force
 await Post.where({ status: 'active', authorId: 1 }).get()  // object form = AND
 await Post.where({ id: [1, 2, 3] }).get()                  // array value = IN
 await Post.where('views', '>', 100).orWhere('featured', true).get()
+
+// Callback form groups conditions in parentheses — required when an OR
+// chain must sit next to AND filters, or the ANDs get OR'd away:
+// (title LIKE ? OR excerpt LIKE ?) AND published = true
+await Post.where((q) => q.where('title', 'like', p).orWhere('excerpt', 'like', p))
+  .where('published', true)
+  .get()
 ```
 
 Operators (exact set): `=` `!=` `>` `<` `>=` `<=` `like` `in` `not in` `is null` `is not null`

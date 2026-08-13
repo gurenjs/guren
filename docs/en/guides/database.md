@@ -8,7 +8,7 @@ Define your table schema, configure the Drizzle adapter, and you are ready to qu
 
 ```ts
 // db/schema.ts
-import { pgTable, serial, text, timestamp } from 'drizzle-orm/pg-core'
+import { pgTable, serial, text, timestamp } from '@guren/orm/drizzle/pg'
 
 export const posts = pgTable('posts', {
   id: serial('id').primaryKey(),
@@ -155,6 +155,14 @@ const trending = await Post.where('status', 'published')
 
 // Object syntax for simple equality
 const drafts = await Post.where({ status: 'draft', authorId: 1 }).get()
+
+// Callback syntax groups conditions in parentheses:
+// (title LIKE ? OR excerpt LIKE ?) AND status = 'published'
+const hits = await Post.where((q) => {
+  q.where('title', 'like', '%bun%').orWhere('excerpt', 'like', '%bun%')
+})
+  .where('status', 'published')
+  .get()
 ```
 
 > [!TIP]
@@ -165,7 +173,9 @@ const drafts = await Post.where({ status: 'draft', authorId: 1 }).get()
 | `.where(column, value)` | Filter by equality |
 | `.where(column, op, value)` | Filter with operator (`>`, `<`, `!=`, `LIKE`) |
 | `.where(object)` | Filter by multiple equalities |
+| `.where(callback)` | Parenthesized condition group, AND-ed with the rest |
 | `.orWhere(column, value)` | OR condition |
+| `.orWhere(callback)` | OR a parenthesized condition group |
 | `.orderBy(column, direction?)` | Sort results |
 | `.limit(n)` / `.offset(n)` | Limit and skip |
 | `.get()` | Execute and return array |

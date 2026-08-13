@@ -1,5 +1,6 @@
 import { DEFAULT_PAGINATION_SIZE } from './Model'
 import { ModelNotFoundException } from './ModelNotFoundException'
+import { normalizeConditionSequence } from './where-conditions'
 import type {
   AdapterQueryOptions,
   FindManyOptions,
@@ -42,6 +43,18 @@ export interface GroupCondition {
 
 /** A where condition - either simple or grouped. */
 export type WhereCondition = SimpleCondition | GroupCondition
+
+/**
+ * Callback receiving a nested builder to compose a parenthesized
+ * condition group, mirroring Laravel's `where(fn ($q) => ...)`.
+ *
+ * Only the conditions added on the nested builder are read back —
+ * ordering, limits, eager loads, and terminal calls made inside the
+ * callback are not part of the group.
+ */
+export type WhereGroupCallback<TRecord extends PlainObject = PlainObject> = (
+  query: QueryBuilder<TRecord>,
+) => void
 
 /** Options carried by the QueryBuilder for query execution. */
 export interface QueryBuilderOptions {
@@ -97,19 +110,32 @@ export class QueryBuilder<
   /**
    * Add a where condition (AND).
    *
-   * Supports three calling signatures:
+   * Supports four calling signatures:
    * - `where(field, value)` - equality check
    * - `where(field, operator, value)` - comparison
    * - `where(object)` - multiple equality conditions
+   * - `where(callback)` - parenthesized condition group, AND-ed with the rest
+   *
+   * @example
+   * // (title LIKE ? OR excerpt LIKE ?) AND published = true
+   * await Post.where((q) => {
+   *   q.where('title', 'like', pattern).orWhere('excerpt', 'like', pattern)
+   * }).where('published', true)
    */
+  where(callback: WhereGroupCallback<TRecord>): this
   where<TKey extends FieldKey<TRecord>>(field: TKey, value: TRecord[TKey]): this
   where<TKey extends FieldKey<TRecord>>(field: TKey, operator: WhereOperator, value: unknown): this
   where(conditions: Partial<Record<FieldKey<TRecord>, unknown>>): this
   where(
-    fieldOrConditions: FieldKey<TRecord> | Partial<Record<FieldKey<TRecord>, unknown>>,
+    fieldOrConditions: FieldKey<TRecord> | Partial<Record<FieldKey<TRecord>, unknown>> | WhereGroupCallback<TRecord>,
     operatorOrValue?: unknown,
     value?: unknown,
   ): this {
+    if (typeof fieldOrConditions === 'function') {
+      this.pushCallbackGroup(fieldOrConditions, 'and')
+      return this
+    }
+
     if (typeof fieldOrConditions === 'object' && fieldOrConditions !== null) {
       for (const [key, val] of Object.entries(fieldOrConditions)) {
         if (val !== undefined) {
@@ -136,15 +162,23 @@ export class QueryBuilder<
    *
    * Same overloads as `where()`, but joins with OR logic.
    * Creates an OR group containing the new condition(s).
+   * With a callback, the group's conditions are parenthesized as a whole:
+   * `(preceding conditions) OR (callback group)`.
    */
+  orWhere(callback: WhereGroupCallback<TRecord>): this
   orWhere<TKey extends FieldKey<TRecord>>(field: TKey, value: TRecord[TKey]): this
   orWhere<TKey extends FieldKey<TRecord>>(field: TKey, operator: WhereOperator, value: unknown): this
   orWhere(conditions: Partial<Record<FieldKey<TRecord>, unknown>>): this
   orWhere(
-    fieldOrConditions: FieldKey<TRecord> | Partial<Record<FieldKey<TRecord>, unknown>>,
+    fieldOrConditions: FieldKey<TRecord> | Partial<Record<FieldKey<TRecord>, unknown>> | WhereGroupCallback<TRecord>,
     operatorOrValue?: unknown,
     value?: unknown,
   ): this {
+    if (typeof fieldOrConditions === 'function') {
+      this.pushCallbackGroup(fieldOrConditions, 'or')
+      return this
+    }
+
     const orConditions: SimpleCondition[] = []
 
     if (typeof fieldOrConditions === 'object' && fieldOrConditions !== null) {
@@ -544,6 +578,31 @@ export class QueryBuilder<
   /** Get the internal query options (used by adapters). */
   getOptions(): QueryBuilderOptions {
     return { ...this.options }
+  }
+
+  /**
+   * Run a grouping callback against a nested builder, fold the collected
+   * conditions into a single node, and push it joined by `boolean`.
+   *
+   * The nested builder intentionally skips global scopes (`defaultScope`,
+   * SoftDeletes): the outer builder already carries them, and re-applying
+   * them inside every group would duplicate — or, inside an OR group,
+   * weaken — their filters.
+   */
+  private pushCallbackGroup(callback: WhereGroupCallback<TRecord>, boolean: 'and' | 'or'): void {
+    const nested = new QueryBuilder<TRecord>(this.modelClass, { trx: this.options.trx })
+    callback(nested)
+    const grouped = normalizeConditionSequence(nested.conditions)
+    if (!grouped) return
+
+    // An or-group node means two different things by position: in member
+    // position it is a parenthesized disjunction, but at the top level it is
+    // an orWhere continuation that folds the preceding conditions into its
+    // OR. Wrapping puts the node in member position, selecting the first
+    // reading; for `where(callback)` an and-rooted or simple node already
+    // reads correctly at the top level, so it is pushed bare.
+    const needsWrap = boolean === 'or' || (grouped.type === 'group' && grouped.boolean === 'or')
+    this.conditions.push(needsWrap ? { type: 'group', boolean, conditions: [grouped] } : grouped)
   }
 
   private addSimpleCondition(field: string, operator: WhereOperator, value: unknown): void {

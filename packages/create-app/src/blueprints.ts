@@ -293,9 +293,11 @@ export type AppSeederContext = ${seederContext}
 `
 }
 
+// Each dialect imports from its own `@guren/orm/drizzle/<dialect>` barrel —
+// the same modules `guren add auth` / `add resource` merge new columns into.
 function generateSchema(driver: DatabaseDriver): string {
   if (driver === 'postgres') {
-    return `import { pgTable, serial, text, timestamp } from '@guren/orm/drizzle'
+    return `import { pgTable, serial, text, timestamp } from '@guren/orm/drizzle/pg'
 
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),
@@ -307,12 +309,7 @@ export const users = pgTable('users', {
   }
 
   if (driver === 'mysql') {
-    // MySQL uses drizzle-orm directly — @guren/orm/drizzle re-exports the
-    // PostgreSQL builders under the plain names (`timestamp`, `text`), so a
-    // MySQL table imported from there is built out of pg column builders.
-    // This is also the module `guren add auth` / `add resource` merge their
-    // new columns into.
-    return `import { mysqlTable, int, varchar, timestamp } from 'drizzle-orm/mysql-core'
+    return `import { mysqlTable, int, varchar, timestamp } from '@guren/orm/drizzle/mysql'
 
 export const users = mysqlTable('users', {
   id: int('id').primaryKey().autoincrement(),
@@ -323,8 +320,7 @@ export const users = mysqlTable('users', {
 `
   }
 
-  // SQLite uses drizzle-orm directly — @guren/orm/drizzle does not re-export SQLite helpers
-  return `import { sqliteTable, integer, text } from 'drizzle-orm/sqlite-core'
+  return `import { sqliteTable, integer, text } from '@guren/orm/drizzle/sqlite'
 
 export const users = sqliteTable('users', {
   id: integer('id').primaryKey({ autoIncrement: true }),

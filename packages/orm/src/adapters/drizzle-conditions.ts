@@ -1,6 +1,7 @@
 import { and, eq, gt, gte, inArray, isNotNull, isNull, like, lt, lte, ne, notInArray, or } from 'drizzle-orm'
 import type { AnyColumn, SQL } from 'drizzle-orm'
 import type { GroupCondition, SimpleCondition, WhereCondition } from '../QueryBuilder'
+import { normalizeConditionSequence } from '../where-conditions'
 
 type DrizzleTableLike = Record<string, unknown>
 
@@ -108,79 +109,18 @@ function buildSingleCondition(table: unknown, condition: WhereCondition): SQL | 
  * Translates an array of QueryBuilder WhereConditions into a single
  * Drizzle ORM condition expression.
  *
- * The top-level conditions are joined with AND. OR conditions are
- * represented as GroupCondition nodes with `boolean: 'or'`.
- *
- * When an OR group is encountered, it creates:
- *   AND(previous_conditions, OR(previous_and_block, or_conditions))
- *
- * This matches the typical SQL builder behavior where:
+ * The list's sequential semantics — top-level conditions AND together,
+ * an OR group folds everything before it into the OR, so
  *   .where('a', 1).where('b', 2).orWhere('c', 3)
- * produces: (a = 1 AND b = 2) OR (c = 3)
+ * produces `(a = 1 AND b = 2) OR (c = 3)` — are applied by
+ * `normalizeConditionSequence` (shared with QueryBuilder's grouping
+ * callbacks), leaving only a flat-join tree to render here.
  *
  * @param table - The Drizzle table object
  * @param conditions - Array of WhereCondition objects from QueryBuilder
  * @returns A Drizzle SQL condition or undefined if no conditions
  */
 export function buildDrizzleConditions(table: unknown, conditions: WhereCondition[]): SQL | undefined {
-  if (conditions.length === 0) {
-    return undefined
-  }
-
-  // Separate AND conditions and OR groups
-  // Strategy: collect AND conditions, when we hit an OR group,
-  // wrap current AND block with the OR group.
-  let currentAnd: SQL[] = []
-  let result: SQL | undefined
-
-  for (const condition of conditions) {
-    if (condition.type === 'group' && condition.boolean === 'or') {
-      // Build the OR group's conditions
-      const orParts = condition.conditions
-        .map((c) => buildSingleCondition(table, c))
-        .filter((c): c is SQL => c !== undefined)
-
-      if (orParts.length > 0) {
-        // Combine current AND conditions into one block
-        const andBlock = combineAnd(currentAnd, result)
-        if (andBlock) {
-          result = or(andBlock, ...orParts)
-        } else {
-          result = orParts.length === 1 ? orParts[0] : or(...orParts)
-        }
-        currentAnd = []
-      }
-    } else {
-      const built = buildSingleCondition(table, condition)
-      if (built) {
-        currentAnd.push(built)
-      }
-    }
-  }
-
-  // Combine remaining AND conditions with result
-  return combineAnd(currentAnd, result)
-}
-
-/**
- * Combines an array of AND conditions with an optional existing result.
- */
-function combineAnd(andParts: SQL[], existing: SQL | undefined): SQL | undefined {
-  const all: SQL[] = []
-
-  if (existing) {
-    all.push(existing)
-  }
-
-  all.push(...andParts)
-
-  if (all.length === 0) {
-    return undefined
-  }
-
-  if (all.length === 1) {
-    return all[0]
-  }
-
-  return and(...all)
+  const normalized = normalizeConditionSequence(conditions)
+  return normalized ? buildSingleCondition(table, normalized) : undefined
 }
