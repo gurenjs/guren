@@ -120,6 +120,13 @@ type RequestOptionsOf<TRoute extends { path: string }> =
     ? { params?: never; body?: BodyOf<TRoute>; query?: Record<string, unknown> }
     : { params: PathParamsOf<TRoute['path']>; body?: BodyOf<TRoute>; query?: Record<string, unknown> }
 
+// Param-less routes may omit the options argument entirely; the same
+// predicate that shapes the options decides the arity.
+type RequestArgsOf<TRoute extends { path: string }> =
+  HasPathParams<TRoute['path']> extends false
+    ? [options?: RequestOptionsOf<TRoute>]
+    : [options: RequestOptionsOf<TRoute>]
+
 export type ApiRequestOptions<T extends ApiRouteName> = RequestOptionsOf<ApiRoutes[T]>
 
 // The wire contract these mirror is owned by Guren's CSRF middleware: it
@@ -211,9 +218,7 @@ export function createApiClient<TRoutes extends { [K in keyof TRoutes]: { method
   return {
     async request<TName extends keyof TRoutes & string>(
       name: TName,
-      ...args: HasPathParams<TRoutes[TName]['path']> extends false
-        ? [options?: RequestOptionsOf<TRoutes[TName]>]
-        : [options: RequestOptionsOf<TRoutes[TName]>]
+      ...args: RequestArgsOf<TRoutes[TName]>
     ): Promise<TypedResponse<ResponseOf<TRoutes[TName]>>> {
       const route = (routes as Record<string, { method: string; path: string }>)[name]
       if (!route) throw new Error(\`Route [\${name}] not defined.\`)

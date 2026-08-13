@@ -33,11 +33,9 @@ export interface RouteManifestLike {
   [name: string]: { method: string; path: string }
 }
 
-// The verbatim text of PATH_PARAM_TYPE_HELPERS in @guren/cli's
-// routes-types-fragments.ts, which the generated modules embed. This package
-// ships as a library — it cannot import an emitted fragment — so the fragment
-// is mirrored here and routes-types-fragments.test.ts asserts the mirror
-// character for character.
+// Verbatim mirror of PATH_PARAM_TYPE_HELPERS in @guren/cli's
+// routes-types-fragments.ts (its JSDoc has the why); pinned character for
+// character by routes-types-fragments.test.ts there.
 type NormalizeParamKey<TValue extends string> = TValue extends `${infer Key}?` ? Key : TValue
 type PathParamKeys<TPath extends string> =
   TPath extends `${string}:${infer Param}/${infer Rest}`
@@ -52,6 +50,15 @@ type PathParamsOf<TPath extends string> =
     : { [TKey in PathParamKeys<TPath>]: string | number }
 
 // ─── Link component ──────────────────────────────────────────
+
+function substituteParams(path: string, params?: Record<string, string | number>): string {
+  if (!params) return path
+  let result = path
+  for (const [key, value] of Object.entries(params)) {
+    result = result.replace(`:${key}`, encodeURIComponent(String(value)))
+  }
+  return result
+}
 
 type OmitHref<T> = Omit<T, 'href'>
 
@@ -85,12 +92,7 @@ export function createTypedLink<TManifest extends RouteManifestLike>(manifest: T
     const entry = manifest[routeName]
     if (!entry) throw new Error(`Route [${routeName}] not defined.`)
 
-    let href = entry.path
-    if (params) {
-      for (const [key, value] of Object.entries(params)) {
-        href = href.replace(`:${key}`, encodeURIComponent(String(value)))
-      }
-    }
+    const href = substituteParams(entry.path, params)
 
     return React.createElement(InertiaLink, { ...rest, href } as any)
   }
@@ -125,12 +127,7 @@ export function createTypedForm<TManifest extends RouteManifestLike>(manifest: T
     const entry = manifest[routeName]
     if (!entry) throw new Error(`Route [${routeName}] not defined.`)
 
-    let action = entry.path
-    if (params) {
-      for (const [key, value] of Object.entries(params)) {
-        action = action.replace(`:${key}`, encodeURIComponent(String(value)))
-      }
-    }
+    const action = substituteParams(entry.path, params)
 
     const httpMethod = method ?? entry.method.toLowerCase()
 
