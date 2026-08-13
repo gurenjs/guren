@@ -86,6 +86,10 @@ describeMySql('createMySqlDatabase against a real MySQL server (requires MYSQL_U
   })
 
   it('clears table contents on reset and leaves migrations applied', async () => {
+    // Explicit setup rather than relying on what the preceding test (or the
+    // reset in beforeAll) left behind: the contract under test must be what
+    // fails here, not the fixture.
+    await database.migrateDatabase()
     const db = await database.getDatabase()
     await db.execute(sql`INSERT INTO \`widgets\` (\`name\`) VALUES ('sprocket')`)
 
@@ -102,6 +106,9 @@ describeMySql('createMySqlDatabase against a real MySQL server (requires MYSQL_U
   })
 
   it('drops views on reset, not just base tables', async () => {
+    // `widgets` has to exist for the view to select from it, whatever the
+    // preceding test left behind.
+    await database.migrateDatabase()
     const db = await database.getDatabase()
     await db.execute(sql`CREATE OR REPLACE VIEW \`widget_names\` AS SELECT \`name\` FROM \`widgets\``)
 
