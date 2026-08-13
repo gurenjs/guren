@@ -201,7 +201,9 @@ function isSameOrigin(url: string): boolean {
  * request shape; routes without one accept `unknown`. Routes that bind an
  * `output` schema type the response: `json()` on the returned `Response`
  * resolves to that schema's parsed shape. Without one it resolves to
- * `unknown` — validate before trusting it.
+ * `unknown` — validate before trusting it. Either way the typed shape
+ * describes the success body only: error statuses carry their own (a 422
+ * from validation is `{ errors: ... }`), so check `ok` before reading it.
  *
  * @example
  * ```typescript

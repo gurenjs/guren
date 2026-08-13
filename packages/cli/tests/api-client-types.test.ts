@@ -84,6 +84,12 @@ export const searchResults: { data: Array<{ id: number; title: string }> } =
 // @ts-expect-error routes without an output schema parse to unknown
 export const untypedResults: { data: unknown[] } = await (await client.request('posts.index')).json()
 
+// The assignability probe above would also pass if json() regressed to \`any\`
+// (or \`never\`) — this one would not: both make the directive unused (TS2578).
+// @ts-expect-error the typed json() rejects a mismatched shape
+export const mismatchedResults: { data: Array<{ id: string }> } =
+  await (await client.request('posts.search', { body: { keywords: ['guren'] } })).json()
+
 // A union route name must stay callable in the way that is safe for every
 // member: params are required whenever any member's path has them.
 declare const eitherRoute: 'posts.index' | 'posts.show'
