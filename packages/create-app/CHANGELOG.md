@@ -1,5 +1,11 @@
 # create-guren-app
 
+## 1.7.2
+
+### Patch Changes
+
+- Update scaffolded `@guren/*` dependency ranges to the versions shipped in this release.
+
 ## 1.7.1
 
 ### Patch Changes

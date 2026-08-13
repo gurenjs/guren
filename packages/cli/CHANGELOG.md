@@ -1,5 +1,49 @@
 # @guren/cli
 
+## 2.4.0
+
+### Minor Changes
+
+- 3e39cc1: `guren audit` now audits routes registered with custom HTTP verbs (`router.on('PURGE', ...)`) instead of silently skipping them.
+
+  Route auditing enumerated the methods it knew: only POST/PUT/PATCH/DELETE were checked for authentication and only POST/PUT/PATCH/QUERY for body validation. A route registered with any other verb fell through both checks, so an unvalidated body plus a missing auth guard produced zero findings and the audit reported a clean pass.
+
+  Method handling is now driven by a single fail-closed classification (`describeMethod`): GET/HEAD/OPTIONS stay unaudited (safe, body-less), QUERY keeps its body check without demanding auth, DELETE stays auth-only, and any other verb is treated as unsafe and body-carrying, so it gets both the authentication and the validation check. That includes TRACE — formally safe per RFC 9110, but deliberately left to the fail-closed default here. Apps using custom verbs may see new findings; genuinely body-less custom verbs can be suppressed via `config/audit.ts`. Output for apps using only GET/HEAD/OPTIONS/QUERY/POST/PUT/PATCH/DELETE is unchanged.
+
+- 0e615fc: First-class support for the HTTP QUERY method (RFC 10008)
+
+  QUERY is safe and idempotent like GET but carries a request body like POST — the right verb for search and filter endpoints whose criteria don't fit in a URL.
+
+  - `router.query(path, options, handler)` registers QUERY routes with the same overloads as the other verbs, on the router and inside `middleware(...)` group builders (which also gain the generic `on()` for arbitrary methods).
+
+  ```ts
+  router.query(
+    "/posts/search",
+    {
+      name: "posts.search",
+      body: z.object({ keywords: z.array(z.string()) }),
+    },
+    [PostsController, "search"]
+  );
+  ```
+
+  - `TestApp.query(path, body?)` drives QUERY routes in tests.
+  - Codegen picks QUERY routes up automatically; the generated API client sends them with a body (`client.request('posts.search', { body })`).
+  - CSRF protection deliberately skips QUERY by default: it is a safe method, and browsers cannot send it without a CORS preflight. Keep QUERY handlers read-only, or opt into protection via the middleware's `methods` option — the generated client keeps sending the XSRF header on same-origin browser requests, so that opt-in works there (cross-origin clients supply their own header, as with every method).
+  - `guren audit` checks body validation on QUERY routes without demanding auth middleware on them, matching GET.
+  - The OpenAPI generator now allowlists the methods OpenAPI 3.1 can express and skips others (QUERY included) with a warning — previously a QUERY route would silently produce an invalid document. Mounted docs surface those warnings once via `console.warn`.
+
+  Also fixed: `createCorsMiddleware` used to hand Hono an explicit `allowMethods: undefined`, which erased Hono's default and made every preflight answer without an `Access-Control-Allow-Methods` header. Guren now owns the default list (GET, HEAD, PUT, POST, DELETE, PATCH, QUERY).
+
+  Deployment note: Guren's fetch-based adapters (Bun, the Cloudflare Workers and Vercel plugins) do not block QUERY, but verify your platform's ingress accepts the method — CloudFront, which fronts the app in the Lambda plugin's asset setup, does not forward it.
+
+### Patch Changes
+
+- Updated dependencies [0e615fc]
+- Updated dependencies [dd9a5df]
+  - @guren/core@1.6.0
+  - @guren/orm@2.3.0
+
 ## 2.3.1
 
 ### Patch Changes
