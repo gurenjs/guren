@@ -33,24 +33,23 @@ export interface RouteManifestLike {
   [name: string]: { method: string; path: string }
 }
 
-// Same rule as PATH_PARAM_TYPE_HELPERS in @guren/cli's
+// The verbatim text of PATH_PARAM_TYPE_HELPERS in @guren/cli's
 // routes-types-fragments.ts, which the generated modules embed. This package
-// ships as a library — it cannot import an emitted fragment — so the two
-// spellings have to be kept in lockstep by hand.
-type ExtractParams<TPath extends string> =
+// ships as a library — it cannot import an emitted fragment — so the fragment
+// is mirrored here and routes-types-fragments.test.ts asserts the mirror
+// character for character.
+type NormalizeParamKey<TValue extends string> = TValue extends `${infer Key}?` ? Key : TValue
+type PathParamKeys<TPath extends string> =
   TPath extends `${string}:${infer Param}/${infer Rest}`
-    ? (Param extends `${infer Key}?` ? Key : Param) | ExtractParams<`/${Rest}`>
+    ? NormalizeParamKey<Param> | PathParamKeys<`/${Rest}`>
     : TPath extends `${string}:${infer Param}`
-      ? Param extends `${infer Key}?` ? Key : Param
+      ? NormalizeParamKey<Param>
       : never
-
-type RouteParamsFor<TPath extends string> =
-  [ExtractParams<TPath>] extends [never]
+type HasPathParams<TPath extends string> = [PathParamKeys<TPath>] extends [never] ? false : true
+type PathParamsOf<TPath extends string> =
+  HasPathParams<TPath> extends false
     ? Record<string, never>
-    : { [K in ExtractParams<TPath>]: string | number }
-
-type HasParams<TPath extends string> =
-  [ExtractParams<TPath>] extends [never] ? false : true
+    : { [TKey in PathParamKeys<TPath>]: string | number }
 
 // ─── Link component ──────────────────────────────────────────
 
@@ -62,8 +61,8 @@ export type TypedLinkProps<
 > = OmitHref<InertiaLinkProps> & {
   route: TName
 } & (
-  HasParams<TManifest[TName]['path']> extends true
-    ? { params: RouteParamsFor<TManifest[TName]['path']> }
+  HasPathParams<TManifest[TName]['path']> extends true
+    ? { params: PathParamsOf<TManifest[TName]['path']> }
     : { params?: never }
 )
 
@@ -110,8 +109,8 @@ export type TypedFormProps<
   route: TName
   method?: 'get' | 'post' | 'put' | 'patch' | 'delete'
 } & (
-  HasParams<TManifest[TName]['path']> extends true
-    ? { params: RouteParamsFor<TManifest[TName]['path']> }
+  HasPathParams<TManifest[TName]['path']> extends true
+    ? { params: PathParamsOf<TManifest[TName]['path']> }
     : { params?: never }
 )
 

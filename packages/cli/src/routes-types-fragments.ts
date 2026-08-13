@@ -28,16 +28,19 @@ declare module '@inertiajs/core' {
 `
 
 /**
- * Param-key extraction from a route path literal.
+ * The path-param rule, from key extraction down to the derived shapes: which
+ * keys a route path literal binds, whether it binds any, and the params
+ * object they form.
  *
- * Emitted into every generated module that answers "does this path take
- * params?" — the route manifest and the API client — so they all derive the
- * answer from the path string the server routes on, not from whatever shape
- * their generator happens to emit alongside it.
+ * Emitted into every generated module that answers those questions — the
+ * route manifest and the API client — so they all derive the answers from
+ * the path string the server routes on, not from whatever shape their
+ * generator happens to emit alongside it.
  *
- * `ExtractParams` in @guren/inertia-client's components.tsx spells the same
- * rule for library code that cannot embed an emitted fragment; keep the two
- * in lockstep.
+ * @guren/inertia-client's components.tsx carries the same rule for library
+ * code that cannot embed an emitted fragment; routes-types-fragments.test.ts
+ * asserts it contains this fragment verbatim, so a change here fails there
+ * until both move.
  */
 export const PATH_PARAM_TYPE_HELPERS = `\
 type NormalizeParamKey<TValue extends string> = TValue extends \`\${infer Key}?\` ? Key : TValue
@@ -47,6 +50,11 @@ type PathParamKeys<TPath extends string> =
     : TPath extends \`\${string}:\${infer Param}\`
       ? NormalizeParamKey<Param>
       : never
+type HasPathParams<TPath extends string> = [PathParamKeys<TPath>] extends [never] ? false : true
+type PathParamsOf<TPath extends string> =
+  HasPathParams<TPath> extends false
+    ? Record<string, never>
+    : { [TKey in PathParamKeys<TPath>]: string | number }
 `
 
 /** Type definitions emitted after the route manifest object. */
@@ -61,13 +69,10 @@ type QueryValue = PrimitiveQueryValue | readonly PrimitiveQueryValue[]
 export type RouteQuery = Record<string, QueryValue>
 
 ${PATH_PARAM_TYPE_HELPERS}
-export type RouteParams<TName extends RouteName> =
-  [PathParamKeys<RouteManifest[TName]['path']>] extends [never]
-    ? Record<string, never>
-    : { [TKey in PathParamKeys<RouteManifest[TName]['path']>]: string | number }
+export type RouteParams<TName extends RouteName> = PathParamsOf<RouteManifest[TName]['path']>
 
 type RouteArgs<TName extends RouteName> =
-  [PathParamKeys<RouteManifest[TName]['path']>] extends [never]
+  HasPathParams<RouteManifest[TName]['path']> extends false
     ? [query?: RouteQuery]
     : [params: RouteParams<TName>, query?: RouteQuery]
 `

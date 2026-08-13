@@ -97,21 +97,11 @@ type PathParamKeys<TPath extends string> =
     : TPath extends `${string}:${infer Param}`
       ? NormalizeParamKey<Param>
       : never
-
-// Both derive from the path literal, so nothing about how the entries above
-// are emitted can silently flip `request()`'s call arity. Deliberately not
-// distributed over a union route name: the union of paths yields the union of
-// their param keys, so an un-narrowed name requires every member's params —
-// substituting a param a member's path lacks is a runtime no-op, while the
-// reverse (accepting one member's empty params) would send a path with its
-// `:param` unresolved. The one pair serves both `ApiRequestOptions` and
-// `request()` below; keep them on it, or a fix lands in one spelling and not
-// the other.
+type HasPathParams<TPath extends string> = [PathParamKeys<TPath>] extends [never] ? false : true
 type PathParamsOf<TPath extends string> =
-  [PathParamKeys<TPath>] extends [never]
+  HasPathParams<TPath> extends false
     ? Record<string, never>
     : { [TKey in PathParamKeys<TPath>]: string | number }
-type HasPathParams<TPath extends string> = [PathParamKeys<TPath>] extends [never] ? false : true
 
 export type ApiRouteParams<T extends ApiRouteName> = PathParamsOf<ApiRoutePath<T>>
 
@@ -129,10 +119,20 @@ export interface TypedResponse<TData> extends Response {
   json(): Promise<TData>
 }
 
-export type ApiRequestOptions<T extends ApiRouteName> =
-  HasPathParams<ApiRoutePath<T>> extends false
-    ? { params?: never; body?: BodyOf<ApiRoutes[T]>; query?: Record<string, unknown> }
-    : { params: ApiRouteParams<T>; body?: BodyOf<ApiRoutes[T]>; query?: Record<string, unknown> }
+// Params derive from the path literal, so nothing about how the entries above
+// are emitted can silently flip `request()`'s call arity. Deliberately not
+// distributed over a union route name (the conditional checks
+// `HasPathParams<...>`, never a bare type parameter): the union of paths
+// yields the union of their param keys, so an un-narrowed name requires every
+// member's params — substituting a param a member's path lacks is a runtime
+// no-op, while the reverse (accepting one member's empty params) would send a
+// path with its `:param` unresolved.
+type RequestOptionsOf<TRoute extends { path: string }> =
+  HasPathParams<TRoute['path']> extends false
+    ? { params?: never; body?: BodyOf<TRoute>; query?: Record<string, unknown> }
+    : { params: PathParamsOf<TRoute['path']>; body?: BodyOf<TRoute>; query?: Record<string, unknown> }
+
+export type ApiRequestOptions<T extends ApiRouteName> = RequestOptionsOf<ApiRoutes[T]>
 
 // The wire contract these mirror is owned by Guren's CSRF middleware: it
 // writes the XSRF-TOKEN cookie and reads either header name. Change them
@@ -222,8 +222,8 @@ export function createApiClient<TRoutes extends { [K in keyof TRoutes]: { method
     async request<TName extends keyof TRoutes & string>(
       name: TName,
       ...args: HasPathParams<TRoutes[TName]['path']> extends false
-        ? [options?: { params?: never; body?: BodyOf<TRoutes[TName]>; query?: Record<string, unknown> }]
-        : [options: { params: PathParamsOf<TRoutes[TName]['path']>; body?: BodyOf<TRoutes[TName]>; query?: Record<string, unknown> }]
+        ? [options?: RequestOptionsOf<TRoutes[TName]>]
+        : [options: RequestOptionsOf<TRoutes[TName]>]
     ): Promise<TypedResponse<ResponseOf<TRoutes[TName]>>> {
       const route = (routes as Record<string, { method: string; path: string }>)[name]
       if (!route) throw new Error(`Route [${name}] not defined.`)
