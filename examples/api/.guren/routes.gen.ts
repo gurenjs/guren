@@ -17,33 +17,38 @@ export const routeManifest = {
 
 export type RouteManifest = typeof routeManifest
 export type RouteName = keyof RouteManifest
-export type RouteMethod = RouteManifest[RouteName]['method']
-export type RoutePath = RouteManifest[RouteName]['path']
+export type RouteMethod = [RouteName] extends [never] ? string : RouteManifest[RouteName]['method']
+export type RoutePath = [RouteName] extends [never] ? string : RouteManifest[RouteName]['path']
 
 type PrimitiveQueryValue = string | number | boolean | null | undefined
 type QueryValue = PrimitiveQueryValue | readonly PrimitiveQueryValue[]
 export type RouteQuery = Record<string, QueryValue>
 
-type NormalizeParamKey<TValue extends string> = TValue extends `${infer Key}?` ? Key : TValue
-type PathParamKeys<TPath extends string> =
-  TPath extends `${string}:${infer Param}/${infer Rest}`
-    ? NormalizeParamKey<Param> | PathParamKeys<`/${Rest}`>
-    : TPath extends `${string}:${infer Param}`
-      ? NormalizeParamKey<Param>
-      : never
-
-export type RouteParams<TName extends RouteName> =
-  [PathParamKeys<RouteManifest[TName]['path']>] extends [never]
+type SegmentParamKey<TSegment extends string> = TSegment extends `:${infer TParam}`
+  ? TParam extends `${infer TName}{${string}`
+    ? TName
+    : TParam extends `${infer TName}?`
+      ? TName
+      : TParam
+  : never
+type PathParamKeys<TPath extends string> = TPath extends `${infer THead}/${infer TRest}`
+  ? SegmentParamKey<THead> | PathParamKeys<TRest>
+  : SegmentParamKey<TPath>
+type HasPathParams<TPath extends string> = [PathParamKeys<TPath>] extends [never] ? false : true
+type PathParamsOf<TPath extends string> =
+  HasPathParams<TPath> extends false
     ? Record<string, never>
-    : { [TKey in PathParamKeys<RouteManifest[TName]['path']>]: string | number }
+    : { [TKey in PathParamKeys<TPath>]: string | number }
+
+export type RouteParams<TName extends RouteName> = PathParamsOf<RouteManifest[TName]['path']>
 
 type RouteArgs<TName extends RouteName> =
-  [PathParamKeys<RouteManifest[TName]['path']>] extends [never]
+  HasPathParams<RouteManifest[TName]['path']> extends false
     ? [query?: RouteQuery]
     : [params: RouteParams<TName>, query?: RouteQuery]
 
 export function route<TName extends RouteName>(name: TName, ...args: RouteArgs<TName>): string {
-  const definition = routeManifest[name]
+  const definition: { method: RouteMethod; path: RoutePath } | undefined = routeManifest[name]
   if (!definition) {
     throw new Error(`Route [${String(name)}] not defined.`)
   }
@@ -76,7 +81,7 @@ export const routes = {
 } as const
 
 function hasPathParams(path: string): boolean {
-  return /:[A-Za-z0-9_-]+/u.test(path)
+  return /(?:^|\/):[A-Za-z0-9_-]/u.test(path)
 }
 
 function substituteParams(path: string, params?: Record<string, string | number>): string {
@@ -84,12 +89,12 @@ function substituteParams(path: string, params?: Record<string, string | number>
     return path
   }
 
-  return path.replace(/:([A-Za-z0-9_-]+)/gu, (match, key) => {
+  return path.replace(/(^|\/):([A-Za-z0-9_-]+\*?)(?:\{[^{}]*\{[^{}]*\}[^{}]*\}|\{[^{}]*\})?\??/gu, (match, prefix, key) => {
     if (!Object.prototype.hasOwnProperty.call(params, key)) {
       return match
     }
 
-    return encodeURIComponent(String(params[key]))
+    return `${prefix}${encodeURIComponent(String(params[key]))}`
   })
 }
 

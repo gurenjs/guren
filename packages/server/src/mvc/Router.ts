@@ -1024,13 +1024,31 @@ function createRouteBuilder<M extends string = never>(route: RegisteredRoute, na
   }
 }
 
+// Mirrors Hono's path lexing: a param starts only at a segment boundary
+// (`/status/foo:bar` is a literal), an attached regex constraint is consumed
+// whole (`{[0-9]{2}}` and `{[^/]{2}}` stay intact), and a trailing `?`/`*`
+// modifier belongs to the token. One pattern serves substitution and both
+// binding scanners below, so the lexing rule cannot drift between them.
+//
+// The constraint is spelled out to one level of nesting rather than with a
+// nested quantifier: every class here excludes both braces, so a scan stops
+// at the next brace instead of running to the end of the string. The
+// `\{[^}]*\}(?:[^/]*\})*` shape it replaces was quadratic (CodeQL
+// js/polynomial-redos; measured 2.9s for a 16k-char path, vs 1.9ms here).
+const PATH_PARAM_PATTERN = /(^|\/):([A-Za-z0-9_-]+\*?)(?:\{[^{}]*\{[^{}]*\}[^{}]*\}|\{[^{}]*\})?\??/gu
+
+/** Param labels in path order, with constraints and modifiers dropped. */
+function extractPathParamNames(path: string): string[] {
+  return Array.from(path.matchAll(PATH_PARAM_PATTERN), (match) => match[2]!)
+}
+
 function substituteParams(path: string, params: Record<string, string | number>): string {
-  return path.replace(/:([A-Za-z0-9_-]+)/gu, (match, key) => {
+  return path.replace(PATH_PARAM_PATTERN, (match, prefix, key) => {
     if (!Object.prototype.hasOwnProperty.call(params, key)) {
       return match
     }
 
-    return encodeURIComponent(String(params[key]))
+    return `${prefix}${encodeURIComponent(String(params[key]))}`
   })
 }
 
@@ -1295,7 +1313,7 @@ async function resolveModelBindings(
   const params = c.req.param()
 
   // Get path params in order from the route pattern
-  const pathParams = path?.match(/:([a-zA-Z0-9_-]+)/g)?.map(p => p.slice(1)) ?? []
+  const pathParams = path ? extractPathParamNames(path) : []
 
   for (const param of pathParams) {
     const resolver = modelBindings.get(param)
@@ -1363,9 +1381,9 @@ function serializeBindings(
 ): Record<string, string> | undefined {
   const entries = new Map<string, string>()
 
-  for (const param of path.match(/:(\w+)/g) ?? []) {
-    const name = routerBindingNames.get(param.slice(1))
-    if (name) entries.set(param.slice(1), name)
+  for (const param of extractPathParamNames(path)) {
+    const name = routerBindingNames.get(param)
+    if (name) entries.set(param, name)
   }
 
   for (const [param, model] of routeBindings ?? []) {

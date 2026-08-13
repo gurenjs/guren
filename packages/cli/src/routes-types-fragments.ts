@@ -32,6 +32,21 @@ declare module '@inertiajs/core' {
  * keys a route path literal binds, whether it binds any, and the params
  * object they form.
  *
+ * Mirrors Hono's own path lexing (verified against hono@4.13.1 by reading
+ * `c.req.param()` back): a param starts only at a segment boundary
+ * (`/status/foo:bar` is a static literal, not a param named `bar`), its key
+ * ends at the first `{` — a regex constraint may itself contain nested
+ * braces (`:t{[0-9]{2}}` is a valid Hono route) but is never part of the key
+ * — and a trailing `?` is dropped, because Hono strips it too
+ * (`/archive/:slug?` arrives as `slug`).
+ *
+ * A trailing `*` is deliberately **kept**: Hono does not strip it, so
+ * `/files/:slug*` arrives as the literal key `slug*`. Dropping it here would
+ * make the generated key disagree with `c.req.param()`, `validateParams()`,
+ * and route model binding for every inbound use. (`:slug*` is not wildcard
+ * syntax at all — `/files/x/y` 404s — which is why the routing guide tells
+ * you to write `:path{.+}` instead.)
+ *
  * Emitted into every generated module that answers those questions — the
  * route manifest and the API client — so they all derive the answers from
  * the path string the server routes on, not from whatever shape their
@@ -43,13 +58,16 @@ declare module '@inertiajs/core' {
  * until both move.
  */
 export const PATH_PARAM_TYPE_HELPERS = `\
-type NormalizeParamKey<TValue extends string> = TValue extends \`\${infer Key}?\` ? Key : TValue
-type PathParamKeys<TPath extends string> =
-  TPath extends \`\${string}:\${infer Param}/\${infer Rest}\`
-    ? NormalizeParamKey<Param> | PathParamKeys<\`/\${Rest}\`>
-    : TPath extends \`\${string}:\${infer Param}\`
-      ? NormalizeParamKey<Param>
-      : never
+type SegmentParamKey<TSegment extends string> = TSegment extends \`:\${infer TParam}\`
+  ? TParam extends \`\${infer TName}{\${string}\`
+    ? TName
+    : TParam extends \`\${infer TName}?\`
+      ? TName
+      : TParam
+  : never
+type PathParamKeys<TPath extends string> = TPath extends \`\${infer THead}/\${infer TRest}\`
+  ? SegmentParamKey<THead> | PathParamKeys<TRest>
+  : SegmentParamKey<TPath>
 type HasPathParams<TPath extends string> = [PathParamKeys<TPath>] extends [never] ? false : true
 type PathParamsOf<TPath extends string> =
   HasPathParams<TPath> extends false
@@ -95,11 +113,19 @@ export function route<TName extends RouteName>(name: TName, ...args: RouteArgs<T
 
 /**
  * The runtime half of the path-param rule: how a bound key is substituted
- * into the path. Token-based — whole `:param` tokens are replaced by key
- * lookup — so a param whose name is a prefix of another (`:id` vs
- * `:identifier`) can never corrupt it, and a key the path lacks really is a
- * no-op. A per-key `path.replace(':key', ...)` loop has neither property;
- * that spelling is what this fragment exists to keep out of the generators.
+ * into the path. Mirrors the same Hono lexing as PATH_PARAM_TYPE_HELPERS — a
+ * param starts only at a segment boundary, an attached regex constraint is consumed
+ * whole, including one level of nested braces (so `{[0-9]{2}}` stays intact), and the
+ * whole token is consumed so no modifier is left behind in the URL:
+ * `/items/:id{[0-9]+}` -> `/items/1`. A trailing `*` is part of the key
+ * itself (see PATH_PARAM_TYPE_HELPERS), so `/files/:slug*` is filled from
+ * `params['slug*']` — the same key the request arrives with.
+ *
+ * Whole tokens are replaced by key lookup, so a param whose name is a prefix
+ * of another (`:id` vs `:identifier`) can never corrupt it, and a key the
+ * path lacks really is a no-op. A per-key `path.replace(':key', ...)` loop
+ * has neither property; that spelling is what this fragment exists to keep
+ * out of the generators.
  *
  * Mirrored verbatim in @guren/inertia-client's components.tsx alongside
  * PATH_PARAM_TYPE_HELPERS, under the same pin test.
@@ -110,12 +136,12 @@ function substituteParams(path: string, params?: Record<string, string | number>
     return path
   }
 
-  return path.replace(/:([A-Za-z0-9_-]+)/gu, (match, key) => {
+  return path.replace(/(^|\\/):([A-Za-z0-9_-]+\\*?)(?:\\{[^{}]*\\{[^{}]*\\}[^{}]*\\}|\\{[^{}]*\\})?\\??/gu, (match, prefix, key) => {
     if (!Object.prototype.hasOwnProperty.call(params, key)) {
       return match
     }
 
-    return encodeURIComponent(String(params[key]))
+    return \`\${prefix}\${encodeURIComponent(String(params[key]))}\`
   })
 }
 `
@@ -123,7 +149,7 @@ function substituteParams(path: string, params?: Record<string, string | number>
 /** Runtime utility functions used by the `route()` helper. */
 export const RUNTIME_UTILITY_FUNCTIONS = `\
 function hasPathParams(path: string): boolean {
-  return /:[A-Za-z0-9_-]+/u.test(path)
+  return /(?:^|\\/):[A-Za-z0-9_-]/u.test(path)
 }
 
 ${PATH_PARAM_RUNTIME_HELPERS}

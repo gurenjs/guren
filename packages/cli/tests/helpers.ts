@@ -350,6 +350,26 @@ export function assertWorkspaceBuilt(artifacts: string[]): void {
 export const COLD_TSC_TIMEOUT = 180_000
 
 /**
+ * Base compiler options for compiling a generated module plus its usage probe
+ * in a temp directory. Spread and extend rather than mutate — several compile
+ * gates share it.
+ *
+ * No @types scan (`types: []`): the default type-root walk climbs ancestor
+ * directories, so a TMPDIR inside a workspace would silently pull in — and
+ * type-check — every @types package it finds there.
+ */
+export const GENERATED_MODULE_COMPILER_OPTIONS: ts.CompilerOptions = {
+  strict: true,
+  noEmit: true,
+  skipLibCheck: true,
+  target: ts.ScriptTarget.ES2022,
+  module: ts.ModuleKind.ESNext,
+  moduleResolution: ts.ModuleResolutionKind.Bundler,
+  lib: ['lib.es2022.d.ts', 'lib.dom.d.ts'],
+  types: [],
+}
+
+/**
  * Type-check `rootNames` in-process and return each diagnostic as a
  * `file:line TSxxxx: message` string — the compile gate for generated output.
  * An accepted `@ts-expect-error` probe surfaces as TS2578, so zero diagnostics

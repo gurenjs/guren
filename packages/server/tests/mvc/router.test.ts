@@ -931,3 +931,63 @@ describe('Router QUERY method (RFC 10008)', () => {
     expect(def!.middlewareNames).toEqual(['auth'])
   })
 })
+
+describe('Router route() with Hono path modifiers', () => {
+  it.each([
+    ['a regex-constrained param', '/items/:id{[0-9]+}', { id: 7 }, '/items/7'],
+    ['an optional param', '/archive/:slug?', { slug: 'news' }, '/archive/news'],
+    ['an optional regex-constrained param', '/tags/:code{[a-z]+}?', { code: 'abc' }, '/tags/abc'],
+    ['a constraint containing a slash character class', '/docs/:path{[^/]+}/meta', { path: 'intro' }, '/docs/intro/meta'],
+    ['a constraint with nested braces', '/at/:t{[0-9]{2}}', { t: 12 }, '/at/12'],
+    ['a constraint with both a slash and nested braces', '/c/:p{[^/]{2}}', { p: 'ab' }, '/c/ab'],
+    ['a trailing * as part of the key, as Hono reports it', '/files/:slug*', { 'slug*': 'intro' }, '/files/intro'],
+    ['a hyphenated param label', '/inventory/:item-id', { 'item-id': 7 }, '/inventory/7'],
+    ['params sharing a prefix, without clobbering', '/posts/:id/:idx', { id: 1, idx: 2 }, '/posts/1/2'],
+  ] as const)('substitutes %s', (_case, path, params, expected) => {
+    const router = new Router()
+    router.get(path, [StubController, 'show']).name('case.show')
+
+    expect(router.route('case.show', params as Record<string, string | number>)).toBe(expected)
+  })
+
+  it('leaves the whole token in place when the param is not supplied', () => {
+    const router = new Router()
+    router.get('/items/:id{[0-9]+}', [StubController, 'show']).name('items.show')
+
+    expect(router.route('items.show', {})).toBe('/items/:id{[0-9]+}')
+  })
+
+  it('treats a mid-segment colon as a literal, as Hono does', () => {
+    const router = new Router()
+    router.get('/status/foo:bar', [StubController, 'show']).name('status.show')
+
+    expect(router.route('status.show', { bar: 9 })).toBe('/status/foo:bar')
+  })
+})
+
+describe('Router binding introspection with Hono path modifiers', () => {
+  class FakeModel {
+    static findOrFail(): never {
+      throw new Error('not reached')
+    }
+  }
+
+  it('does not invent a binding for a colon inside a regex constraint', () => {
+    const router = new Router()
+    router.bind('kind', FakeModel as never)
+    router.bind('b', FakeModel as never)
+    router.get('/x/:kind{(?:a|:b)}/y', [StubController, 'show']).name('x.show')
+
+    const [def] = router.definitions()
+    expect(def!.bindings).toEqual({ kind: 'FakeModel' })
+  })
+
+  it('serializes a router-level binding for a hyphenated param', () => {
+    const router = new Router()
+    router.bind('item-id', FakeModel as never)
+    router.get('/inventory/:item-id', [StubController, 'show']).name('inventory.show')
+
+    const [def] = router.definitions()
+    expect(def!.bindings).toEqual({ 'item-id': 'FakeModel' })
+  })
+})

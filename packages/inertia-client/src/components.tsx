@@ -36,13 +36,16 @@ export interface RouteManifestLike {
 // Verbatim mirror of PATH_PARAM_TYPE_HELPERS in @guren/cli's
 // routes-types-fragments.ts (its JSDoc has the why); pinned character for
 // character by routes-types-fragments.test.ts there.
-type NormalizeParamKey<TValue extends string> = TValue extends `${infer Key}?` ? Key : TValue
-type PathParamKeys<TPath extends string> =
-  TPath extends `${string}:${infer Param}/${infer Rest}`
-    ? NormalizeParamKey<Param> | PathParamKeys<`/${Rest}`>
-    : TPath extends `${string}:${infer Param}`
-      ? NormalizeParamKey<Param>
-      : never
+type SegmentParamKey<TSegment extends string> = TSegment extends `:${infer TParam}`
+  ? TParam extends `${infer TName}{${string}`
+    ? TName
+    : TParam extends `${infer TName}?`
+      ? TName
+      : TParam
+  : never
+type PathParamKeys<TPath extends string> = TPath extends `${infer THead}/${infer TRest}`
+  ? SegmentParamKey<THead> | PathParamKeys<TRest>
+  : SegmentParamKey<TPath>
 type HasPathParams<TPath extends string> = [PathParamKeys<TPath>] extends [never] ? false : true
 type PathParamsOf<TPath extends string> =
   HasPathParams<TPath> extends false
@@ -60,12 +63,12 @@ function substituteParams(path: string, params?: Record<string, string | number>
     return path
   }
 
-  return path.replace(/:([A-Za-z0-9_-]+)/gu, (match, key) => {
+  return path.replace(/(^|\/):([A-Za-z0-9_-]+\*?)(?:\{[^{}]*\{[^{}]*\}[^{}]*\}|\{[^{}]*\})?\??/gu, (match, prefix, key) => {
     if (!Object.prototype.hasOwnProperty.call(params, key)) {
       return match
     }
 
-    return encodeURIComponent(String(params[key]))
+    return `${prefix}${encodeURIComponent(String(params[key]))}`
   })
 }
 

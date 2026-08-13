@@ -1,7 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from 'bun:test'
 import { mkdtemp, rm, readFile, mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { pathToFileURL } from 'node:url'
+import ts from 'typescript'
+import { checkTypes, COLD_TSC_TIMEOUT, GENERATED_MODULE_COMPILER_OPTIONS } from './helpers'
 import {
   buildDeclarationContent,
   buildRouteModuleContent,
@@ -33,6 +36,26 @@ describe('toTypeLiteral', () => {
 
   it('handles path without leading slash', () => {
     expect(toTypeLiteral('users/:id')).toBe('`/users/${string}`')
+  })
+
+  it('drops Hono regex constraints from dynamic segments', () => {
+    expect(toTypeLiteral('/items/:id{[0-9]+}')).toBe('`/items/${string}`')
+  })
+
+  it('keeps segments intact when a constraint contains a slash', () => {
+    expect(toTypeLiteral('/docs/:path{[^/]+}/meta')).toBe('`/docs/${string}/meta`')
+  })
+
+  it('keeps a nested-brace constraint out of the literal', () => {
+    expect(toTypeLiteral('/at/:t{[0-9]{2}}')).toBe('`/at/${string}`')
+  })
+
+  it('treats a mid-segment colon as a literal, as Hono does', () => {
+    expect(toTypeLiteral('/status/foo:bar')).toBe("'/status/foo:bar'")
+  })
+
+  it('keeps a static brace segment literal', () => {
+    expect(toTypeLiteral('/literal/{foo}')).toBe("'/literal/{foo}'")
   })
 })
 
@@ -232,3 +255,109 @@ describe('buildRouteModuleContent', () => {
     }
   })
 })
+
+/**
+ * The generated module is app-facing code, so string assertions only prove it
+ * mentions the right names. These run it (transpile, import, call `route()`)
+ * and compile a usage probe against it, covering the one bug class both
+ * gates exist for: Hono path modifiers (`{regex}`, `?`, `*`) leaking into
+ * param keys or substituted URLs.
+ */
+describe('generated route() with Hono path modifiers', () => {
+  const definitions: RouteDefinition[] = [
+    { method: 'GET', path: '/items/:id{[0-9]+}', name: 'items.show' },
+    { method: 'GET', path: '/archive/:slug?', name: 'archive.show' },
+    { method: 'GET', path: '/tags/:code{[a-z]+}?', name: 'tags.show' },
+    { method: 'GET', path: '/docs/:path{[^/]+}/meta', name: 'docs.meta' },
+    { method: 'GET', path: '/at/:t{[0-9]{2}}', name: 'at.show' },
+    { method: 'GET', path: '/c/:p{[^/]{2}}', name: 'combo.show' },
+    { method: 'GET', path: '/files/:slug*', name: 'files.show' },
+    { method: 'GET', path: '/posts/:id/:idx', name: 'posts.pair' },
+    { method: 'GET', path: '/status/foo:bar', name: 'status.show' },
+  ]
+
+  type RouteFn = (name: string, ...args: unknown[]) => string
+
+  let dir: string
+  let usageFile: string
+  let route: RouteFn
+
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'guren-cli-routes-gen-'))
+    usageFile = join(dir, 'usage.ts')
+    const source = buildRouteModuleContent(definitions, { source: 'routes/web.ts' })
+    const modulePath = join(dir, 'routes.gen.mjs')
+    await Promise.all([
+      writeFile(join(dir, 'routes.gen.ts'), source, 'utf8'),
+      writeFile(usageFile, ROUTES_USAGE_PROBE, 'utf8'),
+      writeFile(modulePath, new Bun.Transpiler({ loader: 'ts' }).transformSync(source), 'utf8'),
+    ])
+    ;({ route } = await import(pathToFileURL(modulePath).href))
+  })
+
+  afterAll(async () => {
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  it.each([
+    ['a regex-constrained param', 'items.show', { id: 7 }, '/items/7'],
+    ['an optional param', 'archive.show', { slug: 'news' }, '/archive/news'],
+    ['an optional regex-constrained param', 'tags.show', { code: 'abc' }, '/tags/abc'],
+    ['a constraint containing a slash character class', 'docs.meta', { path: 'intro' }, '/docs/intro/meta'],
+    ['a constraint with nested braces', 'at.show', { t: 12 }, '/at/12'],
+    ['a constraint with both a slash and nested braces', 'combo.show', { p: 'ab' }, '/c/ab'],
+    ['a trailing * as part of the key, as Hono reports it', 'files.show', { 'slug*': 'intro' }, '/files/intro'],
+    ['params sharing a prefix, without clobbering', 'posts.pair', { id: 1, idx: 2 }, '/posts/1/2'],
+  ] as const)('substitutes %s', (_case, name, params, expected) => {
+    expect(route(name, params)).toBe(expected)
+  })
+
+  it('treats a mid-segment colon as a literal, as Hono does', () => {
+    expect(route('status.show')).toBe('/status/foo:bar')
+  })
+
+  it('still appends the query string for a literal-colon path with no params', () => {
+    // hasPathParams() decides arity for the no-params-arg call form; a route
+    // whose type-level RouteArgs disagrees with the runtime check would
+    // silently drop this query string instead of appending it.
+    expect(route('status.show', { tab: 'x' })).toBe('/status/foo:bar?tab=x')
+  })
+
+  it('still appends the query string after a modifier substitution', () => {
+    expect(route('items.show', { id: 7 }, { tab: 'specs' })).toBe('/items/7?tab=specs')
+  })
+
+  it('compiles the usage probe against the emitted module', () => {
+    expect(checkTypes([usageFile], routesCompilerOptions)).toEqual([])
+  }, COLD_TSC_TIMEOUT)
+})
+
+const ROUTES_USAGE_PROBE = `import { route, routes } from './routes.gen'
+
+// Modifiers must normalize to the bare label in RouteParams keys.
+void route('items.show', { id: 1 })
+void route('archive.show', { slug: 'news' })
+void route('tags.show', { code: 'abc' })
+void route('docs.meta', { path: 'intro' })
+void route('at.show', { t: 12 })
+// Hono does not strip a trailing asterisk: the request arrives keyed
+// 'slug*', so that is the key the generated type has to ask for.
+void route('files.show', { 'slug*': 'intro' })
+// A mid-segment colon is a literal, not a param, so the route takes no params.
+void route('status.show')
+void routes.items.show({ id: 1 })
+
+// @ts-expect-error the regex constraint must not leak into the param key
+void route('items.show', { 'id{[0-9]+}': 1 })
+
+// @ts-expect-error the optional marker must not leak into the param key
+void route('archive.show', { 'slug?': 'news' })
+
+// @ts-expect-error the bare label is not the key Hono routes on
+void route('files.show', { slug: 'intro' })
+
+// @ts-expect-error a route with path params requires them
+void route('items.show')
+`
+
+const routesCompilerOptions: ts.CompilerOptions = GENERATED_MODULE_COMPILER_OPTIONS

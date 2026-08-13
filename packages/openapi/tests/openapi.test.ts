@@ -59,6 +59,39 @@ describe('@guren/openapi', () => {
     expect(document.paths['/posts/{id}']?.post?.responses['422']).toBeDefined()
   })
 
+  it('keeps Hono path modifiers out of path templates, parameters, and operation ids', () => {
+    // No `name`: operationId falls back to `name` when present, and these
+    // routes have to exercise buildOperationId's own path-derived id.
+    const definitions: RouteDefinition[] = [
+      { method: 'GET', path: '/items/:id{[0-9]+}' },
+      { method: 'GET', path: '/tags/:code{[a-z]+}?' },
+      { method: 'GET', path: '/docs/:path{[^/]+}/meta' },
+      { method: 'GET', path: '/at/:t{[0-9]{2}}' },
+      { method: 'GET', path: '/status/foo:bar' },
+    ]
+
+    const { document, warnings } = generateOpenApiDocument(definitions, {
+      title: 'Blog API',
+      version: '1.0.0',
+    })
+
+    expect(warnings).toEqual([])
+    expect(Object.keys(document.paths).sort()).toEqual(['/at/{t}', '/docs/{path}/meta', '/items/{id}', '/status/foo:bar', '/tags/{code}'])
+    expect(document.paths['/items/{id}']?.get?.parameters).toEqual([
+      { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+    ])
+    expect(document.paths['/tags/{code}']?.get?.parameters).toEqual([
+      { name: 'code', in: 'path', required: true, schema: { type: 'string' } },
+    ])
+    expect(document.paths['/items/{id}']?.get?.operationId).toBe('getItemsById')
+    expect(document.paths['/tags/{code}']?.get?.operationId).toBe('getTagsByCode')
+    expect(document.paths['/at/{t}']?.get?.parameters).toEqual([
+      { name: 't', in: 'path', required: true, schema: { type: 'string' } },
+    ])
+    // A mid-segment colon is a literal in Hono, so it is not a path param.
+    expect(document.paths['/status/foo:bar']?.get?.parameters).toBeUndefined()
+  })
+
   it('returns warnings for non-zod schemas', () => {
     const definitions: RouteDefinition[] = [
       {
