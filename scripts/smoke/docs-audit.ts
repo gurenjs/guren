@@ -42,6 +42,12 @@ async function auditEnglishDocs(root: string): Promise<void> {
   assert(!cli.includes('`check` and `audit` both exit'), 'CLI guide must not claim plain check sets an exit code — only the suite flags gate CI.')
   assert(cli.includes('`make:command <Name>`'), 'CLI guide must list make:command in the scaffold table.')
   assert(cli.includes('bun run console <command>'), 'CLI guide must distinguish the app command runner from the `guren console` REPL.')
+  // the per-agent MCP config map mirrors planComponents (agent-targets.ts);
+  // this paragraph already shipped one false claim (Cursor via .mcp.json)
+  for (const mcpPath of ['.mcp.json', '.cursor/mcp.json', '.vscode/mcp.json', '.codex/config.toml', 'opencode.json']) {
+    assert(cli.includes(mcpPath), `CLI guide must name ${mcpPath} in the agent harness MCP config map.`)
+  }
+  assert(cli.includes('agent:init --target'), 'CLI guide must document agent:init --target.')
 
   const consoleGuide = await read(root, 'docs/en/guides/console.md')
   assert(consoleGuide.includes('bunx guren make:command'), 'Console guide must document the make:command scaffold.')
@@ -178,6 +184,14 @@ async function auditEnglishDocs(root: string): Promise<void> {
 }
 
 async function auditJapaneseDocs(root: string): Promise<void> {
+  const cli = await read(root, 'docs/ja/guides/cli.md')
+  // same claims as the English CLI guide: the per-agent MCP config map
+  // mirrors planComponents (agent-targets.ts)
+  for (const mcpPath of ['.mcp.json', '.cursor/mcp.json', '.vscode/mcp.json', '.codex/config.toml', 'opencode.json']) {
+    assert(cli.includes(mcpPath), `Japanese CLI guide must name ${mcpPath} in the agent harness MCP config map.`)
+  }
+  assert(cli.includes('agent:init --target'), 'Japanese CLI guide must document agent:init --target.')
+
   const firstSteps = await read(root, 'docs/ja/guides/first-steps.md')
   assert(firstSteps.includes('@guren/core'), 'Japanese First Steps must describe the @guren/core standard path.')
   assert(firstSteps.includes('new PostResource(post).toJSON()'), 'Japanese First Steps must show explicit resource serialization.')

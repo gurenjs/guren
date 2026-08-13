@@ -57,6 +57,10 @@ useGitIdentity()
 // Bun charges to the *next* test.
 const GIT_TEST_TIMEOUT_MS = GIT_TIMEOUT_MS * 2
 
+function logged(target: typeof warnMock, text: string): boolean {
+  return target.mock.calls.some((call) => call.join(' ').includes(text))
+}
+
 describe('create-guren-app CLI', () => {
   it('scaffolds a SPA project and replaces tokens', async () => {
     const workspace = await createTempWorkspace('guren-create-app-cli-')
@@ -120,16 +124,57 @@ describe('create-guren-app CLI', () => {
           auth: false,
           db: 'sqlite',
           install: false,
-          agents: 'none',
+          // duplicates collapse before the "none is exclusive" check
+          agents: 'none,none',
         },
       })
 
-      expect(
-        infoMock.mock.calls.some((call) => call.join(' ').includes('Skipping the AI agent harness')),
-      ).toBe(true)
-      expect(
-        warnMock.mock.calls.some((call) => call.join(' ').includes('agent harness was not installed')),
-      ).toBe(false)
+      expect(logged(infoMock, 'Skipping the AI agent harness')).toBe(true)
+      expect(logged(warnMock, 'agent harness was not installed')).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('accepts a repeated --agents flag as accumulated by the arg parser', async () => {
+    const workspace = await createTempWorkspace('guren-create-app-cli-agents-repeat-')
+    try {
+      warnMock.mockClear()
+      await capturedCommand.run({
+        args: {
+          target: join(workspace.dir, 'repeat-agents-app'),
+          force: false,
+          mode: 'spa',
+          auth: false,
+          db: 'sqlite',
+          install: false,
+          agents: ['codex', 'cursor'],
+        },
+      })
+
+      expect(logged(warnMock, 'bunx guren agent:init --target codex,cursor')).toBe(true)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('forwards --agents all verbatim so the app CLI owns the expansion', async () => {
+    const workspace = await createTempWorkspace('guren-create-app-cli-agents-all-')
+    try {
+      warnMock.mockClear()
+      await capturedCommand.run({
+        args: {
+          target: join(workspace.dir, 'all-agents-app'),
+          force: false,
+          mode: 'spa',
+          auth: false,
+          db: 'sqlite',
+          install: false,
+          agents: 'all',
+        },
+      })
+
+      expect(logged(warnMock, 'bunx guren agent:init --target all')).toBe(true)
     } finally {
       await workspace.cleanup()
     }
@@ -151,11 +196,7 @@ describe('create-guren-app CLI', () => {
         },
       })
 
-      expect(
-        warnMock.mock.calls.some((call) =>
-          call.join(' ').includes('bunx guren agent:init --target codex,cursor'),
-        ),
-      ).toBe(true)
+      expect(logged(warnMock, 'bunx guren agent:init --target codex,cursor')).toBe(true)
     } finally {
       await workspace.cleanup()
     }
@@ -164,19 +205,23 @@ describe('create-guren-app CLI', () => {
   it('rejects an unknown --agents value before scaffolding work begins', async () => {
     const workspace = await createTempWorkspace('guren-create-app-cli-agents-bad-')
     try {
+      const appDir = join(workspace.dir, 'bad-agents-app')
       await expect(
         capturedCommand.run({
           args: {
-            target: join(workspace.dir, 'bad-agents-app'),
+            target: appDir,
             force: false,
             mode: 'spa',
             auth: false,
             db: 'sqlite',
             install: false,
-            agents: 'claud',
+            agents: 'all,claud',
           },
         }),
       ).rejects.toThrow('Invalid agent "claud"')
+
+      // the throw happened before the template copy, not after
+      await expect(access(join(appDir, 'package.json'))).rejects.toThrow()
     } finally {
       await workspace.cleanup()
     }

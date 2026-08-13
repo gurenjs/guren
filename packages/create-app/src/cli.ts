@@ -114,45 +114,51 @@ async function resolveDatabase(flagValue: unknown): Promise<DatabaseDriver> {
 // Mirrors AGENT_TARGETS in @guren/cli's agent-targets.ts — create-app cannot
 // import it (the CLI is installed into the scaffolded app, not here). The
 // app's own `guren agent:init --target` re-validates, so drift fails loud at
-// install time rather than shipping a harness for an unknown agent.
+// install time, and tests/agent-choices-mirror.test.ts pins the two lists
+// against each other.
 const AGENT_CHOICES = ['claude', 'codex', 'cursor', 'copilot', 'opencode'] as const
 type AgentChoice = (typeof AGENT_CHOICES)[number]
+const AGENT_CHOICE_SET = new Set<string>(AGENT_CHOICES)
+const AGENT_CHOICES_HELP = `Supported values are: ${AGENT_CHOICES.join(', ')}, all, none.`
+const DEFAULT_AGENTS: AgentChoice[] = ['claude']
 
-/** null = the user opted out of the harness entirely. */
-async function resolveAgents(flagValue: unknown): Promise<AgentChoice[] | null> {
-  if (typeof flagValue === 'string') {
-    const parts = flagValue
-      .split(',')
-      .map((part) => part.trim().toLowerCase())
-      .filter(Boolean)
-    if (parts.length === 0) {
-      throw new Error(`Invalid --agents value. Supported values are: ${AGENT_CHOICES.join(', ')}, all, none.`)
+/**
+ * The selection handed to `guren agent:init --target`: agent names, `['all']`
+ * forwarded verbatim (the app's CLI owns the expansion, so a framework
+ * release that learns a new target is not narrowed by this list), or null
+ * when the user opted out of the harness entirely.
+ */
+async function resolveAgents(flagValue: unknown): Promise<string[] | null> {
+  // citty accumulates a repeated --agents flag into an array; accept both
+  const raw = Array.isArray(flagValue) ? flagValue.join(',') : flagValue
+  if (typeof raw === 'string') {
+    // a Set both dedupes (so `none,none` still reads as plain "none") and
+    // preserves first-seen order for the --target list
+    const parts = new Set(
+      raw
+        .split(',')
+        .map((part) => part.trim().toLowerCase())
+        .filter(Boolean),
+    )
+    if (parts.size === 0) {
+      throw new Error(`Invalid --agents value. ${AGENT_CHOICES_HELP}`)
     }
-    if (parts.includes('none')) {
-      if (parts.length > 1) {
+    if (parts.has('none')) {
+      if (parts.size > 1) {
         throw new Error('--agents "none" cannot be combined with other values.')
       }
       return null
     }
-    let all = false
-    const agents: AgentChoice[] = []
     for (const part of parts) {
-      if (part === 'all') {
-        all = true
-        continue
-      }
-      if (!(AGENT_CHOICES as readonly string[]).includes(part)) {
-        throw new Error(`Invalid agent "${part}". Supported values are: ${AGENT_CHOICES.join(', ')}, all, none.`)
-      }
-      if (!agents.includes(part as AgentChoice)) {
-        agents.push(part as AgentChoice)
+      if (part !== 'all' && !AGENT_CHOICE_SET.has(part)) {
+        throw new Error(`Invalid agent "${part}". ${AGENT_CHOICES_HELP}`)
       }
     }
-    return all ? [...AGENT_CHOICES] : agents
+    return parts.has('all') ? ['all'] : [...parts]
   }
 
   if (!process.stdin.isTTY) {
-    return ['claude']
+    return DEFAULT_AGENTS
   }
 
   const result = await consola.prompt('Which AI coding agents should the agent harness support?', {
@@ -164,24 +170,29 @@ async function resolveAgents(flagValue: unknown): Promise<AgentChoice[] | null> 
       { value: 'copilot', label: 'GitHub Copilot' },
       { value: 'opencode', label: 'OpenCode' },
     ],
-    initial: ['claude'],
+    initial: DEFAULT_AGENTS,
     required: false,
   })
 
+  // an unexpected prompt shape falls back to the default like the sibling
+  // resolvers do — never to "no harness"; only a selection positively read
+  // as empty means the user deselected everything
   if (!Array.isArray(result)) {
-    return ['claude']
+    return DEFAULT_AGENTS
+  }
+  if (result.length === 0) {
+    return null
   }
   const agents = result
-    // consola types the multiselect return loosely; accept both plain values
-    // and `{ value }` option objects rather than misreading either as "none"
     .map((entry) =>
-      typeof entry === 'object' && entry !== null && 'value' in entry
-        ? String((entry as { value: unknown }).value)
-        : String(entry),
+      String(
+        typeof entry === 'object' && entry !== null && 'value' in entry
+          ? (entry as { value: unknown }).value
+          : entry,
+      ),
     )
-    .filter((value): value is AgentChoice => (AGENT_CHOICES as readonly string[]).includes(value))
-  // deselecting everything is the interactive way of saying "no harness"
-  return agents.length > 0 ? agents : null
+    .filter((value) => AGENT_CHOICE_SET.has(value))
+  return agents.length > 0 ? agents : DEFAULT_AGENTS
 }
 
 async function resolveGitInit(flagValue: unknown, target: { dir: string; wasEmpty: boolean }): Promise<boolean> {
@@ -354,20 +365,23 @@ const command = defineCommand({
       installed = await installDependencies(targetDir)
     }
 
-    let harnessInstalled = false
     if (agents === null) {
-      consola.info('Skipping the AI agent harness. Add it later with `bunx guren agent:init`.')
+      consola.info(
+        'Skipping the AI agent harness. Add it later with `bunx guren agent:init --target <agents>`.',
+      )
     } else {
+      const targetList = agents.join(',')
+      let harnessInstalled = false
       if (installed) {
         consola.start('Setting up AI agent harness...')
-        harnessInstalled = await runAppCli(targetDir, ['agent:init', '--target', agents.join(',')])
+        harnessInstalled = await runAppCli(targetDir, ['agent:init', '--target', targetList])
         if (harnessInstalled) {
-          consola.success(`AI agent harness installed for: ${agents.join(', ')}`)
+          consola.success(`AI agent harness installed for: ${targetList}`)
         }
       }
       if (!harnessInstalled) {
         consola.warn(
-          `AI agent harness was not installed automatically. Run \`bunx guren agent:init --target ${agents.join(',')}\` inside the app after installing dependencies.`,
+          `AI agent harness was not installed automatically. Run \`bunx guren agent:init --target ${targetList}\` inside the app after installing dependencies.`,
         )
       }
     }
