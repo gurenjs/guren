@@ -57,6 +57,19 @@ describe('makeModule', () => {
     }
   })
 
+  it('rejects a module name starting with a digit', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-module-digit-')
+    try {
+      // `modules/2fa/` would be PascalCased into `2faInvoice` by codegen.
+      await expect(makeModule('2fa')).rejects.toThrow(/Invalid module name/)
+
+      const created = await readFile(join(workspace.dir, 'modules/2fa/index.ts'), 'utf8').catch(() => null)
+      expect(created).toBeNull()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('patches an existing db/schema.ts with a re-export', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-module-schema-patch-')
     try {
