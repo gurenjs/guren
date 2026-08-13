@@ -31,15 +31,23 @@ export interface ScaffoldOptions {
  * a manifest into an app that cannot compile one, and an agent reading this
  * result is exactly who needs to hear that a page it just wrote was ignored.
  *
- * `definitions` is the route manifest `generateRouteTypes` builds. It stays
- * opaque here — this package only carries it from one CLI call to the next
- * (`generateApiClientTypes` consumes it) and never reads inside it, so
- * mirroring the CLI's route shape would only create something to keep in sync.
+ * `definitions` is what a generator extracted: the route manifest from
+ * `generateRouteTypes`, the Resource definitions from `generateDataTypes`.
+ * It stays opaque here — this package only carries it from one CLI call to
+ * the next (`generateApiClientTypes` consumes both) and never reads inside
+ * it, so mirroring the CLI's shapes would only create something to keep in
+ * sync.
  */
 export interface CodegenResult {
   outputPath?: string
   definitions?: unknown[]
   skipped?: { message: string } | null
+  /**
+   * Diagnostics the generator wants surfaced to whoever asked for the run —
+   * a `resource` response hint naming an unknown Resource class, for
+   * instance. Non-fatal: the artifact was still written.
+   */
+  warnings?: string[]
 }
 
 /**
@@ -99,11 +107,13 @@ export interface GurenCliApi {
   generateChannelTypes(opts: CodegenOptions): Promise<CodegenResult | void>
   /**
    * Takes the route manifest `generateRouteTypes` returns, so it can only run
-   * after that succeeded.
+   * after that succeeded. `resources` is the Resource set `generateDataTypes`
+   * extracted — without it every `resource` response hint is "unknown
+   * Resource" and the client's `json()` stays untyped.
    */
   generateApiClientTypes(
     definitions: unknown[],
-    opts: CodegenOptions,
+    opts: CodegenOptions & { resources?: unknown[] },
   ): Promise<CodegenResult | void>
   /**
    * Route-dependent context generation that re-runs the CLI in a fresh
@@ -353,6 +363,7 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
 
       const generated: string[] = []
       const skipped: Array<{ artifacts: string[]; reason: string }> = []
+      const warnings: string[] = []
       let failed = false
 
       /**
@@ -373,6 +384,9 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
           } else {
             generated.push(...artifacts)
           }
+          // Non-fatal diagnostics travel to the agent that requested the run
+          // — a console line on this server's stderr reaches nobody.
+          if (result?.warnings) warnings.push(...result.warnings)
           return result
         } catch (error) {
           failed = true
@@ -391,17 +405,20 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
         () => cli.generateRouteTypes(options),
       )
       await run(['.guren/pages.gen.ts'], () => cli.generatePageTypes(options))
-      await run(['.guren/data.gen.ts'], () => cli.generateDataTypes(options))
+      const data = await run(['.guren/data.gen.ts'], () => cli.generateDataTypes(options))
       await run(['.guren/channels.gen.ts'], () => cli.generateChannelTypes(options))
       await run(['.guren/api-client.gen.ts'], () => {
         if (!routes?.definitions) {
           throw new Error('route generation produced no manifest to build a client from')
         }
-        return cli.generateApiClientTypes(routes.definitions, options)
+        // Resource definitions ride along so `resource` response hints
+        // resolve — dropped, they would all warn and the regenerated client
+        // would silently lose its typed json().
+        return cli.generateApiClientTypes(routes.definitions, { ...options, resources: data?.definitions })
       })
 
       return {
-        content: [{ type: 'text', text: JSON.stringify({ generated, skipped }, null, 2) }],
+        content: [{ type: 'text', text: JSON.stringify({ generated, skipped, warnings }, null, 2) }],
         // A generator that found nothing to describe is not a failure — an
         // app with no page components is a normal shape — so only a thrown
         // one makes the run an error, even when other artifacts landed.

@@ -21,6 +21,7 @@ import {
   ZOD3_UNSUPPORTED_MESSAGE,
   type ZodSchemaLike,
 } from '@guren/core/internal/zod-compat'
+import { quoteObjectKey } from './utils'
 
 interface SchemaTypeOptions {
   /**
@@ -123,7 +124,9 @@ function zodToType(z: ZodSchemaLike, io: SchemaIo): string {
       if (entries.length === 0) return '{}'
       const fields = entries.map(([key, val]) => {
         const opt = isOptional(val, io) ? '?' : ''
-        return `${key}${opt}: ${zodToType(val, io)}`
+        // Quoted when not a bare identifier — z.object({ 'user-id': ... })
+        // would otherwise emit invalid TypeScript.
+        return `${quoteObjectKey(key)}${opt}: ${zodToType(val, io)}`
       })
       return `{ ${fields.join('; ')} }`
     }

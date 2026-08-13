@@ -8,6 +8,7 @@ import { createMcpServer } from '../../src/mcp/create-mcp-server'
 import type { CodegenOptions, CodegenResult, GurenCliApi } from '../../src/mcp/create-mcp-server'
 
 const ROUTE_MANIFEST = [{ method: 'GET', path: '/posts', name: 'posts.index' }]
+const RESOURCE_DEFINITIONS = [{ className: 'PostResource', dataName: 'Post' }]
 
 type CodegenCall = { generator: string; options: CodegenOptions; definitions?: unknown[] }
 
@@ -95,9 +96,9 @@ function createMockCli(overrides: Partial<GurenCliApi> = {}, calls?: CodegenCall
     makeRoute: async (name) => `routes/${name}.ts`,
     generateRouteTypes: record('generateRouteTypes', { definitions: ROUTE_MANIFEST }),
     generatePageTypes: record('generatePageTypes'),
-    generateDataTypes: record('generateDataTypes'),
+    generateDataTypes: record('generateDataTypes', { definitions: RESOURCE_DEFINITIONS }),
     generateChannelTypes: record('generateChannelTypes'),
-    generateApiClientTypes: async (definitions: unknown[], options: CodegenOptions) => {
+    generateApiClientTypes: async (definitions: unknown[], options: CodegenOptions & { resources?: unknown[] }) => {
       calls?.push({ generator: 'generateApiClientTypes', options, definitions })
     },
     ...overrides,
@@ -347,6 +348,24 @@ describe('Guren MCP Server', () => {
       expect(call.options.force).toBe(true)
     }
     expect(calls.at(-1)?.definitions).toEqual(ROUTE_MANIFEST)
+    // Resource definitions must ride along, or every `resource` response
+    // hint resolves to "unknown Resource" and the regenerated client
+    // silently loses its typed json().
+    expect((calls.at(-1)?.options as { resources?: unknown[] }).resources).toEqual(RESOURCE_DEFINITIONS)
+  })
+
+  test('guren_codegen surfaces generator warnings in the tool payload', async () => {
+    const warning = 'Route "posts.search" declares a resource response hint referencing "GhostResource", but no matching Resource class was found in app/Http/Resources — response left untyped.'
+    const client = await createTestClient({
+      generateApiClientTypes: async () => ({ outputPath: '.guren/api-client.gen.ts', warnings: [warning] }),
+    })
+    const result = await client.callTool({ name: 'guren_codegen', arguments: {} })
+    const data = JSON.parse((result.content as Array<{ type: string; text: string }>)[0].text)
+
+    // The MCP client is the only console this run has — warnings must land
+    // in the payload, not on the server process's stderr.
+    expect(data.warnings).toEqual([warning])
+    expect(data.generated).toContain('.guren/api-client.gen.ts')
   })
 
   test('guren_codegen skips the API client when route generation failed', async () => {

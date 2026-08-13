@@ -20,6 +20,8 @@ export type {
   RouteMiddlewareInput,
   RouteOpenApiMetadata,
   ResourceAction as RouteResourceAction,
+  ResourceResponseHint,
+  ResourceResponseShape,
   ResourceRouteOptions,
 } from './mvc/Router'
 export { ViewEngine } from './mvc/ViewEngine'

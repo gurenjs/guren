@@ -24,7 +24,22 @@ const definitions: RouteDefinitionLike[] = [
       output: z.object({ data: z.array(z.object({ id: z.number(), title: z.string() })) }),
     },
   },
+  {
+    method: 'GET',
+    path: '/articles',
+    name: 'articles.index',
+    resource: { data: ['ArticleResource'] },
+  },
 ]
+
+const resources = [{ className: 'ArticleResource', dataName: 'Article' }]
+
+// What data.gen.ts would carry for ArticleResource — the emitted client
+// imports `Data` from this sibling, so the compile gate needs it on disk.
+const DATA_GEN = `export namespace Data {
+  export type Article = { id: number; title: string }
+}
+`
 
 // One emitted module shared by every suite below: the compile gate reads the
 // .ts source next to its usage probe, the runtime suite imports the
@@ -37,9 +52,10 @@ beforeAll(async () => {
   dir = await mkdtemp(join(tmpdir(), 'guren-cli-api-client-'))
   usageFile = join(dir, 'usage.ts')
   modulePath = join(dir, 'api-client.gen.mjs')
-  const source = buildApiClientContent(definitions)
+  const source = buildApiClientContent(definitions, { resources })
   await Promise.all([
     writeFile(join(dir, 'api-client.gen.ts'), source, 'utf8'),
+    writeFile(join(dir, 'data.gen.ts'), DATA_GEN, 'utf8'),
     writeFile(usageFile, USAGE_PROBE, 'utf8'),
     writeFile(modulePath, new Bun.Transpiler({ loader: 'ts' }).transformSync(source), 'utf8'),
   ])
@@ -60,6 +76,68 @@ describe('buildApiClientContent', () => {
     // else in this file type-checks the emitted source: the create-app
     // template it lands in is excluded from every tsconfig.
     expect(content).toContain('(globalThis as { document?: { cookie?: string } }).document?.cookie')
+  })
+
+  it('types the response from a resource hint via the Data namespace', () => {
+    const content = buildApiClientContent(definitions, { resources })
+
+    expect(content).toContain("import type { Data } from './data.gen'")
+    expect(content).toContain('response: { data: Array<Data.Article> }')
+  })
+
+  it('renders nested hints: bare classes, collections, and quoted envelope keys', () => {
+    const content = buildApiClientContent(
+      [{
+        method: 'GET',
+        path: '/feed',
+        name: 'feed.index',
+        resource: { entry: 'ArticleResource', 'kebab-key': ['ArticleResource'] },
+      }],
+      { resources },
+    )
+
+    expect(content).toContain("response: { entry: Data.Article; 'kebab-key': Array<Data.Article> }")
+  })
+
+  it('lets a bound output schema win over a resource hint', () => {
+    const content = buildApiClientContent(
+      [{
+        method: 'GET',
+        path: '/articles',
+        name: 'articles.index',
+        schemas: { output: z.object({ total: z.number() }) },
+        resource: { data: ['ArticleResource'] },
+      }],
+      { resources },
+    )
+
+    expect(content).toContain('response: { total: number }')
+    expect(content).not.toContain('Data.Article')
+    // Nothing referenced Data, so the import must not be emitted — data.gen
+    // may not even exist for an app whose only hints are shadowed.
+    expect(content).not.toContain("from './data.gen'")
+  })
+
+  it('leaves the response untyped and warns when a hinted Resource is unknown', () => {
+    const warnings: string[] = []
+    const content = buildApiClientContent(
+      [{
+        method: 'GET',
+        path: '/articles',
+        name: 'articles.index',
+        resource: { data: ['GhostResource'], author: 'ArticleResource' },
+      }],
+      { resources, warnings },
+    )
+
+    // The whole entry, verbatim: proves no response line landed on it (the
+    // static client template legitimately mentions `response:` elsewhere).
+    expect(content).toContain("  'articles.index': {\n    method: 'GET'\n    path: '/articles'\n  }")
+    expect(content).not.toContain("from './data.gen'")
+    expect(warnings).toEqual([
+      'Route "articles.index" declares a resource response hint referencing "GhostResource", '
+      + 'but no matching Resource class was found in app/Http/Resources — response left untyped.',
+    ])
   })
 })
 
@@ -86,6 +164,14 @@ export const searchResults: { data: Array<{ id: number; title: string }> } =
 
 // @ts-expect-error routes without an output schema parse to unknown
 export const untypedResults: { data: unknown[] } = await (await client.request('posts.index')).json()
+
+// A resource response hint types json() from the generated Data namespace.
+export const articles: { data: Array<{ id: number; title: string }> } =
+  await (await client.request('articles.index')).json()
+
+// @ts-expect-error the resource-hinted json() rejects a mismatched shape
+export const wrongArticles: { data: Array<{ id: string }> } =
+  await (await client.request('articles.index')).json()
 
 // The assignability probe above would also pass if json() regressed to \`any\`
 // (or \`never\`) — this one would not: both make the directive unused (TS2578).
