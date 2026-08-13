@@ -6,7 +6,8 @@
  * separate frontend applications.
  */
 import { resolve } from 'node:path'
-import { escapeSingleQuoted as escapeSingleQuotes, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
+import { escapeSingleQuoted as escapeSingleQuotes, extractPathParamNames, quoteObjectKey, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
+import { RUNTIME_SUBSTITUTE_PARAMS_FUNCTION } from './routes-types-fragments'
 import { schemaToTypeString } from './schema-type-extractor'
 
 export interface RouteDefinitionLike {
@@ -55,9 +56,9 @@ export function buildApiClientContent(definitions: RouteDefinitionLike[]): strin
 
   const routeEntries = named
     .map((d) => {
-      const params = extractParams(d.path)
+      const params = extractPathParamNames(d.path)
       const paramsType = params.length > 0
-        ? `{ ${params.map((p) => `${p}: string | number`).join('; ')} }`
+        ? `{ ${params.map((p) => `${quoteObjectKey(p)}: string | number`).join('; ')} }`
         : 'Record<string, never>'
       const bodyType = d.schemas?.body ? schemaToTypeString(d.schemas.body, { io: 'input' }) : undefined
       const responseType = d.schemas?.output ? schemaToTypeString(d.schemas.output, { io: 'output' }) : undefined
@@ -200,12 +201,7 @@ export function createApiClient<TRoutes extends { [K in keyof TRoutes]: { method
       if (!route) throw new Error(\`Route [\${name}] not defined.\`)
 
       const opts = (args as unknown[])[0] as { params?: Record<string, unknown>; body?: unknown; query?: Record<string, unknown> } | undefined
-      let path = route.path
-      if (opts?.params) {
-        for (const [key, value] of Object.entries(opts.params)) {
-          path = path.replace(\`:$\{key}\`, encodeURIComponent(String(value)))
-        }
-      }
+      const path = substituteParams(route.path, opts?.params as Record<string, string | number> | undefined)
 
       let url = \`$\{config.baseUrl}$\{path}\`
       if (opts?.query) {
@@ -245,11 +241,8 @@ export function createApiClient<TRoutes extends { [K in keyof TRoutes]: { method
 const routes: Record<string, { method: string; path: string }> = {
 ${named.map((d) => `  '${escapeSingleQuotes(d.name)}': { method: '${d.method}', path: '${escapeSingleQuotes(d.path)}' },`).join('\n')}
 }
-`
+
+${RUNTIME_SUBSTITUTE_PARAMS_FUNCTION}`
 }
 
-function extractParams(path: string): string[] {
-  const matches = path.match(/:([A-Za-z0-9_]+)/g)
-  return matches ? matches.map((m) => m.slice(1)) : []
-}
 

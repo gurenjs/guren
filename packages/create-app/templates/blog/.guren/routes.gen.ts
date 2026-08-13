@@ -30,13 +30,21 @@ type PrimitiveQueryValue = string | number | boolean | null | undefined
 type QueryValue = PrimitiveQueryValue | readonly PrimitiveQueryValue[]
 export type RouteQuery = Record<string, QueryValue>
 
-type NormalizeParamKey<TValue extends string> = TValue extends `${infer Key}?` ? Key : TValue
-type PathParamKeys<TPath extends string> =
-  TPath extends `${string}:${infer Param}/${infer Rest}`
-    ? NormalizeParamKey<Param> | PathParamKeys<`/${Rest}`>
-    : TPath extends `${string}:${infer Param}`
-      ? NormalizeParamKey<Param>
-      : never
+// Mirrors Hono's path lexing: a param starts only at a segment boundary, its
+// key ends at the first `{` (regex constraints, which may nest braces, are
+// never part of it), and a trailing `?`/`*` modifier is dropped.
+type SegmentParamKey<TSegment extends string> = TSegment extends `:${infer TParam}`
+  ? TParam extends `${infer TName}{${string}`
+    ? TName
+    : TParam extends `${infer TName}?`
+      ? TName
+      : TParam extends `${infer TName}*`
+        ? TName
+        : TParam
+  : never
+type PathParamKeys<TPath extends string> = TPath extends `${infer THead}/${infer TRest}`
+  ? SegmentParamKey<THead> | PathParamKeys<TRest>
+  : SegmentParamKey<TPath>
 
 export type RouteParams<TName extends RouteName> =
   [PathParamKeys<RouteManifest[TName]['path']>] extends [never]
@@ -94,20 +102,24 @@ export const routes = {
 } as const
 
 function hasPathParams(path: string): boolean {
-  return /:[A-Za-z0-9_-]+/u.test(path)
+  return /(?:^|\/):[A-Za-z0-9_-]/u.test(path)
 }
 
+// Mirrors Hono's path lexing: a param starts only at a segment boundary, an
+// attached regex constraint runs to the last `}` before the next `/` (so
+// `{[0-9]{2}}` stays whole), and a trailing `?`/`*` modifier is consumed
+// with the token: `/items/:id{[0-9]+}` -> `/items/1`.
 function substituteParams(path: string, params?: Record<string, string | number>): string {
   if (!params) {
     return path
   }
 
-  return path.replace(/:([A-Za-z0-9_-]+)/gu, (match, key) => {
+  return path.replace(/(^|\/):([A-Za-z0-9_-]+)(?:\{[^}]*\}(?:[^/]*\})*)?[?*]?/gu, (match, prefix, key) => {
     if (!Object.prototype.hasOwnProperty.call(params, key)) {
       return match
     }
 
-    return encodeURIComponent(String(params[key]))
+    return `${prefix}${encodeURIComponent(String(params[key]))}`
   })
 }
 

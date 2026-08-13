@@ -1,5 +1,5 @@
 import { relative, resolve } from 'node:path'
-import { escapeSingleQuoted as escapeSingleQuotes, escapeTemplateLiteral as escapeTemplateSegment, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
+import { PATH_PARAM_PATTERN, escapeSingleQuoted as escapeSingleQuotes, escapeTemplateLiteral as escapeTemplateSegment, extractPathParamNames, quoteObjectKey as quoteKey, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
 import {
   DECLARATION_MODULE_AUGMENTATION,
@@ -124,18 +124,23 @@ ${RUNTIME_UTILITY_FUNCTIONS}`
 }
 
 export function toTypeLiteral(path: string): string {
-  if (!path.includes(':')) {
+  // Replacing each param token with a placeholder first keeps constraint
+  // contents (which may include `/`) out of the segment split, and leaves
+  // literal segments — including `foo:bar` and `{static}` — untouched.
+  const masked = path.replace(PATH_PARAM_PATTERN, '$1\u0000')
+
+  if (!masked.includes('\u0000')) {
     return `'${escapeSingleQuotes(path)}'`
   }
 
-  const segments = path.split('/')
+  const segments = masked.split('/')
   const rendered = segments
     .map((segment) => {
       if (!segment) {
         return ''
       }
 
-      if (segment.startsWith(':')) {
+      if (segment.includes('\u0000')) {
         return '${string}'
       }
 
@@ -188,17 +193,11 @@ function renderHelperTree(node: HelperTreeNode, depth: number): string {
   return `{\n${entries.join(',\n')}\n${'  '.repeat(depth - 1)}}`
 }
 
-const VALID_JS_IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/u
-
-function quoteKey(segment: string): string {
-  return VALID_JS_IDENTIFIER.test(segment) ? segment : `'${escapeSingleQuotes(segment)}'`
-}
-
 function renderHelperNode(segment: string, node: HelperTreeNode, depth: number): string {
   const key = quoteKey(segment)
 
   if (node.route && node.children.size === 0) {
-    const params = extractParamNames(node.route.path)
+    const params = extractPathParamNames(node.route.path)
     if (params.length === 0) {
       return `${key}: (query?: RouteQuery) => route('${node.route.name}', query)`
     }
@@ -207,7 +206,7 @@ function renderHelperNode(segment: string, node: HelperTreeNode, depth: number):
   }
 
   if (node.route && node.children.size > 0) {
-    const params = extractParamNames(node.route.path)
+    const params = extractPathParamNames(node.route.path)
     const selfFn = params.length === 0
       ? `(query?: RouteQuery) => route('${node.route.name}', query)`
       : `(params: RouteParams<'${node.route.name}'>, query?: RouteQuery) => route('${node.route.name}', params, query)`
@@ -222,8 +221,4 @@ function renderHelperNode(segment: string, node: HelperTreeNode, depth: number):
   }
 
   return `${key}: ${renderHelperTree(node, depth)}`
-}
-
-function extractParamNames(path: string): string[] {
-  return Array.from(path.matchAll(/:([A-Za-z0-9_-]+)/gu), (match) => match[1])
 }

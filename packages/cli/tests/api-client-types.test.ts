@@ -5,12 +5,14 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { z } from 'zod'
-import { checkTypes, COLD_TSC_TIMEOUT } from './helpers'
+import { checkTypes, COLD_TSC_TIMEOUT, GENERATED_MODULE_COMPILER_OPTIONS } from './helpers'
 import { buildApiClientContent, type RouteDefinitionLike } from '../src/api-client-types'
 
 const definitions: RouteDefinitionLike[] = [
   { method: 'GET', path: '/posts', name: 'posts.index' },
   { method: 'GET', path: '/posts/:id', name: 'posts.show' },
+  { method: 'GET', path: '/items/:id{[0-9]+}', name: 'items.show' },
+  { method: 'GET', path: '/inventory/:item-id{[0-9]+}', name: 'inventory.show' },
   { method: 'POST', path: '/posts', name: 'posts.store' },
   {
     method: 'QUERY',
@@ -63,7 +65,12 @@ const client = createApiClient<ApiRoutes>({ baseUrl: 'http://localhost:3000' })
 
 void client.request('posts.index')
 void client.request('posts.show', { params: { id: 1 } })
+void client.request('items.show', { params: { id: 1 } })
+void client.request('inventory.show', { params: { 'item-id': 1 } })
 void client.request('posts.search', { body: { keywords: ['guren'] } })
+
+// @ts-expect-error the regex constraint must not leak into the param key
+void client.request('items.show', { params: { 'id{[0-9]+}': 1 } })
 
 // @ts-expect-error a route with path params requires them
 void client.request('posts.show')
@@ -84,19 +91,7 @@ export const paramsRejected: ApiRequestOptions<'posts.index'> = { params: {} }
 export const paramsRequired: ApiRequestOptions<'posts.show'> = {}
 `
 
-const compilerOptions: ts.CompilerOptions = {
-  strict: true,
-  noEmit: true,
-  skipLibCheck: true,
-  target: ts.ScriptTarget.ES2022,
-  module: ts.ModuleKind.ESNext,
-  moduleResolution: ts.ModuleResolutionKind.Bundler,
-  lib: ['lib.es2022.d.ts', 'lib.dom.d.ts'],
-  // No @types scan: the default type-root walk climbs ancestor directories,
-  // so a TMPDIR inside a workspace would silently pull in — and type-check —
-  // every @types package it finds there.
-  types: [],
-}
+const compilerOptions: ts.CompilerOptions = GENERATED_MODULE_COMPILER_OPTIONS
 
 /**
  * The emitted module's types are only exercised where a call site exists —
@@ -123,7 +118,7 @@ describe('generated createApiClient', () => {
     baseUrl: string
     headers?: Record<string, string>
     credentials?: RequestCredentials
-  }) => { request: (name: string, options?: { body?: unknown }) => Promise<Response> }
+  }) => { request: (name: string, options?: { params?: Record<string, unknown>; body?: unknown }) => Promise<Response> }
 
   const PAGE_ORIGIN = 'http://localhost:3000'
   const originalFetch = globalThis.fetch
@@ -189,6 +184,22 @@ describe('generated createApiClient', () => {
     await createApiClient({ baseUrl: PAGE_ORIGIN }).request('posts.store', { body: {} })
 
     expect(headersOf(calls[0]!.init)['X-XSRF-TOKEN']).toBe('right')
+  })
+
+  it('substitutes params through Hono modifiers in the URL', async () => {
+    const { calls } = stubFetch()
+
+    await createApiClient({ baseUrl: 'http://api.example.com' }).request('items.show', { params: { id: 7 } })
+
+    expect(calls[0]!.url).toBe('http://api.example.com/items/7')
+  })
+
+  it('substitutes hyphenated param labels, matching the emitted params type', async () => {
+    const { calls } = stubFetch()
+
+    await createApiClient({ baseUrl: 'http://api.example.com' }).request('inventory.show', { params: { 'item-id': 7 } })
+
+    expect(calls[0]!.url).toBe('http://api.example.com/inventory/7')
   })
 
   it('omits the header on safe methods', async () => {

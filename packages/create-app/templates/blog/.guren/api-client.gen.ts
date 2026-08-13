@@ -213,12 +213,7 @@ export function createApiClient<TRoutes extends { [K in keyof TRoutes]: { method
       if (!route) throw new Error(`Route [${name}] not defined.`)
 
       const opts = (args as unknown[])[0] as { params?: Record<string, unknown>; body?: unknown; query?: Record<string, unknown> } | undefined
-      let path = route.path
-      if (opts?.params) {
-        for (const [key, value] of Object.entries(opts.params)) {
-          path = path.replace(`:${key}`, encodeURIComponent(String(value)))
-        }
-      }
+      const path = substituteParams(route.path, opts?.params as Record<string, string | number> | undefined)
 
       let url = `${config.baseUrl}${path}`
       if (opts?.query) {
@@ -273,4 +268,22 @@ const routes: Record<string, { method: string; path: string }> = {
   'profile.update': { method: 'PUT', path: '/profile' },
   'register': { method: 'GET', path: '/register' },
   'register.store': { method: 'POST', path: '/register' },
+}
+
+// Mirrors Hono's path lexing: a param starts only at a segment boundary, an
+// attached regex constraint runs to the last `}` before the next `/` (so
+// `{[0-9]{2}}` stays whole), and a trailing `?`/`*` modifier is consumed
+// with the token: `/items/:id{[0-9]+}` -> `/items/1`.
+function substituteParams(path: string, params?: Record<string, string | number>): string {
+  if (!params) {
+    return path
+  }
+
+  return path.replace(/(^|\/):([A-Za-z0-9_-]+)(?:\{[^}]*\}(?:[^/]*\})*)?[?*]?/gu, (match, prefix, key) => {
+    if (!Object.prototype.hasOwnProperty.call(params, key)) {
+      return match
+    }
+
+    return `${prefix}${encodeURIComponent(String(params[key]))}`
+  })
 }

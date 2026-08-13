@@ -146,7 +146,7 @@ router.get('/posts/:id', [PostsController, 'show'])
 
 コントローラー内では `this.validateParams()` か `this.ctx.req.param('id')` でパラメータを読み取ります。
 
-オプショナルセグメントには Hono のパターンサポート（`router.get('/posts/:id?', handler)`）を使い、ワイルドカードには `*`（例: `/:slug*`）を使います。
+オプショナルセグメント（`router.get('/posts/:id?', handler)`）や正規表現制約（`router.get('/items/:id{[0-9]+}', handler)`）も Hono のパターンサポートで利用できます。複数セグメントにまたがるマッチには `:path{.+}` のような制約付きパラメータを使います。なお `/:slug*` は Hono のワイルドカード構文ではありません。`slug*` という名前の単一セグメントパラメータとして登録されてしまうため、使わないでください。
 
 ## ルートモデルバインディング
 

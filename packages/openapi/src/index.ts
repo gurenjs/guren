@@ -588,19 +588,30 @@ function normalizeServers(servers?: OpenApiDocumentOptions['servers']): OpenApiS
   return resolved.map((server) => typeof server === 'string' ? { url: server } : server)
 }
 
+// Mirrors Hono's path lexing: a param starts only at a segment boundary
+// (`/status/foo:bar` is a literal), an attached regex constraint runs to the
+// last `}` before the next `/` (so `{[0-9]{2}}` stays whole), and a trailing
+// `?`/`*` modifier belongs to the token. The one pattern feeds the path
+// template, the parameter list, and the operation id below.
+const PATH_PARAM_PATTERN = /(^|\/):([A-Za-z0-9_-]+)(?:\{[^}]*\}(?:[^/]*\})*)?[?*]?/gu
+
 function toOpenApiPath(path: string): string {
-  return path.replace(/:([A-Za-z0-9_-]+)/gu, '{$1}')
+  return path.replace(PATH_PARAM_PATTERN, '$1{$2}')
 }
 
 function extractPathParamNames(path: string): string[] {
-  return Array.from(path.matchAll(/:([A-Za-z0-9_-]+)/gu)).map((match) => match[1] ?? '')
+  return Array.from(path.matchAll(PATH_PARAM_PATTERN)).map((match) => match[2] ?? '')
 }
 
 function buildOperationId(definition: RouteDefinition): string {
-  const fragments = definition.path
+  // Derived from the OpenAPI path template so the id and the template cannot
+  // disagree about where the params are.
+  const fragments = toOpenApiPath(definition.path)
     .split('/')
     .filter(Boolean)
-    .map((segment) => segment.startsWith(':') ? `By${capitalize(segment.slice(1))}` : capitalize(segment))
+    .map((segment) => segment.startsWith('{') && segment.endsWith('}')
+      ? `By${capitalize(segment.slice(1, -1))}`
+      : capitalize(segment))
 
   return `${definition.method.toLowerCase()}${fragments.join('') || 'Root'}`
 }

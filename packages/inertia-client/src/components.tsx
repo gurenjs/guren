@@ -33,12 +33,46 @@ export interface RouteManifestLike {
   [name: string]: { method: string; path: string }
 }
 
-type ExtractParams<TPath extends string> =
-  TPath extends `${string}:${infer Param}/${infer Rest}`
-    ? (Param extends `${infer Key}?` ? Key : Param) | ExtractParams<`/${Rest}`>
-    : TPath extends `${string}:${infer Param}`
-      ? Param extends `${infer Key}?` ? Key : Param
-      : never
+// The blocks below are hand-mirrors of `@guren/cli`'s generated fragments
+// (routes-types-fragments.ts) — this package has no guren dependencies, so it
+// cannot import them. A sync test in packages/cli/tests asserts each mirror
+// matches its fragment character for character; edit them there first.
+
+// Mirrors Hono's path lexing: a param starts only at a segment boundary, its
+// key ends at the first `{` (regex constraints, which may nest braces, are
+// never part of it), and a trailing `?`/`*` modifier is dropped.
+type SegmentParamKey<TSegment extends string> = TSegment extends `:${infer TParam}`
+  ? TParam extends `${infer TName}{${string}`
+    ? TName
+    : TParam extends `${infer TName}?`
+      ? TName
+      : TParam extends `${infer TName}*`
+        ? TName
+        : TParam
+  : never
+type PathParamKeys<TPath extends string> = TPath extends `${infer THead}/${infer TRest}`
+  ? SegmentParamKey<THead> | PathParamKeys<TRest>
+  : SegmentParamKey<TPath>
+
+type ExtractParams<TPath extends string> = PathParamKeys<TPath>
+
+// Mirrors Hono's path lexing: a param starts only at a segment boundary, an
+// attached regex constraint runs to the last `}` before the next `/` (so
+// `{[0-9]{2}}` stays whole), and a trailing `?`/`*` modifier is consumed
+// with the token: `/items/:id{[0-9]+}` -> `/items/1`.
+function substituteParams(path: string, params?: Record<string, string | number>): string {
+  if (!params) {
+    return path
+  }
+
+  return path.replace(/(^|\/):([A-Za-z0-9_-]+)(?:\{[^}]*\}(?:[^/]*\})*)?[?*]?/gu, (match, prefix, key) => {
+    if (!Object.prototype.hasOwnProperty.call(params, key)) {
+      return match
+    }
+
+    return `${prefix}${encodeURIComponent(String(params[key]))}`
+  })
+}
 
 type RouteParamsFor<TPath extends string> =
   [ExtractParams<TPath>] extends [never]
@@ -82,12 +116,7 @@ export function createTypedLink<TManifest extends RouteManifestLike>(manifest: T
     const entry = manifest[routeName]
     if (!entry) throw new Error(`Route [${routeName}] not defined.`)
 
-    let href = entry.path
-    if (params) {
-      for (const [key, value] of Object.entries(params)) {
-        href = href.replace(`:${key}`, encodeURIComponent(String(value)))
-      }
-    }
+    const href = substituteParams(entry.path, params)
 
     return React.createElement(InertiaLink, { ...rest, href } as any)
   }
@@ -122,12 +151,7 @@ export function createTypedForm<TManifest extends RouteManifestLike>(manifest: T
     const entry = manifest[routeName]
     if (!entry) throw new Error(`Route [${routeName}] not defined.`)
 
-    let action = entry.path
-    if (params) {
-      for (const [key, value] of Object.entries(params)) {
-        action = action.replace(`:${key}`, encodeURIComponent(String(value)))
-      }
-    }
+    const action = substituteParams(entry.path, params)
 
     const httpMethod = method ?? entry.method.toLowerCase()
 

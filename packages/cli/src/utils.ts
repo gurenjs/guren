@@ -309,6 +309,28 @@ export function escapeSingleQuoted(value: string): string {
 }
 
 /**
+ * One Hono route-path param token, as Hono's own parser lexes it: a param
+ * starts only at a segment boundary (`/:name` — `/status/foo:bar` is a
+ * literal), an attached regex constraint runs to the last `}` before the next
+ * `/` (so `{[0-9]{2}}` stays whole), and a trailing `?`/`*` modifier belongs
+ * to the token. Group 1 is the boundary, group 2 the param label. Shared by
+ * every route generator so the lexing rule lands once.
+ */
+export const PATH_PARAM_PATTERN = /(^|\/):([A-Za-z0-9_-]+)(?:\{[^}]*\}(?:[^/]*\})*)?[?*]?/gu
+
+/** Param labels in path order, with constraints and modifiers dropped. */
+export function extractPathParamNames(path: string): string[] {
+  return Array.from(path.matchAll(PATH_PARAM_PATTERN), (match) => match[2]!)
+}
+
+const VALID_JS_IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/u
+
+/** Render an object key for generated code, quoting it when it is not a bare identifier. */
+export function quoteObjectKey(key: string): string {
+  return VALID_JS_IDENTIFIER.test(key) ? key : `'${escapeSingleQuoted(key)}'`
+}
+
+/**
  * Escape a value for interpolation inside generated template literals.
  * Backslashes must go first — escaping them after the backtick pass would
  * double-escape the `\` it just inserted.
