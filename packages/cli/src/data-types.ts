@@ -386,6 +386,12 @@ function findBodyEnd(masked: string, openIndex: number): number | null {
  * structure. Neither is exotic — a commented-out draft of an interface, or a
  * string literal type like `marker: '}'`, is ordinary code that a regex over
  * the raw file reads as the real thing.
+ *
+ * `patch-helpers.ts` masks for its own matching too, and deliberately does not
+ * share this: it keeps the quotes so a masked `'A', 'B'` still splits into two
+ * entries, and it is a write path that edits an app's own files, where the
+ * divergences here (blanked quotes, an unterminated quote stopping at the
+ * newline) would change what gets patched.
  */
 function maskCommentsAndStrings(source: string): string {
   // Split on UTF-16 units so an index into `chars` is an index into `source`.
