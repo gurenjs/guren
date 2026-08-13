@@ -169,10 +169,9 @@ const RESERVED_WORDS = new Set([
  *
  * Three ways to be unemittable:
  *
- * - No `toArray()` type could be extracted (`rawType === null`). Already
- *   warned about by {@link extractResourceType}, which is the only place that
- *   knows *which* recognised shape the file missed and therefore what to tell
- *   the author to change.
+ * - No `toArray()` type could be extracted (`rawType === null`). Warned about
+ *   by {@link extractResourceType}, the only place that knows *which*
+ *   recognised shape the file missed and so what to tell the author to change.
  * - The name is one TypeScript will not accept. A class name is always an
  *   identifier, but a module directory name is not — `modules/2fa/` qualifies
  *   to `2faInvoice` — and neither is safe from reserved words.
@@ -246,18 +245,24 @@ async function extractResourceType(
   // class lives — see ResourceDefinition.dataName.
   const dataName = module ? `${pascalCase(module)}${baseName}` : baseName
   const common = { className, dataName, imports, module, filePath: relPath }
+  // Comments and string literals are blanked out before anything is matched
+  // against the source. Both routinely carry text that looks like a
+  // declaration or an unbalanced brace and is neither — a commented-out draft
+  // of the very interface being looked for is the ordinary case — and a regex
+  // reading the raw file cannot tell the difference.
+  const masked = maskCommentsAndStrings(source)
 
   // Strategy 1: an interface named after the class, `interface PostResourceData { ... }`
-  const interfaceBody = readObjectTypeBody(source, `${baseName}(?:Resource)?Data`)
+  const interfaceBody = readObjectTypeBody(source, masked, `${baseName}(?:Resource)?Data`)
   if (interfaceBody) {
     return { ...common, rawType: interfaceBody }
   }
 
   // Strategy 2: Explicit return type on toArray(): `toArray(): SomeType {`
-  const returnTypeMatch = source.match(/toArray\s*\(\s*\)\s*:\s*(\w+(?:Data)?)\s*\{/)
+  const returnTypeMatch = masked.match(/toArray\s*\(\s*\)\s*:\s*(\w+(?:Data)?)\s*\{/)
   if (returnTypeMatch) {
     const typeName = returnTypeMatch[1]
-    const body = readObjectTypeBody(source, typeName)
+    const body = readObjectTypeBody(source, masked, typeName)
     if (body) {
       return { ...common, rawType: body }
     }
@@ -265,14 +270,14 @@ async function extractResourceType(
     // The annotation names a type this file does not hand over. Which of the
     // two reasons it is decides what the author has to change, so say which:
     // a declaration that is simply elsewhere is a different fix from one that
-    // is right here but is not an object type.
-    const declaredHere = new RegExp(`(?:interface|type)\\s+${typeName}\\b`, 'u').test(source)
+    // is right here in a form that cannot be copied.
+    const declaredHere = new RegExp(`(?:interface|type)\\s+${typeName}\\b`, 'u').test(masked)
     warnings.push(
       declaredHere
         ? `Resource ${className} (${relPath}) annotates toArray(): ${typeName} and declares `
-          + `${typeName} in that file, but only an object type body can be copied into `
+          + `${typeName} in that file, but only a plain object type can be copied into `
           + `data.gen.ts — omitted. Write ${typeName} as \`interface ${typeName} { … }\` or `
-          + `\`type ${typeName} = { … }\`.`
+          + `\`type ${typeName} = { … }\`, without type parameters.`
         : `Resource ${className} (${relPath}) annotates toArray(): ${typeName}, but no `
           + `interface or type ${typeName} is declared in that file — omitted from data.gen.ts. `
           + "Only the resource's own source is read, so move the declaration into it.",
@@ -280,18 +285,30 @@ async function extractResourceType(
     return { ...common, rawType: null }
   }
 
-  // The class is a Resource but none of the recognised shapes described its
-  // payload — the case an unannotated `toArray()` returning an object literal
-  // lands in. It type-checks and serves fine, so nothing else in the run will
-  // ever mention it; without this line the only symptom is a `Data` namespace
-  // that quietly lacks the member.
+  // Nothing recognised described the payload. Reported anyway, with no type:
+  // the class still claims its name, which is what stops a same-named twin
+  // elsewhere from resolving a response hint to this one's payload.
   //
-  // Reported anyway, with no type: it still claims its class name, which is
-  // what stops a same-named twin elsewhere from resolving a hint.
+  // An annotation in a shape Strategy 2 does not read — `Types.PostPayload`,
+  // `PostData<string>` — is a different sentence from no annotation at all.
+  // Telling an author who wrote one that they wrote none sends them to add a
+  // second, which is how the silence this replaces wasted time in the first
+  // place.
+  const looseAnnotation = masked.match(/toArray\s*\(\s*\)\s*:\s*([^{;\n]+?)\s*\{/u)
+  // Quoted from the source rather than the mask, so a string literal type
+  // inside the annotation reads back as the author wrote it.
+  const annotationStart = looseAnnotation
+    ? looseAnnotation.index! + looseAnnotation[0].indexOf(looseAnnotation[1])
+    : -1
   warnings.push(
-    `Resource ${className} (${relPath}) has no toArray() return type to extract — omitted `
-    + `from data.gen.ts. Declare \`export interface ${baseName}ResourceData { … }\` in that `
-    + `file and annotate \`toArray(): ${baseName}ResourceData\`.`,
+    looseAnnotation
+      ? `Resource ${className} (${relPath}) annotates toArray(): `
+        + `${source.slice(annotationStart, annotationStart + looseAnnotation[1].length)}, which `
+        + 'is not a shape data.gen.ts can be built from — omitted. Name a plain interface or '
+        + 'type declared in the same file.'
+      : `Resource ${className} (${relPath}) has no toArray() return type to extract — omitted `
+        + `from data.gen.ts. Declare \`export interface ${baseName}ResourceData { … }\` in that `
+        + `file and annotate \`toArray(): ${baseName}ResourceData\`.`,
   )
   return { ...common, rawType: null }
 }
@@ -300,6 +317,10 @@ async function extractResourceType(
  * The body of `interface <name> { … }` / `type <name> = { … }`, declared
  * anywhere in `source`, or `null` when the file declares no such object type.
  *
+ * `masked` is {@link maskCommentsAndStrings} of the same string: everything is
+ * *matched* against it and *sliced* from `source`, so offsets stay usable
+ * while text that only looks like code cannot be found.
+ *
  * `namePattern` is spliced into a regex, so a caller may pass alternatives
  * (`Post(?:Resource)?Data`) rather than probing one spelling at a time.
  *
@@ -307,7 +328,7 @@ async function extractResourceType(
  * searching forward for the next `{`: a `type PostData = string` followed by
  * the class declaration would otherwise hand back the class body.
  */
-function readObjectTypeBody(source: string, namePattern: string): string | null {
+function readObjectTypeBody(source: string, masked: string, namePattern: string): string | null {
   const declaration = new RegExp(
     // `[^{;]*` for the heritage clause, so `extends Record<string, unknown>`
     // is stepped over; `;` bounds it so an aliasless declaration cannot run
@@ -315,14 +336,18 @@ function readObjectTypeBody(source: string, namePattern: string): string | null 
     `(?:export\\s+)?(?:interface|type)\\s+(?:${namePattern})\\s*(?:=\\s*|extends[^{;]*)?\\{`,
     'u',
   )
-  const match = declaration.exec(source)
+  const match = declaration.exec(masked)
   if (!match) return null
 
-  return readBraceBody(source, match.index + match[0].length - 1)
+  const openIndex = match.index + match[0].length - 1
+  const end = findBodyEnd(masked, openIndex)
+
+  return end === null ? null : source.slice(openIndex, end)
 }
 
 /**
- * The `{ … }` starting at `openIndex`, matched by counting depth.
+ * Index just past the `}` closing the `{` at `openIndex`, by counting depth,
+ * or `null` for an unterminated body.
  *
  * Depth, not a delimiter: the predecessor regexes ended a body at the first
  * `\n}`, which is neither necessary nor sufficient. A one-line
@@ -332,60 +357,135 @@ function readObjectTypeBody(source: string, namePattern: string): string | null 
  * avoid — while a legitimately nested property forced a shape the convention
  * never promised.
  *
- * Comments and string literals are stepped over rather than counted, because
- * both routinely carry an unbalanced brace that is not structure. Returns
- * `null` for an unterminated body, which is a file that would not compile
- * either way.
+ * Takes the masked source, so no brace it counts is inside a comment or a
+ * string.
  */
-function readBraceBody(source: string, openIndex: number): string | null {
+function findBodyEnd(masked: string, openIndex: number): number | null {
+  let depth = 0
+
+  for (let index = openIndex; index < masked.length; index += 1) {
+    const char = masked[index]
+    if (char === '{') {
+      depth += 1
+    } else if (char === '}') {
+      depth -= 1
+      if (depth === 0) return index + 1
+    }
+  }
+
+  return null
+}
+
+/**
+ * `source` with the contents of comments and string literals replaced by
+ * spaces, newlines and length preserved so every index still addresses the
+ * same character in the original.
+ *
+ * Everything this module matches runs against the result: a declaration
+ * inside a comment is not a declaration, and a brace inside a string is not
+ * structure. Neither is exotic — a commented-out draft of an interface, or a
+ * string literal type like `marker: '}'`, is ordinary code that a regex over
+ * the raw file reads as the real thing.
+ */
+function maskCommentsAndStrings(source: string): string {
+  // Split on UTF-16 units so an index into `chars` is an index into `source`.
+  const chars = source.split('')
+  const blank = (from: number, to: number): void => {
+    for (let index = from; index < to && index < chars.length; index += 1) {
+      if (chars[index] !== '\n') chars[index] = ' '
+    }
+  }
+
+  let index = 0
+  while (index < source.length) {
+    const char = source[index]
+
+    if (char === '/' && source[index + 1] === '/') {
+      const lineEnd = source.indexOf('\n', index)
+      const stop = lineEnd === -1 ? source.length : lineEnd
+      blank(index, stop)
+      index = stop
+      continue
+    }
+    if (char === '/' && source[index + 1] === '*') {
+      const commentEnd = source.indexOf('*/', index + 2)
+      const stop = commentEnd === -1 ? source.length : commentEnd + 2
+      blank(index, stop)
+      index = stop
+      continue
+    }
+    if (char === "'" || char === '"' || char === '`') {
+      index = maskStringLiteral(source, index, blank)
+      continue
+    }
+
+    index += 1
+  }
+
+  return chars.join('')
+}
+
+/** Blanks the string literal opening at `openIndex`; returns the index past it. */
+function maskStringLiteral(
+  source: string,
+  openIndex: number,
+  blank: (from: number, to: number) => void,
+): number {
+  const quote = source[openIndex]
+  let index = openIndex + 1
+
+  while (index < source.length) {
+    const char = source[index]
+
+    if (char === '\\') {
+      index += 2
+      continue
+    }
+    if (char === quote) {
+      index += 1
+      break
+    }
+    // Only a template literal spans lines. Stopping at the newline keeps a
+    // lone apostrophe in prose from swallowing the rest of the file.
+    if (quote !== '`' && char === '\n') break
+    // A template's `${ … }` can hold another template, whose backtick would
+    // otherwise be read as this one's closing delimiter — which truncates the
+    // body being read, silently and mid-property.
+    if (quote === '`' && char === '$' && source[index + 1] === '{') {
+      index = maskTemplateExpression(source, index + 1, blank)
+      continue
+    }
+
+    index += 1
+  }
+
+  blank(openIndex, index)
+  return index
+}
+
+/** Index just past the `}` closing the template expression opening at `openIndex`. */
+function maskTemplateExpression(
+  source: string,
+  openIndex: number,
+  blank: (from: number, to: number) => void,
+): number {
   let depth = 0
   let index = openIndex
 
   while (index < source.length) {
     const char = source[index]
 
-    if (char === '/' && source[index + 1] === '/') {
-      const lineEnd = source.indexOf('\n', index)
-      index = lineEnd === -1 ? source.length : lineEnd + 1
-      continue
-    }
-    if (char === '/' && source[index + 1] === '*') {
-      const commentEnd = source.indexOf('*/', index + 2)
-      index = commentEnd === -1 ? source.length : commentEnd + 2
-      continue
-    }
     if (char === "'" || char === '"' || char === '`') {
-      index = skipStringLiteral(source, index)
+      index = maskStringLiteral(source, index, blank)
       continue
     }
-
     if (char === '{') {
       depth += 1
     } else if (char === '}') {
       depth -= 1
-      if (depth === 0) return source.slice(openIndex, index + 1)
+      if (depth === 0) return index + 1
     }
-    index += 1
-  }
 
-  return null
-}
-
-/** Index just past the string literal opening at `openIndex`. */
-function skipStringLiteral(source: string, openIndex: number): number {
-  const quote = source[openIndex]
-  let index = openIndex + 1
-
-  while (index < source.length) {
-    const char = source[index]
-    if (char === '\\') {
-      index += 2
-      continue
-    }
-    if (char === quote) return index + 1
-    // Only a template literal spans lines. Stopping at the newline keeps a
-    // lone apostrophe in prose from swallowing the rest of the file.
-    if (quote !== '`' && char === '\n') return index
     index += 1
   }
 

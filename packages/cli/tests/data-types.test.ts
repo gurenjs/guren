@@ -26,6 +26,23 @@ function resourceFixture(className: string, fields: string): string {
   )
 }
 
+/**
+ * A `PostResource` file carrying `declarations` verbatim above the class, with
+ * `toArray()` annotated as `returnType` when one is given. For the cases where
+ * the declaration is the subject and the class around it is only scaffolding.
+ */
+function postResourceFile(declarations: string, returnType?: string): string {
+  return (
+    "import { Resource } from '@guren/core'\n\n"
+    + `${declarations}\n\n`
+    + 'export class PostResource extends Resource<Record<string, unknown>> {\n'
+    + `  toArray()${returnType ? `: ${returnType}` : ''} {\n`
+    + '    return {} as never\n'
+    + '  }\n'
+    + '}\n'
+  )
+}
+
 describe('generateDataTypes discovers module resources', () => {
   let appRoot: string
 
@@ -264,11 +281,10 @@ describe('generateDataTypes discovers module resources', () => {
 })
 
 /**
- * The extractor recognises a documented subset of `toArray()` shapes, and a
- * Resource outside it type-checks, serves, and passes its own tests — the only
- * symptom is a `Data` member that never appears. Every miss therefore has to
- * name itself, and name the shape it wanted, or the artifact reports success
- * while quietly describing less than the app does.
+ * A Resource outside the recognised subset of `toArray()` shapes type-checks
+ * and serves fine — the only symptom is a `Data` member that never appears. So
+ * every miss has to name itself and the shape it wanted, or the run reports
+ * success while the artifact describes less than the app does.
  */
 describe('generateDataTypes reports Resource classes it could not extract', () => {
   let appRoot: string
@@ -362,12 +378,30 @@ describe('generateDataTypes reports Resource classes it could not extract', () =
       // An intersection has no body to copy into the namespace. The
       // declaration is right here, so telling the author to write one would
       // send them looking for something they can already see.
+      'app/Http/Resources/PostResource.ts': postResourceFile(
+        "import type { PostRecord } from '../../Models/Post.js'\n\n"
+        + 'export type PostPayload = PostRecord & { extra: string }',
+        'PostPayload',
+      ),
+    })
+
+    const { warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('declares PostPayload in that file')
+    expect(warnings[0]).toContain('only a plain object type can be copied')
+    expect(warnings[0]).not.toContain('move the declaration into it')
+  })
+
+  it('quotes an annotation it does not read instead of calling it absent', async () => {
+    await writeWorkspaceFiles(appRoot, {
+      // A qualified name is a return type, just not one Strategy 2 reads.
+      // Telling the author they wrote none sends them to add a second.
       'app/Http/Resources/PostResource.ts':
         "import { Resource } from '@guren/core'\n"
-        + "import type { PostRecord } from '../../Models/Post.js'\n\n"
-        + 'export type PostPayload = PostRecord & { extra: string }\n\n'
+        + "import type * as Types from './types.js'\n\n"
         + 'export class PostResource extends Resource<Record<string, unknown>> {\n'
-        + '  toArray(): PostPayload {\n'
+        + '  toArray(): Types.PostPayload {\n'
         + '    return {} as never\n'
         + '  }\n'
         + '}\n',
@@ -376,9 +410,8 @@ describe('generateDataTypes reports Resource classes it could not extract', () =
     const { warnings } = await generateDataTypes({ appRoot, force: true })
 
     expect(warnings).toHaveLength(1)
-    expect(warnings[0]).toContain('declares PostPayload in that file')
-    expect(warnings[0]).toContain('object type body')
-    expect(warnings[0]).not.toContain('move the declaration into it')
+    expect(warnings[0]).toContain('annotates toArray(): Types.PostPayload')
+    expect(warnings[0]).not.toContain('no toArray() return type')
   })
 
   it('stays silent for the shape make:resource scaffolds', async () => {
@@ -395,10 +428,10 @@ describe('generateDataTypes reports Resource classes it could not extract', () =
 })
 
 /**
- * The `toArray()` body is copied verbatim into `data.gen.ts`, so reading one
- * byte too many is worse than reading none: an over-captured body takes the
- * whole artifact — every other resource's type with it — out of compilation,
- * and nothing warns, because extraction "succeeded".
+ * The type body is copied verbatim into `data.gen.ts`, so reading one byte too
+ * many is worse than reading none: an over-captured body takes the whole
+ * artifact — every other resource's type with it — out of compilation, and
+ * nothing warns, because extraction "succeeded".
  */
 describe('generateDataTypes reads a type body by brace depth', () => {
   let appRoot: string
@@ -411,21 +444,15 @@ describe('generateDataTypes reads a type body by brace depth', () => {
     await rm(appRoot, { recursive: true, force: true })
   })
 
-  const write = (body: string) =>
-    writeWorkspaceFiles(appRoot, { 'app/Http/Resources/PostResource.ts': body })
+  const writeResource = (declarations: string, returnType?: string) =>
+    writeWorkspaceFiles(appRoot, {
+      'app/Http/Resources/PostResource.ts': postResourceFile(declarations, returnType),
+    })
 
   it(
     'stops a one-line interface at its own closing brace',
     async () => {
-      await write(
-        "import { Resource } from '@guren/core'\n\n"
-        + 'export interface PostResourceData { id: number }\n\n'
-        + 'export class PostResource extends Resource<Record<string, unknown>> {\n'
-        + '  toArray(): PostResourceData {\n'
-        + '    return {} as never\n'
-        + '  }\n'
-        + '}\n',
-      )
+      await writeResource('export interface PostResourceData { id: number }', 'PostResourceData')
 
       const { outputPath, definitions, warnings } = await generateDataTypes({ appRoot, force: true })
 
@@ -450,15 +477,7 @@ describe('generateDataTypes reads a type body by brace depth', () => {
   it('reads a plain local interface named by the annotation', async () => {
     // No `extends` and no `=` — the shape a hand-written resource lands on
     // when the payload type is not named after the class.
-    await write(
-      "import { Resource } from '@guren/core'\n\n"
-      + 'export interface PostPayload {\n  id: number\n}\n\n'
-      + 'export class PostResource extends Resource<Record<string, unknown>> {\n'
-      + '  toArray(): PostPayload {\n'
-      + '    return {} as never\n'
-      + '  }\n'
-      + '}\n',
-    )
+    await writeResource('export interface PostPayload {\n  id: number\n}', 'PostPayload')
 
     const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
 
@@ -467,17 +486,12 @@ describe('generateDataTypes reads a type body by brace depth', () => {
   })
 
   it('keeps a nested object whole', async () => {
-    await write(
-      "import { Resource } from '@guren/core'\n\n"
-      + 'export interface PostResourceData {\n'
+    await writeResource(
+      'export interface PostResourceData {\n'
       + '  author: {\n    id: number\n  }\n'
       + '  id: number\n'
-      + '}\n\n'
-      + 'export class PostResource extends Resource<Record<string, unknown>> {\n'
-      + '  toArray(): PostResourceData {\n'
-      + '    return {} as never\n'
-      + '  }\n'
-      + '}\n',
+      + '}',
+      'PostResourceData',
     )
 
     const { definitions } = await generateDataTypes({ appRoot, force: true })
@@ -488,18 +502,13 @@ describe('generateDataTypes reads a type body by brace depth', () => {
   })
 
   it('does not count braces inside comments or string literal types', async () => {
-    await write(
-      "import { Resource } from '@guren/core'\n\n"
-      + 'export interface PostResourceData {\n'
+    await writeResource(
+      'export interface PostResourceData {\n'
       + "  // Serialized as '}' by the legacy encoder — see ADR 0003.\n"
       + "  marker: '}'\n"
       + '  id: number\n'
-      + '}\n\n'
-      + 'export class PostResource extends Resource<Record<string, unknown>> {\n'
-      + '  toArray(): PostResourceData {\n'
-      + '    return {} as never\n'
-      + '  }\n'
-      + '}\n',
+      + '}',
+      'PostResourceData',
     )
 
     const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
@@ -509,18 +518,43 @@ describe('generateDataTypes reads a type body by brace depth', () => {
     expect(definitions[0]?.rawType?.endsWith('\n}')).toBe(true)
   })
 
+  it('ignores a declaration that is only a commented-out draft', async () => {
+    // The ordinary way a file comes to hold two declarations of one name: the
+    // previous shape left above the current one. Reading the comment yields a
+    // `Data` member describing a payload the app stopped sending.
+    await writeResource(
+      '// interface PostResourceData { bogus: string }\n'
+      + '/* export interface PostResourceData {\n  alsoBogus: string\n} */\n\n'
+      + 'export interface PostResourceData {\n  id: number\n}',
+      'PostResourceData',
+    )
+
+    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(warnings).toEqual([])
+    expect(definitions[0]?.rawType).toBe('{\n  id: number\n}')
+  })
+
+  it('keeps a template literal type whose expression nests another template', async () => {
+    // The inner backtick closes nothing; read as this template's delimiter it
+    // ends the literal early and the body is truncated mid-property.
+    await writeResource(
+      'export interface PostResourceData {\n'
+      + '  value: `${string extends string ? `}` : never}`\n'
+      + '  id: number\n'
+      + '}',
+      'PostResourceData',
+    )
+
+    const { definitions } = await generateDataTypes({ appRoot, force: true })
+
+    expect(definitions[0]?.rawType?.endsWith('  id: number\n}')).toBe(true)
+  })
+
   it('ignores a same-named alias that declares no object type', async () => {
     // `type PostResourceData = string` has no body; walking forward to the
     // next `{` would hand back the class declaration below it.
-    await write(
-      "import { Resource } from '@guren/core'\n\n"
-      + 'export type PostResourceData = string\n\n'
-      + 'export class PostResource extends Resource<Record<string, unknown>> {\n'
-      + '  toArray() {\n'
-      + '    return {} as never\n'
-      + '  }\n'
-      + '}\n',
-    )
+    await writeResource('export type PostResourceData = string')
 
     const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
 
