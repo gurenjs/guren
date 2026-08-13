@@ -1,5 +1,7 @@
 ---
 "@guren/orm": minor
+"@guren/core": patch
+"@guren/cli": patch
 "create-guren-app": patch
 ---
 

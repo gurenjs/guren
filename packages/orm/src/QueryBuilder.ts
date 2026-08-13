@@ -46,6 +46,10 @@ export type WhereCondition = SimpleCondition | GroupCondition
 /**
  * Callback receiving a nested builder to compose a parenthesized
  * condition group, mirroring Laravel's `where(fn ($q) => ...)`.
+ *
+ * Only the conditions added on the nested builder are read back —
+ * ordering, limits, eager loads, and terminal calls made inside the
+ * callback are not part of the group.
  */
 export type WhereGroupCallback<TRecord extends PlainObject = PlainObject> = (
   query: QueryBuilder<TRecord>,
