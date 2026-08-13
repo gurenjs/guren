@@ -458,13 +458,18 @@ interface ControllerMethodInfo {
 /**
  * Method bodies below are judged with regexes (VALIDATE_BODY_PATTERN,
  * AUTH_CALL_PATTERN, BODY_ACCESS_PATTERN, FORCE_WRITE_PATTERN), which cannot
- * tell live code from a commented-out line or a string that merely mentions an
- * API. A commented `// await this.validateBody(...)` must not count as
- * validation, and a `forceCreate` inside an error message must not warn.
- * Blank comments, string/regex literal contents, and template quasis with
- * spaces — offsets are preserved, so method-body slices taken from the result
- * line up with the original AST positions. Template *expressions* are kept:
- * they are live code.
+ * tell live code from a commented-out line, a string that merely mentions an
+ * API, JSX text, or a type-only declaration. A commented
+ * `// await this.validateBody(...)` must not count as validation, a
+ * `forceCreate` inside an error message must not warn, and neither must a
+ * local `type Decoy = { validateBody(): void }` nested in the method body —
+ * TS allows local type/interface declarations inside a function, and their
+ * member signatures read exactly like the runtime call the regexes look for.
+ * Blank comments, string/regex/JSX-text contents, template quasis, and whole
+ * type-alias/interface declarations (never executable, so blanking the full
+ * range is always safe) with spaces — offsets are preserved, so method-body
+ * slices taken from the result line up with the original AST positions.
+ * Template *expressions* are kept: they are live code.
  */
 function blankCommentsAndStrings(source: string, ast: File): string {
   const ranges: [number, number][] = []
@@ -478,8 +483,13 @@ function blankCommentsAndStrings(source: string, ast: File): string {
     if (typeof start !== 'number' || typeof end !== 'number') return
     if (type === 'StringLiteral' || type === 'DirectiveLiteral') {
       ranges.push([start + 1, end - 1])
-    } else if (type === 'TemplateElement' || type === 'RegExpLiteral') {
+    } else if (type === 'TemplateElement' || type === 'RegExpLiteral' || type === 'JSXText') {
       ranges.push([start, end])
+    } else if (type === 'TSTypeAliasDeclaration' || type === 'TSInterfaceDeclaration') {
+      // Blank the whole declaration and stop descending — it contributes no
+      // runtime code, so there is nothing further inside worth walking.
+      ranges.push([start, end])
+      return false
     }
   })
   if (ranges.length === 0) return source

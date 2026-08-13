@@ -1726,6 +1726,72 @@ export default function registerRoutes(router: any) {
       await workspace.cleanup()
     }
   })
+
+  it('does not count validateBody inside JSX text as validation', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-jsx-text-')
+
+    try {
+      // .tsx isn't a discovered controller extension, but the parser falls
+      // back to the jsx-enabled dialect for a plain .ts file whenever the
+      // non-jsx dialects fail to parse it (see parserPluginCandidates), so
+      // JSX syntax reaches a real controller file this way too.
+      await writeController(
+        workspace.dir,
+        'PostController',
+        `export default class PostController {
+  async store() {
+    const decoy = <div>call this.validateBody(schema) first</div>
+    const data = await this.request.json()
+    return decoy
+  }
+}`,
+      )
+      await writeRoutes(workspace.dir, POST_ROUTE)
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      expect(report.routesAnalyzed).toBe(true)
+      const validation = report.findings.find(f => f.key === 'validation:POST /posts')
+      expect(validation).toBeDefined()
+      expect(validation!.status).toBe('fail')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('does not count validateBody/forceCreate inside a local type declaration as live code', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-type-decoy-')
+
+    try {
+      await writeController(
+        workspace.dir,
+        'PostController',
+        `export default class PostController {
+  async store() {
+    type Decoy = {
+      validateBody(schema: unknown): void
+      forceCreate(data: unknown): void
+    }
+    const data = await this.request.json()
+    return null
+  }
+}`,
+      )
+      await writeRoutes(workspace.dir, POST_ROUTE)
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      expect(report.routesAnalyzed).toBe(true)
+      const validation = report.findings.find(f => f.key === 'validation:POST /posts')
+      expect(validation).toBeDefined()
+      expect(validation!.status).toBe('fail')
+
+      const forceWrite = report.findings.find(f => f.key === 'force-write-request-data:PostController.store')
+      expect(forceWrite).toBeUndefined()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
 })
 
 const WEBHOOK_ROUTE = `export default function registerRoutes(router: any) {
