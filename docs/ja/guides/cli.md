@@ -257,14 +257,19 @@ Inertiaのページは `modules/<name>/` 配下にコロケーションされま
 
 ## AIエージェントハーネス
 
-`create-guren-app` で作成したアプリには、AIエージェント向けのハーネスが最初から組み込まれます。内容は、プロジェクトガイドの `CLAUDE.md`、`.claude/` 配下の検証済みAPIルール・スキル・サブエージェント、開発サーバーの MCP エンドポイントを指す `.mcp.json`（エンドポイント自体は scaffold された `dev` スクリプトの `GUREN_MCP=1` で有効になります）、そしてフィードバックループを構成する hooks です。セッション開始時に `guren context` のプロジェクトマップが読み込まれ、ルート・コントローラ・モデル・スキーマ・ページの編集後には `guren check` が自動で再実行され、失敗があればその場でコーディングエージェントに報告されます。
+`create-guren-app` で作成したアプリには、AIエージェント向けのハーネスが最初から組み込まれます。scaffold 時に使用するエージェント(Claude Code・Codex・Cursor・GitHub Copilot・OpenCode)を選択すると、それぞれがネイティブに読み込むファイル構成でインストールされます(非対話環境では `--agents codex,cursor` のように指定、`--agents none` でスキップ)。
+
+選択ごとに生成されるもの:
+
+- **Claude Code**: プロジェクトガイドの `CLAUDE.md`、`.claude/` 配下の検証済みAPIルール・スキル・サブエージェント、開発サーバーの MCP エンドポイントを指す `.mcp.json`（エンドポイント自体は scaffold された `dev` スクリプトの `GUREN_MCP=1` で有効になります）、そしてフィードバックループを構成する hooks です。セッション開始時に `guren context` のプロジェクトマップが読み込まれ、ルート・コントローラ・モデル・スキーマ・ページの編集後には `guren check` が自動で再実行され、失敗があればその場でコーディングエージェントに報告されます。
+- **Codex・Cursor・GitHub Copilot・OpenCode**: プロジェクトガイドの `AGENTS.md` と、`.agents/rules/`・`.agents/skills/` 配下の同じルール・スキル(スキルはエージェント横断の SKILL.md 標準形式)。加えて、Cursor にはネイティブ形式のルール(`.cursor/rules/guren-*.mdc`)、Copilot にはパススコープ付き instructions(`.github/instructions/guren-*.instructions.md`)、Codex にはハーネス自身のコマンドを承認不要にする許可リスト(`.codex/rules/guren.rules`)が生成されます。MCP クライアント設定は各ツールが参照する場所(`.codex/config.toml`・`.cursor/mcp.json`・`.vscode/mcp.json`・`opencode.json` の `mcp` エントリ)に書き出されます。これらのエージェントには hooks 機構がないため、セッション開始時の `guren context` 実行と編集後の `guren check` 実行を `AGENTS.md` が指示します。
 
 | コマンド | 説明 | 例 |
 |---------|------|-----|
-| `agent:init` | 既存アプリにエージェントハーネスを導入(既存ファイルはスキップ、`--force` で上書き) | `bunx guren agent:init` |
-| `agent:sync` | フレームワーク管理ファイル(`.claude/` の rules・skills・agents・hooks)を最新版に更新 | `bunx guren agent:sync` |
+| `agent:init` | 選択したエージェント向けのハーネスを既存アプリに導入(既存ファイルはスキップ、`--force` で上書き) | `bunx guren agent:init --target codex,cursor` |
+| `agent:sync` | フレームワーク管理ファイル(rules・skills・サブエージェント・hooks)を、ディスク上で検出した全エージェント分まとめて最新版に更新 | `bunx guren agent:sync` |
 
-`agent:sync` はユーザー所有のファイル(`CLAUDE.md`・`.mcp.json`・`.claude/settings.json`)には触れないため、カスタマイズはフレームワークの更新後も維持されます。
+`agent:init --target` には `claude`(既定)・`codex`・`cursor`・`copilot`・`opencode`・`all` を指定できます。`agent:sync` はユーザー所有のファイル(`CLAUDE.md`・`AGENTS.md`・`.claude/settings.json`・各 MCP クライアント設定)には触れないため、カスタマイズはフレームワークの更新後も維持されます。MCP 設定が既に存在する場合、`agent:init` はファイルに触れず、手動で追記するためのスニペットを表示します。
 
 ## デプロイレシピ生成
 

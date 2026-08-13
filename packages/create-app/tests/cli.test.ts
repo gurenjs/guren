@@ -107,6 +107,81 @@ describe('create-guren-app CLI', () => {
     }
   })
 
+  it('skips the agent harness entirely with --agents none', async () => {
+    const workspace = await createTempWorkspace('guren-create-app-cli-agents-none-')
+    try {
+      infoMock.mockClear()
+      warnMock.mockClear()
+      await capturedCommand.run({
+        args: {
+          target: join(workspace.dir, 'no-harness-app'),
+          force: false,
+          mode: 'spa',
+          auth: false,
+          db: 'sqlite',
+          install: false,
+          agents: 'none',
+        },
+      })
+
+      expect(
+        infoMock.mock.calls.some((call) => call.join(' ').includes('Skipping the AI agent harness')),
+      ).toBe(true)
+      expect(
+        warnMock.mock.calls.some((call) => call.join(' ').includes('agent harness was not installed')),
+      ).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('suggests the selected targets when the harness could not be installed', async () => {
+    const workspace = await createTempWorkspace('guren-create-app-cli-agents-list-')
+    try {
+      warnMock.mockClear()
+      await capturedCommand.run({
+        args: {
+          target: join(workspace.dir, 'multi-agent-app'),
+          force: false,
+          mode: 'spa',
+          auth: false,
+          db: 'sqlite',
+          install: false,
+          agents: 'codex, cursor',
+        },
+      })
+
+      expect(
+        warnMock.mock.calls.some((call) =>
+          call.join(' ').includes('bunx guren agent:init --target codex,cursor'),
+        ),
+      ).toBe(true)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('rejects an unknown --agents value before scaffolding work begins', async () => {
+    const workspace = await createTempWorkspace('guren-create-app-cli-agents-bad-')
+    try {
+      await expect(
+        capturedCommand.run({
+          args: {
+            target: join(workspace.dir, 'bad-agents-app'),
+            force: false,
+            mode: 'spa',
+            auth: false,
+            db: 'sqlite',
+            install: false,
+            agents: 'claud',
+          },
+        }),
+      ).rejects.toThrow('Invalid agent "claud"')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('scaffolds an SSR project and updates build script', async () => {
     const workspace = await createTempWorkspace('guren-create-app-cli-ssr-')
     try {

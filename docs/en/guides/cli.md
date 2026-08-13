@@ -259,14 +259,19 @@ Inertia pages are not colocated inside `modules/<name>/` — they stay under the
 
 ## AI Agent Harness
 
-Apps scaffolded with `create-guren-app` include an AI agent harness out of the box: a `CLAUDE.md` project guide, verified API rules, skills, and subagents under `.claude/`, an `.mcp.json` pointing at the dev server's MCP endpoint (the scaffolded `dev` script enables it via `GUREN_MCP=1`), and hooks that close the feedback loop — the `guren context` project map loads at session start, and `guren check` re-runs automatically after edits to routes, controllers, models, schema, or pages, reporting failures straight back to the coding agent.
+Apps scaffolded with `create-guren-app` include an AI agent harness out of the box. The scaffolder asks which coding agents you use — Claude Code, Codex, Cursor, GitHub Copilot, OpenCode — and installs the files each one reads natively (answer non-interactively with `--agents codex,cursor`, or skip the harness with `--agents none`).
+
+What each selection writes:
+
+- **Claude Code**: a `CLAUDE.md` project guide, verified API rules, skills, and subagents under `.claude/`, an `.mcp.json` pointing at the dev server's MCP endpoint (the scaffolded `dev` script enables it via `GUREN_MCP=1`), and hooks that close the feedback loop — the `guren context` project map loads at session start, and `guren check` re-runs automatically after edits to routes, controllers, models, schema, or pages, reporting failures straight back to the coding agent.
+- **Codex, Cursor, GitHub Copilot, OpenCode**: an `AGENTS.md` project guide plus the same rules and skills under `.agents/rules/` and `.agents/skills/` (skills follow the cross-agent SKILL.md standard). Cursor additionally gets the rules in its native format (`.cursor/rules/guren-*.mdc`), Copilot as path-scoped instructions (`.github/instructions/guren-*.instructions.md`), and Codex a command-approval allowlist for the harness's own commands (`.codex/rules/guren.rules`). MCP client configs land where each tool looks: `.codex/config.toml`, `.cursor/mcp.json`, `.vscode/mcp.json`, or the `mcp` entry in `opencode.json`. These agents have no hook mechanism, so `AGENTS.md` instructs them to run `guren context` at session start and `guren check` after edits.
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `agent:init` | Install the agent harness into an existing app (skips files that already exist; `--force` overwrites) | `bunx guren agent:init` |
-| `agent:sync` | Refresh framework-managed files (`.claude/` rules, skills, agents, hooks) to the latest version | `bunx guren agent:sync` |
+| `agent:init` | Install the agent harness for the selected agents into an existing app (skips files that already exist; `--force` overwrites) | `bunx guren agent:init --target codex,cursor` |
+| `agent:sync` | Refresh framework-managed files (rules, skills, subagents, hooks) for every agent detected on disk | `bunx guren agent:sync` |
 
-`agent:sync` never touches user-owned files — `CLAUDE.md`, `.mcp.json`, and `.claude/settings.json` — so your customizations survive framework updates.
+`agent:init --target` accepts `claude` (the default), `codex`, `cursor`, `copilot`, `opencode`, and `all`. `agent:sync` never touches user-owned files — `CLAUDE.md`, `AGENTS.md`, `.claude/settings.json`, and the MCP client configs — so your customizations survive framework updates. When an MCP config already exists, `agent:init` leaves it alone and prints the snippet to merge by hand.
 
 ## Deployment Recipes
 
