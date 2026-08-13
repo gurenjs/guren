@@ -1,6 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { relative, resolve } from 'node:path'
-import { walk, type BabelNode } from './ast-walk'
+import { literalString, walk, type BabelNode } from './ast-walk'
 import { parseSourceFile } from './parse-cache'
 import { escapeSingleQuoted as esc, escapeTemplateLiteral as escapeTemplatePart, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 
@@ -161,7 +161,7 @@ function extractDefinitionsFromSource(
 
     if (methodName === 'channel' || methodName === 'privateChannel' || methodName === 'presenceChannel') {
       const [patternArg] = (node.arguments as unknown[]) ?? []
-      const pattern = getLiteralString(patternArg)
+      const pattern = literalString(patternArg)
       if (!pattern) return
 
       const normalized = methodName === 'privateChannel'
@@ -177,7 +177,7 @@ function extractDefinitionsFromSource(
       const channelFromChain = resolveChannelFromBroadcastChain(member.object)
       if (channelFromChain) {
         const [eventArg] = (node.arguments as unknown[]) ?? []
-        const eventName = getLiteralString(eventArg)
+        const eventName = literalString(eventArg)
         if (!eventName) return
         const [, payloadArg] = (node.arguments as unknown[]) ?? []
         const payloadType = renderPayloadType(payloadArg)
@@ -186,8 +186,8 @@ function extractDefinitionsFromSource(
       }
 
       const [channelArg, eventArg, payloadArg] = (node.arguments as unknown[]) ?? []
-      const channelName = getLiteralString(channelArg)
-      const eventName = getLiteralString(eventArg)
+      const channelName = literalString(channelArg)
+      const eventName = literalString(eventArg)
       if (!channelName || !eventName) return
       const payloadType = renderPayloadType(payloadArg)
       addEventPayload(ensureChannel(definitions, channelName), eventName, payloadType)
@@ -204,7 +204,7 @@ function resolveChannelFromBroadcastChain(value: BabelNode): string | null {
   if (member.property.type !== 'Identifier') return null
 
   const [firstArg] = (value.arguments as unknown[]) ?? []
-  const channel = getLiteralString(firstArg)
+  const channel = literalString(firstArg)
   if (!channel) return null
 
   const methodName = member.property.name as string
@@ -228,20 +228,6 @@ function addEventPayload(definition: ChannelDefinition, eventName: string, paylo
   definition.events.set(eventName, payloads)
 }
 
-function getLiteralString(value: unknown): string | null {
-  if (!value || typeof value !== 'object') return null
-  const node = value as { type?: string; value?: unknown; quasis?: Array<{ value?: { cooked?: string } }>; expressions?: unknown[] }
-
-  if (node.type === 'StringLiteral' && typeof node.value === 'string') {
-    return node.value
-  }
-
-  if (node.type === 'TemplateLiteral' && Array.isArray(node.quasis) && node.quasis.length === 1 && Array.isArray(node.expressions) && node.expressions.length === 0) {
-    return node.quasis[0]?.value?.cooked ?? null
-  }
-
-  return null
-}
 
 function normalizePrivate(value: string): string {
   return value.startsWith('private-') ? value : `private-${value}`

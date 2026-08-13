@@ -8,6 +8,7 @@ import {
   fileExists,
   findFirstExisting,
   formatTruncatedList,
+  moduleRoutesEntryCandidates,
   toPosixRelative,
 } from './discovery'
 import type { ParseCache } from './parse-cache'
@@ -369,17 +370,6 @@ interface WiringScope {
   files: string[]
 }
 
-/**
- * Entry files to look for in a module *when its descriptor could not be
- * read*, in order: the shape `make:module` scaffolds, then the barrel layout
- * a hand-built module may use. {@link resolveModuleEntry} is the real rule —
- * the entry is whatever file `defineModule({ routes })` names — and this list
- * only stands in when there is no descriptor to resolve from.
- */
-function moduleEntryCandidates(moduleDir: string): string[] {
-  return [`${moduleDir}/routes.ts`, `${moduleDir}/routes.js`, `${moduleDir}/routes/index.ts`, `${moduleDir}/routes/index.js`]
-}
-
 /** How a module names its routes registrar, read from its descriptor. */
 type ModuleEntryResolution =
   /** `defineModule({ routes })` traced to a file — the scope's entry. */
@@ -579,7 +569,7 @@ export async function checkRouteRegistrarWiring(options: RoutesCheckOptions): Pr
       continue
     }
 
-    const entries = moduleEntryCandidates(toPosixRelative(cwd, dir))
+    const entries = moduleRoutesEntryCandidates(toPosixRelative(cwd, dir))
     const scopeResults = await checkScope(cwd, cache, {
       module,
       entryFile:

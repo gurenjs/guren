@@ -34,3 +34,36 @@ export function walk(value: unknown, visit: (node: BabelNode) => boolean | void)
     walk(node[key], visit)
   }
 }
+
+/**
+ * The string a node spells statically, or `null` when it does not spell one.
+ *
+ * A no-substitution template literal counts, because ``router.get(`/posts`,
+ * ...)`` and `router.get('/posts', ...)` are the same route — a scanner that
+ * knows only `StringLiteral` reads the first as no route at all. Anything with
+ * an interpolation, or a reference to a constant declared elsewhere, is `null`:
+ * these scanners miss rather than invent.
+ */
+export function literalString(value: unknown): string | null {
+  if (!value || typeof value !== 'object') return null
+  const node = value as {
+    type?: string
+    value?: unknown
+    quasis?: Array<{ value?: { cooked?: string } }>
+    expressions?: unknown[]
+  }
+
+  if (node.type === 'StringLiteral' && typeof node.value === 'string') {
+    return node.value
+  }
+
+  if (
+    node.type === 'TemplateLiteral'
+    && node.quasis?.length === 1
+    && node.expressions?.length === 0
+  ) {
+    return node.quasis[0]?.value?.cooked ?? null
+  }
+
+  return null
+}

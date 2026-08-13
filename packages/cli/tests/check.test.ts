@@ -1006,6 +1006,23 @@ export class User extends defineModel(users, {
     expect(denied).toBeUndefined()
   })
 })
+
+/**
+ * Init a repo at `dir` with everything committed, so `getChangedFiles`
+ * starts from a clean baseline; returns a runner for further git commands.
+ */
+function initGitRepo(dir: string): (...args: string[]) => void {
+  const git = (...args: string[]): void => {
+    spawnSync('git', args, { cwd: dir, stdio: 'ignore' })
+  }
+  git('init', '-b', 'main')
+  git('config', 'user.email', 'test@example.com')
+  git('config', 'user.name', 'Test')
+  git('add', '.')
+  git('commit', '-m', 'initial')
+  return git
+}
+
 describe('route registrar wiring', () => {
   /** Every `route-registrar:` finding, keyed by the file it names. */
   function wiring(report: CheckReport): Map<string, CheckResult> {
@@ -1631,22 +1648,6 @@ export function registerRoutes(router: Router): void {
     expect(finding!.suggestion).toContain('Add to routes/api.ts')
   })
 
-  /**
-   * Init a repo at `dir` with everything committed, so `getChangedFiles`
-   * starts from a clean baseline; returns a runner for further git commands.
-   */
-  function initGitRepo(dir: string): (...args: string[]) => void {
-    const git = (...args: string[]): void => {
-      spawnSync('git', args, { cwd: dir, stdio: 'ignore' })
-    }
-    git('init', '-b', 'main')
-    git('config', 'user.email', 'test@example.com')
-    git('config', 'user.name', 'Test')
-    git('add', '.')
-    git('commit', '-m', 'initial')
-    return git
-  }
-
   // The edit hook runs `runCheck({ changed: true })` on every save of a
   // controller, model, or page — none of which can move this answer, and all
   // of which would otherwise re-parse routes/ to re-derive it.
@@ -1740,5 +1741,278 @@ export const billingModule = defineModule({ name: 'billing' })
     )
 
     expect(wiring(report).size).toBe(0)
+  })
+})
+
+describe('route path parameters', () => {
+  /** Every `route-path-modifier:` finding, in the order reported. */
+  const modifiers = (report: CheckReport): CheckResult[] =>
+    report.checks.filter((c) => c.key.startsWith('route-path-modifier:'))
+
+  const entryWith = (body: string): string => `import { Router } from '@guren/core'
+
+export function registerWebRoutes(router: Router): void {
+${body}
+}
+`
+
+  it('warns about a :name* parameter, naming what Hono actually registers', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': entryWith(`  router.get('/files/:slug*', [FileController, 'show'])`),
+    })
+
+    const [finding, ...rest] = modifiers(report)
+    expect(rest).toEqual([])
+    expect(finding?.status).toBe('warn')
+    expect(finding?.key).toBe('route-path-modifier:routes/web.ts:/files/:slug*')
+    expect(finding?.filePath).toBe('routes/web.ts')
+    // The two halves of the mistake: the name it really binds, and the name
+    // the controller will ask for and not get.
+    expect(finding?.message).toContain("named literally 'slug*'")
+    expect(finding?.message).toContain("req.param('slug') is undefined")
+    expect(finding?.suggestion).toContain("'/files/:slug{.+}'")
+    // Not advisory: `check --ci` gates on this the way it does on an unmounted
+    // registrar, so an app carrying one goes red there.
+    expect(finding?.advisory).toBeUndefined()
+  })
+
+  // Real routes files register most of their routes inside a group callback,
+  // so a top-level-statement scan would see almost nothing.
+  it('sees routes registered inside a group callback', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': entryWith(`  router.middleware('auth').group((auth) => {
+    auth.get('/docs/:path*', [DocsController, 'show'])
+  })`),
+    })
+
+    expect(modifiers(report).map((c) => c.key)).toEqual(['route-path-modifier:routes/web.ts:/docs/:path*'])
+  })
+
+  // on(method, path) puts the path in argument 1 — reading argument 0 would
+  // inspect the verb and never see it.
+  it('reads the path argument of on(), not the method', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': entryWith(`  router.on('PURGE', '/cache/:key*', [CacheController, 'purge'])`),
+    })
+
+    expect(modifiers(report).map((c) => c.key)).toEqual(['route-path-modifier:routes/web.ts:/cache/:key*'])
+  })
+
+  it('warns about a group prefix carrying one, which every route inside inherits', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': entryWith(`  router.group('/:tenant*', (scoped) => {
+    scoped.get('/dashboard', [DashboardController, 'index'])
+  })`),
+    })
+
+    expect(modifiers(report).map((c) => c.key)).toEqual(['route-path-modifier:routes/web.ts:/:tenant*'])
+  })
+
+  // resource() spreads one path over up to seven routes, and was the hole a
+  // hand-kept mirror of Router's surface shipped with.
+  it('warns about a resource path carrying one', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': entryWith(`  router.resource('/files/:slug*', FileController)`),
+    })
+
+    expect(modifiers(report).map((c) => c.key)).toEqual(['route-path-modifier:routes/web.ts:/files/:slug*'])
+  })
+
+  // A path spelled as a no-substitution template literal is the same route.
+  it('reads a template-literal path', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': entryWith('  router.get(`/files/:slug*`, [FileController, \'show\'])'),
+    })
+
+    expect(modifiers(report).map((c) => c.key)).toEqual(['route-path-modifier:routes/web.ts:/files/:slug*'])
+  })
+
+  // The optional form: detection and the suggested rewrite have to agree, or
+  // the fix handed back is the path that was already wrong.
+  it('suggests a rewrite that keeps the optional marker', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': entryWith(`  router.get('/files/:slug*?', [FileController, 'show'])`),
+    })
+
+    const [finding] = modifiers(report)
+    expect(finding?.suggestion).toContain("'/files/:slug{.+}?'")
+  })
+
+  // A single star param at a time: the sentence is about one parameter, while
+  // the suggested path fixes them all.
+  it('reports one finding per path, however many stars it carries', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': entryWith(`  router.get('/:tenant*/files/:slug*', [FileController, 'show'])`),
+    })
+
+    const [finding, ...rest] = modifiers(report)
+    expect(rest).toEqual([])
+    expect(finding?.message).toContain("named literally 'tenant*'")
+    expect(finding?.suggestion).toContain("'/:tenant{.+}/files/:slug{.+}'")
+  })
+
+  // make:module scaffolds a single modules/<name>/routes.ts and no routes/
+  // directory, so the module discovery this check shares with the wiring
+  // check drops it — the file most modules actually route from.
+  it('reads a module that keeps its routes in a single routes.ts', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': entryWith(`  router.get('/', [HomeController, 'index'])`),
+      'modules/billing/index.ts': `import { defineModule } from '@guren/core'
+import { registerBillingRoutes } from './routes.js'
+
+export const billingModule = defineModule({ name: 'billing', routes: registerBillingRoutes })
+`,
+      'modules/billing/routes.ts': `import { Router } from '@guren/core'
+
+export function registerBillingRoutes(router: Router): void {
+  router.get('/invoices/:ref*', [InvoiceController, 'show'])
+}
+`,
+    })
+
+    expect(modifiers(report).map((c) => c.key)).toEqual([
+      'route-path-modifier:modules/billing/routes.ts:/invoices/:ref*',
+    ])
+  })
+
+  it('reads a module routes directory too', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': entryWith(`  router.get('/', [HomeController, 'index'])`),
+      'modules/billing/routes/invoice.ts': `import { Router } from '@guren/core'
+
+export function registerInvoiceRoutes(router: Router): void {
+  router.get('/invoices/:ref*', [InvoiceController, 'show'])
+}
+`,
+    })
+
+    expect(modifiers(report).map((c) => c.key)).toEqual([
+      'route-path-modifier:modules/billing/routes/invoice.ts:/invoices/:ref*',
+    ])
+  })
+
+  // The non-detections, in one app rather than seven: this is a per-segment
+  // string predicate, and a failure still names the path it fired on. Three of
+  // the seven contain a `*` — the `{.*}` one is what a rule matching a star
+  // anywhere in the segment gets wrong, and it is also the syntax this check
+  // tells people to move to.
+  const SAFE_PATHS = [
+    '/docs/:path{.+}',
+    '/docs/:path{.*}',
+    '/docs/:path{[^/]*}',
+    '/reports/:month{[0-9]{2}}',
+    '/assets/*',
+    '/posts/:id?',
+    '/posts/:id',
+  ]
+
+  it('says nothing about constrained parameters, wildcards, or optional parameters', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': entryWith(
+        SAFE_PATHS.map((path) => `  router.get('${path}', [SomeController, 'show'])`).join('\n'),
+      ),
+    })
+
+    expect(modifiers(report)).toEqual([])
+  })
+
+  // The member-call match is loose by design; the literal has to look like a
+  // path before anything is reported.
+  it('says nothing about a non-route .get() call in a routes file', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': `import { Router } from '@guren/core'
+
+const labels = new Map<string, string>()
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/posts', [PostController, 'index'])
+  labels.get('/files/:slug*')
+}
+`,
+    })
+
+    expect(modifiers(report)).toEqual([])
+  })
+
+  // The edit hook runs `runCheck({ changed: true })` on every save, so this
+  // path matters more than the unfiltered one — and it is the path where a
+  // finding can vanish silently, since the file set comes from three
+  // different producers and each POSIX-relative path has to match what git
+  // reports for its file to be looked at at all.
+  it('reports a :name* added to either a project or a module routes file under --changed', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-route-path-changed-')
+
+    try {
+      await writeWorkspaceFiles(workspace.dir, {
+        'routes/web.ts': entryWith(`  router.get('/', [HomeController, 'index'])`),
+        'modules/billing/index.ts': `import { defineModule } from '@guren/core'
+import { registerBillingRoutes } from './routes.js'
+
+export const billingModule = defineModule({ name: 'billing', routes: registerBillingRoutes })
+`,
+        'modules/billing/routes.ts': `import { Router } from '@guren/core'
+
+export function registerBillingRoutes(router: Router): void {
+  router.get('/invoices', [InvoiceController, 'index'])
+}
+`,
+        'app/Http/Controllers/HomeController.ts': 'export default class HomeController {}\n',
+      })
+      const git = initGitRepo(workspace.dir)
+
+      const changed = async (): Promise<string[]> =>
+        modifiers(await runCheck({ cwd: workspace.dir, changed: true })).map((c) => c.key)
+
+      expect(await changed()).toEqual([])
+
+      // The single-file module shape, whose path no `routes/` directory scan
+      // produces.
+      await writeFile(
+        join(workspace.dir, 'modules/billing/routes.ts'),
+        `import { Router } from '@guren/core'
+
+export function registerBillingRoutes(router: Router): void {
+  router.get('/invoices/:ref*', [InvoiceController, 'show'])
+}
+`,
+        'utf8',
+      )
+      expect(await changed()).toEqual(['route-path-modifier:modules/billing/routes.ts:/invoices/:ref*'])
+
+      await writeFile(
+        join(workspace.dir, 'routes/web.ts'),
+        entryWith(`  router.get('/files/:slug*', [FileController, 'show'])`),
+        'utf8',
+      )
+      expect(await changed()).toEqual([
+        'route-path-modifier:modules/billing/routes.ts:/invoices/:ref*',
+        'route-path-modifier:routes/web.ts:/files/:slug*',
+      ])
+
+      // The other half of the filter, and the cost of it: once both are
+      // committed, an unrelated edit says nothing about them. A plain
+      // `guren check` is what surfaces what an app already carries.
+      git('add', '.')
+      git('commit', '-m', 'add routes')
+      await writeFile(
+        join(workspace.dir, 'app/Http/Controllers/HomeController.ts'),
+        'export default class HomeController {\n  index() {}\n}\n',
+        'utf8',
+      )
+      expect(await changed()).toEqual([])
+      expect(modifiers(await runCheck({ cwd: workspace.dir }))).toHaveLength(2)
+    } finally {
+      await workspace.cleanup()
+    }
+    // Spawns git and runs the suite five times, like the sibling gate test.
+  }, 30_000)
+
+  it('does not run under --arch', async () => {
+    const report = await withWorkspace(
+      { 'routes/web.ts': entryWith(`  router.get('/files/:slug*', [FileController, 'show'])`) },
+      { arch: true },
+    )
+
+    expect(modifiers(report)).toEqual([])
   })
 })

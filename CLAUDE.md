@@ -103,7 +103,7 @@ bunx guren model:list           # List models with relationships
 bunx guren model:list --format json  # Models as JSON
 
 # Integrity checking
-bunx guren check                # Validate route↔controller↔page consistency, console command registration, route registrar wiring (every routes/*.ts reached from the registrar that would mount it — the entry registrar for the project's, the registrar defineModule({ routes }) names for modules/*/routes/), Postgres timestamp time zones, architecture boundaries, and doc links (informational; only --arch/--docs/--spec set the exit code)
+bunx guren check                # Validate route↔controller↔page consistency, console command registration, route registrar wiring (every routes/*.ts reached from the registrar that would mount it — the entry registrar for the project's, the registrar defineModule({ routes }) names for modules/*/routes/), route paths using `:name*` (not a Hono wildcard — it registers a parameter named literally `name*`), Postgres timestamp time zones, architecture boundaries, and doc links (informational; only --arch/--docs/--spec set the exit code)
 bunx guren check --json         # Check results as JSON
 bunx guren check --arch         # Architecture boundary checks only (guren.arch.ts) — fast path for edit hooks
 bunx guren check --docs         # Doc-link checks only: OKF frontmatter (type/entities/related) + body markdown links + @docs tags (exits non-zero on failures)
@@ -385,6 +385,7 @@ export const handler = createLambdaHandler(app)
 | `packages/cli/src/app-surface.ts` | The one rule for "this app cannot render an Inertia page". Scaffolders that emit a page component or wire into `routes/web.ts` refuse an API-only app through it. Positive evidence only — a scaffolder that guesses blocks commands that would have worked |
 | `packages/cli/src/check.ts` | AI agent: integrity checking |
 | `packages/cli/src/console-check.ts` | AI agent: console command registration checks (part of `guren check`) |
+| `packages/cli/src/route-path-check.ts` | AI agent: route path checks — a `:name*` parameter, which reads as a Hono wildcard but registers a single-segment parameter named literally `name*` (part of `guren check`) |
 | `packages/cli/src/routes-check.ts` | AI agent: route registrar wiring checks — a `routes/*.ts` its mounting registrar never calls, per scope: the app's entry for the project's `routes/`, the registrar `defineModule({ routes })` names for `modules/<name>/routes/` (part of `guren check`) |
 | `packages/cli/src/schema-check.ts` | AI agent: Postgres `timestamptz` schema checks (part of `guren check`) |
 | `packages/cli/src/arch-check.ts` | AI agent: architecture boundary checking (`guren.arch.ts`, see RFC 0002) |
