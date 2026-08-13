@@ -8,37 +8,39 @@ import Layout from '../../components/Layout.js'
 
 interface Props extends PaginatedPageProps<PostResourceData> {}
 
-type PostSearchBody = ApiRoutes['posts.search']['body']
-
 // posts.search is an HTTP QUERY route (RFC 10008): safe like GET, but the
 // criteria travel in a JSON body — HTML forms and Inertia navigation cannot
-// send it, so the page calls it through the generated typed client.
+// send it, so the page calls it through the generated typed client. The
+// client types the request body from the schema bound to the route.
 const api = createApiClient<ApiRoutes>({ baseUrl: '' })
-
-const fieldClass =
-  'w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring'
 
 export default function PostsIndex({ data, pagination }: Props) {
   const [keywords, setKeywords] = useState('')
   const [results, setResults] = useState<PostResourceData[] | null>(null)
   const [searching, setSearching] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   async function search(event: FormEvent) {
     event.preventDefault()
     const terms = keywords.split(/\s+/).filter((term) => term.length > 0)
     if (terms.length === 0) {
       setResults(null)
+      setError(null)
       return
     }
 
     setSearching(true)
+    setError(null)
     try {
-      const body: PostSearchBody = { keywords: terms }
-      const response = await api.request('posts.search', { body })
-      if (response.ok) {
-        const payload = (await response.json()) as { data: PostResourceData[] }
-        setResults(payload.data)
+      const response = await api.request('posts.search', { body: { keywords: terms } })
+      if (!response.ok) {
+        setError('Search failed — try fewer or shorter keywords.')
+        return
       }
+      const payload = (await response.json()) as { data: PostResourceData[] }
+      setResults(payload.data)
+    } catch {
+      setError('Search failed — check your connection and try again.')
     } finally {
       setSearching(false)
     }
@@ -58,7 +60,7 @@ export default function PostsIndex({ data, pagination }: Props) {
             value={keywords}
             onChange={(event) => setKeywords(event.target.value)}
             placeholder="Search posts…"
-            className={fieldClass}
+            className="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
           />
           <button
             type="submit"
@@ -69,6 +71,8 @@ export default function PostsIndex({ data, pagination }: Props) {
           </button>
         </form>
 
+        {error !== null && <p className="text-sm text-rose-400">{error}</p>}
+
         {results !== null && (
           <p className="text-sm text-slate-400">
             {results.length} {results.length === 1 ? 'result' : 'results'} ·{' '}
@@ -77,6 +81,7 @@ export default function PostsIndex({ data, pagination }: Props) {
               onClick={() => {
                 setKeywords('')
                 setResults(null)
+                setError(null)
               }}
               className="text-emerald-300 transition hover:text-emerald-200"
             >

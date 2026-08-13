@@ -2,9 +2,11 @@ import { beforeAll, describe, it } from 'bun:test'
 import { TestApp } from '@guren/testing'
 import app from '../src/app.js'
 
-// posts.search is an HTTP QUERY route (RFC 10008) whose body schema is bound
-// to the route, so invalid payloads are rejected with 422 before the
-// controller — and the database — is ever reached. That keeps this starter
+// posts.search is an HTTP QUERY route (RFC 10008). Its controller validates
+// the body with validateBody() before building any query — the schema bound
+// to the route feeds codegen and `guren audit`, while body parsing stays in
+// the controller so the request stream is read once — so an invalid payload
+// gets a 422 without the database ever being touched. That keeps this starter
 // test green without migrations or fixtures; cover the happy path with real
 // feature tests once your test database is set up.
 describe('posts.search', () => {

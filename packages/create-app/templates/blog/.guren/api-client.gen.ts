@@ -106,15 +106,20 @@ export type ApiRouteMethod<T extends ApiRouteName> = ApiRoutes[T]['method']
 export type ApiRoutePath<T extends ApiRouteName> = ApiRoutes[T]['path']
 export type ApiRouteParams<T extends ApiRouteName> = ApiRoutes[T]['params']
 
-// Param-less routes are emitted as `Record<string, never>`, whose `keyof` is
-// `string` — so this must compare against that shape, not against `never`.
-type HasParams<T extends ApiRouteName> =
-  ApiRoutes[T]['params'] extends Record<string, never> ? false : true
+// Param-less routes are emitted as `params: Record<string, never>`, whose
+// `keyof` is `string` — so this compares against that shape, not against
+// `never`. The one predicate serves both `ApiRequestOptions` and `request()`
+// below; keep them on it, or a fix lands in one spelling and not the other.
+type HasBoundParams<TParams> = TParams extends Record<string, never> ? false : true
+
+// The request body type a route declares through its bound schema — `unknown`
+// for routes without one.
+type BodyOf<TRoute> = TRoute extends { body: infer TBody } ? TBody : unknown
 
 export type ApiRequestOptions<T extends ApiRouteName> =
-  HasParams<T> extends true
-    ? { params: ApiRouteParams<T>; body?: unknown; query?: Record<string, unknown> }
-    : { params?: never; body?: unknown; query?: Record<string, unknown> }
+  HasBoundParams<ApiRouteParams<T>> extends false
+    ? { params?: never; body?: BodyOf<ApiRoutes[T]>; query?: Record<string, unknown> }
+    : { params: ApiRouteParams<T>; body?: BodyOf<ApiRoutes[T]>; query?: Record<string, unknown> }
 
 // The wire contract these mirror is owned by Guren's CSRF middleware: it
 // writes the XSRF-TOKEN cookie and reads either header name. Change them
@@ -179,6 +184,9 @@ function isSameOrigin(url: string): boolean {
  * Cookies follow the `credentials` option (`'same-origin'` by default; use
  * `'include'` cross-origin, with a CORS setup that allows it).
  *
+ * Routes that bind a `body` schema type the `body` option with that schema's
+ * request shape; routes without one accept `unknown`.
+ *
  * @example
  * ```typescript
  * import type { ApiRoutes } from '@/.guren/api-client.gen'
@@ -197,11 +205,9 @@ export function createApiClient<TRoutes extends { [K in keyof TRoutes]: { method
   return {
     async request<TName extends keyof TRoutes & string>(
       name: TName,
-      // Param-less routes carry `params: Record<string, never>` — match that
-      // shape (its `keyof` is `string`, so `extends [never]` never fires).
-      ...args: TRoutes[TName]['params'] extends Record<string, never>
-        ? [options?: { body?: unknown; query?: Record<string, unknown> }]
-        : [options: { params: TRoutes[TName]['params']; body?: unknown; query?: Record<string, unknown> }]
+      ...args: HasBoundParams<TRoutes[TName]['params']> extends false
+        ? [options?: { params?: never; body?: BodyOf<TRoutes[TName]>; query?: Record<string, unknown> }]
+        : [options: { params: TRoutes[TName]['params']; body?: BodyOf<TRoutes[TName]>; query?: Record<string, unknown> }]
     ): Promise<Response> {
       const route = (routes as Record<string, { method: string; path: string }>)[name]
       if (!route) throw new Error(`Route [${name}] not defined.`)
