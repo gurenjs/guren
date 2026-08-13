@@ -3,18 +3,17 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { sql } from 'drizzle-orm'
-import { createMySqlDatabase, type MySqlDatabase } from '../src/mysql'
+import { createPostgresDatabase, type PostgresDatabase } from '../src/postgres'
 
-// The unit tests mock `drizzle-orm/mysql2` away, so they cannot see driver-level
-// breakage (a wiring shape the adapter rejects, a migrator that never runs).
-// CI supplies MYSQL_URL from a mysql service container; locally, start one with
-// `bun run db:up:mysql`. MYSQL_URL needs a user allowed to create a database,
-// since the compose service only grants the app user rights on its own.
-const MYSQL_URL = process.env.MYSQL_URL
-const describeMySql = MYSQL_URL ? describe : describe.skip
+// The unit tests in postgres.test.ts mock `postgres` and the migrator away, so
+// they can assert that a migration run *happens* but never that the database
+// ends up usable. CI supplies POSTGRES_URL from its postgres service; locally,
+// start one with `bun run db:up`. POSTGRES_URL needs a user allowed to create a
+// database, since the reset below drops every schema in the one it runs against.
+const POSTGRES_URL = process.env.POSTGRES_URL
+const describePostgres = POSTGRES_URL ? describe : describe.skip
 
-// Derived rather than taken from MYSQL_URL: the reset below drops every table
-// in the database it runs against, and MYSQL_URL is the same string a
+// Derived rather than taken from POSTGRES_URL, which is the same string a
 // scaffolded app puts in DATABASE_URL.
 const TEST_DATABASE = 'guren_orm_test'
 
@@ -25,33 +24,37 @@ function databaseUrl(url: string, database: string): string {
 }
 
 async function ensureTestDatabase(url: string): Promise<void> {
-  const { createPool } = await import('mysql2/promise')
-  const pool = createPool({ uri: databaseUrl(url, 'mysql') })
+  const { default: postgres } = await import('postgres')
+  const admin = postgres(databaseUrl(url, 'postgres'), { max: 1 })
   try {
-    await pool.query(`CREATE DATABASE IF NOT EXISTS \`${TEST_DATABASE}\``)
+    const existing = await admin.unsafe(`SELECT 1 FROM pg_database WHERE datname = '${TEST_DATABASE}'`)
+    // Postgres has no CREATE DATABASE IF NOT EXISTS.
+    if (existing.length === 0) {
+      await admin.unsafe(`CREATE DATABASE "${TEST_DATABASE}"`)
+    }
   } finally {
-    await pool.end()
+    await admin.end({ timeout: 0 })
   }
 }
 
 function createMigrationsFolder(): string {
-  const migrationsFolder = mkdtempSync(join(tmpdir(), 'guren-orm-mysql-integration-'))
+  const migrationsFolder = mkdtempSync(join(tmpdir(), 'guren-orm-postgres-integration-'))
   const migrationDir = join(migrationsFolder, '20240101000000_init')
   mkdirSync(migrationDir, { recursive: true })
   writeFileSync(
     join(migrationDir, 'migration.sql'),
-    'CREATE TABLE `widgets` (`id` int AUTO_INCREMENT PRIMARY KEY NOT NULL, `name` varchar(255) NOT NULL);',
+    'CREATE TABLE "widgets" ("id" serial PRIMARY KEY NOT NULL, "name" varchar(255) NOT NULL);',
   )
   return migrationsFolder
 }
 
-describeMySql('createMySqlDatabase against a real MySQL server (requires MYSQL_URL)', () => {
-  let database: MySqlDatabase
+describePostgres('createPostgresDatabase against a real PostgreSQL server (requires POSTGRES_URL)', () => {
+  let database: PostgresDatabase
 
   beforeAll(async () => {
-    const url = MYSQL_URL as string
+    const url = POSTGRES_URL as string
     await ensureTestDatabase(url)
-    database = createMySqlDatabase({
+    database = createPostgresDatabase({
       migrationsFolder: createMigrationsFolder(),
       connectionString: () => databaseUrl(url, TEST_DATABASE),
     })
@@ -67,22 +70,9 @@ describeMySql('createMySqlDatabase against a real MySQL server (requires MYSQL_U
   it('runs migrations and queries through the real driver', async () => {
     const db = await database.getDatabase()
 
-    const [rows] = (await db.execute(sql`SELECT 1 AS one`)) as unknown as [Array<{ one: number }>]
-    expect(rows[0]?.one).toBe(1)
-
-    await db.execute(sql`INSERT INTO \`widgets\` (\`name\`) VALUES ('gear')`)
-    const [widgets] = (await db.execute(sql`SELECT \`name\` FROM \`widgets\``)) as unknown as [
-      Array<{ name: string }>,
-    ]
+    await db.execute(sql`INSERT INTO "widgets" ("name") VALUES ('gear')`)
+    const widgets = (await db.execute(sql`SELECT "name" FROM "widgets"`)) as unknown as Array<{ name: string }>
     expect(widgets.map((widget) => widget.name)).toEqual(['gear'])
-  })
-
-  it('reports the applied migration', async () => {
-    await database.migrateDatabase()
-
-    const status = await database.migrationStatus()
-    expect(status).toHaveLength(1)
-    expect(status[0]).toMatchObject({ name: '20240101000000_init', applied: true })
   })
 
   it('clears table contents on reset and leaves migrations applied', async () => {
@@ -91,7 +81,7 @@ describeMySql('createMySqlDatabase against a real MySQL server (requires MYSQL_U
     // fails here, not the fixture.
     await database.migrateDatabase()
     const db = await database.getDatabase()
-    await db.execute(sql`INSERT INTO \`widgets\` (\`name\`) VALUES ('sprocket')`)
+    await db.execute(sql`INSERT INTO "widgets" ("name") VALUES ('sprocket')`)
 
     await database.resetDatabase()
 
@@ -99,9 +89,9 @@ describeMySql('createMySqlDatabase against a real MySQL server (requires MYSQL_U
     expect(status[0]).toMatchObject({ applied: true })
 
     // Queryable without an explicit migrateDatabase(): the reset re-applied it.
-    const [widgets] = (await db.execute(sql`SELECT \`name\` FROM \`widgets\``)) as unknown as [
-      Array<{ name: string }>,
-    ]
+    // This is the issue-400 repro — the handle predates the reset, so nothing
+    // re-migrates on the way to the query.
+    const widgets = (await db.execute(sql`SELECT "name" FROM "widgets"`)) as unknown as Array<{ name: string }>
     expect(widgets).toEqual([])
   })
 
@@ -110,14 +100,14 @@ describeMySql('createMySqlDatabase against a real MySQL server (requires MYSQL_U
     // preceding test left behind.
     await database.migrateDatabase()
     const db = await database.getDatabase()
-    await db.execute(sql`CREATE OR REPLACE VIEW \`widget_names\` AS SELECT \`name\` FROM \`widgets\``)
+    await db.execute(sql`CREATE OR REPLACE VIEW "widget_names" AS SELECT "name" FROM "widgets"`)
 
     await database.resetDatabase()
 
     // Only what the migrations rebuild survives — the view is not among them.
-    const [remaining] = (await db.execute(
-      sql`SELECT table_name AS name FROM information_schema.tables WHERE table_schema = DATABASE()`,
-    )) as unknown as [Array<{ name: string }>]
+    const remaining = (await db.execute(
+      sql`SELECT table_name AS name FROM information_schema.tables WHERE table_schema = 'public'`,
+    )) as unknown as Array<{ name: string }>
     expect(remaining.map((row) => row.name)).not.toContain('widget_names')
     expect(remaining.map((row) => row.name)).toContain('widgets')
   })

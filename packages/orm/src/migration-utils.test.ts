@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { sql } from 'drizzle-orm'
 import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, listLocalMigrations } from './migration-utils'
 import { createSqliteDatabase } from './sqlite'
 
@@ -75,7 +76,7 @@ describe('createSqliteDatabase resetDatabase/migrationStatus', () => {
     rmSync(workDir, { recursive: true, force: true })
   })
 
-  test('should report status, reset all tables, and allow re-migration', async () => {
+  test('should report status, clear table contents, and leave migrations applied', async () => {
     const migrationsDir = join(workDir, 'migrations')
     writeDrizzleMigration(
       migrationsDir,
@@ -109,18 +110,54 @@ describe('createSqliteDatabase resetDatabase/migrationStatus', () => {
 
     await database.resetDatabase()
 
+    // The reset dropped the table and migrated it back: the schema is there,
+    // the rows are gone.
     const tables = raw
-      .query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+      .query("SELECT name FROM sqlite_master WHERE type='table' AND name = 'widgets'")
       .all() as Array<{ name: string }>
-    expect(tables).toHaveLength(0)
+    expect(tables).toHaveLength(1)
+    expect((raw.query('SELECT count(*) as c FROM widgets').get() as { c: number }).c).toBe(0)
 
     const reset = await database.migrationStatus()
-    expect(reset[0].applied).toBe(false)
+    expect(reset[0].applied).toBe(true)
 
-    // Re-migration works after reset
+    // The documented reset-then-migrate pattern still holds: the second run
+    // sees an up-to-date tracker and no-ops rather than re-applying.
     await database.migrateDatabase()
     const remigrated = await database.migrationStatus()
+    expect(remigrated).toHaveLength(1)
     expect(remigrated[0].applied).toBe(true)
+  })
+
+  test('should leave tables queryable without an explicit migrateDatabase() call', async () => {
+    // The issue this test pins: `resetDatabase()` reads as self-sufficient, and
+    // a caller that trusts the name used to meet "no such table" inside the
+    // first query of the first test — far from the reset that caused it.
+    const migrationsDir = join(workDir, 'migrations')
+    writeDrizzleMigration(
+      migrationsDir,
+      '20260101000000_create_widgets',
+      'CREATE TABLE widgets (id integer primary key autoincrement, name text not null);',
+    )
+
+    const database = createSqliteDatabase({
+      migrationsFolder: migrationsDir,
+      filename: join(workDir, 'test.db'),
+    })
+
+    // The handle is taken before the reset, so nothing re-migrates on the way
+    // to the query — `getDatabase()` awaits the migration run, which would hide
+    // the very gap this test covers.
+    const db = (await database.getDatabase()) as { run(query: unknown): unknown; all(query: unknown): unknown[] }
+    db.run(sql`INSERT INTO widgets (name) VALUES ('gear')`)
+
+    await database.resetDatabase()
+
+    expect(db.all(sql`SELECT name FROM widgets`)).toEqual([])
+    db.run(sql`INSERT INTO widgets (name) VALUES ('cog')`)
+    expect(db.all(sql`SELECT name FROM widgets`)).toEqual([{ name: 'cog' }])
+
+    await database.closeDatabase()
   })
 })
 

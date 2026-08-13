@@ -187,6 +187,24 @@ describe('createPostgresDatabase', () => {
     expect(status).toEqual([{ name: '20240101000000_init', applied: false, appliedAt: null }])
   })
 
+  it('re-applies migrations after dropping the schema', async () => {
+    // Mock-level coverage: the live equivalent is the sqlite test in
+    // src/migration-utils.test.ts, which queries a table after a bare reset.
+    // Without this run the reset would leave the schema it just dropped gone,
+    // and the next query would fail with `relation ... does not exist`.
+    const database = createPostgresDatabase({
+      migrationsFolder: createMigrationsFolder(true),
+      connectionString: () => 'postgres://example',
+    })
+
+    await database.migrateDatabase()
+    migrateMock.mockClear()
+
+    await database.resetDatabase()
+
+    expect(migrateMock).toHaveBeenCalledTimes(1)
+  })
+
   it('describes an unreachable server when resetting rather than throwing a message-less error', async () => {
     const database = createPostgresDatabase({
       migrationsFolder: createMigrationsFolder(true),

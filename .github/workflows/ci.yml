@@ -66,6 +66,9 @@ jobs:
       REDIS_URL: redis://localhost:6379
       # Drives the ORM's MySQL integration test, which creates its own database.
       MYSQL_URL: mysql://root:guren@localhost:33306/guren
+      # Same for the Postgres integration test — it creates its own database
+      # rather than resetting the one a scaffolded app would point DATABASE_URL at.
+      POSTGRES_URL: postgres://guren:guren@localhost:54322/guren
       APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
 
     steps:

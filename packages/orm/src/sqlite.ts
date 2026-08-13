@@ -27,7 +27,7 @@ export interface SqliteDatabase {
   closeDatabase(): Promise<void>
   configureOrm(): Promise<void>
   seedDatabase(): Promise<void>
-  /** Drops every table and view (including the drizzle migration tracker) so migrations can be re-applied from scratch. */
+  /** Drops every table and view (including the drizzle migration tracker), then re-applies migrations — same end state as `guren db:reset`. */
   resetDatabase(): Promise<void>
   /** Per-migration applied state derived from the drizzle-kit journal and the __drizzle_migrations table. */
   migrationStatus(): Promise<MigrationStatusEntry[]>
@@ -153,6 +153,9 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
 
     async resetDatabase() {
       await database.get()
+      // Only reachable when a concurrent evaluation closed the handle while the
+      // await above was suspended. Nothing here can act on a closed handle, and
+      // migrating would re-open one against a database this call never dropped.
       if (!sqliteClient) return
 
       // Anything left behind fails the next migration run, and three things
@@ -177,8 +180,12 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
         sqliteClient.exec('PRAGMA foreign_keys = ON;')
       }
 
-      // Allow migrateDatabase() to re-apply everything from scratch.
+      // Drop the memo so the run below re-applies everything from scratch, then
+      // migrate: a reset ends on a migrated database, the same state `guren
+      // db:reset` leaves behind. A caller that migrates again — the documented
+      // reset-then-migrate pattern — hits the memo and no-ops.
       migrations.reset()
+      await migrations.get()
     },
 
     async migrationStatus() {

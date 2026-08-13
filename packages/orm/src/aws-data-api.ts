@@ -67,7 +67,7 @@ export interface AwsDataApiDatabase {
   closeDatabase(): Promise<void>
   configureOrm(): Promise<void>
   seedDatabase(): Promise<void>
-  /** Drops the public schema (and the drizzle tracker schema) so migrations can be re-applied from scratch. */
+  /** Drops the public schema (and the drizzle tracker schema), then re-applies migrations — same end state as `guren db:reset`. */
   resetDatabase(): Promise<void>
   /** Per-migration applied state derived from the drizzle-kit journal and drizzle.__drizzle_migrations. */
   migrationStatus(): Promise<MigrationStatusEntry[]>
@@ -215,8 +215,12 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
       await adminDb.execute(sql.raw('DROP SCHEMA IF EXISTS drizzle CASCADE'))
     })
 
-    // Allow migrateDatabase() to re-apply everything from scratch.
+    // Drop the memo so the run below re-applies everything from scratch, then
+    // migrate: a reset ends on a migrated database, the same state `guren
+    // db:reset` leaves behind. A caller that migrates again — the documented
+    // reset-then-migrate pattern — hits the memo and no-ops.
     migrations.reset()
+    await migrations.get()
   }
 
   async function migrationStatus(): Promise<MigrationStatusEntry[]> {
