@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import ts from 'typescript'
 import { generateDataTypes } from '../src/data-types'
+import { makeResource } from '../src/make-resource'
 import { checkTypes, COLD_TSC_TIMEOUT, writeWorkspaceFiles } from './helpers'
 
 /**
@@ -19,6 +20,23 @@ function resourceFixture(className: string, fields: string): string {
     + '}\n\n'
     + `export class ${className} extends Resource<Record<string, unknown>> {\n`
     + `  toArray(): ${dataName} {\n`
+    + '    return {} as never\n'
+    + '  }\n'
+    + '}\n'
+  )
+}
+
+/**
+ * A `PostResource` file carrying `declarations` verbatim above the class, with
+ * `toArray()` annotated as `returnType` when one is given. For the cases where
+ * the declaration is the subject and the class around it is only scaffolding.
+ */
+function postResourceFile(declarations: string, returnType?: string): string {
+  return (
+    "import { Resource } from '@guren/core'\n\n"
+    + `${declarations}\n\n`
+    + 'export class PostResource extends Resource<Record<string, unknown>> {\n'
+    + `  toArray()${returnType ? `: ${returnType}` : ''} {\n`
     + '    return {} as never\n'
     + '  }\n'
     + '}\n'
@@ -259,5 +277,288 @@ describe('generateDataTypes discovers module resources', () => {
     expect(definitions).toEqual([])
     expect(warnings).toEqual([])
     expect(await read()).toContain('// No resources found')
+  })
+})
+
+/**
+ * A Resource outside the recognised subset of `toArray()` shapes type-checks
+ * and serves fine — the only symptom is a `Data` member that never appears. So
+ * every miss has to name itself and the shape it wanted, or the run reports
+ * success while the artifact describes less than the app does.
+ */
+describe('generateDataTypes reports Resource classes it could not extract', () => {
+  let appRoot: string
+
+  beforeEach(async () => {
+    appRoot = await mkdtemp(join(tmpdir(), 'guren-cli-data-types-miss-'))
+  })
+
+  afterEach(async () => {
+    await rm(appRoot, { recursive: true, force: true })
+  })
+
+  const read = () => readFile(join(appRoot, '.guren/data.gen.ts'), 'utf8')
+
+  it('warns about a toArray() that returns an unannotated object literal', async () => {
+    await writeWorkspaceFiles(appRoot, {
+      // The reported case, verbatim: valid TypeScript, correct at runtime, and
+      // invisible to a regex looking for a return annotation.
+      'app/Http/Resources/PostResource.ts':
+        "import { Resource } from '@guren/core'\n"
+        + "import type { PostRecord } from '../../Models/Post.js'\n\n"
+        + 'export class PostResource extends Resource<PostRecord> {\n'
+        + '  toArray() {\n'
+        + '    return { id: this.resource.id, title: this.resource.title }\n'
+        + '  }\n'
+        + '}\n',
+    })
+
+    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('PostResource')
+    expect(warnings[0]).toContain('app/Http/Resources/PostResource.ts')
+    // The fix has to be quotable from the message alone — that is the whole
+    // point of it, and it must spell the convention `make:resource` emits.
+    expect(warnings[0]).toContain('export interface PostResourceData')
+    expect(warnings[0]).toContain('toArray(): PostResourceData')
+
+    // Still a tombstone, so a same-named Resource elsewhere cannot resolve a
+    // response hint to this one's payload.
+    expect(definitions.map((d) => [d.className, d.dataName, d.rawType])).toEqual([
+      ['PostResource', null, null],
+    ])
+    expect(await read()).toContain('// No resources found')
+  })
+
+  it('names the module path of an unextractable module resource', async () => {
+    await writeWorkspaceFiles(appRoot, {
+      'modules/billing/app/Http/Resources/InvoiceResource.ts':
+        "import { Resource } from '@guren/core'\n\n"
+        + 'export class InvoiceResource extends Resource<Record<string, unknown>> {\n'
+        + '  toArray() {\n'
+        + '    return { total: 0 }\n'
+        + '  }\n'
+        + '}\n',
+    })
+
+    const { warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('modules/billing/app/Http/Resources/InvoiceResource.ts')
+    expect(warnings[0]).toContain('export interface InvoiceResourceData')
+  })
+
+  it('says so when the annotated type lives in another file', async () => {
+    await writeWorkspaceFiles(appRoot, {
+      'app/Http/Resources/types.ts': 'export interface PostPayload {\n  id: number\n}\n',
+      'app/Http/Resources/PostResource.ts':
+        "import { Resource } from '@guren/core'\n"
+        + "import type { PostPayload } from './types.js'\n\n"
+        + 'export class PostResource extends Resource<Record<string, unknown>> {\n'
+        + '  toArray(): PostPayload {\n'
+        + '    return {} as never\n'
+        + '  }\n'
+        + '}\n',
+    })
+
+    const { warnings } = await generateDataTypes({ appRoot, force: true })
+
+    // A declaration that is merely elsewhere needs "move it here", not "write
+    // one" — the generic message sends the author looking for something that
+    // is already written.
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('PostPayload')
+    expect(warnings[0]).toContain('is declared in that file')
+    expect(warnings[0]).toContain('move the declaration into it')
+  })
+
+  it('says so when the annotated type is here but is not an object type', async () => {
+    await writeWorkspaceFiles(appRoot, {
+      // An intersection has no body to copy into the namespace. The
+      // declaration is right here, so telling the author to write one would
+      // send them looking for something they can already see.
+      'app/Http/Resources/PostResource.ts': postResourceFile(
+        "import type { PostRecord } from '../../Models/Post.js'\n\n"
+        + 'export type PostPayload = PostRecord & { extra: string }',
+        'PostPayload',
+      ),
+    })
+
+    const { warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('declares PostPayload in that file')
+    expect(warnings[0]).toContain('only a plain object type can be copied')
+    expect(warnings[0]).not.toContain('move the declaration into it')
+  })
+
+  it('quotes an annotation it does not read instead of calling it absent', async () => {
+    await writeWorkspaceFiles(appRoot, {
+      // A qualified name is a return type, just not one Strategy 2 reads.
+      // Telling the author they wrote none sends them to add a second.
+      'app/Http/Resources/PostResource.ts':
+        "import { Resource } from '@guren/core'\n"
+        + "import type * as Types from './types.js'\n\n"
+        + 'export class PostResource extends Resource<Record<string, unknown>> {\n'
+        + '  toArray(): Types.PostPayload {\n'
+        + '    return {} as never\n'
+        + '  }\n'
+        + '}\n',
+    })
+
+    const { warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('annotates toArray(): Types.PostPayload')
+    expect(warnings[0]).not.toContain('no toArray() return type')
+  })
+
+  it('stays silent for the shape make:resource scaffolds', async () => {
+    // Generated by the scaffolder rather than restated here: a warning the
+    // framework's own output triggers would be the message being wrong, and a
+    // hand-copied fixture stops proving that the day the template changes.
+    await makeResource('Post', { cwd: appRoot, model: 'Post' })
+
+    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(warnings).toEqual([])
+    expect(definitions.map((d) => d.dataName)).toEqual(['Post'])
+  })
+})
+
+/**
+ * The type body is copied verbatim into `data.gen.ts`, so reading one byte too
+ * many is worse than reading none: an over-captured body takes the whole
+ * artifact — every other resource's type with it — out of compilation, and
+ * nothing warns, because extraction "succeeded".
+ */
+describe('generateDataTypes reads a type body by brace depth', () => {
+  let appRoot: string
+
+  beforeEach(async () => {
+    appRoot = await mkdtemp(join(tmpdir(), 'guren-cli-data-types-body-'))
+  })
+
+  afterEach(async () => {
+    await rm(appRoot, { recursive: true, force: true })
+  })
+
+  const writeResource = (declarations: string, returnType?: string) =>
+    writeWorkspaceFiles(appRoot, {
+      'app/Http/Resources/PostResource.ts': postResourceFile(declarations, returnType),
+    })
+
+  it(
+    'stops a one-line interface at its own closing brace',
+    async () => {
+      await writeResource('export interface PostResourceData { id: number }', 'PostResourceData')
+
+      const { outputPath, definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+      expect(warnings).toEqual([])
+      expect(definitions.map((d) => d.rawType)).toEqual(['{ id: number }'])
+      // Compiled rather than substring-matched: over-capture leaves a
+      // `data.gen.ts` that still *contains* the right text, so only tsc can
+      // tell the two apart.
+      expect(
+        checkTypes([outputPath], {
+          strict: true,
+          noEmit: true,
+          skipLibCheck: true,
+          target: ts.ScriptTarget.ES2022,
+          types: [],
+        }),
+      ).toEqual([])
+    },
+    COLD_TSC_TIMEOUT,
+  )
+
+  it('reads a plain local interface named by the annotation', async () => {
+    // No `extends` and no `=` — the shape a hand-written resource lands on
+    // when the payload type is not named after the class.
+    await writeResource('export interface PostPayload {\n  id: number\n}', 'PostPayload')
+
+    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(warnings).toEqual([])
+    expect(definitions.map((d) => d.rawType)).toEqual(['{\n  id: number\n}'])
+  })
+
+  it('keeps a nested object whole', async () => {
+    await writeResource(
+      'export interface PostResourceData {\n'
+      + '  author: {\n    id: number\n  }\n'
+      + '  id: number\n'
+      + '}',
+      'PostResourceData',
+    )
+
+    const { definitions } = await generateDataTypes({ appRoot, force: true })
+
+    // The trailing `id` proves the reader did not stop at the nested type's
+    // closing brace.
+    expect(definitions[0]?.rawType).toBe('{\n  author: {\n    id: number\n  }\n  id: number\n}')
+  })
+
+  it('does not count braces inside comments or string literal types', async () => {
+    await writeResource(
+      'export interface PostResourceData {\n'
+      + "  // Serialized as '}' by the legacy encoder — see ADR 0003.\n"
+      + "  marker: '}'\n"
+      + '  id: number\n'
+      + '}',
+      'PostResourceData',
+    )
+
+    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(warnings).toEqual([])
+    expect(definitions[0]?.rawType).toContain('id: number')
+    expect(definitions[0]?.rawType?.endsWith('\n}')).toBe(true)
+  })
+
+  it('ignores a declaration that is only a commented-out draft', async () => {
+    // The ordinary way a file comes to hold two declarations of one name: the
+    // previous shape left above the current one. Reading the comment yields a
+    // `Data` member describing a payload the app stopped sending.
+    await writeResource(
+      '// interface PostResourceData { bogus: string }\n'
+      + '/* export interface PostResourceData {\n  alsoBogus: string\n} */\n\n'
+      + 'export interface PostResourceData {\n  id: number\n}',
+      'PostResourceData',
+    )
+
+    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(warnings).toEqual([])
+    expect(definitions[0]?.rawType).toBe('{\n  id: number\n}')
+  })
+
+  it('keeps a template literal type whose expression nests another template', async () => {
+    // The inner backtick closes nothing; read as this template's delimiter it
+    // ends the literal early and the body is truncated mid-property.
+    await writeResource(
+      'export interface PostResourceData {\n'
+      + '  value: `${string extends string ? `}` : never}`\n'
+      + '  id: number\n'
+      + '}',
+      'PostResourceData',
+    )
+
+    const { definitions } = await generateDataTypes({ appRoot, force: true })
+
+    expect(definitions[0]?.rawType?.endsWith('  id: number\n}')).toBe(true)
+  })
+
+  it('ignores a same-named alias that declares no object type', async () => {
+    // `type PostResourceData = string` has no body; walking forward to the
+    // next `{` would hand back the class declaration below it.
+    await writeResource('export type PostResourceData = string')
+
+    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(definitions.map((d) => d.rawType)).toEqual([null])
+    expect(warnings).toHaveLength(1)
   })
 })

@@ -35,6 +35,10 @@ export const PATCH_REASONS = {
  * original settles both, and keeps brace/bracket counting from tripping over
  * a `{` inside a string.
  */
+// `data-types.ts` masks for its own matching and does not share this one: it
+// blanks the quotes as well and stops an unterminated `'`/`"` at the newline,
+// which `parseArrayEntries` below cannot have — it counts masked entries and
+// needs `'A', 'B'` to stay two of them.
 function maskNonCode(source: string): string {
   const mask = source.split('')
   let i = 0

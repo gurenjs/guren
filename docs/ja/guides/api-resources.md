@@ -330,6 +330,25 @@ router.query('/posts/search', {
 
 生成された API クライアントは、このルートの `json()` を `{ data: Data.Post[] }` として型付けします。ヒントの書き方は [Resource レスポンスヒント](./routing.md#resource-レスポンスヒント)を参照してください。
 
+### コード生成が読む形を宣言する
+
+抽出はソースコードレベルで行われるため、Resource は自分のファイル内にペイロードの型を明記する必要があります。注釈のない `toArray()` からオブジェクトリテラルを返すのは TypeScript としては正しいものの、コード生成はその形を読み取れません。`make:resource` が生成するとおり、クラス名にちなんだ interface を宣言して `toArray()` に注釈を付けてください:
+
+```ts
+export interface UserResourceData {
+  id: number
+  name: string
+}
+
+export class UserResource extends Resource<User> {
+  toArray(): UserResourceData {
+    return { id: this.resource.id, name: this.resource.name }
+  }
+}
+```
+
+interface は Resource 自身のファイルで宣言してください。共通の型モジュールから import したものは読み取られません。型を抽出できなかった Resource は黙って捨てられるのではなく `guren codegen` の警告で名指しされるので、`Data.*` が生成されない理由は必ず表示されます。
+
 ### モジュール内の Resource
 
 コード生成はプロジェクトルートの `app/Http/Resources` に加えて、各 `modules/<name>/` の中も走査します。モジュールの Resource はモジュール名を冠した名前で出力され、`modules/billing/app/Http/Resources/InvoiceResource.ts` は `Data.BillingInvoice` になります。この修飾は衝突したときだけでなく常に付きます。そうすることで型名は「クラスがどこにあるか」だけで決まり、別の場所に2つ目の `InvoiceResource` を追加してもフロントエンドが既にインポートしている型名が変わることはありません。

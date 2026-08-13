@@ -5,8 +5,23 @@ import type { WithRelations } from '@guren/orm'
 
 type TaskWithOwner = WithRelations<typeof Task, 'owner'>
 
+export interface TaskResourceData extends Record<string, unknown> {
+  id: number
+  title: string
+  description: string | null
+  completed: boolean
+  notificationArtifactPath: string
+  broadcastChannels: {
+    public: string
+    private: string
+  }
+  createdAt: string
+  updatedAt: string
+  owner?: { id: number | undefined; name: string | undefined }
+}
+
 export class TaskResource extends Resource<TaskRecord | TaskWithOwner> {
-  toArray() {
+  toArray(): TaskResourceData {
     const task = this.resource
     return {
       id: task.id,

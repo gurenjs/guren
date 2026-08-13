@@ -201,7 +201,8 @@ function isSameOrigin(url: string): boolean {
  * `output` schema type the response: `json()` on the returned `Response`
  * resolves to that schema's parsed shape. A `resource` response hint types
  * `json()` the same way from the `Data` types extracted out of
- * app/Http/Resources — declared, not validated: the server never checks the
+ * app/Http/Resources, at the project root and under modules/* — declared, not
+ * validated: the server never checks the
  * payload against it at runtime. Without either, `json()` resolves to
  * `unknown` — validate before trusting it. Either way the typed shape
  * describes the success body only: error statuses carry their own (a 422

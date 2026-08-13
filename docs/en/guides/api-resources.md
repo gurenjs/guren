@@ -330,6 +330,25 @@ router.query('/posts/search', {
 
 The generated API client then types `json()` for that route as `{ data: Data.Post[] }`. See [Resource Response Hints](./routing.md#resource-response-hints) for the hint syntax.
 
+### Declaring the shape codegen reads
+
+Extraction is source-level, so a Resource has to state its payload type in its own file — an object literal returned from an unannotated `toArray()` is correct TypeScript that codegen cannot read. Declare an interface named after the class and annotate `toArray()` with it, which is what `make:resource` scaffolds:
+
+```ts
+export interface UserResourceData {
+  id: number
+  name: string
+}
+
+export class UserResource extends Resource<User> {
+  toArray(): UserResourceData {
+    return { id: this.resource.id, name: this.resource.name }
+  }
+}
+```
+
+The interface must be declared in the resource's own file — one imported from a shared types module is not read. A Resource codegen cannot extract a type from is named in a `guren codegen` warning rather than dropped in silence, so a missing `Data.*` member always says why.
+
 ### Resources inside modules
 
 Codegen scans `app/Http/Resources` at the project root and inside every `modules/<name>/` directory. A module's Resource is emitted under a name qualified with its module, so `modules/billing/app/Http/Resources/InvoiceResource.ts` becomes `Data.BillingInvoice`. The qualifier is always applied, never only on collision — that way a type's name depends solely on where its class lives, and adding a second `InvoiceResource` elsewhere cannot rename one the frontend already imports.
