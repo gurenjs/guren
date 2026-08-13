@@ -1838,6 +1838,19 @@ ${body}
     expect(finding?.suggestion).toContain("'/files/:slug{.+}?'")
   })
 
+  // A star alongside a constraint has no single obvious rewrite, so the
+  // suggestion falls back to naming the path rather than inventing one.
+  it('leaves a constrained star parameter as written in the suggestion', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': entryWith(`  router.get('/files/:slug*{[a-z]+}', [FileController, 'show'])`),
+    })
+
+    const [finding] = modifiers(report)
+    expect(finding?.message).toContain("named literally 'slug*'")
+    expect(finding?.suggestion).toContain("'/files/:slug*{[a-z]+}'")
+    expect(finding?.suggestion).toContain("drop the '*' instead")
+  })
+
   // A single star param at a time: the sentence is about one parameter, while
   // the suggested path fixes them all.
   it('reports one finding per path, however many stars it carries', async () => {
