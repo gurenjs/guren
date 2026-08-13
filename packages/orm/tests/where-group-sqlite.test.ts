@@ -66,6 +66,21 @@ describe('callback where groups on real bun:sqlite driver', () => {
     expect(posts.map((p) => p.title).sort()).toEqual(['Bun speed', 'Deleted bun', 'Hono routing'])
   })
 
+  it('should match any keyword when all OR pairs share one group (blog template shape)', async () => {
+    const posts = await Post.newQuery()
+      .where((q) => {
+        for (const keyword of ['speed', 'routing']) {
+          const pattern = `%${keyword}%`
+          q.orWhere('title', 'like', pattern).orWhere('excerpt', 'like', pattern)
+        }
+      })
+      .where('published', true)
+      .get()
+
+    // (title/excerpt ~ speed OR title/excerpt ~ routing) AND published
+    expect(posts.map((p) => p.title).sort()).toEqual(['Bun speed', 'Hono routing'])
+  })
+
   it('should stack keyword groups for multiple keywords', async () => {
     const query = Post.newQuery().where('published', true)
     for (const keyword of ['bun', 'routing']) {
