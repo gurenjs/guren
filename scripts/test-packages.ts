@@ -70,6 +70,10 @@ async function testPathFor(pkg: { dir: string; relativeDir: string }): Promise<s
 // the moment cwd moves.
 const cwdGuard = join(import.meta.dir, 'test-cwd-guard.ts')
 
+// Fails any test file that leaves globalThis.fetch replaced. Absolute for the
+// same reason as the guard above.
+const fetchGuard = join(import.meta.dir, 'test-global-fetch-guard.ts')
+
 // Detectors whose own code lives outside packages/, so a package sweep would
 // never run them — and a detector that silently stops detecting is worth
 // nothing. The smoke package list is here for the same reason: the gates that
@@ -99,6 +103,8 @@ const testArgs = [
   '--isolate',
   '--preload',
   cwdGuard,
+  '--preload',
+  fetchGuard,
   ...forwarded,
   ...(await Promise.all(targets.map(testPathFor))),
   ...guardTests,

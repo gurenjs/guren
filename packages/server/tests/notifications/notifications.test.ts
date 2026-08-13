@@ -108,6 +108,11 @@ class TestUser implements Notifiable {
   }
 }
 
+// Captured at module scope, before any describe body runs: a value read inside
+// a describe is already whatever an earlier describe left behind, so restoring
+// to it re-pins the replacement instead of clearing it.
+const realFetch = global.fetch
+
 describe('Notification', () => {
   describe('constructor', () => {
     it('should generate a unique ID', () => {
@@ -729,6 +734,13 @@ describe('SlackChannel', () => {
     global.fetch = fetchMock
   })
 
+  // Without this the stub outlives the describe: every later file in the run
+  // gets a fetch that answers 200 to anything, which reads as a passing HTTP
+  // call right up until a test asserts on the status.
+  afterEach(() => {
+    global.fetch = realFetch
+  })
+
   describe('send', () => {
     it('should send notification to Slack webhook', async () => {
       const channel = new SlackChannel('https://hooks.slack.com/test')
@@ -969,7 +981,6 @@ describe('Queued notifications', () => {
   let manager: NotificationManager
   let user: QueuedUser
   let dbChannel: DatabaseChannel
-  const originalFetch = global.fetch
 
   beforeEach(() => {
     driver = new MemoryDriver()
@@ -986,7 +997,7 @@ describe('Queued notifications', () => {
   })
 
   afterEach(() => {
-    global.fetch = originalFetch
+    global.fetch = realFetch
   })
 
   /**
