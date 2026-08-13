@@ -3,7 +3,7 @@ import { pages } from '@/.guren/pages.gen'
 import { Post } from '../../Models/Post.js'
 import type { UserRecord } from '../../Models/User.js'
 import { PostResource, type PostResourceData } from '../Resources/PostResource.js'
-import { PostIdParamSchema, PostPayloadSchema, ListPostsQuerySchema } from '../Validators/PostValidator.js'
+import { PostIdParamSchema, PostPayloadSchema, PostSearchSchema, ListPostsQuerySchema } from '../Validators/PostValidator.js'
 
 type PostsIndexProps = PaginatedPageProps<PostResourceData>
 
@@ -23,6 +23,22 @@ export default class PostController extends Controller {
         links: paginator.links(),
       },
     } satisfies PostsIndexProps)
+  }
+
+  // Serves the HTTP QUERY route `posts.search` — a safe read that carries its
+  // criteria in a JSON body. Matches posts with any keyword in title or excerpt.
+  async search(): Promise<Response> {
+    const { keywords, limit } = await this.validateBody(PostSearchSchema)
+
+    const query = Post.newQuery().with('author')
+    for (const keyword of keywords) {
+      const pattern = `%${keyword}%`
+      query.orWhere('title', 'like', pattern)
+      query.orWhere('excerpt', 'like', pattern)
+    }
+    const posts = await query.orderBy('id', 'desc').limit(limit).get()
+
+    return this.json({ data: posts.map((post) => new PostResource(post).toJSON()) })
   }
 
   async show(): Promise<Response> {

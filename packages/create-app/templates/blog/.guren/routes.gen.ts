@@ -11,6 +11,7 @@ export const routeManifest = {
   'posts.destroy': { method: 'DELETE', path: '/posts/:id' },
   'posts.edit': { method: 'GET', path: '/posts/:id/edit' },
   'posts.index': { method: 'GET', path: '/posts' },
+  'posts.search': { method: 'QUERY', path: '/posts/search' },
   'posts.show': { method: 'GET', path: '/posts/:id' },
   'posts.store': { method: 'POST', path: '/posts' },
   'posts.update': { method: 'PUT', path: '/posts/:id' },
@@ -75,6 +76,7 @@ export const routes = {
     destroy: (params: RouteParams<'posts.destroy'>, query?: RouteQuery) => route('posts.destroy', params, query),
     edit: (params: RouteParams<'posts.edit'>, query?: RouteQuery) => route('posts.edit', params, query),
     index: (query?: RouteQuery) => route('posts.index', query),
+    search: (query?: RouteQuery) => route('posts.search', query),
     show: (params: RouteParams<'posts.show'>, query?: RouteQuery) => route('posts.show', params, query),
     store: (query?: RouteQuery) => route('posts.store', query),
     update: (params: RouteParams<'posts.update'>, query?: RouteQuery) => route('posts.update', params, query)
