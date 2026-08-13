@@ -27,6 +27,28 @@ declare module '@inertiajs/core' {
 }
 `
 
+/**
+ * Param-key extraction from a route path literal.
+ *
+ * Emitted into every generated module that answers "does this path take
+ * params?" — the route manifest and the API client — so they all derive the
+ * answer from the path string the server routes on, not from whatever shape
+ * their generator happens to emit alongside it.
+ *
+ * `ExtractParams` in @guren/inertia-client's components.tsx spells the same
+ * rule for library code that cannot embed an emitted fragment; keep the two
+ * in lockstep.
+ */
+export const PATH_PARAM_TYPE_HELPERS = `\
+type NormalizeParamKey<TValue extends string> = TValue extends \`\${infer Key}?\` ? Key : TValue
+type PathParamKeys<TPath extends string> =
+  TPath extends \`\${string}:\${infer Param}/\${infer Rest}\`
+    ? NormalizeParamKey<Param> | PathParamKeys<\`/\${Rest}\`>
+    : TPath extends \`\${string}:\${infer Param}\`
+      ? NormalizeParamKey<Param>
+      : never
+`
+
 /** Type definitions emitted after the route manifest object. */
 export const RUNTIME_TYPE_DEFINITIONS = `\
 export type RouteManifest = typeof routeManifest
@@ -38,14 +60,7 @@ type PrimitiveQueryValue = string | number | boolean | null | undefined
 type QueryValue = PrimitiveQueryValue | readonly PrimitiveQueryValue[]
 export type RouteQuery = Record<string, QueryValue>
 
-type NormalizeParamKey<TValue extends string> = TValue extends \`\${infer Key}?\` ? Key : TValue
-type PathParamKeys<TPath extends string> =
-  TPath extends \`\${string}:\${infer Param}/\${infer Rest}\`
-    ? NormalizeParamKey<Param> | PathParamKeys<\`/\${Rest}\`>
-    : TPath extends \`\${string}:\${infer Param}\`
-      ? NormalizeParamKey<Param>
-      : never
-
+${PATH_PARAM_TYPE_HELPERS}
 export type RouteParams<TName extends RouteName> =
   [PathParamKeys<RouteManifest[TName]['path']>] extends [never]
     ? Record<string, never>

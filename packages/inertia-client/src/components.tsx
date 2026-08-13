@@ -33,6 +33,10 @@ export interface RouteManifestLike {
   [name: string]: { method: string; path: string }
 }
 
+// Same rule as PATH_PARAM_TYPE_HELPERS in @guren/cli's
+// routes-types-fragments.ts, which the generated modules embed. This package
+// ships as a library — it cannot import an emitted fragment — so the two
+// spellings have to be kept in lockstep by hand.
 type ExtractParams<TPath extends string> =
   TPath extends `${string}:${infer Param}/${infer Rest}`
     ? (Param extends `${infer Key}?` ? Key : Param) | ExtractParams<`/${Rest}`>

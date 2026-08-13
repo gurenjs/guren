@@ -16,7 +16,10 @@ const definitions: RouteDefinitionLike[] = [
     method: 'QUERY',
     path: '/posts/search',
     name: 'posts.search',
-    schemas: { body: z.object({ keywords: z.array(z.string()) }) },
+    schemas: {
+      body: z.object({ keywords: z.array(z.string()) }),
+      output: z.object({ data: z.array(z.object({ id: z.number(), title: z.string() })) }),
+    },
   },
 ]
 
@@ -74,14 +77,36 @@ void client.request('posts.missing')
 // @ts-expect-error a bound body schema types the payload
 void client.request('posts.search', { body: { keywords: 'guren' } })
 
+// A bound output schema types json(); without one it stays unknown.
+export const searchResults: { data: Array<{ id: number; title: string }> } =
+  await (await client.request('posts.search', { body: { keywords: ['guren'] } })).json()
+
+// @ts-expect-error routes without an output schema parse to unknown
+export const untypedResults: { data: unknown[] } = await (await client.request('posts.index')).json()
+
+// A union route name must stay callable in the way that is safe for every
+// member: params are required whenever any member's path has them.
+declare const eitherRoute: 'posts.index' | 'posts.show'
+void client.request(eitherRoute, { params: { id: 1 } })
+
+// @ts-expect-error a union name requires the params its members need
+void client.request(eitherRoute)
+
+// @ts-expect-error empty params must not satisfy a union name either
+void client.request(eitherRoute, { params: {} })
+
 export const indexOptions: ApiRequestOptions<'posts.index'> = {}
 export const showOptions: ApiRequestOptions<'posts.show'> = { params: { id: 1 } }
+export const unionOptions: ApiRequestOptions<'posts.index' | 'posts.show'> = { params: { id: 1 } }
 
 // @ts-expect-error param-less routes reject a params member
 export const paramsRejected: ApiRequestOptions<'posts.index'> = { params: {} }
 
 // @ts-expect-error a route with path params requires them here too
 export const paramsRequired: ApiRequestOptions<'posts.show'> = {}
+
+// @ts-expect-error the union options type requires every member's params
+export const unionParamsRequired: ApiRequestOptions<'posts.index' | 'posts.show'> = {}
 `
 
 const compilerOptions: ts.CompilerOptions = {
