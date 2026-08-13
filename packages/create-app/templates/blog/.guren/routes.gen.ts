@@ -30,9 +30,6 @@ type PrimitiveQueryValue = string | number | boolean | null | undefined
 type QueryValue = PrimitiveQueryValue | readonly PrimitiveQueryValue[]
 export type RouteQuery = Record<string, QueryValue>
 
-// Mirrors Hono's path lexing: a param starts only at a segment boundary, its
-// key ends at the first `{` (regex constraints, which may nest braces, are
-// never part of it), and a trailing `?`/`*` modifier is dropped.
 type SegmentParamKey<TSegment extends string> = TSegment extends `:${infer TParam}`
   ? TParam extends `${infer TName}{${string}`
     ? TName
@@ -45,19 +42,21 @@ type SegmentParamKey<TSegment extends string> = TSegment extends `:${infer TPara
 type PathParamKeys<TPath extends string> = TPath extends `${infer THead}/${infer TRest}`
   ? SegmentParamKey<THead> | PathParamKeys<TRest>
   : SegmentParamKey<TPath>
-
-export type RouteParams<TName extends RouteName> =
-  [PathParamKeys<RouteManifest[TName]['path']>] extends [never]
+type HasPathParams<TPath extends string> = [PathParamKeys<TPath>] extends [never] ? false : true
+type PathParamsOf<TPath extends string> =
+  HasPathParams<TPath> extends false
     ? Record<string, never>
-    : { [TKey in PathParamKeys<RouteManifest[TName]['path']>]: string | number }
+    : { [TKey in PathParamKeys<TPath>]: string | number }
+
+export type RouteParams<TName extends RouteName> = PathParamsOf<RouteManifest[TName]['path']>
 
 type RouteArgs<TName extends RouteName> =
-  [PathParamKeys<RouteManifest[TName]['path']>] extends [never]
+  HasPathParams<RouteManifest[TName]['path']> extends false
     ? [query?: RouteQuery]
     : [params: RouteParams<TName>, query?: RouteQuery]
 
 export function route<TName extends RouteName>(name: TName, ...args: RouteArgs<TName>): string {
-  const definition = routeManifest[name]
+  const definition: { method: RouteMethod; path: RoutePath } | undefined = routeManifest[name]
   if (!definition) {
     throw new Error(`Route [${String(name)}] not defined.`)
   }
@@ -105,10 +104,6 @@ function hasPathParams(path: string): boolean {
   return /(?:^|\/):[A-Za-z0-9_-]/u.test(path)
 }
 
-// Mirrors Hono's path lexing: a param starts only at a segment boundary, an
-// attached regex constraint runs to the last `}` before the next `/` (so
-// `{[0-9]{2}}` stays whole), and a trailing `?`/`*` modifier is consumed
-// with the token: `/items/:id{[0-9]+}` -> `/items/1`.
 function substituteParams(path: string, params?: Record<string, string | number>): string {
   if (!params) {
     return path

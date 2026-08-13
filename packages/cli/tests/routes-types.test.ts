@@ -314,6 +314,13 @@ describe('generated route() with Hono path modifiers', () => {
     expect(route('status.show')).toBe('/status/foo:bar')
   })
 
+  it('still appends the query string for a literal-colon path with no params', () => {
+    // hasPathParams() decides arity for the no-params-arg call form; a route
+    // whose type-level RouteArgs disagrees with the runtime check would
+    // silently drop this query string instead of appending it.
+    expect(route('status.show', { tab: 'x' })).toBe('/status/foo:bar?tab=x')
+  })
+
   it('still appends the query string after a modifier substitution', () => {
     expect(route('items.show', { id: 7 }, { tab: 'specs' })).toBe('/items/7?tab=specs')
   })
