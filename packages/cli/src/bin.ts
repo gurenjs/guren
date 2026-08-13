@@ -959,10 +959,17 @@ const codegenCommand = defineCommand({
       appRoot: args.app,
       ...writerOptions,
     })
-    const { outputPath: dataOutputPath, definitions: resourceDefinitions } = await generateDataTypes({
+    const {
+      outputPath: dataOutputPath,
+      definitions: resourceDefinitions,
+      warnings: dataWarnings,
+    } = await generateDataTypes({
       appRoot: args.app,
       ...writerOptions,
     })
+    for (const warning of dataWarnings) {
+      consola.warn(warning)
+    }
     const { outputPath: channelOutputPath } = await generateChannelTypes({
       appRoot: args.app,
       ...writerOptions,

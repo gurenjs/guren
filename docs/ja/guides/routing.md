@@ -260,7 +260,7 @@ router.query('/posts/search', {
 
 ヒントはコントローラーが組み立てる JSON をそのまま写します。単一リソースはクラスそのもの（`resource: PostResource`）、コレクションは要素 1 つの配列（`resource: [PostResource]`）、エンベロープはプレーンオブジェクトで表します。`{ data: [PostResource] }` は `this.json({ data: PostResource.collection(posts) })` に対応します。ネストは任意の深さで書けます。
 
-`guren codegen` は各クラスを `app/Http/Resources` と突き合わせ、組み立てた形（この例では `{ data: Data.Post[] }`）で生成 API クライアントの `json()` を型付けします。`output` と違ってリクエスト時には何も実行されません。ヒントはあくまで宣言であり、見つからない Resource クラスを指した場合はコード生成が警告してレスポンスを型無しのままにする、という形でのみ検査されます。両方指定した場合は、実際に強制される側である `output` が優先されます。
+`guren codegen` は各クラスをプロジェクトルートと各 `modules/<name>/` の `app/Http/Resources` と突き合わせ、組み立てた形（この例では `{ data: Data.Post[] }`）で生成 API クライアントの `json()` を型付けします。`output` と違ってリクエスト時には何も実行されません。ヒントはあくまで宣言であり、見つからない Resource クラスを指した場合はコード生成が警告してレスポンスを型無しのままにする、という形でのみ検査されます。両方指定した場合は、実際に強制される側である `output` が優先されます。
 
 > [!NOTE]
 > ヒントの末端はすべて Resource クラスである必要があります。Resource と通常の型付きオブジェクトが混ざるエンベロープ（たとえばページネーションレスポンスの `meta` と `links`）は今のところ表現できません。そうしたルートには `output` スキーマを使ってください。

@@ -253,8 +253,28 @@ export function discoverControllerFiles(appRoot: string): Promise<string[]> {
   return discoverDir(appRoot, 'app/Http/Controllers')
 }
 
-export function discoverResourceFiles(appRoot: string): Promise<string[]> {
-  return discoverDir(appRoot, 'app/Http/Resources')
+/**
+ * Where an app's `JsonResource` subclasses live, relative to an app root.
+ *
+ * `make:resource` writes here, `discoverResourceFiles` reads here, the data
+ * generator names it in the header it stamps on `data.gen.ts`, and the Vite
+ * plugin watches it. Same reason as {@link DB_ARTIFACT_DIRS}: a reader holding
+ * its own copy of the path cannot treat a miss as "no such class exists", only
+ * as "not where I happened to look".
+ */
+export const RESOURCES_DIR = 'app/Http/Resources'
+
+/**
+ * Resource classes at the project root and in every module.
+ *
+ * `subDir` relocates the scan for the one caller with a non-conventional
+ * layout (`generateDataTypes`'s `resourcesDir` option). It stays a parameter
+ * here rather than a second scan in the caller so that an override still
+ * inherits the module fan-out and the test-file exclusion — a scanner that
+ * forked would answer "is this a Resource?" by two rules at once.
+ */
+export function discoverResourceFiles(appRoot: string, subDir: string = RESOURCES_DIR): Promise<string[]> {
+  return discoverDir(appRoot, subDir)
 }
 
 export function discoverEventFiles(appRoot: string): Promise<string[]> {

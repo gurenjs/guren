@@ -311,13 +311,24 @@ export function escapeSingleQuoted(value: string): string {
 const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/u
 
 /**
+ * Whether `value` can be written as a bare identifier in generated code.
+ *
+ * Character shape only, and deliberately: `default` is a fine object key and a
+ * syntax error as a type alias name, so a caller emitting a *binding* has to
+ * rule out reserved words itself.
+ */
+export function isIdentifier(value: string): boolean {
+  return IDENTIFIER_RE.test(value)
+}
+
+/**
  * Renders a property key for a generated object or type literal: bare when it
  * is a valid identifier, single-quoted otherwise. Shared by the codegen
  * emitters for the same reason as {@link escapeSingleQuoted} \u2014 what counts as
  * an emittable key should have one spelling.
  */
 export function quoteObjectKey(key: string): string {
-  return IDENTIFIER_RE.test(key) ? key : `'${escapeSingleQuoted(key)}'`
+  return isIdentifier(key) ? key : `'${escapeSingleQuoted(key)}'`
 }
 
 /**
