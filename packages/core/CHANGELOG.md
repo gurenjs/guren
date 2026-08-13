@@ -1,5 +1,32 @@
 # @guren/core
 
+## 1.6.1
+
+### Patch Changes
+
+- b7b2b09: `where(callback)` and `orWhere(callback)` compose parenthesized condition groups, Laravel's `where(fn ($q) => ...)`.
+
+  Until now `orWhere()` always pushed a top-level OR, so "(title LIKE ? OR excerpt LIKE ?) AND published = true" was inexpressible from application code — any AND filter next to an OR keyword chain (a published flag, tenancy, soft deletes) was silently OR'd away. The callback form collects conditions on a nested builder and folds them into a single group AND-ed with the rest of the query (`orWhere(callback)` ORs the whole group instead). Sequential semantics inside the callback match the top level: `.where(a).where(b).orWhere(c)` reads `(a AND b) OR c`, and callbacks nest. Groups render through the existing Drizzle condition tree, verified against the real sqlite driver alongside SoftDeletes and global scopes.
+
+  The blog starter's `posts.search` action now groups its keyword OR chain this way, so filters added after it apply to every match.
+
+- Updated dependencies [e698600]
+- Updated dependencies [4bb4472]
+- Updated dependencies [e984c3d]
+- Updated dependencies [2291ac0]
+- Updated dependencies [44f96d8]
+- Updated dependencies [b4295fc]
+- Updated dependencies [1379993]
+- Updated dependencies [c9d7c38]
+- Updated dependencies [5e1bb0d]
+- Updated dependencies [7b34556]
+- Updated dependencies [1f815fd]
+- Updated dependencies [ca3c2a4]
+- Updated dependencies [b7b2b09]
+  - @guren/cli@2.5.0
+  - @guren/orm@2.4.0
+  - @guren/server@2.6.0
+
 ## 1.6.0
 
 ### Minor Changes
