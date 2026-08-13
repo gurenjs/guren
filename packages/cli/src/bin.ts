@@ -63,7 +63,7 @@ import { runCheck, renderCheckReport } from './check'
 import { runAudit, renderAuditReport } from './audit'
 import { generateGuidelines } from './guidelines'
 import { installAgentHarness, type AgentHarnessResult } from './agent-harness'
-import { parseTargetList, type AgentTarget } from './agent-targets'
+import { AGENT_TARGETS, parseTargetList, type AgentTarget } from './agent-targets'
 import { makeFeature } from './make-feature'
 import { parseFieldsString } from './fields'
 import { generateKeyValue, writeKeyToEnv } from './key-generate'
@@ -2012,8 +2012,7 @@ function reportAgentHarnessResult(result: AgentHarnessResult): void {
   }
 }
 
-const AGENT_TARGETS_HELP =
-  'Comma-separated agent targets: claude, codex, cursor, copilot, opencode, or "all".'
+const AGENT_TARGETS_HELP = `Comma-separated agent targets: ${AGENT_TARGETS.join(', ')}, or "all".`
 
 function parseTargetArg(raw: string): AgentTarget[] {
   try {

@@ -12,15 +12,10 @@ so make them part of your loop:
 3. Framework-managed files (`.agents/rules/`, `.agents/skills/`) can be
    refreshed anytime with `bunx guren agent:sync`.
 
-Detailed, verified API rules live in `.agents/rules/*.md`; each file's `globs`
-frontmatter states which paths it covers — read the matching rule before
-editing those paths: `orm-models.md` (models, queries, relations),
-`controllers-http.md` (validation, Inertia, auth), `routes-codegen.md`
-(route options, schema binding, codegen), `testing.md` (TestApp assertions),
-`docs-and-spec.md` (linked ADRs/docs, generated spec views).
-For framework signatures, check the `guren context` digest first, then the
-matching rule file; only read `node_modules/@guren/*` for APIs neither covers.
-
 Reusable skills (SKILL.md, the Agent Skills format) live in
 `.agents/skills/` — agents that support the standard discover them there
 automatically.
+
+Detailed, verified API rules live in `.agents/rules/*.md`; each file's `globs`
+frontmatter states which paths it covers — read the matching rule before
+editing those paths.

@@ -2,7 +2,6 @@ import { describe, it, expect } from 'bun:test'
 import {
   AGENT_TARGETS,
   BULK_TEMPLATE_PREFIXES,
-  NAMED_TEMPLATE_PATHS,
   componentsForTargets,
   parseTargetList,
   planComponents,
@@ -73,6 +72,7 @@ const FAKE_RULE = [
 function fakeTemplates(): TemplateFiles {
   return new Map([
     ['core/entry-intro.md', '# __APP_TITLE__ intro\n'],
+    ['core/rules-catalog.md', 'rule catalog\n'],
     ['core/entry-body.md', 'body referencing __RULES_DIR__/testing.md\n'],
     ['core/rules/testing.md', FAKE_RULE],
     ['core/skills/scaffold/SKILL.md', 'rules live in `__RULES_DIR__/`'],
@@ -102,7 +102,7 @@ describe('planComponents', () => {
     const byPath = planByPath(['claude'])
 
     expect(byPath.get('CLAUDE.md')?.content).toBe(
-      '# My App intro\n\nclaude hooks workflow\n\nbody referencing .claude/rules/testing.md\n',
+      '# My App intro\n\nclaude hooks workflow\n\nrule catalog\n\nbody referencing .claude/rules/testing.md\n',
     )
     expect(byPath.get('CLAUDE.md')?.managed).toBe(false)
     expect(byPath.get('.claude/rules/testing.md')?.managed).toBe(true)
@@ -117,7 +117,7 @@ describe('planComponents', () => {
     const byPath = planByPath(['claude', 'agents'])
 
     expect(byPath.get('AGENTS.md')?.content).toBe(
-      '# My App intro\n\nmanual workflow for .agents/rules\n\nbody referencing .agents/rules/testing.md\n',
+      '# My App intro\n\nmanual workflow for .agents/rules\n\nrule catalog\n\nbody referencing .agents/rules/testing.md\n',
     )
     expect(byPath.get('CLAUDE.md')?.content).toContain('claude hooks workflow')
     expect(byPath.get('.agents/skills/scaffold/SKILL.md')?.content).toBe(
@@ -200,39 +200,70 @@ describe('planComponents', () => {
   })
 })
 
-describe('template completeness', () => {
-  it('every shipped template file is reachable from the planner', async () => {
-    const templates = await loadAgentTemplates()
+const ALL_COMPONENTS: HarnessComponent[] = ['claude', 'agents', 'cursor', 'copilot', 'codex', 'opencode']
 
-    for (const path of NAMED_TEMPLATE_PATHS) {
-      expect(templates.has(path)).toBe(true)
+describe('template completeness', () => {
+  it('every shipped template file is consumed by the planner', async () => {
+    const templates = await loadAgentTemplates()
+    // evidence, not declaration: record which templates the planner actually
+    // reads by name, so a file added to the tree but never wired into
+    // planComponents fails here instead of shipping uninstalled
+    const used = new Set<string>()
+    class RecordingTemplates extends Map<string, string> {
+      override get(key: string): string | undefined {
+        used.add(key)
+        return super.get(key)
+      }
     }
+
+    planComponents(ALL_COMPONENTS, new RecordingTemplates(templates), 'Demo App')
+
     for (const path of templates.keys()) {
       const reachable =
-        (NAMED_TEMPLATE_PATHS as readonly string[]).includes(path) ||
-        BULK_TEMPLATE_PREFIXES.some((prefix) => path.startsWith(prefix))
+        used.has(path) || BULK_TEMPLATE_PREFIXES.some((prefix) => path.startsWith(prefix))
       if (!reachable) {
         throw new Error(
-          `${path} is neither in NAMED_TEMPLATE_PATHS nor under a bulk prefix — ` +
+          `${path} is neither get()-consumed by planComponents nor under a bulk prefix — ` +
             'it would never be installed. Wire it into planComponents (agent-targets.ts).',
         )
       }
     }
   })
 
-  it('the full plan over the real templates renders without leftovers or conflicts', async () => {
+  it('the full plan over the real templates assembles both entry documents in order', async () => {
     const templates = await loadAgentTemplates()
-    const all = planComponents(
-      ['claude', 'agents', 'cursor', 'copilot', 'codex', 'opencode'],
-      templates,
-      'Demo App',
-    )
+    const all = planComponents(ALL_COMPONENTS, templates, 'Demo App')
+    const headings = (content: string | undefined): string[] =>
+      (content ?? '').split('\n').filter((line) => line.startsWith('## '))
 
     const claudeMd = all.find((file) => file.path === 'CLAUDE.md')
     const agentsMd = all.find((file) => file.path === 'AGENTS.md')
+
     expect(claudeMd?.content).toContain('# Demo App')
     expect(claudeMd?.content).toContain('.claude/rules')
+    expect(headings(claudeMd?.content)).toEqual([
+      '## Overview',
+      '## AI Agents: Start Here',
+      '## Project Structure',
+      '## Development Commands',
+      '## MCP Server (AI Agent Integration)',
+      '## Architecture Overview',
+      '## Testing',
+      '## Key Files',
+    ])
+
     expect(agentsMd?.content).toContain('# Demo App')
     expect(agentsMd?.content).toContain('.agents/rules')
+    expect(headings(agentsMd?.content)).toEqual([
+      '## Overview',
+      '## AI Agents: Start Here',
+      '## Session Workflow',
+      '## Project Structure',
+      '## Development Commands',
+      '## MCP Server (AI Agent Integration)',
+      '## Architecture Overview',
+      '## Testing',
+      '## Key Files',
+    ])
   })
 })

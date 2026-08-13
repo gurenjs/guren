@@ -2,10 +2,11 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import process from 'node:process'
-import { fileExists, toPosixRelative } from './discovery'
+import { fileExists, readIfExists, toPosixRelative } from './discovery'
 import {
   DETECTABLE_COMPONENTS,
   componentsForTargets,
+  normalizeComponents,
   planComponents,
   type AgentTarget,
   type HarnessComponent,
@@ -151,7 +152,9 @@ async function detectInstalledComponents(
   if (components.length === 0) {
     components.push('claude')
   }
-  return components
+  // restore the install invariant (cursor/copilot imply the agents family),
+  // so a deleted .agents/ tree is recreated rather than left dangling
+  return normalizeComponents(components)
 }
 
 export async function installAgentHarness(options: AgentHarnessOptions = {}): Promise<AgentHarnessResult> {
@@ -183,7 +186,7 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
       // onboarding guidance, not a recurring nag — sync stays quiet about
       // configs the user has decided to keep without the Guren endpoint
       if (file.mergeMarker && mode === 'init') {
-        const current = await readFile(destPath, 'utf8').catch(() => '')
+        const current = (await readIfExists(cwd, file.path)) ?? ''
         if (!current.includes(file.mergeMarker)) {
           mcpMergeHints.push({ path: file.path, snippet: file.content })
         }

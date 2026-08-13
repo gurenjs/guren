@@ -174,6 +174,18 @@ describe('installAgentHarness', () => {
     expect(result.written.some((path) => path.startsWith('.github/'))).toBe(false)
   })
 
+  it('sync recreates a deleted .agents tree when native cursor rules remain', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init', targets: ['cursor'] })
+    await rm(join(tempDir, '.agents'), { recursive: true, force: true })
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'sync' })
+
+    // cursor evidence implies the agents family it depends on
+    expect(result.written).toContain('.agents/rules/orm-models.md')
+    expect(result.written).toContain('.agents/skills/dev-workflow/SKILL.md')
+    expect(result.skipped).toContain('AGENTS.md')
+  })
+
   it('sync ignores a hand-authored .agents/rules directory holding no managed files', async () => {
     await mkdir(join(tempDir, '.agents/rules'), { recursive: true })
     await writeFile(join(tempDir, '.agents/rules/my-conventions.md'), 'user rule\n', 'utf8')
