@@ -8,11 +8,14 @@ import { createTempWorkspace } from './helpers'
 /**
  * Behavioural coverage for the scaffolded `bin/serve.ts`.
  *
- * The file decides which port a generated app binds, and nothing tested it —
- * which is how `PORT=0` silently became 3333 and how a port walk could hand an
- * automated run somebody else's server. Asserting the file's *text* would pin
- * none of that, so each case runs the real template against a stub `src/main.js`
- * and reads back the ports it actually asked for.
+ * The file decides which port a generated app asks for, and nothing tested it —
+ * which is how `PORT=0` silently became 3333. The busy-port walk itself lives in
+ * `Application.listen({ portFallback })` and is tested with it; what matters
+ * here is that the template hands `listen()` the right port exactly once and
+ * does not force `GUREN_STRICT_PORT` — a template-side retry or strict-port
+ * override would nest with the framework's own walk. Asserting the file's
+ * *text* would pin none of that, so each case runs the real template against a
+ * stub `src/main.js` and reads back what it actually asked for.
  */
 
 const templatesDir = fileURLToPath(new URL('../templates', import.meta.url))
@@ -21,9 +24,10 @@ const DEFAULT_SERVE = join(templatesDir, 'default/bin/serve.ts')
 const API_ONLY_SERVE = join(templatesDir, 'api-only/bin/serve.ts')
 
 /**
- * Stands in for a booted app. Records every port `listen()` is asked for and
- * fails the first `FAIL_TIMES` attempts with the error shape Bun throws for a
- * taken port — `code: 'EADDRINUSE'`, and a message that never says so.
+ * Stands in for a booted app. Records every port `listen()` is asked for,
+ * whether the template forced `GUREN_STRICT_PORT` before the call, and fails
+ * the first `FAIL_TIMES` attempts with the error shape Bun throws for a taken
+ * port — `code: 'EADDRINUSE'`, and a message that never says so.
  */
 const STUB_MAIN = `
 const failTimes = Number(process.env.FAIL_TIMES ?? 0)
@@ -33,6 +37,7 @@ const app = {
   async listen(options) {
     attempts += 1
     console.log('LISTEN ' + options.port)
+    console.log('STRICT ' + (process.env.GUREN_STRICT_PORT ?? 'unset'))
 
     if (attempts <= failTimes) {
       const error = new Error('Failed to start server. Is port ' + options.port + ' in use?')
@@ -52,6 +57,7 @@ type RunResult = {
   exitCode: number
   requestedPorts: number[]
   boundPort: number | undefined
+  strictPortAtListen: string | undefined
   stderr: string
 }
 
@@ -85,6 +91,7 @@ async function runServeTemplate(
       exitCode: proc.exitCode ?? 0,
       requestedPorts: [...stdout.matchAll(/^LISTEN (\d+)$/gmu)].map((match) => Number(match[1])),
       boundPort: [...stdout.matchAll(/^BOUND (\d+)$/gmu)].map((match) => Number(match[1]))[0],
+      strictPortAtListen: [...stdout.matchAll(/^STRICT (.+)$/gmu)].map((match) => match[1])[0],
       stderr: proc.stderr.toString(),
     }
   } finally {
@@ -116,67 +123,30 @@ describe('scaffolded bin/serve.ts', () => {
     expect(result.boundPort).toBe(0)
   })
 
-  it('never walks off port 0 into the privileged range', async () => {
-    // A walk from 0 would try 1, 2, 3. There is nothing to recover from
-    // either: the OS was already asked for any free port.
-    const result = await runServeTemplate(DEFAULT_SERVE, { PORT: '0', FAIL_TIMES: '1' })
+  it('leaves the busy-port walk to listen()', async () => {
+    // The template used to force GUREN_STRICT_PORT=1 and retry on its own.
+    // Now that listen({ portFallback }) owns the walk, the template must call
+    // it once and leave the strict-port decision to the environment — a
+    // template-side retry would nest with the framework's into a much wider
+    // search, and a forced GUREN_STRICT_PORT=1 would switch the walk off.
+    const result = await runServeTemplate(DEFAULT_SERVE, { PORT: '4000', FAIL_TIMES: '1' })
 
-    expect(result.exitCode).not.toBe(0)
-    expect(result.requestedPorts).toEqual([0])
-  })
-
-  it('walks to the next free port in development', async () => {
-    const result = await runServeTemplate(DEFAULT_SERVE, { PORT: '4000', FAIL_TIMES: '2' })
-
-    expect(result.exitCode).toBe(0)
-    expect(result.requestedPorts).toEqual([4000, 4001, 4002])
-    expect(result.boundPort).toBe(4002)
-    expect(result.stderr).toContain('Port 4000 is in use, trying 4001...')
-  })
-
-  it('fails fast on a busy port when GUREN_STRICT_PORT=1', async () => {
-    const result = await runServeTemplate(DEFAULT_SERVE, {
-      PORT: '4000',
-      FAIL_TIMES: '1',
-      GUREN_STRICT_PORT: '1',
-    })
-
-    expect(result.exitCode).not.toBe(0)
-    // The walk is what makes an automated run silently test the wrong app, so
-    // the strict flag has to stop it at the first attempt.
     expect(result.requestedPorts).toEqual([4000])
+    expect(result.strictPortAtListen).toBe('unset')
+    // The stub's rejection stands in for listen() giving up; it must surface
+    // as a failed exit, not be swallowed by a leftover catch.
+    expect(result.exitCode).not.toBe(0)
     expect(result.boundPort).toBeUndefined()
   })
 
-  it('does not walk in production', async () => {
+  it('passes GUREN_STRICT_PORT through untouched', async () => {
     const result = await runServeTemplate(DEFAULT_SERVE, {
       PORT: '4000',
-      FAIL_TIMES: '1',
-      NODE_ENV: 'production',
+      GUREN_STRICT_PORT: '1',
     })
 
-    expect(result.exitCode).not.toBe(0)
+    expect(result.exitCode).toBe(0)
     expect(result.requestedPorts).toEqual([4000])
-  })
-
-  it('still targets a @guren/core that predates listen({ portFallback })', async () => {
-    // The retry loop above duplicates what `Application.listen()` already does.
-    // It stays only because templates resolve `@guren/*` from npm, so they
-    // cannot call a framework option until the release that ships it.
-    //
-    // This pins the exit condition rather than leaving it to a changeset
-    // sentence that `changeset version` deletes — in the very release that
-    // unblocks the migration. `sync:template-deps` rewrites this range at
-    // release time, so when it moves, this fails and says what to do.
-    const templatePkg = JSON.parse(
-      await readFile(join(templatesDir, 'default/package.json'), 'utf8'),
-    ) as { dependencies?: Record<string, string> }
-
-    expect(
-      templatePkg.dependencies?.['@guren/core'],
-      'The template @guren/core range moved, so listen({ portFallback }) is now published. ' +
-        'Replace the retry loop in templates/{default,api-only}/bin/serve.ts with ' +
-        'app.listen({ port, hostname }) and delete this test.',
-    ).toBe('^1.5.2')
+    expect(result.strictPortAtListen).toBe('1')
   })
 })
