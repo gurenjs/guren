@@ -958,7 +958,7 @@ const codegenCommand = defineCommand({
       appRoot: args.app,
       ...writerOptions,
     })
-    const { outputPath: dataOutputPath } = await generateDataTypes({
+    const { outputPath: dataOutputPath, definitions: resourceDefinitions } = await generateDataTypes({
       appRoot: args.app,
       ...writerOptions,
     })
@@ -968,7 +968,7 @@ const codegenCommand = defineCommand({
     })
     const { outputPath: apiClientOutputPath } = await generateApiClientTypes(
       definitions,
-      { appRoot: args.app, ...writerOptions },
+      { appRoot: args.app, resources: resourceDefinitions, ...writerOptions },
     )
     consola.success(`Route types generated at ${outputPath}`)
     consola.success(`Route helpers generated at ${runtimeOutputPath}`)

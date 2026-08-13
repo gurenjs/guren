@@ -28,7 +28,7 @@ export type { GenerateRouteTypesOptions } from './routes-types'
 export type { GeneratePageTypesOptions, PageDefinition } from './pages-types'
 export type { GenerateDataTypesOptions, ResourceDefinition } from './data-types'
 export type { GenerateChannelTypesOptions } from './channel-types'
-export type { GenerateApiClientOptions } from './api-client-types'
+export type { GenerateApiClientOptions, ResourceShapeLike, ResourceTypeRef } from './api-client-types'
 export type { GenerateOpenApiSpecOptions, GenerateOpenApiSpecResult } from './openapi-generate'
 export type { DoctorCheck, DoctorReport, DoctorStatus, DoctorJsonOutput, RunDoctorOptions, NextStep } from './doctor'
 

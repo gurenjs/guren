@@ -61,6 +61,37 @@ interface BindableModel {
   readonly name?: string
 }
 
+/**
+ * A Resource class accepted as a response hint. Only the constructor name is
+ * introspected — the router never instantiates it, so any class whose
+ * instances expose `toJSON()` (every `Resource` subclass) qualifies.
+ */
+interface ResponseResourceClass {
+  new (resource: any): { toJSON(): unknown }
+}
+
+/**
+ * Type-level response hint for a route: a Resource class, a single-element
+ * array of a hint (a collection), or a plain object of hints (an envelope,
+ * e.g. `{ data: [PostResource] }`). Purely declarative — nothing is validated
+ * at runtime. `guren codegen` maps each Resource class to the `Data` type it
+ * extracts from `app/Http/Resources` and types the API client's `json()`
+ * with the assembled shape.
+ */
+export type ResourceResponseHint =
+  | ResponseResourceClass
+  | readonly [ResourceResponseHint]
+  | { readonly [key: string]: ResourceResponseHint }
+
+/**
+ * Serialized form of {@link ResourceResponseHint} carried by
+ * {@link RouteDefinition}: Resource classes become their class names.
+ */
+export type ResourceResponseShape =
+  | string
+  | [ResourceResponseShape]
+  | { [key: string]: ResourceResponseShape }
+
 type SchemaLike<T = unknown> = ValidationSchema<T> | undefined
 type InferSchema<TSchema extends SchemaLike<unknown>> =
   TSchema extends ValidationSchema<infer TValue> ? TValue : never
@@ -104,6 +135,13 @@ export interface RouteContractOptions<
   query?: TQuerySchema
   body?: TBodySchema
   output?: TOutputSchema
+  /**
+   * Type-level response hint (see {@link ResourceResponseHint}). Unlike
+   * `output`, nothing runs at request time — the route's JSON is assumed to
+   * follow the shape. When both are set, `output` wins in generated types:
+   * it is the one actually enforced.
+   */
+  resource?: ResourceResponseHint
   bind?: Record<string, BindableModel>
 }
 
@@ -131,6 +169,7 @@ interface RegisteredRoute {
     body?: SchemaLike<unknown>
     output?: SchemaLike<unknown>
   }
+  resource?: ResourceResponseHint
   openapi?: RouteOpenApiMetadata
   bindings?: Map<string, BindableModel>
 }
@@ -152,6 +191,13 @@ export interface RouteDefinition {
     body?: SchemaLike<unknown>
     output?: SchemaLike<unknown>
   }
+  /**
+   * Serialized response hint from `RouteContractOptions.resource` — Resource
+   * class names in place of the classes. Absent when no hint was declared or
+   * when any class in the hint has no usable name (a partially-typed response
+   * would claim a shape the wire does not have).
+   */
+  resource?: ResourceResponseShape
   /** Named middleware (aliases or groups) applied to this route */
   middlewareNames?: string[]
   /** Whether inline (unnamed) middleware handlers are attached */
@@ -588,11 +634,12 @@ export class Router<M extends string = never> {
   }
 
   definitions(): RouteDefinition[] {
-    return this.registry.map(({ method, path, name, schemas, openapi, routeMiddlewareNames, middlewares, scopedMiddlewares, handler, bindings }) => ({
+    return this.registry.map(({ method, path, name, schemas, resource, openapi, routeMiddlewareNames, middlewares, scopedMiddlewares, handler, bindings }) => ({
       method,
       path,
       name,
       schemas,
+      resource: resource === undefined ? undefined : serializeResourceHint(resource),
       middlewareNames: [...routeMiddlewareNames],
       // Route-local only, so a group-scoped handler does not make every route
       // in the group report middleware it never attached (`guren audit` warns
@@ -750,6 +797,7 @@ export class Router<M extends string = never> {
 
 function applyRouteContract(route: RegisteredRoute, options: RouteContractOptions): void {
   route.schemas = { params: options.params, query: options.query, body: options.body, output: options.output }
+  route.resource = options.resource
   route.openapi = {
     summary: options.summary,
     description: options.description,
@@ -1327,6 +1375,37 @@ function serializeBindings(
   return entries.size > 0 ? Object.fromEntries(entries) : undefined
 }
 
+/**
+ * Serializes a {@link ResourceResponseHint} for introspection, replacing each
+ * Resource class with its constructor name. All-or-nothing on purpose: a
+ * class without a usable name (an anonymous class expression) voids the whole
+ * hint rather than narrowing it, because a response type missing one of its
+ * keys describes a payload the server never sends.
+ */
+function serializeResourceHint(hint: ResourceResponseHint): ResourceResponseShape | undefined {
+  if (typeof hint === 'function') {
+    return hint.name || undefined
+  }
+
+  // Array.isArray does not narrow the readonly tuple member of the union
+  // (it is not assignable to `any[]`), so without the assertion the tuple
+  // would fall through to the Object.entries path and serialize as
+  // `{ '0': ... }`.
+  if (Array.isArray(hint)) {
+    const [element] = hint as readonly ResourceResponseHint[]
+    const inner = element === undefined ? undefined : serializeResourceHint(element)
+    return inner === undefined ? undefined : [inner]
+  }
+
+  const shape: { [key: string]: ResourceResponseShape } = {}
+  for (const [key, value] of Object.entries(hint)) {
+    const serialized = serializeResourceHint(value as ResourceResponseHint)
+    if (serialized === undefined) return undefined
+    shape[key] = serialized
+  }
+  return shape
+}
+
 function isControllerAction(action: AnyRouteHandler): action is AnyControllerAction {
   return Array.isArray(action)
 }
@@ -1340,6 +1419,7 @@ function isRouteContractOptions(value: unknown): value is RouteContractOptions<S
     || 'query' in value
     || 'body' in value
     || 'output' in value
+    || 'resource' in value
     || 'bind' in value
     || 'name' in value
     || 'middlewares' in value

@@ -3,6 +3,7 @@ import { Hono, type MiddlewareHandler } from 'hono'
 import { z } from 'zod'
 import { Router } from '../../src/mvc/Router'
 import { Controller } from '../../src/mvc/Controller'
+import { Resource } from '../../src/http/resources/Resource'
 
 class StubController extends Controller {
   async index() { return new Response('index') }
@@ -129,6 +130,71 @@ describe('Router route contract metadata', () => {
         deprecated: undefined,
       },
     ])
+  })
+})
+
+describe('Router resource response hint', () => {
+  class PostResource extends Resource<{ id: number }> {
+    toArray() { return { id: this.resource.id } }
+  }
+  class AuthorResource extends Resource<{ name: string }> {
+    toArray() { return { name: this.resource.name } }
+  }
+
+  it('serializes a bare resource class to its name', () => {
+    const router = new Router()
+    router.get('/post', { name: 'post.show', resource: PostResource }, [StubController, 'show'])
+
+    expect(router.definitions()[0]?.resource).toEqual('PostResource')
+  })
+
+  it('serializes collections and envelopes recursively', () => {
+    const router = new Router()
+    router.query('/search', {
+      name: 'posts.search',
+      resource: { data: [PostResource], author: AuthorResource },
+    }, [StubController, 'index'])
+
+    expect(router.definitions()[0]?.resource).toEqual({
+      data: ['PostResource'],
+      author: 'AuthorResource',
+    })
+  })
+
+  it('is recognized as contract options when it is the only key besides name', () => {
+    const router = new Router()
+    router.get('/posts', { resource: [PostResource] }, [StubController, 'index'])
+
+    expect(router.definitions()[0]?.resource).toEqual(['PostResource'])
+  })
+
+  it('omits the whole hint when any class has no usable name', () => {
+    const Anonymous = class extends Resource<{ id: number }> {
+      toArray() { return { id: this.resource.id } }
+    }
+    // Class expressions assigned to a variable infer a name; strip it the way
+    // an un-nameable binding would present.
+    Object.defineProperty(Anonymous, 'name', { value: '' })
+
+    const router = new Router()
+    router.get('/posts', {
+      name: 'posts.index',
+      resource: { data: [Anonymous], author: AuthorResource },
+    }, [StubController, 'index'])
+
+    expect(router.definitions()[0]?.resource).toBeUndefined()
+  })
+
+  it('keeps the hint out of mounted behavior — no runtime validation', async () => {
+    const router = new Router()
+    router.get('/posts', { name: 'posts.index', resource: [PostResource] }, async () => ({ anything: true }))
+
+    const app = new Hono()
+    router.mount(app)
+    const response = await app.request('/posts')
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ anything: true })
   })
 })
 
