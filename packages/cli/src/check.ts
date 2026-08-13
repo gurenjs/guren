@@ -25,6 +25,7 @@ import {
   staticStringProperty,
 } from './model-parser'
 import { checkConsoleCommandRegistration } from './console-check'
+import { checkRoutePathParams, discoverRoutePathFiles } from './route-path-check'
 import { affectsRouteWiring, checkRouteRegistrarWiring } from './routes-check'
 import { checkSchemaTimestamps } from './schema-check'
 import { parseSchemaTables, schemaPathFor, type SchemaTable } from './schema-parser'
@@ -255,6 +256,14 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       const routeWiringResults = await checkRouteRegistrarWiring({ cwd, cache, routesFile: options.routesFile })
       checks.push(...routeWiringResults)
     }
+
+    // 7.6. Check route paths for `:name*`, which reads as a wildcard and is
+    // not one — Hono registers a single-segment parameter named literally
+    // `name*`. Unlike check 7.5 this is genuinely a per-file question (a
+    // `:slug*` can only arrive by editing the file that holds it), so it is
+    // changed-*filtered* like checks 1-4 rather than gated as a unit.
+    const routePathFiles = filterChanged(await discoverRoutePathFiles(cwd, options.routesFile))
+    checks.push(...(await checkRoutePathParams({ cwd, cache, files: routePathFiles })))
 
     // 8. Check Postgres timestamp columns carry a time zone. Content-activated
     // and dialect-gated: apps with no schema, or a non-Postgres one, contribute

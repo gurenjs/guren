@@ -1742,3 +1742,151 @@ export const billingModule = defineModule({ name: 'billing' })
     expect(wiring(report).size).toBe(0)
   })
 })
+
+describe('route path parameters', () => {
+  /** Every `route-path-modifier:` finding, in the order reported. */
+  const modifiers = (report: CheckReport): CheckResult[] =>
+    report.checks.filter((c) => c.key.startsWith('route-path-modifier:'))
+
+  const entryWith = (body: string): string => `import { Router } from '@guren/core'
+
+export function registerWebRoutes(router: Router): void {
+${body}
+}
+`
+
+  it('warns about a :name* parameter, naming what Hono actually registers', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': entryWith(`  router.get('/files/:slug*', [FileController, 'show'])`),
+    })
+
+    const [finding, ...rest] = modifiers(report)
+    expect(rest).toEqual([])
+    expect(finding?.status).toBe('warn')
+    expect(finding?.key).toBe('route-path-modifier:routes/web.ts:/files/:slug*')
+    expect(finding?.filePath).toBe('routes/web.ts')
+    // The two halves of the mistake: the name it really binds, and the name
+    // the controller will ask for and not get.
+    expect(finding?.message).toContain("named literally 'slug*'")
+    expect(finding?.message).toContain("req.param('slug') is undefined")
+    expect(finding?.suggestion).toContain("'/files/:slug{.+}'")
+  })
+
+  // Real routes files register most of their routes inside a group callback,
+  // so a top-level-statement scan would see almost nothing.
+  it('sees routes registered inside a group callback', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': entryWith(`  router.middleware('auth').group((auth) => {
+    auth.get('/docs/:path*', [DocsController, 'show'])
+  })`),
+    })
+
+    expect(modifiers(report).map((c) => c.key)).toEqual(['route-path-modifier:routes/web.ts:/docs/:path*'])
+  })
+
+  // on(method, path) puts the path in argument 1 — reading argument 0 would
+  // inspect the verb and never see it.
+  it('reads the path argument of on(), not the method', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': entryWith(`  router.on('PURGE', '/cache/:key*', [CacheController, 'purge'])`),
+    })
+
+    expect(modifiers(report)).toHaveLength(1)
+  })
+
+  it('warns about a group prefix carrying one, which every route inside inherits', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': entryWith(`  router.group('/:tenant*', (scoped) => {
+    scoped.get('/dashboard', [DashboardController, 'index'])
+  })`),
+    })
+
+    expect(modifiers(report).map((c) => c.key)).toEqual(['route-path-modifier:routes/web.ts:/:tenant*'])
+  })
+
+  // make:module scaffolds a single modules/<name>/routes.ts and no routes/
+  // directory, so the module discovery this check shares with the wiring
+  // check drops it — the file most modules actually route from.
+  it('reads a module that keeps its routes in a single routes.ts', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': entryWith(`  router.get('/', [HomeController, 'index'])`),
+      'modules/billing/index.ts': `import { defineModule } from '@guren/core'
+import { registerBillingRoutes } from './routes.js'
+
+export const billingModule = defineModule({ name: 'billing', routes: registerBillingRoutes })
+`,
+      'modules/billing/routes.ts': `import { Router } from '@guren/core'
+
+export function registerBillingRoutes(router: Router): void {
+  router.get('/invoices/:ref*', [InvoiceController, 'show'])
+}
+`,
+    })
+
+    expect(modifiers(report).map((c) => c.key)).toEqual([
+      'route-path-modifier:modules/billing/routes.ts:/invoices/:ref*',
+    ])
+  })
+
+  it('reads a module routes directory too', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': entryWith(`  router.get('/', [HomeController, 'index'])`),
+      'modules/billing/routes/invoice.ts': `import { Router } from '@guren/core'
+
+export function registerInvoiceRoutes(router: Router): void {
+  router.get('/invoices/:ref*', [InvoiceController, 'show'])
+}
+`,
+    })
+
+    expect(modifiers(report).map((c) => c.key)).toEqual([
+      'route-path-modifier:modules/billing/routes/invoice.ts:/invoices/:ref*',
+    ])
+  })
+
+  // The non-detections. A rule matching `*` anywhere in the segment would
+  // report all four of these — three of them are the very syntax this check
+  // tells people to move to.
+  it.each([
+    ['a constrained multi-segment parameter', '/docs/:path{.+}'],
+    ['a constraint whose regex contains a star', '/docs/:path{.*}'],
+    ['a constraint whose regex contains a star and a slash', '/docs/:path{[^/]*}'],
+    ['a nested-brace constraint', '/reports/:month{[0-9]{2}}'],
+    ["Hono's real wildcard segment", '/assets/*'],
+    ['an optional parameter', '/posts/:id?'],
+    ['a plain parameter', '/posts/:id'],
+  ])('says nothing about %s', async (_label, path) => {
+    const report = await withWorkspace({
+      'routes/web.ts': entryWith(`  router.get('${path}', [SomeController, 'show'])`),
+    })
+
+    expect(modifiers(report)).toEqual([])
+  })
+
+  // The member-call match is loose by design; the literal has to look like a
+  // path before anything is reported.
+  it('says nothing about a non-route .get() call in a routes file', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': `import { Router } from '@guren/core'
+
+const labels = new Map<string, string>()
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/posts', [PostController, 'index'])
+  labels.get(':slug*')
+}
+`,
+    })
+
+    expect(modifiers(report)).toEqual([])
+  })
+
+  it('does not run under --arch', async () => {
+    const report = await withWorkspace(
+      { 'routes/web.ts': entryWith(`  router.get('/files/:slug*', [FileController, 'show'])`) },
+      { arch: true },
+    )
+
+    expect(modifiers(report)).toEqual([])
+  })
+})
