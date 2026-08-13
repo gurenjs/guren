@@ -7,6 +7,7 @@
  */
 import { resolve } from 'node:path'
 import { escapeSingleQuoted as escapeSingleQuotes, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
+import { PATH_PARAM_RUNTIME_HELPERS, PATH_PARAM_TYPE_HELPERS } from './routes-types-fragments'
 import { schemaToTypeString } from './schema-type-extractor'
 
 export interface RouteDefinitionLike {
@@ -55,16 +56,11 @@ export function buildApiClientContent(definitions: RouteDefinitionLike[]): strin
 
   const routeEntries = named
     .map((d) => {
-      const params = extractParams(d.path)
-      const paramsType = params.length > 0
-        ? `{ ${params.map((p) => `${p}: string | number`).join('; ')} }`
-        : 'Record<string, never>'
       const bodyType = d.schemas?.body ? schemaToTypeString(d.schemas.body, { io: 'input' }) : undefined
       const responseType = d.schemas?.output ? schemaToTypeString(d.schemas.output, { io: 'output' }) : undefined
       let entry = `  '${escapeSingleQuotes(d.name)}': {
     method: '${d.method}'
-    path: '${escapeSingleQuotes(d.path)}'
-    params: ${paramsType}`
+    path: '${escapeSingleQuotes(d.path)}'`
       if (bodyType) entry += `\n    body: ${bodyType}`
       if (responseType) entry += `\n    response: ${responseType}`
       entry += '\n  }'
@@ -82,6 +78,8 @@ export function buildApiClientContent(definitions: RouteDefinitionLike[]): strin
  * \`body\` is the *request* shape — what you send. Coercing schemas are rendered
  * as they travel: \`z.coerce.date()\` is a \`string\` here, not the \`Date\` the
  * controller ends up with. \`response\` is the parsed shape you get back.
+ * Params are not stored on the entries: they are derived from each entry's
+ * \`path\` literal, the same string the server routes on.
  */
 export interface ApiRoutes {
 ${routeEntries || '  // No named routes found'}
@@ -91,22 +89,45 @@ export type ApiRouteName = keyof ApiRoutes
 
 export type ApiRouteMethod<T extends ApiRouteName> = ApiRoutes[T]['method']
 export type ApiRoutePath<T extends ApiRouteName> = ApiRoutes[T]['path']
-export type ApiRouteParams<T extends ApiRouteName> = ApiRoutes[T]['params']
 
-// Param-less routes are emitted as \`params: Record<string, never>\`, whose
-// \`keyof\` is \`string\` — so this compares against that shape, not against
-// \`never\`. The one predicate serves both \`ApiRequestOptions\` and \`request()\`
-// below; keep them on it, or a fix lands in one spelling and not the other.
-type HasBoundParams<TParams> = TParams extends Record<string, never> ? false : true
+${PATH_PARAM_TYPE_HELPERS}
+export type ApiRouteParams<T extends ApiRouteName> = PathParamsOf<ApiRoutePath<T>>
 
 // The request body type a route declares through its bound schema — \`unknown\`
 // for routes without one.
 type BodyOf<TRoute> = TRoute extends { body: infer TBody } ? TBody : unknown
 
-export type ApiRequestOptions<T extends ApiRouteName> =
-  HasBoundParams<ApiRouteParams<T>> extends false
-    ? { params?: never; body?: BodyOf<ApiRoutes[T]>; query?: Record<string, unknown> }
-    : { params: ApiRouteParams<T>; body?: BodyOf<ApiRoutes[T]>; query?: Record<string, unknown> }
+// The parsed shape a route declares through its bound output schema —
+// \`unknown\` for routes without one.
+type ResponseOf<TRoute> = TRoute extends { response: infer TResponse } ? TResponse : unknown
+
+// The runtime object is the plain fetch \`Response\`; only \`json()\` is narrowed
+// to the route's declared response shape.
+export interface TypedResponse<TData> extends Response {
+  json(): Promise<TData>
+}
+
+// Params derive from the path literal, so nothing about how the entries above
+// are emitted can silently flip \`request()\`'s call arity. Deliberately not
+// distributed over a union route name (the conditional checks
+// \`HasPathParams<...>\`, never a bare type parameter): the union of paths
+// yields the union of their param keys, so an un-narrowed name requires every
+// member's params — substituting a param a member's path lacks is a runtime
+// no-op, while the reverse (accepting one member's empty params) would send a
+// path with its \`:param\` unresolved.
+type RequestOptionsOf<TRoute extends { path: string }> =
+  HasPathParams<TRoute['path']> extends false
+    ? { params?: never; body?: BodyOf<TRoute>; query?: Record<string, unknown> }
+    : { params: PathParamsOf<TRoute['path']>; body?: BodyOf<TRoute>; query?: Record<string, unknown> }
+
+// Param-less routes may omit the options argument entirely; the same
+// predicate that shapes the options decides the arity.
+type RequestArgsOf<TRoute extends { path: string }> =
+  HasPathParams<TRoute['path']> extends false
+    ? [options?: RequestOptionsOf<TRoute>]
+    : [options: RequestOptionsOf<TRoute>]
+
+export type ApiRequestOptions<T extends ApiRouteName> = RequestOptionsOf<ApiRoutes[T]>
 
 // The wire contract these mirror is owned by Guren's CSRF middleware: it
 // writes the XSRF-TOKEN cookie and reads either header name. Change them
@@ -172,7 +193,12 @@ function isSameOrigin(url: string): boolean {
  * \`'include'\` cross-origin, with a CORS setup that allows it).
  *
  * Routes that bind a \`body\` schema type the \`body\` option with that schema's
- * request shape; routes without one accept \`unknown\`.
+ * request shape; routes without one accept \`unknown\`. Routes that bind an
+ * \`output\` schema type the response: \`json()\` on the returned \`Response\`
+ * resolves to that schema's parsed shape. Without one it resolves to
+ * \`unknown\` — validate before trusting it. Either way the typed shape
+ * describes the success body only: error statuses carry their own (a 422
+ * from validation is \`{ errors: ... }\`), so check \`ok\` before reading it.
  *
  * @example
  * \`\`\`typescript
@@ -183,29 +209,28 @@ function isSameOrigin(url: string): boolean {
  * const post = await client.request('posts.show', { params: { id: 1 } })
  * \`\`\`
  */
+// Token-based substitution shared with the route manifest module: whole
+// \`:param\` tokens are replaced by key lookup, so a key the path lacks is a
+// true no-op — the property the union-name rule above relies on — and a
+// param name that prefixes another (\`:id\` vs \`:identifier\`) cannot corrupt
+// it the way a per-key \`path.replace(':key', ...)\` loop would.
+${PATH_PARAM_RUNTIME_HELPERS}
 // The mapped-object constraint (rather than \`Record<...>\`) is what lets the
 // generated \`ApiRoutes\` interface satisfy it — interfaces have no implicit
 // index signature, so \`Record<string, ...>\` would reject them.
-export function createApiClient<TRoutes extends { [K in keyof TRoutes]: { method: string; path: string; params: unknown } }>(
+export function createApiClient<TRoutes extends { [K in keyof TRoutes]: { method: string; path: string } }>(
   config: { baseUrl: string; headers?: Record<string, string>; credentials?: RequestInit['credentials'] },
 ) {
   return {
     async request<TName extends keyof TRoutes & string>(
       name: TName,
-      ...args: HasBoundParams<TRoutes[TName]['params']> extends false
-        ? [options?: { params?: never; body?: BodyOf<TRoutes[TName]>; query?: Record<string, unknown> }]
-        : [options: { params: TRoutes[TName]['params']; body?: BodyOf<TRoutes[TName]>; query?: Record<string, unknown> }]
-    ): Promise<Response> {
+      ...args: RequestArgsOf<TRoutes[TName]>
+    ): Promise<TypedResponse<ResponseOf<TRoutes[TName]>>> {
       const route = (routes as Record<string, { method: string; path: string }>)[name]
       if (!route) throw new Error(\`Route [\${name}] not defined.\`)
 
-      const opts = (args as unknown[])[0] as { params?: Record<string, unknown>; body?: unknown; query?: Record<string, unknown> } | undefined
-      let path = route.path
-      if (opts?.params) {
-        for (const [key, value] of Object.entries(opts.params)) {
-          path = path.replace(\`:$\{key}\`, encodeURIComponent(String(value)))
-        }
-      }
+      const opts = (args as unknown[])[0] as { params?: Record<string, string | number>; body?: unknown; query?: Record<string, unknown> } | undefined
+      const path = substituteParams(route.path, opts?.params)
 
       let url = \`$\{config.baseUrl}$\{path}\`
       if (opts?.query) {
@@ -246,10 +271,5 @@ const routes: Record<string, { method: string; path: string }> = {
 ${named.map((d) => `  '${escapeSingleQuotes(d.name)}': { method: '${d.method}', path: '${escapeSingleQuotes(d.path)}' },`).join('\n')}
 }
 `
-}
-
-function extractParams(path: string): string[] {
-  const matches = path.match(/:([A-Za-z0-9_]+)/g)
-  return matches ? matches.map((m) => m.slice(1)) : []
 }
 

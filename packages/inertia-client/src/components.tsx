@@ -33,22 +33,41 @@ export interface RouteManifestLike {
   [name: string]: { method: string; path: string }
 }
 
-type ExtractParams<TPath extends string> =
+// Verbatim mirror of PATH_PARAM_TYPE_HELPERS in @guren/cli's
+// routes-types-fragments.ts (its JSDoc has the why); pinned character for
+// character by routes-types-fragments.test.ts there.
+type NormalizeParamKey<TValue extends string> = TValue extends `${infer Key}?` ? Key : TValue
+type PathParamKeys<TPath extends string> =
   TPath extends `${string}:${infer Param}/${infer Rest}`
-    ? (Param extends `${infer Key}?` ? Key : Param) | ExtractParams<`/${Rest}`>
+    ? NormalizeParamKey<Param> | PathParamKeys<`/${Rest}`>
     : TPath extends `${string}:${infer Param}`
-      ? Param extends `${infer Key}?` ? Key : Param
+      ? NormalizeParamKey<Param>
       : never
-
-type RouteParamsFor<TPath extends string> =
-  [ExtractParams<TPath>] extends [never]
+type HasPathParams<TPath extends string> = [PathParamKeys<TPath>] extends [never] ? false : true
+type PathParamsOf<TPath extends string> =
+  HasPathParams<TPath> extends false
     ? Record<string, never>
-    : { [K in ExtractParams<TPath>]: string | number }
-
-type HasParams<TPath extends string> =
-  [ExtractParams<TPath>] extends [never] ? false : true
+    : { [TKey in PathParamKeys<TPath>]: string | number }
 
 // ─── Link component ──────────────────────────────────────────
+
+// Verbatim mirror of PATH_PARAM_RUNTIME_HELPERS, from the same fragment
+// module and under the same pin test as the type helpers above: token-based
+// substitution, so a param name that prefixes another cannot corrupt it and
+// keys the path lacks are no-ops.
+function substituteParams(path: string, params?: Record<string, string | number>): string {
+  if (!params) {
+    return path
+  }
+
+  return path.replace(/:([A-Za-z0-9_-]+)/gu, (match, key) => {
+    if (!Object.prototype.hasOwnProperty.call(params, key)) {
+      return match
+    }
+
+    return encodeURIComponent(String(params[key]))
+  })
+}
 
 type OmitHref<T> = Omit<T, 'href'>
 
@@ -58,8 +77,8 @@ export type TypedLinkProps<
 > = OmitHref<InertiaLinkProps> & {
   route: TName
 } & (
-  HasParams<TManifest[TName]['path']> extends true
-    ? { params: RouteParamsFor<TManifest[TName]['path']> }
+  HasPathParams<TManifest[TName]['path']> extends true
+    ? { params: PathParamsOf<TManifest[TName]['path']> }
     : { params?: never }
 )
 
@@ -82,12 +101,7 @@ export function createTypedLink<TManifest extends RouteManifestLike>(manifest: T
     const entry = manifest[routeName]
     if (!entry) throw new Error(`Route [${routeName}] not defined.`)
 
-    let href = entry.path
-    if (params) {
-      for (const [key, value] of Object.entries(params)) {
-        href = href.replace(`:${key}`, encodeURIComponent(String(value)))
-      }
-    }
+    const href = substituteParams(entry.path, params)
 
     return React.createElement(InertiaLink, { ...rest, href } as any)
   }
@@ -106,8 +120,8 @@ export type TypedFormProps<
   route: TName
   method?: 'get' | 'post' | 'put' | 'patch' | 'delete'
 } & (
-  HasParams<TManifest[TName]['path']> extends true
-    ? { params: RouteParamsFor<TManifest[TName]['path']> }
+  HasPathParams<TManifest[TName]['path']> extends true
+    ? { params: PathParamsOf<TManifest[TName]['path']> }
     : { params?: never }
 )
 
@@ -122,12 +136,7 @@ export function createTypedForm<TManifest extends RouteManifestLike>(manifest: T
     const entry = manifest[routeName]
     if (!entry) throw new Error(`Route [${routeName}] not defined.`)
 
-    let action = entry.path
-    if (params) {
-      for (const [key, value] of Object.entries(params)) {
-        action = action.replace(`:${key}`, encodeURIComponent(String(value)))
-      }
-    }
+    const action = substituteParams(entry.path, params)
 
     const httpMethod = method ?? entry.method.toLowerCase()
 

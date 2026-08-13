@@ -27,6 +27,36 @@ declare module '@inertiajs/core' {
 }
 `
 
+/**
+ * The path-param rule, from key extraction down to the derived shapes: which
+ * keys a route path literal binds, whether it binds any, and the params
+ * object they form.
+ *
+ * Emitted into every generated module that answers those questions — the
+ * route manifest and the API client — so they all derive the answers from
+ * the path string the server routes on, not from whatever shape their
+ * generator happens to emit alongside it.
+ *
+ * @guren/inertia-client's components.tsx carries the same rule for library
+ * code that cannot embed an emitted fragment; routes-types-fragments.test.ts
+ * asserts it contains this fragment verbatim, so a change here fails there
+ * until both move.
+ */
+export const PATH_PARAM_TYPE_HELPERS = `\
+type NormalizeParamKey<TValue extends string> = TValue extends \`\${infer Key}?\` ? Key : TValue
+type PathParamKeys<TPath extends string> =
+  TPath extends \`\${string}:\${infer Param}/\${infer Rest}\`
+    ? NormalizeParamKey<Param> | PathParamKeys<\`/\${Rest}\`>
+    : TPath extends \`\${string}:\${infer Param}\`
+      ? NormalizeParamKey<Param>
+      : never
+type HasPathParams<TPath extends string> = [PathParamKeys<TPath>] extends [never] ? false : true
+type PathParamsOf<TPath extends string> =
+  HasPathParams<TPath> extends false
+    ? Record<string, never>
+    : { [TKey in PathParamKeys<TPath>]: string | number }
+`
+
 /** Type definitions emitted after the route manifest object. */
 export const RUNTIME_TYPE_DEFINITIONS = `\
 export type RouteManifest = typeof routeManifest
@@ -38,21 +68,11 @@ type PrimitiveQueryValue = string | number | boolean | null | undefined
 type QueryValue = PrimitiveQueryValue | readonly PrimitiveQueryValue[]
 export type RouteQuery = Record<string, QueryValue>
 
-type NormalizeParamKey<TValue extends string> = TValue extends \`\${infer Key}?\` ? Key : TValue
-type PathParamKeys<TPath extends string> =
-  TPath extends \`\${string}:\${infer Param}/\${infer Rest}\`
-    ? NormalizeParamKey<Param> | PathParamKeys<\`/\${Rest}\`>
-    : TPath extends \`\${string}:\${infer Param}\`
-      ? NormalizeParamKey<Param>
-      : never
-
-export type RouteParams<TName extends RouteName> =
-  [PathParamKeys<RouteManifest[TName]['path']>] extends [never]
-    ? Record<string, never>
-    : { [TKey in PathParamKeys<RouteManifest[TName]['path']>]: string | number }
+${PATH_PARAM_TYPE_HELPERS}
+export type RouteParams<TName extends RouteName> = PathParamsOf<RouteManifest[TName]['path']>
 
 type RouteArgs<TName extends RouteName> =
-  [PathParamKeys<RouteManifest[TName]['path']>] extends [never]
+  HasPathParams<RouteManifest[TName]['path']> extends false
     ? [query?: RouteQuery]
     : [params: RouteParams<TName>, query?: RouteQuery]
 `
@@ -73,12 +93,18 @@ export function route<TName extends RouteName>(name: TName, ...args: RouteArgs<T
 }
 `
 
-/** Runtime utility functions used by the `route()` helper. */
-export const RUNTIME_UTILITY_FUNCTIONS = `\
-function hasPathParams(path: string): boolean {
-  return /:[A-Za-z0-9_-]+/u.test(path)
-}
-
+/**
+ * The runtime half of the path-param rule: how a bound key is substituted
+ * into the path. Token-based — whole `:param` tokens are replaced by key
+ * lookup — so a param whose name is a prefix of another (`:id` vs
+ * `:identifier`) can never corrupt it, and a key the path lacks really is a
+ * no-op. A per-key `path.replace(':key', ...)` loop has neither property;
+ * that spelling is what this fragment exists to keep out of the generators.
+ *
+ * Mirrored verbatim in @guren/inertia-client's components.tsx alongside
+ * PATH_PARAM_TYPE_HELPERS, under the same pin test.
+ */
+export const PATH_PARAM_RUNTIME_HELPERS = `\
 function substituteParams(path: string, params?: Record<string, string | number>): string {
   if (!params) {
     return path
@@ -92,7 +118,15 @@ function substituteParams(path: string, params?: Record<string, string | number>
     return encodeURIComponent(String(params[key]))
   })
 }
+`
 
+/** Runtime utility functions used by the `route()` helper. */
+export const RUNTIME_UTILITY_FUNCTIONS = `\
+function hasPathParams(path: string): boolean {
+  return /:[A-Za-z0-9_-]+/u.test(path)
+}
+
+${PATH_PARAM_RUNTIME_HELPERS}
 function appendQueryString(path: string, query?: RouteQuery): string {
   if (!query) {
     return path

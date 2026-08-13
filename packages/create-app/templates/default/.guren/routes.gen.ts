@@ -22,14 +22,16 @@ type PathParamKeys<TPath extends string> =
     : TPath extends `${string}:${infer Param}`
       ? NormalizeParamKey<Param>
       : never
-
-export type RouteParams<TName extends RouteName> =
-  [PathParamKeys<RouteManifest[TName]['path']>] extends [never]
+type HasPathParams<TPath extends string> = [PathParamKeys<TPath>] extends [never] ? false : true
+type PathParamsOf<TPath extends string> =
+  HasPathParams<TPath> extends false
     ? Record<string, never>
-    : { [TKey in PathParamKeys<RouteManifest[TName]['path']>]: string | number }
+    : { [TKey in PathParamKeys<TPath>]: string | number }
+
+export type RouteParams<TName extends RouteName> = PathParamsOf<RouteManifest[TName]['path']>
 
 type RouteArgs<TName extends RouteName> =
-  [PathParamKeys<RouteManifest[TName]['path']>] extends [never]
+  HasPathParams<RouteManifest[TName]['path']> extends false
     ? [query?: RouteQuery]
     : [params: RouteParams<TName>, query?: RouteQuery]
 

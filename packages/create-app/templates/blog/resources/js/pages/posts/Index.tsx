@@ -37,6 +37,8 @@ export default function PostsIndex({ data, pagination }: Props) {
         setError('Search failed — try fewer or shorter keywords.')
         return
       }
+      // The route binds no `output` schema, so json() resolves to unknown and
+      // the shape is asserted here. Bind one to have codegen type json() itself.
       const payload = (await response.json()) as { data: PostResourceData[] }
       setResults(payload.data)
     } catch {
