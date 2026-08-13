@@ -79,11 +79,10 @@ export async function linkInstalledPackage(
 /**
  * The `db/schema.ts` a fresh app starts from, per dialect. Kept in the shape
  * `create-guren-app` scaffolds so the patchers are exercised against what
- * users actually have on disk — notably, MySQL apps import their builders
- * from `drizzle-orm/mysql-core`, never from the PostgreSQL-first
- * `@guren/orm/drizzle` subpath.
+ * users actually have on disk — each dialect imports its builders from its
+ * own `@guren/orm/drizzle/<dialect>` barrel.
  */
-export const PG_SCHEMA_FIXTURE = `import { pgTable, serial, text, timestamp } from '@guren/orm/drizzle'
+export const PG_SCHEMA_FIXTURE = `import { pgTable, serial, text, timestamp } from '@guren/orm/drizzle/pg'
 
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),
@@ -93,7 +92,7 @@ export const users = pgTable('users', {
 })
 `
 
-export const MYSQL_SCHEMA_FIXTURE = `import { mysqlTable, int, varchar, timestamp } from 'drizzle-orm/mysql-core'
+export const MYSQL_SCHEMA_FIXTURE = `import { mysqlTable, int, varchar, timestamp } from '@guren/orm/drizzle/mysql'
 
 export const users = mysqlTable('users', {
   id: int('id').primaryKey().autoincrement(),
@@ -103,7 +102,7 @@ export const users = mysqlTable('users', {
 })
 `
 
-export const SQLITE_SCHEMA_FIXTURE = `import { sqliteTable, integer, text } from 'drizzle-orm/sqlite-core'
+export const SQLITE_SCHEMA_FIXTURE = `import { sqliteTable, integer, text } from '@guren/orm/drizzle/sqlite'
 
 export const users = sqliteTable('users', {
   id: integer('id').primaryKey({ autoIncrement: true }),

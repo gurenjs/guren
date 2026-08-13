@@ -479,11 +479,30 @@ export type { SchemaDialect }
  * case that matters most is a schema with no tables yet — hence the `pg`
  * fallback below, which a parse-based answer could not produce.
  */
+/**
+ * The `@guren/orm/drizzle/<dialect>` barrel each dialect's schema imports its
+ * column builders from: a dialect signal for `detectSchemaDialect`, and the
+ * module the `ensure*Imports` patchers below merge new builders into.
+ */
+export const DIALECT_BARRELS = {
+  sqlite: '@guren/orm/drizzle/sqlite',
+  pg: '@guren/orm/drizzle/pg',
+  mysql: '@guren/orm/drizzle/mysql',
+} as const satisfies Record<SchemaDialect, string>
+
 export function detectSchemaDialect(content: string): SchemaDialect {
-  if (content.includes('sqliteTable') || content.includes('drizzle-orm/sqlite-core')) {
+  if (
+    content.includes('sqliteTable') ||
+    content.includes('drizzle-orm/sqlite-core') ||
+    content.includes(DIALECT_BARRELS.sqlite)
+  ) {
     return 'sqlite'
   }
-  if (content.includes('mysqlTable') || content.includes('drizzle-orm/mysql-core')) {
+  if (
+    content.includes('mysqlTable') ||
+    content.includes('drizzle-orm/mysql-core') ||
+    content.includes(DIALECT_BARRELS.mysql)
+  ) {
     return 'mysql'
   }
   return 'pg'
@@ -552,16 +571,20 @@ export function ensureNamedImports(content: string, specifier: string, needed: s
   return match ? content.replace(existingImport, () => importLine) : `${importLine}\n${content}`
 }
 
-export function ensureDrizzleImports(content: string, needed: string[]): string {
-  return ensureNamedImports(content, '@guren/orm/drizzle', needed)
+// Pre-barrel apps keep their `@guren/orm/drizzle` / `drizzle-orm/<dialect>-core`
+// imports: those resolve to the same drizzle-orm copy as the barrels (see
+// drizzle-pins.ts), so the mixed specifiers a patch leaves behind are safe.
+
+export function ensurePgImports(content: string, needed: string[]): string {
+  return ensureNamedImports(content, DIALECT_BARRELS.pg, needed)
 }
 
 export function ensureSqliteImports(content: string, needed: string[]): string {
-  return ensureNamedImports(content, 'drizzle-orm/sqlite-core', needed)
+  return ensureNamedImports(content, DIALECT_BARRELS.sqlite, needed)
 }
 
 export function ensureMysqlImports(content: string, needed: string[]): string {
-  return ensureNamedImports(content, 'drizzle-orm/mysql-core', needed)
+  return ensureNamedImports(content, DIALECT_BARRELS.mysql, needed)
 }
 
 /**

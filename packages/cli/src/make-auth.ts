@@ -6,8 +6,8 @@ import { assertNotApiOnly } from './app-surface'
 import {
   addCreateAppOption,
   detectSchemaDialect,
-  ensureDrizzleImports,
   ensureMysqlImports,
+  ensurePgImports,
   ensureSqliteImports,
   PATCH_REASONS,
   readSchemaDialect,
@@ -1867,7 +1867,7 @@ function ensureAuthColumnImports(content: string, dialect: SchemaDialect): strin
   if (dialect === 'mysql') {
     return ensureMysqlImports(content, ['mysqlTable', 'int', 'varchar', 'timestamp'])
   }
-  return ensureDrizzleImports(content, ['pgTable', 'serial', 'text', 'timestamp'])
+  return ensurePgImports(content, ['pgTable', 'serial', 'text', 'timestamp'])
 }
 
 /**

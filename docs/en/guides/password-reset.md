@@ -279,7 +279,7 @@ export class DatabasePasswordResetStore implements PasswordResetTokenStore {
 
 ```ts
 // db/schema.ts
-import { pgTable, text, timestamp } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp } from '@guren/orm/drizzle/pg'
 
 export const passwordResets = pgTable('password_resets', {
   tokenHash: text('token_hash').primaryKey(),

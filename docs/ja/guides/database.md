@@ -17,7 +17,7 @@ Guren は Drizzle ORM と PostgreSQL を組み合わせて使います。この�
 `db/schema.ts` で Drizzle のスキーマビルダーを使います。
 
 ```ts
-import { pgTable, serial, text, boolean, timestamp, jsonb } from 'drizzle-orm/pg-core'
+import { pgTable, serial, text, boolean, timestamp, jsonb } from '@guren/orm/drizzle/pg'
 
 export const posts = pgTable('posts', {
   id: serial('id').primaryKey(),
