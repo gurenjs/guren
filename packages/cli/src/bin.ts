@@ -63,7 +63,7 @@ import { runCheck, renderCheckReport } from './check'
 import { runAudit, renderAuditReport } from './audit'
 import { generateGuidelines } from './guidelines'
 import { installAgentHarness, type AgentHarnessResult } from './agent-harness'
-import { parseTargetList } from './agent-targets'
+import { parseTargetList, type AgentTarget } from './agent-targets'
 import { makeFeature } from './make-feature'
 import { parseFieldsString } from './fields'
 import { generateKeyValue, writeKeyToEnv } from './key-generate'
@@ -2012,11 +2012,17 @@ function reportAgentHarnessResult(result: AgentHarnessResult): void {
   }
 }
 
-const AGENT_TARGET_ARG = {
-  type: 'string',
-  description:
-    'Comma-separated agent targets: claude, codex, cursor, copilot, opencode, or "all".',
-} as const
+const AGENT_TARGETS_HELP =
+  'Comma-separated agent targets: claude, codex, cursor, copilot, opencode, or "all".'
+
+function parseTargetArg(raw: string): AgentTarget[] {
+  try {
+    return parseTargetList(raw)
+  } catch (error) {
+    // a typo is a usage problem: usage + message, not a stack trace
+    throw new UsageError(error instanceof Error ? error.message : String(error))
+  }
+}
 
 const agentInitCommand = defineCommand({
   meta: {
@@ -2031,8 +2037,8 @@ const agentInitCommand = defineCommand({
       description: 'Overwrite existing files, including CLAUDE.md, AGENTS.md, and .claude/settings.json.',
     },
     target: {
-      ...AGENT_TARGET_ARG,
-      description: `${AGENT_TARGET_ARG.description} Default: claude.`,
+      type: 'string',
+      description: `${AGENT_TARGETS_HELP} Default: claude.`,
     },
     app: {
       type: 'string',
@@ -2044,7 +2050,7 @@ const agentInitCommand = defineCommand({
       cwd: args.app,
       mode: 'init',
       force: Boolean(args.force),
-      targets: args.target ? parseTargetList(args.target) : undefined,
+      targets: args.target ? parseTargetArg(args.target) : undefined,
     })
     reportAgentHarnessResult(result)
     consola.success('AI agent harness is ready. Update it later with `bunx guren agent:sync`.')
@@ -2059,8 +2065,8 @@ const agentSyncCommand = defineCommand({
   },
   args: {
     target: {
-      ...AGENT_TARGET_ARG,
-      description: `${AGENT_TARGET_ARG.description} Default: every target detected on disk.`,
+      type: 'string',
+      description: `${AGENT_TARGETS_HELP} Default: every target detected on disk.`,
     },
     app: {
       type: 'string',
@@ -2071,7 +2077,7 @@ const agentSyncCommand = defineCommand({
     const result = await installAgentHarness({
       cwd: args.app,
       mode: 'sync',
-      targets: args.target ? parseTargetList(args.target) : undefined,
+      targets: args.target ? parseTargetArg(args.target) : undefined,
     })
     reportAgentHarnessResult(result)
     consola.success('Agent harness synced to the latest framework version.')

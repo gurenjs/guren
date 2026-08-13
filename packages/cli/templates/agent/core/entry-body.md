@@ -1,41 +1,3 @@
-# __APP_TITLE__
-
-## Overview
-
-A fullstack TypeScript application built with the Guren framework (Laravel-inspired, running on Bun).
-
-## AI Agents: Start Here
-
-Before exploring `node_modules`, use the built-in introspection commands:
-
-```bash
-bunx guren context         # project map: models, routes, controllers, pages (add --json for JSON)
-bunx guren context User    # everything about one entity: model, routes, pages, linked docs — start entity work here
-bunx guren check           # validate route ↔ controller ↔ page consistency, doc links, and spec freshness — run after changes
-bunx guren docs:graph --path <file>  # which docs govern this file, which spec views derive from it — ask BEFORE renaming/moving
-bunx guren codegen         # regenerate .guren/*.gen.ts typed manifests (also runs via `bun run dev`)
-bunx guren spec:generate   # regenerate docs/spec/ views (ER, domain, screens, modules) after schema/model/route changes
-bunx guren make:adr "..."  # record an architecture decision under docs/adr/ (--entity <Model> links it)
-```
-
-This project ships with an agent harness wired into `.claude/settings.json`:
-a `SessionStart` hook injects the `guren context` project map, and a
-`PostToolUse` hook (`.claude/hooks/check-after-edit.ts`) re-runs `guren check`
-after edits to routes, controllers, models, schema, or pages and reports
-failures back immediately. The injected map ends with a "Guren API Signatures"
-digest of the ORM, controller, and testing APIs — those signatures are already
-in your context before you write any code. Framework-managed files
-(`.claude/rules`, `skills`, `agents`, `hooks`) can be refreshed anytime with
-`bunx guren agent:sync`.
-
-Detailed, verified API rules live in `.claude/rules/*.md` and load automatically
-based on the files you are editing (glob-scoped): `orm-models.md` (models, queries,
-relations), `controllers-http.md` (validation, Inertia, auth), `routes-codegen.md`
-(route options, schema binding, codegen), `testing.md` (TestApp assertions),
-`docs-and-spec.md` (linked ADRs/docs, generated spec views).
-For framework signatures, check the session-start digest first, then the matching
-rule file; only read `node_modules/@guren/*` for APIs neither covers.
-
 ## Project Structure
 
 ```
@@ -109,31 +71,39 @@ bun run test
 
 ## MCP Server (AI Agent Integration)
 
-`bun run dev` を実行すると、開発サーバーに MCP エンドポイントが起動します（`dev` スクリプトの `GUREN_MCP=1` で有効化。無い場合は `GUREN_MCP=1 bun run dev`、本番環境では付けても無効です）:
+`bun run dev` starts an MCP endpoint alongside the dev server (enabled by
+`GUREN_MCP=1` in the `dev` script; if your script lacks it, run
+`GUREN_MCP=1 bun run dev`; the flag has no effect in production):
 
 ```
 http://localhost:3333/_guren/mcp
 ```
 
-`.mcp.json` が設定済みなので、Claude Code / Cursor は自動的に接続します。
+`bunx guren agent:init` writes the MCP client config for the agents you
+selected: `.mcp.json` (Claude Code), `.cursor/mcp.json` (Cursor),
+`.vscode/mcp.json` (VS Code / Copilot), `.codex/config.toml` (Codex — a
+project-scoped config Codex reads in trusted projects only), or the `mcp`
+entry in `opencode.json` (OpenCode). If your agent is not configured yet,
+point it at the URL above as a streamable-HTTP server.
 
-エンドポイントは同一マシンからのアクセスのみ許可します。他オリジンのブラウザページ
-（DNS rebinding 含む）と、LAN 上の別ホストからのリクエストは 403 で拒否されます。
+The endpoint only accepts requests from this machine: browser pages on other
+origins (including DNS rebinding) and requests from other hosts on the LAN
+are rejected with 403.
 
-### 利用可能なツール
+### Available tools
 
-| Tool | 説明 |
-|------|------|
-| `guren_get_context` | プロジェクト構造マップ（models, routes, pages, controllers等） |
-| `guren_entity_context` | エンティティ単位のコンテキストバンドル（model, routes, pages, linked docs） |
-| `guren_check` | route↔controller↔page の整合性・docリンク・spec鮮度の検証 |
-| `guren_docs_graph` | OKF docsリレーショングラフ(entity/pathで近傍に絞り込み)— リネーム前の影響照会 |
-| `guren_list_models` | モデル一覧（リレーション、soft deletes、auth trait含む） |
-| `guren_generate_guidelines` | プロジェクト固有コーディング規約の自動生成 |
-| `guren_doctor` | プロジェクト健全性チェック + 次のアクション提案 |
-| `guren_make_feature` | CRUD 一括スキャフォールド |
-| `guren_make_component` | 個別コンポーネント生成 |
-| `guren_codegen` | 型マニフェスト生成（routes.gen.ts, pages.gen.ts等） |
+| Tool | Description |
+|------|-------------|
+| `guren_get_context` | Project structure map (models, routes, pages, controllers, …) |
+| `guren_entity_context` | Entity-centric context bundle (model, routes, pages, linked docs) |
+| `guren_check` | Validate route ↔ controller ↔ page consistency, doc links, spec freshness |
+| `guren_docs_graph` | OKF docs relation graph (narrow with entity/path) — impact query before renames |
+| `guren_list_models` | List models (relations, soft deletes, auth trait) |
+| `guren_generate_guidelines` | Generate project-specific coding guidelines |
+| `guren_doctor` | Project health check + suggested next actions |
+| `guren_make_feature` | Scaffold a complete CRUD feature |
+| `guren_make_component` | Scaffold a single component |
+| `guren_codegen` | Generate typed manifests (routes.gen.ts, pages.gen.ts, …) |
 
 ## Architecture Overview
 
@@ -163,9 +133,9 @@ export class Post extends defineModel(posts, {
 ```
 
 - Models: `await Post.findOrFail(id)` throws a 404; `Post.where(...)` starts a query
-  builder chain. Full API in `.claude/rules/orm-models.md`.
+  builder chain. Full API in `__RULES_DIR__/orm-models.md`.
 - Attaching a Zod schema to a route both validates the request automatically and
-  feeds `bunx guren codegen` typed manifests. Details in `.claude/rules/routes-codegen.md`.
+  feeds `bunx guren codegen` typed manifests. Details in `__RULES_DIR__/routes-codegen.md`.
 - Middleware: `defineMiddleware(async (c, next) => { ... })` from `@guren/core`;
   register aliases via `const router = baseRouter.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))`
   — the return value carries the alias name in the router's type, so dropping it makes
@@ -183,7 +153,7 @@ await app.get('/posts').assertOk()
 await app.actingAs(user).json().post('/posts', { title: 'Hi' }).assertCreated()
 ```
 
-Full client and assertion reference: `.claude/rules/testing.md`.
+Full client and assertion reference: `__RULES_DIR__/testing.md`.
 
 ## Key Files
 
@@ -195,4 +165,4 @@ Full client and assertion reference: `.claude/rules/testing.md`.
 | `routes/web.ts` | Web route definitions |
 | `app/Providers/` | Service providers |
 | `resources/js/pages/` | React page components |
-| `.claude/rules/` | Glob-scoped API rules (auto-loaded per edited path) |
+| `__RULES_DIR__/` | Verified API rules (each file's `globs` frontmatter states the covered paths) |

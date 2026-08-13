@@ -1,9 +1,10 @@
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
-import { basename, dirname, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import process from 'node:process'
-import { fileExists } from './discovery'
+import { fileExists, toPosixRelative } from './discovery'
 import {
+  DETECTABLE_COMPONENTS,
   componentsForTargets,
   planComponents,
   type AgentTarget,
@@ -18,6 +19,8 @@ import {
  * `templates/agent/targets`) into the per-agent files planned by
  * `agent-targets.ts` — Claude Code's `.claude/` tree, and the shared
  * `AGENTS.md` + `.agents/` family for Codex, Cursor, Copilot, and OpenCode.
+ * The planner owns every path, content, and classification decision; this
+ * module is the I/O half.
  *
  * Files fall into two groups:
  * - Managed (rules, skills, subagents, hooks) — owned by the framework,
@@ -55,8 +58,8 @@ export interface AgentHarnessResult {
   /**
    * MCP client configs that already existed without the Guren endpoint.
    * Those files routinely carry unrelated user configuration (`opencode.json`,
-   * `.codex/config.toml`), so the installer never merges into them — it
-   * reports the snippet to add by hand instead.
+   * `.codex/config.toml`, `.vscode/mcp.json`), so the installer never merges
+   * into them — it reports the snippet to add by hand instead.
    */
   mcpMergeHints: Array<{ path: string; snippet: string }>
 }
@@ -106,7 +109,8 @@ async function scriptsEnableMcp(cwd: string): Promise<boolean> {
   }
 }
 
-async function loadTemplates(): Promise<TemplateFiles> {
+/** Load every file under `templates/agent` keyed by template-relative POSIX path. */
+export async function loadAgentTemplates(): Promise<TemplateFiles> {
   const entries = await readdir(templateDir, { recursive: true, withFileTypes: true })
   const files: TemplateFiles = new Map()
   for (const entry of entries) {
@@ -114,41 +118,35 @@ async function loadTemplates(): Promise<TemplateFiles> {
       continue
     }
     const sourcePath = join(entry.parentPath, entry.name)
-    const relPath = relative(templateDir, sourcePath).replaceAll('\\', '/')
-    files.set(relPath, await readFile(sourcePath, 'utf8'))
+    files.set(toPosixRelative(templateDir, sourcePath), await readFile(sourcePath, 'utf8'))
   }
   return files
 }
 
 /**
- * Which harness components an app already has, judged by positive evidence of
- * framework-managed artifacts — never by files other tools also create
- * (`AGENTS.md` exists in plenty of repos that never ran `agent:init`, so its
- * presence proves nothing). A bare app with no evidence gets the Claude
- * default, preserving the long-standing "sync acts as install" behavior.
+ * Which harness components an app already has. The evidence is the plans
+ * themselves: a component counts as installed when any of the managed files
+ * `planComponents` would write for it exists on disk — detection can never
+ * drift from the planner because it has no path knowledge of its own. A
+ * user-authored file that happens to collide with a managed path is still
+ * read as evidence (and `sync` would refresh it); that residual risk is
+ * narrower than the pre-multi-agent behavior, which overwrote the managed
+ * set unconditionally. A bare app with no evidence gets the Claude default,
+ * preserving the long-standing "sync acts as install" behavior.
  */
-async function dirHasGurenFiles(cwd: string, dir: string, suffix: string): Promise<boolean> {
-  try {
-    const names = await readdir(join(cwd, dir))
-    return names.some((name) => name.startsWith('guren-') && name.endsWith(suffix))
-  } catch {
-    return false
-  }
-}
-
-async function detectInstalledComponents(cwd: string): Promise<HarnessComponent[]> {
+async function detectInstalledComponents(
+  cwd: string,
+  templates: TemplateFiles,
+): Promise<HarnessComponent[]> {
   const components: HarnessComponent[] = []
-  if (await fileExists(cwd, '.claude/rules')) {
-    components.push('claude')
-  }
-  if (await fileExists(cwd, '.agents/rules')) {
-    components.push('agents')
-  }
-  if (await dirHasGurenFiles(cwd, '.cursor/rules', '.mdc')) {
-    components.push('cursor')
-  }
-  if (await dirHasGurenFiles(cwd, '.github/instructions', '.instructions.md')) {
-    components.push('copilot')
+  for (const component of DETECTABLE_COMPONENTS) {
+    const managed = planComponents([component], templates, 'App').filter((file) => file.managed)
+    for (const file of managed) {
+      if (await fileExists(cwd, file.path)) {
+        components.push(component)
+        break
+      }
+    }
   }
   if (components.length === 0) {
     components.push('claude')
@@ -161,21 +159,20 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
   const mode = options.mode ?? 'init'
   const force = Boolean(options.force)
   const appTitle = await resolveAppTitle(cwd)
+  const templates = await loadAgentTemplates()
 
   const components = options.targets
     ? componentsForTargets(options.targets)
     : mode === 'sync'
-      ? await detectInstalledComponents(cwd)
+      ? await detectInstalledComponents(cwd, templates)
       : componentsForTargets(['claude'])
 
-  const templates = await loadTemplates()
   const written: string[] = []
   const skipped: string[] = []
   const mcpMergeHints: AgentHarnessResult['mcpMergeHints'] = []
 
-  for (const file of planComponents(components, templates)) {
+  for (const file of planComponents(components, templates, appTitle)) {
     const destPath = join(cwd, file.path)
-    const content = file.content.replaceAll('__APP_TITLE__', appTitle)
     const exists = await fileExists(cwd, file.path)
 
     // sync refreshes managed files; existing user-owned files are only
@@ -185,17 +182,17 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
       skipped.push(file.path)
       // onboarding guidance, not a recurring nag — sync stays quiet about
       // configs the user has decided to keep without the Guren endpoint
-      if (file.mergeHint && mode === 'init') {
+      if (file.mergeMarker && mode === 'init') {
         const current = await readFile(destPath, 'utf8').catch(() => '')
-        if (!current.includes('_guren/mcp')) {
-          mcpMergeHints.push({ path: file.path, snippet: content })
+        if (!current.includes(file.mergeMarker)) {
+          mcpMergeHints.push({ path: file.path, snippet: file.content })
         }
       }
       continue
     }
 
     await mkdir(dirname(destPath), { recursive: true })
-    await writeFile(destPath, content, 'utf8')
+    await writeFile(destPath, file.content, 'utf8')
     written.push(file.path)
   }
 

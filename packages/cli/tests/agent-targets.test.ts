@@ -1,11 +1,15 @@
 import { describe, it, expect } from 'bun:test'
 import {
   AGENT_TARGETS,
+  BULK_TEMPLATE_PREFIXES,
+  NAMED_TEMPLATE_PATHS,
   componentsForTargets,
   parseTargetList,
   planComponents,
+  type HarnessComponent,
   type TemplateFiles,
 } from '../src/agent-targets'
+import { loadAgentTemplates } from '../src/agent-harness'
 
 describe('parseTargetList', () => {
   it('parses a comma-separated list, trimming and deduping', () => {
@@ -22,6 +26,10 @@ describe('parseTargetList', () => {
 
   it('throws on an unknown target instead of installing the default', () => {
     expect(() => parseTargetList('claud')).toThrow('Unknown agent target "claud"')
+  })
+
+  it('validates every entry even when "all" is present', () => {
+    expect(() => parseTargetList('all,claud')).toThrow('Unknown agent target "claud"')
   })
 
   it('throws on an empty list', () => {
@@ -64,14 +72,16 @@ const FAKE_RULE = [
 
 function fakeTemplates(): TemplateFiles {
   return new Map([
-    ['core/AGENTS.md', '# __APP_TITLE__ (agents)'],
+    ['core/entry-intro.md', '# __APP_TITLE__ intro\n'],
+    ['core/entry-body.md', 'body referencing __RULES_DIR__/testing.md\n'],
     ['core/rules/testing.md', FAKE_RULE],
     ['core/skills/scaffold/SKILL.md', 'rules live in `__RULES_DIR__/`'],
-    ['targets/claude/CLAUDE.md', '# __APP_TITLE__ (full)'],
+    ['targets/claude/workflow.md', 'claude hooks workflow\n'],
     ['targets/claude/mcp.json', '{}'],
     ['targets/claude/settings.json', '{}'],
     ['targets/claude/agents/code-review.md', 'agent'],
     ['targets/claude/hooks/check-after-edit.ts', 'hook'],
+    ['targets/agents/workflow.md', 'manual workflow for __RULES_DIR__\n'],
     ['targets/codex/config.toml', '[mcp_servers.guren]'],
     ['targets/codex/rules/guren.rules', 'prefix_rule(...)'],
     ['targets/cursor/mcp.json', '{"mcpServers":{}}'],
@@ -80,12 +90,20 @@ function fakeTemplates(): TemplateFiles {
   ])
 }
 
-describe('planComponents', () => {
-  it('renders the claude-only plan with the full CLAUDE.md', () => {
-    const files = planComponents(['claude'], fakeTemplates())
-    const byPath = new Map(files.map((file) => [file.path, file]))
+function planByPath(
+  components: HarnessComponent[],
+  templates: TemplateFiles = fakeTemplates(),
+): Map<string, ReturnType<typeof planComponents>[number]> {
+  return new Map(planComponents(components, templates, 'My App').map((file) => [file.path, file]))
+}
 
-    expect(byPath.get('CLAUDE.md')?.content).toBe('# __APP_TITLE__ (full)')
+describe('planComponents', () => {
+  it('renders the claude-only plan with the fully assembled CLAUDE.md', () => {
+    const byPath = planByPath(['claude'])
+
+    expect(byPath.get('CLAUDE.md')?.content).toBe(
+      '# My App intro\n\nclaude hooks workflow\n\nbody referencing .claude/rules/testing.md\n',
+    )
     expect(byPath.get('CLAUDE.md')?.managed).toBe(false)
     expect(byPath.get('.claude/rules/testing.md')?.managed).toBe(true)
     expect(byPath.get('.claude/skills/scaffold/SKILL.md')?.content).toBe(
@@ -95,41 +113,41 @@ describe('planComponents', () => {
     expect(byPath.has('.agents/rules/testing.md')).toBe(false)
   })
 
-  it('keeps the full CLAUDE.md next to AGENTS.md when both families are present', () => {
-    const files = planComponents(['claude', 'agents'], fakeTemplates())
-    const byPath = new Map(files.map((file) => [file.path, file]))
+  it('assembles AGENTS.md from the same intro and body with the agents workflow', () => {
+    const byPath = planByPath(['claude', 'agents'])
 
-    expect(byPath.get('CLAUDE.md')?.content).toBe('# __APP_TITLE__ (full)')
-    expect(byPath.get('AGENTS.md')?.managed).toBe(false)
+    expect(byPath.get('AGENTS.md')?.content).toBe(
+      '# My App intro\n\nmanual workflow for .agents/rules\n\nbody referencing .agents/rules/testing.md\n',
+    )
+    expect(byPath.get('CLAUDE.md')?.content).toContain('claude hooks workflow')
     expect(byPath.get('.agents/skills/scaffold/SKILL.md')?.content).toBe(
       'rules live in `.agents/rules/`',
     )
-    expect(byPath.get('.claude/skills/scaffold/SKILL.md')?.content).toBe(
-      'rules live in `.claude/rules/`',
-    )
   })
 
-  it('marks the codex and opencode MCP configs as user-owned merge-hint files', () => {
-    const files = planComponents(['agents', 'codex', 'opencode'], fakeTemplates())
-    const byPath = new Map(files.map((file) => [file.path, file]))
+  it('marks every MCP client config as user-owned with the endpoint merge marker', () => {
+    const byPath = planByPath(['claude', 'agents', 'cursor', 'copilot', 'codex', 'opencode'])
 
-    expect(byPath.get('.codex/config.toml')).toMatchObject({ managed: false, mergeHint: true })
-    expect(byPath.get('opencode.json')).toMatchObject({ managed: false, mergeHint: true })
-    expect(byPath.has('CLAUDE.md')).toBe(false)
-    expect(byPath.has('.claude/rules/testing.md')).toBe(false)
+    for (const path of [
+      '.mcp.json',
+      '.cursor/mcp.json',
+      '.vscode/mcp.json',
+      '.codex/config.toml',
+      'opencode.json',
+    ]) {
+      expect(byPath.get(path)).toMatchObject({ managed: false, mergeMarker: '_guren/mcp' })
+    }
   })
 
-  it('ships the codex command approval policy as plain user-owned (no merge hint)', () => {
-    const files = planComponents(['agents', 'codex'], fakeTemplates())
-    const byPath = new Map(files.map((file) => [file.path, file]))
+  it('ships the codex command approval policy as plain user-owned (no merge marker)', () => {
+    const byPath = planByPath(['agents', 'codex'])
 
     expect(byPath.get('.codex/rules/guren.rules')).toMatchObject({ managed: false })
-    expect(byPath.get('.codex/rules/guren.rules')?.mergeHint).toBeUndefined()
+    expect(byPath.get('.codex/rules/guren.rules')?.mergeMarker).toBeUndefined()
   })
 
   it('renders cursor rules as guren-prefixed .mdc with comma-joined globs', () => {
-    const files = planComponents(['agents', 'cursor'], fakeTemplates())
-    const byPath = new Map(files.map((file) => [file.path, file]))
+    const byPath = planByPath(['agents', 'cursor'])
 
     const rule = byPath.get('.cursor/rules/guren-testing.mdc')
     expect(rule?.managed).toBe(true)
@@ -137,34 +155,84 @@ describe('planComponents', () => {
     expect(rule?.content).toContain('globs: tests/**,app/**')
     expect(rule?.content).toContain('alwaysApply: false')
     expect(rule?.content).toContain('# Testing')
-    expect(byPath.get('.cursor/mcp.json')).toMatchObject({ managed: false, mergeHint: true })
   })
 
   it('renders copilot rules as guren-prefixed .instructions.md with applyTo', () => {
-    const files = planComponents(['agents', 'copilot'], fakeTemplates())
-    const byPath = new Map(files.map((file) => [file.path, file]))
+    const byPath = planByPath(['agents', 'copilot'])
 
     const rule = byPath.get('.github/instructions/guren-testing.instructions.md')
     expect(rule?.managed).toBe(true)
     expect(rule?.content).toContain('applyTo: "tests/**,app/**"')
     expect(rule?.content).toContain('# Testing')
     expect(rule?.content).not.toContain('alwaysApply')
-    expect(byPath.get('.vscode/mcp.json')).toMatchObject({ managed: false, mergeHint: true })
+  })
+
+  it('parses rule frontmatter with CRLF line endings', () => {
+    const templates = fakeTemplates()
+    templates.set('core/rules/testing.md', FAKE_RULE.replaceAll('\n', '\r\n'))
+
+    const rule = planByPath(['cursor'], templates).get('.cursor/rules/guren-testing.mdc')
+    expect(rule?.content).toContain('globs: tests/**,app/**')
   })
 
   it('throws when a rule file has no parseable frontmatter instead of shipping an empty scope', () => {
     const templates = fakeTemplates()
     templates.set('core/rules/testing.md', '# No frontmatter\n')
-    expect(() => planComponents(['cursor'], templates)).toThrow(
-      'Agent harness rule testing.md is missing its frontmatter block',
+    expect(() => planComponents(['cursor'], templates, 'My App')).toThrow(
+      'Agent harness rule testing.md needs a description and at least one glob',
+    )
+  })
+
+  it('throws when a template token survives rendering', () => {
+    const templates = fakeTemplates()
+    templates.set('targets/claude/mcp.json', '{"oops": "__RULES_DIR__"}')
+    expect(() => planComponents(['claude'], templates, 'My App')).toThrow(
+      'Agent harness left __RULES_DIR__ unrendered in .mcp.json',
     )
   })
 
   it('throws when a canonical template file is missing', () => {
     const templates = fakeTemplates()
-    templates.delete('core/AGENTS.md')
-    expect(() => planComponents(['agents'], templates)).toThrow(
-      'Agent harness template is missing core/AGENTS.md',
+    templates.delete('core/entry-body.md')
+    expect(() => planComponents(['agents'], templates, 'My App')).toThrow(
+      'Agent harness template is missing core/entry-body.md',
     )
+  })
+})
+
+describe('template completeness', () => {
+  it('every shipped template file is reachable from the planner', async () => {
+    const templates = await loadAgentTemplates()
+
+    for (const path of NAMED_TEMPLATE_PATHS) {
+      expect(templates.has(path)).toBe(true)
+    }
+    for (const path of templates.keys()) {
+      const reachable =
+        (NAMED_TEMPLATE_PATHS as readonly string[]).includes(path) ||
+        BULK_TEMPLATE_PREFIXES.some((prefix) => path.startsWith(prefix))
+      if (!reachable) {
+        throw new Error(
+          `${path} is neither in NAMED_TEMPLATE_PATHS nor under a bulk prefix — ` +
+            'it would never be installed. Wire it into planComponents (agent-targets.ts).',
+        )
+      }
+    }
+  })
+
+  it('the full plan over the real templates renders without leftovers or conflicts', async () => {
+    const templates = await loadAgentTemplates()
+    const all = planComponents(
+      ['claude', 'agents', 'cursor', 'copilot', 'codex', 'opencode'],
+      templates,
+      'Demo App',
+    )
+
+    const claudeMd = all.find((file) => file.path === 'CLAUDE.md')
+    const agentsMd = all.find((file) => file.path === 'AGENTS.md')
+    expect(claudeMd?.content).toContain('# Demo App')
+    expect(claudeMd?.content).toContain('.claude/rules')
+    expect(agentsMd?.content).toContain('# Demo App')
+    expect(agentsMd?.content).toContain('.agents/rules')
   })
 })

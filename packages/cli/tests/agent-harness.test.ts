@@ -174,6 +174,17 @@ describe('installAgentHarness', () => {
     expect(result.written.some((path) => path.startsWith('.github/'))).toBe(false)
   })
 
+  it('sync ignores a hand-authored .agents/rules directory holding no managed files', async () => {
+    await mkdir(join(tempDir, '.agents/rules'), { recursive: true })
+    await writeFile(join(tempDir, '.agents/rules/my-conventions.md'), 'user rule\n', 'utf8')
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'sync' })
+
+    expect(result.written).not.toContain('AGENTS.md')
+    expect(result.written.some((path) => path.startsWith('.agents/'))).toBe(false)
+    expect(await readFile(join(tempDir, '.agents/rules/my-conventions.md'), 'utf8')).toBe('user rule\n')
+  })
+
   it('sync does not mistake user-authored cursor rules for an installed harness', async () => {
     await mkdir(join(tempDir, '.cursor/rules'), { recursive: true })
     await writeFile(join(tempDir, '.cursor/rules/my-style.mdc'), 'user rule\n', 'utf8')

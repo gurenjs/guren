@@ -136,7 +136,18 @@ this per tool (see Open Questions).
 
 **Entry documents.**
 
-- `claude` only (default): `CLAUDE.md` exactly as today. No churn.
+*Amended during review (2026-08-13):* both entry documents are assembled from
+three template pieces — a shared intro (title, overview, introspection
+commands), a per-target workflow section (Claude's hook description vs. the
+manual session loop), and a shared body (structure, commands, MCP,
+architecture, testing) with the rules directory as a token. Review found the
+two hand-maintained copies already disagreeing on day one (the old CLAUDE.md
+carried a Japanese MCP section and claims the body had dropped), which also
+retires the "no churn for claude" line below: the claude output changes once,
+to the assembled — and now correct — document. The per-target bullets
+otherwise stand:
+
+- `claude` only (default): `CLAUDE.md` ~~exactly as today. No churn~~.
 - Any non-Claude target: `AGENTS.md` with the canonical body. Its "session
   workflow" section replaces the hook description with pull instructions: run
   `bunx guren context` at session start (or call the `guren_get_context` MCP
@@ -163,12 +174,17 @@ this per tool (see Open Questions).
 | codex | `.codex/config.toml` | `[mcp_servers.guren]` + `url = "http://localhost:3333/_guren/mcp"` |
 | opencode | `opencode.json` | `{ "$schema": "https://opencode.ai/config.json", "mcp": { "guren": { "type": "remote", "url": "…" } } }` |
 
-`.codex/config.toml`, `.vscode/mcp.json`, and `opencode.json` frequently
-pre-exist with unrelated user configuration. The installer does **not** merge
-into existing files — it skips them and prints the snippet to add by hand.
-Structured merging of three formats (TOML, VS Code JSON, OpenCode JSON) is
-risk without payoff at this scale; revisit only if skip-and-print proves
-noisy in practice.
+MCP client configs frequently pre-exist with unrelated user configuration.
+The installer does **not** merge into existing files — it skips them and
+prints the snippet to add by hand. Structured merging of several formats
+(TOML, VS Code JSON, OpenCode JSON) is risk without payoff at this scale;
+revisit only if skip-and-print proves noisy in practice. *Amended during
+review (2026-08-13):* the skip-and-print treatment is derived from the file's
+role — it applies to **every** MCP client config, including `.mcp.json`
+(originally omitted, which left a repo with a pre-existing `.mcp.json` and
+`GUREN_MCP=1` already in its `dev` script with zero signal that the Guren
+server was never wired). The hint prints on `init` only; `sync` stays quiet
+about configs the user has decided to keep without the endpoint.
 
 The endpoint's security posture is unchanged: `GUREN_MCP=1` opt-in,
 loopback-only guard. Cloud agents (Copilot coding agent on github.com) cannot
@@ -202,12 +218,17 @@ guren agent:sync --target cursor        # constrain the refresh
 ```
 
 `agent:sync` detects installed targets statelessly from positive evidence of
-managed artifacts (same doctrine as `app-surface.ts`): `.claude/rules/` →
+managed artifacts (same doctrine as `app-surface.ts`). ~~`.claude/rules/` →
 claude; `.cursor/rules/guren-*.mdc` → cursor; `.github/instructions/guren-*`
-→ copilot; `.agents/rules/` → the shared codex/opencode family. Codex and
-OpenCode need no distinction at sync time — their managed outputs are
-identical; only the user-owned MCP snippet differs, and sync never touches
-user-owned files. No state file, no marker.
+→ copilot; `.agents/rules/` → the shared codex/opencode family.~~ *Amended
+during review (2026-08-13):* hand-listed sentinels re-encode planner
+knowledge in the detector and drift when an output path changes — and bare
+directory existence read a hand-authored `.agents/rules/` as an installed
+harness. Detection now derives from the plans themselves: a component counts
+as installed when any managed file `planComponents` would write for it
+exists on disk. Codex and OpenCode need no distinction at sync time — their
+managed outputs are identical; only the user-owned extras differ, and sync
+never touches user-owned files. No state file, no marker.
 
 `create-app` currently shells out to `agent:init`; agent selection becomes
 part of the scaffold interview. In interactive sessions a multi-select prompt
