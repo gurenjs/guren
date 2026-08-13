@@ -60,7 +60,7 @@ type RouteArgs<TName extends RouteName> =
 /** The `route()` function emitted into the runtime module. */
 export const RUNTIME_ROUTE_FUNCTION = `\
 export function route<TName extends RouteName>(name: TName, ...args: RouteArgs<TName>): string {
-  const definition = routeManifest[name]
+  const definition: { method: RouteMethod; path: RoutePath } | undefined = routeManifest[name]
   if (!definition) {
     throw new Error(\`Route [\${String(name)}] not defined.\`)
   }

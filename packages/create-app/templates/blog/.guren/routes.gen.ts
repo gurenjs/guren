@@ -48,7 +48,7 @@ type RouteArgs<TName extends RouteName> =
     : [params: RouteParams<TName>, query?: RouteQuery]
 
 export function route<TName extends RouteName>(name: TName, ...args: RouteArgs<TName>): string {
-  const definition = routeManifest[name]
+  const definition: { method: RouteMethod; path: RoutePath } | undefined = routeManifest[name]
   if (!definition) {
     throw new Error(`Route [${String(name)}] not defined.`)
   }
