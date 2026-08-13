@@ -407,19 +407,18 @@ export function registerWebRoutes(baseRouter: Router): void {
 
 ## Sanitized User Records
 
-`auth.user()` — and the cached user available right after `login()` or `attempt()` — never exposes credential material. `ModelUserProvider` strips the password column, the remember-token column, and any fields listed in the model's `static hidden` before the record leaves the auth layer:
+`auth.user()` — and the cached user available right after `login()` or `attempt()` — never exposes credential material. `ModelUserProvider` strips the password column, the remember-token column, and any fields the model marks as `hidden` before the record leaves the auth layer:
 
 ```ts
 export class User extends defineModel(users, {
   base: AuthenticatableModel,
   optionalOnCreate: ['passwordHash'],
   requireOnCreate: ['password'],
-}) {
-  static override hidden = ['passwordHash', 'rememberToken']
-}
+  hidden: ['passwordHash', 'rememberToken'],
+}) {}
 ```
 
-The `make:auth` scaffolder generates the user model with this `hidden` declaration out of the box.
+The `make:auth` scaffolder generates the user model with this `hidden` configuration out of the box. See [Hiding Fields](./database.md#hiding-fields) for the option and the still-supported `static hidden = [...]` form.
 
 Credential validation still runs on the raw database record internally, so login and remember-me tokens are unaffected — sanitization only changes what `auth.user()` exposes to application code.
 
@@ -446,13 +445,13 @@ user.email        // ✅ string
 user.passwordHash // ❌ compile error — stripped at runtime
 ```
 
-If your model hides additional fields via `static hidden`, or your credential columns use names outside the conventions (`password`, `passwordHash`, `password_hash`, `rememberToken`, `remember_token`), list them in the second type parameter:
+If your model hides additional fields via `hidden`, or your credential columns use names outside the conventions (`password`, `passwordHash`, `password_hash`, `rememberToken`, `remember_token`), list them in the second type parameter:
 
 ```ts
 type SafeUser = Sanitized<UserRecord, 'twoFactorSecret' | 'credentialDigest'>
 ```
 
-The runtime strips exactly the columns your provider is configured with plus the model's `static hidden` — a static type cannot see that configuration, so `Sanitized<T>` reflects the conventional names and relies on you to pass anything else. `guren audit` warns about sensitive columns missing from `static hidden`, which keeps the runtime side honest.
+The runtime strips exactly the columns your provider is configured with plus the model's `hidden` fields — a static type cannot see that configuration, so `Sanitized<T>` reflects the conventional names and relies on you to pass anything else. `guren audit` warns about sensitive columns missing from `hidden`, which keeps the runtime side honest.
 
 ## Remember Tokens
 

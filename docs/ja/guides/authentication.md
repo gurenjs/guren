@@ -405,19 +405,18 @@ export function registerWebRoutes(baseRouter: Router): void {
 
 ## サニタイズされたユーザーレコード
 
-`auth.user()`（および `login()` / `attempt()` 直後にキャッシュされるユーザー）が資格情報を露出することはありません。`ModelUserProvider` は、レコードが認証レイヤーを出る前に、パスワードカラム・remember トークンカラム・モデルの `static hidden` に列挙されたフィールドを除去します。
+`auth.user()`（および `login()` / `attempt()` 直後にキャッシュされるユーザー）が資格情報を露出することはありません。`ModelUserProvider` は、レコードが認証レイヤーを出る前に、パスワードカラム・remember トークンカラム・モデルが `hidden` に指定したフィールドを除去します。
 
 ```ts
 export class User extends defineModel(users, {
   base: AuthenticatableModel,
   optionalOnCreate: ['passwordHash'],
   requireOnCreate: ['password'],
-}) {
-  static override hidden = ['passwordHash', 'rememberToken']
-}
+  hidden: ['passwordHash', 'rememberToken'],
+}) {}
 ```
 
-`make:auth` スキャフォルダーは、この `hidden` 宣言を含むユーザーモデルを最初から生成します。
+`make:auth` スキャフォルダーは、この `hidden` 設定を含むユーザーモデルを最初から生成します。オプションと、引き続き使える `static hidden = [...]` の書き方については[フィールドの非表示](./database.md#フィールドの非表示)を参照してください。
 
 資格情報の検証は内部で生のデータベースレコードに対して行われるため、ログインや remember me の動作には影響しません。サニタイズが変えるのは、`auth.user()` がアプリケーションコードに公開する内容だけです。
 
@@ -444,13 +443,13 @@ user.email        // ✅ string
 user.passwordHash // ❌ コンパイルエラー — ランタイムで除去済み
 ```
 
-モデルの `static hidden` で追加のフィールドを隠している場合や、資格情報カラムが慣例名(`password`、`passwordHash`、`password_hash`、`rememberToken`、`remember_token`)以外の場合は、第2型引数に列挙します。
+モデルの `hidden` で追加のフィールドを隠している場合や、資格情報カラムが慣例名(`password`、`passwordHash`、`password_hash`、`rememberToken`、`remember_token`)以外の場合は、第2型引数に列挙します。
 
 ```ts
 type SafeUser = Sanitized<UserRecord, 'twoFactorSecret' | 'credentialDigest'>
 ```
 
-ランタイムが除去するのは「プロバイダーに設定されたカラム + モデルの `static hidden`」そのものです。静的型はこの設定を参照できないため、`Sanitized<T>` は慣例名を反映し、それ以外は第2型引数での指定に委ねます。`static hidden` に漏れている機微カラムは `guren audit` が警告するため、ランタイム側の正しさはそちらで担保できます。
+ランタイムが除去するのは「プロバイダーに設定されたカラム + モデルの `hidden` フィールド」そのものです。静的型はこの設定を参照できないため、`Sanitized<T>` は慣例名を反映し、それ以外は第2型引数での指定に委ねます。`hidden` に漏れている機微カラムは `guren audit` が警告するため、ランタイム側の正しさはそちらで担保できます。
 
 ## Remember トークン
 

@@ -58,7 +58,7 @@ export type DefaultSanitizedKeys =
  * conventional credential keys plus any extra keys passed as `Hidden`.
  *
  * The runtime strips exactly the *configured* password/remember-token
- * columns plus the model's `static hidden` — a static type cannot see
+ * columns plus the model's `hidden` fields — a static type cannot see
  * that configuration. If your columns use other names, or the model
  * hides additional fields, list them in `Hidden` explicitly. Only
  * meaningful for concrete record types (index-signature records like
