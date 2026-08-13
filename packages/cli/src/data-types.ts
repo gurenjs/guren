@@ -68,7 +68,9 @@ export async function generateDataTypes(
   let definitions: ResourceDefinition[]
   try {
     const files = await discoverResourceFiles(appRoot, resourcesDir)
-    definitions = await collectResourceDefinitions(appRoot, files, outputDirectory)
+    const collected = await collectResourceDefinitions(appRoot, files, outputDirectory)
+    definitions = collected.definitions
+    warnings.push(...collected.warnings)
   } catch {
     definitions = []
   }
@@ -126,18 +128,19 @@ async function collectResourceDefinitions(
   appRoot: string,
   files: string[],
   outputDirectory: string,
-): Promise<ResourceDefinition[]> {
+): Promise<{ definitions: ResourceDefinition[]; warnings: string[] }> {
   const ordered = files
     .map((file) => ({ file, relPath: toPosixRelative(appRoot, file) }))
     .sort((left, right) => (left.relPath < right.relPath ? -1 : left.relPath > right.relPath ? 1 : 0))
 
   const definitions: ResourceDefinition[] = []
+  const warnings: string[] = []
   for (const { file, relPath } of ordered) {
-    const extracted = await extractResourceType(file, outputDirectory, relPath)
+    const extracted = await extractResourceType(file, outputDirectory, relPath, warnings)
     if (extracted) definitions.push(extracted)
   }
 
-  return definitions
+  return { definitions, warnings }
 }
 
 /**
@@ -166,8 +169,10 @@ const RESERVED_WORDS = new Set([
  *
  * Three ways to be unemittable:
  *
- * - No `toArray()` type could be extracted (`rawType === null`). Silent, as it
- *   has always been: the shapes this recognises are a documented subset.
+ * - No `toArray()` type could be extracted (`rawType === null`). Already
+ *   warned about by {@link extractResourceType}, which is the only place that
+ *   knows *which* recognised shape the file missed and therefore what to tell
+ *   the author to change.
  * - The name is one TypeScript will not accept. A class name is always an
  *   identifier, but a module directory name is not — `modules/2fa/` qualifies
  *   to `2faInvoice` — and neither is safe from reserved words.
@@ -219,6 +224,7 @@ async function extractResourceType(
   filePath: string,
   outputDirectory: string,
   relPath: string,
+  warnings: string[],
 ): Promise<ResourceDefinition | null> {
   const source = await readFile(filePath, 'utf-8')
 
@@ -241,31 +247,149 @@ async function extractResourceType(
   const dataName = module ? `${pascalCase(module)}${baseName}` : baseName
   const common = { className, dataName, imports, module, filePath: relPath }
 
-  // Strategy 1: Explicit exported interface `export interface PostResourceData { ... }`
-  const interfaceMatch = source.match(
-    new RegExp(`export\\s+interface\\s+${baseName}(?:Resource)?Data\\s+(\\{[\\s\\S]*?\\n\\})`),
-  )
-  if (interfaceMatch) {
-    return { ...common, rawType: interfaceMatch[1] }
+  // Strategy 1: an interface named after the class, `interface PostResourceData { ... }`
+  const interfaceBody = readObjectTypeBody(source, `${baseName}(?:Resource)?Data`)
+  if (interfaceBody) {
+    return { ...common, rawType: interfaceBody }
   }
 
   // Strategy 2: Explicit return type on toArray(): `toArray(): SomeType {`
   const returnTypeMatch = source.match(/toArray\s*\(\s*\)\s*:\s*(\w+(?:Data)?)\s*\{/)
   if (returnTypeMatch) {
     const typeName = returnTypeMatch[1]
-    // Find the type/interface definition in the same file
-    const typeDefMatch = source.match(
-      new RegExp(`(?:export\\s+)?(?:interface|type)\\s+${typeName}\\s*(?:=\\s*|extends[^{]*)(\\{[\\s\\S]*?\\n\\})`),
-    )
-    if (typeDefMatch) {
-      return { ...common, rawType: typeDefMatch[1] }
+    const body = readObjectTypeBody(source, typeName)
+    if (body) {
+      return { ...common, rawType: body }
     }
+
+    // The annotation names a type this file does not hand over. Which of the
+    // two reasons it is decides what the author has to change, so say which:
+    // a declaration that is simply elsewhere is a different fix from one that
+    // is right here but is not an object type.
+    const declaredHere = new RegExp(`(?:interface|type)\\s+${typeName}\\b`, 'u').test(source)
+    warnings.push(
+      declaredHere
+        ? `Resource ${className} (${relPath}) annotates toArray(): ${typeName} and declares `
+          + `${typeName} in that file, but only an object type body can be copied into `
+          + `data.gen.ts — omitted. Write ${typeName} as \`interface ${typeName} { … }\` or `
+          + `\`type ${typeName} = { … }\`.`
+        : `Resource ${className} (${relPath}) annotates toArray(): ${typeName}, but no `
+          + `interface or type ${typeName} is declared in that file — omitted from data.gen.ts. `
+          + "Only the resource's own source is read, so move the declaration into it.",
+    )
+    return { ...common, rawType: null }
   }
 
   // The class is a Resource but none of the recognised shapes described its
-  // payload. Reported anyway, with no type: it still claims its class name,
-  // which is what stops a same-named twin elsewhere from resolving a hint.
+  // payload — the case an unannotated `toArray()` returning an object literal
+  // lands in. It type-checks and serves fine, so nothing else in the run will
+  // ever mention it; without this line the only symptom is a `Data` namespace
+  // that quietly lacks the member.
+  //
+  // Reported anyway, with no type: it still claims its class name, which is
+  // what stops a same-named twin elsewhere from resolving a hint.
+  warnings.push(
+    `Resource ${className} (${relPath}) has no toArray() return type to extract — omitted `
+    + `from data.gen.ts. Declare \`export interface ${baseName}ResourceData { … }\` in that `
+    + `file and annotate \`toArray(): ${baseName}ResourceData\`.`,
+  )
   return { ...common, rawType: null }
+}
+
+/**
+ * The body of `interface <name> { … }` / `type <name> = { … }`, declared
+ * anywhere in `source`, or `null` when the file declares no such object type.
+ *
+ * `namePattern` is spliced into a regex, so a caller may pass alternatives
+ * (`Post(?:Resource)?Data`) rather than probing one spelling at a time.
+ *
+ * The brace that opens the body has to be found by the pattern rather than by
+ * searching forward for the next `{`: a `type PostData = string` followed by
+ * the class declaration would otherwise hand back the class body.
+ */
+function readObjectTypeBody(source: string, namePattern: string): string | null {
+  const declaration = new RegExp(
+    // `[^{;]*` for the heritage clause, so `extends Record<string, unknown>`
+    // is stepped over; `;` bounds it so an aliasless declaration cannot run
+    // into a later statement's brace.
+    `(?:export\\s+)?(?:interface|type)\\s+(?:${namePattern})\\s*(?:=\\s*|extends[^{;]*)?\\{`,
+    'u',
+  )
+  const match = declaration.exec(source)
+  if (!match) return null
+
+  return readBraceBody(source, match.index + match[0].length - 1)
+}
+
+/**
+ * The `{ … }` starting at `openIndex`, matched by counting depth.
+ *
+ * Depth, not a delimiter: the predecessor regexes ended a body at the first
+ * `\n}`, which is neither necessary nor sufficient. A one-line
+ * `interface PostResourceData { id: number }` ran past its own closing brace
+ * and swallowed the class declaration below it — emitting a `data.gen.ts`
+ * that did not compile, the one failure mode dropping a definition exists to
+ * avoid — while a legitimately nested property forced a shape the convention
+ * never promised.
+ *
+ * Comments and string literals are stepped over rather than counted, because
+ * both routinely carry an unbalanced brace that is not structure. Returns
+ * `null` for an unterminated body, which is a file that would not compile
+ * either way.
+ */
+function readBraceBody(source: string, openIndex: number): string | null {
+  let depth = 0
+  let index = openIndex
+
+  while (index < source.length) {
+    const char = source[index]
+
+    if (char === '/' && source[index + 1] === '/') {
+      const lineEnd = source.indexOf('\n', index)
+      index = lineEnd === -1 ? source.length : lineEnd + 1
+      continue
+    }
+    if (char === '/' && source[index + 1] === '*') {
+      const commentEnd = source.indexOf('*/', index + 2)
+      index = commentEnd === -1 ? source.length : commentEnd + 2
+      continue
+    }
+    if (char === "'" || char === '"' || char === '`') {
+      index = skipStringLiteral(source, index)
+      continue
+    }
+
+    if (char === '{') {
+      depth += 1
+    } else if (char === '}') {
+      depth -= 1
+      if (depth === 0) return source.slice(openIndex, index + 1)
+    }
+    index += 1
+  }
+
+  return null
+}
+
+/** Index just past the string literal opening at `openIndex`. */
+function skipStringLiteral(source: string, openIndex: number): number {
+  const quote = source[openIndex]
+  let index = openIndex + 1
+
+  while (index < source.length) {
+    const char = source[index]
+    if (char === '\\') {
+      index += 2
+      continue
+    }
+    if (char === quote) return index + 1
+    // Only a template literal spans lines. Stopping at the newline keeps a
+    // lone apostrophe in prose from swallowing the rest of the file.
+    if (quote !== '`' && char === '\n') return index
+    index += 1
+  }
+
+  return source.length
 }
 
 function collectTypeImports(source: string, filePath: string): string[] {
