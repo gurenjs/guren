@@ -10,6 +10,7 @@ import {
   toPosixRelative,
 } from './discovery'
 import type { ParseCache } from './parse-cache'
+import { extractPathParamNames, PATH_PARAM_PATTERN } from './utils'
 import { check, type CheckResult } from './check-result'
 
 /**
@@ -44,75 +45,53 @@ const ROUTE_PATH_ARGUMENT: Record<string, number> = {
 }
 
 /**
- * One path segment that names a `:name*` parameter — the `/:slug*` shape —
- * or `null` for every other segment.
+ * The name Hono binds for the first `:name*` parameter in a path, or `null`
+ * when the path is fine.
  *
- * Detection and rewrite come out of the same read on purpose. Deriving the
- * corrected segment separately meant re-deciding, by string comparison,
- * whether the segment carried a constraint or a trailing `?`, and the two
- * reads had already disagreed: `/:slug*?` was reported and then handed back
- * to the user unchanged as its own fix.
+ * Read through the shared lexer rather than a rule of this file's own: a
+ * param starts only at a segment boundary, an attached `{constraint}` is
+ * consumed whole (including one level of nesting), and the label keeps a
+ * trailing `*` — which is the whole finding. `/files/:slug*` therefore reads
+ * as the parameter `slug*`, exactly as Hono registers it (`getPattern`,
+ * verified against hono 4.13.1): the route does not match `/files/a/b`, and
+ * `c.req.param('slug')` is undefined.
  *
- * Deliberately narrower than a path-param lexer: this asks a yes/no question
- * per segment rather than enumerating a path's parameter names, so it needs
- * none of the boundary and nesting rules a full lexer carries. The repo's
- * canonical one lives in `routes-types-fragments.ts` (mirrored into
- * @guren/inertia-client under a verbatim pin test) — derive from that if this
- * ever needs to answer more than "does this name end in a star?".
- *
- * The rule is Hono's own (`getPattern`, verified against hono 4.13.1): a
- * segment beginning `:` takes everything up to an optional `{constraint}` as
- * the parameter *name*, `[^{}]+`, with no special meaning for `*`. So
- * `/files/:slug*` registers a single-segment parameter literally named
- * `slug*` — it does not match `/files/a/b`, and `c.req.param('slug')` is
- * undefined.
- *
- * What must NOT match, and why the naive "does the segment contain `*`" test
- * is wrong: `:path{.+}`, `:path{.*}` and `:t{[0-9]{2}}` are legitimate
+ * What must NOT match, and why a rule of the form "does the segment contain
+ * `*`" is wrong: `:path{.+}`, `:path{.*}` and `:t{[0-9]{2}}` are legitimate
  * constrained parameters, and a bare `*` segment is Hono's real wildcard.
- * Only the name is examined, so all four are left alone.
- */
-function starSuffixedSegment(segment: string): { name: string; rewrite: string } | null {
-  if (!segment.startsWith(':')) return null
-
-  const brace = segment.indexOf('{')
-  const optional = brace === -1 && segment.endsWith('?')
-  const name = segment.slice(1, brace === -1 ? (optional ? -1 : undefined) : brace)
-  if (!name.endsWith('*')) return null
-
-  // A segment carrying both a star and a constraint (`:slug*{[a-z]+}`) has no
-  // single obvious rewrite, so it is left as written — the finding still names
-  // it, and the fallback half of the suggestion still applies.
-  const rewrite = brace === -1 ? `:${name.slice(0, -1)}{.+}${optional ? '?' : ''}` : segment
-  return { name, rewrite }
-}
-
-/**
- * The name Hono binds for the first `:name*` in a path, or `null` when the
- * path is fine. First rather than every one: the finding is phrased about a
- * single parameter, and the suggested path below fixes them all regardless.
+ * Only the label is examined, so all four are left alone.
+ *
+ * First rather than every one: the finding is phrased about a single
+ * parameter, and {@link withoutStarSuffixes} fixes them all regardless.
+ *
+ * Note what this check depends on: the shared pattern keeps the `*` as part
+ * of the label, so a change there that normalized it away would leave this
+ * silently reporting nothing. The detection tests fail on exactly that, which
+ * is the guard.
  */
 function firstStarSuffixedName(path: string): string | null {
-  for (const segment of path.split('/')) {
-    const found = starSuffixedSegment(segment)
-    if (found) return found.name
-  }
-  return null
+  return extractPathParamNames(path).find((name) => name.endsWith('*')) ?? null
 }
 
 /**
  * The path this one should have been, with every `:name*` rewritten to the
  * multi-segment form `:name{.+}`.
  *
- * Rebuilt from the split segments rather than patched by string replacement,
- * so a name appearing twice, or as a prefix of another, cannot rewrite the
- * wrong one.
+ * Driven by the same pattern that found the parameter, so detection and fix
+ * cannot disagree — they had, before this shared reading: `/:slug*?` was
+ * reported and then handed back unchanged as its own fix. Each token is
+ * replaced whole, so a name appearing twice, or as a prefix of another, cannot
+ * rewrite the wrong one.
+ *
+ * A parameter carrying both a star and a constraint (`:slug*{[a-z]+}`) has no
+ * single obvious rewrite, so it is left as written — the finding still names
+ * it, and the fallback half of the suggestion still applies.
  */
 function withoutStarSuffixes(path: string): string {
-  return path
-    .split('/')
-    .map((segment) => starSuffixedSegment(segment)?.rewrite ?? segment)
-    .join('/')
+  return path.replace(PATH_PARAM_PATTERN, (token: string, boundary: string, label: string) => {
+    if (!label.endsWith('*') || token.includes('{')) return token
+    return `${boundary}:${label.slice(0, -1)}{.+}${token.endsWith('?') ? '?' : ''}`
+  })
 }
 
 /** A route path literal found in a routes file. */
