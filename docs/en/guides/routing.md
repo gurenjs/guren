@@ -307,7 +307,7 @@ router.query('/posts/search', {
 
 The hint mirrors the JSON the controller builds: a bare class (`resource: PostResource`) for a single resource, a one-element array (`resource: [PostResource]`) for a collection, and a plain object for an envelope — `{ data: [PostResource] }` matches `this.json({ data: PostResource.collection(posts) })`. Nesting works to any depth.
 
-`guren codegen` resolves each class against `app/Http/Resources` and types the generated API client's `json()` with the assembled shape (`{ data: Data.Post[] }` here). Unlike `output`, nothing runs at request time — the hint is a declaration, checked only in the sense that codegen warns and leaves the response untyped if it names a Resource class it cannot find. When a route sets both, `output` wins: it is the one actually enforced.
+`guren codegen` resolves each class against `app/Http/Resources` — at the project root and inside every `modules/<name>/` — and types the generated API client's `json()` with the assembled shape (`{ data: Data.Post[] }` here). Unlike `output`, nothing runs at request time — the hint is a declaration, checked only in the sense that codegen warns and leaves the response untyped if it names a Resource class it cannot find. When a route sets both, `output` wins: it is the one actually enforced.
 
 > [!NOTE]
 > Every leaf of the hint must be a Resource class. An envelope that mixes Resources with plain typed objects — a paginated response's `meta` and `links`, for example — cannot be expressed yet; bind an `output` schema for those routes instead.

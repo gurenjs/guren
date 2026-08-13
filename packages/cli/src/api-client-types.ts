@@ -31,11 +31,14 @@ export interface RouteDefinitionLike {
 }
 
 /**
- * The subset of data-types' ResourceDefinition the client generator needs:
- * the class name a hint serializes to, and the `Data` namespace member it
- * resolves to (e.g. 'PostResource' → `Data.Post`).
+ * The subset of data-types' ResourceDefinition the client generator needs: the
+ * class name a hint serializes to, the `Data` member it resolves to (e.g.
+ * 'PostResource' → `Data.Post`, or `Data.BillingPost` under
+ * `modules/billing/`), and where it was declared so a warning can name the
+ * file. A `null` dataName is a class that exists but was not emitted.
  */
-export type ResourceTypeRef = Pick<ResourceDefinition, 'className' | 'dataName'>
+export type ResourceTypeRef =
+  Pick<ResourceDefinition, 'className' | 'dataName'> & Partial<Pick<ResourceDefinition, 'filePath'>>
 
 export interface GenerateApiClientOptions extends WriterOptions {
   appRoot?: string
@@ -81,20 +84,29 @@ export interface BuildApiClientOptions {
 }
 
 interface ResourceShapeContext {
-  dataNames: Map<string, string>
+  /** Class name → every Resource declaring it. Arity is what decides. */
+  declared: Map<string, ResourceTypeRef[]>
+  /** Hint leaves naming a Resource class nothing declares. */
   missing: Set<string>
+  /** Hint leaves naming a class that does not resolve to exactly one type. */
+  unresolved: Set<string>
   usedData: boolean
 }
 
 function resourceShapeToType(shape: ResourceResponseShape, context: ResourceShapeContext): string {
   if (typeof shape === 'string') {
-    const dataName = context.dataNames.get(shape)
-    if (!dataName) {
-      context.missing.add(shape)
+    const declared = context.declared.get(shape) ?? []
+    // A hint carries only the class name (`serializeResourceHint` in the
+    // router), so a name two app roots both declare cannot be attributed to
+    // either — guessing would type the response as the other one's payload.
+    // One declaration with no emitted type is the same refusal for a different
+    // reason, and data.gen's own warnings say which.
+    if (declared.length !== 1 || declared[0].dataName === null) {
+      ;(declared.length === 0 ? context.missing : context.unresolved).add(shape)
       return 'unknown'
     }
     context.usedData = true
-    return `Data.${dataName}`
+    return `Data.${declared[0].dataName}`
   }
 
   if (Array.isArray(shape)) {
@@ -107,6 +119,18 @@ function resourceShapeToType(shape: ResourceResponseShape, context: ResourceShap
   return entries.length > 0 ? `{ ${entries.join('; ')} }` : '{}'
 }
 
+function quoteNames(names: Iterable<string>): string {
+  return Array.from(names).map((name) => `"${name}"`).join(', ')
+}
+
+/** Names the candidates behind an unresolvable class name, by file when known. */
+function describeDeclarations(refs: ResourceTypeRef[]): string[] {
+  return refs.map((ref) => {
+    const type = ref.dataName === null ? 'no generated type' : `Data.${ref.dataName}`
+    return ref.filePath ? `${ref.filePath} → ${type}` : type
+  })
+}
+
 export function buildApiClientContent(
   definitions: RouteDefinitionLike[],
   options: BuildApiClientOptions = {},
@@ -115,7 +139,17 @@ export function buildApiClientContent(
     .filter((d): d is RouteDefinitionLike & { name: string } => Boolean(d.name))
     .sort((a, b) => a.name.localeCompare(b.name))
 
-  const dataNames = new Map((options.resources ?? []).map((r) => [r.className, r.dataName]))
+  // Resource class names are unique per app root but not across them: the
+  // project root and any `modules/<name>/` may each declare a `PostResource`.
+  // Grouping rather than keying by name is what lets arity, below, refuse the
+  // ones that cannot be attributed to a single declaration.
+  const declared = new Map<string, ResourceTypeRef[]>()
+  for (const resource of options.resources ?? []) {
+    const group = declared.get(resource.className)
+    if (group) group.push(resource)
+    else declared.set(resource.className, [resource])
+  }
+
   let importsData = false
 
   // `output` wins over `resource` when a route declares both: the schema is
@@ -124,16 +158,35 @@ export function buildApiClientContent(
     if (d.schemas?.output) return schemaToTypeString(d.schemas.output, { io: 'output' })
     if (d.resource === undefined) return undefined
 
-    const context: ResourceShapeContext = { dataNames, missing: new Set(), usedData: false }
+    const context: ResourceShapeContext = {
+      declared,
+      missing: new Set(),
+      unresolved: new Set(),
+      usedData: false,
+    }
     const rendered = resourceShapeToType(d.resource, context)
+    // All-or-nothing: a response typed around an unresolved leaf would assert
+    // a shape the server does not send. Untyped stays honest. Both sets are
+    // reported — a hint naming one unknown class and one ambiguous class has
+    // two things wrong with it, and fixing either alone leaves it untyped.
     if (context.missing.size > 0) {
-      // All-or-nothing: a response typed around an unresolved leaf would
-      // assert a shape the server does not send. Untyped stays honest.
       options.warnings?.push(
         `Route "${d.name}" declares a resource response hint referencing `
-        + `${Array.from(context.missing).map((n) => `"${n}"`).join(', ')}, `
-        + 'but no matching Resource class was found in app/Http/Resources — response left untyped.',
+        + `${quoteNames(context.missing)}, but no matching Resource class was found in `
+        + 'app/Http/Resources (at the project root or under modules/*) — response left untyped.',
       )
+    }
+    if (context.unresolved.size > 0) {
+      options.warnings?.push(
+        `Route "${d.name}" declares a resource response hint referencing `
+        + `${quoteNames(context.unresolved)}, which does not resolve to exactly one generated `
+        + `type (${Array.from(context.unresolved)
+          .flatMap((name) => describeDeclarations(declared.get(name) ?? []))
+          .join('; ')}) — a hint carries only the class name, so it cannot say which. `
+        + 'Response left untyped; see the data.gen.ts warnings above.',
+      )
+    }
+    if (context.missing.size > 0 || context.unresolved.size > 0) {
       return undefined
     }
     importsData ||= context.usedData
@@ -287,7 +340,8 @@ function isSameOrigin(url: string): boolean {
  * \`output\` schema type the response: \`json()\` on the returned \`Response\`
  * resolves to that schema's parsed shape. A \`resource\` response hint types
  * \`json()\` the same way from the \`Data\` types extracted out of
- * app/Http/Resources — declared, not validated: the server never checks the
+ * app/Http/Resources, at the project root and under modules/* — declared, not
+ * validated: the server never checks the
  * payload against it at runtime. Without either, \`json()\` resolves to
  * \`unknown\` — validate before trusting it. Either way the typed shape
  * describes the success body only: error statuses carry their own (a 422

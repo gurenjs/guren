@@ -2,6 +2,8 @@ import { spawn } from 'node:child_process'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { HmrContext, Logger, Plugin, ResolvedConfig, ViteDevServer } from 'vite'
+import { RESOURCES_DIR, toPosixRelative } from '../discovery'
+import { escapeRegExp } from '../utils'
 
 export interface RouteTypesPluginOptions {
   /**
@@ -51,7 +53,6 @@ export interface RouteTypesPluginOptions {
 const DEFAULT_EXECUTABLE = 'bun'
 const DEFAULT_WATCH_FILE = 'routes/web.ts'
 const DEFAULT_PAGES_DIR = 'resources/js/pages'
-const DEFAULT_RESOURCES_DIR = 'app/Http/Resources'
 // Fixed by convention across codegen and check (see cli/src/i18n-types.ts).
 const DEFAULT_LANG_DIR = 'lang'
 
@@ -64,7 +65,7 @@ function resolvePathOptions(options: RouteTypesPluginOptions) {
   return {
     watchFile: options.watchFile ?? DEFAULT_WATCH_FILE,
     pagesDir: options.pagesDir ?? DEFAULT_PAGES_DIR,
-    resourcesDir: options.resourcesDir ?? DEFAULT_RESOURCES_DIR,
+    resourcesDir: options.resourcesDir ?? RESOURCES_DIR,
   }
 }
 
@@ -181,6 +182,12 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
     const watchFile = resolve(root, paths.watchFile)
     const pagesDir = resolve(root, paths.pagesDir)
     const resourcesDir = resolve(root, paths.resourcesDir)
+    // Codegen scans the Resources directory at the project root AND inside
+    // every `modules/<name>/`, so watching only the root one leaves a module's
+    // Data types stale for the whole dev session with no signal. Matched by
+    // shape rather than by listing `modules/`, so a module created mid-session
+    // needs no restart.
+    const moduleResources = new RegExp(`^modules/[^/]+/${escapeRegExp(paths.resourcesDir)}(?:/|$)`, 'u')
     const langDir = resolve(root, DEFAULT_LANG_DIR)
     const changedFile = resolve(file)
 
@@ -188,6 +195,7 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
       changedFile === watchFile ||
       changedFile.startsWith(`${pagesDir}/`) || changedFile === pagesDir ||
       changedFile.startsWith(`${resourcesDir}/`) || changedFile === resourcesDir ||
+      moduleResources.test(toPosixRelative(root, changedFile)) ||
       // Codegen only reads lang/<locale>/*.json — other files under lang/
       // (notes, fixtures) never affect the generated union.
       (changedFile.startsWith(`${langDir}/`) && changedFile.endsWith('.json'))

@@ -26,12 +26,12 @@ describe('routeTypesPlugin CI skip', () => {
     return routeTypesPlugin({ executable: 'touch', args: [markerPath] }) as unknown as PluginHooks
   }
 
-  function hotUpdate(plugin: PluginHooks, modules: unknown[] = []): Promise<unknown> {
-    return plugin.handleHotUpdate({
-      file: join(root, 'routes/web.ts'),
-      server: { config: { root } },
-      modules,
-    })
+  function hotUpdate(
+    plugin: PluginHooks,
+    modules: unknown[] = [],
+    file = join(root, 'routes/web.ts'),
+  ): Promise<unknown> {
+    return plugin.handleHotUpdate({ file, server: { config: { root } }, modules })
   }
 
   beforeEach(async () => {
@@ -104,5 +104,54 @@ describe('routeTypesPlugin CI skip', () => {
     await hotUpdate(plugin)
 
     expect(existsSync(markerPath)).toBe(true)
+  })
+})
+
+/**
+ * What the watcher regenerates on has to keep up with what codegen scans:
+ * `generateDataTypes` fans out over `modules/<name>/app/Http/Resources`, so a
+ * watcher that saw only the project-root copy would leave a module's `Data`
+ * types stale for a whole `bun run dev` session, silently.
+ */
+describe('routeTypesPlugin watches module Resources', () => {
+  let root: string
+  let markerPath: string
+  let originalCi: string | undefined
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'guren-route-types-modules-'))
+    markerPath = join(root, 'codegen-ran')
+    originalCi = process.env.CI
+    delete process.env.CI
+  })
+
+  afterEach(async () => {
+    if (originalCi === undefined) delete process.env.CI
+    else process.env.CI = originalCi
+    await rm(root, { recursive: true, force: true })
+  })
+
+  async function touchedBy(relativePath: string): Promise<boolean> {
+    const plugin = routeTypesPlugin({ executable: 'touch', args: [markerPath] }) as unknown as PluginHooks
+    await plugin.handleHotUpdate({
+      file: join(root, relativePath),
+      server: { config: { root } },
+      modules: [],
+    })
+    return existsSync(markerPath)
+  }
+
+  it('regenerates for a Resource inside a module', async () => {
+    expect(await touchedBy('modules/billing/app/Http/Resources/InvoiceResource.ts')).toBe(true)
+  })
+
+  it('still regenerates for a Resource at the project root', async () => {
+    expect(await touchedBy('app/Http/Resources/PostResource.ts')).toBe(true)
+  })
+
+  it('ignores other files inside a module', async () => {
+    // Matched by shape, not by "anything under modules/" — a module's models
+    // and controllers do not feed any generated artifact.
+    expect(await touchedBy('modules/billing/app/Models/Invoice.ts')).toBe(false)
   })
 })

@@ -1,7 +1,6 @@
 import type { WriterOptions } from './utils'
 import { scaffoldFile } from './utils'
-
-const RESOURCES_DIR = 'app/Http/Resources'
+import { RESOURCES_DIR } from './discovery'
 
 function resourceTemplate(className: string, modelName: string): string {
   return `import { Resource } from '@guren/core'

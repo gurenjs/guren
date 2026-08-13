@@ -138,8 +138,132 @@ describe('buildApiClientContent', () => {
     expect(content).not.toContain("from './data.gen'")
     expect(warnings).toEqual([
       'Route "articles.index" declares a resource response hint referencing "GhostResource", '
-      + 'but no matching Resource class was found in app/Http/Resources — response left untyped.',
+      + 'but no matching Resource class was found in app/Http/Resources (at the project root '
+      + 'or under modules/*) — response left untyped.',
     ])
+  })
+
+  it('types a hint naming a Resource that lives in a module', () => {
+    const warnings: string[] = []
+    const content = buildApiClientContent(
+      [{
+        method: 'GET',
+        path: '/invoices',
+        name: 'invoices.index',
+        resource: { data: ['InvoiceResource'] },
+      }],
+      { resources: [{ className: 'InvoiceResource', dataName: 'BillingInvoice' }], warnings },
+    )
+
+    // Module resources are emitted under a qualified `Data` member, and the
+    // hint — which carries only the class name — has to find it there.
+    expect(content).toContain('response: { data: Array<Data.BillingInvoice> }')
+    expect(content).toContain("import type { Data } from './data.gen'")
+    expect(warnings).toEqual([])
+  })
+
+  it('leaves the response untyped and warns when two app roots declare the class name', () => {
+    const warnings: string[] = []
+    const content = buildApiClientContent(
+      [{
+        method: 'GET',
+        path: '/invoices',
+        name: 'invoices.index',
+        resource: 'InvoiceResource',
+      }],
+      {
+        resources: [
+          { className: 'InvoiceResource', dataName: 'BillingInvoice', filePath: 'modules/billing/app/Http/Resources/InvoiceResource.ts' },
+          { className: 'InvoiceResource', dataName: 'InventoryInvoice', filePath: 'modules/inventory/app/Http/Resources/InvoiceResource.ts' },
+        ],
+        warnings,
+      },
+    )
+
+    expect(content).toContain("  'invoices.index': {\n    method: 'GET'\n    path: '/invoices'\n  }")
+    expect(content).not.toContain("from './data.gen'")
+    expect(warnings).toEqual([
+      'Route "invoices.index" declares a resource response hint referencing "InvoiceResource", '
+      + 'which does not resolve to exactly one generated type '
+      + '(modules/billing/app/Http/Resources/InvoiceResource.ts → Data.BillingInvoice; '
+      + 'modules/inventory/app/Http/Resources/InvoiceResource.ts → Data.InventoryInvoice) — '
+      + 'a hint carries only the class name, so it cannot say which. '
+      + 'Response left untyped; see the data.gen.ts warnings above.',
+    ])
+  })
+
+  it('keeps every candidate when three app roots declare the class name', () => {
+    const warnings: string[] = []
+    buildApiClientContent(
+      [{ method: 'GET', path: '/invoices', name: 'invoices.index', resource: 'InvoiceResource' }],
+      {
+        resources: [
+          { className: 'InvoiceResource', dataName: 'BillingInvoice' },
+          { className: 'InvoiceResource', dataName: 'InventoryInvoice' },
+          { className: 'InvoiceResource', dataName: 'SalesInvoice' },
+        ],
+        warnings,
+      },
+    )
+
+    expect(warnings[0]).toContain('(Data.BillingInvoice; Data.InventoryInvoice; Data.SalesInvoice)')
+  })
+
+  it('refuses to resolve a class whose twin exists but was not emitted', () => {
+    const warnings: string[] = []
+    const content = buildApiClientContent(
+      [{ method: 'GET', path: '/posts', name: 'posts.index', resource: 'PostResource' }],
+      {
+        // What data-types reports when `modules/2fa/`'s PostResource is
+        // discovered but unemittable: the root one is NOT the only candidate,
+        // so typing the route as Data.Post would hand it the wrong payload.
+        resources: [
+          { className: 'PostResource', dataName: 'Post', filePath: 'app/Http/Resources/PostResource.ts' },
+          { className: 'PostResource', dataName: null, filePath: 'modules/2fa/app/Http/Resources/PostResource.ts' },
+        ],
+        warnings,
+      },
+    )
+
+    expect(content).toContain("  'posts.index': {\n    method: 'GET'\n    path: '/posts'\n  }")
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('modules/2fa/app/Http/Resources/PostResource.ts → no generated type')
+  })
+
+  it('refuses a lone class that was discovered but produced no type', () => {
+    const warnings: string[] = []
+    buildApiClientContent(
+      [{ method: 'GET', path: '/posts', name: 'posts.index', resource: 'PostResource' }],
+      { resources: [{ className: 'PostResource', dataName: null }], warnings },
+    )
+
+    // Not "no matching Resource class" — it exists, it just has no Data member.
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('does not resolve to exactly one generated type')
+  })
+
+  it('reports both an unknown and an unresolvable leaf of one hint', () => {
+    const warnings: string[] = []
+    buildApiClientContent(
+      [{
+        method: 'GET',
+        path: '/feed',
+        name: 'feed.index',
+        resource: { posts: ['PostResource'], ghost: 'GhostResource' },
+      }],
+      {
+        resources: [
+          { className: 'PostResource', dataName: 'Post' },
+          { className: 'PostResource', dataName: 'BlogPost' },
+        ],
+        warnings,
+      },
+    )
+
+    // Fixing either alone still leaves the route untyped, so both are said.
+    expect(warnings).toHaveLength(2)
+    expect(warnings[0]).toContain('"GhostResource"')
+    expect(warnings[1]).toContain('"PostResource"')
   })
 })
 

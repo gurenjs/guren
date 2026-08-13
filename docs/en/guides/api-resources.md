@@ -330,6 +330,12 @@ router.query('/posts/search', {
 
 The generated API client then types `json()` for that route as `{ data: Data.Post[] }`. See [Resource Response Hints](./routing.md#resource-response-hints) for the hint syntax.
 
+### Resources inside modules
+
+Codegen scans `app/Http/Resources` at the project root and inside every `modules/<name>/` directory. A module's Resource is emitted under a name qualified with its module, so `modules/billing/app/Http/Resources/InvoiceResource.ts` becomes `Data.BillingInvoice`. The qualifier is always applied, never only on collision — that way a type's name depends solely on where its class lives, and adding a second `InvoiceResource` elsewhere cannot rename one the frontend already imports.
+
+A response hint carries only the Resource's class name, so two app roots that both declare an `InvoiceResource` make the hint unresolvable: codegen warns, naming both files, and leaves that route's response untyped rather than guessing which module's payload the route returns. Rename one of the classes to resolve it.
+
 ## Best Practices
 
 1. **Keep resources focused** - One resource per model transformation
