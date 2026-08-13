@@ -63,6 +63,7 @@ import { runCheck, renderCheckReport } from './check'
 import { runAudit, renderAuditReport } from './audit'
 import { generateGuidelines } from './guidelines'
 import { installAgentHarness, type AgentHarnessResult } from './agent-harness'
+import { AGENT_TARGETS, parseTargetList, type AgentTarget } from './agent-targets'
 import { makeFeature } from './make-feature'
 import { parseFieldsString } from './fields'
 import { generateKeyValue, writeKeyToEnv } from './key-generate'
@@ -958,7 +959,7 @@ const codegenCommand = defineCommand({
       appRoot: args.app,
       ...writerOptions,
     })
-    const { outputPath: dataOutputPath } = await generateDataTypes({
+    const { outputPath: dataOutputPath, definitions: resourceDefinitions } = await generateDataTypes({
       appRoot: args.app,
       ...writerOptions,
     })
@@ -966,10 +967,13 @@ const codegenCommand = defineCommand({
       appRoot: args.app,
       ...writerOptions,
     })
-    const { outputPath: apiClientOutputPath } = await generateApiClientTypes(
+    const { outputPath: apiClientOutputPath, warnings: apiClientWarnings } = await generateApiClientTypes(
       definitions,
-      { appRoot: args.app, ...writerOptions },
+      { appRoot: args.app, resources: resourceDefinitions, ...writerOptions },
     )
+    for (const warning of apiClientWarnings) {
+      consola.warn(warning)
+    }
     consola.success(`Route types generated at ${outputPath}`)
     consola.success(`Route helpers generated at ${runtimeOutputPath}`)
     consola.success(`Data types generated at ${dataOutputPath}`)
@@ -1998,24 +2002,45 @@ function reportAgentHarnessResult(result: AgentHarnessResult): void {
   if (result.skipped.length > 0) {
     consola.info(`Skipped ${result.skipped.length} existing file(s): ${result.skipped.join(', ')}`)
   }
+  for (const hint of result.mcpMergeHints) {
+    consola.info(
+      `${hint.path} already exists, so it was left alone. Add the Guren MCP server to it yourself:\n${hint.snippet}`,
+    )
+  }
   if (result.mcpEndpointNotEnabled) {
     consola.info(
-      '.mcp.json points at the dev server MCP endpoint, which is opt-in. ' +
+      'The agent MCP config points at the dev server MCP endpoint, which is opt-in. ' +
       'Add `GUREN_MCP=1` to your `dev` script, or start the server with `GUREN_MCP=1 bun run dev`.',
     )
+  }
+}
+
+const AGENT_TARGETS_HELP = `Comma-separated agent targets: ${AGENT_TARGETS.join(', ')}, or "all".`
+
+function parseTargetArg(raw: string): AgentTarget[] {
+  try {
+    return parseTargetList(raw)
+  } catch (error) {
+    // a typo is a usage problem: usage + message, not a stack trace
+    throw new UsageError(error instanceof Error ? error.message : String(error))
   }
 }
 
 const agentInitCommand = defineCommand({
   meta: {
     name: 'agent:init',
-    description: 'Install the AI agent harness (CLAUDE.md, .claude/ rules, skills, hooks, .mcp.json).',
+    description:
+      'Install the AI agent harness (CLAUDE.md/AGENTS.md, rules, skills, hooks, MCP config) for the selected agents.',
   },
   args: {
     force: {
       type: 'boolean',
       alias: 'f',
-      description: 'Overwrite existing files, including CLAUDE.md and .claude/settings.json.',
+      description: 'Overwrite existing files, including CLAUDE.md, AGENTS.md, and .claude/settings.json.',
+    },
+    target: {
+      type: 'string',
+      description: `${AGENT_TARGETS_HELP} Default: claude.`,
     },
     app: {
       type: 'string',
@@ -2027,6 +2052,7 @@ const agentInitCommand = defineCommand({
       cwd: args.app,
       mode: 'init',
       force: Boolean(args.force),
+      targets: args.target ? parseTargetArg(args.target) : undefined,
     })
     reportAgentHarnessResult(result)
     consola.success('AI agent harness is ready. Update it later with `bunx guren agent:sync`.')
@@ -2036,9 +2062,14 @@ const agentInitCommand = defineCommand({
 const agentSyncCommand = defineCommand({
   meta: {
     name: 'agent:sync',
-    description: 'Update framework-managed agent harness files (.claude/ rules, skills, agents, hooks).',
+    description:
+      'Update framework-managed agent harness files (rules, skills, agents, hooks) for every installed agent.',
   },
   args: {
+    target: {
+      type: 'string',
+      description: `${AGENT_TARGETS_HELP} Default: every target detected on disk.`,
+    },
     app: {
       type: 'string',
       description: 'Application root directory.',
@@ -2048,6 +2079,7 @@ const agentSyncCommand = defineCommand({
     const result = await installAgentHarness({
       cwd: args.app,
       mode: 'sync',
+      targets: args.target ? parseTargetArg(args.target) : undefined,
     })
     reportAgentHarnessResult(result)
     consola.success('Agent harness synced to the latest framework version.')

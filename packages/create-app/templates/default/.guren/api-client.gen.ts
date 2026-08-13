@@ -142,7 +142,10 @@ function isSameOrigin(url: string): boolean {
  * Routes that bind a `body` schema type the `body` option with that schema's
  * request shape; routes without one accept `unknown`. Routes that bind an
  * `output` schema type the response: `json()` on the returned `Response`
- * resolves to that schema's parsed shape. Without one it resolves to
+ * resolves to that schema's parsed shape. A `resource` response hint types
+ * `json()` the same way from the `Data` types extracted out of
+ * app/Http/Resources — declared, not validated: the server never checks the
+ * payload against it at runtime. Without either, `json()` resolves to
  * `unknown` — validate before trusting it. Either way the typed shape
  * describes the success body only: error statuses carry their own (a 422
  * from validation is `{ errors: ... }`), so check `ok` before reading it.

@@ -308,6 +308,18 @@ export function escapeSingleQuoted(value: string): string {
     .replace(/\u2029/gu, '\\u2029')
 }
 
+const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/u
+
+/**
+ * Renders a property key for a generated object or type literal: bare when it
+ * is a valid identifier, single-quoted otherwise. Shared by the codegen
+ * emitters for the same reason as {@link escapeSingleQuoted} \u2014 what counts as
+ * an emittable key should have one spelling.
+ */
+export function quoteObjectKey(key: string): string {
+  return IDENTIFIER_RE.test(key) ? key : `'${escapeSingleQuoted(key)}'`
+}
+
 /**
  * One Hono route-path param token, as Hono's own parser lexes it: a param
  * starts only at a segment boundary (`/:name` — `/status/foo:bar` is a
@@ -321,13 +333,6 @@ export const PATH_PARAM_PATTERN = /(^|\/):([A-Za-z0-9_-]+)(?:\{[^}]*\}(?:[^/]*\}
 /** Param labels in path order, with constraints and modifiers dropped. */
 export function extractPathParamNames(path: string): string[] {
   return Array.from(path.matchAll(PATH_PARAM_PATTERN), (match) => match[2]!)
-}
-
-const VALID_JS_IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/u
-
-/** Render an object key for generated code, quoting it when it is not a bare identifier. */
-export function quoteObjectKey(key: string): string {
-  return VALID_JS_IDENTIFIER.test(key) ? key : `'${escapeSingleQuoted(key)}'`
 }
 
 /**
@@ -477,8 +482,6 @@ export function resourceName(value: string): { className: string; fileName: stri
 export function ensureSuffix(name: string, suffix: string): string {
   return name.endsWith(suffix) ? name : `${name}${suffix}`
 }
-
-const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/u
 
 /**
  * Builds a `pages.foo.bar` accessor for a scaffolded controller, matching the

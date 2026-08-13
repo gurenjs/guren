@@ -158,7 +158,7 @@ describe('GUREN_API_DIGEST', () => {
   for (const [ruleFile, tokens] of Object.entries(tokensByRuleFile)) {
     it(`stays in sync with the ${ruleFile} rule file`, async () => {
       const ruleText = await readFile(
-        new URL(`../templates/agent/.claude/rules/${ruleFile}`, import.meta.url),
+        new URL(`../templates/agent/core/rules/${ruleFile}`, import.meta.url),
         'utf8',
       )
       for (const token of tokens) {

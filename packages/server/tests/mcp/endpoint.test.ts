@@ -18,8 +18,9 @@ afterEach(() => {
 
 describe('MCP_ENDPOINT_PATH', () => {
   test('matches the URL shipped in .mcp.json templates', () => {
-    // Pins the contract: changing this constant requires updating
-    // packages/cli/templates/agent/.mcp.json and examples/blog/.mcp.json.
+    // Pins the contract: changing this constant requires updating the MCP
+    // client templates under packages/cli/templates/agent/targets/*/ (five
+    // files carry the URL) and examples/blog/.mcp.json.
     expect(MCP_ENDPOINT_PATH).toBe('/_guren/mcp')
   })
 })

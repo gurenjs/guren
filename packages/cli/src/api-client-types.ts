@@ -6,9 +6,11 @@
  * separate frontend applications.
  */
 import { resolve } from 'node:path'
-import { escapeSingleQuoted as escapeSingleQuotes, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
+import type { ResourceResponseShape } from '@guren/core'
+import { escapeSingleQuoted as escapeSingleQuotes, quoteObjectKey, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 import { PATH_PARAM_RUNTIME_HELPERS, PATH_PARAM_TYPE_HELPERS } from './routes-types-fragments'
 import { schemaToTypeString } from './schema-type-extractor'
+import type { ResourceDefinition } from './data-types'
 
 export interface RouteDefinitionLike {
   method: string
@@ -20,11 +22,30 @@ export interface RouteDefinitionLike {
     body?: unknown
     output?: unknown
   }
+  /**
+   * Serialized response hint from `RouteContractOptions.resource`: a Resource
+   * class name, a single-element array (a collection), or an envelope object
+   * of either.
+   */
+  resource?: ResourceResponseShape
 }
+
+/**
+ * The subset of data-types' ResourceDefinition the client generator needs:
+ * the class name a hint serializes to, and the `Data` namespace member it
+ * resolves to (e.g. 'PostResource' → `Data.Post`).
+ */
+export type ResourceTypeRef = Pick<ResourceDefinition, 'className' | 'dataName'>
 
 export interface GenerateApiClientOptions extends WriterOptions {
   appRoot?: string
   outputFile?: string
+  /**
+   * Resource classes discovered by `generateDataTypes()`. Routes declaring a
+   * `resource` hint resolve their response types against these — without
+   * them every hint is "unknown Resource" and stays untyped.
+   */
+  resources?: ResourceTypeRef[]
 }
 
 const DEFAULT_OUTPUT_FILE = '.guren/api-client.gen.ts'
@@ -38,26 +59,91 @@ export interface ApiRouteEntry {
 export async function generateApiClientTypes(
   definitions: RouteDefinitionLike[],
   options: GenerateApiClientOptions = {},
-): Promise<{ outputPath: string }> {
+): Promise<{ outputPath: string; warnings: string[] }> {
   const appRoot = resolveAppRoot(options)
   const outputFile = resolve(appRoot, options.outputFile ?? DEFAULT_OUTPUT_FILE)
 
-  const module = buildApiClientContent(definitions)
+  // Returned rather than logged (same contract as generateOpenApiSpec), so
+  // programmatic callers — the MCP codegen tool above all — can surface them
+  // to whoever asked for the regeneration.
+  const warnings: string[] = []
+  const module = buildApiClientContent(definitions, { resources: options.resources, warnings })
 
   const outputPath = await writeGeneratedFileIn(appRoot, outputFile, module, { force: options.force })
 
-  return { outputPath }
+  return { outputPath, warnings }
 }
 
-export function buildApiClientContent(definitions: RouteDefinitionLike[]): string {
+export interface BuildApiClientOptions {
+  resources?: ResourceTypeRef[]
+  /** Sink for per-route notes about hints that could not be resolved. */
+  warnings?: string[]
+}
+
+interface ResourceShapeContext {
+  dataNames: Map<string, string>
+  missing: Set<string>
+  usedData: boolean
+}
+
+function resourceShapeToType(shape: ResourceResponseShape, context: ResourceShapeContext): string {
+  if (typeof shape === 'string') {
+    const dataName = context.dataNames.get(shape)
+    if (!dataName) {
+      context.missing.add(shape)
+      return 'unknown'
+    }
+    context.usedData = true
+    return `Data.${dataName}`
+  }
+
+  if (Array.isArray(shape)) {
+    return `Array<${resourceShapeToType(shape[0], context)}>`
+  }
+
+  const entries = Object.entries(shape).map(
+    ([key, value]) => `${quoteObjectKey(key)}: ${resourceShapeToType(value, context)}`,
+  )
+  return entries.length > 0 ? `{ ${entries.join('; ')} }` : '{}'
+}
+
+export function buildApiClientContent(
+  definitions: RouteDefinitionLike[],
+  options: BuildApiClientOptions = {},
+): string {
   const named = definitions
     .filter((d): d is RouteDefinitionLike & { name: string } => Boolean(d.name))
     .sort((a, b) => a.name.localeCompare(b.name))
 
+  const dataNames = new Map((options.resources ?? []).map((r) => [r.className, r.dataName]))
+  let importsData = false
+
+  // `output` wins over `resource` when a route declares both: the schema is
+  // the one actually enforced at runtime, the hint is only a claim.
+  const responseTypeOf = (d: RouteDefinitionLike & { name: string }): string | undefined => {
+    if (d.schemas?.output) return schemaToTypeString(d.schemas.output, { io: 'output' })
+    if (d.resource === undefined) return undefined
+
+    const context: ResourceShapeContext = { dataNames, missing: new Set(), usedData: false }
+    const rendered = resourceShapeToType(d.resource, context)
+    if (context.missing.size > 0) {
+      // All-or-nothing: a response typed around an unresolved leaf would
+      // assert a shape the server does not send. Untyped stays honest.
+      options.warnings?.push(
+        `Route "${d.name}" declares a resource response hint referencing `
+        + `${Array.from(context.missing).map((n) => `"${n}"`).join(', ')}, `
+        + 'but no matching Resource class was found in app/Http/Resources — response left untyped.',
+      )
+      return undefined
+    }
+    importsData ||= context.usedData
+    return rendered
+  }
+
   const routeEntries = named
     .map((d) => {
       const bodyType = d.schemas?.body ? schemaToTypeString(d.schemas.body, { io: 'input' }) : undefined
-      const responseType = d.schemas?.output ? schemaToTypeString(d.schemas.output, { io: 'output' }) : undefined
+      const responseType = responseTypeOf(d)
       let entry = `  '${escapeSingleQuotes(d.name)}': {
     method: '${d.method}'
     path: '${escapeSingleQuotes(d.path)}'`
@@ -68,9 +154,13 @@ export function buildApiClientContent(definitions: RouteDefinitionLike[]): strin
     })
     .join('\n')
 
+  // The Data import resolves against the sibling data.gen.ts — both artifacts
+  // land in .guren/ and `guren codegen` always writes data.gen first.
+  const dataImport = importsData ? "\nimport type { Data } from './data.gen'\n" : ''
+
   return `// Generated — DO NOT EDIT
 // Run \`guren codegen\` to regenerate.
-
+${dataImport}
 /**
  * Typed API route registry.
  * Use with \`createApiClient<ApiRoutes>()\` for end-to-end type safety.
@@ -195,7 +285,10 @@ function isSameOrigin(url: string): boolean {
  * Routes that bind a \`body\` schema type the \`body\` option with that schema's
  * request shape; routes without one accept \`unknown\`. Routes that bind an
  * \`output\` schema type the response: \`json()\` on the returned \`Response\`
- * resolves to that schema's parsed shape. Without one it resolves to
+ * resolves to that schema's parsed shape. A \`resource\` response hint types
+ * \`json()\` the same way from the \`Data\` types extracted out of
+ * app/Http/Resources — declared, not validated: the server never checks the
+ * payload against it at runtime. Without either, \`json()\` resolves to
  * \`unknown\` — validate before trusting it. Either way the typed shape
  * describes the success body only: error statuses carry their own (a 422
  * from validation is \`{ errors: ... }\`), so check \`ok\` before reading it.
