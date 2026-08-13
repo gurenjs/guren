@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Generated from routes/web.ts — DO NOT EDIT
 // Run `guren codegen` to regenerate.
 
@@ -7,8 +8,8 @@ export const routeManifest = {
 
 export type RouteManifest = typeof routeManifest
 export type RouteName = keyof RouteManifest
-export type RouteMethod = RouteManifest[RouteName]['method']
-export type RoutePath = RouteManifest[RouteName]['path']
+export type RouteMethod = [RouteName] extends [never] ? string : RouteManifest[RouteName]['method']
+export type RoutePath = [RouteName] extends [never] ? string : RouteManifest[RouteName]['path']
 
 type PrimitiveQueryValue = string | number | boolean | null | undefined
 type QueryValue = PrimitiveQueryValue | readonly PrimitiveQueryValue[]
@@ -21,19 +22,21 @@ type PathParamKeys<TPath extends string> =
     : TPath extends `${string}:${infer Param}`
       ? NormalizeParamKey<Param>
       : never
-
-export type RouteParams<TName extends RouteName> =
-  [PathParamKeys<RouteManifest[TName]['path']>] extends [never]
+type HasPathParams<TPath extends string> = [PathParamKeys<TPath>] extends [never] ? false : true
+type PathParamsOf<TPath extends string> =
+  HasPathParams<TPath> extends false
     ? Record<string, never>
-    : { [TKey in PathParamKeys<RouteManifest[TName]['path']>]: string | number }
+    : { [TKey in PathParamKeys<TPath>]: string | number }
+
+export type RouteParams<TName extends RouteName> = PathParamsOf<RouteManifest[TName]['path']>
 
 type RouteArgs<TName extends RouteName> =
-  [PathParamKeys<RouteManifest[TName]['path']>] extends [never]
+  HasPathParams<RouteManifest[TName]['path']> extends false
     ? [query?: RouteQuery]
     : [params: RouteParams<TName>, query?: RouteQuery]
 
 export function route<TName extends RouteName>(name: TName, ...args: RouteArgs<TName>): string {
-  const definition = routeManifest[name]
+  const definition: { method: RouteMethod; path: RoutePath } | undefined = routeManifest[name]
   if (!definition) {
     throw new Error(`Route [${String(name)}] not defined.`)
   }

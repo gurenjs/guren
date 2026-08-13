@@ -1,9 +1,9 @@
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import ts from 'typescript'
-import { assertWorkspaceBuilt } from './helpers'
+import { assertWorkspaceBuilt, checkTypes, COLD_TSC_TIMEOUT } from './helpers'
 import { buildTranslationTypesContent } from '../src/i18n-types'
 
 /**
@@ -98,25 +98,8 @@ afterAll(async () => {
   await rm(dir, { recursive: true, force: true })
 })
 
-// Each check() builds a full tsc program over the built .d.ts surface. On a
-// warm TypeScript cache that takes a few seconds, but in a fresh worktree
-// (cold node_modules, no incremental state) a single probe has been measured
-// at 10–25s normally and 70s right after a full monorepo build — far past
-// bun:test's 5s default, which made both tests time out rather than fail.
-// check() is synchronous, so a timeout cannot interrupt it anyway; the limit
-// only needs to sit above the slowest observed cold start, not near it.
-const COLD_TSC_TIMEOUT = 180_000
-
 function check(rootNames: string[]): string[] {
-  const program = ts.createProgram(rootNames, compilerOptions)
-  return ts.getPreEmitDiagnostics(program).map((diagnostic) => {
-    const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, ' ')
-    if (!diagnostic.file || diagnostic.start === undefined) {
-      return `TS${diagnostic.code}: ${message}`
-    }
-    const { line } = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start)
-    return `${basename(diagnostic.file.fileName)}:${line + 1} TS${diagnostic.code}: ${message}`
-  })
+  return checkTypes(rootNames, compilerOptions)
 }
 
 describe('generated translation key augmentation', () => {

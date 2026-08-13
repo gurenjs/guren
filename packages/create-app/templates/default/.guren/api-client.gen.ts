@@ -8,6 +8,8 @@
  * `body` is the *request* shape — what you send. Coercing schemas are rendered
  * as they travel: `z.coerce.date()` is a `string` here, not the `Date` the
  * controller ends up with. `response` is the parsed shape you get back.
+ * Params are not stored on the entries: they are derived from each entry's
+ * `path` literal, the same string the server routes on.
  */
 export interface ApiRoutes {
   // No named routes found
@@ -17,21 +19,67 @@ export type ApiRouteName = keyof ApiRoutes
 
 export type ApiRouteMethod<T extends ApiRouteName> = ApiRoutes[T]['method']
 export type ApiRoutePath<T extends ApiRouteName> = ApiRoutes[T]['path']
-export type ApiRouteParams<T extends ApiRouteName> = ApiRoutes[T]['params']
 
-type HasParams<T extends ApiRouteName> =
-  [keyof ApiRoutes[T]['params']] extends [never] ? false : true
+type NormalizeParamKey<TValue extends string> = TValue extends `${infer Key}?` ? Key : TValue
+type PathParamKeys<TPath extends string> =
+  TPath extends `${string}:${infer Param}/${infer Rest}`
+    ? NormalizeParamKey<Param> | PathParamKeys<`/${Rest}`>
+    : TPath extends `${string}:${infer Param}`
+      ? NormalizeParamKey<Param>
+      : never
+type HasPathParams<TPath extends string> = [PathParamKeys<TPath>] extends [never] ? false : true
+type PathParamsOf<TPath extends string> =
+  HasPathParams<TPath> extends false
+    ? Record<string, never>
+    : { [TKey in PathParamKeys<TPath>]: string | number }
 
-export type ApiRequestOptions<T extends ApiRouteName> =
-  HasParams<T> extends true
-    ? { params: ApiRouteParams<T>; body?: unknown; query?: Record<string, unknown> }
-    : { params?: never; body?: unknown; query?: Record<string, unknown> }
+export type ApiRouteParams<T extends ApiRouteName> = PathParamsOf<ApiRoutePath<T>>
+
+// The request body type a route declares through its bound schema — `unknown`
+// for routes without one.
+type BodyOf<TRoute> = TRoute extends { body: infer TBody } ? TBody : unknown
+
+// The parsed shape a route declares through its bound output schema —
+// `unknown` for routes without one.
+type ResponseOf<TRoute> = TRoute extends { response: infer TResponse } ? TResponse : unknown
+
+// The runtime object is the plain fetch `Response`; only `json()` is narrowed
+// to the route's declared response shape.
+export interface TypedResponse<TData> extends Response {
+  json(): Promise<TData>
+}
+
+// Params derive from the path literal, so nothing about how the entries above
+// are emitted can silently flip `request()`'s call arity. Deliberately not
+// distributed over a union route name (the conditional checks
+// `HasPathParams<...>`, never a bare type parameter): the union of paths
+// yields the union of their param keys, so an un-narrowed name requires every
+// member's params — substituting a param a member's path lacks is a runtime
+// no-op, while the reverse (accepting one member's empty params) would send a
+// path with its `:param` unresolved.
+type RequestOptionsOf<TRoute extends { path: string }> =
+  HasPathParams<TRoute['path']> extends false
+    ? { params?: never; body?: BodyOf<TRoute>; query?: Record<string, unknown> }
+    : { params: PathParamsOf<TRoute['path']>; body?: BodyOf<TRoute>; query?: Record<string, unknown> }
+
+// Param-less routes may omit the options argument entirely; the same
+// predicate that shapes the options decides the arity.
+type RequestArgsOf<TRoute extends { path: string }> =
+  HasPathParams<TRoute['path']> extends false
+    ? [options?: RequestOptionsOf<TRoute>]
+    : [options: RequestOptionsOf<TRoute>]
+
+export type ApiRequestOptions<T extends ApiRouteName> = RequestOptionsOf<ApiRoutes[T]>
 
 // The wire contract these mirror is owned by Guren's CSRF middleware: it
 // writes the XSRF-TOKEN cookie and reads either header name. Change them
 // together.
 const XSRF_COOKIE_NAME = 'XSRF-TOKEN'
 const XSRF_HEADER_NAME = 'X-XSRF-TOKEN'
+// QUERY (RFC 10008) is deliberately NOT listed even though the server's CSRF
+// default skips it: the redundant token header is harmless there, and keeping
+// it is what makes a server that opts QUERY into protection (the middleware's
+// `methods` option) work with this client unchanged.
 const CSRF_SAFE_METHODS = ['GET', 'HEAD', 'OPTIONS']
 const CSRF_HEADER_NAMES = [XSRF_HEADER_NAME.toLowerCase(), 'x-csrf-token']
 
@@ -86,6 +134,14 @@ function isSameOrigin(url: string): boolean {
  * Cookies follow the `credentials` option (`'same-origin'` by default; use
  * `'include'` cross-origin, with a CORS setup that allows it).
  *
+ * Routes that bind a `body` schema type the `body` option with that schema's
+ * request shape; routes without one accept `unknown`. Routes that bind an
+ * `output` schema type the response: `json()` on the returned `Response`
+ * resolves to that schema's parsed shape. Without one it resolves to
+ * `unknown` — validate before trusting it. Either way the typed shape
+ * describes the success body only: error statuses carry their own (a 422
+ * from validation is `{ errors: ... }`), so check `ok` before reading it.
+ *
  * @example
  * ```typescript
  * import type { ApiRoutes } from '@/.guren/api-client.gen'
@@ -95,26 +151,41 @@ function isSameOrigin(url: string): boolean {
  * const post = await client.request('posts.show', { params: { id: 1 } })
  * ```
  */
-export function createApiClient<TRoutes extends Record<string, { method: string; path: string; params: unknown }>>(
+// Token-based substitution shared with the route manifest module: whole
+// `:param` tokens are replaced by key lookup, so a key the path lacks is a
+// true no-op — the property the union-name rule above relies on — and a
+// param name that prefixes another (`:id` vs `:identifier`) cannot corrupt
+// it the way a per-key `path.replace(':key', ...)` loop would.
+function substituteParams(path: string, params?: Record<string, string | number>): string {
+  if (!params) {
+    return path
+  }
+
+  return path.replace(/:([A-Za-z0-9_-]+)/gu, (match, key) => {
+    if (!Object.prototype.hasOwnProperty.call(params, key)) {
+      return match
+    }
+
+    return encodeURIComponent(String(params[key]))
+  })
+}
+
+// The mapped-object constraint (rather than `Record<...>`) is what lets the
+// generated `ApiRoutes` interface satisfy it — interfaces have no implicit
+// index signature, so `Record<string, ...>` would reject them.
+export function createApiClient<TRoutes extends { [K in keyof TRoutes]: { method: string; path: string } }>(
   config: { baseUrl: string; headers?: Record<string, string>; credentials?: RequestInit['credentials'] },
 ) {
   return {
     async request<TName extends keyof TRoutes & string>(
       name: TName,
-      ...args: [keyof TRoutes[TName]['params']] extends [never]
-        ? [options?: { body?: unknown; query?: Record<string, unknown> }]
-        : [options: { params: TRoutes[TName]['params']; body?: unknown; query?: Record<string, unknown> }]
-    ): Promise<Response> {
+      ...args: RequestArgsOf<TRoutes[TName]>
+    ): Promise<TypedResponse<ResponseOf<TRoutes[TName]>>> {
       const route = (routes as Record<string, { method: string; path: string }>)[name]
       if (!route) throw new Error(`Route [${name}] not defined.`)
 
-      const opts = (args as unknown[])[0] as { params?: Record<string, unknown>; body?: unknown; query?: Record<string, unknown> } | undefined
-      let path = route.path
-      if (opts?.params) {
-        for (const [key, value] of Object.entries(opts.params)) {
-          path = path.replace(`:${key}`, encodeURIComponent(String(value)))
-        }
-      }
+      const opts = (args as unknown[])[0] as { params?: Record<string, string | number>; body?: unknown; query?: Record<string, unknown> } | undefined
+      const path = substituteParams(route.path, opts?.params)
 
       let url = `${config.baseUrl}${path}`
       if (opts?.query) {

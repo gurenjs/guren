@@ -67,6 +67,7 @@ export type {
   SoftDeletesStatic,
   WhereOperator,
   WhereCondition,
+  WhereGroupCallback,
   SimpleCondition,
   GroupCondition,
   ORMAdapterAdvanced,

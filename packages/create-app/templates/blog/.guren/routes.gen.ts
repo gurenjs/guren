@@ -11,6 +11,7 @@ export const routeManifest = {
   'posts.destroy': { method: 'DELETE', path: '/posts/:id' },
   'posts.edit': { method: 'GET', path: '/posts/:id/edit' },
   'posts.index': { method: 'GET', path: '/posts' },
+  'posts.search': { method: 'QUERY', path: '/posts/search' },
   'posts.show': { method: 'GET', path: '/posts/:id' },
   'posts.store': { method: 'POST', path: '/posts' },
   'posts.update': { method: 'PUT', path: '/posts/:id' },
@@ -36,19 +37,21 @@ type PathParamKeys<TPath extends string> =
     : TPath extends `${string}:${infer Param}`
       ? NormalizeParamKey<Param>
       : never
-
-export type RouteParams<TName extends RouteName> =
-  [PathParamKeys<RouteManifest[TName]['path']>] extends [never]
+type HasPathParams<TPath extends string> = [PathParamKeys<TPath>] extends [never] ? false : true
+type PathParamsOf<TPath extends string> =
+  HasPathParams<TPath> extends false
     ? Record<string, never>
-    : { [TKey in PathParamKeys<RouteManifest[TName]['path']>]: string | number }
+    : { [TKey in PathParamKeys<TPath>]: string | number }
+
+export type RouteParams<TName extends RouteName> = PathParamsOf<RouteManifest[TName]['path']>
 
 type RouteArgs<TName extends RouteName> =
-  [PathParamKeys<RouteManifest[TName]['path']>] extends [never]
+  HasPathParams<RouteManifest[TName]['path']> extends false
     ? [query?: RouteQuery]
     : [params: RouteParams<TName>, query?: RouteQuery]
 
 export function route<TName extends RouteName>(name: TName, ...args: RouteArgs<TName>): string {
-  const definition = routeManifest[name]
+  const definition: { method: RouteMethod; path: RoutePath } | undefined = routeManifest[name]
   if (!definition) {
     throw new Error(`Route [${String(name)}] not defined.`)
   }
@@ -75,6 +78,7 @@ export const routes = {
     destroy: (params: RouteParams<'posts.destroy'>, query?: RouteQuery) => route('posts.destroy', params, query),
     edit: (params: RouteParams<'posts.edit'>, query?: RouteQuery) => route('posts.edit', params, query),
     index: (query?: RouteQuery) => route('posts.index', query),
+    search: (query?: RouteQuery) => route('posts.search', query),
     show: (params: RouteParams<'posts.show'>, query?: RouteQuery) => route('posts.show', params, query),
     store: (query?: RouteQuery) => route('posts.store', query),
     update: (params: RouteParams<'posts.update'>, query?: RouteQuery) => route('posts.update', params, query)

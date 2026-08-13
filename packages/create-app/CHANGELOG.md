@@ -1,5 +1,12 @@
 # create-guren-app
 
+## 1.7.2
+
+### Patch Changes
+
+- Update scaffolded `@guren/*` dependency ranges to the versions shipped in this release.
+- The scaffolded `bin/serve.ts` now delegates the busy-port walk to `Application.listen()` instead of retrying around it. Behaviour is unchanged — walk in development, fail fast in production or with `GUREN_STRICT_PORT=1`, never walk off `PORT=0` — but the port the server reports binding now comes from the one place that knows it.
+
 ## 1.7.1
 
 ### Patch Changes

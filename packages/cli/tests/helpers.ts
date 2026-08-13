@@ -2,8 +2,9 @@ import { mock } from 'bun:test'
 import { consola as realConsola } from 'consola'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
-import { dirname, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
+import ts from 'typescript'
 
 const repoRoot = resolve(import.meta.dir, '../../..')
 
@@ -79,11 +80,10 @@ export async function linkInstalledPackage(
 /**
  * The `db/schema.ts` a fresh app starts from, per dialect. Kept in the shape
  * `create-guren-app` scaffolds so the patchers are exercised against what
- * users actually have on disk — notably, MySQL apps import their builders
- * from `drizzle-orm/mysql-core`, never from the PostgreSQL-first
- * `@guren/orm/drizzle` subpath.
+ * users actually have on disk — each dialect imports its builders from its
+ * own `@guren/orm/drizzle/<dialect>` barrel.
  */
-export const PG_SCHEMA_FIXTURE = `import { pgTable, serial, text, timestamp } from '@guren/orm/drizzle'
+export const PG_SCHEMA_FIXTURE = `import { pgTable, serial, text, timestamp } from '@guren/orm/drizzle/pg'
 
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),
@@ -93,7 +93,7 @@ export const users = pgTable('users', {
 })
 `
 
-export const MYSQL_SCHEMA_FIXTURE = `import { mysqlTable, int, varchar, timestamp } from 'drizzle-orm/mysql-core'
+export const MYSQL_SCHEMA_FIXTURE = `import { mysqlTable, int, varchar, timestamp } from '@guren/orm/drizzle/mysql'
 
 export const users = mysqlTable('users', {
   id: int('id').primaryKey().autoincrement(),
@@ -103,7 +103,7 @@ export const users = mysqlTable('users', {
 })
 `
 
-export const SQLITE_SCHEMA_FIXTURE = `import { sqliteTable, integer, text } from 'drizzle-orm/sqlite-core'
+export const SQLITE_SCHEMA_FIXTURE = `import { sqliteTable, integer, text } from '@guren/orm/drizzle/sqlite'
 
 export const users = sqliteTable('users', {
   id: integer('id').primaryKey({ autoIncrement: true }),
@@ -339,6 +339,33 @@ export function assertWorkspaceBuilt(artifacts: string[]): void {
       ...missing.map((artifact) => `  missing ${relative(repoRoot, artifact)}`),
     ].join('\n'),
   )
+}
+
+// Each checkTypes() call builds a full tsc program. On a warm TypeScript
+// cache that takes a few seconds, but in a fresh worktree (cold node_modules,
+// no incremental state) a single probe has been measured at 10–25s normally
+// and 70s right after a full monorepo build — far past bun:test's 5s default.
+// checkTypes() is synchronous, so a timeout cannot interrupt it anyway; the
+// limit only needs to sit above the slowest observed cold start, not near it.
+export const COLD_TSC_TIMEOUT = 180_000
+
+/**
+ * Type-check `rootNames` in-process and return each diagnostic as a
+ * `file:line TSxxxx: message` string — the compile gate for generated output.
+ * An accepted `@ts-expect-error` probe surfaces as TS2578, so zero diagnostics
+ * proves both polarities: valid usage compiled AND every bad-usage probe
+ * errored.
+ */
+export function checkTypes(rootNames: string[], compilerOptions: ts.CompilerOptions): string[] {
+  const program = ts.createProgram(rootNames, compilerOptions)
+  return ts.getPreEmitDiagnostics(program).map((diagnostic) => {
+    const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, ' ')
+    if (!diagnostic.file || diagnostic.start === undefined) {
+      return `TS${diagnostic.code}: ${message}`
+    }
+    const { line } = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start)
+    return `${basename(diagnostic.file.fileName)}:${line + 1} TS${diagnostic.code}: ${message}`
+  })
 }
 
 /** Spawn the CLI bin as a subprocess and return its exit code. */

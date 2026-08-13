@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { addImport, addProvider, hasImport, hasAuthProvider, ensureDrizzleImports, ensureMysqlImports, ensureNamedImports, ensureSqliteImports } from './patch-helpers'
+import { addImport, addProvider, hasImport, hasAuthProvider, ensureMysqlImports, ensureNamedImports, ensurePgImports, ensureSqliteImports } from './patch-helpers'
 
 describe('patch-helpers', () => {
   let tempDir: string
@@ -239,35 +239,47 @@ const app = new Application()`
     })
   })
 
-  describe('ensureDrizzleImports', () => {
+  describe('ensurePgImports', () => {
     it('should add missing imports when no Drizzle import exists', () => {
       const content = `const x = 1\n`
-      const result = ensureDrizzleImports(content, ['pgTable', 'serial', 'text'])
+      const result = ensurePgImports(content, ['pgTable', 'serial', 'text'])
 
-      expect(result).toContain("import { pgTable, serial, text } from '@guren/orm/drizzle'")
+      expect(result).toContain("import { pgTable, serial, text } from '@guren/orm/drizzle/pg'")
       expect(result).toContain('const x = 1')
     })
 
     it('should merge into existing Drizzle import', () => {
-      const content = `import { pgTable, serial } from '@guren/orm/drizzle'\n\nexport const posts = pgTable('posts', {})\n`
-      const result = ensureDrizzleImports(content, ['pgTable', 'serial', 'text', 'timestamp'])
+      const content = `import { pgTable, serial } from '@guren/orm/drizzle/pg'\n\nexport const posts = pgTable('posts', {})\n`
+      const result = ensurePgImports(content, ['pgTable', 'serial', 'text', 'timestamp'])
 
-      expect(result).toContain("import { pgTable, serial, text, timestamp } from '@guren/orm/drizzle'")
+      expect(result).toContain("import { pgTable, serial, text, timestamp } from '@guren/orm/drizzle/pg'")
       expect(result).not.toContain("import { pgTable, serial }")
     })
 
     it('should not modify content when all imports already present', () => {
-      const content = `import { pgTable, serial, text, timestamp } from '@guren/orm/drizzle'\n\nexport const posts = pgTable('posts', {})\n`
-      const result = ensureDrizzleImports(content, ['pgTable', 'serial', 'text', 'timestamp'])
+      const content = `import { pgTable, serial, text, timestamp } from '@guren/orm/drizzle/pg'\n\nexport const posts = pgTable('posts', {})\n`
+      const result = ensurePgImports(content, ['pgTable', 'serial', 'text', 'timestamp'])
 
       expect(result).toBe(content)
     })
 
     it('should return content unchanged when needed list is empty', () => {
       const content = `const x = 1\n`
-      const result = ensureDrizzleImports(content, [])
+      const result = ensurePgImports(content, [])
 
       expect(result).toBe(content)
+    })
+
+    // Apps scaffolded before the dialect barrels import from the mixed
+    // `@guren/orm/drizzle` (or, for sqlite/mysql, `drizzle-orm/<dialect>-core`
+    // — the mechanism is identical). Names already in scope count as present;
+    // only genuinely new builders arrive via the barrel.
+    it('should add only the missing builders for a pre-barrel app', () => {
+      const legacy = `import { pgTable, serial, text, timestamp } from '@guren/orm/drizzle'\n\nexport const posts = pgTable('posts', {})\n`
+      const result = ensurePgImports(legacy, ['pgTable', 'serial', 'text', 'timestamp', 'boolean'])
+
+      expect(result).toContain("import { boolean } from '@guren/orm/drizzle/pg'")
+      expect(result).toContain("import { pgTable, serial, text, timestamp } from '@guren/orm/drizzle'")
     })
   })
 
@@ -276,20 +288,20 @@ const app = new Application()`
       const content = `const x = 1\n`
       const result = ensureSqliteImports(content, ['sqliteTable', 'integer', 'text'])
 
-      expect(result).toContain("import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'")
+      expect(result).toContain("import { integer, sqliteTable, text } from '@guren/orm/drizzle/sqlite'")
       expect(result).toContain('const x = 1')
     })
 
     it('should merge into existing SQLite import', () => {
-      const content = `import { sqliteTable, integer } from 'drizzle-orm/sqlite-core'\n\nexport const users = sqliteTable('users', {})\n`
+      const content = `import { sqliteTable, integer } from '@guren/orm/drizzle/sqlite'\n\nexport const users = sqliteTable('users', {})\n`
       const result = ensureSqliteImports(content, ['sqliteTable', 'integer', 'text'])
 
-      expect(result).toContain("import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'")
+      expect(result).toContain("import { integer, sqliteTable, text } from '@guren/orm/drizzle/sqlite'")
       expect(result).not.toContain("import { sqliteTable, integer }")
     })
 
     it('should not modify content when all imports already present', () => {
-      const content = `import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'\n\nexport const users = sqliteTable('users', {})\n`
+      const content = `import { integer, sqliteTable, text } from '@guren/orm/drizzle/sqlite'\n\nexport const users = sqliteTable('users', {})\n`
       const result = ensureSqliteImports(content, ['sqliteTable', 'integer', 'text'])
 
       expect(result).toBe(content)
@@ -305,13 +317,13 @@ const app = new Application()`
 
   describe('ensureMysqlImports', () => {
     // The header `create-guren-app --db mysql` scaffolds.
-    const scaffoldedSchema = `import { mysqlTable, int, varchar, timestamp } from 'drizzle-orm/mysql-core'\n\nexport const users = mysqlTable('users', {})\n`
+    const scaffoldedSchema = `import { mysqlTable, int, varchar, timestamp } from '@guren/orm/drizzle/mysql'\n\nexport const users = mysqlTable('users', {})\n`
 
     it('should add missing imports when no MySQL import exists', () => {
       const content = `const x = 1\n`
       const result = ensureMysqlImports(content, ['mysqlTable', 'int', 'varchar'])
 
-      expect(result).toContain("import { int, mysqlTable, varchar } from 'drizzle-orm/mysql-core'")
+      expect(result).toContain("import { int, mysqlTable, varchar } from '@guren/orm/drizzle/mysql'")
       expect(result).toContain('const x = 1')
     })
 
@@ -319,7 +331,7 @@ const app = new Application()`
       const result = ensureMysqlImports(scaffoldedSchema, ['mysqlTable', 'int', 'timestamp', 'boolean'])
 
       expect(result).toContain(
-        "import { boolean, int, mysqlTable, timestamp, varchar } from 'drizzle-orm/mysql-core'",
+        "import { boolean, int, mysqlTable, timestamp, varchar } from '@guren/orm/drizzle/mysql'",
       )
       // One import line, not a second one appended alongside it.
       expect(result.match(/^import /gmu)).toHaveLength(1)
@@ -338,12 +350,11 @@ const app = new Application()`
       expect(result).toBe(content)
     })
 
-    // Documents why the mysql scaffold must not import from
-    // `@guren/orm/drizzle`: the merge is not module-scoped, so a same-named
-    // builder already in scope from another dialect satisfies the requirement
-    // and the MySQL one is never imported. Scoping the match per module would
-    // be an improvement — update this test rather than treating it as a
-    // regression.
+    // Documents that the merge is not module-scoped: a same-named builder
+    // already in scope from another module satisfies the requirement, so a
+    // pre-barrel app is left untouched when nothing is missing. Scoping the
+    // match per module would be an improvement — update this test rather than
+    // treating it as a regression.
     it('should not re-import a name another module already brought into scope', () => {
       const mixed = `import { mysqlTable, int, varchar, timestamp } from '@guren/orm/drizzle'\n\nexport const users = mysqlTable('users', {})\n`
       const result = ensureMysqlImports(mixed, ['mysqlTable', 'int', 'varchar', 'timestamp'])

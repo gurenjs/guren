@@ -22,7 +22,9 @@ export function isPageId(value: string): value is PageId {
  * Auto-extracted Props types from page components.
  */
 export interface PagePropsMap {
-  'Home': Record<string, unknown>
+  'Home': {
+  message: string
+}
 }
 
 export type InferPageProps<TId extends PageId> =
@@ -43,5 +45,5 @@ function defineGeneratedPage<TId extends string, TProps extends PagePropsRecord 
 }
 
 export const pages = {
-  Home: defineGeneratedPage('Home', pageManifest['Home'])
+  Home: defineGeneratedPage<'Home', PagePropsMap['Home']>('Home', pageManifest['Home'])
 } as const

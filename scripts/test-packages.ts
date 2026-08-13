@@ -16,6 +16,8 @@
 // Positional arguments select packages by directory name or package name.
 // Everything after a bare `--` is forwarded to `bun test` verbatim.
 
+import { closeSync, mkdtempSync, openSync, readSync, rmSync, writeSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { collectPackages, parseArgs, repoRoot, selectPackages } from './workspace-packages.ts'
@@ -104,10 +106,82 @@ const testArgs = [
 
 console.log(`[test] ${targets.map((pkg) => pkg.name).join(', ')}`)
 
+// On Linux the child's stdout/stderr go to temp files, pumped back to this
+// process's own fds — NOT inherited pipes. Under `--isolate` every test file
+// gets a fresh globals context, and Bun re-creates process.stderr lazily per
+// context as a WriteStream whose fast path registers fd 2 with epoll. When
+// fd 2 is a pipe (any CI runner), that registration intermittently collides
+// with one another sink still holds and the construction dies with "EEXIST:
+// file already exists, epoll_ctl" — uncatchably: it surfaces as an "Unhandled
+// error between tests", kills the whole file mid-load, and the summary says
+// "N tests failed:" while naming none. It cannot be defused from inside the
+// test process either: reading, defineProperty-ing or even delete-ing
+// process.stderr reifies the lazy property first, constructing the exact
+// stream whose construction is the hazard (each variant verified on Bun
+// 1.3.14). A regular file is the one stdio target epoll cannot register, so
+// redirecting removes the race structurally. macOS keeps inherit: kqueue has
+// no such failure mode, and a local TTY keeps its colors.
+const redirectStdio = process.platform === 'linux'
+
+if (!redirectStdio) {
+  const proc = Bun.spawn([process.execPath, ...testArgs], {
+    cwd: repoRoot,
+    stdout: 'inherit',
+    stderr: 'inherit',
+  })
+  process.exit(await proc.exited)
+}
+
+// One fd per channel, opened read-write: the child inherits a duplicate for
+// its writes while this process pread()s the same descriptor at explicit
+// offsets. Reopening the path for reading would work too, but a second open
+// of a just-created path is a textbook time-of-check/time-of-use shape.
+const stdioDir = mkdtempSync(join(tmpdir(), 'guren-test-stdio-'))
+const channels = [
+  { fd: openSync(join(stdioDir, 'stdout.log'), 'w+'), offset: 0, targetFd: 1 },
+  { fd: openSync(join(stdioDir, 'stderr.log'), 'w+'), offset: 0, targetFd: 2 },
+]
+
+// Forwarded with synchronous reads and writes on raw fds: this process's own
+// process.stdout/stderr are the same lazy WriteStreams the redirect exists to
+// avoid, so the pump must not touch them.
+const chunk = Buffer.alloc(65536)
+function pump(): void {
+  for (const channel of channels) {
+    for (;;) {
+      const bytes = readSync(channel.fd, chunk, 0, chunk.length, channel.offset)
+      if (bytes <= 0) break
+      channel.offset += bytes
+      let written = 0
+      while (written < bytes) {
+        try {
+          written += writeSync(channel.targetFd, chunk, written, bytes - written)
+        } catch (error) {
+          // EAGAIN: our own stdio can be a full non-blocking pipe — give its
+          // reader a beat instead of spinning hot. Anything else is
+          // unwritable output; drop it rather than wedge the run.
+          if ((error as NodeJS.ErrnoException).code === 'EAGAIN') Bun.sleepSync(1)
+          else written = bytes
+        }
+      }
+    }
+  }
+}
+
 const proc = Bun.spawn([process.execPath, ...testArgs], {
   cwd: repoRoot,
-  stdout: 'inherit',
-  stderr: 'inherit',
+  stdout: channels[0]!.fd,
+  stderr: channels[1]!.fd,
 })
 
-process.exit(await proc.exited)
+const pumpTimer = setInterval(pump, 50)
+const exitCode = await proc.exited
+clearInterval(pumpTimer)
+pump()
+
+for (const channel of channels) {
+  closeSync(channel.fd)
+}
+rmSync(stdioDir, { recursive: true, force: true })
+
+process.exit(exitCode)
