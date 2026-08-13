@@ -379,16 +379,15 @@ function resolveDatabaseFilename(): string {
 
 ### データのクリーンアップ
 
-ほとんどのスイートでは、テスト専用ファイルによる分離だけで十分です。`config/database.ts` がすでにエクスポートしている `resetDatabase()` / `migrateDatabase()` を `beforeEach` で使い、クリーンな状態にリセットしましょう。
+ほとんどのスイートでは、テスト専用ファイルによる分離だけで十分です。`config/database.ts` がすでにエクスポートしている `resetDatabase()` を `beforeEach` で使い、クリーンな状態にリセットしましょう。この関数はすべてのテーブルを削除したあとマイグレーションを再適用します（`guren db:reset` と同じ最終状態）。そのため、リセット直後からテーブルをそのままクエリできます。
 
 ```typescript
 import { describe, it, expect, beforeEach } from 'bun:test'
-import { resetDatabase, migrateDatabase } from '@/config/database'
+import { resetDatabase } from '@/config/database'
 
 describe('User モデル', () => {
   beforeEach(async () => {
-    await resetDatabase()   // すべてのテーブルを削除
-    await migrateDatabase() // マイグレーションを最初から再適用
+    await resetDatabase() // 全テーブルを削除してマイグレーションを再適用
   })
 
   it('ユーザーを作成する', async () => {
@@ -415,7 +414,7 @@ interface DatabaseConnection {
 }
 ```
 
-Guren の SQLite アダプターはこの `DatabaseConnection` をそのまま提供しません — `config/database.ts` の `getDatabase()` が解決するのは内部の Drizzle インスタンスであり、このインターフェースとは形が異なります。そのため、これらのヘルパーを使うにはアダプターを自分で書き、テスト実行前に `setTestDatabase()` へ渡す必要があります。**同一の接続でなければならない**という制約があるのは `useDatabaseTransactions()` だけです — `beforeEach` でトランザクションを開始し `afterEach` でロールバックするため、同じファイルへ独立に開いた 2 本目の接続では 1 本目の接続で行った書き込みが見えず、ロールバックもされません。`useTruncateTables()` にはこの制約はありません — `DELETE FROM` は即座にコミットされる操作なので、同じデータベースファイルへの接続であればどれを使ってもモデル側から見える行を削除できます。アダプターの配線が過剰だと感じる場合は、上記の `resetDatabase()` / `migrateDatabase()` パターンの方がシンプルで、この問題自体を回避できます。
+Guren の SQLite アダプターはこの `DatabaseConnection` をそのまま提供しません — `config/database.ts` の `getDatabase()` が解決するのは内部の Drizzle インスタンスであり、このインターフェースとは形が異なります。そのため、これらのヘルパーを使うにはアダプターを自分で書き、テスト実行前に `setTestDatabase()` へ渡す必要があります。**同一の接続でなければならない**という制約があるのは `useDatabaseTransactions()` だけです — `beforeEach` でトランザクションを開始し `afterEach` でロールバックするため、同じファイルへ独立に開いた 2 本目の接続では 1 本目の接続で行った書き込みが見えず、ロールバックもされません。`useTruncateTables()` にはこの制約はありません — `DELETE FROM` は即座にコミットされる操作なので、同じデータベースファイルへの接続であればどれを使ってもモデル側から見える行を削除できます。アダプターの配線が過剰だと感じる場合は、上記の `resetDatabase()` パターンの方がシンプルで、この問題自体を回避できます。
 
 ### HTTP テスト
 

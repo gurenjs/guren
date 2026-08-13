@@ -209,16 +209,15 @@ Tests read and write `./data/guren.test.db` by default — a separate file from 
 
 ### Cleaning Up Between Tests
 
-For most suites, the separate test-database file is isolation enough — reset it back to a clean slate in `beforeEach` using the `resetDatabase()`/`migrateDatabase()` helpers your `config/database.ts` already exports:
+For most suites, the separate test-database file is isolation enough — reset it back to a clean slate in `beforeEach` using the `resetDatabase()` helper your `config/database.ts` already exports. It drops every table and re-applies migrations, the same end state `guren db:reset` leaves behind, so your tables are ready to query straight after:
 
 ```ts
 import { describe, test, expect, beforeEach } from 'bun:test'
-import { resetDatabase, migrateDatabase } from '@/config/database'
+import { resetDatabase } from '@/config/database'
 
 describe('User Model', () => {
   beforeEach(async () => {
-    await resetDatabase()   // drops every table
-    await migrateDatabase() // re-applies migrations from scratch
+    await resetDatabase() // drops every table, then re-applies migrations
   })
 
   test('creates a user', async () => {
@@ -245,7 +244,7 @@ interface DatabaseConnection {
 }
 ```
 
-Guren's SQLite adapter doesn't hand you a ready-made `DatabaseConnection` — `getDatabase()` from `config/database.ts` resolves to the underlying Drizzle instance, not this interface — so using these helpers means writing a small adapter yourself and passing it to `setTestDatabase()` before your tests run. `useDatabaseTransactions()` specifically **must wrap the same connection your models write through**: it begins a transaction on `beforeEach` and rolls it back on `afterEach`, and a second, independently-opened connection to the same file won't see (or roll back) writes made via the first one. `useTruncateTables()` has no such requirement — a `DELETE FROM` on any connection to the same database file removes the rows your models see, since it commits immediately rather than participating in a shared transaction. If the adapter plumbing sounds like more than your suite needs, the `resetDatabase()`/`migrateDatabase()` pattern above is simpler and sidesteps the whole question.
+Guren's SQLite adapter doesn't hand you a ready-made `DatabaseConnection` — `getDatabase()` from `config/database.ts` resolves to the underlying Drizzle instance, not this interface — so using these helpers means writing a small adapter yourself and passing it to `setTestDatabase()` before your tests run. `useDatabaseTransactions()` specifically **must wrap the same connection your models write through**: it begins a transaction on `beforeEach` and rolls it back on `afterEach`, and a second, independently-opened connection to the same file won't see (or roll back) writes made via the first one. `useTruncateTables()` has no such requirement — a `DELETE FROM` on any connection to the same database file removes the rows your models see, since it commits immediately rather than participating in a shared transaction. If the adapter plumbing sounds like more than your suite needs, the `resetDatabase()` pattern above is simpler and sidesteps the whole question.
 
 ## Faking Services
 
