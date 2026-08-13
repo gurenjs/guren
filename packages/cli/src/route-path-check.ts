@@ -207,8 +207,9 @@ export interface RoutePathCheckOptions {
  *
  * Findings only: a `pass` per route path would bury every other result under
  * one line per route. A `warn` rather than a `fail` because a parameter
- * genuinely named `slug*` is legal, if unlikely — and plain `guren check`
- * does not gate on exit code anyway, so this cannot redden an app's CI.
+ * genuinely named `slug*` is legal, if unlikely. Not `advisory`, though — the
+ * same class as an unmounted route registrar, so `check --ci` gates on it, and
+ * an app carrying one goes red there until the path is fixed.
  */
 export async function checkRoutePathParams(options: RoutePathCheckOptions): Promise<CheckResult[]> {
   const { cwd, cache, files } = options

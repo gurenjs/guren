@@ -1006,6 +1006,23 @@ export class User extends defineModel(users, {
     expect(denied).toBeUndefined()
   })
 })
+
+/**
+ * Init a repo at `dir` with everything committed, so `getChangedFiles`
+ * starts from a clean baseline; returns a runner for further git commands.
+ */
+function initGitRepo(dir: string): (...args: string[]) => void {
+  const git = (...args: string[]): void => {
+    spawnSync('git', args, { cwd: dir, stdio: 'ignore' })
+  }
+  git('init', '-b', 'main')
+  git('config', 'user.email', 'test@example.com')
+  git('config', 'user.name', 'Test')
+  git('add', '.')
+  git('commit', '-m', 'initial')
+  return git
+}
+
 describe('route registrar wiring', () => {
   /** Every `route-registrar:` finding, keyed by the file it names. */
   function wiring(report: CheckReport): Map<string, CheckResult> {
@@ -1631,22 +1648,6 @@ export function registerRoutes(router: Router): void {
     expect(finding!.suggestion).toContain('Add to routes/api.ts')
   })
 
-  /**
-   * Init a repo at `dir` with everything committed, so `getChangedFiles`
-   * starts from a clean baseline; returns a runner for further git commands.
-   */
-  function initGitRepo(dir: string): (...args: string[]) => void {
-    const git = (...args: string[]): void => {
-      spawnSync('git', args, { cwd: dir, stdio: 'ignore' })
-    }
-    git('init', '-b', 'main')
-    git('config', 'user.email', 'test@example.com')
-    git('config', 'user.name', 'Test')
-    git('add', '.')
-    git('commit', '-m', 'initial')
-    return git
-  }
-
   // The edit hook runs `runCheck({ changed: true })` on every save of a
   // controller, model, or page — none of which can move this answer, and all
   // of which would otherwise re-parse routes/ to re-derive it.
@@ -1880,6 +1881,79 @@ export function registerWebRoutes(router: Router): void {
 
     expect(modifiers(report)).toEqual([])
   })
+
+  // The edit hook runs `runCheck({ changed: true })` on every save, so this
+  // path matters more than the unfiltered one — and it is the path where a
+  // finding can vanish silently, since the file set comes from three
+  // different producers and each POSIX-relative path has to match what git
+  // reports for its file to be looked at at all.
+  it('reports a :name* added to either a project or a module routes file under --changed', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-route-path-changed-')
+
+    try {
+      await writeWorkspaceFiles(workspace.dir, {
+        'routes/web.ts': entryWith(`  router.get('/', [HomeController, 'index'])`),
+        'modules/billing/index.ts': `import { defineModule } from '@guren/core'
+import { registerBillingRoutes } from './routes.js'
+
+export const billingModule = defineModule({ name: 'billing', routes: registerBillingRoutes })
+`,
+        'modules/billing/routes.ts': `import { Router } from '@guren/core'
+
+export function registerBillingRoutes(router: Router): void {
+  router.get('/invoices', [InvoiceController, 'index'])
+}
+`,
+        'app/Http/Controllers/HomeController.ts': 'export default class HomeController {}\n',
+      })
+      const git = initGitRepo(workspace.dir)
+
+      const changed = async (): Promise<string[]> =>
+        modifiers(await runCheck({ cwd: workspace.dir, changed: true })).map((c) => c.key)
+
+      expect(await changed()).toEqual([])
+
+      // The single-file module shape, whose path no `routes/` directory scan
+      // produces.
+      await writeFile(
+        join(workspace.dir, 'modules/billing/routes.ts'),
+        `import { Router } from '@guren/core'
+
+export function registerBillingRoutes(router: Router): void {
+  router.get('/invoices/:ref*', [InvoiceController, 'show'])
+}
+`,
+        'utf8',
+      )
+      expect(await changed()).toEqual(['route-path-modifier:modules/billing/routes.ts:/invoices/:ref*'])
+
+      await writeFile(
+        join(workspace.dir, 'routes/web.ts'),
+        entryWith(`  router.get('/files/:slug*', [FileController, 'show'])`),
+        'utf8',
+      )
+      expect(await changed()).toEqual([
+        'route-path-modifier:modules/billing/routes.ts:/invoices/:ref*',
+        'route-path-modifier:routes/web.ts:/files/:slug*',
+      ])
+
+      // The other half of the filter, and the cost of it: once both are
+      // committed, an unrelated edit says nothing about them. A plain
+      // `guren check` is what surfaces what an app already carries.
+      git('add', '.')
+      git('commit', '-m', 'add routes')
+      await writeFile(
+        join(workspace.dir, 'app/Http/Controllers/HomeController.ts'),
+        'export default class HomeController {\n  index() {}\n}\n',
+        'utf8',
+      )
+      expect(await changed()).toEqual([])
+      expect(modifiers(await runCheck({ cwd: workspace.dir }))).toHaveLength(2)
+    } finally {
+      await workspace.cleanup()
+    }
+    // Spawns git and runs the suite five times, like the sibling gate test.
+  }, 30_000)
 
   it('does not run under --arch', async () => {
     const report = await withWorkspace(
