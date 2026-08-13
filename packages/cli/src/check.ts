@@ -255,15 +255,18 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     if (routesChanged) {
       const routeWiringResults = await checkRouteRegistrarWiring({ cwd, cache, routesFile: options.routesFile })
       checks.push(...routeWiringResults)
-    }
 
-    // 7.6. Check route paths for `:name*`, which reads as a wildcard and is
-    // not one — Hono registers a single-segment parameter named literally
-    // `name*`. Unlike check 7.5 this is genuinely a per-file question (a
-    // `:slug*` can only arrive by editing the file that holds it), so it is
-    // changed-*filtered* like checks 1-4 rather than gated as a unit.
-    const routePathFiles = filterChanged(await discoverRoutePathFiles(cwd, options.routesFile))
-    checks.push(...(await checkRoutePathParams({ cwd, cache, files: routePathFiles })))
+      // 7.6. Check route paths for `:name*`, which reads as a wildcard and
+      // is not one — Hono registers a single-segment parameter named
+      // literally `name*`. Unlike 7.5 this is genuinely a per-file question
+      // (a `:slug*` can only arrive by editing the file that holds it), so it
+      // is changed-*filtered* like checks 1-4. It shares 7.5's gate all the
+      // same: `affectsRouteWiring` covers every file this reads, and asking a
+      // string predicate first is what keeps a controller-only save from
+      // paying for a scan of routes/ and every module.
+      const routePathFiles = filterChanged(await discoverRoutePathFiles(cwd, options.routesFile))
+      checks.push(...(await checkRoutePathParams({ cwd, cache, files: routePathFiles })))
+    }
 
     // 8. Check Postgres timestamp columns carry a time zone. Content-activated
     // and dialect-gated: apps with no schema, or a non-Postgres one, contribute

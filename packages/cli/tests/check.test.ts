@@ -1771,6 +1771,9 @@ ${body}
     expect(finding?.message).toContain("named literally 'slug*'")
     expect(finding?.message).toContain("req.param('slug') is undefined")
     expect(finding?.suggestion).toContain("'/files/:slug{.+}'")
+    // Not advisory: `check --ci` gates on this the way it does on an unmounted
+    // registrar, so an app carrying one goes red there.
+    expect(finding?.advisory).toBeUndefined()
   })
 
   // Real routes files register most of their routes inside a group callback,
@@ -1792,7 +1795,7 @@ ${body}
       'routes/web.ts': entryWith(`  router.on('PURGE', '/cache/:key*', [CacheController, 'purge'])`),
     })
 
-    expect(modifiers(report)).toHaveLength(1)
+    expect(modifiers(report).map((c) => c.key)).toEqual(['route-path-modifier:routes/web.ts:/cache/:key*'])
   })
 
   it('warns about a group prefix carrying one, which every route inside inherits', async () => {
@@ -1803,6 +1806,49 @@ ${body}
     })
 
     expect(modifiers(report).map((c) => c.key)).toEqual(['route-path-modifier:routes/web.ts:/:tenant*'])
+  })
+
+  // resource() spreads one path over up to seven routes, and was the hole a
+  // hand-kept mirror of Router's surface shipped with.
+  it('warns about a resource path carrying one', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': entryWith(`  router.resource('/files/:slug*', FileController)`),
+    })
+
+    expect(modifiers(report).map((c) => c.key)).toEqual(['route-path-modifier:routes/web.ts:/files/:slug*'])
+  })
+
+  // A path spelled as a no-substitution template literal is the same route.
+  it('reads a template-literal path', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': entryWith('  router.get(`/files/:slug*`, [FileController, \'show\'])'),
+    })
+
+    expect(modifiers(report).map((c) => c.key)).toEqual(['route-path-modifier:routes/web.ts:/files/:slug*'])
+  })
+
+  // The optional form: detection and the suggested rewrite have to agree, or
+  // the fix handed back is the path that was already wrong.
+  it('suggests a rewrite that keeps the optional marker', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': entryWith(`  router.get('/files/:slug*?', [FileController, 'show'])`),
+    })
+
+    const [finding] = modifiers(report)
+    expect(finding?.suggestion).toContain("'/files/:slug{.+}?'")
+  })
+
+  // A single star param at a time: the sentence is about one parameter, while
+  // the suggested path fixes them all.
+  it('reports one finding per path, however many stars it carries', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': entryWith(`  router.get('/:tenant*/files/:slug*', [FileController, 'show'])`),
+    })
+
+    const [finding, ...rest] = modifiers(report)
+    expect(rest).toEqual([])
+    expect(finding?.message).toContain("named literally 'tenant*'")
+    expect(finding?.suggestion).toContain("'/:tenant{.+}/files/:slug{.+}'")
   })
 
   // make:module scaffolds a single modules/<name>/routes.ts and no routes/
@@ -1845,20 +1891,26 @@ export function registerInvoiceRoutes(router: Router): void {
     ])
   })
 
-  // The non-detections. A rule matching `*` anywhere in the segment would
-  // report all four of these — three of them are the very syntax this check
+  // The non-detections, in one app rather than seven: this is a per-segment
+  // string predicate, and a failure still names the path it fired on. Three of
+  // the seven contain a `*` — the `{.*}` one is what a rule matching a star
+  // anywhere in the segment gets wrong, and it is also the syntax this check
   // tells people to move to.
-  it.each([
-    ['a constrained multi-segment parameter', '/docs/:path{.+}'],
-    ['a constraint whose regex contains a star', '/docs/:path{.*}'],
-    ['a constraint whose regex contains a star and a slash', '/docs/:path{[^/]*}'],
-    ['a nested-brace constraint', '/reports/:month{[0-9]{2}}'],
-    ["Hono's real wildcard segment", '/assets/*'],
-    ['an optional parameter', '/posts/:id?'],
-    ['a plain parameter', '/posts/:id'],
-  ])('says nothing about %s', async (_label, path) => {
+  const SAFE_PATHS = [
+    '/docs/:path{.+}',
+    '/docs/:path{.*}',
+    '/docs/:path{[^/]*}',
+    '/reports/:month{[0-9]{2}}',
+    '/assets/*',
+    '/posts/:id?',
+    '/posts/:id',
+  ]
+
+  it('says nothing about constrained parameters, wildcards, or optional parameters', async () => {
     const report = await withWorkspace({
-      'routes/web.ts': entryWith(`  router.get('${path}', [SomeController, 'show'])`),
+      'routes/web.ts': entryWith(
+        SAFE_PATHS.map((path) => `  router.get('${path}', [SomeController, 'show'])`).join('\n'),
+      ),
     })
 
     expect(modifiers(report)).toEqual([])
@@ -1874,7 +1926,7 @@ const labels = new Map<string, string>()
 
 export function registerWebRoutes(router: Router): void {
   router.get('/posts', [PostController, 'index'])
-  labels.get(':slug*')
+  labels.get('/files/:slug*')
 }
 `,
     })

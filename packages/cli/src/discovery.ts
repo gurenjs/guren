@@ -329,6 +329,22 @@ export async function discoverModuleRoutesFiles(appRoot: string): Promise<Module
 }
 
 /**
+ * Files a module may keep its routes registrar in, in probe order: the single
+ * `modules/<name>/routes.ts` shape `make:module` scaffolds, then the barrel
+ * layout a hand-built module may use. Project-relative, given a
+ * project-relative module directory.
+ *
+ * The counterpart to {@link discoverModuleRoutesFiles}, which answers only
+ * about a module's `routes/` *directory* and so returns nothing at all for the
+ * scaffolded shape. Both questions are asked by more than one check, so the
+ * list lives here rather than beside either of them: a second copy is how one
+ * check comes to read `modules/x/routes.mts` while the other does not.
+ */
+export function moduleRoutesEntryCandidates(moduleDir: string): string[] {
+  return [`${moduleDir}/routes.ts`, `${moduleDir}/routes.js`, `${moduleDir}/routes/index.ts`, `${moduleDir}/routes/index.js`]
+}
+
+/**
  * Console command classes (`make:command` output). Unlike controllers or
  * jobs, nothing loads these by scanning the directory at runtime —
  * registration with a `ConsoleKernel` is explicit — so this discovery exists
