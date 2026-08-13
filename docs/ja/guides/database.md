@@ -290,6 +290,14 @@ const popular = await Post.where('status', 'published')
 // オブジェクト構文によるシンプルな等値比較
 const admins = await User.where({ role: 'admin' })
 
+// コールバック構文は条件を括弧でグループ化する:
+// (title LIKE ? OR excerpt LIKE ?) AND status = 'published'
+const hits = await Post.where((q) => {
+  q.where('title', 'like', '%bun%').orWhere('excerpt', 'like', '%bun%')
+})
+  .where('status', 'published')
+  .get()
+
 // thenable - .get() なしで直接 await 可能
 const users = await User.where({ role: 'admin' })
 ```
@@ -303,8 +311,10 @@ const users = await User.where({ role: 'admin' })
 | `.where(column, value)` | 等値でフィルタ |
 | `.where(column, operator, value)` | 演算子でフィルタ（`>`、`<`、`>=`、`<=`、`!=`、`LIKE`） |
 | `.where(object)` | 複数の等値条件でフィルタ |
+| `.where(callback)` | 括弧でグループ化した条件を AND で結合 |
 | `.orWhere(column, value)` | OR 条件 |
 | `.orWhere(column, operator, value)` | 演算子付き OR 条件 |
+| `.orWhere(callback)` | 括弧でグループ化した条件を OR で結合 |
 | `.orderBy(column, direction?)` | 結果をソート（`'asc'` または `'desc'`） |
 | `.limit(n)` | 結果件数を制限 |
 | `.offset(n)` | 最初の n 件をスキップ |
