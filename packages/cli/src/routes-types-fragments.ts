@@ -93,12 +93,18 @@ export function route<TName extends RouteName>(name: TName, ...args: RouteArgs<T
 }
 `
 
-/** Runtime utility functions used by the `route()` helper. */
-export const RUNTIME_UTILITY_FUNCTIONS = `\
-function hasPathParams(path: string): boolean {
-  return /:[A-Za-z0-9_-]+/u.test(path)
-}
-
+/**
+ * The runtime half of the path-param rule: how a bound key is substituted
+ * into the path. Token-based — whole `:param` tokens are replaced by key
+ * lookup — so a param whose name is a prefix of another (`:id` vs
+ * `:identifier`) can never corrupt it, and a key the path lacks really is a
+ * no-op. A per-key `path.replace(':key', ...)` loop has neither property;
+ * that spelling is what this fragment exists to keep out of the generators.
+ *
+ * Mirrored verbatim in @guren/inertia-client's components.tsx alongside
+ * PATH_PARAM_TYPE_HELPERS, under the same pin test.
+ */
+export const PATH_PARAM_RUNTIME_HELPERS = `\
 function substituteParams(path: string, params?: Record<string, string | number>): string {
   if (!params) {
     return path
@@ -112,7 +118,15 @@ function substituteParams(path: string, params?: Record<string, string | number>
     return encodeURIComponent(String(params[key]))
   })
 }
+`
 
+/** Runtime utility functions used by the `route()` helper. */
+export const RUNTIME_UTILITY_FUNCTIONS = `\
+function hasPathParams(path: string): boolean {
+  return /:[A-Za-z0-9_-]+/u.test(path)
+}
+
+${PATH_PARAM_RUNTIME_HELPERS}
 function appendQueryString(path: string, query?: RouteQuery): string {
   if (!query) {
     return path
