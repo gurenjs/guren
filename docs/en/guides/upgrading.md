@@ -66,7 +66,7 @@ await Post.forceCreate({ ...validated, authorId: user.id })
 
 #### Sanitized auth user records
 
-- **What changed**: `auth.user()` no longer contains the password column, the remember-token column, or fields listed in the model's `static hidden`.
+- **What changed**: `auth.user()` no longer contains the password column, the remember-token column, or fields the model lists in `hidden`.
 - **Who is affected**: Code that read those fields off the authenticated user object.
 - **How to migrate**: Load the model explicitly (e.g. `User.findOrFail(user.id)`) in the rare server-side flows that need the raw record.
 
