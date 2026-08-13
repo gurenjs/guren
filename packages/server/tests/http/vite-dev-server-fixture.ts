@@ -1,7 +1,7 @@
 import { mock } from 'bun:test'
 
 import * as realViteDevServer from '../../src/http/vite-dev-server'
-import type { GurenGlobalSlots } from '../../src/http/Application'
+import type { ActiveViteDevServer, GurenGlobalSlots } from '../../src/http/Application'
 
 /**
  * Shared setup for the `Application` tests that stub the managed Vite dev
@@ -47,6 +47,41 @@ export function resetGurenGlobals(): void {
     if (key.startsWith('__guren')) {
       delete slots[key]
     }
+  }
+}
+
+/**
+ * Plant the active-server slot the way a previous `bun --hot` incarnation
+ * leaves it. The record's owner is an application from the module instance the
+ * reload replaced, so nothing in this run can equal it — which is the point:
+ * the adopting app has to take ownership rather than share it.
+ */
+export function seedPreviousViteDevServer(server: unknown, localUrl: string): void {
+  gurenGlobals.__gurenActiveViteDevServer = {
+    server,
+    localUrl,
+    owner: {},
+    disposeTeardown: () => {},
+  }
+}
+
+/**
+ * Read the slot back with the record's real shape, for assertions on what a
+ * `listen()` or `stop()` left behind.
+ */
+export function activeViteDevServer(): ActiveViteDevServer | undefined {
+  return gurenGlobals.__gurenActiveViteDevServer as ActiveViteDevServer | undefined
+}
+
+/**
+ * The process listener counts the teardown assertions compare: one snapshot
+ * before `listen()`, one after each transition.
+ */
+export function signalListenerCounts(): { exit: number; sigint: number; sigterm: number } {
+  return {
+    exit: process.listenerCount('exit'),
+    sigint: process.listenerCount('SIGINT'),
+    sigterm: process.listenerCount('SIGTERM'),
   }
 }
 

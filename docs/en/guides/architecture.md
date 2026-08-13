@@ -264,6 +264,12 @@ closed instead:
 await app.stop(true) // don't wait for in-flight requests
 ```
 
+That wait is bounded, so a request that never finishes cannot hold shutdown
+open forever: after 5 seconds `stop()` warns and stops waiting, leaving the
+remaining connections to drain on their own. The socket has already stopped
+accepting new connections by then. Set `GUREN_BUN_STOP_TIMEOUT_MS` to change
+the bound.
+
 Calling `stop()` when nothing is listening, or calling it twice, does nothing.
 A later `listen()` starts cleanly, so you can stop and restart within a single
 process:

@@ -69,16 +69,47 @@ export interface RunAuditOptions {
   deps?: boolean
 }
 
-// Two orthogonal axes drive the route loop below: unsafe methods get the auth
-// check, body-carrying methods get the validation check. QUERY (RFC 10008) is
-// safe like GET but body-carrying, so it appears only in BODY_METHODS.
-// Sibling classifications that must stay coherent with these (no shared
-// constant — @guren/cli declares no @guren/server dependency): the CSRF
-// middleware's DEFAULT_PROTECTED_METHODS in packages/server, and the
-// generated client's CSRF_SAFE_METHODS in api-client-types.ts.
-const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
-const BODY_METHODS = new Set(['POST', 'PUT', 'PATCH', 'QUERY'])
-const AUDITED_METHODS = new Set([...MUTATING_METHODS, ...BODY_METHODS])
+/**
+ * HTTP method semantics driving the two per-route phases in auditRoutes().
+ * The two sets are orthogonal axes rather than a partition: unsafe methods
+ * get the auth check, body-carrying methods get the validation check, and
+ * QUERY (RFC 10008) is both — safe like GET, but body-carrying like POST.
+ *
+ * `SAFE_METHODS` holds the verbs the authentication phase trusts not to
+ * change state. It is the RFC 9110 §9.2.1 safe set *minus TRACE*, on
+ * purpose: an app registering a TRACE route is unusual enough that the
+ * fail-closed default below is the better answer — do not "fix" the list
+ * back to the RFC. It is the same axis as `DEFAULT_PROTECTED_METHODS` in
+ * `@guren/server` (src/http/middleware/csrf.ts, expressed as its
+ * complement) and the emitted `CSRF_SAFE_METHODS` in api-client-types.ts;
+ * the packages share no dependency edge, so the list is duplicated by
+ * convention (see trimSlashes in utils.ts for the precedent).
+ *
+ * `BODYLESS_METHODS` are the verbs whose requests conventionally carry no
+ * body, so the validation phase demands no validateBody() for them.
+ */
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'QUERY'])
+const BODYLESS_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'DELETE'])
+
+/**
+ * Exported for tests. Classifies an HTTP method for the audit phases.
+ *
+ * Deliberately fail-closed: a verb neither set recognizes — anything an app
+ * registers via `router.on('PURGE', ...)` — is treated as unsafe AND
+ * body-carrying. The alternative (skipping it, as the pre-classification
+ * enumerations did) made a custom-verb route with an unvalidated body and no
+ * auth middleware produce zero findings, i.e. the routes the audit
+ * understands least reported the cleanest pass. A false-positive finding on
+ * a genuinely body-less custom verb can be suppressed via config/audit.ts;
+ * a silently skipped route cannot be seen at all.
+ */
+export function describeMethod(method: string): { safe: boolean; bodyCarrying: boolean } {
+  const upper = method.toUpperCase()
+  return {
+    safe: SAFE_METHODS.has(upper),
+    bodyCarrying: !BODYLESS_METHODS.has(upper),
+  }
+}
 
 /**
  * Paths that are expected to be reachable without authentication
@@ -565,7 +596,10 @@ async function auditRoutes(
 
   for (const route of definitions) {
     const method = route.method.toUpperCase()
-    if (!AUDITED_METHODS.has(method)) continue
+    const { safe, bodyCarrying } = describeMethod(method)
+    // No shared skip here on purpose: each phase gates on its own predicate,
+    // so a later-added phase chooses its own scope instead of silently
+    // inheriting "mutating-only" from a mid-loop `continue`.
 
     const routeLabel = `${method} ${route.path}`
     const controllerKey = route.controller
@@ -574,7 +608,7 @@ async function auditRoutes(
     const methodInfo = controllerKey ? controllerMethods.get(controllerKey) : undefined
 
     // 1. Input validation on body-carrying routes
-    if (BODY_METHODS.has(method)) {
+    if (bodyCarrying) {
       const hasRouteSchema = Boolean(route.schemas?.body)
       // Route-level body schemas are runtime-enforced only for inline handlers.
       // For controller actions the router intentionally leaves body validation
@@ -638,76 +672,77 @@ async function auditRoutes(
       }
     }
 
-    // 2. Authentication on mutating routes. Safe body-carrying methods
-    // (QUERY) are read routes, so they get the same treatment as GET here.
-    if (!MUTATING_METHODS.has(method)) continue
-    if (GUEST_PATH_PATTERN.test(route.path)) continue
+    // 2. Authentication on unsafe (state-changing) routes. Safe
+    // body-carrying methods (QUERY) are read routes, so they get the same
+    // treatment as GET here. Guest flows (login/register/password reset)
+    // are exempt — they must be reachable unauthenticated.
+    if (!safe && !GUEST_PATH_PATTERN.test(route.path)) {
+      const middlewareNames = route.middlewareNames ?? []
+      // Capability verdict (RFC 0007): the server stamps its auth guards
+      // (requireAuthenticated/requireGuest) and definitions() aggregates the
+      // stamps across aliases, groups, and inline handlers. An older server
+      // emits no `capabilities` field at all — only then fall back to the
+      // pre-capability name heuristic so mixed-version apps don't regress.
+      const verdict = authMiddlewareVerdict(route)
+      const hasAuthMiddleware = verdict === 'verified' || verdict === 'legacy-name-match'
+      const hasControllerAuth = methodInfo ? AUTH_CALL_PATTERN.test(methodInfo.body) : false
 
-    const middlewareNames = route.middlewareNames ?? []
-    // Capability verdict (RFC 0007): the server stamps its auth guards
-    // (requireAuthenticated/requireGuest) and definitions() aggregates the
-    // stamps across aliases, groups, and inline handlers. An older server
-    // emits no `capabilities` field at all — only then fall back to the
-    // pre-capability name heuristic so mixed-version apps don't regress.
-    const verdict = authMiddlewareVerdict(route)
-    const hasAuthMiddleware = verdict === 'verified' || verdict === 'legacy-name-match'
-    const hasControllerAuth = methodInfo ? AUTH_CALL_PATTERN.test(methodInfo.body) : false
-
-    if (hasAuthMiddleware || hasControllerAuth) {
-      findings.push(
-        finding(
-          `authz:${routeLabel}`,
-          routeLabel,
-          'pass',
-          verdict === 'verified'
-            ? 'Protected by an authentication guard (verified via middleware capabilities).'
-            : verdict === 'legacy-name-match'
-              ? `Protected by middleware: ${middlewareNames.join(', ')}.`
-              : `Controller checks authentication in ${controllerKey}.`,
-        ),
-      )
-    } else if (verdict === 'unverified-auth-name') {
-      findings.push(
-        finding(
-          `authz:${routeLabel}`,
-          routeLabel,
-          'warn',
-          `Middleware (${middlewareNames.join(', ')}) is named like an auth guard but is not one the framework recognizes.`,
-          UNRECOGNIZED_GUARD_SUGGESTION,
-        ),
-      )
-    } else if (route.hasInlineMiddleware) {
-      findings.push(
-        finding(
-          `authz:${routeLabel}`,
-          routeLabel,
-          'warn',
-          'Inline middleware is attached but is not a recognized authentication guard.',
-          UNRECOGNIZED_GUARD_SUGGESTION,
-        ),
-      )
-    } else if (WEBHOOK_PATH_PATTERN.test(route.path)) {
-      findings.push(
-        finding(
-          `authz:${routeLabel}`,
-          routeLabel,
-          'warn',
-          `Webhook-style route has no authentication check${controllerKey ? ` (${controllerKey})` : ''}.`,
-          'Webhooks cannot use session auth — verify the provider signature (e.g. HMAC header) before processing the payload.',
-          methodInfo?.filePath,
-        ),
-      )
-    } else {
-      findings.push(
-        finding(
-          `authz:${routeLabel}`,
-          routeLabel,
-          'warn',
-          `Mutating route has no authentication check${controllerKey ? ` (${controllerKey})` : ''}.`,
-          "Wrap the route in router.middleware('auth').group(...) or call this.auth.userOrFail() in the controller.",
-          methodInfo?.filePath,
-        ),
-      )
+      if (hasAuthMiddleware || hasControllerAuth) {
+        findings.push(
+          finding(
+            `authz:${routeLabel}`,
+            routeLabel,
+            'pass',
+            verdict === 'verified'
+              ? 'Protected by an authentication guard (verified via middleware capabilities).'
+              : verdict === 'legacy-name-match'
+                ? `Protected by middleware: ${middlewareNames.join(', ')}.`
+                : `Controller checks authentication in ${controllerKey}.`,
+          ),
+        )
+      } else if (verdict === 'unverified-auth-name') {
+        findings.push(
+          finding(
+            `authz:${routeLabel}`,
+            routeLabel,
+            'warn',
+            `Middleware (${middlewareNames.join(', ')}) is named like an auth guard but is not one the framework recognizes.`,
+            UNRECOGNIZED_GUARD_SUGGESTION,
+          ),
+        )
+      } else if (route.hasInlineMiddleware) {
+        findings.push(
+          finding(
+            `authz:${routeLabel}`,
+            routeLabel,
+            'warn',
+            'Inline middleware is attached but is not a recognized authentication guard.',
+            UNRECOGNIZED_GUARD_SUGGESTION,
+          ),
+        )
+      } else if (WEBHOOK_PATH_PATTERN.test(route.path)) {
+        findings.push(
+          finding(
+            `authz:${routeLabel}`,
+            routeLabel,
+            'warn',
+            `Webhook-style route has no authentication check${controllerKey ? ` (${controllerKey})` : ''}.`,
+            'Webhooks cannot use session auth — verify the provider signature (e.g. HMAC header) before processing the payload.',
+            methodInfo?.filePath,
+          ),
+        )
+      } else {
+        findings.push(
+          finding(
+            `authz:${routeLabel}`,
+            routeLabel,
+            'warn',
+            `Mutating route has no authentication check${controllerKey ? ` (${controllerKey})` : ''}.`,
+            "Wrap the route in router.middleware('auth').group(...) or call this.auth.userOrFail() in the controller.",
+            methodInfo?.filePath,
+          ),
+        )
+      }
     }
   }
 

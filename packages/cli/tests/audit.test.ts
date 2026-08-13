@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
-import { authMiddlewareVerdict, runAudit, LINK_BUILDER_PATTERN, type AuditReport } from '../src/audit'
+import { authMiddlewareVerdict, describeMethod, runAudit, LINK_BUILDER_PATTERN, type AuditReport } from '../src/audit'
 import { createTempWorkspace, writeWorkspaceFiles } from './helpers'
 
 async function writeRoutes(dir: string, contents: string): Promise<void> {
@@ -2020,5 +2020,114 @@ describe('authMiddlewareVerdict', () => {
         capabilities: { authentication: { mode: 'guest-only' } },
       }),
     ).toBe('none')
+  })
+})
+
+describe('describeMethod', () => {
+  it('classifies the standard verbs', () => {
+    expect(describeMethod('GET')).toEqual({ safe: true, bodyCarrying: false })
+    expect(describeMethod('HEAD')).toEqual({ safe: true, bodyCarrying: false })
+    expect(describeMethod('OPTIONS')).toEqual({ safe: true, bodyCarrying: false })
+    expect(describeMethod('POST')).toEqual({ safe: false, bodyCarrying: true })
+    expect(describeMethod('PUT')).toEqual({ safe: false, bodyCarrying: true })
+    expect(describeMethod('PATCH')).toEqual({ safe: false, bodyCarrying: true })
+    expect(describeMethod('DELETE')).toEqual({ safe: false, bodyCarrying: false })
+    // The two sets are independent axes, so QUERY (RFC 10008) lands on both:
+    // no auth demanded, body validation still checked.
+    expect(describeMethod('QUERY')).toEqual({ safe: true, bodyCarrying: true })
+  })
+
+  it('is case-insensitive', () => {
+    expect(describeMethod('get')).toEqual({ safe: true, bodyCarrying: false })
+    expect(describeMethod('delete')).toEqual({ safe: false, bodyCarrying: false })
+  })
+
+  it('defaults an unrecognized verb to unsafe and body-carrying', () => {
+    expect(describeMethod('PURGE')).toEqual({ safe: false, bodyCarrying: true })
+    // TRACE is formally safe per RFC 9110, but the classification leaves it
+    // to the fail-closed default on purpose — this pin records that decision.
+    expect(describeMethod('TRACE')).toEqual({ safe: false, bodyCarrying: true })
+  })
+})
+
+const CUSTOM_VERB_ROUTES = `class CacheController {
+  async flush() { return null }
+}
+export default function registerRoutes(router: any) {
+  router.on('PURGE', '/cache', [CacheController, 'flush'])
+}`
+
+describe('custom-verb routes (router.on)', () => {
+  it.each([
+    [
+      'flags an unvalidated body read without auth',
+      `export default class CacheController {
+  async flush() {
+    const data = await this.request.json()
+    return null
+  }
+}`,
+      'fail',
+      'warn',
+    ] as const,
+    [
+      'passes a validated body behind an auth check',
+      `export default class CacheController {
+  async flush() {
+    await this.auth.userOrFail()
+    const data = await this.validateBody(FlushSchema)
+    return null
+  }
+}`,
+      'pass',
+      'pass',
+    ] as const,
+  ])('%s', async (_name, controller, validationStatus, authzStatus) => {
+    const workspace = await createTempWorkspace('guren-cli-audit-custom-verb-')
+
+    try {
+      await writeController(workspace.dir, 'CacheController', controller)
+      await writeRoutes(workspace.dir, CUSTOM_VERB_ROUTES)
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      expect(report.routesAnalyzed).toBe(true)
+      const validation = report.findings.find(f => f.key === 'validation:PURGE /cache')
+      expect(validation).toBeDefined()
+      expect(validation!.status).toBe(validationStatus)
+      const authz = report.findings.find(f => f.key === 'authz:PURGE /cache')
+      expect(authz).toBeDefined()
+      expect(authz!.status).toBe(authzStatus)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('still skips safe verbs and keeps DELETE out of the validation phase', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-safe-verbs-')
+
+    try {
+      await writeRoutes(
+        workspace.dir,
+        `class PostController {
+  async index() { return null }
+  async destroy() { return null }
+}
+export default function registerRoutes(router: any) {
+  router.get('/posts', [PostController, 'index'])
+  router.delete('/posts/:id', [PostController, 'destroy'])
+}`,
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      expect(report.findings.find(f => f.key.endsWith('GET /posts'))).toBeUndefined()
+      expect(report.findings.find(f => f.key === 'validation:DELETE /posts/:id')).toBeUndefined()
+      const authz = report.findings.find(f => f.key === 'authz:DELETE /posts/:id')
+      expect(authz).toBeDefined()
+      expect(authz!.status).toBe('warn')
+    } finally {
+      await workspace.cleanup()
+    }
   })
 })
