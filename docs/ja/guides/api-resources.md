@@ -316,6 +316,20 @@ bunx guren make:resource User
 # 作成: app/Http/Resources/UserResource.ts
 ```
 
+## Resource から API レスポンスを型付けする
+
+`guren codegen` は各 Resource の形を `.guren/data.gen.ts` に抽出します（`Data.Post`、`Data.User` など）。Resource で応答するルートは、ルートコントラクトで Resource を指名するだけで、その形をレスポンス型として宣言できます。Zod スキーマも、フィールドの再記述も不要です:
+
+```ts
+router.query('/posts/search', {
+  name: 'posts.search',
+  body: PostSearchSchema,
+  resource: { data: [PostResource] },
+}, [PostController, 'search'])
+```
+
+生成された API クライアントは、このルートの `json()` を `{ data: Data.Post[] }` として型付けします。ヒントの書き方は [Resource レスポンスヒント](./routing.md#resource-レスポンスヒント)を参照してください。
+
 ## ベストプラクティス
 
 1. **リソースを焦点化** - モデル変換ごとに1つのリソース

@@ -316,6 +316,20 @@ bunx guren make:resource User
 # Creates: app/Http/Resources/UserResource.ts
 ```
 
+## Typing API Responses from Resources
+
+`guren codegen` extracts each Resource's shape into `.guren/data.gen.ts` (as `Data.Post`, `Data.User`, …). A route that answers with a Resource can declare that shape as its response type — no Zod schema, no restating the fields — by naming the Resource in its route contract:
+
+```ts
+router.query('/posts/search', {
+  name: 'posts.search',
+  body: PostSearchSchema,
+  resource: { data: [PostResource] },
+}, [PostController, 'search'])
+```
+
+The generated API client then types `json()` for that route as `{ data: Data.Post[] }`. See [Resource Response Hints](./routing.md#resource-response-hints) for the hint syntax.
+
 ## Best Practices
 
 1. **Keep resources focused** - One resource per model transformation

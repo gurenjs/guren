@@ -237,11 +237,30 @@ router.get('/posts/:id', {
 | `query` | クエリパラメータの Zod スキーマ |
 | `body` | リクエストボディの Zod スキーマ |
 | `output` | レスポンスボディの Zod スキーマ |
+| `resource` | Resource クラスによるレスポンスヒント — スキーマなしで API クライアントを型付け |
 | `bind` | ルートモデルバインディングマップ |
 | `middlewares` | ミドルウェアハンドラーの配列 |
 
 > [!NOTE]
 > 同じクエリキーが繰り返された場合、`query` スキーマには配列として渡されます（`?tag=a&tag=b` → `{ tag: ['a', 'b'] }`）。1 回だけ出現するキーは文字列のままです。詳細は[配列形式のクエリパラメータ](./validation.md#配列形式のクエリパラメータ)を参照してください。
+
+### Resource レスポンスヒント
+
+[API リソース](./api-resources.md)で応答するルートには、すでにレスポンス型があります。コード生成が Resource クラスから `.guren/data.gen.ts` に抽出する型です。そうしたルートに `output` スキーマを書くと、同じ形を Zod で二重定義することになり、2 つのコピーが乖離していきます。代わりに Resource そのものを宣言してください:
+
+```ts
+import { PostResource } from '@/app/Http/Resources/PostResource'
+
+router.query('/posts/search', {
+  name: 'posts.search',
+  body: PostSearchSchema,
+  resource: { data: [PostResource] },
+}, [PostController, 'search'])
+```
+
+ヒントはコントローラーが組み立てる JSON をそのまま写します。単一リソースはクラスそのもの（`resource: PostResource`）、コレクションは要素 1 つの配列（`resource: [PostResource]`）、エンベロープはプレーンオブジェクトで表します。`{ data: [PostResource] }` は `this.json({ data: PostResource.collection(posts) })` に対応します。ネストは任意の深さで書けます。
+
+`guren codegen` は各クラスを `app/Http/Resources` と突き合わせ、組み立てた形（この例では `{ data: Data.Post[] }`）で生成 API クライアントの `json()` を型付けします。`output` と違ってリクエスト時には何も実行されません。ヒントはあくまで宣言であり、見つからない Resource クラスを指した場合はコード生成が警告してレスポンスを型無しのままにする、という形でのみ検査されます。両方指定した場合は、実際に強制される側である `output` が優先されます。
 
 ### OpenAPI メタデータ
 

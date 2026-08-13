@@ -11,7 +11,9 @@ interface Props extends PaginatedPageProps<PostResourceData> {}
 // posts.search is an HTTP QUERY route (RFC 10008): safe like GET, but the
 // criteria travel in a JSON body — HTML forms and Inertia navigation cannot
 // send it, so the page calls it through the generated typed client. The
-// client types the request body from the schema bound to the route.
+// client types the request body from the schema bound to the route, and
+// json() from the `resource` hint the route declares — both come from the
+// route definition, so this file never restates the wire shape.
 const api = createApiClient<ApiRoutes>({ baseUrl: '' })
 
 export default function PostsIndex({ data, pagination }: Props) {
@@ -37,9 +39,7 @@ export default function PostsIndex({ data, pagination }: Props) {
         setError('Search failed — try fewer or shorter keywords.')
         return
       }
-      // The route binds no `output` schema, so json() resolves to unknown and
-      // the shape is asserted here. Bind one to have codegen type json() itself.
-      const payload = (await response.json()) as { data: PostResourceData[] }
+      const payload = await response.json()
       setResults(payload.data)
     } catch {
       setError('Search failed — check your connection and try again.')

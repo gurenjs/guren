@@ -2,6 +2,7 @@ import { Router, requireAuthenticated, requireGuest } from '@guren/core'
 import HomeController from '../app/Http/Controllers/HomeController.js'
 import PostController from '../app/Http/Controllers/PostController.js'
 import { PostPayloadSchema, PostSearchSchema } from '../app/Http/Validators/PostValidator.js'
+import { PostResource } from '../app/Http/Resources/PostResource.js'
 import { registerAuthRoutes } from './auth.js'
 
 export function registerWebRoutes(baseRouter: Router): void {
@@ -33,7 +34,14 @@ export function registerWebRoutes(baseRouter: Router): void {
 
     // HTTP QUERY (RFC 10008): safe and idempotent like GET, but carries its
     // search criteria in a JSON body. Only fetch-based clients can send it —
-    // the posts page calls it through the generated API client.
-    posts.query('/search', { name: 'posts.search', body: PostSearchSchema }, [PostController, 'search'])
+    // the posts page calls it through the generated API client. The
+    // `resource` hint declares the response shape the controller builds with
+    // PostResource, so the client's json() comes back typed — no runtime
+    // validation, just the type codegen already extracts from the Resource.
+    posts.query('/search', {
+      name: 'posts.search',
+      body: PostSearchSchema,
+      resource: { data: [PostResource] },
+    }, [PostController, 'search'])
   })
 }

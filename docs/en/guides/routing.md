@@ -282,11 +282,30 @@ Available contract fields:
 | `query` | Zod schema for query string parameters |
 | `body` | Zod schema for the request body |
 | `output` | Zod schema for the response body |
+| `resource` | Resource class response hint — types the API client without a schema |
 | `bind` | Route model binding map |
 | `middlewares` | Array of middleware handlers |
 
 > [!NOTE]
 > Repeated query keys reach the `query` schema as arrays (`?tag=a&tag=b` → `{ tag: ['a', 'b'] }`), while a key that appears once stays a string — see [Array-Style Query Parameters](./validation.md#array-style-query-parameters).
+
+### Resource Response Hints
+
+Routes that answer with [API Resources](./api-resources.md) already have a response type — the one codegen extracts from the Resource class into `.guren/data.gen.ts`. Writing an `output` schema for such a route would restate that shape in Zod and leave two copies to drift. Declare the Resource itself instead:
+
+```ts
+import { PostResource } from '@/app/Http/Resources/PostResource'
+
+router.query('/posts/search', {
+  name: 'posts.search',
+  body: PostSearchSchema,
+  resource: { data: [PostResource] },
+}, [PostController, 'search'])
+```
+
+The hint mirrors the JSON the controller builds: a bare class (`resource: PostResource`) for a single resource, a one-element array (`resource: [PostResource]`) for a collection, and a plain object for an envelope — `{ data: [PostResource] }` matches `this.json({ data: PostResource.collection(posts) })`. Nesting works to any depth.
+
+`guren codegen` resolves each class against `app/Http/Resources` and types the generated API client's `json()` with the assembled shape (`{ data: Data.Post[] }` here). Unlike `output`, nothing runs at request time — the hint is a declaration, checked only in the sense that codegen warns and leaves the response untyped if it names a Resource class it cannot find. When a route sets both, `output` wins: it is the one actually enforced.
 
 ### OpenAPI Metadata
 
