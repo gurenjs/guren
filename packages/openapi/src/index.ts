@@ -589,18 +589,29 @@ function normalizeServers(servers?: OpenApiDocumentOptions['servers']): OpenApiS
 }
 
 function toOpenApiPath(path: string): string {
-  return path.replace(/:([A-Za-z0-9_-]+)/gu, '{$1}')
+  // Consume a Hono regex constraint (`{...}`) or trailing `?`/`*` with the
+  // token — OpenAPI path templates carry only the bare label
+  // (`/items/:id{[0-9]+}` -> `/items/{id}`). Unlike the TS/runtime param-key
+  // rule (routes-types-fragments.ts), `*` is dropped here too: RFC 6570 (the
+  // URI Template spec OpenAPI path templates follow) gives `{name*}` its own
+  // "explode" meaning, so keeping a literal `:slug*`'s `*` would produce a
+  // template that means something else entirely.
+  return path.replace(/:([A-Za-z0-9_-]+)(?:\{[^}]*\})?[?*]?/gu, '{$1}')
 }
 
 function extractPathParamNames(path: string): string[] {
-  return Array.from(path.matchAll(/:([A-Za-z0-9_-]+)/gu)).map((match) => match[1] ?? '')
+  // A regex constraint (`:id{[0-9]+}`) may itself contain `:` or `/`, so it
+  // must be dropped before scanning for param labels.
+  const withoutPatterns = path.replace(/\{[^}]*\}/gu, '')
+  return Array.from(withoutPatterns.matchAll(/:([A-Za-z0-9_-]+)/gu)).map((match) => match[1] ?? '')
 }
 
 function buildOperationId(definition: RouteDefinition): string {
   const fragments = definition.path
+    .replace(/\{[^}]*\}/gu, '')
     .split('/')
     .filter(Boolean)
-    .map((segment) => segment.startsWith(':') ? `By${capitalize(segment.slice(1))}` : capitalize(segment))
+    .map((segment) => segment.startsWith(':') ? `By${capitalize(segment.slice(1).replace(/[?*]$/u, ''))}` : capitalize(segment))
 
   return `${definition.method.toLowerCase()}${fragments.join('') || 'Root'}`
 }

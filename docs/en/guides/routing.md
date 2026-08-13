@@ -243,6 +243,8 @@ const id = this.ctx.req.param('id')
 const userId = this.ctx.req.param('userId')
 ```
 
+Optional segments (`router.get('/posts/:id?', handler)`) and regex constraints (`router.get('/items/:id{[0-9]+}', handler)`) follow Hono's pattern support. To match across multiple segments, use a constrained parameter such as `:path{.+}`. Note that `/:slug*` is not Hono wildcard syntax: it registers a single-segment parameter literally named `slug*`, so avoid it.
+
 > [!NOTE]
 > For large apps, split routes into multiple registrars (`routes/api.ts`, `routes/admin.ts`) and compose them from `src/app.ts`.
 

@@ -32,6 +32,19 @@ declare module '@inertiajs/core' {
  * keys a route path literal binds, whether it binds any, and the params
  * object they form.
  *
+ * Hono path params carry optional modifiers the key extraction must see
+ * through: a regex constraint (\`:id{[0-9]+}\`, which may itself contain \`/\`
+ * but never \`}\`) and a trailing \`?\` (optional segment). \`StripParamPatterns\`
+ * removes constraint bodies before the path is split into \`:\`/\`/\`-delimited
+ * segments, so a constraint's own \`/\` cannot be mistaken for a path
+ * separator; \`NormalizeParamKey\` then drops a trailing \`?\`.
+ *
+ * A trailing \`*\` is deliberately left alone. Unlike \`?\` and \`{...}\`, \`*\` is
+ * not a Hono modifier — \`:slug*\` names a literal, single-segment param whose
+ * runtime key really is \`slug*\` (verified against Hono directly; see
+ * docs/*\/guides/routing.md). Stripping it would type a key Hono never
+ * produces.
+ *
  * Emitted into every generated module that answers those questions — the
  * route manifest and the API client — so they all derive the answers from
  * the path string the server routes on, not from whatever shape their
@@ -44,9 +57,13 @@ declare module '@inertiajs/core' {
  */
 export const PATH_PARAM_TYPE_HELPERS = `\
 type NormalizeParamKey<TValue extends string> = TValue extends \`\${infer Key}?\` ? Key : TValue
-type PathParamKeys<TPath extends string> =
+type StripParamPatterns<TPath extends string> = TPath extends \`\${infer Head}{\${string}}\${infer Tail}\`
+  ? \`\${Head}\${StripParamPatterns<Tail>}\`
+  : TPath
+type PathParamKeys<TPath extends string> = ExtractParamKeys<StripParamPatterns<TPath>>
+type ExtractParamKeys<TPath extends string> =
   TPath extends \`\${string}:\${infer Param}/\${infer Rest}\`
-    ? NormalizeParamKey<Param> | PathParamKeys<\`/\${Rest}\`>
+    ? NormalizeParamKey<Param> | ExtractParamKeys<\`/\${Rest}\`>
     : TPath extends \`\${string}:\${infer Param}\`
       ? NormalizeParamKey<Param>
       : never
@@ -95,11 +112,17 @@ export function route<TName extends RouteName>(name: TName, ...args: RouteArgs<T
 
 /**
  * The runtime half of the path-param rule: how a bound key is substituted
- * into the path. Token-based — whole `:param` tokens are replaced by key
- * lookup — so a param whose name is a prefix of another (`:id` vs
- * `:identifier`) can never corrupt it, and a key the path lacks really is a
- * no-op. A per-key `path.replace(':key', ...)` loop has neither property;
- * that spelling is what this fragment exists to keep out of the generators.
+ * into the path. Token-based — whole `:param` tokens, modifiers included,
+ * are replaced by key lookup — so a param whose name is a prefix of another
+ * (`:id` vs `:identifier`) can never corrupt it, and a key the path lacks
+ * really is a no-op. A per-key `path.replace(':key', ...)` loop has neither
+ * property; that spelling is what this fragment exists to keep out of the
+ * generators.
+ *
+ * The key capture group mirrors PATH_PARAM_TYPE_HELPERS: a trailing regex
+ * constraint (`{...}`) and `?` are modifiers consumed with the token but
+ * excluded from the key, while a trailing `*` is part of the literal key
+ * (Hono's own behavior for `:slug*` — see that fragment's doc comment).
  *
  * Mirrored verbatim in @guren/inertia-client's components.tsx alongside
  * PATH_PARAM_TYPE_HELPERS, under the same pin test.
@@ -110,7 +133,7 @@ function substituteParams(path: string, params?: Record<string, string | number>
     return path
   }
 
-  return path.replace(/:([A-Za-z0-9_-]+)/gu, (match, key) => {
+  return path.replace(/:([A-Za-z0-9_-]+\\*?)(?:\\{[^}]*\\})?\\??/gu, (match, key) => {
     if (!Object.prototype.hasOwnProperty.call(params, key)) {
       return match
     }

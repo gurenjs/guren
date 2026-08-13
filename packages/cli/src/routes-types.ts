@@ -126,7 +126,11 @@ export function toTypeLiteral(path: string): string {
     return `'${escapeSingleQuotes(path)}'`
   }
 
-  const segments = path.split('/')
+  // A Hono regex constraint (`:id{[0-9]+}`) may contain `/`, so it must be
+  // stripped before splitting the path into segments — otherwise a `/`
+  // inside the constraint is mistaken for a path separator.
+  const withoutPatterns = path.replace(/\{[^}]*\}/gu, '')
+  const segments = withoutPatterns.split('/')
   const rendered = segments
     .map((segment) => {
       if (!segment) {
@@ -223,5 +227,9 @@ function renderHelperNode(segment: string, node: HelperTreeNode, depth: number):
 }
 
 function extractParamNames(path: string): string[] {
-  return Array.from(path.matchAll(/:([A-Za-z0-9_-]+)/gu), (match) => match[1])
+  // A Hono regex constraint (`:id{[0-9]+}`) may itself contain `:`, so it
+  // must be dropped before scanning for param labels — otherwise a `:`
+  // inside the constraint can be mistaken for the start of another param.
+  const withoutPatterns = path.replace(/\{[^}]*\}/gu, '')
+  return Array.from(withoutPatterns.matchAll(/:([A-Za-z0-9_-]+)/gu), (match) => match[1])
 }

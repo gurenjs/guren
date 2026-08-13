@@ -37,9 +37,13 @@ export interface RouteManifestLike {
 // routes-types-fragments.ts (its JSDoc has the why); pinned character for
 // character by routes-types-fragments.test.ts there.
 type NormalizeParamKey<TValue extends string> = TValue extends `${infer Key}?` ? Key : TValue
-type PathParamKeys<TPath extends string> =
+type StripParamPatterns<TPath extends string> = TPath extends `${infer Head}{${string}}${infer Tail}`
+  ? `${Head}${StripParamPatterns<Tail>}`
+  : TPath
+type PathParamKeys<TPath extends string> = ExtractParamKeys<StripParamPatterns<TPath>>
+type ExtractParamKeys<TPath extends string> =
   TPath extends `${string}:${infer Param}/${infer Rest}`
-    ? NormalizeParamKey<Param> | PathParamKeys<`/${Rest}`>
+    ? NormalizeParamKey<Param> | ExtractParamKeys<`/${Rest}`>
     : TPath extends `${string}:${infer Param}`
       ? NormalizeParamKey<Param>
       : never
@@ -60,7 +64,7 @@ function substituteParams(path: string, params?: Record<string, string | number>
     return path
   }
 
-  return path.replace(/:([A-Za-z0-9_-]+)/gu, (match, key) => {
+  return path.replace(/:([A-Za-z0-9_-]+\*?)(?:\{[^}]*\})?\??/gu, (match, key) => {
     if (!Object.prototype.hasOwnProperty.call(params, key)) {
       return match
     }

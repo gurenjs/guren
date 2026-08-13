@@ -14,6 +14,8 @@ const definitions: RouteDefinitionLike[] = [
   { method: 'GET', path: '/library/:identifier', name: 'library.show' },
   { method: 'GET', path: '/posts', name: 'posts.index' },
   { method: 'GET', path: '/posts/:id', name: 'posts.show' },
+  { method: 'GET', path: '/items/:id{[0-9]+}', name: 'items.show' },
+  { method: 'GET', path: '/foo/:slug*', name: 'foo.show' },
   { method: 'POST', path: '/posts', name: 'posts.store' },
   {
     method: 'QUERY',
@@ -69,7 +71,15 @@ const client = createApiClient<ApiRoutes>({ baseUrl: 'http://localhost:3000' })
 
 void client.request('posts.index')
 void client.request('posts.show', { params: { id: 1 } })
+void client.request('items.show', { params: { id: 1 } })
+void client.request('foo.show', { params: { 'slug*': 'x' } })
 void client.request('posts.search', { body: { keywords: ['guren'] } })
+
+// @ts-expect-error the regex constraint must not leak into the param key
+void client.request('items.show', { params: { 'id{[0-9]+}': 1 } })
+
+// @ts-expect-error the bare name is not the real key — '*' is part of it
+void client.request('foo.show', { params: { slug: 'x' } })
 
 // @ts-expect-error a route with path params requires them
 void client.request('posts.show')
@@ -242,6 +252,25 @@ describe('generated createApiClient', () => {
     await createApiClient({ baseUrl: PAGE_ORIGIN }).request('library.show', { params: { id: 1, identifier: 2 } })
 
     expect(calls[0]!.url).toBe(`${PAGE_ORIGIN}/library/2`)
+  })
+
+  it('substitutes params through Hono modifiers in the URL', async () => {
+    const { calls } = stubFetch()
+
+    await createApiClient({ baseUrl: 'http://api.example.com' }).request('items.show', { params: { id: 7 } })
+
+    expect(calls[0]!.url).toBe('http://api.example.com/items/7')
+  })
+
+  // `:slug*` is not Hono wildcard syntax (verified directly against Hono;
+  // see docs/*/guides/routing.md): it registers a single-segment param whose
+  // runtime key really is the literal string `slug*`.
+  it('substitutes a literal `:name*` param under its real key', async () => {
+    const { calls } = stubFetch()
+
+    await createApiClient({ baseUrl: 'http://api.example.com' }).request('foo.show', { params: { 'slug*': 'x' } })
+
+    expect(calls[0]!.url).toBe('http://api.example.com/foo/x')
   })
 
   it('omits the header on safe methods', async () => {

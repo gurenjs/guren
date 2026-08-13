@@ -977,7 +977,12 @@ function createRouteBuilder<M extends string = never>(route: RegisteredRoute, na
 }
 
 function substituteParams(path: string, params: Record<string, string | number>): string {
-  return path.replace(/:([A-Za-z0-9_-]+)/gu, (match, key) => {
+  // A trailing regex constraint (`{...}`) or `?` is a Hono modifier consumed
+  // with the token but excluded from the key; a trailing `*` is part of the
+  // literal key (`:slug*` names a single-segment param whose Hono runtime
+  // key really is `slug*`) — see PATH_PARAM_TYPE_HELPERS in
+  // @guren/cli's routes-types-fragments.ts for the full rule this mirrors.
+  return path.replace(/:([A-Za-z0-9_-]+\*?)(?:\{[^}]*\})?\??/gu, (match, key) => {
     if (!Object.prototype.hasOwnProperty.call(params, key)) {
       return match
     }
@@ -1246,8 +1251,12 @@ async function resolveModelBindings(
   const resolved: unknown[] = []
   const params = c.req.param()
 
-  // Get path params in order from the route pattern
-  const pathParams = path?.match(/:([a-zA-Z0-9_-]+)/g)?.map(p => p.slice(1)) ?? []
+  // Get path params in order from the route pattern. A regex constraint
+  // (`:id{[0-9]+}`) may itself contain `:`, so it must be dropped first —
+  // otherwise a `:` inside the constraint reads as another param and shifts
+  // this positional list out of sync with modelBindings' insertion order.
+  const withoutPatterns = path?.replace(/\{[^}]*\}/gu, '')
+  const pathParams = withoutPatterns?.match(/:([a-zA-Z0-9_-]+)/g)?.map(p => p.slice(1)) ?? []
 
   for (const param of pathParams) {
     const resolver = modelBindings.get(param)
@@ -1315,7 +1324,12 @@ function serializeBindings(
 ): Record<string, string> | undefined {
   const entries = new Map<string, string>()
 
-  for (const param of path.match(/:(\w+)/g) ?? []) {
+  // A regex constraint (`:id{[0-9]+}`) may itself contain `:`, so it must be
+  // dropped first — otherwise a `:` inside the constraint reads as another
+  // param name.
+  const withoutPatterns = path.replace(/\{[^}]*\}/gu, '')
+
+  for (const param of withoutPatterns.match(/:(\w+)/g) ?? []) {
     const name = routerBindingNames.get(param.slice(1))
     if (name) entries.set(param.slice(1), name)
   }

@@ -854,3 +854,62 @@ describe('Router QUERY method (RFC 10008)', () => {
     expect(def!.middlewareNames).toEqual(['auth'])
   })
 })
+
+describe('Router route() with Hono path modifiers', () => {
+  it('substitutes a regex-constrained param without leaking the constraint', () => {
+    const router = new Router()
+    router.get('/items/:id{[0-9]+}', [StubController, 'show']).name('items.show')
+
+    expect(router.route('items.show', { id: 7 })).toBe('/items/7')
+  })
+
+  it('substitutes an optional param without leaving the ? marker', () => {
+    const router = new Router()
+    router.get('/archive/:slug?', [StubController, 'show']).name('archive.show')
+
+    expect(router.route('archive.show', { slug: 'news' })).toBe('/archive/news')
+  })
+
+  it('substitutes an optional regex-constrained param', () => {
+    const router = new Router()
+    router.get('/tags/:code{[a-z]+}?', [StubController, 'show']).name('tags.show')
+
+    expect(router.route('tags.show', { code: 'abc' })).toBe('/tags/abc')
+  })
+
+  it('substitutes a param whose constraint contains a slash character class', () => {
+    const router = new Router()
+    router.get('/docs/:path{[^/]+}/meta', [StubController, 'show']).name('docs.meta')
+
+    expect(router.route('docs.meta', { path: 'intro' })).toBe('/docs/intro/meta')
+  })
+
+  it('leaves the whole token in place when the param is not supplied', () => {
+    const router = new Router()
+    router.get('/items/:id{[0-9]+}', [StubController, 'show']).name('items.show')
+
+    expect(router.route('items.show', {})).toBe('/items/:id{[0-9]+}')
+  })
+
+  it('does not clobber a longer param that shares a prefix', () => {
+    const router = new Router()
+    router.get('/posts/:id/:idx', [StubController, 'show']).name('posts.pair')
+
+    expect(router.route('posts.pair', { id: 1, idx: 2 })).toBe('/posts/1/2')
+  })
+
+  it('substitutes a literal `:name*` param under its real Hono key (name + `*`)', async () => {
+    // `:slug*` is not Hono wildcard syntax — verified directly against Hono
+    // (see docs/*/guides/routing.md): it registers a single-segment param
+    // whose runtime key is the literal string `slug*`, not `slug`.
+    const router = new Router()
+    router.get('/foo/:slug*', [StubController, 'show']).name('foo.show')
+
+    expect(router.route('foo.show', { 'slug*': 'x' })).toBe('/foo/x')
+
+    const app = new Hono()
+    router.mount(app)
+    const response = await app.request('/foo/x')
+    expect(response.status).toBe(200)
+  })
+})

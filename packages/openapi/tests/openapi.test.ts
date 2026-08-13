@@ -59,6 +59,47 @@ describe('@guren/openapi', () => {
     expect(document.paths['/posts/{id}']?.post?.responses['422']).toBeDefined()
   })
 
+  it('keeps Hono path modifiers out of path templates, parameters, and operation ids', () => {
+    // No `name`: operationId falls back to `name` when present, and these
+    // routes have to exercise buildOperationId's own path-derived id.
+    const definitions: RouteDefinition[] = [
+      { method: 'GET', path: '/items/:id{[0-9]+}' },
+      { method: 'GET', path: '/tags/:code{[a-z]+}?' },
+      { method: 'GET', path: '/docs/:path{[^/]+}/meta' },
+      // `:slug*` is not Hono wildcard syntax — its runtime param key is the
+      // literal `slug*`. OpenAPI path templates follow RFC 6570, where
+      // `{name*}` already means "explode", so the `*` is dropped here rather
+      // than kept (unlike the TS/runtime param-key rule, which keeps it —
+      // see PATH_PARAM_TYPE_HELPERS in @guren/cli's routes-types-fragments.ts).
+      { method: 'GET', path: '/foo/:slug*' },
+    ]
+
+    const { document, warnings } = generateOpenApiDocument(definitions, {
+      title: 'Blog API',
+      version: '1.0.0',
+    })
+
+    expect(warnings).toEqual([])
+    expect(Object.keys(document.paths).sort()).toEqual([
+      '/docs/{path}/meta',
+      '/foo/{slug}',
+      '/items/{id}',
+      '/tags/{code}',
+    ])
+    expect(document.paths['/items/{id}']?.get?.parameters).toEqual([
+      { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+    ])
+    expect(document.paths['/tags/{code}']?.get?.parameters).toEqual([
+      { name: 'code', in: 'path', required: true, schema: { type: 'string' } },
+    ])
+    expect(document.paths['/foo/{slug}']?.get?.parameters).toEqual([
+      { name: 'slug', in: 'path', required: true, schema: { type: 'string' } },
+    ])
+    expect(document.paths['/items/{id}']?.get?.operationId).toBe('getItemsById')
+    expect(document.paths['/tags/{code}']?.get?.operationId).toBe('getTagsByCode')
+    expect(document.paths['/foo/{slug}']?.get?.operationId).toBe('getFooBySlug')
+  })
+
   it('returns warnings for non-zod schemas', () => {
     const definitions: RouteDefinition[] = [
       {

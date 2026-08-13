@@ -1,7 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from 'bun:test'
 import { mkdtemp, rm, readFile, mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { pathToFileURL } from 'node:url'
+import ts from 'typescript'
+import { checkTypes, COLD_TSC_TIMEOUT } from './helpers'
 import {
   buildDeclarationContent,
   buildRouteModuleContent,
@@ -33,6 +36,14 @@ describe('toTypeLiteral', () => {
 
   it('handles path without leading slash', () => {
     expect(toTypeLiteral('users/:id')).toBe('`/users/${string}`')
+  })
+
+  it('drops Hono regex constraints from dynamic segments', () => {
+    expect(toTypeLiteral('/items/:id{[0-9]+}')).toBe('`/items/${string}`')
+  })
+
+  it('keeps segments intact when a constraint contains a slash', () => {
+    expect(toTypeLiteral('/docs/:path{[^/]+}/meta')).toBe('`/docs/${string}/meta`')
   })
 })
 
@@ -232,3 +243,115 @@ describe('buildRouteModuleContent', () => {
     }
   })
 })
+
+/**
+ * The generated module is app-facing code, so string assertions only prove it
+ * mentions the right names. These run it (transpile, import, call `route()`)
+ * and compile a usage probe against it, covering the one bug class both
+ * gates exist for: Hono path modifiers (`{regex}`, `?`, `*`) leaking into
+ * param keys or substituted URLs.
+ */
+describe('generated route() with Hono path modifiers', () => {
+  const definitions: RouteDefinition[] = [
+    { method: 'GET', path: '/items/:id{[0-9]+}', name: 'items.show' },
+    { method: 'GET', path: '/archive/:slug?', name: 'archive.show' },
+    { method: 'GET', path: '/tags/:code{[a-z]+}?', name: 'tags.show' },
+    { method: 'GET', path: '/docs/:path{[^/]+}/meta', name: 'docs.meta' },
+    { method: 'GET', path: '/posts/:id/:idx', name: 'posts.pair' },
+    { method: 'GET', path: '/foo/:slug*', name: 'foo.show' },
+  ]
+
+  type RouteFn = (name: string, ...args: unknown[]) => string
+
+  let dir: string
+  let usageFile: string
+  let route: RouteFn
+
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'guren-cli-routes-gen-'))
+    usageFile = join(dir, 'usage.ts')
+    const source = buildRouteModuleContent(definitions, { source: 'routes/web.ts' })
+    const modulePath = join(dir, 'routes.gen.mjs')
+    await Promise.all([
+      writeFile(join(dir, 'routes.gen.ts'), source, 'utf8'),
+      writeFile(usageFile, ROUTES_USAGE_PROBE, 'utf8'),
+      writeFile(modulePath, new Bun.Transpiler({ loader: 'ts' }).transformSync(source), 'utf8'),
+    ])
+    ;({ route } = await import(pathToFileURL(modulePath).href))
+  })
+
+  afterAll(async () => {
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  it('substitutes a regex-constrained param without leaking the constraint', () => {
+    expect(route('items.show', { id: 7 })).toBe('/items/7')
+  })
+
+  it('substitutes an optional param without leaving the ? marker', () => {
+    expect(route('archive.show', { slug: 'news' })).toBe('/archive/news')
+  })
+
+  it('substitutes an optional regex-constrained param', () => {
+    expect(route('tags.show', { code: 'abc' })).toBe('/tags/abc')
+  })
+
+  it('substitutes a param whose constraint contains a slash character class', () => {
+    expect(route('docs.meta', { path: 'intro' })).toBe('/docs/intro/meta')
+  })
+
+  it('does not clobber a longer param that shares a prefix', () => {
+    expect(route('posts.pair', { id: 1, idx: 2 })).toBe('/posts/1/2')
+  })
+
+  it('substitutes a literal `:name*` param under its real Hono key (name + `*`)', () => {
+    expect(route('foo.show', { 'slug*': 'x' })).toBe('/foo/x')
+  })
+
+  it('still appends the query string after a modifier substitution', () => {
+    expect(route('items.show', { id: 7 }, { tab: 'specs' })).toBe('/items/7?tab=specs')
+  })
+
+  it('compiles the usage probe against the emitted module', () => {
+    expect(checkTypes([usageFile], routesCompilerOptions)).toEqual([])
+  }, COLD_TSC_TIMEOUT)
+})
+
+const ROUTES_USAGE_PROBE = `import { route, routes } from './routes.gen'
+
+// Modifiers must normalize to the bare label in RouteParams keys, except a
+// literal '*' (not a Hono modifier — see PATH_PARAM_TYPE_HELPERS), which
+// stays part of the key.
+void route('items.show', { id: 1 })
+void route('archive.show', { slug: 'news' })
+void route('tags.show', { code: 'abc' })
+void route('docs.meta', { path: 'intro' })
+void route('foo.show', { 'slug*': 'x' })
+void routes.items.show({ id: 1 })
+
+// @ts-expect-error the regex constraint must not leak into the param key
+void route('items.show', { 'id{[0-9]+}': 1 })
+
+// @ts-expect-error the optional marker must not leak into the param key
+void route('archive.show', { 'slug?': 'news' })
+
+// @ts-expect-error the bare name is not the real key — '*' is part of it
+void route('foo.show', { slug: 'x' })
+
+// @ts-expect-error a route with path params requires them
+void route('items.show')
+`
+
+const routesCompilerOptions: ts.CompilerOptions = {
+  strict: true,
+  noEmit: true,
+  skipLibCheck: true,
+  target: ts.ScriptTarget.ES2022,
+  module: ts.ModuleKind.ESNext,
+  moduleResolution: ts.ModuleResolutionKind.Bundler,
+  lib: ['lib.es2022.d.ts', 'lib.dom.d.ts'],
+  // No @types scan: the default type-root walk climbs ancestor directories,
+  // so a TMPDIR inside a workspace would silently pull in — and type-check —
+  // every @types package it finds there.
+  types: [],
+}
