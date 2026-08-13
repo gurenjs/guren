@@ -416,7 +416,7 @@ export function referencesIdentifier(body: string, name: string): boolean {
   return new RegExp(`\\b${escapeRegExp(name)}\\b`, 'u').test(body)
 }
 
-const SAFE_MODULE_NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/u
+const SAFE_MODULE_NAME_RE = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/u
 
 /**
  * kebab-cases a `--module <name>`/`make:module <name>` value and rejects
@@ -427,13 +427,25 @@ const SAFE_MODULE_NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/u
  * the result to be one or more alphanumeric segments joined by single
  * hyphens rejects those, plus anything else that isn't a plain directory
  * name (empty, all-symbol, leading/trailing hyphen, etc.) in one check.
+ *
+ * The first segment must additionally start with a letter, because the name
+ * is not only a directory: codegen PascalCases it to qualify the identifiers
+ * it emits for that module (`modules/billing/InvoiceResource` becomes
+ * `Data.BillingInvoice`), and no TypeScript identifier may start with a
+ * digit. `modules/2fa/` would yield `2faInvoice`, which the generator has to
+ * drop. Refusing the name here is the whole of the fix: every generator that
+ * qualifies a generated identifier by module name inherits the constraint,
+ * so this validator — not any one generator — is where it belongs. Later
+ * segments are unconstrained; only the leading character reaches the front
+ * of an identifier.
  */
 export function safeModuleName(value: string): string {
   const name = kebabCase(value)
   if (!SAFE_MODULE_NAME_RE.test(name)) {
     throw new Error(
-      `Invalid module name "${value}" — it becomes a directory segment under modules/, so it must be one or `
-      + `more alphanumeric segments joined by hyphens (e.g. "billing", "billing-ops").`,
+      `Invalid module name "${value}" — it becomes a directory segment under modules/ and is PascalCased into `
+      + `generated type names, so it must be one or more alphanumeric segments joined by hyphens, starting with `
+      + `a letter (e.g. "billing", "billing-ops", "two-factor" rather than "2fa").`,
     )
   }
   return name
