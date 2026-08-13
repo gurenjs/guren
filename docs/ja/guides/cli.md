@@ -271,6 +271,8 @@ Inertiaのページは `modules/<name>/` 配下にコロケーションされま
 
 `agent:init --target` には `claude`(既定)・`codex`・`cursor`・`copilot`・`opencode`・`all` を指定できます。`agent:sync` はユーザー所有のファイル(`CLAUDE.md`・`AGENTS.md`・`.claude/settings.json`・各 MCP クライアント設定)を上書きしないため、カスタマイズはフレームワークの更新後も維持されます(削除したユーザー所有ファイルは再作成されます)。MCP 設定が既に存在する場合、`agent:init` はファイルを上書きせず、手動で追記するためのスニペットを表示します。
 
+リリースでフレームワークのルールやスキルが改名・削除されると、旧ファイルは配布先の全ルートに残り続けます。特に Cursor・Copilot は古い `.cursor/rules/guren-*.mdc` / `.github/instructions/guren-*.instructions.md` を glob で読み込み続けます。`agent:sync` はフレームワーク管理ディレクトリ(rules/skills のルートと `guren-*` ネイティブルール)内で現行ハーネスに含まれないファイルを一覧表示し、`agent:sync --prune` を付けるとそれらを削除します。`--prune` なしでは一切削除しないため、管理ディレクトリに置いた自作ルールが既定で消えることはありません。ただし `--prune` は一覧に出たものを自作ファイル含めてすべて削除するので、実行前に一覧を確認してください(自作ルールは `CLAUDE.md`/`AGENTS.md` に書くか、Cursor/Copilot では `guren-` プレフィックス以外の名前にしておくと対象外になります)。
+
 ## デプロイレシピ生成
 
 CLI からデプロイ設定ファイルを直接生成できます。

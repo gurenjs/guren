@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
-import { mkdtemp, mkdir, rm, readFile, writeFile, access } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, readFile, rename, writeFile, access } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { installAgentHarness } from '../src/agent-harness'
+import { AGENT_TARGETS } from '../src/agent-targets'
 
 describe('installAgentHarness', () => {
   let tempDir: string
@@ -247,6 +248,130 @@ describe('installAgentHarness', () => {
     // the user-owned MCP snippet is not re-planned by a detected sync,
     // so a deleted .codex/config.toml stays deleted
     expect(result.written).not.toContain('.codex/config.toml')
+  })
+
+  it('sync reports what a renamed canonical rule left behind without deleting it', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init', targets: ['claude', 'cursor'] })
+    // simulate an install from an older release whose canonical rule carried the old name
+    await rename(join(tempDir, '.claude/rules/orm-models.md'), join(tempDir, '.claude/rules/models.md'))
+    await rename(join(tempDir, '.agents/rules/orm-models.md'), join(tempDir, '.agents/rules/models.md'))
+    await rename(
+      join(tempDir, '.cursor/rules/guren-orm-models.mdc'),
+      join(tempDir, '.cursor/rules/guren-models.mdc'),
+    )
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'sync' })
+
+    expect(result.stale).toEqual([
+      '.agents/rules/models.md',
+      '.claude/rules/models.md',
+      '.cursor/rules/guren-models.mdc',
+    ])
+    expect(result.pruned).toEqual([])
+    // the current name is restored, the old copies stay until an explicit --prune
+    expect(result.written).toContain('.claude/rules/orm-models.md')
+    await access(join(tempDir, '.claude/rules/models.md'))
+    await access(join(tempDir, '.cursor/rules/guren-models.mdc'))
+  })
+
+  it('sync --prune deletes the renamed rule leftovers in every root', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init', targets: ['claude', 'cursor', 'copilot'] })
+    await rename(join(tempDir, '.claude/rules/orm-models.md'), join(tempDir, '.claude/rules/models.md'))
+    await rename(join(tempDir, '.agents/rules/orm-models.md'), join(tempDir, '.agents/rules/models.md'))
+    await rename(
+      join(tempDir, '.cursor/rules/guren-orm-models.mdc'),
+      join(tempDir, '.cursor/rules/guren-models.mdc'),
+    )
+    await rename(
+      join(tempDir, '.github/instructions/guren-orm-models.instructions.md'),
+      join(tempDir, '.github/instructions/guren-models.instructions.md'),
+    )
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true })
+
+    expect(result.pruned).toEqual(result.stale)
+    expect(result.pruned).toEqual([
+      '.agents/rules/models.md',
+      '.claude/rules/models.md',
+      '.cursor/rules/guren-models.mdc',
+      '.github/instructions/guren-models.instructions.md',
+    ])
+    await expect(access(join(tempDir, '.claude/rules/models.md'))).rejects.toThrow()
+    await expect(access(join(tempDir, '.cursor/rules/guren-models.mdc'))).rejects.toThrow()
+    // the rule under its current name is freshly written, not pruned
+    expect(await readFile(join(tempDir, '.cursor/rules/guren-orm-models.mdc'), 'utf8')).toContain(
+      'defineModel',
+    )
+  })
+
+  it('sync --prune removes a skill that left the canonical set, directory included', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init' })
+    await mkdir(join(tempDir, '.claude/skills/retired-skill'), { recursive: true })
+    await writeFile(join(tempDir, '.claude/skills/retired-skill/SKILL.md'), 'old skill\n', 'utf8')
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true })
+
+    expect(result.pruned).toEqual(['.claude/skills/retired-skill/SKILL.md'])
+    await expect(access(join(tempDir, '.claude/skills/retired-skill'))).rejects.toThrow()
+    await access(join(tempDir, '.claude/skills/dev-workflow/SKILL.md'))
+  })
+
+  it('sync --prune leaves user files outside the managed name patterns alone', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init', targets: ['cursor', 'copilot'] })
+    await writeFile(join(tempDir, '.cursor/rules/my-style.mdc'), 'user rule\n', 'utf8')
+    await writeFile(join(tempDir, '.github/instructions/team.instructions.md'), 'user instructions\n', 'utf8')
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true })
+
+    expect(result.stale).toEqual([])
+    expect(await readFile(join(tempDir, '.cursor/rules/my-style.mdc'), 'utf8')).toBe('user rule\n')
+    expect(await readFile(join(tempDir, '.github/instructions/team.instructions.md'), 'utf8')).toBe(
+      'user instructions\n',
+    )
+  })
+
+  it('sync reports a user file in the managed rules root but keeps it by default', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init' })
+    await writeFile(join(tempDir, '.claude/rules/team-conventions.md'), 'user rule\n', 'utf8')
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'sync' })
+
+    expect(result.stale).toEqual(['.claude/rules/team-conventions.md'])
+    expect(result.pruned).toEqual([])
+    expect(await readFile(join(tempDir, '.claude/rules/team-conventions.md'), 'utf8')).toBe('user rule\n')
+  })
+
+  it('sync --prune scans only the namespaces of the components being synced', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init' })
+    // an .agents tree with no managed evidence is not a detected component,
+    // so its namespace is out of scope for this sync
+    await mkdir(join(tempDir, '.agents/rules'), { recursive: true })
+    await writeFile(join(tempDir, '.agents/rules/leftover.md'), 'x\n', 'utf8')
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true })
+
+    expect(result.stale).toEqual([])
+    await access(join(tempDir, '.agents/rules/leftover.md'))
+  })
+
+  it('a fresh full install syncs with nothing stale', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init', targets: [...AGENT_TARGETS] })
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'sync' })
+
+    expect(result.stale).toEqual([])
+    expect(result.pruned).toEqual([])
+  })
+
+  it('init never reports or deletes stale candidates', async () => {
+    await mkdir(join(tempDir, '.claude/rules'), { recursive: true })
+    await writeFile(join(tempDir, '.claude/rules/extra.md'), 'user rule\n', 'utf8')
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'init', prune: true })
+
+    expect(result.stale).toEqual([])
+    expect(result.pruned).toEqual([])
+    expect(await readFile(join(tempDir, '.claude/rules/extra.md'), 'utf8')).toBe('user rule\n')
   })
 
   it('reports that .mcp.json is dead when no script enables the endpoint', async () => {

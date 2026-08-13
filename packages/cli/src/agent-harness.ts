@@ -1,4 +1,5 @@
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rm, rmdir, writeFile } from 'node:fs/promises'
+import type { Dirent } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import process from 'node:process'
@@ -6,6 +7,7 @@ import { fileExists, readIfExists, toPosixRelative } from './discovery'
 import {
   DETECTABLE_COMPONENTS,
   componentsForTargets,
+  managedNamespaces,
   normalizeComponents,
   planComponents,
   type AgentTarget,
@@ -44,11 +46,29 @@ export interface AgentHarnessOptions {
    * default is whatever components are already installed on disk.
    */
   targets?: AgentTarget[]
+  /**
+   * Sync only: delete the files reported in `stale` instead of just listing
+   * them. Off by default because the managed namespaces can hold
+   * user-authored files under colliding names — the report names every
+   * candidate first, and deletion stays an explicit opt-in.
+   */
+  prune?: boolean
 }
 
 export interface AgentHarnessResult {
   written: string[]
   skipped: string[]
+  /**
+   * Sync only: files inside the framework-managed namespaces
+   * (`managedNamespaces`) that the current plan no longer writes — what a
+   * renamed or removed canonical rule/skill leaves behind, in every root it
+   * fanned out to. Reported so the user can decide; deleted only with
+   * `prune`. A user file under a colliding name lands here too, which is why
+   * the default is report-only.
+   */
+  stale: string[]
+  /** The subset of `stale` that `prune: true` deleted. */
+  pruned: string[]
   /**
    * True when the installed MCP client config points at an endpoint no script
    * in the app enables. The endpoint is opt-in via `GUREN_MCP=1`; apps
@@ -157,6 +177,67 @@ async function detectInstalledComponents(
   return normalizeComponents(components)
 }
 
+/**
+ * Files inside the active components' managed namespaces that the current
+ * plan does not write. Planned-but-user-owned files (none live in a
+ * namespace today) are excluded via the full planned path set, so a future
+ * planner change cannot turn its own output into a prune candidate.
+ */
+async function findStaleManagedFiles(
+  cwd: string,
+  components: HarnessComponent[],
+  plannedPaths: ReadonlySet<string>,
+): Promise<string[]> {
+  const stale: string[] = []
+  for (const namespace of managedNamespaces(components)) {
+    let entries: Dirent[]
+    try {
+      entries = await readdir(join(cwd, namespace.dir), {
+        recursive: namespace.recursive,
+        withFileTypes: true,
+      })
+    } catch {
+      continue // namespace directory does not exist — nothing to clean
+    }
+    for (const entry of entries) {
+      if (!entry.isFile()) {
+        continue
+      }
+      if (
+        namespace.fileName &&
+        !(entry.name.startsWith(namespace.fileName.prefix) && entry.name.endsWith(namespace.fileName.suffix))
+      ) {
+        continue
+      }
+      const relPath = toPosixRelative(cwd, join(entry.parentPath, entry.name))
+      if (!plannedPaths.has(relPath)) {
+        stale.push(relPath)
+      }
+    }
+  }
+  return stale.sort()
+}
+
+/** Depth-first removal of directories pruning emptied (rmdir refuses non-empty ones). */
+async function removeEmptiedDirs(dir: string): Promise<void> {
+  let entries: Dirent[]
+  try {
+    entries = await readdir(dir, { withFileTypes: true })
+  } catch {
+    return
+  }
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      await removeEmptiedDirs(join(dir, entry.name))
+    }
+  }
+  try {
+    await rmdir(dir)
+  } catch {
+    // still holds files — keep it
+  }
+}
+
 export async function installAgentHarness(options: AgentHarnessOptions = {}): Promise<AgentHarnessResult> {
   const cwd = resolve(options.cwd ?? process.cwd())
   const mode = options.mode ?? 'init'
@@ -174,7 +255,8 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
   const skipped: string[] = []
   const mcpMergeHints: AgentHarnessResult['mcpMergeHints'] = []
 
-  for (const file of planComponents(components, templates, appTitle)) {
+  const plan = planComponents(components, templates, appTitle)
+  for (const file of plan) {
     const destPath = join(cwd, file.path)
     const exists = await fileExists(cwd, file.path)
 
@@ -199,9 +281,30 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
     written.push(file.path)
   }
 
+  // Stale cleanup is a sync concern: init installs into places it has never
+  // written, so "not in the plan" carries no leftover signal there.
+  const stale =
+    mode === 'sync'
+      ? await findStaleManagedFiles(cwd, components, new Set(plan.map((file) => file.path)))
+      : []
+  const pruned: string[] = []
+  if (options.prune && stale.length > 0) {
+    for (const relPath of stale) {
+      await rm(join(cwd, relPath), { force: true })
+      pruned.push(relPath)
+    }
+    for (const namespace of managedNamespaces(components)) {
+      if (pruned.some((relPath) => relPath.startsWith(`${namespace.dir}/`))) {
+        await removeEmptiedDirs(join(cwd, namespace.dir))
+      }
+    }
+  }
+
   return {
     written,
     skipped,
+    stale,
+    pruned,
     mcpEndpointNotEnabled: !(await scriptsEnableMcp(cwd)),
     mcpMergeHints,
   }

@@ -53,6 +53,77 @@ export type DetectableComponent = (typeof DETECTABLE_COMPONENTS)[number]
  */
 const MCP_ENDPOINT_MARKER = '_guren/mcp'
 
+/**
+ * A directory (or a name pattern within one) whose matching files the planner
+ * owns outright: anything there that the current plan does not write is a
+ * leftover from an earlier harness version — a renamed or removed canonical
+ * rule or skill — and `agent:sync` may report it and, with `--prune`, delete
+ * it.
+ */
+export interface ManagedNamespace {
+  /** App-relative POSIX directory the claim applies under. */
+  dir: string
+  /**
+   * File-name pattern marking a file as framework-owned inside a directory
+   * shared with user-authored files. Absent → every file under `dir` is
+   * claimed (the canonical rules/skills roots).
+   */
+  fileName?: { prefix: string; suffix: string }
+  /** Whether the claim extends into subdirectories. */
+  recursive: boolean
+}
+
+/**
+ * The native-rule namespaces double as the path rule `planComponents` writes
+ * with, so the prune pattern and the written names cannot drift apart.
+ */
+const CURSOR_RULES_NAMESPACE = {
+  dir: '.cursor/rules',
+  fileName: { prefix: 'guren-', suffix: '.mdc' },
+  recursive: false,
+} satisfies ManagedNamespace
+
+const COPILOT_RULES_NAMESPACE = {
+  dir: '.github/instructions',
+  fileName: { prefix: 'guren-', suffix: '.instructions.md' },
+  recursive: false,
+} satisfies ManagedNamespace
+
+function nativeRulePath(
+  namespace: typeof CURSOR_RULES_NAMESPACE | typeof COPILOT_RULES_NAMESPACE,
+  stem: string,
+): string {
+  return `${namespace.dir}/${namespace.fileName.prefix}${stem}${namespace.fileName.suffix}`
+}
+
+/**
+ * The namespaces the given components own. Deliberately narrower than the
+ * managed file set: `.claude/agents/` and `.claude/hooks/` ship managed files
+ * too, but those directories are the conventional home for user-authored
+ * subagents and hooks, and a name pattern cannot tell the two apart — so
+ * stale copies there are left to the user rather than claimed for pruning.
+ * The rules/skills roots are claimed wholesale: they are the fan-out set a
+ * rename multiplies across every root, and the entry documents present them
+ * as the framework's rule catalog.
+ */
+export function managedNamespaces(components: Iterable<HarnessComponent>): ManagedNamespace[] {
+  const active = new Set<HarnessComponent>(components)
+  const namespaces: ManagedNamespace[] = []
+  if (active.has('claude')) {
+    namespaces.push({ dir: '.claude/rules', recursive: true }, { dir: '.claude/skills', recursive: true })
+  }
+  if (active.has('agents')) {
+    namespaces.push({ dir: '.agents/rules', recursive: true }, { dir: '.agents/skills', recursive: true })
+  }
+  if (active.has('cursor')) {
+    namespaces.push(CURSOR_RULES_NAMESPACE)
+  }
+  if (active.has('copilot')) {
+    namespaces.push(COPILOT_RULES_NAMESPACE)
+  }
+  return namespaces
+}
+
 export interface PlannedFile {
   /** App-relative POSIX path, e.g. `.agents/rules/testing.md`. */
   path: string
@@ -297,14 +368,18 @@ export function planComponents(
 
   if (components.includes('cursor')) {
     for (const [stem, doc] of nativeRuleDocs) {
-      add({ path: `.cursor/rules/guren-${stem}.mdc`, content: renderCursorRule(doc), managed: true })
+      add({
+        path: nativeRulePath(CURSOR_RULES_NAMESPACE, stem),
+        content: renderCursorRule(doc),
+        managed: true,
+      })
     }
     addMcpConfig('.cursor/mcp.json', 'targets/cursor/mcp.json')
   }
   if (components.includes('copilot')) {
     for (const [stem, doc] of nativeRuleDocs) {
       add({
-        path: `.github/instructions/guren-${stem}.instructions.md`,
+        path: nativeRulePath(COPILOT_RULES_NAMESPACE, stem),
         content: renderCopilotRule(doc),
         managed: true,
       })

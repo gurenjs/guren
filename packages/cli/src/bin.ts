@@ -2002,6 +2002,14 @@ function reportAgentHarnessResult(result: AgentHarnessResult): void {
   if (result.skipped.length > 0) {
     consola.info(`Skipped ${result.skipped.length} existing file(s): ${result.skipped.join(', ')}`)
   }
+  if (result.pruned.length > 0) {
+    consola.success(`Removed ${result.pruned.length} stale managed file(s): ${result.pruned.join(', ')}`)
+  } else if (result.stale.length > 0) {
+    consola.info(
+      `Found ${result.stale.length} file(s) in framework-managed directories that are not part of the current harness: ${result.stale.join(', ')}\n` +
+        'If they are leftovers from an earlier harness version, remove them with `bunx guren agent:sync --prune`. Files you authored yourself are safe to keep — sync never deletes without --prune.',
+    )
+  }
   for (const hint of result.mcpMergeHints) {
     consola.info(
       `${hint.path} already exists, so it was left alone. Add the Guren MCP server to it yourself:\n${hint.snippet}`,
@@ -2070,6 +2078,11 @@ const agentSyncCommand = defineCommand({
       type: 'string',
       description: `${AGENT_TARGETS_HELP} Default: every target detected on disk.`,
     },
+    prune: {
+      type: 'boolean',
+      description:
+        'Delete files in framework-managed directories (rules/skills roots, guren-* native rules) that are no longer part of the harness. Without this flag they are only reported.',
+    },
     app: {
       type: 'string',
       description: 'Application root directory.',
@@ -2080,6 +2093,7 @@ const agentSyncCommand = defineCommand({
       cwd: args.app,
       mode: 'sync',
       targets: args.target ? parseTargetArg(args.target) : undefined,
+      prune: Boolean(args.prune),
     })
     reportAgentHarnessResult(result)
     consola.success('Agent harness synced to the latest framework version.')
