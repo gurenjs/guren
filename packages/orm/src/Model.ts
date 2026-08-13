@@ -9,7 +9,7 @@ import { executeObservers } from './ModelObserver'
 import type { ModelObserver, ModelObserverConstructor } from './ModelObserver'
 import { ModelNotFoundException } from './ModelNotFoundException'
 import { QueryBuilder, PREPARED_UPDATE } from './QueryBuilder'
-import type { WhereOperator } from './QueryBuilder'
+import type { WhereGroupCallback, WhereOperator } from './QueryBuilder'
 import { serializeRecord, serializeRecords } from './serialization'
 import { MassAssignmentException } from './MassAssignmentException'
 
@@ -1001,16 +1001,21 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    *   .limit(10)
    *   .get()
    */
+  static where<T extends typeof Model>(this: T, callback: WhereGroupCallback<TRecordFor<T>>): QueryBuilder<TRecordFor<T>>
   static where<T extends typeof Model>(this: T, conditions: WhereClauseFor<T>): QueryBuilder<TRecordFor<T>>
   static where<T extends typeof Model>(this: T, field: keyof TRecordFor<T> & string, value: unknown): QueryBuilder<TRecordFor<T>>
   static where<T extends typeof Model>(this: T, field: keyof TRecordFor<T> & string, operator: WhereOperator, value: unknown): QueryBuilder<TRecordFor<T>>
   static where<T extends typeof Model>(
     this: T,
-    fieldOrConditions: (keyof TRecordFor<T> & string) | WhereClauseFor<T>,
+    fieldOrConditions: (keyof TRecordFor<T> & string) | WhereClauseFor<T> | WhereGroupCallback<TRecordFor<T>>,
     operatorOrValue?: unknown,
     value?: unknown,
   ): QueryBuilder<TRecordFor<T>> {
     const builder = this.newQuery()
+
+    if (typeof fieldOrConditions === 'function') {
+      return builder.where(fieldOrConditions)
+    }
 
     if (typeof fieldOrConditions === 'object' && fieldOrConditions !== null) {
       return builder.where(fieldOrConditions as Partial<Record<keyof TRecordFor<T> & string, unknown>>)

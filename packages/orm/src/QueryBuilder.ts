@@ -43,6 +43,14 @@ export interface GroupCondition {
 /** A where condition - either simple or grouped. */
 export type WhereCondition = SimpleCondition | GroupCondition
 
+/**
+ * Callback receiving a nested builder to compose a parenthesized
+ * condition group, mirroring Laravel's `where(fn ($q) => ...)`.
+ */
+export type WhereGroupCallback<TRecord extends PlainObject = PlainObject> = (
+  query: QueryBuilder<TRecord>,
+) => void
+
 /** Options carried by the QueryBuilder for query execution. */
 export interface QueryBuilderOptions {
   orderBy: Array<{ column: string; direction: OrderDirection }>
@@ -97,19 +105,41 @@ export class QueryBuilder<
   /**
    * Add a where condition (AND).
    *
-   * Supports three calling signatures:
+   * Supports four calling signatures:
    * - `where(field, value)` - equality check
    * - `where(field, operator, value)` - comparison
    * - `where(object)` - multiple equality conditions
+   * - `where(callback)` - parenthesized condition group, AND-ed with the rest
+   *
+   * @example
+   * // (title LIKE ? OR excerpt LIKE ?) AND published = true
+   * await Post.where((q) => {
+   *   q.where('title', 'like', pattern).orWhere('excerpt', 'like', pattern)
+   * }).where('published', true)
    */
+  where(callback: WhereGroupCallback<TRecord>): this
   where<TKey extends FieldKey<TRecord>>(field: TKey, value: TRecord[TKey]): this
   where<TKey extends FieldKey<TRecord>>(field: TKey, operator: WhereOperator, value: unknown): this
   where(conditions: Partial<Record<FieldKey<TRecord>, unknown>>): this
   where(
-    fieldOrConditions: FieldKey<TRecord> | Partial<Record<FieldKey<TRecord>, unknown>>,
+    fieldOrConditions: FieldKey<TRecord> | Partial<Record<FieldKey<TRecord>, unknown>> | WhereGroupCallback<TRecord>,
     operatorOrValue?: unknown,
     value?: unknown,
   ): this {
+    if (typeof fieldOrConditions === 'function') {
+      const grouped = this.buildCallbackGroup(fieldOrConditions)
+      if (grouped) {
+        // A bare OR group at the top level would fold the preceding
+        // conditions into its OR; wrap it so it stays one AND-ed condition.
+        this.conditions.push(
+          grouped.type === 'group' && grouped.boolean === 'or'
+            ? { type: 'group', boolean: 'and', conditions: [grouped] }
+            : grouped,
+        )
+      }
+      return this
+    }
+
     if (typeof fieldOrConditions === 'object' && fieldOrConditions !== null) {
       for (const [key, val] of Object.entries(fieldOrConditions)) {
         if (val !== undefined) {
@@ -136,15 +166,26 @@ export class QueryBuilder<
    *
    * Same overloads as `where()`, but joins with OR logic.
    * Creates an OR group containing the new condition(s).
+   * With a callback, the group's conditions are parenthesized as a whole:
+   * `(preceding conditions) OR (callback group)`.
    */
+  orWhere(callback: WhereGroupCallback<TRecord>): this
   orWhere<TKey extends FieldKey<TRecord>>(field: TKey, value: TRecord[TKey]): this
   orWhere<TKey extends FieldKey<TRecord>>(field: TKey, operator: WhereOperator, value: unknown): this
   orWhere(conditions: Partial<Record<FieldKey<TRecord>, unknown>>): this
   orWhere(
-    fieldOrConditions: FieldKey<TRecord> | Partial<Record<FieldKey<TRecord>, unknown>>,
+    fieldOrConditions: FieldKey<TRecord> | Partial<Record<FieldKey<TRecord>, unknown>> | WhereGroupCallback<TRecord>,
     operatorOrValue?: unknown,
     value?: unknown,
   ): this {
+    if (typeof fieldOrConditions === 'function') {
+      const grouped = this.buildCallbackGroup(fieldOrConditions)
+      if (grouped) {
+        this.conditions.push({ type: 'group', boolean: 'or', conditions: [grouped] })
+      }
+      return this
+    }
+
     const orConditions: SimpleCondition[] = []
 
     if (typeof fieldOrConditions === 'object' && fieldOrConditions !== null) {
@@ -546,6 +587,21 @@ export class QueryBuilder<
     return { ...this.options }
   }
 
+  /**
+   * Run a grouping callback against a nested builder and fold the collected
+   * conditions into a single condition node.
+   *
+   * The nested builder intentionally skips global scopes (`defaultScope`,
+   * SoftDeletes): the outer builder already carries them, and re-applying
+   * them inside every group would duplicate — or, inside an OR group,
+   * weaken — their filters.
+   */
+  private buildCallbackGroup(callback: WhereGroupCallback<TRecord>): WhereCondition | null {
+    const nested = new QueryBuilder<TRecord>(this.modelClass, { trx: this.options.trx })
+    callback(nested)
+    return normalizeConditionSequence(nested.conditions)
+  }
+
   private addSimpleCondition(field: string, operator: WhereOperator, value: unknown): void {
     this.conditions.push({
       type: 'simple',
@@ -648,6 +704,49 @@ export class QueryBuilder<
 
     return copies as TResult[]
   }
+}
+
+/**
+ * Fold a builder's sequential condition list into one condition node.
+ *
+ * A builder's condition list has sequential semantics that only the
+ * top-level adapter rendering implements: an OR group folds everything
+ * before it into the OR (`.where(a).where(b).orWhere(c)` reads
+ * `(a AND b) OR c`). Inside a GroupCondition, adapters join members
+ * flatly with the group's boolean, so a nested list must be normalized
+ * here into a tree whose flat joins already express those semantics.
+ *
+ * Returns null when the list holds no renderable condition.
+ */
+function normalizeConditionSequence(conditions: WhereCondition[]): WhereCondition | null {
+  let folded: WhereCondition | null = null
+  let pendingAnd: WhereCondition[] = []
+
+  for (const condition of conditions) {
+    if (condition.type === 'group' && condition.boolean === 'or') {
+      if (condition.conditions.length === 0) continue
+      const andBlock = combineAnd(pendingAnd, folded)
+      pendingAnd = []
+      if (andBlock) {
+        folded = { type: 'group', boolean: 'or', conditions: [andBlock, ...condition.conditions] }
+      } else if (condition.conditions.length === 1) {
+        folded = condition.conditions[0]!
+      } else {
+        folded = { type: 'group', boolean: 'or', conditions: [...condition.conditions] }
+      }
+    } else {
+      pendingAnd.push(condition)
+    }
+  }
+
+  return combineAnd(pendingAnd, folded)
+}
+
+function combineAnd(andParts: WhereCondition[], existing: WhereCondition | null): WhereCondition | null {
+  const all = existing ? [existing, ...andParts] : [...andParts]
+  if (all.length === 0) return null
+  if (all.length === 1) return all[0]!
+  return { type: 'group', boolean: 'and', conditions: all }
 }
 
 /**

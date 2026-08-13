@@ -40,6 +40,7 @@ export { QueryBuilder } from './QueryBuilder'
 export type {
   WhereOperator,
   WhereCondition,
+  WhereGroupCallback,
   SimpleCondition,
   GroupCondition,
   ORMAdapterAdvanced,
