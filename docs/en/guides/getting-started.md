@@ -24,12 +24,13 @@ bunx create-guren-app my-app
 cd my-app
 ```
 
-The scaffolder asks two questions — the defaults are right for getting started:
+The scaffolder walks you through a few choices — the defaults are right for getting started:
 
 - **Rendering mode**: SSR (default) or SPA. SSR gives you server-rendered HTML with automatic Vite asset discovery.
 - **Database**: SQLite (default, zero-config), PostgreSQL, or MySQL.
+- **AI agents**: which coding agents to set up the [agent harness](./cli.md#ai-agent-harness) for — Claude Code (default), Codex, Cursor, GitHub Copilot, OpenCode.
 
-It then installs dependencies and creates a `.env` file with a generated `APP_KEY` for you. To skip the prompts, pass flags: `--mode ssr`, `--db sqlite`, or `--auth` to include authentication scaffolding from the start.
+It then installs dependencies and creates a `.env` file with a generated `APP_KEY` for you. Flags answer the prompts non-interactively — `--mode ssr`, `--db sqlite`, `--agents codex,cursor` — and `--auth` includes authentication scaffolding from the start.
 
 ### 2. Start the dev server
 

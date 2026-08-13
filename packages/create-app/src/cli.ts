@@ -111,6 +111,90 @@ async function resolveDatabase(flagValue: unknown): Promise<DatabaseDriver> {
   return (value as DatabaseDriver) ?? 'sqlite'
 }
 
+// Mirrors AGENT_TARGETS in @guren/cli's agent-targets.ts — create-app cannot
+// import it (the CLI is installed into the scaffolded app, not here). The
+// app's own `guren agent:init --target` re-validates, so drift fails loud at
+// install time, and tests/agent-choices-mirror.test.ts pins the two lists
+// against each other.
+const AGENT_CHOICES = ['claude', 'codex', 'cursor', 'copilot', 'opencode'] as const
+type AgentChoice = (typeof AGENT_CHOICES)[number]
+const AGENT_CHOICE_SET = new Set<string>(AGENT_CHOICES)
+const AGENT_CHOICES_HELP = `Supported values are: ${AGENT_CHOICES.join(', ')}, all, none.`
+const DEFAULT_AGENTS: AgentChoice[] = ['claude']
+
+/**
+ * The selection handed to `guren agent:init --target`: agent names, `['all']`
+ * forwarded verbatim (the app's CLI owns the expansion, so a framework
+ * release that learns a new target is not narrowed by this list), or null
+ * when the user opted out of the harness entirely.
+ */
+async function resolveAgents(flagValue: unknown): Promise<string[] | null> {
+  // citty accumulates a repeated --agents flag into an array; accept both
+  const raw = Array.isArray(flagValue) ? flagValue.join(',') : flagValue
+  if (typeof raw === 'string') {
+    // a Set both dedupes (so `none,none` still reads as plain "none") and
+    // preserves first-seen order for the --target list
+    const parts = new Set(
+      raw
+        .split(',')
+        .map((part) => part.trim().toLowerCase())
+        .filter(Boolean),
+    )
+    if (parts.size === 0) {
+      throw new Error(`Invalid --agents value. ${AGENT_CHOICES_HELP}`)
+    }
+    if (parts.has('none')) {
+      if (parts.size > 1) {
+        throw new Error('--agents "none" cannot be combined with other values.')
+      }
+      return null
+    }
+    for (const part of parts) {
+      if (part !== 'all' && !AGENT_CHOICE_SET.has(part)) {
+        throw new Error(`Invalid agent "${part}". ${AGENT_CHOICES_HELP}`)
+      }
+    }
+    return parts.has('all') ? ['all'] : [...parts]
+  }
+
+  if (!process.stdin.isTTY) {
+    return DEFAULT_AGENTS
+  }
+
+  const result = await consola.prompt('Which AI coding agents should the agent harness support?', {
+    type: 'multiselect',
+    options: [
+      { value: 'claude', label: 'Claude Code' },
+      { value: 'codex', label: 'Codex' },
+      { value: 'cursor', label: 'Cursor' },
+      { value: 'copilot', label: 'GitHub Copilot' },
+      { value: 'opencode', label: 'OpenCode' },
+    ],
+    initial: DEFAULT_AGENTS,
+    required: false,
+  })
+
+  // an unexpected prompt shape falls back to the default like the sibling
+  // resolvers do — never to "no harness"; only a selection positively read
+  // as empty means the user deselected everything
+  if (!Array.isArray(result)) {
+    return DEFAULT_AGENTS
+  }
+  if (result.length === 0) {
+    return null
+  }
+  const agents = result
+    .map((entry) =>
+      String(
+        typeof entry === 'object' && entry !== null && 'value' in entry
+          ? (entry as { value: unknown }).value
+          : entry,
+      ),
+    )
+    .filter((value) => AGENT_CHOICE_SET.has(value))
+  return agents.length > 0 ? agents : DEFAULT_AGENTS
+}
+
 async function resolveGitInit(flagValue: unknown, target: { dir: string; wasEmpty: boolean }): Promise<boolean> {
   if (flagValue === false) {
     return false
@@ -227,6 +311,11 @@ const command = defineCommand({
       type: 'boolean',
       description: 'Initialize a git repository and create an initial commit (prompted when interactive, off otherwise)',
     },
+    agents: {
+      type: 'string',
+      description:
+        'AI agents to set up the harness for: claude, codex, cursor, copilot, opencode, all, or none (prompted when interactive; default: claude)',
+    },
   },
   async run({ args }) {
     const target = args.target as string
@@ -251,6 +340,7 @@ const command = defineCommand({
       : await resolveRenderingMode(args.mode)
     const database = await resolveDatabase(args.db)
     // Asked here, applied last: every prompt runs before the long work starts.
+    const agents = await resolveAgents(args.agents)
     const shouldInitGit = await resolveGitInit(args.git, { dir: targetDir, wasEmpty: targetWasEmpty })
 
     await scaffoldAppBlueprint({
@@ -275,16 +365,25 @@ const command = defineCommand({
       installed = await installDependencies(targetDir)
     }
 
-    let harnessInstalled = false
-    if (installed) {
-      consola.start('Setting up AI agent harness...')
-      harnessInstalled = await runAppCli(targetDir, ['agent:init'])
-      if (harnessInstalled) {
-        consola.success('AI agent harness installed (CLAUDE.md, .claude/, .mcp.json)')
+    if (agents === null) {
+      consola.info(
+        'Skipping the AI agent harness. Add it later with `bunx guren agent:init --target <agents>`.',
+      )
+    } else {
+      const targetList = agents.join(',')
+      let harnessInstalled = false
+      if (installed) {
+        consola.start('Setting up AI agent harness...')
+        harnessInstalled = await runAppCli(targetDir, ['agent:init', '--target', targetList])
+        if (harnessInstalled) {
+          consola.success(`AI agent harness installed for: ${targetList}`)
+        }
       }
-    }
-    if (!harnessInstalled) {
-      consola.warn('AI agent harness was not installed automatically. Run `bunx guren agent:init` inside the app after installing dependencies.')
+      if (!harnessInstalled) {
+        consola.warn(
+          `AI agent harness was not installed automatically. Run \`bunx guren agent:init --target ${targetList}\` inside the app after installing dependencies.`,
+        )
+      }
     }
 
     let authInstalled = false
