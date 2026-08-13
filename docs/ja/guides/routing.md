@@ -237,7 +237,7 @@ router.get('/posts/:id', {
 | `query` | クエリパラメータの Zod スキーマ |
 | `body` | リクエストボディの Zod スキーマ |
 | `output` | レスポンスボディの Zod スキーマ |
-| `resource` | Resource クラスによるレスポンスヒント — スキーマなしで API クライアントを型付け |
+| `resource` | Resource クラスによるレスポンスヒント（スキーマなしで API クライアントを型付け） |
 | `bind` | ルートモデルバインディングマップ |
 | `middlewares` | ミドルウェアハンドラーの配列 |
 
