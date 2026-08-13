@@ -330,7 +330,7 @@ async function extractResourceType(
 type ObjectTypeRead =
   | { kind: 'body'; body: string }
   | { kind: 'none' }
-  | { kind: 'unreadable'; typeName: string; reason: string }
+  | { kind: 'unreadable'; typeName: string; reason: string; fix?: string }
 
 /**
  * The body of `interface <name> { … }` / `type <name> = { … }`, declared
@@ -349,19 +349,27 @@ type ObjectTypeRead =
  */
 function readObjectType(source: string, masked: string, namePattern: string): ObjectTypeRead {
   const declaration = new RegExp(
+    // Anchored to column 0, which is what "the file's payload type" means
+    // here: a declaration nested in a namespace, an ambient module or a
+    // function body is a different type that merely shares the name, and
+    // emitting its members as the Resource's payload is silently wrong. No
+    // formatter indents a top-level declaration, so the anchor costs nothing.
+    //
     // `[^{;]*` for the heritage clause, so `extends Record<string, unknown>`
     // is stepped over; `;` bounds it so an aliasless declaration cannot run
     // into a later statement's brace.
-    `(?:export\\s+)?(?:interface|type)\\s+(${namePattern})\\b\\s*(?:(=)\\s*|(extends[^{;]*))?\\{`,
-    'u',
+    `^(?:export\\s+)?(?:interface|type)\\s+(${namePattern})\\b\\s*(?:(=)\\s*|(extends[^{;]*))?\\{`,
+    'mu',
   )
   const match = declaration.exec(masked)
   if (!match) {
     // Declared, but not in a form with a body this can copy — `type X = string`,
     // an intersection, a generic. Distinguishing this from "not declared here"
     // is what lets the caller say which of the two it is.
-    const anyDeclaration = new RegExp(`(?:interface|type)\\s+(${namePattern})\\b(\\s*<)?`, 'u')
-      .exec(masked)
+    const anyDeclaration = new RegExp(
+      `^(?:export\\s+)?(?:interface|type)\\s+(${namePattern})\\b(\\s*<)?`,
+      'mu',
+    ).exec(masked)
     if (!anyDeclaration) return { kind: 'none' }
 
     return {
@@ -397,10 +405,24 @@ function readObjectType(source: string, masked: string, namePattern: string): Ob
 
   const openIndex = match.index + match[0].length - 1
   const end = findBodyEnd(masked, openIndex)
-  if (end === null) return { kind: 'unreadable', typeName, reason: 'is not a plain object type' }
+  if (end === null) {
+    // Distinct from "not an object type": the shape is right and the file is
+    // truncated. Telling the author to rewrite the type sends them past it.
+    return {
+      kind: 'unreadable',
+      typeName,
+      reason: 'opens a body that is never closed',
+      fix: 'Close it.',
+    }
+  }
 
-  // Declaration merging: TypeScript unions every block, this reads one.
-  const declarations = masked.match(new RegExp(`(?:interface|type)\\s+${typeName}\\b`, 'gu'))
+  // Declaration merging: TypeScript unions every block, this reads one. Same
+  // anchor as above — only top-level declarations merge with each other, so a
+  // same-named type inside a namespace or a function body is not a second
+  // block and must not cost this one its type.
+  const declarations = masked.match(
+    new RegExp(`^(?:export\\s+)?(?:interface|type)\\s+${typeName}\\b`, 'gmu'),
+  )
   if (declarations && declarations.length > 1) {
     return {
       kind: 'unreadable',
@@ -410,15 +432,18 @@ function readObjectType(source: string, masked: string, namePattern: string): Ob
   }
 
   // A type alias's right-hand side runs to the end of the statement, so a body
-  // followed by `&`, `|` or a conditional `extends` is only its first term. An
-  // interface always ends at its brace, so this cannot apply to one.
+  // followed by an operator is only its first term: `&`/`|` compose, a
+  // conditional `extends` branches, and `[` makes the body an operand —
+  // `{ … }[]` is an array of it and `{ … }['k']` is one member of it, neither
+  // of which is the body. An interface always ends at its brace, so none of
+  // this can apply to one.
   if (isAlias) {
     const rest = masked.slice(end)
-    if (/^\s*[&|]/u.test(rest) || /^\s*extends\b/u.test(rest)) {
+    if (/^\s*[&|[]/u.test(rest) || /^\s*extends\b/u.test(rest)) {
       return {
         kind: 'unreadable',
         typeName,
-        reason: 'composes other types, and only its first object body would be copied',
+        reason: 'uses its object body as one operand of a larger type, not as the type itself',
       }
     }
   }
@@ -431,11 +456,13 @@ function countOccurrences(haystack: string, needle: string): number {
 }
 
 /** The half of an unreadable-declaration warning that does not name the Resource. */
-function describeUnreadable(read: { typeName: string; reason: string }): string {
+function describeUnreadable(read: { typeName: string; reason: string; fix?: string }): string {
+  const fix = read.fix
+    ?? `Write ${read.typeName} as a single non-generic \`interface ${read.typeName} { … }\` or `
+      + `\`type ${read.typeName} = { … }\` with its members inline.`
+
   return `declares ${read.typeName} in that file, but it ${read.reason} — omitted from `
-    + `data.gen.ts. Write ${read.typeName} as a single non-generic `
-    + `\`interface ${read.typeName} { … }\` or \`type ${read.typeName} = { … }\` with its `
-    + 'members inline.'
+    + `data.gen.ts. ${fix}`
 }
 
 /**
