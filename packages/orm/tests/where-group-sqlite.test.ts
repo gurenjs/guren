@@ -119,6 +119,18 @@ describe('callback where groups on real bun:sqlite driver', () => {
     expect(posts.map((p) => p.title).sort()).toEqual(['Bun speed', 'Unrelated'])
   })
 
+  it('should accept a grouping callback on the transaction-bound scope', async () => {
+    const titles = await Post.transaction(async (_trx, txPost) => {
+      const posts = await txPost
+        .where((q) => q.where('title', 'like', '%bun%').orWhere('excerpt', 'like', '%bun%'))
+        .where('published', true)
+        .get()
+      return posts.map((p) => p.title).sort()
+    })
+
+    expect(titles).toEqual(['Bun speed', 'Deleted bun', 'Hono routing'])
+  })
+
   it('should apply grouped conditions to bulk update and delete', async () => {
     await Post.newQuery()
       .where((q) => q.where('title', 'like', '%bun%').orWhere('excerpt', 'like', '%bun%'))

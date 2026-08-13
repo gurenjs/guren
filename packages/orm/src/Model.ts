@@ -439,10 +439,14 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    */
   static inTransaction<T extends typeof Model>(this: T, trx: TransactionHandle): TransactionModelScope<T> {
     const where: TransactionModelScope<T>['where'] = (
-      fieldOrConditions: FieldFor<T> | WhereClauseFor<T>,
+      fieldOrConditions: FieldFor<T> | WhereClauseFor<T> | WhereGroupCallback<TRecordFor<T>>,
       operatorOrValue?: unknown,
       value?: unknown,
     ) => {
+      if (typeof fieldOrConditions === 'function') {
+        return this.newQuery({ trx }).where(fieldOrConditions)
+      }
+
       if (typeof fieldOrConditions === 'object' && fieldOrConditions !== null) {
         return this.newQuery({ trx }).where(fieldOrConditions as Partial<Record<keyof TRecordFor<T> & string, unknown>>)
       }
@@ -2478,6 +2482,7 @@ export interface TransactionModelScope<T extends typeof Model> {
   find(id: unknown): Promise<TRecordFor<T> | null>
   findOrFail(id: unknown): Promise<TRecordFor<T>>
   first(where?: WhereClauseFor<T>): Promise<TRecordFor<T> | null>
+  where(callback: WhereGroupCallback<TRecordFor<T>>): QueryBuilder<TRecordFor<T>>
   where(conditions: WhereClauseFor<T>): QueryBuilder<TRecordFor<T>>
   where(field: FieldFor<T>, value: unknown): QueryBuilder<TRecordFor<T>>
   where(field: FieldFor<T>, operator: WhereOperator, value: unknown): QueryBuilder<TRecordFor<T>>
