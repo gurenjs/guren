@@ -3,6 +3,7 @@ import {
   AGENT_TARGETS,
   BULK_TEMPLATE_PREFIXES,
   componentsForTargets,
+  managedNamespaces,
   parseTargetList,
   planComponents,
   type HarnessComponent,
@@ -201,6 +202,51 @@ describe('planComponents', () => {
 })
 
 const ALL_COMPONENTS: HarnessComponent[] = ['claude', 'agents', 'cursor', 'copilot', 'codex', 'opencode']
+
+describe('managedNamespaces', () => {
+  it('claims the rules and skills roots wholesale for claude and agents', () => {
+    expect(managedNamespaces(['claude', 'agents'])).toEqual([
+      { kind: 'tree', dir: '.claude/rules' },
+      { kind: 'tree', dir: '.claude/skills' },
+      { kind: 'tree', dir: '.agents/rules' },
+      { kind: 'tree', dir: '.agents/skills' },
+    ])
+  })
+
+  it('claims only guren-prefixed files in the shared cursor and copilot directories', () => {
+    expect(managedNamespaces(['cursor', 'copilot'])).toEqual([
+      { kind: 'pattern', dir: '.cursor/rules', prefix: 'guren-', suffix: '.mdc' },
+      { kind: 'pattern', dir: '.github/instructions', prefix: 'guren-', suffix: '.instructions.md' },
+    ])
+  })
+
+  it('claims nothing for codex and opencode, whose distinct files are user-owned', () => {
+    expect(managedNamespaces(['codex', 'opencode'])).toEqual([])
+  })
+
+  it('every planned file inside a shared namespace carries its ownership pattern', () => {
+    // .cursor/rules and .github/instructions also hold user files, so a
+    // managed file the pattern cannot claim would be orphaned on rename
+    const namespaces = managedNamespaces(ALL_COMPONENTS).filter(
+      (namespace) => namespace.kind === 'pattern',
+    )
+    for (const file of planComponents(ALL_COMPONENTS, fakeTemplates(), 'My App')) {
+      for (const namespace of namespaces) {
+        if (!file.path.startsWith(`${namespace.dir}/`)) {
+          continue
+        }
+        const name = file.path.slice(namespace.dir.length + 1)
+        if (file.managed) {
+          expect(name).toStartWith(namespace.prefix)
+          expect(name).toEndWith(namespace.suffix)
+        } else {
+          // a user-owned planned file must never match the prune pattern
+          expect(name.startsWith(namespace.prefix) && name.endsWith(namespace.suffix)).toBe(false)
+        }
+      }
+    }
+  })
+})
 
 describe('template completeness', () => {
   it('every shipped template file is consumed by the planner', async () => {

@@ -118,6 +118,7 @@ bunx guren doctor --next        # Doctor report + actionable next steps
 # Agent harness (in scaffolded apps)
 bunx guren agent:init           # Install AI agent harness (CLAUDE.md, .claude/ rules, skills, hooks, .mcp.json)
 bunx guren agent:sync           # Refresh framework-managed harness files to the latest version
+bunx guren agent:sync --prune   # Also delete managed-directory files that left the harness (reported-only by default)
 
 # Code generation
 bunx guren guidelines           # Auto-generate project-specific coding guidelines

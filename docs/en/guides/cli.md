@@ -273,6 +273,8 @@ What each selection writes:
 
 `agent:init --target` accepts `claude` (the default), `codex`, `cursor`, `copilot`, `opencode`, and `all`. `agent:sync` never overwrites user-owned files — `CLAUDE.md`, `AGENTS.md`, `.claude/settings.json`, and the MCP client configs — so your customizations survive framework updates (a user-owned file you deleted is recreated). When an MCP config already exists, `agent:init` leaves it alone and prints the snippet to merge by hand.
 
+When a framework rule or skill is renamed or removed in a release, the old copies stay behind in every root that received them — and Cursor and Copilot keep auto-loading stale `.cursor/rules/guren-*.mdc` / `.github/instructions/guren-*.instructions.md` files. `agent:sync` lists any files in the framework-managed directories (the rules/skills roots and the `guren-*` native rules) that are no longer part of the harness; `agent:sync --prune` deletes them. Without `--prune` nothing is ever deleted, so a rule of your own that lives in a managed directory is safe by default — but note that `--prune` removes *everything* the report lists, including such files, so review the list first (or keep your own rules elsewhere, e.g. in `CLAUDE.md`/`AGENTS.md` or under names outside the `guren-` prefix for Cursor/Copilot).
+
 ## Deployment Recipes
 
 Generate deployment config files directly from the CLI:
