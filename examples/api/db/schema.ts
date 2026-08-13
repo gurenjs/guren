@@ -1,4 +1,4 @@
-import { pgTable, serial, text, uniqueIndex, integer, boolean, timestamp } from 'drizzle-orm/pg-core'
+import { pgTable, serial, text, uniqueIndex, integer, boolean, timestamp } from '@guren/orm/drizzle/pg'
 
 export const users = pgTable(
   'users',

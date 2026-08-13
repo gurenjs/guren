@@ -31,7 +31,7 @@ bun run db:up
 Open `db/schema.ts` and add a table. Here is a simple `tasks` table:
 
 ```typescript
-import { pgTable, serial, text, boolean, timestamp } from 'drizzle-orm/pg-core'
+import { pgTable, serial, text, boolean, timestamp } from '@guren/orm/drizzle/pg'
 
 export const tasks = pgTable('tasks', {
   id: serial('id').primaryKey(),

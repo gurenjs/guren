@@ -8,7 +8,7 @@ Define your table schema, configure the Drizzle adapter, and you are ready to qu
 
 ```ts
 // db/schema.ts
-import { pgTable, serial, text, timestamp } from 'drizzle-orm/pg-core'
+import { pgTable, serial, text, timestamp } from '@guren/orm/drizzle/pg'
 
 export const posts = pgTable('posts', {
   id: serial('id').primaryKey(),

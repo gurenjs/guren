@@ -245,7 +245,7 @@ const { plainTextToken } = await createApiToken(store, {
 
 ```ts
 // db/schema.ts
-import { pgTable, text, timestamp, jsonb } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, jsonb } from '@guren/orm/drizzle/pg'
 
 export const apiTokens = pgTable('api_tokens', {
   id: text('id').primaryKey(),
