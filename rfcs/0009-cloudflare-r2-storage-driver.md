@@ -29,7 +29,7 @@ files. Today's options, checked against the code:
      `getVisibility` issue `PutObjectAcl` / `GetObjectAcl`. R2's S3 API
      reference lists `x-amz-acl` and the ACL operations as unsupported.
      Whether R2 ignores or rejects the header must be checked against a real
-     bucket (§6, step 0); the ACL calls will not work either way. So the
+     bucket (§5, step 0); the ACL calls will not work either way. So the
      documented recipe is at best partially true, and it is untested — there
      is no `S3Driver` test in `packages/server/tests/storage/storage.test.ts`
      (only `LocalDriver`, `MemoryDriver`, `StorageManager`).
@@ -39,22 +39,45 @@ The typical first need on Workers is public reads (images, downloads) plus an
 authenticated upload path — exactly the shape the binding API serves best,
 with no credentials to provision and nothing extra in the bundle.
 
-## Verified premises (2026-08-15)
+## Verified constraints (2026-08-15)
 
-The plan below was written against the code, not the docs. Corrections to the
-working assumptions the plan started from:
+Read out of the code and the R2 API rather than assumed. Each one rules out a
+design this plan would otherwise have reached for:
 
-| Assumption | Reality in the code |
-|---|---|
-| `StorageDriver` has "about 20 methods" | **21**: `put`, `putFile`, `get`, `getAsString`, `exists`, `delete`, `deleteMany`, `copy`, `move`, `url`, `temporaryUrl`, `size`, `lastModified`, `metadata`, `files`, `directories`, `allFiles`, `makeDirectory`, `deleteDirectory`, `setVisibility`, `getVisibility` (`packages/server/src/storage/types.ts:59-201`). Content is `Buffer \| string`; reads return `Buffer \| null`. |
-| `StorageManager.registerDriver()` is a usable extension point for third-party drivers | Only half true. `registerDriver(name, factory)` exists (`StorageManager.ts:132`), but the constructor resolves every `disks` entry **eagerly** (`registerDiskFromConfig`, `StorageManager.ts:82-94`) and throws `Unknown storage driver: r2` for a driver registered afterwards. `DriverConfig` is also a **closed** union of `'local' \| 's3' \| 'memory'` (`types.ts:293-296`), so `{ driver: 'r2' }` does not type-check. **`registerDisk(name, () => driver)` is the extension point that actually works today** (`StorageManager.ts:123`), and it is what this plan uses. |
-| `S3Driver` dynamically imports `@aws-sdk/client-s3` | Correct — via `importAwsModule()` with a "Missing optional dependency" error (`S3Driver.ts:463-474`). The plan reused this pattern for the presign dependency; **that was wrong on Workers** — see §1.2. |
-| The Cloudflare plugin uses a lazy `binding: () => getWorkersEnv<Env>().DB` closure | Correct (`packages/orm/src/d1.ts:6-25`, `packages/plugin-cloudflare/src/env.ts`). `getWorkersEnv()` throws before the first request; `web/app/Http/Middleware/site-analytics.ts:90-97` shows the pattern for an *optional* binding (try/catch → undefined off-Workers), and `web/config/database.ts:9-11` the `isWorkersRuntime()` switch (`navigator.userAgent === 'Cloudflare-Workers'`). |
-| `cloudflarePlugin()` registers services | It does not — `register() {}` is empty and `CloudflarePluginConfig` is an empty interface "reserved for upcoming RFC 0003 parts" (`packages/plugin-cloudflare/src/index.ts`). This plan keeps it that way (§2.2). |
-| `cloudflare:build` scaffolds `wrangler.jsonc` | Correct — once, `wx` flag, never overwritten; `warnMissingBuildOwnedKeys` only reports **build-owned** keys (`alias`, `define`, `migrations_dir`) (`build.ts:308-396`). |
-| Workers-side R2 API | Verified against the R2 Workers API reference (fetched 2026-08-15): `head(key)`, `get(key, {onlyIf, range})` → `R2ObjectBody \| R2Object \| null`, `put(key, ReadableStream \| ArrayBuffer \| ArrayBufferView \| string \| null \| Blob, {httpMetadata, customMetadata, onlyIf, md5…})`, `delete(key \| key[])` → `void`, **max 1000 keys per call**, `list({limit ≤ 1000, prefix, cursor, delimiter, include})` → `{objects, truncated, cursor?, delimitedPrefixes}`. `R2Object` carries `key, size, etag, httpEtag, uploaded (Date), httpMetadata, customMetadata, writeHttpMetadata(headers)`. **There is no `copy` on the binding**, and no presigned-URL API. |
-| Presigned URLs | Verified: generated client-side with SigV4 against `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`, need an R2 API token (access key id + secret), **max expiry 7 days**. Not available from a binding. |
-| Cloudflare Images binding | Verified: `env.IMAGES.input(stream).transform({width…}).output({format}).response()`; billed per unique transformation. Relevant only to RFC 0010 (variants). |
+- **`StorageDriver` is 21 methods** (`storage/types.ts`); content is
+  `Buffer | string`, reads return `Buffer | null`.
+- **`StorageManager.registerDriver()` is not a usable extension point.** The
+  constructor resolves every `disks` entry eagerly, so a driver registered
+  afterwards still throws `Unknown storage driver`, and `DriverConfig` is a
+  closed union of `'local' | 's3' | 'memory'`, so `{ driver: 'r2' }` does not
+  type-check. **`registerDisk(name, () => driver)` is what works today**, and
+  it is what this plan uses.
+- **`S3Driver` loads `@aws-sdk/client-s3` through a lazy `importAwsModule()`**
+  with a "Missing optional dependency" error. The plan reused that pattern for
+  the presign dependency; **that was wrong on Workers** — see §1.2.
+- **Bindings must be read lazily.** `createD1Database({ binding })` and
+  `getWorkersEnv()` establish the contract: the resolver runs per call, and
+  `getWorkersEnv()` throws before the first request. `config/database.ts` in
+  the guren.dev app shows the `isWorkersRuntime()` switch
+  (`navigator.userAgent === 'Cloudflare-Workers'`) that picks a driver per
+  runtime.
+- **`cloudflarePlugin()` registers nothing.** `register()` is empty and its
+  config interface is a placeholder, so the plugin has no service-container
+  seam to hang a disk on (§2.2).
+- **`cloudflare:build` scaffolds `wrangler.jsonc` once** (`wx` flag, never
+  overwritten) and warns only about *build-owned* keys — `alias`, `define`,
+  `migrations_dir` (§2.1).
+- **The R2 binding API** (verified against the Workers API reference):
+  `head(key)`; `get(key, { onlyIf, range })` → `R2ObjectBody | R2Object |
+  null`; `put(key, ReadableStream | ArrayBuffer | ArrayBufferView | string |
+  null | Blob, { httpMetadata, customMetadata, … })`; `delete(key | key[])` →
+  `void`, **max 1000 keys per call**; `list({ limit ≤ 1000, prefix, cursor,
+  delimiter })` → `{ objects, truncated, cursor?, delimitedPrefixes }`.
+  `R2Object` carries `key, size, uploaded, httpMetadata, customMetadata`.
+  **There is no `copy` on the binding, and no presigned-URL API.**
+- **Presigned URLs are a client-side SigV4 construction** against
+  `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`, requiring an R2 API token
+  and capped at **7 days**. A binding cannot produce one.
 
 ## Proposed Solution
 
@@ -172,10 +195,10 @@ the `r2_buckets` entry in wrangler.jsonc."*
 | `getAsString(path)` | `bucket.get(key)` → `obj.text()` | Avoids the Buffer round trip. |
 | `exists(path)` | `(await bucket.head(key)) !== null` | |
 | `delete(path)` | `head` then `delete` | `R2Bucket.delete()` returns `void` and is idempotent, so the contract's *"false if not found"* needs a `head` first (a Class B op — cheap). `S3Driver.delete` returns `true` unconditionally, but Local/Memory are exact; follow the exact ones. |
-| `deleteMany(paths)` | `bucket.delete(chunk)` per **1000-key chunk** | Returns `paths.length` (dedupe first). R2 gives no per-key result; `S3Driver` returns `Deleted.length`, which S3 also reports for missing keys, so the observable contract matches. |
+| `deleteMany(paths)` | `bucket.delete(chunk)` per **1000-key chunk** | Returns `paths.length` (dedupe first). R2 gives no per-key result. The alternative — head-then-delete per key, for an exact count — costs N extra reads to report something `S3Driver` does not report either: it returns `Deleted.length`, which S3 also counts for missing keys, so the observable contract already matches. |
 | `copy(from, to)` | `get(from)` → `put(to, obj.body, { httpMetadata: obj.httpMetadata, customMetadata: obj.customMetadata })` | **No copy on the binding** — stream the body through. `obj === null` throws `File not found: ${from}` (Memory precedent). Single-`put` size limits apply (multipart is out of scope). |
 | `move(from, to)` | `copy` + `delete(from)` | |
-| `url(path)` | `${publicUrl}/${key}` | Throws when `publicUrl` is unset (no derivable default; fail closed rather than return a URL that 404s). No percent-encoding, matching `S3Driver.url` — noted as an Open Question. |
+| `url(path)` | `${publicUrl}/${key}` | Throws when `publicUrl` is unset (no derivable default; fail closed rather than return a URL that 404s). **Amended in implementation:** percent-encodes each key segment, unlike `S3Driver.url` (Open Question 3). |
 | `temporaryUrl(path, expiration)` | SigV4 presign on WebCrypto against `https://${accountId}.r2.cloudflarestorage.com/${bucket}/${key}` with `X-Amz-Expires` | Only when `presign` is configured; else throws with guidance naming the option and the signed-route alternative. Expiry > 7 days throws up front (R2 rejects it; the S3 driver would only find out from AWS). **Amended in implementation:** the signer is written in-package, not taken from a dependency — see §1.2. |
 | `size` / `lastModified` | `head(key)` → `size` / `uploaded` | Throw `File not found` on `null` (S3/Memory precedent). |
 | `metadata(path)` | `head(key)` → `{ path, size, lastModified: uploaded, contentType: httpMetadata?.contentType, metadata: customMetadata, visibility }` | `visibility` is the disk's configured value (§1.3). |
@@ -210,7 +233,7 @@ Three options were weighed:
       Workers bundler can follow `import(moduleName)`, so the presign path
       threw `No such module` at runtime while every test stayed green (under
       Bun the same import resolves from `node_modules`). This is invisible to
-      any test that does not run inside workerd — see §4.2. A literal
+      any test that does not run inside workerd — see §4. A literal
       `import('aws4fetch')` bundles correctly but then fails the *build* for
       every app that never signs a URL, since an optional dependency is not
       installed.
@@ -251,8 +274,9 @@ nothing per object. The candidates:
   call site with a message that names the option. Portable code that never
   passes `visibility` (the common case) is unaffected.
 
-This is called out as an Open Question because it is stricter than S3/Local
-behave; the reasoning is fail-closed over silent no-op.
+This is stricter than S3/Local behave, and the alternative considered was to
+warn once per disk and proceed; fail-closed beat silent no-op, because the
+failure this prevents is a leak that looks like success.
 
 #### 1.4 Design decision: `putFile`
 
@@ -386,135 +410,96 @@ network), and either `wrangler dev` (local emulated R2, exercises the real
 driver) or `STORAGE_DISK=s3` pointed at the R2 endpoint when a shared,
 persistent bucket is wanted from a Bun process.
 
-### 3. Files
+### 3. Where it lands
 
-| Action | Path | What |
-|---|---|---|
-| add | `packages/plugin-cloudflare/src/storage/R2Driver.ts` | Driver, `R2DriverOptions`, `R2BucketLike` + object/list shapes, `trimSlashes` |
-| add | `packages/plugin-cloudflare/src/storage/R2Driver.test.ts` | Unit tests against an in-memory `FakeR2Bucket` (§4.1) |
-| add | `packages/plugin-cloudflare/src/storage/fake-r2-bucket.ts` | Test double implementing `R2BucketLike` with real `prefix`/`delimiter`/`cursor` semantics; also exported for app tests? — Open Question |
-| add | `packages/plugin-cloudflare/src/storage/R2Driver.types.test.ts` | `R2Bucket` (workers-types) satisfies `R2BucketLike` |
-| add | `packages/plugin-cloudflare/src/storage/r2-miniflare.test.ts` | Opt-in e2e (`GUREN_TEST_WRANGLER=1`) against a real local R2 (§4.2) |
-| edit | `packages/plugin-cloudflare/src/index.ts` | exports |
-| add | `packages/plugin-cloudflare/src/storage/sigv4.ts` (+ `sigv4.test.ts`) | WebCrypto SigV4 presigning for the one request shape `temporaryUrl()` needs (§1.2) |
-| edit | `packages/plugin-cloudflare/package.json` | devDependency `miniflare` for §4.2. **No runtime dependency is added** |
-| edit | `packages/plugin-cloudflare/README.md` | "Storage (R2)" section under API |
-| edit | `docs/en/guides/cloudflare.md`, `docs/ja/guides/cloudflare.md` | "Storage (R2)" section: binding, `wrangler.jsonc` snippet, `StorageProvider` switch, custom domain, `wrangler r2 object put` for one-off uploads |
-| edit | `docs/en/guides/storage.md`, `docs/ja/guides/storage.md` | Replace the "Cloudflare R2 via `driver: 's3'`" recipe with the binding driver for Workers; keep the S3-API recipe only if step 0 proves it works, and say what it cannot do (ACL) |
-| edit | `rfcs/0003-cloudflare-workers-plugin.md` | §6 support matrix: move storage from "unsupported" to "works via `R2Driver`"; §7: strike "R2 storage driver", point here |
-| edit | `packages/cli/templates/agent/core/skills/guren-api/SKILL.md` | Storage section: mention `R2Driver` on Workers (agent harness) |
-| add | `.changeset/*.md` | `@guren/plugin-cloudflare` **minor** (0.2.x → 0.3.0) |
-| sibling PR | `packages/cli/src/blueprints.ts` (`storage` blueprint), `packages/server/src/storage/drivers/S3Driver.ts` | `guren add storage` scaffold reads `STORAGE_DISK` (§2.4); `S3DriverOptions.acl?: boolean` (§2.4 option 1). Neither blocks the plugin release; both touch npm-resolved packages, so they ship on the server/cli train |
-| edit | `web/` | nothing required; optional: register an R2 disk for the guren.dev CMS as the in-repo dogfooding app (§4.3) |
+| Package | Change |
+|---|---|
+| `@guren/plugin-cloudflare` | The driver, its structural binding types, the WebCrypto signer (§1.2), and their tests; four new type exports (`R2Driver`, `R2DriverOptions`, `R2PresignOptions`, `R2BucketLike`). No runtime dependency is added |
+| Docs | A "Storage (R2)" section in the Cloudflare guide (both languages); the storage guide's R2-over-S3 recipe gains the "on Workers, use the binding" pointer and the ACL caveat from step 0; RFC 0003's §6 matrix moves storage out of "unsupported" |
+| Agent harness | The `guren-api` skill's storage section names `R2Driver` on Workers |
+| Sibling PR (`@guren/server`, `@guren/cli`) | `S3DriverOptions.acl` and the `STORAGE_DISK` scaffold (§2.4). Neither blocks this release |
 
-Nothing under `packages/server`, `packages/core`, `packages/create-app`, or
-`packages/cli/src` changes, so none of `audit:starter-template`,
-`smoke:starter*`, `sync:template-deps` are in play. `bun run audit:docs` is
-content-coupled (`scripts/smoke/docs-audit.ts`) — adding an assertion that
-`cloudflare.md` names `R2Driver` is optional but cheap and keeps the docs from
-drifting.
+Nothing in `@guren/server`, `@guren/core`, `@guren/create-app`, or the CLI's
+own source changes, so none of the template audits or starter smokes are in
+play (§2.2 explains why that matters for the release order).
 
 ### 4. Test strategy
 
-#### 4.1 Unit tests (always on)
+Three layers, because each catches something the one below cannot:
 
-`R2Driver.test.ts` mirrors the `describe` structure of the `MemoryDriver`
-block in `packages/server/tests/storage/storage.test.ts` (put/get, exists,
-delete, copy/move, url, size/lastModified, files/directories, visibility,
-deleteDirectory) against `FakeR2Bucket`, plus the R2-specific behaviours:
+1. **Unit tests against an in-memory `FakeR2Bucket`** implementing
+   `R2BucketLike` with real prefix/delimiter/cursor semantics. This is where
+   the driver's own logic is pinned — key scoping, the 1000-key delete
+   batching, cursor following (which `S3Driver.allFiles` gets wrong today by
+   reading one page), folder markers, and the visibility and presign refusals.
+   The fake also records calls, so "deletes each page as it lists it" is
+   assertable at all.
+2. **A type-level test** that the real `R2Bucket` from
+   `@cloudflare/workers-types` satisfies `R2BucketLike`, so drift in
+   workers-types is a typecheck failure rather than a runtime one. **Learned
+   in implementation:** streams and blobs inside that interface must be
+   structural too (`R2StreamLike`, `R2BlobLike`), not the global
+   `ReadableStream`/`Blob` — workers-types declares its own interfaces for
+   both, and neither direction is assignable to the runtime globals, so naming
+   the globals makes the real `R2Bucket` fail a check it should pass.
+3. **An opt-in run against workerd's real R2** through Miniflare, gated
+   behind `GUREN_TEST_WRANGLER=1` exactly like `wrangler-migrations.test.ts`
+   (it fetches a native binary on first run, so CI skips it). The same
+   conformance suite runs against both the fake and the real bucket, so every
+   semantic the fake encodes is checked against the runtime rather than
+   assumed.
 
-- `delete` returns `false` for a missing key (head-then-delete);
-- `deleteMany` with 2 500 keys issues 3 `delete` calls of 1000/1000/500;
-- `allFiles` over a bucket where the fake returns `truncated: true` pages
-  follows `cursor` to the end (the S3 driver's single-page bug is what this
-  guards against);
-- `copy` preserves `httpMetadata.contentType` and `customMetadata`;
-- `url()` without `publicUrl` throws, with `publicUrl` joins the prefix;
-- `temporaryUrl()` without `presign` throws with the RFC 0010 hint; with
-  `presign` and a fixed `datetime` produces a URL containing
-  `X-Amz-Algorithm=AWS4-HMAC-SHA256`, `X-Amz-Expires=<n>`, `X-Amz-Signature`
-  (the signer takes an injectable clock, so the test is deterministic);
-  expiry > 7 days throws before signing;
-- `put({ visibility })` / `setVisibility` matching the disk → no-op,
-  conflicting → throw naming the `visibility` option;
-- `binding()` returning `undefined` throws the guidance message;
-- `putFile` throws.
+**Two things only layer 3 can see, and both were real.** Miniflare's binding
+proxy cannot marshal a `ReadableStream`, so `copy()`/`move()` — the methods
+that pipe `get().body` into `put()`, because the binding has no copy — have to
+run *inside* workerd, which the suite does by bundling the driver into a
+worker. And `temporaryUrl()` must sign from inside that same bundle: the first
+implementation loaded its signer through a lazy import that no Workers bundler
+can follow, which no test outside workerd could observe (§1.2).
 
-Mutation check before merge (per `.claude/rules` "verification must be able
-to fail"): drop the cursor loop and confirm the pagination test goes red.
-
-#### 4.2 Real-runtime test (opt-in)
-
-Miniflare exposes a real R2 implementation to Node/Bun without HTTP:
-`new Miniflare({ modules: true, script: '…', r2Buckets: ['BUCKET'] })` then
-`await mf.getR2Bucket('BUCKET')` returns an `R2Bucket` backed by workerd's
-local R2. `r2-miniflare.test.ts` runs the same conformance block against it,
-gated behind `GUREN_TEST_WRANGLER=1` exactly like
-`wrangler-migrations.test.ts` (network on first run to fetch workerd; skipped
-in CI). This is what catches semantics the fake gets wrong (e.g. what `list`
-returns for `prefix: 'a/'` when only `a` exists, `head` on a zero-byte
-object). **Verified in implementation:** Miniflare 5 runs under `bun test`.
-One limit: the binding proxy cannot marshal a `ReadableStream`, so
-`copy()`/`move()` (which pipe `get().body` into `put()`) throw
-`DataCloneError` through `getR2Bucket()`. The suite therefore has a second
-block that bundles the driver with `Bun.build` and runs those two methods
-*inside* workerd (`modules: [{ type: 'ESModule', … }]`, since `script:`
-alone makes Miniflare walk the bundle and reject the driver's dynamic
-its import graph itself), which also
-confirms `Buffer` under `nodejs_compat`.
+Whatever a test protects, check it can fail: dropping the cursor loop must
+turn the pagination test red, and restoring the lazy signer import must turn
+the in-workerd presign test red.
 
 #### 4.3 Dogfooding (a real Workers app)
 
-The same loop RFC 0003 Part 4 ran with the guren.dev site (`web/`), which
-is already deployed on Workers + D1 and is the natural in-repo candidate:
+The same loop RFC 0003 Part 4 ran with the guren.dev site (`web/`), which is
+already deployed on Workers + D1:
 
 - Bucket + custom domain, `MEDIA` binding, `StorageProvider` switch as in §1.
-- Seeding existing files: `bunx wrangler r2 object put <bucket>/<key>
-  --file …` from a script — the driver has no filesystem access on Workers,
-  and a Bun script has no binding, so initial bulk loads go through wrangler
-  (or the S3 API), not the driver.
-- An authenticated upload path (`this.file()` → `put(buffer, { contentType })`,
-  the storage guide's existing example) exercised through `wrangler dev`, then
-  production.
-- Guard: a `GUREN_TEST_WRANGLER=1` run of §4.2 before the release PR.
+- Seeding existing files goes through `wrangler r2 object put` or the S3 API,
+  not the driver: the driver has no filesystem access on Workers, and a Bun
+  script has no binding.
+- An authenticated upload path (`this.file()` → `put(buffer, { contentType })`)
+  exercised through `wrangler dev`, then production.
 
-### 5. Implementation steps
+### 5. Implementation plan
 
-0. **Spike (½ day, before writing the driver):** against a throwaway R2
-   bucket, (a) run today's `S3Driver` recipe from the storage guide and record
-   whether `PutObject` with `x-amz-acl` succeeds, is ignored, or errors — this
-   decides what the storage-guide edit says; (b) confirm `wrangler deploy`
-   fails for a nonexistent bound bucket (decides §2.1's default); (c) confirm
-   Miniflare's `getR2Bucket` works under `bun test` (decides §4.2's shape).
-1. `R2Driver.ts` + `FakeR2Bucket` + unit tests. Land the driver with
-   `temporaryUrl` throwing unconditionally first if the signer slows review;
-   the throw message is the contract either way.
-2. `temporaryUrl` presign path + deterministic test; optional peer dep.
-3. Type-level test against `@cloudflare/workers-types`.
-4. Miniflare e2e (opt-in).
-5. Exports, README, `docs/{en,ja}/guides/{cloudflare,storage}.md`, RFC 0003
-   matrix update, harness SKILL.md line, changeset. Run `bun run
-   audit:core-first` (docs must import from `@guren/core` /
-   `@guren/plugin-cloudflare`, never `@guren/server`) and `bun run
-   audit:docs`.
-6. Release `@guren/plugin-cloudflare@0.3.0` (no other package moves).
-7. Dogfooding (§4.3): bucket, domain, provider switch, seeding, upload path.
-   Anything a real app needs that the driver lacks comes back here as a
-   follow-up.
+Split into parts, referencing this RFC:
 
-Steps 1–5 are one PR (`feat(plugin-cloudflare): add R2Driver`); step 6 is the
-release; step 7 is app-side work.
+0. **Spike.** Against a throwaway bucket, measure the two things §2.1 and §6
+   currently assume: whether R2 ignores or rejects `x-amz-acl` on `PutObject`
+   (which decides what the storage guide says, and how urgent the
+   `S3DriverOptions.acl` sibling PR is), and whether `wrangler deploy` refuses
+   a Worker bound to a bucket that does not exist (which decides the scaffold
+   default). Both are Open Questions until then.
+1. **Driver.** `R2Driver`, the structural binding types, `FakeR2Bucket`, the
+   unit and type-level tests.
+2. **Presigning.** The WebCrypto signer (§1.2) and its known-answer tests,
+   plus the in-workerd presign check. The driver is useful before this lands —
+   `temporaryUrl()` throwing with guidance is the contract either way.
+3. **Real-runtime coverage.** The opt-in Miniflare conformance run.
+4. **Docs and release.** Exports, README, both guides, the RFC 0003 matrix,
+   the harness skill, changeset; `@guren/plugin-cloudflare` minor.
+5. **Dogfooding** (§4.3). Anything a real app needs that the driver lacks
+   comes back here as a follow-up.
 
 ### 6. Documentation notes
 
-- The storage guide's "S3-Compatible Services → Cloudflare R2" block is
-  currently the only R2 mention. After this RFC it should say: on Workers use
-  `R2Driver` (binding, no credentials); from Bun/Lambda/Vercel the S3 API with
-  an R2 token is the route, with the ACL caveat from step 0 spelled out.
-- Both `en` and `ja` guides move together (a lesson recorded from earlier
-  reviews: en/ja drift).
-- No `packages/*` paths or RFC part numbers in user-facing docs
-  (`docs/CLAUDE.md`).
+The storage guide's "S3-Compatible Services → Cloudflare R2" block is
+currently the only R2 mention. After this RFC it says: on Workers use
+`R2Driver` (binding, no credentials); from Bun/Lambda/Vercel the S3 API with
+an R2 token is the route, with the ACL caveat from step 0 spelled out.
 
 ## Alternatives Considered
 
@@ -550,27 +535,26 @@ the token secrets. No deprecations.
 
 ## Open Questions
 
-1. **Strict visibility (§1.3)** — throw on a conflicting `put({ visibility })`
-   is stricter than every other driver. Alternative: warn once per disk and
-   proceed. Leaning throw; the guide's example would then need
-   `visibility` removed from the R2 variant.
-2. ~~**`url()` encoding**~~ — **Resolved in implementation (review
+1. **Does `wrangler deploy` refuse a Worker bound to a bucket that does not
+   exist?** §2.1 declines to scaffold `r2_buckets` on the strength of this,
+   and it is still unmeasured — if wrangler in fact deploys and only fails at
+   runtime, the scaffold decision should be revisited. Step 0 measures it.
+2. **What does R2 do with `x-amz-acl` on `PutObject`?** The storage guide's
+   S3-API recipe and the `S3DriverOptions.acl` sibling PR (§2.4) both hinge on
+   whether R2 ignores or rejects the header. Also step 0.
+3. ~~**`url()` encoding**~~ — **Resolved in implementation (review
    finding):** `R2Driver.url()` percent-encodes each key segment, since this
    is the first place a Workers app is steered to a driver's `url()` for
    public links. `S3Driver.url` / `LocalDriver.url` still do not; aligning
    them is a server change tracked separately.
-3. **Should `FakeR2Bucket` be exported** (e.g. from
+4. **Should `FakeR2Bucket` be exported** (e.g. from
    `@guren/plugin-cloudflare/testing`) so app tests can run against R2
    semantics without Miniflare? Useful for app-level tests; adds a public
    surface to maintain. Leaning yes, as a subpath export, once the fake has
-   survived §4.2 comparison.
-4. **`deleteMany` return value** — `paths.length` vs. head-then-delete per key
-   (N Class B ops). Leaning `paths.length`, matching what S3 observably does.
-5. **Streaming reads** — an optional `getStream?(path): Promise<ReadableStream
-   | null>` on `StorageDriver` would let RFC 0010's proxy route avoid
-   buffering; it is an additive server change and belongs with RFC 0010, but
-   the R2 driver could implement it ahead of the interface (structural
-   typing). Decide when RFC 0010 lands.
+   survived the real-runtime comparison in §4.
+5. ~~**Streaming reads**~~ — **owned by RFC 0010 §3**, which proposes the
+   optional `getStream?` on `StorageDriver` and consumes it; `R2Driver` will
+   implement it (`obj.body`) when that lands. Not open here.
 
 ## Follow-ups (not in this RFC)
 

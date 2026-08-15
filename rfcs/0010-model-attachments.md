@@ -76,8 +76,7 @@ These shape the design more than any preference does:
 - **Signing runs on Workers today.** `MessageSigner` is `node:crypto`
   (`createHmac`, `timingSafeEqual`), and RFC 0003 §6 verified — and guren.dev
   runs in production — that session-cookie signing works under
-  `nodejs_compat`. **A WebCrypto reimplementation is not needed**; the
-  earlier assumption that signed delivery required one is corrected here.
+  `nodejs_compat`, so signed delivery needs no WebCrypto reimplementation.
 - **Framework-owned tables ship as schema snippets, not migrations.**
   `DatabaseSessionStore` (`packages/core/src/session-store.ts`) takes the
   Drizzle table as `unknown`, documents the column contract in JSDoc and the
@@ -123,7 +122,7 @@ Where a driver lacks a capability, the layer picks the fallback below rather
 than failing — the choice is made once, from a **capability probe on the
 resolved disk** (`typeof disk.getStream === 'function'`, and for presigning a
 try/catch around `temporaryUrl()` at configure time or a per-driver
-declaration; Open Question 11), never from a driver name string, so
+declaration; Open Question 6), never from a driver name string, so
 third-party drivers get the same treatment as built-ins:
 
 | Feature | `local` | `s3` (AWS/MinIO/Spaces…) | `r2` (RFC 0009) | `memory` (tests) | third-party |
@@ -161,7 +160,8 @@ Two tables, Rails-shaped, dialect snippets shipped through docs + JSDoc +
 ```ts
 // sqlite / D1 flavour (pg/mysql snippets differ only in column builders)
 export const storageBlobs = sqliteTable('storage_blobs', {
-  id: text('id').primaryKey(),                       // ULID (sortable, no autoincrement race on D1)
+  id: text('id').primaryKey(),                       // ULID: sortable, no autoincrement race on D1, and
+                                                     // unguessable before a direct-upload id is signed
   key: text('key').notNull().unique(),               // object key on the disk
   disk: text('disk').notNull(),                      // StorageManager disk name
   filename: text('filename').notNull(),
@@ -192,6 +192,8 @@ export const storageAttachments = sqliteTable('storage_attachments', {
   'record')` is a plain relation.
 - Rails' third table (`variant_records`) is not adopted; variants use derived
   keys (§6).
+- The `storage_` prefix keeps both tables clear of app tables and of the
+  mail/notification "attachment" vocabulary already in `@guren/server`.
 
 `configureAttachments()` follows the session-store precedent — tables in,
 models out — plus the storage/signing wiring:
@@ -275,11 +277,9 @@ What the types then enforce, all at compile time:
   `visible` use), so an attachment named `title` on a table with a `title`
   column fails to compile instead of shadowing the column at load time.
 
-The runtime shape is unchanged (`Attachable` still writes
-`static attachments` on the anonymous subclass, which is what codegen and
-`guren check` read; the static-declaration spelling from the earlier draft
-stays *accepted* by the parser but is no longer the documented form). The
-mixin's statics, all keyed on `keyof TAttachments`:
+The runtime shape is `static attachments` on the anonymous subclass, which is
+what codegen and `guren check` read. The mixin's statics, all keyed on
+`keyof TAttachments`:
 
 | Static | Purpose |
 |---|---|
@@ -363,15 +363,17 @@ Rules that make this the security boundary the driver cannot be:
   `X-Content-Type-Options: nosniff`, so a user upload cannot become a
   same-origin script. Overridable per attachment declaration.
 - **Streaming.** Proxy mode uses `disk.getStream(key)` when the driver
-  implements it (RFC 0009 Open Question 5 adds an *optional*
-  `getStream?(path): Promise<ReadableStream | null>` to `StorageDriver`;
-  `R2Driver` returns `obj.body`), falling back to `disk.get()` (buffered)
-  otherwise. Range requests are out of scope for v1 (Open Question 6).
+  implements it. This RFC owns that addition: an optional
+  `getStream?(path): Promise<ReadableStream | null>` on `StorageDriver`
+  (§8), which `R2Driver` satisfies with `obj.body`. Where it is absent the
+  route falls back to `disk.get()` (buffered). Range requests are out of
+  scope for v1 (Open Question 3).
 - **Auth.** The signature *is* the authorization for private blobs (a
-  short-lived capability URL). Apps that need per-request checks (a
-  document only its owner may see, revocable) wrap `attachmentUrl()` in
-  their own controller and set `expiresIn` low; the RFC does not add a
-  second authorization layer to the delivery route.
+  short-lived capability URL). The alternative — an `authorize(blob, ctx)`
+  callback on `registerAttachmentRoutes` for revocable access — is not in
+  v1: apps that need per-request checks wrap `attachmentUrl()` in their own
+  controller and set `expiresIn` low. Revisit if that wrapper turns out to
+  be the common case rather than the exception.
 
 ### 4. Direct upload
 
@@ -413,7 +415,8 @@ POST /storage/direct-uploads      (registered by registerAttachmentRoutes; must 
   manually).
 - **Client helper** (`@guren/inertia-client`): `useDirectUpload({ model,
   name })` returning `{ upload(file) → signedId, progress }`, typed by
-  `AttachmentsMap`. Optional in v1.
+  `AttachmentsMap`. Ships with Part 2, since Part 5 dogfoods an upload UI on
+  it.
 
 ### 5. Lifecycle and purge
 
@@ -428,7 +431,7 @@ POST /storage/direct-uploads      (registered by registerAttachmentRoutes; must 
   breaks pages.
 - Record deletion: **explicit** `Post.purgeAttachments(id)` in the destroy
   action (documented in the guide, scaffolded by `make:feature --attach`?
-  — Open Question 8). A `deleting` hook is registered too, but only as a
+  — Open Question 4). A `deleting` hook is registered too, but only as a
   best-effort: it fires on one of three delete paths and receives the
   where clause, so it purges only when `where` carries the primary key.
   `attachments:purge-orphans` also removes attachment rows whose record no
@@ -505,7 +508,7 @@ buffers a 20 MB original.
 | `@guren/server` | additive optional `StorageDriver.getStream?` and `temporaryUploadUrl?`; `S3Driver` implements both |
 | `@guren/plugin-cloudflare` | `R2Driver.getStream`, `R2Driver.temporaryUploadUrl` (presign only), `CloudflareImagesTransformer` |
 | `@guren/cli` | `add attachments` blueprint, `attachments-types.ts` codegen, `check`/`audit` rules, `spec:generate` edges, `shouldRegenerate` |
-| `@guren/inertia-client` | `useDirectUpload` (optional, later) |
+| `@guren/inertia-client` | `useDirectUpload` (Part 2) |
 
 Release order (per `.claude/rules/common-pitfalls.md`, templates and plugins
 resolve `@guren/*` from npm): server/core additive methods → cli → plugin
@@ -579,42 +582,39 @@ in a column can backfill with `Post.attach(id, 'cover', { path: row.coverKey,
 disk: 'media' })` — no re-upload. No deprecations; the storage API is
 unchanged.
 
+## Follow-ups (not in this RFC)
+
+- **`parseRequestPayload` collapses arrays** (`http/request.ts`), so a
+  multi-file field reaches `validateBody` as its first file only. This RFC
+  routes around it with `this.files()`; changing the payload shape is a
+  server behaviour change with its own blast radius and belongs in its own
+  PR.
+- **A cross-driver `StorageDriver` conformance suite** (local/memory/s3/r2),
+  which §0's matrix currently asserts per-driver.
+
 ## Open Questions
 
 1. **Eager loading:** `Post.with('cover')` needs a per-name filter on
    `morphMany` (a `where` on the relation definition) that `@guren/orm` does
    not have; v1 ships `withAttachments()` instead. Add relation constraints
    to the ORM (general win) or keep the helper?
-2. **Codegen scope in v1:** ship `attachments.gen.ts` in Part 1 or defer to
-   Part 4? Leaning Part 4 — nothing in the model API needs it.
-3. **Checksum:** base64 SHA-256 (WebCrypto everywhere, R2 `sha256` put
+2. **Checksum:** base64 SHA-256 (WebCrypto everywhere, R2 `sha256` put
    option) vs. base64 MD5 (Rails/S3 `Content-MD5` compatible). Leaning
    SHA-256.
-4. **IDs:** ULID text PKs (proposed) vs. autoincrement — D1/SQLite
-   `INSERT … RETURNING` works for both; ULID keeps direct-upload blob ids
-   unguessable before they are signed.
-5. **Table names:** `storage_blobs`/`storage_attachments` vs.
-   `blobs`/`attachments`. Prefixed avoids collisions with app tables and
-   with the mail/notification "attachment" vocabulary.
-6. **Range requests** in proxy mode (video): v1 or later? R2 `get(key, {
+3. **Range requests** in proxy mode (video): v1 or later? R2 `get(key, {
    range })` supports it; the driver's `getStream` would need a range
    argument.
-7. **Delivery-route authorization hook:** is a capability URL enough, or
-   should `registerAttachmentRoutes` accept an `authorize(blob, ctx)`
-   callback for revocable access? Leaning: signature only in v1, low
-   `expiresIn`, document the wrapper pattern.
-8. **`make:feature --attach`** and whether `make:feature`'s destroy action
+4. **`make:feature --attach`** and whether `make:feature`'s destroy action
    should call `purgeAttachments` by default.
-9. **Multi-file `validateBody`:** should `parseRequestPayload` stop
-   collapsing arrays (`request.ts:22`) so `hasManyAttached` fields validate
-   through the normal path? That is a server behaviour change with its own
-   blast radius; the RFC uses `this.files()` and leaves the payload
-   collapse alone.
-10. **Modules (RFC 0002):** a module's model declaring attachments —
+5. **Modules (RFC 0002):** a module's model declaring attachments —
     `guren add attachments --module` scaffolds module-local tables, or all
     modules share the app-level pair? Leaning shared (one `configureAttachments`
     per app), matching the sessions table.
-11. **Capability detection (§0):** optional methods (`getStream?`,
+6. **Capability detection (§0):**
+7. **Variant mode default (§6):** `materialize` off-Workers and `url` on
+    Workers-with-a-custom-domain — but nothing says how that is selected.
+    Same class as the question above; fold it into whichever answer wins
+    there, or require `variants.mode` explicitly. optional methods (`getStream?`,
     `temporaryUploadUrl?`) are probed structurally, but "can `temporaryUrl()`
     produce a real signed URL" is not observable from the type — `LocalDriver`
     returns a plain URL, `R2Driver` throws without `presign`. Options: (a) an
