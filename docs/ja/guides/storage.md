@@ -49,7 +49,6 @@ await disk.put('file.txt', 'Hello World')                    // 文字列コン�
 await disk.put('image.jpg', imageBuffer)                      // Bufferコンテンツ
 await disk.put('data.json', JSON.stringify(data), {          // オプション付き
   contentType: 'application/json',
-  visibility: 'public',
 })
 await disk.putFile('uploads/report.pdf', './temp/report.pdf') // ローカルファイルから
 
@@ -121,18 +120,24 @@ await disk.deleteDirectory('uploads/temp')
 
 ### 可視性
 
+可視性がどこに属するかはバックエンド次第で、ドライバは「できるふり」をせずどちらであるかを示します。
+
+- **オブジェクト単位** — ACL が有効な S3。`setVisibility()` は1ファイルだけを変更します。
+- **ディスク単位** — ローカルディスク（到達可能性はディスクのルートと、それを配信する仕組みで決まります）、`acl: false` の S3、Cloudflare R2。ディスク側で `visibility` を宣言し、逆の値を求められた場合は黙って無視せず拒否します。S3 と R2 では現在すでにエラーですが、ローカルドライバはこれまで受け付けてきた経緯があるため、今は警告のみで次のメジャーでエラーになります。
+
 ```ts
-const disk = storage.disk()
+const disk = storage.disk('public')       // visibility: 'public' を宣言したディスク
 
-// アップロード時に可視性を設定
-await disk.put('file.txt', content, { visibility: 'public' })
+await disk.put('file.txt', content)                  // ディスクの可視性を継承
+await disk.put('file.txt', content, { visibility: 'public' })  // 同じ意味を明示しただけ
+await disk.getVisibility('file.txt')                 // 'public'（ファイルが無ければ例外）
 
-// 可視性を変更
-await disk.setVisibility('file.txt', 'public')
-await disk.setVisibility('file.txt', 'private')
+// オブジェクト単位のバックエンドでは1ファイルだけ移動します
+await storage.disk('s3').setVisibility('file.txt', 'private')
 
-// 現在の可視性を取得
-const visibility = await disk.getVisibility('file.txt')
+// ディスク単位のバックエンドでは、黙って捨てられるのではなく拒否されます。
+// 代わりに目的の可視性を持つディスクへ置いてください。
+await storage.disk('local').put('secret.pdf', content)
 ```
 
 ## 設定
@@ -278,8 +283,28 @@ const storage = new StorageManager({
 })
 ```
 
+S3 のオブジェクト ACL に対応していないエンドポイント（R2 は `x-amz-acl` と ACL 操作を非対応と明記しており、MinIO は構成によります）では `acl: false` を指定します。ドライバはヘッダの送出をやめ、`getVisibility()` はディスクに設定した `visibility` を返し、`put({ visibility })` や `setVisibility()` で逆の値を求められた場合は、黙って無視せず例外を投げます。
+
+```ts
+const storage = new StorageManager({
+  default: 's3',
+  disks: {
+    s3: {
+      driver: 's3',
+      bucket: 'my-bucket',
+      region: 'auto',
+      endpoint: `https://${process.env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+      accessKeyId: process.env.R2_ACCESS_KEY_ID,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+      acl: false,
+      visibility: 'public',
+    },
+  },
+})
+```
+
 > [!NOTE]
-> Cloudflare Workers 上では S3 API ではなくバケットバインディングを使ってください。`@guren/plugin-cloudflare` の `R2Driver` は資格情報も AWS SDK も不要です。上の S3 のレシピは他のランタイム（Bun サーバー、スクリプト、Lambda）から R2 に到達するためのものです。R2 にはオブジェクト単位の ACL が無いため、可視性はバケット単位の設定として扱ってください。[Cloudflare Workers ガイド](./cloudflare.md#ストレージr2)を参照してください。
+> Cloudflare Workers 上では S3 API ではなくバケットバインディングを使ってください。`@guren/plugin-cloudflare` の `R2Driver` は資格情報も AWS SDK も不要です。上の S3 のレシピは他のランタイム（Bun サーバー、スクリプト、Lambda）から R2 に到達するためのものです。[Cloudflare Workers ガイド](./cloudflare.md#ストレージr2)を参照してください。
 
 ### 署名付きURL
 
@@ -292,6 +317,27 @@ const disk = storage.disk('s3')
 const expiration = new Date(Date.now() + 3600 * 1000)
 const url = await disk.temporaryUrl('private/document.pdf', expiration)
 ```
+
+### 環境ごとのディスク切り替え
+
+ディスクはまとめて宣言しておき、環境変数で選びます（`bunx guren add storage` はこの形で生成します）。ドライバは初回利用時に構築されるため、触らないディスクはクライアントも接続も作りません。
+
+```ts
+const storage = createStorageManager({
+  default: process.env.STORAGE_DISK ?? 'local',
+  disks: {
+    local: { driver: 'local', root: './storage/app/public', url: '/storage' },
+    s3: { driver: 's3', bucket: process.env.S3_BUCKET!, region: 'ap-northeast-1' },
+  },
+})
+```
+
+開発では `STORAGE_DISK=local`、本番では `STORAGE_DISK=s3`。コードの変更は不要で、`storage.disk()` は選ばれた方を返します。
+
+この形について、2点注意があります。
+
+- **設定値は解決しないディスクの分も先に読まれます。** オブジェクトを組み立てた時点で評価されるためです。`process.env.S3_BUCKET` が未設定でも無害ですが、未設定時に例外を投げるヘルパーを書くと、そのディスクを一度も使わなくても起動時に落ちます。そうしたヘルパーはディスクの定義に置かず、`storage.registerDisk('s3', () => new S3Driver({ ... }))` を使ってください。こちらのコールバックは本当に初回利用時に実行されます。
+- **未知のディスク名は構築時には弾かれません。** `createStorageManager({ default: 'typo' })` は成功し、最初にディスクを解決したときに初めて `Storage disk not found: typo` を投げます。キュージョブの中かもしれません。生成される StorageProvider が起動時に名前を検証しているのはこのためです。設定を手書きする場合も同じようにしてください。
 
 ## ファイルアップロード
 
@@ -323,12 +369,13 @@ export class UploadController extends Controller {
     const ext = file.name.split('.').pop()
     const filename = `avatars/${crypto.randomUUID()}.${ext}`
 
-    await storage.disk().put(filename, buffer, {
+    // The public disk declares its own visibility, so the upload does not
+    // have to ask for one the disk may not be able to honour.
+    await storage.disk('public').put(filename, buffer, {
       contentType: file.type,
-      visibility: 'public',
     })
 
-    const url = storage.disk().url(filename)
+    const url = storage.disk('public').url(filename)
 
     return this.json({ url })
   }

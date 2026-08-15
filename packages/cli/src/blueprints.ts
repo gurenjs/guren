@@ -505,7 +505,7 @@ export default class NotificationProvider extends ServiceProvider {
     },
   },
   storage: {
-    description: 'Install storage infrastructure with local/public disks and a sample storage service.',
+    description: 'Install storage infrastructure with local/public disks (switchable via STORAGE_DISK) and a sample storage service.',
     run: async (options) => {
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
       const created = await scaffoldFeatureFiles([
@@ -513,15 +513,32 @@ export default class NotificationProvider extends ServiceProvider {
           path: 'app/Providers/StorageProvider.ts',
           contents: `import { ServiceProvider, createStorageManager } from '@guren/core'
 
+// Declared once, chosen per environment: set STORAGE_DISK in .env (or in
+// your platform's vars) to switch without touching code. Drivers are built
+// on first use, so a disk you never touch never opens a connection — but the
+// values below are read when this object is built, so keep anything that can
+// throw (a required-env helper) out of it.
+const disks = {
+  local: { driver: 'local', root: './storage/app' },
+  // Declared public because it is: everything under it is served. A local
+  // disk has no per-object visibility, so this is where that is decided.
+  public: { driver: 'local', root: './storage/app/public', visibility: 'public' },
+} as const
+
+const selected = process.env.STORAGE_DISK ?? 'local'
+
 export default class StorageProvider extends ServiceProvider {
   register(): void {
-    this.container.instance('storage', createStorageManager({
-      default: 'local',
-      disks: {
-        local: { driver: 'local', root: './storage/app' },
-        public: { driver: 'local', root: './storage/app/public' },
-      },
-    }))
+    // Checked here rather than left to the first upload: an unknown name is
+    // accepted at construction and only throws when a disk is resolved,
+    // which can be a queued job or a rarely-hit route in production.
+    if (!(selected in disks)) {
+      throw new Error(
+        \`STORAGE_DISK="\${selected}" is not a declared disk. Declare it in app/Providers/StorageProvider.ts or use one of: \${Object.keys(disks).join(', ')}.\`,
+      )
+    }
+
+    this.container.instance('storage', createStorageManager({ default: selected, disks }))
   }
 }
 `,

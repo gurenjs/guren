@@ -188,6 +188,19 @@ export interface StorageDriver {
 
   /**
    * Set file visibility.
+   *
+   * Contract: throws when the file does not exist, so a caller cannot take
+   * success as proof the object is there. A driver whose backend has no
+   * per-object visibility (bucket-level access, a plain filesystem) reports
+   * the disk's configured visibility and throws when asked for the other
+   * value, rather than accepting a request it cannot honour — silently
+   * doing nothing is a leak that looks like success.
+   *
+   * `LocalDriver` is such a backend: what makes a local file reachable is
+   * the disk root and whatever serves it, not a flag on one file. It has
+   * always accepted per-object requests and done nothing, so it warns
+   * instead of throwing and will throw in the next major.
+   *
    * @param path File path
    * @param visibility Visibility setting
    */
@@ -195,6 +208,10 @@ export interface StorageDriver {
 
   /**
    * Get file visibility.
+   *
+   * Contract: throws when the file does not exist. Drivers without
+   * per-object visibility report the disk's configured value.
+   *
    * @param path File path
    */
   getVisibility(path: string): Promise<'public' | 'private'>
@@ -275,6 +292,25 @@ export interface S3DriverOptions {
    * @default 'private'
    */
   visibility?: 'public' | 'private'
+
+  /**
+   * Whether the endpoint implements S3 object ACLs.
+   *
+   * AWS S3 does, so this defaults to `true` and every `put` carries an
+   * `x-amz-acl` header derived from the file's visibility. Several
+   * S3-compatible endpoints do not: Cloudflare R2 documents `x-amz-acl` and
+   * the ACL operations as unsupported (access is decided per bucket), and
+   * MinIO/others vary. Set `acl: false` for those.
+   *
+   * With `acl: false` the driver stops sending the header, and visibility
+   * becomes a property of the whole disk: `getVisibility()` reports the
+   * configured `visibility`, and `put({ visibility })` / `setVisibility()`
+   * throw when asked for the other value rather than silently not applying
+   * it. Enforce per-object access in front of the disk instead.
+   *
+   * @default true
+   */
+  acl?: boolean
 }
 
 /**

@@ -49,7 +49,6 @@ await disk.put('file.txt', 'Hello World')                    // String content
 await disk.put('image.jpg', imageBuffer)                      // Buffer content
 await disk.put('data.json', JSON.stringify(data), {          // With options
   contentType: 'application/json',
-  visibility: 'public',
 })
 await disk.putFile('uploads/report.pdf', './temp/report.pdf') // From local file
 
@@ -121,18 +120,24 @@ await disk.deleteDirectory('uploads/temp')
 
 ### Visibility
 
+Where visibility lives depends on the backend, and the driver tells you which one you have rather than pretending:
+
+- **Per object** — S3 with ACLs enabled. `setVisibility()` changes one file.
+- **Per disk** — a local disk (reachability comes from the disk root and whatever serves it), S3 with `acl: false`, and Cloudflare R2. The disk declares its `visibility`; asking for the other value is refused instead of silently doing nothing. On S3 and R2 that is an error today; the local driver warns and will error in the next major, since it has been accepting these calls for a while.
+
 ```ts
-const disk = storage.disk()
+const disk = storage.disk('public')       // declared visibility: 'public'
 
-// Set visibility on upload
-await disk.put('file.txt', content, { visibility: 'public' })
+await disk.put('file.txt', content)                  // inherits the disk's visibility
+await disk.put('file.txt', content, { visibility: 'public' })  // same thing, stated explicitly
+await disk.getVisibility('file.txt')                 // 'public' — throws if the file is not there
 
-// Change visibility
-await disk.setVisibility('file.txt', 'public')
-await disk.setVisibility('file.txt', 'private')
+// On a per-object backend this moves one file:
+await storage.disk('s3').setVisibility('file.txt', 'private')
 
-// Get current visibility
-const visibility = await disk.getVisibility('file.txt')
+// On a per-disk backend the request is refused rather than silently
+// dropped. Put the file on a disk with the visibility you want instead:
+await storage.disk('local').put('secret.pdf', content)
 ```
 
 ## Configuration
@@ -278,8 +283,28 @@ const storage = new StorageManager({
 })
 ```
 
+Endpoints that do not implement S3 object ACLs — R2 documents `x-amz-acl` and the ACL operations as unsupported, and MinIO deployments vary — need `acl: false`. The driver then stops sending the header, `getVisibility()` reports the disk's configured `visibility`, and `put({ visibility })` / `setVisibility()` throw when asked for the other value instead of silently not applying it:
+
+```ts
+const storage = new StorageManager({
+  default: 's3',
+  disks: {
+    s3: {
+      driver: 's3',
+      bucket: 'my-bucket',
+      region: 'auto',
+      endpoint: `https://${process.env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+      accessKeyId: process.env.R2_ACCESS_KEY_ID,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+      acl: false,
+      visibility: 'public',
+    },
+  },
+})
+```
+
 > [!NOTE]
-> On Cloudflare Workers, use the bucket binding instead of the S3 API: `R2Driver` from `@guren/plugin-cloudflare` needs no credentials and no AWS SDK. The S3 recipe above is for reaching R2 from other runtimes (a Bun server, a script, Lambda). R2 has no per-object ACLs, so treat visibility as a bucket-level setting there. See the [Cloudflare Workers guide](./cloudflare.md#storage-r2).
+> On Cloudflare Workers, use the bucket binding instead of the S3 API: `R2Driver` from `@guren/plugin-cloudflare` needs no credentials and no AWS SDK. The S3 recipe above is for reaching R2 from other runtimes (a Bun server, a script, Lambda). See the [Cloudflare Workers guide](./cloudflare.md#storage-r2).
 
 ### Pre-signed URLs
 
@@ -292,6 +317,27 @@ const disk = storage.disk('s3')
 const expiration = new Date(Date.now() + 3600 * 1000)
 const url = await disk.temporaryUrl('private/document.pdf', expiration)
 ```
+
+### Choosing a Disk per Environment
+
+Declare every disk once and pick one with an environment variable, the way `bunx guren add storage` scaffolds it. Drivers are built on first use, so a disk you never touch never constructs a client or opens a connection:
+
+```ts
+const storage = createStorageManager({
+  default: process.env.STORAGE_DISK ?? 'local',
+  disks: {
+    local: { driver: 'local', root: './storage/app/public', url: '/storage' },
+    s3: { driver: 's3', bucket: process.env.S3_BUCKET!, region: 'ap-northeast-1' },
+  },
+})
+```
+
+`STORAGE_DISK=local` in development, `STORAGE_DISK=s3` in production — no code change, and `storage.disk()` returns whichever one is selected.
+
+Two things to know about this shape:
+
+- **The config values are read eagerly**, even for a disk you never resolve — they are evaluated when you build the object. `process.env.S3_BUCKET` being unset is harmless, but a helper that *throws* on a missing variable will throw at startup for a disk the app never touches. Keep those out of the disk map, or build that disk with `storage.registerDisk('s3', () => new S3Driver({ ... }))`, whose callback really does run on first use.
+- **An unknown name is not caught at construction.** `createStorageManager({ default: 'typo' })` succeeds and only throws `Storage disk not found: typo` when a disk is first resolved — which can be inside a queued job. The scaffolded provider checks the value against its own disk map at boot for this reason; do the same if you write the config by hand.
 
 ## File Uploads
 
@@ -323,12 +369,13 @@ export class UploadController extends Controller {
     const ext = file.name.split('.').pop()
     const filename = `avatars/${crypto.randomUUID()}.${ext}`
 
-    await storage.disk().put(filename, buffer, {
+    // The public disk declares its own visibility, so the upload does not
+    // have to ask for one the disk may not be able to honour.
+    await storage.disk('public').put(filename, buffer, {
       contentType: file.type,
-      visibility: 'public',
     })
 
-    const url = storage.disk().url(filename)
+    const url = storage.disk('public').url(filename)
 
     return this.json({ url })
   }
