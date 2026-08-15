@@ -1,6 +1,6 @@
 ---
 "@guren/core": patch
-"@guren/plugin-lambda": patch
+"@guren/plugin-lambda": minor
 "@guren/plugin-vercel": minor
 "@guren/cli": patch
 ---
@@ -30,10 +30,20 @@ reaches a factory without naming it.
 whose CLI has no way to replace a module — no alias flag, no plugin flag — so
 this platform had no stub mechanism at all. It now uses Bun's JS API, which
 takes plugins. Update `scripts/vercel-build.ts` to `await buildVercelOutput({
-... })`; the scaffold emits that from now on. Both plugins also pass
-`throw: false` to `Bun.build`: it rejects with a bare "Bundle failed" by
-default, discarding the one line that matters — the module it could not
-resolve.
+... })`; the scaffold emits that from now on.
+
+That missing mechanism was also why a scaffolded app could not be bundled for
+Vercel at all: the disabled MCP endpoint's `import("@guren/cli")` resolves and
+the CLI's own `import("@guren/openapi")` behind it does not. The Vercel build
+now stubs the same dev-only modules Lambda has stubbed since it shipped —
+Vite and the MCP endpoint — which also drops the dev tooling those dragged
+into the function. `bun:sqlite` is deliberately **not** stubbed here: the
+function runs on Vercel's Bun runtime, so sqlite is a working database on this
+platform, unlike on Workers and Lambda.
+
+Both plugins also pass `throw: false` to `Bun.build`: it rejects with a bare
+"Bundle failed" by default, discarding the one line that matters — the module
+it could not resolve.
 
 An opt-in `GUREN_TEST_BUNDLE=1` test per platform bundles a Postgres app with
 no other client installed. Each installs the ORM from a tarball rather than a

@@ -164,9 +164,11 @@ otherwise fail to build on `mysql2`, a database it never chose. The build reads
 which factories `config/database.ts` calls and replaces the clients for every
 other dialect with a stub that throws if it is ever reached.
 
-If your config reaches a factory without naming it — a re-export, or an
-indirection through another module — the build says it could not tell and
-stubs nothing. Name the databases yourself in that case:
+Only `config/database.ts` (or `db/config.ts`) is read, so an app that opens a
+second connection elsewhere should name its databases explicitly. So should
+one whose config reaches a factory without naming it — through a re-export, or
+an indirection into another module — which the build reports as not being able
+to tell, and stubs nothing:
 
 ```bash
 bunx guren lambda:build --database postgres,sqlite
