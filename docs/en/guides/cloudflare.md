@@ -187,7 +187,7 @@ export default class StorageProvider extends ServiceProvider {
 Three things follow from how R2 differs from S3:
 
 - **`publicUrl` is required for `url()`.** Attach a custom domain to the bucket in the dashboard (the r2.dev subdomain is rate-limited and meant for development) and pass it as `publicUrl`; R2 has no derivable public URL, so `url()` throws without it.
-- **`temporaryUrl()` needs S3 credentials.** The binding cannot sign URLs. Either pass `presign: { accountId, bucket, accessKeyId, secretAccessKey }` (an R2 API token) and install `aws4fetch`, or keep private files behind an authenticated route in your app. Without `presign`, `temporaryUrl()` throws with that guidance.
+- **`temporaryUrl()` needs S3 credentials.** The binding cannot sign URLs. Either pass `presign: { accountId, bucket, accessKeyId, secretAccessKey }` (an R2 API token), or keep private files behind an authenticated route in your app. Without `presign`, `temporaryUrl()` throws with that guidance.
 - **Visibility is per bucket, not per object.** A bucket is public (custom domain / r2.dev) or private; there is no per-object ACL. The driver reports the bucket's `visibility` (defaults to `'public'` when `publicUrl` is set) and throws if `put({ visibility })` or `setVisibility()` asks for the other value, rather than pretending to honour it.
 
 `putFile()` also throws — there is no local file to read on Workers. Read the bytes yourself (`await file.arrayBuffer()`) and call `put()`. For one-off bulk loads, `bunx wrangler r2 object put my-app-media/<key> --file <path>` from your machine is simpler than going through the app.

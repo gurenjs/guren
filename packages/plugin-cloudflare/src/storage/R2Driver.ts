@@ -1,4 +1,5 @@
 import type { FileMetadata, PutOptions, StorageDriver } from '@guren/core'
+import { presignGetUrl } from './sigv4'
 
 /**
  * Structural view of the R2 binding, in the same spirit as the S3 driver's
@@ -116,18 +117,17 @@ export interface R2DriverOptions {
   visibility?: 'public' | 'private'
   /**
    * S3 API credentials used only by `temporaryUrl()`. Optional — omit it and
-   * `temporaryUrl()` throws with guidance. Requires the optional `aws4fetch`
-   * dependency.
+   * `temporaryUrl()` throws with guidance.
    */
   presign?: R2PresignOptions
 }
-
-type AwsClient = InstanceType<typeof import('aws4fetch').AwsClient>
 
 /** R2 rejects presigned URLs valid for longer than seven days. */
 const MAX_PRESIGN_SECONDS = 7 * 24 * 60 * 60
 /** `R2Bucket.delete()` accepts at most this many keys per call. */
 const DELETE_BATCH_SIZE = 1000
+/** How many delete batches may be in flight at once. */
+const DELETE_CONCURRENCY = 6
 
 /**
  * Cloudflare R2 storage driver over the Workers binding.
@@ -147,7 +147,6 @@ export class R2Driver implements StorageDriver {
   private readonly prefix: string
   private readonly diskVisibility: 'public' | 'private'
   private readonly presign?: R2PresignOptions
-  private awsClient?: Promise<AwsClient>
 
   constructor(options: R2DriverOptions) {
     this.resolveBinding = options.binding
@@ -249,7 +248,12 @@ export class R2Driver implements StorageDriver {
     for (let index = 0; index < keys.length; index += DELETE_BATCH_SIZE) {
       batches.push(keys.slice(index, index + DELETE_BATCH_SIZE))
     }
-    await Promise.all(batches.map((batch) => bucket.delete(batch)))
+    // Bounded fan-out: concurrent enough to hide latency, small enough that
+    // a large deleteMany does not open an unbounded number of binding calls
+    // from one request.
+    for (let index = 0; index < batches.length; index += DELETE_CONCURRENCY) {
+      await Promise.all(batches.slice(index, index + DELETE_CONCURRENCY).map((batch) => bucket.delete(batch)))
+    }
     // R2 reports nothing per key; like S3's DeleteObjects, every requested
     // key counts as deleted.
     return keys.length
@@ -300,30 +304,15 @@ export class R2Driver implements StorageDriver {
         `R2Driver.temporaryUrl(): R2 presigned URLs may be valid for at most 7 days (requested ${expiresIn}s).`,
       )
     }
-    const client = await this.presignClient(this.presign)
-    const url = new URL(
-      `https://${this.presign.accountId}.r2.cloudflarestorage.com/${this.presign.bucket}/${encodeKey(this.key(path))}`,
-    )
-    url.searchParams.set('X-Amz-Expires', String(Math.max(1, expiresIn)))
-    const signed = await client.sign(new Request(url.toString(), { method: 'GET' }), { aws: { signQuery: true } })
-    return signed.url
-  }
-
-  /**
-   * One `AwsClient` per driver: it caches the derived SigV4 signing key, so
-   * a fresh instance per URL would redo the HMAC chain on every call.
-   */
-  private presignClient(presign: R2PresignOptions): Promise<AwsClient> {
-    this.awsClient ??= importOptionalModule<typeof import('aws4fetch')>('aws4fetch').then(
-      ({ AwsClient }) =>
-        new AwsClient({
-          accessKeyId: presign.accessKeyId,
-          secretAccessKey: presign.secretAccessKey,
-          service: 's3',
-          region: 'auto',
-        }),
-    )
-    return this.awsClient
+    return presignGetUrl({
+      url: `https://${this.presign.accountId}.r2.cloudflarestorage.com/${this.presign.bucket}/${encodeKey(this.key(path))}`,
+      accessKeyId: this.presign.accessKeyId,
+      secretAccessKey: this.presign.secretAccessKey,
+      // R2's S3 API is single-region.
+      region: 'auto',
+      service: 's3',
+      expiresIn: Math.max(1, expiresIn),
+    })
   }
 
   async size(path: string): Promise<number> {
@@ -407,9 +396,9 @@ export class R2Driver implements StorageDriver {
     // convention S3 consoles use for folders: `directories()` sees it as a
     // delimited prefix, while the trailing-slash filter keeps it out of
     // `files()`/`allFiles()`.
-    const key = this.key(path)
-    if (!key) return
-    await this.bucket().put(`${key}/`, '')
+    const normalized = trimSlashes(path)
+    if (!normalized) return
+    await this.bucket().put(`${this.key(normalized)}/`, '')
   }
 
   async deleteDirectory(path: string): Promise<void> {
@@ -463,26 +452,4 @@ function trimSlashes(value: string): string {
   while (start < end && value[start] === '/') start++
   while (end > start && value[end - 1] === '/') end--
   return value.slice(start, end)
-}
-
-/**
- * Twin of `S3Driver`'s `importAwsModule` in `@guren/server` (module-private
- * there); the detection stays byte-for-byte the same so a fix lands in both.
- */
-function isMissingModule(error: unknown, moduleName: string): boolean {
-  if (!error || typeof error !== 'object') return false
-  if ((error as { code?: string }).code === 'ERR_MODULE_NOT_FOUND') return true
-  const message = String((error as { message?: string }).message ?? '')
-  return message.includes(`Cannot find package '${moduleName}'`) || message.includes(`Cannot find module '${moduleName}'`)
-}
-
-async function importOptionalModule<T>(moduleName: string): Promise<T> {
-  try {
-    return (await import(moduleName)) as T
-  } catch (error) {
-    if (isMissingModule(error, moduleName)) {
-      throw new Error(`Missing optional dependency "${moduleName}". Install aws4fetch to use R2Driver.temporaryUrl().`)
-    }
-    throw error
-  }
 }

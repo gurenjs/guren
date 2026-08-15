@@ -44,18 +44,9 @@
     "@guren/core": "^1.5.2",
     "citty": "^0.1.6"
   },
-  "peerDependencies": {
-    "aws4fetch": "^1.0.0"
-  },
-  "peerDependenciesMeta": {
-    "aws4fetch": {
-      "optional": true
-    }
-  },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260702.1",
     "@types/node": "^20.14.10",
-    "aws4fetch": "^1.0.20",
     "miniflare": "5.20260801.1-alpha",
     "tsup": "^8.5.0",
     "typescript": "^5.4.0"

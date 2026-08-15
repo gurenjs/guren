@@ -14,8 +14,9 @@ at `LocalStorageDriver`, mirroring the D1/SQLite runtime switch.
 
 Where the binding differs from S3, the driver says so instead of guessing:
 `url()` needs `publicUrl` (R2 has no derivable public URL); `temporaryUrl()`
-presigns through the optional `aws4fetch` peer when `presign` credentials
-are configured and throws with guidance otherwise (bindings cannot sign);
+presigns on WebCrypto
+(no dependency) when `presign` credentials are configured and throws with
+guidance otherwise (bindings cannot sign);
 `put({ visibility })` / `setVisibility()` throw when asked for the opposite
 of the bucket's declared `visibility` (R2 has no per-object ACL);
 `putFile()` throws (no filesystem). Bulk deletes are batched to the

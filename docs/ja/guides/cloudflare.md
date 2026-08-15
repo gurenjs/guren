@@ -187,7 +187,7 @@ export default class StorageProvider extends ServiceProvider {
 R2 と S3 の違いから、次の3点が異なります:
 
 - **`url()` には `publicUrl` が必須です。** ダッシュボードでバケットにカスタムドメインを割り当て（r2.dev サブドメインはレート制限付きで開発向けです）、それを `publicUrl` に渡してください。R2 には導出できる公開 URL が無いため、未設定だと `url()` は例外を投げます。
-- **`temporaryUrl()` には S3 資格情報が必要です。** バインディングは URL に署名できません。`presign: { accountId, bucket, accessKeyId, secretAccessKey }`（R2 API トークン）を渡して `aws4fetch` をインストールするか、非公開ファイルはアプリの認証付きルート越しに配信してください。`presign` が無い場合、`temporaryUrl()` はその案内付きで例外を投げます。
+- **`temporaryUrl()` には S3 資格情報が必要です。** バインディングは URL に署名できません。`presign: { accountId, bucket, accessKeyId, secretAccessKey }`（R2 API トークン）を渡すか、非公開ファイルはアプリの認証付きルート越しに配信してください。`presign` が無い場合、`temporaryUrl()` はその案内付きで例外を投げます。
 - **可視性はオブジェクト単位ではなくバケット単位です。** バケットは公開（カスタムドメイン / r2.dev）か非公開かのどちらかで、オブジェクトごとの ACL はありません。ドライバはバケットの `visibility`（`publicUrl` があれば既定 `'public'`）を報告し、`put({ visibility })` や `setVisibility()` で逆の値を求められた場合は、できるふりをせず例外を投げます。
 
 `putFile()` も例外を投げます。Workers には読み取れるローカルファイルがありません。自分でバイト列を読み（`await file.arrayBuffer()`）、`put()` を呼んでください。一度きりの一括投入なら、手元から `bunx wrangler r2 object put my-app-media/<key> --file <path>` の方が簡単です。

@@ -73,8 +73,8 @@ describe.skipIf(!enabled)('R2Driver.copy/move inside workerd', () => {
     const { Miniflare } = await import('miniflare')
     const mf = new Miniflare({
       // An explicit module list: with `script` alone Miniflare walks the
-      // bundle for imports and rejects the driver's dynamic
-      // `import(moduleName)` for the optional aws4fetch dependency.
+      // bundle's import graph itself, which is stricter than what wrangler
+      // ships to workerd.
       modules: [{ type: 'ESModule', path: 'worker.js', contents: script }],
       r2Buckets: ['BUCKET'],
       compatibilityDate: '2026-07-01',
@@ -84,7 +84,18 @@ describe.skipIf(!enabled)('R2Driver.copy/move inside workerd', () => {
       const response = await mf.dispatchFetch('http://worker/')
       const body = (await response.json()) as Record<string, unknown>
       expect(response.status).toBe(200)
-      expect(body).toEqual({
+
+      // The regression this block exists for: a signer the bundler cannot
+      // reach makes temporaryUrl() throw `No such module` at runtime, which
+      // nothing outside workerd can observe.
+      const signedUrl = new URL(String(body.signedUrl))
+      expect(signedUrl.origin).toBe('https://acct.r2.cloudflarestorage.com')
+      expect(signedUrl.pathname).toBe('/b/a%20b.png')
+      expect(signedUrl.searchParams.get('X-Amz-Algorithm')).toBe('AWS4-HMAC-SHA256')
+      expect(signedUrl.searchParams.get('X-Amz-Signature')).toMatch(/^[0-9a-f]{64}$/)
+
+      const { signedUrl: _signed, ...rest } = body
+      expect(rest).toEqual({
         copied: 'content',
         bytesAreBuffer: true,
         bytes: Array.from(new TextEncoder().encode('content')),

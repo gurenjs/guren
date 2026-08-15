@@ -149,14 +149,18 @@ export function describeR2DriverConformance(name: string, harness: R2Conformance
         expect(await driver.size('a.txt')).toBe(5)
         expect(await driver.lastModified('a.txt')).toBeInstanceOf(Date)
         const metadata = await driver.metadata('a.txt')
-        expect(metadata).toMatchObject({
+        expect(metadata?.lastModified).toBeInstanceOf(Date)
+        // Exact, not a subset: an unexpected extra field or a dropped one is
+        // the drift this assertion exists to catch. Only the timestamp is
+        // excluded, since it differs per backend.
+        expect({ ...metadata, lastModified: undefined }).toEqual({
           path: 'a.txt',
           size: 5,
+          lastModified: undefined,
           contentType: 'text/plain',
           visibility: 'public',
           metadata: { k: 'v' },
         })
-        expect(metadata?.lastModified).toBeInstanceOf(Date)
       })
 
       test('throws for size/lastModified of a missing file and returns null metadata', async () => {

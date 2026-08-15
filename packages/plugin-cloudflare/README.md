@@ -48,7 +48,7 @@ bunx wrangler deploy
   )
   ```
 
-  with `"r2_buckets": [{ "binding": "MEDIA", "bucket_name": "my-app-media" }]` in `wrangler.jsonc`. Three methods differ from the S3 driver, because the binding differs from S3: `url()` needs `publicUrl` (a custom domain or the r2.dev subdomain — R2 has no derivable public URL); `temporaryUrl()` needs the optional `presign` credentials plus the `aws4fetch` package, and throws with guidance otherwise (bindings cannot sign URLs); `setVisibility()` / `put({ visibility })` throw when asked for the opposite of the bucket's declared `visibility`, because R2 has no per-object ACL to honour the request with. `putFile()` throws — Workers has no filesystem.
+  with `"r2_buckets": [{ "binding": "MEDIA", "bucket_name": "my-app-media" }]` in `wrangler.jsonc`. Three methods differ from the S3 driver, because the binding differs from S3: `url()` needs `publicUrl` (a custom domain or the r2.dev subdomain — R2 has no derivable public URL); `temporaryUrl()` needs the optional `presign` credentials, and throws with guidance otherwise (bindings cannot sign URLs); `setVisibility()` / `put({ visibility })` throw when asked for the opposite of the bucket's declared `visibility`, because R2 has no per-object ACL to honour the request with. `putFile()` throws — Workers has no filesystem.
 
 - **`cloudflarePlugin()`** — the service provider factory, registered automatically by `guren plugin`.
 

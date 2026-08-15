@@ -14,7 +14,21 @@ export default {
     const metadata = await driver.metadata('moved.txt')
     // get() returns a Buffer — proves nodejs_compat's Buffer global is there.
     const bytes = await driver.get('moved.txt')
+    // Presigning must work from inside the bundle: the signer has to be
+    // reachable through whatever bundler produced this worker, which a
+    // variable-specifier dynamic import is not.
+    const presigning = new R2Driver({
+      binding: () => env.BUCKET,
+      presign: { accountId: 'acct', bucket: 'b', accessKeyId: 'AKIDEXAMPLE', secretAccessKey: 'secret' },
+    })
+    let signedUrl: string
+    try {
+      signedUrl = await presigning.temporaryUrl('a b.png', new Date(Date.now() + 3600_000))
+    } catch (error) {
+      signedUrl = `ERROR: ${String(error)}`
+    }
     return Response.json({
+      signedUrl,
       copied,
       bytesAreBuffer: bytes instanceof Buffer,
       bytes: Array.from(bytes ?? []),
