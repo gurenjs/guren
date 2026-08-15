@@ -280,7 +280,9 @@ export class R2Driver implements StorageDriver {
           'R2 has no derivable public URL.',
       )
     }
-    return `${this.publicUrl}/${this.key(path)}`
+    // Percent-encode per segment so keys with spaces or `#` produce a URL
+    // that resolves; `/` stays a separator.
+    return `${this.publicUrl}/${encodeKey(this.key(path))}`
   }
 
   async temporaryUrl(path: string, expiration: Date): Promise<string> {

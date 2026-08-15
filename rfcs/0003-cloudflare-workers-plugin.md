@@ -478,6 +478,8 @@ following. This matrix ships in the plugin docs — Workers is a supported
 - Password hashing → `NodeHasher` swap + OAuth-on-Free guidance (§4)
 - Inertia SSR loading → `setInertiaSsrRenderer` static wiring (§5)
 - Static assets (`Bun.file` paths) → Workers Static Assets (§5)
+- Storage → `R2Driver` over the R2 binding (RFC 0009; amended after
+  acceptance)
 
 **Unsupported on Workers (documented, error early where possible):**
 

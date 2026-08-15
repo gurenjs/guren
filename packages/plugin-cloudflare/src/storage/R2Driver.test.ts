@@ -159,6 +159,10 @@ describe('R2Driver', () => {
       expect(prefixed.url('/a/b.png')).toBe('https://media.example.com/uploads/a/b.png')
     })
 
+    test('percent-encodes key segments', () => {
+      expect(driver.url('a b/c#1.png')).toBe('https://media.example.com/a%20b/c%231.png')
+    })
+
     test('throws without publicUrl', () => {
       const bare = new R2Driver({ binding: () => bucket })
       expect(() => bare.url('a.png')).toThrow(/publicUrl/)

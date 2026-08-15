@@ -47,11 +47,11 @@ describe.skipIf(!enabled)('R2Driver against Miniflare R2', () => {
     expect(metadata?.lastModified).toBeInstanceOf(Date)
   })
 
-  // copy()/move() are not exercised here: the driver streams `get().body`
-  // straight into `put()`, which workerd supports but Miniflare's out-of-
-  // process binding proxy cannot marshal (DataCloneError on the stream).
-  // They are covered by the FakeR2Bucket unit tests; the streaming put is
-  // the documented R2 pattern (`bucket.put(key, object.body)`).
+  // copy()/move() are exercised separately below: the driver streams
+  // `get().body` straight into `put()`, which workerd supports but
+  // Miniflare's out-of-process binding proxy cannot marshal (DataCloneError
+  // on the stream) — so that path runs *inside* workerd, see the second
+  // describe block.
 
   test('delete reports whether the object existed', async () => {
     await driver.put('x.txt', 'x')
@@ -83,5 +83,47 @@ describe.skipIf(!enabled)('R2Driver against Miniflare R2', () => {
     expect(await driver.deleteMany(paths.slice(0, 50))).toBe(50)
     await driver.deleteDirectory('bulk')
     expect(await driver.allFiles('bulk')).toEqual([])
+  })
+})
+
+// The streaming copy is the one code path the binding proxy cannot carry, so
+// this block bundles the driver and runs it inside workerd itself, where
+// `bucket.put(key, object.body)` is the documented R2 pattern.
+describe.skipIf(!enabled)('R2Driver.copy/move inside workerd', () => {
+  test('streams get().body into put() and carries metadata', async () => {
+    const entry = new URL('./r2-miniflare.worker.ts', import.meta.url).pathname
+    const build = await Bun.build({ entrypoints: [entry], target: 'browser', format: 'esm', minify: false })
+    if (!build.success) {
+      throw new Error(build.logs.map((log) => String(log)).join('\n'))
+    }
+    const script = await build.outputs[0]!.text()
+
+    const { Miniflare } = await import('miniflare')
+    const mf = new Miniflare({
+      // An explicit module list: with `script` alone Miniflare walks the
+      // bundle for imports and rejects the driver's dynamic
+      // `import(moduleName)` for the optional aws4fetch dependency.
+      modules: [{ type: 'ESModule', path: 'worker.js', contents: script }],
+      r2Buckets: ['BUCKET'],
+      compatibilityDate: '2026-07-01',
+      compatibilityFlags: ['nodejs_compat'],
+    })
+    try {
+      const response = await mf.dispatchFetch('http://worker/')
+      const body = (await response.json()) as Record<string, unknown>
+      expect(response.status).toBe(200)
+      expect(body).toEqual({
+        copied: 'content',
+        bytesAreBuffer: true,
+        bytes: Array.from(new TextEncoder().encode('content')),
+        moved: 'content',
+        copyExistsAfterMove: false,
+        sourceExists: true,
+        contentType: 'text/plain',
+        metadata: { k: 'v' },
+      })
+    } finally {
+      await mf.dispose()
+    }
   })
 })
