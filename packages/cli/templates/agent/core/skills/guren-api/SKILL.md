@@ -343,7 +343,7 @@ Source: `packages/server/src/storage/`
 
 - `StorageManager.ts` — Storage manager
 
-Drivers: `LocalDriver.ts`, `MemoryDriver.ts`, `S3Driver.ts`
+Drivers: `LocalDriver.ts`, `MemoryDriver.ts`, `S3Driver.ts`. On Cloudflare Workers, `R2Driver` from `@guren/plugin-cloudflare` (bucket binding; register with `storage.registerDisk()`).
 
 ### Scheduling
 Source: `packages/server/src/scheduling/`

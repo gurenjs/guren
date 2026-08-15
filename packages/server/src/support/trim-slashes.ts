@@ -3,8 +3,9 @@
  * quadratically on adversarial input (long slash runs mid-string), and
  * several call sites here feed request-derived paths.
  *
- * A twin of `trimSlashes` lives in `@guren/cli` (`src/utils.ts`); the
- * packages share no dependency edge, so the six lines are duplicated by
+ * Twins live in `@guren/cli` (`src/utils.ts`, `trimSlashes`) and
+ * `@guren/plugin-cloudflare` (`src/storage/R2Driver.ts`, both functions);
+ * neither package can import this module, so the lines are duplicated by
  * convention.
  */
 
