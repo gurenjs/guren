@@ -413,6 +413,12 @@ export type DevOnlySpecifier = (typeof DEV_ONLY_MODULES)[number]['specifier']
  * @param message Platform-specific explanation, including the replacement API.
  */
 export function renderDevOnlyStub(module: DevOnlyModule, message: string): string {
+  // The message reaches the file twice, and only one of those is safe on its
+  // own: `JSON.stringify` handles the thrown string, but the leading comment
+  // would end at the first line terminator and run whatever followed as code.
+  // Callers pass literals today; the escape is here because this is where the
+  // file is constructed, not where the strings happen to come from.
+  const comment = message.replace(/[\r\n\u2028\u2029]+/g, ' ')
   const error = `throw new Error(${JSON.stringify(message)})`
   const throwing = module.exportNames
     .map((name) => `export function ${name}() { ${error} }`)
@@ -425,7 +431,7 @@ export function renderDevOnlyStub(module: DevOnlyModule, message: string): strin
   // object-shaped access working.
   const named = module.exportNames.length > 0 ? `, { ${module.exportNames.join(', ')} }` : ''
   const fallback = `function unavailable() { ${error} }`
-  return `// ${message}\n${throwing}\n${fallback}\nexport default Object.assign(unavailable${named})\n`
+  return `// ${comment}\n${throwing}\n${fallback}\nexport default Object.assign(unavailable${named})\n`
 }
 
 /**

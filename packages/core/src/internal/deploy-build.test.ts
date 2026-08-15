@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import {
   assertOutputDirOutsideRoot,
   DEV_ONLY_MODULES,
+  renderDevOnlyStub,
   importSpecifier,
   MCP_SDK_SUBPATH_PREFIX,
   readManifest,
@@ -320,5 +321,48 @@ describe('the module graph this list describes', () => {
     for (const name of exportNames) {
       expect(source).toContain(name)
     }
+  })
+})
+
+describe('renderDevOnlyStub', () => {
+  // The message lands in the file twice, and only the thrown copy is safe on
+  // its own: `JSON.stringify` escapes it, while the leading comment would end
+  // at the first line terminator and run whatever followed as code. Callers
+  // pass literals today — the escape exists because this is where the file is
+  // constructed, not because the strings are untrusted.
+  const LINE_SEPARATOR = String.fromCharCode(0x2028)
+  const PARAGRAPH_SEPARATOR = String.fromCharCode(0x2029)
+
+  const terminators: Array<[string, string]> = [
+    ['line feed', '\n'],
+    ['carriage return', '\r'],
+    ['CRLF', '\r\n'],
+    ['line separator', LINE_SEPARATOR],
+    ['paragraph separator', PARAGRAPH_SEPARATOR],
+  ]
+
+  for (const [name, terminator] of terminators) {
+    test(`keeps a ${name} inside the leading comment`, () => {
+      const stub = renderDevOnlyStub(
+        { specifier: 'x', kind: 'sqlite', exportNames: [] },
+        `unavailable${terminator}globalThis.INJECTED = true //`,
+      )
+
+      const [comment] = stub.split(new RegExp(`\r\n|[\r\n${LINE_SEPARATOR}${PARAGRAPH_SEPARATOR}]`))
+      expect(comment).toBe('// unavailable globalThis.INJECTED = true //')
+    })
+  }
+
+  test('still names every export the importer destructures', () => {
+    const stub = renderDevOnlyStub(
+      { specifier: 'x', kind: 'sqlite', exportNames: ['Database', 'open'] },
+      'nope',
+    )
+
+    expect(stub).toContain('export function Database()')
+    expect(stub).toContain('export function open()')
+    // Callable, because `import pgClient from "postgres"` calls its default.
+    expect(stub).toContain('function unavailable()')
+    expect(stub).toContain('export default Object.assign(unavailable, { Database, open })')
   })
 })
