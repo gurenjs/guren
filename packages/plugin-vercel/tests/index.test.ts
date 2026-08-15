@@ -8,7 +8,7 @@ const DEFAULT_ENTRYPOINT_SOURCE = "export default { fetch() { return new Respons
 
 /**
  * Writes a minimal buildable app under `root` and returns it as
- * `buildVercelOutput` options, so a test can just `buildVercelOutput(app)`.
+ * `buildVercelOutput` options, so a test can just `await buildVercelOutput(app)`.
  */
 function scaffoldApp(
   root: string,
@@ -42,7 +42,7 @@ describe('@guren/plugin-vercel', () => {
     expect(await response.text()).toBe('ok:/hello')
   })
 
-  it('returns an independent provider class per factory call', () => {
+  it('returns an independent provider class per factory call', async () => {
     const first = vercelPlugin()
     const second = vercelPlugin({})
 
@@ -62,20 +62,20 @@ describe('@guren/plugin-vercel', () => {
       rmSync(root, { recursive: true, force: true })
     })
 
-    it('refuses an outputDir that is, contains, or is the root of the app', () => {
+    it('refuses an outputDir that is, contains, or is the root of the app', async () => {
       // The build deletes outputDir before writing it, so a caller that points
       // it at the project (or at `/`) would lose the source tree.
       const app = scaffoldApp(root, { entrypoint: 'src/vercel.ts' })
 
       for (const outputDir of [root, join(root, '..'), '/']) {
-        expect(() => buildVercelOutput({ ...app, outputDir })).toThrow(
+        await expect(buildVercelOutput({ ...app, outputDir })).rejects.toThrow(
           /never the root itself or a parent of it/,
         )
       }
       expect(readFileSync(app.entrypoint, 'utf8')).toBe(DEFAULT_ENTRYPOINT_SOURCE)
     })
 
-    it('reads the client manifest from a custom publicDir', () => {
+    it('reads the client manifest from a custom publicDir', async () => {
       const app = scaffoldApp(root, { entrypoint: 'src/vercel.ts' })
       mkdirSync(join(root, 'web-root/assets/.vite'), { recursive: true })
       writeFileSync(
@@ -85,7 +85,7 @@ describe('@guren/plugin-vercel', () => {
         }),
       )
 
-      buildVercelOutput({ ...app, publicDir: join(root, 'web-root') })
+      await buildVercelOutput({ ...app, publicDir: join(root, 'web-root') })
 
       const config = JSON.parse(
         readFileSync(join(app.outputDir, 'functions/index.func/.vc-config.json'), 'utf8'),
@@ -95,7 +95,7 @@ describe('@guren/plugin-vercel', () => {
       expect(config.environment.GUREN_INERTIA_STYLES).toBe('/assets/app-Custom999.css')
     })
 
-    it('points GUREN_INERTIA_SSR_MANIFEST at the layout the SSR build produced', () => {
+    it('points GUREN_INERTIA_SSR_MANIFEST at the layout the SSR build produced', async () => {
       // Older Vite configs emit a flat manifest.json; naming the .vite path
       // unconditionally leaves the runtime loading a file that is not there.
       const app = scaffoldApp(root, { entrypoint: 'src/vercel.ts' })
@@ -106,7 +106,7 @@ describe('@guren/plugin-vercel', () => {
         JSON.stringify({ 'resources/js/ssr.tsx': { file: 'ssr-Xyz789.js' } }),
       )
 
-      buildVercelOutput(app)
+      await buildVercelOutput(app)
 
       const config = JSON.parse(
         readFileSync(join(app.outputDir, 'functions/index.func/.vc-config.json'), 'utf8'),
@@ -116,7 +116,7 @@ describe('@guren/plugin-vercel', () => {
       expect(config.environment.GUREN_INERTIA_SSR_MANIFEST).toBe('./.guren/ssr/manifest.json')
     })
 
-    it('fails when the SSR manifest names a chunk that is not on disk, keeping the previous output', () => {
+    it('fails when the SSR manifest names a chunk that is not on disk, keeping the previous output', async () => {
       // Previously written into the function environment unchecked, so a stale
       // or partial SSR build deployed and fell back to CSR at request time.
       // Cloudflare and Lambda already treated this as fatal.
@@ -129,13 +129,13 @@ describe('@guren/plugin-vercel', () => {
         JSON.stringify({ 'resources/js/ssr.tsx': { file: 'ssr-Gone.js' } }),
       )
 
-      expect(() => buildVercelOutput(app)).toThrow(/but the file does not exist/)
+      await expect(buildVercelOutput(app)).rejects.toThrow(/but the file does not exist/)
       // Deleting before validation would take the last deployable artifact
       // with it, leaving nothing to roll back to.
       expect(readFileSync(join(app.outputDir, 'config.json'), 'utf8')).toBe('{ "previous": true }')
     })
 
-    it('fails on a missing entrypoint before touching the previous output', () => {
+    it('fails on a missing entrypoint before touching the previous output', async () => {
       // The spawned `bun build` would also fail on this, but only after the
       // previous output was deleted.
       const app = scaffoldApp(root, { entrypoint: 'src/vercel.ts' })
@@ -143,14 +143,14 @@ describe('@guren/plugin-vercel', () => {
       mkdirSync(join(app.outputDir, 'functions'), { recursive: true })
       writeFileSync(join(app.outputDir, 'config.json'), '{ "previous": true }')
 
-      expect(() => buildVercelOutput(app)).toThrow(/entrypoint not found/)
+      await expect(buildVercelOutput(app)).rejects.toThrow(/entrypoint not found/)
       expect(readFileSync(join(app.outputDir, 'config.json'), 'utf8')).toBe('{ "previous": true }')
     })
 
-    it('matches the configured handler filename to the bundled entrypoint', () => {
+    it('matches the configured handler filename to the bundled entrypoint', async () => {
       const app = scaffoldApp(root, { entrypoint: 'src/vercel.ts' })
 
-      buildVercelOutput(app)
+      await buildVercelOutput(app)
 
       const config = JSON.parse(
         readFileSync(join(app.outputDir, 'functions/index.func/.vc-config.json'), 'utf8'),
@@ -159,14 +159,14 @@ describe('@guren/plugin-vercel', () => {
       expect(config.handler).toBe('vercel.js')
     })
 
-    it('routes the asset base back onto the output root', () => {
+    it('routes the asset base back onto the output root', async () => {
       // Built assets self-reference `/public/assets/` while the files land at
       // the output root, so a deployment routed only by this file — which is
       // what `--prebuilt` does — needs the mapping here rather than in
       // vercel.json.
       const app = scaffoldApp(root, { entrypoint: 'src/vercel.ts' })
 
-      buildVercelOutput(app)
+      await buildVercelOutput(app)
 
       const config = JSON.parse(readFileSync(join(app.outputDir, 'config.json'), 'utf8'))
       const routes = config.routes as Array<Record<string, string>>
@@ -177,12 +177,12 @@ describe('@guren/plugin-vercel', () => {
       expect(routes.findIndex((route) => route.handle === 'filesystem')).toBeGreaterThan(0)
     })
 
-    it('copies the docs directory into the function bundle', () => {
+    it('copies the docs directory into the function bundle', async () => {
       const app = scaffoldApp(root)
       mkdirSync(join(root, 'docs/en/guides'), { recursive: true })
       writeFileSync(join(root, 'docs/en/guides/overview.md'), '# Overview\n\nHello docs.\n', 'utf8')
 
-      buildVercelOutput(app)
+      await buildVercelOutput(app)
 
       const copied = readFileSync(
         join(app.outputDir, 'functions/index.func/docs/en/guides/overview.md'),
@@ -200,7 +200,7 @@ describe('@guren/plugin-vercel', () => {
           'class GurenJobProbe {}\nexport default { fetch() { return new Response(GurenJobProbe.name) } }\n',
       })
 
-      buildVercelOutput(app)
+      await buildVercelOutput(app)
 
       // Asserting on the runtime name rather than the bundle text: `.name` is
       // what the queue registry and notification types actually read, and it
@@ -211,12 +211,12 @@ describe('@guren/plugin-vercel', () => {
       expect(await response.text()).toBe('GurenJobProbe')
     })
 
-    it('finds docs in a parent directory when the app root is nested', () => {
+    it('finds docs in a parent directory when the app root is nested', async () => {
       const app = scaffoldApp(join(root, 'web'))
       mkdirSync(join(root, 'docs/en/guides'), { recursive: true })
       writeFileSync(join(root, 'docs/en/guides/overview.md'), '# Overview\n\nParent docs.\n', 'utf8')
 
-      buildVercelOutput(app)
+      await buildVercelOutput(app)
 
       const copied = readFileSync(
         join(app.outputDir, 'functions/index.func/docs/en/guides/overview.md'),

@@ -5,7 +5,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   assertOutputDirOutsideRoot,
+  DATABASE_FACTORIES,
+  detectDatabaseDialects,
   DEV_ONLY_MODULES,
+  parseDatabaseDialects,
+  unusedSqlClients,
   renderDevOnlyStub,
   importSpecifier,
   MCP_SDK_SUBPATH_PREFIX,
@@ -382,5 +386,194 @@ describe('renderDevOnlyStub', () => {
     // Callable, because `import pgClient from "postgres"` calls its default.
     expect(stub).toContain('function unavailable()')
     expect(stub).toContain('export default Object.assign(unavailable, { Database, open })')
+  })
+})
+
+describe('detectDatabaseDialects', () => {
+  let root: string
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'guren-dialects-'))
+  })
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  function writeConfig(relativePath: string, source: string): void {
+    const path = join(root, relativePath)
+    mkdirSync(join(path, '..'), { recursive: true })
+    writeFileSync(path, source)
+  }
+
+  test('should read the dialect a config declares', () => {
+    writeConfig('config/database.ts', "import { createPostgresDatabase } from '@guren/orm'\nexport const db = createPostgresDatabase({})\n")
+
+    expect(detectDatabaseDialects(root)).toEqual({ dialects: ['postgres'], source: 'config/database.ts' })
+  })
+
+  test('should report every dialect a config declares, not the first', () => {
+    // Real shape, not a hypothetical: an app picks its database at runtime,
+    // D1 when deployed and sqlite locally. Stopping at the first match stubs
+    // a client the app actually reaches for.
+    writeConfig(
+      'config/database.ts',
+      "import { createD1Database, createSqliteDatabase } from '@guren/core'\n"
+        + 'const db = isWorkers() ? createD1Database({}) : createSqliteDatabase({})\n',
+    )
+
+    expect(detectDatabaseDialects(root).dialects).toEqual(['sqlite', 'd1'])
+  })
+
+  test('should fall back to the second config location', () => {
+    writeConfig('db/config.ts', 'export const db = createMySqlDatabase({})\n')
+
+    expect(detectDatabaseDialects(root)).toEqual({ dialects: ['mysql'], source: 'db/config.ts' })
+  })
+
+  test('should prefer config/database.ts when both exist', () => {
+    writeConfig('config/database.ts', 'export const db = createPostgresDatabase({})\n')
+    writeConfig('db/config.ts', 'export const db = createMySqlDatabase({})\n')
+
+    expect(detectDatabaseDialects(root).dialects).toEqual(['postgres'])
+  })
+
+  test('should report no dialects when the config names no factory', () => {
+    // An indirection the scan cannot follow. Reporting "none" here would be
+    // read as "stub everything"; the caller has to be able to tell this apart
+    // from a positive answer.
+    writeConfig('config/database.ts', "export * from './database/postgres'\n")
+
+    expect(detectDatabaseDialects(root)).toEqual({ source: 'config/database.ts' })
+  })
+
+  test('should report nothing when the app has no database config', () => {
+    expect(detectDatabaseDialects(root)).toEqual({})
+  })
+
+  test('should not match a factory name embedded in a longer identifier', () => {
+    writeConfig('config/database.ts', 'export const db = notCreatePostgresDatabaseAtAll({})\n')
+
+    expect(detectDatabaseDialects(root).dialects).toBeUndefined()
+  })
+})
+
+describe('unusedSqlClients', () => {
+  let root: string
+  let warnings: string[]
+  const realWarn = console.warn
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'guren-unused-clients-'))
+    warnings = []
+    console.warn = (message: string) => warnings.push(String(message))
+  })
+
+  afterEach(() => {
+    console.warn = realWarn
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  function writeConfig(source: string): void {
+    mkdirSync(join(root, 'config'), { recursive: true })
+    writeFileSync(join(root, 'config/database.ts'), source)
+  }
+
+  test('should stub the clients of every dialect the app does not declare', () => {
+    writeConfig('export const db = createPostgresDatabase({})\n')
+
+    const specifiers = unusedSqlClients({ root, label: 'Test build' }).map(({ module }) => module.specifier)
+
+    expect(specifiers).toEqual(['mysql2', 'mysql2/promise', '@aws-sdk/client-rds-data'])
+  })
+
+  test('should keep every client of a declared dialect', () => {
+    writeConfig('export const db = createMySqlDatabase({})\n')
+
+    const specifiers = unusedSqlClients({ root, label: 'Test build' }).map(({ module }) => module.specifier)
+
+    // Both mysql2 entries, not just the one the factory names: drizzle reaches
+    // the client through `mysql2/promise` while the ORM's own type import
+    // names `mysql2`.
+    expect(specifiers).not.toContain('mysql2')
+    expect(specifiers).not.toContain('mysql2/promise')
+    expect(specifiers).toContain('postgres')
+  })
+
+  test('should keep the clients of every declared dialect when a config names two', () => {
+    writeConfig('const db = env ? createPostgresDatabase({}) : createSqliteDatabase({})\n')
+
+    const specifiers = unusedSqlClients({ root, label: 'Test build' }).map(({ module }) => module.specifier)
+
+    expect(specifiers).not.toContain('postgres')
+    expect(specifiers).toEqual(['mysql2', 'mysql2/promise', '@aws-sdk/client-rds-data'])
+  })
+
+  test('should stub nothing and warn when the config declares no dialect', () => {
+    // Fail open. Under-stubbing leaves today's behaviour — a loud build
+    // failure naming a client the app never installed. Over-stubbing ships a
+    // bundle that builds clean and cannot reach its own database.
+    writeConfig("export * from './database/postgres'\n")
+
+    expect(unusedSqlClients({ root, label: 'Test build' })).toEqual([])
+    expect(warnings.join('\n')).toContain('config/database.ts names no @guren/orm database factory')
+  })
+
+  test('should stub nothing and warn when the app has no database config', () => {
+    expect(unusedSqlClients({ root, label: 'Test build' })).toEqual([])
+    expect(warnings.join('\n')).toContain('no database config found')
+  })
+
+  test('should let an explicit dialect list override the config', () => {
+    writeConfig('export const db = createPostgresDatabase({})\n')
+
+    const specifiers = unusedSqlClients({ root, label: 'Test build', dialects: ['mysql'] }).map(
+      ({ module }) => module.specifier,
+    )
+
+    expect(specifiers).toContain('postgres')
+    expect(specifiers).not.toContain('mysql2')
+    expect(warnings).toEqual([])
+  })
+
+  test('should name the dialect and the override in the message a stub throws', () => {
+    writeConfig('export const db = createPostgresDatabase({})\n')
+
+    const [first] = unusedSqlClients({ root, label: 'Lambda build' })
+
+    expect(first?.message).toContain('"mysql2" client is stubbed')
+    expect(first?.message).toContain('declares postgres, not mysql')
+    expect(first?.message).toContain("databaseDialects: ['mysql']")
+  })
+})
+
+describe('parseDatabaseDialects', () => {
+  test('should accept a comma-separated list', () => {
+    expect(parseDatabaseDialects('postgres, sqlite', 'Test build')).toEqual(['postgres', 'sqlite'])
+  })
+
+  test('should reject a name that is not a dialect', () => {
+    // Narrowing silently to nothing would stub every client — the exact
+    // failure the override exists to prevent.
+    expect(() => parseDatabaseDialects('postgres,mongo', 'Test build')).toThrow(/does not name a database/)
+  })
+
+  test('should reject an empty list', () => {
+    expect(() => parseDatabaseDialects(' , ', 'Test build')).toThrow(/does not name a database/)
+  })
+})
+
+describe('DATABASE_FACTORIES', () => {
+  test('should name exactly the database factories @guren/core exports', () => {
+    // Built from the public export surface, not from the ORM's implementation
+    // files: a list read off the implementation admits names that were never
+    // exported and misses the ones that were. A factory this map misspells
+    // (`createMysqlDatabase` for `createMySqlDatabase`) detects nothing and
+    // stubs nothing, and nothing else would notice.
+    const index = readFileSync(new URL('../index.ts', import.meta.url), 'utf8')
+    const exported = [...index.matchAll(/^\s*(create\w*Database),$/gm)].map(([, name]) => name)
+
+    expect(exported.length).toBeGreaterThan(0)
+    expect(new Set(Object.keys(DATABASE_FACTORIES))).toEqual(new Set(exported))
   })
 })
