@@ -19,8 +19,6 @@ export interface R2ObjectLike {
   key: string
   size: number
   uploaded: Date
-  etag: string
-  httpEtag: string
   httpMetadata?: R2HttpMetadataLike
   customMetadata?: Record<string, string>
 }
@@ -124,6 +122,8 @@ export interface R2DriverOptions {
   presign?: R2PresignOptions
 }
 
+type AwsClient = InstanceType<typeof import('aws4fetch').AwsClient>
+
 /** R2 rejects presigned URLs valid for longer than seven days. */
 const MAX_PRESIGN_SECONDS = 7 * 24 * 60 * 60
 /** `R2Bucket.delete()` accepts at most this many keys per call. */
@@ -147,6 +147,7 @@ export class R2Driver implements StorageDriver {
   private readonly prefix: string
   private readonly diskVisibility: 'public' | 'private'
   private readonly presign?: R2PresignOptions
+  private awsClient?: Promise<AwsClient>
 
   constructor(options: R2DriverOptions) {
     this.resolveBinding = options.binding
@@ -244,9 +245,11 @@ export class R2Driver implements StorageDriver {
     const keys = Array.from(new Set(rawKeys))
     if (keys.length === 0) return 0
     const bucket = this.bucket()
+    const batches: string[][] = []
     for (let index = 0; index < keys.length; index += DELETE_BATCH_SIZE) {
-      await bucket.delete(keys.slice(index, index + DELETE_BATCH_SIZE))
+      batches.push(keys.slice(index, index + DELETE_BATCH_SIZE))
     }
+    await Promise.all(batches.map((batch) => bucket.delete(batch)))
     // R2 reports nothing per key; like S3's DeleteObjects, every requested
     // key counts as deleted.
     return keys.length
@@ -268,9 +271,9 @@ export class R2Driver implements StorageDriver {
   }
 
   async move(from: string, to: string): Promise<string> {
-    await this.copy(from, to)
+    const destination = await this.copy(from, to)
     await this.bucket().delete(this.key(from))
-    return trimSlashes(to)
+    return destination
   }
 
   url(path: string): string {
@@ -280,8 +283,6 @@ export class R2Driver implements StorageDriver {
           'R2 has no derivable public URL.',
       )
     }
-    // Percent-encode per segment so keys with spaces or `#` produce a URL
-    // that resolves; `/` stays a separator.
     return `${this.publicUrl}/${encodeKey(this.key(path))}`
   }
 
@@ -299,24 +300,30 @@ export class R2Driver implements StorageDriver {
         `R2Driver.temporaryUrl(): R2 presigned URLs may be valid for at most 7 days (requested ${expiresIn}s).`,
       )
     }
-    const { AwsClient } = await importOptionalModule<{
-      AwsClient: new (init: { accessKeyId: string; secretAccessKey: string; service: string; region: string }) => {
-        sign(input: Request, init?: { aws?: { signQuery?: boolean } }): Promise<Request>
-      }
-    }>('aws4fetch')
-
-    const client = new AwsClient({
-      accessKeyId: this.presign.accessKeyId,
-      secretAccessKey: this.presign.secretAccessKey,
-      service: 's3',
-      region: 'auto',
-    })
+    const client = await this.presignClient(this.presign)
     const url = new URL(
       `https://${this.presign.accountId}.r2.cloudflarestorage.com/${this.presign.bucket}/${encodeKey(this.key(path))}`,
     )
     url.searchParams.set('X-Amz-Expires', String(Math.max(1, expiresIn)))
     const signed = await client.sign(new Request(url.toString(), { method: 'GET' }), { aws: { signQuery: true } })
     return signed.url
+  }
+
+  /**
+   * One `AwsClient` per driver: it caches the derived SigV4 signing key, so
+   * a fresh instance per URL would redo the HMAC chain on every call.
+   */
+  private presignClient(presign: R2PresignOptions): Promise<AwsClient> {
+    this.awsClient ??= importOptionalModule<typeof import('aws4fetch')>('aws4fetch').then(
+      ({ AwsClient }) =>
+        new AwsClient({
+          accessKeyId: presign.accessKeyId,
+          secretAccessKey: presign.secretAccessKey,
+          service: 's3',
+          region: 'auto',
+        }),
+    )
+    return this.awsClient
   }
 
   async size(path: string): Promise<number> {
@@ -349,34 +356,35 @@ export class R2Driver implements StorageDriver {
   }
 
   async files(directory: string): Promise<string[]> {
-    const result: string[] = []
-    for await (const page of this.pages({ prefix: this.directoryPrefix(directory), delimiter: '/' })) {
-      for (const object of page.objects) {
-        if (!object.key.endsWith('/')) result.push(this.unkey(object.key))
-      }
-    }
-    return result.sort()
+    return this.collectFiles({ prefix: this.directoryPrefix(directory), delimiter: '/' })
   }
 
   async directories(directory: string): Promise<string[]> {
-    const result = new Set<string>()
+    const result: string[] = []
     for await (const page of this.pages({ prefix: this.directoryPrefix(directory), delimiter: '/' })) {
       for (const prefix of page.delimitedPrefixes) {
         const relative = trimTrailingSlashes(this.unkey(prefix))
-        if (relative) result.add(relative)
-      }
-    }
-    return Array.from(result).sort()
-  }
-
-  async allFiles(directory: string): Promise<string[]> {
-    const result: string[] = []
-    for await (const page of this.pages({ prefix: this.directoryPrefix(directory) })) {
-      for (const object of page.objects) {
-        if (!object.key.endsWith('/')) result.push(this.unkey(object.key))
+        if (relative) result.push(relative)
       }
     }
     return result.sort()
+  }
+
+  async allFiles(directory: string): Promise<string[]> {
+    return this.collectFiles({ prefix: this.directoryPrefix(directory) })
+  }
+
+  /** App-relative paths of every listed object, minus folder markers. */
+  private async collectFiles(options: R2ListOptionsLike): Promise<string[]> {
+    const result: string[] = []
+    for await (const object of this.objects(options)) {
+      if (!object.key.endsWith('/')) result.push(this.unkey(object.key))
+    }
+    return result.sort()
+  }
+
+  private async *objects(options: R2ListOptionsLike): AsyncGenerator<R2ObjectLike> {
+    for await (const page of this.pages(options)) yield* page.objects
   }
 
   /**
@@ -405,13 +413,15 @@ export class R2Driver implements StorageDriver {
   }
 
   async deleteDirectory(path: string): Promise<void> {
-    // Raw keys, not paths: the folder marker written by makeDirectory ends
-    // in `/`, which key() would strip.
-    const keys: string[] = []
+    // Delete page by page (a page is at most 1000 keys, the delete cap)
+    // rather than buffering every key first. Raw keys, not paths: the folder
+    // marker written by makeDirectory ends in `/`, which key() would strip.
+    const bucket = this.bucket()
     for await (const page of this.pages({ prefix: this.directoryPrefix(path) })) {
-      for (const object of page.objects) keys.push(object.key)
+      if (page.objects.length > 0) {
+        await bucket.delete(page.objects.map((object) => object.key))
+      }
     }
-    await this.deleteKeys(keys)
   }
 
   async setVisibility(path: string, visibility: 'public' | 'private'): Promise<void> {
@@ -437,16 +447,16 @@ function encodeKey(key: string): string {
   return key.split('/').map(encodeURIComponent).join('/')
 }
 
+/**
+ * Twins of `@guren/server`'s `support/trim-slashes` (not exported from the
+ * package): regex-free so request-derived paths cannot make them backtrack.
+ */
 function trimTrailingSlashes(value: string): string {
   let end = value.length
   while (end > 0 && value[end - 1] === '/') end--
   return value.slice(0, end)
 }
 
-/**
- * Twin of `@guren/server`'s `trimSlashes` (not exported from the package):
- * regex-free so request-derived paths cannot make it backtrack.
- */
 function trimSlashes(value: string): string {
   let start = 0
   let end = value.length
@@ -455,6 +465,10 @@ function trimSlashes(value: string): string {
   return value.slice(start, end)
 }
 
+/**
+ * Twin of `S3Driver`'s `importAwsModule` in `@guren/server` (module-private
+ * there); the detection stays byte-for-byte the same so a fix lands in both.
+ */
 function isMissingModule(error: unknown, moduleName: string): boolean {
   if (!error || typeof error !== 'object') return false
   if ((error as { code?: string }).code === 'ERR_MODULE_NOT_FOUND') return true

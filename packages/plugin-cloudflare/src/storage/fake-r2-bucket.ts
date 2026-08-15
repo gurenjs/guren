@@ -94,11 +94,13 @@ export class FakeR2Bucket implements R2BucketLike {
     const delimiter = options.delimiter
     const limit = options.limit ?? this.pageSize
 
-    // One sorted entry list mixing objects and delimited prefixes, so the
-    // cursor is simply "how many entries were already returned".
+    // One sorted entry list mixing objects and delimited prefixes. The
+    // cursor is the last key returned, not an offset: R2 resumes *after a
+    // key*, so a caller that deletes what it listed (deleteDirectory) must
+    // not skip entries — an offset cursor would.
     const entries: Array<{ key: string; kind: 'object' | 'prefix' }> = []
     const seenPrefixes = new Set<string>()
-    for (const key of Array.from(this.objects.keys()).sort()) {
+    for (const key of this.keys()) {
       if (!key.startsWith(prefix)) continue
       const rest = key.slice(prefix.length)
       const delimiterAt = delimiter ? rest.indexOf(delimiter) : -1
@@ -113,9 +115,9 @@ export class FakeR2Bucket implements R2BucketLike {
       entries.push({ key, kind: 'object' })
     }
 
-    const start = options.cursor ? Number.parseInt(options.cursor, 10) : 0
-    const page = entries.slice(start, start + limit)
-    const truncated = start + limit < entries.length
+    const remaining = options.cursor ? entries.filter((entry) => entry.key > options.cursor!) : entries
+    const page = remaining.slice(0, limit)
+    const truncated = remaining.length > limit
 
     return {
       objects: page
@@ -123,28 +125,20 @@ export class FakeR2Bucket implements R2BucketLike {
         .map((entry) => this.toObject(entry.key, this.objects.get(entry.key)!)),
       delimitedPrefixes: page.filter((entry) => entry.kind === 'prefix').map((entry) => entry.key),
       truncated,
-      cursor: truncated ? String(start + limit) : undefined,
+      cursor: truncated ? page[page.length - 1]!.key : undefined,
     }
   }
 
-  /** Test helpers. */
+  /** Sorted keys, for assertions. */
   keys(): string[] {
     return Array.from(this.objects.keys()).sort()
   }
 
-  clear(): void {
-    this.objects.clear()
-    this.calls.length = 0
-  }
-
   private toObject(key: string, stored: StoredObject): R2ObjectLike {
-    const etag = `"${stored.bytes.byteLength.toString(16)}-${key.length.toString(16)}"`
     return {
       key,
       size: stored.bytes.byteLength,
       uploaded: stored.uploaded,
-      etag: etag.slice(1, -1),
-      httpEtag: etag,
       httpMetadata: stored.httpMetadata,
       customMetadata: stored.customMetadata,
     }

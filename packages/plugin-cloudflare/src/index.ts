@@ -29,17 +29,4 @@ export type { WorkersAppLike, WorkersExecutionContext, WorkersHandler } from './
 export { buildCloudflareOutput, flattenD1Migrations } from './build'
 export type { BuildCloudflareOutputOptions } from './build'
 export { R2Driver } from './storage/R2Driver'
-export type {
-  R2DriverOptions,
-  R2PresignOptions,
-  R2BucketLike,
-  R2ObjectLike,
-  R2ObjectBodyLike,
-  R2ObjectsLike,
-  R2ListOptionsLike,
-  R2PutOptionsLike,
-  R2PutValue,
-  R2StreamLike,
-  R2BlobLike,
-  R2HttpMetadataLike,
-} from './storage/R2Driver'
+export type { R2DriverOptions, R2PresignOptions, R2BucketLike } from './storage/R2Driver'

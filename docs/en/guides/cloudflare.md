@@ -65,7 +65,7 @@ interface WorkersEnv {
   DB: unknown
 }
 
-function isWorkersRuntime(): boolean {
+export function isWorkersRuntime(): boolean {
   return typeof navigator !== 'undefined' && navigator.userAgent === 'Cloudflare-Workers'
 }
 
