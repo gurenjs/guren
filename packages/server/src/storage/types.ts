@@ -197,7 +197,9 @@ export interface StorageDriver {
    * doing nothing is a leak that looks like success.
    *
    * `LocalDriver` is such a backend: what makes a local file reachable is
-   * the disk root and whatever serves it, not a flag on one file.
+   * the disk root and whatever serves it, not a flag on one file. It has
+   * always accepted per-object requests and done nothing, so it warns
+   * instead of throwing and will throw in the next major.
    *
    * @param path File path
    * @param visibility Visibility setting

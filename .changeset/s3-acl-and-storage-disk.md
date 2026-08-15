@@ -1,5 +1,5 @@
 ---
-"@guren/server": major
+"@guren/server": minor
 "@guren/cli": minor
 ---
 
@@ -19,23 +19,26 @@ or `setVisibility()` throw when asked for the other value instead of silently
 dropping it — a `setVisibility(path, 'private')` that does nothing on a public
 bucket is a leak that looks like success.
 
-**Breaking:** the `StorageDriver` contract now states what the visibility
-methods do, and every driver follows it. Four drivers had three behaviours
-because the contract said nothing: a visibility call throws when the file
-does not exist, and a backend without per-object visibility reports the
-disk's configured value and refuses the other one instead of accepting a
-request it cannot carry out.
+The `StorageDriver` contract now states what the visibility methods do,
+which four drivers had been answering three different ways: a visibility
+call throws when the file does not exist, and a backend without per-object
+visibility reports the disk's configured value and refuses the other one
+instead of accepting a request it cannot carry out. `R2Driver` and the new
+`acl: false` path follow it from the start.
 
-`LocalDriver` changes as a result. `getVisibility()` and `setVisibility()`
-throw for a missing file, and `put({ visibility })` / `setVisibility()`
-throw when the value differs from the disk's — previously all three were
-silent no-ops that reported success. What makes a local file reachable is
-the disk root and whatever serves it, not a flag on one file, so a
-per-object request there was never carried out; it only looked like it was.
+**Deprecated, not changed:** `LocalDriver` has always accepted per-object
+visibility requests and done nothing — `put({ visibility })` and
+`setVisibility()` against a disk's other value, and either visibility method
+against a file that does not exist. It now warns once per process for each
+and keeps its current behaviour; these become errors in 3.0.0. What makes a
+local file reachable is the disk root and whatever serves it, not a flag on
+one file, so those calls were never carried out, they only looked like they
+were.
 
-To upgrade, declare the visibility on the disk instead of the call: the
-scaffolded `public` disk now carries `visibility: 'public'`, and files that
-must not be reachable belong on a disk that is not served.
+To get ahead of it, declare the visibility on the disk rather than the call:
+the scaffolded `public` disk now carries `visibility: 'public'`, and files
+that must not be reachable belong on a disk that is not served.
+`bunx guren upgrade --check-only` lists the call sites.
 
 Separately, `guren add storage` now scaffolds a disk map selected by
 `STORAGE_DISK`, so an app declares its disks once and picks one per

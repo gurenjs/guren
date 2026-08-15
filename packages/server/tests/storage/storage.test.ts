@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,6 +8,7 @@ import {
   StorageManager,
   createStorageManager,
 } from '../../src/storage'
+import { resetWarnOnce } from '../../src/support/warn-once'
 
 describe('LocalDriver', () => {
   let driver: LocalDriver
@@ -254,11 +255,15 @@ describe('LocalDriver', () => {
     })
   })
 
-  // Visibility on a local disk is a property of the disk, not of one file:
-  // what makes a file reachable is the disk root and whatever serves it.
-  // The driver therefore reports the configured value and refuses the other
-  // one, instead of accepting a request it cannot carry out.
+  // Visibility on a local disk is a property of the disk: what makes a file
+  // reachable is the disk root and whatever serves it. The driver has always
+  // accepted per-object requests and done nothing, so it now says so and
+  // keeps the old behaviour until the next major.
   describe('visibility', () => {
+    beforeEach(() => {
+      resetWarnOnce()
+    })
+
     it('reports the disk visibility', async () => {
       await driver.put('test.txt', 'content')
       expect(await driver.getVisibility('test.txt')).toBe('private')
@@ -267,25 +272,39 @@ describe('LocalDriver', () => {
       expect(await publicDriver.getVisibility('test.txt')).toBe('public')
     })
 
-    it('accepts a request that matches the disk', async () => {
+    it('is silent when the request matches the disk', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
       await driver.put('test.txt', 'content', { visibility: 'private' })
       await driver.setVisibility('test.txt', 'private')
       expect(await driver.getVisibility('test.txt')).toBe('private')
+      expect(warn).not.toHaveBeenCalled()
+      warn.mockRestore()
     })
 
-    it('refuses a visibility it cannot carry out, on put and on setVisibility', async () => {
-      await expect(driver.put('a.txt', 'content', { visibility: 'public' })).rejects.toThrow(
-        /no per-object visibility/,
-      )
-      expect(await driver.exists('a.txt')).toBe(false)
+    it('warns, once, when asked for a visibility it cannot carry out', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
-      await driver.put('b.txt', 'content')
-      await expect(driver.setVisibility('b.txt', 'public')).rejects.toThrow(/no per-object visibility/)
+      await driver.put('a.txt', 'content', { visibility: 'public' })
+      await driver.put('b.txt', 'content', { visibility: 'public' })
+
+      // The file is still written: the warning announces a future error, it
+      // does not introduce one.
+      expect(await driver.exists('a.txt')).toBe(true)
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(warn.mock.calls[0]?.[0]).toMatch(/no per-object visibility/)
+      expect(warn.mock.calls[0]?.[0]).toMatch(/next major/)
+      warn.mockRestore()
     })
 
-    it('does not report a visibility for a file that is not there', async () => {
-      await expect(driver.getVisibility('missing.txt')).rejects.toThrow('File not found: missing.txt')
-      await expect(driver.setVisibility('missing.txt', 'private')).rejects.toThrow('File not found: missing.txt')
+    it('warns when a visibility call names a file that is not there', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+      expect(await driver.getVisibility('missing.txt')).toBe('private')
+      await driver.setVisibility('missing.txt', 'private')
+
+      expect(warn).toHaveBeenCalledTimes(2)
+      expect(warn.mock.calls.every((call) => /does not exist/.test(String(call[0])))).toBe(true)
+      warn.mockRestore()
     })
   })
 })

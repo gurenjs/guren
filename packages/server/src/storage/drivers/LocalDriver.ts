@@ -12,6 +12,7 @@ import {
 import { existsSync } from 'node:fs'
 import { join, dirname, relative, resolve, sep } from 'node:path'
 import type { StorageDriver, LocalDriverOptions, PutOptions, FileMetadata } from '../types'
+import { warnOnce } from '../../support/warn-once'
 
 /**
  * Local filesystem storage driver.
@@ -63,7 +64,7 @@ export class LocalDriver implements StorageDriver {
 
   async put(path: string, content: Buffer | string, options?: PutOptions): Promise<string> {
     if (options?.visibility) {
-      this.assertVisibilityMatches(options.visibility, 'put')
+      this.warnUnsupportedVisibility(options.visibility, 'put')
     }
     const fullPath = this.fullPath(path)
     await this.ensureDirectory(fullPath)
@@ -247,32 +248,41 @@ export class LocalDriver implements StorageDriver {
   async setVisibility(path: string, visibility: 'public' | 'private'): Promise<void> {
     // A local disk has no per-object visibility: whether a file is reachable
     // is decided by where the disk is rooted and what serves it, not by a
-    // flag on one file. So the contract's rule for such backends applies —
-    // report the disk's value, refuse the other one, and never claim success
-    // for a file that is not there.
-    await this.assertExists(path)
-    this.assertVisibilityMatches(visibility, 'setVisibility')
+    // flag on one file. The contract's rule for such backends is to refuse
+    // what cannot be carried out, but this driver has been silently
+    // accepting it, so it warns for now and throws in the next major.
+    await this.warnIfMissing(path, 'setVisibility')
+    this.warnUnsupportedVisibility(visibility, 'setVisibility')
   }
 
   async getVisibility(path: string): Promise<'public' | 'private'> {
-    await this.assertExists(path)
+    await this.warnIfMissing(path, 'getVisibility')
     return this.defaultVisibility
   }
 
-  private async assertExists(path: string): Promise<void> {
-    if (!(await this.exists(path))) {
-      throw new Error(`File not found: ${path}`)
+  private async warnIfMissing(path: string, operation: string): Promise<void> {
+    if (await this.exists(path)) {
+      return
     }
+    warnOnce(
+      `local-visibility-missing:${operation}`,
+      `[guren] LocalDriver.${operation}("${path}") was called for a file that does not exist and returned as if it `
+        + 'had succeeded. Every other storage driver throws `File not found` here, and LocalDriver will too in the '
+        + 'next major — check `exists()` first, or handle the error.',
+    )
   }
 
-  private assertVisibilityMatches(requested: 'public' | 'private', operation: string): void {
+  private warnUnsupportedVisibility(requested: 'public' | 'private', operation: string): void {
     if (requested === this.defaultVisibility) {
       return
     }
-    throw new Error(
-      `LocalDriver.${operation}: cannot make an object ${requested} on a ${this.defaultVisibility} disk. ` +
-        'A local disk has no per-object visibility — it is decided by the disk root and by what serves it. ' +
-        'Declare it with the driver\'s "visibility" option, or keep restricted files on a disk that is not served.',
+    warnOnce(
+      `local-visibility-per-object:${operation}`,
+      `[guren] LocalDriver.${operation}() was asked to make an object ${requested} on a ${this.defaultVisibility} `
+        + 'disk, and did nothing. A local disk has no per-object visibility — what makes a file reachable is the '
+        + 'disk root and whatever serves it — so the request was never carried out, it only looked like it was. '
+        + 'Declare the disk\'s "visibility" option to match, or keep restricted files on a disk that is not '
+        + 'served. This becomes an error in the next major.',
     )
   }
 

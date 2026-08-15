@@ -123,7 +123,7 @@ await disk.deleteDirectory('uploads/temp')
 可視性がどこに属するかはバックエンド次第で、ドライバは「できるふり」をせずどちらであるかを示します。
 
 - **オブジェクト単位** — ACL が有効な S3。`setVisibility()` は1ファイルだけを変更します。
-- **ディスク単位** — ローカルディスク（到達可能性はディスクのルートと、それを配信する仕組みで決まります）、`acl: false` の S3、Cloudflare R2。ディスク側で `visibility` を宣言し、逆の値を求められた場合は黙って無視せず例外を投げます。
+- **ディスク単位** — ローカルディスク（到達可能性はディスクのルートと、それを配信する仕組みで決まります）、`acl: false` の S3、Cloudflare R2。ディスク側で `visibility` を宣言し、逆の値を求められた場合は黙って無視せず拒否します。S3 と R2 では現在すでにエラーですが、ローカルドライバはこれまで受け付けてきた経緯があるため、今は警告のみで次のメジャーでエラーになります。
 
 ```ts
 const disk = storage.disk('public')       // visibility: 'public' を宣言したディスク
@@ -135,7 +135,7 @@ await disk.getVisibility('file.txt')                 // 'public'（ファイル�
 // オブジェクト単位のバックエンドでは1ファイルだけ移動します
 await storage.disk('s3').setVisibility('file.txt', 'private')
 
-// ディスク単位のバックエンドでは、対処すべきオプションを示して例外になります。
+// ディスク単位のバックエンドでは、黙って捨てられるのではなく拒否されます。
 // 代わりに目的の可視性を持つディスクへ置いてください。
 await storage.disk('local').put('secret.pdf', content)
 ```

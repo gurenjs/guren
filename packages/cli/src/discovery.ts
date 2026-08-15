@@ -249,6 +249,15 @@ export function discoverModelFiles(appRoot: string): Promise<string[]> {
   return discoverDir(appRoot, 'app/Models')
 }
 
+/**
+ * Every source file under `app/`, module roots included. For checks whose
+ * subject can live anywhere an app puts code (a controller, a job, a
+ * service) rather than in one conventional directory.
+ */
+export function discoverAppSourceFiles(appRoot: string): Promise<string[]> {
+  return discoverDir(appRoot, 'app')
+}
+
 export function discoverControllerFiles(appRoot: string): Promise<string[]> {
   return discoverDir(appRoot, 'app/Http/Controllers')
 }

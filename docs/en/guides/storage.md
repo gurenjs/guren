@@ -123,7 +123,7 @@ await disk.deleteDirectory('uploads/temp')
 Where visibility lives depends on the backend, and the driver tells you which one you have rather than pretending:
 
 - **Per object** — S3 with ACLs enabled. `setVisibility()` changes one file.
-- **Per disk** — a local disk (reachability comes from the disk root and whatever serves it), S3 with `acl: false`, and Cloudflare R2. The disk declares its `visibility`; asking for the other value throws instead of silently doing nothing.
+- **Per disk** — a local disk (reachability comes from the disk root and whatever serves it), S3 with `acl: false`, and Cloudflare R2. The disk declares its `visibility`; asking for the other value is refused instead of silently doing nothing. On S3 and R2 that is an error today; the local driver warns and will error in the next major, since it has been accepting these calls for a while.
 
 ```ts
 const disk = storage.disk('public')       // declared visibility: 'public'
@@ -135,8 +135,8 @@ await disk.getVisibility('file.txt')                 // 'public' — throws if t
 // On a per-object backend this moves one file:
 await storage.disk('s3').setVisibility('file.txt', 'private')
 
-// On a per-disk backend it throws, naming the option that fixes it. Put the
-// file on a disk with the visibility you want instead:
+// On a per-disk backend the request is refused rather than silently
+// dropped. Put the file on a disk with the visibility you want instead:
 await storage.disk('local').put('secret.pdf', content)
 ```
 
