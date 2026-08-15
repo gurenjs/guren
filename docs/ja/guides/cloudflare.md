@@ -137,6 +137,63 @@ const oauth = createOAuthManager({
 
 どちらのストアもテーブルを必要とします。スキーマは[認証ガイド](./authentication.md)を参照してください。
 
+## ストレージ（R2）
+
+Workers にはファイルシステムが無いため、`local` ストレージドライバは動きません。`R2Driver` は Cloudflare R2 バケットをバケットバインディング経由で `StorageManager` の同じ API の背後に置きます。用意する資格情報は無く、AWS SDK もバンドルに入りません。
+
+バケットを作ってバインドします:
+
+```bash
+bunx wrangler r2 bucket create my-app-media
+```
+
+```jsonc
+// wrangler.jsonc
+"r2_buckets": [
+  { "binding": "MEDIA", "bucket_name": "my-app-media" }
+]
+```
+
+次に、Workers 上では R2、それ以外ではローカルファイルシステムを使うディスクを登録します。`config/database.ts` が D1 に使っているのと同じランタイム判定です:
+
+```typescript
+// app/Providers/StorageProvider.ts
+import { ServiceProvider, createStorageManager, LocalStorageDriver } from '@guren/core'
+import { R2Driver, getWorkersEnv } from '@guren/plugin-cloudflare'
+import { isWorkersRuntime } from '../../config/database.js'
+
+interface Env {
+  MEDIA: unknown
+}
+
+export default class StorageProvider extends ServiceProvider {
+  register(): void {
+    const storage = createStorageManager({ default: 'media' })
+    storage.registerDisk('media', () =>
+      isWorkersRuntime()
+        ? new R2Driver({
+            binding: () => getWorkersEnv<Env>().MEDIA,
+            publicUrl: 'https://media.example.com',
+          })
+        : new LocalStorageDriver({ root: './storage/app/public', url: '/storage' }),
+    )
+    this.container.instance('storage', storage)
+  }
+}
+```
+
+`binding` は値ではなくリゾルバです。バインディングは最初のリクエストと共に届くので、D1 バインディングと同じく遅延して読む必要があります。あとは[ストレージガイド](./storage.md)の `storage.disk('media').put(...)` / `get(...)` / `files(...)` がそのまま動きます。`bun run dev` はディスクに、`wrangler dev` と本番は R2 に書き込みます。
+
+R2 と S3 の違いから、次の3点が異なります:
+
+- **`url()` には `publicUrl` が必須です。** ダッシュボードでバケットにカスタムドメインを割り当て（r2.dev サブドメインはレート制限付きで開発向けです）、それを `publicUrl` に渡してください。R2 には導出できる公開 URL が無いため、未設定だと `url()` は例外を投げます。
+- **`temporaryUrl()` には S3 資格情報が必要です。** バインディングは URL に署名できません。`presign: { accountId, bucket, accessKeyId, secretAccessKey }`（R2 API トークン）を渡して `aws4fetch` をインストールするか、非公開ファイルはアプリの認証付きルート越しに配信してください。`presign` が無い場合、`temporaryUrl()` はその案内付きで例外を投げます。
+- **可視性はオブジェクト単位ではなくバケット単位です。** バケットは公開（カスタムドメイン / r2.dev）か非公開かのどちらかで、オブジェクトごとの ACL はありません。ドライバはバケットの `visibility`（`publicUrl` があれば既定 `'public'`）を報告し、`put({ visibility })` や `setVisibility()` で逆の値を求められた場合は、できるふりをせず例外を投げます。
+
+`putFile()` も例外を投げます。Workers には読み取れるローカルファイルがありません。自分でバイト列を読み（`await file.arrayBuffer()`）、`put()` を呼んでください。一度きりの一括投入なら、手元から `bunx wrangler r2 object put my-app-media/<key> --file <path>` の方が簡単です。
+
+Bun プロセス（スクリプトや Workers 以外のデプロイ）から同じバケットに到達するには、代わりに S3 互換エンドポイントと S3 ドライバを使います。`endpoint: 'https://<ACCOUNT_ID>.r2.cloudflarestorage.com'`、`region: 'auto'`、R2 API トークンの組み合わせで、[ストレージガイド](./storage.md#s3互換サービス)を参照してください。
+
 ## シークレット
 
 `APP_KEY` は必須です。セッションと CSRF の署名に使われ、これが無いとワーカーは起動時に例外を投げます。リクエストを 1 件も処理しないまま落ちます。

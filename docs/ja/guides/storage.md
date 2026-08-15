@@ -278,6 +278,9 @@ const storage = new StorageManager({
 })
 ```
 
+> [!NOTE]
+> Cloudflare Workers 上では S3 API ではなくバケットバインディングを使ってください。`@guren/plugin-cloudflare` の `R2Driver` は資格情報も AWS SDK も不要です。上の S3 のレシピは他のランタイム（Bun サーバー、スクリプト、Lambda）から R2 に到達するためのものです。R2 にはオブジェクト単位の ACL が無いため、可視性はバケット単位の設定として扱ってください。[Cloudflare Workers ガイド](./cloudflare.md#ストレージr2)を参照してください。
+
 ### 署名付きURL
 
 プライベートファイル用の一時URLを生成します。

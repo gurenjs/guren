@@ -137,6 +137,63 @@ const oauth = createOAuthManager({
 
 Both stores need tables. See [Authentication](./authentication.md) for the schema.
 
+## Storage (R2)
+
+Workers has no filesystem, so the `local` storage driver cannot run there. `R2Driver` puts a Cloudflare R2 bucket behind the same `StorageManager` API, through the bucket binding — no credentials to provision and no AWS SDK in the bundle.
+
+Create the bucket and bind it:
+
+```bash
+bunx wrangler r2 bucket create my-app-media
+```
+
+```jsonc
+// wrangler.jsonc
+"r2_buckets": [
+  { "binding": "MEDIA", "bucket_name": "my-app-media" }
+]
+```
+
+Then register a disk that uses R2 on Workers and the local filesystem everywhere else, the same runtime switch `config/database.ts` uses for D1:
+
+```typescript
+// app/Providers/StorageProvider.ts
+import { ServiceProvider, createStorageManager, LocalStorageDriver } from '@guren/core'
+import { R2Driver, getWorkersEnv } from '@guren/plugin-cloudflare'
+import { isWorkersRuntime } from '../../config/database.js'
+
+interface Env {
+  MEDIA: unknown
+}
+
+export default class StorageProvider extends ServiceProvider {
+  register(): void {
+    const storage = createStorageManager({ default: 'media' })
+    storage.registerDisk('media', () =>
+      isWorkersRuntime()
+        ? new R2Driver({
+            binding: () => getWorkersEnv<Env>().MEDIA,
+            publicUrl: 'https://media.example.com',
+          })
+        : new LocalStorageDriver({ root: './storage/app/public', url: '/storage' }),
+    )
+    this.container.instance('storage', storage)
+  }
+}
+```
+
+`binding` is a resolver, not a value — bindings arrive with the first request, so it must be read lazily, exactly like the D1 binding. Every `storage.disk('media').put(...)` / `get(...)` / `files(...)` call from the [Storage guide](./storage.md) then works unchanged; `bun run dev` writes to disk, `wrangler dev` and production write to R2.
+
+Three things follow from how R2 differs from S3:
+
+- **`publicUrl` is required for `url()`.** Attach a custom domain to the bucket in the dashboard (the r2.dev subdomain is rate-limited and meant for development) and pass it as `publicUrl`; R2 has no derivable public URL, so `url()` throws without it.
+- **`temporaryUrl()` needs S3 credentials.** The binding cannot sign URLs. Either pass `presign: { accountId, bucket, accessKeyId, secretAccessKey }` (an R2 API token) and install `aws4fetch`, or keep private files behind an authenticated route in your app. Without `presign`, `temporaryUrl()` throws with that guidance.
+- **Visibility is per bucket, not per object.** A bucket is public (custom domain / r2.dev) or private; there is no per-object ACL. The driver reports the bucket's `visibility` (defaults to `'public'` when `publicUrl` is set) and throws if `put({ visibility })` or `setVisibility()` asks for the other value, rather than pretending to honour it.
+
+`putFile()` also throws — there is no local file to read on Workers. Read the bytes yourself (`await file.arrayBuffer()`) and call `put()`. For one-off bulk loads, `bunx wrangler r2 object put my-app-media/<key> --file <path>` from your machine is simpler than going through the app.
+
+To reach the same bucket from a Bun process — a script, or a non-Workers deployment — use the S3-compatible endpoint with the S3 driver instead: `endpoint: 'https://<ACCOUNT_ID>.r2.cloudflarestorage.com'`, `region: 'auto'`, and an R2 API token, as shown in the [Storage guide](./storage.md#s3-compatible-services).
+
 ## Secrets
 
 `APP_KEY` is required — sessions and CSRF are signed with it, and the worker throws during startup without it, before serving a single request.

@@ -278,6 +278,9 @@ const storage = new StorageManager({
 })
 ```
 
+> [!NOTE]
+> On Cloudflare Workers, use the bucket binding instead of the S3 API: `R2Driver` from `@guren/plugin-cloudflare` needs no credentials and no AWS SDK. The S3 recipe above is for reaching R2 from other runtimes (a Bun server, a script, Lambda). R2 has no per-object ACLs, so treat visibility as a bucket-level setting there. See the [Cloudflare Workers guide](./cloudflare.md#storage-r2).
+
 ### Pre-signed URLs
 
 Generate temporary URLs for private files:

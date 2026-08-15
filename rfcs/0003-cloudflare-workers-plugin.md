@@ -487,7 +487,9 @@ following. This matrix ships in the plugin docs — Workers is a supported
   logging `FileChannel`/`DailyFileChannel` (use console/external), i18n
   `JsonLoader` (build-time bundling is future work)
 - `S3Driver.putFile(localPath)` (reads local fs) — `put(buffer)` works, the
-  driver is otherwise fetch-based
+  driver is otherwise fetch-based. **Amended by RFC 0009:** storage on
+  Workers is now served by `R2Driver` (the R2 binding), which moves storage
+  from this list to "works via replacements" above.
 - Long-lived processes: `Scheduler.start()`, queue `Worker`, WebSocket
   broadcasting — see below (future adapters map to Cron Triggers / Queues /
   Durable Objects)
@@ -498,7 +500,7 @@ following. This matrix ships in the plugin docs — Workers is a supported
 - **Cron Triggers** (↔ `createScheduleHandler` equivalent — the module worker
   shape already reserves the `scheduled` export for this)
 - **Cache store** on Cache API / KV
-- **R2 storage driver**
+- ~~**R2 storage driver**~~ — shipped as RFC 0009 (`R2Driver` in this plugin)
 - Auto-discovery on Workers (providers must be listed explicitly in
   `createApp()`, same as the documented Lambda constraint)
 
