@@ -307,7 +307,7 @@ export function stageStaticAssets(publicDir: string, assetsOut: string): void {
 }
 
 /** What a dev-only module is needed for, so a plugin can word its own message. */
-export type DevOnlyModuleKind = 'sqlite' | 'vite' | 'mcp'
+export type DevOnlyModuleKind = 'sqlite' | 'vite' | 'mcp' | 'sql-driver'
 
 export interface DevOnlyModule {
   readonly specifier: string
@@ -337,6 +337,10 @@ export interface DevOnlyModule {
  * - `mcp` — the opt-in MCP endpoint's lazy imports, which drag the CLI
  *   generators (and Babel) plus the MCP SDK in behind them.
  *
+ * SQL client libraries are deliberately *not* here: they are dev-only on
+ * Workers, where D1 is the only database, and load-bearing on Lambda and
+ * Vercel, which connect to Postgres. See `SQL_CLIENT_MODULES`.
+ *
  * `as const` so a consumer can key an exhaustive table on the specifiers and
  * have a new entry here surface as a compile error there.
  */
@@ -356,6 +360,45 @@ export const DEV_ONLY_MODULES = [
   },
 ] as const satisfies readonly DevOnlyModule[]
 
+/**
+ * The database client libraries `@guren/orm`'s Postgres, MySQL and Aurora
+ * Data API factories reach for.
+ *
+ * They sit apart from `DEV_ONLY_MODULES` because whether they are dead weight
+ * depends on the platform: on Workers, D1 is the only database there is, so
+ * every one of these is unreachable; on Lambda and Vercel the app connects to
+ * Postgres through them and stubbing them would break a working deploy.
+ *
+ * A platform where they are unreachable has to stub them rather than ignore
+ * them. `@guren/orm` names them in *literal* dynamic imports, which a bundler
+ * follows whether or not the branch can be taken — so a D1 app failed to
+ * bundle on `Could not resolve "postgres"`, naming a database its author had
+ * deliberately not chosen. Both the client and the drizzle entry point that
+ * imports it need stubbing: aliasing only the client leaves drizzle's own
+ * `import pgClient from "postgres"` to resolve.
+ *
+ * Export names are read off drizzle-orm's driver and session modules, which
+ * is what a bundler checks a stub against.
+ */
+export const SQL_CLIENT_MODULES = [
+  { specifier: 'postgres', kind: 'sql-driver', exportNames: [] },
+  { specifier: 'mysql2', kind: 'sql-driver', exportNames: [] },
+  { specifier: 'mysql2/promise', kind: 'sql-driver', exportNames: ['createPool'] },
+  {
+    specifier: '@aws-sdk/client-rds-data',
+    kind: 'sql-driver',
+    exportNames: [
+      'RDSDataClient',
+      'BeginTransactionCommand',
+      'CommitTransactionCommand',
+      'ExecuteStatementCommand',
+      'RollbackTransactionCommand',
+    ],
+  },
+] as const satisfies readonly DevOnlyModule[]
+
+export type SqlClientSpecifier = (typeof SQL_CLIENT_MODULES)[number]['specifier']
+
 export type DevOnlySpecifier = (typeof DEV_ONLY_MODULES)[number]['specifier']
 
 /**
@@ -370,14 +413,19 @@ export type DevOnlySpecifier = (typeof DEV_ONLY_MODULES)[number]['specifier']
  * @param message Platform-specific explanation, including the replacement API.
  */
 export function renderDevOnlyStub(module: DevOnlyModule, message: string): string {
-  if (module.exportNames.length === 0) {
-    return `// ${message}\nexport {}\n`
-  }
-
+  const error = `throw new Error(${JSON.stringify(message)})`
   const throwing = module.exportNames
-    .map((name) => `export function ${name}() { throw new Error(${JSON.stringify(message)}) }`)
+    .map((name) => `export function ${name}() { ${error} }`)
     .join('\n')
-  return `${throwing}\nexport default { ${module.exportNames.join(', ')} }\n`
+
+  // The default export is a *function*, not an object of the named ones:
+  // `drizzle-orm/postgres-js` does `import pgClient from "postgres"` and calls
+  // it, and a module with no default at all fails the bundle outright with
+  // "no matching export". Attaching the named exports keeps the previous
+  // object-shaped access working.
+  const named = module.exportNames.length > 0 ? `, { ${module.exportNames.join(', ')} }` : ''
+  const fallback = `function unavailable() { ${error} }`
+  return `// ${message}\n${throwing}\n${fallback}\nexport default Object.assign(unavailable${named})\n`
 }
 
 /**
