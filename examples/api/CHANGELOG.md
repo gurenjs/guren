@@ -1,5 +1,12 @@
 # @guren/example-api
 
+## 0.1.17
+
+### Patch Changes
+
+- Updated dependencies [2b98e24]
+  - @guren/cli@2.6.0
+
 ## 0.1.16
 
 ### Patch Changes

@@ -18,7 +18,7 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@guren/cli": "^2.5.0",
+    "@guren/cli": "^2.6.0",
     "@guren/core": "^1.6.1",
     "@guren/orm": "^2.4.0",
     "drizzle-orm": "1.0.0-rc.4"
