@@ -253,6 +253,41 @@ describe('LocalDriver', () => {
       expect(await driver.exists('dir/subdir/file2.txt')).toBe(false)
     })
   })
+
+  // Visibility on a local disk is a property of the disk, not of one file:
+  // what makes a file reachable is the disk root and whatever serves it.
+  // The driver therefore reports the configured value and refuses the other
+  // one, instead of accepting a request it cannot carry out.
+  describe('visibility', () => {
+    it('reports the disk visibility', async () => {
+      await driver.put('test.txt', 'content')
+      expect(await driver.getVisibility('test.txt')).toBe('private')
+
+      const publicDriver = new LocalDriver({ root: tmpDir, visibility: 'public' })
+      expect(await publicDriver.getVisibility('test.txt')).toBe('public')
+    })
+
+    it('accepts a request that matches the disk', async () => {
+      await driver.put('test.txt', 'content', { visibility: 'private' })
+      await driver.setVisibility('test.txt', 'private')
+      expect(await driver.getVisibility('test.txt')).toBe('private')
+    })
+
+    it('refuses a visibility it cannot carry out, on put and on setVisibility', async () => {
+      await expect(driver.put('a.txt', 'content', { visibility: 'public' })).rejects.toThrow(
+        /no per-object visibility/,
+      )
+      expect(await driver.exists('a.txt')).toBe(false)
+
+      await driver.put('b.txt', 'content')
+      await expect(driver.setVisibility('b.txt', 'public')).rejects.toThrow(/no per-object visibility/)
+    })
+
+    it('does not report a visibility for a file that is not there', async () => {
+      await expect(driver.getVisibility('missing.txt')).rejects.toThrow('File not found: missing.txt')
+      await expect(driver.setVisibility('missing.txt', 'private')).rejects.toThrow('File not found: missing.txt')
+    })
+  })
 })
 
 describe('MemoryDriver', () => {

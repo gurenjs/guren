@@ -49,7 +49,6 @@ await disk.put('file.txt', 'Hello World')                    // String content
 await disk.put('image.jpg', imageBuffer)                      // Buffer content
 await disk.put('data.json', JSON.stringify(data), {          // With options
   contentType: 'application/json',
-  visibility: 'public',
 })
 await disk.putFile('uploads/report.pdf', './temp/report.pdf') // From local file
 
@@ -121,18 +120,24 @@ await disk.deleteDirectory('uploads/temp')
 
 ### Visibility
 
+Where visibility lives depends on the backend, and the driver tells you which one you have rather than pretending:
+
+- **Per object** — S3 with ACLs enabled. `setVisibility()` changes one file.
+- **Per disk** — a local disk (reachability comes from the disk root and whatever serves it), S3 with `acl: false`, and Cloudflare R2. The disk declares its `visibility`; asking for the other value throws instead of silently doing nothing.
+
 ```ts
-const disk = storage.disk()
+const disk = storage.disk('public')       // declared visibility: 'public'
 
-// Set visibility on upload
-await disk.put('file.txt', content, { visibility: 'public' })
+await disk.put('file.txt', content)                  // inherits the disk's visibility
+await disk.put('file.txt', content, { visibility: 'public' })  // same thing, stated explicitly
+await disk.getVisibility('file.txt')                 // 'public' — throws if the file is not there
 
-// Change visibility
-await disk.setVisibility('file.txt', 'public')
-await disk.setVisibility('file.txt', 'private')
+// On a per-object backend this moves one file:
+await storage.disk('s3').setVisibility('file.txt', 'private')
 
-// Get current visibility
-const visibility = await disk.getVisibility('file.txt')
+// On a per-disk backend it throws, naming the option that fixes it. Put the
+// file on a disk with the visibility you want instead:
+await storage.disk('local').put('secret.pdf', content)
 ```
 
 ## Configuration
@@ -364,12 +369,13 @@ export class UploadController extends Controller {
     const ext = file.name.split('.').pop()
     const filename = `avatars/${crypto.randomUUID()}.${ext}`
 
-    await storage.disk().put(filename, buffer, {
+    // The public disk declares its own visibility, so the upload does not
+    // have to ask for one the disk may not be able to honour.
+    await storage.disk('public').put(filename, buffer, {
       contentType: file.type,
-      visibility: 'public',
     })
 
-    const url = storage.disk().url(filename)
+    const url = storage.disk('public').url(filename)
 
     return this.json({ url })
   }

@@ -374,7 +374,11 @@ async function assertFeatureScaffolds(appDir: string): Promise<void> {
   assert(storageProvider.includes("from '@guren/core'"), 'Storage blueprint must import from @guren/core.')
   assert(storageProvider.includes('createStorageManager'), 'Storage blueprint must create a storage manager.')
   assert(storageProvider.includes("this.container.instance('storage'"), 'Storage blueprint must bind storage into the container.')
-  assert(storageProvider.includes("public: { driver: 'local', root: './storage/app/public' }"), 'Storage blueprint must expose a public disk.')
+  assert(
+    storageProvider.includes("public: { driver: 'local', root: './storage/app/public', visibility: 'public' }"),
+    "Storage blueprint must expose a public disk that declares itself public — a local disk has no per-object visibility, so an undeclared 'public' disk reports 'private' and refuses put({ visibility: 'public' }).",
+  )
+  assert(storageProvider.includes('STORAGE_DISK'), 'Storage blueprint must select its disk from STORAGE_DISK.')
 
   const broadcastProvider = await readFile(join(appDir, 'app/Providers/BroadcastProvider.ts'), 'utf8')
   assert(broadcastProvider.includes("from '@guren/core'"), 'Broadcasting blueprint must import from @guren/core.')

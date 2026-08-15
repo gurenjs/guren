@@ -49,7 +49,6 @@ await disk.put('file.txt', 'Hello World')                    // 文字列コン�
 await disk.put('image.jpg', imageBuffer)                      // Bufferコンテンツ
 await disk.put('data.json', JSON.stringify(data), {          // オプション付き
   contentType: 'application/json',
-  visibility: 'public',
 })
 await disk.putFile('uploads/report.pdf', './temp/report.pdf') // ローカルファイルから
 
@@ -121,18 +120,24 @@ await disk.deleteDirectory('uploads/temp')
 
 ### 可視性
 
+可視性がどこに属するかはバックエンド次第で、ドライバは「できるふり」をせずどちらであるかを示します。
+
+- **オブジェクト単位** — ACL が有効な S3。`setVisibility()` は1ファイルだけを変更します。
+- **ディスク単位** — ローカルディスク（到達可能性はディスクのルートと、それを配信する仕組みで決まります）、`acl: false` の S3、Cloudflare R2。ディスク側で `visibility` を宣言し、逆の値を求められた場合は黙って無視せず例外を投げます。
+
 ```ts
-const disk = storage.disk()
+const disk = storage.disk('public')       // visibility: 'public' を宣言したディスク
 
-// アップロード時に可視性を設定
-await disk.put('file.txt', content, { visibility: 'public' })
+await disk.put('file.txt', content)                  // ディスクの可視性を継承
+await disk.put('file.txt', content, { visibility: 'public' })  // 同じ意味を明示しただけ
+await disk.getVisibility('file.txt')                 // 'public'（ファイルが無ければ例外）
 
-// 可視性を変更
-await disk.setVisibility('file.txt', 'public')
-await disk.setVisibility('file.txt', 'private')
+// オブジェクト単位のバックエンドでは1ファイルだけ移動します
+await storage.disk('s3').setVisibility('file.txt', 'private')
 
-// 現在の可視性を取得
-const visibility = await disk.getVisibility('file.txt')
+// ディスク単位のバックエンドでは、対処すべきオプションを示して例外になります。
+// 代わりに目的の可視性を持つディスクへ置いてください。
+await storage.disk('local').put('secret.pdf', content)
 ```
 
 ## 設定
@@ -364,12 +369,13 @@ export class UploadController extends Controller {
     const ext = file.name.split('.').pop()
     const filename = `avatars/${crypto.randomUUID()}.${ext}`
 
-    await storage.disk().put(filename, buffer, {
+    // The public disk declares its own visibility, so the upload does not
+    // have to ask for one the disk may not be able to honour.
+    await storage.disk('public').put(filename, buffer, {
       contentType: file.type,
-      visibility: 'public',
     })
 
-    const url = storage.disk().url(filename)
+    const url = storage.disk('public').url(filename)
 
     return this.json({ url })
   }

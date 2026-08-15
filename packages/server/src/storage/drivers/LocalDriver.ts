@@ -62,6 +62,9 @@ export class LocalDriver implements StorageDriver {
   }
 
   async put(path: string, content: Buffer | string, options?: PutOptions): Promise<string> {
+    if (options?.visibility) {
+      this.assertVisibilityMatches(options.visibility, 'put')
+    }
     const fullPath = this.fullPath(path)
     await this.ensureDirectory(fullPath)
 
@@ -242,18 +245,35 @@ export class LocalDriver implements StorageDriver {
   }
 
   async setVisibility(path: string, visibility: 'public' | 'private'): Promise<void> {
-    // Known deviation from the `StorageDriver` contract, kept deliberately:
-    // the contract says a driver without per-object visibility reports the
-    // disk's value and throws for the other one, and that any visibility
-    // call throws for a missing file. Both would change the default
-    // behavior of a stable API, so they wait for the next major; every
-    // other driver already behaves as documented.
+    // A local disk has no per-object visibility: whether a file is reachable
+    // is decided by where the disk is rooted and what serves it, not by a
+    // flag on one file. So the contract's rule for such backends applies —
+    // report the disk's value, refuse the other one, and never claim success
+    // for a file that is not there.
+    await this.assertExists(path)
+    this.assertVisibilityMatches(visibility, 'setVisibility')
   }
 
   async getVisibility(path: string): Promise<'public' | 'private'> {
-    // Returns the disk value even for a path that does not exist — see the
-    // deviation note on `setVisibility`.
+    await this.assertExists(path)
     return this.defaultVisibility
+  }
+
+  private async assertExists(path: string): Promise<void> {
+    if (!(await this.exists(path))) {
+      throw new Error(`File not found: ${path}`)
+    }
+  }
+
+  private assertVisibilityMatches(requested: 'public' | 'private', operation: string): void {
+    if (requested === this.defaultVisibility) {
+      return
+    }
+    throw new Error(
+      `LocalDriver.${operation}: cannot make an object ${requested} on a ${this.defaultVisibility} disk. ` +
+        'A local disk has no per-object visibility — it is decided by the disk root and by what serves it. ' +
+        'Declare it with the driver\'s "visibility" option, or keep restricted files on a disk that is not served.',
+    )
   }
 
   /**

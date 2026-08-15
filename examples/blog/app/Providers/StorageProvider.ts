@@ -6,7 +6,7 @@ export default class StorageProvider extends ServiceProvider {
       default: 'local',
       disks: {
         local: { driver: 'local', root: './storage/app' },
-        public: { driver: 'local', root: './storage/app/public' },
+        public: { driver: 'local', root: './storage/app/public', visibility: 'public' },
       },
     }))
   }

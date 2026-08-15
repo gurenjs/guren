@@ -1,5 +1,5 @@
 ---
-"@guren/server": minor
+"@guren/server": major
 "@guren/cli": minor
 ---
 
@@ -19,11 +19,23 @@ or `setVisibility()` throw when asked for the other value instead of silently
 dropping it — a `setVisibility(path, 'private')` that does nothing on a public
 bucket is a leak that looks like success.
 
-The `StorageDriver` contract now also states what the visibility methods do
-for a file that does not exist (they throw) and for a backend without
-per-object visibility (report the disk's value, refuse the other one), with
-`LocalDriver`'s long-standing deviation recorded in place — aligning it
-changes stable default behavior, so it waits for a major.
+**Breaking:** the `StorageDriver` contract now states what the visibility
+methods do, and every driver follows it. Four drivers had three behaviours
+because the contract said nothing: a visibility call throws when the file
+does not exist, and a backend without per-object visibility reports the
+disk's configured value and refuses the other one instead of accepting a
+request it cannot carry out.
+
+`LocalDriver` changes as a result. `getVisibility()` and `setVisibility()`
+throw for a missing file, and `put({ visibility })` / `setVisibility()`
+throw when the value differs from the disk's — previously all three were
+silent no-ops that reported success. What makes a local file reachable is
+the disk root and whatever serves it, not a flag on one file, so a
+per-object request there was never carried out; it only looked like it was.
+
+To upgrade, declare the visibility on the disk instead of the call: the
+scaffolded `public` disk now carries `visibility: 'public'`, and files that
+must not be reachable belong on a disk that is not served.
 
 Separately, `guren add storage` now scaffolds a disk map selected by
 `STORAGE_DISK`, so an app declares its disks once and picks one per

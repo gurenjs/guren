@@ -520,7 +520,9 @@ export default class NotificationProvider extends ServiceProvider {
 // throw (a required-env helper) out of it.
 const disks = {
   local: { driver: 'local', root: './storage/app' },
-  public: { driver: 'local', root: './storage/app/public' },
+  // Declared public because it is: everything under it is served. A local
+  // disk has no per-object visibility, so this is where that is decided.
+  public: { driver: 'local', root: './storage/app/public', visibility: 'public' },
 } as const
 
 const selected = process.env.STORAGE_DISK ?? 'local'
