@@ -275,6 +275,25 @@ export interface S3DriverOptions {
    * @default 'private'
    */
   visibility?: 'public' | 'private'
+
+  /**
+   * Whether the endpoint implements S3 object ACLs.
+   *
+   * AWS S3 does, so this defaults to `true` and every `put` carries an
+   * `x-amz-acl` header derived from the file's visibility. Several
+   * S3-compatible endpoints do not: Cloudflare R2 documents `x-amz-acl` and
+   * the ACL operations as unsupported (access is decided per bucket), and
+   * MinIO/others vary. Set `acl: false` for those.
+   *
+   * With `acl: false` the driver stops sending the header, and visibility
+   * becomes a property of the whole disk: `getVisibility()` reports the
+   * configured `visibility`, and `put({ visibility })` / `setVisibility()`
+   * throw when asked for the other value rather than silently not applying
+   * it. Enforce per-object access in front of the disk instead.
+   *
+   * @default true
+   */
+  acl?: boolean
 }
 
 /**

@@ -278,8 +278,28 @@ const storage = new StorageManager({
 })
 ```
 
+S3 のオブジェクト ACL に対応していないエンドポイント（R2 は `x-amz-acl` と ACL 操作を非対応と明記しており、MinIO は構成によります）では `acl: false` を指定します。ドライバはヘッダの送出をやめ、`getVisibility()` はディスクに設定した `visibility` を返し、`put({ visibility })` や `setVisibility()` で逆の値を求められた場合は、黙って無視せず例外を投げます。
+
+```ts
+const storage = new StorageManager({
+  default: 's3',
+  disks: {
+    s3: {
+      driver: 's3',
+      bucket: 'my-bucket',
+      region: 'auto',
+      endpoint: `https://${process.env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+      accessKeyId: process.env.R2_ACCESS_KEY_ID,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+      acl: false,
+      visibility: 'public',
+    },
+  },
+})
+```
+
 > [!NOTE]
-> Cloudflare Workers 上では S3 API ではなくバケットバインディングを使ってください。`@guren/plugin-cloudflare` の `R2Driver` は資格情報も AWS SDK も不要です。上の S3 のレシピは他のランタイム（Bun サーバー、スクリプト、Lambda）から R2 に到達するためのものです。R2 にはオブジェクト単位の ACL が無いため、可視性はバケット単位の設定として扱ってください。[Cloudflare Workers ガイド](./cloudflare.md#ストレージr2)を参照してください。
+> Cloudflare Workers 上では S3 API ではなくバケットバインディングを使ってください。`@guren/plugin-cloudflare` の `R2Driver` は資格情報も AWS SDK も不要です。上の S3 のレシピは他のランタイム（Bun サーバー、スクリプト、Lambda）から R2 に到達するためのものです。[Cloudflare Workers ガイド](./cloudflare.md#ストレージr2)を参照してください。
 
 ### 署名付きURL
 
@@ -292,6 +312,22 @@ const disk = storage.disk('s3')
 const expiration = new Date(Date.now() + 3600 * 1000)
 const url = await disk.temporaryUrl('private/document.pdf', expiration)
 ```
+
+### 環境ごとのディスク切り替え
+
+ディスクはまとめて宣言しておき、環境変数で選びます（`bunx guren add storage` はこの形で生成します）。ディスクは遅延解決されるため、使わないディスクは構築されず、その資格情報も読まれません。
+
+```ts
+const storage = createStorageManager({
+  default: process.env.STORAGE_DISK ?? 'local',
+  disks: {
+    local: { driver: 'local', root: './storage/app/public', url: '/storage' },
+    s3: { driver: 's3', bucket: process.env.S3_BUCKET!, region: 'ap-northeast-1' },
+  },
+})
+```
+
+開発では `STORAGE_DISK=local`、本番では `STORAGE_DISK=s3`。コードの変更は不要で、`storage.disk()` は選ばれた方を返します。
 
 ## ファイルアップロード
 

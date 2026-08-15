@@ -505,7 +505,7 @@ export default class NotificationProvider extends ServiceProvider {
     },
   },
   storage: {
-    description: 'Install storage infrastructure with local/public disks and a sample storage service.',
+    description: 'Install storage infrastructure with local/public disks (switchable via STORAGE_DISK) and a sample storage service.',
     run: async (options) => {
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
       const created = await scaffoldFeatureFiles([
@@ -515,8 +515,11 @@ export default class NotificationProvider extends ServiceProvider {
 
 export default class StorageProvider extends ServiceProvider {
   register(): void {
+    // Disks are declared here and chosen per environment: set STORAGE_DISK
+    // in .env (or in your platform's vars) to switch without touching code.
+    // Disks resolve lazily, so declaring one you do not use costs nothing.
     this.container.instance('storage', createStorageManager({
-      default: 'local',
+      default: process.env.STORAGE_DISK ?? 'local',
       disks: {
         local: { driver: 'local', root: './storage/app' },
         public: { driver: 'local', root: './storage/app/public' },

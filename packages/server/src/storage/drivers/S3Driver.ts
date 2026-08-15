@@ -1,4 +1,5 @@
 import type { StorageDriver, S3DriverOptions, PutOptions, FileMetadata } from '../types'
+import { assertVisibilitySupported, cannedAcl, putAclFields } from './s3-acl'
 
 /**
  * S3 Client interface (@aws-sdk/client-s3 compatible).
@@ -34,6 +35,7 @@ export class S3Driver implements StorageDriver {
   private readonly prefix: string
   private readonly baseUrl: string
   private readonly defaultVisibility: 'public' | 'private'
+  private readonly acl: boolean
 
   constructor(private readonly options: S3DriverOptions) {
     this.client = options.client as S3Client | null
@@ -45,6 +47,7 @@ export class S3Driver implements StorageDriver {
     this.prefix = options.prefix ?? ''
     this.baseUrl = options.url ?? `https://${this.bucket}.s3.${this.region}.amazonaws.com`
     this.defaultVisibility = options.visibility ?? 'private'
+    this.acl = options.acl ?? true
   }
 
   /**
@@ -87,12 +90,6 @@ export class S3Driver implements StorageDriver {
     return this.prefix ? `${this.prefix}/${path}` : path
   }
 
-  /**
-   * Get ACL from visibility.
-   */
-  private getAcl(visibility: 'public' | 'private'): string {
-    return visibility === 'public' ? 'public-read' : 'private'
-  }
 
   async put(path: string, content: Buffer | string, options?: PutOptions): Promise<string> {
     const client = await this.getClient()
@@ -101,6 +98,7 @@ export class S3Driver implements StorageDriver {
     }
 
     const body = typeof content === 'string' ? Buffer.from(content) : content
+    assertVisibilitySupported(this.acl, this.defaultVisibility, options?.visibility, 'put')
     const visibility = options?.visibility ?? this.defaultVisibility
 
     const command = new PutObjectCommand({
@@ -108,7 +106,7 @@ export class S3Driver implements StorageDriver {
       Key: this.prefixKey(path),
       Body: body,
       ContentType: options?.contentType,
-      ACL: this.getAcl(visibility),
+      ...putAclFields(this.acl, visibility),
       Metadata: options?.metadata,
     })
 
@@ -395,6 +393,12 @@ export class S3Driver implements StorageDriver {
   }
 
   async setVisibility(path: string, visibility: 'public' | 'private'): Promise<void> {
+    assertVisibilitySupported(this.acl, this.defaultVisibility, visibility, 'setVisibility')
+    if (!this.acl) {
+      // Equal to the disk's visibility (the guard above proved it), and this
+      // endpoint has no per-object ACL to write.
+      return
+    }
     const client = await this.getClient()
     const { PutObjectAclCommand } = await importAwsModule('@aws-sdk/client-s3') as {
       PutObjectAclCommand: new (input: unknown) => unknown
@@ -403,13 +407,16 @@ export class S3Driver implements StorageDriver {
     const command = new PutObjectAclCommand({
       Bucket: this.bucket,
       Key: this.prefixKey(path),
-      ACL: this.getAcl(visibility),
+      ACL: cannedAcl(visibility),
     })
 
     await client.send(command)
   }
 
   async getVisibility(path: string): Promise<'public' | 'private'> {
+    if (!this.acl) {
+      return this.defaultVisibility
+    }
     const client = await this.getClient()
     const { GetObjectAclCommand } = await importAwsModule('@aws-sdk/client-s3') as {
       GetObjectAclCommand: new (input: unknown) => unknown
