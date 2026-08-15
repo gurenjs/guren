@@ -397,8 +397,8 @@ POST /storage/direct-uploads      (registered by registerAttachmentRoutes; must 
   client `PUT`s the bytes straight to the bucket, then submits `signedId`.
   This needs an additive, optional driver method
   `temporaryUploadUrl?(path, expiration, { contentType, checksum })` —
-  `S3Driver` via `PutObjectCommand` + presigner, `R2Driver` via aws4fetch
-  `PUT` — and a **blob "pending" state**: the row is created before the
+  `S3Driver` via `PutObjectCommand` + presigner, `R2Driver` via the WebCrypto
+  signer RFC 0009 §1.2 added (a `PUT` variant of the same shape) — and a **blob "pending" state**: the row is created before the
   bytes exist, and `attach(signedId)` verifies `disk.exists(key)` (and the
   size/checksum via `head`) before flipping it to attached.
 - **Auth is mandatory and app-owned.** `registerAttachmentRoutes` requires

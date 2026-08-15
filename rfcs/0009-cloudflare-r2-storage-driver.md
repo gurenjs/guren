@@ -48,7 +48,7 @@ working assumptions the plan started from:
 |---|---|
 | `StorageDriver` has "about 20 methods" | **21**: `put`, `putFile`, `get`, `getAsString`, `exists`, `delete`, `deleteMany`, `copy`, `move`, `url`, `temporaryUrl`, `size`, `lastModified`, `metadata`, `files`, `directories`, `allFiles`, `makeDirectory`, `deleteDirectory`, `setVisibility`, `getVisibility` (`packages/server/src/storage/types.ts:59-201`). Content is `Buffer \| string`; reads return `Buffer \| null`. |
 | `StorageManager.registerDriver()` is a usable extension point for third-party drivers | Only half true. `registerDriver(name, factory)` exists (`StorageManager.ts:132`), but the constructor resolves every `disks` entry **eagerly** (`registerDiskFromConfig`, `StorageManager.ts:82-94`) and throws `Unknown storage driver: r2` for a driver registered afterwards. `DriverConfig` is also a **closed** union of `'local' \| 's3' \| 'memory'` (`types.ts:293-296`), so `{ driver: 'r2' }` does not type-check. **`registerDisk(name, () => driver)` is the extension point that actually works today** (`StorageManager.ts:123`), and it is what this plan uses. |
-| `S3Driver` dynamically imports `@aws-sdk/client-s3` | Correct — via `importAwsModule()` with a "Missing optional dependency" error (`S3Driver.ts:463-474`). Same pattern is reused here for `aws4fetch`. |
+| `S3Driver` dynamically imports `@aws-sdk/client-s3` | Correct — via `importAwsModule()` with a "Missing optional dependency" error (`S3Driver.ts:463-474`). The plan reused this pattern for the presign dependency; **that was wrong on Workers** — see §1.2. |
 | The Cloudflare plugin uses a lazy `binding: () => getWorkersEnv<Env>().DB` closure | Correct (`packages/orm/src/d1.ts:6-25`, `packages/plugin-cloudflare/src/env.ts`). `getWorkersEnv()` throws before the first request; `web/app/Http/Middleware/site-analytics.ts:90-97` shows the pattern for an *optional* binding (try/catch → undefined off-Workers), and `web/config/database.ts:9-11` the `isWorkersRuntime()` switch (`navigator.userAgent === 'Cloudflare-Workers'`). |
 | `cloudflarePlugin()` registers services | It does not — `register() {}` is empty and `CloudflarePluginConfig` is an empty interface "reserved for upcoming RFC 0003 parts" (`packages/plugin-cloudflare/src/index.ts`). This plan keeps it that way (§2.2). |
 | `cloudflare:build` scaffolds `wrangler.jsonc` | Correct — once, `wx` flag, never overwritten; `warnMissingBuildOwnedKeys` only reports **build-owned** keys (`alias`, `define`, `migrations_dir`) (`build.ts:308-396`). |
@@ -176,7 +176,7 @@ the `r2_buckets` entry in wrangler.jsonc."*
 | `copy(from, to)` | `get(from)` → `put(to, obj.body, { httpMetadata: obj.httpMetadata, customMetadata: obj.customMetadata })` | **No copy on the binding** — stream the body through. `obj === null` throws `File not found: ${from}` (Memory precedent). Single-`put` size limits apply (multipart is out of scope). |
 | `move(from, to)` | `copy` + `delete(from)` | |
 | `url(path)` | `${publicUrl}/${key}` | Throws when `publicUrl` is unset (no derivable default; fail closed rather than return a URL that 404s). No percent-encoding, matching `S3Driver.url` — noted as an Open Question. |
-| `temporaryUrl(path, expiration)` | `aws4fetch` SigV4 presign against `https://${accountId}.r2.cloudflarestorage.com/${bucket}/${key}` with `X-Amz-Expires` | Only when `presign` is configured; else throws *"R2 bindings cannot sign URLs. Either configure `presign: { accountId, bucket, accessKeyId, secretAccessKey }` (an R2 API token) or serve private files through a signed app route."* `aws4fetch` is an **optional** dependency loaded with the `importAwsModule`-style dynamic import (same missing-module error shape). Expiry > 7 days throws up front (R2 rejects it; the S3 driver would only find out from AWS). |
+| `temporaryUrl(path, expiration)` | SigV4 presign on WebCrypto against `https://${accountId}.r2.cloudflarestorage.com/${bucket}/${key}` with `X-Amz-Expires` | Only when `presign` is configured; else throws with guidance naming the option and the signed-route alternative. Expiry > 7 days throws up front (R2 rejects it; the S3 driver would only find out from AWS). **Amended in implementation:** the signer is written in-package, not taken from a dependency — see §1.2. |
 | `size` / `lastModified` | `head(key)` → `size` / `uploaded` | Throw `File not found` on `null` (S3/Memory precedent). |
 | `metadata(path)` | `head(key)` → `{ path, size, lastModified: uploaded, contentType: httpMetadata?.contentType, metadata: customMetadata, visibility }` | `visibility` is the disk's configured value (§1.3). |
 | `files(dir)` | `list({ prefix: `${key}/`, delimiter: '/' })`, loop on `truncated`/`cursor` | Strip prefix; drop keys ending in `/` (S3 precedent, covers `.keep`-style markers only when named so — see `makeDirectory`). |
@@ -197,10 +197,33 @@ Three options were weighed:
    **chosen.** Matches how Cloudflare itself documents presigned URLs for R2
    (client-side SigV4 with an API token; not something a binding can do), and
    keeps the credential-free default: an app that never calls `temporaryUrl()`
-   never needs a token. `aws4fetch` (WebCrypto-based, ~6 KB, Workers-native)
-   is the signer, loaded lazily so it stays out of bundles that do not use it.
-   Hand-rolling SigV4 was rejected: it is 100 lines of easy-to-get-wrong
-   canonicalization for zero benefit over a 6 KB dependency.
+   never needs a token.
+
+   **The signer itself was amended twice in implementation, and the reason is
+   worth recording.** The plan said: use `aws4fetch` (WebCrypto-based, ~11 KB,
+   Workers-native), loaded lazily through the `importAwsModule` pattern so it
+   stays out of bundles that do not use it — and rejected hand-rolling SigV4
+   as "100 lines of easy-to-get-wrong canonicalization for zero benefit over a
+   small dependency". Both halves turned out to be wrong:
+
+   1. **A lazy import with a variable specifier cannot work on Workers.** No
+      Workers bundler can follow `import(moduleName)`, so the presign path
+      threw `No such module` at runtime while every test stayed green (under
+      Bun the same import resolves from `node_modules`). This is invisible to
+      any test that does not run inside workerd — see §4.2. A literal
+      `import('aws4fetch')` bundles correctly but then fails the *build* for
+      every app that never signs a URL, since an optional dependency is not
+      installed.
+   2. **The dependency is dormant.** Last release 2024-08, last commit
+      2024-12, 22 open issues (checked 2026-08-15).
+
+   So the driver signs with WebCrypto directly (`crypto.subtle`, a global on
+   workerd, Bun and Node 18+). R2 presigning is one request shape — GET, no
+   body, `host` the only signed header — which makes the canonicalization
+   ~70 lines, and it leaves nothing for a bundler to resolve. The
+   implementation was cross-checked byte-for-byte against `aws4fetch` on
+   plain, spaced, unicode and RFC-3986-reserved keys before that package was
+   removed; those signatures are frozen as known-answer tests.
 3. **Sign an app route instead** (a Guren-served `/storage/<signed>` URL). This
    is the right long-term answer for *private* files and is exactly RFC 0010's
    signed delivery route — which is why the throw message here points at it.
@@ -349,7 +372,7 @@ through the S3 API. Two options for how Guren exposes that:
    unconditional ACL is a latent bug for every non-AWS S3 target. **Chosen
    as a sibling PR**, not on this RFC's critical path (§2.2) — the R2Driver
    ships without it, and step 0 decides how urgent it is.
-2. **`R2Driver` falls back to the S3 API through `aws4fetch` when the
+2. **`R2Driver` falls back to the S3 API through its own signer when the
    binding is absent and `presign` credentials are set** — one driver
    everywhere, no `@aws-sdk` in the bundle. Rejected for v1: `ListObjectsV2`
    and `DeleteObjects` are XML in and out, so the fallback needs an XML
@@ -367,13 +390,14 @@ persistent bucket is wanted from a Bun process.
 
 | Action | Path | What |
 |---|---|---|
-| add | `packages/plugin-cloudflare/src/storage/R2Driver.ts` | Driver, `R2DriverOptions`, `R2BucketLike` + object/list shapes, `trimSlashes`, `importOptionalModule('aws4fetch')` |
+| add | `packages/plugin-cloudflare/src/storage/R2Driver.ts` | Driver, `R2DriverOptions`, `R2BucketLike` + object/list shapes, `trimSlashes` |
 | add | `packages/plugin-cloudflare/src/storage/R2Driver.test.ts` | Unit tests against an in-memory `FakeR2Bucket` (§4.1) |
 | add | `packages/plugin-cloudflare/src/storage/fake-r2-bucket.ts` | Test double implementing `R2BucketLike` with real `prefix`/`delimiter`/`cursor` semantics; also exported for app tests? — Open Question |
 | add | `packages/plugin-cloudflare/src/storage/R2Driver.types.test.ts` | `R2Bucket` (workers-types) satisfies `R2BucketLike` |
 | add | `packages/plugin-cloudflare/src/storage/r2-miniflare.test.ts` | Opt-in e2e (`GUREN_TEST_WRANGLER=1`) against a real local R2 (§4.2) |
 | edit | `packages/plugin-cloudflare/src/index.ts` | exports |
-| edit | `packages/plugin-cloudflare/package.json` | `peerDependencies: { aws4fetch: "^1" }` + `peerDependenciesMeta: { aws4fetch: { optional: true } }`; devDependency `aws4fetch` for the presign test; devDependency `miniflare` for §4.2 |
+| add | `packages/plugin-cloudflare/src/storage/sigv4.ts` (+ `sigv4.test.ts`) | WebCrypto SigV4 presigning for the one request shape `temporaryUrl()` needs (§1.2) |
+| edit | `packages/plugin-cloudflare/package.json` | devDependency `miniflare` for §4.2. **No runtime dependency is added** |
 | edit | `packages/plugin-cloudflare/README.md` | "Storage (R2)" section under API |
 | edit | `docs/en/guides/cloudflare.md`, `docs/ja/guides/cloudflare.md` | "Storage (R2)" section: binding, `wrangler.jsonc` snippet, `StorageProvider` switch, custom domain, `wrangler r2 object put` for one-off uploads |
 | edit | `docs/en/guides/storage.md`, `docs/ja/guides/storage.md` | Replace the "Cloudflare R2 via `driver: 's3'`" recipe with the binding driver for Workers; keep the S3-API recipe only if step 0 proves it works, and say what it cannot do (ACL) |
@@ -409,7 +433,7 @@ deleteDirectory) against `FakeR2Bucket`, plus the R2-specific behaviours:
 - `temporaryUrl()` without `presign` throws with the RFC 0010 hint; with
   `presign` and a fixed `datetime` produces a URL containing
   `X-Amz-Algorithm=AWS4-HMAC-SHA256`, `X-Amz-Expires=<n>`, `X-Amz-Signature`
-  (aws4fetch accepts `aws: { datetime }`, so the test is deterministic);
+  (the signer takes an injectable clock, so the test is deterministic);
   expiry > 7 days throws before signing;
 - `put({ visibility })` / `setVisibility` matching the disk → no-op,
   conflicting → throw naming the `visibility` option;
@@ -436,7 +460,7 @@ One limit: the binding proxy cannot marshal a `ReadableStream`, so
 block that bundles the driver with `Bun.build` and runs those two methods
 *inside* workerd (`modules: [{ type: 'ESModule', … }]`, since `script:`
 alone makes Miniflare walk the bundle and reject the driver's dynamic
-`import(moduleName)` for the optional aws4fetch dependency), which also
+its import graph itself), which also
 confirms `Buffer` under `nodejs_compat`.
 
 #### 4.3 Dogfooding (a real Workers app)
@@ -463,8 +487,8 @@ is already deployed on Workers + D1 and is the natural in-repo candidate:
    fails for a nonexistent bound bucket (decides §2.1's default); (c) confirm
    Miniflare's `getR2Bucket` works under `bun test` (decides §4.2's shape).
 1. `R2Driver.ts` + `FakeR2Bucket` + unit tests. Land the driver with
-   `temporaryUrl` throwing unconditionally first if the aws4fetch step slows
-   review; the throw message is the contract either way.
+   `temporaryUrl` throwing unconditionally first if the signer slows review;
+   the throw message is the contract either way.
 2. `temporaryUrl` presign path + deterministic test; optional peer dep.
 3. Type-level test against `@cloudflare/workers-types`.
 4. Miniflare e2e (opt-in).
@@ -494,7 +518,7 @@ release; step 7 is app-side work.
 
 ## Alternatives Considered
 
-- **Extend `S3Driver` with an "R2 mode" (skip ACL, presign via aws4fetch).**
+- **Extend `S3Driver` with an "R2 mode" (skip ACL, presign without the SDK).**
   Keeps one driver, but ships `@aws-sdk/client-s3` in the Worker and still
   needs a token for every operation when a zero-credential binding is sitting
   in `env`. Also leaves the plugin with nothing platform-specific to own. The
@@ -563,6 +587,6 @@ the token secrets. No deprecations.
 - (d) `cloudflare:build --with-r2 <BINDING>` if demand shows up.
 - (e) `S3DriverOptions.acl` and the `STORAGE_DISK` scaffold (§2.4) — sibling
   PRs, tracked separately.
-- (f) `R2Driver` S3-API fallback via aws4fetch (§2.4 option 2) — only if
+- (f) `R2Driver` S3-API fallback through its own signer (§2.4 option 2) — only if
   the aws-sdk dependency proves a burden for non-Workers R2 users.
 - (g) RFC 0010: attachments, signed delivery, direct upload, variants.
