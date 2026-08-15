@@ -361,6 +361,36 @@ export const DEV_ONLY_MODULES = [
 ] as const satisfies readonly DevOnlyModule[]
 
 /**
+ * A database `@guren/orm` can connect through, named after the factory an
+ * app's database config calls to declare it.
+ */
+export type DatabaseDialect = 'postgres' | 'mysql' | 'sqlite' | 'aws-data-api' | 'd1'
+
+/**
+ * The `@guren/orm` factory names an app's database config calls, and the
+ * dialect each one declares.
+ *
+ * Taken from `@guren/core`'s export allowlist rather than from the ORM's
+ * implementation files, and pinned there by a test: a list built from the
+ * implementation admits names that were never exported and misses the aliases
+ * that were. The spelling is `createMySqlDatabase`, not `createMysqlDatabase`
+ * — a build that filters on a name nobody exports detects nothing and stubs
+ * nothing, which is silent.
+ */
+export const DATABASE_FACTORIES = {
+  createPostgresDatabase: 'postgres',
+  createMySqlDatabase: 'mysql',
+  createSqliteDatabase: 'sqlite',
+  createAwsDataApiDatabase: 'aws-data-api',
+  createD1Database: 'd1',
+} as const satisfies Record<string, DatabaseDialect>
+
+/** A client library reached only by the dialect it belongs to. */
+export interface SqlClientModule extends DevOnlyModule {
+  readonly dialect: DatabaseDialect
+}
+
+/**
  * The database client libraries `@guren/orm`'s Postgres, MySQL and Aurora
  * Data API factories reach for.
  *
@@ -368,6 +398,11 @@ export const DEV_ONLY_MODULES = [
  * depends on the platform: on Workers, D1 is the only database there is, so
  * every one of these is unreachable; on Lambda and Vercel the app connects to
  * Postgres through them and stubbing them would break a working deploy.
+ *
+ * That makes the list itself the wrong granularity for a platform that hosts
+ * more than one dialect. Workers stubs all of it; Lambda and Vercel stub the
+ * entries whose `dialect` the app's config does not declare, which is what
+ * `unusedSqlClients` decides.
  *
  * A platform where they are unreachable has to stub them rather than ignore
  * them. `@guren/orm` names them in *literal* dynamic imports, which a bundler
@@ -381,12 +416,13 @@ export const DEV_ONLY_MODULES = [
  * is what a bundler checks a stub against.
  */
 export const SQL_CLIENT_MODULES = [
-  { specifier: 'postgres', kind: 'sql-driver', exportNames: [] },
-  { specifier: 'mysql2', kind: 'sql-driver', exportNames: [] },
-  { specifier: 'mysql2/promise', kind: 'sql-driver', exportNames: ['createPool'] },
+  { specifier: 'postgres', kind: 'sql-driver', dialect: 'postgres', exportNames: [] },
+  { specifier: 'mysql2', kind: 'sql-driver', dialect: 'mysql', exportNames: [] },
+  { specifier: 'mysql2/promise', kind: 'sql-driver', dialect: 'mysql', exportNames: ['createPool'] },
   {
     specifier: '@aws-sdk/client-rds-data',
     kind: 'sql-driver',
+    dialect: 'aws-data-api',
     exportNames: [
       'RDSDataClient',
       'BeginTransactionCommand',
@@ -395,9 +431,159 @@ export const SQL_CLIENT_MODULES = [
       'RollbackTransactionCommand',
     ],
   },
-] as const satisfies readonly DevOnlyModule[]
+] as const satisfies readonly SqlClientModule[]
 
 export type SqlClientSpecifier = (typeof SQL_CLIENT_MODULES)[number]['specifier']
+
+/**
+ * Where an app declares its database, in the order it is looked for.
+ *
+ * The same pair `guren doctor` checks, kept as a copy for the same reason
+ * `realpathOfNearestExisting` above is one: this module must not import
+ * beyond node builtins, and cli cannot be imported from core. If the two ever
+ * disagree, a build would stub clients for an app whose config the doctor
+ * says is fine — so a change to either belongs in both.
+ */
+export const DATABASE_CONFIG_CANDIDATES = ['config/database.ts', 'db/config.ts'] as const
+
+export interface DatabaseDialectDetection {
+  /**
+   * Every dialect the config declares, or undefined when the build could not
+   * tell — which is not the same as "none", and callers must not treat it as
+   * an empty set.
+   */
+  dialects?: readonly DatabaseDialect[]
+  /** Root-relative path of the file that was read, when one was found. */
+  source?: string
+}
+
+/**
+ * Which databases an app connects to, read off its database config.
+ *
+ * A *union*, never a single answer: an app legitimately names two factories in
+ * one file, picking between them at runtime — the Workers app in this
+ * repository declares D1 for the deployed worker and sqlite for local
+ * development, and a Lambda app can pair Postgres with sqlite the same way.
+ * Taking the first match would stub a client the app really does reach for.
+ *
+ * Matching is a scan for the factory names, not a parse: every way of being
+ * wrong about a name that *is* in the file — mentioned in a comment, imported
+ * but never called, called in a branch this deploy will not take — errs
+ * toward reporting a dialect the app might not use, and the caller stubs
+ * fewer clients as a result. The opposite error is the dangerous one, so the
+ * cheap reading is the right one. A config that reaches a factory without
+ * naming it (a re-export, an indirection through another module) reports
+ * nothing, and the caller stubs nothing.
+ */
+export function detectDatabaseDialects(root: string): DatabaseDialectDetection {
+  for (const candidate of DATABASE_CONFIG_CANDIDATES) {
+    const path = resolve(root, candidate)
+    if (!existsSync(path)) {
+      continue
+    }
+
+    let source: string
+    try {
+      source = readFileSync(path, 'utf8')
+    } catch {
+      return { source: candidate }
+    }
+
+    const dialects = new Set<DatabaseDialect>()
+    for (const [factory, dialect] of Object.entries(DATABASE_FACTORIES)) {
+      if (new RegExp(`\\b${factory}\\b`).test(source)) {
+        dialects.add(dialect)
+      }
+    }
+
+    return dialects.size > 0 ? { dialects: [...dialects], source: candidate } : { source: candidate }
+  }
+
+  return {}
+}
+
+/** Every dialect name `databaseDialects` accepts, for validation and messages. */
+export const DATABASE_DIALECTS = [...new Set(Object.values(DATABASE_FACTORIES))] as readonly DatabaseDialect[]
+
+/**
+ * Parse a comma-separated `--database` value into dialects, rejecting names
+ * that are not dialects.
+ *
+ * Rejecting matters more than it looks: the option exists to override a
+ * detection that came back empty, and an unrecognised name silently narrowing
+ * to nothing would leave the build stubbing every client — the over-stubbing
+ * failure this whole path is arranged to avoid.
+ *
+ * @param label Platform name for the error message, e.g. `'Lambda build'`.
+ */
+export function parseDatabaseDialects(value: string, label: string): readonly DatabaseDialect[] {
+  const names = value
+    .split(',')
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0)
+
+  const unknown = names.filter((name) => !DATABASE_DIALECTS.includes(name as DatabaseDialect))
+  if (names.length === 0 || unknown.length > 0) {
+    throw new Error(
+      `${label}: "${value}" does not name a database. Expected a comma-separated list of ${DATABASE_DIALECTS.join(', ')}.`,
+    )
+  }
+
+  return names as readonly DatabaseDialect[]
+}
+
+/** One client to stub, with the explanation its stub throws. */
+export interface UnusedSqlClient {
+  readonly module: SqlClientModule
+  readonly message: string
+}
+
+/**
+ * The database clients an app does not connect through, for a platform where
+ * the ones it *does* connect through are load-bearing — Lambda and Vercel,
+ * as opposed to Workers, where D1 is the only database and every client in
+ * `SQL_CLIENT_MODULES` is unreachable regardless of what the config says.
+ *
+ * Fails open: when the dialects cannot be read, this warns and returns
+ * nothing to stub. The two errors are not symmetric. Under-stubbing leaves
+ * today's behaviour — the build fails to resolve a client the app never
+ * installed, loudly, at build time. Over-stubbing produces a bundle that
+ * builds clean and then cannot reach its own database, at runtime, in
+ * production. Only the second is worth protecting against, so anything less
+ * than positive evidence means stub nothing.
+ *
+ * @param dialects Overrides detection when the caller already knows, for an
+ *   app whose config the scan cannot read.
+ * @param label Platform name for the messages, e.g. `'Lambda build'`.
+ */
+export function unusedSqlClients(input: {
+  root: string
+  label: string
+  dialects?: readonly DatabaseDialect[]
+}): readonly UnusedSqlClient[] {
+  const { root, label } = input
+  const detection = input.dialects ? { dialects: input.dialects } : detectDatabaseDialects(root)
+  const declared = detection.dialects
+
+  if (!declared) {
+    console.warn(
+      `${label}: ${detection.source ? `${detection.source} names no @guren/orm database factory` : `no database config found (looked for ${DATABASE_CONFIG_CANDIDATES.join(', ')})`}`
+        + ` — every database client stays in the module graph, and the build fails on any this app has not installed.`
+        + ` Pass "databaseDialects" to name the ones it uses.`,
+    )
+    return []
+  }
+
+  const declaredList = declared.join(', ')
+  return SQL_CLIENT_MODULES.filter((module) => !declared.includes(module.dialect)).map((module) => ({
+    module,
+    message:
+      `${label}: the "${module.specifier}" client is stubbed — this app declares ${declaredList}, not ${module.dialect}.`
+      + ` @guren/orm names every dialect's client in a dynamic import that bundlers follow even when the branch cannot be taken,`
+      + ` so an uninstalled client would otherwise fail the build.`
+      + ` If this app really does connect with ${module.dialect}, pass databaseDialects: ['${module.dialect}'] to the build.`,
+  }))
+}
 
 export type DevOnlySpecifier = (typeof DEV_ONLY_MODULES)[number]['specifier']
 
