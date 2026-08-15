@@ -112,9 +112,14 @@ export class R2Driver implements StorageDriver { /* §1.1 */ }
 `R2BucketLike` interface (`head/get/put/delete/list` and the object shapes it
 reads), the same way `S3Driver` declares its own `S3Client { send() }`
 (`S3Driver.ts:6-8`). `@cloudflare/workers-types` stays a devDependency; a
-type-level test (`R2Driver.types.test.ts`, `const _: R2BucketLike =
-{} as R2Bucket`) pins that the real `R2Bucket` satisfies it, so drift in
-workers-types shows up at typecheck rather than at runtime.
+type-level test (`R2Driver.types.test.ts`) pins that the real `R2Bucket`
+satisfies it, so drift in workers-types shows up at typecheck rather than at
+runtime. **Learned in implementation:** streams and blobs inside that
+interface must be structural too (`R2StreamLike { locked, getReader(),
+cancel() }`, `R2BlobLike`), not the global `ReadableStream`/`Blob` —
+workers-types declares its own interfaces for both, and neither direction is
+assignable to the runtime globals, so naming the globals makes the real
+`R2Bucket` fail the check while being perfectly usable at runtime.
 
 **Registration** is through `StorageManager.registerDisk()` (the extension
 point that works today, see premises), and mirrors the D1 runtime switch:
@@ -177,7 +182,7 @@ the `r2_buckets` entry in wrangler.jsonc."*
 | `files(dir)` | `list({ prefix: `${key}/`, delimiter: '/' })`, loop on `truncated`/`cursor` | Strip prefix; drop keys ending in `/` (S3 precedent, covers `.keep`-style markers only when named so — see `makeDirectory`). |
 | `directories(dir)` | same `list`, read `delimitedPrefixes` | Strip prefix and trailing `/`. |
 | `allFiles(dir)` | `list({ prefix })`, paginate | Pagination is **not optional**: `S3Driver.allFiles` reads a single page (`S3Driver.ts:364-383`), which silently caps at 1000; the R2 driver loops. |
-| `makeDirectory(path)` | `put(`${path}/.keep`, '')` | S3 precedent. |
+| `makeDirectory(path)` | `put(`${key}/`, '')` — a zero-byte object whose key ends in `/` | **Amended in implementation** from the S3 driver's `.keep` marker: a trailing-slash key is the folder convention S3 consoles use, `directories()` sees it as a delimited prefix, and the trailing-slash filter keeps it out of `files()`/`allFiles()` — a `.keep` marker would be listed as a file, which is what `S3Driver` does today. `deleteDirectory()` deletes raw listed keys (not through `key()`, which would strip the slash). |
 | `deleteDirectory(path)` | `allFiles` + `deleteMany` (chunked) | |
 | `setVisibility(path, v)` | — | No per-object ACL in R2. **No-op when `v` equals the disk visibility, throws otherwise** (§1.3). |
 | `getVisibility(path)` | `head` for existence, then return the disk visibility | Throws `File not found` on `null` (Memory precedent). |
@@ -424,10 +429,15 @@ gated behind `GUREN_TEST_WRANGLER=1` exactly like
 `wrangler-migrations.test.ts` (network on first run to fetch workerd; skipped
 in CI). This is what catches semantics the fake gets wrong (e.g. what `list`
 returns for `prefix: 'a/'` when only `a` exists, `head` on a zero-byte
-object). **To verify in step 0:** Miniflare 4 under `bun test` — if workerd
-spawning misbehaves under Bun, fall back to `wrangler dev` + a temp worker
-that mounts the driver behind `/put`, `/get`, … and drive it with `fetch`
-(the migrations test already shells out to `bunx wrangler`).
+object). **Verified in implementation:** Miniflare 5 runs under `bun test`.
+One limit: the binding proxy cannot marshal a `ReadableStream`, so
+`copy()`/`move()` (which pipe `get().body` into `put()`) throw
+`DataCloneError` through `getR2Bucket()`. The suite therefore has a second
+block that bundles the driver with `Bun.build` and runs those two methods
+*inside* workerd (`modules: [{ type: 'ESModule', … }]`, since `script:`
+alone makes Miniflare walk the bundle and reject the driver's dynamic
+`import(moduleName)` for the optional aws4fetch dependency), which also
+confirms `Buffer` under `nodejs_compat`.
 
 #### 4.3 Dogfooding (a real Workers app)
 
@@ -520,11 +530,11 @@ the token secrets. No deprecations.
    is stricter than every other driver. Alternative: warn once per disk and
    proceed. Leaning throw; the guide's example would then need
    `visibility` removed from the R2 variant.
-2. **`url()` encoding** — `S3Driver.url` and `LocalDriver.url` do not
-   percent-encode the key. Keys with spaces or `#` produce broken URLs today
-   on every driver; fixing it only in R2 would be inconsistent, fixing it
-   everywhere is a server change. Proposal: match existing drivers here, open
-   a separate issue.
+2. ~~**`url()` encoding**~~ — **Resolved in implementation (review
+   finding):** `R2Driver.url()` percent-encodes each key segment, since this
+   is the first place a Workers app is steered to a driver's `url()` for
+   public links. `S3Driver.url` / `LocalDriver.url` still do not; aligning
+   them is a server change tracked separately.
 3. **Should `FakeR2Bucket` be exported** (e.g. from
    `@guren/plugin-cloudflare/testing`) so app tests can run against R2
    semantics without Miniflare? Useful for app-level tests; adds a public
