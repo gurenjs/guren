@@ -242,11 +242,17 @@ export class LocalDriver implements StorageDriver {
   }
 
   async setVisibility(path: string, visibility: 'public' | 'private'): Promise<void> {
-    // Local driver doesn't have visibility control
-    // This is a no-op
+    // Known deviation from the `StorageDriver` contract, kept deliberately:
+    // the contract says a driver without per-object visibility reports the
+    // disk's value and throws for the other one, and that any visibility
+    // call throws for a missing file. Both would change the default
+    // behavior of a stable API, so they wait for the next major; every
+    // other driver already behaves as documented.
   }
 
   async getVisibility(path: string): Promise<'public' | 'private'> {
+    // Returns the disk value even for a path that does not exist — see the
+    // deviation note on `setVisibility`.
     return this.defaultVisibility
   }
 

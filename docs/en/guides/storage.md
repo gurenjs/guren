@@ -315,7 +315,7 @@ const url = await disk.temporaryUrl('private/document.pdf', expiration)
 
 ### Choosing a Disk per Environment
 
-Declare every disk once and pick one with an environment variable, the way `bunx guren add storage` scaffolds it. Disks resolve lazily, so a disk you never use is never constructed and its credentials are never read:
+Declare every disk once and pick one with an environment variable, the way `bunx guren add storage` scaffolds it. Drivers are built on first use, so a disk you never touch never constructs a client or opens a connection:
 
 ```ts
 const storage = createStorageManager({
@@ -328,6 +328,11 @@ const storage = createStorageManager({
 ```
 
 `STORAGE_DISK=local` in development, `STORAGE_DISK=s3` in production — no code change, and `storage.disk()` returns whichever one is selected.
+
+Two things to know about this shape:
+
+- **The config values are read eagerly**, even for a disk you never resolve — they are evaluated when you build the object. `process.env.S3_BUCKET` being unset is harmless, but a helper that *throws* on a missing variable will throw at startup for a disk the app never touches. Keep those out of the disk map, or build that disk with `storage.registerDisk('s3', () => new S3Driver({ ... }))`, whose callback really does run on first use.
+- **An unknown name is not caught at construction.** `createStorageManager({ default: 'typo' })` succeeds and only throws `Storage disk not found: typo` when a disk is first resolved — which can be inside a queued job. The scaffolded provider checks the value against its own disk map at boot for this reason; do the same if you write the config by hand.
 
 ## File Uploads
 

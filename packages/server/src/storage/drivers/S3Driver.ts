@@ -92,13 +92,17 @@ export class S3Driver implements StorageDriver {
 
 
   async put(path: string, content: Buffer | string, options?: PutOptions): Promise<string> {
+    // Before the client and the SDK import: a request this disk cannot
+    // honour should say so, not report a missing optional dependency that
+    // would not have made it succeed.
+    assertVisibilitySupported(this.acl, this.defaultVisibility, options?.visibility, 'put')
+
     const client = await this.getClient()
     const { PutObjectCommand } = await importAwsModule('@aws-sdk/client-s3') as {
       PutObjectCommand: new (input: unknown) => unknown
     }
 
     const body = typeof content === 'string' ? Buffer.from(content) : content
-    assertVisibilitySupported(this.acl, this.defaultVisibility, options?.visibility, 'put')
     const visibility = options?.visibility ?? this.defaultVisibility
 
     const command = new PutObjectCommand({
@@ -313,6 +317,15 @@ export class S3Driver implements StorageDriver {
     }
   }
 
+  /** `metadata()`, but honouring the contract's not-found error. */
+  private async metadataOrFail(path: string): Promise<FileMetadata> {
+    const metadata = await this.metadata(path)
+    if (!metadata) {
+      throw new Error(`File not found: ${path}`)
+    }
+    return metadata
+  }
+
   async files(directory: string): Promise<string[]> {
     const client = await this.getClient()
     const { ListObjectsV2Command } = await importAwsModule('@aws-sdk/client-s3') as {
@@ -395,8 +408,10 @@ export class S3Driver implements StorageDriver {
   async setVisibility(path: string, visibility: 'public' | 'private'): Promise<void> {
     assertVisibilitySupported(this.acl, this.defaultVisibility, visibility, 'setVisibility')
     if (!this.acl) {
-      // Equal to the disk's visibility (the guard above proved it), and this
-      // endpoint has no per-object ACL to write.
+      // Equal to the disk's visibility (the guard above proved it), so there
+      // is no ACL to write — but the contract still forbids reporting
+      // success for an object that is not there.
+      await this.metadataOrFail(path)
       return
     }
     const client = await this.getClient()
@@ -415,6 +430,7 @@ export class S3Driver implements StorageDriver {
 
   async getVisibility(path: string): Promise<'public' | 'private'> {
     if (!this.acl) {
+      await this.metadataOrFail(path)
       return this.defaultVisibility
     }
     const client = await this.getClient()

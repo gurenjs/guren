@@ -19,7 +19,14 @@ or `setVisibility()` throw when asked for the other value instead of silently
 dropping it — a `setVisibility(path, 'private')` that does nothing on a public
 bucket is a leak that looks like success.
 
-Separately, `guren add storage` now scaffolds
-`default: process.env.STORAGE_DISK ?? 'local'`, so an app declares its disks
-once and selects one per environment. Disks resolve lazily, so declaring a
-disk you do not use costs nothing and its credentials are never read.
+The `StorageDriver` contract now also states what the visibility methods do
+for a file that does not exist (they throw) and for a backend without
+per-object visibility (report the disk's value, refuse the other one), with
+`LocalDriver`'s long-standing deviation recorded in place — aligning it
+changes stable default behavior, so it waits for a major.
+
+Separately, `guren add storage` now scaffolds a disk map selected by
+`STORAGE_DISK`, so an app declares its disks once and picks one per
+environment. The generated provider validates the name at boot: an unknown
+one is accepted by `createStorageManager` and only fails when a disk is first
+resolved, which can be inside a queued job.

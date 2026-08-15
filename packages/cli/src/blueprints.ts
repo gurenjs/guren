@@ -513,18 +513,30 @@ export default class NotificationProvider extends ServiceProvider {
           path: 'app/Providers/StorageProvider.ts',
           contents: `import { ServiceProvider, createStorageManager } from '@guren/core'
 
+// Declared once, chosen per environment: set STORAGE_DISK in .env (or in
+// your platform's vars) to switch without touching code. Drivers are built
+// on first use, so a disk you never touch never opens a connection — but the
+// values below are read when this object is built, so keep anything that can
+// throw (a required-env helper) out of it.
+const disks = {
+  local: { driver: 'local', root: './storage/app' },
+  public: { driver: 'local', root: './storage/app/public' },
+} as const
+
+const selected = process.env.STORAGE_DISK ?? 'local'
+
 export default class StorageProvider extends ServiceProvider {
   register(): void {
-    // Disks are declared here and chosen per environment: set STORAGE_DISK
-    // in .env (or in your platform's vars) to switch without touching code.
-    // Disks resolve lazily, so declaring one you do not use costs nothing.
-    this.container.instance('storage', createStorageManager({
-      default: process.env.STORAGE_DISK ?? 'local',
-      disks: {
-        local: { driver: 'local', root: './storage/app' },
-        public: { driver: 'local', root: './storage/app/public' },
-      },
-    }))
+    // Checked here rather than left to the first upload: an unknown name is
+    // accepted at construction and only throws when a disk is resolved,
+    // which can be a queued job or a rarely-hit route in production.
+    if (!(selected in disks)) {
+      throw new Error(
+        \`STORAGE_DISK="\${selected}" is not a declared disk. Declare it in app/Providers/StorageProvider.ts or use one of: \${Object.keys(disks).join(', ')}.\`,
+      )
+    }
+
+    this.container.instance('storage', createStorageManager({ default: selected, disks }))
   }
 }
 `,

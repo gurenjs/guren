@@ -188,6 +188,18 @@ export interface StorageDriver {
 
   /**
    * Set file visibility.
+   *
+   * Contract: throws when the file does not exist, so a caller cannot take
+   * success as proof the object is there. A driver whose backend has no
+   * per-object visibility (bucket-level access, a plain filesystem) reports
+   * the disk's configured visibility and throws when asked for the other
+   * value, rather than accepting a request it cannot honour — silently
+   * doing nothing is a leak that looks like success.
+   *
+   * Known deviation: `LocalDriver` is an unconditional no-op and does not
+   * throw on either count. Aligning it changes the default behavior of a
+   * stable API, so it is deferred to the next major.
+   *
    * @param path File path
    * @param visibility Visibility setting
    */
@@ -195,6 +207,13 @@ export interface StorageDriver {
 
   /**
    * Get file visibility.
+   *
+   * Contract: throws when the file does not exist. Drivers without
+   * per-object visibility report the disk's configured value.
+   *
+   * Known deviation: `LocalDriver` returns the disk value for any path,
+   * including one that does not exist (see `setVisibility`).
+   *
    * @param path File path
    */
   getVisibility(path: string): Promise<'public' | 'private'>

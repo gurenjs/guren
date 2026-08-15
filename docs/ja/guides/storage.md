@@ -315,7 +315,7 @@ const url = await disk.temporaryUrl('private/document.pdf', expiration)
 
 ### 環境ごとのディスク切り替え
 
-ディスクはまとめて宣言しておき、環境変数で選びます（`bunx guren add storage` はこの形で生成します）。ディスクは遅延解決されるため、使わないディスクは構築されず、その資格情報も読まれません。
+ディスクはまとめて宣言しておき、環境変数で選びます（`bunx guren add storage` はこの形で生成します）。ドライバは初回利用時に構築されるため、触らないディスクはクライアントも接続も作りません。
 
 ```ts
 const storage = createStorageManager({
@@ -328,6 +328,11 @@ const storage = createStorageManager({
 ```
 
 開発では `STORAGE_DISK=local`、本番では `STORAGE_DISK=s3`。コードの変更は不要で、`storage.disk()` は選ばれた方を返します。
+
+この形について、2点注意があります。
+
+- **設定値は解決しないディスクの分も先に読まれます。** オブジェクトを組み立てた時点で評価されるためです。`process.env.S3_BUCKET` が未設定でも無害ですが、未設定時に例外を投げるヘルパーを書くと、そのディスクを一度も使わなくても起動時に落ちます。そうしたヘルパーはディスクの定義に置かず、`storage.registerDisk('s3', () => new S3Driver({ ... }))` を使ってください。こちらのコールバックは本当に初回利用時に実行されます。
+- **未知のディスク名は構築時には弾かれません。** `createStorageManager({ default: 'typo' })` は成功し、最初にディスクを解決したときに初めて `Storage disk not found: typo` を投げます。キュージョブの中かもしれません。生成される StorageProvider が起動時に名前を検証しているのはこのためです。設定を手書きする場合も同じようにしてください。
 
 ## ファイルアップロード
 
