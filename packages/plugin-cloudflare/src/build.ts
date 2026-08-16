@@ -455,7 +455,13 @@ function warnMissingBuildOwnedKeys(configPath: string, outRelative: string): voi
   }
 
   const missing: string[] = []
-  const alias = (config.alias as Record<string, string> | undefined) ?? {}
+  // A non-object `alias` is malformed rather than merely outdated, and `in`
+  // would throw it out of a function whose whole point is to warn instead of
+  // failing the build. Treat it as holding no entries and name them all.
+  const configAlias = config.alias
+  const alias = (
+    typeof configAlias === 'object' && configAlias !== null ? configAlias : {}
+  ) as Record<string, string>
   for (const [specifier, target] of Object.entries(devOnlyAliases(outRelative))) {
     if (!(specifier in alias)) {
       missing.push(`${JSON.stringify(specifier)}: ${JSON.stringify(target)} (inside "alias")`)

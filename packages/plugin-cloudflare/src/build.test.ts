@@ -384,13 +384,28 @@ describe('workers runtime configuration', () => {
     // above — or report `define` as missing when the file has it.
     expect(warning).not.toContain('process.env.NODE_ENV')
     expect(warning).not.toContain('could not parse')
-    // Only the missing entry is suggested. A suggestion carrying the entries
-    // the file already has reads as an object to paste over `alias`, which
-    // would drop the app's own `shiki` stub along with them.
-    expect(warning).not.toContain('shiki')
-    for (const key of kept) {
-      expect(warning).not.toContain(scaffolded.alias[key])
+    // Only the missing entry is suggested, so nothing the file already has —
+    // the app's own `shiki` stub included — is named. A suggestion carrying
+    // those entries reads as an object to paste over `alias`, which would
+    // drop the ones the build does not own.
+    for (const [specifier, target] of Object.entries(alias)) {
+      expect(warning).not.toContain(specifier)
+      expect(warning).not.toContain(target)
     }
+  })
+
+  test('should warn rather than throw when alias is not an object', async () => {
+    scaffoldApp(root)
+    // Malformed rather than outdated. `in` on a string throws, and this
+    // warning runs inside the scaffold's catch block, so the TypeError would
+    // escape as a build failure instead of the guidance the check exists for.
+    writeFileSync(join(root, 'wrangler.jsonc'), '{ "name": "legacy", "alias": "./stubs" }\n')
+
+    const warning = await captureWarnings(async () => {
+      await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+    })
+
+    expect(warning).toContain('bun:sqlite')
   })
 
   test('should stay silent when a commented config already has every build-owned key', async () => {
