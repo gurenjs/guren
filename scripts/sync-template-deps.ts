@@ -30,7 +30,18 @@ import {
 } from '../packages/cli/src/drizzle-pins'
 import { collectPackages, repoRoot } from './workspace-packages'
 
-const DEPENDENCY_GROUPS = ['dependencies', 'devDependencies', 'peerDependencies'] as const
+/**
+ * The groups this script rewrites a template's ranges in. Exported because
+ * `plan-create-app-bump.ts` has to predict, before `changeset version` runs,
+ * whether this script will rewrite anything — a group it read and this one did
+ * not would be a release that rewrites a range and plans no scaffolder bump.
+ *
+ * Deliberately not the four-group list in `scripts/smoke/local-packages.ts`:
+ * that one answers which packages a smoke must vendor, and a group there costs
+ * nothing extra, while a group here would rewrite a range this script does not
+ * own.
+ */
+export const DEPENDENCY_GROUPS = ['dependencies', 'devDependencies', 'peerDependencies'] as const
 
 const ORM_MANIFEST = 'packages/orm/package.json'
 
