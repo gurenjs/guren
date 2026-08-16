@@ -31,8 +31,15 @@ import { buildLambdaOutput } from '../src/build'
 // GUREN_TEST_BUNDLE=1 like the Workers bundle test's GUREN_TEST_WRANGLER.
 const enabled = process.env.GUREN_TEST_BUNDLE === '1'
 
-/** Clients a Postgres app does not install, and this probe must not have. */
-const ABSENT_CLIENTS = ['mysql2', '@aws-sdk']
+/**
+ * Packages this probe must not have installed.
+ *
+ * The clients belong to dialects a Postgres app never uses. The rest are the
+ * dev-only modules the build stubs unconditionally — reached from the probe
+ * entry below so a build that stopped stubbing them fails here rather than in
+ * a user's deploy.
+ */
+const ABSENT_PACKAGES = ['mysql2', '@aws-sdk', 'vite', '@modelcontextprotocol']
 
 function run(cmd: string[], cwd: string): { exitCode: number; output: string } {
   const result = Bun.spawnSync({ cmd, cwd, stdout: 'pipe', stderr: 'pipe' })
@@ -78,7 +85,7 @@ describe.skipIf(!enabled)('lambda:build bundles an app importing @guren/orm', ()
     // Asserted rather than assumed: if a future installer pulls the ORM's
     // optional peers in, the bundler would resolve them for real and the test
     // would pass no matter what the stubs say.
-    for (const client of ABSENT_CLIENTS) {
+    for (const client of ABSENT_PACKAGES) {
       rmSync(join(root, 'node_modules', client), { recursive: true, force: true })
       if (existsSync(join(root, 'node_modules', client))) {
         throw new Error(`bundle probe still has ${client} installed; the test would pass vacuously`)
@@ -93,10 +100,19 @@ describe.skipIf(!enabled)('lambda:build bundles an app importing @guren/orm', ()
         + '})\n',
     )
 
+    // The dev-only imports stand in for the ones Guren's own graph makes: the
+    // disabled MCP endpoint reaches `@guren/cli` and the SDK, and `Application`
+    // reaches Vite when serving locally. Naming them directly keeps the probe
+    // to two installed packages while still covering the stubs that path needs
+    // — a bundler follows a literal dynamic import either way.
     writeFileSync(
       join(root, 'src/lambda.ts'),
       "import { getDatabase } from '../config/database'\n\n"
-        + 'export const http = async () => new Response(String(typeof (await getDatabase())))\n',
+        + 'export const http = async () => new Response(String(typeof (await getDatabase())))\n\n'
+        + 'export const devOnly = async () => [\n'
+        + "  await import('vite'),\n"
+        + "  await import('@modelcontextprotocol/sdk/server/mcp.js'),\n"
+        + ']\n',
     )
   })
 
@@ -125,6 +141,18 @@ describe.skipIf(!enabled)('lambda:build bundles an app importing @guren/orm', ()
       // this half, stubbing all four would pass the test above just as well —
       // and would ship a function that cannot reach its own database.
       expect(bundled).toContain('class PostgresError')
+    },
+    120_000,
+  )
+
+  test(
+    'bundles with none of the dev-only modules installed either',
+    async () => {
+      // Unconditional, unlike the clients: no app can make the Vite dev server
+      // or the MCP endpoint's generators run on this platform. Covered here
+      // because the build succeeding is the only observable difference — the
+      // stub's own text is dropped with the branch it replaced.
+      await bundle()
     },
     120_000,
   )

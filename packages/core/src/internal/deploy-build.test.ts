@@ -524,6 +524,28 @@ describe('unusedSqlClients', () => {
     expect(warnings.join('\n')).toContain('no database config found')
   })
 
+  test('should reject an empty dialect list rather than read it as "declares nothing"', () => {
+    // An empty array is truthy, so a plain `input.dialects ?` test would take
+    // the override branch and stub *every* client — including postgres, which
+    // this app connects through. The bundle would build clean and the deployed
+    // function would throw on its first query.
+    writeConfig('export const db = createPostgresDatabase({})\n')
+
+    expect(() => unusedSqlClients({ root, label: 'Test build', dialects: [] })).toThrow(
+      /does not name a database/,
+    )
+  })
+
+  test('should reject a misspelled dialect rather than stub its client', () => {
+    // Same failure as the empty list, one letter at a time: a dialect the
+    // filter never sees is a dialect whose client it stubs.
+    writeConfig('export const db = createPostgresDatabase({})\n')
+
+    expect(() =>
+      unusedSqlClients({ root, label: 'Test build', dialects: ['postgress' as never] }),
+    ).toThrow(/does not name a database/)
+  })
+
   test('should let an explicit dialect list override the config', () => {
     writeConfig('export const db = createPostgresDatabase({})\n')
 

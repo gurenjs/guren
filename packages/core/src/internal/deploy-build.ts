@@ -506,13 +506,41 @@ export function detectDatabaseDialects(root: string): DatabaseDialectDetection {
 export const DATABASE_DIALECTS = [...new Set(Object.values(DATABASE_FACTORIES))] as readonly DatabaseDialect[]
 
 /**
- * Parse a comma-separated `--database` value into dialects, rejecting names
- * that are not dialects.
+ * Reject a dialect list that names nothing, or names something that is not a
+ * dialect.
  *
- * Rejecting matters more than it looks: the option exists to override a
- * detection that came back empty, and an unrecognised name silently narrowing
- * to nothing would leave the build stubbing every client — the over-stubbing
- * failure this whole path is arranged to avoid.
+ * Both are rejected rather than dropped because both mean the same thing to
+ * the filter downstream — a dialect it never sees is a dialect whose client it
+ * stubs. An empty list stubs *every* client, and `['postgress']` stubs the
+ * Postgres one; either way the bundle builds clean and the deployed function
+ * cannot reach its own database. That is the failure the caller reached for
+ * this option to avoid, so it fails here, at build time, with the typo in the
+ * message.
+ *
+ * Deliberately not a fail-open: the surrounding code stubs nothing when it
+ * cannot *read* an app's dialects, but this input is a caller stating them.
+ * Falling back to detection would discard the override and then stub according
+ * to the very config the caller was overriding.
+ *
+ * @param label Platform name for the error message, e.g. `'Lambda build'`.
+ */
+function assertDatabaseDialects(
+  names: readonly string[],
+  label: string,
+  quoted: string,
+): readonly DatabaseDialect[] {
+  const unknown = names.filter((name) => !DATABASE_DIALECTS.includes(name as DatabaseDialect))
+  if (names.length === 0 || unknown.length > 0) {
+    throw new Error(
+      `${label}: ${quoted} does not name a database. Expected one or more of ${DATABASE_DIALECTS.join(', ')}.`,
+    )
+  }
+
+  return names as readonly DatabaseDialect[]
+}
+
+/**
+ * Parse a comma-separated `--database` value into dialects.
  *
  * @param label Platform name for the error message, e.g. `'Lambda build'`.
  */
@@ -522,14 +550,7 @@ export function parseDatabaseDialects(value: string, label: string): readonly Da
     .map((name) => name.trim())
     .filter((name) => name.length > 0)
 
-  const unknown = names.filter((name) => !DATABASE_DIALECTS.includes(name as DatabaseDialect))
-  if (names.length === 0 || unknown.length > 0) {
-    throw new Error(
-      `${label}: "${value}" does not name a database. Expected a comma-separated list of ${DATABASE_DIALECTS.join(', ')}.`,
-    )
-  }
-
-  return names as readonly DatabaseDialect[]
+  return assertDatabaseDialects(names, label, JSON.stringify(value))
 }
 
 /** One client to stub, with the explanation its stub throws. */
@@ -562,14 +583,19 @@ export function unusedSqlClients(input: {
   dialects?: readonly DatabaseDialect[]
 }): readonly UnusedSqlClient[] {
   const { root, label } = input
-  const detection = input.dialects ? { dialects: input.dialects } : detectDatabaseDialects(root)
+  // An empty array is truthy, so this cannot be a plain `input.dialects ?`
+  // test: that reads a caller's empty list as "this app declares nothing",
+  // which stubs every client including the one it connects through.
+  const detection = input.dialects
+    ? { dialects: assertDatabaseDialects(input.dialects, label, `databaseDialects ${JSON.stringify(input.dialects)}`) }
+    : detectDatabaseDialects(root)
   const declared = detection.dialects
 
   if (!declared) {
     console.warn(
       `${label}: ${detection.source ? `${detection.source} names no @guren/orm database factory` : `no database config found (looked for ${DATABASE_CONFIG_CANDIDATES.join(', ')})`}`
         + ` — every database client stays in the module graph, and the build fails on any this app has not installed.`
-        + ` Pass "databaseDialects" to name the ones it uses.`,
+        + ` Name them with the build's "databaseDialects" option (--database on the command line).`,
     )
     return []
   }
