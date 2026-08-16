@@ -29,6 +29,7 @@ import { buildLambdaOutput } from '../src/build'
 //
 // Needs the network to install @guren/orm and postgres, so it is gated behind
 // GUREN_TEST_BUNDLE=1 like the Workers bundle test's GUREN_TEST_WRANGLER.
+// The nightly canary sets both.
 const enabled = process.env.GUREN_TEST_BUNDLE === '1'
 
 /**

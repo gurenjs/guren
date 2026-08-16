@@ -29,6 +29,7 @@ import { buildVercelOutput } from '../src/index'
 //
 // Needs the network to install @guren/orm and postgres, so it is gated behind
 // GUREN_TEST_BUNDLE=1 like the Workers bundle test's GUREN_TEST_WRANGLER.
+// The nightly canary sets both.
 //
 // This platform is also where the stub mechanism is newest: `bun build` was
 // spawned as a subprocess until this build moved to Bun's JS API, which is

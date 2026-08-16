@@ -17,8 +17,9 @@ import { DEV_ONLY_MODULES, SQL_CLIENT_MODULES } from '@guren/core/internal/deplo
 // from before it moved to D1, which masked the failure.
 //
 // Requires network on first run (bunx downloads wrangler + workerd), so it is
-// gated behind GUREN_TEST_WRANGLER=1 and skipped in CI, like
-// wrangler-migrations.test.ts.
+// gated behind GUREN_TEST_WRANGLER=1 rather than run on every PR, like
+// wrangler-migrations.test.ts. The nightly canary sets the variable, so this
+// does run — the gate it replaces was one nothing switched on at all.
 const enabled = process.env.GUREN_TEST_WRANGLER === '1'
 
 /** Installed directories that would let wrangler resolve a client for real. */
