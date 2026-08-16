@@ -53,7 +53,7 @@ let summary: Record<string, string | undefined> = {}
 try {
   writeFileSync(entrypoint, "export default { fetch: () => new Response('ok') }\n", 'utf8')
 
-  buildVercelOutput({ rootDir: appDir, outputDir, entrypoint })
+  await buildVercelOutput({ rootDir: appDir, outputDir, entrypoint })
 
   const configPath = resolve(outputDir, 'functions/index.func/.vc-config.json')
   if (!existsSync(configPath)) {

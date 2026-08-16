@@ -156,6 +156,24 @@ const database = createPostgresDatabase({
 })
 ```
 
+### Only the client you use is bundled
+
+The ORM reaches every dialect's client through a dynamic import, and bundlers
+follow those whether or not the branch can be taken — so a Postgres app would
+otherwise fail to build on `mysql2`, a database it never chose. The build reads
+which factories `config/database.ts` calls and replaces the clients for every
+other dialect with a stub that throws if it is ever reached.
+
+Only `config/database.ts` (or `db/config.ts`) is read, so an app that opens a
+second connection elsewhere should name its databases explicitly. So should
+one whose config reaches a factory without naming it — through a re-export, or
+an indirection into another module — which the build reports as not being able
+to tell, and stubs nothing:
+
+```bash
+bunx guren lambda:build --database postgres,sqlite
+```
+
 ## Runtime Detection
 
 Conditionally configure services based on the runtime:

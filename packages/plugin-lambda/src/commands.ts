@@ -1,4 +1,5 @@
 import { defineCommand } from 'citty'
+import { DATABASE_DIALECTS, parseDatabaseDialects } from '@guren/core/internal/deploy-build'
 import { buildLambdaOutput } from './build'
 
 const lambdaBuild = defineCommand({
@@ -19,12 +20,19 @@ const lambdaBuild = defineCommand({
       type: 'boolean',
       description: 'Also produce .lambda/function.zip (requires the zip binary)',
     },
+    database: {
+      type: 'string',
+      description:
+        `Databases this app connects to (comma-separated: ${DATABASE_DIALECTS.join(', ')}). `
+        + 'Defaults to what config/database.ts declares; every other dialect\'s client is stubbed out of the bundle.',
+    },
   },
   async run({ args }) {
     await buildLambdaOutput({
       rootDir: args.root || process.cwd(),
       skipAppBuild: Boolean(args['skip-app-build']),
       zip: Boolean(args.zip),
+      databaseDialects: args.database ? parseDatabaseDialects(args.database, 'Lambda build') : undefined,
     })
   },
 })

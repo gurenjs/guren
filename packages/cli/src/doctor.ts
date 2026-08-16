@@ -945,6 +945,10 @@ async function createEnvFileAutofix(_context: DoctorRuleContext, check: DoctorCh
   }
 }
 
+// Twinned with `DATABASE_CONFIG_CANDIDATES` in @guren/core's deploy-build,
+// which the deploy plugins read to find out which database an app declares.
+// A location added here has to be added there too, or a build stubs the
+// clients of an app whose config this check calls fine.
 const DATABASE_CONFIG_CANDIDATES = ['config/database.ts', 'db/config.ts']
 
 async function detectDatabaseConfig(context: DoctorRuleContext): Promise<DoctorCheck> {

@@ -12,8 +12,9 @@ import {
   resolveSsrEntryFile,
   ssrRuntimePaths,
   stageStaticAssets,
+  unusedSqlClients,
   type ClientAssetEnv,
-  type DevOnlyModule,
+  type DatabaseDialect,
   type PathLike,
 } from '@guren/core/internal/deploy-build'
 import { LAMBDA_HANDLER_EXPORTS, LAMBDA_HANDLER_MODULE } from './handlers'
@@ -39,6 +40,13 @@ export interface BuildLambdaOutputOptions {
   skipAppBuild?: boolean
   /** Also produce `<outputDir>/function.zip` (requires the `zip` binary). */
   zip?: boolean
+  /**
+   * Databases this app connects to, overriding what is read from
+   * `config/database.ts`. Every other dialect's client is stubbed out of the
+   * bundle. Pass this when the config reaches a factory without naming it and
+   * the build reports that it could not tell.
+   */
+  databaseDialects?: readonly DatabaseDialect[]
 }
 
 const MCP_UNAVAILABLE = 'The MCP endpoint is unavailable on AWS Lambda — it generates files on disk.'
@@ -46,11 +54,12 @@ const MCP_UNAVAILABLE = 'The MCP endpoint is unavailable on AWS Lambda — it ge
 /**
  * Why the dev-only modules in `DEV_ONLY_MODULES` cannot run here, worded for
  * this platform: each names the Lambda-appropriate replacement.
- */
-/**
- * Keyed on the kinds this platform actually stubs, not on every kind that
- * exists: Lambda connects to Postgres and the Data API, so the SQL clients
- * are load-bearing here and never reach `renderDevOnlyStub`.
+ *
+ * Keyed on the kinds this platform stubs unconditionally, not on every kind
+ * that exists. The SQL clients are load-bearing on Lambda — the app connects
+ * to Postgres or the Data API through them — so which of those are dead
+ * weight is decided per app, not here, and their messages come from
+ * `unusedSqlClients`.
  */
 const UNAVAILABLE_ON_LAMBDA: Record<(typeof DEV_ONLY_MODULES)[number]['kind'], string> = {
   sqlite: 'bun:sqlite is unavailable on AWS Lambda — use createAwsDataApiDatabase() or createPostgresDatabase().',
@@ -64,6 +73,9 @@ const UNAVAILABLE_ON_LAMBDA: Record<(typeof DEV_ONLY_MODULES)[number]['kind'], s
  * the bundle top level, so an external module reached this way (the MCP SDK)
  * would fail at import time on Lambda even though no code path ever runs it.
  * Stubbing also keeps megabytes of dev tooling out of the bundle.
+ *
+ * Unconditional, unlike the database clients: nothing an app can declare makes
+ * the Vite dev server or the MCP endpoint's generators run on Lambda.
  */
 const DEV_ONLY_STUBS: Record<string, string> = Object.fromEntries(
   DEV_ONLY_MODULES.map((module) => [
@@ -71,6 +83,28 @@ const DEV_ONLY_STUBS: Record<string, string> = Object.fromEntries(
     renderDevOnlyStub(module, UNAVAILABLE_ON_LAMBDA[module.kind]),
   ]),
 )
+
+/**
+ * The dev-only stubs plus one per database client this app does not connect
+ * through. Unlike the dev-only set this depends on the app, so it is built
+ * per build rather than at module scope.
+ *
+ * A stub here also *overrides* `external`, verified against Bun 1.3.14: the
+ * bundler consults plugins before it consults the external list, so stubbing
+ * `@aws-sdk/client-rds-data` for a Postgres app really does replace it rather
+ * than leaving `external: ['@aws-sdk/*']` to keep drizzle's hoisted top-level
+ * import of a package the runtime may not provide.
+ */
+function stubsFor(root: string, dialects: readonly DatabaseDialect[] | undefined): Record<string, string> {
+  const unused = unusedSqlClients({ root, label: 'Lambda build', dialects })
+
+  return {
+    ...DEV_ONLY_STUBS,
+    ...Object.fromEntries(
+      unused.map(({ module, message }) => [module.specifier, renderDevOnlyStub(module, message)]),
+    ),
+  }
+}
 
 /**
  * Fallback for an MCP SDK subpath `DEV_ONLY_MODULES` does not name. It cannot
@@ -85,14 +119,18 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-// Derived from the shared list so it stays the only enumeration of stubbed
-// specifiers — a hand-maintained regex could silently fall out of sync.
-const STUB_FILTER = new RegExp(
-  `^(?:${[
-    ...DEV_ONLY_MODULES.map((module) => escapeRegExp(module.specifier)),
-    `${escapeRegExp(MCP_SDK_SUBPATH_PREFIX)}.+`,
-  ].join('|')})$`,
-)
+// Derived from the stubs actually rendered so it stays the only enumeration
+// of stubbed specifiers — a hand-maintained regex could silently fall out of
+// sync, and a client that is filtered but has no stub loads as an empty
+// module instead of failing.
+function stubFilter(stubs: Record<string, string>): RegExp {
+  return new RegExp(
+    `^(?:${[
+      ...Object.keys(stubs).map(escapeRegExp),
+      `${escapeRegExp(MCP_SDK_SUBPATH_PREFIX)}.+`,
+    ].join('|')})$`,
+  )
+}
 
 /**
  * Assemble a deployable AWS Lambda directory (`.lambda/`) from a built Guren
@@ -139,7 +177,7 @@ export async function buildLambdaOutput(options: BuildLambdaOutputOptions = {}):
   const wrapperPath = resolve(out, `${LAMBDA_HANDLER_MODULE}.ts`)
   writeFileSync(wrapperPath, renderHandlerModule({ out, entrypoint, env }))
 
-  await bundleHandler(wrapperPath, funcDir)
+  await bundleHandler(wrapperPath, funcDir, stubsFor(root, options.databaseDialects))
 
   // Lambda's Node.js runtime treats `.js` as CommonJS unless the package is
   // marked as a module; the bundle and the SSR chunks are both ESM.
@@ -230,9 +268,20 @@ function renderHandlerModule(input: {
   return lines.join('\n')
 }
 
-async function bundleHandler(handlerEntry: string, funcDir: string): Promise<void> {
+async function bundleHandler(
+  handlerEntry: string,
+  funcDir: string,
+  stubs: Record<string, string>,
+): Promise<void> {
+  const filter = stubFilter(stubs)
+
   const result = await Bun.build({
     entrypoints: [handlerEntry],
+    // `Bun.build` rejects with a bare "Bundle failed" AggregateError by
+    // default (Bun >= 1.2), which discards the one line that matters — the
+    // module it could not resolve. Opting out of that is what makes the
+    // `result.logs` report below reachable at all.
+    throw: false,
     outdir: funcDir,
     target: 'node',
     // `identifiers: false`: class names are runtime identity here.
@@ -261,14 +310,14 @@ async function bundleHandler(handlerEntry: string, funcDir: string): Promise<voi
     external: ['@aws-sdk/*'],
     plugins: [
       {
-        name: 'guren-lambda-dev-stubs',
+        name: 'guren-lambda-stubs',
         setup(build) {
-          build.onResolve({ filter: STUB_FILTER }, (args) => ({
+          build.onResolve({ filter }, (args) => ({
             path: args.path,
             namespace: 'guren-lambda-stub',
           }))
           build.onLoad({ filter: /.*/, namespace: 'guren-lambda-stub' }, (args) => ({
-            contents: DEV_ONLY_STUBS[args.path] ?? unlistedMcpStub,
+            contents: stubs[args.path] ?? unlistedMcpStub,
             loader: 'js',
           }))
         },

@@ -123,7 +123,7 @@ function vercelBuildTemplate(): string {
  */
 import { buildVercelOutput } from '${VERCEL_PLUGIN_PACKAGE}'
 
-buildVercelOutput({
+await buildVercelOutput({
   rootDir: new URL('..', import.meta.url),
   entrypoint: new URL('../src/vercel.ts', import.meta.url),
 })

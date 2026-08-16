@@ -3,11 +3,16 @@ import { basename, extname, resolve } from 'node:path'
 import { definePlugin, type ServiceProviderConstructor } from '@guren/core'
 import {
   assertOutputDirOutsideRoot,
+  DEV_ONLY_MODULES,
+  MCP_SDK_SUBPATH_PREFIX,
+  renderDevOnlyStub,
   resetOutputDir,
   resolveClientAssetEnv,
   resolvePathLike,
   resolveSsrEntryFile,
   ssrRuntimePaths,
+  unusedSqlClients,
+  type DatabaseDialect,
   type PathLike,
 } from '@guren/core/internal/deploy-build'
 
@@ -31,6 +36,13 @@ export interface BuildVercelOutputOptions {
   docsDir?: PathLike
   ssrDir?: PathLike
   migrationsDir?: PathLike
+  /**
+   * Databases this app connects to, overriding what is read from
+   * `config/database.ts`. Every other dialect's client is stubbed out of the
+   * bundle. Pass this when the config reaches a factory without naming it and
+   * the build reports that it could not tell.
+   */
+  databaseDialects?: readonly DatabaseDialect[]
 }
 
 /**
@@ -65,7 +77,7 @@ export async function createVercelHandler(app: VercelAppLike): Promise<VercelHan
   }
 }
 
-export function buildVercelOutput(options: BuildVercelOutputOptions = {}): void {
+export async function buildVercelOutput(options: BuildVercelOutputOptions = {}): Promise<void> {
   const root = resolvePathLike(options.rootDir ?? new URL('..', import.meta.url))
   const out = resolvePathLike(options.outputDir ?? resolve(root, '.vercel/output'))
   const funcDir = resolve(out, 'functions/index.func')
@@ -136,40 +148,7 @@ export function buildVercelOutput(options: BuildVercelOutputOptions = {}): void 
     ),
   )
 
-  const result = Bun.spawnSync({
-    // `bun build` inlines `process.env.NODE_ENV` at bundle time (defaulting to
-    // "development"), so pin it to "production" for the deployed function.
-    //
-    // Whitespace and syntax only — never plain `--minify`, which also mangles
-    // identifiers. Guren keys durable records on class names: the queue
-    // registry stores each job's wire name (its class name unless it declares a
-    // jobName) in every queued message, and notifications persist
-    // `constructor.name` as their `type`. Mangled, a job dispatched by one
-    // deploy resolves to nothing after the next.
-    //
-    // Not `--keep-names`: as of Bun 1.3.14 it is accepted and silently leaves
-    // class names mangled, so it cannot replace this.
-    cmd: [
-      'bun',
-      'build',
-      entrypoint,
-      '--outdir',
-      funcDir,
-      '--target',
-      'bun',
-      '--minify-whitespace',
-      '--minify-syntax',
-      '--define',
-      'process.env.NODE_ENV="production"',
-    ],
-    cwd: root,
-    stdout: 'inherit',
-    stderr: 'inherit',
-  })
-
-  if (result.exitCode !== 0) {
-    throw new Error('bun build failed')
-  }
+  await bundleFunction({ entrypoint, funcDir, root, dialects: options.databaseDialects })
 
   if (existsSync(ssrDir)) {
     cpSync(ssrDir, resolve(funcDir, '.guren/ssr'), { recursive: true })
@@ -186,6 +165,136 @@ export function buildVercelOutput(options: BuildVercelOutputOptions = {}): void 
   if (existsSync(publicDir)) {
     cpSync(publicDir, resolve(out, 'static'), { recursive: true })
   }
+}
+
+const MCP_UNAVAILABLE =
+  'The MCP endpoint is unavailable on Vercel — it generates files on disk, and the function filesystem is read-only.'
+
+/**
+ * Why each dev-only module cannot run here, or `null` for one that can and is
+ * therefore left alone.
+ *
+ * `sqlite` is the `null`, and it is written as an entry rather than filtered
+ * out somewhere else so the decision sits where the reason does: the function
+ * runs on Vercel's Bun runtime, so `bun:sqlite` is a working database here —
+ * unlike on Workers and Lambda, whose tables name a replacement for it.
+ * Stubbing it would break an app that ships a read-only sqlite file beside
+ * its function.
+ *
+ * Keyed on every kind `DEV_ONLY_MODULES` contains, so a kind added there is a
+ * compile error here rather than a module that silently stubs to `undefined`.
+ */
+const UNAVAILABLE_ON_VERCEL: Record<(typeof DEV_ONLY_MODULES)[number]['kind'], string | null> = {
+  sqlite: null,
+  vite: 'The Vite dev server is unavailable on Vercel — assets are served from the static output directory.',
+  mcp: MCP_UNAVAILABLE,
+}
+
+/**
+ * Modules replaced with throwing stubs, in the order they are matched.
+ *
+ * Two separate reasons, both of them the same defect shape — a *literal*
+ * dynamic import of a package the app never installed, which a bundler
+ * follows whether or not the branch can be taken:
+ *
+ * - The dev-only ones. A scaffolded app could not be bundled for Vercel at
+ *   all: the disabled MCP endpoint's `import("@guren/cli")` resolves, and the
+ *   CLI's own `import("@guren/openapi")` behind it does not. Lambda never saw
+ *   this because it has stubbed these since it shipped.
+ * - The database clients for dialects the app does not use, decided per app
+ *   rather than per platform — the ones it *does* use are load-bearing here,
+ *   unlike on Workers where D1 is the only database.
+ */
+function stubbedModules(root: string, dialects: readonly DatabaseDialect[] | undefined): Record<string, string> {
+  const devOnly = DEV_ONLY_MODULES.flatMap((module) => {
+    const message = UNAVAILABLE_ON_VERCEL[module.kind]
+    return message === null ? [] : [[module.specifier, renderDevOnlyStub(module, message)]]
+  })
+
+  const unused = unusedSqlClients({ root, label: LABEL, dialects }).map(({ module, message }) => [
+    module.specifier,
+    renderDevOnlyStub(module, message),
+  ])
+
+  return Object.fromEntries([...devOnly, ...unused])
+}
+
+/**
+ * Fallback for an MCP SDK subpath `DEV_ONLY_MODULES` does not name. It cannot
+ * know which names the importer destructures, so it throws on evaluation
+ * rather than resolving to an empty module: a subpath reached from app code
+ * (not Guren's disabled MCP endpoint) must fail loudly at build or cold start,
+ * never silently hand back missing exports.
+ */
+const unlistedMcpStub = `throw new Error(${JSON.stringify(MCP_UNAVAILABLE)})\n`
+
+/**
+ * Bundle the function with Bun's JS API rather than by spawning `bun build`.
+ *
+ * The CLI has no way to replace a module — no alias flag, no plugin flag — and
+ * this build needs one, which is why this platform had no stub mechanism at
+ * all while the other two did. The API takes plugins.
+ */
+async function bundleFunction(input: {
+  entrypoint: string
+  funcDir: string
+  root: string
+  dialects: readonly DatabaseDialect[] | undefined
+}): Promise<void> {
+  const stubs = stubbedModules(input.root, input.dialects)
+  // Derived from the stubs actually rendered so it stays the only enumeration
+  // of stubbed specifiers — a hand-maintained regex could silently fall out of
+  // sync, and a specifier that is filtered but has no stub would load as an
+  // empty module instead of failing.
+  const filter = new RegExp(
+    `^(?:${[...Object.keys(stubs).map(escapeRegExp), `${escapeRegExp(MCP_SDK_SUBPATH_PREFIX)}.+`].join('|')})$`,
+  )
+
+  const result = await Bun.build({
+    entrypoints: [input.entrypoint],
+    // `Bun.build` rejects with a bare "Bundle failed" AggregateError by
+    // default (Bun >= 1.2), which discards the one line that matters — the
+    // module it could not resolve. Opting out of that is what makes the
+    // `result.logs` report below reachable at all.
+    throw: false,
+    outdir: input.funcDir,
+    target: 'bun',
+    // Whitespace and syntax only — never plain `minify: true`, which also
+    // mangles identifiers. Guren keys durable records on class names: the
+    // queue registry stores each job's wire name (its class name unless it
+    // declares a jobName) in every queued message, and notifications persist
+    // `constructor.name` as their `type`. Mangled, a job dispatched by one
+    // deploy resolves to nothing after the next.
+    //
+    // Not `keepNames`: as of Bun 1.3.14 it is accepted and silently leaves
+    // class names mangled, so it cannot replace this.
+    minify: { whitespace: true, syntax: true, identifiers: false },
+    define: {
+      // `bun build` inlines `process.env.NODE_ENV` at bundle time (defaulting
+      // to "development"), so pin it to "production" for the deployed function.
+      'process.env.NODE_ENV': '"production"',
+    },
+    plugins: [
+      {
+        name: 'guren-vercel-stubs',
+        setup(build) {
+          build.onResolve({ filter }, (args) => ({ path: args.path, namespace: 'guren-vercel-stub' }))
+          build.onLoad({ filter: /.*/, namespace: 'guren-vercel-stub' }, (args) => ({
+            contents: stubs[args.path] ?? unlistedMcpStub,
+            loader: 'js',
+          }))
+        },
+      },
+    ],
+  })
+
+  if (!result.success) {
+    throw new Error(`${LABEL}: bun build failed.\n${result.logs.map((log) => String(log)).join('\n')}`)
+  }
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function buildVercelEnvironment(publicDir: string, ssrDir: string): Record<string, string> {
