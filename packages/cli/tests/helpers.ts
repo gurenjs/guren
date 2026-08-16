@@ -12,6 +12,14 @@ const repoRoot = resolve(import.meta.dir, '../../..')
 export const CLI_BIN_PATH = join(repoRoot, 'packages/cli/src/bin.ts')
 
 /**
+ * The *built* CLI entry, for assertions about how the published package
+ * behaves rather than how the sources do. `CLI_BIN_PATH` runs from `src/`,
+ * where anything resolved relative to `import.meta.url` lands somewhere else
+ * than it does in `dist/`.
+ */
+export const CLI_DIST_BIN = join(repoRoot, 'packages/cli/dist/bin.js')
+
+/**
  * The built artifact this package's tests reach `@guren/server` through.
  * `@guren/core` resolves to source, but its `export * from '@guren/server'`
  * follows the workspace symlink to server's `exports`, which point at
