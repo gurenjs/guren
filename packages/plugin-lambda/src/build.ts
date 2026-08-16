@@ -47,7 +47,12 @@ const MCP_UNAVAILABLE = 'The MCP endpoint is unavailable on AWS Lambda — it ge
  * Why the dev-only modules in `DEV_ONLY_MODULES` cannot run here, worded for
  * this platform: each names the Lambda-appropriate replacement.
  */
-const UNAVAILABLE_ON_LAMBDA: Record<DevOnlyModule['kind'], string> = {
+/**
+ * Keyed on the kinds this platform actually stubs, not on every kind that
+ * exists: Lambda connects to Postgres and the Data API, so the SQL clients
+ * are load-bearing here and never reach `renderDevOnlyStub`.
+ */
+const UNAVAILABLE_ON_LAMBDA: Record<(typeof DEV_ONLY_MODULES)[number]['kind'], string> = {
   sqlite: 'bun:sqlite is unavailable on AWS Lambda — use createAwsDataApiDatabase() or createPostgresDatabase().',
   vite: 'The Vite dev server is unavailable on AWS Lambda — serve assets from S3/CloudFront.',
   mcp: MCP_UNAVAILABLE,

@@ -3,6 +3,7 @@ import { relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
   DEV_ONLY_MODULES,
+  SQL_CLIENT_MODULES,
   importSpecifier,
   renderDevOnlyStub,
   assertOutputDirOutsideRoot,
@@ -14,6 +15,7 @@ import {
   type ClientAssetEnv,
   type DevOnlyModule,
   type DevOnlySpecifier,
+  type SqlClientSpecifier,
   type PathLike,
 } from '@guren/core/internal/deploy-build'
 
@@ -96,10 +98,20 @@ const MCP_UNAVAILABLE = 'The MCP endpoint is unavailable on Cloudflare Workers �
  * Why the dev-only modules in `DEV_ONLY_MODULES` cannot run here, worded for
  * this platform: each names the Workers-appropriate replacement.
  */
-const UNAVAILABLE_ON_WORKERS: Record<DevOnlyModule['kind'], string> = {
+/**
+ * Both lists: on Workers the SQL clients are as unreachable as the dev-only
+ * modules, because D1 is the only database the platform has.
+ */
+const STUBBED_MODULES = [...DEV_ONLY_MODULES, ...SQL_CLIENT_MODULES]
+
+const UNAVAILABLE_ON_WORKERS: Record<(typeof STUBBED_MODULES)[number]['kind'], string> = {
   sqlite: 'bun:sqlite is unavailable on Cloudflare Workers — use createD1Database().',
   vite: 'The Vite dev server is unavailable on Cloudflare Workers — assets are served by Workers Static Assets.',
   mcp: MCP_UNAVAILABLE,
+  'sql-driver':
+    'This database client is unavailable on Cloudflare Workers — use createD1Database(). '
+    + 'It is stubbed because @guren/orm names it in a dynamic import that bundlers follow '
+    + 'even when the branch cannot be taken.',
 }
 
 /**
@@ -113,16 +125,20 @@ const UNAVAILABLE_ON_WORKERS: Record<DevOnlyModule['kind'], string> = {
  * compile error here until it gets a filename — the drift a derived name would
  * have prevented, caught by the type system instead.
  */
-const STUB_FILES: Record<DevOnlySpecifier, string> = {
+const STUB_FILES: Record<DevOnlySpecifier | SqlClientSpecifier, string> = {
   'bun:sqlite': 'stub-bun-sqlite.js',
   vite: 'stub-vite.js',
   '@guren/cli': 'stub-guren-cli.js',
   '@modelcontextprotocol/sdk/server/mcp.js': 'stub-mcp-server.js',
   '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js': 'stub-mcp-transport.js',
+  postgres: 'stub-postgres.js',
+  mysql2: 'stub-mysql2.js',
+  'mysql2/promise': 'stub-mysql2-promise.js',
+  '@aws-sdk/client-rds-data': 'stub-rds-data.js',
 }
 
 function writeDevOnlyStubs(out: string): void {
-  for (const module of DEV_ONLY_MODULES) {
+  for (const module of STUBBED_MODULES) {
     writeFileSync(
       resolve(out, STUB_FILES[module.specifier]),
       renderDevOnlyStub(module, UNAVAILABLE_ON_WORKERS[module.kind]),
@@ -138,7 +154,7 @@ function writeDevOnlyStubs(out: string): void {
  */
 function devOnlyAliases(outRelative: string): Record<string, string> {
   return Object.fromEntries(
-    DEV_ONLY_MODULES.map((module) => [
+    STUBBED_MODULES.map((module) => [
       module.specifier,
       `./${outRelative}/${STUB_FILES[module.specifier]}`,
     ]),
