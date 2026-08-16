@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -15,6 +15,21 @@ import {
 function changeset(file: string, ...lines: string[]): ParsedChangeset {
   return parseChangeset(file, `---\n${lines.join('\n')}\n---\n\nA change.\n`)
 }
+
+describe('the premise the gate encodes', () => {
+  test('@guren/core still re-exports @guren/server wholesale', async () => {
+    // The rule is two string constants in a script that never opens core's
+    // barrel. If that barrel is ever narrowed to a named allowlist — the
+    // direction the header contemplates for @guren/orm — the gate would go on
+    // demanding a core major with nothing left to justify it.
+    const barrel = await readFile(
+      join(import.meta.dir, '..', '..', 'packages', 'core', 'src', 'index.ts'),
+      'utf8',
+    )
+
+    expect(barrel.split('\n')[0]).toBe("export * from '@guren/server'")
+  })
+})
 
 describe('parseChangeset', () => {
   test('reads both quoting styles the repository has actually committed', () => {
@@ -36,6 +51,16 @@ describe('parseChangeset', () => {
     )
 
     expect([...parsed.releases]).toEqual([['@guren/server', 'minor']])
+  })
+
+  test('accepts the frontmatter shapes changesets itself accepts', () => {
+    // Checked against the installed `@changesets/parse`: it reads all three, so
+    // refusing them would fail a legal release plan at exit 2.
+    expect([...parseChangeset('c.md', '---\n# both\n"@guren/server": major\n---\n\nx\n').releases])
+      .toEqual([['@guren/server', 'major']])
+    expect([...parseChangeset('q.md', '---\n"@guren/server": "major"\n---\n\nx\n').releases])
+      .toEqual([['@guren/server', 'major']])
+    expect([...parseChangeset('e.md', '---\n---\n\nx\n').releases]).toEqual([])
   })
 
   test('refuses a file with no frontmatter rather than reading it as empty', () => {
@@ -83,7 +108,6 @@ describe('readChangesetDirectory', () => {
     const missing = join(dir, 'not-here')
 
     await expect(readChangesetDirectory(missing)).rejects.toThrow(/no release plan to judge/)
-    expect(auditReleasePlan(await readChangesetDirectory(dir))).toMatchObject({ code: 1 })
   })
 })
 

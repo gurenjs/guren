@@ -44,10 +44,13 @@
  *
  * ## What it deliberately does not do
  *
- * There is no escape hatch. A server major confined to a subpath core does not
- * re-export (`@guren/server/lambda`, `/mcp`, `/vite` — the root barrel is a
- * named re-export list that does not reach them) would not strictly need a core
- * major, and this asks for one anyway. That is the cheaper mistake:
+ * There is no escape hatch. Core mirrors most of server and the exceptions are
+ * narrow: `index.ts`, `runtime.ts` and `vite.ts` are wholesale `export *` from
+ * their server counterparts, `lambda.ts` and `redis.ts` are named allowlists,
+ * and `@guren/server/mcp` has no core subpath at all. So a server major that
+ * genuinely cannot reach core has to be confined to `/mcp`, or to names outside
+ * those two allowlists — and this asks for a core major even then. That is the
+ * cheaper mistake:
  * over-bumping core costs one deliberate round of range and compatibility
  * revision, during a server-major release everyone is already watching, whereas
  * under-bumping ships a silent break to `^`-pinned apps. An opt-out would have
@@ -87,8 +90,12 @@ export interface AuditResult {
   messages: string[]
 }
 
-const FRONTMATTER = /^﻿?\s*---\r?\n([\s\S]*?)\r?\n---/
-const RELEASE_LINE = /^\s*(?:"([^"]*)"|'([^']*)'|([^:\s]+))\s*:\s*([A-Za-z]+)\s*$/
+// Deliberately as permissive as the frontmatter `@changesets/parse` accepts,
+// which is a real YAML parser: an empty block, `#` comments, and a quoted bump
+// are all legal changesets this gate must not refuse. Anything it still cannot
+// read is reported (exit 2) rather than skipped.
+const FRONTMATTER = /^﻿?\s*---\r?\n((?:[\s\S]*?\r?\n)?)---/
+const RELEASE_LINE = /^\s*(?:"([^"]*)"|'([^']*)'|([^:\s]+))\s*:\s*(\S+)\s*$/
 
 export class ChangesetParseError extends Error {}
 
@@ -108,15 +115,16 @@ export function parseChangeset(file: string, contents: string): ParsedChangeset 
 
   const releases = new Map<string, Bump>()
   for (const line of frontmatter[1].split(/\r?\n/)) {
-    if (line.trim() === '') continue
+    const trimmed = line.trim()
+    if (trimmed === '' || trimmed.startsWith('#')) continue
     const release = RELEASE_LINE.exec(line)
     if (!release) {
       throw new ChangesetParseError(
         `${file}: frontmatter line ${JSON.stringify(line)} is not a \`"package": bump\` entry.`,
       )
     }
-    const name = release[1] ?? release[2] ?? release[3] ?? ''
-    const bump = release[4].toLowerCase()
+    const name = release[1] ?? release[2] ?? release[3]
+    const bump = release[4].replace(/^["']|["']$/g, '').toLowerCase()
     if (!BUMPS.has(bump)) {
       throw new ChangesetParseError(
         `${file}: ${name} declares an unknown bump ${JSON.stringify(release[4])}.`,
@@ -154,25 +162,24 @@ export function auditReleasePlan(changesets: ParsedChangeset[]): AuditResult {
 
   // The loudest core bump in the plan, not the first one read: two changesets
   // may bump core, and naming `patch` while a `minor` sits beside it would
-  // describe a release that is not the one being refused.
-  const ORDER: readonly Bump[] = ['none', 'patch', 'minor', 'major']
-  const declared = changesets
-    .map((c) => c.releases.get(CORE))
-    .filter((bump): bump is Bump => bump !== undefined)
-    .sort((a, b) => ORDER.indexOf(b) - ORDER.indexOf(a))[0]
+  // describe a release that is not the one being refused. `major` is absent
+  // from the order because the early return above already took it.
+  const LOUDEST_FIRST = ['minor', 'patch', 'none'] as const
+  const declared = LOUDEST_FIRST.find((bump) =>
+    changesets.some((c) => c.releases.get(CORE) === bump),
+  )
+  const coreState =
+    declared === undefined
+      ? 'not bumped at all'
+      : declared === 'none'
+        ? 'explicitly held at `none`'
+        : `only bumped \`${declared}\``
 
   return {
     code: 1,
     messages: [
-      `core semver audit failed: this release majors ${SERVER} (${serverMajors
-        .map((c) => c.file)
-        .join(', ')}) but ${CORE} is ${
-        declared === undefined
-          ? 'not bumped at all'
-          : declared === 'none'
-            ? 'explicitly held at `none`'
-            : `only bumped \`${declared}\``
-      }.`,
+      `core semver audit failed: this release majors ${SERVER} ` +
+        `(${serverMajors.map((c) => c.file).join(', ')}) but ${CORE} is ${coreState}.`,
       `${CORE} re-exports server's entire root surface (\`export * from '@guren/server'\` at ` +
         'packages/core/src/index.ts:1), so a server removal is a core removal. Server 2.0.0 ' +
         'shipped through core as 1.5.0 exactly this way, breaking every app on `^1.4.0`.',
