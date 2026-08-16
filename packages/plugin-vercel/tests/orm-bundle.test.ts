@@ -35,8 +35,15 @@ import { buildVercelOutput } from '../src/index'
 // the only one of the two that takes plugins.
 const enabled = process.env.GUREN_TEST_BUNDLE === '1'
 
-/** Clients a Postgres app does not install, and this probe must not have. */
-const ABSENT_CLIENTS = ['mysql2', '@aws-sdk']
+/**
+ * Packages this probe must not have installed.
+ *
+ * The clients belong to dialects a Postgres app never uses. The rest are the
+ * dev-only modules this build started stubbing when it moved to Bun's JS API
+ * — the reason a scaffolded app could not be bundled for Vercel at all, and
+ * the half of the change most likely to be simplified back out.
+ */
+const ABSENT_PACKAGES = ['mysql2', '@aws-sdk', 'vite', '@modelcontextprotocol']
 
 function run(cmd: string[], cwd: string): { exitCode: number; output: string } {
   const result = Bun.spawnSync({ cmd, cwd, stdout: 'pipe', stderr: 'pipe' })
@@ -82,7 +89,7 @@ describe.skipIf(!enabled)('vercel:build bundles an app importing @guren/orm', ()
     // Asserted rather than assumed: if a future installer pulls the ORM's
     // optional peers in, the bundler would resolve them for real and the test
     // would pass no matter what the stubs say.
-    for (const client of ABSENT_CLIENTS) {
+    for (const client of ABSENT_PACKAGES) {
       rmSync(join(root, 'node_modules', client), { recursive: true, force: true })
       if (existsSync(join(root, 'node_modules', client))) {
         throw new Error(`bundle probe still has ${client} installed; the test would pass vacuously`)
@@ -97,11 +104,18 @@ describe.skipIf(!enabled)('vercel:build bundles an app importing @guren/orm', ()
         + '})\n',
     )
 
+    // The dev-only imports stand in for the ones Guren's own graph makes: the
+    // disabled MCP endpoint reaches `@guren/cli` and the SDK, and `Application`
+    // reaches Vite when serving locally. Naming them directly keeps the probe
+    // to two installed packages while still covering the stubs that path needs
+    // — a bundler follows a literal dynamic import either way.
     writeFileSync(
       join(root, 'src/vercel.ts'),
       "import { getDatabase } from '../config/database'\n\n"
         + 'export default {\n'
         + '  async fetch(): Promise<Response> {\n'
+        + "    await import('vite')\n"
+        + "    await import('@modelcontextprotocol/sdk/server/mcp.js')\n"
         + '    return new Response(String(typeof (await getDatabase())))\n'
         + '  },\n'
         + '}\n',
@@ -132,6 +146,19 @@ describe.skipIf(!enabled)('vercel:build bundles an app importing @guren/orm', ()
       // this half, stubbing all four would pass the test above just as well —
       // and would ship a function that cannot reach its own database.
       expect(bundled).toContain('class PostgresError')
+    },
+    120_000,
+  )
+
+  test(
+    'bundles with none of the dev-only modules installed either',
+    async () => {
+      // The regression this guards: with these unstubbed, a scaffolded app
+      // fails on `Could not resolve "@guren/openapi"` — reached from the MCP
+      // endpoint's `import("@guren/cli")`, which resolves. Covered here
+      // because the build succeeding is the only observable difference — the
+      // stub's own text is dropped with the branch it replaced.
+      await bundle()
     },
     120_000,
   )
