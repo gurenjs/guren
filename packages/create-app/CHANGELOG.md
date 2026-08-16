@@ -1,5 +1,20 @@
 # create-guren-app
 
+## 1.8.2
+
+### Patch Changes
+
+- Ship template dependency ranges for this release
+
+  The scaffold's `@guren/*` ranges are generated from the workspace versions,
+  so a release that moves any of them has to republish the scaffolder — a
+  `changeset publish` only uploads packages whose own version moved, and
+  without this bump the updated ranges would sit in the repo and never reach
+  anyone running `create-guren-app`.
+
+  No behaviour change; the scaffolded app just resolves the versions released
+  alongside it.
+
 ## 1.8.1
 
 ### Patch Changes

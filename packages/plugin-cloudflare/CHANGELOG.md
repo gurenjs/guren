@@ -1,5 +1,64 @@
 # @guren/plugin-cloudflare
 
+## 0.3.1
+
+### Patch Changes
+
+- 116f32d: Make the wrangler config upgrade warning reach commented configs, and suggest entries rather than whole keys
+
+  `cloudflare:build` never overwrites an existing `wrangler.jsonc`; instead it warns
+  about the keys it owns that the config is missing — notably the `alias` entries,
+  without which `wrangler deploy` cannot resolve the stubbed modules. Two things
+  kept that warning from doing its job.
+
+  It read the file with `JSON.parse`, so any config carrying a comment failed to
+  parse and the check bailed silently. Comments are the normal case in a `.jsonc`
+  file, which meant the warning could not fire for the apps it exists to help: they
+  saw nothing at build time and a resolution failure at deploy time instead. The
+  config is now read with a JSONC-tolerant parser (comments and trailing commas,
+  string-aware so a `//` inside a value survives), and a file that is still
+  unparseable afterwards is reported rather than skipped.
+
+  The warning also printed `alias` and `define` as complete objects holding only
+  the build-owned entries, which reads as something to paste over what the file
+  has. Apps keep their own entries under both keys, so following it could drop a
+  pinned dependency alias or a second `define`. It now names only the individual
+  entries that are missing, and says to add them alongside what is already there.
+
+- 15cfaf5: Stub the unused database clients in the Cloudflare worker bundle
+
+  A scaffolded app switched to D1 could not be deployed. `wrangler deploy`
+  failed with `Could not resolve "postgres"` — naming a database its author had
+  deliberately not chosen — and then `mysql2/promise` and
+  `@aws-sdk/client-rds-data` behind it.
+
+  `@guren/orm` names each dialect's client in a _literal_ dynamic import, and a
+  bundler follows those whether or not the branch can be taken. On Workers none
+  of them can be: D1 is the only database there is. `cloudflare:build` now
+  writes a stub for each and aliases it, the same way it already handles
+  `bun:sqlite` and the Vite dev server. Apps that worked around this by
+  installing `postgres` and `mysql2` they never used can drop them.
+
+  The clients live in their own `SQL_CLIENT_MODULES` list rather than the
+  existing dev-only one, because whether they are dead weight is a property of
+  the platform: Lambda and Vercel connect to Postgres through them, and
+  stubbing them there would break a working deploy. Each platform's message
+  table is now keyed on the modules it actually stubs, so a Workers-only entry
+  cannot silently demand a message from a plugin that never renders it.
+
+  Nothing had caught this: no gate ran wrangler over an app that imports the
+  ORM, and the one Workers app in this repository carries a leftover `postgres`
+  dependency from before it moved to D1, which masked the failure. An opt-in
+  `GUREN_TEST_WRANGLER=1` test now bundles such an app with no client
+  installed. It installs the ORM from a tarball rather than a local path,
+  because a linked install resolves out into this repository's own
+  `node_modules` — which is how the first version of the test passed with no
+  stubs at all.
+
+- Updated dependencies [b927659]
+- Updated dependencies [15cfaf5]
+  - @guren/core@1.6.2
+
 ## 0.3.0
 
 ### Minor Changes

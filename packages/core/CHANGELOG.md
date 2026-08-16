@@ -1,5 +1,89 @@
 # @guren/core
 
+## 1.6.2
+
+### Patch Changes
+
+- b927659: Stub the database clients a Lambda or Vercel app does not use
+
+  A Postgres app failed to bundle for either platform with
+  `Could not resolve "mysql2"` — naming a database its author never chose — and
+  `@aws-sdk/client-rds-data` behind it. `@guren/orm` names each dialect's client
+  in a _literal_ dynamic import, and a bundler follows those whether or not the
+  branch can be taken, so every client the app did not install broke the build.
+
+  Workers could stub all of them, because D1 is the only database there is.
+  Here the client the app _does_ use is load-bearing, so the build now reads
+  which dialects `config/database.ts` declares and stubs only the rest.
+  Detection is a union, never a single answer — an app legitimately pairs
+  Postgres with sqlite and picks at runtime — and it fails open: when no
+  factory can be read, nothing is stubbed and the build says so. Over-stubbing
+  would ship a function that builds clean and cannot reach its own database,
+  which is a far worse failure than the loud one this replaces.
+
+  Pass `databaseDialects` to `buildLambdaOutput`/`buildVercelOutput`, or
+  `guren lambda:build --database postgres,sqlite`, for an app whose config
+  reaches a factory without naming it.
+
+  `buildVercelOutput` is now **async**. It bundled by spawning `bun build`,
+  whose CLI has no way to replace a module — no alias flag, no plugin flag — so
+  this platform had no stub mechanism at all. It now uses Bun's JS API, which
+  takes plugins. Update `scripts/vercel-build.ts` to `await buildVercelOutput({
+... })`; the scaffold emits that from now on.
+
+  That missing mechanism was also why a scaffolded app could not be bundled for
+  Vercel at all: the disabled MCP endpoint's `import("@guren/cli")` resolves and
+  the CLI's own `import("@guren/openapi")` behind it does not. The Vercel build
+  now stubs the same dev-only modules Lambda has stubbed since it shipped —
+  Vite and the MCP endpoint — which also drops the dev tooling those dragged
+  into the function. `bun:sqlite` is deliberately **not** stubbed here: the
+  function runs on Vercel's Bun runtime, so sqlite is a working database on this
+  platform, unlike on Workers and Lambda.
+
+  Both plugins also pass `throw: false` to `Bun.build`: it rejects with a bare
+  "Bundle failed" by default, discarding the one line that matters — the module
+  it could not resolve.
+
+  An opt-in `GUREN_TEST_BUNDLE=1` test per platform bundles a Postgres app with
+  no other client installed. Each installs the ORM from a tarball rather than a
+  local path, because a linked install resolves out into this repository's own
+  `node_modules` where every client exists. The assertions are behavioural
+  rather than about the stub's text: resolution happens before dead-code
+  elimination, so the message a stub throws is not in the output either way.
+
+- 15cfaf5: Stub the unused database clients in the Cloudflare worker bundle
+
+  A scaffolded app switched to D1 could not be deployed. `wrangler deploy`
+  failed with `Could not resolve "postgres"` — naming a database its author had
+  deliberately not chosen — and then `mysql2/promise` and
+  `@aws-sdk/client-rds-data` behind it.
+
+  `@guren/orm` names each dialect's client in a _literal_ dynamic import, and a
+  bundler follows those whether or not the branch can be taken. On Workers none
+  of them can be: D1 is the only database there is. `cloudflare:build` now
+  writes a stub for each and aliases it, the same way it already handles
+  `bun:sqlite` and the Vite dev server. Apps that worked around this by
+  installing `postgres` and `mysql2` they never used can drop them.
+
+  The clients live in their own `SQL_CLIENT_MODULES` list rather than the
+  existing dev-only one, because whether they are dead weight is a property of
+  the platform: Lambda and Vercel connect to Postgres through them, and
+  stubbing them there would break a working deploy. Each platform's message
+  table is now keyed on the modules it actually stubs, so a Workers-only entry
+  cannot silently demand a message from a plugin that never renders it.
+
+  Nothing had caught this: no gate ran wrangler over an app that imports the
+  ORM, and the one Workers app in this repository carries a leftover `postgres`
+  dependency from before it moved to D1, which masked the failure. An opt-in
+  `GUREN_TEST_WRANGLER=1` test now bundles such an app with no client
+  installed. It installs the ORM from a tarball rather than a local path,
+  because a linked install resolves out into this repository's own
+  `node_modules` — which is how the first version of the test passed with no
+  stubs at all.
+
+- Updated dependencies [b927659]
+  - @guren/cli@2.6.1
+
 ## 1.6.1
 
 ### Patch Changes
