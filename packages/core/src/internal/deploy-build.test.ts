@@ -353,6 +353,24 @@ describe('renderDevOnlyStub', () => {
     })
   }
 
+  // JSON and JavaScript disagree here: JSON leaves U+2028/U+2029 raw, and
+  // JavaScript below ES2019 reads them as line terminators — so a message
+  // carrying one would end the `throw` statement it was embedded in.
+  for (const [name, separator] of [
+    ['line separator', LINE_SEPARATOR],
+    ['paragraph separator', PARAGRAPH_SEPARATOR],
+  ] as const) {
+    test(`escapes a ${name} in the thrown message`, () => {
+      const stub = renderDevOnlyStub(
+        { specifier: 'x', kind: 'sqlite', exportNames: [] },
+        `unavailable${separator}globalThis.INJECTED = true //`,
+      )
+
+      expect(stub).not.toContain(separator)
+      expect(stub).toContain(separator === LINE_SEPARATOR ? '\\u2028' : '\\u2029')
+    })
+  }
+
   test('still names every export the importer destructures', () => {
     const stub = renderDevOnlyStub(
       { specifier: 'x', kind: 'sqlite', exportNames: ['Database', 'open'] },

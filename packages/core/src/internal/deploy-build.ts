@@ -412,14 +412,26 @@ export type DevOnlySpecifier = (typeof DEV_ONLY_MODULES)[number]['specifier']
  *
  * @param message Platform-specific explanation, including the replacement API.
  */
+/**
+ * A JavaScript string literal for `value`.
+ *
+ * `JSON.stringify` alone is not one: JSON and JavaScript disagree about
+ * U+2028 and U+2029, which JSON leaves raw while JavaScript reads them as
+ * line terminators — so a message containing either ends the statement it was
+ * embedded in on any target below ES2019.
+ */
+function toJsStringLiteral(value: string): string {
+  return JSON.stringify(value).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
+}
+
 export function renderDevOnlyStub(module: DevOnlyModule, message: string): string {
-  // The message reaches the file twice, and only one of those is safe on its
-  // own: `JSON.stringify` handles the thrown string, but the leading comment
-  // would end at the first line terminator and run whatever followed as code.
-  // Callers pass literals today; the escape is here because this is where the
-  // file is constructed, not where the strings happen to come from.
+  // The message reaches the file twice and needs different escaping each
+  // time: as a string literal in the thrown error, and as text in a comment
+  // that any line terminator would end, running whatever followed as code.
+  // Callers pass literals today; the escaping is here because this is where
+  // the file is constructed, not where the strings happen to come from.
   const comment = message.replace(/[\r\n\u2028\u2029]+/g, ' ')
-  const error = `throw new Error(${JSON.stringify(message)})`
+  const error = `throw new Error(${toJsStringLiteral(message)})`
   const throwing = module.exportNames
     .map((name) => `export function ${name}() { ${error} }`)
     .join('\n')
