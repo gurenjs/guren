@@ -358,30 +358,112 @@ function scaffoldWranglerConfig(root: string, out: string, packageName: string |
 }
 
 /**
+ * `wrangler.jsonc` is JSONC by name and by habit — the scaffold writes plain
+ * JSON, but every app that has touched the file since has comments in it, and
+ * `JSON.parse` rejects the first one. Reading it with `JSON.parse` meant the
+ * upgrade warning below could not fire for the population it was written for.
+ *
+ * Only comments and trailing commas are stripped, which is the whole of what
+ * wrangler accepts beyond JSON. The scan tracks string literals rather than
+ * pattern-matching, because a config carries both hazards for real: `define`
+ * holds `"\"file:///worker.js\""`, where the `//` is inside a string and the
+ * quotes around it are escaped.
+ */
+function parseJsonc(text: string): unknown {
+  const out: string[] = []
+  let index = 0
+
+  while (index < text.length) {
+    const char = text[index]
+
+    if (char === '"') {
+      const start = index
+      index += 1
+      while (index < text.length) {
+        if (text[index] === '\\') {
+          index += 2
+          continue
+        }
+        if (text[index] === '"') {
+          index += 1
+          break
+        }
+        index += 1
+      }
+      out.push(text.slice(start, index))
+      continue
+    }
+
+    if (char === '/' && text[index + 1] === '/') {
+      while (index < text.length && text[index] !== '\n') {
+        index += 1
+      }
+      continue
+    }
+
+    if (char === '/' && text[index + 1] === '*') {
+      const end = text.indexOf('*/', index + 2)
+      index = end === -1 ? text.length : end + 2
+      continue
+    }
+
+    if (char === '}' || char === ']') {
+      // Every chunk is one character except a string literal, which is
+      // emitted whole and can never be blank or a bare comma. So the last
+      // non-blank chunk being a comma means a trailing one, not a comma
+      // inside a value.
+      let back = out.length - 1
+      while (back >= 0 && /^\s+$/.test(out[back])) {
+        back -= 1
+      }
+      if (back >= 0 && out[back] === ',') {
+        out.splice(back, 1)
+      }
+    }
+
+    out.push(char)
+    index += 1
+  }
+
+  return JSON.parse(out.join(''))
+}
+
+/**
  * The scaffold never overwrites an existing config, but `alias`, `define`,
  * and `migrations_dir` are build-owned invariants pointing into the output
  * directory — an app scaffolded before they existed deploys a worker that
  * cannot resolve `bun:sqlite` or never applies its migrations. Name exactly
  * what is missing rather than failing the build.
+ *
+ * Individual entries, never a whole `"alias"` or `"define"` object: apps keep
+ * their own entries under both keys — a `shiki` stub, a pinned `@guren/orm`,
+ * an extra `define` — and a suggestion shaped like a complete object reads as
+ * one to paste over what is there, which would drop them.
  */
 function warnMissingBuildOwnedKeys(configPath: string, outRelative: string): void {
   let config: Record<string, unknown>
   try {
-    config = JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown>
+    config = parseJsonc(readFileSync(configPath, 'utf8')) as Record<string, unknown>
   } catch {
-    // Comments or trailing commas — a real JSONC file we should not guess at.
+    // Past the comment and trailing-comma stripping, so the file is malformed
+    // by wrangler's reckoning too — say so rather than pass silently, because
+    // the keys below going unchecked is how a deploy fails later instead.
+    console.warn(
+      `Cloudflare build: could not parse ${configPath}, so its build-owned keys went unchecked. Fix the file, or compare it against a config scaffolded in an empty directory.`,
+    )
     return
   }
 
   const missing: string[] = []
-  const alias = config.alias as Record<string, string> | undefined
-  const expectedAliases = devOnlyAliases(outRelative)
-  if (!alias || Object.keys(expectedAliases).some((key) => !(key in alias))) {
-    missing.push(`"alias": ${JSON.stringify(expectedAliases)}`)
+  const alias = (config.alias as Record<string, string> | undefined) ?? {}
+  for (const [specifier, target] of Object.entries(devOnlyAliases(outRelative))) {
+    if (!(specifier in alias)) {
+      missing.push(`${JSON.stringify(specifier)}: ${JSON.stringify(target)} (inside "alias")`)
+    }
   }
   const define = config.define as Record<string, string> | undefined
   if (!define?.['process.env.NODE_ENV']) {
-    missing.push('"define": { "process.env.NODE_ENV": "\\"production\\"" }')
+    missing.push('"process.env.NODE_ENV": "\\"production\\"" (inside "define")')
   }
   const d1 = (config.d1_databases as Array<Record<string, unknown>> | undefined)?.[0]
   if (d1 && d1.migrations_dir !== `${outRelative}/d1-migrations`) {
@@ -390,7 +472,7 @@ function warnMissingBuildOwnedKeys(configPath: string, outRelative: string): voi
 
   if (missing.length > 0) {
     console.warn(
-      `Cloudflare build: ${configPath} predates this plugin version. Add the following or the worker will fail to start or skip migrations:\n  ${missing.join('\n  ')}`,
+      `Cloudflare build: ${configPath} predates this plugin version. Add these entries, alongside whatever the file already has under the same keys, or the worker will fail to start or skip migrations:\n  ${missing.join('\n  ')}`,
     )
   }
 }
