@@ -37,6 +37,43 @@ function isInMemory(dbPath: string): boolean {
   return dbPath === ':memory:' || dbPath === '' || dbPath.startsWith('file::memory:')
 }
 
+/**
+ * A scheme *with an authority* — the `//` is what separates a connection URI
+ * from a filename — for every scheme that could name a database server.
+ *
+ * Two exclusions keep legal filenames out of it. `file:` is sqlite's own URI
+ * scheme and never addresses a server, so all of its forms stay legal, the
+ * authority-shaped `file:///absolute/path.db` included. And the scheme must be
+ * at least two characters: no registered scheme is one letter, while `C://db`
+ * is a Windows drive path whose separator merely got doubled.
+ *
+ * Everything without a scheme is untouched — `:memory:`, `file::memory:`,
+ * `file:local.db`, and every relative and absolute path.
+ */
+const CONNECTION_URI = /^(?!file:)[a-z][a-z0-9+.-]+:\/\//i
+
+/**
+ * This driver `mkdir -p`s the filename's directory, which is what makes a
+ * connection string dangerous rather than merely wrong: `postgres://u:pw@host/db`
+ * does not fail, it *succeeds* — creating a `postgres:/u:pw@host/db` tree and
+ * migrating into a database nobody ever reads, while `db:migrate` and
+ * `db:status` agree with each other on that stray file. Rejecting before the
+ * mkdir is the difference between a stop and a silent success.
+ *
+ * The likeliest source is an ambient `DATABASE_URL` that a sqlite app never
+ * meant to consume — the resolved value is checked, not the option, so the
+ * env fallback below is covered too.
+ */
+function assertNotConnectionUri(dbPath: string, source: string): void {
+  if (!CONNECTION_URI.test(dbPath)) return
+
+  throw new Error(
+    `createSqliteDatabase() received a connection URI where it expects a file path: ${dbPath} (from ${source}). ` +
+      'Left alone it would be created as a directory tree and migrated into silently. ' +
+      'Pass a path such as "./data/guren.db", or ":memory:".',
+  )
+}
+
 export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteDatabase {
   const { migrationsFolder, filename, seedersFolder, relations } = options
 
@@ -59,7 +96,18 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
 
   function resolveFilename(): string {
     const value = typeof filename === 'function' ? filename() : filename
-    return value ?? process.env.DATABASE_URL ?? './data/guren.db'
+    if (value != null) {
+      assertNotConnectionUri(value, 'the "filename" option')
+      return value
+    }
+
+    const fromEnv = process.env.DATABASE_URL
+    if (fromEnv != null) {
+      assertNotConnectionUri(fromEnv, 'DATABASE_URL')
+      return fromEnv
+    }
+
+    return './data/guren.db'
   }
 
   // Unlike the other drivers, this flight must not open with
