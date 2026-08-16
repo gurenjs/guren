@@ -30,7 +30,6 @@
     "@inertiajs/core": "^3.6.1",
     "@inertiajs/react": "^3.6.1",
     "drizzle-orm": "1.0.0-rc.4",
-    "postgres": "^3.4.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "sanitize-html": "^2.17.6",
