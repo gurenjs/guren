@@ -8,6 +8,18 @@ function writeJson(path: string, value: unknown): void {
   writeFileSync(path, JSON.stringify(value, null, 2))
 }
 
+async function captureWarnings(run: () => Promise<void>): Promise<string> {
+  const warnings: string[] = []
+  const original = console.warn
+  console.warn = (message: string) => warnings.push(message)
+  try {
+    await run()
+  } finally {
+    console.warn = original
+  }
+  return warnings.join('\n')
+}
+
 function scaffoldApp(root: string, options: { ssr?: boolean; renderExport?: string } = {}): void {
   const { ssr = true, renderExport = 'export const render = () => ({ body: "", head: [] })' } = options
 
@@ -312,20 +324,114 @@ describe('workers runtime configuration', () => {
       main: '.cloudflare/worker.js',
       d1_databases: [{ binding: 'DB', migrations_dir: 'db/migrations' }],
     })
-    const warnings: string[] = []
-    const original = console.warn
-    console.warn = (message: string) => warnings.push(message)
-
-    try {
+    const warning = await captureWarnings(async () => {
       await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
-    } finally {
-      console.warn = original
-    }
+    })
 
-    const warning = warnings.join('\n')
     expect(warning).toContain('alias')
     expect(warning).toContain('process.env.NODE_ENV')
     expect(warning).toContain('.cloudflare/d1-migrations')
+  })
+
+  test('should warn about a missing alias in a config carrying comments and trailing commas', async () => {
+    scaffoldApp(root)
+    const configPath = join(root, 'wrangler.jsonc')
+
+    // Scaffold first, then take one alias back out — the expectation is
+    // derived from the alias map the build itself owns, so this test keeps
+    // holding as that list grows.
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+    const scaffolded = JSON.parse(readFileSync(configPath, 'utf8'))
+    const [dropped, ...kept] = Object.keys(scaffolded.alias)
+    const alias = {
+      ...Object.fromEntries(kept.map((key) => [key, scaffolded.alias[key]])),
+      // An app's own alias, the kind the suggestion must not read as
+      // something to paste over.
+      shiki: './stubs/shiki.js',
+    }
+
+    // Every JSONC hazard a real config carries: a line comment, a block
+    // comment, a trailing comma, `//` inside a string, and escaped quotes.
+    writeFileSync(
+      configPath,
+      `{
+  // Kept by the app, not the build.
+  "name": "legacy",
+  "main": ".cloudflare/worker.js",
+  /* The build owns these. */
+  "alias": ${JSON.stringify(alias, null, 2)},
+  "define": {
+    "process.env.NODE_ENV": "\\"production\\"",
+    "import.meta.url": "\\"file:///worker.js\\"",
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "migrations_dir": ".cloudflare/d1-migrations",
+    },
+  ],
+}
+`,
+    )
+
+    const warning = await captureWarnings(async () => {
+      await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+    })
+
+    expect(warning).toContain(dropped)
+    // A stripper that mangled `"\"file:///worker.js\""` or the escaped quotes
+    // around `"production"` would either fail to parse — losing the alias line
+    // above — or report `define` as missing when the file has it.
+    expect(warning).not.toContain('process.env.NODE_ENV')
+    expect(warning).not.toContain('could not parse')
+    // Only the missing entry is suggested, so nothing the file already has —
+    // the app's own `shiki` stub included — is named. A suggestion carrying
+    // those entries reads as an object to paste over `alias`, which would
+    // drop the ones the build does not own.
+    for (const [specifier, target] of Object.entries(alias)) {
+      expect(warning).not.toContain(specifier)
+      expect(warning).not.toContain(target)
+    }
+  })
+
+  test('should warn rather than throw when alias is not an object', async () => {
+    scaffoldApp(root)
+    // Malformed rather than outdated. `in` on a string throws, and this
+    // warning runs inside the scaffold's catch block, so the TypeError would
+    // escape as a build failure instead of the guidance the check exists for.
+    writeFileSync(join(root, 'wrangler.jsonc'), '{ "name": "legacy", "alias": "./stubs" }\n')
+
+    const warning = await captureWarnings(async () => {
+      await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+    })
+
+    expect(warning).toContain('bun:sqlite')
+  })
+
+  test('should stay silent when a commented config already has every build-owned key', async () => {
+    scaffoldApp(root)
+    const configPath = join(root, 'wrangler.jsonc')
+
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+    const scaffolded = readFileSync(configPath, 'utf8')
+    writeFileSync(configPath, `// An app comment, added after scaffolding.\n${scaffolded}`)
+
+    const warning = await captureWarnings(async () => {
+      await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+    })
+
+    expect(warning).toBe('')
+  })
+
+  test('should report a config it cannot parse rather than skipping the check', async () => {
+    scaffoldApp(root)
+    writeFileSync(join(root, 'wrangler.jsonc'), '{ "name": "legacy", oops }\n')
+
+    const warning = await captureWarnings(async () => {
+      await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+    })
+
+    expect(warning).toContain('could not parse')
   })
 
   test('should write a stub file for every aliased specifier', async () => {
