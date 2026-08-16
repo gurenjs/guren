@@ -25,6 +25,13 @@
     "@guren/cli": "./.cloudflare/stub-guren-cli.js",
     "@modelcontextprotocol/sdk/server/mcp.js": "./.cloudflare/stub-mcp-server.js",
     "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js": "./.cloudflare/stub-mcp-transport.js",
+    // @guren/orm names every dialect's client in a literal dynamic import,
+    // which a bundler follows even though D1 is the only database Workers
+    // has. Without these the deploy fails on a database this app never chose.
+    "postgres": "./.cloudflare/stub-postgres.js",
+    "mysql2": "./.cloudflare/stub-mysql2.js",
+    "mysql2/promise": "./.cloudflare/stub-mysql2-promise.js",
+    "@aws-sdk/client-rds-data": "./.cloudflare/stub-rds-data.js",
     "shiki": "./stubs/shiki.js",
     // Monorepo-only: app code resolves @guren/core through tsconfig paths to
     // source while prebuilt dist files resolve @guren/orm through
