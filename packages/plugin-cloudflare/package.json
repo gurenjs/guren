@@ -1,6 +1,6 @@
 {
   "name": "@guren/plugin-cloudflare",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -41,7 +41,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@guren/core": "^1.5.2",
+    "@guren/core": "^1.6.2",
     "citty": "^0.1.6"
   },
   "devDependencies": {

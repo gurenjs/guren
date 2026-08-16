@@ -1,5 +1,16 @@
 # web
 
+## 0.1.18
+
+### Patch Changes
+
+- Updated dependencies [116f32d]
+- Updated dependencies [b927659]
+- Updated dependencies [15cfaf5]
+  - @guren/plugin-cloudflare@0.3.1
+  - @guren/core@1.6.2
+  - @guren/cli@2.6.1
+
 ## 0.1.17
 
 ### Patch Changes
