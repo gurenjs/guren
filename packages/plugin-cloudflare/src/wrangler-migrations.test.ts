@@ -8,7 +8,8 @@ import { flattenD1Migrations } from './build'
 // generated SQL (tab indentation, backtick quoting, `--> statement-breakpoint`
 // separators, 0000_-prefixed filename ordering) against a local D1 database.
 // Requires network on first run (bunx downloads wrangler + workerd), so it is
-// gated behind GUREN_TEST_WRANGLER=1 and skipped in CI.
+// gated behind GUREN_TEST_WRANGLER=1 rather than run on every PR. The nightly
+// canary sets the variable.
 const enabled = process.env.GUREN_TEST_WRANGLER === '1'
 
 function wrangler(cwd: string, args: string[]): { exitCode: number; output: string } {

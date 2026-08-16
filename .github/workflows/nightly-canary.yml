@@ -131,6 +131,25 @@ jobs:
       - name: Run tests
         run: bun run test
 
+      # -- Deploy bundle gates (nightly only) --
+
+      # These four tests are opt-in, and until now ran nowhere: no workflow
+      # set either variable, so all three deploy plugins shipped their bundle
+      # gates switched off. They cover an app failing to bundle on a database
+      # it never chose, which reached users twice because nothing in the repo
+      # bundled a real app.
+      #
+      # Nightly rather than PR CI: each probe installs @guren/orm from a
+      # tarball plus its clients from npm, and `bunx wrangler` resolves the
+      # latest release rather than the version this repo pins. An upstream
+      # publish can therefore turn these red with no change here — a canary
+      # signal, not a reason to block a merge.
+      - name: Deploy bundle gates
+        run: bun run test:bun plugin-cloudflare plugin-lambda plugin-vercel
+        env:
+          GUREN_TEST_WRANGLER: '1'
+          GUREN_TEST_BUNDLE: '1'
+
       # -- Benchmarks (nightly only) --
 
       - name: Run benchmarks
