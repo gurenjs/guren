@@ -5,12 +5,12 @@ Welcome to your new Guren application. This template ships with Inertia server-s
 ## Prerequisites
 
 - [Bun](https://bun.sh/) installed locally.
-- PostgreSQL reachable at `postgres://guren:guren@localhost:54322/guren` (or override `DATABASE_URL` in `.env`). You can use any Postgres instance; Docker is fine as long as the URL matches.
+- No database server. Local development uses SQLite at `SQLITE_DATABASE_PATH` (`./data/guren.db` by default); production runs on Cloudflare D1 through the `DB` binding in `wrangler.jsonc`.
 
 ## Quickstart
 
 1. Install dependencies: `bun install`.
-2. Copy environment: `cp .env.example .env` and adjust `DATABASE_URL` if needed.
+2. Copy environment: `cp .env.example .env` and set `APP_KEY`, which is required to boot.
 3. Generate route and page manifests once so the client picks up links: `bun run codegen`.
 4. Start dev servers (Bun API + Vite dev server with hot reload): `bun run dev`.
 
