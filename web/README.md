@@ -9,7 +9,7 @@ Welcome to your new Guren application. This template ships with Inertia server-s
 
 ## Quickstart
 
-1. Install dependencies: `bun install`.
+1. Install dependencies from the repository root: `bun install`.
 2. Copy environment: `cp .env.example .env` and set `APP_KEY`, which is required to boot.
 3. Generate route and page manifests once so the client picks up links: `bun run codegen`.
 4. Start dev servers (Bun API + Vite dev server with hot reload): `bun run dev`.
