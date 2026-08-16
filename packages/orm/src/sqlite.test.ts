@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { sql } from 'drizzle-orm'
 import { createSqliteDatabase, type SqliteDatabase, type SqliteDatabaseOptions } from './sqlite'
 
@@ -272,5 +272,116 @@ describe('createSqliteDatabase closeDatabase', () => {
     await database.closeDatabase()
 
     expect(isOpen(db)).toBe(false)
+  })
+})
+
+describe('createSqliteDatabase connection-URI filenames', () => {
+  const POSTGRES_URI = 'postgres://guren:guren@localhost:54322/guren'
+  let originalDatabaseUrl: string | undefined
+
+  beforeEach(() => {
+    originalDatabaseUrl = process.env.DATABASE_URL
+    delete process.env.DATABASE_URL
+  })
+
+  afterEach(() => {
+    if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL
+    else process.env.DATABASE_URL = originalDatabaseUrl
+  })
+
+  test('should reject a connection URI passed as the filename', async () => {
+    const database = createSqliteDatabase({
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: POSTGRES_URI,
+    })
+
+    await expect(database.getDatabase()).rejects.toThrow(/connection URI where it expects a file path/)
+  })
+
+  // The failure this guards is not the rejection but what used to happen instead:
+  // the driver mkdir -p's the filename's directory, so an unguarded URI is created
+  // as a `postgres:/guren:guren@localhost:54322` tree and migrated into silently.
+  test('should create no directory tree for the rejected URI', async () => {
+    const database = createSqliteDatabase({
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: POSTGRES_URI,
+    })
+
+    await expect(database.getDatabase()).rejects.toThrow()
+
+    expect(existsSync(resolve('postgres:'))).toBe(false)
+  })
+
+  // An app that never passes `filename` still inherits DATABASE_URL, which is how
+  // a sqlite-backed Nightly Canary spent two weeks migrating a stray database.
+  test('should reject a connection URI inherited from DATABASE_URL', async () => {
+    process.env.DATABASE_URL = POSTGRES_URI
+
+    const database = createSqliteDatabase({ migrationsFolder: join(workDir, 'migrations') })
+
+    await expect(database.getDatabase()).rejects.toThrow(/from DATABASE_URL/)
+    expect(existsSync(resolve('postgres:'))).toBe(false)
+  })
+
+  test.each([':memory:', '', 'file::memory:', 'file::memory:?cache=shared'])(
+    'should accept %p, which carries a scheme but no authority',
+    async (filename) => {
+      const database = createSqliteDatabase({ migrationsFolder: join(workDir, 'migrations'), filename })
+
+      const db = await database.getDatabase()
+      expect(isOpen(db)).toBe(true)
+
+      await database.closeDatabase()
+    },
+  )
+
+  // `file:` never addresses a database server, so no form of it is a connection
+  // string — including the authority-shaped one, which is sqlite's own spelling
+  // of an absolute path and opens today.
+  test('should accept file:// with an absolute path', async () => {
+    const database = createSqliteDatabase({
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: `file://${join(workDir, 'abs.db')}`,
+    })
+
+    const db = await database.getDatabase()
+    expect(isOpen(db)).toBe(true)
+
+    await database.closeDatabase()
+  })
+
+  // A one-letter scheme is always a Windows drive, never a registered scheme.
+  test('should accept a Windows drive path whose separator got doubled', async () => {
+    const database = createSqliteDatabase({
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: 'C://db/app.db',
+    })
+
+    try {
+      // Resolved against the cwd on a POSIX host, so this asserts the guard's
+      // decision — reaching the open at all means the URI check let it through.
+      const db = await database.getDatabase()
+      expect(isOpen(db)).toBe(true)
+      await database.closeDatabase()
+    } finally {
+      rmSync(resolve('C:'), { recursive: true, force: true })
+    }
+  })
+
+  test('should accept file:local.db, which sqlite resolves to a real file', async () => {
+    // sqlite resolves this URI against the cwd rather than workDir, so the file it
+    // creates is cleaned up here rather than by the suite's workDir teardown.
+    const database = createSqliteDatabase({
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: 'file:local.db',
+    })
+
+    try {
+      const db = await database.getDatabase()
+      expect(isOpen(db)).toBe(true)
+      await database.closeDatabase()
+    } finally {
+      rmSync(resolve('local.db'), { force: true })
+    }
   })
 })
