@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
-import { pathToFileURL } from 'node:url'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { consola } from 'consola'
 import { defineCommand, showUsage } from 'citty'
 import type { CommandDef } from 'citty'
@@ -2650,10 +2651,36 @@ try {
   consola.warn(`Failed to discover plugin commands: ${error instanceof Error ? error.message : String(error)}`)
 }
 
+/**
+ * This package's own version, for `guren --version`. Read from the manifest
+ * rather than written here as a literal, which would drift at every
+ * `changeset version`.
+ *
+ * `../package.json` is this package's root from either layout: built output
+ * puts `bin.js` directly in `dist/`, and running from source puts `bin.ts`
+ * directly in `src/` — the same idiom `agent-harness.ts` uses to find
+ * `templates/`.
+ *
+ * Returns `undefined` rather than throwing: this module is evaluated for
+ * every command, so an unreadable manifest must cost only `--version` (which
+ * falls back to the usage-plus-error path in `runCli`) and not take
+ * `make:model` down with it.
+ */
+function readOwnVersion(): string | undefined {
+  try {
+    const manifestPath = fileURLToPath(new URL('../package.json', import.meta.url))
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { version?: unknown }
+    return typeof manifest.version === 'string' ? manifest.version : undefined
+  } catch {
+    return undefined
+  }
+}
+
 const main = defineCommand({
   meta: {
     name: 'guren',
     description: 'Guren framework CLI utilities.',
+    version: readOwnVersion(),
   },
   args: {
     help: {
