@@ -15,7 +15,7 @@ chosen Guren and scaffolded. So the harness reaches exactly the developers who
 needed no convincing. It is a retention feature that we have been treating as
 a growth feature.
 
-Two catalogs now sit in front of developers who have *not* chosen a stack:
+Three channels now sit in front of developers who have *not* chosen a stack:
 
 - The Claude Code plugin marketplace — `claude plugin marketplace add <owner>/<repo>`,
   plus the browsable community catalog `anthropics/claude-plugins-community`
@@ -23,9 +23,17 @@ Two catalogs now sit in front of developers who have *not* chosen a stack:
 - The Agent Skills CLI (`npx skills add <owner>/<repo>`, `vercel-labs/skills`),
   which installs into Cursor, Codex, Copilot, OpenCode, Gemini CLI and ~70
   other agents from one GitHub repository.
+- **Agent Plugins v1** (<https://agent-plugins.org>), a vendor-neutral
+  packaging standard for exactly this artifact — Agent Skills plus MCP
+  servers — with a Technical Steering Committee from Amazon, Cursor,
+  Microsoft, OpenAI and Vercel, and implementations in OpenAI's tooling,
+  Cursor, GitHub Copilot, VS Code, Kiro and others. VS Code discovers plugins
+  from git-repository marketplaces (`chat.plugins.marketplaces`, defaulting to
+  `copilot-plugins` and `awesome-copilot`) and from the Copilot CLI's
+  `~/.copilot/installed-plugins/`.
 
-One GitHub repository can serve both, which is how other frameworks already
-appear there:
+One GitHub repository can serve all three, which is how other frameworks
+already appear there:
 
 ```bash
 claude plugin marketplace add <owner>/<repo>
@@ -33,11 +41,11 @@ claude plugin install <plugin>@<marketplace> --scope project
 npx skills add <owner>/<repo>
 ```
 
-Guren has no presence in either. That is the gap this RFC closes.
+Guren has no presence in any of them. That is the gap this RFC closes.
 
 ### The finding that shapes the whole design
 
-Neither channel can carry the harness.
+No channel can carry the harness.
 
 **Claude Code plugins have no rules component.** A plugin's component
 directories are `skills/`, `commands/`, `agents/`, `hooks/`, `.mcp.json`,
@@ -75,9 +83,9 @@ from that.
 
 ### 1. Packaging shape: a separate public repo, generated from this one
 
-Publish `gurenjs/agent-skills`, laid out the way both catalogs'
-tooling expects — a marketplace manifest at the root and each plugin in its
-own directory under `plugins/`:
+Publish `gurenjs/agent-skills`, laid out the way all three channels expect —
+a marketplace manifest at the root and each plugin in its own directory under
+`plugins/`:
 
 ```
 agent-skills/                    # published repo (generated; no hand edits)
@@ -85,7 +93,8 @@ agent-skills/                    # published repo (generated; no hand edits)
 │   └── marketplace.json
 ├── plugins/
 │   └── guren/
-│       ├── .claude-plugin/plugin.json
+│       ├── plugin.json                  # Agent Plugins v1 (portable)
+│       ├── .claude-plugin/plugin.json   # Claude Code's manifest location
 │       ├── skills/
 │       │   ├── guren-new-app/SKILL.md
 │       │   └── guren-harness/SKILL.md
@@ -152,7 +161,10 @@ packages/cli/templates/agent-catalog/
 Every file in the published tree has a source here, with one exception: the
 two `LICENSE` copies are the repository root's own `LICENSE`, copied by the
 generator rather than templated, so the published license can never diverge
-from the framework's.
+from the framework's. `plugin.json.tpl` renders **twice** — once to the
+plugin root as the Agent Plugins v1 manifest and once to
+`.claude-plugin/plugin.json` — from one source, so the two cannot disagree
+(§4).
 
 `scripts/build-agent-catalog.ts --out <dir>` renders them. A new
 `audit:agent-catalog` script renders into a temporary directory and runs
@@ -314,19 +326,50 @@ than to themselves. The plugin's own value ends where `agent:init` begins.
 
 ### 4. Target coverage
 
-| Guren target (RFC 0008) | Claude marketplace | `npx skills add` |
-|---|---|---|
-| claude | native; skills namespaced `/guren:guren-new-app` | also supported (`-a claude-code`) |
-| codex | — | yes → `.agents/skills/` |
-| cursor | — | yes → `.agents/skills/` |
-| copilot | — | yes → `.agents/skills/` |
-| opencode | — | yes → `.agents/skills/` |
+| Guren target (RFC 0008) | Claude marketplace | `npx skills add` | Agent Plugins v1 |
+|---|---|---|---|
+| claude | native; skills namespaced `/guren:guren-new-app` | yes (`-a claude-code`) | not an implementer today |
+| codex | — | yes → `.agents/skills/` | yes (OpenAI is on the TSC) |
+| cursor | — | yes → `.agents/skills/` | yes |
+| copilot | — | yes → `.agents/skills/` | yes (VS Code + Copilot CLI) |
+| opencode | — | yes → `.agents/skills/` | — |
 
 One repo covers all five, plus every other agent the skills CLI knows
-(Gemini CLI, Cline, and ~70 more). No target is dropped, because the
-per-target work — rules transforms, MCP configs, Codex approval rules — is
-not carryable by either channel and stays where it already works, in
-`agent:init`.
+(Gemini CLI, Cline, and ~70 more) and every Agent Plugins client. No target
+is dropped, because the per-target work — rules transforms, MCP configs,
+Codex approval rules — is not carryable by any of these channels and stays
+where it already works, in `agent:init`.
+
+**Conforming to Agent Plugins v1 is nearly free, and the RFC's first draft
+did not.** The spec requires `plugin.json` at the **plugin root** carrying
+`$schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"` and a
+`name` matching `[a-z0-9]` plus hyphens and periods, 1–64 characters,
+alphanumeric at both ends. Claude Code instead reads
+`.claude-plugin/plugin.json`. The first draft shipped only the latter, so the
+payload was Claude-shaped rather than portable.
+
+The gap is two things: manifest *location* and a missing `$schema`. The
+skills half — `skills/<name>/SKILL.md` — already matches the spec exactly,
+and `guren` is already a conforming plugin name. The spec's own migration
+guidance is additive ("add root `plugin.json` without removing existing
+platform files"), dual manifests are explicitly supported, and VS Code
+auto-detects the format by manifest location, reading Agent Plugins,
+Copilot-style root `plugin.json`, `.claude-plugin/plugin.json` and legacy
+`.plugin/plugin.json` alike. So the payload ships **both**, rendered from one
+template. Because everything is generated, the usual objection to duplicated
+manifests — that they drift — does not apply here.
+
+Two spec details worth carrying into the implementation. The manifest schema
+is **closed**: only `$schema`, `name`, `version`, `description`, `author`,
+`homepage`, `repository`, `license`, `keywords` and `extensions` are
+permitted at the top level, and anything else is a fatal validation error.
+Guren's plugin is metadata-only, so this costs nothing today — but it is the
+reason no Claude-specific field can be added to the portable manifest later;
+such fields belong under `extensions["<reverse.domain>"]` or stay in
+`.claude-plugin/plugin.json`. And the spec's optional root `mcp.json`
+(`streamable-http`, `${PLUGIN_ROOT}`/`${PLUGIN_DATA}`) is deliberately not
+used, for the same reason §7 gives for Claude's `.mcp.json`: Guren's endpoint
+is app-local and `agent:init` writes the client config.
 
 **The collision constraint.** Claude Code namespaces plugin skills by plugin
 name, so nothing collides there. `npx skills add` does not: it copies into a
@@ -529,34 +572,39 @@ Automated, in CI on every PR:
    names is registered, the minimum-CLI claim is `<=` the workspace version.
 2. `claude plugin validate <rendered>/plugins/guren --strict`, reported as
    pass / fail / could-not-run per §2.
-3. Mutation checks in the implementation PR, proving 1 and the version gate
+3. The root `plugin.json` validates against the Agent Plugins v1 JSON
+   Schema (`https://agent-plugins.org/schemas/1.0.0/plugin.schema.json`),
+   with the schema vendored rather than fetched so CI does not depend on a
+   third-party host. The closed-schema rule makes this a real gate: an
+   unrecognized top-level field is fatal to conforming clients (§4).
+4. Mutation checks in the implementation PR, proving 1 and the version gate
    can fail: name a nonexistent target; name an unregistered command; edit
    `templates/agent-catalog/**` with no `@guren/cli` changeset present; change
    `AGENT_TARGETS` with no `@guren/cli` changeset present.
 
 Manual, once before the first publish and after any payload change:
 
-4. **Empty directory, skills channel.** `mkdir /tmp/x && cd /tmp/x` →
+5. **Empty directory, skills channel.** `mkdir /tmp/x && cd /tmp/x` →
    `npx skills add gurenjs/agent-skills` → confirm exactly
    `guren-new-app` and `guren-harness` land, and confirm by inspection that
    no step in `guren-new-app` invokes `bunx guren` before an app exists.
    This is the specific failure the npm-404 fact predicts.
-5. **Empty directory, Claude channel.** Render the payload locally, then
+6. **Empty directory, Claude channel.** Render the payload locally, then
    `claude plugin marketplace add <rendered>` (local paths are a supported
    marketplace source) and install; verify `/guren:guren-new-app` appears and
    runs end-to-end, producing a working app.
-6. **Freshly scaffolded app.** Scaffold with `bunx create-guren-app`, install
+7. **Freshly scaffolded app.** Scaffold with `bunx create-guren-app`, install
    the plugin, run `guren-harness` → `agent:init --target` succeeds,
    `guren check` runs clean.
-7. **Collision test.** In an app where `agent:init --target codex` has
+8. **Collision test.** In an app where `agent:init --target codex` has
    already run, `npx skills add` the plugin and diff `.agents/skills/`:
    nothing the harness wrote may be modified or removed.
-8. **Prune test — the one the first draft of this RFC missed.** Continue from
+9. **Prune test — the one the first draft of this RFC missed.** Continue from
    7: run `bunx guren agent:sync` and assert the plugin's skills are *not*
    reported stale, then `bunx guren agent:sync --prune` and assert they still
    exist. Separately assert the tombstone half still works: a retired
    canonical skill name is still reported and deleted (§4).
-9. **Old-CLI degradation.** Pin an app to `@guren/cli` 2.4.x and confirm that
+10. **Old-CLI degradation.** Pin an app to `@guren/cli` 2.4.x and confirm that
    `guren-harness`'s version probe produces a working claude-only install
    rather than a silent no-op (§5).
 
@@ -688,6 +736,11 @@ the changeset.
    and less useful. Where is the line?
 6. **`anthropics/claude-plugins-community` submission timing.** Deferred out
    of v1 (§7); when?
+7. **The Agent Plugins marketplaces are a separate listing problem.** VS Code
+   defaults to the `copilot-plugins` and `awesome-copilot` repositories and
+   takes extra ones via `chat.plugins.marketplaces`; being spec-conformant
+   makes Guren *installable* from a URL but does not make it *listed*. Is
+   getting listed in-scope, and in which catalogs?
 
 ## Risks to the Premise
 
@@ -729,11 +782,12 @@ changeset-based version gate, and the failure-path testing.
 | Export the builtin command registry out of `bin.ts` (§2) | 0.5 day |
 | `scripts/build-agent-catalog.ts` + `audit:agent-catalog` + tests | 1 day |
 | Changeset-based version gate + release-side version check (§5) | 0.5 day |
+| Agent Plugins v1 manifest + vendored-schema validation (§4) | 0.5 day |
 | Mirror job ordered after a successful npm publish (§5) | 0.5 day |
-| Manual verification (§6 items 4–9), including failure paths | 1–1.5 days |
+| Manual verification (§6 items 5–10), including failure paths | 1–1.5 days |
 | Docs (`docs/{en,ja}/guides/cli.md`), README positioning | 0.5 day |
 
-**5–6 focused days**, and closer to 8 if either open-ended item bites: the
+**5.5–6.5 focused days**, and closer to 8 if either open-ended item bites: the
 `bin.ts` extraction turning out to need real surgery on a 2,600-line module
 that runs `runCli()` at top level, or `claude plugin validate` not running
 unauthenticated in CI (Open Question 1). Excludes the community-marketplace
@@ -756,15 +810,20 @@ submission (deferred, §7) and the maintainer-only steps in §8.
    (§2). Without the first, `agent:sync --prune` deletes the very skills the
    catalog installs. This is the item that turns the RFC from purely additive
    into a narrowing behavior change, so it needs an explicit yes.
-6. **Repo `gurenjs/agent-skills`, marketplace name `gurenjs`, plugin name
+6. **Conform to Agent Plugins v1 and ship both manifests** (§4) — versus
+   Claude-only, which is what the first draft proposed. The spec is
+   vendor-neutral with Amazon, Cursor, Microsoft, OpenAI and Vercel behind
+   it, conformance costs one extra rendered file, and the spec's own
+   migration guidance is additive. Recommended yes.
+7. **Repo `gurenjs/agent-skills`, marketplace name `gurenjs`, plugin name
    `guren`** — note that `agent-skills` is fine as a *repository* name but is
    a reserved *marketplace* name, so the two must not be spelled the same
    (§8).
-7. **Mirror ordered after a successful npm publish**, not merely on the same
+8. **Mirror ordered after a successful npm publish**, not merely on the same
    release event (§5).
-8. **Maintainer actions**: create the public repo, add the mirror token
+9. **Maintainer actions**: create the public repo, add the mirror token
    secret (§8).
-9. **Defer the `anthropics/claude-plugins-community` submission** to after a
+10. **Defer the `anthropics/claude-plugins-community` submission** to after a
    version has been verified in the wild (§7, Open Question 6).
 
 ## Sources (verified 2026-08-17)
@@ -776,5 +835,11 @@ submission (deferred, §7) and the maintainer-only steps in §8.
   <https://code.claude.com/docs/en/plugin-marketplaces>
 - Agent Skills CLI discovery, install paths, agent list:
   <https://github.com/vercel-labs/skills>
+- Agent Plugins v1 specification, schema and migration guidance:
+  <https://agent-plugins.org>,
+  <https://github.com/agentplugins/agent-plugins-spec/blob/main/spec/1.0.0.md>,
+  <https://github.com/agentplugins/agent-plugins-example>
+- VS Code plugin format auto-detection and marketplace discovery:
+  <https://code.visualstudio.com/docs/agent-customization/agent-plugins>
 - `guren` absent from npm: `npm view guren` → 404;
   `@guren/cli` 2.6.1 provides the `guren` bin.
