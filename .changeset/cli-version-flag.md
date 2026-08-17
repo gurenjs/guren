@@ -25,6 +25,14 @@ instance. citty ignores flags it does not recognise, so without a working
 `--version` there was no cheap way to detect an older CLI: passing an
 unsupported flag to it exits 0 and silently does something else.
 
+The version prints on plain stdout, like every other command that emits a
+payload rather than a diagnostic (`model:list`, `context`, `route:list`). citty's
+own `runMain` logs it through consola, which makes the version unreadable
+exactly where it gets read: consola's non-TTY reporter prefixes the level, so CI
+and any piped caller saw `[log] 2.6.1`, and a configured log level could drop the
+line entirely. `guren --version` now emits a bare version line regardless of
+`CI`, `NODE_ENV`, or log level.
+
 An unreadable manifest leaves `meta.version` unset rather than throwing. The
 root command module is evaluated for every command, so that failure costs only
 `--version`, which falls back to the message above, and never `make:model`.

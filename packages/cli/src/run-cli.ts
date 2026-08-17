@@ -82,7 +82,13 @@ export async function runCli(cmd: AnyCommandDef, rawArgs: string[]): Promise<num
       if (!meta?.version) {
         return failWithUsage('No version specified')
       }
-      consola.log(meta.version)
+      // Plain stdout, like every other command that prints a payload rather
+      // than a diagnostic (`model:list`, `context`, `route:list`). citty's own
+      // `runMain` uses `consola.log` here, which makes the version unreadable
+      // exactly where it gets read: consola's non-TTY reporter prefixes the
+      // level, so CI and any piped caller see `[log] 2.6.1`, and a configured
+      // log level can drop the line entirely.
+      console.log(meta.version)
       return 0
     }
 

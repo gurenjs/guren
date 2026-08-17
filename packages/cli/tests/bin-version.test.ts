@@ -18,10 +18,18 @@ async function manifestVersion(): Promise<string> {
 }
 
 async function runBin(bin: string, args: string[], cwd: string): Promise<{ exitCode: number; stdout: string }> {
-  // `bun test` sets NODE_ENV=test, which drops consola below the log level
-  // `--version` prints at. Real invocations do not.
-  const { NODE_ENV: _testEnv, ...env } = process.env
-  const proc = Bun.spawn(['bun', bin, ...args], { cwd, env, stdout: 'pipe', stderr: 'pipe' })
+  // Deliberately keeps the environment `bun test` provides, including
+  // NODE_ENV=test. The version is a payload, not a diagnostic, so neither
+  // consola's log level nor its reporter may touch it: under NODE_ENV=test
+  // consola sits at the warn level and would drop the line entirely, and
+  // CI=1 selects the non-TTY reporter that prefixes it (`[log] 2.6.1`).
+  // Both shapes are how a script or an agent actually invokes this.
+  const proc = Bun.spawn(['bun', bin, ...args], {
+    cwd,
+    env: { ...process.env, CI: '1' },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
   const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited])
   return { exitCode, stdout: stripAnsi(stdout) }
 }
@@ -42,9 +50,11 @@ describe('guren --version', () => {
         const { exitCode, stdout } = await runBin(bin, ['--version'], workspace.dir)
 
         expect(exitCode).toBe(0)
-        // Other packages can log to stdout during module load (@guren/orm's
-        // duplicate-copy warning, for one), so assert the version is among
-        // the output lines rather than that it is all of it.
+        // A dependency can log to stdout while the module graph loads
+        // (@guren/orm's duplicate-copy warning is one), so look for the
+        // version among the lines rather than expecting it to be all of the
+        // output — but require a line that is *exactly* the version, which a
+        // reporter-prefixed `[log] 2.6.1` would not satisfy.
         const lines = stdout.split('\n').map((line) => line.trim())
         expect(lines).toContain(await manifestVersion())
       } finally {
