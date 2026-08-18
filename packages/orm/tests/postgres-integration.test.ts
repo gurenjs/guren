@@ -257,6 +257,44 @@ describePostgres('eager loading inside a transaction (requires POSTGRES_URL)', (
       if (!(error instanceof RollbackSignal)) throw error
     })
   })
+
+  it('carries the transaction down a nested relation path', async () => {
+    // The recursion in loadRelationInto() re-enters on the related model, so
+    // the second hop has its own chance to fall back to the pool.
+    await Article.transaction(async (trx) => {
+      const author = (await Author.create({ name: 'Katherine' }, { trx })) as AuthorRecord
+      await Article.create({ title: 'On Orbits', authorId: author.id }, { trx })
+
+      const [loaded] = (await Author.newQuery({ trx })
+        .where('id', author.id)
+        .with('articles.author')
+        .get()) as Array<AuthorRecord & { articles: Array<ArticleRecord & { author: AuthorRecord | null }> }>
+
+      expect(loaded.articles[0]?.author).toMatchObject({ name: 'Katherine' })
+
+      throw new RollbackSignal()
+    }).catch((error: unknown) => {
+      if (!(error instanceof RollbackSignal)) throw error
+    })
+  })
+
+  it('counts related rows on the transaction with withCount()', async () => {
+    await Article.transaction(async (trx) => {
+      const author = (await Author.create({ name: 'Radia' }, { trx })) as AuthorRecord
+      await Article.create({ title: 'On Trees', authorId: author.id }, { trx })
+      await Article.create({ title: 'On Bridges', authorId: author.id }, { trx })
+
+      const [loaded] = (await Author.withCount('articles', { id: author.id }, { trx })) as Array<
+        AuthorRecord & { articlesCount: number }
+      >
+
+      expect(loaded.articlesCount).toBe(2)
+
+      throw new RollbackSignal()
+    }).catch((error: unknown) => {
+      if (!(error instanceof RollbackSignal)) throw error
+    })
+  })
 })
 
 /** Unwinds a transaction after its assertions have run, without failing it. */

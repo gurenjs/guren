@@ -1964,14 +1964,18 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     this: T,
     relations: K | readonly K[],
     where?: WhereClauseFor<T>,
+    queryOptions?: ModelQueryOptions,
   ): Promise<Array<TRecordFor<T> & RelationCountPick<K | readonly K[]>>>
 
   static async withCount<T extends typeof Model, Names extends RelationNames>(
     this: T,
     relations: Names,
     where?: WhereClauseFor<T>,
+    queryOptions?: ModelQueryOptions,
   ): Promise<Array<TRecordFor<T> & RelationCountPick<Names>>> {
-    const records = where ? await this.where(where) : await this.all()
+    const records = where
+      ? await this.newQuery(queryOptions).where(where as Partial<Record<string, unknown>>).get()
+      : await this.all(queryOptions)
     if (!records.length) {
       return records as Array<TRecordFor<T> & RelationCountPick<Names>>
     }
@@ -1979,7 +1983,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     const relationList = normalizeRelations(relations)
     const copies = records.map((record) => ({ ...record })) as Array<PlainObject>
     for (const relationName of relationList) {
-      await this.loadRelationCountInto(copies, relationName)
+      await this.loadRelationCountInto(copies, relationName, queryOptions)
     }
 
     return copies as Array<TRecordFor<T> & RelationCountPick<Names>>
@@ -1990,6 +1994,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     this: T,
     records: Array<PlainObject>,
     relationName: string,
+    queryOptions?: ModelQueryOptions,
   ): Promise<void> {
     if (relationName.includes('.')) {
       throw new Error(`${this.name}: withCount does not support nested relation "${relationName}".`)
@@ -2013,7 +2018,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
 
         const counts = new Map<unknown, number>()
         if (values.length > 0) {
-          const relatedRecords = (await related.where({ [foreignKey]: values } as WhereClause)) as PlainObject[]
+          const relatedRecords = (await related.newQuery(queryOptions).where({ [foreignKey]: values } as WhereClause)) as PlainObject[]
           for (const item of relatedRecords) {
             const key = item[foreignKey]
             counts.set(key, (counts.get(key) ?? 0) + 1)
@@ -2027,7 +2032,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       }
       case 'morphMany': {
         const withRelation = records.map((record) => ({ ...record }))
-        await this.loadRelationInto(withRelation, relationName)
+        await this.loadRelationInto(withRelation, relationName, queryOptions)
         for (const [index, record] of records.entries()) {
           const value = withRelation[index]?.[relationName]
           record[countField] = Array.isArray(value) ? value.length : 0
@@ -2043,7 +2048,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
 
         const ownerKeys = new Set<unknown>()
         if (values.length > 0) {
-          const owners = (await related.where({ [ownerKey]: values } as WhereClause)) as PlainObject[]
+          const owners = (await related.newQuery(queryOptions).where({ [ownerKey]: values } as WhereClause)) as PlainObject[]
           for (const owner of owners) {
             ownerKeys.add(owner[ownerKey])
           }

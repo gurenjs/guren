@@ -17,7 +17,7 @@ could be inconsistent even when they did not.
 `ModelQueryOptions` and pass it to each related query, including the pivot and
 through-table reads. `QueryBuilder` forwards its own `trx`.
 
-`Model.with()`, `findWith()`, `findWithOrFail()` and `withPaginate()` gained an
-optional trailing `queryOptions` argument so they can forward a transaction too.
-These four previously took no query options at all, so this completes the
-plumbing rather than fixing a reachable bug in them.
+`Model.with()`, `findWith()`, `findWithOrFail()`, `withPaginate()` and
+`withCount()` gained an optional trailing `queryOptions` argument so they can
+forward a transaction too. These five previously took no query options at all,
+so this completes the plumbing rather than fixing a reachable bug in them.
