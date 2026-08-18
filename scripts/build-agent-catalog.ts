@@ -37,7 +37,6 @@ import { repoRoot } from './workspace-packages'
 
 const TEMPLATE_DIR = 'packages/cli/templates/agent-catalog'
 const CLI_MANIFEST = 'packages/cli/package.json'
-const CREATE_APP_MANIFEST = 'packages/create-app/package.json'
 const LICENSE = 'LICENSE'
 
 /**
@@ -55,11 +54,11 @@ const PORTABLE_SCHEMA_URL = 'https://agent-plugins.org/schemas/1.0.0/plugin.sche
  * generator actually consumes.
  */
 export const CATALOG_INPUTS = [
-  `${TEMPLATE_DIR}/`,
+  `${TEMPLATE_DIR}/`, // templates, skills, and the vendored plugin.schema.json
   'scripts/build-agent-catalog.ts',
   'packages/cli/src/agent-targets.ts',
   CLI_MANIFEST,
-  CREATE_APP_MANIFEST,
+  LICENSE,
 ] as const
 
 interface RenderContext {
@@ -68,7 +67,7 @@ interface RenderContext {
   targets: readonly string[]
 }
 
-interface RenderedFile {
+export interface RenderedFile {
   /** Path relative to the payload root, POSIX. */
   path: string
   content: string
@@ -83,7 +82,10 @@ async function readContext(): Promise<RenderContext> {
   if (!cli.version) {
     throw new Error(`${CLI_MANIFEST} has no version`)
   }
-  return { cliVersion: cli.version, minCli: MIN_CLI_FOR_TARGETS, targets: AGENT_TARGETS }
+  // test hook only: lets the publish integration test render a second
+  // version without editing packages/cli/package.json
+  const cliVersion = process.env.GUREN_CATALOG_VERSION_OVERRIDE ?? cli.version
+  return { cliVersion, minCli: MIN_CLI_FOR_TARGETS, targets: AGENT_TARGETS }
 }
 
 function substitute(template: string, ctx: RenderContext, portableSchema: boolean): string {
@@ -159,8 +161,10 @@ export async function writeCatalog(outDir: string): Promise<RenderedFile[]> {
  * flags are read. Stops at the closing backtick of an inline span so prose
  * after it is not mistaken for flags.
  */
-const GUREN_INVOCATION_RE = /\b(?:bunx\s+)?guren\s+([a-z][a-z0-9:-]*)([^\n`]*)/gu
+const GUREN_INVOCATION_RE = /\b(?:bunx\s+)?guren\s+(--version|[a-z][a-z0-9:-]*)([^\n`]*)/gu
 const FLAG_RE = /(?:^|\s)--([a-z][a-z0-9-]*)/gu
+/** Where one shell invocation ends and the next begins on the same line. */
+const SHELL_SEPARATOR_RE = /\s*(?:&&|\|\||;|\|)\s*/u
 
 type ArgsShape = Record<string, unknown> | undefined
 
@@ -182,10 +186,16 @@ export async function assertCommandsAndFlags(files: readonly RenderedFile[]): Pr
   for (const file of files) {
     if (!file.path.endsWith('.md')) continue
     for (const match of file.content.matchAll(GUREN_INVOCATION_RE)) {
-      const [, command, rest] = match
-      // `guren --version` is the root command; `guren` followed by a
-      // placeholder like `<cmd>` is not an invocation
+      const [, command, restRaw] = match
       if (command === undefined || command.startsWith('<')) continue
+      // `guren --version` is the root command's own flag, always accepted;
+      // it is matched so the probe the harness skill relies on is at least
+      // spelled as something the CLI has
+      if (command === '--version') continue
+      // flags belong to this invocation only up to the next shell separator;
+      // `guren check && guren agent:init --target codex` must not hand
+      // --target to check
+      const rest = (restRaw ?? '').split(SHELL_SEPARATOR_RE)[0] ?? ''
       if (!registered.has(command)) {
         problems.push(`${file.path}: names \`guren ${command}\`, which the CLI does not register`)
         continue
@@ -195,7 +205,7 @@ export async function assertCommandsAndFlags(files: readonly RenderedFile[]): Pr
         declared = await declaredArgs(command)
         flagCache.set(command, declared)
       }
-      for (const flag of (rest ?? '').matchAll(FLAG_RE)) {
+      for (const flag of rest.matchAll(FLAG_RE)) {
         const name = flag[1]
         if (name && !declared.has(name)) {
           problems.push(`${file.path}: \`guren ${command} --${name}\` — \`${command}\` declares no \`--${name}\``)
@@ -247,12 +257,66 @@ export async function assertMinCli(): Promise<string[]> {
  * a validator dependency; the vendored copy is read so a field added upstream
  * shows up as a diff here, not as a silent pass.
  */
-export async function assertPortableManifest(files: readonly RenderedFile[]): Promise<string[]> {
-  const schema = JSON.parse(await readFile(join(repoRoot, TEMPLATE_DIR, 'plugin.schema.json'), 'utf8')) as {
-    required?: string[]
-    properties?: Record<string, unknown>
-    additionalProperties?: boolean
+/**
+ * A validator for exactly the JSON Schema subset the vendored Agent Plugins
+ * schema uses: `type`, `const`, `required`, `properties`, `additionalProperties`,
+ * `items`, `minLength`, `maxLength`, `pattern`. Small enough to enforce here
+ * without a dependency, and driven by the schema file rather than by a
+ * hand-copied rule — so the name pattern, for one, is the spec's own
+ * (`^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$`), which admits
+ * `a-.b` where a stricter hand-written regex would not.
+ */
+type JsonSchema = {
+  type?: string
+  const?: unknown
+  required?: string[]
+  properties?: Record<string, JsonSchema>
+  additionalProperties?: boolean
+  items?: JsonSchema
+  minLength?: number
+  maxLength?: number
+  pattern?: string
+}
+
+export function validateAgainstSchema(value: unknown, schema: JsonSchema, path = 'plugin.json'): string[] {
+  const problems: string[] = []
+  const typeOf = (v: unknown): string => (Array.isArray(v) ? 'array' : v === null ? 'null' : typeof v)
+  if (schema.type !== undefined && typeOf(value) !== schema.type) {
+    return [`${path}: expected ${schema.type}, got ${typeOf(value)}`]
   }
+  if (schema.const !== undefined && value !== schema.const) {
+    problems.push(`${path}: must be ${JSON.stringify(schema.const)}`)
+  }
+  if (typeof value === 'string') {
+    if (schema.minLength !== undefined && value.length < schema.minLength) problems.push(`${path}: shorter than ${schema.minLength}`)
+    if (schema.maxLength !== undefined && value.length > schema.maxLength) problems.push(`${path}: longer than ${schema.maxLength}`)
+    if (schema.pattern !== undefined && !new RegExp(schema.pattern, 'u').test(value)) {
+      problems.push(`${path}: "${value}" does not match ${schema.pattern}`)
+    }
+  }
+  if (Array.isArray(value) && schema.items) {
+    value.forEach((item, i) => problems.push(...validateAgainstSchema(item, schema.items!, `${path}[${i}]`)))
+  }
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    const obj = value as Record<string, unknown>
+    for (const key of schema.required ?? []) {
+      if (!(key in obj)) problems.push(`${path}: missing required field "${key}"`)
+    }
+    const props = schema.properties ?? {}
+    for (const [key, v] of Object.entries(obj)) {
+      const sub = props[key]
+      if (sub) {
+        problems.push(...validateAgainstSchema(v, sub, `${path}.${key}`))
+      } else if (schema.additionalProperties === false) {
+        problems.push(`${path}: field "${key}" is not permitted (closed schema)`)
+      }
+    }
+  }
+  return problems
+}
+
+export async function assertPortableManifest(files: readonly RenderedFile[]): Promise<string[]> {
+  const schema = JSON.parse(await readFile(join(repoRoot, TEMPLATE_DIR, 'plugin.schema.json'), 'utf8')) as JsonSchema
   const file = files.find((f) => f.path === 'plugins/guren/plugin.json')
   if (!file) return ['plugins/guren/plugin.json was not rendered']
   let manifest: Record<string, unknown>
@@ -261,23 +325,7 @@ export async function assertPortableManifest(files: readonly RenderedFile[]): Pr
   } catch (error) {
     return [`plugins/guren/plugin.json is not valid JSON: ${(error as Error).message}`]
   }
-  const problems: string[] = []
-  for (const key of schema.required ?? []) {
-    if (!(key in manifest)) problems.push(`plugin.json: missing required field "${key}"`)
-  }
-  if (schema.additionalProperties === false) {
-    const allowed = new Set(Object.keys(schema.properties ?? {}))
-    for (const key of Object.keys(manifest)) {
-      if (!allowed.has(key)) problems.push(`plugin.json: field "${key}" is not permitted (closed schema)`)
-    }
-  }
-  if (manifest.$schema !== PORTABLE_SCHEMA_URL) {
-    problems.push(`plugin.json: $schema must be ${PORTABLE_SCHEMA_URL}`)
-  }
-  const name = manifest.name
-  if (typeof name !== 'string' || !/^[a-z0-9](?:[a-z0-9]|[-.](?![-.]))*[a-z0-9]$|^[a-z0-9]$/u.test(name) || name.length > 64) {
-    problems.push(`plugin.json: name "${String(name)}" violates the Agent Plugins name rule`)
-  }
+  const problems = validateAgainstSchema(manifest, schema)
   // Claude's copy must be the same manifest minus $schema
   const claude = files.find((f) => f.path === 'plugins/guren/.claude-plugin/plugin.json')
   if (claude) {
@@ -291,13 +339,33 @@ export async function assertPortableManifest(files: readonly RenderedFile[]): Pr
 }
 
 /**
+ * Does this changeset's frontmatter release `pkg`? Only the `---`-delimited
+ * block is read, so a package-looking line in the Markdown body does not
+ * count; keys may be quoted or bare, as changesets accepts both. (The OKF
+ * frontmatter parser in packages/cli is a fixed-field subset and does not
+ * see package names, so this is the one place a tiny local parser is right.)
+ */
+export function changesetNames(source: string, pkg: string): boolean {
+  const block = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u.exec(source)
+  if (!block) return false
+  for (const line of (block[1] ?? '').split(/\r?\n/u)) {
+    const m = /^\s*(?:"([^"]+)"|'([^']+)'|([^\s:"']+))\s*:/u.exec(line)
+    const key = m?.[1] ?? m?.[2] ?? m?.[3]
+    if (key === pkg) return true
+  }
+  return false
+}
+
+/**
  * Sources changed ⇒ a `@guren/cli` changeset is present. Compared against
  * `base` (a ref or SHA). Callers on shallow checkouts must fetch it first.
  */
 export async function assertChangesetGate(base: string): Promise<string[]> {
-  // three-dot needs a merge base, which a shallow checkout may not have even
-  // after fetching the base ref; fall back to two-dot (base tip vs HEAD),
-  // which over-reports on a stale branch but never under-reports
+  // three-dot (merge-base..HEAD) is the precise diff on a full clone; it
+  // needs a merge base, which a shallow CI checkout that fetched only the
+  // base SHA does not have. Two-dot (base tip..HEAD) needs none and can only
+  // over-report on a stale branch, never under-report — so try precise, then
+  // safe.
   let diff = Bun.spawnSync(['git', 'diff', '--name-only', `${base}...HEAD`], { cwd: repoRoot })
   if (!diff.success) {
     diff = Bun.spawnSync(['git', 'diff', '--name-only', `${base}..HEAD`], { cwd: repoRoot })
@@ -308,8 +376,9 @@ export async function assertChangesetGate(base: string): Promise<string[]> {
   const changed = diff.stdout.toString().split('\n').filter(Boolean)
   const touched = changed.filter((f) => CATALOG_INPUTS.some((input) => (input.endsWith('/') ? f.startsWith(input) : f === input)))
   if (touched.length === 0) return []
-  // a version bump in the CLI manifest is itself the release PR — no changeset expected there
-  if (touched.every((f) => f === CLI_MANIFEST || f === CREATE_APP_MANIFEST)) return []
+  // the CLI manifest only moves in the release PR, which is the version bump
+  // itself — no changeset expected there
+  if (touched.every((f) => f === CLI_MANIFEST)) return []
 
   const changesetDir = join(repoRoot, '.changeset')
   let names: string[] = []
@@ -319,8 +388,7 @@ export async function assertChangesetGate(base: string): Promise<string[]> {
     // no .changeset dir — fall through to the failure below
   }
   for (const name of names) {
-    const body = await readFile(join(changesetDir, name), 'utf8')
-    if (/^---[\s\S]*?["']@guren\/cli["']\s*:/mu.test(body)) return []
+    if (changesetNames(await readFile(join(changesetDir, name), 'utf8'), '@guren/cli')) return []
   }
   return [
     `catalog inputs changed (${touched.join(', ')}) but no .changeset/*.md names "@guren/cli". ` +
@@ -336,7 +404,7 @@ export async function assertChangesetGate(base: string): Promise<string[]> {
  * or it could not be spawned). An unavailable check is not a green one; the
  * caller decides whether to block on it, but it is never reported as pass.
  */
-type ValidateOutcome = { kind: 'pass' } | { kind: 'fail'; output: string } | { kind: 'unavailable'; reason: string }
+export type ValidateOutcome = { kind: 'pass' } | { kind: 'fail'; output: string } | { kind: 'unavailable'; reason: string }
 
 export async function claudePluginValidate(payloadDir: string): Promise<ValidateOutcome> {
   const which = Bun.spawnSync(['sh', '-c', 'command -v claude'], {})
@@ -361,14 +429,25 @@ export async function claudePluginValidate(payloadDir: string): Promise<Validate
 // CLI
 // ---------------------------------------------------------------------------
 
-/** 0 clean, 1 a rule failed, 2 the gate could not fully run. */
-async function check(base: string | undefined, requireValidate: boolean): Promise<number> {
-  const files = await renderCatalog()
-  const problems = [
+/**
+ * The derived-fact rules, as one call. `--check` and the publish script both
+ * run exactly this over exactly the tree they are about to trust — one
+ * implementation, so the two cannot audit different things.
+ */
+export async function auditRenderedFiles(files: readonly RenderedFile[]): Promise<string[]> {
+  return [
     ...(await assertCommandsAndFlags(files)),
     ...assertTargets(files),
     ...(await assertMinCli()),
     ...(await assertPortableManifest(files)),
+  ]
+}
+
+/** 0 clean, 1 a rule failed, 2 the gate could not fully run. */
+async function check(base: string | undefined, requireValidate: boolean): Promise<number> {
+  const files = await renderCatalog()
+  const problems = [
+    ...(await auditRenderedFiles(files)),
     ...(base ? await assertChangesetGate(base) : []),
   ]
   if (problems.length > 0) {
@@ -402,6 +481,53 @@ async function check(base: string | undefined, requireValidate: boolean): Promis
   return 0
 }
 
+/**
+ * Is what gurenjs/agent-skills publishes the same tree this checkout renders?
+ * Read-only: clones the public repo shallow, renders, and diffs. Backs the
+ * nightly drift job — the one defense a maintainer-run publish lacks is a
+ * reminder that it was forgotten, and this is it. Exit 1 on drift with the
+ * file list; exit 2 if the public repo could not be cloned (unavailable is
+ * not green). Never writes anywhere but a temp dir.
+ */
+export async function diffPublished(remote: string): Promise<{ code: 0 | 1 | 2; report: string }> {
+  const cloneDir = await mkdtemp(join(tmpdir(), 'guren-agent-catalog-published-'))
+  try {
+    const clone = Bun.spawnSync(['git', 'clone', '--quiet', '--depth', '1', remote, cloneDir])
+    if (!clone.success) {
+      return { code: 2, report: `could not clone ${remote}:\n${clone.stderr.toString().trim()}` }
+    }
+    const rendered = await renderCatalog()
+    const drift: string[] = []
+    for (const file of rendered) {
+      const published = Bun.file(join(cloneDir, file.path))
+      if (!(await published.exists())) {
+        drift.push(`missing in published: ${file.path}`)
+        continue
+      }
+      if ((await published.text()) !== file.content) {
+        drift.push(`differs: ${file.path}`)
+      }
+    }
+    // files the publish would delete
+    const tracked = Bun.spawnSync(['git', 'ls-files'], { cwd: cloneDir }).stdout.toString().split('\n').filter(Boolean)
+    const renderedPaths = new Set(rendered.map((f) => f.path))
+    for (const path of tracked) {
+      if (!renderedPaths.has(path)) drift.push(`extra in published: ${path}`)
+    }
+    if (drift.length === 0) {
+      return { code: 0, report: `gurenjs/agent-skills matches this checkout's render (${rendered.length} files).` }
+    }
+    return {
+      code: 1,
+      report:
+        `gurenjs/agent-skills has drifted from this checkout's render:\n${drift.map((d) => `  ${d}`).join('\n')}\n` +
+        'Run `bun run publish:agent-catalog` after the release that carries these sources.',
+    }
+  } finally {
+    await rm(cloneDir, { recursive: true, force: true })
+  }
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2)
   const outIdx = args.indexOf('--out')
@@ -411,9 +537,16 @@ async function main(): Promise<void> {
     process.exitCode = await check(base, args.includes('--require-validate'))
     return
   }
+  if (args.includes('--diff-published')) {
+    const remote = process.env.GUREN_AGENT_SKILLS_REMOTE ?? 'https://github.com/gurenjs/agent-skills.git'
+    const result = await diffPublished(remote)
+    ;(result.code === 0 ? console.log : console.error)(result.report)
+    process.exitCode = result.code
+    return
+  }
   const outDir = outIdx >= 0 && args[outIdx + 1] ? args[outIdx + 1]! : undefined
   if (!outDir) {
-    throw new Error('Usage: build-agent-catalog.ts --out <dir> | --check [--base <ref>]')
+    throw new Error('Usage: build-agent-catalog.ts --out <dir> | --check [--base <ref>] [--require-validate] | --diff-published')
   }
   await rm(outDir, { recursive: true, force: true })
   const files = await writeCatalog(outDir)

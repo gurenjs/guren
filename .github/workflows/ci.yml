@@ -131,19 +131,25 @@ jobs:
       # it claims about the CLI: every `guren` command and flag a skill names is
       # registered, every target is in AGENT_TARGETS, the Agent Plugins v1
       # manifest conforms, and — because the plugin's version is the CLI's — a
-      # change to any catalog input carries a @guren/cli changeset. The base ref
-      # is fetched explicitly: the checkout above is shallow, so deepen both
-      # sides until a merge base exists (bounded), and the script falls back
-      # to a two-dot diff if none is found — over-reporting, never under.
+      # change to any catalog input carries a @guren/cli changeset.
+      #
+      # The changeset gate diffs against the PR's base *SHA* from the event
+      # payload, fetched by SHA into a named ref: on a shallow checkout there
+      # is no refs/remotes/origin/<base>, `git fetch origin <branch>` only
+      # updates FETCH_HEAD, and HEAD on a pull_request run is the synthetic
+      # merge commit, so a deepen loop keyed on either guesses. A two-dot diff
+      # (base..HEAD) needs no merge base. On `push` to main there is no base
+      # to gate against, so only the derived-fact rules run there; the gate
+      # already fired on the PR that merged.
       - name: Agent catalog audit
         run: |
-          base="${{ github.base_ref || 'main' }}"
-          git fetch --no-tags --depth=1 origin "$base"
-          for _ in 1 2 3 4 5 6; do
-            git merge-base HEAD "origin/$base" >/dev/null 2>&1 && break
-            git fetch --no-tags --deepen=50 origin "$base" HEAD || true
-          done
-          bun run audit:agent-catalog --base "origin/$base"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base_sha="${{ github.event.pull_request.base.sha }}"
+            git fetch --no-tags --depth=1 origin "$base_sha:refs/audit-base"
+            bun run audit:agent-catalog --base refs/audit-base
+          else
+            bun run audit:agent-catalog
+          fi
 
       - name: Dependency audit
         run: bun run audit:deps

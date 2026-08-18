@@ -64,7 +64,10 @@ Overwrites framework-managed files (rules, skills, subagents, hooks) with the
 installed CLI's version and leaves user-owned files alone. It reports files
 under the managed locations that the current harness no longer writes;
 `--prune` deletes those. Skills you or another installer (including this
-plugin) added to `.claude/skills/` or `.agents/skills/` are never touched.
+plugin) added to `.claude/skills/` or `.agents/skills/` are never touched
+unless they sit under a name the harness itself ships — the claim is by
+directory name, so avoid the canonical names (`dev-workflow`, `db-manage`,
+`scaffold`, `feature`, `guren-api`, `plugin-authoring`) for your own.
 
 ## The loop the harness expects
 

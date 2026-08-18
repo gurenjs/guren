@@ -5,12 +5,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import {
+  CATALOG_INPUTS,
   assertCommandsAndFlags,
   assertMinCli,
   assertPortableManifest,
   assertTargets,
+  changesetNames,
   claudePluginValidate,
   renderCatalog,
+  validateAgainstSchema,
   writeCatalog,
 } from './build-agent-catalog.ts'
 
@@ -117,6 +120,44 @@ describe('audit: commands and flags', () => {
   it('does not read prose after an inline span as flags', async () => {
     expect(await assertCommandsAndFlags(md('x.md', 'Use `guren check` — the --changed flag is optional prose here.'))).toEqual([])
   })
+
+  it('attributes flags per invocation when several share a line', async () => {
+    // --target belongs to agent:init, not to check; a greedy rest-of-line
+    // capture would blame check for a flag it never declared
+    expect(await assertCommandsAndFlags(md('x.md', '`guren check && guren agent:init --target codex`'))).toEqual([])
+    const bad = await assertCommandsAndFlags(md('x.md', '`guren check --target codex && guren agent:init`'))
+    expect(bad).toHaveLength(1)
+    expect(bad[0]).toContain('check')
+  })
+
+  it('accepts the root --version probe the harness skill relies on', async () => {
+    expect(await assertCommandsAndFlags(md('x.md', 'Run `bunx guren --version` first.'))).toEqual([])
+  })
+})
+
+describe('audit: changeset gate parser', () => {
+  it('reads a quoted key', () => {
+    expect(changesetNames('---\n"@guren/cli": minor\n---\n\nbody\n', '@guren/cli')).toBe(true)
+  })
+  it('reads an unquoted key', () => {
+    expect(changesetNames('---\n@guren/cli: patch\n---\n\nbody\n', '@guren/cli')).toBe(true)
+  })
+  it('reads a key that is not first', () => {
+    expect(changesetNames('---\n"@guren/orm": minor\n"@guren/cli": patch\n---\n', '@guren/cli')).toBe(true)
+  })
+  it('does not count a mention in the Markdown body', () => {
+    expect(changesetNames('---\n"@guren/orm": minor\n---\n\nSee "@guren/cli": it is unaffected.\n', '@guren/cli')).toBe(false)
+  })
+  it('does not count a different package', () => {
+    expect(changesetNames('---\n"@guren/cli-extras": minor\n---\n', '@guren/cli')).toBe(false)
+  })
+  it('the gate watches every file renderCatalog reads', () => {
+    // LICENSE is copied into the payload and the schema drives validation;
+    // both were once missing from this list, which let a change to either
+    // publish under an unchanged version
+    expect(CATALOG_INPUTS).toContain('LICENSE')
+    expect(CATALOG_INPUTS.some((i) => i.startsWith('packages/cli/templates/agent-catalog'))).toBe(true)
+  })
 })
 
 describe('audit: targets', () => {
@@ -161,16 +202,32 @@ describe('audit: Agent Plugins v1 manifest', () => {
     const problems = await assertPortableManifest(rootManifest({ ...valid, mcpServers: {} }))
     expect(problems).toEqual(['plugin.json: field "mcpServers" is not permitted (closed schema)'])
   })
-  it('fails on a name that violates the Agent Plugins name rule', async () => {
-    for (const bad of ['Guren', 'guren--skills', '-guren', 'guren.', 'a'.repeat(65)]) {
+  it("fails on a name that violates the schema's own pattern", async () => {
+    for (const bad of ['Guren', 'guren--skills', 'guren..skills', '-guren', 'guren.', 'a'.repeat(65), '']) {
       const problems = await assertPortableManifest(rootManifest({ ...valid, name: bad }))
-      expect(problems.some((p) => p.includes('name rule'))).toBe(true)
+      expect(problems.some((p) => p.includes('plugin.json.name'))).toBe(true)
     }
   })
-  it('accepts every valid name shape the spec lists', async () => {
-    for (const ok of ['my-plugin', 'acme.tools', 'lint3r', 'a']) {
+  it("accepts every valid name shape, including mixed separators the spec's pattern admits", async () => {
+    // a-.b is valid per the schema (only -- and .. are forbidden); a stricter
+    // hand-written regex used to reject it
+    for (const ok of ['my-plugin', 'acme.tools', 'lint3r', 'a', 'a-.b', 'a.-b']) {
       expect(await assertPortableManifest(rootManifest({ ...valid, name: ok }))).toEqual([])
     }
+  })
+  it('enforces field types the schema declares, not just top-level keys', async () => {
+    const problems = await assertPortableManifest(rootManifest({ ...valid, keywords: ['ok', 42] }))
+    expect(problems.some((p) => p.includes('keywords[1]'))).toBe(true)
+    const author = await assertPortableManifest(rootManifest({ ...valid, author: { name: 'x', twitter: '@x' } }))
+    expect(author.some((p) => p.includes('author') && p.includes('twitter'))).toBe(true)
+    const version = await assertPortableManifest(rootManifest({ ...valid, version: 1 }))
+    expect(version.some((p) => p.includes('plugin.json.version'))).toBe(true)
+  })
+  it('validateAgainstSchema is driven by the schema, so an upstream change is honored', () => {
+    // a schema that adds a constraint is enforced without touching this file
+    expect(validateAgainstSchema({ name: 'a' }, { type: 'object', properties: { name: { type: 'string', minLength: 3 } } })).toEqual([
+      'plugin.json.name: shorter than 3',
+    ])
   })
   it('fails when the Claude copy diverges from the root beyond $schema', async () => {
     const problems = await assertPortableManifest([
