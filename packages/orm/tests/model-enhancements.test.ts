@@ -198,59 +198,64 @@ describe('Phase 2: Serialization', () => {
 // =============================================================================
 
 describe('Phase 3: QueryBuilder.with()', () => {
-  it('loads relations via QueryBuilder.with()', async () => {
-    type PostRecord = { id: number; title: string; authorId: number }
+  type PostRecord = { id: number; title: string; authorId: number }
 
-    class User extends Model<UserRecord> {
-      static table = 'users'
-    }
+  // One in-memory adapter over several tables: the eager loader queries the
+  // related table through the same adapter the parent model uses.
+  function createMultiAdapter(stores: Record<string, PlainObject[]>): ORMAdapter {
+    const matches = (where: PlainObject) => (r: PlainObject) =>
+      Object.entries(where).every(([k, v]) => (Array.isArray(v) ? v.includes(r[k]) : r[k] === v))
+    const rows = (table: unknown) => stores[String(table)] ?? []
 
-    class Post extends Model<PostRecord> {
-      static table = 'posts'
-    }
-
-    User.hasMany('posts', Post, 'authorId', 'id')
-
-    const stores = {
-      users: [
-        { id: 1, name: 'Alice' },
-        { id: 2, name: 'Bob' },
-      ] as UserRecord[],
-      posts: [
-        { id: 10, title: 'Post A', authorId: 1 },
-        { id: 11, title: 'Post B', authorId: 1 },
-        { id: 12, title: 'Post C', authorId: 2 },
-      ] as PostRecord[],
-    }
-
-    const multiAdapter: ORMAdapter = {
+    return {
       async findMany<T extends PlainObject>(table: unknown, options?: FindManyOptions<T>): Promise<T[]> {
-        const store = table === 'users' ? stores.users : stores.posts
-        const { where } = options ?? {}
-        let results = where
-          ? store.filter((r) =>
-              Object.entries(where as PlainObject).every(([k, v]) => {
-                if (Array.isArray(v)) return v.includes((r as PlainObject)[k])
-                return (r as PlainObject)[k] === v
-              }),
-            )
-          : [...store]
+        const { where, limit, offset } = options ?? {}
+        let results = where ? rows(table).filter(matches(where as PlainObject)) : [...rows(table)]
+        if (typeof offset === 'number') results = results.slice(offset)
+        if (typeof limit === 'number') results = results.slice(0, limit)
         return results.map((r) => ({ ...r })) as unknown as T[]
       },
       async findUnique<T extends PlainObject>(table: unknown, where: WhereClause<T>): Promise<T | null> {
-        const store = table === 'users' ? stores.users : stores.posts
-        const record = store.find((r) =>
-          Object.entries(where as PlainObject).every(([k, v]) => (r as PlainObject)[k] === v),
-        )
+        const record = rows(table).find(matches(where as PlainObject))
         return (record ? { ...record } : null) as unknown as T | null
       },
       async create<T extends PlainObject>(table: unknown, data: PlainObject): Promise<T> {
         return data as unknown as T
       },
+      async count(table: unknown): Promise<number> {
+        return rows(table).length
+      },
     }
+  }
 
-    User.useAdapter(multiAdapter)
-    Post.useAdapter(multiAdapter)
+  function defineBlog(stores: Record<string, PlainObject[]>) {
+    class User extends Model<UserRecord> {
+      static table = 'users'
+    }
+    class Post extends Model<PostRecord> {
+      static table = 'posts'
+    }
+    User.hasMany('posts', Post, 'authorId', 'id')
+    Post.belongsTo('author', User, 'authorId', 'id')
+
+    const adapter = createMultiAdapter(stores)
+    User.useAdapter(adapter)
+    Post.useAdapter(adapter)
+    return { User, Post }
+  }
+
+  it('loads relations via QueryBuilder.with()', async () => {
+    const { User } = defineBlog({
+      users: [
+        { id: 1, name: 'Alice' },
+        { id: 2, name: 'Bob' },
+      ],
+      posts: [
+        { id: 10, title: 'Post A', authorId: 1 },
+        { id: 11, title: 'Post B', authorId: 1 },
+        { id: 12, title: 'Post C', authorId: 2 },
+      ],
+    })
 
     const users = await User.where({ name: 'Alice' }).with('posts').get() as any[]
     expect(users).toHaveLength(1)
@@ -259,48 +264,52 @@ describe('Phase 3: QueryBuilder.with()', () => {
   })
 
   it('loads relations via first().with()', async () => {
-    type PostRecord = { id: number; title: string; authorId: number }
-
-    class User extends Model<UserRecord> {
-      static table = 'users'
-    }
-
-    class Post extends Model<PostRecord> {
-      static table = 'posts'
-    }
-
-    User.hasMany('posts', Post, 'authorId', 'id')
-
-    const stores = {
-      users: [{ id: 1, name: 'Alice' }] as UserRecord[],
-      posts: [{ id: 10, title: 'Post A', authorId: 1 }] as PostRecord[],
-    }
-
-    const multiAdapter: ORMAdapter = {
-      async findMany<T extends PlainObject>(table: unknown, options?: FindManyOptions<T>): Promise<T[]> {
-        const store = table === 'users' ? stores.users : stores.posts
-        const { where, limit } = options ?? {}
-        let results = where
-          ? store.filter((r) =>
-              Object.entries(where as PlainObject).every(([k, v]) => {
-                if (Array.isArray(v)) return v.includes((r as PlainObject)[k])
-                return (r as PlainObject)[k] === v
-              }),
-            )
-          : [...store]
-        if (typeof limit === 'number') results = results.slice(0, limit)
-        return results.map((r) => ({ ...r })) as unknown as T[]
-      },
-      async findUnique<T extends PlainObject>(): Promise<T | null> { return null },
-      async create<T extends PlainObject>(table: unknown, data: PlainObject): Promise<T> { return data as unknown as T },
-    }
-
-    User.useAdapter(multiAdapter)
-    Post.useAdapter(multiAdapter)
+    const { User } = defineBlog({
+      users: [{ id: 1, name: 'Alice' }],
+      posts: [{ id: 10, title: 'Post A', authorId: 1 }],
+    })
 
     const user = await User.newQuery().with('posts').first() as any
     expect(user).not.toBeNull()
     expect(user.posts).toHaveLength(1)
+  })
+
+  it('loads relations via with().paginate()', async () => {
+    const { Post } = defineBlog({
+      users: [
+        { id: 1, name: 'Alice' },
+        { id: 2, name: 'Bob' },
+      ],
+      posts: [
+        { id: 10, title: 'Post A', authorId: 1 },
+        { id: 11, title: 'Post B', authorId: 2 },
+        { id: 12, title: 'Post C', authorId: 1 },
+      ],
+    })
+
+    const page = await Post.newQuery().with('author').paginate({ page: 1, perPage: 2 }) as any
+    expect(page.meta.total).toBe(3)
+    expect(page.data).toHaveLength(2)
+    expect(page.data[0].author).toMatchObject({ id: 1, name: 'Alice' })
+    expect(page.data[1].author).toMatchObject({ id: 2, name: 'Bob' })
+
+    const last = await Post.newQuery().with('author').paginate({ page: 2, perPage: 2 }) as any
+    expect(last.data).toHaveLength(1)
+    expect(last.data[0].author).toMatchObject({ id: 1, name: 'Alice' })
+  })
+
+  it('restores limit/offset when eager loading fails in first() and paginate()', async () => {
+    const { Post } = defineBlog({
+      users: [{ id: 1, name: 'Alice' }],
+      // Enough rows that both queries fetch something: an empty page never
+      // reaches the eager loader, so it could not fail there.
+      posts: Array.from({ length: 5 }, (_, i) => ({ id: 10 + i, title: `Post ${i}`, authorId: 1 })),
+    })
+
+    const query = Post.newQuery().with('missing').limit(5).offset(3)
+    await expect(query.first()).rejects.toThrow('unknown relation "missing"')
+    await expect(query.paginate({ page: 1, perPage: 1 })).rejects.toThrow('unknown relation "missing"')
+    expect(query.getOptions()).toMatchObject({ limitValue: 5, offsetValue: 3 })
   })
 })
 

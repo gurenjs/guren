@@ -360,11 +360,12 @@ export class QueryBuilder<
   async first(): Promise<TResult | null> {
     const prev = this.options.limitValue
     this.options.limitValue = 1
-    const results = await this.executeQuery()
-    this.options.limitValue = prev
-    if (results.length === 0) return null
-    const loaded = await this.loadEagerRelations(results)
-    return loaded[0] as TResult
+    try {
+      const results = await this.get()
+      return results[0] ?? null
+    } finally {
+      this.options.limitValue = prev
+    }
   }
 
   /**
@@ -432,11 +433,14 @@ export class QueryBuilder<
     this.options.limitValue = sanitizedPerPage
     this.options.offsetValue = offset
 
-    const data = await this.executeQuery()
-
-    // Restore
-    this.options.limitValue = prevLimit
-    this.options.offsetValue = prevOffset
+    // get() is the one path that also attaches `.with()` relations.
+    let data: TResult[]
+    try {
+      data = await this.get()
+    } finally {
+      this.options.limitValue = prevLimit
+      this.options.offsetValue = prevOffset
+    }
 
     const from = total === 0 ? 0 : offset + 1
     const to = total === 0 ? 0 : offset + data.length
