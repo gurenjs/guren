@@ -633,18 +633,6 @@ export class Application {
     // Registering first here is the only ordering an app cannot get in front of.
     this.mountSecurityDefaults()
 
-    // Publish this container as the process-wide one. Code that runs outside a
-    // request has no context to reach it through — Job.make() and the exported
-    // resolve() both read the global — so without this every job that resolves
-    // a service throws "Container not initialized".
-    //
-    // Set here rather than in boot() because a job can run against an app that
-    // was never booted: `guren queue:work` imports the app entry (which builds
-    // the Application at module scope) and reads the queue driver without
-    // calling boot(). Last construction wins, which is what `bun --hot` wants —
-    // a reloaded entry replaces the stale container instead of being ignored.
-    setContainer(this.container)
-
     // Bind core instances
     this.container.instance('app', this as Application)
     this.container.instance('hono', this.hono)
@@ -726,6 +714,24 @@ export class Application {
     if (!hasUserProviderOf(InertiaServiceProvider)) {
       this.providerManager.register(InertiaServiceProvider)
     }
+
+    // Publish this container as the process-wide one. Code that runs outside a
+    // request has no context to reach it through — Job.make() and the exported
+    // resolve() both read the global — so without this every job that resolves
+    // a service throws "Container not initialized".
+    //
+    // Construction rather than boot(): `guren queue:work` bootstraps the app
+    // only far enough to read the queue driver, and an entry that just exports
+    // the application (no `ready`/`bootstrap`) is accepted there and never
+    // booted. A job dispatched from module scope is in the same position.
+    //
+    // Last statement of the constructor, so an application that fails to build
+    // — provider registration below instantiates providers, and that can throw
+    // — leaves the previous application's container in place rather than
+    // publishing its own half-built one. Otherwise last construction wins,
+    // which is what `bun --hot` wants: a reloaded entry replaces the stale
+    // container instead of being ignored.
+    setContainer(this.container)
   }
 
   get auth(): AuthManager {
