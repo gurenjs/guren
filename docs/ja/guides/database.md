@@ -876,7 +876,7 @@ const posts = await Post.with('author', { authorId: [1, 2] })
 // posts[0].author は関連する UserRecord か null（belongsTo の場合）
 ```
 
-QueryBuilder 上でも eager loading が使えるので、フィルタやソートと組み合わせられます。
+QueryBuilder 上でも eager loading が使えるので、フィルタやソートと組み合わせられます。レコードを返す `get()`、`first()`、`firstOrFail()`、`paginate()` のいずれでもリレーションが付与されます。
 
 ```ts
 const activeUsers = await User.where('active', true)
@@ -885,6 +885,9 @@ const activeUsers = await User.where('active', true)
   .get()
 
 const user = await User.newQuery().with('posts').first()
+
+// ページの各行にも author が付きます
+const page = await Post.newQuery().with('author').orderBy('id', 'desc').paginate({ page: 1, perPage: 10 })
 ```
 
 ネストリレーションはドット記法で指定します。

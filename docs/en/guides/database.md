@@ -370,7 +370,7 @@ const posts = await Post.with('author')             // posts[0].author is UserRe
 const filtered = await Post.with('author', { authorId: [1, 2] })
 ```
 
-Eager loading also works on the QueryBuilder, so you can combine it with filters and ordering:
+Eager loading also works on the QueryBuilder, so you can combine it with filters and ordering. The record-returning methods — `get()`, `first()`, `firstOrFail()`, and `paginate()` — all attach the relations:
 
 ```ts
 const activeUsers = await User.where('active', true)
@@ -379,6 +379,9 @@ const activeUsers = await User.where('active', true)
   .get()
 
 const user = await User.newQuery().with('posts').first()
+
+// Each row of the page carries its author
+const page = await Post.newQuery().with('author').orderBy('id', 'desc').paginate({ page: 1, perPage: 10 })
 ```
 
 Nested relations use dot notation:
