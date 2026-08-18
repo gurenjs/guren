@@ -192,7 +192,7 @@ just audit.
 | The agent target list the harness skill offers | `AGENT_TARGETS` in `packages/cli/src/agent-targets.ts` |
 | Plugin `version` | `packages/cli/package.json` version (see §5) |
 | Minimum `@guren/cli` claim | a single constant in the generator, asserted `<=` the workspace version |
-| Scaffolder name and invocation | the `create-guren-app` workspace package name |
+| ~~Scaffolder name and invocation~~ | ~~the `create-guren-app` workspace package name~~ **Amended in implementation:** dropped. `create-guren-app` is named literally in the skill and the audit does not derive it; the generator never read the create-app manifest, so listing it as an input was a false promise. Renaming the scaffolder is a template edit under the changeset gate like any other. |
 | Every `guren <subcommand>` and flag the skills name | the CLI's registered command list plus each command's declared `args` |
 
 That last row is the one that earns its keep, and it needs a small refactor
@@ -420,7 +420,14 @@ export type ManagedNamespace =
 `tree` (rule files are flat and framework-owned, and the entry documents
 present that directory as the framework's rule catalog).
 
-**`names` cannot be the current plan alone, and this is the subtle part.** A
+**`names` cannot be the current plan alone, and this is the subtle part.**
+*Amended in implementation (2026-08-18):* every claimed name — planned or
+retired — is also validated as exactly one plain path segment before it
+reaches the walker; the claim is interpolated into a directory `--prune`
+removes under, so `..` or `a/b` would otherwise claim outside the app. And
+the guarantee is by *name*, not by author: a third-party skill installed
+under a canonical name such as `dev-workflow` collides and is refreshed as
+the framework's own. The docs and changeset say so. A
 claim over only current names can never recognize a skill the framework used
 to ship and has since dropped — and cleaning those up is existing, deliberate
 behavior, pinned by the test
@@ -729,9 +736,18 @@ the changeset.
 
 ## Open Questions
 
-1. **Does `claude plugin validate` run unauthenticated in CI?** Determines
+1. ~~**Does `claude plugin validate` run unauthenticated in CI?** Determines
    whether manifest validation is a PR gate or a release-workflow step. To be
-   settled empirically in implementation.
+   settled empirically in implementation.~~ **Resolved in implementation
+   (2026-08-18):** it runs unauthenticated wherever the `claude` binary is
+   present — verified locally with `--strict` on both the plugin and the
+   marketplace manifest — but the ubuntu CI runner has no `claude` on PATH.
+   So `audit:agent-catalog` in CI reports validation as *could-not-run*
+   (distinct from pass, printed in the log) and gates on the derived-fact
+   rules; the validator's blocking run is `publish:agent-catalog`, which
+   refuses to publish when it is unavailable (`--skip-validate` is the
+   explicit override for a maintainer who validated by hand). Publish is the
+   last gate before users, and it runs on a machine that has the CLI.
 2. **Plugin version derived from `@guren/cli` vs. independent.** Recommended
    derived (§5); the cost is that a wording fix waits for a CLI release.
    Review raised a sharper objection: `guren-new-app` mostly describes
