@@ -912,9 +912,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     }
 
     const copy = { ...record }
-    for (const rel of relationList) {
-      await this.loadRelationInto([copy], rel, queryOptions)
-    }
+    await this.loadRelationsInto([copy], relationList, queryOptions)
     return copy as TRecordFor<T> & RelationTypePick<T, Names>
   }
 
@@ -955,9 +953,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     }
 
     const copy = { ...record }
-    for (const rel of relationList) {
-      await this.loadRelationInto([copy], rel, queryOptions)
-    }
+    await this.loadRelationsInto([copy], relationList, queryOptions)
     return copy as TRecordFor<T> & RelationTypePick<T, Names>
   }
 
@@ -1617,9 +1613,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
 
     const records = result.data.map((record) => ({ ...record }))
 
-    for (const relationName of relationList) {
-      await this.loadRelationInto(records, relationName, queryOptions)
-    }
+    await this.loadRelationsInto(records, relationList, queryOptions)
 
     return {
       data: records as Array<TRecordFor<T> & RelationTypePick<T, Names>>,
@@ -1949,9 +1943,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     }
 
     const copies = records.map((record) => ({ ...record }))
-    for (const relationName of relationList) {
-      await this.loadRelationInto(copies, relationName, queryOptions)
-    }
+    await this.loadRelationsInto(copies, relationList, queryOptions)
 
     return copies as Array<TRecordFor<T> & RelationTypePick<T, Names>>
   }
@@ -2076,10 +2068,52 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    * @internal Used by QueryBuilder for eager loading.
    * Supports nested paths with dot notation, e.g. `posts.comments`.
    *
-   * `constraints` are keyed by the full path of the level each one constrains,
-   * so `pathPrefix` accumulates the path walked so far as the recursion
-   * descends: at `posts.comments` the leaf looks itself up under that whole
-   * key, not under `comments`.
+   * Paths are grouped by their head segment so a relation shared by several
+   * paths is loaded exactly once. Walking `posts.comments` and `posts.tags`
+   * independently would load `posts` twice, and the loaders assign fresh
+   * spread copies — so the second pass would replace the very row objects the
+   * first had already attached children to, and only the last path would
+   * survive.
+   */
+  static async loadRelationsInto<T extends typeof Model>(
+    this: T,
+    records: Array<PlainObject>,
+    relationNames: readonly string[],
+    queryOptions?: ModelQueryOptions,
+    constraints?: EagerLoadConstraints,
+    pathPrefix = '',
+  ): Promise<void> {
+    if (relationNames.length === 0) return
+
+    // head -> the distinct tails to walk beneath it, in first-seen order.
+    const groups = new Map<string, string[]>()
+    for (const path of relationNames) {
+      const [head, ...rest] = path.split('.')
+      const tails = groups.get(head) ?? []
+      groups.set(head, tails)
+
+      // A bare path contributes no tail, so `posts` alongside `posts.comments`
+      // loads `posts` once and still descends into the comments. A trailing
+      // dot does contribute one — an empty tail — so a malformed `posts.`
+      // still reaches the unknown-relation throw rather than being read as
+      // the bare `posts`.
+      if (rest.length > 0) {
+        const tail = rest.join('.')
+        if (!tails.includes(tail)) {
+          tails.push(tail)
+        }
+      }
+    }
+
+    for (const [head, tails] of groups) {
+      await this.loadRelationLevel(records, head, tails, queryOptions, constraints, pathPrefix)
+    }
+  }
+
+  /**
+   * @internal Public since it is reachable from generated code; kept for
+   * backwards compatibility now that the eager loader walks whole path lists.
+   * Internal callers should use {@link loadRelationsInto} instead.
    */
   static async loadRelationInto<T extends typeof Model>(
     this: T,
@@ -2089,7 +2123,26 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     constraints?: EagerLoadConstraints,
     pathPrefix = '',
   ): Promise<void> {
-    const [head, ...rest] = relationName.split('.')
+    await this.loadRelationsInto(records, [relationName], queryOptions, constraints, pathPrefix)
+  }
+
+  /**
+   * Load one relation level and recurse into the tails beneath it.
+   *
+   * `constraints` are keyed by the full path of the level each one constrains,
+   * so `pathPrefix` accumulates the path walked so far as the recursion
+   * descends: at `posts.comments` the leaf looks itself up under that whole
+   * key, not under `comments`.
+   */
+  protected static async loadRelationLevel<T extends typeof Model>(
+    this: T,
+    records: Array<PlainObject>,
+    head: string,
+    tails: readonly string[],
+    queryOptions?: ModelQueryOptions,
+    constraints?: EagerLoadConstraints,
+    pathPrefix = '',
+  ): Promise<void> {
     const definition = this.getRelationDefinition(head)
 
     if (!definition) {
@@ -2126,7 +2179,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
         break
     }
 
-    if (rest.length === 0) {
+    if (tails.length === 0) {
       return
     }
 
@@ -2156,7 +2209,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     }
 
     const related = await resolveModelReference(definition.related)
-    await related.loadRelationInto(children, rest.join('.'), queryOptions, constraints, currentPath)
+    await related.loadRelationsInto(children, tails, queryOptions, constraints, currentPath)
   }
 
   protected static async loadHasMany(
@@ -2529,7 +2582,7 @@ type RelationNames = string | readonly string[]
 // ('comments.author'). Only the head segment is checked against
 // relationTypes — the tail is an unvalidated string, so a malformed path
 // ('comments.', 'comments..author') or a typo'd nested segment still
-// type-checks. loadRelationInto() throws "unknown relation" for a bad tail
+// type-checks. loadRelationLevel() throws "unknown relation" for a bad tail
 // segment at runtime, but only once it actually recurses into at least one
 // loaded child row — if every record's head relation loads zero rows, the
 // tail is never inspected and the call silently no-ops. Declare the nested

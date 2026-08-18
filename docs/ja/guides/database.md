@@ -896,6 +896,16 @@ const page = await Post.newQuery().with('author').orderBy('id', 'desc').paginate
 const users = await User.with('posts.comments')
 ```
 
+同じリレーションから複数のパスを枝分かれさせることもできます。共通する先頭の
+リレーションは一度だけ読み込まれるため、どの枝も同じレコードに載ります。
+
+```ts
+const users = await User.newQuery().with('posts.comments', 'posts.tags').get()
+
+users[0].posts[0].comments // 読み込まれます
+users[0].posts[0].tags     // こちらも読み込まれます
+```
+
 QueryBuilder では、`with()` のオブジェクト形式でリレーションごとにコールバックを
 渡し、読み込みクエリに条件を追加できます。コールバックは外部キーによる絞り込みが
 すでに適用されたクエリビルダを受け取るので、`where()` を呼ぶと読み込む関連レコード

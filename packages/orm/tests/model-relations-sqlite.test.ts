@@ -54,6 +54,9 @@ type UserWithPosts = UserRecord & { posts: PostRecord[] }
 type UserWithPostComments = UserRecord & {
   posts: Array<PostRecord & { comments: CommentRecord[] }>
 }
+type UserWithPostCommentsAndTags = UserRecord & {
+  posts: Array<PostRecord & { comments: CommentRecord[]; tags: TagRecord[] }>
+}
 type PostWithAuthor = PostRecord & { author: UserRecord | null }
 type UserWithPostAuthors = UserRecord & { posts: PostWithAuthor[] }
 
@@ -365,5 +368,93 @@ describe('relations on real bun:sqlite driver', () => {
       'keep',
       'keep',
     ])
+  })
+
+  it('should load both sibling nested paths under a shared head', async () => {
+    const users = (await User.newQuery()
+      .with('posts.comments', 'posts.tags')
+      .get()) as UserWithPostCommentsAndTags[]
+
+    const a1 = users.find((u) => u.name === 'Alice')?.posts.find((p) => p.title === 'A1')
+    // the shared head `posts` is loaded once, so neither sibling replaces the
+    // row objects the other already attached children to
+    expect(a1?.comments.map((c) => c.body).sort()).toEqual(['drop', 'keep'])
+    expect(a1?.tags.map((t) => t.name).sort()).toEqual(['draft', 'news'])
+  })
+
+  it('should load both sibling nested paths regardless of their order', async () => {
+    const users = (await User.newQuery()
+      .with('posts.tags', 'posts.comments')
+      .get()) as UserWithPostCommentsAndTags[]
+
+    const a1 = users.find((u) => u.name === 'Alice')?.posts.find((p) => p.title === 'A1')
+    expect(a1?.comments.map((c) => c.body).sort()).toEqual(['drop', 'keep'])
+    expect(a1?.tags.map((t) => t.name).sort()).toEqual(['draft', 'news'])
+  })
+
+  it('should keep sibling nested paths when each carries its own constraint', async () => {
+    const users = (await User.newQuery()
+      .with({
+        'posts.tags': (q) => q.where('name', 'news'),
+        'posts.comments': (q) => q.where('body', 'keep'),
+      })
+      .get()) as UserWithPostCommentsAndTags[]
+
+    const a1 = users.find((u) => u.name === 'Alice')?.posts.find((p) => p.title === 'A1')
+    expect(a1?.comments.map((c) => c.body)).toEqual(['keep'])
+    expect(a1?.tags.map((t) => t.name)).toEqual(['news'])
+  })
+
+  it('should load a bare path and a nested path that share a head', async () => {
+    const users = (await User.newQuery()
+      .with('posts', 'posts.comments')
+      .get()) as UserWithPostComments[]
+
+    const alice = users.find((u) => u.name === 'Alice')
+    expect(alice?.posts.map((p) => p.title).sort()).toEqual(['A1', 'A2'])
+    expect(alice?.posts.find((p) => p.title === 'A1')?.comments.map((c) => c.body).sort()).toEqual([
+      'drop',
+      'keep',
+    ])
+  })
+
+  it('should load sibling nested paths through Model.with()', async () => {
+    const users = (await User.with(['posts.comments', 'posts.tags'])) as UserWithPostCommentsAndTags[]
+
+    const a1 = users.find((u) => u.name === 'Alice')?.posts.find((p) => p.title === 'A1')
+    expect(a1?.comments.map((c) => c.body).sort()).toEqual(['drop', 'keep'])
+    expect(a1?.tags.map((t) => t.name).sort()).toEqual(['draft', 'news'])
+  })
+
+  it('should reject a nested path that walks through a morphTo relation', async () => {
+    Model.morphMap = { Post, User }
+    try {
+      await expect(Image.newQuery().with('imageable.author').get()).rejects.toThrow(
+        /nested eager loading through morphTo relation "imageable"/,
+      )
+    } finally {
+      Model.morphMap = undefined
+    }
+  })
+
+  it('should reject a nested morphTo path even when there are no records to load', async () => {
+    // the throw has to stay ahead of any children inspection, so an empty
+    // result set still reports the unsupported path instead of resolving
+    Model.morphMap = { Post, User }
+    try {
+      await expect(Image.loadRelationInto([], 'imageable.author')).rejects.toThrow(
+        /nested eager loading through morphTo relation "imageable"/,
+      )
+    } finally {
+      Model.morphMap = undefined
+    }
+  })
+
+  it('should reject a path with a trailing dot instead of reading it as bare', async () => {
+    // `posts.` names an empty tail segment; silently treating it as `posts`
+    // would swallow a typo that used to be reported
+    await expect(User.newQuery().with('posts.' as never).get()).rejects.toThrow(
+      /unknown relation ""/,
+    )
   })
 })

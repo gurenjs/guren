@@ -390,6 +390,16 @@ Nested relations use dot notation:
 const users = await User.with('posts.comments')
 ```
 
+Several paths may branch off the same relation. The shared head is read once,
+so every branch lands on the same records:
+
+```ts
+const users = await User.newQuery().with('posts.comments', 'posts.tags').get()
+
+users[0].posts[0].comments // loaded
+users[0].posts[0].tags     // loaded too
+```
+
 On the QueryBuilder, the object form of `with()` takes a callback per relation
 to constrain the query that loads it. The callback receives that relation's
 query builder with the foreign-key filter already on it, so a `where()` narrows
