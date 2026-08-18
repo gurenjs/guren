@@ -150,6 +150,7 @@ describe('GUREN_API_DIGEST', () => {
       'validateBody',
       'userOrFail',
       'bind: { id: Post }',
+      "bind: { slug: [Post, 'slug'] }",
       "await this.authorize('update', [Post, post])",
     ],
     'testing.md': ['actingAs', 'withCsrf', 'assertUnprocessable', 'assertInertia', 'query(path, body?)'],

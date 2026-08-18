@@ -150,26 +150,62 @@ router.get('/posts/:id', [PostsController, 'show'])
 
 ## ルートモデルバインディング
 
-毎回 `findOrFail()` を書きたくない場合は、ルートパラメータにモデルをバインドできます。
+毎回 `findOrFail()` を書きたくない場合は、ルートパラメータにモデルをバインドできます。ルートの `bind` オプションでバインディングを宣言し、コントローラーでは `this.model()` でレコードを受け取ります。
 
 ```ts
 import { PostResource } from '@/app/Http/Resources/PostResource'
 import { pages } from '@/.guren/pages.gen'
 
-router.bind('post', Post)
-router.get('/posts/:post', [PostsController, 'show'])
+// routes/web.ts: :id は Post.findOrFail(id) で解決される
+router.get('/posts/:id', { bind: { id: Post }, name: 'posts.show' }, [PostsController, 'show'])
 
 async show() {
-  const post = this.ctx.get('post') as PostRecord
+  const post = this.model(Post)  // PostRecord として型付け済み
   return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() })
 }
 ```
 
-slug ベースの解決にしたい場合は、独自 resolver も渡せます。
+レコードが見つからなければ自動的に 404 を返します。
+
+### 主キー以外のカラムでバインドする
+
+モデルクラスだけを渡した場合は常に主キーで検索します。slug など別のユニークカラムで解決したいときは `[Model, column]` のタプルを渡してください。ルーターは `Post.findOrFail(value, 'slug')` を呼び、`this.model(Post)` は同じレコードを返します。
 
 ```ts
-router.bind('post', async (value) => Post.where('slug', value).firstOrFail())
+router.get('/posts/:slug', { bind: { slug: [Post, 'slug'] }, name: 'posts.show' }, [PostsController, 'show'])
+
+async show() {
+  const post = this.model(Post)  // slug で解決済み
+  // ...
+}
 ```
+
+カラム名はただの文字列です。綴りを間違えると 404 ではなくクエリ自体が失敗するので、スキーマと揃えてください。同じパラメータをルーター（後述）とルートの両方でバインドした場合はルート側の `bind` が優先され、検索は 1 回だけ行われます。
+
+### ルーターレベルのバインディング
+
+`router.bind(param, ...)` は、そのルーターに登録されたコントローラータプルのルートのうち、パスに同名パラメータを含むものすべてに対して一度でバインドします。`bind` オプションと同じモデル形式（`Post` または `[Post, 'slug']`）に加え、独自 resolver 関数も渡せます。
+
+```ts
+router.bind('post', Post)                    // 主キーで検索
+router.bind('post', [Post, 'slug'])          // slug で検索
+router.bind('post', async (value) => Post.where('slug', value).firstOrFail())  // 独自 resolver
+
+router.get('/posts/:post', [PostsController, 'show'])
+```
+
+ルーターレベルのバインディングで解決された値は、コンテキストの後ろに**位置引数として**パスパラメータの順に渡されます。モデルバインディング（`Post` や `[Post, 'slug']`）は `this.model(Post)` でも受け取れますが、独自 resolver の値は参照するためのモデルクラスがないため位置引数でのみ受け取れます。
+
+```ts
+import type { Context } from '@guren/core'
+
+async show(_ctx: Context, post: PostRecord) {
+  return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() })
+}
+```
+
+> [!NOTE]
+> バインドされた値は Hono のコンテキストには格納されません。`this.ctx.get('post')` は `undefined` を返すので、`this.model(Post)` か位置引数を使ってください。バインディングが解決されるのはコントローラータプルのルートだけです。インラインハンドラーは Hono の `(ctx, next)` を受け取るため、レコードは自分で取得してください。
 
 ## ブートストラップ
 `src/app.ts` で registrar を `createApp()` に渡します。
@@ -238,7 +274,7 @@ router.get('/posts/:id', {
 | `body` | リクエストボディの Zod スキーマ |
 | `output` | レスポンスボディの Zod スキーマ |
 | `resource` | Resource クラスによるレスポンスヒント（スキーマなしで API クライアントを型付け） |
-| `bind` | ルートモデルバインディングマップ |
+| `bind` | ルートモデルバインディングマップ。`{ id: Post }`（主キー）または `{ slug: [Post, 'slug'] }`（別カラム） |
 | `middlewares` | ミドルウェアハンドラーの配列 |
 
 > [!NOTE]

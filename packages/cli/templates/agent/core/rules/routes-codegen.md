@@ -29,7 +29,7 @@ export function registerWebRoutes(baseRouter: Router): void {
 
 Options object (second arg) is `RouteContractOptions`:
 `name?` · `middlewares?: MiddlewareHandler[]` · `params?` / `query?` / `body?` / `output?`
-(Zod schemas) · `bind?: Record<string, BindableModel>` · plus OpenAPI metadata
+(Zod schemas) · `bind?: Record<string, RouteModelBinding>` (`Post` or `[Post, 'slug']`) · plus OpenAPI metadata
 (`summary?`, `description?`, `tags?`, `operationId?`, `deprecated?`).
 
 Schemas attached here do double duty: requests are **validated automatically**
@@ -37,7 +37,8 @@ Schemas attached here do double duty: requests are **validated automatically**
 
 `router.resource('/posts', PostController, { name?, param?, only?, except? })` registers
 index/create/store/show/edit/update/destroy (GET/POST/PUT/DELETE, `:id` param) named `posts.index` etc.
-Model binding: `bind: { id: Post }` + `this.model(Post)` in the controller.
+Model binding: `bind: { id: Post }` (primary key) or `bind: { slug: [Post, 'slug'] }` (another column)
++ `this.model(Post)` in the controller. See `controllers-http.md` for router-level `router.bind()`.
 
 Verbs: `get / post / put / patch / delete / query` (all with the same overloads), plus
 `router.on(method, path, ...)` for anything else. `query()` registers the HTTP QUERY

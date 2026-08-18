@@ -171,29 +171,60 @@ async show() {
 }
 ```
 
-With model binding, Guren resolves the model automatically:
+With model binding, Guren resolves the model automatically. Declare the binding on the route with the `bind` option and read the record in the controller with `this.model()`:
 
 ```ts
-// Register bindings (top of routes file)
-router.bind('post', Post)
-
-// Route uses :post instead of :id
-router.get('/posts/:post', [PostsController, 'show'])
+// routes/web.ts — :id is looked up with Post.findOrFail(id)
+router.get('/posts/:id', { bind: { id: Post }, name: 'posts.show' }, [PostsController, 'show'])
 
 // Controller receives the resolved model — no lookup needed
 async show() {
-  const post = this.ctx.get('post') as PostRecord
+  const post = this.model(Post)  // typed as PostRecord
   return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() })
 }
 ```
 
 If the record is not found, a 404 is returned automatically.
 
-You can also bind with a custom resolver for slug-based lookups:
+### Binding by another column
+
+The class alone always looks up by primary key. To resolve a slug (or any other unique column), bind a `[Model, column]` tuple — the router calls `Post.findOrFail(value, 'slug')` and `this.model(Post)` returns the same record:
 
 ```ts
-router.bind('post', async (value) => Post.where('slug', value).firstOrFail())
+router.get('/posts/:slug', { bind: { slug: [Post, 'slug'] }, name: 'posts.show' }, [PostsController, 'show'])
+
+async show() {
+  const post = this.model(Post)  // resolved by slug
+  // ...
+}
 ```
+
+The column name is a plain string — a misspelled column fails the query rather than returning 404, so keep it aligned with your schema. When the same parameter is bound both on the router (below) and on the route, the route's own `bind` wins and the record is looked up once.
+
+### Router-level bindings
+
+`router.bind(param, ...)` binds a parameter name once for every controller-action route on that router whose path contains it. It accepts the same model forms as the `bind` option (`Post` or `[Post, 'slug']`), plus a custom resolver function:
+
+```ts
+router.bind('post', Post)                    // by primary key
+router.bind('post', [Post, 'slug'])          // by slug
+router.bind('post', async (value) => Post.where('slug', value).firstOrFail())  // custom resolver
+
+router.get('/posts/:post', [PostsController, 'show'])
+```
+
+Router-level bindings reach the controller as **positional arguments after the context**, in path-parameter order. A model binding (`Post` or `[Post, 'slug']`) is also available through `this.model(Post)`; a custom resolver's value is only available positionally, since there is no model class to look it up by:
+
+```ts
+import type { Context } from '@guren/core'
+
+async show(_ctx: Context, post: PostRecord) {
+  return this.inertia(pages.posts.Show, { post: new PostResource(post).toJSON() })
+}
+```
+
+> [!NOTE]
+> Bound values are not stored on the Hono context — `this.ctx.get('post')` returns `undefined`. Use `this.model(Post)` or the positional argument. Bindings resolve for controller-action routes only; an inline handler receives Hono's `(ctx, next)` and has to look the record up itself.
 
 ## Resource Routes
 
@@ -285,7 +316,7 @@ Available contract fields:
 | `body` | Zod schema for the request body |
 | `output` | Zod schema for the response body |
 | `resource` | Resource class response hint — types the API client without a schema |
-| `bind` | Route model binding map |
+| `bind` | Route model binding map — `{ id: Post }` (primary key) or `{ slug: [Post, 'slug'] }` (another column) |
 | `middlewares` | Array of middleware handlers |
 
 > [!NOTE]

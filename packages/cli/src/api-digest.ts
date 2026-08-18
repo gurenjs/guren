@@ -44,7 +44,10 @@ Verified quick reference — trust this and \`.claude/rules/*.md\` over grepping
 - \`this.auth\` — every method is async, always \`await\`: \`userOrFail<UserRecord>()\` (throws → 401;
   pass \`<T>\` — the default type has no \`.id\`) · \`user<T>()\` · \`check()\` · \`guest()\` ·
   \`login(user, remember?)\` · \`attempt(credentials, remember?)\` · \`logout()\`
-- Route model binding: route option \`bind: { id: Post }\` + \`this.model(Post)\` (already resolved, 404 on miss)
+- Route model binding: route option \`bind: { id: Post }\` (primary key) or \`bind: { slug: [Post, 'slug'] }\` (another column)
+  + \`this.model(Post)\` (already resolved, 404 on miss). Router-level \`router.bind(param, Post | [Post, 'slug'] | resolverFn)\`
+  binds every route with that param; its value arrives as a positional arg after the context (models also via \`this.model()\`) —
+  never on \`this.ctx.get()\`
 - \`await this.authorize('update', [Post, post])\` (throws → 403)
 
 ### Testing (@guren/testing)

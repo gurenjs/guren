@@ -30,6 +30,24 @@ export type SafeValidationResult<T> =
   | { success: true; data: T }
   | { success: false; errors: Record<string, string> }
 
+/**
+ * The record `Controller.model()` returns for a bound model class. ORM models
+ * carry their row type as a `recordType` marker (set by `defineModel()`);
+ * `findOrFail`'s own return type cannot be read off the class because the
+ * method is generic in `this`, and `ReturnType` widens it to the base row.
+ * Anything without a usable marker — a class extending `Model` directly
+ * without redeclaring it, or a plain `{ findOrFail }` adapter — falls back to
+ * whatever its `findOrFail` resolves to. The marker is only trusted when it
+ * names an object type: `Model`'s own is `unknown`, and an unrelated
+ * `recordType` on some adapter (a string tag, say) describes no record.
+ */
+export type BoundModelRecord<T extends { findOrFail(...args: any[]): Promise<any> }> =
+  T extends { readonly recordType: infer R }
+    ? unknown extends R
+      ? Awaited<ReturnType<T['findOrFail']>>
+      : R extends object ? R : Awaited<ReturnType<T['findOrFail']>>
+    : Awaited<ReturnType<T['findOrFail']>>
+
 type DefaultInertiaProps = Record<string, unknown>
 
 export type AuthPayload = Record<string, unknown> & { user: unknown }
@@ -131,12 +149,16 @@ export class Controller {
   }
 
   /**
-   * Retrieve a model instance resolved via route model binding.
+   * Retrieve a model instance resolved via route model binding — a per-route
+   * `bind` option or a router-level `router.bind(param, Model)`. Look up by
+   * primary key with the class alone, or by another column with a
+   * `[Model, column]` tuple.
    *
    * @example
    * ```typescript
    * // routes/web.ts
    * posts.get('/:id', { bind: { id: Post }, name: 'posts.show' }, [PostController, 'show'])
+   * posts.get('/by-slug/:slug', { bind: { slug: [Post, 'slug'] } }, [PostController, 'show'])
    *
    * // PostController.ts
    * async show() {
@@ -147,15 +169,15 @@ export class Controller {
    */
   protected model<T extends { findOrFail(...args: any[]): Promise<any> }>(
     modelClass: T,
-  ): Awaited<ReturnType<T['findOrFail']>> {
+  ): BoundModelRecord<T> {
     const instance = this.resolvedModels?.get(modelClass)
     if (instance === undefined) {
       throw new Error(
         `No model binding found for ${(modelClass as { name?: string }).name ?? 'unknown'}. ` +
-        'Ensure the route has a matching bind option in RouteContractOptions.',
+        'Ensure the route has a matching bind option in RouteContractOptions, or the router a bind(param, Model) call.',
       )
     }
-    return instance as Awaited<ReturnType<T['findOrFail']>>
+    return instance as BoundModelRecord<T>
   }
 
   protected get ctx(): Context {

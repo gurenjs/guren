@@ -14,10 +14,12 @@ export { Controller } from './mvc/Controller'
 export type { InertiaResponse, InferInertiaProps, ControllerInertiaProps, AuthPayload } from './mvc/Controller'
 export { Router } from './mvc/Router'
 export type {
+  BindableModel,
   RouteBuilder,
   RouteContractOptions,
   RouteDefinition,
   RouteMiddlewareInput,
+  RouteModelBinding,
   RouteOpenApiMetadata,
   ResourceAction as RouteResourceAction,
   ResourceResponseHint,
